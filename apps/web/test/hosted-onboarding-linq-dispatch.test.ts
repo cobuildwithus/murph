@@ -26,6 +26,9 @@ import { parseHostedLinqProviderEvent } from "@/src/lib/hosted-onboarding/linq-p
 import { createHostedLinqParticipantContact } from "@/src/lib/hosted-onboarding/linq-participant-contact";
 import { hostedLinqFirstContactContainsBlockedContent } from "@/src/lib/hosted-onboarding/webhook-provider-linq-shared";
 
+type HostedRuntimeAiAccessDecisionReader =
+  typeof import("@/src/lib/hosted-onboarding/member-access").readHostedRuntimeAiAccessDecision;
+
 const mocks = vi.hoisted(() => {
   const state = {
     deriveHostedOnboardingTimingErrorName: vi.fn(() => "Error"),
@@ -70,6 +73,9 @@ const mocks = vi.hoisted(() => {
       telegramWebhookSecret: null,
     },
     readHostedExecutionControlClientIfConfigured: vi.fn(),
+    readHostedRuntimeAiAccessDecisionActual:
+      null as HostedRuntimeAiAccessDecisionReader | null,
+    readHostedRuntimeAiAccessDecision: vi.fn<HostedRuntimeAiAccessDecisionReader>(),
     incrementHostedLinqInboundDailyState: vi.fn(),
     incrementHostedLinqOutboundDailyState: vi.fn(),
     nudgeHostedRunnerUserBestEffort: vi.fn(async () => ({
@@ -225,6 +231,18 @@ vi.mock("@/src/lib/hosted-onboarding/linq-daily-state", async () => {
     readHostedLinqDailyState: mocks.readHostedLinqDailyState,
     releaseHostedLinqOnboardingLinkNoticeClaim: mocks.releaseHostedLinqOnboardingLinkNoticeClaim,
     releaseHostedLinqQuotaReplyNoticeClaim: mocks.releaseHostedLinqQuotaReplyNoticeClaim,
+  };
+});
+
+vi.mock("@/src/lib/hosted-onboarding/member-access", async () => {
+  const actual = await vi.importActual<typeof import("@/src/lib/hosted-onboarding/member-access")>(
+    "@/src/lib/hosted-onboarding/member-access",
+  );
+  mocks.readHostedRuntimeAiAccessDecisionActual = actual.readHostedRuntimeAiAccessDecision;
+
+  return {
+    ...actual,
+    readHostedRuntimeAiAccessDecision: mocks.readHostedRuntimeAiAccessDecision,
   };
 });
 
@@ -416,6 +434,7 @@ type HostedLinqLineFixture = {
 
 type HostedLinqProviderEventFixture = {
   createMany?: MockedFunction;
+  findMany?: MockedFunction;
 };
 
 type HostedLinqFirstContactAdmissionDecisionFixture = {
@@ -534,6 +553,15 @@ async function handleHostedOnboardingLinqWebhook(input: HostedOnboardingLinqWebh
 describe("handleHostedOnboardingLinqWebhook", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    const actualReadHostedRuntimeAiAccessDecision =
+      mocks.readHostedRuntimeAiAccessDecisionActual;
+    if (!actualReadHostedRuntimeAiAccessDecision) {
+      throw new Error("Expected the hosted runtime access reader test implementation.");
+    }
+    mocks.readHostedRuntimeAiAccessDecision.mockReset();
+    mocks.readHostedRuntimeAiAccessDecision.mockImplementation(
+      actualReadHostedRuntimeAiAccessDecision,
+    );
     mocks.claimHostedLinqDeliveryProviderDispatchTx.mockResolvedValue({
       claimed: true,
       id: "hld_claimed",
@@ -7139,6 +7167,313 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(readHostedMemberRoutingUpsertMock(prisma)).not.toHaveBeenCalled();
   });
 
+  it("replies with the trial-conversion notice when a paused member texts their bound home chat", async () => {
+    const fixture = await buildPausedHostedMemberHomeRouteFixture();
+    const scheduledTasks: Array<() => Promise<void>> = [];
+    const prisma = asPrismaTransactionClient({
+      hostedLinqProviderEvent: {
+        createMany: vi.fn().mockResolvedValue({ count: 1 }),
+        findMany: vi.fn().mockResolvedValue([]),
+      },
+      hostedWebhookReceipt: buildHostedWebhookReceiptFixture(),
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue(fixture.member),
+      },
+      hostedMemberRouting: createSingleHostedMemberRoutingMock(fixture.routing),
+    });
+
+    const response = await handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody: buildHostedLinqWebhookBody({
+        createdAt: "2026-07-23T12:00:00.000Z",
+        data: {
+          chat: {
+            id: fixture.homeChatId,
+            owner_handle: {
+              handle: fixture.homeLinePhone,
+              id: "handle_owner_home",
+              is_me: true,
+              service: "iMessage",
+            },
+          },
+          sent_at: "2026-07-23T12:00:00.000Z",
+        },
+        eventId: "evt_paused_home_notice",
+        service: "iMessage",
+      }),
+      scheduleAfterResponse: (task) => {
+        scheduledTasks.push(task);
+      },
+      signature: null,
+      timestamp: null,
+    });
+
+    for (const task of scheduledTasks) {
+      await task();
+    }
+
+    expect(response).toMatchObject({
+      ok: true,
+      reason: "sent-trial-conversion-notice",
+    });
+    expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        chatId: fixture.homeChatId,
+        message: expect.stringContaining("https://withmurph.ai/settings#subscription"),
+        replyToMessageId: "msg_123",
+      }),
+    );
+    expect(readHostedMemberRoutingUpsertMock(prisma)).not.toHaveBeenCalled();
+    expect(mocks.incrementHostedLinqInboundDailyState).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
+    expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
+  });
+
+  it("replies with the billing-inactive notice when a past_due member texts their bound home chat", async () => {
+    const fixture = await buildPausedHostedMemberHomeRouteFixture({
+      billingStatus: HostedBillingStatus.past_due,
+    });
+    const scheduledTasks: Array<() => Promise<void>> = [];
+    const prisma = asPrismaTransactionClient({
+      hostedLinqProviderEvent: {
+        createMany: vi.fn().mockResolvedValue({ count: 1 }),
+        findMany: vi.fn().mockResolvedValue([]),
+      },
+      hostedWebhookReceipt: buildHostedWebhookReceiptFixture(),
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue(fixture.member),
+      },
+      hostedMemberRouting: createSingleHostedMemberRoutingMock(fixture.routing),
+    });
+
+    const response = await handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody: buildHostedLinqWebhookBody({
+        createdAt: "2026-07-23T12:00:00.000Z",
+        data: {
+          chat: {
+            id: fixture.homeChatId,
+            owner_handle: {
+              handle: fixture.homeLinePhone,
+              id: "handle_owner_home",
+              is_me: true,
+              service: "iMessage",
+            },
+          },
+          sent_at: "2026-07-23T12:00:00.000Z",
+        },
+        eventId: "evt_past_due_home_notice",
+        service: "iMessage",
+      }),
+      scheduleAfterResponse: (task) => {
+        scheduledTasks.push(task);
+      },
+      signature: null,
+      timestamp: null,
+    });
+
+    for (const task of scheduledTasks) {
+      await task();
+    }
+
+    // A lapsed paying member must never reach the first-contact pending bind,
+    // which would raise HOSTED_LINQ_HOME_ROUTE_CHANGED on every provider retry.
+    expect(response).toMatchObject({
+      ok: true,
+      reason: "sent-billing-inactive-notice",
+    });
+    expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        chatId: fixture.homeChatId,
+        message: expect.stringContaining("https://withmurph.ai/settings#subscription"),
+        replyToMessageId: "msg_123",
+      }),
+    );
+    expect(readHostedMemberRoutingUpsertMock(prisma)).not.toHaveBeenCalled();
+    expect(mocks.incrementHostedLinqInboundDailyState).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+  });
+
+  // Every lapsed-after-activation billing state must answer on the member's own
+  // bound home chat. Reaching the first-contact tail here raises a retryable
+  // HOSTED_LINQ_HOME_ROUTE_CHANGED that can never succeed, which silently drops
+  // the message on every provider retry.
+  it.each([
+    [HostedBillingStatus.paused, "sent-trial-conversion-notice"],
+    [HostedBillingStatus.past_due, "sent-billing-inactive-notice"],
+    [HostedBillingStatus.canceled, "sent-billing-inactive-notice"],
+    [HostedBillingStatus.unpaid, "sent-billing-inactive-notice"],
+    // `incomplete` reaches here only because the fixture owns a subscription;
+    // a first-time `incomplete` member has none and stays on the signup path.
+    [HostedBillingStatus.incomplete, "sent-billing-inactive-notice"],
+  ] as const)(
+    "answers a %s member on their bound home chat instead of dropping the text",
+    async (billingStatus, expectedReason) => {
+      const fixture = await buildPausedHostedMemberHomeRouteFixture({ billingStatus });
+      const scheduledTasks: Array<() => Promise<void>> = [];
+      const prisma = asPrismaTransactionClient({
+        hostedLinqProviderEvent: {
+          createMany: vi.fn().mockResolvedValue({ count: 1 }),
+          findMany: vi.fn().mockResolvedValue([]),
+        },
+        hostedWebhookReceipt: buildHostedWebhookReceiptFixture(),
+        hostedMember: { findUnique: vi.fn().mockResolvedValue(fixture.member) },
+        hostedMemberRouting: createSingleHostedMemberRoutingMock(fixture.routing),
+      });
+
+      const response = await handleHostedOnboardingLinqWebhook({
+        prisma,
+        rawBody: buildHostedLinqWebhookBody({
+          createdAt: "2026-07-23T12:00:00.000Z",
+          data: {
+            chat: {
+              id: fixture.homeChatId,
+              owner_handle: {
+                handle: fixture.homeLinePhone,
+                id: "handle_owner_home",
+                is_me: true,
+                service: "iMessage",
+              },
+            },
+            sent_at: "2026-07-23T12:00:00.000Z",
+          },
+          eventId: `evt_lapsed_${billingStatus}`,
+          service: "iMessage",
+        }),
+        scheduleAfterResponse: (task) => {
+          scheduledTasks.push(task);
+        },
+        signature: null,
+        timestamp: null,
+      });
+
+      for (const task of scheduledTasks) {
+        await task();
+      }
+
+      expect(response).toMatchObject({ ok: true, reason: expectedReason });
+      expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          chatId: fixture.homeChatId,
+          message: expect.stringContaining("https://withmurph.ai/settings#subscription"),
+        }),
+      );
+      expect(readHostedMemberRoutingUpsertMock(prisma)).not.toHaveBeenCalled();
+      expect(mocks.incrementHostedLinqInboundDailyState).not.toHaveBeenCalled();
+      expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+    },
+  );
+
+  it("keeps the home-line redirect when a paused member texts another hosted line", async () => {
+    const fixture = await buildPausedHostedMemberHomeRouteFixture();
+    const scheduledTasks: Array<() => Promise<void>> = [];
+    const prisma = asPrismaTransactionClient({
+      hostedLinqProviderEvent: {
+        createMany: vi.fn().mockResolvedValue({ count: 1 }),
+        findMany: vi.fn().mockResolvedValue([]),
+      },
+      hostedWebhookReceipt: buildHostedWebhookReceiptFixture(),
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue(fixture.member),
+      },
+      hostedMemberRouting: createSingleHostedMemberRoutingMock(fixture.routing),
+    });
+
+    const response = await handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody: buildHostedLinqWebhookBody({
+        createdAt: "2026-07-23T12:00:00.000Z",
+        data: {
+          chat: {
+            id: "chat_other_paused",
+            owner_handle: {
+              handle: "+15550100002",
+              id: "handle_owner_other_paused",
+              is_me: true,
+              service: "iMessage",
+            },
+          },
+          sent_at: "2026-07-23T12:00:00.000Z",
+        },
+        eventId: "evt_paused_other_redirect",
+        service: "iMessage",
+      }),
+      scheduleAfterResponse: (task) => {
+        scheduledTasks.push(task);
+      },
+      signature: null,
+      timestamp: null,
+    });
+
+    for (const task of scheduledTasks) {
+      await task();
+    }
+
+    expect(response).toMatchObject({
+      ok: true,
+      reason: "redirected-to-home-line",
+    });
+    expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        chatId: "chat_other_paused",
+        message: expect.stringContaining(fixture.homeLinePhone),
+        replyToMessageId: "msg_123",
+      }),
+    );
+    expect(readHostedMemberRoutingUpsertMock(prisma)).not.toHaveBeenCalled();
+    expect(mocks.incrementHostedLinqInboundDailyState).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+  });
+
+  it("leaves a bound-home member with no billing to recover on the acquisition path", async () => {
+    const fixture = await buildPausedHostedMemberHomeRouteFixture();
+    mocks.readHostedRuntimeAiAccessDecision.mockResolvedValueOnce({
+      allowed: false,
+      reason: "hosted_access_inactive",
+      retryAfter: new Date("2026-07-23T12:15:00.000Z"),
+      userNotice: null,
+    });
+    const prisma = asPrismaTransactionClient({
+      hostedLinqProviderEvent: {
+        createMany: vi.fn().mockResolvedValue({ count: 1 }),
+        findMany: vi.fn().mockResolvedValue([]),
+      },
+      hostedWebhookReceipt: buildHostedWebhookReceiptFixture(),
+      hostedMember: { findUnique: vi.fn().mockResolvedValue(fixture.member) },
+      hostedMemberRouting: createSingleHostedMemberRoutingMock(fixture.routing),
+    });
+
+    // No notice means there is no billing to recover, so this member must stay on
+    // the signup journey rather than being answered as a lapsed member. The
+    // permanent-route guard still owns what happens at the storage layer.
+    await expect(handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody: buildHostedLinqWebhookBody({
+        createdAt: "2026-07-23T12:00:00.000Z",
+        data: {
+          chat: {
+            id: fixture.homeChatId,
+            owner_handle: {
+              handle: fixture.homeLinePhone,
+              id: "handle_owner_home",
+              is_me: true,
+              service: "iMessage",
+            },
+          },
+          sent_at: "2026-07-23T12:00:00.000Z",
+        },
+        eventId: "evt_home_without_notice",
+        service: "iMessage",
+      }),
+      signature: null,
+      timestamp: null,
+    })).rejects.toMatchObject({ code: "HOSTED_LINQ_HOME_ROUTE_CHANGED" });
+
+    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+  });
+
   it("appends active-member Linq input even when the usage gate would deny", async () => {
     mocks.checkHostedAiUsageGate.mockRejectedValueOnce(
       new Error("webhook usage gate should not run"),
@@ -9013,6 +9348,49 @@ function asPrismaTransactionClient<T extends PrismaFixtureBase>(
   return prisma as T & HostedOnboardingLinqWebhookPrismaFixture;
 }
 
+function createSingleHostedMemberRoutingMock(record: Record<string, unknown>) {
+  const matchesLookup = (where: Record<string, unknown> | undefined, key: string) => {
+    const condition = where?.[key];
+    if (typeof condition === "string") {
+      return record[key] === condition;
+    }
+    if (typeof condition !== "object" || condition === null || !("in" in condition)) {
+      return true;
+    }
+    const values = (condition as { in?: unknown }).in;
+    return Array.isArray(values) && values.includes(record[key]);
+  };
+  const matchesWhere = (where: Record<string, unknown> | undefined) => {
+    const excluded = where?.NOT;
+    if (
+      typeof excluded === "object"
+      && excluded !== null
+      && "memberId" in excluded
+      && record.memberId === (excluded as { memberId?: unknown }).memberId
+    ) {
+      return false;
+    }
+
+    return matchesLookup(where, "memberId")
+      && matchesLookup(where, "linqChatLookupKey")
+      && matchesLookup(where, "pendingLinqParticipantContactLookupKey")
+      && matchesLookup(where, "pendingLinqChatLookupKey");
+  };
+
+  return {
+    createMany: vi.fn().mockResolvedValue({ count: 1 }),
+    findFirst: vi.fn(async ({ where }: { where?: Record<string, unknown> } = {}) =>
+      matchesWhere(where) ? record : null),
+    findMany: vi.fn(async ({ where }: { where?: Record<string, unknown> } = {}) =>
+      matchesWhere(where) ? [record] : []),
+    findUnique: vi.fn(async ({ where }: { where?: Record<string, unknown> } = {}) =>
+      matchesWhere(where) ? record : null),
+    groupBy: vi.fn().mockResolvedValue([]),
+    updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+    upsert: vi.fn(),
+  };
+}
+
 function createStatefulHostedMemberRoutingMock(initialRecord: Record<string, unknown> | null = null) {
   let hostedMemberRoutingRecord = initialRecord;
   return {
@@ -9205,6 +9583,108 @@ function readHostedMemberIdentityFromMockMember(
     walletChainType: typeof identity.walletChainType === "string" ? identity.walletChainType : null,
     walletCreatedAt: identity.walletCreatedAt instanceof Date ? identity.walletCreatedAt : null,
     walletProvider: typeof identity.walletProvider === "string" ? identity.walletProvider : null,
+  };
+}
+
+type PausedHostedMemberBillingRefFixture = {
+  currentBillingPhase: string | null;
+  currentBillingPlanCode: string | null;
+  currentCheckoutOffer: string | null;
+  currentTrialEndsAt: Date | null;
+  currentTrialStartedAt: Date | null;
+  pulseTrialPolicyVersion: string | null;
+  pulseTrialRedeemedAt: Date | null;
+};
+
+async function buildPausedHostedMemberHomeRouteFixture(input: {
+  billingRef?: PausedHostedMemberBillingRefFixture;
+  billingStatus?: HostedBillingStatus;
+} = {}) {
+  const billingStatus = input.billingStatus ?? HostedBillingStatus.paused;
+  const memberId = "member_paused";
+  const homeChatId = "chat_paused_home";
+  const homeLinePhone = "+15550100001";
+  const createdAt = new Date("2026-07-03T12:00:00.000Z");
+  const updatedAt = new Date("2026-07-13T12:00:00.000Z");
+  const linqChatIdEncrypted = await encryptHostedWebNullableString({
+    field: "hosted-member-routing.home-linq-chat-id",
+    memberId,
+    value: homeChatId,
+  });
+  const linqRecipientPhoneEncrypted = await encryptHostedWebNullableString({
+    field: "hosted-member-routing.home-linq-recipient-phone",
+    memberId,
+    value: homeLinePhone,
+  });
+  const routing = {
+    linqChatIdEncrypted,
+    linqChatLookupKey: createHostedLinqChatLookupKey(homeChatId),
+    linqHomeLineAssignedAt: createdAt,
+    linqParticipantContactKind: "phone",
+    linqParticipantContactLookupKey: createHostedPhoneLookupKey("+15551234567"),
+    linqRecipientPhoneEncrypted,
+    linqRecipientPhoneLookupKey: createHostedPhoneLookupKey(homeLinePhone),
+    member: {
+      billingStatus,
+      createdAt,
+      id: memberId,
+      suspendedAt: null,
+      updatedAt,
+    },
+    memberId,
+    pendingLinqChatIdEncrypted: null,
+    pendingLinqChatLookupKey: null,
+    pendingLinqParticipantContactEncrypted: null,
+    pendingLinqParticipantContactKind: null,
+    pendingLinqParticipantContactLookupKey: null,
+    pendingLinqParticipantContactObservedAt: null,
+    pendingLinqRecipientPhoneEncrypted: null,
+    pendingLinqRecipientPhoneLookupKey: null,
+    replyAliasLookupKey: null,
+    telegramUserIdEncrypted: null,
+    telegramUserLookupKey: null,
+  };
+
+  return {
+    homeChatId,
+    homeLinePhone,
+    member: {
+      accountGroupMemberships: [],
+      billingRef: input.billingRef ?? {
+        currentBillingPhase: "trial",
+        currentBillingPlanCode: "launch_monthly",
+        currentCheckoutOffer: "pulse_trial_7d",
+        currentTrialEndsAt: new Date("2026-07-13T12:00:00.000Z"),
+        currentTrialStartedAt: createdAt,
+        pulseTrialPolicyVersion: "pulse-trial-2026-06-30-v2",
+        pulseTrialRedeemedAt: createdAt,
+        stripeSubscriptionLookupKey: "hbidx:stripe-subscription:v1:existing",
+      },
+      billingStatus,
+      createdAt,
+      id: memberId,
+      invites: [],
+      phoneLookupKey: createHostedPhoneLookupKey("+15551234567"),
+      routing,
+      suspendedAt: null,
+      threadContainer: null,
+      updatedAt,
+    },
+    routing,
+  };
+}
+
+function buildHostedWebhookReceiptFixture() {
+  return {
+    create: vi.fn().mockResolvedValue({}),
+    findUnique: vi.fn().mockResolvedValue({
+      payloadJson: {
+        eventType: "message.received",
+        receiptAttemptCount: 1,
+        receiptStatus: "processing",
+      },
+    }),
+    updateMany: vi.fn().mockResolvedValue({ count: 1 }),
   };
 }
 

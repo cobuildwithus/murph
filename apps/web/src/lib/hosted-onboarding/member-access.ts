@@ -21,6 +21,7 @@ import {
   isHostedMemberSuspended,
 } from "./entitlement";
 import { hostedOnboardingError } from "./errors";
+import { hasHostedRecoverableBilling } from "./lifecycle";
 import type { HostedOnboardingReadClient } from "./shared";
 
 /**
@@ -61,6 +62,7 @@ const hostedRuntimeAiAccessBillingRefSelect =
     currentTrialStartedAt: true,
     pulseTrialPolicyVersion: true,
     pulseTrialRedeemedAt: true,
+    stripeSubscriptionLookupKey: true,
   });
 
 export const hostedMemberPersonAccessSelect = Prisma.validator<Prisma.HostedMemberSelect>()({
@@ -133,13 +135,38 @@ export type HostedRuntimeAiAccessDecision =
     reason: "hosted_access_inactive" | "trial_expired_pending_billing";
     retryAfter: Date;
     userNotice: {
-      code: "trial_conversion_pending";
+      code: HostedRuntimeAiAccessNoticeCode;
       message: string;
     } | null;
   };
 
+/**
+ * `trial_conversion_pending` is the lapsed-trial case; `billing_inactive` covers
+ * every other non-suspended member whose own billing is not active (paused paid,
+ * past_due, canceled, unpaid, incomplete). Both are claim-free notices: they
+ * carry no usage-period claim token because they are not usage-limit notices.
+ */
+export type HostedRuntimeAiAccessNoticeCode =
+  | "billing_inactive"
+  | "trial_conversion_pending";
+
+const HOSTED_RUNTIME_AI_ACCESS_NOTICE_CODES = new Set<string>([
+  "billing_inactive",
+  "trial_conversion_pending",
+]);
+
+/** Access notices are claim-free: they carry no AI usage-period claim token. */
+export function isHostedRuntimeAiAccessNoticeCode(
+  code: string,
+): code is HostedRuntimeAiAccessNoticeCode {
+  return HOSTED_RUNTIME_AI_ACCESS_NOTICE_CODES.has(code);
+}
+
 const HOSTED_RUNTIME_AI_ACCESS_RETRY_MS = 15 * 60_000;
 const HOSTED_AI_USAGE_HOME_URL = "https://withmurph.ai/home";
+// Lapsed billing recovers from the Subscription controls, not the dashboard: the
+// Home page only surfaces a billing action for a narrow paused-trial shape.
+const HOSTED_BILLING_RECOVERY_URL = "https://withmurph.ai/settings#subscription";
 
 function hasActiveHostedPersonAccess(person: HostedMemberPersonAccessState): boolean {
   if (isHostedMemberSuspended(person.suspendedAt)) {
@@ -305,6 +332,12 @@ export async function readActiveHostedFamilySponsorship(input: {
  */
 export async function readHostedRuntimeAiAccessDecision(input: {
   memberId: string;
+  /**
+   * Per-delivery discriminator so repeated notices to the same member rotate
+   * copy variants instead of repeating one sentence verbatim. Omit to keep the
+   * member-stable seed used by once-per-conversation callers.
+   */
+  noticeSeed?: string;
   now?: Date;
   prisma?: HostedOnboardingReadClient;
 }): Promise<HostedRuntimeAiAccessDecision> {
@@ -342,6 +375,7 @@ export async function readHostedRuntimeAiAccessDecision(input: {
 
   return resolveHostedRuntimeAiPersonAccessDecision({
     memberId: input.memberId,
+    ...(input.noticeSeed === undefined ? {} : { noticeSeed: input.noticeSeed }),
     now,
     person: member,
   });
@@ -349,6 +383,7 @@ export async function readHostedRuntimeAiAccessDecision(input: {
 
 function resolveHostedRuntimeAiPersonAccessDecision(input: {
   memberId: string;
+  noticeSeed?: string;
   now: Date;
   person: HostedRuntimeAiPersonAccessState;
 }): HostedRuntimeAiAccessDecision {
@@ -364,14 +399,46 @@ function resolveHostedRuntimeAiPersonAccessDecision(input: {
   if (sponsored) {
     return { allowed: true };
   }
-  if (!hasHostedMemberOwnActiveBilling(input.person)) {
-    return buildHostedRuntimeInactiveAccessDecision(input.now);
+  const ownBillingActive = hasHostedMemberOwnActiveBilling(input.person);
+  // Only a member who already owns billing can recover it. A genuine first-time
+  // subscriber gets no notice, so the caller leaves them on the signup journey.
+  const recoverable = hasHostedRecoverableBilling({
+    billingStatus: input.person.billingStatus,
+    hasExistingSubscription: Boolean(
+      input.person.billingRef?.stripeSubscriptionLookupKey,
+    ),
+  });
+  // Every non-suspended member whose own billing is not active carries a notice,
+  // so callers on a member-recognized surface can always answer instead of going
+  // silent. Suspended and thread-container denials stay notice-less above.
+  const lapsedBillingDecision = (): HostedRuntimeAiAccessDecision =>
+    buildHostedRuntimeInactiveAccessDecision(input.now, {
+      code: "billing_inactive",
+      message: renderUserFacingMessage({
+        context: {
+          homeUrl: HOSTED_BILLING_RECOVERY_URL,
+        },
+        key: "linq.ai_usage.billing_inactive",
+        seed: buildHostedRuntimeAiAccessNoticeSeed({
+          code: "billing_inactive",
+          discriminator: input.person.billingStatus,
+          memberId: input.memberId,
+          ...(input.noticeSeed === undefined ? {} : { noticeSeed: input.noticeSeed }),
+        }),
+      }).text,
+    });
+  if (!ownBillingActive && input.person.billingStatus !== HostedBillingStatus.paused) {
+    return recoverable
+      ? lapsedBillingDecision()
+      : buildHostedRuntimeInactiveAccessDecision(input.now);
   }
 
   const billingRef = input.person.billingRef;
   const billingPhase = parseHostedBillingPhase(billingRef?.currentBillingPhase);
   if (billingPhase === "paid") {
-    return { allowed: true };
+    return ownBillingActive
+      ? { allowed: true }
+      : lapsedBillingDecision();
   }
 
   const checkoutOffer = parseHostedBillingCheckoutOffer(
@@ -381,8 +448,11 @@ function resolveHostedRuntimeAiPersonAccessDecision(input: {
     || checkoutOffer === HOSTED_PULSE_TRIAL_OFFER
     || Boolean(billingRef?.pulseTrialRedeemedAt);
   if (!trialShaped) {
-    // Legacy active paid members may predate phase and trial fields.
-    return { allowed: true };
+    // Legacy active paid members may predate phase and trial fields. Paused
+    // billing without a trial shape is not a conversion-pending state.
+    return ownBillingActive
+      ? { allowed: true }
+      : lapsedBillingDecision();
   }
 
   const trialPolicy = requireHostedPulseTrialPolicy(
@@ -402,7 +472,9 @@ function resolveHostedRuntimeAiPersonAccessDecision(input: {
     && input.now.getTime() >= trialStart.getTime()
     && input.now.getTime() < trialEnd.getTime()
   ) {
-    return { allowed: true };
+    return ownBillingActive
+      ? { allowed: true }
+      : lapsedBillingDecision();
   }
 
   const retryAfter = new Date(input.now.getTime() + HOSTED_RUNTIME_AI_ACCESS_RETRY_MS);
@@ -414,12 +486,15 @@ function resolveHostedRuntimeAiPersonAccessDecision(input: {
       code: "trial_conversion_pending",
       message: renderUserFacingMessage({
         context: {
-          homeUrl: HOSTED_AI_USAGE_HOME_URL,
+          homeUrl: HOSTED_BILLING_RECOVERY_URL,
         },
         key: "linq.ai_usage.trial_conversion_pending",
-        seed: `linq.ai_usage:${input.memberId}:trial_conversion_pending:${
-          trialStart?.toISOString() ?? "pending-billing"
-        }`,
+        seed: buildHostedRuntimeAiAccessNoticeSeed({
+          code: "trial_conversion_pending",
+          discriminator: trialStart?.toISOString() ?? "pending-billing",
+          memberId: input.memberId,
+          ...(input.noticeSeed === undefined ? {} : { noticeSeed: input.noticeSeed }),
+        }),
       }).text,
     },
   };
@@ -427,13 +502,32 @@ function resolveHostedRuntimeAiPersonAccessDecision(input: {
 
 function buildHostedRuntimeInactiveAccessDecision(
   now: Date,
+  userNotice: Extract<
+    HostedRuntimeAiAccessDecision,
+    { allowed: false }
+  >["userNotice"] = null,
 ): Extract<HostedRuntimeAiAccessDecision, { allowed: false }> {
   return {
     allowed: false,
     reason: "hosted_access_inactive",
     retryAfter: new Date(now.getTime() + HOSTED_RUNTIME_AI_ACCESS_RETRY_MS),
-    userNotice: null,
+    userNotice,
   };
+}
+
+/**
+ * Keeps the historical member-stable seed when no per-delivery discriminator is
+ * supplied, so once-per-conversation callers render the same variant they always
+ * have, while repeated notices on a texting surface rotate.
+ */
+function buildHostedRuntimeAiAccessNoticeSeed(input: {
+  code: HostedRuntimeAiAccessNoticeCode;
+  discriminator: string;
+  memberId: string;
+  noticeSeed?: string;
+}): string {
+  const base = `linq.ai_usage:${input.memberId}:${input.code}:${input.discriminator}`;
+  return input.noticeSeed === undefined ? base : `${base}:${input.noticeSeed}`;
 }
 
 async function hasAnyHostedRuntimeAiAccessThreadContainerParticipant(input: {
