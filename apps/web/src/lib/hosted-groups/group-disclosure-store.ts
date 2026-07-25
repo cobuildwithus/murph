@@ -21,6 +21,7 @@ import {
   sealHostedUserSecureBoxString,
 } from "../hosted-crypto/secure-box";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
+import { readActiveHostedMemberAccess } from "../hosted-onboarding/member-access";
 import { lockHostedMemberRow } from "../hosted-onboarding/shared";
 import { getPrisma } from "../prisma";
 import { lockHostedGroupRow } from "./group-store";
@@ -49,7 +50,12 @@ export type HostedGroupDisclosureReadClient = PrismaClient | Prisma.TransactionC
 export type HostedGroupDisclosurePermissionReactionTxResult =
   | { kind: "accepted" }
   | {
-      kind: "limit_reached" | "not_found" | "not_group_member" | "wrong_thread";
+      kind:
+        | "limit_reached"
+        | "member_inactive"
+        | "not_found"
+        | "not_group_member"
+        | "wrong_thread";
     };
 
 export type HostedGroupDisclosurePermissionAppendTxResult =
@@ -413,6 +419,18 @@ export async function acceptHostedGroupDisclosurePermissionReactionTx(input: {
     || input.now < (membership.joinedAt ?? membership.createdAt)
   ) {
     return { kind: "not_group_member" };
+  }
+
+  // A grant created here outlives a lapse in access and governs private data, so
+  // current access is validated at this durable-effect boundary rather than by
+  // the caller: only here is the reacted-to message proven to be this member's
+  // disclosure request, and the member row is already locked above, so the fact
+  // cannot change under the grant write.
+  if (!await readActiveHostedMemberAccess({
+    memberId: input.memberId,
+    prisma: input.tx,
+  })) {
+    return { kind: "member_inactive" };
   }
 
   const permissionText = await openHostedGroupDisclosurePermissionText({

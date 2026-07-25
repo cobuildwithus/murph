@@ -6,6 +6,14 @@ import { describe, expect, it, vi } from "vitest";
 import { setHostedSecureBoxStringTestCodecForTests } from "@/src/lib/hosted-crypto/secure-box";
 import { createPrismaClient } from "@/src/lib/prisma";
 
+const memberAccessMocks = vi.hoisted(() => ({
+  readActiveHostedMemberAccess: vi.fn(async () => true),
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/member-access", () => ({
+  readActiveHostedMemberAccess: memberAccessMocks.readActiveHostedMemberAccess,
+}));
+
 vi.mock("@/src/lib/hosted-onboarding/contact-privacy", async (importOriginal) => ({
   ...await importOriginal<
     typeof import("@/src/lib/hosted-onboarding/contact-privacy")
@@ -739,6 +747,23 @@ describe("hosted group disclosure grant lifecycle", () => {
     expect(missingMembership.grants).toEqual([]);
     expect(wrongThread.grants).toEqual([]);
     expect(joinedAfterReaction.grants).toEqual([]);
+  });
+
+  // A grant outlives a lapse in access and governs private data, so current
+  // access is validated here, under the member-row lock, once the reacted-to
+  // message has proven this is the member's disclosure request.
+  it("refuses to create a grant for a member whose access has lapsed", async () => {
+    memberAccessMocks.readActiveHostedMemberAccess.mockResolvedValueOnce(false);
+    const harness = buildDisclosureStoreHarness();
+    await bindPermission(harness);
+
+    await expect(acceptPermission(harness)).resolves.toEqual({
+      kind: "member_inactive",
+    });
+    expect(harness.grants).toEqual([]);
+    expect(memberAccessMocks.readActiveHostedMemberAccess).toHaveBeenCalledWith(
+      expect.objectContaining({ memberId: "member_1" }),
+    );
   });
 
   it.each([

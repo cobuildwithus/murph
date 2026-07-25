@@ -9,7 +9,6 @@ import {
   isHostedLinqAffirmativeReaction,
   type ParsedHostedLinqProviderEvent,
 } from "../hosted-onboarding/linq-provider-events";
-import { readActiveHostedMemberAccess } from "../hosted-onboarding/member-access";
 import { hasHostedMemberActivationProof } from "../hosted-onboarding/member-activation";
 import { normalizePhoneNumber } from "../hosted-onboarding/phone";
 import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "../hosted-onboarding/shared";
@@ -114,17 +113,12 @@ export async function handleHostedGroupJoinOfferReaction(input: {
     threadId: input.event.linqChatId,
   });
 
-  // An exact Like is only a *possible* disclosure consent: this shape check
-  // cannot see which message was reacted to, so the same Like also carries the
-  // room's advertised "Like or heart this message" join offer. Consenting to a
-  // disclosure creates durable, future-effective authority over private data, so
-  // it keeps requiring current access; run that owner only when the member could
-  // legitimately consent, and let everyone else fall through to the join lookup
-  // below, which matches on the message and rejects a disclosure request anyway.
-  if (
-    isDisclosureConsentReaction
-    && await readActiveHostedMemberAccess({ memberId: member.id, prisma: input.prisma })
-  ) {
+  // An exact Like is only a *possible* disclosure consent: this shape cannot see
+  // which message was reacted to, and the canonical offer advertises "Like or
+  // heart this message", so the same Like also carries the join offer. Each
+  // message-bound owner decides its own operation and authority; this adapter
+  // only sequences them and never pre-judges which effect the Like targets.
+  if (isDisclosureConsentReaction) {
     const disclosureResult = await input.prisma.$transaction(async (tx) =>
       acceptHostedGroupDisclosurePermissionReactionTx({
         memberId: member.id,
@@ -146,6 +140,13 @@ export async function handleHostedGroupJoinOfferReaction(input: {
     if (disclosureResult.kind === "limit_reached") {
       return skipHostedGroupJoinOfferReaction({
         reason: "disclosure_grant_limit_reached",
+      });
+    }
+    // The message proved this Like targets a disclosure request the member may
+    // not currently consent to, so it must not fall through to the join owner.
+    if (disclosureResult.kind === "member_inactive") {
+      return skipHostedGroupJoinOfferReaction({
+        reason: "member_inactive",
       });
     }
   }

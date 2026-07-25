@@ -290,17 +290,22 @@ describe("handleHostedGroupJoinOfferReaction", () => {
 
   // Disclosure consent creates a durable, future-effective permission over
   // private data, so it keeps the current-access policy that joining drops.
-  it("never creates a disclosure grant for a lapsed member's Like", async () => {
+  // The disclosure owner resolves the message and its own authority, so a
+  // lapsed member's Like on a real disclosure request stops there instead of
+  // falling through into unintended membership.
+  it("does not turn a lapsed member's denied disclosure Like into a join", async () => {
+    mocks.acceptHostedGroupDisclosurePermissionReactionTx.mockResolvedValueOnce({
+      kind: "member_inactive",
+    });
     mocks.hasHostedMemberActivationProof.mockResolvedValue(true);
-    mocks.readActiveHostedMemberAccess.mockResolvedValue(false);
     const prisma = createPrismaStub();
 
-    await handleHostedGroupJoinOfferReaction({
+    await expect(handleHostedGroupJoinOfferReaction({
       event: parseReactionEvent({ reactionType: "like" }),
       prisma,
-    });
+    })).resolves.toEqual({ status: "ignored", reason: "member_inactive" });
 
-    expect(mocks.acceptHostedGroupDisclosurePermissionReactionTx).not.toHaveBeenCalled();
+    expect(mocks.acceptHostedGroupJoinOfferTx).not.toHaveBeenCalled();
   });
 
   it("still accepts an active member's disclosure consent Like", async () => {
