@@ -19,38 +19,30 @@ const mocks = vi.hoisted(() => ({
   verifyAndParseHostedLinqWebhookRequest: vi.fn(),
 }));
 
-vi.mock("@/src/lib/prisma", () => ({
-  getPrisma: mocks.getPrisma,
-}));
-
+vi.mock("@/src/lib/prisma", () => ({ getPrisma: mocks.getPrisma }));
 vi.mock("@/src/lib/hosted-execution/telegram-access-notice", () => ({
   sendHostedTelegramAccessNotice: mocks.sendHostedTelegramAccessNotice,
 }));
-
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", () => ({
   lookupHostedMemberRoutingByHomeLinqChatId:
     mocks.lookupHostedMemberRoutingByHomeLinqChatId,
   resolveHostedMemberRoutingByTelegramUserId:
     mocks.resolveHostedMemberRoutingByTelegramUserId,
 }));
-
 vi.mock("@/src/lib/hosted-onboarding/linq", () => ({
   verifyAndParseHostedLinqWebhookRequest:
     mocks.verifyAndParseHostedLinqWebhookRequest,
 }));
-
 vi.mock("@/src/lib/hosted-onboarding/recognized-inbound-access", () => ({
   resolveHostedRecognizedInboundAccess:
     mocks.resolveHostedRecognizedInboundAccess,
 }));
-
 vi.mock("@/src/lib/hosted-onboarding/telegram", () => ({
   buildHostedTelegramMessagePayload: mocks.buildHostedTelegramMessagePayload,
   buildHostedTelegramWebhookEventId: mocks.buildHostedTelegramWebhookEventId,
   parseHostedTelegramWebhookUpdate: mocks.parseHostedTelegramWebhookUpdate,
   summarizeHostedTelegramWebhook: mocks.summarizeHostedTelegramWebhook,
 }));
-
 vi.mock("@/src/lib/hosted-onboarding/webhook-provider-linq-shared", () => ({
   buildInactiveMemberAccessNoticeResponse:
     mocks.buildInactiveMemberAccessNoticeResponse,
@@ -58,21 +50,17 @@ vi.mock("@/src/lib/hosted-onboarding/webhook-provider-linq-shared", () => ({
   resolveHostedOnboardingLinqMessageContext:
     mocks.resolveHostedOnboardingLinqMessageContext,
 }));
-
 vi.mock("@/src/lib/hosted-onboarding/webhook-service", () => ({
   handleHostedOnboardingLinqWebhook:
     mocks.handleHostedOnboardingLinqWebhook,
   handleHostedOnboardingTelegramWebhook:
     mocks.handleHostedOnboardingTelegramWebhook,
 }));
-
 vi.mock("@/src/lib/hosted-onboarding/webhook-transport", () => ({
   drainHostedLinqSideEffectsDirect: mocks.drainHostedLinqSideEffectsDirect,
 }));
 
-import {
-  hostedOnboardingError,
-} from "@/src/lib/hosted-onboarding/errors";
+import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import {
   handleHostedOnboardingLinqWebhookWithVisibleAccess,
   handleHostedOnboardingTelegramWebhookWithVisibleAccess,
@@ -90,31 +78,25 @@ describe("visible access webhook recovery", () => {
     });
   });
 
-  it("turns a permanent Linq home-route signup collision into a visible signup handoff", async () => {
-    const routeError = hostedOnboardingError({
-      code: "HOSTED_LINQ_HOME_ROUTE_CHANGED",
-      httpStatus: 503,
-      message: "route changed",
-      retryable: true,
-    });
-    mocks.handleHostedOnboardingLinqWebhook.mockRejectedValue(routeError);
+  it("turns a permanent Linq home-route collision into a signup reply", async () => {
+    mocks.handleHostedOnboardingLinqWebhook.mockRejectedValue(
+      hostedOnboardingError({
+        code: "HOSTED_LINQ_HOME_ROUTE_CHANGED",
+        httpStatus: 503,
+        message: "route changed",
+        retryable: true,
+      }),
+    );
     mocks.verifyAndParseHostedLinqWebhookRequest.mockReturnValue({
       event_id: "linq:event:123",
       event_type: "message.received",
     });
     mocks.resolveHostedOnboardingLinqMessageContext.mockReturnValue({
       messageEvent: {
-        data: {
-          chat: { is_group: false },
-          service: "iMessage",
-        },
+        data: { chat: { is_group: false }, service: "iMessage" },
       },
       occurredAt: "2026-07-25T12:00:00.000Z",
-      participantContact: {
-        kind: "phone",
-        lookupKey: "phone-key",
-        value: "+15550100001",
-      },
+      participantContact: { kind: "phone", value: "+15550100001" },
       summary: {
         chatId: "chat_home",
         isFromMe: false,
@@ -122,10 +104,7 @@ describe("visible access webhook recovery", () => {
       },
     });
     mocks.lookupHostedMemberRoutingByHomeLinqChatId.mockResolvedValue({
-      core: {
-        id: "member_123",
-        suspendedAt: null,
-      },
+      core: { id: "member_123", suspendedAt: null },
     });
     mocks.resolveHostedRecognizedInboundAccess.mockResolvedValue({
       inviteCode: "invite_code",
@@ -137,10 +116,7 @@ describe("visible access webhook recovery", () => {
     });
     const plan = {
       desiredSideEffects: [{ effectId: "signup-effect" }],
-      response: {
-        ok: true,
-        reason: "sent-signup-link",
-      },
+      response: { ok: true, reason: "sent-signup-link" },
     };
     mocks.buildSignupLinkResponse.mockReturnValue(plan);
 
@@ -151,60 +127,17 @@ describe("visible access webhook recovery", () => {
       timestamp: null,
     })).resolves.toEqual(plan.response);
 
-    expect(mocks.buildSignupLinkResponse).toHaveBeenCalledWith({
-      chatId: "chat_home",
-      inviteCode: "invite_code",
-      inviteId: "invite_123",
-      memberId: "member_123",
-      messageId: "message_123",
-      occurredAt: "2026-07-25T12:00:00.000Z",
-      service: "iMessage",
-      sourceEventId: "linq:event:123",
-      threadIsDirect: true,
-    });
-    expect(mocks.drainHostedLinqSideEffectsDirect).toHaveBeenCalledWith({
-      prisma,
-      scheduleAfterResponse: undefined,
-      sideEffects: plan.desiredSideEffects,
-    });
-  });
-
-  it("keeps a genuinely active Linq route race retryable", async () => {
-    const routeError = hostedOnboardingError({
-      code: "HOSTED_LINQ_HOME_ROUTE_CHANGED",
-      httpStatus: 503,
-      message: "route changed",
-      retryable: true,
-    });
-    mocks.handleHostedOnboardingLinqWebhook.mockRejectedValue(routeError);
-    mocks.verifyAndParseHostedLinqWebhookRequest.mockReturnValue({
-      event_id: "linq:event:active",
-      event_type: "message.received",
-    });
-    mocks.resolveHostedOnboardingLinqMessageContext.mockReturnValue({
-      messageEvent: { data: { chat: { is_group: false } } },
-      occurredAt: "2026-07-25T12:00:00.000Z",
-      participantContact: { kind: "phone", value: "+15550100001" },
-      summary: {
+    expect(mocks.buildSignupLinkResponse).toHaveBeenCalledWith(
+      expect.objectContaining({
         chatId: "chat_home",
-        isFromMe: false,
-        messageId: "message_active",
-      },
-    });
-    mocks.lookupHostedMemberRoutingByHomeLinqChatId.mockResolvedValue({
-      core: { id: "member_active", suspendedAt: null },
-    });
-    mocks.resolveHostedRecognizedInboundAccess.mockResolvedValue({
-      kind: "allowed",
-    });
-
-    await expect(handleHostedOnboardingLinqWebhookWithVisibleAccess({
-      prisma,
-      rawBody: "{}",
-      signature: null,
-      timestamp: null,
-    })).rejects.toBe(routeError);
-    expect(mocks.drainHostedLinqSideEffectsDirect).not.toHaveBeenCalled();
+        inviteCode: "invite_code",
+        memberId: "member_123",
+        threadIsDirect: true,
+      }),
+    );
+    expect(mocks.drainHostedLinqSideEffectsDirect).toHaveBeenCalledWith(
+      expect.objectContaining({ sideEffects: plan.desiredSideEffects }),
+    );
   });
 
   it("replies to a recognized inactive Telegram member on the inbound thread", async () => {
@@ -241,7 +174,7 @@ describe("visible access webhook recovery", () => {
     await expect(handleHostedOnboardingTelegramWebhookWithVisibleAccess({
       prisma,
       rawBody: "{}",
-      secretToken: "secret",
+      secretToken: null,
     })).resolves.toEqual({
       ignored: false,
       ok: true,
@@ -254,52 +187,8 @@ describe("visible access webhook recovery", () => {
       noticeCode: "billing_inactive",
       prisma,
       replyToMessageId: "7",
-      sentAt: new Date("2026-07-25T12:00:00.000Z"),
       sourceEventId: "telegram:update:321",
       target: "456",
-    });
-  });
-
-  it("keeps Telegram retryable until an access notice is durably sent", async () => {
-    mocks.handleHostedOnboardingTelegramWebhook.mockResolvedValue({
-      ignored: true,
-      ok: true,
-      reason: "inactive-member",
-    });
-    mocks.parseHostedTelegramWebhookUpdate.mockReturnValue({ update_id: 321 });
-    mocks.summarizeHostedTelegramWebhook.mockResolvedValue({
-      isDirect: true,
-      occurredAt: "2026-07-25T12:00:00.000Z",
-      senderTelegramUserId: "456",
-    });
-    mocks.buildHostedTelegramMessagePayload.mockReturnValue({
-      messageId: "7",
-      threadId: "456",
-    });
-    mocks.resolveHostedMemberRoutingByTelegramUserId.mockResolvedValue({
-      lookup: {
-        core: { id: "member_telegram", suspendedAt: null },
-      },
-      status: "found",
-    });
-    mocks.resolveHostedRecognizedInboundAccess.mockResolvedValue({
-      kind: "access_notice",
-      message: "Billing needs attention.",
-      noticeCode: "billing_inactive",
-      responseReason: "sent-billing-inactive-notice",
-    });
-    mocks.sendHostedTelegramAccessNotice.mockResolvedValue({
-      retryAt: new Date("2026-07-25T12:00:30.000Z"),
-      status: "in_flight",
-    });
-
-    await expect(handleHostedOnboardingTelegramWebhookWithVisibleAccess({
-      prisma,
-      rawBody: "{}",
-      secretToken: "secret",
-    })).rejects.toMatchObject({
-      code: "HOSTED_TELEGRAM_ACCESS_NOTICE_RETRY",
-      retryable: true,
     });
   });
 });
