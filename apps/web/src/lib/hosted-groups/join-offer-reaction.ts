@@ -97,18 +97,8 @@ export async function handleHostedGroupJoinOfferReaction(input: {
       reason: "not_a_member",
     });
   }
-  // Joining and disclosure consent answer different authority questions, so they
-  // do not share one eligibility policy. Joining mirrors the link adapter behind
-  // the same offer, which admits any authenticated, non-suspended member: a
-  // lapsed member who likes the offer would otherwise be denied the action the
-  // offer itself advertises. Disclosure consent creates a durable, future-
-  // effective permission over private data, so it keeps requiring current access.
-  if (
-    member.suspendedAt
-    || !(await (isDisclosureConsentReaction
-      ? readActiveHostedMemberAccess({ memberId: member.id, prisma: input.prisma })
-      : hasHostedMemberActivationProof({ memberId: member.id, prisma: input.prisma })))
-  ) {
+  // Suspension denies every operation reachable from here.
+  if (member.suspendedAt) {
     return skipHostedGroupJoinOfferReaction({
       reason: "member_inactive",
     });
@@ -124,7 +114,17 @@ export async function handleHostedGroupJoinOfferReaction(input: {
     threadId: input.event.linqChatId,
   });
 
-  if (isDisclosureConsentReaction) {
+  // An exact Like is only a *possible* disclosure consent: this shape check
+  // cannot see which message was reacted to, so the same Like also carries the
+  // room's advertised "Like or heart this message" join offer. Consenting to a
+  // disclosure creates durable, future-effective authority over private data, so
+  // it keeps requiring current access; run that owner only when the member could
+  // legitimately consent, and let everyone else fall through to the join lookup
+  // below, which matches on the message and rejects a disclosure request anyway.
+  if (
+    isDisclosureConsentReaction
+    && await readActiveHostedMemberAccess({ memberId: member.id, prisma: input.prisma })
+  ) {
     const disclosureResult = await input.prisma.$transaction(async (tx) =>
       acceptHostedGroupDisclosurePermissionReactionTx({
         memberId: member.id,
@@ -148,6 +148,16 @@ export async function handleHostedGroupJoinOfferReaction(input: {
         reason: "disclosure_grant_limit_reached",
       });
     }
+  }
+
+  // Joining mirrors the link adapter behind the same offer, which admits any
+  // authenticated, non-suspended member, so a lapsed member is not denied the
+  // action the offer itself advertises. Never-activated handles stay denied and
+  // keep the first-reply contact-card path instead.
+  if (!await hasHostedMemberActivationProof({ memberId: member.id, prisma: input.prisma })) {
+    return skipHostedGroupJoinOfferReaction({
+      reason: "member_inactive",
+    });
   }
 
   let result: Awaited<ReturnType<typeof acceptHostedGroupJoinOfferTx>>;
