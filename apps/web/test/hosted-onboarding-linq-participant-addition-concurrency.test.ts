@@ -4,9 +4,6 @@ import type { Prisma, PrismaClient } from "@prisma/client";
 import { describe, expect, it } from "vitest";
 
 import {
-  provisionHostedCryptoDomainRootsForUserTx,
-} from "@/src/lib/hosted-crypto/domain-root-store";
-import {
   createHostedExternalThreadIdentityLookupKey,
   createHostedExternalThreadLookupKey,
 } from "@/src/lib/hosted-onboarding/contact-privacy";
@@ -85,18 +82,15 @@ async function createRouteFixture(): Promise<RouteFixture> {
       { id: containerMemberId },
     ],
   });
-  await observer.$transaction(async (tx) => {
-    await provisionHostedCryptoDomainRootsForUserTx({
-      reason: "test.hosted-thread-route",
-      tx,
-      userId: containerMemberId,
-    });
-    await tx.hostedThreadContainer.create({
-      data: {
-        memberId: containerMemberId,
-        ownerMemberId,
-      },
-    });
+  // The hosted secure-box test codec in test/setup-env.ts short-circuits seal
+  // and open before any domain-root lookup, so this fixture must not provision
+  // real crypto roots: doing so would require the GCP authority key that the
+  // PostgreSQL-ordering CI lane deliberately does not configure.
+  await observer.hostedThreadContainer.create({
+    data: {
+      memberId: containerMemberId,
+      ownerMemberId,
+    },
   });
   await observer.hostedThreadRoute.create({
     data: {
