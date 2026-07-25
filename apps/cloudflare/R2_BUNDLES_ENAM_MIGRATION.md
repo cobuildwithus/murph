@@ -9,66 +9,110 @@ bucket. The move therefore needs no dual-read runtime, fallback, or data-model
 change: create dedicated ENAM buckets, copy and prove them, then switch the
 existing configuration in one immediate deploy.
 
-The expected production write pause is the ten-minute PUT-URL drain plus the
-cutover deploy, post-deploy proof, one controlled restore canary, and one
-same-head redeploy that forces its second restore onto a new versioned
-container. Seed within 24 hours of the cutover; do not leave a second
-production copy without a bounded owner.
+The entire copy happens inside a single write fence. There is no live
+pre-seed, so no ordinary bundle cleanup can delete a source object after that
+object has already been copied, and the destination can never drift from the
+source while the operation is in flight. The window is therefore longer than a
+delta cutover and correspondingly simpler: the source is authoritative and
+unchanged throughout, and aborting costs only the window.
 
 ## Safety contract
 
-- Rehearse the whole flow against real R2 with a distinct staging Worker and
-  the existing preview bucket before creating the production destination. The
-  rehearsed ENAM bucket becomes the new configured preview bucket, so the
-  production deploy never references an undefined bucket.
+- Run the migration only inside the fence. The command requires
+  `--source-frozen` in both its read-only and `--apply` forms; there is no
+  phase that is safe to run against a live source.
 - The OC source remains authoritative until the binding switch and remains the
   rollback source until the first durable ENAM checkpoint. The tool never
-  deletes from either bucket. An unexpected ENAM object is an invariant
-  failure: abandon that unused destination instead of deleting unknown data.
+  deletes from either bucket.
+- The destination must be a subset of the frozen source when a run starts and
+  exactly equal to it when the run ends. An object present in the destination
+  but absent from the source is an invariant failure: it means the source moved
+  while the fence was supposed to hold it still.
+- Aborting is free before the first ENAM checkpoint. Nothing at the source has
+  changed and no configuration has moved. Recovery is to empty and delete the
+  ENAM destination — which only ever held copies of the source — create a fresh
+  one, and run again inside the same or a later fence. Never delete or recreate
+  an OC source.
 - Keep the production ENAM destination unbound and writer-exclusive until
   cutover. Use a temporary Object Read & Write key scoped only to the exact
   bucket pair.
-- Seed lists the source, then issues bounded, explicit `CopyObject` requests.
-  Each request uses R2's required leading-slash source, the listed source ETag
-  as a precondition, metadata `COPY`, and Standard storage. There is no `sync`
-  heuristic or multipart path.
+- The run lists the source, then issues bounded, explicit `CopyObject`
+  requests. Each request uses R2's required leading-slash source, the listed
+  source ETag as a precondition, metadata `COPY`, and Standard storage. There
+  is no `sync` heuristic or multipart path.
 - Objects at the single-copy limit, non-Standard objects, and multipart or
-  non-MD5 ETags fail closed. Seed excludes the canonical lifecycle prefixes;
-  those prefixes must be naturally empty before final.
-- The first seed accepts only an empty destination, reads back its lifecycle
-  rules, conditionally creates one zero-byte marker bound to the exact pair,
-  and proves that marker is the only object before copying. Every retry and
-  final check requires that marker.
-- Final is read-only. It requires `--source-frozen`, two stable inventory
-  reads, the exact marker, and exact key, size, ETag, and storage-class parity
-  with zero destination-only application objects.
+  non-MD5 ETags fail closed.
+- The first run against an empty destination reads back its lifecycle rules,
+  conditionally creates one zero-byte marker bound to the exact pair, and
+  proves that marker is the only object before copying. Every later run against
+  that destination requires that exact marker.
+- Every run ends with the same read-only proof: two stable inventory reads, the
+  exact marker, and exact key, size, ETag, and storage-class parity with zero
+  destination-only objects. Running the command without `--apply` performs only
+  that proof, which is how the post-deploy gates in section 7 work.
 - `--source-frozen` is an operator assertion, not a lock. Keep the external
-  fence active through variable readback, both deploys, the post-deploy final
-  checks, direct smokes, and both controlled restore wakes.
+  fence active through the copy, variable readback, both deploys, the
+  post-deploy proofs, direct smokes, and both controlled restore wakes.
+
+### Account deletion stays available
+
+Account deletion is not blocked at any point in this operation. The runtime
+deletion path targets the active bucket, and the single-window shape keeps that
+correct at every moment:
+
+- Before the fence, no ENAM copy exists, so deletion removes the member's
+  objects from the only copy that exists.
+- Inside the fence, a deletion that reaches R2 mutates the frozen source. The
+  copy or the closing proof fails closed, because the removed object is still
+  present in the destination. The operator recovers by abandoning the
+  destination and re-running; no member data is carried forward.
+- Between the closing proof and the binding switch, the post-deploy proof in
+  section 7 re-runs before any writer is reopened and detects the same
+  condition. The response there is the rollback in section 6, which is still
+  free at that point.
+- After cutover, deletion targets ENAM. OC is a retirement copy that section 8
+  destroys whole, so nothing a member deleted can come back.
 
 References: [R2 data location][data-location], [R2 consistency][consistency],
-[R2 authentication][r2-auth], [R2 S3 compatibility][s3-api], [R2's current
-leading-slash `CopyObject` example][copy-object], and [Vercel WAF custom
-rules][vercel-waf]. The cutover ordering also accounts for [Worker version
-deployment semantics][worker-versions], [Durable Object code-update skew][do-updates],
-and [Durable Object alarms][do-alarms].
+[R2 authentication][r2-auth], [R2 S3 compatibility][s3-api], and [R2's current
+leading-slash `CopyObject` example][copy-object]. The cutover ordering also
+accounts for [Worker version deployment semantics][worker-versions], [Durable
+Object code-update skew][do-updates], and [Durable Object alarms][do-alarms].
 
 [data-location]: https://developers.cloudflare.com/r2/reference/data-location/
 [consistency]: https://developers.cloudflare.com/r2/reference/consistency/
 [r2-auth]: https://developers.cloudflare.com/r2/api/tokens/
 [s3-api]: https://developers.cloudflare.com/r2/api/s3/api/
 [copy-object]: https://developers.cloudflare.com/r2/buckets/storage-classes/
-[vercel-waf]: https://vercel.com/docs/vercel-firewall/vercel-waf/custom-rules
 [worker-versions]: https://developers.cloudflare.com/workers/versions-and-deployments/
 [do-updates]: https://developers.cloudflare.com/durable-objects/platform/known-issues/#code-updates
 [do-alarms]: https://developers.cloudflare.com/durable-objects/api/alarms/
 
-## 1. Rehearse the exact copy path on real R2
+## 1. Size the window before booking it
+
+The fence must cover the whole copy, so book from measured volume and a
+measured rate rather than an assumption.
+
+```bash
+SOURCE_BUCKET="$(gh variable get CF_BUNDLES_BUCKET --env production)"
+pnpm --dir apps/cloudflare exec wrangler r2 bucket info "$SOURCE_BUCKET" --json
+```
+
+Record the reported object count and payload size. Take the copy rate from the
+timed preview rehearsal in section 2, which uses the same account, the same
+command, and the same OC-to-ENAM path. Book the fence with margin over the
+extrapolated copy time plus the fixed cost of section 4's ten-minute drain, the
+cutover deploy, the post-deploy proofs, and both restore canaries.
+
+An overrun is not a data risk. If the copy or any proof does not finish inside
+the booked window, take the abandonment path in the safety contract, reopen
+writers, and rebook. Nothing at the source has changed.
+
+## 2. Rehearse the exact copy path on real R2
 
 Move the existing OC preview bucket first; this is both the real R2 rehearsal
 and the preview-bucket migration. Create a distinct ENAM preview destination.
-Bucket location cannot be changed after creation. Never delete or recreate an
-OC source.
+Bucket location cannot be changed after creation.
 
 ```bash
 PREVIEW_SOURCE_BUCKET="$(gh variable get CF_BUNDLES_PREVIEW_BUCKET --env production)"
@@ -79,8 +123,8 @@ pnpm --dir apps/cloudflare exec wrangler r2 bucket info "$PREVIEW_DESTINATION_BU
 ```
 
 If the preview source is empty, first use the existing OC staging Worker to
-write a representative v2 checkpoint; the migration final intentionally
-refuses an empty source because it cannot prove a real restore path.
+write a representative v2 checkpoint; the migration intentionally refuses an
+empty source because it cannot prove a real restore path.
 
 Issue a temporary R2 key limited to that pair. Load it without echoing the
 secret or placing it in an argument:
@@ -92,32 +136,23 @@ read -r -s R2_MIGRATION_SECRET_ACCESS_KEY
 export CLOUDFLARE_ACCOUNT_ID R2_MIGRATION_ACCESS_KEY_ID R2_MIGRATION_SECRET_ACCESS_KEY
 ```
 
-Run read-only preflight, then seed:
-
-```bash
-pnpm --dir apps/cloudflare r2:bundles:migrate -- \
-  --phase seed --source "$PREVIEW_SOURCE_BUCKET" \
-  --destination "$PREVIEW_DESTINATION_BUCKET"
-
-pnpm --dir apps/cloudflare r2:bundles:migrate -- \
-  --phase seed --source "$PREVIEW_SOURCE_BUCKET" \
-  --destination "$PREVIEW_DESTINATION_BUCKET" \
-  --confirm-destination "$PREVIEW_DESTINATION_BUCKET" --apply
-```
-
 Stop staging writers, wait ten minutes after the last possible presigned PUT,
-rerun seed, then require the read-only final gate:
+then run the copy and record its wall time. Rerun the read-only form to prove
+the mirror a second time:
 
 ```bash
-pnpm --dir apps/cloudflare r2:bundles:migrate -- \
-  --phase seed --source "$PREVIEW_SOURCE_BUCKET" \
-  --destination "$PREVIEW_DESTINATION_BUCKET" \
-  --confirm-destination "$PREVIEW_DESTINATION_BUCKET" --apply
+time pnpm --dir apps/cloudflare r2:bundles:migrate -- \
+  --source "$PREVIEW_SOURCE_BUCKET" --destination "$PREVIEW_DESTINATION_BUCKET" \
+  --source-frozen --confirm-destination "$PREVIEW_DESTINATION_BUCKET" --apply
 
 pnpm --dir apps/cloudflare r2:bundles:migrate -- \
-  --phase final --source "$PREVIEW_SOURCE_BUCKET" \
-  --destination "$PREVIEW_DESTINATION_BUCKET" --source-frozen
+  --source "$PREVIEW_SOURCE_BUCKET" --destination "$PREVIEW_DESTINATION_BUCKET" \
+  --source-frozen
 ```
+
+The `Copy plan` line reports the object and byte counts actually copied. Divide
+the recorded wall time by those counts to get the per-object and per-byte rates
+that section 1 extrapolates from.
 
 Deploy a distinct staging Worker through the manual preview path in
 `apps/cloudflare/DEPLOY.md`. Set its binding, presign bucket, and preview bucket
@@ -163,33 +198,6 @@ metadata; do not use shell tracing:
 After all three preview proofs pass, revoke the preview-pair migration key. The
 new ENAM preview bucket is now owned by the staging Worker, not an unowned copy.
 
-## 2. Establish the privacy owner and 24-hour lease
-
-The runtime account-deletion cleanup targets only the active bucket. Before
-the first production seed, add a temporary Vercel WAF `Deny` rule whose exact
-conditions are method `POST` and request path
-`/api/settings/privacy/delete`. WAF changes are immediate and need no deploy.
-
-Prove the production rule returns the WAF's `403`, observe the exact rule hit
-in Vercel Firewall, and confirm the request did not reach application logs.
-Wait ten minutes so any deletion admitted before the rule can finish. Keep the
-rule until OC retirement. This blocks only account deletion, not ordinary use.
-
-Record an owner and a deadline no later than 24 hours after the first production
-seed. If cutover misses it, perform a separately reviewed abandonment operation
-that:
-
-1. empties and deletes only the unused ENAM destination;
-2. revokes its migration key;
-3. restores the old runtime credential with an immediate deploy if section 3
-   had already staged the transition credential; and
-4. removes the exact WAF rule and proves account deletion reaches the app.
-
-Never let an abandoned destination become an unowned second data copy.
-The deadline is an ownership escalation, never permission to delete or revoke
-without proof. After the commit point, extend the named owner and deadline if a
-retirement check fails; keep the safety copy and temporary controls in place.
-
 ## 3. Pre-stage rollback-safe runtime credentials
 
 Create a distinct runtime credential scoped exactly to OC and ENAM. Before
@@ -211,40 +219,7 @@ deployment and require the canonical direct-R2 smoke. This proves the exact
 new secret pair, signer, OC binding, and variables-back rollback path before
 the maintenance window. Keep the old key valid for outstanding URLs.
 
-## 4. Seed production
-
-Define the authoritative production pair, create its dedicated ENAM bucket,
-and issue a separate pair-scoped migration key as in section 1:
-
-```bash
-SOURCE_BUCKET="$(gh variable get CF_BUNDLES_BUCKET --env production)"
-test "$(gh variable get HOSTED_R2_PRESIGN_BUCKET_NAME --env production)" = "$SOURCE_BUCKET"
-DESTINATION_BUCKET='<new-production-enam-bucket>'
-pnpm --dir apps/cloudflare exec wrangler r2 bucket create "$DESTINATION_BUCKET" --location enam
-pnpm --dir apps/cloudflare exec wrangler r2 bucket info "$SOURCE_BUCKET" --json
-pnpm --dir apps/cloudflare exec wrangler r2 bucket info "$DESTINATION_BUCKET" --json
-
-pnpm --dir apps/cloudflare r2:bundles:migrate -- \
-  --phase seed --source "$SOURCE_BUCKET" --destination "$DESTINATION_BUCKET"
-
-pnpm --dir apps/cloudflare r2:bundles:migrate -- \
-  --phase seed --source "$SOURCE_BUCKET" --destination "$DESTINATION_BUCKET" \
-  --confirm-destination "$DESTINATION_BUCKET" --apply
-```
-
-Run seed no earlier than 24 hours before the booked cutover. It never deletes
-or silently accepts destination extras. Keep the already rehearsed
-`PREVIEW_DESTINATION_BUCKET` available; the deploy applies lifecycle rules to
-both configured buckets before uploading the Worker.
-
-Seed excludes raw-email and staged meal-photo prefixes because copying resets
-their retention age. Do not book the final window until those prefixes are
-naturally empty, every object passes the single-copy guards, and seed completes
-with exact stable parity. Any later source mutation invalidates readiness;
-rerun seed. Any destination-only object invalidates that destination; do not
-delete around the gate.
-
-## 5. Establish the production write fence
+## 4. Establish the production write fence
 
 One cutover owner must prove every item below. Abort if any item is uncertain.
 
@@ -253,40 +228,56 @@ One cutover owner must prove every item below. Abort if any item is uncertain.
 2. Pause message and browser-vault admission, Cloudflare Email Routing,
    meal-photo intake, automations, Temporal and cron wakes, and operator jobs
    that can write BUNDLES.
-3. Confirm the account-deletion WAF rule remains active.
-4. Confirm every runner has no invocation in flight and the mailbox is drained.
-5. Record the last possible presigned PUT time and wait ten full minutes.
-6. Account for `HostedUserRunner` cleanup alarms. They can still delete only an
+3. Confirm every runner has no invocation in flight and the mailbox is drained.
+4. Record the last possible presigned PUT time and wait ten full minutes.
+5. Account for `HostedUserRunner` cleanup alarms. They can still delete only an
    aged orphan after re-reading Web's current snapshot; they do not create
    objects or delete the current referenced snapshot. Do not claim a global
-   alarm pause. The formal final checks therefore run after the immediate
-   deployment has moved the active binding to ENAM.
+   alarm pause. A cleanup that fires during the window removes an object the
+   copy already carried, which the closing proof reports as a destination-only
+   object; that is an abandon-and-retry condition, not a partial success.
 
-Keep the general fence through section 8. Keep account deletion blocked through
-section 9.
+Keep the fence through section 7.
 
-## 6. Last pre-switch convergence under the fence
+## 5. Copy the frozen source and prove the mirror
 
-Rerun seed to copy the fenced delta, then run one read-only final readiness
-check immediately before editing variables. This proves stable parity at that
-moment; the two formal final gates run after deploy to catch a cleanup mutation
-in the binding-switch window.
+Define the authoritative production pair, create its dedicated ENAM bucket,
+and issue a separate pair-scoped migration key as in section 2:
+
+```bash
+test "$(gh variable get HOSTED_R2_PRESIGN_BUCKET_NAME --env production)" = "$SOURCE_BUCKET"
+DESTINATION_BUCKET='<new-production-enam-bucket>'
+pnpm --dir apps/cloudflare exec wrangler r2 bucket create "$DESTINATION_BUCKET" --location enam
+pnpm --dir apps/cloudflare exec wrangler r2 bucket info "$SOURCE_BUCKET" --json
+pnpm --dir apps/cloudflare exec wrangler r2 bucket info "$DESTINATION_BUCKET" --json
+```
+
+Run the copy, then the read-only proof immediately before editing variables:
 
 ```bash
 pnpm --dir apps/cloudflare r2:bundles:migrate -- \
-  --phase seed --source "$SOURCE_BUCKET" --destination "$DESTINATION_BUCKET" \
-  --confirm-destination "$DESTINATION_BUCKET" --apply
+  --source "$SOURCE_BUCKET" --destination "$DESTINATION_BUCKET" \
+  --source-frozen --confirm-destination "$DESTINATION_BUCKET" --apply
 
 pnpm --dir apps/cloudflare r2:bundles:migrate -- \
-  --phase final --source "$SOURCE_BUCKET" --destination "$DESTINATION_BUCKET" \
-  --source-frozen
+  --source "$SOURCE_BUCKET" --destination "$DESTINATION_BUCKET" --source-frozen
 ```
 
-Final mutates nothing. If this readiness check fails or the window expires,
-leave configuration on OC, reopen ordinary writers, and retry before the
-24-hour lease ends.
+The copy run may be interrupted and rerun; a partially copied destination is
+still a subset of the frozen source, so the rerun resumes rather than restarts.
+A destination-only object is different: it means the source moved under the
+fence. Do not delete around the gate. Abandon that destination per the safety
+contract, reopen writers, and rebook.
 
-## 7. Switch and read back all configuration
+Objects staged under the lifecycle-managed `hosted-email/messages/` and
+`hosted-meal-photos/images/` prefixes are copied like any other object rather
+than dropped, so a pending import survives the move. Both destinations carry
+the identical checked-in lifecycle rules, so the deletion backstop still
+applies; a staged object that was already partway through its backstop restarts
+that clock in ENAM. Carrying a pending import forward is the intended trade
+against losing it when OC is retired.
+
+## 6. Switch and read back all configuration
 
 Capture the three current production values and prove the active source before
 changing anything:
@@ -323,28 +314,27 @@ values plus one immediate deploy. Record the workflow run, deployed head SHA,
 Worker version, container fingerprint, and smoke result in the private change
 record.
 
-## 8. Prove production before reopening writers
+## 7. Prove production before reopening writers
 
-While the general fence remains active, require the exact Worker version and
-container fingerprint plus the immediate rollout's self-cleaning direct-R2
-PUT, binding HEAD, size check, and delete against ENAM. Then run final twice,
+While the fence remains active, require the exact Worker version and container
+fingerprint plus the immediate rollout's self-cleaning direct-R2 PUT, binding
+HEAD, size check, and delete against ENAM. Then run the read-only proof twice,
 still before any user canary:
 
 ```bash
 for _ in 1 2; do
   pnpm --dir apps/cloudflare r2:bundles:migrate -- \
-    --phase final --source "$SOURCE_BUCKET" --destination "$DESTINATION_BUCKET" \
-    --source-frozen
+    --source "$SOURCE_BUCKET" --destination "$DESTINATION_BUCKET" --source-frozen
 done
 ```
 
-If either check fails, do not wake the canary. Restore all three captured OC
+If either proof fails, do not wake the canary. Restore all three captured OC
 values, deploy immediately, and require the exact rollback workflow and OC
 direct-R2 smoke before reopening writers. Cloudflare can briefly run old
-Durable Object code during an update; the post-deploy checks are the gate that
-catches an OC or ENAM orphan cleanup in that window. Cleanup re-reads the
-current snapshot before deleting, so it cannot remove the referenced
-checkpoint.
+Durable Object code during an update; these proofs are the gate that catches an
+OC or ENAM orphan cleanup, or a member account deletion, in the binding-switch
+window. Cleanup re-reads the current snapshot before deleting, so it cannot
+remove the referenced checkpoint.
 
 Next use the existing ops runtime-maintenance wake for exactly one controlled
 operator-owned member while all other ingress stays fenced:
@@ -371,14 +361,15 @@ The first canary checkpoint is the commit point. Before it, restore the old
 variables and deploy immediately on any failure. After it, the operation is
 forward-only; OC is a bounded retirement safety copy, not an automatic
 rollback target. Reopen ordinary writers only after the same-head redeploy and
-fresh cold restore pass. Keep account deletion blocked.
+fresh cold restore pass.
 
-## 9. Retire OC and remove temporary controls
+## 8. Retire OC and remove temporary controls
 
 Keep the OC buckets, lifecycle rules, old signing key, and transition runtime
 credential until old one-hour GET URLs expire and the canary is signed off:
-at least one hour after cutover, with retirement targeted inside the 24-hour
-lease. A missed target follows the fail-safe extension in section 2.
+at least one hour after cutover, and within 24 hours. Extend the named owner
+and deadline if a retirement check fails; keep the safety copy in place rather
+than removing a control on a deadline.
 
 Use a separate, explicitly reviewed destructive operation to delete the exact
 pair markers from the two ENAM destinations, prove each reserved marker prefix
@@ -388,10 +379,8 @@ empty, and retire only the matching production and preview OC buckets. Then:
 2. update the two runtime secrets, record their names and `updatedAt` values,
    deploy immediately, and require the ENAM direct-R2 smoke;
 3. revoke the transition, old runtime, and production pair-scoped migration
-   credentials;
-4. remove the exact account-deletion WAF rule and prove the route reaches the
-   app again; and
-5. delete this runbook, migration script, tests, and package command in one
+   credentials; and
+4. delete this runbook, migration script, tests, and package command in one
    cleanup PR.
 
 Retirement does not require OC/ENAM parity after the commit point: new ENAM

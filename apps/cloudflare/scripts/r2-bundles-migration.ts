@@ -37,15 +37,19 @@ const commonChildEnvironmentNames = [
 ] as const;
 
 export const R2_BUNDLES_MIGRATION_USAGE = `Usage:
-  pnpm r2:bundles:migrate -- --phase <seed|final> \\
+  pnpm r2:bundles:migrate -- --source-frozen \\
     --source <oc-bucket> --destination <enam-bucket> [options]
 
+The migration runs only inside the cutover write fence. Without --apply it is a
+read-only gate that proves the destination is an exact mirror of the frozen
+source. With --apply it copies the missing objects and then proves the same
+mirror.
+
 Options:
-  --apply                       Execute seed mutations. Final is always
-                                read-only.
-  --confirm-destination <name>  Repeat the destination name for seed apply.
+  --apply                       Copy missing objects, then verify.
+  --confirm-destination <name>  Repeat the destination name for --apply.
   --source-frozen               Assert every producer is paused and issued
-                                upload URLs have expired. Required for final.
+                                upload URLs have expired. Always required.
   --help                        Show this help.
 
 Required environment:
@@ -57,13 +61,10 @@ The R2 migration credential must be a temporary Object Read & Write key scoped
 to the source and destination buckets. Credentials remain in child-process
 environment only; they are never placed in command arguments or output.`;
 
-export type R2BundlesMigrationPhase = "final" | "seed";
-
 export interface R2BundlesMigrationOptions {
   apply: boolean;
   confirmDestination: string | null;
   destination: string;
-  phase: R2BundlesMigrationPhase;
   source: string;
   sourceFrozen: boolean;
 }
@@ -149,7 +150,6 @@ export function parseR2BundlesMigrationArgs(
       "confirm-destination": { type: "string" },
       destination: { type: "string" },
       help: { short: "h", type: "boolean" },
-      phase: { type: "string" },
       source: { type: "string" },
       "source-frozen": { type: "boolean" },
     },
@@ -158,7 +158,6 @@ export function parseR2BundlesMigrationArgs(
   if (values.help) return { help: true };
   if (positionals.length > 0) throw new TypeError("Unexpected positional migration argument.");
 
-  const phase = parsePhase(requireFlag(values.phase, "--phase"));
   const source = normalizeBucketName(requireFlag(values.source, "--source"), "source");
   const destination = normalizeBucketName(
     requireFlag(values.destination, "--destination"),
@@ -170,7 +169,6 @@ export function parseR2BundlesMigrationArgs(
       ? null
       : normalizeBucketName(values["confirm-destination"], "confirmed destination"),
     destination,
-    phase,
     source,
     sourceFrozen: values["source-frozen"] ?? false,
   };
@@ -378,7 +376,6 @@ export async function runR2BundlesMigration(
   };
   const log = dependencies.log ?? console.log;
   const expectedLifecycle = await readCanonicalLifecycle();
-  const excludedPrefixes = expectedLifecycle.map((rule) => rule.prefix);
   const markerKey = createR2MigrationMarkerKey(options.source, options.destination);
 
   await assertAwsCliV2(context);
@@ -390,51 +387,44 @@ export async function runR2BundlesMigration(
   ]);
   assertBucketInfo(sourceInfo, destinationInfo, options);
   assertExactLifecycle(sourceLifecycle, expectedLifecycle, "source");
-  if (options.phase !== "seed" || destinationLifecycle.length > 0) {
+  if (!options.apply || destinationLifecycle.length > 0) {
     assertExactLifecycle(destinationLifecycle, expectedLifecycle, "destination");
   }
 
   const before = await readInventoryPair(context);
   assertNoMigrationMarkers(before.source);
-  assertEligibleInventory(before.destination, "destination");
+  assertEligiblePair(before);
+  if (before.source.length === 0) {
+    throw new Error("Refusing an R2 bundles migration with an empty source bucket.");
+  }
+  if (before.destination.length > 0) assertExpectedMarker(before.destination, markerKey);
 
-  if (options.phase === "seed") {
-    await runSeed({
+  if (options.apply) {
+    await copyFrozenSource({
       before,
       context,
       destinationLifecycle,
-      excludedPrefixes,
       expectedLifecycle,
       log,
       markerKey,
     });
-    return;
   }
-  await runFinal({ before, context, excludedPrefixes, log, markerKey });
+  const verified = await verifyFrozenMirror({ context, markerKey });
+  log(
+    `Verified the exact mirror of ${verified.sourceCount.toLocaleString("en-US")} frozen source `
+    + "object(s); no source or destination object was changed or deleted.",
+  );
 }
 
-async function runSeed(input: {
+async function copyFrozenSource(input: {
   before: InventoryPair;
   context: MigrationContext;
   destinationLifecycle: readonly R2LifecycleRule[];
-  excludedPrefixes: readonly string[];
   expectedLifecycle: readonly R2LifecycleRule[];
   log: (message: string) => void;
   markerKey: string;
 }): Promise<void> {
-  const { before, context, destinationLifecycle, excludedPrefixes, log, markerKey } = input;
-  const source = excludePrefixes(before.source, excludedPrefixes);
-  assertEligibleInventory(source, "seed source");
-  if (before.destination.length > 0) {
-    assertExpectedMarker(before.destination, markerKey);
-    assertExactLifecycle(destinationLifecycle, input.expectedLifecycle, "destination");
-  }
-  logInventory(log, "Seed preflight", source, before.source.length - source.length);
-  if (!context.options.apply) {
-    log("Seed dry run complete; no lifecycle rules, objects, bindings, or variables changed.");
-    return;
-  }
-
+  const { before, context, destinationLifecycle, log, markerKey } = input;
   if (before.destination.length === 0) {
     if (destinationLifecycle.length === 0) {
       await applyDestinationLifecycle(context);
@@ -457,74 +447,36 @@ async function runSeed(input: {
     await readInventory(context, context.options.destination),
     markerKey,
   );
-  assertNoDestinationOnly(compareR2ObjectInventories(source, destination));
-  const copyEntries = findSourceEntriesNeedingCopy(source, destination);
+  assertNoDestinationOnly(compareR2ObjectInventories(before.source, destination));
+  const copyEntries = findSourceEntriesNeedingCopy(before.source, destination);
+  logCopyPlan(log, before.source, copyEntries);
   await copySourceEntries(context, copyEntries);
-  const verified = await convergeAfterCopy({
-    context,
-    excludedPrefixes,
-    markerKey,
-    sourceBefore: source,
-  });
   if (copyEntries.length > 0) {
     log(`Copied ${copyEntries.length.toLocaleString("en-US")} object(s).`);
   }
-  log(`Verified ${verified.sourceCount.toLocaleString("en-US")} seeded objects; final is still required.`);
 }
 
-async function runFinal(input: {
-  before: InventoryPair;
+async function verifyFrozenMirror(input: {
   context: MigrationContext;
-  excludedPrefixes: readonly string[];
-  log: (message: string) => void;
   markerKey: string;
-}): Promise<void> {
-  const { before, context, excludedPrefixes, log, markerKey } = input;
-  assertEligiblePair(before);
-  assertNoLifecycleObjects(before.source, excludedPrefixes);
-  if (before.source.length === 0) {
-    throw new Error("Refusing a final migration with an empty source bucket.");
-  }
-  const stable = await readInventoryPair(context);
-  assertEligiblePair(stable);
-  assertNoLifecycleObjects(stable.source, excludedPrefixes);
-  assertStableInventory(before.source, stable.source, "Source inventory is not frozen");
-  assertStableInventory(before.destination, stable.destination, "Destination inventory is not stable");
-
-  const destination = withoutExpectedMarker(stable.destination, markerKey);
-  const comparison = compareR2ObjectInventories(stable.source, destination);
-  assertNoFailures(
-    comparison.failures,
-    "Destination is not fully seeded from the frozen source; rerun seed under the write fence",
-  );
-
-  assertNoDestinationOnly(comparison);
-  log(
-    `Verified the final stable mirror of ${stable.source.length.toLocaleString("en-US")} `
-    + "objects; no object was changed or deleted.",
-  );
-}
-
-async function convergeAfterCopy(input: {
-  context: MigrationContext;
-  excludedPrefixes: readonly string[];
-  markerKey: string;
-  sourceBefore: readonly R2ObjectInventoryEntry[];
 }): Promise<{ sourceCount: number }> {
-  const normalize = (pair: InventoryPair): InventoryPair => ({
-    destination: withoutExpectedMarker(pair.destination, input.markerKey),
-    source: excludePrefixes(pair.source, input.excludedPrefixes),
-  });
-  const first = normalize(await readInventoryPair(input.context));
-  const second = normalize(await readInventoryPair(input.context));
+  const first = await readInventoryPair(input.context);
+  const second = await readInventoryPair(input.context);
   assertEligiblePair(first);
   assertEligiblePair(second);
-  assertStableInventory(input.sourceBefore, first.source, "Source changed during copy");
-  assertStableInventory(first.source, second.source, "Source changed during verification");
-  assertStableInventory(first.destination, second.destination, "Destination changed during verification");
+  assertStableInventory(first.source, second.source, "Source inventory is not frozen");
+  assertStableInventory(
+    first.destination,
+    second.destination,
+    "Destination inventory is not stable",
+  );
 
-  const comparison = compareR2ObjectInventories(second.source, second.destination);
-  assertNoFailures(comparison.failures, "Destination mirror is incomplete after copy");
+  const destination = withoutExpectedMarker(second.destination, input.markerKey);
+  const comparison = compareR2ObjectInventories(second.source, destination);
+  assertNoFailures(
+    comparison.failures,
+    "Destination is not a complete copy of the frozen source; rerun with --apply inside the write fence",
+  );
   assertNoDestinationOnly(comparison);
   return { sourceCount: second.source.length };
 }
@@ -533,12 +485,13 @@ function assertOptionAcknowledgements(options: R2BundlesMigrationOptions): void 
   if (options.source === options.destination) {
     throw new TypeError("R2 migration source and destination buckets must be different.");
   }
-  if (options.phase === "seed" && options.sourceFrozen) {
-    throw new TypeError("The seed phase does not accept final-cutover acknowledgements.");
+  if (!options.sourceFrozen) {
+    throw new TypeError(
+      "The R2 bundles migration runs only inside the cutover write fence; --source-frozen is required.",
+    );
   }
-  if (options.phase === "final"
-    && (options.apply || !options.sourceFrozen || options.confirmDestination !== null)) {
-    throw new TypeError("Final is read-only and requires only --source-frozen.");
+  if (!options.apply && options.confirmDestination !== null) {
+    throw new TypeError("The read-only mirror gate does not accept --confirm-destination.");
   }
   if (options.apply && options.confirmDestination !== options.destination) {
     throw new TypeError(
@@ -670,28 +623,6 @@ function assertNoMigrationMarkers(entries: readonly R2ObjectInventoryEntry[]): v
   }
 }
 
-function excludePrefixes(
-  entries: readonly R2ObjectInventoryEntry[],
-  prefixes: readonly string[],
-): R2ObjectInventoryEntry[] {
-  return entries.filter((entry) => !prefixes.some((prefix) => entry.key.startsWith(prefix)));
-}
-
-function assertNoLifecycleObjects(
-  entries: readonly R2ObjectInventoryEntry[],
-  prefixes: readonly string[],
-): void {
-  const keys = entries
-    .filter((entry) => prefixes.some((prefix) => entry.key.startsWith(prefix)))
-    .map((entry) => entry.key);
-  if (keys.length > 0) {
-    throw new Error(formatFingerprintFailure(
-      `${keys.length} lifecycle-managed source object(s) would have their retention age reset`,
-      keys,
-    ));
-  }
-}
-
 function assertNoDestinationOnly(comparison: R2InventoryComparison): void {
   if (comparison.destinationOnlyCount > 0) {
     throw new Error(
@@ -767,11 +698,6 @@ function findSourceEntriesNeedingCopy(
 function requireFlag(value: string | undefined, flag: string): string {
   if (!value) throw new TypeError(`${flag} is required.`);
   return value;
-}
-
-function parsePhase(value: string): R2BundlesMigrationPhase {
-  if (value === "seed" || value === "final") return value;
-  throw new TypeError("--phase must be seed or final.");
 }
 
 function normalizeBucketName(value: string, label: string): string {
@@ -956,17 +882,17 @@ function runChild(
   });
 }
 
-function logInventory(
+function logCopyPlan(
   log: (message: string) => void,
-  label: string,
-  entries: readonly R2ObjectInventoryEntry[],
-  excludedCount: number,
+  source: readonly R2ObjectInventoryEntry[],
+  copyEntries: readonly R2ObjectInventoryEntry[],
 ): void {
-  const bytes = entries.reduce((total, entry) => total + entry.size, 0);
+  const gibibytes = (entries: readonly R2ObjectInventoryEntry[]): string =>
+    (entries.reduce((total, entry) => total + entry.size, 0) / (1024 ** 3)).toFixed(2);
   log(
-    `${label}: ${entries.length.toLocaleString("en-US")} objects, `
-    + `${(bytes / (1024 ** 3)).toFixed(2)} GiB, `
-    + `${excludedCount.toLocaleString("en-US")} lifecycle-managed object(s) excluded.`,
+    `Copy plan: ${copyEntries.length.toLocaleString("en-US")} of `
+    + `${source.length.toLocaleString("en-US")} frozen source object(s), `
+    + `${gibibytes(copyEntries)} of ${gibibytes(source)} GiB.`,
   );
 }
 

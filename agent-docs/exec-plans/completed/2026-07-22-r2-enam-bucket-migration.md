@@ -2,26 +2,28 @@
 
 Status: completed
 Created: 2026-07-22
-Updated: 2026-07-23
+Updated: 2026-07-25
 
 ## Goal
 
 - Enable operators to move the hosted bundles buckets from Oceania to newly
-  created Eastern North America buckets with a short, bounded write pause.
+  created Eastern North America buckets inside one write fence that covers the
+  whole copy.
 - Keep the runtime architecture unchanged: copy immutable object bytes and
   metadata, switch the existing bucket configuration together, and retain the
   old bucket only as a bounded retirement safety copy.
 
 ## Success criteria
 
-- Migration tooling fails closed unless source and destination are different,
-  the destination reports the `enam` location, lifecycle rules match, and the
-  final exact simple-ETag inventory verification succeeds.
-- The runbook covers the preview-bucket rehearsal/move, a live production bulk
-  copy, representative metadata and restore proof, a drained final delta,
-  fenced configuration cutover, post-deploy parity checks, pre-commit rollback,
-  a version-forced cold restore canary, and source-bucket retirement without
-  exposing credentials.
+- Migration tooling refuses to run outside the declared write fence and fails
+  closed unless source and destination are different, the destination reports
+  the `enam` location, lifecycle rules match, and the exact simple-ETag
+  inventory verification succeeds.
+- The runbook covers window sizing from measured volume and a measured rate,
+  the preview-bucket rehearsal/move, representative metadata and restore proof,
+  the fenced whole-bucket copy, fenced configuration cutover, post-deploy parity
+  checks, pre-commit rollback, a version-forced cold restore canary, and
+  source-bucket retirement without exposing credentials.
 - No permanent dual-read path, application runtime state, data-model
   migration, or dependency is introduced. A zero-byte pair-bound provenance
   marker exists only through the bounded rollback window and is removed with
@@ -44,14 +46,16 @@ Updated: 2026-07-23
   single-operation server-side CopyObject requests with metadata preservation
   and source-ETag conditions; never give the tool delete authority. Fail closed
   unless exact keys, sizes, simple ETags, and storage class match. Prove
-  representative v2 metadata/checksums during staging rehearsal. Exclude
-  lifecycle-bound transient prefixes from the live seed and block final
-  cutover until they expire so copy time cannot reset privacy retention.
-- Pause new writes and drain issued upload URLs before the final delta because
-  bucket identity is part of the upload target even though it is not part of
-  stored snapshot refs or encryption AAD. Run the formal parity checks again
-  after the binding deploy so eventual Durable Object code skew cannot hide an
-  orphan cleanup in the switch window.
+  representative v2 metadata/checksums during staging rehearsal.
+- Copy the whole bucket inside the fence rather than pre-seeding against a live
+  source. Ordinary bundle and snapshot cleanup deletes source objects, so any
+  copy that runs before the fence can leave a destination object the source no
+  longer has, which no delete-free tool can reconcile.
+- Pause new writes and drain issued upload URLs before the copy because bucket
+  identity is part of the upload target even though it is not part of stored
+  snapshot refs or encryption AAD. Run the parity proof again after the binding
+  deploy so eventual Durable Object code skew cannot hide an orphan cleanup or
+  an account deletion in the switch window.
 - Treat verification failure as a hard cutover blocker. Do not add an
   old-bucket runtime fallback to work around incomplete copying.
 
@@ -61,8 +65,8 @@ Updated: 2026-07-23
    rollback invariants from code and current official Cloudflare tooling.
 2. Implement the smallest deterministic copy and verification command with
    pure, focused regression coverage.
-3. Document preview rehearsal, production bulk copy, maintenance-window final
-   delta, configuration cutover, smoke checks, and rollback.
+3. Document window sizing, preview rehearsal, the fenced whole-bucket copy,
+   configuration cutover, smoke checks, and rollback.
 4. Run focused tests, canonical diff and acceptance verification, completion
    reviews, CI, and exact-head ReviewGPT.
 5. Open a draft PR without executing the production migration.
@@ -72,8 +76,9 @@ Updated: 2026-07-23
 - Both configured hosted bundles buckets currently report the `oc` location,
   while the inspected hosted containers run in Eastern North America.
 - The production bucket contains roughly 77 GiB across roughly 61,000 objects,
-  including multiple hosted object families, so a live initial copy is needed
-  before the bounded write pause.
+  including multiple hosted object families. The fence must therefore cover a
+  copy of that size, which the runbook sizes from `wrangler r2 bucket info`
+  volume and the timed preview rehearsal rate rather than an assumption.
 - Existing deploy preflight requires the presign bucket name to equal the
   Worker `BUNDLES` binding bucket, which provides one cutover invariant rather
   than a second runtime configuration path.
@@ -97,8 +102,14 @@ Updated: 2026-07-23
   sources, source-ETag preconditions, used metadata preservation, conditional
   marker creation, exact read-only final, and refusal of destination extras.
   Across 36 generated AWS calls it observed no delete or high-level sync path.
-- The focused migration suite passes all 31 cases, Cloudflare typecheck passes,
-  and the canonical `test:diff apps/cloudflare` lane passes 1,888 Node tests and
-  the Workers test. Full acceptance is blocked only by a pre-existing shared
-  `/tmp` fixture whose pending-input schema does not match current main.
-Completed: 2026-07-23
+- Exact-head review round 1 returned `RETROSPECTIVE_REQUIRED` against the
+  earlier live-pre-seed shape: a copy that runs while production is live cannot
+  converge, because ordinary snapshot and bundle cleanup deletes an already
+  copied source object and the delete-free destination rule then rejects the
+  whole destination. The recorded retrospective chose the frozen whole-bucket
+  copy over destination reconciliation or a deletion fence, which also deleted
+  the temporary account-deletion block, the 24-hour ownership lease, the
+  abandonment escalation, and the two-phase seed/final command surface.
+- The focused migration suite passes all 32 cases, Cloudflare typecheck passes,
+  and the canonical `test:diff apps/cloudflare` lane passes.
+Completed: 2026-07-25

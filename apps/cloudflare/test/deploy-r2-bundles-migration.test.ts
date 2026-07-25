@@ -71,9 +71,8 @@ function options(overrides: Partial<R2BundlesMigrationOptions> = {}): R2BundlesM
     apply: false,
     confirmDestination: null,
     destination: DESTINATION_BUCKET,
-    phase: "seed",
     source: SOURCE_BUCKET,
-    sourceFrozen: false,
+    sourceFrozen: true,
     ...overrides,
   };
 }
@@ -201,25 +200,39 @@ describe("R2 bundles migration arguments", () => {
   it("is read-only by default", () => {
     expect(parseR2BundlesMigrationArgs([
       "--",
-      "--phase", "seed",
-      "--source", SOURCE_BUCKET,
-      "--destination", DESTINATION_BUCKET,
-    ])).toEqual(options());
-  });
-
-  it("keeps final read-only and requires the frozen-source assertion", () => {
-    expect(() => parseR2BundlesMigrationArgs([
-      "--phase", "final",
-      "--source", SOURCE_BUCKET,
-      "--destination", DESTINATION_BUCKET,
-      "--apply",
-    ])).toThrow("Final is read-only");
-    expect(parseR2BundlesMigrationArgs([
-      "--phase", "final",
       "--source", SOURCE_BUCKET,
       "--destination", DESTINATION_BUCKET,
       "--source-frozen",
-    ])).toEqual(options({ phase: "final", sourceFrozen: true }));
+    ])).toEqual(options());
+  });
+
+  it("refuses to run at all outside the declared write fence", () => {
+    expect(() => parseR2BundlesMigrationArgs([
+      "--source", SOURCE_BUCKET,
+      "--destination", DESTINATION_BUCKET,
+    ])).toThrow("--source-frozen is required");
+    expect(() => parseR2BundlesMigrationArgs([
+      "--source", SOURCE_BUCKET,
+      "--destination", DESTINATION_BUCKET,
+      "--apply",
+      "--confirm-destination", DESTINATION_BUCKET,
+    ])).toThrow("--source-frozen is required");
+  });
+
+  it("keeps the copy behind an exact destination confirmation", () => {
+    expect(() => parseR2BundlesMigrationArgs([
+      "--source", SOURCE_BUCKET,
+      "--destination", DESTINATION_BUCKET,
+      "--source-frozen",
+      "--apply",
+    ])).toThrow("--confirm-destination");
+    expect(parseR2BundlesMigrationArgs([
+      "--source", SOURCE_BUCKET,
+      "--destination", DESTINATION_BUCKET,
+      "--source-frozen",
+      "--apply",
+      "--confirm-destination", DESTINATION_BUCKET,
+    ])).toEqual(options({ apply: true, confirmDestination: DESTINATION_BUCKET }));
   });
 });
 
@@ -313,8 +326,10 @@ describe("R2 copy command and credential boundaries", () => {
 });
 
 describe("R2 migration orchestration", () => {
-  it("performs only read-only preflight without --apply", async () => {
-    const { calls, runner } = createMockRunner({ destinationLifecycleEmpty: true });
+  it("performs only a read-only mirror gate without --apply", async () => {
+    const { calls, runner } = createMockRunner({
+      destinationInventory: [inventoryEntry(), markerEntry()],
+    });
     await runR2BundlesMigration(options(), migrationEnvironment({
       DATABASE_URL: "must-not-reach-a-child",
     }), { log: () => undefined, runner });
@@ -330,7 +345,7 @@ describe("R2 migration orchestration", () => {
 
   it("fails closed on multipart history without exposing its object key", async () => {
     const { runner } = createMockRunner({
-      destinationLifecycleEmpty: true,
+      destinationInventory: [markerEntry()],
       sourceInventory: [inventoryEntry({ etag: '"multipart-etag-2"' })],
     });
     let message = "";
@@ -480,18 +495,17 @@ describe("R2 migration orchestration", () => {
     expect(mutationCalls(calls)).toHaveLength(0);
   });
 
-  it("final verifies an exact marked mirror without mutating it", async () => {
+  it("verifies an exact marked mirror without mutating it", async () => {
+    const logs: string[] = [];
     const { calls, runner } = createMockRunner({
       destinationInventory: [inventoryEntry(), markerEntry()],
     });
-    await runR2BundlesMigration(options({
-      phase: "final",
-      sourceFrozen: true,
-    }), migrationEnvironment(), {
-      log: () => undefined,
+    await runR2BundlesMigration(options(), migrationEnvironment(), {
+      log: (message) => logs.push(message),
       runner,
     });
     expect(mutationCalls(calls)).toHaveLength(0);
+    expect(logs.join("\n")).toContain("Verified the exact mirror of 1 frozen source object(s)");
   });
 
   it.each([
@@ -508,12 +522,12 @@ describe("R2 migration orchestration", () => {
       ],
     ],
     ["malformed", [markerEntry(MARKER_KEY, { size: 1 })]],
-  ])("rejects a %s destination marker during final", async (_label, markers) => {
+  ])("rejects a %s destination marker", async (_label, markers) => {
     const { calls, runner } = createMockRunner({
       destinationInventory: [inventoryEntry(), ...markers],
     });
     await expect(runR2BundlesMigration(
-      options({ phase: "final", sourceFrozen: true }),
+      options(),
       migrationEnvironment(),
       { log: () => undefined, runner },
     )).rejects.toThrow("provenance marker does not match");
@@ -523,62 +537,54 @@ describe("R2 migration orchestration", () => {
   it.each([
     ["missing", []],
     ["changed", [inventoryEntry({ etag: '"ffffffffffffffffffffffffffffffff"' })]],
-  ])("refuses %s frozen-source coverage during final", async (_label, objects) => {
+  ])("refuses %s frozen-source coverage", async (_label, objects) => {
     const { calls, runner } = createMockRunner({
       destinationInventory: [...objects, markerEntry()],
     });
-    await expect(runR2BundlesMigration(options({
-      phase: "final",
-      sourceFrozen: true,
-    }), migrationEnvironment(), { log: () => undefined, runner })).rejects.toThrow(
-      "Destination is not fully seeded from the frozen source",
-    );
+    await expect(runR2BundlesMigration(options(), migrationEnvironment(), {
+      log: () => undefined,
+      runner,
+    })).rejects.toThrow("Destination is not a complete copy of the frozen source");
     expect(mutationCalls(calls)).toHaveLength(0);
   });
 
-  it("refuses a source that changes between final inventory reads", async () => {
+  it("refuses a source that changes between the two verification reads", async () => {
     const { calls, runner } = createMockRunner({
       destinationInventory: [inventoryEntry(), markerEntry()],
-      sourceInventoryReadHook: ({ inventory, readCount }) => readCount === 2
+      sourceInventoryReadHook: ({ inventory, readCount }) => readCount === 3
         ? inventory.map((entry) => ({ ...entry, lastModified: "2026-07-22T20:01:00Z" }))
         : inventory,
     });
-    await expect(runR2BundlesMigration(options({
-      phase: "final",
-      sourceFrozen: true,
-    }), migrationEnvironment(), { log: () => undefined, runner })).rejects.toThrow(
-      "Source inventory is not frozen",
-    );
+    await expect(runR2BundlesMigration(options(), migrationEnvironment(), {
+      log: () => undefined,
+      runner,
+    })).rejects.toThrow("Source inventory is not frozen");
     expect(mutationCalls(calls)).toHaveLength(0);
   });
 
-  it("refuses a destination that changes between final inventory reads", async () => {
+  it("refuses a destination that changes between the two verification reads", async () => {
     const { calls, runner } = createMockRunner({
       destinationInventory: [inventoryEntry(), markerEntry()],
-      destinationInventoryReadHook: ({ inventory, readCount }) => readCount === 2
+      destinationInventoryReadHook: ({ inventory, readCount }) => readCount === 3
         ? [...inventory, inventoryEntry({ key: "unexpected-final-object" })]
         : inventory,
     });
-    await expect(runR2BundlesMigration(options({
-      phase: "final",
-      sourceFrozen: true,
-    }), migrationEnvironment(), { log: () => undefined, runner })).rejects.toThrow(
-      "Destination inventory is not stable",
-    );
+    await expect(runR2BundlesMigration(options(), migrationEnvironment(), {
+      log: () => undefined,
+      runner,
+    })).rejects.toThrow("Destination inventory is not stable");
     expect(mutationCalls(calls)).toHaveLength(0);
   });
 
-  it("refuses destination extras during final without deleting anything", async () => {
+  it("refuses destination extras without deleting anything", async () => {
     const extra = inventoryEntry({ key: "obsolete-object" });
     const rejected = createMockRunner({
       destinationInventory: [inventoryEntry(), extra, markerEntry()],
     });
-    await expect(runR2BundlesMigration(options({
-      phase: "final",
-      sourceFrozen: true,
-    }), migrationEnvironment(), { log: () => undefined, runner: rejected.runner })).rejects.toThrow(
-      "unexpected object",
-    );
+    await expect(runR2BundlesMigration(options(), migrationEnvironment(), {
+      log: () => undefined,
+      runner: rejected.runner,
+    })).rejects.toThrow("unexpected object");
     expect(mutationCalls(rejected.calls)).toHaveLength(0);
     expect(rejected.calls.some((call) => call.args.includes("delete-object"))).toBe(false);
   });
@@ -617,7 +623,7 @@ describe("R2 migration orchestration", () => {
     expect(calls.some((call) => call.args.includes("delete-object"))).toBe(false);
   });
 
-  it("omits both lifecycle-managed prefixes from seed copies", async () => {
+  it("carries staged lifecycle-managed objects instead of dropping them", async () => {
     const email = inventoryEntry({ key: "hosted-email/messages/transient-email" });
     const meal = inventoryEntry({ key: "hosted-meal-photos/images/transient-photo" });
     const { calls, runner } = createMockRunner({
@@ -631,22 +637,28 @@ describe("R2 migration orchestration", () => {
     const copiedKeys = calls
       .filter((call) => call.args[1] === "copy-object")
       .map((call) => call.args[call.args.indexOf("--key") + 1]);
-    expect(copiedKeys).toEqual([PRIVATE_KEY]);
+    expect(copiedKeys.slice().sort()).toEqual([email.key, meal.key, PRIVATE_KEY].sort());
   });
 
-  it("blocks final while a lifecycle-managed source object remains", async () => {
-    const transient = inventoryEntry({ key: "hosted-email/messages/transient-email" });
+  it("fails closed when ordinary cleanup deletes an already-copied source object", async () => {
+    const superseded = inventoryEntry({
+      etag: '"11111111111111111111111111111111"',
+      key: `${PRIVATE_KEY}-superseded`,
+    });
     const { calls, runner } = createMockRunner({
-      destinationInventory: [inventoryEntry(), transient, markerEntry()],
-      sourceInventory: [inventoryEntry(), transient],
+      destinationInventory: [inventoryEntry(), superseded, markerEntry()],
+      sourceInventory: [inventoryEntry(), superseded],
+      sourceInventoryReadHook: ({ inventory, readCount }) => readCount >= 2
+        ? inventory.filter((entry) => entry.key !== superseded.key)
+        : inventory,
     });
     await expect(runR2BundlesMigration(options({
-      phase: "final",
-      sourceFrozen: true,
+      apply: true,
+      confirmDestination: DESTINATION_BUCKET,
     }), migrationEnvironment(), { log: () => undefined, runner })).rejects.toThrow(
-      "retention age reset",
+      "unexpected object",
     );
-    expect(mutationCalls(calls)).toHaveLength(0);
+    expect(calls.some((call) => call.args.includes("delete-object"))).toBe(false);
   });
 
   it("keeps credentials out of arguments and limits each child environment", async () => {
