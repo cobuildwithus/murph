@@ -289,6 +289,7 @@ export async function handleHostedRuntimeGroupTool(input: {
         result: await readHostedGroupSharedDataByRuntimeMemberId({
           linqSenderHandles: input.request.linqSenderHandles ?? [],
           projectionScopes: input.request.projectionScopes,
+          telegramSenderHandles: input.request.telegramSenderHandles ?? [],
           runtimeMemberId: input.memberId,
         }),
       };

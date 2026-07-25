@@ -732,6 +732,7 @@ describe("handleHostedRuntimeGroupTool", () => {
       linqSenderHandles: ["+15551110001", "member@example.test"],
       projectionScopes: [{ projectionKind: "steps-days.v0" }],
       runtimeMemberId: "member_group_runtime",
+      telegramSenderHandles: [],
     });
   });
 

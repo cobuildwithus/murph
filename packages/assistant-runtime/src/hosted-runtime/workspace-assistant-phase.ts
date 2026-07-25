@@ -12,7 +12,7 @@ import {
 import {
   HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX,
   HOSTED_RUNTIME_GROUP_JOIN_OFFER_LEGACY_MESSAGE_TEMPLATE,
-  HOSTED_RUNTIME_GROUP_LINQ_SENDER_HANDLE_MAX_CODE_POINTS,
+  HOSTED_RUNTIME_GROUP_SENDER_HANDLE_MAX_CODE_POINTS,
   type HostedRuntimeGroupToolLinqThreadContext,
   type HostedRuntimeGroupToolRequest,
   type HostedRuntimeGroupToolResponse,
@@ -302,12 +302,17 @@ export type HostedWorkspaceRuntimeAssistantPhase = (
  * thread-route egress authority, which live only in wake-derived delivery
  * contexts (the web DB stores hashed lookup keys). Inject them here so the
  * model never supplies its own thread target.
+ *
+ * Current-turn sender evidence is injected the same way and for the same
+ * reason: it must come from the accepted inputs for this operation, never from
+ * the model.
  */
-export function createHostedGroupToolWithLinqThreadContext(input: {
+export function createHostedGroupToolWithCurrentTurnContext(input: {
   emailDeliveryContexts?: readonly HostedAssistantEmailDeliveryContext[] | null;
   groupEmailIngress?: boolean;
   groupToolPort: NonNullable<HostedRuntimePlatform["groupToolPort"]>;
   linqDeliveryContexts: readonly HostedAssistantLinqDeliveryContext[];
+  telegramSenderHandles?: readonly string[];
 }): NonNullable<HostedRuntimePlatform["groupToolPort"]> {
   const emailIngressPresent = input.groupEmailIngress === true
     || (input.emailDeliveryContexts?.length ?? 0) > 0;
@@ -338,14 +343,18 @@ export function createHostedGroupToolWithLinqThreadContext(input: {
           action: request.action,
           projectionScopes: request.projectionScopes,
         };
-        const linqSenderHandles = emailIngressPresent
-          ? []
-          : resolveHostedGroupToolLinqSenderHandles(input.linqDeliveryContexts);
-        return await input.groupToolPort.request(
-          linqSenderHandles.length > 0
-            ? { ...sharedReadRequest, linqSenderHandles }
-            : sharedReadRequest,
-        );
+        // Hosted email reply aliases authenticate a route, not the human From
+        // header, so email ingress never carries sender evidence.
+        const senderHandles = emailIngressPresent
+          ? {}
+          : resolveHostedGroupToolSenderHandles({
+              linqDeliveryContexts: input.linqDeliveryContexts,
+              telegramSenderHandles: input.telegramSenderHandles ?? [],
+            });
+        return await input.groupToolPort.request({
+          ...sharedReadRequest,
+          ...senderHandles,
+        });
       }
       if (
         request.action !== "read_chat_participants"
@@ -441,6 +450,35 @@ function resolveHostedGroupToolSelfOptOutContext(input: {
   return eligible.size === 1 ? [...eligible.values()][0] ?? null : null;
 }
 
+/**
+ * Picks the one channel whose handles may be matched this turn. A group runtime
+ * is bound to a single provider thread, so evidence from two channels is a
+ * contradiction and fails closed rather than letting Web guess which index to
+ * match against.
+ */
+function resolveHostedGroupToolSenderHandles(input: {
+  linqDeliveryContexts: readonly HostedAssistantLinqDeliveryContext[];
+  telegramSenderHandles: readonly string[];
+}): { linqSenderHandles?: string[]; telegramSenderHandles?: string[] } {
+  const linqHandles = resolveHostedGroupToolLinqSenderHandles(
+    input.linqDeliveryContexts,
+  );
+  const telegramHandles = [...new Set(input.telegramSenderHandles)]
+    .filter((handle) =>
+      [...handle].length <= HOSTED_RUNTIME_GROUP_SENDER_HANDLE_MAX_CODE_POINTS
+    )
+    .slice(0, HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX);
+  if (linqHandles.length > 0 && telegramHandles.length > 0) {
+    return {};
+  }
+  if (linqHandles.length > 0) {
+    return { linqSenderHandles: linqHandles };
+  }
+  return telegramHandles.length > 0
+    ? { telegramSenderHandles: telegramHandles }
+    : {};
+}
+
 function resolveHostedGroupToolLinqSenderHandles(
   contexts: readonly HostedAssistantLinqDeliveryContext[],
 ): string[] {
@@ -467,7 +505,7 @@ function resolveHostedGroupToolLinqSenderHandles(
     if (
       !senderHandle
       || [...senderHandle].length
-        > HOSTED_RUNTIME_GROUP_LINQ_SENDER_HANDLE_MAX_CODE_POINTS
+        > HOSTED_RUNTIME_GROUP_SENDER_HANDLE_MAX_CODE_POINTS
     ) {
       continue;
     }
@@ -570,6 +608,7 @@ function createHostedAssistantAutomationOperationScope(
           && route?.threadIsDirect === false,
         groupToolPort: input.runtime.platform.groupToolPort ?? null,
         linqDeliveryContexts: durableContext.linqDeliveryContexts,
+        telegramSenderHandles: durableContext.telegramSenderHandles,
       });
       const scopedExecutionContext = scopeHostedAutomationToolToAssistantOperation({
         executionContext: groupScopedExecutionContext,
@@ -591,11 +630,13 @@ async function resolveHostedAssistantInputIdsOperationContext(input: {
 }): Promise<{
   linqDeliveryContexts: HostedAssistantLinqDeliveryContext[];
   route: AssistantCurrentDeliveryRoute | null;
+  telegramSenderHandles: string[];
 }> {
   const routes: AssistantCurrentDeliveryRoute[] = [];
   const linqDeliveryContexts: HostedAssistantLinqDeliveryContext[] = [];
+  const telegramSenderHandles: string[] = [];
   if (input.inputIds.length === 0) {
-    return { linqDeliveryContexts, route: null };
+    return { linqDeliveryContexts, route: null, telegramSenderHandles };
   }
   for (const inputId of input.inputIds) {
     try {
@@ -608,7 +649,7 @@ async function resolveHostedAssistantInputIdsOperationContext(input: {
         replyTarget: event?.replyTarget ?? null,
       });
       if (!route || typeof route.threadIsDirect !== "boolean") {
-        return { linqDeliveryContexts: [], route: null };
+        return { linqDeliveryContexts: [], route: null, telegramSenderHandles: [] };
       }
       routes.push(route);
       const linqDeliveryContext = readHostedAssistantInputLinqDeliveryContext({
@@ -618,18 +659,44 @@ async function resolveHostedAssistantInputIdsOperationContext(input: {
       if (linqDeliveryContext) {
         linqDeliveryContexts.push(linqDeliveryContext);
       }
+      const telegramSenderHandle = readHostedAssistantInputTelegramGroupSenderHandle(event);
+      if (telegramSenderHandle) {
+        telegramSenderHandles.push(telegramSenderHandle);
+      }
     } catch {
-      return { linqDeliveryContexts: [], route: null };
+      return { linqDeliveryContexts: [], route: null, telegramSenderHandles: [] };
     }
   }
   const route = resolveUnambiguousCurrentDeliveryRoute(routes);
   if (!route || typeof route.threadIsDirect !== "boolean") {
-    return { linqDeliveryContexts: [], route: null };
+    return { linqDeliveryContexts: [], route: null, telegramSenderHandles: [] };
   }
   return {
     linqDeliveryContexts,
     route,
+    telegramSenderHandles,
   };
+}
+
+/**
+ * Telegram group attribution evidence for one accepted input. Gated exactly
+ * like the Linq delivery context: route-authorized, non-direct, and with the
+ * source channel agreeing with the reply target.
+ */
+function readHostedAssistantInputTelegramGroupSenderHandle(
+  event: AssistantInputEventRecord | null,
+): string | null {
+  const sourceMetadata = event?.sourceMetadata;
+  if (
+    !event
+    || sourceMetadata?.kind !== "telegram"
+    || sourceMetadata.externalThreadRouteAuthorityPresent !== true
+    || event.conversation?.threadIsDirect !== false
+    || event.replyTarget?.channel !== "telegram"
+  ) {
+    return null;
+  }
+  return normalizeAssistantRouteString(sourceMetadata.senderHandle);
 }
 
 function readHostedAssistantInputLinqDeliveryContext(input: {
@@ -675,13 +742,15 @@ function scopeHostedGroupToolToAssistantOperation(input: {
   groupEmailIngress: boolean;
   groupToolPort: NonNullable<HostedRuntimePlatform["groupToolPort"]> | null;
   linqDeliveryContexts: readonly HostedAssistantLinqDeliveryContext[];
+  telegramSenderHandles?: readonly string[];
 }): AssistantExecutionContext {
   const scopedGroupToolPort = input.groupToolPort
-    ? createHostedGroupToolWithLinqThreadContext({
+    ? createHostedGroupToolWithCurrentTurnContext({
         emailDeliveryContexts: input.emailDeliveryContexts,
         groupEmailIngress: input.groupEmailIngress,
         groupToolPort: input.groupToolPort,
         linqDeliveryContexts: input.linqDeliveryContexts,
+        telegramSenderHandles: input.telegramSenderHandles ?? [],
       })
     : null;
   const sharedScopedExecutionContext = scopeHostedGroupSharedReaderToAssistantOperation({
