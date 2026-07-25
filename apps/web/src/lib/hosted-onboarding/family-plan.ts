@@ -3571,7 +3571,9 @@ export async function acceptHostedFamilyInviteTx(input: {
     const activation = await activateHostedMemberForFamilySponsorshipTx({
       memberId: input.acceptedMemberId,
       occurredAt: now,
-      preparedCryptoDomainRoots: input.preparedCryptoDomainRoots ?? new Map(),
+      ...(input.preparedCryptoDomainRoots
+        ? { preparedCryptoDomainRoots: input.preparedCryptoDomainRoots }
+        : {}),
       prisma: input.tx,
       sourceEventId: `family-invite:${invite.id}`,
     });
