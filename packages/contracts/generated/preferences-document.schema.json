@@ -82,6 +82,11 @@
               "type": "integer",
               "minimum": 0,
               "maximum": 10
+            },
+            "unhinged": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 10
             }
           },
           "additionalProperties": false

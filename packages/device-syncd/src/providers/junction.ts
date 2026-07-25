@@ -1716,6 +1716,17 @@ export function createJunctionDeviceSyncProvider(
       traceId: verified.messageId,
       occurredAt,
       resourceCategory: resource?.category ?? null,
+      // A historical-pull completion is a data-less notification, so accepting
+      // its fetch job proves nothing arrived. Treating it as delivery would
+      // refresh the arrival signal and hide the very stall this detects.
+      dataSourceProviderSlug: isJunctionDataEvent(eventType)
+          && !(
+            isJunctionHistoricalDataEvent(eventType)
+            && data !== null
+            && isJunctionHistoricalPullCompletedWebhookData(data, externalAccountSelection.userId)
+          )
+        ? sourceProviderSlug
+        : null,
       jobs,
       unknownAccountAction: "accept",
     };

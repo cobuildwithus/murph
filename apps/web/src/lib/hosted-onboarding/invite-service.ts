@@ -29,7 +29,10 @@ import {
   type HostedMemberRoutingStateSnapshot,
 } from "./hosted-member-routing-store";
 import { type HostedMemberCoreState } from "./hosted-member-store";
-import { isHostedMemberMessagingSetupRequired } from "./messaging-state";
+import {
+  isHostedMemberMessagingSetupRequired,
+  resolveHostedMemberMessagingState,
+} from "./messaging-state";
 import { deriveHostedOnboardingStage } from "./lifecycle";
 import { readActiveHostedMemberAccess } from "./member-access";
 import {
@@ -112,6 +115,7 @@ export async function getHostedInviteStatus(input: {
         matchesInvite: false,
       },
       stage: "invalid",
+      telegramStartRequired: false,
     };
   }
 
@@ -142,10 +146,13 @@ export async function getHostedInviteStatus(input: {
       : false,
     suspendedAt: invite.member.suspendedAt,
   });
-  const messagingSetupRequired = isHostedMemberMessagingSetupRequired({
+  const messagingInput = {
     identity: invite.member.identity,
     routing: inviteRouting,
-  });
+  };
+  const messagingSetupRequired = isHostedMemberMessagingSetupRequired(messagingInput);
+  const telegramStartRequired =
+    resolveHostedMemberMessagingState(messagingInput).telegramAwaitingInbound;
   const phoneAuthTarget = resolveHostedInvitePhoneAuthTarget(
     await projectHostedMemberIdentityState(inviteIdentity, prisma),
   );
@@ -194,6 +201,7 @@ export async function getHostedInviteStatus(input: {
       matchesInvite: Boolean(sessionMatchesInvite),
     },
     stage,
+    telegramStartRequired,
   };
 }
 
@@ -324,6 +332,9 @@ export interface HostedInviteBillingCheckoutSnapshot {
   member: {
     billingStatus: HostedMember["billingStatus"];
     id: string;
+    billingRef: {
+      stripeSubscriptionLookupKey: string | null;
+    } | null;
     identity: {
       phoneLookupKey: string | null;
     } | null;
@@ -348,6 +359,11 @@ export async function requireHostedInviteForBillingCheckout(
       memberId: true,
       member: {
         select: {
+          billingRef: {
+            select: {
+              stripeSubscriptionLookupKey: true,
+            },
+          },
           billingStatus: true,
           id: true,
           identity: {

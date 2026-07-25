@@ -22,6 +22,7 @@ import {
   publishLatestBrowserVaultReplicaRefTx,
   projectHostedRuntimeLog,
   readAcceptedRuntimeAttemptFailureSignalOwnerLogId,
+  recordHostedRuntimeLogs,
   recordHostedRuntimeLogTx,
   type HostedRuntimeLogRow,
   type HostedWorkspaceTransactionRunner,
@@ -1800,6 +1801,105 @@ describe("hosted workspace store", () => {
 });
 
 describe("hosted runtime log store", () => {
+  it("writes a whole runtime log batch as one statement", async () => {
+    const createMany = vi.fn(
+      async (_args: { data: readonly { eventCode: string; id: string }[] }) => ({
+        count: _args.data.length,
+      }),
+    );
+    const create = vi.fn();
+    const prisma = Object.assign(Object.create(null), {
+      hostedRuntimeLog: { create, createMany },
+    }) as Parameters<typeof recordHostedRuntimeLogs>[0]["prisma"];
+
+    const references = await recordHostedRuntimeLogs({
+      entries: Array.from({ length: 50 }, () => ({
+        component: "mailbox",
+        eventCode: "mailbox.imported",
+        level: "info",
+        phase: "import",
+      })),
+      prisma,
+      userId: "member_workspace_1",
+    });
+
+    // The pool defaults to 15 clients; 50 independent creates would let one
+    // request outrun the whole pool.
+    expect(createMany).toHaveBeenCalledOnce();
+    expect(create).not.toHaveBeenCalled();
+    expect(createMany.mock.calls[0]?.[0]?.data).toHaveLength(50);
+    expect(references).toHaveLength(50);
+    expect(new Set(references.map((reference) => reference.id)).size).toBe(50);
+    expect(references.every((reference) => reference.eventCode === "mailbox.imported"))
+      .toBe(true);
+  });
+
+  it("does not touch the database for an empty runtime log batch", async () => {
+    const createMany = vi.fn(async () => ({ count: 0 }));
+    const prisma = Object.assign(Object.create(null), {
+      hostedRuntimeLog: { createMany },
+    }) as Parameters<typeof recordHostedRuntimeLogs>[0]["prisma"];
+
+    expect(await recordHostedRuntimeLogs({
+      entries: [],
+      prisma,
+      userId: "member_workspace_1",
+    })).toEqual([]);
+    expect(createMany).not.toHaveBeenCalled();
+  });
+
+  it("rejects a batch entry with a forbidden field just like a single write", async () => {
+    const createMany = vi.fn(async () => ({ count: 0 }));
+    const prisma = Object.assign(Object.create(null), {
+      hostedRuntimeLog: { createMany },
+    }) as Parameters<typeof recordHostedRuntimeLogs>[0]["prisma"];
+
+    await expect(recordHostedRuntimeLogs({
+      entries: [{
+        component: "not_a_real_component",
+        eventCode: "mailbox.imported",
+        level: "info",
+        phase: "import",
+      }],
+      prisma,
+      userId: "member_workspace_1",
+    })).rejects.toThrow(/component/);
+    expect(createMany).not.toHaveBeenCalled();
+  });
+
+  it("writes nothing when a later batch entry is invalid", async () => {
+    // Normalizing the whole batch before the single write is what removes the
+    // partial-success behaviour the per-entry loop had; a valid prefix must not
+    // reach the database when a later entry is rejected.
+    const createMany = vi.fn(async () => ({ count: 0 }));
+    const create = vi.fn();
+    const prisma = Object.assign(Object.create(null), {
+      hostedRuntimeLog: { create, createMany },
+    }) as Parameters<typeof recordHostedRuntimeLogs>[0]["prisma"];
+
+    await expect(recordHostedRuntimeLogs({
+      entries: [
+        {
+          component: "mailbox",
+          eventCode: "mailbox.imported",
+          level: "info",
+          phase: "import",
+        },
+        {
+          component: "not_a_real_component",
+          eventCode: "mailbox.imported",
+          level: "info",
+          phase: "import",
+        },
+      ],
+      prisma,
+      userId: "member_workspace_1",
+    })).rejects.toThrow(/component/);
+
+    expect(createMany).not.toHaveBeenCalled();
+    expect(create).not.toHaveBeenCalled();
+  });
+
   it("selects the earliest recent same-user accepted-failure log as signal owner", async () => {
     const findFirst = vi.fn<HostedRuntimeLogFindFirst>(async () => ({ id: "runtime_log_prior" }));
     const prisma = Object.assign(Object.create(null), {

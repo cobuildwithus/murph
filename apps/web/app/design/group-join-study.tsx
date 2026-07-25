@@ -94,6 +94,7 @@ export function GroupJoinStudy() {
             groupName={DESIGN_GROUP_NAME}
             joinCode={DESIGN_JOIN_CODE}
             permissions={DESIGN_PERMISSIONS}
+            postJoinContactOption={null}
             postJoinDestination="/home"
           />
           <GroupJoinLeaveButton groupName={DESIGN_GROUP_NAME} joinCode={DESIGN_JOIN_CODE} />
@@ -113,6 +114,7 @@ export function GroupJoinStudy() {
             groupName={DESIGN_GROUP_NAME}
             joinCode={DESIGN_JOIN_CODE}
             permissions={DESIGN_PERMISSIONS}
+            postJoinContactOption={null}
             postJoinDestination="/home"
           />
           <GroupJoinHomeLink label="Not now" />
@@ -134,6 +136,7 @@ export function GroupJoinStudy() {
             groupName={DESIGN_GROUP_NAME}
             joinCode={DESIGN_JOIN_CODE}
             permissions={DESIGN_PERMISSIONS}
+            postJoinContactOption={null}
             postJoinDestination="/home"
           />
           <GroupJoinLeaveButton groupName={DESIGN_GROUP_NAME} joinCode={DESIGN_JOIN_CODE} />

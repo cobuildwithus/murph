@@ -3529,10 +3529,40 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       LINQ_API_BASE_URL: "http://host.docker.internal:4011/",
       TELEGRAM_API_BASE_URL: "http://telegram.example.com/bot",
       TELEGRAM_FILE_BASE_URL: "https://files.telegram.example/",
+      // xAI is pinned to api.x.ai and must not join the configurable provider
+      // base-URL allowlist, even when a stale environment value is present.
+      XAI_API_BASE_URL: "http://host.docker.internal:4014/",
     })).toEqual([
       "http://host.docker.internal:4011/",
       "https://files.telegram.example/",
     ]);
+  });
+
+  it("allows hosted xAI provider fetches through the intercepted provider boundary", async () => {
+    const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
+    const hostedFetch = createCloudflareHostedProviderFetch(
+      "member_123",
+      fetchMock as typeof fetch,
+      {
+        readCurrentLease: () => ({
+          attemptId: "runtime_write_123",
+          leaseGeneration: "7",
+          providerEgressToken: "provider-egress-token-local",
+          userId: "member_123",
+          workspaceVersion: "6",
+        }),
+      },
+    );
+
+    const response = await hostedFetch("https://api.x.ai/v1/responses", {
+      body: "{}",
+      method: "POST",
+    });
+
+    expect(response.status).toBe(204);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const request = requireFetchRequest(fetchMock.mock.calls[0], "xai provider fetch");
+    expect(request.headers.get(HOSTED_RUNNER_BOUND_USER_ID_HEADER)).toBe("member_123");
   });
 
   it("allows configured hosted-local provider fetch URLs through the runner host alias", async () => {
@@ -4126,6 +4156,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
                 detail: { source: "default", value: 5 },
                 humor: { source: "custom", value: 8 },
                 push: { source: "default", value: 3 },
+                unhinged: { source: "default", value: 0 },
               },
             },
           }), {
@@ -4282,6 +4313,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
           detail: { source: "default", value: 5 },
           humor: { source: "custom", value: 8 },
           push: { source: "default", value: 3 },
+          unhinged: { source: "default", value: 0 },
         },
       },
     });

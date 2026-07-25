@@ -20,6 +20,7 @@ import {
   applyCanonicalWriteBatch,
   createExperiment,
   initializeVault,
+  readExperimentLifecycleFrontmatterDocuments,
   repairExperimentMedia,
   validateVault,
   walkVaultFiles,
@@ -112,7 +113,13 @@ test("experiment media repair is dry-run first and copy-verifies before exact li
   assert.equal(repairedMarkdown.includes(legacyRelativePath), false);
   assert.equal(repairedMarkdown.split(capturedMediaPath).length - 1, 2);
   assert.equal((await validateVault({ vaultRoot })).valid, true);
+  // Promotion reclaims the directory it emptied, so nothing is left under the
+  // experiments root for later readers to tolerate.
+  await assert.rejects(readFile(path.dirname(legacyPath), "utf8"), {
+    code: "ENOENT",
+  });
 
+  await mkdir(path.dirname(legacyPath), { recursive: true });
   await writeFile(legacyPath, "legacy-image-bytes", "utf8");
   await writeFile(
     experimentPath,
@@ -128,6 +135,7 @@ test("experiment media repair is dry-run first and copy-verifies before exact li
     canonicalCapturePaths,
   );
 
+  await mkdir(path.dirname(legacyPath), { recursive: true });
   await writeFile(legacyPath, "legacy-image-bytes", "utf8");
   await writeFile(
     experimentPath,
@@ -719,4 +727,54 @@ test("vault validation and supported text writes enforce the direct experiment a
     ),
     true,
   );
+});
+
+test("experiment media repair reclaims the nested directories it empties", async () => {
+  const vaultRoot = await createTempVault();
+  const experiment = await createExperiment({
+    slug: "face-photo-check",
+    title: "Face Photo Check",
+    vaultRoot,
+  });
+
+  // The shape a legacy media folder actually takes: media/<slug>/<date>/.
+  const legacyDirectory =
+    `${VAULT_LAYOUT.experimentsDirectory}/media/face-photo-check/2026-06-26`;
+  const legacyRelativePaths = [
+    `${legacyDirectory}/baseline-front.webp`,
+    `${legacyDirectory}/baseline-left-profile.webp`,
+  ];
+  await mkdir(path.join(vaultRoot, legacyDirectory), { recursive: true });
+  for (const relativePath of legacyRelativePaths) {
+    await writeFile(path.join(vaultRoot, relativePath), relativePath, "utf8");
+  }
+
+  const experimentPath = path.join(vaultRoot, experiment.experiment.relativePath);
+  await writeFile(
+    experimentPath,
+    `${await readFile(experimentPath, "utf8")}\n${
+      legacyRelativePaths.map((relativePath) => `Photo: ${relativePath}`).join("\n")
+    }\n`,
+    "utf8",
+  );
+
+  const applied = await repairExperimentMedia({ apply: true, vaultRoot });
+  assert.equal(applied.mutated, true);
+  assert.equal(applied.deletedFileCount, legacyRelativePaths.length);
+
+  // Every level of the emptied tree is gone, and the experiments root is not.
+  for (const removed of [
+    legacyDirectory,
+    `${VAULT_LAYOUT.experimentsDirectory}/media/face-photo-check`,
+    `${VAULT_LAYOUT.experimentsDirectory}/media`,
+  ]) {
+    await assert.rejects(readFile(path.join(vaultRoot, removed), "utf8"), {
+      code: "ENOENT",
+    });
+  }
+  assert.equal((await validateVault({ vaultRoot })).valid, true);
+
+  // And the lifecycle read the incident broke now succeeds.
+  const lifecycle = await readExperimentLifecycleFrontmatterDocuments({ vaultRoot });
+  assert.deepEqual(lifecycle.items.map((item) => item.slug), ["face-photo-check"]);
 });

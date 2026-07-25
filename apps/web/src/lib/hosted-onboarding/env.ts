@@ -57,6 +57,7 @@ export interface HostedOnboardingEnvironment {
   >;
   stripeSecretKey: string | null;
   stripeWebhookSecret: string | null;
+  telegramBotToken: string | null;
   telegramBotUsername: string | null;
   telegramWebhookSecret: string | null;
 }
@@ -107,6 +108,7 @@ export function readHostedOnboardingEnvironment(
     stripeUsageCreditPriceIdsByOffer: readHostedStripeUsageCreditPriceIdsByOffer(source),
     stripeSecretKey: readEnv(source, "STRIPE_SECRET_KEY"),
     stripeWebhookSecret: readEnv(source, "STRIPE_WEBHOOK_SECRET"),
+    telegramBotToken: readEnv(source, "TELEGRAM_BOT_TOKEN"),
     telegramBotUsername: readHostedTelegramBotUsername(source),
     telegramWebhookSecret: readEnv(source, "TELEGRAM_WEBHOOK_SECRET"),
   };

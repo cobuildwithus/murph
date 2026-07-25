@@ -35,6 +35,7 @@ import {
   requireHostedUsageCreditPurchasePayerMemberId,
   retrieveAndExpireHostedUsageCreditStripeSession,
 } from "./usage-credit-purchase-stripe";
+import { logHostedStripeFailure } from "./stripe-error-log";
 import { getPrisma } from "../prisma";
 
 export async function closeHostedUsageCreditPurchasesForAccountDeletion(input: {
@@ -233,6 +234,11 @@ async function resolveHostedUsageCreditStripeSessionForAccountDeletion(input: {
         input.now.getTime() >= input.purchase.checkoutExpiresAt.getTime() &&
         isDefinitiveHostedUsageCreditStripeRequestRejection(error)
       ) {
+        // Expired-checkout recovery absorbs this rejection, so record it here.
+        logHostedStripeFailure({
+          error,
+          operationName: "checkout.sessions.create.deletion-replay",
+        });
         const matchedSession = await findHostedUsageCreditStripeSessionForExpiredAttempt({
           checkoutRequest,
           purchase: input.purchase,
@@ -243,7 +249,10 @@ async function resolveHostedUsageCreditStripeSessionForAccountDeletion(input: {
         }
         resolvedSessionId = matchedSession.id;
       } else {
-        throw buildHostedUsageCreditStripeUnavailableError(error);
+        throw buildHostedUsageCreditStripeUnavailableError(
+          error,
+          "checkout.sessions.create.deletion-replay",
+        );
       }
     }
     if (replayedSession) {
@@ -297,7 +306,10 @@ async function findHostedUsageCreditStripeSessionForExpiredAttempt(input: {
         ...(startingAfter ? { starting_after: startingAfter } : {}),
       });
     } catch (error) {
-      throw buildHostedUsageCreditStripeUnavailableError(error);
+      throw buildHostedUsageCreditStripeUnavailableError(
+        error,
+        "checkout.sessions.list.deletion-recovery",
+      );
     }
 
     for (const session of page.data) {

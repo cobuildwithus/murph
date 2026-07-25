@@ -65,6 +65,7 @@ export function buildJoinInvitePreviewStatus(
       matchesInvite: true,
     },
     stage: "active",
+    telegramStartRequired: false,
   };
 
   switch (stage) {

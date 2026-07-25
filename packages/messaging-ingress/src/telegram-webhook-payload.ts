@@ -14,6 +14,8 @@ import {
 } from "./internal.ts";
 
 import type {
+  TelegramCallbackQueryLike,
+  TelegramCallbackQueryMessageLike,
   TelegramChat,
   TelegramContact,
   TelegramDirectMessagesTopic,
@@ -106,13 +108,63 @@ export function parseTelegramWebhookUpdate(rawBody: string): TelegramUpdateLike 
   const updateId = requireTelegramInteger(record.update_id, "update_id");
   const message = validateOptionalTelegramMessage(record.message, "message");
   const businessMessage = validateOptionalTelegramMessage(record.business_message, "business_message");
+  const callbackQuery = validateOptionalTelegramCallbackQuery(record.callback_query, "callback_query");
 
   return {
     ...record,
     business_message: businessMessage,
+    callback_query: callbackQuery,
     message,
     update_id: updateId,
   } as TelegramUpdateLike;
+}
+
+function validateOptionalTelegramCallbackQuery(
+  value: unknown,
+  label: string,
+): TelegramCallbackQueryLike | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+
+  const record = requireTelegramRecord(value, label);
+  const id = readOptionalTelegramString(record.id, `${label}.id`);
+
+  if (!id) {
+    throw new TypeError(`${label}.id must be a non-empty string.`);
+  }
+
+  return {
+    ...record,
+    data: readOptionalTelegramString(record.data, `${label}.data`),
+    from: requireTelegramUser(record.from, `${label}.from`),
+    id,
+    inline_message_id: readOptionalTelegramString(
+      record.inline_message_id,
+      `${label}.inline_message_id`,
+    ),
+    message: validateOptionalTelegramCallbackQueryMessage(
+      record.message,
+      `${label}.message`,
+    ),
+  } as TelegramCallbackQueryLike;
+}
+
+function validateOptionalTelegramCallbackQueryMessage(
+  value: unknown,
+  label: string,
+): TelegramCallbackQueryMessageLike | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+
+  const record = requireTelegramRecord(value, label);
+
+  return {
+    ...record,
+    chat: validateTelegramChat(record.chat, `${label}.chat`),
+    message_id: requireTelegramInteger(record.message_id, `${label}.message_id`),
+  } as TelegramCallbackQueryMessageLike;
 }
 
 export function buildTelegramCaptureRawMetadata(input: {
@@ -477,6 +529,16 @@ function validateOptionalTelegramChat(value: unknown, label: string): TelegramCh
   }
 
   return validateTelegramChat(value, label);
+}
+
+function requireTelegramUser(value: unknown, label: string): TelegramUser {
+  const user = validateOptionalTelegramUser(value, label);
+
+  if (!user) {
+    throw new TypeError(`${label} must be an object.`);
+  }
+
+  return user;
 }
 
 function validateOptionalTelegramUser(value: unknown, label: string): TelegramUser | null | undefined {

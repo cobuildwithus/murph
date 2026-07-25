@@ -14,15 +14,19 @@ import { AuthDialog } from "@/src/components/hosted-onboarding/auth-dialog";
 import { requestHostedOnboardingJson } from "@/src/components/hosted-onboarding/client-api";
 import { navigateHostedAuthRedirect } from "@/src/components/hosted-onboarding/hosted-auth-navigation";
 import { groupJoinPermissionsForDisplay } from "@/src/components/hosted-groups/group-join-permission-groups";
+import { MurphContactLink } from "@/src/components/murph/murph-contact-link";
 import { toErrorMessage } from "@/src/components/settings/hosted-settings-sync-helpers";
-import { Button } from "@/src/components/ui/button";
+import { Button, buttonVariants } from "@/src/components/ui/button";
 import {
   buildGroupJoinPostAuthReturnPath,
   type GroupJoinPostJoinDestination,
 } from "@/src/lib/hosted-groups/group-join-handoff";
 import type { HostedConsentStatus } from "@/src/lib/legal/consent";
 import type { HostedPrivyCompletionPayload } from "@/src/lib/hosted-onboarding/types";
+import type { MurphContactOption } from "@/src/lib/murph-contact-routing";
 import { cn } from "@/src/lib/utils";
+
+const GROUP_JOIN_RETURN_LABEL = "Back to Murph";
 
 export interface GroupJoinPermissionDisplay {
   description: string;
@@ -101,9 +105,9 @@ export function GroupJoinAcceptForm(props: {
   groupName: string;
   joinCode: string;
   permissions: readonly GroupJoinPermissionDisplay[];
+  postJoinContactOption: MurphContactOption | null;
   postJoinDestination: GroupJoinPostJoinDestination;
 }) {
-  const router = useRouter();
   const initialSelectedScopeKeys = useMemo(
     () =>
       props.alreadyActiveMember
@@ -174,14 +178,24 @@ export function GroupJoinAcceptForm(props: {
         <p className="text-base font-medium text-foreground">
           {props.alreadyActiveMember ? "Your sharing is updated." : `You're in ${props.groupName}.`}
         </p>
-        <Button
-          type="button"
-          size="xl"
-          onClick={() => router.push(props.postJoinDestination)}
-          className="w-full"
-        >
-          Open Murph
-        </Button>
+        {props.postJoinContactOption ? (
+          <MurphContactLink
+            actionLabel={GROUP_JOIN_RETURN_LABEL}
+            className={buttonVariants({ className: "w-full", size: "xl" })}
+            option={props.postJoinContactOption}
+          >
+            {GROUP_JOIN_RETURN_LABEL}
+          </MurphContactLink>
+        ) : (
+          <Button
+            render={<Link href={props.postJoinDestination} />}
+            nativeButton={false}
+            size="xl"
+            className="w-full"
+          >
+            {GROUP_JOIN_RETURN_LABEL}
+          </Button>
+        )}
       </div>
     );
   }

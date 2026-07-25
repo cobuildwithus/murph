@@ -127,7 +127,6 @@ describe("hosted local shutdown checkpoint conversation-ahead e2e", () => {
     await seedActivatedWorkspaceCheckpoint();
 
     const baselineStatus = await readHostedRunnerStatusWithLogLimit(100);
-    const baselineIdleSnapshotCount = countIdleShutdownSnapshotLogs(baselineStatus);
     const baselineAcceptedRequestCount = requireLinqStub().acceptedSendRequests.length;
     const baselineMessageIdCount = requireLinqStub().listObservedMessageIds(chatId).length;
     const baselineFirstAcceptedCount = requireLinqStub().countAcceptedSends(
@@ -147,7 +146,6 @@ describe("hosted local shutdown checkpoint conversation-ahead e2e", () => {
     requireScenario().queueAssistantResponses([conversationAheadReplyText], {
       matchInputContains: conversationAheadInboundText,
     });
-    await requireScenario().harness.armShutdownCheckpointPublicationBarrierForTest(userId);
 
     const firstWebhookResponse = await postSignedLinqWebhook(
       buildHostedLinqInboundEvent(userId, chatId, {
@@ -171,15 +169,19 @@ describe("hosted local shutdown checkpoint conversation-ahead e2e", () => {
       userId,
     });
     expect(requireLinqStub().readObservedMessageText(firstReply)).toBe(firstReplyText);
-    expect((await readHostedRunnerStatusWithLogLimit(100)).inFlight).toBe(true);
+    const firstReplyStatus = await readHostedRunnerStatusWithLogLimit(100);
+    expect(firstReplyStatus.inFlight).toBe(true);
+    const shutdownBaselineIdleSnapshotCount =
+      countIdleShutdownSnapshotLogs(firstReplyStatus);
 
+    await requireScenario().harness.armShutdownCheckpointPublicationBarrierForTest(userId);
     gracefulStopPromise =
       requireScenario().harness.beginShutdownCheckpointGracefulStopForTest(userId);
     await waitForShutdownCheckpointPublicationBarrier();
     const publicationHeldStatus = await readHostedRunnerStatusWithLogLimit(100);
     const publicationHeldWorkspaceVersion = requireWorkspaceVersion(publicationHeldStatus);
     expect(countIdleShutdownSnapshotLogs(publicationHeldStatus)).toBe(
-      baselineIdleSnapshotCount,
+      shutdownBaselineIdleSnapshotCount,
     );
 
     const conversationAheadWebhookResponse = await postSignedLinqWebhook(
@@ -212,14 +214,14 @@ describe("hosted local shutdown checkpoint conversation-ahead e2e", () => {
     ).resolves.toEqual({ state: "unarmed" });
 
     const committedShutdownStatus = await waitForCommittedShutdownCheckpoint({
-      baselineIdleSnapshotCount,
+      baselineIdleSnapshotCount: shutdownBaselineIdleSnapshotCount,
       publicationHeldWorkspaceVersion,
     });
     expect(isHostedWorkspaceSnapshotV2Ref(
       committedShutdownStatus.workspace?.snapshotRef ?? null,
     )).toBe(true);
     expect(countIdleShutdownSnapshotLogs(committedShutdownStatus)).toBe(
-      baselineIdleSnapshotCount + 1,
+      shutdownBaselineIdleSnapshotCount + 1,
     );
     const committedShutdownSnapshotAtMs = requireLatestIdleShutdownSnapshotAtMs(
       committedShutdownStatus,

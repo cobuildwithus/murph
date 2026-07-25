@@ -24,6 +24,7 @@ import {
   HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON_ENV,
   HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV,
   HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV,
+  HOSTED_RUNTIME_ENV_KEY_NAMES,
   HOSTED_RUNTIME_ENV_PROFILE_KEYS,
   readHostedRuntimeCommitTimeoutConfigValue,
 } from "../src/hosted-runtime/launch-spec.ts";
@@ -708,6 +709,15 @@ test("hosted runtime parsers profile is semantic and forwards no native paths", 
       NODE_ENV: "production",
     },
   );
+});
+
+test("hosted assistant runtime never forwards an xAI base URL override", () => {
+  assert.equal(
+    (HOSTED_RUNTIME_ENV_PROFILE_KEYS.assistant as readonly string[])
+      .includes("XAI_API_BASE_URL"),
+    false,
+  );
+  assert.equal(HOSTED_RUNTIME_ENV_KEY_NAMES.includes("XAI_API_BASE_URL"), false);
 });
 
 test("hosted runtime child env projection is a transport projection of forwarded env only", () => {

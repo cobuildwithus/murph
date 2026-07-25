@@ -256,7 +256,7 @@ Detail is 10/10 or a member explicitly asks this turn for the full rules.
    `murph.group action="read_shared"` exactly once with the exact scoring scope
    and `device-sync-status.v0`. This is the only kickoff attribution, scoring,
    and diagnostic read; it must never become prompt preload or other pre-model
-   work. On an interactive Linq turn, record a returned row's group-scoped
+   work. On an interactive group turn, record a returned row's group-scoped
    `participantId` only when an exact current prompt `Sender:` handle appears
    in that row's `currentTurnHandles`. Do not persist or render a handle. Do not
    attach an id from a matching display name, array position, projection

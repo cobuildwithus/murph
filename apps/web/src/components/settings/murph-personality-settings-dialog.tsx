@@ -3,12 +3,11 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { Loader2Icon, SlidersHorizontalIcon } from "lucide-react";
 import {
-  assistantPersonalitySettingIds,
+  assistantWebPersonalitySettingIds,
   isAssistantPersonalityScore,
   resolveAssistantPersonalityScores,
   type AssistantPersonalityPreferences,
-  type AssistantPersonalityScores,
-  type AssistantPersonalitySettingId,
+  type AssistantWebPersonalitySettingId,
 } from "@murphai/contracts";
 
 import { Button } from "@/src/components/ui/button";
@@ -33,20 +32,23 @@ import { cn } from "@/src/lib/utils";
 
 // The Settings snapshot stores each dial as an explicit score or null (no web
 // choice yet). Null resolves to the shared default for display; it is never
-// persisted back as if the member had chosen it.
+// persisted back as if the member had chosen it. Settings only ever sees the
+// web-visible dials; conversational-only dials never reach this surface.
 export type AssistantPersonalitySnapshot = Record<
-  AssistantPersonalitySettingId,
+  AssistantWebPersonalitySettingId,
   number | null
 >;
+
+type AssistantWebPersonalityScores = Record<AssistantWebPersonalitySettingId, number>;
 
 // Only the dials the member actually moved are submitted, so a web save cannot
 // overwrite a sibling dial changed conversationally in the canonical vault.
 export type AssistantPersonalityDialUpdate = Partial<
-  Record<AssistantPersonalitySettingId, number>
+  Record<AssistantWebPersonalitySettingId, number>
 >;
 
 interface PersonalityDialField {
-  id: AssistantPersonalitySettingId;
+  id: AssistantWebPersonalitySettingId;
   label: string;
   description: string;
   minLabel: string;
@@ -98,11 +100,11 @@ export function MurphPersonalitySettingsDialog({
   const isMobile = useIsMobile();
   // The displayed scores shown when the editor opened seed the draft. Captured
   // once so a later prop change cannot replace a member's in-progress choices.
-  const [initialScores] = useState<AssistantPersonalityScores>(() =>
+  const [initialScores] = useState<AssistantWebPersonalityScores>(() =>
     resolveAssistantPersonalitySnapshotScores(personality),
   );
-  const [scores, setScores] = useState<AssistantPersonalityScores>(initialScores);
-  const [touchedDials, setTouchedDials] = useState<Set<AssistantPersonalitySettingId>>(
+  const [scores, setScores] = useState<AssistantWebPersonalityScores>(initialScores);
+  const [touchedDials, setTouchedDials] = useState<Set<AssistantWebPersonalitySettingId>>(
     () => new Set(),
   );
   const [saving, setSaving] = useState(false);
@@ -122,7 +124,7 @@ export function MurphPersonalitySettingsDialog({
   const requestedDials = collectTouchedDials(scores, touchedDials);
   const dirty = touchedDials.size > 0;
 
-  const handleValueChange = (id: AssistantPersonalitySettingId, value: number) => {
+  const handleValueChange = (id: AssistantWebPersonalitySettingId, value: number) => {
     setScores((current) => ({ ...current, [id]: value }));
     setTouchedDials((current) => {
       if (current.has(id)) {
@@ -365,8 +367,13 @@ function PersonalityDialTicks({ value }: { value: number }) {
 
 export function resolveAssistantPersonalitySnapshotScores(
   snapshot: AssistantPersonalitySnapshot | null | undefined,
-): AssistantPersonalityScores {
-  return resolveAssistantPersonalityScores(snapshotToPreferences(snapshot));
+): AssistantWebPersonalityScores {
+  const resolved = resolveAssistantPersonalityScores(snapshotToPreferences(snapshot));
+  const scores = {} as AssistantWebPersonalityScores;
+  for (const id of assistantWebPersonalitySettingIds) {
+    scores[id] = resolved[id];
+  }
+  return scores;
 }
 
 function snapshotToPreferences(
@@ -376,7 +383,7 @@ function snapshotToPreferences(
   if (!snapshot) {
     return preferences;
   }
-  for (const id of assistantPersonalitySettingIds) {
+  for (const id of assistantWebPersonalitySettingIds) {
     const value = snapshot[id];
     if (isAssistantPersonalityScore(value)) {
       preferences[id] = value;
@@ -386,11 +393,11 @@ function snapshotToPreferences(
 }
 
 function collectTouchedDials(
-  scores: AssistantPersonalityScores,
-  touchedDials: ReadonlySet<AssistantPersonalitySettingId>,
+  scores: AssistantWebPersonalityScores,
+  touchedDials: ReadonlySet<AssistantWebPersonalitySettingId>,
 ): AssistantPersonalityDialUpdate {
   const changed: AssistantPersonalityDialUpdate = {};
-  for (const id of assistantPersonalitySettingIds) {
+  for (const id of assistantWebPersonalitySettingIds) {
     if (touchedDials.has(id)) {
       changed[id] = scores[id];
     }
@@ -430,7 +437,9 @@ function parseAssistantPersonalitySaveResponse(
     push: null,
   };
 
-  for (const id of assistantPersonalitySettingIds) {
+  // Iterate only the web-visible dials so a server response that also carries
+  // the conversational-only unhinged score can never enter client state.
+  for (const id of assistantWebPersonalitySettingIds) {
     const score = value.assistantPersonality[id];
     if (score !== null && !isAssistantPersonalityScore(score)) {
       throw new Error("Assistant personality save returned an invalid response.");

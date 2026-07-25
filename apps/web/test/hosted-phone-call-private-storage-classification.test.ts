@@ -25,6 +25,7 @@ const HOSTED_PHONE_CALL_FIELD_CLASSIFICATION = {
   endedAt: operational("Provider-call lifecycle timestamp; contains no call content."),
   id: operational("Opaque Murph row identity used for authority and AAD."),
   memberId: operational("Opaque member ownership key used for authority and AAD."),
+  originSessionId: operational("Opaque initiating resident-session identity used for exact result binding."),
   provider: operational("Bounded provider discriminator."),
   providerCallId: operational("Opaque provider correlation identity."),
   requestKey: operational("Opaque idempotency identity."),

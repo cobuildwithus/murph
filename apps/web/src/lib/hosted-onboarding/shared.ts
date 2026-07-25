@@ -103,6 +103,10 @@ export function generateHostedVaultShareId(): string {
   return `hbvs_${randomBytes(12).toString("base64url")}`;
 }
 
+export function generateHostedAccountExitReasonId(): string {
+  return `haer_${randomBytes(12).toString("base64url")}`;
+}
+
 export function generateHostedFamilyCheckoutAttemptId(): string {
   return `hbfca_${randomBytes(12).toString("base64url")}`;
 }

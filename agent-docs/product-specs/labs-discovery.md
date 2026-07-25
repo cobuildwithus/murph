@@ -123,4 +123,4 @@ Direct proof covers strict contracts, provider normalization and failures,
 browser-session and signed-callback authorization, Cloudflare transport,
 assistant registration/audience policy/prompt guidance, runtime wiring, and UI
 states. Final UI proof includes authenticated desktop and mobile renders, then
-the required frontend, coverage, Fable, and ReviewGPT reviews.
+the required frontend, coverage, Fable-or-Opus UI, and ReviewGPT reviews.

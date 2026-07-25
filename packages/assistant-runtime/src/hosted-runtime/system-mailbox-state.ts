@@ -339,7 +339,10 @@ export function findNextHostedSystemMailboxQueueItem(input: {
     const item = input.state.pending.find((pending) =>
       systemMailboxItemRouteActionAllowed(pending, input.allowedRouteActions)
     ) ?? null;
-    return item && systemMailboxItemIsDue(item, input.now) ? item : null;
+    return item
+      && systemMailboxItemIsDue(item, input.now)
+      ? item
+      : null;
   }
 
   const blockedRouteActions = new Set<HostedSystemMailboxRouteAction>();
@@ -649,7 +652,9 @@ function findNextHostedSystemMailboxQueueItemsForWake(input: {
     const item = input.state.pending.find((pending) =>
       systemMailboxItemRouteActionAllowed(pending, input.allowedRouteActions)
     ) ?? null;
-    return item ? [item] : [];
+    return item
+      ? [item]
+      : [];
   }
 
   const seenRouteActions = new Set<HostedSystemMailboxRouteAction>();

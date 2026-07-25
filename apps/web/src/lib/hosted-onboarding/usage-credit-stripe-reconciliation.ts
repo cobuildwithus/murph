@@ -281,6 +281,7 @@ async function reconcileDeletedExpiredUsageCreditCheckout(input: {
   }
   const session = await readHostedUsageCreditStripe({
     context: input.context,
+    operationName: "checkout.sessions.retrieve.usage-credit-reconciliation",
     read: (options) =>
       input.context.stripe.checkout.sessions.retrieve(
         sessionId,
@@ -378,6 +379,7 @@ async function resolveHostedUsageCreditStripeEventCandidate(input: {
   const charge = chargeId
     ? await readHostedUsageCreditStripe({
         context: input.context,
+        operationName: "charges.retrieve.usage-credit-reconciliation",
         read: (options) =>
           input.context.stripe.charges.retrieve(chargeId, undefined, options),
       })
@@ -388,6 +390,7 @@ async function resolveHostedUsageCreditStripeEventCandidate(input: {
   const paymentIntent = paymentIntentId
     ? await readHostedUsageCreditStripe({
         context: input.context,
+        operationName: "paymentIntents.retrieve.usage-credit-reconciliation",
         read: (options) =>
           input.context.stripe.paymentIntents.retrieve(
             paymentIntentId,

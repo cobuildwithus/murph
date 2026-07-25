@@ -139,6 +139,7 @@ const hostedRuntimeAssistantPersonalityUpdateSchema = z
     detail: assistantPersonalityScoreSchema.nullable().optional(),
     humor: assistantPersonalityScoreSchema.nullable().optional(),
     push: assistantPersonalityScoreSchema.nullable().optional(),
+    unhinged: assistantPersonalityScoreSchema.nullable().optional(),
   })
   .strict()
   .superRefine((personality, context) => {
@@ -177,6 +178,7 @@ const hostedRuntimeAssistantPersonalitySettingsSchema = z.object({
   detail: hostedRuntimeAssistantPersonalitySettingSnapshotSchema,
   humor: hostedRuntimeAssistantPersonalitySettingSnapshotSchema,
   push: hostedRuntimeAssistantPersonalitySettingSnapshotSchema,
+  unhinged: hostedRuntimeAssistantPersonalitySettingSnapshotSchema,
 }).strict();
 
 const hostedRuntimeAssistantPersonalityUpdateOutcomesSchema = z
@@ -184,6 +186,7 @@ const hostedRuntimeAssistantPersonalityUpdateOutcomesSchema = z
     detail: z.enum(hostedRuntimeAssistantPersonalityUpdateOutcomeValues).optional(),
     humor: z.enum(hostedRuntimeAssistantPersonalityUpdateOutcomeValues).optional(),
     push: z.enum(hostedRuntimeAssistantPersonalityUpdateOutcomeValues).optional(),
+    unhinged: z.enum(hostedRuntimeAssistantPersonalityUpdateOutcomeValues).optional(),
   })
   .strict()
   .superRefine((outcomes, context) => {

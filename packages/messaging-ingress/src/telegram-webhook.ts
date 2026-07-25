@@ -21,6 +21,8 @@ import type {
 } from "./telegram-types.ts";
 
 export type {
+  TelegramCallbackQueryLike,
+  TelegramCallbackQueryMessageLike,
   TelegramChat,
   TelegramContact,
   TelegramDirectMessagesTopic,
@@ -144,7 +146,18 @@ export function serializeTelegramThreadTarget(input: TelegramThreadTarget): stri
   return segments.join(":");
 }
 
-export function buildTelegramThreadTarget(message: TelegramMessageLike): TelegramThreadTarget {
+/**
+ * The fields a thread target is derived from. Both an ordinary message and the
+ * message an inline-keyboard button was attached to carry them, so a callback
+ * resolves to the exact same thread id as the message that advertised the card.
+ */
+export type TelegramThreadTargetSource = Pick<TelegramMessageLike, "chat">
+  & Partial<Pick<
+    TelegramMessageLike,
+    "business_connection_id" | "direct_messages_topic" | "message_thread_id"
+  >>;
+
+export function buildTelegramThreadTarget(message: TelegramThreadTargetSource): TelegramThreadTarget {
   return normalizeTelegramThreadTarget({
     businessConnectionId: normalizeTextValue(message.business_connection_id ?? null),
     chatId: String(message.chat.id),
@@ -155,7 +168,7 @@ export function buildTelegramThreadTarget(message: TelegramMessageLike): Telegra
   });
 }
 
-export function buildTelegramThreadId(message: TelegramMessageLike): string {
+export function buildTelegramThreadId(message: TelegramThreadTargetSource): string {
   return serializeTelegramThreadTarget(buildTelegramThreadTarget(message));
 }
 

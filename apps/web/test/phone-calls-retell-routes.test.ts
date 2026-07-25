@@ -443,7 +443,7 @@ describe("Retell ask_murph route", () => {
     expect(mocks.handleRetellCallAnalyzed).toHaveBeenCalledOnce();
   });
 
-  it("does not wake the runtime when call_analyzed did not append a notification", async () => {
+  it("does not wake the runtime when call_analyzed did not append context", async () => {
     mocks.handleRetellCallAnalyzed.mockResolvedValueOnce({
       notificationMailboxItemId: null,
       notificationUserId: null,

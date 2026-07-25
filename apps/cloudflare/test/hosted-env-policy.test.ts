@@ -233,10 +233,12 @@ describe("buildHostedWorkerSecretsPayload", () => {
       CLOUDFLARE_IMAGES_API_KEY: "cloudflare-images-token",
       OLLAMA_API_KEY: "ollama-secret",
       VERCEL_AI_API_KEY: "vercel-secret",
+      XAI_API_KEY: "xai-secret",
     });
 
     expect(payload.CLOUDFLARE_IMAGES_API_KEY).toBe("cloudflare-images-token");
     expect(payload.ELEVENLABS_API_KEY).toBe("elevenlabs-secret");
+    expect(payload.XAI_API_KEY).toBe("xai-secret");
     expect(payload.OLLAMA_API_KEY).toBeUndefined();
     expect(payload.HOSTED_LOG_FINGERPRINT_SECRET).toBe("log-fingerprint-secret");
     expect(payload.HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET).toBe(
@@ -261,10 +263,12 @@ describe("buildHostedWorkerSecretsPayload", () => {
 describe("isHostedAssistantApiKeyEnvName", () => {
   it("accepts only hosted assistant model authority env names", () => {
     expect(isHostedAssistantApiKeyEnvName("ELEVENLABS_API_KEY")).toBe(false);
+    expect(isHostedAssistantApiKeyEnvName("XAI_API_KEY")).toBe(false);
     expect(isHostedAssistantApiKeyEnvName("OPENAI_API_KEY")).toBe(true);
     expect(isHostedAssistantApiKeyEnvName("VERCEL_AI_API_KEY")).toBe(false);
     expect(isHostedAssistantApiKeyEnvName("STRIPE_SECRET_KEY")).toBe(false);
     expect(HOSTED_ASSISTANT_ALLOWED_API_KEY_ENV_NAMES).not.toContain("ELEVENLABS_API_KEY");
+    expect(HOSTED_ASSISTANT_ALLOWED_API_KEY_ENV_NAMES).not.toContain("XAI_API_KEY");
     expect(HOSTED_ASSISTANT_ALLOWED_API_KEY_ENV_NAMES).toContain("OPENAI_API_KEY");
   });
 });

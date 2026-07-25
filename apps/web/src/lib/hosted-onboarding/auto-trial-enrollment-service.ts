@@ -52,6 +52,10 @@ import {
   writeHostedMemberStripeBillingTx,
 } from "./stripe-billing-policy";
 import type { HostedStripeDispatchContext } from "./stripe-dispatch";
+import {
+  logHostedStripeFailure,
+  withHostedStripeFailureLog,
+} from "./stripe-error-log";
 
 const HOSTED_AUTO_PULSE_TRIAL_MEMBER_LOCK_ACQUISITION_TIMEOUT_MS = 2_000;
 const HOSTED_AUTO_PULSE_TRIAL_RESERVATION_TRANSACTION_TIMEOUT_MS = 15_000;
@@ -717,6 +721,10 @@ async function retrieveHostedAutoPulseTrialFinalizationSubscription(input: {
       HOSTED_AUTO_PULSE_TRIAL_STRIPE_AUTHORITY_REQUEST_OPTIONS,
     );
   } catch (error) {
+    logHostedStripeFailure({
+      error,
+      operationName: "subscription.retrieve.auto-trial-finalization",
+    });
     if (isDefinitiveHostedAutoPulseTrialStripeAuthorityRejection(error)) {
       throw hostedOnboardingError({
         cause: error,
@@ -1012,30 +1020,33 @@ async function createHostedAutoPulseTrialStripeSubscription(input: {
   stripe: Stripe;
   stripeCustomerId: string;
 }): Promise<Stripe.Subscription> {
-  return input.stripe.subscriptions.create({
-    customer: input.stripeCustomerId,
-    items: [
-      {
-        price: input.priceId,
-        quantity: 1,
+  return withHostedStripeFailureLog(
+    "subscription.create.auto-trial",
+    () => input.stripe.subscriptions.create({
+      customer: input.stripeCustomerId,
+      items: [
+        {
+          price: input.priceId,
+          quantity: 1,
+        },
+      ],
+      metadata: input.metadata,
+      trial_period_days: HOSTED_PULSE_TRIAL_DAYS,
+      trial_settings: {
+        end_behavior: {
+          missing_payment_method: "pause",
+        },
       },
-    ],
-    metadata: input.metadata,
-    trial_period_days: HOSTED_PULSE_TRIAL_DAYS,
-    trial_settings: {
-      end_behavior: {
-        missing_payment_method: "pause",
-      },
-    },
-  }, {
-    idempotencyKey: buildHostedAutoPulseTrialSubscriptionIdempotencyKey({
-      memberId: input.memberId,
-      policyVersion: HOSTED_PULSE_TRIAL_POLICY_VERSION,
-      priceId: input.priceId,
-      recoveryScope: input.idempotencyKeyScope,
-      stripeCustomerId: input.stripeCustomerId,
+    }, {
+      idempotencyKey: buildHostedAutoPulseTrialSubscriptionIdempotencyKey({
+        memberId: input.memberId,
+        policyVersion: HOSTED_PULSE_TRIAL_POLICY_VERSION,
+        priceId: input.priceId,
+        recoveryScope: input.idempotencyKeyScope,
+        stripeCustomerId: input.stripeCustomerId,
+      }),
     }),
-  });
+  );
 }
 
 type HostedAutoPulseTrialStripeSubscriptionRecovery = {
@@ -1265,6 +1276,10 @@ async function listHostedAutoPulseTrialStripeSubscriptionsForRecovery(input: {
     if (isHostedOnboardingError(error)) {
       throw error;
     }
+    logHostedStripeFailure({
+      error,
+      operationName: "subscriptions.list.auto-trial-recovery",
+    });
     throw hostedOnboardingError({
       code: "HOSTED_AUTO_PULSE_TRIAL_RECOVERY_LOOKUP_FAILED",
       httpStatus: 502,

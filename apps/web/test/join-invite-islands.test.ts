@@ -636,16 +636,8 @@ test("JoinInviteLegalConsentIsland keeps accepted consent visible while route re
     { requireButton: false },
   );
 
-  const checkboxes = [...container.querySelectorAll('input[type="checkbox"]')] as HTMLInputElement[];
-  expect(checkboxes).toHaveLength(2);
-
-  for (const checkbox of checkboxes) {
-    await act(async () => {
-      setCheckboxChecked(window, checkbox, true);
-    });
-  }
-
-  const continueButton = findButtonByText(container, /Continue/);
+  expect(container.querySelector('input[type="checkbox"]')).toBeNull();
+  const continueButton = findButtonByText(container, /^Consent$/);
 
   await act(async () => {
     continueButton.dispatchEvent(new window.Event("click", { bubbles: true }));
@@ -655,8 +647,8 @@ test("JoinInviteLegalConsentIsland keeps accepted consent visible while route re
     expect(mocks.refresh).toHaveBeenCalledTimes(1);
   });
 
-  expect(container.textContent).toContain("Terms of Service");
-  expect(container.textContent).toContain("Consumer Health Data Notice");
+  expect(container.textContent).toContain("Terms");
+  expect(container.textContent).toContain("Health data");
   expect(container.textContent).toContain("Continuing...");
   expect(continueButton.disabled).toBe(true);
   await cleanup();
@@ -695,6 +687,7 @@ function createStatus(
       matchesInvite: false,
     },
     stage: "verify",
+    telegramStartRequired: false,
     ...overrides,
   };
 }
@@ -781,15 +774,4 @@ function findButtonByText(container: Element, pattern: RegExp): HTMLButtonElemen
   );
   expect(button).toBeTruthy();
   return button as HTMLButtonElement;
-}
-
-function setCheckboxChecked(
-  window: Window & typeof globalThis,
-  input: HTMLInputElement,
-  checked: boolean,
-) {
-  input.checked = checked;
-  input.dispatchEvent(new window.Event("click", { bubbles: true, cancelable: true }));
-  input.dispatchEvent(new window.Event("input", { bubbles: true }));
-  input.dispatchEvent(new window.Event("change", { bubbles: true }));
 }

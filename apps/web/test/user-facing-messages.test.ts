@@ -8,6 +8,17 @@ import {
 
 const USER_FACING_MESSAGE_MIN_VARIANT_COUNT = 20;
 
+/**
+ * The thread notice has room for personality, but every variant still has to
+ * say plainly that Murph has stopped rather than only joking around it.
+ */
+const THREAD_PAUSE_STATED =
+  /paused|out\b|quiet|gone|nothing left|done|no more|zero|dark|silence|tapped|unsupervised|ran? out|time's up/iu;
+
+/** Every group funding ask must point at the room, never at one named payer. */
+const GROUP_FUNDING_ANYONE_PHRASE =
+  /anyone|anybody|any one|any of you|one of you|someone|somebody|whoever|whichever|which of you|one person/iu;
+
 const TEST_TEMPLATE_KEYS = [
   "assistant.signup_welcome",
   "assistant.family_welcome",
@@ -20,6 +31,7 @@ const TEST_TEMPLATE_KEYS = [
   "linq.ai_usage.family_limit_reached",
   "linq.ai_usage.pulse_upgrade_edge",
   "linq.ai_usage.thread_limit_reached",
+  "linq.ai_usage.thread_limit_funding",
 ] as const satisfies readonly UserFacingMessageTemplateKey[];
 
 const TEST_CONTEXT_BY_KEY = {
@@ -46,10 +58,16 @@ const TEST_CONTEXT_BY_KEY = {
   "linq.ai_usage.family_limit_reached": {
     homeUrl: "https://withmurph.ai/home",
   },
+  "linq.ai_usage.billing_inactive": {
+    homeUrl: "https://withmurph.ai/home",
+  },
   "linq.ai_usage.pulse_upgrade_edge": {
     homeUrl: "https://withmurph.ai/home",
   },
   "linq.ai_usage.thread_limit_reached": {},
+  "linq.ai_usage.thread_limit_funding": {
+    fundingUrl: "https://www.withmurph.ai/groups/fund/test-code",
+  },
 } satisfies {
   [K in UserFacingMessageTemplateKey]: UserFacingMessageContextByKey[K];
 };
@@ -104,6 +122,10 @@ describe("user-facing message variants", () => {
     expectEveryVariantContains("linq.ai_usage.trial_conversion_pending", "https://withmurph.ai/home");
     expectEveryVariantContains("linq.ai_usage.trial_limit_reached", "https://withmurph.ai/home");
     expectEveryVariantContains("linq.ai_usage.family_limit_reached", "https://withmurph.ai/home");
+    expectEveryVariantContains(
+      "linq.ai_usage.thread_limit_funding",
+      "https://www.withmurph.ai/groups/fund/test-code",
+    );
   });
 
   it("identifies Murph in every phone signup invite", () => {
@@ -113,7 +135,27 @@ describe("user-facing message variants", () => {
   it("keeps thread allowance copy neutral while explaining the pause", () => {
     for (const text of collectRenderedTexts("linq.ai_usage.thread_limit_reached")) {
       expect(text).not.toMatch(/trial|upgrade|checkout|Edge|Pulse|top[ -]?up|payer|https?:\/\//iu);
-      expect(text).toMatch(/AI usage is paused until .+ allowance resets/iu);
+      expect(text).toMatch(/resets\.$/u);
+    }
+  });
+
+  it("speaks the thread pause as Murph, in first person, to the whole room", () => {
+    for (const text of collectRenderedTexts("linq.ai_usage.thread_limit_reached")) {
+      expect(text).toMatch(/\b(?:I|I'm|I've|me|my)\b/u);
+      // Murph is the one who ran out, so no variant may narrate the chat's
+      // account back at the room in the third person.
+      expect(text).not.toMatch(/(?:^|\.\s)(?:this|the) chat\b/iu);
+      expect(text).not.toMatch(/\bMurph (?:time|usage)\b/iu);
+      expect(text).toMatch(/everyone|everybody|all of you|whole room|whole group/iu);
+      expect(text).not.toMatch(/included|allowance|usage period|monthly amount/iu);
+    }
+  });
+
+  it("asks the room to fund the group only from the delivery-time action copy", () => {
+    for (const text of collectRenderedTexts("linq.ai_usage.thread_limit_funding")) {
+      expect(text).toMatch(GROUP_FUNDING_ANYONE_PHRASE);
+      expect(text).toMatch(/https:\/\/www\.withmurph\.ai\/groups\/fund\/test-code$/u);
+      expect(text).not.toMatch(/trial|upgrade|Edge|Pulse|\$|paid|owner|admin/iu);
     }
   });
 
@@ -149,14 +191,15 @@ describe("user-facing message variants", () => {
       expect(text).not.toMatch(/add usage|top[ -]?up/iu);
     }
 
-    for (const key of [
-      "linq.ai_usage.family_limit_reached",
-      "linq.ai_usage.thread_limit_reached",
-    ] as const) {
-      for (const text of collectRenderedTexts(key)) {
-        expect(text).toMatch(/AI usage is paused until .+ allowance resets/iu);
-        expect(text).not.toMatch(/add usage|top[ -]?up/iu);
-      }
+    for (const text of collectRenderedTexts("linq.ai_usage.family_limit_reached")) {
+      expect(text).toMatch(/AI usage is paused until .+ allowance resets/iu);
+      expect(text).not.toMatch(/add usage|top[ -]?up/iu);
+    }
+
+    for (const text of collectRenderedTexts("linq.ai_usage.thread_limit_reached")) {
+      expect(text).toMatch(THREAD_PAUSE_STATED);
+      expect(text).toMatch(/(?:until|when)\b.*resets/iu);
+      expect(text).not.toMatch(/add usage|top[ -]?up/iu);
     }
   });
 
@@ -193,12 +236,17 @@ describe("user-facing message variants", () => {
       "linq.ai_usage.edge_limit_reached",
       "linq.ai_usage.family_limit_reached",
       "linq.ai_usage.pulse_upgrade_edge",
-      "linq.ai_usage.thread_limit_reached",
     ] as const) {
       for (const text of collectRenderedTexts(key)) {
         expect(text).toMatch(/^.+ \(100% used\)\./u);
         expect(text).not.toMatch(/\$|USD|dollars?|\$\d+(?:\.\d+)?\s*\/\s*\$\d+/iu);
       }
+    }
+
+    // The group notice says the chat is out in plain words, so it carries no
+    // percentage of its own and still never quotes currency.
+    for (const text of collectRenderedTexts("linq.ai_usage.thread_limit_reached")) {
+      expect(text).not.toMatch(/\d+%|\$|USD|dollars?/iu);
     }
   });
 

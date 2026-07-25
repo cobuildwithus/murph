@@ -101,6 +101,7 @@ function buildAssistantPersonalityResult(
       humor: settingResult("humor"),
       push: settingResult("push"),
       detail: settingResult("detail"),
+      unhinged: settingResult("unhinged"),
     },
   }
 }

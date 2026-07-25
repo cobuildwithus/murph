@@ -1001,6 +1001,12 @@ function createHostedMemberIdentityServiceTransaction(): HostedCryptoTestTransac
           input.data.assistantPushCausalSeq === null
             ? null
             : BigInt(input.data.assistantPushCausalSeq),
+        assistantUnhinged: null,
+        assistantUnhingedCausalSeq:
+          input.data.assistantUnhingedCausalSeq === undefined ||
+          input.data.assistantUnhingedCausalSeq === null
+            ? null
+            : BigInt(input.data.assistantUnhingedCausalSeq),
         assistantTone: null,
         assistantToneCausalSeq: null,
         assistantVoice: null,

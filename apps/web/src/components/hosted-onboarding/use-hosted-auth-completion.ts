@@ -51,5 +51,10 @@ export function useHostedAuthCompletion(input: {
     }
   }
 
-  return { completeAuth, completingMethod, errorMessage };
+  function resetCompletion() {
+    setCompletingMethod(null);
+    setErrorMessage(null);
+  }
+
+  return { completeAuth, completingMethod, errorMessage, resetCompletion };
 }

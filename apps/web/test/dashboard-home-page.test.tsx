@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => ({
   getHostedPageAuthSnapshot: vi.fn(),
   readHostedMemberBillingEligibilityState: vi.fn(),
   readHostedAiUsageGate: vi.fn(),
+  readHostedMemberMessagingSetupState: vi.fn(),
   projectHostedPersonalAiUsageStatus: vi.fn(),
   resolveHostedMurphContactOption: vi.fn(),
   routerRefresh: vi.fn(),
@@ -143,6 +144,10 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-billing-store", () => ({
   readHostedMemberBillingEligibilityState: mocks.readHostedMemberBillingEligibilityState,
 }));
 
+vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({
+  readHostedMemberMessagingSetupState: mocks.readHostedMemberMessagingSetupState,
+}));
+
 vi.mock("@/src/lib/hosted-execution/usage-allowance", () => ({
   readHostedAiUsageGate: mocks.readHostedAiUsageGate,
 }));
@@ -178,6 +183,12 @@ beforeEach(() => {
   });
   mocks.shouldShowHomeDeviceSyncStep.mockResolvedValue(true);
   mocks.readHostedMemberBillingEligibilityState.mockResolvedValue(null);
+  // Default to a member Murph can already reach, so the "Message Murph" step
+  // stays hidden unless a test opts into the awaiting-first-message state.
+  mocks.readHostedMemberMessagingSetupState.mockResolvedValue({
+    identity: { phoneLookupKey: "hbidx:phone:v1:member" },
+    routing: null,
+  });
   mocks.resolveHostedMurphContactOption.mockResolvedValue({
     href: "sms:+15555550123",
     kind: "text",
@@ -832,4 +843,45 @@ test("HomePage keeps persona onboarding gated behind the exact initial-visit mar
 
   assert.doesNotMatch(markup, /data-home-initial-visit-persona-picker/);
   assert.equal(mocks.resolveHostedMurphContactOption.mock.calls.length, 0);
+});
+
+test("HomePage asks for the first message when Murph has no way to send one", async () => {
+  // Telegram is linked but no inbound thread exists yet, so Murph cannot open
+  // the conversation and has to ask for it on the dashboard instead.
+  mocks.readHostedMemberMessagingSetupState.mockResolvedValue({
+    identity: { phoneLookupKey: null },
+    routing: {
+      linqChatId: null,
+      pendingLinqChatId: null,
+      pendingLinqParticipantContact: null,
+      telegramThreadId: null,
+      telegramUserId: "456",
+    },
+  });
+
+  const { default: HomePage } = await import("../app/(dashboard)/home/page");
+  const markup = renderToStaticMarkup(await HomePage());
+
+  assert.match(markup, /Message Murph/);
+  assert.match(markup, /Murph can&#x27;t message you first/);
+  assert.ok(markup.indexOf("Message Murph") < markup.indexOf("Connect devices"));
+});
+
+test("HomePage hides the message step once Murph has a way to reach the member", async () => {
+  mocks.readHostedMemberMessagingSetupState.mockResolvedValue({
+    identity: { phoneLookupKey: null },
+    routing: {
+      linqChatId: null,
+      pendingLinqChatId: null,
+      pendingLinqParticipantContact: null,
+      telegramThreadId: "456",
+      telegramUserId: "456",
+    },
+  });
+
+  const { default: HomePage } = await import("../app/(dashboard)/home/page");
+  const markup = renderToStaticMarkup(await HomePage());
+
+  assert.doesNotMatch(markup, /Murph can&#x27;t message you first/);
+  assert.match(markup, /Connect devices/);
 });
