@@ -434,11 +434,14 @@ describe("deleteHostedAccountData", () => {
     });
   });
 
-  it("fails closed while a group-join outreach provider attempt is in flight", async () => {
-    // The provider call happens outside any transaction, so deleting here would
-    // report success while a private text about a just-deleted group is still on
-    // its way. Retry once the attempt terminalizes instead.
+  it("preempts a pending dispatch instead of stranding the deletion", async () => {
+    // `dispatchStartedAt` is never cleared when a retryable failure defers a row,
+    // so treating it as a live call would block deletion indefinitely after the
+    // account was already suspended and its providers revoked. The egress
+    // authority refuses the send once the row is gone, so deletion proceeds.
+    const deleteCalls: HostedAccountDeletionPrismaDeleteCall[] = [];
     const prisma = createHostedAccountDeletionPrismaForTest({
+      deleteCalls,
       groupJoinOutreachPhoneLookupKeys: ["hbidx:phone:v1:participant"],
       groupJoinOutreachRows: [{
         dispatchStartedAt: new Date("2026-07-25T09:00:00.000Z"),
@@ -453,10 +456,10 @@ describe("deleteHostedAccountData", () => {
       memberId: "member_123",
       prisma,
       request: new Request("https://join.example.test/settings"),
-    })).rejects.toMatchObject({
-      code: "ACCOUNT_DELETION_GROUP_JOIN_OUTREACH_DISPATCH_IN_PROGRESS",
-      retryable: true,
-    });
+    })).resolves.toBeDefined();
+
+    expect(deleteCalls.map((call) => call.model))
+      .toContain("hostedGroupJoinOutreach");
   });
 
   it("deletes an owned group's outreach correlation before the group cascade hides it", async () => {

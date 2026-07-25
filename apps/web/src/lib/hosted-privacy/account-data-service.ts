@@ -1106,30 +1106,20 @@ async function deleteHostedGroupJoinOutreachRowsForMembers(
         ...(ownedGroupIds.length > 0 ? [{ groupId: { in: ownedGroupIds } }] : []),
       ],
     },
-    select: { dispatchStartedAt: true, id: true, sentAt: true, skippedAt: true },
+    select: { id: true },
   });
   if (outreaches.length === 0) {
     return { deliveryCount: 0, outreachCount: 0 };
   }
 
-  // A claim can be committed while its provider call is still outside any
-  // transaction. Deleting now would report success while a private text about a
-  // group that no longer exists is still in flight, so fail closed and let the
-  // caller retry once the attempt terminalizes.
-  if (
-    outreaches.some((outreach) =>
-      outreach.dispatchStartedAt !== null
-      && outreach.sentAt === null
-      && outreach.skippedAt === null)
-  ) {
-    throw hostedOnboardingError({
-      code: "ACCOUNT_DELETION_GROUP_JOIN_OUTREACH_DISPATCH_IN_PROGRESS",
-      httpStatus: 503,
-      message: "A group-join outreach provider attempt is in progress. Retry account deletion once that attempt finishes.",
-      retryable: true,
-    });
-  }
-
+  // Deletion preempts any pending dispatch rather than waiting for one. The
+  // existing egress authority already owns that boundary: it refuses the send
+  // when the outreach row is absent, unclaimed, or already terminal, so removing
+  // the row is what stops a later provider call. Blocking here instead would be
+  // strictly worse -- `dispatchStartedAt` is never cleared when a retryable
+  // provider failure defers a row, so a retry-pending outreach would look live
+  // indefinitely and strand this deletion after it has already suspended the
+  // member, revoked providers, and cancelled billing.
   const outreachIds = outreaches.map((outreach) => outreach.id);
   const deliverySourceRefs = outreachIds
     .map((outreachId) => createHostedLinqDeliverySourceRefLookupKey(outreachId))

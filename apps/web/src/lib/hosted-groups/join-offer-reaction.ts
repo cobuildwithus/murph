@@ -110,6 +110,9 @@ export async function handleHostedGroupJoinOfferReaction(input: {
       return skipHostedGroupJoinOfferReaction({ reason: "reaction_removed" });
     }
 
+    const regionSupportedForRemoval = isHostedGroupJoinOutreachSupportedRegion(
+      participantPhoneNumber,
+    );
     try {
       const revoked = await input.prisma.$transaction(async (tx) => {
         const offer = await readHostedGroupJoinOfferTargetTx({
@@ -119,9 +122,7 @@ export async function handleHostedGroupJoinOfferReaction(input: {
           tx,
         });
         return revokeHostedGroupJoinOutreachForRemovedReactionTx({
-          allowMissingRowTombstone: isHostedGroupJoinOutreachSupportedRegion(
-            participantPhoneNumber,
-          ),
+          allowMissingRowTombstone: regionSupportedForRemoval,
           groupId: offer.groupId,
           now: input.event.providerCreatedAt,
           offerId: offer.offerId,
@@ -129,9 +130,19 @@ export async function handleHostedGroupJoinOfferReaction(input: {
           tx,
         });
       }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
-      return revoked.kind === "revoked"
-        ? { status: "accepted", reason: "outreach_revoked" }
-        : skipHostedGroupJoinOfferReaction({ reason: "reaction_removed" });
+      if (revoked.kind === "revoked") {
+        return { status: "accepted", reason: "outreach_revoked" };
+      }
+      // This owner decided a canonical-offer reaction from a refused region, so
+      // the disposition has to be consumable. Reporting a plain
+      // `reaction_removed` would let the webhook fall through and stage this
+      // participant's phone into group-owned reaction context, which is exactly
+      // the group-visible disclosure the feature avoids.
+      return skipHostedGroupJoinOfferReaction({
+        reason: regionSupportedForRemoval
+          ? "reaction_removed"
+          : "recipient_region_unsupported",
+      });
     } catch (error) {
       if (!readHostedGroupJoinOfferTargetSkipReason(error)) {
         throw error;
