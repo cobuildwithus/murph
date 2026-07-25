@@ -28,10 +28,10 @@ import {
 import {
   HOSTED_PULSE_TRIAL_OFFER,
   HOSTED_PULSE_TRIAL_USAGE_LIMIT_USD_MICROS,
-  getHostedAiUsageMonthlyAllowanceForPlan,
   getHostedAiUsageMonthlyAllowanceUsdMicros,
   getHostedBillingPlanCodeForPlan,
   getHostedDefaultBillingPlanCode,
+  getHostedFamilyAiUsageMonthlyAllowanceForPlan,
   parseHostedBillingPlanCode,
   parseHostedBillingPhase,
   parseHostedPlanCode,
@@ -377,7 +377,8 @@ async function readHostedFamilySponsoredBillingRefForMember(input: {
     currentTrialStartedAt: null,
     pulseTrialPolicyVersion: null,
     pulseTrialRedeemedAt: null,
-    usageLimitUsdMicrosOverride: getHostedAiUsageMonthlyAllowanceForPlan(planCode),
+    usageLimitUsdMicrosOverride:
+      getHostedFamilyAiUsageMonthlyAllowanceForPlan(planCode),
   };
 }
 
@@ -1632,10 +1633,18 @@ async function ensureHostedAiUsageAllowancePeriodTx(input: {
 
   const currentBillingPlanCode = parseHostedBillingPlanCode(current.billingPlanCode)
     ?? resolved.billingPlanCode;
-  const periodMatches =
+  const periodIdentityMatches =
     currentBillingPlanCode === resolved.billingPlanCode &&
-    current.limitUsdMicros === resolved.limitUsdMicros &&
     current.periodEnd.getTime() === resolved.periodEnd.getTime();
+  const periodMatches =
+    periodIdentityMatches &&
+    (
+      current.limitUsdMicros === resolved.limitUsdMicros ||
+      shouldPreserveExistingPaidPeriodLimit({
+        currentLimitUsdMicros: current.limitUsdMicros,
+        resolved,
+      })
+    );
 
   if (periodMatches) {
     const blockedAt = resolveHostedAiUsageAllowanceBlockedAt({
@@ -1773,10 +1782,18 @@ async function readHostedAiUsageAllowancePeriodTx(input: {
   if (current) {
     const currentBillingPlanCode = parseHostedBillingPlanCode(current.billingPlanCode)
       ?? resolved.billingPlanCode;
-    const periodMatches =
+    const periodIdentityMatches =
       currentBillingPlanCode === resolved.billingPlanCode &&
-      current.limitUsdMicros === resolved.limitUsdMicros &&
       current.periodEnd.getTime() === resolved.periodEnd.getTime();
+    const periodMatches =
+      periodIdentityMatches &&
+      (
+        current.limitUsdMicros === resolved.limitUsdMicros ||
+        shouldPreserveExistingPaidPeriodLimit({
+          currentLimitUsdMicros: current.limitUsdMicros,
+          resolved,
+        })
+      );
     const limitUsdMicros = periodMatches ? current.limitUsdMicros : resolved.limitUsdMicros;
 
     return {
@@ -1805,6 +1822,23 @@ async function readHostedAiUsageAllowancePeriodTx(input: {
     usageCreditBalanceUsdMicros: input.usageCreditBalanceUsdMicros,
     usageCreditLedgerVersion: input.usageCreditLedgerVersion,
   };
+}
+
+function shouldPreserveExistingPaidPeriodLimit(input: {
+  currentLimitUsdMicros: bigint;
+  resolved: Extract<HostedAiUsageAllowancePeriodResolution, { kind: "period" }>;
+}): boolean {
+  return (
+    (
+      input.resolved.allowanceSource === "direct_paid_member_plan" ||
+      input.resolved.allowanceSource === "family_sponsored_plan"
+    ) &&
+    (
+      input.currentLimitUsdMicros === 10_000_000n ||
+      input.currentLimitUsdMicros === 25_000_000n
+    ) &&
+    input.currentLimitUsdMicros > input.resolved.limitUsdMicros
+  );
 }
 
 async function accountHostedAiUsageAllowancePeriodSpendTx(input: {

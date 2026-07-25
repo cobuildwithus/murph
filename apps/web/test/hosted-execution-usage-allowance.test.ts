@@ -35,6 +35,11 @@ import {
 } from "@/src/lib/hosted-execution/usage-allowance";
 import { buildHostedRetellPhoneCallUsageRecord } from "@/src/lib/hosted-execution/usage-retell";
 
+const DIRECT_PULSE_ALLOWANCE_USD_MICROS = 6_400_000n;
+const DIRECT_EDGE_ALLOWANCE_USD_MICROS = 16_000_000n;
+const FAMILY_PULSE_ALLOWANCE_USD_MICROS = 5_600_000n;
+const FAMILY_EDGE_ALLOWANCE_USD_MICROS = 15_200_000n;
+
 beforeEach(() => {
   usageCreditMocks.settleHostedUsageCreditForUsageTx.mockReset();
   usageCreditMocks.settleHostedUsageCreditForUsageTx.mockImplementation(
@@ -1270,7 +1275,7 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
     const tx = createAllowanceTx({
       executeRaw,
       hostedAiUsageUpdateMany: vi.fn(async () => ({ count: 1 })),
-      spentUsdMicros: 9_999_948n,
+      spentUsdMicros: 6_399_948n,
       usageCreditBalanceUsdMicros: 5_000n,
       usageCreditLedgerVersion: 7n,
     });
@@ -1303,7 +1308,7 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
     const tx = createAllowanceTx({
       executeRaw: vi.fn<AllowanceExecuteRaw>(async () => 1),
       hostedAiUsageUpdateMany: vi.fn(async () => ({ count: 1 })),
-      spentUsdMicros: 9_900_000n,
+      spentUsdMicros: 6_300_000n,
       usageCreditBalanceUsdMicros: 87_500n,
       usageCreditLedgerVersion: 7n,
     });
@@ -1424,7 +1429,7 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
     const tx = createAllowanceTx({
       executeRaw: vi.fn<AllowanceExecuteRaw>(async () => 0),
       hostedAiUsageUpdateMany: vi.fn(async () => ({ count: 1 })),
-      spentUsdMicros: 9_999_948n,
+      spentUsdMicros: 6_399_948n,
       usageCreditBalanceUsdMicros: 5_000n,
       usageCreditLedgerVersion: 7n,
     });
@@ -1455,7 +1460,7 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
     const tx = createAllowanceTx({
       executeRaw: vi.fn<AllowanceExecuteRaw>(async () => 1),
       hostedAiUsageUpdateMany: vi.fn(async () => ({ count: 1 })),
-      spentUsdMicros: 9_999_948n,
+      spentUsdMicros: 6_399_948n,
       usageCreditBalanceUsdMicros: 500n,
       usageCreditLedgerVersion: 4n,
     });
@@ -1505,7 +1510,7 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
     const tx = createAllowanceTx({
       executeRaw: vi.fn<AllowanceExecuteRaw>(async () => 1),
       hostedAiUsageUpdateMany: vi.fn(async () => ({ count: 1 })),
-      spentUsdMicros: 9_999_948n,
+      spentUsdMicros: 6_399_948n,
     });
     const now = new Date("2026-03-29T12:00:05.000Z");
 
@@ -1545,7 +1550,7 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
         blockedAt,
         executeRaw: vi.fn<AllowanceExecuteRaw>(async () => 1),
         hostedAiUsageUpdateMany: vi.fn(async () => ({ count: 1 })),
-        spentUsdMicros: 10_000_000n,
+        spentUsdMicros: DIRECT_PULSE_ALLOWANCE_USD_MICROS,
       });
       return await accountHostedAiUsageForAllowanceTx({
         memberId: "member_123",
@@ -1561,7 +1566,7 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
       blockedAt: null,
       executeRaw: vi.fn<AllowanceExecuteRaw>(async () => 1),
       hostedAiUsageUpdateMany: vi.fn(async () => ({ count: 1 })),
-      spentUsdMicros: 10_000_000n,
+      spentUsdMicros: DIRECT_PULSE_ALLOWANCE_USD_MICROS,
       usageCreditBalanceUsdMicros: 500n,
       usageCreditLedgerVersion: 8n,
     });
@@ -1697,10 +1702,10 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
 
       expect(updateMany).toHaveBeenCalledWith(expect.objectContaining({
         data: expect.objectContaining({
-          allowanceCostUsdMicros: 10_000_000n,
+          allowanceCostUsdMicros: DIRECT_PULSE_ALLOWANCE_USD_MICROS,
           allowanceCounted: true,
           allowancePricingSnapshotJson: expect.objectContaining({
-            blockCostUsdMicros: "10000000",
+            blockCostUsdMicros: "6400000",
             reason: "missing_provider_usage_tokens",
             schema: "murph.hosted-ai-usage-allowance-malformed.v1",
             tokenPricingBasis: "standard",
@@ -1733,10 +1738,10 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
 
       expect(updateMany).toHaveBeenCalledWith(expect.objectContaining({
         data: expect.objectContaining({
-          allowanceCostUsdMicros: 10_000_000n,
+          allowanceCostUsdMicros: DIRECT_PULSE_ALLOWANCE_USD_MICROS,
           allowanceCounted: true,
           allowancePricingSnapshotJson: expect.objectContaining({
-            blockCostUsdMicros: "10000000",
+            blockCostUsdMicros: "6400000",
             reason: "inconsistent_provider_usage_tokens",
             schema: "murph.hosted-ai-usage-allowance-malformed.v1",
           }),
@@ -1763,10 +1768,10 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
 
     expect(updateMany).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({
-        allowanceCostUsdMicros: 10_000_000n,
+        allowanceCostUsdMicros: DIRECT_PULSE_ALLOWANCE_USD_MICROS,
         allowanceCounted: true,
         allowancePricingSnapshotJson: expect.objectContaining({
-          blockCostUsdMicros: "10000000",
+          blockCostUsdMicros: "6400000",
           reason: "missing_provider_usage_tokens",
           schema: "murph.hosted-ai-usage-allowance-malformed.v1",
         }),
@@ -1954,7 +1959,7 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
     expect(tx.hostedAiUsagePeriod.createMany).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({
         billingPlanCode: "launch_monthly",
-        limitUsdMicros: 10_000_000n,
+        limitUsdMicros: FAMILY_PULSE_ALLOWANCE_USD_MICROS,
         memberId: "member_123",
         periodEnd: new Date("2026-05-01T00:00:00.000Z"),
         periodStart: new Date("2026-04-01T00:00:00.000Z"),
@@ -2158,7 +2163,7 @@ describe("reconcileHostedAiUsageAllowancePeriodForMemberTx", () => {
 describe("resolveHostedAiUsageGate", () => {
   it("allows active members while recorded spend is below the period limit", async () => {
     const prisma = createGatePrisma({
-      spentUsdMicros: 9_000_000n,
+      spentUsdMicros: 5_400_000n,
     });
 
     await expect(resolveHostedAiUsageGate({
@@ -2167,15 +2172,15 @@ describe("resolveHostedAiUsageGate", () => {
       prisma: prisma as never,
     })).resolves.toMatchObject({
       allowed: true,
-      limitUsdMicros: 10_000_000n,
+      limitUsdMicros: DIRECT_PULSE_ALLOWANCE_USD_MICROS,
       remainingUsdMicros: 1_000_000n,
-      spentUsdMicros: 9_000_000n,
+      spentUsdMicros: 5_400_000n,
     });
   });
 
   it("blocks active members when the combined allowance reaches zero", async () => {
     const prisma = createGatePrisma({
-      spentUsdMicros: 10_000_000n,
+      spentUsdMicros: DIRECT_PULSE_ALLOWANCE_USD_MICROS,
     });
 
     await expect(resolveHostedAiUsageGate({
@@ -2190,7 +2195,7 @@ describe("resolveHostedAiUsageGate", () => {
       },
       reason: "ai_usage_limit_exceeded",
       retryAfter: new Date("2026-04-01T00:00:00.000Z"),
-      spentUsdMicros: 10_000_000n,
+      spentUsdMicros: DIRECT_PULSE_ALLOWANCE_USD_MICROS,
       usageCreditBalanceUsdMicros: 0n,
       usageCreditLedgerVersion: 0n,
     });
@@ -2206,12 +2211,12 @@ describe("resolveHostedAiUsageGate", () => {
       findUniquePeriod: {
         billingPlanCode: "launch_monthly",
         blockedAt,
-        limitUsdMicros: 10_000_000n,
+        limitUsdMicros: DIRECT_PULSE_ALLOWANCE_USD_MICROS,
         periodEnd: new Date("2026-04-01T00:00:00.000Z"),
         periodStart: new Date("2026-03-01T00:00:00.000Z"),
-        spentUsdMicros: 10_000_000n,
+        spentUsdMicros: DIRECT_PULSE_ALLOWANCE_USD_MICROS,
       },
-      spentUsdMicros: 10_000_000n,
+      spentUsdMicros: DIRECT_PULSE_ALLOWANCE_USD_MICROS,
       update,
       usageCreditBalanceUsdMicros: 2_500_000n,
       usageCreditLedgerVersion: 9n,
@@ -2224,7 +2229,7 @@ describe("resolveHostedAiUsageGate", () => {
     })).resolves.toMatchObject({
       allowed: true,
       remainingUsdMicros: 2_500_000n,
-      spentUsdMicros: 10_000_000n,
+      spentUsdMicros: DIRECT_PULSE_ALLOWANCE_USD_MICROS,
       usageCreditBalanceUsdMicros: 2_500_000n,
       usageCreditLedgerVersion: 9n,
     });
@@ -2237,7 +2242,7 @@ describe("resolveHostedAiUsageGate", () => {
 
   it("adds purchased credit to remaining included capacity", async () => {
     const prisma = createGatePrisma({
-      spentUsdMicros: 9_000_000n,
+      spentUsdMicros: 5_400_000n,
       usageCreditBalanceUsdMicros: 3_000_000n,
       usageCreditLedgerVersion: 6n,
     });
@@ -2268,14 +2273,14 @@ describe("resolveHostedAiUsageGate", () => {
       })),
       findUniquePeriod: {
         billingPlanCode: "launch_monthly",
-        limitUsdMicros: 10_000_000n,
+        limitUsdMicros: DIRECT_PULSE_ALLOWANCE_USD_MICROS,
         periodEnd: nextPeriodEnd,
         periodStart: nextPeriodStart,
         spentUsdMicros: 0n,
       },
       periodEnd: new Date("2026-05-01T00:00:00.000Z"),
       periodStart: new Date("2026-04-01T00:00:00.000Z"),
-      spentUsdMicros: 10_000_000n,
+      spentUsdMicros: DIRECT_PULSE_ALLOWANCE_USD_MICROS,
     });
 
     await expect(resolveHostedAiUsageGate({
@@ -2284,16 +2289,16 @@ describe("resolveHostedAiUsageGate", () => {
       prisma: prisma as never,
     })).resolves.toMatchObject({
       allowed: true,
-      limitUsdMicros: 10_000_000n,
+      limitUsdMicros: DIRECT_PULSE_ALLOWANCE_USD_MICROS,
       periodEnd: nextPeriodEnd,
       periodStart: nextPeriodStart,
-      remainingUsdMicros: 10_000_000n,
+      remainingUsdMicros: DIRECT_PULSE_ALLOWANCE_USD_MICROS,
       spentUsdMicros: 0n,
     });
 
     expect(prisma.hostedAiUsagePeriod.createMany).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({
-        limitUsdMicros: 10_000_000n,
+        limitUsdMicros: DIRECT_PULSE_ALLOWANCE_USD_MICROS,
         memberId: "member_123",
         periodEnd: nextPeriodEnd,
         periodStart: nextPeriodStart,
@@ -2306,8 +2311,8 @@ describe("resolveHostedAiUsageGate", () => {
   it("uses the Edge usage limit notice when an Edge member is over limit", async () => {
     const prisma = createGatePrisma({
       billingPlanCode: "launch_edge_monthly",
-      limitUsdMicros: 25_000_000n,
-      spentUsdMicros: 25_000_000n,
+      limitUsdMicros: DIRECT_EDGE_ALLOWANCE_USD_MICROS,
+      spentUsdMicros: DIRECT_EDGE_ALLOWANCE_USD_MICROS,
     });
 
     await expect(resolveHostedAiUsageGate({
@@ -2326,10 +2331,10 @@ describe("resolveHostedAiUsageGate", () => {
   it("keeps Edge allowance while a Pulse switch is only scheduled locally", async () => {
     const prisma = createGatePrisma({
       billingPlanCode: "launch_edge_monthly",
-      limitUsdMicros: 25_000_000n,
+      limitUsdMicros: DIRECT_EDGE_ALLOWANCE_USD_MICROS,
       scheduledBillingEffectiveAt: new Date("2026-04-01T00:00:00.000Z"),
       scheduledBillingPlanCode: "launch_monthly",
-      spentUsdMicros: 24_000_000n,
+      spentUsdMicros: 15_000_000n,
     });
 
     await expect(resolveHostedAiUsageGate({
@@ -2339,7 +2344,7 @@ describe("resolveHostedAiUsageGate", () => {
     })).resolves.toMatchObject({
       allowed: true,
       billingPlanCode: "launch_edge_monthly",
-      limitUsdMicros: 25_000_000n,
+      limitUsdMicros: DIRECT_EDGE_ALLOWANCE_USD_MICROS,
       remainingUsdMicros: 1_000_000n,
     });
   });
@@ -2347,8 +2352,8 @@ describe("resolveHostedAiUsageGate", () => {
   it("uses Pulse allowance only after subscription reconciliation writes Pulse as current plan", async () => {
     const prisma = createGatePrisma({
       billingPlanCode: "launch_monthly",
-      limitUsdMicros: 10_000_000n,
-      spentUsdMicros: 9_000_000n,
+      limitUsdMicros: DIRECT_PULSE_ALLOWANCE_USD_MICROS,
+      spentUsdMicros: 5_400_000n,
     });
 
     await expect(resolveHostedAiUsageGate({
@@ -2358,7 +2363,7 @@ describe("resolveHostedAiUsageGate", () => {
     })).resolves.toMatchObject({
       allowed: true,
       billingPlanCode: "launch_monthly",
-      limitUsdMicros: 10_000_000n,
+      limitUsdMicros: DIRECT_PULSE_ALLOWANCE_USD_MICROS,
       remainingUsdMicros: 1_000_000n,
     });
   });
@@ -2528,10 +2533,10 @@ describe("resolveHostedAiUsageGate", () => {
     })).resolves.toMatchObject({
       allowed: true,
       billingPlanCode: "launch_monthly",
-      limitUsdMicros: 10_000_000n,
+      limitUsdMicros: FAMILY_PULSE_ALLOWANCE_USD_MICROS,
       periodEnd: new Date("2026-05-01T00:00:00.000Z"),
       periodStart: new Date("2026-04-01T00:00:00.000Z"),
-      remainingUsdMicros: 10_000_000n,
+      remainingUsdMicros: FAMILY_PULSE_ALLOWANCE_USD_MICROS,
       spentUsdMicros: 0n,
     });
     expect(prisma.hostedAiUsagePeriod.createMany).toHaveBeenCalledWith(expect.objectContaining({
@@ -2562,8 +2567,8 @@ describe("resolveHostedAiUsageGate", () => {
     })).resolves.toMatchObject({
       allowed: true,
       billingPlanCode: "launch_edge_monthly",
-      limitUsdMicros: 25_000_000n,
-      remainingUsdMicros: 25_000_000n,
+      limitUsdMicros: FAMILY_EDGE_ALLOWANCE_USD_MICROS,
+      remainingUsdMicros: FAMILY_EDGE_ALLOWANCE_USD_MICROS,
     });
   });
 
@@ -2587,10 +2592,10 @@ describe("resolveHostedAiUsageGate", () => {
       allowed: true,
       allowanceSource: "family_sponsored_plan",
       billingPlanCode: "launch_monthly",
-      limitUsdMicros: 10_000_000n,
+      limitUsdMicros: FAMILY_PULSE_ALLOWANCE_USD_MICROS,
       periodEnd: new Date("2026-05-01T00:00:00.000Z"),
       periodStart: new Date("2026-04-01T00:00:00.000Z"),
-      remainingUsdMicros: 10_000_000n,
+      remainingUsdMicros: FAMILY_PULSE_ALLOWANCE_USD_MICROS,
       spentUsdMicros: 0n,
     });
   });
@@ -2618,10 +2623,10 @@ describe("resolveHostedAiUsageGate", () => {
     })).resolves.toMatchObject({
       allowed: true,
       billingPlanCode: "launch_monthly",
-      limitUsdMicros: 10_000_000n,
+      limitUsdMicros: FAMILY_PULSE_ALLOWANCE_USD_MICROS,
       periodEnd: new Date("2026-05-01T00:00:00.000Z"),
       periodStart: new Date("2026-04-01T00:00:00.000Z"),
-      remainingUsdMicros: 10_000_000n,
+      remainingUsdMicros: FAMILY_PULSE_ALLOWANCE_USD_MICROS,
       spentUsdMicros: 0n,
     });
   });
@@ -2797,31 +2802,22 @@ describe("resolveHostedAiUsageGate", () => {
     })).resolves.toMatchObject({
       allowed: true,
       billingPlanCode: "launch_monthly",
-      limitUsdMicros: 10_000_000n,
+      limitUsdMicros: DIRECT_PULSE_ALLOWANCE_USD_MICROS,
       periodEnd: new Date("2026-05-08T12:00:00.000Z"),
       periodStart: new Date("2026-04-08T12:00:00.000Z"),
-      remainingUsdMicros: 7_000_000n,
+      remainingUsdMicros: 3_400_000n,
       spentUsdMicros: 3_000_000n,
     });
   });
 
-  it("raises the current period limit without lowering spend", async () => {
-    const update = vi.fn(async (args?: unknown) => {
-      void args;
-      return {
+  it("preserves a legacy fixed Edge limit through its current paid period", async () => {
+    const update = vi.fn();
+    const prisma = createGatePrisma({
       billingPlanCode: "launch_edge_monthly",
       limitUsdMicros: 25_000_000n,
       periodEnd: new Date("2026-04-01T00:00:00.000Z"),
       periodStart: new Date("2026-03-01T00:00:00.000Z"),
-      spentUsdMicros: 14_000_000n,
-      };
-    });
-    const prisma = createGatePrisma({
-      billingPlanCode: "launch_edge_monthly",
-      limitUsdMicros: 10_000_000n,
-      periodEnd: new Date("2026-04-01T00:00:00.000Z"),
-      periodStart: new Date("2026-03-01T00:00:00.000Z"),
-      spentUsdMicros: 14_000_000n,
+      spentUsdMicros: 17_000_000n,
       update,
     });
 
@@ -2833,17 +2829,94 @@ describe("resolveHostedAiUsageGate", () => {
       allowed: true,
       billingPlanCode: "launch_edge_monthly",
       limitUsdMicros: 25_000_000n,
-      remainingUsdMicros: 11_000_000n,
+      remainingUsdMicros: 8_000_000n,
+      spentUsdMicros: 17_000_000n,
+    });
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  it("starts the following Edge period with the price-derived allowance", async () => {
+    const periodStart = new Date("2026-04-01T00:00:00.000Z");
+    const periodEnd = new Date("2026-05-01T00:00:00.000Z");
+    const prisma = createGatePrisma({
+      billingPlanCode: "launch_edge_monthly",
+      findUniquePeriod: null,
+      periodEnd,
+      periodStart,
+      spentUsdMicros: 0n,
+    });
+
+    await expect(resolveHostedAiUsageGate({
+      memberId: "member_123",
+      now: "2026-04-01T00:00:00.000Z",
+      prisma: prisma as never,
+    })).resolves.toMatchObject({
+      allowed: true,
+      billingPlanCode: "launch_edge_monthly",
+      limitUsdMicros: DIRECT_EDGE_ALLOWANCE_USD_MICROS,
+      remainingUsdMicros: DIRECT_EDGE_ALLOWANCE_USD_MICROS,
+    });
+    expect(prisma.hostedAiUsagePeriod.createMany).toHaveBeenCalledWith({
+      data: {
+        billingPlanCode: "launch_edge_monthly",
+        limitUsdMicros: DIRECT_EDGE_ALLOWANCE_USD_MICROS,
+        memberId: "member_123",
+        periodEnd,
+        periodStart,
+        spentUsdMicros: 0n,
+      },
+      skipDuplicates: true,
+    });
+  });
+
+  it("still reconciles an actual plan change during the current period", async () => {
+    const update = vi.fn(async (args: {
+      data: {
+        billingPlanCode: string;
+        blockedAt: Date | null;
+        limitUsdMicros: bigint;
+        periodEnd: Date;
+      };
+    }) => ({
+      billingPlanCode: args.data.billingPlanCode,
+      blockedAt: args.data.blockedAt,
+      limitUsdMicros: args.data.limitUsdMicros,
+      periodEnd: args.data.periodEnd,
+      periodStart: new Date("2026-03-01T00:00:00.000Z"),
+      spentUsdMicros: 6_000_000n,
+    }));
+    const prisma = createGatePrisma({
+      billingPlanCode: "launch_edge_monthly",
+      findUniquePeriod: {
+        billingPlanCode: "launch_monthly",
+        limitUsdMicros: DIRECT_PULSE_ALLOWANCE_USD_MICROS,
+        periodEnd: new Date("2026-04-01T00:00:00.000Z"),
+        periodStart: new Date("2026-03-01T00:00:00.000Z"),
+        spentUsdMicros: 6_000_000n,
+      },
+      periodEnd: new Date("2026-04-01T00:00:00.000Z"),
+      periodStart: new Date("2026-03-01T00:00:00.000Z"),
+      spentUsdMicros: 6_000_000n,
+      update,
+    });
+
+    await expect(resolveHostedAiUsageGate({
+      memberId: "member_123",
+      now: "2026-03-29T12:00:00.000Z",
+      prisma: prisma as never,
+    })).resolves.toMatchObject({
+      allowed: true,
+      billingPlanCode: "launch_edge_monthly",
+      limitUsdMicros: DIRECT_EDGE_ALLOWANCE_USD_MICROS,
+      remainingUsdMicros: 10_000_000n,
+      spentUsdMicros: 6_000_000n,
     });
     expect(update).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({
-        blockedAt: null,
-        limitUsdMicros: 25_000_000n,
+        billingPlanCode: "launch_edge_monthly",
+        limitUsdMicros: DIRECT_EDGE_ALLOWANCE_USD_MICROS,
       }),
     }));
-    const updateData = (update.mock.calls[0]?.[0] as { data?: Record<string, unknown> } | undefined)
-      ?.data;
-    expect(updateData).not.toHaveProperty("spentUsdMicros");
   });
 
   it("uses billing-period counter without aggregating historical usage rows", async () => {
@@ -2867,7 +2940,7 @@ describe("resolveHostedAiUsageGate", () => {
       aggregate,
       findUniquePeriod: {
         billingPlanCode: "launch_monthly",
-        limitUsdMicros: 10_000_000n,
+        limitUsdMicros: DIRECT_PULSE_ALLOWANCE_USD_MICROS,
         periodEnd: new Date("2026-05-15T00:00:00.000Z"),
         periodStart: new Date("2026-04-15T00:00:00.000Z"),
         spentUsdMicros: 11_000_000n,
@@ -2931,12 +3004,12 @@ describe("resolveHostedAiUsageGate", () => {
       findUniquePeriod: {
         billingPlanCode: "launch_edge_monthly",
         blockedAt: new Date("2026-04-20T12:00:00.000Z"),
-        limitUsdMicros: 25_000_000n,
+        limitUsdMicros: DIRECT_EDGE_ALLOWANCE_USD_MICROS,
         periodEnd: new Date("2026-05-15T00:00:00.000Z"),
         periodStart: new Date("2026-04-15T00:00:00.000Z"),
         spentUsdMicros: 0n,
       },
-      limitUsdMicros: 25_000_000n,
+      limitUsdMicros: DIRECT_EDGE_ALLOWANCE_USD_MICROS,
       periodEnd: new Date("2026-05-15T00:00:00.000Z"),
       periodStart: new Date("2026-04-15T00:00:00.000Z"),
       spentUsdMicros: 0n,
@@ -2949,8 +3022,8 @@ describe("resolveHostedAiUsageGate", () => {
       prisma: prisma as never,
     })).resolves.toMatchObject({
       allowed: true,
-      limitUsdMicros: 25_000_000n,
-      remainingUsdMicros: 25_000_000n,
+      limitUsdMicros: DIRECT_EDGE_ALLOWANCE_USD_MICROS,
+      remainingUsdMicros: DIRECT_EDGE_ALLOWANCE_USD_MICROS,
       spentUsdMicros: 0n,
     });
 
@@ -2984,12 +3057,12 @@ describe("readHostedAiUsageGate", () => {
       findUniquePeriod: {
         billingPlanCode: "launch_edge_monthly",
         blockedAt: new Date("2026-04-20T12:00:00.000Z"),
-        limitUsdMicros: 25_000_000n,
+        limitUsdMicros: DIRECT_EDGE_ALLOWANCE_USD_MICROS,
         periodEnd: new Date("2026-05-15T00:00:00.000Z"),
         periodStart: new Date("2026-04-15T00:00:00.000Z"),
         spentUsdMicros: 0n,
       },
-      limitUsdMicros: 25_000_000n,
+      limitUsdMicros: DIRECT_EDGE_ALLOWANCE_USD_MICROS,
       periodEnd: new Date("2026-05-15T00:00:00.000Z"),
       periodStart: new Date("2026-04-15T00:00:00.000Z"),
       spentUsdMicros: 0n,
@@ -3001,8 +3074,8 @@ describe("readHostedAiUsageGate", () => {
       prisma: prisma as never,
     })).resolves.toMatchObject({
       allowed: true,
-      limitUsdMicros: 25_000_000n,
-      remainingUsdMicros: 25_000_000n,
+      limitUsdMicros: DIRECT_EDGE_ALLOWANCE_USD_MICROS,
+      remainingUsdMicros: DIRECT_EDGE_ALLOWANCE_USD_MICROS,
       spentUsdMicros: 0n,
     });
 
@@ -3035,10 +3108,10 @@ describe("readHostedAiUsageGate", () => {
     })).resolves.toMatchObject({
       allowed: true,
       billingPlanCode: "launch_monthly",
-      limitUsdMicros: 10_000_000n,
+      limitUsdMicros: FAMILY_PULSE_ALLOWANCE_USD_MICROS,
       periodEnd: new Date("2026-05-01T00:00:00.000Z"),
       periodStart: new Date("2026-04-01T00:00:00.000Z"),
-      remainingUsdMicros: 10_000_000n,
+      remainingUsdMicros: FAMILY_PULSE_ALLOWANCE_USD_MICROS,
       spentUsdMicros: 0n,
     });
 
@@ -3066,10 +3139,10 @@ describe("readHostedAiUsageGate", () => {
     })).resolves.toMatchObject({
       allowed: true,
       billingPlanCode: "launch_edge_monthly",
-      limitUsdMicros: 25_000_000n,
+      limitUsdMicros: DIRECT_EDGE_ALLOWANCE_USD_MICROS,
       periodEnd: new Date("2026-05-08T12:00:00.000Z"),
       periodStart: new Date("2026-04-08T12:00:00.000Z"),
-      remainingUsdMicros: 25_000_000n,
+      remainingUsdMicros: DIRECT_EDGE_ALLOWANCE_USD_MICROS,
       spentUsdMicros: 0n,
     });
 
@@ -3098,10 +3171,10 @@ describe("readHostedAiUsageGate", () => {
     })).resolves.toMatchObject({
       allowed: true,
       billingPlanCode: "launch_monthly",
-      limitUsdMicros: 10_000_000n,
+      limitUsdMicros: FAMILY_PULSE_ALLOWANCE_USD_MICROS,
       periodEnd: new Date("2026-05-01T00:00:00.000Z"),
       periodStart: new Date("2026-04-01T00:00:00.000Z"),
-      remainingUsdMicros: 10_000_000n,
+      remainingUsdMicros: FAMILY_PULSE_ALLOWANCE_USD_MICROS,
       spentUsdMicros: 0n,
     });
   });
@@ -3303,7 +3376,7 @@ describe("readHostedAiUsageGate", () => {
       aggregate,
       findUniquePeriod: {
         billingPlanCode: "launch_monthly",
-        limitUsdMicros: 10_000_000n,
+        limitUsdMicros: DIRECT_PULSE_ALLOWANCE_USD_MICROS,
         periodEnd: new Date("2026-05-15T00:00:00.000Z"),
         periodStart: new Date("2026-04-15T00:00:00.000Z"),
         spentUsdMicros: 5_000_000n,
@@ -3484,8 +3557,8 @@ describe("readHostedAiUsageGateSnapshots", () => {
     expect(increasedSnapshots.get("member_123")).toMatchObject({
       decision: {
         allowed: true,
-        limitUsdMicros: 25_000_000n,
-        remainingUsdMicros: 15_000_000n,
+        limitUsdMicros: DIRECT_EDGE_ALLOWANCE_USD_MICROS,
+        remainingUsdMicros: 6_000_000n,
       },
       periodPersistedAt: periodUpdatedAt,
     });
@@ -3525,7 +3598,7 @@ describe("readHostedAiUsageGateSnapshots", () => {
     expect(decreasedSnapshots.get("member_123")).toMatchObject({
       decision: {
         allowed: false,
-        limitUsdMicros: 10_000_000n,
+        limitUsdMicros: DIRECT_PULSE_ALLOWANCE_USD_MICROS,
         reason: "ai_usage_limit_exceeded",
         remainingUsdMicros: 0n,
       },
@@ -3537,7 +3610,7 @@ describe("readHostedAiUsageGateSnapshots", () => {
 describe("checkHostedAiUsageGate", () => {
   it("serves allow decisions from the read gate without usage-period writes", async () => {
     const prisma = createGatePrisma({
-      spentUsdMicros: 9_000_000n,
+      spentUsdMicros: 5_400_000n,
     });
 
     await expect(checkHostedAiUsageGate({
@@ -3547,7 +3620,7 @@ describe("checkHostedAiUsageGate", () => {
     })).resolves.toMatchObject({
       allowed: true,
       remainingUsdMicros: 1_000_000n,
-      spentUsdMicros: 9_000_000n,
+      spentUsdMicros: 5_400_000n,
     });
 
     expect(prisma.hostedAiUsagePeriod.createMany).not.toHaveBeenCalled();
@@ -3558,7 +3631,7 @@ describe("checkHostedAiUsageGate", () => {
 
   it("confirms exhausted read decisions through the mutating gate", async () => {
     const prisma = createGatePrisma({
-      spentUsdMicros: 10_000_000n,
+      spentUsdMicros: DIRECT_PULSE_ALLOWANCE_USD_MICROS,
     });
     prisma.hostedMember.findUnique = vi.fn(async () => ({
       billingRef: {
@@ -3589,7 +3662,7 @@ describe("checkHostedAiUsageGate", () => {
     })).resolves.toMatchObject({
       allowed: false,
       reason: "ai_usage_limit_exceeded",
-      spentUsdMicros: 10_000_000n,
+      spentUsdMicros: DIRECT_PULSE_ALLOWANCE_USD_MICROS,
     });
 
     expect(prisma.hostedMember.findUnique).toHaveBeenCalledTimes(2);
@@ -3610,7 +3683,7 @@ describe("checkHostedAiUsageGate", () => {
       return undefined;
     });
     const prisma = createGatePrisma({
-      spentUsdMicros: 10_000_000n,
+      spentUsdMicros: DIRECT_PULSE_ALLOWANCE_USD_MICROS,
       update,
     });
     prisma.hostedMember.findUnique = vi.fn(async () => ({
@@ -3641,7 +3714,7 @@ describe("checkHostedAiUsageGate", () => {
     })).resolves.toMatchObject({
       allowed: false,
       reason: "ai_usage_limit_exceeded",
-      spentUsdMicros: 10_000_000n,
+      spentUsdMicros: DIRECT_PULSE_ALLOWANCE_USD_MICROS,
     });
 
     expect(prisma.hostedAiUsagePeriod.createMany).toHaveBeenCalledTimes(1);
@@ -3716,7 +3789,7 @@ function createAllowanceTx(input: {
         billingPlanCode: input.billingPlanCode ?? "launch_monthly",
         blockedAt: input.blockedAt ?? null,
         lastUsageAt: null,
-        limitUsdMicros: input.limitUsdMicros ?? 10_000_000n,
+        limitUsdMicros: input.limitUsdMicros ?? DIRECT_PULSE_ALLOWANCE_USD_MICROS,
         periodEnd: input.periodEnd ?? new Date("2026-04-01T00:00:00.000Z"),
         periodStart: input.periodStart ?? new Date("2026-03-01T00:00:00.000Z"),
         spentUsdMicros: input.spentUsdMicros ?? 0n,
@@ -3731,7 +3804,10 @@ function createAllowanceTx(input: {
       }) => ({
         billingPlanCode: args?.data?.billingPlanCode ?? input.billingPlanCode ?? "launch_monthly",
         blockedAt: args?.data?.blockedAt ?? input.blockedAt ?? null,
-        limitUsdMicros: args?.data?.limitUsdMicros ?? input.limitUsdMicros ?? 10_000_000n,
+        limitUsdMicros:
+          args?.data?.limitUsdMicros
+          ?? input.limitUsdMicros
+          ?? DIRECT_PULSE_ALLOWANCE_USD_MICROS,
         periodEnd: args?.data?.periodEnd ?? input.periodEnd ?? new Date("2026-04-01T00:00:00.000Z"),
         periodStart: input.periodStart ?? new Date("2026-03-01T00:00:00.000Z"),
         spentUsdMicros: input.spentUsdMicros ?? 0n,
@@ -3881,7 +3957,7 @@ function createGatePrisma(input: {
     lastUsageAt: input.spentUsdMicros > 0n
       ? new Date(periodStart.getTime() + 60_000)
       : null,
-    limitUsdMicros: input.limitUsdMicros ?? 10_000_000n,
+    limitUsdMicros: input.limitUsdMicros ?? DIRECT_PULSE_ALLOWANCE_USD_MICROS,
     periodEnd,
     periodStart,
     spentUsdMicros: input.spentUsdMicros,

@@ -1,6 +1,6 @@
 # Hosted Plan Usage And Subscription Actions
 
-Last verified: 2026-07-22
+Last verified: 2026-07-25
 Status: Implemented current-state contract
 
 ## Goal
@@ -83,6 +83,16 @@ internal included allowance value. When included usage is exhausted, Settings
 may explain that Murph will use remaining usage credit without quantifying it.
 The operation that crosses effective capacity may finish, but subsequent
 usage-bearing work blocks and accepted conversation input remains pending.
+
+For paid access, the included monthly usage value is exactly 80% of the
+server-owned recurring amount for that member's billing mode and tier. Direct
+Pulse and Edge therefore include $6.40 and $16.00 from their $8 and $20 prices.
+Family-sponsored Pulse and Edge members separately receive $5.60 and $15.20
+from their $7 and $19 seat prices. Discounts, taxes, prorations, trials, and
+purchased usage credit do not redefine this catalog-owned allowance.
+An already-open paid period keeps a higher included limit that was granted when
+the period began. The price-derived allowance starts on its next paid period;
+an actual plan or Family tier change still reconciles during the current period.
 
 A forecast requires at least 24 hours of counted usage. It is shown only when
 the observed pace projects exhaustion before the current period ends. The
