@@ -1867,6 +1867,39 @@ describe("hosted runtime log store", () => {
     expect(createMany).not.toHaveBeenCalled();
   });
 
+  it("writes nothing when a later batch entry is invalid", async () => {
+    // Normalizing the whole batch before the single write is what removes the
+    // partial-success behaviour the per-entry loop had; a valid prefix must not
+    // reach the database when a later entry is rejected.
+    const createMany = vi.fn(async () => ({ count: 0 }));
+    const create = vi.fn();
+    const prisma = Object.assign(Object.create(null), {
+      hostedRuntimeLog: { create, createMany },
+    }) as Parameters<typeof recordHostedRuntimeLogs>[0]["prisma"];
+
+    await expect(recordHostedRuntimeLogs({
+      entries: [
+        {
+          component: "mailbox",
+          eventCode: "mailbox.imported",
+          level: "info",
+          phase: "import",
+        },
+        {
+          component: "not_a_real_component",
+          eventCode: "mailbox.imported",
+          level: "info",
+          phase: "import",
+        },
+      ],
+      prisma,
+      userId: "member_workspace_1",
+    })).rejects.toThrow(/component/);
+
+    expect(createMany).not.toHaveBeenCalled();
+    expect(create).not.toHaveBeenCalled();
+  });
+
   it("selects the earliest recent same-user accepted-failure log as signal owner", async () => {
     const findFirst = vi.fn<HostedRuntimeLogFindFirst>(async () => ({ id: "runtime_log_prior" }));
     const prisma = Object.assign(Object.create(null), {
