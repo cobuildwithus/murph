@@ -1527,6 +1527,7 @@ model HostedThreadRoute {
   threadLookupKey         String                @map("thread_lookup_key")
   threadIdentityLookupKey String                @map("thread_identity_lookup_key")
   containerMemberId       String                @map("container_member_id")
+  deliveryRouteEncrypted   String?               @map("delivery_route_encrypted")
   pendingParticipantAddition Boolean? @default(false) @map("pending_participant_addition")
   pendingGroupReactionContextEncrypted String? @map("pending_group_reaction_context_encrypted")
   createdAt               DateTime              @default(now()) @map("created_at")

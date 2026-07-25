@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { z } from "zod";
 
 import {
   hostedPhoneCallBriefSchema,
@@ -59,12 +60,19 @@ describe("hosted phone call contracts", () => {
   it("parses the server-owned start request", () => {
     expect(hostedPhoneCallStartRequestSchema.parse({
       brief: VALID_BRIEF,
+      inboundMailboxItemIds: ["mailbox_group_1", "mailbox_group_2"],
       originSessionId: "session_phone_call",
       requestKey: "turn-123:tool-1",
     })).toMatchObject({
+      inboundMailboxItemIds: ["mailbox_group_1", "mailbox_group_2"],
       originSessionId: "session_phone_call",
       requestKey: "turn-123:tool-1",
     });
+    expect(hostedPhoneCallStartRequestSchema.parse({
+      brief: VALID_BRIEF,
+      originSessionId: "session_direct_phone_call",
+      requestKey: "turn-124:tool-1",
+    })).not.toHaveProperty("inboundMailboxItemIds");
   });
 
   it("keeps start responses bounded to transport lifecycle states", () => {
@@ -72,5 +80,71 @@ describe("hosted phone call contracts", () => {
       phoneCallId: "hpc_123",
       status: "calling",
     }).status).toBe("calling");
+  });
+});
+
+// Murph must never dial emergency or crisis dispatch. There is no dedicated
+// emergency policy owner in production: the E.164 shape already makes every
+// two- and three-digit code unrepresentable. These tests are the guarantee.
+// If the accepted phone-number format is ever widened, they fail here rather
+// than letting an automated emergency dial through.
+describe("hosted phone call emergency dialing", () => {
+  const EMERGENCY_AND_CRISIS_CODES = [
+    // Universal / GSM
+    "08", "000", "112", "911", "999",
+    // Europe
+    "15", "17", "18", "113", "115", "117", "118", "144", "155",
+    // Americas, including the US/Canada suicide-and-crisis line
+    "988", "190", "191", "192", "193",
+    // Asia-Pacific
+    "100", "101", "102", "103", "104", "106", "108", "110", "119", "120",
+    "111", "122", "123", "125", "133", "995", "996", "997", "998",
+    // Africa / Middle East
+    "114", "116", "121", "124", "127", "199",
+  ];
+
+  it("cannot represent any emergency or crisis short code", () => {
+    for (const number of EMERGENCY_AND_CRISIS_CODES) {
+      expect(hostedPhoneCallBriefSchema.safeParse({
+        ...VALID_BRIEF,
+        to: { phoneNumber: number },
+      }).success).toBe(false);
+    }
+  });
+
+  it("cannot represent a country-code-prefixed emergency code", () => {
+    for (const number of ["+1911", "+44999", "+61000", "+1988", "+49112"]) {
+      expect(hostedPhoneCallBriefSchema.safeParse({
+        ...VALID_BRIEF,
+        to: { phoneNumber: number },
+      }).success).toBe(false);
+    }
+  });
+
+  // The rejection must come from length, not from anything that could be
+  // confused with a subscriber number. These stay dialable, including the
+  // India mobile whose country code begins with an emergency code's digits.
+  it("still accepts ordinary subscriber numbers", () => {
+    for (const number of [
+      "+12125550123",
+      "+15550000001",
+      "+442071838750",
+      "+911234567890",
+      "+19115550123",
+      "+8613800138000",
+    ]) {
+      expect(hostedPhoneCallBriefSchema.safeParse({
+        ...VALID_BRIEF,
+        to: { phoneNumber: number },
+      }).success).toBe(true);
+    }
+  });
+
+  it("keeps the model-facing tool schema pattern for the dialed number", () => {
+    const serialized = JSON.stringify(
+      z.toJSONSchema(hostedPhoneCallBriefSchema, { io: "input" }),
+    );
+    expect(serialized).toContain("pattern");
+    expect(serialized).toContain("[1-9]");
   });
 });

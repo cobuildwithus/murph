@@ -476,6 +476,13 @@ function cloneAssistantNotificationPayload(
 ): HostedExecutionAssistantNotificationRequestedPayload {
   return {
     ...value,
+    ...(value.externalThreadRouteAuthority === undefined
+      ? {}
+      : {
+          externalThreadRouteAuthority: value.externalThreadRouteAuthority
+            ? cloneExternalThreadRouteAuthority(value.externalThreadRouteAuthority)
+            : null,
+        }),
     ...(value.firstContact === undefined
       ? {}
       : { firstContact: value.firstContact ? { ...value.firstContact } : null }),

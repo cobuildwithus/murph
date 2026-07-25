@@ -6,7 +6,18 @@ import { z } from "zod";
 // response to cross the control-plane boundary.
 export const HOSTED_PHONE_CALL_START_SERVICE_TIMEOUT_MS = 40_000;
 export const HOSTED_PHONE_CALL_START_TRANSPORT_TIMEOUT_MS = 45_000;
+export const HOSTED_PHONE_CALL_INBOUND_MAILBOX_ITEM_IDS_MAX = 32;
 
+// Murph must never dial emergency or crisis dispatch: it is an unattended
+// caller that cannot hold a line, give a location, or stay reachable, so an
+// automated emergency call consumes a dispatcher and can displace a real one.
+//
+// This constraint needs no dedicated policy owner. Every emergency and crisis
+// short code worldwide is two or three digits, and the E.164 shape below
+// requires eight to fifteen, so no such code can reach call admission or the
+// provider. The guarantee is pinned by explicit regression tests over this
+// schema rather than by production machinery, so widening the format in future
+// fails those tests instead of silently permitting an emergency dial.
 const hostedPhoneCallE164PhoneNumberSchema = z
   .string()
   .trim()
@@ -45,6 +56,11 @@ export const hostedPhoneCallBriefSchema = z
 export const hostedPhoneCallStartRequestSchema = z
   .object({
     brief: hostedPhoneCallBriefSchema,
+    inboundMailboxItemIds: z
+      .array(z.string().trim().min(1).max(200))
+      .min(1)
+      .max(HOSTED_PHONE_CALL_INBOUND_MAILBOX_ITEM_IDS_MAX)
+      .optional(),
     originSessionId: z.string().trim().min(1).max(200),
     requestKey: z.string().trim().min(1).max(200),
   })
