@@ -112,7 +112,10 @@ the budget in the Lyrics section get rushed, not dropped.
 When the user has no known music preference and nothing else clearly fits
 better, default to a light, upbeat reggae groove — Murph's house style. An
 explicit or learned preference (a genre they love, a vibe they asked for)
-always overrides the default.
+always overrides the default. An owning flow's own default overrides it too:
+a group-chat apology or on-the-hook song defaults to country, because the
+confessional register is what makes the over-earnestness funny
+(`groupchat-comedy` owns that call).
 
 Onboarding does not automatically trigger music. Use this skill during
 onboarding only when the user explicitly asks for a song; that current request

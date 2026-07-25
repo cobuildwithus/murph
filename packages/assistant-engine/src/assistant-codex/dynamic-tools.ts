@@ -201,6 +201,17 @@ import {
   MURPH_GENERATE_SONG_TOOL,
   parseGenerateSongArguments,
 } from './dynamic-tools/generate-song.js'
+import {
+  executeAskGrokDynamicTool,
+  MURPH_ASK_GROK_TOOL,
+  parseAskGrokArguments,
+} from './dynamic-tools/ask-grok.js'
+import type {
+  AskGrokToolArgs,
+  AskGrokToolRuntime,
+  AskGrokTurnState,
+} from './ask-grok-tool.js'
+export { MURPH_ASK_GROK_TOOL } from './dynamic-tools/ask-grok.js'
 const MURPH_CHARACTER_SHEET_REFERENCE_IMAGE_REF =
   'skill-assets/murph-character-sheet-v1.png'
 const GENERATE_IMAGE_REFERENCE_IMAGE_REFS_DESCRIPTION =
@@ -1138,6 +1149,7 @@ const MURPH_BASE_DYNAMIC_TOOLS = [
   MURPH_GROUP_TOOL,
   MURPH_NEWSLETTER_TOOL,
   MURPH_GENERATE_SONG_TOOL,
+  MURPH_ASK_GROK_TOOL,
   MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL,
   MURPH_SEND_VAULT_FILE_TOOL,
   MURPH_FINISH_WITHOUT_REPLY_TOOL,
@@ -1194,6 +1206,7 @@ export interface MurphDynamicToolAvailability {
   phoneCallsAvailable?: boolean | null
   voiceMemoGenerationAvailable?: boolean | null
   vaultFileSendAvailable?: boolean | null
+  askGrokAvailable?: boolean | null
 }
 
 type AvailabilityPredicate = (
@@ -1232,6 +1245,7 @@ const TOOL_AVAILABILITY: ReadonlyMap<MurphDynamicTool, AvailabilityPredicate> =
     [MURPH_PERSONALIZATION_TOOL, defaultOff((a) => a.personalizationAvailable)],
     [MURPH_GENERATE_VOICE_MEMO_TOOL, defaultOff((a) => a.voiceMemoGenerationAvailable)],
     [MURPH_GENERATE_SONG_TOOL, defaultOff((a) => a.voiceMemoGenerationAvailable)],
+    [MURPH_ASK_GROK_TOOL, defaultOff((a) => a.askGrokAvailable)],
     [MURPH_SEND_VAULT_FILE_TOOL, defaultOff((a) => a.vaultFileSendAvailable)],
     [MURPH_CREATE_PHONE_CALL_TOOL, defaultOff((a) => a.phoneCallsAvailable)],
     ...MURPH_COMPUTER_DYNAMIC_TOOLS.map(
@@ -1893,6 +1907,10 @@ export type MurphDynamicToolRequest =
       args: GenerateSongToolArgs
     }
   | {
+      kind: 'ask-grok'
+      args: AskGrokToolArgs
+    }
+  | {
       kind: 'computer-open'
       args: ComputerOpenToolArgs
     }
@@ -1937,6 +1955,10 @@ export type MurphDynamicToolRequest =
     }
   | {
       kind: 'invalid-generate-song-arguments'
+      validationDigest: SafeToolCallValidationDigest
+    }
+  | {
+      kind: 'invalid-ask-grok-arguments'
       validationDigest: SafeToolCallValidationDigest
     }
   | {
@@ -2191,6 +2213,20 @@ export function readMurphDynamicToolRequest(
 
       return {
         kind: 'generate-song',
+        args: parsed.args,
+      }
+    }
+    case MURPH_ASK_GROK_TOOL.name: {
+      const parsed = parseAskGrokArguments(request.arguments)
+      if (!parsed.ok) {
+        return {
+          kind: 'invalid-ask-grok-arguments',
+          validationDigest: parsed.validationDigest,
+        }
+      }
+
+      return {
+        kind: 'ask-grok',
         args: parsed.args,
       }
     }
@@ -2515,6 +2551,8 @@ export async function executeMurphDynamicToolRequest(input: {
   requireHostedGeneratedImageUploader?: boolean | null
   vaultRoot?: string | null
   voiceMemoRuntime?: VoiceMemoToolRuntime | null
+  askGrokRuntime?: AskGrokToolRuntime | null
+  askGrokTurnState?: AskGrokTurnState | null
 }): Promise<MurphDynamicToolExecutionResult> {
   if (
     isExecutableComputerDynamicToolRequest(input.request) &&
@@ -2545,6 +2583,8 @@ export async function executeMurphDynamicToolRequest(input: {
       return toolTextResult(false, 'invalid voice memo generation arguments')
     case 'invalid-generate-song-arguments':
       return toolTextResult(false, 'invalid song generation arguments')
+    case 'invalid-ask-grok-arguments':
+      return toolTextResult(false, 'invalid ask_grok arguments')
     case 'invalid-progress-arguments':
       return toolTextResult(false, 'invalid progress update arguments')
     case 'invalid-reaction-arguments':
@@ -2761,6 +2801,7 @@ export async function executeMurphDynamicToolRequest(input: {
       try {
         const result = await phoneCalls.start({
           brief: input.request.brief,
+          originSessionId: requestKeyScope.originSessionId,
           requestKey: createPhoneCallRequestKey({
             brief: input.request.brief,
             scope: requestKeyScope,
@@ -2768,13 +2809,18 @@ export async function executeMurphDynamicToolRequest(input: {
         }, {
           signal: input.abortSignal ?? null,
         })
+        const resultContextGuidance =
+          'When the call finishes, Murph messages the member with the result if it is worth sharing; you may tell them you will follow up once you hear back.'
         if (result.status === "calling") {
-          return toolTextResult(true, `phone call accepted or placed: ${result.phoneCallId}`)
+          return toolTextResult(
+            true,
+            `phone call accepted or placed: ${result.phoneCallId}. ${resultContextGuidance}`,
+          )
         }
         return toolTextResult(
           false,
           result.status === "starting"
-            ? `phone call start is still being reconciled: ${result.phoneCallId}`
+            ? `phone call start is still being reconciled: ${result.phoneCallId}. ${resultContextGuidance}`
             : `phone call attempt was unsuccessful: ${result.phoneCallId}`,
         )
       } catch {
@@ -2967,6 +3013,14 @@ export async function executeMurphDynamicToolRequest(input: {
         args: input.request.args,
         currentResponseMedia: input.currentResponseMedia ?? [],
         voiceMemoRuntime: input.voiceMemoRuntime ?? null,
+      })
+    }
+    case 'ask-grok': {
+      return await executeAskGrokDynamicTool({
+        abortSignal: input.abortSignal ?? null,
+        args: input.request.args,
+        askGrokRuntime: input.askGrokRuntime ?? null,
+        askGrokTurnState: input.askGrokTurnState ?? null,
       })
     }
     case 'connected-apps-manage':

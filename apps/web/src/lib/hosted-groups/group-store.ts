@@ -35,10 +35,15 @@ import {
 import { hasHostedRuntimeActiveAccess } from "../hosted-mailbox/runtime-access";
 import {
   createHostedEmailLookupKeyReadCandidates,
-  createHostedLinqMessageLookupKey,
   createHostedPhoneLookupKeyReadCandidates,
   createHostedTelegramUserLookupKeyReadCandidates,
 } from "../hosted-onboarding/contact-privacy";
+import {
+  createHostedGroupOfferMessageLookupKey,
+  readHostedGroupOfferMessageIdSuffix,
+  type HostedGroupOfferChannel,
+  type HostedGroupOfferMessageBinding,
+} from "./offer-message-binding";
 import { assertHostedMemberNotSuspended } from "../hosted-onboarding/entitlement";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import { activeHostedMemberAccessWhere } from "../hosted-onboarding/member-access";
@@ -1259,13 +1264,13 @@ export async function acceptHostedGroupJoinCodeTx(input: {
 
 export async function recordHostedGroupJoinOfferTx(input: {
   groupId: string;
-  messageId: string | null;
+  message: HostedGroupOfferMessageBinding;
   postedAt: Date;
   projectionKinds?: readonly HostedVaultShareProjectionKind[] | null;
   projectionScopes?: readonly HostedVaultShareProjectionScope[] | null;
   tx: Prisma.TransactionClient;
 }): Promise<HostedGroupJoinOfferBindingTxResult> {
-  const messageLookupKey = createHostedLinqMessageLookupKey(input.messageId);
+  const messageLookupKey = createHostedGroupOfferMessageLookupKey(input.message);
   if (!messageLookupKey) {
     throw hostedOnboardingError({
       code: "HOSTED_GROUP_JOIN_OFFER_MESSAGE_ID_REQUIRED",
@@ -1295,7 +1300,7 @@ export async function recordHostedGroupJoinOfferTx(input: {
   }
   const binding = {
     groupId: input.groupId,
-    messageIdSuffix: toHostedOnboardingLogIdSuffix(input.messageId),
+    messageIdSuffix: readHostedGroupOfferMessageIdSuffix(input.message),
     messageLookupKey,
     projectionKinds,
     projectionScopes,
@@ -1399,6 +1404,7 @@ export async function prepareHostedGroupJoinOfferPostTx(input: {
 }
 
 export async function readHostedGroupJoinOfferTargetTx(input: {
+  channel: HostedGroupOfferChannel;
   messageLookupKeyReadCandidates: readonly string[];
   threadIdentityLookupKeyReadCandidates: readonly string[];
   tx: Prisma.TransactionClient;
@@ -1486,7 +1492,7 @@ export async function readHostedGroupJoinOfferTargetTx(input: {
   }
   const route = await input.tx.hostedThreadRoute.findFirst({
     where: {
-      channel: "linq",
+      channel: input.channel,
       containerMemberId: group.runtimeMemberId,
       threadIdentityLookupKey: {
         in: threadIdentityLookupKeyReadCandidates,
@@ -1515,6 +1521,7 @@ export async function readHostedGroupJoinOfferTargetTx(input: {
 }
 
 export async function acceptHostedGroupJoinOfferTx(input: {
+  channel: HostedGroupOfferChannel;
   confirmationPublicBaseUrl?: string | null;
   memberId: string;
   messageLookupKeyReadCandidates: readonly string[];
@@ -1523,6 +1530,7 @@ export async function acceptHostedGroupJoinOfferTx(input: {
   tx: Prisma.TransactionClient;
 }): Promise<HostedGroupJoinOfferAcceptanceTxResult> {
   const offer = await readHostedGroupJoinOfferTargetTx({
+    channel: input.channel,
     messageLookupKeyReadCandidates: input.messageLookupKeyReadCandidates,
     threadIdentityLookupKeyReadCandidates:
       input.threadIdentityLookupKeyReadCandidates,

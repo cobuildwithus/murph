@@ -216,6 +216,7 @@ export interface WorkerEnvironmentContract<
   TELEGRAM_API_BASE_URL?: string;
   TELEGRAM_BOT_TOKEN?: string;
   TELEGRAM_FILE_BASE_URL?: string;
+  XAI_API_KEY?: string;
   HOSTED_WEB_CALLBACK_SIGNING_KEY_ID?: string;
   HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK?: string;
   HOSTED_WEB_BASE_URL?: string;

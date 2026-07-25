@@ -2,7 +2,6 @@ import "server-only";
 
 import type { PrismaClient } from "@prisma/client";
 
-import { isHostedOnboardingError } from "../hosted-onboarding/errors";
 import { lookupHostedMemberIdentityByPhoneNumber } from "../hosted-onboarding/hosted-member-identity-store";
 import { lookupHostedMemberByVerifiedEmailAddress } from "../hosted-onboarding/hosted-member-store";
 import {
@@ -10,44 +9,25 @@ import {
   type ParsedHostedLinqProviderEvent,
 } from "../hosted-onboarding/linq-provider-events";
 import { readActiveHostedMemberAccess } from "../hosted-onboarding/member-access";
-import { logHostedOnboardingDiagnostic } from "../hosted-onboarding/logging";
 import { normalizePhoneNumber } from "../hosted-onboarding/phone";
-import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "../hosted-onboarding/shared";
 import { createHostedExternalThreadIdentityLookupKeyReadCandidates } from "../hosted-onboarding/contact-privacy";
-import { signalHostedRuntimeMaintenanceRuntime } from "../hosted-orchestration/signal-runtime";
-import { resolveHostedPublicBaseUrl } from "../hosted-web/public-url";
 import {
-  enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort,
-} from "./group-newsletter";
-import {
-  materializePendingHostedGroupJoinConfirmationsBestEffort,
-  signalHostedGroupJoinConfirmationRuntimeBestEffort,
-} from "./group-join-confirmation";
-import {
-  acceptHostedGroupDisclosurePermissionReactionTx,
-} from "./group-disclosure-store";
+  acceptHostedGroupOfferAffirmation,
+  type HostedGroupOfferAffirmationKind,
+  type HostedGroupOfferAffirmationSkipReason,
+} from "./group-offer-affirmation";
 import {
   enqueueHostedGroupJoinOutreachTx,
   revokeHostedGroupJoinOutreachForRemovedReactionTx,
 } from "./group-join-outreach-store";
-import {
-  acceptHostedGroupJoinOfferTx,
-  readHostedGroupJoinOfferTargetTx,
-} from "./group-store";
-import {
-  createHostedPostCommitDeadline,
-  readHostedPostCommitRemainingMs,
-  waitForHostedPostCommitOperation,
-} from "../hosted-onboarding/bounded-post-commit";
+import { readHostedGroupJoinOfferTargetTx } from "./group-store";
+import { isHostedOnboardingError } from "../hosted-onboarding/errors";
+import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "../hosted-onboarding/shared";
 
 type HostedGroupJoinOfferReactionSkipReason =
-  | "disclosure_grant_limit_reached"
-  | "launch_consent_missing"
+  | HostedGroupOfferAffirmationSkipReason
   | "member_inactive"
   | "missing_reaction_context"
-  | "no_offer_match"
-  | "offer_revoked"
-  | "not_a_member"
   | "non_phone_handle"
   | "reaction_removed"
   | "unsupported_reaction";
@@ -69,9 +49,13 @@ export async function handleHostedGroupJoinOfferReaction(input: {
       reason: "unsupported_reaction",
     });
   }
-  const isDisclosureConsentReaction = isExactHostedGroupDisclosureLikeReaction(
-    input.event,
-  );
+  // A bare like is ambiguous on Linq: the same gesture accepts a join offer or
+  // a disclosure request, so it may satisfy either card. Every other
+  // affirmative reaction only ever accepts a join offer.
+  const kinds: HostedGroupOfferAffirmationKind[] =
+    isExactHostedGroupDisclosureLikeReaction(input.event)
+      ? ["disclosure", "join"]
+      : ["join"];
   if (
     input.event.eventType !== "reaction.removed"
     && !isHostedLinqAffirmativeReaction({
@@ -100,10 +84,11 @@ export async function handleHostedGroupJoinOfferReaction(input: {
       ? input.event.messageLookupKeyReadCandidates
       : [input.event.messageLookupKey],
   );
-  const threadIdentityLookupKeyReadCandidates = createHostedExternalThreadIdentityLookupKeyReadCandidates({
-    channel: "linq",
-    threadId: input.event.linqChatId,
-  });
+  const threadIdentityLookupKeyReadCandidates =
+    createHostedExternalThreadIdentityLookupKeyReadCandidates({
+      channel: "linq",
+      threadId: input.event.linqChatId,
+    });
 
   const member = await resolveHostedGroupJoinOfferReactionMember({
     handle: input.event.reactionFromHandle,
@@ -111,9 +96,9 @@ export async function handleHostedGroupJoinOfferReaction(input: {
   });
 
   if (input.event.eventType === "reaction.removed") {
-    // Only the pre-member outreach this feature owns is revocable. A member's
+    // Only the pre-member outreach this adapter owns is revocable. A member's
     // removal keeps its previous no-op behavior: their grants are additive and
-    // are not undone by dropping a tapback.
+    // dropping a tapback does not undo them.
     const participantPhoneNumber = member
       ? null
       : readHostedGroupJoinOfferReactionParticipantPhone(
@@ -126,6 +111,7 @@ export async function handleHostedGroupJoinOfferReaction(input: {
     try {
       const revoked = await input.prisma.$transaction(async (tx) => {
         const offer = await readHostedGroupJoinOfferTargetTx({
+          channel: "linq",
           messageLookupKeyReadCandidates,
           threadIdentityLookupKeyReadCandidates,
           tx,
@@ -142,7 +128,7 @@ export async function handleHostedGroupJoinOfferReaction(input: {
         ? { status: "accepted", reason: "outreach_revoked" }
         : skipHostedGroupJoinOfferReaction({ reason: "reaction_removed" });
     } catch (error) {
-      if (!readHostedGroupJoinOfferReactionSkipReason(error)) {
+      if (!readHostedGroupJoinOfferTargetSkipReason(error)) {
         throw error;
       }
       return skipHostedGroupJoinOfferReaction({ reason: "reaction_removed" });
@@ -150,6 +136,8 @@ export async function handleHostedGroupJoinOfferReaction(input: {
   }
 
   if (!member) {
+    // Someone who does not use Murph yet: record durable intent to text them
+    // privately instead of dropping the reaction.
     const participantPhoneNumber = readHostedGroupJoinOfferReactionParticipantPhone(
       input.event.reactionFromHandle,
     );
@@ -160,6 +148,7 @@ export async function handleHostedGroupJoinOfferReaction(input: {
     try {
       await input.prisma.$transaction(async (tx) => {
         const offer = await readHostedGroupJoinOfferTargetTx({
+          channel: "linq",
           messageLookupKeyReadCandidates,
           threadIdentityLookupKeyReadCandidates,
           tx,
@@ -173,7 +162,7 @@ export async function handleHostedGroupJoinOfferReaction(input: {
         });
       }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
     } catch (error) {
-      const reason = readHostedGroupJoinOfferReactionSkipReason(error);
+      const reason = readHostedGroupJoinOfferTargetSkipReason(error);
       if (!reason) {
         throw error;
       }
@@ -190,93 +179,36 @@ export async function handleHostedGroupJoinOfferReaction(input: {
     });
   }
 
-  if (isDisclosureConsentReaction) {
-    const disclosureResult = await input.prisma.$transaction(async (tx) =>
-      acceptHostedGroupDisclosurePermissionReactionTx({
-        memberId: member.id,
-        messageLookupKeyReadCandidates,
-        now: input.event.providerCreatedAt,
-        reactionEventId: input.event.eventId,
-        threadIdentityLookupKeyReadCandidates,
-        tx,
-      }), HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
-    if (disclosureResult.kind === "accepted") {
-      return { status: "accepted", reason: "accepted" };
-    }
-    if (disclosureResult.kind === "not_group_member") {
-      return skipHostedGroupJoinOfferReaction({ reason: "not_a_member" });
-    }
-    if (disclosureResult.kind === "wrong_thread") {
-      return skipHostedGroupJoinOfferReaction({ reason: "no_offer_match" });
-    }
-    if (disclosureResult.kind === "limit_reached") {
-      return skipHostedGroupJoinOfferReaction({
-        reason: "disclosure_grant_limit_reached",
-      });
-    }
-  }
-
-  let result: Awaited<ReturnType<typeof acceptHostedGroupJoinOfferTx>>;
-  try {
-    result = await input.prisma.$transaction(async (tx) =>
-      acceptHostedGroupJoinOfferTx({
-        confirmationPublicBaseUrl: resolveHostedPublicBaseUrl(),
-        memberId: member.id,
-        messageLookupKeyReadCandidates,
-        now: input.event.providerCreatedAt,
-        threadIdentityLookupKeyReadCandidates,
-        tx,
-      }), HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
-  } catch (error) {
-    const reason = readHostedGroupJoinOfferReactionSkipReason(error);
-    if (!reason) {
-      throw error;
-    }
-    return skipHostedGroupJoinOfferReaction({
-      reason,
-    });
-  }
-
-  const postCommitDeadlineMs = createHostedPostCommitDeadline(undefined);
-  if (result.joinConfirmationSignal) {
-    await signalHostedGroupJoinConfirmationRuntimeBestEffort({
-      ...result.joinConfirmationSignal,
-      prisma: input.prisma,
-      ...(input.signal ? { signal: input.signal } : {}),
-      timeoutMs: readHostedPostCommitRemainingMs(postCommitDeadlineMs),
-    });
-  }
-  await materializePendingHostedGroupJoinConfirmationsBestEffort({
+  const result = await acceptHostedGroupOfferAffirmation({
+    affirmationEventId: input.event.eventId,
+    channel: "linq",
+    kinds,
     memberId: member.id,
-    membershipId: result.membershipId,
+    messageLookupKeyReadCandidates,
+    now: input.event.providerCreatedAt,
     prisma: input.prisma,
     ...(input.signal ? { signal: input.signal } : {}),
-    timeoutMs: readHostedPostCommitRemainingMs(postCommitDeadlineMs),
+    threadIdentityLookupKeyReadCandidates,
   });
+  return result.status === "accepted"
+    ? { status: "accepted", reason: "accepted" }
+    : skipHostedGroupJoinOfferReaction({ reason: result.reason });
+}
 
-  if (result.grantedVaultShareProjectionKinds.length > 0) {
-    await runHostedGroupJoinPostCommitBestEffort({
-      deadlineMs: postCommitDeadlineMs,
-      operation: (abortSignal) => signalHostedRuntimeMaintenanceRuntime({
-        abortSignal,
-        userId: member.id,
-      }),
-      signal: input.signal,
-    });
+function readHostedGroupJoinOfferTargetSkipReason(
+  error: unknown,
+): HostedGroupOfferAffirmationSkipReason | null {
+  if (!isHostedOnboardingError(error)) {
+    return null;
   }
-
-  if (result.grantedVaultShareProjectionKinds.includes("group-email.v0")) {
-    await runHostedGroupJoinPostCommitBestEffort({
-      deadlineMs: postCommitDeadlineMs,
-      operation: () => enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort({
-        groupId: result.groupId,
-        memberId: member.id,
-        prisma: input.prisma,
-      }),
-      signal: input.signal,
-    });
+  if (error.code === "HOSTED_GROUP_JOIN_OFFER_REVOKED") {
+    return "offer_revoked";
   }
-  return { status: "accepted", reason: "accepted" };
+  return error.code === "HOSTED_GROUP_JOIN_OFFER_NOT_FOUND"
+    || error.code === "HOSTED_GROUP_NOT_ACTIVE"
+    || error.code === "HOSTED_GROUP_RUNTIME_UNSUPPORTED"
+      ? "no_offer_match"
+      : null;
 }
 
 function readHostedGroupJoinOfferReactionParticipantPhone(
@@ -293,48 +225,10 @@ function isExactHostedGroupDisclosureLikeReaction(
     && event.reactionCustomEmoji === null;
 }
 
-async function runHostedGroupJoinPostCommitBestEffort(input: {
-  deadlineMs: number;
-  operation: (signal: AbortSignal) => Promise<unknown>;
-  signal?: AbortSignal;
-}): Promise<void> {
-  try {
-    await waitForHostedPostCommitOperation({
-      deadlineMs: input.deadlineMs,
-      operation: input.operation,
-      signal: input.signal,
-    });
-  } catch {
-    // The durable join, grants, and mailbox items remain available for a later wake.
-  }
-}
-
 function normalizeLookupKeyCandidates(values: readonly (string | null | undefined)[]): string[] {
   return [...new Set(values
     .map((value) => value?.trim() ?? "")
     .filter((value) => value.length > 0))];
-}
-
-function readHostedGroupJoinOfferReactionSkipReason(
-  error: unknown,
-): HostedGroupJoinOfferReactionSkipReason | null {
-  if (!isHostedOnboardingError(error)) {
-    return null;
-  }
-  if (error.code === "HOSTED_CONSENT_REQUIRED") {
-    return "launch_consent_missing";
-  }
-  if (error.code === "HOSTED_GROUP_JOIN_OFFER_REVOKED") {
-    return "offer_revoked";
-  }
-  if (
-    error.code === "HOSTED_GROUP_JOIN_OFFER_NOT_FOUND"
-    || error.code === "HOSTED_GROUP_NOT_ACTIVE"
-    || error.code === "HOSTED_GROUP_RUNTIME_UNSUPPORTED"
-  ) {
-    return "no_offer_match";
-  }
-  return null;
 }
 
 async function resolveHostedGroupJoinOfferReactionMember(input: {
@@ -361,8 +255,5 @@ async function resolveHostedGroupJoinOfferReactionMember(input: {
 function skipHostedGroupJoinOfferReaction(input: {
   reason: HostedGroupJoinOfferReactionSkipReason;
 }): HostedGroupJoinOfferReactionResult {
-  logHostedOnboardingDiagnostic("hosted-groups.join-offer-reaction-skip", {
-    reason: input.reason,
-  });
   return { status: "ignored", reason: input.reason };
 }

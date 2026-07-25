@@ -14994,6 +14994,7 @@ function createPhaseWorkspace(input: {
 }
 
 function createPhaseInput(input: {
+  acceptedAssistantInputCausalSeq?: string;
   assistantAutomationScheduleChanged?: HostedWorkspaceRuntimeAssistantPhaseInput["assistantAutomationScheduleChanged"];
   foregroundCausalOnly?: boolean;
   clearAssistantAutomationScheduleChanged?: HostedWorkspaceRuntimeAssistantPhaseInput["clearAssistantAutomationScheduleChanged"];
@@ -15031,6 +15032,9 @@ function createPhaseInput(input: {
   >;
   runtimeForwardedEnv?: Record<string, string>;
   runtimeLatencyTraceRequests?: HostedRuntimeLatencyTraceRequest[];
+  runtimePhoneCalls?: NonNullable<
+    HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["phoneCalls"]
+  >;
   runtimeEnv?: Record<string, string>;
   operatorHomeRoot?: string;
   shouldYieldBackgroundMaintenance?: HostedWorkspaceRuntimeAssistantPhaseInput["shouldYieldBackgroundMaintenance"];
@@ -15051,6 +15055,11 @@ function createPhaseInput(input: {
   const assistantInputIds = input.assistantInputIds
     ?? (input.importedCount ? ["ain_00000000000000000000000000000001"] : []);
   return {
+    ...(
+      input.acceptedAssistantInputCausalSeq
+        ? { acceptedAssistantInputCausalSeq: input.acceptedAssistantInputCausalSeq }
+        : {}
+    ),
     assistantAutomationScheduleChanged: input.assistantAutomationScheduleChanged,
     foregroundCausalOnly: input.foregroundCausalOnly,
     clearAssistantAutomationScheduleChanged:
@@ -15188,6 +15197,7 @@ function createPhaseInput(input: {
         ...(input.runtimeLabsToolPort
           ? { labsToolPort: input.runtimeLabsToolPort }
           : {}),
+        ...(input.runtimePhoneCalls ? { phoneCalls: input.runtimePhoneCalls } : {}),
         ...(input.runtimeSubscriptionToolPort
           ? { subscriptionToolPort: input.runtimeSubscriptionToolPort }
           : {}),

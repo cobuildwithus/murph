@@ -246,6 +246,59 @@ describe("hosted local Linq provider stub", () => {
     }
   });
 
+  it("replays an accepted message for the same provider idempotency key", async () => {
+    const stub = await startHostedLocalLinqStub();
+    const expectedPath = "/chats/chat_idempotency_replay/messages";
+    const matchRequest = (request: { body: string }) =>
+      JSON.parse(request.body).message?.parts?.[0]?.value === "accept once";
+
+    try {
+      const firstResponse = await postLinqStubMessage({
+        baseUrl: stub.baseUrl,
+        idempotencyKey: "delivery-idempotency-replay",
+        message: "accept once",
+        path: expectedPath,
+      });
+      expect(firstResponse.status).toBe(200);
+      const acceptedMessageId = stub.requireLatestObservedMessageId(
+        "chat_idempotency_replay",
+      );
+
+      const replayResponse = await postLinqStubMessage({
+        baseUrl: stub.baseUrl,
+        idempotencyKey: "delivery-idempotency-replay",
+        message: "accept once",
+        path: expectedPath,
+      });
+      expect(replayResponse.status).toBe(200);
+
+      expect(stub.countObservedSends(expectedPath, matchRequest)).toBe(2);
+      expect(stub.countAcceptedSends(expectedPath, matchRequest)).toBe(1);
+      expect(stub.listObservedMessageIds("chat_idempotency_replay")).toEqual([
+        acceptedMessageId,
+      ]);
+      await expect(replayResponse.json()).resolves.toMatchObject({
+        message: {
+          id: acceptedMessageId,
+        },
+      });
+
+      const conflictingReplayResponse = await postLinqStubMessage({
+        baseUrl: stub.baseUrl,
+        idempotencyKey: "delivery-idempotency-replay",
+        message: "conflicting payload",
+        path: expectedPath,
+      });
+      expect(conflictingReplayResponse.status).toBe(409);
+      expect(stub.countAcceptedSends(expectedPath)).toBe(1);
+      expect(stub.listObservedMessageIds("chat_idempotency_replay")).toEqual([
+        acceptedMessageId,
+      ]);
+    } finally {
+      await stub.stop();
+    }
+  });
+
   it("overrides canonical chat classification without changing inbound webhook fixtures", async () => {
     const stub = await startHostedLocalLinqStub();
 

@@ -153,6 +153,7 @@ import {
   resolveHostedSystemMailboxNextWakeCandidate,
   type HostedSystemMailboxCheckpointPreparation,
   type HostedSystemMailboxPendingItem,
+  type HostedSystemMailboxRouteAction,
 } from "./system-mailbox.ts";
 import type {
   HostedAssistantLinqDeliveryContext,
@@ -1593,7 +1594,8 @@ export async function runHostedWorkspaceAssistantPhase(
     const memberPreferencesPrePlanningStartedAt = Date.now();
     const memberPreferencesPrePlanning =
       hasFreshConversationInput
-        ? await runPrePlanningMemberPreferencesMailboxPhase({
+        ? await runPrePlanningSystemMailboxPhase({
+          allowedRouteActions: HOSTED_MEMBER_PREFERENCE_PRE_PLANNING_ROUTE_ACTIONS,
           executionContext,
           input,
         })
@@ -3847,7 +3849,8 @@ function buildPreAutomationLaneSkippedAssistantWakeResult(input: {
   };
 }
 
-async function runPrePlanningMemberPreferencesMailboxPhase(input: {
+async function runPrePlanningSystemMailboxPhase(input: {
+  allowedRouteActions: readonly HostedSystemMailboxRouteAction[];
   executionContext: AssistantExecutionContext;
   input: HostedWorkspaceRuntimeAssistantPhaseInput;
 }): Promise<{
@@ -3862,7 +3865,7 @@ async function runPrePlanningMemberPreferencesMailboxPhase(input: {
     assertHostedAssistantPhaseLiveness(input.input.signal);
     const now = new Date(resolveHostedAssistantPhaseNowMs(input.input)).toISOString();
     const pendingWake = await resolveHostedSystemMailboxNextWakeCandidate({
-      allowedRouteActions: HOSTED_MEMBER_PREFERENCE_PRE_PLANNING_ROUTE_ACTIONS,
+      allowedRouteActions: input.allowedRouteActions,
       now: () => now,
       vaultRoot: input.input.restored.vaultRoot,
     });
@@ -3890,7 +3893,7 @@ async function runPrePlanningMemberPreferencesMailboxPhase(input: {
     }
 
     const preparation = await prepareHostedSystemMailboxItemForCheckpoint({
-      allowedRouteActions: HOSTED_MEMBER_PREFERENCE_PRE_PLANNING_ROUTE_ACTIONS,
+      allowedRouteActions: input.allowedRouteActions,
       executionContext: input.executionContext,
       now: () => now,
       operatorHomeRoot: input.input.restored.operatorHomeRoot,
@@ -3932,7 +3935,7 @@ async function runPrePlanningMemberPreferencesMailboxPhase(input: {
 
   const now = new Date(resolveHostedAssistantPhaseNowMs(input.input)).toISOString();
   const pendingWake = await resolveHostedSystemMailboxNextWakeCandidate({
-    allowedRouteActions: HOSTED_MEMBER_PREFERENCE_PRE_PLANNING_ROUTE_ACTIONS,
+    allowedRouteActions: input.allowedRouteActions,
     now: () => now,
     vaultRoot: input.input.restored.vaultRoot,
   });
@@ -4221,7 +4224,8 @@ async function runSystemMailboxMaintenancePhase(input: {
         continueAssistantLane: true,
         result: null,
       }
-    : await runPrePlanningMemberPreferencesMailboxPhase({
+    : await runPrePlanningSystemMailboxPhase({
+        allowedRouteActions: HOSTED_MEMBER_PREFERENCE_PRE_PLANNING_ROUTE_ACTIONS,
         executionContext: input.executionContext,
         input: phaseInput,
       });

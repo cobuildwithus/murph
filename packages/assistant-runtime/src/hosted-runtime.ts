@@ -1845,7 +1845,9 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                   ...runtimeEnv,
                   ...(confirmedAssistantTargetEnv ?? {}),
                 },
-                beforeProviderAcceptedInputs: async ({ acceptedInputs }) => {
+                beforeProviderAcceptedInputs: async ({
+                  acceptedInputs,
+                }) => {
                   const acceptedInputsOnlyAssistant = acceptedInputs.every(
                     (acceptedInput) => acceptedInput.source === "assistant-input",
                   );

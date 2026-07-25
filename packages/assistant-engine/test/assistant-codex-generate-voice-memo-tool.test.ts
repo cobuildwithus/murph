@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import { ELEVENLABS_TTS_MAX_TEXT_LENGTH } from '@murphai/operator-config/elevenlabs-runtime'
+
 import {
   executeMurphDynamicToolRequest,
   readMurphDynamicToolRequest,
@@ -233,7 +235,8 @@ describe('executeGenerateVoiceMemoTool', () => {
     expect(fetchImpl).toHaveBeenCalledTimes(3)
   })
 
-  it('reports ElevenLabs provider failures without attempting Linq upload', async () => {
+  it('reports the ElevenLabs status in the tool result and the runtime log', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const fetchImpl = vi.fn<typeof fetch>(async (input) => {
       const url = String(input)
       if (url.startsWith('https://api.elevenlabs.io/')) {
@@ -257,9 +260,72 @@ describe('executeGenerateVoiceMemoTool', () => {
       }),
     ).resolves.toEqual({
       rpcSuccess: false,
-      rpcText: 'voice memo generation failed',
+      rpcText: expect.stringMatching(
+        /^voice memo generation failed: ELEVENLABS_API_REQUEST_FAILED \(http 503, \d+ms\)$/,
+      ),
     })
     expect(fetchImpl).toHaveBeenCalledTimes(1)
+    expect(warn).toHaveBeenCalledWith(
+      'Assistant voice memo generation failed.',
+      expect.objectContaining({
+        failure: expect.stringContaining('http 503'),
+      }),
+    )
+  })
+
+  it('names the transport stage when no ElevenLabs response arrives', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const fetchImpl = vi.fn<typeof fetch>(async (input) => {
+      const url = String(input)
+      if (url.startsWith('https://api.elevenlabs.io/')) {
+        throw new TypeError('fetch failed')
+      }
+
+      throw new Error(`Unexpected request: ${url}`)
+    })
+
+    const result = await executeGenerateVoiceMemoTool({
+      args: {
+        text: 'Send a short reminder.',
+        voiceId: null,
+      },
+      runtime: createRuntime({
+        ELEVENLABS_API_KEY: 'elevenlabs-key',
+        LINQ_API_TOKEN: 'linq-token',
+        MURPH_ELEVENLABS_VOICE_ID: 'voice_murph',
+      }, fetchImpl, 'linq'),
+    })
+
+    // The incident this replaces reported a bare "voice memo generation failed"
+    // for every cause, so a transport death had to stay distinguishable from an
+    // HTTP rejection in the text the model reads back.
+    expect(result.rpcSuccess).toBe(false)
+    expect(result.rpcText).toContain('stage=transport')
+    expect(result.rpcText).toContain('TypeError')
+    expect(result.rpcText).not.toContain('http ')
+  })
+
+  it('rejects text longer than one voice memo can synthesize in time', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const fetchImpl = vi.fn<typeof fetch>()
+
+    await expect(
+      executeGenerateVoiceMemoTool({
+        args: {
+          text: 'a'.repeat(ELEVENLABS_TTS_MAX_TEXT_LENGTH + 1),
+          voiceId: null,
+        },
+        runtime: createRuntime({
+          ELEVENLABS_API_KEY: 'elevenlabs-key',
+          LINQ_API_TOKEN: 'linq-token',
+          MURPH_ELEVENLABS_VOICE_ID: 'voice_murph',
+        }, fetchImpl, 'linq'),
+      }),
+    ).resolves.toMatchObject({
+      rpcSuccess: false,
+      rpcText: expect.stringContaining('ELEVENLABS_INVALID_INPUT'),
+    })
+    expect(fetchImpl).not.toHaveBeenCalled()
   })
 
   it('rejects oversized generated audio before creating a Linq attachment', async () => {
@@ -501,6 +567,7 @@ describe('executeGenerateVoiceMemoTool', () => {
   })
 
   it('rejects private Linq upload URLs before uploading generated audio', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
     const fetchImpl = vi.fn<typeof fetch>(async (input) => {
       const url = String(input)
       if (url.startsWith('https://api.elevenlabs.io/')) {
@@ -541,7 +608,9 @@ describe('executeGenerateVoiceMemoTool', () => {
 
     expect(result).toMatchObject({
       rpcSuccess: false,
-      rpcText: 'voice memo generated but Linq attachment upload failed',
+      rpcText: expect.stringMatching(
+        /^voice memo generated but Linq attachment upload failed: LINQ_[A-Z_]+/,
+      ),
     })
     expect(result).not.toHaveProperty('usageDraft')
     expect(fetchImpl).toHaveBeenCalledTimes(2)

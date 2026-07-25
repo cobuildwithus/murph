@@ -2584,7 +2584,9 @@ test('sendAssistantMessageLocal binds accepted inputs before provider execution'
         },
       ],
     },
-    beforeProviderAcceptedInputs: async ({ acceptedInputs }) => {
+    beforeProviderAcceptedInputs: async ({
+      acceptedInputs,
+    }) => {
       assert.deepEqual(acceptedInputs.map((item) => item.id), ['turn-default'])
       callOrder.push('accepted-inputs')
     },
@@ -7576,6 +7578,7 @@ async function loadLocalServiceModule(input?: {
     } | null
   }
   session?: AssistantSession
+  sessionCreated?: boolean
   transcriptEntries?: Array<{
     createdAt?: string | null
   }>
@@ -7955,7 +7958,7 @@ async function loadLocalServiceModule(input?: {
     ),
     resolveAssistantSession: vi.fn(),
     resolveAssistantMessageSession: vi.fn(async () => ({
-      created: false,
+      created: input?.sessionCreated === true,
       session,
     })),
     resolveAssistantOperatorDefaults: vi.fn(async () => ({
