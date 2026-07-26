@@ -219,6 +219,11 @@ const RENAMED_GROUP_SUMMARY = {
 };
 const SLEEP_SCOPE = { projectionKind: "sleep-times.v0" } as const;
 const SLEEP_DURATION_SCOPE = { projectionKind: "sleep-duration-days.v0" } as const;
+const DEEP_SLEEP_SCOPE = { projectionKind: "deep-sleep-days.v0" } as const;
+const REM_SLEEP_SCOPE = { projectionKind: "rem-sleep-days.v0" } as const;
+const WORKOUTS_SCOPE = {
+  projectionKind: "workouts.v0",
+} as const;
 const PROTEIN_SCOPE = { projectionKind: "protein-days.v0" } as const;
 const RUNNING_SCOPE = buildHostedVaultShareActivityMinutesProjectionScope({
   activityKind: "running",
@@ -1435,10 +1440,14 @@ describe("hosted group join policy", () => {
     }).requestedVaultShareProjectionKinds).toEqual([]);
 
     expect(projectHostedVaultShareProjectionDisplays([
+      { projectionKind: "time-zone.v0" },
       { projectionKind: "group-email.v0" },
       { projectionKind: "sleep-times.v0" },
       SLEEP_DURATION_SCOPE,
+      DEEP_SLEEP_SCOPE,
+      REM_SLEEP_SCOPE,
       { projectionKind: "activity-days.v0" },
+      WORKOUTS_SCOPE,
       RUNNING_SCOPE,
       RUNNING_DISTANCE_SCOPE,
       RUNNING_SESSION_COUNT_SCOPE,
@@ -1458,6 +1467,14 @@ describe("hosted group join policy", () => {
         projectionScopeKey: "group-email.v0",
       },
       {
+        description:
+          "Shares your current time-zone name as optional group context. It does not determine score dates or prove your exact location.",
+        label: "Time zone",
+        projectionKind: "time-zone.v0",
+        projectionScope: { projectionKind: "time-zone.v0" },
+        projectionScopeKey: "time-zone.v0",
+      },
+      {
         description: "Shares your last 7 days of sleep start and end times.",
         label: "Sleep timing",
         projectionKind: "sleep-times.v0",
@@ -1472,11 +1489,32 @@ describe("hosted group join policy", () => {
         projectionScopeKey: "sleep-duration-days.v0",
       },
       {
+        description: "Shares your last 7 days of deep sleep minutes.",
+        label: "Deep sleep",
+        projectionKind: "deep-sleep-days.v0",
+        projectionScope: DEEP_SLEEP_SCOPE,
+        projectionScopeKey: "deep-sleep-days.v0",
+      },
+      {
+        description: "Shares your last 7 days of REM sleep minutes.",
+        label: "REM sleep",
+        projectionKind: "rem-sleep-days.v0",
+        projectionScope: REM_SLEEP_SCOPE,
+        projectionScopeKey: "rem-sleep-days.v0",
+      },
+      {
         description: "Shares your last 7 days of active minutes.",
         label: "Activity minutes",
         projectionKind: "activity-days.v0",
         projectionScope: { projectionKind: "activity-days.v0" },
         projectionScopeKey: "activity-days.v0",
+      },
+      {
+        description: "Shares each workout from the last 7 days, including its local start time, duration, and type. Does not share absolute timestamps, routes, location, heart rate, or provider identity.",
+        label: "Workout details",
+        projectionKind: "workouts.v0",
+        projectionScope: WORKOUTS_SCOPE,
+        projectionScopeKey: "workouts.v0",
       },
       {
         description: "Shares your last 7 days of heart-rate zone minutes.",

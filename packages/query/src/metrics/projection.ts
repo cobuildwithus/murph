@@ -120,6 +120,7 @@ type WearableSummaryBase = {
   summaryConfidence: {
     level: WearableConfidenceLevel;
   };
+  timeZone?: string | null;
 };
 
 type WearableResolvedMetricField<TSummary> = Extract<{
@@ -193,6 +194,7 @@ function summaryMetricEvidence<TField extends string>(
       summary[entry.summaryField],
       summary.summaryConfidence.level,
       entry.sourceKind,
+      summary.timeZone,
     )
   );
 }
@@ -316,6 +318,7 @@ function metricEvidence(
   resolved: WearableResolvedMetric,
   confidence: WearableConfidenceLevel,
   sourceKind: MetricRowEvidence["sourceKind"],
+  timeZone: string | null | undefined,
 ): WearableMetricEvidenceResult {
   const selection = resolved.selection;
   const sourceCandidate = selectWearableSourceCandidate(resolved);
@@ -350,6 +353,7 @@ function metricEvidence(
         sourceFamily: selection.sourceFamily ?? sourceCandidate?.sourceFamily ?? null,
         sourceKind: selection.sourceKind ?? sourceCandidate?.sourceKind ?? null,
         syntheticRecordId,
+        timeZone: timeZone ?? undefined,
       },
       dataOrigin: sourceCandidate?.dataOrigin ?? null,
       date,
