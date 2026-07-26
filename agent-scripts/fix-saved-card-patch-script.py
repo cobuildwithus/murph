@@ -27,4 +27,16 @@ if content.count(purpose_old) != 1:
     raise RuntimeError("Saved-card patch purpose context was missing.")
 content = content.replace(purpose_old, purpose_new)
 
+signature_old = "''')}): Promise<HostedUsageCreditPreparedStripeEvent> {"
+signature_new = "'''}): Promise<HostedUsageCreditPreparedStripeEvent> {"
+if content.count(signature_old) != 1:
+    raise RuntimeError("Saved-card patch prepare signature context was missing.")
+content = content.replace(signature_old, signature_new)
+
+nullable_signature_old = "''')}): Promise<HostedUsageCreditPreparedStripeEvent | null> {"
+nullable_signature_new = "'''}): Promise<HostedUsageCreditPreparedStripeEvent | null> {"
+if content.count(nullable_signature_old) != 1:
+    raise RuntimeError("Saved-card patch nullable prepare signature context was missing.")
+content = content.replace(nullable_signature_old, nullable_signature_new)
+
 path.write_text(content)
