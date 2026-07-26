@@ -503,9 +503,15 @@ tracking plan, use `experiment-onboarding` for the bounded run and
 
 ## Learn from completed runs
 
-After a successful non-trivial browser run, save a memory only when the run
-revealed a new, durable fact that will materially improve future tasks for this
-same user.
+This section applies only outside appointment work. For appointment work,
+follow `appointment-scheduling`'s durable-memory boundary: browser completion
+grants no additional write authority, and a reusable preference may be saved
+only when the user clearly intends it to apply beyond the current appointment
+or asks Murph to remember it.
+
+After another successful non-trivial browser run, save a memory only when the
+run revealed a new, durable fact that will materially improve future tasks for
+this same user.
 
 1. Read existing memory first:
    `vault-cli memory show --vault "$VAULT" --format json`
@@ -524,8 +530,6 @@ Good memories describe durable facts, for example:
 - "Prefers Amazon for routine supplement reorders when the exact product is sold
   by the brand or a verified seller; otherwise prefers the brand's official
   store."
-- "Use the existing dentist's official patient portal for appointments; the
-  public booking page is for new patients."
 - "Never select subscriptions, autoship, memberships, or marketing opt-ins
   unless explicitly requested."
 

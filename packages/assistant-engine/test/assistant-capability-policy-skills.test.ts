@@ -84,6 +84,13 @@ describe('assistant capability policy skills', () => {
     expect(normalized).toContain('`billingActive: true`')
     expect(normalized).toContain('matches exactly one member row')
     expect(normalized).toContain(
+      'Provide the exact absolute Family Settings URL named by the `murph.family_plan` tool description',
+    )
+    expect(skill).not.toMatch(/Provide `?\/settings#family/iu)
+    expect(MURPH_FAMILY_PLAN_TOOL.description).toContain(
+      'https://www.withmurph.ai/settings#family',
+    )
+    expect(normalized).toContain(
       'A hosted group cannot own a Family plan, begin checkout, inspect account status, or create invites.',
     )
     expect(normalized).toContain(
