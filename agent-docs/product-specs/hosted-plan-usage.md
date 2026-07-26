@@ -200,7 +200,13 @@ explanation visible until dismissal, and ordinary Settings requires a fresh
 start-now confirmation before any resume or immediate invoice. Dismissing,
 canceling, copying to another member, and expired, tampered, or marker-only
 returns remain inert. The browser never upgrades a continue-at-trial-end choice
-into an immediate start.
+into an immediate start. Each continuation POST carries the server-rendered
+action as compare-only metadata; the route rejects any mismatch with the
+member/session/action-bound cookie before billing dispatch and still derives
+the operation only from that cookie. Successful responses leave the bounded
+cookie untouched so an older in-flight response cannot clear a newer return
+from another tab. The public marker removal keeps completed or dismissed
+returns inert, and the existing short expiry bounds any surviving claim.
 
 Starting Pulse now uses the existing start-paid-Pulse service. Upgrading to
 Edge uses the existing plan-change service. Pulse activation keeps its existing

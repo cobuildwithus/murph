@@ -48,6 +48,15 @@ export function PulseTrialBillingContinuationStudy() {
           status="start_required"
         />
       </ContinuationPreview>
+      <ContinuationPreview label="Choice changed in another tab">
+        <PulseTrialBillingContinuationView
+          action="continue_pulse"
+          errorMessage={null}
+          onConfirm={NOOP}
+          onDismiss={NOOP}
+          status="choice_changed"
+        />
+      </ContinuationPreview>
     </div>
   );
 }

@@ -4,7 +4,6 @@ import { hostedOnboardingError } from "../src/lib/hosted-onboarding/errors";
 
 const mocks = vi.hoisted(() => ({
   assertHostedOnboardingMutationOrigin: vi.fn(),
-  buildClearCookie: vi.fn(),
   buildContinuationCookie: vi.fn(),
   continuePulse: vi.fn(),
   getHostedAppSessionFromRequest: vi.fn(),
@@ -36,7 +35,6 @@ vi.mock(
     )>();
     return {
       ...actual,
-      buildHostedPulseTrialContinuationClearCookie: mocks.buildClearCookie,
       buildHostedPulseTrialContinuationCookie: mocks.buildContinuationCookie,
       readHostedPulseTrialContinuationRequest: mocks.readContinuationRequest,
       readHostedPulseTrialPaymentReturnAction: mocks.readPaymentReturnAction,
@@ -65,7 +63,6 @@ beforeEach(async () => {
     sessionId: "hws_session_123",
   };
   mocks.assertHostedOnboardingMutationOrigin.mockImplementation(() => {});
-  mocks.buildClearCookie.mockReturnValue("murph-start-pulse=; Max-Age=0");
   mocks.buildContinuationCookie.mockReturnValue(
     "murph-start-pulse=issued; Max-Age=900",
   );
@@ -118,9 +115,6 @@ test.each([
     const actual = await vi.importActual<typeof import(
       "../src/lib/hosted-onboarding/billing-pulse-trial-continuation"
     )>("@/src/lib/hosted-onboarding/billing-pulse-trial-continuation");
-    mocks.buildClearCookie.mockImplementation(
-      actual.buildHostedPulseTrialContinuationClearCookie,
-    );
     mocks.buildContinuationCookie.mockImplementation(
       actual.buildHostedPulseTrialContinuationCookie,
     );
@@ -159,6 +153,7 @@ test.each([
     });
     const wrongSessionResponse = await route.POST(buildPostRequest(undefined, {
       cookie: requestCookie!,
+      "x-murph-pulse-continuation-action": action,
     }));
     expect(wrongSessionResponse.status).toBe(403);
     expect(mocks.continuePulse).not.toHaveBeenCalled();
@@ -166,6 +161,7 @@ test.each([
 
     const response = await route.POST(buildPostRequest(undefined, {
       cookie: requestCookie!,
+      "x-murph-pulse-continuation-action": action,
     }));
 
     expect(response.status).toBe(200);
@@ -174,9 +170,139 @@ test.each([
       paymentMethodContinuation: "conversation",
       prisma: { label: "test-prisma" },
     });
-    expect(response.headers.get("set-cookie")).toContain("Max-Age=0");
+    expect(response.headers.get("set-cookie")).toBeNull();
   },
 );
+
+test("rejects a stale rendered action before either billing service", async () => {
+  mocks.readContinuationRequest.mockReturnValueOnce("start_pulse_now");
+  const response = await route.POST(buildPostRequest(undefined, {
+    "x-murph-pulse-continuation-action": "continue_pulse",
+  }));
+
+  expect(response.status).toBe(409);
+  await expect(response.json()).resolves.toMatchObject({
+    error: {
+      code: "HOSTED_PULSE_TRIAL_CONTINUATION_CHANGED",
+    },
+  });
+  expect(mocks.continuePulse).not.toHaveBeenCalled();
+  expect(mocks.startPulse).not.toHaveBeenCalled();
+  expect(response.headers.get("set-cookie")).toBeNull();
+});
+
+test("keeps a newer start claim usable when an older continue page retries", async () => {
+  const actual = await vi.importActual<typeof import(
+    "../src/lib/hosted-onboarding/billing-pulse-trial-continuation"
+  )>("@/src/lib/hosted-onboarding/billing-pulse-trial-continuation");
+  mocks.buildContinuationCookie.mockImplementation(
+    actual.buildHostedPulseTrialContinuationCookie,
+  );
+  mocks.readContinuationRequest.mockImplementation(
+    actual.readHostedPulseTrialContinuationRequest,
+  );
+  mocks.readPaymentReturnAction.mockImplementation(
+    actual.readHostedPulseTrialPaymentReturnAction,
+  );
+
+  const continueReturn = await route.GET(new Request(
+    actual.buildHostedPulseTrialPaymentReturnUrl({
+      action: "continue_pulse",
+      memberId: "member_123",
+      publicBaseUrl: "https://join.example.test",
+    }),
+  ));
+  const continueCookie = continueReturn.headers.get("set-cookie")?.split(";", 1)[0];
+  expect(continueCookie).toBeTruthy();
+
+  mocks.continuePulse.mockResolvedValueOnce({
+    billingPlanCode: "launch_monthly",
+    paymentUrl: "https://billing.stripe.test/session_retry",
+    status: "payment_required",
+  });
+  const delayedContinue = await route.POST(buildPostRequest(undefined, {
+    cookie: continueCookie!,
+    "x-murph-pulse-continuation-action": "continue_pulse",
+  }));
+  expect(delayedContinue.status).toBe(200);
+
+  const startReturn = await route.GET(new Request(
+    actual.buildHostedPulseTrialPaymentReturnUrl({
+      action: "start_pulse_now",
+      memberId: "member_123",
+      publicBaseUrl: "https://join.example.test",
+    }),
+  ));
+  const startCookie = startReturn.headers.get("set-cookie")?.split(";", 1)[0];
+  expect(startCookie).toBeTruthy();
+
+  const staleRetry = await route.POST(buildPostRequest(undefined, {
+    cookie: startCookie!,
+    "x-murph-pulse-continuation-action": "continue_pulse",
+  }));
+  expect(staleRetry.status).toBe(409);
+  expect(mocks.startPulse).not.toHaveBeenCalled();
+  expect(staleRetry.headers.get("set-cookie")).toBeNull();
+
+  const currentConfirmation = await route.POST(buildPostRequest(undefined, {
+    cookie: startCookie!,
+    "x-murph-pulse-continuation-action": "start_pulse_now",
+  }));
+  expect(currentConfirmation.status).toBe(200);
+  expect(mocks.startPulse).toHaveBeenCalledTimes(1);
+  expect(currentConfirmation.headers.get("set-cookie")).toBeNull();
+});
+
+test("keeps a newer continue claim usable when an older start page confirms", async () => {
+  const actual = await vi.importActual<typeof import(
+    "../src/lib/hosted-onboarding/billing-pulse-trial-continuation"
+  )>("@/src/lib/hosted-onboarding/billing-pulse-trial-continuation");
+  mocks.buildContinuationCookie.mockImplementation(
+    actual.buildHostedPulseTrialContinuationCookie,
+  );
+  mocks.readContinuationRequest.mockImplementation(
+    actual.readHostedPulseTrialContinuationRequest,
+  );
+  mocks.readPaymentReturnAction.mockImplementation(
+    actual.readHostedPulseTrialPaymentReturnAction,
+  );
+
+  const startReturn = await route.GET(new Request(
+    actual.buildHostedPulseTrialPaymentReturnUrl({
+      action: "start_pulse_now",
+      memberId: "member_123",
+      publicBaseUrl: "https://join.example.test",
+    }),
+  ));
+  expect(startReturn.headers.get("set-cookie")).toBeTruthy();
+
+  const continueReturn = await route.GET(new Request(
+    actual.buildHostedPulseTrialPaymentReturnUrl({
+      action: "continue_pulse",
+      memberId: "member_123",
+      publicBaseUrl: "https://join.example.test",
+    }),
+  ));
+  const continueCookie = continueReturn.headers.get("set-cookie")?.split(";", 1)[0];
+  expect(continueCookie).toBeTruthy();
+
+  const staleConfirmation = await route.POST(buildPostRequest(undefined, {
+    cookie: continueCookie!,
+    "x-murph-pulse-continuation-action": "start_pulse_now",
+  }));
+  expect(staleConfirmation.status).toBe(409);
+  expect(mocks.startPulse).not.toHaveBeenCalled();
+  expect(mocks.continuePulse).not.toHaveBeenCalled();
+  expect(staleConfirmation.headers.get("set-cookie")).toBeNull();
+
+  const currentCheck = await route.POST(buildPostRequest(undefined, {
+    cookie: continueCookie!,
+    "x-murph-pulse-continuation-action": "continue_pulse",
+  }));
+  expect(currentCheck.status).toBe(200);
+  expect(mocks.continuePulse).toHaveBeenCalledTimes(1);
+  expect(currentCheck.headers.get("set-cookie")).toBeNull();
+});
 
 test("keeps an invalid return inert so settings cannot bounce it back here", async () => {
   mocks.readPaymentReturnAction.mockReturnValueOnce(null);
@@ -238,13 +364,15 @@ test("dispatches continue_pulse without ending the trial", async () => {
     status: "continuing",
   });
   expect(response.headers.get("set-cookie")).toBe(
-    "murph-start-pulse=; Max-Age=0",
+    null,
   );
 });
 
 test("dispatches start_pulse_now through the same canonical service", async () => {
   mocks.readContinuationRequest.mockReturnValueOnce("start_pulse_now");
-  const response = await route.POST(buildPostRequest());
+  const response = await route.POST(buildPostRequest(undefined, {
+    "x-murph-pulse-continuation-action": "start_pulse_now",
+  }));
 
   expect(response.status).toBe(200);
   expect(mocks.startPulse).toHaveBeenCalledWith({
@@ -279,6 +407,20 @@ test("rejects missing claims, request bodies, and cross-origin mutations", async
   expect(mocks.continuePulse).not.toHaveBeenCalled();
   expect(mocks.startPulse).not.toHaveBeenCalled();
 
+  const missingRenderedActionResponse = await route.POST(new Request(
+    "https://join.example.test/api/settings/billing/pulse-trial-continuation",
+    {
+      headers: {
+        cookie: "murph-start-pulse=issued",
+        origin: "https://join.example.test",
+      },
+      method: "POST",
+    },
+  ));
+  expect(missingRenderedActionResponse.status).toBe(409);
+  expect(mocks.continuePulse).not.toHaveBeenCalled();
+  expect(mocks.startPulse).not.toHaveBeenCalled();
+
   const bodyResponse = await route.POST(buildPostRequest("{}"));
   expect(bodyResponse.status).toBe(400);
 
@@ -306,6 +448,7 @@ function buildPostRequest(
       headers: {
         cookie: "murph-start-pulse=issued",
         origin: "https://join.example.test",
+        "x-murph-pulse-continuation-action": "continue_pulse",
         ...headers,
       },
       method: "POST",

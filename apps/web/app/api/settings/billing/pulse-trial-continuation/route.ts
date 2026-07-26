@@ -5,17 +5,18 @@ import {
   requireHostedAppSessionFromRequest,
 } from "@/src/lib/hosted-onboarding/app-session";
 import {
-  buildHostedPulseTrialContinuationClearCookie,
   buildHostedPulseTrialContinuationCookie,
   readHostedPulseTrialContinuationRequest,
   readHostedPulseTrialPaymentReturnAction,
 } from "@/src/lib/hosted-onboarding/billing-pulse-trial-continuation";
 import {
+  HOSTED_PULSE_TRIAL_CONTINUATION_ACTION_HEADER,
   HOSTED_PULSE_TRIAL_CONTINUATION_ACTION_PARAM,
   HOSTED_PULSE_TRIAL_CONTINUATION_EXPIRES_PARAM,
   HOSTED_PULSE_TRIAL_CONTINUATION_SIGNATURE_PARAM,
   HOSTED_START_PAID_PULSE_RETURN_PARAM,
   HOSTED_START_PAID_PULSE_RETURN_VALUE,
+  type HostedPulseTrialContinuationAction,
 } from "@/src/lib/hosted-onboarding/billing-pulse-trial-continuation-contract";
 import {
   continueHostedPulseTrialPaidPlan,
@@ -78,6 +79,15 @@ export const POST = withJsonError(async (request: Request) => {
       message: "Your Pulse confirmation expired. Try again.",
     });
   }
+  const renderedAction = readRenderedContinuationAction(request);
+  if (renderedAction !== action) {
+    throw hostedOnboardingError({
+      code: "HOSTED_PULSE_TRIAL_CONTINUATION_CHANGED",
+      httpStatus: 409,
+      message:
+        "This Pulse choice changed in another tab. Continue from the latest return.",
+    });
+  }
 
   const result = action === "start_pulse_now"
     ? await startHostedPulseTrialPaidPlan({
@@ -90,7 +100,7 @@ export const POST = withJsonError(async (request: Request) => {
         paymentMethodContinuation: "conversation",
         prisma,
       });
-  const response = jsonOk(
+  return jsonOk(
     result.status === "payment_required"
       ? {
         billingPlanCode: result.billingPlanCode,
@@ -99,13 +109,6 @@ export const POST = withJsonError(async (request: Request) => {
       }
       : result,
   );
-  if (result.status !== "payment_required") {
-    response.headers.append(
-      "Set-Cookie",
-      buildHostedPulseTrialContinuationClearCookie(),
-    );
-  }
-  return response;
 });
 
 function buildSignedInReturnUrl(requestUrl: string): URL {
@@ -152,4 +155,15 @@ async function assertNoRequestBody(request: Request): Promise<void> {
     httpStatus: 400,
     message: "This route does not accept a request body.",
   });
+}
+
+function readRenderedContinuationAction(
+  request: Request,
+): HostedPulseTrialContinuationAction | null {
+  const value = request.headers.get(
+    HOSTED_PULSE_TRIAL_CONTINUATION_ACTION_HEADER,
+  );
+  return value === "continue_pulse" || value === "start_pulse_now"
+    ? value
+    : null;
 }

@@ -173,12 +173,19 @@ without conversion or Stripe has paused it, the old continue claim fails closed
 without `subscriptions.resume`, and Settings keeps an explanation visible
 until the member dismisses it and makes any fresh start-now choice. The route
 reads the action only from the bound claim; the marker and client cannot select
-or change it. Dismissing a start-now confirmation removes the public marker and
-returns to ordinary Settings without a POST, leaving any surviving claim inert.
-Completed, continuing, and billing-pending results clear the claim. If Stripe
-has not exposed the newly saved method yet, Settings shows a terminal status
+or change it. Every POST also carries the server-rendered action as compare-only
+request metadata. The route rejects a missing or mismatched value before either
+billing service, so an older tab cannot submit a newer same-name browser claim
+under stale terms. Dismissing a start-now confirmation removes the public
+marker and returns to ordinary Settings without a POST, leaving any surviving
+claim inert. Successful responses do not clear the shared cookie: an older
+in-flight response therefore cannot erase a newer return installed in another
+tab, and the existing 15-minute expiry still bounds the claim. If Stripe has
+not exposed the newly saved method yet, Settings shows a terminal status
 instead of opening another portal loop; an explicit retry may reuse the
-still-short-lived exact-action claim and returned Stripe URL.
+still-short-lived exact-action claim and returned Stripe URL. If another tab
+replaced that claim, Settings keeps a changed-choice notice visible until
+acknowledgment and directs the member to the latest return.
 
 While a browser continuation is checking state or waiting for billing, Settings
 shows one busy status and suppresses every other Start Pulse action. A terminal

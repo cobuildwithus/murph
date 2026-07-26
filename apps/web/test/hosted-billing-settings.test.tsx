@@ -927,6 +927,7 @@ describe("HostedBillingSettings", () => {
     });
 
     assert.deepEqual(mocks.requestHostedPulseTrialContinuation.mock.calls, [[{
+      action: "start_pulse_now",
       redirectIfPaymentRequired: false,
     }]]);
     assert.deepEqual(mocks.routerReplace.mock.calls, [["/settings#subscription"]]);
@@ -954,6 +955,7 @@ describe("HostedBillingSettings", () => {
     });
 
     assert.deepEqual(mocks.requestHostedPulseTrialContinuation.mock.calls, [[{
+      action: "continue_pulse",
       redirectIfPaymentRequired: false,
     }]]);
     assert.match(
@@ -1085,8 +1087,14 @@ describe("HostedBillingSettings", () => {
     });
 
     assert.deepEqual(mocks.requestHostedPulseTrialContinuation.mock.calls, [
-      [{ redirectIfPaymentRequired: false }],
-      [{ redirectIfPaymentRequired: true }],
+      [{
+        action: "continue_pulse",
+        redirectIfPaymentRequired: false,
+      }],
+      [{
+        action: "continue_pulse",
+        redirectIfPaymentRequired: true,
+      }],
     ]);
     assert.match(
       rendered.window.document.body.textContent ?? "",
@@ -1123,6 +1131,7 @@ describe("HostedBillingSettings", () => {
     });
 
     assert.deepEqual(mocks.requestHostedPulseTrialContinuation.mock.calls, [[{
+      action: "continue_pulse",
       redirectIfPaymentRequired: false,
     }]]);
     assert.match(
@@ -1138,6 +1147,54 @@ describe("HostedBillingSettings", () => {
       rendered.window.document.body.textContent ?? "",
       /Continue after trial/,
     );
+
+    const gotItButton = findLastButtonByText(
+      rendered.window.document,
+      "Got it",
+      rendered.window,
+    );
+    await act(async () => {
+      gotItButton.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+    });
+    assert.deepEqual(mocks.routerReplace.mock.calls, [["/settings#subscription"]]);
+
+    await rendered.cleanup();
+  });
+
+  test("keeps a changed-choice notice visible until acknowledgment", async () => {
+    const { HostedOnboardingApiError } = await import(
+      "@/src/components/hosted-onboarding/client-api"
+    );
+    mocks.requestHostedPulseTrialContinuation.mockRejectedValueOnce(
+      new HostedOnboardingApiError({
+        code: "HOSTED_PULSE_TRIAL_CONTINUATION_CHANGED",
+        message:
+          "This Pulse choice changed in another tab. Continue from the latest return.",
+      }),
+    );
+    const { PulseTrialBillingContinuation } = await import(
+      "@/src/components/settings/hosted-start-paid-pulse-button"
+    );
+    const rendered = await renderClientComponent(
+      createElement(PulseTrialBillingContinuation, {
+        action: "continue_pulse",
+      }),
+      { requireButton: false },
+    );
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    assert.match(
+      rendered.window.document.body.textContent ?? "",
+      /Your Pulse choice changed/,
+    );
+    assert.match(
+      rendered.window.document.body.textContent ?? "",
+      /Continue from the latest return/,
+    );
+    assert.equal(mocks.routerReplace.mock.calls.length, 0);
 
     const gotItButton = findLastButtonByText(
       rendered.window.document,

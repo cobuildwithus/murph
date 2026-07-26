@@ -31,6 +31,7 @@ type PulseTrialBillingContinuationStatus =
   | "active"
   | "billing_pending"
   | "checking"
+  | "choice_changed"
   | "confirming"
   | "continuing"
   | "dismissed"
@@ -171,6 +172,7 @@ export function PulseTrialBillingContinuation(props: {
 
     try {
       const result = await requestHostedPulseTrialContinuation({
+        action: props.action,
         redirectIfPaymentRequired,
       });
       if (result.status === "redirecting") {
@@ -201,6 +203,13 @@ export function PulseTrialBillingContinuation(props: {
       setStatus("dismissed");
       router.replace("/settings#subscription");
     } catch (error) {
+      if (
+        error instanceof HostedOnboardingApiError
+        && error.code === "HOSTED_PULSE_TRIAL_CONTINUATION_CHANGED"
+      ) {
+        setStatus("choice_changed");
+        return;
+      }
       if (
         error instanceof HostedOnboardingApiError
         && error.code === "HOSTED_PULSE_TRIAL_CONTINUE_REQUIRES_START"
@@ -309,6 +318,18 @@ export function PulseTrialBillingContinuationView(props: {
         eyebrow="Trial update"
         onAction={props.onDismiss}
         title="Your trial has ended"
+      />
+    );
+  }
+
+  if (props.status === "choice_changed") {
+    return (
+      <ContinuationNotice
+        actionLabel="Got it"
+        description="This Pulse choice changed in another tab. Continue from the latest return."
+        eyebrow="Pulse update"
+        onAction={props.onDismiss}
+        title="Your Pulse choice changed"
       />
     );
   }
