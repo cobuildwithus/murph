@@ -1,6 +1,6 @@
 # PR 956 retention and signal-bound corrections
 
-Status: active
+Status: completed
 Created: 2026-07-25
 Updated: 2026-07-25
 
@@ -63,8 +63,25 @@ Updated: 2026-07-25
 
 ## Verification
 
-- Commands to run: focused retention/runtime-log/Temporal tests, migration
+- Required commands: focused retention/runtime-log/Temporal tests, migration
   guards, `pnpm test:diff` for touched web and Temporal paths,
   `pnpm verify:acceptance`, and the repository ReviewGPT/CI gates.
 - Expected outcomes: all pass; deterministic timeout tests show no more than
   five started or unresolved signal operations.
+- Focused migration and retention tests pass 12 cases; the runtime-log queue
+  suite passes 13 cases. Earlier exact-head focused verification passed 62 web
+  and 265 assistant-runtime cases.
+- The exact remediation-head canonical `pnpm test:diff` passed 76 package files
+  (1,869 tests, 2 skipped), 514 hosted-web files (6,554 tests, 173 skipped) plus
+  typecheck/lint/dev smoke/production build, 106 Cloudflare node files (1,898
+  tests), and 2 worker tests.
+- Full `pnpm verify:acceptance` passed: repository guards, workspace
+  typechecks, package coverage, hosted-web verification and production build,
+  and both Cloudflare test lanes completed successfully.
+- Preliminary remediation ReviewGPT returned `SPECIALIST_OUTCOME: PASS` with no
+  findings after 440 seconds. Manual inspection under the documented
+  preliminary exception confirmed the exact PR/head, Phlebas lane, Pro model,
+  guarded ZIP, substantive remediation review, and terminal marker.
+- The current head has 27 successful GitHub checks and no failures. Parent
+  review found no remaining merge blocker; final ReviewGPT remains.
+Completed: 2026-07-25
