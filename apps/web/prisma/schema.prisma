@@ -1214,6 +1214,17 @@ model HostedGrowthDailySnapshot {
   @@map("hosted_growth_daily_snapshot")
 }
 
+/// Anonymous company-wide growth totals that must outlive member-scoped rows.
+/// The top-up total starts from retained rows at tracker cutover; it is not a
+/// complete pre-cutover purchase ledger. The database constrains this model to
+/// one `global` row.
+model HostedGrowthAggregate {
+  id                          String @id @db.VarChar(32)
+  trackedFulfilledUsageTopUps Int    @default(0) @map("tracked_fulfilled_usage_top_ups")
+
+  @@map("hosted_growth_aggregate")
+}
+
 model HostedLinqFirstContactAdmissionDecision {
   eventId             String   @id @map("event_id")
   decision            String
