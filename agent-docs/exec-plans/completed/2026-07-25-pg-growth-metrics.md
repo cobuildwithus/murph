@@ -86,9 +86,30 @@ store, growth target owner, billing authority, or lifecycle.
   is defined, and the literal-red product exception is documented. Its final
   low-severity catalog-only synthetic-data inconsistency was corrected by
   pairing zero current payers with zero current MRR.
+- Preliminary `completion-specialists` ReviewGPT passed the frontend lens with
+  no findings and returned one medium coverage finding. Its downloaded
+  `reviewgpt-coverage.patch` touched only the focused growth test, passed
+  `git apply --check`, and was accepted to prove nonzero active-member and
+  fulfilled-top-up values cross the page boundary into both top-up
+  presentations. The focused 21-test suite and hosted-web typecheck passed
+  after application.
+- The post-specialist canonical affected-path run passed in Crabbox testbox
+  `tbx_01kydvfjhrxgkbq1n37jzrgk20`: build, lint/typecheck, development smoke,
+  510 test files, and 6,508 tests passed.
+- Final repository acceptance in Crabbox testbox
+  `tbx_01kydvs0z2bzrzdabv500xha9n` again passed the changed hosted-web build,
+  typecheck, lint, and test coverage. Its sole failure was the same unchanged
+  `packages/cli` prompt-contract assertion already reproduced from the base
+  branch.
+- Parent final review found and removed one unrelated design-catalog heading
+  edit. The remaining diff passed whitespace and identifier-path scans with no
+  findings.
 - Reviewer-readable Cloudflare Images hosting is blocked: the linked
   development project has no Images upload variables, and the connected
   Cloudflare API identity lacks Images write permission. The redacted captures
   remain in the ignored review-evidence path for exact-head specialist
   packaging; the draft PR must record this hosted-proof gap until a
   least-privilege Images token is available.
+Status: completed
+Updated: 2026-07-25
+Completed: 2026-07-25

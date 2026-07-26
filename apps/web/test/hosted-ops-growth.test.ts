@@ -486,6 +486,10 @@ describe("hosted ops growth metrics", () => {
   it("counts own-paid or family-paid members in the mature converted count query", async () => {
     queueCurrentMetricMocks();
     queueCurrentMetricMocks();
+    mocks.hostedMember.count
+      .mockResolvedValueOnce(6)
+      .mockResolvedValueOnce(3);
+    mocks.hostedUsageCreditPurchase.count.mockResolvedValueOnce(12);
     mocks.hostedGrowthDailySnapshot.upsert.mockResolvedValueOnce(
       snapshotRow("2026-07-06", 2_900),
     );
@@ -499,8 +503,15 @@ describe("hosted ops growth metrics", () => {
     const markup = renderToStaticMarkup(await growthPage.default());
 
     expect(markup).toContain("MRR growth per week");
-    expect(markup).toContain("Fulfilled usage top-ups (lifetime)");
-    expect(markup).toContain("One-time");
+    expect(markup).toMatch(
+      /Weekly active member growth<\/div><div[^>]*>\+100%<\/div><div[^>]*>6 direct members messaged<\/div>/u,
+    );
+    expect(markup).toMatch(
+      /Fulfilled top-ups · lifetime<\/span><span[^>]*>12<\/span>/u,
+    );
+    expect(markup).toMatch(
+      /Fulfilled usage top-ups \(lifetime\)<\/td><td[^>]*>12<\/td><td[^>]*>One-time<\/td>/u,
+    );
     expect(mocks.hostedMemberBillingRef.findMany.mock.calls[0]?.[0]).toMatchObject({
       select: {
         member: {
