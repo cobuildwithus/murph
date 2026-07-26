@@ -366,11 +366,9 @@ describe("parseHostedLinqProviderEvent", () => {
     });
     expect(parsed?.payloadSanitizedJson).toMatchObject({
       created_at: "2026-03-26T12:00:00.000Z",
-      data_shape: expect.objectContaining({
-        kind: "object",
-        keyCount: expect.any(Number),
-      }),
     });
+    // The shape has one home: the sanitized payload must not carry a copy.
+    expect(parsed?.payloadSanitizedJson).not.toHaveProperty("data_shape");
 
     const persistedShape = JSON.stringify(parsed?.payloadShapeJson);
     const persistedSanitizedPayload = JSON.stringify(parsed?.payloadSanitizedJson);

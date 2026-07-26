@@ -98,6 +98,12 @@ describe("hosted Linq contact card client", () => {
           last_name: null,
           phone_number: "+15550000001",
         },
+        {
+          first_name: "Murph",
+          is_active: true,
+          last_name: null,
+          phone_number: "+15550000002",
+        },
       ],
     }));
     vi.stubGlobal("fetch", fetchMock);
@@ -106,9 +112,18 @@ describe("hosted Linq contact card client", () => {
       {
         firstName: "Murph",
         imageUrl: null,
+        imageUrlPresent: true,
         isActive: true,
         lastName: null,
         phoneNumber: "+15550000001",
+      },
+      {
+        firstName: "Murph",
+        imageUrl: null,
+        imageUrlPresent: false,
+        isActive: true,
+        lastName: null,
+        phoneNumber: "+15550000002",
       },
     ]);
     expect(fetchMock).toHaveBeenCalledWith(
