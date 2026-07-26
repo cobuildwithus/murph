@@ -39,9 +39,16 @@ Done:
 - The first complete `pnpm test:diff` rerun passed every preflight, affected typecheck, assistant-engine test, and assistant CLI test before one untouched assistant-runtime clinical-records preemption test timing-flaked; its exact isolated rerun passed.
 - Added the required design-catalog component and section registrations. The mandated browser runtime exposed no installed target, so desktop/mobile rendered captures remain unavailable.
 - Attempted the required Claude Fable UI double-check; it stopped at explicit usage-credit exhaustion, so policy forbids an Opus fallback.
+- The first product-experience review found that native Share could appear before a shareable PNG existed, lose transient activation while awaiting preparation, silently fall back to download, and hide non-dismissal failures.
+- Corrected that journey: Share now appears only when the actual prepared PNG passes `navigator.canShare({ files })`, invokes the share sheet synchronously from the ready state, and presents inline recovery for technical failures while leaving user dismissal quiet.
+- Added ready, preparing, preview-recovery, and native-share-recovery design studies plus focused unsupported-capability, preview-failure, share-rejection, and request-cancellation tests.
+- Removed synchronous effect-owned UI resets by keying the private-card request session to its input and owning object-URL creation/revocation at the resolved-file boundary; scoped Web lint and all 12 affected Web tests pass.
+- The current Web typecheck reaches an unchanged `origin/main` error in `apps/web/src/lib/hosted-routing/thread-route-store.ts:170`; the task diff does not touch that file.
+- The required product-experience re-review returned `NO FINDINGS`; remaining material proof gaps are the full Telegram orchestration path and real interruption/restart or mutated-artifact orchestration path.
+- Added the ready-but-download-only catalog branch requested by the re-review and captured redacted desktop and mobile design-catalog evidence for ready, unsupported, preparing, preview-recovery, and native-share-recovery states through the repository Playwright runtime.
 
 Now:
-- Resolve the required product-experience audit, commit/push the review candidate, and run the preliminary unified prompt/frontend/coverage ReviewGPT pass.
+- Commit/push the review candidate and run the preliminary unified prompt/frontend/coverage ReviewGPT pass.
 
 Next:
 - Resolve preliminary findings, run the parent final review, rerun canonical diff/acceptance verification, and close this plan with `scripts/finish-task`.

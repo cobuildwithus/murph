@@ -116,6 +116,27 @@ const cardData: ExperimentCardData = {
   ],
 };
 
+async function waitForPreparedPreview(container: HTMLElement): Promise<void> {
+  await act(async () => {
+    await vi.waitFor(() => {
+      expect(container.querySelector('[role="dialog"] img')).not.toBeNull();
+    });
+  });
+}
+
+function installNativeFileShare(input: {
+  canShare: (data?: ShareData) => boolean;
+  navigator: Navigator;
+  share: (data?: ShareData) => Promise<void>;
+}): void {
+  for (const target of new Set([globalThis.navigator, input.navigator])) {
+    Object.defineProperties(target, {
+      canShare: { configurable: true, value: input.canShare },
+      share: { configurable: true, value: input.share },
+    });
+  }
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.fetch.mockResolvedValue(
@@ -196,6 +217,124 @@ test("aborts an in-flight private card request when the experiment data changes"
     expect(pendingSignal.aborted).toBe(true);
     expect(rendered.container.querySelector('[role="dialog"]')).toBeNull();
     expect(mocks.fetch).toHaveBeenCalledTimes(1);
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
+test("keeps native Share hidden when the prepared PNG is not file-shareable", async () => {
+  const { ShareResultsCard } = await import(
+    "@/src/components/experiments/experiment-detail/share-results-card"
+  );
+  const rendered = await renderClientComponent(
+    createElement(ShareResultsCard, { cardData }),
+  );
+  const nativeShare = vi.fn();
+  const canShare = vi.fn(() => false);
+  installNativeFileShare({
+    canShare,
+    navigator: rendered.window.navigator,
+    share: nativeShare,
+  });
+
+  try {
+    await act(async () => {
+      rendered.button.dispatchEvent(
+        new rendered.window.Event("click", { bubbles: true }),
+      );
+      await Promise.resolve();
+    });
+    await waitForPreparedPreview(rendered.container);
+
+    const dialog = rendered.container.querySelector('[role="dialog"]');
+    assert.ok(dialog);
+    expect(Array.from(dialog.querySelectorAll("button")).map(
+      (button) => button.textContent?.trim(),
+    )).not.toContain("Share");
+    expect(dialog.textContent).toMatch(/Download image/u);
+    expect(canShare).toHaveBeenCalledOnce();
+    expect(nativeShare).not.toHaveBeenCalled();
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
+test("does not expose native Share while the private preview is unavailable", async () => {
+  const { ShareResultsCard } = await import(
+    "@/src/components/experiments/experiment-detail/share-results-card"
+  );
+  mocks.fetch.mockResolvedValueOnce(new Response("unavailable", { status: 503 }));
+  const rendered = await renderClientComponent(
+    createElement(ShareResultsCard, { cardData }),
+  );
+  installNativeFileShare({
+    canShare: vi.fn(() => true),
+    navigator: rendered.window.navigator,
+    share: vi.fn(),
+  });
+
+  try {
+    await act(async () => {
+      rendered.button.dispatchEvent(
+        new rendered.window.Event("click", { bubbles: true }),
+      );
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const dialog = rendered.container.querySelector('[role="dialog"]');
+    assert.ok(dialog);
+    expect(dialog.textContent).toMatch(/Preview unavailable/u);
+    expect(Array.from(dialog.querySelectorAll("button")).map(
+      (button) => button.textContent?.trim(),
+    )).not.toContain("Share");
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
+test("shows recovery when native file sharing fails for a non-dismissal error", async () => {
+  const { ShareResultsCard } = await import(
+    "@/src/components/experiments/experiment-detail/share-results-card"
+  );
+  const rendered = await renderClientComponent(
+    createElement(ShareResultsCard, { cardData }),
+  );
+  const nativeShare = vi.fn().mockRejectedValue(new Error("share transport failed"));
+  installNativeFileShare({
+    canShare: vi.fn(() => true),
+    navigator: rendered.window.navigator,
+    share: nativeShare,
+  });
+
+  try {
+    await act(async () => {
+      rendered.button.dispatchEvent(
+        new rendered.window.Event("click", { bubbles: true }),
+      );
+      await Promise.resolve();
+    });
+    await waitForPreparedPreview(rendered.container);
+    const dialog = rendered.container.querySelector('[role="dialog"]');
+    assert.ok(dialog);
+    const shareButton = Array.from(dialog.querySelectorAll("button")).find(
+      (button) => button.textContent?.trim() === "Share",
+    );
+    assert.ok(shareButton);
+
+    await act(async () => {
+      shareButton.dispatchEvent(
+        new rendered.window.Event("click", { bubbles: true }),
+      );
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(nativeShare).toHaveBeenCalledOnce();
+    expect(dialog.querySelector('[role="alert"]')?.textContent).toMatch(
+      /Sharing couldn't open/u,
+    );
+    expect(dialog.textContent).toMatch(/download the image/u);
   } finally {
     await rendered.cleanup();
   }

@@ -1,3 +1,5 @@
+import type { ReactNode } from "react";
+
 import { ShareResultsCardPanel } from "@/src/components/experiments/experiment-detail/share-results-card";
 
 const SYNTHETIC_RESULTS_CARD = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(`
@@ -23,26 +25,95 @@ const SYNTHETIC_RESULTS_CARD = `data:image/svg+xml;charset=utf-8,${encodeURIComp
 export function ExperimentResultsShareStudy() {
   return (
     <div className="rounded-2xl border border-border bg-card p-5 sm:p-8">
-      <div className="mx-auto max-w-[34rem]" inert>
-        <div className="mb-5">
-          <h3 className="font-serif text-2xl font-semibold tracking-tight text-foreground">
-            Share your results
-          </h3>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Preview your private results card, then share it or save a copy.
-          </p>
-        </div>
-        <ShareResultsCardPanel
-          busy={null}
-          canNativeShare
-          onDownload={() => {}}
-          onRetry={() => {}}
-          onShare={() => {}}
-          previewStatus="ready"
-          previewUrl={SYNTHETIC_RESULTS_CARD}
-          title="Evening magnesium test"
-        />
+      <div className="grid gap-8 xl:grid-cols-2" inert>
+        <ResultsShareState title="Ready to share">
+          <ShareResultsCardPanel
+            busy={null}
+            canNativeShare
+            onDownload={() => {}}
+            onRetry={() => {}}
+            onShare={() => {}}
+            previewStatus="ready"
+            previewUrl={SYNTHETIC_RESULTS_CARD}
+            shareError={false}
+            title="Evening magnesium test"
+          />
+        </ResultsShareState>
+        <ResultsShareState title="Download-only browser">
+          <ShareResultsCardPanel
+            busy={null}
+            canNativeShare={false}
+            onDownload={() => {}}
+            onRetry={() => {}}
+            onShare={() => {}}
+            previewStatus="ready"
+            previewUrl={SYNTHETIC_RESULTS_CARD}
+            shareError={false}
+            title="Evening magnesium test"
+          />
+        </ResultsShareState>
+        <ResultsShareState title="Preparing preview">
+          <ShareResultsCardPanel
+            busy={null}
+            canNativeShare={false}
+            onDownload={() => {}}
+            onRetry={() => {}}
+            onShare={() => {}}
+            previewStatus="loading"
+            previewUrl={null}
+            shareError={false}
+            title="Evening magnesium test"
+          />
+        </ResultsShareState>
+        <ResultsShareState title="Preview recovery">
+          <ShareResultsCardPanel
+            busy={null}
+            canNativeShare={false}
+            onDownload={() => {}}
+            onRetry={() => {}}
+            onShare={() => {}}
+            previewStatus="error"
+            previewUrl={null}
+            shareError={false}
+            title="Evening magnesium test"
+          />
+        </ResultsShareState>
+        <ResultsShareState title="Native share recovery">
+          <ShareResultsCardPanel
+            busy={null}
+            canNativeShare
+            onDownload={() => {}}
+            onRetry={() => {}}
+            onShare={() => {}}
+            previewStatus="ready"
+            previewUrl={SYNTHETIC_RESULTS_CARD}
+            shareError
+            title="Evening magnesium test"
+          />
+        </ResultsShareState>
       </div>
+    </div>
+  );
+}
+
+function ResultsShareState({
+  children,
+  title,
+}: {
+  children: ReactNode;
+  title: string;
+}) {
+  return (
+    <div className="mx-auto w-full max-w-[34rem]">
+      <div className="mb-5">
+        <h3 className="font-serif text-2xl font-semibold tracking-tight text-foreground">
+          {title}
+        </h3>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Preview your private results card, then share it or save a copy.
+        </p>
+      </div>
+      {children}
     </div>
   );
 }

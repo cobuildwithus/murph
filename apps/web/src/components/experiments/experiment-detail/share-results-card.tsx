@@ -5,7 +5,6 @@ import {
   useMemo,
   useRef,
   useState,
-  useSyncExternalStore,
 } from "react";
 import { usePathname } from "next/navigation";
 import { Download, RefreshCw, Share2 } from "lucide-react";
@@ -26,6 +25,12 @@ interface ShareResultsCardProps {
   cardData: ExperimentCardData;
 }
 
+interface ShareResultsCardSessionProps extends ShareResultsCardProps {
+  cardEndpoint: string;
+  cardPayload: string;
+  filename: string;
+}
+
 export interface ShareResultsCardPanelProps {
   busy: "download" | "share" | null;
   canNativeShare: boolean;
@@ -34,16 +39,19 @@ export interface ShareResultsCardPanelProps {
   onShare: () => void;
   previewStatus: "idle" | "loading" | "ready" | "error";
   previewUrl: string | null;
+  shareError: boolean;
   title: string;
 }
 
-/** Native sharing is a client-only capability — read it without an SSR mismatch. */
-function useNativeShareSupport(): boolean {
-  return useSyncExternalStore(
-    () => () => {},
-    () => typeof navigator !== "undefined" && typeof navigator.share === "function",
-    () => false,
-  );
+function canSharePreparedCardFile(file: File): boolean {
+  return typeof navigator !== "undefined"
+    && typeof navigator.share === "function"
+    && typeof navigator.canShare === "function"
+    && navigator.canShare({ files: [file] });
+}
+
+function isShareDismissal(error: unknown): boolean {
+  return error instanceof DOMException && error.name === "AbortError";
 }
 
 async function requestExperimentCardFile(input: {
@@ -80,9 +88,32 @@ function downloadCardFile(file: File): void {
 
 export function ShareResultsCard({ cardData }: ShareResultsCardProps) {
   const pathname = usePathname();
+  const cardEndpoint = `${pathname}/card`;
+  const cardPayload = useMemo(() => JSON.stringify(cardData), [cardData]);
+  const slug = pathname.split("/").filter(Boolean).pop() ?? "experiment";
+  const filename = `${slug}-results.png`;
+
+  return (
+    <ShareResultsCardSession
+      key={`${cardEndpoint}\0${filename}\0${cardPayload}`}
+      cardData={cardData}
+      cardEndpoint={cardEndpoint}
+      cardPayload={cardPayload}
+      filename={filename}
+    />
+  );
+}
+
+function ShareResultsCardSession({
+  cardData,
+  cardEndpoint,
+  cardPayload,
+  filename,
+}: ShareResultsCardSessionProps) {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState<"download" | "share" | null>(null);
   const [cardFile, setCardFile] = useState<File | null>(null);
+  const [shareError, setShareError] = useState(false);
   const [previewStatus, setPreviewStatus] = useState<
     "idle" | "loading" | "ready" | "error"
   >("idle");
@@ -91,38 +122,22 @@ export function ShareResultsCard({ cardData }: ShareResultsCardProps) {
     controller: AbortController;
     request: Promise<File>;
   } | null>(null);
-  const canNativeShare = useNativeShareSupport();
-  const cardEndpoint = `${pathname}/card`;
-  const cardPayload = useMemo(() => JSON.stringify(cardData), [cardData]);
-  const slug = pathname.split("/").filter(Boolean).pop() ?? "experiment";
-  const filename = `${slug}-results.png`;
+  const previewUrlRef = useRef<string | null>(null);
+  const canNativeShare = useMemo(
+    () => cardFile !== null && canSharePreparedCardFile(cardFile),
+    [cardFile],
+  );
 
   useEffect(() => {
-    pendingCardRequest.current?.controller.abort();
-    pendingCardRequest.current = null;
-    setOpen(false);
-    setCardFile(null);
-    setPreviewStatus("idle");
-
     return () => {
       pendingCardRequest.current?.controller.abort();
       pendingCardRequest.current = null;
+      if (previewUrlRef.current) {
+        URL.revokeObjectURL(previewUrlRef.current);
+        previewUrlRef.current = null;
+      }
     };
-  }, [cardEndpoint, cardPayload, filename]);
-
-  useEffect(() => {
-    if (!cardFile) {
-      setPreviewUrl(null);
-      return;
-    }
-
-    const objectUrl = URL.createObjectURL(cardFile);
-    setPreviewUrl(objectUrl);
-
-    return () => {
-      URL.revokeObjectURL(objectUrl);
-    };
-  }, [cardFile]);
+  }, []);
 
   async function prepareCardFile(): Promise<File> {
     if (cardFile) {
@@ -146,8 +161,11 @@ export function ShareResultsCard({ cardData }: ShareResultsCardProps) {
       if (pendingCardRequest.current?.request !== request) {
         throw new DOMException("Card request was superseded.", "AbortError");
       }
+      const nextPreviewUrl = URL.createObjectURL(file);
+      previewUrlRef.current = nextPreviewUrl;
       setCardFile(file);
       setPreviewStatus("ready");
+      setPreviewUrl(nextPreviewUrl);
       return file;
     } catch (error) {
       if (pendingCardRequest.current?.request === request) {
@@ -175,7 +193,7 @@ export function ShareResultsCard({ cardData }: ShareResultsCardProps) {
   }
 
   function retryPreview(): void {
-    setPreviewUrl(null);
+    setShareError(false);
     void prepareCardFile().catch(() => {
       // The dialog keeps the retry state visible.
     });
@@ -193,16 +211,18 @@ export function ShareResultsCard({ cardData }: ShareResultsCardProps) {
   }
 
   async function handleNativeShare() {
+    if (!cardFile || !canSharePreparedCardFile(cardFile)) {
+      setShareError(true);
+      return;
+    }
     setBusy("share");
+    setShareError(false);
     try {
-      const file = await prepareCardFile();
-      if (navigator.canShare?.({ files: [file] })) {
-        await navigator.share({ files: [file], title: cardData.title });
-      } else {
-        downloadCardFile(file);
+      await navigator.share({ files: [cardFile], title: cardData.title });
+    } catch (error) {
+      if (!isShareDismissal(error)) {
+        setShareError(true);
       }
-    } catch {
-      // The user dismissed the share sheet, or sharing is unavailable.
     } finally {
       setBusy(null);
     }
@@ -233,6 +253,7 @@ export function ShareResultsCard({ cardData }: ShareResultsCardProps) {
           }}
           previewStatus={previewStatus}
           previewUrl={previewUrl}
+          shareError={shareError}
           title={cardData.title}
         />
       </DialogContent>
@@ -248,6 +269,7 @@ export function ShareResultsCardPanel({
   onShare,
   previewStatus,
   previewUrl,
+  shareError,
   title,
 }: ShareResultsCardPanelProps) {
   return (
@@ -288,7 +310,7 @@ export function ShareResultsCardPanel({
         {canNativeShare && (
           <Button
             onClick={onShare}
-            disabled={busy !== null || previewStatus === "loading"}
+            disabled={busy !== null || previewStatus !== "ready"}
             className="flex-1"
           >
             <Share2 />
@@ -305,6 +327,11 @@ export function ShareResultsCardPanel({
           {busy === "download" ? "Preparing…" : "Download image"}
         </Button>
       </div>
+      {shareError && (
+        <p className="text-sm text-destructive" role="alert">
+          Sharing couldn&apos;t open. Try again or download the image.
+        </p>
+      )}
     </>
   );
 }
