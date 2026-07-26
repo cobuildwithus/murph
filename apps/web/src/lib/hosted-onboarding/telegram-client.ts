@@ -1,5 +1,7 @@
 import "server-only";
 
+import type { TelegramThreadTarget } from "@murphai/messaging-ingress/telegram-webhook";
+
 import { hostedOnboardingError } from "./errors";
 import { getHostedOnboardingEnvironment } from "./runtime";
 import { normalizeNullableString } from "./shared";
@@ -30,9 +32,9 @@ function requireHostedTelegramBotToken(): string {
 }
 
 /**
- * Issues one bounded Bot API request. No caller consumes the Bot API result
- * today, so nothing here parses one; a future outbound sender can add exactly
- * the parsing its own delivery proof requires.
+ * Issues one bounded Bot API request. Callers that need delivery proof only rely
+ * on Telegram accepting the request; response bodies stay outside this small
+ * transport boundary.
  */
 async function callHostedTelegramApi(input: {
   body: unknown;
@@ -46,16 +48,80 @@ async function callHostedTelegramApi(input: {
   input.signal?.addEventListener("abort", onAbort, { once: true });
 
   try {
-    await fetch(`${HOSTED_TELEGRAM_API_BASE_URL}/bot${token}/${input.method}`, {
-      body: JSON.stringify(input.body),
-      headers: { "content-type": "application/json" },
-      method: "POST",
-      signal: controller.signal,
-    });
+    let response: Response;
+    try {
+      response = await fetch(`${HOSTED_TELEGRAM_API_BASE_URL}/bot${token}/${input.method}`, {
+        body: JSON.stringify(input.body),
+        headers: { "content-type": "application/json" },
+        method: "POST",
+        signal: controller.signal,
+      });
+    } catch {
+      throw hostedOnboardingError({
+        code: "HOSTED_TELEGRAM_API_REQUEST_FAILED",
+        httpStatus: 502,
+        message: `Telegram ${input.method} request failed.`,
+        retryable: true,
+      });
+    }
+
+    if (!response.ok) {
+      throw hostedOnboardingError({
+        code: "HOSTED_TELEGRAM_API_REQUEST_FAILED",
+        httpStatus: 502,
+        message: `Telegram ${input.method} failed with HTTP ${response.status}.`,
+        retryable: response.status === 429 || response.status >= 500,
+      });
+    }
   } finally {
     clearTimeout(timeout);
     input.signal?.removeEventListener("abort", onAbort);
   }
+}
+
+export async function sendHostedTelegramTextMessage(input: {
+  message: string;
+  replyToMessageId?: number | null;
+  signal?: AbortSignal;
+  target: TelegramThreadTarget;
+}): Promise<void> {
+  const chatId = normalizeNullableString(input.target.chatId);
+  const message = normalizeNullableString(input.message);
+  if (!chatId || !message) {
+    throw new TypeError("Hosted Telegram text delivery requires a target and message.");
+  }
+
+  const replyToMessageId = typeof input.replyToMessageId === "number"
+    && Number.isSafeInteger(input.replyToMessageId)
+    && input.replyToMessageId > 0
+    ? input.replyToMessageId
+    : null;
+
+  await callHostedTelegramApi({
+    body: {
+      chat_id: chatId,
+      text: message,
+      ...(input.target.businessConnectionId
+        ? { business_connection_id: input.target.businessConnectionId }
+        : {}),
+      ...(input.target.messageThreadId
+        ? { message_thread_id: input.target.messageThreadId }
+        : {}),
+      ...(input.target.directMessagesTopicId
+        ? { direct_messages_topic_id: input.target.directMessagesTopicId }
+        : {}),
+      ...(replyToMessageId
+        ? {
+            reply_parameters: {
+              allow_sending_without_reply: true,
+              message_id: replyToMessageId,
+            },
+          }
+        : {}),
+    },
+    method: "sendMessage",
+    ...(input.signal ? { signal: input.signal } : {}),
+  });
 }
 
 /**

@@ -1809,7 +1809,7 @@ describe("completeHostedPrivyVerification", () => {
     }));
   });
 
-  it("does not block phone auth when a linked Telegram route belongs to another member", async () => {
+  it("surfaces a secondary Telegram ownership conflict before issuing an invite", async () => {
     const secondaryTelegramTransactionCachePresence: boolean[] = [];
     const phoneMember = makeMember({ id: "member_phone_with_secondary_telegram" });
     const activeInvite = makeInvite(phoneMember, {
@@ -1818,7 +1818,6 @@ describe("completeHostedPrivyVerification", () => {
       inviteCode: "invite-phone-secondary-telegram",
       memberId: phoneMember.id,
     });
-    const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const prisma = asCompleteHostedPrivyVerificationPrisma({
       hostedInvite: {
         create: vi.fn().mockResolvedValue(activeInvite),
@@ -1846,38 +1845,83 @@ describe("completeHostedPrivyVerification", () => {
       },
     });
 
-    try {
-      await expect(
-        completeHostedPrivyVerification({
-          authMethod: "phone",
-          identity: makeIdentity({
-            telegram: {
-              firstName: "Alice",
-              lastName: null,
-              photoUrl: null,
-              telegramUserId: "456",
-              username: "alice",
-            },
-          }),
-          now: NOW,
-          prisma,
+    await expect(
+      completeHostedPrivyVerification({
+        authMethod: "phone",
+        identity: makeIdentity({
+          telegram: {
+            firstName: "Alice",
+            lastName: null,
+            photoUrl: null,
+            telegramUserId: "456",
+            username: "alice",
+          },
         }),
-      ).resolves.toMatchObject({
-        inviteCode: "invite-phone-secondary-telegram",
-        memberId: phoneMember.id,
-        stage: "checkout",
-      });
-      expect(consoleWarn).toHaveBeenCalledWith(
-        "Hosted Privy secondary telegram binding sync failed.",
-      );
-    } finally {
-      consoleWarn.mockRestore();
-    }
+        now: NOW,
+        prisma,
+      }),
+    ).rejects.toMatchObject({
+      code: "TELEGRAM_IDENTITY_CONFLICT",
+      httpStatus: 409,
+    });
 
     expect(prisma.hostedMember.create).not.toHaveBeenCalled();
+    expect(prisma.hostedInvite.create).not.toHaveBeenCalled();
     expect(prisma.hostedMemberRouting.upsert).not.toHaveBeenCalled();
     expect(secondaryTelegramTransactionCachePresence).toEqual([true]);
     expect(getHostedDomainRootUnwrapCache()).toBeUndefined();
+  });
+
+  it("writes a secondary Telegram binding exactly once during successful phone auth", async () => {
+    const phoneMember = makeMember({ id: "member_phone_with_secondary_telegram" });
+    const activeInvite = makeInvite(phoneMember, {
+      channel: "web",
+      id: "invite_phone_secondary_telegram",
+      inviteCode: "invite-phone-secondary-telegram",
+      memberId: phoneMember.id,
+    });
+    const telegramRoutingUpsert = vi.fn(async () => ({}));
+    const prisma = asCompleteHostedPrivyVerificationPrisma({
+      hostedInvite: {
+        create: vi.fn().mockResolvedValue(activeInvite),
+        findFirst: vi.fn().mockResolvedValue(null),
+        update: vi.fn(),
+      },
+      hostedMember: {
+        create: vi.fn(),
+        findUnique: vi.fn().mockImplementation(async ({ where }: { where: Record<string, unknown> }) => (
+          where.id === phoneMember.id || where.phoneLookupKey ? phoneMember : null
+        )),
+      },
+      hostedMemberRouting: {
+        findMany: vi.fn().mockResolvedValue([]),
+        findUnique: vi.fn().mockResolvedValue(null),
+        upsert: telegramRoutingUpsert,
+      },
+    });
+
+    await expect(
+      completeHostedPrivyVerification({
+        authMethod: "phone",
+        identity: makeIdentity({
+          telegram: {
+            firstName: "Alice",
+            lastName: null,
+            photoUrl: null,
+            telegramUserId: "456",
+            username: "alice",
+          },
+        }),
+        now: NOW,
+        prisma,
+      }),
+    ).resolves.toMatchObject({
+      inviteCode: "invite-phone-secondary-telegram",
+      memberId: phoneMember.id,
+      stage: "checkout",
+    });
+
+    expect(telegramRoutingUpsert).toHaveBeenCalledTimes(1);
   });
 
   it("does not block phone auth when a linked email belongs to another member", async () => {

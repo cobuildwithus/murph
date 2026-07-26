@@ -2467,6 +2467,27 @@ describe("Linq explicit external-thread routing", () => {
     expect(prisma.hostedThreadContainerParticipant.findFirst).not.toHaveBeenCalled();
   });
 
+  it("classifies an echoed own message on an inactive routed thread without side effects", async () => {
+    const prisma = createPrisma({
+      routeContainerActive: false,
+      routeContainerMemberId: "member_thread_container_123",
+      routeParticipantActive: true,
+    });
+
+    const plan = await planHostedOnboardingLinqWebhook({
+      event: buildLinqMessageReceivedEvent({ isFromMe: true }),
+      prisma: prisma as never,
+    });
+
+    expect(plan.response).toMatchObject({
+      ignored: true,
+      ok: true,
+      reason: "thread-container-inactive",
+    });
+    expect(mailboxStore.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+    expect(prisma.hostedThreadContainerParticipant.findFirst).not.toHaveBeenCalled();
+  });
+
   it("ignores routed thread traffic when the route owner is inactive", async () => {
     const prisma = createPrisma({
       routeContainerMemberId: "member_thread_container_123",

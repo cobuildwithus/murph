@@ -2229,6 +2229,7 @@ test('sendAssistantNotificationLocal isolates detached provider results without 
     serviceTier: 'flex',
     turnPolicy: {
       kind: 'maintenance-exact-skip',
+      maintenanceProfile: 'member-memory',
       privateSummary: 'No notification required.',
     },
     vault: '/vaults/skip',
@@ -2252,6 +2253,7 @@ test('sendAssistantNotificationLocal isolates detached provider results without 
           'memories.use_memories=false',
           'memories.generate_memories=false',
         ],
+        maintenanceProfile: 'member-memory',
         prompt: expect.stringContaining(
           '## Conversation evidence (engine-supplied, bounded, last 7 days)',
         ),
@@ -2301,6 +2303,40 @@ test('sendAssistantNotificationLocal isolates detached provider results without 
   )
 
   vi.clearAllMocks()
+
+  const groupMaintenanceResult = await sendAssistantNotificationLocal({
+    instructions: 'Refresh the group room model.',
+    serviceTier: 'flex',
+    turnPolicy: {
+      kind: 'maintenance-exact-skip',
+      maintenanceProfile: 'group-room-model',
+      privateSummary: 'No notification required.',
+    },
+    vault: '/vaults/skip',
+  })
+
+  expect(groupMaintenanceResult.response).toBeNull()
+  expect(mocks.executeCodexTurnWithRecovery).toHaveBeenCalledWith(
+    expect.objectContaining({
+      hostedToolContext: null,
+      input: expect.objectContaining({
+        maintenanceProfile: 'group-room-model',
+        prompt: expect.stringContaining(
+          '## Group conversation evidence (engine-supplied, bounded, last 7 days)',
+        ),
+      }),
+      profile: {
+        nativeResumePolicy: 'disabled',
+        promptProfile: 'maintenance',
+        threadScope: 'isolated-thread',
+        toolProfile: 'maintenance-turn',
+      },
+    }),
+  )
+  expect(mocks.persistAssistantTurnAndSession).not.toHaveBeenCalled()
+  expect(deliverMessage).not.toHaveBeenCalled()
+
+  vi.clearAllMocks()
   mocks.executeCodexTurnWithRecovery.mockResolvedValueOnce({
     kind: 'succeeded',
     providerTurn: {
@@ -2327,6 +2363,7 @@ test('sendAssistantNotificationLocal isolates detached provider results without 
       instructions: 'Run overnight memory maintenance.',
       turnPolicy: {
         kind: 'maintenance-exact-skip',
+        maintenanceProfile: 'member-memory',
         privateSummary: 'No notification required.',
       },
       vault: '/vaults/skip',
@@ -2338,6 +2375,68 @@ test('sendAssistantNotificationLocal isolates detached provider results without 
     code: 'ASSISTANT_NOTIFICATION_MAINTENANCE_DECISION_INVALID',
   })
   expect((invalidMaintenanceError as Error & {
+    details?: Record<string, unknown>
+  }).details).toMatchObject({
+    assistantNotificationProviderNonReplayableWork: true,
+    assistantNotificationStage: 'provider',
+  })
+  expect(mocks.persistAssistantTurnAndSession).not.toHaveBeenCalled()
+  expect(deliverMessage).not.toHaveBeenCalled()
+
+  vi.clearAllMocks()
+  mocks.executeCodexTurnWithRecovery.mockResolvedValueOnce({
+    kind: 'succeeded',
+    providerTurn: {
+      ...createProviderResult({
+        rawEvents: [
+          {
+            method: 'item/completed',
+            params: {
+              item: {
+                arguments: {
+                  action: 'upsert',
+                  body: '## Tips\n- one useful tip',
+                  expectedDigest: 'a'.repeat(64),
+                },
+                id: 'group-room-model-write',
+                namespace: 'murph',
+                success: true,
+                tool: 'group_room_model',
+                type: 'dynamicToolCall',
+              },
+            },
+          },
+        ],
+        response: JSON.stringify({
+          kind: 'send_message',
+          privateSummary: 'Should not send.',
+          text: 'Visible maintenance message.',
+        }),
+        session: providerSession,
+      }),
+      additionalUsages: [],
+    },
+  })
+
+  let invalidGroupMaintenanceError: unknown
+  try {
+    await sendAssistantNotificationLocal({
+      instructions: 'Refresh the group room model.',
+      serviceTier: 'flex',
+      turnPolicy: {
+        kind: 'maintenance-exact-skip',
+        maintenanceProfile: 'group-room-model',
+        privateSummary: 'No notification required.',
+      },
+      vault: '/vaults/skip',
+    })
+  } catch (error) {
+    invalidGroupMaintenanceError = error
+  }
+  expect(invalidGroupMaintenanceError).toMatchObject({
+    code: 'ASSISTANT_NOTIFICATION_MAINTENANCE_DECISION_INVALID',
+  })
+  expect((invalidGroupMaintenanceError as Error & {
     details?: Record<string, unknown>
   }).details).toMatchObject({
     assistantNotificationProviderNonReplayableWork: true,
@@ -2373,6 +2472,7 @@ test('sendAssistantNotificationLocal isolates detached provider results without 
       instructions: 'Run overnight memory maintenance.',
       turnPolicy: {
         kind: 'maintenance-exact-skip',
+        maintenanceProfile: 'member-memory',
         privateSummary: 'No notification required.',
       },
       vault: '/vaults/skip',
@@ -2452,6 +2552,7 @@ test('sendAssistantNotificationLocal gives hosted capabilities only to real sche
     scheduledOccurrenceAt: '2026-07-18T14:00:00.000Z',
     turnPolicy: {
       kind: 'maintenance-exact-skip',
+      maintenanceProfile: 'member-memory',
       privateSummary: 'No notification required.',
     },
     vault: '/vaults/notification-device-scope',

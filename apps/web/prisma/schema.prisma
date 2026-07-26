@@ -619,6 +619,8 @@ model HostedWebSession {
   @@index([privyUserId])
   @@index([expiresAt])
   @@index([revokedAt])
+  @@index([expiresAt, id])
+  @@index([revokedAt, id])
   @@map("hosted_web_session")
 }
 
@@ -910,6 +912,8 @@ model HostedMailboxItem {
   @@index([userId, lane, laneSeq])
   @@index([userId, kind, createdAt])
   @@index([userId, expiresAt])
+  @@index([expiresAt, id])
+  @@index([createdAt, id])
   @@map("hosted_mailbox_item")
 }
 
@@ -956,6 +960,7 @@ model HostedIngressLatencyTrace {
   @@index([source, acceptedAt])
   @@index([source, providerStartAt])
   @@index([userId, acceptedAt])
+  @@index([acceptedAt, id])
   @@index([assistantInputId])
   @@index([runtimeAttemptId])
   @@index([linqDeliveryId])
@@ -1023,6 +1028,7 @@ model HostedWorkspace {
   nextWakeReason         String?      @map("next_wake_reason")
   inboxMediaRetentionWakeAt DateTime? @map("inbox_media_retention_wake_at")
   inboxMediaRetentionSignalAttemptedAt DateTime? @map("inbox_media_retention_signal_attempted_at")
+  acceptedAttemptFailureRecheckClaimedAt DateTime? @map("accepted_attempt_failure_recheck_claimed_at")
   redactedStatusJson     Json?        @map("redacted_status_json")
   checkpointedAt         DateTime?    @map("checkpointed_at")
   createdAt              DateTime     @default(now()) @map("created_at")
@@ -1058,6 +1064,7 @@ model HostedRuntimeLog {
   @@index([attemptId, eventCode, at])
   @@index([level, at])
   @@index([component, at])
+  @@index([at, id])
   @@map("hosted_runtime_log")
 }
 
@@ -1205,6 +1212,17 @@ model HostedGrowthDailySnapshot {
   outboundMessagesPriorDay Int? @map("outbound_messages_prior_day")
 
   @@map("hosted_growth_daily_snapshot")
+}
+
+/// Anonymous company-wide growth totals that must outlive member-scoped rows.
+/// The top-up total starts from retained rows at tracker cutover; it is not a
+/// complete pre-cutover purchase ledger. The database constrains this model to
+/// one `global` row.
+model HostedGrowthAggregate {
+  id                          String @id @db.VarChar(32)
+  trackedFulfilledUsageTopUps Int    @default(0) @map("tracked_fulfilled_usage_top_ups")
+
+  @@map("hosted_growth_aggregate")
 }
 
 model HostedLinqFirstContactAdmissionDecision {
@@ -1626,6 +1644,7 @@ model HostedLinqProviderEvent {
   @@index([phoneNumberLookupKey, providerCreatedAt])
   @@index([phoneNumberLookupKey, eventType, providerCreatedAt])
   @@index([messageLookupKey, providerCreatedAt])
+  @@index([receivedAt, eventId])
   @@index([deliveryStatus, providerCreatedAt])
   @@map("hosted_linq_provider_event")
 }

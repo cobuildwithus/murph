@@ -8,7 +8,10 @@ import type {
 import { buildHostedProviderAccountBlindIndex } from "../routing-index";
 import type { HostedPrismaTransactionClient } from "./types";
 
-const HOSTED_PROCESSED_WEBHOOK_TRACE_RETENTION_DAYS = 30;
+// Processed-trace retention belongs to the hourly hosted retention job. This
+// request-path store only claims, completes, or releases the one trace it is
+// handling; a global prune on every webhook made unrelated rows the cost of
+// serving a request.
 const MINIMIZED_HOSTED_WEBHOOK_TRACE_ACCOUNT_SENTINEL = "_minimized_";
 
 export class PrismaHostedWebhookTraceStore {
@@ -30,8 +33,6 @@ export class PrismaHostedWebhookTraceStore {
       externalAccountId: input.externalAccountId,
       provider: input.provider,
     });
-    await this.pruneProcessedWebhookTraces(this.prisma, new Date());
-
     return this.prisma.$transaction(async (tx) => {
       const created = await tx.deviceWebhookTrace.createMany({
         data: {
@@ -127,7 +128,6 @@ export class PrismaHostedWebhookTraceStore {
       },
     });
 
-    await this.pruneProcessedWebhookTraces(prisma, new Date());
     return result.count > 0;
   }
 
@@ -138,26 +138,6 @@ export class PrismaHostedWebhookTraceStore {
         traceId,
         claimToken,
         status: "processing",
-      },
-    });
-
-    await this.pruneProcessedWebhookTraces(this.prisma, new Date());
-  }
-
-  private async pruneProcessedWebhookTraces(
-    prisma: HostedPrismaTransactionClient | PrismaClient,
-    referenceNow: Date,
-  ): Promise<void> {
-    const retentionCutoff = new Date(
-      referenceNow.getTime() - HOSTED_PROCESSED_WEBHOOK_TRACE_RETENTION_DAYS * 86_400_000,
-    );
-
-    await prisma.deviceWebhookTrace.deleteMany({
-      where: {
-        status: "processed",
-        receivedAt: {
-          lt: retentionCutoff,
-        },
       },
     });
   }

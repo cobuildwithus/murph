@@ -195,6 +195,8 @@ import {
 import type { AssistantExecutionContext } from '../src/assistant/execution-context.ts'
 import type { AssistantNotificationInput } from '../src/assistant/notification-turn.ts'
 import {
+  MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_AUTOMATION_ID,
+  MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_PRIVATE_SUMMARY,
   MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
   MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_PRIVATE_SUMMARY,
 } from '../src/assistant/managed-automations.ts'
@@ -2437,9 +2439,53 @@ describe('assistant cron runtime orchestration', () => {
         threadIsDirect: null,
         turnPolicy: {
           kind: 'maintenance-exact-skip',
+          maintenanceProfile: 'member-memory',
           privateSummary: MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_PRIVATE_SUMMARY,
         },
         turnTrigger: 'automation-cron',
+      }),
+    )
+  })
+
+  it('runs retained group room-model maintenance silently with the group evidence profile', async () => {
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-group-room-model-',
+    )
+    addGroupRoomModelConsolidationAutomation(vaultRoot)
+
+    const result = await runAssistantCronJobNow({
+      executionContext: {
+        hosted: {
+          memberId: 'member-group-runtime',
+          userEnvKeys: [],
+        },
+      },
+      job: MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_AUTOMATION_ID,
+      vault: vaultRoot,
+    })
+
+    expect(result.run).toMatchObject({
+      outcome: 'no_op',
+      reason: 'no_delivery',
+      status: 'succeeded',
+    })
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bindingDeliveryTarget: undefined,
+        channel: null,
+        deliveryTarget: null,
+        identityId: null,
+        instructions: 'Refresh the group room model.',
+        participantId: null,
+        responsePolicy: null,
+        sessionId: null,
+        threadId: null,
+        threadIsDirect: null,
+        turnPolicy: {
+          kind: 'maintenance-exact-skip',
+          maintenanceProfile: 'group-room-model',
+          privateSummary: MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_PRIVATE_SUMMARY,
+        },
       }),
     )
   })
@@ -2541,6 +2587,7 @@ describe('assistant cron runtime orchestration', () => {
         threadIsDirect: null,
         turnPolicy: {
           kind: 'maintenance-exact-skip',
+          maintenanceProfile: 'member-memory',
           privateSummary: MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_PRIVATE_SUMMARY,
         },
       }),
@@ -9482,6 +9529,39 @@ function addManagedResearchAutomation(input: {
     summary: null,
     tags: ['assistant', 'scheduled', 'murph-managed', input.tag],
     title: input.title ?? slug,
+    updatedAt: '2026-04-08T08:00:00.000Z',
+  })
+}
+
+function addGroupRoomModelConsolidationAutomation(vaultRoot: string): void {
+  getVaultAutomationStore(vaultRoot).push({
+    automationId: MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_AUTOMATION_ID,
+    continuityPolicy: 'fresh',
+    createdAt: '2026-04-08T08:00:00.000Z',
+    instructions: 'Refresh the group room model.',
+    route: {
+      channel: 'telegram',
+      deliverySource: null,
+      deliveryTarget: 'retained-group-room',
+      identityId: null,
+      participantId: null,
+      threadId: 'retained-group-room',
+      threadIsDirect: false,
+    },
+    schedule: {
+      kind: 'cron',
+      expression: '0 4 * * *',
+    },
+    slug: 'group-room-model-consolidation',
+    status: 'active',
+    summary: null,
+    tags: [
+      'assistant',
+      'scheduled',
+      'murph-managed:group-room-model-consolidation',
+      'runtime-maintenance',
+    ],
+    title: 'Group room model consolidation',
     updatedAt: '2026-04-08T08:00:00.000Z',
   })
 }
