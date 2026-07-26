@@ -59,6 +59,16 @@ export interface HostedThreadRouteSnapshot {
   channel: HostedThreadRouteChannel;
   container: HostedMemberCoreState;
   containerMemberId: string;
+  /**
+   * Present on snapshots read from the canonical route store. It remains
+   * optional so narrow in-memory route projections used by non-routing callers
+   * do not become a second source of truth.
+   */
+  deliveryRouteState?: {
+    deliveryRouteEncryptedPresent: boolean;
+    threadIdentityLookupKey: string;
+    threadLookupKey: string;
+  };
   owner: HostedThreadRouteOwnerState;
 }
 
@@ -107,6 +117,9 @@ export async function readHostedThreadRouteByThreadIdentity(input: {
         },
       },
       containerMemberId: true,
+      deliveryRouteEncrypted: true,
+      threadIdentityLookupKey: true,
+      threadLookupKey: true,
     },
     where: {
       channel: input.channel,
@@ -144,12 +157,41 @@ export async function readHostedThreadRouteByThreadIdentity(input: {
     });
   }
 
+  const deliveryRouteState =
+    typeof row.threadIdentityLookupKey === "string"
+    && typeof row.threadLookupKey === "string"
+    && (
+      typeof row.deliveryRouteEncrypted === "string"
+      || row.deliveryRouteEncrypted === null
+    )
+      ? {
+          deliveryRouteEncryptedPresent:
+            typeof row.deliveryRouteEncrypted === "string"
+            && row.deliveryRouteEncrypted.length > 0,
+          threadIdentityLookupKey: row.threadIdentityLookupKey,
+          threadLookupKey: row.threadLookupKey,
+        }
+      : null;
+
   return {
     channel: row.channel,
     container: row.container.member,
     containerMemberId: row.containerMemberId,
+    ...(deliveryRouteState ? { deliveryRouteState } : {}),
     owner: row.container.owner,
   };
+}
+
+export function requiresHostedThreadDeliveryRouteRefresh(input: {
+  accountLookupKey: string | null | undefined;
+  route: HostedThreadRouteSnapshot;
+  threadId: string | number | null | undefined;
+}): boolean {
+  // Ciphertext presence and matching blinded lookup keys cannot prove that the
+  // encrypted material opens or still describes this route. Every canonical
+  // snapshot must reach the owner-aware refresh boundary, which validates
+  // before deciding to write.
+  return input.route.deliveryRouteState !== undefined;
 }
 
 export async function lockHostedThreadRouteByThreadIdentityTx(input: {

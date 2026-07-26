@@ -61,4 +61,11 @@ jobs:
           docker push "${{ steps.images.outputs.mirror }}"
 
       - name: Report published digest
-        run: docker image inspect --format '{{index .RepoDigests 0}}' "${{ steps.images.outputs.mirror }}"
+        run: |
+          set -euo pipefail
+          # RepoDigests holds every repo this image is known by, and the pulled
+          # upstream one sorts first, so select the mirror explicitly.
+          docker image inspect \
+            --format '{{range .RepoDigests}}{{println .}}{{end}}' \
+            "${{ steps.images.outputs.mirror }}" \
+            | grep "^ghcr.io/"

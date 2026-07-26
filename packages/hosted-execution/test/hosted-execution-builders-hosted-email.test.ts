@@ -141,6 +141,12 @@ describe("hosted execution wake builders", () => {
       deliveryDispatchMode: "queue-only" as const,
       deliveryDedupeToken: "signup-welcome:user_123",
       deliveryIdempotencyKey: "signup-welcome:user_123",
+      externalThreadRouteAuthority: {
+        accountLookupKey: "linq-account-key",
+        channel: "linq" as const,
+        containerMemberId: "thread-container",
+        threadId: "group-thread",
+      },
       firstContact: {
         markSeenOnDeliveryAccepted: true,
       },
@@ -173,6 +179,7 @@ describe("hosted execution wake builders", () => {
     });
 
     notification.firstContact.markSeenOnDeliveryAccepted = false;
+    notification.externalThreadRouteAuthority.threadId = "mutated-thread";
     notification.responsePolicy.text = "mutated";
     notification.route.delivery.source!.fromPhoneNumber = "+15550009999";
 
@@ -183,6 +190,12 @@ describe("hosted execution wake builders", () => {
         deliveryDispatchMode: "queue-only",
         deliveryDedupeToken: "signup-welcome:user_123",
         deliveryIdempotencyKey: "signup-welcome:user_123",
+        externalThreadRouteAuthority: {
+          accountLookupKey: "linq-account-key",
+          channel: "linq",
+          containerMemberId: "thread-container",
+          threadId: "group-thread",
+        },
         firstContact: {
           markSeenOnDeliveryAccepted: true,
         },

@@ -225,6 +225,7 @@ export interface HostedExecutionAssistantNotificationRequestedPayload {
   deliveryDedupeToken?: string | null;
   deliveryDispatchMode?: HostedExecutionAssistantNotificationDeliveryDispatchMode | null;
   deliveryIdempotencyKey?: string | null;
+  externalThreadRouteAuthority?: HostedExecutionExternalThreadRouteAuthority | null;
   firstContact?: HostedExecutionAssistantNotificationFirstContactPolicy | null;
   instructions: string;
   responsePolicy?: HostedExecutionAssistantNotificationResponsePolicy | null;

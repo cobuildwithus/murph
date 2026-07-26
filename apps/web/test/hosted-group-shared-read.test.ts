@@ -2,6 +2,10 @@ import { Prisma, type PrismaClient } from "@prisma/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   buildHostedVaultShareProjectionScopeKey,
+  HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS,
+  HOSTED_VAULT_SHARE_SOURCE_REVISION_MAX_LENGTH,
+  HOSTED_VAULT_SHARE_WORKOUT_KIND_MAX_LENGTH,
+  HOSTED_VAULT_SHARE_WORKOUTS_MAX_PER_DAY,
   hostedVaultShareProjectionKindToScope,
   type HostedVaultShareDeliveryRecord,
 } from "@murphai/hosted-execution/vault-share";
@@ -21,15 +25,38 @@ import {
   readHostedGroupSharedDataByRuntimeMemberId,
 } from "@/src/lib/hosted-groups/group-store";
 import {
+  HOSTED_VAULT_SHARE_PROJECTION_SNAPSHOT_MAX_BYTES,
+  parseHostedVaultShareProjectionSnapshot,
   serializeHostedVaultShareProjectionSnapshot,
 } from "@/src/lib/hosted-vault-share/projection-snapshot";
 
 const RUNTIME_MEMBER_ID = "member_group_runtime";
 const PROFILE_SCOPE = hostedVaultShareProjectionKindToScope("profile-name.v0");
+const PROTEIN_SCOPE = hostedVaultShareProjectionKindToScope("protein-days.v0");
 const STEPS_SCOPE = hostedVaultShareProjectionKindToScope("steps-days.v0");
+const DEEP_SLEEP_SCOPE = hostedVaultShareProjectionKindToScope("deep-sleep-days.v0");
+const REM_SLEEP_SCOPE = hostedVaultShareProjectionKindToScope("rem-sleep-days.v0");
+const WORKOUTS_SCOPE = hostedVaultShareProjectionKindToScope(
+  "workouts.v0",
+);
 const DEVICE_SCOPE = hostedVaultShareProjectionKindToScope("device-sync-status.v0");
+const PROTEIN_KEY = buildHostedVaultShareProjectionScopeKey(PROTEIN_SCOPE);
 const STEPS_KEY = buildHostedVaultShareProjectionScopeKey(STEPS_SCOPE);
+const DEEP_SLEEP_KEY = buildHostedVaultShareProjectionScopeKey(DEEP_SLEEP_SCOPE);
+const REM_SLEEP_KEY = buildHostedVaultShareProjectionScopeKey(REM_SLEEP_SCOPE);
+const WORKOUTS_KEY = buildHostedVaultShareProjectionScopeKey(
+  WORKOUTS_SCOPE,
+);
 const DEVICE_KEY = buildHostedVaultShareProjectionScopeKey(DEVICE_SCOPE);
+
+type TestProjectionScope =
+  | typeof PROFILE_SCOPE
+  | typeof PROTEIN_SCOPE
+  | typeof STEPS_SCOPE
+  | typeof DEEP_SLEEP_SCOPE
+  | typeof REM_SLEEP_SCOPE
+  | typeof WORKOUTS_SCOPE
+  | typeof DEVICE_SCOPE;
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -44,7 +71,7 @@ function shareRow(input: {
   ciphertext?: string | null;
   id: string;
   memberId: string;
-  projectionScope: typeof PROFILE_SCOPE | typeof STEPS_SCOPE | typeof DEVICE_SCOPE;
+  projectionScope: TestProjectionScope;
 }) {
   return {
     destinationMemberId: RUNTIME_MEMBER_ID,
@@ -62,7 +89,7 @@ function shareRow(input: {
 function snapshot(input: {
   id: string;
   memberId: string;
-  projectionScope: typeof PROFILE_SCOPE | typeof STEPS_SCOPE;
+  projectionScope: TestProjectionScope;
   records: readonly HostedVaultShareDeliveryRecord[];
 }): string {
   const share = shareRow(input);
@@ -131,6 +158,80 @@ function createPrisma(input: {
     transaction,
   };
 }
+
+describe("workouts.v0 snapshot bounds", () => {
+  it("keeps the maximum parser-valid seven-day workout snapshot within its byte limit", () => {
+    // This finite in-range value exercises the longest JSON number spelling used
+    // by the bounded duration field rather than relying only on integer minutes.
+    const maximumWidthMinutes = 0.0000030024105450300988;
+    expect(JSON.stringify(maximumWidthMinutes)).toHaveLength(24);
+
+    const records = Array.from(
+      { length: HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS },
+      (_, dayIndex): HostedVaultShareDeliveryRecord => {
+        const date = `2026-07-${String(24 - dayIndex).padStart(2, "0")}`;
+        return {
+          data: {
+            calendarClosedThroughDate: "2026-07-23",
+            date,
+            timeSemantics: "canonical-event-zone-or-vault-zone.v0",
+            workouts: Array.from(
+              { length: HOSTED_VAULT_SHARE_WORKOUTS_MAX_PER_DAY },
+              (_, workoutIndex) => ({
+                kind: "x".repeat(HOSTED_VAULT_SHARE_WORKOUT_KIND_MAX_LENGTH),
+                minutes: maximumWidthMinutes,
+                startLocalMs: 86_399_999 - workoutIndex,
+              }),
+            ),
+          },
+          occurredAt: `${date}T00:00:00.000Z`,
+          recordKey: date,
+          sourceRevision: "A".repeat(
+            HOSTED_VAULT_SHARE_SOURCE_REVISION_MAX_LENGTH,
+          ),
+        };
+      },
+    );
+
+    const serialized = snapshot({
+      id: "share_workouts_maximum",
+      memberId: "member_workouts_maximum",
+      projectionScope: WORKOUTS_SCOPE,
+      records,
+    });
+    const encoder = new TextEncoder();
+
+    const snapshotBytes = encoder.encode(serialized).byteLength;
+    expect(snapshotBytes).toBe(16_067);
+    expect(snapshotBytes).toBeLessThanOrEqual(
+      HOSTED_VAULT_SHARE_PROJECTION_SNAPSHOT_MAX_BYTES,
+    );
+  });
+
+  it("rejects an oversized snapshot before parsing or publishing any records", () => {
+    const share = shareRow({
+      id: "share_workouts_oversized",
+      memberId: "member_workouts_oversized",
+      projectionScope: WORKOUTS_SCOPE,
+    });
+
+    expect(() =>
+      parseHostedVaultShareProjectionSnapshot({
+        plaintext: "x".repeat(
+          HOSTED_VAULT_SHARE_PROJECTION_SNAPSHOT_MAX_BYTES + 1,
+        ),
+        share: {
+          destinationMemberId: share.destinationMemberId,
+          grantorMemberId: share.grantorMemberId,
+          id: share.id,
+          projectionKind: share.projectionKind,
+          projectionScope: WORKOUTS_SCOPE,
+          projectionScopeKey: share.projectionScopeKey,
+        },
+      })
+    ).toThrow(/snapshot is too large/u);
+  });
+});
 
 describe("readHostedGroupSharedDataByRuntimeMemberId", () => {
   it("returns scoped participant keys and the complete matrix when names collide", async () => {
@@ -282,6 +383,94 @@ describe("readHostedGroupSharedDataByRuntimeMemberId", () => {
     }));
   });
 
+  it("returns the encrypted protein grant matrix without source or meal metadata", async () => {
+    const date = new Date(Date.now() - 24 * 60 * 60 * 1000)
+      .toISOString()
+      .slice(0, 10);
+    const proteinA = snapshot({
+      id: "share_protein_a",
+      memberId: "member_a",
+      projectionScope: PROTEIN_SCOPE,
+      records: [{
+        data: {
+          date,
+          metricKey: "protein-grams",
+          unit: "g",
+          value: 94,
+        },
+        occurredAt: `${date}T00:00:00.000Z`,
+        recordKey: date,
+        sourceRevision: "p".repeat(32),
+      }],
+    });
+    const proteinB = snapshot({
+      id: "share_protein_b",
+      memberId: "member_b",
+      projectionScope: PROTEIN_SCOPE,
+      records: [],
+    });
+    installCiphertexts({ proteinA, proteinB });
+    const { prisma } = createPrisma({
+      shares: [
+        shareRow({
+          ciphertext: "proteinA",
+          id: "share_protein_a",
+          memberId: "member_a",
+          projectionScope: PROTEIN_SCOPE,
+        }),
+        shareRow({
+          ciphertext: "proteinB",
+          id: "share_protein_b",
+          memberId: "member_b",
+          projectionScope: PROTEIN_SCOPE,
+        }),
+      ],
+    });
+
+    const result = await readHostedGroupSharedDataByRuntimeMemberId({
+      prisma,
+      projectionScopes: [PROTEIN_SCOPE],
+      runtimeMemberId: RUNTIME_MEMBER_ID,
+    });
+
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") throw new Error("expected ok result");
+    expect(result.requestedProjectionScopeKeys).toEqual([PROTEIN_KEY]);
+    expect(result.members[0]?.projections).toEqual([{
+      dataStatus: "available",
+      grantStatus: "granted",
+      projectionScope: PROTEIN_SCOPE,
+      projectionScopeKey: PROTEIN_KEY,
+      records: [{
+        data: {
+          date,
+          metricKey: "protein-grams",
+          unit: "g",
+          value: 94,
+        },
+        occurredAt: `${date}T00:00:00.000Z`,
+        recordKey: date,
+      }],
+    }]);
+    expect(result.members[1]?.projections).toEqual([{
+      dataStatus: "missing",
+      grantStatus: "granted",
+      projectionScope: PROTEIN_SCOPE,
+      projectionScopeKey: PROTEIN_KEY,
+      records: [],
+    }]);
+    expect(result.members[2]?.projections).toEqual([{
+      dataStatus: "missing",
+      grantStatus: "not_granted",
+      projectionScope: PROTEIN_SCOPE,
+      projectionScopeKey: PROTEIN_KEY,
+      records: [],
+    }]);
+    expect(JSON.stringify(result)).not.toContain("sourceRevision");
+    expect(JSON.stringify(result)).not.toContain("mealId");
+    expect(JSON.stringify(result)).not.toContain("externalRef");
+  });
+
   it("preserves an encrypted daily-metric zero as available shared data", async () => {
     const date = new Date(Date.now() - 24 * 60 * 60 * 1000)
       .toISOString()
@@ -332,6 +521,252 @@ describe("readHostedGroupSharedDataByRuntimeMemberId", () => {
           data: expect.objectContaining({ value: 0 }),
         })],
       })],
+    })]);
+  });
+
+  it("returns the complete sleep-stage and workout-timing member-by-scope matrix", async () => {
+    const date = new Date(Date.now() - 24 * 60 * 60 * 1000)
+      .toISOString()
+      .slice(0, 10);
+    const deepZero = snapshot({
+      id: "share_deep_a",
+      memberId: "member_a",
+      projectionScope: DEEP_SLEEP_SCOPE,
+      records: [{
+        data: {
+          date,
+          metricKey: "deep-sleep-minutes",
+          unit: "minutes",
+          value: 0,
+        },
+        occurredAt: `${date}T00:00:00.000Z`,
+        recordKey: date,
+        sourceRevision: "A".repeat(32),
+      }],
+    });
+    const remAvailable = snapshot({
+      id: "share_rem_a",
+      memberId: "member_a",
+      projectionScope: REM_SLEEP_SCOPE,
+      records: [{
+        data: {
+          date,
+          metricKey: "rem-sleep-minutes",
+          unit: "minutes",
+          value: 84,
+        },
+        occurredAt: `${date}T00:00:00.000Z`,
+        recordKey: date,
+        sourceRevision: "B".repeat(32),
+      }],
+    });
+    const workoutsAtMidnight = snapshot({
+      id: "share_workouts_a",
+      memberId: "member_a",
+      projectionScope: WORKOUTS_SCOPE,
+      records: [{
+        data: {
+          calendarClosedThroughDate: date,
+          date,
+          timeSemantics: "canonical-event-zone-or-vault-zone.v0",
+          workouts: [{ kind: "running", minutes: 30, startLocalMs: 0 }],
+        },
+        occurredAt: `${date}T00:00:00.000Z`,
+        recordKey: date,
+        sourceRevision: "C".repeat(32),
+      }],
+    });
+    const deepEmpty = snapshot({
+      id: "share_deep_b",
+      memberId: "member_b",
+      projectionScope: DEEP_SLEEP_SCOPE,
+      records: [],
+    });
+    installCiphertexts({ deepEmpty, deepZero, remAvailable, workoutsAtMidnight });
+    const { prisma } = createPrisma({
+      shares: [
+        shareRow({
+          ciphertext: "deepZero",
+          id: "share_deep_a",
+          memberId: "member_a",
+          projectionScope: DEEP_SLEEP_SCOPE,
+        }),
+        shareRow({
+          ciphertext: "remAvailable",
+          id: "share_rem_a",
+          memberId: "member_a",
+          projectionScope: REM_SLEEP_SCOPE,
+        }),
+        shareRow({
+          ciphertext: "workoutsAtMidnight",
+          id: "share_workouts_a",
+          memberId: "member_a",
+          projectionScope: WORKOUTS_SCOPE,
+        }),
+        shareRow({
+          ciphertext: "deepEmpty",
+          id: "share_deep_b",
+          memberId: "member_b",
+          projectionScope: DEEP_SLEEP_SCOPE,
+        }),
+        shareRow({
+          id: "share_rem_b",
+          memberId: "member_b",
+          projectionScope: REM_SLEEP_SCOPE,
+        }),
+        shareRow({
+          id: "share_workouts_c",
+          memberId: "member_c",
+          projectionScope: WORKOUTS_SCOPE,
+        }),
+      ],
+    });
+
+    const result = await readHostedGroupSharedDataByRuntimeMemberId({
+      prisma,
+      projectionScopes: [
+        DEEP_SLEEP_SCOPE,
+        REM_SLEEP_SCOPE,
+        WORKOUTS_SCOPE,
+      ],
+      runtimeMemberId: RUNTIME_MEMBER_ID,
+    });
+
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") throw new Error("expected ok result");
+    expect(result.requestedProjectionScopeKeys).toEqual([
+      DEEP_SLEEP_KEY,
+      REM_SLEEP_KEY,
+      WORKOUTS_KEY,
+    ]);
+    expect(result.members).toHaveLength(3);
+    for (const member of result.members) {
+      expect(member.projections).toHaveLength(3);
+    }
+    expect(result.members[0]).toMatchObject({
+      memberId: "member_a",
+      participantId: "participant_a",
+      projections: [
+        {
+          dataStatus: "available",
+          grantStatus: "granted",
+          records: [{ data: { value: 0 } }],
+        },
+        {
+          dataStatus: "available",
+          grantStatus: "granted",
+          records: [{ data: { value: 84 } }],
+        },
+        {
+          dataStatus: "available",
+          grantStatus: "granted",
+          records: [{
+            data: {
+              workouts: [{ kind: "running", minutes: 30, startLocalMs: 0 }],
+            },
+          }],
+        },
+      ],
+    });
+    expect(result.members[1]?.projections).toEqual([
+      expect.objectContaining({
+        dataStatus: "missing",
+        grantStatus: "granted",
+        records: [],
+      }),
+      expect.objectContaining({
+        dataStatus: "missing",
+        grantStatus: "granted",
+        records: [],
+      }),
+      expect.objectContaining({
+        dataStatus: "missing",
+        grantStatus: "not_granted",
+        records: [],
+      }),
+    ]);
+    expect(result.members[2]?.projections).toEqual([
+      expect.objectContaining({
+        dataStatus: "missing",
+        grantStatus: "not_granted",
+        records: [],
+      }),
+      expect.objectContaining({
+        dataStatus: "missing",
+        grantStatus: "not_granted",
+        records: [],
+      }),
+      expect.objectContaining({
+        dataStatus: "missing",
+        grantStatus: "granted",
+        records: [],
+      }),
+    ]);
+    expect(JSON.stringify(result)).not.toContain("sourceRevision");
+  });
+
+  it("preserves an encrypted protein zero as available shared data", async () => {
+    const date = new Date(Date.now() - 24 * 60 * 60 * 1000)
+      .toISOString()
+      .slice(0, 10);
+    const proteinZero = snapshot({
+      id: "share_protein_zero",
+      memberId: "member_protein_zero",
+      projectionScope: PROTEIN_SCOPE,
+      records: [{
+        data: {
+          date,
+          metricKey: "protein-grams",
+          unit: "g",
+          value: 0,
+        },
+        occurredAt: `${date}T00:00:00.000Z`,
+        recordKey: date,
+      }],
+    });
+    installCiphertexts({ proteinZero });
+    const { prisma } = createPrisma({
+      group: {
+        members: [{
+          id: "participant_protein_zero",
+          memberId: "member_protein_zero",
+        }],
+      },
+      shares: [shareRow({
+        ciphertext: "proteinZero",
+        id: "share_protein_zero",
+        memberId: "member_protein_zero",
+        projectionScope: PROTEIN_SCOPE,
+      })],
+    });
+
+    const result = await readHostedGroupSharedDataByRuntimeMemberId({
+      prisma,
+      projectionScopes: [PROTEIN_SCOPE],
+      runtimeMemberId: RUNTIME_MEMBER_ID,
+    });
+
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") throw new Error("expected ok result");
+    expect(result.members).toEqual([expect.objectContaining({
+      memberId: "member_protein_zero",
+      participantId: "participant_protein_zero",
+      projections: [{
+        dataStatus: "available",
+        grantStatus: "granted",
+        projectionScope: PROTEIN_SCOPE,
+        projectionScopeKey: PROTEIN_KEY,
+        records: [{
+          data: {
+            date,
+            metricKey: "protein-grams",
+            unit: "g",
+            value: 0,
+          },
+          occurredAt: `${date}T00:00:00.000Z`,
+          recordKey: date,
+        }],
+      }],
     })]);
   });
 
