@@ -1,7 +1,4 @@
-import {
-  HostedBillingStatus,
-  HostedUsageCreditPurchaseStatus,
-} from "@prisma/client";
+import { HostedBillingStatus } from "@prisma/client";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -35,6 +32,9 @@ const mocks = vi.hoisted(() => ({
     findMany: vi.fn(),
     upsert: vi.fn(),
   },
+  hostedGrowthAggregate: {
+    findUniqueOrThrow: vi.fn(),
+  },
   hostedLinqDelivery: {
     count: vi.fn(),
   },
@@ -48,9 +48,6 @@ const mocks = vi.hoisted(() => ({
   hostedMemberBillingRef: {
     count: vi.fn(),
     findMany: vi.fn(),
-  },
-  hostedUsageCreditPurchase: {
-    count: vi.fn(),
   },
   requireActiveHostedAppSession: vi.fn(),
   requireActiveHostedAppSessionFromRequest: vi.fn(),
@@ -94,12 +91,12 @@ let growthCronRoute: GrowthCronRouteModule;
 const originalHostedOpsMemberIds = process.env.HOSTED_OPS_MEMBER_IDS;
 const prisma = {
   hostedAccountGroup: mocks.hostedAccountGroup,
+  hostedGrowthAggregate: mocks.hostedGrowthAggregate,
   hostedGrowthDailySnapshot: mocks.hostedGrowthDailySnapshot,
   hostedLinqDelivery: mocks.hostedLinqDelivery,
   hostedMailboxItem: mocks.hostedMailboxItem,
   hostedMember: mocks.hostedMember,
   hostedMemberBillingRef: mocks.hostedMemberBillingRef,
-  hostedUsageCreditPurchase: mocks.hostedUsageCreditPurchase,
 };
 
 const zeroStatusCounts = {
@@ -126,8 +123,10 @@ describe("hosted ops growth metrics", () => {
     mocks.getPrisma.mockReturnValue(prisma);
     mocks.hostedLinqDelivery.count.mockResolvedValue(0);
     mocks.hostedMailboxItem.count.mockResolvedValue(0);
+    mocks.hostedGrowthAggregate.findUniqueOrThrow.mockResolvedValue({
+      fulfilledUsageTopUps: 0,
+    });
     mocks.hostedMember.count.mockResolvedValue(0);
-    mocks.hostedUsageCreditPurchase.count.mockResolvedValue(0);
     mocks.requireActiveHostedAppSession.mockResolvedValue({
       member: { id: "member_ops" },
     });
@@ -489,7 +488,9 @@ describe("hosted ops growth metrics", () => {
     mocks.hostedMember.count
       .mockResolvedValueOnce(6)
       .mockResolvedValueOnce(3);
-    mocks.hostedUsageCreditPurchase.count.mockResolvedValueOnce(12);
+    mocks.hostedGrowthAggregate.findUniqueOrThrow.mockResolvedValueOnce({
+      fulfilledUsageTopUps: 12,
+    });
     mocks.hostedGrowthDailySnapshot.upsert.mockResolvedValueOnce(
       snapshotRow("2026-07-06", 2_900),
     );
@@ -628,7 +629,9 @@ describe("hosted ops growth metrics", () => {
     mocks.hostedMember.count
       .mockResolvedValueOnce(6)
       .mockResolvedValueOnce(3);
-    mocks.hostedUsageCreditPurchase.count.mockResolvedValueOnce(12);
+    mocks.hostedGrowthAggregate.findUniqueOrThrow.mockResolvedValueOnce({
+      fulfilledUsageTopUps: 12,
+    });
     mocks.hostedMember.findMany.mockResolvedValueOnce([]);
     mocks.hostedMemberBillingRef.findMany.mockResolvedValueOnce([]);
     mocks.hostedGrowthDailySnapshot.findMany.mockResolvedValueOnce([]);
@@ -645,9 +648,12 @@ describe("hosted ops growth metrics", () => {
     expect(dashboard.usageTopUps).toEqual({
       totalFulfilled: 12,
     });
-    expect(mocks.hostedUsageCreditPurchase.count).toHaveBeenCalledWith({
+    expect(mocks.hostedGrowthAggregate.findUniqueOrThrow).toHaveBeenCalledWith({
+      select: {
+        fulfilledUsageTopUps: true,
+      },
       where: {
-        status: HostedUsageCreditPurchaseStatus.fulfilled,
+        id: "global",
       },
     });
     expect(mocks.hostedMember.count.mock.calls[5]?.[0]).toMatchObject({
@@ -657,8 +663,8 @@ describe("hosted ops growth metrics", () => {
           some: {
             kind: "conversation.message",
             occurredAt: {
-              gte: new Date("2026-06-30T00:00:00.000Z"),
-              lt: new Date("2026-07-07T00:00:00.000Z"),
+              gte: new Date("2026-06-29T12:00:00.000Z"),
+              lt: new Date("2026-07-06T12:00:00.000Z"),
             },
           },
         },
@@ -672,8 +678,8 @@ describe("hosted ops growth metrics", () => {
           some: {
             kind: "conversation.message",
             occurredAt: {
-              gte: new Date("2026-06-23T00:00:00.000Z"),
-              lt: new Date("2026-06-30T00:00:00.000Z"),
+              gte: new Date("2026-06-22T12:00:00.000Z"),
+              lt: new Date("2026-06-29T12:00:00.000Z"),
             },
           },
         },
@@ -681,6 +687,59 @@ describe("hosted ops growth metrics", () => {
       },
     });
   });
+
+  it.each([
+    new Date("2026-07-06T00:05:00.000Z"),
+    new Date("2026-07-06T12:05:00.000Z"),
+  ])(
+    "compares equal rolling active-member windows at %s",
+    async (now) => {
+      queueCurrentMetricMocks();
+      mocks.hostedMember.count
+        .mockResolvedValueOnce(7)
+        .mockResolvedValueOnce(7);
+      mocks.hostedGrowthAggregate.findUniqueOrThrow.mockResolvedValueOnce({
+        fulfilledUsageTopUps: 12,
+      });
+      mocks.hostedMember.findMany.mockResolvedValueOnce([]);
+      mocks.hostedMemberBillingRef.findMany.mockResolvedValueOnce([]);
+      mocks.hostedGrowthDailySnapshot.findMany.mockResolvedValueOnce([]);
+      mocks.hostedMemberBillingRef.count
+        .mockResolvedValueOnce(0)
+        .mockResolvedValueOnce(0);
+
+      const dashboard = await readHostedGrowthDashboard(now);
+
+      expect(dashboard.activeMembers).toEqual({
+        trailing7Days: 7,
+        wowPercent: 0,
+      });
+      expect(mocks.hostedMember.count.mock.calls[5]?.[0]).toMatchObject({
+        where: {
+          hostedMailboxItems: {
+            some: {
+              occurredAt: {
+                gte: addUtcDays(now, -7),
+                lt: now,
+              },
+            },
+          },
+        },
+      });
+      expect(mocks.hostedMember.count.mock.calls[6]?.[0]).toMatchObject({
+        where: {
+          hostedMailboxItems: {
+            some: {
+              occurredAt: {
+                gte: addUtcDays(now, -14),
+                lt: addUtcDays(now, -7),
+              },
+            },
+          },
+        },
+      });
+    },
+  );
 
   it("leads the scorecard with weekly revenue growth and keeps usage context honest", () => {
     const scorecardProps = {

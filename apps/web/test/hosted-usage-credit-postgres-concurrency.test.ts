@@ -169,6 +169,20 @@ async function cleanupUsageCreditFixture(
   }
 }
 
+async function readFulfilledUsageTopUps(
+  prisma: PrismaClient,
+): Promise<number> {
+  const aggregate = await prisma.hostedGrowthAggregate.findUniqueOrThrow({
+    select: {
+      fulfilledUsageTopUps: true,
+    },
+    where: {
+      id: "global",
+    },
+  });
+  return aggregate.fulfilledUsageTopUps;
+}
+
 async function readBackendPid(tx: Prisma.TransactionClient): Promise<number> {
   const rows = await tx.$queryRaw<Array<{ pid: number }>>`
     SELECT pg_backend_pid() AS pid
@@ -220,6 +234,9 @@ describe.skipIf(!runPostgresConcurrencyProof)(
   () => {
     it("grants one ledger entry when two grant replays race", async () => {
       const fixture = await createUsageCreditFixture();
+      const initialFulfilledUsageTopUps = await readFulfilledUsageTopUps(
+        fixture.observer,
+      );
       const paidAt = new Date("2026-07-16T12:01:00.000Z");
       const firstGranted = createDeferred();
       const releaseFirstGrant = createDeferred();
@@ -279,12 +296,114 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           beneficiarySequence: 1n,
           kind: "purchase_grant",
         }]);
+        await expect(
+          readFulfilledUsageTopUps(fixture.observer),
+        ).resolves.toBe(initialFulfilledUsageTopUps + 1);
       } finally {
         releaseFirstGrant.resolve();
         await Promise.allSettled([
           firstTransaction,
           ...(replayTransaction ? [replayTransaction] : []),
         ]);
+        await cleanupUsageCreditFixture(fixture);
+      }
+    });
+
+    it("rolls back the lifetime count and retains it after member rows are deleted", async () => {
+      const fixture = await createUsageCreditFixture();
+      const initialFulfilledUsageTopUps = await readFulfilledUsageTopUps(
+        fixture.observer,
+      );
+      const paidAt = new Date("2026-07-16T12:08:00.000Z");
+
+      try {
+        await expect(fixture.firstClient.$transaction(async (tx) => {
+          await grantHostedUsageCreditForPurchaseTx({
+            paidAt,
+            purchaseId: fixture.purchaseId,
+            tx,
+          });
+          throw new Error("force growth aggregate rollback");
+        }, transactionOptions)).rejects.toThrow(
+          "force growth aggregate rollback",
+        );
+        await expect(
+          readFulfilledUsageTopUps(fixture.observer),
+        ).resolves.toBe(initialFulfilledUsageTopUps);
+        await expect(
+          fixture.observer.hostedUsageCreditPurchase.findUniqueOrThrow({
+            select: {
+              status: true,
+            },
+            where: {
+              id: fixture.purchaseId,
+            },
+          }),
+        ).resolves.toEqual({
+          status: HostedUsageCreditPurchaseStatus.created,
+        });
+
+        await expect(fixture.firstClient.$transaction((tx) =>
+          grantHostedUsageCreditForPurchaseTx({
+            paidAt,
+            purchaseId: fixture.purchaseId,
+            tx,
+          }), transactionOptions)
+        ).resolves.toMatchObject({
+          granted: true,
+        });
+        await expect(fixture.secondClient.$transaction((tx) =>
+          grantHostedUsageCreditForPurchaseTx({
+            paidAt,
+            purchaseId: fixture.purchaseId,
+            tx,
+          }), transactionOptions)
+        ).resolves.toMatchObject({
+          granted: false,
+        });
+        await expect(
+          readFulfilledUsageTopUps(fixture.observer),
+        ).resolves.toBe(initialFulfilledUsageTopUps + 1);
+
+        await fixture.thirdClient.$transaction(async (tx) => {
+          await tx.hostedUsageCreditEntry.deleteMany({
+            where: {
+              beneficiaryMemberId: fixture.beneficiaryMemberId,
+            },
+          });
+          await tx.hostedUsageCreditPurchase.deleteMany({
+            where: {
+              beneficiaryMemberId: fixture.beneficiaryMemberId,
+            },
+          });
+          await tx.hostedMember.deleteMany({
+            where: {
+              id: fixture.beneficiaryMemberId,
+            },
+          });
+        }, transactionOptions);
+
+        await expect(Promise.all([
+          fixture.observer.hostedMember.count({
+            where: {
+              id: fixture.beneficiaryMemberId,
+            },
+          }),
+          fixture.observer.hostedUsageCreditPurchase.count({
+            where: {
+              beneficiaryMemberId: fixture.beneficiaryMemberId,
+            },
+          }),
+          fixture.observer.hostedUsageCreditEntry.count({
+            where: {
+              beneficiaryMemberId: fixture.beneficiaryMemberId,
+            },
+          }),
+        ])).resolves.toEqual([0, 0, 0]);
+        await expect(
+          readFulfilledUsageTopUps(fixture.observer),
+        ).resolves.toBe(initialFulfilledUsageTopUps + 1);
+      } finally {
         await cleanupUsageCreditFixture(fixture);
       }
     });

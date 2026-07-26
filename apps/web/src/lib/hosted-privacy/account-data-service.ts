@@ -242,6 +242,12 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
     note: "Deletes member-scoped included-allowance spend aggregates used by the hosted AI usage gate.",
   },
   {
+    slug: "prisma.hosted_growth_aggregate",
+    label: "Anonymous hosted growth totals",
+    deletion: "documented-retention",
+    note: "Retains one unjoinable company-wide fulfilled usage-top-up count with no member, payer, beneficiary, purchase, Stripe, event, or timestamp history. Successful fulfillment increments it atomically; account deletion cannot identify a person from it or decrement the lifetime total.",
+  },
+  {
     slug: "prisma.hosted_usage_credit_entry",
     label: "Hosted usage-credit ledger entries",
     deletion: "live-delete",

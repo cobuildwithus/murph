@@ -2,7 +2,6 @@ import "server-only";
 
 import {
   HostedBillingStatus,
-  HostedUsageCreditPurchaseStatus,
   type Prisma,
   type PrismaClient,
 } from "@prisma/client";
@@ -65,15 +64,16 @@ function activePaidFamilyMembershipWhere(): Prisma.HostedAccountGroupMembershipW
 type HostedGrowthPrisma = Pick<
   PrismaClient,
   | "hostedAccountGroup"
+  | "hostedGrowthAggregate"
   | "hostedGrowthDailySnapshot"
   | "hostedLinqDelivery"
   | "hostedMailboxItem"
   | "hostedMember"
   | "hostedMemberBillingRef"
-  | "hostedUsageCreditPurchase"
 >;
 
 const INBOUND_MESSAGE_MAILBOX_KIND = "conversation.message";
+const HOSTED_GROWTH_AGGREGATE_ID = "global";
 const OUTBOUND_LINQ_SENT_STATUSES = [
   "accepted",
   "delivered",
@@ -591,9 +591,11 @@ export async function readHostedGrowthDashboard(
   const todayStart = startOfUtcDay(now);
   const recentStart = addUtcDays(todayStart, -63);
   const dailyStart = addUtcDays(todayStart, -(DAILY_SERIES_DAYS - 1));
-  const currentSevenDayStart = addUtcDays(todayStart, -6);
-  const previousSevenDayStart = addUtcDays(todayStart, -13);
-  const currentSevenDayEnd = addUtcDays(todayStart, 1);
+  const currentCalendarSevenDayStart = addUtcDays(todayStart, -6);
+  const previousCalendarSevenDayStart = addUtcDays(todayStart, -13);
+  const currentCalendarSevenDayEnd = addUtcDays(todayStart, 1);
+  const activeMembersCurrentStart = addUtcDays(now, -7);
+  const activeMembersPreviousStart = addUtcDays(now, -14);
 
   const [
     current,
@@ -602,7 +604,7 @@ export async function readHostedGrowthDashboard(
     snapshots,
     matureStarted,
     matureConverted,
-    totalFulfilledUsageTopUps,
+    growthAggregate,
     activeMembersTrailing7Days,
     activeMembersPrevious7Days,
   ] = await Promise.all([
@@ -686,9 +688,12 @@ export async function readHostedGrowthDashboard(
         },
       },
     }),
-    prisma.hostedUsageCreditPurchase.count({
+    prisma.hostedGrowthAggregate.findUniqueOrThrow({
+      select: {
+        fulfilledUsageTopUps: true,
+      },
       where: {
-        status: HostedUsageCreditPurchaseStatus.fulfilled,
+        id: HOSTED_GROWTH_AGGREGATE_ID,
       },
     }),
     prisma.hostedMember.count({
@@ -698,8 +703,8 @@ export async function readHostedGrowthDashboard(
           some: {
             kind: INBOUND_MESSAGE_MAILBOX_KIND,
             occurredAt: {
-              gte: currentSevenDayStart,
-              lt: currentSevenDayEnd,
+              gte: activeMembersCurrentStart,
+              lt: now,
             },
           },
         },
@@ -712,8 +717,8 @@ export async function readHostedGrowthDashboard(
           some: {
             kind: INBOUND_MESSAGE_MAILBOX_KIND,
             occurredAt: {
-              gte: previousSevenDayStart,
-              lt: currentSevenDayStart,
+              gte: activeMembersPreviousStart,
+              lt: activeMembersCurrentStart,
             },
           },
         },
@@ -749,23 +754,23 @@ export async function readHostedGrowthDashboard(
   );
   const newMembersTrailing7Days = countCreatedRowsInRange(
     memberRows,
-    currentSevenDayStart,
-    currentSevenDayEnd,
+    currentCalendarSevenDayStart,
+    currentCalendarSevenDayEnd,
   );
   const newMembersPrevious7Days = countCreatedRowsInRange(
     memberRows,
-    previousSevenDayStart,
-    currentSevenDayStart,
+    previousCalendarSevenDayStart,
+    currentCalendarSevenDayStart,
   );
   const trialStartsTrailing7Days = countTrialStartsInRange(
     trialStartRows,
-    currentSevenDayStart,
-    currentSevenDayEnd,
+    currentCalendarSevenDayStart,
+    currentCalendarSevenDayEnd,
   );
   const trialStartsPrevious7Days = countTrialStartsInRange(
     trialStartRows,
-    previousSevenDayStart,
-    currentSevenDayStart,
+    previousCalendarSevenDayStart,
+    currentCalendarSevenDayStart,
   );
 
   return {
@@ -811,7 +816,7 @@ export async function readHostedGrowthDashboard(
       ),
     },
     usageTopUps: {
-      totalFulfilled: totalFulfilledUsageTopUps,
+      totalFulfilled: growthAggregate.fulfilledUsageTopUps,
     },
     weeklyRows,
   };
