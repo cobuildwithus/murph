@@ -26,11 +26,11 @@ function GroupUsageFundingCard({
           <p className="text-sm font-medium text-muted-foreground">{groupName}</p>
           <CardTitle>
             <h1 className="text-balance font-serif text-3xl font-semibold leading-[1.05] tracking-tight text-foreground sm:text-4xl">
-              Add group credit
+              Keep Murph going
             </h1>
           </CardTitle>
           <CardDescription className="max-w-md text-pretty text-base leading-7">
-            One-time credit belongs to this group. Personal plans stay unchanged.
+            Add messages for everyone in the chat.
           </CardDescription>
         </div>
       </CardHeader>
@@ -40,7 +40,7 @@ function GroupUsageFundingCard({
           className={cn(buttonVariants({ size: "lg", variant: "ghost" }), "w-full")}
           href="/home"
         >
-          Open Murph
+          Go home
         </Link>
       </CardFooter>
     </Card>
