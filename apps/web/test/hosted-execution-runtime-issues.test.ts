@@ -15,16 +15,15 @@ const TEST_ISSUE_ID = 'ari_0123456789abcdef_abcdef123456abcdef123456'
 
 describe('importHostedAssistantRuntimeIssues', () => {
   it('stores anonymized issue rows with retention metadata and no member relation', async () => {
-    const upsert = vi.fn<
+    const createMany = vi.fn<
       (input: {
-        create: Record<string, unknown>
-        update: Record<string, never>
-        where: { id: string }
-      }) => Promise<void>
-    >(async () => undefined)
+        data: Record<string, unknown>[]
+        skipDuplicates: true
+      }) => Promise<{ count: number }>
+    >(async (input) => ({ count: input.data.length }))
     const prisma = {
       hostedAssistantRuntimeIssue: {
-        upsert,
+        createMany,
       },
     }
 
@@ -57,14 +56,12 @@ describe('importHostedAssistantRuntimeIssues', () => {
 
     expect(result.recordedIds).toEqual([TEST_ISSUE_ID])
     expect(result.records).toHaveLength(1)
-    expect(upsert).toHaveBeenCalledTimes(1)
+    // Stable issue ids make one idempotent insert equivalent to the old
+    // per-issue upsert loop.
+    expect(createMany).toHaveBeenCalledTimes(1)
+    expect(createMany.mock.calls[0]?.[0]?.skipDuplicates).toBe(true)
 
-    const upsertInput = upsert.mock.calls[0]?.[0]
-    expect(upsertInput?.where).toEqual({
-      id: TEST_ISSUE_ID,
-    })
-
-    const create = upsertInput?.create
+    const create = createMany.mock.calls[0]?.[0]?.data[0]
     expect(create).toEqual(
       expect.objectContaining({
         component: 'assistant.reply-finalizer',
@@ -93,16 +90,15 @@ describe('importHostedAssistantRuntimeIssues', () => {
     const bearerSecret = ['sk', 'testsecret12345'].join('-')
     const providerSecret = ['sk', 'providersecret12345'].join('-')
     const webhookSecret = ['whsec', 'runtimehook12345'].join('_')
-    const upsert = vi.fn<
+    const createMany = vi.fn<
       (input: {
-        create: Record<string, unknown>
-        update: Record<string, never>
-        where: { id: string }
-      }) => Promise<void>
-    >(async () => undefined)
+        data: Record<string, unknown>[]
+        skipDuplicates: true
+      }) => Promise<{ count: number }>
+    >(async (input) => ({ count: input.data.length }))
     prismaMocks.getPrisma.mockReturnValue({
       hostedAssistantRuntimeIssue: {
-        upsert,
+        createMany,
       },
     })
 
@@ -135,7 +131,7 @@ describe('importHostedAssistantRuntimeIssues', () => {
       now: new Date('2026-04-08T00:00:00.000Z'),
     })
 
-    const create = upsert.mock.calls[0]?.[0]?.create
+    const create = createMany.mock.calls[0]?.[0]?.data[0]
     expect(create).toEqual(
       expect.objectContaining({
         component: 'assistant.reply-finalizer',

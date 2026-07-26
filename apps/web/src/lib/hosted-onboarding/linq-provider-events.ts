@@ -567,10 +567,11 @@ function buildParsedProviderEvent(input: {
     messageLookupKey,
     messageLookupKeyReadCandidates,
     payloadHash: buildPayloadHash(input.rawBody, input.event),
+    // `payloadShapeJson` below is the canonical shape; embedding a second copy
+    // here stored the same diagnostic twice for every provider event.
     payloadSanitizedJson: toPrismaJson({
       api_version: normalizeNullableString(input.event.api_version),
       created_at: providerCreatedAt.toISOString(),
-      data_shape: payloadShapeJson,
       event_id_suffix: toHostedOnboardingLogIdSuffix(input.event.event_id),
       event_type: input.event.event_type,
       trace_id_suffix: toHostedOnboardingLogIdSuffix(input.event.trace_id),

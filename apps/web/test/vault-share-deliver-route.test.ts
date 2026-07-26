@@ -20,8 +20,19 @@ import {
   buildHostedVaultShareProjectionScopeKey,
   HOSTED_VAULT_SHARE_BROAD_ACTIVITY_MINUTES_SEMANTICS,
   HOSTED_VAULT_SHARE_CANONICAL_WORKOUT_DAY_SEMANTICS,
+  HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS,
+  HOSTED_VAULT_SHARE_SOURCE_REVISION_MAX_LENGTH,
+  HOSTED_VAULT_SHARE_WORKOUT_KIND_MAX_LENGTH,
+  HOSTED_VAULT_SHARE_WORKOUTS_MAX_PER_DAY,
   hostedVaultShareProjectionKindToScope,
+  parseHostedVaultShareDeliverRequest,
+  type HostedVaultShareDeliverRequest,
+  type HostedVaultShareDeliveryRecord,
 } from "@murphai/hosted-execution/vault-share";
+
+import {
+  HOSTED_VAULT_SHARE_DELIVER_BODY_LIMIT_BYTES,
+} from "@/src/lib/hosted-vault-share/delivery-limits";
 
 type DeliverRouteModule =
   typeof import("../app/api/internal/hosted-runtime/vault-share/deliver/route");
@@ -98,8 +109,10 @@ const ACTIVITY_SCOPE = hostedVaultShareProjectionKindToScope("activity-days.v0")
 const ACTIVITY_SCOPE_KEY = buildHostedVaultShareProjectionScopeKey(ACTIVITY_SCOPE);
 const WORKOUT_SCOPE = hostedVaultShareProjectionKindToScope("workout-days.v0");
 const WORKOUT_SCOPE_KEY = buildHostedVaultShareProjectionScopeKey(WORKOUT_SCOPE);
+const WORKOUTS_SCOPE = hostedVaultShareProjectionKindToScope("workouts.v0");
 const PROFILE_SCOPE = hostedVaultShareProjectionKindToScope("profile-name.v0");
 const PROFILE_SCOPE_KEY = buildHostedVaultShareProjectionScopeKey(PROFILE_SCOPE);
+const MAXIMUM_WIDTH_WORKOUT_MINUTES = 0.0000030024105450300988;
 
 const ACTIVE_SHARE = {
   destinationMemberId: "member_referee",
@@ -127,6 +140,39 @@ function buildRequest(body: unknown): Request {
   });
 }
 
+function workoutsDeliveryBody(workoutsPerDay: number): HostedVaultShareDeliverRequest {
+  return {
+    projectionKind: "workouts.v0",
+    projectionScope: WORKOUTS_SCOPE,
+    records: Array.from(
+      { length: HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS },
+      (_, dayIndex): HostedVaultShareDeliveryRecord => {
+        const date = `2026-07-${String(24 - dayIndex).padStart(2, "0")}`;
+        return {
+          data: {
+            calendarClosedThroughDate: "2026-07-23",
+            date,
+            timeSemantics: "canonical-event-zone-or-vault-zone.v0",
+            workouts: Array.from(
+              { length: workoutsPerDay },
+              (_, workoutIndex) => ({
+                kind: "x".repeat(HOSTED_VAULT_SHARE_WORKOUT_KIND_MAX_LENGTH),
+                minutes: MAXIMUM_WIDTH_WORKOUT_MINUTES,
+                startLocalMs: 86_399_999 - workoutIndex,
+              }),
+            ),
+          },
+          occurredAt: `${date}T00:00:00.000Z`,
+          recordKey: date,
+          sourceRevision: "A".repeat(
+            HOSTED_VAULT_SHARE_SOURCE_REVISION_MAX_LENGTH,
+          ),
+        };
+      },
+    ),
+  };
+}
+
 describe("vault-share deliver route", () => {
   beforeAll(async () => {
     deliverRoute = await import(
@@ -141,11 +187,41 @@ describe("vault-share deliver route", () => {
 		mocks.replaceHostedVaultShareProjectionSnapshot.mockResolvedValue("replaced");
   });
 
+  it("keeps the maximum parser-valid workouts delivery body within the ingress limit", () => {
+    const body = workoutsDeliveryBody(HOSTED_VAULT_SHARE_WORKOUTS_MAX_PER_DAY);
+    const bodyBytes = new TextEncoder().encode(JSON.stringify(body)).byteLength;
+    const nextBoundBody = workoutsDeliveryBody(
+      HOSTED_VAULT_SHARE_WORKOUTS_MAX_PER_DAY + 1,
+    );
+    const nextBoundBodyBytes = new TextEncoder().encode(
+      JSON.stringify(nextBoundBody),
+    ).byteLength;
+
+    expect(() => parseHostedVaultShareDeliverRequest(body)).not.toThrow();
+    expect(() => parseHostedVaultShareDeliverRequest(nextBoundBody)).toThrow(
+      new RegExp(`at most ${HOSTED_VAULT_SHARE_WORKOUTS_MAX_PER_DAY}`, "u"),
+    );
+    expect(JSON.stringify(MAXIMUM_WIDTH_WORKOUT_MINUTES)).toHaveLength(24);
+    expect(bodyBytes).toBe(16_090);
+    expect(bodyBytes).toBeLessThanOrEqual(
+      HOSTED_VAULT_SHARE_DELIVER_BODY_LIMIT_BYTES,
+    );
+    expect(nextBoundBodyBytes).toBe(17_147);
+    expect(nextBoundBodyBytes).toBeGreaterThan(
+      HOSTED_VAULT_SHARE_DELIVER_BODY_LIMIT_BYTES,
+    );
+  });
+
   it("replaces the snapshot for every active share", async () => {
-    const response = await deliverRoute.POST(buildRequest(VALID_BODY));
+    const request = buildRequest(VALID_BODY);
+    const response = await deliverRoute.POST(request);
 
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ status: "delivered" });
+    expect(mocks.requireHostedCloudflareCallbackRequest).toHaveBeenCalledWith(
+      request,
+      { maxBodyBytes: HOSTED_VAULT_SHARE_DELIVER_BODY_LIMIT_BYTES },
+    );
     expect(mocks.findActiveHostedVaultShares).toHaveBeenCalledWith({
       grantorMemberId: "member_grantor",
       projectionScope: SLEEP_SCOPE,
