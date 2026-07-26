@@ -10,6 +10,7 @@ import {
   readHostedPulseTrialPaymentIntent,
   startHostedPulseTrialPaidPlan,
 } from "./billing-start-paid-pulse-service";
+import { signalHostedRuntimeManualWakeBestEffort } from "../hosted-orchestration/manual-wake";
 import { hostedOnboardingError } from "./errors";
 import { lookupHostedMemberStripeBillingRefByStripeCustomerId } from "./hosted-member-billing-store";
 
@@ -80,10 +81,26 @@ export async function applyStripePulseTrialPaymentMethodAttached(input: {
       prisma: input.prisma,
     });
 
-  // Stripe has not exposed a usable card yet, so nothing moved. Keep the
-  // receipt's obligation rather than returning normally and letting the
-  // reconciler mark an unfinished recovery complete.
   if (result.status === "payment_required") {
+    // Two different states share this status. An invoice that needs the member
+    // to act carries its own URL, and retrying cannot advance it: the member
+    // has to do something. Retiring the handoff and waking their runtime hands
+    // the next step back to them through the same owner that already speaks to
+    // a member after a billing event, instead of burning the retry ladder and
+    // poisoning the receipt while they are never asked.
+    if (result.paymentUrl) {
+      await clearHostedPulseTrialPaymentIntent({
+        memberId,
+        observedAction: action,
+        observedExpiresAt,
+        prisma: input.prisma,
+      });
+      await signalHostedRuntimeManualWakeBestEffort({ userId: memberId });
+      return { memberId };
+    }
+
+    // Stripe has not exposed the saved card yet. That is transient, so keep the
+    // receipt's obligation rather than reporting a recovery that did not happen.
     throw hostedOnboardingError({
       code: "HOSTED_PULSE_TRIAL_PAYMENT_METHOD_RECOVERY_PENDING",
       httpStatus: 409,

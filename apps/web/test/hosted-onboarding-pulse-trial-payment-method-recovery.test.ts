@@ -4,9 +4,14 @@ import type Stripe from "stripe";
 
 const mocks = vi.hoisted(() => ({
   billingRefUpdateMany: vi.fn(),
+  signalManualWake: vi.fn(),
   continuePulse: vi.fn(),
   lookupBillingRef: vi.fn(),
   startPulse: vi.fn(),
+}));
+
+vi.mock("@/src/lib/hosted-orchestration/manual-wake", () => ({
+  signalHostedRuntimeManualWakeBestEffort: mocks.signalManualWake,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-billing-store", () => ({
@@ -63,6 +68,7 @@ let recovery: typeof import(
 beforeEach(async () => {
   vi.clearAllMocks();
   mocks.billingRefUpdateMany.mockResolvedValue({});
+  mocks.signalManualWake.mockResolvedValue(undefined);
   mocks.startPulse.mockResolvedValue({ status: "started" });
   mocks.continuePulse.mockResolvedValue({ status: "continuing" });
   recovery = await import(
@@ -158,12 +164,11 @@ test("keeps the receipt obligation when Stripe has no usable card yet", async ()
   stubIntent({ action: "start_pulse_now", expiresAt: LIVE_EXPIRY });
   mocks.startPulse.mockResolvedValueOnce({
     billingPlanCode: "launch_monthly",
-    paymentUrl: "https://billing.example.test/session",
     status: "payment_required",
   });
 
   // Returning normally here would let the reconciler mark an unfinished
-  // recovery complete and deliver a fresh portal URL to nobody.
+  // recovery complete while nothing had actually moved.
   await expect(recovery.applyStripePulseTrialPaymentMethodAttached({
     now: NOW,
     occurredAt: NOW,
@@ -312,4 +317,47 @@ test("ignores a payment method with no customer attached", async () => {
 
   expect(result).toBeNull();
   expect(mocks.lookupBillingRef).not.toHaveBeenCalled();
+});
+
+test("hands an action-required invoice back to the member instead of burning the retry ladder", async () => {
+  // A requires_action invoice cannot advance without the member, so retrying
+  // just consumes all six attempts and poisons the receipt while they are
+  // never asked for anything.
+  stubIntent({ action: "start_pulse_now", expiresAt: LIVE_EXPIRY });
+  mocks.startPulse.mockResolvedValueOnce({
+    billingPlanCode: "launch_monthly",
+    paymentUrl: "https://invoice.stripe.test/in_resume",
+    status: "payment_required",
+  });
+
+  const result = await recovery.applyStripePulseTrialPaymentMethodAttached({
+    now: NOW,
+    occurredAt: NOW,
+    paymentMethod: buildPaymentMethod(),
+    prisma,
+  });
+
+  expect(result).toEqual({ memberId: "hbm_test_1" });
+  expect(mocks.signalManualWake).toHaveBeenCalledWith({ userId: "hbm_test_1" });
+  expect(mocks.billingRefUpdateMany).toHaveBeenCalledTimes(1);
+});
+
+test("keeps retrying, and never wakes the member, while Stripe is merely lagging", async () => {
+  stubIntent({ action: "start_pulse_now", expiresAt: LIVE_EXPIRY });
+  mocks.startPulse.mockResolvedValueOnce({
+    billingPlanCode: "launch_monthly",
+    status: "payment_required",
+  });
+
+  await expect(recovery.applyStripePulseTrialPaymentMethodAttached({
+    now: NOW,
+    occurredAt: NOW,
+    paymentMethod: buildPaymentMethod(),
+    prisma,
+  })).rejects.toMatchObject({
+    code: "HOSTED_PULSE_TRIAL_PAYMENT_METHOD_RECOVERY_PENDING",
+  });
+
+  expect(mocks.signalManualWake).not.toHaveBeenCalled();
+  expect(mocks.billingRefUpdateMany).not.toHaveBeenCalled();
 });

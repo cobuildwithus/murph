@@ -21,6 +21,7 @@ const mocks = vi.hoisted(() => ({
     // ever prove the no-persistence fallback.
     hostedMemberBillingRef: {
       update: vi.fn(),
+      updateMany: vi.fn(),
     },
   },
   readHostedMemberCoreState: vi.fn(),
@@ -157,6 +158,51 @@ describe("startHostedPulseTrialPaidPlan", () => {
     });
     expect(mocks.applyStripeInvoicePaid).not.toHaveBeenCalled();
     expect(mocks.signalHostedRuntimeManualWakeBestEffort).not.toHaveBeenCalled();
+  });
+
+  test("supersedes an outstanding payment handoff when a card-backed choice settles", async () => {
+    // start-now was recorded while no card existed. The member then saved a
+    // card and asked to continue at trial end instead. If this decision leaves
+    // the old row live, the delayed payment_method.attached recovery executes
+    // start-now and bills them against their newer instruction.
+    await expect(continueHostedPulseTrialPaidPlan({
+      memberId: "member_123",
+      now: new Date("2026-05-06T00:00:00.000Z"),
+    })).resolves.toEqual({
+      billingPlanCode: "launch_monthly",
+      status: "continuing",
+    });
+
+    expect(mocks.prismaClient.hostedMemberBillingRef.updateMany)
+      .toHaveBeenCalledWith({
+        where: { memberId: "member_123" },
+        data: {
+          pulseTrialPaymentIntentAction: null,
+          pulseTrialPaymentIntentExpiresAt: null,
+        },
+      });
+  });
+
+  test("leaves the handoff intact while the same handoff is still in flight", async () => {
+    mocks.stripe.subscriptions.retrieve.mockResolvedValueOnce(makeSubscription({
+      customer: makeCustomer({
+        defaultPaymentMethod: null,
+        defaultSource: null,
+      }),
+      defaultPaymentMethod: null,
+      defaultSource: null,
+    }));
+
+    // payment_required is not a decision, so the intent this call just recorded
+    // must survive for the browser or webhook to complete.
+    await expect(startHostedPulseTrialPaidPlan({
+      memberId: "member_123",
+      now: new Date("2026-05-06T00:00:00.000Z"),
+      paymentMethodContinuation: "conversation",
+    })).resolves.toMatchObject({ status: "payment_required" });
+
+    expect(mocks.prismaClient.hostedMemberBillingRef.updateMany)
+      .not.toHaveBeenCalled();
   });
 
   test("keeps a card-backed active Pulse trial running until its natural end", async () => {

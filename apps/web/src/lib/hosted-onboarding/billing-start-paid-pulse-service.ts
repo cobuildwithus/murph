@@ -145,19 +145,58 @@ type HostedPulseTrialPaymentMethodPortalContinuation =
 export async function startHostedPulseTrialPaidPlan(
   input: HostedPulseTrialStartPaidPlanInput,
 ): Promise<HostedPulseTrialStartPaidResult> {
-  return transitionHostedPulseTrialPaidPlan({
-    ...input,
-    timing: "now",
-  });
+  return supersedeHostedPulseTrialPaymentIntentOnDecision(
+    input,
+    () => transitionHostedPulseTrialPaidPlan({
+      ...input,
+      timing: "now",
+    }),
+  );
 }
 
 export async function continueHostedPulseTrialPaidPlan(
   input: HostedPulseTrialPaidPlanInput,
 ): Promise<HostedPulseTrialContinueResult> {
-  return transitionHostedPulseTrialPaidPlan({
-    ...input,
-    timing: "at_trial_end",
+  return supersedeHostedPulseTrialPaymentIntentOnDecision(
+    input,
+    () => transitionHostedPulseTrialPaidPlan({
+      ...input,
+      timing: "at_trial_end",
+    }),
+  );
+}
+
+/**
+ * Retires any outstanding payment handoff once a Pulse decision is settled.
+ *
+ * Every conversation, browser-return, and webhook path reaches a decision
+ * through here, so this is the one place that can guarantee the member's latest
+ * choice wins. Without it a card-backed request returns `continuing` or
+ * `started` while an older recorded action stays live, and a delayed
+ * `payment_method.attached` recovery can later execute that stale action
+ * against the member's newer instruction.
+ *
+ * `payment_required` is not a decision: it means the handoff this intent
+ * belongs to is still in flight, so the intent must survive.
+ */
+async function supersedeHostedPulseTrialPaymentIntentOnDecision<
+  TResult extends HostedPulseTrialContinueResult,
+>(
+  input: HostedPulseTrialPaidPlanInput,
+  run: () => Promise<TResult>,
+): Promise<TResult> {
+  const result = await run();
+
+  if (result.status === "payment_required") {
+    return result;
+  }
+
+  await clearHostedPulseTrialPaymentIntentForMember({
+    memberId: input.memberId,
+    prisma: input.prisma ?? getPrisma(),
   });
+
+  return result;
 }
 
 async function transitionHostedPulseTrialPaidPlan(
@@ -687,6 +726,23 @@ export async function readHostedPulseTrialPaymentIntentForMember(input: {
  * recorded action, so the delete is conditional on the action and expiry the
  * caller observed.
  */
+/**
+ * Retires whatever handoff is outstanding for a member, whichever action it
+ * named. Used when a settled decision supersedes it.
+ */
+export async function clearHostedPulseTrialPaymentIntentForMember(input: {
+  memberId: string;
+  prisma: PrismaClient;
+}): Promise<void> {
+  await input.prisma.hostedMemberBillingRef.updateMany({
+    where: { memberId: input.memberId },
+    data: {
+      pulseTrialPaymentIntentAction: null,
+      pulseTrialPaymentIntentExpiresAt: null,
+    },
+  });
+}
+
 export async function clearHostedPulseTrialPaymentIntent(input: {
   memberId: string;
   observedAction: HostedPulseTrialContinuationAction;
