@@ -28,6 +28,9 @@ export async function ingestHostedLinqProviderEventTx(input: {
 }): Promise<{
   alertIds: string[];
   duplicate: boolean;
+  restoreOnboardingLink?: NonNullable<
+    Awaited<ReturnType<typeof applyHostedLinqDeliveryReceiptTx>>["restoreOnboardingLink"]
+  >;
 }> {
   const receivedAt = input.receivedAt ?? new Date();
   const eventLookupKey = createHostedLinqProviderEventLookupKey(input.event.eventId);
@@ -124,6 +127,9 @@ export async function ingestHostedLinqProviderEventTx(input: {
   return {
     alertIds,
     duplicate: false,
+    ...(deliveryReceipt.restoreOnboardingLink
+      ? { restoreOnboardingLink: deliveryReceipt.restoreOnboardingLink }
+      : {}),
   };
 }
 

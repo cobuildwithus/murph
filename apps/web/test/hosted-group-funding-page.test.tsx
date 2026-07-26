@@ -115,14 +115,11 @@ describe("hosted group funding page", () => {
     }));
 
     assert.match(markup, /Sunday sleep crew/u);
-    assert.match(markup, /<h1[^>]*>Add group credit<\/h1>/u);
-    assert.match(
-      markup,
-      /One-time credit belongs to this group\. Personal plans stay unchanged\./u,
-    );
+    assert.match(markup, /<h1[^>]*>Keep Murph going<\/h1>/u);
+    assert.match(markup, /Add messages for everyone in the chat\./u);
     assert.doesNotMatch(markup, /Group usage|Running low/u);
     assert.match(markup, /top-up:group/u);
-    assert.match(markup, /href="\/home"[^>]*>Open Murph<\/a>/u);
+    assert.match(markup, /href="\/home"[^>]*>Go home<\/a>/u);
     expect(mocks.readHostedUsageCreditPurchaseStatus).toHaveBeenCalledWith({
       beneficiaryMemberId: "member_group_runtime",
       payerMemberId: "member_payer",

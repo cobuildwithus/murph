@@ -33,22 +33,12 @@ import { readActiveHostedMemberAccess } from "../hosted-onboarding/member-access
 import {
   getHostedLinqChatHandles,
   type HostedLinqChatHandleSummary,
-  isHostedLinqAttachmentSendPrepareFailure,
-  sendHostedLinqAttachmentMessage,
   sendHostedLinqChatMessage,
   updateHostedLinqChatAvatar,
   updateHostedLinqChatDisplayName,
 } from "../hosted-onboarding/linq-client";
 import {
-  buildMurphHostedLinqContactCardVcf,
-  fetchMurphHostedLinqContactCardVcfPhoto,
-  MURPH_CONTACT_CARD_VCF_CONTENT_TYPE,
-  MURPH_CONTACT_CARD_VCF_FILE_NAME,
-  resolveMurphHostedLinqContactCardBackupPhoneNumber,
-} from "../hosted-onboarding/linq-contact-card";
-import {
-  releaseHostedLinqContactCardShareAttempt,
-  reserveHostedLinqContactCardShareAttempt,
+  shareMurphHostedLinqContactCardVcfToChat,
 } from "../hosted-onboarding/linq-contact-card-share";
 import { createHostedLinqParticipantContactLookupKey } from "../hosted-onboarding/linq-participant-contact";
 import {
@@ -1630,78 +1620,20 @@ async function handleHostedRuntimeGroupShareContactCard(input: {
     return unavailable(ownerAccess.unavailableReason);
   }
 
-  let linePhoneNumber: string | null = null;
-  let rosterPresent = false;
-  try {
-    const handles = await getHostedLinqChatHandles({ chatId: authorized.chatId });
-    rosterPresent = handles.length > 0;
-    linePhoneNumber = normalizePhoneNumber(
-      handles.find((handle) => handle.isMe)?.handle ?? null,
-    );
-  } catch {
-    return unavailable("provider_unavailable");
-  }
-  if (!rosterPresent) {
-    return unavailable("provider_unavailable");
-  }
-  if (!linePhoneNumber) {
-    return unavailable("line_unresolved");
-  }
-
-  const reservation = await reserveHostedLinqContactCardShareAttempt({
+  const outcome = await shareMurphHostedLinqContactCardVcfToChat({
     chatId: authorized.chatId,
+    idempotencyKeyPrefix: "group-contact-card",
     memberId: input.memberId,
     prisma,
   });
-  if (reservation.action !== "share") {
-    if (reservation.reason === "recent_attempt") {
-      return {
-        action: "share_contact_card",
-        result: { status: "already_shared" },
-      };
-    }
-    return unavailable(reservation.reason);
+  if (outcome.status === "already_shared") {
+    return {
+      action: "share_contact_card",
+      result: { status: "already_shared" },
+    };
   }
-
-  const [photo, backupPhoneNumber] = await Promise.all([
-    fetchMurphHostedLinqContactCardVcfPhoto(),
-    resolveMurphHostedLinqContactCardBackupPhoneNumber({
-      excludePhoneNumber: linePhoneNumber,
-      prisma: getPrisma(),
-    }),
-  ]);
-  const vcf = buildMurphHostedLinqContactCardVcf({
-    backupPhoneNumber,
-    phoneNumber: linePhoneNumber,
-    photo,
-  });
-  try {
-    await sendHostedLinqAttachmentMessage({
-      bytes: new Uint8Array(Buffer.from(vcf, "utf8")),
-      chatId: authorized.chatId,
-      contentType: MURPH_CONTACT_CARD_VCF_CONTENT_TYPE,
-      fileName: MURPH_CONTACT_CARD_VCF_FILE_NAME,
-      // Chat id + reservation instant: retries of this reservation dedupe at
-      // the provider while a later requested re-share stays a distinct send.
-      // The chat id is Linq's own identifier, so no new exposure.
-      idempotencyKey: `group-contact-card:${authorized.chatId}:${reservation.attemptedAt.getTime()}`,
-    });
-  } catch (error) {
-    if (isHostedLinqAttachmentSendPrepareFailure(error)) {
-      // Nothing reached the chat; free the throttle reservation so a later
-      // retry is not locked out. Ambiguous message-send failures keep it.
-      try {
-        await releaseHostedLinqContactCardShareAttempt({
-          attemptedAt: reservation.attemptedAt,
-          chatId: authorized.chatId,
-          memberId: input.memberId,
-          prisma,
-        });
-      } catch {
-        // Best effort: a stuck reservation only delays the next attempt.
-      }
-    }
-    return unavailable("send_failed");
+  if (outcome.status !== "sent") {
+    return unavailable(outcome.reason);
   }
 
   return {

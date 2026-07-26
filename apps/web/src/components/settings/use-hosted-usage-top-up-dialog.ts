@@ -46,7 +46,12 @@ function useHostedUsageTopUpDialog({
   const { refresh } = useRouter();
   const [state, dispatch] = useReducer(
     hostedUsageTopUpReducer,
-    { activePurchase, initialOpen, purchaseReturn },
+    {
+      activePurchase,
+      defaultOfferCode: readDefaultOfferCode(offers),
+      initialOpen,
+      purchaseReturn,
+    },
     createHostedUsageTopUpState,
   );
   const checkoutRequestRef = useRef<OwnedCheckoutRequest | null>(null);
@@ -529,6 +534,16 @@ function useHostedUsageTopUpDialog({
     startCheckout,
     state,
   };
+}
+
+// Opens on the middle amount so the picker always has a live primary action.
+// Nothing here commits the payer to it: checkout is still an explicit click.
+function readDefaultOfferCode(
+  offers: HostedUsageTopUpDialogProps["offers"],
+): string | null {
+  return offers.length === 0
+    ? null
+    : offers[Math.floor((offers.length - 1) / 2)]?.offerCode ?? null;
 }
 
 function checkoutErrorMessage(
