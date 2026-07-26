@@ -4009,6 +4009,12 @@ describe("HostedUserRunner execution coordination", () => {
       startedAgoMs: 35_000,
       userId: TEST_USER_ID,
     });
+    await expect(runner.readActiveRuntimeFenceForTest({
+      userId: TEST_USER_ID,
+    })).resolves.toEqual({
+      attemptId: stuck.attemptId,
+      processingMode: "default",
+    });
 
     expect(stuck.nextWakeAt).toBeNull();
     expect(readRunnerMeta(sql)).toMatchObject({

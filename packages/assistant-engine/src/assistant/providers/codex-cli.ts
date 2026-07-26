@@ -41,6 +41,9 @@ import {
   type AssistantProviderTurnExecutionInput,
   type AssistantProviderUsage,
 } from './types.js'
+import {
+  MURPH_CODEX_BASE_INSTRUCTIONS,
+} from '../codex-base-instructions.js'
 import { normalizeNullableString } from '../shared.js'
 import {
   isSensitiveAssistantFieldName,
@@ -211,6 +214,7 @@ export async function executeCodexAssistantTurnAttempt(
     authorizeAcceptedMessageTarget:
       input.authorizeAcceptedMessageTarget ?? null,
     approvalPolicy,
+    baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
     developerInstructions,
     dynamicTools: input.dynamicTools,
     environments: input.environments ?? undefined,
@@ -478,6 +482,7 @@ function emitAssistantProviderPromptSizeTraceEvent(input: {
         type: ASSISTANT_PROVIDER_PROMPT_SIZE_TRACE_TYPE,
         providerTraceKind: 'provider.prompt_size',
         providerPromptDiagnosticKind: 'primary',
+        baseInstructionsBytes: byteLength(MURPH_CODEX_BASE_INSTRUCTIONS),
         providerPromptBytes: byteLength(input.prompt),
         systemPromptBytes: byteLength(systemPrompt),
         userPromptBytes: byteLength(userPrompt),

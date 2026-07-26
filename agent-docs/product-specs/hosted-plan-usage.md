@@ -85,6 +85,10 @@ unavailable reason `group_not_supported` before exposing personal usage facts.
 Inactive hosted access and a trial awaiting conversion also return explicit
 unavailable states.
 
+Every newly created Linq or Telegram group thread starts with a persisted $7.50
+included-usage limit. This is prospective: existing group-thread rows keep
+their stored limit.
+
 Usage is cost-weighted included capacity across models and modalities. It is
 not a token count or cash balance. Used and remaining included percentages are
 bounded integers that sum to 100. An included period reports 100% used even
@@ -95,6 +99,22 @@ internal included allowance value. When included usage is exhausted, Settings
 may explain that Murph will use remaining usage credit without quantifying it.
 The operation that crosses effective capacity may finish, but subsequent
 usage-bearing work blocks and accepted conversation input remains pending.
+
+For paid access, the included monthly usage value is exactly 80% of the
+server-owned recurring amount for that member's billing mode and tier. Direct
+Pulse and Edge therefore include $6.40 and $16.00 from their $8 and $20 prices.
+Family-sponsored Pulse and Edge members separately receive $5.60 and $15.20
+from their $7 and $19 seat prices. Discounts, taxes, prorations, trials, and
+purchased usage credit do not redefine this catalog-owned allowance.
+An authoritative paid billing period that is already open keeps the higher
+included limit granted before this policy change. The price-derived allowance
+starts on its next paid period; an actual plan, Family tier, or
+direct-to-Family billing-mode change still reconciles during the current
+period. The rollout's predeploy data migration materializes a missing
+legacy-limit row only when the direct or Family paid projection supplies valid
+current bounds. It skips calendar fallbacks because their temporary key can be
+replaced by a delayed billing projection without a renewal. Existing allowance,
+spend, and future periods remain untouched.
 
 A forecast requires at least 24 hours of counted usage. It is shown only when
 the observed pace projects exhaustion before the current period ends. The

@@ -1,7 +1,9 @@
 import { type PrismaClient } from "@prisma/client";
 import type Stripe from "stripe";
 
+import { prepareHostedCryptoDomainRootCandidates } from "../hosted-crypto/domain-root-store";
 import { getPrisma } from "../prisma";
+import { HOSTED_PULSE_TRIAL_OFFER } from "./billing-plans";
 import { hostedOnboardingError } from "./errors";
 import {
   signalHostedMemberActivationRuntimeWakeBestEffortResult,
@@ -107,6 +109,13 @@ async function applyHostedCheckoutSessionSuccess(input: {
   hostedExecutionEventId: string | null;
   welcomeEmailMemberId: string | null;
 }> {
+  const preparedCryptoDomainRoots =
+    input.session.metadata?.checkoutOffer === HOSTED_PULSE_TRIAL_OFFER
+      ? await prepareHostedCryptoDomainRootCandidates({
+          prisma: input.prisma,
+          userId: input.memberId,
+        })
+      : null;
   let activationOutcome: {
     activatedMemberId: string | null;
     cleanupPulseTrialStripeSubscriptionId?: string | null;
@@ -136,7 +145,14 @@ async function applyHostedCheckoutSessionSuccess(input: {
         });
       }
 
-      return applyStripeCheckoutCompleted(input.session, tx);
+      return preparedCryptoDomainRoots
+        ? applyStripeCheckoutCompleted(
+            input.session,
+            tx,
+            undefined,
+            preparedCryptoDomainRoots,
+          )
+        : applyStripeCheckoutCompleted(input.session, tx);
     },
   });
 

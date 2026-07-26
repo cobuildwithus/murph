@@ -46,6 +46,7 @@ export type HostedLocalE2eScenarioName =
   | "device-sync-wake"
   | "direct-r2-presigned-put"
   | "family-sponsored-group-roundtrip"
+  | "foreground-reply-priority"
   | "idle-checkpoint-deferred-progress"
   | "junction-wearable-fixture"
   | "mailbox-platform-env"
@@ -325,6 +326,12 @@ export const hostedLocalE2eScenarios: readonly HostedLocalE2eScenario[] = [
   {
     file: "apps/cloudflare/test/hosted-local-vault-file-approval-resume-e2e.test.ts",
     name: "vault-file-approval-resume",
+    testControls: true,
+  },
+  {
+    dedicatedVitestProcess: true,
+    file: "apps/cloudflare/test/hosted-local-foreground-reply-priority-e2e.test.ts",
+    name: "foreground-reply-priority",
     testControls: true,
   },
 ] as const;

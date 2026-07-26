@@ -116,24 +116,16 @@ const HOSTED_BILLING_PLAN_DEFINITIONS = {
   },
 } as const satisfies Record<HostedBillingPlanCode, HostedBillingPlanDefinition>;
 
-export const HOSTED_AI_USAGE_MONTHLY_ALLOWANCE_USD_MICROS = {
-  launch_edge_monthly: 25_000_000n,
-  launch_monthly: 10_000_000n,
-} as const satisfies Record<HostedBillingPlanCode, bigint>;
-
 export interface HostedPlanDefinition {
-  readonly aiUsageMonthlyAllowanceUsdMicros: bigint;
   readonly code: HostedPlanCode;
   readonly displayName: string;
 }
 
 const HOSTED_PLAN_DEFINITIONS = {
   pulse: {
-    aiUsageMonthlyAllowanceUsdMicros: 10_000_000n,
     displayName: "Pulse",
   },
   edge: {
-    aiUsageMonthlyAllowanceUsdMicros: 25_000_000n,
     displayName: "Edge",
   },
 } as const satisfies Record<
@@ -219,10 +211,12 @@ export function parseHostedPlanCode(value: unknown): HostedPlanCode | null {
     : null;
 }
 
-export function getHostedAiUsageMonthlyAllowanceForPlan(
+export function getHostedFamilyAiUsageMonthlyAllowanceForPlan(
   code: HostedPlanCode,
 ): bigint {
-  return HOSTED_PLAN_DEFINITIONS[code].aiUsageMonthlyAllowanceUsdMicros;
+  return calculateHostedPaidAiUsageAllowanceUsdMicros(
+    HOSTED_FAMILY_BILLING_OFFERS[code].recurringAmountUsdCents,
+  );
 }
 
 export function getHostedBillingPlanDefinition(
@@ -238,7 +232,23 @@ export function getHostedDefaultBillingPlanCode(): HostedBillingPlanCode {
 export function getHostedAiUsageMonthlyAllowanceUsdMicros(
   code: HostedBillingPlanCode,
 ): bigint {
-  return HOSTED_AI_USAGE_MONTHLY_ALLOWANCE_USD_MICROS[code];
+  return calculateHostedPaidAiUsageAllowanceUsdMicros(
+    HOSTED_BILLING_PLAN_DEFINITIONS[code].recurringAmountUsdCents,
+  );
+}
+
+const USD_MICROS_PER_CENT = 10_000n;
+const HOSTED_PAID_AI_USAGE_ALLOWANCE_NUMERATOR = 4n;
+const HOSTED_PAID_AI_USAGE_ALLOWANCE_DENOMINATOR = 5n;
+
+function calculateHostedPaidAiUsageAllowanceUsdMicros(
+  recurringAmountUsdCents: number,
+): bigint {
+  return (
+    BigInt(recurringAmountUsdCents)
+    * USD_MICROS_PER_CENT
+    * HOSTED_PAID_AI_USAGE_ALLOWANCE_NUMERATOR
+  ) / HOSTED_PAID_AI_USAGE_ALLOWANCE_DENOMINATOR;
 }
 
 export function isHostedPulseTrialCheckoutEnabled(

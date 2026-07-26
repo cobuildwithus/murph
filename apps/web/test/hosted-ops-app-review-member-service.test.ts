@@ -7,6 +7,7 @@ const dependencies = vi.hoisted(() => ({
   getPrisma: vi.fn(),
   lookupHostedMemberIdentityByPrivyUserId: vi.fn(),
   materializePendingHostedGroupJoinConfirmationsBestEffort: vi.fn(),
+  prepareHostedCryptoDomainRootCandidates: vi.fn(),
   privyClientConstructor: vi.fn(),
   privyGetByEmailAddress: vi.fn(),
   privySetCustomMetadata: vi.fn(),
@@ -65,6 +66,11 @@ vi.mock("@/src/lib/hosted-onboarding/member-activation", () => ({
     dependencies.activateHostedMemberForPositiveSourceTx,
 }));
 
+vi.mock("@/src/lib/hosted-crypto/domain-root-store", () => ({
+  prepareHostedCryptoDomainRootCandidates:
+    dependencies.prepareHostedCryptoDomainRootCandidates,
+}));
+
 vi.mock("@/src/lib/hosted-groups/group-join-confirmation", () => ({
   materializePendingHostedGroupJoinConfirmationsBestEffort:
     dependencies.materializePendingHostedGroupJoinConfirmationsBestEffort,
@@ -110,6 +116,7 @@ describe("prepareHostedOpsAppReviewMember", () => {
     dependencies.materializePendingHostedGroupJoinConfirmationsBestEffort.mockResolvedValue(
       undefined,
     );
+    dependencies.prepareHostedCryptoDomainRootCandidates.mockResolvedValue(new Map());
     dependencies.recordHostedLaunchRequiredConsent.mockResolvedValue(undefined);
     dependencies.readHostedConsentStatus.mockResolvedValue({
       launchScopes: [
@@ -135,6 +142,13 @@ describe("prepareHostedOpsAppReviewMember", () => {
   });
 
   it("applies reviewer access without writing redundant Privy member metadata", async () => {
+    const preparedCryptoDomainRoots = new Map([
+      ["control", { domain: "control" }],
+    ]);
+    dependencies.prepareHostedCryptoDomainRootCandidates.mockResolvedValueOnce(
+      preparedCryptoDomainRoots,
+    );
+
     const summary = await prepareHostedOpsAppReviewMember({
       mode: "apply",
       now: NOW,
@@ -158,7 +172,22 @@ describe("prepareHostedOpsAppReviewMember", () => {
         now: NOW,
       }),
     );
-    expect(dependencies.activateHostedMemberForPositiveSourceTx).toHaveBeenCalledOnce();
+    const prisma = dependencies.getPrisma.mock.results[0]?.value as {
+      $transaction: ReturnType<typeof vi.fn>;
+    };
+    expect(dependencies.prepareHostedCryptoDomainRootCandidates).toHaveBeenCalledWith({
+      prisma,
+      userId: MEMBER_ID,
+    });
+    expect(
+      dependencies.prepareHostedCryptoDomainRootCandidates.mock.invocationCallOrder[0],
+    ).toBeLessThan(prisma.$transaction.mock.invocationCallOrder[0] ?? 0);
+    expect(dependencies.activateHostedMemberForPositiveSourceTx).toHaveBeenCalledWith(
+      expect.objectContaining({
+        memberId: MEMBER_ID,
+        preparedCryptoDomainRoots,
+      }),
+    );
     expect(
       dependencies.materializePendingHostedGroupJoinConfirmationsBestEffort,
     ).toHaveBeenCalledWith(expect.objectContaining({

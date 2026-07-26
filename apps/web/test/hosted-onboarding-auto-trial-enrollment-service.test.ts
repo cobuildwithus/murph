@@ -24,6 +24,7 @@ const mocks = vi.hoisted(() => {
     assertHostedLaunchRequiredConsentGranted: vi.fn(),
     bindHostedMemberStripeCustomerIdIfMissingTx: vi.fn(),
     lockHostedMemberRow: vi.fn(),
+    prepareHostedCryptoDomainRootCandidates: vi.fn(),
     readHostedMemberBillingSnapshot: vi.fn(),
     requireHostedInviteForBillingCheckout: vi.fn(),
     requireHostedStripeBillingPlanConfig: vi.fn(),
@@ -36,6 +37,11 @@ const mocks = vi.hoisted(() => {
 
 vi.mock("@/src/lib/legal/consent", () => ({
   assertHostedLaunchRequiredConsentGranted: mocks.assertHostedLaunchRequiredConsentGranted,
+}));
+
+vi.mock("@/src/lib/hosted-crypto/domain-root-store", () => ({
+  prepareHostedCryptoDomainRootCandidates:
+    mocks.prepareHostedCryptoDomainRootCandidates,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/shared", async () => {
@@ -221,6 +227,7 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
       hostedExecutionEventId: "member.activated:auto-trial",
       memberId: "member_123",
     });
+    mocks.prepareHostedCryptoDomainRootCandidates.mockResolvedValue(new Map());
     mocks.signalHostedMemberActivationRuntimeWakeBestEffortResult.mockResolvedValue({
       accepted: true,
     });
@@ -264,6 +271,12 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
 
   it("creates a no-card Pulse trial subscription, writes trial billing state, and activates", async () => {
     const prisma = makePrisma();
+    const preparedCryptoDomainRoots = new Map([
+      ["control", { domain: "control" }],
+    ]);
+    mocks.prepareHostedCryptoDomainRootCandidates.mockResolvedValueOnce(
+      preparedCryptoDomainRoots,
+    );
 
     await expect(
       ensureHostedAutoPulseTrialEnrollment({
@@ -367,6 +380,13 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
         timeout: 30_000,
       },
     );
+    expect(mocks.prepareHostedCryptoDomainRootCandidates).toHaveBeenCalledWith({
+      prisma,
+      userId: "member_123",
+    });
+    expect(
+      mocks.prepareHostedCryptoDomainRootCandidates.mock.invocationCallOrder[0],
+    ).toBeLessThan(prisma.$transaction.mock.invocationCallOrder[1] ?? 0);
     expect(mocks.writeHostedMemberStripeBillingTx).toHaveBeenCalledWith(
       expect.objectContaining({
         billingStatus: HostedBillingStatus.active,
@@ -388,6 +408,7 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
     expect(mocks.activateHostedMemberForPositiveSourceTx).toHaveBeenCalledWith(
       expect.objectContaining({
         memberId: "member_123",
+        preparedCryptoDomainRoots,
         skipIfPreviouslyActivated: true,
       }),
     );

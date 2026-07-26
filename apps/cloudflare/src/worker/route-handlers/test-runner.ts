@@ -11,6 +11,7 @@ import {
   resolveHostedExecutionRunnerContainerName,
 } from "../../runner-container.ts";
 import type {
+  HostedRunnerActiveFenceTestResult,
   HostedRunnerStuckInvocationTestResult,
 } from "../../user-runner/hosted-user-runner-test.ts";
 import type {
@@ -35,6 +36,9 @@ import {
 } from "../route-utils/test-routes.ts";
 
 interface HostedLocalTestUserRunnerStubLike extends UserRunnerDurableObjectStubLike {
+  readActiveRuntimeFenceForTest(input: {
+    userId: string;
+  }): Promise<HostedRunnerActiveFenceTestResult | null>;
   runAlarmForTest(input: { userId: string }): Promise<{ ok: true }>;
   runUntilIdleForTest(input: {
     userId: string;
@@ -50,6 +54,9 @@ interface HostedLocalTestRunnerContainerStubLike {
     input: { userId: string },
   ): Promise<{ ok: true }>;
   armCanonicalCheckpointLostAckForTest?(
+    input: { userId: string },
+  ): Promise<{ ok: true }>;
+  armCanonicalCheckpointPublicationBarrierForTest?(
     input: { userId: string },
   ): Promise<{ ok: true }>;
   armSnapshotPublicationCorruptionForTest?(
@@ -102,12 +109,15 @@ function hasHostedLocalTestRunnerContainerShutdownCheckpointPublicationBarrierCo
   stub: object,
 ): stub is HostedLocalTestRunnerContainerStubLike & Required<Pick<
   HostedLocalTestRunnerContainerStubLike,
+  | "armCanonicalCheckpointPublicationBarrierForTest"
   | "armShutdownCheckpointPublicationBarrierForTest"
   | "beginShutdownCheckpointGracefulStopForTest"
   | "readShutdownCheckpointPublicationBarrierForTest"
   | "releaseShutdownCheckpointPublicationBarrierForTest"
 >> {
-  return "armShutdownCheckpointPublicationBarrierForTest" in stub
+  return "armCanonicalCheckpointPublicationBarrierForTest" in stub
+    && typeof stub.armCanonicalCheckpointPublicationBarrierForTest === "function"
+    && "armShutdownCheckpointPublicationBarrierForTest" in stub
     && typeof stub.armShutdownCheckpointPublicationBarrierForTest === "function"
     && "beginShutdownCheckpointGracefulStopForTest" in stub
     && typeof stub.beginShutdownCheckpointGracefulStopForTest === "function"
@@ -258,6 +268,19 @@ export const testRunnerRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] =
       return requireHostedWorkerTestEnvironment(context);
     },
     async handle(context, params) {
+      return handleTestReadActiveRuntimeFenceRoute(context, params.userId);
+    },
+    match: matchHostedLocalTestUserRoute("/__test/users/", "/active-runtime-fence"),
+    methods: ["POST"],
+    name: "test-read-active-runtime-fence",
+    wrongMethodResponse: "not-found",
+  },
+  {
+    authorization: "vercel-oidc",
+    beforeMethod(context) {
+      return requireHostedWorkerTestEnvironment(context);
+    },
+    async handle(context, params) {
       return handleTestStartStuckInvocationRoute(context, params.userId);
     },
     match: matchHostedLocalTestUserRoute("/__test/users/", "/stuck-invocation"),
@@ -266,6 +289,30 @@ export const testRunnerRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] =
     wrongMethodResponse: "not-found",
   },
 ];
+
+export async function handleTestReadActiveRuntimeFenceRoute(
+  context: WorkerRouteContext,
+  encodedUserId: string,
+): Promise<Response> {
+  if (!isHostedWorkerTestEnvironment(context.env)) {
+    return notFound();
+  }
+
+  const userId = decodeRouteParam(encodedUserId);
+  const boundUserResponse = requireHostedExecutionBoundUserResponse(
+    context.request,
+    userId,
+    "Hosted execution bound user does not match the test runner user.",
+    "test-runner-bound-user-mismatch",
+    "test-read-active-runtime-fence",
+  );
+  if (boundUserResponse) {
+    return boundUserResponse;
+  }
+
+  const stub = context.env.USER_RUNNER.getByName(userId) as HostedLocalTestUserRunnerStubLike;
+  return json(await stub.readActiveRuntimeFenceForTest({ userId }));
+}
 
 export async function handleTestRunUntilIdleRoute(
   context: WorkerRouteContext,
@@ -484,13 +531,14 @@ export async function handleTestShutdownCheckpointPublicationBarrierRoute(
     context.url.searchParams.size !== 1
     || (
       action !== "arm"
+      && action !== "arm-canonical"
       && action !== "shutdown"
       && action !== "status"
       && action !== "release"
     )
   ) {
     return jsonError(
-      "Shutdown checkpoint publication barrier action must be arm, shutdown, status, or release.",
+      "Checkpoint publication barrier action must be arm, arm-canonical, shutdown, status, or release.",
       400,
     );
   }
@@ -507,6 +555,8 @@ export async function handleTestShutdownCheckpointPublicationBarrierRoute(
   }
 
   switch (action) {
+    case "arm-canonical":
+      return json(await stub.armCanonicalCheckpointPublicationBarrierForTest({ userId }));
     case "arm":
       return json(await stub.armShutdownCheckpointPublicationBarrierForTest({ userId }));
     case "shutdown":
