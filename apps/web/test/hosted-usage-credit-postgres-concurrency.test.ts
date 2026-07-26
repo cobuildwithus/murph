@@ -22,10 +22,16 @@ import {
   reconcileHostedUsageReferralRewardAfterCommit,
 } from "@/src/lib/hosted-growth/usage-referral";
 import {
+  createHostedExternalThreadIdentityLookupKey,
+  createHostedExternalThreadLookupKey,
   createHostedPhoneLookupKey,
 } from "@/src/lib/hosted-onboarding/contact-privacy";
 import { assertHostedUsageCreditPurchasesReadyForAccountDeletionTx } from "@/src/lib/hosted-onboarding/usage-credit-purchase-account-deletion";
 import { bindHostedUsageCreditStripeReferencesTx } from "@/src/lib/hosted-onboarding/usage-credit-stripe-reconciliation-context";
+import {
+  buildHostedThreadDeliveryRoute,
+  sealHostedThreadDeliveryRoute,
+} from "@/src/lib/hosted-routing/thread-delivery-route";
 import { createPrismaClient } from "@/src/lib/prisma";
 
 const databaseUrl = process.env.DATABASE_URL?.trim() ?? "";
@@ -902,6 +908,231 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         });
         await observer.hostedMember.deleteMany({
           where: { id: { in: [referrerMemberId, targetContainerMemberId] } },
+        });
+        await observer.$disconnect();
+      }
+    });
+
+    it("completes and celebrates a new-person referral exactly once", async () => {
+      const fixtureId = randomUUID();
+      const referrerMemberId = `member_usage_referral_new_referrer_${fixtureId}`;
+      const sourceContainerMemberId =
+        `member_usage_referral_new_source_${fixtureId}`;
+      const targetContainerMemberId =
+        `member_usage_referral_new_target_${fixtureId}`;
+      const introducedMemberId =
+        `member_usage_referral_new_introduced_${fixtureId}`;
+      const referralId = `hur_usage_referral_new_${fixtureId}`;
+      const sourceThreadId = `linq-thread-${fixtureId}`;
+      const sourceAccountLookupKey = `linq-account-${fixtureId}`;
+      const sourceThreadIdentityLookupKey =
+        createHostedExternalThreadIdentityLookupKey({
+          channel: "linq",
+          threadId: sourceThreadId,
+        });
+      const sourceThreadLookupKey = createHostedExternalThreadLookupKey({
+        accountLookupKey: sourceAccountLookupKey,
+        channel: "linq",
+        threadId: sourceThreadId,
+      });
+      if (!sourceThreadIdentityLookupKey || !sourceThreadLookupKey) {
+        throw new Error("Expected blinded source-thread lookup keys.");
+      }
+      const observer = createPrismaClient({ databaseUrl, poolMax: 2 });
+      const now = new Date();
+      const armedAt = new Date(now.getTime() - 20 * 60_000);
+      const targetBoundAt = new Date(now.getTime() - 15 * 60_000);
+      const activatedAt = new Date(now.getTime() - 10 * 60_000);
+      const qualifiedAt = new Date(now.getTime() - 5 * 60_000);
+      const celebrationDedupeKey =
+        `assistant.notification.requested:usage-referral-reward:${referralId}`;
+
+      try {
+        await observer.hostedMember.createMany({
+          data: [
+            { billingStatus: "active", id: referrerMemberId },
+            { billingStatus: "active", id: sourceContainerMemberId },
+            { billingStatus: "not_started", id: targetContainerMemberId },
+            { billingStatus: "active", id: introducedMemberId },
+          ],
+        });
+        await observer.hostedThreadContainer.createMany({
+          data: [
+            {
+              memberId: sourceContainerMemberId,
+              ownerMemberId: referrerMemberId,
+            },
+            {
+              memberId: targetContainerMemberId,
+              ownerMemberId: referrerMemberId,
+            },
+          ],
+        });
+        const sourceDeliveryRoute = buildHostedThreadDeliveryRoute({
+          accountLookupKey: sourceAccountLookupKey,
+          channel: "linq",
+          threadId: sourceThreadId,
+        });
+        await observer.hostedThreadRoute.create({
+          data: {
+            channel: "linq",
+            containerMemberId: sourceContainerMemberId,
+            deliveryRouteEncrypted: await sealHostedThreadDeliveryRoute({
+              containerMemberId: sourceContainerMemberId,
+              prisma: observer,
+              route: sourceDeliveryRoute,
+            }),
+            threadIdentityLookupKey: sourceThreadIdentityLookupKey,
+            threadLookupKey: sourceThreadLookupKey,
+          },
+        });
+        await observer.hostedMailboxItem.create({
+          data: {
+            dedupeKey: `member.activated:${introducedMemberId}`,
+            id: `hmi_usage_referral_activation_${fixtureId}`,
+            kind: "member.activated",
+            lane: "system",
+            laneSeq: 1n,
+            occurredAt: activatedAt,
+            payloadSchema: "murph.hosted-execution.member-activated.v1",
+            userId: introducedMemberId,
+          },
+        });
+        await observer.hostedUsageReferral.create({
+          data: {
+            armedAt,
+            beneficiaryMemberId: sourceContainerMemberId,
+            expiresAt: new Date(now.getTime() + 24 * 60 * 60_000),
+            firstHumanMessageAt: qualifiedAt,
+            humanMessageCount: 1,
+            id: referralId,
+            introducedMemberId,
+            lastHumanMessageAt: qualifiedAt,
+            nonReferrerMessageCount: 1,
+            observedEventKeysJson: ["introduced-member-first-message"],
+            observedSpeakerKeysJson: ["introduced-member"],
+            policyCode: "new_person_activation_v1",
+            policyVersion: HOSTED_USAGE_REFERRAL_POLICY_VERSION,
+            qualifiedAt,
+            referrerMemberId,
+            referrerSubjectKey: "authenticated-member",
+            rewardUsdMicros:
+              HOSTED_USAGE_REFERRAL_PERSON_REWARD_USD_MICROS,
+            status: "target_bound",
+            targetBoundAt,
+            targetContainerMemberId,
+          },
+        });
+
+        const first = await reconcileHostedUsageReferralRewardAfterCommit({
+          prisma: observer,
+          referralId,
+        });
+        await expect(reconcileHostedUsageReferralRewardAfterCommit({
+          prisma: observer,
+          referralId,
+        })).resolves.toBeNull();
+
+        expect(first).toMatchObject({
+          eventId: celebrationDedupeKey,
+          linqChatId: sourceThreadId,
+          mailboxItemId: expect.any(String),
+          source: "linq",
+          userId: sourceContainerMemberId,
+          wakeMailboxCheckpoint: {
+            lane: "system",
+            laneSeq: expect.any(String),
+          },
+        });
+        await expect(Promise.all([
+          observer.hostedUsageReferral.findUniqueOrThrow({
+            select: {
+              celebrationQueuedAt: true,
+              rewardedAt: true,
+              status: true,
+            },
+            where: { id: referralId },
+          }),
+          observer.hostedUsageCreditEntry.count({
+            where: { kind: "referral_grant", referralId },
+          }),
+          observer.hostedUsageCreditGrant.count({
+            where: { entry: { referralId } },
+          }),
+          observer.hostedMailboxItem.findMany({
+            select: { dedupeKey: true, kind: true, userId: true },
+            where: {
+              dedupeKey: celebrationDedupeKey,
+              userId: sourceContainerMemberId,
+            },
+          }),
+        ])).resolves.toEqual([
+          {
+            celebrationQueuedAt: expect.any(Date),
+            rewardedAt: expect.any(Date),
+            status: "rewarded",
+          },
+          1,
+          1,
+          [{
+            dedupeKey: celebrationDedupeKey,
+            kind: "assistant.notification.requested",
+            userId: sourceContainerMemberId,
+          }],
+        ]);
+      } finally {
+        await observer.hostedMailboxPayload.deleteMany({
+          where: {
+            userId: { in: [sourceContainerMemberId, introducedMemberId] },
+          },
+        });
+        await observer.hostedMailboxItem.deleteMany({
+          where: {
+            userId: { in: [sourceContainerMemberId, introducedMemberId] },
+          },
+        });
+        await observer.hostedMailboxLaneCounter.deleteMany({
+          where: {
+            userId: { in: [sourceContainerMemberId, introducedMemberId] },
+          },
+        });
+        await observer.hostedWorkspace.deleteMany({
+          where: { userId: sourceContainerMemberId },
+        });
+        await observer.hostedUsageCreditGrant.deleteMany({
+          where: { entry: { referralId } },
+        });
+        await observer.hostedUsageCreditEntry.deleteMany({
+          where: { referralId },
+        });
+        await observer.hostedUsageReferral.deleteMany({
+          where: { id: referralId },
+        });
+        await observer.hostedThreadRoute.deleteMany({
+          where: {
+            containerMemberId: {
+              in: [sourceContainerMemberId, targetContainerMemberId],
+            },
+          },
+        });
+        await observer.hostedThreadContainer.deleteMany({
+          where: {
+            memberId: {
+              in: [sourceContainerMemberId, targetContainerMemberId],
+            },
+          },
+        });
+        await observer.hostedMember.deleteMany({
+          where: {
+            id: {
+              in: [
+                referrerMemberId,
+                sourceContainerMemberId,
+                targetContainerMemberId,
+                introducedMemberId,
+              ],
+            },
+          },
         });
         await observer.$disconnect();
       }

@@ -1,6 +1,6 @@
 # Hosted usage referral rewards
 
-Status: active
+Status: completed
 Created: 2026-07-26
 
 ## Goal
@@ -130,5 +130,22 @@ person activates or a real group becomes active.
   `tbx_01kyg0abhyntzyzbdztq543nhc` in 4m38s, including full workspace
   typecheck, package coverage, Web tests/lint/dev smoke/production build, and
   Cloudflare verification. The delegated Actions proof is run `30218111295`.
-- Preliminary specialist ReviewGPT, final parent review, final ReviewGPT, CI,
-  and mergeability remain pending.
+- Preliminary specialist ReviewGPT completed in 16 minutes with two accepted
+  coverage findings and no prompt finding. The direct privacy test now asserts
+  the rewarded-survivor anonymization and unrewarded/beneficiary deletion
+  predicates and payload. The real PostgreSQL suite is now 9/9 and adds a
+  production-faithful new-person activation with a valid Linq source route,
+  exactly one grant and deterministic celebration, a completion fence and
+  first wake, and replay with no duplicate work.
+- Post-remediation canonical diff verification passed on Blacksmith Testbox
+  `tbx_01kyg21ss3g1s82rgjmnt8ztkk` in 2m1s. The delegated Actions proof is run
+  `30219194499`.
+- Post-remediation full canonical acceptance passed on Blacksmith Testbox
+  `tbx_01kyg21xj3zbhbngtcam24eq29` in 4m35s. The delegated Actions proof is run
+  `30219196435`.
+- Parent final review found no remaining correctness, accounting, privacy,
+  ingress-authority, reliability, deployment-compatibility, or simplicity
+  finding in the candidate plus preliminary-remediation delta.
+- Final ReviewGPT, CI, and mergeability remain pending.
+Updated: 2026-07-26
+Completed: 2026-07-26

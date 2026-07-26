@@ -487,11 +487,13 @@ describe("deleteHostedAccountData", () => {
 
   it("deletes usage-credit entries and grants before source and member rows", async () => {
     const deleteCalls: HostedAccountDeletionPrismaDeleteCall[] = [];
+    const updateCalls: HostedAccountDeletionPrismaUpdateCall[] = [];
     const operationOrder: string[] = [];
     const prisma = createHostedAccountDeletionPrismaForTest({
       deleteCalls,
       onTransaction: () => operationOrder.push("transaction"),
       operationOrder,
+      updateCalls,
     });
 
     const result = await deleteHostedAccountData({
@@ -532,12 +534,62 @@ describe("deleteHostedAccountData", () => {
         },
       },
       {
+        model: "hostedUsageReferral",
+        where: {
+          OR: [
+            { beneficiaryMemberId: "member_123" },
+            {
+              AND: [
+                {
+                  OR: [
+                    { beneficiaryMemberId: "member_123" },
+                    { introducedMemberId: "member_123" },
+                    { referrerMemberId: "member_123" },
+                    { targetContainerMemberId: "member_123" },
+                  ],
+                },
+                { status: { not: "rewarded" } },
+              ],
+            },
+          ],
+        },
+      },
+      {
         model: "hostedUsageCreditPurchase",
         where: {
           beneficiaryMemberId: "member_123",
         },
       },
     ]));
+    expect(updateCalls).toContainEqual({
+      data: {
+        firstHumanMessageAt: null,
+        humanMessageCount: 0,
+        introducedMemberId: null,
+        lastHumanMessageAt: null,
+        nonReferrerMessageCount: 0,
+        observedEventKeysJson: expect.anything(),
+        observedSpeakerKeysJson: expect.anything(),
+        referrerMemberId: null,
+        referrerSubjectKey: null,
+        targetContainerMemberId: null,
+      },
+      model: "hostedUsageReferral",
+      where: {
+        AND: [
+          {
+            OR: [
+              { beneficiaryMemberId: "member_123" },
+              { introducedMemberId: "member_123" },
+              { referrerMemberId: "member_123" },
+              { targetContainerMemberId: "member_123" },
+            ],
+          },
+          { NOT: { beneficiaryMemberId: "member_123" } },
+        ],
+        status: "rewarded",
+      },
+    });
     expect(operationOrder.indexOf("delete:hostedUsageCreditGrant")).toBeLessThan(
       operationOrder.indexOf("delete:hostedUsageCreditEntry"),
     );
@@ -2028,6 +2080,7 @@ function createHostedAccountDeletionPrismaForTest(input: {
     providerAccountBlindIndex: string;
     sources?: { sourceProviderSlug: string; status: string }[];
   }>;
+  updateCalls?: HostedAccountDeletionPrismaUpdateCall[];
 }): Parameters<typeof deleteHostedAccountData>[0]["prisma"] {
   const makeDeleteDelegate = (model: string): HostedAccountDeletionPrismaDeleteDelegate => ({
     count: async () => {
@@ -2039,8 +2092,13 @@ function createHostedAccountDeletionPrismaForTest(input: {
       input.deleteCalls?.push({ model, where: args.where });
       return { count: 1 };
     },
-    updateMany: async () => {
+    updateMany: async (args) => {
       input.operationOrder?.push(`update:${model}`);
+      input.updateCalls?.push({
+        data: args.data,
+        model,
+        where: args.where,
+      });
       return { count: 1 };
     },
   });
@@ -2252,6 +2310,12 @@ type HostedAccountDeletionPrismaDeleteCall = {
   where: unknown;
 };
 
+type HostedAccountDeletionPrismaUpdateCall = {
+  data: unknown;
+  model: string;
+  where: unknown;
+};
+
 type HostedAccountDeletionConnectedAppIntentRow = {
   alias: string | null;
   claimHash?: string;
@@ -2262,7 +2326,7 @@ type HostedAccountDeletionConnectedAppIntentRow = {
 type HostedAccountDeletionPrismaDeleteDelegate = {
   count(args: { where: unknown }): Promise<number>;
   deleteMany(args: { where: unknown }): Promise<{ count: number }>;
-  updateMany(args: unknown): Promise<{ count: number }>;
+  updateMany(args: { data?: unknown; where?: unknown }): Promise<{ count: number }>;
 };
 
 type HostedAccountDeletionPrismaTransactionFake = {
