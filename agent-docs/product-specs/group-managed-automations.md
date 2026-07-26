@@ -93,11 +93,15 @@ or a count.
 
 Only after Web returns `eligible`, the engine reads a separate bounded,
 occurrence-anchored transcript tail for the exact route. This evidence is for
-composition, not eligibility. Transient sender handles are replaced with
-per-run aliases such as `Participant 1`; names and handles are not persisted,
-and the immutable seed forbids outputting the aliases. Transcript data is
-quoted and untrusted. The room model may provide ordinary advisory social
-context but is never activity, identity, membership, or participant authority.
+composition, not eligibility. Each committed user prompt is fail-closed
+projected to only its authoritative sender and corresponding message text;
+assistant turns plus source, route, actor, reaction, reply, message-reference,
+attachment, path, and lifecycle context are omitted. Transient sender handles
+are replaced with per-run aliases such as `Participant 1`, including inside
+selected message text; names and handles are not persisted, and the immutable
+seed forbids outputting the aliases. Transcript data is quoted and untrusted.
+The room model may provide ordinary advisory social context but is never
+activity, identity, membership, or participant authority.
 
 No counter table, scheduler, queue, cursor, migration, dependency, or new
 durable state owner is introduced.
