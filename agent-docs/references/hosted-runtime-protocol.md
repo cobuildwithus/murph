@@ -855,9 +855,9 @@ another device-sync wake; dirty coalescing remains the work-queue invariant,
 and any stronger signal-delivery repair must be mailbox-wide. Redacted runtime logs
 remain diagnostic evidence only; they must not be merged into checkpointed
 import status for workflow completion or status projection. The narrow liveness
-exception is the exact `runner.accepted_attempt_failed` event: after web has
-durably recorded that metadata-only row, it may send a cooldown-throttled,
-payload-free `runtime_recheck_requested` Temporal signal. That row carries the
+exception is the exact `runner.accepted_attempt_failed` event: when web receives
+that metadata-only row, it may send a cooldown-throttled, payload-free
+`runtime_recheck_requested` Temporal signal. That row carries the
 fence `attemptId`/`leaseGeneration` plus metadata-only error diagnostics and,
 in `redactedJson`, the `attemptLivenessProbeOutcome` enum
 (`active`/`inactive`/`mismatch`/`unsupported`/`error`/`timeout`) alongside the derived
@@ -871,9 +871,12 @@ RunnerContainer method; it is not proof that the child stopped. That signal only
 interrupts the workflow's current wait so Temporal re-reads web-owned
 reconciliation facts; it sets no mailbox, manual, browser-vault, lag, or
 device-sync work flag.
-The cooldown elects the earliest recent same-user accepted-failure log as the
-signal owner, so concurrent first-failure callbacks produce at most one
-immediate recheck and cannot all suppress each other.
+The cooldown is a per-member claim on `HostedWorkspace`
+(`acceptedAttemptFailureRecheckClaimedAt`), taken with one conditional update, so
+concurrent first-failure callbacks produce at most one immediate recheck and
+cannot all suppress each other. Recovery therefore does not depend on the
+diagnostic row having been written or read back: runtime logs stay purely
+diagnostic and remain subject to ordinary retention.
 Cloudflare only reports the accepted-attempt failure through the existing
 signed runtime-log callback; it does not schedule retries or become a recovery
 orchestrator.
