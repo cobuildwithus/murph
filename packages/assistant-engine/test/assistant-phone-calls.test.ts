@@ -80,6 +80,9 @@ describe("assistant phone calls", () => {
     expect(MURPH_CREATE_PHONE_CALL_TOOL.description).toContain(
       "Murph resolves verified transfer numbers server-side",
     );
+    expect(MURPH_CREATE_PHONE_CALL_TOOL.description).toContain(
+      "Group-chat calls never transfer to one participant",
+    );
   });
 
   it("uses only eligible user-sourced accepted input as phone-call authority", () => {
@@ -281,8 +284,57 @@ describe("assistant phone calls", () => {
     });
     expect(result.rpcResult.contentItems[0]?.text).toContain("phone call accepted or placed: hpc_123");
     expect(result.rpcResult.contentItems[0]?.text).toContain(
-      "When the call finishes, Murph messages the member with the result if it is worth sharing; you may tell them you will follow up once you hear back.",
+      "When the call finishes, Murph reports the result back in this conversation if it is worth sharing; you may tell them you will follow up once you hear back.",
     );
+  });
+
+  it("canonicalizes group transfer permission before request-key creation and dispatch", async () => {
+    const effectiveBrief = {
+      ...BASE_BRIEF,
+      allowTransferToUser: false,
+    };
+    const phoneCallScope = {
+      ...BASE_SCOPE,
+      acceptedInputIds: ["group_phone_call_input"],
+      conversationScope: "group" as const,
+      originSessionId: "session_group_phone_call",
+    };
+    const expectedRequestKey = createPhoneCallRequestKey({
+      brief: effectiveBrief,
+      scope: phoneCallScope,
+    });
+    const start = vi.fn(async () => ({
+      phoneCallId: "hpc_group",
+      status: "calling" as const,
+    }));
+    const request = readMurphDynamicToolRequest(dynamicToolCall({
+      argumentsValue: BASE_BRIEF,
+      tool: MURPH_CREATE_PHONE_CALL_TOOL.name,
+    }));
+    if (!request || request.kind !== "create-phone-call") {
+      throw new Error("Expected create phone call request.");
+    }
+
+    await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createHostedToolContext({
+        currentUserActionScope: () => phoneCallScope,
+        phoneCalls: { start },
+      }),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request,
+    });
+
+    expect(start).toHaveBeenCalledWith({
+      brief: effectiveBrief,
+      inboundMailboxItemIds: ["mailbox_item_1"],
+      originSessionId: "session_group_phone_call",
+      requestKey: expectedRequestKey,
+    }, {
+      signal: null,
+    });
   });
 
   it.each([
@@ -327,7 +379,7 @@ describe("assistant phone calls", () => {
     expect(result.rpcResult.contentItems[0]?.text).toContain("hpc_123");
     if (status === "starting") {
       expect(result.rpcResult.contentItems[0]?.text).toContain(
-        "When the call finishes, Murph messages the member with the result if it is worth sharing; you may tell them you will follow up once you hear back.",
+        "When the call finishes, Murph reports the result back in this conversation if it is worth sharing; you may tell them you will follow up once you hear back.",
       );
     }
   });

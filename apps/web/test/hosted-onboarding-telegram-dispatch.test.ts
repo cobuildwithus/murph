@@ -5,10 +5,21 @@ import {
   readHostedMemberRoutingTelegramPrivateState,
 } from "@/src/lib/hosted-onboarding/member-private-codecs";
 import {
+  createHostedExternalThreadIdentityLookupKey,
+  createHostedExternalThreadLookupKey,
   createHostedTelegramUsernameLookupKey,
   createHostedTelegramUserLookupKey,
 } from "@/src/lib/hosted-onboarding/contact-privacy";
+import {
+  HOSTED_TELEGRAM_THREAD_ACCOUNT_LOOKUP_KEY,
+  openHostedThreadDeliveryRoute,
+} from "@/src/lib/hosted-routing/thread-delivery-route";
 import { renderUserFacingMessage } from "@/src/lib/hosted-messages/user-facing-messages";
+
+type HostedThreadDeliveryRouteRefresher =
+  typeof import("@/src/lib/hosted-routing/thread-container-service")[
+    "refreshHostedThreadContainerDeliveryRouteTx"
+  ];
 
 const mocks = vi.hoisted(() => {
   const state = {
@@ -21,6 +32,15 @@ const mocks = vi.hoisted(() => {
       created: false,
       demotedMailboxConsumedAt: null,
     })),
+    refreshHostedThreadContainerDeliveryRouteTx:
+      vi.fn<HostedThreadDeliveryRouteRefresher>(async () => ({
+        deliveryRoute: {
+          channel: "telegram" as const,
+          schema: "murph.hosted-thread-delivery-route.v1" as const,
+          threadId: "-100123",
+        },
+        demotedMailboxConsumedAt: null,
+      })),
     nudgeHostedRunnerUserBestEffort: vi.fn(async () => ({
       accepted: true,
       alarmScheduled: false,
@@ -68,6 +88,12 @@ const mocks = vi.hoisted(() => {
     readHostedThreadRouteByThreadIdentity: vi.fn(async (): Promise<{
       channel: "telegram";
       containerMemberId: string;
+      deliveryRouteState?: {
+        deliveryRouteEncryptedPresent: boolean;
+        threadIdentityLookupKey: string;
+        threadLookupKey: string;
+      };
+      owner: { id: string };
     } | null> => null),
     readHostedMailboxItemByDedupeKey: vi.fn(async () => null),
     readHostedMailboxItemOwnerById: vi.fn(async (input: {
@@ -142,11 +168,20 @@ vi.mock("@/src/lib/hosted-mailbox/store", async () => {
 
 vi.mock("@/src/lib/hosted-routing/thread-container-service", () => ({
   ensureHostedThreadContainerRouteTx: mocks.ensureHostedThreadContainerRouteTx,
+  refreshHostedThreadContainerDeliveryRouteTx:
+    mocks.refreshHostedThreadContainerDeliveryRouteTx,
 }));
 
-vi.mock("@/src/lib/hosted-routing/thread-route-store", () => ({
-  readHostedThreadRouteByThreadIdentity: mocks.readHostedThreadRouteByThreadIdentity,
-}));
+vi.mock("@/src/lib/hosted-routing/thread-route-store", async () => {
+  const actual = await vi.importActual<
+    typeof import("@/src/lib/hosted-routing/thread-route-store")
+  >("@/src/lib/hosted-routing/thread-route-store");
+  return {
+    ...actual,
+    readHostedThreadRouteByThreadIdentity:
+      mocks.readHostedThreadRouteByThreadIdentity,
+  };
+});
 
 vi.mock("@/src/lib/hosted-groups/group-join-confirmation", () => ({
   materializePendingHostedGroupJoinConfirmationsBestEffort:
@@ -205,6 +240,10 @@ vi.mock("@/src/lib/hosted-crypto/domain-root-store", async () => {
 });
 
 import { handleHostedOnboardingTelegramWebhook as handleHostedOnboardingTelegramWebhookImpl } from "@/src/lib/hosted-onboarding/webhook-service";
+
+const actualThreadContainerService = await vi.importActual<
+  typeof import("@/src/lib/hosted-routing/thread-container-service")
+>("@/src/lib/hosted-routing/thread-container-service");
 
 type HostedOnboardingTelegramWebhookInput = Parameters<typeof handleHostedOnboardingTelegramWebhookImpl>[0];
 type TelegramWebhookPrismaHarness = {
@@ -489,9 +528,27 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
 
   it("reuses an existing Telegram group route for another linked active sender", async () => {
     mocks.runtimeEnv.telegramWebhookSecret = "telegram-secret";
+    const threadIdentityLookupKey = createHostedExternalThreadIdentityLookupKey({
+      channel: "telegram",
+      threadId: "-100123",
+    });
+    const threadLookupKey = createHostedExternalThreadLookupKey({
+      accountLookupKey: "telegram:bot",
+      channel: "telegram",
+      threadId: "-100123",
+    });
+    if (!threadIdentityLookupKey || !threadLookupKey) {
+      throw new Error("Expected Telegram thread route lookup keys.");
+    }
     mocks.readHostedThreadRouteByThreadIdentity.mockResolvedValue({
       channel: "telegram",
       containerMemberId: "member_existing_group_container",
+      deliveryRouteState: {
+        deliveryRouteEncryptedPresent: true,
+        threadIdentityLookupKey,
+        threadLookupKey,
+      },
+      owner: { id: "member_telegram_owner" },
     });
     const prisma = withPrismaTransaction({
       hostedMemberRouting: {
@@ -541,6 +598,132 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
           userId: "member_existing_group_container",
         }),
       }),
+    );
+  });
+
+  it("repairs non-empty corrupt Telegram delivery material on owner ingress", async () => {
+    mocks.runtimeEnv.telegramWebhookSecret = "telegram-secret";
+    const containerMemberId = "member_existing_group_container";
+    const threadId = "-100123";
+    const threadIdentityLookupKey = createHostedExternalThreadIdentityLookupKey({
+      channel: "telegram",
+      threadId,
+    });
+    const threadLookupKey = createHostedExternalThreadLookupKey({
+      accountLookupKey: HOSTED_TELEGRAM_THREAD_ACCOUNT_LOOKUP_KEY,
+      channel: "telegram",
+      threadId,
+    });
+    if (!threadIdentityLookupKey || !threadLookupKey) {
+      throw new Error("Expected current Telegram thread route lookup keys.");
+    }
+    const routeRow: {
+      channel: "telegram";
+      containerMemberId: string;
+      deliveryRouteEncrypted: string | null;
+      pendingGroupReactionContextEncrypted: string | null;
+      threadIdentityLookupKey: string;
+      threadLookupKey: string;
+    } = {
+      channel: "telegram",
+      containerMemberId,
+      deliveryRouteEncrypted: "corrupt-delivery-route",
+      pendingGroupReactionContextEncrypted:
+        "same-authority-reaction-context",
+      threadIdentityLookupKey,
+      threadLookupKey,
+    };
+    const hostedThreadRouteUpdate = vi.fn(async ({
+      data,
+    }: {
+      data: {
+        deliveryRouteEncrypted: string;
+        pendingGroupReactionContextEncrypted?: string | null;
+        threadIdentityLookupKey: string;
+        threadLookupKey: string;
+      };
+    }) => {
+      routeRow.deliveryRouteEncrypted = data.deliveryRouteEncrypted;
+      routeRow.threadIdentityLookupKey = data.threadIdentityLookupKey;
+      routeRow.threadLookupKey = data.threadLookupKey;
+      if (Object.hasOwn(data, "pendingGroupReactionContextEncrypted")) {
+        routeRow.pendingGroupReactionContextEncrypted =
+          data.pendingGroupReactionContextEncrypted ?? null;
+      }
+      return routeRow;
+    });
+    mocks.readHostedThreadRouteByThreadIdentity.mockResolvedValue({
+      channel: "telegram",
+      containerMemberId,
+      deliveryRouteState: {
+        deliveryRouteEncryptedPresent: true,
+        threadIdentityLookupKey,
+        threadLookupKey,
+      },
+      owner: { id: "member_telegram_owner" },
+    });
+    mocks.refreshHostedThreadContainerDeliveryRouteTx.mockImplementationOnce(
+      actualThreadContainerService.refreshHostedThreadContainerDeliveryRouteTx,
+    );
+    const prisma = withPrismaTransaction({
+      hostedMemberRouting: {
+        findUnique: vi.fn().mockResolvedValue({
+          member: {
+            billingStatus: HostedBillingStatus.active,
+            id: "member_telegram_owner",
+            suspendedAt: null,
+          },
+          memberId: "member_telegram_owner",
+        }),
+      },
+      hostedThreadContainer: {
+        findUnique: vi.fn(async ({
+          where,
+        }: {
+          where: { memberId: string };
+        }) => where.memberId === containerMemberId
+          ? { memberId: containerMemberId }
+          : null),
+      },
+      hostedThreadRoute: {
+        findMany: vi.fn(async () => [routeRow]),
+        update: hostedThreadRouteUpdate,
+      },
+    });
+
+    await expect(handleHostedOnboardingTelegramWebhook({
+      prisma,
+      rawBody: JSON.stringify({
+        message: {
+          chat: { id: -100123, title: "Family chat", type: "group" },
+          date: 1_774_522_601,
+          from: { first_name: "Casey", id: 789 },
+          message_id: 3,
+          text: "repair this route",
+        },
+        update_id: 324,
+      }),
+      secretToken: "telegram-secret",
+    })).resolves.toMatchObject({
+      ok: true,
+      reason: "wake-appended-active-group",
+    });
+
+    expect(mocks.ensureHostedThreadContainerRouteTx).not.toHaveBeenCalled();
+    expect(hostedThreadRouteUpdate).toHaveBeenCalledTimes(1);
+    expect(routeRow.deliveryRouteEncrypted).toMatch(/^hsb-test:/u);
+    await expect(openHostedThreadDeliveryRoute({
+      channel: "telegram",
+      containerMemberId,
+      encrypted: routeRow.deliveryRouteEncrypted,
+      prisma: prisma as never,
+    })).resolves.toEqual({
+      channel: "telegram",
+      schema: "murph.hosted-thread-delivery-route.v1",
+      threadId,
+    });
+    expect(routeRow.pendingGroupReactionContextEncrypted).toBe(
+      "same-authority-reaction-context",
     );
   });
 

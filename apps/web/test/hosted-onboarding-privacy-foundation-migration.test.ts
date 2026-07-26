@@ -423,6 +423,13 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
+    const hostedThreadDeliveryRouteMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260725120000_hosted_thread_delivery_route/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     const sensitiveActionApprovalMigrationSql = readFileSync(
       new URL(
         "../prisma/migrations/20260624150000_hosted_sensitive_action_approval/migration.sql",
@@ -888,6 +895,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260723230000_hosted_member_assistant_unhinged",
       "20260724160000_hosted_account_exit_reason",
       "20260724180000_device_connection_source_last_data_at",
+      "20260725120000_hosted_thread_delivery_route",
       "20260725230000_hosted_paid_usage_legacy_period_cutover",
       "migration_lock.toml",
     ]);
@@ -1072,6 +1080,14 @@ describe("hosted Prisma baseline migration", () => {
     expect(hostedThreadRoutesMigrationSql).not.toContain("thread_id_encrypted");
     expect(hostedThreadRoutesMigrationSql).not.toContain('"source"');
     expect(hostedThreadRoutesMigrationSql).not.toContain('"status"');
+    expect(hostedThreadDeliveryRouteMigrationSql).toContain(
+      'ADD COLUMN "delivery_route_encrypted" TEXT',
+    );
+    expect(hostedThreadDeliveryRouteMigrationSql).not.toContain("NOT NULL");
+    expect(schema).toMatch(
+      /deliveryRouteEncrypted\s+String\?\s+@map\("delivery_route_encrypted"\)/u,
+    );
+    expect(schema).not.toMatch(/deliveryRoute\s+String/u);
     expect(hostedThreadRouteParticipantAdditionMigrationSql).toContain(
       'ADD COLUMN "pending_participant_addition" BOOLEAN DEFAULT false',
     );

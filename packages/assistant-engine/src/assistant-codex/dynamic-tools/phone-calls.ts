@@ -9,6 +9,7 @@ import {
 import type {
   AssistantHostedToolRequestKeyScope,
 } from '../../assistant/hosted-tool-context.js'
+import type { AssistantConversationScope } from '../../assistant/conversation-policy.js'
 import type {
   AssistantAcceptedTurnInputItemInput,
   AssistantAcceptedTurnInputSource,
@@ -42,6 +43,7 @@ export const MURPH_CREATE_PHONE_CALL_TOOL = {
     'Put only user-approved, call-relevant, disclosable facts in shareableFacts.',
     'Set allowTransferToUser=true for calls likely to require live user identity verification, personal consent, or in-the-moment judgment unless the user says not to transfer.',
     'Set allowTransferToUser=false for info-only calls, simple status checks, or calls where transfer would surprise the user.',
+    'Group-chat calls never transfer to one participant; Murph forces allowTransferToUser=false for group calls.',
     'Do not put the user transfer phone number in shareableFacts; Murph resolves verified transfer numbers server-side.',
     'Facts outside shareableFacts require Murph consultation during the call.',
   ].join(' '),
@@ -99,6 +101,20 @@ export function createPhoneCallRequestKey(input: {
     }))
     .digest('hex')
   return `phone_call_${digest}`
+}
+
+export function normalizePhoneCallBriefForConversationScope(input: {
+  brief: HostedPhoneCallBrief
+  conversationScope: AssistantConversationScope
+}): HostedPhoneCallBrief {
+  if (input.conversationScope !== 'group' || !input.brief.allowTransferToUser) {
+    return input.brief
+  }
+
+  return {
+    ...input.brief,
+    allowTransferToUser: false,
+  }
 }
 
 export function resolveAssistantUserActionAcceptedInputIds(input: {

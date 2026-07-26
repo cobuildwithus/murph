@@ -537,6 +537,12 @@ function buildAssistantNotificationInput(
       : wake.notification.deliveryDispatchMode ?? undefined,
     deliveryIdempotencyKey: wake.notification.deliveryIdempotencyKey ?? null,
     executionContext,
+    ...(wake.notification.externalThreadRouteAuthority
+      ? {
+          externalThreadRouteAuthority:
+            wake.notification.externalThreadRouteAuthority,
+        }
+      : {}),
     firstContactPolicy: wake.notification.firstContact
       ? {
           markSeenOnDeliveryAccepted:
@@ -562,6 +568,8 @@ function buildAssistantNotificationInputFromRoute(input: {
   deliveryDispatchMode: AssistantNotificationInput["deliveryDispatchMode"];
   deliveryIdempotencyKey: AssistantNotificationInput["deliveryIdempotencyKey"];
   executionContext: AssistantExecutionContext;
+  externalThreadRouteAuthority?:
+    AssistantNotificationInput["outboxExternalThreadRouteAuthority"];
   firstContactPolicy: AssistantNotificationInput["firstContactPolicy"];
   instructions: string;
   logDetails: HostedExecutionStructuredLogDetails;
@@ -630,6 +638,12 @@ function buildAssistantNotificationInputFromRoute(input: {
         input.recordLogEntry(entry);
       }
     },
+    ...(input.externalThreadRouteAuthority
+      ? {
+          outboxExternalThreadRouteAuthority:
+            input.externalThreadRouteAuthority,
+        }
+      : {}),
     responsePolicy: input.responsePolicy,
     threadId: route.threadId,
     threadIsDirect: route.threadIsDirect,
