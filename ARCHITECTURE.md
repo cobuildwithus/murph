@@ -1,6 +1,6 @@
 # Murph Architecture
 
-Last verified: 2026-07-21
+Last verified: 2026-07-25
 
 ## Accepted-Message Targeting
 
@@ -62,11 +62,49 @@ matching member's bounded `currentTurnHandles` array and only when it resolves
 to exactly one current membership; the same row carries the group-scoped
 `participantId`. The model may bind a challenge participant only when an exact
 current `Sender:` handle appears in one row. Scheduled and detached reads carry
-no handles. Handles are never persisted, and this adds no pre-model work,
-standalone query, decrypted contact roster, or compatibility branch. The
-legacy `read_current` wire is unchanged, and assistant-engine still removes the
-global member id and legacy roster handle before any group summary reaches the
-model.
+no handles. Those handles are never persisted as membership or shared-data
+authority, and this adds no pre-model roster work, standalone Web query,
+decrypted contact roster, or compatibility branch. The legacy `read_current`
+wire is unchanged, and assistant-engine still removes the global member id and
+legacy roster handle before any group summary reaches the model.
+
+Each synthetic hosted group runtime may additionally keep one assistant-authored
+`group-room-model` derived knowledge page. A twice-weekly managed automation
+installed only on authenticated non-direct Linq/iMessage or Telegram routes
+reuses the existing isolated, exact-skip background-maintenance lane and a
+bounded seven-day tail of committed transcripts from those same authenticated
+group-chat channels. It fully rewrites the one page only when the evidence
+materially improves a compact list of room canon, likely person-specific comedy
+preferences, successful Murph formats, retired material, and open callbacks.
+One dedicated owner reads, replaces, or deletes the fixed page. Generic
+knowledge show, list, search, append, upsert, and generated index surfaces
+exclude it. Every mutation passes the digest returned by the immediately prior
+show and compares that digest under the same fixed-page lock, so a concurrent
+rewrite cannot be lost. Replacement validates the normalized body and complete
+6 KiB advisory envelope before writing; ordinary prompts never truncate an
+accepted page. Raw `Sender:` handles remain transient evidence attribution and
+cannot be persisted in the page.
+
+Ordinary authenticated hosted group-chat turns read that fixed page directly
+from the same group vault and append a bounded rendering to dynamic turn
+context. An explicit current-room remember, correction, retirement, or forget
+request may fully rewrite the page only through a dynamic tool admitted for
+current accepted input on that authenticated route. Group email neither receives
+the page nor contributes maintenance evidence, and its spoofable sender cannot
+receive the mutation tool. Silent consolidation receives that same dynamic tool
+only from the immutable managed-automation id, runs in a fresh one-shot Codex
+thread with workspace access denied and network disabled, and has no generic
+knowledge or shell write surface. Ordinary prompt reads fail open, but mutation reads
+distinguish a genuinely missing page from malformed, unreadable, or wrong-type
+fixed-slug state; conflicts stop both explicit and scheduled replacement. The
+rendering is quoted as fallible data and
+explicitly tells the model to skim it lightly: most turns should use none of it,
+and at most one naturally relevant tip should shape a reply. Current
+conversation, safety rules, authoritative tool results, and explicit canonical
+room style settings always outrank it. This adds no database table, mailbox
+kind, roster service, cursor, vector index, per-participant page, or pruning
+workflow; the admitted committed transcript is evidence and the single page is
+the only durable room-intelligence owner.
 
 Web then captures the current roster and exact active grants, decrypts the
 bounded encrypted snapshots owned by those share rows, and returns every member

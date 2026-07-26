@@ -221,6 +221,8 @@ export async function executeCodexAssistantTurnAttempt(
       codexConfigOverrides.length > 0 ? codexConfigOverrides : undefined,
     env: codexProcessEnv,
     fetchImpl: input.providerFetch ?? undefined,
+    groupRoomModelMaintenanceAuthorized:
+      input.groupRoomModelMaintenanceAuthorized === true,
     hostedGeneratedImageUploader: input.generatedImageUploader ?? null,
     hostedToolContext: input.hostedToolContext ?? null,
     materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts ?? null,
@@ -265,13 +267,17 @@ export async function executeCodexAssistantTurnAttempt(
     ...(input.processLifetime === 'one-shot'
       ? { processLifetime: 'one-shot' as const }
       : {}),
+    permissions: input.permissions ?? null,
     providerRequestOrdinal: input.providerRequestOrdinal ?? null,
     requireHostedGeneratedImageUploader:
       input.requireGeneratedImageUploader ?? false,
     images: extractCodexAppServerUserMessageImages(input.userMessageContent),
     excludeResumeTurns: true,
     reasoningEffort: providerConfig.policy.reasoningEffort ?? undefined,
-    sandbox: providerConfig.policy.sandbox ?? undefined,
+    runtimeWorkspaceRoots: input.runtimeWorkspaceRoots ?? null,
+    sandbox: input.permissions
+      ? undefined
+      : providerConfig.policy.sandbox ?? undefined,
     serviceTier: input.serviceTier ?? null,
     vaultRoot: input.vaultRoot ?? null,
     voiceMemoRuntime,

@@ -174,6 +174,7 @@ export function expectAdvertisedMurphDynamicTools(
   options: {
     connectedAppsAvailable?: boolean;
     computerToolsAvailable?: boolean;
+    groupRoomModelAvailable?: boolean;
     messageTargetingAvailable?: boolean;
     newsletterAvailable?: boolean;
     phoneCallsAvailable?: boolean;
@@ -207,6 +208,13 @@ export function expectAdvertisedMurphDynamicTools(
           name === "murph.react_to_message"
           || name === "murph.select_reply_target"
         )
+      ) {
+        return false;
+      }
+
+      if (
+        options.groupRoomModelAvailable !== true
+        && name === "murph.group_room_model"
       ) {
         return false;
       }
