@@ -25538,7 +25538,7 @@ describe("hosted workspace runtime entrypoint", () => {
           reason: "browser_vault_refresh",
         },
       })
-    ).toThrow("Hosted assistant workspace runtime job request.reason is no longer supported.");
+    ).toThrow("Hosted workspace invocation request.reason is no longer supported.");
 
     expect(() =>
       parseHostedAssistantWorkspaceRuntimeJobInput({
@@ -25547,7 +25547,7 @@ describe("hosted workspace runtime entrypoint", () => {
           source: "manual",
         },
       })
-    ).toThrow("Hosted assistant workspace runtime job request.source is no longer supported.");
+    ).toThrow("Hosted workspace invocation request.source is no longer supported.");
 
     expect(() =>
       parseHostedAssistantWorkspaceRuntimeJobInput({
@@ -25557,7 +25557,7 @@ describe("hosted workspace runtime entrypoint", () => {
         },
       })
     ).toThrow(
-      "Hosted assistant workspace runtime job request.checkpointNextWakeAt is no longer supported.",
+      "Hosted workspace invocation request.checkpointNextWakeAt is no longer supported.",
     );
 
     expect(() =>
@@ -25568,7 +25568,7 @@ describe("hosted workspace runtime entrypoint", () => {
         },
       })
     ).toThrow(
-      "Hosted assistant workspace runtime job request.deadlineAt is no longer supported.",
+      "Hosted workspace invocation request.deadlineAt is no longer supported.",
     );
 
     expect(() =>

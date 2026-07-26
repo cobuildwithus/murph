@@ -381,6 +381,11 @@ replacement path. It must start a default-mode child rather than coalescing the
 wake because system-mailbox mode imports only system work and returns before
 assistant admission. A system-mailbox request behind an active default runtime
 remains deferred and cannot broaden that child's admission authority.
+`parseHostedWorkspaceInvocationRequest` is the single wire parser for this
+request contract. Assistant-runtime and Cloudflare transport adapters must
+delegate to that parser instead of reconstructing a partial request, because
+silently omitting `processingMode` turns import-only work back into default
+assistant work and defeats the ownership rule.
 Runtime-fence liveness uses one container probe vocabulary: exact-active,
 inactive, mismatched, or indeterminate. The probe only answers whether the
 container still has the requested fence identity in flight. It does not own

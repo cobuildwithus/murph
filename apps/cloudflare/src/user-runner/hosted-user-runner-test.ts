@@ -19,6 +19,11 @@ export interface HostedRunnerStuckInvocationTestResult {
   ok: true;
 }
 
+export interface HostedRunnerActiveFenceTestResult {
+  attemptId: string;
+  processingMode: RunnerWriteFenceToken["processingMode"];
+}
+
 export class HostedUserRunnerWithTestControls extends HostedUserRunner {
   private readonly testState: DurableObjectStateLike;
 
@@ -104,6 +109,19 @@ export class HostedUserRunnerWithTestControls extends HostedUserRunner {
       nextWakeAt: null,
       ok: true,
     };
+  }
+
+  async readActiveRuntimeFenceForTest(input: {
+    userId: string;
+  }): Promise<HostedRunnerActiveFenceTestResult | null> {
+    await this.stateStore.bindUser(input.userId);
+    const token = await this.stateStore.readWriteFenceToken();
+    return token
+      ? {
+          attemptId: token.attemptId,
+          processingMode: token.processingMode,
+        }
+      : null;
   }
 
   private async ageActiveWriteFenceForHostedLocalTest(input: {
