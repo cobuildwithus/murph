@@ -1,6 +1,6 @@
 # PR 962 group usage limit and merge reconciliation
 
-Status: active
+Status: completed
 Created: 2026-07-26
 Updated: 2026-07-26
 
@@ -80,6 +80,11 @@ Updated: 2026-07-26
   needed direct-to-Family reconciliation regressions. The test-only artifact
   at index 0 from the Eragon review thread was inspected, path-checked, and
   applied without production changes.
+- Parent final review found no remaining issue. It confirmed both provider
+  entry points inherit the shared default, existing routes do not rewrite
+  stored containers, the unrelated Pulse Trial stays at $4.50, the new
+  migration has no row update, and the conflict resolution retains both the
+  paid-usage cutover and newer `main` migration inventory.
 
 ## Verification
 
@@ -96,3 +101,9 @@ Updated: 2026-07-26
 - Specialist remediation proof: the focused Stripe billing-events suite passed
   36/36; canonical diff verification passed with 6,722 hosted Web tests, Web
   TypeScript, lint with zero errors, dev smoke, and the production build.
+- Full `pnpm verify:acceptance` passed every task-relevant lane, including the
+  complete hosted Web suite and production build. Its sole failure was an
+  unrelated setup-wizard TTY selection race in a package untouched by this PR;
+  the exact test then passed 6/6 in isolation and the full setup-cli coverage
+  lane passed 124/124 on immediate rerun.
+Completed: 2026-07-26
