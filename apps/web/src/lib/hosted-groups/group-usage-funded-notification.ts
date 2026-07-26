@@ -18,6 +18,9 @@ import {
   withHostedMemberStripeMutationLock,
 } from "../hosted-onboarding/hosted-member-billing-store";
 import {
+  projectHostedUsageCreditPurchaseTarget,
+} from "../hosted-onboarding/usage-credit-purchase-status-service";
+import {
   isHostedThreadContainerNotificationDestination,
   resolveHostedAssistantNotificationDestination,
 } from "../hosted-routing/assistant-notification-destination";
@@ -34,7 +37,10 @@ export async function appendHostedGroupUsageFundedNotificationIfApplicable(input
   const purchase = await input.prisma.hostedUsageCreditPurchase.findUnique({
     select: {
       beneficiaryMemberId: true,
+      checkoutSuccessUrl: true,
+      id: true,
       paidAt: true,
+      payerMemberId: true,
       remainingCreditUsdMicros: true,
       status: true,
     },
@@ -45,6 +51,7 @@ export async function appendHostedGroupUsageFundedNotificationIfApplicable(input
     || purchase.status !== HostedUsageCreditPurchaseStatus.fulfilled
     || purchase.paidAt === null
     || purchase.remainingCreditUsdMicros <= 0n
+    || projectHostedUsageCreditPurchaseTarget(purchase).kind !== "group"
   ) {
     return false;
   }
@@ -94,7 +101,10 @@ export async function appendHostedGroupUsageFundedNotificationIfApplicable(input
         await tx.hostedUsageCreditPurchase.findUnique({
           select: {
             beneficiaryMemberId: true,
+            checkoutSuccessUrl: true,
+            id: true,
             paidAt: true,
+            payerMemberId: true,
             remainingCreditUsdMicros: true,
             status: true,
           },
@@ -108,6 +118,8 @@ export async function appendHostedGroupUsageFundedNotificationIfApplicable(input
           HostedUsageCreditPurchaseStatus.fulfilled
         || currentPurchase.paidAt === null
         || currentPurchase.remainingCreditUsdMicros <= 0n
+        || projectHostedUsageCreditPurchaseTarget(currentPurchase).kind !==
+          "group"
         || new Date(
           currentPurchase.paidAt.getTime() +
             HOSTED_GROUP_USAGE_FUNDED_NOTIFICATION_TTL_MS,

@@ -89,9 +89,10 @@ Last verified: 2026-07-26
   entries against unused attributable credit. A reconciliation failure keeps
   the receipt retryable rather than suspending the subscription or silently
   completing the event.
-- A funded-group celebration may be created only after that verified grant
-  leaves positive credit and only when the beneficiary resolves to one current
-  thread-container notification destination. Its durable mailbox payload must
+- A funded-group celebration may be created only when the purchase's frozen
+  target is a hosted group, the verified grant leaves positive credit, and the
+  beneficiary resolves to one current thread-container notification
+  destination. Its durable mailbox payload must
   omit amount, offer, provider and purchase references, funding links, contact
   data, contributor label, and private payer identity; contributor attribution
   is always anonymous because an authenticated funder need not belong to the

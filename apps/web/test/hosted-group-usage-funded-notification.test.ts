@@ -173,6 +173,25 @@ describe("group usage-funded notification", () => {
     expect(mocks.appendMailbox).not.toHaveBeenCalled();
   });
 
+  it("does not celebrate a non-group purchase for a container-shaped beneficiary", async () => {
+    const prisma = createPrismaHarness({
+      checkoutSuccessUrl:
+        "https://murph.example/settings?usageCheckout=success&usagePurchase=purchase-secret-123#subscription",
+      payerMemberId: "member-group-runtime",
+    });
+
+    await expect(appendHostedGroupUsageFundedNotificationIfApplicable({
+      // @ts-expect-error - focused harness implements the exact delegates used here.
+      prisma,
+      purchaseId: "purchase-secret-123",
+      now: FIXED_NOW,
+    })).resolves.toBe(false);
+
+    expect(mocks.resolveDestination).not.toHaveBeenCalled();
+    expect(mocks.appendMailbox).not.toHaveBeenCalled();
+    expect(mocks.withMemberLock).not.toHaveBeenCalled();
+  });
+
   it("expires a stale celebration before destination or provider work", async () => {
     const prisma = createPrismaHarness();
 
@@ -251,6 +270,8 @@ describe("group usage-funded notification", () => {
 
 function createPrismaHarness(
   overrides: Partial<{
+    checkoutSuccessUrl: string;
+    payerMemberId: string;
     remainingCreditUsdMicros: bigint;
     status: HostedUsageCreditPurchaseStatus;
   }> = {},
@@ -269,13 +290,20 @@ function createPrismaHarness(
 
 function createPurchase(
   overrides: Partial<{
+    checkoutSuccessUrl: string;
+    payerMemberId: string;
     remainingCreditUsdMicros: bigint;
     status: HostedUsageCreditPurchaseStatus;
   }> = {},
 ) {
   return {
     beneficiaryMemberId: "member-group-runtime",
+    checkoutSuccessUrl:
+      overrides.checkoutSuccessUrl
+      ?? "https://murph.example/groups/fund/groupjoincode123456?usageCheckout=success&usagePurchase=purchase-secret-123",
+    id: "purchase-secret-123",
     paidAt: new Date("2026-07-25T22:00:00.000Z"),
+    payerMemberId: overrides.payerMemberId ?? "member-payer",
     remainingCreditUsdMicros:
       overrides.remainingCreditUsdMicros ?? 5_000_000n,
     status: overrides.status ?? HostedUsageCreditPurchaseStatus.fulfilled,

@@ -272,11 +272,12 @@ pending. Read-only status reconciliation never invokes a notice provider.
 
 ### Group Funding Celebration
 
-A verified paid hosted-group Checkout that leaves positive credit appends one
-idempotent `assistant.notification.requested` item to the synthetic group
-runtime. The item reuses the durable group notification destination and the
-ordinary outbox; there is no second queue, cron, browser callback, or funding
-lifecycle. The existing post-grant runtime recheck imports it.
+A verified paid Checkout whose frozen purchase target is a hosted group and
+whose grant leaves positive credit appends one idempotent
+`assistant.notification.requested` item to the synthetic group runtime. The
+item reuses the durable group notification destination and the ordinary
+outbox; there is no second queue, cron, browser callback, or funding lifecycle.
+The existing post-grant runtime recheck imports it.
 
 The notification runs against the existing group session with recent committed
 conversation history and exposes exactly `murph.generate_voice_memo` and
