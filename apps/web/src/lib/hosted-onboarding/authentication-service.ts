@@ -50,10 +50,7 @@ import {
 } from "./shared";
 import { readActiveHostedMemberAccess } from "./member-access";
 import type { HostedPostVerificationStage } from "./stage";
-import {
-  hostedOnboardingError,
-  isHostedOnboardingError,
-} from "./errors";
+import { hostedOnboardingError } from "./errors";
 
 type HostedPrivyCompletionMemberResolution = {
   bindingAuthMethod: HostedPrivyAuthMethod;
@@ -302,7 +299,7 @@ async function syncHostedPrivyBindings(input: {
     if (input.authMethod === "email") {
       await syncEmailBinding().catch(mapHostedPrivyPrimaryEmailBindingError);
     } else {
-      await syncHostedPrivySecondaryBindingBestEffort("email", syncEmailBinding);
+      await syncHostedPrivySecondaryEmailBindingBestEffort(syncEmailBinding);
     }
   }
 
@@ -320,23 +317,22 @@ async function syncHostedPrivyBindings(input: {
     if (input.authMethod === "telegram") {
       await syncTelegramBinding();
     } else {
-      await syncHostedPrivySecondaryBindingBestEffort("telegram", syncTelegramBinding);
+      await syncTelegramBinding();
     }
   }
 }
 
-async function syncHostedPrivySecondaryBindingBestEffort(
-  binding: "email" | "telegram",
+async function syncHostedPrivySecondaryEmailBindingBestEffort(
   syncBinding: () => Promise<void>,
 ): Promise<void> {
   try {
     await syncBinding();
   } catch (error) {
-    if (!isExpectedHostedPrivySecondaryBindingConflict(error)) {
+    if (!isHostedPrivyEmailBindingUniqueConstraintError(error)) {
       throw error;
     }
 
-    console.warn(`Hosted Privy secondary ${binding} binding sync failed.`);
+    console.warn("Hosted Privy secondary email binding sync failed.");
   }
 }
 
@@ -412,14 +408,6 @@ async function syncHostedPrivyPrimaryBindingTx(input: {
       telegramUserId: input.identity.telegram.telegramUserId,
     });
   }
-}
-
-function isExpectedHostedPrivySecondaryBindingConflict(error: unknown): boolean {
-  if (isHostedPrivyEmailBindingUniqueConstraintError(error)) {
-    return true;
-  }
-
-  return isHostedOnboardingError(error) && error.code === "TELEGRAM_IDENTITY_CONFLICT";
 }
 
 function mapHostedPrivyPrimaryEmailBindingError(error: unknown): never {

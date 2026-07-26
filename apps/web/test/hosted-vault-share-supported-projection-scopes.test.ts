@@ -49,9 +49,32 @@ describe("hosted vault-share supported projection scopes", () => {
       hostedVaultShare.buildHostedVaultShareProjectionScopeKey(LEGACY_RUNNING_MINUTES_SCOPE),
     );
     expect(supported).not.toContain("device-sync-status.v0");
+    expect(supported).not.toContain("protein-days.v0");
+    expect(supported).not.toContain("calories-days.v0");
+    expect(supported).not.toContain("carbs-days.v0");
+    expect(supported).not.toContain("fat-days.v0");
+    expect(supported).not.toContain("fiber-days.v0");
     expect(supported).not.toContain("sleep-duration-days.v0");
+    expect(supported).not.toContain("deep-sleep-days.v0");
+    expect(supported).not.toContain("rem-sleep-days.v0");
+    expect(supported).not.toContain("workouts.v0");
     expect(supported).not.toContain(
       hostedVaultShare.buildHostedVaultShareProjectionScopeKey(FUTURE_MINUTES_SCOPE),
     );
+  });
+
+  it("accepts an explicitly declared protein projection capability", async () => {
+    const supportedProjectionScopes = await import(
+      "../src/lib/hosted-vault-share/supported-projection-scopes"
+    );
+
+    const supported =
+      supportedProjectionScopes.readHostedVaultShareSupportedProjectionScopeKeysFromRequest(
+        new Request(
+          "https://worker.example.test/internal/vault-share/active-kinds?supportedProjectionScope=protein-days.v0",
+        ),
+      );
+
+    expect([...supported]).toEqual(["protein-days.v0"]);
   });
 });

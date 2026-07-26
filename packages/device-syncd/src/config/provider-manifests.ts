@@ -177,6 +177,12 @@ const JUNCTION_DEVICE_SYNC_PROVIDER_MANIFEST = defineConfiguredDeviceSyncProvide
         windowStart: stringJobField({ includeInHostedHint: true }),
       },
     },
+    push_source_recovery: {
+      payload: {
+        silentSinceAt: stringJobField({ includeInHostedHint: true }),
+        sourceProviderSlug: stringJobField({ includeInHostedHint: true }),
+      },
+    },
     resource: {
       payload: {
         companionAdmissionId: stringJobField({ includeInHostedHint: true }),

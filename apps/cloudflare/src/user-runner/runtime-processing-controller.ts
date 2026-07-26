@@ -222,9 +222,12 @@ export class RuntimeProcessingController {
     if (activeFence.processingMode !== requestedProcessingMode) {
       if (
         activeFence.processingMode === "inbox_media_retention"
-        && requestedProcessingMode !== "inbox_media_retention"
+        || (
+          activeFence.processingMode === "system_mailbox"
+          && requestedProcessingMode === "default"
+        )
       ) {
-        return await this.preemptActiveRetentionRuntimeForForegroundProcessing({
+        return await this.preemptActiveBackgroundRuntimeForPriorityProcessing({
           activeFence,
           commandBudget: input.commandBudget,
           input: input.input,
@@ -380,6 +383,7 @@ export class RuntimeProcessingController {
     input: RuntimeProcessingInput;
     preserveStartingFence?: boolean;
     record: RunnerStateRecord;
+    replacedStaleFence?: boolean;
     runtimeWakeStartedAt: number;
   }): Promise<HostedRuntimeEnsureProcessingResponse> {
     const { activeFence, record } = input;
@@ -425,7 +429,7 @@ export class RuntimeProcessingController {
 
     const replacementFenceClearedAtEpochMs = Date.now();
     const replacementInput = withRuntimeProcessingOrchestration(inputAtClearStart, {
-      replacedStaleFence: true,
+      replacedStaleFence: input.replacedStaleFence ?? true,
       replacementFenceClearElapsedMs: Math.max(
         0,
         replacementFenceClearedAtEpochMs - replacementFenceClearStartedAtEpochMs,
@@ -440,7 +444,7 @@ export class RuntimeProcessingController {
     });
   }
 
-  private async preemptActiveRetentionRuntimeForForegroundProcessing(input: {
+  private async preemptActiveBackgroundRuntimeForPriorityProcessing(input: {
     activeFence: NonNullable<RunnerStateRecord["writeFence"]>;
     commandBudget: RuntimeProcessingCommandBudget;
     input: RuntimeProcessingInput;
@@ -449,40 +453,6 @@ export class RuntimeProcessingController {
   }): Promise<HostedRuntimeEnsureProcessingResponse> {
     const { activeFence, record } = input;
     const runnerContainerName = this.readActiveRuntimeFenceContainerName(input);
-    const activeRuntimeState =
-      await this.readActiveRuntimeFenceLiveness({
-        activeFence,
-        commandBudget: input.commandBudget,
-        record,
-        runnerContainerName,
-      });
-    if (activeRuntimeState.outcome === "inactive") {
-      const abortResult = await this.abortActiveRuntimeFence({
-        activeFence,
-        commandBudget: input.commandBudget,
-        record,
-        runnerContainerName,
-      });
-      if (!abortResult.aborted) {
-        return abortResult.response;
-      }
-
-      return await this.replaceInactiveRuntimeFence({
-        activeFence,
-        commandBudget: input.commandBudget,
-        input: input.input,
-        preserveStartingFence: false,
-        record,
-        runtimeWakeStartedAt: input.runtimeWakeStartedAt,
-      });
-    }
-    if (activeRuntimeState.outcome === "mismatch") {
-      return createRuntimeProcessingRetryLater({
-        reason: "container_rpc_error",
-        userId: input.input.userId,
-      });
-    }
-
     const abortResult = await this.abortActiveRuntimeFence({
       activeFence,
       commandBudget: input.commandBudget,
@@ -499,6 +469,7 @@ export class RuntimeProcessingController {
       input: input.input,
       preserveStartingFence: false,
       record,
+      replacedStaleFence: false,
       runtimeWakeStartedAt: input.runtimeWakeStartedAt,
     });
   }
@@ -571,7 +542,7 @@ export class RuntimeProcessingController {
         component: "hosted.runner",
         details: buildHostedRunnerMetadataOnlyErrorDetails(error),
         level: "warn",
-        message: "Hosted runner could not preempt active retention runtime processing.",
+        message: "Hosted runner could not preempt active background runtime processing.",
         phase: "scheduled",
         userId: input.record.userId,
       });
@@ -617,7 +588,7 @@ export class RuntimeProcessingController {
         component: "hosted.runner",
         details: buildHostedRunnerMetadataOnlyErrorDetails(result.error),
         level: "warn",
-        message: "Hosted runner active retention liveness check failed.",
+        message: "Hosted runner active runtime liveness check failed.",
         phase: "scheduled",
         userId: input.record.userId,
       });

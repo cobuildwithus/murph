@@ -1,6 +1,10 @@
 import "server-only";
 
-import { HostedBillingStatus, type Prisma, type PrismaClient } from "@prisma/client";
+import {
+  HostedBillingStatus,
+  type Prisma,
+  type PrismaClient,
+} from "@prisma/client";
 
 import {
   HOSTED_PLAN_CODES,
@@ -60,6 +64,7 @@ function activePaidFamilyMembershipWhere(): Prisma.HostedAccountGroupMembershipW
 type HostedGrowthPrisma = Pick<
   PrismaClient,
   | "hostedAccountGroup"
+  | "hostedGrowthAggregate"
   | "hostedGrowthDailySnapshot"
   | "hostedLinqDelivery"
   | "hostedMailboxItem"
@@ -68,6 +73,7 @@ type HostedGrowthPrisma = Pick<
 >;
 
 const INBOUND_MESSAGE_MAILBOX_KIND = "conversation.message";
+const HOSTED_GROWTH_AGGREGATE_ID = "global";
 const OUTBOUND_LINQ_SENT_STATUSES = [
   "accepted",
   "delivered",
@@ -196,6 +202,10 @@ export interface HostedGrowthTrialCohortRow {
 }
 
 export interface HostedGrowthDashboard {
+  activeMembers: {
+    trailing7Days: number;
+    wowPercent: number | null;
+  };
   capturedAt: string;
   conversion: {
     converted: number;
@@ -216,6 +226,9 @@ export interface HostedGrowthDashboard {
   trialStarts: {
     trailing7Days: number;
     wowPercent: number | null;
+  };
+  usageTopUps: {
+    trackedFulfilled: number;
   };
   weeklyRows: HostedGrowthWeeklyRow[];
 }
@@ -578,6 +591,11 @@ export async function readHostedGrowthDashboard(
   const todayStart = startOfUtcDay(now);
   const recentStart = addUtcDays(todayStart, -63);
   const dailyStart = addUtcDays(todayStart, -(DAILY_SERIES_DAYS - 1));
+  const currentCalendarSevenDayStart = addUtcDays(todayStart, -6);
+  const previousCalendarSevenDayStart = addUtcDays(todayStart, -13);
+  const currentCalendarSevenDayEnd = addUtcDays(todayStart, 1);
+  const activeMembersCurrentStart = addUtcDays(now, -7);
+  const activeMembersPreviousStart = addUtcDays(now, -14);
 
   const [
     current,
@@ -586,6 +604,9 @@ export async function readHostedGrowthDashboard(
     snapshots,
     matureStarted,
     matureConverted,
+    growthAggregate,
+    activeMembersTrailing7Days,
+    activeMembersPrevious7Days,
   ] = await Promise.all([
     readCurrentHostedGrowthMetrics(now, prisma),
     prisma.hostedMember.findMany({
@@ -667,6 +688,42 @@ export async function readHostedGrowthDashboard(
         },
       },
     }),
+    prisma.hostedGrowthAggregate.findUniqueOrThrow({
+      select: {
+        trackedFulfilledUsageTopUps: true,
+      },
+      where: {
+        id: HOSTED_GROWTH_AGGREGATE_ID,
+      },
+    }),
+    prisma.hostedMember.count({
+      where: {
+        ...realHostedMemberWhere,
+        hostedMailboxItems: {
+          some: {
+            kind: INBOUND_MESSAGE_MAILBOX_KIND,
+            occurredAt: {
+              gte: activeMembersCurrentStart,
+              lt: now,
+            },
+          },
+        },
+      },
+    }),
+    prisma.hostedMember.count({
+      where: {
+        ...realHostedMemberWhere,
+        hostedMailboxItems: {
+          some: {
+            kind: INBOUND_MESSAGE_MAILBOX_KIND,
+            occurredAt: {
+              gte: activeMembersPreviousStart,
+              lt: activeMembersCurrentStart,
+            },
+          },
+        },
+      },
+    }),
   ]);
   const trialStartRows = rawTrialStartRows.map((row): HostedGrowthTrialStartRow => ({
     currentBillingPhase: row.currentBillingPhase,
@@ -695,30 +752,35 @@ export async function readHostedGrowthDashboard(
     todayStart,
     addUtcDays(todayStart, 1),
   );
-  const currentSevenDayStart = addUtcDays(todayStart, -6);
-  const previousSevenDayStart = addUtcDays(todayStart, -13);
   const newMembersTrailing7Days = countCreatedRowsInRange(
     memberRows,
-    currentSevenDayStart,
-    addUtcDays(todayStart, 1),
+    currentCalendarSevenDayStart,
+    currentCalendarSevenDayEnd,
   );
   const newMembersPrevious7Days = countCreatedRowsInRange(
     memberRows,
-    previousSevenDayStart,
-    currentSevenDayStart,
+    previousCalendarSevenDayStart,
+    currentCalendarSevenDayStart,
   );
   const trialStartsTrailing7Days = countTrialStartsInRange(
     trialStartRows,
-    currentSevenDayStart,
-    addUtcDays(todayStart, 1),
+    currentCalendarSevenDayStart,
+    currentCalendarSevenDayEnd,
   );
   const trialStartsPrevious7Days = countTrialStartsInRange(
     trialStartRows,
-    previousSevenDayStart,
-    currentSevenDayStart,
+    previousCalendarSevenDayStart,
+    currentCalendarSevenDayStart,
   );
 
   return {
+    activeMembers: {
+      trailing7Days: activeMembersTrailing7Days,
+      wowPercent: calculatePercentChange(
+        activeMembersTrailing7Days,
+        activeMembersPrevious7Days,
+      ),
+    },
     capturedAt: now.toISOString(),
     conversion: calculateTrialConversionSummary({
       matureConverted,
@@ -752,6 +814,9 @@ export async function readHostedGrowthDashboard(
         trialStartsTrailing7Days,
         trialStartsPrevious7Days,
       ),
+    },
+    usageTopUps: {
+      trackedFulfilled: growthAggregate.trackedFulfilledUsageTopUps,
     },
     weeklyRows,
   };

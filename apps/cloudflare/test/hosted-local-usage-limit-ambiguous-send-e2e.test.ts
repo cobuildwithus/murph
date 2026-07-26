@@ -185,7 +185,7 @@ describe("hosted local usage-limit ambiguous send e2e", () => {
       scenario: requireScenario(),
       userId,
     });
-    const firstCompletedStatus = await requireScenario().waitForHostedCompletion(userId);
+    const firstCompletedStatus = await requireScenario().waitForHostedIdle(userId);
 
     expect(requireLinqStub().countObservedSends(replyPath, usageNoticeMatcher)).toBe(
       observedBaseline + 1,

@@ -12,6 +12,8 @@ import {
   type HostedVaultShareProjectionScope,
 } from "@murphai/hosted-execution/vault-share";
 
+import { HOSTED_VAULT_SHARE_TIME_ZONE_DESCRIPTION } from "./projection-display-copy";
+
 type HostedVaultShareSelectableProjectionKind =
   (typeof HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS)[number];
 
@@ -45,6 +47,10 @@ const HOSTED_VAULT_SHARE_PROJECTION_DISPLAY: Record<HostedVaultShareSelectablePr
   description: string;
   label: string;
 }> = {
+  "time-zone.v0": {
+    label: "Time zone",
+    description: HOSTED_VAULT_SHARE_TIME_ZONE_DESCRIPTION,
+  },
   "group-email.v0": {
     label: "Email address",
     description:
@@ -95,6 +101,31 @@ const HOSTED_VAULT_SHARE_PROJECTION_DISPLAY: Record<HostedVaultShareSelectablePr
     label: "Daily max heart rate",
     description: "Shares your last 7 days of max heart rate.",
   },
+  "protein-days.v0": {
+    label: "Daily protein",
+    description:
+      "Shares your last 7 days of daily protein totals from meals in Murph, including meals imported from connected apps.",
+  },
+  "calories-days.v0": {
+    label: "Daily calories",
+    description:
+      "Shares your last 7 days of daily calorie totals from meals in Murph, including meals imported from connected apps.",
+  },
+  "carbs-days.v0": {
+    label: "Daily carbs",
+    description:
+      "Shares your last 7 days of daily carbohydrate totals from meals in Murph, including meals imported from connected apps.",
+  },
+  "fat-days.v0": {
+    label: "Daily fat",
+    description:
+      "Shares your last 7 days of daily fat totals from meals in Murph, including meals imported from connected apps.",
+  },
+  "fiber-days.v0": {
+    label: "Daily fiber",
+    description:
+      "Shares your last 7 days of daily fiber totals from meals in Murph, including meals imported from connected apps.",
+  },
   "resting-heart-rate-days.v0": {
     label: "Resting heart rate",
     description: "Shares your last 7 days of resting heart rate.",
@@ -107,6 +138,14 @@ const HOSTED_VAULT_SHARE_PROJECTION_DISPLAY: Record<HostedVaultShareSelectablePr
     label: "Sleep duration",
     description: "Shares your last 7 days of total sleep duration.",
   },
+  "deep-sleep-days.v0": {
+    label: "Deep sleep",
+    description: "Shares your last 7 days of deep sleep minutes.",
+  },
+  "rem-sleep-days.v0": {
+    label: "REM sleep",
+    description: "Shares your last 7 days of REM sleep minutes.",
+  },
   "steps-days.v0": {
     label: "Steps",
     description: "Shares your last 7 days of steps.",
@@ -118,6 +157,10 @@ const HOSTED_VAULT_SHARE_PROJECTION_DISPLAY: Record<HostedVaultShareSelectablePr
   "workout-days.v0": {
     label: "Workout summaries",
     description: "Shares your last 7 days of workout counts and minutes.",
+  },
+  "workouts.v0": {
+    label: "Workout details",
+    description: "Shares each workout from the last 7 days, including its local start time, duration, and type. Does not share absolute timestamps, routes, location, heart rate, or provider identity.",
   },
   "workout-strain-days.v0": {
     label: "Workout strain",
