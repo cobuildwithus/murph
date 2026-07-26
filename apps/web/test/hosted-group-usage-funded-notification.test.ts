@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   appendMailbox: vi.fn(),
   readMailboxItem: vi.fn(),
   resolveDestination: vi.fn(),
+  withMemberLock: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-mailbox/store", () => ({
@@ -19,6 +20,10 @@ vi.mock("@/src/lib/hosted-routing/assistant-notification-destination", () => ({
     conversationShape: string;
   }) => destination.conversationShape === "thread-container",
   resolveHostedAssistantNotificationDestination: mocks.resolveDestination,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/hosted-member-billing-store", () => ({
+  withHostedMemberStripeMutationLock: mocks.withMemberLock,
 }));
 
 import {
@@ -56,6 +61,10 @@ beforeEach(() => {
     inserted: true,
     item: { id: "mailbox-item-1" },
   });
+  mocks.withMemberLock.mockImplementation(async (input: {
+    prisma: unknown;
+    run: (prisma: unknown) => Promise<unknown>;
+  }) => input.run(input.prisma));
 });
 
 describe("group usage-funded notification", () => {
@@ -71,6 +80,10 @@ describe("group usage-funded notification", () => {
 
     expect(mocks.appendMailbox).toHaveBeenCalledWith(expect.objectContaining({
       expiresAt: new Date("2026-07-25T22:30:00.000Z"),
+    }));
+    expect(mocks.withMemberLock).toHaveBeenCalledWith(expect.objectContaining({
+      memberId: "member-group-runtime",
+      prisma,
     }));
     const envelope = mocks.appendMailbox.mock.calls[0]?.[0]?.envelope;
     expect(envelope).toMatchObject({
@@ -118,6 +131,7 @@ describe("group usage-funded notification", () => {
 
     expect(mocks.resolveDestination).not.toHaveBeenCalled();
     expect(mocks.appendMailbox).not.toHaveBeenCalled();
+    expect(mocks.withMemberLock).not.toHaveBeenCalled();
   });
 
   it("rejects a dedupe identity already owned by another mailbox kind", async () => {
@@ -173,6 +187,44 @@ describe("group usage-funded notification", () => {
     expect(mocks.appendMailbox).not.toHaveBeenCalled();
   });
 
+  it("rechecks the funded balance while holding the billing mutation lock", async () => {
+    const prisma = createPrismaHarness();
+    prisma.hostedUsageCreditPurchase.findUnique
+      .mockResolvedValueOnce(createPurchase())
+      .mockResolvedValueOnce(createPurchase({
+        remainingCreditUsdMicros: 0n,
+      }));
+
+    await expect(appendHostedGroupUsageFundedNotificationIfApplicable({
+      // @ts-expect-error - focused harness implements the exact delegates used here.
+      prisma,
+      purchaseId: "purchase-secret-123",
+      now: FIXED_NOW,
+    })).resolves.toBe(false);
+
+    expect(mocks.withMemberLock).toHaveBeenCalledOnce();
+    expect(mocks.appendMailbox).not.toHaveBeenCalled();
+  });
+
+  it("rejects a race-time dedupe identity conflict", async () => {
+    const prisma = createPrismaHarness();
+    mocks.appendMailbox.mockResolvedValueOnce({
+      dedupeConflict: true,
+      duplicate: false,
+      inserted: false,
+      item: { id: "mailbox-item-conflict" },
+    });
+
+    await expect(appendHostedGroupUsageFundedNotificationIfApplicable({
+      // @ts-expect-error - focused harness implements the exact delegates used here.
+      prisma,
+      purchaseId: "purchase-secret-123",
+      now: FIXED_NOW,
+    })).rejects.toThrow(
+      "Group usage-funded notification identity conflicts with another mailbox payload.",
+    );
+  });
+
   it.each([
     {
       overrides: { remainingCreditUsdMicros: 0n },
@@ -203,13 +255,7 @@ function createPrismaHarness(
     status: HostedUsageCreditPurchaseStatus;
   }> = {},
 ) {
-  const purchase = {
-    beneficiaryMemberId: "member-group-runtime",
-    paidAt: new Date("2026-07-25T22:00:00.000Z"),
-    remainingCreditUsdMicros:
-      overrides.remainingCreditUsdMicros ?? 5_000_000n,
-    status: overrides.status ?? HostedUsageCreditPurchaseStatus.fulfilled,
-  };
+  const purchase = createPurchase(overrides);
   const tx = { kind: "tx" };
   return {
     $transaction: vi.fn(async (run: (value: typeof tx) => Promise<unknown>) =>
@@ -218,5 +264,20 @@ function createPrismaHarness(
     hostedUsageCreditPurchase: {
       findUnique: vi.fn(async () => purchase),
     },
+  };
+}
+
+function createPurchase(
+  overrides: Partial<{
+    remainingCreditUsdMicros: bigint;
+    status: HostedUsageCreditPurchaseStatus;
+  }> = {},
+) {
+  return {
+    beneficiaryMemberId: "member-group-runtime",
+    paidAt: new Date("2026-07-25T22:00:00.000Z"),
+    remainingCreditUsdMicros:
+      overrides.remainingCreditUsdMicros ?? 5_000_000n,
+    status: overrides.status ?? HostedUsageCreditPurchaseStatus.fulfilled,
   };
 }

@@ -15,6 +15,9 @@ import {
   readHostedMailboxItemByDedupeKey,
 } from "../hosted-mailbox/store";
 import {
+  withHostedMemberStripeMutationLock,
+} from "../hosted-onboarding/hosted-member-billing-store";
+import {
   isHostedThreadContainerNotificationDestination,
   resolveHostedAssistantNotificationDestination,
 } from "../hosted-routing/assistant-notification-destination";
@@ -83,30 +86,67 @@ export async function appendHostedGroupUsageFundedNotificationIfApplicable(input
     return false;
   }
 
-  await input.prisma.$transaction(async (tx) => {
-    await appendHostedMailboxEnvelopeTx({
-      envelope: buildHostedExecutionAssistantNotificationRequestedWake({
-        eventId,
-        memberId: purchase.beneficiaryMemberId,
-        notification: {
-          deliveryDedupeToken: notificationKey,
-          deliveryDispatchMode: "queue-only",
-          deliveryIdempotencyKey: notificationKey,
-          externalThreadRouteAuthority:
-            destination.externalThreadRouteAuthority,
-          instructions: buildHostedGroupUsageFundedInstructions(),
-          notificationToolProfile: "response-audio",
-          responsePolicy: { kind: "require_send" },
-          route: destination.route,
-        },
-        occurredAt: paidAt.toISOString(),
-      }),
-      expiresAt,
-      tx,
-    });
-  });
+  return withHostedMemberStripeMutationLock({
+    memberId: purchase.beneficiaryMemberId,
+    prisma: input.prisma,
+    run: async (tx) => {
+      const currentPurchase =
+        await tx.hostedUsageCreditPurchase.findUnique({
+          select: {
+            beneficiaryMemberId: true,
+            paidAt: true,
+            remainingCreditUsdMicros: true,
+            status: true,
+          },
+          where: { id: input.purchaseId },
+        });
+      if (
+        !currentPurchase
+        || currentPurchase.beneficiaryMemberId !==
+          purchase.beneficiaryMemberId
+        || currentPurchase.status !==
+          HostedUsageCreditPurchaseStatus.fulfilled
+        || currentPurchase.paidAt === null
+        || currentPurchase.remainingCreditUsdMicros <= 0n
+        || new Date(
+          currentPurchase.paidAt.getTime() +
+            HOSTED_GROUP_USAGE_FUNDED_NOTIFICATION_TTL_MS,
+        ).getTime() <= (input.now ?? new Date()).getTime()
+      ) {
+        return false;
+      }
 
-  return true;
+      const appendResult = await appendHostedMailboxEnvelopeTx({
+        envelope: buildHostedExecutionAssistantNotificationRequestedWake({
+          eventId,
+          memberId: currentPurchase.beneficiaryMemberId,
+          notification: {
+            deliveryDedupeToken: notificationKey,
+            deliveryDispatchMode: "queue-only",
+            deliveryIdempotencyKey: notificationKey,
+            externalThreadRouteAuthority:
+              destination.externalThreadRouteAuthority,
+            instructions: buildHostedGroupUsageFundedInstructions(),
+            notificationToolProfile: "response-audio",
+            responsePolicy: { kind: "require_send" },
+            route: destination.route,
+          },
+          occurredAt: currentPurchase.paidAt.toISOString(),
+        }),
+        expiresAt: new Date(
+          currentPurchase.paidAt.getTime() +
+            HOSTED_GROUP_USAGE_FUNDED_NOTIFICATION_TTL_MS,
+        ),
+        tx,
+      });
+      if (appendResult.dedupeConflict) {
+        throw new Error(
+          "Group usage-funded notification identity conflicts with another mailbox payload.",
+        );
+      }
+      return true;
+    },
+  });
 }
 
 function buildHostedGroupUsageFundedInstructions(): string {
