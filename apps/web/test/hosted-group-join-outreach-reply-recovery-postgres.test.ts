@@ -117,11 +117,16 @@ describe.skipIf(!runPostgresProof)(
       let newerOutreachId: string | null = null;
       let deliveryIdempotencyLookupKey: string | null = null;
 
-      const firstProviderMessageId = `linq-message-first-${randomUUID()}`;
+      const newerProviderMessageId = `linq-message-newer-${randomUUID()}`;
+      const originalProviderMessageId = `linq-message-original-${randomUUID()}`;
       providerMocks.sendHostedLinqChatMessage
         .mockResolvedValueOnce({
           chatId,
-          messageId: firstProviderMessageId,
+          messageId: newerProviderMessageId,
+        })
+        .mockResolvedValueOnce({
+          chatId,
+          messageId: originalProviderMessageId,
         });
 
       try {
@@ -274,7 +279,6 @@ describe.skipIf(!runPostgresProof)(
             effectId: signupLinkEffect.effectId,
             groupJoinOutreachId: outreachId,
             groupJoinRepliedAt: signupLinkEffect.payload.occurredAt,
-            sourceEventId: signupLinkEffect.payload.sourceEventId,
           });
         await expect(claimHostedLinqDeliveryProviderDispatchTx({
           attemptedAt: crashClaimedAt,
@@ -307,9 +311,9 @@ describe.skipIf(!runPostgresProof)(
         expect(providerMocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
         expect(scheduledTasks).toHaveLength(0);
 
-        // A newer same-day inbound can now resolve a different valid outreach,
-        // but it cannot inherit the original member/day delivery key or rewrite
-        // that key's persisted source intent.
+        // A newer same-day inbound is an independent group intention. It sends
+        // under its own exact-source provider key without rewriting or waiting
+        // for the crashed original event.
         await prisma.hostedGroup.create({
           data: {
             displayName: "Newer Recovery Proof Group",
@@ -348,6 +352,15 @@ describe.skipIf(!runPostgresProof)(
           },
           where: { id: newerOutreachId },
         });
+        const genericSignupSentAt =
+          new Date("2026-07-24T20:00:45.000Z");
+        await expect(prisma.hostedLinqDailyState.updateMany({
+          data: { onboardingLinkSentAt: genericSignupSentAt },
+          where: {
+            dayUtc: new Date("2026-07-24T00:00:00.000Z"),
+            memberId: participantMemberId,
+          },
+        })).resolves.toEqual({ count: 1 });
         const newerInboundEvent = buildDirectReplyEvent({
           chatId,
           eventId: `event-newer-${randomUUID()}`,
@@ -366,17 +379,44 @@ describe.skipIf(!runPostgresProof)(
           ok: true,
           reason: "sent-signup-link",
         });
-        expect(providerMocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+        expect(providerMocks.sendHostedLinqChatMessage).toHaveBeenCalledTimes(1);
+        const newerProviderCall =
+          providerMocks.sendHostedLinqChatMessage.mock.calls[0]?.[0];
+        expect(newerProviderCall).toEqual(expect.objectContaining({
+          chatId,
+          idempotencyKey: expect.any(String),
+          message: expect.stringContaining(
+            `/groups/join/${newerJoinCode}?invite=`,
+          ),
+        }));
+        expect(newerProviderCall?.idempotencyKey).not.toBe(
+          signupLinkEffect.effectId,
+        );
         await expect(prisma.hostedLinqDelivery.findUnique({
           select: { sourceRef: true },
           where: {
             idempotencyKey: deliveryIdempotencyLookupKey,
           },
         })).resolves.toEqual({ sourceRef: originalSourceRef });
+
+        for (const task of scheduledTasks.splice(0)) {
+          await task();
+        }
         await expect(prisma.hostedGroupJoinOutreach.findUnique({
           select: { repliedAt: true },
           where: { id: newerOutreachId },
-        })).resolves.toEqual({ repliedAt: null });
+        })).resolves.toEqual({
+          repliedAt: new Date("2026-07-24T20:01:30.000Z"),
+        });
+        await expect(prisma.hostedLinqDailyState.findFirst({
+          select: { onboardingLinkSentAt: true },
+          where: {
+            dayUtc: new Date("2026-07-24T00:00:00.000Z"),
+            memberId: participantMemberId,
+          },
+        })).resolves.toEqual({
+          onboardingLinkSentAt: genericSignupSentAt,
+        });
 
         // A retry of the same webhook effect after the ambiguity window owns
         // continuation. It reclaims the exact row and reuses the immutable
@@ -401,7 +441,7 @@ describe.skipIf(!runPostgresProof)(
           ok: true,
           reason: "sent-signup-link",
         });
-        expect(providerMocks.sendHostedLinqChatMessage).toHaveBeenCalledTimes(1);
+        expect(providerMocks.sendHostedLinqChatMessage).toHaveBeenCalledTimes(2);
         expect(providerMocks.sendHostedLinqChatMessage).toHaveBeenLastCalledWith(
           expect.objectContaining({
             chatId,
@@ -432,7 +472,18 @@ describe.skipIf(!runPostgresProof)(
         await expect(prisma.hostedGroupJoinOutreach.findUnique({
           select: { repliedAt: true },
           where: { id: newerOutreachId },
-        })).resolves.toEqual({ repliedAt: null });
+        })).resolves.toEqual({
+          repliedAt: new Date("2026-07-24T20:01:30.000Z"),
+        });
+        await expect(prisma.hostedLinqDailyState.findFirst({
+          select: { onboardingLinkSentAt: true },
+          where: {
+            dayUtc: new Date("2026-07-24T00:00:00.000Z"),
+            memberId: participantMemberId,
+          },
+        })).resolves.toEqual({
+          onboardingLinkSentAt: genericSignupSentAt,
+        });
         await expect(prisma.hostedLinqDelivery.findUnique({
           select: { sourceRef: true },
           where: {
@@ -446,9 +497,13 @@ describe.skipIf(!runPostgresProof)(
             recipientPhoneNumber: recipientPhone,
             tx,
           })
-        )).resolves.toEqual({
-          joinCode: newerJoinCode,
-          outreachId: newerOutreachId,
+        )).resolves.toBeNull();
+        await prisma.hostedLinqDailyState.updateMany({
+          data: { onboardingLinkSentAt: null },
+          where: {
+            dayUtc: new Date("2026-07-24T00:00:00.000Z"),
+            memberId: participantMemberId,
+          },
         });
         await expect(handleHostedOnboardingLinqWebhook({
           prisma,
@@ -457,10 +512,10 @@ describe.skipIf(!runPostgresProof)(
           signature: null,
           timestamp: null,
         })).resolves.toMatchObject({
-          ignored: true,
+          duplicate: true,
           reason: "signup-link-already-sent",
         });
-        expect(providerMocks.sendHostedLinqChatMessage).toHaveBeenCalledTimes(1);
+        expect(providerMocks.sendHostedLinqChatMessage).toHaveBeenCalledTimes(2);
       } finally {
         await cleanupRecoveryProof({
           deliveryIdempotencyLookupKey,

@@ -465,6 +465,35 @@ export async function handleHostedOnboardingLinqWebhook(input: {
           retryable: true,
         });
       }
+      const decidedUnsentSignup = drainResult.skipped.find(
+        (skip) =>
+          (
+            skip.template === "invite_signup"
+            || skip.template === "invite_signup_fallback"
+          )
+          && (
+            skip.reason === "effect_unresolved"
+            || skip.reason === "notice_already_claimed"
+            || skip.reason === "notice_target_unauthorized"
+          ),
+      );
+      if (decidedUnsentSignup && drainResult.sentCount === 0) {
+        plan = {
+          ...plan,
+          desiredSideEffects: [],
+          response: {
+            ...(decidedUnsentSignup.reason === "notice_already_claimed"
+              ? { duplicate: true }
+              : { ignored: true }),
+            ok: true,
+            reason: decidedUnsentSignup.reason === "effect_unresolved"
+              ? "signup-link-attempts-exhausted"
+              : decidedUnsentSignup.reason === "notice_already_claimed"
+                ? "signup-link-already-sent"
+                : "signup-link-target-unavailable",
+          },
+        };
+      }
     }
 
     scheduleHostedLinqProviderEventIngestionBestEffort({

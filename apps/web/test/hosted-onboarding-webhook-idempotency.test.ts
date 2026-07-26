@@ -1178,18 +1178,25 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
       "linq-invite-signup:member_123:2026-03-26T00:00:00.000Z";
     const firstSourceRef = buildHostedLinqInviteSignupDeliverySourceRef({
       effectId: expectedIdempotencyKey,
-      groupJoinRepliedAt: "2026-03-26T12:00:00.000Z",
-      sourceEventId: "evt_first_contact_one",
     });
     mocks.readHostedLinqDeliveryProviderDispatchIntentTx
       .mockResolvedValueOnce(null)
-      .mockResolvedValueOnce({ sourceRef: firstSourceRef });
-    mocks.claimHostedLinqDeliveryProviderDispatchTx.mockResolvedValueOnce({
-      claimed: true,
-      id: "hld_first_contact",
-    });
+      .mockResolvedValueOnce({
+        providerCorrelated: false,
+        sourceRef: firstSourceRef,
+      });
+    mocks.claimHostedLinqDeliveryProviderDispatchTx
+      .mockResolvedValueOnce({
+        claimed: true,
+        id: "hld_first_contact",
+      })
+      .mockResolvedValueOnce({
+        claimed: false,
+        id: "hld_first_contact",
+        outcome: "completed",
+      });
 
-    const laterInboundResponse = await handleHostedOnboardingLinqWebhook({
+    const firstInboundResponse = await handleHostedOnboardingLinqWebhook({
       rawBody: buildLinqMessageWebhookBody({
         eventId: "evt_first_contact_one",
         messageId: "msg_first_contact_one",
@@ -1198,7 +1205,7 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
       signature: null,
       timestamp: null,
     });
-    await handleHostedOnboardingLinqWebhook({
+    const laterInboundResponse = await handleHostedOnboardingLinqWebhook({
       rawBody: buildLinqMessageWebhookBody({
         eventId: "evt_first_contact_two",
         messageId: "msg_first_contact_two",
@@ -1209,11 +1216,16 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     });
 
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledTimes(1);
-    expect(laterInboundResponse).toMatchObject({
+    expect(firstInboundResponse).toMatchObject({
       ok: true,
       reason: "sent-signup-link",
     });
-    expect(mocks.claimHostedLinqDeliveryProviderDispatchTx).toHaveBeenCalledTimes(1);
+    expect(laterInboundResponse).toMatchObject({
+      duplicate: true,
+      ok: true,
+      reason: "signup-link-already-sent",
+    });
+    expect(mocks.claimHostedLinqDeliveryProviderDispatchTx).toHaveBeenCalledTimes(2);
     expect(mocks.claimHostedLinqDeliveryProviderDispatchTx).toHaveBeenNthCalledWith(
       1,
       expect.objectContaining({

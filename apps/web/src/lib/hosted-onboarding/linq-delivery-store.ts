@@ -207,7 +207,7 @@ export async function recordHostedLinqDeliveryAttemptTx(input: {
   }
 }
 
-const HOSTED_LINQ_INVITE_SIGNUP_MAX_ATTEMPTS_PER_DAY = 5;
+const HOSTED_LINQ_INVITE_SIGNUP_MAX_ATTEMPTS_PER_IDENTITY = 5;
 
 /**
  * Resolves which signup-link delivery attempt an inbound-driven send should
@@ -217,8 +217,8 @@ const HOSTED_LINQ_INVITE_SIGNUP_MAX_ATTEMPTS_PER_DAY = 5;
  * so the retry advances to the next attempt ordinal. A synchronous send
  * failure keeps its ordinal: the row is not provider-correlated and the
  * existing stale-attempt re-claim on the same key stays dedupe-safe against
- * a provider that may have half-processed it. Returns null when the day's
- * attempt budget is exhausted.
+ * a provider that may have half-processed it. Returns null when that exact
+ * identity's attempt budget is exhausted.
  */
 export async function resolveHostedLinqInviteSignupDispatchEffectIdTx(input: {
   effectId: string;
@@ -230,11 +230,12 @@ export async function resolveHostedLinqInviteSignupDispatchEffectIdTx(input: {
   }
 
   const candidates = Array.from(
-    { length: HOSTED_LINQ_INVITE_SIGNUP_MAX_ATTEMPTS_PER_DAY },
+    { length: HOSTED_LINQ_INVITE_SIGNUP_MAX_ATTEMPTS_PER_IDENTITY },
     (_, index) => buildHostedLinqInviteSignupEffectId({
       attempt: index + 1,
       memberId: parsed.memberId,
       occurredAt: parsed.dayUtc,
+      sourceEventDigest: parsed.sourceEventDigest,
     }),
   );
   const lookupKeys = candidates.map(
@@ -288,9 +289,8 @@ type HostedLinqDeliveryProviderDispatchClaimInput = {
 export type HostedLinqDeliveryProviderDispatchClaim = {
   claimed: boolean;
   id: string | null;
-  intentMismatch?: boolean;
+  outcome?: "completed" | "incompatible";
   retryAt?: Date;
-  sourceRef?: string | null;
 };
 
 export async function claimHostedLinqDeliveryProviderDispatchTx(
@@ -305,17 +305,33 @@ export async function claimHostedLinqDeliveryProviderDispatchTx(
 export async function readHostedLinqDeliveryProviderDispatchIntentTx(input: {
   idempotencyKey: string;
   prisma: HostedLinqDeliveryClient;
-}): Promise<{ sourceRef: string | null } | null> {
+}): Promise<{
+  providerCorrelated: boolean;
+  sourceRef: string | null;
+} | null> {
   const idempotencyKey = createHostedLinqDeliveryIdempotencyLookupKey(
     input.idempotencyKey,
   );
   if (!idempotencyKey) {
     return null;
   }
-  return input.prisma.hostedLinqDelivery.findUnique({
+  const delivery = await input.prisma.hostedLinqDelivery.findUnique({
     where: { idempotencyKey },
-    select: { sourceRef: true },
+    select: {
+      acceptedAt: true,
+      deliveredAt: true,
+      lastReceiptAt: true,
+      messageLookupKey: true,
+      sourceRef: true,
+      status: true,
+    },
   });
+  return delivery
+    ? {
+        providerCorrelated: isHostedLinqDeliveryProviderCorrelated(delivery),
+        sourceRef: delivery.sourceRef,
+      }
+    : null;
 }
 
 async function claimHostedLinqDeliveryProviderDispatchWithIdTx(
@@ -1768,6 +1784,9 @@ async function claimExistingHostedLinqDeliveryProviderDispatchTx(input: {
     return {
       claimed: false,
       id: input.delivery.id,
+      ...(isHostedLinqInviteSignupDeliveryTemplate(input.data.template)
+        ? { outcome: "completed" as const }
+        : {}),
     };
   }
 
@@ -1784,8 +1803,7 @@ async function claimExistingHostedLinqDeliveryProviderDispatchTx(input: {
     return {
       claimed: false,
       id: input.delivery.id,
-      intentMismatch: true,
-      sourceRef: input.delivery.sourceRef,
+      outcome: "incompatible",
     };
   }
 
@@ -1993,15 +2011,18 @@ async function resolveHostedLinqFailedDeliveryReopenTx(input: {
   const newerAttemptLookupKeys = Array.from(
     {
       length:
-        HOSTED_LINQ_INVITE_SIGNUP_MAX_ATTEMPTS_PER_DAY - failedAttempt.attempt,
+        HOSTED_LINQ_INVITE_SIGNUP_MAX_ATTEMPTS_PER_IDENTITY
+        - failedAttempt.attempt,
     },
-    (_, index) => createHostedLinqDeliveryIdempotencyLookupKey(
-      buildHostedLinqInviteSignupEffectId({
-        attempt: failedAttempt.attempt + index + 1,
-        memberId: failedAttempt.memberId,
-        occurredAt: failedAttempt.dayUtc,
-      }),
-    ),
+    (_, index) =>
+      createHostedLinqDeliveryIdempotencyLookupKey(
+        buildHostedLinqInviteSignupEffectId({
+          attempt: failedAttempt.attempt + index + 1,
+          memberId: failedAttempt.memberId,
+          occurredAt: failedAttempt.dayUtc,
+          sourceEventDigest: failedAttempt.sourceEventDigest,
+        }),
+      ),
   ).filter((lookupKey): lookupKey is string => lookupKey !== null);
   if (newerAttemptLookupKeys.length === 0) {
     return link;

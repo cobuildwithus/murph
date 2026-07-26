@@ -321,11 +321,9 @@ describe("hosted Linq webhook transport", () => {
       groupJoinReplyContext: {
         outreachId: "hgrpjoa-1",
         repliedAt: "2026-03-26T12:00:00.000Z",
-        sourceEventId: "event-group-reply",
       },
-      occurredAt: "2026-03-26T12:00:00.000Z",
-      sourceEventId: "event-group-reply",
     });
+    expect(markHostedLinqOnboardingLinkNoticeSent).not.toHaveBeenCalled();
     expect(prisma.hostedGroupJoinOutreach.updateMany).toHaveBeenCalledWith({
       data: {
         repliedAt: new Date("2026-03-26T12:00:00.000Z"),
@@ -374,10 +372,21 @@ describe("hosted Linq webhook transport", () => {
     expect(sendHostedLinqChatMessage).not.toHaveBeenCalled();
   });
 
-  it("does not let a later inbound replace a persisted group signup intent", async () => {
-    const effect = createHostedWebhookLinqMessageSideEffect({
+  it("gives different group reply events independent provider identities", async () => {
+    const firstEffect = createHostedWebhookLinqMessageSideEffect({
       chatId: "chat-1",
-      groupJoinCode: "join-group-b",
+      groupJoinCode: "join-group",
+      groupJoinOutreachId: "hgrpjoa-a",
+      inviteId: "invite-1",
+      memberId: "member-1",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      replyToMessageId: "message-a",
+      sourceEventId: "event-a",
+      template: "invite_signup",
+    });
+    const laterEffect = createHostedWebhookLinqMessageSideEffect({
+      chatId: "chat-1",
+      groupJoinCode: "join-group",
       groupJoinOutreachId: "hgrpjoa-b",
       inviteId: "invite-1",
       memberId: "member-1",
@@ -386,31 +395,25 @@ describe("hosted Linq webhook transport", () => {
       sourceEventId: "event-b",
       template: "invite_signup",
     });
-    vi.mocked(readHostedLinqDeliveryProviderDispatchIntentTx).mockResolvedValueOnce({
-      sourceRef: buildHostedLinqInviteSignupDeliverySourceRef({
-        effectId: effect.effectId,
-        groupJoinOutreachId: "hgrpjoa-a",
-        groupJoinRepliedAt: "2026-03-26T12:00:00.000Z",
-        sourceEventId: "event-a",
-      }),
-    });
+    const prisma = createInviteSignupPrismaFixture();
 
     await expect(
       drainHostedLinqSideEffectsDirect({
-        prisma: createInviteSignupPrismaFixture() as never,
-        sideEffects: [effect],
+        prisma: prisma as never,
+        sideEffects: [firstEffect, laterEffect],
       }),
-    ).resolves.toEqual({
-      sentCount: 0,
-      skipped: [{
-        effectId: effect.effectId,
-        reason: "notice_intent_mismatch",
-        template: "invite_signup",
-      }],
-    });
+    ).resolves.toMatchObject({ sentCount: 2 });
 
-    expect(claimHostedLinqDeliveryProviderDispatchTx).not.toHaveBeenCalled();
-    expect(sendHostedLinqChatMessage).not.toHaveBeenCalled();
+    expect(firstEffect.effectId).not.toBe(laterEffect.effectId);
+    expect(claimHostedLinqDeliveryProviderDispatchTx).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ idempotencyKey: firstEffect.effectId }),
+    );
+    expect(claimHostedLinqDeliveryProviderDispatchTx).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ idempotencyKey: laterEffect.effectId }),
+    );
+    expect(sendHostedLinqChatMessage).toHaveBeenCalledTimes(2);
   });
 
   it("recovers the original group signup payload for a retry of the same inbound", async () => {
@@ -426,11 +429,11 @@ describe("hosted Linq webhook transport", () => {
       template: "invite_signup",
     });
     vi.mocked(readHostedLinqDeliveryProviderDispatchIntentTx).mockResolvedValueOnce({
+      providerCorrelated: false,
       sourceRef: buildHostedLinqInviteSignupDeliverySourceRef({
         effectId: effect.effectId,
         groupJoinOutreachId: "hgrpjoa-a",
         groupJoinRepliedAt: "2026-03-26T12:00:00.000Z",
-        sourceEventId: "event-a",
       }),
     });
     const prisma = createInviteSignupPrismaFixture({
@@ -451,7 +454,6 @@ describe("hosted Linq webhook transport", () => {
           effectId: effect.effectId,
           groupJoinOutreachId: "hgrpjoa-a",
           groupJoinRepliedAt: "2026-03-26T12:00:00.000Z",
-          sourceEventId: "event-a",
         }),
       }),
     );
@@ -469,43 +471,58 @@ describe("hosted Linq webhook transport", () => {
     });
   });
 
-  it("does not upgrade an original generic signup intent to a later group link", async () => {
-    const effect = createHostedWebhookLinqMessageSideEffect({
+  it("recovers a persisted group intent when current lookup finds no group", async () => {
+    const originalEffect = createHostedWebhookLinqMessageSideEffect({
       chatId: "chat-1",
-      groupJoinCode: "join-group-b",
-      groupJoinOutreachId: "hgrpjoa-b",
+      groupJoinCode: "join-group-a",
+      groupJoinOutreachId: "hgrpjoa-a",
       inviteId: "invite-1",
       memberId: "member-1",
-      occurredAt: "2026-03-26T12:01:00.000Z",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      replyToMessageId: "message-a",
+      sourceEventId: "event-a",
+      template: "invite_signup",
+    });
+    const retryEffect = createHostedWebhookLinqMessageSideEffect({
+      chatId: "chat-1",
+      inviteId: "invite-1",
+      memberId: "member-1",
+      occurredAt: "2026-03-26T12:00:00.000Z",
       replyToMessageId: "message-a",
       sourceEventId: "event-a",
       template: "invite_signup",
     });
     const persistedSourceRef =
       buildHostedLinqInviteSignupDeliverySourceRef({
-        effectId: effect.effectId,
+        effectId: originalEffect.effectId,
+        groupJoinOutreachId: "hgrpjoa-a",
         groupJoinRepliedAt: "2026-03-26T12:00:00.000Z",
-        sourceEventId: "event-a",
       });
-    vi.mocked(readHostedLinqDeliveryProviderDispatchIntentTx).mockResolvedValueOnce({
-      sourceRef: persistedSourceRef,
-    });
+    vi.mocked(readHostedLinqDeliveryProviderDispatchIntentTx)
+      .mockResolvedValue({
+        providerCorrelated: false,
+        sourceRef: persistedSourceRef,
+      });
 
     await expect(
       drainHostedLinqSideEffectsDirect({
-        prisma: createInviteSignupPrismaFixture() as never,
-        sideEffects: [effect],
+        prisma: createInviteSignupPrismaFixture({
+          groupJoinCode: "join-group-a",
+        }) as never,
+        sideEffects: [retryEffect],
       }),
     ).resolves.toMatchObject({ sentCount: 1 });
 
     expect(claimHostedLinqDeliveryProviderDispatchTx).toHaveBeenCalledWith(
       expect.objectContaining({
+        idempotencyKey: originalEffect.effectId,
         sourceRef: persistedSourceRef,
       }),
     );
     expect(buildHostedInviteReply).toHaveBeenCalledWith({
-      joinUrl: "https://join.test/invite-code",
-      seed: effect.effectId,
+      joinUrl:
+        "https://join.test/groups/join/join-group-a?invite=invite-code",
+      seed: originalEffect.effectId,
     });
   });
 
@@ -563,7 +580,6 @@ describe("hosted Linq webhook transport", () => {
         groupJoinReplyContext: {
           outreachId: "hgrpjoa-failed",
           repliedAt: "2026-03-26T12:00:00.000Z",
-          sourceEventId: null,
         },
         memberId: "member-1",
         occurredAt: "2026-03-26T00:00:00.000Z",
@@ -595,7 +611,7 @@ describe("hosted Linq webhook transport", () => {
     });
     await scheduledTasks[0]?.();
 
-    expect(releaseHostedLinqOnboardingLinkNoticeClaim).toHaveBeenCalled();
+    expect(releaseHostedLinqOnboardingLinkNoticeClaim).not.toHaveBeenCalled();
     expect(prisma.hostedGroupJoinOutreach.updateMany).not.toHaveBeenCalled();
   });
 
@@ -1560,8 +1576,6 @@ describe("hosted Linq webhook transport", () => {
       source: "hosted_webhook_side_effect",
       sourceRef: buildHostedLinqInviteSignupDeliverySourceRef({
         effectId: effect.effectId,
-        groupJoinRepliedAt: "2026-03-26T12:00:00.000Z",
-        sourceEventId: "event-fallback-invite",
       }),
       status: "attempted",
       targetKind: "participant",
@@ -2043,8 +2057,6 @@ describe("hosted Linq webhook transport", () => {
       source: "hosted_webhook_side_effect",
       sourceRef: buildHostedLinqInviteSignupDeliverySourceRef({
         effectId: effect.effectId,
-        groupJoinRepliedAt: "2026-03-26T12:00:00.000Z",
-        sourceEventId: "event-1",
       }),
       status: "attempted",
       targetKind: "thread",

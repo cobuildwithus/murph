@@ -2451,8 +2451,7 @@ describe("hosted Linq observability stores", () => {
     })).resolves.toEqual({
       claimed: false,
       id: "hld_stale_attempt",
-      intentMismatch: true,
-      sourceRef: "persisted-source-ref",
+      outcome: "incompatible",
     });
 
     expect(fixture.hostedLinqDeliveryUpdateMany).not.toHaveBeenCalled();
@@ -3497,17 +3496,18 @@ describe("hosted Linq signup-link delivery attempts", () => {
       attempt: 2,
       dayUtc: "2026-03-26T00:00:00.000Z",
       memberId: "member_123",
+      sourceEventDigest: null,
     });
     expect(parseHostedLinqInviteSignupEffectId(BASE_EFFECT_ID)).toEqual({
       attempt: 1,
       dayUtc: "2026-03-26T00:00:00.000Z",
       memberId: "member_123",
+      sourceEventDigest: null,
     });
     const sourceRef = buildHostedLinqInviteSignupDeliverySourceRef({
       effectId: second,
       groupJoinOutreachId: "hgrpjoa_opaque",
       groupJoinRepliedAt: "2026-03-26T12:34:56.000Z",
-      sourceEventId: "evt_group_reply",
     });
     expect(sourceRef.startsWith(
       buildHostedLinqInviteSignupDeliverySourceRefMemberPrefix("member_123"),
@@ -3520,23 +3520,40 @@ describe("hosted Linq signup-link delivery attempts", () => {
       groupJoinReplyContext: {
         outreachId: "hgrpjoa_opaque",
         repliedAt: "2026-03-26T12:34:56.000Z",
-        sourceEventId: "evt_group_reply",
       },
-      occurredAt: "2026-03-26T12:34:56.000Z",
-      sourceEventId: "evt_group_reply",
     });
     const genericSourceRef = buildHostedLinqInviteSignupDeliverySourceRef({
       effectId: BASE_EFFECT_ID,
-      groupJoinRepliedAt: "2026-03-26T12:34:56.000Z",
-      sourceEventId: "evt_generic_reply",
     });
     expect(parseHostedLinqInviteSignupDeliverySourceRef(genericSourceRef))
       .toEqual({
         effectId: BASE_EFFECT_ID,
         groupJoinReplyContext: null,
-        occurredAt: "2026-03-26T12:34:56.000Z",
-        sourceEventId: "evt_generic_reply",
       });
+
+    const groupEffectId = buildHostedLinqInviteSignupEffectId({
+      groupJoinOutreachId: "hgrpjoa_opaque",
+      memberId: "member_123",
+      occurredAt: "2026-03-26T12:34:56.000Z",
+      sourceEventId: "evt_group_reply",
+    });
+    expect(groupEffectId).toMatch(
+      /^linq-invite-signup:member_123:2026-03-26T00:00:00\.000Z:e[0-9a-f]{32}$/u,
+    );
+    const parsedGroupEffect =
+      parseHostedLinqInviteSignupEffectId(groupEffectId);
+    expect(parsedGroupEffect).toMatchObject({
+      attempt: 1,
+      dayUtc: "2026-03-26T00:00:00.000Z",
+      memberId: "member_123",
+      sourceEventDigest: expect.stringMatching(/^[0-9a-f]{32}$/u),
+    });
+    expect(buildHostedLinqInviteSignupEffectId({
+      attempt: 2,
+      memberId: "member_123",
+      occurredAt: parsedGroupEffect?.dayUtc ?? "",
+      sourceEventDigest: parsedGroupEffect?.sourceEventDigest,
+    })).toBe(`${groupEffectId}:a2`);
   });
 
   it("keeps the base attempt while no delivery row blocks it", async () => {
@@ -3556,6 +3573,24 @@ describe("hosted Linq signup-link delivery attempts", () => {
       effectId: BASE_EFFECT_ID,
       prisma: fixture.prisma as never,
     })).resolves.toBe(`${BASE_EFFECT_ID}:a2`);
+  });
+
+  it("advances only the failed exact-source group attempt", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    const groupEffectId = buildHostedLinqInviteSignupEffectId({
+      groupJoinOutreachId: "hgrpjoa_opaque",
+      memberId: "member_123",
+      occurredAt: "2026-03-26T12:34:56.000Z",
+      sourceEventId: "evt_group_reply",
+    });
+    fixture.hostedLinqDeliveryFindMany.mockResolvedValueOnce([
+      failedCorrelatedRow(groupEffectId),
+    ]);
+
+    await expect(resolveHostedLinqInviteSignupDispatchEffectIdTx({
+      effectId: groupEffectId,
+      prisma: fixture.prisma as never,
+    })).resolves.toBe(`${groupEffectId}:a2`);
   });
 
   it("keeps the same attempt after a synchronous send failure", async () => {
@@ -3639,7 +3674,6 @@ describe("hosted Linq signup-link delivery attempts", () => {
         groupJoinReplyContext: {
           outreachId: "hgrpjoa_buffered",
           repliedAt: "2026-03-26T12:01:00.000Z",
-          sourceEventId: null,
         },
         memberId: "member_123",
         occurredAt: "2026-03-26T00:00:00.000Z",

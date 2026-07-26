@@ -82,11 +82,6 @@ export async function ingestHostedLinqProviderEventTx(input: {
     prisma: input.prisma,
   });
   if (deliveryReceipt.reopenOnboardingLink) {
-    await releaseHostedLinqOnboardingLinkNoticeClaim({
-      memberId: deliveryReceipt.reopenOnboardingLink.memberId,
-      occurredAt: deliveryReceipt.reopenOnboardingLink.occurredAt,
-      prisma: input.prisma,
-    });
     const groupJoinReplyContext =
       deliveryReceipt.reopenOnboardingLink.groupJoinReplyContext;
     if (groupJoinReplyContext) {
@@ -95,14 +90,15 @@ export async function ingestHostedLinqProviderEventTx(input: {
         repliedAt: new Date(groupJoinReplyContext.repliedAt),
         tx: input.prisma,
       });
+    } else {
+      await releaseHostedLinqOnboardingLinkNoticeClaim({
+        memberId: deliveryReceipt.reopenOnboardingLink.memberId,
+        occurredAt: deliveryReceipt.reopenOnboardingLink.occurredAt,
+        prisma: input.prisma,
+      });
     }
   }
   if (deliveryReceipt.restoreOnboardingLink) {
-    await markHostedLinqOnboardingLinkNoticeSent({
-      memberId: deliveryReceipt.restoreOnboardingLink.memberId,
-      occurredAt: deliveryReceipt.restoreOnboardingLink.occurredAt,
-      prisma: input.prisma,
-    });
     const groupJoinReplyContext =
       deliveryReceipt.restoreOnboardingLink.groupJoinReplyContext;
     if (groupJoinReplyContext) {
@@ -110,6 +106,12 @@ export async function ingestHostedLinqProviderEventTx(input: {
         outreachId: groupJoinReplyContext.outreachId,
         repliedAt: new Date(groupJoinReplyContext.repliedAt),
         tx: input.prisma,
+      });
+    } else {
+      await markHostedLinqOnboardingLinkNoticeSent({
+        memberId: deliveryReceipt.restoreOnboardingLink.memberId,
+        occurredAt: deliveryReceipt.restoreOnboardingLink.occurredAt,
+        prisma: input.prisma,
       });
     }
   }

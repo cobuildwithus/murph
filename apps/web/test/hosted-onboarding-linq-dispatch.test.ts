@@ -4135,6 +4135,60 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(mocks.markHostedLinqOnboardingLinkNoticeSent).not.toHaveBeenCalled();
   });
 
+  it("reports a decided target rejection without claiming that a signup link sent", async () => {
+    const invite = {
+      channel: "linq",
+      id: "invite_target_unavailable",
+      inviteCode: "code_target_unavailable",
+      memberId: "member_target_unavailable",
+      sentAt: null,
+      status: "pending",
+    };
+    mocks.claimHostedLinqDeliveryProviderDispatchTx.mockResolvedValueOnce({
+      claimed: false,
+      id: "hld_target_unavailable",
+      outcome: "incompatible",
+    });
+    const prisma = asPrismaTransactionClient({
+      $queryRaw: vi.fn().mockResolvedValue([]),
+      hostedWebhookReceipt: buildHostedWebhookReceiptFixture(),
+      hostedInvite: {
+        create: vi.fn().mockResolvedValue(invite),
+        findFirst: vi.fn().mockResolvedValue(null),
+        findUnique: vi.fn().mockResolvedValue(invite),
+        update: vi.fn(),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedMember: {
+        create: vi.fn().mockResolvedValue({
+          accountGroupMemberships: [],
+          billingStatus: HostedBillingStatus.not_started,
+          id: "member_target_unavailable",
+          phoneLookupKey: "+15551234567",
+        }),
+        findUnique: vi.fn().mockResolvedValue(null),
+        update: vi.fn(),
+      },
+    });
+
+    await expect(handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody: buildHostedLinqWebhookBody({
+        eventId: "evt_signup_target_unavailable",
+        service: "iMessage",
+      }),
+      signature: null,
+      timestamp: null,
+    })).resolves.toMatchObject({
+      ignored: true,
+      ok: true,
+      reason: "signup-link-target-unavailable",
+    });
+
+    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+    expect(mocks.markHostedLinqOnboardingLinkNoticeSent).not.toHaveBeenCalled();
+  });
+
   it("does not create a pending signup route when the inbound Linq line is not assignable", async () => {
     const prismaMocks = {
       $queryRaw: vi.fn().mockResolvedValue([]),

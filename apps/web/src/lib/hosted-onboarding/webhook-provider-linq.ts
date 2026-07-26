@@ -867,7 +867,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
       })
     : null;
 
-  if (existingDailyState?.onboardingLinkSentAt) {
+  if (existingDailyState?.onboardingLinkSentAt && !groupJoinContext) {
     return logHostedLinqWebhookPlannerDecisionAndReturn(
       buildIgnoredLinqWebhookPlan("signup-link-already-sent"),
       buildHostedLinqWebhookPlannerDetails(input.event, context, {
@@ -1060,7 +1060,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
     recipientPhone: bindingResult.recipientPhone,
   });
 
-  if (dailyState.onboardingLinkSentAt) {
+  if (dailyState.onboardingLinkSentAt && !groupJoinContext) {
     return logHostedLinqWebhookPlannerDecisionAndReturn(
       buildIgnoredLinqWebhookPlan("signup-link-already-sent"),
       buildHostedLinqWebhookPlannerDetails(input.event, context, {
