@@ -1,6 +1,6 @@
 # Bad-code round 1: preserve hosted processing mode
 
-Status: active
+Status: completed
 Created: 2026-07-26
 Updated: 2026-07-26
 
@@ -56,4 +56,8 @@ Updated: 2026-07-26
 - `pnpm exec vitest run packages/assistant-runtime/test/hosted-runtime-workspace-entrypoint.test.ts`: passed, 237 tests.
 - `pnpm exec vitest run --config apps/cloudflare/vitest.node.workspace.ts apps/cloudflare/test/runner-job-transport.test.ts --no-coverage`: passed, 1 test.
 - `MURPH_VERIFY_EXECUTOR=crabbox pnpm test:diff packages/assistant-runtime/src/hosted-runtime/parsers.ts packages/assistant-runtime/test/hosted-runtime-workspace-entrypoint.test.ts apps/cloudflare/test/runner-job-transport.test.ts`: passed on a one-shot Testbox; assistant-runtime typecheck plus 1,892 tests passed, and Cloudflare typecheck plus 1,929 tests passed.
-- Preliminary specialist review, final parent review, final ReviewGPT, and PR checks: pending.
+- Preliminary `completion-specialists` ReviewGPT: `SPECIALIST_OUTCOME: PASS`; prompt and frontend lenses were not applicable, the coverage lens passed with no findings, and no patch artifact was returned.
+- Final parent review: passed; the canonical parser owns all request validation, the assistant-runtime export delegates without changing its public surface, the Cloudflare container uses that export, and the restored mode controls the existing bounded retention/system branches.
+- Final canonical `MURPH_VERIFY_EXECUTOR=crabbox pnpm test:diff ...` rerun: passed on a fresh one-shot Testbox with the same 1,892 assistant-runtime and 1,929 Cloudflare test results.
+- Final ReviewGPT and exact-head PR checks: pending until after plan closure and the resulting push.
+Completed: 2026-07-26
