@@ -5796,6 +5796,146 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
+  test("runs a joined-group completion before the dirty idle checkpoint", async () => {
+    const vaultRoot = await mkdtemp(
+      path.join(tmpdir(), "murph-workspace-entrypoint-"),
+    );
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const mailboxItems: HostedMailboxItem[] = [];
+    const foregroundCausalOnlyValues: boolean[] = [];
+    const activeTurnCompletionImportObserved = createDeferred<void>();
+    let assistantPhaseCalls = 0;
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const resultPromise = runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_assistant_ask_completion_dirty_wake",
+            idleCheckpointDelayMs: 500,
+            leaseGeneration: "7",
+            userId: TEST_USER_ID,
+            workspaceVersion: "0",
+          },
+        }),
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            events.push(`snapshot:${snapshotInput.reason}`);
+            return {
+              snapshotRef: createBundleRef({
+                hash: "e".repeat(64),
+                key:
+                  "users/bundles/member-synthetic/"
+                  + "assistant-ask-completion-dirty-wake.bundle.json",
+                size: 512,
+              }),
+            };
+          },
+          async importItem(item, context) {
+            assert.equal(item.route.action, "continue-assistant-ask");
+            assert.equal(context?.assistantAskCompletionKind, "joined_group");
+            events.push(`mailbox.importItem:${item.item.id}`);
+            if (
+              item.item.id
+              === "mailbox_item_entrypoint_assistant_ask_completion_active_turn"
+            ) {
+              activeTurnCompletionImportObserved.resolve();
+            }
+            return { status: "imported" };
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({
+              events,
+              items: mailboxItems,
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({ version: "0" }),
+            }),
+          }),
+          runtimeWakeSignal,
+          async runAssistantPhase(input) {
+            assistantPhaseCalls += 1;
+            foregroundCausalOnlyValues.push(
+              input.foregroundCausalOnly === true,
+            );
+            events.push(`assistant.phase:${assistantPhaseCalls}`);
+            if (assistantPhaseCalls === 1) {
+              setTimeout(() => {
+                mailboxItems.push(createMailboxItem({
+                  id: "mailbox_item_entrypoint_assistant_ask_completion",
+                  kind: "assistant.ask.completed",
+                  lane: "system",
+                  laneSeq: "1",
+                }));
+                runtimeWakeSignal.notify();
+              }, 0);
+              return {
+                checkpointReason: "assistant_runtime_commit",
+                progressed: true,
+              };
+            }
+            if (assistantPhaseCalls === 2) {
+              setTimeout(() => {
+                mailboxItems.push(createMailboxItem({
+                  id:
+                    "mailbox_item_entrypoint_"
+                    + "assistant_ask_completion_active_turn",
+                  kind: "assistant.ask.completed",
+                  lane: "system",
+                  laneSeq: "2",
+                }));
+                runtimeWakeSignal.notify();
+              }, 0);
+              await withRealTimeout(
+                activeTurnCompletionImportObserved.promise,
+                2_000,
+                () => events.join(","),
+              );
+            }
+            return { progressed: false };
+          },
+          vaultRoot,
+        },
+      );
+
+      const result = await withRealTimeout(
+        resultPromise,
+        2_000,
+        () => events.join(","),
+      );
+
+      assert.equal(assistantPhaseCalls, 2);
+      assert.deepEqual(foregroundCausalOnlyValues, [false, true]);
+      assert.ok(
+        requireEventIndex(
+          events,
+          "mailbox.importItem:mailbox_item_entrypoint_assistant_ask_completion",
+        ) < requireEventIndex(events, "snapshot:idle_shutdown"),
+        events.join(","),
+      );
+      assert.ok(
+        requireEventIndex(events, "assistant.phase:2")
+          < requireEventIndex(events, "snapshot:idle_shutdown"),
+        events.join(","),
+      );
+      assert.ok(
+        requireEventIndex(
+          events,
+          "mailbox.importItem:"
+            + "mailbox_item_entrypoint_assistant_ask_completion_active_turn",
+        ) < requireEventIndex(events, "snapshot:idle_shutdown"),
+        events.join(","),
+      );
+      assert.equal(result.status, "idle");
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
   test("preserves joined-group ask admission in an active dirty pre-checkpoint pass", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];
