@@ -145,17 +145,21 @@ test("design catalog keeps the hosted billing recovery state matrix rendered", (
   for (const state of [
     "start-pulse-billing-pending",
     "start-pulse-terminal-billing-recovery",
+    "start-pulse-terminal-close",
     "edge-processing",
     "edge-retry",
     "edge-terminal-billing-recovery",
-    "family-invite-payment-recovery-idle",
+    "family-invite-payment-recovery-error-phone",
     "family-invite-payment-recovery-finishing",
+    "family-access-suspended-support",
   ]) {
     assert.match(source, new RegExp(`state="${state}"`, "u"));
   }
   assert.match(source, /<StartPaidPulseConfirmationContent/u);
   assert.match(source, /<EdgeUpgradeConfirmationContent/u);
-  assert.match(source, /<FamilyInvitePaymentRecoveryStep/u);
+  assert.match(source, /<FamilyInvitePaymentRecoveryContent/u);
+  assert.match(source, /<HostedFamilyBillingRecoveryNotice/u);
+  assert.match(source, /viewport="phone"/u);
   assert.doesNotMatch(source, /<StartPaidPulseButton/u);
   assert.doesNotMatch(source, /<UpgradeToEdgeButton/u);
 });

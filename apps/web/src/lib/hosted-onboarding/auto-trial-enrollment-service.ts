@@ -21,8 +21,11 @@ import {
 } from "./hosted-member-store";
 import {
   bindHostedMemberStripeCustomerIdIfMissingTx,
+  clearHostedMemberStripeCustomerReservationAfterDefinitiveFailureTx,
+  finalizeHostedMemberStripeCustomerReservationTx,
   HostedMemberStripeMutationLockBusyError,
   readHostedMemberOwnsExactStripeSubscriptionTx,
+  reserveHostedMemberStripeCustomerReservationTx,
   withHostedMemberStripeMutationLockForOps,
 } from "./hosted-member-billing-store";
 import { assertHostedMemberBillingStartMessagingReady } from "./billing-start-preconditions";
@@ -170,8 +173,12 @@ type HostedAutoPulseTrialReservationOutcome =
       result: HostedAutoPulseTrialEnrollmentResult;
     }
   | {
-      kind: "reserved";
+      kind: "customer_bound";
       stripeCustomerId: string;
+    }
+  | {
+      kind: "customer_reserved";
+      reservationId: string;
     };
 
 type HostedAutoPulseTrialFinalizationOutcome =
@@ -192,6 +199,29 @@ const EMPTY_AUTO_TRIAL_POST_COMMIT_EFFECTS: HostedAutoPulseTrialPostCommitEffect
   hostedExecutionEventId: null,
   welcomeEmailMemberId: null,
 };
+
+async function withHostedAutoPulseTrialCustomerReservationLock<TResult>(input: {
+  memberId: string;
+  prisma: PrismaClient;
+  run: (tx: Prisma.TransactionClient) => Promise<TResult>;
+}): Promise<TResult> {
+  try {
+    return await withHostedMemberStripeMutationLockForOps({
+      acquisitionTimeoutMs:
+        HOSTED_AUTO_PULSE_TRIAL_MEMBER_LOCK_ACQUISITION_TIMEOUT_MS,
+      memberId: input.memberId,
+      prisma: input.prisma,
+      run: input.run,
+      transactionTimeoutMs:
+        HOSTED_AUTO_PULSE_TRIAL_RESERVATION_TRANSACTION_TIMEOUT_MS,
+    });
+  } catch (error) {
+    if (error instanceof HostedMemberStripeMutationLockBusyError) {
+      throw buildHostedAutoPulseTrialFinalizationBusyError();
+    }
+    throw error;
+  }
+}
 
 export async function ensureHostedAutoPulseTrialEnrollment(
   input: HostedAutoPulseTrialEnrollmentInput,
@@ -265,67 +295,43 @@ export async function ensureHostedAutoPulseTrialEnrollment(
   assertHostedAutoPulseTrialEligible(initialMember);
 
   const metadata = buildHostedAutoPulseTrialMetadata(invite.member.id);
-  const candidateStripeCustomerId = initialMember.billingRef?.stripeCustomerId ??
-    await createHostedPulseTrialStripeCustomer({
-      memberId: invite.member.id,
-      stripe,
-    });
 
-  let reservation: HostedAutoPulseTrialReservationOutcome;
-  try {
-    reservation = await withHostedMemberStripeMutationLockForOps({
-      acquisitionTimeoutMs:
-        HOSTED_AUTO_PULSE_TRIAL_MEMBER_LOCK_ACQUISITION_TIMEOUT_MS,
-      memberId: invite.member.id,
-      prisma,
-      run: (tx): Promise<HostedAutoPulseTrialReservationOutcome> =>
-        runWithHostedDomainRootUnwrapCache(async () => {
-          const currentMember = await readHostedAutoPulseTrialEnrollmentMember({
-            memberId: invite.member.id,
-            prisma: tx,
-          });
-          const currentStatus =
-            resolveHostedAutoPulseTrialExistingStatus(currentMember);
-          if (currentStatus) {
-            return {
-              kind: "existing",
-              result: buildHostedAutoPulseTrialEnrollmentResult(currentStatus),
-            };
-          }
-
-          assertHostedAutoPulseTrialEligible(currentMember);
-          const reservedBillingRef = currentMember.billingRef?.stripeCustomerId
-            ? currentMember.billingRef
-            : await bindHostedMemberStripeCustomerIdIfMissingTx({
-                memberId: invite.member.id,
-                stripeCustomerId: candidateStripeCustomerId,
-                tx,
-              });
-          const stripeCustomerId = reservedBillingRef?.stripeCustomerId;
-          if (!stripeCustomerId) {
-            throw hostedOnboardingError({
-              code: "HOSTED_AUTO_PULSE_TRIAL_CUSTOMER_BIND_FAILED",
-              httpStatus: 409,
-              message:
-                "Murph could not reserve Stripe billing for trial activation. Try again.",
-              retryable: true,
-            });
-          }
-
+  const reservation = await withHostedAutoPulseTrialCustomerReservationLock({
+    memberId: invite.member.id,
+    prisma,
+    run: (tx): Promise<HostedAutoPulseTrialReservationOutcome> =>
+      runWithHostedDomainRootUnwrapCache(async () => {
+        const currentMember = await readHostedAutoPulseTrialEnrollmentMember({
+          memberId: invite.member.id,
+          prisma: tx,
+        });
+        const currentStatus =
+          resolveHostedAutoPulseTrialExistingStatus(currentMember);
+        if (currentStatus) {
           return {
-            kind: "reserved",
-            stripeCustomerId,
+            kind: "existing",
+            result: buildHostedAutoPulseTrialEnrollmentResult(currentStatus),
           };
-        }),
-      transactionTimeoutMs:
-        HOSTED_AUTO_PULSE_TRIAL_RESERVATION_TRANSACTION_TIMEOUT_MS,
-    });
-  } catch (error) {
-    if (error instanceof HostedMemberStripeMutationLockBusyError) {
-      throw buildHostedAutoPulseTrialFinalizationBusyError();
-    }
-    throw error;
-  }
+        }
+
+        assertHostedAutoPulseTrialEligible(currentMember);
+        const customerReservation =
+          await reserveHostedMemberStripeCustomerReservationTx({
+            memberId: invite.member.id,
+            now,
+            tx,
+          });
+        return customerReservation.kind === "bound"
+          ? {
+              kind: "customer_bound",
+              stripeCustomerId: customerReservation.stripeCustomerId,
+            }
+          : {
+              kind: "customer_reserved",
+              reservationId: customerReservation.reservationId,
+            };
+      }),
+  });
 
   if (reservation.kind === "existing") {
     const currentMember = await readHostedAutoPulseTrialEnrollmentMember({
@@ -342,12 +348,109 @@ export async function ensureHostedAutoPulseTrialEnrollment(
     return reservation.result;
   }
 
+  let stripeCustomerId: string;
+  if (reservation.kind === "customer_bound") {
+    stripeCustomerId = reservation.stripeCustomerId;
+  } else {
+    let candidateStripeCustomerId: string;
+    try {
+      candidateStripeCustomerId =
+        await createHostedPulseTrialStripeCustomer({
+          memberId: invite.member.id,
+          requestOptions:
+            HOSTED_AUTO_PULSE_TRIAL_STRIPE_AUTHORITY_REQUEST_OPTIONS,
+          reservationId: reservation.reservationId,
+          stripe,
+        });
+    } catch (error) {
+      if (isHostedStripeDefinitiveRequestRejection(error)) {
+        await withHostedAutoPulseTrialCustomerReservationLock({
+          memberId: invite.member.id,
+          prisma,
+          run: (tx) =>
+            clearHostedMemberStripeCustomerReservationAfterDefinitiveFailureTx({
+              memberId: invite.member.id,
+              reservationId: reservation.reservationId,
+              tx,
+            }),
+        });
+      }
+      throw error;
+    }
+
+    const customerFinalization =
+      await withHostedAutoPulseTrialCustomerReservationLock({
+        memberId: invite.member.id,
+        prisma,
+        run: async (tx): Promise<HostedAutoPulseTrialReservationOutcome> =>
+          runWithHostedDomainRootUnwrapCache(async () => {
+            const currentMember = await readHostedMemberBillingSnapshot({
+              memberId: invite.member.id,
+              prisma: tx,
+            });
+            const currentStatus = currentMember
+              ? resolveHostedAutoPulseTrialExistingStatus(currentMember)
+              : null;
+            const eligibilityError = currentMember
+              ? readHostedAutoPulseTrialEligibilityError(currentMember)
+              : hostedOnboardingError({
+                  code: "HOSTED_MEMBER_NOT_FOUND",
+                  httpStatus: 403,
+                  message:
+                    "Finish signup from your latest Murph link before continuing.",
+                });
+            const finalized =
+              await finalizeHostedMemberStripeCustomerReservationTx({
+                bindAllowed: Boolean(
+                  currentMember && !currentStatus && !eligibilityError
+                ),
+                candidateStripeCustomerId,
+                memberId: invite.member.id,
+                now,
+                reservationId: reservation.reservationId,
+                tx,
+              });
+            if (finalized.kind === "bound") {
+              return {
+                kind: "customer_bound",
+                stripeCustomerId: finalized.stripeCustomerId,
+              };
+            }
+            if (currentStatus) {
+              return {
+                kind: "existing",
+                result: buildHostedAutoPulseTrialEnrollmentResult(currentStatus),
+              };
+            }
+            throw eligibilityError;
+          }),
+      });
+    if (customerFinalization.kind === "existing") {
+      const currentMember = await readHostedAutoPulseTrialEnrollmentMember({
+        memberId: invite.member.id,
+        prisma,
+      });
+      await cleanupHostedAutoPulseTrialLosersForExistingEnrollment({
+        currentMember,
+        memberId: invite.member.id,
+        priceId,
+        prisma,
+        stripe,
+      });
+      return customerFinalization.result;
+    }
+    if (customerFinalization.kind !== "customer_bound") {
+      throw new TypeError("Stripe Customer finalization returned an invalid outcome.");
+    }
+    stripeCustomerId = customerFinalization.stripeCustomerId;
+  }
+
   const subscription = await resolveHostedAutoPulseTrialStripeSubscription({
     memberId: invite.member.id,
     metadata,
     priceId,
     stripe,
-    stripeCustomerId: reservation.stripeCustomerId,
+    stripeCustomerId,
   });
   return finalizeHostedAutoPulseTrialEnrollment({
     memberId: invite.member.id,
@@ -355,7 +458,7 @@ export async function ensureHostedAutoPulseTrialEnrollment(
     priceId,
     prisma,
     stripe,
-    stripeCustomerId: reservation.stripeCustomerId,
+    stripeCustomerId,
     subscriptionId: subscription.id,
   });
 }
@@ -1557,8 +1660,10 @@ function buildHostedAutoPulseTrialEnrollmentResult(
   };
 }
 
-export function buildHostedAutoPulseTrialCustomerIdempotencyKey(memberId: string): string {
-  return buildHostedPulseTrialCustomerIdempotencyKey(memberId);
+export function buildHostedAutoPulseTrialCustomerIdempotencyKey(
+  reservationId: string,
+): string {
+  return buildHostedPulseTrialCustomerIdempotencyKey(reservationId);
 }
 
 export function buildHostedAutoPulseTrialSubscriptionIdempotencyKey(input: {

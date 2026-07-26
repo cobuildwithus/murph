@@ -98,6 +98,7 @@ import {
   findMemberForStripeInvoice,
   findMemberForStripeSubscription,
   HOSTED_STRIPE_RECURRING_FINANCIAL_REQUEST_OPTIONS,
+  isHostedStripeUnappliedPendingUpdateInvoice,
   readHostedStripeRecurringFinancialState,
   resolveStripeFinancialContext,
 } from "@/src/lib/hosted-onboarding/stripe-billing-lookup";
@@ -961,6 +962,65 @@ describe("hosted onboarding stripe billing lookup", () => {
       fullyRefunded: false,
       invoiceId: paidBaseInvoice.id,
     });
+  });
+
+  it("recognizes an expired first-time tier item without ignoring a void after that tier applied", () => {
+    const expiredUpdateInvoice = makeStripeFinancialInvoice({
+      amountPaid: 0,
+      amountRemaining: 1_000,
+      billingReason: "subscription_update",
+      id: "in_expired_edge_add",
+      lines: [
+        makeStripeInvoiceLine({
+          amount: 1_000,
+          invoiceId: "in_expired_edge_add",
+          periodEnd: 1_778_000_000,
+          periodStart: 1_776_000_000,
+          priceId: "price_edge",
+          proration: true,
+          quantity: 1,
+          subscriptionId: "sub_123",
+          subscriptionItemId: "si_edge_new",
+        }),
+      ],
+      status: "void",
+    });
+    const pulseOnly = makeStripeSubscription({
+      items: [
+        makeStripeSubscriptionItem({
+          id: "si_pulse",
+          priceId: "price_pulse",
+          quantity: 2,
+        }),
+      ],
+      latestInvoice: expiredUpdateInvoice.id,
+      pendingUpdate: null,
+    });
+    const edgeApplied = makeStripeSubscription({
+      items: [
+        makeStripeSubscriptionItem({
+          id: "si_pulse",
+          priceId: "price_pulse",
+          quantity: 1,
+        }),
+        makeStripeSubscriptionItem({
+          id: "si_edge_applied",
+          priceId: "price_edge",
+          quantity: 1,
+        }),
+      ],
+      latestInvoice: expiredUpdateInvoice.id,
+      pendingUpdate: null,
+    });
+
+    expect(isHostedStripeUnappliedPendingUpdateInvoice({
+      invoice: expiredUpdateInvoice,
+      subscription: pulseOnly,
+    })).toBe(true);
+    expect(isHostedStripeUnappliedPendingUpdateInvoice({
+      invoice: expiredUpdateInvoice,
+      subscription: edgeApplied,
+    })).toBe(false);
   });
 
   it("fails closed when more than 100 invoices fund one current period", async () => {

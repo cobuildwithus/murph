@@ -29,9 +29,10 @@ import {
   isHostedOnboardingError,
 } from "../hosted-onboarding/errors";
 import {
-  acceptHostedMemberStripeCheckoutCompletionTx,
   clearHostedMemberStripeCheckoutAttemptTx,
+  readFreshHostedMemberStripeCustomerReservation,
   readHostedMemberStripeBillingRef,
+  type HostedMemberStripeCustomerReservation,
   withHostedMemberStripeMutationLock,
 } from "../hosted-onboarding/hosted-member-billing-store";
 import { readHostedMemberIdentity } from "../hosted-onboarding/hosted-member-identity-store";
@@ -45,15 +46,17 @@ import {
 } from "../hosted-onboarding/family-plan";
 import { deleteHostedPrivyUser } from "../hosted-onboarding/privy";
 import { buildHostedLinqInviteSignupEffectIdMemberPrefix } from "../hosted-onboarding/linq-invite-signup-effect-id";
+import {
+  createHostedPulseTrialStripeCustomer,
+  hasHostedPulseTrialStripeCustomerReservationMetadata,
+} from "../hosted-onboarding/pulse-trial-customer";
 import { getHostedOnboardingStripe } from "../hosted-onboarding/runtime";
 import { logHostedStripeFailure } from "../hosted-onboarding/stripe-error-log";
-import {
-  isHostedStripeLegacyCheckoutCompletionAllowed,
-  isHostedStripeRetryableFailure,
-} from "../hosted-onboarding/stripe-billing-state";
+import { isHostedStripeRetryableFailure } from "../hosted-onboarding/stripe-billing-state";
 import {
   buildHostedCheckoutSubscriptionCleanupCandidate,
   buildHostedFamilyCheckoutSubscriptionCleanupCandidate,
+  classifyHostedStripeCustomerDeletionBalance,
   executeHostedCheckoutSubscriptionCleanup,
 } from "../hosted-onboarding/stripe-checkout-subscription-cleanup";
 import {
@@ -668,11 +671,20 @@ export async function deleteHostedAccountData(input: {
     memberId: input.memberId,
     prisma: input.prisma,
   });
+  const stripeCustomerReservation =
+    readFreshHostedMemberStripeCustomerReservation({
+      billingRef: postFenceBillingRef,
+      now: deletionStartedAt,
+    });
+  const recoveredStripeCustomerReservation =
+    await recoverHostedStripeCustomerReservationForAccountDeletion({
+      memberId: input.memberId,
+      reservation: stripeCustomerReservation,
+    });
   const checkoutResult = await reconcileHostedStripeCheckoutSessionForAccountDeletion({
     checkoutAttemptId: postFenceBillingRef?.checkoutAttemptId ?? null,
     checkoutIntentHash: postFenceBillingRef?.checkoutIntentHash ?? null,
     memberId: input.memberId,
-    observedAt: deletionStartedAt,
     prisma: input.prisma,
     stripeCheckoutSessionId: postFenceBillingRef?.stripeCheckoutSessionId ?? null,
   });
@@ -680,9 +692,9 @@ export async function deleteHostedAccountData(input: {
     memberId: input.memberId,
     prisma: input.prisma,
   });
-  // A completed Session can bind its subscription during the recovery above.
-  // Re-read only after that atomic decision so ordinary account deletion sees
-  // the accepted winner, while a superseded loser has already been cleaned up.
+  // A completed post-fence Session is cleaned up as a loser under the billing
+  // owner lock. Re-read after that decision so a subscription already bound
+  // before the fence still follows ordinary account-deletion cancellation.
   const billingRef = await readHostedMemberStripeBillingRef({
     memberId: input.memberId,
     prisma: input.prisma,
@@ -693,7 +705,7 @@ export async function deleteHostedAccountData(input: {
     memberId: input.memberId,
     prisma: input.prisma,
   });
-  const stripeCustomerIds = dedupeNullableStrings([
+  const knownStripeCustomerIds = dedupeNullableStrings([
     stripeCustomerId,
     checkoutResult.stripeCustomerId,
     ...familyBillingRefs.map((familyBillingRef) => familyBillingRef.stripeCustomerId),
@@ -736,6 +748,15 @@ export async function deleteHostedAccountData(input: {
       .filter((id): id is string => typeof id === "string" && id.length > 0),
     memberId: input.memberId,
     stripeSubscriptionId,
+  });
+  const stripeCustomerScope =
+    buildHostedStripeCustomerScopeForAccountDeletion({
+      knownStripeCustomerIds,
+      recoveredStripeCustomerReservation,
+    });
+  await assertHostedStripeCustomersSafeForAccountDeletion({
+    memberId: input.memberId,
+    stripeCustomerScope,
   });
   await closeHostedUsageCreditPurchasesForAccountDeletion({
     memberIds: deletionMemberIds,
@@ -845,7 +866,7 @@ export async function deleteHostedAccountData(input: {
   // account deletion is best effort and reported instead of fail-closed.
   const stripeCustomer = await deleteHostedStripeCustomersBestEffort({
     memberId: input.memberId,
-    stripeCustomerIds,
+    stripeCustomerScope,
   });
   const privyUser = await deleteHostedPrivyUserBestEffort({
     memberId: input.memberId,
@@ -1150,6 +1171,293 @@ const HOSTED_ACCOUNT_DELETION_STRIPE_REQUEST_OPTIONS = {
   maxNetworkRetries: 0,
   timeout: 5_000,
 } as const satisfies Stripe.RequestOptions;
+const HOSTED_ACCOUNT_DELETION_STRIPE_PAGE_SIZE = 100;
+const HOSTED_ACCOUNT_DELETION_STRIPE_MAX_PAGES = 10;
+
+interface HostedAccountDeletionStripeCustomerScope {
+  pulseTrialReservationIdByCustomerId: ReadonlyMap<string, string>;
+  stripeCustomerIds: readonly string[];
+}
+
+interface HostedAccountDeletionRecoveredStripeCustomerReservation {
+  reservationId: string;
+  stripeCustomerId: string;
+}
+
+async function recoverHostedStripeCustomerReservationForAccountDeletion(input: {
+  memberId: string;
+  reservation: HostedMemberStripeCustomerReservation | null;
+}): Promise<HostedAccountDeletionRecoveredStripeCustomerReservation | null> {
+  if (!input.reservation) {
+    return null;
+  }
+  const stripe = getHostedOnboardingStripe();
+  if (!stripe) {
+    throw hostedOnboardingError({
+      code: "ACCOUNT_DELETION_STRIPE_NOT_CONFIGURED",
+      httpStatus: 500,
+      message:
+        "Billing is not configured, so your Stripe Customer reservation could not be recovered. Contact support to delete your account.",
+    });
+  }
+
+  let stripeCustomerId: string;
+  try {
+    stripeCustomerId = await createHostedPulseTrialStripeCustomer({
+      memberId: input.memberId,
+      requestOptions: HOSTED_ACCOUNT_DELETION_STRIPE_REQUEST_OPTIONS,
+      reservationId: input.reservation.reservationId,
+      stripe,
+    });
+  } catch (error) {
+    throw buildHostedAccountDeletionCustomerProviderError({
+      error,
+      operationName: "customers.create.account-deletion-reservation-recovery",
+    });
+  }
+  if (typeof stripeCustomerId !== "string" || stripeCustomerId.length === 0) {
+    throw buildHostedAccountDeletionCustomerStateError(
+      "Stripe returned an invalid Customer for the account-deletion reservation.",
+    );
+  }
+  return {
+    reservationId: input.reservation.reservationId,
+    stripeCustomerId,
+  };
+}
+
+function buildHostedStripeCustomerScopeForAccountDeletion(input: {
+  knownStripeCustomerIds: readonly string[];
+  recoveredStripeCustomerReservation:
+    HostedAccountDeletionRecoveredStripeCustomerReservation | null;
+}): HostedAccountDeletionStripeCustomerScope {
+  const pulseTrialReservationIdByCustomerId = new Map<string, string>();
+  if (input.recoveredStripeCustomerReservation) {
+    pulseTrialReservationIdByCustomerId.set(
+      input.recoveredStripeCustomerReservation.stripeCustomerId,
+      input.recoveredStripeCustomerReservation.reservationId,
+    );
+  }
+  return {
+    pulseTrialReservationIdByCustomerId,
+    stripeCustomerIds: dedupeNullableStrings([
+      ...input.knownStripeCustomerIds,
+      input.recoveredStripeCustomerReservation?.stripeCustomerId ?? null,
+    ]),
+  };
+}
+
+async function assertHostedStripeCustomersSafeForAccountDeletion(input: {
+  memberId: string;
+  stripeCustomerScope: HostedAccountDeletionStripeCustomerScope;
+}): Promise<void> {
+  if (input.stripeCustomerScope.stripeCustomerIds.length === 0) {
+    return;
+  }
+  const stripe = getHostedOnboardingStripe();
+  if (!stripe) {
+    throw hostedOnboardingError({
+      code: "ACCOUNT_DELETION_STRIPE_NOT_CONFIGURED",
+      httpStatus: 500,
+      message:
+        "Billing is not configured, so your Stripe balance could not be verified. Contact support to delete your account.",
+    });
+  }
+
+  for (const stripeCustomerId of input.stripeCustomerScope.stripeCustomerIds) {
+    await inspectHostedStripeCustomerForAccountDeletion({
+      memberId: input.memberId,
+      pulseTrialCustomerReservationId:
+        input.stripeCustomerScope.pulseTrialReservationIdByCustomerId.get(
+          stripeCustomerId,
+        ) ?? null,
+      stripe,
+      stripeCustomerId,
+    });
+  }
+}
+
+async function inspectHostedStripeCustomerForAccountDeletion(input: {
+  memberId: string;
+  pulseTrialCustomerReservationId: string | null;
+  stripe: Stripe;
+  stripeCustomerId: string;
+}): Promise<"missing" | "ready"> {
+  let customer: Stripe.Customer | Stripe.DeletedCustomer;
+  try {
+    customer = await input.stripe.customers.retrieve(
+      input.stripeCustomerId,
+      {
+        expand: ["cash_balance", "invoice_credit_balance"],
+      },
+      HOSTED_ACCOUNT_DELETION_STRIPE_REQUEST_OPTIONS,
+    );
+  } catch (error) {
+    if (isStripeResourceMissingError(error)) {
+      return "missing";
+    }
+    throw buildHostedAccountDeletionCustomerProviderError({
+      error,
+      operationName: "customers.retrieve.account-deletion-balance",
+    });
+  }
+  if (customer.id !== input.stripeCustomerId) {
+    throw buildHostedAccountDeletionCustomerStateError(
+      "Stripe returned a different Customer during account deletion.",
+    );
+  }
+  if (customer.deleted) {
+    return "missing";
+  }
+  if (
+    input.pulseTrialCustomerReservationId
+    && !hasHostedPulseTrialStripeCustomerReservationMetadata({
+      memberId: input.memberId,
+      metadata: customer.metadata,
+      reservationId: input.pulseTrialCustomerReservationId,
+    })
+  ) {
+    throw buildHostedAccountDeletionCustomerStateError(
+      "Stripe returned a Customer with mismatched account-deletion recovery metadata.",
+    );
+  }
+  const deletionBalanceState =
+    classifyHostedStripeCustomerDeletionBalance(customer);
+  if (deletionBalanceState === "invalid") {
+    throw buildHostedAccountDeletionCustomerStateError(
+      "Stripe returned an invalid Customer deletion balance during account deletion.",
+    );
+  }
+  if (
+    deletionBalanceState === "cash_balance"
+    || deletionBalanceState === "nonzero"
+  ) {
+    throw hostedOnboardingError({
+      code: "ACCOUNT_DELETION_STRIPE_CUSTOMER_BALANCE_REMAINS",
+      httpStatus: 409,
+      message:
+        deletionBalanceState === "cash_balance"
+          ? "Your Stripe billing account still has a Cash Balance attached. Contact support before deleting your account."
+          : "Your Stripe billing account still has a credit or debit balance. Contact support before deleting your account.",
+    });
+  }
+  await assertHostedStripeCustomerHasNoLiveSubscriptionsForAccountDeletion({
+    stripe: input.stripe,
+    stripeCustomerId: input.stripeCustomerId,
+  });
+  return "ready";
+}
+
+async function assertHostedStripeCustomerHasNoLiveSubscriptionsForAccountDeletion(
+  input: {
+    stripe: Stripe;
+    stripeCustomerId: string;
+  },
+): Promise<void> {
+  const seenSubscriptionIds = new Set<string>();
+  let startingAfter: string | undefined;
+  for (
+    let pageIndex = 0;
+    pageIndex < HOSTED_ACCOUNT_DELETION_STRIPE_MAX_PAGES;
+    pageIndex += 1
+  ) {
+    let page: Awaited<ReturnType<Stripe["subscriptions"]["list"]>>;
+    try {
+      page = await input.stripe.subscriptions.list({
+        customer: input.stripeCustomerId,
+        limit: HOSTED_ACCOUNT_DELETION_STRIPE_PAGE_SIZE,
+        ...(startingAfter ? { starting_after: startingAfter } : {}),
+        status: "all",
+      }, HOSTED_ACCOUNT_DELETION_STRIPE_REQUEST_OPTIONS);
+    } catch (error) {
+      throw buildHostedAccountDeletionCustomerProviderError({
+        error,
+        operationName: "subscriptions.list.account-deletion-customer",
+      });
+    }
+    if (!Array.isArray(page.data) || typeof page.has_more !== "boolean") {
+      throw buildHostedAccountDeletionCustomerStateError(
+        "Stripe returned malformed Customer subscriptions during account deletion.",
+      );
+    }
+    for (const subscription of page.data) {
+      if (
+        typeof subscription.id !== "string"
+        || subscription.id.length === 0
+        || seenSubscriptionIds.has(subscription.id)
+        || coerceStripeObjectId(subscription.customer) !==
+          input.stripeCustomerId
+      ) {
+        throw buildHostedAccountDeletionCustomerStateError(
+          "Stripe returned an invalid Customer subscription during account deletion.",
+        );
+      }
+      seenSubscriptionIds.add(subscription.id);
+      if (
+        subscription.status !== "canceled"
+        && subscription.status !== "incomplete_expired"
+      ) {
+        throw hostedOnboardingError({
+          code: "ACCOUNT_DELETION_STRIPE_CUSTOMER_HAS_LIVE_BILLING",
+          httpStatus: 409,
+          message:
+            "A Stripe Customer still has live billing. Contact support before deleting your account.",
+        });
+      }
+    }
+    if (!page.has_more) {
+      return;
+    }
+    const lastSubscriptionId = page.data.at(-1)?.id;
+    if (
+      !lastSubscriptionId
+      || seenSubscriptionIds.has(lastSubscriptionId) === false
+      || lastSubscriptionId === startingAfter
+    ) {
+      throw buildHostedAccountDeletionCustomerStateError(
+        "Stripe returned an invalid Customer subscription cursor during account deletion.",
+      );
+    }
+    startingAfter = lastSubscriptionId;
+  }
+  throw hostedOnboardingError({
+    code: "ACCOUNT_DELETION_STRIPE_CUSTOMER_SUBSCRIPTIONS_INCOMPLETE",
+    httpStatus: 503,
+    message:
+      "Stripe returned too many Customer subscriptions to verify safely. Contact support to delete your account.",
+    retryable: true,
+  });
+}
+
+function buildHostedAccountDeletionCustomerProviderError(input: {
+  error: unknown;
+  operationName: string;
+}) {
+  logHostedStripeFailure({
+    error: input.error,
+    operationName: input.operationName,
+  });
+  const retryable = isHostedStripeRetryableFailure(input.error);
+  return hostedOnboardingError({
+    cause: input.error,
+    code: retryable
+      ? "ACCOUNT_DELETION_STRIPE_CUSTOMER_PROVIDER_UNAVAILABLE"
+      : "ACCOUNT_DELETION_STRIPE_CUSTOMER_PROVIDER_REJECTED",
+    httpStatus: retryable ? 502 : 500,
+    message: retryable
+      ? "Stripe could not confirm your billing account state. Retry account deletion."
+      : "Stripe rejected billing account verification. Contact support to delete your account.",
+    retryable,
+  });
+}
+
+function buildHostedAccountDeletionCustomerStateError(message: string) {
+  return hostedOnboardingError({
+    code: "ACCOUNT_DELETION_STRIPE_CUSTOMER_STATE_INCONSISTENT",
+    httpStatus: 500,
+    message,
+  });
+}
 
 async function assertHostedBillingOwnershipStableForAccountDeletionTx(input: {
   expectedDirectSubscriptionId: string | null;
@@ -1205,7 +1513,6 @@ async function reconcileHostedStripeCheckoutSessionForAccountDeletion(input: {
   checkoutAttemptId: string | null;
   checkoutIntentHash: string | null;
   memberId: string;
-  observedAt: Date;
   prisma: PrismaClient;
   stripeCheckoutSessionId: string | null;
 }): Promise<{ stripeCustomerId: string | null }> {
@@ -1295,7 +1602,6 @@ async function reconcileHostedStripeCheckoutSessionForAccountDeletion(input: {
   }
   return reconcileCompletedHostedMemberStripeCheckoutForAccountDeletion({
     attempt: input,
-    observedAt: input.observedAt,
     session: settlement.session,
     stripe,
   });
@@ -1494,7 +1800,6 @@ async function reconcileCompletedHostedMemberStripeCheckoutForAccountDeletion(
       memberId: string;
       prisma: PrismaClient;
     };
-    observedAt: Date;
     session: Stripe.Checkout.Session;
     stripe: Stripe;
   },
@@ -1518,51 +1823,16 @@ async function reconcileCompletedHostedMemberStripeCheckoutForAccountDeletion(
     });
   }
 
-  const acceptance = await withHostedMemberStripeMutationLock({
-    memberId: input.attempt.memberId,
+  await executeHostedCheckoutSubscriptionCleanup({
+    candidate: buildHostedCheckoutSubscriptionCleanupCandidate({
+      memberId: input.attempt.memberId,
+      reason: "superseded",
+      session: input.session,
+      stripeSubscriptionId,
+    }),
     prisma: input.attempt.prisma,
-    run: (tx) => {
-      const checkoutOffer =
-        readHostedMemberCheckoutOfferForAccountDeletion(input.session);
-      if (!checkoutOffer) {
-        throw hostedOnboardingError({
-          code: "ACCOUNT_DELETION_STRIPE_CHECKOUT_MISMATCH",
-          httpStatus: 500,
-          message:
-            "The completed billing checkout has an unsupported offer, so account deletion cannot safely continue. Contact support.",
-        });
-      }
-      return acceptHostedMemberStripeCheckoutCompletionTx({
-        allowLegacyCompletion:
-          isHostedStripeLegacyCheckoutCompletionAllowed({
-            observedAt: input.observedAt,
-            sessionCreated: input.session.created,
-            sessionExpiresAt: input.session.expires_at,
-          }),
-        checkoutAttemptId: input.attempt.checkoutAttemptId,
-        checkoutIntentHash: input.attempt.checkoutIntentHash,
-        checkoutSessionId: input.session.id,
-        currentCheckoutOffer: checkoutOffer,
-        eventCreatedAt: new Date(input.session.created * 1_000),
-        memberId: input.attempt.memberId,
-        stripeCustomerId,
-        stripeSubscriptionId,
-        tx,
-      });
-    },
+    stripe: input.stripe,
   });
-  if (acceptance.kind === "cleanup_superseded") {
-    await executeHostedCheckoutSubscriptionCleanup({
-      candidate: buildHostedCheckoutSubscriptionCleanupCandidate({
-        memberId: input.attempt.memberId,
-        reason: "superseded",
-        session: input.session,
-        stripeSubscriptionId,
-      }),
-      prisma: input.attempt.prisma,
-      stripe: input.stripe,
-    });
-  }
   return { stripeCustomerId };
 }
 
@@ -1874,6 +2144,7 @@ async function cancelHostedStripeSubscriptionForAccountDeletion(input: {
 
 async function deleteHostedStripeCustomerBestEffort(input: {
   memberId: string;
+  pulseTrialCustomerReservationId: string | null;
   stripeCustomerId: string | null;
 }): Promise<HostedAccountVendorDeletionResult> {
   if (!input.stripeCustomerId) {
@@ -1886,7 +2157,26 @@ async function deleteHostedStripeCustomerBestEffort(input: {
   }
 
   try {
-    await stripe.customers.del(input.stripeCustomerId);
+    const readiness = await inspectHostedStripeCustomerForAccountDeletion({
+      memberId: input.memberId,
+      pulseTrialCustomerReservationId:
+        input.pulseTrialCustomerReservationId,
+      stripe,
+      stripeCustomerId: input.stripeCustomerId,
+    });
+    if (readiness === "missing") {
+      return { errorCode: null, status: "skipped_no_record" };
+    }
+    const deleted = await stripe.customers.del(
+      input.stripeCustomerId,
+      {},
+      HOSTED_ACCOUNT_DELETION_STRIPE_REQUEST_OPTIONS,
+    );
+    if (deleted.id !== input.stripeCustomerId || !deleted.deleted) {
+      throw buildHostedAccountDeletionCustomerStateError(
+        "Stripe did not confirm deletion of the exact Customer.",
+      );
+    }
     return { errorCode: null, status: "completed" };
   } catch (error) {
     if (isStripeResourceMissingError(error)) {
@@ -1908,16 +2198,20 @@ async function deleteHostedStripeCustomerBestEffort(input: {
 
 async function deleteHostedStripeCustomersBestEffort(input: {
   memberId: string;
-  stripeCustomerIds: readonly string[];
+  stripeCustomerScope: HostedAccountDeletionStripeCustomerScope;
 }): Promise<HostedAccountVendorDeletionResult> {
-  if (input.stripeCustomerIds.length === 0) {
+  if (input.stripeCustomerScope.stripeCustomerIds.length === 0) {
     return { errorCode: null, status: "skipped_no_record" };
   }
 
   const results = [];
-  for (const stripeCustomerId of input.stripeCustomerIds) {
+  for (const stripeCustomerId of input.stripeCustomerScope.stripeCustomerIds) {
     results.push(await deleteHostedStripeCustomerBestEffort({
       memberId: input.memberId,
+      pulseTrialCustomerReservationId:
+        input.stripeCustomerScope.pulseTrialReservationIdByCustomerId.get(
+          stripeCustomerId,
+        ) ?? null,
       stripeCustomerId,
     }));
   }

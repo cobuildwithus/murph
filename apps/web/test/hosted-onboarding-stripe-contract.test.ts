@@ -58,6 +58,7 @@ const cleanupSummary: CleanupSummary = {
 
 let productId: string | null = null;
 let priceId: string | null = null;
+let edgePriceId: string | null = null;
 
 if (RUN_STRIPE_BILLING_CONTRACT && STRIPE_CLI_PROFILE.length === 0) {
   throw new Error(
@@ -198,6 +199,14 @@ function assertTestMode(record: JsonRecord, message: string): void {
 function requirePriceId(): string {
   assertContract(priceId !== null, "Stripe contract Price was not prepared.");
   return priceId;
+}
+
+function requireEdgePriceId(): string {
+  assertContract(
+    edgePriceId !== null,
+    "Stripe contract Edge Price was not prepared.",
+  );
+  return edgePriceId;
 }
 
 function metadataData(): readonly string[] {
@@ -610,22 +619,51 @@ async function createPausedSubscription(
   };
 }
 
-function subscriptionItem(subscription: JsonRecord): JsonRecord {
+function subscriptionItems(subscription: JsonRecord): readonly JsonRecord[] {
   const items = readRecord(
     subscription,
     "items",
     "Stripe Subscription items were missing.",
   );
-  const itemList = readObjectList(
+  return readObjectList(
     items,
     "data",
     "Stripe Subscription item list was invalid.",
   );
+}
+
+function subscriptionItem(subscription: JsonRecord): JsonRecord {
+  const itemList = subscriptionItems(subscription);
   assertContract(
     itemList.length === 1,
     "Stripe contract fixture had an unexpected item count.",
   );
   return itemList[0];
+}
+
+function subscriptionHasItem(input: {
+  id: string;
+  priceId: string;
+  quantity: number;
+  subscription: JsonRecord;
+}): boolean {
+  return subscriptionItems(input.subscription).some((item) =>
+    readString(
+      item,
+      "id",
+      "Stripe Subscription item id was invalid.",
+    ) === input.id &&
+    readObjectId(
+      item,
+      "price",
+      "Stripe Subscription item Price was invalid.",
+    ) === input.priceId &&
+    readNumber(
+      item,
+      "quantity",
+      "Stripe Subscription item quantity was invalid.",
+    ) === input.quantity
+  );
 }
 
 async function createActiveSubscription(
@@ -892,6 +930,25 @@ describe.skipIf(!RUN_STRIPE_BILLING_CONTRACT)(
         "id",
         "Stripe Price did not return an id.",
       );
+      const edgePrice = await stripePost("/v1/prices", "create Edge Price", {
+        data: [
+          "currency=usd",
+          "unit_amount=1900",
+          "recurring[interval]=month",
+          `product=${productId}`,
+          ...metadataData(),
+        ],
+        idempotencyKey: idempotencyKey("edge-price"),
+      });
+      assertTestMode(
+        edgePrice,
+        "Stripe Edge Price was not created in test mode.",
+      );
+      edgePriceId = readString(
+        edgePrice,
+        "id",
+        "Stripe Edge Price did not return an id.",
+      );
     }, 120_000);
 
     afterAll(async () => {
@@ -899,14 +956,20 @@ describe.skipIf(!RUN_STRIPE_BILLING_CONTRACT)(
         await cleanClock(clockId);
       }
       cleanupSummary.failures += activeClockIds.size;
-      if (priceId !== null) {
+      for (const [label, currentPriceId] of [
+        ["price", priceId],
+        ["edge-price", edgePriceId],
+      ] as const) {
+        if (currentPriceId === null) {
+          continue;
+        }
         try {
           const price = await stripePost(
-            `/v1/prices/${priceId}`,
-            "archive Price",
+            `/v1/prices/${currentPriceId}`,
+            `archive ${label}`,
             {
               data: ["active=false"],
-              idempotencyKey: idempotencyKey("archive-price"),
+              idempotencyKey: idempotencyKey(`archive-${label}`),
             },
           );
           assertContract(
@@ -1227,6 +1290,455 @@ describe.skipIf(!RUN_STRIPE_BILLING_CONTRACT)(
           assertContract(
             freshInvoiceId !== firstInvoiceId,
             "Stripe fresh Resume key did not create a new attempt Invoice.",
+          );
+        });
+      },
+      TEST_TIMEOUT_MS,
+    );
+
+    test(
+      "keeps a 3DS last-tier price swap pending through expiry, then applies and consolidates a fresh retry",
+      async () => {
+        await withTestClock("last-tier-price-swap", async (clock) => {
+          const customerId = await createCustomer(clock.id);
+          const paymentMethodId = await createAndAttachPaymentMethod(
+            customerId,
+            "tok_visa",
+            `last-tier-${randomUUID()}`,
+          );
+          await stripePost(
+            `/v1/customers/${customerId}`,
+            "set last-tier Customer tender",
+            {
+              data: [
+                `invoice_settings[default_payment_method]=${paymentMethodId}`,
+              ],
+              idempotencyKey: idempotencyKey(
+                `last-tier-customer-tender-${randomUUID()}`,
+              ),
+            },
+          );
+          const created = await stripePost(
+            "/v1/subscriptions",
+            "create mixed-tier Subscription",
+            {
+              data: [
+                `customer=${customerId}`,
+                `default_payment_method=${paymentMethodId}`,
+                `items[0][price]=${requirePriceId()}`,
+                `items[1][price]=${requireEdgePriceId()}`,
+                "payment_behavior=error_if_incomplete",
+                ...metadataData(),
+              ],
+              expand: ["latest_invoice"],
+              idempotencyKey: idempotencyKey(
+                `last-tier-subscription-${randomUUID()}`,
+              ),
+            },
+          );
+          const subscriptionId = readString(
+            created,
+            "id",
+            "Stripe mixed-tier Subscription did not return an id.",
+          );
+          const baseInvoiceId = readObjectId(
+            created,
+            "latest_invoice",
+            "Stripe mixed-tier Subscription did not return its base Invoice.",
+          );
+          await waitForInvoiceStatus(baseInvoiceId, "paid");
+          const before = await waitFor(
+            "mixed-tier Subscription",
+            () =>
+              stripeGet(
+                `/v1/subscriptions/${subscriptionId}`,
+                "retrieve mixed-tier Subscription",
+              ),
+            (subscription) =>
+              readOptionalString(
+                subscription,
+                "status",
+                "Stripe mixed-tier Subscription status was invalid.",
+              ) === "active" &&
+              subscriptionItems(subscription).length === 2,
+          );
+          const beforeItems = subscriptionItems(before);
+          const sourceItem = beforeItems.find((item) =>
+            readObjectId(
+              item,
+              "price",
+              "Stripe mixed-tier item Price was invalid.",
+            ) === requirePriceId()
+          );
+          const retainedTargetItem = beforeItems.find((item) =>
+            readObjectId(
+              item,
+              "price",
+              "Stripe mixed-tier item Price was invalid.",
+            ) === requireEdgePriceId()
+          );
+          assertContract(
+            sourceItem !== undefined && retainedTargetItem !== undefined,
+            "Stripe mixed-tier fixture did not expose one item per tier.",
+          );
+          const sourceItemId = readString(
+            sourceItem,
+            "id",
+            "Stripe source Subscription item did not return an id.",
+          );
+          const retainedTargetItemId = readString(
+            retainedTargetItem,
+            "id",
+            "Stripe target Subscription item did not return an id.",
+          );
+
+          const actionPaymentMethodId = await createAndAttachPaymentMethod(
+            customerId,
+            "tok_threeDSecure2Required",
+            `last-tier-action-${randomUUID()}`,
+          );
+          await stripePost(
+            `/v1/subscriptions/${subscriptionId}`,
+            "set last-tier action-required tender",
+            {
+              data: [
+                `default_payment_method=${actionPaymentMethodId}`,
+              ],
+              idempotencyKey: idempotencyKey(
+                `last-tier-action-tender-${randomUUID()}`,
+              ),
+            },
+          );
+          const pending = await stripePost(
+            `/v1/subscriptions/${subscriptionId}`,
+            "create pending last-tier price swap",
+            {
+              data: [
+                `items[0][id]=${sourceItemId}`,
+                `items[0][price]=${requireEdgePriceId()}`,
+                "items[0][quantity]=1",
+                "payment_behavior=pending_if_incomplete",
+                "proration_behavior=always_invoice",
+              ],
+              expand: ["latest_invoice"],
+              idempotencyKey: idempotencyKey(
+                `last-tier-pending-swap-${randomUUID()}`,
+              ),
+            },
+          );
+          assertContract(
+            subscriptionItems(pending).length === 2 &&
+              subscriptionHasItem({
+                id: sourceItemId,
+                priceId: requirePriceId(),
+                quantity: 1,
+                subscription: pending,
+              }) &&
+              subscriptionHasItem({
+                id: retainedTargetItemId,
+                priceId: requireEdgePriceId(),
+                quantity: 1,
+                subscription: pending,
+              }),
+            "Stripe changed the applied mixed-tier items before 3DS payment.",
+          );
+          const pendingUpdate = readRecord(
+            pending,
+            "pending_update",
+            "Stripe last-tier pending update was missing.",
+          );
+          const pendingUpdateItems = readObjectList(
+            pendingUpdate,
+            "subscription_items",
+            "Stripe last-tier pending update items were invalid.",
+          );
+          assertContract(
+            pendingUpdateItems.length === 1 &&
+              readString(
+                pendingUpdateItems[0],
+                "id",
+                "Stripe last-tier pending item id was invalid.",
+              ) === sourceItemId &&
+              readObjectId(
+                pendingUpdateItems[0],
+                "price",
+                "Stripe last-tier pending item Price was invalid.",
+              ) === requireEdgePriceId() &&
+              readNumber(
+                pendingUpdateItems[0],
+                "quantity",
+                "Stripe last-tier pending item quantity was invalid.",
+              ) === 1,
+            "Stripe did not retain the exact last-tier price target.",
+          );
+          const expiresAt = readNumber(
+            pendingUpdate,
+            "expires_at",
+            "Stripe last-tier pending expiry was invalid.",
+          );
+          const expiredInvoiceId = readObjectId(
+            pending,
+            "latest_invoice",
+            "Stripe pending last-tier swap did not return an Invoice.",
+          );
+          assertContract(
+            expiredInvoiceId !== baseInvoiceId,
+            "Stripe pending last-tier swap reused the base Invoice.",
+          );
+          const actionInvoice = await waitForInvoiceStatus(
+            expiredInvoiceId,
+            "open",
+          );
+          assertStripeHostedInvoiceUrl(actionInvoice.hosted_invoice_url);
+          const actionPaymentIntent = await invoicePaymentIntent(
+            expiredInvoiceId,
+            "open",
+          );
+          assertContract(
+            readOptionalString(
+              actionPaymentIntent,
+              "status",
+              "Stripe last-tier PaymentIntent status was invalid.",
+            ) === "requires_action",
+            "Stripe last-tier 3DS PaymentIntent did not require action.",
+          );
+
+          await advanceClock(clock.id, expiresAt + 60);
+          const expired = await waitFor(
+            "last-tier pending expiry",
+            () =>
+              stripeGet(
+                `/v1/subscriptions/${subscriptionId}`,
+                "retrieve expired last-tier swap",
+              ),
+            (subscription) =>
+              readNullableRecord(
+                subscription,
+                "pending_update",
+                "Stripe expired last-tier pending update was invalid.",
+              ) === null,
+          );
+          assertContract(
+            subscriptionItems(expired).length === 2 &&
+              subscriptionHasItem({
+                id: sourceItemId,
+                priceId: requirePriceId(),
+                quantity: 1,
+                subscription: expired,
+              }) &&
+              subscriptionHasItem({
+                id: retainedTargetItemId,
+                priceId: requireEdgePriceId(),
+                quantity: 1,
+                subscription: expired,
+              }),
+            "Stripe applied an expired last-tier price swap.",
+          );
+          await waitForInvoiceStatus(expiredInvoiceId, "void");
+          assertContract(
+            readObjectId(
+              expired,
+              "latest_invoice",
+              "Stripe expired last-tier latest Invoice was invalid.",
+            ) === expiredInvoiceId,
+            "Stripe lost the exact expired last-tier attempt Invoice.",
+          );
+
+          await stripePost(
+            `/v1/subscriptions/${subscriptionId}`,
+            "restore last-tier successful tender",
+            {
+              data: [`default_payment_method=${paymentMethodId}`],
+              idempotencyKey: idempotencyKey(
+                `last-tier-restore-tender-${randomUUID()}`,
+              ),
+            },
+          );
+          const retried = await stripePost(
+            `/v1/subscriptions/${subscriptionId}`,
+            "retry last-tier price swap",
+            {
+              data: [
+                `items[0][id]=${sourceItemId}`,
+                `items[0][price]=${requireEdgePriceId()}`,
+                "items[0][quantity]=1",
+                "payment_behavior=pending_if_incomplete",
+                "proration_behavior=always_invoice",
+              ],
+              expand: ["latest_invoice"],
+              idempotencyKey: idempotencyKey(
+                `last-tier-retry-swap-${randomUUID()}`,
+              ),
+            },
+          );
+          const updateInvoiceId = readObjectId(
+            retried,
+            "latest_invoice",
+            "Stripe retried last-tier swap did not return an Invoice.",
+          );
+          assertContract(
+            updateInvoiceId !== baseInvoiceId &&
+              updateInvoiceId !== expiredInvoiceId,
+            "Stripe fresh last-tier retry did not create a new Invoice.",
+          );
+          await waitForInvoiceStatus(updateInvoiceId, "paid");
+          const applied = await waitFor(
+            "paid last-tier retry",
+            () =>
+              stripeGet(
+                `/v1/subscriptions/${subscriptionId}`,
+                "retrieve paid last-tier retry",
+              ),
+            (subscription) => {
+              const pendingUpdate = readNullableRecord(
+                subscription,
+                "pending_update",
+                "Stripe last-tier pending update was invalid.",
+              );
+              const items = subscriptionItems(subscription);
+              return pendingUpdate === null &&
+                items.length === 2 &&
+                items.every((item) =>
+                  readObjectId(
+                    item,
+                    "price",
+                    "Stripe applied last-tier item Price was invalid.",
+                  ) === requireEdgePriceId()
+                );
+            },
+          );
+          const appliedItems = subscriptionItems(applied);
+          assertContract(
+            appliedItems.some((item) =>
+              readString(
+                item,
+                "id",
+                "Stripe converted item id was invalid.",
+              ) === sourceItemId
+            ) &&
+              appliedItems.some((item) =>
+                readString(
+                  item,
+                  "id",
+                  "Stripe retained item id was invalid.",
+                ) === retainedTargetItemId
+              ),
+            "Stripe did not preserve both exact items after the paid price swap.",
+          );
+
+          const updateInvoiceLinesResponse = await stripeGet(
+            `/v1/invoices/${updateInvoiceId}/lines`,
+            "retrieve last-tier price-swap Invoice lines",
+            {
+              data: ["limit=100"],
+              expand: ["data.pricing.price_details.price"],
+            },
+          );
+          const updateInvoiceLines = readObjectList(
+            updateInvoiceLinesResponse,
+            "data",
+            "Stripe last-tier price-swap Invoice lines were invalid.",
+          );
+          let netProrationAmount = 0;
+          let sawSourceCredit = false;
+          let sawTargetCharge = false;
+          for (const line of updateInvoiceLines) {
+            const parent = readRecord(
+              line,
+              "parent",
+              "Stripe last-tier Invoice line parent was invalid.",
+            );
+            const details = readNullableRecord(
+              parent,
+              "subscription_item_details",
+              "Stripe last-tier Invoice line details were invalid.",
+            );
+            if (
+              parent.type !== "subscription_item_details" ||
+              details?.proration !== true ||
+              details.subscription_item !== sourceItemId
+            ) {
+              continue;
+            }
+            const amount = readNumber(
+              line,
+              "amount",
+              "Stripe last-tier Invoice line amount was invalid.",
+            );
+            const pricing = readRecord(
+              line,
+              "pricing",
+              "Stripe last-tier Invoice line pricing was invalid.",
+            );
+            const priceDetails = readRecord(
+              pricing,
+              "price_details",
+              "Stripe last-tier Invoice price details were invalid.",
+            );
+            const linePriceId = readObjectId(
+              priceDetails,
+              "price",
+              "Stripe last-tier Invoice Price was invalid.",
+            );
+            netProrationAmount += amount;
+            sawSourceCredit ||= linePriceId === requirePriceId() && amount < 0;
+            sawTargetCharge ||=
+              linePriceId === requireEdgePriceId() && amount > 0;
+          }
+          assertContract(
+            sawSourceCredit && sawTargetCharge && netProrationAmount > 0,
+            "Stripe did not invoice the exact old-tier credit and new-tier charge.",
+          );
+
+          const normalized = await stripePost(
+            `/v1/subscriptions/${subscriptionId}`,
+            "consolidate duplicate target-tier items",
+            {
+              data: [
+                `items[0][id]=${retainedTargetItemId}`,
+                "items[0][quantity]=2",
+                `items[1][id]=${sourceItemId}`,
+                "items[1][deleted]=true",
+                "proration_behavior=none",
+              ],
+              expand: ["latest_invoice"],
+              idempotencyKey: idempotencyKey(
+                `last-tier-consolidate-${randomUUID()}`,
+              ),
+            },
+          );
+          const normalizedItems = subscriptionItems(normalized);
+          assertContract(
+            readNullableRecord(
+              normalized,
+              "pending_update",
+              "Stripe normalized pending update was invalid.",
+            ) === null &&
+              normalizedItems.length === 1 &&
+              readString(
+                normalizedItems[0],
+                "id",
+                "Stripe normalized item id was invalid.",
+              ) === retainedTargetItemId &&
+              readObjectId(
+                normalizedItems[0],
+                "price",
+                "Stripe normalized item Price was invalid.",
+              ) === requireEdgePriceId() &&
+              readNumber(
+                normalizedItems[0],
+                "quantity",
+                "Stripe normalized item quantity was invalid.",
+              ) === 2,
+            "Stripe did not consolidate the duplicate target-tier items exactly.",
+          );
+          assertContract(
+            readObjectId(
+              normalized,
+              "latest_invoice",
+              "Stripe normalized Subscription latest Invoice was invalid.",
+            ) === updateInvoiceId,
+            "Stripe no-proration consolidation created a second charge Invoice.",
           );
         });
       },

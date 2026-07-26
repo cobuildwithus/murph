@@ -97,7 +97,11 @@ authenticated Stripe CLI without accepting an API key, pins
 test-owned clocks and archived catalog fixtures. The scenarios cover typed
 PaymentMethod and legacy Source Resume, exact resumption Invoice payment through
 Invoice Payments, terminal-void idempotency rotation, action-required pending
-updates and expiry, and cumulative refunds.
+updates and expiry, cumulative refunds, and the last-Pulse-to-Edge Family price
+swap plus no-proration duplicate-item consolidation. Customer-reservation and
+loser-compensation concurrency remain deterministic Web/database tests; the
+provider-contract lane proves the Stripe request and invoice semantics they
+depend on.
 
 Scheduled Telegram group route-authority coverage is owner-split. Hosted Web
 tests bind the signed callback member to the exact current thread-container

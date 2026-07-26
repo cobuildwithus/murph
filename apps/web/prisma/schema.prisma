@@ -840,6 +840,8 @@ model HostedMemberBillingRef {
   memberId                      String       @unique @map("member_id")
   stripeCustomerLookupKey       String?      @unique @map("stripe_customer_lookup_key")
   stripeCustomerIdEncrypted     String?      @map("stripe_customer_id_encrypted")
+  stripeCustomerReservationId        String?   @unique @map("stripe_customer_reservation_id")
+  stripeCustomerReservationCreatedAt DateTime? @map("stripe_customer_reservation_created_at")
   stripeSubscriptionLookupKey   String?      @unique @map("stripe_subscription_lookup_key")
   stripeSubscriptionIdEncrypted String?      @map("stripe_subscription_id_encrypted")
   stripeSubscriptionScheduleLookupKey   String?      @unique @map("stripe_subscription_schedule_lookup_key")

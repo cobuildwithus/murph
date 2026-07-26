@@ -6,6 +6,7 @@ import {
   buildHostedStripeTenderSubscriptionUpdate,
   classifyHostedStripeFailure,
   classifyHostedStripeInvoiceCollectionState,
+  isHostedStripeDefinitiveRequestRejection,
   isHostedStripeIdempotencyConflict,
   isHostedStripeLegacyCheckoutCompletionAllowed,
   isHostedStripeRetryableFailure,
@@ -442,6 +443,22 @@ describe("Stripe billing state", () => {
       code: "idempotency_error",
       statusCode: 400,
       type: "StripeIdempotencyError",
+    })).toBe(true);
+    expect(isHostedStripeDefinitiveRequestRejection({
+      code: "idempotency_key_in_use",
+      headers: { "stripe-should-retry": "false" },
+      statusCode: 409,
+      type: "StripeIdempotencyError",
+    })).toBe(false);
+    expect(isHostedStripeDefinitiveRequestRejection({
+      headers: { "stripe-should-retry": "false" },
+      statusCode: 503,
+      type: "StripeAPIError",
+    })).toBe(false);
+    expect(isHostedStripeDefinitiveRequestRejection({
+      headers: { "stripe-should-retry": "false" },
+      statusCode: 400,
+      type: "StripeInvalidRequestError",
     })).toBe(true);
     expect(isHostedStripeRetryableFailure({
       statusCode: 400,

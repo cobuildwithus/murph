@@ -58,6 +58,7 @@ import {
   coerceStripeInvoiceSubscriptionId,
   coerceStripeObjectId,
   mapStripeSubscriptionStatusToHostedBillingStatus,
+  readStripeShouldRetryDirective,
 } from "./billing";
 import {
   HOSTED_PULSE_TRIAL_OFFER,
@@ -163,6 +164,7 @@ class HostedLegacyFamilyCleanupPendingError extends Error {
 
 class HostedStripeEventRetrieveRetryableError extends Error {
   readonly code = "HOSTED_STRIPE_EVENT_RETRIEVE_RETRYABLE";
+  readonly providerDirectedRetry: boolean;
 
   constructor(cause: unknown) {
     super(
@@ -172,6 +174,8 @@ class HostedStripeEventRetrieveRetryableError extends Error {
       { cause },
     );
     this.name = "HostedStripeEventRetrieveRetryableError";
+    this.providerDirectedRetry =
+      readStripeShouldRetryDirective(cause) !== false;
   }
 }
 
@@ -1108,7 +1112,10 @@ async function processClaimedHostedStripeEvent(
   } catch (error) {
     const poisoned = claimed.attemptCount >= STRIPE_EVENT_MAX_ATTEMPTS &&
       !(error instanceof HostedLegacyFamilyCleanupPendingError) &&
-      !(error instanceof HostedStripeEventRetrieveRetryableError) &&
+      !(
+        error instanceof HostedStripeEventRetrieveRetryableError &&
+        error.providerDirectedRetry
+      ) &&
       !usageCreditEventHandled &&
       !isHostedUsageCreditStripeRetryableError(error) &&
       !isHostedStripeRetryableFailure(error);
@@ -1206,6 +1213,17 @@ async function processHostedStripeEventWithDiscoveredMemberLock(
     }
   }
   if (
+    isHostedStripeUnownedTerminalSubscriptionDeletion({
+      processingContext,
+      stripeEvent,
+    })
+  ) {
+    return {
+      memberId: null,
+      result: buildEmptyHostedStripeEventProcessingResult(),
+    };
+  }
+  if (
     (
       isHostedStripeSubscriptionBillingEvent(stripeEvent.type) ||
       isHostedStripeInvoiceBillingEvent(stripeEvent.type)
@@ -1239,6 +1257,20 @@ async function processHostedStripeEventWithDiscoveredMemberLock(
       HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
     ),
   };
+}
+
+function isHostedStripeUnownedTerminalSubscriptionDeletion(input: {
+  processingContext: HostedStripeEventProcessingContext;
+  stripeEvent: Stripe.Event;
+}): boolean {
+  const subscription = input.processingContext.canonicalSubscription;
+  return input.stripeEvent.type === "customer.subscription.deleted"
+    && input.processingContext.billingOwner === null
+    && subscription !== null
+    && (
+      subscription.status === "canceled"
+      || subscription.status === "incomplete_expired"
+    );
 }
 
 async function processHostedStripeEventWithVerifiedMemberLock(input: {

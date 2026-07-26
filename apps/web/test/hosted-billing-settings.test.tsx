@@ -970,6 +970,97 @@ describe("HostedBillingSettings", () => {
     await rendered.cleanup();
   });
 
+  test("closes deterministic Start Pulse failures without another mutation action", async () => {
+    const { HostedOnboardingApiError } = await import(
+      "@/src/components/hosted-onboarding/client-api"
+    );
+    mocks.requestHostedPulseTrialStartPaid.mockRejectedValueOnce(
+      new HostedOnboardingApiError({
+        code: "HOSTED_PULSE_TRIAL_START_PAID_UNSUPPORTED",
+        message: "This Pulse update is only available while your Pulse trial is active.",
+        retryable: false,
+      }),
+    );
+    const { StartPaidPulseButton } = await import(
+      "@/src/components/settings/hosted-start-paid-pulse-button"
+    );
+    const rendered = await renderClientComponent(createElement(StartPaidPulseButton));
+
+    await act(async () => {
+      rendered.button.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+    });
+    const confirmButton = findLastButtonByText(
+      rendered.window.document,
+      "Start Pulse",
+      rendered.window,
+    );
+    await act(async () => {
+      confirmButton.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+    });
+
+    const dialog = rendered.window.document.querySelector('[role="dialog"]');
+    assert.ok(dialog);
+    assert.match(dialog.textContent ?? "", /only available while your Pulse trial is active/);
+    assert.doesNotMatch(dialog.textContent ?? "", /Try again/);
+    assert.doesNotMatch(dialog.textContent ?? "", /Open billing/);
+    assert.equal(
+      [...dialog.querySelectorAll("button")].some(
+        (button) => button.textContent?.includes("Start Pulse"),
+      ),
+      false,
+    );
+    assert.ok(findButtonByText(dialog, "Close", rendered.window));
+    assert.equal(mocks.requestHostedPulseTrialStartPaid.mock.calls.length, 1);
+
+    await rendered.cleanup();
+  });
+
+  test("routes explicit Start Pulse support failures to the existing support action", async () => {
+    const { HostedOnboardingApiError } = await import(
+      "@/src/components/hosted-onboarding/client-api"
+    );
+    mocks.requestHostedPulseTrialStartPaid.mockRejectedValueOnce(
+      new HostedOnboardingApiError({
+        code: "HOSTED_PULSE_TRIAL_START_PAID_STRIPE_PROVIDER_REJECTED",
+        message: "Stripe rejected this Pulse billing change. Contact support before retrying.",
+        retryable: false,
+      }),
+    );
+    const { StartPaidPulseButton } = await import(
+      "@/src/components/settings/hosted-start-paid-pulse-button"
+    );
+    const rendered = await renderClientComponent(createElement(StartPaidPulseButton));
+
+    await act(async () => {
+      rendered.button.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+    });
+    const confirmButton = findLastButtonByText(
+      rendered.window.document,
+      "Start Pulse",
+      rendered.window,
+    );
+    await act(async () => {
+      confirmButton.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+    });
+
+    const dialog = rendered.window.document.querySelector('[role="dialog"]');
+    assert.ok(dialog);
+    const supportLink = [...dialog.querySelectorAll("a")].find(
+      (candidate) => candidate.textContent?.includes("Email support"),
+    );
+    assert.ok(supportLink);
+    assert.match(supportLink.href, /^mailto:support@withmurph\.ai/u);
+    assert.doesNotMatch(dialog.textContent ?? "", /Try again/);
+    assert.equal(
+      [...dialog.querySelectorAll("button")].some(
+        (button) => button.textContent?.includes("Start Pulse"),
+      ),
+      false,
+    );
+
+    await rendered.cleanup();
+  });
+
   test("redirects to the hosted invoice when Start Pulse needs payment confirmation", async () => {
     mocks.requestHostedPulseTrialStartPaid.mockResolvedValueOnce({
       status: "redirecting",
@@ -1298,22 +1389,17 @@ describe("HostedBillingSettings", () => {
   test.each([
     ["an unrecognized code", "HOSTED_BILLING_PLAN_UPGRADE_UNEXPECTED_STATE"],
     ["no code", null],
-  ])("offers retry for a non-retryable plan-upgrade failure with %s", async (_label, code) => {
+  ])("closes a non-retryable plan-upgrade failure with %s", async (_label, code) => {
     const { HostedOnboardingApiError } = await import(
       "@/src/components/hosted-onboarding/client-api"
     );
-    mocks.requestHostedOnboardingJson
-      .mockRejectedValueOnce(
-        new HostedOnboardingApiError({
-          code,
-          message: "Could not confirm this plan change.",
-          retryable: false,
-        }),
-      )
-      .mockResolvedValueOnce({
-        billingPlanCode: "launch_edge_monthly",
-        status: "upgraded",
-      });
+    mocks.requestHostedOnboardingJson.mockRejectedValueOnce(
+      new HostedOnboardingApiError({
+        code,
+        message: "Could not confirm this plan change.",
+        retryable: false,
+      }),
+    );
 
     const { UpgradeToEdgeButton } = await import("@/src/components/settings/hosted-plan-upgrade-button");
     const rendered = await renderClientComponent(createElement(UpgradeToEdgeButton));
@@ -1334,18 +1420,16 @@ describe("HostedBillingSettings", () => {
     assert.ok(dialog);
     assert.match(dialog.textContent ?? "", /Could not confirm this plan change/);
     assert.doesNotMatch(dialog.textContent ?? "", /Open billing/);
-    const retryButton = findButtonByText(
-      dialog,
-      "Try again",
-      rendered.window,
+    assert.doesNotMatch(dialog.textContent ?? "", /Try again/);
+    assert.equal(
+      [...dialog.querySelectorAll("button")].some(
+        (button) => button.textContent?.includes("Upgrade to Edge"),
+      ),
+      false,
     );
-
-    await act(async () => {
-      retryButton.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
-    });
-
-    assert.equal(mocks.requestHostedOnboardingJson.mock.calls.length, 2);
-    assert.equal(mocks.routerRefresh.mock.calls.length, 1);
+    assert.ok(findButtonByText(dialog, "Close", rendered.window));
+    assert.equal(mocks.requestHostedOnboardingJson.mock.calls.length, 1);
+    assert.equal(mocks.routerRefresh.mock.calls.length, 0);
 
     await rendered.cleanup();
   });

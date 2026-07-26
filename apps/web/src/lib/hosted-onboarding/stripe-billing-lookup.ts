@@ -1023,13 +1023,17 @@ function isHostedStripeExpiredUnappliedUpdateInvoice(input: {
     );
     const targetQuantity = line.quantity;
     if (
-      !currentItem ||
       !targetPriceId ||
       !Number.isSafeInteger(targetQuantity) ||
       targetQuantity === null ||
       targetQuantity <= 0
     ) {
       return false;
+    }
+    if (!currentItem) {
+      return ![...currentItems.values()].some(
+        (item) => coerceStripeObjectId(item.price) === targetPriceId,
+      );
     }
     const currentPriceId = coerceStripeObjectId(currentItem.price);
     const currentQuantity = currentItem.quantity;

@@ -187,6 +187,22 @@ type HostedFamilyStripeMutationOutcome =
       kind: "processing";
     };
 
+type HostedFamilyLastSourceMemberUpgrade = {
+  convertedSourceItemId: string;
+  retainedTargetItemId: string;
+  retainedTargetQuantity: number;
+  targetPriceId: string;
+};
+
+type HostedFamilyPendingMemberTransition = {
+  current: HostedFamilyPlanCapacities;
+  membershipId: string;
+  pendingStartedAt: Date;
+  sourcePlanCode: HostedPlanCode;
+  target: HostedFamilyPlanCapacities;
+  targetPlanCode: HostedPlanCode;
+};
+
 function hostedFamilyCapacityPaymentRequiredError(paymentUrl: string) {
   return hostedOnboardingError({
     code: "HOSTED_FAMILY_CAPACITY_PAYMENT_REQUIRED",
@@ -1768,15 +1784,6 @@ export async function applyHostedFamilyStripeSubscriptionUpdatedTx(input: {
     };
   }
 
-  const familyPlanState = hasFamilyMetadata
-    ? readHostedFamilyStripePlanState({
-        priceIdsByPlan: readHostedOnboardingEnvironment().stripeFamilyPriceIdsByPlan,
-        subscription: input.subscription,
-      })
-    : null;
-  const stripeBillingStatus = mapStripeSubscriptionStatusToHostedBillingStatus(
-    input.subscription.status,
-  );
   const eventFreshUnderOwnerLock = await lockHostedFamilyBillingReconciliationTx({
     eventCreatedAt,
     group,
@@ -1800,6 +1807,46 @@ export async function applyHostedFamilyStripeSubscriptionUpdatedTx(input: {
     return buildEmptyHostedFamilyStripeSubscriptionResult();
   }
 
+  const [activeMemberships, currentCapacities] = await Promise.all([
+    input.tx.hostedAccountGroupMembership.findMany({
+      select: {
+        id: true,
+        pendingPlanCode: true,
+        planCode: true,
+        updatedAt: true,
+      },
+      where: {
+        groupId: group.id,
+        status: "active",
+      },
+    }),
+    readHostedFamilyPlanCapacitiesTx({
+      groupId: group.id,
+      tx: input.tx,
+    }),
+  ]);
+  const pendingMemberTransition = readHostedFamilyPendingMemberTransition({
+    activeMemberships,
+    currentCapacities,
+  });
+  const subscription = lockedMatch.billingRef
+    ? await normalizeHostedFamilyCompletedMemberUpgradeUnderOwnerLock({
+        billingRef: lockedMatch.billingRef,
+        groupId: group.id,
+        pendingMemberTransition,
+        subscription: input.subscription,
+      })
+    : input.subscription;
+  const familyPlanState = hasFamilyMetadata
+    ? readHostedFamilyStripePlanState({
+        priceIdsByPlan:
+          readHostedOnboardingEnvironment().stripeFamilyPriceIdsByPlan,
+        subscription,
+      })
+    : null;
+  const stripeBillingStatus = mapStripeSubscriptionStatusToHostedBillingStatus(
+    subscription.status,
+  );
   if (!familyPlanState) {
     const failClosedBillingStatus = stripeBillingStatus === HostedBillingStatus.active
       ? HostedBillingStatus.unpaid
@@ -1808,13 +1855,13 @@ export async function applyHostedFamilyStripeSubscriptionUpdatedTx(input: {
       billingStatus: failClosedBillingStatus,
       currentBillingPhase: null,
       currentBillingPlanCode: HOSTED_FAMILY_BILLING_PLAN_CODE,
-      ...buildHostedFamilyStripeSubscriptionPeriodSnapshot(input.subscription),
+      ...buildHostedFamilyStripeSubscriptionPeriodSnapshot(subscription),
       billedSeatCount: null,
       groupId: group.id,
-      stripeCustomerId: coerceStripeObjectId(input.subscription.customer),
+      stripeCustomerId: coerceStripeObjectId(subscription.customer),
       stripeEventCreatedAt: eventCreatedAt,
       stripeSubscriptionItemId: null,
-      stripeSubscriptionId: input.subscription.id,
+      stripeSubscriptionId: subscription.id,
       tx: input.tx,
     });
     await input.tx.hostedAccountGroupPlanCapacity.deleteMany({
@@ -1827,60 +1874,36 @@ export async function applyHostedFamilyStripeSubscriptionUpdatedTx(input: {
     };
   }
 
-  const [activeMemberships, currentCapacities] = await Promise.all([
-    input.tx.hostedAccountGroupMembership.findMany({
-      select: { id: true, pendingPlanCode: true, planCode: true },
+  let membershipsForCapacity = activeMemberships;
+  if (
+    pendingMemberTransition &&
+    hostedFamilyPlanCapacitiesEqual(
+      pendingMemberTransition.target,
+      familyPlanState.capacities,
+    )
+  ) {
+    const completed = await input.tx.hostedAccountGroupMembership.updateMany({
+      data: {
+        pendingPlanCode: null,
+        planCode: pendingMemberTransition.targetPlanCode,
+      },
       where: {
-        groupId: group.id,
+        id: pendingMemberTransition.membershipId,
+        pendingPlanCode: pendingMemberTransition.targetPlanCode,
+        planCode: pendingMemberTransition.sourcePlanCode,
         status: "active",
       },
-    }),
-    readHostedFamilyPlanCapacitiesTx({
-      groupId: group.id,
-      tx: input.tx,
-    }),
-  ]);
-  const pendingMemberships = activeMemberships.filter(
-    (membership) => typeof membership.pendingPlanCode === "string",
-  );
-  let membershipsForCapacity = activeMemberships;
-  if (currentCapacities && pendingMemberships.length === 1) {
-    const pendingMembership = pendingMemberships[0];
-    const sourcePlanCode = parseHostedPlanCode(pendingMembership?.planCode);
-    const targetPlanCode = parseHostedPlanCode(pendingMembership?.pendingPlanCode);
-    const expectedCapacities = sourcePlanCode && targetPlanCode && sourcePlanCode !== targetPlanCode
-      ? parseHostedFamilyPlanCapacities({
-          ...currentCapacities,
-          [sourcePlanCode]: currentCapacities[sourcePlanCode] - 1,
-          [targetPlanCode]: currentCapacities[targetPlanCode] + 1,
-        })
-      : null;
-    if (
-      pendingMembership &&
-      sourcePlanCode &&
-      targetPlanCode &&
-      expectedCapacities &&
-      hostedFamilyPlanCapacitiesEqual(expectedCapacities, familyPlanState.capacities)
-    ) {
-      const completed = await input.tx.hostedAccountGroupMembership.updateMany({
-        data: {
-          pendingPlanCode: null,
-          planCode: targetPlanCode,
-        },
-        where: {
-          id: pendingMembership.id,
-          pendingPlanCode: targetPlanCode,
-          planCode: sourcePlanCode,
-          status: "active",
-        },
-      });
-      if (completed.count === 1) {
-        membershipsForCapacity = activeMemberships.map((membership) =>
-          membership.id === pendingMembership.id
-            ? { ...membership, pendingPlanCode: null, planCode: targetPlanCode }
-            : membership,
-        );
-      }
+    });
+    if (completed.count === 1) {
+      membershipsForCapacity = activeMemberships.map((membership) =>
+        membership.id === pendingMemberTransition.membershipId
+          ? {
+              ...membership,
+              pendingPlanCode: null,
+              planCode: pendingMemberTransition.targetPlanCode,
+            }
+          : membership,
+      );
     }
   }
   const activeCounts = countHostedFamilyAssignmentsByPlan(membershipsForCapacity);
@@ -1896,18 +1919,18 @@ export async function applyHostedFamilyStripeSubscriptionUpdatedTx(input: {
   const billingRef = await writeHostedAccountGroupStripeBillingTx({
     billingStatus,
     currentBillingPhase:
-      input.subscription.status === "active" && activeMembersFitPaidSeats ? "paid" : null,
+      subscription.status === "active" && activeMembersFitPaidSeats ? "paid" : null,
     currentBillingPlanCode: HOSTED_FAMILY_BILLING_PLAN_CODE,
     ...buildHostedFamilyStripeSubscriptionPeriodSnapshot(
-      input.subscription,
-      legacyPulseItem ?? input.subscription.items.data[0] ?? null,
+      subscription,
+      legacyPulseItem ?? subscription.items.data[0] ?? null,
     ),
     billedSeatCount,
     groupId: group.id,
-    stripeCustomerId: coerceStripeObjectId(input.subscription.customer),
+    stripeCustomerId: coerceStripeObjectId(subscription.customer),
     stripeEventCreatedAt: eventCreatedAt,
     stripeSubscriptionItemId: legacyPulseItem?.id ?? null,
-    stripeSubscriptionId: input.subscription.id,
+    stripeSubscriptionId: subscription.id,
     tx: input.tx,
   });
   await replaceHostedFamilyPlanCapacitiesTx({
@@ -1920,7 +1943,7 @@ export async function applyHostedFamilyStripeSubscriptionUpdatedTx(input: {
   // even when entitlement remains unpaid/blocked.
   await clearHostedFamilyOwnerDirectPaidBillingTx({
     ownerMemberId: group.ownerMemberId,
-    stripeSubscriptionId: input.subscription.id,
+    stripeSubscriptionId: subscription.id,
     tx: input.tx,
   });
   if (
@@ -1944,7 +1967,7 @@ export async function applyHostedFamilyStripeSubscriptionUpdatedTx(input: {
     const activations = await activateHostedFamilyGroupMembersForActiveBillingTx({
       groupId: group.id,
       occurredAt: input.dispatchContext.eventCreatedAt ?? new Date(),
-      sourceEventId: `family-subscription:${input.subscription.id}`,
+      sourceEventId: `family-subscription:${subscription.id}`,
       tx: input.tx,
     });
 
@@ -3816,11 +3839,14 @@ async function updateHostedFamilyStripeCapacitiesUnderOwnerLock(input: {
   memberTransition?: {
     idempotencyKey: string;
     prorationDate: number;
+    sourcePlanCode: HostedPlanCode;
+    targetPlanCode: HostedPlanCode;
   };
   target: HostedFamilyPlanCapacities;
 }): Promise<HostedFamilyStripeMutationOutcome> {
   const stripeSubscriptionId = input.billingRef.stripeSubscriptionId;
   const stripeCustomerId = input.billingRef.stripeCustomerId;
+  const memberTransition = input.memberTransition;
   if (!stripeSubscriptionId || !stripeCustomerId) {
     throw hostedOnboardingError({
       code: "HOSTED_FAMILY_BILLING_SYNCING",
@@ -3849,13 +3875,17 @@ async function updateHostedFamilyStripeCapacitiesUnderOwnerLock(input: {
     priceIdsByPlan,
     subscription,
   });
-  if (!stripeState) {
-    throw hostedOnboardingError({
-      code: "HOSTED_FAMILY_SUBSCRIPTION_INVALID",
-      httpStatus: 409,
-      message: "Family billing contains an unsupported subscription item.",
-    });
-  }
+  const recoveredLastSourceUpgrade = memberTransition
+    ? readHostedFamilyAppliedLastSourceMemberUpgrade({
+        billingRef: input.billingRef,
+        current: input.current,
+        priceIdsByPlan,
+        sourcePlanCode: memberTransition.sourcePlanCode,
+        subscription,
+        target: input.target,
+        targetPlanCode: memberTransition.targetPlanCode,
+      })
+    : null;
   if (
     subscription.status === "past_due" ||
     subscription.status === "unpaid"
@@ -3891,6 +3921,37 @@ async function updateHostedFamilyStripeCapacitiesUnderOwnerLock(input: {
   if (blockedFinancialOutcome) {
     return blockedFinancialOutcome;
   }
+  if (recoveredLastSourceUpgrade && memberTransition) {
+    const outcome = await resolveHostedFamilyPaymentGatedMemberTransitionOutcome({
+      current: null,
+      lastSourceUpgrade: recoveredLastSourceUpgrade,
+      previousLatestInvoiceId: null,
+      priceIdsByPlan,
+      stripe,
+      stripeCustomerId,
+      subscription,
+      target: input.target,
+    });
+    if (outcome.kind !== "applied") {
+      return outcome;
+    }
+    await normalizeHostedFamilyLastSourceMemberUpgrade({
+      idempotencyKey: memberTransition.idempotencyKey,
+      lastSourceUpgrade: recoveredLastSourceUpgrade,
+      priceIdsByPlan,
+      stripe,
+      subscription,
+      target: input.target,
+    });
+    return { kind: "applied" };
+  }
+  if (!stripeState) {
+    throw hostedOnboardingError({
+      code: "HOSTED_FAMILY_SUBSCRIPTION_INVALID",
+      httpStatus: 409,
+      message: "Family billing contains an unsupported subscription item.",
+    });
+  }
   if (
     !hostedFamilyPlanCapacitiesEqual(stripeState.capacities, input.current) &&
     !hostedFamilyPlanCapacitiesEqual(stripeState.capacities, input.target)
@@ -3902,13 +3963,41 @@ async function updateHostedFamilyStripeCapacitiesUnderOwnerLock(input: {
       retryable: true,
     });
   }
+  if (hostedFamilyPlanCapacitiesEqual(stripeState.capacities, input.target)) {
+    return { kind: "applied" };
+  }
+
+  const increase = calculateHostedFamilyMonthlyAmountUsdCents(input.target) >
+    calculateHostedFamilyMonthlyAmountUsdCents(stripeState.capacities);
+  const paymentGatedMemberTransition =
+    memberTransition !== undefined && increase;
+  const capacityUpdateItems = buildHostedFamilyStripeCapacityUpdateItems({
+    current: stripeState,
+    priceIdsByPlan,
+    target: input.target,
+  });
+  const lastSourceUpgrade = paymentGatedMemberTransition && memberTransition
+    ? buildHostedFamilyLastSourceMemberUpgrade({
+        current: stripeState,
+        priceIdsByPlan,
+        sourcePlanCode: memberTransition.sourcePlanCode,
+        target: input.target,
+        targetPlanCode: memberTransition.targetPlanCode,
+      })
+    : null;
   if (subscription.pending_update) {
-    if (!isHostedFamilyPendingCapacityUpdateTarget({
-      current: stripeState,
-      priceIdsByPlan,
-      subscription,
-      target: input.target,
-    })) {
+    const pendingTargetMatches = lastSourceUpgrade
+      ? readHostedFamilyLastSourceMemberUpgradeState({
+          lastSourceUpgrade,
+          subscription,
+        }) === "pending"
+      : isHostedFamilyPendingCapacityUpdateTarget({
+          current: stripeState,
+          priceIdsByPlan,
+          subscription,
+          target: input.target,
+        });
+    if (!pendingTargetMatches) {
       throw hostedOnboardingError({
         code: "HOSTED_FAMILY_BILLING_SYNCING",
         httpStatus: 409,
@@ -3922,27 +4011,29 @@ async function updateHostedFamilyStripeCapacitiesUnderOwnerLock(input: {
       subscription,
     });
   }
-  if (hostedFamilyPlanCapacitiesEqual(stripeState.capacities, input.target)) {
-    return { kind: "applied" };
-  }
-
-  const increase = calculateHostedFamilyMonthlyAmountUsdCents(input.target) >
-    calculateHostedFamilyMonthlyAmountUsdCents(stripeState.capacities);
-  const updateItems = buildHostedFamilyStripeCapacityUpdateItems({
-    current: stripeState,
-    priceIdsByPlan,
-    target: input.target,
-  });
+  const updateItems = lastSourceUpgrade
+    ? [{
+        id: lastSourceUpgrade.convertedSourceItemId,
+        price: lastSourceUpgrade.targetPriceId,
+        quantity: 1,
+      }]
+    : capacityUpdateItems;
   if (
     increase &&
-    updateItems.some((item) => item.deleted === true)
+    capacityUpdateItems.some((item) => item.deleted === true) &&
+    !lastSourceUpgrade
   ) {
     throw hostedOnboardingError({
       code: "HOSTED_FAMILY_CAPACITY_PAYMENT_UPDATE_UNSUPPORTED",
       httpStatus: 409,
-      message: "That paid Family capacity change must be completed as separate member plan changes.",
+      message: memberTransition
+        ? "That member is the last person on their current Family tier, so this paid plan change cannot be completed atomically yet."
+        : "That paid Family capacity change must be completed as separate member plan changes.",
     });
   }
+  const previousLatestInvoiceId = coerceStripeObjectId(
+    subscription.latest_invoice,
+  );
   const updated = await withHostedStripeFailureLog(
     "subscription.update.family-capacity",
     () => stripe.subscriptions.update(
@@ -3950,10 +4041,15 @@ async function updateHostedFamilyStripeCapacitiesUnderOwnerLock(input: {
       {
         expand: [...HOSTED_STRIPE_BILLING_SUBSCRIPTION_EXPANSIONS],
         items: updateItems,
-        ...(input.memberTransition
+        ...(memberTransition
           ? {
-              proration_behavior: "create_prorations" as const,
-              proration_date: input.memberTransition.prorationDate,
+              ...(paymentGatedMemberTransition
+                ? { payment_behavior: "pending_if_incomplete" as const }
+                : {}),
+              proration_behavior: paymentGatedMemberTransition
+                ? "always_invoice" as const
+                : "create_prorations" as const,
+              proration_date: memberTransition.prorationDate,
             }
           : {
               ...(increase ? { payment_behavior: "pending_if_incomplete" as const } : {}),
@@ -3961,8 +4057,9 @@ async function updateHostedFamilyStripeCapacitiesUnderOwnerLock(input: {
             }),
       },
       {
-        idempotencyKey: input.memberTransition?.idempotencyKey ??
-          `family-capacity:${input.groupId}:${buildHostedStripeSubscriptionMutationScope(subscription)}:${input.target.pulse}:${input.target.edge}`,
+        idempotencyKey: memberTransition
+          ? `${memberTransition.idempotencyKey}:${buildHostedStripeSubscriptionMutationScope(subscription)}`
+          : `family-capacity:${input.groupId}:${buildHostedStripeSubscriptionMutationScope(subscription)}:${input.target.pulse}:${input.target.edge}`,
       },
     ),
   );
@@ -3970,6 +4067,30 @@ async function updateHostedFamilyStripeCapacitiesUnderOwnerLock(input: {
     priceIdsByPlan,
     subscription: updated,
   });
+  if (paymentGatedMemberTransition && memberTransition) {
+    const outcome = await resolveHostedFamilyPaymentGatedMemberTransitionOutcome({
+      current: stripeState,
+      lastSourceUpgrade,
+      previousLatestInvoiceId,
+      priceIdsByPlan,
+      stripe,
+      stripeCustomerId,
+      subscription: updated,
+      target: input.target,
+    });
+    if (outcome.kind !== "applied" || !lastSourceUpgrade) {
+      return outcome;
+    }
+    await normalizeHostedFamilyLastSourceMemberUpgrade({
+      idempotencyKey: memberTransition.idempotencyKey,
+      lastSourceUpgrade,
+      priceIdsByPlan,
+      stripe,
+      subscription: updated,
+      target: input.target,
+    });
+    return { kind: "applied" };
+  }
   if (applied && hostedFamilyPlanCapacitiesEqual(applied.capacities, input.target)) {
     return { kind: "applied" };
   }
@@ -4042,6 +4163,259 @@ function assertHostedFamilyDirectPaidPendingUpdateMatches(input: {
   }
 }
 
+function readHostedFamilyPendingMemberTransition(input: {
+  activeMemberships: readonly {
+    id: string;
+    pendingPlanCode: string | null;
+    planCode: string;
+    updatedAt: Date;
+  }[];
+  currentCapacities: HostedFamilyPlanCapacities | null;
+}): HostedFamilyPendingMemberTransition | null {
+  const pendingMemberships = input.activeMemberships.filter(
+    (membership) => membership.pendingPlanCode !== null,
+  );
+  const pendingMembership = pendingMemberships[0];
+  const sourcePlanCode = parseHostedPlanCode(pendingMembership?.planCode);
+  const targetPlanCode = parseHostedPlanCode(
+    pendingMembership?.pendingPlanCode,
+  );
+  if (
+    pendingMemberships.length !== 1 ||
+    !pendingMembership ||
+    !sourcePlanCode ||
+    !targetPlanCode ||
+    sourcePlanCode === targetPlanCode ||
+    !input.currentCapacities
+  ) {
+    return null;
+  }
+  const target = parseHostedFamilyPlanCapacities({
+    ...input.currentCapacities,
+    [sourcePlanCode]: input.currentCapacities[sourcePlanCode] - 1,
+    [targetPlanCode]: input.currentCapacities[targetPlanCode] + 1,
+  });
+  return target
+    ? {
+        current: input.currentCapacities,
+        membershipId: pendingMembership.id,
+        pendingStartedAt: pendingMembership.updatedAt,
+        sourcePlanCode,
+        target,
+        targetPlanCode,
+      }
+    : null;
+}
+
+async function normalizeHostedFamilyCompletedMemberUpgradeUnderOwnerLock(input: {
+  billingRef: HostedAccountGroupBillingRefSnapshot;
+  groupId: string;
+  pendingMemberTransition: HostedFamilyPendingMemberTransition | null;
+  subscription: Stripe.Subscription;
+}): Promise<Stripe.Subscription> {
+  const transition = input.pendingMemberTransition;
+  if (
+    input.subscription.pending_update !== null ||
+    !isHostedFamilyStripeSubscriptionMetadata(input.subscription) ||
+    transition?.sourcePlanCode !== "pulse" ||
+    transition.targetPlanCode !== "edge"
+  ) {
+    return input.subscription;
+  }
+  const stripeCustomerId = coerceStripeObjectId(input.subscription.customer);
+  if (
+    input.billingRef.stripeSubscriptionId !== input.subscription.id ||
+    !stripeCustomerId ||
+    (
+      input.billingRef.stripeCustomerId !== null &&
+      input.billingRef.stripeCustomerId !== stripeCustomerId
+    )
+  ) {
+    return input.subscription;
+  }
+  const priceIdsByPlan = {
+    ...readHostedOnboardingEnvironment().stripeFamilyPriceIdsByPlan,
+    edge: requireHostedStripeFamilyPlanConfig({ planCode: "edge" }).priceId,
+  };
+  const lastSourceUpgrade = readHostedFamilyAppliedLastSourceMemberUpgrade({
+    billingRef: input.billingRef,
+    current: transition.current,
+    priceIdsByPlan,
+    sourcePlanCode: transition.sourcePlanCode,
+    subscription: input.subscription,
+    target: transition.target,
+    targetPlanCode: transition.targetPlanCode,
+  });
+  if (!lastSourceUpgrade) {
+    return input.subscription;
+  }
+  const stripe = requireHostedStripeApi();
+  const collectionOutcome =
+    await resolveHostedFamilyPaymentGatedMemberTransitionOutcome({
+      current: null,
+      lastSourceUpgrade,
+      previousLatestInvoiceId: null,
+      priceIdsByPlan,
+      stripe,
+      stripeCustomerId,
+      subscription: input.subscription,
+      target: transition.target,
+    });
+  if (collectionOutcome.kind !== "applied") {
+    throw hostedOnboardingError({
+      code: "HOSTED_FAMILY_MEMBER_PLAN_SYNCING",
+      httpStatus: 409,
+      message: "That member's paid plan change is still syncing.",
+      retryable: true,
+    });
+  }
+  return normalizeHostedFamilyLastSourceMemberUpgrade({
+    idempotencyKey:
+      `family-member-plan:${input.groupId}:${transition.membershipId}:${transition.pendingStartedAt.getTime()}:edge`,
+    lastSourceUpgrade,
+    priceIdsByPlan,
+    stripe,
+    subscription: input.subscription,
+    target: transition.target,
+  });
+}
+
+function buildHostedFamilyLastSourceMemberUpgrade(input: {
+  current: NonNullable<ReturnType<typeof readHostedFamilyStripePlanState>>;
+  priceIdsByPlan: Readonly<Record<HostedPlanCode, string | null>>;
+  sourcePlanCode: HostedPlanCode;
+  target: HostedFamilyPlanCapacities;
+  targetPlanCode: HostedPlanCode;
+}): HostedFamilyLastSourceMemberUpgrade | null {
+  const sourceItem = input.current.itemsByPlan.pulse;
+  const retainedTargetItem = input.current.itemsByPlan.edge;
+  const targetPriceId = input.priceIdsByPlan.edge;
+  if (
+    input.sourcePlanCode !== "pulse" ||
+    input.targetPlanCode !== "edge" ||
+    input.current.capacities.pulse !== 1 ||
+    input.current.capacities.edge < 1 ||
+    input.target.pulse !== 0 ||
+    input.target.edge !== input.current.capacities.edge + 1 ||
+    !sourceItem ||
+    !retainedTargetItem ||
+    !targetPriceId
+  ) {
+    return null;
+  }
+  return {
+    convertedSourceItemId: sourceItem.id,
+    retainedTargetItemId: retainedTargetItem.id,
+    retainedTargetQuantity: input.target.edge,
+    targetPriceId,
+  };
+}
+
+function readHostedFamilyAppliedLastSourceMemberUpgrade(input: {
+  billingRef: HostedAccountGroupBillingRefSnapshot;
+  current: HostedFamilyPlanCapacities;
+  priceIdsByPlan: Readonly<Record<HostedPlanCode, string | null>>;
+  sourcePlanCode: HostedPlanCode;
+  subscription: Stripe.Subscription;
+  target: HostedFamilyPlanCapacities;
+  targetPlanCode: HostedPlanCode;
+}): HostedFamilyLastSourceMemberUpgrade | null {
+  const convertedSourceItemId = input.billingRef.stripeSubscriptionItemId;
+  const targetPriceId = input.priceIdsByPlan.edge;
+  if (
+    input.sourcePlanCode !== "pulse" ||
+    input.targetPlanCode !== "edge" ||
+    input.subscription.pending_update !== null ||
+    input.subscription.items.has_more ||
+    input.current.pulse !== 1 ||
+    input.current.edge < 1 ||
+    input.target.pulse !== 0 ||
+    input.target.edge !== input.current.edge + 1 ||
+    !convertedSourceItemId ||
+    !targetPriceId ||
+    input.subscription.items.data.length !== 2
+  ) {
+    return null;
+  }
+  const convertedSourceItem = input.subscription.items.data.find(
+    (item) => item.id === convertedSourceItemId,
+  );
+  const retainedTargetItems = input.subscription.items.data.filter(
+    (item) => item.id !== convertedSourceItemId,
+  );
+  const retainedTargetItem = retainedTargetItems[0];
+  if (
+    !convertedSourceItem ||
+    retainedTargetItems.length !== 1 ||
+    !retainedTargetItem ||
+    convertedSourceItem.price.id !== targetPriceId ||
+    convertedSourceItem.quantity !== 1 ||
+    retainedTargetItem.price.id !== targetPriceId ||
+    retainedTargetItem.quantity !== input.current.edge
+  ) {
+    return null;
+  }
+  return {
+    convertedSourceItemId,
+    retainedTargetItemId: retainedTargetItem.id,
+    retainedTargetQuantity: input.target.edge,
+    targetPriceId,
+  };
+}
+
+function readHostedFamilyLastSourceMemberUpgradeState(input: {
+  lastSourceUpgrade: HostedFamilyLastSourceMemberUpgrade;
+  subscription: Stripe.Subscription;
+}): "applied" | "pending" | null {
+  const pendingUpdate = input.subscription.pending_update;
+  const pendingItems = pendingUpdate?.subscription_items;
+  if (pendingUpdate) {
+    if (
+      pendingUpdate.billing_cycle_anchor !== null ||
+      pendingUpdate.trial_end !== null ||
+      (
+        pendingUpdate.trial_from_plan !== false &&
+        pendingUpdate.trial_from_plan !== null
+      ) ||
+      !Array.isArray(pendingItems) ||
+      pendingItems.length !== 1
+    ) {
+      return null;
+    }
+    const pendingItem = pendingItems[0];
+    return pendingItem?.id === input.lastSourceUpgrade.convertedSourceItemId &&
+        coerceStripeObjectId(pendingItem.price) ===
+          input.lastSourceUpgrade.targetPriceId &&
+        pendingItem.quantity === 1
+      ? "pending"
+      : null;
+  }
+  if (
+    input.subscription.items.has_more ||
+    input.subscription.items.data.length !== 2
+  ) {
+    return null;
+  }
+  const convertedSourceItem = input.subscription.items.data.find(
+    (item) => item.id === input.lastSourceUpgrade.convertedSourceItemId,
+  );
+  const retainedTargetItem = input.subscription.items.data.find(
+    (item) => item.id === input.lastSourceUpgrade.retainedTargetItemId,
+  );
+  return (
+    convertedSourceItem &&
+    retainedTargetItem &&
+    convertedSourceItem.id !== retainedTargetItem.id &&
+    convertedSourceItem.price.id === input.lastSourceUpgrade.targetPriceId &&
+    convertedSourceItem.quantity === 1 &&
+    retainedTargetItem.price.id === input.lastSourceUpgrade.targetPriceId &&
+    retainedTargetItem.quantity ===
+      input.lastSourceUpgrade.retainedTargetQuantity - 1
+  )
+    ? "applied"
+    : null;
+}
+
 function isHostedFamilyPendingCapacityUpdateTarget(input: {
   current: NonNullable<ReturnType<typeof readHostedFamilyStripePlanState>>;
   priceIdsByPlan: Readonly<Record<HostedPlanCode, string | null>>;
@@ -4107,20 +4481,28 @@ function buildHostedFamilyDirectPaidCheckoutResult(
 }
 
 async function resolveHostedFamilyPendingCollectionOutcome(input: {
+  collectionSnapshot?: Awaited<
+    ReturnType<typeof retrieveHostedStripeInvoiceCollectionSnapshot>
+  >;
+  paidOutcome?: HostedFamilyStripeMutationOutcome;
   stripe: Stripe;
   stripeCustomerId: string;
   subscription: Stripe.Subscription;
 }): Promise<HostedFamilyStripeMutationOutcome> {
   const latestInvoiceId = coerceStripeObjectId(input.subscription.latest_invoice);
-  const collectionSnapshot = latestInvoiceId
-    ? await callHostedFamilyDirectPaidStripeOperation(
-        "invoice.collection.retrieve.family",
-        () => retrieveHostedStripeInvoiceCollectionSnapshot({
-          invoiceId: latestInvoiceId,
-          stripe: input.stripe,
-        }),
-      )
-    : null;
+  const collectionSnapshot =
+    input.collectionSnapshot ??
+    (
+      latestInvoiceId
+        ? await callHostedFamilyDirectPaidStripeOperation(
+            "invoice.collection.retrieve.family",
+            () => retrieveHostedStripeInvoiceCollectionSnapshot({
+              invoiceId: latestInvoiceId,
+              stripe: input.stripe,
+            }),
+          )
+        : null
+    );
   const collectionState = classifyHostedStripeInvoiceCollectionState(
     collectionSnapshot?.invoice ?? null,
     collectionSnapshot?.invoicePayments,
@@ -4135,10 +4517,10 @@ async function resolveHostedFamilyPendingCollectionOutcome(input: {
       }),
     };
   }
-  if (
-    collectionState.kind === "processing" ||
-    collectionState.kind === "paid"
-  ) {
+  if (collectionState.kind === "paid") {
+    return input.paidOutcome ?? { kind: "processing" };
+  }
+  if (collectionState.kind === "processing") {
     return { kind: "processing" };
   }
   if (collectionState.kind === "none") {
@@ -4155,6 +4537,167 @@ async function resolveHostedFamilyPendingCollectionOutcome(input: {
     httpStatus: 409,
     message: "Stripe could not complete this Family billing change. Start the change again after Stripe releases it.",
     retryable: false,
+  });
+}
+
+async function normalizeHostedFamilyLastSourceMemberUpgrade(input: {
+  idempotencyKey: string;
+  lastSourceUpgrade: HostedFamilyLastSourceMemberUpgrade;
+  priceIdsByPlan: Readonly<Record<HostedPlanCode, string | null>>;
+  stripe: Stripe;
+  subscription: Stripe.Subscription;
+  target: HostedFamilyPlanCapacities;
+}): Promise<Stripe.Subscription> {
+  if (readHostedFamilyLastSourceMemberUpgradeState({
+    lastSourceUpgrade: input.lastSourceUpgrade,
+    subscription: input.subscription,
+  }) !== "applied") {
+    throw hostedOnboardingError({
+      code: "HOSTED_FAMILY_CAPACITY_UPDATE_UNCONFIRMED",
+      httpStatus: 502,
+      message:
+        "Stripe did not expose the paid Family member plan change for normalization.",
+    });
+  }
+  const paidInvoiceId = coerceStripeObjectId(input.subscription.latest_invoice);
+  const normalized = await withHostedStripeFailureLog(
+    "subscription.update.family-member-plan-normalize",
+    () => input.stripe.subscriptions.update(
+      input.subscription.id,
+      {
+        expand: [...HOSTED_STRIPE_BILLING_SUBSCRIPTION_EXPANSIONS],
+        items: [
+          {
+            id: input.lastSourceUpgrade.retainedTargetItemId,
+            quantity: input.lastSourceUpgrade.retainedTargetQuantity,
+          },
+          {
+            deleted: true,
+            id: input.lastSourceUpgrade.convertedSourceItemId,
+          },
+        ],
+        proration_behavior: "none",
+      },
+      {
+        idempotencyKey:
+          `${input.idempotencyKey}:normalize:${buildHostedStripeSubscriptionMutationScope(input.subscription)}`,
+      },
+    ),
+  );
+  const normalizedState = readHostedFamilyStripePlanState({
+    priceIdsByPlan: input.priceIdsByPlan,
+    subscription: normalized,
+  });
+  if (
+    normalized.pending_update !== null ||
+    coerceStripeObjectId(normalized.latest_invoice) !== paidInvoiceId ||
+    !normalizedState ||
+    !hostedFamilyPlanCapacitiesEqual(
+      normalizedState.capacities,
+      input.target,
+    )
+  ) {
+    throw hostedOnboardingError({
+      code: "HOSTED_FAMILY_CAPACITY_UPDATE_UNCONFIRMED",
+      httpStatus: 502,
+      message:
+        "Stripe did not confirm the exact paid Family member plan quantities.",
+    });
+  }
+  return normalized;
+}
+
+async function resolveHostedFamilyPaymentGatedMemberTransitionOutcome(input: {
+  current: NonNullable<ReturnType<typeof readHostedFamilyStripePlanState>> | null;
+  lastSourceUpgrade: HostedFamilyLastSourceMemberUpgrade | null;
+  previousLatestInvoiceId: string | null;
+  priceIdsByPlan: Readonly<Record<HostedPlanCode, string | null>>;
+  stripe: Stripe;
+  stripeCustomerId: string;
+  subscription: Stripe.Subscription;
+  target: HostedFamilyPlanCapacities;
+}): Promise<HostedFamilyStripeMutationOutcome> {
+  const applied = readHostedFamilyStripePlanState({
+    priceIdsByPlan: input.priceIdsByPlan,
+    subscription: input.subscription,
+  });
+  const targetApplied =
+    input.subscription.pending_update === null &&
+    applied !== null &&
+    hostedFamilyPlanCapacitiesEqual(applied.capacities, input.target);
+  const lastSourceUpgradeApplied =
+    input.lastSourceUpgrade !== null &&
+    readHostedFamilyLastSourceMemberUpgradeState({
+      lastSourceUpgrade: input.lastSourceUpgrade,
+      subscription: input.subscription,
+    }) === "applied";
+  const targetPending =
+    input.subscription.pending_update !== null &&
+    (
+      input.lastSourceUpgrade
+        ? readHostedFamilyLastSourceMemberUpgradeState({
+            lastSourceUpgrade: input.lastSourceUpgrade,
+            subscription: input.subscription,
+          }) === "pending"
+        : input.current !== null &&
+          isHostedFamilyPendingCapacityUpdateTarget({
+            current: input.current,
+            priceIdsByPlan: input.priceIdsByPlan,
+            subscription: input.subscription,
+            target: input.target,
+          })
+    );
+  if (!targetApplied && !lastSourceUpgradeApplied && !targetPending) {
+    throw hostedOnboardingError({
+      code: "HOSTED_FAMILY_CAPACITY_UPDATE_UNCONFIRMED",
+      httpStatus: 502,
+      message: "Stripe did not confirm the requested Family member plan change.",
+    });
+  }
+
+  const latestInvoiceId = coerceStripeObjectId(
+    input.subscription.latest_invoice,
+  );
+  if (
+    !latestInvoiceId ||
+    latestInvoiceId === input.previousLatestInvoiceId
+  ) {
+    throw hostedOnboardingError({
+      code: "HOSTED_FAMILY_BILLING_PAYMENT_STATE_UNAVAILABLE",
+      httpStatus: 502,
+      message:
+        "Stripe did not identify the invoice for this Family member plan change.",
+      retryable: true,
+    });
+  }
+  const collectionSnapshot = await callHostedFamilyDirectPaidStripeOperation(
+    "invoice.collection.retrieve.family-member-plan",
+    () => retrieveHostedStripeInvoiceCollectionSnapshot({
+      invoiceId: latestInvoiceId,
+      stripe: input.stripe,
+    }),
+  );
+  if (
+    coerceStripeInvoiceSubscriptionId(collectionSnapshot.invoice) !==
+      input.subscription.id ||
+    collectionSnapshot.invoice.billing_reason !== "subscription_update"
+  ) {
+    throw hostedOnboardingError({
+      code: "HOSTED_FAMILY_BILLING_PAYMENT_STATE_UNAVAILABLE",
+      httpStatus: 502,
+      message:
+        "Stripe did not return the exact invoice for this Family member plan change.",
+      retryable: true,
+    });
+  }
+  return resolveHostedFamilyPendingCollectionOutcome({
+    collectionSnapshot,
+    paidOutcome: targetApplied || lastSourceUpgradeApplied
+      ? { kind: "applied" }
+      : { kind: "processing" },
+    stripe: input.stripe,
+    stripeCustomerId: input.stripeCustomerId,
+    subscription: input.subscription,
   });
 }
 
@@ -5792,6 +6335,21 @@ export async function updateHostedFamilyMemberPlan(input: {
   const now = input.now ?? new Date();
   const targetPlanCode = normalizeHostedFamilyPlanCode(input.planCode);
   const transition = await prisma.$transaction(async (tx) => {
+    const initialGroup = await tx.hostedAccountGroup.findUnique({
+      select: hostedAccountGroupAccessSelect,
+      where: { id: input.groupId },
+    });
+    if (
+      !initialGroup ||
+      initialGroup.ownerMemberId !== input.ownerMemberId
+    ) {
+      throw hostedOnboardingError({
+        code: "HOSTED_FAMILY_OWNER_REQUIRED",
+        httpStatus: 403,
+        message: "Only the Family plan owner can change member tiers.",
+      });
+    }
+    await lockHostedMemberRow(tx, initialGroup.ownerMemberId);
     const group = await tx.hostedAccountGroup.findUnique({
       select: hostedAccountGroupAccessSelect,
       where: { id: input.groupId },
@@ -5810,7 +6368,6 @@ export async function updateHostedFamilyMemberPlan(input: {
         message: "Family billing must be active before changing member tiers.",
       });
     }
-    await lockHostedMemberRow(tx, group.ownerMemberId);
     const [membership, capacities, assignments, pendingElsewhere] = await Promise.all([
       tx.hostedAccountGroupMembership.findFirst({
         select: { id: true, pendingPlanCode: true, planCode: true, updatedAt: true },
@@ -5993,6 +6550,8 @@ export async function updateHostedFamilyMemberPlan(input: {
             idempotencyKey:
               `family-member-plan:${group.id}:${transition.membershipId}:${transition.pendingStartedAt.getTime()}:${transition.targetPlanCode}`,
             prorationDate: Math.floor(transition.pendingStartedAt.getTime() / 1_000),
+            sourcePlanCode: transition.sourcePlanCode,
+            targetPlanCode: transition.targetPlanCode,
           },
           target: transition.targetCapacities,
         });

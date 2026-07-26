@@ -407,6 +407,36 @@ test("HostedFamilyManager shows unpaid paused access with Family billing recover
   }
 });
 
+test("HostedFamilyManager routes active-but-suspended Family access to support", async () => {
+  const { HostedFamilyManager } = await import(
+    "@/src/components/settings/hosted-family-settings-actions"
+  );
+  const { cleanup, container } = await renderClientComponent(
+    createElement(HostedFamilyManager, {
+      ...baseFamilyManagerProps(),
+      billingActive: false,
+      billingStatus: "active",
+    }),
+    { requireButton: false },
+  );
+
+  try {
+    assert.match(
+      container.textContent ?? "",
+      /Billing is active, but Family access is paused\./,
+    );
+    assert.equal(buttonByTextOrNull(container, "Manage Family billing"), null);
+    const supportLink = [...container.querySelectorAll("a")].find(
+      (candidate) => candidate.textContent?.includes("Email support"),
+    );
+    assert.ok(supportLink);
+    assert.match(supportLink.href, /^mailto:support@withmurph\.ai/u);
+    assert.match(supportLink.href, /subject=Murph\+Family\+access\+support/u);
+  } finally {
+    await cleanup();
+  }
+});
+
 test("HostedFamilyManager presents rows as mobile cards without forcing horizontal overflow", async () => {
   const { HostedFamilyManager } = await import(
     "@/src/components/settings/hosted-family-settings-actions"
@@ -532,8 +562,17 @@ test.each([
       await clickButton(container, window, "Add Edge seat & continue");
 
       expect(assign).not.toHaveBeenCalled();
-      assert.equal(inputById(container, "family-invite-label").value, "Mom");
-      assert.equal(inputById(container, "family-invite-phone").value, "+48600000000");
+      assert.equal(container.querySelector("#family-invite-label"), null);
+      assert.equal(container.querySelector("#family-invite-phone"), null);
+      assert.match(container.textContent ?? "", /Finish family invite/);
+      assert.match(
+        container.textContent ?? "",
+        /These details are locked to the seat charge already in progress\./,
+      );
+      assert.match(container.textContent ?? "", /Mom/);
+      assert.match(container.textContent ?? "", /iMessage/);
+      assert.match(container.textContent ?? "", /\+48600000000/);
+      assert.match(container.textContent ?? "", /Edge · \$19\/mo/);
       const approvalLink = linkByText(container, "Approve seat charge in Stripe");
       assert.equal(approvalLink.href, paymentUrl);
       assert.equal(approvalLink.target, "_blank");
@@ -550,9 +589,18 @@ test.each([
       assert.match(paymentNotice?.className ?? "", /bg-\[#f5f0e8\]/u);
       assert.match(
         container.textContent ?? "",
-        /Your invite details stay here until you return to finish the invite\./,
+        /Then return here to finish this saved invite\./,
       );
+      const dialogContent = container.querySelector<HTMLElement>("[data-dialog-content]");
+      assert.ok(dialogContent);
+      assert.match(dialogContent.className, /max-h-\[calc\(100dvh-2rem\)\]/u);
+      assert.match(dialogContent.className, /overflow-y-auto/u);
       const firstPayload = mocks.requestHostedOnboardingJson.mock.calls[0]?.[0]?.payload;
+
+      await clickButton(container, window, "Close for now");
+      assert.equal(container.querySelector("[data-dialog-content]"), null);
+      await clickButton(container, window, "Resume invite");
+      assert.match(container.textContent ?? "", /These details are locked/);
 
       await clickButton(container, window, "Finish invite");
 
@@ -615,6 +663,8 @@ test("HostedFamilyManager prevents concurrent Finish invite retries", async () =
     const approvalLink = linkByText(container, "Approve seat charge in Stripe");
     assert.equal(approvalLink.getAttribute("aria-disabled"), "true");
     assert.equal(approvalLink.getAttribute("data-disabled"), "");
+    assert.match(approvalLink.className, /data-disabled:opacity-50/u);
+    assert.match(approvalLink.className, /data-disabled:pointer-events-none/u);
   } finally {
     await cleanup();
   }

@@ -92,7 +92,8 @@ import type { HostedConsentStatus } from "@/src/lib/legal/consent";
 import { buildWhoopAppleHealthSetupGuide } from "@/src/lib/device-sync/whoop-apple-health-setup-guide";
 import { MurphAssistantStylePicker } from "@/src/components/murph/murph-assistant-style-picker";
 import {
-  FamilyInvitePaymentRecoveryStep,
+  FamilyInvitePaymentRecoveryContent,
+  HostedFamilyBillingRecoveryNotice,
   HostedFamilyManager,
 } from "@/src/components/settings/hosted-family-settings-actions";
 import { EdgeUpgradeConfirmationContent } from "@/src/components/settings/hosted-plan-upgrade-button";
@@ -115,13 +116,18 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 function HostedBillingRecoveryPreview(props: {
   children: React.ReactNode;
   label: string;
+  viewport?: "default" | "phone";
   state: string;
 }) {
   return (
     <Dialog>
       <article
         data-design-state={props.state}
-        className="flex min-w-0 flex-col gap-6 rounded-2xl border border-[#c4a882]/25 bg-[#fffcf6] p-5 text-[#2d3436] md:p-6"
+        className={`flex min-w-0 flex-col gap-6 rounded-2xl border border-[#c4a882]/25 bg-[#fffcf6] p-5 text-[#2d3436] md:p-6 ${
+          props.viewport === "phone"
+            ? "mx-auto max-h-[36rem] w-full max-w-[20rem] overflow-y-auto overscroll-contain"
+            : ""
+        }`}
       >
         <p className="border-b border-[#c4a882]/20 pb-3 font-mono text-[10px] uppercase tracking-[0.12em] text-[#736a58]">
           {props.label}
@@ -1004,6 +1010,18 @@ export function ComponentsContent() {
               />
             </HostedBillingRecoveryPreview>
             <HostedBillingRecoveryPreview
+              label="Start Pulse · terminal close"
+              state="start-pulse-terminal-close"
+            >
+              <StartPaidPulseConfirmationContent
+                errorAction="close"
+                errorMessage="This Pulse update is only available while your trial is active."
+                status="idle"
+                onCancel={() => {}}
+                onConfirm={() => {}}
+              />
+            </HostedBillingRecoveryPreview>
+            <HostedBillingRecoveryPreview
               label="Edge · processing"
               state="edge-processing"
             >
@@ -1043,12 +1061,22 @@ export function ComponentsContent() {
               />
             </HostedBillingRecoveryPreview>
             <HostedBillingRecoveryPreview
-              label="Family invite · payment recovery"
-              state="family-invite-payment-recovery-idle"
+              label="Family invite · payment recovery error · phone"
+              state="family-invite-payment-recovery-error-phone"
+              viewport="phone"
             >
-              <FamilyInvitePaymentRecoveryStep
+              <FamilyInvitePaymentRecoveryContent
+                errorMessage="Stripe is still waiting for the saved seat charge."
+                intent={{
+                  addSeatIfNeeded: true,
+                  planCode: "edge",
+                  targetEmail: "family.member@example.test",
+                  targetLabel: "Parent",
+                }}
                 isFinishing={false}
+                tier={{ name: "Edge", planCode: "edge", priceLabel: "$19/mo" }}
                 paymentUrl="https://invoice.stripe.com/i/design-family-seat"
+                onClose={() => {}}
                 onFinish={() => {}}
               />
             </HostedBillingRecoveryPreview>
@@ -1056,10 +1084,27 @@ export function ComponentsContent() {
               label="Family invite · finishing"
               state="family-invite-payment-recovery-finishing"
             >
-              <FamilyInvitePaymentRecoveryStep
+              <FamilyInvitePaymentRecoveryContent
+                intent={{
+                  addSeatIfNeeded: true,
+                  planCode: "pulse",
+                  targetLabel: "Parent",
+                  targetPhoneNumber: "+15550100100",
+                }}
                 isFinishing
+                tier={{ name: "Pulse", planCode: "pulse", priceLabel: "$7/mo" }}
                 paymentUrl="https://invoice.stripe.com/i/design-family-seat"
+                onClose={() => {}}
                 onFinish={() => {}}
+              />
+            </HostedBillingRecoveryPreview>
+            <HostedBillingRecoveryPreview
+              label="Family access · suspended support"
+              state="family-access-suspended-support"
+            >
+              <HostedFamilyBillingRecoveryNotice
+                billingActive={false}
+                billingStatus="active"
               />
             </HostedBillingRecoveryPreview>
           </div>

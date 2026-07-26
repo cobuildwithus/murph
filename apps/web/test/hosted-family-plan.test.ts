@@ -100,6 +100,9 @@ import {
   createHostedTelegramUsernameLookupKey,
 } from "@/src/lib/hosted-onboarding/contact-privacy";
 import {
+  buildHostedStripeSubscriptionMutationScope,
+} from "@/src/lib/hosted-onboarding/stripe-billing-state";
+import {
   acceptHostedFamilyInvite,
   acceptHostedFamilyInviteFromTelegramTx,
   acceptHostedFamilyInviteFromPhoneTx,
@@ -2249,7 +2252,7 @@ describe("hosted Family plan", () => {
     );
   });
 
-  it("records a pending member tier and atomically swaps Stripe quantities", async () => {
+  it("payment-gates a price-increasing member tier before projecting Edge", async () => {
     const tx = createTxMock();
     const pendingStartedAt = new Date("2026-07-15T12:00:00.000Z");
     tx.hostedAccountGroupMembership.findFirst
@@ -2295,10 +2298,23 @@ describe("hosted Family plan", () => {
     const stripeRetrieve = vi.fn().mockResolvedValue(
       makeFamilyStripeSubscription({ itemQuantity: 2 }),
     );
-    const stripeUpdate = vi.fn().mockResolvedValue(
-      makeFamilyStripeSubscription({ edgeItemQuantity: 1, itemQuantity: 1 }),
-    );
+    const paidInvoice = makeFamilyStripeInvoice({ status: "paid" });
+    const stripeUpdate = vi.fn().mockResolvedValue({
+      ...makeFamilyStripeSubscription({
+        edgeItemQuantity: 1,
+        itemQuantity: 1,
+      }),
+      latest_invoice: paidInvoice,
+    });
     runtimeMocks.requireHostedStripeApi.mockReturnValue({
+      invoicePayments: {
+        list: vi.fn().mockResolvedValue(
+          makeFamilyStripeInvoicePaymentList([]),
+        ),
+      },
+      invoices: {
+        retrieve: vi.fn().mockResolvedValue(paidInvoice),
+      },
       subscriptions: {
         retrieve: stripeRetrieve,
         update: stripeUpdate,
@@ -2329,12 +2345,16 @@ describe("hosted Family plan", () => {
           { id: "si_family", quantity: 1 },
           { price: "price_family_edge", quantity: 1 },
         ],
-        proration_behavior: "create_prorations",
+        payment_behavior: "pending_if_incomplete",
+        proration_behavior: "always_invoice",
         proration_date: Math.floor(pendingStartedAt.getTime() / 1_000),
       }),
       {
-        idempotencyKey:
-          `family-member-plan:hbag_family:hbagm_mom:${pendingStartedAt.getTime()}:edge`,
+        idempotencyKey: expect.stringMatching(
+          new RegExp(
+            `^family-member-plan:hbag_family:hbagm_mom:${pendingStartedAt.getTime()}:edge:[a-f0-9]{32}$`,
+          ),
+        ),
       },
     );
     expect(tx.hostedAccountGroupMembership.update).not.toHaveBeenCalledWith(
@@ -2342,7 +2362,148 @@ describe("hosted Family plan", () => {
     );
   });
 
-  it("returns the exact Stripe action URL for a pending member tier charge", async () => {
+  it("payment-gates the last Pulse seat by price, then consolidates without a second proration", async () => {
+    const tx = createTxMock({ activeMembershipCount: 6, billedSeatCount: 6 });
+    const pendingStartedAt = new Date("2026-07-15T12:00:00.000Z");
+    tx.hostedAccountGroupMembership.findFirst
+      .mockResolvedValueOnce({
+        id: "hbagm_mom",
+        pendingPlanCode: null,
+        planCode: "pulse",
+        updatedAt: new Date("2026-07-15T11:00:00.000Z"),
+      })
+      .mockResolvedValueOnce(null);
+    tx.hostedAccountGroupMembership.update.mockResolvedValueOnce({
+      id: "hbagm_mom",
+      pendingPlanCode: "edge",
+      planCode: "pulse",
+      updatedAt: pendingStartedAt,
+    });
+    tx.hostedAccountGroupMembership.findUnique.mockResolvedValueOnce({
+      pendingPlanCode: "edge",
+      planCode: "pulse",
+    });
+    const currentAssignments = [
+      { memberId: "member_owner", planCode: "edge" },
+      { memberId: "member_two", planCode: "edge" },
+      { memberId: "member_three", planCode: "edge" },
+      { memberId: "member_four", planCode: "edge" },
+      { memberId: "member_five", planCode: "edge" },
+      { memberId: "member_mom", planCode: "pulse" },
+    ];
+    tx.hostedAccountGroupMembership.findMany
+      .mockResolvedValue(currentAssignments.map((assignment) => (
+        assignment.memberId === "member_mom"
+          ? { ...assignment, planCode: "edge" }
+          : assignment
+      )))
+      .mockResolvedValueOnce(currentAssignments)
+      .mockResolvedValueOnce(currentAssignments)
+      .mockResolvedValueOnce(currentAssignments);
+    const currentCapacities = [
+      { billedQuantity: 1, planCode: "pulse" },
+      { billedQuantity: 5, planCode: "edge" },
+    ];
+    tx.hostedAccountGroupPlanCapacity.findMany
+      .mockResolvedValue([{ billedQuantity: 6, planCode: "edge" }])
+      .mockResolvedValueOnce(currentCapacities)
+      .mockResolvedValueOnce(currentCapacities);
+
+    const paidInvoice = makeFamilyStripeInvoice({ status: "paid" });
+    const duplicateApplied: Stripe.Subscription = {
+      ...makeFamilyStripeSubscription({
+        edgeItemQuantity: 5,
+        itemQuantity: 1,
+        priceId: "price_family_edge",
+      }),
+      latest_invoice: paidInvoice,
+    };
+    const normalizedBase = makeFamilyStripeSubscription({
+      edgeItemQuantity: 6,
+    });
+    const normalized: Stripe.Subscription = {
+      ...normalizedBase,
+      items: {
+        ...normalizedBase.items,
+        data: [normalizedBase.items.data[1]!],
+      },
+      latest_invoice: paidInvoice,
+    };
+    const stripeUpdate = vi.fn()
+      .mockResolvedValueOnce(duplicateApplied)
+      .mockResolvedValueOnce(normalized);
+    runtimeMocks.requireHostedStripeApi.mockReturnValue({
+      invoicePayments: {
+        list: vi.fn().mockResolvedValue(
+          makeFamilyStripeInvoicePaymentList([]),
+        ),
+      },
+      invoices: {
+        retrieve: vi.fn().mockResolvedValue(paidInvoice),
+      },
+      subscriptions: {
+        retrieve: vi.fn().mockResolvedValue(
+          makeFamilyStripeSubscription({
+            edgeItemQuantity: 5,
+            itemQuantity: 1,
+          }),
+        ),
+        update: stripeUpdate,
+      },
+    });
+    const prisma = tx as FamilyPlanTxMock & {
+      $transaction: ReturnType<typeof vi.fn>;
+    };
+    prisma.$transaction = vi.fn((callback) => callback(tx));
+
+    await expect(updateHostedFamilyMemberPlan({
+      groupId: "hbag_family",
+      memberId: "member_mom",
+      ownerMemberId: "member_owner",
+      planCode: "edge",
+      prisma: prisma as never,
+    })).resolves.toMatchObject({ syncing: true });
+
+    expect(stripeUpdate).toHaveBeenNthCalledWith(
+      1,
+      "sub_family",
+      expect.objectContaining({
+        items: [{
+          id: "si_family",
+          price: "price_family_edge",
+          quantity: 1,
+        }],
+        payment_behavior: "pending_if_incomplete",
+        proration_behavior: "always_invoice",
+      }),
+      expect.any(Object),
+    );
+    expect(stripeUpdate).toHaveBeenNthCalledWith(
+      2,
+      "sub_family",
+      expect.objectContaining({
+        items: [
+          { id: "si_family_edge", quantity: 6 },
+          { deleted: true, id: "si_family" },
+        ],
+        proration_behavior: "none",
+      }),
+      expect.any(Object),
+    );
+    expect(stripeUpdate.mock.calls[1]?.[1]).not.toHaveProperty(
+      "payment_behavior",
+    );
+    expect(tx.hostedAccountGroupMembership.update).not.toHaveBeenCalledWith(
+      expect.objectContaining({ data: { planCode: "edge" } }),
+    );
+  });
+
+  it.each([
+    "requires_action",
+    "requires_payment_method",
+  ] as const)(
+    "returns the exact Stripe action URL when a member tier charge %s",
+    async (paymentIntentStatus) => {
     const tx = createTxMock();
     const pendingStartedAt = new Date("2026-07-15T12:00:00.000Z");
     tx.hostedAccountGroupMembership.findFirst
@@ -2397,7 +2558,7 @@ describe("hosted Family plan", () => {
         list: vi.fn().mockResolvedValue(makeFamilyStripeInvoicePaymentList([
           makeFamilyStripeInvoicePayment({
             invoiceId: actionInvoice.id,
-            paymentIntentStatus: "requires_action",
+            paymentIntentStatus,
           }),
         ])),
       },
@@ -2430,9 +2591,107 @@ describe("hosted Family plan", () => {
     });
 
     expect(stripeUpdate).toHaveBeenCalledTimes(1);
+    expect(stripeUpdate).toHaveBeenCalledWith(
+      "sub_family",
+      expect.objectContaining({
+        payment_behavior: "pending_if_incomplete",
+        proration_behavior: "always_invoice",
+      }),
+      expect.any(Object),
+    );
     expect(tx.hostedAccountGroupMembership.update).toHaveBeenCalledWith(
       expect.objectContaining({ data: { pendingPlanCode: "edge" } }),
     );
+    expect(tx.hostedAccountGroupMembership.update).not.toHaveBeenCalledWith(
+      expect.objectContaining({ data: { planCode: "edge" } }),
+    );
+    },
+  );
+
+  it("keeps Pulse entitlement when the exact upgrade invoice is uncollectible", async () => {
+    const tx = createTxMock();
+    const pendingStartedAt = new Date("2026-07-15T12:00:00.000Z");
+    tx.hostedAccountGroupMembership.findFirst
+      .mockResolvedValueOnce({
+        id: "hbagm_mom",
+        pendingPlanCode: null,
+        planCode: "pulse",
+        updatedAt: new Date("2026-07-15T11:00:00.000Z"),
+      })
+      .mockResolvedValueOnce(null);
+    tx.hostedAccountGroupMembership.update.mockResolvedValueOnce({
+      id: "hbagm_mom",
+      pendingPlanCode: "edge",
+      planCode: "pulse",
+      updatedAt: pendingStartedAt,
+    });
+    tx.hostedAccountGroupMembership.findUnique.mockResolvedValueOnce({
+      pendingPlanCode: "edge",
+      planCode: "pulse",
+    });
+    tx.hostedAccountGroupMembership.findMany.mockResolvedValue([
+      { memberId: "member_owner", planCode: "pulse" },
+      { memberId: "member_mom", planCode: "pulse" },
+    ]);
+    tx.hostedAccountGroupPlanCapacity.findMany.mockResolvedValue([
+      { billedQuantity: 2, planCode: "pulse" },
+    ]);
+
+    const currentSubscription = makeFamilyStripeSubscription({
+      itemQuantity: 2,
+    });
+    const targetSubscription = makeFamilyStripeSubscription({
+      edgeItemQuantity: 1,
+      itemQuantity: 1,
+    });
+    const terminalInvoice = makeFamilyStripeInvoice({
+      status: "uncollectible",
+    });
+    const pendingSubscription: Stripe.Subscription = {
+      ...currentSubscription,
+      latest_invoice: terminalInvoice,
+      pending_update: {
+        ...makeFamilyStripePendingUpdate({
+          quantity: 1,
+          subscriptionItem: currentSubscription.items.data[0]!,
+        }),
+        subscription_items: targetSubscription.items.data,
+      },
+    };
+    const stripeUpdate = vi.fn().mockResolvedValue(pendingSubscription);
+    runtimeMocks.requireHostedStripeApi.mockReturnValue({
+      invoicePayments: {
+        list: vi.fn().mockResolvedValue(
+          makeFamilyStripeInvoicePaymentList([]),
+        ),
+      },
+      invoices: {
+        retrieve: vi.fn().mockResolvedValue(terminalInvoice),
+      },
+      subscriptions: {
+        retrieve: vi.fn().mockResolvedValue(currentSubscription),
+        update: stripeUpdate,
+      },
+    });
+    const prisma = tx as FamilyPlanTxMock & {
+      $transaction: ReturnType<typeof vi.fn>;
+    };
+    prisma.$transaction = vi.fn((callback) => callback(tx));
+
+    await expect(updateHostedFamilyMemberPlan({
+      groupId: "hbag_family",
+      memberId: "member_mom",
+      ownerMemberId: "member_owner",
+      planCode: "edge",
+      prisma: prisma as never,
+    })).rejects.toMatchObject({
+      code: "HOSTED_FAMILY_BILLING_PAYMENT_TERMINAL",
+      details: { collectionState: "uncollectible" },
+      httpStatus: 409,
+      retryable: false,
+    });
+
+    expect(stripeUpdate).toHaveBeenCalledTimes(1);
     expect(tx.hostedAccountGroupMembership.update).not.toHaveBeenCalledWith(
       expect.objectContaining({ data: { planCode: "edge" } }),
     );
@@ -2478,10 +2737,23 @@ describe("hosted Family plan", () => {
       ])
       .mockResolvedValueOnce(currentCapacities)
       .mockResolvedValueOnce(currentCapacities);
-    const stripeUpdate = vi.fn().mockResolvedValue(
-      makeFamilyStripeSubscription({ edgeItemQuantity: 1, itemQuantity: 1 }),
-    );
+    const paidInvoice = makeFamilyStripeInvoice({ status: "paid" });
+    const stripeUpdate = vi.fn().mockResolvedValue({
+      ...makeFamilyStripeSubscription({
+        edgeItemQuantity: 1,
+        itemQuantity: 1,
+      }),
+      latest_invoice: paidInvoice,
+    });
     runtimeMocks.requireHostedStripeApi.mockReturnValue({
+      invoicePayments: {
+        list: vi.fn().mockResolvedValue(
+          makeFamilyStripeInvoicePaymentList([]),
+        ),
+      },
+      invoices: {
+        retrieve: vi.fn().mockResolvedValue(paidInvoice),
+      },
       subscriptions: {
         retrieve: vi.fn().mockResolvedValue(
           makeFamilyStripeSubscription({ itemQuantity: 2 }),
@@ -2509,8 +2781,215 @@ describe("hosted Family plan", () => {
         proration_date: Math.floor(pendingStartedAt.getTime() / 1_000),
       }),
       {
+        idempotencyKey: expect.stringMatching(
+          new RegExp(
+            `^family-member-plan:hbag_family:hbagm_mom:${pendingStartedAt.getTime()}:edge:[a-f0-9]{32}$`,
+          ),
+        ),
+      },
+    );
+  });
+
+  it("retries a locally pending upgrade after exact expired-update proof rotates provider state", async () => {
+    const actualFinancialLookup = await vi.importActual<
+      typeof import("@/src/lib/hosted-onboarding/stripe-billing-lookup")
+    >("@/src/lib/hosted-onboarding/stripe-billing-lookup");
+    recurringFinancialMocks.readHostedStripeRecurringFinancialState
+      .mockImplementation(
+        actualFinancialLookup.readHostedStripeRecurringFinancialState,
+      );
+    recurringFinancialMocks.classifyHostedStripeRecurringFinancialHealth
+      .mockImplementation(
+        actualFinancialLookup.classifyHostedStripeRecurringFinancialHealth,
+      );
+
+    const tx = createTxMock();
+    const pendingStartedAt = new Date("2026-07-15T12:00:00.000Z");
+    tx.hostedAccountGroupMembership.findFirst
+      .mockResolvedValueOnce({
+        id: "hbagm_mom",
+        pendingPlanCode: "edge",
+        planCode: "pulse",
+        updatedAt: pendingStartedAt,
+      })
+      .mockResolvedValueOnce(null);
+    tx.hostedAccountGroupMembership.findUnique.mockResolvedValueOnce({
+      pendingPlanCode: "edge",
+      planCode: "pulse",
+    });
+    tx.hostedAccountGroupMembership.findMany
+      .mockResolvedValue([
+        { memberId: "member_owner", planCode: "pulse" },
+        { memberId: "member_mom", planCode: "edge" },
+      ])
+      .mockResolvedValueOnce([
+        { memberId: "member_owner", planCode: "pulse" },
+        { memberId: "member_mom", planCode: "pulse" },
+      ])
+      .mockResolvedValueOnce([
+        { memberId: "member_owner", planCode: "pulse" },
+        { memberId: "member_mom", planCode: "pulse" },
+      ])
+      .mockResolvedValueOnce([
+        { memberId: "member_owner", planCode: "pulse" },
+        { memberId: "member_mom", planCode: "pulse" },
+      ]);
+    const currentCapacities = [{ billedQuantity: 2, planCode: "pulse" }];
+    tx.hostedAccountGroupPlanCapacity.findMany
+      .mockResolvedValue([
+        { billedQuantity: 1, planCode: "pulse" },
+        { billedQuantity: 1, planCode: "edge" },
+      ])
+      .mockResolvedValueOnce(currentCapacities)
+      .mockResolvedValueOnce(currentCapacities);
+
+    const expiredInvoice = makeFamilyStripeInvoice({
+      amountRemaining: 700,
+      billingReason: "subscription_update",
+      id: "in_family_expired_edge",
+      lines: [
+        makeFamilyStripeInvoiceLine({
+          amount: 700,
+          invoiceId: "in_family_expired_edge",
+          periodStart: FAMILY_STRIPE_PERIOD_START_SECONDS + 3_600,
+          priceId: "price_family_edge",
+          proration: true,
+          quantity: 1,
+          subscriptionItemId: "si_family_edge_expired",
+        }),
+      ],
+      status: "void",
+    });
+    const paidBaseInvoice = makeFamilyStripeInvoice({
+      amountPaid: 1_600,
+      billingReason: "subscription_cycle",
+      id: "in_family_paid_base",
+      lines: [
+        makeFamilyStripeInvoiceLine({
+          amount: 1_600,
+          invoiceId: "in_family_paid_base",
+          priceId: "price_family",
+          quantity: 2,
+          subscriptionItemId: "si_family",
+        }),
+      ],
+      status: "paid",
+    });
+    const retryInvoice = makeFamilyStripeInvoice({
+      id: "in_family_retry_paid",
+      lines: [
+        makeFamilyStripeInvoiceLine({
+          invoiceId: "in_family_retry_paid",
+          periodStart: FAMILY_STRIPE_PERIOD_START_SECONDS + 7_200,
+          priceId: "price_family_edge",
+          proration: true,
+          quantity: 1,
+          subscriptionItemId: "si_family_edge",
+        }),
+      ],
+      status: "paid",
+    });
+    const expiredSubscription: Stripe.Subscription = {
+      ...makeFamilyStripeSubscription({ itemQuantity: 2 }),
+      latest_invoice: expiredInvoice,
+    };
+    const pendingSubscription: Stripe.Subscription = {
+      ...expiredSubscription,
+      latest_invoice: {
+        ...expiredInvoice,
+        status: "open",
+      },
+      pending_update: makeFamilyStripePendingUpdate({
+        quantity: 1,
+        subscriptionItem: makeFamilyStripeSubscriptionItem({
+          id: "si_family_edge_expired",
+          priceId: "price_family_edge",
+          quantity: 1,
+          subscriptionId: "sub_family",
+        }),
+      }),
+    };
+    const updatedSubscription: Stripe.Subscription = {
+      ...makeFamilyStripeSubscription({
+        edgeItemQuantity: 1,
+        itemQuantity: 1,
+      }),
+      latest_invoice: retryInvoice,
+    };
+    const invoiceById = new Map([
+      [expiredInvoice.id, expiredInvoice],
+      [paidBaseInvoice.id, paidBaseInvoice],
+      [retryInvoice.id, retryInvoice],
+    ]);
+    const stripeUpdate = vi.fn().mockResolvedValue(updatedSubscription);
+    runtimeMocks.requireHostedStripeApi.mockReturnValue({
+      disputes: {
+        list: vi.fn().mockResolvedValue({ data: [], has_more: false }),
+      },
+      invoicePayments: {
+        list: vi.fn().mockImplementation(async ({ invoice }) => ({
+          data: invoice === paidBaseInvoice.id
+            ? [makeFamilyStripeInvoicePayment({
+                amountPaid: 1_600,
+                invoiceId: paidBaseInvoice.id,
+                paymentIntentId: "pi_family_paid_base",
+                paymentIntentStatus: "succeeded",
+              })]
+            : [],
+          has_more: false,
+          object: "list",
+          url: "/v1/invoice_payments",
+        })),
+      },
+      invoices: {
+        list: vi.fn().mockResolvedValue({
+          data: [expiredInvoice, paidBaseInvoice],
+          has_more: false,
+        }),
+        retrieve: vi.fn().mockImplementation(async (invoiceId) => {
+          const invoice = invoiceById.get(invoiceId);
+          if (!invoice) {
+            throw new Error(`Unexpected invoice fixture: ${invoiceId}`);
+          }
+          return invoice;
+        }),
+      },
+      refunds: {
+        list: vi.fn().mockResolvedValue({ data: [], has_more: false }),
+      },
+      subscriptions: {
+        retrieve: vi.fn().mockResolvedValue(expiredSubscription),
+        update: stripeUpdate,
+      },
+    });
+    const prisma = tx as FamilyPlanTxMock & {
+      $transaction: ReturnType<typeof vi.fn>;
+    };
+    prisma.$transaction = vi.fn((callback) => callback(tx));
+
+    const expiredScope =
+      buildHostedStripeSubscriptionMutationScope(expiredSubscription);
+    expect(expiredScope).not.toBe(
+      buildHostedStripeSubscriptionMutationScope(pendingSubscription),
+    );
+
+    await expect(updateHostedFamilyMemberPlan({
+      groupId: "hbag_family",
+      memberId: "member_mom",
+      ownerMemberId: "member_owner",
+      planCode: "edge",
+      prisma: prisma as never,
+    })).resolves.toMatchObject({ syncing: true });
+
+    expect(stripeUpdate).toHaveBeenCalledWith(
+      "sub_family",
+      expect.objectContaining({
+        payment_behavior: "pending_if_incomplete",
+        proration_behavior: "always_invoice",
+      }),
+      {
         idempotencyKey:
-          `family-member-plan:hbag_family:hbagm_mom:${pendingStartedAt.getTime()}:edge`,
+          `family-member-plan:hbag_family:hbagm_mom:${pendingStartedAt.getTime()}:edge:${expiredScope}`,
       },
     );
   });
@@ -2597,6 +3076,9 @@ describe("hosted Family plan", () => {
       }),
       expect.any(Object),
     );
+    expect(stripeUpdate.mock.calls[0]?.[1]).not.toHaveProperty(
+      "payment_behavior",
+    );
   });
 
   it("rejects a second pending member tier change in the same group", async () => {
@@ -2627,6 +3109,59 @@ describe("hosted Family plan", () => {
     expect(tx.hostedAccountGroupMembership.update).not.toHaveBeenCalled();
     expect(runtimeMocks.requireHostedStripeApi).not.toHaveBeenCalled();
   });
+
+  it.each([
+    {
+      label: "billing reversal",
+      lockedBillingStatus: HostedBillingStatus.unpaid,
+      lockedSuspendedAt: null,
+    },
+    {
+      label: "group suspension",
+      lockedBillingStatus: HostedBillingStatus.active,
+      lockedSuspendedAt: new Date("2026-07-15T11:30:00.000Z"),
+    },
+  ])(
+    "does not persist a member plan intent after concurrent $label under the owner lock",
+    async ({ lockedBillingStatus, lockedSuspendedAt }) => {
+      const activeGroup = {
+        billingStatus: HostedBillingStatus.active,
+        id: "hbag_family",
+        ownerMemberId: "member_owner",
+        suspendedAt: null,
+      };
+      const tx = createTxMock({ group: activeGroup });
+      tx.hostedAccountGroup.findUnique
+        .mockResolvedValueOnce(activeGroup)
+        .mockResolvedValueOnce({
+          ...activeGroup,
+          billingStatus: lockedBillingStatus,
+          suspendedAt: lockedSuspendedAt,
+        });
+      const prisma = tx as FamilyPlanTxMock & {
+        $transaction: ReturnType<typeof vi.fn>;
+      };
+      prisma.$transaction = vi.fn((callback) => callback(tx));
+
+      await expect(updateHostedFamilyMemberPlan({
+        groupId: "hbag_family",
+        memberId: "member_mom",
+        ownerMemberId: "member_owner",
+        planCode: "edge",
+        prisma: prisma as never,
+      })).rejects.toMatchObject({
+        code: "HOSTED_FAMILY_BILLING_INACTIVE",
+      });
+
+      expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
+      expect(tx.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+        tx.hostedAccountGroup.findUnique.mock.invocationCallOrder[1]!,
+      );
+      expect(tx.hostedAccountGroupMembership.findFirst).not.toHaveBeenCalled();
+      expect(tx.hostedAccountGroupMembership.update).not.toHaveBeenCalled();
+      expect(runtimeMocks.requireHostedStripeApi).not.toHaveBeenCalled();
+    },
+  );
 
   it("keeps the current member tier when the Stripe swap fails", async () => {
     const tx = createTxMock();
@@ -3148,6 +3683,136 @@ describe("hosted Family plan", () => {
     expect(tx.hostedAccountGroup.update).toHaveBeenCalledWith({
       data: { billingStatus: HostedBillingStatus.active },
       where: { id: "hbag_family" },
+    });
+  });
+
+  it("recovers a paid last-Pulse upgrade by consolidating before webhook projection", async () => {
+    const tx = createTxMock({ activeMembershipCount: 6, billedSeatCount: 6 });
+    const pendingStartedAt = new Date("2026-07-15T12:00:00.000Z");
+    tx.hostedAccountGroupMembership.findMany.mockResolvedValue([
+      {
+        id: "hbagm_owner",
+        memberId: "member_owner",
+        pendingPlanCode: null,
+        planCode: "edge",
+        updatedAt: new Date("2026-06-18T12:00:00.000Z"),
+      },
+      {
+        id: "hbagm_two",
+        memberId: "member_two",
+        pendingPlanCode: null,
+        planCode: "edge",
+        updatedAt: new Date("2026-06-18T12:00:00.000Z"),
+      },
+      {
+        id: "hbagm_three",
+        memberId: "member_three",
+        pendingPlanCode: null,
+        planCode: "edge",
+        updatedAt: new Date("2026-06-18T12:00:00.000Z"),
+      },
+      {
+        id: "hbagm_four",
+        memberId: "member_four",
+        pendingPlanCode: null,
+        planCode: "edge",
+        updatedAt: new Date("2026-06-18T12:00:00.000Z"),
+      },
+      {
+        id: "hbagm_five",
+        memberId: "member_five",
+        pendingPlanCode: null,
+        planCode: "edge",
+        updatedAt: new Date("2026-06-18T12:00:00.000Z"),
+      },
+      {
+        id: "hbagm_mom",
+        memberId: "member_mom",
+        pendingPlanCode: "edge",
+        planCode: "pulse",
+        updatedAt: pendingStartedAt,
+      },
+    ]);
+    tx.hostedAccountGroupPlanCapacity.findMany.mockResolvedValue([
+      { billedQuantity: 1, planCode: "pulse" },
+      { billedQuantity: 5, planCode: "edge" },
+    ]);
+    const paidInvoice = makeFamilyStripeInvoice({ status: "paid" });
+    const duplicateApplied: Stripe.Subscription = {
+      ...makeFamilyStripeSubscription({
+        edgeItemQuantity: 5,
+        itemQuantity: 1,
+        priceId: "price_family_edge",
+      }),
+      latest_invoice: paidInvoice,
+    };
+    const normalizedBase = makeFamilyStripeSubscription({
+      edgeItemQuantity: 6,
+    });
+    const normalized: Stripe.Subscription = {
+      ...normalizedBase,
+      items: {
+        ...normalizedBase.items,
+        data: [normalizedBase.items.data[1]!],
+      },
+      latest_invoice: paidInvoice,
+    };
+    const stripeUpdate = vi.fn().mockResolvedValue(normalized);
+    runtimeMocks.requireHostedStripeApi.mockReturnValue({
+      invoicePayments: {
+        list: vi.fn().mockResolvedValue(
+          makeFamilyStripeInvoicePaymentList([]),
+        ),
+      },
+      invoices: {
+        retrieve: vi.fn().mockResolvedValue(paidInvoice),
+      },
+      subscriptions: {
+        update: stripeUpdate,
+      },
+    });
+
+    await expect(applyHostedFamilyStripeSubscriptionUpdatedTx({
+      dispatchContext: {
+        eventCreatedAt: new Date("2026-07-15T12:30:00.000Z"),
+      },
+      subscription: duplicateApplied,
+      tx,
+    })).resolves.toMatchObject({
+      groupId: "hbag_family",
+    });
+
+    expect(stripeUpdate).toHaveBeenCalledWith(
+      "sub_family",
+      expect.objectContaining({
+        items: [
+          { id: "si_family_edge", quantity: 6 },
+          { deleted: true, id: "si_family" },
+        ],
+        proration_behavior: "none",
+      }),
+      expect.objectContaining({
+        idempotencyKey: expect.stringMatching(
+          /^family-member-plan:hbag_family:hbagm_mom:\d+:edge:normalize:[a-f0-9]{32}$/u,
+        ),
+      }),
+    );
+    expect(tx.hostedAccountGroupMembership.updateMany).toHaveBeenCalledWith({
+      data: {
+        pendingPlanCode: null,
+        planCode: "edge",
+      },
+      where: {
+        id: "hbagm_mom",
+        pendingPlanCode: "edge",
+        planCode: "pulse",
+        status: "active",
+      },
+    });
+    expect(tx.hostedAccountGroupPlanCapacity.createMany).toHaveBeenCalledWith({
+      data: [
+        { billedQuantity: 6, groupId: "hbag_family", planCode: "edge" },
+      ],
     });
   });
 
@@ -7775,31 +8440,105 @@ function makeFamilyStripeSubscriptionEvent(): Stripe.Event {
 }
 
 function makeFamilyStripeInvoice(input: {
+  amountPaid?: number;
+  amountRemaining?: number;
+  attempted?: boolean;
+  billingReason?: Stripe.Invoice.BillingReason;
+  created?: number;
+  customerId?: string;
   hostedInvoiceUrl?: string | null;
+  id?: string;
+  lines?: Stripe.InvoiceLineItem[];
   status: Stripe.Invoice.Status;
+  subscriptionId?: string;
 }): Stripe.Invoice {
   const invoice: Partial<Stripe.Invoice> = {
-    amount_remaining: input.status === "paid" ? 0 : 700,
-    attempted: true,
-    customer: "cus_direct",
+    amount_paid: input.amountPaid ?? (input.status === "paid" ? 700 : 0),
+    amount_remaining:
+      input.amountRemaining ?? (input.status === "paid" ? 0 : 700),
+    attempted: input.attempted ?? true,
+    billing_reason: input.billingReason ?? "subscription_update",
+    created: input.created ?? FAMILY_STRIPE_PERIOD_START_SECONDS,
+    customer: input.customerId ?? "cus_family",
     hosted_invoice_url: input.hostedInvoiceUrl ?? null,
-    id: "in_family_transition",
+    id: input.id ?? "in_family_transition",
+    lines: {
+      data: input.lines ?? [],
+      has_more: false,
+      object: "list",
+      url: `/v1/invoices/${input.id ?? "in_family_transition"}/lines`,
+    },
     object: "invoice",
+    parent: {
+      quote_details: null,
+      subscription_details: {
+        metadata: {},
+        subscription: input.subscriptionId ?? "sub_family",
+      },
+      type: "subscription_details",
+    },
     status: input.status,
   };
   return invoice as Stripe.Invoice;
 }
 
-function makeFamilyStripeInvoicePayment(input: {
+function makeFamilyStripeInvoiceLine(input: {
+  amount?: number;
   invoiceId: string;
+  periodEnd?: number;
+  periodStart?: number;
+  priceId: string;
+  proration?: boolean;
+  quantity: number;
+  subscriptionItemId: string;
+}): Stripe.InvoiceLineItem {
+  const line: Partial<Stripe.InvoiceLineItem> = {
+    amount: input.amount ?? 700,
+    id: `il_${input.invoiceId}_${input.subscriptionItemId}`,
+    invoice: input.invoiceId,
+    object: "line_item",
+    parent: {
+      invoice_item_details: null,
+      subscription_item_details: {
+        invoice_item: null,
+        proration: input.proration ?? false,
+        proration_details: null,
+        subscription: "sub_family",
+        subscription_item: input.subscriptionItemId,
+      },
+      type: "subscription_item_details",
+    },
+    period: {
+      end: input.periodEnd ?? FAMILY_STRIPE_PERIOD_END_SECONDS,
+      start: input.periodStart ?? FAMILY_STRIPE_PERIOD_START_SECONDS,
+    },
+    pricing: {
+      price_details: {
+        price: input.priceId,
+        product: "prod_family",
+      },
+      type: "price_details",
+      unit_amount_decimal: null,
+    },
+    quantity: input.quantity,
+    subscription: "sub_family",
+  };
+  return line as Stripe.InvoiceLineItem;
+}
+
+function makeFamilyStripeInvoicePayment(input: {
+  amountPaid?: number;
+  invoiceId: string;
+  paymentIntentId?: string;
   paymentIntentStatus: Stripe.PaymentIntent.Status;
 }): Stripe.InvoicePayment {
   const paymentIntent: Partial<Stripe.PaymentIntent> = {
-    id: "pi_family_transition",
+    id: input.paymentIntentId ?? "pi_family_transition",
     object: "payment_intent",
     status: input.paymentIntentStatus,
   };
   const invoicePayment: Partial<Stripe.InvoicePayment> = {
+    amount_paid: input.amountPaid ?? 700,
     id: "inpay_family_transition",
     invoice: input.invoiceId,
     is_default: true,

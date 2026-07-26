@@ -9,6 +9,7 @@ import {
   requestHostedPulseTrialContinuation,
   requestHostedPulseTrialStartPaid,
 } from "@/src/components/hosted-onboarding/client-api";
+import { ContactSupportAction } from "@/src/components/support/contact-support-action";
 import { BillingPortalButton } from "@/src/components/settings/billing-portal-button";
 import { Button } from "@/src/components/ui/button";
 import { Spinner } from "@/src/components/ui/spinner";
@@ -23,10 +24,14 @@ import { getHostedBillingPlanDefinition } from "@/src/lib/hosted-onboarding/bill
 import { cn } from "@/src/lib/utils";
 
 import { PlanFeatureCard } from "./plan-feature-card";
-import { toErrorMessage } from "./hosted-settings-sync-helpers";
+import {
+  resolveHostedBillingErrorAction,
+  toErrorMessage,
+  type HostedBillingErrorAction,
+} from "./hosted-settings-sync-helpers";
 
 type StartPaidPulseStatus = "billing_pending" | "idle" | "submitting";
-type StartPaidPulseErrorAction = "billing" | "retry" | null;
+type StartPaidPulseErrorAction = HostedBillingErrorAction | null;
 type PulseTrialBillingContinuationStatus =
   | "billing_pending"
   | "error"
@@ -44,6 +49,10 @@ const START_PAID_PULSE_BILLING_RECOVERY_CODES = new Set([
   "HOSTED_PULSE_TRIAL_START_PAID_PREEXISTING_INVOICE_CONFLICT",
   "HOSTED_PULSE_TRIAL_START_PAID_RESUMED_WITHOUT_INVOICE",
   "HOSTED_PULSE_TRIAL_START_PAID_UNCOLLECTIBLE",
+]);
+const START_PAID_PULSE_SUPPORT_RECOVERY_CODES = new Set([
+  "HOSTED_PULSE_TRIAL_START_PAID_PAYMENT_URL_MISSING",
+  "HOSTED_PULSE_TRIAL_START_PAID_STRIPE_PROVIDER_REJECTED",
 ]);
 
 const PULSE_FEATURES = [
@@ -157,16 +166,11 @@ export function StartPaidPulseButton(props: {
 function resolveStartPaidPulseErrorAction(
   error: unknown,
 ): StartPaidPulseErrorAction {
-  if (!(error instanceof HostedOnboardingApiError)) {
-    return "retry";
-  }
-  if (error.retryable) {
-    return "retry";
-  }
-  return error.code &&
-      START_PAID_PULSE_BILLING_RECOVERY_CODES.has(error.code)
-    ? "billing"
-    : null;
+  return resolveHostedBillingErrorAction({
+    billingRecoveryCodes: START_PAID_PULSE_BILLING_RECOVERY_CODES,
+    error,
+    supportRecoveryCodes: START_PAID_PULSE_SUPPORT_RECOVERY_CODES,
+  });
 }
 
 export function PulseTrialBillingContinuation() {
@@ -350,7 +354,15 @@ export function StartPaidPulseConfirmationContent(props: {
             variant="secondary"
             label="Open billing"
           />
-        ) : (
+        ) : props.errorAction === "support" ? (
+          <ContactSupportAction
+            body={"Hi Murph support,\n\nI need help finishing a Pulse billing change."}
+            className="w-full"
+            subject="Murph Pulse billing support"
+          />
+        ) : !props.errorMessage ||
+          props.errorAction === "retry" ||
+          props.status === "billing_pending" ? (
           <Button
             type="button"
             size="xl"
@@ -366,7 +378,7 @@ export function StartPaidPulseConfirmationContent(props: {
                   ? "Try again"
                   : "Start Pulse"}
           </Button>
-        )}
+        ) : null}
         <Button
           type="button"
           size="xl"
@@ -375,7 +387,7 @@ export function StartPaidPulseConfirmationContent(props: {
           disabled={isSubmitting}
           className="w-full"
         >
-          Cancel
+          {props.errorMessage && props.errorAction !== "retry" ? "Close" : "Cancel"}
         </Button>
       </div>
     </>

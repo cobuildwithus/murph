@@ -5,9 +5,9 @@ import { useRouter } from "next/navigation";
 import { useState, type ReactNode } from "react";
 
 import {
-  HostedOnboardingApiError,
   requestHostedOnboardingJson,
 } from "@/src/components/hosted-onboarding/client-api";
+import { ContactSupportAction } from "@/src/components/support/contact-support-action";
 import { BillingPortalButton } from "@/src/components/settings/billing-portal-button";
 import { Button } from "@/src/components/ui/button";
 import {
@@ -22,7 +22,11 @@ import type { HostedBillingPlanUpgradeResult } from "@/src/lib/hosted-onboarding
 import { cn } from "@/src/lib/utils";
 
 import { PlanFeatureCard } from "./plan-feature-card";
-import { toErrorMessage } from "./hosted-settings-sync-helpers";
+import {
+  resolveHostedBillingErrorAction,
+  toErrorMessage,
+  type HostedBillingErrorAction,
+} from "./hosted-settings-sync-helpers";
 
 const edgePlan = getHostedBillingPlanDefinition("launch_edge_monthly");
 const edgePriceLabel = formatHostedBillingPlanMonthlyPrice(edgePlan.recurringAmountUsdCents);
@@ -34,7 +38,7 @@ const EDGE_FEATURES = [
   "Deeper research and analysis",
 ];
 
-type EdgeUpgradeRecovery = "billing" | "retry" | null;
+type EdgeUpgradeRecovery = HostedBillingErrorAction | null;
 
 const EDGE_UPGRADE_BILLING_RECOVERY_CODES = new Set([
   "HOSTED_BILLING_PLAN_UPGRADE_APPLIED_INVOICE_VOIDED",
@@ -42,6 +46,9 @@ const EDGE_UPGRADE_BILLING_RECOVERY_CODES = new Set([
   "HOSTED_BILLING_PLAN_UPGRADE_FINANCIAL_STATE_BLOCKED",
   "HOSTED_BILLING_PLAN_UPGRADE_INVOICE_FAILED",
   "HOSTED_BILLING_PLAN_UPGRADE_INVOICE_UNCOLLECTIBLE",
+]);
+const EDGE_UPGRADE_SUPPORT_RECOVERY_CODES = new Set([
+  "HOSTED_BILLING_STRIPE_PLAN_CHANGE_PROVIDER_REJECTED",
 ]);
 
 export function UpgradeToEdgeButton(props: {
@@ -242,6 +249,12 @@ export function EdgeUpgradeConfirmationContent(props: {
             label="Open billing"
             variant="secondary"
           />
+        ) : props.errorMessage && props.recovery === "support" ? (
+          <ContactSupportAction
+            body={"Hi Murph support,\n\nI need help finishing an Edge billing change."}
+            className="w-full"
+            subject="Murph Edge billing support"
+          />
         ) : !props.errorMessage || props.recovery === "retry" ? (
           <Button
             type="button"
@@ -267,7 +280,7 @@ export function EdgeUpgradeConfirmationContent(props: {
           disabled={props.isUpgrading}
           className="w-full"
         >
-          Cancel
+          {props.errorMessage && props.recovery !== "retry" ? "Close" : "Cancel"}
         </Button>
       </div>
     </>
@@ -279,16 +292,11 @@ function formatHostedBillingPlanMonthlyPrice(amountUsdCents: number): string {
 }
 
 function resolveEdgeUpgradeRecovery(error: unknown): EdgeUpgradeRecovery {
-  if (!(error instanceof HostedOnboardingApiError)) {
-    return "retry";
-  }
-  if (error.retryable) {
-    return "retry";
-  }
-  return error.code &&
-      EDGE_UPGRADE_BILLING_RECOVERY_CODES.has(error.code)
-    ? "billing"
-    : "retry";
+  return resolveHostedBillingErrorAction({
+    billingRecoveryCodes: EDGE_UPGRADE_BILLING_RECOVERY_CODES,
+    error,
+    supportRecoveryCodes: EDGE_UPGRADE_SUPPORT_RECOVERY_CODES,
+  });
 }
 
 function isHostedStripePaymentActionUrl(value: string): boolean {

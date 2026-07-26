@@ -28,12 +28,14 @@ import {
   type HostedMemberFamilyBillingClaim,
 } from "./family-plan";
 import {
-  bindHostedMemberStripeCustomerIdIfMissingTx,
   bindHostedMemberStripeCheckoutSessionTx,
+  clearHostedMemberStripeCustomerReservationAfterDefinitiveFailureTx,
+  finalizeHostedMemberStripeCustomerReservationTx,
   clearHostedMemberStripeCheckoutAttemptTx,
   HostedMemberStripeMutationLockBusyError,
   type HostedMemberStripeCheckoutAttemptReservation,
   readHostedMemberStripeBillingRef,
+  reserveHostedMemberStripeCustomerReservationTx,
   reserveHostedMemberStripeCheckoutAttemptTx,
   withHostedMemberStripeMutationLock,
   withHostedMemberStripeMutationLockForOps,
@@ -59,7 +61,6 @@ import {
   requireHostedStripeCheckoutConfig,
 } from "./runtime";
 import {
-  logHostedStripeFailure,
   withHostedStripeFailureLog,
 } from "./stripe-error-log";
 import {
@@ -73,13 +74,10 @@ import {
 import {
   sendHostedSignupWelcomeEmailForMemberBestEffort,
 } from "./signup-welcome-email";
-import {
-  HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
-  lockHostedMemberRow,
-} from "./shared";
 import { createHostedPulseTrialStripeCustomer } from "./pulse-trial-customer";
 import {
   HOSTED_STRIPE_IDEMPOTENCY_SAFE_REPLAY_WINDOW_MS,
+  isHostedStripeDefinitiveRequestRejection,
   isHostedStripeIdempotencyConflict,
   isHostedStripeRetryableFailure,
 } from "./stripe-billing-state";
@@ -220,6 +218,7 @@ export async function createHostedBillingCheckout(
     ) {
       await reserveHostedPulseTrialCheckoutCustomer({
         memberId: invite.member.id,
+        now,
         prisma,
         stripe,
       });
@@ -1119,17 +1118,14 @@ function buildHostedBillingCheckoutStripeError(error: unknown) {
 
 async function reserveHostedPulseTrialCheckoutCustomer(input: {
   memberId: string;
+  now: Date;
   prisma: PrismaClient;
   stripe: ReturnType<typeof requireHostedStripeCheckoutConfig>["stripe"];
 }): Promise<string> {
-  const candidateStripeCustomerId = await createHostedPulseTrialStripeCustomer({
+  const reservation = await withHostedBillingCheckoutMemberLock({
     memberId: input.memberId,
-    stripe: input.stripe,
-  });
-  let stripeCustomerId: string;
-  try {
-    stripeCustomerId = await input.prisma.$transaction(async (tx) => {
-      await lockHostedMemberRow(tx, input.memberId);
+    prisma: input.prisma,
+    run: async (tx) => {
       const member = await tx.hostedMember.findUnique({
         select: {
           suspendedAt: true,
@@ -1147,60 +1143,81 @@ async function reserveHostedPulseTrialCheckoutCustomer(input: {
             : "Your hosted member record was not found.",
         });
       }
-      const currentBillingRef = await readHostedMemberStripeBillingRef({
+      return reserveHostedMemberStripeCustomerReservationTx({
         memberId: input.memberId,
-        prisma: tx,
+        now: input.now,
+        tx,
       });
-      const billingRef = currentBillingRef?.stripeCustomerId
-        ? currentBillingRef
-        : await bindHostedMemberStripeCustomerIdIfMissingTx({
-            memberId: input.memberId,
-            stripeCustomerId: candidateStripeCustomerId,
-            tx,
-          });
-      if (!billingRef?.stripeCustomerId) {
-        throw hostedOnboardingError({
-          code: "HOSTED_AUTO_PULSE_TRIAL_CUSTOMER_BIND_FAILED",
-          httpStatus: 409,
-          message: "Murph could not reserve Stripe billing for trial activation. Try again.",
-          retryable: true,
-        });
-      }
-      return billingRef.stripeCustomerId;
-    }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+    },
+  });
+
+  if (reservation.kind === "bound") {
+    return reservation.stripeCustomerId;
+  }
+
+  let candidateStripeCustomerId: string;
+  try {
+    candidateStripeCustomerId = await createHostedPulseTrialStripeCustomer({
+      memberId: input.memberId,
+      requestOptions: HOSTED_BILLING_CHECKOUT_STRIPE_AUTHORITY_REQUEST_OPTIONS,
+      reservationId: reservation.reservationId,
+      stripe: input.stripe,
+    });
   } catch (error) {
-    // Customer creation uses a stable per-member idempotency key. Deleting the
-    // candidate after any failed binding transaction could make the next retry
-    // replay a deleted Customer. Retain it unless a successful transaction
-    // proves that a different Customer owns the member.
+    if (isHostedStripeDefinitiveRequestRejection(error)) {
+      await withHostedBillingCheckoutMemberLock({
+        memberId: input.memberId,
+        prisma: input.prisma,
+        run: (tx) =>
+          clearHostedMemberStripeCustomerReservationAfterDefinitiveFailureTx({
+            memberId: input.memberId,
+            reservationId: reservation.reservationId,
+            tx,
+          }),
+      });
+    }
     throw error;
   }
 
-  if (stripeCustomerId !== candidateStripeCustomerId) {
-    await deleteUnusedHostedPulseTrialStripeCustomer({
-      candidateStripeCustomerId,
-      stripe: input.stripe,
-    });
+  const finalization = await withHostedBillingCheckoutMemberLock({
+    memberId: input.memberId,
+    prisma: input.prisma,
+    run: async (tx) => {
+      const member = await tx.hostedMember.findUnique({
+        select: {
+          suspendedAt: true,
+        },
+        where: {
+          id: input.memberId,
+        },
+      });
+      const finalized =
+        await finalizeHostedMemberStripeCustomerReservationTx({
+          bindAllowed: Boolean(member && !(member.suspendedAt instanceof Date)),
+          candidateStripeCustomerId,
+          memberId: input.memberId,
+          now: input.now,
+          reservationId: reservation.reservationId,
+          tx,
+        });
+      return {
+        finalized,
+        memberExists: Boolean(member),
+      };
+    },
+  });
+  if (finalization.finalized.kind === "bound") {
+    return finalization.finalized.stripeCustomerId;
   }
-
-  return stripeCustomerId;
-}
-
-async function deleteUnusedHostedPulseTrialStripeCustomer(input: {
-  candidateStripeCustomerId: string;
-  stripe: Stripe;
-}): Promise<void> {
-  try {
-    await input.stripe.customers.del(
-      input.candidateStripeCustomerId,
-      HOSTED_BILLING_CHECKOUT_STRIPE_AUTHORITY_REQUEST_OPTIONS,
-    );
-  } catch (error) {
-    logHostedStripeFailure({
-      error,
-      operationName: "customers.del.unused-trial-reservation",
-    });
-  }
+  throw hostedOnboardingError({
+    code: finalization.memberExists
+      ? "HOSTED_MEMBER_SUSPENDED"
+      : "HOSTED_MEMBER_NOT_FOUND",
+    httpStatus: finalization.memberExists ? 403 : 404,
+    message: finalization.memberExists
+      ? "This hosted account is suspended. Contact support to restore access."
+      : "Your hosted member record was not found.",
+  });
 }
 
 async function resolveHostedBillingCheckoutAuth(

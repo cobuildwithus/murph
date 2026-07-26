@@ -140,6 +140,8 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
     'stripeSubscriptionScheduleIdEncrypted String? @map("stripe_subscription_schedule_id_encrypted")',
     'stripeCheckoutSessionLookupKey String? @unique @map("stripe_checkout_session_lookup_key")',
     'stripeCheckoutSessionIdEncrypted String? @map("stripe_checkout_session_id_encrypted")',
+    'stripeCustomerReservationId String? @unique @map("stripe_customer_reservation_id")',
+    'stripeCustomerReservationCreatedAt DateTime? @map("stripe_customer_reservation_created_at")',
     'checkoutAttemptId String? @map("checkout_attempt_id")',
     'checkoutIntentHash String? @map("checkout_intent_hash")',
     'checkoutCreatedAt DateTime? @map("checkout_created_at")',
@@ -792,6 +794,13 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
+    const hostedMemberStripeCustomerReservationMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260726020000_hosted_member_stripe_customer_reservation/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     expect(migrationEntries).toEqual([
       "2026040600_init",
       "20260425000000_drop_legacy_linq_control_plane",
@@ -917,6 +926,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260725120000_hosted_observability_retention",
       "20260725120000_hosted_thread_delivery_route",
       "20260725210000_hosted_member_checkout_attempt",
+      "20260726020000_hosted_member_stripe_customer_reservation",
       "migration_lock.toml",
     ]);
     expect(hostedMemberCheckoutAttemptMigrationSql).toContain(
@@ -925,8 +935,17 @@ describe("hosted Prisma baseline migration", () => {
     expect(hostedMemberCheckoutAttemptMigrationSql).toContain(
       'ADD COLUMN "stripe_checkout_session_id_encrypted" TEXT',
     );
+    expect(hostedMemberStripeCustomerReservationMigrationSql).toContain(
+      'ADD COLUMN "stripe_customer_reservation_id" TEXT',
+    );
+    expect(hostedMemberStripeCustomerReservationMigrationSql).toContain(
+      'ADD COLUMN "stripe_customer_reservation_created_at" TIMESTAMP(3)',
+    );
     expect(hostedMemberCheckoutAttemptMigrationSql).toContain(
       'CREATE UNIQUE INDEX "hosted_member_billing_ref_stripe_checkout_session_lookup_key_key"',
+    );
+    expect(hostedMemberStripeCustomerReservationMigrationSql).toContain(
+      'CREATE UNIQUE INDEX "hosted_member_billing_ref_stripe_customer_reservation_id_key"',
     );
     expect(hostedMailboxSubscriptionActionClaimMigrationSql).toContain(
       'ALTER TABLE "hosted_mailbox_item"',

@@ -431,6 +431,28 @@ The owner lock applies these rules:
 This prevents a plan, offer, email/customer, retry, or double-click variation
 from creating two simultaneously chargeable accepted subscriptions.
 
+Creating the member's first Stripe Customer uses the same ownership shape.
+Before the provider call, Web stores one member-scoped reservation ID and its
+creation time under the member owner lock. Standard Checkout, automatic trial
+enrollment, and usage-credit Checkout all replay `customers.create` with that
+reservation ID as the Stripe idempotency key, then bind the returned Customer
+and clear the reservation under the same lock. A definitive provider rejection
+may clear the reservation; an ambiguous response retains it. Replays stop at
+the conservative 23-hour idempotency boundary and fail closed for operator
+reconciliation instead of risking a second Customer after Stripe may prune the
+key. Account deletion replays a fresh reservation before local deletion and
+verifies its exact server-owned metadata, subscriptions, and zero balance.
+
+Loser cleanup derives compensation only from the exact paid Checkout invoice.
+It reconciles every paid allocation and cumulative refund before creating new
+refunds, excludes pre-existing Customer debt from the refund target, and
+restores any Customer credit consumed by the loser through an invoice-linked
+post-payment Credit Note. Issued Credit Notes and their immutable balance
+transactions are the long-horizon retry proof; editable metadata is diagnostic
+only. Customer deletion is allowed only after canonical legacy and
+per-currency balances are zero and is preceded by final balance and local-owner
+rechecks.
+
 ## Trial Activation
 
 This is the highest-risk implementation slice.
@@ -719,8 +741,23 @@ Focused tests to add or update:
   - equivalent retries recover one stored Session, while plan, offer, policy,
     customer/email, and invite changes cannot overwrite its canonical intent
   - an unbound attempt stops replay before Stripe may prune its idempotency key
+  - first-Customer creation reserves before the provider call, replays one
+    reservation after ambiguity, and fails closed once that reservation is too
+    old to replay safely
   - stale or concurrent completions accept exactly one subscription; a loser
     is canceled and its cumulative paid Checkout allocations are refunded
+- `hosted-onboarding-auto-trial-enrollment-service.test.ts` and
+  `hosted-usage-credit-member-stripe-customer.test.ts`
+  - reuse the same first-Customer reservation primitive as standard Checkout
+  - concurrent callers bind one exact Customer
+  - suspension, deletion, and provider ambiguity retain enough ownership for
+    safe replay or account-deletion cleanup
+- `hosted-onboarding-stripe-checkout-subscription-cleanup.test.ts`
+  - cumulative cash refunds never exceed the exact invoice cash allocation
+  - consumed Customer credit is restored once through canonical Credit Notes,
+    including a response lost after Stripe commits
+  - prior Customer debt, mixed Credit Notes, incomplete pagination, nonzero
+    balances, or ownership drift fail closed before destructive cleanup
 - `hosted-onboarding-billing-checkout-route.test.ts`
   - route validates `checkoutOffer`
   - route defaults missing offer to `standard`

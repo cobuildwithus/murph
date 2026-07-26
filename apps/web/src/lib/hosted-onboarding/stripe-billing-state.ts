@@ -667,19 +667,44 @@ export function isHostedStripeDefinitiveRequestRejection(
   if (!error || typeof error !== "object") {
     return false;
   }
+  const type = Reflect.get(error, "type");
+  const rawType = Reflect.get(error, "rawType");
+  const code = Reflect.get(error, "code");
+  const statusCode = Reflect.get(error, "statusCode");
+  if (
+    code === "idempotency_key_in_use" ||
+    isHostedStripeIdempotencyConflict(error) ||
+    statusCode === 409 ||
+    statusCode === 429 ||
+    (
+      typeof statusCode === "number" &&
+      statusCode >= 500
+    ) ||
+    (
+      typeof type === "string" &&
+      HOSTED_STRIPE_RETRYABLE_ERROR_TYPES.has(type)
+    ) ||
+    (
+      typeof rawType === "string" &&
+      HOSTED_STRIPE_RETRYABLE_ERROR_TYPES.has(rawType)
+    ) ||
+    (
+      typeof code === "string" &&
+      HOSTED_STRIPE_RETRYABLE_ERROR_CODES.has(code)
+    )
+  ) {
+    return false;
+  }
   const shouldRetry = readStripeShouldRetryDirective(error);
   if (shouldRetry !== null) {
     return !shouldRetry;
   }
-  const statusCode = Reflect.get(error, "statusCode");
   if (typeof statusCode === "number") {
     return statusCode >= 400 &&
       statusCode < 500 &&
       statusCode !== 409 &&
       statusCode !== 429;
   }
-  const type = Reflect.get(error, "type");
-  const rawType = Reflect.get(error, "rawType");
   return type === "StripeInvalidRequestError" ||
     type === "StripeAuthenticationError" ||
     type === "StripePermissionError" ||

@@ -270,7 +270,13 @@ async function transitionHostedPulseTrialPaidPlan(
   }
 
   const existingInvoiceResult =
-    subscription.status !== "trialing" && !canResumePausedAutoTrial
+    subscription.status !== "trialing" &&
+      !(
+        canResumePausedAutoTrial &&
+        isHostedPulseTrialStartPaidZeroAmountPaidInvoice(
+          existingInvoiceSnapshot?.invoice ?? null,
+        )
+      )
       ? await maybeResolveHostedPulseTrialStartPaidPostMutationInvoiceResult({
         invoiceSnapshot: existingInvoiceSnapshot,
         memberId: input.memberId,
@@ -374,6 +380,15 @@ async function transitionHostedPulseTrialPaidPlan(
     stripeCustomerId,
     stripeSubscriptionId,
   });
+}
+
+function isHostedPulseTrialStartPaidZeroAmountPaidInvoice(
+  invoice: Stripe.Invoice | null,
+): boolean {
+  return invoice?.status === "paid" &&
+    invoice.amount_due === 0 &&
+    invoice.amount_paid === 0 &&
+    invoice.total === 0;
 }
 
 function assertHostedPulseTrialStartPaidRecoverableSourceState(input: {

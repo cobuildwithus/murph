@@ -11,6 +11,7 @@ import {
 } from "@/src/components/hosted-onboarding/client-api";
 import { HOSTED_PHONE_COUNTRY_OPTIONS } from "@/src/components/hosted-onboarding/hosted-phone-country-options";
 import { usePhoneCountryCode } from "@/src/components/hosted-onboarding/phone-country-code-client-provider";
+import { ContactSupportAction } from "@/src/components/support/contact-support-action";
 import { Badge } from "@/src/components/ui/badge";
 import { Button } from "@/src/components/ui/button";
 import {
@@ -81,7 +82,7 @@ interface CreatedFamilyInvite {
   telegramInviteUrl: string | null;
 }
 
-interface FamilyInviteRequestPayload {
+export interface FamilyInviteRequestPayload {
   addSeatIfNeeded: boolean;
   planCode: HostedPlanCode;
   targetEmail?: string;
@@ -109,8 +110,8 @@ export function FamilyInvitePaymentRecoveryStep(props: {
       >
         <p className="font-medium text-[#2d3436]">Seat charge needs approval</p>
         <p className="mt-1 leading-5">
-          Open Stripe in a new tab and approve the charge. Your invite details stay here
-          until you return to finish the invite.
+          Open Stripe in a new tab and approve the charge. Then return here to finish
+          this saved invite.
         </p>
       </div>
 
@@ -162,6 +163,94 @@ export function FamilyInvitePaymentRecoveryStep(props: {
   );
 }
 
+export function FamilyInvitePaymentRecoveryContent(props: {
+  errorMessage?: string | null;
+  intent: FamilyInviteRequestPayload;
+  isFinishing: boolean;
+  onClose: () => void;
+  onFinish: () => void;
+  paymentUrl: string;
+  tier: FamilyManagerTier;
+}) {
+  const contact = readFamilyInviteIntentContact(props.intent);
+
+  return (
+    <>
+      <DialogHeader className="pr-10">
+        <DialogTitle className="font-serif text-2xl/7 font-semibold tracking-normal text-[#2d3436]">
+          Finish family invite
+        </DialogTitle>
+        <DialogDescription className="text-sm leading-6 text-[#736a58]">
+          These details are locked to the seat charge already in progress.
+        </DialogDescription>
+      </DialogHeader>
+
+      <dl className="divide-y divide-[#c4a882]/20 border-y border-[#c4a882]/25 text-sm">
+        {props.intent.targetLabel ? (
+          <FamilyInviteIntentRow label="Name" value={props.intent.targetLabel} />
+        ) : null}
+        {contact ? (
+          <FamilyInviteIntentRow label={contact.label} value={contact.value} />
+        ) : null}
+        <FamilyInviteIntentRow
+          label="Access"
+          value={`${props.tier.name} · ${props.tier.priceLabel}`}
+        />
+      </dl>
+
+      <FamilyInvitePaymentRecoveryStep
+        errorMessage={props.errorMessage}
+        isFinishing={props.isFinishing}
+        paymentUrl={props.paymentUrl}
+        onFinish={props.onFinish}
+      />
+
+      <Button
+        type="button"
+        size="xl"
+        variant="ghost"
+        onClick={props.onClose}
+        disabled={props.isFinishing}
+        className="w-full"
+      >
+        Close for now
+      </Button>
+    </>
+  );
+}
+
+function FamilyInviteIntentRow(props: {
+  label: string;
+  value: string;
+}) {
+  return (
+    <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,2fr)] gap-3 py-3">
+      <dt className="text-[#736a58]">{props.label}</dt>
+      <dd className="text-right font-medium text-[#2d3436] [overflow-wrap:anywhere]">
+        {props.value}
+      </dd>
+    </div>
+  );
+}
+
+function readFamilyInviteIntentContact(
+  intent: FamilyInviteRequestPayload,
+): { label: string; value: string } | null {
+  if (intent.targetPhoneNumber) {
+    return { label: "iMessage", value: intent.targetPhoneNumber };
+  }
+  if (intent.targetEmail) {
+    return { label: "Email", value: intent.targetEmail };
+  }
+  if (intent.targetTelegramUsername) {
+    return {
+      label: "Telegram",
+      value: `@${intent.targetTelegramUsername}`,
+    };
+  }
+  return null;
+}
+
 function inviteContacts(invite: FamilyManagerInvite): string[] {
   return [
     invite.targetEmail,
@@ -209,7 +298,7 @@ const INVITE_CHANNEL_OPTIONS: ReadonlyArray<{
   { label: "Telegram", value: "telegram" },
 ];
 const DIALOG_CLASS =
-  "max-w-md gap-6 border border-[#c4a882]/25 bg-[#fffcf6] p-6 text-[#2d3436] ring-[#c4a882]/25 md:p-7";
+  "max-h-[calc(100dvh-2rem)] max-w-md gap-6 overflow-y-auto overscroll-contain border border-[#c4a882]/25 bg-[#fffcf6] p-6 text-[#2d3436] ring-[#c4a882]/25 md:p-7";
 const DEFAULT_INVITE_PHONE_COUNTRY_CODE = "US";
 
 function resolveInvitePhoneCountryOption(value: string | null | undefined) {
@@ -330,7 +419,7 @@ export function HostedFamilyStartButton(props: {
   );
 }
 
-function HostedFamilyBillingStatusNotice(props: {
+export function HostedFamilyBillingRecoveryNotice(props: {
   billingActive: boolean;
   billingStatus: HostedBillingStatus;
 }) {
@@ -354,7 +443,7 @@ function HostedFamilyBillingStatusNotice(props: {
       case "active":
         return {
           detail:
-            "Billing is active, but Family access is temporarily unavailable. Contact Murph if this continues.",
+            "Billing is active, but Family access is paused. Email support so Murph can review the account.",
           title: "Family access is paused.",
         };
       case "canceled":
@@ -397,12 +486,20 @@ function HostedFamilyBillingStatusNotice(props: {
         <p className="mt-1 text-sm leading-5 text-[#736a58]">{copy.detail}</p>
       </div>
       <div className="w-full shrink-0 sm:w-auto">
-        <BillingPortalButton
-          billingScope="family"
-          block
-          label="Manage Family billing"
-          variant="secondary"
-        />
+        {props.billingStatus === "active" ? (
+          <ContactSupportAction
+            body={"Hi Murph support,\n\nMy Family billing is active, but Family access is paused."}
+            className="w-full sm:w-auto"
+            subject="Murph Family access support"
+          />
+        ) : (
+          <BillingPortalButton
+            billingScope="family"
+            block
+            label="Manage Family billing"
+            variant="secondary"
+          />
+        )}
       </div>
     </div>
   );
@@ -540,12 +637,10 @@ export function HostedFamilyManager(props: {
   function changeInviteChannel(nextChannel: InviteChannel) {
     setInviteChannel(nextChannel);
     setInviteError(null);
-    setInvitePaymentRecovery(null);
   }
 
   function markInviteFormEdited() {
     setInviteError(null);
-    setInvitePaymentRecovery(null);
   }
 
   function buildFamilyInviteRequestPayload(): FamilyInviteRequestPayload | null {
@@ -730,7 +825,9 @@ export function HostedFamilyManager(props: {
 
   function closeInviteDialog() {
     setInviteOpen(false);
-    resetInviteForm();
+    if (!invitePaymentRecovery) {
+      resetInviteForm();
+    }
   }
 
   return (
@@ -748,12 +845,14 @@ export function HostedFamilyManager(props: {
           <Button
             type="button"
             onClick={() => {
-              resetInviteForm();
+              if (!invitePaymentRecovery) {
+                resetInviteForm();
+              }
               setInviteOpen(true);
             }}
-            disabled={inviteDisabled}
+            disabled={!invitePaymentRecovery && inviteDisabled}
           >
-            Invite member
+            {invitePaymentRecovery ? "Resume invite" : "Invite member"}
           </Button>
         </div>
         {actionNotice ? (
@@ -966,233 +1065,249 @@ export function HostedFamilyManager(props: {
           );
         })}
 
-      <HostedFamilyBillingStatusNotice
+      <HostedFamilyBillingRecoveryNotice
         billingActive={props.billingActive}
         billingStatus={props.billingStatus}
       />
 
       <Dialog open={inviteOpen} onOpenChange={(open) => { if (!open) { closeInviteDialog(); } }}>
         <DialogContent className={DIALOG_CLASS}>
-          <DialogHeader className="pr-10">
-            <DialogTitle className="font-serif text-2xl/7 font-semibold tracking-normal text-[#2d3436]">
-              {createdInvite ? "Invite created" : "Invite a family member"}
-            </DialogTitle>
-            <DialogDescription className="text-sm leading-6 text-[#736a58]">
-              {createdInvite
-                ? "Copy the link and send it to them yourself."
-                : "You'll get a link to send them yourself. Murph won't message them."}
-            </DialogDescription>
-          </DialogHeader>
-
-          {createdInvite ? (
-            <div className="flex flex-col gap-4">
-              <div className="rounded-lg border border-[#c4a882]/25 bg-[#f5f0e8] p-4">
-                <div className="flex items-start gap-3">
-                  <div className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full bg-primary/15 text-primary">
-                    <Check className="size-4" aria-hidden="true" />
-                  </div>
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium text-[#2d3436]">
-                      Send this invite to {createdInvite.targetLabel ?? createdInvite.targetPhoneHint ?? "your family member"}.
-                    </p>
-                    <p className="mt-1 text-xs leading-5 text-[#736a58]">
-                      {createdInviteHasContact
-                        ? "Only they can use this invite."
-                        : "Anyone with this link can join."}
-                    </p>
-                  </div>
-                </div>
-              </div>
-              <Button
-                type="button"
-                size="xl"
-                onClick={() => void copyCreatedInviteLink()}
-                disabled={!inviteShareLink(createdInvite)}
-                className="w-full"
-              >
-                {createdInviteCopied ? (
-                  <>
-                    <Check className="size-4" aria-hidden="true" /> Copied invite link
-                  </>
-                ) : (
-                  <>
-                    <Copy className="size-4" aria-hidden="true" /> Copy invite link
-                  </>
-                )}
-              </Button>
-              <Button type="button" size="xl" variant="ghost" onClick={closeInviteDialog} className="w-full">
-                Done
-              </Button>
-            </div>
+          {invitePaymentRecovery ? (
+            <FamilyInvitePaymentRecoveryContent
+              errorMessage={inviteError}
+              intent={invitePaymentRecovery.payload}
+              isFinishing={isInviting}
+              paymentUrl={invitePaymentRecovery.paymentUrl}
+              tier={
+                props.tiers.find(
+                  (tier) => tier.planCode === invitePaymentRecovery.payload.planCode,
+                ) ?? invitePlan
+              }
+              onClose={closeInviteDialog}
+              onFinish={() => void submitInvite(invitePaymentRecovery.payload)}
+            />
           ) : (
             <>
-              <fieldset
-                disabled={isInviting}
-                className="flex min-w-0 flex-col gap-4 border-0 p-0"
-              >
-                <div className="flex flex-col gap-1.5">
-                  <Label htmlFor="family-invite-label">Name</Label>
-                  <Input
-                    id="family-invite-label"
-                    value={label}
-                    onChange={(event) => {
-                      markInviteFormEdited();
-                      setLabel(event.target.value);
-                    }}
-                    placeholder="Mom"
-                    autoComplete="off"
-                    autoFocus
-                    className="h-12 text-base"
-                  />
-                </div>
+              <DialogHeader className="pr-10">
+                <DialogTitle className="font-serif text-2xl/7 font-semibold tracking-normal text-[#2d3436]">
+                  {createdInvite ? "Invite created" : "Invite a family member"}
+                </DialogTitle>
+                <DialogDescription className="text-sm leading-6 text-[#736a58]">
+                  {createdInvite
+                    ? "Copy the link and send it to them yourself."
+                    : "You'll get a link to send them yourself. Murph won't message them."}
+                </DialogDescription>
+              </DialogHeader>
 
-                <div className="flex flex-col gap-1.5">
-                  <Label>Access</Label>
-                  <SegmentedControl
-                    aria-label="Family member tier"
-                    options={props.tiers.map((tier) => ({
-                      label: `${tier.name} · ${tier.priceLabel}`,
-                      value: tier.planCode,
-                    }))}
-                    value={invitePlanCode}
-                    onValueChange={(planCode) => {
-                      markInviteFormEdited();
-                      setInvitePlanCode(planCode);
-                    }}
-                    className="border-[#c4a882]/25 bg-[#f5f0e8]"
-                    itemClassName="text-[#736a58] hover:bg-[#fffcf6]/70 hover:text-[#2d3436] aria-pressed:bg-[#fffcf6] aria-pressed:text-[#2d3436] aria-pressed:shadow-none"
-                  />
-                </div>
-
-                <SegmentedControl
-                  aria-label="Invite by"
-                  options={INVITE_CHANNEL_OPTIONS}
-                  value={inviteChannel}
-                  onValueChange={changeInviteChannel}
-                  className="border-[#c4a882]/25 bg-[#f5f0e8]"
-                  itemClassName="text-[#736a58] hover:bg-[#fffcf6]/70 hover:text-[#2d3436] aria-pressed:bg-[#fffcf6] aria-pressed:text-[#2d3436] aria-pressed:shadow-none"
-                />
-
-                {inviteChannel === "imessage" ? (
-                  <div className="flex flex-col gap-1.5">
-                    <Label htmlFor="family-invite-phone">Phone number</Label>
-                    <PhoneNumberInput
-                      id="family-invite-phone"
-                      autoComplete="off"
-                      inputName="family-invite-phone"
-                      options={HOSTED_PHONE_COUNTRY_OPTIONS}
-                      selectedCountry={selectedPhoneCountry}
-                      value={phone}
-                      onCountryChange={(countryCode) => {
-                        markInviteFormEdited();
-                        setPhoneCountryCode(countryCode);
-                      }}
-                      onPhoneNumberChange={(phoneNumber) => {
-                        markInviteFormEdited();
-                        setPhone(phoneNumber);
-                      }}
-                    />
+              {createdInvite ? (
+                <div className="flex flex-col gap-4">
+                  <div className="rounded-lg border border-[#c4a882]/25 bg-[#f5f0e8] p-4">
+                    <div className="flex items-start gap-3">
+                      <div className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full bg-primary/15 text-primary">
+                        <Check className="size-4" aria-hidden="true" />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium text-[#2d3436]">
+                          Send this invite to {createdInvite.targetLabel ?? createdInvite.targetPhoneHint ?? "your family member"}.
+                        </p>
+                        <p className="mt-1 text-xs leading-5 text-[#736a58]">
+                          {createdInviteHasContact
+                            ? "Only they can use this invite."
+                            : "Anyone with this link can join."}
+                        </p>
+                      </div>
+                    </div>
                   </div>
-                ) : null}
-                {inviteChannel === "email" ? (
-                  <div className="flex flex-col gap-1.5">
-                    <Label htmlFor="family-invite-email">Email</Label>
-                    <Input
-                      id="family-invite-email"
-                      type="email"
-                      value={email}
-                      onChange={(event) => {
-                        markInviteFormEdited();
-                        setEmail(event.target.value);
-                      }}
-                      placeholder="mom@example.com"
-                      inputMode="email"
-                      autoComplete="off"
-                    />
-                  </div>
-                ) : null}
-                {inviteChannel === "telegram" ? (
-                  <div className="flex flex-col gap-1.5">
-                    <Label htmlFor="family-invite-telegram">Telegram username</Label>
-                    <Input
-                      id="family-invite-telegram"
-                      value={telegram}
-                      onChange={(event) => {
-                        markInviteFormEdited();
-                        setTelegram(event.target.value);
-                      }}
-                      placeholder="@username"
-                      autoComplete="off"
-                    />
-                  </div>
-                ) : null}
-                {selectedTierUnavailable ? (
-                  <p role="status" className="text-xs leading-5 text-[#736a58]">
-                    No open {invitePlan.name} seats. Choose a tier with an open seat or free one first.
-                  </p>
-                ) : inviteNeedsStableTargetForSeat ? (
-                  <p role="status" className="text-xs leading-5 text-[#736a58]">
-                    {activeContactInput
-                      ? `Enter a valid ${activeContactInputNoun} to invite. It adds a paid ${invitePlan.name} seat at ${invitePlan.priceLabel}.`
-                      : `Add a contact to invite. It adds a paid ${invitePlan.name} seat at ${invitePlan.priceLabel}.`}
-                  </p>
-                ) : inviteWillAddSeat ? (
-                  <p role="status" className="text-xs leading-5 text-[#736a58]">
-                    Add the {invitePlan.name} seat at {invitePlan.priceLabel} first. Murph creates
-                    the invite after Stripe confirms the seat is ready.
-                  </p>
-                ) : !activeContactInput ? (
-                  <p className="text-xs leading-5 text-[#736a58]">
-                    No contact? Anyone with the link can join.
-                  </p>
-                ) : null}
-              </fieldset>
-
-              {invitePaymentRecovery ? (
-                <FamilyInvitePaymentRecoveryStep
-                  errorMessage={inviteError}
-                  isFinishing={isInviting}
-                  paymentUrl={invitePaymentRecovery.paymentUrl}
-                  onFinish={() => void submitInvite(invitePaymentRecovery.payload)}
-                />
-              ) : inviteError ? (
-                <p
-                  role="alert"
-                  className="rounded-lg border border-destructive/20 bg-destructive/5 p-3 text-sm text-destructive [overflow-wrap:anywhere]"
-                >
-                  {inviteError}
-                </p>
-              ) : null}
-
-              <div className="flex flex-col gap-2">
-                {!invitePaymentRecovery ? (
                   <Button
                     type="button"
                     size="xl"
-                    onClick={() => void submitInvite()}
-                    disabled={inviteSubmitDisabled}
+                    onClick={() => void copyCreatedInviteLink()}
+                    disabled={!inviteShareLink(createdInvite)}
                     className="w-full"
                   >
-                    {isInviting ? (
-                      <Loader2 className="size-4 animate-spin" aria-hidden="true" />
-                    ) : inviteWillAddSeat ? (
-                      `Add ${invitePlan.name} seat & continue`
+                    {createdInviteCopied ? (
+                      <>
+                        <Check className="size-4" aria-hidden="true" /> Copied invite link
+                      </>
                     ) : (
-                      "Create invite"
+                      <>
+                        <Copy className="size-4" aria-hidden="true" /> Copy invite link
+                      </>
                     )}
                   </Button>
-                ) : null}
-                <Button
-                  type="button"
-                  size="xl"
-                  variant="ghost"
-                  onClick={closeInviteDialog}
-                  disabled={isInviting}
-                  className="w-full"
-                >
-                  Cancel
-                </Button>
-              </div>
+                  <Button
+                    type="button"
+                    size="xl"
+                    variant="ghost"
+                    onClick={closeInviteDialog}
+                    className="w-full"
+                  >
+                    Done
+                  </Button>
+                </div>
+              ) : (
+                <>
+                  <fieldset
+                    disabled={isInviting}
+                    className="flex min-w-0 flex-col gap-4 border-0 p-0"
+                  >
+                    <div className="flex flex-col gap-1.5">
+                      <Label htmlFor="family-invite-label">Name</Label>
+                      <Input
+                        id="family-invite-label"
+                        value={label}
+                        onChange={(event) => {
+                          markInviteFormEdited();
+                          setLabel(event.target.value);
+                        }}
+                        placeholder="Mom"
+                        autoComplete="off"
+                        autoFocus
+                        className="h-12 text-base"
+                      />
+                    </div>
+
+                    <div className="flex flex-col gap-1.5">
+                      <Label>Access</Label>
+                      <SegmentedControl
+                        aria-label="Family member tier"
+                        options={props.tiers.map((tier) => ({
+                          label: `${tier.name} · ${tier.priceLabel}`,
+                          value: tier.planCode,
+                        }))}
+                        value={invitePlanCode}
+                        onValueChange={(planCode) => {
+                          markInviteFormEdited();
+                          setInvitePlanCode(planCode);
+                        }}
+                        className="border-[#c4a882]/25 bg-[#f5f0e8]"
+                        itemClassName="text-[#736a58] hover:bg-[#fffcf6]/70 hover:text-[#2d3436] aria-pressed:bg-[#fffcf6] aria-pressed:text-[#2d3436] aria-pressed:shadow-none"
+                      />
+                    </div>
+
+                    <SegmentedControl
+                      aria-label="Invite by"
+                      options={INVITE_CHANNEL_OPTIONS}
+                      value={inviteChannel}
+                      onValueChange={changeInviteChannel}
+                      className="border-[#c4a882]/25 bg-[#f5f0e8]"
+                      itemClassName="text-[#736a58] hover:bg-[#fffcf6]/70 hover:text-[#2d3436] aria-pressed:bg-[#fffcf6] aria-pressed:text-[#2d3436] aria-pressed:shadow-none"
+                    />
+
+                    {inviteChannel === "imessage" ? (
+                      <div className="flex flex-col gap-1.5">
+                        <Label htmlFor="family-invite-phone">Phone number</Label>
+                        <PhoneNumberInput
+                          id="family-invite-phone"
+                          autoComplete="off"
+                          inputName="family-invite-phone"
+                          options={HOSTED_PHONE_COUNTRY_OPTIONS}
+                          selectedCountry={selectedPhoneCountry}
+                          value={phone}
+                          onCountryChange={(countryCode) => {
+                            markInviteFormEdited();
+                            setPhoneCountryCode(countryCode);
+                          }}
+                          onPhoneNumberChange={(phoneNumber) => {
+                            markInviteFormEdited();
+                            setPhone(phoneNumber);
+                          }}
+                        />
+                      </div>
+                    ) : null}
+                    {inviteChannel === "email" ? (
+                      <div className="flex flex-col gap-1.5">
+                        <Label htmlFor="family-invite-email">Email</Label>
+                        <Input
+                          id="family-invite-email"
+                          type="email"
+                          value={email}
+                          onChange={(event) => {
+                            markInviteFormEdited();
+                            setEmail(event.target.value);
+                          }}
+                          placeholder="mom@example.com"
+                          inputMode="email"
+                          autoComplete="off"
+                        />
+                      </div>
+                    ) : null}
+                    {inviteChannel === "telegram" ? (
+                      <div className="flex flex-col gap-1.5">
+                        <Label htmlFor="family-invite-telegram">Telegram username</Label>
+                        <Input
+                          id="family-invite-telegram"
+                          value={telegram}
+                          onChange={(event) => {
+                            markInviteFormEdited();
+                            setTelegram(event.target.value);
+                          }}
+                          placeholder="@username"
+                          autoComplete="off"
+                        />
+                      </div>
+                    ) : null}
+                    {selectedTierUnavailable ? (
+                      <p role="status" className="text-xs leading-5 text-[#736a58]">
+                        No open {invitePlan.name} seats. Choose a tier with an open seat
+                        or free one first.
+                      </p>
+                    ) : inviteNeedsStableTargetForSeat ? (
+                      <p role="status" className="text-xs leading-5 text-[#736a58]">
+                        {activeContactInput
+                          ? `Enter a valid ${activeContactInputNoun} to invite. It adds a paid ${invitePlan.name} seat at ${invitePlan.priceLabel}.`
+                          : `Add a contact to invite. It adds a paid ${invitePlan.name} seat at ${invitePlan.priceLabel}.`}
+                      </p>
+                    ) : inviteWillAddSeat ? (
+                      <p role="status" className="text-xs leading-5 text-[#736a58]">
+                        Add the {invitePlan.name} seat at {invitePlan.priceLabel} first.
+                        Murph creates the invite after Stripe confirms the seat is ready.
+                      </p>
+                    ) : !activeContactInput ? (
+                      <p className="text-xs leading-5 text-[#736a58]">
+                        No contact? Anyone with the link can join.
+                      </p>
+                    ) : null}
+                  </fieldset>
+
+                  {inviteError ? (
+                    <p
+                      role="alert"
+                      className="rounded-lg border border-destructive/20 bg-destructive/5 p-3 text-sm text-destructive [overflow-wrap:anywhere]"
+                    >
+                      {inviteError}
+                    </p>
+                  ) : null}
+
+                  <div className="flex flex-col gap-2">
+                    <Button
+                      type="button"
+                      size="xl"
+                      onClick={() => void submitInvite()}
+                      disabled={inviteSubmitDisabled}
+                      className="w-full"
+                    >
+                      {isInviting ? (
+                        <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+                      ) : inviteWillAddSeat ? (
+                        `Add ${invitePlan.name} seat & continue`
+                      ) : (
+                        "Create invite"
+                      )}
+                    </Button>
+                    <Button
+                      type="button"
+                      size="xl"
+                      variant="ghost"
+                      onClick={closeInviteDialog}
+                      disabled={isInviting}
+                      className="w-full"
+                    >
+                      Cancel
+                    </Button>
+                  </div>
+                </>
+              )}
             </>
           )}
         </DialogContent>

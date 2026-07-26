@@ -110,20 +110,33 @@ presence, controls the classification.
 
 Changing a member's tier is one owner-confirmed action. Web records the target
 in the membership's nullable `pendingPlanCode` while the current tier and access
-remain active, then swaps the source and destination quantities in one
-serialized Stripe subscription update. The subscription webhook accepts that
-pending intent only when the incoming quantities equal the exact one-member
-swap from the current paid projection; it then writes the member tier and paid
-projection in the same transaction and clears the pending value. This one-field
-bridge is required when all six Family places are occupied because a temporary
-seventh paid place is invalid. Retries reuse the same pending intent and Stripe
-idempotency key. The request path never writes paid capacity.
+remain active, then submits the exact source-to-target composition under the
+existing owner lock. A price-increasing change uses
+`pending_if_incomplete` plus `always_invoice`; Murph classifies the exact
+`subscription_update` invoice and does not project the target tier until Stripe
+has both collected it and applied the item change. The subscription webhook
+accepts that pending intent only when the incoming quantities equal the exact
+one-member swap from the current paid projection; it then writes the member
+tier and paid projection in the same transaction and clears the pending value.
+This one-field bridge is required when all six Family places are occupied
+because a temporary seventh paid place is invalid.
+
+When the upgrade moves the last Pulse place and an Edge item already exists,
+the payment-gated phase changes that exact Pulse item's price to Edge so Stripe
+can invoice the Pulse credit and Edge charge atomically. After exact paid and
+applied proof, Murph consolidates the two Edge items with one non-prorating
+update under the same owner lock before projecting entitlement. The opt-in
+Stripe contract lane must prove this pinned-API behavior. Retries keep the same
+local pending intent and reuse its idempotency key only while canonical provider
+state is unchanged; terminal expiry clears the provider pending state and
+rotates the key. The request path never writes paid capacity.
 While that intent exists, Settings labels the member as updating and disables
 further plan or removal actions until the webhook clears it.
 
-Member plan swaps use Stripe prorations on the next invoice: upgrades add the
-prorated difference and downgrades add the corresponding credit. The owner sees
-the target per-person monthly price before confirming.
+Price-increasing member swaps collect the prorated difference immediately.
+Downgrades remain non-payment-gated and add the corresponding credit through
+Stripe's ordinary proration behavior. The owner sees the target per-person
+monthly price before confirming.
 
 Core invariant:
 

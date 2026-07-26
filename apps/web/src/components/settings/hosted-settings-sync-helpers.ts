@@ -1,6 +1,33 @@
+import { HostedOnboardingApiError } from "@/src/components/hosted-onboarding/client-api";
+
+export type HostedBillingErrorAction = "billing" | "close" | "retry" | "support";
+
 export interface JsonErrorDetails {
   code: string | null;
   message: string | null;
+}
+
+export function resolveHostedBillingErrorAction(input: {
+  billingRecoveryCodes: ReadonlySet<string>;
+  error: unknown;
+  supportRecoveryCodes: ReadonlySet<string>;
+}): HostedBillingErrorAction {
+  if (!(input.error instanceof HostedOnboardingApiError)) {
+    return "close";
+  }
+  if (input.error.retryable) {
+    return "retry";
+  }
+  if (
+    input.error.code !== null &&
+    input.billingRecoveryCodes.has(input.error.code)
+  ) {
+    return "billing";
+  }
+  return input.error.code !== null &&
+    input.supportRecoveryCodes.has(input.error.code)
+    ? "support"
+    : "close";
 }
 
 export async function readOptionalJsonObject(response: Response): Promise<Record<string, unknown> | null> {

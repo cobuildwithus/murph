@@ -32,11 +32,15 @@ import {
 } from "@/src/lib/hosted-onboarding/hosted-member-store";
 import {
   bindHostedMemberStripeCustomerIdIfMissingTx,
+  clearHostedMemberStripeCustomerReservationAfterDefinitiveFailureTx,
+  finalizeHostedMemberStripeCustomerReservationTx,
   lookupHostedMemberStripeBillingRefByStripeCustomerId,
   lookupHostedMemberStripeBillingRefByStripeSubscriptionId,
+  readFreshHostedMemberStripeCustomerReservation,
   readHostedMemberBillingEligibilityState,
   readHostedMemberOwnsExactStripeSubscriptionTx,
   readHostedMemberStripeBillingRef,
+  reserveHostedMemberStripeCustomerReservationTx,
   type HostedMemberStripeBillingRefSnapshot,
   writeHostedMemberStripeBillingRefTx,
 } from "@/src/lib/hosted-onboarding/hosted-member-billing-store";
@@ -3805,6 +3809,271 @@ describe("hosted-member-store", () => {
       select: {
         memberId: true,
       },
+    });
+  });
+
+  it("creates one durable Stripe Customer reservation and reuses its exact marker", async () => {
+    const now = new Date("2026-07-26T12:00:00.000Z");
+    let persistedReservation: Record<string, unknown> | null = null;
+    const upsert = vi.fn().mockImplementation(async (query) => {
+      persistedReservation = {
+        ...query.create,
+        memberId: "member_123",
+        stripeCustomerLookupKey: null,
+      };
+      return persistedReservation;
+    });
+    const findUnique = vi.fn().mockImplementation(async () =>
+      persistedReservation
+    );
+    const tx = {
+      $queryRaw: createMemberRowLockQueryRaw(),
+      hostedMemberBillingRef: {
+        findUnique,
+        upsert,
+      },
+    } as never;
+
+    const first = await reserveHostedMemberStripeCustomerReservationTx({
+      memberId: "member_123",
+      now,
+      tx,
+    });
+    expect(first).toMatchObject({
+      createdAt: now,
+      kind: "reserved",
+      reservationId: expect.stringMatching(/^hbscr_/u),
+    });
+    await expect(reserveHostedMemberStripeCustomerReservationTx({
+      memberId: "member_123",
+      now: new Date("2026-07-27T10:59:59.999Z"),
+      tx,
+    })).resolves.toEqual({
+      createdAt: now,
+      kind: "reserved",
+      reservationId: first.kind === "reserved"
+        ? first.reservationId
+        : "unexpected-bound-customer",
+    });
+
+    expect(upsert).toHaveBeenCalledOnce();
+  });
+
+  it("fails closed instead of rotating an expired Stripe Customer reservation", async () => {
+    const createdAt = new Date("2026-07-26T12:00:00.000Z");
+    const upsert = vi.fn();
+    const tx = {
+      $queryRaw: createMemberRowLockQueryRaw(),
+      hostedMemberBillingRef: {
+        findUnique: vi.fn().mockResolvedValue({
+          memberId: "member_123",
+          stripeCustomerLookupKey: null,
+          stripeCustomerReservationCreatedAt: createdAt,
+          stripeCustomerReservationId: "hbscr_expired",
+        }),
+        upsert,
+      },
+    } as never;
+
+    await expect(reserveHostedMemberStripeCustomerReservationTx({
+      memberId: "member_123",
+      now: new Date("2026-07-27T11:00:00.000Z"),
+      tx,
+    })).rejects.toMatchObject({
+      code: "HOSTED_STRIPE_CUSTOMER_RESERVATION_RECOVERY_REQUIRED",
+      retryable: false,
+    });
+    expect(upsert).not.toHaveBeenCalled();
+  });
+
+  it("exact-binds a reserved Stripe Customer and clears both marker fields", async () => {
+    const createdAt = new Date("2026-07-26T12:00:00.000Z");
+    const updateMany = vi.fn().mockResolvedValue({ count: 1 });
+    const tx = {
+      $queryRaw: createMemberRowLockQueryRaw(),
+      hostedMemberBillingRef: {
+        findMany: vi.fn().mockResolvedValue([]),
+        findUnique: vi.fn().mockResolvedValue({
+          memberId: "member_123",
+          stripeCustomerLookupKey: null,
+          stripeCustomerReservationCreatedAt: createdAt,
+          stripeCustomerReservationId: "hbscr_exact",
+        }),
+        updateMany,
+      },
+    } as never;
+
+    await expect(finalizeHostedMemberStripeCustomerReservationTx({
+      bindAllowed: true,
+      candidateStripeCustomerId: "cus_exact",
+      memberId: "member_123",
+      now: new Date("2026-07-26T12:00:01.000Z"),
+      reservationId: "hbscr_exact",
+      tx,
+    })).resolves.toEqual({
+      kind: "bound",
+      stripeCustomerId: "cus_exact",
+    });
+
+    expect(updateMany).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        stripeCustomerIdEncrypted: expect.stringMatching(/^hsb-test:/u),
+        stripeCustomerLookupKey: expect.stringMatching(
+          /^hbidx:stripe-customer:v1:/u,
+        ),
+        stripeCustomerReservationCreatedAt: null,
+        stripeCustomerReservationId: null,
+      }),
+      where: {
+        memberId: "member_123",
+        stripeCustomerLookupKey: null,
+        stripeCustomerReservationCreatedAt: createdAt,
+        stripeCustomerReservationId: "hbscr_exact",
+      },
+    });
+  });
+
+  it("retains the exact marker when finalization is no longer eligible", async () => {
+    const createdAt = new Date("2026-07-26T12:00:00.000Z");
+    const updateMany = vi.fn();
+    const tx = {
+      $queryRaw: createMemberRowLockQueryRaw(),
+      hostedMemberBillingRef: {
+        findUnique: vi.fn().mockResolvedValue({
+          memberId: "member_123",
+          stripeCustomerLookupKey: null,
+          stripeCustomerReservationCreatedAt: createdAt,
+          stripeCustomerReservationId: "hbscr_exact",
+        }),
+        updateMany,
+      },
+    } as never;
+
+    await expect(finalizeHostedMemberStripeCustomerReservationTx({
+      bindAllowed: false,
+      candidateStripeCustomerId: "cus_exact",
+      memberId: "member_123",
+      now: new Date("2026-07-26T12:00:01.000Z"),
+      reservationId: "hbscr_exact",
+      tx,
+    })).resolves.toEqual({ kind: "ineligible" });
+    expect(updateMany).not.toHaveBeenCalled();
+  });
+
+  it("stays ineligible when a concurrent finalizer already bound the exact Customer", async () => {
+    const encryptedCustomerId = await encryptHostedWebNullableString({
+      field: "hosted-member-billing-ref.stripe-customer-id",
+      memberId: "member_123",
+      value: "cus_exact",
+    });
+    const tx = {
+      $queryRaw: createMemberRowLockQueryRaw(),
+      hostedMemberBillingRef: {
+        findUnique: vi.fn().mockResolvedValue({
+          memberId: "member_123",
+          stripeCustomerIdEncrypted: encryptedCustomerId,
+          stripeCustomerLookupKey: "hbidx:stripe-customer:v1:exact",
+          stripeCustomerReservationCreatedAt: null,
+          stripeCustomerReservationId: null,
+          stripeSubscriptionIdEncrypted: null,
+        }),
+      },
+    } as never;
+
+    await expect(finalizeHostedMemberStripeCustomerReservationTx({
+      bindAllowed: false,
+      candidateStripeCustomerId: "cus_exact",
+      memberId: "member_123",
+      now: new Date("2026-07-26T12:00:01.000Z"),
+      reservationId: "hbscr_exact",
+      tx,
+    })).resolves.toEqual({ kind: "ineligible" });
+  });
+
+  it("exact-clears only the marker whose definitive provider request failed", async () => {
+    const createdAt = new Date("2026-07-26T12:00:00.000Z");
+    const updateMany = vi.fn().mockResolvedValue({ count: 1 });
+    const tx = {
+      $queryRaw: createMemberRowLockQueryRaw(),
+      hostedMemberBillingRef: {
+        findUnique: vi.fn().mockResolvedValue({
+          memberId: "member_123",
+          stripeCustomerLookupKey: null,
+          stripeCustomerReservationCreatedAt: createdAt,
+          stripeCustomerReservationId: "hbscr_exact",
+        }),
+        updateMany,
+      },
+    } as never;
+
+    await expect(
+      clearHostedMemberStripeCustomerReservationAfterDefinitiveFailureTx({
+        memberId: "member_123",
+        reservationId: "hbscr_exact",
+        tx,
+      }),
+    ).resolves.toBe(true);
+    expect(updateMany).toHaveBeenCalledWith({
+      data: {
+        stripeCustomerReservationCreatedAt: null,
+        stripeCustomerReservationId: null,
+      },
+      where: {
+        memberId: "member_123",
+        stripeCustomerLookupKey: null,
+        stripeCustomerReservationCreatedAt: createdAt,
+        stripeCustomerReservationId: "hbscr_exact",
+      },
+    });
+  });
+
+  it("rejects partial, bound-plus-marker, and mismatched reservation state", async () => {
+    const now = new Date("2026-07-26T12:00:00.000Z");
+    expect(() => readFreshHostedMemberStripeCustomerReservation({
+      billingRef: {
+        memberId: "member_123",
+        stripeCustomerId: null,
+        stripeCustomerReservationCreatedAt: null,
+        stripeCustomerReservationId: "hbscr_partial",
+        stripeSubscriptionId: null,
+      },
+      now,
+    })).toThrow(expect.objectContaining({
+      code: "HOSTED_STRIPE_CUSTOMER_RESERVATION_INCONSISTENT",
+    }));
+    expect(() => readFreshHostedMemberStripeCustomerReservation({
+      billingRef: {
+        memberId: "member_123",
+        stripeCustomerId: "cus_bound",
+        stripeCustomerReservationCreatedAt: now,
+        stripeCustomerReservationId: "hbscr_bound",
+        stripeSubscriptionId: null,
+      },
+      now,
+    })).toThrow(expect.objectContaining({
+      code: "HOSTED_STRIPE_CUSTOMER_RESERVATION_INCONSISTENT",
+    }));
+
+    const tx = {
+      $queryRaw: createMemberRowLockQueryRaw(),
+      hostedMemberBillingRef: {
+        findUnique: vi.fn().mockResolvedValue({
+          memberId: "member_123",
+          stripeCustomerLookupKey: null,
+          stripeCustomerReservationCreatedAt: now,
+          stripeCustomerReservationId: "hbscr_other",
+        }),
+      },
+    } as never;
+    await expect(finalizeHostedMemberStripeCustomerReservationTx({
+      bindAllowed: true,
+      candidateStripeCustomerId: "cus_exact",
+      memberId: "member_123",
+      now,
+      reservationId: "hbscr_exact",
+      tx,
+    })).rejects.toMatchObject({
+      code: "HOSTED_STRIPE_CUSTOMER_RESERVATION_INCONSISTENT",
     });
   });
 

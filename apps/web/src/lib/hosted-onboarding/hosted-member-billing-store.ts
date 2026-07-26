@@ -1,6 +1,8 @@
 /**
  * Owns hosted member Stripe billing-reference lookup and write surfaces.
  */
+import { randomUUID } from "node:crypto";
+
 import {
   type HostedMember,
   type HostedMemberBillingRef,
@@ -30,6 +32,9 @@ import {
   lockHostedMemberRow,
   type HostedOnboardingReadClient,
 } from "./shared";
+import {
+  HOSTED_STRIPE_IDEMPOTENCY_SAFE_REPLAY_WINDOW_MS,
+} from "./stripe-billing-state";
 
 export interface HostedMemberStripeBillingRefSnapshot {
   checkoutAttemptId?: string | null;
@@ -48,6 +53,8 @@ export interface HostedMemberStripeBillingRefSnapshot {
   pulseTrialRedeemedAt?: Date | null;
   scheduledBillingEffectiveAt?: Date | null;
   scheduledBillingPlanCode?: string | null;
+  stripeCustomerReservationCreatedAt?: Date | null;
+  stripeCustomerReservationId?: string | null;
   stripeCustomerId: string | null;
   stripeCheckoutSessionId?: string | null;
   stripeSubscriptionId: string | null;
@@ -107,6 +114,31 @@ export interface HostedMemberStripeCheckoutAttemptReservation {
   createdAt: Date;
   intentHash: string;
   stripeCheckoutSessionId: string | null;
+}
+
+export type HostedMemberStripeCustomerReservationOutcome =
+  | {
+      kind: "bound";
+      stripeCustomerId: string;
+    }
+  | {
+      createdAt: Date;
+      kind: "reserved";
+      reservationId: string;
+    };
+
+export type HostedMemberStripeCustomerReservationFinalizationOutcome =
+  | {
+      kind: "bound";
+      stripeCustomerId: string;
+    }
+  | {
+      kind: "ineligible";
+    };
+
+export interface HostedMemberStripeCustomerReservation {
+  createdAt: Date;
+  reservationId: string;
 }
 
 // Stripe's pinned SDK permits three 80-second attempts plus two Retry-After
@@ -965,6 +997,220 @@ export async function bindHostedMemberStripeCustomerIdIfMissing(input: {
   }), HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
 }
 
+export async function reserveHostedMemberStripeCustomerReservationTx(input: {
+  memberId: string;
+  now: Date;
+  tx: Prisma.TransactionClient;
+}): Promise<HostedMemberStripeCustomerReservationOutcome> {
+  await lockHostedMemberRow(input.tx, input.memberId);
+  const current = await input.tx.hostedMemberBillingRef.findUnique({
+    where: { memberId: input.memberId },
+  });
+
+  assertHostedMemberStripeCustomerReservationShape(current);
+  if (current?.stripeCustomerLookupKey) {
+    const billingRef = await projectHostedMemberStripeBillingRefSnapshot(
+      current,
+      input.tx,
+    );
+    if (!billingRef.stripeCustomerId) {
+      throw buildHostedMemberStripeCustomerReservationInvariantError();
+    }
+    return {
+      kind: "bound",
+      stripeCustomerId: billingRef.stripeCustomerId,
+    };
+  }
+
+  const currentReservation =
+    readHostedMemberStripeCustomerReservation(current);
+  if (currentReservation) {
+    assertHostedMemberStripeCustomerReservationFresh({
+      createdAt: currentReservation.createdAt,
+      now: input.now,
+    });
+    return {
+      ...currentReservation,
+      kind: "reserved",
+    };
+  }
+
+  const reservationId = `hbscr_${randomUUID()}`;
+  const reserved = await input.tx.hostedMemberBillingRef.upsert({
+    where: { memberId: input.memberId },
+    create: {
+      memberId: input.memberId,
+      stripeCustomerReservationCreatedAt: input.now,
+      stripeCustomerReservationId: reservationId,
+    },
+    update: {
+      stripeCustomerReservationCreatedAt: input.now,
+      stripeCustomerReservationId: reservationId,
+    },
+  });
+  assertHostedMemberStripeCustomerReservationShape(reserved);
+  return {
+    createdAt: input.now,
+    kind: "reserved",
+    reservationId,
+  };
+}
+
+export async function finalizeHostedMemberStripeCustomerReservationTx(input: {
+  bindAllowed: boolean;
+  candidateStripeCustomerId: string;
+  memberId: string;
+  now: Date;
+  reservationId: string;
+  tx: Prisma.TransactionClient;
+}): Promise<HostedMemberStripeCustomerReservationFinalizationOutcome> {
+  await lockHostedMemberRow(input.tx, input.memberId);
+  const current = await input.tx.hostedMemberBillingRef.findUnique({
+    where: { memberId: input.memberId },
+  });
+
+  if (!current) {
+    if (!input.bindAllowed) {
+      return { kind: "ineligible" };
+    }
+    throw buildHostedMemberStripeCustomerReservationInvariantError();
+  }
+  assertHostedMemberStripeCustomerReservationShape(current);
+
+  if (current.stripeCustomerLookupKey) {
+    const billingRef = await projectHostedMemberStripeBillingRefSnapshot(
+      current,
+      input.tx,
+    );
+    if (billingRef.stripeCustomerId !== input.candidateStripeCustomerId) {
+      throw buildHostedMemberStripeCustomerReservationInvariantError();
+    }
+    if (!input.bindAllowed) {
+      return { kind: "ineligible" };
+    }
+    return {
+      kind: "bound",
+      stripeCustomerId: input.candidateStripeCustomerId,
+    };
+  }
+
+  const reservation = readHostedMemberStripeCustomerReservation(current);
+  if (!reservation || reservation.reservationId !== input.reservationId) {
+    throw buildHostedMemberStripeCustomerReservationInvariantError();
+  }
+  assertHostedMemberStripeCustomerReservationFresh({
+    createdAt: reservation.createdAt,
+    now: input.now,
+  });
+  if (!input.bindAllowed) {
+    return { kind: "ineligible" };
+  }
+
+  const stripeCustomerLookupKey = createHostedStripeCustomerLookupKey(
+    input.candidateStripeCustomerId,
+  );
+  if (!stripeCustomerLookupKey) {
+    throw buildHostedMemberStripeCustomerReservationInvariantError();
+  }
+  await assertHostedMemberStripeBillingIdentifiersAvailableTx({
+    memberId: input.memberId,
+    stripeCustomerId: input.candidateStripeCustomerId,
+    tx: input.tx,
+  });
+  const privateColumns = await buildHostedMemberBillingPrivateColumns({
+    memberId: input.memberId,
+    prisma: input.tx,
+    stripeCustomerId: input.candidateStripeCustomerId,
+    stripeSubscriptionId: null,
+  });
+  const bound = await input.tx.hostedMemberBillingRef.updateMany({
+    data: {
+      stripeCustomerIdEncrypted: privateColumns.stripeCustomerIdEncrypted,
+      stripeCustomerLookupKey,
+      stripeCustomerReservationCreatedAt: null,
+      stripeCustomerReservationId: null,
+    },
+    where: {
+      memberId: input.memberId,
+      stripeCustomerLookupKey: null,
+      stripeCustomerReservationCreatedAt: reservation.createdAt,
+      stripeCustomerReservationId: reservation.reservationId,
+    },
+  });
+  if (bound.count !== 1) {
+    throw buildHostedMemberStripeCustomerReservationInvariantError();
+  }
+
+  return {
+    kind: "bound",
+    stripeCustomerId: input.candidateStripeCustomerId,
+  };
+}
+
+export async function clearHostedMemberStripeCustomerReservationAfterDefinitiveFailureTx(
+  input: {
+    memberId: string;
+    reservationId: string;
+    tx: Prisma.TransactionClient;
+  },
+): Promise<boolean> {
+  await lockHostedMemberRow(input.tx, input.memberId);
+  const current = await input.tx.hostedMemberBillingRef.findUnique({
+    where: { memberId: input.memberId },
+  });
+  if (!current) {
+    return false;
+  }
+  assertHostedMemberStripeCustomerReservationShape(current);
+  if (current.stripeCustomerLookupKey) {
+    return false;
+  }
+  const reservation = readHostedMemberStripeCustomerReservation(current);
+  if (!reservation) {
+    return false;
+  }
+  if (reservation.reservationId !== input.reservationId) {
+    throw buildHostedMemberStripeCustomerReservationInvariantError();
+  }
+
+  const cleared = await input.tx.hostedMemberBillingRef.updateMany({
+    data: {
+      stripeCustomerReservationCreatedAt: null,
+      stripeCustomerReservationId: null,
+    },
+    where: {
+      memberId: input.memberId,
+      stripeCustomerLookupKey: null,
+      stripeCustomerReservationCreatedAt: reservation.createdAt,
+      stripeCustomerReservationId: reservation.reservationId,
+    },
+  });
+  if (cleared.count !== 1) {
+    throw buildHostedMemberStripeCustomerReservationInvariantError();
+  }
+  return true;
+}
+
+export function readFreshHostedMemberStripeCustomerReservation(input: {
+  billingRef: HostedMemberStripeBillingRefSnapshot | null;
+  now: Date;
+}): HostedMemberStripeCustomerReservation | null {
+  const billingRef = input.billingRef;
+  assertHostedMemberStripeCustomerReservationPairShape({
+    hasBoundCustomer: Boolean(billingRef?.stripeCustomerId),
+    reservationCreatedAt: billingRef?.stripeCustomerReservationCreatedAt,
+    reservationId: billingRef?.stripeCustomerReservationId,
+  });
+  const reservation = readHostedMemberStripeCustomerReservation(billingRef);
+  if (reservation) {
+    assertHostedMemberStripeCustomerReservationFresh({
+      createdAt: reservation.createdAt,
+      now: input.now,
+    });
+  }
+  return reservation;
+}
+
 export async function projectHostedMemberStripeBillingRefSnapshot(
   billingRef: HostedMemberBillingRef,
   prisma?: HostedOnboardingReadClient,
@@ -1002,6 +1248,9 @@ export async function projectHostedMemberStripeBillingRefSnapshot(
     ...(billingRef.scheduledBillingPlanCode
       ? { scheduledBillingPlanCode: billingRef.scheduledBillingPlanCode }
       : {}),
+    stripeCustomerReservationCreatedAt:
+      billingRef.stripeCustomerReservationCreatedAt,
+    stripeCustomerReservationId: billingRef.stripeCustomerReservationId,
     ...(billingRef.stripeCheckoutSessionIdEncrypted !== undefined
       ? { stripeCheckoutSessionId: privateState.stripeCheckoutSessionId }
       : {}),
@@ -1011,6 +1260,86 @@ export async function projectHostedMemberStripeBillingRefSnapshot(
       ? { stripeSubscriptionScheduleId: privateState.stripeSubscriptionScheduleId }
       : {}),
   };
+}
+
+function assertHostedMemberStripeCustomerReservationShape(
+  billingRef: HostedMemberBillingRef | null,
+): void {
+  if (!billingRef) {
+    return;
+  }
+  assertHostedMemberStripeCustomerReservationPairShape({
+    hasBoundCustomer: Boolean(billingRef.stripeCustomerLookupKey),
+    reservationCreatedAt: billingRef.stripeCustomerReservationCreatedAt,
+    reservationId: billingRef.stripeCustomerReservationId,
+  });
+}
+
+function assertHostedMemberStripeCustomerReservationPairShape(input: {
+  hasBoundCustomer: boolean;
+  reservationCreatedAt?: Date | null;
+  reservationId?: string | null;
+}): void {
+  const hasReservationId = Boolean(input.reservationId);
+  const hasReservationCreatedAt = input.reservationCreatedAt instanceof Date;
+  if (
+    hasReservationId !== hasReservationCreatedAt ||
+    (
+      input.hasBoundCustomer &&
+      (hasReservationId || hasReservationCreatedAt)
+    )
+  ) {
+    throw buildHostedMemberStripeCustomerReservationInvariantError();
+  }
+}
+
+function readHostedMemberStripeCustomerReservation(
+  billingRef:
+    | HostedMemberBillingRef
+    | HostedMemberStripeBillingRefSnapshot
+    | null,
+): HostedMemberStripeCustomerReservation | null {
+  if (
+    !billingRef?.stripeCustomerReservationId ||
+    !(billingRef.stripeCustomerReservationCreatedAt instanceof Date)
+  ) {
+    return null;
+  }
+  return {
+    createdAt: billingRef.stripeCustomerReservationCreatedAt,
+    reservationId: billingRef.stripeCustomerReservationId,
+  };
+}
+
+function assertHostedMemberStripeCustomerReservationFresh(input: {
+  createdAt: Date;
+  now: Date;
+}): void {
+  const ageMs = input.now.getTime() - input.createdAt.getTime();
+  if (
+    Number.isFinite(ageMs) &&
+    ageMs >= 0 &&
+    ageMs < HOSTED_STRIPE_IDEMPOTENCY_SAFE_REPLAY_WINDOW_MS
+  ) {
+    return;
+  }
+  throw hostedOnboardingError({
+    code: "HOSTED_STRIPE_CUSTOMER_RESERVATION_RECOVERY_REQUIRED",
+    httpStatus: 409,
+    message:
+      "Stripe Customer creation could not be reconciled safely. Contact support before retrying billing.",
+    retryable: false,
+  });
+}
+
+function buildHostedMemberStripeCustomerReservationInvariantError(): Error {
+  return hostedOnboardingError({
+    code: "HOSTED_STRIPE_CUSTOMER_RESERVATION_INCONSISTENT",
+    httpStatus: 500,
+    message:
+      "Stored Stripe Customer reservation state is inconsistent. Contact support before retrying billing.",
+    retryable: false,
+  });
 }
 
 async function projectHostedMemberStripeBillingLookup(
