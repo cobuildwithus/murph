@@ -1,6 +1,6 @@
 # Protect hosted provider credentials from assistant shell reads
 
-Status: active
+Status: completed
 Created: 2026-07-26
 Updated: 2026-07-26
 
@@ -104,15 +104,32 @@ Updated: 2026-07-26
     review and again after resolving every accepted finding.
   - Preliminary `completion-specialists` ReviewGPT: completed with three
     accepted coverage findings and no patch artifact; all three are resolved.
+  - Parent final review of the complete base-to-head patch: passed with no
+    findings. Permission ownership, hosted-only selection, exclusion behavior,
+    start/resume attestation, native proof/result plumbing, and durable docs
+    align with the stated credential boundary.
+  - Rebased normally onto the then-current `main`. The sole conflict was the CI
+    map description; resolution retained upstream's new hosted-E2E scenario and
+    this patch's two-profile native sandbox proof. `git range-diff` confirmed no
+    production or test drift.
+  - Post-rebase `pnpm test:diff packages/assistant-engine
+    packages/assistant-runtime packages/hosted-execution apps/cloudflare`:
+    passed, including 2,719 Assistant Engine tests, 1,896 Assistant Runtime
+    tests, 6,732 hosted-web tests plus lint/dev smoke/production build, and
+    1,931 Node + 2 Workers Cloudflare tests.
+  - `pnpm verify:acceptance`: passed end to end, including all workspace
+    coverage thresholds, built-package boundary checks, the web production
+    build, and final Cloudflare app verification.
+  - `git diff --check` and the repository privacy-identifier scan: passed.
   - `pnpm --dir apps/cloudflare runner:docker:smoke:prepared-base`: the
     production image built, but the local macOS `linux/amd64` emulation failed
     in the pre-existing Bubblewrap vault command before reaching the new
     permission probe. The path-scoped native Ubuntu CI job remains the
     authoritative named-profile sandbox proof.
 - Remaining:
-  - `pnpm verify:acceptance`
   - Final exact-head ReviewGPT/CI loop.
 - Expected outcomes:
   - Managed credential read is denied; representative vault write and network
     access remain allowed.
   - All required checks and review gates pass with no unresolved findings.
+Completed: 2026-07-26
