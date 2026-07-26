@@ -85,6 +85,10 @@ unavailable reason `group_not_supported` before exposing personal usage facts.
 Inactive hosted access and a trial awaiting conversion also return explicit
 unavailable states.
 
+Every newly created Linq or Telegram group thread starts with a persisted $7.50
+included-usage limit. This is prospective: existing group-thread rows keep
+their stored limit.
+
 Usage is cost-weighted included capacity across models and modalities. It is
 not a token count or cash balance. Used and remaining included percentages are
 bounded integers that sum to 100. An included period reports 100% used even

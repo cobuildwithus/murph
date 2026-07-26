@@ -72,6 +72,9 @@ Updated: 2026-07-26
 - Keep the explicit service-layer write as the authoritative creation path and
   align the database default as a fail-safe, rather than relying on an implicit
   Prisma default.
+- Product-experience review passed with no findings: both provider entry points
+  reuse the existing creation owner, and the change adds no interaction,
+  permission, continuation, delivery, or recovery concept.
 
 ## Verification
 
@@ -81,3 +84,7 @@ Updated: 2026-07-26
 - Expected outcomes: new group creation and the database fallback both use
   `7_500_000`, existing rows are untouched, all checks pass, and PR #962 is
   mergeable.
+- Completed proof: the focused Linq route, Telegram dispatch, and migration
+  suites passed 89/89; Prisma schema validation and agent-docs drift checks
+  passed. Canonical diff verification passed in Blacksmith Testbox
+  `tbx_01kyerhrtem0ts8jx3q9fwkpwf`.
