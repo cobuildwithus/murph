@@ -1,6 +1,6 @@
 # Assistant Ask latency, status, and requester identity
 
-Status: active
+Status: completed
 Created: 2026-07-26
 Updated: 2026-07-26
 
@@ -83,3 +83,4 @@ Updated: 2026-07-26
   completion handling.
 - Cloudflare/runtime then enables the matching safe pre-checkpoint completion
   admission. The durable Temporal path remains compatible throughout.
+Completed: 2026-07-26
