@@ -3225,41 +3225,6 @@ describe("hosted-member-store", () => {
     });
   });
 
-  it("carries the recorded Pulse payment intent through the customer lookup", async () => {
-    // The payment_method.attached recovery reads the intent straight off this
-    // lookup, so a dropped projection would silently disable it.
-    const member = createHostedMember();
-    const expiresAt = new Date("2026-05-06T00:30:00.000Z");
-    const findMany = vi.fn().mockResolvedValueOnce([{
-      member,
-      memberId: member.id,
-      pulseTrialPaymentIntentAction: "start_pulse_now",
-      pulseTrialPaymentIntentExpiresAt: expiresAt,
-      stripeCustomerIdEncrypted: await encryptHostedWebNullableString({
-        field: "hosted-member-billing-ref.stripe-customer-id",
-        memberId: member.id,
-        value: "cus_123",
-      }),
-      stripeCustomerLookupKey: "hbidx:stripe-customer:v1:abc123",
-      stripeSubscriptionIdEncrypted: null,
-      stripeSubscriptionLookupKey: null,
-    }]);
-
-    await expect(
-      lookupHostedMemberStripeBillingRefByStripeCustomerId({
-        prisma: {
-          hostedMemberBillingRef: { findMany },
-        } as never,
-        stripeCustomerId: "cus_123",
-      }),
-    ).resolves.toMatchObject({
-      billingRef: {
-        pulseTrialPaymentIntentAction: "start_pulse_now",
-        pulseTrialPaymentIntentExpiresAt: expiresAt,
-      },
-    });
-  });
-
   it("looks up Stripe billing refs with the matched billing slice intact", async () => {
     const member = createHostedMember();
     const findMany = vi.fn()

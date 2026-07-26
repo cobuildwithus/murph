@@ -59,7 +59,6 @@ import {
   finishHostedOnboardingTiming,
   startHostedOnboardingTiming,
 } from "./logging";
-import { applyStripePulseTrialPaymentMethodAttached } from "./billing-pulse-trial-payment-method-recovery";
 import { requireHostedStripeApi } from "./runtime";
 import {
   logHostedStripeFailure,
@@ -784,17 +783,6 @@ async function processClaimedHostedStripeEvent(
         memberId: processingMemberId,
         prisma,
         subscriptionId: result.cleanupPulseTrialStripeSubscriptionId,
-      });
-    }
-    // Runs outside the reconciliation transaction: finishing the plan change
-    // makes Stripe calls and takes its own member lock.
-    if (stripeEvent.type === "payment_method.attached") {
-      await applyStripePulseTrialPaymentMethodAttached({
-        // The event's own occurrence time, so a slow retry cannot expire an
-        // intent that was valid when the member actually saved their card.
-        occurredAt: claimed.stripeCreatedAt,
-        paymentMethod: stripeEvent.data.object as Stripe.PaymentMethod,
-        prisma,
       });
     }
     if (result.welcomeEmailMemberId) {

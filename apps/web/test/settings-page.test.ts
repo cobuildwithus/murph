@@ -357,7 +357,7 @@ test("SettingsDataPrivacyPage opens the auth-required data privacy handoff for s
   assert.match(markup, /After sign-in, this link opens the deletion controls directly in settings\./);
 });
 
-test("SettingsPage offers sign-in to signed-out visitors before reading member settings", async () => {
+test("SettingsPage redirects signed-out visitors before reading member settings", async () => {
   mocks.getHostedPageAuthSnapshot.mockResolvedValue({
     authenticated: false,
     authenticatedMember: null,
@@ -366,9 +366,7 @@ test("SettingsPage offers sign-in to signed-out visitors before reading member s
 
   const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
 
-  const markup = renderToStaticMarkup(await SettingsPage());
-
-  assert.match(markup, /Sign in to open settings/);
+  await expect(SettingsPage()).rejects.toThrow("NEXT_REDIRECT:/");
 
   expect(mocks.getPrisma).not.toHaveBeenCalled();
   expect(mocks.readHostedAccountSettingsPageSnapshot).not.toHaveBeenCalled();
@@ -443,11 +441,9 @@ test("SettingsPage ignores a partial payment return instead of looping back to t
 
   const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
 
-  const markup = renderToStaticMarkup(await SettingsPage({
+  await expect(SettingsPage({
     searchParams: Promise.resolve({ action: "start_pulse_now" }),
-  }));
-
-  assert.match(markup, /Sign in to open settings/);
+  })).rejects.toThrow("NEXT_REDIRECT:/");
 });
 
 test("SettingsPage resumes the Pulse action only for a marked return with a bound claim", async () => {

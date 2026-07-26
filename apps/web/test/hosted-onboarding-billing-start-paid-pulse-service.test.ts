@@ -13,16 +13,8 @@ const mocks = vi.hoisted(() => ({
   applyStripeInvoicePaid: vi.fn(),
   getPrisma: vi.fn(),
   signalHostedRuntimeManualWakeBestEffort: vi.fn(),
-  billingRefUpdate: vi.fn(),
   prismaClient: {
     $transaction: vi.fn(),
-    // Without this delegate the payment-intent write throws a TypeError that
-    // the service's best-effort catch swallows, so every case below would only
-    // ever prove the no-persistence fallback.
-    hostedMemberBillingRef: {
-      update: vi.fn(),
-      updateMany: vi.fn(),
-    },
   },
   readHostedMemberCoreState: vi.fn(),
   readHostedMemberStripeBillingRef: vi.fn(),
@@ -158,51 +150,6 @@ describe("startHostedPulseTrialPaidPlan", () => {
     });
     expect(mocks.applyStripeInvoicePaid).not.toHaveBeenCalled();
     expect(mocks.signalHostedRuntimeManualWakeBestEffort).not.toHaveBeenCalled();
-  });
-
-  test("supersedes an outstanding payment handoff when a card-backed choice settles", async () => {
-    // start-now was recorded while no card existed. The member then saved a
-    // card and asked to continue at trial end instead. If this decision leaves
-    // the old row live, the delayed payment_method.attached recovery executes
-    // start-now and bills them against their newer instruction.
-    await expect(continueHostedPulseTrialPaidPlan({
-      memberId: "member_123",
-      now: new Date("2026-05-06T00:00:00.000Z"),
-    })).resolves.toEqual({
-      billingPlanCode: "launch_monthly",
-      status: "continuing",
-    });
-
-    expect(mocks.prismaClient.hostedMemberBillingRef.updateMany)
-      .toHaveBeenCalledWith({
-        where: { memberId: "member_123" },
-        data: {
-          pulseTrialPaymentIntentAction: null,
-          pulseTrialPaymentIntentExpiresAt: null,
-        },
-      });
-  });
-
-  test("leaves the handoff intact while the same handoff is still in flight", async () => {
-    mocks.stripe.subscriptions.retrieve.mockResolvedValueOnce(makeSubscription({
-      customer: makeCustomer({
-        defaultPaymentMethod: null,
-        defaultSource: null,
-      }),
-      defaultPaymentMethod: null,
-      defaultSource: null,
-    }));
-
-    // payment_required is not a decision, so the intent this call just recorded
-    // must survive for the browser or webhook to complete.
-    await expect(startHostedPulseTrialPaidPlan({
-      memberId: "member_123",
-      now: new Date("2026-05-06T00:00:00.000Z"),
-      paymentMethodContinuation: "conversation",
-    })).resolves.toMatchObject({ status: "payment_required" });
-
-    expect(mocks.prismaClient.hostedMemberBillingRef.updateMany)
-      .not.toHaveBeenCalled();
   });
 
   test("keeps a card-backed active Pulse trial running until its natural end", async () => {
@@ -354,77 +301,6 @@ describe("startHostedPulseTrialPaidPlan", () => {
       return_url: "https://join.example.test/settings#subscription",
     });
     expect(mocks.stripe.subscriptions.update).not.toHaveBeenCalled();
-
-    // The webhook fallback can only finish a switch it can name, and handing
-    // out the link must still not touch the Stripe subscription.
-    expect(mocks.prismaClient.hostedMemberBillingRef.update).toHaveBeenCalledWith({
-      where: { memberId: "member_123" },
-      data: {
-        pulseTrialPaymentIntentAction: "start_pulse_now",
-        // Matches the signed return link's 30-minute lifetime.
-        pulseTrialPaymentIntentExpiresAt: new Date("2026-05-06T00:30:00.000Z"),
-      },
-    });
-    expect(
-      mocks.prismaClient.hostedMemberBillingRef.update.mock.invocationCallOrder[0],
-    ).toBeLessThan(
-      mocks.stripe.billingPortal.sessions.create.mock.invocationCallOrder[0],
-    );
-  });
-
-  test("records a continue intent when the trial-end path needs a card", async () => {
-    mocks.stripe.subscriptions.retrieve.mockResolvedValueOnce(makeSubscription({
-      customer: makeCustomer({
-        defaultPaymentMethod: null,
-        defaultSource: null,
-      }),
-      defaultPaymentMethod: null,
-      defaultSource: null,
-    }));
-
-    await expect(continueHostedPulseTrialPaidPlan({
-      memberId: "member_123",
-      now: new Date("2026-05-06T00:00:00.000Z"),
-      paymentMethodContinuation: "conversation",
-    })).resolves.toMatchObject({ status: "payment_required" });
-
-    expect(mocks.prismaClient.hostedMemberBillingRef.update).toHaveBeenCalledWith({
-      where: { memberId: "member_123" },
-      data: {
-        pulseTrialPaymentIntentAction: "continue_pulse",
-        // Matches the signed return link's 30-minute lifetime.
-        pulseTrialPaymentIntentExpiresAt: new Date("2026-05-06T00:30:00.000Z"),
-      },
-    });
-    expect(mocks.stripe.subscriptions.update).not.toHaveBeenCalled();
-  });
-
-  test("issues no payment link when the intent cannot be recorded", async () => {
-    mocks.prismaClient.hostedMemberBillingRef.update.mockRejectedValueOnce(
-      new Error("database is unavailable"),
-    );
-    mocks.stripe.subscriptions.retrieve.mockResolvedValueOnce(makeSubscription({
-      customer: makeCustomer({
-        defaultPaymentMethod: null,
-        defaultSource: null,
-      }),
-      defaultPaymentMethod: null,
-      defaultSource: null,
-    }));
-
-    // The recorded row is the only authority for which action a handoff
-    // completes. Handing out a link we cannot resolve later would let the
-    // browser and the webhook run different actions for one card setup.
-    await expect(startHostedPulseTrialPaidPlan({
-      memberId: "member_123",
-      now: new Date("2026-05-06T00:00:00.000Z"),
-      paymentMethodContinuation: "conversation",
-    })).rejects.toMatchObject({
-      code: "HOSTED_PULSE_TRIAL_PAYMENT_INTENT_NOT_RECORDED",
-      retryable: true,
-    });
-
-    expect(mocks.stripe.billingPortal.sessions.create).not.toHaveBeenCalled();
   });
 
   test("returns conversational no-card starts through the signed exact-action bridge", async () => {

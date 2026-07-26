@@ -109,7 +109,10 @@ export default async function SettingsPage({
   const pulseTrialPaymentReturn = readPulseTrialPaymentReturn(resolvedSearchParams);
 
   if (!authenticated) {
-    return <SettingsAuthRequired resumingPayment={pulseTrialPaymentReturn !== null} />;
+    if (pulseTrialPaymentReturn === null) {
+      redirect("/");
+    }
+    return <SettingsAuthRequired />;
   }
 
   // Only the continuation route can verify the signature and set the

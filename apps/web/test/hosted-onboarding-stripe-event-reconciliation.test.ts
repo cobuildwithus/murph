@@ -11,7 +11,6 @@ const mocks = vi.hoisted(() => ({
   applyStripeInvoicePaid: vi.fn(),
   applyStripeInvoicePaymentFailed: vi.fn(),
   applyStripeRefundCreated: vi.fn(),
-  applyStripePulseTrialPaymentMethodAttached: vi.fn(),
   applyStripeSubscriptionUpdated: vi.fn(),
   cancelHostedFamilySponsoredCheckoutSubscription: vi.fn(),
   cancelHostedPulseTrialCheckoutLoserSubscription: vi.fn(),
@@ -190,14 +189,6 @@ vi.mock(
         mocks.reconcileHostedUsageCreditStripeEvent,
     };
   },
-);
-
-vi.mock(
-  "@/src/lib/hosted-onboarding/billing-pulse-trial-payment-method-recovery",
-  () => ({
-    applyStripePulseTrialPaymentMethodAttached:
-      mocks.applyStripePulseTrialPaymentMethodAttached,
-  }),
 );
 
 vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
@@ -467,48 +458,6 @@ describe("hosted Stripe event reconciliation", () => {
     expect(mocks.sendHostedSignupWelcomeEmailForMember).not.toHaveBeenCalled();
     expect(mocks.sendHostedSignupNotificationEmailForMemberBestEffort).not.toHaveBeenCalled();
     expect(mocks.sendHostedSubscriptionCancellationEmailForMember).not.toHaveBeenCalled();
-  });
-
-  it("finishes a Pulse switch when the card arrives after the browser gave up", async () => {
-    const prisma = createStripeEventPrismaHarness();
-    const event = makePaymentMethodAttachedEvent();
-    mocks.stripe.events.retrieve.mockResolvedValue(event);
-    mocks.applyStripePulseTrialPaymentMethodAttached.mockResolvedValue({
-      memberId: "member_123",
-    });
-
-    await recordHostedStripeEvent({ event, prisma: prisma.client });
-
-    await expect(reconcileHostedStripeEventById({
-      eventId: event.id,
-      prisma: prisma.client,
-    })).resolves.toMatchObject({ status: "completed" });
-
-    // Must run with the real client outside the reconciliation transaction:
-    // finishing the plan change makes Stripe calls and takes its own lock. The
-    // event's own occurrence time is passed so a slow retry cannot expire an
-    // intent that was valid when the member saved their card.
-    expect(mocks.applyStripePulseTrialPaymentMethodAttached).toHaveBeenCalledWith({
-      occurredAt: new Date(event.created * 1000),
-      paymentMethod: event.data.object,
-      prisma: prisma.client,
-    });
-  });
-
-  it("leaves a failed Pulse card recovery retryable instead of completing the receipt", async () => {
-    const prisma = createStripeEventPrismaHarness();
-    const event = makePaymentMethodAttachedEvent();
-    mocks.stripe.events.retrieve.mockResolvedValue(event);
-    mocks.applyStripePulseTrialPaymentMethodAttached.mockRejectedValue(
-      new Error("Stripe is unavailable."),
-    );
-
-    await recordHostedStripeEvent({ event, prisma: prisma.client });
-
-    await expect(reconcileHostedStripeEventById({
-      eventId: event.id,
-      prisma: prisma.client,
-    })).resolves.toMatchObject({ status: "failed" });
   });
 
   it("reconciles usage-credit Checkout before subscription-shaped handling", async () => {
@@ -2856,30 +2805,6 @@ function makeInvoicePaymentFailedEvent(): Stripe.Event {
     },
     type: "invoice.payment_failed",
   });
-}
-
-function makePaymentMethodAttachedEvent(): Stripe.Event {
-  return makeStripeEvent({
-    api_version: "2025-03-31.basil",
-    created: 1774708801,
-    data: {
-      object: {
-        customer: "cus_attached_123",
-        id: "pm_attached_123",
-        object: "payment_method",
-        type: "card",
-      },
-    },
-    id: "evt_payment_method_attached_123",
-    livemode: false,
-    object: "event",
-    pending_webhooks: 0,
-    request: {
-      id: null,
-      idempotency_key: null,
-    },
-    type: "payment_method.attached",
-  } as never);
 }
 
 function makeCheckoutCompletedEvent(): Stripe.Event {

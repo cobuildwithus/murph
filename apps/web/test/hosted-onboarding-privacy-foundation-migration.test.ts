@@ -148,12 +148,6 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
     'currentPeriodEnd DateTime? @map("current_period_end")',
     'pulseTrialRedeemedAt DateTime? @map("pulse_trial_redeemed_at")',
     'pulseTrialPolicyVersion String? @map("pulse_trial_policy_version")',
-    // Which paid-plan action the member asked for before leaving for Stripe's
-    // payment-method page, and when that request goes stale. Both are plan
-    // mechanics, not personal data: the action is one of two fixed tokens and
-    // neither field is looked up, encrypted, or derived from member identity.
-    'pulseTrialPaymentIntentAction String? @map("pulse_trial_payment_intent_action")',
-    'pulseTrialPaymentIntentExpiresAt DateTime? @map("pulse_trial_payment_intent_expires_at")',
     'currentTrialStartedAt DateTime? @map("current_trial_started_at")',
     'currentTrialEndsAt DateTime? @map("current_trial_ends_at")',
     'createdAt DateTime @default(now()) @map("created_at")',
@@ -902,7 +896,6 @@ describe("hosted Prisma baseline migration", () => {
       "20260724160000_hosted_account_exit_reason",
       "20260724180000_device_connection_source_last_data_at",
       "20260725120000_hosted_thread_delivery_route",
-      "20260725210000_hosted_pulse_trial_payment_intent",
       "migration_lock.toml",
     ]);
     expect(hostedMailboxSubscriptionActionClaimMigrationSql).toContain(
