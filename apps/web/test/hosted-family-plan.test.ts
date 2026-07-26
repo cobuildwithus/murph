@@ -2608,6 +2608,30 @@ describe("hosted Family plan", () => {
     );
   });
 
+  it("returns a missing browser invite before crypto preparation", async () => {
+    const tx = createTxMock();
+    tx.hostedAccountGroupInvite.findUnique.mockResolvedValueOnce(null);
+    cryptoRootMocks.prepareHostedCryptoDomainRootCandidates.mockRejectedValue(
+      new Error("KMS unavailable"),
+    );
+    const prisma = tx as FamilyPlanTxMock & {
+      $transaction: ReturnType<typeof vi.fn>;
+    };
+    prisma.$transaction = vi.fn((callback) => callback(tx));
+
+    await expect(acceptHostedFamilyInvite({
+      acceptedMemberId: "member_mom",
+      inviteCode: "missing_invite",
+      prisma: prisma as never,
+    })).rejects.toMatchObject({
+      code: "HOSTED_FAMILY_INVITE_NOT_FOUND",
+      httpStatus: 404,
+    });
+
+    expect(cryptoRootMocks.prepareHostedCryptoDomainRootCandidates).not.toHaveBeenCalled();
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
   it("rejects a wrong-phone browser identity before crypto preparation", async () => {
     const tx = createTxMock();
     tx.hostedAccountGroupInvite.findUnique.mockResolvedValue({

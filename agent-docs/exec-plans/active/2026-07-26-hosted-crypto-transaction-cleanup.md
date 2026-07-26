@@ -110,8 +110,13 @@ Updated: 2026-07-26
   that could retry forever without preparing the owner candidate. The path was
   corrected for both subscription and invoice events, covered with regression
   tests, and the follow-up product review passed.
-- Canonical `pnpm test:diff ...` passed on fresh Blacksmith Testbox
-  `tbx_01kyg9bymy72fv0b6gfvdy5n4s`: repository guards, hosted-web typecheck,
-  531 test files / 6,758 tests, lint, development smoke, and production build.
-- Preliminary specialist review, full acceptance, final ReviewGPT, and
-  current-head CI remain pending.
+- Preliminary completion-specialist review returned three medium coverage
+  findings. The exact-thread test-only patch was inspected in full and applied
+  for missing-invite denial ordering and all three Stripe billing adapter
+  propagation paths. Parent-authored cases prove both first-contact allow
+  replan paths warm and zeroize before their second planner transaction.
+  Focused remediation proof passed 321 tests.
+- Corrected canonical `pnpm test:diff ...` passed on fresh Blacksmith Testbox
+  `tbx_01kygb66rxws8qc7whdmd2z2a0`: repository guards, hosted-web typecheck,
+  531 test files / 6,761 tests, lint, development smoke, and production build.
+- Full acceptance, final ReviewGPT, and current-head CI remain pending.
