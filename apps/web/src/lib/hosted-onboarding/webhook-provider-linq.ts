@@ -94,6 +94,7 @@ import {
 import { normalizePhoneNumber } from "./phone";
 import {
   ensureHostedThreadContainerRouteTx,
+  refreshHostedThreadContainerDeliveryRouteTx,
 } from "../hosted-routing/thread-container-service";
 import type {
   HostedLinqFirstContactAdmissionRequest,
@@ -106,6 +107,7 @@ import {
   consumeHostedLinqThreadRouteParticipantAdditionPendingTx,
   consumeHostedLinqThreadRoutePendingContextTx,
   readHostedThreadRouteByThreadIdentity,
+  requiresHostedThreadDeliveryRouteRefresh,
   type HostedLinqThreadRouteEgressAuthority,
   type HostedThreadRouteSnapshot,
 } from "../hosted-routing/thread-route-store";
@@ -171,6 +173,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
     summary,
   } = context;
 
+  const accountLookupKey = createHostedPhoneLookupKey(recipientPhoneNumber);
   const threadRouteAccountLookupKeys = createHostedPhoneLookupKeyReadCandidates(
     recipientPhoneNumber,
   );
@@ -180,20 +183,46 @@ export async function planHostedOnboardingLinqWebhook(input: {
     threadId: summary.chatId,
   });
   if (explicitThreadRoute) {
-    const demotion = isHostedLinqGroupChat(messageEvent)
-      ? await demoteHostedMemberLinqGroupChatBindingsTx({
-          linqChatId: summary.chatId,
-          mailboxDedupeKey: input.event.event_id,
-          prisma: input.prisma,
-        })
-      : { mailboxConsumedAt: null };
+    let routeAccountLookupKey = accountLookupKey;
+    let sourceMailboxConsumedAt: Date | null = null;
+    if (requiresHostedThreadDeliveryRouteRefresh({
+      accountLookupKey,
+      route: explicitThreadRoute,
+      threadId: summary.chatId,
+    })) {
+      if (!accountLookupKey) {
+        throw new TypeError(
+          "Hosted Linq thread route refresh requires the current account lookup key.",
+        );
+      }
+      const refreshedRoute = await refreshHostedThreadContainerDeliveryRouteTx({
+        accountLookupKey,
+        accountLookupKeys: threadRouteAccountLookupKeys,
+        mailboxDedupeKey: input.event.event_id,
+        prisma: input.prisma,
+        route: explicitThreadRoute,
+        threadId: summary.chatId,
+      });
+      if (refreshedRoute.deliveryRoute?.channel === "linq") {
+        routeAccountLookupKey = refreshedRoute.deliveryRoute.accountLookupKey;
+      }
+      sourceMailboxConsumedAt = refreshedRoute.demotedMailboxConsumedAt;
+    } else if (isHostedLinqGroupChat(messageEvent)) {
+      const demotion = await demoteHostedMemberLinqGroupChatBindingsTx({
+        linqChatId: summary.chatId,
+        mailboxDedupeKey: input.event.event_id,
+        prisma: input.prisma,
+      });
+      sourceMailboxConsumedAt = demotion.mailboxConsumedAt;
+    }
     return planHostedLinqExplicitThreadRouteWebhook({
       ...(input.affirmativeReaction ? { affirmativeReaction: true } : {}),
+      accountLookupKey: routeAccountLookupKey,
       context,
       event: input.event,
       prisma: input.prisma,
       route: explicitThreadRoute,
-      sourceMailboxConsumedAt: demotion.mailboxConsumedAt,
+      sourceMailboxConsumedAt,
     });
   }
 
@@ -1135,6 +1164,7 @@ async function resolveIncomingHostedLinqHomeLineRouteBindingTx(input: {
 }
 
 async function planHostedLinqExplicitThreadRouteWebhook(input: {
+  accountLookupKey?: string | null;
   affirmativeReaction?: boolean;
   context: ReturnType<typeof resolveHostedOnboardingLinqMessageContext>;
   event: HostedLinqWebhookEvent;
@@ -1222,9 +1252,10 @@ async function planHostedLinqExplicitThreadRouteWebhook(input: {
     );
   }
 
-  const currentLineAccountLookupKey = createHostedPhoneLookupKey(input.context.recipientPhoneNumber);
+  const routeAccountLookupKey = input.accountLookupKey
+    ?? createHostedPhoneLookupKey(input.context.recipientPhoneNumber);
   const routeAuthority = buildHostedLinqThreadRouteEgressAuthority({
-    accountLookupKey: currentLineAccountLookupKey,
+    accountLookupKey: routeAccountLookupKey,
     route: input.route,
     threadId: summary.chatId,
   });
@@ -1233,7 +1264,7 @@ async function planHostedLinqExplicitThreadRouteWebhook(input: {
     groupReactionContext?: string;
   }) =>
     buildHostedLinqConversationWakeForMailbox({
-      ...(currentLineAccountLookupKey ? { accountLookupKey: currentLineAccountLookupKey } : {}),
+      ...(routeAccountLookupKey ? { accountLookupKey: routeAccountLookupKey } : {}),
       eventId: input.event.event_id,
       ...(context?.groupParticipantAdded ? { groupParticipantAdded: true } : {}),
       ...(context?.groupReactionContext
@@ -1369,9 +1400,9 @@ async function planHostedLinqExplicitThreadRouteWebhook(input: {
 
   const pendingContext = isHostedLinqDirectChatAttested(messageEvent)
     ? { groupParticipantAdded: false, groupReactionContext: null }
-    : currentLineAccountLookupKey
+    : routeAccountLookupKey
       ? await consumeHostedLinqThreadRoutePendingContextTx({
-          accountLookupKey: currentLineAccountLookupKey,
+          accountLookupKey: routeAccountLookupKey,
           containerMemberId: input.route.containerMemberId,
           prisma: input.prisma,
           threadId: summary.chatId,

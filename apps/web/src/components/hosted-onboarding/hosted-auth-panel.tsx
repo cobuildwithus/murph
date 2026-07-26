@@ -1,7 +1,7 @@
 "use client";
 
 import { usePrivy, useUser } from "@privy-io/react-auth";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { PhoneIcon } from "lucide-react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
@@ -16,6 +16,7 @@ import { isHostedOnboardingAccessibleStage } from "@/src/lib/hosted-onboarding/s
 import type { HostedPrivyCompletionPayload } from "@/src/lib/hosted-onboarding/types";
 import { cn } from "@/src/lib/utils";
 import type { HostedAuthCompletionResult } from "./hosted-auth-completion";
+import { logoutHostedAppSession } from "./hosted-app-session-client";
 import { navigateHostedAuthRedirect } from "./hosted-auth-navigation";
 
 import {
@@ -39,11 +40,14 @@ type HostedResumableAuth = {
   method: HostedResumableAuthMethod;
 };
 
+export type HostedAuthPanelView = "auth" | "consent" | "finishing";
+
 export function HostedAuthPanel({
   inviteCode,
   methods,
   onCompleted,
   onSignOut,
+  onViewChange,
   requireLaunchConsentOnCompletion,
   showPassiveLegalNotice,
   size,
@@ -52,6 +56,7 @@ export function HostedAuthPanel({
   methods: readonly HostedAuthMethod[];
   onCompleted?: (payload: HostedPrivyCompletionPayload) => Promise<void> | void;
   onSignOut?: () => Promise<void> | void;
+  onViewChange?: (view: HostedAuthPanelView) => void;
   requireLaunchConsentOnCompletion?: boolean;
   showPassiveLegalNotice?: boolean;
   size?: "default" | "compact";
@@ -62,7 +67,11 @@ export function HostedAuthPanel({
   const [telegramNotice, setTelegramNotice] = useState<TelegramAuthNotice | null>(null);
   const [pendingAuthCompletion, setPendingAuthCompletion] =
     useState<HostedAuthCompletionResult | null>(null);
+  const [consentDeclinePending, setConsentDeclinePending] = useState(false);
   const pendingAuthCompletionRef = useRef<HostedAuthCompletionResult | null>(null);
+  // Decline is terminal. A status read or acceptance that resolves after it must
+  // not advance the journey the member just refused.
+  const consentDeclinedRef = useRef(false);
   const { authenticated, logout } = usePrivy();
   const { user } = useUser();
   const completion = useHostedAuthCompletion({
@@ -85,6 +94,15 @@ export function HostedAuthPanel({
   const shouldRequireLaunchConsent = requireLaunchConsentOnCompletion ?? false;
   const shouldShowPassiveLegalNotice = showPassiveLegalNotice ?? false;
 
+  const view: HostedAuthPanelView = pendingAuthCompletion
+    ? "consent"
+    : completion.completingMethod
+      ? "finishing"
+      : "auth";
+  useEffect(() => {
+    onViewChange?.(view);
+  }, [onViewChange, view]);
+
   async function handleAuthCompleted(result: HostedAuthCompletionResult) {
     if (shouldGateHostedAuthCompletionWithLaunchConsent({
       result,
@@ -104,18 +122,54 @@ export function HostedAuthPanel({
   }
 
   async function handleConsentSatisfied() {
+    if (consentDeclinedRef.current) return;
+
     const result = pendingAuthCompletionRef.current;
     if (!result) return;
 
     if (onCompleted) {
+      await onCompleted(result.payload);
       pendingAuthCompletionRef.current = null;
       setPendingAuthCompletion(null);
-      await onCompleted(result.payload);
       return;
     }
 
     pendingAuthCompletionRef.current = null;
     navigateHostedAuthRedirect(result.redirectUrl);
+  }
+
+  async function handleConsentDeclined() {
+    if (consentDeclinePending) return;
+
+    consentDeclinedRef.current = true;
+    setConsentDeclinePending(true);
+    try {
+      await logoutHostedAppSession({ logoutPrivy: logout });
+    } catch {
+      // logoutHostedAppSession owns recovery: it revalidates authority by
+      // reloading the document, and the fail-closed gate reappears if the
+      // session survived. Nothing rendered here would outlive that reload.
+      // The decline did not take effect, so it does not keep terminal priority.
+      consentDeclinedRef.current = false;
+      setConsentDeclinePending(false);
+      return;
+    }
+
+    try {
+      await onSignOut?.();
+    } catch {
+      // The authoritative Murph app session is already gone.
+    }
+
+    // Clear the refused completion before releasing terminal priority, so a
+    // late callback from the declined journey still has nothing to advance.
+    // The panel stays mounted and returns to auth, so the next authentication
+    // in this same panel must be able to complete.
+    pendingAuthCompletionRef.current = null;
+    consentDeclinedRef.current = false;
+    completion.resetCompletion();
+    setPendingAuthCompletion(null);
+    setConsentDeclinePending(false);
   }
 
   async function handleContinueResumableAuth() {
@@ -127,23 +181,27 @@ export function HostedAuthPanel({
   }
 
   async function handleSignOutResumableAuth() {
-    await logout();
+    await logoutHostedAppSession({ logoutPrivy: logout });
     await onSignOut?.();
   }
 
   if (pendingAuthCompletion) {
     return (
-      <HostedLegalConsentCard
-        mode="compact"
-        onAccepted={handleConsentSatisfied}
-        onRequirementChange={(required) => {
-          if (!required) {
-            void handleConsentSatisfied();
-          }
-        }}
-        preferredScope="launch.legal"
-        source="homepage-auth-dialog"
-      />
+      <div className="space-y-4">
+        <HostedLegalConsentCard
+          declinePending={consentDeclinePending}
+          mode="compact"
+          onAccepted={handleConsentSatisfied}
+          onDecline={() => void handleConsentDeclined()}
+          onRequirementChange={(required) => {
+            if (!required) {
+              void handleConsentSatisfied();
+            }
+          }}
+          preferredScope="launch.legal"
+          source="homepage-auth-dialog"
+        />
+      </div>
     );
   }
 

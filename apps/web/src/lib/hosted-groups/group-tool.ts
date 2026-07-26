@@ -21,6 +21,7 @@ import type {
 } from "@murphai/hosted-execution/vault-share";
 import {
   buildHostedVaultShareProjectionScopeKey,
+  getHostedVaultShareDailyMetricProjectionSpec,
 } from "@murphai/hosted-execution/vault-share";
 
 import { hasHostedRuntimeActiveAccess } from "../hosted-mailbox/runtime-access";
@@ -29,8 +30,6 @@ import {
 } from "../hosted-onboarding/entitlement";
 import { hasHostedMemberActivationProof } from "../hosted-onboarding/member-activation";
 import { readActiveHostedMemberAccess } from "../hosted-onboarding/member-access";
-import { lookupHostedMemberIdentityByPhoneNumber } from "../hosted-onboarding/hosted-member-identity-store";
-import { lookupHostedMemberByVerifiedEmailAddress } from "../hosted-onboarding/hosted-member-store";
 import {
   getHostedLinqChatHandles,
   type HostedLinqChatHandleSummary,
@@ -102,6 +101,9 @@ import {
   projectHostedVaultShareProjectionDisplays,
 } from "./join-policy";
 import { sha256Hex } from "../primitives";
+import {
+  lookupHostedGroupParticipantMemberByHandle,
+} from "./participant-member";
 
 export const HOSTED_THREAD_CONTAINER_PARTICIPANT_RECONCILE_MAX =
   HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX;
@@ -710,7 +712,7 @@ async function lookupSelfOptOutParticipantMember(input: {
     return null;
   }
 
-  return await lookupParticipantMemberByHandle({
+  return await lookupHostedGroupParticipantMemberByHandle({
     handle: input.context.senderHandle,
     prisma: input.prisma,
   });
@@ -1265,7 +1267,22 @@ function renderHostedGroupJoinOfferScopeSentence(
 ): string {
   const labels = projectHostedVaultShareProjectionDisplays(projectionScopes)
     .map((display) => formatHostedGroupJoinOfferShareScopeLabel(display.label));
-  return `your ${formatHumanList(["Murph profile name", ...labels])}`;
+  const sentence = `your ${formatHumanList(["Murph profile name", ...labels])}`;
+  // Nutrition labels (e.g. "daily protein") read as a bare number; disclose that
+  // the totals come from the member's meals, connected-app imports included, so a
+  // like-to-consent reaction is not materially narrower than what is exported.
+  return projectionScopes.some(isHostedGroupMealNutritionProjectionScope)
+    ? `${sentence} (nutrition totals come from your meals in Murph, including meals imported from connected apps)`
+    : sentence;
+}
+
+function isHostedGroupMealNutritionProjectionScope(
+  scope: HostedVaultShareProjectionScope,
+): boolean {
+  return (
+    getHostedVaultShareDailyMetricProjectionSpec(scope.projectionKind)?.source.kind
+      === "meal-nutrition-total"
+  );
 }
 
 function formatHostedGroupJoinOfferShareScopeLabel(label: string): string {
@@ -1348,7 +1365,7 @@ async function handleHostedRuntimeGroupReadChatParticipants(input: {
   const resolvedParticipants: HostedThreadContainerResolvedParticipant[] = [];
   try {
     for (const handle of participantHandles) {
-      const lookup = await lookupParticipantMemberByHandle({
+      const lookup = await lookupHostedGroupParticipantMemberByHandle({
         handle: handle.handle,
         prisma,
       });
@@ -1508,7 +1525,7 @@ async function resolveHostedThreadContainerParticipants(input: {
     if (!isCurrentHostedLinqParticipantHandle(handle)) {
       continue;
     }
-    const lookup = await lookupParticipantMemberByHandle({
+    const lookup = await lookupHostedGroupParticipantMemberByHandle({
       handle: handle.handle,
       prisma: input.prisma,
     });
@@ -1521,26 +1538,6 @@ async function resolveHostedThreadContainerParticipants(input: {
     }
   }
   return resolvedParticipants;
-}
-
-async function lookupParticipantMemberByHandle(input: {
-  handle: string;
-  prisma: HostedOnboardingReadClient;
-}) {
-  if (input.handle.includes("@")) {
-    return await lookupHostedMemberByVerifiedEmailAddress({
-      address: input.handle,
-      prisma: input.prisma,
-    });
-  }
-  const phoneNumber = normalizePhoneNumber(input.handle);
-  if (!phoneNumber) {
-    return null;
-  }
-  return await lookupHostedMemberIdentityByPhoneNumber({
-    phoneNumber,
-    prisma: input.prisma,
-  });
 }
 
 function isCurrentHostedLinqParticipantHandle(handle: HostedLinqChatHandleSummary): boolean {

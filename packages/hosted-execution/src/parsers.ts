@@ -1296,6 +1296,15 @@ function parseHostedExecutionAssistantNotificationRequestedPayload(
             `${label}.deliveryIdempotencyKey`,
           ),
         }),
+    ...(record.externalThreadRouteAuthority === undefined
+      ? {}
+      : {
+          externalThreadRouteAuthority:
+            parseOptionalHostedExecutionExternalThreadRouteAuthority(
+              record.externalThreadRouteAuthority,
+              `${label}.externalThreadRouteAuthority`,
+            ),
+        }),
     ...(record.firstContact === undefined
       ? {}
       : {
