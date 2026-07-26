@@ -459,9 +459,9 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
   },
   {
     slug: "providers.oura_whoop_strava",
-    label: "Oura, WHOOP, and Strava provider revocation",
+    label: "Wearable provider account cleanup",
     deletion: "best-effort-delete",
-    note: "Uses the existing provider revokeAccess hook where configured before deleting local tokens. Wearable sources without a provider-side revocation hook are deleted locally unless source-side revocation is implemented.",
+    note: "Uses a provider's destructive deleteAccount hook when configured, including Junction user deletion, and otherwise falls back to ordinary revokeAccess before local tokens are deleted. Wearable sources without either hook are deleted locally only.",
   },
   {
     slug: "providers.composio_connected_apps",
@@ -1635,9 +1635,10 @@ async function revokeDeviceProvidersBestEffort(input: {
 
       registry ??= createHostedDeviceSyncRegistry(process.env);
       const provider = registry.get(connection.provider);
-      const revokeAccess = provider?.connectionHandler?.revokeAccess;
+      const deleteProviderAccount = provider?.connectionHandler?.deleteAccount
+        ?? provider?.connectionHandler?.revokeAccess;
 
-      if (!revokeAccess) {
+      if (!deleteProviderAccount) {
         results.push({
           connectionId: connection.id,
           errorCode: storedAccount.credential.kind === "provider_config"
@@ -1650,7 +1651,7 @@ async function revokeDeviceProvidersBestEffort(input: {
         continue;
       }
 
-      await revokeAccess(storedAccount);
+      await deleteProviderAccount(storedAccount);
       results.push({
         connectionId: connection.id,
         errorCode: null,

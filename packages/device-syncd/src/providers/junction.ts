@@ -485,6 +485,22 @@ export function createJunctionDeviceSyncProvider(
     }
   }
 
+  async function deleteAccount(
+    account: Pick<DeviceSyncAccount, "externalAccountId">,
+  ): Promise<void> {
+    const userId = normalizeString(account.externalAccountId);
+    if (!userId) {
+      throw deviceSyncError({
+        code: "JUNCTION_USER_ID_MISSING",
+        message: "Junction account deletion requires a stored Junction user id.",
+        retryable: false,
+        httpStatus: 409,
+      });
+    }
+
+    await client.deleteUser(userId);
+  }
+
   function createScheduledJobs(
     account: StoredDeviceSyncAccount,
     now: string,
@@ -2430,6 +2446,7 @@ export function createJunctionDeviceSyncProvider(
     connectionHandler: {
       beginConnection,
       completeConnection,
+      deleteAccount,
       revokeAccess,
     },
     sdkConnectionHandler: {

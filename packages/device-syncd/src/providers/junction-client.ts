@@ -336,6 +336,27 @@ export class JunctionClient {
     );
   }
 
+  async deleteUser(
+    userId: string,
+    options: { signal?: AbortSignal | null } = {},
+  ): Promise<void> {
+    const normalizedUserId = normalizeString(userId);
+    if (!normalizedUserId) {
+      throw new TypeError("Junction user deletion requires a Junction user id.");
+    }
+
+    await this.requestJson<unknown>(
+      "DELETE",
+      `/v2/user/${encodeURIComponent(normalizedUserId)}`,
+      undefined,
+      {
+        endpointKind: "junction_user_delete",
+        optional404: true,
+        signal: options.signal ?? null,
+      },
+    );
+  }
+
   async listUserDevices(
     userId: string,
     options: { signal?: AbortSignal | null } = {},

@@ -139,6 +139,33 @@ export class PrismaHostedConnectionStore {
   private async upsertConnectionWithPreviousOnce(
     input: UpsertPublicDeviceSyncConnectionInput,
   ): Promise<UpsertPublicDeviceSyncConnectionResult> {
+    const result = await this.upsertConnectionRecords(input);
+
+    return {
+      account: await this.buildDurableConnectionRecord(result.record),
+      previousAccount: result.previousRecord
+        ? await this.buildDurableConnectionRecord(result.previousRecord, {
+            externalAccountId: input.externalAccountId,
+          })
+        : null,
+    };
+  }
+
+  async upsertConnectionTx(
+    tx: Prisma.TransactionClient,
+    input: UpsertPublicDeviceSyncConnectionInput,
+  ): Promise<PublicDeviceSyncAccount> {
+    const result = await this.upsertConnectionRecords(input, tx);
+    return this.buildUpsertedConnectionAccount(result.record, input);
+  }
+
+  private async upsertConnectionRecords(
+    input: UpsertPublicDeviceSyncConnectionInput,
+    tx?: Prisma.TransactionClient,
+  ): Promise<{
+    previousRecord: HostedConnectionRecord | null;
+    record: HostedConnectionRecord;
+  }> {
     const ownerId = normalizeNullableString(input.ownerId);
     const displayName = normalizeNullableString(input.displayName);
     const replacementMetadata = sanitizeHostedDeviceSyncConnectionMetadata(input.metadata ?? {});
@@ -151,7 +178,7 @@ export class PrismaHostedConnectionStore {
     const credential = resolveHostedUpsertConnectionCredential(input);
     const setupWrite = buildHostedConnectionSetupWrite(input, connectedAt, "create");
 
-    const result = await this.prisma.$transaction(async (tx) => {
+    const upsert = async (tx: Prisma.TransactionClient) => {
       let existing = await tx.deviceConnection.findUnique({
         where: {
           provider_providerAccountBlindIndex: {
@@ -320,16 +347,23 @@ export class PrismaHostedConnectionStore {
         record: created,
         previousRecord: null,
       };
-    });
-
-    return {
-      account: await this.buildDurableConnectionRecord(result.record),
-      previousAccount: result.previousRecord
-        ? await this.buildDurableConnectionRecord(result.previousRecord, {
-            externalAccountId: input.externalAccountId,
-          })
-        : null,
     };
+
+    return tx ? upsert(tx) : this.prisma.$transaction(upsert);
+  }
+
+  private buildUpsertedConnectionAccount(
+    record: HostedConnectionRecord,
+    input: UpsertPublicDeviceSyncConnectionInput,
+  ): PublicDeviceSyncAccount {
+    return toRedactedPublicDeviceSyncAccount(
+      buildHostedPublicDeviceSyncAccount({
+        record: mapHostedConnectionRecord(record),
+        fallback: {
+          externalAccountId: input.externalAccountId,
+        },
+      }),
+    );
   }
 
   private async resolveUpsertConnectionUniqueRace(
