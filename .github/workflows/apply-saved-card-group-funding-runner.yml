@@ -15,6 +15,8 @@ jobs:
         with:
           ref: agent/reuse-saved-card-for-group-funding
           fetch-depth: 0
+      - name: Prepare integration patch
+        run: python agent-scripts/fix-saved-card-patch-script.py
       - name: Apply integration patch
         id: apply
         run: |
@@ -34,6 +36,7 @@ jobs:
         if: steps.apply.outputs.status == '0'
         run: |
           rm agent-scripts/apply-saved-card-group-funding.py
+          rm agent-scripts/fix-saved-card-patch-script.py
           rm .github/workflows/apply-saved-card-group-funding.yml
           rm apply-saved-card-group-funding.log
           git config user.name "OpenAI"
