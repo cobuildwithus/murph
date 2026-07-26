@@ -515,6 +515,48 @@ describe("hosted Stripe event reconciliation", () => {
     );
   });
 
+  it("requests the group thank-you after delayed payment succeeds", async () => {
+    const prisma = createStripeEventPrismaHarness();
+    const event = {
+      ...makeCheckoutCompletedEvent(),
+      id: "evt_checkout_async_payment_succeeded_123",
+      type: "checkout.session.async_payment_succeeded",
+    } as Stripe.Event;
+    mocks.stripe.events.retrieve.mockResolvedValue(event);
+    mocks.reconcileHostedUsageCreditStripeEvent.mockResolvedValue({
+      beneficiaryMemberId: "member_123",
+      granted: true,
+      handled: true,
+      purchaseId: "hucp_purchase_123",
+      wakeRequired: true,
+    });
+
+    await recordHostedStripeEvent({ event, prisma: prisma.client });
+
+    await expect(reconcileHostedStripeEventById({
+      eventId: event.id,
+      prisma: prisma.client,
+    })).resolves.toMatchObject({
+      status: "completed",
+      usageCreditGrantedMemberId: "member_123",
+    });
+
+    expect(mocks.appendGroupFundingThankYou).toHaveBeenCalledWith({
+      prisma: prisma.client,
+      purchaseId: "hucp_purchase_123",
+    });
+    expect(mocks.signalHostedRuntimeRecheckRuntime).toHaveBeenCalledWith({
+      abortSignal: expect.any(AbortSignal),
+      prisma: prisma.client,
+      userId: "member_123",
+    });
+    expect(
+      mocks.appendGroupFundingThankYou.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      mocks.signalHostedRuntimeRecheckRuntime.mock.invocationCallOrder[0] ?? 0,
+    );
+  });
+
   it("rechecks restored usage before retrying a transient group celebration append", async () => {
     const prisma = createStripeEventPrismaHarness();
     const event = makeCheckoutCompletedEvent();

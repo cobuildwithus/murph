@@ -212,6 +212,7 @@ import {
 import {
   executeGenerateSongDynamicTool,
   MURPH_GENERATE_SONG_TOOL,
+  MURPH_RESPONSE_AUDIO_GENERATE_SONG_TOOL,
   parseGenerateSongArguments,
 } from './dynamic-tools/generate-song.js'
 import {
@@ -1190,6 +1191,7 @@ export const MURPH_DYNAMIC_TOOLS = [
 
 export type MurphDynamicTool =
   | (typeof MURPH_DYNAMIC_TOOLS)[number]
+  | typeof MURPH_RESPONSE_AUDIO_GENERATE_SONG_TOOL
   | typeof MURPH_GROUP_SEND_PROGRESS_UPDATE_TOOL
   | typeof MURPH_GROUP_SHARED_READ_TOOL
   | typeof MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL

@@ -44,6 +44,34 @@ export const MURPH_GENERATE_SONG_TOOL = {
   },
 } as const
 
+export const MURPH_RESPONSE_AUDIO_GENERATE_SONG_TOOL = {
+  namespace: 'murph',
+  name: 'generate_song',
+  description:
+    'Generate one original, copyright-safe 5–15-second song or instrumental for this existing group conversation and attach it as a native voice memo to the final response. Set durationSeconds explicitly between 5 and 15. Keep lyrics to at most four short lines. Never imitate or name a real artist, band, or song, and never copy lyrics. Use only group-safe details from the supplied recent history; do not expose private health, account, payment, or contributor identity. Do not ask anyone to take an action, spend money, or follow a link. This does not send directly.',
+  inputSchema: {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      prompt: {
+        type: 'string',
+        minLength: 1,
+        maxLength: 4100,
+      },
+      durationSeconds: {
+        type: 'integer',
+        minimum: 5,
+        maximum: 15,
+      },
+      instrumental: {
+        type: 'boolean',
+        default: false,
+      },
+    },
+    required: ['prompt', 'durationSeconds'],
+  },
+} as const
+
 const generateSongArgumentsSchema = z
   .object({
     durationSeconds: z.number().int().min(3).max(300).default(30),

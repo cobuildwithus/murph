@@ -2907,6 +2907,159 @@ test('sendAssistantNotificationLocal rejects a response-audio turn with no audio
   expect(deliverMessage).not.toHaveBeenCalled()
 })
 
+test('sendAssistantNotificationLocal rejects a response-audio turn with more than one audio attempt', async () => {
+  const providerResult = createProviderResult({
+    rawEvents: [
+      createResponseAudioToolCompletedEvent({
+        success: false,
+        tool: 'generate_voice_memo',
+      }),
+      createResponseAudioToolCompletedEvent({
+        success: false,
+        tool: 'generate_song',
+      }),
+    ],
+    response: JSON.stringify({
+      kind: 'send_message',
+      privateSummary: 'Celebrate the group contribution.',
+      text: 'The group fuel gauge lives to fight another day.',
+    }),
+  })
+  const { deliverMessage, sendAssistantNotificationLocal } =
+    await loadNotificationTurnHarness({
+      providerResult,
+      turnId: 'turn-group-celebration-two-audio-attempts',
+    })
+
+  await expect(sendAssistantNotificationLocal({
+    instructions: 'Create a brief group celebration.',
+    notificationToolProfile: 'response-audio',
+    responsePolicy: { kind: 'require_send' },
+    vault: '/vaults/group-celebration-two-audio-attempts',
+  })).rejects.toMatchObject({
+    code: 'ASSISTANT_NOTIFICATION_RESPONSE_AUDIO_TOOL_COUNT_INVALID',
+  })
+  expect(deliverMessage).not.toHaveBeenCalled()
+})
+
+test('sendAssistantNotificationLocal rejects successful audio without one attachment', async () => {
+  const providerResult = createProviderResult({
+    rawEvents: [
+      createResponseAudioToolCompletedEvent({
+        success: true,
+        tool: 'generate_voice_memo',
+      }),
+    ],
+    response: JSON.stringify({
+      kind: 'send_message',
+      privateSummary: 'Celebrate the group contribution.',
+      text: 'The group fuel gauge lives to fight another day.',
+    }),
+  })
+  const { deliverMessage, sendAssistantNotificationLocal } =
+    await loadNotificationTurnHarness({
+      providerResult,
+      turnId: 'turn-group-celebration-success-without-media',
+    })
+
+  await expect(sendAssistantNotificationLocal({
+    instructions: 'Create a brief group celebration.',
+    notificationToolProfile: 'response-audio',
+    responsePolicy: { kind: 'require_send' },
+    vault: '/vaults/group-celebration-success-without-media',
+  })).rejects.toMatchObject({
+    code: 'ASSISTANT_NOTIFICATION_RESPONSE_AUDIO_MEDIA_INVALID',
+    details: expect.objectContaining({
+      assistantNotificationProviderNonReplayableWork: true,
+    }),
+  })
+  expect(deliverMessage).not.toHaveBeenCalled()
+})
+
+test('sendAssistantNotificationLocal rejects failed audio with an attachment', async () => {
+  const unexpectedVoiceMemo = {
+    filename: 'unexpected-group-thanks.mp3',
+    kind: 'voice_memo' as const,
+    transcript: 'Thanks for keeping the group going.',
+    transport: {
+      attachmentId: 'attachment-unexpected-group-thanks',
+      kind: 'linq_attachment' as const,
+    },
+  }
+  const providerResult = createProviderResult({
+    rawEvents: [
+      createResponseAudioToolCompletedEvent({
+        success: false,
+        tool: 'generate_song',
+      }),
+    ],
+    response: JSON.stringify({
+      kind: 'send_message',
+      privateSummary: 'Audio was unavailable; thank the group in text.',
+      text: 'The group fuel gauge lives to fight another day.',
+    }),
+    responseMedia: [unexpectedVoiceMemo],
+  })
+  const { deliverMessage, sendAssistantNotificationLocal } =
+    await loadNotificationTurnHarness({
+      providerResult,
+      turnId: 'turn-group-celebration-failure-with-media',
+    })
+
+  await expect(sendAssistantNotificationLocal({
+    instructions: 'Create a brief group celebration.',
+    notificationToolProfile: 'response-audio',
+    responsePolicy: { kind: 'require_send' },
+    vault: '/vaults/group-celebration-failure-with-media',
+  })).rejects.toMatchObject({
+    code: 'ASSISTANT_NOTIFICATION_RESPONSE_AUDIO_MEDIA_INVALID',
+  })
+  expect(deliverMessage).not.toHaveBeenCalled()
+})
+
+test('sendAssistantNotificationLocal rejects skip after successful response audio as non-replayable', async () => {
+  const voiceMemo = {
+    filename: 'group-thanks-before-skip.mp3',
+    kind: 'voice_memo' as const,
+    transcript: 'Thanks for keeping the group going.',
+    transport: {
+      attachmentId: 'attachment-group-thanks-before-skip',
+      kind: 'linq_attachment' as const,
+    },
+  }
+  const providerResult = createProviderResult({
+    rawEvents: [
+      createResponseAudioToolCompletedEvent({
+        success: true,
+        tool: 'generate_voice_memo',
+      }),
+    ],
+    response: JSON.stringify({
+      kind: 'skip',
+      privateSummary: 'No group thank-you required.',
+    }),
+    responseMedia: [voiceMemo],
+  })
+  const { deliverMessage, sendAssistantNotificationLocal } =
+    await loadNotificationTurnHarness({
+      providerResult,
+      turnId: 'turn-group-celebration-success-then-skip',
+    })
+
+  await expect(sendAssistantNotificationLocal({
+    instructions: 'Create a brief group celebration.',
+    notificationToolProfile: 'response-audio',
+    responsePolicy: { kind: 'require_send' },
+    vault: '/vaults/group-celebration-success-then-skip',
+  })).rejects.toMatchObject({
+    code: 'ASSISTANT_NOTIFICATION_RESPONSE_REQUIRED',
+    details: expect.objectContaining({
+      assistantNotificationProviderNonReplayableWork: true,
+    }),
+  })
+  expect(deliverMessage).not.toHaveBeenCalled()
+})
+
 test('sendAssistantNotificationLocal accepts text fallback after one failed audio attempt', async () => {
   const providerResult = createProviderResult({
     rawEvents: [

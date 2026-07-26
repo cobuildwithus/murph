@@ -109,6 +109,9 @@ import {
   type MurphDynamicTool,
 } from '../../assistant-codex/dynamic-tools.js'
 import {
+  MURPH_RESPONSE_AUDIO_GENERATE_SONG_TOOL,
+} from '../../assistant-codex/dynamic-tools/generate-song.js'
+import {
   resolveAssistantUserActionAcceptedInputIds,
 } from '../../assistant-codex/dynamic-tools/phone-calls.js'
 import {
@@ -816,11 +819,17 @@ export async function resolveAssistantRouteTurnPlan(input: {
           privateInteractiveAudience &&
           input.hostedToolContext?.vaultFileSendAvailable === true,
       })
-  const dynamicTools = responseAudioTurn
-    ? availableDynamicTools.filter((tool) =>
-        tool.namespace === 'murph' &&
-        (tool.name === 'generate_voice_memo' || tool.name === 'generate_song')
-      )
+  const dynamicTools: readonly MurphDynamicTool[] = responseAudioTurn
+    ? availableDynamicTools.reduce<MurphDynamicTool[]>((tools, tool) => {
+        if (tool.namespace !== 'murph') return tools
+        if (tool.name === 'generate_voice_memo') {
+          tools.push(tool)
+        }
+        if (tool.name === 'generate_song') {
+          tools.push(MURPH_RESPONSE_AUDIO_GENERATE_SONG_TOOL)
+        }
+        return tools
+      }, [])
     : availableDynamicTools
   const messageTargetDynamicToolsAvailable =
     dynamicTools.some(

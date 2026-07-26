@@ -425,7 +425,10 @@ describe('assistant Codex turn planning', () => {
 
     try {
       await appendAssistantTranscriptEntries(vault, session.sessionId, [
-        { kind: 'user', text: 'Bennett keeps calling this the wellness senate.' },
+        {
+          kind: 'user',
+          text: 'Bennett wants the wellness senate anthem to sound like a famous band.',
+        },
         { kind: 'assistant', text: 'The wellness senate is now in session.' },
       ])
       const plan = await resolveAssistantRouteTurnPlan({
@@ -493,16 +496,50 @@ describe('assistant Codex turn planning', () => {
       expect(plan.assistantCliContract).toBeNull()
       expect(plan.sessionContext).toBeUndefined()
       expect(plan.conversationHistoryMessages).toEqual([
-        { content: 'Bennett keeps calling this the wellness senate.', role: 'user' },
+        {
+          content:
+            'Bennett wants the wellness senate anthem to sound like a famous band.',
+          role: 'user',
+        },
         { content: 'The wellness senate is now in session.', role: 'assistant' },
       ])
-      expect(plan.systemPrompt).toContain('response-audio notification')
+      expect(plan.systemPrompt).toContain('audio thank-you inside an existing conversation')
+      expect(plan.systemPrompt).toContain('You must call exactly one')
       expect(plan.systemPrompt).toContain('murph.generate_voice_memo')
       expect(plan.systemPrompt).toContain('murph.generate_song')
-      expect(plan.systemPrompt).toContain('Delivery adapter contract:')
+      expect(plan.systemPrompt).toContain('In-chat response contract:')
+      expect(plan.systemPrompt).toContain(
+        '{"kind":"send_message","text":"...","privateSummary":"..."}',
+      )
+      expect(plan.systemPrompt).not.toContain('"kind":"skip"')
+      expect(plan.systemPrompt).not.toContain('"subject"')
+      expect(plan.systemPrompt).not.toContain('notification')
+      expect(plan.systemPrompt).not.toContain('proactive')
+      expect(plan.systemPrompt).not.toContain('Delivery adapter contract:')
       expect(plan.systemPrompt).not.toContain('PRIVATE_CLI_CONTRACT')
       expect(plan.systemPrompt).not.toContain('PRIVATE_CONTEXT_SNAPSHOT')
       expect(plan.systemPrompt).not.toContain('PRIVATE_HOSTED_CONTEXT')
+      const responseAudioSong = plan.dynamicTools.find(
+        (tool) => tool.name === 'generate_song',
+      )
+      expect(responseAudioSong?.description).toContain(
+        'original, copyright-safe 5–15-second song',
+      )
+      expect(responseAudioSong?.description).toContain(
+        'Never imitate or name a real artist, band, or song',
+      )
+      expect(responseAudioSong?.description).not.toContain('requested action')
+      expect(responseAudioSong?.description).not.toContain('personal benefit')
+      expect(responseAudioSong?.inputSchema).toMatchObject({
+        properties: {
+          durationSeconds: {
+            maximum: 15,
+            minimum: 5,
+            type: 'integer',
+          },
+        },
+        required: ['prompt', 'durationSeconds'],
+      })
       expect(plan.assistantPreferredElevenLabsVoiceId).toBe(
         resolveAssistantVoiceOptionElevenLabsVoiceId('warm'),
       )
