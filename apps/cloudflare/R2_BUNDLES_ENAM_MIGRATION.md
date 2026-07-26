@@ -242,6 +242,7 @@ Object code-update skew][do-updates], [Durable Object alarms][do-alarms],
 [do-alarms]: https://developers.cloudflare.com/durable-objects/api/alarms/
 [vercel-runtime-logs]: https://vercel.com/docs/logs/runtime
 [vercel-cli-logs]: https://vercel.com/docs/cli/logs
+[vercel-skew-protection]: https://vercel.com/docs/skew-protection
 
 ## 1. Size the window before booking it
 
@@ -408,149 +409,175 @@ Keep the fence through section 7.
 ## 5. Copy the frozen source and prove the mirror
 
 First qualify the marker-bearing web version while the maintenance flag is
-unset. Record `MARKER_DEPLOY_CURSOR_UTC` immediately before dispatching that
-preparatory deployment. It emits two exact, identifier-free Vercel runtime-log
-messages in the same request:
+unset. The delete route pins Vercel `maxDuration` to 300 seconds and emits two
+exact, identifier-free runtime-log messages inside the same Vercel request
+event. Confirm Skew Protection is enabled, then establish one full route
+lifetime of observable quiet before dispatching the preparatory deployment:
 
 ```bash
+export ACCOUNT_DELETE_MAX_DURATION_SECONDS=300
+pnpm --dir apps/web exec vercel api /v9/projects/murph --raw 2>/dev/null |
+  jq -er '.skewProtectionMaxAge | numbers | select(. > 0)' >/dev/null
+export MARKERLESS_QUIET_START_UTC="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+sleep "$ACCOUNT_DELETE_MAX_DURATION_SECONDS"
 export MARKER_DEPLOY_CURSOR_UTC="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 ```
 
-- `Hosted account deletion admitted before destructive effects.` immediately
-  before the deletion service;
-- `Hosted account deletion confirmed terminal across R2 and durable state.`
-  only when the service's aggregate `cloudflare.deleted` result proves every
-  fanned-out hosted-member R2 and Durable Object cleanup returned successfully.
+- `Hosted account deletion request entered the guarded route.` is the first
+  handler action, before any guard or await;
+- `Hosted account deletion request reached a safe terminal disposition.` is
+  emitted when the request stops before destructive deletion starts, or only
+  after the existing deletion service's aggregate `cloudflare.deleted` result
+  proves every fanned-out hosted-member R2 and Durable Object cleanup returned
+  successfully.
 
-Vercel supplies the shared `requestId`. A timeout, process exit,
-`cloudflare.deleted=false`, or missing log leaves the admission unmatched and
-therefore blocks the migration; request completion, HTTP status, event counts,
-and elapsed time are never terminal proof.
+A timeout, process exit, throw after deletion starts,
+`cloudflare.deleted=false`, or missing log leaves the entry unmatched and
+blocks the migration. Request completion, HTTP status, event counts, and
+elapsed time are never deletion proof.
 
-Wait for the preparatory deployment to reach 100 percent and record
-`MARKER_READY_UTC`. If its predecessor did not contain both markers, inspect
-that predecessor's logs from `MARKER_DEPLOY_CURSOR_UTC` through
-`MARKER_READY_UTC` for `POST /api/settings/privacy/delete` and require exact
-zero. An invocation on a markerless version cannot be joined mechanically, so
-any match fails this qualification and becomes an incident. A later
-qualification whose predecessor already contains both markers includes those
-requests in the exact join below instead. Keep the whole qualification inside
-Vercel's retained searchable-log window; if the cursor is no longer queryable,
-dispatch a fresh marker-bearing preparation rather than infer missing history.
+Wait for the preparatory deployment to reach 100 percent and record its exact
+deployment ID as `MARKER_DEPLOYMENT_ID`. In that deployment's Vercel menu, set
+the [Skew Protection Threshold][vercel-skew-protection] to this deployment.
+Vercel then refuses to resolve requests to every older deployment, including
+requests carrying an old deployment query parameter, header, or cookie. Record
+`MARKER_READY_UTC` only after Vercel confirms the threshold.
+
+The 100-percent traffic boundary alone is not this transition gate: Skew
+Protection can still address an older deployment. Query the entire interval
+from `MARKERLESS_QUIET_START_UTC` through `MARKER_READY_UTC` and require that
+every delete-route invocation, if any, resolved to `MARKER_DEPLOYMENT_ID`.
+Reaching the result bound, a missing deployment ID, or any older deployment
+match is unjoinable and becomes an incident:
+
+```bash
+(
+  set -euo pipefail
+  test -n "$MARKERLESS_QUIET_START_UTC"
+  test -n "$MARKER_READY_UTC"
+  test -n "$MARKER_DEPLOYMENT_ID"
+  QUALIFICATION_LOG="$(mktemp)"
+  trap 'rm -f "$QUALIFICATION_LOG"' EXIT
+  pnpm --dir apps/web exec vercel logs --project murph \
+    --environment production --no-branch \
+    --query '/api/settings/privacy/delete' \
+    --since "$MARKERLESS_QUIET_START_UTC" --until "$MARKER_READY_UTC" \
+    --limit 1000 --json >"$QUALIFICATION_LOG"
+  test "$(jq -s 'length' "$QUALIFICATION_LOG")" -lt 1000
+  test "$(
+    jq -s --arg markerDeploymentId "$MARKER_DEPLOYMENT_ID" '
+      [.[] |
+        select(
+          .requestPath == "/api/settings/privacy/delete"
+          and .requestMethod == "POST"
+        ) |
+        (.deploymentId // "") |
+        select(. != $markerDeploymentId)
+      ] | length
+    ' "$QUALIFICATION_LOG"
+  )" = 0
+)
+```
+
+After the threshold, wait the route's full 300-second platform-enforced
+maximum duration. Vercel terminates a Function that exceeds its configured
+`maxDuration`; together with the preceding quiet interval and exact deployment
+query, this retires every markerless predecessor invocation. It does not prove
+any deletion result. Keep the qualification inside Vercel's retained
+searchable-log window, and dispatch a fresh marker-bearing preparation rather
+than infer missing history.
+
+```bash
+sleep "$ACCOUNT_DELETE_MAX_DURATION_SECONDS"
+```
 
 For the activation:
 
-1. In the cutover shell, record the fence cursor **before** inspecting earlier
-   admissions. This ordering closes the scan-to-cursor race:
+1. Begin the tracked interval before the marker deployment was dispatched:
 
    ```bash
-   export ADMISSION_MARKER='Hosted account deletion admitted before destructive effects.'
-   export TERMINAL_MARKER='Hosted account deletion confirmed terminal across R2 and durable state.'
-   export FENCE_CURSOR_UTC="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+   export ENTRY_MARKER='Hosted account deletion request entered the guarded route.'
+   export SAFE_TERMINAL_MARKER='Hosted account deletion request reached a safe terminal disposition.'
+   export TRACKED_WINDOW_START_UTC="$MARKER_DEPLOY_CURSOR_UTC"
    ```
 
-2. In one fail-closed block, list every delete-route invocation from the
-   preparatory deployment cursor up to the fence cursor. Require every matching
-   log to carry a Vercel `requestId`, and require exactly one admission and one
-   terminal marker for each unique request before the cursor. This intentionally
-   blocks even an invocation that never reached authorization if its safety
-   cannot be distinguished from missing logs. Reaching Vercel's 1,000-result
-   bound is ambiguous and therefore fails:
+2. Set `HOSTED_ACCOUNT_DELETION_MAINTENANCE=1`, deploy it to 100 percent, and
+   prove the three route checks from the deferral section. Record its exact
+   deployment ID as `MAINTENANCE_DEPLOYMENT_ID`.
+
+3. In that deployment's Vercel menu, advance the Skew Protection Threshold to
+   `MAINTENANCE_DEPLOYMENT_ID`. Record the drain cutoff only after Vercel
+   confirms the threshold and the deployment remains at 100 percent. This
+   later boundary is the single admission-closing instant: no new request can
+   resolve to an older unset-guard deployment, every invocation on the
+   maintenance deployment rejects before destructive deletion, and every
+   already-running marker-bearing invocation emitted its entry marker as its
+   first handler action.
+
+4. Wait the full route lifetime plus a small log-flush margin:
+
+   ```bash
+   test -n "$MAINTENANCE_DEPLOYMENT_ID"
+   export FENCE_CLOSED_UTC="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+   sleep "$((ACCOUNT_DELETE_MAX_DURATION_SECONDS + 30))"
+   ```
+
+5. In one fail-closed block, list every delete-route invocation from
+   `TRACKED_WINDOW_START_UTC` through `FENCE_CLOSED_UTC`. Require every matching
+   Vercel request event to carry its opaque event `id`, and require exactly one
+   entry and one safe terminal message in that event's `logs` array. The
+   terminal message may occur after the cutoff because the event is fetched
+   only after the full drain; it remains owned by the same request event.
+   Reaching Vercel's 1,000-result bound is ambiguous and fails:
 
    ```bash
    (
      set -euo pipefail
-     test -n "$MARKER_DEPLOY_CURSOR_UTC"
-     test -n "$FENCE_CURSOR_UTC"
-     ADMISSION_TMP_DIR="$(mktemp -d)"
-     ROUTE_LOG="$ADMISSION_TMP_DIR/delete-route.jsonl"
-     REQUEST_IDS="$ADMISSION_TMP_DIR/request-ids.txt"
-     trap 'rm -f "$ROUTE_LOG" "$REQUEST_IDS"; rmdir "$ADMISSION_TMP_DIR"' EXIT
+     test -n "$TRACKED_WINDOW_START_UTC"
+     test -n "$FENCE_CLOSED_UTC"
+     DRAIN_TMP_DIR="$(mktemp -d)"
+     ROUTE_LOG="$DRAIN_TMP_DIR/delete-route.jsonl"
+     trap 'rm -f "$ROUTE_LOG"; rmdir "$DRAIN_TMP_DIR"' EXIT
 
      pnpm --dir apps/web exec vercel logs --project murph \
        --environment production --no-branch \
        --query '/api/settings/privacy/delete' \
-       --since "$MARKER_DEPLOY_CURSOR_UTC" --until "$FENCE_CURSOR_UTC" \
+       --since "$TRACKED_WINDOW_START_UTC" --until "$FENCE_CLOSED_UTC" \
        --limit 1000 --json >"$ROUTE_LOG"
      ROUTE_LOG_COUNT="$(jq -s 'length' "$ROUTE_LOG")"
      test "$ROUTE_LOG_COUNT" -lt 1000
-     UNJOINABLE_LOG_COUNT="$(
-       jq -s '
-         [.[] |
-           select(
-             (.path == "/api/settings/privacy/delete"
-               or .requestPath == "/api/settings/privacy/delete"
-               or .proxy.path == "/api/settings/privacy/delete")
-             and (.method == "POST" or .proxy.method == "POST")
-           ) |
-           select((.requestId // "") == "")
-         ] | length
-       ' "$ROUTE_LOG"
-     )"
-     test "$UNJOINABLE_LOG_COUNT" = 0
-     jq -r '
-       select(
-         (.path == "/api/settings/privacy/delete"
-           or .requestPath == "/api/settings/privacy/delete"
-           or .proxy.path == "/api/settings/privacy/delete")
-         and (.method == "POST" or .proxy.method == "POST")
-       ) | .requestId
-     ' "$ROUTE_LOG" | sort -u >"$REQUEST_IDS"
-
-     while IFS= read -r REQUEST_ID; do
-         test -n "$REQUEST_ID"
-         ADMISSION_COUNT="$(
-           pnpm --dir apps/web exec vercel logs --project murph \
-             --environment production --no-branch --request-id "$REQUEST_ID" \
-             --query "$ADMISSION_MARKER" --since "$MARKER_DEPLOY_CURSOR_UTC" \
-             --until "$FENCE_CURSOR_UTC" --limit 2 --json |
-             jq -s --arg marker "$ADMISSION_MARKER" \
-               '[.[] | select(.message == $marker)] | length'
-         )"
-         TERMINAL_COUNT="$(
-           pnpm --dir apps/web exec vercel logs --project murph \
-             --environment production --no-branch --request-id "$REQUEST_ID" \
-             --query "$TERMINAL_MARKER" --since "$MARKER_DEPLOY_CURSOR_UTC" \
-             --until "$FENCE_CURSOR_UTC" --limit 2 --json |
-             jq -s --arg marker "$TERMINAL_MARKER" \
-               '[.[] | select(.message == $marker)] | length'
-         )"
-         test "$ADMISSION_COUNT" = 1
-         test "$TERMINAL_COUNT" = 1
-     done <"$REQUEST_IDS"
+     test "$(
+       jq -s \
+         --arg entryMarker "$ENTRY_MARKER" \
+         --arg terminalMarker "$SAFE_TERMINAL_MARKER" '
+           [.[] |
+             select(
+               .requestPath == "/api/settings/privacy/delete"
+               and .requestMethod == "POST"
+             ) |
+             select(
+               (.id // "") == ""
+               or ([.logs[]? | select(.message == $entryMarker)] | length) != 1
+               or ([.logs[]? | select(.message == $terminalMarker)] | length) != 1
+             )
+           ] | length
+         ' "$ROUTE_LOG"
+     )" = 0
    )
    ```
 
-3. Set `HOSTED_ACCOUNT_DELETION_MAINTENANCE=1`, deploy to 100 percent, and
-   prove the three route checks from the deferral section.
-4. Query from the already-recorded fence cursor through the present and require
-   exact zero admissions:
+   An unmatched, duplicated, or unjoinable request blocks destination creation.
+   Clear the maintenance variable through a production deployment, investigate
+   the request as an incident, and rebook. Do not infer safety from a timeout or
+   successful HTTP response.
 
-   ```bash
-   (
-     set -euo pipefail
-     ADMISSION_COUNT="$(
-       pnpm --dir apps/web exec vercel logs --project murph \
-         --environment production --no-branch --query "$ADMISSION_MARKER" \
-         --since "$FENCE_CURSOR_UTC" --limit 1 --json |
-         jq -s --arg marker "$ADMISSION_MARKER" \
-           '[.[] | select(.message == $marker)] | length'
-     )"
-     test "$ADMISSION_COUNT" = 0
-   )
-   ```
-
-   Any marker means a deletion crossed the fence. Do not create the
-   destination. Clear the maintenance variable through a production deployment,
-   investigate the unmatched request as an incident, and rebook.
-
-The focused route regressions prove admission precedes a deliberately held
-effect, terminal remains absent while it is held, and terminal is emitted only
-after the aggregate Cloudflare result succeeds. Rehearse in preproduction with
-two concurrent deletions, including one that fans out and one held across
-activation, plus a forced web-control timeout. No copy may become eligible
-unless every pre-cursor request has its exact terminal pair and the
-post-cursor admission count is zero.
+The focused route regression holds a request after it passes the unset guard
+but before authentication returns, activates the maintenance environment, and
+then releases it into both `cloudflare.deleted=true` and
+`cloudflare.deleted=false`. The entry is visible while held; only the aggregate
+success receives a safe terminal pair. Rehearse the same boundary in
+preproduction with concurrent deletions and a forced web-control timeout. No
+copy becomes eligible unless every pre-fence request has its exact pair.
 
 Only now define the authoritative production pair, create its dedicated ENAM
 bucket, and issue a separate pair-scoped migration key as in section 2:

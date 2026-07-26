@@ -30,21 +30,22 @@ export const HOSTED_ACCOUNT_DELETION_MAINTENANCE_MESSAGE =
   + "Nothing has changed and your request was not started. Please try again after maintenance.";
 
 /**
- * Exact, identifier-free Vercel runtime-log marker for a deletion that passed
- * both guards and consumed its sensitive-action challenge.
+ * Exact, identifier-free Vercel runtime-log marker emitted before any guard or
+ * await in the delete route. Every invocation on the marker-bearing deployment
+ * therefore has one request-owned migration proof anchor.
  */
-export const HOSTED_ACCOUNT_DELETION_ADMISSION_LOG_MESSAGE =
-  "Hosted account deletion admitted before destructive effects.";
+export const HOSTED_ACCOUNT_DELETION_ENTRY_LOG_MESSAGE =
+  "Hosted account deletion request entered the guarded route.";
 
 /**
- * Paired marker emitted in the same Vercel request only after every fanned-out
- * hosted-member cleanup has synchronously confirmed its R2 and Durable Object
- * effects. The migration runbook joins the two markers by Vercel requestId and
- * never treats HTTP completion, elapsed time, or a best-effort false result as
- * terminal proof.
+ * Paired marker for a request that cannot leave member data behind: either the
+ * request stopped before destructive deletion began, or every fanned-out R2
+ * and Durable Object cleanup synchronously confirmed success. Once deletion
+ * begins, timeout, process exit, throw, or a best-effort false result emits no
+ * marker and blocks the migration.
  */
-export const HOSTED_ACCOUNT_DELETION_TERMINAL_LOG_MESSAGE =
-  "Hosted account deletion confirmed terminal across R2 and durable state.";
+export const HOSTED_ACCOUNT_DELETION_SAFE_TERMINAL_LOG_MESSAGE =
+  "Hosted account deletion request reached a safe terminal disposition.";
 
 export function assertHostedAccountDeletionAvailable(
   environment: Readonly<Record<string, string | undefined>> = process.env,
