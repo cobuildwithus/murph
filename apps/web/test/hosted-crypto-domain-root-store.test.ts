@@ -1482,6 +1482,10 @@ function createStepRecordingKmsClient(input: {
       input.steps.push("kms.decrypt");
       return input.client.decrypt(decryptInput);
     },
+    async macSign(macInput) {
+      input.steps.push("kms.mac-sign");
+      return input.client.macSign(macInput);
+    },
     async encrypt(encryptInput) {
       input.steps.push("kms.encrypt");
       return input.client.encrypt(encryptInput);
