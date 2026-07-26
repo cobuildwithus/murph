@@ -2197,34 +2197,58 @@ describe("selectProjectableWorkoutsDays", () => {
     }
   });
 
-  it("widens the UTC source read for the Asia/Tokyo earliest local window day", async () => {
+  it("keeps the oldest UTC-12 workout stable across UTC midnight", async () => {
     const vaultRoot = await createActivitySessionVault([{
       schemaVersion: "murph.event.v1",
       id: "evt_rederived_date_cutoff",
       kind: "activity_session",
-      occurredAt: "2026-07-02T23:30:00.000Z",
-      dayKey: "2026-07-02",
-      recordedAt: "2026-07-03T00:30:00.000Z",
+      occurredAt: "2026-07-01T21:30:00.000Z",
+      dayKey: "2026-07-01",
+      recordedAt: "2026-07-01T22:30:00.000Z",
       timeZone: "Asia/Tokyo",
       activityType: "running",
       durationMinutes: 30,
     }]);
     const dateNow = vi.spyOn(Date, "now").mockReturnValue(
-      Date.parse("2026-07-09T00:00:00.000Z"),
+      Date.parse("2026-07-08T23:59:59.999Z"),
     );
 
     try {
-      const selected = await readProjectableWorkoutsDays(vaultRoot);
-      expect(findWorkoutsRecord(selected, "2026-07-03")).toMatchObject({
-        data: {
-          workouts: [{
-            kind: "running",
-            minutes: 30,
-            startLocalMs: 30_600_000,
-          }],
-        },
-        recordKey: "2026-07-03",
-      });
+      const assertStableOldestDate = async () => {
+        const selected = await readProjectableWorkoutsDays(vaultRoot);
+        expect(findWorkoutsRecord(selected, "2026-07-02")).toMatchObject({
+          data: {
+            calendarClosedThroughDate: "2026-07-07",
+            workouts: [{
+              kind: "running",
+              minutes: 30,
+              startLocalMs: 23_400_000,
+            }],
+          },
+          recordKey: "2026-07-02",
+        });
+      };
+
+      await assertStableOldestDate();
+      dateNow.mockReturnValue(Date.parse("2026-07-09T00:00:00.000Z"));
+      await assertStableOldestDate();
+
+      dateNow.mockReturnValue(Date.parse("2026-07-09T12:00:00.000Z"));
+      const advanced = await readProjectableWorkoutsDays(vaultRoot);
+      expect(advanced.map((record) => record.recordKey)).toEqual([
+        "2026-07-09",
+        "2026-07-08",
+        "2026-07-07",
+        "2026-07-06",
+        "2026-07-05",
+        "2026-07-04",
+        "2026-07-03",
+      ]);
+      expect(findWorkoutsRecord(advanced, "2026-07-02")).toBeUndefined();
+      expect(advanced.every((record) =>
+        "calendarClosedThroughDate" in record.data
+        && record.data.calendarClosedThroughDate === "2026-07-08"
+      )).toBe(true);
     } finally {
       dateNow.mockRestore();
       await rm(vaultRoot, { recursive: true, force: true });

@@ -3377,15 +3377,14 @@ function groupSharedUnavailableToolResult(
 }
 
 /**
- * One read returns every member crossed with every requested scope, and the whole
- * result is rejected once it passes ASSISTANT_HOSTED_GROUP_SHARED_READ_MAX_RESULT_CODE_UNITS,
- * so a per-workout list is the one projection dense enough to need a compact model
- * view. `workouts.v0` day records restate their own date in `data.date`, `recordKey`
- * and `occurredAt`, and repeat required projection metadata on every record;
- * keyed by ISO date — that projection's real day identity — each day costs its date
- * once. Every other projection is passed through byte-identically. The
- * compaction happens only at the model boundary; encrypted stored records keep
- * their validated delivery shape.
+ * One read returns every member crossed with every requested scope. At the model
+ * boundary, every projection is keyed by its exact scope and its grant/data pair
+ * is collapsed to one three-state status. Non-workout record arrays remain
+ * byte-identical. `workouts.v0` additionally compacts repeated day identity,
+ * time semantics, completion watermark, and activity kinds because its
+ * per-workout lists are the one record payload dense enough to need that extra
+ * reduction. Encrypted stored records and the complete Web response retain
+ * their validated shapes.
  */
 /**
  * `grantStatus` and `dataStatus` only ever encode three states between them, so

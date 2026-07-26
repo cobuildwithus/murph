@@ -71,12 +71,16 @@ parsing, or bound failures return one typed `unavailable` result without shared
 records rather than falling back to cached data.
 
 That full Web result remains the authority boundary. The assistant-engine model
-adapter compacts it to the model's bounded result. If whole member rows still
-exceed that bound, it returns `status="partial"` and names each still-current
-capacity-omitted membership in `omittedParticipantIds`. Omission does not imply
-departure, a score, a diagnostic state, or a permission state. The assistant
-keeps those participants unverified and unranked and labels any standings
-partial; this model-only compaction never changes stored or Web-returned truth.
+adapter keys each retained projection by exact scope and maps the grant/data
+pair to `not_granted`, `missing`, or `available`. Non-workout record arrays stay
+intact; `workouts.v0` additionally compacts its repeated day, activity-kind,
+time-semantics, and completion-watermark fields. If whole member rows still
+exceed the model bound, the adapter returns `status="partial"` and names each
+still-current capacity-omitted membership in `omittedParticipantIds`. Omission
+does not imply departure, a score, a diagnostic state, or a permission state.
+The assistant keeps those participants unverified and unranked and labels any
+standings partial; this model-only compaction never changes stored or
+Web-returned truth.
 
 Each returned member has a `participantId` derived from that group's
 `HostedGroupMember` row. It is stable only for the lifetime of that exact group

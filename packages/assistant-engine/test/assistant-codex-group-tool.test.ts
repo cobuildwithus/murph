@@ -29,6 +29,9 @@ import type {
   AssistantHostedGroupSharedReader,
 } from "../src/assistant/execution-context.ts";
 import {
+  ASSISTANT_HOSTED_GROUP_SHARED_READ_MAX_RESULT_CODE_UNITS,
+} from "../src/assistant/group-shared-read-limits.ts";
+import {
   executeMurphDynamicToolRequest,
   MURPH_DYNAMIC_TOOLS,
   MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL,
@@ -563,7 +566,7 @@ describe("murph.group dynamic tool", () => {
     }
   });
 
-  it("returns scoped participant keys for exact joins without exposing global member ids", async () => {
+  it("normalizes a mixed shared read without exposing global member ids", async () => {
     const response = {
       members: [
         {
@@ -596,6 +599,26 @@ describe("murph.group dynamic tool", () => {
               projectionScopeKey: "device-sync-status.v0",
               records: [],
             },
+            {
+              dataStatus: "available" as const,
+              grantStatus: "granted" as const,
+              projectionScope: { projectionKind: "workouts.v0" as const },
+              projectionScopeKey: "workouts.v0",
+              records: [{
+                data: {
+                  calendarClosedThroughDate: "2026-07-18",
+                  date: "2026-07-18",
+                  timeSemantics: "canonical-event-zone-or-vault-zone.v0" as const,
+                  workouts: [{
+                    kind: "running",
+                    minutes: 45,
+                    startLocalMs: 23_400_000,
+                  }],
+                },
+                occurredAt: "2026-07-18T00:00:00.000Z",
+                recordKey: "2026-07-18",
+              }],
+            },
           ],
         },
         {
@@ -625,12 +648,20 @@ describe("murph.group dynamic tool", () => {
                 recordKey: "device-sync-status",
               }],
             },
+            {
+              dataStatus: "missing" as const,
+              grantStatus: "not_granted" as const,
+              projectionScope: { projectionKind: "workouts.v0" as const },
+              projectionScopeKey: "workouts.v0",
+              records: [],
+            },
           ],
         },
       ],
       requestedProjectionScopeKeys: [
         "steps-days.v0",
         "device-sync-status.v0",
+        "workouts.v0",
       ],
       status: "ok" as const,
       trustedOnlyResultField: "shared_result_internal",
@@ -641,6 +672,7 @@ describe("murph.group dynamic tool", () => {
       projectionScopes: [
         { projectionKind: "steps-days.v0" },
         { projectionKind: "device-sync-status.v0" },
+        { projectionKind: "workouts.v0" },
       ],
     }));
     if (!request || request.kind !== "group") {
@@ -665,6 +697,7 @@ describe("murph.group dynamic tool", () => {
       projectionScopes: [
         { projectionKind: "steps-days.v0" },
         { projectionKind: "device-sync-status.v0" },
+        { projectionKind: "workouts.v0" },
       ],
     });
     const toolText = result.rpcResult.contentItems[0];
@@ -678,6 +711,10 @@ describe("murph.group dynamic tool", () => {
     expect(toolText.text).not.toContain("shared_result_internal");
     expect(toolText.text).toContain('"participantId":"participant_a"');
     expect(toolText.text).toContain('"participantId":"participant_b"');
+    expect(toolText.text.length)
+      .toBeLessThanOrEqual(
+        ASSISTANT_HOSTED_GROUP_SHARED_READ_MAX_RESULT_CODE_UNITS,
+      );
     const payload = readGroupToolPayload(result);
     expect(payload).toMatchObject({
       action: "read_shared",
@@ -690,8 +727,33 @@ describe("murph.group dynamic tool", () => {
             // Keyed by scope, and the granted/data pair collapses to the one
             // status the model actually acts on.
             projections: {
-              "steps-days.v0": { status: "available" },
+              "steps-days.v0": {
+                records: [{
+                  data: {
+                    date: "2026-07-18",
+                    metricKey: "steps",
+                    unit: "count",
+                    value: 8_001,
+                  },
+                  occurredAt: "2026-07-18T00:00:00.000Z",
+                  recordKey: "2026-07-18",
+                }],
+                status: "available",
+              },
               "device-sync-status.v0": { status: "not_granted" },
+              "workouts.v0": {
+                calendarClosedThroughDate: "2026-07-18",
+                days: {
+                  "2026-07-18": [{
+                    kindIndex: 0,
+                    minutes: 45,
+                    startLocalMs: 23_400_000,
+                  }],
+                },
+                kinds: ["running"],
+                status: "available",
+                timeSemantics: "canonical-event-zone-or-vault-zone.v0",
+              },
             },
           },
           {
@@ -701,6 +763,7 @@ describe("murph.group dynamic tool", () => {
             projections: {
               "steps-days.v0": { status: "missing" },
               "device-sync-status.v0": { status: "available" },
+              "workouts.v0": { status: "not_granted" },
             },
           },
         ],
@@ -879,7 +942,7 @@ describe("murph.group dynamic tool", () => {
     expect(projection.calendarClosedThroughDate).toBe("2026-07-24");
   });
 
-  it("leaves an existing daily scope's model shape unchanged", async () => {
+  it("preserves non-workout records while normalizing their projection envelope", async () => {
     const groupSharedReadRequest = vi.fn(async () => ({
       members: [{
         currentTurnHandles: [],
@@ -944,9 +1007,8 @@ describe("murph.group dynamic tool", () => {
 
     const payload = readGroupToolPayload(result);
     const projection = readFirstProjection(payload);
-    // Assert the whole projection is byte-identical to what the reader produced.
-    // A partial toMatchObject here would pass while recordKey or occurredAt were
-    // being stripped, which is exactly how an earlier version of this test lied.
+    // The model envelope is deliberately keyed and three-state, while the
+    // non-workout record array remains byte-identical to the Web response.
     expect(projection).toEqual({
       status: "available",
       records: [

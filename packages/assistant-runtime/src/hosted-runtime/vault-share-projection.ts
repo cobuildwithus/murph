@@ -82,6 +82,8 @@ export const HOSTED_VAULT_SHARE_PROJECTION_DAILY_RECORD_WINDOW = 7;
 
 export const HOSTED_VAULT_SHARE_PROJECTION_MAX_DAILY_RECORD_AGE_DAYS = 7;
 
+const HOSTED_VAULT_SHARE_WORKOUT_CALENDAR_TIME_ZONE = "Etc/GMT+12";
+
 type MetricSourceOwnerPoint = Pick<
   MetricSeriesPoint,
   "recordIds" | "sourceFamily" | "sourceKind"
@@ -559,8 +561,18 @@ export async function readProjectableWorkoutsDays(
   context?: HostedVaultShareProjectionReadContext,
 ): Promise<HostedVaultShareDeliveryRecord[]> {
   const nowMs = Date.now();
+  const calendarCurrentDate = readTimeZoneDate(
+    nowMs,
+    HOSTED_VAULT_SHARE_WORKOUT_CALENDAR_TIME_ZONE,
+  );
+  if (!calendarCurrentDate) {
+    return [];
+  }
+  // The oldest emitted UTC-12 date can begin on the preceding UTC date in a
+  // positive-offset event zone. Read that one preceding date, then let the
+  // event-zone conversion and fixed seven-date producer window filter it.
   const sourceReadFromDate = shiftIsoDate(
-    new Date(nowMs).toISOString().slice(0, 10),
+    calendarCurrentDate,
     -HOSTED_VAULT_SHARE_PROJECTION_DAILY_RECORD_WINDOW,
   );
   if (!sourceReadFromDate) {
@@ -1035,7 +1047,10 @@ export function selectProjectableWorkoutsDays(
   // A date is complete only after it has ended in UTC-12, the last civil
   // timezone to leave it. This boundary is global and monotonic: changing a
   // member's declared timezone cannot reopen a result that was already final.
-  const calendarCurrentDate = readTimeZoneDate(input.nowMs, "Etc/GMT+12");
+  const calendarCurrentDate = readTimeZoneDate(
+    input.nowMs,
+    HOSTED_VAULT_SHARE_WORKOUT_CALENDAR_TIME_ZONE,
+  );
   if (!calendarCurrentDate) {
     return [];
   }
