@@ -1,6 +1,6 @@
 # Hosted foreground reply priority E2E gate
 
-Status: active
+Status: completed
 Created: 2026-07-26
 Updated: 2026-07-26
 
@@ -111,9 +111,10 @@ Updated: 2026-07-26
    command.
 6. [x] Capture the red result on current `main`; apply only the smallest root fix
    exposed by that proof.
-7. [ ] Run focused and direct hosted-local verification, then canonical checks.
-8. [ ] Complete required product/review gates, commit, push, open the PR, run
-   exact-head ReviewGPT with CI, and resolve any findings.
+7. [x] Run focused and direct hosted-local verification, then canonical checks.
+8. [x] Complete the required local product, specialist, and parent review gates,
+   close the plan, and produce the final pushed candidate. Exact-head final
+   ReviewGPT and CI run after plan closure under the PR completion loop.
 
 ## Decisions
 
@@ -143,6 +144,15 @@ Updated: 2026-07-26
 - Product-experience review is clean after tightening the all-wake fixture,
   causally scoping the active-turn response to its late inbound, and proving
   the exact system-to-default fence transition during held publication.
+- Preliminary specialist ReviewGPT found one accepted coverage gap: the first
+  matching Linq send ended duplicate observation too early. The returned
+  test-only patch was rejected because it required global scheduler completion
+  under the intentional 180-second idle floor. The landed correction instead
+  holds exact matching-send counts after each existing terminal boundary, with
+  a longer active-turn window that covers the deliberately stalled prior turn.
+- The first acceptance run exposed that the workflow guard's closed scenario
+  list did not include the new dedicated gate. The guard was updated, its
+  focused suite passed, and the complete acceptance command then passed.
 
 ## Verification
 
@@ -158,10 +168,12 @@ Updated: 2026-07-26
   - The dedicated `Hosted foreground reply priority E2E` check is terminal
     green.
 - Direct hosted-local result, production 180-second idle floor:
-  - `system_mailbox`: 15,480 ms
-  - `inbox_media_retention`: 8,559 ms
-  - stale invocation owner: 8,742 ms
-  - active default turn: 11,287 ms
+  - `system_mailbox`: 18,813 ms
+  - `inbox_media_retention`: 10,008 ms
+  - stale invocation owner: 11,651 ms
+  - active default turn: 11,551 ms
+  - Each matching accepted-send count remained exactly one through its bounded
+    post-boundary observation window.
 - Canonical diff verification:
   - `pnpm test:diff <changed paths>` passed.
   - Assistant runtime: 1,892 passed, 2 skipped.
@@ -169,3 +181,7 @@ Updated: 2026-07-26
   - Hosted web: 6,712 passed, 174 skipped; lint, development smoke, and
     production build passed.
   - Cloudflare runner: 1,931 Node tests and 2 Workers-runtime tests passed.
+  - `pnpm verify:acceptance` passed, including all workspace typechecks,
+    package coverage, package boundaries, the production Web build, and
+    Cloudflare Node and Workers-runtime suites.
+Completed: 2026-07-26

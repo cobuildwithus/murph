@@ -78,6 +78,8 @@ const linqWebhookSecret = "linq-local-foreground-reply-priority-secret";
 const productionLikeAssistantModel = "gpt-5.6-terra";
 const productionIdleCheckpointDelayMs = 180_000;
 const promptReplyDeadlineMs = 45_000;
+const duplicateReplyObservationMs = 3_000;
+const activeTurnDuplicateReplyObservationMs = 22_000;
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
 const workerPersistDirOverride = process.env.MURPH_E2E_CF_PERSIST_DIR?.trim() || null;
 const localDatabaseUrl = process.env.DATABASE_URL?.trim() || undefined;
@@ -223,6 +225,11 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
       systemMailboxProbe.userId,
       latestAppend.wake.seq,
     );
+    await assertExactlyOneAcceptedReplyAfterBoundary({
+      identity: systemMailboxProbe,
+      label: "system mailbox",
+      replyText: "Foreground reply won over the full system mailbox.",
+    });
 
     writeLatencyProof("system_mailbox", latencyMs);
   }, 300_000);
@@ -258,6 +265,11 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
       await releaseBackgroundCheckpointBarrier(retentionProbe.userId);
     }
     await expect(shutdown.completion).resolves.toEqual({ ok: true });
+    await assertExactlyOneAcceptedReplyAfterBoundary({
+      identity: retentionProbe,
+      label: "inbox media retention",
+      replyText: "Foreground reply won over retention-only work.",
+    });
 
     writeLatencyProof("inbox_media_retention", latencyMs);
   }, 180_000);
@@ -274,6 +286,11 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
     const latencyMs = await sendInboundAndRequirePromptReply({
       identity: stuckInvocationProbe,
       inboundText: "Reply through a stale invocation fence.",
+      label: "stale invocation fence",
+      replyText: "Foreground reply recovered the stale invocation fence.",
+    });
+    await assertExactlyOneAcceptedReplyAfterBoundary({
+      identity: stuckInvocationProbe,
       label: "stale invocation fence",
       replyText: "Foreground reply recovered the stale invocation fence.",
     });
@@ -345,6 +362,12 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
     });
     const latencyMs = performance.now() - startedAt;
     expect(latencyMs).toBeLessThan(promptReplyDeadlineMs);
+    await assertExactlyOneAcceptedReplyAfterBoundary({
+      identity: activeTurnProbe,
+      label: "active foreground turn",
+      observationMs: activeTurnDuplicateReplyObservationMs,
+      replyText,
+    });
 
     writeLatencyProof("active_default", latencyMs);
   }, 180_000);
@@ -413,6 +436,27 @@ async function sendInboundAndRequirePromptReply(input: {
   );
 
   return latencyMs;
+}
+
+async function assertExactlyOneAcceptedReplyAfterBoundary(input: {
+  identity: ProbeIdentity;
+  label: string;
+  observationMs?: number;
+  replyText: string;
+}): Promise<void> {
+  const replyPath = replyPathFor(input.identity);
+  const replyMatcher = matchLinqMessageText(input.replyText);
+  const startedAt = Date.now();
+  while (
+    Date.now() - startedAt
+      < (input.observationMs ?? duplicateReplyObservationMs)
+  ) {
+    expect(
+      requireLinqStub().countAcceptedSends(replyPath, replyMatcher),
+      `${input.label} emitted a duplicate accepted Linq reply after its terminal boundary.`,
+    ).toBe(1);
+    await sleep(250);
+  }
 }
 
 async function warmHostedRunnerForStaleFence(
