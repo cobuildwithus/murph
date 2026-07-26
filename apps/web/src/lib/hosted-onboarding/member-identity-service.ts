@@ -13,7 +13,10 @@ import { getPrisma } from "../prisma";
 import {
   hostedOnboardingError,
 } from "./errors";
-import { type HostedPrivyIdentity } from "./privy";
+import {
+  readHostedPrivyUserById,
+  type HostedPrivyIdentity,
+} from "./privy";
 import { resolveHostedPrivyAuthMethodFromIdentity } from "./privy-auth-method";
 import type { HostedPrivyAuthMethod } from "./types";
 import {
@@ -62,6 +65,8 @@ export {
   lookupHostedMemberForPrivyPrincipal,
 };
 export type { HostedMemberPrivyIdentityLookup };
+
+const HOSTED_PRIVY_NEW_MEMBER_AUTHORITY_TIMEOUT_MS = 5_000;
 
 export async function ensureHostedMemberForPhone(input: {
   phoneNumber: string;
@@ -337,10 +342,6 @@ export async function ensureHostedMemberForPrivyIdentityResolutionTx(input: {
   created: boolean;
   member: HostedMemberCoreState;
 }> {
-  await assertHostedPrivyAccountDeletionNotPendingTx({
-    prisma: input.prisma,
-    privyUserId: input.identity.userId,
-  });
   const authMethod = resolveHostedPrivyAuthMethodFromIdentity({
     authMethod: input.authMethod,
     identity: input.identity,
@@ -352,6 +353,14 @@ export async function ensureHostedMemberForPrivyIdentityResolutionTx(input: {
   });
 
   if (!existingMemberLookup) {
+    await assertHostedPrivyAccountDeletionNotPendingTx({
+      prisma: input.prisma,
+      privyUserId: input.identity.userId,
+    });
+    await readHostedPrivyUserById(input.identity.userId, {
+      maxRetries: 0,
+      timeout: HOSTED_PRIVY_NEW_MEMBER_AUTHORITY_TIMEOUT_MS,
+    });
     const memberId = generateHostedMemberId();
 
     const createdMember = await createHostedMember({
@@ -377,10 +386,6 @@ export async function ensureHostedMemberForPrivyIdentityResolutionTx(input: {
       signupPhoneCodeSendAttemptStartedAt: null,
       signupPhoneCodeSentAt: null,
       signupPhoneNumber: null,
-    });
-    await assertHostedPrivyAccountDeletionNotPendingTx({
-      prisma: input.prisma,
-      privyUserId: input.identity.userId,
     });
     return {
       created: true,

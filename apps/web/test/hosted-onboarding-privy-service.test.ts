@@ -15,6 +15,7 @@ import { encryptHostedWebNullableString } from "@/src/lib/hosted-web/encryption"
 
 const privyManagementMocks = vi.hoisted(() => ({
   clientConstructor: vi.fn(),
+  getUser: vi.fn(),
   setCustomMetadata: vi.fn(),
 }));
 
@@ -27,6 +28,7 @@ vi.mock("@privy-io/node", () => ({
 
     users() {
       return {
+        _get: privyManagementMocks.getUser,
         setCustomMetadata: privyManagementMocks.setCustomMetadata,
       };
     }
@@ -226,6 +228,9 @@ function makeInvite(member: ReturnType<typeof makeMember>, overrides: Record<str
 describe("completeHostedPrivyVerification", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    privyManagementMocks.getUser.mockImplementation(async (userId: string) => ({
+      id: userId,
+    }));
     vi.spyOn(console, "info").mockImplementation(() => {});
   });
 
@@ -649,7 +654,14 @@ describe("completeHostedPrivyVerification", () => {
     expect(result.inviteCode).toBe("public-invite-code");
     expect(result.messagingSetupRequired).toBe(false);
     expect(result.stage).toBe("checkout");
-    expect(privyManagementMocks.clientConstructor).not.toHaveBeenCalled();
+    expect(privyManagementMocks.clientConstructor).toHaveBeenCalledOnce();
+    expect(privyManagementMocks.getUser).toHaveBeenCalledWith(
+      "did:privy:user_123",
+      {
+        maxRetries: 0,
+        timeout: 5_000,
+      },
+    );
     expect(privyManagementMocks.setCustomMetadata).not.toHaveBeenCalled();
   });
 
@@ -1649,10 +1661,9 @@ describe("completeHostedPrivyVerification", () => {
     expect(prisma.hostedInvite.create).not.toHaveBeenCalled();
   });
 
-  it("rolls back re-creation when deletion becomes visible after the initial check", async () => {
-    const findPendingCleanup = vi.fn()
-      .mockResolvedValueOnce(null)
-      .mockResolvedValueOnce({ id: "cleanup_pending" });
+  it("requires live provider authority before creating a new Privy member", async () => {
+    privyManagementMocks.getUser.mockRejectedValueOnce(new Error("missing"));
+    const findPendingCleanup = vi.fn().mockResolvedValue(null);
     const prisma = asCompleteHostedPrivyVerificationPrisma({
       hostedAccountDeletionCleanup: {
         findFirst: findPendingCleanup,
@@ -1662,9 +1673,7 @@ describe("completeHostedPrivyVerification", () => {
         findFirst: vi.fn(),
       },
       hostedMember: {
-        create: vi.fn().mockResolvedValue(makeMember({
-          id: "member_recreated",
-        })),
+        create: vi.fn(),
         findUnique: vi.fn().mockResolvedValue(null),
       },
     });
@@ -1674,14 +1683,21 @@ describe("completeHostedPrivyVerification", () => {
       now: NOW,
       prisma,
     })).rejects.toMatchObject({
-      code: "PRIVY_ACCOUNT_DELETION_IN_PROGRESS",
-      httpStatus: 409,
+      code: "PRIVY_USER_LOOKUP_FAILED",
+      httpStatus: 503,
       retryable: true,
     });
 
-    expect(findPendingCleanup).toHaveBeenCalledTimes(2);
-    expect(prisma.hostedMember.create).toHaveBeenCalledOnce();
-    expect(prisma.hostedMemberIdentity.upsert).toHaveBeenCalledOnce();
+    expect(findPendingCleanup).toHaveBeenCalledOnce();
+    expect(privyManagementMocks.getUser).toHaveBeenCalledWith(
+      "did:privy:user_123",
+      {
+        maxRetries: 0,
+        timeout: 5_000,
+      },
+    );
+    expect(prisma.hostedMember.create).not.toHaveBeenCalled();
+    expect(prisma.hostedMemberIdentity.upsert).not.toHaveBeenCalled();
     expect(prisma.hostedInvite.create).not.toHaveBeenCalled();
   });
 

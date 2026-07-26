@@ -58,7 +58,14 @@ export async function verifyHostedPrivyIdentityToken(identityToken: string): Pro
   }
 }
 
-export async function readHostedPrivyUserById(privyUserId: string): Promise<HostedPrivyUser> {
+export async function readHostedPrivyUserById(
+  privyUserId: string,
+  options?: {
+    maxRetries?: number;
+    signal?: AbortSignal;
+    timeout?: number;
+  },
+): Promise<HostedPrivyUser> {
   const client = getHostedPrivyManagementClient();
 
   if (!client) {
@@ -71,7 +78,7 @@ export async function readHostedPrivyUserById(privyUserId: string): Promise<Host
   }
 
   try {
-    const user = await client.users()._get(privyUserId);
+    const user = await client.users()._get(privyUserId, options);
     if (!user || typeof user !== "object" || Reflect.get(user, "id") !== privyUserId) {
       throw new TypeError("Privy user lookup returned an unexpected user.");
     }
