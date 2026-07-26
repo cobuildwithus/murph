@@ -1,6 +1,6 @@
 # Complete 14-day inbound message retention
 
-Status: active
+Status: completed
 Created: 2026-07-25
 Updated: 2026-07-25
 
@@ -131,9 +131,9 @@ Updated: 2026-07-25
 ## Verification
 
 - Completed proof:
-  - Assistant Engine: 174 files passed, 1 skipped; 2,662 tests passed,
+  - Assistant Engine: 174 files passed, 1 skipped; 2,675 tests passed,
     5 skipped.
-  - Assistant Runtime: 76 files passed; 1,857 tests passed, 2 skipped.
+  - Assistant Runtime: 76 files passed; 1,872 tests passed, 2 skipped.
   - Inbox: 24 files passed; 220 tests passed, 3 skipped.
   - Focused Web retention owners: 134 tests passed.
   - Preliminary `completion-specialists` ReviewGPT: prompt and frontend lenses
@@ -142,11 +142,13 @@ Updated: 2026-07-25
     Assistant Runtime selection/wake integration 58 tests passed; Web migration
     inventory 5 tests passed.
   - Isolated local-Postgres migration and Assistant Ask retention proof:
-    3 tests passed after all 122 migrations applied, including real snapshot
+    3 tests passed after all 123 migrations applied, including real snapshot
     re-arming and sidecar deletion.
-  - Exact hosted-local runner assembly passed with entry 1,657,027 bytes,
-    static boot closure 7,882,562 bytes, and total output 9,605,653 bytes inside
+  - Exact hosted-local runner assembly passed with entry 1,659,721 bytes,
+    static boot closure 7,896,210 bytes, and total output 9,619,301 bytes inside
     the reviewed guards.
+  - Cloudflare's corrected bundle-budget assertion passed in its focused
+    34-test file and in the canonical 44-file, 761-test app suite.
   - Scenario-manifest integrity: 204 scenarios, 11 sample inputs, and 28
     golden-output directories passed.
   - Production-path checkpoint/restore regression proves the retained unique
@@ -156,13 +158,20 @@ Updated: 2026-07-25
     Assistant Engine, Assistant CLI, and Assistant Runtime before stopping on
     an unrelated current-`main` CLI audit mismatch: its unchanged test expects
     wording no longer present in the unchanged ReviewGPT prompt.
+  - Parent final review found no remaining retention bug, competing lifecycle
+    owner, foreground-turn cleanup, terminality gap, or cutoff/read mismatch.
+  - Canonical `pnpm verify:acceptance` passed all 31 workspace typechecks,
+    repository guards, Web's 514-file/6,551-test suite, Assistant Engine,
+    Assistant Runtime, Inbox, Cloudflare, and every non-CLI package. It exited
+    only for the same current-`main` CLI audit mismatch; both the failing test
+    and ReviewGPT prompt are unchanged from `origin/main`.
 - Remaining completion gates:
-  - Parent final review and `pnpm verify:acceptance`.
-  - `scripts/finish-task`, final pushed-head ReviewGPT, CI, and clean-merge
-    proof.
+  - `scripts/finish-task`, final pushed-head ReviewGPT round 3, CI, and
+    clean-merge proof.
 - Expected final outcomes:
   - No in-scope unique phrase survives in a durable carrier after the scheduled
     retention pass and restore.
   - Structural facts and distilled canonical records remain.
   - Unconsumed accepted work has an explicit restart-safe terminal outcome.
   - Required audits, ReviewGPT, PR CI, and merge-conflict proof are green.
+Completed: 2026-07-25
