@@ -1,6 +1,6 @@
 # Land group room-model consolidation
 
-Status: active
+Status: completed
 Created: 2026-07-25
 Updated: 2026-07-25
 
@@ -152,3 +152,4 @@ Updated: 2026-07-25
     zero unresolved accepted findings.
   - PR #950 is green, conflict-free, merged, and its task worktree retires
     cleanly.
+Completed: 2026-07-25
