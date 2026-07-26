@@ -193,6 +193,17 @@ Every component lives on cream paper, wears warm hairline borders, and speaks in
 ### Signal Cards
 Large Fraunces stat number (the value) + DM Mono unit label + delta in sage green + expected range from protocol underneath. In finished state, show "was X" baseline value under the stat. One card per tracked signal; never grid five-abreast — prefer two or three across with room to breathe.
 
+### Ops Weekly Growth Scorecard
+On `/ops/growth`, lead with one large Fraunces weekly MRR growth rate and keep
+current MRR, tracked fulfilled usage top-ups, paying-customer growth, active
+usage, acquisition, activation, and conversion subordinate. Compare the
+displayed one-decimal rate with the 10% weekly target so the number and verdict
+cannot disagree. A hit uses primary sage. A miss uses Tailwind `red-700` as a
+deliberate binary target exception because the standard sienna warning token
+reads brown rather than the explicitly required red; always pair either color
+with `10% target hit` or `Below 10% target` text. A missing comparison stays
+neutral and must not claim that a snapshot exists.
+
 ### Measured Biomarker Index
 On `/biomarkers`, device-derived reading rows lead in a flat full-width notebook
 band bracketed by warm one-pixel rules. Do not wrap that band in a rounded card

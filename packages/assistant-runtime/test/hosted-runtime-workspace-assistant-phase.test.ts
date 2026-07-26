@@ -14773,6 +14773,7 @@ describe("hosted runtime log helpers", () => {
         "Hosted runtime durable log write failed.",
         {
           component: "assistant",
+          entryCount: 1,
           errorName: "TypeError",
           eventCode: "assistant.pass_finished",
         },

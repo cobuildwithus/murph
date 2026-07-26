@@ -29,6 +29,9 @@ import type {
   AssistantHostedGroupSharedReader,
 } from "../src/assistant/execution-context.ts";
 import {
+  ASSISTANT_HOSTED_GROUP_SHARED_READ_MAX_RESULT_CODE_UNITS,
+} from "../src/assistant/group-shared-read-limits.ts";
+import {
   executeMurphDynamicToolRequest,
   MURPH_DYNAMIC_TOOLS,
   MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL,
@@ -122,7 +125,13 @@ describe("murph.group dynamic tool", () => {
       sessionCountScopeSchema,
     ] = MURPH_GROUP_TOOL.inputSchema.properties.projectionScopes.items.oneOf;
     expect(fixedScopeSchema.properties.projectionKind.enum)
-      .toEqual(expect.arrayContaining(["sleep-times.v0", "steps-days.v0"]));
+      .toEqual(expect.arrayContaining([
+        "sleep-times.v0",
+        "deep-sleep-days.v0",
+        "rem-sleep-days.v0",
+        "steps-days.v0",
+        "workouts.v0",
+      ]));
     expect(minutesScopeSchema.properties.projectionKind.enum)
       .toEqual([HOSTED_VAULT_SHARE_ACTIVITY_MINUTES_PROJECTION_KIND]);
     expect(distanceScopeSchema.properties.projectionKind.enum)
@@ -217,6 +226,12 @@ describe("murph.group dynamic tool", () => {
     expect(MURPH_GROUP_SHARED_READ_TOOL.inputSchema.properties.action.enum).toEqual([
       "read_shared",
     ]);
+    expect(MURPH_GROUP_SHARED_READ_TOOL.description)
+      .toContain('status="partial" with omittedParticipantIds');
+    expect(MURPH_GROUP_SHARED_READ_TOOL.description)
+      .toContain("never infer departure, score, diagnostic state, or permission state");
+    expect(MURPH_GROUP_TOOL.description)
+      .toContain('status="partial" with omittedParticipantIds');
 
     const scheduledGroupTools = resolveMurphDynamicTools({
       groupAvailable: false,
@@ -484,6 +499,25 @@ describe("murph.group dynamic tool", () => {
       },
     });
 
+    expect(readMurphDynamicToolRequest(groupToolCall({
+      action: "read_shared",
+      projectionScopes: [
+        { projectionKind: "deep-sleep-days.v0" },
+        { projectionKind: "rem-sleep-days.v0" },
+        { projectionKind: "workouts.v0" },
+      ],
+    }))).toEqual({
+      kind: "group",
+      request: {
+        action: "read_shared",
+        projectionScopes: [
+          { projectionKind: "deep-sleep-days.v0" },
+          { projectionKind: "rem-sleep-days.v0" },
+          { projectionKind: "workouts.v0" },
+        ],
+      },
+    });
+
     for (const invalid of [
       { action: "read_shared", projectionScopes: [] },
       {
@@ -532,7 +566,7 @@ describe("murph.group dynamic tool", () => {
     }
   });
 
-  it("returns scoped participant keys for exact joins without exposing global member ids", async () => {
+  it("normalizes a mixed shared read without exposing global member ids", async () => {
     const response = {
       members: [
         {
@@ -565,6 +599,26 @@ describe("murph.group dynamic tool", () => {
               projectionScopeKey: "device-sync-status.v0",
               records: [],
             },
+            {
+              dataStatus: "available" as const,
+              grantStatus: "granted" as const,
+              projectionScope: { projectionKind: "workouts.v0" as const },
+              projectionScopeKey: "workouts.v0",
+              records: [{
+                data: {
+                  calendarClosedThroughDate: "2026-07-18",
+                  date: "2026-07-18",
+                  timeSemantics: "canonical-event-zone-or-vault-zone.v0" as const,
+                  workouts: [{
+                    kind: "running",
+                    minutes: 45,
+                    startLocalMs: 23_400_000,
+                  }],
+                },
+                occurredAt: "2026-07-18T00:00:00.000Z",
+                recordKey: "2026-07-18",
+              }],
+            },
           ],
         },
         {
@@ -594,12 +648,20 @@ describe("murph.group dynamic tool", () => {
                 recordKey: "device-sync-status",
               }],
             },
+            {
+              dataStatus: "missing" as const,
+              grantStatus: "not_granted" as const,
+              projectionScope: { projectionKind: "workouts.v0" as const },
+              projectionScopeKey: "workouts.v0",
+              records: [],
+            },
           ],
         },
       ],
       requestedProjectionScopeKeys: [
         "steps-days.v0",
         "device-sync-status.v0",
+        "workouts.v0",
       ],
       status: "ok" as const,
       trustedOnlyResultField: "shared_result_internal",
@@ -610,6 +672,7 @@ describe("murph.group dynamic tool", () => {
       projectionScopes: [
         { projectionKind: "steps-days.v0" },
         { projectionKind: "device-sync-status.v0" },
+        { projectionKind: "workouts.v0" },
       ],
     }));
     if (!request || request.kind !== "group") {
@@ -634,6 +697,7 @@ describe("murph.group dynamic tool", () => {
       projectionScopes: [
         { projectionKind: "steps-days.v0" },
         { projectionKind: "device-sync-status.v0" },
+        { projectionKind: "workouts.v0" },
       ],
     });
     const toolText = result.rpcResult.contentItems[0];
@@ -647,6 +711,10 @@ describe("murph.group dynamic tool", () => {
     expect(toolText.text).not.toContain("shared_result_internal");
     expect(toolText.text).toContain('"participantId":"participant_a"');
     expect(toolText.text).toContain('"participantId":"participant_b"');
+    expect(toolText.text.length)
+      .toBeLessThanOrEqual(
+        ASSISTANT_HOSTED_GROUP_SHARED_READ_MAX_RESULT_CODE_UNITS,
+      );
     const payload = readGroupToolPayload(result);
     expect(payload).toMatchObject({
       action: "read_shared",
@@ -656,31 +724,316 @@ describe("murph.group dynamic tool", () => {
             currentTurnHandles: ["+15551110001"],
             displayName: "Alex",
             participantId: "participant_a",
-            projections: [
-              {
-                dataStatus: "available",
-                grantStatus: "granted",
-                projectionScopeKey: "steps-days.v0",
+            // Keyed by scope, and the granted/data pair collapses to the one
+            // status the model actually acts on.
+            projections: {
+              "steps-days.v0": {
+                records: [{
+                  data: {
+                    date: "2026-07-18",
+                    metricKey: "steps",
+                    unit: "count",
+                    value: 8_001,
+                  },
+                  occurredAt: "2026-07-18T00:00:00.000Z",
+                  recordKey: "2026-07-18",
+                }],
+                status: "available",
               },
-              {
-                dataStatus: "missing",
-                grantStatus: "not_granted",
-                projectionScopeKey: "device-sync-status.v0",
+              "device-sync-status.v0": { status: "not_granted" },
+              "workouts.v0": {
+                calendarClosedThroughDate: "2026-07-18",
+                days: {
+                  "2026-07-18": [{
+                    kindIndex: 0,
+                    minutes: 45,
+                    startLocalMs: 23_400_000,
+                  }],
+                },
+                kinds: ["running"],
+                status: "available",
+                timeSemantics: "canonical-event-zone-or-vault-zone.v0",
               },
-            ],
+            },
           },
           {
             currentTurnHandles: ["member-b@example.test"],
             displayName: "Alex",
             participantId: "participant_b",
-            projections: [
-              { dataStatus: "missing", grantStatus: "granted" },
-              { dataStatus: "available", grantStatus: "granted" },
-            ],
+            projections: {
+              "steps-days.v0": { status: "missing" },
+              "device-sync-status.v0": { status: "available" },
+              "workouts.v0": { status: "not_granted" },
+            },
           },
         ],
         status: "ok",
       },
+    });
+  });
+
+  it("passes bounded workout arrays through the model-facing boundary", async () => {
+    const groupSharedReadRequest = vi.fn(async () => ({
+      members: [{
+        currentTurnHandles: [],
+        displayName: null,
+        memberId: "member_internal_timing",
+        participantId: "participant_timing",
+        projections: [{
+          dataStatus: "available" as const,
+          grantStatus: "granted" as const,
+          projectionScope: {
+            projectionKind: "workouts.v0" as const,
+          },
+          projectionScopeKey: "workouts.v0",
+          records: [{
+            data: {
+              calendarClosedThroughDate: "2026-07-17",
+              date: "2026-07-18",
+              timeSemantics: "canonical-event-zone-or-vault-zone.v0" as const,
+              workouts: [{
+                kind: "running",
+                minutes: 45,
+                startLocalMs: 64_800_001,
+              }],
+            },
+            occurredAt: "2026-07-18T00:00:00.000Z",
+            recordKey: "2026-07-18",
+          }],
+        }],
+      }],
+      requestedProjectionScopeKeys: ["workouts.v0"],
+      status: "ok" as const,
+    }));
+    const request = readMurphDynamicToolRequest(groupToolCall({
+      action: "read_shared",
+      projectionScopes: [{ projectionKind: "workouts.v0" }],
+    }));
+    if (!request || request.kind !== "group") {
+      throw new Error("Expected group request.");
+    }
+
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createGroupHostedToolContext({
+        groupSharedReadRequest,
+        groupToolAvailable: false,
+      }),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request,
+      vaultRoot: null,
+    });
+
+    const payload = readGroupToolPayload(result);
+    expect(JSON.stringify(payload)).not.toContain("member_internal_timing");
+    expect(payload).toMatchObject({
+      action: "read_shared",
+      result: {
+        members: [{
+          participantId: "participant_timing",
+          // Projections are keyed by scope, so each one no longer restates it.
+          projections: {
+            "workouts.v0": {
+              calendarClosedThroughDate: "2026-07-17",
+              // Days are keyed by their ISO date, and the one required semantics
+              // literal is stated once for the projection, not per record.
+              days: {
+                "2026-07-18": [{
+                  kindIndex: 0,
+                  minutes: 45,
+                  startLocalMs: 64_800_001,
+                }],
+              },
+              kinds: ["running"],
+              status: "available",
+              timeSemantics: "canonical-event-zone-or-vault-zone.v0",
+            },
+          },
+        }],
+      },
+    });
+    expect(JSON.stringify(payload)).not.toMatch(
+      /absoluteTimestamp|heartRate|location|provider|route|timeZone/u,
+    );
+
+    // One read returns members x scopes x days, so the shared budget must not be
+    // spent restating each day's own date or a projection-level constant.
+    const serialized = JSON.stringify(payload);
+    expect(serialized).not.toContain("2026-07-18T00:00:00.000Z");
+    expect(serialized).not.toContain('"recordKey"');
+    expect(serialized).not.toContain('"records"');
+    expect(serialized.match(/2026-07-18/gu)).toHaveLength(1);
+    expect(serialized.match(/canonical-event-zone-or-vault-zone\.v0/gu))
+      .toHaveLength(1);
+  });
+
+  it("keeps every workouts day value an array and hoists its completion watermark", async () => {
+    const groupSharedReadRequest = vi.fn(async () => ({
+      members: [{
+        currentTurnHandles: [],
+        displayName: null,
+        memberId: "member_internal_provisional",
+        participantId: "participant_provisional",
+        projections: [{
+          dataStatus: "available" as const,
+          grantStatus: "granted" as const,
+          projectionScope: { projectionKind: "workouts.v0" as const },
+          projectionScopeKey: "workouts.v0",
+          records: [
+            {
+              data: {
+                calendarClosedThroughDate: "2026-07-24",
+                date: "2026-07-24",
+                timeSemantics: "canonical-event-zone-or-vault-zone.v0" as const,
+                workouts: [],
+              },
+              occurredAt: "2026-07-24T00:00:00.000Z",
+              recordKey: "2026-07-24",
+            },
+            {
+              data: {
+                calendarClosedThroughDate: "2026-07-24",
+                date: "2026-07-25",
+                timeSemantics: "canonical-event-zone-or-vault-zone.v0" as const,
+                workouts: [{ kind: "running", minutes: 30, startLocalMs: 68_400_000 }],
+              },
+              occurredAt: "2026-07-25T00:00:00.000Z",
+              recordKey: "2026-07-25",
+            },
+          ],
+        }],
+      }],
+      requestedProjectionScopeKeys: ["workouts.v0"],
+      status: "ok" as const,
+    }));
+    const request = readMurphDynamicToolRequest(groupToolCall({
+      action: "read_shared",
+      projectionScopes: [{ projectionKind: "workouts.v0" }],
+    }));
+    if (!request || request.kind !== "group") {
+      throw new Error("Expected group request.");
+    }
+
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createGroupHostedToolContext({
+        groupSharedReadRequest,
+        groupToolAvailable: false,
+      }),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request,
+      vaultRoot: null,
+    });
+
+    const projection = readFirstProjection(readGroupToolPayload(result));
+    // A settled empty day and an open day must have the SAME value shape, or the
+    // referee's days[date].some(...) breaks on exactly the pending case.
+    const days = projection.days;
+    expect(Object.values(days ?? {}).every(Array.isArray)).toBe(true);
+    expect(days).toEqual({
+      "2026-07-24": [],
+      "2026-07-25": [{ kindIndex: 0, minutes: 30, startLocalMs: 68_400_000 }],
+    });
+    expect(projection.kinds).toEqual(["running"]);
+    expect(projection.calendarClosedThroughDate).toBe("2026-07-24");
+  });
+
+  it("preserves non-workout records while normalizing their projection envelope", async () => {
+    const groupSharedReadRequest = vi.fn(async () => ({
+      members: [{
+        currentTurnHandles: [],
+        displayName: null,
+        memberId: "member_internal_mixed",
+        participantId: "participant_mixed",
+        projections: [{
+          dataStatus: "available" as const,
+          grantStatus: "granted" as const,
+          projectionScope: {
+            projectionKind: "activity-days.v0" as const,
+          },
+          projectionScopeKey: "activity-days.v0",
+          records: [
+            {
+              data: {
+                date: "2026-07-18",
+                metricKey: "activity-minutes",
+                metricSemantics: "broad-movement" as const,
+                unit: "minutes",
+                value: 30,
+              },
+              occurredAt: "2026-07-18T00:00:00.000Z",
+              recordKey: "2026-07-18",
+            },
+            {
+              data: {
+                date: "2026-07-17",
+                metricKey: "activity-minutes",
+                unit: "minutes",
+                value: 45,
+              },
+              occurredAt: "2026-07-17T00:00:00.000Z",
+              recordKey: "2026-07-17",
+            },
+          ],
+        }],
+      }],
+      requestedProjectionScopeKeys: ["activity-days.v0"],
+      status: "ok" as const,
+    }));
+    const request = readMurphDynamicToolRequest(groupToolCall({
+      action: "read_shared",
+      projectionScopes: [{ projectionKind: "activity-days.v0" }],
+    }));
+    if (!request || request.kind !== "group") {
+      throw new Error("Expected group request.");
+    }
+
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createGroupHostedToolContext({
+        groupSharedReadRequest,
+        groupToolAvailable: false,
+      }),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request,
+      vaultRoot: null,
+    });
+
+    const payload = readGroupToolPayload(result);
+    const projection = readFirstProjection(payload);
+    // The model envelope is deliberately keyed and three-state, while the
+    // non-workout record array remains byte-identical to the Web response.
+    expect(projection).toEqual({
+      status: "available",
+      records: [
+        {
+          data: {
+            date: "2026-07-18",
+            metricKey: "activity-minutes",
+            metricSemantics: "broad-movement",
+            unit: "minutes",
+            value: 30,
+          },
+          occurredAt: "2026-07-18T00:00:00.000Z",
+          recordKey: "2026-07-18",
+        },
+        {
+          data: {
+            date: "2026-07-17",
+            metricKey: "activity-minutes",
+            unit: "minutes",
+            value: 45,
+          },
+          occurredAt: "2026-07-17T00:00:00.000Z",
+          recordKey: "2026-07-17",
+        },
+      ],
     });
   });
 
@@ -773,27 +1126,56 @@ describe("murph.group dynamic tool", () => {
     }
   });
 
-  it("fails the whole shared read closed when its bounded result is too large", async () => {
+  it("names omitted members instead of failing an oversized shared read", async () => {
+    const dates = [
+      "2026-07-24",
+      "2026-07-23",
+      "2026-07-22",
+      "2026-07-21",
+      "2026-07-20",
+      "2026-07-19",
+      "2026-07-18",
+    ];
+    const workoutKinds = Array.from({ length: 13 }, (_unused, index) =>
+      `activity-${String(index).padStart(2, "0")}-${"x".repeat(65)}`
+    );
+    // This uses the production roster, day, workout-count, and activity-kind
+    // bounds. A dense but valid roster must not cost everyone their standings,
+    // while capacity-omitted members must remain explicitly current.
     const groupSharedReadRequest = vi.fn<GroupSharedReadRequest>(async () => ({
-      members: [{
+      members: Array.from({ length: 32 }, (_unused, index) => ({
         currentTurnHandles: [],
-        displayName: `Member ${"x".repeat(49_000)}`,
-        memberId: "member_oversized",
-        participantId: "participant_oversized",
+        displayName: `Member ${index}`,
+        memberId: `member_oversized_${index}`,
+        participantId: `participant_oversized_${index}`,
         projections: [{
-          dataStatus: "missing",
-          grantStatus: "granted",
-          projectionScope: { projectionKind: "steps-days.v0" },
-          projectionScopeKey: "steps-days.v0",
-          records: [],
+          dataStatus: "available" as const,
+          grantStatus: "granted" as const,
+          projectionScope: { projectionKind: "workouts.v0" as const },
+          projectionScopeKey: "workouts.v0",
+          records: dates.map((date) => ({
+            data: {
+              calendarClosedThroughDate: "2026-07-24",
+              date,
+              timeSemantics:
+                "canonical-event-zone-or-vault-zone.v0" as const,
+              workouts: workoutKinds.map((kind, workoutIndex) => ({
+                kind,
+                minutes: 1_440 - workoutIndex,
+                startLocalMs: 86_399_999 - workoutIndex,
+              })),
+            },
+            occurredAt: `${date}T00:00:00.000Z`,
+            recordKey: date,
+          })),
         }],
-      }],
-      requestedProjectionScopeKeys: ["steps-days.v0"],
+      })),
+      requestedProjectionScopeKeys: ["workouts.v0"],
       status: "ok",
     }));
     const request = readMurphDynamicToolRequest(groupToolCall({
       action: "read_shared",
-      projectionScopes: [{ projectionKind: "steps-days.v0" }],
+      projectionScopes: [{ projectionKind: "workouts.v0" }],
     }));
     if (!request || request.kind !== "group") {
       throw new Error("Expected group request.");
@@ -812,13 +1194,22 @@ describe("murph.group dynamic tool", () => {
       vaultRoot: null,
     });
 
-    expect(readGroupToolPayload(result)).toEqual({
-      action: "read_shared",
-      result: {
-        status: "unavailable",
-        unavailableReason: "group_shared_result_too_large",
-      },
-    });
+    const payload = JSON.parse(JSON.stringify(readGroupToolPayload(result)));
+    expect(payload.result.status).toBe("partial");
+    // Whole members only: whoever remains is complete.
+    expect(payload.result.members.length).toBeGreaterThan(0);
+    expect(payload.result.members.length).toBeLessThan(32);
+    for (const member of payload.result.members) {
+      expect(Object.keys(member.projections)).toEqual(["workouts.v0"]);
+      expect(member.projections["workouts.v0"].days)
+        .toHaveProperty("2026-07-24");
+    }
+    expect(payload.result.omittedParticipantIds.length)
+      .toBe(32 - payload.result.members.length);
+    for (const omitted of payload.result.omittedParticipantIds) {
+      expect(omitted).toMatch(/^participant_oversized_\d+$/u);
+    }
+    expect(JSON.stringify(payload).length).toBeLessThanOrEqual(64_000);
   });
 
   it("parses one bounded group ask without accepting model-supplied authority", () => {
@@ -3357,6 +3748,27 @@ function readGroupToolPayload(
     throw new Error("Expected text tool payload.");
   }
   return JSON.parse(item.text);
+}
+
+interface ReadSharedProjectionShape {
+  calendarClosedThroughDate?: string;
+  days?: Record<string, unknown>;
+  status?: string;
+  kinds?: string[];
+  records?: { data: Record<string, unknown> }[];
+  timeSemantics?: string;
+}
+
+function readFirstProjection(payload: unknown): ReadSharedProjectionShape {
+  const projections = JSON.parse(JSON.stringify(payload))
+    ?.result?.members?.[0]?.projections;
+  const projection = projections === undefined
+    ? undefined
+    : Object.values(projections)[0];
+  if (!projection) {
+    throw new Error("Expected a read_shared payload with one projection.");
+  }
+  return projection;
 }
 
 function generatedImageRefFromPayload(payload: unknown): string {
