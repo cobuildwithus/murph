@@ -8,7 +8,10 @@ import {
   buildHostedAppSessionClearCookie,
   requireHostedAppSessionFromRequest,
 } from "@/src/lib/hosted-onboarding/app-session";
-import { assertHostedAccountDeletionAvailable } from "@/src/lib/hosted-privacy/account-deletion-maintenance";
+import {
+  assertHostedAccountDeletionAvailable,
+  HOSTED_ACCOUNT_DELETION_ADMISSION_LOG_MESSAGE,
+} from "@/src/lib/hosted-privacy/account-deletion-maintenance";
 import { HOSTED_ACCOUNT_PRIVACY_REQUEST_BODY_LIMIT_BYTES } from "@/src/lib/hosted-privacy/account-data-shared";
 import { getPrisma } from "@/src/lib/prisma";
 import {
@@ -40,6 +43,11 @@ export const POST = withJsonError(async (request: Request) => {
     prisma,
     privyUserId: auth.privyUserId,
   });
+
+  // Deliberately contains no member, request, or authorization data. Vercel
+  // supplies the request/deployment correlation fields around this exact
+  // marker, which the one-shot migration gate consumes operationally.
+  console.info(HOSTED_ACCOUNT_DELETION_ADMISSION_LOG_MESSAGE);
 
   const result = await deleteHostedAccountData({
     exitFeedback: deletionRequest.exitFeedback,

@@ -80,29 +80,66 @@ variable would be enough to erase OC. Shell-variable discipline is not an
 adequate guard for that outcome; the credential must make it impossible.
 
 Issue a temporary Object Read & Write key scoped to `$DESTINATION_BUCKET`
-alone, export it in place of the pair-scoped key, and prove it cannot reach the
-source before deleting anything:
+alone and load it into `R2_MIGRATION_ACCESS_KEY_ID` and
+`R2_MIGRATION_SECRET_ACCESS_KEY` in place of the pair-scoped key. Run the
+whole abandonment as one fail-closed block. It removes every ambient AWS
+credential source, binds the destination-only key explicitly, proves the exact
+pair marker exists in the named destination, and requires the source probe to
+fail specifically with `AccessDenied` before either destructive command runs:
 
 ```bash
-# Must fail with AccessDenied. If it succeeds, the credential is wrong: stop.
-aws s3api list-objects-v2 --bucket "$SOURCE_BUCKET" --max-items 1 \
-  --endpoint-url "https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com" \
-  --region auto
+(
+  set -euo pipefail
+  test -n "$SOURCE_BUCKET"
+  test -n "$DESTINATION_BUCKET"
+  test "$DESTINATION_BUCKET" != "$SOURCE_BUCKET"
+  test -n "$R2_MIGRATION_ACCESS_KEY_ID"
+  test -n "$R2_MIGRATION_SECRET_ACCESS_KEY"
+
+  unset AWS_PROFILE AWS_DEFAULT_PROFILE AWS_SESSION_TOKEN AWS_SECURITY_TOKEN
+  unset AWS_ROLE_ARN AWS_ROLE_SESSION_NAME AWS_WEB_IDENTITY_TOKEN_FILE
+  unset AWS_CONTAINER_CREDENTIALS_FULL_URI AWS_CONTAINER_CREDENTIALS_RELATIVE_URI
+  export AWS_ACCESS_KEY_ID="$R2_MIGRATION_ACCESS_KEY_ID"
+  export AWS_SECRET_ACCESS_KEY="$R2_MIGRATION_SECRET_ACCESS_KEY"
+  export AWS_EC2_METADATA_DISABLED=true
+  export AWS_CONFIG_FILE=/dev/null AWS_SHARED_CREDENTIALS_FILE=/dev/null
+  R2_ENDPOINT="https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com"
+
+  MARKER_KEY="$(node -e '
+    const { createHash } = require("node:crypto");
+    const [source, destination] = process.argv.slice(1);
+    const pair = createHash("sha256").update(`${source}\0${destination}`).digest("hex");
+    process.stdout.write(`_murph/r2-bundles-migration/${pair}.marker`);
+  ' "$SOURCE_BUCKET" "$DESTINATION_BUCKET")"
+  aws s3api head-object --bucket "$DESTINATION_BUCKET" --key "$MARKER_KEY" \
+    --endpoint-url "$R2_ENDPOINT" --region auto --no-cli-pager >/dev/null
+
+  ABANDONMENT_TMP_DIR="$(mktemp -d)"
+  SOURCE_PROBE_ERROR="$ABANDONMENT_TMP_DIR/source-probe.err"
+  trap 'rm -f "$SOURCE_PROBE_ERROR"; rmdir "$ABANDONMENT_TMP_DIR"' EXIT
+  if aws s3api list-objects-v2 --bucket "$SOURCE_BUCKET" --max-items 1 \
+    --endpoint-url "$R2_ENDPOINT" --region auto --no-cli-pager \
+    >/dev/null 2>"$SOURCE_PROBE_ERROR"; then
+    echo "Destination-only credential can read the source; stop." >&2
+    exit 1
+  fi
+  if ! grep -q 'AccessDenied' "$SOURCE_PROBE_ERROR"; then
+    echo "Source probe did not fail with AccessDenied; stop." >&2
+    exit 1
+  fi
+
+  aws s3 rm "s3://$DESTINATION_BUCKET" --recursive \
+    --endpoint-url "$R2_ENDPOINT" --region auto --no-cli-pager
+  pnpm --dir apps/cloudflare exec wrangler r2 bucket delete "$DESTINATION_BUCKET"
+)
 ```
 
-Only once that read is denied, empty the destination and delete the bucket:
-
-```bash
-test "$DESTINATION_BUCKET" != "$SOURCE_BUCKET"
-aws s3 rm "s3://$DESTINATION_BUCKET" --recursive \
-  --endpoint-url "https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com" \
-  --region auto
-pnpm --dir apps/cloudflare exec wrangler r2 bucket delete "$DESTINATION_BUCKET"
-```
-
-Prove the bucket is gone afterwards, then revoke the destination-only key. Read
-the source inventory once more with the ordinary migration key and confirm its
-object count is unchanged from the count recorded in section 1.
+Prove the bucket is gone afterwards through an authenticated bucket listing,
+then revoke the destination-only key. Do not compare the source count with
+section 1: ordinary cleanup is allowed to remove source objects throughout the
+window, so count equality is not a source-safety proof. The mechanically bound
+destination-only credential, exact pair marker, and denied source probe are the
+proof that abandonment had no authority over OC.
 
 Then release the deletion window before reopening anything. Once the
 destination is gone, OC is the sole authoritative bucket again and deletion is
@@ -186,7 +223,9 @@ References: [R2 data location][data-location], [R2 consistency][consistency],
 [R2 authentication][r2-auth], [R2 S3 compatibility][s3-api], and [R2's current
 leading-slash `CopyObject` example][copy-object]. The cutover ordering also
 accounts for [Worker version deployment semantics][worker-versions], [Durable
-Object code-update skew][do-updates], and [Durable Object alarms][do-alarms].
+Object code-update skew][do-updates], [Durable Object alarms][do-alarms],
+[Vercel runtime-log fields][vercel-runtime-logs], and
+[Vercel CLI log filters][vercel-cli-logs].
 
 [data-location]: https://developers.cloudflare.com/r2/reference/data-location/
 [consistency]: https://developers.cloudflare.com/r2/reference/consistency/
@@ -196,6 +235,8 @@ Object code-update skew][do-updates], and [Durable Object alarms][do-alarms].
 [worker-versions]: https://developers.cloudflare.com/workers/versions-and-deployments/
 [do-updates]: https://developers.cloudflare.com/durable-objects/platform/known-issues/#code-updates
 [do-alarms]: https://developers.cloudflare.com/durable-objects/api/alarms/
+[vercel-runtime-logs]: https://vercel.com/docs/logs/runtime
+[vercel-cli-logs]: https://vercel.com/docs/cli/logs
 
 ## 1. Size the window before booking it
 
@@ -376,26 +417,81 @@ Now open the deletion window, as the last step before any object is copied:
 set `HOSTED_ACCOUNT_DELETION_MAINTENANCE=1` in the Vercel production
 environment, deploy, and prove the three checks from the deferral section.
 
-**Then drain the deletions the guard could not stop.** Both guards run once, at
-request entry. A deletion accepted by the previous deployment keeps running
-through its whole workflow -- vendor revocation, database deletion, and
-Cloudflare object deletion -- and nothing re-checks the flag partway through. If
-one is still in flight when copying starts, it can remove a member's objects
-from only one side of the pair, which is the exact outcome this window exists to
-prevent, and it would also make the section 7 rollback unsafe.
+**Then prove zero deletion admissions across the deployment boundary.** Both
+guards run once, at request entry. A deletion accepted by the previous
+deployment keeps running through provider revocation, database deletion, and
+Cloudflare object deletion, and nothing re-checks the flag partway through.
+The web route therefore emits the exact identifier-free runtime-log marker
+`Hosted account deletion admitted before destructive effects.` synchronously
+after consuming the sensitive-action challenge and immediately before calling
+the deletion service. Vercel groups that marker with its own `requestId`,
+`deploymentId`, UTC timestamp, route, and method fields.
 
-Prove the drain before copying:
+The marker must already be present in the 100-percent production deployment
+before this maintenance activation deploy starts. During that preparatory
+rollout, inspect the predecessor deployment's `POST
+/api/settings/privacy/delete` invocations that overlap the rollout. If any
+existed, stop scheduling the migration until its Cloudflare structured event
+`Hosted runner user data deletion completed.` proves terminal R2 and Durable
+Object cleanup; an HTTP `200`, a completed Vercel invocation, or
+`cloudflare.deleted=false` is not terminal proof.
 
-1. Record the time the maintenance deployment reached 100 percent.
-2. Query production logs for `POST /api/settings/privacy/delete` requests that
-   started before that time, and confirm each one has logged its completion.
-3. Wait ten minutes past the last such completion with no new admitted request.
-   Ten minutes is the same bound section 4 uses for issued PUT URLs and is far
-   above the observed runtime of a single deletion; if any request has not
-   completed by then, do not start the copy. Treat it as an incident and
-   establish what state that member's data is in first.
+For the activation deploy:
 
-Only after both the three checks and this drain pass does anything get copied.
+1. Inspect every admission marker from the moment the preparatory deployment
+   first received traffic through the present. Establish the terminal
+   Cloudflare event above for every marker. Only after those direct proofs
+   leave no earlier deletion in flight, record a fresh UTC cursor in the
+   cutover shell:
+
+   ```bash
+   export ADMISSION_MARKER='Hosted account deletion admitted before destructive effects.'
+   export ADMISSION_CURSOR_UTC="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+   printf 'export ADMISSION_MARKER=%q\nexport ADMISSION_CURSOR_UTC=%q\n' \
+     "$ADMISSION_MARKER" "$ADMISSION_CURSOR_UTC"
+   ```
+
+   Paste the two printed `export` commands into a second terminal; do not
+   recompute the cursor there. Start the live query immediately:
+
+   ```bash
+   pnpm --dir apps/web exec vercel logs --project murph --environment production \
+     --no-branch --query "$ADMISSION_MARKER" --since "$ADMISSION_CURSOR_UTC" \
+     --json --follow
+   ```
+
+2. Set the flag, deploy, and keep the query live until the deployment reaches
+   100 percent and the three route checks pass.
+3. Back in the original cutover shell, query again from the recorded cursor
+   through the current time and require an exact zero:
+
+   ```bash
+   (
+     set -euo pipefail
+     ADMISSION_COUNT="$(
+       pnpm --dir apps/web exec vercel logs --project murph \
+         --environment production --no-branch --query "$ADMISSION_MARKER" \
+         --since "$ADMISSION_CURSOR_UTC" --json |
+         jq -s --arg marker "$ADMISSION_MARKER" \
+           '[.[] | select(.message == $marker)] | length'
+     )"
+     test "$ADMISSION_COUNT" = 0
+   )
+   ```
+
+   If even one marker exists, do not copy. The destination still contains no
+   copies: abandon it, clear the deletion window, establish the admitted
+   request's terminal Cloudflare outcome as an incident, and rebook.
+4. Proceed only when both the live and bounded queries contain zero admission
+   markers. Do not use request completion, HTTP status, or elapsed time as a
+   substitute.
+
+The focused route regression holds the deletion service after authorization
+and proves the marker is emitted before that held effect. Rehearse the
+operational gate the same way in preproduction: a deliberately held request
+must appear in the query before it completes and force the zero-admission path
+to abandon. Only after the three route checks and this zero-admission proof pass
+does anything get copied.
 
 Run the copy, then the read-only proof immediately before editing variables:
 

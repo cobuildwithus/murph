@@ -1,6 +1,7 @@
-import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
+import { HOSTED_ACCOUNT_DELETION_ADMISSION_LOG_MESSAGE } from "@/src/lib/hosted-privacy/account-deletion-maintenance";
 import { HOSTED_ACCOUNT_DATA_DELETION_SCHEMA } from "@/src/lib/hosted-privacy/account-data-shared";
 
 const mocks = vi.hoisted(() => ({
@@ -51,7 +52,12 @@ describe("settings privacy delete route", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.spyOn(console, "info").mockImplementation(() => {});
     applyRouteDefaults();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
   function applyRouteDefaults(): void {
@@ -128,6 +134,15 @@ describe("settings privacy delete route", () => {
     expect(mocks.verifyAndConsumeSensitiveActionChallenge.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.deleteHostedAccountData.mock.invocationCallOrder[0],
     );
+    expect(console.info).toHaveBeenCalledWith(
+      HOSTED_ACCOUNT_DELETION_ADMISSION_LOG_MESSAGE,
+    );
+    expect(mocks.verifyAndConsumeSensitiveActionChallenge.mock.invocationCallOrder[0]).toBeLessThan(
+      vi.mocked(console.info).mock.invocationCallOrder[0],
+    );
+    expect(vi.mocked(console.info).mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.deleteHostedAccountData.mock.invocationCallOrder[0],
+    );
     expect(mocks.deleteHostedAccountData).toHaveBeenCalledWith({
       memberId: "member_123",
       prisma: mocks.prismaClient,
@@ -147,6 +162,55 @@ describe("settings privacy delete route", () => {
         schema: HOSTED_ACCOUNT_DATA_DELETION_SCHEMA,
       },
     });
+  });
+
+  it("logs admission before a held deletion effect can complete", async () => {
+    let releaseDeletion = (): void => {
+      throw new Error("Held account deletion was not started.");
+    };
+    mocks.deleteHostedAccountData.mockImplementationOnce(async () => {
+      await new Promise<void>((resolve) => {
+        releaseDeletion = resolve;
+      });
+      return {
+        deletedAt: "2026-04-29T01:02:03.000Z",
+        deletedCounts: {
+          "prisma.hosted_member": 1,
+        },
+        memberId: "member_123",
+        schema: HOSTED_ACCOUNT_DATA_DELETION_SCHEMA,
+      };
+    });
+    const request = new Request("https://join.example.test/api/settings/privacy/delete", {
+      body: JSON.stringify({
+        authorization: {
+          signature: `0x${"11".repeat(65)}`,
+          token: "sac_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef",
+        },
+        confirmationPhrase: "DELETE MY ACCOUNT",
+      }),
+      headers: {
+        "Content-Type": "application/json",
+        origin: "https://join.example.test",
+      },
+      method: "POST",
+    });
+
+    let responseSettled = false;
+    const responsePromise = settingsPrivacyDeleteRoute.POST(request).finally(() => {
+      responseSettled = true;
+    });
+
+    await vi.waitFor(() => {
+      expect(console.info).toHaveBeenCalledWith(
+        HOSTED_ACCOUNT_DELETION_ADMISSION_LOG_MESSAGE,
+      );
+      expect(mocks.deleteHostedAccountData).toHaveBeenCalledTimes(1);
+    });
+    expect(responseSettled).toBe(false);
+
+    releaseDeletion();
+    await expect(responsePromise).resolves.toMatchObject({ status: 200 });
   });
 
   it("rejects a wrong typed phrase before deleting account data", async () => {
@@ -239,6 +303,9 @@ describe("settings privacy delete route", () => {
       expect(mocks.verifyAndConsumeSensitiveActionChallenge).not.toHaveBeenCalled();
       expect(mocks.deleteHostedAccountData).not.toHaveBeenCalled();
       expect(mocks.buildHostedAppSessionClearCookie).not.toHaveBeenCalled();
+      expect(console.info).not.toHaveBeenCalledWith(
+        HOSTED_ACCOUNT_DELETION_ADMISSION_LOG_MESSAGE,
+      );
 
       vi.unstubAllEnvs();
     });

@@ -29,6 +29,16 @@ export const HOSTED_ACCOUNT_DELETION_MAINTENANCE_MESSAGE =
   "Murph is in scheduled maintenance, so we can't delete your account right now. "
   + "Nothing has changed and your request was not started. Please try again after maintenance.";
 
+/**
+ * Exact, identifier-free Vercel runtime-log marker for a deletion that passed
+ * both guards and consumed its sensitive-action challenge. The migration
+ * runbook treats any marker across the maintenance deployment boundary as a
+ * reason to abandon before copying; it never infers terminal R2 deletion from
+ * HTTP completion or elapsed time.
+ */
+export const HOSTED_ACCOUNT_DELETION_ADMISSION_LOG_MESSAGE =
+  "Hosted account deletion admitted before destructive effects.";
+
 export function assertHostedAccountDeletionAvailable(
   environment: Readonly<Record<string, string | undefined>> = process.env,
 ): void {
