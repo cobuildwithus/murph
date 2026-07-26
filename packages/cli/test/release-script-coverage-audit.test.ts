@@ -1311,7 +1311,12 @@ describe('monorepo release flow coverage audit', () => {
     expect(prDeepReviewPrompt).toContain(
       '`review-gpt-pr-context/since-previous-reviewed-head.diff`',
     )
-    expect(prDeepReviewPrompt).toContain('If any required artifact is missing, unreadable, stale,')
+    expect(prDeepReviewPrompt).toContain(
+      'Stop as `INVALID` only when the code evidence itself will not support a review:',
+    )
+    expect(prDeepReviewPrompt).toContain(
+      'Do not stop for a discrepancy confined to the descriptive content of',
+    )
     expect(prDeepReviewPrompt).not.toContain('repo.snapshot.zip')
     expect(prDeepReviewPrompt).not.toContain('repo.repomix.zip')
     expect(prDeepReviewPrompt.toLowerCase()).not.toContain('repomix')
