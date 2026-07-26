@@ -39,4 +39,14 @@ if content.count(nullable_signature_old) != 1:
     raise RuntimeError("Saved-card patch nullable prepare signature context was missing.")
 content = content.replace(nullable_signature_old, nullable_signature_new)
 
+stripe_surface_old = '''    stripe_surface_new,
+    expected=2,
+)'''
+stripe_surface_new = '''    stripe_surface_new,
+    expected=1,
+)'''
+if content.count(stripe_surface_old) != 1:
+    raise RuntimeError("Saved-card patch Stripe test surface count was missing.")
+content = content.replace(stripe_surface_old, stripe_surface_new)
+
 path.write_text(content)
