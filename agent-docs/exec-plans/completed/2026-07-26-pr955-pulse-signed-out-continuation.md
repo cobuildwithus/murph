@@ -1,6 +1,6 @@
 # PR 955 signed-out Pulse continuation
 
-Status: active
+Status: completed
 Created: 2026-07-26
 Updated: 2026-07-26
 
@@ -78,6 +78,12 @@ Updated: 2026-07-26
 - Ship browser-return recovery only. The rejected webhook fallback is broader
   than the observed defect, conflicts with the current product contract, and
   requires new durable messaging semantics to be correct.
+- Preserve the existing `/` redirect for ordinary signed-out Settings visits.
+  The authentication-required surface is admitted only when all three signed
+  return parameters are present.
+- Accept the documented real-provider scenario gap: production authentication
+  was not exercised locally, while the route, session, wrong-session, auth
+  navigation, and rendered boundaries have direct focused proof.
 
 ## Verification
 
@@ -89,3 +95,13 @@ Updated: 2026-07-26
   - PR-specific ReviewGPT final gate and required GitHub checks.
 - Expected outcomes:
   - All checks pass with no accepted ReviewGPT findings on the exact PR head.
+- Completed before plan closure:
+  - Focused Settings/auth/continuation Vitest: 3 files, 51 tests passed.
+  - Frontend design-proof policy: 10 tests passed.
+  - `pnpm test:diff ...`: passed in an isolated Testbox.
+  - `pnpm verify:acceptance`: passed in an isolated Testbox.
+  - Local product-experience review: `PASS`, `NO FINDINGS`; one explicit
+    real-provider end-to-end evidence gap remains.
+  - Fresh Claude UI double-check: attempted with Fable and stopped at explicit
+    credit exhaustion, as required by the completion workflow.
+Completed: 2026-07-26
