@@ -115,6 +115,11 @@ Updated: 2026-07-26
   terminal-evidence owners. Use the prior turn start as the backlog frontier so
   input received while that reply was running remains replyable. Do not add a
   reset-specific purge, cooldown, queue, or second recovery state.
+- Architecture pressure check: the correction adds no persisted state, schema,
+  dependency, service, queue, manager, or reset-specific branch. It reuses the
+  existing scanner stop/`nextWakeAt`, outbox intent, turn receipt, and terminal
+  suppression owners. A fresh scan is simpler than adding cache invalidation or
+  a second in-pass room state machine.
 
 ## Verification
 
@@ -126,7 +131,17 @@ Updated: 2026-07-26
   - product-experience review: `NO FINDINGS` after the parent fixed its
     acknowledgement-race and stale-history findings
   - diff privacy scan and `git diff --check`: passed
+  - rebased `pnpm test:diff ...`: all repo guards and affected typechecks
+    passed; assistant-engine passed 2,725 tests with 5 skipped, assistant CLI
+    passed 128 tests, assistant-runtime passed 1,896 tests with 2 skipped, and
+    assistantd passed 40 tests
+  - an earlier assistant-runtime aggregate run had one unrelated timeout in a
+    mixed system/device checkpoint test; its isolated rerun passed in 686 ms
+- External local blocker:
+  - the final CLI source phase timed out in eight prepared-runtime-dependent
+    tests while waiting on the shared workspace artifact lock; the same
+    unrelated lock contention reproduced across runs and is outside this
+    engine/runtime diff
 - Still required on the exact pushed candidate:
-  - `pnpm test:diff ...` with the touched owners
   - `pnpm verify:acceptance`
   - preliminary and final ReviewGPT gates plus PR CI
