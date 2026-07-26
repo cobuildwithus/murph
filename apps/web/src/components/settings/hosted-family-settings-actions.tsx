@@ -1070,8 +1070,12 @@ export function HostedFamilyManager(props: {
         billingStatus={props.billingStatus}
       />
 
-      <Dialog open={inviteOpen} onOpenChange={(open) => { if (!open) { closeInviteDialog(); } }}>
-        <DialogContent className={DIALOG_CLASS}>
+      <Dialog open={inviteOpen} onOpenChange={(open) => {
+        if (!open && !isInviting) {
+          closeInviteDialog();
+        }
+      }}>
+        <DialogContent className={DIALOG_CLASS} showCloseButton={!isInviting}>
           {invitePaymentRecovery ? (
             <FamilyInvitePaymentRecoveryContent
               errorMessage={inviteError}

@@ -81,8 +81,20 @@ vi.mock("@/src/components/ui/dialog", () => ({
         }),
       )
     : null),
-  DialogContent: ({ children, className }: HTMLAttributes<HTMLDivElement>) =>
-    createElement("div", { className, "data-dialog-content": "true" }, children),
+  DialogContent: ({
+    children,
+    className,
+    showCloseButton,
+  }: HTMLAttributes<HTMLDivElement> & { showCloseButton?: boolean }) =>
+    createElement(
+      "div",
+      {
+        className,
+        "data-dialog-content": "true",
+        "data-show-close-button": showCloseButton === false ? "false" : "true",
+      },
+      children,
+    ),
   DialogDescription: (props: HTMLAttributes<HTMLParagraphElement>) =>
     createElement("p", props),
   DialogHeader: (props: HTMLAttributes<HTMLDivElement>) =>
@@ -613,6 +625,14 @@ test.each([
         1,
       );
       assert.match(container.textContent ?? "", /Only they can use this invite\./);
+      const dismiss = container.querySelector<HTMLButtonElement>(
+        'button[aria-label="Dismiss dialog"]',
+      );
+      assert.ok(dismiss);
+      await act(async () => {
+        dismiss.dispatchEvent(new window.Event("click", { bubbles: true }));
+      });
+      assert.equal(container.querySelector("[data-dialog-content]"), null);
     } finally {
       await cleanup();
     }
@@ -621,6 +641,10 @@ test.each([
 
 test("HostedFamilyManager prevents concurrent Finish invite retries", async () => {
   const paymentUrl = "https://invoice.stripe.com/i/in_family_capacity";
+  let rejectFinish: ((reason?: unknown) => void) | undefined;
+  const pendingFinish = new Promise<never>((_resolve, reject) => {
+    rejectFinish = reject;
+  });
   const { HostedOnboardingApiError } = await import(
     "@/src/components/hosted-onboarding/client-api"
   );
@@ -632,7 +656,7 @@ test("HostedFamilyManager prevents concurrent Finish invite retries", async () =
         message: "Authenticate the Family seat charge in Stripe to finish this change.",
       }),
     )
-    .mockImplementationOnce(() => new Promise(() => {}));
+    .mockImplementationOnce(() => pendingFinish);
   const { HostedFamilyManager } = await import(
     "@/src/components/settings/hosted-family-settings-actions"
   );
@@ -665,6 +689,33 @@ test("HostedFamilyManager prevents concurrent Finish invite retries", async () =
     assert.equal(approvalLink.getAttribute("data-disabled"), "");
     assert.match(approvalLink.className, /data-disabled:opacity-50/u);
     assert.match(approvalLink.className, /data-disabled:pointer-events-none/u);
+    const pendingDialog = container.querySelector<HTMLElement>("[data-dialog-content]");
+    assert.ok(pendingDialog);
+    assert.equal(pendingDialog.dataset.showCloseButton, "false");
+    const dismiss = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Dismiss dialog"]',
+    );
+    assert.ok(dismiss);
+    await act(async () => {
+      dismiss.dispatchEvent(new window.Event("click", { bubbles: true }));
+      await Promise.resolve();
+    });
+    assert.ok(container.querySelector("[data-dialog-content]"));
+    expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledTimes(2);
+
+    await act(async () => {
+      rejectFinish?.(new Error("Retry failed"));
+      await pendingFinish.catch(() => undefined);
+    });
+
+    assert.match(container.textContent ?? "", /Retry failed/);
+    const settledDialog = container.querySelector<HTMLElement>("[data-dialog-content]");
+    assert.ok(settledDialog);
+    assert.equal(settledDialog.dataset.showCloseButton, "true");
+    await act(async () => {
+      dismiss.dispatchEvent(new window.Event("click", { bubbles: true }));
+    });
+    assert.equal(container.querySelector("[data-dialog-content]"), null);
   } finally {
     await cleanup();
   }
