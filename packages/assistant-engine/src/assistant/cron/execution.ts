@@ -103,6 +103,7 @@ import {
   listCanonicalAssistantCronRecords,
   projectCanonicalAssistantCronJob,
   type CanonicalAssistantCronJobRecord,
+  resolveAssistantCronDefaultTimeZone,
   resolveCanonicalAssistantCronJobId,
   resolveCanonicalAssistantCronOccurrenceAt,
   resolveCanonicalRuntimeState,
@@ -529,6 +530,7 @@ export async function executeClaimedAssistantCronJob(
   }
   let managedOwnerSkipReason: string | null = null
   let managedActivitySkipReason: string | null = null
+  let managedGroupActivityTimeZone: string | null = null
   // Preemptible background maintenance has exactly one yield owner: the
   // maintenance cancellation below. Wiring the generic foreground poller too
   // (hosted passes the same predicate as both callbacks) created a race
@@ -615,12 +617,19 @@ export async function executeClaimedAssistantCronJob(
       managedOwnerAuthorization.seed.automationId ===
         MURPH_GROUP_SUNDAY_SUPERLATIVES_AUTOMATION_ID
     ) {
+      managedGroupActivityTimeZone =
+        input.job.kind === 'canonical' &&
+          input.job.source.kind === 'automation'
+          ? input.job.source.timeZone ??
+            await resolveAssistantCronDefaultTimeZone(input.vault)
+          : null
       const status = await readAssistantCronManagedGroupActivityDecision({
         authorization: managedOwnerAuthorization,
         executionContext: input.executionContext ?? null,
         job: input.job,
         occurrenceAt,
         signal: yieldCancellation.signal,
+        timeZone: managedGroupActivityTimeZone,
       })
       if (status !== 'eligible') {
         managedActivitySkipReason = status === 'ineligible'
@@ -871,7 +880,7 @@ export async function executeClaimedAssistantCronJob(
               (managedOwnerAuthorization.channel !== 'linq' &&
                 managedOwnerAuthorization.channel !== 'telegram') ||
               !managedOwnerAuthorization.target ||
-              !input.job.source.timeZone
+              !managedGroupActivityTimeZone
             ) {
               throw new AssistantCronManagedOwnerInvalidatedError()
             }
@@ -879,7 +888,7 @@ export async function executeClaimedAssistantCronJob(
               channel: managedOwnerAuthorization.channel,
               occurrenceAt,
               target: managedOwnerAuthorization.target,
-              timeZone: input.job.source.timeZone,
+              timeZone: managedGroupActivityTimeZone,
               vault: input.vault,
             })
             executionInstructions = [
@@ -2377,6 +2386,7 @@ async function readAssistantCronManagedGroupActivityDecision(input: {
   job: ResolvedAssistantCronJob
   occurrenceAt: string
   signal: AbortSignal
+  timeZone: string | null
 }): Promise<HostedRuntimeManagedGroupActivityDecisionStatus> {
   if (
     input.authorization.kind !== 'authorized' ||
@@ -2386,7 +2396,7 @@ async function readAssistantCronManagedGroupActivityDecision(input: {
     !input.authorization.target ||
     input.job.kind !== 'canonical' ||
     input.job.source.kind !== 'automation' ||
-    !input.job.source.timeZone
+    !input.timeZone
   ) {
     return 'unavailable'
   }
@@ -2403,7 +2413,7 @@ async function readAssistantCronManagedGroupActivityDecision(input: {
         channel: input.authorization.channel,
         target: input.authorization.target,
       },
-      timeZone: input.job.source.timeZone,
+      timeZone: input.timeZone,
     }, {
       signal: input.signal,
     })
