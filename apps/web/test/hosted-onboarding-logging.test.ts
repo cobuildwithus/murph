@@ -86,7 +86,7 @@ describe("hosted Stripe failure logging", () => {
     vi.restoreAllMocks();
   });
 
-  it("extracts every diagnosable Stripe field including the request id", () => {
+  it("extracts structured Stripe diagnostics without the provider message", () => {
     expect(describeHostedStripeError({
       code: "resource_missing",
       decline_code: "insufficient_funds",
@@ -99,7 +99,6 @@ describe("hosted Stripe failure logging", () => {
     })).toEqual({
       code: "resource_missing",
       declineCode: "insufficient_funds",
-      message: "No such subscription: sub_123",
       param: "items[0][price]",
       rawType: "invalid_request_error",
       requestId: "req_abc123",
@@ -112,8 +111,8 @@ describe("hosted Stripe failure logging", () => {
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
 
     logHostedStripeFailure({
-      error: Object.assign(new Error("Cannot update a paused subscription."), {
-        code: "subscription_paused",
+      error: Object.assign(new Error("No such customer: cus_Qwerty123"), {
+        code: "card_declined",
         param: "pause_collection",
         rawType: "invalid_request_error",
         requestId: "req_abc123",
@@ -125,8 +124,7 @@ describe("hosted Stripe failure logging", () => {
 
     expect(consoleError).toHaveBeenCalledWith("Hosted Stripe call failed.", {
       operationName: "subscription.update.paused-pre-resume-cleanup",
-      stripeCode: "subscription_paused",
-      stripeMessage: "Cannot update a paused subscription.",
+      stripeCode: "card_declined",
       stripeParam: "pause_collection",
       stripeRawType: "invalid_request_error",
       stripeRequestId: "req_abc123",
@@ -135,15 +133,12 @@ describe("hosted Stripe failure logging", () => {
     });
   });
 
-  it("redacts secrets and caps provider messages", () => {
+  it("discards provider-authored messages instead of projecting them", () => {
     const fields = describeHostedStripeError({
       message: `Invalid API key sk_live_${"a".repeat(24)} for user@example.com at https://api.stripe.com/v1 ${"x".repeat(400)}`,
     });
 
-    expect(fields.message).not.toMatch(/sk_live_|@example\.com|https:/u);
-    expect(fields.message).toContain("<redacted-secret>");
-    expect(fields.message).toContain("<redacted-email>");
-    expect(fields.message?.length).toBe(240);
+    expect(fields).not.toHaveProperty("message");
   });
 
   it("drops unexpected request ids and status codes and redacts secret-shaped tokens", () => {
@@ -166,7 +161,6 @@ describe("hosted Stripe failure logging", () => {
     expect(describeHostedStripeError("boom")).toEqual({
       code: null,
       declineCode: null,
-      message: null,
       param: null,
       rawType: null,
       requestId: null,
@@ -236,7 +230,6 @@ describe("hosted Stripe failure logging", () => {
     expect(consoleError).toHaveBeenCalledTimes(1);
     expect(consoleError).toHaveBeenCalledWith("Hosted Stripe call failed.", {
       operationName: "subscription.retrieve",
-      stripeMessage: "Stripe is down.",
       stripeRequestId: "req_abc123",
       stripeStatusCode: 503,
       stripeType: "StripeConnectionError",

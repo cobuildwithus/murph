@@ -12,6 +12,10 @@ import {
 } from "./billing-plans";
 import { normalizePhoneNumber } from "./phone";
 import {
+  readHostedStripePortalConfigurationIds,
+  type HostedStripePortalConfigurationIds,
+} from "./stripe-portal-config";
+import {
   getHostedUsageCreditOfferDefinition,
   HOSTED_USAGE_CREDIT_OFFER_CODES,
   type HostedUsageCreditOfferCode,
@@ -52,6 +56,7 @@ export interface HostedOnboardingEnvironment {
   publicBaseUrl: string | null;
   stripePriceIdsByPlan: Readonly<Record<HostedBillingPlanCode, string | null>>;
   stripeFamilyPriceIdsByPlan: Readonly<Record<HostedPlanCode, string | null>>;
+  stripePortalConfigurationIds: HostedStripePortalConfigurationIds;
   stripeUsageCreditPriceIdsByOffer: Readonly<
     Record<HostedUsageCreditOfferCode, string | null>
   >;
@@ -104,6 +109,7 @@ export function readHostedOnboardingEnvironment(
     privyVerificationKey: readEnv(source, "PRIVY_VERIFICATION_KEY"),
     publicBaseUrl,
     stripeFamilyPriceIdsByPlan: readHostedStripeFamilyPriceIdsByPlan(source),
+    stripePortalConfigurationIds: readHostedStripePortalConfigurationIds(source),
     stripePriceIdsByPlan: readHostedStripePriceIdsByPlan(source),
     stripeUsageCreditPriceIdsByOffer: readHostedStripeUsageCreditPriceIdsByOffer(source),
     stripeSecretKey: readEnv(source, "STRIPE_SECRET_KEY"),
@@ -113,7 +119,6 @@ export function readHostedOnboardingEnvironment(
     telegramWebhookSecret: readEnv(source, "TELEGRAM_WEBHOOK_SECRET"),
   };
 }
-
 
 function readHostedTelegramBotUsername(
   source: HostedOnboardingEnvSource,

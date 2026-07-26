@@ -31,6 +31,7 @@ import {
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
   lockHostedMemberRow,
 } from "./shared";
+import { classifyHostedStripeFailure } from "./stripe-billing-state";
 import {
   getHostedUsageCreditOfferDefinition,
   HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_VERSION,
@@ -64,7 +65,6 @@ import { logHostedStripeFailure } from "./stripe-error-log";
 import {
   buildHostedGroupUsageFundingPath,
   normalizeHostedGroupUsageFundingLocator,
-  normalizeHostedGroupUsageJoinCode,
   readHostedGroupUsageFundingLocatorRuntimeMemberId,
   readHostedGroupUsageFundingTargetByLocator,
 } from "../hosted-groups/group-usage-funding";
@@ -615,12 +615,17 @@ async function continueHostedUsageCreditCheckout(input: {
     });
   } catch (error) {
     logHostedStripeFailure({ error, operationName: "checkout.sessions.create" });
+    const failure = classifyHostedStripeFailure(error);
     throw hostedOnboardingError({
-      code: "HOSTED_USAGE_CREDIT_STRIPE_UNAVAILABLE",
+      code: failure.kind === "provider_ambiguous"
+        ? "HOSTED_USAGE_CREDIT_STRIPE_UNAVAILABLE"
+        : "HOSTED_USAGE_CREDIT_STRIPE_REJECTED",
       details: describeSafeHostedUsageCreditStripeError(error),
-      httpStatus: 502,
-      message: "Stripe checkout is temporarily unavailable. Try again with the same request.",
-      retryable: true,
+      httpStatus: failure.httpStatus,
+      message: failure.kind === "provider_ambiguous"
+        ? "Stripe checkout is temporarily unavailable. Try again with the same request."
+        : "Stripe rejected the usage-credit checkout request. Contact support.",
+      retryable: failure.retryable,
     });
   }
 

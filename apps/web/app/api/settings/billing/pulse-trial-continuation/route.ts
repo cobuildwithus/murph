@@ -74,11 +74,13 @@ export const POST = withJsonError(async (request: Request) => {
   const result = action === "start_pulse_now"
     ? await startHostedPulseTrialPaidPlan({
         memberId: auth.member.id,
+        paymentMethodRecoveryConfirmed: true,
         paymentMethodContinuation: "conversation",
         prisma,
       })
     : await continueHostedPulseTrialPaidPlan({
         memberId: auth.member.id,
+        paymentMethodRecoveryConfirmed: true,
         paymentMethodContinuation: "conversation",
         prisma,
       });

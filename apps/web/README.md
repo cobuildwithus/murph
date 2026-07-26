@@ -80,6 +80,25 @@ safe. See `agent-docs/references/hosted-runtime-protocol.md` and
 `apps/cloudflare/DEPLOY.md` for the durable-row and committed-snapshot proof
 required before any such migration.
 
+## Billing Checkout-attempt deployment compatibility
+
+Standard subscription Checkout reserves one durable attempt on the member
+billing owner before Stripe creates a Session. The nullable attempt and
+encrypted Session columns may be migrated before the corresponding Web code;
+the previously deployed Web bundle ignores their all-null expansion safely.
+
+The first production Web deployment that can write
+`HostedMemberBillingRef.checkoutAttemptId` is a conditional rollback floor
+while any standard Checkout attempt or Session can still exist. Older Web code
+does not recognize that reservation and can create another chargeable Session
+for the same member. Prefer a forward fix. A below-floor rollback is safe only
+after new Checkout admission is frozen; the prior and current Web function
+windows have drained so no create or same-key recovery remains in flight; one
+full maximum Stripe Checkout Session lifetime has then elapsed; every known
+open standard Session is reconciled or explicitly expired; and all five
+Checkout attempt/Session columns are proved null. Do not drop the additive
+columns or their lookup index as part of an application rollback.
+
 ## Direct-login deferred-checkpoint deployment compatibility
 
 A completed direct-login handoff now means "the user completed takeover; the
@@ -584,7 +603,24 @@ Hosted onboarding extras:
 - `HOSTED_ONBOARDING_STRIPE_PRICE_ID_USAGE_CREDIT_5_USD`
 - `HOSTED_ONBOARDING_STRIPE_PRICE_ID_USAGE_CREDIT_10_USD`
 - `HOSTED_ONBOARDING_STRIPE_PRICE_ID_USAGE_CREDIT_25_USD`
-- `HOSTED_ONBOARDING_STRIPE_FAMILY_PORTAL_CONFIGURATION_ID` optionally selects a dedicated Family Billing Portal configuration.
+- `HOSTED_ONBOARDING_STRIPE_MEMBER_PORTAL_CONFIGURATION_ID`
+- `HOSTED_ONBOARDING_STRIPE_FAMILY_PORTAL_CONFIGURATION_ID`
+- `HOSTED_ONBOARDING_STRIPE_PAYMENT_RECOVERY_PORTAL_CONFIGURATION_ID`
+  select dedicated member, Family, and payment-recovery Stripe Billing Portal
+  configurations. All three are required in Vercel Preview and Production;
+  local and test runtimes may omit them and use Stripe's mutable default
+  configuration. The deploy preflight retrieves every configuration and
+  requires a distinct, active, non-default configuration in the same Stripe
+  mode as `STRIPE_SECRET_KEY`. Every configuration must expose invoice history
+  and payment-method recovery while disabling subscription updates and pauses.
+  The payment-recovery configuration must disable cancellation; member and
+  Family cancellation must be at period end without proration. The same
+  feature policy is revalidated from Stripe immediately before every Portal
+  session is created, so a later Dashboard edit fails closed.
+  `stripe-portal-config.ts` owns the environment and deployment contract,
+  `stripe-portal-policy.ts` owns the shared provider feature policy, and
+  `stripe-portal.ts` is the only Portal-session creator. Vercel builds run the
+  provider check through `pnpm stripe-portal:config-check`.
 - `STRIPE_SECRET_KEY`
 - `STRIPE_WEBHOOK_SECRET`
 - `LINQ_API_TOKEN`

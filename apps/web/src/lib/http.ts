@@ -65,6 +65,12 @@ const DEFAULT_RAW_BODY_LIMIT_BYTES = 1024 * 1024;
 // Header values may contain commas, so unquoted auth/cookie forms redact through the next object boundary.
 const JSON_LOG_HEADER_SECRET_VALUE_PATTERN =
   /(^|[\s,{])(["']?(?:authorization|proxy-authorization|cookie|set-cookie)["']?\s*[:=]\s*)(?:"[^"]*"|'[^']*'|\[[^\]]*\]|[^}]*)/giu;
+// Stripe object ids are opaque mixed-case/alphanumeric correlation handles for
+// private billing records. The mixed-case/digit lookahead avoids mistaking safe
+// lowercase error codes such as `card_declined` for ids. Keep request ids
+// (`req_...`) available for provider support.
+const JSON_LOG_STRIPE_OBJECT_ID_PATTERN =
+  /\b(?:acct|ba|bpc|bps|bt|card|ch|clock|cn|cnli|cs|cus|dp|ephkey|evt|fee|file|ii|il|in|inpay|mandate|person|pi|plink|pm|price|prod|promo|qt|re|sched|seti|si|src|sub|tok|tr|txn|txr)_(?=[A-Za-z0-9_-]*[A-Z0-9])[A-Za-z0-9_-]+\b/gu;
 const JSON_ERROR_RESPONSE_DETAIL_SAFE_KEYS = new Set([
   "code",
   "operationName",
@@ -590,6 +596,7 @@ export function sanitizeJsonLogString(
     .replace(/\b(Basic|Bearer)\s+[A-Z0-9._~+/=-]+\b/giu, "$1 <redacted-secret>")
     .replace(/\b(?:sk|pk|rk)_(?:live|test)_[A-Z0-9]+\b/giu, "<redacted-secret>")
     .replace(/\bwhsec_[A-Z0-9]+\b/giu, "<redacted-secret>")
+    .replace(JSON_LOG_STRIPE_OBJECT_ID_PATTERN, "<redacted-stripe-id>")
     .replace(/\bfile:\/\/\S+/giu, "<redacted-path>")
     .replace(/\bhttps?:\/\/\S+/giu, "<redacted-url>")
     .replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/giu, "<redacted-email>")

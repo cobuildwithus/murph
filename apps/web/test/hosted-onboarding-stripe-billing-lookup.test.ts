@@ -4,12 +4,33 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 
 const mocks = vi.hoisted(() => ({
+  lookupHostedAccountGroupStripeBillingRefByStripeSubscriptionId: vi.fn(),
   lookupHostedMemberStripeBillingRefByStripeCustomerId: vi.fn(),
   lookupHostedMemberStripeBillingRefByStripeSubscriptionId: vi.fn(),
   readHostedMemberBillingSnapshot: vi.fn(),
   readHostedMemberCoreState: vi.fn(),
+  stripeChargesRetrieve: vi.fn(),
+  stripeDisputesList: vi.fn(),
+  stripeInvoicePaymentsList: vi.fn(),
+  stripeInvoiceLineItemsList: vi.fn(),
+  stripeInvoicesList: vi.fn(),
+  stripeInvoicesRetrieve: vi.fn(),
+  stripePaymentIntentsRetrieve: vi.fn(),
+  stripeRefundsList: vi.fn(),
   stripeSubscriptionsRetrieve: vi.fn(),
 }));
+
+vi.mock("@/src/lib/hosted-onboarding/family-plan", async () => {
+  const actual = await vi.importActual<
+    typeof import("@/src/lib/hosted-onboarding/family-plan")
+  >("@/src/lib/hosted-onboarding/family-plan");
+
+  return {
+    ...actual,
+    lookupHostedAccountGroupStripeBillingRefByStripeSubscriptionId:
+      mocks.lookupHostedAccountGroupStripeBillingRefByStripeSubscriptionId,
+  };
+});
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-billing-store", async () => {
   const actual = await vi.importActual<
@@ -45,6 +66,26 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", async () => {
   return {
     ...actual,
     requireHostedStripeApi: () => ({
+      charges: {
+        retrieve: mocks.stripeChargesRetrieve,
+      },
+      disputes: {
+        list: mocks.stripeDisputesList,
+      },
+      invoicePayments: {
+        list: mocks.stripeInvoicePaymentsList,
+      },
+      invoices: {
+        list: mocks.stripeInvoicesList,
+        listLineItems: mocks.stripeInvoiceLineItemsList,
+        retrieve: mocks.stripeInvoicesRetrieve,
+      },
+      paymentIntents: {
+        retrieve: mocks.stripePaymentIntentsRetrieve,
+      },
+      refunds: {
+        list: mocks.stripeRefundsList,
+      },
       subscriptions: {
         retrieve: mocks.stripeSubscriptionsRetrieve,
       },
@@ -53,13 +94,20 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", async () => {
 });
 
 import {
+  classifyHostedStripeRecurringFinancialHealth,
   findMemberForStripeInvoice,
   findMemberForStripeSubscription,
+  HOSTED_STRIPE_RECURRING_FINANCIAL_REQUEST_OPTIONS,
+  readHostedStripeRecurringFinancialState,
+  resolveStripeFinancialContext,
 } from "@/src/lib/hosted-onboarding/stripe-billing-lookup";
+import { resolveHostedStripeBillingOwner } from "@/src/lib/hosted-onboarding/stripe-billing-owner";
 
 describe("hosted onboarding stripe billing lookup", () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
+    mocks.lookupHostedAccountGroupStripeBillingRefByStripeSubscriptionId
+      .mockResolvedValue(null);
     mocks.lookupHostedMemberStripeBillingRefByStripeCustomerId.mockResolvedValue(null);
     mocks.lookupHostedMemberStripeBillingRefByStripeSubscriptionId.mockResolvedValue(null);
     mocks.readHostedMemberBillingSnapshot.mockResolvedValue(makeMemberSnapshot());
@@ -73,7 +121,113 @@ describe("hosted onboarding stripe billing lookup", () => {
         },
       }),
     );
+    mocks.stripeChargesRetrieve.mockResolvedValue(
+      makeStripeCharge(),
+    );
+    mocks.stripePaymentIntentsRetrieve.mockResolvedValue(
+      makeStripePaymentIntent(),
+    );
+    mocks.stripeInvoicesRetrieve.mockResolvedValue(
+      makeStripeFinancialInvoice(),
+    );
+    mocks.stripeInvoicesList.mockResolvedValue({
+      data: [],
+      has_more: false,
+    });
+    mocks.stripeInvoicePaymentsList.mockImplementation(async (params: {
+      invoice?: string;
+    }) => ({
+      data: [makeStripeInvoicePayment({
+        invoice: makeStripeFinancialInvoice({
+          id: params.invoice ?? "in_123",
+        }),
+      })],
+      has_more: false,
+    }));
+    mocks.stripeInvoiceLineItemsList.mockResolvedValue({
+      data: [],
+      has_more: false,
+    });
+    mocks.stripeRefundsList.mockResolvedValue({
+      data: [],
+      has_more: false,
+    });
+    mocks.stripeDisputesList.mockResolvedValue({
+      data: [],
+      has_more: false,
+    });
   });
+
+  it.each([
+    [
+      {
+        collectionState: {
+          invoiceId: "in_123",
+          invoicePaymentId: "inpay_123",
+          kind: "paid",
+          paymentIntentId: "pi_123",
+        },
+        fullyRefunded: false,
+        invoiceId: "in_123",
+        outstandingDispute: false,
+      },
+      { kind: "healthy" },
+    ],
+    [
+      {
+        collectionState: { kind: "none" },
+        fullyRefunded: false,
+        invoiceId: null,
+        outstandingDispute: false,
+      },
+      {
+        collectionState: { kind: "none" },
+        kind: "blocked",
+        reason: "collection_missing",
+      },
+    ],
+    [
+      {
+        collectionState: {
+          invoiceId: "in_123",
+          invoicePaymentId: "inpay_123",
+          kind: "paid",
+          paymentIntentId: "pi_123",
+        },
+        fullyRefunded: true,
+        invoiceId: "in_123",
+        outstandingDispute: false,
+      },
+      expect.objectContaining({
+        kind: "blocked",
+        reason: "fully_refunded",
+      }),
+    ],
+    [
+      {
+        collectionState: {
+          invoiceId: "in_123",
+          invoicePaymentId: "inpay_123",
+          kind: "paid",
+          paymentIntentId: "pi_123",
+        },
+        fullyRefunded: false,
+        invoiceId: "in_123",
+        outstandingDispute: true,
+      },
+      expect.objectContaining({
+        kind: "blocked",
+        reason: "outstanding_dispute",
+      }),
+    ],
+  ] as const)(
+    "classifies canonical recurring mutation health %#",
+    (state, expected) => {
+      expect(classifyHostedStripeRecurringFinancialHealth(state)).toEqual(
+        expected,
+      );
+    },
+  );
 
   it("resolves invoice.paid members from the live Stripe subscription when local billing refs have not been written yet", async () => {
     await expect(
@@ -392,6 +546,1050 @@ describe("hosted onboarding stripe billing lookup", () => {
     expect(mocks.lookupHostedMemberStripeBillingRefByStripeCustomerId).not.toHaveBeenCalled();
     expect(mocks.stripeSubscriptionsRetrieve).not.toHaveBeenCalled();
   });
+
+  it("resolves a recurring financial event through exactly one paid InvoicePayment", async () => {
+    await expect(
+      resolveStripeFinancialContext({
+        chargeId: "ch_123",
+        paymentIntentId: "pi_123",
+      }),
+    ).resolves.toEqual({
+      customerId: "cus_123",
+      invoiceId: "in_123",
+      paymentIntentId: "pi_123",
+      subscriptionId: "sub_123",
+    });
+
+    expect(mocks.stripeChargesRetrieve).toHaveBeenCalledWith("ch_123");
+    expect(mocks.stripePaymentIntentsRetrieve).toHaveBeenCalledWith("pi_123");
+    expect(mocks.stripeInvoicePaymentsList).toHaveBeenCalledWith({
+      expand: ["data.invoice"],
+      limit: 100,
+      payment: {
+        payment_intent: "pi_123",
+        type: "payment_intent",
+      },
+      status: "paid",
+    });
+  });
+
+  it.each(["refund", "dispute"] as const)(
+    "resolves a legacy Source Charge-only %s through an exact paid InvoicePayment",
+    async () => {
+      const invoice = makeStripeFinancialInvoice({
+        id: "in_legacy",
+      });
+      const invoicePayment = makeStripeInvoicePayment({
+        chargeId: "ch_legacy",
+        id: "ipay_legacy",
+        invoice,
+        kind: "charge",
+      });
+      invoice.payments = {
+        data: [invoicePayment],
+        has_more: false,
+        object: "list",
+        url: "/v1/invoice_payments",
+      };
+      mocks.stripeChargesRetrieve.mockResolvedValueOnce(
+        makeStripeCharge({
+          id: "ch_legacy",
+          paymentIntentId: null,
+        }),
+      );
+      mocks.stripeInvoicesList.mockResolvedValueOnce({
+        data: [invoice],
+        has_more: false,
+      });
+
+      await expect(
+        resolveStripeFinancialContext({
+          chargeId: "ch_legacy",
+          paymentIntentId: null,
+        }),
+      ).resolves.toEqual({
+        customerId: "cus_123",
+        invoiceId: "in_legacy",
+        paymentIntentId: null,
+        subscriptionId: "sub_123",
+      });
+
+      expect(mocks.stripePaymentIntentsRetrieve).not.toHaveBeenCalled();
+      expect(mocks.stripeInvoicesList).toHaveBeenCalledWith({
+        customer: "cus_123",
+        expand: ["data.payments"],
+        limit: 100,
+        status: "paid",
+      });
+      expect(mocks.stripeInvoicePaymentsList).not.toHaveBeenCalled();
+    },
+  );
+
+  it("fails closed when a PaymentIntent does not resolve to a paid invoice", async () => {
+    mocks.stripeInvoicePaymentsList.mockResolvedValueOnce({
+      data: [],
+      has_more: false,
+    });
+
+    await expect(
+      resolveStripeFinancialContext({
+        chargeId: "ch_123",
+        paymentIntentId: "pi_123",
+      }),
+    ).rejects.toThrow(
+      "Stripe recurring financial payment did not resolve to a bounded paid invoice set.",
+    );
+  });
+
+  it("deduplicates multiple paid invoices allocated from one PaymentIntent to one subscription", async () => {
+    mocks.stripeInvoicePaymentsList.mockResolvedValueOnce({
+      data: [
+        makeStripeInvoicePayment({
+          invoice: makeStripeFinancialInvoice({ id: "in_1" }),
+        }),
+        makeStripeInvoicePayment({
+          invoice: makeStripeFinancialInvoice({ id: "in_2" }),
+        }),
+      ],
+      has_more: false,
+    });
+
+    await expect(
+      resolveStripeFinancialContext({
+        chargeId: "ch_123",
+        paymentIntentId: "pi_123",
+      }),
+    ).resolves.toMatchObject({
+      customerId: "cus_123",
+      invoiceId: "in_1",
+      paymentIntentId: "pi_123",
+      subscriptionId: "sub_123",
+    });
+  });
+
+  it("rejects one PaymentIntent allocated across multiple subscriptions", async () => {
+    mocks.stripeInvoicePaymentsList.mockResolvedValueOnce({
+      data: [
+        makeStripeInvoicePayment({
+          invoice: makeStripeFinancialInvoice({
+            id: "in_1",
+            subscriptionId: "sub_123",
+          }),
+        }),
+        makeStripeInvoicePayment({
+          invoice: makeStripeFinancialInvoice({
+            id: "in_2",
+            subscriptionId: "sub_other",
+          }),
+        }),
+      ],
+      has_more: false,
+    });
+
+    await expect(
+      resolveStripeFinancialContext({
+        chargeId: "ch_123",
+        paymentIntentId: "pi_123",
+      }),
+    ).rejects.toThrow(
+      "Stripe recurring financial payment spanned multiple recurring owners.",
+    );
+  });
+
+  it("resolves exactly one member or Family subscription owner and rejects dual ownership", async () => {
+    const memberLookup = {
+      billingRef: makeBillingRef({
+        stripeCustomerId: "cus_123",
+        stripeSubscriptionId: "sub_123",
+      }),
+      core: makeHostedMemberCoreState(),
+      matchedBy: "stripeSubscriptionId",
+    };
+    mocks.lookupHostedMemberStripeBillingRefByStripeSubscriptionId
+      .mockResolvedValueOnce(memberLookup);
+
+    await expect(
+      resolveHostedStripeBillingOwner({
+        prisma: {} as never,
+        stripeSubscriptionId: "sub_123",
+      }),
+    ).resolves.toEqual({
+      kind: "member",
+      lockMemberId: "member_123",
+      memberId: "member_123",
+      stripeCustomerId: "cus_123",
+      stripeSubscriptionId: "sub_123",
+    });
+
+    const familyLookup = makeFamilyBillingLookup();
+    mocks.lookupHostedMemberStripeBillingRefByStripeSubscriptionId
+      .mockResolvedValueOnce(memberLookup);
+    mocks.lookupHostedAccountGroupStripeBillingRefByStripeSubscriptionId
+      .mockResolvedValueOnce(familyLookup);
+    await expect(
+      resolveHostedStripeBillingOwner({
+        prisma: {} as never,
+        stripeSubscriptionId: "sub_123",
+      }),
+    ).rejects.toThrow(
+      "Stripe subscription matched both member and Family billing owners.",
+    );
+  });
+
+  it("reconciles cumulative successful refunds and ignores pending or failed refunds", async () => {
+    mocks.stripeRefundsList.mockResolvedValueOnce({
+      data: [
+        makeStripeRefund({ amount: 400, id: "re_1", status: "succeeded" }),
+        makeStripeRefund({ amount: 600, id: "re_2", status: "succeeded" }),
+        makeStripeRefund({ amount: 5_000, id: "re_pending", status: "pending" }),
+        makeStripeRefund({ amount: 5_000, id: "re_failed", status: "failed" }),
+      ],
+      has_more: false,
+    });
+
+    await expect(
+      readHostedStripeRecurringFinancialState(
+        makeStripeSubscription({
+          latestInvoice: "in_123",
+        }),
+      ),
+    ).resolves.toMatchObject({
+      fullyRefunded: true,
+      invoiceId: "in_123",
+      outstandingDispute: false,
+    });
+  });
+
+  it("nets all canonical dispute balance transactions before blocking entitlement", async () => {
+    mocks.stripeDisputesList.mockResolvedValueOnce({
+      data: [
+        makeStripeDispute({
+          balanceTransactions: [
+            makeStripeBalanceTransaction({ amount: -1_000, id: "txn_withdrawn" }),
+            makeStripeBalanceTransaction({ amount: 250, id: "txn_partial_return" }),
+          ],
+        }),
+      ],
+      has_more: false,
+    });
+
+    await expect(
+      readHostedStripeRecurringFinancialState(
+        makeStripeSubscription({
+          latestInvoice: "in_123",
+        }),
+      ),
+    ).resolves.toMatchObject({
+      fullyRefunded: false,
+      outstandingDispute: true,
+    });
+  });
+
+  it("uses the newest paid exact-subscription invoice for an exact unapplied pending delta", async () => {
+    const failedUpdateInvoice = makeStripeFinancialInvoice({
+      amountPaid: 0,
+      billingReason: "subscription_update",
+      id: "in_failed_update",
+      status: "open",
+    });
+    const paidEntitlementInvoice = makeStripeFinancialInvoice({
+      id: "in_current_entitlement",
+    });
+    mocks.stripeInvoicesRetrieve
+      .mockResolvedValueOnce(failedUpdateInvoice)
+      .mockResolvedValueOnce(paidEntitlementInvoice);
+    mocks.stripeInvoicePaymentsList
+      .mockResolvedValueOnce({ data: [], has_more: false })
+      .mockResolvedValueOnce({
+        data: [makeStripeInvoicePayment({
+          chargeId: "ch_current",
+          invoice: paidEntitlementInvoice,
+          paymentIntentId: "pi_current",
+        })],
+        has_more: false,
+      });
+    mocks.stripeInvoicesList.mockResolvedValueOnce({
+      data: [paidEntitlementInvoice],
+      has_more: false,
+    });
+
+    await expect(
+      readHostedStripeRecurringFinancialState(
+        makeStripeSubscription({
+          items: [
+            makeStripeSubscriptionItem({
+              priceId: "price_launch",
+            }),
+          ],
+          latestInvoice: "in_failed_update",
+          pendingUpdate: makeStripePendingUpdate({
+            priceId: "price_edge",
+          }),
+          status: "active",
+        }),
+      ),
+    ).resolves.toMatchObject({
+      collectionState: { kind: "paid" },
+      invoiceId: "in_current_entitlement",
+    });
+    expect(mocks.stripeInvoicesList).toHaveBeenCalledWith({
+      created: {
+        gte: 1_774_395_200,
+      },
+      limit: 100,
+      subscription: "sub_123",
+    }, HOSTED_STRIPE_RECURRING_FINANCIAL_REQUEST_OPTIONS);
+  });
+
+  it("keeps an unresolved applied subscription update controlling without exact pending-update proof", async () => {
+    const unresolvedUpdateInvoice = makeStripeFinancialInvoice({
+      amountPaid: 0,
+      amountRemaining: 1_000,
+      attempted: true,
+      billingReason: "subscription_update",
+      id: "in_applied_update",
+      status: "open",
+    });
+    const paidEntitlementInvoice = makeStripeFinancialInvoice({
+      id: "in_current_entitlement",
+    });
+    mocks.stripeInvoicesRetrieve
+      .mockResolvedValueOnce(unresolvedUpdateInvoice)
+      .mockResolvedValueOnce(paidEntitlementInvoice);
+    mocks.stripeInvoicePaymentsList
+      .mockResolvedValueOnce({ data: [], has_more: false })
+      .mockResolvedValueOnce({
+        data: [makeStripeInvoicePayment({
+          invoice: paidEntitlementInvoice,
+        })],
+        has_more: false,
+      });
+    mocks.stripeInvoicesList.mockResolvedValueOnce({
+      data: [unresolvedUpdateInvoice, paidEntitlementInvoice],
+      has_more: false,
+    });
+
+    await expect(
+      readHostedStripeRecurringFinancialState(
+        makeStripeSubscription({
+          items: [
+            makeStripeSubscriptionItem({
+              priceId: "price_edge",
+            }),
+          ],
+          latestInvoice: unresolvedUpdateInvoice.id,
+          pendingUpdate: null,
+          status: "active",
+        }),
+      ),
+    ).resolves.toMatchObject({
+      collectionState: { kind: "payment_required" },
+      invoiceId: unresolvedUpdateInvoice.id,
+    });
+  });
+
+  it("keeps the paid base controlling after an unapplied pending update expires and its invoice is voided", async () => {
+    const expiredUpdateInvoice = makeStripeFinancialInvoice({
+      amountPaid: 0,
+      amountRemaining: 1_000,
+      billingReason: "subscription_update",
+      id: "in_expired_update",
+      lines: [
+        makeStripeInvoiceLine({
+          amount: 1_000,
+          invoiceId: "in_expired_update",
+          periodEnd: 1_778_000_000,
+          periodStart: 1_776_000_000,
+          priceId: "price_target",
+          proration: true,
+          quantity: 2,
+          subscriptionId: "sub_123",
+          subscriptionItemId: "si_123",
+        }),
+      ],
+      status: "void",
+    });
+    const paidBaseInvoice = makeStripeFinancialInvoice({
+      id: "in_paid_base",
+      lines: [
+        makeStripeInvoiceLine({
+          invoiceId: "in_paid_base",
+          periodEnd: 1_778_000_000,
+          periodStart: 1_775_000_000,
+          priceId: "price_current",
+          quantity: 1,
+          subscriptionId: "sub_123",
+          subscriptionItemId: "si_123",
+        }),
+      ],
+    });
+    mocks.stripeInvoicesRetrieve
+      .mockResolvedValueOnce(expiredUpdateInvoice)
+      .mockResolvedValueOnce(paidBaseInvoice);
+    mocks.stripeInvoicesList.mockResolvedValueOnce({
+      data: [expiredUpdateInvoice, paidBaseInvoice],
+      has_more: false,
+    });
+    mocks.stripeInvoicePaymentsList
+      .mockResolvedValueOnce({
+        data: [],
+        has_more: false,
+      })
+      .mockResolvedValueOnce({
+        data: [makeStripeInvoicePayment({
+          invoice: paidBaseInvoice,
+        })],
+        has_more: false,
+      });
+
+    await expect(
+      readHostedStripeRecurringFinancialState(
+        makeStripeSubscription({
+          items: [
+            makeStripeSubscriptionItem({
+              id: "si_123",
+              priceId: "price_current",
+              quantity: 1,
+            }),
+          ],
+          latestInvoice: expiredUpdateInvoice.id,
+          pendingUpdate: null,
+        }),
+      ),
+    ).resolves.toMatchObject({
+      collectionState: { kind: "paid" },
+      fullyRefunded: false,
+      invoiceId: paidBaseInvoice.id,
+    });
+  });
+
+  it("fails closed when more than 100 invoices fund one current period", async () => {
+    const latestInvoice = makeStripeFinancialInvoice({
+      id: "in_current_0",
+    });
+    const currentInvoices = Array.from({ length: 101 }, (_, index) =>
+      makeStripeFinancialInvoice({
+        id: `in_current_${index}`,
+      })
+    );
+    mocks.stripeInvoicesRetrieve.mockResolvedValueOnce(latestInvoice);
+    mocks.stripeInvoicesList
+      .mockResolvedValueOnce({
+        data: currentInvoices.slice(0, 100),
+        has_more: true,
+      })
+      .mockResolvedValueOnce({
+        data: currentInvoices.slice(100),
+        has_more: false,
+      });
+
+    await expect(
+      readHostedStripeRecurringFinancialState(
+        makeStripeSubscription({
+          latestInvoice: latestInvoice.id,
+        }),
+      ),
+    ).rejects.toThrow(
+      "Stripe exceeded the bounded current-period invoice reconciliation shape.",
+    );
+  });
+
+  it("counts the separately retrieved latest invoice inside the 100-invoice cap", async () => {
+    const latestInvoice = makeStripeFinancialInvoice({
+      id: "in_latest_outside_list_window",
+    });
+    const listedInvoices = Array.from({ length: 100 }, (_, index) =>
+      makeStripeFinancialInvoice({
+        id: `in_listed_${index}`,
+      })
+    );
+    mocks.stripeInvoicesRetrieve.mockResolvedValueOnce(latestInvoice);
+    mocks.stripeInvoicesList.mockResolvedValueOnce({
+      data: listedInvoices,
+      has_more: false,
+    });
+
+    await expect(
+      readHostedStripeRecurringFinancialState(
+        makeStripeSubscription({
+          latestInvoice: latestInvoice.id,
+        }),
+      ),
+    ).rejects.toThrow(
+      "Stripe exceeded the bounded current-period invoice reconciliation shape.",
+    );
+    expect(mocks.stripeRefundsList).not.toHaveBeenCalled();
+    expect(mocks.stripeDisputesList).not.toHaveBeenCalled();
+  });
+
+  it("reconciles nine paid invoices from one current billing period", async () => {
+    const currentInvoices = Array.from({ length: 9 }, (_, index) =>
+      makeStripeFinancialInvoice({
+        billingReason: index === 0
+          ? "subscription_cycle"
+          : "subscription_update",
+        id: `in_current_${index}`,
+      })
+    );
+    const latestInvoice = currentInvoices.at(-1)!;
+    mocks.stripeInvoicesRetrieve.mockImplementation(async (invoiceId: string) => {
+      const invoice = currentInvoices.find((candidate) => candidate.id === invoiceId);
+      if (!invoice) {
+        throw new Error("Unexpected Stripe invoice.");
+      }
+      return invoice;
+    });
+    mocks.stripeInvoicesList.mockResolvedValueOnce({
+      data: currentInvoices,
+      has_more: false,
+    });
+
+    await expect(
+      readHostedStripeRecurringFinancialState(
+        makeStripeSubscription({
+          latestInvoice: latestInvoice.id,
+        }),
+      ),
+    ).resolves.toMatchObject({
+      collectionState: { kind: "paid" },
+      fullyRefunded: false,
+      invoiceId: latestInvoice.id,
+      outstandingDispute: false,
+    });
+    expect(mocks.stripeInvoicesList).toHaveBeenCalledWith({
+      created: {
+        gte: 1_774_395_200,
+      },
+      limit: 100,
+      subscription: "sub_123",
+    }, HOSTED_STRIPE_RECURRING_FINANCIAL_REQUEST_OPTIONS);
+  });
+
+  it("caps concurrent recurring-financial Stripe reads at four calls", async () => {
+    const invoices = Array.from({ length: 9 }, (_, index) =>
+      makeStripeFinancialInvoice({
+        billingReason: index === 0
+          ? "subscription_cycle"
+          : "subscription_update",
+        id: `in_concurrency_${index}`,
+      })
+    );
+    const latestInvoice = invoices.at(-1)!;
+    const tracker = makeConcurrentCallTracker();
+    mocks.stripeInvoicesRetrieve.mockImplementation((invoiceId: string) =>
+      tracker.run(() => {
+        const invoice = invoices.find((candidate) => candidate.id === invoiceId);
+        if (!invoice) {
+          throw new Error("Unexpected Stripe invoice.");
+        }
+        return invoice;
+      })
+    );
+    mocks.stripeInvoicePaymentsList.mockImplementation((params: {
+      invoice: string;
+    }) =>
+      tracker.run(() => {
+        const invoice = invoices.find(
+          (candidate) => candidate.id === params.invoice,
+        );
+        if (!invoice) {
+          throw new Error("Unexpected Stripe invoice payment.");
+        }
+        return {
+          data: [
+            makeStripeInvoicePayment({
+              chargeId: `ch_${invoice.id}`,
+              invoice,
+              paymentIntentId: `pi_${invoice.id}`,
+            }),
+          ],
+          has_more: false,
+        };
+      })
+    );
+    mocks.stripeInvoicesList.mockImplementation(() =>
+      tracker.run(() => ({
+        data: invoices,
+        has_more: false,
+      }))
+    );
+    mocks.stripeRefundsList.mockImplementation(() =>
+      tracker.run(() => ({
+        data: [],
+        has_more: false,
+      }))
+    );
+    mocks.stripeDisputesList.mockImplementation(() =>
+      tracker.run(() => ({
+        data: [],
+        has_more: false,
+      }))
+    );
+
+    await expect(
+      readHostedStripeRecurringFinancialState(
+        makeStripeSubscription({
+          latestInvoice: latestInvoice.id,
+        }),
+      ),
+    ).resolves.toMatchObject({
+      collectionState: { kind: "paid" },
+      fullyRefunded: false,
+      outstandingDispute: false,
+    });
+    expect(tracker.maxConcurrent()).toBe(4);
+  });
+
+  it("caps canonical invoice-line reads at four calls", async () => {
+    const invoices = Array.from({ length: 8 }, (_, index) => {
+      const invoice = makeStripeFinancialInvoice({
+        id: `in_line_concurrency_${index}`,
+      });
+      return {
+        ...invoice,
+        lines: {
+          ...invoice.lines,
+          data: [],
+          has_more: true,
+        },
+      };
+    });
+    const latestInvoice = invoices.at(-1)!;
+    const tracker = makeConcurrentCallTracker();
+    mocks.stripeInvoicesRetrieve.mockImplementation((invoiceId: string) => {
+      const invoice = invoices.find((candidate) => candidate.id === invoiceId);
+      if (!invoice) {
+        throw new Error("Unexpected Stripe invoice.");
+      }
+      return Promise.resolve(invoice);
+    });
+    mocks.stripeInvoicesList.mockResolvedValueOnce({
+      data: invoices,
+      has_more: false,
+    });
+    mocks.stripeInvoiceLineItemsList.mockImplementation((invoiceId: string) =>
+      tracker.run(() => ({
+        data: [
+          makeStripeInvoiceLine({
+            invoiceId,
+            periodEnd: 1_778_000_000,
+            periodStart: 1_775_000_000,
+            subscriptionId: "sub_123",
+          }),
+        ],
+        has_more: false,
+      }))
+    );
+
+    await expect(
+      readHostedStripeRecurringFinancialState(
+        makeStripeSubscription({
+          latestInvoice: latestInvoice.id,
+        }),
+      ),
+    ).resolves.toMatchObject({
+      collectionState: { kind: "paid" },
+    });
+    expect(tracker.maxConcurrent()).toBe(4);
+  });
+
+  it("fails closed when one period exceeds the bounded payment-allocation shape", async () => {
+    const invoice = makeStripeFinancialInvoice();
+    mocks.stripeInvoicePaymentsList.mockResolvedValue({
+      data: Array.from({ length: 101 }, (_, index) =>
+        makeStripeInvoicePayment({
+          chargeId: `ch_${index}`,
+          id: `ipay_${index}`,
+          invoice,
+          paymentIntentId: `pi_${index}`,
+        })
+      ),
+      has_more: false,
+    });
+
+    await expect(
+      readHostedStripeRecurringFinancialState(
+        makeStripeSubscription({
+          latestInvoice: invoice.id,
+        }),
+      ),
+    ).rejects.toThrow(
+      "Stripe exceeded the bounded current-period payment reconciliation shape.",
+    );
+  });
+
+  it("fails closed instead of paging an unbounded recurring refund history", async () => {
+    mocks.stripeRefundsList.mockResolvedValueOnce({
+      data: [],
+      has_more: true,
+    });
+
+    await expect(
+      readHostedStripeRecurringFinancialState(
+        makeStripeSubscription({
+          latestInvoice: "in_123",
+        }),
+      ),
+    ).rejects.toThrow(
+      "Stripe exceeded the bounded recurring refund reconciliation shape.",
+    );
+  });
+
+  it("does not let a full refund of an older invoice block a newer healthy period", async () => {
+    await expect(
+      readHostedStripeRecurringFinancialState(
+        makeStripeSubscription({
+          latestInvoice: "in_123",
+        }),
+      ),
+    ).resolves.toMatchObject({
+      fullyRefunded: false,
+      invoiceId: "in_123",
+    });
+    expect(mocks.stripeInvoicesRetrieve).toHaveBeenCalledWith(
+      "in_123",
+      {},
+      HOSTED_STRIPE_RECURRING_FINANCIAL_REQUEST_OPTIONS,
+    );
+    expect(mocks.stripeInvoicePaymentsList).toHaveBeenCalledWith({
+      expand: ["data.payment.payment_intent"],
+      invoice: "in_123",
+      limit: 100,
+    }, HOSTED_STRIPE_RECURRING_FINANCIAL_REQUEST_OPTIONS);
+    expect(mocks.stripeRefundsList).toHaveBeenCalledWith({
+      charge: "ch_123",
+      limit: 20,
+    }, HOSTED_STRIPE_RECURRING_FINANCIAL_REQUEST_OPTIONS);
+  });
+
+  it("revokes the current period when its base renewal is fully refunded despite a later paid delta", async () => {
+    const renewalInvoice = makeStripeFinancialInvoice({
+      id: "in_renewal",
+    });
+    const paidUpdateInvoice = makeStripeFinancialInvoice({
+      billingReason: "subscription_update",
+      id: "in_update",
+    });
+    mocks.stripeInvoicesRetrieve
+      .mockResolvedValueOnce(paidUpdateInvoice)
+      .mockResolvedValueOnce(renewalInvoice);
+    mocks.stripeInvoicesList.mockResolvedValueOnce({
+      data: [paidUpdateInvoice, renewalInvoice],
+      has_more: false,
+    });
+    mocks.stripeInvoicePaymentsList
+      .mockResolvedValueOnce({
+        data: [makeStripeInvoicePayment({
+          chargeId: "ch_update",
+          invoice: paidUpdateInvoice,
+          paymentIntentId: "pi_update",
+        })],
+        has_more: false,
+      })
+      .mockResolvedValueOnce({
+        data: [makeStripeInvoicePayment({
+          chargeId: "ch_renewal",
+          invoice: renewalInvoice,
+          paymentIntentId: "pi_renewal",
+        })],
+        has_more: false,
+      });
+    mocks.stripeRefundsList.mockImplementation(async (params: {
+      charge?: string;
+    }) => ({
+      data: params.charge === "ch_renewal"
+        ? [
+            makeStripeRefund({
+              amount: 1_000,
+              chargeId: "ch_renewal",
+              id: "re_renewal",
+              paymentIntentId: "pi_renewal",
+              status: "succeeded",
+            }),
+          ]
+        : [],
+      has_more: false,
+    }));
+
+    await expect(
+      readHostedStripeRecurringFinancialState(
+        makeStripeSubscription({
+          latestInvoice: "in_update",
+        }),
+      ),
+    ).resolves.toMatchObject({
+      collectionState: { kind: "paid" },
+      fullyRefunded: true,
+      invoiceId: "in_update",
+    });
+  });
+
+  it.each([
+    ["a partial refund", 500, false],
+    ["a full aggregate refund", 1_000, true],
+  ] as const)(
+    "reconciles %s once across two current-period invoices paid by one PaymentIntent",
+    async (_description, refundAmount, fullyRefunded) => {
+      const renewalInvoice = makeStripeFinancialInvoice({
+        amountPaid: 500,
+        id: "in_shared_renewal",
+      });
+      const deltaInvoice = makeStripeFinancialInvoice({
+        amountPaid: 500,
+        billingReason: "subscription_update",
+        id: "in_shared_delta",
+      });
+      mocks.stripeInvoicesRetrieve
+        .mockResolvedValueOnce(deltaInvoice)
+        .mockResolvedValueOnce(renewalInvoice);
+      mocks.stripeInvoicesList.mockResolvedValueOnce({
+        data: [deltaInvoice, renewalInvoice],
+        has_more: false,
+      });
+      mocks.stripeInvoicePaymentsList
+        .mockResolvedValueOnce({
+          data: [makeStripeInvoicePayment({
+            amountPaid: 500,
+            chargeId: "ch_shared",
+            id: "ipay_shared_delta",
+            invoice: deltaInvoice,
+            paymentIntentId: "pi_shared",
+          })],
+          has_more: false,
+        })
+        .mockResolvedValueOnce({
+          data: [makeStripeInvoicePayment({
+            amountPaid: 500,
+            chargeId: "ch_shared",
+            id: "ipay_shared_renewal",
+            invoice: renewalInvoice,
+            paymentIntentId: "pi_shared",
+          })],
+          has_more: false,
+        });
+      mocks.stripeRefundsList.mockResolvedValueOnce({
+        data: [
+          makeStripeRefund({
+            amount: refundAmount,
+            chargeId: "ch_shared",
+            id: "re_shared",
+            paymentIntentId: "pi_shared",
+            status: "succeeded",
+          }),
+        ],
+        has_more: false,
+      });
+
+      await expect(
+        readHostedStripeRecurringFinancialState(
+          makeStripeSubscription({
+            latestInvoice: deltaInvoice.id,
+          }),
+        ),
+      ).resolves.toMatchObject({
+        fullyRefunded,
+      });
+      expect(mocks.stripeRefundsList).toHaveBeenCalledOnce();
+      expect(mocks.stripeDisputesList).toHaveBeenCalledOnce();
+    },
+  );
+
+  it("deduplicates mixed InvoicePayment forms before refund and dispute reads", async () => {
+    const renewalInvoice = makeStripeFinancialInvoice({
+      id: "in_mixed_renewal",
+    });
+    const deltaInvoice = makeStripeFinancialInvoice({
+      billingReason: "subscription_update",
+      id: "in_mixed_delta",
+    });
+    mocks.stripeInvoicesRetrieve
+      .mockResolvedValueOnce(deltaInvoice)
+      .mockResolvedValueOnce(renewalInvoice);
+    mocks.stripeInvoicesList.mockResolvedValueOnce({
+      data: [deltaInvoice, renewalInvoice],
+      has_more: false,
+    });
+    mocks.stripeInvoicePaymentsList
+      .mockResolvedValueOnce({
+        data: [makeStripeInvoicePayment({
+          chargeId: "ch_mixed",
+          invoice: deltaInvoice,
+          paymentIntentId: "pi_mixed",
+        })],
+        has_more: false,
+      })
+      .mockResolvedValueOnce({
+        data: [makeStripeInvoicePayment({
+          chargeId: "ch_mixed",
+          invoice: renewalInvoice,
+          kind: "charge",
+        })],
+        has_more: false,
+      });
+
+    await expect(
+      readHostedStripeRecurringFinancialState(
+        makeStripeSubscription({
+          latestInvoice: deltaInvoice.id,
+        }),
+      ),
+    ).resolves.toMatchObject({
+      fullyRefunded: false,
+      outstandingDispute: false,
+    });
+    expect(mocks.stripeRefundsList).toHaveBeenCalledOnce();
+    expect(mocks.stripeDisputesList).toHaveBeenCalledOnce();
+  });
+
+  it("excludes paid invoices whose subscription lines fund only a prior period", async () => {
+    const currentInvoice = makeStripeFinancialInvoice({
+      id: "in_current",
+    });
+    const priorInvoice = makeStripeFinancialInvoice({
+      id: "in_prior",
+      linePeriodEnd: 1_775_000_000,
+      linePeriodStart: 1_772_000_000,
+    });
+    mocks.stripeInvoicesRetrieve.mockResolvedValueOnce(currentInvoice);
+    mocks.stripeInvoicesList.mockResolvedValueOnce({
+      data: [currentInvoice, priorInvoice],
+      has_more: false,
+    });
+
+    await expect(
+      readHostedStripeRecurringFinancialState(
+        makeStripeSubscription({
+          latestInvoice: "in_current",
+        }),
+      ),
+    ).resolves.toMatchObject({
+      fullyRefunded: false,
+      invoiceId: "in_current",
+    });
+    expect(mocks.stripeInvoicesRetrieve).toHaveBeenCalledTimes(1);
+    expect(mocks.stripeRefundsList).toHaveBeenCalledTimes(1);
+  });
+
+  it("fails closed instead of paging beyond the bounded current-period invoice window", async () => {
+    const currentInvoice = makeStripeFinancialInvoice({
+      id: "in_current",
+    });
+    mocks.stripeInvoicesRetrieve.mockResolvedValueOnce(currentInvoice);
+    mocks.stripeInvoicesList.mockResolvedValueOnce({
+      data: [currentInvoice],
+      has_more: true,
+    });
+
+    await expect(
+      readHostedStripeRecurringFinancialState(
+        makeStripeSubscription({
+          latestInvoice: "in_current",
+        }),
+      ),
+    ).rejects.toThrow(
+      "Stripe exceeded the bounded current-period invoice reconciliation shape.",
+    );
+    expect(mocks.stripeInvoicesList).toHaveBeenCalledOnce();
+  });
+
+  it("keeps an unpaid current-period base invoice controlling after a later paid delta", async () => {
+    const paidDelta = makeStripeFinancialInvoice({
+      billingReason: "subscription_update",
+      id: "in_paid_delta",
+    });
+    const unpaidBase = makeStripeFinancialInvoice({
+      amountPaid: 0,
+      amountRemaining: 1_000,
+      attempted: true,
+      billingReason: "subscription_cycle",
+      id: "in_unpaid_base",
+      status: "open",
+    });
+    mocks.stripeInvoicesRetrieve
+      .mockResolvedValueOnce(paidDelta)
+      .mockResolvedValueOnce(unpaidBase);
+    mocks.stripeInvoicesList.mockResolvedValueOnce({
+      data: [paidDelta, unpaidBase],
+      has_more: false,
+    });
+    mocks.stripeInvoicePaymentsList
+      .mockResolvedValueOnce({
+        data: [makeStripeInvoicePayment({
+          chargeId: "ch_delta",
+          invoice: paidDelta,
+          paymentIntentId: "pi_delta",
+        })],
+        has_more: false,
+      })
+      .mockResolvedValueOnce({
+        data: [],
+        has_more: false,
+      });
+
+    await expect(
+      readHostedStripeRecurringFinancialState(
+        makeStripeSubscription({
+          latestInvoice: "in_paid_delta",
+        }),
+      ),
+    ).resolves.toMatchObject({
+      collectionState: {
+        kind: "payment_required",
+      },
+      fullyRefunded: false,
+      invoiceId: "in_unpaid_base",
+    });
+  });
+
+  it("rejects a listed refund that does not match the canonical invoice payment", async () => {
+    mocks.stripeRefundsList.mockResolvedValueOnce({
+      data: [
+        makeStripeRefund({
+          amount: 1_000,
+          chargeId: "ch_wrong",
+          id: "re_wrong",
+          paymentIntentId: "pi_wrong",
+          status: "succeeded",
+        }),
+      ],
+      has_more: false,
+    });
+
+    await expect(
+      readHostedStripeRecurringFinancialState(
+        makeStripeSubscription({
+          latestInvoice: "in_123",
+        }),
+      ),
+    ).rejects.toThrow(
+      "Stripe returned a Refund for the wrong current-entitlement Charge.",
+    );
+  });
+
+  it("rejects a listed dispute that does not match the canonical invoice payment", async () => {
+    mocks.stripeDisputesList.mockResolvedValueOnce({
+      data: [
+        makeStripeDispute({
+          balanceTransactions: [
+            makeStripeBalanceTransaction({ amount: -1_000, id: "txn_wrong" }),
+          ],
+          chargeId: "ch_wrong",
+          paymentIntentId: "pi_wrong",
+        }),
+      ],
+      has_more: false,
+    });
+
+    await expect(
+      readHostedStripeRecurringFinancialState(
+        makeStripeSubscription({
+          latestInvoice: "in_123",
+        }),
+      ),
+    ).rejects.toThrow(
+      "Stripe returned a Dispute for the wrong current-entitlement Charge.",
+    );
+  });
 });
 
 function makeMemberSnapshot(overrides?: {
@@ -456,15 +1654,375 @@ function makeStripeInvoice(
 
 function makeStripeSubscription(
   overrides?: Partial<{
+    currentPeriodEnd: number;
+    currentPeriodStart: number;
     customer: string;
     id: string;
+    items: Stripe.SubscriptionItem[];
+    latestInvoice: string | null;
     metadata: Record<string, string>;
+    pendingUpdate: Stripe.Subscription.PendingUpdate | null;
+    status: Stripe.Subscription.Status;
   }>,
 ): Stripe.Subscription {
-  return {
+  const currentPeriodEnd = overrides?.currentPeriodEnd ?? 1_778_000_000;
+  const currentPeriodStart = overrides?.currentPeriodStart ?? 1_775_000_000;
+  const latestInvoice = overrides?.latestInvoice;
+  const subscription: Stripe.Subscription & {
+    current_period_end: number;
+    current_period_start: number;
+  } = {
+    application: null,
+    application_fee_percent: null,
+    automatic_tax: {
+      disabled_reason: null,
+      enabled: false,
+      liability: null,
+    },
+    billing_cycle_anchor: currentPeriodStart,
+    billing_cycle_anchor_config: null,
+    billing_mode: {
+      flexible: null,
+      type: "classic",
+    },
+    billing_thresholds: null,
+    cancel_at: null,
+    cancel_at_period_end: false,
+    canceled_at: null,
+    cancellation_details: null,
+    collection_method: "charge_automatically",
+    created: currentPeriodStart,
+    currency: "usd",
+    current_period_end: currentPeriodEnd,
+    current_period_start: currentPeriodStart,
     customer: overrides?.customer ?? "cus_123",
+    customer_account: null,
+    days_until_due: null,
+    default_payment_method: null,
+    default_source: null,
+    description: null,
+    discounts: [],
+    ended_at: null,
     id: overrides?.id ?? "sub_123",
+    invoice_settings: {
+      account_tax_ids: null,
+      issuer: { type: "self" },
+    },
+    items: {
+      data: overrides?.items ?? [],
+      has_more: false,
+      object: "list",
+      url: "/v1/subscription_items",
+    },
+    latest_invoice: latestInvoice ?? null,
+    livemode: false,
+    managed_payments: null,
     metadata: overrides?.metadata ?? {},
-    status: "active",
-  } as Stripe.Subscription;
+    next_pending_invoice_item_invoice: null,
+    object: "subscription",
+    on_behalf_of: null,
+    pause_collection: null,
+    payment_settings: null,
+    pending_invoice_item_interval: null,
+    pending_setup_intent: null,
+    pending_update:
+      overrides && "pendingUpdate" in overrides
+        ? overrides.pendingUpdate ?? null
+        : null,
+    schedule: null,
+    start_date: currentPeriodStart,
+    status: overrides?.status ?? "active",
+    test_clock: null,
+    transfer_data: null,
+    trial_end: null,
+    trial_settings: null,
+    trial_start: null,
+  };
+  return subscription;
+}
+
+function makeStripeSubscriptionItem(input: {
+  id?: string;
+  priceId: string;
+  quantity?: number;
+}): Stripe.SubscriptionItem {
+  const plan: Partial<Stripe.Plan> = {
+    id: input.priceId,
+    object: "plan",
+  };
+  const price: Partial<Stripe.Price> = {
+    id: input.priceId,
+    object: "price",
+  };
+  const item: Partial<Stripe.SubscriptionItem> = {
+    billing_thresholds: null,
+    created: 1_775_000_000,
+    current_period_end: 1_778_000_000,
+    current_period_start: 1_775_000_000,
+    discounts: [],
+    id: input.id ?? "si_123",
+    metadata: {},
+    object: "subscription_item" as const,
+    plan: plan as Stripe.Plan,
+    price: price as Stripe.Price,
+    quantity: input.quantity ?? 1,
+    subscription: "sub_123",
+    tax_rates: null,
+  };
+  return item as Stripe.SubscriptionItem;
+}
+
+function makeStripePendingUpdate(input: {
+  itemId?: string;
+  priceId: string;
+  quantity?: number;
+}): Stripe.Subscription.PendingUpdate {
+  return {
+    billing_cycle_anchor: null,
+    expires_at: 1_777_000_000,
+    subscription_items: [
+      makeStripeSubscriptionItem({
+        id: input.itemId,
+        priceId: input.priceId,
+        quantity: input.quantity,
+      }),
+    ],
+    trial_end: null,
+    trial_from_plan: false,
+  };
+}
+
+function makeStripeCharge(overrides?: {
+  customerId?: string;
+  id?: string;
+  paymentIntentId?: string | null;
+}): Stripe.Charge {
+  const charge: Partial<Stripe.Charge> = {
+    customer: overrides?.customerId ?? "cus_123",
+    id: overrides?.id ?? "ch_123",
+    object: "charge",
+    payment_intent:
+      overrides && "paymentIntentId" in overrides
+        ? overrides.paymentIntentId
+        : "pi_123",
+  };
+  return charge as Stripe.Charge;
+}
+
+function makeStripePaymentIntent(overrides?: {
+  chargeId?: string;
+  id?: string;
+}): Stripe.PaymentIntent {
+  const paymentIntent: Partial<Stripe.PaymentIntent> = {
+    customer: "cus_123",
+    id: overrides?.id ?? "pi_123",
+    latest_charge: overrides?.chargeId ?? "ch_123",
+    object: "payment_intent",
+    status: "succeeded",
+  };
+  return paymentIntent as Stripe.PaymentIntent;
+}
+
+function makeStripeFinancialInvoice(overrides?: {
+  amountPaid?: number;
+  amountRemaining?: number;
+  attempted?: boolean;
+  billingReason?: Stripe.Invoice["billing_reason"];
+  id?: string;
+  linePeriodEnd?: number;
+  linePeriodStart?: number;
+  lines?: Stripe.InvoiceLineItem[];
+  status?: Stripe.Invoice["status"];
+  subscriptionId?: string;
+}): Stripe.Invoice {
+  const invoice: Partial<Stripe.Invoice> & { subscription: string } = {
+    amount_paid: overrides?.amountPaid ?? 1_000,
+    amount_remaining: overrides?.amountRemaining ?? 0,
+    attempted: overrides?.attempted ?? true,
+    billing_reason: overrides?.billingReason ?? "subscription_cycle",
+    customer: "cus_123",
+    id: overrides?.id ?? "in_123",
+    lines: {
+      data: [
+        ...(overrides?.lines ?? [
+          makeStripeInvoiceLine({
+            invoiceId: overrides?.id ?? "in_123",
+            periodEnd: overrides?.linePeriodEnd ?? 1_778_000_000,
+            periodStart: overrides?.linePeriodStart ?? 1_775_000_000,
+            subscriptionId: overrides?.subscriptionId ?? "sub_123",
+          }),
+        ]),
+      ],
+      has_more: false,
+      object: "list",
+      url: `/v1/invoices/${overrides?.id ?? "in_123"}/lines`,
+    },
+    object: "invoice",
+    status: overrides?.status ?? "paid",
+    subscription: overrides?.subscriptionId ?? "sub_123",
+  };
+  return invoice as Stripe.Invoice;
+}
+
+function makeStripeInvoiceLine(input: {
+  amount?: number;
+  invoiceId: string;
+  periodEnd: number;
+  periodStart: number;
+  priceId?: string;
+  proration?: boolean;
+  quantity?: number;
+  subscriptionId: string;
+  subscriptionItemId?: string;
+}): Stripe.InvoiceLineItem {
+  const line: Partial<Stripe.InvoiceLineItem> = {
+    amount: input.amount ?? 1_000,
+    id: `il_${input.invoiceId}`,
+    invoice: input.invoiceId,
+    object: "line_item",
+    parent: {
+      invoice_item_details: null,
+      subscription_item_details: {
+        invoice_item: null,
+        proration: input.proration ?? false,
+        proration_details: null,
+        subscription: input.subscriptionId,
+        subscription_item: input.subscriptionItemId ?? "si_123",
+      },
+      type: "subscription_item_details",
+    },
+    period: {
+      end: input.periodEnd,
+      start: input.periodStart,
+    },
+    pricing: {
+      price_details: {
+        price: input.priceId ?? "price_123",
+        product: "prod_123",
+      },
+      type: "price_details",
+      unit_amount_decimal: null,
+    },
+    quantity: input.quantity ?? 1,
+    subscription: input.subscriptionId,
+  };
+  return line as Stripe.InvoiceLineItem;
+}
+
+function makeStripeInvoicePayment(overrides?: {
+  amountPaid?: number;
+  chargeId?: string;
+  id?: string;
+  invoice?: Stripe.Invoice;
+  kind?: "charge" | "payment_intent";
+  paymentIntentId?: string;
+}): Stripe.InvoicePayment {
+  const chargeId = overrides?.chargeId ?? "ch_123";
+  const paymentIntentId = overrides?.paymentIntentId ?? "pi_123";
+  const invoice = overrides?.invoice ?? makeStripeFinancialInvoice();
+  const invoicePayment: Partial<Stripe.InvoicePayment> = {
+    amount_paid: overrides?.amountPaid ??
+      (typeof invoice.amount_paid === "number" ? invoice.amount_paid : 1_000),
+    id: overrides?.id ?? `ipay_${invoice.id}`,
+    invoice,
+    is_default: true,
+    object: "invoice_payment",
+    payment: overrides?.kind === "charge"
+      ? {
+          charge: makeStripeCharge({
+            id: chargeId,
+            paymentIntentId: null,
+          }),
+          type: "charge",
+        }
+      : {
+          charge: chargeId,
+          payment_intent: makeStripePaymentIntent({
+            chargeId,
+            id: paymentIntentId,
+          }),
+          type: "payment_intent",
+        },
+    status: "paid",
+  };
+  return invoicePayment as Stripe.InvoicePayment;
+}
+
+function makeStripeRefund(input: {
+  amount: number;
+  chargeId?: string;
+  id: string;
+  paymentIntentId?: string;
+  status: Stripe.Refund["status"];
+}): Stripe.Refund {
+  const refund: Partial<Stripe.Refund> = {
+    amount: input.amount,
+    charge: input.chargeId ?? "ch_123",
+    id: input.id,
+    object: "refund",
+    payment_intent: input.paymentIntentId ?? "pi_123",
+    status: input.status,
+  };
+  return refund as Stripe.Refund;
+}
+
+function makeStripeBalanceTransaction(input: {
+  amount: number;
+  id: string;
+}): Stripe.BalanceTransaction {
+  const transaction: Partial<Stripe.BalanceTransaction> = {
+    amount: input.amount,
+    currency: "usd",
+    id: input.id,
+    object: "balance_transaction",
+  };
+  return transaction as Stripe.BalanceTransaction;
+}
+
+function makeStripeDispute(input: {
+  balanceTransactions: Stripe.BalanceTransaction[];
+  chargeId?: string;
+  paymentIntentId?: string;
+}): Stripe.Dispute {
+  const dispute: Partial<Stripe.Dispute> = {
+    balance_transactions: input.balanceTransactions,
+    charge: input.chargeId ?? "ch_123",
+    id: "dp_123",
+    object: "dispute",
+    payment_intent: input.paymentIntentId ?? "pi_123",
+  };
+  return dispute as Stripe.Dispute;
+}
+
+function makeConcurrentCallTracker() {
+  let active = 0;
+  let maximum = 0;
+
+  return {
+    maxConcurrent: () => maximum,
+    run: async <T>(read: () => T): Promise<T> => {
+      active += 1;
+      maximum = Math.max(maximum, active);
+      try {
+        await Promise.resolve();
+        return read();
+      } finally {
+        active -= 1;
+      }
+    },
+  };
+}
+
+function makeFamilyBillingLookup() {
+  return {
+    billingRef: {
+      stripeCustomerId: "cus_123",
+      stripeSubscriptionId: "sub_123",
+    },
+    group: {
+      id: "group_123",
+      ownerMemberId: "owner_123",
+    },
+    matchedBy: "stripeSubscriptionId",
+  };
 }

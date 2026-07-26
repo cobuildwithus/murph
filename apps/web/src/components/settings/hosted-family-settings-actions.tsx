@@ -1,8 +1,9 @@
 "use client";
 
+import type { HostedBillingStatus } from "@prisma/client";
 import { Check, Copy, Loader2 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 
 import {
   HostedOnboardingApiError,
@@ -11,7 +12,7 @@ import {
 import { HOSTED_PHONE_COUNTRY_OPTIONS } from "@/src/components/hosted-onboarding/hosted-phone-country-options";
 import { usePhoneCountryCode } from "@/src/components/hosted-onboarding/phone-country-code-client-provider";
 import { Badge } from "@/src/components/ui/badge";
-import { Button } from "@/src/components/ui/button";
+import { Button, buttonVariants } from "@/src/components/ui/button";
 import {
   Dialog,
   DialogContent,
@@ -32,6 +33,7 @@ import { normalizePhoneNumberForCountry } from "@/src/lib/hosted-onboarding/shar
 import type { MurphContactOption } from "@/src/lib/murph-contact-routing";
 import { cn } from "@/src/lib/utils";
 
+import { BillingPortalButton } from "./billing-portal-button";
 import { toErrorMessage } from "./hosted-settings-sync-helpers";
 import {
   HostedUsageTopUpDialog,
@@ -77,6 +79,20 @@ interface CreatedFamilyInvite {
   targetPhoneHint: string | null;
   targetTelegramUsername?: string | null;
   telegramInviteUrl: string | null;
+}
+
+interface FamilyInviteRequestPayload {
+  addSeatIfNeeded: boolean;
+  planCode: HostedPlanCode;
+  targetEmail?: string;
+  targetLabel?: string;
+  targetPhoneNumber?: string;
+  targetTelegramUsername?: string;
+}
+
+interface FamilyInvitePaymentRecovery {
+  paymentUrl: string;
+  payload: FamilyInviteRequestPayload;
 }
 
 function inviteContacts(invite: FamilyManagerInvite): string[] {
@@ -145,6 +161,41 @@ function resolveInvitePhoneCountryOption(value: string | null | undefined) {
   return option;
 }
 
+function resolveHostedFamilyPaymentUrl(error: unknown): string | null {
+  if (
+    !(error instanceof HostedOnboardingApiError) ||
+    (
+      error.code !== "HOSTED_FAMILY_CAPACITY_PAYMENT_REQUIRED" &&
+      error.code !== "HOSTED_FAMILY_DIRECT_PAID_PAYMENT_REQUIRED"
+    )
+  ) {
+    return null;
+  }
+
+  const paymentUrl = error.details?.paymentUrl;
+  if (typeof paymentUrl !== "string" || paymentUrl.trim().length === 0) {
+    return null;
+  }
+
+  try {
+    const parsedPaymentUrl = new URL(paymentUrl);
+    if (
+      parsedPaymentUrl.protocol !== "https:" ||
+      parsedPaymentUrl.username.length > 0 ||
+      parsedPaymentUrl.password.length > 0 ||
+      (
+        parsedPaymentUrl.origin !== "https://invoice.stripe.com" &&
+        parsedPaymentUrl.origin !== "https://billing.stripe.com"
+      )
+    ) {
+      return null;
+    }
+    return parsedPaymentUrl.toString();
+  } catch {
+    return null;
+  }
+}
+
 export function HostedFamilyStartButton(props: {
   block?: boolean;
   label: string;
@@ -177,6 +228,11 @@ export function HostedFamilyStartButton(props: {
       setIsSubmitting(false);
       setStatusMessage("Your Family plan is syncing with Stripe. Refresh in a moment.");
     } catch (error) {
+      const paymentUrl = resolveHostedFamilyPaymentUrl(error);
+      if (paymentUrl) {
+        window.location.assign(paymentUrl);
+        return;
+      }
       setIsSubmitting(false);
       setErrorMessage(toErrorMessage(error, "Could not start the Family plan right now."));
     }
@@ -207,8 +263,87 @@ export function HostedFamilyStartButton(props: {
   );
 }
 
+function HostedFamilyBillingStatusNotice(props: {
+  billingActive: boolean;
+  billingStatus: HostedBillingStatus;
+}) {
+  if (props.billingActive) {
+    return null;
+  }
+
+  if (props.billingStatus === "not_started") {
+    return (
+      <p
+        role="status"
+        className="rounded-lg border border-[#c4a882]/25 bg-[#fffcf6] p-3 text-sm text-[#736a58]"
+      >
+        Billing is still activating. Your family members get access once payment is confirmed.
+      </p>
+    );
+  }
+
+  const copy = (() => {
+    switch (props.billingStatus) {
+      case "active":
+        return {
+          detail:
+            "Billing is active, but Family access is temporarily unavailable. Contact Murph if this continues.",
+          title: "Family access is paused.",
+        };
+      case "canceled":
+        return {
+          detail:
+            "The Family plan is canceled, so included access is paused. Review the subscription in Stripe.",
+          title: "The Family plan is no longer active.",
+        };
+      case "incomplete":
+        return {
+          detail:
+            "Stripe still needs payment before included access can start. Review Family billing to finish setup.",
+          title: "Family billing is incomplete.",
+        };
+      case "past_due":
+        return {
+          detail:
+            "A Family payment is past due, so included access is paused. Review the invoice or payment method in Stripe.",
+          title: "Family billing needs attention.",
+        };
+      case "paused":
+        return {
+          detail:
+            "The Family subscription is paused, so included access is paused. Review the subscription in Stripe.",
+          title: "The Family plan is paused.",
+        };
+      case "unpaid":
+        return {
+          detail:
+            "The Family subscription is unpaid, so included access is paused. Review Family billing before trying again.",
+          title: "Family access is paused.",
+        };
+    }
+  })();
+
+  return (
+    <div className="flex flex-col gap-3 rounded-lg border border-[#c4a882]/25 bg-[#fffcf6] p-3 sm:flex-row sm:items-center sm:justify-between">
+      <div role="status" className="max-w-2xl">
+        <p className="text-sm font-medium text-[#2d3436]">{copy.title}</p>
+        <p className="mt-1 text-sm leading-5 text-[#736a58]">{copy.detail}</p>
+      </div>
+      <div className="w-full shrink-0 sm:w-auto">
+        <BillingPortalButton
+          billingScope="family"
+          block
+          label="Manage Family billing"
+          variant="secondary"
+        />
+      </div>
+    </div>
+  );
+}
+
 export function HostedFamilyManager(props: {
   billingActive: boolean;
+  billingStatus: HostedBillingStatus;
   invites: FamilyManagerInvite[];
   members: FamilyManagerMember[];
   plans: Record<HostedPlanCode, {
@@ -248,7 +383,10 @@ export function HostedFamilyManager(props: {
   const [telegram, setTelegram] = useState("");
   const [email, setEmail] = useState("");
   const [isInviting, setIsInviting] = useState(false);
+  const inviteRequestInFlight = useRef(false);
   const [inviteError, setInviteError] = useState<string | null>(null);
+  const [invitePaymentRecovery, setInvitePaymentRecovery] =
+    useState<FamilyInvitePaymentRecovery | null>(null);
   const [createdInvite, setCreatedInvite] = useState<CreatedFamilyInvite | null>(null);
   const [createdInviteCopied, setCreatedInviteCopied] = useState(false);
   const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
@@ -327,6 +465,7 @@ export function HostedFamilyManager(props: {
     setTelegram("");
     setEmail("");
     setInviteError(null);
+    setInvitePaymentRecovery(null);
     setCreatedInvite(null);
     setCreatedInviteCopied(false);
   }
@@ -334,26 +473,63 @@ export function HostedFamilyManager(props: {
   function changeInviteChannel(nextChannel: InviteChannel) {
     setInviteChannel(nextChannel);
     setInviteError(null);
+    setInvitePaymentRecovery(null);
   }
 
-  async function submitInvite() {
+  function markInviteFormEdited() {
+    setInviteError(null);
+    setInvitePaymentRecovery(null);
+  }
+
+  function buildFamilyInviteRequestPayload(): FamilyInviteRequestPayload | null {
     if (!activeContactInput && !trimmedLabel) {
       setInviteError("Add a name or a contact first.");
-      return;
+      return null;
     }
     if (inviteChannel === "imessage" && phone.trim() && !normalizedPhone) {
       setInviteError(`Enter a valid phone number for ${selectedPhoneCountry.label}.`);
-      return;
+      return null;
     }
     if (inviteChannel === "email" && trimmedEmail && !normalizedEmail) {
       setInviteError("Enter a valid email address.");
-      return;
+      return null;
     }
     if (inviteChannel === "telegram" && trimmedTelegram && !normalizedTelegram) {
       setInviteError("Enter a valid Telegram username.");
+      return null;
+    }
+
+    return {
+      // Only authorize buying a seat when the dialog actually showed the
+      // paid-seat cost, so a stale open-seat form never charges silently.
+      addSeatIfNeeded: inviteWillAddSeat,
+      planCode: invitePlan.planCode,
+      ...(trimmedLabel ? { targetLabel: trimmedLabel } : {}),
+      ...(inviteChannel === "imessage" && normalizedPhone
+        ? { targetPhoneNumber: normalizedPhone }
+        : {}),
+      ...(inviteChannel === "email" && normalizedEmail ? { targetEmail: normalizedEmail } : {}),
+      ...(inviteChannel === "telegram" && normalizedTelegram
+        ? { targetTelegramUsername: normalizedTelegram }
+        : {}),
+    };
+  }
+
+  async function submitInvite(retryPayload?: FamilyInviteRequestPayload) {
+    if (inviteRequestInFlight.current) {
       return;
     }
+
+    const payload = retryPayload ?? buildFamilyInviteRequestPayload();
+    if (!payload) {
+      return;
+    }
+
+    inviteRequestInFlight.current = true;
     setInviteError(null);
+    if (!retryPayload) {
+      setInvitePaymentRecovery(null);
+    }
     setCreatedInvite(null);
     setCreatedInviteCopied(false);
     setIsInviting(true);
@@ -362,31 +538,27 @@ export function HostedFamilyManager(props: {
         invite: CreatedFamilyInvite;
       }>({
         method: "POST",
-        payload: {
-          // Only authorize buying a seat when the dialog actually showed the
-          // paid-seat cost, so a stale open-seat form never charges silently.
-          addSeatIfNeeded: inviteWillAddSeat,
-          planCode: invitePlan.planCode,
-          targetLabel: trimmedLabel || undefined,
-          ...(inviteChannel === "imessage" && normalizedPhone
-            ? { targetPhoneNumber: normalizedPhone }
-            : {}),
-          ...(inviteChannel === "email" && normalizedEmail ? { targetEmail: normalizedEmail } : {}),
-          ...(inviteChannel === "telegram" && normalizedTelegram
-            ? { targetTelegramUsername: normalizedTelegram }
-            : {}),
-        },
+        payload: { ...payload },
         url: "/api/settings/billing/family/invite",
       });
+      setInvitePaymentRecovery(null);
       setCreatedInvite({
         ...response.invite,
-        targetEmail: inviteChannel === "email" ? normalizedEmail : null,
-        targetPhoneHint:
-          inviteChannel === "imessage" && normalizedPhone ? response.invite.targetPhoneHint : null,
-        targetTelegramUsername: inviteChannel === "telegram" ? normalizedTelegram : null,
+        targetEmail: payload.targetEmail ?? null,
+        targetPhoneHint: payload.targetPhoneNumber ? response.invite.targetPhoneHint : null,
+        targetTelegramUsername: payload.targetTelegramUsername ?? null,
       });
       router.refresh();
     } catch (error) {
+      const capacityPaymentUrl = resolveHostedFamilyPaymentUrl(error);
+      if (capacityPaymentUrl) {
+        setInvitePaymentRecovery({
+          paymentUrl: capacityPaymentUrl,
+          payload,
+        });
+        return;
+      }
+
       // The seat was added but Stripe is still confirming: refresh so the new
       // seat shows, and keep the dialog open so the owner can resend in a moment.
       if (
@@ -397,6 +569,7 @@ export function HostedFamilyManager(props: {
       }
       setInviteError(toErrorMessage(error, "Could not create the invite right now."));
     } finally {
+      inviteRequestInFlight.current = false;
       setIsInviting(false);
     }
   }
@@ -408,6 +581,7 @@ export function HostedFamilyManager(props: {
     setActionError(null);
     setActionNotice(null);
     setIsActing(true);
+    let redirectingToStripe = false;
     try {
       const url = pendingAction.kind === "cancel-invite"
         ? `/api/settings/billing/family/invite/${encodeURIComponent(pendingAction.id)}`
@@ -429,6 +603,12 @@ export function HostedFamilyManager(props: {
       setPendingAction(null);
       router.refresh();
     } catch (error) {
+      const paymentUrl = resolveHostedFamilyPaymentUrl(error);
+      if (paymentUrl) {
+        redirectingToStripe = true;
+        window.location.assign(paymentUrl);
+        return;
+      }
       setActionError(
         toErrorMessage(
           error,
@@ -444,7 +624,9 @@ export function HostedFamilyManager(props: {
         ),
       );
     } finally {
-      setIsActing(false);
+      if (!redirectingToStripe) {
+        setIsActing(false);
+      }
     }
   }
 
@@ -717,14 +899,10 @@ export function HostedFamilyManager(props: {
           );
         })}
 
-      {!props.billingActive ? (
-        <p
-          role="status"
-          className="rounded-lg border border-[#c4a882]/25 bg-[#fffcf6] p-3 text-sm text-[#736a58]"
-        >
-          Billing is still activating. Your family members get access once payment is confirmed.
-        </p>
-      ) : null}
+      <HostedFamilyBillingStatusNotice
+        billingActive={props.billingActive}
+        billingStatus={props.billingStatus}
+      />
 
       <Dialog open={inviteOpen} onOpenChange={(open) => { if (!open) { closeInviteDialog(); } }}>
         <DialogContent className={DIALOG_CLASS}>
@@ -781,13 +959,19 @@ export function HostedFamilyManager(props: {
             </div>
           ) : (
             <>
-              <div className="flex flex-col gap-4">
+              <fieldset
+                disabled={isInviting}
+                className="flex min-w-0 flex-col gap-4 border-0 p-0"
+              >
                 <div className="flex flex-col gap-1.5">
                   <Label htmlFor="family-invite-label">Name</Label>
                   <Input
                     id="family-invite-label"
                     value={label}
-                    onChange={(event) => setLabel(event.target.value)}
+                    onChange={(event) => {
+                      markInviteFormEdited();
+                      setLabel(event.target.value);
+                    }}
                     placeholder="Mom"
                     autoComplete="off"
                     autoFocus
@@ -804,7 +988,10 @@ export function HostedFamilyManager(props: {
                       value: tier.planCode,
                     }))}
                     value={invitePlanCode}
-                    onValueChange={setInvitePlanCode}
+                    onValueChange={(planCode) => {
+                      markInviteFormEdited();
+                      setInvitePlanCode(planCode);
+                    }}
                     className="border-[#c4a882]/25 bg-[#f5f0e8]"
                     itemClassName="text-[#736a58] hover:bg-[#fffcf6]/70 hover:text-[#2d3436] aria-pressed:bg-[#fffcf6] aria-pressed:text-[#2d3436] aria-pressed:shadow-none"
                   />
@@ -829,8 +1016,14 @@ export function HostedFamilyManager(props: {
                       options={HOSTED_PHONE_COUNTRY_OPTIONS}
                       selectedCountry={selectedPhoneCountry}
                       value={phone}
-                      onCountryChange={setPhoneCountryCode}
-                      onPhoneNumberChange={setPhone}
+                      onCountryChange={(countryCode) => {
+                        markInviteFormEdited();
+                        setPhoneCountryCode(countryCode);
+                      }}
+                      onPhoneNumberChange={(phoneNumber) => {
+                        markInviteFormEdited();
+                        setPhone(phoneNumber);
+                      }}
                     />
                   </div>
                 ) : null}
@@ -841,7 +1034,10 @@ export function HostedFamilyManager(props: {
                       id="family-invite-email"
                       type="email"
                       value={email}
-                      onChange={(event) => setEmail(event.target.value)}
+                      onChange={(event) => {
+                        markInviteFormEdited();
+                        setEmail(event.target.value);
+                      }}
                       placeholder="mom@example.com"
                       inputMode="email"
                       autoComplete="off"
@@ -854,7 +1050,10 @@ export function HostedFamilyManager(props: {
                     <Input
                       id="family-invite-telegram"
                       value={telegram}
-                      onChange={(event) => setTelegram(event.target.value)}
+                      onChange={(event) => {
+                        markInviteFormEdited();
+                        setTelegram(event.target.value);
+                      }}
                       placeholder="@username"
                       autoComplete="off"
                     />
@@ -870,12 +1069,30 @@ export function HostedFamilyManager(props: {
                       ? `Enter a valid ${activeContactInputNoun} to invite. It adds a paid ${invitePlan.name} seat at ${invitePlan.priceLabel}.`
                       : `Add a contact to invite. It adds a paid ${invitePlan.name} seat at ${invitePlan.priceLabel}.`}
                   </p>
+                ) : inviteWillAddSeat ? (
+                  <p role="status" className="text-xs leading-5 text-[#736a58]">
+                    Add the {invitePlan.name} seat at {invitePlan.priceLabel} first. Murph creates
+                    the invite after Stripe confirms the seat is ready.
+                  </p>
                 ) : !activeContactInput ? (
                   <p className="text-xs leading-5 text-[#736a58]">
                     No contact? Anyone with the link can join.
                   </p>
                 ) : null}
-              </div>
+              </fieldset>
+
+              {invitePaymentRecovery ? (
+                <div
+                  role="status"
+                  className="border-y border-[#c4a882]/25 py-3 text-sm text-[#736a58]"
+                >
+                  <p className="font-medium text-[#2d3436]">Seat charge needs approval</p>
+                  <p className="mt-1 leading-5">
+                    Open Stripe in a new tab and approve the charge. Your invite details stay here
+                    until you return to finish the invite.
+                  </p>
+                </div>
+              ) : null}
 
               {inviteError ? (
                 <p
@@ -887,21 +1104,50 @@ export function HostedFamilyManager(props: {
               ) : null}
 
               <div className="flex flex-col gap-2">
-                <Button
-                  type="button"
-                  size="xl"
-                  onClick={() => void submitInvite()}
-                  disabled={inviteSubmitDisabled}
-                  className="w-full"
-                >
-                  {isInviting ? (
-                    <Loader2 className="size-4 animate-spin" aria-hidden="true" />
-                  ) : inviteWillAddSeat ? (
-                    `Create invite & add ${invitePlan.name} · ${invitePlan.priceLabel}`
-                  ) : (
-                    "Create invite"
-                  )}
-                </Button>
+                {invitePaymentRecovery ? (
+                  <>
+                    <a
+                      href={invitePaymentRecovery.paymentUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className={cn(buttonVariants({ size: "xl", variant: "secondary" }), "w-full")}
+                    >
+                      Approve seat charge in Stripe
+                    </a>
+                    <Button
+                      type="button"
+                      size="xl"
+                      onClick={() => void submitInvite(invitePaymentRecovery.payload)}
+                      disabled={isInviting}
+                      className="w-full"
+                    >
+                      {isInviting ? (
+                        <>
+                          <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+                          Finishing invite...
+                        </>
+                      ) : (
+                        "Finish invite"
+                      )}
+                    </Button>
+                  </>
+                ) : (
+                  <Button
+                    type="button"
+                    size="xl"
+                    onClick={() => void submitInvite()}
+                    disabled={inviteSubmitDisabled}
+                    className="w-full"
+                  >
+                    {isInviting ? (
+                      <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+                    ) : inviteWillAddSeat ? (
+                      `Add ${invitePlan.name} seat & continue`
+                    ) : (
+                      "Create invite"
+                    )}
+                  </Button>
+                )}
                 <Button
                   type="button"
                   size="xl"

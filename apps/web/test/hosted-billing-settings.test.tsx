@@ -869,6 +869,107 @@ describe("HostedBillingSettings", () => {
     await rendered.cleanup();
   });
 
+  test("opens member billing instead of retrying a terminal Start Pulse state", async () => {
+    const { HostedOnboardingApiError } = await import(
+      "@/src/components/hosted-onboarding/client-api"
+    );
+    mocks.requestHostedPulseTrialStartPaid.mockRejectedValueOnce(
+      new HostedOnboardingApiError({
+        code: "HOSTED_PULSE_TRIAL_START_PAID_UNCOLLECTIBLE",
+        message: "Stripe marked this invoice uncollectible. Open billing to update payment.",
+      }),
+    );
+    mocks.requestHostedOnboardingJson.mockResolvedValueOnce({
+      url: "https://billing.stripe.test/session_recovery",
+    });
+    const { StartPaidPulseButton } = await import(
+      "@/src/components/settings/hosted-start-paid-pulse-button"
+    );
+    const rendered = await renderClientComponent(createElement(StartPaidPulseButton));
+
+    await act(async () => {
+      rendered.button.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+    });
+    const confirmButton = findLastButtonByText(
+      rendered.window.document,
+      "Start Pulse",
+      rendered.window,
+    );
+    await act(async () => {
+      confirmButton.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+    });
+
+    const dialog = rendered.window.document.querySelector('[role="dialog"]');
+    assert.ok(dialog);
+    assert.match(dialog.textContent ?? "", /invoice uncollectible/i);
+    assert.doesNotMatch(dialog.textContent ?? "", /Try again/);
+    const billingButton = findButtonByText(dialog, "Open billing", rendered.window);
+
+    await act(async () => {
+      billingButton.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+    });
+
+    assert.deepEqual(mocks.requestHostedOnboardingJson.mock.calls, [[{
+      method: "POST",
+      url: "/api/settings/billing/portal",
+    }]]);
+    assert.deepEqual(rendered.assign.mock.calls, [[
+      "https://billing.stripe.test/session_recovery",
+    ]]);
+    assert.equal(mocks.requestHostedPulseTrialStartPaid.mock.calls.length, 1);
+
+    await rendered.cleanup();
+  });
+
+  test("keeps the inline retry only for retryable Start Pulse failures", async () => {
+    const { HostedOnboardingApiError } = await import(
+      "@/src/components/hosted-onboarding/client-api"
+    );
+    mocks.requestHostedPulseTrialStartPaid
+      .mockRejectedValueOnce(
+        new HostedOnboardingApiError({
+          code: "HOSTED_PULSE_TRIAL_START_PAID_STRIPE_UNAVAILABLE",
+          message: "Stripe is temporarily unavailable. Try again shortly.",
+          retryable: true,
+        }),
+      )
+      .mockResolvedValueOnce({
+        status: "started",
+      });
+    const { StartPaidPulseButton } = await import(
+      "@/src/components/settings/hosted-start-paid-pulse-button"
+    );
+    const rendered = await renderClientComponent(createElement(StartPaidPulseButton));
+
+    await act(async () => {
+      rendered.button.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+    });
+    const confirmButton = findLastButtonByText(
+      rendered.window.document,
+      "Start Pulse",
+      rendered.window,
+    );
+    await act(async () => {
+      confirmButton.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+    });
+
+    const dialog = rendered.window.document.querySelector('[role="dialog"]');
+    assert.ok(dialog);
+    assert.match(dialog.textContent ?? "", /temporarily unavailable/i);
+    assert.doesNotMatch(dialog.textContent ?? "", /Open billing/);
+    const retryButton = findButtonByText(dialog, "Try again", rendered.window);
+
+    await act(async () => {
+      retryButton.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+    });
+
+    assert.equal(mocks.requestHostedPulseTrialStartPaid.mock.calls.length, 2);
+    assert.equal(mocks.requestHostedOnboardingJson.mock.calls.length, 0);
+    assert.equal(mocks.routerRefresh.mock.calls.length, 1);
+
+    await rendered.cleanup();
+  });
+
   test("redirects to the hosted invoice when Start Pulse needs payment confirmation", async () => {
     mocks.requestHostedPulseTrialStartPaid.mockResolvedValueOnce({
       status: "redirecting",
@@ -1031,8 +1132,8 @@ describe("HostedBillingSettings", () => {
   test("redirects to Stripe when the upgrade needs payment confirmation", async () => {
     mocks.requestHostedOnboardingJson.mockResolvedValueOnce({
       billingPlanCode: "launch_monthly",
-      paymentUrl: "https://stripe.example.test/portal/session_123",
-      status: "pending_payment",
+      paymentUrl: "https://billing.stripe.com/p/session_123",
+      status: "payment_required",
     });
 
     const { UpgradeToEdgeButton } = await import("@/src/components/settings/hosted-plan-upgrade-button");
@@ -1048,19 +1149,199 @@ describe("HostedBillingSettings", () => {
 
     assert.equal(mocks.routerRefresh.mock.calls.length, 0);
     assert.deepEqual(rendered.assign.mock.calls[0], [
-      "https://stripe.example.test/portal/session_123",
+      "https://billing.stripe.com/p/session_123",
     ]);
+    const redirectingButton = findLastButtonByText(
+      rendered.window.document,
+      "Upgrading...",
+      rendered.window,
+    );
+    assert.equal(redirectingButton.disabled, true);
+
+    await rendered.cleanup();
+  });
+
+  test("keeps Stripe processing in the dialog and rechecks without redirecting", async () => {
+    mocks.requestHostedOnboardingJson
+      .mockResolvedValueOnce({
+        billingPlanCode: "launch_monthly",
+        status: "processing",
+      })
+      .mockResolvedValueOnce({
+        billingPlanCode: "launch_edge_monthly",
+        status: "upgraded",
+      });
+
+    const { UpgradeToEdgeButton } = await import("@/src/components/settings/hosted-plan-upgrade-button");
+    const rendered = await renderClientComponent(createElement(UpgradeToEdgeButton));
+
+    await act(async () => {
+      rendered.button.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+    });
+    const confirmButton = findLastButtonByText(
+      rendered.window.document,
+      "Upgrade to Edge",
+      rendered.window,
+    );
+    await act(async () => {
+      confirmButton.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+    });
+
+    assert.match(
+      rendered.window.document.body.textContent ?? "",
+      /Stripe is still processing this invoice/,
+    );
+    assert.equal(rendered.assign.mock.calls.length, 0);
+    assert.equal(mocks.routerRefresh.mock.calls.length, 0);
+
+    const recheckButton = findLastButtonByText(
+      rendered.window.document,
+      "Check status",
+      rendered.window,
+    );
+    await act(async () => {
+      recheckButton.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+    });
+
+    assert.equal(mocks.requestHostedOnboardingJson.mock.calls.length, 2);
+    assert.equal(mocks.routerRefresh.mock.calls.length, 1);
+    assert.equal(rendered.assign.mock.calls.length, 0);
+
+    await rendered.cleanup();
+  });
+
+  test("rejects a non-Stripe payment handoff without navigating", async () => {
+    mocks.requestHostedOnboardingJson.mockResolvedValueOnce({
+      billingPlanCode: "launch_monthly",
+      paymentUrl: "https://billing.stripe.com.attacker.example/session_123",
+      status: "payment_required",
+    });
+
+    const { UpgradeToEdgeButton } = await import("@/src/components/settings/hosted-plan-upgrade-button");
+    const rendered = await renderClientComponent(createElement(UpgradeToEdgeButton));
+
+    await act(async () => {
+      rendered.button.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+    });
+    const confirmButton = findLastButtonByText(
+      rendered.window.document,
+      "Upgrade to Edge",
+      rendered.window,
+    );
+    await act(async () => {
+      confirmButton.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+    });
+
+    assert.match(
+      rendered.window.document.body.textContent ?? "",
+      /Stripe did not return a safe payment page/,
+    );
+    assert.ok(findLastButtonByText(
+      rendered.window.document,
+      "Open billing",
+      rendered.window,
+    ));
+    assert.doesNotMatch(
+      rendered.window.document.body.textContent ?? "",
+      /Try again/,
+    );
+    assert.equal(rendered.assign.mock.calls.length, 0);
+    assert.equal(mocks.routerRefresh.mock.calls.length, 0);
+
+    await rendered.cleanup();
+  });
+
+  test("offers billing instead of retry for a terminal collection outcome", async () => {
+    const { HostedOnboardingApiError } = await import(
+      "@/src/components/hosted-onboarding/client-api"
+    );
+    mocks.requestHostedOnboardingJson.mockRejectedValueOnce(
+      new HostedOnboardingApiError({
+        code: "HOSTED_BILLING_PLAN_UPGRADE_INVOICE_UNCOLLECTIBLE",
+        message: "Stripe marked this invoice uncollectible. Open billing.",
+        retryable: false,
+      }),
+    );
+
+    const { UpgradeToEdgeButton } = await import("@/src/components/settings/hosted-plan-upgrade-button");
+    const rendered = await renderClientComponent(createElement(UpgradeToEdgeButton));
+
+    await act(async () => {
+      rendered.button.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+    });
+    const confirmButton = findLastButtonByText(
+      rendered.window.document,
+      "Upgrade to Edge",
+      rendered.window,
+    );
+    await act(async () => {
+      confirmButton.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+    });
+
+    assert.match(
+      rendered.window.document.body.textContent ?? "",
+      /Stripe marked this invoice uncollectible/,
+    );
+    assert.ok(findLastButtonByText(
+      rendered.window.document,
+      "Open billing",
+      rendered.window,
+    ));
+    assert.doesNotMatch(
+      rendered.window.document.body.textContent ?? "",
+      /Try again/,
+    );
+
+    await rendered.cleanup();
+  });
+
+  test("offers a retry only when the plan-upgrade error is retryable", async () => {
+    const { HostedOnboardingApiError } = await import(
+      "@/src/components/hosted-onboarding/client-api"
+    );
+    mocks.requestHostedOnboardingJson.mockRejectedValueOnce(
+      new HostedOnboardingApiError({
+        code: "HOSTED_BILLING_PLAN_UPGRADE_ATTEMPT_EXPIRED",
+        message: "That plan-change attempt expired.",
+        retryable: true,
+      }),
+    );
+
+    const { UpgradeToEdgeButton } = await import("@/src/components/settings/hosted-plan-upgrade-button");
+    const rendered = await renderClientComponent(createElement(UpgradeToEdgeButton));
+
+    await act(async () => {
+      rendered.button.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+    });
+    const confirmButton = findLastButtonByText(
+      rendered.window.document,
+      "Upgrade to Edge",
+      rendered.window,
+    );
+    await act(async () => {
+      confirmButton.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+    });
+
+    assert.ok(findLastButtonByText(
+      rendered.window.document,
+      "Try again",
+      rendered.window,
+    ));
+    assert.doesNotMatch(
+      rendered.window.document.body.textContent ?? "",
+      /Open billing/,
+    );
 
     await rendered.cleanup();
   });
 });
 
 function findButtonByText(
-  document: Document,
+  parent: ParentNode,
   text: string,
   window: Window & typeof globalThis,
 ): HTMLButtonElement {
-  const button = [...document.querySelectorAll("button")]
+  const button = [...parent.querySelectorAll("button")]
     .find((candidate) => candidate.textContent?.includes(text));
   assert.ok(button instanceof window.HTMLButtonElement);
   return button;

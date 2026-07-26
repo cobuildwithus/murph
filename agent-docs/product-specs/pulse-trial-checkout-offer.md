@@ -1,6 +1,6 @@
 # Pulse Trial Checkout Offer Implementation Plan
 
-Last verified: 2026-07-16
+Last verified: 2026-07-25
 
 Status: Implemented locally
 
@@ -76,10 +76,23 @@ The current local checkout now has the Pulse Trial shape implemented on that fou
 
 - `apps/web/src/lib/hosted-onboarding/billing-plans.ts` defines only `launch_monthly` and `launch_edge_monthly`.
 - `billing-plans.ts` stores included hosted AI usage allowances by plan: Pulse is 10.00 USD micros and Edge is 25.00 USD micros.
-- `apps/web/src/lib/hosted-onboarding/billing-service.ts` creates Stripe Checkout Sessions in `subscription` mode with the plan recurring line item, session metadata, subscription metadata, card payment methods, and a deterministic Stripe idempotency key that includes the checkout offer and trial policy inputs.
-- `apps/web/src/lib/hosted-onboarding/stripe-billing-events.ts` binds Stripe customer/subscription refs on standard `checkout.session.completed`, activates paid subscriptions from `invoice.paid`, records subscription period markers from subscription events, and has one metadata-gated Pulse Trial activation path for Stripe trialing subscriptions.
+- `apps/web/src/lib/hosted-onboarding/billing-service.ts` reserves one durable
+  Checkout attempt on the locked member billing owner before creating a Stripe
+  Session. The Session and subscription carry the attempt id and canonical
+  intent hash, and an ambiguous retry recovers that exact Session while it is
+  still inside the bounded provider replay window.
+- `apps/web/src/lib/hosted-onboarding/stripe-billing-events.ts` accepts a
+  standard `checkout.session.completed` only when the exact attempt, member,
+  customer, subscription, and cross-member/Family ownership proofs agree.
+  Superseded completions never replace the accepted owner; their exact
+  subscription is canceled and its paid Checkout invoice is refunded under the
+  same owner lock.
 - `apps/web/src/lib/hosted-onboarding/stripe-billing-status.ts` deliberately keeps subscription webhook writes conservative: Stripe `trialing` maps to hosted `active`, but subscription events that would make an inactive Murph member active are written as `incomplete` unless the member was already active.
-- `apps/web/prisma/schema.prisma` has `HostedMemberBillingRef` with Stripe customer/subscription refs, current plan code, current period start/end, current billing phase, current checkout offer, immutable trial redemption metadata, trial start/end markers, and last Stripe event freshness.
+- `apps/web/prisma/schema.prisma` has `HostedMemberBillingRef` with encrypted
+  Stripe customer/subscription/Checkout Session refs, the durable Checkout
+  attempt and intent binding, current plan code, current period start/end,
+  current billing phase, current checkout offer, immutable trial redemption
+  metadata, trial start/end markers, and last Stripe event freshness.
 - `apps/web/src/lib/hosted-execution/usage-allowance.ts` prices imported platform AI usage, skips member-provided credentials for allowance spend, maintains `HostedAiUsagePeriod`, and resolves trial accounting from persisted trial state without becoming runtime admission authority.
 - `apps/web/src/lib/hosted-onboarding/member-access.ts` owns model-work access, including stale or malformed trial denial, and Temporal reconciliation consumes that decision without a separate callback route.
 - `apps/web/src/components/hosted-onboarding/join-invite-stage-server.tsx` renders Pulse Trial, Pulse, and Edge as the pricing grid; the self-hosting GitHub link is secondary below the grid.
@@ -325,6 +338,8 @@ Every Checkout Session and resulting subscription should carry the same server-d
 const checkoutMetadata = {
   memberId,
   billingPlanCode: "launch_monthly",
+  checkoutAttemptId,
+  checkoutIntentHash,
   checkoutOffer: "pulse_trial_7d",
   trialPolicyVersion: "pulse-trial-2026-07-15-v3",
   trialDurationDays: "14",
@@ -338,6 +353,8 @@ For standard checkout, include:
 const checkoutMetadata = {
   memberId,
   billingPlanCode,
+  checkoutAttemptId,
+  checkoutIntentHash,
   checkoutOffer: "standard",
 };
 ```
@@ -374,30 +391,45 @@ Keep `payment_method_types: ["card"]`. Do not set `payment_method_collection: "i
 
 ### Idempotency Key
 
-The current idempotency key includes member, invite, plan, line items, and customer/email binding. Extend it with an offer policy binding:
+The billing owner stores one open attempt before Stripe is called:
 
 ```ts
-function deriveHostedBillingCheckoutOfferBindingKey(input: {
-  checkoutOffer: HostedBillingCheckoutOffer;
-  trialDurationDays?: number | null;
-  trialPolicyVersion?: string | null;
-  trialUsageLimitUsdMicros?: bigint | null;
-}): string;
+{
+  attemptId,
+  intentHash,
+  checkoutCreatedAt,
+  stripeCheckoutSessionId,
+}
 ```
 
-Return a short hash-backed binding such as `offer:<12-char-sha256>`, built only from server-derived offer policy values. This keeps Stripe idempotency keys compact while still changing the key when the trial policy changes.
+`intentHash` is derived only from the canonical server-owned request: member,
+invite return URLs, plan/price line items, offer policy metadata, and the
+customer or verified-email binding. Raw email is represented by its private
+lookup key rather than stored in the attempt.
 
-Include this binding in the key:
+Stripe receives a stable key for that immutable attempt:
 
 ```txt
-hosted-billing-checkout:<memberId>:<inviteCode>:<planCode>:<offerBinding>:<lineItems>:<customerBinding>
+hosted-billing-checkout:<attemptId>:<intentHash>
 ```
 
-This prevents these collisions:
+The owner lock applies these rules:
 
-- standard Pulse vs Pulse Trial with the same Pulse price
-- Pulse Trial policy v1 vs any later trial policy with different days or allowance
-- email-bound checkout vs later durable customer-bound checkout
+- An open Session for the same attempt and intent is retrieved and returned.
+- A completed Session is reconciled through the canonical subscription owner
+  before the endpoint reports success.
+- An expired Session is compare-and-set cleared before a new attempt is
+  reserved.
+- A different intent cannot overwrite an open attempt.
+- An unbound ambiguous create is replayed only inside the conservative
+  23-hour idempotency window. After that window, the attempt fails closed
+  rather than reusing a key Stripe may have pruned.
+- Completion atomically accepts only the exact current attempt. A losing
+  completion is left unbound, then canceled and cumulatively refunded from its
+  exact Checkout invoice.
+
+This prevents a plan, offer, email/customer, retry, or double-click variation
+from creating two simultaneously chargeable accepted subscriptions.
 
 ## Trial Activation
 
@@ -660,7 +692,9 @@ Implement in this order to keep the diff reviewable:
 4. Extend checkout route/client types to accept only the public trial offer and resolve missing offer to internal `standard`.
 5. Add checkout offer resolution in `createHostedBillingCheckout`.
 6. Add trial metadata and `subscription_data.trial_period_days` for `pulse_trial_7d`.
-7. Add offer policy data to the Stripe idempotency key.
+7. Reserve one durable Checkout attempt under the member owner lock, bind the
+   canonical intent hash to its Stripe idempotency key, and recover only the
+   exact stored Session.
 8. Add metadata-gated trial activation from `checkout.session.completed` and success-route reconciliation through the shared helper.
 9. Extend subscription and invoice billing snapshots to write phase transitions without letting subscription events promote trial to paid.
 10. Make `resolveHostedAiUsageAllowancePeriod` phase-aware and stale-trial aware before period upsert/carryover.
@@ -682,8 +716,11 @@ Focused tests to add or update:
   - Pulse Trial request includes trial metadata and `trial_period_days: 14`
   - Edge trial is rejected
   - prior trial redemption is rejected from immutable `pulseTrialRedeemedAt`, even after cancellation or replacement subscription
-  - idempotency key differs between standard Pulse and Pulse Trial
-  - idempotency key differs when trial policy version or limit changes
+  - equivalent retries recover one stored Session, while plan, offer, policy,
+    customer/email, and invite changes cannot overwrite its canonical intent
+  - an unbound attempt stops replay before Stripe may prune its idempotency key
+  - stale or concurrent completions accept exactly one subscription; a loser
+    is canceled and its cumulative paid Checkout allocations are refunded
 - `hosted-onboarding-billing-checkout-route.test.ts`
   - route validates `checkoutOffer`
   - route defaults missing offer to `standard`
@@ -759,6 +796,19 @@ Expected verification for the implementation change:
 12. Confirm the initial trial invoice does not activate paid access.
 13. Confirm the first real paid invoice updates phase to `paid` and resolves the normal Pulse allowance.
 
+The first production Web deployment that can write a standard Checkout attempt
+is also the conditional rollback floor described in `apps/web/README.md`. Do
+not roll an attempt-unaware Web bundle underneath a live or provider-ambiguous
+Session.
+
+During that deployment transition only, a standard Session without attempt or
+intent metadata may bind when its provider timestamps are safe, its lifetime is
+at most Stripe's 24-hour Checkout limit, and Murph observes it no later than
+`expires_at` plus Stripe's three-day live-webhook retry horizon. After that
+horizon it is a superseded loser and must be canceled/refunded, never bound.
+New Sessions always carry attempt metadata; remove this legacy-facing shim once
+the attempt-aware Web release has been live for that four-day maximum window.
+
 Runtime admission uses the web-owned composed decision without a separate Cloudflare allowance callback. Cloudflare/runner #587 or newer remains the rollback floor for a Web build that omits the retired route.
 
 The 14-day policy ships as `pulse-trial-2026-07-15-v3` in the same Web bundle that reads and writes trial policy metadata. That bundle continues to recognize the earlier 7-day v1 and 10-day v2 policies, so existing and in-flight trials remain valid during rollout. Once Stripe or the database contains a v3 trial, this Web release is the rollback floor for trial handling: a v2-only build does not know v3 and will fail closed for that member. Prefer a forward fix after the first v3 trial is created.
@@ -767,8 +817,8 @@ The 14-day policy ships as `pulse-trial-2026-07-15-v3` in the same Web bundle th
 
 | Scenario | Risk | Required behavior |
 | --- | --- | --- |
-| Standard Pulse checkout and Pulse Trial checkout use the same Stripe price | Stripe idempotency collision | Offer policy binding must be in the idempotency key. |
-| User double-clicks trial CTA | Duplicate sessions or mixed state | Same request shape reuses the same idempotency key; webhook/success activation is idempotent. |
+| Standard Pulse checkout and Pulse Trial checkout use the same Stripe price | Stripe idempotency collision | Their server-derived intent hashes differ while each immutable attempt keeps one stable key. |
+| User double-clicks trial CTA | Duplicate sessions or mixed state | Both requests serialize on the member owner and recover the same stored attempt/Session. |
 | User completes Checkout but success redirect never reaches Murph | Trial never activates | Webhook path must perform the same metadata-gated activation. |
 | Stripe webhook arrives after success route | Duplicate activation | Shared trial helper checks current active state before activation; billing ref writes remain freshness-gated. |
 | Stripe initial trial invoice emits `invoice.paid` | Paid access activates before payment | Ignore the trial invoice for paid activation and phase transition; only checkout-completed may trial-activate. |
@@ -788,7 +838,12 @@ The 14-day policy ships as `pulse-trial-2026-07-15-v3` in the same Web bundle th
 | Calendar fallback period exists before trial markers are written | Spend moves into wrong period | Do not carry fallback usage into trial periods; require trial boundaries before trial access. |
 | One invocation exceeds remaining trial allowance before usage import | Product expects an exact token-level cutoff | Let the crossing operation finish, record the limit notice, preserve accepted input, and block subsequent usage-bearing work. |
 
-The main simplification is to keep "trial" as a phase on the existing Pulse subscription instead of creating new product, plan, entitlement, or budget tables. The only new persisted state is the phase/offer/trial boundary plus immutable redemption marker needed to make checkout and allowance decisions deterministic.
+The main simplification is to keep "trial" as a phase on the existing Pulse
+subscription instead of creating new product, plan, entitlement, or budget
+tables. Trial policy still needs only the phase/offer/trial boundary and
+immutable redemption marker. Checkout concurrency adds one short-lived attempt
+on that same billing owner rather than a second subscription ledger or
+state-machine table.
 
 ## Acceptance Criteria
 
@@ -797,7 +852,11 @@ The implementation is complete when:
 - `HOSTED_BILLING_PLAN_CODES` still contains only `launch_monthly` and `launch_edge_monthly`.
 - The public checkout API accepts only missing offer or `checkoutOffer: "pulse_trial_7d"`; the server resolves missing offer to internal `standard`.
 - Pulse Trial Checkout Sessions reuse the existing Pulse price and include 14 trial days.
-- Trial and standard checkout idempotency keys cannot collide.
+- Trial and standard Checkout intents cannot collide, and one owner can publish
+  only one open Session for its current attempt.
+- A superseded paid completion is never retained as an unowned renewing
+  subscription; it is canceled and cumulatively refunded from its exact
+  Checkout invoice.
 - `checkout.session.completed` activates only valid Pulse Trial sessions.
 - initial trial invoices do not activate paid access, and only a real paid invoice converts trial phase to paid.
 - `HostedMemberBillingRef` persists plan, phase, offer, period, trial boundaries, and immutable Pulse Trial redemption.

@@ -24,8 +24,8 @@ import {
   resolveHostedBillingReady,
 } from "@/src/lib/hosted-onboarding/billing-plans";
 import {
+  buildHostedBillingCheckoutIntentHash,
   buildHostedBillingCheckoutLineItems,
-  deriveHostedBillingCheckoutOfferBindingKey,
 } from "@/src/lib/hosted-onboarding/billing-service";
 
 describe("hosted billing launch plan Stripe configuration", () => {
@@ -325,26 +325,36 @@ describe("hosted billing launch plan Stripe configuration", () => {
     ]);
   });
 
-  it("binds Stripe checkout idempotency to the checkout offer and trial policy", () => {
-    const standard = deriveHostedBillingCheckoutOfferBindingKey({
+  it("binds a durable Checkout attempt to its canonical provider intent", () => {
+    const baseIntent = {
+      billingPlanCode: "launch_monthly" as const,
+      inviteCode: "invite_123",
+      memberId: "member_123",
+      priceId: "price_base_monthly",
+      publicBaseUrl: "https://example.test",
+      stripeCustomerId: null,
+      verifiedEmailAddress: "member@example.test",
+    };
+    const standard = buildHostedBillingCheckoutIntentHash({
+      ...baseIntent,
       checkoutOffer: "standard",
     });
-    const trial = deriveHostedBillingCheckoutOfferBindingKey({
+    const trial = buildHostedBillingCheckoutIntentHash({
+      ...baseIntent,
       checkoutOffer: "pulse_trial_7d",
     });
 
     expect(standard).not.toBe(trial);
-    expect(deriveHostedBillingCheckoutOfferBindingKey({
-      checkoutOffer: "pulse_trial_7d",
-      trialPolicyVersion: "future-policy",
-    })).not.toBe(trial);
-    expect(deriveHostedBillingCheckoutOfferBindingKey({
-      checkoutOffer: "pulse_trial_7d",
-      trialDurationDays: 10,
-    })).not.toBe(trial);
-    expect(deriveHostedBillingCheckoutOfferBindingKey({
-      checkoutOffer: "pulse_trial_7d",
-      trialUsageLimitUsdMicros: 5_000_000n,
-    })).not.toBe(trial);
+    expect(buildHostedBillingCheckoutIntentHash({
+      ...baseIntent,
+      checkoutOffer: "standard",
+      priceId: "price_replacement",
+    })).not.toBe(standard);
+    expect(buildHostedBillingCheckoutIntentHash({
+      ...baseIntent,
+      checkoutOffer: "standard",
+      stripeCustomerId: "cus_123",
+      verifiedEmailAddress: null,
+    })).not.toBe(standard);
   });
 });

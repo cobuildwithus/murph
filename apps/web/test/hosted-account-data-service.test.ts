@@ -6,6 +6,7 @@ const serviceMocks = vi.hoisted(() => ({
     disconnectAccount: vi.fn(),
     listAccounts: vi.fn(),
   },
+  applyHostedFamilyStripeCheckoutCompletedTx: vi.fn(),
   createComposioConnectedAppsClient: vi.fn(),
   createHostedDeviceSyncControlPlane: vi.fn(),
   createHostedDeviceSyncRegistry: vi.fn(),
@@ -16,7 +17,9 @@ const serviceMocks = vi.hoisted(() => ({
   assertHostedUsageCreditPurchasesReadyForAccountDeletionTx: vi.fn(),
   closeHostedUsageCreditPurchasesForAccountDeletion: vi.fn(),
   assertHostedPhoneCallsReadyForAccountDeletionTx: vi.fn(),
+  acceptHostedMemberStripeCheckoutCompletionTx: vi.fn(),
   deleteHostedPhoneCallsForAccountDeletion: vi.fn(),
+  executeHostedCheckoutSubscriptionCleanup: vi.fn(),
   terminateHostedUserRuntimeWorkflowBestEffort: vi.fn(),
 }));
 
@@ -47,6 +50,31 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/src/lib/hosted-onboarding/runtime")>()),
   getHostedOnboardingStripe: serviceMocks.getHostedOnboardingStripe,
 }));
+
+vi.mock("@/src/lib/hosted-onboarding/hosted-member-billing-store", async (importOriginal) => ({
+  ...(await importOriginal<
+    typeof import("@/src/lib/hosted-onboarding/hosted-member-billing-store")
+  >()),
+  acceptHostedMemberStripeCheckoutCompletionTx:
+    serviceMocks.acceptHostedMemberStripeCheckoutCompletionTx,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/family-plan", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/src/lib/hosted-onboarding/family-plan")>()),
+  applyHostedFamilyStripeCheckoutCompletedTx:
+    serviceMocks.applyHostedFamilyStripeCheckoutCompletedTx,
+}));
+
+vi.mock(
+  "@/src/lib/hosted-onboarding/stripe-checkout-subscription-cleanup",
+  async (importOriginal) => ({
+    ...(await importOriginal<
+      typeof import("@/src/lib/hosted-onboarding/stripe-checkout-subscription-cleanup")
+    >()),
+    executeHostedCheckoutSubscriptionCleanup:
+      serviceMocks.executeHostedCheckoutSubscriptionCleanup,
+  }),
+);
 
 vi.mock("@/src/lib/hosted-onboarding/usage-credit-purchase-service", () => ({
   assertHostedUsageCreditPurchasesReadyForAccountDeletionTx:
@@ -164,6 +192,10 @@ const VALID_DELETION_MODES = new Set([
 
 beforeEach(() => {
   vi.stubEnv("KERNEL_API_KEY", "");
+  serviceMocks.applyHostedFamilyStripeCheckoutCompletedTx.mockReset();
+  serviceMocks.applyHostedFamilyStripeCheckoutCompletedTx.mockResolvedValue({
+    groupId: "family_group_123",
+  });
   serviceMocks.connectedAppsClient.deleteAccount.mockReset();
   serviceMocks.connectedAppsClient.deleteAccount.mockResolvedValue(undefined);
   serviceMocks.connectedAppsClient.disconnectAccount.mockReset();
@@ -197,8 +229,15 @@ beforeEach(() => {
   serviceMocks.closeHostedUsageCreditPurchasesForAccountDeletion.mockResolvedValue(undefined);
   serviceMocks.assertHostedPhoneCallsReadyForAccountDeletionTx.mockReset();
   serviceMocks.assertHostedPhoneCallsReadyForAccountDeletionTx.mockResolvedValue(undefined);
+  serviceMocks.acceptHostedMemberStripeCheckoutCompletionTx.mockReset();
+  serviceMocks.acceptHostedMemberStripeCheckoutCompletionTx.mockResolvedValue({
+    billingRef: {},
+    kind: "accepted",
+  });
   serviceMocks.deleteHostedPhoneCallsForAccountDeletion.mockReset();
   serviceMocks.deleteHostedPhoneCallsForAccountDeletion.mockResolvedValue(undefined);
+  serviceMocks.executeHostedCheckoutSubscriptionCleanup.mockReset();
+  serviceMocks.executeHostedCheckoutSubscriptionCleanup.mockResolvedValue(undefined);
   serviceMocks.terminateHostedUserRuntimeWorkflowBestEffort.mockReset();
   serviceMocks.terminateHostedUserRuntimeWorkflowBestEffort.mockResolvedValue({
     configured: true,
@@ -754,6 +793,740 @@ describe("deleteHostedAccountData", () => {
     expect(operationOrder.indexOf("count:hostedVaultShare")).toBeLessThan(
       operationOrder.indexOf("delete:hostedMember"),
     );
+  });
+
+  it("reads and expires an exact open standard Checkout only after the suspension fence", async () => {
+    const operationOrder: string[] = [];
+    const billingRefRecord = await makeCheckoutAttemptBillingRefRowForTest({
+      attemptId: "checkout_attempt_delete_open",
+      intentHash: "intent_hash_delete_open",
+      memberId: "member_123",
+      sessionId: "cs_test_delete_open",
+    });
+    const stripe = {
+      checkout: {
+        sessions: {
+          expire: vi.fn(async () => {
+            operationOrder.push("stripe:checkout-expire");
+            return {
+              id: "cs_test_delete_open",
+              status: "expired",
+            };
+          }),
+          retrieve: vi.fn(async () => {
+            operationOrder.push("stripe:checkout-retrieve");
+            return makeStandardCheckoutSessionForAccountDeletionTest({
+              attemptId: "checkout_attempt_delete_open",
+              intentHash: "intent_hash_delete_open",
+              sessionId: "cs_test_delete_open",
+              status: "open",
+            });
+          }),
+        },
+      },
+    };
+    serviceMocks.getHostedOnboardingStripe.mockReturnValue(stripe);
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      billingRefRecord,
+      onTransaction: () => operationOrder.push("transaction"),
+      operationOrder,
+    });
+
+    await deleteHostedAccountData({
+      memberId: "member_123",
+      prisma,
+      request: new Request("https://join.example.test/settings"),
+    });
+
+    expect(operationOrder.indexOf("update:hostedMember")).toBeLessThan(
+      operationOrder.indexOf("find:hostedMemberBillingRef"),
+    );
+    expect(operationOrder.indexOf("find:hostedMemberBillingRef")).toBeLessThan(
+      operationOrder.indexOf("stripe:checkout-retrieve"),
+    );
+    expect(stripe.checkout.sessions.retrieve).toHaveBeenCalledWith(
+      "cs_test_delete_open",
+      {},
+      {
+        maxNetworkRetries: 0,
+        timeout: 5_000,
+      },
+    );
+    expect(stripe.checkout.sessions.expire).toHaveBeenCalledWith(
+      "cs_test_delete_open",
+      {},
+      {
+        maxNetworkRetries: 0,
+        timeout: 5_000,
+      },
+    );
+    expect(serviceMocks.acceptHostedMemberStripeCheckoutCompletionTx).not
+      .toHaveBeenCalled();
+  });
+
+  it("treats an already-expired standard Checkout as idempotently cleaned up", async () => {
+    const billingRefRecord = await makeCheckoutAttemptBillingRefRowForTest({
+      attemptId: "checkout_attempt_delete_expired",
+      intentHash: "intent_hash_delete_expired",
+      memberId: "member_123",
+      sessionId: "cs_test_delete_expired",
+    });
+    const stripe = {
+      checkout: {
+        sessions: {
+          expire: vi.fn(),
+          retrieve: vi.fn(async () =>
+            makeStandardCheckoutSessionForAccountDeletionTest({
+              attemptId: "checkout_attempt_delete_expired",
+              intentHash: "intent_hash_delete_expired",
+              sessionId: "cs_test_delete_expired",
+              status: "expired",
+            })),
+        },
+      },
+    };
+    serviceMocks.getHostedOnboardingStripe.mockReturnValue(stripe);
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      billingRefRecord,
+      onTransaction: () => undefined,
+    });
+
+    await expect(deleteHostedAccountData({
+      memberId: "member_123",
+      prisma,
+      request: new Request("https://join.example.test/settings"),
+    })).resolves.toMatchObject({
+      memberId: "member_123",
+    });
+
+    expect(stripe.checkout.sessions.expire).not.toHaveBeenCalled();
+  });
+
+  it("treats a resource-missing standard Checkout as idempotently cleaned up", async () => {
+    const billingRefRecord = await makeCheckoutAttemptBillingRefRowForTest({
+      attemptId: "checkout_attempt_delete_missing",
+      intentHash: "intent_hash_delete_missing",
+      memberId: "member_123",
+      sessionId: "cs_test_delete_missing",
+    });
+    const stripe = {
+      checkout: {
+        sessions: {
+          expire: vi.fn(),
+          retrieve: vi.fn(async () => {
+            throw Object.assign(new Error("No such checkout session"), {
+              code: "resource_missing",
+              type: "StripeInvalidRequestError",
+            });
+          }),
+        },
+      },
+    };
+    serviceMocks.getHostedOnboardingStripe.mockReturnValue(stripe);
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      billingRefRecord,
+      onTransaction: () => undefined,
+    });
+
+    await expect(deleteHostedAccountData({
+      memberId: "member_123",
+      prisma,
+      request: new Request("https://join.example.test/settings"),
+    })).resolves.toMatchObject({
+      memberId: "member_123",
+    });
+
+    expect(stripe.checkout.sessions.expire).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [
+      "member owner",
+      {
+        client_reference_id: "member_other",
+      },
+    ],
+    [
+      "attempt",
+      {
+        metadata: {
+          checkoutAttemptId: "checkout_attempt_other",
+        },
+      },
+    ],
+    [
+      "intent hash",
+      {
+        metadata: {
+          checkoutIntentHash: "intent_hash_other",
+        },
+      },
+    ],
+  ])("fails closed when the stored Checkout %s does not match", async (
+    _label,
+    override,
+  ) => {
+    const deleteCalls: HostedAccountDeletionPrismaDeleteCall[] = [];
+    const billingRefRecord = await makeCheckoutAttemptBillingRefRowForTest({
+      attemptId: "checkout_attempt_delete_mismatch",
+      intentHash: "intent_hash_delete_mismatch",
+      memberId: "member_123",
+      sessionId: "cs_test_delete_mismatch",
+    });
+    const baseSession = makeStandardCheckoutSessionForAccountDeletionTest({
+      attemptId: "checkout_attempt_delete_mismatch",
+      intentHash: "intent_hash_delete_mismatch",
+      sessionId: "cs_test_delete_mismatch",
+      status: "open",
+    });
+    const stripe = {
+      checkout: {
+        sessions: {
+          expire: vi.fn(),
+          retrieve: vi.fn(async () => ({
+            ...baseSession,
+            ...override,
+            metadata: {
+              ...baseSession.metadata,
+              ...("metadata" in override ? override.metadata : {}),
+            },
+          })),
+        },
+      },
+    };
+    serviceMocks.getHostedOnboardingStripe.mockReturnValue(stripe);
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      billingRefRecord,
+      deleteCalls,
+      onTransaction: () => undefined,
+    });
+
+    await expect(deleteHostedAccountData({
+      memberId: "member_123",
+      prisma,
+      request: new Request("https://join.example.test/settings"),
+    })).rejects.toMatchObject({
+      code: "ACCOUNT_DELETION_STRIPE_CHECKOUT_MISMATCH",
+      retryable: false,
+    });
+
+    expect(stripe.checkout.sessions.expire).not.toHaveBeenCalled();
+    expect(deleteCalls).toEqual([]);
+  });
+
+  it.each([
+    [
+      "a deterministic invalid request",
+      Object.assign(new Error("Invalid parameter"), {
+        code: "parameter_invalid_integer",
+        statusCode: 400,
+        type: "StripeInvalidRequestError",
+      }),
+      "ACCOUNT_DELETION_STRIPE_CHECKOUT_PROVIDER_REJECTED",
+      false,
+    ],
+    [
+      "an ambiguous connection failure",
+      Object.assign(new Error("Connection ended"), {
+        code: "ETIMEDOUT",
+        type: "StripeConnectionError",
+      }),
+      "ACCOUNT_DELETION_STRIPE_CHECKOUT_PROVIDER_UNAVAILABLE",
+      true,
+    ],
+  ])("classifies %s without deleting local ownership", async (
+    _label,
+    providerError,
+    expectedCode,
+    expectedRetryable,
+  ) => {
+    const deleteCalls: HostedAccountDeletionPrismaDeleteCall[] = [];
+    const billingRefRecord = await makeCheckoutAttemptBillingRefRowForTest({
+      attemptId: "checkout_attempt_delete_provider_error",
+      intentHash: "intent_hash_delete_provider_error",
+      memberId: "member_123",
+      sessionId: "cs_test_delete_provider_error",
+    });
+    const stripe = {
+      checkout: {
+        sessions: {
+          expire: vi.fn(),
+          retrieve: vi.fn(async () => {
+            throw providerError;
+          }),
+        },
+      },
+    };
+    serviceMocks.getHostedOnboardingStripe.mockReturnValue(stripe);
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      billingRefRecord,
+      deleteCalls,
+      onTransaction: () => undefined,
+    });
+
+    await expect(deleteHostedAccountData({
+      memberId: "member_123",
+      prisma,
+      request: new Request("https://join.example.test/settings"),
+    })).rejects.toMatchObject({
+      code: expectedCode,
+      retryable: expectedRetryable,
+    });
+
+    expect(deleteCalls).toEqual([]);
+  });
+
+  it.each([
+    "standard",
+    "pulse_trial_7d",
+  ] as const)(
+    "atomically accepts a completed missing-webhook %s Checkout before ordinary deletion",
+    async (checkoutOffer) => {
+    const operationOrder: string[] = [];
+    const attemptBillingRef = await makeCheckoutAttemptBillingRefRowForTest({
+      attemptId: "checkout_attempt_delete_complete",
+      intentHash: "intent_hash_delete_complete",
+      memberId: "member_123",
+      sessionId: "cs_test_delete_complete",
+    });
+    const acceptedBillingRef = await makeCheckoutAttemptBillingRefRowForTest({
+      customerId: "cus_delete_complete",
+      memberId: "member_123",
+      subscriptionId: "sub_delete_complete",
+    });
+    const session = makeStandardCheckoutSessionForAccountDeletionTest({
+      attemptId: "checkout_attempt_delete_complete",
+      checkoutOffer,
+      customerId: "cus_delete_complete",
+      intentHash: "intent_hash_delete_complete",
+      sessionId: "cs_test_delete_complete",
+      status: "complete",
+      subscriptionId: "sub_delete_complete",
+    });
+    const stripe = {
+      checkout: {
+        sessions: {
+          expire: vi.fn(),
+          retrieve: vi.fn(async () => session),
+        },
+      },
+      customers: {
+        del: vi.fn(async () => {
+          operationOrder.push("stripe:customer-delete");
+          return { deleted: true };
+        }),
+      },
+      subscriptions: {
+        cancel: vi.fn(async () => {
+          operationOrder.push("stripe:subscription-cancel");
+          return { id: "sub_delete_complete", status: "canceled" };
+        }),
+        retrieve: vi.fn(async () => ({
+          id: "sub_delete_complete",
+          status: "active",
+        })),
+      },
+    };
+    serviceMocks.acceptHostedMemberStripeCheckoutCompletionTx.mockImplementation(
+      async () => {
+        operationOrder.push("stripe-checkout:accept");
+        return {
+          billingRef: {},
+          kind: "accepted",
+        };
+      },
+    );
+    serviceMocks.getHostedOnboardingStripe.mockReturnValue(stripe);
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      billingRefRecords: [attemptBillingRef, acceptedBillingRef],
+      onTransaction: () => operationOrder.push("transaction"),
+    });
+
+    await deleteHostedAccountData({
+      memberId: "member_123",
+      prisma,
+      request: new Request("https://join.example.test/settings"),
+    });
+
+    expect(serviceMocks.acceptHostedMemberStripeCheckoutCompletionTx)
+      .toHaveBeenCalledWith(expect.objectContaining({
+        checkoutAttemptId: "checkout_attempt_delete_complete",
+        checkoutIntentHash: "intent_hash_delete_complete",
+        checkoutSessionId: "cs_test_delete_complete",
+        currentCheckoutOffer: checkoutOffer,
+        eventCreatedAt: new Date(session.created * 1_000),
+        memberId: "member_123",
+        stripeCustomerId: "cus_delete_complete",
+        stripeSubscriptionId: "sub_delete_complete",
+      }));
+    expect(serviceMocks.executeHostedCheckoutSubscriptionCleanup).not
+      .toHaveBeenCalled();
+    expect(stripe.subscriptions.cancel).toHaveBeenCalledWith(
+      "sub_delete_complete",
+    );
+    expect(stripe.customers.del).toHaveBeenCalledWith("cus_delete_complete");
+    expect(operationOrder.indexOf("stripe-checkout:accept")).toBeLessThan(
+      operationOrder.indexOf("stripe:subscription-cancel"),
+    );
+    },
+  );
+
+  it("cleans a completed superseded Checkout loser before deleting the accepted subscription", async () => {
+    const operationOrder: string[] = [];
+    const attemptBillingRef = await makeCheckoutAttemptBillingRefRowForTest({
+      attemptId: "checkout_attempt_delete_loser",
+      intentHash: "intent_hash_delete_loser",
+      memberId: "member_123",
+      sessionId: "cs_test_delete_loser",
+    });
+    const acceptedBillingRef = await makeCheckoutAttemptBillingRefRowForTest({
+      customerId: "cus_delete_authoritative",
+      memberId: "member_123",
+      subscriptionId: "sub_delete_authoritative",
+    });
+    const session = makeStandardCheckoutSessionForAccountDeletionTest({
+      attemptId: "checkout_attempt_delete_loser",
+      customerId: "cus_delete_loser",
+      intentHash: "intent_hash_delete_loser",
+      sessionId: "cs_test_delete_loser",
+      status: "complete",
+      subscriptionId: "sub_delete_loser",
+    });
+    const stripe = {
+      checkout: {
+        sessions: {
+          expire: vi.fn(),
+          retrieve: vi.fn(async () => session),
+        },
+      },
+      customers: {
+        del: vi.fn(async () => ({ deleted: true })),
+      },
+      subscriptions: {
+        cancel: vi.fn(async () => {
+          operationOrder.push("stripe:authoritative-subscription-cancel");
+          return { id: "sub_delete_authoritative", status: "canceled" };
+        }),
+        retrieve: vi.fn(async () => ({
+          id: "sub_delete_authoritative",
+          status: "active",
+        })),
+      },
+    };
+    serviceMocks.acceptHostedMemberStripeCheckoutCompletionTx.mockResolvedValue({
+      kind: "cleanup_superseded",
+    });
+    serviceMocks.executeHostedCheckoutSubscriptionCleanup.mockImplementation(
+      async () => {
+        operationOrder.push("stripe-checkout:loser-cleanup");
+      },
+    );
+    serviceMocks.getHostedOnboardingStripe.mockReturnValue(stripe);
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      billingRefRecords: [attemptBillingRef, acceptedBillingRef],
+      onTransaction: () => undefined,
+    });
+
+    await deleteHostedAccountData({
+      memberId: "member_123",
+      prisma,
+      request: new Request("https://join.example.test/settings"),
+    });
+
+    expect(serviceMocks.executeHostedCheckoutSubscriptionCleanup)
+      .toHaveBeenCalledWith({
+        candidate: {
+          checkoutAttemptId: "checkout_attempt_delete_loser",
+          checkoutIntentHash: "intent_hash_delete_loser",
+          checkoutSessionId: "cs_test_delete_loser",
+          familyBillingClaim: null,
+          memberId: "member_123",
+          reason: "superseded",
+          stripeSubscriptionId: "sub_delete_loser",
+        },
+        prisma,
+        stripe,
+      });
+    expect(stripe.customers.del).toHaveBeenCalledWith(
+      "cus_delete_authoritative",
+    );
+    expect(stripe.customers.del).toHaveBeenCalledWith("cus_delete_loser");
+    expect(operationOrder.indexOf("stripe-checkout:loser-cleanup")).toBeLessThan(
+      operationOrder.indexOf("stripe:authoritative-subscription-cancel"),
+    );
+  });
+
+  it("clears an exact unbound direct Checkout reservation after the deletion fence", async () => {
+    const deleteCalls: HostedAccountDeletionPrismaDeleteCall[] = [];
+    const billingRefRecord = await makeCheckoutAttemptBillingRefRowForTest({
+      attemptId: "checkout_attempt_binding_pending",
+      intentHash: "intent_hash_binding_pending",
+      memberId: "member_123",
+    });
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      billingRefRecord,
+      deleteCalls,
+      onTransaction: () => undefined,
+    });
+
+    await expect(deleteHostedAccountData({
+      memberId: "member_123",
+      prisma,
+      request: new Request("https://join.example.test/settings"),
+    })).resolves.toMatchObject({
+      memberId: "member_123",
+    });
+
+    expect(deleteCalls.length).toBeGreaterThan(0);
+    expect(serviceMocks.getHostedOnboardingStripe).not.toHaveBeenCalled();
+  });
+
+  it("aborts final deletion when a new direct subscription binds after provider cleanup", async () => {
+    const deleteCalls: HostedAccountDeletionPrismaDeleteCall[] = [];
+    const initialBillingRef = await makeCheckoutAttemptBillingRefRowForTest({
+      memberId: "member_123",
+    });
+    const driftedBillingRef = await makeCheckoutAttemptBillingRefRowForTest({
+      customerId: "cus_bound_after_cleanup",
+      memberId: "member_123",
+      subscriptionId: "sub_bound_after_cleanup",
+    });
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      billingRefRecords: [
+        initialBillingRef,
+        initialBillingRef,
+        driftedBillingRef,
+      ],
+      deleteCalls,
+      onTransaction: () => undefined,
+    });
+
+    await expect(deleteHostedAccountData({
+      memberId: "member_123",
+      prisma,
+      request: new Request("https://join.example.test/settings"),
+    })).rejects.toMatchObject({
+      code: "ACCOUNT_DELETION_STRIPE_BILLING_OWNERSHIP_CHANGED",
+      retryable: true,
+    });
+
+    expect(deleteCalls).toEqual([]);
+  });
+
+  it("expires an exact open owned Family Checkout before deleting its group", async () => {
+    const operationOrder: string[] = [];
+    const familyBillingRefRecord = await makeFamilyBillingRefRowForTest({
+      checkoutAttemptId: "family_checkout_attempt_open",
+      checkoutSessionId: "cs_test_family_delete_open",
+      groupId: "family_group_123",
+      ownerMemberId: "member_123",
+      stripeCustomerId: "cus_family_delete_open",
+      stripeSubscriptionId: null,
+    });
+    const stripe = {
+      checkout: {
+        sessions: {
+          expire: vi.fn(async () => {
+            operationOrder.push("stripe:family-checkout-expire");
+            return {
+              id: "cs_test_family_delete_open",
+              status: "expired",
+            };
+          }),
+          retrieve: vi.fn(async () => {
+            operationOrder.push("stripe:family-checkout-retrieve");
+            return makeFamilyCheckoutSessionForAccountDeletionTest({
+              attemptId: "family_checkout_attempt_open",
+              customerId: "cus_family_delete_open",
+              sessionId: "cs_test_family_delete_open",
+              status: "open",
+            });
+          }),
+        },
+      },
+      customers: {
+        del: vi.fn(async () => ({ deleted: true })),
+      },
+    };
+    serviceMocks.getHostedOnboardingStripe.mockReturnValue(stripe);
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      familyBillingRefRecords: [familyBillingRefRecord],
+      familyGroups: [{ id: "family_group_123" }],
+      onTransaction: () => operationOrder.push("transaction"),
+      operationOrder,
+    });
+
+    await deleteHostedAccountData({
+      memberId: "member_123",
+      prisma,
+      request: new Request("https://join.example.test/settings"),
+    });
+
+    expect(operationOrder.indexOf("update:hostedMember")).toBeLessThan(
+      operationOrder.indexOf("stripe:family-checkout-retrieve"),
+    );
+    expect(stripe.checkout.sessions.expire).toHaveBeenCalledWith(
+      "cs_test_family_delete_open",
+      {},
+      {
+        maxNetworkRetries: 0,
+        timeout: 5_000,
+      },
+    );
+    expect(serviceMocks.applyHostedFamilyStripeCheckoutCompletedTx).not
+      .toHaveBeenCalled();
+    expect(serviceMocks.executeHostedCheckoutSubscriptionCleanup).not
+      .toHaveBeenCalled();
+    expect(stripe.customers.del).toHaveBeenCalledWith(
+      "cus_family_delete_open",
+    );
+  });
+
+  it("recovers a Family Checkout that completes while expiration races, then refunds before group deletion", async () => {
+    const operationOrder: string[] = [];
+    const deleteCalls: HostedAccountDeletionPrismaDeleteCall[] = [];
+    const familyAttemptBillingRef = await makeFamilyBillingRefRowForTest({
+      checkoutAttemptId: "family_checkout_attempt_race",
+      checkoutSessionId: "cs_test_family_delete_race",
+      groupId: "family_group_123",
+      ownerMemberId: "member_123",
+      stripeCustomerId: "cus_family_delete_race",
+      stripeSubscriptionId: null,
+    });
+    const familyAcceptedBillingRef = await makeFamilyBillingRefRowForTest({
+      groupId: "family_group_123",
+      ownerMemberId: "member_123",
+      stripeCustomerId: "cus_family_delete_race",
+      stripeSubscriptionId: "sub_family_delete_race",
+    });
+    const openSession = makeFamilyCheckoutSessionForAccountDeletionTest({
+      attemptId: "family_checkout_attempt_race",
+      customerId: "cus_family_delete_race",
+      sessionId: "cs_test_family_delete_race",
+      status: "open",
+    });
+    const completeSession = makeFamilyCheckoutSessionForAccountDeletionTest({
+      attemptId: "family_checkout_attempt_race",
+      customerId: "cus_family_delete_race",
+      sessionId: "cs_test_family_delete_race",
+      status: "complete",
+      subscriptionId: "sub_family_delete_race",
+    });
+    const stripe = {
+      checkout: {
+        sessions: {
+          expire: vi.fn(async () => {
+            operationOrder.push("stripe:family-checkout-expire-raced");
+            throw Object.assign(new Error("Checkout is no longer open"), {
+              code: "checkout_session_not_open",
+              statusCode: 400,
+              type: "StripeInvalidRequestError",
+            });
+          }),
+          retrieve: vi.fn()
+            .mockResolvedValueOnce(openSession)
+            .mockResolvedValueOnce(completeSession),
+        },
+      },
+      customers: {
+        del: vi.fn(async () => ({ deleted: true })),
+      },
+      subscriptions: {
+        cancel: vi.fn(),
+        retrieve: vi.fn(async () => ({
+          id: "sub_family_delete_race",
+          status: "canceled",
+        })),
+      },
+    };
+    serviceMocks.applyHostedFamilyStripeCheckoutCompletedTx.mockImplementation(
+      async () => {
+        operationOrder.push("family-checkout:canonical-bind");
+        return { groupId: "family_group_123" };
+      },
+    );
+    serviceMocks.executeHostedCheckoutSubscriptionCleanup.mockImplementation(
+      async () => {
+        operationOrder.push("family-checkout:cancel-refund");
+      },
+    );
+    serviceMocks.getHostedOnboardingStripe.mockReturnValue(stripe);
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      deleteCalls,
+      familyBillingRefRecordReads: [
+        familyAttemptBillingRef,
+        familyAcceptedBillingRef,
+      ],
+      familyGroups: [{ id: "family_group_123" }],
+      onTransaction: () => operationOrder.push("transaction"),
+      operationOrder,
+    });
+
+    await deleteHostedAccountData({
+      memberId: "member_123",
+      prisma,
+      request: new Request("https://join.example.test/settings"),
+    });
+
+    expect(stripe.checkout.sessions.retrieve).toHaveBeenCalledTimes(2);
+    expect(serviceMocks.applyHostedFamilyStripeCheckoutCompletedTx)
+      .toHaveBeenCalledWith(expect.objectContaining({
+        dispatchContext: {
+          eventCreatedAt: new Date(completeSession.created * 1_000),
+        },
+        session: completeSession,
+      }));
+    expect(serviceMocks.executeHostedCheckoutSubscriptionCleanup)
+      .toHaveBeenCalledWith({
+        candidate: {
+          checkoutAttemptId: "family_checkout_attempt_race",
+          checkoutIntentHash: null,
+          checkoutSessionId: "cs_test_family_delete_race",
+          familyBillingClaim: null,
+          familyGroupId: "family_group_123",
+          memberId: "member_123",
+          reason: "family_account_deletion",
+          stripeSubscriptionId: "sub_family_delete_race",
+        },
+        prisma,
+        stripe,
+      });
+    expect(operationOrder.indexOf("family-checkout:canonical-bind"))
+      .toBeLessThan(operationOrder.indexOf("family-checkout:cancel-refund"));
+    expect(operationOrder.indexOf("family-checkout:cancel-refund"))
+      .toBeLessThan(operationOrder.indexOf("delete:hostedAccountGroup"));
+    expect(stripe.subscriptions.cancel).not.toHaveBeenCalled();
+    expect(stripe.customers.del).toHaveBeenCalledWith(
+      "cus_family_delete_race",
+    );
+  });
+
+  it("clears an exact unbound owned Family Checkout after the deletion fence", async () => {
+    const deleteCalls: HostedAccountDeletionPrismaDeleteCall[] = [];
+    const familyBillingRefRecord = await makeFamilyBillingRefRowForTest({
+      checkoutAttemptId: "family_checkout_attempt_binding_pending",
+      groupId: "family_group_123",
+      ownerMemberId: "member_123",
+      stripeCustomerId: null,
+      stripeSubscriptionId: null,
+    });
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      deleteCalls,
+      familyBillingRefRecords: [familyBillingRefRecord],
+      familyGroups: [{ id: "family_group_123" }],
+      onTransaction: () => undefined,
+    });
+
+    await expect(deleteHostedAccountData({
+      memberId: "member_123",
+      prisma,
+      request: new Request("https://join.example.test/settings"),
+    })).resolves.toMatchObject({
+      memberId: "member_123",
+    });
+
+    expect(deleteCalls.length).toBeGreaterThan(0);
+    expect(serviceMocks.getHostedOnboardingStripe).not.toHaveBeenCalled();
   });
 
   it("cancels the Stripe subscription before local deletion and deletes vendor accounts after it", async () => {
@@ -1973,6 +2746,7 @@ describe("deleteHostedAccountData", () => {
 
 function createHostedAccountDeletionPrismaForTest(input: {
   billingRefRecord?: Record<string, unknown> | null;
+  billingRefRecords?: readonly (Record<string, unknown> | null)[];
   connectedAppConnectIntentRows?: HostedAccountDeletionConnectedAppIntentRow[];
   connectedAppsSession?: boolean;
   countResults?: Record<string, number>;
@@ -1985,6 +2759,7 @@ function createHostedAccountDeletionPrismaForTest(input: {
   }>;
   hostedComputerRunRows?: Record<string, unknown>[];
   familyBillingRefRecords?: Record<string, unknown>[];
+  familyBillingRefRecordReads?: readonly (Record<string, unknown> | null)[];
   familyGroups?: Array<{ id: string }>;
   ownedThreadContainerMemberIds?: string[];
   identityRecord?: Record<string, unknown> | null;
@@ -1998,6 +2773,8 @@ function createHostedAccountDeletionPrismaForTest(input: {
     sources?: { sourceProviderSlug: string; status: string }[];
   }>;
 }): Parameters<typeof deleteHostedAccountData>[0]["prisma"] {
+  let billingRefReadIndex = 0;
+  let familyBillingRefReadIndex = 0;
   const makeDeleteDelegate = (model: string): HostedAccountDeletionPrismaDeleteDelegate => ({
     count: async () => {
       input.operationOrder?.push(`count:${model}`);
@@ -2038,6 +2815,23 @@ function createHostedAccountDeletionPrismaForTest(input: {
         return [];
       },
     },
+    hostedAccountGroupBillingRef: {
+      ...makeDeleteDelegate("hostedAccountGroupBillingRef"),
+      findUnique: async (args: { where: { groupId: string } }) =>
+        input.familyBillingRefRecords?.find((record) =>
+          record.groupId === args.where.groupId
+        )
+        ?? input.familyBillingRefRecordReads?.at(-1)
+        ?? null,
+      updateMany: async () => {
+        input.operationOrder?.push("update:hostedAccountGroupBillingRef");
+        return { count: 1 };
+      },
+    },
+    hostedAccountGroup: {
+      ...makeDeleteDelegate("hostedAccountGroup"),
+      findMany: async () => input.familyGroups ?? [],
+    },
     hostedConnectedAppConnectIntent: {
       ...makeDeleteDelegate("hostedConnectedAppConnectIntent"),
       findMany: async () => input.transactionConnectedAppConnectIntentRows ?? [],
@@ -2052,6 +2846,15 @@ function createHostedAccountDeletionPrismaForTest(input: {
       ...makeDeleteDelegate("hostedMember"),
       updateMany: async () => {
         input.operationOrder?.push("update:hostedMember");
+        return { count: 1 };
+      },
+    },
+    hostedMemberBillingRef: {
+      ...makeDeleteDelegate("hostedMemberBillingRef"),
+      findUnique: async () =>
+        input.billingRefRecords?.at(-1) ?? input.billingRefRecord ?? null,
+      updateMany: async () => {
+        input.operationOrder?.push("update:hostedMemberBillingRef");
         return { count: 1 };
       },
     },
@@ -2074,14 +2877,39 @@ function createHostedAccountDeletionPrismaForTest(input: {
       findMany: async () => input.familyGroups ?? [],
     },
     hostedAccountGroupBillingRef: {
-      findUnique: async (args: { where: { groupId: string } }) =>
-        input.familyBillingRefRecords?.find((record) => record.groupId === args.where.groupId) ?? null,
+      findUnique: async (args: { where: { groupId: string } }) => {
+        if (
+          input.familyBillingRefRecordReads
+          && input.familyBillingRefRecordReads.length > 0
+        ) {
+          const index = Math.min(
+            familyBillingRefReadIndex,
+            input.familyBillingRefRecordReads.length - 1,
+          );
+          familyBillingRefReadIndex += 1;
+          return input.familyBillingRefRecordReads[index] ?? null;
+        }
+        return input.familyBillingRefRecords?.find((record) =>
+          record.groupId === args.where.groupId
+        ) ?? null;
+      },
     },
     hostedMember: {
       findUnique: async () => ({ id: "member_123" }),
     },
     hostedMemberBillingRef: {
-      findUnique: async () => input.billingRefRecord ?? null,
+      findUnique: async () => {
+        input.operationOrder?.push("find:hostedMemberBillingRef");
+        if (input.billingRefRecords && input.billingRefRecords.length > 0) {
+          const index = Math.min(
+            billingRefReadIndex,
+            input.billingRefRecords.length - 1,
+          );
+          billingRefReadIndex += 1;
+          return input.billingRefRecords[index] ?? null;
+        }
+        return input.billingRefRecord ?? null;
+      },
     },
     hostedMemberIdentity: {
       findUnique: async () => input.identityRecord ?? null,
@@ -2175,13 +3003,115 @@ async function makeVendorAccountRowsForTest(memberId: string, overrides?: {
   };
 }
 
+async function makeCheckoutAttemptBillingRefRowForTest(input: {
+  attemptId?: string | null;
+  customerId?: string | null;
+  intentHash?: string | null;
+  memberId: string;
+  sessionId?: string | null;
+  subscriptionId?: string | null;
+}): Promise<Record<string, unknown>> {
+  const privateColumns = await buildHostedMemberBillingPrivateColumns({
+    memberId: input.memberId,
+    stripeCheckoutSessionId: input.sessionId ?? null,
+    stripeCustomerId: input.customerId ?? null,
+    stripeSubscriptionId: input.subscriptionId ?? null,
+  });
+
+  return {
+    checkoutAttemptId: input.attemptId ?? null,
+    checkoutCreatedAt: input.attemptId
+      ? new Date("2026-07-25T20:00:00.000Z")
+      : null,
+    checkoutIntentHash: input.intentHash ?? null,
+    currentBillingPhase: null,
+    currentBillingPlanCode: null,
+    currentCheckoutOffer: null,
+    currentPeriodEnd: null,
+    currentPeriodStart: null,
+    currentTrialEndsAt: null,
+    currentTrialStartedAt: null,
+    lastStripeEventCreatedAt: null,
+    memberId: input.memberId,
+    pulseTrialPolicyVersion: null,
+    pulseTrialRedeemedAt: null,
+    scheduledBillingEffectiveAt: null,
+    scheduledBillingPlanCode: null,
+    ...privateColumns,
+  };
+}
+
+function makeStandardCheckoutSessionForAccountDeletionTest(input: {
+  attemptId: string;
+  checkoutOffer?: "pulse_trial_7d" | "standard";
+  customerId?: string | null;
+  intentHash: string;
+  sessionId: string;
+  status: "complete" | "expired" | "open";
+  subscriptionId?: string | null;
+}) {
+  return {
+    client_reference_id: "member_123",
+    created: 1_785_000_000,
+    customer: input.customerId ?? null,
+    id: input.sessionId,
+    metadata: {
+      checkoutAttemptId: input.attemptId,
+      checkoutIntentHash: input.intentHash,
+      checkoutOffer: input.checkoutOffer ?? "standard",
+      memberId: "member_123",
+    },
+    mode: "subscription",
+    status: input.status,
+    subscription: input.subscriptionId ?? null,
+  };
+}
+
+function makeFamilyCheckoutSessionForAccountDeletionTest(input: {
+  attemptId: string;
+  customerId?: string | null;
+  groupId?: string;
+  sessionId: string;
+  status: "complete" | "expired" | "open";
+  subscriptionId?: string | null;
+}) {
+  const groupId = input.groupId ?? "family_group_123";
+  return {
+    client_reference_id: groupId,
+    created: 1_785_000_000,
+    customer: input.customerId ?? null,
+    id: input.sessionId,
+    metadata: {
+      accountGroupId: groupId,
+      billingPlanCode: "launch_family_monthly",
+      checkoutAttemptId: input.attemptId,
+      kind: "hosted_family_plan",
+      ownerMemberId: "member_123",
+    },
+    mode: "subscription",
+    status: input.status,
+    subscription: input.subscriptionId ?? null,
+  };
+}
+
 async function makeFamilyBillingRefRowForTest(input: {
+  checkoutAttemptId?: string | null;
+  checkoutSessionId?: string | null;
   groupId: string;
   ownerMemberId: string;
   stripeCustomerId: string | null;
   stripeSubscriptionId: string | null;
 }): Promise<Record<string, unknown>> {
-  const [stripeCustomerIdEncrypted, stripeSubscriptionIdEncrypted] = await Promise.all([
+  const [
+    stripeCheckoutSessionIdEncrypted,
+    stripeCustomerIdEncrypted,
+    stripeSubscriptionIdEncrypted,
+  ] = await Promise.all([
+    encryptHostedWebNullableString({
+      field: "hosted-account-group-billing-ref.stripe-checkout-session-id",
+      memberId: input.ownerMemberId,
+      value: input.checkoutSessionId ?? null,
+    }),
     encryptHostedWebNullableString({
       field: "hosted-account-group-billing-ref.stripe-customer-id",
       memberId: input.ownerMemberId,
@@ -2195,6 +3125,11 @@ async function makeFamilyBillingRefRowForTest(input: {
   ]);
 
   return {
+    checkoutAttemptId: input.checkoutAttemptId ?? null,
+    checkoutCreatedAt: input.checkoutAttemptId
+      ? new Date("2026-07-25T20:00:00.000Z")
+      : null,
+    checkoutSeatCount: input.checkoutAttemptId ? 3 : null,
     currentBillingPhase: "paid",
     currentBillingPlanCode: "launch_family_monthly",
     currentPeriodEnd: new Date("2026-05-23T00:00:00.000Z"),
@@ -2207,6 +3142,7 @@ async function makeFamilyBillingRefRowForTest(input: {
     },
     groupId: input.groupId,
     lastStripeEventCreatedAt: new Date("2026-04-23T00:00:00.000Z"),
+    stripeCheckoutSessionIdEncrypted,
     stripeCustomerIdEncrypted,
     stripeSubscriptionIdEncrypted,
   };
@@ -2243,6 +3179,15 @@ type HostedAccountDeletionPrismaTransactionFake = {
   hostedComputerRun: HostedAccountDeletionPrismaDeleteDelegate & {
     findMany: () => Promise<unknown[]>;
   };
+  hostedAccountGroup: HostedAccountDeletionPrismaDeleteDelegate & {
+    findMany: () => Promise<Array<{ id: string }>>;
+  };
+  hostedAccountGroupBillingRef: HostedAccountDeletionPrismaDeleteDelegate & {
+    findUnique: (args: {
+      where: { groupId: string };
+    }) => Promise<Record<string, unknown> | null>;
+    updateMany: (args: unknown) => Promise<{ count: number }>;
+  };
   hostedConnectedAppConnectIntent: HostedAccountDeletionPrismaDeleteDelegate & {
     findMany: () => Promise<unknown[]>;
   };
@@ -2250,6 +3195,10 @@ type HostedAccountDeletionPrismaTransactionFake = {
     findMany: () => Promise<Array<{ memberId: string }>>;
   };
   hostedMember: HostedAccountDeletionPrismaDeleteDelegate & {
+    updateMany: (args: unknown) => Promise<{ count: number }>;
+  };
+  hostedMemberBillingRef: HostedAccountDeletionPrismaDeleteDelegate & {
+    findUnique: () => Promise<Record<string, unknown> | null>;
     updateMany: (args: unknown) => Promise<{ count: number }>;
   };
 };

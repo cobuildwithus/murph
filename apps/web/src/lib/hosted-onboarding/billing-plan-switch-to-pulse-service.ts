@@ -1,4 +1,8 @@
-import { Prisma, type PrismaClient } from "@prisma/client";
+import {
+  Prisma,
+  type HostedBillingStatus,
+  type PrismaClient,
+} from "@prisma/client";
 import type Stripe from "stripe";
 
 import { sha256Hex } from "../primitives";
@@ -16,6 +20,7 @@ import { hostedOnboardingError } from "./errors";
 import {
   lookupHostedMemberStripeBillingRefByStripeSubscriptionScheduleId,
   readHostedMemberStripeBillingRef,
+  withHostedMemberStripeMutationLock,
   writeHostedMemberStripeBillingRefTx,
   type HostedMemberStripeBillingRefSnapshot,
 } from "./hosted-member-billing-store";
@@ -24,15 +29,21 @@ import { isHostedStripeLegacyAiUsageMeteredItem } from "./legacy-usage-price";
 import {
   requireHostedStripeBillingPlanConfig,
 } from "./runtime";
-import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "./shared";
 import {
   describeHostedStripeErrorDetails,
   logHostedStripeFailure,
 } from "./stripe-error-log";
+import {
+  assertHostedStripeSubscriptionMatchesCustomer,
+  isHostedStripeRetryableFailure,
+} from "./stripe-billing-state";
 
 const SWITCH_TO_PULSE_SOURCE_PLAN = "launch_edge_monthly" satisfies HostedBillingPlanCode;
 const SWITCH_TO_PULSE_TARGET_PLAN = "launch_monthly" satisfies HostedBillingPlanCode;
 const SWITCH_TO_PULSE_MARKER = "edge_to_pulse_at_period_end";
+const SWITCH_TO_PULSE_UPDATE_OPERATION_VERSION = "v2";
+const SWITCH_TO_PULSE_PROVIDER_BUDGET_MS = 90_000;
+const SWITCH_TO_PULSE_STRIPE_REQUEST_TIMEOUT_MS = 15_000;
 const STRIPE_TRIAL_METADATA_KEYS = [
   "trialDurationDays",
   "trialPolicyVersion",
@@ -61,6 +72,7 @@ interface HostedSwitchScheduleContext {
   edgeConfig: HostedStripePlanConfig;
   memberId: string;
   pulseConfig: HostedStripePlanConfig;
+  stripeCustomerId: string;
   stripeSubscriptionId: string;
 }
 
@@ -107,32 +119,73 @@ export async function scheduleHostedBillingPlanSwitchToPulse(input: {
     });
   }
 
+  return withHostedMemberStripeMutationLock({
+    memberId: input.memberId,
+    prisma,
+    run: (tx) =>
+      scheduleHostedBillingPlanSwitchToPulseWithLockedOwner({
+        expectedStripeCustomerId: stripeCustomerId,
+        expectedStripeSubscriptionId: stripeSubscriptionId,
+        memberId: input.memberId,
+        now,
+        tx,
+      }),
+  });
+}
+
+async function scheduleHostedBillingPlanSwitchToPulseWithLockedOwner(input: {
+  expectedStripeCustomerId: string;
+  expectedStripeSubscriptionId: string;
+  memberId: string;
+  now: Date;
+  tx: Prisma.TransactionClient;
+}): Promise<HostedBillingPlanSwitchToPulseResult> {
+  const providerDeadlineMs =
+    Date.now() + SWITCH_TO_PULSE_PROVIDER_BUDGET_MS;
+  const member = await readHostedMemberCoreState({
+    memberId: input.memberId,
+    prisma: input.tx,
+  });
+  const billingRef = await readHostedMemberStripeBillingRef({
+    memberId: input.memberId,
+    prisma: input.tx,
+  });
+  assertHostedBillingPlanSwitchLockedSource({
+    billingRef,
+    expectedStripeCustomerId: input.expectedStripeCustomerId,
+    expectedStripeSubscriptionId: input.expectedStripeSubscriptionId,
+    member,
+  });
+
   const edgeConfig = requireHostedSwitchPlanConfig(SWITCH_TO_PULSE_SOURCE_PLAN);
   const pulseConfig = requireHostedSwitchPlanConfig(SWITCH_TO_PULSE_TARGET_PLAN);
   const stripe = edgeConfig.stripe;
   const subscription = await callHostedStripePlanSwitchOperation(
     "subscription.retrieve",
     () =>
-      stripe.subscriptions.retrieve(stripeSubscriptionId, {
+      stripe.subscriptions.retrieve(input.expectedStripeSubscriptionId, {
         expand: ["items.data.price"],
-      }),
+      }, buildHostedBillingPlanSwitchStripeRequestOptions({
+        providerDeadlineMs,
+      })),
   );
 
   assertHostedStripeSubscriptionMatchesCustomer({
-    stripeCustomerId,
+    stripeCustomerId: input.expectedStripeCustomerId,
     subscription,
   });
   assertHostedStripeSubscriptionScheduleableState({
-    now,
+    now: input.now,
     subscription,
   });
   assertHostedStripeCanonicalEdgeSubscriptionItems({
     edgeConfig,
     subscription,
   });
+  assertHostedStripeSubscriptionConfigurationSupported(subscription);
 
   const currentPeriodEnd = requireHostedStripeSubscriptionCurrentPeriodEnd({
-    now,
+    now: input.now,
     subscription,
   });
   const currentPeriodEndUnix = toUnixSeconds(currentPeriodEnd);
@@ -142,21 +195,29 @@ export async function scheduleHostedBillingPlanSwitchToPulse(input: {
     edgeConfig,
     memberId: input.memberId,
     pulseConfig,
-    stripeSubscriptionId,
+    stripeCustomerId: input.expectedStripeCustomerId,
+    stripeSubscriptionId: input.expectedStripeSubscriptionId,
   };
   const existingScheduleId = coerceStripeObjectId(subscription.schedule);
 
   if (existingScheduleId) {
     const existingSchedule = await retrieveHostedBillingPlanSwitchSchedule({
+      providerDeadlineMs,
       scheduleId: existingScheduleId,
       stripe,
     });
+    assertHostedStripeScheduleConfigurationSupported(existingSchedule, context);
 
-    if (isHostedBillingPlanSwitchToPulseScheduleCompatible(existingSchedule, context)) {
+    if (isHostedBillingPlanSwitchToPulseScheduleCompatible(
+      existingSchedule,
+      context,
+      subscription,
+    )) {
       await persistHostedBillingPlanSwitchToPulsePendingFields({
         context,
-        prisma,
+        expectedStripeCustomerId: input.expectedStripeCustomerId,
         schedule: existingSchedule,
+        tx: input.tx,
       });
 
       return {
@@ -166,25 +227,25 @@ export async function scheduleHostedBillingPlanSwitchToPulse(input: {
       };
     }
 
-    const recoveredSchedule = await tryRecoverHostedBillingPlanSwitchScheduleFromCreateIdempotency({
+    if (!isHostedBillingPlanSwitchPristineAttachedSchedule({
       context,
-      stripe,
-      stripeSubscriptionId,
-    });
-
-    if (!recoveredSchedule || recoveredSchedule.id !== existingSchedule.id) {
+      liveSchedule: existingSchedule,
+      subscription,
+    })) {
       throw buildHostedBillingPlanSwitchScheduleConflictError();
     }
 
     const updatedSchedule = await updateHostedBillingPlanSwitchToPulseSchedule({
       context,
-      schedule: recoveredSchedule,
+      providerDeadlineMs,
+      schedule: existingSchedule,
       stripe,
     });
     await persistHostedBillingPlanSwitchToPulsePendingFields({
       context,
-      prisma,
+      expectedStripeCustomerId: input.expectedStripeCustomerId,
       schedule: updatedSchedule,
+      tx: input.tx,
     });
 
     return {
@@ -196,23 +257,35 @@ export async function scheduleHostedBillingPlanSwitchToPulse(input: {
 
   const createdSchedule = await createHostedBillingPlanSwitchScheduleFromSubscription({
     context,
+    providerDeadlineMs,
     stripe,
-    stripeSubscriptionId,
+    stripeSubscriptionId: input.expectedStripeSubscriptionId,
   });
   const retrievedSchedule = await retrieveHostedBillingPlanSwitchSchedule({
+    providerDeadlineMs,
     scheduleId: createdSchedule.id,
     stripe,
   });
+  assertHostedStripeScheduleConfigurationSupported(retrievedSchedule, context);
+  if (!isHostedBillingPlanSwitchPristineAttachedSchedule({
+    context,
+    liveSchedule: retrievedSchedule,
+    subscription,
+  })) {
+    throw buildHostedBillingPlanSwitchScheduleConflictError();
+  }
   const updatedSchedule = await updateHostedBillingPlanSwitchToPulseSchedule({
     context,
+    providerDeadlineMs,
     schedule: retrievedSchedule,
     stripe,
   });
 
   await persistHostedBillingPlanSwitchToPulsePendingFields({
     context,
-    prisma,
+    expectedStripeCustomerId: input.expectedStripeCustomerId,
     schedule: updatedSchedule,
+    tx: input.tx,
   });
 
   return {
@@ -323,14 +396,45 @@ function assertHostedBillingPlanSwitchToPulseSourceState(input: {
   });
 }
 
+function assertHostedBillingPlanSwitchLockedSource(input: {
+  billingRef: HostedMemberStripeBillingRefSnapshot | null;
+  expectedStripeCustomerId: string;
+  expectedStripeSubscriptionId: string;
+  member: {
+    billingStatus: HostedBillingStatus;
+    suspendedAt?: Date | null;
+  } | null;
+}): void {
+  if (
+    !input.member ||
+    input.billingRef?.stripeCustomerId !== input.expectedStripeCustomerId ||
+    input.billingRef?.stripeSubscriptionId !==
+      input.expectedStripeSubscriptionId
+  ) {
+    throw buildHostedBillingPlanSwitchSourceChangedError();
+  }
+
+  try {
+    assertHostedMemberOwnActiveBillingAllowed(input.member);
+    assertHostedBillingPlanSwitchToPulseSourceState({
+      billingRef: input.billingRef,
+      member: input.member,
+    });
+  } catch {
+    throw buildHostedBillingPlanSwitchSourceChangedError();
+  }
+}
+
 function buildHostedBillingPlanSwitchContextFromLocalPendingState(input: {
   billingRef: HostedMemberStripeBillingRefSnapshot;
   memberId: string;
 }): HostedSwitchScheduleContext | null {
   const stripeSubscriptionId = input.billingRef.stripeSubscriptionId;
+  const stripeCustomerId = input.billingRef.stripeCustomerId;
   const currentPeriodEnd = input.billingRef.scheduledBillingEffectiveAt;
 
   if (
+    !stripeCustomerId ||
     !stripeSubscriptionId ||
     !currentPeriodEnd ||
     input.billingRef.scheduledBillingPlanCode !== SWITCH_TO_PULSE_TARGET_PLAN
@@ -347,6 +451,7 @@ function buildHostedBillingPlanSwitchContextFromLocalPendingState(input: {
     edgeConfig,
     memberId: input.memberId,
     pulseConfig,
+    stripeCustomerId,
     stripeSubscriptionId,
   };
 }
@@ -364,23 +469,6 @@ function requireHostedSwitchPlanConfig(
   };
 }
 
-function assertHostedStripeSubscriptionMatchesCustomer(input: {
-  stripeCustomerId: string;
-  subscription: Stripe.Subscription;
-}): void {
-  const subscriptionCustomerId = coerceStripeObjectId(input.subscription.customer);
-
-  if (subscriptionCustomerId === input.stripeCustomerId) {
-    return;
-  }
-
-  throw hostedOnboardingError({
-    code: "HOSTED_BILLING_STRIPE_CUSTOMER_MISMATCH",
-    httpStatus: 409,
-    message: "Your subscription could not be matched to this hosted account.",
-  });
-}
-
 function assertHostedStripeSubscriptionScheduleableState(input: {
   now: Date;
   subscription: Stripe.Subscription;
@@ -391,6 +479,10 @@ function assertHostedStripeSubscriptionScheduleableState(input: {
 
   if (input.subscription.cancel_at_period_end) {
     throw buildHostedStripeSubscriptionStateUnsupportedError("cancel_at_period_end");
+  }
+
+  if (input.subscription.cancel_at !== null && input.subscription.cancel_at !== undefined) {
+    throw buildHostedStripeSubscriptionStateUnsupportedError("cancel_at");
   }
 
   if (input.subscription.pending_update) {
@@ -452,6 +544,8 @@ function assertHostedStripeCanonicalEdgeSubscriptionItems(input: {
     throw buildHostedStripeSubscriptionItemsUnsupportedError();
   }
 
+  assertHostedStripeSubscriptionItemConfigurationSupported(recurringItem);
+
   for (const item of items) {
     if (
       item.id !== recurringItem.id &&
@@ -474,50 +568,398 @@ function isSupportedRecurringQuantity(item: Stripe.SubscriptionItem): boolean {
   return quantity === null || quantity === 1;
 }
 
+function assertHostedStripeSubscriptionConfigurationSupported(
+  subscription: Stripe.Subscription,
+): void {
+  const reason = readHostedStripeUnsupportedSubscriptionConfigurationReason(
+    subscription,
+  );
+
+  if (reason) {
+    throw buildHostedStripeSubscriptionConfigurationUnsupportedError(reason);
+  }
+}
+
+function readHostedStripeUnsupportedSubscriptionConfigurationReason(
+  subscription: Stripe.Subscription,
+): string | null {
+  if (
+    subscription.application_fee_percent !== null
+    && subscription.application_fee_percent !== undefined
+  ) {
+    return "application_fee_percent";
+  }
+  if (hasUnsupportedHostedStripeAutomaticTax(subscription.automatic_tax)) {
+    return "automatic_tax";
+  }
+  if (
+    subscription.billing_cycle_anchor_config !== null
+    && subscription.billing_cycle_anchor_config !== undefined
+  ) {
+    return "billing_cycle_anchor_config";
+  }
+  if (
+    subscription.billing_mode?.type
+    && subscription.billing_mode.type !== "classic"
+  ) {
+    return "billing_mode";
+  }
+  if (
+    subscription.billing_thresholds !== null
+    && subscription.billing_thresholds !== undefined
+  ) {
+    return "billing_thresholds";
+  }
+  if (
+    subscription.collection_method
+    && subscription.collection_method !== "charge_automatically"
+  ) {
+    return "collection_method";
+  }
+  if (
+    subscription.days_until_due !== null
+    && subscription.days_until_due !== undefined
+  ) {
+    return "days_until_due";
+  }
+  if (hasHostedStripeValues(subscription.default_tax_rates)) {
+    return "default_tax_rates";
+  }
+  if (hasHostedStripeValues(subscription.discounts)) {
+    return "discounts";
+  }
+  if (
+    subscription.default_source !== null
+    && subscription.default_source !== undefined
+  ) {
+    return "default_source";
+  }
+  if (hasUnsupportedHostedStripeInvoiceSettings(subscription.invoice_settings)) {
+    return "invoice_settings";
+  }
+  if (
+    subscription.managed_payments !== null
+    && subscription.managed_payments !== undefined
+  ) {
+    return "managed_payments";
+  }
+  if (subscription.on_behalf_of !== null && subscription.on_behalf_of !== undefined) {
+    return "on_behalf_of";
+  }
+  if (
+    subscription.pause_collection !== null
+    && subscription.pause_collection !== undefined
+  ) {
+    return "pause_collection";
+  }
+  if (hasUnsupportedHostedStripePaymentSettings(subscription.payment_settings)) {
+    return "payment_settings";
+  }
+  if (
+    subscription.pending_invoice_item_interval !== null
+    && subscription.pending_invoice_item_interval !== undefined
+  ) {
+    return "pending_invoice_item_interval";
+  }
+  if (subscription.transfer_data !== null && subscription.transfer_data !== undefined) {
+    return "transfer_data";
+  }
+
+  return null;
+}
+
+function assertHostedStripeSubscriptionItemConfigurationSupported(
+  item: Stripe.SubscriptionItem,
+): void {
+  const reason = readHostedStripeUnsupportedItemConfigurationReason(item);
+
+  if (reason) {
+    throw buildHostedStripeSubscriptionConfigurationUnsupportedError(
+      `item.${reason}`,
+    );
+  }
+}
+
+function assertHostedStripeScheduleConfigurationSupported(
+  schedule: Stripe.SubscriptionSchedule,
+  context: HostedSwitchScheduleContext,
+): void {
+  const reason = readHostedStripeUnsupportedScheduleConfigurationReason(
+    schedule,
+    context,
+  );
+
+  if (reason) {
+    throw buildHostedStripeSubscriptionConfigurationUnsupportedError(reason);
+  }
+}
+
+function readHostedStripeUnsupportedScheduleConfigurationReason(
+  schedule: Stripe.SubscriptionSchedule,
+  context: HostedSwitchScheduleContext,
+): string | null {
+  if (
+    schedule.billing_mode?.type
+    && schedule.billing_mode.type !== "classic"
+  ) {
+    return "schedule.billing_mode";
+  }
+  if (Reflect.get(schedule, "renewal_interval") != null) {
+    return "schedule.renewal_interval";
+  }
+
+  const defaultSettingsReason = readHostedStripeUnsupportedScheduleSettingsReason(
+    schedule.default_settings,
+  );
+  if (defaultSettingsReason) {
+    return `schedule.default_settings.${defaultSettingsReason}`;
+  }
+
+  for (const phase of schedule.phases) {
+    const phaseReason = readHostedStripeUnsupportedSchedulePhaseReason(
+      phase,
+      context,
+    );
+    if (phaseReason) {
+      return `schedule.phase.${phaseReason}`;
+    }
+  }
+
+  return null;
+}
+
+function readHostedStripeUnsupportedScheduleSettingsReason(
+  settings: Stripe.SubscriptionSchedule.DefaultSettings | undefined,
+): string | null {
+  if (!settings) {
+    return null;
+  }
+  if (
+    settings.application_fee_percent !== null
+    && settings.application_fee_percent !== undefined
+  ) {
+    return "application_fee_percent";
+  }
+  if (hasUnsupportedHostedStripeAutomaticTax(settings.automatic_tax)) {
+    return "automatic_tax";
+  }
+  if (
+    settings.billing_thresholds !== null
+    && settings.billing_thresholds !== undefined
+  ) {
+    return "billing_thresholds";
+  }
+  if (settings.collection_method && settings.collection_method !== "charge_automatically") {
+    return "collection_method";
+  }
+  if (Reflect.get(settings, "default_source") != null) {
+    return "default_source";
+  }
+  if (hasUnsupportedHostedStripeInvoiceSettings(settings.invoice_settings)) {
+    return "invoice_settings";
+  }
+  if (settings.on_behalf_of !== null && settings.on_behalf_of !== undefined) {
+    return "on_behalf_of";
+  }
+  if (settings.transfer_data !== null && settings.transfer_data !== undefined) {
+    return "transfer_data";
+  }
+
+  return null;
+}
+
+function readHostedStripeUnsupportedSchedulePhaseReason(
+  phase: Stripe.SubscriptionSchedule.Phase,
+  context: HostedSwitchScheduleContext,
+): string | null {
+  if (hasHostedStripeValues(phase.add_invoice_items)) {
+    return "add_invoice_items";
+  }
+  if (
+    phase.application_fee_percent !== null
+    && phase.application_fee_percent !== undefined
+  ) {
+    return "application_fee_percent";
+  }
+  if (hasUnsupportedHostedStripeAutomaticTax(phase.automatic_tax)) {
+    return "automatic_tax";
+  }
+  if (phase.billing_thresholds !== null && phase.billing_thresholds !== undefined) {
+    return "billing_thresholds";
+  }
+  if (phase.collection_method && phase.collection_method !== "charge_automatically") {
+    return "collection_method";
+  }
+  if (hasHostedStripeValues(phase.default_tax_rates)) {
+    return "default_tax_rates";
+  }
+  if (hasHostedStripeValues(phase.discounts)) {
+    return "discounts";
+  }
+  if (hasUnsupportedHostedStripeInvoiceSettings(phase.invoice_settings)) {
+    return "invoice_settings";
+  }
+  if (phase.on_behalf_of !== null && phase.on_behalf_of !== undefined) {
+    return "on_behalf_of";
+  }
+  if (phase.transfer_data !== null && phase.transfer_data !== undefined) {
+    return "transfer_data";
+  }
+
+  for (const item of phase.items) {
+    const priceId = coerceStripeObjectId(item.price);
+    if (
+      priceId !== context.edgeConfig.priceId
+      && priceId !== context.pulseConfig.priceId
+    ) {
+      continue;
+    }
+
+    const itemReason = readHostedStripeUnsupportedItemConfigurationReason(item);
+    if (itemReason) {
+      return `item.${itemReason}`;
+    }
+  }
+
+  return null;
+}
+
+function readHostedStripeUnsupportedItemConfigurationReason(item: {
+  billing_thresholds?: object | null;
+  discounts?: readonly unknown[] | null;
+  metadata?: Stripe.Metadata | null;
+  tax_rates?: readonly unknown[] | null;
+}): string | null {
+  if (item.billing_thresholds !== null && item.billing_thresholds !== undefined) {
+    return "billing_thresholds";
+  }
+  if (hasHostedStripeValues(item.discounts)) {
+    return "discounts";
+  }
+  if (item.metadata && Object.keys(item.metadata).length > 0) {
+    return "metadata";
+  }
+  if (hasHostedStripeValues(item.tax_rates)) {
+    return "tax_rates";
+  }
+
+  return null;
+}
+
+function hasUnsupportedHostedStripeAutomaticTax(
+  automaticTax: {
+    disabled_reason?: string | null;
+    enabled: boolean;
+    liability?: object | null;
+  } | undefined,
+): boolean {
+  return automaticTax?.enabled === true
+    || (automaticTax?.disabled_reason !== null
+      && automaticTax?.disabled_reason !== undefined)
+    || (automaticTax?.liability !== null
+      && automaticTax?.liability !== undefined);
+}
+
+function hasUnsupportedHostedStripeInvoiceSettings(
+  invoiceSettings: {
+    account_tax_ids?: readonly unknown[] | null;
+    days_until_due?: number | null;
+    issuer?: {
+      type: string;
+    } | null;
+  } | null | undefined,
+): boolean {
+  if (!invoiceSettings) {
+    return false;
+  }
+
+  return hasHostedStripeValues(invoiceSettings.account_tax_ids)
+    || (invoiceSettings?.days_until_due !== null
+      && invoiceSettings?.days_until_due !== undefined)
+    || (invoiceSettings?.issuer?.type !== undefined
+      && invoiceSettings.issuer.type !== "self")
+    || hasHostedStripeValues(Reflect.get(invoiceSettings, "custom_fields"))
+    || Reflect.get(invoiceSettings, "description") != null
+    || Reflect.get(invoiceSettings, "footer") != null
+    || Reflect.get(invoiceSettings, "rendering_options") != null;
+}
+
+function hasUnsupportedHostedStripePaymentSettings(
+  paymentSettings: {
+    payment_method_options?: object | null;
+    payment_method_types?: readonly unknown[] | null;
+    save_default_payment_method?: string | null;
+  } | null | undefined,
+): boolean {
+  return (paymentSettings?.payment_method_options !== null
+      && paymentSettings?.payment_method_options !== undefined)
+    || hasHostedStripeValues(paymentSettings?.payment_method_types)
+    || (paymentSettings?.save_default_payment_method !== null
+      && paymentSettings?.save_default_payment_method !== undefined
+      && paymentSettings.save_default_payment_method !== "off");
+}
+
+function hasHostedStripeValues(
+  values: unknown,
+): boolean {
+  return Array.isArray(values) && values.length > 0;
+}
+
 async function retrieveHostedBillingPlanSwitchSchedule(input: {
+  providerDeadlineMs: number;
   scheduleId: string;
   stripe: Stripe;
 }): Promise<Stripe.SubscriptionSchedule> {
+  const requestOptions = buildHostedBillingPlanSwitchStripeRequestOptions({
+    providerDeadlineMs: input.providerDeadlineMs,
+  });
   return callHostedStripePlanSwitchOperation(
     "subscriptionSchedules.retrieve",
-    () => input.stripe.subscriptionSchedules.retrieve(input.scheduleId),
+    () =>
+      input.stripe.subscriptionSchedules.retrieve(
+        input.scheduleId,
+        {},
+        requestOptions,
+      ),
   );
 }
 
 async function createHostedBillingPlanSwitchScheduleFromSubscription(input: {
   context: HostedSwitchScheduleContext;
+  providerDeadlineMs: number;
   stripe: Stripe;
   stripeSubscriptionId: string;
 }): Promise<Stripe.SubscriptionSchedule> {
+  const requestOptions = buildHostedBillingPlanSwitchStripeRequestOptions({
+    idempotencyKey:
+      buildHostedBillingPlanSwitchToPulseCreateIdempotencyKey(input.context),
+    providerDeadlineMs: input.providerDeadlineMs,
+  });
   return callHostedStripePlanSwitchOperation(
     "subscriptionSchedules.create",
     () =>
       input.stripe.subscriptionSchedules.create({
         from_subscription: input.stripeSubscriptionId,
-      }, {
-        idempotencyKey: buildHostedBillingPlanSwitchToPulseCreateIdempotencyKey(input.context),
-      }),
+      }, requestOptions),
   );
-}
-
-async function tryRecoverHostedBillingPlanSwitchScheduleFromCreateIdempotency(input: {
-  context: HostedSwitchScheduleContext;
-  stripe: Stripe;
-  stripeSubscriptionId: string;
-}): Promise<Stripe.SubscriptionSchedule | null> {
-  try {
-    return await createHostedBillingPlanSwitchScheduleFromSubscription(input);
-  } catch {
-    return null;
-  }
 }
 
 async function updateHostedBillingPlanSwitchToPulseSchedule(input: {
   context: HostedSwitchScheduleContext;
+  providerDeadlineMs: number;
   schedule: Stripe.SubscriptionSchedule;
   stripe: Stripe;
 }): Promise<Stripe.SubscriptionSchedule> {
+  assertHostedStripeScheduleConfigurationSupported(
+    input.schedule,
+    input.context,
+  );
   const currentPhase = requireHostedBillingPlanSwitchCurrentPhase(input.schedule);
+  const requestOptions = buildHostedBillingPlanSwitchStripeRequestOptions({
+    idempotencyKey:
+      buildHostedBillingPlanSwitchToPulseUpdateIdempotencyKey(input.context),
+    providerDeadlineMs: input.providerDeadlineMs,
+  });
   const updatedSchedule = await callHostedStripePlanSwitchOperation(
     "subscriptionSchedules.update",
     () =>
@@ -532,11 +974,13 @@ async function updateHostedBillingPlanSwitchToPulseSchedule(input: {
           buildHostedBillingPlanSwitchFuturePhaseParams(input.context),
         ],
         proration_behavior: "none",
-      }, {
-        idempotencyKey: buildHostedBillingPlanSwitchToPulseUpdateIdempotencyKey(input.context),
-      }),
+      }, requestOptions),
   );
 
+  assertHostedStripeScheduleConfigurationSupported(
+    updatedSchedule,
+    input.context,
+  );
   if (!isHostedBillingPlanSwitchToPulseScheduleCompatible(updatedSchedule, input.context)) {
     throw buildHostedBillingPlanSwitchScheduleConflictError();
   }
@@ -566,8 +1010,22 @@ function buildHostedBillingPlanSwitchCurrentPhaseParams(input: {
   context: HostedSwitchScheduleContext;
   phase: Stripe.SubscriptionSchedule.Phase;
 }): Stripe.SubscriptionScheduleUpdateParams.Phase {
+  const defaultPaymentMethodId = coerceStripeObjectId(
+    input.phase.default_payment_method,
+  );
+
   return {
-    ...copySupportedHostedStripeSchedulePhaseFields(input.phase),
+    ...(input.phase.billing_cycle_anchor
+      ? { billing_cycle_anchor: input.phase.billing_cycle_anchor }
+      : {}),
+    ...(input.phase.collection_method
+      ? { collection_method: input.phase.collection_method }
+      : {}),
+    ...(input.phase.currency ? { currency: input.phase.currency } : {}),
+    ...(defaultPaymentMethodId
+      ? { default_payment_method: defaultPaymentMethodId }
+      : {}),
+    ...(input.phase.description ? { description: input.phase.description } : {}),
     end_date: input.context.currentPeriodEndUnix,
     items: [
       {
@@ -575,7 +1033,12 @@ function buildHostedBillingPlanSwitchCurrentPhaseParams(input: {
         quantity: 1,
       },
     ],
+    ...(input.phase.metadata ? { metadata: input.phase.metadata } : {}),
+    ...(input.phase.proration_behavior
+      ? { proration_behavior: input.phase.proration_behavior }
+      : {}),
     start_date: input.phase.start_date,
+    ...(input.phase.trial_end ? { trial_end: input.phase.trial_end } : {}),
   };
 }
 
@@ -596,41 +1059,6 @@ function buildHostedBillingPlanSwitchFuturePhaseParams(
     metadata: buildHostedBillingPlanSwitchFuturePhaseMetadata(context),
     proration_behavior: "none",
     start_date: context.currentPeriodEndUnix,
-  };
-}
-
-function copySupportedHostedStripeSchedulePhaseFields(
-  phase: Stripe.SubscriptionSchedule.Phase,
-): Partial<Stripe.SubscriptionScheduleUpdateParams.Phase> {
-  return {
-    ...(phase.application_fee_percent !== null
-      ? { application_fee_percent: phase.application_fee_percent }
-      : {}),
-    ...(phase.automatic_tax
-      ? {
-          automatic_tax: {
-            enabled: phase.automatic_tax.enabled,
-          },
-        }
-      : {}),
-    ...(phase.billing_cycle_anchor ? { billing_cycle_anchor: phase.billing_cycle_anchor } : {}),
-    ...(phase.collection_method ? { collection_method: phase.collection_method } : {}),
-    ...(phase.currency ? { currency: phase.currency } : {}),
-    ...(typeof coerceStripeObjectId(phase.default_payment_method) === "string"
-      ? { default_payment_method: coerceStripeObjectId(phase.default_payment_method) ?? undefined }
-      : {}),
-    ...(Array.isArray(phase.default_tax_rates) && phase.default_tax_rates.length > 0
-      ? {
-          default_tax_rates: phase.default_tax_rates.flatMap((taxRate) => {
-            const id = coerceStripeObjectId(taxRate);
-            return id ? [id] : [];
-          }),
-        }
-      : {}),
-    ...(phase.description ? { description: phase.description } : {}),
-    ...(phase.metadata ? { metadata: phase.metadata } : {}),
-    ...(phase.proration_behavior ? { proration_behavior: phase.proration_behavior } : {}),
-    ...(phase.trial_end ? { trial_end: phase.trial_end } : {}),
   };
 }
 
@@ -661,7 +1089,12 @@ function buildStripeMetadataUnsetFields(keys: readonly string[]): Stripe.Metadat
 function isHostedBillingPlanSwitchToPulseScheduleCompatible(
   schedule: Stripe.SubscriptionSchedule,
   context: HostedSwitchScheduleContext,
+  subscription?: Stripe.Subscription,
 ): boolean {
+  if (readHostedStripeUnsupportedScheduleConfigurationReason(schedule, context)) {
+    return false;
+  }
+
   if (schedule.status !== "active") {
     return false;
   }
@@ -671,6 +1104,9 @@ function isHostedBillingPlanSwitchToPulseScheduleCompatible(
   }
 
   if (coerceStripeObjectId(schedule.subscription) !== context.stripeSubscriptionId) {
+    return false;
+  }
+  if (coerceStripeObjectId(schedule.customer) !== context.stripeCustomerId) {
     return false;
   }
 
@@ -684,6 +1120,22 @@ function isHostedBillingPlanSwitchToPulseScheduleCompatible(
 
   const [currentPhase, futurePhase] = schedule.phases;
   if (!currentPhase || !futurePhase) {
+    return false;
+  }
+  if (
+    subscription &&
+    (
+      !hasHostedBillingPlanSwitchPristineDefaultSettings({
+        schedule,
+        subscription,
+      }) ||
+      !hasHostedBillingPlanSwitchCurrentPhaseCanonicalState({
+        context,
+        currentPhase,
+        subscription,
+      })
+    )
+  ) {
     return false;
   }
 
@@ -702,13 +1154,126 @@ function isHostedBillingPlanSwitchToPulseScheduleCompatible(
     });
 }
 
+function isHostedBillingPlanSwitchPristineAttachedSchedule(input: {
+  context: HostedSwitchScheduleContext;
+  liveSchedule: Stripe.SubscriptionSchedule;
+  subscription: Stripe.Subscription;
+}): boolean {
+  if (
+    input.liveSchedule.status !== "active"
+    || input.liveSchedule.end_behavior !== "release"
+    || coerceStripeObjectId(input.liveSchedule.subscription)
+      !== input.context.stripeSubscriptionId
+    || coerceStripeObjectId(input.liveSchedule.customer)
+      !== input.context.stripeCustomerId
+    || Object.keys(input.liveSchedule.metadata ?? {}).length > 0
+    || input.liveSchedule.phases.length !== 1
+    || !hasHostedBillingPlanSwitchPristineDefaultSettings({
+      schedule: input.liveSchedule,
+      subscription: input.subscription,
+    })
+  ) {
+    return false;
+  }
+
+  const currentPhase = input.liveSchedule.phases[0];
+  if (
+    !currentPhase
+    || !input.liveSchedule.current_phase
+    || currentPhase.start_date !== input.liveSchedule.current_phase.start_date
+    || currentPhase.end_date !== input.liveSchedule.current_phase.end_date
+    || !hasHostedBillingPlanSwitchCurrentPhaseCanonicalState({
+      context: input.context,
+      currentPhase,
+      subscription: input.subscription,
+    })
+  ) {
+    return false;
+  }
+
+  return true;
+}
+
+function hasHostedBillingPlanSwitchCurrentPhaseCanonicalState(input: {
+  context: HostedSwitchScheduleContext;
+  currentPhase: Stripe.SubscriptionSchedule.Phase;
+  subscription: Stripe.Subscription;
+}): boolean {
+  return input.currentPhase.start_date < input.context.currentPeriodEndUnix &&
+    input.currentPhase.end_date === input.context.currentPeriodEndUnix &&
+    isHostedBillingPlanSwitchPristinePhaseMetadata({
+      phaseMetadata: input.currentPhase.metadata,
+      subscriptionMetadata: input.subscription.metadata,
+    }) &&
+    coerceStripeObjectId(input.currentPhase.default_payment_method) ===
+      coerceStripeObjectId(input.subscription.default_payment_method) &&
+    input.currentPhase.collection_method ===
+      input.subscription.collection_method &&
+    input.currentPhase.description === input.subscription.description &&
+    input.currentPhase.trial_end === null &&
+    hasExactHostedStripeSchedulePhaseItems(
+      input.currentPhase,
+      input.subscription.items.data,
+    );
+}
+
+function isHostedBillingPlanSwitchPristinePhaseMetadata(input: {
+  phaseMetadata: Stripe.Metadata | null;
+  subscriptionMetadata: Stripe.Metadata;
+}): boolean {
+  const phaseMetadata = input.phaseMetadata ?? {};
+  if (Object.keys(phaseMetadata).length === 0) {
+    return true;
+  }
+
+  const subscriptionEntries = Object.entries(input.subscriptionMetadata);
+  return Object.keys(phaseMetadata).length === subscriptionEntries.length &&
+    subscriptionEntries.every(
+      ([key, value]) => phaseMetadata[key] === value,
+    );
+}
+
+function hasHostedBillingPlanSwitchPristineDefaultSettings(input: {
+  schedule: Stripe.SubscriptionSchedule;
+  subscription: Stripe.Subscription;
+}): boolean {
+  const settings = input.schedule.default_settings;
+  return settings.billing_cycle_anchor === "automatic" &&
+    settings.collection_method === input.subscription.collection_method &&
+    coerceStripeObjectId(settings.default_payment_method) ===
+      coerceStripeObjectId(input.subscription.default_payment_method) &&
+    settings.description === input.subscription.description;
+}
+
+function hasExactHostedStripeSchedulePhaseItems(
+  phase: Stripe.SubscriptionSchedule.Phase,
+  subscriptionItems: readonly Stripe.SubscriptionItem[],
+): boolean {
+  const canonicalizeItem = (item: {
+    price: string | Stripe.Price | Stripe.DeletedPrice;
+    quantity?: number | null;
+  }): string | null => {
+    const priceId = coerceStripeObjectId(item.price);
+    return priceId
+      ? `${priceId}:${item.quantity ?? "metered"}`
+      : null;
+  };
+  const actualItems = phase.items.map(canonicalizeItem).sort();
+  const expectedItems = subscriptionItems.map(canonicalizeItem).sort();
+  return actualItems.length === expectedItems.length &&
+    !actualItems.includes(null) &&
+    !expectedItems.includes(null) &&
+    actualItems.every((item, index) => item === expectedItems[index]);
+}
+
 function isHostedBillingPlanSwitchScheduleMetadataCompatible(
   metadata: Stripe.Metadata | null,
   context: HostedSwitchScheduleContext,
 ): boolean {
   return metadata?.murphPlanSwitch === SWITCH_TO_PULSE_MARKER &&
     metadata.memberId === context.memberId &&
-    metadata.billingPlanCode === SWITCH_TO_PULSE_TARGET_PLAN;
+    metadata.billingPlanCode === SWITCH_TO_PULSE_TARGET_PLAN &&
+    metadata.checkoutOffer === HOSTED_STANDARD_CHECKOUT_OFFER;
 }
 
 function hasHostedStripeSchedulePhaseItems(
@@ -735,18 +1300,32 @@ function hasHostedStripeTrialMetadataClears(metadata: Stripe.Metadata | null): b
 
 async function persistHostedBillingPlanSwitchToPulsePendingFields(input: {
   context: HostedSwitchScheduleContext;
-  prisma: PrismaClient;
+  expectedStripeCustomerId: string;
   schedule: Stripe.SubscriptionSchedule;
+  tx: Prisma.TransactionClient;
 }): Promise<void> {
-  await input.prisma.$transaction(async (tx) => {
-    await writeHostedMemberStripeBillingRefTx({
-      memberId: input.context.memberId,
-      scheduledBillingEffectiveAt: input.context.currentPeriodEnd,
-      scheduledBillingPlanCode: SWITCH_TO_PULSE_TARGET_PLAN,
-      stripeSubscriptionScheduleId: input.schedule.id,
-      tx,
-    });
-  }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+  const member = await readHostedMemberCoreState({
+    memberId: input.context.memberId,
+    prisma: input.tx,
+  });
+  const billingRef = await readHostedMemberStripeBillingRef({
+    memberId: input.context.memberId,
+    prisma: input.tx,
+  });
+  assertHostedBillingPlanSwitchLockedSource({
+    billingRef,
+    expectedStripeCustomerId: input.expectedStripeCustomerId,
+    expectedStripeSubscriptionId: input.context.stripeSubscriptionId,
+    member,
+  });
+
+  await writeHostedMemberStripeBillingRefTx({
+    memberId: input.context.memberId,
+    scheduledBillingEffectiveAt: input.context.currentPeriodEnd,
+    scheduledBillingPlanCode: SWITCH_TO_PULSE_TARGET_PLAN,
+    stripeSubscriptionScheduleId: input.schedule.id,
+    tx: input.tx,
+  });
 }
 
 function buildHostedBillingPlanSwitchToPulseCreateIdempotencyKey(
@@ -763,7 +1342,7 @@ function buildHostedBillingPlanSwitchToPulseCreateIdempotencyKey(
 function buildHostedBillingPlanSwitchToPulseUpdateIdempotencyKey(
   context: HostedSwitchScheduleContext,
 ): string {
-  return `hosted-billing-switch-to-pulse:update:${sha256Hex(JSON.stringify({
+  return `hosted-billing-switch-to-pulse:${SWITCH_TO_PULSE_UPDATE_OPERATION_VERSION}:update:${sha256Hex(JSON.stringify({
     currentPeriodEnd: context.currentPeriodEndUnix,
     memberId: context.memberId,
     edgePriceId: context.edgeConfig.priceId,
@@ -771,6 +1350,33 @@ function buildHostedBillingPlanSwitchToPulseUpdateIdempotencyKey(
     stripeSubscriptionId: context.stripeSubscriptionId,
     targetPlanCode: SWITCH_TO_PULSE_TARGET_PLAN,
   }))}`;
+}
+
+function buildHostedBillingPlanSwitchStripeRequestOptions(input: {
+  idempotencyKey?: string;
+  providerDeadlineMs: number;
+}): Stripe.RequestOptions {
+  const remainingMs = Math.floor(input.providerDeadlineMs - Date.now());
+  if (remainingMs <= 0) {
+    throw hostedOnboardingError({
+      code: "HOSTED_BILLING_STRIPE_PLAN_SWITCH_UNAVAILABLE",
+      httpStatus: 502,
+      message:
+        "Stripe billing is unavailable for plan changes right now. Try again shortly.",
+      retryable: true,
+    });
+  }
+
+  return {
+    ...(input.idempotencyKey
+      ? { idempotencyKey: input.idempotencyKey }
+      : {}),
+    maxNetworkRetries: 0,
+    timeout: Math.min(
+      remainingMs,
+      SWITCH_TO_PULSE_STRIPE_REQUEST_TIMEOUT_MS,
+    ),
+  };
 }
 
 function buildHostedStripeSubscriptionStateUnsupportedError(reason: string) {
@@ -792,11 +1398,33 @@ function buildHostedStripeSubscriptionItemsUnsupportedError() {
   });
 }
 
+function buildHostedStripeSubscriptionConfigurationUnsupportedError(
+  reason: string,
+) {
+  return hostedOnboardingError({
+    code: "HOSTED_BILLING_STRIPE_SUBSCRIPTION_CONFIGURATION_UNSUPPORTED",
+    details: {
+      code: reason,
+    },
+    httpStatus: 409,
+    message:
+      "Your Stripe subscription has billing settings that this plan change cannot safely preserve.",
+  });
+}
+
 function buildHostedBillingPlanSwitchScheduleConflictError() {
   return hostedOnboardingError({
     code: "HOSTED_BILLING_STRIPE_SCHEDULE_CONFLICT",
     httpStatus: 409,
     message: "A billing change is already scheduled. Contact support if you want to change it.",
+  });
+}
+
+function buildHostedBillingPlanSwitchSourceChangedError() {
+  return hostedOnboardingError({
+    code: "HOSTED_BILLING_PLAN_SWITCH_STATE_CHANGED",
+    httpStatus: 409,
+    message: "Your billing ownership changed before this plan switch could start.",
   });
 }
 
@@ -808,12 +1436,16 @@ async function callHostedStripePlanSwitchOperation<T>(
     return await operation();
   } catch (error) {
     logHostedStripeFailure({ error, operationName });
+    const retryable = isHostedStripeRetryableFailure(error);
     throw hostedOnboardingError({
+      cause: error,
       code: "HOSTED_BILLING_STRIPE_PLAN_SWITCH_UNAVAILABLE",
       details: describeHostedStripeErrorDetails({ error, operationName }),
-      httpStatus: 502,
-      message: "Stripe billing is unavailable for plan changes right now. Try again shortly.",
-      retryable: true,
+      httpStatus: retryable ? 502 : 500,
+      message: retryable
+        ? "Stripe billing is unavailable for plan changes right now. Try again shortly."
+        : "Stripe could not complete this plan change. Contact support before trying again.",
+      retryable,
     });
   }
 }

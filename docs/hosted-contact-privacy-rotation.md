@@ -1,6 +1,6 @@
 # Hosted Contact-Privacy Rotation
 
-Last verified: 2026-07-16
+Last verified: 2026-07-25
 
 ## Goal
 
@@ -46,6 +46,7 @@ The encrypted owner-table fields already preserve the raw values needed to re-de
 - `HostedMemberRouting.telegramUserLookupKey`
 - `HostedMemberBillingRef.stripeCustomerLookupKey`
 - `HostedMemberBillingRef.stripeSubscriptionLookupKey`
+- `HostedMemberBillingRef.stripeCheckoutSessionLookupKey`
 - `HostedGroupDisclosurePermission.permissionDigest`, re-derived from the
   group-owned encrypted permission text and owning group id
 

@@ -19,9 +19,9 @@ const mocks = vi.hoisted(() => {
 
   const state = {
     activateHostedMemberForPositiveSourceTx: vi.fn(),
-  applyStripeCheckoutCompleted: vi.fn(),
-  cancelHostedFamilySponsoredCheckoutSubscription: vi.fn(),
-  cancelHostedPulseTrialCheckoutLoserSubscription: vi.fn(),
+    applyStripeCheckoutCompleted: vi.fn(),
+    cancelHostedPulseTrialCheckoutLoserSubscription: vi.fn(),
+    executeHostedCheckoutSubscriptionCleanup: vi.fn(),
     findMemberForStripeObject: vi.fn(),
     getHostedInviteStatus: vi.fn(),
     listHostedStripeCheckoutSessionMemberIds: vi.fn(),
@@ -91,10 +91,13 @@ vi.mock("@/src/lib/hosted-onboarding/stripe-billing-lookup", async () => {
 
 vi.mock("@/src/lib/hosted-onboarding/stripe-billing-events", () => ({
   applyStripeCheckoutCompleted: mocks.applyStripeCheckoutCompleted,
-  cancelHostedFamilySponsoredCheckoutSubscription:
-    mocks.cancelHostedFamilySponsoredCheckoutSubscription,
   cancelHostedPulseTrialCheckoutLoserSubscription:
     mocks.cancelHostedPulseTrialCheckoutLoserSubscription,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/stripe-checkout-subscription-cleanup", () => ({
+  executeHostedCheckoutSubscriptionCleanup:
+    mocks.executeHostedCheckoutSubscriptionCleanup,
 }));
 
 import { reconcileHostedBillingCheckoutSuccess } from "@/src/lib/hosted-onboarding/billing-success-service";
@@ -139,8 +142,8 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
       hostedExecutionEventId: null,
       welcomeEmailMemberId: null,
     });
-    mocks.cancelHostedFamilySponsoredCheckoutSubscription.mockResolvedValue(undefined);
     mocks.cancelHostedPulseTrialCheckoutLoserSubscription.mockResolvedValue(undefined);
+    mocks.executeHostedCheckoutSubscriptionCleanup.mockResolvedValue(undefined);
     mocks.sendHostedSignupWelcomeEmailForMemberBestEffort.mockResolvedValue(undefined);
     mocks.getHostedInviteStatus.mockResolvedValue(createStatus({
       stage: "activating",
@@ -208,6 +211,8 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
           },
         }),
         tx,
+        undefined,
+        expect.any(Date),
       );
       expect(mocks.activateHostedMemberForPositiveSourceTx).not.toHaveBeenCalled();
       expect(mocks.signalHostedMemberActivationRuntimeWakeBestEffortResult).not.toHaveBeenCalled();
@@ -248,6 +253,8 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
         },
       }),
       tx,
+      undefined,
+      expect.any(Date),
     );
     expect(mocks.activateHostedMemberForPositiveSourceTx).not.toHaveBeenCalled();
     expect(mocks.signalHostedMemberActivationRuntimeWakeBestEffortResult).not.toHaveBeenCalled();
@@ -319,9 +326,17 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
         callback: (innerTx: typeof tx) => Promise<unknown>,
       ) => callback(tx)),
     };
+    const cleanupCandidate = {
+      checkoutAttemptId: "attempt_123",
+      checkoutIntentHash: "intent_123",
+      checkoutSessionId: "cs_123",
+      memberId: "member_123",
+      reason: "family_sponsored",
+      stripeSubscriptionId: "sub_superseded",
+    };
     mocks.applyStripeCheckoutCompleted.mockResolvedValueOnce({
       activatedMemberId: null,
-      cleanupFamilySponsoredStripeSubscriptionId: "sub_superseded",
+      cleanupCheckoutSubscription: cleanupCandidate,
       hostedExecutionEventId: null,
       welcomeEmailMemberId: null,
     });
@@ -333,10 +348,98 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
       sessionId: "cs_123",
     })).resolves.toEqual(createStatus({ stage: "activating" }));
 
-    expect(mocks.cancelHostedFamilySponsoredCheckoutSubscription).toHaveBeenCalledWith({
-      subscriptionId: "sub_superseded",
+    expect(mocks.executeHostedCheckoutSubscriptionCleanup).toHaveBeenCalledWith({
+      candidate: cleanupCandidate,
+      prisma,
+      stripe: mocks.stripe,
     });
     expect(mocks.cancelHostedPulseTrialCheckoutLoserSubscription).not.toHaveBeenCalled();
+  });
+
+  it("runs superseded Checkout financial cleanup before returning success", async () => {
+    const tx = {
+      __tag: "tx",
+      $queryRaw: vi.fn(async () => []),
+    };
+    const prisma = {
+      $transaction: vi.fn(async (
+        callback: (innerTx: typeof tx) => Promise<unknown>,
+      ) => callback(tx)),
+    };
+    const cleanupCandidate = {
+      checkoutAttemptId: "attempt_123",
+      checkoutIntentHash: "intent_123",
+      checkoutSessionId: "cs_123",
+      memberId: "member_123",
+      reason: "superseded",
+      stripeSubscriptionId: "sub_loser",
+    };
+    mocks.applyStripeCheckoutCompleted.mockResolvedValueOnce({
+      activatedMemberId: null,
+      cleanupCheckoutSubscription: cleanupCandidate,
+      hostedExecutionEventId: null,
+      welcomeEmailMemberId: null,
+    });
+
+    await expect(reconcileHostedBillingCheckoutSuccess({
+      inviteCode: "invite-code",
+      member: createAuthenticatedMember(),
+      prisma: prisma as never,
+      sessionId: "cs_123",
+    })).resolves.toEqual(createStatus({ stage: "activating" }));
+
+    expect(mocks.executeHostedCheckoutSubscriptionCleanup).toHaveBeenCalledWith({
+      candidate: cleanupCandidate,
+      prisma,
+      stripe: mocks.stripe,
+    });
+    expect(mocks.getHostedInviteStatus).toHaveBeenCalledOnce();
+  });
+
+  it("does not emit success effects until Checkout financial cleanup succeeds", async () => {
+    const tx = {
+      __tag: "tx",
+      $queryRaw: vi.fn(async () => []),
+    };
+    const prisma = {
+      $transaction: vi.fn(async (
+        callback: (innerTx: typeof tx) => Promise<unknown>,
+      ) => callback(tx)),
+    };
+    const cleanupCandidate = {
+      checkoutAttemptId: "attempt_123",
+      checkoutIntentHash: "intent_123",
+      checkoutSessionId: "cs_123",
+      memberId: "member_123",
+      reason: "superseded",
+      stripeSubscriptionId: "sub_loser",
+    };
+    mocks.applyStripeCheckoutCompleted.mockResolvedValueOnce({
+      activatedMemberId: "member_123",
+      cleanupCheckoutSubscription: cleanupCandidate,
+      hostedExecutionEventId: "event_123",
+      welcomeEmailMemberId: "member_123",
+    });
+    mocks.executeHostedCheckoutSubscriptionCleanup.mockRejectedValueOnce(
+      Object.assign(new Error("refund pending"), {
+        code: "HOSTED_CHECKOUT_CLEANUP_REFUND_PENDING",
+        retryable: true,
+      }),
+    );
+
+    await expect(reconcileHostedBillingCheckoutSuccess({
+      inviteCode: "invite-code",
+      member: createAuthenticatedMember(),
+      prisma: prisma as never,
+      sessionId: "cs_123",
+    })).rejects.toMatchObject({
+      code: "HOSTED_CHECKOUT_CLEANUP_REFUND_PENDING",
+      retryable: true,
+    });
+
+    expect(mocks.getHostedInviteStatus).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMemberActivationRuntimeWakeBestEffortResult).not.toHaveBeenCalled();
+    expect(mocks.sendHostedSignupWelcomeEmailForMemberBestEffort).not.toHaveBeenCalled();
   });
 
   it("passes checkout welcome candidates through the durable welcome gate without waking runtime", async () => {
@@ -452,6 +555,8 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
         subscription: null,
       }),
       tx,
+      undefined,
+      expect.any(Date),
     );
     expect(mocks.activateHostedMemberForPositiveSourceTx).not.toHaveBeenCalled();
     expect(mocks.signalHostedMemberActivationRuntimeWakeBestEffortResult).not.toHaveBeenCalled();

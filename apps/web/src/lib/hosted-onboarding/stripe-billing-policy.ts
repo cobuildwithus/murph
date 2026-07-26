@@ -25,6 +25,7 @@ import {
 
 export type HostedStripeBillingFreshnessPolicy =
   | "auto-pulse-trial-entitlement"
+  | "canonical-financial-state"
   | "strict"
   | "positive-invoice-entitlement"
   | "trial-checkout-entitlement";
@@ -70,7 +71,6 @@ export async function writeHostedMemberStripeBillingTx(input: {
   pulseTrialRedeemedAt?: Date | null;
   stripeCustomerId?: string | null;
   stripeSubscriptionId?: string | null;
-  suspendedAtOverride?: Date | null;
   tx: Prisma.TransactionClient;
 }): Promise<HostedMemberBillingSnapshot | null> {
   await lockHostedMemberRow(input.tx, input.member.core.id);
@@ -130,12 +130,23 @@ export async function writeHostedMemberStripeBillingTx(input: {
     stripeCustomerId: input.stripeCustomerId,
     stripeSubscriptionId: input.stripeSubscriptionId,
   });
+  const allowStaleCanonicalFinancialWrite = isStale &&
+    freshnessPolicy === "canonical-financial-state" &&
+    hostedStripeBillingRefValueMatches(
+      currentMember.billingRef?.stripeCustomerId,
+      input.stripeCustomerId,
+    ) &&
+    hostedStripeBillingRefValueMatches(
+      currentMember.billingRef?.stripeSubscriptionId,
+      input.stripeSubscriptionId,
+    );
 
   if (
     isStale &&
     !allowStalePositiveInvoiceWrite &&
     !allowStaleTrialCheckoutWrite &&
-    !allowStaleAutoPulseTrialWrite
+    !allowStaleAutoPulseTrialWrite &&
+    !allowStaleCanonicalFinancialWrite
   ) {
     return null;
   }
@@ -145,7 +156,8 @@ export async function writeHostedMemberStripeBillingTx(input: {
     preserveCurrentWhenNextMissing:
       allowStalePositiveInvoiceWrite ||
       allowStaleTrialCheckoutWrite ||
-      allowStaleAutoPulseTrialWrite,
+      allowStaleAutoPulseTrialWrite ||
+      allowStaleCanonicalFinancialWrite,
     stripeCustomerId: input.stripeCustomerId,
     stripeSubscriptionId: input.stripeSubscriptionId,
   });
@@ -166,7 +178,6 @@ export async function writeHostedMemberStripeBillingTx(input: {
     billingStatus: nextBillingStatus,
     memberId: currentMember.core.id,
     prisma: input.tx,
-    suspendedAt: input.suspendedAtOverride,
   });
 
   await writeHostedMemberStripeBillingRefTx({
@@ -245,29 +256,6 @@ export async function writeHostedMemberStripeBillingRefIfFreshTx(input: {
   return readHostedMemberBillingSnapshot({
     memberId: input.memberId,
     prisma: input.tx,
-  });
-}
-
-export async function suspendHostedMemberForBillingReversalTx(input: {
-  canonicalBillingStatus: HostedBillingStatus | null;
-  dispatchContext: Pick<HostedStripeDispatchContext, "eventCreatedAt" | "sourceEventId" | "sourceType">;
-  member: HostedMemberBillingSnapshot;
-  stripeCustomerId?: string | null;
-  tx: Prisma.TransactionClient;
-}): Promise<void> {
-  await writeHostedMemberStripeBillingTx({
-    billingStatus: HostedBillingStatus.unpaid,
-    canonicalBillingStatus: input.canonicalBillingStatus,
-    dispatchContext: {
-      eventCreatedAt: input.dispatchContext.eventCreatedAt,
-      occurredAt: input.dispatchContext.eventCreatedAt.toISOString(),
-      sourceEventId: input.dispatchContext.sourceEventId,
-      sourceType: input.dispatchContext.sourceType,
-    },
-    member: input.member,
-    stripeCustomerId: input.stripeCustomerId,
-    suspendedAtOverride: input.dispatchContext.eventCreatedAt,
-    tx: input.tx,
   });
 }
 

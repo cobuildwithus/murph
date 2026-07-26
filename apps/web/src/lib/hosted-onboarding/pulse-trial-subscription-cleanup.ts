@@ -21,7 +21,11 @@ import {
 import {
   readHostedMemberBillingSnapshot,
 } from "./hosted-member-store";
-import { logHostedStripeFailure } from "./stripe-error-log";
+import { classifyHostedStripeFailure } from "./stripe-billing-state";
+import {
+  describeHostedStripeErrorDetails,
+  logHostedStripeFailure,
+} from "./stripe-error-log";
 
 export type HostedPulseTrialCandidateDisposition =
   | "current"
@@ -273,12 +277,19 @@ export async function retrieveHostedPulseTrialCleanupTarget(input: {
       error,
       operationName: "subscription.retrieve.trial-cleanup-target",
     });
+    const failure = classifyHostedStripeFailure(error);
     throw hostedOnboardingError({
       cause: error,
       code: "HOSTED_PULSE_TRIAL_CLEANUP_FAILED",
-      httpStatus: 502,
-      message: "Murph could not confirm an unused Stripe trial. Try again.",
-      retryable: true,
+      details: describeHostedStripeErrorDetails({
+        error,
+        operationName: "subscription.retrieve.trial-cleanup-target",
+      }),
+      httpStatus: failure.httpStatus,
+      message: failure.kind === "provider_ambiguous"
+        ? "Murph could not confirm an unused Stripe trial. Try again."
+        : "Stripe rejected the unused-trial lookup. Contact support.",
+      retryable: failure.retryable,
     });
   }
 }
@@ -310,12 +321,19 @@ export async function cancelHostedPulseTrialLoserSubscription(input: {
       error,
       operationName: "subscription.cancel.trial-loser",
     });
+    const failure = classifyHostedStripeFailure(error);
     throw hostedOnboardingError({
       cause: error,
       code: "HOSTED_PULSE_TRIAL_CLEANUP_FAILED",
-      httpStatus: 502,
-      message: "Murph could not cancel an unused Stripe trial. Try again.",
-      retryable: true,
+      details: describeHostedStripeErrorDetails({
+        error,
+        operationName: "subscription.cancel.trial-loser",
+      }),
+      httpStatus: failure.httpStatus,
+      message: failure.kind === "provider_ambiguous"
+        ? "Murph could not cancel an unused Stripe trial. Try again."
+        : "Stripe rejected the unused-trial cleanup. Contact support.",
+      retryable: failure.retryable,
     });
   }
 }

@@ -483,6 +483,7 @@ test("phone-bound invite to a full plan is not web-acceptable", async () => {
 
 test("revoke cancels a pending invite for the owner", async () => {
   const tx = {
+    $queryRaw: vi.fn().mockResolvedValue([]),
     hostedAccountGroup: {
       findUnique: vi.fn().mockResolvedValue(GROUP),
     },
@@ -494,20 +495,23 @@ test("revoke cancels a pending invite for the owner", async () => {
   const revoked = await revokeHostedFamilyInviteTx({
     groupId: "hbag_1",
     inviteId: "inv_dad",
+    now: NOW,
     ownerMemberId: "m_owner",
     // @ts-expect-error: focused tx double
     tx,
   });
 
   expect(revoked).toBe(true);
+  expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
   expect(tx.hostedAccountGroupInvite.updateMany).toHaveBeenCalledWith({
-    data: { status: "revoked" },
+    data: { status: "revoked", updatedAt: NOW },
     where: { groupId: "hbag_1", id: "inv_dad", status: "pending" },
   });
 });
 
 test("revoke rejects a non-owner", async () => {
   const tx = {
+    $queryRaw: vi.fn().mockResolvedValue([]),
     hostedAccountGroup: {
       findUnique: vi.fn().mockResolvedValue(GROUP),
     },
@@ -525,11 +529,13 @@ test("revoke rejects a non-owner", async () => {
       tx,
     }),
   ).rejects.toMatchObject({ code: "HOSTED_FAMILY_OWNER_REQUIRED" });
+  expect(tx.$queryRaw).not.toHaveBeenCalled();
   expect(tx.hostedAccountGroupInvite.updateMany).not.toHaveBeenCalled();
 });
 
 test("revoke returns false when no pending invite matches", async () => {
   const tx = {
+    $queryRaw: vi.fn().mockResolvedValue([]),
     hostedAccountGroup: {
       findUnique: vi.fn().mockResolvedValue(GROUP),
     },

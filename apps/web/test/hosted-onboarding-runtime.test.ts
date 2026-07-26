@@ -2,9 +2,13 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import type { HostedOnboardingEnvironment } from "@/src/lib/hosted-onboarding/env";
 import {
+  assertHostedStripePortalConfigurationsForDeployment,
+} from "@/src/lib/hosted-onboarding/stripe-portal-config";
+import {
   requireHostedStripeCheckoutConfig,
   requireHostedStripeFamilyPlanConfig,
   requireHostedStripeUsageCreditCheckoutConfig,
+  resolveHostedStripePortalConfigurationId,
 } from "@/src/lib/hosted-onboarding/runtime";
 
 const globalForHostedOnboarding = globalThis as typeof globalThis & {
@@ -12,6 +16,11 @@ const globalForHostedOnboarding = globalThis as typeof globalThis & {
   __murphHostedOnboardingStripe?: unknown;
 };
 const originalVercelEnvironment = process.env.VERCEL_ENV;
+const PORTAL_CONFIGURATION_IDS = {
+  family: "bpc_family",
+  member: "bpc_member",
+  payment_recovery: "bpc_paymentrecovery",
+} as const;
 
 function createHostedOnboardingEnvironment(
   overrides: Partial<HostedOnboardingEnvironment> = {},
@@ -43,6 +52,7 @@ function createHostedOnboardingEnvironment(
       edge: "price_family_edge_123",
       pulse: "price_family_pulse_123",
     },
+    stripePortalConfigurationIds: PORTAL_CONFIGURATION_IDS,
     stripePriceIdsByPlan: {
       launch_edge_monthly: "price_edge_monthly_123",
       launch_monthly: "price_monthly_123",
@@ -61,17 +71,17 @@ function createHostedOnboardingEnvironment(
   };
 }
 
-describe("requireHostedStripeCheckoutConfig", () => {
-  afterEach(() => {
-    delete globalForHostedOnboarding.__murphHostedOnboardingEnv;
-    delete globalForHostedOnboarding.__murphHostedOnboardingStripe;
-    if (originalVercelEnvironment === undefined) {
-      delete process.env.VERCEL_ENV;
-    } else {
-      process.env.VERCEL_ENV = originalVercelEnvironment;
-    }
-  });
+afterEach(() => {
+  delete globalForHostedOnboarding.__murphHostedOnboardingEnv;
+  delete globalForHostedOnboarding.__murphHostedOnboardingStripe;
+  if (originalVercelEnvironment === undefined) {
+    delete process.env.VERCEL_ENV;
+  } else {
+    process.env.VERCEL_ENV = originalVercelEnvironment;
+  }
+});
 
+describe("requireHostedStripeCheckoutConfig", () => {
   it("allows checkout config with the hosted recurring price", () => {
     globalForHostedOnboarding.__murphHostedOnboardingEnv =
       createHostedOnboardingEnvironment();
@@ -153,5 +163,137 @@ describe("requireHostedStripeCheckoutConfig", () => {
       code: "STRIPE_PRICE_ID_REQUIRED",
       httpStatus: 500,
     }));
+  });
+});
+
+describe("Stripe Billing Portal runtime configuration", () => {
+  it("resolves the dedicated configuration for each portal purpose", () => {
+    for (const kind of ["family", "member", "payment_recovery"] as const) {
+      expect(resolveHostedStripePortalConfigurationId(kind, {
+        environment: {
+          isProduction: true,
+          stripePortalConfigurationIds: PORTAL_CONFIGURATION_IDS,
+        },
+      })).toBe(PORTAL_CONFIGURATION_IDS[kind]);
+    }
+  });
+
+  it("allows the mutable Stripe default only in a local or test runtime", () => {
+    delete process.env.VERCEL_ENV;
+    expect(resolveHostedStripePortalConfigurationId("member", {
+      environment: {
+        isProduction: false,
+        stripePortalConfigurationIds: {
+          ...PORTAL_CONFIGURATION_IDS,
+          member: null,
+        },
+      },
+    })).toBeUndefined();
+  });
+
+  it.each(["preview", "production"])(
+    "requires explicit configurations in the ambient Vercel %s runtime",
+    (vercelEnvironment) => {
+      process.env.VERCEL_ENV = vercelEnvironment;
+
+      expect(() =>
+        resolveHostedStripePortalConfigurationId("member", {
+          environment: {
+            isProduction: false,
+            stripePortalConfigurationIds: {
+              ...PORTAL_CONFIGURATION_IDS,
+              member: null,
+            },
+          },
+        })
+      ).toThrowError(
+        expect.objectContaining({
+          code: "HOSTED_BILLING_STRIPE_PORTAL_CONFIGURATION_REQUIRED",
+          details: {
+            configurationKind: "member",
+            envKey:
+              "HOSTED_ONBOARDING_STRIPE_MEMBER_PORTAL_CONFIGURATION_ID",
+            reason: "missing",
+          },
+          retryable: false,
+        }),
+      );
+    },
+  );
+
+  it("fails closed when a production portal purpose has no configuration", () => {
+    expect(() =>
+      resolveHostedStripePortalConfigurationId("payment_recovery", {
+        environment: {
+          isProduction: true,
+          stripePortalConfigurationIds: {
+            ...PORTAL_CONFIGURATION_IDS,
+            payment_recovery: null,
+          },
+        },
+      })
+    ).toThrowError(
+      expect.objectContaining({
+        code: "HOSTED_BILLING_STRIPE_PORTAL_CONFIGURATION_REQUIRED",
+        details: {
+          configurationKind: "payment_recovery",
+          envKey:
+            "HOSTED_ONBOARDING_STRIPE_PAYMENT_RECOVERY_PORTAL_CONFIGURATION_ID",
+          reason: "missing",
+        },
+        httpStatus: 500,
+        retryable: false,
+      }),
+    );
+  });
+
+  it("rejects a configured non-Stripe portal id before provider entry", () => {
+    expect(() =>
+      resolveHostedStripePortalConfigurationId("member", {
+        environment: {
+          isProduction: false,
+          stripePortalConfigurationIds: {
+            ...PORTAL_CONFIGURATION_IDS,
+            member: "portal_member",
+          },
+        },
+      })
+    ).toThrowError(
+      expect.objectContaining({
+        code: "HOSTED_BILLING_STRIPE_PORTAL_CONFIGURATION_REQUIRED",
+        details: {
+          configurationKind: "member",
+          envKey: "HOSTED_ONBOARDING_STRIPE_MEMBER_PORTAL_CONFIGURATION_ID",
+          reason: "invalid",
+        },
+        httpStatus: 500,
+        retryable: false,
+      }),
+    );
+  });
+
+  it("exposes a secret-safe all-config assertion for runtime health checks", () => {
+    expect(() =>
+      assertHostedStripePortalConfigurationsForDeployment({
+        configurationIds: {
+          family: null,
+          member: "portal_member",
+          payment_recovery: "bpc_paymentrecovery",
+        },
+        isDeployedRuntime: true,
+      })
+    ).toThrowError(
+      expect.objectContaining({
+        code: "HOSTED_BILLING_STRIPE_PORTAL_CONFIGURATIONS_REQUIRED",
+        details: {
+          envKeys: [
+            "HOSTED_ONBOARDING_STRIPE_FAMILY_PORTAL_CONFIGURATION_ID",
+            "HOSTED_ONBOARDING_STRIPE_MEMBER_PORTAL_CONFIGURATION_ID",
+          ],
+        },
+        httpStatus: 500,
+        retryable: false,
+      }),
+    );
   });
 });

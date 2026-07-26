@@ -517,12 +517,12 @@ describe("json route helper factory", () => {
       logMessage: "route failed",
     });
     const error = new TypeError(
-      "Invalid callback state for https://example.test/callback?token=secret from /Users/test/app while emailing operator@example.test",
+      "Invalid callback state for https://example.test/callback?token=secret from /srv/private/app while emailing operator@example.test for cus_Qwerty123",
     );
 
     Reflect.set(error, "code", "E_STATE_BAD");
     Reflect.set(error, "statusCode", 400);
-    error.cause = new Error("Bearer sk_test_123");
+    error.cause = new Error("Bearer sk_test_123 for sub_Asdfgh456");
 
     const response = helpers.jsonError(error);
 
@@ -534,11 +534,11 @@ describe("json route helper factory", () => {
       },
     });
     expect(warnSpy).toHaveBeenCalledWith("route failed", {
-      errorCauseMessage: "Bearer <redacted-secret>",
+      errorCauseMessage: "Bearer <redacted-secret> for <redacted-stripe-id>",
       errorCauseType: "Error",
       errorCode: "E_STATE_BAD",
       errorMessage:
-        "Invalid callback state for <redacted-url> from <redacted-path> while emailing <redacted-email>",
+        "Invalid callback state for <redacted-url> from <redacted-path> while emailing <redacted-email> for <redacted-stripe-id>",
       errorResponseCode: "INVALID_REQUEST",
       errorStatusCode: 400,
       errorType: "TypeError",
@@ -575,5 +575,13 @@ describe("json route helper factory", () => {
       .toBe("Cookie: <redacted-secret>");
     expect(httpModule.sanitizeJsonLogString("{\"authorization\":\"Bearer auth-fixture-token\",\"status\":401}"))
       .toBe("{\"authorization\":<redacted-secret>,\"status\":401}");
+  });
+
+  it("redacts private Stripe object ids while preserving request correlation ids", () => {
+    expect(httpModule.sanitizeJsonLogString(
+      "Stripe req_abc123 failed for cus_Qwerty123 sub_Asdfgh456 in_Zxcvbn789 pi_Poiuyt321 pm_Lkjhgf654 ch_Mnbvcx987",
+    )).toBe(
+      "Stripe req_abc123 failed for <redacted-stripe-id> <redacted-stripe-id> <redacted-stripe-id> <redacted-stripe-id> <redacted-stripe-id> <redacted-stripe-id>",
+    );
   });
 });

@@ -26,6 +26,7 @@ import { PlanFeatureCard } from "./plan-feature-card";
 import { toErrorMessage } from "./hosted-settings-sync-helpers";
 
 type StartPaidPulseStatus = "billing_pending" | "idle" | "submitting";
+type StartPaidPulseErrorAction = "billing" | "retry" | null;
 type PulseTrialBillingContinuationStatus =
   | "billing_pending"
   | "error"
@@ -33,6 +34,17 @@ type PulseTrialBillingContinuationStatus =
 
 const pulsePlan = getHostedBillingPlanDefinition("launch_monthly");
 const pulsePriceLabel = `$${pulsePlan.recurringAmountUsdCents / 100}`;
+
+const START_PAID_PULSE_BILLING_RECOVERY_CODES = new Set([
+  "HOSTED_PULSE_TRIAL_START_PAID_ATTEMPT_EXPIRED",
+  "HOSTED_PULSE_TRIAL_START_PAID_CANCELING",
+  "HOSTED_PULSE_TRIAL_START_PAID_COLLECTION_TIMED_OUT",
+  "HOSTED_PULSE_TRIAL_START_PAID_FINANCIAL_STATE_BLOCKED",
+  "HOSTED_PULSE_TRIAL_START_PAID_PAYMENT_FAILED",
+  "HOSTED_PULSE_TRIAL_START_PAID_PREEXISTING_INVOICE_CONFLICT",
+  "HOSTED_PULSE_TRIAL_START_PAID_RESUMED_WITHOUT_INVOICE",
+  "HOSTED_PULSE_TRIAL_START_PAID_UNCOLLECTIBLE",
+]);
 
 const PULSE_FEATURES = [
   "Run experiments, see what changed",
@@ -52,6 +64,7 @@ export function StartPaidPulseButton(props: {
 }) {
   const router = useRouter();
   const [confirmationOpen, setConfirmationOpen] = useState(false);
+  const [errorAction, setErrorAction] = useState<StartPaidPulseErrorAction>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [status, setStatus] = useState<StartPaidPulseStatus>("idle");
   const isSubmitting = status === "submitting";
@@ -62,6 +75,7 @@ export function StartPaidPulseButton(props: {
     setConfirmationOpen(open);
     if (!open) {
       setStatus("idle");
+      setErrorAction(null);
       setErrorMessage(null);
     }
   }
@@ -71,6 +85,7 @@ export function StartPaidPulseButton(props: {
       return;
     }
 
+    setErrorAction(null);
     setErrorMessage(null);
     setStatus("submitting");
     props.onPendingChange?.(true);
@@ -88,17 +103,13 @@ export function StartPaidPulseButton(props: {
         return;
       }
 
-      if (result.status === "payment_required") {
-        setStatus("idle");
-        setErrorMessage("Your payment method is still being confirmed. Try again shortly.");
-        return;
-      }
-
       setStatus("idle");
+      setErrorAction(null);
       setConfirmationOpen(false);
       router.refresh();
     } catch (error) {
       setStatus("idle");
+      setErrorAction(resolveStartPaidPulseErrorAction(error));
       setErrorMessage(toErrorMessage(error, "Could not start Pulse right now."));
     } finally {
       props.onPendingChange?.(false);
@@ -132,6 +143,7 @@ export function StartPaidPulseButton(props: {
         </p>
       ) : null}
       <StartPaidPulseConfirmationDialog
+        errorAction={errorAction}
         errorMessage={errorMessage}
         status={status}
         onConfirm={() => void handleStartPaidPulse()}
@@ -140,6 +152,21 @@ export function StartPaidPulseButton(props: {
       />
     </div>
   );
+}
+
+function resolveStartPaidPulseErrorAction(
+  error: unknown,
+): StartPaidPulseErrorAction {
+  if (!(error instanceof HostedOnboardingApiError)) {
+    return "retry";
+  }
+  if (error.retryable) {
+    return "retry";
+  }
+  return error.code &&
+      START_PAID_PULSE_BILLING_RECOVERY_CODES.has(error.code)
+    ? "billing"
+    : null;
 }
 
 export function PulseTrialBillingContinuation() {
@@ -238,6 +265,7 @@ export function PulseTrialBillingContinuation() {
 }
 
 function StartPaidPulseConfirmationDialog(props: {
+  errorAction: StartPaidPulseErrorAction;
   errorMessage: string | null;
   status: StartPaidPulseStatus;
   onConfirm: () => void;
@@ -294,19 +322,30 @@ function StartPaidPulseConfirmationDialog(props: {
         ) : null}
 
         <div className="flex flex-col gap-2">
-          <Button
-            type="button"
-            size="xl"
-            onClick={props.onConfirm}
-            disabled={isSubmitting}
-            className="w-full"
-          >
-            {isSubmitting
-              ? "Starting..."
-              : props.status === "billing_pending"
-                ? "Check status"
-                : "Start Pulse"}
-          </Button>
+          {props.errorAction === "billing" ? (
+            <BillingPortalButton
+              billingScope="member"
+              block
+              variant="secondary"
+              label="Open billing"
+            />
+          ) : (
+            <Button
+              type="button"
+              size="xl"
+              onClick={props.onConfirm}
+              disabled={isSubmitting}
+              className="w-full"
+            >
+              {isSubmitting
+                ? "Starting..."
+                : props.status === "billing_pending"
+                  ? "Check status"
+                  : props.errorAction === "retry"
+                    ? "Try again"
+                    : "Start Pulse"}
+            </Button>
+          )}
           <Button
             type="button"
             size="xl"

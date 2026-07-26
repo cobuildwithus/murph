@@ -138,6 +138,11 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
     'stripeSubscriptionIdEncrypted String? @map("stripe_subscription_id_encrypted")',
     'stripeSubscriptionScheduleLookupKey String? @unique @map("stripe_subscription_schedule_lookup_key")',
     'stripeSubscriptionScheduleIdEncrypted String? @map("stripe_subscription_schedule_id_encrypted")',
+    'stripeCheckoutSessionLookupKey String? @unique @map("stripe_checkout_session_lookup_key")',
+    'stripeCheckoutSessionIdEncrypted String? @map("stripe_checkout_session_id_encrypted")',
+    'checkoutAttemptId String? @map("checkout_attempt_id")',
+    'checkoutIntentHash String? @map("checkout_intent_hash")',
+    'checkoutCreatedAt DateTime? @map("checkout_created_at")',
     'lastStripeEventCreatedAt DateTime? @map("last_stripe_event_created_at")',
     'currentBillingPhase String? @map("current_billing_phase")',
     'currentBillingPlanCode String? @map("current_billing_plan_code")',
@@ -780,6 +785,13 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
+    const hostedMemberCheckoutAttemptMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260725210000_hosted_member_checkout_attempt/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     expect(migrationEntries).toEqual([
       "2026040600_init",
       "20260425000000_drop_legacy_linq_control_plane",
@@ -904,8 +916,18 @@ describe("hosted Prisma baseline migration", () => {
       "20260724180000_device_connection_source_last_data_at",
       "20260725120000_hosted_observability_retention",
       "20260725120000_hosted_thread_delivery_route",
+      "20260725210000_hosted_member_checkout_attempt",
       "migration_lock.toml",
     ]);
+    expect(hostedMemberCheckoutAttemptMigrationSql).toContain(
+      'ADD COLUMN "checkout_attempt_id" TEXT',
+    );
+    expect(hostedMemberCheckoutAttemptMigrationSql).toContain(
+      'ADD COLUMN "stripe_checkout_session_id_encrypted" TEXT',
+    );
+    expect(hostedMemberCheckoutAttemptMigrationSql).toContain(
+      'CREATE UNIQUE INDEX "hosted_member_billing_ref_stripe_checkout_session_lookup_key_key"',
+    );
     expect(hostedMailboxSubscriptionActionClaimMigrationSql).toContain(
       'ALTER TABLE "hosted_mailbox_item"',
     );

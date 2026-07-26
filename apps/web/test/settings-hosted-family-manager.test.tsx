@@ -27,10 +27,16 @@ vi.mock("next/navigation", () => ({
 vi.mock("@/src/components/hosted-onboarding/client-api", () => ({
   HostedOnboardingApiError: class HostedOnboardingApiError extends Error {
     readonly code: string | null;
+    readonly details: Record<string, unknown> | null;
 
-    constructor(input: { code?: string | null; message: string }) {
+    constructor(input: {
+      code?: string | null;
+      details?: Record<string, unknown> | null;
+      message: string;
+    }) {
       super(input.message);
       this.code = input.code ?? null;
+      this.details = input.details ?? null;
     }
   },
   requestHostedOnboardingJson: mocks.requestHostedOnboardingJson,
@@ -336,6 +342,71 @@ test("HostedFamilyManager hides paid seat quantity controls", async () => {
   }
 });
 
+test("HostedFamilyManager reserves activation copy for not-started Family billing", async () => {
+  const { HostedFamilyManager } = await import(
+    "@/src/components/settings/hosted-family-settings-actions"
+  );
+  const { cleanup, container } = await renderClientComponent(
+    createElement(HostedFamilyManager, {
+      ...baseFamilyManagerProps(),
+      billingActive: false,
+      billingStatus: "not_started",
+    }),
+    { requireButton: false },
+  );
+
+  try {
+    assert.match(
+      container.textContent ?? "",
+      /Billing is still activating\. Your family members get access once payment is confirmed\./,
+    );
+    assert.doesNotMatch(container.textContent ?? "", /Family access is paused\./);
+    assert.equal(buttonByTextOrNull(container, "Manage Family billing"), null);
+    assert.equal(buttonByText(container, "Invite member").disabled, true);
+  } finally {
+    await cleanup();
+  }
+});
+
+test("HostedFamilyManager shows unpaid paused access with Family billing recovery", async () => {
+  mocks.requestHostedOnboardingJson.mockImplementationOnce(() => new Promise(() => {}));
+  const { HostedFamilyManager } = await import(
+    "@/src/components/settings/hosted-family-settings-actions"
+  );
+  const { cleanup, container, window } = await renderClientComponent(
+    createElement(HostedFamilyManager, {
+      ...baseFamilyManagerProps(),
+      billingActive: false,
+      billingStatus: "unpaid",
+    }),
+    { requireButton: false },
+  );
+
+  try {
+    assert.match(container.textContent ?? "", /Family access is paused\./);
+    assert.match(
+      container.textContent ?? "",
+      /The Family subscription is unpaid, so included access is paused\./,
+    );
+    assert.doesNotMatch(container.textContent ?? "", /Billing is still activating/);
+    assert.equal(buttonByText(container, "Invite member").disabled, true);
+
+    const billingButton = buttonByText(container, "Manage Family billing");
+    assert.equal(billingButton.disabled, false);
+    await clickButton(container, window, "Manage Family billing");
+
+    expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
+      method: "POST",
+      payload: {
+        billingScope: "family",
+      },
+      url: "/api/settings/billing/portal",
+    });
+  } finally {
+    await cleanup();
+  }
+});
+
 test("HostedFamilyManager presents rows as mobile cards without forcing horizontal overflow", async () => {
   const { HostedFamilyManager } = await import(
     "@/src/components/settings/hosted-family-settings-actions"
@@ -406,7 +477,7 @@ test("HostedFamilyManager adds the selected Edge seat while creating an invite",
     await act(async () => {
       setInputValue(window, inputById(container, "family-invite-phone"), "+48600000000");
     });
-    await clickButton(container, window, "Create invite & add Edge · $19/mo");
+    await clickButton(container, window, "Add Edge seat & continue");
 
     expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -417,6 +488,207 @@ test("HostedFamilyManager adds the selected Edge seat while creating an invite",
         }),
         url: "/api/settings/billing/family/invite",
       }),
+    );
+  } finally {
+    await cleanup();
+  }
+});
+
+test.each([
+  ["hosted invoice", "https://invoice.stripe.com/i/in_family_capacity"],
+  ["Billing Portal", "https://billing.stripe.com/p/session_family_capacity"],
+])(
+  "HostedFamilyManager keeps a %s capacity approval explicit and finishes the saved invite",
+  async (_destination, paymentUrl) => {
+    const { HostedOnboardingApiError } = await import(
+      "@/src/components/hosted-onboarding/client-api"
+    );
+    mocks.requestHostedOnboardingJson.mockRejectedValueOnce(
+      new HostedOnboardingApiError({
+        code: "HOSTED_FAMILY_CAPACITY_PAYMENT_REQUIRED",
+        details: { paymentUrl },
+        message: "Authenticate the Family seat charge in Stripe to finish this change.",
+      }),
+    );
+    const { HostedFamilyManager } = await import(
+      "@/src/components/settings/hosted-family-settings-actions"
+    );
+    const { assign, cleanup, container, window } = await renderClientComponent(
+      createElement(HostedFamilyManager, baseFamilyManagerProps()),
+      { requireButton: false },
+    );
+
+    try {
+      await clickButton(container, window, "Invite member");
+      await clickButton(container, window, "Edge · $19/mo");
+      await act(async () => {
+        setInputValue(window, inputById(container, "family-invite-label"), "Mom");
+        setInputValue(
+          window,
+          inputById(container, "family-invite-phone"),
+          "+48600000000",
+        );
+      });
+      await clickButton(container, window, "Add Edge seat & continue");
+
+      expect(assign).not.toHaveBeenCalled();
+      assert.equal(inputById(container, "family-invite-label").value, "Mom");
+      assert.equal(inputById(container, "family-invite-phone").value, "+48600000000");
+      const approvalLink = linkByText(container, "Approve seat charge in Stripe");
+      assert.equal(approvalLink.href, paymentUrl);
+      assert.equal(approvalLink.target, "_blank");
+      assert.equal(approvalLink.rel, "noopener noreferrer");
+      assert.match(
+        container.textContent ?? "",
+        /Your invite details stay here until you return to finish the invite\./,
+      );
+      const firstPayload = mocks.requestHostedOnboardingJson.mock.calls[0]?.[0]?.payload;
+
+      await clickButton(container, window, "Finish invite");
+
+      expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledTimes(2);
+      expect(mocks.requestHostedOnboardingJson.mock.calls[1]?.[0]?.payload).toEqual(firstPayload);
+      assert.equal(
+        [...container.querySelectorAll("h2")].filter(
+          (heading) => heading.textContent === "Invite created",
+        ).length,
+        1,
+      );
+      assert.match(container.textContent ?? "", /Only they can use this invite\./);
+    } finally {
+      await cleanup();
+    }
+  },
+);
+
+test("HostedFamilyManager prevents concurrent Finish invite retries", async () => {
+  const paymentUrl = "https://invoice.stripe.com/i/in_family_capacity";
+  const { HostedOnboardingApiError } = await import(
+    "@/src/components/hosted-onboarding/client-api"
+  );
+  mocks.requestHostedOnboardingJson
+    .mockRejectedValueOnce(
+      new HostedOnboardingApiError({
+        code: "HOSTED_FAMILY_CAPACITY_PAYMENT_REQUIRED",
+        details: { paymentUrl },
+        message: "Authenticate the Family seat charge in Stripe to finish this change.",
+      }),
+    )
+    .mockImplementationOnce(() => new Promise(() => {}));
+  const { HostedFamilyManager } = await import(
+    "@/src/components/settings/hosted-family-settings-actions"
+  );
+  const { assign, cleanup, container, window } = await renderClientComponent(
+    createElement(HostedFamilyManager, baseFamilyManagerProps()),
+    { requireButton: false },
+  );
+
+  try {
+    await clickButton(container, window, "Invite member");
+    await clickButton(container, window, "Edge · $19/mo");
+    await act(async () => {
+      setInputValue(window, inputById(container, "family-invite-phone"), "+48600000000");
+    });
+    await clickButton(container, window, "Add Edge seat & continue");
+
+    const finishButton = buttonByText(container, "Finish invite");
+    await act(async () => {
+      finishButton.dispatchEvent(new window.Event("click", { bubbles: true }));
+      finishButton.dispatchEvent(new window.Event("click", { bubbles: true }));
+      await Promise.resolve();
+    });
+
+    expect(assign).not.toHaveBeenCalled();
+    expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledTimes(2);
+    assert.equal(finishButton.disabled, true);
+    assert.match(finishButton.textContent ?? "", /Finishing invite\.\.\./);
+  } finally {
+    await cleanup();
+  }
+});
+
+test.each([
+  ["hosted invoice", "https://invoice.stripe.com/i/in_direct_family"],
+  ["Billing Portal", "https://billing.stripe.com/p/session_direct_family"],
+])(
+  "HostedFamilyStartButton redirects to Stripe's %s when direct billing needs recovery",
+  async (_destination, paymentUrl) => {
+    const { HostedOnboardingApiError } = await import(
+      "@/src/components/hosted-onboarding/client-api"
+    );
+    mocks.requestHostedOnboardingJson.mockRejectedValueOnce(
+      new HostedOnboardingApiError({
+        code: "HOSTED_FAMILY_DIRECT_PAID_PAYMENT_REQUIRED",
+        details: { paymentUrl },
+        message:
+          "Finish the current subscription payment in Stripe before converting it to Family billing.",
+      }),
+    );
+    const { HostedFamilyStartButton } = await import(
+      "@/src/components/settings/hosted-family-settings-actions"
+    );
+    const { assign, cleanup, container, window } = await renderClientComponent(
+      createElement(HostedFamilyStartButton, { label: "Choose Family" }),
+      { requireButton: false },
+    );
+
+    try {
+      const submitButton = buttonByText(container, "Choose Family");
+      await clickButton(container, window, "Choose Family");
+
+      expect(assign).toHaveBeenCalledOnce();
+      expect(assign).toHaveBeenCalledWith(paymentUrl);
+      assert.equal(submitButton.disabled, true);
+      assert.match(submitButton.textContent ?? "", /Opening Stripe\.\.\./);
+      await act(async () => {
+        submitButton.click();
+      });
+      expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledTimes(1);
+      assert.doesNotMatch(
+        container.textContent ?? "",
+        /Finish the current subscription payment/,
+      );
+    } finally {
+      await cleanup();
+    }
+  },
+);
+
+test.each([
+  ["a non-HTTPS URL", "javascript:alert('unsafe')"],
+  ["an arbitrary HTTPS origin", "https://payments.example.test/in_family_capacity"],
+])("HostedFamilyManager rejects %s for a capacity payment", async (_case, paymentUrl) => {
+  const { HostedOnboardingApiError } = await import(
+    "@/src/components/hosted-onboarding/client-api"
+  );
+  mocks.requestHostedOnboardingJson.mockRejectedValueOnce(
+    new HostedOnboardingApiError({
+      code: "HOSTED_FAMILY_CAPACITY_PAYMENT_REQUIRED",
+      details: { paymentUrl },
+      message: "Authenticate the Family seat charge in Stripe to finish this change.",
+    }),
+  );
+  const { HostedFamilyManager } = await import(
+    "@/src/components/settings/hosted-family-settings-actions"
+  );
+  const { assign, cleanup, container, window } = await renderClientComponent(
+    createElement(HostedFamilyManager, baseFamilyManagerProps()),
+    { requireButton: false },
+  );
+
+  try {
+    await clickButton(container, window, "Invite member");
+    await clickButton(container, window, "Edge · $19/mo");
+    await act(async () => {
+      setInputValue(window, inputById(container, "family-invite-phone"), "+48600000000");
+    });
+    await clickButton(container, window, "Add Edge seat & continue");
+
+    expect(assign).not.toHaveBeenCalled();
+    assert.equal(linkByTextOrNull(container, "Approve seat charge in Stripe"), null);
+    assert.match(
+      container.textContent ?? "",
+      /Authenticate the Family seat charge in Stripe to finish this change\./,
     );
   } finally {
     await cleanup();
@@ -514,6 +786,67 @@ test("HostedFamilyManager confirms a member move to Edge", async () => {
       payload: { planCode: "edge" },
       url: "/api/settings/billing/family/members/member_mom",
     });
+  } finally {
+    await cleanup();
+  }
+});
+
+test("HostedFamilyManager preserves a member tier payment action through the Stripe handoff", async () => {
+  const paymentUrl = "https://invoice.stripe.com/i/in_member_plan";
+  const { HostedOnboardingApiError } = await import(
+    "@/src/components/hosted-onboarding/client-api"
+  );
+  mocks.requestHostedOnboardingJson.mockRejectedValueOnce(
+    new HostedOnboardingApiError({
+      code: "HOSTED_FAMILY_CAPACITY_PAYMENT_REQUIRED",
+      details: { paymentUrl },
+      message: "Authenticate the Family seat charge in Stripe to finish this change.",
+    }),
+  );
+  const { HostedFamilyManager } = await import(
+    "@/src/components/settings/hosted-family-settings-actions"
+  );
+  const props = baseFamilyManagerProps();
+  const { assign, cleanup, container, window } = await renderClientComponent(
+    createElement(HostedFamilyManager, {
+      ...props,
+      members: [
+        ...props.members,
+        {
+          isOwner: false,
+          joinedAtIso: "2026-07-02T00:00:00.000Z",
+          label: "Mom",
+          memberId: "member_mom",
+          pendingPlanCode: null,
+          planCode: "pulse" as const,
+        },
+      ],
+    }),
+    { requireButton: false },
+  );
+
+  try {
+    await clickLastButton(container, window, "Manage");
+    const submitButton = buttonByText(container, "Upgrade to Edge");
+    await clickButton(container, window, "Upgrade to Edge");
+
+    expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
+      method: "PATCH",
+      payload: { planCode: "edge" },
+      url: "/api/settings/billing/family/members/member_mom",
+    });
+    expect(assign).toHaveBeenCalledOnce();
+    expect(assign).toHaveBeenCalledWith(paymentUrl);
+    assert.equal(submitButton.disabled, true);
+    assert.match(submitButton.textContent ?? "", /Working\.\.\./);
+    await act(async () => {
+      submitButton.click();
+    });
+    expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledTimes(1);
+    assert.doesNotMatch(
+      container.textContent ?? "",
+      /Authenticate the Family seat charge in Stripe/,
+    );
   } finally {
     await cleanup();
   }
@@ -832,9 +1165,13 @@ test("HostedFamilyManager requires a stable target before adding a paid seat", a
     await act(async () => {
       setInputValue(window, inputById(container, "family-invite-phone"), "+48600000000");
     });
+    assert.match(
+      container.textContent ?? "",
+      /Add the Pulse seat at \$7\/mo first\. Murph creates the invite after Stripe confirms the seat is ready\./,
+    );
     const contactBoundSubmit = buttonByText(
       container,
-      "Create invite & add Pulse · $7/mo",
+      "Add Pulse seat & continue",
     );
     assert.equal(contactBoundSubmit.disabled, false);
 
@@ -845,7 +1182,7 @@ test("HostedFamilyManager requires a stable target before adding a paid seat", a
     assert.equal(inactivePhoneSubmit.disabled, true);
 
     await clickButton(container, window, "iMessage");
-    await clickButton(container, window, "Create invite & add Pulse · $7/mo");
+    await clickButton(container, window, "Add Pulse seat & continue");
 
     expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -1089,6 +1426,7 @@ function payerTopUpContactOption() {
 function baseFamilyManagerProps() {
   return {
     billingActive: true,
+    billingStatus: "active" as const,
     invites: [],
     members: [
       {
@@ -1154,6 +1492,18 @@ function buttonByText(container: HTMLElement, label: string): HTMLButtonElement 
 
 function buttonByTextOrNull(container: HTMLElement, label: string): HTMLButtonElement | null {
   return [...container.querySelectorAll("button")].find(
+    (candidate) => candidate.textContent?.includes(label),
+  ) ?? null;
+}
+
+function linkByText(container: HTMLElement, label: string): HTMLAnchorElement {
+  const link = linkByTextOrNull(container, label);
+  assert.ok(link, `Expected link containing "${label}"`);
+  return link;
+}
+
+function linkByTextOrNull(container: HTMLElement, label: string): HTMLAnchorElement | null {
+  return [...container.querySelectorAll("a")].find(
     (candidate) => candidate.textContent?.includes(label),
   ) ?? null;
 }

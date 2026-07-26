@@ -87,6 +87,18 @@ grant/debit serialization, and deletion-first cleanup. Stripe remains mocked,
 and component tests do not replace a deployed browser flow, so launch still
 needs the documented test-mode Checkout, webhook, and browser smoke.
 
+Recurring Stripe billing also has an opt-in provider-contract lane:
+`MURPH_RUN_STRIPE_BILLING_CONTRACT=1 MURPH_STRIPE_CLI_PROFILE=<test-profile>
+pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage
+apps/web/test/hosted-onboarding-stripe-contract.test.ts`. It uses the
+authenticated Stripe CLI without accepting an API key, pins
+`2026-04-22.dahlia`, refuses writes unless the profile proves
+`livemode=false`, redacts provider failures, and cleans up only the exact
+test-owned clocks and archived catalog fixtures. The scenarios cover typed
+PaymentMethod and legacy Source Resume, exact resumption Invoice payment through
+Invoice Payments, terminal-void idempotency rotation, action-required pending
+updates and expiry, and cumulative refunds.
+
 Scheduled Telegram group route-authority coverage is owner-split. Hosted Web
 tests bind the signed callback member to the exact current thread-container
 route and reject a foreign container. Cloudflare tests lock the new signed

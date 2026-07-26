@@ -1,4 +1,6 @@
-import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { beforeEach, expect, test, vi } from "vitest";
+
+import { makeSafeStripePortalConfiguration } from "./support/stripe-portal";
 
 const mocks = vi.hoisted(() => ({
   assertHostedOnboardingMutationOrigin: vi.fn(),
@@ -8,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   readHostedMemberStripeBillingRef: vi.fn(),
   requireHostedAppSessionFromRequest: vi.fn(),
   requireHostedStripeApi: vi.fn(),
+  resolveHostedStripePortalConfigurationId: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/csrf", () => ({
@@ -33,17 +36,16 @@ vi.mock("@/src/lib/hosted-onboarding/app-session", () => ({
 
 vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
   requireHostedStripeApi: mocks.requireHostedStripeApi,
+  resolveHostedStripePortalConfigurationId:
+    mocks.resolveHostedStripePortalConfigurationId,
 }));
 
 type BillingPortalRouteModule = typeof import("../app/api/settings/billing/portal/route");
 
 let billingPortalRoute: BillingPortalRouteModule;
-const originalFamilyPortalConfigurationId =
-  process.env.HOSTED_ONBOARDING_STRIPE_FAMILY_PORTAL_CONFIGURATION_ID;
 
 beforeEach(async () => {
   vi.clearAllMocks();
-  delete process.env.HOSTED_ONBOARDING_STRIPE_FAMILY_PORTAL_CONFIGURATION_ID;
   mocks.assertHostedOnboardingMutationOrigin.mockImplementation(() => {});
   mocks.getPrisma.mockReturnValue({} as never);
   mocks.requireHostedAppSessionFromRequest.mockResolvedValue({
@@ -67,6 +69,13 @@ beforeEach(async () => {
   });
   mocks.requireHostedStripeApi.mockReturnValue({
     billingPortal: {
+      configurations: {
+        retrieve: vi.fn(async (configurationId: string) =>
+          makeSafeStripePortalConfiguration({
+            configurationId,
+          })
+        ),
+      },
       sessions: {
         create: vi.fn().mockResolvedValue({
           id: "bps_123",
@@ -75,17 +84,12 @@ beforeEach(async () => {
       },
     },
   });
+  mocks.resolveHostedStripePortalConfigurationId.mockImplementation(
+    (kind: "family" | "member") =>
+      kind === "family" ? "bpc_family" : "bpc_member",
+  );
 
   billingPortalRoute = await import("../app/api/settings/billing/portal/route");
-});
-
-afterEach(() => {
-  if (originalFamilyPortalConfigurationId === undefined) {
-    delete process.env.HOSTED_ONBOARDING_STRIPE_FAMILY_PORTAL_CONFIGURATION_ID;
-  } else {
-    process.env.HOSTED_ONBOARDING_STRIPE_FAMILY_PORTAL_CONFIGURATION_ID =
-      originalFamilyPortalConfigurationId;
-  }
 });
 
 test("creates a Stripe billing portal session for an authenticated hosted member", async () => {
@@ -107,6 +111,17 @@ test("creates a Stripe billing portal session for an authenticated hosted member
   expect(mocks.readHostedMemberStripeBillingRef).toHaveBeenCalledWith({
     memberId: "member_123",
     prisma: expect.any(Object),
+  });
+  expect(mocks.resolveHostedStripePortalConfigurationId).toHaveBeenCalledWith(
+    "member",
+  );
+  expect(
+    mocks.requireHostedStripeApi().billingPortal.configurations.retrieve,
+  ).toHaveBeenCalledWith("bpc_member");
+  expect(mocks.requireHostedStripeApi().billingPortal.sessions.create).toHaveBeenCalledWith({
+    configuration: "bpc_member",
+    customer: "cus_123",
+    return_url: "https://join.example.test/settings",
   });
 });
 
@@ -137,22 +152,25 @@ test("creates a Stripe billing portal session for a family owner group", async (
     prisma: expect.any(Object),
   });
   expect(mocks.readHostedMemberStripeBillingRef).not.toHaveBeenCalled();
+  expect(mocks.resolveHostedStripePortalConfigurationId).toHaveBeenCalledWith(
+    "family",
+  );
+  expect(
+    mocks.requireHostedStripeApi().billingPortal.configurations.retrieve,
+  ).toHaveBeenCalledWith("bpc_family");
   expect(mocks.requireHostedStripeApi().billingPortal.sessions.create).toHaveBeenCalledWith({
+    configuration: "bpc_family",
     customer: "cus_family_123",
     return_url: "https://join.example.test/settings",
   });
 });
 
-test("uses the dedicated Family portal configuration when configured", async () => {
-  process.env.HOSTED_ONBOARDING_STRIPE_FAMILY_PORTAL_CONFIGURATION_ID = "bpc_family";
+test("omits an explicit portal configuration only when the resolver permits fallback", async () => {
+  mocks.resolveHostedStripePortalConfigurationId.mockReturnValueOnce(undefined);
 
   const response = await billingPortalRoute.POST(
     new Request("https://join.example.test/api/settings/billing/portal", {
-      body: JSON.stringify({
-        billingScope: "family",
-      }),
       headers: {
-        "content-type": "application/json",
         origin: "https://join.example.test",
       },
       method: "POST",
@@ -161,8 +179,7 @@ test("uses the dedicated Family portal configuration when configured", async () 
 
   expect(response.status).toBe(200);
   expect(mocks.requireHostedStripeApi().billingPortal.sessions.create).toHaveBeenCalledWith({
-    configuration: "bpc_family",
-    customer: "cus_family_123",
+    customer: "cus_123",
     return_url: "https://join.example.test/settings",
   });
 });

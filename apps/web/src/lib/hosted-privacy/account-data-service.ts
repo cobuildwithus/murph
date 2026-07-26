@@ -1,4 +1,5 @@
 import { type HostedBillingStatus, Prisma, type PrismaClient } from "@prisma/client";
+import type Stripe from "stripe";
 
 import { sanitizeHostedRuntimeErrorCode } from "@murphai/device-syncd/hosted-runtime";
 import { isDeviceSyncError } from "@murphai/device-syncd/errors";
@@ -18,14 +19,43 @@ import {
 } from "../connected-apps/config";
 import { resolveHostedDeviceSyncBrowserProviderLabel } from "../device-sync/provider-label";
 import { acquireHostedWebhookTraceOwnerLockTx } from "../device-sync/webhook-trace-owner-lock";
-import { hostedOnboardingError } from "../hosted-onboarding/errors";
-import { readHostedMemberStripeBillingRef } from "../hosted-onboarding/hosted-member-billing-store";
+import { coerceStripeObjectId } from "../hosted-onboarding/billing";
+import {
+  parseHostedBillingCheckoutOffer,
+  type HostedBillingCheckoutOffer,
+} from "../hosted-onboarding/billing-plans";
+import {
+  hostedOnboardingError,
+  isHostedOnboardingError,
+} from "../hosted-onboarding/errors";
+import {
+  acceptHostedMemberStripeCheckoutCompletionTx,
+  clearHostedMemberStripeCheckoutAttemptTx,
+  readHostedMemberStripeBillingRef,
+  withHostedMemberStripeMutationLock,
+} from "../hosted-onboarding/hosted-member-billing-store";
 import { readHostedMemberIdentity } from "../hosted-onboarding/hosted-member-identity-store";
-import { readHostedAccountGroupStripeBillingRef } from "../hosted-onboarding/family-plan";
+import {
+  applyHostedFamilyStripeCheckoutCompletedTx,
+  clearHostedFamilyCheckoutAttemptForSession,
+  clearHostedFamilyCheckoutAttemptWithoutSessionTx,
+  HOSTED_FAMILY_BILLING_PLAN_CODE,
+  HOSTED_FAMILY_STRIPE_METADATA_KIND,
+  readHostedAccountGroupStripeBillingRef,
+} from "../hosted-onboarding/family-plan";
 import { deleteHostedPrivyUser } from "../hosted-onboarding/privy";
 import { buildHostedLinqInviteSignupEffectIdMemberPrefix } from "../hosted-onboarding/linq-invite-signup-effect-id";
 import { getHostedOnboardingStripe } from "../hosted-onboarding/runtime";
 import { logHostedStripeFailure } from "../hosted-onboarding/stripe-error-log";
+import {
+  isHostedStripeLegacyCheckoutCompletionAllowed,
+  isHostedStripeRetryableFailure,
+} from "../hosted-onboarding/stripe-billing-state";
+import {
+  buildHostedCheckoutSubscriptionCleanupCandidate,
+  buildHostedFamilyCheckoutSubscriptionCleanupCandidate,
+  executeHostedCheckoutSubscriptionCleanup,
+} from "../hosted-onboarding/stripe-checkout-subscription-cleanup";
 import {
   generateHostedAccountExitReasonId,
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
@@ -611,25 +641,10 @@ export async function deleteHostedAccountData(input: {
     });
   }
 
-  // Decrypt vendor account ids before their rows are deleted below.
-  const billingRef = await readHostedMemberStripeBillingRef({
-    memberId: input.memberId,
-    prisma: input.prisma,
-  });
   const identity = await readHostedMemberIdentity({
     memberId: input.memberId,
     prisma: input.prisma,
   });
-  const familyBillingRefs = await listHostedFamilyBillingRefsOwnedByMember({
-    memberId: input.memberId,
-    prisma: input.prisma,
-  });
-  const stripeCustomerId = billingRef?.stripeCustomerId ?? null;
-  const stripeSubscriptionId = billingRef?.stripeSubscriptionId ?? null;
-  const stripeCustomerIds = dedupeNullableStrings([
-    stripeCustomerId,
-    ...familyBillingRefs.map((familyBillingRef) => familyBillingRef.stripeCustomerId),
-  ]);
   const privyUserId = identity?.privyUserId ?? null;
   const ownedThreadContainerMemberIds = await listOwnedHostedThreadContainerMemberIds({
     ownerMemberId: input.memberId,
@@ -646,6 +661,43 @@ export async function deleteHostedAccountData(input: {
     now: deletionStartedAt,
     prisma: input.prisma,
   });
+  // Suspension is the durable deletion fence. Checkout creation checks it
+  // while holding this same member owner lock, so this post-fence read cannot
+  // miss a Session that is still being created or bound.
+  const postFenceBillingRef = await readHostedMemberStripeBillingRef({
+    memberId: input.memberId,
+    prisma: input.prisma,
+  });
+  const checkoutResult = await reconcileHostedStripeCheckoutSessionForAccountDeletion({
+    checkoutAttemptId: postFenceBillingRef?.checkoutAttemptId ?? null,
+    checkoutIntentHash: postFenceBillingRef?.checkoutIntentHash ?? null,
+    memberId: input.memberId,
+    observedAt: deletionStartedAt,
+    prisma: input.prisma,
+    stripeCheckoutSessionId: postFenceBillingRef?.stripeCheckoutSessionId ?? null,
+  });
+  await reconcileOwnedHostedFamilyStripeCheckoutSessionsForAccountDeletion({
+    memberId: input.memberId,
+    prisma: input.prisma,
+  });
+  // A completed Session can bind its subscription during the recovery above.
+  // Re-read only after that atomic decision so ordinary account deletion sees
+  // the accepted winner, while a superseded loser has already been cleaned up.
+  const billingRef = await readHostedMemberStripeBillingRef({
+    memberId: input.memberId,
+    prisma: input.prisma,
+  });
+  const stripeCustomerId = billingRef?.stripeCustomerId ?? null;
+  const stripeSubscriptionId = billingRef?.stripeSubscriptionId ?? null;
+  const familyBillingRefs = await listHostedFamilyBillingRefsOwnedByMember({
+    memberId: input.memberId,
+    prisma: input.prisma,
+  });
+  const stripeCustomerIds = dedupeNullableStrings([
+    stripeCustomerId,
+    checkoutResult.stripeCustomerId,
+    ...familyBillingRefs.map((familyBillingRef) => familyBillingRef.stripeCustomerId),
+  ]);
   await deleteHostedPhoneCallsForAccountDeletion({
     memberIds: deletionMemberIds,
     prisma: input.prisma,
@@ -715,6 +767,12 @@ export async function deleteHostedAccountData(input: {
       memberIds: transactionDeletionMemberIds,
       now: deletionStartedAt,
       prisma: tx,
+    });
+    await assertHostedBillingOwnershipStableForAccountDeletionTx({
+      expectedDirectSubscriptionId: stripeSubscriptionId,
+      expectedFamilyBillingRefs: familyBillingRefs,
+      memberId: input.memberId,
+      tx,
     });
     await assertHostedUsageCreditPurchasesReadyForAccountDeletionTx({
       memberIds: transactionDeletionMemberIds,
@@ -1088,10 +1146,653 @@ async function cancelHostedStripeSubscriptionsForAccountDeletion(input: {
   return input.stripeSubscriptionId ? directResult : familyResult ?? directResult;
 }
 
+const HOSTED_ACCOUNT_DELETION_STRIPE_REQUEST_OPTIONS = {
+  maxNetworkRetries: 0,
+  timeout: 5_000,
+} as const satisfies Stripe.RequestOptions;
+
+async function assertHostedBillingOwnershipStableForAccountDeletionTx(input: {
+  expectedDirectSubscriptionId: string | null;
+  expectedFamilyBillingRefs: readonly {
+    checkoutAttemptId: string | null;
+    groupId: string;
+    stripeCheckoutSessionId: string | null;
+    stripeSubscriptionId: string | null;
+  }[];
+  memberId: string;
+  tx: Prisma.TransactionClient;
+}): Promise<void> {
+  const [currentDirectBillingRef, currentFamilyBillingRefs] = await Promise.all([
+    readHostedMemberStripeBillingRef({
+      memberId: input.memberId,
+      prisma: input.tx,
+    }),
+    listHostedFamilyBillingRefsOwnedByMember({
+      memberId: input.memberId,
+      prisma: input.tx,
+    }),
+  ]);
+  const directChanged = Boolean(
+    (currentDirectBillingRef?.stripeSubscriptionId ?? null)
+      !== input.expectedDirectSubscriptionId,
+  );
+  const normalizeFamilyRefs = (refs: readonly {
+    checkoutAttemptId: string | null;
+    groupId: string;
+    stripeCheckoutSessionId: string | null;
+    stripeSubscriptionId: string | null;
+  }[]) => refs.map((billingRef) => ({
+    groupId: billingRef.groupId,
+    stripeSubscriptionId: billingRef.stripeSubscriptionId,
+  })).sort((left, right) => left.groupId.localeCompare(right.groupId));
+  const expectedFamily = normalizeFamilyRefs(input.expectedFamilyBillingRefs);
+  const currentFamily = normalizeFamilyRefs(currentFamilyBillingRefs);
+  if (
+    directChanged
+    || JSON.stringify(currentFamily) !== JSON.stringify(expectedFamily)
+  ) {
+    throw hostedOnboardingError({
+      code: "ACCOUNT_DELETION_STRIPE_BILLING_OWNERSHIP_CHANGED",
+      httpStatus: 409,
+      message:
+        "Billing ownership changed while account deletion was running. Retry deletion so the latest subscription can be canceled safely.",
+      retryable: true,
+    });
+  }
+}
+
+async function reconcileHostedStripeCheckoutSessionForAccountDeletion(input: {
+  checkoutAttemptId: string | null;
+  checkoutIntentHash: string | null;
+  memberId: string;
+  observedAt: Date;
+  prisma: PrismaClient;
+  stripeCheckoutSessionId: string | null;
+}): Promise<{ stripeCustomerId: string | null }> {
+  const checkoutAttemptId = input.checkoutAttemptId;
+  const checkoutIntentHash = input.checkoutIntentHash;
+  if (!input.stripeCheckoutSessionId) {
+    if (checkoutAttemptId || checkoutIntentHash) {
+      if (!checkoutAttemptId || !checkoutIntentHash) {
+        throw hostedOnboardingError({
+          code: "ACCOUNT_DELETION_STRIPE_CHECKOUT_STATE_INCONSISTENT",
+          httpStatus: 500,
+          message:
+            "Billing checkout state is incomplete, so account deletion cannot safely continue. Contact support.",
+        });
+      }
+      const cleared = await withHostedMemberStripeMutationLock({
+        memberId: input.memberId,
+        prisma: input.prisma,
+        run: (tx) => clearHostedMemberStripeCheckoutAttemptTx({
+          attemptId: checkoutAttemptId,
+          expectedSessionId: null,
+          intentHash: checkoutIntentHash,
+          memberId: input.memberId,
+          tx,
+        }),
+      });
+      if (!cleared) {
+        throw hostedOnboardingError({
+          code: "ACCOUNT_DELETION_STRIPE_CHECKOUT_STATE_CHANGED",
+          httpStatus: 409,
+          message:
+            "Billing checkout changed while account deletion was fencing it. Retry account deletion.",
+          retryable: true,
+        });
+      }
+      // Checkout URLs are published only after their exact Session ID commits.
+      // An unbound attempt therefore cannot be completed by the user; Stripe
+      // will expire any provider-side create whose response was lost.
+      return { stripeCustomerId: null };
+    }
+    return { stripeCustomerId: null };
+  }
+  if (!input.checkoutAttemptId || !input.checkoutIntentHash) {
+    throw hostedOnboardingError({
+      code: "ACCOUNT_DELETION_STRIPE_CHECKOUT_STATE_INCONSISTENT",
+      httpStatus: 500,
+      message:
+        "Billing checkout state is incomplete, so account deletion cannot safely continue. Contact support.",
+    });
+  }
+
+  const stripe = getHostedOnboardingStripe();
+  if (!stripe) {
+    throw hostedOnboardingError({
+      code: "ACCOUNT_DELETION_STRIPE_NOT_CONFIGURED",
+      httpStatus: 500,
+      message:
+        "Billing is not configured, so your open checkout could not be expired. Contact support to delete your account.",
+    });
+  }
+
+  const settlement = await settleHostedCheckoutSessionForAccountDeletion({
+    operationScope: "account-deletion",
+    sessionId: input.stripeCheckoutSessionId,
+    stripe,
+    validate: (session) =>
+      assertHostedMemberCheckoutSessionForAccountDeletion({
+        attempt: input,
+        session,
+      }),
+  });
+  if (settlement.kind === "missing") {
+    await clearHostedMemberCheckoutAttemptForAccountDeletion({
+      attempt: input,
+      expectedSessionId: input.stripeCheckoutSessionId,
+    });
+    return { stripeCustomerId: null };
+  }
+  if (settlement.kind === "expired") {
+    await clearHostedMemberCheckoutAttemptForAccountDeletion({
+      attempt: input,
+      expectedSessionId: input.stripeCheckoutSessionId,
+    });
+    return {
+      stripeCustomerId: coerceStripeObjectId(settlement.session.customer),
+    };
+  }
+  return reconcileCompletedHostedMemberStripeCheckoutForAccountDeletion({
+    attempt: input,
+    observedAt: input.observedAt,
+    session: settlement.session,
+    stripe,
+  });
+}
+
+async function clearHostedMemberCheckoutAttemptForAccountDeletion(input: {
+  attempt: {
+    checkoutAttemptId: string | null;
+    checkoutIntentHash: string | null;
+    memberId: string;
+    prisma: PrismaClient;
+  };
+  expectedSessionId: string;
+}): Promise<void> {
+  const checkoutAttemptId = input.attempt.checkoutAttemptId;
+  const checkoutIntentHash = input.attempt.checkoutIntentHash;
+  if (!checkoutAttemptId || !checkoutIntentHash) {
+    throw buildHostedAccountDeletionCheckoutStateUnknownError();
+  }
+  const cleared = await withHostedMemberStripeMutationLock({
+    memberId: input.attempt.memberId,
+    prisma: input.attempt.prisma,
+    run: (tx) => clearHostedMemberStripeCheckoutAttemptTx({
+      attemptId: checkoutAttemptId,
+      expectedSessionId: input.expectedSessionId,
+      intentHash: checkoutIntentHash,
+      memberId: input.attempt.memberId,
+      tx,
+    }),
+  });
+  if (!cleared) {
+    const current = await readHostedMemberStripeBillingRef({
+      memberId: input.attempt.memberId,
+      prisma: input.attempt.prisma,
+    });
+    if (current?.checkoutAttemptId === checkoutAttemptId) {
+      throw hostedOnboardingError({
+        code: "ACCOUNT_DELETION_STRIPE_CHECKOUT_STATE_CHANGED",
+        httpStatus: 409,
+        message:
+          "Billing checkout changed while account deletion was clearing it. Retry account deletion.",
+        retryable: true,
+      });
+    }
+  }
+}
+
+type HostedAccountDeletionCheckoutSettlement =
+  | { kind: "complete"; session: Stripe.Checkout.Session }
+  | { kind: "expired"; session: Stripe.Checkout.Session }
+  | { kind: "missing" };
+
+async function settleHostedCheckoutSessionForAccountDeletion(input: {
+  operationScope: "account-deletion" | "family-account-deletion";
+  sessionId: string;
+  stripe: Stripe;
+  validate: (session: Stripe.Checkout.Session) => void;
+}): Promise<HostedAccountDeletionCheckoutSettlement> {
+  const retrieve = async (operationName: string) => {
+    try {
+      return await input.stripe.checkout.sessions.retrieve(
+        input.sessionId,
+        {},
+        HOSTED_ACCOUNT_DELETION_STRIPE_REQUEST_OPTIONS,
+      );
+    } catch (error) {
+      if (isStripeResourceMissingError(error)) {
+        return null;
+      }
+      throw buildHostedAccountDeletionCheckoutProviderError({
+        error,
+        operationName,
+      });
+    }
+  };
+  const initial = await retrieve(
+    `checkout.sessions.retrieve.${input.operationScope}`,
+  );
+  if (!initial) {
+    return { kind: "missing" };
+  }
+  input.validate(initial);
+  if (initial.status === "complete" || initial.status === "expired") {
+    return {
+      kind: initial.status,
+      session: initial,
+    };
+  }
+  if (initial.status !== "open") {
+    throw buildHostedAccountDeletionCheckoutStateUnknownError();
+  }
+
+  let expireError: unknown = null;
+  try {
+    const expired = await input.stripe.checkout.sessions.expire(
+      initial.id,
+      {},
+      HOSTED_ACCOUNT_DELETION_STRIPE_REQUEST_OPTIONS,
+    );
+    if (expired.id === initial.id && expired.status === "expired") {
+      return {
+        kind: "expired",
+        session: initial,
+      };
+    }
+    expireError = hostedOnboardingError({
+      code: "ACCOUNT_DELETION_STRIPE_CHECKOUT_EXPIRE_UNCONFIRMED",
+      httpStatus: 502,
+      message:
+        "Stripe did not confirm that the open checkout expired. Retry account deletion.",
+      retryable: true,
+    });
+  } catch (error) {
+    if (isStripeResourceMissingError(error)) {
+      return { kind: "missing" };
+    }
+    expireError = error;
+  }
+
+  // Checkout can complete in Stripe after the open read but before expiration.
+  // One canonical reread distinguishes that race from a genuine provider error.
+  const terminal = await retrieve(
+    `checkout.sessions.retrieve.after-expire-${input.operationScope}`,
+  );
+  if (!terminal) {
+    return { kind: "missing" };
+  }
+  input.validate(terminal);
+  if (terminal.status === "complete" || terminal.status === "expired") {
+    return {
+      kind: terminal.status,
+      session: terminal,
+    };
+  }
+  if (terminal.status !== "open") {
+    throw buildHostedAccountDeletionCheckoutStateUnknownError();
+  }
+  if (isHostedOnboardingError(expireError)) {
+    throw expireError;
+  }
+  throw buildHostedAccountDeletionCheckoutProviderError({
+    error: expireError,
+    operationName: `checkout.sessions.expire.${input.operationScope}`,
+  });
+}
+
+function buildHostedAccountDeletionCheckoutStateUnknownError() {
+  return hostedOnboardingError({
+    code: "ACCOUNT_DELETION_STRIPE_CHECKOUT_STATE_UNKNOWN",
+    httpStatus: 500,
+    message:
+      "Stripe returned an unknown checkout state, so account deletion cannot safely continue.",
+  });
+}
+
+function assertHostedMemberCheckoutSessionForAccountDeletion(input: {
+  attempt: {
+    checkoutAttemptId: string | null;
+    checkoutIntentHash: string | null;
+    memberId: string;
+    stripeCheckoutSessionId: string | null;
+  };
+  session: Stripe.Checkout.Session;
+}): void {
+  if (
+    input.session.id !== input.attempt.stripeCheckoutSessionId
+    || input.session.client_reference_id !== input.attempt.memberId
+    || input.session.metadata?.memberId !== input.attempt.memberId
+    || input.session.metadata?.checkoutAttemptId !==
+      input.attempt.checkoutAttemptId
+    || input.session.metadata?.checkoutIntentHash !==
+      input.attempt.checkoutIntentHash
+    || !readHostedMemberCheckoutOfferForAccountDeletion(input.session)
+    || input.session.mode !== "subscription"
+  ) {
+    throw hostedOnboardingError({
+      code: "ACCOUNT_DELETION_STRIPE_CHECKOUT_MISMATCH",
+      httpStatus: 500,
+      message:
+        "The stored billing checkout does not match this account, so deletion cannot safely continue. Contact support.",
+    });
+  }
+}
+
+function readHostedMemberCheckoutOfferForAccountDeletion(
+  session: Stripe.Checkout.Session,
+): HostedBillingCheckoutOffer | null {
+  return parseHostedBillingCheckoutOffer(session.metadata?.checkoutOffer);
+}
+
+async function reconcileCompletedHostedMemberStripeCheckoutForAccountDeletion(
+  input: {
+    attempt: {
+      checkoutAttemptId: string | null;
+      checkoutIntentHash: string | null;
+      memberId: string;
+      prisma: PrismaClient;
+    };
+    observedAt: Date;
+    session: Stripe.Checkout.Session;
+    stripe: Stripe;
+  },
+): Promise<{ stripeCustomerId: string | null }> {
+  const stripeCustomerId = coerceStripeObjectId(input.session.customer);
+  const stripeSubscriptionId = coerceStripeObjectId(input.session.subscription);
+  if (!stripeCustomerId || !stripeSubscriptionId) {
+    throw hostedOnboardingError({
+      code: "ACCOUNT_DELETION_STRIPE_CHECKOUT_STATE_INCONSISTENT",
+      httpStatus: 500,
+      message:
+        "The completed billing checkout is missing its customer or subscription, so account deletion cannot safely continue. Contact support.",
+    });
+  }
+  if (!Number.isSafeInteger(input.session.created) || input.session.created <= 0) {
+    throw hostedOnboardingError({
+      code: "ACCOUNT_DELETION_STRIPE_CHECKOUT_STATE_INCONSISTENT",
+      httpStatus: 500,
+      message:
+        "The completed billing checkout has an invalid provider timestamp, so account deletion cannot safely continue. Contact support.",
+    });
+  }
+
+  const acceptance = await withHostedMemberStripeMutationLock({
+    memberId: input.attempt.memberId,
+    prisma: input.attempt.prisma,
+    run: (tx) => {
+      const checkoutOffer =
+        readHostedMemberCheckoutOfferForAccountDeletion(input.session);
+      if (!checkoutOffer) {
+        throw hostedOnboardingError({
+          code: "ACCOUNT_DELETION_STRIPE_CHECKOUT_MISMATCH",
+          httpStatus: 500,
+          message:
+            "The completed billing checkout has an unsupported offer, so account deletion cannot safely continue. Contact support.",
+        });
+      }
+      return acceptHostedMemberStripeCheckoutCompletionTx({
+        allowLegacyCompletion:
+          isHostedStripeLegacyCheckoutCompletionAllowed({
+            observedAt: input.observedAt,
+            sessionCreated: input.session.created,
+            sessionExpiresAt: input.session.expires_at,
+          }),
+        checkoutAttemptId: input.attempt.checkoutAttemptId,
+        checkoutIntentHash: input.attempt.checkoutIntentHash,
+        checkoutSessionId: input.session.id,
+        currentCheckoutOffer: checkoutOffer,
+        eventCreatedAt: new Date(input.session.created * 1_000),
+        memberId: input.attempt.memberId,
+        stripeCustomerId,
+        stripeSubscriptionId,
+        tx,
+      });
+    },
+  });
+  if (acceptance.kind === "cleanup_superseded") {
+    await executeHostedCheckoutSubscriptionCleanup({
+      candidate: buildHostedCheckoutSubscriptionCleanupCandidate({
+        memberId: input.attempt.memberId,
+        reason: "superseded",
+        session: input.session,
+        stripeSubscriptionId,
+      }),
+      prisma: input.attempt.prisma,
+      stripe: input.stripe,
+    });
+  }
+  return { stripeCustomerId };
+}
+
+async function reconcileOwnedHostedFamilyStripeCheckoutSessionsForAccountDeletion(
+  input: {
+    memberId: string;
+    prisma: PrismaClient;
+  },
+): Promise<void> {
+  const familyBillingRefs = await listHostedFamilyBillingRefsOwnedByMember({
+    memberId: input.memberId,
+    prisma: input.prisma,
+  });
+  const refsWithCheckoutState = familyBillingRefs.filter((billingRef) =>
+    billingRef.checkoutAttemptId || billingRef.stripeCheckoutSessionId
+  );
+  if (refsWithCheckoutState.length === 0) {
+    return;
+  }
+
+  const refsWithBoundSessions: typeof refsWithCheckoutState = [];
+  for (const billingRef of refsWithCheckoutState) {
+    const checkoutAttemptId = billingRef.checkoutAttemptId;
+    if (checkoutAttemptId && !billingRef.stripeCheckoutSessionId) {
+      const cleared = await withHostedMemberStripeMutationLock({
+        memberId: input.memberId,
+        prisma: input.prisma,
+        run: (tx) => clearHostedFamilyCheckoutAttemptWithoutSessionTx({
+          attemptId: checkoutAttemptId,
+          groupId: billingRef.groupId,
+          tx,
+        }),
+      });
+      if (!cleared) {
+        throw hostedOnboardingError({
+          code: "ACCOUNT_DELETION_STRIPE_CHECKOUT_STATE_CHANGED",
+          httpStatus: 409,
+          message:
+            "Family billing checkout changed while account deletion was fencing it. Retry account deletion.",
+          retryable: true,
+        });
+      }
+      continue;
+    }
+    if (!billingRef.checkoutAttemptId || !billingRef.stripeCheckoutSessionId) {
+      throw hostedOnboardingError({
+        code: "ACCOUNT_DELETION_STRIPE_CHECKOUT_STATE_INCONSISTENT",
+        httpStatus: 500,
+        message:
+          "Family billing checkout state is incomplete, so account deletion cannot safely continue. Contact support.",
+      });
+    }
+    refsWithBoundSessions.push(billingRef);
+  }
+  if (refsWithBoundSessions.length === 0) {
+    return;
+  }
+
+  const stripe = getHostedOnboardingStripe();
+  if (!stripe) {
+    throw hostedOnboardingError({
+      code: "ACCOUNT_DELETION_STRIPE_NOT_CONFIGURED",
+      httpStatus: 500,
+      message:
+        "Billing is not configured, so your open Family checkout could not be reconciled. Contact support to delete your account.",
+    });
+  }
+
+  for (const billingRef of refsWithBoundSessions) {
+    const stripeCheckoutSessionId = billingRef.stripeCheckoutSessionId;
+    const checkoutAttemptId = billingRef.checkoutAttemptId;
+    if (!stripeCheckoutSessionId || !checkoutAttemptId) {
+      throw buildHostedAccountDeletionCheckoutStateUnknownError();
+    }
+    const settlement = await settleHostedCheckoutSessionForAccountDeletion({
+      operationScope: "family-account-deletion",
+      sessionId: stripeCheckoutSessionId,
+      stripe,
+      validate: (session) =>
+        assertHostedFamilyCheckoutSessionForAccountDeletion({
+          billingRef,
+          memberId: input.memberId,
+          session,
+        }),
+    });
+    if (settlement.kind !== "complete") {
+      const cleared = await withHostedMemberStripeMutationLock({
+        memberId: input.memberId,
+        prisma: input.prisma,
+        run: (tx) => clearHostedFamilyCheckoutAttemptForSession({
+          attemptId: checkoutAttemptId,
+          groupId: billingRef.groupId,
+          prisma: tx,
+          sessionId: stripeCheckoutSessionId,
+        }),
+      });
+      if (!cleared) {
+        const currentBillingRef =
+          await readHostedAccountGroupStripeBillingRef({
+            groupId: billingRef.groupId,
+            prisma: input.prisma,
+          });
+        if (currentBillingRef?.checkoutAttemptId === checkoutAttemptId) {
+          throw hostedOnboardingError({
+            code: "ACCOUNT_DELETION_STRIPE_CHECKOUT_STATE_CHANGED",
+            httpStatus: 409,
+            message:
+              "Family billing checkout changed while account deletion was clearing it. Retry account deletion.",
+            retryable: true,
+          });
+        }
+      }
+      continue;
+    }
+    const session = settlement.session;
+
+    const stripeCustomerId = coerceStripeObjectId(session.customer);
+    const stripeSubscriptionId = coerceStripeObjectId(session.subscription);
+    if (
+      !stripeCustomerId
+      || !stripeSubscriptionId
+      || !Number.isSafeInteger(session.created)
+      || session.created <= 0
+    ) {
+      throw hostedOnboardingError({
+        code: "ACCOUNT_DELETION_STRIPE_CHECKOUT_STATE_INCONSISTENT",
+        httpStatus: 500,
+        message:
+          "The completed Family checkout is missing canonical billing details, so account deletion cannot safely continue. Contact support.",
+      });
+    }
+
+    const reconciliation = await input.prisma.$transaction(
+      (tx) => applyHostedFamilyStripeCheckoutCompletedTx({
+        dispatchContext: {
+          eventCreatedAt: new Date(session.created * 1_000),
+        },
+        session,
+        tx,
+      }),
+      HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
+    );
+    if (reconciliation.groupId !== billingRef.groupId) {
+      throw hostedOnboardingError({
+        code: "ACCOUNT_DELETION_STRIPE_CHECKOUT_MISMATCH",
+        httpStatus: 500,
+        message:
+          "The completed Family checkout could not be bound to its billing owner, so account deletion cannot safely continue. Contact support.",
+      });
+    }
+
+    await executeHostedCheckoutSubscriptionCleanup({
+      candidate: buildHostedFamilyCheckoutSubscriptionCleanupCandidate({
+        groupId: billingRef.groupId,
+        ownerMemberId: input.memberId,
+        session,
+        stripeSubscriptionId,
+      }),
+      prisma: input.prisma,
+      stripe,
+    });
+  }
+}
+
+function assertHostedFamilyCheckoutSessionForAccountDeletion(input: {
+  billingRef: {
+    checkoutAttemptId: string | null;
+    groupId: string;
+    ownerMemberId: string;
+    stripeCustomerId: string | null;
+  };
+  memberId: string;
+  session: Stripe.Checkout.Session;
+}): void {
+  const sessionCustomerId = coerceStripeObjectId(input.session.customer);
+  if (
+    input.billingRef.ownerMemberId !== input.memberId
+    || input.session.client_reference_id !== input.billingRef.groupId
+    || input.session.metadata?.accountGroupId !== input.billingRef.groupId
+    || input.session.metadata?.ownerMemberId !== input.memberId
+    || input.session.metadata?.checkoutAttemptId !==
+      input.billingRef.checkoutAttemptId
+    || input.session.metadata?.kind !== HOSTED_FAMILY_STRIPE_METADATA_KIND
+    || input.session.metadata?.billingPlanCode !==
+      HOSTED_FAMILY_BILLING_PLAN_CODE
+    || input.session.mode !== "subscription"
+    || (
+      input.billingRef.stripeCustomerId
+      && sessionCustomerId !== input.billingRef.stripeCustomerId
+    )
+  ) {
+    throw hostedOnboardingError({
+      code: "ACCOUNT_DELETION_STRIPE_CHECKOUT_MISMATCH",
+      httpStatus: 500,
+      message:
+        "The stored Family checkout does not match this billing owner, so deletion cannot safely continue. Contact support.",
+    });
+  }
+}
+
+function buildHostedAccountDeletionCheckoutProviderError(input: {
+  error: unknown;
+  operationName: string;
+}) {
+  logHostedStripeFailure(input);
+  const retryable = isHostedStripeRetryableFailure(input.error);
+  return hostedOnboardingError({
+    cause: input.error,
+    code: retryable
+      ? "ACCOUNT_DELETION_STRIPE_CHECKOUT_PROVIDER_UNAVAILABLE"
+      : "ACCOUNT_DELETION_STRIPE_CHECKOUT_PROVIDER_REJECTED",
+    httpStatus: retryable ? 502 : 500,
+    message: retryable
+      ? "Stripe could not confirm checkout cleanup. Retry account deletion."
+      : "Stripe rejected checkout cleanup. Contact support to delete your account.",
+    retryable,
+  });
+}
+
 async function listHostedFamilyBillingRefsOwnedByMember(input: {
   memberId: string;
   prisma: HostedAccountDataPrisma;
-}): Promise<Array<{ stripeCustomerId: string | null; stripeSubscriptionId: string | null }>> {
+}): Promise<Array<{
+  checkoutAttemptId: string | null;
+  groupId: string;
+  ownerMemberId: string;
+  stripeCheckoutSessionId: string | null;
+  stripeCustomerId: string | null;
+  stripeSubscriptionId: string | null;
+}>> {
   const groups = await input.prisma.hostedAccountGroup.findMany({
     select: {
       id: true,
@@ -1113,6 +1814,10 @@ async function listHostedFamilyBillingRefsOwnedByMember(input: {
   return billingRefs
     .filter((billingRef): billingRef is NonNullable<typeof billingRef> => billingRef !== null)
     .map((billingRef) => ({
+      checkoutAttemptId: billingRef.checkoutAttemptId,
+      groupId: billingRef.groupId,
+      ownerMemberId: billingRef.group.ownerMemberId,
+      stripeCheckoutSessionId: billingRef.stripeCheckoutSessionId,
       stripeCustomerId: billingRef.stripeCustomerId,
       stripeSubscriptionId: billingRef.stripeSubscriptionId,
     }));

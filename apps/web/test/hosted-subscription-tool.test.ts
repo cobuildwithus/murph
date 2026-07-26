@@ -227,11 +227,11 @@ describe("hosted subscription tool", () => {
     });
   });
 
-  it("returns the Edge Billing Portal URL while payment is pending", async () => {
+  it("returns the Edge Stripe payment URL when payment action is required", async () => {
     mocks.upgradePlan.mockResolvedValue({
       billingPlanCode: "launch_monthly",
       paymentUrl: "https://billing.stripe.com/p/session_123",
-      status: "pending_payment",
+      status: "payment_required",
     });
 
     await expect(handleHostedSubscriptionTool({
@@ -245,6 +245,25 @@ describe("hosted subscription tool", () => {
       paymentUrl: "https://billing.stripe.com/p/session_123",
       plan: EDGE_PLAN,
       status: "payment_required",
+    });
+  });
+
+  it("keeps a processing Edge invoice as pending without a payment URL", async () => {
+    mocks.upgradePlan.mockResolvedValue({
+      billingPlanCode: "launch_monthly",
+      status: "processing",
+    });
+
+    await expect(handleHostedSubscriptionTool({
+      memberId: "member_123",
+      request: {
+        action: "upgrade_edge",
+        assistantInputId: ASSISTANT_INPUT_ID,
+      },
+    })).resolves.toEqual({
+      action: "upgrade_edge",
+      plan: EDGE_PLAN,
+      status: "pending",
     });
   });
 

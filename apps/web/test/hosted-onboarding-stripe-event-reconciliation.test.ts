@@ -7,28 +7,32 @@ import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "@/src/lib/hosted-onboardi
 const mocks = vi.hoisted(() => ({
   applyStripeCheckoutCompleted: vi.fn(),
   applyStripeCheckoutExpired: vi.fn(),
-  applyStripeDisputeUpdated: vi.fn(),
+  applyStripeInvoiceCollectionStateChanged: vi.fn(),
   applyStripeInvoicePaid: vi.fn(),
-  applyStripeInvoicePaymentFailed: vi.fn(),
-  applyStripeRefundCreated: vi.fn(),
+  applyStripeRecurringFinancialState: vi.fn(),
   applyStripeSubscriptionUpdated: vi.fn(),
-  cancelHostedFamilySponsoredCheckoutSubscription: vi.fn(),
   cancelHostedPulseTrialCheckoutLoserSubscription: vi.fn(),
   clearHostedBillingPlanSwitchToPulsePendingFieldsForScheduleTx: vi.fn(),
+  convergeHostedFamilyDirectPaidOwnershipTx: vi.fn(),
   findMemberForStripeCheckoutSession: vi.fn(),
   findMemberForStripeInvoice: vi.fn(),
   findMemberForStripeSubscription: vi.fn(),
   listHostedStripeCheckoutSessionMemberIds: vi.fn(),
   prepareHostedLegacySyntheticFamilyCleanupTx: vi.fn(),
+  readHostedFamilyDirectPaidTransitionContext: vi.fn(),
+  readHostedMemberFamilyBillingClaim: vi.fn(),
   readActiveHostedFamilySponsorship: vi.fn(),
   readHostedMemberBillingSnapshot: vi.fn(),
   reconcileHostedUsageCreditStripeEvent: vi.fn(),
   refreshHostedBillingPlanSwitchToPulsePendingFieldsFromScheduleTx: vi.fn(),
-  resolveStripeCustomerContext: vi.fn(),
+  reconcileHostedFamilyDirectPaidTransitionSubscription: vi.fn(),
+  resolveHostedStripeBillingOwner: vi.fn(),
+  resolveStripeFinancialContext: vi.fn(),
   sendHostedSignupNotificationEmailForMemberBestEffort: vi.fn(),
   sendHostedSignupWelcomeEmailForMember: vi.fn(),
   sendHostedSubscriptionCancellationEmailForMember: vi.fn(),
   signalHostedRuntimeRecheckRuntime: vi.fn(),
+  executeHostedCheckoutSubscriptionCleanup: vi.fn(),
   stripe: {
     events: {
       retrieve: vi.fn(),
@@ -63,8 +67,18 @@ vi.mock("@/src/lib/hosted-onboarding/family-plan", async () => {
       activations: [],
       groupId: null,
     })),
+    convergeHostedFamilyDirectPaidOwnershipTx:
+      mocks.convergeHostedFamilyDirectPaidOwnershipTx,
+    lookupHostedAccountGroupStripeBillingRefByStripeSubscriptionId:
+      vi.fn(async () => null),
     prepareHostedLegacySyntheticFamilyCleanupTx:
       mocks.prepareHostedLegacySyntheticFamilyCleanupTx,
+    readHostedFamilyDirectPaidTransitionContext:
+      mocks.readHostedFamilyDirectPaidTransitionContext,
+    readHostedMemberFamilyBillingClaim:
+      mocks.readHostedMemberFamilyBillingClaim,
+    reconcileHostedFamilyDirectPaidTransitionSubscription:
+      mocks.reconcileHostedFamilyDirectPaidTransitionSubscription,
   };
 });
 
@@ -100,13 +114,11 @@ vi.mock("@/src/lib/hosted-onboarding/billing-plan-switch-to-pulse-service", () =
 vi.mock("@/src/lib/hosted-onboarding/stripe-billing-events", () => ({
   applyStripeCheckoutCompleted: mocks.applyStripeCheckoutCompleted,
   applyStripeCheckoutExpired: mocks.applyStripeCheckoutExpired,
-  applyStripeDisputeUpdated: mocks.applyStripeDisputeUpdated,
+  applyStripeInvoiceCollectionStateChanged:
+    mocks.applyStripeInvoiceCollectionStateChanged,
   applyStripeInvoicePaid: mocks.applyStripeInvoicePaid,
-  applyStripeInvoicePaymentFailed: mocks.applyStripeInvoicePaymentFailed,
-  applyStripeRefundCreated: mocks.applyStripeRefundCreated,
+  applyStripeRecurringFinancialState: mocks.applyStripeRecurringFinancialState,
   applyStripeSubscriptionUpdated: mocks.applyStripeSubscriptionUpdated,
-  cancelHostedFamilySponsoredCheckoutSubscription:
-    mocks.cancelHostedFamilySponsoredCheckoutSubscription,
   cancelHostedPulseTrialCheckoutLoserSubscription:
     mocks.cancelHostedPulseTrialCheckoutLoserSubscription,
 }));
@@ -123,7 +135,30 @@ vi.mock("@/src/lib/hosted-onboarding/stripe-billing-lookup", async () => {
     findMemberForStripeSubscription: mocks.findMemberForStripeSubscription,
     listHostedStripeCheckoutSessionMemberIds:
       mocks.listHostedStripeCheckoutSessionMemberIds,
-    resolveStripeCustomerContext: mocks.resolveStripeCustomerContext,
+    resolveStripeFinancialContext: mocks.resolveStripeFinancialContext,
+  };
+});
+
+vi.mock("@/src/lib/hosted-onboarding/stripe-billing-owner", async () => {
+  const actual = await vi.importActual<
+    typeof import("@/src/lib/hosted-onboarding/stripe-billing-owner")
+  >("@/src/lib/hosted-onboarding/stripe-billing-owner");
+
+  return {
+    ...actual,
+    resolveHostedStripeBillingOwner: mocks.resolveHostedStripeBillingOwner,
+  };
+});
+
+vi.mock("@/src/lib/hosted-onboarding/stripe-checkout-subscription-cleanup", async () => {
+  const actual = await vi.importActual<
+    typeof import("@/src/lib/hosted-onboarding/stripe-checkout-subscription-cleanup")
+  >("@/src/lib/hosted-onboarding/stripe-checkout-subscription-cleanup");
+
+  return {
+    ...actual,
+    executeHostedCheckoutSubscriptionCleanup:
+      mocks.executeHostedCheckoutSubscriptionCleanup,
   };
 });
 
@@ -210,6 +245,11 @@ type HostedStripeEventReconcileInput = Parameters<typeof reconcileHostedStripeEv
 type StripeEventPrismaHarnessClient = {
   $queryRaw: (...args: unknown[]) => Promise<unknown>;
   $transaction: <T>(callback: (tx: StripeEventPrismaHarnessClient) => Promise<T>) => Promise<T>;
+  hostedMember: {
+    findMany: (input: {
+      where: { id: { in: string[] } };
+    }) => Promise<Array<{ id: string }>>;
+  };
   hostedStripeEvent: {
     create: ({ data }: { data: Record<string, unknown> }) => Promise<MutableStripeEventRow>;
     findMany: () => Promise<MutableStripeEventRow[]>;
@@ -259,23 +299,25 @@ describe("hosted Stripe event reconciliation", () => {
       welcomeEmailMemberId: null,
     });
     mocks.applyStripeCheckoutExpired.mockResolvedValue(undefined);
-    mocks.applyStripeDisputeUpdated.mockResolvedValue(undefined);
+    mocks.applyStripeInvoiceCollectionStateChanged.mockResolvedValue(undefined);
     mocks.applyStripeInvoicePaid.mockResolvedValue({
       activatedMemberId: "member_123",
       hostedExecutionEventId: "dispatch_123",
       welcomeEmailMemberId: "member_123",
     });
-    mocks.applyStripeInvoicePaymentFailed.mockResolvedValue(undefined);
-    mocks.applyStripeRefundCreated.mockResolvedValue(undefined);
+    mocks.applyStripeRecurringFinancialState.mockResolvedValue({
+      blockActiveProjection: false,
+      state: "healthy",
+    });
     mocks.applyStripeSubscriptionUpdated.mockResolvedValue({
       activatedMemberId: null,
       activatedMembers: [],
       hostedExecutionEventId: null,
       welcomeEmailMemberId: null,
     });
-    mocks.cancelHostedFamilySponsoredCheckoutSubscription.mockResolvedValue(undefined);
     mocks.cancelHostedPulseTrialCheckoutLoserSubscription.mockResolvedValue(undefined);
     mocks.clearHostedBillingPlanSwitchToPulsePendingFieldsForScheduleTx.mockResolvedValue(undefined);
+    mocks.convergeHostedFamilyDirectPaidOwnershipTx.mockResolvedValue(null);
     mocks.findMemberForStripeCheckoutSession.mockResolvedValue({
       core: { id: "member_123" },
     });
@@ -287,13 +329,28 @@ describe("hosted Stripe event reconciliation", () => {
     });
     mocks.listHostedStripeCheckoutSessionMemberIds.mockResolvedValue(["member_123"]);
     mocks.prepareHostedLegacySyntheticFamilyCleanupTx.mockResolvedValue(null);
+    mocks.readHostedFamilyDirectPaidTransitionContext.mockReturnValue(null);
+    mocks.readHostedMemberFamilyBillingClaim.mockResolvedValue(null);
     mocks.readActiveHostedFamilySponsorship.mockResolvedValue(false);
     mocks.readHostedMemberBillingSnapshot.mockResolvedValue(null);
     mocks.reconcileHostedUsageCreditStripeEvent.mockResolvedValue({ handled: false });
     mocks.refreshHostedBillingPlanSwitchToPulsePendingFieldsFromScheduleTx.mockResolvedValue(undefined);
-    mocks.resolveStripeCustomerContext.mockResolvedValue({
-      customerId: null,
+    mocks.reconcileHostedFamilyDirectPaidTransitionSubscription
+      .mockImplementation(async ({ subscription }) => subscription);
+    mocks.resolveHostedStripeBillingOwner.mockResolvedValue({
+      kind: "member",
+      lockMemberId: "member_123",
+      memberId: "member_123",
+      stripeCustomerId: "cus_123",
+      stripeSubscriptionId: "sub_123",
     });
+    mocks.resolveStripeFinancialContext.mockResolvedValue({
+      customerId: "cus_123",
+      invoiceId: "in_123",
+      paymentIntentId: "pi_123",
+      subscriptionId: "sub_123",
+    });
+    mocks.executeHostedCheckoutSubscriptionCleanup.mockResolvedValue(undefined);
     mocks.sendHostedSignupWelcomeEmailForMember.mockResolvedValue({
       providerMessageId: "resend_email_123",
       status: "sent",
@@ -391,7 +448,12 @@ describe("hosted Stripe event reconciliation", () => {
       "active",
       makeCanonicalSubscription(),
     );
-    expect(mocks.stripe.subscriptions.retrieve).toHaveBeenCalledWith("sub_123");
+    expect(mocks.stripe.subscriptions.retrieve).toHaveBeenCalledWith(
+      "sub_123",
+      expect.objectContaining({
+        expand: expect.arrayContaining(["latest_invoice"]),
+      }),
+    );
     expect(prisma.client.$transaction).toHaveBeenCalledWith(
       expect.any(Function),
       expect.objectContaining(HOSTED_ONBOARDING_TRANSACTION_OPTIONS),
@@ -454,10 +516,86 @@ describe("hosted Stripe event reconciliation", () => {
         sourceEventId: event.id,
         sourceType: "stripe.checkout.session.completed",
       }),
+      expect.any(Date),
     );
     expect(mocks.sendHostedSignupWelcomeEmailForMember).not.toHaveBeenCalled();
     expect(mocks.sendHostedSignupNotificationEmailForMemberBestEffort).not.toHaveBeenCalled();
     expect(mocks.sendHostedSubscriptionCancellationEmailForMember).not.toHaveBeenCalled();
+  });
+
+  it("keeps the first webhook receipt time stable when processing crosses the legacy horizon", async () => {
+    const prisma = createStripeEventPrismaHarness();
+    const event = makeCheckoutCompletedEvent();
+    const sessionCreated = 1_800_000_000;
+    const sessionExpiresAt = sessionCreated + 24 * 60 * 60;
+    const receivedAt = new Date(
+      (sessionExpiresAt + 3 * 24 * 60 * 60) * 1_000,
+    );
+    const retryObservedAt = new Date(receivedAt.getTime() + 1);
+    Object.assign(event, {
+      created: sessionCreated,
+    });
+    Object.assign(event.data.object, {
+      created: sessionCreated,
+      expires_at: sessionExpiresAt,
+    });
+    mocks.stripe.events.retrieve.mockResolvedValue(event);
+
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(receivedAt);
+      await recordHostedStripeEvent({
+        event,
+        prisma: prisma.client,
+      });
+
+      vi.setSystemTime(retryObservedAt);
+      await expect(reconcileHostedStripeEventById({
+        eventId: event.id,
+        prisma: prisma.client,
+      })).resolves.toMatchObject({
+        status: "completed",
+      });
+
+      expect(mocks.applyStripeCheckoutCompleted).toHaveBeenCalledWith(
+        event.data.object,
+        expect.anything(),
+        expect.objectContaining({
+          sourceEventId: event.id,
+        }),
+        receivedAt,
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("routes checkout expiration through exact attempt cleanup", async () => {
+    const prisma = createStripeEventPrismaHarness();
+    const event = makeCheckoutExpiredEvent();
+    mocks.stripe.events.retrieve.mockResolvedValue(event);
+
+    await recordHostedStripeEvent({
+      event,
+      prisma: prisma.client,
+    });
+
+    await expect(
+      reconcileHostedStripeEventById({
+        eventId: event.id,
+        prisma: prisma.client,
+      }),
+    ).resolves.toEqual({
+      activatedMemberId: null,
+      eventId: event.id,
+      hostedExecutionEventId: null,
+      status: "completed",
+    });
+
+    expect(mocks.applyStripeCheckoutExpired).toHaveBeenCalledWith(
+      event.data.object,
+      prisma.client,
+    );
   });
 
   it("reconciles usage-credit Checkout before subscription-shaped handling", async () => {
@@ -778,7 +916,53 @@ describe("hosted Stripe event reconciliation", () => {
 
     expect(reversalCount).toBe(1);
     expect(mocks.reconcileHostedUsageCreditStripeEvent).toHaveBeenCalledTimes(2);
-    expect(mocks.applyStripeRefundCreated).not.toHaveBeenCalled();
+    expect(mocks.applyStripeRecurringFinancialState).not.toHaveBeenCalled();
+    expect(prisma.rows[0]).toEqual(expect.objectContaining({
+      attemptCount: 7,
+      processedAt: expect.any(Date),
+      status: HostedStripeEventStatus.completed,
+    }));
+    errorSpy.mockRestore();
+  });
+
+  it("keeps recurring financial reconciliation claimable after a transient sixth attempt", async () => {
+    const prisma = createStripeEventPrismaHarness();
+    const event = makeRefundCreatedEvent();
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    mocks.stripe.events.retrieve.mockResolvedValue(event);
+    mocks.applyStripeRecurringFinancialState
+      .mockRejectedValueOnce(Object.assign(
+        new Error("Stripe recurring financial read unavailable"),
+        {
+          statusCode: 503,
+          type: "StripeAPIError",
+        },
+      ))
+      .mockResolvedValueOnce({
+        blockActiveProjection: false,
+        state: "healthy",
+      });
+
+    await recordHostedStripeEvent({ event, prisma: prisma.client });
+    prisma.rows[0]!.attemptCount = 5;
+
+    await expect(reconcileHostedStripeEventById({
+      eventId: event.id,
+      prisma: prisma.client,
+    })).resolves.toMatchObject({ status: "failed" });
+    expect(prisma.rows[0]).toEqual(expect.objectContaining({
+      attemptCount: 6,
+      processedAt: null,
+      status: HostedStripeEventStatus.failed,
+    }));
+
+    prisma.rows[0]!.nextAttemptAt = new Date(0);
+    await expect(reconcileHostedStripeEventById({
+      eventId: event.id,
+      prisma: prisma.client,
+    })).resolves.toMatchObject({ status: "completed" });
+
+    expect(mocks.applyStripeRecurringFinancialState).toHaveBeenCalledTimes(2);
     expect(prisma.rows[0]).toEqual(expect.objectContaining({
       attemptCount: 7,
       processedAt: expect.any(Date),
@@ -929,12 +1113,13 @@ describe("hosted Stripe event reconciliation", () => {
     const ordering: string[] = [];
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     mocks.stripe.events.retrieve.mockResolvedValue(event);
-    mocks.findMemberForStripeCheckoutSession
+    vi.mocked(prisma.client.hostedMember.findMany)
       .mockImplementationOnce(async () => {
         ordering.push("owner-resolved");
-        return { core: { id: "member_123" } };
+        return [{ id: "member_123" }];
       })
-      .mockImplementationOnce(async () => {
+      .mockResolvedValueOnce([]);
+    mocks.findMemberForStripeCheckoutSession.mockImplementationOnce(async () => {
         ordering.push("owner-revalidated");
         return { core: { id: "member_456" } };
       });
@@ -1306,6 +1491,7 @@ describe("hosted Stripe event reconciliation", () => {
       expect.objectContaining({
         sourceType: "stripe.checkout.session.completed",
       }),
+      expect.any(Date),
     );
   });
 
@@ -1368,11 +1554,18 @@ describe("hosted Stripe event reconciliation", () => {
     mocks.stripe.events.retrieve.mockResolvedValue(event);
     mocks.applyStripeCheckoutCompleted.mockResolvedValue({
       activatedMemberId: null,
-      cleanupFamilySponsoredStripeSubscriptionId: "sub_checkout_123",
+      cleanupCheckoutSubscription: {
+        checkoutAttemptId: "attempt_123",
+        checkoutIntentHash: "intent_123",
+        checkoutSessionId: "cs_trial_123",
+        memberId: "member_123",
+        reason: "family_sponsored",
+        stripeSubscriptionId: "sub_checkout_123",
+      },
       hostedExecutionEventId: null,
       welcomeEmailMemberId: null,
     });
-    mocks.cancelHostedFamilySponsoredCheckoutSubscription
+    mocks.executeHostedCheckoutSubscriptionCleanup
       .mockRejectedValueOnce(new Error("Stripe unavailable"))
       .mockResolvedValueOnce(undefined);
 
@@ -1388,11 +1581,97 @@ describe("hosted Stripe event reconciliation", () => {
       prisma: prisma.client,
     })).resolves.toMatchObject({ status: "completed" });
 
-    expect(mocks.cancelHostedFamilySponsoredCheckoutSubscription).toHaveBeenCalledTimes(2);
-    expect(mocks.cancelHostedFamilySponsoredCheckoutSubscription).toHaveBeenCalledWith({
-      subscriptionId: "sub_checkout_123",
+    expect(mocks.executeHostedCheckoutSubscriptionCleanup).toHaveBeenCalledTimes(2);
+    expect(mocks.executeHostedCheckoutSubscriptionCleanup).toHaveBeenCalledWith({
+      candidate: expect.objectContaining({
+        memberId: "member_123",
+        reason: "family_sponsored",
+        stripeSubscriptionId: "sub_checkout_123",
+      }),
+      prisma: prisma.client,
     });
     errorSpy.mockRestore();
+  });
+
+  it("executes loser cleanup for a completed legacy standard Checkout after member deletion", async () => {
+    const prisma = createStripeEventPrismaHarness();
+    const event = makeCheckoutCompletedEvent();
+    const cleanupCandidate = {
+      checkoutAttemptId: null,
+      checkoutIntentHash: null,
+      checkoutSessionId: "cs_checkout_123",
+      familyBillingClaim: null,
+      memberId: "member_123",
+      reason: "superseded" as const,
+      stripeSubscriptionId: "sub_checkout_123",
+    };
+    mocks.stripe.events.retrieve.mockResolvedValue(event);
+    mocks.findMemberForStripeCheckoutSession.mockResolvedValue(null);
+    vi.mocked(prisma.client.hostedMember.findMany).mockResolvedValue([]);
+    mocks.applyStripeCheckoutCompleted.mockResolvedValue({
+      activatedMemberId: null,
+      cleanupCheckoutSubscription: cleanupCandidate,
+      hostedExecutionEventId: null,
+      welcomeEmailMemberId: null,
+    });
+
+    await recordHostedStripeEvent({ event, prisma: prisma.client });
+
+    await expect(reconcileHostedStripeEventById({
+      eventId: event.id,
+      prisma: prisma.client,
+    })).resolves.toMatchObject({ status: "completed" });
+
+    expect(mocks.applyStripeCheckoutCompleted).toHaveBeenCalledOnce();
+    expect(mocks.executeHostedCheckoutSubscriptionCleanup).toHaveBeenCalledWith({
+      candidate: cleanupCandidate,
+      prisma: prisma.client,
+    });
+  });
+
+  it("locks the exact member and cleans a second standard Checkout with a different customer", async () => {
+    const prisma = createStripeEventPrismaHarness();
+    const event = makeCheckoutCompletedEvent();
+    const winnerBase = makeActiveNonTrialMemberWithoutSubscription();
+    const winner = {
+      ...winnerBase,
+      billingRef: {
+        ...winnerBase.billingRef,
+        stripeCustomerId: "cus_winner",
+        stripeSubscriptionId: "sub_winner",
+      },
+    };
+    const cleanupCandidate = {
+      checkoutAttemptId: null,
+      checkoutIntentHash: null,
+      checkoutSessionId: "cs_checkout_123",
+      familyBillingClaim: null,
+      memberId: "member_123",
+      reason: "superseded" as const,
+      stripeSubscriptionId: "sub_checkout_123",
+    };
+    mocks.stripe.events.retrieve.mockResolvedValue(event);
+    mocks.findMemberForStripeCheckoutSession.mockResolvedValue(null);
+    mocks.readHostedMemberBillingSnapshot.mockResolvedValue(winner);
+    mocks.applyStripeCheckoutCompleted.mockResolvedValue({
+      activatedMemberId: null,
+      cleanupCheckoutSubscription: cleanupCandidate,
+      hostedExecutionEventId: null,
+      welcomeEmailMemberId: null,
+    });
+
+    await recordHostedStripeEvent({ event, prisma: prisma.client });
+
+    await expect(reconcileHostedStripeEventById({
+      eventId: event.id,
+      prisma: prisma.client,
+    })).resolves.toMatchObject({ status: "completed" });
+
+    expect(prisma.client.$queryRaw).toHaveBeenCalled();
+    expect(mocks.executeHostedCheckoutSubscriptionCleanup).toHaveBeenCalledWith({
+      candidate: cleanupCandidate,
+      prisma: prisma.client,
+    });
   });
 
   it("cleans up a Family-sponsored direct subscription without a stored billing reference", async () => {
@@ -1433,9 +1712,7 @@ describe("hosted Stripe event reconciliation", () => {
       expect.anything(),
       prisma.client,
     );
-    expect(mocks.cancelHostedFamilySponsoredCheckoutSubscription).toHaveBeenCalledWith({
-      subscriptionId: "sub_123",
-    });
+    expect(mocks.executeHostedCheckoutSubscriptionCleanup).not.toHaveBeenCalled();
   });
 
   it("cleans up a Family-sponsored paid invoice without a stored billing reference", async () => {
@@ -1474,9 +1751,7 @@ describe("hosted Stripe event reconciliation", () => {
       "active",
       canonicalSubscription,
     );
-    expect(mocks.cancelHostedFamilySponsoredCheckoutSubscription).toHaveBeenCalledWith({
-      subscriptionId: "sub_123",
-    });
+    expect(mocks.executeHostedCheckoutSubscriptionCleanup).not.toHaveBeenCalled();
   });
 
   it("retries a subscription-created Pulse Trial loser cleanup before completing the receipt", async () => {
@@ -1741,7 +2016,12 @@ describe("hosted Stripe event reconciliation", () => {
       }),
       expect.anything(),
     );
-    expect(mocks.stripe.subscriptions.retrieve).toHaveBeenCalledWith("sub_123");
+    expect(mocks.stripe.subscriptions.retrieve).toHaveBeenCalledWith(
+      "sub_123",
+      expect.objectContaining({
+        expand: expect.arrayContaining(["latest_invoice"]),
+      }),
+    );
   });
 
   it("locks the direct member before retrieving canonical subscription state", async () => {
@@ -1806,7 +2086,6 @@ describe("hosted Stripe event reconciliation", () => {
       "member-resolved",
       "member-locked",
       "subscription-retrieved",
-      "member-resolved",
       "billing-written",
     ]);
     expect(mocks.findMemberForStripeSubscription).toHaveBeenCalledWith({
@@ -1835,6 +2114,13 @@ describe("hosted Stripe event reconciliation", () => {
     }) => ({
       core: { id: input.subscription.metadata.memberId },
     }));
+    mocks.resolveHostedStripeBillingOwner.mockResolvedValue({
+      kind: "member",
+      lockMemberId: "member_456",
+      memberId: "member_456",
+      stripeCustomerId: "cus_456",
+      stripeSubscriptionId: "sub_123",
+    });
 
     await recordHostedStripeEvent({ event, prisma: prisma.client });
     await expect(reconcileHostedStripeEventById({
@@ -1864,6 +2150,21 @@ describe("hosted Stripe event reconciliation", () => {
     }) => input.subscription.status === "past_due"
       ? null
       : { core: { id: input.subscription.metadata.memberId } });
+    mocks.resolveHostedStripeBillingOwner
+      .mockResolvedValueOnce({
+        kind: "member",
+        lockMemberId: "member_123",
+        memberId: "member_123",
+        stripeCustomerId: "cus_123",
+        stripeSubscriptionId: "sub_123",
+      })
+      .mockResolvedValueOnce({
+        kind: "member",
+        lockMemberId: "member_456",
+        memberId: "member_456",
+        stripeCustomerId: "cus_456",
+        stripeSubscriptionId: "sub_123",
+      });
 
     await recordHostedStripeEvent({ event, prisma: prisma.client });
     await expect(reconcileHostedStripeEventById({
@@ -1887,6 +2188,7 @@ describe("hosted Stripe event reconciliation", () => {
       .mockResolvedValueOnce(null)
       .mockResolvedValueOnce(null)
       .mockResolvedValue({ core: { id: "member_123" } });
+    mocks.resolveHostedStripeBillingOwner.mockResolvedValue(null);
 
     await recordHostedStripeEvent({ event, prisma: prisma.client });
     await expect(reconcileHostedStripeEventById({
@@ -2117,17 +2419,24 @@ describe("hosted Stripe event reconciliation", () => {
       status: "completed",
     });
 
-    expect(mocks.applyStripeInvoicePaymentFailed).toHaveBeenCalledWith(
-      event.data.object,
+    expect(mocks.applyStripeInvoiceCollectionStateChanged).toHaveBeenCalledWith(
       expect.objectContaining({
         sourceEventId: event.id,
         sourceType: "stripe.invoice.payment_failed",
       }),
       expect.anything(),
-      HostedBillingStatus.past_due,
       canonicalSubscription,
+      expect.objectContaining({
+        kind: "member",
+        memberId: "member_123",
+      }),
     );
-    expect(mocks.stripe.subscriptions.retrieve).toHaveBeenCalledWith("sub_123");
+    expect(mocks.stripe.subscriptions.retrieve).toHaveBeenCalledWith(
+      "sub_123",
+      expect.objectContaining({
+        expand: expect.arrayContaining(["latest_invoice"]),
+      }),
+    );
   });
 
   it("locks the direct member before retrieving invoice canonical subscription state", async () => {
@@ -2155,7 +2464,7 @@ describe("hosted Stripe event reconciliation", () => {
       retrieveStarted.resolve(undefined);
       return releaseRetrieve.promise;
     });
-    mocks.applyStripeInvoicePaymentFailed.mockImplementationOnce(async () => {
+    mocks.applyStripeInvoiceCollectionStateChanged.mockImplementationOnce(async () => {
       ordering.push("billing-written");
     });
 
@@ -2179,7 +2488,6 @@ describe("hosted Stripe event reconciliation", () => {
       "member-resolved",
       "member-locked",
       "subscription-retrieved",
-      "member-resolved",
       "billing-written",
     ]);
   });
@@ -2199,6 +2507,13 @@ describe("hosted Stripe event reconciliation", () => {
     mocks.findMemberForStripeSubscription.mockResolvedValue({
       core: { id: "member_456" },
     });
+    mocks.resolveHostedStripeBillingOwner.mockResolvedValue({
+      kind: "member",
+      lockMemberId: "member_456",
+      memberId: "member_456",
+      stripeCustomerId: "cus_456",
+      stripeSubscriptionId: "sub_123",
+    });
 
     await recordHostedStripeEvent({ event, prisma: prisma.client });
     await expect(reconcileHostedStripeEventById({
@@ -2206,7 +2521,7 @@ describe("hosted Stripe event reconciliation", () => {
       prisma: prisma.client,
     })).resolves.toMatchObject({ status: "failed" });
 
-    expect(mocks.applyStripeInvoicePaymentFailed).not.toHaveBeenCalled();
+    expect(mocks.applyStripeInvoiceCollectionStateChanged).not.toHaveBeenCalled();
     expect(prisma.rows[0]?.status).toBe(HostedStripeEventStatus.failed);
     errorSpy.mockRestore();
   });
@@ -2251,7 +2566,7 @@ describe("hosted Stripe event reconciliation", () => {
       ordering.push(retrieveCount === 1 ? "identity-retrieved" : "canonical-retrieved");
       return retrieveCount === 1 ? identitySubscription : canonicalSubscription;
     });
-    mocks.applyStripeInvoicePaymentFailed.mockImplementationOnce(async () => {
+    mocks.applyStripeInvoiceCollectionStateChanged.mockImplementationOnce(async () => {
       ordering.push("billing-written");
     });
 
@@ -2266,16 +2581,17 @@ describe("hosted Stripe event reconciliation", () => {
       "identity-resolved",
       "member-locked",
       "canonical-retrieved",
-      "identity-resolved",
       "billing-written",
     ]);
     expect(mocks.stripe.subscriptions.retrieve).toHaveBeenCalledTimes(2);
-    expect(mocks.applyStripeInvoicePaymentFailed).toHaveBeenCalledWith(
-      event.data.object,
+    expect(mocks.applyStripeInvoiceCollectionStateChanged).toHaveBeenCalledWith(
       expect.anything(),
       expect.anything(),
-      HostedBillingStatus.past_due,
       canonicalSubscription,
+      expect.objectContaining({
+        kind: "member",
+        memberId: "member_123",
+      }),
     );
   });
 
@@ -2611,8 +2927,11 @@ describe("hosted Stripe event reconciliation", () => {
   it("resolves refund customer context from the live Stripe event", async () => {
     const prisma = createStripeEventPrismaHarness();
     const event = makeRefundCreatedEvent();
-    mocks.resolveStripeCustomerContext.mockResolvedValue({
+    mocks.resolveStripeFinancialContext.mockResolvedValue({
       customerId: "cus_refund",
+      invoiceId: "in_refund",
+      paymentIntentId: "pi_refund",
+      subscriptionId: "sub_123",
     });
     mocks.stripe.events.retrieve.mockResolvedValue(event);
 
@@ -2633,19 +2952,486 @@ describe("hosted Stripe event reconciliation", () => {
       status: "completed",
     });
 
-    expect(mocks.resolveStripeCustomerContext).toHaveBeenCalledWith({
+    expect(mocks.resolveStripeFinancialContext).toHaveBeenCalledWith({
       chargeId: "ch_refund",
       paymentIntentId: "pi_refund",
     });
-    expect(mocks.applyStripeRefundCreated).toHaveBeenCalledWith(
-      event.data.object,
-      expect.objectContaining({
+    expect(mocks.applyStripeRecurringFinancialState).toHaveBeenCalledWith({
+      dispatchContext: expect.objectContaining({
         sourceEventId: event.id,
         sourceType: "stripe.refund.created",
       }),
-      expect.anything(),
-      "cus_refund",
+      owner: expect.objectContaining({
+        kind: "member",
+        memberId: "member_123",
+      }),
+      restoreWhenHealthy: true,
+      subscription: expect.objectContaining({ id: "sub_123" }),
+      tx: expect.anything(),
+    });
+  });
+
+  it.each([
+    ["invoice.paid", "member"],
+    ["customer.subscription.updated", "family"],
+  ] as const)(
+    "does not apply delayed %s active projection for a canonically unsettled %s owner",
+    async (type, ownerKind) => {
+      const prisma = createStripeEventPrismaHarness();
+      const event = type === "invoice.paid"
+        ? makeInvoicePaidEvent()
+        : makeSubscriptionUpdatedEvent();
+      mocks.stripe.events.retrieve.mockResolvedValue(event);
+      mocks.stripe.subscriptions.retrieve.mockResolvedValue(
+        makeCanonicalSubscription({ status: "active" }),
+      );
+      mocks.applyStripeRecurringFinancialState.mockResolvedValueOnce({
+        blockActiveProjection: true,
+        state: "unsettled",
+      });
+      if (ownerKind === "family") {
+        mocks.findMemberForStripeSubscription.mockResolvedValue(null);
+        mocks.resolveHostedStripeBillingOwner.mockResolvedValue({
+          groupId: "group_123",
+          kind: "family",
+          lockMemberId: "owner_123",
+          stripeCustomerId: "cus_123",
+          stripeSubscriptionId: "sub_123",
+        });
+      }
+
+      await recordHostedStripeEvent({ event, prisma: prisma.client });
+
+      await expect(reconcileHostedStripeEventById({
+        eventId: event.id,
+        prisma: prisma.client,
+      })).resolves.toMatchObject({ status: "completed" });
+
+      expect(mocks.applyStripeRecurringFinancialState).toHaveBeenCalledOnce();
+      expect(mocks.applyStripeInvoicePaid).not.toHaveBeenCalled();
+      expect(mocks.applyStripeSubscriptionUpdated).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    "refund.updated",
+    "charge.dispute.updated",
+  ] as const)(
+    "routes legacy Source Charge-only %s without inventing a PaymentIntent",
+    async (type) => {
+      const prisma = createStripeEventPrismaHarness();
+      const event = makeFinancialReversalEvent(type, {
+        paymentIntentId: null,
+      });
+      mocks.resolveStripeFinancialContext.mockResolvedValueOnce({
+        customerId: "cus_123",
+        invoiceId: "in_legacy",
+        paymentIntentId: null,
+        subscriptionId: "sub_123",
+      });
+      mocks.stripe.events.retrieve.mockResolvedValue(event);
+
+      await recordHostedStripeEvent({ event, prisma: prisma.client });
+
+      await expect(reconcileHostedStripeEventById({
+        eventId: event.id,
+        prisma: prisma.client,
+      })).resolves.toMatchObject({ status: "completed" });
+      expect(mocks.resolveStripeFinancialContext).toHaveBeenCalledWith({
+        chargeId: "ch_financial_123",
+        paymentIntentId: null,
+      });
+      expect(mocks.applyStripeRecurringFinancialState).toHaveBeenCalledOnce();
+    },
+  );
+
+  it.each([
+    "refund.created",
+    "refund.updated",
+    "refund.failed",
+    "charge.refund.updated",
+    "charge.refunded",
+    "charge.dispute.created",
+    "charge.dispute.updated",
+    "charge.dispute.closed",
+    "charge.dispute.funds_reinstated",
+    "charge.dispute.funds_withdrawn",
+  ] as const)(
+    "routes %s through canonical recurring financial reconciliation",
+    async (type) => {
+      const prisma = createStripeEventPrismaHarness();
+      const event = makeFinancialReversalEvent(type);
+      mocks.stripe.events.retrieve.mockResolvedValue(event);
+
+      await recordHostedStripeEvent({
+        event,
+        prisma: prisma.client,
+      });
+
+      await expect(
+        reconcileHostedStripeEventById({
+          eventId: event.id,
+          prisma: prisma.client,
+        }),
+      ).resolves.toMatchObject({
+        eventId: event.id,
+        status: "completed",
+      });
+
+      expect(mocks.resolveStripeFinancialContext).toHaveBeenCalledWith({
+        chargeId: "ch_financial_123",
+        paymentIntentId: "pi_financial_123",
+      });
+      expect(mocks.applyStripeRecurringFinancialState).toHaveBeenCalledOnce();
+      expect(mocks.applyStripeRecurringFinancialState).toHaveBeenCalledWith({
+        dispatchContext: expect.objectContaining({
+          sourceEventId: event.id,
+          sourceType: `stripe.${type}`,
+        }),
+        owner: expect.objectContaining({
+          kind: "member",
+          memberId: "member_123",
+        }),
+        restoreWhenHealthy: true,
+        subscription: expect.objectContaining({ id: "sub_123" }),
+        tx: expect.anything(),
+      });
+      expect(mocks.applyStripeInvoicePaid).not.toHaveBeenCalled();
+      expect(mocks.applyStripeSubscriptionUpdated).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    "invoice.payment_action_required",
+    "invoice.payment_attempt_required",
+    "invoice.finalization_failed",
+    "invoice.marked_uncollectible",
+    "invoice.voided",
+  ] as const)(
+    "routes %s through the shared terminal collection projector",
+    async (type) => {
+      const prisma = createStripeEventPrismaHarness();
+      const event = makeInvoiceCollectionStateEvent(type);
+      const canonicalSubscription = makeCanonicalSubscription();
+      mocks.stripe.events.retrieve.mockResolvedValue(event);
+      mocks.stripe.subscriptions.retrieve.mockResolvedValue(canonicalSubscription);
+
+      await recordHostedStripeEvent({
+        event,
+        prisma: prisma.client,
+      });
+
+      await expect(
+        reconcileHostedStripeEventById({
+          eventId: event.id,
+          prisma: prisma.client,
+        }),
+      ).resolves.toMatchObject({
+        eventId: event.id,
+        status: "completed",
+      });
+
+      expect(mocks.applyStripeInvoiceCollectionStateChanged).toHaveBeenCalledOnce();
+      expect(mocks.applyStripeInvoiceCollectionStateChanged).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sourceEventId: event.id,
+          sourceType: `stripe.${type}`,
+        }),
+        expect.anything(),
+        canonicalSubscription,
+        expect.objectContaining({
+          kind: "member",
+          memberId: "member_123",
+        }),
+      );
+      expect(mocks.applyStripeRecurringFinancialState).not.toHaveBeenCalled();
+    },
+  );
+
+  it("holds the exact Family owner lock while projecting a recurring financial reversal", async () => {
+    const prisma = createStripeEventPrismaHarness();
+    const event = makeFinancialReversalEvent("charge.dispute.updated");
+    const ordering: string[] = [];
+    const familyOwner = {
+      groupId: "group_123",
+      kind: "family" as const,
+      lockMemberId: "owner_123",
+      stripeCustomerId: "cus_123",
+      stripeSubscriptionId: "sub_123",
+    };
+    mocks.stripe.events.retrieve.mockResolvedValue(event);
+    mocks.resolveHostedStripeBillingOwner.mockResolvedValue(familyOwner);
+    vi.mocked(prisma.client.$queryRaw).mockImplementation(async () => {
+      ordering.push("owner-locked");
+      return [];
+    });
+    mocks.applyStripeRecurringFinancialState.mockImplementationOnce(async () => {
+      ordering.push("financial-projected");
+      return {
+        blockActiveProjection: true,
+        state: "blocked",
+      };
+    });
+
+    await recordHostedStripeEvent({ event, prisma: prisma.client });
+
+    await expect(reconcileHostedStripeEventById({
+      eventId: event.id,
+      prisma: prisma.client,
+    })).resolves.toMatchObject({ status: "completed" });
+
+    expect(ordering).toEqual(["owner-locked", "financial-projected"]);
+    expect(mocks.applyStripeRecurringFinancialState).toHaveBeenCalledWith(
+      expect.objectContaining({
+        owner: familyOwner,
+      }),
     );
+  });
+
+  it.each([
+    ["refund.updated", "blocked"],
+    ["charge.dispute.funds_reinstated", "healthy"],
+  ] as const)(
+    "converges direct-paid Family ownership before projecting %s as %s",
+    async (type, financialState) => {
+      const prisma = createStripeEventPrismaHarness();
+      const event = makeFinancialReversalEvent(type);
+      const canonicalSubscription = makeCanonicalSubscription({
+        metadata: {
+          kind: "hosted_family_plan",
+        },
+      });
+      const ordering: string[] = [];
+      const memberOwner = {
+        kind: "member" as const,
+        lockMemberId: "member_123",
+        memberId: "member_123",
+        stripeCustomerId: "cus_123",
+        stripeSubscriptionId: "sub_123",
+      };
+      const familyOwner = {
+        groupId: "group_123",
+        kind: "family" as const,
+        lockMemberId: "member_123",
+        stripeCustomerId: "cus_123",
+        stripeSubscriptionId: "sub_123",
+      };
+      mocks.stripe.events.retrieve.mockResolvedValue(event);
+      mocks.stripe.subscriptions.retrieve.mockResolvedValue(canonicalSubscription);
+      mocks.resolveHostedStripeBillingOwner
+        .mockResolvedValueOnce(memberOwner)
+        .mockResolvedValueOnce(memberOwner)
+        .mockResolvedValue(familyOwner);
+      vi.mocked(prisma.client.$queryRaw).mockImplementation(async () => {
+        ordering.push("owner-locked");
+        return [];
+      });
+      mocks.convergeHostedFamilyDirectPaidOwnershipTx
+        .mockImplementationOnce(async () => {
+          ordering.push("ownership-converged");
+          return { groupId: "group_123" };
+        });
+      mocks.applyStripeRecurringFinancialState.mockImplementationOnce(async () => {
+        ordering.push("financial-projected");
+        return {
+          blockActiveProjection: financialState === "blocked",
+          state: financialState,
+        };
+      });
+
+      await recordHostedStripeEvent({ event, prisma: prisma.client });
+
+      await expect(reconcileHostedStripeEventById({
+        eventId: event.id,
+        prisma: prisma.client,
+      })).resolves.toMatchObject({ status: "completed" });
+
+      expect(ordering).toEqual([
+        "owner-locked",
+        "ownership-converged",
+        "financial-projected",
+      ]);
+      expect(mocks.convergeHostedFamilyDirectPaidOwnershipTx).toHaveBeenCalledWith({
+        eventCreatedAt: new Date(event.created * 1000),
+        subscription: canonicalSubscription,
+        tx: expect.anything(),
+        verifiedOwnerMemberId: "member_123",
+      });
+      expect(mocks.applyStripeRecurringFinancialState).toHaveBeenCalledWith(
+        expect.objectContaining({
+          owner: familyOwner,
+          restoreWhenHealthy: true,
+          subscription: canonicalSubscription,
+        }),
+      );
+    },
+  );
+
+  it("fails closed when exact Family ownership changes after the owner lock", async () => {
+    const prisma = createStripeEventPrismaHarness();
+    const event = makeFinancialReversalEvent("refund.updated");
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    mocks.stripe.events.retrieve.mockResolvedValue(event);
+    mocks.resolveHostedStripeBillingOwner
+      .mockResolvedValueOnce({
+        groupId: "group_123",
+        kind: "family",
+        lockMemberId: "owner_123",
+        stripeCustomerId: "cus_123",
+        stripeSubscriptionId: "sub_123",
+      })
+      .mockResolvedValue({
+        groupId: "group_456",
+        kind: "family",
+        lockMemberId: "owner_456",
+        stripeCustomerId: "cus_123",
+        stripeSubscriptionId: "sub_123",
+      });
+
+    await recordHostedStripeEvent({ event, prisma: prisma.client });
+
+    await expect(reconcileHostedStripeEventById({
+      eventId: event.id,
+      prisma: prisma.client,
+    })).resolves.toMatchObject({ status: "failed" });
+
+    expect(prisma.client.$queryRaw).toHaveBeenCalledOnce();
+    expect(mocks.applyStripeRecurringFinancialState).not.toHaveBeenCalled();
+    expect(prisma.rows[0]).toEqual(expect.objectContaining({
+      processedAt: null,
+      status: HostedStripeEventStatus.failed,
+    }));
+    errorSpy.mockRestore();
+  });
+
+  it.each([
+    ["customer.subscription.pending_update_applied", false],
+    ["customer.subscription.pending_update_expired", true],
+  ] as const)(
+    "reconciles %s Family transition metadata only after the owner lock",
+    async (type, isTerminal) => {
+      const prisma = createStripeEventPrismaHarness();
+      const event = makePendingUpdateEvent(type);
+      const canonicalSubscription = makeCanonicalSubscription();
+      const ordering: string[] = [];
+      mocks.stripe.events.retrieve.mockResolvedValue(event);
+      mocks.stripe.subscriptions.retrieve.mockResolvedValue(canonicalSubscription);
+      mocks.readHostedFamilyDirectPaidTransitionContext.mockReturnValue({
+        ownerMemberId: "member_123",
+      });
+      vi.mocked(prisma.client.$queryRaw).mockImplementation(async () => {
+        ordering.push("owner-locked");
+        return [];
+      });
+      mocks.reconcileHostedFamilyDirectPaidTransitionSubscription
+        .mockImplementationOnce(async () => {
+          ordering.push("transition-reconciled");
+          return canonicalSubscription;
+        });
+
+      await recordHostedStripeEvent({ event, prisma: prisma.client });
+
+      await expect(reconcileHostedStripeEventById({
+        eventId: event.id,
+        prisma: prisma.client,
+      })).resolves.toMatchObject({ status: "completed" });
+
+      expect(ordering).toEqual(["owner-locked", "transition-reconciled"]);
+      const transitionInput =
+        mocks.reconcileHostedFamilyDirectPaidTransitionSubscription.mock.calls[0]?.[0];
+      expect(transitionInput).toEqual(expect.objectContaining({
+        subscription: canonicalSubscription,
+        verifiedOwnerMemberId: "member_123",
+      }));
+      if (isTerminal) {
+        expect(transitionInput).toEqual(expect.objectContaining({
+          terminalProviderProof: "pending_update_expired",
+        }));
+      } else {
+        expect(transitionInput).not.toHaveProperty("terminalProviderProof");
+      }
+    },
+  );
+
+  it("uses an exact voided latest update invoice as terminal Family transition proof", async () => {
+    const prisma = createStripeEventPrismaHarness();
+    const event = makeStripeEvent({
+      api_version: "2025-03-31.basil",
+      created: 1_774_708_807,
+      data: {
+        object: {
+          billing_reason: "subscription_update",
+          customer: "cus_123",
+          id: "in_family_update",
+          lines: {
+            data: [{
+              amount: 1_000,
+              parent: {
+                subscription_item_details: {
+                  proration: true,
+                  subscription: "sub_123",
+                  subscription_item: "si_current",
+                },
+              },
+              pricing: {
+                price_details: {
+                  price: "price_family",
+                },
+              },
+              quantity: 2,
+            }],
+            has_more: false,
+          },
+          status: "void",
+          subscription: "sub_123",
+        },
+      },
+      id: "evt_invoice_voided_family_update",
+      livemode: false,
+      object: "event",
+      pending_webhooks: 0,
+      request: {
+        id: null,
+        idempotency_key: null,
+      },
+      type: "invoice.voided",
+    });
+    const canonicalSubscription = {
+      ...makeCanonicalSubscription(),
+      items: {
+        data: [{
+          id: "si_current",
+          price: {
+            id: "price_pulse",
+          },
+          quantity: 1,
+        }],
+      },
+      latest_invoice: "in_family_update",
+      pending_update: null,
+    } as Stripe.Subscription;
+    mocks.stripe.events.retrieve.mockResolvedValue(event);
+    mocks.stripe.subscriptions.retrieve.mockResolvedValue(canonicalSubscription);
+    mocks.readHostedFamilyDirectPaidTransitionContext.mockReturnValue({
+      ownerMemberId: "member_123",
+    });
+    mocks.reconcileHostedFamilyDirectPaidTransitionSubscription
+      .mockResolvedValueOnce(canonicalSubscription);
+
+    await recordHostedStripeEvent({ event, prisma: prisma.client });
+
+    await expect(reconcileHostedStripeEventById({
+      eventId: event.id,
+      prisma: prisma.client,
+    })).resolves.toMatchObject({ status: "completed" });
+
+    expect(
+      mocks.reconcileHostedFamilyDirectPaidTransitionSubscription,
+    ).toHaveBeenCalledWith(expect.objectContaining({
+      subscription: canonicalSubscription,
+      terminalProviderProof: "invoice_voided",
+      verifiedOwnerMemberId: "member_123",
+    }));
   });
 
   it("marks the receipt failed when Stripe event retrieval fails", async () => {
@@ -2817,6 +3603,7 @@ function makeCheckoutCompletedEvent(): Stripe.Event {
         customer: "cus_checkout",
         id: "cs_checkout_123",
         metadata: {
+          checkoutOffer: "standard",
           memberId: "member_123",
         },
         subscription: "sub_checkout_123",
@@ -2831,6 +3618,35 @@ function makeCheckoutCompletedEvent(): Stripe.Event {
       idempotency_key: null,
     },
     type: "checkout.session.completed",
+  });
+}
+
+function makeCheckoutExpiredEvent(): Stripe.Event {
+  return makeStripeEvent({
+    api_version: "2025-03-31.basil",
+    created: 1774708802,
+    data: {
+      object: {
+        client_reference_id: "member_123",
+        customer: "cus_checkout",
+        id: "cs_checkout_expired_123",
+        metadata: {
+          checkoutOffer: "standard",
+          memberId: "member_123",
+        },
+        status: "expired",
+        subscription: null,
+      },
+    },
+    id: "evt_checkout_expired_123",
+    livemode: false,
+    object: "event",
+    pending_webhooks: 0,
+    request: {
+      id: null,
+      idempotency_key: null,
+    },
+    type: "checkout.session.expired",
   });
 }
 
@@ -3004,6 +3820,8 @@ function makeSubscriptionEvent(
   type:
     | "customer.subscription.created"
     | "customer.subscription.deleted"
+    | "customer.subscription.pending_update_applied"
+    | "customer.subscription.pending_update_expired"
     | "customer.subscription.paused"
     | "customer.subscription.resumed"
     | "customer.subscription.trial_will_end",
@@ -3040,6 +3858,103 @@ function makeSubscriptionEvent(
     },
     type,
   });
+}
+
+type FinancialReversalEventType =
+  | "refund.created"
+  | "refund.updated"
+  | "refund.failed"
+  | "charge.refund.updated"
+  | "charge.refunded"
+  | "charge.dispute.created"
+  | "charge.dispute.updated"
+  | "charge.dispute.closed"
+  | "charge.dispute.funds_reinstated"
+  | "charge.dispute.funds_withdrawn";
+
+function makeFinancialReversalEvent(
+  type: FinancialReversalEventType,
+  input?: {
+    paymentIntentId?: string | null;
+  },
+): Stripe.Event {
+  const paymentIntentId =
+    input && "paymentIntentId" in input
+      ? input.paymentIntentId
+      : "pi_financial_123";
+  const object = type === "charge.refunded"
+    ? {
+        id: "ch_financial_123",
+        payment_intent: paymentIntentId,
+      }
+    : type.startsWith("charge.dispute.")
+    ? {
+        charge: "ch_financial_123",
+        id: "dp_financial_123",
+        payment_intent: paymentIntentId,
+      }
+    : {
+        charge: "ch_financial_123",
+        id: "re_financial_123",
+        payment_intent: paymentIntentId,
+      };
+
+  return makeStripeEvent({
+    api_version: "2025-03-31.basil",
+    created: 1774708806,
+    data: {
+      object,
+    },
+    id: `evt_${type.replace(/\./gu, "_")}_123`,
+    livemode: false,
+    object: "event",
+    pending_webhooks: 0,
+    request: {
+      id: null,
+      idempotency_key: null,
+    },
+    type,
+  });
+}
+
+type InvoiceCollectionStateEventType =
+  | "invoice.payment_action_required"
+  | "invoice.payment_attempt_required"
+  | "invoice.finalization_failed"
+  | "invoice.marked_uncollectible"
+  | "invoice.voided";
+
+function makeInvoiceCollectionStateEvent(
+  type: InvoiceCollectionStateEventType,
+): Stripe.Event {
+  return makeStripeEvent({
+    api_version: "2025-03-31.basil",
+    created: 1774708807,
+    data: {
+      object: {
+        customer: "cus_123",
+        id: "in_collection_123",
+        subscription: "sub_123",
+      },
+    },
+    id: `evt_${type.replace(/\./gu, "_")}_123`,
+    livemode: false,
+    object: "event",
+    pending_webhooks: 0,
+    request: {
+      id: null,
+      idempotency_key: null,
+    },
+    type,
+  });
+}
+
+function makePendingUpdateEvent(
+  type:
+    | "customer.subscription.pending_update_applied"
+    | "customer.subscription.pending_update_expired",
+): Stripe.Event {
+  return makeSubscriptionEvent(type);
 }
 
 function makeRefundCreatedEvent(): Stripe.Event {
@@ -3140,6 +4055,11 @@ function createStripeEventPrismaHarness() {
   const client: StripeEventPrismaHarnessClient = {
     $queryRaw: vi.fn(async () => []),
     $transaction: transaction,
+    hostedMember: {
+      findMany: vi.fn(async (input: {
+        where: { id: { in: string[] } };
+      }) => input.where.id.in.map((id) => ({ id }))),
+    },
     hostedStripeEvent: {
       create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
         const row: MutableStripeEventRow = {

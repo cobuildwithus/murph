@@ -59,14 +59,14 @@ export type HostedPulseTrialStartPaidClientResult =
     status: "redirecting";
   }
   | {
-    status: "payment_required";
-  }
-  | {
     status: "started";
   };
 
 export type HostedPulseTrialContinuationClientResult =
   | HostedPulseTrialStartPaidClientResult
+  | {
+    status: "payment_required";
+  }
   | {
     status: "continuing";
   };

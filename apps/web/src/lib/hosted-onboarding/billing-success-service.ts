@@ -25,19 +25,28 @@ import {
 } from "./stripe-billing-lookup";
 import {
   applyStripeCheckoutCompleted,
-  cancelHostedFamilySponsoredCheckoutSubscription,
   cancelHostedPulseTrialCheckoutLoserSubscription,
 } from "./stripe-billing-events";
+import {
+  executeHostedCheckoutSubscriptionCleanup,
+  type HostedCheckoutSubscriptionCleanupCandidate,
+} from "./stripe-checkout-subscription-cleanup";
 
 export async function reconcileHostedBillingCheckoutSuccess(input: {
   inviteCode: string;
   linkedAccounts?: readonly PrivyLinkedAccountLike[];
   member: HostedMemberCoreState;
+  now?: Date;
   prisma?: PrismaClient;
   sessionId: string;
 }) {
   const prisma = input.prisma ?? getPrisma();
-  const invite = await requireHostedInviteForAuthentication(input.inviteCode, prisma, new Date());
+  const observedAt = input.now ?? new Date();
+  const invite = await requireHostedInviteForAuthentication(
+    input.inviteCode,
+    prisma,
+    observedAt,
+  );
 
   if (input.member.id !== invite.memberId) {
     throw hostedOnboardingError({
@@ -65,14 +74,15 @@ export async function reconcileHostedBillingCheckoutSuccess(input: {
 
   const activationOutcome = await applyHostedCheckoutSessionSuccess({
     memberId: invite.memberId,
+    observedAt,
     prisma,
     session,
   });
-  if (activationOutcome.cleanupFamilySponsoredStripeSubscriptionId) {
-    await cancelHostedFamilySponsoredCheckoutSubscription({
-      subscriptionId: activationOutcome.cleanupFamilySponsoredStripeSubscriptionId,
-    });
-  }
+  await cleanupHostedCheckoutSubscriptionIfNeeded({
+    candidate: activationOutcome.cleanupCheckoutSubscription,
+    prisma,
+    stripe,
+  });
   if (activationOutcome.cleanupPulseTrialStripeSubscriptionId) {
     await cancelHostedPulseTrialCheckoutLoserSubscription({
       memberId: invite.memberId,
@@ -98,19 +108,20 @@ export async function reconcileHostedBillingCheckoutSuccess(input: {
 
 async function applyHostedCheckoutSessionSuccess(input: {
   memberId: string;
+  observedAt: Date;
   prisma: PrismaClient;
   session: Stripe.Checkout.Session;
 }): Promise<{
   activatedMemberId: string | null;
+  cleanupCheckoutSubscription?: HostedCheckoutSubscriptionCleanupCandidate | null;
   cleanupPulseTrialStripeSubscriptionId?: string | null;
-  cleanupFamilySponsoredStripeSubscriptionId?: string | null;
   hostedExecutionEventId: string | null;
   welcomeEmailMemberId: string | null;
 }> {
   let activationOutcome: {
     activatedMemberId: string | null;
+    cleanupCheckoutSubscription?: HostedCheckoutSubscriptionCleanupCandidate | null;
     cleanupPulseTrialStripeSubscriptionId?: string | null;
-    cleanupFamilySponsoredStripeSubscriptionId?: string | null;
     hostedExecutionEventId: string | null;
     welcomeEmailMemberId: string | null;
   } = {
@@ -136,11 +147,32 @@ async function applyHostedCheckoutSessionSuccess(input: {
         });
       }
 
-      return applyStripeCheckoutCompleted(input.session, tx);
+      return applyStripeCheckoutCompleted(
+        input.session,
+        tx,
+        undefined,
+        input.observedAt,
+      );
     },
   });
 
   return activationOutcome;
+}
+
+async function cleanupHostedCheckoutSubscriptionIfNeeded(input: {
+  candidate?: HostedCheckoutSubscriptionCleanupCandidate | null;
+  prisma: PrismaClient;
+  stripe: Stripe;
+}): Promise<void> {
+  if (!input.candidate) {
+    return;
+  }
+
+  await executeHostedCheckoutSubscriptionCleanup({
+    candidate: input.candidate,
+    prisma: input.prisma,
+    stripe: input.stripe,
+  });
 }
 
 async function sendHostedCheckoutSuccessWelcomeEmailBestEffort(input: {

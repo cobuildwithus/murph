@@ -143,7 +143,13 @@ function projectEdgeUpgradeResult(input: {
         plan,
         status: "completed",
       };
-    case "pending_payment":
+    case "processing":
+      return {
+        action: input.action,
+        plan,
+        status: "pending",
+      };
+    case "payment_required":
       return {
         action: input.action,
         paymentUrl: input.result.paymentUrl,

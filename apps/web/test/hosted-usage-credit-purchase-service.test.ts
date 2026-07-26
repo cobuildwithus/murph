@@ -138,6 +138,12 @@ const NOW = new Date("2026-07-16T17:00:00.000Z");
 const MEMBER_ID = "hbm_member123";
 const CLIENT_REQUEST_KEY = "request_key_123456";
 
+function makeStripeConnectionError(message: string): Error {
+  return Object.assign(new Error(message), {
+    type: "StripeConnectionError",
+  });
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.requireHostedOnboardingPublicBaseUrl.mockReset();
@@ -584,7 +590,9 @@ describe("createHostedUsageCreditCheckout", () => {
 
   it("withholds Family retry capability when authority ends after Stripe failure", async () => {
     const fake = createFakePrisma();
-    mocks.stripeCheckoutCreate.mockRejectedValue(new Error("connection lost"));
+    mocks.stripeCheckoutCreate.mockRejectedValue(
+      makeStripeConnectionError("connection lost"),
+    );
 
     await expect(createHostedFamilyMemberUsageCreditCheckout({
       beneficiaryMemberId: "hbm_familymember1",
@@ -1045,7 +1053,9 @@ describe("createHostedUsageCreditCheckout", () => {
   it("withholds retry capability for a suspended payer's unattached purchase", async () => {
     const fake = createFakePrisma();
     mocks.getPrisma.mockReturnValue(fake.prisma);
-    mocks.stripeCheckoutCreate.mockRejectedValueOnce(new Error("connection lost"));
+    mocks.stripeCheckoutCreate.mockRejectedValueOnce(
+      makeStripeConnectionError("connection lost"),
+    );
 
     await expect(createHostedUsageCreditCheckout({
       clientRequestKey: CLIENT_REQUEST_KEY,
@@ -1222,6 +1232,7 @@ describe("createHostedUsageCreditCheckout", () => {
         providerRequestIdPresent: true,
         statusCode: 503,
       },
+      httpStatus: 502,
       retryable: true,
     });
     expect(checkoutError).toBeInstanceOf(Error);
@@ -1258,10 +1269,47 @@ describe("createHostedUsageCreditCheckout", () => {
     expect(fake.purchases.size).toBe(1);
   });
 
+  it("fails non-retryably when Stripe rejects Checkout creation", async () => {
+    const fake = createFakePrisma();
+    mocks.getPrisma.mockReturnValue(fake.prisma);
+    mocks.stripeCheckoutCreate.mockRejectedValueOnce(Object.assign(
+      new Error("Unknown Checkout parameter."),
+      {
+        code: "parameter_unknown",
+        rawType: "invalid_request_error",
+        statusCode: 400,
+        type: "StripeInvalidRequestError",
+      },
+    ));
+
+    await expect(createHostedUsageCreditCheckout({
+      clientRequestKey: CLIENT_REQUEST_KEY,
+      memberId: MEMBER_ID,
+      now: NOW,
+      offerCode: "usage_10_usd",
+    })).rejects.toMatchObject({
+      code: "HOSTED_USAGE_CREDIT_STRIPE_REJECTED",
+      details: {
+        providerErrorCode: "parameter_unknown",
+        providerErrorType: "StripeInvalidRequestError",
+        statusCode: 400,
+      },
+      httpStatus: 500,
+      retryable: false,
+    });
+
+    expect(mocks.stripeCheckoutCreate).toHaveBeenCalledOnce();
+    expect(onlyPurchase(fake.purchases)).toMatchObject({
+      status: "created",
+    });
+  });
+
   it("rejects an unsupported Checkout request policy before retrying Stripe", async () => {
     const fake = createFakePrisma();
     mocks.getPrisma.mockReturnValue(fake.prisma);
-    mocks.stripeCheckoutCreate.mockRejectedValueOnce(new Error("connection lost"));
+    mocks.stripeCheckoutCreate.mockRejectedValueOnce(
+      makeStripeConnectionError("connection lost"),
+    );
 
     await expect(createHostedUsageCreditCheckout({
       clientRequestKey: CLIENT_REQUEST_KEY,
@@ -1289,7 +1337,9 @@ describe("createHostedUsageCreditCheckout", () => {
   it("stops provider creation retries at the derived 30-minute safety window", async () => {
     const fake = createFakePrisma();
     mocks.getPrisma.mockReturnValue(fake.prisma);
-    mocks.stripeCheckoutCreate.mockRejectedValueOnce(new Error("connection lost"));
+    mocks.stripeCheckoutCreate.mockRejectedValueOnce(
+      makeStripeConnectionError("connection lost"),
+    );
 
     await expect(createHostedUsageCreditCheckout({
       clientRequestKey: CLIENT_REQUEST_KEY,
@@ -1326,7 +1376,9 @@ describe("createHostedUsageCreditCheckout", () => {
   it("stops projecting an unattached purchase at the exact frozen expiry", async () => {
     const fake = createFakePrisma();
     mocks.getPrisma.mockReturnValue(fake.prisma);
-    mocks.stripeCheckoutCreate.mockRejectedValueOnce(new Error("connection lost"));
+    mocks.stripeCheckoutCreate.mockRejectedValueOnce(
+      makeStripeConnectionError("connection lost"),
+    );
 
     await expect(createHostedUsageCreditCheckout({
       clientRequestKey: CLIENT_REQUEST_KEY,
@@ -1359,7 +1411,7 @@ describe("createHostedUsageCreditCheckout", () => {
     const fake = createFakePrisma();
     mocks.getPrisma.mockReturnValue(fake.prisma);
     mocks.stripeCheckoutCreate
-      .mockRejectedValueOnce(new Error("connection lost"))
+      .mockRejectedValueOnce(makeStripeConnectionError("connection lost"))
       .mockImplementationOnce(async (request) => buildStripeSession(request));
 
     await expect(createHostedUsageCreditCheckout({
@@ -1446,7 +1498,9 @@ describe("createHostedUsageCreditCheckout", () => {
   it("returns honest recovery state when the frozen create retry stays ambiguous", async () => {
     const fake = createFakePrisma();
     mocks.getPrisma.mockReturnValue(fake.prisma);
-    mocks.stripeCheckoutCreate.mockRejectedValue(new Error("connection lost"));
+    mocks.stripeCheckoutCreate.mockRejectedValue(
+      makeStripeConnectionError("connection lost"),
+    );
 
     await expect(createHostedUsageCreditCheckout({
       clientRequestKey: CLIENT_REQUEST_KEY,
@@ -1505,7 +1559,7 @@ describe("createHostedUsageCreditCheckout", () => {
     const fake = createFakePrisma();
     mocks.getPrisma.mockReturnValue(fake.prisma);
     mocks.stripeCheckoutCreate
-      .mockRejectedValueOnce(new Error("connection lost"))
+      .mockRejectedValueOnce(makeStripeConnectionError("connection lost"))
       .mockImplementationOnce(async (request) => buildStripeSession(request));
 
     await expect(createHostedUsageCreditCheckout({
@@ -1533,7 +1587,9 @@ describe("createHostedUsageCreditCheckout", () => {
   it("closes a same-key unbound purchase after its Checkout expiry", async () => {
     const fake = createFakePrisma();
     mocks.getPrisma.mockReturnValue(fake.prisma);
-    mocks.stripeCheckoutCreate.mockRejectedValueOnce(new Error("connection lost"));
+    mocks.stripeCheckoutCreate.mockRejectedValueOnce(
+      makeStripeConnectionError("connection lost"),
+    );
 
     await expect(createHostedUsageCreditCheckout({
       clientRequestKey: CLIENT_REQUEST_KEY,
@@ -1557,7 +1613,9 @@ describe("createHostedUsageCreditCheckout", () => {
   it("rejects request-key reuse with different offer semantics", async () => {
     const fake = createFakePrisma();
     mocks.getPrisma.mockReturnValue(fake.prisma);
-    mocks.stripeCheckoutCreate.mockRejectedValueOnce(new Error("connection lost"));
+    mocks.stripeCheckoutCreate.mockRejectedValueOnce(
+      makeStripeConnectionError("connection lost"),
+    );
 
     await expect(createHostedUsageCreditCheckout({
       clientRequestKey: CLIENT_REQUEST_KEY,
@@ -1610,7 +1668,9 @@ describe("expireHostedUsageCreditCheckout", () => {
   it("does not treat a cancel return as authority for an unbound created purchase", async () => {
     const fake = createFakePrisma();
     mocks.getPrisma.mockReturnValue(fake.prisma);
-    mocks.stripeCheckoutCreate.mockRejectedValueOnce(new Error("connection lost"));
+    mocks.stripeCheckoutCreate.mockRejectedValueOnce(
+      makeStripeConnectionError("connection lost"),
+    );
     await expect(createHostedUsageCreditCheckout({
       clientRequestKey: CLIENT_REQUEST_KEY,
       memberId: MEMBER_ID,
@@ -1729,7 +1789,9 @@ describe("expireHostedUsageCreditCheckout", () => {
     mocks.stripeCheckoutRetrieve
       .mockResolvedValueOnce(openSession)
       .mockResolvedValueOnce(openSession);
-    mocks.stripeCheckoutExpire.mockRejectedValueOnce(new Error("Stripe timeout"));
+    mocks.stripeCheckoutExpire.mockRejectedValueOnce(
+      makeStripeConnectionError("Stripe timeout"),
+    );
 
     await expect(expireHostedUsageCreditCheckout({
       now: new Date(NOW.getTime() + 60_000),
@@ -2038,7 +2100,9 @@ describe("usage-credit account-deletion convergence", () => {
         status: "expired",
         url: null,
       });
-    mocks.stripeCheckoutExpire.mockRejectedValueOnce(new Error("Stripe timeout"));
+    mocks.stripeCheckoutExpire.mockRejectedValueOnce(
+      makeStripeConnectionError("Stripe timeout"),
+    );
     fake.member.suspendedAt = NOW;
 
     await expect(closeHostedUsageCreditPurchasesForAccountDeletion({
@@ -2065,7 +2129,9 @@ describe("usage-credit account-deletion convergence", () => {
       offerCode: "usage_10_usd",
     });
     const purchase = onlyPurchase(fake.purchases);
-    mocks.stripeCheckoutRetrieve.mockRejectedValueOnce(new Error("Stripe unavailable"));
+    mocks.stripeCheckoutRetrieve.mockRejectedValueOnce(
+      makeStripeConnectionError("Stripe unavailable"),
+    );
     fake.member.suspendedAt = NOW;
 
     await expect(closeHostedUsageCreditPurchasesForAccountDeletion({
@@ -2157,7 +2223,9 @@ describe("readHostedUsageCreditPurchaseStatus", () => {
   it("projects a created purchase as reconciliation without provider I/O", async () => {
     const fake = createFakePrisma();
     mocks.getPrisma.mockReturnValue(fake.prisma);
-    mocks.stripeCheckoutCreate.mockRejectedValueOnce(new Error("connection lost"));
+    mocks.stripeCheckoutCreate.mockRejectedValueOnce(
+      makeStripeConnectionError("connection lost"),
+    );
     await expect(createHostedUsageCreditCheckout({
       clientRequestKey: CLIENT_REQUEST_KEY,
       memberId: MEMBER_ID,
@@ -2181,7 +2249,9 @@ describe("readHostedUsageCreditPurchaseStatus", () => {
   it("does not reveal another payer's purchase", async () => {
     const fake = createFakePrisma();
     mocks.getPrisma.mockReturnValue(fake.prisma);
-    mocks.stripeCheckoutCreate.mockRejectedValueOnce(new Error("connection lost"));
+    mocks.stripeCheckoutCreate.mockRejectedValueOnce(
+      makeStripeConnectionError("connection lost"),
+    );
     await expect(createHostedUsageCreditCheckout({
       clientRequestKey: CLIENT_REQUEST_KEY,
       memberId: MEMBER_ID,
@@ -2202,7 +2272,9 @@ describe("readHostedUsageCreditPurchaseStatus", () => {
   it("does not reveal a payer's purchase for another beneficiary", async () => {
     const fake = createFakePrisma();
     mocks.getPrisma.mockReturnValue(fake.prisma);
-    mocks.stripeCheckoutCreate.mockRejectedValueOnce(new Error("connection lost"));
+    mocks.stripeCheckoutCreate.mockRejectedValueOnce(
+      makeStripeConnectionError("connection lost"),
+    );
     await expect(createHostedUsageCreditCheckout({
       clientRequestKey: CLIENT_REQUEST_KEY,
       memberId: MEMBER_ID,

@@ -1,6 +1,6 @@
 # Hosted Family Plan
 
-Last verified: 2026-07-22
+Last verified: 2026-07-25
 
 ## Purpose
 
@@ -90,6 +90,23 @@ updates Stripe and reports that Family billing is syncing. The Family
 subscription webhook writes the paid projection and clears the old direct
 billing reference in the same transaction, so entitlement ownership changes
 once and never advances Stripe's event watermark from local wall time.
+
+The provider transition is deliberately phased under the existing owner lock:
+write neutral transition metadata, submit only the payment-gated recurring item
+change, prove the canonical invoice paid with no pending update, delete any
+legacy metered items in a separate non-prorating update, and only then write
+authoritative Family ownership metadata. Each phase re-reads the current local
+binding and canonical Stripe subscription. A completed or open Family Checkout
+attempt must first reconcile or expire by exact attempt and Session identity
+under the same owner lock. The request path never writes paid capacity or clears
+the direct billing reference.
+
+Payment-required provider states return the exact Stripe-hosted invoice or
+versioned payment-recovery Portal URL. Processing states remain bounded syncing
+states, while voided, uncollectible, canceled, and finalization-failed states
+are terminal rather than indefinite pending. These outcomes come from a
+canonical invoice plus InvoicePayments read so the PaymentIntent state, not URL
+presence, controls the classification.
 
 Changing a member's tier is one owner-confirmed action. Web records the target
 in the membership's nullable `pendingPlanCode` while the current tier and access

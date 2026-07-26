@@ -13,7 +13,6 @@ import {
   isHostedAutoPulseTrialEnabled,
   parseHostedPulseTrialPolicyVersion,
 } from "./billing-plans";
-import { readStripeShouldRetryDirective } from "./billing";
 import { isHostedMemberSuspended } from "./entitlement";
 import { hostedOnboardingError, isHostedOnboardingError } from "./errors";
 import {
@@ -51,8 +50,13 @@ import {
 import {
   writeHostedMemberStripeBillingTx,
 } from "./stripe-billing-policy";
+import {
+  classifyHostedStripeFailure,
+  isHostedStripeDefinitiveRequestRejection,
+} from "./stripe-billing-state";
 import type { HostedStripeDispatchContext } from "./stripe-dispatch";
 import {
+  describeHostedStripeErrorDetails,
   logHostedStripeFailure,
   withHostedStripeFailureLog,
 } from "./stripe-error-log";
@@ -725,7 +729,7 @@ async function retrieveHostedAutoPulseTrialFinalizationSubscription(input: {
       error,
       operationName: "subscription.retrieve.auto-trial-finalization",
     });
-    if (isDefinitiveHostedAutoPulseTrialStripeAuthorityRejection(error)) {
+      if (isHostedStripeDefinitiveRequestRejection(error)) {
       throw hostedOnboardingError({
         cause: error,
         code: "HOSTED_AUTO_PULSE_TRIAL_STRIPE_REJECTED",
@@ -741,40 +745,6 @@ async function retrieveHostedAutoPulseTrialFinalizationSubscription(input: {
       retryable: true,
     });
   }
-}
-
-function isDefinitiveHostedAutoPulseTrialStripeAuthorityRejection(
-  error: unknown,
-): boolean {
-  if (!error || typeof error !== "object") {
-    return false;
-  }
-  const shouldRetry = readStripeShouldRetryDirective(error);
-  if (shouldRetry !== null) {
-    return !shouldRetry;
-  }
-  const statusCode = "statusCode" in error &&
-      typeof error.statusCode === "number"
-    ? error.statusCode
-    : null;
-  if (statusCode !== null) {
-    return statusCode >= 400 &&
-      statusCode < 500 &&
-      statusCode !== 409 &&
-      statusCode !== 429;
-  }
-  const type = "type" in error && typeof error.type === "string"
-    ? error.type
-    : null;
-  const rawType = "rawType" in error && typeof error.rawType === "string"
-    ? error.rawType
-    : null;
-  return type === "StripeInvalidRequestError" ||
-    type === "StripeAuthenticationError" ||
-    type === "StripePermissionError" ||
-    rawType === "invalid_request_error" ||
-    rawType === "authentication_error" ||
-    rawType === "permission_error";
 }
 
 function assertHostedAutoPulseTrialFinalizationSubscriptionEligible(input: {
@@ -1280,11 +1250,18 @@ async function listHostedAutoPulseTrialStripeSubscriptionsForRecovery(input: {
       error,
       operationName: "subscriptions.list.auto-trial-recovery",
     });
+    const failure = classifyHostedStripeFailure(error);
     throw hostedOnboardingError({
       code: "HOSTED_AUTO_PULSE_TRIAL_RECOVERY_LOOKUP_FAILED",
-      httpStatus: 502,
-      message: "Murph could not check for an unfinished trial setup. Try again.",
-      retryable: true,
+      details: describeHostedStripeErrorDetails({
+        error,
+        operationName: "subscriptions.list.auto-trial-recovery",
+      }),
+      httpStatus: failure.httpStatus,
+      message: failure.kind === "provider_ambiguous"
+        ? "Murph could not check for an unfinished trial setup. Try again."
+        : "Stripe rejected the unfinished-trial lookup. Contact support.",
+      retryable: failure.retryable,
     });
   }
 }

@@ -167,17 +167,18 @@ async function addSeatThenInvite<T>(
   if (snapshot.seats.billed >= snapshot.seats.max) {
     return "unavailable";
   }
-  const targetCapacities = {
-    edge: snapshot.plans.edge.billed,
-    pulse: snapshot.plans.pulse.billed,
-    [planCode]: snapshot.plans[planCode].billed + 1,
-  };
-  await updateHostedFamilyPlanCapacities({
+  const capacityResult = await updateHostedFamilyPlanCapacities({
     groupId: snapshot.groupId,
     ownerMemberId,
     prisma,
-    targetCapacities,
+    requiredPlanCode: planCode,
   });
+  if (capacityResult.kind === "not_needed") {
+    return { invite: await issueInvite() };
+  }
+  if (capacityResult.kind === "unavailable") {
+    return "unavailable";
+  }
   // Give the webhook a moment to reconcile the new count, then let the invite
   // itself be the test: if any seat is now open (even if a concurrent change
   // pushed the count past our target) it lands; only a still-full plan reports
@@ -185,7 +186,7 @@ async function addSeatThenInvite<T>(
   await waitForHostedFamilyPlanCapacities({
     groupId: snapshot.groupId,
     prisma,
-    targetCapacities,
+    targetCapacities: capacityResult.targetCapacities,
   });
   try {
     return { invite: await issueInvite() };

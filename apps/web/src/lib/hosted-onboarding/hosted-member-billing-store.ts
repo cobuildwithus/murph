@@ -11,6 +11,8 @@ import {
 
 import { getPrisma } from "../prisma";
 import {
+  createHostedStripeCheckoutSessionLookupKey,
+  createHostedStripeCheckoutSessionLookupKeyReadCandidates,
   createHostedStripeCustomerLookupKey,
   createHostedStripeCustomerLookupKeyReadCandidates,
   createHostedStripeSubscriptionLookupKey,
@@ -30,6 +32,9 @@ import {
 } from "./shared";
 
 export interface HostedMemberStripeBillingRefSnapshot {
+  checkoutAttemptId?: string | null;
+  checkoutCreatedAt?: Date | null;
+  checkoutIntentHash?: string | null;
   currentBillingPhase?: string | null;
   currentBillingPlanCode?: string | null;
   currentCheckoutOffer?: string | null;
@@ -44,6 +49,7 @@ export interface HostedMemberStripeBillingRefSnapshot {
   scheduledBillingEffectiveAt?: Date | null;
   scheduledBillingPlanCode?: string | null;
   stripeCustomerId: string | null;
+  stripeCheckoutSessionId?: string | null;
   stripeSubscriptionId: string | null;
   stripeSubscriptionScheduleId?: string | null;
 }
@@ -87,6 +93,22 @@ export interface HostedMemberStripeBillingRefWriteInput {
   tx: Prisma.TransactionClient;
 }
 
+type HostedMemberStripeCheckoutAcceptanceOutcome =
+  | {
+      billingRef: HostedMemberStripeBillingRefSnapshot;
+      kind: "accepted" | "already_accepted";
+    }
+  | {
+      kind: "cleanup_superseded";
+    };
+
+export interface HostedMemberStripeCheckoutAttemptReservation {
+  attemptId: string;
+  createdAt: Date;
+  intentHash: string;
+  stripeCheckoutSessionId: string | null;
+}
+
 // Stripe's pinned SDK permits three 80-second attempts plus two Retry-After
 // waits of up to 60 seconds per call. A serialized billing transition can
 // perform one retrieve and one update under this lock, so 13 minutes covers
@@ -124,16 +146,34 @@ export async function withHostedMemberStripeMutationLockForOps<TResult>(input: {
   run: (tx: Prisma.TransactionClient) => Promise<TResult>;
   transactionTimeoutMs: number;
 }): Promise<TResult> {
+  return withHostedMemberStripeMutationLocksForOps({
+    acquisitionTimeoutMs: input.acquisitionTimeoutMs,
+    memberIds: [input.memberId],
+    prisma: input.prisma,
+    run: input.run,
+    transactionTimeoutMs: input.transactionTimeoutMs,
+  });
+}
+
+export async function withHostedMemberStripeMutationLocksForOps<TResult>(input: {
+  acquisitionTimeoutMs: number;
+  memberIds: readonly string[];
+  prisma: PrismaClient;
+  run: (tx: Prisma.TransactionClient) => Promise<TResult>;
+  transactionTimeoutMs: number;
+}): Promise<TResult> {
   return input.prisma.$transaction(async (tx) => {
-    try {
-      await lockHostedMemberRow(tx, input.memberId, {
-        timeoutMs: input.acquisitionTimeoutMs,
-      });
-    } catch (error) {
-      if (isHostedMemberStripeMutationLockTimeout(error)) {
-        throw new HostedMemberStripeMutationLockBusyError();
+    for (const memberId of [...new Set(input.memberIds)]) {
+      try {
+        await lockHostedMemberRow(tx, memberId, {
+          timeoutMs: input.acquisitionTimeoutMs,
+        });
+      } catch (error) {
+        if (isHostedMemberStripeMutationLockTimeout(error)) {
+          throw new HostedMemberStripeMutationLockBusyError();
+        }
+        throw error;
       }
-      throw error;
     }
 
     await tx.$queryRaw`select set_config('lock_timeout', '0', true)`;
@@ -269,6 +309,488 @@ export async function readHostedMemberStripeBillingRef(input: {
   return billingRef ? await projectHostedMemberStripeBillingRefSnapshot(billingRef, input.prisma) : null;
 }
 
+/**
+ * Reserves the single standard Checkout attempt owned by a hosted member.
+ *
+ * Callers first commit this reservation, then reacquire the member row lock
+ * across the bounded Stripe create/retrieve and exact Session bind. The
+ * committed attempt survives an ambiguous provider response; the second lock
+ * prevents a conflicting Checkout, deletion, or subscription acceptance from
+ * replacing its owner while Stripe is deciding the mutation.
+ */
+export async function reserveHostedMemberStripeCheckoutAttemptTx(input: {
+  attemptId: string;
+  createdAt: Date;
+  intentHash: string;
+  memberId: string;
+  tx: Prisma.TransactionClient;
+}): Promise<HostedMemberStripeCheckoutAttemptReservation> {
+  await lockHostedMemberRow(input.tx, input.memberId);
+
+  const member = await input.tx.hostedMember.findUnique({
+    select: {
+      suspendedAt: true,
+    },
+    where: {
+      id: input.memberId,
+    },
+  });
+  if (!member) {
+    throw hostedOnboardingError({
+      code: "HOSTED_MEMBER_NOT_FOUND",
+      httpStatus: 404,
+      message: "Your hosted member record was not found.",
+    });
+  }
+  if (member.suspendedAt instanceof Date) {
+    throw hostedOnboardingError({
+      code: "HOSTED_MEMBER_SUSPENDED",
+      httpStatus: 403,
+      message: "This hosted account is suspended. Contact support to restore access.",
+    });
+  }
+
+  const currentBillingRef = await readHostedMemberStripeBillingRef({
+    memberId: input.memberId,
+    prisma: input.tx,
+  });
+  if (currentBillingRef?.stripeSubscriptionId) {
+    throw hostedOnboardingError({
+      code: "HOSTED_BILLING_SUBSCRIPTION_ALREADY_EXISTS",
+      httpStatus: 409,
+      message:
+        "This hosted account already has a subscription. Manage it from Settings instead of starting a new one.",
+    });
+  }
+
+  const currentAttempt = readHostedMemberStripeCheckoutAttempt(currentBillingRef);
+  if (currentAttempt) {
+    return currentAttempt;
+  }
+
+  await input.tx.hostedMemberBillingRef.upsert({
+    create: {
+      checkoutAttemptId: input.attemptId,
+      checkoutCreatedAt: input.createdAt,
+      checkoutIntentHash: input.intentHash,
+      memberId: input.memberId,
+    },
+    update: {
+      checkoutAttemptId: input.attemptId,
+      checkoutCreatedAt: input.createdAt,
+      checkoutIntentHash: input.intentHash,
+      stripeCheckoutSessionIdEncrypted: null,
+      stripeCheckoutSessionLookupKey: null,
+    },
+    where: {
+      memberId: input.memberId,
+    },
+  });
+
+  return {
+    attemptId: input.attemptId,
+    createdAt: input.createdAt,
+    intentHash: input.intentHash,
+    stripeCheckoutSessionId: null,
+  };
+}
+
+export async function bindHostedMemberStripeCheckoutSessionTx(input: {
+  attemptId: string;
+  intentHash: string;
+  memberId: string;
+  sessionId: string;
+  tx: Prisma.TransactionClient;
+}): Promise<void> {
+  const stripeCheckoutSessionLookupKey = createHostedStripeCheckoutSessionLookupKey(
+    input.sessionId,
+  );
+  if (!stripeCheckoutSessionLookupKey) {
+    throw new TypeError("Stripe Checkout Session ID is invalid.");
+  }
+  const stripeCheckoutSessionIdEncrypted = (
+    await buildHostedMemberBillingPrivateColumns({
+      memberId: input.memberId,
+      prisma: input.tx,
+      stripeCheckoutSessionId: input.sessionId,
+      stripeCustomerId: null,
+      stripeSubscriptionId: null,
+    })
+  ).stripeCheckoutSessionIdEncrypted;
+
+  const updated = await input.tx.hostedMemberBillingRef.updateMany({
+    data: {
+      stripeCheckoutSessionIdEncrypted,
+      stripeCheckoutSessionLookupKey,
+    },
+    where: {
+      checkoutAttemptId: input.attemptId,
+      checkoutIntentHash: input.intentHash,
+      memberId: input.memberId,
+      stripeSubscriptionLookupKey: null,
+    },
+  });
+  if (updated.count !== 1) {
+    throw hostedOnboardingError({
+      code: "HOSTED_BILLING_CHECKOUT_ATTEMPT_STALE",
+      httpStatus: 409,
+      message:
+        "Billing changed before Stripe returned a checkout session. Start checkout again.",
+      retryable: true,
+    });
+  }
+}
+
+export async function clearHostedMemberStripeCheckoutAttemptTx(input: {
+  attemptId: string;
+  expectedSessionId: string | null;
+  intentHash: string;
+  memberId: string;
+  tx: Prisma.TransactionClient;
+}): Promise<boolean> {
+  const stripeCheckoutSessionLookupKeys =
+    createHostedStripeCheckoutSessionLookupKeyReadCandidates(
+      input.expectedSessionId,
+    );
+  const updated = await input.tx.hostedMemberBillingRef.updateMany({
+    data: {
+      checkoutAttemptId: null,
+      checkoutCreatedAt: null,
+      checkoutIntentHash: null,
+      stripeCheckoutSessionIdEncrypted: null,
+      stripeCheckoutSessionLookupKey: null,
+    },
+    where: {
+      checkoutAttemptId: input.attemptId,
+      checkoutIntentHash: input.intentHash,
+      memberId: input.memberId,
+      stripeCheckoutSessionLookupKey: input.expectedSessionId
+        ? { in: stripeCheckoutSessionLookupKeys }
+        : null,
+    },
+  });
+  return updated.count === 1;
+}
+
+export async function clearHostedMemberStripeCheckoutAttemptForSessionTx(input: {
+  memberId: string;
+  sessionId: string;
+  tx: Prisma.TransactionClient;
+}): Promise<boolean> {
+  const stripeCheckoutSessionLookupKeys =
+    createHostedStripeCheckoutSessionLookupKeyReadCandidates(input.sessionId);
+  if (stripeCheckoutSessionLookupKeys.length === 0) {
+    return false;
+  }
+  const updated = await input.tx.hostedMemberBillingRef.updateMany({
+    data: {
+      checkoutAttemptId: null,
+      checkoutCreatedAt: null,
+      checkoutIntentHash: null,
+      stripeCheckoutSessionIdEncrypted: null,
+      stripeCheckoutSessionLookupKey: null,
+    },
+    where: {
+      memberId: input.memberId,
+      stripeCheckoutSessionLookupKey: {
+        in: stripeCheckoutSessionLookupKeys,
+      },
+    },
+  });
+  return updated.count === 1;
+}
+
+/**
+ * Atomically accepts one standard Checkout winner. Ownership, provider refs,
+ * the event watermark, and attempt cleanup move in the same locked write, so
+ * an older authoritative completion cannot be rejected by event freshness or
+ * leave a cleared attempt without its subscription binding.
+ */
+export async function acceptHostedMemberStripeCheckoutCompletionTx(input: {
+  allowLegacyCompletion: boolean;
+  checkoutAttemptId: string | null;
+  checkoutIntentHash: string | null;
+  checkoutSessionId: string;
+  currentCheckoutOffer: string;
+  eventCreatedAt: Date;
+  memberId: string;
+  stripeCustomerId: string;
+  stripeSubscriptionId: string;
+  tx: Prisma.TransactionClient;
+}): Promise<HostedMemberStripeCheckoutAcceptanceOutcome> {
+  const stripeCheckoutSessionLookupKey =
+    createHostedStripeCheckoutSessionLookupKey(input.checkoutSessionId);
+  const stripeCheckoutSessionLookupCandidates =
+    createHostedStripeCheckoutSessionLookupKeyReadCandidates(
+      input.checkoutSessionId,
+    );
+  const stripeCustomerLookupKey =
+    createHostedStripeCustomerLookupKey(input.stripeCustomerId);
+  const stripeSubscriptionLookupKey =
+    createHostedStripeSubscriptionLookupKey(input.stripeSubscriptionId);
+  if (
+    !stripeCheckoutSessionLookupKey
+    || !stripeCustomerLookupKey
+    || !stripeSubscriptionLookupKey
+  ) {
+    throw new TypeError("Completed Stripe Checkout identifiers are invalid.");
+  }
+
+  const stripeCustomerLookupCandidates =
+    createHostedStripeCustomerLookupKeyReadCandidates(input.stripeCustomerId);
+  const stripeSubscriptionLookupCandidates =
+    createHostedStripeSubscriptionLookupKeyReadCandidates(
+      input.stripeSubscriptionId,
+    );
+  const current = await input.tx.hostedMemberBillingRef.findUnique({
+    where: {
+      memberId: input.memberId,
+    },
+  });
+  const completionMatchesCurrentAttempt = Boolean(
+    current
+    && input.checkoutAttemptId
+    && input.checkoutIntentHash
+    && current.checkoutAttemptId === input.checkoutAttemptId
+    && current.checkoutIntentHash === input.checkoutIntentHash
+    && (
+      current.stripeCheckoutSessionLookupKey === null
+      || stripeCheckoutSessionLookupCandidates.includes(
+        current.stripeCheckoutSessionLookupKey,
+      )
+    ),
+  );
+  const completionMatchesUntrackedCheckout = Boolean(
+    current
+    && current.checkoutAttemptId === null
+    && current.checkoutCreatedAt === null
+    && current.checkoutIntentHash === null
+    && (
+      current.stripeCheckoutSessionLookupKey === null
+      || stripeCheckoutSessionLookupCandidates.includes(
+        current.stripeCheckoutSessionLookupKey,
+      )
+    ),
+  );
+  const clearAcceptedCheckoutState =
+    completionMatchesCurrentAttempt || completionMatchesUntrackedCheckout;
+  const nextEventCreatedAt = maxHostedStripeEventCreatedAt(
+    current?.lastStripeEventCreatedAt ?? null,
+    input.eventCreatedAt,
+  );
+  const privateColumns = await buildHostedMemberBillingPrivateColumns({
+    memberId: input.memberId,
+    prisma: input.tx,
+    stripeCheckoutSessionId: null,
+    stripeCustomerId: input.stripeCustomerId,
+    stripeSubscriptionId: input.stripeSubscriptionId,
+  });
+
+  if (current?.stripeSubscriptionLookupKey) {
+    if (
+      !stripeSubscriptionLookupCandidates.includes(
+        current.stripeSubscriptionLookupKey,
+      )
+    ) {
+      return { kind: "cleanup_superseded" };
+    }
+    const updated = await input.tx.hostedMemberBillingRef.updateMany({
+      data: {
+        ...(clearAcceptedCheckoutState
+          ? {
+              checkoutAttemptId: null,
+              checkoutCreatedAt: null,
+              checkoutIntentHash: null,
+              stripeCheckoutSessionIdEncrypted: null,
+              stripeCheckoutSessionLookupKey: null,
+            }
+          : {}),
+        currentCheckoutOffer: input.currentCheckoutOffer,
+        lastStripeEventCreatedAt: nextEventCreatedAt,
+        stripeCustomerIdEncrypted: privateColumns.stripeCustomerIdEncrypted,
+        stripeCustomerLookupKey,
+      },
+      where: {
+        checkoutAttemptId: current.checkoutAttemptId,
+        checkoutCreatedAt: current.checkoutCreatedAt,
+        checkoutIntentHash: current.checkoutIntentHash,
+        memberId: input.memberId,
+        stripeCheckoutSessionLookupKey:
+          current.stripeCheckoutSessionLookupKey,
+        stripeSubscriptionLookupKey: {
+          in: stripeSubscriptionLookupCandidates,
+        },
+      },
+    });
+    if (updated.count !== 1) {
+      return { kind: "cleanup_superseded" };
+    }
+    const accepted = await input.tx.hostedMemberBillingRef.findUniqueOrThrow({
+      where: {
+        memberId: input.memberId,
+      },
+    });
+    return {
+      billingRef: await projectHostedMemberStripeBillingRefSnapshot(
+        accepted,
+        input.tx,
+      ),
+      kind: "already_accepted",
+    };
+  }
+
+  if (
+    current?.stripeCustomerLookupKey
+    && !stripeCustomerLookupCandidates.includes(current.stripeCustomerLookupKey)
+  ) {
+    return { kind: "cleanup_superseded" };
+  }
+
+  const acceptsCurrentAttempt = completionMatchesCurrentAttempt;
+  const acceptsLegacy = Boolean(
+    input.allowLegacyCompletion
+    && !input.checkoutAttemptId
+    && !input.checkoutIntentHash
+    && (
+      !current
+      || (
+        current.checkoutAttemptId === null
+        && current.checkoutCreatedAt === null
+        && current.checkoutIntentHash === null
+        && current.stripeCheckoutSessionLookupKey === null
+      )
+    ),
+  );
+  if (!acceptsCurrentAttempt && !acceptsLegacy) {
+    return { kind: "cleanup_superseded" };
+  }
+
+  await assertHostedMemberStripeBillingIdentifiersAvailableTx({
+    memberId: input.memberId,
+    stripeCustomerId: input.stripeCustomerId,
+    stripeSubscriptionId: input.stripeSubscriptionId,
+    tx: input.tx,
+  });
+
+  if (!current) {
+    const accepted = await input.tx.hostedMemberBillingRef.create({
+      data: {
+        ...privateColumns,
+        currentCheckoutOffer: input.currentCheckoutOffer,
+        lastStripeEventCreatedAt: nextEventCreatedAt,
+        memberId: input.memberId,
+        stripeCustomerLookupKey,
+        stripeSubscriptionLookupKey,
+      },
+    });
+    return {
+      billingRef: await projectHostedMemberStripeBillingRefSnapshot(
+        accepted,
+        input.tx,
+      ),
+      kind: "accepted",
+    };
+  }
+
+  const updated = await input.tx.hostedMemberBillingRef.updateMany({
+    data: {
+      checkoutAttemptId: null,
+      checkoutCreatedAt: null,
+      checkoutIntentHash: null,
+      currentCheckoutOffer: input.currentCheckoutOffer,
+      lastStripeEventCreatedAt: nextEventCreatedAt,
+      stripeCheckoutSessionIdEncrypted: null,
+      stripeCheckoutSessionLookupKey: null,
+      stripeCustomerIdEncrypted: privateColumns.stripeCustomerIdEncrypted,
+      stripeCustomerLookupKey,
+      stripeSubscriptionIdEncrypted:
+        privateColumns.stripeSubscriptionIdEncrypted,
+      stripeSubscriptionLookupKey,
+    },
+    where: {
+      checkoutAttemptId: acceptsCurrentAttempt
+        ? input.checkoutAttemptId
+        : null,
+      checkoutIntentHash: acceptsCurrentAttempt
+        ? input.checkoutIntentHash
+        : null,
+      memberId: input.memberId,
+      ...(acceptsCurrentAttempt
+        ? {
+            OR: [
+              { stripeCheckoutSessionLookupKey: null },
+              {
+                stripeCheckoutSessionLookupKey: {
+                  in: stripeCheckoutSessionLookupCandidates,
+                },
+              },
+            ],
+          }
+        : { stripeCheckoutSessionLookupKey: null }),
+      stripeSubscriptionLookupKey: null,
+    },
+  });
+  if (updated.count !== 1) {
+    return { kind: "cleanup_superseded" };
+  }
+  const accepted = await input.tx.hostedMemberBillingRef.findUniqueOrThrow({
+    where: {
+      memberId: input.memberId,
+    },
+  });
+  return {
+    billingRef: await projectHostedMemberStripeBillingRefSnapshot(
+      accepted,
+      input.tx,
+    ),
+    kind: "accepted",
+  };
+}
+
+function maxHostedStripeEventCreatedAt(
+  current: Date | null,
+  candidate: Date,
+): Date {
+  return current && current.getTime() > candidate.getTime()
+    ? current
+    : candidate;
+}
+
+function readHostedMemberStripeCheckoutAttempt(
+  billingRef: HostedMemberStripeBillingRefSnapshot | null,
+): HostedMemberStripeCheckoutAttemptReservation | null {
+  const attemptId = billingRef?.checkoutAttemptId ?? null;
+  const intentHash = billingRef?.checkoutIntentHash ?? null;
+  const createdAt = billingRef?.checkoutCreatedAt ?? null;
+  const stripeCheckoutSessionId = billingRef?.stripeCheckoutSessionId ?? null;
+
+  if (!attemptId) {
+    if (intentHash || createdAt || stripeCheckoutSessionId) {
+      throw buildHostedMemberStripeCheckoutAttemptInvariantError();
+    }
+    return null;
+  }
+  if (!intentHash || !createdAt) {
+    throw buildHostedMemberStripeCheckoutAttemptInvariantError();
+  }
+
+  return {
+    attemptId,
+    createdAt,
+    intentHash,
+    stripeCheckoutSessionId,
+  };
+}
+
+function buildHostedMemberStripeCheckoutAttemptInvariantError() {
+  return hostedOnboardingError({
+    code: "HOSTED_BILLING_CHECKOUT_ATTEMPT_INCONSISTENT",
+    httpStatus: 500,
+    message:
+      "Stored billing checkout state is incomplete. Contact support before starting another checkout.",
+  });
+}
+
 export async function readHostedMemberBillingEligibilityState(input: {
   memberId: string;
   prisma: HostedOnboardingReadClient;
@@ -305,6 +827,36 @@ export async function readHostedMemberStripeCustomerId(input: {
 }): Promise<string | null> {
   const billingRef = await readHostedMemberStripeBillingRef(input);
   return billingRef?.stripeCustomerId ?? null;
+}
+
+/**
+ * Irreversible cleanup checks only the subscription blind index. It must not
+ * decrypt customer/subscription IDs or widen the KMS scope while holding a
+ * provider-mutation lock.
+ */
+export async function readHostedMemberOwnsExactStripeSubscriptionTx(input: {
+  memberId: string;
+  stripeSubscriptionId: string;
+  tx: Prisma.TransactionClient;
+}): Promise<boolean> {
+  const lookupCandidates = createHostedStripeSubscriptionLookupKeyReadCandidates(
+    input.stripeSubscriptionId,
+  );
+  if (lookupCandidates.length === 0) {
+    return false;
+  }
+  const billingRef = await input.tx.hostedMemberBillingRef.findUnique({
+    select: {
+      stripeSubscriptionLookupKey: true,
+    },
+    where: {
+      memberId: input.memberId,
+    },
+  });
+  return Boolean(
+    billingRef?.stripeSubscriptionLookupKey
+    && lookupCandidates.includes(billingRef.stripeSubscriptionLookupKey),
+  );
 }
 
 export async function writeHostedMemberStripeBillingRefTx(
@@ -420,6 +972,15 @@ export async function projectHostedMemberStripeBillingRefSnapshot(
   const privateState = await readHostedMemberBillingPrivateState(billingRef, prisma);
 
   return {
+    ...(billingRef.checkoutAttemptId !== undefined
+      ? { checkoutAttemptId: billingRef.checkoutAttemptId }
+      : {}),
+    ...(billingRef.checkoutCreatedAt !== undefined
+      ? { checkoutCreatedAt: billingRef.checkoutCreatedAt }
+      : {}),
+    ...(billingRef.checkoutIntentHash !== undefined
+      ? { checkoutIntentHash: billingRef.checkoutIntentHash }
+      : {}),
     ...(billingRef.lastStripeEventCreatedAt !== undefined
       ? {
           lastStripeEventCreatedAt: billingRef.lastStripeEventCreatedAt,
@@ -440,6 +1001,9 @@ export async function projectHostedMemberStripeBillingRefSnapshot(
       : {}),
     ...(billingRef.scheduledBillingPlanCode
       ? { scheduledBillingPlanCode: billingRef.scheduledBillingPlanCode }
+      : {}),
+    ...(billingRef.stripeCheckoutSessionIdEncrypted !== undefined
+      ? { stripeCheckoutSessionId: privateState.stripeCheckoutSessionId }
       : {}),
     stripeCustomerId: privateState.stripeCustomerId,
     stripeSubscriptionId: privateState.stripeSubscriptionId,

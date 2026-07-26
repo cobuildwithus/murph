@@ -1,6 +1,6 @@
 # Hosted Plan Downgrades
 
-Last verified: 2026-07-16
+Last verified: 2026-07-25
 
 ## Goal
 
@@ -21,9 +21,17 @@ scheduled switch:
 
 - `POST /api/settings/billing/upgrade-plan` accepts only `launch_edge_monthly`.
 - `upgradeHostedBillingPlan` is upgrade-shaped and only permits `launch_monthly -> launch_edge_monthly`.
+- The upgrade result preserves Stripe collection truth: `processing` carries no
+  payment URL and remains a deadline-bounded status recheck, while
+  `payment_required` carries only an exact Stripe Billing Portal or hosted
+  invoice URL. Settings redirects only for `payment_required`, offers a
+  `Check status` action for `processing`, and sends terminal collection
+  outcomes to `Open billing` instead of offering an ineffective retry.
 - `POST /api/settings/billing/switch-to-pulse` schedules `launch_edge_monthly -> launch_monthly` at the next renewal through `scheduleHostedBillingPlanSwitchToPulse`.
 - `/settings` computes and renders both upgrade and switch actions when the current billing state makes them eligible.
-- `Manage subscription` opens Stripe Customer Portal for payment methods, invoices, and other Stripe-managed account work.
+- `Manage subscription` opens Stripe Customer Portal with the explicit member
+  configuration for payment methods, invoices, and supported cancellation.
+  Portal-side plan and quantity changes remain disabled.
 
 The app-owned Edge-to-Pulse path is intentionally narrow; arbitrary plan
 transitions still stay out of scope.
@@ -222,6 +230,21 @@ Stripe Customer Portal supports scheduled downgrades in general, but the app kee
 
 Stripe Subscription Schedules are the correct Stripe-owned primitive for this behavior. They are designed for future subscription changes, including downgrades, and phase metadata updates the underlying subscription metadata when a phase starts.
 
+Every hosted Billing Portal session selects one explicit configuration in
+Vercel Preview and Production: member, Family, or payment recovery. Omitting
+`configuration` uses Stripe's mutable Dashboard default and is permitted only
+for local and test runtimes. The web deploy preflight retrieves all three and
+requires distinct, active, non-default configurations in the same Stripe mode
+as the configured key. Plan changes, quantity changes, and subscription pauses
+must be disabled. Payment recovery cannot cancel; member and Family
+cancellation is at period end without proration. Session creation retrieves and
+revalidates the selected configuration immediately before opening the Portal,
+so an unsafe post-deploy Dashboard edit fails closed.
+`stripe-portal-config.ts` owns the environment and deployment contract,
+`stripe-portal-policy.ts` owns the shared Stripe feature policy, and
+`stripe-portal.ts` is the only Portal-session creator. The web build invokes
+that provider contract through `pnpm stripe-portal:config-check`.
+
 Relevant Stripe docs:
 
 - Customer Portal configuration: https://docs.stripe.com/customer-management/configure-portal
@@ -344,6 +367,7 @@ Algorithm:
    - subscription is trialing, paused, unpaid, past due, incomplete,
      incomplete expired, or canceled
    - subscription has `cancel_at_period_end`
+   - subscription has an explicit `cancel_at`
    - subscription has a pending update
    - subscription current period end is missing, invalid, or not in the future
    - subscription attached schedule is present but is not the same compatible
@@ -352,34 +376,53 @@ Algorithm:
    subscription shape. Use configured Stripe price ids for this service and for
    the central subscription reconciliation path that writes
    `currentBillingPlanCode`.
-9. If `subscription.schedule` is present, retrieve it.
-10. Return `already_scheduled` only if the attached schedule is active,
+9. Before creating a schedule, fail closed unless the subscription uses the
+   canonical billing configuration that this narrow transition preserves. Do
+   not attach a schedule when collection is invoice-based or the subscription
+   uses flexible billing, a fixed anchor configuration, application fees,
+   automatic tax, billing thresholds, discounts or tax rates, a legacy default
+   source, custom payment settings, non-default invoice issuer/tax settings,
+   Connect transfer ownership, paused collection, pending invoice-item
+   intervals, managed payments, or recurring-item thresholds, discounts,
+   metadata, or tax rates.
+10. If `subscription.schedule` is present, retrieve it and apply the same
+    fail-closed check to schedule defaults and current/future phase
+    configuration.
+11. Return `already_scheduled` only if the attached schedule is active,
     app-authored, attached to the same subscription, targets Pulse at the same
     current period end, and has the expected Edge current phase plus Pulse future
     phase. Persist any missing pending display fields before returning.
-11. Reject all other attached schedules with a safe "billing change already
+12. If the attached schedule's fresh canonical shape exactly matches the
+    untouched one-phase result Stripe derives from this locked subscription,
+    adopt and update that same schedule directly. Compare its exact customer,
+    subscription, phase timing, item prices and quantities, payment method,
+    metadata, and supported default/phase settings to the locked subscription.
+    Never replay schedule creation after Stripe has attached a schedule.
+13. Reject all other attached schedules with a safe "billing change already
     scheduled" conflict and direct the user to support. Do not update, release,
-    or reinterpret Dashboard-created, Portal-created, or otherwise unknown
-    schedules in the first version.
-12. Otherwise create or idempotently recover a subscription schedule from the
-    subscription using `from_subscription`.
-13. Retrieve the schedule after creation.
-14. Update the schedule by passing all current and future phases required by
+    or reinterpret Dashboard-created, Portal-created, or otherwise drifted
+    schedules.
+14. If no schedule is attached, create one from the subscription using
+    `from_subscription` and a deterministic idempotency key.
+15. Retrieve the schedule after creation and apply the same exact pristine
+    comparison before updating it.
+16. Update the schedule by passing all current and future phases required by
     Stripe.
-15. Current phase:
+17. Current phase:
     - start from the current phase returned by Stripe
-    - preserve non-plan phase/default fields that must remain set
+    - preserve only the small, explicitly supported canonical fields; do not
+      build a generic Stripe phase copier
     - keep the Edge recurring price
     - end exactly at the subscription current period end
-16. Future phase:
+18. Future phase:
     - start exactly at subscription current period end
     - use the Pulse recurring price
     - last one billing interval
     - set phase `proration_behavior` to `none`
     - set metadata for Pulse and clear trial-shaped metadata keys
-17. Set top-level schedule update `proration_behavior` to `none`.
-18. Set `end_behavior` to `release`.
-19. Store the returned schedule id and pending display fields in the local
+19. Set top-level schedule update `proration_behavior` to `none`.
+20. Set `end_behavior` to `release`.
+21. Store the returned schedule id and pending display fields in the local
     billing read model only after Stripe returns the updated schedule.
 
 Important schedule rules:
@@ -400,17 +443,48 @@ First version supports only canonical hosted subscriptions with exactly the know
 
 Reject subscriptions with unknown active licensed items, duplicate known recurring items, non-month recurring intervals, unsupported quantities, or unmarked metered add-ons. Marked legacy hosted AI usage metered items may be dropped by the schedule update; do not silently preserve unknown add-ons into the future phase.
 
-Schedule creation is a two-step Stripe operation because `from_subscription` cannot be combined with phase values. The service must be retry-safe across:
+Do not grow a universal Stripe schedule copier. A newly adopted billing feature
+must be added deliberately to the canonical validation and phase construction
+only after its preservation semantics are proven.
 
-- creating or idempotently recovering a schedule from the subscription
+Schedule creation is a two-step Stripe operation because `from_subscription` cannot be combined with phase values. The member's billing-owner lock covers the canonical subscription read, schedule create/retrieve/update, and exact-reference local write. Provider requests are bounded and disable client retries so they cannot outlive the owner lock. The service must be retry-safe across:
+
+- creating a schedule when the locked subscription has none
+- canonically adopting an attached pristine schedule without replaying create
 - updating the schedule with app metadata and phases
 - writing local pending display fields
 
-Use a deterministic Stripe idempotency key based on member id, subscription id, target switch, and subscription current period end.
+Use a deterministic create key based on member id, subscription id, target
+switch, and subscription current period end. Use a separately versioned
+deterministic update key for the adopted schedule update.
 
 If Stripe schedule creation succeeded but local persistence failed, a repeat request must detect the compatible attached schedule, persist the pending display fields, and return `already_scheduled`.
 
-If schedule creation succeeded but phase update failed, a repeat request must either recover the same app-created schedule through the same idempotency key and finish the update, or reject with an operator-repair conflict. Do not leave the user behind an attached but unconfigured schedule with no recovery path.
+If schedule creation succeeded but phase update failed, a repeat request
+canonically retrieves the attached schedule under the owner lock. It updates the
+same schedule only when the fresh shape still exactly matches the untouched
+`from_subscription` result; otherwise it rejects with an operator-repair
+conflict. It never replays create once `subscription.schedule` is present.
+
+Do not compensate by releasing the newly attached schedule after an update
+failure. The `from_subscription` current phase preserves the active Edge
+subscription, and the attached schedule remains the idempotent recovery owner.
+The next corrected attempt must retrieve and reuse that same schedule rather
+than create a second schedule. This applies to deterministic and ambiguous
+update failures; provider ambiguity must never trigger a compensating release.
+
+Provider failures remain distinct from schedule conflicts. Network failures,
+rate limits, selected Stripe 5xx responses, and retry-directed failures stay
+retryable so an idempotent recovery can continue. Authentication, programming,
+and other deterministic provider failures are non-retryable internal errors.
+An attached schedule becomes an operator-repair conflict when its fresh
+canonical shape is neither the completed app-authored switch nor the exact
+untouched schedule derived from the locked subscription; unrelated invalid
+requests remain provider failures. Attached schedule provenance comes from that
+canonical shape, not from replaying the create key or inspecting
+`Idempotent-Replayed`. The update key carries an explicit operation version:
+reuse that version through provider ambiguity, and bump it only when a corrected
+deployment intentionally changes the schedule-update contract.
 
 ## Local Read Model
 
@@ -518,7 +592,15 @@ Required tests:
 - service rejects `cancel_at_period_end`
 - service rejects pending update
 - service rejects existing foreign schedule
+- service adopts only an attached pristine schedule whose customer,
+  subscription, phase timing, item price/quantity, payment method, metadata, and
+  supported settings match the locked canonical subscription
+- service applies the same pristine check after create and retrieve
+- service rereads exact member ownership under the owner lock before provider
+  reads and before the local pending-field write
 - service rejects missing, duplicate, unknown, or mismatched subscription items
+- service rejects unsupported subscription and attached-schedule financial
+  configuration before schedule mutation
 - service creates schedule from subscription with deterministic idempotency key
 - service updates phases with Edge current prices and Pulse future prices
 - both phases include only the hosted recurring price
@@ -526,6 +608,9 @@ Required tests:
 - future phase metadata sets Pulse and clears trial metadata
 - duplicate request returns `already_scheduled`
 - retry after schedule-created/local-write-failed self-heals
+- ambiguous provider failures stay retryable during idempotent recovery while
+  deterministic provider configuration failures do not become schedule
+  conflicts
 - pending display fields are written after successful schedule update
 - schedule lifecycle webhooks clear or refresh only matching pending fields
 - `customer.subscription.updated` with Pulse recurring price id updates current plan to Pulse and clears pending fields
@@ -550,6 +635,9 @@ Stripe sandbox acceptance:
 Deployment checks:
 
 - production has both recurring price env vars
+- Vercel Preview and Production have explicit member, Family, and
+  payment-recovery Billing Portal configuration ids; the provider-backed build
+  preflight verifies their active state, Stripe mode, and feature policy
 - webhook endpoint includes subscription and schedule events
 - backend deploy lands before UI exposure
 - consider a feature flag or server-side allowlist for first production test

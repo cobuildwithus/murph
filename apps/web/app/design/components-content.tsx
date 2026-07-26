@@ -92,6 +92,8 @@ import type { HostedConsentStatus } from "@/src/lib/legal/consent";
 import { buildWhoopAppleHealthSetupGuide } from "@/src/lib/device-sync/whoop-apple-health-setup-guide";
 import { MurphAssistantStylePicker } from "@/src/components/murph/murph-assistant-style-picker";
 import { HostedFamilyManager } from "@/src/components/settings/hosted-family-settings-actions";
+import { UpgradeToEdgeButton } from "@/src/components/settings/hosted-plan-upgrade-button";
+import { StartPaidPulseButton } from "@/src/components/settings/hosted-start-paid-pulse-button";
 import { MurphPersonalitySettingsDialog } from "@/src/components/settings/murph-personality-settings-dialog";
 import { MURPH_TELEGRAM_URL } from "@/src/lib/murph-contact-routing";
 import { DESIGN_USAGE_OFFERS } from "./group-usage-funding-study";
@@ -943,11 +945,32 @@ export function ComponentsContent() {
 
         <Separator />
 
+        <Section title="Hosted Billing Recovery Actions">
+          <p className="text-sm text-muted-foreground">
+            The real subscription actions keep passive Stripe processing
+            separate from payment recovery and route terminal collection states
+            to Billing. Controls are inert in this synthetic catalog study.
+          </p>
+          <div
+            aria-label="Read-only hosted billing recovery actions"
+            className="flex flex-wrap items-center gap-3 rounded-xl border border-border bg-card p-5"
+            inert
+          >
+            <StartPaidPulseButton>Start Pulse</StartPaidPulseButton>
+            <UpgradeToEdgeButton>Upgrade to Edge</UpgradeToEdgeButton>
+          </div>
+        </Section>
+
+        <Separator />
+
         <Section title="Hosted Family Manager">
           <p className="text-sm text-muted-foreground">
             Family members and pending invites use cards under 768px and the
-            compact table layout above it. This fixture keeps all contact details
-            synthetic and does not submit settings mutations.
+            compact table layout above it. The synthetic in-progress tier change
+            shows the real recovery affordance; payment recovery keeps that
+            action pending while Stripe takes over. The second fixture shows the
+            truthful unpaid-access state and its Family billing action. All
+            contact details are synthetic, and the studies do not submit settings mutations.
           </p>
           <div
             aria-label="Read-only hosted Family preview"
@@ -956,6 +979,7 @@ export function ComponentsContent() {
           >
             <HostedFamilyManager
               billingActive
+              billingStatus="active"
               invites={[
                 {
                   acceptUrl: "/family/accept/design-preview",
@@ -985,7 +1009,7 @@ export function ComponentsContent() {
                   joinedAtIso: "2026-07-07T00:00:00.000Z",
                   label: "Partner",
                   memberId: "design-member",
-                  pendingPlanCode: null,
+                  pendingPlanCode: "pulse",
                   planCode: "edge",
                 },
               ]}
@@ -1001,6 +1025,47 @@ export function ComponentsContent() {
                 min: 2,
                 remaining: 0,
                 used: 3,
+              }}
+              tiers={[
+                { name: "Pulse", planCode: "pulse", priceLabel: "$7/mo" },
+                { name: "Edge", planCode: "edge", priceLabel: "$19/mo" },
+              ]}
+            />
+          </div>
+          <div
+            aria-label="Read-only hosted Family unpaid recovery preview"
+            className="rounded-xl border border-border bg-card p-5"
+            inert
+          >
+            <div className="mb-4 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+              Unpaid billing recovery
+            </div>
+            <HostedFamilyManager
+              billingActive={false}
+              billingStatus="unpaid"
+              invites={[]}
+              members={[
+                {
+                  isOwner: true,
+                  joinedAtIso: "2026-07-01T00:00:00.000Z",
+                  label: null,
+                  memberId: "design-unpaid-owner",
+                  pendingPlanCode: null,
+                  planCode: "pulse",
+                },
+              ]}
+              plans={{
+                edge: { active: 0, billed: 0, invited: 0, remaining: 0, used: 0 },
+                pulse: { active: 1, billed: 2, invited: 0, remaining: 1, used: 1 },
+              }}
+              seats={{
+                active: 1,
+                billed: 2,
+                invited: 0,
+                max: 6,
+                min: 2,
+                remaining: 1,
+                used: 1,
               }}
               tiers={[
                 { name: "Pulse", planCode: "pulse", priceLabel: "$7/mo" },

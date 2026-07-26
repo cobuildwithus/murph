@@ -149,6 +149,12 @@ import {
   runHostedAutoPulseTrialCampaignPostCommitEffects,
 } from "@/src/lib/hosted-onboarding/auto-trial-enrollment-service";
 
+function makeStripeConnectionError(message: string): Error {
+  return Object.assign(new Error(message), {
+    type: "StripeConnectionError",
+  });
+}
+
 describe("ensureHostedAutoPulseTrialEnrollment", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -1584,7 +1590,13 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
   });
 
   it("fails retryably without creating a subscription when Stripe recovery lookup fails", async () => {
-    mocks.stripe.subscriptions.list.mockRejectedValueOnce(new Error("Stripe unavailable"));
+    mocks.stripe.subscriptions.list.mockRejectedValueOnce(Object.assign(
+      new Error("Stripe unavailable"),
+      {
+        statusCode: 503,
+        type: "StripeConnectionError",
+      },
+    ));
 
     await expect(
       ensureHostedAutoPulseTrialEnrollment({
@@ -1600,6 +1612,37 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
       code: "HOSTED_AUTO_PULSE_TRIAL_RECOVERY_LOOKUP_FAILED",
       httpStatus: 502,
       retryable: true,
+    });
+
+    expect(mocks.stripe.subscriptions.create).not.toHaveBeenCalled();
+    expect(mocks.writeHostedMemberStripeBillingTx).not.toHaveBeenCalled();
+  });
+
+  it("fails non-retryably when Stripe rejects the recovery lookup", async () => {
+    mocks.stripe.subscriptions.list.mockRejectedValueOnce(Object.assign(
+      new Error("Unknown subscription-list parameter."),
+      {
+        code: "parameter_unknown",
+        rawType: "invalid_request_error",
+        statusCode: 400,
+        type: "StripeInvalidRequestError",
+      },
+    ));
+
+    await expect(
+      ensureHostedAutoPulseTrialEnrollment({
+        inviteCode: "invite-code",
+        member: {
+          id: "member_123",
+          suspendedAt: null,
+        },
+        now: new Date("2026-06-14T12:00:05.000Z"),
+        prisma: makePrisma() as never,
+      }),
+    ).rejects.toMatchObject({
+      code: "HOSTED_AUTO_PULSE_TRIAL_RECOVERY_LOOKUP_FAILED",
+      httpStatus: 500,
+      retryable: false,
     });
 
     expect(mocks.stripe.subscriptions.create).not.toHaveBeenCalled();
@@ -1738,7 +1781,7 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
       has_more: false,
     });
     mocks.stripe.subscriptions.cancel
-      .mockRejectedValueOnce(new Error("transient Stripe failure"))
+      .mockRejectedValueOnce(makeStripeConnectionError("transient Stripe failure"))
       .mockResolvedValueOnce({
         id: "sub_losing_trial_123",
         object: "subscription",
@@ -1785,7 +1828,7 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
       has_more: false,
     });
     mocks.stripe.subscriptions.cancel
-      .mockRejectedValueOnce(new Error("transient Stripe failure"))
+      .mockRejectedValueOnce(makeStripeConnectionError("transient Stripe failure"))
       .mockResolvedValueOnce({
         id: "sub_losing_trial_123",
         object: "subscription",
@@ -1946,7 +1989,7 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
         has_more: false,
       });
     mocks.stripe.subscriptions.cancel
-      .mockRejectedValueOnce(new Error("transient Stripe failure"))
+      .mockRejectedValueOnce(makeStripeConnectionError("transient Stripe failure"))
       .mockResolvedValueOnce({
         id: "sub_auto_trial_123",
         object: "subscription",
@@ -2056,7 +2099,9 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
         has_more: false,
       });
     mocks.stripe.subscriptions.cancel.mockRejectedValueOnce(
-      new Error("connection closed after Stripe accepted cancellation"),
+      makeStripeConnectionError(
+        "connection closed after Stripe accepted cancellation",
+      ),
     );
 
     const enroll = () => ensureHostedAutoPulseTrialEnrollment({

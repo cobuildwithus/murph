@@ -253,7 +253,6 @@ describe("hosted onboarding stripe billing policy", () => {
       billingStatus: HostedBillingStatus.past_due,
       memberId: "member_123",
       prisma: {},
-      suspendedAt: undefined,
     });
   });
 
@@ -339,7 +338,6 @@ describe("hosted onboarding stripe billing policy", () => {
       billingStatus: HostedBillingStatus.incomplete,
       memberId: "member_123",
       prisma: {},
-      suspendedAt: undefined,
     });
   });
 
@@ -424,7 +422,6 @@ describe("hosted onboarding stripe billing policy", () => {
       billingStatus: HostedBillingStatus.incomplete,
       memberId: "member_123",
       prisma: {},
-      suspendedAt: undefined,
     });
   });
 
@@ -526,7 +523,6 @@ describe("hosted onboarding stripe billing policy", () => {
       billingStatus: HostedBillingStatus.active,
       memberId: "member_123",
       prisma: {},
-      suspendedAt: undefined,
     });
     expect(mocks.writeHostedMemberStripeBillingRef).toHaveBeenCalledWith({
       memberId: "member_123",
@@ -614,7 +610,6 @@ describe("hosted onboarding stripe billing policy", () => {
       billingStatus: HostedBillingStatus.active,
       memberId: "member_123",
       prisma: {},
-      suspendedAt: undefined,
     });
     expect(mocks.writeHostedMemberStripeBillingRef).toHaveBeenCalledWith(expect.objectContaining({
       currentBillingPhase: "trial",
@@ -1023,6 +1018,47 @@ describe("hosted onboarding stripe billing policy", () => {
       stripeSubscriptionId: "sub_checkout",
       tx,
     });
+  });
+
+  it("never changes the account suspension fence during Stripe billing writes", async () => {
+    const suspendedAt = new Date("2026-04-10T12:00:00.000Z");
+    const suspendedMember = makeMemberSnapshot({
+      billingRef: {
+        memberId: "member_123",
+        stripeCustomerId: "cus_123",
+        stripeSubscriptionId: "sub_123",
+      },
+      core: {
+        suspendedAt,
+      },
+    });
+    mocks.readHostedMemberBillingSnapshot
+      .mockResolvedValueOnce(suspendedMember)
+      .mockResolvedValueOnce(suspendedMember);
+
+    await writeHostedMemberStripeBillingTx({
+      billingStatus: HostedBillingStatus.unpaid,
+      canonicalBillingStatus: null,
+      dispatchContext: {
+        eventCreatedAt: new Date("2026-04-12T00:00:00.000Z"),
+        occurredAt: "2026-04-12T00:00:00.000Z",
+        sourceEventId: "evt_financial_state",
+        sourceType: "stripe.billing.financial_state",
+      },
+      freshnessPolicy: "canonical-financial-state",
+      member: suspendedMember,
+      stripeCustomerId: "cus_123",
+      stripeSubscriptionId: "sub_123",
+      tx: {} as never,
+    });
+
+    const coreWrite = mocks.updateHostedMemberCoreState.mock.calls.at(-1)?.[0];
+    expect(coreWrite).toEqual({
+      billingStatus: HostedBillingStatus.unpaid,
+      memberId: "member_123",
+      prisma: {},
+    });
+    expect(coreWrite).not.toHaveProperty("suspendedAt");
   });
 
 });

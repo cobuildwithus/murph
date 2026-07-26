@@ -171,6 +171,7 @@ test.each([
     expect(response.status).toBe(200);
     expect(mocks[expectedService]).toHaveBeenCalledWith({
       memberId: "member_123",
+      paymentMethodRecoveryConfirmed: true,
       paymentMethodContinuation: "conversation",
       prisma: { label: "test-prisma" },
     });
@@ -211,6 +212,7 @@ test("dispatches continue_pulse without ending the trial", async () => {
   });
   expect(mocks.continuePulse).toHaveBeenCalledWith({
     memberId: "member_123",
+    paymentMethodRecoveryConfirmed: true,
     paymentMethodContinuation: "conversation",
     prisma: { label: "test-prisma" },
   });
@@ -231,6 +233,7 @@ test("dispatches start_pulse_now through the same canonical service", async () =
   expect(response.status).toBe(200);
   expect(mocks.startPulse).toHaveBeenCalledWith({
     memberId: "member_123",
+    paymentMethodRecoveryConfirmed: true,
     paymentMethodContinuation: "conversation",
     prisma: { label: "test-prisma" },
   });

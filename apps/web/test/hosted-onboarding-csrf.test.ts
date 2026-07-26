@@ -207,6 +207,11 @@ function createHostedOnboardingEnvironment(
       launch_edge_monthly: null,
       launch_monthly: null,
     },
+    stripePortalConfigurationIds: {
+      family: null,
+      member: null,
+      payment_recovery: null,
+    },
     stripeUsageCreditPriceIdsByOffer: {
       usage_5_usd: null,
       usage_10_usd: null,

@@ -13,6 +13,10 @@ describe("readHostedOnboardingEnvironment", () => {
       HOSTED_ONBOARDING_STRIPE_PRICE_ID_USAGE_CREDIT_5_USD: "price_usage_5_123",
       HOSTED_ONBOARDING_STRIPE_PRICE_ID_USAGE_CREDIT_10_USD: "price_usage_10_123",
       HOSTED_ONBOARDING_STRIPE_PRICE_ID_USAGE_CREDIT_25_USD: "price_usage_25_123",
+      HOSTED_ONBOARDING_STRIPE_FAMILY_PORTAL_CONFIGURATION_ID: "bpc_family",
+      HOSTED_ONBOARDING_STRIPE_MEMBER_PORTAL_CONFIGURATION_ID: "bpc_member",
+      HOSTED_ONBOARDING_STRIPE_PAYMENT_RECOVERY_PORTAL_CONFIGURATION_ID:
+        "bpc_paymentrecovery",
       NEXT_PUBLIC_PRIVY_APP_ID: "cm_app_123",
       PRIVY_VERIFICATION_KEY: "privy-verification-key",
       STRIPE_SECRET_KEY: "sk_test_123",
@@ -30,6 +34,11 @@ describe("readHostedOnboardingEnvironment", () => {
     expect(environment.stripePriceIdsByPlan).toEqual({
       launch_edge_monthly: "price_edge_monthly_123",
       launch_monthly: "price_monthly_123",
+    });
+    expect(environment.stripePortalConfigurationIds).toEqual({
+      family: "bpc_family",
+      member: "bpc_member",
+      payment_recovery: "bpc_paymentrecovery",
     });
     expect(environment.stripeUsageCreditPriceIdsByOffer).toEqual({
       usage_5_usd: "price_usage_5_123",

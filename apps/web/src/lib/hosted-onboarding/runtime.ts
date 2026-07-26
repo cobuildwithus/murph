@@ -8,7 +8,16 @@ import {
   type HostedPlanCode,
 } from "./billing-plans";
 import { hostedOnboardingError } from "./errors";
-import { readHostedOnboardingEnvironment, type HostedOnboardingEnvironment } from "./env";
+import {
+  readHostedOnboardingEnvironment,
+  type HostedOnboardingEnvironment,
+} from "./env";
+import {
+  HOSTED_STRIPE_PORTAL_CONFIGURATION_ENV_KEYS,
+  isHostedStripePortalConfigurationId,
+  readHostedStripeSecretKeyLiveMode,
+  type HostedStripePortalConfigurationKind,
+} from "./stripe-portal-config";
 import {
   getHostedUsageCreditOfferDefinition,
   type HostedUsageCreditOfferCode,
@@ -74,6 +83,47 @@ export function requireHostedStripeApi(): Stripe {
   }
 
   return stripe;
+}
+
+type HostedStripePortalConfigurationEnvironment = Pick<
+  HostedOnboardingEnvironment,
+  "isProduction" | "stripePortalConfigurationIds"
+>;
+
+export function resolveHostedStripePortalConfigurationId(
+  kind: HostedStripePortalConfigurationKind,
+  options?: {
+    environment?: HostedStripePortalConfigurationEnvironment;
+    isDeployedRuntime?: boolean;
+  },
+): string | undefined {
+  const environment = options?.environment ?? getHostedOnboardingEnvironment();
+  const configurationId = environment.stripePortalConfigurationIds[kind];
+  const isDeployedRuntime = options?.isDeployedRuntime
+    ?? hostedStripePortalRequiresExplicitConfiguration(environment);
+
+  if (isHostedStripePortalConfigurationId(configurationId)) {
+    return configurationId;
+  }
+
+  if (!configurationId && !isDeployedRuntime) {
+    return undefined;
+  }
+
+  const envKey = HOSTED_STRIPE_PORTAL_CONFIGURATION_ENV_KEYS[kind];
+  throw hostedOnboardingError({
+    code: "HOSTED_BILLING_STRIPE_PORTAL_CONFIGURATION_REQUIRED",
+    details: {
+      configurationKind: kind,
+      envKey,
+      reason: configurationId ? "invalid" : "missing",
+    },
+    httpStatus: 500,
+    message: configurationId
+      ? `${envKey} must contain a valid Stripe Billing Portal configuration ID.`
+      : `${envKey} must be configured for Stripe Billing Portal sessions in deployed environments.`,
+    retryable: false,
+  });
 }
 
 export function requireHostedStripeApiMode(): {
@@ -191,22 +241,6 @@ export function requireHostedStripeUsageCreditCheckoutConfig(input: {
   };
 }
 
-function readHostedStripeSecretKeyLiveMode(secretKey: string | null): boolean {
-  if (secretKey?.startsWith("sk_live_") || secretKey?.startsWith("rk_live_")) {
-    return true;
-  }
-
-  if (secretKey?.startsWith("sk_test_") || secretKey?.startsWith("rk_test_")) {
-    return false;
-  }
-
-  throw hostedOnboardingError({
-    code: "STRIPE_SECRET_KEY_MODE_INVALID",
-    message: "STRIPE_SECRET_KEY must identify a Stripe test or live environment.",
-    httpStatus: 500,
-  });
-}
-
 function hostedUsageCreditRequiresLiveStripe(
   environment: HostedOnboardingEnvironment,
 ): boolean {
@@ -214,6 +248,16 @@ function hostedUsageCreditRequiresLiveStripe(
 
   return vercelEnvironment
     ? vercelEnvironment === "production"
+    : environment.isProduction;
+}
+
+function hostedStripePortalRequiresExplicitConfiguration(
+  environment: HostedStripePortalConfigurationEnvironment,
+): boolean {
+  const vercelEnvironment = process.env.VERCEL_ENV?.trim().toLowerCase();
+
+  return vercelEnvironment
+    ? vercelEnvironment !== "development"
     : environment.isProduction;
 }
 

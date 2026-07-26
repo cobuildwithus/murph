@@ -49,6 +49,7 @@ export function HostedFamilySettings(props: {
     <div className="flex flex-col gap-5">
       <HostedFamilyManager
         billingActive={snapshot.billingActive}
+        billingStatus={snapshot.billingStatus}
         invites={invites}
         members={members}
         plans={snapshot.plans}

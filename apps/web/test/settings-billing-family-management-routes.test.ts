@@ -117,7 +117,11 @@ beforeEach(async () => {
     snapshot: ownerSnapshot,
     syncing: false,
   });
-  mocks.updateHostedFamilyPlanCapacities.mockResolvedValue(ownerSnapshot);
+  mocks.updateHostedFamilyPlanCapacities.mockResolvedValue({
+    kind: "updated",
+    snapshot: ownerSnapshot,
+    targetCapacities: { edge: 0, pulse: 3 },
+  });
   mocks.waitForHostedFamilyPlanCapacities.mockResolvedValue(true);
   mocks.hostedFamilyInviteHasReusableTarget.mockReturnValue(true);
 
@@ -251,9 +255,51 @@ test("adds one paid seat and retries when the plan is full", async () => {
     groupId: "hbag_family",
     ownerMemberId: "member_owner",
     prisma: expect.any(Object),
-    targetCapacities: { edge: 0, pulse: 3 },
+    requiredPlanCode: "pulse",
   });
   expect(mocks.issueHostedFamilyInviteTx).toHaveBeenCalledTimes(3);
+});
+
+test("preserves the actionable payment URL when adding a Family seat requires authentication", async () => {
+  const seatLimit = () =>
+    hostedOnboardingError({
+      code: "HOSTED_FAMILY_SEAT_LIMIT_REACHED",
+      httpStatus: 409,
+      message: "This Family plan has no open paid seats.",
+    });
+  mocks.issueHostedFamilyInviteTx
+    .mockRejectedValueOnce(seatLimit())
+    .mockRejectedValueOnce(seatLimit());
+  mocks.updateHostedFamilyPlanCapacities.mockRejectedValueOnce(
+    hostedOnboardingError({
+      code: "HOSTED_FAMILY_CAPACITY_PAYMENT_REQUIRED",
+      details: {
+        paymentUrl: "https://invoice.stripe.test/in_family_capacity",
+      },
+      httpStatus: 409,
+      message: "Authenticate the Family seat charge in Stripe to finish this change.",
+      retryable: false,
+    }),
+  );
+
+  const response = await inviteRoute.POST(
+    inviteRequest({ addSeatIfNeeded: true, targetLabel: "Dad", targetPhoneNumber: "+48600000001" }),
+  );
+
+  expect(response.status).toBe(409);
+  await expect(response.json()).resolves.toEqual({
+    error: {
+      code: "HOSTED_FAMILY_CAPACITY_PAYMENT_REQUIRED",
+      details: {
+        paymentUrl: "https://invoice.stripe.test/in_family_capacity",
+      },
+      message: "Authenticate the Family seat charge in Stripe to finish this change.",
+      retryable: false,
+    },
+  });
+  expect(mocks.updateHostedFamilyPlanCapacities).toHaveBeenCalledTimes(1);
+  expect(mocks.waitForHostedFamilyPlanCapacities).not.toHaveBeenCalled();
+  expect(mocks.issueHostedFamilyInviteTx).toHaveBeenCalledTimes(2);
 });
 
 test("reuses a concurrently-created invite on the pre-buy re-check (no purchase)", async () => {
@@ -285,6 +331,57 @@ test("reuses a concurrently-created invite on the pre-buy re-check (no purchase)
   expect(mocks.updateHostedFamilyPlanCapacities).not.toHaveBeenCalled();
   expect(mocks.issueHostedFamilyInviteTx).toHaveBeenCalledTimes(2);
 });
+
+test.each([
+  "revoked",
+  "expired",
+] as const)(
+  "retries the invite without waiting or buying when a pending invite was %s under the owner lock",
+  async () => {
+    const seatLimit = () =>
+      hostedOnboardingError({
+        code: "HOSTED_FAMILY_SEAT_LIMIT_REACHED",
+        httpStatus: 409,
+        message: "This Family plan has no open paid seats.",
+      });
+    mocks.issueHostedFamilyInviteTx
+      .mockRejectedValueOnce(seatLimit())
+      .mockRejectedValueOnce(seatLimit())
+      .mockResolvedValueOnce({
+        channel: "family",
+        expiresAt: new Date("2026-07-01T00:00:00.000Z"),
+        id: "inv_new",
+        inviteCode: "NEWCODE",
+        planCode: "pulse",
+        status: "pending",
+        targetLabel: "Dad",
+        targetPhoneHint: "+48 6** *** ***",
+        targetTelegramUsername: null,
+      });
+    mocks.updateHostedFamilyPlanCapacities.mockResolvedValueOnce({
+      kind: "not_needed",
+    });
+
+    const response = await inviteRoute.POST(
+      inviteRequest({
+        addSeatIfNeeded: true,
+        targetLabel: "Dad",
+        targetPhoneNumber: "+48600000001",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.updateHostedFamilyPlanCapacities).toHaveBeenCalledTimes(1);
+    expect(mocks.updateHostedFamilyPlanCapacities).toHaveBeenCalledWith({
+      groupId: "hbag_family",
+      ownerMemberId: "member_owner",
+      prisma: expect.any(Object),
+      requiredPlanCode: "pulse",
+    });
+    expect(mocks.waitForHostedFamilyPlanCapacities).not.toHaveBeenCalled();
+    expect(mocks.issueHostedFamilyInviteTx).toHaveBeenCalledTimes(3);
+  },
+);
 
 test("uses a seat freed before the purchase instead of buying another", async () => {
   const seatLimit = () =>

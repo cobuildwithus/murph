@@ -9,6 +9,7 @@ import {
 } from "./contact-privacy";
 import { hostedOnboardingError } from "./errors";
 import type { HostedOnboardingReadClient } from "./shared";
+import { classifyHostedStripeFailure } from "./stripe-billing-state";
 import {
   describeHostedStripeError,
   logHostedStripeFailure,
@@ -381,12 +382,17 @@ export function buildHostedUsageCreditStripeUnavailableError(
   operationName: string,
 ) {
   logHostedStripeFailure({ error, operationName });
+  const failure = classifyHostedStripeFailure(error);
   return hostedOnboardingError({
-    code: "HOSTED_USAGE_CREDIT_STRIPE_UNAVAILABLE",
+    code: failure.kind === "provider_ambiguous"
+      ? "HOSTED_USAGE_CREDIT_STRIPE_UNAVAILABLE"
+      : "HOSTED_USAGE_CREDIT_STRIPE_REJECTED",
     details: describeSafeHostedUsageCreditStripeError(error),
-    httpStatus: 502,
-    message: "Stripe checkout is temporarily unavailable. Try again.",
-    retryable: true,
+    httpStatus: failure.httpStatus,
+    message: failure.kind === "provider_ambiguous"
+      ? "Stripe checkout is temporarily unavailable. Try again."
+      : "Stripe rejected the usage-credit request. Contact support.",
+    retryable: failure.retryable,
   });
 }
 

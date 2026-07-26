@@ -4,7 +4,11 @@ import { ArrowRight } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState, type ReactNode } from "react";
 
-import { requestHostedOnboardingJson } from "@/src/components/hosted-onboarding/client-api";
+import {
+  HostedOnboardingApiError,
+  requestHostedOnboardingJson,
+} from "@/src/components/hosted-onboarding/client-api";
+import { BillingPortalButton } from "@/src/components/settings/billing-portal-button";
 import { Button } from "@/src/components/ui/button";
 import {
   Dialog,
@@ -30,6 +34,16 @@ const EDGE_FEATURES = [
   "Deeper research and analysis",
 ];
 
+type EdgeUpgradeRecovery = "billing" | "retry" | null;
+
+const EDGE_UPGRADE_BILLING_RECOVERY_CODES = new Set([
+  "HOSTED_BILLING_PLAN_UPGRADE_APPLIED_INVOICE_VOIDED",
+  "HOSTED_BILLING_PLAN_UPGRADE_COLLECTION_TIMED_OUT",
+  "HOSTED_BILLING_PLAN_UPGRADE_FINANCIAL_STATE_BLOCKED",
+  "HOSTED_BILLING_PLAN_UPGRADE_INVOICE_FAILED",
+  "HOSTED_BILLING_PLAN_UPGRADE_INVOICE_UNCOLLECTIBLE",
+]);
+
 export function UpgradeToEdgeButton(props: {
   block?: boolean;
   children?: ReactNode;
@@ -41,12 +55,17 @@ export function UpgradeToEdgeButton(props: {
   const router = useRouter();
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isUpgrading, setIsUpgrading] = useState(false);
+  const [processing, setProcessing] = useState(false);
+  const [recovery, setRecovery] = useState<EdgeUpgradeRecovery>(null);
   const [confirmationOpen, setConfirmationOpen] = useState(false);
 
   async function handleUpgrade() {
     setErrorMessage(null);
+    setProcessing(false);
+    setRecovery(null);
     setIsUpgrading(true);
     props.onPendingChange?.(true);
+    let redirecting = false;
 
     try {
       const response = await requestHostedOnboardingJson<HostedBillingPlanUpgradeResult>({
@@ -57,17 +76,43 @@ export function UpgradeToEdgeButton(props: {
         url: "/api/settings/billing/upgrade-plan",
       });
 
-      if (response.status === "pending_payment") {
-        window.location.assign(response.paymentUrl);
+      if (response.status === "processing") {
+        setProcessing(true);
         return;
       }
 
+      if (response.status === "payment_required") {
+        if (!isHostedStripePaymentActionUrl(response.paymentUrl)) {
+          setErrorMessage(
+            "Stripe did not return a safe payment page. Open billing to continue.",
+          );
+          setRecovery("billing");
+          return;
+        }
+        window.location.assign(response.paymentUrl);
+        redirecting = true;
+        return;
+      }
+
+      setConfirmationOpen(false);
       router.refresh();
     } catch (error) {
       setErrorMessage(toErrorMessage(error, "Could not upgrade your plan right now."));
+      setRecovery(resolveEdgeUpgradeRecovery(error));
     } finally {
-      setIsUpgrading(false);
-      props.onPendingChange?.(false);
+      if (!redirecting) {
+        setIsUpgrading(false);
+        props.onPendingChange?.(false);
+      }
+    }
+  }
+
+  function setConfirmationOpenState(open: boolean) {
+    setConfirmationOpen(open);
+    if (!open) {
+      setErrorMessage(null);
+      setProcessing(false);
+      setRecovery(null);
     }
   }
 
@@ -91,8 +136,10 @@ export function UpgradeToEdgeButton(props: {
         <EdgeUpgradeConfirmationDialog
           errorMessage={errorMessage}
           isUpgrading={isUpgrading}
+          processing={processing}
+          recovery={recovery}
           onConfirm={() => void handleUpgrade()}
-          onOpenChange={setConfirmationOpen}
+          onOpenChange={setConfirmationOpenState}
           open={confirmationOpen}
         />
       </div>
@@ -113,8 +160,10 @@ export function UpgradeToEdgeButton(props: {
       <EdgeUpgradeConfirmationDialog
         errorMessage={errorMessage}
         isUpgrading={isUpgrading}
+        processing={processing}
+        recovery={recovery}
         onConfirm={() => void handleUpgrade()}
-        onOpenChange={setConfirmationOpen}
+        onOpenChange={setConfirmationOpenState}
         open={confirmationOpen}
       />
     </div>
@@ -124,6 +173,8 @@ export function UpgradeToEdgeButton(props: {
 function EdgeUpgradeConfirmationDialog(props: {
   errorMessage: string | null;
   isUpgrading: boolean;
+  processing: boolean;
+  recovery: EdgeUpgradeRecovery;
   onConfirm: () => void;
   onOpenChange: (open: boolean) => void;
   open: boolean;
@@ -150,17 +201,41 @@ function EdgeUpgradeConfirmationDialog(props: {
             {props.errorMessage}
           </p>
         ) : null}
+        {props.processing ? (
+          <p
+            role="status"
+            aria-live="polite"
+            className="rounded-lg border border-[#c4a882]/25 bg-white/50 p-3 text-sm text-[#736a58]"
+          >
+            Stripe is still processing this invoice. Check the status again shortly.
+          </p>
+        ) : null}
 
         <div className="flex flex-col gap-2">
-          <Button
-            type="button"
-            size="xl"
-            onClick={props.onConfirm}
-            disabled={props.isUpgrading}
-            className="w-full"
-          >
-            {props.isUpgrading ? "Upgrading..." : "Upgrade to Edge"}
-          </Button>
+          {props.errorMessage && props.recovery === "billing" ? (
+            <BillingPortalButton
+              billingScope="member"
+              block
+              label="Open billing"
+              variant="secondary"
+            />
+          ) : !props.errorMessage || props.recovery === "retry" ? (
+            <Button
+              type="button"
+              size="xl"
+              onClick={props.onConfirm}
+              disabled={props.isUpgrading}
+              className="w-full"
+            >
+              {props.isUpgrading
+                ? "Upgrading..."
+                : props.processing
+                  ? "Check status"
+                  : props.recovery === "retry"
+                    ? "Try again"
+                    : "Upgrade to Edge"}
+            </Button>
+          ) : null}
           <Button
             type="button"
             size="xl"
@@ -179,4 +254,31 @@ function EdgeUpgradeConfirmationDialog(props: {
 
 function formatHostedBillingPlanMonthlyPrice(amountUsdCents: number): string {
   return `$${amountUsdCents / 100}`;
+}
+
+function resolveEdgeUpgradeRecovery(error: unknown): EdgeUpgradeRecovery {
+  if (!(error instanceof HostedOnboardingApiError)) {
+    return "retry";
+  }
+  if (error.retryable) {
+    return "retry";
+  }
+  return error.code &&
+      EDGE_UPGRADE_BILLING_RECOVERY_CODES.has(error.code)
+    ? "billing"
+    : null;
+}
+
+function isHostedStripePaymentActionUrl(value: string): boolean {
+  try {
+    const parsed = new URL(value);
+    return (
+      parsed.origin === "https://billing.stripe.com" ||
+      parsed.origin === "https://invoice.stripe.com"
+    ) &&
+      parsed.username === "" &&
+      parsed.password === "";
+  } catch {
+    return false;
+  }
 }
