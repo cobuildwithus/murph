@@ -189,11 +189,12 @@ describe("hosted local snapshot publication fallback e2e", () => {
     if (!publicationRefAtFaultObservation) {
       throw new Error("Rejected publication did not retain a restorable snapshot.");
     }
-    const recoveryCompletedBeforeFaultObservation = hasCleanSnapshotPublication(
-      rejectedPublicationStatus,
-      baselineSnapshotRef,
-    );
-    if (!recoveryCompletedBeforeFaultObservation) {
+    const recoveryPublicationObservedBeforeFaultObservation =
+      hasAdvancedSnapshotPublication(
+        rejectedPublicationStatus,
+        baselineSnapshotRef,
+      );
+    if (!recoveryPublicationObservedBeforeFaultObservation) {
       expect(publicationRefAtFaultObservation).toEqual(baselineSnapshotRef);
     }
     expect(requireWorkspaceVersion(rejectedPublicationStatus))
@@ -204,14 +205,14 @@ describe("hosted local snapshot publication fallback e2e", () => {
       baselineInvokeFailureDestroyCount,
     });
 
-    if (!recoveryCompletedBeforeFaultObservation) {
+    if (!recoveryPublicationObservedBeforeFaultObservation) {
       requireScenario().queueAssistantResponses([firstReplyText], {
         matchInputContains: firstInboundText,
       });
     }
-    const restoredStatus = recoveryCompletedBeforeFaultObservation
-      ? rejectedPublicationStatus
-      : await waitForCleanSnapshotPublication(baselineSnapshotRef);
+    const restoredStatus = await waitForCleanSnapshotPublication(
+      baselineSnapshotRef,
+    );
     const restoredSnapshotRef = restoredStatus.workspace?.snapshotRef;
     if (!restoredSnapshotRef || !isHostedWorkspaceSnapshotV2Ref(restoredSnapshotRef)) {
       throw new Error("Recovered provider turn did not publish a clean v2 snapshot.");
@@ -412,12 +413,19 @@ function hasCleanSnapshotPublication(
   status: HostedRunnerStatusResponse,
   baselineSnapshotRef: HostedExecutionSnapshotRef,
 ): boolean {
-  const snapshotRef = status.workspace?.snapshotRef ?? null;
-  return isHostedWorkspaceSnapshotV2Ref(snapshotRef)
-    && JSON.stringify(snapshotRef) !== JSON.stringify(baselineSnapshotRef)
+  return hasAdvancedSnapshotPublication(status, baselineSnapshotRef)
     && !status.inFlight
     && !status.lastErrorCode
     && status.mailboxLag.every((lane) => lane.lag === "0");
+}
+
+function hasAdvancedSnapshotPublication(
+  status: HostedRunnerStatusResponse,
+  baselineSnapshotRef: HostedExecutionSnapshotRef,
+): boolean {
+  const snapshotRef = status.workspace?.snapshotRef ?? null;
+  return isHostedWorkspaceSnapshotV2Ref(snapshotRef)
+    && JSON.stringify(snapshotRef) !== JSON.stringify(baselineSnapshotRef);
 }
 
 function countSnapshotPublicationFaults(): number {
