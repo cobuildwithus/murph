@@ -224,6 +224,31 @@ async function createAuthorizedOpenAiImagesRequest(): Promise<Request> {
 }
 
 describe("hosted-local test RunnerContainer outbound composition", () => {
+  it("drops the exact operation queue used by the base container", async () => {
+    const container: HostedLocalTestRunnerContainer = Object.create(
+      HostedLocalTestRunnerContainer.prototype,
+    );
+    Object.defineProperty(container, "workspaceInvocationOperations", {
+      configurable: true,
+      value: [{ attemptId: "attempt_test" }],
+      writable: true,
+    });
+
+    await expect(container.dropActiveOperationForTest({
+      userId: "member_drop",
+    })).resolves.toEqual({ ok: true });
+
+    expect(
+      Object.getOwnPropertyDescriptor(
+        container,
+        "workspaceInvocationOperations",
+      )?.value,
+    ).toEqual([]);
+    expect(
+      Object.hasOwn(container, "workspaceInvocationActiveOperation"),
+    ).toBe(false);
+  });
+
   it("uses SIGTERM for the shutdown checkpoint control", async () => {
     const stop = vi.fn(async () => undefined);
     const destroy = vi.fn(async () => undefined);

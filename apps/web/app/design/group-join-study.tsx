@@ -11,6 +11,7 @@ import {
   GroupJoinLeaveButton,
   type GroupJoinPermissionDisplay,
 } from "@/src/components/hosted-groups/group-join-client";
+import { HOSTED_VAULT_SHARE_TIME_ZONE_DESCRIPTION } from "@/src/lib/hosted-groups/projection-display-copy";
 
 const DESIGN_GROUP_NAME = "Sunday Sleep Crew";
 const DESIGN_JOIN_CODE = "DESIGN_JOIN";
@@ -71,6 +72,14 @@ const DESIGN_PERMISSIONS: GroupJoinPermissionDisplay[] = [
     projectionScope: { projectionKind: "calories-days.v0" },
     projectionScopeKey: buildHostedVaultShareProjectionScopeKey({
       projectionKind: "calories-days.v0",
+    }),
+  },
+  {
+    description: HOSTED_VAULT_SHARE_TIME_ZONE_DESCRIPTION,
+    label: "Time zone",
+    projectionScope: { projectionKind: "time-zone.v0" },
+    projectionScopeKey: buildHostedVaultShareProjectionScopeKey({
+      projectionKind: "time-zone.v0",
     }),
   },
 ];

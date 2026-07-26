@@ -1,6 +1,7 @@
 import {
   activityKindAliasGroups,
   isStrictIsoDate,
+  normalizeIanaTimeZone,
   isStrictIsoDateTime,
   normalizeActivityKindToken,
 } from "@murphai/contracts";
@@ -35,6 +36,8 @@ export {
 export const HOSTED_VAULT_SHARE_DAILY_METRIC_PROJECTION_KINDS = [
   "activity-days.v0",
   "sleep-duration-days.v0",
+  "deep-sleep-days.v0",
+  "rem-sleep-days.v0",
   "steps-days.v0",
   "max-heart-rate-days.v0",
   "distance-days.v0",
@@ -93,6 +96,8 @@ const METRIC_SERIES_SOURCE = { kind: "metric-series" } as const;
 export const HOSTED_VAULT_SHARE_DAILY_METRIC_PROJECTION_SPECS = [
   { projectionKind: "activity-days.v0", metricKey: "activity-minutes", minValue: 0, maxValue: 1_440, source: METRIC_SERIES_SOURCE },
   { projectionKind: "sleep-duration-days.v0", metricKey: "total-sleep-minutes", minValue: 0, maxValue: 1_440, source: METRIC_SERIES_SOURCE },
+  { projectionKind: "deep-sleep-days.v0", metricKey: "deep-sleep-minutes", minValue: 0, maxValue: 1_440, source: METRIC_SERIES_SOURCE },
+  { projectionKind: "rem-sleep-days.v0", metricKey: "rem-sleep-minutes", minValue: 0, maxValue: 1_440, source: METRIC_SERIES_SOURCE },
   { projectionKind: "steps-days.v0", metricKey: "steps", minValue: 0, maxValue: 1_000_000, source: METRIC_SERIES_SOURCE },
   { projectionKind: "max-heart-rate-days.v0", metricKey: "max-heart-rate", minValue: 0, maxValue: 260, source: METRIC_SERIES_SOURCE },
   { projectionKind: "distance-days.v0", metricKey: "distance-km", minValue: 0, maxValue: 1_000, source: METRIC_SERIES_SOURCE },
@@ -224,7 +229,9 @@ export const HOSTED_VAULT_SHARE_FIXED_PROJECTION_KINDS = [
   "group-email.v0",
   "profile-name.v0",
   "sleep-times.v0",
+  "time-zone.v0",
   "workout-days.v0",
+  "workouts.v0",
   "heart-rate-zones-days.v0",
   ...HOSTED_VAULT_SHARE_DAILY_METRIC_PROJECTION_KINDS,
 ] as const;
@@ -246,10 +253,14 @@ export const HOSTED_VAULT_SHARE_PROJECTION_KINDS = [
  */
 export const HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS = [
   "group-email.v0",
+  "time-zone.v0",
   "sleep-times.v0",
   "sleep-duration-days.v0",
+  "deep-sleep-days.v0",
+  "rem-sleep-days.v0",
   "activity-days.v0",
   "workout-days.v0",
+  "workouts.v0",
   "heart-rate-zones-days.v0",
   "steps-days.v0",
   "max-heart-rate-days.v0",
@@ -286,6 +297,7 @@ export type HostedVaultShareSelectableProjectionKind =
  */
 export const HOSTED_VAULT_SHARE_CURRENT_STATE_PROJECTION_KINDS = [
   "profile-name.v0",
+  "time-zone.v0",
 ] as const satisfies readonly HostedVaultShareProjectionKind[];
 
 export function isHostedVaultShareCurrentStateProjectionKind(
@@ -422,7 +434,7 @@ export const HOSTED_VAULT_SHARE_REVOKE_PAYLOAD_SCHEMA =
 
 const HOSTED_VAULT_SHARE_RECORD_KEY_MAX_LENGTH = 128;
 const HOSTED_VAULT_SHARE_RECORD_KEY_PATTERN = /^[A-Za-z0-9._-]+$/u;
-const HOSTED_VAULT_SHARE_SOURCE_REVISION_MAX_LENGTH = 96;
+export const HOSTED_VAULT_SHARE_SOURCE_REVISION_MAX_LENGTH = 96;
 const HOSTED_VAULT_SHARE_SOURCE_REVISION_PATTERN = /^[A-Za-z0-9_-]+$/u;
 
 export interface HostedVaultShareSleepTimesData {
@@ -435,11 +447,29 @@ export const HOSTED_VAULT_SHARE_BROAD_ACTIVITY_MINUTES_SEMANTICS =
   "broad-movement" as const;
 export const HOSTED_VAULT_SHARE_CANONICAL_WORKOUT_DAY_SEMANTICS =
   "canonical-workout-day" as const;
+export const HOSTED_VAULT_SHARE_WORKOUT_TIME_SEMANTICS =
+  "canonical-event-zone-or-vault-zone.v0" as const;
+// With seven maximum-size day records, 13 workouts/day serialize to a 16,090-byte
+// delivery request and a 16,067-byte snapshot. A 14-workout/day request is 17,147
+// bytes and cannot cross the 16 KiB ingress ceiling. Parsers reject overflow rather
+// than truncating a day.
+export const HOSTED_VAULT_SHARE_WORKOUTS_MAX_PER_DAY = 13;
+export const HOSTED_VAULT_SHARE_WORKOUT_KIND_MAX_LENGTH = 80;
+/**
+ * Providers can emit a real workout with no usable sport name; WHOOP maps an
+ * unusable `sport_name` to the canonical type `workout`. The activity-kind
+ * resolver deliberately rejects such generic tokens because it exists to
+ * classify adherence, not to label a disclosure. A workout proved by durable
+ * external-reference evidence is still a workout the group asked to see, so it
+ * is disclosed under this truthful generic label rather than dropped.
+ */
+export const HOSTED_VAULT_SHARE_WORKOUT_GENERIC_KIND = "workout";
 
 export interface HostedVaultShareDailyMetricData {
   date: string;
   metricKey: string;
   metricSemantics?: typeof HOSTED_VAULT_SHARE_BROAD_ACTIVITY_MINUTES_SEMANTICS;
+  provisional?: true;
   unit: string | null;
   value: number;
 }
@@ -449,6 +479,19 @@ export interface HostedVaultShareWorkoutDayData {
   metricSemantics?: typeof HOSTED_VAULT_SHARE_CANONICAL_WORKOUT_DAY_SEMANTICS;
   workoutCount: number;
   workoutMinutes: number;
+}
+
+export interface HostedVaultShareWorkout {
+  kind: string;
+  minutes: number;
+  startLocalMs: number;
+}
+
+export interface HostedVaultShareWorkoutsDayData {
+  calendarClosedThroughDate: string;
+  date: string;
+  timeSemantics: typeof HOSTED_VAULT_SHARE_WORKOUT_TIME_SEMANTICS;
+  workouts: HostedVaultShareWorkout[];
 }
 
 export interface HostedVaultShareActivityMinutesDayData {
@@ -486,6 +529,17 @@ export interface HostedVaultShareProfileNameData {
   displayName: string;
 }
 
+/**
+ * The member's own IANA timezone, so a group can tell which calendar day a
+ * shared daily fact belongs to and when that day has finished for them.
+ * Without it a consumer must either guess from the data, which lets a late
+ * import reclassify an already-published day, or wait for the day to end in
+ * the last timezone on earth.
+ */
+export interface HostedVaultShareTimeZoneData {
+  timeZone: string;
+}
+
 export type HostedVaultShareDeviceSyncSourceStatus =
   | "connected"
   | "disconnected"
@@ -513,8 +567,10 @@ export type HostedVaultShareDeliveryRecordData =
   | HostedVaultShareDeviceSyncStatusData
   | HostedVaultShareHeartRateZoneDayData
   | HostedVaultShareProfileNameData
+  | HostedVaultShareTimeZoneData
   | HostedVaultShareSleepTimesData
-  | HostedVaultShareWorkoutDayData;
+  | HostedVaultShareWorkoutDayData
+  | HostedVaultShareWorkoutsDayData;
 
 export interface HostedVaultShareDeliveryRecord {
   data: HostedVaultShareDeliveryRecordData;
@@ -898,14 +954,21 @@ export function parseHostedVaultShareDeliveryRecord(
     record.occurredAt,
     "Vault share delivery record occurredAt",
   );
+  const provisional = requireObject(record.data, "Vault share delivery record data").provisional;
+  const completedDateScope = projectionScope.projectionKind === "deep-sleep-days.v0"
+    || projectionScope.projectionKind === "rem-sleep-days.v0";
+  if (provisional !== undefined && (provisional !== true || !completedDateScope)) {
+    throw new TypeError(`Vault share ${projectionScope.projectionKind} data provisional is invalid.`);
+  }
+  const data = parseHostedVaultShareDeliveryRecordData(record.data, {
+    occurredAt,
+    projectionKind: projectionScope.projectionKind,
+    projectionScope,
+    recordKey,
+  });
 
   return {
-    data: parseHostedVaultShareDeliveryRecordData(record.data, {
-      occurredAt,
-      projectionKind: projectionScope.projectionKind,
-      projectionScope,
-      recordKey,
-    }),
+    data: provisional === true ? { ...data, provisional } : data,
     occurredAt,
     recordKey,
     ...parseHostedVaultShareSourceRevision(record.sourceRevision),
@@ -978,10 +1041,14 @@ function parseHostedVaultShareDeliveryRecordData(
       return parseHostedVaultShareHeartRateZoneDayData(value, context);
     case "profile-name.v0":
       return parseHostedVaultShareProfileNameData(value, context);
+    case "time-zone.v0":
+      return parseHostedVaultShareTimeZoneData(value, context);
     case "sleep-times.v0":
       return parseHostedVaultShareSleepTimesData(value, context);
     case "workout-days.v0":
       return parseHostedVaultShareWorkoutDayData(value, context);
+    case "workouts.v0":
+      return parseHostedVaultShareWorkoutsDayData(value, context);
   }
 
   throw new TypeError(
@@ -990,6 +1057,7 @@ function parseHostedVaultShareDeliveryRecordData(
 }
 
 export const HOSTED_VAULT_SHARE_PROFILE_NAME_RECORD_KEY = "profile-name";
+export const HOSTED_VAULT_SHARE_TIME_ZONE_RECORD_KEY = "time-zone";
 export const HOSTED_VAULT_SHARE_PROFILE_NAME_MAX_LENGTH = 120;
 
 export const HOSTED_VAULT_SHARE_DEVICE_SYNC_STATUS_RECORD_KEY =
@@ -1124,6 +1192,30 @@ function requireHostedVaultShareNonFutureTimestamp(
     throw new TypeError(`${label} must not be in the future.`);
   }
   return timestamp;
+}
+
+function parseHostedVaultShareTimeZoneData(
+  value: unknown,
+  context: { recordKey: string },
+): HostedVaultShareTimeZoneData {
+  const data = requireObject(value, "Vault share time-zone data");
+
+  // One logical record per grantor, so a delivery replaces the previous
+  // timezone rather than accumulating a travel history.
+  if (context.recordKey !== HOSTED_VAULT_SHARE_TIME_ZONE_RECORD_KEY) {
+    throw new TypeError(
+      'Vault share time-zone recordKey must be "time-zone".',
+    );
+  }
+
+  const timeZone = normalizeIanaTimeZone(
+    requireString(data.timeZone, "Vault share time-zone data timeZone"),
+  );
+  if (!timeZone) {
+    throw new TypeError("Vault share time-zone data timeZone is invalid.");
+  }
+
+  return { timeZone };
 }
 
 function parseHostedVaultShareProfileNameData(
@@ -1288,6 +1380,102 @@ function parseHostedVaultShareWorkoutDayData(
     workoutCount,
     workoutMinutes,
   };
+}
+
+function parseHostedVaultShareWorkoutsDayData(
+  value: unknown,
+  context: { occurredAt: string; recordKey: string },
+): HostedVaultShareWorkoutsDayData {
+  const data = requireObject(value, "Vault share workouts data");
+  assertObjectKeys(
+    data,
+    "Vault share workouts data",
+    ["calendarClosedThroughDate", "date", "timeSemantics", "workouts"],
+  );
+  const calendarClosedThroughDate = requireString(
+    data.calendarClosedThroughDate,
+    "Vault share workouts data calendarClosedThroughDate",
+  );
+  if (!isStrictIsoDate(calendarClosedThroughDate)) {
+    throw new TypeError(
+      "Vault share workouts data calendarClosedThroughDate is invalid.",
+    );
+  }
+  const date = parseHostedVaultShareDailyDate(data.date, {
+    dataLabel: "Vault share workouts data",
+    occurredAt: context.occurredAt,
+    occurredAtDescription: "workout date at UTC midnight",
+    recordKey: context.recordKey,
+  });
+  const rawWorkouts = requireArray(
+    data.workouts,
+    "Vault share workouts data workouts",
+  );
+  if (rawWorkouts.length > HOSTED_VAULT_SHARE_WORKOUTS_MAX_PER_DAY) {
+    throw new TypeError(
+      `Vault share workouts data workouts must contain at most ${HOSTED_VAULT_SHARE_WORKOUTS_MAX_PER_DAY} entries.`,
+    );
+  }
+  const workouts = rawWorkouts.map((workout, index) =>
+    parseHostedVaultShareWorkout(workout, index)
+  );
+  const timeSemantics = requireString(
+    data.timeSemantics,
+    "Vault share workouts data timeSemantics",
+  );
+  if (
+    timeSemantics
+    !== HOSTED_VAULT_SHARE_WORKOUT_TIME_SEMANTICS
+  ) {
+    throw new TypeError(
+      "Vault share workouts data timeSemantics is invalid.",
+    );
+  }
+
+  return { calendarClosedThroughDate, date, timeSemantics, workouts };
+}
+
+function parseHostedVaultShareWorkout(
+  value: unknown,
+  index: number,
+): HostedVaultShareWorkout {
+  const label = `Vault share workouts data workouts[${index}]`;
+  const workout = requireObject(value, label);
+  assertObjectKeys(workout, label, ["kind", "minutes", "startLocalMs"]);
+
+  const kind = requireString(workout.kind, `${label} kind`);
+  if (
+    kind.length === 0
+    || kind.length > HOSTED_VAULT_SHARE_WORKOUT_KIND_MAX_LENGTH
+    || normalizeActivityKindToken(kind) !== kind
+  ) {
+    throw new TypeError(
+      `${label} kind must be a normalized activity token of at most ${HOSTED_VAULT_SHARE_WORKOUT_KIND_MAX_LENGTH} characters.`,
+    );
+  }
+
+  const minutes = requireNumber(workout.minutes, `${label} minutes`);
+  if (minutes <= 0 || minutes > HOSTED_VAULT_SHARE_DAY_MAX_MINUTES) {
+    throw new TypeError(
+      `${label} minutes must be greater than 0 and at most ${HOSTED_VAULT_SHARE_DAY_MAX_MINUTES}.`,
+    );
+  }
+
+  const startLocalMs = requireNumber(
+    workout.startLocalMs,
+    `${label} startLocalMs`,
+  );
+  if (
+    !Number.isInteger(startLocalMs)
+    || startLocalMs < 0
+    || startLocalMs >= 24 * 60 * 60 * 1_000
+  ) {
+    throw new TypeError(
+      `${label} startLocalMs must be an integer between 0 and 86399999.`,
+    );
+  }
+
+  return { kind, minutes, startLocalMs };
 }
 
 function parseHostedVaultShareActivityMinutesDayData(
@@ -1642,12 +1830,31 @@ export function parseHostedVaultShareDeliverRequest(
     );
   }
 
+  const parsedRecords = records.map((record) =>
+    parseHostedVaultShareDeliveryRecord(record, projectionScope)
+  );
+  if (projectionKind === "workouts.v0") {
+    let calendarClosedThroughDate: string | undefined;
+    for (const record of parsedRecords) {
+      if (!("workouts" in record.data)) {
+        throw new TypeError("Vault share workouts record data is invalid.");
+      }
+      if (
+        calendarClosedThroughDate !== undefined
+        && record.data.calendarClosedThroughDate !== calendarClosedThroughDate
+      ) {
+        throw new TypeError(
+          "Vault share workouts records must use one calendarClosedThroughDate.",
+        );
+      }
+      calendarClosedThroughDate = record.data.calendarClosedThroughDate;
+    }
+  }
+
   return {
     projectionKind,
     projectionScope,
-    records: records.map((record) =>
-      parseHostedVaultShareDeliveryRecord(record, projectionScope),
-    ),
+    records: parsedRecords,
   };
 }
 

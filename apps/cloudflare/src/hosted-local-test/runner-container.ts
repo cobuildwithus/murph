@@ -113,8 +113,7 @@ export class RunnerContainer extends BaseRunnerContainer {
 
   async dropActiveOperationForTest(_input: { userId: string }): Promise<{ ok: true }> {
     Object.assign(this, {
-      workspaceInvocationActiveOperation: null,
-      workspaceInvocationActiveOperationPreservedAfterTransportFailure: false,
+      workspaceInvocationOperations: [],
     });
     return { ok: true };
   }
