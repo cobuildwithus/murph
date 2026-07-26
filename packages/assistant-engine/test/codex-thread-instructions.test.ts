@@ -43,6 +43,18 @@ describe('Codex thread instructions', () => {
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
       'When the runtime summarizes earlier context',
     )
+    expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
+      'Requests to answer, explain, review, diagnose, or plan authorize inspection and the requested response only',
+    )
+    expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
+      'including "build me a plan," authorizes producing that content, not changing saved state or external systems',
+    )
+    expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
+      'Mutate state or carry out implementation steps only when the request explicitly asks for that action',
+    )
+    expect(MURPH_CODEX_BASE_INSTRUCTIONS).not.toContain(
+      'not unrelated mutations',
+    )
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).not.toMatch(
       /(?:apply_patch|rg --files|git reset|AGENTS\.md|SKILL\.md)/u,
     )
