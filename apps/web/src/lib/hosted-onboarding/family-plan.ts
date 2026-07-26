@@ -307,6 +307,7 @@ interface HostedAccountGroupStripeObjectMatch {
 
 export type HostedFamilyStripeSubscriptionResult = {
   activations: HostedMemberActivationResult[];
+  billingModeChangedMemberIds?: string[];
   groupId: string | null;
 };
 
@@ -1609,7 +1610,7 @@ export async function applyHostedFamilyStripeSubscriptionUpdatedTx(input: {
     // A direct-paid owner conversion reuses the same Stripe subscription. The
     // Family webhook is the single handoff point: only clear the old individual
     // billing owner after the paid Family projection is durably reconciled.
-    await clearHostedFamilyOwnerDirectPaidBillingTx({
+    const billingModeChanged = await clearHostedFamilyOwnerDirectPaidBillingTx({
       ownerMemberId: group.ownerMemberId,
       stripeSubscriptionId: input.subscription.id,
       tx: input.tx,
@@ -1629,6 +1630,9 @@ export async function applyHostedFamilyStripeSubscriptionUpdatedTx(input: {
 
     return {
       activations,
+      billingModeChangedMemberIds: billingModeChanged
+        ? [group.ownerMemberId]
+        : [],
       groupId: group.id,
     };
   }
@@ -2100,13 +2104,13 @@ async function clearHostedFamilyOwnerDirectPaidBillingTx(input: {
   ownerMemberId: string;
   stripeSubscriptionId: string;
   tx: Prisma.TransactionClient;
-}): Promise<void> {
+}): Promise<boolean> {
   const billingRef = await readHostedMemberStripeBillingRef({
     memberId: input.ownerMemberId,
     prisma: input.tx,
   });
   if (billingRef?.stripeSubscriptionId !== input.stripeSubscriptionId) {
-    return;
+    return false;
   }
 
   await input.tx.hostedMember.update({
@@ -2139,6 +2143,7 @@ async function clearHostedFamilyOwnerDirectPaidBillingTx(input: {
       memberId: input.ownerMemberId,
     },
   });
+  return true;
 }
 
 function buildHostedFamilyDirectPaidUpgradeIdempotencyKey(

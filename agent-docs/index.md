@@ -1,6 +1,6 @@
 # Murph Agent Docs Index
 
-Last verified: 2026-07-25
+Last verified: 2026-07-26
 
 ## Purpose
 
@@ -48,7 +48,7 @@ It intentionally lists live architecture, product, verification, and package-bou
 | `agent-docs/product-specs/pulse-trial-checkout-offer.md` | Implemented Pulse Trial checkout-offer architecture over the enforced hosted billing and AI usage allowance primitives. | Hosted billing/product spec | High | 2026-07-16 |
 | `agent-docs/product-specs/pulse-trial-start-paid-pulse.md` | Implemented exhausted Pulse Trial conversion to paid Pulse by ending the Stripe trial and billing the existing Pulse subscription. | Hosted billing/product spec | High | 2026-07-16 |
 | `agent-docs/product-specs/hosted-plan-downgrades.md` | Edge-to-Pulse renewal switches plus the web-owned hosted assistant configuration and personalization resolvers, including the fully deployed input-bound-only model/reasoning update contract, personal Luna/Terra choices, billing-gated Sol, relation-derived group-chat Sol, reasoning and conversation style controls, the enforced composed included-plus-credit usage boundary, and the one-time durable-workflow recheck rollout. | Hosted billing/current-state spec | High | 2026-07-16 |
-| `agent-docs/product-specs/hosted-plan-usage.md` | Web-owned enforced included-usage projection with non-quantified purchased-credit continuation in Settings, explicit-request subscription quotes, and the private accepted-input-bound subscription action surface with durable mailbox claims, Stripe-hosted personal and exact Family-member payment handoffs, conversational policy, and group privacy boundaries. | Hosted billing/current-state spec | High | 2026-07-23 |
+| `agent-docs/product-specs/hosted-plan-usage.md` | Web-owned enforced included-usage projection with price-derived paid allowances, prospective $7.50 group-thread limits, non-quantified purchased-credit continuation in Settings, explicit-request subscription quotes, and the private accepted-input-bound subscription action surface with durable mailbox claims, Stripe-hosted personal and exact Family-member payment handoffs, conversational policy, and group privacy boundaries. | Hosted billing/current-state spec | High | 2026-07-26 |
 | `agent-docs/product-specs/labs-discovery.md` | Implemented read-only lab catalog and ZIP collection-site discovery through private Murph and the authenticated unlinked Labs page, with provider-neutral member-facing language. | Hosted Labs product spec | High | 2026-07-16 |
 | `agent-docs/product-specs/hosted-usage-topups.md` | Implemented fixed-pack personal, exact Family-member, and hosted-group Stripe Checkout funding over one Murph-owned usage-credit purchase lifecycle and signed refund/dispute ledger. | Hosted billing/product spec | High | 2026-07-22 |
 | `agent-docs/product-specs/hosted-family-plan.md` | Hosted Family plan for 2-6 sponsored people, mixed Pulse/Edge member assignments, exact owner-funded member usage top-ups, webhook-owned capacity, private member accounts, chat-first invites, and privacy boundaries. | Hosted billing/product spec | High | 2026-07-22 |
