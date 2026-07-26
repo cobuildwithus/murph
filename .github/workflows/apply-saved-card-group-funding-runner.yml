@@ -16,9 +16,23 @@ jobs:
           ref: agent/reuse-saved-card-for-group-funding
           fetch-depth: 0
       - name: Apply integration patch
-        run: python agent-scripts/apply-saved-card-group-funding.py
+        run: |
+          set +e
+          python agent-scripts/apply-saved-card-group-funding.py > /tmp/apply.log 2>&1
+          status=$?
+          cat /tmp/apply.log
+          if [ "$status" -ne 0 ]; then
+            cp /tmp/apply.log agent-scripts/apply-saved-card-group-funding.error.log
+            git config user.name "OpenAI"
+            git config user.email "openai@users.noreply.github.com"
+            git add agent-scripts/apply-saved-card-group-funding.error.log
+            git commit -m "chore: capture saved-card patch failure"
+            git push origin HEAD:agent/reuse-saved-card-for-group-funding
+            exit "$status"
+          fi
       - name: Commit implementation
         run: |
+          rm -f agent-scripts/apply-saved-card-group-funding.error.log
           rm agent-scripts/apply-saved-card-group-funding.py
           rm .github/workflows/apply-saved-card-group-funding.yml
           git config user.name "OpenAI"
