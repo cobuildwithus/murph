@@ -307,6 +307,11 @@ describe("hosted Linq webhook transport", () => {
     ).resolves.toBeDefined();
 
     expect(scheduledTasks).toHaveLength(1);
+    expect(markHostedLinqOnboardingLinkNoticeSent).toHaveBeenCalledWith({
+      memberId: "member-1",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      prisma,
+    });
     expect(prisma.hostedGroupJoinOutreach.updateMany).not.toHaveBeenCalled();
 
     await scheduledTasks[0]?.();
@@ -323,7 +328,7 @@ describe("hosted Linq webhook transport", () => {
         repliedAt: "2026-03-26T12:00:00.000Z",
       },
     });
-    expect(markHostedLinqOnboardingLinkNoticeSent).not.toHaveBeenCalled();
+    expect(markHostedLinqOnboardingLinkNoticeSent).toHaveBeenCalledTimes(2);
     expect(prisma.hostedGroupJoinOutreach.updateMany).toHaveBeenCalledWith({
       data: {
         repliedAt: new Date("2026-03-26T12:00:00.000Z"),
@@ -611,6 +616,7 @@ describe("hosted Linq webhook transport", () => {
     });
     await scheduledTasks[0]?.();
 
+    expect(markHostedLinqOnboardingLinkNoticeSent).toHaveBeenCalledTimes(1);
     expect(releaseHostedLinqOnboardingLinkNoticeClaim).not.toHaveBeenCalled();
     expect(prisma.hostedGroupJoinOutreach.updateMany).not.toHaveBeenCalled();
   });

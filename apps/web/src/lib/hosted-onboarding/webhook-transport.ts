@@ -1004,9 +1004,9 @@ async function markHostedLinqDeliveryAcceptedBestEffort(input: {
     // A terminal receipt can beat this milestone write (it only just learned
     // the provider message id); the milestone replays that receipt and this
     // applies the same daily-state consequence as live receipt ingestion.
-    // Milestone and consequence commit atomically: a replayed failure must
-    // never mark the delivery terminally failed while leaving the member/day
-    // marked sent, or the planner suppresses retries for the rest of the day.
+    // Milestone and consequence commit atomically. Generic failure reopens the
+    // member/day; group failure reopens only its exact outreach and preserves
+    // the monotonic fact that some signup link may already have been accepted.
     await runHostedLinqTransportTransaction(input.prisma, async (prisma) => {
       const milestone = await markHostedLinqDeliveryAcceptedTx({
         idempotencyKey: input.effect.effectId,
@@ -1024,16 +1024,6 @@ async function markHostedLinqDeliveryAcceptedBestEffort(input: {
           prisma,
         });
       }
-      if (
-        milestone.restoreOnboardingLink
-        && !milestone.restoreOnboardingLink.groupJoinReplyContext
-      ) {
-        await markHostedLinqOnboardingLinkNoticeSent({
-          memberId: milestone.restoreOnboardingLink.memberId,
-          occurredAt: milestone.restoreOnboardingLink.occurredAt,
-          prisma,
-        });
-      }
       const payload = input.effect.payload;
       if (
         (
@@ -1045,13 +1035,20 @@ async function markHostedLinqDeliveryAcceptedBestEffort(input: {
           payload.template === "invite_signup"
           || payload.template === "invite_signup_fallback"
         )
-        && payload.groupJoinOutreachId?.trim()
       ) {
-        await consumeHostedGroupJoinOutreachReplyContextTx({
-          outreachId: payload.groupJoinOutreachId.trim(),
-          repliedAt: new Date(payload.occurredAt),
-          tx: prisma,
+        await markHostedLinqOnboardingLinkNoticeSent({
+          memberId: payload.memberId,
+          occurredAt: payload.occurredAt,
+          prisma,
         });
+        const groupJoinOutreachId = payload.groupJoinOutreachId?.trim();
+        if (groupJoinOutreachId) {
+          await consumeHostedGroupJoinOutreachReplyContextTx({
+            outreachId: groupJoinOutreachId,
+            repliedAt: new Date(payload.occurredAt),
+            tx: prisma,
+          });
+        }
       }
     });
   } catch (error) {
@@ -1525,10 +1522,6 @@ async function markHostedLinqNoticeSentForSideEffect(
   ) {
     return;
   }
-  if (effect.payload.groupJoinOutreachId?.trim()) {
-    return;
-  }
-
   await markHostedLinqOnboardingLinkNoticeSent({
     memberId: effect.payload.memberId,
     occurredAt: effect.payload.occurredAt,

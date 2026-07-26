@@ -3682,6 +3682,45 @@ describe("hosted Linq signup-link delivery attempts", () => {
     });
   });
 
+  it("restores group signup state when the accepted milestone replays a buffered delivery receipt", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    fixture.hostedLinqProviderEventFindMany.mockResolvedValueOnce([{
+      deliveryStatus: "delivered",
+      eventId: "evt_delivered_buffered",
+      failureCode: null,
+      failureReason: null,
+      phoneNumberLookupKey: null,
+      providerCreatedAt: new Date("2026-03-26T12:02:00.000Z"),
+      service: "sms",
+    }]);
+    fixture.hostedLinqDeliveryFindUnique.mockResolvedValueOnce({
+      sourceRef: buildHostedLinqInviteSignupDeliverySourceRef({
+        effectId: BASE_EFFECT_ID,
+        groupJoinOutreachId: "hgrpjoa_buffered",
+        groupJoinRepliedAt: "2026-03-26T12:01:00.000Z",
+      }),
+      template: "invite_signup",
+    });
+
+    await expect(markHostedLinqDeliveryAcceptedTx({
+      idempotencyKey: BASE_EFFECT_ID,
+      linqChatId: "chat_123",
+      messageId: "provider_msg_123",
+      prisma: fixture.prisma as never,
+    })).resolves.toEqual({
+      deliveryStatus: "delivered",
+      reopenOnboardingLink: null,
+      restoreOnboardingLink: {
+        groupJoinReplyContext: {
+          outreachId: "hgrpjoa_buffered",
+          repliedAt: "2026-03-26T12:01:00.000Z",
+        },
+        memberId: "member_123",
+        occurredAt: "2026-03-26T00:00:00.000Z",
+      },
+    });
+  });
+
   it("reopens failed group context and restores it when delivery later wins", async () => {
     const fixture = createObservabilityPrismaFixture();
     const repliedAt = "2026-03-26T12:01:00.000Z";
@@ -3754,6 +3793,16 @@ describe("hosted Linq signup-link delivery attempts", () => {
           skippedAt: null,
         },
       });
+    expect(fixture.hostedLinqDailyStateUpdateMany).toHaveBeenCalledWith({
+      data: {
+        onboardingLinkSentAt: expect.any(Date),
+      },
+      where: {
+        dayUtc: new Date("2026-03-26T00:00:00.000Z"),
+        memberId: "member_123",
+        onboardingLinkSentAt: null,
+      },
+    });
   });
 
   it("does not reopen daily or group context for a stale failed attempt", async () => {

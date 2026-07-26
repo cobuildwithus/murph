@@ -352,15 +352,6 @@ describe.skipIf(!runPostgresProof)(
           },
           where: { id: newerOutreachId },
         });
-        const genericSignupSentAt =
-          new Date("2026-07-24T20:00:45.000Z");
-        await expect(prisma.hostedLinqDailyState.updateMany({
-          data: { onboardingLinkSentAt: genericSignupSentAt },
-          where: {
-            dayUtc: new Date("2026-07-24T00:00:00.000Z"),
-            memberId: participantMemberId,
-          },
-        })).resolves.toEqual({ count: 1 });
         const newerInboundEvent = buildDirectReplyEvent({
           chatId,
           eventId: `event-newer-${randomUUID()}`,
@@ -408,15 +399,21 @@ describe.skipIf(!runPostgresProof)(
         })).resolves.toEqual({
           repliedAt: new Date("2026-07-24T20:01:30.000Z"),
         });
-        await expect(prisma.hostedLinqDailyState.findFirst({
+        const dailyStateAfterNewerGroup =
+          await prisma.hostedLinqDailyState.findFirst({
           select: { onboardingLinkSentAt: true },
           where: {
             dayUtc: new Date("2026-07-24T00:00:00.000Z"),
             memberId: participantMemberId,
           },
-        })).resolves.toEqual({
-          onboardingLinkSentAt: genericSignupSentAt,
         });
+        expect(dailyStateAfterNewerGroup?.onboardingLinkSentAt)
+          .toEqual(expect.any(Date));
+        const groupSignupAcceptedAt =
+          dailyStateAfterNewerGroup?.onboardingLinkSentAt ?? null;
+        if (!groupSignupAcceptedAt) {
+          throw new Error("Expected group signup acceptance to close the daily gate.");
+        }
 
         // A retry of the same webhook effect after the ambiguity window owns
         // continuation. It reclaims the exact row and reuses the immutable
@@ -482,7 +479,7 @@ describe.skipIf(!runPostgresProof)(
             memberId: participantMemberId,
           },
         })).resolves.toEqual({
-          onboardingLinkSentAt: genericSignupSentAt,
+          onboardingLinkSentAt: groupSignupAcceptedAt,
         });
         await expect(prisma.hostedLinqDelivery.findUnique({
           select: { sourceRef: true },
@@ -498,21 +495,22 @@ describe.skipIf(!runPostgresProof)(
             tx,
           })
         )).resolves.toBeNull();
-        await prisma.hostedLinqDailyState.updateMany({
-          data: { onboardingLinkSentAt: null },
-          where: {
-            dayUtc: new Date("2026-07-24T00:00:00.000Z"),
-            memberId: participantMemberId,
-          },
+        const ordinaryInboundEvent = buildDirectReplyEvent({
+          chatId,
+          eventId: `event-ordinary-${randomUUID()}`,
+          messageId: `message-ordinary-${randomUUID()}`,
+          occurredAt: "2026-07-24T20:02:00.000Z",
+          participantPhone,
+          recipientPhone,
         });
         await expect(handleHostedOnboardingLinqWebhook({
           prisma,
-          rawBody: JSON.stringify(recoveredEvent),
+          rawBody: JSON.stringify(ordinaryInboundEvent),
           scheduleAfterResponse,
           signature: null,
           timestamp: null,
         })).resolves.toMatchObject({
-          duplicate: true,
+          ignored: true,
           reason: "signup-link-already-sent",
         });
         expect(providerMocks.sendHostedLinqChatMessage).toHaveBeenCalledTimes(2);

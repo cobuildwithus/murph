@@ -11,6 +11,7 @@ import {
   GroupJoinLeaveButton,
   type GroupJoinPermissionDisplay,
 } from "@/src/components/hosted-groups/group-join-client";
+import { HostedAuthPanel } from "@/src/components/hosted-onboarding/hosted-auth-panel";
 import { HOSTED_VAULT_SHARE_TIME_ZONE_DESCRIPTION } from "@/src/lib/hosted-groups/projection-display-copy";
 
 const DESIGN_GROUP_NAME = "Sunday Sleep Crew";
@@ -90,7 +91,22 @@ export function GroupJoinStudy() {
       className="grid gap-6 rounded-3xl border border-border bg-background px-4 py-12 sm:px-8 lg:grid-cols-2"
       data-design-study="group-join"
       id="group-join"
+      inert
     >
+      <GroupJoinVariant
+        caption="A signed-out invitee who arrived from a group text sees only the phone-bound account path. The invite code stays attached through authentication so Murph can return them to this group."
+        title="Message invite · signed out"
+      >
+        <GroupJoinPageMock alreadyActiveMember={false}>
+          <HostedAuthPanel
+            inviteCode="hinv_design_group_message"
+            methods={["phone"]}
+            requireLaunchConsentOnCompletion
+            size="compact"
+          />
+        </GroupJoinPageMock>
+      </GroupJoinVariant>
+
       <GroupJoinVariant
         caption="Existing member re-opens the invite link. Save changes and Leave group stay as buttons; Back to Murph is the new quiet exit."
         title="Existing member"

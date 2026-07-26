@@ -101,17 +101,16 @@ export async function ingestHostedLinqProviderEventTx(input: {
   if (deliveryReceipt.restoreOnboardingLink) {
     const groupJoinReplyContext =
       deliveryReceipt.restoreOnboardingLink.groupJoinReplyContext;
+    await markHostedLinqOnboardingLinkNoticeSent({
+      memberId: deliveryReceipt.restoreOnboardingLink.memberId,
+      occurredAt: deliveryReceipt.restoreOnboardingLink.occurredAt,
+      prisma: input.prisma,
+    });
     if (groupJoinReplyContext) {
       await consumeHostedGroupJoinOutreachReplyContextTx({
         outreachId: groupJoinReplyContext.outreachId,
         repliedAt: new Date(groupJoinReplyContext.repliedAt),
         tx: input.prisma,
-      });
-    } else {
-      await markHostedLinqOnboardingLinkNoticeSent({
-        memberId: deliveryReceipt.restoreOnboardingLink.memberId,
-        occurredAt: deliveryReceipt.restoreOnboardingLink.occurredAt,
-        prisma: input.prisma,
       });
     }
   }
