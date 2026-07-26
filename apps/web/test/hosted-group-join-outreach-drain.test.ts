@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  acquireDrainLock: vi.fn(),
   assertParticipantAuthority: vi.fn(),
   claimDelivery: vi.fn(),
   countHomeBindings: vi.fn(),
@@ -52,6 +53,7 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-identity-store", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-groups/group-join-outreach-store", () => ({
+  acquireHostedGroupJoinOutreachDrainLockTx: mocks.acquireDrainLock,
   readHostedGroupJoinOutreachParticipantPhone: mocks.readParticipantPhone,
 }));
 
@@ -85,6 +87,7 @@ const LINE = {
 describe("hosted group join outreach drain", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.acquireDrainLock.mockResolvedValue(undefined);
     mocks.assertParticipantAuthority.mockResolvedValue(undefined);
     mocks.claimDelivery.mockResolvedValue({
       claimed: true,
