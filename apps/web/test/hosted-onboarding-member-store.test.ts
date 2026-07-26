@@ -11,6 +11,7 @@ import {
   createHostedLinqChatLookupKeyReadCandidates,
   createHostedPhoneLookupKey,
   createHostedPhoneLookupKeyReadCandidates,
+  createHostedStripeSubscriptionLookupKey,
 } from "@/src/lib/hosted-onboarding/contact-privacy";
 import {
   createHostedLinqParticipantContact,
@@ -34,6 +35,7 @@ import {
   lookupHostedMemberStripeBillingRefByStripeCustomerId,
   lookupHostedMemberStripeBillingRefByStripeSubscriptionId,
   readHostedMemberBillingEligibilityState,
+  readHostedMemberOwnsExactStripeSubscriptionTx,
   readHostedMemberStripeBillingRef,
   type HostedMemberStripeBillingRefSnapshot,
   writeHostedMemberStripeBillingRefTx,
@@ -3221,6 +3223,51 @@ describe("hosted-member-store", () => {
         currentCheckoutOffer: true,
         stripeCustomerLookupKey: true,
         stripeSubscriptionLookupKey: true,
+      },
+    });
+  });
+
+  it("recognizes exact Stripe subscription ownership across readable blind-index keys", async () => {
+    setHostedContactPrivacyKeyring({
+      currentVersion: "v1",
+      keysByVersion: {
+        v1: TEST_CONTACT_PRIVACY_KEY,
+      },
+    });
+    const previousLookupKey =
+      createHostedStripeSubscriptionLookupKey("sub_candidate_123");
+    if (!previousLookupKey) {
+      throw new Error("Expected a Stripe subscription lookup key.");
+    }
+
+    setHostedContactPrivacyKeyring({
+      currentVersion: "v2",
+      keysByVersion: {
+        v1: TEST_CONTACT_PRIVACY_KEY,
+        v2: TEST_CONTACT_PRIVACY_ROTATED_KEY,
+      },
+    });
+    const findUnique = vi.fn().mockResolvedValue({
+      stripeSubscriptionLookupKey: previousLookupKey,
+    });
+
+    await expect(
+      readHostedMemberOwnsExactStripeSubscriptionTx({
+        memberId: "member_123",
+        stripeSubscriptionId: "sub_candidate_123",
+        tx: {
+          hostedMemberBillingRef: {
+            findUnique,
+          },
+        } as never,
+      }),
+    ).resolves.toBe(true);
+    expect(findUnique).toHaveBeenCalledWith({
+      select: {
+        stripeSubscriptionLookupKey: true,
+      },
+      where: {
+        memberId: "member_123",
       },
     });
   });
