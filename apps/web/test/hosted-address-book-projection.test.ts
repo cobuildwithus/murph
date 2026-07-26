@@ -33,6 +33,8 @@ import type { HostedGcpKmsClient } from "@/src/lib/hosted-crypto/gcp-kms";
 
 const KEY_VERSION_NAME =
   "projects/example/locations/global/keyRings/address-book/cryptoKeys/phone-token/cryptoKeyVersions/1";
+const KEY_VERSION_TWO_NAME =
+  "projects/example/locations/global/keyRings/address-book/cryptoKeys/phone-token/cryptoKeyVersions/2";
 const SOURCE = {
   HOSTED_ADDRESS_BOOK_ADVISORY_NAMES_ENABLED: "1",
   HOSTED_ADDRESS_BOOK_REPLACEMENT_ENABLED: "1",
@@ -425,9 +427,101 @@ describe("hosted address-book projection lifecycle", () => {
     })).resolves.toMatchObject({ revision: 2 });
   });
 
+  it("drains an old-key replacement before retirement and fences stale retries", async () => {
+    const store = new AddressBookPrismaStub("owner-member");
+    const oldCrypto = makeAddressBookCrypto();
+    const originalMacSign = oldCrypto.kms.macSign;
+    let releaseOldMac: (() => void) | undefined;
+    let reportOldMacStarted: (() => void) | undefined;
+    const oldMacStarted = new Promise<void>((resolve) => {
+      reportOldMacStarted = resolve;
+    });
+    const oldMacReleased = new Promise<void>((resolve) => {
+      releaseOldMac = resolve;
+    });
+    oldCrypto.kms.macSign = vi.fn(async (input) => {
+      reportOldMacStarted?.();
+      await oldMacReleased;
+      return originalMacSign(input);
+    });
+    const oldRequest = parseHostedAddressBookReplaceRequest({
+      baseRevision: 0,
+      contacts: [{ advisoryName: "Alex R.", phoneNumber: "+12125550100" }],
+      mutationId: "4f5150c8-a9bc-42d3-b975-a289481a3140",
+      schemaVersion: 1,
+    });
+    let oldReplacementSettled = false;
+    const oldReplacement = replaceHostedAddressBookProjection({
+      crypto: oldCrypto,
+      memberId: "owner-member",
+      prisma: store as never,
+      request: oldRequest,
+      source: SOURCE,
+    }).finally(() => {
+      oldReplacementSettled = true;
+    });
+
+    await oldMacStarted;
+    expect(oldReplacementSettled).toBe(false);
+    expect(store.projection).toBeNull();
+
+    releaseOldMac?.();
+    await expect(oldReplacement).resolves.toMatchObject({
+      enabled: true,
+      revision: 1,
+    });
+    expect(store.contacts.map((row) => row.phoneTokenVersion)).toEqual([1]);
+
+    await expect(deleteHostedAddressBookProjection({
+      memberId: "owner-member",
+      prisma: store as never,
+      request: parseHostedAddressBookDeleteRequest({
+        baseRevision: 1,
+        mutationId: "747552e5-bd57-4f8b-a402-066ad2dc22c3",
+        schemaVersion: 1,
+      }),
+      source: SOURCE,
+    })).resolves.toMatchObject({
+      enabled: false,
+      revision: 2,
+      storedContactCount: 0,
+    });
+    expect(store.contacts).toEqual([]);
+
+    await expect(replaceHostedAddressBookProjection({
+      crypto: oldCrypto,
+      memberId: "owner-member",
+      prisma: store as never,
+      request: oldRequest,
+      source: SOURCE,
+    })).rejects.toMatchObject({
+      code: "HOSTED_ADDRESS_BOOK_REVISION_CONFLICT",
+    });
+    expect(store.contacts).toEqual([]);
+
+    const newCrypto = makeAddressBookCrypto(2);
+    await expect(replaceHostedAddressBookProjection({
+      crypto: newCrypto,
+      memberId: "owner-member",
+      prisma: store as never,
+      request: parseHostedAddressBookReplaceRequest({
+        baseRevision: 2,
+        contacts: [{ advisoryName: "Alex R.", phoneNumber: "+12125550100" }],
+        mutationId: "856f0038-6e5d-4210-8553-e9db5b21c1ca",
+        schemaVersion: 1,
+      }),
+      source: SOURCE,
+    })).resolves.toMatchObject({
+      enabled: true,
+      revision: 3,
+      storedContactCount: 1,
+    });
+    expect(store.contacts.map((row) => row.phoneTokenVersion)).toEqual([2]);
+  });
+
 });
 
-function makeAddressBookCrypto() {
+function makeAddressBookCrypto(version = 1) {
   const macSign = vi.fn<HostedGcpKmsClient["macSign"]>(async (input) => ({
     keyVersionName: input.keyVersionName,
     mac: new Uint8Array(createHash("sha256")
@@ -444,9 +538,12 @@ function makeAddressBookCrypto() {
   return {
     environment: "test",
     keyring: {
-      currentVersion: 1,
-      keyVersionNames: new Map([[1, KEY_VERSION_NAME]]),
-      readVersions: [1],
+      currentVersion: version,
+      keyVersionNames: new Map([[
+        version,
+        version === 1 ? KEY_VERSION_NAME : KEY_VERSION_TWO_NAME,
+      ]]),
+      readVersions: [version],
     },
     kms,
   };

@@ -61,12 +61,31 @@ indefinitely. This is an accepted tradeoff: Murph does not silently withdraw a
 member's opt-in merely to complete routine key rotation. Routine rotation must
 wait for the indexed prior-version count to reach zero through replacement,
 Stop/Delete, foreground permission-loss reconciliation, or account deletion.
-For emergency retirement, first disable advisory reads and the affected KMS
-version, then delete each complete projection containing that token version in
-one maintenance transaction, verify the indexed count is zero, and configure a
-new current key. Affected members see sharing Off and must explicitly share
-again; Murph must never leave an enabled projection whose token key is no longer
-readable.
+
+Emergency retirement is an ordered write-drain and reset:
+
+1. Deploy both address-book gates Off, verify the Off deployment owns all Web
+   traffic, and keep the affected KMS version enabled during the drain.
+2. Retire every prior Web deployment, confirm the platform reports no active
+   pre-change invocation, and wait at least the address-book route's explicit
+   60-second maximum duration after the last old deployment stopped receiving
+   traffic. If that drain cannot be proven, retirement is not complete.
+3. Disable the affected KMS version. For each projection containing that token
+   version, use one maintenance transaction with the normal delete-shaped
+   lifecycle: lock the hosted-member owner, delete the complete contact list,
+   set the projection Off, advance its revision, and retain the CAS/replay
+   fence. Never physically erase only the projection row.
+4. Verify the indexed affected-version contact count is zero and no enabled
+   projection depends on an unreadable version.
+5. Configure and fully deploy the new keyring, then reopen replacement writes.
+   Affected members must explicitly share again under the new current key.
+   Reopen advisory reads last.
+
+The deterministic lifecycle test pauses an old-key replacement before its
+transaction, drains it before the Off transition, proves a stale retry cannot
+recreate sharing after the revision advances, and then proves an explicit fresh
+share succeeds under the new key. Murph must never leave an enabled projection
+whose token key is no longer readable.
 
 This materially limits a Postgres dump or Postgres-plus-ordinary-content-key
 compromise: neither contains the MAC authority required to test candidate

@@ -121,6 +121,7 @@ describe("device sync companion address-book route", () => {
       memberId: MEMBER.id,
       prisma: mocks.prisma,
     });
+    expect(route.maxDuration).toBe(60);
   });
 
   it("requires active access and launch consent for bounded replacements", async () => {

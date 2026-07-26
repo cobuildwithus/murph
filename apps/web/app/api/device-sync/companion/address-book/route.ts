@@ -16,6 +16,8 @@ import {
 import { assertHostedLaunchRequiredConsentGranted } from "@/src/lib/legal/consent";
 import { getPrisma } from "@/src/lib/prisma";
 
+export const maxDuration = 60;
+
 export const GET = withJsonError(async (request: Request) => {
   const prisma = getPrisma();
   const auth = await requirePrivyMemberAuthFromBearerToken(request, prisma);
