@@ -1,6 +1,6 @@
 # Paid usage cutover retrospective
 
-Status: active
+Status: completed
 Created: 2026-07-25
 Updated: 2026-07-25
 
@@ -68,3 +68,4 @@ Updated: 2026-07-25
 - Canonical `pnpm test:diff` passed locally: Web TypeScript, 6,556 tests with
   173 intentional skips, lint with zero errors, dev smoke, and the production
   Next.js build.
+Completed: 2026-07-25
