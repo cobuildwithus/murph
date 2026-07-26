@@ -177,6 +177,11 @@ describe("vault-share contracts", () => {
       "vo2-max-days.v0",
       "resting-heart-rate-days.v0",
       "hrv-days.v0",
+      "protein-days.v0",
+      "calories-days.v0",
+      "carbs-days.v0",
+      "fat-days.v0",
+      "fiber-days.v0",
       "device-sync-status.v0",
     ]);
     expect(HOSTED_VAULT_SHARE_CURRENT_STATE_PROJECTION_KINDS).not.toContain(
@@ -190,6 +195,47 @@ describe("vault-share contracts", () => {
       metricKey: "total-sleep-minutes",
       minValue: 0,
       projectionKind: "sleep-duration-days.v0",
+      source: { kind: "metric-series" },
+    });
+    expect(getHostedVaultShareDailyMetricProjectionSpec("protein-days.v0")).toEqual({
+      expectedUnit: "g",
+      maxValue: 2_000,
+      metricKey: "protein-grams",
+      minValue: 0,
+      projectionKind: "protein-days.v0",
+      source: { kind: "meal-nutrition-total", totalKey: "proteinGrams" },
+    });
+    expect(getHostedVaultShareDailyMetricProjectionSpec("calories-days.v0")).toEqual({
+      expectedUnit: "kcal",
+      maxValue: 20_000,
+      metricKey: "dietary-calories",
+      minValue: 0,
+      projectionKind: "calories-days.v0",
+      source: { kind: "meal-nutrition-total", totalKey: "calories" },
+    });
+    expect(getHostedVaultShareDailyMetricProjectionSpec("carbs-days.v0")).toEqual({
+      expectedUnit: "g",
+      maxValue: 2_000,
+      metricKey: "carbs-grams",
+      minValue: 0,
+      projectionKind: "carbs-days.v0",
+      source: { kind: "meal-nutrition-total", totalKey: "carbsGrams" },
+    });
+    expect(getHostedVaultShareDailyMetricProjectionSpec("fat-days.v0")).toEqual({
+      expectedUnit: "g",
+      maxValue: 2_000,
+      metricKey: "fat-grams",
+      minValue: 0,
+      projectionKind: "fat-days.v0",
+      source: { kind: "meal-nutrition-total", totalKey: "fatGrams" },
+    });
+    expect(getHostedVaultShareDailyMetricProjectionSpec("fiber-days.v0")).toEqual({
+      expectedUnit: "g",
+      maxValue: 500,
+      metricKey: "fiber-grams",
+      minValue: 0,
+      projectionKind: "fiber-days.v0",
+      source: { kind: "meal-nutrition-total", totalKey: "fiberGrams" },
     });
     expect(
       HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES.map((scope) =>
@@ -742,6 +788,151 @@ describe("daily metric vault-share delivery records", () => {
       })
     ).toThrow(/date at UTC midnight/u);
   });
+});
+
+describe("protein-days.v0 delivery records", () => {
+  const VALID_PROTEIN_RECORD = {
+    data: {
+      date: "2026-07-03",
+      metricKey: "protein-grams",
+      unit: "g",
+      value: 142.5,
+    },
+    occurredAt: "2026-07-03T00:00:00.000Z",
+    recordKey: "2026-07-03",
+  };
+
+  it("parses a valid daily protein record", () => {
+    expect(parseHostedVaultShareDeliverRequest({
+      projectionKind: "protein-days.v0",
+      records: [VALID_PROTEIN_RECORD],
+    })).toEqual({
+      projectionKind: "protein-days.v0",
+      projectionScope: { projectionKind: "protein-days.v0" },
+      records: [VALID_PROTEIN_RECORD],
+    });
+  });
+
+  it("accepts a complete true-zero day", () => {
+    expect(parseHostedVaultShareDeliverRequest({
+      projectionKind: "protein-days.v0",
+      records: [{
+        ...VALID_PROTEIN_RECORD,
+        data: { ...VALID_PROTEIN_RECORD.data, value: 0 },
+      }],
+    }).records[0]?.data).toMatchObject({ value: 0 });
+  });
+
+  it("rejects a wrong metric key", () => {
+    expect(() =>
+      parseHostedVaultShareDeliverRequest({
+        projectionKind: "protein-days.v0",
+        records: [{
+          ...VALID_PROTEIN_RECORD,
+          data: { ...VALID_PROTEIN_RECORD.data, metricKey: "steps" },
+        }],
+      })
+    ).toThrow(/metricKey must be protein-grams/u);
+  });
+
+  it("requires the exact gram unit", () => {
+    for (const unit of [null, "grams", "G", "kg"]) {
+      expect(() =>
+        parseHostedVaultShareDeliverRequest({
+          projectionKind: "protein-days.v0",
+          records: [{
+            ...VALID_PROTEIN_RECORD,
+            data: { ...VALID_PROTEIN_RECORD.data, unit },
+          }],
+        })
+      ).toThrow(/unit must be g/u);
+    }
+  });
+
+  it("rejects out-of-bound values", () => {
+    for (const value of [-1, 2_001]) {
+      expect(() =>
+        parseHostedVaultShareDeliverRequest({
+          projectionKind: "protein-days.v0",
+          records: [{
+            ...VALID_PROTEIN_RECORD,
+            data: { ...VALID_PROTEIN_RECORD.data, value },
+          }],
+        })
+      ).toThrow(/value must be between 0 and 2000/u);
+    }
+  });
+
+  it("rejects record identity drift", () => {
+    expect(() =>
+      parseHostedVaultShareDeliverRequest({
+        projectionKind: "protein-days.v0",
+        records: [{ ...VALID_PROTEIN_RECORD, recordKey: "2026-07-04" }],
+      })
+    ).toThrow();
+
+    expect(() =>
+      parseHostedVaultShareDeliverRequest({
+        projectionKind: "protein-days.v0",
+        records: [{ ...VALID_PROTEIN_RECORD, occurredAt: "2026-07-03T10:00:00.000Z" }],
+      })
+    ).toThrow(/date at UTC midnight/u);
+  });
+});
+
+describe("nutrient meal-nutrition delivery records", () => {
+  const NUTRIENTS = [
+    { projectionKind: "calories-days.v0", metricKey: "dietary-calories", unit: "kcal", maxValue: 20_000, value: 2_150 },
+    { projectionKind: "carbs-days.v0", metricKey: "carbs-grams", unit: "g", maxValue: 2_000, value: 240 },
+    { projectionKind: "fat-days.v0", metricKey: "fat-grams", unit: "g", maxValue: 2_000, value: 71 },
+    { projectionKind: "fiber-days.v0", metricKey: "fiber-grams", unit: "g", maxValue: 500, value: 34 },
+  ] as const;
+
+  for (const nutrient of NUTRIENTS) {
+    const validRecord = {
+      data: { date: "2026-07-03", metricKey: nutrient.metricKey, unit: nutrient.unit, value: nutrient.value },
+      occurredAt: "2026-07-03T00:00:00.000Z",
+      recordKey: "2026-07-03",
+    };
+
+    it(`parses a valid ${nutrient.projectionKind} record and keeps a complete zero day`, () => {
+      expect(parseHostedVaultShareDeliverRequest({
+        projectionKind: nutrient.projectionKind,
+        records: [validRecord],
+      })).toEqual({
+        projectionKind: nutrient.projectionKind,
+        projectionScope: { projectionKind: nutrient.projectionKind },
+        records: [validRecord],
+      });
+      expect(parseHostedVaultShareDeliverRequest({
+        projectionKind: nutrient.projectionKind,
+        records: [{ ...validRecord, data: { ...validRecord.data, value: 0 } }],
+      }).records[0]?.data).toMatchObject({ value: 0 });
+    });
+
+    it(`rejects a wrong metric key, unit, and out-of-bound value for ${nutrient.projectionKind}`, () => {
+      expect(() =>
+        parseHostedVaultShareDeliverRequest({
+          projectionKind: nutrient.projectionKind,
+          records: [{ ...validRecord, data: { ...validRecord.data, metricKey: "steps" } }],
+        })
+      ).toThrow(new RegExp(`metricKey must be ${nutrient.metricKey}`, "u"));
+
+      expect(() =>
+        parseHostedVaultShareDeliverRequest({
+          projectionKind: nutrient.projectionKind,
+          records: [{ ...validRecord, data: { ...validRecord.data, unit: "mg" } }],
+        })
+      ).toThrow(new RegExp(`unit must be ${nutrient.unit}`, "u"));
+
+      expect(() =>
+        parseHostedVaultShareDeliverRequest({
+          projectionKind: nutrient.projectionKind,
+          records: [{ ...validRecord, data: { ...validRecord.data, value: nutrient.maxValue + 1 } }],
+        })
+      ).toThrow(new RegExp(`value must be between 0 and ${nutrient.maxValue}`, "u"));
+    });
+  }
 });
 
 describe("workout-days.v0 delivery records", () => {

@@ -4,7 +4,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   ensureHostedThreadContainerRouteTx,
+  refreshHostedThreadContainerDeliveryRouteTx,
 } from "../src/lib/hosted-routing/thread-container-service";
+import {
+  buildHostedThreadDeliveryRoute,
+  openHostedThreadDeliveryRoute,
+  sealHostedThreadDeliveryRoute,
+} from "../src/lib/hosted-routing/thread-delivery-route";
 import {
   appendHostedLinqThreadRouteReactionContextTx,
   consumeHostedLinqThreadRoutePendingContextTx,
@@ -28,6 +34,17 @@ const secureBoxMocks = vi.hoisted(() => ({
   openHostedUserSecureBoxString: vi.fn(),
   sealHostedUserSecureBoxString: vi.fn(),
 }));
+
+vi.mock("../src/lib/hosted-routing/thread-route-store", async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import("../src/lib/hosted-routing/thread-route-store")
+  >();
+  return {
+    ...actual,
+    requiresHostedThreadDeliveryRouteRefresh:
+      actual.requiresHostedThreadDeliveryRouteRefresh,
+  };
+});
 
 vi.mock("../src/lib/hosted-crypto/secure-box", async (importOriginal) => {
   const actual = await importOriginal<
@@ -280,6 +297,7 @@ function createPrisma(input: {
   pendingParticipantAddition?: boolean;
   routeAccountPhone?: string;
   routeContainerMemberId?: string | null;
+  routeDeliveryRouteEncrypted?: string | null;
   routeContainerActive?: boolean;
   routeOwnerActive?: boolean;
   routeOwnerSponsored?: boolean;
@@ -293,6 +311,7 @@ function createPrisma(input: {
   const routeOwnerActive = input.routeOwnerActive ?? true;
   const routeOwnerSponsored = input.routeOwnerSponsored ?? false;
   const routeParticipantActive = input.routeParticipantActive ?? false;
+  let deliveryRouteEncrypted = input.routeDeliveryRouteEncrypted ?? null;
   let pendingGroupReactionContextEncrypted =
     input.pendingGroupReactionContextEncrypted ?? null;
   let pendingParticipantAddition = input.pendingParticipantAddition ?? false;
@@ -324,6 +343,7 @@ function createPrisma(input: {
         {
           channel: "linq",
           container: {
+            ownerMemberId: "member_owner_123",
             // Container members are synthetic (`not_started` own billing);
             // container access derives solely from suspension + the owner.
             member: {
@@ -359,6 +379,7 @@ function createPrisma(input: {
             },
           },
           containerMemberId: routeContainerMemberId,
+          deliveryRouteEncrypted,
           pendingGroupReactionContextEncrypted,
           pendingParticipantAddition,
           threadIdentityLookupKey: expectedIdentity,
@@ -399,6 +420,48 @@ function createPrisma(input: {
         pendingParticipantAddition,
         threadIdentityLookupKey: expectedIdentity,
         threadLookupKey: expected,
+      };
+    }),
+    update: vi.fn().mockImplementation(async ({ data, where }: {
+      data: {
+        deliveryRouteEncrypted?: string;
+        pendingGroupReactionContextEncrypted?: string | null;
+        threadIdentityLookupKey?: string;
+        threadLookupKey?: string;
+      };
+      where: {
+        channel_threadIdentityLookupKey: {
+          channel: string;
+          threadIdentityLookupKey: string;
+        };
+      };
+    }) => {
+      const expectedIdentity = createHostedExternalThreadIdentityLookupKey({
+        channel: "linq",
+        threadId: "chat_group_123",
+      });
+      if (
+        !routeContainerMemberId
+        || where.channel_threadIdentityLookupKey.channel !== "linq"
+        || where.channel_threadIdentityLookupKey.threadIdentityLookupKey !== expectedIdentity
+      ) {
+        throw new Error("Expected the canonical hosted thread route update.");
+      }
+      if (data.deliveryRouteEncrypted !== undefined) {
+        deliveryRouteEncrypted = data.deliveryRouteEncrypted;
+      }
+      if (Object.hasOwn(data, "pendingGroupReactionContextEncrypted")) {
+        pendingGroupReactionContextEncrypted =
+          data.pendingGroupReactionContextEncrypted ?? null;
+      }
+      return {
+        channel: "linq",
+        containerMemberId: routeContainerMemberId,
+        deliveryRouteEncrypted,
+        pendingGroupReactionContextEncrypted,
+        pendingParticipantAddition,
+        threadIdentityLookupKey: expectedIdentity,
+        threadLookupKey: data.threadLookupKey ?? null,
       };
     }),
     updateMany: vi.fn().mockImplementation(async ({ data, where }: {
@@ -447,6 +510,9 @@ function createPrisma(input: {
       }
       return { count: 1 };
     }),
+  };
+  const hostedThreadContainer = {
+    findUnique: vi.fn().mockResolvedValue(null),
   };
   const hostedMemberRouting = {
     findMany: vi.fn().mockResolvedValue([]),
@@ -512,10 +578,12 @@ function createPrisma(input: {
   };
   const transaction = vi.fn(async (callback: (tx: unknown) => Promise<unknown>) => {
     const pendingBefore = pendingParticipantAddition;
+    const deliveryRouteBefore = deliveryRouteEncrypted;
     const reactionContextBefore = pendingGroupReactionContextEncrypted;
     try {
       return await callback(prisma);
     } catch (error) {
+      deliveryRouteEncrypted = deliveryRouteBefore;
       pendingParticipantAddition = pendingBefore;
       pendingGroupReactionContextEncrypted = reactionContextBefore;
       throw error;
@@ -528,9 +596,11 @@ function createPrisma(input: {
     hostedMailboxItem,
     hostedMember,
     hostedMemberRouting,
+    hostedThreadContainer,
     hostedThreadContainerParticipant,
     hostedThreadRoute,
     hostedWorkspace,
+    readDeliveryRouteEncrypted: () => deliveryRouteEncrypted,
     readPendingGroupReactionContextEncrypted: () =>
       pendingGroupReactionContextEncrypted,
     readPendingParticipantAddition: () => pendingParticipantAddition,
@@ -556,6 +626,7 @@ function createStatefulThreadRoutePrisma() {
   const routes: Array<{
     channel: string;
     containerMemberId: string;
+    deliveryRouteEncrypted: string | null;
     pendingGroupReactionContextEncrypted: string | null;
     pendingParticipantAddition: boolean;
     threadIdentityLookupKey: string;
@@ -596,6 +667,7 @@ function createStatefulThreadRoutePrisma() {
       data: {
         channel: string;
         containerMemberId: string;
+        deliveryRouteEncrypted: string;
         threadIdentityLookupKey: string;
         threadLookupKey: string;
       };
@@ -648,6 +720,7 @@ function createStatefulThreadRoutePrisma() {
               ?? ownerState.id,
           },
           containerMemberId: route.containerMemberId,
+          deliveryRouteEncrypted: route.deliveryRouteEncrypted,
           threadIdentityLookupKey: route.threadIdentityLookupKey,
           threadLookupKey: route.threadLookupKey,
         }));
@@ -702,6 +775,7 @@ function createStatefulThreadRoutePrisma() {
     }),
     update: vi.fn().mockImplementation(async ({ data, where }: {
       data: {
+        deliveryRouteEncrypted?: string;
         pendingGroupReactionContextEncrypted?: string | null;
         threadIdentityLookupKey: string;
         threadLookupKey: string;
@@ -724,6 +798,9 @@ function createStatefulThreadRoutePrisma() {
       if (Object.hasOwn(data, "pendingGroupReactionContextEncrypted")) {
         route.pendingGroupReactionContextEncrypted =
           data.pendingGroupReactionContextEncrypted ?? null;
+      }
+      if (data.deliveryRouteEncrypted !== undefined) {
+        route.deliveryRouteEncrypted = data.deliveryRouteEncrypted;
       }
       route.threadIdentityLookupKey = data.threadIdentityLookupKey;
       route.threadLookupKey = data.threadLookupKey;
@@ -814,6 +891,7 @@ function createStatefulThreadRoutePrisma() {
       channel: string;
       containerMemberId: string;
       ownerMemberId: string;
+      deliveryRouteEncrypted?: string | null;
       pendingGroupReactionContextEncrypted?: string | null;
       threadIdentityLookupKey: string;
       threadLookupKey: string;
@@ -825,6 +903,7 @@ function createStatefulThreadRoutePrisma() {
       routes.push({
         channel: input.channel,
         containerMemberId: input.containerMemberId,
+        deliveryRouteEncrypted: input.deliveryRouteEncrypted ?? null,
         pendingGroupReactionContextEncrypted:
           input.pendingGroupReactionContextEncrypted ?? null,
         pendingParticipantAddition: false,
@@ -840,6 +919,16 @@ function createStatefulThreadRoutePrisma() {
         monthlyUsageLimitUsdMicros: 4_500_000n,
         ownerMemberId: input.ownerMemberId,
       });
+    },
+    readDeliveryRouteEncrypted(containerMemberId: string) {
+      return routes.find((route) =>
+        route.containerMemberId === containerMemberId
+      )?.deliveryRouteEncrypted ?? null;
+    },
+    readPendingGroupReactionContextEncrypted(containerMemberId: string) {
+      return routes.find((route) =>
+        route.containerMemberId === containerMemberId
+      )?.pendingGroupReactionContextEncrypted ?? null;
     },
   };
   return prisma;
@@ -1107,6 +1196,7 @@ describe("Linq explicit external-thread routing", () => {
       );
       expect(prisma.hostedThreadRoute.update).toHaveBeenCalledWith({
         data: {
+          deliveryRouteEncrypted: expect.stringMatching(/^hsb-test:/u),
           pendingGroupReactionContextEncrypted: null,
           threadIdentityLookupKey: currentThreadIdentityLookupKey,
           threadLookupKey: currentThreadLookupKey,
@@ -1130,6 +1220,181 @@ describe("Linq explicit external-thread routing", () => {
     } finally {
       restoreV2();
     }
+  });
+
+  it("repairs owned legacy delivery material in place with the binding account identity", async () => {
+    const accountLookupKey = requireTestPhoneLookupKey("+15550000000");
+    const prisma = createPrisma({
+      routeAccountPhone: "+15550000000",
+      routeContainerMemberId: "member_thread_container_123",
+      routeDeliveryRouteEncrypted: null,
+    });
+    const route = await readHostedThreadRouteByThreadIdentity({
+      channel: "linq",
+      prisma: prisma as never,
+      threadId: "chat_group_123",
+    });
+    if (!route) {
+      throw new Error("Expected a bound Linq thread route.");
+    }
+
+    const refreshed = await refreshHostedThreadContainerDeliveryRouteTx({
+      accountLookupKey,
+      accountLookupKeys: createHostedPhoneLookupKeyReadCandidates("+15550000000"),
+      prisma: prisma as never,
+      route,
+      threadId: "chat_group_123",
+    });
+
+    expect(refreshed.deliveryRoute).toEqual({
+      accountLookupKey,
+      channel: "linq",
+      schema: "murph.hosted-thread-delivery-route.v1",
+      threadId: "chat_group_123",
+    });
+    expect(prisma.hostedThreadContainer.findUnique).not.toHaveBeenCalled();
+    expect(hostedMemberStore.createHostedMember).not.toHaveBeenCalled();
+    const encrypted = prisma.readDeliveryRouteEncrypted();
+    expect(encrypted).toMatch(/^hsb-test:/u);
+    await expect(openHostedThreadDeliveryRoute({
+      channel: "linq",
+      containerMemberId: "member_thread_container_123",
+      encrypted,
+      prisma: prisma as never,
+    })).resolves.toEqual(refreshed.deliveryRoute);
+  });
+
+  it("repairs non-empty corrupt delivery material on owning-line Linq ingress", async () => {
+    const accountLookupKey = requireTestPhoneLookupKey("+15550000000");
+    const threadIdentityLookupKey = createHostedExternalThreadIdentityLookupKey({
+      channel: "linq",
+      threadId: "chat_group_123",
+    });
+    const threadLookupKey = createHostedExternalThreadLookupKey({
+      accountLookupKey,
+      channel: "linq",
+      threadId: "chat_group_123",
+    });
+    if (!threadIdentityLookupKey || !threadLookupKey) {
+      throw new Error("Expected current Linq thread route lookup keys.");
+    }
+    const prisma = createPrisma({
+      pendingGroupReactionContextEncrypted: "same-authority-reaction-context",
+      routeAccountPhone: "+15550000000",
+      routeContainerMemberId: "member_thread_container_123",
+      routeDeliveryRouteEncrypted: "corrupt-delivery-route",
+    });
+    vi.mocked(usageAllowance.checkHostedAiUsageGate).mockResolvedValueOnce({
+      allowed: true,
+      allowanceSource: "thread_container",
+      billingPlanCode: "launch_monthly",
+      limitUsdMicros: 4_500_000n,
+      memberId: "member_thread_container_123",
+      periodEnd: new Date("2026-07-01T00:00:00.000Z"),
+      periodStart: new Date("2026-06-01T00:00:00.000Z"),
+      remainingUsdMicros: 4_500_000n,
+      spentUsdMicros: 0n,
+      usageCreditBalanceUsdMicros: 0n,
+      usageCreditLedgerVersion: 0n,
+    });
+
+    const plan = await planHostedOnboardingLinqWebhook({
+      event: buildLinqMessageReceivedEvent({}),
+      prisma: prisma as never,
+    });
+
+    expect(plan.response).toMatchObject({
+      ignored: false,
+      ok: true,
+      reason: "wake-appended-thread-route",
+    });
+    expect(prisma.hostedThreadRoute.update).toHaveBeenCalledWith({
+      data: {
+        deliveryRouteEncrypted: expect.stringMatching(/^hsb-test:/u),
+        threadIdentityLookupKey,
+        threadLookupKey,
+      },
+      where: {
+        channel_threadIdentityLookupKey: {
+          channel: "linq",
+          threadIdentityLookupKey,
+        },
+      },
+    });
+    const encrypted = prisma.readDeliveryRouteEncrypted();
+    await expect(openHostedThreadDeliveryRoute({
+      channel: "linq",
+      containerMemberId: "member_thread_container_123",
+      encrypted,
+      prisma: prisma as never,
+    })).resolves.toEqual({
+      accountLookupKey,
+      channel: "linq",
+      schema: "murph.hosted-thread-delivery-route.v1",
+      threadId: "chat_group_123",
+    });
+  });
+
+  it("repairs legacy delivery material without clearing same-authority reaction context", async () => {
+    const prisma = createStatefulThreadRoutePrisma();
+    const accountLookupKey = requireTestPhoneLookupKey("+15550000000");
+    const threadLookupKey = createHostedExternalThreadLookupKey({
+      accountLookupKey,
+      channel: "linq",
+      threadId: "chat_group_123",
+    });
+    const threadIdentityLookupKey = createHostedExternalThreadIdentityLookupKey({
+      channel: "linq",
+      threadId: "chat_group_123",
+    });
+    if (!threadLookupKey || !threadIdentityLookupKey) {
+      throw new Error("Expected route lookup keys.");
+    }
+    prisma.seedThreadRoute({
+      channel: "linq",
+      containerMemberId: "member_thread_container_123",
+      deliveryRouteEncrypted: null,
+      ownerMemberId: "member_owner_123",
+      pendingGroupReactionContextEncrypted: "encrypted pending reaction context",
+      threadIdentityLookupKey,
+      threadLookupKey,
+    });
+    vi.mocked(hostedMemberStore.readHostedMemberCoreState).mockResolvedValue({
+      billingStatus: HostedBillingStatus.active,
+      createdAt: new Date("2026-06-24T00:00:00.000Z"),
+      id: "member_owner_123",
+      suspendedAt: null,
+      updatedAt: new Date("2026-06-24T00:00:00.000Z"),
+    });
+
+    await ensureHostedThreadContainerRouteTx({
+      accountLookupKey,
+      channel: "linq",
+      containerMemberId: "member_thread_container_123",
+      occurredAt: new Date("2026-06-24T00:00:00.000Z"),
+      ownerMemberId: "member_owner_123",
+      prisma: prisma as never,
+      threadId: "chat_group_123",
+    });
+
+    expect(prisma.hostedThreadRoute.update).toHaveBeenCalledWith({
+      data: {
+        deliveryRouteEncrypted: expect.stringMatching(/^hsb-test:/u),
+        threadIdentityLookupKey,
+        threadLookupKey,
+      },
+      where: {
+        channel_threadIdentityLookupKey: {
+          channel: "linq",
+          threadIdentityLookupKey,
+        },
+      },
+    });
+    expect(prisma.readDeliveryRouteEncrypted("member_thread_container_123"))
+      .toMatch(/^hsb-test:/u);
+    expect(prisma.readPendingGroupReactionContextEncrypted(
+      "member_thread_container_123",
+    )).toBe("encrypted pending reaction context");
   });
 
   it("creates and reuses a route container before routing Linq ingress", async () => {
@@ -1193,6 +1458,14 @@ describe("Linq explicit external-thread routing", () => {
     expect(domainRootStore.provisionHostedCryptoDomainRootsForUserTx).toHaveBeenCalledTimes(1);
     expect(prisma.hostedThreadContainer.create).toHaveBeenCalledTimes(1);
     expect(prisma.hostedThreadRoute.create).toHaveBeenCalledTimes(1);
+    expect(prisma.hostedThreadRoute.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        deliveryRouteEncrypted: expect.stringMatching(/^hsb-test:/u),
+      }),
+    });
+    expect(prisma.hostedThreadRoute.update).not.toHaveBeenCalled();
+    expect(prisma.readDeliveryRouteEncrypted("member_thread_container_123"))
+      .toMatch(/^hsb-test:/u);
 
     vi.mocked(mailboxStore.readHostedMailboxItemByDedupeKey).mockResolvedValueOnce(null);
     vi.mocked(linqDailyState.incrementHostedLinqInboundDailyState).mockResolvedValueOnce({
@@ -1822,6 +2095,76 @@ describe("Linq explicit external-thread routing", () => {
       }),
       tx: prisma,
     });
+    expect(prisma.hostedThreadRoute.update).not.toHaveBeenCalled();
+    expect(prisma.readDeliveryRouteEncrypted()).toBeNull();
+  });
+
+  it("keeps the original Linq binding identity when another line delivers", async () => {
+    const originalAccountLookupKey = requireTestPhoneLookupKey("+15550000000");
+    const routeDeliveryRouteEncrypted = await sealHostedThreadDeliveryRoute({
+      containerMemberId: "member_thread_container_123",
+      route: buildHostedThreadDeliveryRoute({
+        accountLookupKey: originalAccountLookupKey,
+        channel: "linq",
+        threadId: "chat_group_123",
+      }),
+    });
+    const prisma = createPrisma({
+      routeAccountPhone: "+15550000000",
+      routeContainerMemberId: "member_thread_container_123",
+      routeDeliveryRouteEncrypted,
+    });
+    vi.mocked(usageAllowance.checkHostedAiUsageGate).mockResolvedValueOnce({
+      allowed: true,
+      allowanceSource: "thread_container",
+      billingPlanCode: "launch_monthly",
+      limitUsdMicros: 4_500_000n,
+      memberId: "member_thread_container_123",
+      periodEnd: new Date("2026-07-01T00:00:00.000Z"),
+      periodStart: new Date("2026-06-01T00:00:00.000Z"),
+      remainingUsdMicros: 4_500_000n,
+      spentUsdMicros: 0n,
+      usageCreditBalanceUsdMicros: 0n,
+      usageCreditLedgerVersion: 0n,
+    });
+    vi.mocked(mailboxStore.appendHostedMailboxEnvelopeTx).mockResolvedValueOnce({
+      dedupeConflict: false,
+      duplicate: false,
+      inserted: true,
+      item: buildHostedMailboxItem({
+        id: "mailbox_group_canonical_line_123",
+        userId: "member_thread_container_123",
+      }),
+    });
+
+    const plan = await planHostedOnboardingLinqWebhook({
+      event: buildLinqMessageReceivedEvent({
+        recipient: "+15559999999",
+      }),
+      prisma: prisma as never,
+    });
+
+    expect(plan.response).toMatchObject({
+      ignored: false,
+      ok: true,
+      reason: "wake-appended-thread-route",
+    });
+    expect(mailboxStore.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
+      envelope: expect.objectContaining({
+        message: expect.objectContaining({
+          accountLookupKey: originalAccountLookupKey,
+          routeAuthority: {
+            accountLookupKey: originalAccountLookupKey,
+            channel: "linq",
+            containerMemberId: "member_thread_container_123",
+            threadId: "chat_group_123",
+          },
+        }),
+      }),
+      tx: prisma,
+    });
+    expect(prisma.hostedThreadRoute.update).not.toHaveBeenCalled();
+    expect(prisma.readDeliveryRouteEncrypted()).toBe(routeDeliveryRouteEncrypted);
   });
 
   it.each([
