@@ -33,7 +33,10 @@ import {
 import {
   decideHostedGroupJoinOutreachSendWindow,
 } from "./group-join-outreach-window";
-import { readHostedGroupJoinOutreachParticipantPhone } from "./group-join-outreach-store";
+import {
+  acquireHostedGroupJoinOutreachDrainLockTx,
+  readHostedGroupJoinOutreachParticipantPhone,
+} from "./group-join-outreach-store";
 
 export const HOSTED_GROUP_JOIN_OUTREACH_DELIVERY_SOURCE =
   "hosted_group_join_outreach";
@@ -332,9 +335,7 @@ async function claimOneHostedGroupJoinOutreachTx(input: {
   now: Date;
   tx: Prisma.TransactionClient;
 }): Promise<HostedGroupJoinOutreachClaimResult> {
-  await input.tx.$executeRaw`
-    SELECT pg_advisory_xact_lock(hashtext('hosted_group_join_outreach_drain'))
-  `;
+  await acquireHostedGroupJoinOutreachDrainLockTx(input.tx);
 
   const outreach = await input.tx.hostedGroupJoinOutreach.findFirst({
     orderBy: [

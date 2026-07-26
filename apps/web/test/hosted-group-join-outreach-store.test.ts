@@ -3,7 +3,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   consumeHostedGroupJoinOutreachReplyContextTx,
   enqueueHostedGroupJoinOutreachTx,
+  isHostedGroupJoinOutreachReplyDeliveryAuthorizedTx,
   readHostedGroupJoinOutreachReplyContextTx,
+  reopenHostedGroupJoinOutreachReplyContextTx,
   revokeHostedGroupJoinOutreachForRemovedReactionTx,
 } from "@/src/lib/hosted-groups/group-join-outreach-store";
 import {
@@ -136,6 +138,94 @@ describe("hosted group join outreach store", () => {
       updateMany,
     };
   }
+
+  it.each([
+    {
+      expected: true,
+      label: "live matching context",
+      offer: {
+        groupId: "hgrp_opaque",
+        group: { joinCode: "join_opaque", runtimeMemberId: "hbm_runtime" },
+        revokedAt: null,
+      },
+      outreach: {
+        groupId: "hgrp_opaque",
+        offerId: "hgrpjo_opaque",
+        repliedAt: null,
+        sentAt: new Date("2026-07-24T16:00:00.000Z"),
+        skippedAt: null,
+      },
+    },
+    {
+      expected: false,
+      label: "already consumed context",
+      offer: {
+        groupId: "hgrp_opaque",
+        group: { joinCode: "join_opaque", runtimeMemberId: "hbm_runtime" },
+        revokedAt: null,
+      },
+      outreach: {
+        groupId: "hgrp_opaque",
+        offerId: "hgrpjo_opaque",
+        repliedAt: new Date("2026-07-24T16:01:00.000Z"),
+        sentAt: new Date("2026-07-24T16:00:00.000Z"),
+        skippedAt: null,
+      },
+    },
+    {
+      expected: false,
+      label: "revoked offer",
+      offer: {
+        groupId: "hgrp_opaque",
+        group: { joinCode: "join_opaque", runtimeMemberId: "hbm_runtime" },
+        revokedAt: new Date("2026-07-24T16:01:00.000Z"),
+      },
+      outreach: {
+        groupId: "hgrp_opaque",
+        offerId: "hgrpjo_opaque",
+        repliedAt: null,
+        sentAt: new Date("2026-07-24T16:00:00.000Z"),
+        skippedAt: null,
+      },
+    },
+    {
+      expected: false,
+      label: "group without a runtime",
+      offer: {
+        groupId: "hgrp_opaque",
+        group: { joinCode: "join_opaque", runtimeMemberId: null },
+        revokedAt: null,
+      },
+      outreach: {
+        groupId: "hgrp_opaque",
+        offerId: "hgrpjo_opaque",
+        repliedAt: null,
+        sentAt: new Date("2026-07-24T16:00:00.000Z"),
+        skippedAt: null,
+      },
+    },
+  ])("authorizes reply delivery only for $label", async ({
+    expected,
+    offer,
+    outreach,
+  }) => {
+    const tx = {
+      $executeRaw: vi.fn(async () => 0),
+      hostedGroupJoinOffer: {
+        findUnique: vi.fn(async () => offer),
+      },
+      hostedGroupJoinOutreach: {
+        findUnique: vi.fn(async () => outreach),
+      },
+    };
+
+    await expect(isHostedGroupJoinOutreachReplyDeliveryAuthorizedTx({
+      groupJoinCode: "join_opaque",
+      outreachId: "hgrpjoa_opaque",
+      tx: tx as never,
+    })).resolves.toBe(expected);
+    expect(tx.$executeRaw).toHaveBeenCalledTimes(1);
+  });
 
 
   // Removing the reaction is the participant's only undo at this entry point,
@@ -531,6 +621,37 @@ describe("hosted group join outreach store", () => {
       where: {
         id: "hgrpjoa_opaque",
         repliedAt: null,
+        sentAt: { not: null },
+        skippedAt: null,
+      },
+    });
+  });
+
+  it("reopens only the reply context consumed by the failed attempt", async () => {
+    const failedAttemptRepliedAt = new Date("2026-07-24T20:00:00.000Z");
+    const updateMany = vi.fn()
+      .mockResolvedValueOnce({ count: 1 })
+      .mockResolvedValueOnce({ count: 0 });
+    const tx = {
+      hostedGroupJoinOutreach: { updateMany },
+    } as never;
+
+    await expect(reopenHostedGroupJoinOutreachReplyContextTx({
+      outreachId: "hgrpjoa_opaque",
+      repliedAt: failedAttemptRepliedAt,
+      tx,
+    })).resolves.toBe(true);
+    await expect(reopenHostedGroupJoinOutreachReplyContextTx({
+      outreachId: "hgrpjoa_opaque",
+      repliedAt: failedAttemptRepliedAt,
+      tx,
+    })).resolves.toBe(false);
+
+    expect(updateMany).toHaveBeenCalledWith({
+      data: { repliedAt: null },
+      where: {
+        id: "hgrpjoa_opaque",
+        repliedAt: failedAttemptRepliedAt,
         sentAt: { not: null },
         skippedAt: null,
       },

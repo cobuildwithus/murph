@@ -28,7 +28,10 @@ import {
 import { sanitizeHostedOnboardingLogString } from "./http";
 import { buildHostedGroupAwareInviteUrl } from "../hosted-groups/group-join-invite-link";
 import { normalizePhoneNumber } from "./phone";
-import { buildHostedLinqInviteSignupEffectId } from "./linq-invite-signup-effect-id";
+import {
+  buildHostedLinqInviteSignupDeliverySourceRef,
+  buildHostedLinqInviteSignupEffectId,
+} from "./linq-invite-signup-effect-id";
 import {
   claimHostedLinqQuotaReplyNotice,
   markHostedLinqOnboardingLinkNoticeSent,
@@ -55,6 +58,7 @@ import {
 } from "../hosted-routing/linq-chat-ownership-lock";
 import {
   consumeHostedGroupJoinOutreachReplyContextTx,
+  isHostedGroupJoinOutreachReplyDeliveryAuthorizedTx,
 } from "../hosted-groups/group-join-outreach-store";
 import {
   sanitizeHostedOnboardingStructuredLogDetails,
@@ -749,6 +753,22 @@ async function prepareHostedLinqSideEffectProviderDispatch(input: {
       if (!invite) {
         return "target_unauthorized";
       }
+      const groupJoinOutreachId =
+        input.effect.payload.groupJoinOutreachId?.trim() ?? "";
+      if (groupJoinOutreachId) {
+        const groupJoinCode =
+          input.effect.payload.groupJoinCode?.trim() ?? "";
+        if (
+          !groupJoinCode
+          || !await isHostedGroupJoinOutreachReplyDeliveryAuthorizedTx({
+            groupJoinCode,
+            outreachId: groupJoinOutreachId,
+            tx: prisma,
+          })
+        ) {
+          return "target_unauthorized";
+        }
+      }
     }
 
     if (target.linqChatId) {
@@ -766,7 +786,7 @@ async function prepareHostedLinqSideEffectProviderDispatch(input: {
         : { phoneNumber: target.phoneNumber }),
       prisma,
       source: "hosted_webhook_side_effect",
-      sourceRef: input.effect.effectId,
+      sourceRef: buildHostedLinqSideEffectDeliverySourceRef(input.effect),
       status: "provider_dispatch_started",
       targetKind: target.targetKind,
       template,
@@ -814,6 +834,11 @@ async function markHostedLinqDeliveryAcceptedBestEffort(input: {
       const payload = input.effect.payload;
       if (
         (
+          milestone.deliveryStatus === "accepted"
+          || milestone.deliveryStatus === "delivered"
+        )
+        &&
+        (
           payload.template === "invite_signup"
           || payload.template === "invite_signup_fallback"
         )
@@ -835,6 +860,26 @@ async function markHostedLinqDeliveryAcceptedBestEffort(input: {
       throw error;
     }
   }
+}
+
+function buildHostedLinqSideEffectDeliverySourceRef(
+  effect: HostedLinqMessageSideEffect,
+): string {
+  const payload = effect.payload;
+  if (
+    (
+      payload.template === "invite_signup"
+      || payload.template === "invite_signup_fallback"
+    )
+    && payload.groupJoinOutreachId?.trim()
+  ) {
+    return buildHostedLinqInviteSignupDeliverySourceRef({
+      effectId: effect.effectId,
+      groupJoinOutreachId: payload.groupJoinOutreachId,
+      groupJoinRepliedAt: payload.occurredAt,
+    });
+  }
+  return effect.effectId;
 }
 
 async function runHostedLinqTransportTransaction<TResult>(

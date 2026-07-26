@@ -73,6 +73,10 @@ vi.mock("@/src/lib/phone-calls/account-deletion", () => ({
 
 import { HostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { createHostedLinqDeliverySourceRefLookupKey } from "@/src/lib/hosted-onboarding/linq-observability-identifiers";
+import {
+  buildHostedLinqInviteSignupDeliverySourceRefMemberPrefix,
+  buildHostedLinqInviteSignupGroupJoinSourceRefFragment,
+} from "@/src/lib/hosted-onboarding/linq-invite-signup-effect-id";
 import { ComposioConnectedAppsRequestError } from "@/src/lib/connected-apps/composio";
 import {
   HOSTED_ACCOUNT_DELETION_CONFIRMATION_PHRASE,
@@ -489,10 +493,26 @@ describe("deleteHostedAccountData", () => {
       {
         model: "hostedLinqDelivery",
         where: {
-          source: "hosted_group_join_outreach",
-          sourceRef: {
-            in: [createHostedLinqDeliverySourceRefLookupKey("hgrpjoa_owned")],
-          },
+          OR: [
+            {
+              source: "hosted_group_join_outreach",
+              sourceRef: {
+                in: [createHostedLinqDeliverySourceRefLookupKey("hgrpjoa_owned")],
+              },
+            },
+            {
+              source: "hosted_webhook_side_effect",
+              sourceRef: {
+                contains:
+                  buildHostedLinqInviteSignupGroupJoinSourceRefFragment(
+                    "hgrpjoa_owned",
+                  ),
+              },
+              template: {
+                in: ["invite_signup", "invite_signup_fallback"],
+              },
+            },
+          ],
         },
       },
       {
@@ -539,10 +559,26 @@ describe("deleteHostedAccountData", () => {
       {
         model: "hostedLinqDelivery",
         where: {
-          source: "hosted_group_join_outreach",
-          sourceRef: {
-            in: [createHostedLinqDeliverySourceRefLookupKey("hgrpjoa_opaque")],
-          },
+          OR: [
+            {
+              source: "hosted_group_join_outreach",
+              sourceRef: {
+                in: [createHostedLinqDeliverySourceRefLookupKey("hgrpjoa_opaque")],
+              },
+            },
+            {
+              source: "hosted_webhook_side_effect",
+              sourceRef: {
+                contains:
+                  buildHostedLinqInviteSignupGroupJoinSourceRefFragment(
+                    "hgrpjoa_opaque",
+                  ),
+              },
+              template: {
+                in: ["invite_signup", "invite_signup_fallback"],
+              },
+            },
+          ],
         },
       },
     ]));
@@ -780,7 +816,23 @@ describe("deleteHostedAccountData", () => {
             },
             {
               sourceRef: {
+                startsWith:
+                  buildHostedLinqInviteSignupDeliverySourceRefMemberPrefix(
+                    "member_123",
+                  ),
+              },
+            },
+            {
+              sourceRef: {
                 startsWith: "linq-invite-signup:member_thread_container_123:",
+              },
+            },
+            {
+              sourceRef: {
+                startsWith:
+                  buildHostedLinqInviteSignupDeliverySourceRefMemberPrefix(
+                    "member_thread_container_123",
+                  ),
               },
             },
           ],

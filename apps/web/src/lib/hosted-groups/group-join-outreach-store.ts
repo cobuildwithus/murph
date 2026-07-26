@@ -1,6 +1,6 @@
 import "server-only";
 
-import type { Prisma } from "@prisma/client";
+import type { Prisma, PrismaClient } from "@prisma/client";
 
 import { sha256Hex } from "../primitives";
 import {
@@ -15,7 +15,25 @@ import {
   encryptHostedGroupJoinOutreachPhoneNumber,
 } from "./group-join-outreach-phone-codec";
 
+type HostedGroupJoinOutreachMutationClient =
+  Pick<PrismaClient, "hostedGroupJoinOutreach">;
+type HostedGroupJoinOutreachDrainLockClient =
+  Pick<Prisma.TransactionClient, "$executeRaw">;
+type HostedGroupJoinOutreachReplyAuthorityClient =
+  Pick<
+    Prisma.TransactionClient,
+    "$executeRaw" | "hostedGroupJoinOffer" | "hostedGroupJoinOutreach"
+  >;
+
 const HOSTED_GROUP_JOIN_OUTREACH_REACTION_REMOVED_REASON = "reaction_removed";
+
+export async function acquireHostedGroupJoinOutreachDrainLockTx(
+  tx: HostedGroupJoinOutreachDrainLockClient,
+): Promise<void> {
+  await tx.$executeRaw`
+    SELECT pg_advisory_xact_lock(hashtext('hosted_group_join_outreach_drain'))
+  `;
+}
 
 export type EnqueueHostedGroupJoinOutreachTxResult =
   | { kind: "already_recorded"; outreachId: string }
@@ -337,10 +355,58 @@ export async function readHostedGroupJoinOutreachReplyContextTx(input: {
     : null;
 }
 
+export async function isHostedGroupJoinOutreachReplyDeliveryAuthorizedTx(input: {
+  groupJoinCode: string;
+  outreachId: string;
+  tx: HostedGroupJoinOutreachReplyAuthorityClient;
+}): Promise<boolean> {
+  await acquireHostedGroupJoinOutreachDrainLockTx(input.tx);
+
+  const outreach = await input.tx.hostedGroupJoinOutreach.findUnique({
+    where: { id: input.outreachId },
+    select: {
+      groupId: true,
+      offerId: true,
+      repliedAt: true,
+      sentAt: true,
+      skippedAt: true,
+    },
+  });
+  if (
+    !outreach
+    || !outreach.sentAt
+    || outreach.repliedAt
+    || outreach.skippedAt
+  ) {
+    return false;
+  }
+
+  const offer = await input.tx.hostedGroupJoinOffer.findUnique({
+    where: { id: outreach.offerId },
+    select: {
+      groupId: true,
+      revokedAt: true,
+      group: {
+        select: {
+          joinCode: true,
+          runtimeMemberId: true,
+        },
+      },
+    },
+  });
+  return Boolean(
+    offer
+    && offer.groupId === outreach.groupId
+    && !offer.revokedAt
+    && offer.group.runtimeMemberId
+    && offer.group.joinCode?.trim() === input.groupJoinCode.trim(),
+  );
+}
+
 export async function consumeHostedGroupJoinOutreachReplyContextTx(input: {
   outreachId: string;
   repliedAt: Date;
-  tx: Prisma.TransactionClient;
+  tx: HostedGroupJoinOutreachMutationClient;
 }): Promise<boolean> {
   const consumed = await input.tx.hostedGroupJoinOutreach.updateMany({
     where: {
@@ -354,4 +420,23 @@ export async function consumeHostedGroupJoinOutreachReplyContextTx(input: {
     },
   });
   return consumed.count === 1;
+}
+
+export async function reopenHostedGroupJoinOutreachReplyContextTx(input: {
+  outreachId: string;
+  repliedAt: Date;
+  tx: HostedGroupJoinOutreachMutationClient;
+}): Promise<boolean> {
+  const reopened = await input.tx.hostedGroupJoinOutreach.updateMany({
+    where: {
+      id: input.outreachId,
+      repliedAt: input.repliedAt,
+      sentAt: { not: null },
+      skippedAt: null,
+    },
+    data: {
+      repliedAt: null,
+    },
+  });
+  return reopened.count === 1;
 }

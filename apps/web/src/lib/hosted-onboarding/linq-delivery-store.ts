@@ -18,6 +18,8 @@ import {
 } from "./linq-observability-identifiers";
 import {
   buildHostedLinqInviteSignupEffectId,
+  type HostedLinqInviteSignupGroupJoinReplyContext,
+  parseHostedLinqInviteSignupDeliverySourceRef,
   parseHostedLinqInviteSignupEffectId,
 } from "./linq-invite-signup-effect-id";
 import {
@@ -93,9 +95,16 @@ type HostedLinqDeliveryReceiptData = {
 };
 
 type HostedLinqReopenOnboardingLink = {
+  groupJoinReplyContext?: HostedLinqInviteSignupGroupJoinReplyContext;
   memberId: string;
   occurredAt: string;
 };
+
+type HostedLinqAcceptedMilestoneStatus =
+  | "accepted"
+  | "delivered"
+  | "failed"
+  | null;
 
 export async function recordHostedLinqDeliveryAttemptTx(input: {
   attemptedAt?: Date;
@@ -596,10 +605,12 @@ export async function markHostedLinqDeliveryAcceptedTx(input: {
   messageId?: string | null;
   prisma: HostedLinqDeliveryClient;
 }): Promise<{
+  deliveryStatus: HostedLinqAcceptedMilestoneStatus;
   reopenOnboardingLink: HostedLinqReopenOnboardingLink | null;
   restoreOnboardingLink: HostedLinqReopenOnboardingLink | null;
 }> {
   const none = {
+    deliveryStatus: null,
     reopenOnboardingLink: null,
     restoreOnboardingLink: null,
   };
@@ -644,7 +655,16 @@ export async function markHostedLinqDeliveryAcceptedTx(input: {
       },
     });
     if (updated.count !== 1) {
-      return none;
+      const current = await prisma.hostedLinqDelivery.findUnique({
+        where: { idempotencyKey },
+        select: { status: true },
+      });
+      return {
+        ...none,
+        deliveryStatus: readHostedLinqAcceptedMilestoneStatus(
+          current?.status ?? null,
+        ),
+      };
     }
 
     const replay = await applyLatestHostedLinqDeliveryReceiptForAcceptedMessageTx({
@@ -654,7 +674,10 @@ export async function markHostedLinqDeliveryAcceptedTx(input: {
       prisma,
     });
     if (!replay.advanced || !replay.receipt) {
-      return none;
+      return {
+        ...none,
+        deliveryStatus: "accepted",
+      };
     }
 
     // A receipt buffered before this milestone wrote the message lookup key
@@ -668,17 +691,34 @@ export async function markHostedLinqDeliveryAcceptedTx(input: {
         template: true,
       },
     });
-    const onboardingLink = resolveHostedLinqReopenOnboardingLink({
+    const deliveryIdentity = {
       idempotencyKey: input.idempotencyKey,
       sourceRef: delivery?.sourceRef ?? null,
       template: delivery?.template ?? null,
-    });
+    };
+    const onboardingLink = replay.receipt.deliveryStatus === "failed"
+      ? await resolveHostedLinqFailedDeliveryReopenTx({
+          ...deliveryIdentity,
+          prisma,
+        })
+      : resolveHostedLinqReopenOnboardingLink(deliveryIdentity);
     if (!onboardingLink) {
-      return none;
+      return {
+        ...none,
+        deliveryStatus: replay.receipt.deliveryStatus,
+      };
     }
     return replay.receipt.deliveryStatus === "failed"
-      ? { reopenOnboardingLink: onboardingLink, restoreOnboardingLink: null }
-      : { reopenOnboardingLink: null, restoreOnboardingLink: onboardingLink };
+      ? {
+          deliveryStatus: "failed",
+          reopenOnboardingLink: onboardingLink,
+          restoreOnboardingLink: null,
+        }
+      : {
+          deliveryStatus: "delivered",
+          reopenOnboardingLink: null,
+          restoreOnboardingLink: onboardingLink,
+        };
   });
 }
 
@@ -1257,13 +1297,19 @@ export async function applyHostedLinqDeliveryReceiptTx(input: {
     data: buildReceiptUpdate(input.event),
   });
   const advanced = updated.count === 1;
+  const onboardingLink = advanced && input.event.deliveryStatus === "failed"
+    ? await resolveHostedLinqFailedDeliveryReopenTx({
+        idempotencyKey: delivery.idempotencyKey,
+        prisma: input.prisma,
+        sourceRef: delivery.sourceRef,
+        template: delivery.template,
+      })
+    : null;
   return {
     advanced,
     deliveryId: delivery.id,
     phoneNumberLookupKey: delivery.phoneNumberLookupKey,
-    reopenOnboardingLink: advanced && input.event.deliveryStatus === "failed"
-      ? resolveHostedLinqReopenOnboardingLink(delivery)
-      : null,
+    reopenOnboardingLink: onboardingLink,
     // The symmetric signal: a delivered receipt that wins ordering after a
     // reopen re-marks the member/day as sent, so daily state always tracks
     // the latest terminal delivery truth.
@@ -1844,13 +1890,78 @@ function resolveHostedLinqReopenOnboardingLink(input: {
     return null;
   }
 
-  const parsed = parseHostedLinqInviteSignupEffectId(input.idempotencyKey)
-    ?? parseHostedLinqInviteSignupEffectId(input.sourceRef);
-  return parsed
+  const source =
+    parseHostedLinqInviteSignupDeliverySourceRef(input.sourceRef)
+    ?? parseHostedLinqInviteSignupDeliverySourceRef(input.idempotencyKey);
+  const parsed = source
+    ? parseHostedLinqInviteSignupEffectId(source.effectId)
+    : null;
+  return parsed && source
     ? {
+        ...(source.groupJoinReplyContext
+          ? { groupJoinReplyContext: source.groupJoinReplyContext }
+          : {}),
         memberId: parsed.memberId,
         occurredAt: parsed.dayUtc,
       }
+    : null;
+}
+
+async function resolveHostedLinqFailedDeliveryReopenTx(input: {
+  idempotencyKey: string | null;
+  prisma: HostedLinqDeliveryClient;
+  sourceRef: string | null;
+  template: string | null;
+}): Promise<HostedLinqReopenOnboardingLink | null> {
+  const link = resolveHostedLinqReopenOnboardingLink(input);
+  if (!link) {
+    return null;
+  }
+  const source =
+    parseHostedLinqInviteSignupDeliverySourceRef(input.sourceRef)
+    ?? parseHostedLinqInviteSignupDeliverySourceRef(input.idempotencyKey);
+  const failedAttempt = source
+    ? parseHostedLinqInviteSignupEffectId(source.effectId)
+    : null;
+  if (!failedAttempt) {
+    return link;
+  }
+
+  const newerAttemptLookupKeys = Array.from(
+    {
+      length:
+        HOSTED_LINQ_INVITE_SIGNUP_MAX_ATTEMPTS_PER_DAY - failedAttempt.attempt,
+    },
+    (_, index) => createHostedLinqDeliveryIdempotencyLookupKey(
+      buildHostedLinqInviteSignupEffectId({
+        attempt: failedAttempt.attempt + index + 1,
+        memberId: failedAttempt.memberId,
+        occurredAt: failedAttempt.dayUtc,
+      }),
+    ),
+  ).filter((lookupKey): lookupKey is string => lookupKey !== null);
+  if (newerAttemptLookupKeys.length === 0) {
+    return link;
+  }
+  const newerLiveDeliveries =
+    await input.prisma.hostedLinqDelivery.findMany({
+      where: {
+        idempotencyKey: { in: newerAttemptLookupKeys },
+        status: {
+          in: ["provider_dispatch_started", "accepted", "delivered"],
+        },
+      },
+      select: { id: true },
+      take: 1,
+    });
+  return newerLiveDeliveries.length > 0 ? null : link;
+}
+
+function readHostedLinqAcceptedMilestoneStatus(
+  status: string | null,
+): HostedLinqAcceptedMilestoneStatus {
+  return status === "accepted" || status === "delivered" || status === "failed"
+    ? status
     : null;
 }
 
@@ -1861,7 +1972,7 @@ function normalizeHostedLinqDeliverySourceRef(input: {
   const sourceRef = normalizeNullable(input.sourceRef);
   if (
     isHostedLinqInviteSignupDeliveryTemplate(input.template)
-    && parseHostedLinqInviteSignupEffectId(sourceRef)
+    && parseHostedLinqInviteSignupDeliverySourceRef(sourceRef)
   ) {
     return sourceRef;
   }

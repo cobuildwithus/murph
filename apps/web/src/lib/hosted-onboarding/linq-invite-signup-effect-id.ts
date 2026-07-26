@@ -2,6 +2,18 @@ import { resolveHostedLinqDayUtc } from "./linq-daily-state";
 
 const HOSTED_LINQ_INVITE_SIGNUP_EFFECT_ID_PREFIX = "linq-invite-signup:";
 const HOSTED_LINQ_INVITE_SIGNUP_ATTEMPT_SUFFIX_PATTERN = /:a([2-9]\d*)$/;
+const HOSTED_LINQ_INVITE_SIGNUP_SOURCE_REF_PREFIX =
+  "linq-invite-signup-source:v1:";
+
+export type HostedLinqInviteSignupGroupJoinReplyContext = {
+  outreachId: string;
+  repliedAt: string;
+};
+
+export type HostedLinqInviteSignupDeliverySourceRef = {
+  effectId: string;
+  groupJoinReplyContext: HostedLinqInviteSignupGroupJoinReplyContext | null;
+};
 
 /**
  * One signup-link delivery per member per UTC day is the base identity; a
@@ -26,6 +38,29 @@ export function buildHostedLinqInviteSignupEffectIdMemberPrefix(
   memberId: string,
 ): string {
   return `${HOSTED_LINQ_INVITE_SIGNUP_EFFECT_ID_PREFIX}${memberId}:`;
+}
+
+export function buildHostedLinqInviteSignupDeliverySourceRefMemberPrefix(
+  memberId: string,
+): string {
+  const effectIdPrefix = JSON.stringify(
+    buildHostedLinqInviteSignupEffectIdMemberPrefix(memberId),
+  );
+  return `${HOSTED_LINQ_INVITE_SIGNUP_SOURCE_REF_PREFIX}[${
+    effectIdPrefix.slice(0, -1)
+  }`;
+}
+
+export function buildHostedLinqInviteSignupGroupJoinSourceRefFragment(
+  outreachId: string,
+): string {
+  const normalized = outreachId.trim();
+  if (!normalized) {
+    throw new TypeError(
+      "Hosted Linq group-join signup delivery source requires an outreach id.",
+    );
+  }
+  return JSON.stringify(normalized);
 }
 
 export function parseHostedLinqInviteSignupEffectId(
@@ -54,5 +89,83 @@ export function parseHostedLinqInviteSignupEffectId(
     attempt,
     dayUtc,
     memberId,
+  };
+}
+
+export function buildHostedLinqInviteSignupDeliverySourceRef(input: {
+  effectId: string;
+  groupJoinOutreachId?: string | null;
+  groupJoinRepliedAt?: string | null;
+}): string {
+  const groupJoinOutreachId = input.groupJoinOutreachId?.trim() ?? "";
+  const groupJoinRepliedAt = input.groupJoinRepliedAt?.trim() ?? "";
+  if (!groupJoinOutreachId && !groupJoinRepliedAt) {
+    return input.effectId;
+  }
+  if (
+    !parseHostedLinqInviteSignupEffectId(input.effectId)
+    || !groupJoinOutreachId
+    || !groupJoinRepliedAt
+  ) {
+    throw new TypeError(
+      "Hosted Linq group-join signup delivery source requires a valid effect, outreach, and reply time.",
+    );
+  }
+  const repliedAt = new Date(groupJoinRepliedAt);
+  if (Number.isNaN(repliedAt.getTime())) {
+    throw new TypeError(
+      "Hosted Linq group-join signup delivery source requires a valid reply time.",
+    );
+  }
+  return `${HOSTED_LINQ_INVITE_SIGNUP_SOURCE_REF_PREFIX}${JSON.stringify([
+    input.effectId,
+    groupJoinOutreachId,
+    repliedAt.toISOString(),
+  ])}`;
+}
+
+export function parseHostedLinqInviteSignupDeliverySourceRef(
+  sourceRef: string | null | undefined,
+): HostedLinqInviteSignupDeliverySourceRef | null {
+  const normalized = sourceRef?.trim() ?? "";
+  if (!normalized) {
+    return null;
+  }
+  if (parseHostedLinqInviteSignupEffectId(normalized)) {
+    return {
+      effectId: normalized,
+      groupJoinReplyContext: null,
+    };
+  }
+  if (!normalized.startsWith(HOSTED_LINQ_INVITE_SIGNUP_SOURCE_REF_PREFIX)) {
+    return null;
+  }
+
+  let decoded: unknown;
+  try {
+    decoded = JSON.parse(
+      normalized.slice(HOSTED_LINQ_INVITE_SIGNUP_SOURCE_REF_PREFIX.length),
+    );
+  } catch {
+    return null;
+  }
+  if (
+    !Array.isArray(decoded)
+    || decoded.length !== 3
+    || typeof decoded[0] !== "string"
+    || typeof decoded[1] !== "string"
+    || typeof decoded[2] !== "string"
+    || !parseHostedLinqInviteSignupEffectId(decoded[0])
+    || !decoded[1].trim()
+    || Number.isNaN(new Date(decoded[2]).getTime())
+  ) {
+    return null;
+  }
+  return {
+    effectId: decoded[0],
+    groupJoinReplyContext: {
+      outreachId: decoded[1].trim(),
+      repliedAt: new Date(decoded[2]).toISOString(),
+    },
   };
 }

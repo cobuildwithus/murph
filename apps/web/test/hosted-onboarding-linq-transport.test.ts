@@ -92,6 +92,7 @@ vi.mock("@/src/lib/hosted-onboarding/linq-delivery-store", async () => {
       id: "hld_claimed",
     }),
     markHostedLinqDeliveryAcceptedTx: vi.fn().mockResolvedValue({
+      deliveryStatus: "accepted",
       reopenOnboardingLink: null,
       restoreOnboardingLink: null,
     }),
@@ -156,6 +157,9 @@ import {
   createHostedLinqDeliveryIdempotencyLookupKey,
 } from "@/src/lib/hosted-onboarding/linq-observability-identifiers";
 import {
+  parseHostedLinqInviteSignupDeliverySourceRef,
+} from "@/src/lib/hosted-onboarding/linq-invite-signup-effect-id";
+import {
   createHostedWebhookLinqMessageSideEffect,
   drainHostedLinqSideEffectsDirect,
 } from "@/src/lib/hosted-onboarding/webhook-transport";
@@ -196,6 +200,7 @@ describe("hosted Linq webhook transport", () => {
         };
       });
     vi.mocked(markHostedLinqDeliveryAcceptedTx).mockResolvedValue({
+      deliveryStatus: "accepted",
       reopenOnboardingLink: null,
       restoreOnboardingLink: null,
     });
@@ -300,6 +305,17 @@ describe("hosted Linq webhook transport", () => {
     await scheduledTasks[0]?.();
 
     expect(markHostedLinqDeliveryAcceptedTx).toHaveBeenCalled();
+    const claimInput = vi.mocked(claimHostedLinqDeliveryProviderDispatchTx)
+      .mock.calls[0]?.[0];
+    expect(parseHostedLinqInviteSignupDeliverySourceRef(
+      claimInput?.sourceRef,
+    )).toEqual({
+      effectId: effect.effectId,
+      groupJoinReplyContext: {
+        outreachId: "hgrpjoa-1",
+        repliedAt: "2026-03-26T12:00:00.000Z",
+      },
+    });
     expect(prisma.hostedGroupJoinOutreach.updateMany).toHaveBeenCalledWith({
       data: {
         repliedAt: new Date("2026-03-26T12:00:00.000Z"),
@@ -311,6 +327,95 @@ describe("hosted Linq webhook transport", () => {
         skippedAt: null,
       },
     });
+  });
+
+  it("does not claim a group-aware signup delivery after its outreach authority is gone", async () => {
+    const effect = createHostedWebhookLinqMessageSideEffect({
+      chatId: "chat-1",
+      groupJoinCode: "join-group",
+      groupJoinOutreachId: "hgrpjoa-deleted",
+      inviteId: "invite-1",
+      memberId: "member-1",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      replyToMessageId: "message-1",
+      service: "sms",
+      sourceEventId: "event-group-deleted",
+      threadIsDirect: true,
+      template: "invite_signup",
+    });
+    const prisma = createInviteSignupPrismaFixture({
+      groupReplyAuthorized: false,
+    });
+
+    await expect(
+      drainHostedLinqSideEffectsDirect({
+        prisma: prisma as never,
+        sideEffects: [effect],
+      }),
+    ).resolves.toEqual({
+      sentCount: 0,
+      skipped: [{
+        effectId: effect.effectId,
+        reason: "notice_target_unauthorized",
+        template: "invite_signup",
+      }],
+    });
+
+    expect(prisma.$executeRaw).toHaveBeenCalledTimes(1);
+    expect(prisma.hostedGroupJoinOutreach.findUnique).toHaveBeenCalledWith({
+      select: {
+        groupId: true,
+        offerId: true,
+        repliedAt: true,
+        sentAt: true,
+        skippedAt: true,
+      },
+      where: { id: "hgrpjoa-deleted" },
+    });
+    expect(claimHostedLinqDeliveryProviderDispatchTx).not.toHaveBeenCalled();
+    expect(sendHostedLinqChatMessage).not.toHaveBeenCalled();
+  });
+
+  it("does not consume group context when acceptance replays a buffered failure", async () => {
+    vi.mocked(markHostedLinqDeliveryAcceptedTx).mockResolvedValueOnce({
+      deliveryStatus: "failed",
+      reopenOnboardingLink: {
+        groupJoinReplyContext: {
+          outreachId: "hgrpjoa-failed",
+          repliedAt: "2026-03-26T12:00:00.000Z",
+        },
+        memberId: "member-1",
+        occurredAt: "2026-03-26T00:00:00.000Z",
+      },
+      restoreOnboardingLink: null,
+    });
+    const effect = createHostedWebhookLinqMessageSideEffect({
+      chatId: "chat-1",
+      groupJoinCode: "join-group",
+      groupJoinOutreachId: "hgrpjoa-failed",
+      inviteId: "invite-1",
+      memberId: "member-1",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      replyToMessageId: "message-1",
+      service: "sms",
+      sourceEventId: "event-group-reply-failed",
+      threadIsDirect: true,
+      template: "invite_signup",
+    });
+    const prisma = createInviteSignupPrismaFixture();
+    const scheduledTasks: Array<() => Promise<void>> = [];
+
+    await drainHostedLinqSideEffectsDirect({
+      prisma: prisma as never,
+      scheduleAfterResponse: (task) => {
+        scheduledTasks.push(task);
+      },
+      sideEffects: [effect],
+    });
+    await scheduledTasks[0]?.();
+
+    expect(releaseHostedLinqOnboardingLinkNoticeClaim).toHaveBeenCalled();
+    expect(prisma.hostedGroupJoinOutreach.updateMany).not.toHaveBeenCalled();
   });
 
   it("does not dispatch a signup link when its exact active invite is absent", async () => {
@@ -1942,9 +2047,13 @@ function buildAuthorizedLinqRouteFixture(input: {
 }
 
 function createInviteSignupPrismaFixture(
-  input: { inviteAuthorized?: boolean } = {},
+  input: {
+    groupReplyAuthorized?: boolean;
+    inviteAuthorized?: boolean;
+  } = {},
 ) {
   const transactionClient = {
+    $executeRaw: vi.fn().mockResolvedValue(1),
     $queryRaw: vi.fn().mockResolvedValue([{ id: "member-1" }]),
     hostedInvite: {
       findUnique: vi.fn(async (query: { select?: { id?: boolean } }) =>
@@ -1955,7 +2064,28 @@ function createInviteSignupPrismaFixture(
       update: vi.fn().mockResolvedValue({}),
     },
     hostedGroupJoinOutreach: {
+      findUnique: vi.fn().mockResolvedValue(
+        input.groupReplyAuthorized === false
+          ? null
+          : {
+              groupId: "group-1",
+              offerId: "offer-1",
+              repliedAt: null,
+              sentAt: new Date("2026-03-26T11:00:00.000Z"),
+              skippedAt: null,
+            },
+      ),
       updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+    },
+    hostedGroupJoinOffer: {
+      findUnique: vi.fn().mockResolvedValue({
+        groupId: "group-1",
+        revokedAt: null,
+        group: {
+          joinCode: "join-group",
+          runtimeMemberId: "member-runtime",
+        },
+      }),
     },
   };
   return {

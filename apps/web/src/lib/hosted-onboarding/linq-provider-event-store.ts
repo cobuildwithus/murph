@@ -18,6 +18,10 @@ import {
 import type { ParsedHostedLinqProviderEvent } from "./linq-provider-events";
 import { toHostedOnboardingLogIdSuffix } from "./logging";
 import { sha256Hex } from "../primitives";
+import {
+  consumeHostedGroupJoinOutreachReplyContextTx,
+  reopenHostedGroupJoinOutreachReplyContextTx,
+} from "../hosted-groups/group-join-outreach-store";
 
 type HostedLinqProviderEventClient = PrismaClient | Prisma.TransactionClient;
 
@@ -83,6 +87,15 @@ export async function ingestHostedLinqProviderEventTx(input: {
       occurredAt: deliveryReceipt.reopenOnboardingLink.occurredAt,
       prisma: input.prisma,
     });
+    const groupJoinReplyContext =
+      deliveryReceipt.reopenOnboardingLink.groupJoinReplyContext;
+    if (groupJoinReplyContext) {
+      await reopenHostedGroupJoinOutreachReplyContextTx({
+        outreachId: groupJoinReplyContext.outreachId,
+        repliedAt: new Date(groupJoinReplyContext.repliedAt),
+        tx: input.prisma,
+      });
+    }
   }
   if (deliveryReceipt.restoreOnboardingLink) {
     await markHostedLinqOnboardingLinkNoticeSent({
@@ -90,6 +103,15 @@ export async function ingestHostedLinqProviderEventTx(input: {
       occurredAt: deliveryReceipt.restoreOnboardingLink.occurredAt,
       prisma: input.prisma,
     });
+    const groupJoinReplyContext =
+      deliveryReceipt.restoreOnboardingLink.groupJoinReplyContext;
+    if (groupJoinReplyContext) {
+      await consumeHostedGroupJoinOutreachReplyContextTx({
+        outreachId: groupJoinReplyContext.outreachId,
+        repliedAt: new Date(groupJoinReplyContext.repliedAt),
+        tx: input.prisma,
+      });
+    }
   }
   const outboundEchoDelivery = isHostedRuntimeOwnedOutboundEcho(input.event)
     ? await readHostedLinqDeliveryForProviderMessageTx({

@@ -24,8 +24,13 @@ import { readHostedMemberIdentity } from "../hosted-onboarding/hosted-member-ide
 import { readHostedAccountGroupStripeBillingRef } from "../hosted-onboarding/family-plan";
 import { deleteHostedPrivyUser } from "../hosted-onboarding/privy";
 import { HOSTED_GROUP_JOIN_OUTREACH_DELIVERY_SOURCE } from "@/src/lib/hosted-groups/group-join-outreach-drain";
+import { acquireHostedGroupJoinOutreachDrainLockTx } from "@/src/lib/hosted-groups/group-join-outreach-store";
 import { createHostedLinqDeliverySourceRefLookupKey } from "@/src/lib/hosted-onboarding/linq-observability-identifiers";
-import { buildHostedLinqInviteSignupEffectIdMemberPrefix } from "../hosted-onboarding/linq-invite-signup-effect-id";
+import {
+  buildHostedLinqInviteSignupDeliverySourceRefMemberPrefix,
+  buildHostedLinqInviteSignupEffectIdMemberPrefix,
+  buildHostedLinqInviteSignupGroupJoinSourceRefFragment,
+} from "../hosted-onboarding/linq-invite-signup-effect-id";
 import { getHostedOnboardingStripe } from "../hosted-onboarding/runtime";
 import { logHostedStripeFailure } from "../hosted-onboarding/stripe-error-log";
 import {
@@ -271,7 +276,7 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
     slug: "prisma.hosted_group_join_outreach_delivery",
     label: "Group-join outreach provider correlation",
     deletion: "live-delete",
-    note: "Deletes the hosted_group_join_outreach Linq delivery rows correlated to those outreach ids, so provider attempt and receipt history does not outlive the account. These rows carry no participant or group key of their own, so they must be deleted while their outreach row still supplies the sourceRef.",
+    note: "Deletes both the cold outreach delivery and the group-aware signup-link delivery correlations tied to those outreach ids, so provider attempt and receipt history does not outlive the account. The cold delivery carries no participant or group key of its own, so both correlation kinds are deleted while the outreach row still supplies the source reference.",
   },
   {
     slug: "prisma.hosted_linq_daily_state",
@@ -1044,11 +1049,19 @@ function buildHostedLinqInviteSignupDeliveryWhere(
   memberIds: readonly string[],
 ): Prisma.HostedLinqDeliveryWhereInput {
   return {
-    OR: uniqueStrings(memberIds).map((memberId) => ({
-      sourceRef: {
-        startsWith: buildHostedLinqInviteSignupEffectIdMemberPrefix(memberId),
+    OR: uniqueStrings(memberIds).flatMap((memberId) => [
+      {
+        sourceRef: {
+          startsWith: buildHostedLinqInviteSignupEffectIdMemberPrefix(memberId),
+        },
       },
-    })),
+      {
+        sourceRef: {
+          startsWith:
+            buildHostedLinqInviteSignupDeliverySourceRefMemberPrefix(memberId),
+        },
+      },
+    ]),
     template: {
       in: ["invite_signup", "invite_signup_fallback"],
     },
@@ -1068,12 +1081,11 @@ async function deleteHostedGroupJoinOutreachRowsForMembers(
   // the delivery store normalizes every non-invite reference. Deleting by raw id
   // would match nothing and then remove the rows that derive the digest.
   //
-  // The minute drain can create a correlation concurrently. Taking the drain's own
-  // advisory lock for the rest of this transaction serializes against it, so a
-  // correlation cannot appear after the delete and before the outreach row is gone.
-  await prisma.$executeRaw`
-    SELECT pg_advisory_xact_lock(hashtext('hosted_group_join_outreach_drain'))
-  `;
+  // Both the minute drain and group-reply delivery preparation can create a
+  // correlation concurrently. Their shared advisory lock serializes both paths
+  // with this transaction, so no correlation can appear after its delete and
+  // before the outreach row is gone.
+  await acquireHostedGroupJoinOutreachDrainLockTx(prisma);
 
   const identities = await prisma.hostedMemberIdentity.findMany({
     where: { memberId: memberIdFilter },
@@ -1125,11 +1137,29 @@ async function deleteHostedGroupJoinOutreachRowsForMembers(
   const deliverySourceRefs = outreachIds
     .map((outreachId) => createHostedLinqDeliverySourceRefLookupKey(outreachId))
     .filter((lookupKey): lookupKey is string => Boolean(lookupKey));
-  const deliveries = deliverySourceRefs.length > 0
+  const deliveries = outreachIds.length > 0
     ? await prisma.hostedLinqDelivery.deleteMany({
         where: {
-          source: HOSTED_GROUP_JOIN_OUTREACH_DELIVERY_SOURCE,
-          sourceRef: { in: deliverySourceRefs },
+          OR: [
+            ...(deliverySourceRefs.length > 0
+              ? [{
+                  source: HOSTED_GROUP_JOIN_OUTREACH_DELIVERY_SOURCE,
+                  sourceRef: { in: deliverySourceRefs },
+                }]
+              : []),
+            ...outreachIds.map((outreachId) => ({
+              source: "hosted_webhook_side_effect",
+              sourceRef: {
+                contains:
+                  buildHostedLinqInviteSignupGroupJoinSourceRefFragment(
+                    outreachId,
+                  ),
+              },
+              template: {
+                in: ["invite_signup", "invite_signup_fallback"],
+              },
+            })),
+          ],
         },
       })
     : { count: 0 };
