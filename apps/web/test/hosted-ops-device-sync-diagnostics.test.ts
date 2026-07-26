@@ -42,6 +42,8 @@ type HostedOpsJunctionDiagnosticsRouteModule =
 
 let hostedOpsJunctionDiagnosticsRoute: HostedOpsJunctionDiagnosticsRouteModule;
 
+let hostedOpsJunctionRecoveryRoute: HostedOpsJunctionDiagnosticsRouteModule;
+
 const SELECTED_SOURCE_PROVIDER = "oura";
 const ROUTING_INDEX_KEY = Buffer.from(
   "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -50,6 +52,10 @@ const ROUTING_INDEX_KEY = Buffer.from(
 const JUNCTION_PUBLIC_CONNECTION_ID = createHostedBrowserConnectionId(
   ROUTING_INDEX_KEY,
   "dsc_junction_123",
+);
+const OTHER_JUNCTION_PUBLIC_CONNECTION_ID = createHostedBrowserConnectionId(
+  ROUTING_INDEX_KEY,
+  "dsc_junction_456",
 );
 
 const originalHostedOpsMemberIds = process.env.HOSTED_OPS_MEMBER_IDS;
@@ -61,6 +67,8 @@ describe("hosted ops Junction diagnostics", () => {
   beforeAll(async () => {
     hostedOpsJunctionDiagnosticsRoute =
       await import("../app/api/ops/device-sync/junction-diagnostics/route");
+    hostedOpsJunctionRecoveryRoute =
+      await import("../app/api/ops/device-sync/junction-recovery/route");
   });
 
   beforeEach(() => {
@@ -811,6 +819,334 @@ describe("hosted ops Junction diagnostics", () => {
     await expect(response.json()).resolves.toMatchObject({
       error: {
         code: "HOSTED_OPS_JUNCTION_DIAGNOSTIC_SOURCE_PROVIDER_INVALID",
+      },
+    });
+  });
+
+  it("triggers a Junction historical pull for one stalled source", async () => {
+    mocks.probeRest.mockResolvedValue({
+      generatedAt: "2026-07-24T00:00:00.000Z",
+      provider: "junction",
+      result: {
+        request: {
+          endpoint: "trigger_historical_pull",
+          endpointKind: "junction_bulk_trigger_historical_pull",
+          method: "POST",
+          sourceProviderSlug: SELECTED_SOURCE_PROVIDER,
+        },
+        response: {
+          accepted: true,
+          endpointUnavailable: false,
+          ok: true,
+        },
+      },
+    });
+
+    const response = await hostedOpsJunctionRecoveryRoute.POST(
+      createJsonPostRequest(
+        "https://join.example.test/api/ops/device-sync/junction-recovery",
+        {
+          action: "trigger_historical_pull",
+          connectionId: JUNCTION_PUBLIC_CONNECTION_ID,
+          memberId: "member_target",
+          sourceProvider: SELECTED_SOURCE_PROVIDER,
+        },
+        {
+          headers: {
+            origin: "https://join.example.test",
+          },
+        },
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.probeRest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        endpoint: "trigger_historical_pull",
+        sourceProviderSlug: SELECTED_SOURCE_PROVIDER,
+      }),
+    );
+    await expect(response.json()).resolves.toMatchObject({
+      action: "trigger_historical_pull",
+      memberId: "member_target",
+      ok: true,
+      response: {
+        accepted: true,
+        endpointUnavailable: false,
+      },
+      sourceProvider: SELECTED_SOURCE_PROVIDER,
+    });
+  });
+
+  it("reports a gated Junction historical pull trigger without failing the request", async () => {
+    mocks.probeRest.mockResolvedValue({
+      generatedAt: "2026-07-24T00:00:00.000Z",
+      provider: "junction",
+      result: {
+        request: { endpoint: "trigger_historical_pull" },
+        // Link Migration endpoints are disabled per team until support enables
+        // them, so the operator needs to see that distinctly from a failure.
+        response: { accepted: false, endpointUnavailable: true, ok: true },
+      },
+    });
+
+    const response = await hostedOpsJunctionRecoveryRoute.POST(
+      createJsonPostRequest(
+        "https://join.example.test/api/ops/device-sync/junction-recovery",
+        {
+          action: "trigger_historical_pull",
+          connectionId: JUNCTION_PUBLIC_CONNECTION_ID,
+          memberId: "member_target",
+          sourceProvider: SELECTED_SOURCE_PROVIDER,
+        },
+        { headers: { origin: "https://join.example.test" } },
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      ok: true,
+      response: { accepted: false, endpointUnavailable: true },
+    });
+  });
+
+  it("binds a recovery action to the requested member and connection", async () => {
+    // A second active Junction connection makes misrouting observable: with one
+    // connection any resolution bug still lands on the right account.
+    mocks.createBrowserConnectionId.mockImplementation((connectionId: string) =>
+      connectionId === "dsc_junction_123"
+        ? "dspc_junction_123"
+        : connectionId === "dsc_junction_456"
+          ? "dspc_junction_456"
+          : connectionId
+    );
+    mocks.listConnectionsForUser.mockResolvedValue([
+      {
+        accessTokenExpiresAt: null,
+        connectedAt: "2026-06-27T18:49:38.000Z",
+        createdAt: "2026-06-27T18:49:38.000Z",
+        displayName: "Junction",
+        externalAccountId: "junction-user-raw-id",
+        id: "dsc_junction_123",
+        lastErrorCode: null,
+        lastErrorMessage: null,
+        lastSyncCompletedAt: "2026-06-28T08:51:00.000Z",
+        lastSyncErrorAt: null,
+        lastSyncStartedAt: "2026-06-28T08:50:54.000Z",
+        lastWebhookAt: null,
+        metadata: {},
+        nextReconcileAt: "2026-06-28T16:00:00.000Z",
+        provider: "junction",
+        scopes: [],
+        setupPhase: "source_confirmed",
+        status: "active",
+        updatedAt: "2026-06-28T08:51:00.000Z",
+      },
+      {
+        accessTokenExpiresAt: null,
+        connectedAt: "2026-06-27T18:49:38.000Z",
+        createdAt: "2026-06-27T18:49:38.000Z",
+        displayName: "Junction",
+        externalAccountId: "junction-user-other-id",
+        id: "dsc_junction_456",
+        lastErrorCode: null,
+        lastErrorMessage: null,
+        lastSyncCompletedAt: "2026-06-28T08:51:00.000Z",
+        lastSyncErrorAt: null,
+        lastSyncStartedAt: "2026-06-28T08:50:54.000Z",
+        lastWebhookAt: null,
+        metadata: {},
+        nextReconcileAt: "2026-06-28T16:00:00.000Z",
+        provider: "junction",
+        scopes: [],
+        setupPhase: "source_confirmed",
+        status: "active",
+        updatedAt: "2026-06-28T08:51:00.000Z",
+      },
+    ]);
+    mocks.probeRest.mockResolvedValue({
+      generatedAt: "2026-07-24T00:00:00.000Z",
+      provider: "junction",
+      result: {
+        request: { endpoint: "trigger_historical_pull" },
+        response: { accepted: true, endpointUnavailable: false, ok: true },
+      },
+    });
+
+    const response = await hostedOpsJunctionRecoveryRoute.POST(
+      createJsonPostRequest(
+        "https://join.example.test/api/ops/device-sync/junction-recovery",
+        {
+          action: "trigger_historical_pull",
+          connectionId: OTHER_JUNCTION_PUBLIC_CONNECTION_ID,
+          memberId: "member_target",
+          sourceProvider: SELECTED_SOURCE_PROVIDER,
+        },
+        { headers: { origin: "https://join.example.test" } },
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.listConnectionsForUser).toHaveBeenCalledWith("member_target");
+    expect(mocks.getStoredConnectionAccountForUser).toHaveBeenCalledWith(
+      "member_target",
+      "dsc_junction_456",
+    );
+    // The mutation must target the requested connection's Junction account.
+    expect(mocks.probeRest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        account: expect.objectContaining({ externalAccountId: "junction-user-other-id" }),
+        endpoint: "trigger_historical_pull",
+      }),
+    );
+  });
+
+  it("rejects an unsupported Junction recovery action before touching the provider", async () => {
+    const response = await hostedOpsJunctionRecoveryRoute.POST(
+      createJsonPostRequest(
+        "https://join.example.test/api/ops/device-sync/junction-recovery",
+        {
+          action: "deregister",
+          connectionId: JUNCTION_PUBLIC_CONNECTION_ID,
+          memberId: "member_target",
+          sourceProvider: SELECTED_SOURCE_PROVIDER,
+        },
+        { headers: { origin: "https://join.example.test" } },
+      ),
+    );
+
+    expect(response.status).toBe(400);
+    // These are the seams this route actually reaches, so they are what proves
+    // an unsupported action stopped before any provider work.
+    expect(mocks.probeRest).not.toHaveBeenCalled();
+    expect(mocks.diagnoseBackfill).not.toHaveBeenCalled();
+    expect(mocks.listConnectionsForUser).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toMatchObject({
+      error: { code: "HOSTED_OPS_JUNCTION_RECOVERY_ACTION_INVALID" },
+    });
+  });
+
+  it("enforces operator authority and the feature gate on the recovery route", async () => {
+    const recoveryRequest = () =>
+      createJsonPostRequest(
+        "https://join.example.test/api/ops/device-sync/junction-recovery",
+        {
+          action: "trigger_historical_pull",
+          connectionId: JUNCTION_PUBLIC_CONNECTION_ID,
+          memberId: "member_target",
+          sourceProvider: SELECTED_SOURCE_PROVIDER,
+        },
+        { headers: { origin: "https://join.example.test" } },
+      );
+
+    mocks.probeRest.mockResolvedValue({
+      generatedAt: "2026-07-24T00:00:00.000Z",
+      provider: "junction",
+      result: {
+        request: { endpoint: "trigger_historical_pull" },
+        response: { accepted: true, endpointUnavailable: false, ok: true },
+      },
+    });
+
+    // This route can mutate a member's external provider connection, so its own
+    // origin and session checks need direct proof rather than inference from
+    // the sibling diagnostics route.
+    const allowed = recoveryRequest();
+    expect((await hostedOpsJunctionRecoveryRoute.POST(allowed)).status).toBe(200);
+    expect(mocks.assertHostedOnboardingMutationOrigin).toHaveBeenCalledWith(allowed);
+    expect(mocks.requireActiveHostedAppSessionFromRequest).toHaveBeenCalledWith(allowed);
+
+    vi.clearAllMocks();
+    mocks.assertHostedOnboardingMutationOrigin.mockImplementation(() => {});
+    mocks.requireActiveHostedAppSessionFromRequest.mockResolvedValueOnce({
+      member: { id: "member_other" },
+    });
+    const denied = await hostedOpsJunctionRecoveryRoute.POST(recoveryRequest());
+    expect(denied.status).toBe(404);
+    expect(mocks.probeRest).not.toHaveBeenCalled();
+    await expect(denied.json()).resolves.toMatchObject({
+      error: { code: "HOSTED_OPS_ACCESS_DENIED" },
+    });
+
+    vi.clearAllMocks();
+    mocks.assertHostedOnboardingMutationOrigin.mockImplementation(() => {});
+    mocks.requireActiveHostedAppSessionFromRequest.mockResolvedValue({
+      member: { id: "member_ops" },
+    });
+    process.env.DEVICE_SYNC_BACKFILL_DIAGNOSTIC_ENABLED = "false";
+    const gated = await hostedOpsJunctionRecoveryRoute.POST(recoveryRequest());
+    expect(gated.status).toBeGreaterThanOrEqual(400);
+    expect(mocks.probeRest).not.toHaveBeenCalled();
+  });
+
+  it("runs the refresh recovery action and surfaces a rejected provider response", async () => {
+    mocks.probeRest.mockResolvedValue({
+      generatedAt: "2026-07-24T00:00:00.000Z",
+      provider: "junction",
+      result: {
+        request: { endpoint: "refresh" },
+        response: { ok: true, refreshedSourceCount: 1 },
+      },
+    });
+
+    const refreshed = await hostedOpsJunctionRecoveryRoute.POST(
+      createJsonPostRequest(
+        "https://join.example.test/api/ops/device-sync/junction-recovery",
+        {
+          action: "refresh",
+          connectionId: JUNCTION_PUBLIC_CONNECTION_ID,
+          memberId: "member_target",
+          sourceProvider: SELECTED_SOURCE_PROVIDER,
+        },
+        { headers: { origin: "https://join.example.test" } },
+      ),
+    );
+
+    expect(refreshed.status).toBe(200);
+    expect(mocks.probeRest).toHaveBeenCalledWith(
+      expect.objectContaining({ endpoint: "refresh" }),
+    );
+    await expect(refreshed.json()).resolves.toMatchObject({
+      action: "refresh",
+      response: { ok: true },
+    });
+
+    // A real provider failure must reach the operator, not be flattened into
+    // the same shape as a gated endpoint.
+    mocks.probeRest.mockResolvedValue({
+      generatedAt: "2026-07-24T00:00:00.000Z",
+      provider: "junction",
+      result: {
+        request: { endpoint: "trigger_historical_pull" },
+        response: {
+          errorCode: "JUNCTION_TRIGGER_HISTORICAL_PULL_FAILED",
+          ok: false,
+          responseStatus: 500,
+          retryable: false,
+        },
+      },
+    });
+
+    const failed = await hostedOpsJunctionRecoveryRoute.POST(
+      createJsonPostRequest(
+        "https://join.example.test/api/ops/device-sync/junction-recovery",
+        {
+          action: "trigger_historical_pull",
+          connectionId: JUNCTION_PUBLIC_CONNECTION_ID,
+          memberId: "member_target",
+          sourceProvider: SELECTED_SOURCE_PROVIDER,
+        },
+        { headers: { origin: "https://join.example.test" } },
+      ),
+    );
+
+    expect(failed.status).toBe(200);
+    await expect(failed.json()).resolves.toMatchObject({
+      ok: true,
+      response: {
+        errorCode: "JUNCTION_TRIGGER_HISTORICAL_PULL_FAILED",
+        ok: false,
+        responseStatus: 500,
       },
     });
   });

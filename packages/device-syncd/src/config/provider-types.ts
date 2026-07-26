@@ -14,6 +14,12 @@ export interface JunctionDeviceSyncProviderConfig {
   timeseriesBackfillDays?: number;
   reconcileDays?: number;
   reconcileIntervalMs?: number;
+  /**
+   * Activates automatic push-source recovery. Off by default because the
+   * trigger endpoint is enabled per team by the vendor, so shipping the code
+   * and switching it on are deliberately separate steps.
+   */
+  pushSourceRecoveryEnabled?: boolean;
   requestTimeoutMs?: number;
   webhookSecret?: string;
   webhookTimestampToleranceMs?: number;

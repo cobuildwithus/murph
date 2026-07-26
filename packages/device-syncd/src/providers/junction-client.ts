@@ -121,6 +121,24 @@ export interface JunctionHistoricalPullSnapshot {
   sources: readonly JunctionHistoricalPullSource[];
 }
 
+export interface JunctionBulkTriggerHistoricalPullInput {
+  /** Junction source provider slug, for example `garmin`. */
+  sourceProviderSlug: string;
+  userIds: readonly string[];
+  signal?: AbortSignal | null;
+}
+
+export interface JunctionBulkTriggerHistoricalPullResult {
+  /** True when Junction accepted the trigger request. */
+  accepted: boolean;
+  /**
+   * True when Junction rejects the endpoint itself rather than the request.
+   * Link Migration endpoints are disabled by default per team, so this is the
+   * expected response until support enables them.
+   */
+  endpointUnavailable: boolean;
+}
+
 export interface JunctionRefreshUserDataInput {
   signal?: AbortSignal | null;
   timeoutSeconds?: number | null;
@@ -399,6 +417,60 @@ export class JunctionClient {
     );
   }
 
+  /**
+   * Asks Junction to re-run its historical pull for one provider. For a
+   * push-primary provider this is the only lever that can restart a dead
+   * carrier without the member re-authorizing, because there is nothing to pull
+   * directly and a refresh cannot make the provider push again.
+   *
+   * Junction ships this under Link Migration, which is disabled per team by
+   * default. A disabled endpoint answers 403/404 rather than failing the
+   * request, so that case is reported as `endpointUnavailable` and left for the
+   * caller to treat as "not enabled yet" instead of a transport failure.
+   */
+  async bulkTriggerHistoricalPull(
+    input: JunctionBulkTriggerHistoricalPullInput,
+  ): Promise<JunctionBulkTriggerHistoricalPullResult> {
+    const sourceProviderSlug = normalizeJunctionProviderSlug(input.sourceProviderSlug);
+    if (!sourceProviderSlug) {
+      throw new TypeError("Junction historical pull triggers require a provider slug.");
+    }
+
+    const userIds = [
+      ...new Set(
+        input.userIds
+          .map((userId) => normalizeString(userId))
+          .filter((userId): userId is string => typeof userId === "string"),
+      ),
+    ];
+    if (userIds.length === 0) {
+      throw new TypeError("Junction historical pull triggers require at least one user id.");
+    }
+
+    try {
+      await this.requestJson<unknown>(
+        "POST",
+        "/v2/link/bulk_trigger_historical_pull",
+        {
+          provider: sourceProviderSlug,
+          user_ids: userIds,
+        },
+        {
+          endpointKind: "junction_bulk_trigger_historical_pull",
+          signal: input.signal ?? null,
+        },
+      );
+
+      return { accepted: true, endpointUnavailable: false };
+    } catch (error) {
+      if (isJunctionDisabledEndpointError(error)) {
+        return { accepted: false, endpointUnavailable: true };
+      }
+
+      throw error;
+    }
+  }
+
   async refreshUserData(input: JunctionRefreshUserDataInput): Promise<unknown> {
     const search = new URLSearchParams();
     const timeoutSeconds = normalizeJunctionRefreshTimeoutSeconds(input.timeoutSeconds);
@@ -651,7 +723,25 @@ function resolveJunctionEndpointKind(path: string): string {
     return "junction_introspect_historical_pull";
   }
 
+  if (pathname === "/v2/link/bulk_trigger_historical_pull") {
+    return "junction_bulk_trigger_historical_pull";
+  }
+
   return "junction_api";
+}
+
+/**
+ * A gated Junction endpoint answers 403 (not entitled) or 404 (not routed for
+ * this team) instead of failing the call. Both mean "ask support to enable it",
+ * not "the request was wrong", so callers should stop rather than retry.
+ */
+function isJunctionDisabledEndpointError(error: unknown): boolean {
+  if (!isDeviceSyncError(error)) {
+    return false;
+  }
+
+  const status = error.details?.status;
+  return status === 403 || status === 404;
 }
 
 function buildJunctionIntrospectionSearch(input: JunctionIntrospectionInput): URLSearchParams {
