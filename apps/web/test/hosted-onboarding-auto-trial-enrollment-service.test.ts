@@ -271,6 +271,12 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
 
   it("creates a no-card Pulse trial subscription, writes trial billing state, and activates", async () => {
     const prisma = makePrisma();
+    const preparedCryptoDomainRoots = new Map([
+      ["control", { domain: "control" }],
+    ]);
+    mocks.prepareHostedCryptoDomainRootCandidates.mockResolvedValueOnce(
+      preparedCryptoDomainRoots,
+    );
 
     await expect(
       ensureHostedAutoPulseTrialEnrollment({
@@ -374,6 +380,13 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
         timeout: 30_000,
       },
     );
+    expect(mocks.prepareHostedCryptoDomainRootCandidates).toHaveBeenCalledWith({
+      prisma,
+      userId: "member_123",
+    });
+    expect(
+      mocks.prepareHostedCryptoDomainRootCandidates.mock.invocationCallOrder[0],
+    ).toBeLessThan(prisma.$transaction.mock.invocationCallOrder[1] ?? 0);
     expect(mocks.writeHostedMemberStripeBillingTx).toHaveBeenCalledWith(
       expect.objectContaining({
         billingStatus: HostedBillingStatus.active,
@@ -395,6 +408,7 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
     expect(mocks.activateHostedMemberForPositiveSourceTx).toHaveBeenCalledWith(
       expect.objectContaining({
         memberId: "member_123",
+        preparedCryptoDomainRoots,
         skipIfPreviouslyActivated: true,
       }),
     );

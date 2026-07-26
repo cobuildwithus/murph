@@ -341,6 +341,32 @@ describe("hosted onboarding member activation", () => {
     expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(2);
   });
 
+  it("forwards caller-prepared roots into strict positive-source provisioning", async () => {
+    const preparedCryptoDomainRoots = new Map([
+      ["control", { domain: "control" }],
+    ]) as never;
+
+    await activateHostedMemberForPositiveSourceTx({
+      dispatchContext: {
+        eventCreatedAt: new Date("2026-04-12T00:00:00.000Z"),
+        occurredAt: "2026-04-12T00:00:00.000Z",
+        sourceEventId: "evt_prepared_roots",
+        sourceType: "stripe.invoice.paid",
+      },
+      memberId: "member_123",
+      preparedCryptoDomainRoots,
+      prisma: makeTransactionHarness() as never,
+    });
+
+    expect(mocks.provisionPreparedHostedCryptoDomainRootsTx).toHaveBeenCalledWith({
+      prepared: preparedCryptoDomainRoots,
+      reason: "hosted-member.activation",
+      tx: expect.anything(),
+      userId: "member_123",
+    });
+    expect(mocks.provisionHostedCryptoDomainRootsForUserTx).not.toHaveBeenCalled();
+  });
+
   it("zeroes a successful prewarm root when the other domain unwrap fails", async () => {
     const controlRoot = new Uint8Array(32).fill(9);
     const ingressError = new Error("ingress root unavailable");
@@ -484,6 +510,42 @@ describe("hosted onboarding member activation", () => {
       }),
       tx: expect.anything(),
     });
+  });
+
+  it("uses caller-prepared roots for family sponsorship without the legacy bridge", async () => {
+    const member = makeMemberSnapshot({
+      core: {
+        billingStatus: HostedBillingStatus.canceled,
+      },
+    });
+    setActivationMemberSnapshot(member);
+    const preparedCryptoDomainRoots = new Map([
+      ["control", { domain: "control" }],
+    ]) as never;
+
+    await activateHostedMemberForFamilySponsorshipTx({
+      memberId: member.core.id,
+      occurredAt: new Date("2026-06-18T12:00:00.000Z"),
+      preparedCryptoDomainRoots,
+      prisma: makeTransactionHarness({
+        accountGroupMemberships: [{
+          group: { billingStatus: HostedBillingStatus.active, suspendedAt: null },
+          status: "active",
+        }],
+        billingStatus: HostedBillingStatus.canceled,
+        suspendedAt: null,
+        threadContainer: null,
+      }) as never,
+      sourceEventId: "family-subscription:sub_family_prepared",
+    });
+
+    expect(mocks.provisionPreparedHostedCryptoDomainRootsTx).toHaveBeenCalledWith({
+      prepared: preparedCryptoDomainRoots,
+      reason: "hosted-member.activation",
+      tx: expect.anything(),
+      userId: "member_123",
+    });
+    expect(mocks.provisionHostedCryptoDomainRootsForUserTx).not.toHaveBeenCalled();
   });
 
   it("keeps signup welcome text stable across source events sharing the per-member delivery identity", async () => {

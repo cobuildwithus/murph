@@ -349,6 +349,47 @@ test("prepared hosted domain root candidates stay behind the advisory lock and r
   );
 });
 
+test("legacy transaction provisioning prepares every candidate before its first advisory lock", async () => {
+  const signer = await generateP256SigningKeyPair();
+  const cloudflareRecipient = await generateP256EcdhKeyPair();
+  const steps: string[] = [];
+  gcpKmsMock.client = createStepRecordingKmsClient({
+    client: createLocalKmsClient({
+      encryptCalls: [],
+      signCalls: [],
+      signer: signer.privateKey,
+    }),
+    steps,
+  });
+  stubHostedCryptoEnv({
+    cloudflarePublicJwk: cloudflareRecipient.publicJwk,
+    signerPublicKeyPem: signer.publicKeyPem,
+  });
+
+  const { provisionHostedCryptoDomainRootsForUserTx } = await import(
+    "../src/lib/hosted-crypto/domain-root-store"
+  );
+  const recorder = createStepRecordingTransaction(steps);
+
+  await provisionHostedCryptoDomainRootsForUserTx({
+    reason: "test.legacy-transaction-bridge",
+    tx: recorder.prisma,
+    userId: "member-test-legacy-bridge",
+  });
+
+  const firstAdvisoryLock = steps.indexOf("db.advisory-lock");
+  assert.notEqual(firstAdvisoryLock, -1);
+  assert.equal(steps[0], "db.read-active-domains");
+  assert.ok(
+    steps.slice(0, firstAdvisoryLock).some((step) => step.startsWith("kms.")),
+  );
+  assert.ok(
+    steps.slice(firstAdvisoryLock).every((step) => !step.startsWith("kms.")),
+  );
+  assert.equal(steps.filter((step) => step === "db.advisory-lock").length, 4);
+  assert.equal(recorder.persistedEnvelopes.length, 4);
+});
+
 test("prepared-only provisioning fails closed without signing inside the transaction", async () => {
   const signer = await generateP256SigningKeyPair();
   const cloudflareRecipient = await generateP256EcdhKeyPair();

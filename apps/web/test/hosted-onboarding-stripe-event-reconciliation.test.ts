@@ -366,7 +366,13 @@ describe("hosted Stripe event reconciliation", () => {
   it("retrieves the live Stripe event during reconciliation and marks the receipt completed", async () => {
     const prisma = createStripeEventPrismaHarness();
     const event = makeInvoicePaidEvent();
+    const preparedCryptoDomainRoots = new Map([
+      ["control", { domain: "control" }],
+    ]);
     mocks.stripe.events.retrieve.mockResolvedValue(event);
+    mocks.prepareHostedCryptoDomainRootCandidates.mockResolvedValueOnce(
+      preparedCryptoDomainRoots,
+    );
 
     await recordHostedStripeEvent({
       event,
@@ -397,6 +403,16 @@ describe("hosted Stripe event reconciliation", () => {
       prisma.client,
       "active",
       makeCanonicalSubscription(),
+      preparedCryptoDomainRoots,
+    );
+    expect(mocks.prepareHostedCryptoDomainRootCandidates).toHaveBeenCalledWith({
+      prisma: prisma.client,
+      userId: "member_123",
+    });
+    expect(
+      mocks.prepareHostedCryptoDomainRootCandidates.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      vi.mocked(prisma.client.$transaction).mock.invocationCallOrder[0] ?? 0,
     );
     expect(mocks.stripe.subscriptions.retrieve).toHaveBeenCalledWith("sub_123");
     expect(prisma.client.$transaction).toHaveBeenCalledWith(
@@ -465,6 +481,7 @@ describe("hosted Stripe event reconciliation", () => {
     expect(mocks.sendHostedSignupWelcomeEmailForMember).not.toHaveBeenCalled();
     expect(mocks.sendHostedSignupNotificationEmailForMemberBestEffort).not.toHaveBeenCalled();
     expect(mocks.sendHostedSubscriptionCancellationEmailForMember).not.toHaveBeenCalled();
+    expect(mocks.prepareHostedCryptoDomainRootCandidates).not.toHaveBeenCalled();
   });
 
   it("reconciles usage-credit Checkout before subscription-shaped handling", async () => {
