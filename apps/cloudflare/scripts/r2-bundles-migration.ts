@@ -5,6 +5,15 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 
+import {
+  isHostedWorkspaceSnapshotV2Ref,
+  parseHostedExecutionSnapshotRef,
+  readHostedExecutionSnapshotBaseRef,
+  readHostedExecutionSnapshotDeltaRef,
+  readHostedExecutionSnapshotHotRef,
+} from "@murphai/hosted-execution/parsers";
+
+import { isStoredHostedBundleObjectKey } from "../src/bundle-store.js";
 import { createHostedStorageNamespaceId } from "../src/storage-paths.js";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
@@ -20,7 +29,13 @@ const SIMPLE_ETAG_PATTERN = /^"[a-f0-9]{32}"$/iu;
 const EMPTY_OBJECT_ETAG = '"d41d8cd98f00b204e9800998ecf8427e"';
 const MAX_REPORTED_FINGERPRINTS = 8;
 const CURRENT_USER_NAMESPACE_PATTERN = /^users\/(hsn_[a-f0-9]{24})\//u;
-const ACTIVE_HOSTED_MEMBER_IDS_SQL = "SELECT id FROM hosted_member ORDER BY id;";
+const ACTIVE_HOSTED_MEMBER_OWNERS_SQL = `SELECT json_build_object(
+  'memberId', member.id,
+  'snapshotRef', workspace.snapshot_ref
+)::text
+FROM hosted_member AS member
+LEFT JOIN hosted_workspace AS workspace ON workspace.user_id = member.id
+ORDER BY member.id;`;
 
 const commonChildEnvironmentNames = [
   "HOME",
@@ -73,8 +88,9 @@ export const R2_BUNDLES_ACTIVE_OWNER_GATE_USAGE = `Usage:
 
 The gate runs only after account-deletion admission and every ordinary R2
 writer is closed. It proves that two stable source inventories contain only
-current user namespaces derived in memory from canonical hosted-member ids.
-No member id, namespace id, or object key is printed or written to disk.
+current user namespaces or exact legacy bundle keys referenced by a current
+canonical workspace snapshot. No member id, namespace id, snapshot reference,
+or object key is printed or written to disk.
 
 Options:
   --source <oc-bucket>  Frozen source bucket to inspect.
@@ -552,7 +568,7 @@ export async function runR2BundlesActiveOwnerGate(
       "-v",
       "ON_ERROR_STOP=1",
       "-c",
-      ACTIVE_HOSTED_MEMBER_IDS_SQL,
+      ACTIVE_HOSTED_MEMBER_OWNERS_SQL,
     ],
     command: "murph-prod-psql-ro",
     cwd: appDir,
@@ -564,18 +580,38 @@ export async function runR2BundlesActiveOwnerGate(
     },
     label: "Canonical hosted-member owner query",
   });
-  const activeMemberIds = parseActiveHostedMemberIds(ownerQuery.stdout);
+  const activeOwners = parseActiveHostedMemberOwners(ownerQuery.stdout);
   const activeNamespaces = new Set(
-    activeMemberIds.map((memberId) => createHostedStorageNamespaceId(memberId)),
+    activeOwners.map((owner) => owner.namespace),
   );
+  const canonicalLegacyObjectKeys = new Set(
+    activeOwners.flatMap((owner) => owner.legacyObjectKeys),
+  );
+  const canonicalCheckpointObjectKeys = new Set(
+    activeOwners.flatMap((owner) => owner.checkpointObjectKeys),
+  );
+  const sourceObjectKeys = new Set(secondInventory.map((entry) => entry.key));
+  const missingCanonicalCheckpointObjectCount = [...canonicalCheckpointObjectKeys]
+    .filter((key) => !sourceObjectKeys.has(key))
+    .length;
+  if (missingCanonicalCheckpointObjectCount > 0) {
+    throw new Error(
+      `${missingCanonicalCheckpointObjectCount.toLocaleString("en-US")} canonical hosted `
+      + "workspace checkpoint object(s) are absent from the frozen source; "
+      + "destination creation is blocked.",
+    );
+  }
   let unownedObjectCount = 0;
+  let canonicalLegacyObjectCount = 0;
   const observedOwnedNamespaces = new Set<string>();
   for (const entry of secondInventory) {
     const namespace = CURRENT_USER_NAMESPACE_PATTERN.exec(entry.key)?.[1] ?? null;
-    if (!namespace || !activeNamespaces.has(namespace)) {
-      unownedObjectCount += 1;
-    } else {
+    if (namespace && activeNamespaces.has(namespace)) {
       observedOwnedNamespaces.add(namespace);
+    } else if (canonicalLegacyObjectKeys.has(entry.key)) {
+      canonicalLegacyObjectCount += 1;
+    } else {
+      unownedObjectCount += 1;
     }
   }
 
@@ -590,18 +626,76 @@ export async function runR2BundlesActiveOwnerGate(
   log(
     `Verified ${secondInventory.length.toLocaleString("en-US")} frozen source object(s) `
     + `across ${observedOwnedNamespaces.size.toLocaleString("en-US")} active `
-    + "hosted-member namespace(s).",
+    + "hosted-member namespace(s), including "
+    + `${canonicalLegacyObjectCount.toLocaleString("en-US")} exact canonical `
+    + "legacy checkpoint object(s).",
   );
 }
 
-function parseActiveHostedMemberIds(value: string): string[] {
-  const ids = value.split(/\r?\n/u).filter((line) => line.length > 0);
-  for (const id of ids) {
-    if (id.trim() !== id || /\s/u.test(id)) {
-      throw new TypeError("Canonical hosted-member owner query returned an invalid id.");
+interface ActiveHostedMemberOwner {
+  checkpointObjectKeys: string[];
+  legacyObjectKeys: string[];
+  namespace: string;
+}
+
+function parseActiveHostedMemberOwners(value: string): ActiveHostedMemberOwner[] {
+  const lines = value.split(/\r?\n/u).filter((line) => line.length > 0);
+  const memberIds = new Set<string>();
+  return lines.map((line): ActiveHostedMemberOwner => {
+    const parsed = parseJson(
+      line,
+      "Canonical hosted-member owner query returned invalid JSON.",
+    );
+    if (!isRecord(parsed)
+      || !Object.prototype.hasOwnProperty.call(parsed, "memberId")
+      || !Object.prototype.hasOwnProperty.call(parsed, "snapshotRef")) {
+      throw new TypeError("Canonical hosted-member owner query returned an invalid row.");
     }
-  }
-  return ids;
+    const memberId = requireString(
+      parsed,
+      "memberId",
+      "Canonical hosted-member owner query",
+    );
+    if (memberId.trim() !== memberId || /\s/u.test(memberId) || memberIds.has(memberId)) {
+      throw new TypeError("Canonical hosted-member owner query returned an invalid member id.");
+    }
+    memberIds.add(memberId);
+
+    const namespace = createHostedStorageNamespaceId(memberId);
+    const snapshotRef = parseHostedExecutionSnapshotRef(
+      parsed.snapshotRef,
+      "Canonical hosted workspace snapshot reference",
+    );
+    if (isHostedWorkspaceSnapshotV2Ref(snapshotRef)) {
+      if (snapshotRef.userId !== memberId
+        || CURRENT_USER_NAMESPACE_PATTERN.exec(snapshotRef.objectKey)?.[1] !== namespace) {
+        throw new TypeError(
+          "Canonical hosted workspace snapshot reference does not match its member owner.",
+        );
+      }
+      return {
+        checkpointObjectKeys: [snapshotRef.objectKey],
+        legacyObjectKeys: [],
+        namespace,
+      };
+    }
+
+    const legacyObjectKeys = [
+      readHostedExecutionSnapshotBaseRef(snapshotRef),
+      readHostedExecutionSnapshotHotRef(snapshotRef),
+      readHostedExecutionSnapshotDeltaRef(snapshotRef),
+    ].flatMap((ref) => ref ? [ref.key] : []);
+    if (legacyObjectKeys.some((key) => !isStoredHostedBundleObjectKey(key))) {
+      throw new TypeError(
+        "Canonical hosted workspace snapshot reference uses an unsupported legacy object key.",
+      );
+    }
+    return {
+      checkpointObjectKeys: [...new Set(legacyObjectKeys)],
+      legacyObjectKeys: [...new Set(legacyObjectKeys)],
+      namespace,
+    };
+  });
 }
 
 async function copyFrozenSource(input: {

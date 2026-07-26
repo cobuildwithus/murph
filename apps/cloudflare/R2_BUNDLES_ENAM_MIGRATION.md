@@ -25,8 +25,9 @@ source moves.
   phase that is safe to run against a live source.
 - Before the destination exists, close account-deletion admission, retire every
   predecessor invocation, and prove every frozen source object belongs to a
-  current canonical hosted-member namespace. Unknown or unowned placement
-  blocks the migration without printing its key.
+  current canonical hosted-member namespace or is an exact legacy bundle key
+  reached from that member's canonical workspace snapshot reference. Unknown
+  or unowned placement blocks the migration without printing its key.
 - The OC source remains authoritative until the binding switch and remains the
   rollback source until the first durable ENAM checkpoint. The tool never
   deletes from the OC source.
@@ -486,17 +487,26 @@ unset R2_MIGRATION_ACCESS_KEY_ID R2_MIGRATION_SECRET_ACCESS_KEY CLOUDFLARE_ACCOU
 
 Revoke that source-only key immediately. The gate performs two stable,
 paginated source inventories and one complete Keychain-backed read-only query
-of `hosted_member.id`. It derives the deterministic `hsn_` namespace ids in
-memory, reports counts only, and refuses every source object that is not under
-a current hosted-member namespace. It never prints or writes a member id,
-namespace id, object key, or database URL.
+of each current `hosted_member.id` and its left-joined
+`hosted_workspace.snapshot_ref`. It derives the deterministic `hsn_` namespace
+ids in memory and reuses the runtime's canonical snapshot parser to extract the
+exact base, hot, or delta bundle keys from any supported pre-v2 reference. It
+requires every current canonical checkpoint object to exist in the frozen
+source, reports counts only, and refuses every source object that is neither
+under a current hosted-member namespace nor exactly referenced by one of those
+canonical legacy snapshots. It never prints or writes a member id, namespace
+id, snapshot reference, object key, or database URL.
 
 A request hidden from or delayed in Vercel logs cannot evade this proof. If it
 removed its member row but left even one R2 object, that namespace is unowned
-and destination creation fails. If it completed R2 cleanup, there is no object
-to copy. An empty owner result, unknown key placement, unstable inventory,
-failed automatic pagination, malformed AWS output, failed Postgres query, or
-unowned object all fail closed.
+and every legacy snapshot reference disappeared through the existing cascade,
+so destination creation fails. If it completed R2 cleanup, there is no object
+to copy. A dormant current member's supported legacy full, layered, or working
+checkpoint remains copyable only through its exact canonical reference; a
+different or unreferenced legacy key remains ambiguous. An empty owner result,
+missing canonical checkpoint object, unknown key placement, malformed canonical
+snapshot reference, unstable inventory, failed automatic pagination, malformed
+AWS output, failed Postgres query, or unowned object all fail closed.
 
 Any failure keeps OC authoritative and the destination nonexistent. Preserve
 the source, clear the maintenance variable through a production deployment,

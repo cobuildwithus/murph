@@ -29,6 +29,12 @@ const ACTIVE_MEMBER_ID = "member_active_fixture";
 const ACTIVE_NAMESPACE = createHostedStorageNamespaceId(ACTIVE_MEMBER_ID);
 const ACTIVE_MEMBER_KEY =
   `users/${ACTIVE_NAMESPACE}/workspace-snapshots/snapshot_fixture.snapshot.enc`;
+const LEGACY_FULL_KEY = `bundles/vault/${"a".repeat(48)}.bundle.json`;
+const LEGACY_BASE_KEY =
+  `users/bundles/${"b".repeat(24)}/vault/${"c".repeat(48)}.bundle.json`;
+const LEGACY_HOT_KEY =
+  `users/bundles/${"d".repeat(24)}/vault/${"e".repeat(48)}.bundle.json`;
+const LEGACY_DELTA_KEY = `bundles/vault/${"f".repeat(48)}.bundle.json`;
 const MIGRATION_ACCESS_KEY = "migration-access-fixture";
 const MIGRATION_SECRET_KEY = "migration-secret-fixture";
 const CLOUDFLARE_TOKEN = "cloudflare-fixture";
@@ -95,8 +101,56 @@ function migrationEnvironment(extra: Record<string, string> = {}): Record<string
   };
 }
 
+function legacyBundleRef(key: string, hashSeed: string) {
+  return {
+    hash: hashSeed.repeat(64),
+    key,
+    size: 1024,
+    updatedAt: "2026-07-22T20:00:00.000Z",
+  };
+}
+
+function workspaceSnapshotV2Ref(
+  overrides: { objectKey?: string; userId?: string } = {},
+) {
+  const objectKey = overrides.objectKey ?? ACTIVE_MEMBER_KEY;
+  const userId = overrides.userId ?? ACTIVE_MEMBER_ID;
+  const schema = "murph.hosted-workspace-snapshot.v2";
+  const snapshotId = "snapshot_fixture";
+  return {
+    archive: {
+      compression: "zstd",
+      encryptedByteSize: 1024,
+      encryptedObjectSha256: "a".repeat(64),
+      fileCount: 1,
+      format: "tar",
+      plaintextArchiveSha256: "b".repeat(64),
+      totalPlainBytes: 512,
+    },
+    createdAt: "2026-07-22T20:00:00.000Z",
+    encryption: {
+      aad: {
+        objectKey,
+        purpose: "workspace-snapshot",
+        schema,
+        snapshotId,
+        userId,
+      },
+      ivBase64: "AAAAAAAAAAAAAAAA",
+      rootKeyId: "root-key-fixture",
+      scheme: "murph.hosted-workspace-snapshot-single-object.v1",
+      wrappedDataKey: "wrapped-data-key-fixture",
+    },
+    objectKey,
+    schema,
+    snapshotId,
+    upload: "direct-r2-presigned-put",
+    userId,
+  };
+}
+
 interface MockRunnerOptions {
-  activeMemberIds?: string[];
+  activeOwners?: Array<{ memberId: string; snapshotRef: unknown | null }>;
   copyObjectFailure?: Error;
   destinationInventory?: R2ObjectInventoryEntry[];
   destinationInventoryReadHook?: (input: {
@@ -105,6 +159,8 @@ interface MockRunnerOptions {
   }) => R2ObjectInventoryEntry[];
   destinationLifecycleEmpty?: boolean;
   ownerQueryFailure?: Error;
+  ownerQueryStdout?: string;
+  sourceInventoryFailure?: Error;
   sourceInventoryReadHook?: (input: {
     inventory: R2ObjectInventoryEntry[];
     readCount: number;
@@ -140,9 +196,16 @@ function createMockRunner(input: MockRunnerOptions = {}): {
         }
         if (call.command === "murph-prod-psql-ro") {
           if (input.ownerQueryFailure) throw input.ownerQueryFailure;
+          const activeOwners = input.activeOwners ?? [{
+            memberId: ACTIVE_MEMBER_ID,
+            snapshotRef: null,
+          }];
           return {
             stderr: "",
-            stdout: `${(input.activeMemberIds ?? [ACTIVE_MEMBER_ID]).join("\n")}\n`,
+            stdout: input.ownerQueryStdout
+              ?? `${activeOwners.map((owner) => JSON.stringify(owner)).join("\n")}${
+                activeOwners.length > 0 ? "\n" : ""
+              }`,
           };
         }
         if (call.command === "pnpm" && call.args.includes("info")) {
@@ -197,6 +260,7 @@ function createMockRunner(input: MockRunnerOptions = {}): {
           && call.args[1] === "list-objects-v2") {
           const bucket = call.args[call.args.indexOf("--bucket") + 1];
           if (bucket === SOURCE_BUCKET) {
+            if (input.sourceInventoryFailure) throw input.sourceInventoryFailure;
             sourceInventoryReadCount += 1;
             sourceInventory = input.sourceInventoryReadHook?.({
               inventory: sourceInventory.map((entry) => ({ ...entry })),
@@ -281,6 +345,10 @@ describe("R2 active-owner gate", () => {
   it("joins every stable source object to canonical hosted-member ownership", async () => {
     const logs: string[] = [];
     const { calls, runner } = createMockRunner({
+      activeOwners: [{
+        memberId: ACTIVE_MEMBER_ID,
+        snapshotRef: workspaceSnapshotV2Ref(),
+      }],
       sourceInventory: [
         inventoryEntry({ key: ACTIVE_MEMBER_KEY }),
         inventoryEntry({
@@ -300,16 +368,40 @@ describe("R2 active-owner gate", () => {
     });
 
     expect(logs).toEqual([
-      "Verified 2 frozen source object(s) across 1 active hosted-member namespace(s).",
+      "Verified 2 frozen source object(s) across 1 active hosted-member namespace(s), "
+      + "including 0 exact canonical legacy checkpoint object(s).",
     ]);
     const ownerCall = calls.find((call) => call.command === "murph-prod-psql-ro");
     expect(ownerCall?.env.DATABASE_URL).toBeUndefined();
     expect(ownerCall?.env.R2_MIGRATION_SECRET_ACCESS_KEY).toBeUndefined();
+    expect(ownerCall?.args.join(" ")).toContain("workspace.snapshot_ref");
+  });
+
+  it("blocks a v2 snapshot reference that does not match its member owner", async () => {
+    const mismatchedMemberId = "member_mismatched_fixture";
+    const { runner } = createMockRunner({
+      activeOwners: [{
+        memberId: ACTIVE_MEMBER_ID,
+        snapshotRef: workspaceSnapshotV2Ref({ userId: mismatchedMemberId }),
+      }],
+      sourceInventory: [inventoryEntry({ key: ACTIVE_MEMBER_KEY })],
+    });
+
+    const error = await runR2BundlesActiveOwnerGate({
+      source: SOURCE_BUCKET,
+      sourceFrozen: true,
+    }, migrationEnvironment(), { runner }).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(Error);
+    expect(String(error)).toContain("does not match its member owner");
+    expect(String(error)).not.toContain(ACTIVE_MEMBER_ID);
+    expect(String(error)).not.toContain(mismatchedMemberId);
+    expect(String(error)).not.toContain(ACTIVE_MEMBER_KEY);
   });
 
   it("blocks an object whose member owner is absent without exposing either identifier", async () => {
     const { runner } = createMockRunner({
-      activeMemberIds: [],
+      activeOwners: [],
       sourceInventory: [inventoryEntry({ key: ACTIVE_MEMBER_KEY })],
     });
 
@@ -325,9 +417,58 @@ describe("R2 active-owner gate", () => {
     expect(String(error)).not.toContain(ACTIVE_MEMBER_KEY);
   });
 
-  it("blocks ambiguous non-current object placement", async () => {
+  it.each([
+    {
+      label: "full",
+      keys: [LEGACY_FULL_KEY],
+      snapshotRef: legacyBundleRef(LEGACY_FULL_KEY, "1"),
+    },
+    {
+      label: "layered base and hot",
+      keys: [LEGACY_BASE_KEY, LEGACY_HOT_KEY],
+      snapshotRef: {
+        base: legacyBundleRef(LEGACY_BASE_KEY, "2"),
+        hot: legacyBundleRef(LEGACY_HOT_KEY, "3"),
+        schema: "murph.hosted-execution-layered-snapshot.v1",
+      },
+    },
+    {
+      label: "working base and delta",
+      keys: [LEGACY_BASE_KEY, LEGACY_DELTA_KEY],
+      snapshotRef: {
+        base: legacyBundleRef(LEGACY_BASE_KEY, "4"),
+        delta: legacyBundleRef(LEGACY_DELTA_KEY, "5"),
+        schema: "murph.hosted-execution-working-snapshot.v1",
+      },
+    },
+  ])("permits exact canonical legacy $label checkpoint objects", async ({
+    keys,
+    snapshotRef,
+  }) => {
+    const logs: string[] = [];
     const { runner } = createMockRunner({
-      sourceInventory: [inventoryEntry({ key: "bundles/vault/opaque.bundle.json" })],
+      activeOwners: [{ memberId: ACTIVE_MEMBER_ID, snapshotRef }],
+      sourceInventory: keys.map((key) => inventoryEntry({ key })),
+    });
+
+    await runR2BundlesActiveOwnerGate({
+      source: SOURCE_BUCKET,
+      sourceFrozen: true,
+    }, migrationEnvironment(), {
+      log: (message) => logs.push(message),
+      runner,
+    });
+
+    expect(logs).toEqual([
+      `Verified ${keys.length} frozen source object(s) across 0 active `
+      + `hosted-member namespace(s), including ${keys.length} exact canonical `
+      + "legacy checkpoint object(s).",
+    ]);
+  });
+
+  it("blocks the same legacy object when no current snapshot references it", async () => {
+    const { runner } = createMockRunner({
+      sourceInventory: [inventoryEntry({ key: LEGACY_FULL_KEY })],
     });
 
     await expect(runR2BundlesActiveOwnerGate({
@@ -336,6 +477,63 @@ describe("R2 active-owner gate", () => {
     }, migrationEnvironment(), { runner })).rejects.toThrow(
       "outside current hosted-member ownership",
     );
+  });
+
+  it("blocks a canonical legacy checkpoint whose object is absent from the source", async () => {
+    const { runner } = createMockRunner({
+      activeOwners: [{
+        memberId: ACTIVE_MEMBER_ID,
+        snapshotRef: legacyBundleRef(LEGACY_FULL_KEY, "6"),
+      }],
+      sourceInventory: [inventoryEntry({ key: ACTIVE_MEMBER_KEY })],
+    });
+
+    const error = await runR2BundlesActiveOwnerGate({
+      source: SOURCE_BUCKET,
+      sourceFrozen: true,
+    }, migrationEnvironment(), { runner }).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(Error);
+    expect(String(error)).toContain("checkpoint object(s) are absent");
+    expect(String(error)).not.toContain(ACTIVE_MEMBER_ID);
+    expect(String(error)).not.toContain(LEGACY_FULL_KEY);
+  });
+
+  it("blocks a deleted member's legacy object", async () => {
+    const { runner } = createMockRunner({
+      activeOwners: [],
+      sourceInventory: [inventoryEntry({ key: LEGACY_FULL_KEY })],
+    });
+
+    await expect(runR2BundlesActiveOwnerGate({
+      source: SOURCE_BUCKET,
+      sourceFrozen: true,
+    }, migrationEnvironment(), { runner })).rejects.toThrow(
+      "outside current hosted-member ownership",
+    );
+  });
+
+  it("fails closed on a malformed canonical snapshot reference without exposing it", async () => {
+    const privateMalformedKey = "private-malformed-checkpoint-key";
+    const { runner } = createMockRunner({
+      ownerQueryStdout: `${JSON.stringify({
+        memberId: ACTIVE_MEMBER_ID,
+        snapshotRef: {
+          key: privateMalformedKey,
+        },
+      })}\n`,
+      sourceInventory: [inventoryEntry({ key: ACTIVE_MEMBER_KEY })],
+    });
+
+    const error = await runR2BundlesActiveOwnerGate({
+      source: SOURCE_BUCKET,
+      sourceFrozen: true,
+    }, migrationEnvironment(), { runner }).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(Error);
+    expect(String(error)).toContain("snapshot reference");
+    expect(String(error)).not.toContain(ACTIVE_MEMBER_ID);
+    expect(String(error)).not.toContain(privateMalformedKey);
   });
 
   it("blocks an unstable source inventory before reading owner ids", async () => {
@@ -367,6 +565,20 @@ describe("R2 active-owner gate", () => {
     }, migrationEnvironment(), { runner })).rejects.toThrow(
       "read-only owner query unavailable",
     );
+  });
+
+  it("fails closed when automatic source pagination fails before reading owners", async () => {
+    const { calls, runner } = createMockRunner({
+      sourceInventoryFailure: new Error("automatic source pagination failed"),
+    });
+
+    await expect(runR2BundlesActiveOwnerGate({
+      source: SOURCE_BUCKET,
+      sourceFrozen: true,
+    }, migrationEnvironment(), { runner })).rejects.toThrow(
+      "automatic source pagination failed",
+    );
+    expect(calls.some((call) => call.command === "murph-prod-psql-ro")).toBe(false);
   });
 });
 
