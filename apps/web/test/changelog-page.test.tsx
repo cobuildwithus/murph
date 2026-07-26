@@ -52,6 +52,7 @@ describe("ChangelogPage", () => {
       await ChangelogPage({ searchParams: Promise.resolve({}) }),
     );
 
+    expect(markup).toContain("A Murph that knows when to speak");
     expect(markup).toContain("Group chats that read the room");
     expect(markup).toContain(
       "Updated documents, honest reactions, usage you can see",
@@ -62,7 +63,7 @@ describe("ChangelogPage", () => {
       "Standings that explain themselves, payments that finish",
     );
     expect(markup).toContain("Medical records, without the integration jargon");
-    expect(markup).toContain("Replies that know what they are answering");
+    expect(markup).not.toContain("Replies that know what they are answering");
     expect(markup).toContain("Improvements");
     expect(markup).not.toContain("Under the hood");
     expect(markup).not.toContain("Your records and measurements, in one place");
@@ -70,12 +71,46 @@ describe("ChangelogPage", () => {
     expect(markup).not.toContain("Better answers, better instincts");
     expect(markup).not.toContain("Murph referees your group challenge");
     expect(markup).toContain('aria-label="Changelog pages"');
-    expect(markup).toContain('href="/changelog?edition=2026-07-17"');
+    expect(markup).toContain('href="/changelog?edition=2026-07-18"');
     expect(markup).toContain(
       'href="/changelog?edition=2026-07-19#medical-records-plain-language"',
     );
     expect(markup).toContain("Older");
     expect(markup).not.toContain(">Newer<");
+  });
+
+  it("renders the new try-it controls with their exact prompts", async () => {
+    const markup = renderToStaticMarkup(
+      await ChangelogPage({ searchParams: Promise.resolve({}) }),
+    );
+
+    expect(markup).toContain("Ask about X");
+    expect(markup).toContain("Turn it up");
+    expect(markup).toMatch(/Ask what(?:&#x27;|')s new/u);
+    expect(
+      mocks.resolveHostedMurphContactOptions.mock.calls.map(([input]) => input),
+    ).toEqual(
+      expect.arrayContaining([
+        {
+          message: {
+            body: "What are people on X saying about zone 2 training this week?",
+            subject: "Try it: Ask Grok what people are saying on X",
+          },
+        },
+        {
+          message: {
+            body: "Turn up my Unhinged setting a little.",
+            subject: "Try it: Ask Murph to loosen up",
+          },
+        },
+        {
+          message: {
+            body: "What changed in Murph this week?",
+            subject: "Try it: Ask Murph what changed",
+          },
+        },
+      ]),
+    );
   });
 
   it("renders explanatory visuals for the major new features", async () => {
@@ -105,7 +140,7 @@ describe("ChangelogPage", () => {
     );
     expect(markup).not.toContain("The latest seven days");
     expect(markup).toContain('href="/changelog"');
-    expect(markup).toContain('href="/changelog?edition=2026-07-02"');
+    expect(markup).toContain('href="/changelog?edition=2026-07-03"');
     expect(markup).toContain("Newer");
     expect(markup).toContain("Older");
   });
@@ -139,13 +174,24 @@ describe("ChangelogPage", () => {
           .map((item) => item.id),
       ),
     );
-    const metadata = await generateMetadata({
-      searchParams: Promise.resolve({ edition: "2026-07-08" }),
-    });
+    const [pageOneMetadata, metadata] = await Promise.all([
+      generateMetadata({ searchParams: Promise.resolve({}) }),
+      generateMetadata({
+        searchParams: Promise.resolve({ edition: "2026-07-08" }),
+      }),
+    ]);
 
+    expect(pageOneMetadata).toEqual(
+      expect.objectContaining({
+        alternates: { canonical: "/changelog" },
+        openGraph: expect.objectContaining({
+          images: [expect.objectContaining({ url: pageOneCardUrl })],
+        }),
+      }),
+    );
     expect(metadata).toEqual(
       expect.objectContaining({
-        alternates: { canonical: "/changelog?edition=2026-07-10" },
+        alternates: { canonical: "/changelog?edition=2026-07-11" },
         openGraph: expect.objectContaining({
           images: [expect.objectContaining({ url: pageThreeCardUrl })],
         }),

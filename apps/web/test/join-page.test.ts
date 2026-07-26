@@ -27,6 +27,7 @@ const mocks = vi.hoisted(() => ({
     sessionId: string | null;
   } | null,
   readHostedConsentStatus: vi.fn(),
+  readHostedMemberOwnsSubscription: vi.fn(),
   redirect: vi.fn((path: string) => {
     throw new Error(`NEXT_REDIRECT:${path}`);
   }),
@@ -91,6 +92,10 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-session", () => ({
   getHostedPrivySession: mocks.getHostedPrivySession,
 }));
 
+vi.mock("@/src/lib/hosted-onboarding/hosted-member-billing-store", () => ({
+  readHostedMemberOwnsSubscription: mocks.readHostedMemberOwnsSubscription,
+}));
+
 vi.mock("@/src/components/hosted-onboarding/phone-country-code-provider", () => ({
   PhoneCountryCodeProvider(input: { children: React.ReactNode }) {
     return createElement(
@@ -138,6 +143,7 @@ beforeEach(() => {
   mocks.joinInviteSuccessClientProps = null;
   mocks.resourceHintOrigins = null;
   mocks.getPrisma.mockReturnValue({ prisma: true });
+  mocks.readHostedMemberOwnsSubscription.mockResolvedValue(false);
   mocks.getHostedPageAuthSnapshot.mockResolvedValue({
     authenticated: true,
     authenticatedMember: {
@@ -249,40 +255,47 @@ test("JoinInvitePage builds a server model with the app-session member", async (
   assert.doesNotMatch(markup, /data-share-code/);
 });
 
-test("JoinInvitePage sends a matched lapsed member to the subscription recovery surface", async () => {
-  const { default: JoinInvitePage } = await import("../app/join/[inviteCode]/page");
-  mocks.getHostedPageAuthSnapshot.mockResolvedValueOnce({
-    authenticated: true,
-    authenticatedMember: {
-      billingStatus: "paused",
-      createdAt: new Date("2026-07-03T08:00:00.000Z"),
-      id: "member_paused",
-      suspendedAt: null,
-      updatedAt: new Date("2026-07-13T08:00:00.000Z"),
-    },
-    session: {
-      identity: null,
-      linkedAccounts: [],
-      verifiedPrivyUser: { id: "test-privy-user" },
-    },
-  });
-  mocks.getHostedInviteStatus.mockResolvedValueOnce(createStatus({
-    session: {
+test.each([
+  "incomplete",
+  "paused",
+] as const)(
+  "JoinInvitePage sends a matched %s member with an existing subscription to recovery",
+  async (billingStatus) => {
+    const { default: JoinInvitePage } = await import("../app/join/[inviteCode]/page");
+    mocks.readHostedMemberOwnsSubscription.mockResolvedValueOnce(true);
+    mocks.getHostedPageAuthSnapshot.mockResolvedValueOnce({
       authenticated: true,
-      expiresAt: null,
-      matchesInvite: true,
-    },
-    stage: "active",
-  }));
+      authenticatedMember: {
+        billingStatus,
+        createdAt: new Date("2026-07-03T08:00:00.000Z"),
+        id: `member_${billingStatus}`,
+        suspendedAt: null,
+        updatedAt: new Date("2026-07-13T08:00:00.000Z"),
+      },
+      session: {
+        identity: null,
+        linkedAccounts: [],
+        verifiedPrivyUser: { id: "test-privy-user" },
+      },
+    });
+    mocks.getHostedInviteStatus.mockResolvedValueOnce(createStatus({
+      session: {
+        authenticated: true,
+        expiresAt: null,
+        matchesInvite: true,
+      },
+      stage: "active",
+    }));
 
-  await expect(JoinInvitePage({
-    params: Promise.resolve({ inviteCode: "invite-code" }),
-    searchParams: Promise.resolve({ preview: undefined }),
-  })).rejects.toThrow("NEXT_REDIRECT:/settings#subscription");
+    await expect(JoinInvitePage({
+      params: Promise.resolve({ inviteCode: "invite-code" }),
+      searchParams: Promise.resolve({ preview: undefined }),
+    })).rejects.toThrow("NEXT_REDIRECT:/settings#subscription");
 
-  expect(mocks.redirect).toHaveBeenCalledWith("/settings#subscription");
-  expect(mocks.joinInvitePageViewProps).toBeNull();
-});
+    expect(mocks.redirect).toHaveBeenCalledWith("/settings#subscription");
+    expect(mocks.joinInvitePageViewProps).toBeNull();
+  },
+);
 
 test("JoinInvitePage leaves a suspended paused member in the blocked flow", async () => {
   const { default: JoinInvitePage } = await import("../app/join/[inviteCode]/page");
