@@ -138,7 +138,10 @@ describe('assistant capability-offers prompt contract', () => {
     expect(section).not.toContain('proactively call `action="post_join_offer"` once')
     expect(section).toContain('`action="read_shared"` as the only hosted path')
     expect(section).toContain('resolves live authority lazily after the tool call')
-    expect(section).toContain("exact handle appears in exactly one returned member's `currentTurnHandles`")
+    expect(section).toContain('Model-size `status="partial"` lists current `omittedParticipantIds`')
+    expect(section).toContain('never infer their departure, score, diagnostics, or permission')
+    expect(section).toContain('or call the standings complete')
+    expect(section).toContain("an exact `Sender:` handle must appear in exactly one returned member's `currentTurnHandles`")
     expect(section).toContain('Scheduled and detached reads have no current-turn handles')
     expect(section).not.toContain('For running-challenge standings')
     expect(section).toContain('`not_granted`, `granted` plus `missing`, and `available`')
@@ -246,6 +249,14 @@ describe('assistant capability-offers prompt contract', () => {
     expect(prompt).toContain('coarse connection status')
     expect(prompt).toContain('connection-wide sync-job times')
     expect(prompt).toContain('raw provider or account identity')
+    expect(prompt).toContain('total/deep/REM sleep minutes')
+    expect(prompt).toContain(
+      "`workouts.v0` day records listing each workout's local start time, duration, and type",
+    )
+    expect(prompt).toContain('canonical event zone (validated vault fallback)')
+    expect(prompt).toContain(
+      'it excludes absolute timestamps, routes, location, heart rate, or provider identity',
+    )
   })
 
   it('keeps the new-group contact handoff natural and reactive', () => {

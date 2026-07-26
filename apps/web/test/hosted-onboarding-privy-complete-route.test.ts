@@ -169,6 +169,95 @@ describe("hosted onboarding Privy completion route", () => {
     });
   });
 
+  it("preserves the join continuation for incomplete existing-subscription recovery", async () => {
+    const member = {
+      ...createHostedMember(),
+      billingStatus: "incomplete",
+    };
+    mocks.completeHostedPrivyVerification.mockResolvedValueOnce({
+      inviteCode: "invite_123",
+      joinUrl: "https://join.example.test/join/invite_123",
+      initialVisitEligible: false,
+      member,
+      memberId: "member_123",
+      messagingSetupRequired: false,
+      stage: "checkout",
+    });
+    mocks.getHostedInviteStatus.mockResolvedValueOnce(createInviteStatus("active"));
+
+    const response = await privyCompleteRoute.POST(
+      new Request("https://join.example.test/api/hosted-onboarding/privy/complete", {
+        headers: {
+          origin: "https://join.example.test",
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      joinUrl: "/join/invite_123",
+      stage: "checkout",
+    });
+    expect(mocks.getHostedInviteStatus).toHaveBeenCalledWith({
+      authenticatedMember: member,
+      inviteCode: "invite_123",
+    });
+  });
+
+  it("maps a strict secondary Telegram conflict to the existing 409 response", async () => {
+    mocks.requirePrivyCompletionSession.mockResolvedValueOnce({
+      identity: {
+        phone: {
+          number: "+15550000000",
+          verifiedAt: 1742990400,
+        },
+        telegram: {
+          firstName: "Alice",
+          lastName: null,
+          photoUrl: null,
+          telegramUserId: "456",
+          username: "alice",
+        },
+        userId: "did:privy:user_conflict",
+        wallet: null,
+      },
+      verifiedPrivyUser: {
+        id: "did:privy:user_conflict",
+      },
+    });
+    mocks.completeHostedPrivyVerification.mockRejectedValueOnce(hostedOnboardingError({
+      code: "TELEGRAM_IDENTITY_CONFLICT",
+      httpStatus: 409,
+      message: "That Telegram account is already linked to a different Murph account.",
+      retryable: false,
+    }));
+
+    const response = await privyCompleteRoute.POST(
+      new Request("https://join.example.test/api/hosted-onboarding/privy/complete", {
+        body: JSON.stringify({
+          authIntent: {
+            method: "phone",
+          },
+        }),
+        headers: {
+          origin: "https://join.example.test",
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "TELEGRAM_IDENTITY_CONFLICT",
+        message: "That Telegram account is already linked to a different Murph account.",
+        retryable: false,
+      },
+    });
+    expect(mocks.issueHostedAppSession).not.toHaveBeenCalled();
+  });
+
   it("returns initial visit eligibility only when the completion should open first-run handoff", async () => {
     mocks.completeHostedPrivyVerification.mockResolvedValueOnce({
       inviteCode: "invite_123",

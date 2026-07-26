@@ -5,6 +5,7 @@ import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 const mocks = vi.hoisted(() => ({
   after: vi.fn(),
   handleHostedOnboardingTelegramWebhook: vi.fn(),
+  sendHostedTelegramTextMessage: vi.fn(),
 }));
 
 vi.mock("next/server", async () => {
@@ -19,6 +20,17 @@ vi.mock("next/server", async () => {
 vi.mock("@/src/lib/hosted-onboarding/webhook-service", () => ({
   handleHostedOnboardingTelegramWebhook: mocks.handleHostedOnboardingTelegramWebhook,
 }));
+
+vi.mock("@/src/lib/hosted-onboarding/telegram-client", async () => {
+  const actual = await vi.importActual<typeof import("@/src/lib/hosted-onboarding/telegram-client")>(
+    "@/src/lib/hosted-onboarding/telegram-client",
+  );
+
+  return {
+    ...actual,
+    sendHostedTelegramTextMessage: mocks.sendHostedTelegramTextMessage,
+  };
+});
 
 type HostedOnboardingTelegramRouteModule = typeof import("../app/api/hosted-onboarding/telegram/webhook/route");
 
@@ -36,6 +48,7 @@ describe("hosted onboarding Telegram webhook route", () => {
     mocks.handleHostedOnboardingTelegramWebhook.mockResolvedValue({
       ok: true,
     });
+    mocks.sendHostedTelegramTextMessage.mockResolvedValue(undefined);
   });
 
   it("does not expose a public GET health handler", () => {
@@ -63,6 +76,63 @@ describe("hosted onboarding Telegram webhook route", () => {
       scheduleAfterResponse: expect.any(Function),
       secretToken: "telegram-secret",
       signal: request.signal,
+    });
+  });
+
+  it("maps visible Telegram provider refusal through the public route", async () => {
+    mocks.handleHostedOnboardingTelegramWebhook.mockResolvedValueOnce({
+      ignored: true,
+      ok: true,
+      reason: "ambiguous-telegram-binding",
+    });
+    mocks.sendHostedTelegramTextMessage.mockRejectedValueOnce(hostedOnboardingError({
+      code: "HOSTED_TELEGRAM_API_REQUEST_FAILED",
+      httpStatus: 502,
+      message: "Telegram sendMessage failed.",
+      retryable: true,
+    }));
+    const rawBody = JSON.stringify({
+      message: {
+        chat: {
+          first_name: "Alice",
+          id: 42,
+          type: "private",
+        },
+        date: 1_785_000_000,
+        from: {
+          first_name: "Alice",
+          id: 42,
+          is_bot: false,
+        },
+        message_id: 17,
+        text: "hello",
+      },
+      update_id: 123,
+    });
+
+    const response = await hostedOnboardingTelegramRoute.POST(
+      new Request("https://join.example.test/api/hosted-onboarding/telegram/webhook", {
+        body: rawBody,
+        headers: {
+          "x-telegram-bot-api-secret-token": "telegram-secret",
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(502);
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "HOSTED_TELEGRAM_API_REQUEST_FAILED",
+        message: "Telegram sendMessage failed.",
+        retryable: true,
+      },
+    });
+    expect(mocks.sendHostedTelegramTextMessage).toHaveBeenCalledWith({
+      message: "This Telegram account isn't linked cleanly. Reconnect Telegram in Murph Settings or contact support.",
+      replyToMessageId: 17,
+      signal: expect.any(AbortSignal),
+      target: expect.objectContaining({ chatId: "42" }),
     });
   });
 

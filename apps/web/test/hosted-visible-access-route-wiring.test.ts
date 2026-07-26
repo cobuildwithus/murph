@@ -3,8 +3,10 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 const mocks = vi.hoisted(() => ({
   after: vi.fn(),
   handleHostedOnboardingLinqWebhook: vi.fn(),
+  handleHostedOnboardingLinqWebhookWithVisibleSecondaryOutcomes: vi.fn(),
   handleHostedOnboardingTelegramWebhook: vi.fn(),
   handleHostedOnboardingTelegramWebhookWithVisibleAccess: vi.fn(),
+  handleHostedOnboardingTelegramWebhookWithVisibleOutcomes: vi.fn(),
 }));
 
 vi.mock("next/server", async () => {
@@ -19,6 +21,15 @@ vi.mock("next/server", async () => {
 vi.mock("@/src/lib/hosted-onboarding/visible-access-webhooks", () => ({
   handleHostedOnboardingTelegramWebhookWithVisibleAccess:
     mocks.handleHostedOnboardingTelegramWebhookWithVisibleAccess,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/visible-secondary-webhooks", () => ({
+  withHostedVisibleSecondaryLinqOutcomes: vi.fn(
+    () => mocks.handleHostedOnboardingLinqWebhookWithVisibleSecondaryOutcomes,
+  ),
+  withHostedVisibleSecondaryTelegramOutcomes: vi.fn(
+    () => mocks.handleHostedOnboardingTelegramWebhookWithVisibleOutcomes,
+  ),
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/webhook-service", () => ({
@@ -52,16 +63,22 @@ describe("visible access webhook route wiring", () => {
     mocks.handleHostedOnboardingLinqWebhook.mockResolvedValue({
       ok: true,
     });
+    mocks.handleHostedOnboardingLinqWebhookWithVisibleSecondaryOutcomes.mockImplementation(
+      (input) => mocks.handleHostedOnboardingLinqWebhook(input),
+    );
     mocks.handleHostedOnboardingTelegramWebhookWithVisibleAccess.mockResolvedValue({
       ok: true,
     });
+    mocks.handleHostedOnboardingTelegramWebhookWithVisibleOutcomes.mockImplementation(
+      (input) => mocks.handleHostedOnboardingTelegramWebhookWithVisibleAccess(input),
+    );
   });
 
   afterEach(() => {
     vi.unstubAllEnvs();
   });
 
-  it("keeps Linq ingress on its single canonical owner", async () => {
+  it("keeps Linq ingress on the composed canonical owner", async () => {
     const rawBody = JSON.stringify({ ok: true });
     const response = await linqRoute.POST(
       new Request(
@@ -74,6 +91,14 @@ describe("visible access webhook route wiring", () => {
     );
 
     expect(response.status).toBe(202);
+    expect(
+      mocks.handleHostedOnboardingLinqWebhookWithVisibleSecondaryOutcomes,
+    ).toHaveBeenCalledWith({
+      rawBody,
+      scheduleAfterResponse: expect.any(Function),
+      signature: null,
+      timestamp: null,
+    });
     expect(mocks.handleHostedOnboardingLinqWebhook).toHaveBeenCalledWith({
       rawBody,
       scheduleAfterResponse: expect.any(Function),
@@ -82,7 +107,7 @@ describe("visible access webhook route wiring", () => {
     });
   });
 
-  it("routes Telegram ingress through the visible-access owner", async () => {
+  it("routes Telegram ingress through the composed visible-outcomes owner", async () => {
     const rawBody = JSON.stringify({ ok: true });
     const request = new Request(
       "https://join.example.test/api/hosted-onboarding/telegram/webhook",
@@ -97,6 +122,14 @@ describe("visible access webhook route wiring", () => {
     const response = await telegramRoute.POST(request);
 
     expect(response.status).toBe(202);
+    expect(
+      mocks.handleHostedOnboardingTelegramWebhookWithVisibleOutcomes,
+    ).toHaveBeenCalledWith({
+      rawBody,
+      scheduleAfterResponse: expect.any(Function),
+      secretToken: "telegram-secret",
+      signal: request.signal,
+    });
     expect(
       mocks.handleHostedOnboardingTelegramWebhookWithVisibleAccess,
     ).toHaveBeenCalledWith({
