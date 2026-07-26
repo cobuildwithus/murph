@@ -45,11 +45,14 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // if a future prune reclaims the space.
 //
 // The total budget is expressed as the packaged measurement plus the established
-// 32KB allowance for small reviewed additions. An exact measured ceiling was
-// tried and reverted: it left zero slack, so an unrelated prompt change on main
-// broke assembly. Do not restore the former 250KB operational growth allowance.
-const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_526_767 + 32_768;
-const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_591_691;
+// 32KB allowance for small reviewed additions. After the intentional Junction
+// push-source recovery runtime landed in #964, the 2026-07-26 package measured
+// 9,563,507B in Linux CI and 9,598,822B on macOS; the larger cross-platform
+// measurement is the baseline. An exact measured ceiling was tried and
+// reverted: it left zero slack, so an unrelated prompt change on main broke
+// assembly. Do not restore the former 250KB operational growth allowance.
+const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_598_822 + 32_768;
+const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_639_869;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 7_774_000;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES = 48_000;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_TOLERANCE_BYTES = 96_000;
