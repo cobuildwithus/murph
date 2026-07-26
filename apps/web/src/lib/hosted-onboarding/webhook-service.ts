@@ -12,7 +12,10 @@ import {
 import {
   getHostedLinqChatSummary,
 } from "./linq-client";
-import { hostedOnboardingError } from "./errors";
+import { hostedOnboardingError, isHostedOnboardingError } from "./errors";
+import {
+  planHostedLinqPermanentHomeRouteRecovery,
+} from "./linq-home-route-recovery";
 import { assertHostedTelegramWebhookSecret, parseHostedTelegramWebhookUpdate } from "./telegram";
 import {
   planHostedOnboardingLinqWebhook,
@@ -55,6 +58,7 @@ import {
 } from "./webhook-db-timing";
 import {
   drainHostedLinqSideEffectsDirect,
+  queueHostedLinqContactCardShareAfterDeliveredInviteSignup,
 } from "./webhook-transport";
 import {
   buildHostedLinqFirstContactAdmissionClassifierUnavailableDecision,
@@ -185,6 +189,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
       const providerResult = await ingestHostedLinqProviderEventDirect({
         event: providerEvent,
         prisma,
+        scheduleAfterResponse: input.scheduleAfterResponse,
       });
       const reactionResult = await handleHostedGroupJoinOfferReaction({
         event: providerEvent,
@@ -262,6 +267,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
         : await ingestHostedLinqProviderEventDirect({
             event: providerEvent,
             prisma,
+            scheduleAfterResponse: input.scheduleAfterResponse,
           });
       await scheduleHostedLinqProviderAlertEmails({
         alertIds: providerResult.alertIds,
@@ -430,10 +436,21 @@ export async function handleHostedOnboardingLinqWebhook(input: {
         throw new Error("Hosted Linq first-contact admission remained unresolved after classification.");
       }
     } catch (error) {
-      finishHostedOnboardingTiming(planTiming, "failed", {
-        errorName: deriveHostedOnboardingTimingErrorName(error),
-      });
-      throw error;
+      // A recognized home-route owner whose permanent route no longer matches
+      // the fallback binding would otherwise retry this rollback forever and
+      // never hear anything back. Answer them on the chat they used instead.
+      const recoveredPlan =
+        isHostedOnboardingError(error)
+        && error.code === "HOSTED_LINQ_HOME_ROUTE_CHANGED"
+          ? await planHostedLinqPermanentHomeRouteRecovery({ event, prisma })
+          : null;
+      if (!recoveredPlan) {
+        finishHostedOnboardingTiming(planTiming, "failed", {
+          errorName: deriveHostedOnboardingTimingErrorName(error),
+        });
+        throw error;
+      }
+      plan = recoveredPlan;
     }
     finishHostedOnboardingTiming(planTiming, plan.response.reason ?? "completed", {
       desiredSideEffectCount: plan.desiredSideEffects.length,
@@ -857,14 +874,25 @@ function buildHostedLinqCurrentInboundReplyProof(
 async function ingestHostedLinqProviderEventDirect(input: {
   event: Parameters<typeof ingestHostedLinqProviderEventTx>[0]["event"];
   prisma: PrismaClient;
+  scheduleAfterResponse?: HostedWebhookPostResponseScheduler;
 }): Promise<Awaited<ReturnType<typeof ingestHostedLinqProviderEventTx>>> {
-  return runHostedOnboardingWebhookTransaction(
+  const providerResult = await runHostedOnboardingWebhookTransaction(
     input.prisma,
     (transaction) => ingestHostedLinqProviderEventTx({
       event: input.event,
       prisma: transaction,
     }),
   );
+  if (providerResult.restoreOnboardingLink) {
+    void queueHostedLinqContactCardShareAfterDeliveredInviteSignup({
+      chatId: providerResult.restoreOnboardingLink.linqChatId,
+      memberId: providerResult.restoreOnboardingLink.memberId,
+      prisma: input.prisma,
+      scheduleAfterResponse: input.scheduleAfterResponse,
+      service: providerResult.restoreOnboardingLink.service,
+    });
+  }
+  return providerResult;
 }
 
 async function ingestHostedLinqParticipantEventDirect(input: {

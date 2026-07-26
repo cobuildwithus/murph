@@ -50,6 +50,11 @@ import {
   createHostedLinqChat,
 } from "./linq-client";
 import {
+  isHostedLinqContactCardAutoShareEligible,
+  type MurphHostedLinqNativeContactCardShareOutcome,
+  shareMurphHostedLinqNativeContactCardToChat,
+} from "./linq-contact-card-share";
+import {
   assertHostedThreadRouteEgressAuthority,
   readHostedThreadRouteByThreadIdentity,
   type HostedLinqThreadRouteEgressAuthority,
@@ -711,6 +716,96 @@ function parseHostedAiUsageCreditLedgerVersion(value: unknown): bigint {
   return BigInt(value);
 }
 
+/**
+ * After the delivery lifecycle confirms an invite-signup reply reached the
+ * handset, share the sending line's native provider contact card into that
+ * thread so text-first members can save the contact without visiting the web
+ * app. Direct, group, and fallback-created threads are eligible; the share
+ * module owns the iMessage-only gate and the per-chat throttle reservation.
+ * Best effort: a share failure never fails or delays the reply delivery, and
+ * the request signal is deliberately not forwarded because the share may run
+ * after the response completes. With a post-response scheduler this returns
+ * after registering the task; otherwise the returned promise settles after
+ * the native provider attempt reaches its terminal best-effort outcome.
+ */
+export function queueHostedLinqContactCardShareAfterDeliveredInviteSignup(input: {
+  chatId: string | null;
+  memberId: string;
+  prisma: HostedLinqTransportPersistenceClient;
+  scheduleAfterResponse?: HostedLinqTransportPostResponseScheduler;
+  service: string | null;
+}): Promise<void> | void {
+  if (
+    !input.chatId
+    || !isHostedLinqContactCardAutoShareEligible({ service: input.service })
+  ) {
+    return;
+  }
+  const { chatId, memberId } = input;
+  if (!isHostedLinqTransportPrismaClient(input.prisma)) {
+    // Receipt ingestion and accepted-milestone replay run on the root client;
+    // a transactional client could close before this post-response share runs.
+    console.warn("Hosted Linq contact-card share skipped inside a transaction.", {
+      chatIdSuffix: toHostedOnboardingLogIdSuffix(chatId),
+    });
+    return;
+  }
+  const prisma = input.prisma;
+  const task = async () => {
+    try {
+      const outcome = await shareMurphHostedLinqNativeContactCardToChat({
+        chatId,
+        memberId,
+        prisma,
+      });
+      if (outcome.status === "failed" || outcome.status === "skipped") {
+        console.warn(
+          "Hosted Linq contact-card share did not send.",
+          buildHostedLinqContactCardShareLogDetails(chatId, outcome),
+        );
+      }
+    } catch (error) {
+      console.warn(
+        "Hosted Linq contact-card share failed.",
+        buildHostedLinqContactCardShareLogDetails(chatId, {
+          status: "failed",
+          reason: "send_failed",
+          error,
+        }),
+      );
+    }
+  };
+
+  if (input.scheduleAfterResponse) {
+    input.scheduleAfterResponse(task);
+    return;
+  }
+  return task();
+}
+
+function buildHostedLinqContactCardShareLogDetails(
+  chatId: string,
+  outcome: Extract<
+    MurphHostedLinqNativeContactCardShareOutcome,
+    { status: "failed" | "skipped" }
+  >,
+): Record<string, boolean | number | string | null> {
+  const error = outcome.status === "failed" ? outcome.error : null;
+  const errorRecord = error && typeof error === "object"
+    ? error as Record<string, unknown>
+    : null;
+
+  return sanitizeHostedOnboardingStructuredLogDetails({
+    chatIdSuffix: toHostedOnboardingLogIdSuffix(chatId),
+    errorCode: typeof errorRecord?.code === "string" ? errorRecord.code : null,
+    errorName: error instanceof Error ? error.name : null,
+    operation: "share_contact_card",
+    provider: "linq",
+    reason: outcome.reason,
+    status: outcome.status,
+  });
+}
+
 async function assertHostedLinqSideEffectRouteAuthority(
   effect: HostedLinqMessageSideEffect,
   prisma: HostedLinqTransportPersistenceClient,
@@ -1007,7 +1102,7 @@ async function markHostedLinqDeliveryAcceptedBestEffort(input: {
     // Milestone and consequence commit atomically. Generic failure reopens the
     // member/day; group failure reopens only its exact outreach and preserves
     // the monotonic fact that some signup link may already have been accepted.
-    await runHostedLinqTransportTransaction(input.prisma, async (prisma) => {
+    const milestone = await runHostedLinqTransportTransaction(input.prisma, async (prisma) => {
       const milestone = await markHostedLinqDeliveryAcceptedTx({
         idempotencyKey: input.effect.effectId,
         linqChatId: input.chatId,
@@ -1050,7 +1145,21 @@ async function markHostedLinqDeliveryAcceptedBestEffort(input: {
           });
         }
       }
+      return milestone;
     });
+    if (milestone.restoreOnboardingLink) {
+      // A rare delivered-before-accepted race can let receipt ingestion and
+      // this milestone commit without cross-observing the other's uncommitted
+      // write, omitting this best-effort card. The signup reply still lands and
+      // Murph remains available in the web picker; that accepted limitation
+      // does not warrant an advisory lock or a new durable obligation.
+      await queueHostedLinqContactCardShareAfterDeliveredInviteSignup({
+        chatId: milestone.restoreOnboardingLink.linqChatId,
+        memberId: milestone.restoreOnboardingLink.memberId,
+        prisma: input.prisma,
+        service: milestone.restoreOnboardingLink.service,
+      });
+    }
   } catch (error) {
     console.warn("Hosted Linq delivery accepted recording failed.", {
       errorName: error instanceof Error ? error.name : "UnknownError",

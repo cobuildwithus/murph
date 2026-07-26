@@ -289,6 +289,92 @@ describe.skipIf(!runPostgresConcurrencyProof)(
       }
     });
 
+    it("rolls back a grant and permits member-row deletion after fulfillment", async () => {
+      const fixture = await createUsageCreditFixture();
+      const paidAt = new Date("2026-07-16T12:08:00.000Z");
+
+      try {
+        await expect(fixture.firstClient.$transaction(async (tx) => {
+          await grantHostedUsageCreditForPurchaseTx({
+            paidAt,
+            purchaseId: fixture.purchaseId,
+            tx,
+          });
+          throw new Error("force growth aggregate rollback");
+        }, transactionOptions)).rejects.toThrow(
+          "force growth aggregate rollback",
+        );
+        await expect(
+          fixture.observer.hostedUsageCreditPurchase.findUniqueOrThrow({
+            select: {
+              status: true,
+            },
+            where: {
+              id: fixture.purchaseId,
+            },
+          }),
+        ).resolves.toEqual({
+          status: HostedUsageCreditPurchaseStatus.created,
+        });
+
+        await expect(fixture.firstClient.$transaction((tx) =>
+          grantHostedUsageCreditForPurchaseTx({
+            paidAt,
+            purchaseId: fixture.purchaseId,
+            tx,
+          }), transactionOptions)
+        ).resolves.toMatchObject({
+          granted: true,
+        });
+        await expect(fixture.secondClient.$transaction((tx) =>
+          grantHostedUsageCreditForPurchaseTx({
+            paidAt,
+            purchaseId: fixture.purchaseId,
+            tx,
+          }), transactionOptions)
+        ).resolves.toMatchObject({
+          granted: false,
+        });
+        await fixture.thirdClient.$transaction(async (tx) => {
+          await tx.hostedUsageCreditEntry.deleteMany({
+            where: {
+              beneficiaryMemberId: fixture.beneficiaryMemberId,
+            },
+          });
+          await tx.hostedUsageCreditPurchase.deleteMany({
+            where: {
+              beneficiaryMemberId: fixture.beneficiaryMemberId,
+            },
+          });
+          await tx.hostedMember.deleteMany({
+            where: {
+              id: fixture.beneficiaryMemberId,
+            },
+          });
+        }, transactionOptions);
+
+        await expect(Promise.all([
+          fixture.observer.hostedMember.count({
+            where: {
+              id: fixture.beneficiaryMemberId,
+            },
+          }),
+          fixture.observer.hostedUsageCreditPurchase.count({
+            where: {
+              beneficiaryMemberId: fixture.beneficiaryMemberId,
+            },
+          }),
+          fixture.observer.hostedUsageCreditEntry.count({
+            where: {
+              beneficiaryMemberId: fixture.beneficiaryMemberId,
+            },
+          }),
+        ])).resolves.toEqual([0, 0, 0]);
+      } finally {
+        await cleanupUsageCreditFixture(fixture);
+      }
+    });
+
     it("holds the beneficiary lock while a grant waits on its purchase row", async () => {
       const fixture = await createUsageCreditFixture();
       const purchaseLocked = createDeferred();

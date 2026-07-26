@@ -5,15 +5,18 @@ import {
   BiomarkerPreparingStateStudy,
   BiomarkerReferenceContextStudy,
 } from "@/src/components/biomarkers/biomarker-design-studies";
+import { AsksGridSection } from "@/src/components/homepage/asks-section";
 import { HowItWorksSection } from "@/src/components/homepage/how-it-works-section";
 import { DEFAULT_MURPH_HEADSHOT } from "@/src/components/homepage/murph-headshot-avatar";
 import { PersonasSection } from "@/src/components/homepage/personas-section";
 import { SecurityTeaserSection } from "@/src/components/homepage/security-teaser-section";
+import { TogetherSection } from "@/src/components/homepage/together-section";
 import { Separator } from "@/src/components/ui/separator";
 import { AccountExitReasonStudy } from "./account-exit-reason-study";
 import { ConnectSourceCardStudy } from "./connect-source-card-study";
 import { FamilyInviteJoinStudy } from "./family-invite-join-study";
 import { GroupJoinStudy } from "./group-join-study";
+import { GrowthScorecardStudy } from "./growth-scorecard-study";
 import { HomeLoadStateStudy } from "./home-load-state-study";
 import { PersonaOnboardingStudy } from "./persona-onboarding-study";
 import {
@@ -65,6 +68,20 @@ export function SectionsContent() {
 
       <Separator />
 
+      <StudySection title="Homepage feature cards">
+        <div
+          id="homepage-feature-cards"
+          data-design-section="homepage-feature-cards"
+          className="-mx-5 sm:-mx-8 lg:-mx-12"
+          inert
+        >
+          <TogetherSection />
+          <AsksGridSection />
+        </div>
+      </StudySection>
+
+      <Separator />
+
       <StudySection title="Persona onboarding">
         <PersonaOnboardingStudy />
       </StudySection>
@@ -109,6 +126,12 @@ export function SectionsContent() {
 
       <StudySection title="Personal usage credit states">
         <PersonalUsageCreditOwnerStudy />
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Ops weekly growth compass">
+        <GrowthScorecardStudy />
       </StudySection>
 
       <Separator />

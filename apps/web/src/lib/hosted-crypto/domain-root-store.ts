@@ -46,6 +46,18 @@ export class HostedDomainRootEnvelopeUnavailableError extends Error {
   }
 }
 
+export class HostedCryptoDomainRootCandidateRequiredError extends Error {
+  readonly domain: HostedCryptoDomain;
+
+  constructor(input: { domain: HostedCryptoDomain }) {
+    super(
+      `Prepared hosted ${input.domain} domain root candidate is required.`,
+    );
+    this.name = "HostedCryptoDomainRootCandidateRequiredError";
+    this.domain = input.domain;
+  }
+}
+
 export function isHostedDomainRootEnvelopeUnavailableError(
   error: unknown,
 ): error is HostedDomainRootEnvelopeUnavailableError {
@@ -83,6 +95,9 @@ export interface HostedDomainRootReference {
 export interface UnwrappedHostedDomainRootReference
   extends HostedDomainRootReference, UnwrappedHostedDomainRoot {}
 
+export type PreparedHostedCryptoDomainRootCandidates =
+  ReadonlyMap<HostedCryptoDomain, HostedDomainRootKeyEnvelopeV1>;
+
 async function unwrapWithScopedCache(
   cacheKey: string,
   compute: () => Promise<UnwrappedHostedDomainRoot>,
@@ -112,14 +127,48 @@ async function unwrapWithScopedCache(
   };
 }
 
+/**
+ * Phase one of domain-root provisioning. Signing one envelope costs up to three
+ * GCP KMS round trips, so the candidates are built here, before any transaction
+ * or advisory lock is taken. Candidates are ephemeral: one that loses the
+ * insert race is discarded, and a root key that was never persisted decrypts
+ * nothing and is referenced by nothing.
+ */
+export async function prepareHostedCryptoDomainRootCandidates(input: {
+  domains?: readonly HostedCryptoDomain[];
+  prisma?: HostedCryptoClient;
+  userId: string;
+}): Promise<PreparedHostedCryptoDomainRootCandidates> {
+  const prisma = input.prisma ?? getPrisma();
+  const activeDomains = await readActiveHostedCryptoDomains({
+    prisma,
+    userId: input.userId,
+  });
+  const missing = (input.domains ?? ALL_DOMAINS).filter(
+    (domain) => !activeDomains.has(domain),
+  );
+  if (missing.length === 0) {
+    return new Map();
+  }
+  return new Map(await Promise.all(missing.map(async (domain) => [
+    domain,
+    await createSignedHostedDomainRootEnvelope({ domain, userId: input.userId }),
+  ] as const)));
+}
+
 export async function provisionHostedCryptoDomainRootsForUser(input: {
   prisma?: PrismaClient;
   reason?: string;
   userId: string;
 }): Promise<void> {
   const prisma = input.prisma ?? getPrisma();
+  const prepared = await prepareHostedCryptoDomainRootCandidates({
+    prisma,
+    userId: input.userId,
+  });
   await prisma.$transaction(async (tx) => {
-    await provisionHostedCryptoDomainRootsForUserTx({
+    await provisionPreparedHostedCryptoDomainRootsTx({
+      prepared,
       reason: input.reason,
       tx,
       userId: input.userId,
@@ -127,19 +176,53 @@ export async function provisionHostedCryptoDomainRootsForUser(input: {
   });
 }
 
-export async function provisionHostedCryptoDomainRootsForUserTx(input: {
+/**
+ * Transaction-only commit phase. This API has no signing fallback: callers
+ * must prepare candidates before opening their transaction. An empty map is
+ * valid when every root already exists.
+ */
+export async function provisionPreparedHostedCryptoDomainRootsTx(input: {
+  prepared: PreparedHostedCryptoDomainRootCandidates;
   reason?: string;
   tx: HostedCryptoTx;
   userId: string;
 }): Promise<void> {
   for (const domain of ALL_DOMAINS) {
     await provisionActiveHostedDomainRootEnvelopeForUserOnlyTx({
+      candidate: input.prepared.get(domain),
       domain,
       reason: input.reason ?? "hosted-crypto.provision",
       tx: input.tx,
       userId: input.userId,
     });
   }
+}
+
+/**
+ * Legacy transaction-owned bridge for owners that cannot know every member id
+ * before `BEGIN`: thread-container creation, inbound Family member activation,
+ * signup/Privy identity creation, and active Family Stripe group activation.
+ * It keeps KMS outside each advisory-lock section, but callers retain their
+ * outer connection while candidates are prepared. Family activation is capped
+ * at six sequential members; a fully rootless member costs three encryptions
+ * plus four signatures, for at most 42 KMS calls and four concurrent calls.
+ * New transaction code must use the prepared-only commit API above.
+ */
+export async function provisionHostedCryptoDomainRootsForUserTx(input: {
+  reason?: string;
+  tx: HostedCryptoTx;
+  userId: string;
+}): Promise<void> {
+  const prepared = await prepareHostedCryptoDomainRootCandidates({
+    prisma: input.tx,
+    userId: input.userId,
+  });
+  await provisionPreparedHostedCryptoDomainRootsTx({
+    prepared,
+    reason: input.reason,
+    tx: input.tx,
+    userId: input.userId,
+  });
 }
 
 export async function hasActiveHostedCryptoDomainRootsForUserTx(input: {
@@ -169,19 +252,27 @@ export async function provisionActiveHostedDomainRootEnvelopeForUserOnly(input: 
   userId: string;
 }): Promise<HostedDomainRootKeyEnvelopeV1> {
   const prisma = input.prisma ?? getPrisma();
+  const reason = input.reason ?? "hosted-crypto.provision-domain-root";
+  const prepared = await prepareHostedCryptoDomainRootCandidates({
+    domains: [input.domain],
+    prisma,
+    userId: input.userId,
+  });
   if (hasPrismaTransactionRoot(prisma)) {
     return prisma.$transaction((tx) =>
       provisionActiveHostedDomainRootEnvelopeForUserOnlyTx({
+        candidate: prepared.get(input.domain),
         domain: input.domain,
-        reason: input.reason ?? "hosted-crypto.provision-domain-root",
+        reason,
         tx,
         userId: input.userId,
       }),
     );
   }
   return provisionActiveHostedDomainRootEnvelopeForUserOnlyTx({
+    candidate: prepared.get(input.domain),
     domain: input.domain,
-    reason: input.reason ?? "hosted-crypto.provision-domain-root",
+    reason,
     tx: prisma,
     userId: input.userId,
   });
@@ -361,11 +452,23 @@ export async function readHostedRuntimeCryptoContextForWorker(input: {
 }
 
 async function provisionActiveHostedDomainRootEnvelopeForUserOnlyTx(input: {
+  candidate?: HostedDomainRootKeyEnvelopeV1 | undefined;
   domain: HostedCryptoDomain;
   reason: string;
   tx: HostedCryptoTx;
   userId: string;
 }): Promise<HostedDomainRootKeyEnvelopeV1> {
+  if (
+    input.candidate
+    && (input.candidate.domain !== input.domain || input.candidate.userId !== input.userId)
+  ) {
+    throw new Error("Prepared hosted domain root candidate does not match the requested user/domain.");
+  }
+
+  // There is no partial unique index on (user_id, domain) for active
+  // envelopes, so this advisory lock plus the re-read below is the only race
+  // boundary. A prepared candidate is inserted here or discarded here; it is
+  // never a reason to skip either step.
   await input.tx.$executeRaw`
     SELECT pg_advisory_xact_lock(hashtext(${input.userId}), hashtext(${input.domain}))
   `;
@@ -379,10 +482,12 @@ async function provisionActiveHostedDomainRootEnvelopeForUserOnlyTx(input: {
     return parseAssertAndVerifyEnvelope(existing, input);
   }
 
-  const created = await createSignedHostedDomainRootEnvelope({
-    domain: input.domain,
-    userId: input.userId,
-  });
+  if (!input.candidate) {
+    throw new HostedCryptoDomainRootCandidateRequiredError({
+      domain: input.domain,
+    });
+  }
+  const created = input.candidate;
   const id = crypto.randomUUID();
   await input.tx.$executeRaw`
     INSERT INTO hosted_user_crypto_envelope (
@@ -626,6 +731,19 @@ function assertExpectedGcpKmsWrap(input: {
   ) {
     throw new Error("Hosted domain root KMS encryption context mismatch.");
   }
+}
+
+async function readActiveHostedCryptoDomains(input: {
+  prisma: HostedCryptoClient;
+  userId: string;
+}): Promise<Set<HostedCryptoDomain>> {
+  const rows = await input.prisma.$queryRaw<Array<{ domain: HostedCryptoDomain }>>`
+    SELECT DISTINCT domain::text AS domain
+    FROM hosted_user_crypto_envelope
+    WHERE user_id = ${input.userId}
+      AND status = 'active'::hosted_crypto_envelope_status
+  `;
+  return new Set(rows.map((row) => row.domain));
 }
 
 async function readActiveHostedDomainRootEnvelopeRow(input: {

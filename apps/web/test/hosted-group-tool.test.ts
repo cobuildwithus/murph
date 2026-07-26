@@ -35,6 +35,7 @@ const mocks = vi.hoisted(() => ({
   recordHostedGroupDisclosurePermissionTx: vi.fn(),
   releaseHostedLinqContactCardShareAttempt: vi.fn(),
   reserveHostedLinqContactCardShareAttempt: vi.fn(),
+  shareMurphHostedLinqContactCardVcfToChat: vi.fn(),
   revokeHostedGroupMemberEmailShareTx: vi.fn(),
   revokeHostedGroupDisclosureGrantForMemberTx: vi.fn(),
   resolveMurphHostedLinqContactCardBackupPhoneNumber: vi.fn(),
@@ -101,6 +102,7 @@ vi.mock("@/src/lib/hosted-onboarding/linq-contact-card", () => ({
 vi.mock("@/src/lib/hosted-onboarding/linq-contact-card-share", () => ({
   releaseHostedLinqContactCardShareAttempt: mocks.releaseHostedLinqContactCardShareAttempt,
   reserveHostedLinqContactCardShareAttempt: mocks.reserveHostedLinqContactCardShareAttempt,
+  shareMurphHostedLinqContactCardVcfToChat: mocks.shareMurphHostedLinqContactCardVcfToChat,
 }));
 
 vi.mock("@/src/lib/hosted-routing/thread-route-store", () => ({
@@ -1666,6 +1668,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       chatId: "chat_group_1",
       messageId: "msg_1",
     });
+    mocks.shareMurphHostedLinqContactCardVcfToChat.mockResolvedValue({ status: "sent" });
     mocks.sendHostedLinqChatMessage.mockResolvedValue({
       chatId: "chat_group_1",
       messageId: "msg_offer_1",
@@ -2539,7 +2542,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     });
 
     expect(mocks.assertHostedLinqRouteEgressAuthority).not.toHaveBeenCalled();
-    expect(mocks.sendHostedLinqAttachmentMessage).not.toHaveBeenCalled();
+    expect(mocks.shareMurphHostedLinqContactCardVcfToChat).not.toHaveBeenCalled();
   });
 
   it("rejects when the thread-route authority assertion fails", async () => {
@@ -2870,7 +2873,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     warn.mockRestore();
   });
 
-  it("sends the contact card vcf into the chat using the line's own handle", async () => {
+  it("shares the contact card vcf into the chat through the shared helper", async () => {
     await expect(handleHostedRuntimeGroupTool({
       memberId: "member_container",
       request: { action: "share_contact_card", linqThread: LINQ_THREAD },
@@ -2879,27 +2882,10 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       result: { status: "sent" },
     });
 
-    expect(mocks.buildMurphHostedLinqContactCardVcf).toHaveBeenCalledWith({
-      backupPhoneNumber: "+15558880000",
-      phoneNumber: "+15557770000",
-      photo: null,
-    });
-    expect(mocks.resolveMurphHostedLinqContactCardBackupPhoneNumber).toHaveBeenCalledWith(
-      expect.objectContaining({ excludePhoneNumber: "+15557770000" }),
-    );
-    expect(mocks.sendHostedLinqAttachmentMessage).toHaveBeenCalledWith(
+    expect(mocks.shareMurphHostedLinqContactCardVcfToChat).toHaveBeenCalledWith(
       expect.objectContaining({
         chatId: "chat_group_1",
-        contentType: "text/vcard",
-        fileName: "Murph.vcf",
-        // Keyed to the reservation instant so retries of one reservation
-        // dedupe while a later requested re-share is a distinct send.
-        idempotencyKey: `group-contact-card:chat_group_1:${new Date("2026-07-02T12:00:00Z").getTime()}`,
-      }),
-    );
-    expect(mocks.reserveHostedLinqContactCardShareAttempt).toHaveBeenCalledWith(
-      expect.objectContaining({
-        chatId: "chat_group_1",
+        idempotencyKeyPrefix: "group-contact-card",
         memberId: "member_container",
       }),
     );
@@ -2921,14 +2907,12 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     });
 
     expect(mocks.hasHostedRuntimeActiveAccess).not.toHaveBeenCalled();
-    expect(mocks.reserveHostedLinqContactCardShareAttempt).not.toHaveBeenCalled();
-    expect(mocks.sendHostedLinqAttachmentMessage).not.toHaveBeenCalled();
+    expect(mocks.shareMurphHostedLinqContactCardVcfToChat).not.toHaveBeenCalled();
   });
 
   it("reports already_shared when the per-chat throttle is active", async () => {
-    mocks.reserveHostedLinqContactCardShareAttempt.mockResolvedValue({
-      action: "skip",
-      reason: "recent_attempt",
+    mocks.shareMurphHostedLinqContactCardVcfToChat.mockResolvedValue({
+      status: "already_shared",
     });
 
     await expect(handleHostedRuntimeGroupTool({
@@ -2938,14 +2922,13 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       action: "share_contact_card",
       result: { status: "already_shared" },
     });
-
-    expect(mocks.sendHostedLinqAttachmentMessage).not.toHaveBeenCalled();
   });
 
-  it("does not reserve or send when the line handle is missing from the roster", async () => {
-    mocks.getHostedLinqChatHandles.mockResolvedValue([
-      { handle: "+15550000001", isMe: false, status: "active" },
-    ]);
+  it("maps a line_unresolved skip to structured unavailability", async () => {
+    mocks.shareMurphHostedLinqContactCardVcfToChat.mockResolvedValue({
+      status: "skipped",
+      reason: "line_unresolved",
+    });
 
     await expect(handleHostedRuntimeGroupTool({
       memberId: "member_container",
@@ -2957,13 +2940,14 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
         unavailableReason: "line_unresolved",
       },
     });
-
-    expect(mocks.reserveHostedLinqContactCardShareAttempt).not.toHaveBeenCalled();
-    expect(mocks.sendHostedLinqAttachmentMessage).not.toHaveBeenCalled();
   });
 
-  it("keeps the reservation for an ambiguous message-send failure", async () => {
-    mocks.sendHostedLinqAttachmentMessage.mockRejectedValue(new Error("send maybe delivered"));
+  it("maps a send failure to structured unavailability", async () => {
+    mocks.shareMurphHostedLinqContactCardVcfToChat.mockResolvedValue({
+      status: "failed",
+      reason: "send_failed",
+      error: new Error("upload failed"),
+    });
 
     await expect(handleHostedRuntimeGroupTool({
       memberId: "member_container",
@@ -2975,34 +2959,6 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
         unavailableReason: "send_failed",
       },
     });
-
-    expect(mocks.releaseHostedLinqContactCardShareAttempt).not.toHaveBeenCalled();
-  });
-
-  it("releases the reservation when the failure provably happened before the send", async () => {
-    const prepareFailure = Object.assign(new Error("upload failed"), {
-      details: { phase: "prepare" },
-    });
-    mocks.sendHostedLinqAttachmentMessage.mockRejectedValue(prepareFailure);
-
-    await expect(handleHostedRuntimeGroupTool({
-      memberId: "member_container",
-      request: { action: "share_contact_card", linqThread: LINQ_THREAD },
-    })).resolves.toEqual({
-      action: "share_contact_card",
-      result: {
-        status: "unavailable",
-        unavailableReason: "send_failed",
-      },
-    });
-
-    expect(mocks.releaseHostedLinqContactCardShareAttempt).toHaveBeenCalledWith(
-      expect.objectContaining({
-        attemptedAt: new Date("2026-07-02T12:00:00Z"),
-        chatId: "chat_group_1",
-        memberId: "member_container",
-      }),
-    );
   });
 
   it("reports membership lookup trouble as structured unavailability", async () => {
@@ -3021,8 +2977,11 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     });
   });
 
-  it("treats an empty roster on share as provider trouble rather than a missing line", async () => {
-    mocks.getHostedLinqChatHandles.mockResolvedValue([]);
+  it("maps a provider_unavailable skip to structured unavailability", async () => {
+    mocks.shareMurphHostedLinqContactCardVcfToChat.mockResolvedValue({
+      status: "skipped",
+      reason: "provider_unavailable",
+    });
 
     await expect(handleHostedRuntimeGroupTool({
       memberId: "member_container",
@@ -3034,7 +2993,5 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
         unavailableReason: "provider_unavailable",
       },
     });
-
-    expect(mocks.reserveHostedLinqContactCardShareAttempt).not.toHaveBeenCalled();
   });
 });

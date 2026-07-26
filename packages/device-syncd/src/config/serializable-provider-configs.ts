@@ -38,6 +38,7 @@ export const JUNCTION_SERIALIZABLE_PROVIDER_CONFIG_SCHEMA =
       allowedLinkHosts: "string[]",
       environment: "string",
       providerFilter: "string[]",
+      pushSourceRecoveryEnabled: "boolean",
       reconcileDays: "number",
       reconcileIntervalMs: "number",
       region: "string",

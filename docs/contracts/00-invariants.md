@@ -400,6 +400,13 @@ it has been explicitly elevated to a cross-cutting invariant.
   cross-owner purchases may detach the payer only while invalidating in-flight
   payer-era reconciliation, clearing payer-bound ciphertext, and retaining the
   non-secret lookup evidence required to reconcile later refunds or disputes.
+- The company-wide tracked fulfilled usage-top-up total seeds from retained
+  fulfilled rows at an atomic tracker cutover and does not claim complete
+  pre-cutover lifetime history. It then increments from the first successful
+  purchase-status transition to fulfilled, inside that transaction. It is one
+  anonymous count with no member, purchase, payment-provider, event, or timing
+  reference; fulfillment replay and rollback cannot increment it, and later
+  account deletion cannot decrement it.
 - Identity, authentication, consent, privacy, recipient, and irreversible-effect
   authority fail closed. An advisory dependency may degrade only into an
   already-authorized narrower path and never silently suppress an accepted

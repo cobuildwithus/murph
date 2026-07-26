@@ -41,6 +41,9 @@ import {
   type AssistantProviderTurnExecutionInput,
   type AssistantProviderUsage,
 } from './types.js'
+import {
+  MURPH_CODEX_BASE_INSTRUCTIONS,
+} from '../codex-base-instructions.js'
 import { normalizeNullableString } from '../shared.js'
 import {
   isSensitiveAssistantFieldName,
@@ -211,6 +214,7 @@ export async function executeCodexAssistantTurnAttempt(
     authorizeAcceptedMessageTarget:
       input.authorizeAcceptedMessageTarget ?? null,
     approvalPolicy,
+    baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
     developerInstructions,
     dynamicTools: input.dynamicTools,
     environments: input.environments ?? undefined,
@@ -221,6 +225,8 @@ export async function executeCodexAssistantTurnAttempt(
       codexConfigOverrides.length > 0 ? codexConfigOverrides : undefined,
     env: codexProcessEnv,
     fetchImpl: input.providerFetch ?? undefined,
+    groupRoomModelMaintenanceAuthorized:
+      input.groupRoomModelMaintenanceAuthorized === true,
     hostedGeneratedImageUploader: input.generatedImageUploader ?? null,
     hostedToolContext: input.hostedToolContext ?? null,
     materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts ?? null,
@@ -265,13 +271,17 @@ export async function executeCodexAssistantTurnAttempt(
     ...(input.processLifetime === 'one-shot'
       ? { processLifetime: 'one-shot' as const }
       : {}),
+    permissions: input.permissions ?? null,
     providerRequestOrdinal: input.providerRequestOrdinal ?? null,
     requireHostedGeneratedImageUploader:
       input.requireGeneratedImageUploader ?? false,
     images: extractCodexAppServerUserMessageImages(input.userMessageContent),
     excludeResumeTurns: true,
     reasoningEffort: providerConfig.policy.reasoningEffort ?? undefined,
-    sandbox: providerConfig.policy.sandbox ?? undefined,
+    runtimeWorkspaceRoots: input.runtimeWorkspaceRoots ?? null,
+    sandbox: input.permissions
+      ? undefined
+      : providerConfig.policy.sandbox ?? undefined,
     serviceTier: input.serviceTier ?? null,
     vaultRoot: input.vaultRoot ?? null,
     voiceMemoRuntime,
@@ -472,6 +482,7 @@ function emitAssistantProviderPromptSizeTraceEvent(input: {
         type: ASSISTANT_PROVIDER_PROMPT_SIZE_TRACE_TYPE,
         providerTraceKind: 'provider.prompt_size',
         providerPromptDiagnosticKind: 'primary',
+        baseInstructionsBytes: byteLength(MURPH_CODEX_BASE_INSTRUCTIONS),
         providerPromptBytes: byteLength(input.prompt),
         systemPromptBytes: byteLength(systemPrompt),
         userPromptBytes: byteLength(userPrompt),

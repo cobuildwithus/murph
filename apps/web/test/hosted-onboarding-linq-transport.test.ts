@@ -3,10 +3,10 @@ import { HostedBillingStatus } from "@prisma/client";
 
 const transportBoundaryMocks = vi.hoisted(() => ({
   acquireHostedLinqChatOwnershipLockTx: vi.fn(),
-  maybeShareHostedLinqContactCardAfterOutboundForRuntime: vi.fn().mockResolvedValue({
-    action: "share",
-  }),
   readHostedThreadRouteByThreadIdentity: vi.fn(),
+  shareMurphHostedLinqNativeContactCardToChat: vi.fn().mockResolvedValue({
+    status: "sent",
+  }),
 }));
 
 vi.mock("@/src/lib/hosted-routing/linq-chat-ownership-lock", () => ({
@@ -14,9 +14,13 @@ vi.mock("@/src/lib/hosted-routing/linq-chat-ownership-lock", () => ({
     transportBoundaryMocks.acquireHostedLinqChatOwnershipLockTx,
 }));
 
+// Keep this mock self-contained: importing the actual module here can expose
+// this mocked namespace to another serialized file in the CI Vitest project.
 vi.mock("@/src/lib/hosted-onboarding/linq-contact-card-share", () => ({
-  maybeShareHostedLinqContactCardAfterOutboundForRuntime:
-    transportBoundaryMocks.maybeShareHostedLinqContactCardAfterOutboundForRuntime,
+  isHostedLinqContactCardAutoShareEligible: (input: { service: string | null }) =>
+    input.service?.trim().toLowerCase() === "imessage",
+  shareMurphHostedLinqNativeContactCardToChat:
+    transportBoundaryMocks.shareMurphHostedLinqNativeContactCardToChat,
 }));
 
 vi.mock("@/src/lib/hosted-routing/thread-route-store", async () => {
@@ -35,6 +39,9 @@ vi.mock("@/src/lib/hosted-onboarding/linq-client", () => ({
     chatId: "chat-created",
     messageId: "provider-message-created",
   }),
+  getHostedLinqChatHandles: vi.fn(),
+  isHostedLinqAttachmentSendPrepareFailure: vi.fn(() => false),
+  sendHostedLinqAttachmentMessage: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", () => ({
@@ -248,7 +255,7 @@ describe("hosted Linq webhook transport", () => {
     );
   });
 
-  it("sends an invite-signup reply without a native contact-card side effect", async () => {
+  it("does not share the contact card after provider acceptance alone", async () => {
     const effect = createHostedWebhookLinqMessageSideEffect({
       chatId: "chat-1",
       inviteId: "invite-1",
@@ -256,7 +263,7 @@ describe("hosted Linq webhook transport", () => {
       occurredAt: "2026-03-26T12:00:00.000Z",
       replyToMessageId: "message-1",
       service: "iMessage",
-      sourceEventId: "event-contact-card",
+      sourceEventId: "event-contact-card-provider-accepted",
       threadIsDirect: true,
       template: "invite_signup",
     });
@@ -267,7 +274,8 @@ describe("hosted Linq webhook transport", () => {
         prisma: prisma as never,
         sideEffects: [effect],
       }),
-    ).resolves.toBeDefined();
+    ).resolves.toMatchObject({ sentCount: 1 });
+    await new Promise((resolve) => setImmediate(resolve));
 
     expect(sendHostedLinqChatMessage).toHaveBeenCalledTimes(1);
     expect(sendHostedLinqChatMessage).toHaveBeenCalledWith(expect.objectContaining({
@@ -275,7 +283,7 @@ describe("hosted Linq webhook transport", () => {
       message: "invite-reply",
     }));
     expect(
-      transportBoundaryMocks.maybeShareHostedLinqContactCardAfterOutboundForRuntime,
+      transportBoundaryMocks.shareMurphHostedLinqNativeContactCardToChat,
     ).not.toHaveBeenCalled();
   });
 
@@ -619,6 +627,285 @@ describe("hosted Linq webhook transport", () => {
     expect(markHostedLinqOnboardingLinkNoticeSent).toHaveBeenCalledTimes(1);
     expect(releaseHostedLinqOnboardingLinkNoticeClaim).not.toHaveBeenCalled();
     expect(prisma.hostedGroupJoinOutreach.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("awaits one share when accepted-milestone replay finds an earlier delivered receipt", async () => {
+    vi.mocked(markHostedLinqDeliveryAcceptedTx).mockResolvedValueOnce({
+      deliveryStatus: "delivered",
+      reopenOnboardingLink: null,
+      restoreOnboardingLink: {
+        linqChatId: "chat-1",
+        memberId: "member-1",
+        occurredAt: "2026-03-26T00:00:00.000Z",
+        service: "iMessage",
+      },
+    });
+    const shareControl: { resolve?: () => void } = {};
+    const pendingShare = new Promise<{ status: "sent" }>((resolve) => {
+      shareControl.resolve = () => resolve({ status: "sent" });
+    });
+    transportBoundaryMocks.shareMurphHostedLinqNativeContactCardToChat
+      .mockReturnValueOnce(pendingShare);
+    const scheduledTasks: Array<() => Promise<void>> = [];
+    const scheduleAfterResponse = vi.fn((task: () => Promise<void>) => {
+      scheduledTasks.push(task);
+    });
+    const signal = new AbortController().signal;
+    const effect = createHostedWebhookLinqMessageSideEffect({
+      chatId: "chat-1",
+      inviteId: "invite-1",
+      memberId: "member-1",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      replyToMessageId: "message-1",
+      service: "iMessage",
+      sourceEventId: "event-contact-card-replayed-delivery",
+      threadIsDirect: true,
+      template: "invite_signup",
+    });
+    const prisma = createInviteSignupPrismaFixture();
+
+    await expect(
+      drainHostedLinqSideEffectsDirect({
+        prisma: prisma as never,
+        scheduleAfterResponse,
+        sideEffects: [effect],
+        signal,
+      }),
+    ).resolves.toMatchObject({ sentCount: 1 });
+
+    expect(sendHostedLinqChatMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ signal }),
+    );
+    expect(scheduledTasks).toHaveLength(1);
+    expect(
+      transportBoundaryMocks.shareMurphHostedLinqNativeContactCardToChat,
+    ).not.toHaveBeenCalled();
+
+    const [scheduledTask] = scheduledTasks;
+    if (!scheduledTask) {
+      throw new Error("Expected an accepted-milestone task.");
+    }
+    let milestoneSettled = false;
+    const milestoneTask = scheduledTask().finally(() => {
+      milestoneSettled = true;
+    });
+
+    await vi.waitFor(() => {
+      expect(
+        transportBoundaryMocks.shareMurphHostedLinqNativeContactCardToChat,
+      ).toHaveBeenCalledTimes(1);
+    });
+    expect(milestoneSettled).toBe(false);
+    const resolveShare = shareControl.resolve;
+    if (!resolveShare) {
+      throw new Error("Expected the contact-card share to start.");
+    }
+    resolveShare();
+    await expect(milestoneTask).resolves.toBeUndefined();
+    expect(milestoneSettled).toBe(true);
+    expect(
+      transportBoundaryMocks.shareMurphHostedLinqNativeContactCardToChat,
+    ).toHaveBeenCalledWith(expect.objectContaining({
+      chatId: "chat-1",
+      memberId: "member-1",
+      prisma,
+    }));
+    const [shareInput] =
+      transportBoundaryMocks.shareMurphHostedLinqNativeContactCardToChat.mock.calls[0] ?? [];
+    expect(shareInput).not.toHaveProperty("signal");
+  });
+
+  it("shares a replayed delivered fallback once in its newly created chat", async () => {
+    vi.mocked(markHostedLinqDeliveryAcceptedTx).mockResolvedValueOnce({
+      deliveryStatus: "delivered",
+      reopenOnboardingLink: null,
+      restoreOnboardingLink: {
+        linqChatId: "chat-created",
+        memberId: "member-1",
+        occurredAt: "2026-03-26T00:00:00.000Z",
+        service: "iMessage",
+      },
+    });
+    const effect = createHostedWebhookLinqMessageSideEffect({
+      assignedRecipientPhone: "+15550100001",
+      inviteId: "invite-1",
+      memberId: "member-1",
+      memberPhone: "+15551234567",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      sourceEventId: "event-contact-card-fallback-replayed-delivery",
+      template: "invite_signup_fallback",
+    });
+    const prisma = createInviteSignupPrismaFixture();
+
+    await expect(
+      drainHostedLinqSideEffectsDirect({
+        prisma: prisma as never,
+        sideEffects: [effect],
+      }),
+    ).resolves.toMatchObject({ sentCount: 1 });
+
+    await vi.waitFor(() => {
+      expect(
+        transportBoundaryMocks.shareMurphHostedLinqNativeContactCardToChat,
+      ).toHaveBeenCalledTimes(1);
+    });
+    expect(createHostedLinqChat).toHaveBeenCalledTimes(1);
+    expect(
+      transportBoundaryMocks.shareMurphHostedLinqNativeContactCardToChat,
+    ).toHaveBeenCalledWith(expect.objectContaining({
+      chatId: "chat-created",
+      memberId: "member-1",
+    }));
+  });
+
+  it("does not share a replayed delivered signup over SMS", async () => {
+    vi.mocked(markHostedLinqDeliveryAcceptedTx).mockResolvedValueOnce({
+      deliveryStatus: "delivered",
+      reopenOnboardingLink: null,
+      restoreOnboardingLink: {
+        linqChatId: "chat-1",
+        memberId: "member-1",
+        occurredAt: "2026-03-26T00:00:00.000Z",
+        service: "sms",
+      },
+    });
+    const effect = createHostedWebhookLinqMessageSideEffect({
+      chatId: "chat-1",
+      inviteId: "invite-1",
+      memberId: "member-1",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      replyToMessageId: "message-1",
+      service: "sms",
+      sourceEventId: "event-contact-card-sms-replayed-delivery",
+      threadIsDirect: true,
+      template: "invite_signup",
+    });
+    const prisma = createInviteSignupPrismaFixture();
+
+    await expect(
+      drainHostedLinqSideEffectsDirect({
+        prisma: prisma as never,
+        sideEffects: [effect],
+      }),
+    ).resolves.toMatchObject({ sentCount: 1 });
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(
+      transportBoundaryMocks.shareMurphHostedLinqNativeContactCardToChat,
+    ).not.toHaveBeenCalled();
+  });
+
+  it("skips a replayed delivered contact-card share inside a transaction", async () => {
+    vi.mocked(markHostedLinqDeliveryAcceptedTx).mockResolvedValueOnce({
+      deliveryStatus: "delivered",
+      reopenOnboardingLink: null,
+      restoreOnboardingLink: {
+        linqChatId: "chat-1",
+        memberId: "member-1",
+        occurredAt: "2026-03-26T00:00:00.000Z",
+        service: "iMessage",
+      },
+    });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const effect = createHostedWebhookLinqMessageSideEffect({
+      chatId: "chat-1",
+      inviteId: "invite-1",
+      memberId: "member-1",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      replyToMessageId: "message-1",
+      service: "iMessage",
+      sourceEventId: "event-contact-card-transaction-replayed-delivery",
+      threadIsDirect: true,
+      template: "invite_signup",
+    });
+    const prisma = createInviteSignupPrismaFixture();
+    Reflect.deleteProperty(prisma, "$transaction");
+
+    try {
+      await expect(
+        drainHostedLinqSideEffectsDirect({
+          prisma: prisma as never,
+          sideEffects: [effect],
+        }),
+      ).resolves.toMatchObject({ sentCount: 1 });
+      await new Promise((resolve) => setImmediate(resolve));
+
+      expect(
+        transportBoundaryMocks.shareMurphHostedLinqNativeContactCardToChat,
+      ).not.toHaveBeenCalled();
+      expect(warn).toHaveBeenCalledWith(
+        "Hosted Linq contact-card share skipped inside a transaction.",
+        expect.objectContaining({ chatIdSuffix: expect.any(String) }),
+      );
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("does not delay, fail, or retry the signup reply when a replayed card share fails", async () => {
+    vi.mocked(markHostedLinqDeliveryAcceptedTx).mockResolvedValueOnce({
+      deliveryStatus: "delivered",
+      reopenOnboardingLink: null,
+      restoreOnboardingLink: {
+        linqChatId: "chat-1",
+        memberId: "member-1",
+        occurredAt: "2026-03-26T00:00:00.000Z",
+        service: "iMessage",
+      },
+    });
+    const shareControl: { reject?: (error: Error) => void } = {};
+    const pendingShare = new Promise<never>((_resolve, reject) => {
+      shareControl.reject = reject;
+    });
+    transportBoundaryMocks.shareMurphHostedLinqNativeContactCardToChat.mockReturnValueOnce(
+      pendingShare,
+    );
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const effect = createHostedWebhookLinqMessageSideEffect({
+      chatId: "chat-1",
+      inviteId: "invite-1",
+      memberId: "member-1",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      replyToMessageId: "message-1",
+      service: "iMessage",
+      sourceEventId: "event-contact-card-share-fail-replayed-delivery",
+      threadIsDirect: true,
+      template: "invite_signup",
+    });
+    const prisma = createInviteSignupPrismaFixture();
+
+    try {
+      await expect(
+        drainHostedLinqSideEffectsDirect({
+          prisma: prisma as never,
+          sideEffects: [effect],
+        }),
+      ).resolves.toMatchObject({ sentCount: 1 });
+      expect(sendHostedLinqChatMessage).toHaveBeenCalledTimes(1);
+      await vi.waitFor(() => {
+        expect(
+          transportBoundaryMocks.shareMurphHostedLinqNativeContactCardToChat,
+        ).toHaveBeenCalledTimes(1);
+      });
+      const rejectShare = shareControl.reject;
+      if (!rejectShare) {
+        throw new Error("Expected the contact-card share to start.");
+      }
+      rejectShare(new Error("share failed"));
+
+      await vi.waitFor(() => {
+        expect(warn).toHaveBeenCalledWith(
+          "Hosted Linq contact-card share failed.",
+          expect.objectContaining({ operation: "share_contact_card" }),
+        );
+      });
+      expect(
+        transportBoundaryMocks.shareMurphHostedLinqNativeContactCardToChat,
+      ).toHaveBeenCalledTimes(1);
+      expect(sendHostedLinqChatMessage).toHaveBeenCalledTimes(1);
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it("does not dispatch a signup link when its exact active invite is absent", async () => {
@@ -1067,6 +1354,9 @@ describe("hosted Linq webhook transport", () => {
       prisma: expect.anything(),
     });
     expect(claimHostedLinqQuotaReplyNotice).not.toHaveBeenCalled();
+    expect(
+      transportBoundaryMocks.shareMurphHostedLinqNativeContactCardToChat,
+    ).not.toHaveBeenCalled();
   });
 
   it("consumes legacy persisted AI usage claims without a ledger version as epoch zero", async () => {

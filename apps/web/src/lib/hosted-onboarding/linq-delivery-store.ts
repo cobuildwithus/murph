@@ -106,6 +106,11 @@ type HostedLinqAcceptedMilestoneStatus =
   | "failed"
   | null;
 
+type HostedLinqDeliveredOnboardingLink = HostedLinqReopenOnboardingLink & {
+  linqChatId: string | null;
+  service: string | null;
+};
+
 export async function recordHostedLinqDeliveryAttemptTx(input: {
   attemptedAt?: Date;
   idempotencyKey?: string | null;
@@ -647,7 +652,7 @@ export async function markHostedLinqDeliveryAcceptedTx(input: {
 }): Promise<{
   deliveryStatus: HostedLinqAcceptedMilestoneStatus;
   reopenOnboardingLink: HostedLinqReopenOnboardingLink | null;
-  restoreOnboardingLink: HostedLinqReopenOnboardingLink | null;
+  restoreOnboardingLink: HostedLinqDeliveredOnboardingLink | null;
 }> {
   const none = {
     deliveryStatus: null,
@@ -757,7 +762,11 @@ export async function markHostedLinqDeliveryAcceptedTx(input: {
       : {
           deliveryStatus: "delivered",
           reopenOnboardingLink: null,
-          restoreOnboardingLink: onboardingLink,
+          restoreOnboardingLink: {
+            ...onboardingLink,
+            linqChatId: input.linqChatId ?? null,
+            service: replay.receipt.service,
+          },
         };
   });
 }
@@ -1291,7 +1300,7 @@ export async function applyHostedLinqDeliveryReceiptTx(input: {
   deliveryId: string | null;
   phoneNumberLookupKey: string | null;
   reopenOnboardingLink: HostedLinqReopenOnboardingLink | null;
-  restoreOnboardingLink: HostedLinqReopenOnboardingLink | null;
+  restoreOnboardingLink: HostedLinqDeliveredOnboardingLink | null;
 }> {
   if (!input.event.messageLookupKey || !input.event.deliveryStatus) {
     return {
@@ -1337,25 +1346,36 @@ export async function applyHostedLinqDeliveryReceiptTx(input: {
     data: buildReceiptUpdate(input.event),
   });
   const advanced = updated.count === 1;
-  const onboardingLink = advanced && input.event.deliveryStatus === "failed"
-    ? await resolveHostedLinqFailedDeliveryReopenTx({
-        idempotencyKey: delivery.idempotencyKey,
-        prisma: input.prisma,
-        sourceRef: delivery.sourceRef,
-        template: delivery.template,
-      })
-    : null;
+  const onboardingLink = !advanced
+    ? null
+    : input.event.deliveryStatus === "failed"
+      ? await resolveHostedLinqFailedDeliveryReopenTx({
+          idempotencyKey: delivery.idempotencyKey,
+          prisma: input.prisma,
+          sourceRef: delivery.sourceRef,
+          template: delivery.template,
+        })
+      : resolveHostedLinqReopenOnboardingLink(delivery);
   return {
     advanced,
     deliveryId: delivery.id,
     phoneNumberLookupKey: delivery.phoneNumberLookupKey,
-    reopenOnboardingLink: onboardingLink,
+    reopenOnboardingLink: advanced && input.event.deliveryStatus === "failed"
+      ? onboardingLink
+      : null,
     // The symmetric signal: a delivered receipt that wins ordering after a
     // reopen re-marks the member/day as sent, so daily state always tracks
     // the latest terminal delivery truth.
-    restoreOnboardingLink: advanced && input.event.deliveryStatus === "delivered"
-      ? resolveHostedLinqReopenOnboardingLink(delivery)
-      : null,
+    restoreOnboardingLink:
+      advanced
+      && input.event.deliveryStatus === "delivered"
+      && onboardingLink
+        ? {
+            ...onboardingLink,
+            linqChatId: input.event.linqChatId,
+            service: input.event.service,
+          }
+        : null,
   };
 }
 

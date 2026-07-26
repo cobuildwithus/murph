@@ -7,6 +7,7 @@ import {
 } from "./user-runner-durable-object.ts";
 import {
   HostedUserRunnerWithTestControls,
+  type HostedRunnerActiveFenceTestResult,
   type HostedRunnerStuckInvocationTestResult,
 } from "../user-runner/hosted-user-runner-test.ts";
 import type {
@@ -53,5 +54,11 @@ export class HostedLocalTestUserRunnerDurableObject extends UserRunnerDurableObj
   }): Promise<HostedRunnerStuckInvocationTestResult> {
     await this.testRunner.bindUser(input.userId);
     return await this.testRunner.startStuckInvocationForTest(input);
+  }
+
+  async readActiveRuntimeFenceForTest(input: {
+    userId: string;
+  }): Promise<HostedRunnerActiveFenceTestResult | null> {
+    return await this.testRunner.readActiveRuntimeFenceForTest(input);
   }
 }
