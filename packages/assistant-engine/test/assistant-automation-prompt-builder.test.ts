@@ -656,9 +656,13 @@ describe('buildAssistantAutoReplyPrompt', () => {
     if (result.kind !== 'ready') {
       throw new Error('Expected a ready prompt result.')
     }
-    const senderAttribution = result.prompt.match(/^Sender: \d+$/mu)?.[0]
-    expect(senderAttribution).toBe('Sender: 456')
+    const senderAttribution = /^Sender: (\d+)$/mu.exec(result.prompt)
+    expect(senderAttribution?.[0]).toBe('Sender: 456')
     expect(result.prompt).toContain('Sender name: @alice_example')
+    const senderId = senderAttribution?.[1]
+    if (!senderId) {
+      throw new Error('Expected a numeric Telegram sender attribution.')
+    }
 
     const vaultRoot = await createTempVaultRoot()
     await initializeVault({ vaultRoot })
@@ -666,13 +670,18 @@ describe('buildAssistantAutoReplyPrompt', () => {
     if (roomModel.kind !== 'missing') {
       throw new Error('Expected a missing room model.')
     }
-    await expect(replaceAssistantGroupRoomModel({
-      body: `## People\n- ${senderAttribution} likes dry rulings.`,
-      expectedDigest: roomModel.digest,
-      vaultRoot,
-    })).rejects.toMatchObject({
-      code: 'group_room_model_participant_handle_forbidden',
-    })
+    for (const body of [
+      `## People\n- **Sender:** ${senderId} likes dry rulings.`,
+      `## People\n- Sender: \`${senderId}\` likes dry rulings.`,
+    ]) {
+      await expect(replaceAssistantGroupRoomModel({
+        body,
+        expectedDigest: roomModel.digest,
+        vaultRoot,
+      })).rejects.toMatchObject({
+        code: 'group_room_model_participant_handle_forbidden',
+      })
+    }
   })
 
   it('renders no telegram sender line without an authoritative handle', () => {

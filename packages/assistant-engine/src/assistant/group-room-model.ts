@@ -312,7 +312,7 @@ function assistantGroupRoomModelBodyContainsRawParticipantHandle(
 ): boolean {
   return (
     /(?:^|[^\p{L}\p{N}])\+\d{7,15}(?!\d)/u.test(body) ||
-    /\bSender\s*:?\s*\d{1,16}(?!\d)/iu.test(body) ||
+    /\bSender\b[^\p{L}\p{N}\r\n]{0,16}\d{1,16}(?![\p{L}\p{N}])/iu.test(body) ||
     /(?:^|[^\p{L}\p{N}])\d{5,16}(?!\d)/u.test(body) ||
     /\btelegram:[^\s`()[\]{}<>]+/iu.test(body) ||
     /\bparticipant:[^\s`()[\]{}<>]+/iu.test(body) ||

@@ -123,37 +123,62 @@ test('rejects raw Telegram sender ids and hides identifying stored state', async
     expectedDigest: missing.digest,
     vaultRoot,
   })
+  const identifyingBodies = [
+    '## People\n- Sender: 456 likes dry rulings.',
+    '## People\n- **Sender:** 456 likes dry rulings.',
+    '## People\n- Sender: `456` likes dry rulings.',
+  ]
+  for (const body of identifyingBodies) {
+    await expect(replaceAssistantGroupRoomModel({
+      body,
+      expectedDigest: prior.digest,
+      vaultRoot,
+    })).rejects.toMatchObject({
+      code: 'group_room_model_participant_handle_forbidden',
+    })
+    await expect(readAssistantGroupRoomModelBody({ vaultRoot }))
+      .resolves.toBe(priorBody)
+  }
+
+  const ordinaryNumericBody = [
+    '## Running bits and callbacks',
+    '- Keep 2 callbacks at most.',
+    '- Start at 4 a.m.',
+    '- Use a 3-person format.',
+    '- Sender: 2FA is the name of the running bit.',
+  ].join('\n')
   await expect(replaceAssistantGroupRoomModel({
-    body: '## People\n- Sender: 456 likes dry rulings.',
+    body: ordinaryNumericBody,
     expectedDigest: prior.digest,
     vaultRoot,
-  })).rejects.toMatchObject({
-    code: 'group_room_model_participant_handle_forbidden',
+  })).resolves.toMatchObject({
+    body: ordinaryNumericBody,
+    kind: 'present',
   })
-  await expect(readAssistantGroupRoomModelBody({ vaultRoot }))
-    .resolves.toBe(priorBody)
 
   const pagePath = await resolveAssistantVaultPath(
     vaultRoot,
     buildKnowledgePageRelativePath(ASSISTANT_GROUP_ROOM_MODEL_SLUG),
     'file path',
   )
-  await writeFile(pagePath, buildKnowledgeMarkdown({
-    body: '## People\n- Sender: 456 likes dry rulings.',
-    compiledAt: '2026-07-25T00:00:00.000Z',
-    librarySlugs: [],
-    pageType: ASSISTANT_GROUP_ROOM_MODEL_PAGE_TYPE,
-    relatedSlugs: [],
-    slug: ASSISTANT_GROUP_ROOM_MODEL_SLUG,
-    sourcePaths: [],
-    status: 'active',
-    summary: null,
-    title: 'Group room model',
-  }), 'utf8')
-  await expect(readAssistantGroupRoomModelState({ vaultRoot }))
-    .resolves.toEqual({ kind: 'unavailable' })
-  await expect(readAssistantGroupRoomModelPrompt({ vaultRoot }))
-    .resolves.toBeNull()
+  for (const body of identifyingBodies) {
+    await writeFile(pagePath, buildKnowledgeMarkdown({
+      body,
+      compiledAt: '2026-07-25T00:00:00.000Z',
+      librarySlugs: [],
+      pageType: ASSISTANT_GROUP_ROOM_MODEL_PAGE_TYPE,
+      relatedSlugs: [],
+      slug: ASSISTANT_GROUP_ROOM_MODEL_SLUG,
+      sourcePaths: [],
+      status: 'active',
+      summary: null,
+      title: 'Group room model',
+    }), 'utf8')
+    await expect(readAssistantGroupRoomModelState({ vaultRoot }))
+      .resolves.toEqual({ kind: 'unavailable' })
+    await expect(readAssistantGroupRoomModelPrompt({ vaultRoot }))
+      .resolves.toBeNull()
+  }
 })
 
 test('keeps the reserved page out of generic knowledge surfaces', async () => {
