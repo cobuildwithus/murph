@@ -10,6 +10,12 @@ export function buildMurphHostedRootPermissionProfileTomlLines(input: {
     "# Ordinary hosted root turns retain current filesystem and network authority while child tools cannot read the managed Codex credential file.",
     `[permissions.${MURPH_HOSTED_ROOT_PERMISSION_PROFILE}.filesystem]`,
     '":root" = "write"',
+    // Preserve danger-full-access semantics for Codex's protected top-level
+    // metadata names. Without explicit writes, Linux sandbox setup tries to
+    // create missing mount targets under the container's immutable `/`.
+    '"/.git" = "write"',
+    '"/.agents" = "write"',
+    '"/.codex" = "write"',
     `${JSON.stringify(input.managedCodexAuthPath)} = "deny"`,
     "",
     `[permissions.${MURPH_HOSTED_ROOT_PERMISSION_PROFILE}.network]`,

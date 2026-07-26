@@ -1065,10 +1065,13 @@ async function runCodexHostedRootPermissionProbe(input: {
     },
     CODEX_SHELL_ENV_PROBE_TIMEOUT_MS,
   );
-  const threadId = assertCodexHostedRootThreadAttestation(threadStart.result, {
+  assertCodexHostedRootThreadAttestation(threadStart.result, {
     label: "thread/start",
     vaultRoot: input.vaultRoot,
   });
+  // A metadata-only thread/start has no persisted rollout until its first user
+  // message. Resume from synthetic history so this native smoke exercises the
+  // resume-time permission/root attestation without calling a model provider.
   const threadResume = await input.sendRequest(
     "hosted-root-thread-resume",
     "thread/resume",
@@ -1076,9 +1079,17 @@ async function runCodexHostedRootPermissionProbe(input: {
       approvalPolicy: "never",
       cwd: input.vaultRoot,
       excludeTurns: true,
+      history: [{
+        type: "message",
+        role: "user",
+        content: [{
+          type: "input_text",
+          text: "hosted root resume attestation fixture",
+        }],
+      }],
       permissions: MURPH_HOSTED_ROOT_PERMISSION_PROFILE,
       runtimeWorkspaceRoots: [input.vaultRoot],
-      threadId,
+      threadId: "00000000-0000-4000-8000-000000000042",
     },
     CODEX_SHELL_ENV_PROBE_TIMEOUT_MS,
   );
