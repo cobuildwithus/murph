@@ -707,7 +707,7 @@ async function reconcileAndBindHostedUsageCreditFinancialSnapshotTx(input: {
   tx: Prisma.TransactionClient;
 }): Promise<{ granted: boolean; wakeRequired: boolean }> {
   const reconciliation = await reconcileHostedUsageCreditFinancialSnapshotTx({
-    checkoutAuthorization: input.paymentAuthorization,
+    paymentAuthorization: input.paymentAuthorization,
     effectiveAt: deriveHostedUsageCreditFinancialEffectiveAt({
       event: input.event,
       snapshot: input.snapshot,
