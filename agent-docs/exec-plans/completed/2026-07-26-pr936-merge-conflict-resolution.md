@@ -1,6 +1,6 @@
 # PR 936 merge conflict resolution
 
-Status: active
+Status: completed
 Created: 2026-07-26
 Updated: 2026-07-26
 
@@ -100,16 +100,42 @@ Updated: 2026-07-26
 - Treat round 7 as valid: its exact-head response ran above the trust floor,
   carried the requested model-family evidence, returned no findings, and ended
   with `ROUND_OUTCOME: PASS` plus `REVIEW_COMPLETE`.
+- Preserve `main`'s bounded retention cleanup owner and extend its existing
+  per-run ceiling to mailbox content retirement and structural pruning. Both
+  dimensions use the same 5,000-row batch and four-batch ceiling, while the
+  transaction still records policy non-replies and advances the contiguous
+  conversation floor atomically.
+- Rebaseline the runner boot-closure total to the measured merged production
+  assembly (`9,690,052` bytes) without changing the per-dimension allowances or
+  weakening the forbidden-input checks.
 
 ## Verification
 
-- Commands to run:
-  - Focused Vitest commands for the six conflict owners and the existing
-    real-PostgreSQL stale-checkpoint regression.
-  - `pnpm test:diff <resolved paths...>`
-  - `pnpm verify:acceptance`
-  - `git diff --check`, privacy/identifier scan, merge-tree or GitHub
-    conflict-state proof, and PR CI checks.
-- Expected outcomes:
-  - All commands pass on the exact pushed merged head.
-  - No unresolved accepted ReviewGPT finding remains.
+- Focused conflict-path verification passed:
+  - Web retention cleanup and migration inventory: 2 files, 15 tests.
+  - Cloudflare runner-bundle entrypoint: 1 file, 34 tests.
+  - Web typecheck and focused ESLint.
+  - Cloudflare typecheck and production runner-bundle assembly.
+- The merged production runner assembly measured `1,669,993` entry bytes,
+  `7,955,167` static-closure bytes, and `9,690,052` total bytes, with no
+  forbidden boot input.
+- Canonical diff verification passed in Blacksmith Testbox
+  `tbx_01kyfvay4j6htye6c2nyvye9fy` (GitHub Actions run `30215022339`):
+  Cloudflare 1,929 tests and Web 6,718 tests passed, with builds, typechecks,
+  lint, and dev smoke green. The first automatic local attempt completed its
+  Web leg but reached the ten-minute Cloudflare host-slot admission ceiling;
+  the exact session-owned waiter was stopped and the canonical Testbox lane
+  replaced that environment-bound attempt.
+- `pnpm verify:acceptance` passed in Blacksmith Testbox
+  `tbx_01kyfvh80akxrk0wtpp2px9am6` (GitHub Actions run `30215145501`) in
+  5m11s. All package coverage, package boundaries, app tests, typechecks,
+  lint, Web production build, Cloudflare node tests, and Cloudflare Workers
+  tests passed.
+- `git diff --check` passed. The credential-pattern scan and direct local
+  username, home-directory, and commit-email scan were clean. The configured
+  commit persona is the tool name and matched legitimate product/tool
+  references, not a personal identifier.
+- Remaining PR gates after the final scoped commit and push: conflict-state
+  proof, CI, and ReviewGPT correction-verification round 8 for the manual
+  merge-resolution delta.
+Completed: 2026-07-26
