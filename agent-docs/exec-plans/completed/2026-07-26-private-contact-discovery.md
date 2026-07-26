@@ -1,6 +1,6 @@
 # Privacy-preserving iOS contact discovery
 
-Status: active
+Status: completed
 Created: 2026-07-26
 Updated: 2026-07-26
 
@@ -140,3 +140,4 @@ Updated: 2026-07-26
   - All automated checks pass with no private contact values in logs, fixtures,
     generated artifacts, review packets, or screenshots.
   - The exact additive backend head is deployable before the linked iOS head.
+Completed: 2026-07-26

@@ -22,7 +22,11 @@ import {
   encryptHostedWebNullableString,
 } from "../src/lib/hosted-web/encryption";
 import { readHostedMemberVerifiedEmailSnapshots } from "../src/lib/hosted-onboarding/hosted-member-store";
-import { setHostedSecureBoxStringTestCodecForTests } from "../src/lib/hosted-crypto/secure-box";
+import {
+  openHostedUserSecureBoxStrings,
+  sealHostedUserSecureBoxStrings,
+  setHostedSecureBoxStringTestCodecForTests,
+} from "../src/lib/hosted-crypto/secure-box";
 import type {
   GcpKmsAsymmetricSignInput,
   GcpKmsDecryptInput,
@@ -730,6 +734,90 @@ test("webhook-style multi-field crypto reuses one unwrap per domain inside the s
     // reuse the same unwrap without weakening per-call key copies.
     assert.equal(counting.readCount(), readsAfterSeals);
   });
+});
+
+test("batch private-field sealing unwraps once and preserves member-bound AAD", async () => {
+  const { tx } = await createHostedWebCryptoTransactionFixture();
+  const { provisionActiveHostedDomainRootEnvelopeForUserOnly } = await import(
+    "../src/lib/hosted-crypto/domain-root-store"
+  );
+  const memberId = "member-test-address-book-batch";
+  const scope = "hosted-address-book-advisory-name:v1";
+  const entries = [
+    {
+      aad: {
+        field: "advisory_name",
+        purpose: "hosted-address-book-advisory-name",
+        rowId: "1:phone-token-a",
+        table: "hosted_address_book_contact",
+      },
+      scope,
+      value: "Alex R.",
+    },
+    {
+      aad: {
+        field: "advisory_name",
+        purpose: "hosted-address-book-advisory-name",
+        rowId: "1:phone-token-b",
+        table: "hosted_address_book_contact",
+      },
+      scope,
+      value: "Sam K.",
+    },
+  ] as const;
+  await provisionActiveHostedDomainRootEnvelopeForUserOnly({
+    domain: "control",
+    prisma: tx.prisma,
+    reason: "test.address-book-batch",
+    userId: memberId,
+  });
+  const counting = createEnvelopeReadCountingClient(tx.prisma);
+  const prisma = Object.assign(counting.client, {
+    hostedUserCryptoEnvelope: {
+      findMany: createBatchEnvelopeFindMany(tx),
+    },
+  });
+
+  const sealed = await sealHostedUserSecureBoxStrings({
+    entries,
+    lane: "hosted-member-private-field",
+    prisma,
+    userId: memberId,
+  });
+
+  assert.equal(sealed.length, 2);
+  assert.equal(counting.readCount(), 1);
+  await expect(openHostedUserSecureBoxStrings({
+    entries: entries.map((entry, index) => ({
+      aad: entry.aad,
+      scope: entry.scope,
+      userId: memberId,
+      value: sealed[index],
+    })),
+    lane: "hosted-member-private-field",
+    prisma,
+  })).resolves.toEqual(["Alex R.", "Sam K."]);
+
+  await expect(openHostedUserSecureBoxStrings({
+    entries: [{
+      aad: { ...entries[0].aad, rowId: "1:different-phone-token" },
+      scope,
+      userId: memberId,
+      value: sealed[0],
+    }],
+    lane: "hosted-member-private-field",
+    prisma,
+  })).rejects.toThrow();
+  await expect(openHostedUserSecureBoxStrings({
+    entries: [{
+      aad: entries[0].aad,
+      scope,
+      userId: "different-member",
+      value: sealed[0],
+    }],
+    lane: "hosted-member-private-field",
+    prisma,
+  })).rejects.toThrow();
 });
 
 function createEnvelopeReadCountingClient(

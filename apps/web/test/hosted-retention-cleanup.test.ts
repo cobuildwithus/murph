@@ -1,4 +1,14 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const retentionMocks = vi.hoisted(() => ({
+  expireHostedAddressBookProjections: vi.fn(),
+}));
+
+vi.mock("@/src/lib/hosted-address-book/projection", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/src/lib/hosted-address-book/projection")>()),
+  expireHostedAddressBookProjections:
+    retentionMocks.expireHostedAddressBookProjections,
+}));
 
 import {
   HOSTED_DEVICE_WEBHOOK_TRACE_RETENTION_MS,
@@ -60,6 +70,11 @@ function createRetentionPrisma(input?: {
 }
 
 describe("hosted retention cleanup", () => {
+  beforeEach(() => {
+    retentionMocks.expireHostedAddressBookProjections.mockReset();
+    retentionMocks.expireHostedAddressBookProjections.mockResolvedValue(0);
+  });
+
   it("prunes every high-volume diagnostic table before signaling runtimes", async () => {
     const now = new Date("2026-04-25T12:00:00.000Z");
     const countsByStatement = new Map<string, number>([
@@ -270,6 +285,32 @@ describe("hosted retention cleanup", () => {
         HOSTED_RETENTION_BATCH_SIZE * HOSTED_RETENTION_MAX_BATCHES,
     });
     expect(traceBatches).toBe(HOSTED_RETENTION_MAX_BATCHES);
+  });
+
+  it("continues full address-book expiry batches and stops after a partial batch", async () => {
+    const now = new Date("2026-04-25T12:00:00.000Z");
+    retentionMocks.expireHostedAddressBookProjections
+      .mockResolvedValueOnce(25)
+      .mockResolvedValueOnce(3);
+    const prisma = createRetentionPrisma();
+
+    await expect(runHostedRetentionCleanup({
+      now,
+      prisma: prisma as never,
+    })).resolves.toMatchObject({
+      expiredAddressBookProjections: 28,
+    });
+    expect(retentionMocks.expireHostedAddressBookProjections).toHaveBeenCalledTimes(2);
+    expect(retentionMocks.expireHostedAddressBookProjections).toHaveBeenNthCalledWith(1, {
+      limit: 25,
+      now,
+      prisma,
+    });
+    expect(retentionMocks.expireHostedAddressBookProjections).toHaveBeenNthCalledWith(2, {
+      limit: 25,
+      now,
+      prisma,
+    });
   });
 
   it("runs retention categories one at a time", async () => {

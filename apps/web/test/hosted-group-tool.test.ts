@@ -2683,6 +2683,36 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     });
   });
 
+  it("keeps the truthful roster available when advisory lookup fails", async () => {
+    mocks.readHostedOwnerAddressBookAdvisoryNames.mockRejectedValue(
+      new Error("advisory lookup unavailable"),
+    );
+    mocks.getHostedLinqChatHandles.mockResolvedValue([
+      { handle: "+15557770000", isMe: true, status: "active" },
+      { handle: "+15550000001", isMe: false, status: "active" },
+      { handle: "+15550000002", isMe: false, status: "active" },
+    ]);
+    mocks.lookupHostedMemberIdentityByPhoneNumber.mockImplementation(
+      async ({ phoneNumber }) => phoneNumber === "+15550000001"
+        ? { core: { id: "member_participant", suspendedAt: null } }
+        : null,
+    );
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_container",
+      request: { action: "read_chat_participants", linqThread: LINQ_THREAD },
+    })).resolves.toEqual({
+      action: "read_chat_participants",
+      result: {
+        participants: [
+          { handle: "+15550000001", hasOwnMurph: true },
+          { handle: "+15550000002", hasOwnMurph: false },
+        ],
+        status: "ok",
+      },
+    });
+  });
+
   it("bounds read_chat_participants lookups and reconcile writes to the roster cap", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const activeHandles = Array.from(
