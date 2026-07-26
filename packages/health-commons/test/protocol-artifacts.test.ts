@@ -89,13 +89,31 @@ function createRouteIndex(): HealthCommonsWebRouteIndex {
 }
 
 describe("buildHealthCommonsProtocolGeneratedArtifacts", () => {
-  it("keeps legacy statusless protocols runnable and excludes every nonpublic protocol from run artifacts", () => {
+  it("publishes only explicitly public protocol statuses in run artifacts", () => {
     const artifacts = buildHealthCommonsProtocolGeneratedArtifacts({
       catalog: createCatalog([
         createProtocol({
-          key: "protocol_variant:family/legacy",
-          slug: "protocols/family/legacy",
-          title: "Legacy Protocol",
+          key: "protocol_variant:family/statusless",
+          slug: "protocols/family/statusless",
+          title: "Statusless Protocol",
+        }),
+        createProtocol({
+          key: "protocol_variant:family/field-testing",
+          slug: "protocols/family/field-testing",
+          status: "field-testing",
+          title: "Field Testing Protocol",
+        }),
+        createProtocol({
+          key: "protocol_variant:family/reviewed",
+          slug: "protocols/family/reviewed",
+          status: "reviewed",
+          title: "Reviewed Protocol",
+        }),
+        createProtocol({
+          key: "protocol_variant:family/community",
+          slug: "protocols/family/community",
+          status: "community",
+          title: "Community Protocol",
         }),
         createProtocol({
           key: "protocol_variant:family/draft",
@@ -107,6 +125,7 @@ describe("buildHealthCommonsProtocolGeneratedArtifacts", () => {
           hidden: true,
           key: "protocol_variant:family/hidden",
           slug: "protocols/family/hidden",
+          status: "reviewed",
           title: "Hidden Protocol",
         }),
         createProtocol({
@@ -118,13 +137,18 @@ describe("buildHealthCommonsProtocolGeneratedArtifacts", () => {
       ]),
       routeIndex: createRouteIndex(),
     });
+    const expectedPublicKeys = [
+      "protocol_variant:family/community",
+      "protocol_variant:family/field-testing",
+      "protocol_variant:family/reviewed",
+    ];
 
-    expect(artifacts.index.protocols.map((protocol) => protocol.key)).toEqual([
-      "protocol_variant:family/legacy",
-    ]);
-    expect(artifacts.runSpecs.protocols.map((protocol) => protocol.key)).toEqual([
-      "protocol_variant:family/legacy",
-    ]);
+    expect(artifacts.index.protocols.map((protocol) => protocol.key).sort()).toEqual(
+      expectedPublicKeys,
+    );
+    expect(artifacts.runSpecs.protocols.map((protocol) => protocol.key).sort()).toEqual(
+      expectedPublicKeys,
+    );
   });
 
   it("keeps parent-owned child family edges and protocol parent family edges", () => {
@@ -155,6 +179,7 @@ describe("buildHealthCommonsProtocolGeneratedArtifacts", () => {
         createProtocol({
           key: "protocol_variant:dry-sauna/finnish",
           slug: "protocols/dry-sauna/finnish",
+          status: "field-testing",
           title: "Finnish Sauna",
           relations: [
             {

@@ -4,6 +4,8 @@ import path from "node:path";
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import type { HealthCommonsCatalogEntity } from "@murphai/contracts";
+
 const buildHealthCommonsCatalogMock = vi.hoisted(() => vi.fn());
 const buildHealthCommonsSourceIndexMock = vi.hoisted(() =>
   vi.fn((catalog: { catalogHash: string }) => ({
@@ -36,6 +38,7 @@ vi.mock("../src/catalog.ts", () => ({
 }));
 
 import { writeHealthCommonsGeneratedArtifacts } from "../src/build.ts";
+import { buildHealthCommonsWebBiomarkerOverview } from "../src/biomarker-web-artifacts.ts";
 import { buildHealthCommonsWebGeneratedArtifacts } from "../src/web-artifacts.ts";
 
 const TEST_PAGE_REVISION_ID = `sha256:${"1".repeat(64)}`;
@@ -254,11 +257,13 @@ describe("@murphai/health-commons build determinism", () => {
           createProtocolEntity({
             key: "protocol_variant:family/a",
             slug: "protocols/family/a",
+            status: "field-testing",
             title: "Protocol A",
           }),
           createProtocolEntity({
             key: "protocol_variant:family/b",
             slug: "protocols/other/b",
+            status: "field-testing",
             title: "Protocol B",
           }),
         ],
@@ -276,14 +281,20 @@ describe("@murphai/health-commons build determinism", () => {
     ).toThrow("Duplicate Health Commons web route id generated for protocol_variant:shared");
   });
 
-  it("keeps legacy statusless protocols runnable but excludes draft, hidden, and deprecated protocols", () => {
+  it("publishes web artifacts only for explicitly public protocols", () => {
     const webArtifacts = buildHealthCommonsWebGeneratedArtifacts({
       ...createCatalog("sha256:first"),
       entities: [
         createProtocolEntity({
           key: "protocol_variant:family/public",
           slug: "protocols/family/public",
+          status: "field-testing",
           title: "Public Protocol",
+        }),
+        createProtocolEntity({
+          key: "protocol_variant:family/statusless",
+          slug: "protocols/family/statusless",
+          title: "Statusless Protocol",
         }),
         createProtocolEntity({
           key: "protocol_variant:family/draft",
@@ -295,6 +306,7 @@ describe("@murphai/health-commons build determinism", () => {
           hidden: true,
           key: "protocol_variant:family/hidden",
           slug: "protocols/family/hidden",
+          status: "reviewed",
           title: "Hidden Protocol",
         }),
         createProtocolEntity({
@@ -305,6 +317,10 @@ describe("@murphai/health-commons build determinism", () => {
         }),
       ],
       redirects: [
+        {
+          from: "protocol_variant:legacy/statusless-alias",
+          to: "protocol_variant:family/statusless",
+        },
         {
           from: "protocol_variant:legacy/draft-alias",
           to: "protocol_variant:family/draft",
@@ -345,6 +361,44 @@ describe("@murphai/health-commons build determinism", () => {
     ]);
   });
 
+  it("excludes statusless protocols from biomarker rankings", () => {
+    const biomarker = createBiomarkerEntity({
+      key: "biomarker:test-signal",
+      slug: "biomarkers/test-signal",
+      title: "Test Signal",
+    });
+    const protocol = (key: string, status?: "field-testing") => createProtocolEntity({
+      expectedSignalDescriptions: [{
+        biomarkerKey: biomarker.key,
+        description: "Test signal.",
+        protocolProminence: "focus",
+      }],
+      key: `protocol_variant:family/${key}`,
+      slug: `protocols/family/${key}`,
+      status,
+      title: `${key} Protocol`,
+    });
+    const protocols = [protocol("public", "field-testing"), protocol("statusless")];
+    const overview = buildHealthCommonsWebBiomarkerOverview({
+      biomarker,
+      catalogHash: "sha256:first",
+      entitiesByKey: new Map<string, HealthCommonsCatalogEntity>([
+        [biomarker.key, biomarker],
+        ...protocols.map((entry): [string, HealthCommonsCatalogEntity] => [
+          entry.key,
+          entry,
+        ]),
+      ]),
+      routeAliases: [],
+      routeId: "test-signal",
+      routeIdByEntityKey: new Map(protocols.map((entry) => [entry.key, entry.slug])),
+    });
+
+    expect(overview.protocolRankings.map((ranking) => ranking.key)).toEqual([
+      "protocol_variant:family/public",
+    ]);
+  });
+
   it("keeps protocol signal data for revision-qualified biomarker references", () => {
     const webArtifacts = buildHealthCommonsWebGeneratedArtifacts({
       ...createCatalog("sha256:first"),
@@ -366,6 +420,7 @@ describe("@murphai/health-commons build determinism", () => {
           ],
           key: "protocol_variant:family/public",
           slug: "protocols/family/public",
+          status: "field-testing",
           title: "Public Protocol",
         }),
       ],
