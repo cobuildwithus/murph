@@ -34,7 +34,6 @@ import {
   lookupHostedMemberStripeBillingRefByStripeCustomerId,
   lookupHostedMemberStripeBillingRefByStripeSubscriptionId,
   readHostedMemberBillingEligibilityState,
-  readHostedMemberPulseTrialCleanupOwnershipState,
   readHostedMemberStripeBillingRef,
   type HostedMemberStripeBillingRefSnapshot,
   writeHostedMemberStripeBillingRefTx,
@@ -3222,51 +3221,6 @@ describe("hosted-member-store", () => {
         currentCheckoutOffer: true,
         stripeCustomerLookupKey: true,
         stripeSubscriptionLookupKey: true,
-      },
-    });
-  });
-
-  it("reads Pulse Trial cleanup ownership without loading encrypted Stripe identifiers", async () => {
-    const findUnique = vi.fn().mockResolvedValue({
-      billingRef: {
-        currentBillingPhase: "trial",
-        pulseTrialRedeemedAt: new Date("2026-06-14T12:00:00.000Z"),
-        stripeSubscriptionLookupKey:
-          "hbidx:stripe-subscription:v1:def456",
-      },
-      billingStatus: HostedBillingStatus.active,
-    });
-    const prisma = {
-      hostedMember: {
-        findUnique,
-      },
-    } as never;
-
-    await expect(
-      readHostedMemberPulseTrialCleanupOwnershipState({
-        memberId: "member_123",
-        prisma,
-      }),
-    ).resolves.toEqual({
-      billingStatus: HostedBillingStatus.active,
-      currentBillingPhase: "trial",
-      pulseTrialRedeemedAt: new Date("2026-06-14T12:00:00.000Z"),
-      stripeSubscriptionLookupKey:
-        "hbidx:stripe-subscription:v1:def456",
-    });
-    expect(findUnique).toHaveBeenCalledWith({
-      where: {
-        id: "member_123",
-      },
-      select: {
-        billingRef: {
-          select: {
-            currentBillingPhase: true,
-            pulseTrialRedeemedAt: true,
-            stripeSubscriptionLookupKey: true,
-          },
-        },
-        billingStatus: true,
       },
     });
   });

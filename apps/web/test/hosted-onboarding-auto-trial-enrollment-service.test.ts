@@ -2,10 +2,6 @@ import { HostedBillingStatus, Prisma } from "@prisma/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
-import {
-  createHostedStripeSubscriptionLookupKey,
-  createHostedStripeSubscriptionLookupKeyReadCandidates,
-} from "@/src/lib/hosted-onboarding/contact-privacy";
 import type { HostedMemberStripeBillingRefSnapshot } from "@/src/lib/hosted-onboarding/hosted-member-billing-store";
 import type { HostedMemberBillingSnapshot } from "@/src/lib/hosted-onboarding/hosted-member-store";
 import { isHostedPulseTrialSubscriptionForKnownPolicy } from "@/src/lib/hosted-onboarding/pulse-trial-subscription-cleanup";
@@ -29,7 +25,6 @@ const mocks = vi.hoisted(() => {
     bindHostedMemberStripeCustomerIdIfMissingTx: vi.fn(),
     lockHostedMemberRow: vi.fn(),
     readHostedMemberBillingSnapshot: vi.fn(),
-    readHostedMemberPulseTrialCleanupOwnershipState: vi.fn(),
     requireHostedInviteForBillingCheckout: vi.fn(),
     requireHostedStripeBillingPlanConfig: vi.fn(),
     sendHostedSignupWelcomeEmailForMemberBestEffort: vi.fn(),
@@ -96,8 +91,6 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-billing-store", async () => {
     ...actual,
     bindHostedMemberStripeCustomerIdIfMissingTx:
       mocks.bindHostedMemberStripeCustomerIdIfMissingTx,
-    readHostedMemberPulseTrialCleanupOwnershipState:
-      mocks.readHostedMemberPulseTrialCleanupOwnershipState,
   };
 });
 
@@ -205,12 +198,6 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
       };
     });
     mocks.readHostedMemberBillingSnapshot.mockResolvedValue(makeBillingSnapshot());
-    mocks.readHostedMemberPulseTrialCleanupOwnershipState.mockResolvedValue({
-      billingStatus: HostedBillingStatus.active,
-      currentBillingPhase: null,
-      pulseTrialRedeemedAt: null,
-      stripeSubscriptionLookupKey: null,
-    });
     mocks.writeHostedMemberStripeBillingTx.mockResolvedValue(makeBillingSnapshot({
       billingRef: {
         currentBillingPhase: "trial",
@@ -2312,7 +2299,7 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
     expect(mocks.activateHostedMemberForPositiveSourceTx).not.toHaveBeenCalled();
   });
 
-  it("cancels the created trial after the transaction commits when the locked re-read sees paid billing", async () => {
+  it("cancels the created trial before releasing the finalization lock when the locked re-read sees paid billing", async () => {
     const prisma = makePrisma();
     let cancellationTransactionClient: unknown = null;
     mocks.stripe.subscriptions.cancel.mockImplementationOnce(async () => {
@@ -2370,223 +2357,37 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
         timeout: 5_000,
       },
     );
-    expect(prisma.$transaction).toHaveBeenCalledTimes(3);
+    expect(prisma.$transaction).toHaveBeenCalledTimes(2);
     expect(prisma.$transaction).toHaveBeenNthCalledWith(
-      3,
+      2,
       expect.any(Function),
       {
         maxWait: 5_000,
         timeout: 30_000,
       },
     );
-    const cleanupTransactionClient = prisma.transactionClients[2];
-    if (!cleanupTransactionClient) {
-      throw new Error("Expected a third transaction client for cleanup.");
+    const finalizationTransactionClient = prisma.transactionClients[1];
+    if (!finalizationTransactionClient) {
+      throw new Error("Expected a finalization transaction client.");
     }
-    expect(mocks.lockHostedMemberRow).toHaveBeenCalledTimes(3);
-    expect(mocks.lockHostedMemberRow.mock.calls[2]?.[0])
-      .toBe(cleanupTransactionClient);
+    expect(mocks.lockHostedMemberRow).toHaveBeenCalledTimes(2);
+    expect(mocks.lockHostedMemberRow.mock.calls[1]?.[0])
+      .toBe(finalizationTransactionClient);
+    expect(cancellationTransactionClient).toBe(finalizationTransactionClient);
     expect(
-      mocks.readHostedMemberPulseTrialCleanupOwnershipState,
-    ).toHaveBeenCalledWith({
-      memberId: "member_123",
-      prisma: cleanupTransactionClient,
-    });
-    expect(cancellationTransactionClient).toBe(cleanupTransactionClient);
-    expect(
-      mocks.lockHostedMemberRow.mock.invocationCallOrder[2],
+      mocks.lockHostedMemberRow.mock.invocationCallOrder[1],
     ).toBeLessThan(
-      mocks.readHostedMemberPulseTrialCleanupOwnershipState.mock
-        .invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
+      mocks.stripe.subscriptions.retrieve.mock.invocationCallOrder[0] ??
+        Number.POSITIVE_INFINITY,
     );
     expect(
-      mocks.readHostedMemberPulseTrialCleanupOwnershipState.mock
-        .invocationCallOrder[0],
+      mocks.readHostedMemberBillingSnapshot.mock.invocationCallOrder[2],
     ).toBeLessThan(
       mocks.stripe.subscriptions.cancel.mock.invocationCallOrder[0] ??
         Number.POSITIVE_INFINITY,
     );
     expect(mocks.writeHostedMemberStripeBillingTx).not.toHaveBeenCalled();
     expect(mocks.activateHostedMemberForPositiveSourceTx).not.toHaveBeenCalled();
-  });
-
-  it("reports cleanup lock contention without reading ownership or cancelling Stripe", async () => {
-    const prisma = makePrisma();
-    mocks.readHostedMemberBillingSnapshot
-      .mockResolvedValueOnce(makeBillingSnapshot())
-      .mockResolvedValueOnce(makeBillingSnapshot())
-      .mockResolvedValueOnce(makeBillingSnapshot({
-        billingRef: {
-          currentBillingPhase: "paid",
-          currentBillingPlanCode: "launch_monthly",
-          currentCheckoutOffer: "standard_checkout",
-          currentPeriodEnd: new Date("2026-07-14T12:00:00.000Z"),
-          currentPeriodStart: new Date("2026-06-14T12:00:00.000Z"),
-          currentTrialEndsAt: null,
-          currentTrialStartedAt: null,
-          lastStripeEventCreatedAt: new Date("2026-06-14T12:00:04.000Z"),
-          memberId: "member_123",
-          pulseTrialPolicyVersion: null,
-          pulseTrialRedeemedAt: null,
-          stripeCustomerId: "cus_paid_123",
-          stripeSubscriptionId: "sub_paid_123",
-        },
-        billingStatus: HostedBillingStatus.active,
-      }));
-    mocks.lockHostedMemberRow
-      .mockResolvedValueOnce(undefined)
-      .mockResolvedValueOnce(undefined)
-      .mockRejectedValueOnce(makeMemberLockTimeoutError());
-
-    await expect(
-      ensureHostedAutoPulseTrialEnrollment({
-        inviteCode: "invite-code",
-        member: {
-          id: "member_123",
-          suspendedAt: null,
-        },
-        now: new Date("2026-06-14T12:00:05.000Z"),
-        prisma: prisma as never,
-      }),
-    ).rejects.toMatchObject({
-      code: "HOSTED_AUTO_PULSE_TRIAL_FINALIZATION_BUSY",
-      httpStatus: 503,
-      retryable: true,
-    });
-
-    expect(prisma.$transaction).toHaveBeenCalledTimes(3);
-    expect(mocks.lockHostedMemberRow).toHaveBeenCalledTimes(3);
-    expect(
-      mocks.readHostedMemberPulseTrialCleanupOwnershipState,
-    ).not.toHaveBeenCalled();
-    expect(mocks.stripe.subscriptions.cancel).not.toHaveBeenCalled();
-    expect(mocks.writeHostedMemberStripeBillingTx).not.toHaveBeenCalled();
-    expect(mocks.activateHostedMemberForPositiveSourceTx).not.toHaveBeenCalled();
-  });
-
-  it("never cancels the losing trial that became current after the finalization transaction committed", async () => {
-    const prisma = makePrisma();
-    mocks.readHostedMemberBillingSnapshot
-      .mockResolvedValueOnce(makeBillingSnapshot())
-      .mockResolvedValueOnce(makeBillingSnapshot())
-      .mockResolvedValueOnce(makeBillingSnapshot({
-        billingRef: makePulseTrialBillingRef({
-          stripeCustomerId: "cus_auto_trial_123",
-          stripeSubscriptionId: "sub_other_trial_123",
-        }),
-        billingStatus: HostedBillingStatus.active,
-      }));
-    // Another serialized billing flow bound this attempt's loser as the
-    // member's current subscription once the finalization lock was released.
-    mocks.readHostedMemberPulseTrialCleanupOwnershipState.mockResolvedValue({
-      billingStatus: HostedBillingStatus.active,
-      currentBillingPhase: "trial",
-      pulseTrialRedeemedAt: new Date("2026-06-14T12:00:00.000Z"),
-      stripeSubscriptionLookupKey:
-        createHostedStripeSubscriptionLookupKey("sub_auto_trial_123"),
-    });
-
-    await expect(
-      ensureHostedAutoPulseTrialEnrollment({
-        inviteCode: "invite-code",
-        member: {
-          id: "member_123",
-          suspendedAt: null,
-        },
-        now: new Date("2026-06-14T12:00:05.000Z"),
-        prisma: prisma as never,
-      }),
-    ).rejects.toMatchObject({
-      code: "HOSTED_PULSE_TRIAL_CLEANUP_OWNER_CHANGED",
-      httpStatus: 409,
-      retryable: true,
-    });
-
-    expect(mocks.stripe.subscriptions.cancel).not.toHaveBeenCalled();
-    expect(mocks.writeHostedMemberStripeBillingTx).not.toHaveBeenCalled();
-    expect(mocks.readHostedMemberBillingSnapshot).toHaveBeenCalledTimes(3);
-    expect(
-      mocks.readHostedMemberPulseTrialCleanupOwnershipState,
-    ).toHaveBeenCalledOnce();
-    expect(mocks.lockHostedMemberRow).toHaveBeenCalledTimes(3);
-    expect(prisma.$transaction).toHaveBeenNthCalledWith(
-      3,
-      expect.any(Function),
-      {
-        maxWait: 5_000,
-        timeout: 30_000,
-      },
-    );
-  });
-
-  it("recognizes a current trial stored under a previous readable blind-index key", async () => {
-    const previousKeys = process.env.HOSTED_CONTACT_PRIVACY_KEYS;
-    const previousCurrentVersion =
-      process.env.HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION;
-    const v1Key = Buffer.alloc(32, 11).toString("base64");
-    const v2Key = Buffer.alloc(32, 12).toString("base64");
-
-    try {
-      process.env.HOSTED_CONTACT_PRIVACY_KEYS = `v1:${v1Key}`;
-      process.env.HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION = "v1";
-      const priorLookupKey =
-        createHostedStripeSubscriptionLookupKey("sub_auto_trial_123");
-      if (!priorLookupKey) {
-        throw new Error("Expected a prior Stripe subscription lookup key.");
-      }
-
-      process.env.HOSTED_CONTACT_PRIVACY_KEYS =
-        `v1:${v1Key},v2:${v2Key}`;
-      process.env.HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION = "v2";
-      expect(
-        createHostedStripeSubscriptionLookupKeyReadCandidates(
-          "sub_auto_trial_123",
-        ),
-      ).toContain(priorLookupKey);
-
-      mocks.readHostedMemberBillingSnapshot
-        .mockResolvedValueOnce(makeBillingSnapshot())
-        .mockResolvedValueOnce(makeBillingSnapshot())
-        .mockResolvedValueOnce(makeBillingSnapshot({
-          billingRef: makePulseTrialBillingRef({
-            stripeSubscriptionId: "sub_other_trial_123",
-          }),
-          billingStatus: HostedBillingStatus.active,
-        }));
-      mocks.readHostedMemberPulseTrialCleanupOwnershipState.mockResolvedValue({
-        billingStatus: HostedBillingStatus.active,
-        currentBillingPhase: "trial",
-        pulseTrialRedeemedAt: new Date("2026-06-14T12:00:00.000Z"),
-        stripeSubscriptionLookupKey: priorLookupKey,
-      });
-
-      await expect(
-        ensureHostedAutoPulseTrialEnrollment({
-          inviteCode: "invite-code",
-          member: {
-            id: "member_123",
-            suspendedAt: null,
-          },
-          now: new Date("2026-06-14T12:00:05.000Z"),
-          prisma: makePrisma() as never,
-        }),
-      ).rejects.toMatchObject({
-        code: "HOSTED_PULSE_TRIAL_CLEANUP_OWNER_CHANGED",
-        httpStatus: 409,
-        retryable: true,
-      });
-
-      expect(mocks.stripe.subscriptions.cancel).not.toHaveBeenCalled();
-      expect(
-        mocks.readHostedMemberPulseTrialCleanupOwnershipState,
-      ).toHaveBeenCalledOnce();
-    } finally {
-      restoreEnvValue("HOSTED_CONTACT_PRIVACY_KEYS", previousKeys);
-      restoreEnvValue(
-        "HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION",
-        previousCurrentVersion,
-      );
-    }
   });
 
   it("cancels the unreferenced trial and still reports the block when the locked re-read makes the member ineligible", async () => {
@@ -2597,16 +2398,10 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
       // Billing lapsed between the reservation and the finalization lock, so
       // enrollment fails on the member's own state. Nothing references the
       // trial this attempt created, and no sweep will ever see it, so the
-      // ownership recheck must still allow the cancel.
+      // finalization lock must be retained through cancellation.
       .mockResolvedValue(makeBillingSnapshot({
         billingStatus: HostedBillingStatus.past_due,
       }));
-    mocks.readHostedMemberPulseTrialCleanupOwnershipState.mockResolvedValue({
-      billingStatus: HostedBillingStatus.past_due,
-      currentBillingPhase: null,
-      pulseTrialRedeemedAt: null,
-      stripeSubscriptionLookupKey: null,
-    });
 
     await expect(
       ensureHostedAutoPulseTrialEnrollment({
@@ -2632,11 +2427,60 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
         timeout: 5_000,
       },
     );
-    expect(
-      mocks.readHostedMemberPulseTrialCleanupOwnershipState,
-    ).toHaveBeenCalledOnce();
-    expect(mocks.lockHostedMemberRow).toHaveBeenCalledTimes(3);
+    expect(mocks.lockHostedMemberRow).toHaveBeenCalledTimes(2);
+    expect(prisma.$transaction).toHaveBeenCalledTimes(2);
     expect(mocks.readHostedMemberBillingSnapshot).toHaveBeenCalledTimes(3);
+    expect(mocks.writeHostedMemberStripeBillingTx).not.toHaveBeenCalled();
+    expect(mocks.activateHostedMemberForPositiveSourceTx).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMemberActivationRuntimeWakeBestEffortResult).not.toHaveBeenCalled();
+    expect(mocks.sendHostedSignupWelcomeEmailForMemberBestEffort).not.toHaveBeenCalled();
+  });
+
+  it("rolls back a no-write loser decision when bounded cancellation fails", async () => {
+    const prisma = makePrisma();
+    mocks.readHostedMemberBillingSnapshot
+      .mockResolvedValueOnce(makeBillingSnapshot())
+      .mockResolvedValueOnce(makeBillingSnapshot())
+      .mockResolvedValueOnce(makeBillingSnapshot({
+        billingRef: {
+          currentBillingPhase: "paid",
+          currentBillingPlanCode: "launch_monthly",
+          currentCheckoutOffer: "standard_checkout",
+          currentPeriodEnd: new Date("2026-07-14T12:00:00.000Z"),
+          currentPeriodStart: new Date("2026-06-14T12:00:00.000Z"),
+          currentTrialEndsAt: null,
+          currentTrialStartedAt: null,
+          lastStripeEventCreatedAt: new Date("2026-06-14T12:00:04.000Z"),
+          memberId: "member_123",
+          pulseTrialPolicyVersion: null,
+          pulseTrialRedeemedAt: null,
+          stripeCustomerId: "cus_paid_123",
+          stripeSubscriptionId: "sub_paid_123",
+        },
+        billingStatus: HostedBillingStatus.active,
+      }));
+    mocks.stripe.subscriptions.cancel.mockRejectedValueOnce(
+      new Error("transient Stripe failure"),
+    );
+
+    await expect(
+      ensureHostedAutoPulseTrialEnrollment({
+        inviteCode: "invite-code",
+        member: {
+          id: "member_123",
+          suspendedAt: null,
+        },
+        now: new Date("2026-06-14T12:00:05.000Z"),
+        prisma: prisma as never,
+      }),
+    ).rejects.toMatchObject({
+      code: "HOSTED_PULSE_TRIAL_CLEANUP_FAILED",
+      httpStatus: 502,
+      retryable: true,
+    });
+
+    expect(prisma.$transaction).toHaveBeenCalledTimes(2);
+    expect(mocks.lockHostedMemberRow).toHaveBeenCalledTimes(2);
     expect(mocks.writeHostedMemberStripeBillingTx).not.toHaveBeenCalled();
     expect(mocks.activateHostedMemberForPositiveSourceTx).not.toHaveBeenCalled();
     expect(mocks.signalHostedMemberActivationRuntimeWakeBestEffortResult).not.toHaveBeenCalled();
@@ -3135,12 +2979,4 @@ function makeMemberLockTimeoutError(): Prisma.PrismaClientKnownRequestError {
       },
     },
   );
-}
-
-function restoreEnvValue(name: string, value: string | undefined): void {
-  if (value === undefined) {
-    delete process.env[name];
-    return;
-  }
-  process.env[name] = value;
 }

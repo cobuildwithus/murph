@@ -35,46 +35,7 @@ export function classifyHostedPulseTrialCandidateDisposition(input: {
   pulseTrialRedeemedAt: Date | null;
   subscriptionId: string;
 }): HostedPulseTrialCandidateDisposition {
-  return classifyHostedPulseTrialCandidateOwnershipDisposition({
-    billingStatus: input.billingStatus,
-    currentBillingPhase: input.currentBillingPhase,
-    hasCurrentStripeSubscription: Boolean(input.currentStripeSubscriptionId),
-    isCurrentStripeSubscription:
-      input.currentStripeSubscriptionId === input.subscriptionId,
-    pulseTrialRedeemedAt: input.pulseTrialRedeemedAt,
-  });
-}
-
-export function classifyHostedPulseTrialCandidateLookupDisposition(input: {
-  billingStatus: HostedBillingStatus;
-  candidateStripeSubscriptionLookupKeys: readonly string[];
-  currentBillingPhase: string | null;
-  currentStripeSubscriptionLookupKey: string | null;
-  pulseTrialRedeemedAt: Date | null;
-}): HostedPulseTrialCandidateDisposition {
-  return classifyHostedPulseTrialCandidateOwnershipDisposition({
-    billingStatus: input.billingStatus,
-    currentBillingPhase: input.currentBillingPhase,
-    hasCurrentStripeSubscription: Boolean(
-      input.currentStripeSubscriptionLookupKey,
-    ),
-    isCurrentStripeSubscription: input.currentStripeSubscriptionLookupKey !==
-        null &&
-      input.candidateStripeSubscriptionLookupKeys.includes(
-        input.currentStripeSubscriptionLookupKey,
-      ),
-    pulseTrialRedeemedAt: input.pulseTrialRedeemedAt,
-  });
-}
-
-function classifyHostedPulseTrialCandidateOwnershipDisposition(input: {
-  billingStatus: HostedBillingStatus;
-  currentBillingPhase: string | null;
-  hasCurrentStripeSubscription: boolean;
-  isCurrentStripeSubscription: boolean;
-  pulseTrialRedeemedAt: Date | null;
-}): HostedPulseTrialCandidateDisposition {
-  if (input.isCurrentStripeSubscription) {
+  if (input.currentStripeSubscriptionId === input.subscriptionId) {
     return "current";
   }
   if (
@@ -84,7 +45,7 @@ function classifyHostedPulseTrialCandidateOwnershipDisposition(input: {
       input.billingStatus === HostedBillingStatus.active &&
       (
         input.currentBillingPhase !== "trial" ||
-        input.hasCurrentStripeSubscription
+        Boolean(input.currentStripeSubscriptionId)
       )
     )
   ) {
