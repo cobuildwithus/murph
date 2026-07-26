@@ -547,7 +547,11 @@ describe('Codex model catalog', () => {
   })
 
   it('enforces the output-only boundary at provider execution', async () => {
-    const route = createRoute()
+    const route = createRoute({
+      providerOptions: {
+        sandbox: 'danger-full-access',
+      },
+    })
     const session = createAssistantSession({
       providerOptions: route.providerOptions,
     })
@@ -799,7 +803,11 @@ describe('Codex model catalog', () => {
   })
 
   it('keeps group-email replies but removes ambient filesystem execution', async () => {
-    const route = createRoute()
+    const route = createRoute({
+      providerOptions: {
+        sandbox: 'danger-full-access',
+      },
+    })
     const session = createAssistantSession({
       providerOptions: route.providerOptions,
     })
@@ -819,7 +827,12 @@ describe('Codex model catalog', () => {
     )
     providerTurnRunnerMocks.buildCodexTurnExecutionPlan.mockResolvedValue({
       activeTurnSteering: null,
-      executionContext: { hosted: null },
+      executionContext: {
+        hosted: {
+          memberId: 'member-group-email',
+          userEnvKeys: [],
+        },
+      },
       hostedToolContext: null,
       input,
       profile: {
@@ -1215,7 +1228,11 @@ describe('Codex model catalog', () => {
   })
 
   it('forwards the accepted-message target authorizer to Codex', async () => {
-    const route = createRoute()
+    const route = createRoute({
+      providerOptions: {
+        sandbox: 'danger-full-access',
+      },
+    })
     const session = createAssistantSession({
       providerOptions: route.providerOptions,
     })

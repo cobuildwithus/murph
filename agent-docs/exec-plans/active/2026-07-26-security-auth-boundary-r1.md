@@ -86,17 +86,32 @@ Updated: 2026-07-26
   changing egress, or splitting processes. Codex applies the profile to tool
   execution while its App Server retains provider credentials outside that
   child sandbox.
+- The preliminary specialist review found three coverage gaps, not production
+  defects: selector exclusions did not begin from an otherwise eligible route,
+  the native denial probe lacked an unprofiled readable control, and incorrect
+  runtime roots were not exercised on both thread start and resume. Accepted
+  all three as test/direct-proof corrections without changing production
+  behavior or adding a new abstraction.
 
 ## Verification
 
-- Commands to run:
+- Completed:
   - Focused hosted-execution, assistant-runtime, assistant-engine, and
-    Cloudflare tests selected after reading the testing map.
-  - `pnpm typecheck`
-  - Canonical `pnpm test:diff ...` commands selected by the repo dispatcher.
+    Cloudflare tests selected after reading the testing map: passed.
+  - Assistant Engine and Cloudflare owner typechecks: passed.
+  - `pnpm test:diff packages/assistant-engine packages/assistant-runtime
+    packages/hosted-execution apps/cloudflare`: passed before preliminary
+    review and again after resolving every accepted finding.
+  - Preliminary `completion-specialists` ReviewGPT: completed with three
+    accepted coverage findings and no patch artifact; all three are resolved.
+  - `pnpm --dir apps/cloudflare runner:docker:smoke:prepared-base`: the
+    production image built, but the local macOS `linux/amd64` emulation failed
+    in the pre-existing Bubblewrap vault command before reaching the new
+    permission probe. The path-scoped native Ubuntu CI job remains the
+    authoritative named-profile sandbox proof.
+- Remaining:
   - `pnpm verify:acceptance`
-  - Preliminary `completion-specialists` ReviewGPT and final exact-head
-    ReviewGPT/CI loop.
+  - Final exact-head ReviewGPT/CI loop.
 - Expected outcomes:
   - Managed credential read is denied; representative vault write and network
     access remain allowed.

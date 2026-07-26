@@ -4817,6 +4817,95 @@ describe('assistant codex runtime', () => {
       .toBeUndefined()
   })
 
+  it.each([
+    {
+      errorCode: 'ASSISTANT_CODEX_APP_SERVER_PERMISSION_ATTESTATION_FAILED',
+      errorContext: {
+        mismatchedFields: ['runtimeWorkspaceRoots'],
+        retryable: false,
+      },
+      requestMethod: 'thread/start',
+      resumeSessionId: null,
+    },
+    {
+      errorCode: 'ASSISTANT_CODEX_RESUME_STALE',
+      errorContext: {
+        mismatchedFields: ['runtimeWorkspaceRoots'],
+        resumeContextMismatch: true,
+        retryable: true,
+        staleResume: true,
+      },
+      requestMethod: 'thread/resume',
+      resumeSessionId: 'thread-hosted-root-wrong-roots',
+    },
+  ] as const)(
+    'fails closed before turn start when $requestMethod attests the wrong hosted root',
+    async ({ errorCode, errorContext, requestMethod, resumeSessionId }) => {
+      const workingDirectory = await createTempDir(
+        'assistant-codex-hosted-root-correct-work-',
+      )
+      const wrongWorkspaceRoot = await createTempDir(
+        'assistant-codex-hosted-root-wrong-work-',
+      )
+      const children: MockChildProcess[] = []
+      mockProcessGroupSignalsForChildren(children)
+
+      codexMocks.spawn.mockImplementation(() => {
+        const child = new MockChildProcess()
+        child.pid = 27_600
+        children.push(child)
+
+        queueMicrotask(() => {
+          void (async () => {
+            const initialize = await waitForRpcMethod(child, 'initialize')
+            child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+
+            const threadRequest = await waitForRpcMethod(child, requestMethod)
+            child.stdout.write(jsonLine({
+              id: threadRequest.id,
+              result: {
+                activePermissionProfile: {
+                  id: MURPH_HOSTED_ROOT_PERMISSION_PROFILE,
+                },
+                approvalPolicy: 'never',
+                cwd: workingDirectory,
+                instructionSources: [{ source: 'workspace' }],
+                modelProvider: 'openai',
+                runtimeWorkspaceRoots: [wrongWorkspaceRoot],
+                thread: {
+                  id: resumeSessionId ?? 'thread-hosted-root-wrong-roots',
+                },
+              },
+            }))
+          })()
+        })
+
+        return child
+      })
+
+      await expect(executeCodexAppServerTurn({
+        approvalPolicy: 'never',
+        modelProvider: 'openai',
+        permissions: MURPH_HOSTED_ROOT_PERMISSION_PROFILE,
+        prompt: 'must not start with the wrong hosted root',
+        ...(resumeSessionId ? { resumeSessionId } : {}),
+        runtimeWorkspaceRoots: [workingDirectory],
+        workingDirectory,
+      })).rejects.toMatchObject({
+        code: errorCode,
+        context: errorContext,
+      })
+
+      const child = requireMockChildProcess(children[0] ?? null)
+      expect(
+        readWrittenRpcMessages(child).some(
+          (message) => message.method === 'turn/start',
+        ),
+      ).toBe(false)
+      expect(process.kill).toHaveBeenCalledWith(-27_600, 'SIGTERM')
+    },
+  )
+
   it('keeps narrower named profiles fresh, ephemeral, and one-shot', async () => {
     const workingDirectory = await createTempDir('assistant-codex-narrow-profile-work-')
 

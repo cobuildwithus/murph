@@ -1104,6 +1104,22 @@ async function runCodexHostedRootPermissionProbe(input: {
   await writeFile(authorizedFilePath, authorizedFileContents, { mode: 0o600 });
   await rm(authorizedWritePath, { force: true });
 
+  const readableControl = await input.execCommand(
+    "hosted-root-unprofiled-auth-readable-control",
+    [
+      "node",
+      "-e",
+      'const crypto = require("node:crypto"); const fs = require("node:fs"); process.stdout.write(crypto.createHash("sha256").update(fs.readFileSync(process.argv[1])).digest("hex"));',
+      managedCodexAuthPath,
+    ],
+    { cwd: input.vaultRoot },
+  );
+  if (readableControl.stdout.trim() !== sha256Hex(managedAuthFixture)) {
+    throw new Error(
+      "Hosted runner smoke could not prove the managed auth fixture was readable without the hosted-root permission profile.",
+    );
+  }
+
   let acceptedNetworkConnections = 0;
   const networkServer = createServer((socket) => {
     acceptedNetworkConnections += 1;
