@@ -1212,15 +1212,22 @@ describe('monorepo release flow coverage audit', () => {
         '  }',
       ].join('\n'),
     )
-    expect(reviewGptDriver).toContain(
-      [
-        '  if (!shouldSend) {',
-        '    if (shouldAttachFiles) {',
-        "      cleanupConfirmedDraftAttachments('the upload');",
-        '    }',
-        "    ownedTargetId = '';",
-      ].join('\n'),
+    const unsentDraftBranchStart = reviewGptDriver.indexOf('  if (!shouldSend) {')
+    const unsentDraftBranchEnd = reviewGptDriver.indexOf(
+      '\n  if (shouldSend) {',
+      unsentDraftBranchStart,
     )
+    const unsentDraftBranch = reviewGptDriver.slice(
+      unsentDraftBranchStart,
+      unsentDraftBranchEnd,
+    )
+    expect(unsentDraftBranchStart).toBeGreaterThan(-1)
+    expect(unsentDraftBranchEnd).toBeGreaterThan(unsentDraftBranchStart)
+    expect(unsentDraftBranch).toContain(
+      "console.log('Retained generated local attachment artifact(s) for the unsent draft.');",
+    )
+    expect(unsentDraftBranch).toContain("ownedTargetId = '';")
+    expect(unsentDraftBranch).not.toContain('cleanupConfirmedDraftAttachments')
     expect(reviewGptDriver).toContain(
       [
         '      if (!shouldWaitForResponse) {',
