@@ -1030,9 +1030,13 @@ describe("hosted workspace runtime entrypoint", () => {
     const uploadForegroundStarted = createDeferred<void>();
     const uploadForegroundRelease = createDeferred<void>();
     const completionTurnStarted = createDeferred<void>();
+    const imageUsageRetryStarted = createDeferred<void>();
+    const imageUsageRetryRelease = createDeferred<void>();
     let originUsageReleased = false;
     let providerReleased = false;
     let uploadReleased = false;
+    let imageUsageAttempts = 0;
+    let resultResolved = false;
     let completionInputId: string | null = null;
     let completionText: string | null = null;
     let resultPromise:
@@ -1048,6 +1052,7 @@ describe("hosted workspace runtime entrypoint", () => {
       uploadReleased = true;
       uploadRelease.resolve();
       uploadForegroundRelease.resolve();
+      imageUsageRetryRelease.resolve();
     };
 
     try {
@@ -1203,6 +1208,15 @@ describe("hosted workspace runtime entrypoint", () => {
                 }
                 if (record.featureKey === "assistant_generated_image") {
                   recordedImageUsageOptions.push(options);
+                  imageUsageAttempts += 1;
+                  events.push(`image.usage.attempt:${imageUsageAttempts}`);
+                  if (imageUsageAttempts === 1) {
+                    throw new Error(
+                      "Synthetic transient image usage settlement failure.",
+                    );
+                  }
+                  imageUsageRetryStarted.resolve();
+                  await imageUsageRetryRelease.promise;
                   events.push("image.usage.recorded");
                 }
                 events.push(`usage.finished:${record.usageId}`);
@@ -1360,6 +1374,12 @@ describe("hosted workspace runtime entrypoint", () => {
         },
       );
       void resultPromise.catch(() => undefined);
+      void resultPromise.then(
+        () => {
+          resultResolved = true;
+        },
+        () => undefined,
+      );
 
       await withRealTimeout(
         Promise.race([
@@ -1466,6 +1486,25 @@ describe("hosted workspace runtime entrypoint", () => {
         10_000,
         () => events.join(","),
       );
+      await withRealTimeout(
+        imageUsageRetryStarted.promise,
+        10_000,
+        () => events.join(","),
+      );
+      await new Promise((resolve) => REAL_SET_TIMEOUT(resolve, 25));
+      assert.equal(resultResolved, false);
+      assert.equal(imageUsageAttempts, 2);
+      assert.equal(events.includes("image.usage.recorded"), false);
+      assert.equal(
+        events.filter((event) => event === "provider.started").length,
+        1,
+      );
+      assert.equal(
+        events.filter((event) => event === "turn.image-completion").length,
+        1,
+      );
+
+      imageUsageRetryRelease.resolve();
       const result = await withRealTimeout(
         resultPromise,
         30_000,
@@ -1477,8 +1516,12 @@ describe("hosted workspace runtime entrypoint", () => {
         completionText ?? "",
         /https:\/\/images\.example\.test\/generated\.png/u,
       );
-      assert.equal(recordedImageUsageOptions.length, 1);
-      const recordedImageUsageOption = recordedImageUsageOptions[0];
+      assert.equal(recordedImageUsageOptions.length, 2);
+      assert.deepEqual(
+        recordedImageUsageOptions[1],
+        recordedImageUsageOptions[0],
+      );
+      const recordedImageUsageOption = recordedImageUsageOptions[1];
       assert.ok(
         recordedImageUsageOption
         && typeof recordedImageUsageOption === "object"

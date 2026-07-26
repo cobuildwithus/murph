@@ -44,19 +44,20 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // defense against whole subsystems entering the boot path, and re-baseline down
 // if a future prune reclaims the space.
 //
+// Baselines raised 2026-07-25 for non-blocking hosted image generation.
+// Production assembly on the current base measured a 1,678,382B entry chunk,
+// 7,874,302B static boot closure, and 9,641,377B total after adding the
+// invocation-local image controller, completion handoff, and allowance
+// contracts. The forbidden-input guard remained clean; retain the established
+// per-budget tolerances below.
+//
 // The total budget is expressed as the packaged measurement plus the established
-// 32KB allowance for small reviewed additions. The group room-model feature
-// measured 9,586,139B in CI and 9,621,769B in the local production assembly on
-// 2026-07-25; use the larger measured closure. Its growth stays within the
-// existing assistant-engine boot graph and adds no forbidden subsystem. The
-// Junction push-source recovery runtime from #964 also raised the measured
-// macOS entry chunk to 1,639,869B without adding a forbidden boot input. An
-// exact measured ceiling was tried and reverted: it left zero slack, so an
-// unrelated prompt change on main broke assembly. Do not restore the former
-// 250KB operational growth allowance.
-const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_621_769 + 32_768;
-const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_639_869;
-const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 7_774_000;
+// 32KB allowance for small reviewed additions. An exact measured ceiling was
+// tried and reverted: it left zero slack, so an unrelated prompt change on main
+// broke assembly. Do not restore the former 250KB operational growth allowance.
+const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_641_377 + 32_768;
+const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_678_382;
+const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 7_874_302;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES = 48_000;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_TOLERANCE_BYTES = 96_000;
 // The @murphai package markers are path suffixes, not node_modules-anchored:

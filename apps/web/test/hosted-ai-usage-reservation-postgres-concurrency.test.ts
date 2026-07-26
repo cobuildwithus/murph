@@ -13,7 +13,10 @@ import {
   reserveHostedImageGenerationCapacity,
   type HostedImageGenerationCapacityReservationDecision,
 } from "@/src/lib/hosted-execution/usage-allowance";
-import { grantHostedUsageCreditForPurchaseTx } from "@/src/lib/hosted-execution/usage-credits";
+import {
+  grantHostedUsageCreditForPurchaseTx,
+  reconcileHostedUsageCreditRefundNetReversalTx,
+} from "@/src/lib/hosted-execution/usage-credits";
 import { createPrismaClient } from "@/src/lib/prisma";
 
 const databaseUrl = process.env.DATABASE_URL?.trim() ?? "";
@@ -40,6 +43,7 @@ type ReservationFixture = {
   memberId: string;
   observer: PrismaClient;
   second: PrismaClient;
+  usageCreditPurchaseId: string | null;
 };
 
 const transactionOptions = {
@@ -169,8 +173,10 @@ async function createReservationFixture(input: {
     },
   });
   const usageCreditGrantUsdMicros = input.usageCreditGrantUsdMicros ?? 0n;
+  let usageCreditPurchaseId: string | null = null;
   if (usageCreditGrantUsdMicros > 0n) {
     const purchaseId = `hucp_ai_reservation_${fixtureId}`;
+    usageCreditPurchaseId = purchaseId;
     await observer.hostedUsageCreditPurchase.create({
       data: {
         beneficiaryMemberId: memberId,
@@ -207,6 +213,7 @@ async function createReservationFixture(input: {
     memberId,
     observer,
     second,
+    usageCreditPurchaseId,
   };
 }
 
@@ -579,6 +586,70 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         await fixture.observer.hostedMember.deleteMany({
           where: { id: foreignMemberId },
         });
+        await cleanupReservationFixture(fixture);
+      }
+    });
+
+    it("refuses dispatch when a pre-dispatch refund reversal removes its capacity", async () => {
+      const usageCreditGrantUsdMicros = 300_000n;
+      const fixture = await createReservationFixture({
+        availableCapacityUsdMicros: 0n,
+        usageCreditGrantUsdMicros,
+      });
+      const reservationId =
+        `turn_image_refund_before_dispatch_${randomUUID()}.attempt-1`;
+
+      try {
+        const usageCreditPurchaseId = fixture.usageCreditPurchaseId;
+        if (!usageCreditPurchaseId) {
+          throw new Error("Expected a usage-credit purchase fixture.");
+        }
+        await expect(reserveHostedImageGenerationCapacity({
+          memberId: fixture.memberId,
+          now,
+          prisma: fixture.observer,
+          requestId: reservationId,
+          spec: imageSpec,
+        })).resolves.toEqual({
+          requestId: reservationId,
+          status: "reserved",
+        });
+
+        await expect(fixture.observer.$transaction(
+          (tx) => reconcileHostedUsageCreditRefundNetReversalTx({
+            effectiveAt: now,
+            purchaseId: usageCreditPurchaseId,
+            sourceReferenceLookupKey: `refund_${randomUUID()}`,
+            targetNetReversalUsdMicros: usageCreditGrantUsdMicros,
+            tx,
+          }),
+          transactionOptions,
+        )).resolves.toMatchObject({
+          balanceUsdMicros: 0n,
+          reversedNowUsdMicros: usageCreditGrantUsdMicros,
+          unmetTargetUsdMicros: 0n,
+        });
+
+        await expect(markHostedAiUsageReservationDispatched({
+          memberId: fixture.memberId,
+          now,
+          prisma: fixture.observer,
+          requestId: reservationId,
+        })).resolves.toEqual({
+          requestId: reservationId,
+          status: "not_dispatchable",
+        });
+        await expect(
+          fixture.observer.hostedAiUsageReservation.findUniqueOrThrow({
+            select: {
+              dispatchedAt: true,
+            },
+            where: { requestId: reservationId },
+          }),
+        ).resolves.toEqual({
+          dispatchedAt: null,
+        });
+      } finally {
         await cleanupReservationFixture(fixture);
       }
     });

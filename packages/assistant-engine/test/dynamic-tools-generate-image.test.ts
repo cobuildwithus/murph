@@ -70,13 +70,28 @@ describe('murph.generate_image dynamic tool schema', () => {
       'Do not claim the image is underway',
     )
     expect(MURPH_GENERATE_IMAGE_TOOL.description).toContain(
-      'do not call generate_image again for the same request in this turn',
+      'After status="admission_pending", do not call generate_image again for the same request in this turn',
+    )
+    expect(MURPH_GENERATE_IMAGE_TOOL.description).toContain(
+      'wait for the later trusted result',
+    )
+    expect(MURPH_GENERATE_IMAGE_TOOL.description).toContain(
+      'After status="rejected", this attempt did not start',
+    )
+    expect(MURPH_GENERATE_IMAGE_TOOL.description).toContain(
+      'do not retry automatically in the same turn and do not promise a later result',
+    )
+    expect(MURPH_GENERATE_IMAGE_TOOL.description).toContain(
+      'When reason="conflict", do not infer whether an earlier operation will complete',
     )
     expect(MURPH_GENERATE_IMAGE_TOOL.description).toContain(
       'Nothing is attached or sent automatically',
     )
     expect(MURPH_GENERATE_IMAGE_TOOL.description).toContain(
       'may attach the image with murph.attach_response_media, send any other reply, or finish without reply',
+    )
+    expect(MURPH_GENERATE_IMAGE_TOOL.description).not.toContain(
+      'After admission_pending or rejected',
     )
   })
 

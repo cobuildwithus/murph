@@ -322,6 +322,8 @@ export type HostedWorkspaceDurableCheckpointEffects =
   | readonly HostedWorkspaceDurableCheckpointEffect[];
 
 const HOSTED_PRE_ASSISTANT_SYSTEM_IMPORT_MAX_PAGES = 4;
+const HOSTED_RESERVATION_USAGE_RETRY_INITIAL_DELAY_MS = 250;
+const HOSTED_RESERVATION_USAGE_RETRY_MAX_DELAY_MS = 5_000;
 
 export interface HostedWorkspaceRunnerMailboxImportContext {
   assistantAskRequestTargetKind?: "joined_group";
@@ -900,7 +902,7 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
     }
 
     const completion = deferredUsageWriteTail.then(async () => {
-      const outcome = await flushHostedAssistantUsageRecordsBestEffort({
+      const outcome = await flushHostedAssistantUsageRecords({
         input,
         records,
       });
@@ -2356,7 +2358,7 @@ function normalizeHostedUsageNoticeRouteString(
   return normalized.length > 0 ? normalized : null;
 }
 
-async function flushHostedAssistantUsageRecordsBestEffort(input: {
+async function flushHostedAssistantUsageRecords(input: {
   input: HostedWorkspaceRunnerInput;
   records: readonly HostedDeferredAssistantUsageRecord[];
 }): Promise<HostedWorkspaceRunnerDeferredUsageOutcome> {
@@ -2392,60 +2394,91 @@ async function flushHostedAssistantUsageRecordsBestEffort(input: {
       record,
     } of input.records
   ) {
-    try {
-      const noticeDeliveryTarget =
-        await resolveHostedUsageNoticeDeliveryTargetFromAcceptedInputs({
-          inputIds: providerRequestAcceptedInputIds ?? [],
-          memberId: input.input.expectedUserId,
-          vaultRoot: input.input.vaultRoot,
-        });
-      await usageRecordPort.recordUsage(record, {
-        ...(noticeDeliveryTarget === null || noticeDeliveryTarget === undefined
-          ? {}
-          : { noticeDeliveryTarget }),
-        ...(options?.reservationId === undefined
-          ? {}
-          : { reservationId: options.reservationId }),
-      });
-      successfulRecordCount += 1;
-      successfulUsageIds.add(record.usageId);
-      for (const inputId of providerRequestAcceptedInputIds ?? []) {
-        recordedAcceptedInputIds.add(inputId);
-      }
-    } catch (error) {
-      failedRecordCount += 1;
-      failedUsageIds.add(record.usageId);
-      const diagnostics = buildHostedExecutionSafeErrorDiagnostics(error);
-      const safeErrorMessage =
-        typeof diagnostics?.errorMessage === "string"
-          ? diagnostics.errorMessage
-          : "Hosted assistant usage recording failed.";
-      const nestedErrorCode =
-        typeof diagnostics?.errorCode === "string"
-          ? diagnostics.errorCode
-          : "runtime_error";
-      console.warn("Assistant usage recording failed; continuing without retry.", {
-        errorCode: "assistant_usage_record_failed",
-        nestedErrorCode,
-        safeErrorMessage,
-      });
-      await writeHostedRuntimeLogBestEffort({
-        entry: {
-          ...buildHostedRuntimeLogContextFields(input.input.runtimeLogContext),
-          component: "runtime",
-          errorCode: "assistant_usage_record_failed",
-          eventCode: "runner.error",
-          level: "warn",
-          phase: "error",
-          redactedJson: {
-            assistantUsageRecordFailed: true,
+    let retryDelayMs = HOSTED_RESERVATION_USAGE_RETRY_INITIAL_DELAY_MS;
+    while (true) {
+      try {
+        const noticeDeliveryTarget =
+          await resolveHostedUsageNoticeDeliveryTargetFromAcceptedInputs({
+            inputIds: providerRequestAcceptedInputIds ?? [],
+            memberId: input.input.expectedUserId,
+            vaultRoot: input.input.vaultRoot,
+          });
+        const usageOptions = {
+          ...(noticeDeliveryTarget === null || noticeDeliveryTarget === undefined
+            ? {}
+            : { noticeDeliveryTarget }),
+          ...(options?.reservationId === undefined
+            ? {}
+            : { reservationId: options.reservationId }),
+        };
+        await usageRecordPort.recordUsage(record, usageOptions);
+        successfulRecordCount += 1;
+        successfulUsageIds.add(record.usageId);
+        for (const inputId of providerRequestAcceptedInputIds ?? []) {
+          recordedAcceptedInputIds.add(inputId);
+        }
+        break;
+      } catch (error) {
+        const retryReservationUsage =
+          options?.reservationId !== undefined
+          && input.input.signal?.aborted !== true;
+        const diagnostics = buildHostedExecutionSafeErrorDiagnostics(error);
+        const safeErrorMessage =
+          typeof diagnostics?.errorMessage === "string"
+            ? diagnostics.errorMessage
+            : "Hosted assistant usage recording failed.";
+        const nestedErrorCode =
+          typeof diagnostics?.errorCode === "string"
+            ? diagnostics.errorCode
+            : "runtime_error";
+        console.warn(
+          retryReservationUsage
+            ? "Reservation-backed assistant usage recording failed; retrying."
+            : "Assistant usage recording failed; continuing without retry.",
+          {
+            errorCode: "assistant_usage_record_failed",
             nestedErrorCode,
             safeErrorMessage,
           },
-        },
-        now: input.input.now,
-        platform: input.input.platform,
-      }).catch(() => undefined);
+        );
+        await writeHostedRuntimeLogBestEffort({
+          entry: {
+            ...buildHostedRuntimeLogContextFields(input.input.runtimeLogContext),
+            component: "runtime",
+            errorCode: "assistant_usage_record_failed",
+            eventCode: "runner.error",
+            level: "warn",
+            phase: "error",
+            redactedJson: {
+              assistantUsageRecordFailed: true,
+              nestedErrorCode,
+              retryingReservationUsage: retryReservationUsage,
+              safeErrorMessage,
+            },
+          },
+          now: input.input.now,
+          platform: input.input.platform,
+        }).catch(() => undefined);
+        // Ordinary usage remains one-shot telemetry. A reservation-backed
+        // image write is the idempotent settlement for an outstanding
+        // allowance claim, so the live invocation keeps retrying that same
+        // identity until Web accepts it or the runtime aborts.
+        const shouldRetry = retryReservationUsage
+          ? await waitForHostedReservationUsageRetry({
+              delayMs: retryDelayMs,
+              signal: input.input.signal ?? null,
+            })
+          : false;
+        if (!shouldRetry) {
+          failedRecordCount += 1;
+          failedUsageIds.add(record.usageId);
+          break;
+        }
+        retryDelayMs = Math.min(
+          retryDelayMs * 2,
+          HOSTED_RESERVATION_USAGE_RETRY_MAX_DELAY_MS,
+        );
+      }
     }
   }
 
@@ -2456,6 +2489,36 @@ async function flushHostedAssistantUsageRecordsBestEffort(input: {
     successfulRecordCount,
     successfulUsageIds: [...successfulUsageIds],
   };
+}
+
+async function waitForHostedReservationUsageRetry(input: {
+  delayMs: number;
+  signal: AbortSignal | null;
+}): Promise<boolean> {
+  if (input.signal?.aborted) {
+    return false;
+  }
+  return await new Promise<boolean>((resolve) => {
+    let settled = false;
+    const finish = (shouldRetry: boolean): void => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timeout);
+      input.signal?.removeEventListener("abort", onAbort);
+      resolve(shouldRetry);
+    };
+    const onAbort = (): void => finish(false);
+    const timeout = setTimeout(
+      () => finish(true),
+      Math.max(0, input.delayMs),
+    );
+    input.signal?.addEventListener("abort", onAbort, { once: true });
+    if (input.signal?.aborted) {
+      onAbort();
+    }
+  });
 }
 
 async function writeHostedForegroundMailboxImportFailureRuntimeLog(context: {

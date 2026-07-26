@@ -246,10 +246,13 @@ describe("cloudflare worker routes", () => {
     expect(workerSource).not.toContain("runUntilIdleForTest");
     expect(workerSource).not.toContain("startStuckInvocationForTest");
     expect(workerSource).not.toContain("armCanonicalCheckpointLostAckForTest");
+    expect(workerSource).not.toContain("armOpenAiImageResponseBarrierForTest");
     expect(workerSource).not.toContain("armSnapshotPublicationCorruptionForTest");
     expect(workerSource).not.toContain("armShutdownCheckpointPublicationBarrierForTest");
     expect(workerSource).not.toContain("beginShutdownCheckpointGracefulStopForTest");
     expect(workerSource).not.toContain("readShutdownCheckpointPublicationBarrierForTest");
+    expect(workerSource).not.toContain("readOpenAiImageResponseBarrierForTest");
+    expect(workerSource).not.toContain("releaseOpenAiImageResponseBarrierForTest");
     expect(workerSource).not.toContain("releaseShutdownCheckpointPublicationBarrierForTest");
     expect(workerSource).not.toContain("expireActivityForTest");
     expect(workerSource).not.toContain("ageActiveInvocationForTest");
@@ -344,6 +347,7 @@ describe("cloudflare worker routes", () => {
       "test-run-until-idle",
       "test-run-alarm",
       "test-canonical-checkpoint-lost-ack",
+      "test-openai-image-response-barrier",
       "test-generated-image-upload-type-error",
       "test-snapshot-publication-corruption",
       "test-shutdown-checkpoint-publication-barrier",
@@ -1274,6 +1278,24 @@ describe("cloudflare worker routes", () => {
       error: "Hosted execution bound user does not match the test runner user.",
     });
 
+    const openAiImageResponseBarrierResponse = await hostedLocalTestWorker.fetch(
+      await signControlRequest(new Request(
+        "https://runner.example.test/__test/users/member_123"
+          + "/openai-image-response-barrier?action=status",
+        {
+          method: "POST",
+        },
+      ), {
+        boundUserId: "member_other",
+      }),
+      env,
+    );
+
+    expect(openAiImageResponseBarrierResponse.status).toBe(401);
+    await expect(openAiImageResponseBarrierResponse.json()).resolves.toEqual({
+      error: "Hosted execution bound user does not match the test runner user.",
+    });
+
     const snapshotPublicationCorruptionResponse = await hostedLocalTestWorker.fetch(
       await signControlRequest(new Request(
         "https://runner.example.test/__test/users/member_123/snapshot-publication-corruption",
@@ -1738,6 +1760,73 @@ describe("cloudflare worker routes", () => {
       await signControlRequest(new Request(
         "https://runner.example.test/__test/users/member_123"
           + "/shutdown-checkpoint-publication-barrier?action=arm&extra=1",
+        { method: "POST" },
+      ), {
+        boundUserId: "member_123",
+      }),
+      env,
+    );
+    expect(invalidResponse.status).toBe(400);
+  });
+
+  it("controls the user-scoped OpenAI image response barrier", async () => {
+    const baseRunnerContainerNamespace = createRunnerContainerNamespace();
+    const armOpenAiImageResponseBarrierForTest =
+      vi.fn(async () => ({ ok: true as const }));
+    const readOpenAiImageResponseBarrierForTest =
+      vi.fn(async () => ({ state: "entered" as const }));
+    const releaseOpenAiImageResponseBarrierForTest =
+      vi.fn(async () => ({ ok: true as const, released: true }));
+    const getByName = vi.fn((name: string) => ({
+      ...baseRunnerContainerNamespace.getByName(name),
+      armOpenAiImageResponseBarrierForTest,
+      readOpenAiImageResponseBarrierForTest,
+      releaseOpenAiImageResponseBarrierForTest,
+    }));
+    const env = createWorkerEnv(createUserRunnerStub(), {
+      MURPH_HOSTED_LOCAL_TEST_ROUTES: "1",
+      NODE_ENV: "test",
+      RUNNER_CONTAINER: {
+        getByName,
+      },
+    });
+    const request = async (action: "arm" | "release" | "status") =>
+      await hostedLocalTestWorker.fetch(
+        await signControlRequest(new Request(
+          "https://runner.example.test/__test/users/member_123"
+            + `/openai-image-response-barrier?action=${action}`,
+          { method: "POST" },
+        ), {
+          boundUserId: "member_123",
+        }),
+        env,
+      );
+
+    const armResponse = await request("arm");
+    const statusResponse = await request("status");
+    const releaseResponse = await request("release");
+
+    expect(armResponse.status).toBe(200);
+    await expect(armResponse.json()).resolves.toEqual({ ok: true });
+    expect(statusResponse.status).toBe(200);
+    await expect(statusResponse.json()).resolves.toEqual({ state: "entered" });
+    expect(releaseResponse.status).toBe(200);
+    await expect(releaseResponse.json()).resolves.toEqual({ ok: true, released: true });
+    expect(getByName).toHaveBeenCalledWith(expect.stringContaining("member_123"));
+    expect(armOpenAiImageResponseBarrierForTest).toHaveBeenCalledWith({
+      userId: "member_123",
+    });
+    expect(readOpenAiImageResponseBarrierForTest).toHaveBeenCalledWith({
+      userId: "member_123",
+    });
+    expect(releaseOpenAiImageResponseBarrierForTest).toHaveBeenCalledWith({
+      userId: "member_123",
+    });
+
+    const invalidResponse = await hostedLocalTestWorker.fetch(
+      await signControlRequest(new Request(
+        "https://runner.example.test/__test/users/member_123"
+          + "/openai-image-response-barrier?action=arm&extra=1",
         { method: "POST" },
       ), {
         boundUserId: "member_123",

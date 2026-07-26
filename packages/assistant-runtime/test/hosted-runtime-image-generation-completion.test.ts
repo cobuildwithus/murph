@@ -64,6 +64,11 @@ describe("hosted image generation completion staging", () => {
         service: "imessage",
       },
     });
+    assert.notEqual(
+      origin.conversation?.threadId,
+      origin.replyTarget?.threadId,
+      "hosted conversation identity must stay blinded independently of the raw delivery target",
+    );
 
     const result = await stageHostedImageGenerationCompletionInput({
       operation: {
@@ -441,7 +446,9 @@ async function seedOrigin(
         actorId: input.actorId ?? "linq_sender_actor",
         actorIsSelf: input.actorIsSelf ?? false,
         source: "linq",
-        threadId: threadIsDirect ? "linq_direct_thread" : "linq_group_thread",
+        threadId: threadIsDirect
+          ? "blinded_linq_direct_thread"
+          : "blinded_linq_group_thread",
         threadIsDirect,
       },
       occurredAt: "2026-07-25T22:52:55.000Z",

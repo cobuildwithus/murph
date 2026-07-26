@@ -51,6 +51,10 @@ const hostedUsageCreditModuleSpecifier = new URL(
   "../../src/lib/hosted-execution/usage-credits.ts",
   import.meta.url,
 ).href;
+const hostedGroupUsageFundingModuleSpecifier = new URL(
+  "../../src/lib/hosted-groups/group-usage-funding.ts",
+  import.meta.url,
+).href;
 const hostedComputerUseServiceModuleSpecifier = new URL(
   "../../src/lib/computer-use/service.ts",
   import.meta.url,
@@ -201,6 +205,13 @@ export interface HostedAiUsagePeriodForTest {
   periodEnd: Date;
   periodStart: Date;
   spentUsdMicros: bigint;
+}
+
+export interface HostedGroupUsageStatusForTest {
+  capacityState: "exhausted" | "healthy" | "low";
+  fundingUrl: string | null;
+  periodEnd: string;
+  remainingPercent: number;
 }
 
 export interface HostedLinqDeliveryForTest {
@@ -461,6 +472,13 @@ interface HostedUsageCreditModule {
     purchaseId: string;
     tx: unknown;
   }): Promise<HostedUsageCreditGrantForTest>;
+}
+
+interface HostedGroupUsageFundingModule {
+  readHostedGroupUsageStatus(input: {
+    prisma: HostedTestPrismaClient;
+    runtimeMemberId: string;
+  }): Promise<HostedGroupUsageStatusForTest | null>;
 }
 
 interface HostedThreadRouteForTestModule {
@@ -943,12 +961,13 @@ export async function readHostedPhoneCallForTest(input: {
 
 export async function seedHostedAiUsageLimitPeriodForTest(input: {
   environment?: NodeJS.ProcessEnv;
+  limitUsdMicros?: bigint;
   memberId: string;
   periodEnd: Date;
   periodStart: Date;
   remainingUsdMicros?: bigint;
 }): Promise<HostedAiUsagePeriodForTest> {
-  const limitUsdMicros = 10_000_000n;
+  const limitUsdMicros = input.limitUsdMicros ?? 10_000_000n;
   const remainingUsdMicros = input.remainingUsdMicros ?? 0n;
   if (remainingUsdMicros < 0n || remainingUsdMicros > limitUsdMicros) {
     throw new RangeError("Hosted AI usage test balance must be within the period limit.");
@@ -1000,6 +1019,20 @@ export async function readHostedAiUsageLimitPeriodForTest(input: {
       },
     })
   );
+}
+
+export async function readHostedGroupUsageStatusForTest(input: {
+  environment?: NodeJS.ProcessEnv;
+  runtimeMemberId: string;
+}): Promise<HostedGroupUsageStatusForTest | null> {
+  return withHostedWebTestkitDeps(input.environment, async (deps) => {
+    const groupUsageFundingModule =
+      await loadHostedGroupUsageFundingModule();
+    return await groupUsageFundingModule.readHostedGroupUsageStatus({
+      prisma: deps.prisma,
+      runtimeMemberId: input.runtimeMemberId,
+    });
+  });
 }
 
 export async function grantHostedUsageCreditForTest(input: {
@@ -1370,6 +1403,12 @@ async function loadHostedRuntimeSignalModule(): Promise<HostedRuntimeSignalModul
 
 async function loadHostedUsageCreditModule(): Promise<HostedUsageCreditModule> {
   return await import(hostedUsageCreditModuleSpecifier) as HostedUsageCreditModule;
+}
+
+async function loadHostedGroupUsageFundingModule(): Promise<HostedGroupUsageFundingModule> {
+  return await import(
+    hostedGroupUsageFundingModuleSpecifier
+  ) as HostedGroupUsageFundingModule;
 }
 
 async function createHostedComputerUseStoreForTest(

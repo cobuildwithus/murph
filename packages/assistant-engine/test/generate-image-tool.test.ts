@@ -17,6 +17,7 @@ import {
   persistAssistantImageGenerationCapture,
   prepareAssistantImageGeneration,
   publishAssistantImageGeneration,
+  type GenerateImageToolArgs,
 } from '../src/assistant-codex/generate-image-tool.js'
 import {
   MURPH_ASSISTANT_SKILLS_ROOT_ENV,
@@ -360,6 +361,89 @@ describe('assistant image generation phases', () => {
       )
       expect(replay.rpcSuccess).toBe(true)
       expect(replay.savedImageRef).toBe(first.savedImageRef)
+    })
+  })
+
+  it('isolates changed image arguments while reusing an exact fingerprint-scoped capture', async () => {
+    await withTempDir(async (root) => {
+      const vaultRoot = path.join(root, 'vault')
+      const codexHome = path.join(root, 'codex-home')
+      const referencePath = path.join(vaultRoot, 'raw', 'inbox', 'reference.png')
+      await initializeVault({ vaultRoot })
+      await mkdir(path.dirname(referencePath), { recursive: true })
+      await writeFile(referencePath, PNG_BYTES)
+
+      const args: GenerateImageToolArgs = {
+        alt: 'Mountain cyclist',
+        outputFormat: 'png',
+        prompt: 'Draw a cyclist climbing a mountain.',
+        quality: 'medium',
+        size: '1024x1024',
+      }
+      const operationKey = 'murph.background-image-generation:img_test'
+      const originalCaptureKey = `${operationKey}:fingerprint-original`
+      const original = await executeGenerateImageTool({
+        args,
+        captureIdempotencyKey: originalCaptureKey,
+        codexHome,
+        env: { OPENAI_API_KEY: 'test-key' },
+        fetchImpl: async () => openAiPngResponse(),
+        providerRequestOrdinal: 1,
+        vaultRoot,
+      })
+      expect(original.rpcSuccess).toBe(true)
+
+      const exactReplay = await prepareAssistantImageGeneration({
+        args,
+        captureIdempotencyKey: originalCaptureKey,
+        codexHome,
+        env: { OPENAI_API_KEY: 'test-key' },
+        providerRequestOrdinal: 2,
+        vaultRoot,
+      })
+      expect(exactReplay.status).toBe('cached')
+      if (exactReplay.status !== 'cached') {
+        throw new Error('expected exact request replay to reuse the capture')
+      }
+      expect(exactReplay.generated.savedCapture?.imageRef)
+        .toBe(original.savedImageRef)
+
+      const changedRequests: Array<{
+        args: GenerateImageToolArgs
+        fingerprint: string
+      }> = [
+        {
+          args: { ...args, prompt: 'Draw a runner climbing a mountain.' },
+          fingerprint: 'changed-prompt',
+        },
+        {
+          args: { ...args, quality: 'high' },
+          fingerprint: 'changed-quality',
+        },
+        {
+          args: { ...args, size: '1536x1024' },
+          fingerprint: 'changed-size',
+        },
+        {
+          args: {
+            ...args,
+            referenceImageRefs: ['raw/inbox/reference.png'],
+          },
+          fingerprint: 'changed-references',
+        },
+      ]
+      for (const changedRequest of changedRequests) {
+        const preparation = await prepareAssistantImageGeneration({
+          args: changedRequest.args,
+          captureIdempotencyKey:
+            `${operationKey}:fingerprint-${changedRequest.fingerprint}`,
+          codexHome,
+          env: { OPENAI_API_KEY: 'test-key' },
+          providerRequestOrdinal: 3,
+          vaultRoot,
+        })
+        expect(preparation.status).toBe('provider_required')
+      }
     })
   })
 })

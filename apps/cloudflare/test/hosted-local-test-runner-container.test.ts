@@ -20,11 +20,14 @@ vi.mock("@murphai/hosted-execution", async () => {
 });
 
 import {
+  armOpenAiImageResponseBarrier,
   armCanonicalCheckpointLostAck,
   armSnapshotPublicationCorruption,
   armShutdownCheckpointPublicationBarrier,
   HOSTED_LOCAL_LINQ_ATTACHMENT_UPLOAD_HOST,
+  readOpenAiImageResponseBarrierState,
   readShutdownCheckpointPublicationBarrierState,
+  releaseOpenAiImageResponseBarrier,
   releaseShutdownCheckpointPublicationBarrier,
   RunnerContainer as HostedLocalTestRunnerContainer,
   wrapCanonicalCheckpointLostAckForTest,
@@ -439,6 +442,56 @@ describe("hosted-local test RunnerContainer outbound composition", () => {
         total_tokens: 46,
       },
     });
+  });
+
+  it("holds the deterministic OpenAI image response until explicit release", async () => {
+    const userId = "member_123";
+    const handler = readHostedLocalTestOutboundByHost()[
+      HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.openAi
+    ];
+    if (!handler) {
+      throw new Error("Wrapped OpenAI outbound handler is missing.");
+    }
+    armOpenAiImageResponseBarrier(userId);
+
+    try {
+      expect(readOpenAiImageResponseBarrierState(userId)).toBe("armed");
+      const heldResponse = handler(
+        await createAuthorizedOpenAiImagesRequest(),
+        createOutboundEnv({ openAiApiKey: "openai-worker-secret" }),
+        { containerId: RUNNER_CONTAINER_NAME },
+      );
+      let responseSettled = false;
+      void heldResponse.then(
+        () => {
+          responseSettled = true;
+        },
+        () => {
+          responseSettled = true;
+        },
+      );
+
+      await vi.waitFor(() => {
+        expect(readOpenAiImageResponseBarrierState(userId)).toBe("entered");
+      });
+      await Promise.resolve();
+      expect(responseSettled).toBe(false);
+      expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+        expect.objectContaining({
+          details: {
+            barrierKind: "openai_image_response",
+          },
+          userId,
+        }),
+      );
+
+      expect(releaseOpenAiImageResponseBarrier(userId)).toBe(true);
+      await expect(heldResponse.then((response) => response.status)).resolves.toBe(200);
+      expect(readOpenAiImageResponseBarrierState(userId)).toBe("unarmed");
+      expect(releaseOpenAiImageResponseBarrier(userId)).toBe(false);
+    } finally {
+      releaseOpenAiImageResponseBarrier(userId);
+    }
   });
 
   it("returns a synthetic 503 only after the armed canonical checkpoint commits", async () => {

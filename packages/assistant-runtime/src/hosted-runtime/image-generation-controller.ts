@@ -249,9 +249,11 @@ class ImageGenerationController implements HostedImageGenerationController {
           operation.usageRecord
           && !settledUsage.has(operation.usageRecord.usageId)
         ) {
-          console.warn("Hosted image usage settlement failed without retry.", {
+          console.warn("Hosted image usage settlement remains pending.", {
             operation: "generated_image_usage",
           });
+          this.signal();
+          continue;
         }
         operation.phase = "terminal";
       }
@@ -312,9 +314,17 @@ class ImageGenerationController implements HostedImageGenerationController {
   }
 
   snapshot(): HostedImageGenerationControllerSnapshot {
-    const phases = [...this.operations.values()].map(({ phase }) => phase);
+    const operations = [...this.operations.values()];
+    const phases = operations.map(({ phase }) => phase);
     return {
-      active: phases.some((phase) => phase === "active" || phase === "pending"),
+      active: operations.some((operation) =>
+        operation.phase === "active"
+        || operation.phase === "pending"
+        || (
+          operation.phase === "completion"
+          && operation.completionSelected
+        )
+      ),
       canonicalWritePending: phases.includes("capture"),
       ready: phases.includes("ready"),
       registrationCursor: this.cursor,
@@ -497,13 +507,14 @@ class ImageGenerationController implements HostedImageGenerationController {
       if (existing.fingerprint !== fingerprint) return rejected("conflict");
       return await existing.result;
     }
-    const result = this.prepareRegistration(id, normalized);
+    const result = this.prepareRegistration(id, fingerprint, normalized);
     this.registrations.set(id, { fingerprint, result });
     return result;
   }
 
   private async prepareRegistration(
     id: string,
+    fingerprint: string,
     request: AssistantHostedImageGenerationRegistrationRequest,
   ): Promise<AssistantHostedImageGenerationRegistrationResult> {
     try {
@@ -517,7 +528,8 @@ class ImageGenerationController implements HostedImageGenerationController {
       assertAuthorizedHostedImageGenerationOrigin(origin);
       const prepared = await this.engine.prepare({
         args: request.args,
-        captureIdempotencyKey: `${IMAGE_CAPTURE_KEY_PREFIX}:${id}`,
+        captureIdempotencyKey:
+          `${IMAGE_CAPTURE_KEY_PREFIX}:${id}:${fingerprint}`,
         codexHome: this.input.codexHome ?? null,
         env: this.input.env,
         hostedGeneratedImageUploader: this.input.generatedImageUploader ?? null,

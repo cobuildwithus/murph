@@ -43,15 +43,22 @@ export interface HostedLocalDevHarness {
   request(pathname: string, init?: RequestInit): Promise<Response>;
   requestJson<T>(pathname: string, init?: RequestInit): Promise<T>;
   readUserStatus(userId: string): Promise<HostedRunnerStatusResponse>;
+  armOpenAiImageResponseBarrierForTest(userId: string): Promise<{ ok: true }>;
   armCanonicalCheckpointLostAckForTest(userId: string): Promise<{ ok: true }>;
   armSnapshotPublicationCorruptionForTest(userId: string): Promise<{ ok: true }>;
   armShutdownCheckpointPublicationBarrierForTest(userId: string): Promise<{ ok: true }>;
   beginShutdownCheckpointGracefulStopForTest(userId: string): Promise<{ ok: true }>;
   expireRunnerActivityForTest(userId: string): Promise<{ ok: true }>;
   dropRunnerActiveOperationForTest(userId: string): Promise<{ ok: true }>;
+  readOpenAiImageResponseBarrierForTest(
+    userId: string,
+  ): Promise<{ state: "armed" | "entered" | "unarmed" }>;
   readShutdownCheckpointPublicationBarrierForTest(
     userId: string,
   ): Promise<{ state: "armed" | "entered" | "unarmed" }>;
+  releaseOpenAiImageResponseBarrierForTest(
+    userId: string,
+  ): Promise<{ ok: true; released: boolean }>;
   releaseShutdownCheckpointPublicationBarrierForTest(
     userId: string,
   ): Promise<{ ok: true; released: boolean }>;
@@ -213,6 +220,7 @@ export async function startHostedLocalDevHarness(input: {
           userId,
         });
       },
+      armOpenAiImageResponseBarrierForTest,
       armGeneratedImageUploadTypeErrorForTest,
       armCanonicalCheckpointLostAckForTest,
       armSnapshotPublicationCorruptionForTest,
@@ -220,7 +228,9 @@ export async function startHostedLocalDevHarness(input: {
       beginShutdownCheckpointGracefulStopForTest,
       dropRunnerActiveOperationForTest,
       expireRunnerActivityForTest,
+      readOpenAiImageResponseBarrierForTest,
       readShutdownCheckpointPublicationBarrierForTest,
+      releaseOpenAiImageResponseBarrierForTest,
       releaseShutdownCheckpointPublicationBarrierForTest,
       runHostedAlarmInvocationForTest: requireTestControls(runHostedAlarmInvocationForTest),
       runHostedManualInvocationForTest: requireTestControls(runHostedManualInvocationForTest),
@@ -561,6 +571,53 @@ export async function startHostedLocalDevHarness(input: {
     assertHostedLocalTestControlsAvailable("armGeneratedImageUploadTypeErrorForTest");
     return await requestJsonForRuntime<{ ok: true }>(
       `/__test/users/${encodeURIComponent(userId)}/generated-image-upload-type-error`,
+      {
+        headers: {
+          [HOSTED_EXECUTION_USER_ID_HEADER]: userId,
+          ...statusHeaders(userId),
+        },
+        method: "POST",
+        signal: AbortSignal.timeout(hostedLocalActivityExpiryTimeoutMs),
+      },
+    );
+  }
+
+  async function armOpenAiImageResponseBarrierForTest(
+    userId: string,
+  ): Promise<{ ok: true }> {
+    assertHostedLocalTestControlsAvailable("armOpenAiImageResponseBarrierForTest");
+    return await requestOpenAiImageResponseBarrierForTest<{ ok: true }>(
+      userId,
+      "arm",
+    );
+  }
+
+  async function readOpenAiImageResponseBarrierForTest(
+    userId: string,
+  ): Promise<{ state: "armed" | "entered" | "unarmed" }> {
+    assertHostedLocalTestControlsAvailable("readOpenAiImageResponseBarrierForTest");
+    return await requestOpenAiImageResponseBarrierForTest<{
+      state: "armed" | "entered" | "unarmed";
+    }>(userId, "status");
+  }
+
+  async function releaseOpenAiImageResponseBarrierForTest(
+    userId: string,
+  ): Promise<{ ok: true; released: boolean }> {
+    assertHostedLocalTestControlsAvailable("releaseOpenAiImageResponseBarrierForTest");
+    return await requestOpenAiImageResponseBarrierForTest<{
+      ok: true;
+      released: boolean;
+    }>(userId, "release");
+  }
+
+  async function requestOpenAiImageResponseBarrierForTest<T>(
+    userId: string,
+    action: "arm" | "release" | "status",
+  ): Promise<T> {
+    return await requestJsonForRuntime<T>(
+      `/__test/users/${encodeURIComponent(userId)}`
+        + `/openai-image-response-barrier?action=${action}`,
       {
         headers: {
           [HOSTED_EXECUTION_USER_ID_HEADER]: userId,

@@ -557,6 +557,68 @@ describe('real codex app-server with scripted provider', () => {
     expect(scenario.stub.requestCountSinceBaseline()).toBe(2)
   })
 
+  it('preserves the provider tool-call identity for hosted image admission', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    const registrations: Array<{
+      toolCallId: string
+    }> = []
+    scenario.stub.queue(
+      {
+        functionCall: {
+          arguments: {
+            alt: 'A synthetic mobility setup',
+            prompt: 'Render a synthetic mobility setup.',
+          },
+          name: 'generate_image',
+          namespace: 'murph',
+        },
+      },
+      { text: 'IMAGE_ADMISSION_PENDING_OK' },
+    )
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      hostedToolContext: {
+        computerToolsAvailable: false,
+        currentHostedDeliveryContext: () => null,
+        currentHostedMailboxItemIds: () => [],
+        currentInvocationScope: () => ({
+          conversationScope: null,
+          origin: {
+            assistantInputId: `ain_${'a'.repeat(32)}`,
+            kind: 'accepted_input',
+            sessionId: 'session_scripted_image_admission',
+          },
+        }),
+        imageGenerationRegistrar: {
+          async register(request) {
+            registrations.push({ toolCallId: request.toolCallId })
+            return { status: 'admission_pending' }
+          },
+        },
+        sendVaultFile: async () => {
+          throw new Error('Vault-file sending is unavailable for this turn.')
+        },
+        vaultFileSendAvailable: false,
+      },
+      prompt: 'Generate one synthetic mobility setup image.',
+    })
+
+    expect(registrations).toEqual([{
+      toolCallId: expect.stringMatching(/^call_resp_scripted_/u),
+    }])
+    expect(result.finalMessage).toBe('IMAGE_ADMISSION_PENDING_OK')
+    expect(
+      scenario.stub.requestSummariesSinceBaseline()
+        .flatMap((summary) => summary.functionCallOutputs ?? []),
+    ).toEqual(expect.arrayContaining([
+      expect.stringContaining('"status":"admission_pending"'),
+    ]))
+    expect(scenario.stub.requestCountSinceBaseline()).toBe(2)
+  })
+
   it.each([
     {
       contactCardFails: false,

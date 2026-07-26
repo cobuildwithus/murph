@@ -151,10 +151,6 @@ export function assertAuthorizedHostedImageGenerationOrigin(
     || typeof conversation.threadIsDirect !== "boolean"
     || !replyTarget
     || conversation.source !== replyTarget.channel
-    || (
-      conversation.source !== "email"
-      && conversation.threadId !== replyTarget.threadId
-    )
     || !hasHostedImageGenerationSourceMetadata(origin)
     || !readHostedAssistantInputCurrentDeliveryRoute({
       conversation,

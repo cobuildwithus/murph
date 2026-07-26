@@ -1781,6 +1781,17 @@ async function markHostedAiUsageReservationDispatchedTx(input: {
       status: "not_dispatchable",
     };
   }
+  const dispatchGate = await resolveHostedAiUsageGate({
+    memberId: input.memberId,
+    now: input.now,
+    prisma: input.tx,
+  });
+  if (!dispatchGate.allowed) {
+    return {
+      requestId,
+      status: "not_dispatchable",
+    };
+  }
 
   const dispatched = await input.tx.hostedAiUsageReservation.updateMany({
     data: {

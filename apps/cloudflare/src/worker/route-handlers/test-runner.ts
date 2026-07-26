@@ -46,6 +46,9 @@ interface HostedLocalTestUserRunnerStubLike extends UserRunnerDurableObjectStubL
 }
 
 interface HostedLocalTestRunnerContainerStubLike {
+  armOpenAiImageResponseBarrierForTest?(
+    input: { userId: string },
+  ): Promise<{ ok: true }>;
   armGeneratedImageUploadTypeErrorForTest?(
     input: { userId: string },
   ): Promise<{ ok: true }>;
@@ -66,9 +69,31 @@ interface HostedLocalTestRunnerContainerStubLike {
   readShutdownCheckpointPublicationBarrierForTest?(
     input: { userId: string },
   ): Promise<{ state: "armed" | "entered" | "unarmed" }>;
+  readOpenAiImageResponseBarrierForTest?(
+    input: { userId: string },
+  ): Promise<{ state: "armed" | "entered" | "unarmed" }>;
+  releaseOpenAiImageResponseBarrierForTest?(
+    input: { userId: string },
+  ): Promise<{ ok: true; released: boolean }>;
   releaseShutdownCheckpointPublicationBarrierForTest?(
     input: { userId: string },
   ): Promise<{ ok: true; released: boolean }>;
+}
+
+function hasHostedLocalTestRunnerContainerOpenAiImageResponseBarrierControl(
+  stub: object,
+): stub is HostedLocalTestRunnerContainerStubLike & Required<Pick<
+  HostedLocalTestRunnerContainerStubLike,
+  | "armOpenAiImageResponseBarrierForTest"
+  | "readOpenAiImageResponseBarrierForTest"
+  | "releaseOpenAiImageResponseBarrierForTest"
+>> {
+  return "armOpenAiImageResponseBarrierForTest" in stub
+    && typeof stub.armOpenAiImageResponseBarrierForTest === "function"
+    && "readOpenAiImageResponseBarrierForTest" in stub
+    && typeof stub.readOpenAiImageResponseBarrierForTest === "function"
+    && "releaseOpenAiImageResponseBarrierForTest" in stub
+    && typeof stub.releaseOpenAiImageResponseBarrierForTest === "function";
 }
 
 function hasHostedLocalTestRunnerContainerCanonicalCheckpointLostAckControl(
@@ -176,6 +201,22 @@ export const testRunnerRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] =
     ),
     methods: ["POST"],
     name: "test-canonical-checkpoint-lost-ack",
+    wrongMethodResponse: "not-found",
+  },
+  {
+    authorization: "vercel-oidc",
+    beforeMethod(context) {
+      return requireHostedWorkerTestEnvironment(context);
+    },
+    async handle(context, params) {
+      return handleTestOpenAiImageResponseBarrierRoute(context, params.userId);
+    },
+    match: matchHostedLocalTestUserRoute(
+      "/__test/users/",
+      "/openai-image-response-barrier",
+    ),
+    methods: ["POST"],
+    name: "test-openai-image-response-barrier",
     wrongMethodResponse: "not-found",
   },
   {
@@ -421,6 +462,59 @@ export async function handleTestGeneratedImageUploadTypeErrorRoute(
     );
   }
   return json(await stub.armGeneratedImageUploadTypeErrorForTest({ userId }));
+}
+
+export async function handleTestOpenAiImageResponseBarrierRoute(
+  context: WorkerRouteContext,
+  encodedUserId: string,
+): Promise<Response> {
+  if (!isHostedWorkerTestEnvironment(context.env)) {
+    return notFound();
+  }
+
+  const userId = decodeRouteParam(encodedUserId);
+  const boundUserResponse = requireHostedExecutionBoundUserResponse(
+    context.request,
+    userId,
+    "Hosted execution bound user does not match the test runner user.",
+    "test-runner-bound-user-mismatch",
+    "test-openai-image-response-barrier",
+  );
+  if (boundUserResponse) {
+    return boundUserResponse;
+  }
+
+  const actions = context.url.searchParams.getAll("action");
+  const action = actions.length === 1 ? actions[0] : null;
+  if (
+    context.url.searchParams.size !== 1
+    || (action !== "arm" && action !== "status" && action !== "release")
+  ) {
+    return jsonError(
+      "OpenAI image response barrier action must be arm, status, or release.",
+      400,
+    );
+  }
+
+  const runnerContainerName = resolveHostedExecutionRunnerContainerName({
+    source: context.env,
+    userId,
+  });
+  const stub = context.env.RUNNER_CONTAINER.getByName(runnerContainerName);
+  if (!hasHostedLocalTestRunnerContainerOpenAiImageResponseBarrierControl(stub)) {
+    throw new Error(
+      "Hosted runner container OpenAI image response barrier test RPC is unavailable.",
+    );
+  }
+
+  switch (action) {
+    case "arm":
+      return json(await stub.armOpenAiImageResponseBarrierForTest({ userId }));
+    case "status":
+      return json(await stub.readOpenAiImageResponseBarrierForTest({ userId }));
+    case "release":
+      return json(await stub.releaseOpenAiImageResponseBarrierForTest({ userId }));
+  }
 }
 
 export async function handleTestSnapshotPublicationCorruptionRoute(

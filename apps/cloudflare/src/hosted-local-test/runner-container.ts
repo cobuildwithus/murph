@@ -50,6 +50,13 @@ export type HostedLocalTestRunnerOutboundHandler = (
 ) => Promise<Response>;
 
 export class RunnerContainer extends BaseRunnerContainer {
+  async armOpenAiImageResponseBarrierForTest(
+    input: { userId: string },
+  ): Promise<{ ok: true }> {
+    armOpenAiImageResponseBarrier(input.userId);
+    return { ok: true };
+  }
+
   async armGeneratedImageUploadTypeErrorForTest(
     input: { userId: string },
   ): Promise<{ ok: true }> {
@@ -94,6 +101,23 @@ export class RunnerContainer extends BaseRunnerContainer {
   ): Promise<{ state: HostedLocalShutdownCheckpointPublicationBarrierState }> {
     return {
       state: readShutdownCheckpointPublicationBarrierState(input.userId),
+    };
+  }
+
+  async readOpenAiImageResponseBarrierForTest(
+    input: { userId: string },
+  ): Promise<{ state: HostedLocalOpenAiImageResponseBarrierState }> {
+    return {
+      state: readOpenAiImageResponseBarrierState(input.userId),
+    };
+  }
+
+  async releaseOpenAiImageResponseBarrierForTest(
+    input: { userId: string },
+  ): Promise<{ ok: true; released: boolean }> {
+    return {
+      ok: true,
+      released: releaseOpenAiImageResponseBarrier(input.userId),
     };
   }
 
@@ -521,6 +545,63 @@ const hostedLocalGeneratedImageUrl =
 export const HOSTED_LOCAL_LINQ_ATTACHMENT_UPLOAD_HOST = "uploads.example.test";
 const generatedImageUploadTypeErrorUsers = new Set<string>();
 
+export type HostedLocalOpenAiImageResponseBarrierState =
+  | "armed"
+  | "entered"
+  | "unarmed";
+
+interface HostedLocalOpenAiImageResponseBarrier {
+  entered: boolean;
+  release(): void;
+  released: Promise<void>;
+}
+
+const openAiImageResponseBarriers =
+  new Map<string, HostedLocalOpenAiImageResponseBarrier>();
+
+export function armOpenAiImageResponseBarrier(userId: string): void {
+  const normalizedUserId = normalizeOpenAiImageResponseBarrierUserId(userId);
+  if (openAiImageResponseBarriers.has(normalizedUserId)) {
+    throw new Error(
+      "A hosted-local OpenAI image response barrier is already armed for this user.",
+    );
+  }
+
+  let release = () => {};
+  const released = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  openAiImageResponseBarriers.set(normalizedUserId, {
+    entered: false,
+    release,
+    released,
+  });
+}
+
+export function readOpenAiImageResponseBarrierState(
+  userId: string,
+): HostedLocalOpenAiImageResponseBarrierState {
+  const barrier = openAiImageResponseBarriers.get(
+    normalizeOpenAiImageResponseBarrierUserId(userId),
+  );
+  if (!barrier) {
+    return "unarmed";
+  }
+  return barrier.entered ? "entered" : "armed";
+}
+
+export function releaseOpenAiImageResponseBarrier(userId: string): boolean {
+  const normalizedUserId = normalizeOpenAiImageResponseBarrierUserId(userId);
+  const barrier = openAiImageResponseBarriers.get(normalizedUserId);
+  if (!barrier) {
+    return false;
+  }
+
+  openAiImageResponseBarriers.delete(normalizedUserId);
+  barrier.release();
+  return true;
+}
+
 export function armGeneratedImageUploadTypeError(userId: string): void {
   const normalized = userId.trim();
   if (!normalized) {
@@ -597,13 +678,63 @@ const wrapOpenAiImagesForTest: HostedLocalTestRunnerOutboundHandler = (request, 
   if (pathname !== "/v1/images/generations" && pathname !== "/v1/images/edits") {
     return openAiHandler(request, env, ctx);
   }
+  const userId = request.headers.get(HOSTED_RUNNER_BOUND_USER_ID_HEADER)?.trim() ?? "";
   return handleHostedRunnerOpenAiOutbound(
     request,
     env,
     ctx,
-    hostedLocalOpenAiImagesFetch,
+    async (input, init) => {
+      await waitForOpenAiImageResponseBarrierForTest(userId, input, init);
+      return hostedLocalOpenAiImagesFetch(input, init);
+    },
   );
 };
+
+async function waitForOpenAiImageResponseBarrierForTest(
+  userId: string,
+  input: RequestInfo | URL,
+  init?: RequestInit,
+): Promise<void> {
+  const barrier = userId.length > 0
+    ? openAiImageResponseBarriers.get(userId)
+    : null;
+  if (!barrier) {
+    return;
+  }
+
+  barrier.entered = true;
+  emitHostedExecutionStructuredLog({
+    component: "runner",
+    details: {
+      barrierKind: "openai_image_response",
+    },
+    message:
+      "Hosted-local test paused the deterministic OpenAI image response after provider dispatch.",
+    phase: "wake.running",
+    userId,
+  });
+  await barrier.released;
+
+  const request = input instanceof Request ? input : new Request(input, init);
+  if (request.signal.aborted) {
+    throw request.signal.reason instanceof Error
+      ? request.signal.reason
+      : new DOMException(
+          "Hosted-local OpenAI image response barrier was interrupted.",
+          "AbortError",
+        );
+  }
+}
+
+function normalizeOpenAiImageResponseBarrierUserId(userId: string): string {
+  const normalizedUserId = userId.trim();
+  if (normalizedUserId.length === 0) {
+    throw new TypeError(
+      "Hosted-local OpenAI image response barrier requires a user id.",
+    );
+  }
+  return normalizedUserId;
+}
 
 const wrapGeneratedImageUploadForTest: HostedLocalTestRunnerOutboundHandler = (
   request,

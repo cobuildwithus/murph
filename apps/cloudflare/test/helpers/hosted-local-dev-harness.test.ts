@@ -1164,6 +1164,58 @@ it("controls the hosted-local shutdown checkpoint publication barrier", async ()
   }
 });
 
+it("controls the hosted-local OpenAI image response barrier", async () => {
+  const fetch = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
+    const action = new URL(String(input)).searchParams.get("action");
+    return Response.json(
+      action === "status"
+        ? { state: "entered" }
+        : action === "release"
+          ? { ok: true, released: true }
+          : { ok: true },
+    );
+  });
+  vi.stubGlobal("fetch", fetch);
+
+  const { startHostedLocalDevHarness } = await import("./hosted-local-dev-harness.js");
+  const harness = await startHostedLocalDevHarness({
+    env: {
+      DATABASE_URL: "postgresql://127.0.0.1:5432/murph_test",
+      NEXT_DIST_DIR_MODE: "smoke",
+    },
+    persistDirPrefix: "murph-hosted-local-test-",
+    testControls: true,
+  });
+
+  try {
+    await expect(harness.armOpenAiImageResponseBarrierForTest("member_image_barrier"))
+      .resolves.toEqual({ ok: true });
+    await expect(harness.readOpenAiImageResponseBarrierForTest("member_image_barrier"))
+      .resolves.toEqual({ state: "entered" });
+    await expect(harness.releaseOpenAiImageResponseBarrierForTest("member_image_barrier"))
+      .resolves.toEqual({ ok: true, released: true });
+
+    expect(fetch).toHaveBeenCalledTimes(3);
+    expect(fetch.mock.calls.map(([request]) => String(request))).toEqual([
+      "http://127.0.0.1:8787/__test/users/member_image_barrier"
+        + "/openai-image-response-barrier?action=arm",
+      "http://127.0.0.1:8787/__test/users/member_image_barrier"
+        + "/openai-image-response-barrier?action=status",
+      "http://127.0.0.1:8787/__test/users/member_image_barrier"
+        + "/openai-image-response-barrier?action=release",
+    ]);
+    for (const [, init] of fetch.mock.calls) {
+      const headers = new Headers(init?.headers);
+      expect(headers.get("authorization")).toBe("Bearer oidc-token");
+      expect(headers.get(HOSTED_EXECUTION_USER_ID_HEADER)).toBe("member_image_barrier");
+      expect(init?.signal).toBeInstanceOf(AbortSignal);
+      expect(init).toMatchObject({ method: "POST" });
+    }
+  } finally {
+    await harness.stop();
+  }
+});
+
 it("calls the hosted-local run-until-idle route without an idle checkpoint reason", async () => {
   const fetch = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => {
     return Response.json({ status: "idle" });

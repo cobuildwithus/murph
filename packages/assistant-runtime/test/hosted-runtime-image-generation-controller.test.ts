@@ -61,6 +61,84 @@ describe("hosted image generation controller", () => {
     await harness.controller.drain("forced");
   });
 
+  it("binds cached replay to immutable request arguments across fresh controllers", async () => {
+    const cachedCaptureKeys = new Set<string>();
+    const observedCaptureKeys: string[] = [];
+    const original = createHarness({
+      cachedCaptureKeys,
+      observedCaptureKeys,
+    });
+    const request = createRegistrationRequest({
+      providerRequestOrdinal: 1,
+      toolCallId: "call-replay",
+    });
+
+    await expect(
+      original.controller.registrar.register(request),
+    ).resolves.toEqual({ status: "admission_pending" });
+    expect(observedCaptureKeys).toHaveLength(1);
+    const originalCaptureKey = observedCaptureKeys[0];
+    expect(originalCaptureKey).toBeTruthy();
+    cachedCaptureKeys.add(originalCaptureKey!);
+    await original.controller.drain("forced");
+
+    const exactReplay = createHarness({
+      cachedCaptureKeys,
+      observedCaptureKeys,
+    });
+    await expect(
+      exactReplay.controller.registrar.register({
+        ...request,
+        providerRequestOrdinal: 99,
+      }),
+    ).resolves.toEqual({
+      result: expect.objectContaining({
+        responseMedia: [
+          expect.objectContaining({
+            kind: "image",
+          }),
+        ],
+        rpcSuccess: true,
+      }),
+      status: "inline_result",
+    });
+    expect(observedCaptureKeys.at(-1)).toBe(originalCaptureKey);
+    expect(exactReplay.controller.snapshot().registrationCursor).toBe(0);
+
+    const changedRequests = [
+      createRegistrationRequest({
+        args: { prompt: "A runner climbing a mountain" },
+        toolCallId: "call-replay",
+      }),
+      createRegistrationRequest({
+        args: { quality: "high" },
+        toolCallId: "call-replay",
+      }),
+      createRegistrationRequest({
+        args: { size: "1536x1024" },
+        toolCallId: "call-replay",
+      }),
+      createRegistrationRequest({
+        args: { referenceImageRefs: ["raw/inbox/reference.png"] },
+        toolCallId: "call-replay",
+      }),
+    ];
+    for (const changedRequest of changedRequests) {
+      const changedReplay = createHarness({
+        cachedCaptureKeys,
+        observedCaptureKeys,
+      });
+      await expect(
+        changedReplay.controller.registrar.register(changedRequest),
+      ).resolves.toEqual({ status: "admission_pending" });
+      expect(observedCaptureKeys.at(-1)).not.toBe(originalCaptureKey);
+      expect(changedReplay.controller.snapshot().registrationCursor).toBe(1);
+      expect(changedReplay.allowanceRequests).toEqual([]);
+      expect(changedReplay.providerFetchCount()).toBe(0);
+      await changedReplay.controller.drain("forced");
+    }
+  });
+
   it("fails closed before reservation when originating usage was not recorded", async () => {
     const harness = createHarness();
     const before = harness.controller.snapshot().registrationCursor;
@@ -151,6 +229,25 @@ describe("hosted image generation controller", () => {
       expect(item.record.credentialSource).toBe("platform");
       expect(item.acceptedInputIds).toHaveLength(1);
     }
+    harness.controller.completeCompletionTurns({
+      operationIds: selected,
+      phaseSucceeded: true,
+      successfulUsageIds: [recorded[0]!.record.usageId],
+    });
+    expect(harness.controller.snapshot()).toEqual(
+      expect.objectContaining({
+        active: true,
+        unsettled: true,
+      }),
+    );
+    expect(
+      harness.controller.selectCompletionInputs({
+        inputIds: ["ain_completion_1", "ain_completion_2"],
+        recordDeferredUsage() {
+          throw new Error("Settlement retry must not replay the Murph turn.");
+        },
+      }),
+    ).toEqual([]);
     harness.controller.completeCompletionTurns({
       operationIds: selected,
       phaseSucceeded: true,
@@ -323,6 +420,45 @@ describe("hosted image generation controller", () => {
     });
     expect(records).toHaveLength(1);
   });
+
+  it.each(["failed", "throw"] as const)(
+    "keeps provider usage when image publication reports %s",
+    async (publicationMode) => {
+      const harness = createHarness({ publicationMode });
+      const before = harness.controller.snapshot().registrationCursor;
+      await harness.controller.registrar.register(createRegistrationRequest());
+      await harness.controller.admitRegistered({
+        afterSequence: before,
+        recordedOriginInputIds: ["ain_origin"],
+        throughSequence: harness.controller.snapshot().registrationCursor,
+      });
+      harness.providerGate.resolve();
+      await vi.waitFor(() => {
+        expect(harness.controller.snapshot().canonicalWritePending).toBe(true);
+      });
+      await harness.controller.persistReadyCaptures();
+      await harness.controller.drain("graceful");
+
+      const outcomes: unknown[] = [];
+      await harness.controller.stageReady(async (input) => {
+        outcomes.push(input.outcome);
+        return { completionInputId: `ain_completion_publication_${publicationMode}` };
+      });
+      expect(outcomes).toEqual([
+        { kind: "unavailable", reason: "finalization_failed" },
+      ]);
+
+      const records: AssistantUsageRecord[] = [];
+      harness.controller.selectCompletionInputs({
+        inputIds: [`ain_completion_publication_${publicationMode}`],
+        recordDeferredUsage(record, _acceptedInputIds, options) {
+          expect(options?.reservationId).toBe(record.usageId);
+          records.push(record);
+        },
+      });
+      expect(records).toHaveLength(1);
+    },
+  );
 
   it("does not expose generated media when exact provider usage is missing", async () => {
     const harness = createHarness({ omitGeneratedUsage: true });
@@ -547,6 +683,7 @@ describe("hosted image generation controller", () => {
 });
 
 function createHarness(input: {
+  cachedCaptureKeys?: ReadonlySet<string>;
   dispatchMode?: "generated" | "provider_failed";
   holdMarkDispatched?: boolean;
   holdPublication?: boolean;
@@ -559,8 +696,10 @@ function createHarness(input: {
     HostedRuntimeUsageAllowanceResponse,
     { action: "reserve_image" }
   >["status"];
+  observedCaptureKeys?: string[];
   omitGeneratedUsage?: boolean;
   omitPersistedCapture?: boolean;
+  publicationMode?: "failed" | "throw";
   origin?: {
     actorIsSelf: boolean;
     groupAuthority: boolean;
@@ -618,6 +757,16 @@ function createHarness(input: {
   const publish: HostedImageGenerationEngine["publish"] = async (persisted) => {
     publishCount += 1;
     await publicationGate.promise;
+    if (input.publicationMode === "throw") {
+      throw new TypeError("Synthetic image publication failure.");
+    }
+    if (input.publicationMode === "failed") {
+      return {
+        rpcSuccess: false,
+        rpcText: "image generated but upload failed",
+        usageDraft: persisted.usageDraft,
+      };
+    }
     return {
       responseMedia: [
         {
@@ -688,7 +837,21 @@ function createHarness(input: {
     },
     persistCapture,
     async prepare(prepareInput) {
-      return createProviderRequiredPreparation(prepareInput);
+      const prepared = createProviderRequiredPreparation(prepareInput);
+      const captureKey = prepareInput.captureIdempotencyKey ?? "";
+      input.observedCaptureKeys?.push(captureKey);
+      if (input.cachedCaptureKeys?.has(captureKey) === true) {
+        return {
+          generated: {
+            bytes: Uint8Array.of(9, 8, 7),
+            finalization: prepared.prepared.finalization,
+            savedCapture: null,
+            usageDraft: null,
+          },
+          status: "cached",
+        };
+      }
+      return prepared;
     },
     publish,
   };
@@ -838,6 +1001,7 @@ function createOriginInput(input?: {
 }
 
 function createRegistrationRequest(input: {
+  args?: Partial<AssistantHostedImageGenerationRegistrationRequest["args"]>;
   prompt?: string;
   providerRequestOrdinal?: number;
   toolCallId?: string;
@@ -849,6 +1013,7 @@ function createRegistrationRequest(input: {
       prompt: input.prompt ?? "A cyclist climbing a mountain",
       quality: "medium",
       size: "1024x1024",
+      ...input.args,
     },
     origin: {
       assistantInputId: "ain_origin",

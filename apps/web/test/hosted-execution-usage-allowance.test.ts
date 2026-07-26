@@ -28,6 +28,7 @@ import {
   accountHostedAiUsageForAllowanceTx,
   checkHostedAiUsageGate,
   HOSTED_AI_USAGE_RESERVATION_PRE_DISPATCH_TTL_MS,
+  markHostedAiUsageReservationDispatched,
   priceHostedAiUsageForAllowance,
   readHostedAiUsageGate,
   readHostedAiUsageGateSnapshots,
@@ -3867,6 +3868,40 @@ describe("hosted image generation capacity reservations", () => {
       status: "would_exhaust",
     });
     expect(reservationStore.rows.size).toBe(0);
+  });
+
+  it("revalidates a reservation's capacity immediately before dispatch", async () => {
+    const reservationStore = createHostedAiUsageReservationStore();
+    const gateInput = {
+      hostedAiUsageReservation: reservationStore.delegate,
+      spentUsdMicros: 10_000_000n,
+      usageCreditBalanceUsdMicros: 10_000n,
+    };
+    const prisma = createGatePrisma(gateInput);
+    const requestId = "image_request_capacity_removed";
+
+    await expect(reserveHostedImageGenerationCapacity({
+      memberId: "member_123",
+      now,
+      prisma: prisma as never,
+      requestId,
+      spec: LOW_SQUARE_IMAGE_CAPACITY_SPEC,
+    })).resolves.toEqual({
+      requestId,
+      status: "reserved",
+    });
+
+    gateInput.usageCreditBalanceUsdMicros = 0n;
+    await expect(markHostedAiUsageReservationDispatched({
+      memberId: "member_123",
+      now,
+      prisma: prisma as never,
+      requestId,
+    })).resolves.toEqual({
+      requestId,
+      status: "not_dispatchable",
+    });
+    expect(reservationStore.rows.get(requestId)?.dispatchedAt).toBeNull();
   });
 
   it.each([

@@ -6471,6 +6471,216 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     }
   });
 
+  test("retries reservation-backed deferred usage until exact settlement while ordinary usage stays best-effort", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
+    const { mailboxPort } = createMailboxPort({ items: [] });
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const deferredUsageCaptures: HostedWorkspaceRunnerDeferredUsageCapture[] = [];
+    const reservationRetryStarted = createDeferred<void>();
+    const releaseReservationRetry = createDeferred<void>();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    let ordinaryAttempts = 0;
+    let reservationAttempts = 0;
+    let resultPromise:
+      ReturnType<typeof runHostedWorkspaceUntilIdleOrBudget> | null = null;
+    const usageRecordPort: HostedRuntimeUsageRecordPort = {
+      async recordUsage(record, options) {
+        if (record.usageId === "turn_runner_usage.best-effort") {
+          ordinaryAttempts += 1;
+          throw new Error("Synthetic ordinary usage failure.");
+        }
+        assert.equal(record.usageId, "turn_runner_usage.reserved");
+        assert.deepEqual(options, {
+          reservationId: "turn_runner_usage.reserved",
+        });
+        reservationAttempts += 1;
+        if (reservationAttempts === 1) {
+          throw new Error("Synthetic transient settlement failure.");
+        }
+        reservationRetryStarted.resolve();
+        await releaseReservationRetry.promise;
+        return {
+          recorded: true,
+          usageId: record.usageId,
+        };
+      },
+    };
+
+    try {
+      resultPromise = runHostedWorkspaceUntilIdleOrBudget({
+        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+          attemptId: "attempt_synthetic_runner_usage_settlement_retry",
+          expectedWorkspaceVersion: "0",
+          leaseGeneration: "1",
+          nextWakeAt: null,
+          nextWakeReason: null,
+          snapshotRef: null,
+        }),
+        expectedUserId: TEST_USER_ID,
+        async importItem() {
+          throw new Error("No mailbox import expected.");
+        },
+        initialMailboxImport: createCheckpointedMailboxImportResult(),
+        limitPerLane: 10,
+        platform: createPlatform({
+          mailboxPort,
+          usageRecordPort,
+          workspacePort: createWorkspacePort({ checkpointRequests }),
+        }),
+        requestId: "request_synthetic_runner_usage_settlement_retry",
+        runtimeLogContext: {
+          attemptId: "attempt_synthetic_runner_usage_settlement_retry",
+          leaseGeneration: "1",
+          workspaceVersion: "0",
+        },
+        async runAssistantPhase(input) {
+          input.recordDeferredUsage?.(createAssistantUsageRecord({
+            usageId: "turn_runner_usage.best-effort",
+          }));
+          input.recordDeferredUsage?.(createAssistantUsageRecord({
+            usageId: "turn_runner_usage.reserved",
+          }), undefined, {
+            reservationId: "turn_runner_usage.reserved",
+          });
+          return {
+            progressed: false,
+          };
+        },
+        trackDeferredUsageCapture(capture) {
+          deferredUsageCaptures.push(capture);
+        },
+        vaultRoot,
+        workspace: createWorkspaceState({ version: "0" }),
+        now: () => TEST_NOW,
+      });
+
+      await withTestTimeout(reservationRetryStarted.promise, 2_000);
+      await withTestTimeout(resultPromise, 1_000);
+      const capture = deferredUsageCaptures[0];
+      assert.ok(capture);
+      let settlementFinished = false;
+      void capture.outcome.then(() => {
+        settlementFinished = true;
+      });
+      await Promise.resolve();
+      assert.equal(settlementFinished, false);
+      assert.equal(ordinaryAttempts, 1);
+      assert.equal(reservationAttempts, 2);
+
+      releaseReservationRetry.resolve();
+      assert.deepEqual(await withTestTimeout(capture.outcome, 1_000), {
+        failedRecordCount: 1,
+        failedUsageIds: ["turn_runner_usage.best-effort"],
+        recordedAcceptedInputIds: [],
+        successfulRecordCount: 1,
+        successfulUsageIds: ["turn_runner_usage.reserved"],
+      });
+      assert.equal(ordinaryAttempts, 1);
+      assert.equal(reservationAttempts, 2);
+    } finally {
+      releaseReservationRetry.resolve();
+      warn.mockRestore();
+      await resultPromise?.catch(() => undefined);
+      await rm(vaultRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
+  test("stops reservation-backed usage retries promptly when the runner aborts", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
+    const { mailboxPort } = createMailboxPort({ items: [] });
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const deferredUsageCaptures: HostedWorkspaceRunnerDeferredUsageCapture[] = [];
+    const firstAttemptStarted = createDeferred<void>();
+    const runnerAbort = new AbortController();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    let attempts = 0;
+    let resultPromise:
+      ReturnType<typeof runHostedWorkspaceUntilIdleOrBudget> | null = null;
+    const usageRecordPort: HostedRuntimeUsageRecordPort = {
+      async recordUsage(record, options) {
+        attempts += 1;
+        assert.equal(record.usageId, "turn_runner_usage.abort");
+        assert.deepEqual(options, {
+          reservationId: "turn_runner_usage.abort",
+        });
+        firstAttemptStarted.resolve();
+        throw new Error("Synthetic permanent settlement failure.");
+      },
+    };
+
+    try {
+      resultPromise = runHostedWorkspaceUntilIdleOrBudget({
+        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+          attemptId: "attempt_synthetic_runner_usage_settlement_abort",
+          expectedWorkspaceVersion: "0",
+          leaseGeneration: "1",
+          nextWakeAt: null,
+          nextWakeReason: null,
+          snapshotRef: null,
+        }),
+        expectedUserId: TEST_USER_ID,
+        async importItem() {
+          throw new Error("No mailbox import expected.");
+        },
+        initialMailboxImport: createCheckpointedMailboxImportResult(),
+        limitPerLane: 10,
+        platform: createPlatform({
+          mailboxPort,
+          usageRecordPort,
+          workspacePort: createWorkspacePort({ checkpointRequests }),
+        }),
+        requestId: "request_synthetic_runner_usage_settlement_abort",
+        runtimeLogContext: {
+          attemptId: "attempt_synthetic_runner_usage_settlement_abort",
+          leaseGeneration: "1",
+          workspaceVersion: "0",
+        },
+        async runAssistantPhase(input) {
+          input.recordDeferredUsage?.(createAssistantUsageRecord({
+            usageId: "turn_runner_usage.abort",
+          }), undefined, {
+            reservationId: "turn_runner_usage.abort",
+          });
+          return {
+            progressed: false,
+          };
+        },
+        signal: runnerAbort.signal,
+        trackDeferredUsageCapture(capture) {
+          deferredUsageCaptures.push(capture);
+        },
+        vaultRoot,
+        workspace: createWorkspaceState({ version: "0" }),
+        now: () => TEST_NOW,
+      });
+
+      await withTestTimeout(firstAttemptStarted.promise, 1_000);
+      await withTestTimeout(resultPromise, 1_000);
+      runnerAbort.abort(new Error("Synthetic runtime abort."));
+      const capture = deferredUsageCaptures[0];
+      assert.ok(capture);
+      assert.deepEqual(await withTestTimeout(capture.outcome, 1_000), {
+        failedRecordCount: 1,
+        failedUsageIds: ["turn_runner_usage.abort"],
+        recordedAcceptedInputIds: [],
+        successfulRecordCount: 0,
+        successfulUsageIds: [],
+      });
+      assert.equal(attempts, 1);
+    } finally {
+      runnerAbort.abort(new Error("Test cleanup."));
+      warn.mockRestore();
+      await resultPromise?.catch(() => undefined);
+      await rm(vaultRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
   test("flushes deferred assistant usage in recorder order", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
     const events: string[] = [];
