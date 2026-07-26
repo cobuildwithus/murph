@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
 
+import { MURPH_CODEX_BASE_INSTRUCTIONS } from './codex-base-instructions.js'
 import { normalizeNullableString } from './shared.js'
 
 export function buildAssistantCodexContractFingerprint(input: {
@@ -9,6 +10,7 @@ export function buildAssistantCodexContractFingerprint(input: {
 }): string {
   return createHash('sha256')
     .update(stableJsonStringify({
+      baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
       developerInstructions: normalizeNullableString(input.developerInstructions),
       dynamicTools: input.dynamicTools,
       routeFingerprint: input.routeFingerprint,

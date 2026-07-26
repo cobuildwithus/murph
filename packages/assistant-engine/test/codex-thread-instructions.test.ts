@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto'
+
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 const codexAppServerMocks = vi.hoisted(() => ({
@@ -13,6 +15,12 @@ import { normalizeAssistantProviderConfig } from '@murphai/operator-config/assis
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 
 import {
+  MURPH_CODEX_BASE_INSTRUCTIONS,
+} from '../src/assistant/codex-base-instructions.ts'
+import {
+  buildAssistantCodexContractFingerprint,
+} from '../src/assistant/codex-contract-fingerprint.ts'
+import {
   executeCodexAssistantTurnAttempt,
 } from '../src/assistant/codex-runtime.ts'
 import { resolveMurphDynamicTools } from '../src/assistant-codex/dynamic-tools.ts'
@@ -25,6 +33,39 @@ afterEach(() => {
 })
 
 describe('Codex thread instructions', () => {
+  it('keeps the Murph execution kernel compact without coding-agent baggage', () => {
+    expect(Buffer.byteLength(MURPH_CODEX_BASE_INSTRUCTIONS, 'utf8')).toBeLessThan(3_000)
+    expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
+      "Complete the user's in-scope request end to end",
+    )
+    expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain('untrusted data')
+    expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain('never fabricate tool output')
+    expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
+      'When the runtime summarizes earlier context',
+    )
+    expect(MURPH_CODEX_BASE_INSTRUCTIONS).not.toMatch(
+      /(?:apply_patch|rg --files|git reset|AGENTS\.md|SKILL\.md)/u,
+    )
+  })
+
+  it('includes the base instructions in the native-thread contract fingerprint', () => {
+    const fingerprintInput = {
+      developerInstructions: 'Stable Murph instructions.',
+      dynamicTools: [],
+      routeFingerprint: 'route-contract-v1',
+    }
+    const expectedFingerprint = createHash('sha256')
+      .update(JSON.stringify({
+        baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        ...fingerprintInput,
+      }))
+      .digest('hex')
+
+    expect(buildAssistantCodexContractFingerprint(fingerprintInput)).toBe(
+      expectedFingerprint,
+    )
+  })
+
   it('passes Murph system instructions at thread level and keeps turn input user-scoped', async () => {
     codexAppServerMocks.executeCodexAppServerTurn.mockResolvedValue({
       finalMessage: 'done',
@@ -60,6 +101,7 @@ describe('Codex thread instructions', () => {
     expect(codexAppServerMocks.executeCodexAppServerTurn).toHaveBeenCalledTimes(1)
     const appServerInput = codexAppServerMocks.executeCodexAppServerTurn.mock
       .calls[0]?.[0]
+    expect(appServerInput.baseInstructions).toBe(MURPH_CODEX_BASE_INSTRUCTIONS)
     expect(appServerInput.developerInstructions).toBe('Stable Murph instructions.')
     expect(appServerInput.excludeResumeTurns).toBe(true)
     expect(appServerInput.prompt).toBe(

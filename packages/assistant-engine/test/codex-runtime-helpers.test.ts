@@ -38,6 +38,9 @@ import {
   getAssistantBindingContextLines,
 } from '../src/assistant/bindings.ts'
 import {
+  MURPH_CODEX_BASE_INSTRUCTIONS,
+} from '../src/assistant/codex-base-instructions.ts'
+import {
   DEFAULT_CODEX_MODEL_CAPABILITIES,
   DEFAULT_CODEX_MODELS,
   createCatalogModel,
@@ -2111,6 +2114,10 @@ describe('Codex assistant registry helpers', () => {
       'primary',
     )
     expect(diagnostic).toMatchObject({
+      baseInstructionsBytes: Buffer.byteLength(
+        MURPH_CODEX_BASE_INSTRUCTIONS,
+        'utf8',
+      ),
       conversationContextBytes: Buffer.byteLength(conversationContextPrompt, 'utf8'),
       conversationContextPresent: true,
       developerInstructionsBytes: Buffer.byteLength(
