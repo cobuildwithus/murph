@@ -4417,6 +4417,147 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
+  test("preserves recent unstamped legacy transcript history through retention restore and checkpoint", async () => {
+    const workspaceRoot = await mkdtemp(
+      path.join(tmpdir(), "murph-workspace-legacy-transcript-retention-"),
+    );
+    const sourceVaultRoot = path.join(workspaceRoot, "source-vault");
+    const liveVaultRoot = path.join(workspaceRoot, "live-vault");
+    const restoredVaultRoot = path.join(workspaceRoot, "restored-vault");
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const artifactBytesByHash = new Map<string, Uint8Array>();
+    const sessionId = "session_workspace_legacy_transcript_retention";
+    const legacyEntries = [
+      {
+        createdAt: "2026-07-24T00:00:00.000Z",
+        kind: "user",
+        schema: "murph.assistant-transcript-entry.v1",
+        text: "recent legacy member context survives phase one",
+      },
+      {
+        createdAt: "2026-07-24T00:01:00.000Z",
+        kind: "assistant",
+        schema: "murph.assistant-transcript-entry.v1",
+        text: "paired assistant context survives phase one",
+      },
+    ] as const;
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot: sourceVaultRoot });
+      const transcriptDirectory = path.join(
+        resolveAssistantStatePaths(sourceVaultRoot).assistantStateRoot,
+        "transcripts",
+      );
+      await mkdir(transcriptDirectory, { recursive: true });
+      await writeFile(
+        path.join(transcriptDirectory, `${sessionId}.jsonl`),
+        `${legacyEntries.map((entry) => JSON.stringify(entry)).join("\n")}\n`,
+        "utf8",
+      );
+
+      const baseBundle = await snapshotHostedBundleRoots({
+        kind: "vault",
+        roots: [{ root: sourceVaultRoot, rootKey: "vault" }],
+      });
+      assert.ok(baseBundle);
+      const baseHash = sha256HostedBundleHex(baseBundle);
+      artifactBytesByHash.set(baseHash, baseBundle);
+      const baseSnapshotRef = createBundleRef({
+        hash: baseHash,
+        key: `synthetic/legacy-transcript-retention/${baseHash}.bundle`,
+        size: baseBundle.byteLength,
+      });
+
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_legacy_transcript_retention",
+            idleCheckpointDelayMs: 1,
+            leaseGeneration: "7",
+            processingMode: "inbox_media_retention",
+            userId: TEST_USER_ID,
+            workspaceVersion: "0",
+          },
+        }),
+        {
+          async createCheckpointSnapshot() {
+            const bundle = await snapshotHostedBundleRoots({
+              kind: "vault",
+              roots: [{ root: liveVaultRoot, rootKey: "vault" }],
+            });
+            assert.ok(bundle);
+            const hash = sha256HostedBundleHex(bundle);
+            artifactBytesByHash.set(hash, bundle);
+            return {
+              snapshotRef: createBundleRef({
+                hash,
+                key: `synthetic/legacy-transcript-retention/${hash}.bundle`,
+                size: bundle.byteLength,
+              }),
+            };
+          },
+          async importItem() {
+            throw new Error(
+              "Retention-only processing must not import mailbox items.",
+            );
+          },
+          platform: createPlatform({
+            artifactBytesByHash,
+            mailboxPort: createMailboxPort({ events: [], items: [] }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events: [],
+              workspace: createWorkspaceState({
+                inboxMediaRetentionWakeAt: "2026-07-25T00:00:00.000Z",
+                snapshotRef: baseSnapshotRef,
+                version: "0",
+              }),
+            }),
+          }),
+          async runAssistantPhase() {
+            throw new Error(
+              "Retention-only processing must not enter the assistant phase.",
+            );
+          },
+          vaultRoot: liveVaultRoot,
+        },
+      );
+
+      assert.equal(result.status, "idle");
+      const retainedSnapshotRef = checkpointRequests.at(-1)?.snapshotRef ?? null;
+      assert.ok(retainedSnapshotRef);
+      await restoreHostedWorkspaceRuntimeJobWorkspace({
+        platform: createPlatform({
+          artifactBytesByHash,
+          mailboxPort: createMailboxPort({ events: [], items: [] }),
+          workspacePort: createWorkspacePort({
+            checkpointRequests: [],
+            events: [],
+            workspace: createWorkspaceState({
+              snapshotRef: retainedSnapshotRef,
+              version: "1",
+            }),
+          }),
+        }),
+        vaultRoot: restoredVaultRoot,
+        workspace: createWorkspaceState({
+          snapshotRef: retainedSnapshotRef,
+          version: "1",
+        }),
+      });
+
+      const restoredEntries = await listAssistantTranscriptEntries(
+        restoredVaultRoot,
+        sessionId,
+      );
+      expect(restoredEntries).toEqual(legacyEntries);
+      expect(restoredEntries[0]).not.toHaveProperty("contentReceivedAt");
+      expect(restoredEntries[0]).not.toHaveProperty("textRetiredAt");
+    } finally {
+      await removeTempRoot(workspaceRoot);
+    }
+  });
+
   test("retains no inbound phrase after a scheduled snapshot restore and later-turn read", async () => {
     const workspaceRoot = await mkdtemp(
       path.join(tmpdir(), "murph-workspace-retention-proof-"),

@@ -541,6 +541,31 @@ Opt-in execution integrations:
 - `WHOOP_CLIENT_SECRET`
 The documented deploy surface is intentionally limited to the vars and secrets above for the narrowed execution plane and its opt-in runtime integrations.
 
+### Inbound message-content retention rollout
+
+This rollout has an irreversible transcript cutover and must use two phases:
+
+1. Deploy the Cloudflare Worker and stamping-capable runner bundle with
+   `container_rollout=immediate`. Drain old warm bundles, prove the deployed
+   fingerprint, and verify that newly written user transcript entries carry
+   `contentReceivedAt`.
+2. Deploy Web with the additive mailbox retention columns. This phase-one
+   migration must not re-arm persisted workspace snapshots. Record the verified
+   runner-convergence instant.
+3. Keep legacy unstamped transcript entries intact for 14 complete days after
+   that instant. Newly stamped entries and the other receipt-owned message
+   carriers continue using their exact inclusive 14-day deadlines.
+4. Only after the full interval, ship a separate phase-two migration that
+   re-arms persisted snapshots and enables retirement of every remaining
+   unstamped user transcript entry. Verify retention wake convergence,
+   checkpoint publication, policy-non-reply counts, and content-retirement
+   counts before declaring the cutover complete.
+
+Do not infer legacy receipt time from transcript creation, accepted-turn
+journals, or input events, and do not apply the phase-two rearm early. Normal
+snapshot cleanup can discard those joins, so an early scrub can irreversibly
+erase recent user context while leaving the paired assistant reply.
+
 ### Retired WhatsApp configuration
 
 Removing WhatsApp bindings from the deploy workflow does not delete values that

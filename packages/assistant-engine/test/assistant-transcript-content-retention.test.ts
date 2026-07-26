@@ -11,10 +11,14 @@ const NOW = new Date('2026-07-25T00:00:00.000Z')
 function entry(
   overrides: Partial<AssistantTranscriptEntry> & Pick<AssistantTranscriptEntry, 'kind' | 'createdAt'>,
 ): AssistantTranscriptEntry {
+  const contentReceivedAt =
+    overrides.contentReceivedAt
+    ?? (overrides.kind === 'user' ? overrides.createdAt : undefined)
   return {
     schema: 'murph.assistant-transcript-entry.v1',
     text: 'some message text',
     ...overrides,
+    ...(contentReceivedAt ? { contentReceivedAt } : {}),
   } as AssistantTranscriptEntry
 }
 
@@ -93,6 +97,25 @@ describe('assistant transcript content retention', () => {
 
     expect(result.redactedCount).toBe(1)
     expect(result.entries[0]?.text).toBe('')
+  })
+
+  it('preserves unstamped legacy text until the phase-two cutover', () => {
+    const legacyEntry = {
+      createdAt: isoDaysAgo(30),
+      kind: 'user',
+      schema: 'murph.assistant-transcript-entry.v1',
+      text: 'legacy text without a retained receipt',
+    } satisfies AssistantTranscriptEntry
+    const result = redactExpiredAssistantTranscriptEntries(
+      [legacyEntry],
+      NOW,
+    )
+
+    expect(result).toEqual({
+      entries: [legacyEntry],
+      nextEligibleAt: null,
+      redactedCount: 0,
+    })
   })
 
   it('reports the earliest future content deadline', () => {

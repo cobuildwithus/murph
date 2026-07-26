@@ -698,6 +698,19 @@ younger gap. Policy non-reply tombstones remain as durable terminal evidence,
 while ordinary content-free mailbox tombstones may be pruned after their
 separate structural window.
 
+Assistant transcript retention uses only the user entry's stamped
+`contentReceivedAt`. Projection `createdAt`, accepted-turn journals, and input
+events are not fallback receipt owners: normal settled-snapshot cleanup may
+delete the journal and input before a later retention wake. The rollout is
+therefore two-phase. Phase one stamps every new user entry and preserves every
+unstamped legacy entry; its additive mailbox migration does not re-arm existing
+workspace snapshots. After immediate runner rollout is verified, operators
+record the fleet-convergence instant and wait 14 complete days. A separate
+phase-two migration may then re-arm persisted snapshots and the runtime may
+retire every remaining unstamped user entry. Until that interval has elapsed,
+rearming or fail-closed legacy scrubbing is forbidden because it can erase
+recent paired conversation history irreversibly.
+
 Accepted Linq reply delivery carries an earlier copy of the same exact-item
 consume authority:
 the runtime reports

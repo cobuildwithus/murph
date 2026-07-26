@@ -24,7 +24,7 @@ if (
 describe.skipIf(!runPostgresMigrationProof)(
   "hosted mailbox content-retention migration",
   () => {
-    it("re-arms every persisted snapshot and leaves snapshotless rows untouched", async () => {
+    it("adds mailbox columns without re-arming persisted snapshots in phase one", async () => {
       const migrationSql = await readFile(migrationUrl, "utf8");
       const client = new pg.Client({ connectionString: databaseUrl });
       await client.connect();
@@ -71,42 +71,39 @@ describe.skipIf(!runPostgresMigrationProof)(
         await client.query(migrationSql);
 
         const result = await client.query<{
-          attemptedAtCleared: boolean;
           userId: string;
-          wakeIsOriginal: boolean;
-          wakePresent: boolean;
+          signalAttemptedAt: string | null;
+          wakeAt: string | null;
         }>(`
           SELECT
             workspace."user_id" AS "userId",
-            workspace."inbox_media_retention_signal_attempted_at" IS NULL
-              AS "attemptedAtCleared",
-            workspace."inbox_media_retention_wake_at" IS NOT NULL
-              AS "wakePresent",
-            workspace."inbox_media_retention_wake_at"
-              = TIMESTAMP '2099-01-01T00:00:00.000Z'
-              AS "wakeIsOriginal"
+            to_char(
+              workspace."inbox_media_retention_signal_attempted_at",
+              'YYYY-MM-DD"T"HH24:MI:SS.MS'
+            ) AS "signalAttemptedAt",
+            to_char(
+              workspace."inbox_media_retention_wake_at",
+              'YYYY-MM-DD"T"HH24:MI:SS.MS'
+            ) AS "wakeAt"
           FROM "hosted_workspace" AS workspace
           ORDER BY workspace."user_id"
         `);
 
         expect(result.rows).toEqual([
           {
-            attemptedAtCleared: false,
             userId: "no-snapshot",
-            wakeIsOriginal: true,
-            wakePresent: true,
+            signalAttemptedAt: "2026-07-25T18:00:00.000",
+            wakeAt: "2099-01-01T00:00:00.000",
           },
           {
-            attemptedAtCleared: true,
             userId: "snapshot-existing-wake",
-            wakeIsOriginal: false,
-            wakePresent: true,
+            signalAttemptedAt: "2026-07-25T18:00:00.000",
+            wakeAt: "2099-01-01T00:00:00.000",
           },
           {
-            attemptedAtCleared: true,
             userId: "snapshot-missing-wake",
-            wakeIsOriginal: false,
-            wakePresent: true,
+            signalAttemptedAt: "2026-07-25T18:00:00.000",
+            wakeAt: null,
           },
         ]);
       } finally {

@@ -1,4 +1,3 @@
-import type { Dirent } from 'node:fs'
 import {
   access,
   open,
@@ -19,7 +18,6 @@ import {
   type AssistantTranscriptEntry,
   parseAssistantSessionRecord,
 } from '@murphai/operator-config/assistant-cli-contracts'
-import { isoTimestampSchema } from '@murphai/operator-config/vault-cli-contracts'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
   assistantWithinConversationDriftFields,
@@ -71,31 +69,6 @@ export const ASSISTANT_TRANSCRIPT_AUDIT_RETENTION_LIMIT = 100
  */
 export const ASSISTANT_TRANSCRIPT_CONTENT_RETENTION_MS = 14 * 24 * 60 * 60 * 1000
 const ASSISTANT_RECENT_SESSIONS_INDEX_LIMIT = 50
-const ASSISTANT_INPUT_EVENT_ID_PATTERN = /^ain_[0-9a-f]{32}$/
-
-const assistantLegacyTranscriptReceiptJournalSchema = z.object({
-  sessionId: z.string().min(1),
-  inputs: z.array(z.object({
-    acceptedAt: isoTimestampSchema,
-    id: z.string().min(1),
-    source: z.enum(['assistant-input', 'initial', 'manual', 'system']),
-    transcriptRef: z.object({
-      entryCreatedAt: isoTimestampSchema.nullable(),
-      entryKind: z.enum(['user', 'assistant', 'error', 'status']).nullable(),
-      sessionId: z.string().min(1),
-    }).nullable(),
-  })),
-})
-
-const assistantLegacyInputReceiptEnvelopeSchema = z.object({
-  schema: z.literal('murph.assistant-input-event.v1'),
-  schemaVersion: z.literal(1),
-  value: z.object({
-    inputId: z.string().regex(ASSISTANT_INPUT_EVENT_ID_PATTERN),
-    occurredAt: isoTimestampSchema,
-    receivedAt: isoTimestampSchema.nullable().optional(),
-  }),
-})
 
 const assistantAutomationStateCache = createAssistantBoundedRuntimeCache<string, AssistantAutomationState>({
   name: 'assistant.automation-state',
@@ -368,7 +341,6 @@ export async function pruneAssistantTranscriptRetention(
   let entriesTrimmed = 0
   let nextEligibleAt: string | null = null
   let transcriptsTrimmed = 0
-  let receiptEvidencePromise: Promise<ReadonlyMap<string, string>> | null = null
 
   for (const entry of entries) {
     options.signal?.throwIfAborted()
@@ -396,36 +368,15 @@ export async function pruneAssistantTranscriptRetention(
       continue
     }
 
-    const sessionId = entry.name.slice(0, -'.jsonl'.length)
-    const hasLegacyInboundContent = parsed.values.some(
-      (transcriptEntry) =>
-        transcriptEntry.kind === 'user'
-        && transcriptEntry.contentReceivedAt === undefined
-        && transcriptEntry.text.length > 0,
-    )
-    const receiptEvidence = hasLegacyInboundContent
-      ? await (
-          receiptEvidencePromise
-          ??= collectAssistantTranscriptReceiptEvidence(paths, options.signal)
-        )
-      : new Map<string, string>()
-    options.signal?.throwIfAborted()
-    const recovered = recoverAssistantTranscriptReceiptBasis({
-      entries: parsed.values,
-      now,
-      receiptEvidence,
-      sessionId,
-    })
-    const retained = trimAssistantTranscriptEntriesForAudit(recovered.entries)
+    const retained = trimAssistantTranscriptEntriesForAudit(parsed.values)
     const redaction = redactExpiredAssistantTranscriptEntries(retained, now)
     nextEligibleAt = selectEarlierAssistantRetentionWake(
       nextEligibleAt,
       redaction.nextEligibleAt,
     )
-    const trimmedCount = recovered.entries.length - retained.length
+    const trimmedCount = parsed.values.length - retained.length
     if (
       trimmedCount === 0
-      && recovered.updatedCount === 0
       && redaction.redactedCount === 0
     ) {
       continue
@@ -439,7 +390,7 @@ export async function pruneAssistantTranscriptRetention(
         : '',
     )
     options.signal?.throwIfAborted()
-    entriesRedacted += recovered.redactedCount + redaction.redactedCount
+    entriesRedacted += redaction.redactedCount
     entriesTrimmed += trimmedCount
     transcriptsTrimmed += 1
   }
@@ -449,198 +400,6 @@ export async function pruneAssistantTranscriptRetention(
     entriesTrimmed,
     nextEligibleAt,
     transcriptsTrimmed,
-  }
-}
-
-async function collectAssistantTranscriptReceiptEvidence(
-  paths: AssistantStatePaths,
-  signal?: AbortSignal | null,
-): Promise<ReadonlyMap<string, string>> {
-  const receiptEvidence = new Map<string, string>()
-  const inputReceiptCache = new Map<string, string | null>()
-  const journalDirectory = path.join(paths.stateDirectory, 'accepted-turn-inputs')
-  let journalEntries: Dirent[]
-  try {
-    journalEntries = await readdir(journalDirectory, {
-      withFileTypes: true,
-    })
-  } catch (error) {
-    if (isMissingFileError(error)) {
-      return receiptEvidence
-    }
-    throw error
-  }
-
-  for (const entry of journalEntries) {
-    signal?.throwIfAborted()
-    if (!entry.isFile() || !entry.name.endsWith('.json')) {
-      continue
-    }
-
-    let raw: string
-    try {
-      raw = await readFile(path.join(journalDirectory, entry.name), 'utf8')
-    } catch (error) {
-      if (isMissingFileError(error)) {
-        continue
-      }
-      throw error
-    }
-    signal?.throwIfAborted()
-    const parsed = assistantLegacyTranscriptReceiptJournalSchema.safeParse(
-      parseJsonOrNull(raw),
-    )
-    if (!parsed.success) {
-      continue
-    }
-
-    for (const acceptedInput of parsed.data.inputs) {
-      signal?.throwIfAborted()
-      const transcriptRef = acceptedInput.transcriptRef
-      if (
-        !transcriptRef
-        || transcriptRef.sessionId !== parsed.data.sessionId
-        || transcriptRef.entryKind !== 'user'
-        || transcriptRef.entryCreatedAt === null
-      ) {
-        continue
-      }
-
-      const receivedAt = acceptedInput.source === 'assistant-input'
-        ? await readAssistantInputReceiptForTranscriptRecovery({
-            inputId: acceptedInput.id,
-            inputReceiptCache,
-            paths,
-            signal,
-          })
-        : acceptedInput.acceptedAt
-      if (receivedAt === null) {
-        continue
-      }
-
-      const key = buildAssistantTranscriptReceiptEvidenceKey({
-        createdAt: transcriptRef.entryCreatedAt,
-        kind: transcriptRef.entryKind,
-        sessionId: transcriptRef.sessionId,
-      })
-      const existing = receiptEvidence.get(key)
-      if (
-        existing === undefined
-        || Date.parse(receivedAt) < Date.parse(existing)
-      ) {
-        receiptEvidence.set(key, receivedAt)
-      }
-    }
-  }
-
-  return receiptEvidence
-}
-
-async function readAssistantInputReceiptForTranscriptRecovery(input: {
-  inputId: string
-  inputReceiptCache: Map<string, string | null>
-  paths: AssistantStatePaths
-  signal?: AbortSignal | null
-}): Promise<string | null> {
-  if (!ASSISTANT_INPUT_EVENT_ID_PATTERN.test(input.inputId)) {
-    return null
-  }
-  if (input.inputReceiptCache.has(input.inputId)) {
-    return input.inputReceiptCache.get(input.inputId) ?? null
-  }
-
-  let raw: string
-  try {
-    raw = await readFile(
-      path.join(
-        input.paths.assistantStateRoot,
-        'input-events',
-        `${input.inputId}.json`,
-      ),
-      'utf8',
-    )
-  } catch (error) {
-    if (isMissingFileError(error)) {
-      input.inputReceiptCache.set(input.inputId, null)
-      return null
-    }
-    throw error
-  }
-  input.signal?.throwIfAborted()
-  const parsed = assistantLegacyInputReceiptEnvelopeSchema.safeParse(
-    parseJsonOrNull(raw),
-  )
-  const receivedAt = parsed.success && parsed.data.value.inputId === input.inputId
-    ? parsed.data.value.receivedAt ?? parsed.data.value.occurredAt
-    : null
-  input.inputReceiptCache.set(input.inputId, receivedAt)
-  return receivedAt
-}
-
-function recoverAssistantTranscriptReceiptBasis(input: {
-  entries: readonly AssistantTranscriptEntry[]
-  now: Date
-  receiptEvidence: ReadonlyMap<string, string>
-  sessionId: string
-}): {
-  entries: AssistantTranscriptEntry[]
-  redactedCount: number
-  updatedCount: number
-} {
-  let redactedCount = 0
-  let updatedCount = 0
-  const retiredAt = input.now.toISOString()
-  const entries = input.entries.map((entry) => {
-    if (entry.kind !== 'user' || entry.contentReceivedAt !== undefined) {
-      return entry
-    }
-
-    const receivedAt = input.receiptEvidence.get(
-      buildAssistantTranscriptReceiptEvidenceKey({
-        createdAt: entry.createdAt,
-        kind: entry.kind,
-        sessionId: input.sessionId,
-      }),
-    )
-    if (receivedAt !== undefined) {
-      updatedCount += 1
-      return {
-        ...entry,
-        contentReceivedAt: receivedAt,
-      }
-    }
-
-    // Missing or malformed receipt evidence must not let legacy inbound text
-    // outlive the policy. New user entries always carry contentReceivedAt, so
-    // this fail-closed branch applies only to pre-policy transcript records.
-    if (entry.text.length === 0) {
-      return entry
-    }
-    redactedCount += 1
-    updatedCount += 1
-    return {
-      ...entry,
-      text: '',
-      textRetiredAt: entry.textRetiredAt ?? retiredAt,
-    }
-  })
-
-  return { entries, redactedCount, updatedCount }
-}
-
-function buildAssistantTranscriptReceiptEvidenceKey(input: {
-  createdAt: string
-  kind: AssistantTranscriptEntry['kind']
-  sessionId: string
-}): string {
-  return JSON.stringify([input.sessionId, input.createdAt, input.kind])
-}
-
-function parseJsonOrNull(raw: string): unknown {
-  try {
-    return JSON.parse(raw)
-  } catch {
-    return null
   }
 }
 
@@ -671,9 +430,14 @@ export function redactExpiredAssistantTranscriptEntries(
     if (entry.text.length === 0) {
       return entry
     }
-    const contentReceivedAtMs = Date.parse(
-      entry.contentReceivedAt ?? entry.createdAt,
-    )
+    // Phase one cannot safely infer a receipt for legacy entries after normal
+    // accepted-turn residue pruning has discarded the input-to-transcript
+    // journal. Preserve those entries until the separately deployed phase-two
+    // cutover, after one full retention interval of stamped writes.
+    if (entry.contentReceivedAt === undefined) {
+      return entry
+    }
+    const contentReceivedAtMs = Date.parse(entry.contentReceivedAt)
     if (!Number.isFinite(contentReceivedAtMs)) {
       return entry
     }

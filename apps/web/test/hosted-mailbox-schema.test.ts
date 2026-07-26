@@ -124,11 +124,9 @@ describe("hosted mailbox workspace Prisma groundwork", () => {
     expect(messageRetentionMigrationSql).toContain(
       'ADD COLUMN "retention_disposition" TEXT',
     );
-    expect(messageRetentionMigrationSql).toContain(
-      'SET\n  "inbox_media_retention_wake_at" = CURRENT_TIMESTAMP',
+    expect(messageRetentionMigrationSql).not.toContain(
+      '"inbox_media_retention_wake_at"',
     );
-    expect(messageRetentionMigrationSql).toContain(
-      'WHERE "snapshot_ref" IS DISTINCT FROM NULL',
-    );
+    expect(messageRetentionMigrationSql).not.toMatch(/\bUPDATE\b/iu);
   });
 });
