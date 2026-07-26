@@ -1,11 +1,15 @@
+import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
-import { validatePublicApiReleaseBoundary } from "./release-helpers.mjs";
-
 const releaseManifest = JSON.parse(
   readFileSync(new URL("./release-manifest.json", import.meta.url), "utf8"),
+);
+const repoRoot = fileURLToPath(new URL("../", import.meta.url));
+const releaseVerificationScript = fileURLToPath(
+  new URL("./verify-release-target.mjs", import.meta.url),
 );
 const removedContractsRootExports = [
   "EXPERIMENT_PROGRESS_CARD_VERSION",
@@ -25,27 +29,38 @@ const removedContractsRootExports = [
   "buildExperimentProgressCardPath",
 ] as const;
 
+function verifyReleaseTarget(expectedVersion: string) {
+  const result = spawnSync(
+    process.execPath,
+    [releaseVerificationScript, "--expect-version", expectedVersion],
+    {
+      cwd: repoRoot,
+      encoding: "utf8",
+    },
+  );
+
+  return {
+    output: `${result.stdout}${result.stderr}`,
+    status: result.status,
+  };
+}
+
 describe("public package major-release boundary", () => {
   it("blocks patch and minor releases after the contracts root API removal", () => {
-    expect(
-      validatePublicApiReleaseBoundary(releaseManifest, "1.2.5"),
-    ).toEqual([
-      expect.stringContaining("Use pnpm release:major"),
-    ]);
-    expect(
-      validatePublicApiReleaseBoundary(releaseManifest, "1.3.0"),
-    ).toEqual([
-      expect.stringContaining("Use pnpm release:major"),
-    ]);
+    for (const expectedVersion of ["1.2.5", "1.3.0"]) {
+      const result = verifyReleaseTarget(expectedVersion);
+      expect(result.status).not.toBe(0);
+      expect(result.output).toContain("blocked by the public API boundary");
+      expect(result.output).toContain("Use pnpm release:major");
+    }
   });
 
   it("allows the next major release and records every removed root export", () => {
-    expect(
-      validatePublicApiReleaseBoundary(releaseManifest, "2.0.0"),
-    ).toEqual([]);
-    expect(
-      validatePublicApiReleaseBoundary(releaseManifest, "2.0.0-rc.0"),
-    ).toEqual([]);
+    for (const expectedVersion of ["2.0.0", "2.0.0-rc.0"]) {
+      const result = verifyReleaseTarget(expectedVersion);
+      expect(result.status).not.toBe(0);
+      expect(result.output).not.toContain("public API boundary");
+    }
 
     const contractsRemoval =
       releaseManifest.publicApiReleaseBoundary.removals.find(
