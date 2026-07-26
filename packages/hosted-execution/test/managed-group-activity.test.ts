@@ -6,7 +6,7 @@ import {
 } from "@murphai/hosted-execution/parsers";
 import {
   resolveHostedRuntimeManagedGroupActivityWindow,
-} from "@murphai/hosted-execution/runtime-control";
+} from "@murphai/hosted-execution/managed-group-activity";
 
 const validRequest = {
   occurrenceAt: "2026-07-26T22:00:00.000Z",

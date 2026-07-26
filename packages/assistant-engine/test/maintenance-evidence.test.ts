@@ -14,6 +14,10 @@ import {
   buildAssistantManagedGroupRecapEvidence,
 } from '../src/assistant/maintenance-evidence.ts'
 import {
+  buildAssistantAutoReplyPrompt,
+  type AssistantAutoReplyPromptInput,
+} from '../src/assistant/automation/prompt-builder.ts'
+import {
   appendAssistantTranscriptEntries,
   listAssistantSessions,
   listAssistantTranscriptTailEntries,
@@ -529,19 +533,75 @@ test('builds occurrence-anchored route-exact recap evidence with transient sende
       threadIsDirect: false,
     }),
   )
+  const productionPromptInput: AssistantAutoReplyPromptInput = {
+    actorIsSelf: false,
+    attachmentDescriptors: [{
+      attachmentId: 'attachment-private-1',
+      contentType: 'application/pdf',
+      fileName: 'private-document.pdf',
+      kind: 'document',
+      sizeBytes: 321,
+    }],
+    attachmentEvidence: {
+      attachments: [],
+      optionalInboxCaptureId: null,
+      reasonCode: null,
+      source: null,
+      status: 'not_attempted',
+      updatedAt: null,
+    },
+    conversation: {
+      accountId: 'stable-account-opaque',
+      actorId: 'stable-actor-opaque',
+      actorIsSelf: false,
+      source: 'linq',
+      threadId: 'weekly-room',
+      threadIsDirect: false,
+    },
+    groupReactionContext:
+      'Participant reaction-only-person@example.test added a like reaction on: earlier message',
+    inputId: `ain_${'a'.repeat(32)}`,
+    occurredAt: '2026-07-05T18:00:00.000Z',
+    projection: null,
+    receivedAt: null,
+    replyTarget: {
+      channel: 'linq',
+      messageId: 'provider-message-opaque-id',
+      threadId: 'weekly-room',
+    },
+    source: 'linq',
+    sourceMetadata: {
+      externalThreadRouteAuthorityPresent: true,
+      kind: 'linq',
+      partCount: 1,
+      reactionEligible: true,
+      replyToMessageId: null,
+      senderHandle: '+15551110000',
+      service: 'iMessage',
+    },
+    telegramMetadata: null,
+    text: 'the plant saga started here',
+  }
+  const productionPrompt = buildAssistantAutoReplyPrompt([productionPromptInput])
+  expect(productionPrompt.kind).toBe('ready')
+  if (productionPrompt.kind !== 'ready') {
+    throw new Error('Expected a production-shaped group prompt.')
+  }
+  for (const privateValue of [
+    '+15551110000',
+    'reaction-only-person@example.test',
+    'stable-actor-opaque',
+    'weekly-room',
+    `ain_${'a'.repeat(32)}`,
+    'private-document.pdf',
+  ]) {
+    expect(productionPrompt.prompt).toContain(privateValue)
+  }
   await appendAssistantTranscriptEntries(vaultRoot, 'session-weekly-room', [
     {
       createdAt: '2026-07-05T18:00:00.000Z',
       kind: 'user',
-      text: [
-        'Input 1:',
-        'Sender: @raw_handle',
-        'Sender name: Alice Example',
-        'Message ref: provider-message-opaque-id',
-        '',
-        'Message text:',
-        'the plant saga started here',
-      ].join('\n'),
+      text: productionPrompt.prompt,
     },
     {
       createdAt: '2026-07-10T20:00:00.000Z',
@@ -602,15 +662,24 @@ test('builds occurrence-anchored route-exact recap evidence with transient sende
   })
 
   expect(evidence).toContain(ASSISTANT_MANAGED_GROUP_RECAP_EVIDENCE_HEADING)
-  expect(evidence).toContain('Participant 1')
+  expect(evidence).toContain('"sender":"Participant 1"')
+  expect(evidence).toContain('"text":"the plant saga started here"')
   expect(evidence).toContain('the plant saga started here')
-  expect(evidence).toContain('the fern has entered its legal era')
-  expect(evidence).not.toContain('@raw_handle')
-  expect(evidence).not.toContain('Alice Example')
-  expect(evidence).not.toContain('provider-message-opaque-id')
+  expect(evidence).not.toContain('the fern has entered its legal era')
   expect(evidence).not.toContain('occurrence-boundary')
   expect(evidence).not.toContain('Different room evidence')
   expect(evidence).not.toContain('Direct-chat evidence')
-  expect(evidence).not.toContain('weekly-room')
   expect(evidence).not.toContain('100')
+  for (const privateValue of [
+    '+15551110000',
+    'reaction-only-person@example.test',
+    'stable-account-opaque',
+    'stable-actor-opaque',
+    'weekly-room',
+    `ain_${'a'.repeat(32)}`,
+    'provider-message-opaque-id',
+    'private-document.pdf',
+  ]) {
+    expect(evidence).not.toContain(privateValue)
+  }
 })

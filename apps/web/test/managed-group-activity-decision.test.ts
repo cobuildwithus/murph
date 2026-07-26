@@ -102,7 +102,10 @@ function buildLinqWake(row: ManagedGroupActivityMailboxRow, input: {
   };
 }
 
-function buildTelegramWake(row: ManagedGroupActivityMailboxRow) {
+function buildTelegramWake(row: ManagedGroupActivityMailboxRow, input: {
+  mediaOnly?: boolean;
+  serviceUpdate?: boolean;
+} = {}) {
   return {
     eventId: `event:${row.id}`,
     kind: "conversation.message",
@@ -114,11 +117,21 @@ function buildTelegramWake(row: ManagedGroupActivityMailboxRow) {
         threadId: ROUTE_TARGET,
       },
       telegramMessage: {
+        ...(input.mediaOnly === true
+          ? {
+              attachments: [{
+                fileId: "private-file-id",
+                kind: "photo",
+              }],
+            }
+          : {}),
         from: "1234567890",
         messageId: `message:${row.id}`,
         schema: "murph.hosted-telegram-message.v1",
         senderUsername: "private_username",
-        text: "private message content",
+        ...(input.mediaOnly === true || input.serviceUpdate === true
+          ? {}
+          : { text: "private message content" }),
         threadId: ROUTE_TARGET,
         threadIsDirect: false,
       },
@@ -237,6 +250,32 @@ describe("managed group activity decision", () => {
       request: telegramRequest,
       rows,
       wakeForRow: buildTelegramWake,
+    })).resolves.toEqual({ status: "eligible" });
+  });
+
+  it("excludes Telegram service updates while counting text and media messages", async () => {
+    const telegramRequest: HostedRuntimeManagedGroupActivityDecisionRequest = {
+      ...request,
+      route: { channel: "telegram", target: ROUTE_TARGET },
+    };
+    const textRows = Array.from({ length: 99 }, (_, index) =>
+      buildRow({ id: `telegram-text-${index + 1}` }));
+    const serviceUpdate = buildRow({ id: "telegram-service-update" });
+    await expect(evaluate({
+      request: telegramRequest,
+      rows: [...textRows, serviceUpdate],
+      wakeForRow: (row) => row.id === serviceUpdate.id
+        ? buildTelegramWake(row, { serviceUpdate: true })
+        : buildTelegramWake(row),
+    })).resolves.toEqual({ status: "ineligible" });
+
+    const mediaMessage = buildRow({ id: "telegram-media-only" });
+    await expect(evaluate({
+      request: telegramRequest,
+      rows: [...textRows, mediaMessage],
+      wakeForRow: (row) => row.id === mediaMessage.id
+        ? buildTelegramWake(row, { mediaOnly: true })
+        : buildTelegramWake(row),
     })).resolves.toEqual({ status: "eligible" });
   });
 

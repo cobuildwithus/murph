@@ -2,9 +2,11 @@ import "server-only";
 
 import type { PrismaClient } from "@prisma/client";
 import type { HostedExecutionWake } from "@murphai/hosted-execution/contracts";
-import { parseHostedExecutionWake } from "@murphai/hosted-execution/parsers";
 import {
   resolveHostedRuntimeManagedGroupActivityWindow,
+} from "@murphai/hosted-execution/managed-group-activity";
+import { parseHostedExecutionWake } from "@murphai/hosted-execution/parsers";
+import {
   type HostedRuntimeManagedGroupActivityDecisionRequest,
   type HostedRuntimeManagedGroupActivityDecisionResponse,
 } from "@murphai/hosted-execution/runtime-control";
@@ -245,5 +247,9 @@ function managedGroupActivityWakeMatchesRoute(input: {
     && message.threadIsDirect === false
     && typeof message.from === "string"
     && message.from.trim().length > 0
+    && (
+      (typeof message.text === "string" && message.text.trim().length > 0)
+      || (message.attachments?.length ?? 0) > 0
+    )
   );
 }
