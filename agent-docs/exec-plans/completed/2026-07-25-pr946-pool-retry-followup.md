@@ -1,6 +1,6 @@
 # PR 946 saturation-aware retry and telemetry follow-up
 
-Status: active
+Status: completed
 Created: 2026-07-25
 Updated: 2026-07-25
 
@@ -61,3 +61,18 @@ Updated: 2026-07-25
   repository ReviewGPT/CI gates.
 - Expected outcomes: all pass; overload tests prove zero retries under visible
   capacity and exactly one retry for an ambiguous no-work failure.
+- Focused Prisma coverage passed 36 cases; the isolated real-PostgreSQL lane
+  passed all 3 cases.
+- Canonical `pnpm test:diff apps/web/src/lib/prisma.ts` passed on the pushed
+  implementation (Testbox `tbx_01kydt4my0fv05dz222gphwxp4`, Actions run
+  `30179683120`).
+- Preliminary specialist ReviewGPT passed with no findings on rebased head
+  `21c2731f47`; manual parent review found no remaining correctness or scope
+  issue.
+- The current head has 25 substantive successful GitHub checks and no failures;
+  the remaining status entry is the provider's blank informational check.
+- `pnpm verify:acceptance` passed on the current head: all package coverage,
+  hosted-web tests/lint/dev smoke/production build, Cloudflare node and worker
+  suites, typechecks, package-boundary checks, and repository guards completed
+  successfully.
+Completed: 2026-07-25
