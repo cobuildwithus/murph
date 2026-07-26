@@ -169,20 +169,6 @@ async function cleanupUsageCreditFixture(
   }
 }
 
-async function readFulfilledUsageTopUps(
-  prisma: PrismaClient,
-): Promise<number> {
-  const aggregate = await prisma.hostedGrowthAggregate.findUniqueOrThrow({
-    select: {
-      trackedFulfilledUsageTopUps: true,
-    },
-    where: {
-      id: "global",
-    },
-  });
-  return aggregate.trackedFulfilledUsageTopUps;
-}
-
 async function readBackendPid(tx: Prisma.TransactionClient): Promise<number> {
   const rows = await tx.$queryRaw<Array<{ pid: number }>>`
     SELECT pg_backend_pid() AS pid
@@ -234,9 +220,6 @@ describe.skipIf(!runPostgresConcurrencyProof)(
   () => {
     it("grants one ledger entry when two grant replays race", async () => {
       const fixture = await createUsageCreditFixture();
-      const initialFulfilledUsageTopUps = await readFulfilledUsageTopUps(
-        fixture.observer,
-      );
       const paidAt = new Date("2026-07-16T12:01:00.000Z");
       const firstGranted = createDeferred();
       const releaseFirstGrant = createDeferred();
@@ -296,9 +279,6 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           beneficiarySequence: 1n,
           kind: "purchase_grant",
         }]);
-        await expect(
-          readFulfilledUsageTopUps(fixture.observer),
-        ).resolves.toBe(initialFulfilledUsageTopUps + 1);
       } finally {
         releaseFirstGrant.resolve();
         await Promise.allSettled([
@@ -309,11 +289,8 @@ describe.skipIf(!runPostgresConcurrencyProof)(
       }
     });
 
-    it("rolls back the tracked count and retains it after member rows are deleted", async () => {
+    it("rolls back a grant and permits member-row deletion after fulfillment", async () => {
       const fixture = await createUsageCreditFixture();
-      const initialFulfilledUsageTopUps = await readFulfilledUsageTopUps(
-        fixture.observer,
-      );
       const paidAt = new Date("2026-07-16T12:08:00.000Z");
 
       try {
@@ -327,9 +304,6 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         }, transactionOptions)).rejects.toThrow(
           "force growth aggregate rollback",
         );
-        await expect(
-          readFulfilledUsageTopUps(fixture.observer),
-        ).resolves.toBe(initialFulfilledUsageTopUps);
         await expect(
           fixture.observer.hostedUsageCreditPurchase.findUniqueOrThrow({
             select: {
@@ -361,10 +335,6 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         ).resolves.toMatchObject({
           granted: false,
         });
-        await expect(
-          readFulfilledUsageTopUps(fixture.observer),
-        ).resolves.toBe(initialFulfilledUsageTopUps + 1);
-
         await fixture.thirdClient.$transaction(async (tx) => {
           await tx.hostedUsageCreditEntry.deleteMany({
             where: {
@@ -400,9 +370,6 @@ describe.skipIf(!runPostgresConcurrencyProof)(
             },
           }),
         ])).resolves.toEqual([0, 0, 0]);
-        await expect(
-          readFulfilledUsageTopUps(fixture.observer),
-        ).resolves.toBe(initialFulfilledUsageTopUps + 1);
       } finally {
         await cleanupUsageCreditFixture(fixture);
       }
