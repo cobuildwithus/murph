@@ -2157,7 +2157,7 @@ describe("HostedUserRunner execution coordination", () => {
       runtimeAttemptId: expect.not.stringMatching(token.attemptId),
     });
 
-    expect(readActiveRuntimeUserFence).toHaveBeenCalledOnce();
+    expect(readActiveRuntimeUserFence).not.toHaveBeenCalled();
     expect(abortWorkspaceInvocation).toHaveBeenCalledWith({
       attemptId: token.attemptId,
       leaseGeneration: String(token.generation),
@@ -2191,12 +2191,18 @@ describe("HostedUserRunner execution coordination", () => {
     },
   );
 
-  it("preserves the active retention fence when the settled abort is stale", async () => {
+  it.each([
+    ["stale", "2026-04-27T00:00:05.000Z"],
+    ["queued", "2026-04-27T00:00:05.000Z"],
+    ["failed", "2026-04-27T00:00:30.000Z"],
+  ] as const)(
+    "preserves the active retention fence when the exact abort is %s",
+    async (abortStatus, retryAt) => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const abortWorkspaceInvocation = vi.fn<
       NonNullable<HostedExecutionContainerStubLike["abortWorkspaceInvocation"]>
-    >(async () => "stale");
+    >(async () => abortStatus);
     let activeAttemptId = "";
     let activeGeneration = "";
     const readActiveRuntimeUserFence = vi.fn<
@@ -2226,10 +2232,10 @@ describe("HostedUserRunner execution coordination", () => {
       userId: TEST_USER_ID,
     })).resolves.toEqual({
       kind: "retry_later",
-      retryAt: "2026-04-27T00:00:05.000Z",
+      retryAt,
     });
 
-    expect(readActiveRuntimeUserFence).toHaveBeenCalledOnce();
+    expect(readActiveRuntimeUserFence).not.toHaveBeenCalled();
     expect(abortWorkspaceInvocation).toHaveBeenCalledWith({
       attemptId: token.attemptId,
       leaseGeneration: String(token.generation),
@@ -2241,7 +2247,8 @@ describe("HostedUserRunner execution coordination", () => {
       active_expires_at: null,
       wake_at: null,
     });
-  });
+    },
+  );
 
   it("preempts a legacy retention fence with no persisted container name", async () => {
     vi.useFakeTimers();
@@ -2360,7 +2367,7 @@ describe("HostedUserRunner execution coordination", () => {
       runtimeAttemptId: expect.not.stringMatching(token.attemptId),
     });
 
-    expect(readActiveRuntimeUserFence).toHaveBeenCalledOnce();
+    expect(readActiveRuntimeUserFence).not.toHaveBeenCalled();
     expect(readVersionedActiveRuntimeUserFence).not.toHaveBeenCalled();
     expect(abortWorkspaceInvocation).toHaveBeenCalledWith({
       attemptId: token.attemptId,
@@ -2598,7 +2605,7 @@ describe("HostedUserRunner execution coordination", () => {
     );
   });
 
-  it("preempts a fresh inactive retention-only fence for default processing", async () => {
+  it("preempts a fresh retention-only fence through the exact abort", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const abortWorkspaceInvocation = vi.fn<
@@ -2645,7 +2652,7 @@ describe("HostedUserRunner execution coordination", () => {
       runtimeAttemptId: expect.not.stringMatching(token.attemptId),
     });
 
-    expect(readActiveRuntimeUserFence).toHaveBeenCalledOnce();
+    expect(readActiveRuntimeUserFence).not.toHaveBeenCalled();
     expect(abortWorkspaceInvocation).toHaveBeenCalledWith({
       attemptId: token.attemptId,
       leaseGeneration: String(token.generation),

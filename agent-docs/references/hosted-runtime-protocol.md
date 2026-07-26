@@ -384,8 +384,10 @@ the legacy unversioned per-user container name for liveness probes; fresh
 starts still use the current versioned container resolver.
 For foreground/default work behind an `inbox_media_retention` or
 `system_mailbox` fence, the existing workspace-invocation abort seam is the
-preemption authority when liveness is ambiguous. A local exact-pointer abort
-enters the same inactive-fence replacement path. The container registers the
+sole preemption authority. UserRunner sends that exact abort directly instead
+of spending foreground command budget on a non-authoritative liveness
+preflight. A local exact-pointer abort enters the same inactive-fence
+replacement path. The container registers the
 exact attempt, lease generation, user, abort controller, and invocation result
 before lifecycle-lock admission. Queued duplicate invokes therefore coalesce,
 and an exact abort can cancel already-queued successors before runner dispatch.
@@ -409,15 +411,17 @@ fresh shell. A delayed abort for a released token rechecks the queue head and
 cannot recycle that replacement shell. If explicit destroy fails, any retained
 exact token becomes cleanup-retryable through the next exact wake rather than
 remaining permanently aborted.
-An inactive liveness proof must still send the identity-checked abort first so
-any queued exact background invocation is canceled before the fence is cleared;
-an inactive result or queued matching abort is replacement-safe. Missing-pointer
-abort delivery without inactive proof keeps an exact abort reservation visible
-while it owns the container lifecycle and delivers the identity-checked abort.
-A stale result preserves the fence and retries. An accepted or queued result, or
-an ambiguous delivery failure, recycles the old shell fail-closed before the
-container returns `accepted`; only that settled stop allows the controller to
-clear the exact fence and start a replacement.
+Priority preemption always sends the identity-checked abort first so any queued
+exact background invocation is canceled before the fence is cleared; an
+inactive result or queued matching abort is replacement-safe. Missing-pointer
+abort delivery keeps an exact abort reservation visible while it owns the
+container lifecycle and delivers the identity-checked abort. Control-plane
+`stopped` status does not bypass that abort, and it is not settled-stop proof
+while platform truth explicitly reports the shell running. A stale result
+preserves the fence and retries. An accepted or queued result, or an ambiguous
+delivery failure, recycles the old shell fail-closed before the container
+returns `accepted`; only an observed stop or non-contradicted stopped status
+allows the controller to clear the exact fence and start a replacement.
 
 The foreground-priority rule does not weaken correctness checks. Wrong-user
 authority, invalid auth, undecryptable mailbox payloads, stale leases, and

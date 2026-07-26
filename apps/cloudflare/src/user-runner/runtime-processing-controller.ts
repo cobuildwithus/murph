@@ -453,40 +453,6 @@ export class RuntimeProcessingController {
   }): Promise<HostedRuntimeEnsureProcessingResponse> {
     const { activeFence, record } = input;
     const runnerContainerName = this.readActiveRuntimeFenceContainerName(input);
-    const activeRuntimeState =
-      await this.readActiveRuntimeFenceLiveness({
-        activeFence,
-        commandBudget: input.commandBudget,
-        record,
-        runnerContainerName,
-      });
-    if (activeRuntimeState.outcome === "inactive") {
-      const abortResult = await this.abortActiveRuntimeFence({
-        activeFence,
-        commandBudget: input.commandBudget,
-        record,
-        runnerContainerName,
-      });
-      if (!abortResult.aborted) {
-        return abortResult.response;
-      }
-
-      return await this.replaceInactiveRuntimeFence({
-        activeFence,
-        commandBudget: input.commandBudget,
-        input: input.input,
-        preserveStartingFence: false,
-        record,
-        runtimeWakeStartedAt: input.runtimeWakeStartedAt,
-      });
-    }
-    if (activeRuntimeState.outcome === "mismatch") {
-      return createRuntimeProcessingRetryLater({
-        reason: "container_rpc_error",
-        userId: input.input.userId,
-      });
-    }
-
     const abortResult = await this.abortActiveRuntimeFence({
       activeFence,
       commandBudget: input.commandBudget,

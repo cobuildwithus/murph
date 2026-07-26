@@ -4390,7 +4390,7 @@ describe("RunnerContainer", () => {
       attemptId: request.attemptId,
       leaseGeneration: request.leaseGeneration,
       userId: "member_123",
-    })).resolves.toBe("inactive");
+    })).resolves.toBe("accepted");
     expect(destroy).toHaveBeenCalledOnce();
   });
 
@@ -5038,6 +5038,44 @@ describe("RunnerContainer", () => {
       expect(destroy).toHaveBeenCalledOnce();
     },
   );
+
+  it("requires exact abort and observed stop when control-plane status is stale", async () => {
+    const request = createRunnerRequest("evt_missing_pointer_stale_stopped_status");
+    const containerFetch = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith("/internal/workspace-invocation/abort")) {
+        expect(JSON.parse(String(init?.body))).toEqual({
+          attemptId: request.attemptId,
+          leaseGeneration: request.leaseGeneration,
+          userId: "member_123",
+        });
+        return new Response(null, { status: 503 });
+      }
+      throw new Error(`Unexpected runner request URL: ${url}`);
+    });
+    const destroy = vi.fn(async () => {});
+    const { container } = createContainerDouble({
+      containerFetch,
+      destroy,
+      initialStatus: "stopped",
+      platformRunning: true,
+    });
+
+    let abortSettled = false;
+    const abort = container.abortWorkspaceInvocation({
+      attemptId: request.attemptId,
+      leaseGeneration: request.leaseGeneration,
+      userId: "member_123",
+    }).finally(() => {
+      abortSettled = true;
+    });
+
+    await vi.waitFor(() => expect(destroy).toHaveBeenCalledOnce());
+    expect(containerFetch).toHaveBeenCalledOnce();
+    expect(abortSettled).toBe(false);
+
+    container.onStop({ exitCode: 0, reason: "exit" });
+    await expect(abort).resolves.toBe("accepted");
+  });
 
   it("preserves a newer child when a no-pointer abort is stale", async () => {
     const request = createRunnerRequest("evt_missing_pointer_stale_abort");

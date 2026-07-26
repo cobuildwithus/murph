@@ -1054,6 +1054,10 @@ export class RunnerContainer extends Container {
     return this.ctx.container?.running === false;
   }
 
+  private isPlatformContainerDefinitelyRunning(): boolean {
+    return this.ctx.container?.running === true;
+  }
+
   async smokeHealth(input: HostedExecutionContainerSmokeHealthInput = {}): Promise<HostedExecutionContainerSmokeHealthResult> {
     this.noteContainerInteraction();
     return await this.withLifecycleLock(async () => {
@@ -1780,10 +1784,6 @@ export class RunnerContainer extends Container {
     userId: string;
   }): Promise<RunnerWorkspaceInvocationAbortStatus> {
     return await this.withLifecycleLock(async () => {
-      const status = await readRunnerContainerStatus(this);
-      if (isRunnerContainerStopped(status)) {
-        return "inactive";
-      }
       const abortStatus = await this.postWorkspaceInvocationAbort(input);
       if (abortStatus === "stale") {
         return "stale";
@@ -2089,7 +2089,10 @@ export class RunnerContainer extends Container {
         this,
         RUNNER_DESTROY_SETTLE_TIMEOUT_MS,
       );
-      if (isRunnerContainerStopped(statusBeforeDestroy)) {
+      if (
+        isRunnerContainerStopped(statusBeforeDestroy)
+        && !this.isPlatformContainerDefinitelyRunning()
+      ) {
         return true;
       }
     } catch (error) {
@@ -2292,7 +2295,10 @@ export class RunnerContainer extends Container {
           Math.min(RUNNER_WAIT_INTERVAL_MS, remainingMs),
         );
         appendObservedRunnerContainerStatus(observedStatuses, statusAfterDestroy);
-        if (isRunnerContainerStopped(statusAfterDestroy)) {
+        if (
+          isRunnerContainerStopped(statusAfterDestroy)
+          && !this.isPlatformContainerDefinitelyRunning()
+        ) {
           return {
             ok: true,
             observedStatuses,
