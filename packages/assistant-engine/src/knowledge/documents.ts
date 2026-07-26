@@ -17,6 +17,10 @@ import {
 } from '@murphai/query'
 import { normalizeNullableString } from '@murphai/operator-config/text/shared'
 
+export const GROUP_ROOM_MODEL_KNOWLEDGE_SLUG = 'group-room-model'
+export const GROUP_ROOM_MODEL_KNOWLEDGE_PAGE_TYPE = 'group-room-model'
+export const GROUP_ROOM_MODEL_KNOWLEDGE_PAGE_MAX_BYTES = 8 * 1024
+
 export function deriveKnowledgeTitle(input: {
   body?: string | null
   existingPage?: DerivedKnowledgeNode | null

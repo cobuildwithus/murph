@@ -25,7 +25,7 @@ import {
   readDerivedKnowledgeGraphWithIssues,
   readHealthLibraryGraphWithIssues,
   renderDerivedKnowledgeIndex,
-  searchDerivedKnowledgeVault,
+  searchDerivedKnowledgeGraph,
   summarizeKnowledgeBody,
   type DerivedKnowledgeGraph,
   type DerivedKnowledgeGraphIssue,
@@ -36,6 +36,7 @@ import {
   buildKnowledgePageRelativePath,
   deriveKnowledgeTitle,
   extractKnowledgeRelatedSlugsFromBody,
+  GROUP_ROOM_MODEL_KNOWLEDGE_SLUG,
   normalizeLibrarySlugInputs,
   matchesKnowledgeFilter,
   normalizeKnowledgeBody,
@@ -159,6 +160,7 @@ export async function upsertKnowledgePage(
     title: input.title,
   })
   const slug = normalizeKnowledgeSlug(input.slug ?? initialTitle)
+  assertGenericKnowledgePageSlug(slug, 'upsert')
   const initialGraph = await readDerivedKnowledgeGraphWithIssues(input.vault)
   const initialPage = requireUniqueKnowledgePageBySlug(
     initialGraph.graph,
@@ -304,6 +306,7 @@ export async function appendKnowledgePageSection(
   }
 
   const slug = normalizeKnowledgeSlug(input.slug)
+  assertGenericKnowledgePageSlug(slug, 'append')
   const position = normalizeKnowledgeAppendPosition(input.position)
   const initialGraph = await readDerivedKnowledgeGraphWithIssues(input.vault)
   const initialPage = requireUniqueKnowledgePageBySlug(
@@ -469,7 +472,10 @@ export async function searchKnowledgePages(
   }
 
   const filters = normalizeKnowledgeFilters(input)
-  const result = await searchDerivedKnowledgeVault(input.vault, query, {
+  const graph = toGenericKnowledgeGraph(
+    await readDerivedKnowledgeGraph(input.vault),
+  )
+  const result = searchDerivedKnowledgeGraph(graph, query, {
     limit: input.limit ?? undefined,
     pageType: filters.pageType,
     status: filters.status,
@@ -486,7 +492,9 @@ export async function searchKnowledgePages(
 export async function listKnowledgePages(
   input: KnowledgeListInput,
 ): Promise<KnowledgeListResult> {
-  const graph = await readDerivedKnowledgeGraph(input.vault)
+  const graph = toGenericKnowledgeGraph(
+    await readDerivedKnowledgeGraph(input.vault),
+  )
   const filters = normalizeKnowledgeFilters(input)
   const limit = normalizeKnowledgeListLimit(input.limit)
   const pages = graph.nodes
@@ -516,14 +524,45 @@ function normalizeKnowledgeListLimit(limit: number | null | undefined): number {
   )
 }
 
+function assertGenericKnowledgePageSlug(
+  slug: string,
+  action: 'append' | 'show' | 'upsert',
+): void {
+  if (slug !== GROUP_ROOM_MODEL_KNOWLEDGE_SLUG) {
+    return
+  }
+  throw new VaultCliError(
+    'knowledge_page_reserved',
+    `Knowledge page "${slug}" is owned by its dedicated group room-model surface and cannot be accessed through knowledge ${action}.`,
+    { slug },
+  )
+}
+
+function toGenericKnowledgeGraph(
+  graph: DerivedKnowledgeGraph,
+): DerivedKnowledgeGraph {
+  const nodes = graph.nodes.filter(
+    (node) => node.slug !== GROUP_ROOM_MODEL_KNOWLEDGE_SLUG,
+  )
+  return nodes.length === graph.nodes.length
+    ? graph
+    : {
+        ...graph,
+        bySlug: new Map(nodes.map((node) => [node.slug, node])),
+        nodes,
+      }
+}
+
 export async function getKnowledgePage(
   input: KnowledgeGetInput,
   dependencies: Pick<KnowledgeServiceDependencies, 'readTextFile'> = {},
 ): Promise<KnowledgeGetResult> {
+  const slug = normalizeKnowledgeSlug(input.slug)
+  assertGenericKnowledgePageSlug(slug, 'show')
   const graph = await readDerivedKnowledgeGraph(input.vault)
   const page = requireUniqueKnowledgePageBySlug(
     graph,
-    normalizeKnowledgeSlug(input.slug),
+    slug,
     'get',
   )
 
@@ -551,7 +590,9 @@ export async function rebuildKnowledgeIndex(
     vaultRoot: input.vault,
     resources: [canonicalPathResource(DERIVED_KNOWLEDGE_INDEX_PATH)],
     run: async () => {
-      const graph = await readDerivedKnowledgeGraph(input.vault)
+      const graph = toGenericKnowledgeGraph(
+        await readDerivedKnowledgeGraph(input.vault),
+      )
       const generatedAt = (dependencies.now ?? (() => new Date()))().toISOString()
       const markdown = renderDerivedKnowledgeIndex(graph, generatedAt)
 
