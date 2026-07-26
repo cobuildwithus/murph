@@ -1,0 +1,48 @@
+name: Diagnose saved-card group funding port
+
+on:
+  pull_request:
+    branches:
+      - agent/saved-card-funding-port-runner
+
+permissions:
+  contents: write
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/reuse-saved-card-for-group-funding-v2
+          fetch-depth: 0
+      - name: Apply, commit, and attempt publish
+        shell: bash
+        run: |
+          set +e
+          git fetch origin agent/reuse-saved-card-for-group-funding main > /tmp/diagnostic.log 2>&1
+          git diff --binary 2c0c14e3f7ab36aa08326aeb0036b5288f8f4dd6 1150af88d1fb6dbd26919a642e09e90957f8cd2a > /tmp/feature.patch
+          git apply --3way --index /tmp/feature.patch >> /tmp/diagnostic.log 2>&1
+          python - <<'PY' >> /tmp/diagnostic.log 2>&1
+          from pathlib import Path
+          path = Path("agent-docs/product-specs/hosted-usage-topups.md")
+          path.write_text(path.read_text().rstrip() + "\n")
+          PY
+          git add agent-docs/product-specs/hosted-usage-topups.md
+          git diff --cached --check >> /tmp/diagnostic.log 2>&1
+          echo "--- status before commit ---" >> /tmp/diagnostic.log
+          git status --short >> /tmp/diagnostic.log 2>&1
+          git config user.name "OpenAI"
+          git config user.email "openai@users.noreply.github.com"
+          echo "--- commit ---" >> /tmp/diagnostic.log
+          git commit -m "feat: reuse saved cards for group funding" >> /tmp/diagnostic.log 2>&1
+          echo "commit_exit=$?" >> /tmp/diagnostic.log
+          echo "--- push ---" >> /tmp/diagnostic.log
+          git push origin HEAD:agent/reuse-saved-card-for-group-funding-v2 >> /tmp/diagnostic.log 2>&1
+          echo "push_exit=$?" >> /tmp/diagnostic.log
+          exit 0
+      - name: Upload diagnostic
+        uses: actions/upload-artifact@v4
+        with:
+          name: saved-card-group-funding-publish-diagnostic
+          path: /tmp/diagnostic.log
