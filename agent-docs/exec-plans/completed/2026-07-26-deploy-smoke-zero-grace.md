@@ -54,5 +54,6 @@ the old revision for a grace period that has no product purpose.
 - Canonical `pnpm test:diff` and `pnpm verify:acceptance`.
 - Exact-head CI and final cross-cutting review before merge.
 
-Status: active
+Status: completed
 Updated: 2026-07-26
+Completed: 2026-07-26
