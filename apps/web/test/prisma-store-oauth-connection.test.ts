@@ -74,6 +74,46 @@ describe("PrismaDeviceSyncControlPlaneStore oauth state ingress", () => {
     vi.clearAllMocks();
   });
 
+  it("checks SDK sign-in authority in one current no-decryption query", async () => {
+    const findFirst = vi.fn()
+      .mockResolvedValueOnce({ id: "dsc_sdk_authority" })
+      .mockResolvedValueOnce(null);
+    const store = new PrismaDeviceSyncControlPlaneStore({
+      prisma: {
+        deviceConnection: {
+          findFirst,
+        },
+      } as never,
+      providerAccountBlindIndexKey: BLIND_INDEX_KEY,
+    });
+    const input = {
+      accountId: "dsc_sdk_authority",
+      externalAccountId: "junction-user-1",
+      ownerId: "user-123",
+      provider: "junction",
+    };
+
+    await expect(store.isSdkSignInAuthorityCurrent(input)).resolves.toBe(true);
+    await expect(store.isSdkSignInAuthorityCurrent(input)).resolves.toBe(false);
+    expect(findFirst).toHaveBeenNthCalledWith(1, {
+      where: {
+        id: "dsc_sdk_authority",
+        provider: "junction",
+        providerAccountBlindIndex: buildHostedProviderAccountBlindIndex({
+          externalAccountId: "junction-user-1",
+          key: BLIND_INDEX_KEY,
+          provider: "junction",
+        }),
+        setupPhase: "source_confirmed",
+        status: "active",
+        userId: "user-123",
+      },
+      select: {
+        id: true,
+      },
+    });
+  });
+
   // Consume semantics (replay, expiry, mismatches) are owned by
   // prisma-store-oauth-sessions.test.ts; this only proves delegation.
   it("delegates oauth state consumption to the session store", async () => {

@@ -816,6 +816,32 @@ export class PrismaHostedConnectionStore {
     return record?.userId ?? null;
   }
 
+  async isSdkSignInAuthorityCurrent(input: {
+    accountId: string;
+    externalAccountId: string;
+    ownerId: string;
+    provider: string;
+  }): Promise<boolean> {
+    const record = await this.prisma.deviceConnection.findFirst({
+      where: {
+        id: input.accountId,
+        provider: input.provider,
+        providerAccountBlindIndex: this.buildProviderAccountBlindIndex(
+          input.provider,
+          input.externalAccountId,
+        ),
+        setupPhase: "source_confirmed",
+        status: "active",
+        userId: input.ownerId,
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    return record !== null;
+  }
+
   async listConnectionRecordsForUser(userId: string): Promise<HostedConnectionRecord[]> {
     return this.prisma.deviceConnection.findMany({
       where: {

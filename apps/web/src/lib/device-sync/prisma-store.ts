@@ -222,6 +222,15 @@ export class PrismaDeviceSyncControlPlaneStore
     return this.connections.getConnectionOwnerId(connectionId);
   }
 
+  async isSdkSignInAuthorityCurrent(input: {
+    accountId: string;
+    externalAccountId: string;
+    ownerId: string;
+    provider: string;
+  }): Promise<boolean> {
+    return this.connections.isSdkSignInAuthorityCurrent(input);
+  }
+
   async getConnectionRecordForUser(userId: string, connectionId: string) {
     return this.connections.getConnectionRecordForUser(userId, connectionId);
   }

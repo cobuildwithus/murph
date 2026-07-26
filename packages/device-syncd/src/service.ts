@@ -15,7 +15,10 @@ import {
   sanitizeHostedRuntimeErrorText,
 } from "./hosted-runtime.ts";
 import { createDeviceSyncPublicIngress, DeviceSyncPublicIngress } from "./public-ingress.ts";
-import { toRedactedPublicDeviceSyncAccount } from "./public-account.ts";
+import {
+  isEstablishedDeviceSyncConnection,
+  toRedactedPublicDeviceSyncAccount,
+} from "./public-account.ts";
 import { createDeviceSyncRegistry } from "./registry.ts";
 import {
   addMilliseconds,
@@ -312,6 +315,15 @@ class DeviceSyncServiceController {
         getConnectionByExternalAccount: (provider, externalAccountId) => {
           const account = this.store.getAccountByExternalAccount(provider, externalAccountId);
           return account ? this.toPublicAccount(account) : null;
+        },
+        isSdkSignInAuthorityCurrent: (record) => {
+          const account = this.store.getAccountById(record.accountId);
+          return Boolean(
+            account
+            && account.provider === record.provider
+            && account.externalAccountId === record.externalAccountId
+            && isEstablishedDeviceSyncConnection(account),
+          );
         },
         claimWebhookTrace: (record) => this.store.claimWebhookTrace(record),
         completeWebhookTrace: (provider, traceId, claimToken) =>

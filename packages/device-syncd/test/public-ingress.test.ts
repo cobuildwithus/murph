@@ -53,6 +53,7 @@ class InMemoryPublicIngressStore implements DeviceSyncPublicIngressStore {
   completedWebhookTraceCalls = 0;
   markConnectionSetupFailedError: Error | null = null;
   upsertConnectionCalls = 0;
+  afterConnectionByIdSnapshotOnce: ((accountId: string) => void) | null = null;
   private accountCounter = 0;
 
   deleteExpiredOAuthStates(now: string): number {
@@ -249,11 +250,32 @@ class InMemoryPublicIngressStore implements DeviceSyncPublicIngressStore {
   }
 
   getConnectionById(accountId: string): PublicDeviceSyncAccount | null {
-    return this.accounts.get(accountId) ?? null;
+    const account = this.accounts.get(accountId) ?? null;
+    const afterSnapshot = this.afterConnectionByIdSnapshotOnce;
+    this.afterConnectionByIdSnapshotOnce = null;
+    afterSnapshot?.(accountId);
+    return account;
   }
 
   getConnectionOwnerId(accountId: string): string | null {
     return this.accountOwners.get(accountId) ?? null;
+  }
+
+  isSdkSignInAuthorityCurrent(input: {
+    accountId: string;
+    externalAccountId: string;
+    ownerId: string;
+    provider: string;
+  }): boolean {
+    const account = this.accounts.get(input.accountId) ?? null;
+    return Boolean(
+      account
+      && account.provider === input.provider
+      && account.externalAccountId === input.externalAccountId
+      && account.status === "active"
+      && account.setupPhase === "source_confirmed"
+      && this.accountOwners.get(account.id) === input.ownerId,
+    );
   }
 
   claimWebhookTrace(input: ClaimDeviceSyncWebhookTraceInput): DeviceSyncWebhookTraceClaimResult {
@@ -4332,6 +4354,52 @@ test("public ingress SDK sign-in create withholds a token when disconnect wins d
   assert.equal(store.upsertConnectionCalls, 1);
 });
 
+test("public ingress SDK sign-in create rechecks authority after a stale account snapshot", async () => {
+  const store = new InMemoryPublicIngressStore();
+  const ingress = createDeviceSyncPublicIngress({
+    publicBaseUrl: "https://sync.example.test/device-sync",
+    registry: createDeviceSyncRegistry([
+      createFakeProvider({
+        sdkConnectionHandler: {
+          async ensureConnection() {
+            return {
+              externalAccountId: "demo-sdk-user-1",
+              tokens: {
+                accessToken: "<REDACTED_ACCESS_TOKEN>",
+              } satisfies ProviderAuthTokens,
+              setupPhase: "source_confirmed",
+            };
+          },
+          async createSignInToken() {
+            store.afterConnectionByIdSnapshotOnce = (accountId) => {
+              store.patchAccountStatus(accountId, "disconnected");
+            };
+            return {
+              signInToken: "sdk-sign-in-token-1",
+              environment: "sandbox",
+            };
+          },
+        },
+      }),
+    ]),
+    store,
+  });
+
+  await assert.rejects(
+    () => ingress.createSdkSignInSession({
+      provider: "demo",
+      ownerId: "member-1",
+    }),
+    (error: unknown) =>
+      error instanceof DeviceSyncError
+      && error.code === "SDK_SIGN_IN_RECONNECT_REQUIRED",
+  );
+  assert.equal(
+    store.getConnectionByExternalAccount("demo", "demo-sdk-user-1")?.status,
+    "disconnected",
+  );
+});
+
 test("public ingress SDK sign-in resume mints against the exact active account without lifecycle writes", async () => {
   const store = new InMemoryPublicIngressStore();
   let connectionEstablishedEvents = 0;
@@ -4470,7 +4538,7 @@ test("public ingress SDK sign-in resume rejects terminal, missing, mismatched, a
   assert.equal(mintedTokens, 1);
 });
 
-test("public ingress SDK sign-in resume withholds a token when disconnect wins during mint", async () => {
+test("public ingress SDK sign-in resume rechecks authority after a stale account snapshot", async () => {
   const store = new InMemoryPublicIngressStore();
   let accountId = "";
   let mintedTokens = 0;
@@ -4491,7 +4559,9 @@ test("public ingress SDK sign-in resume withholds a token when disconnect wins d
           async createSignInToken() {
             mintedTokens += 1;
             if (mintedTokens === 2) {
-              store.patchAccountStatus(accountId, "disconnected");
+              store.afterConnectionByIdSnapshotOnce = (snapshotAccountId) => {
+                store.patchAccountStatus(snapshotAccountId, "disconnected");
+              };
             }
             return {
               signInToken: `sdk-sign-in-token-${mintedTokens}`,
