@@ -107,41 +107,48 @@ describe("hosted runtime log write queue", () => {
     },
   );
 
-  it("writes warn and error directly, never waiting behind a queued info backlog", async () => {
-    const { port, writes } = createControlledLogPort();
+  it.each(["warn", "error"] as const)(
+    "writes %s directly, never waiting behind a queued info backlog",
+    async (level) => {
+      const { port, writes } = createControlledLogPort();
 
-    const infoSettled = trackSettled(writeHostedRuntimeLogBestEffort({
-      entry: buildQueueLogEntry("info"),
-      now: () => "2026-06-12T00:00:01.000Z",
-      platform: { logPort: port },
-    }));
-    const warnSettled = trackSettled(writeHostedRuntimeLogBestEffort({
-      entry: buildQueueLogEntry("warn"),
-      now: () => "2026-06-12T00:00:02.000Z",
-      platform: { logPort: port },
-    }));
+      const infoSettled = trackSettled(writeHostedRuntimeLogBestEffort({
+        entry: buildQueueLogEntry("info"),
+        now: () => "2026-06-12T00:00:01.000Z",
+        platform: { logPort: port },
+      }));
+      const directSettled = trackSettled(writeHostedRuntimeLogBestEffort({
+        entry: buildQueueLogEntry(level),
+        now: () => "2026-06-12T00:00:02.000Z",
+        platform: { logPort: port },
+      }));
 
-    await flushMicrotasks();
-    expect(infoSettled()).toBe(true);
-    expect(warnSettled()).toBe(false);
-    // The warn write starts immediately (synchronously, ahead of the
-    // microtask-scheduled info write): the crash-diagnostic tail must not
-    // wait behind backlog. `at` stamps preserve logical ordering for readers.
-    expect(writes).toHaveLength(2);
-    const warnWrite = writes.find((write) => write.entries[0]!.at === "2026-06-12T00:00:02.000Z");
-    const infoWrite = writes.find((write) => write.entries[0]!.at === "2026-06-12T00:00:01.000Z");
-    expect(warnWrite).toBeDefined();
-    expect(infoWrite).toBeDefined();
+      await flushMicrotasks();
+      expect(infoSettled()).toBe(true);
+      expect(directSettled()).toBe(false);
+      // The warn/error write starts immediately (synchronously, ahead of the
+      // microtask-scheduled info write): the crash-diagnostic tail must not
+      // wait behind backlog. `at` stamps preserve logical ordering for readers.
+      expect(writes).toHaveLength(2);
+      const directWrite = writes.find(
+        (write) => write.entries[0]!.at === "2026-06-12T00:00:02.000Z",
+      );
+      const infoWrite = writes.find(
+        (write) => write.entries[0]!.at === "2026-06-12T00:00:01.000Z",
+      );
+      expect(directWrite?.entries[0]!.level).toBe(level);
+      expect(infoWrite).toBeDefined();
 
-    // The warn settles on its own write, independent of the info backlog.
-    warnWrite!.resolve();
-    await flushMicrotasks();
-    expect(warnSettled()).toBe(true);
+      // The warn/error settles on its own write, independent of the info backlog.
+      directWrite!.resolve();
+      await flushMicrotasks();
+      expect(directSettled()).toBe(true);
 
-    infoWrite!.resolve();
-    await flushMicrotasks();
-    await expect(drainHostedRuntimeLogWritesBestEffort()).resolves.toBeUndefined();
-  });
+      infoWrite!.resolve();
+      await flushMicrotasks();
+      await expect(drainHostedRuntimeLogWritesBestEffort()).resolves.toBeUndefined();
+    },
+  );
 
   it("bounded drain returns on timeout while queued writes keep flushing", async () => {
     const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => undefined);

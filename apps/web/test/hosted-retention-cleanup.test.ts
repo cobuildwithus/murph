@@ -380,6 +380,58 @@ describe("hosted retention cleanup", () => {
     }
   }, HOSTED_INBOX_MEDIA_RETENTION_SIGNAL_TIMEOUT_MS + 1_000);
 
+  it("starts one five-signal wave and contains synchronous adapter faults", async () => {
+    const now = new Date("2026-04-25T12:00:00.000Z");
+    const workspaces = Array.from(
+      { length: HOSTED_INBOX_MEDIA_RETENTION_SIGNAL_BATCH_SIZE },
+      (_, index) => ({ userId: `member_due_${index + 1}` }),
+    );
+    const queryRaw = vi.fn().mockResolvedValue(workspaces);
+    let releaseSignals: () => void = () => undefined;
+    const signalGate = new Promise<void>((resolve) => {
+      releaseSignals = resolve;
+    });
+    const signalRuntimeRecheck = vi.fn((input: {
+      abortSignal?: AbortSignal;
+      userId: string;
+    }) => {
+      if (input.userId === workspaces[0]!.userId) {
+        throw new Error("synchronous runtime adapter failure");
+      }
+      return signalGate;
+    });
+    const prisma = createRetentionPrisma({ queryRaw });
+
+    const cleanup = runHostedRetentionCleanup({
+      now,
+      prisma: prisma as never,
+      signalRuntimeRecheck,
+    });
+
+    for (
+      let tick = 0;
+      tick < 200
+      && signalRuntimeRecheck.mock.calls.length
+        < HOSTED_INBOX_MEDIA_RETENTION_SIGNAL_BATCH_SIZE;
+      tick += 1
+    ) {
+      await Promise.resolve();
+    }
+    expect(signalRuntimeRecheck).toHaveBeenCalledTimes(
+      HOSTED_INBOX_MEDIA_RETENTION_SIGNAL_BATCH_SIZE,
+    );
+    expect(
+      signalRuntimeRecheck.mock.calls.map(([input]) => input.userId),
+    ).toEqual(workspaces.map((workspace) => workspace.userId));
+
+    releaseSignals();
+    await expect(cleanup).resolves.toMatchObject({
+      inboxMediaRetentionRuntimeSignalFailures: 1,
+      inboxMediaRetentionRuntimeSignalsSent:
+        HOSTED_INBOX_MEDIA_RETENTION_SIGNAL_BATCH_SIZE - 1,
+    });
+  });
+
   it("rotates failed media-retention signal attempts past the oldest batch", async () => {
     const now = new Date("2026-04-25T12:00:00.000Z");
     const nextHour = new Date("2026-04-25T13:00:00.000Z");
