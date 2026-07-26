@@ -44,6 +44,19 @@ const HOSTED_USAGE_CREDIT_OFFER_DEFINITIONS = {
   Omit<HostedUsageCreditOfferDefinition, "code">
 >;
 
+// Credit is spent as real model cost, so a message count is an estimate, never
+// an entitlement. Every surface quotes it from this one figure, and always as
+// an approximation, so no two surfaces can promise different amounts.
+export const HOSTED_USAGE_CREDIT_USD_PER_MESSAGE = 0.05;
+
+export function estimateHostedUsageCreditMessages(
+  cashAmountMinor: number,
+): number {
+  return Math.round(
+    cashAmountMinor / 100 / HOSTED_USAGE_CREDIT_USD_PER_MESSAGE,
+  );
+}
+
 export function parseHostedUsageCreditOfferCode(
   value: unknown,
 ): HostedUsageCreditOfferCode | null {

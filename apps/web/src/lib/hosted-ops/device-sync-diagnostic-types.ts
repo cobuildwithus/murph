@@ -9,6 +9,33 @@ export interface HostedOpsJunctionDiagnosticInput {
   windowStart?: string | null;
 }
 
+/**
+ * Operator recovery actions for a push-primary source. `refresh` asks Junction
+ * to re-poll; `trigger_historical_pull` asks it to re-run the provider's
+ * historical pull, which is the only lever that can restart a dead push carrier
+ * without the member re-authorizing.
+ */
+export type HostedOpsJunctionRecoveryAction = "refresh" | "trigger_historical_pull";
+
+export interface HostedOpsJunctionRecoveryInput {
+  /** Validated by the ops runner, which owns the supported-action contract. */
+  action: unknown;
+  connectionId?: string | null;
+  memberId?: string | null;
+  request: Request;
+  sourceProvider?: string | null;
+}
+
+export interface HostedOpsJunctionRecoveryResult {
+  action: HostedOpsJunctionRecoveryAction;
+  /** Provider response, already redacted by the device-sync diagnostics owner. */
+  response: Record<string, unknown> | null;
+  generatedAt: string;
+  memberId: string;
+  ok: true;
+  sourceProvider: string;
+}
+
 export interface HostedOpsJunctionDiagnosticResult {
   backfill: {
     hasUsefulHistoricalRecords: boolean | null;

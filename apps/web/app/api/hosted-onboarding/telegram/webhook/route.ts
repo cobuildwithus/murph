@@ -6,9 +6,14 @@ import {
   withJsonError,
 } from "@/src/lib/hosted-onboarding/http";
 import { assertHostedTelegramWebhookSecret } from "@/src/lib/hosted-onboarding/telegram";
-import { handleHostedOnboardingTelegramWebhook } from "@/src/lib/hosted-onboarding/webhook-service";
+import { handleHostedOnboardingTelegramWebhookWithVisibleAccess } from "@/src/lib/hosted-onboarding/visible-access-webhooks";
+import { withHostedVisibleSecondaryTelegramOutcomes } from "@/src/lib/hosted-onboarding/visible-secondary-webhooks";
 
 const HOSTED_TELEGRAM_WEBHOOK_MAX_BODY_BYTES = 256 * 1024;
+const handleHostedOnboardingTelegramWebhookWithVisibleOutcomes =
+  withHostedVisibleSecondaryTelegramOutcomes(
+    handleHostedOnboardingTelegramWebhookWithVisibleAccess,
+  );
 
 export const POST = withJsonError(async (request: Request) => {
   const secretToken = request.headers.get("x-telegram-bot-api-secret-token");
@@ -20,7 +25,7 @@ export const POST = withJsonError(async (request: Request) => {
   });
 
   return jsonOk(
-    await handleHostedOnboardingTelegramWebhook({
+    await handleHostedOnboardingTelegramWebhookWithVisibleOutcomes({
       rawBody,
       scheduleAfterResponse: scheduleAfterResponseOrFireAndForget,
       secretToken,

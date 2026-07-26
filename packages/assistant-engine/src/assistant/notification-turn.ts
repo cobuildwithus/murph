@@ -47,7 +47,10 @@ import {
   selectedAssistantEmailDeliveryIsThreadReply,
 } from './channel-adapters.js'
 import { withAssistantTurnLock } from './turn-lock.js'
-import { buildAssistantMaintenanceConversationEvidence } from './maintenance-evidence.js'
+import {
+  buildAssistantMaintenanceConversationEvidence,
+  type AssistantMaintenanceProfile,
+} from './maintenance-evidence.js'
 import type {
   AssistantDeliveryOutcome,
   AssistantMessageInput,
@@ -138,6 +141,7 @@ export type AssistantNotificationDecision = z.infer<
 
 export type AssistantNotificationTurnPolicy = {
   kind: 'maintenance-exact-skip'
+  maintenanceProfile: AssistantMaintenanceProfile
   privateSummary: string
 }
 
@@ -241,6 +245,7 @@ export async function sendAssistantNotificationLocal(
   const maintenanceEvidence = isAssistantNotificationMaintenanceExactSkip(input)
     ? await buildAssistantMaintenanceConversationEvidence({
         now: new Date(),
+        profile: requireAssistantNotificationMaintenanceProfile(input),
         vault: input.vault,
       })
     : null
@@ -1251,6 +1256,9 @@ function buildAssistantNotificationMessageInput(
     hostedDeliveryIdempotency: input.hostedDeliveryIdempotency ?? null,
     identityId: input.identityId,
     includeEarlySessionOnboarding: false,
+    maintenanceProfile: maintenanceTurn
+      ? requireAssistantNotificationMaintenanceProfile(input)
+      : null,
     maxSessionAgeMs: input.maxSessionAgeMs,
     model: input.model,
     modelProvider: input.modelProvider,
@@ -1462,6 +1470,15 @@ function isAssistantNotificationMaintenanceExactSkip(
   return input.turnPolicy?.kind === 'maintenance-exact-skip'
 }
 
+function requireAssistantNotificationMaintenanceProfile(
+  input: AssistantNotificationInput,
+): AssistantMaintenanceProfile {
+  if (input.turnPolicy?.kind === 'maintenance-exact-skip') {
+    return input.turnPolicy.maintenanceProfile
+  }
+  throw new TypeError('Maintenance profile requires an exact-skip turn policy.')
+}
+
 function isAssistantNotificationScheduledOccurrence(
   input: Pick<AssistantNotificationInput, 'scheduledOccurrenceAt'>,
 ): boolean {
@@ -1481,38 +1498,79 @@ function resolveAssistantNotificationTurnProfile(
 }
 
 // Only maintenance turns consume this signal (to decide whether a failed run
-// already performed non-replayable memory writes); it is derived from the
-// committed provider events rather than trusted from provider metadata.
+// already performed a non-replayable owned write); it is derived from committed
+// provider events rather than trusted from provider metadata.
 function resolveAssistantNotificationProviderNonReplayableWork(input: {
   input: AssistantNotificationInput
   rawEvents: readonly unknown[]
 }): boolean {
   return isAssistantNotificationMaintenanceExactSkip(input.input) &&
-    assistantMaintenanceRawEventsIncludeMemoryMutation(input.rawEvents)
+    assistantMaintenanceRawEventsIncludeMutation(
+      input.rawEvents,
+      requireAssistantNotificationMaintenanceProfile(input.input),
+    )
 }
 
-function assistantMaintenanceRawEventsIncludeMemoryMutation(
+function assistantMaintenanceRawEventsIncludeMutation(
   rawEvents: readonly unknown[],
+  profile: AssistantMaintenanceProfile,
 ): boolean {
   return rawEvents.some((rawEvent) => {
     const event = normalizeCodexEvent(rawEvent)
+    if (
+      profile === 'group-room-model' &&
+      assistantGroupRoomModelDynamicMutationCompleted(event)
+    ) {
+      return true
+    }
     return (
       event.kind === 'status_item' &&
       event.itemType === 'command.execution' &&
       event.itemState === 'completed' &&
       event.exitCode === 0 &&
-      isAssistantMaintenanceMemoryMutationCommand(event.commandLabel)
+      isAssistantMaintenanceMutationCommand(event.commandLabel, profile)
     )
   })
 }
 
-function isAssistantMaintenanceMemoryMutationCommand(
+function isAssistantMaintenanceMutationCommand(
   commandLabel: string | null,
+  profile: AssistantMaintenanceProfile,
 ): boolean {
   const normalized = normalizeNullableString(commandLabel)
+  if (normalized === null) {
+    return false
+  }
+  return profile === 'group-room-model'
+    ? false
+    : /\bvault-cli\b[\s\S]*\bmemory\s+(?:upsert|update)\b/u.test(normalized)
+}
+
+function assistantGroupRoomModelDynamicMutationCompleted(
+  event: ReturnType<typeof normalizeCodexEvent>,
+): boolean {
+  if (
+    event.kind !== 'status_item' ||
+    event.itemState !== 'completed' ||
+    event.itemType !== 'dynamic.tool.call'
+  ) {
+    return false
+  }
+  const record = readAssistantNotificationRecord(event.rawEvent)
+  const item =
+    readAssistantNotificationRecord(record?.item) ??
+    readAssistantNotificationRecord(
+      readAssistantNotificationRecord(record?.params)?.item,
+    ) ??
+    readAssistantNotificationRecord(
+      readAssistantNotificationRecord(record?.data)?.item,
+    )
+  const args = readAssistantNotificationRecord(item?.arguments)
   return (
-    normalized !== null &&
-    /\bvault-cli\b[\s\S]*\bmemory\s+(?:upsert|update)\b/u.test(normalized)
+    item?.success === true &&
+    item.namespace === 'murph' &&
+    (item.tool === 'group_room_model' || item.name === 'group_room_model') &&
+    (args?.action === 'upsert' || args?.action === 'delete')
   )
 }
 

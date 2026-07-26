@@ -60,7 +60,19 @@ import {
 const HOSTED_AUTO_PULSE_TRIAL_MEMBER_LOCK_ACQUISITION_TIMEOUT_MS = 2_000;
 const HOSTED_AUTO_PULSE_TRIAL_RESERVATION_TRANSACTION_TIMEOUT_MS = 15_000;
 const HOSTED_AUTO_PULSE_TRIAL_STRIPE_AUTHORITY_TIMEOUT_MS = 5_000;
-const HOSTED_AUTO_PULSE_TRIAL_FINALIZATION_TRANSACTION_TIMEOUT_MS = 120_000;
+// The common-path finalization transaction holds a pooled connection and the
+// member row lock across one authoritative Stripe read plus its database work.
+// The read is deliberately inside the lock: loser cleanup uses that same lock
+// through cancellation, so a finalizer can never adopt a snapshot retrieved
+// before cleanup cancelled it. The provider call has the tighter five-second
+// request timeout below; 30 seconds leaves the remaining budget for bounded lock
+// acquisition, one member snapshot read, at most one customer bind, the billing
+// write, and the activation write. Rare serialized cleanup uses the same ceiling.
+const HOSTED_AUTO_PULSE_TRIAL_FINALIZATION_TRANSACTION_TIMEOUT_MS = 30_000;
+// Loser cleanup still retrieves and cancels Stripe subscriptions while it holds
+// the member lock, so it keeps the provider-sized budget until it is converted
+// to the same prepare/commit/cleanup shape.
+const HOSTED_AUTO_PULSE_TRIAL_LOSER_CLEANUP_TRANSACTION_TIMEOUT_MS = 120_000;
 const HOSTED_AUTO_PULSE_TRIAL_FINALIZATION_MAX_ATTEMPTS = 3;
 const HOSTED_AUTO_PULSE_TRIAL_FINALIZATION_RETRY_BASE_DELAY_MS = 25;
 const HOSTED_AUTO_PULSE_TRIAL_STRIPE_AUTHORITY_REQUEST_OPTIONS = {
@@ -486,6 +498,10 @@ export async function applyHostedAutoPulseTrialCampaignDispositionTx(input: {
 
   const outcome = await finalizeHostedAutoPulseTrialEnrollmentTx({
     currentMember: input.currentMember,
+    // The campaign owner already holds the member lock for this transaction and
+    // asserts the trial runway against this same clock just above, so it is the
+    // locked freshness clock for this caller.
+    lockedNow: input.now,
     memberId: input.currentMember.core.id,
     now: input.now,
     stripeCustomerId: input.stripeCustomerId,
@@ -579,6 +595,17 @@ export async function runHostedAutoPulseTrialCampaignPostCommitEffects(input: {
   }
 }
 
+/**
+ * Finalizes an auto Pulse Trial under one serialization boundary:
+ *
+ * Take the member lock, read authoritative Stripe state with a bounded
+ * request, re-read the member, and either write enrollment or cancel the
+ * unowned loser before releasing the lock. Every cleanup outcome is decided
+ * before any enrollment write, so cancellation failure can safely roll back
+ * that no-write transaction. A waiting finalizer then performs its provider
+ * read only after cleanup settles and cannot adopt stale pre-cancellation
+ * state.
+ */
 async function finalizeHostedAutoPulseTrialEnrollment(input: {
   memberId: string;
   now: Date;
@@ -590,7 +617,15 @@ async function finalizeHostedAutoPulseTrialEnrollment(input: {
 }): Promise<HostedAutoPulseTrialEnrollmentResult> {
   let outcome: HostedAutoPulseTrialFinalizationOutcome;
   try {
-    outcome = await runHostedAutoPulseTrialFinalizationWithMemberLockRetry(input);
+    outcome = await runHostedAutoPulseTrialFinalizationWithMemberLockRetry({
+      memberId: input.memberId,
+      now: input.now,
+      priceId: input.priceId,
+      prisma: input.prisma,
+      stripe: input.stripe,
+      stripeCustomerId: input.stripeCustomerId,
+      subscriptionId: input.subscriptionId,
+    });
   } catch (error) {
     if (error instanceof HostedMemberStripeMutationLockBusyError) {
       throw buildHostedAutoPulseTrialFinalizationBusyError();
@@ -653,32 +688,32 @@ async function runHostedAutoPulseTrialFinalizationWithMemberLockRetry(input: {
               stripeCustomerId: input.stripeCustomerId,
               subscription,
             });
-            const trialSnapshot = readHostedAutoPulseTrialSubscriptionSnapshot(
-              subscription,
-              decisionNow,
-            );
+            const trialSnapshot =
+              readHostedAutoPulseTrialSubscriptionSnapshot(
+                subscription,
+                decisionNow,
+              );
             const currentMember = await readHostedAutoPulseTrialEnrollmentMember({
               memberId: input.memberId,
               prisma: tx,
             });
-            const finalizationOutcome =
-              await finalizeHostedAutoPulseTrialEnrollmentTx({
-                currentMember,
-                memberId: input.memberId,
-                now: input.now,
-                stripeCustomerId: input.stripeCustomerId,
-                subscription,
-                trialSnapshot,
-                tx,
-              });
+            const outcome = await finalizeHostedAutoPulseTrialEnrollmentTx({
+              currentMember,
+              lockedNow: new Date(),
+              memberId: input.memberId,
+              now: input.now,
+              stripeCustomerId: input.stripeCustomerId,
+              subscription,
+              trialSnapshot,
+              tx,
+            });
             await cancelHostedAutoPulseTrialStripeSubscriptionIfNeeded({
               requestOptions:
                 HOSTED_AUTO_PULSE_TRIAL_STRIPE_AUTHORITY_REQUEST_OPTIONS,
               stripe: input.stripe,
-              subscriptionId:
-                finalizationOutcome.cleanupStripeSubscriptionId,
+              subscriptionId: outcome.cleanupStripeSubscriptionId,
             });
-            return finalizationOutcome;
+            return outcome;
           }),
         transactionTimeoutMs:
           HOSTED_AUTO_PULSE_TRIAL_FINALIZATION_TRANSACTION_TIMEOUT_MS,
@@ -808,6 +843,7 @@ function assertHostedAutoPulseTrialFinalizationSubscriptionEligible(input: {
 
 async function finalizeHostedAutoPulseTrialEnrollmentTx(input: {
   currentMember: HostedMemberBillingSnapshot;
+  lockedNow: Date;
   memberId: string;
   now: Date;
   stripeCustomerId: string;
@@ -852,6 +888,11 @@ async function finalizeHostedAutoPulseTrialEnrollmentTx(input: {
       error: eligibilityError,
     };
   }
+
+  assertHostedAutoPulseTrialSnapshotStillFresh({
+    lockedNow: input.lockedNow,
+    trialSnapshot: input.trialSnapshot,
+  });
 
   const finalBillingRef = input.currentMember.billingRef?.stripeCustomerId
     ? input.currentMember.billingRef
@@ -927,6 +968,36 @@ async function finalizeHostedAutoPulseTrialEnrollmentTx(input: {
     },
     result: buildHostedAutoPulseTrialEnrollmentResult("enrolled"),
   };
+}
+
+/**
+ * Rejects a provider judgement that has aged out before the locked write.
+ *
+ * The subscription is retrieved and judged eligible while the member lock is
+ * held, but an almost-expired trial can still pass that judgement and then
+ * expire while the member snapshot and activation writes run. Every other
+ * field of the retrieved subscription stays protected from competing cleanup
+ * by the shared lock; the trial's own expiry advances with the clock, so it is
+ * recomputed immediately before the write. Persisting past it would mark the
+ * member active on a trial that has already ended.
+ *
+ * The retryable failure makes the caller perform a fresh authoritative read
+ * rather than skipping the write and reporting success.
+ */
+function assertHostedAutoPulseTrialSnapshotStillFresh(input: {
+  lockedNow: Date;
+  trialSnapshot: ReturnType<typeof readHostedAutoPulseTrialSubscriptionSnapshot>;
+}): void {
+  if (input.trialSnapshot.trialEndsAt.getTime() > input.lockedNow.getTime()) {
+    return;
+  }
+
+  throw hostedOnboardingError({
+    code: "HOSTED_AUTO_PULSE_TRIAL_SUBSCRIPTION_CHANGED",
+    httpStatus: 409,
+    message: "Stripe trial state changed before activation. Try again.",
+    retryable: true,
+  });
 }
 
 async function readHostedAutoPulseTrialEnrollmentMember(input: {
@@ -1115,7 +1186,7 @@ async function cleanupHostedAutoPulseTrialLosersForExistingEnrollment(input: {
         acquisitionTimeoutMs:
           HOSTED_AUTO_PULSE_TRIAL_MEMBER_LOCK_ACQUISITION_TIMEOUT_MS,
         transactionTimeoutMs:
-          HOSTED_AUTO_PULSE_TRIAL_FINALIZATION_TRANSACTION_TIMEOUT_MS,
+          HOSTED_AUTO_PULSE_TRIAL_LOSER_CLEANUP_TRANSACTION_TIMEOUT_MS,
       },
       memberId: input.memberId,
       priceId: input.priceId,

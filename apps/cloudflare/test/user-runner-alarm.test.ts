@@ -1922,33 +1922,60 @@ describe("HostedUserRunner execution coordination", () => {
     expect(invoke).not.toHaveBeenCalled();
   });
 
-  it("does not coalesce retention-only requests into a default active write fence", async () => {
+  it.each([
+    ["retention-only", "default", "default", "inbox_media_retention"],
+    ["system-mailbox", "default", "default", "system_mailbox"],
+    ["retention-only", "system-mailbox", "system_mailbox", "inbox_media_retention"],
+  ] as const)(
+    "does not coalesce %s requests into an active %s write fence",
+    async (_requestLabel, _activeLabel, activeProcessingMode, processingMode) => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
+    const abortWorkspaceInvocation = vi.fn<
+      NonNullable<HostedExecutionContainerStubLike["abortWorkspaceInvocation"]>
+    >(async () => "accepted");
     const ensureProcessing = vi.fn<NonNullable<HostedExecutionContainerStubLike["ensureProcessing"]>>(
       async () => ({
         action: "woken" as const,
         kind: "accepted" as const,
       }),
     );
+    let activeAttemptId = "";
+    let activeGeneration = "";
+    const readActiveRuntimeUserFence = vi.fn<
+      NonNullable<HostedExecutionContainerStubLike["readActiveRuntimeUserFence"]>
+    >(async () => ({
+      active: true,
+      attemptId: activeAttemptId,
+      leaseGeneration: activeGeneration,
+      userId: TEST_USER_ID,
+    }));
     const { invoke, runner, sql } = createRunnerHarness({
+      abortWorkspaceInvocation,
       ensureProcessing,
+      readActiveRuntimeUserFence,
       workspace: createWorkspaceState({ version: "7" }),
     });
     await runner.bindUser(TEST_USER_ID);
     const token = writeRuntimeFenceForTest(sql, {
+      processingMode: activeProcessingMode,
+      runnerContainerName: TEST_USER_ID,
       workspaceVersion: "7",
     });
+    activeAttemptId = token.attemptId;
+    activeGeneration = String(token.generation);
 
     await expect(runner.ensureRuntimeProcessingForUser({
-      orchestrationAttemptId: "test-orchestration-attempt-retention",
-      processingMode: "inbox_media_retention",
+      orchestrationAttemptId: `test-${processingMode}-behind-${activeProcessingMode}`,
+      processingMode,
       userId: TEST_USER_ID,
     })).resolves.toEqual({
       kind: "retry_later",
       retryAt: "2026-04-27T00:00:05.000Z",
     });
 
+    expect(readActiveRuntimeUserFence).toHaveBeenCalledOnce();
+    expect(abortWorkspaceInvocation).not.toHaveBeenCalled();
     expect(ensureProcessing).not.toHaveBeenCalled();
     expect(invoke).not.toHaveBeenCalled();
     expect(readRunnerMeta(sql)).toMatchObject({
@@ -1956,7 +1983,8 @@ describe("HostedUserRunner execution coordination", () => {
       active_expires_at: null,
       wake_at: null,
     });
-  });
+    },
+  );
 
   it("accepts active legacy retention-only rechecks without waking the running retention pass", async () => {
     vi.useFakeTimers();
@@ -2054,16 +2082,22 @@ describe("HostedUserRunner execution coordination", () => {
   });
 
   it.each([
-    ["default", undefined],
-    ["system-mailbox", "system_mailbox"],
+    ["retention-only", "default", "inbox_media_retention", undefined],
+    ["retention-only", "system-mailbox", "inbox_media_retention", "system_mailbox"],
+    ["system-mailbox", "foreground", "system_mailbox", undefined],
   ] as const)(
-    "preempts active retention-only work before starting %s processing",
-    async (_label, processingMode) => {
+    "preempts active %s work before starting %s processing",
+    async (_activeLabel, _requestedLabel, activeProcessingMode, processingMode) => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
+    const abortStarted = createDeferred<void>();
+    const abortResult = createDeferred<"accepted">();
     const abortWorkspaceInvocation = vi.fn<
       NonNullable<HostedExecutionContainerStubLike["abortWorkspaceInvocation"]>
-    >(async () => "accepted");
+    >(async () => {
+      abortStarted.resolve(undefined);
+      return await abortResult.promise;
+    });
     const ensureProcessing = vi.fn<NonNullable<HostedExecutionContainerStubLike["ensureProcessing"]>>(
       async () => ({
         action: "woken" as const,
@@ -2081,34 +2115,50 @@ describe("HostedUserRunner execution coordination", () => {
       leaseGeneration: activeGeneration,
       userId: TEST_USER_ID,
     }));
-    const { invoke, runner, sql } = createRunnerHarness({
+    const runnerRuntimeEnvSource = {
+      ...TEST_RUNNER_RUNTIME_ENV_SOURCE,
+      CF_VERSION_METADATA: { id: "current" },
+    };
+    const priorRunnerContainerName = `${TEST_USER_ID}--v-prior`;
+    const currentRunnerContainerName = `${TEST_USER_ID}--v-current`;
+    const { invoke, runner, runnerContainerNames, sql } = createRunnerHarness({
       abortWorkspaceInvocation,
       ensureProcessing,
       invocationResults: [invocationResult.promise],
       readActiveRuntimeUserFence,
+      runnerRuntimeEnvSource,
       workspace: createWorkspaceState({ version: "7" }),
     });
     await runner.bindUser(TEST_USER_ID);
     const token = writeRuntimeFenceForTest(sql, {
-      processingMode: "inbox_media_retention",
-      runnerContainerName: TEST_USER_ID,
+      processingMode: activeProcessingMode,
+      runnerContainerName: priorRunnerContainerName,
       workspaceVersion: "7",
     });
     activeAttemptId = token.attemptId;
     activeGeneration = String(token.generation);
 
-    await expect(runner.ensureRuntimeProcessingForUser({
-      orchestrationAttemptId: "test-orchestration-attempt-default-behind-retention",
+    const ensureRuntimeProcessing = runner.ensureRuntimeProcessingForUser({
+      orchestrationAttemptId:
+        `test-${processingMode ?? "default"}-behind-${activeProcessingMode}`,
       processingMode,
       userId: TEST_USER_ID,
-    })).resolves.toMatchObject({
+    });
+
+    await abortStarted.promise;
+    expect(abortWorkspaceInvocation).toHaveBeenCalledOnce();
+    expect(invoke).not.toHaveBeenCalled();
+    expect(runnerContainerNames[0]).toBe(priorRunnerContainerName);
+    abortResult.resolve("accepted");
+
+    await expect(ensureRuntimeProcessing).resolves.toMatchObject({
       action: "replaced",
       kind: "runtime_processing_accepted",
       recommendedRecheckAt: "2026-04-27T00:01:34.000Z",
       runtimeAttemptId: expect.not.stringMatching(token.attemptId),
     });
 
-    expect(readActiveRuntimeUserFence).toHaveBeenCalledOnce();
+    expect(readActiveRuntimeUserFence).not.toHaveBeenCalled();
     expect(abortWorkspaceInvocation).toHaveBeenCalledWith({
       attemptId: token.attemptId,
       leaseGeneration: String(token.generation),
@@ -2116,9 +2166,13 @@ describe("HostedUserRunner execution coordination", () => {
     });
     expect(ensureProcessing).not.toHaveBeenCalled();
     await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
+    expect(runnerContainerNames).toContain(currentRunnerContainerName);
     expect(invoke.mock.calls[0]?.[0].job.request.processingMode).toBe(
       processingMode,
     );
+    expect(invoke.mock.calls[0]?.[0].orchestration).toMatchObject({
+      replacedStaleFence: false,
+    });
     expect(readRunnerMeta(sql)).toMatchObject({
       active_attempt_id: expect.not.stringMatching(token.attemptId),
       active_expires_at: null,
@@ -2138,12 +2192,18 @@ describe("HostedUserRunner execution coordination", () => {
     },
   );
 
-  it("preserves the active retention fence when the settled abort is stale", async () => {
+  it.each([
+    ["stale", "2026-04-27T00:00:05.000Z"],
+    ["queued", "2026-04-27T00:00:05.000Z"],
+    ["failed", "2026-04-27T00:00:30.000Z"],
+  ] as const)(
+    "preserves the active retention fence when the exact abort is %s",
+    async (abortStatus, retryAt) => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const abortWorkspaceInvocation = vi.fn<
       NonNullable<HostedExecutionContainerStubLike["abortWorkspaceInvocation"]>
-    >(async () => "stale");
+    >(async () => abortStatus);
     let activeAttemptId = "";
     let activeGeneration = "";
     const readActiveRuntimeUserFence = vi.fn<
@@ -2173,10 +2233,10 @@ describe("HostedUserRunner execution coordination", () => {
       userId: TEST_USER_ID,
     })).resolves.toEqual({
       kind: "retry_later",
-      retryAt: "2026-04-27T00:00:05.000Z",
+      retryAt,
     });
 
-    expect(readActiveRuntimeUserFence).toHaveBeenCalledOnce();
+    expect(readActiveRuntimeUserFence).not.toHaveBeenCalled();
     expect(abortWorkspaceInvocation).toHaveBeenCalledWith({
       attemptId: token.attemptId,
       leaseGeneration: String(token.generation),
@@ -2188,7 +2248,8 @@ describe("HostedUserRunner execution coordination", () => {
       active_expires_at: null,
       wake_at: null,
     });
-  });
+    },
+  );
 
   it("preempts a legacy retention fence with no persisted container name", async () => {
     vi.useFakeTimers();
@@ -2307,7 +2368,7 @@ describe("HostedUserRunner execution coordination", () => {
       runtimeAttemptId: expect.not.stringMatching(token.attemptId),
     });
 
-    expect(readActiveRuntimeUserFence).toHaveBeenCalledOnce();
+    expect(readActiveRuntimeUserFence).not.toHaveBeenCalled();
     expect(readVersionedActiveRuntimeUserFence).not.toHaveBeenCalled();
     expect(abortWorkspaceInvocation).toHaveBeenCalledWith({
       attemptId: token.attemptId,
@@ -2545,7 +2606,7 @@ describe("HostedUserRunner execution coordination", () => {
     );
   });
 
-  it("preempts a fresh inactive retention-only fence for default processing", async () => {
+  it("preempts a fresh retention-only fence through the exact abort", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const abortWorkspaceInvocation = vi.fn<
@@ -2592,7 +2653,7 @@ describe("HostedUserRunner execution coordination", () => {
       runtimeAttemptId: expect.not.stringMatching(token.attemptId),
     });
 
-    expect(readActiveRuntimeUserFence).toHaveBeenCalledOnce();
+    expect(readActiveRuntimeUserFence).not.toHaveBeenCalled();
     expect(abortWorkspaceInvocation).toHaveBeenCalledWith({
       attemptId: token.attemptId,
       leaseGeneration: String(token.generation),

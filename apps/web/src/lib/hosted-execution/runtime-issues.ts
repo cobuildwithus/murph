@@ -27,14 +27,13 @@ export async function importHostedAssistantRuntimeIssues(input: {
   const now = input.now ?? new Date();
   const expiresAt = new Date(now.getTime() + HOSTED_ASSISTANT_RUNTIME_ISSUE_RETENTION_MS);
   const records = input.issues.map((entry) => parseAssistantRuntimeIssueRecord(entry));
-  const recordedIds: string[] = [];
 
-  for (const record of records) {
-    await prisma.hostedAssistantRuntimeIssue.upsert({
-      where: {
-        id: record.issueId,
-      },
-      create: {
+  if (records.length > 0) {
+    // Issue ids are already stable and an existing row was never updated, so
+    // `createMany(skipDuplicates)` is the same import in one round trip
+    // instead of one per issue.
+    await prisma.hostedAssistantRuntimeIssue.createMany({
+      data: records.map((record) => ({
         id: record.issueId,
         occurredAt: new Date(record.occurredAt),
         expiresAt,
@@ -49,14 +48,13 @@ export async function importHostedAssistantRuntimeIssues(input: {
         summary: record.summary,
         fingerprint: record.fingerprint,
         detailsJson: toPrismaJson(record.details),
-      },
-      update: {},
+      })),
+      skipDuplicates: true,
     });
-    recordedIds.push(record.issueId);
   }
 
   return {
-    recordedIds,
+    recordedIds: records.map((record) => record.issueId),
     records,
   };
 }

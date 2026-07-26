@@ -367,7 +367,7 @@ export const JUNCTION_DEVICE_PROVIDER_DESCRIPTOR = {
       reconcileDays: 7,
       reconcileIntervalMs: 60 * 60_000,
     },
-    jobKinds: ["backfill", "reconcile", "resource"],
+    jobKinds: ["backfill", "reconcile", "resource", "push_source_recovery"],
     supportsRemoteDisconnect: true,
     supportsTokenRefresh: false,
   },

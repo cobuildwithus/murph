@@ -26,6 +26,7 @@ const MURPH_CONTACT_CARD_IMAGE_PATH = "/murph_headshot.png";
 export type HostedLinqContactCard = {
   firstName: string;
   imageUrl: string | null;
+  imageUrlPresent: boolean;
   isActive: boolean;
   lastName: string | null;
   phoneNumber: string;
@@ -356,6 +357,7 @@ function parseHostedLinqContactCard(value: unknown): HostedLinqContactCard | nul
   return {
     firstName,
     imageUrl: normalizeNullableString(record.image_url),
+    imageUrlPresent: "image_url" in record,
     isActive: record.is_active === true,
     lastName: normalizeNullableString(record.last_name),
     phoneNumber,
