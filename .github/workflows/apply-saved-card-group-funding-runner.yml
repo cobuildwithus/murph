@@ -1,9 +1,8 @@
 name: Apply saved-card group funding integration
 
 on:
-  push:
-    branches:
-      - agent/apply-saved-card-group-funding-runner
+  pull_request:
+    types: [opened]
 
 permissions:
   contents: write
