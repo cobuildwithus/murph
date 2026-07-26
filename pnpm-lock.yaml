@@ -76,8 +76,8 @@ importers:
         specifier: ^0.1.15
         version: 0.1.15(patch_hash=1bb6f46e87ffa3e712f0ba9bad95ca93fb6e118c4d5c2e64a7fc3fbce9825547)
       '@cobuild/review-gpt':
-        specifier: ^0.5.114
-        version: 0.5.114(@cfworker/json-schema@4.1.1)(typescript@7.0.2)
+        specifier: ^0.5.117
+        version: 0.5.117(@cfworker/json-schema@4.1.1)(typescript@7.0.2)
       '@murphai/health-metrics':
         specifier: workspace:*
         version: link:packages/health-metrics
@@ -169,6 +169,9 @@ importers:
       typescript:
         specifier: ^7.0.2
         version: 7.0.2
+      undici:
+        specifier: 7.28.0
+        version: 7.28.0
       vitest:
         specifier: ^4.1.6
         version: 4.1.6(@opentelemetry/api@1.9.0)(@types/node@25.6.2)(@vitest/coverage-v8@4.1.6)(msw@2.14.6(@types/node@25.6.2)(typescript@7.0.2))(vite@8.0.12(@types/node@25.6.2)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.47.1)(tsx@4.21.0)(yaml@2.9.0))
@@ -1347,8 +1350,8 @@ packages:
     resolution: {integrity: sha512-CjzP5OHu6RhOOjmPl/1djZNVEbjttt62rBSzvuPK7u9NrZ37F2lkHT+QmZ4Lb+ZDmMhPTqlwdyqnzwD0Gkhm1Q==}
     hasBin: true
 
-  '@cobuild/review-gpt@0.5.114':
-    resolution: {integrity: sha512-lo7BTMxonIQ+TQ5Z00gUliPTEHoGY2zoLwo9pUjkFeCp8YEmG7c5B/5j2MELqVicBy1aB1nMc/ZPX2pJwR/pPQ==}
+  '@cobuild/review-gpt@0.5.117':
+    resolution: {integrity: sha512-s2/qIU2+l5n5R/sQ9ORB0YfHtV4dWKfqHzGLMXNdfP540hy7ozY1d+jeoZBg7+JCJtAEddCRoni/nfTqdNmR+A==}
     hasBin: true
 
   '@coinbase/cdp-sdk@1.48.3':
@@ -10630,7 +10633,7 @@ snapshots:
 
   '@cobuild/repo-tools@0.1.15(patch_hash=1bb6f46e87ffa3e712f0ba9bad95ca93fb6e118c4d5c2e64a7fc3fbce9825547)': {}
 
-  '@cobuild/review-gpt@0.5.114(@cfworker/json-schema@4.1.1)(typescript@7.0.2)':
+  '@cobuild/review-gpt@0.5.117(@cfworker/json-schema@4.1.1)(typescript@7.0.2)':
     dependencies:
       '@cobuild/repo-tools': 0.1.15(patch_hash=1bb6f46e87ffa3e712f0ba9bad95ca93fb6e118c4d5c2e64a7fc3fbce9825547)
       incur: 0.4.5(patch_hash=d02ac1808a7524a97aaea12822966726a31acaf4c5b5064d56ca03730c790b5e)
