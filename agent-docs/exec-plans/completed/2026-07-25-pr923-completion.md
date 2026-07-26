@@ -1,6 +1,6 @@
 # PR 923 completion: stable workout-day closure
 
-Status: active
+Status: completed
 Created: 2026-07-25
 PR: `#923`
 Branch: `agent/challenge-sleep-stage-workout-times`
@@ -54,28 +54,50 @@ Land the existing group challenge share PR with:
    for timezone mutation, date-line travel, stale snapshots, settled empty
    arrays, and unchanged non-workout scopes.
 
-## Evidence already recovered
+## Recovered context
 
 - The stopped Claude session is the owner session for PR `#923`.
-- Current pushed head `26e3dfb78e` is clean and contains the completed
-  compaction work.
+- Pushed head `26e3dfb78e` contained the completed model compaction work before
+  the final settlement correction.
 - ReviewGPT round 10 accepted two live blockers:
   mutable declared-time-zone settlement can reopen a date, and a valid
   date-line-crossing workout can currently erase the full seven-day projection.
-- PR `#923` currently conflicts with `main`.
+- The branch has since merged current `main` normally and resolved the
+  overlapping protein-day registry additions additively.
 
-## Verification and completion
+## Local completion evidence
 
-1. Run focused tests while implementing.
-2. Run
-   `pnpm test:diff packages/hosted-execution packages/assistant-runtime packages/assistant-engine apps/web`.
-3. Run the required local `product-experience-review` against the completed
-   challenge journey.
-4. Run the parent final diff and call-path review.
-5. Close this plan with `scripts/finish-task`, push the exact head, and continue
-   the existing final ReviewGPT loop from its immutable baseline until
-   `ROUND_OUTCOME: PASS`.
-6. Run PR CI concurrently with the final gate, merge current `main` normally,
-   resolve any conflicts, rerun required checks, and merge the PR only from the
-   confirmed reviewed head.
+- Required local `product-experience-review`: final re-review returned no
+  findings after the typed partial-result contract, refresh-timing language,
+  exact consent copy, and design study were corrected.
+- Preliminary `completion-specialists` ReviewGPT pass: both findings were
+  accepted, fixed, and covered without rerunning the one-shot specialist pass.
+- Parent final diff and call-path review: complete, including the additive
+  protein-day merge resolution and unchanged non-workout projection shapes.
+- Canonical
+  `pnpm test:diff packages/hosted-execution packages/assistant-runtime packages/assistant-engine apps/web`
+  passed guards, affected typechecks, assistant-engine (2,671 tests),
+  assistant-runtime (1,871 tests), and earlier reverse dependents before stopping
+  on an `origin/main` ReviewGPT-preset audit mismatch outside this PR. The exact
+  mismatched files were identical to `origin/main`; upstream fixed that mismatch,
+  and its merged focused audit now passes 40 tests with one expected skip.
+- Exact final merged owner proof:
+  - hosted-execution: 416 tests;
+  - assistant-engine: 2,674 tests with the repository-prescribed 6 GiB heap;
+  - assistant-runtime: 1,884 tests;
+  - Web: 6,554 tests, lint with warnings only, cold dev smoke, and production
+    build;
+  - merge-overlap Web matrix/tool/registry proof: 101 tests;
+  - all four owner typechecks passed.
+- Rendered design proof covers desktop and mobile group-join permission states
+  with synthetic props and no live requests.
 
+## Remaining PR gates
+
+1. Close this plan with `scripts/finish-task` and push the exact head.
+2. Continue the existing final ReviewGPT loop from its immutable baseline until
+   `ROUND_OUTCOME: PASS`, concurrently with PR CI.
+3. Merge only after green required checks and confirmed clean mergeability, then
+   retire the task worktree.
+Updated: 2026-07-25
+Completed: 2026-07-25
