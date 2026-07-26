@@ -1,4 +1,6 @@
 import { HostedBillingStatus } from "@prisma/client";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { hostedOnboardingError } from "../src/lib/hosted-onboarding/errors";
@@ -15,6 +17,7 @@ import {
   startOfUtcDay,
 } from "../src/lib/hosted-ops/growth-metrics";
 import { HOSTED_MESSAGE_VOLUME_BASE } from "../src/lib/message-volume";
+import { GrowthScorecard } from "../app/(dashboard)/ops/growth/growth-scorecard";
 
 vi.mock("server-only", () => ({}));
 
@@ -28,6 +31,9 @@ const mocks = vi.hoisted(() => ({
     aggregate: vi.fn(),
     findMany: vi.fn(),
     upsert: vi.fn(),
+  },
+  hostedGrowthAggregate: {
+    findUniqueOrThrow: vi.fn(),
   },
   hostedLinqDelivery: {
     count: vi.fn(),
@@ -85,6 +91,7 @@ let growthCronRoute: GrowthCronRouteModule;
 const originalHostedOpsMemberIds = process.env.HOSTED_OPS_MEMBER_IDS;
 const prisma = {
   hostedAccountGroup: mocks.hostedAccountGroup,
+  hostedGrowthAggregate: mocks.hostedGrowthAggregate,
   hostedGrowthDailySnapshot: mocks.hostedGrowthDailySnapshot,
   hostedLinqDelivery: mocks.hostedLinqDelivery,
   hostedMailboxItem: mocks.hostedMailboxItem,
@@ -116,6 +123,10 @@ describe("hosted ops growth metrics", () => {
     mocks.getPrisma.mockReturnValue(prisma);
     mocks.hostedLinqDelivery.count.mockResolvedValue(0);
     mocks.hostedMailboxItem.count.mockResolvedValue(0);
+    mocks.hostedGrowthAggregate.findUniqueOrThrow.mockResolvedValue({
+      trackedFulfilledUsageTopUps: 0,
+    });
+    mocks.hostedMember.count.mockResolvedValue(0);
     mocks.requireActiveHostedAppSession.mockResolvedValue({
       member: { id: "member_ops" },
     });
@@ -474,6 +485,12 @@ describe("hosted ops growth metrics", () => {
   it("counts own-paid or family-paid members in the mature converted count query", async () => {
     queueCurrentMetricMocks();
     queueCurrentMetricMocks();
+    mocks.hostedMember.count
+      .mockResolvedValueOnce(6)
+      .mockResolvedValueOnce(3);
+    mocks.hostedGrowthAggregate.findUniqueOrThrow.mockResolvedValueOnce({
+      trackedFulfilledUsageTopUps: 12,
+    });
     mocks.hostedGrowthDailySnapshot.upsert.mockResolvedValueOnce(
       snapshotRow("2026-07-06", 2_900),
     );
@@ -484,8 +501,18 @@ describe("hosted ops growth metrics", () => {
       .mockResolvedValueOnce(3)
       .mockResolvedValueOnce(1);
 
-    await growthPage.default();
+    const markup = renderToStaticMarkup(await growthPage.default());
 
+    expect(markup).toContain("MRR growth per week");
+    expect(markup).toMatch(
+      /Weekly active member growth<\/div><div[^>]*>\+100%<\/div><div[^>]*>6 direct members messaged<\/div>/u,
+    );
+    expect(markup).toMatch(
+      /Tracked fulfilled top-ups<\/span><span[^>]*>12<\/span>/u,
+    );
+    expect(markup).toMatch(
+      /Tracked fulfilled usage top-ups<\/td><td[^>]*>12<\/td><td[^>]*>One-time<\/td>/u,
+    );
     expect(mocks.hostedMemberBillingRef.findMany.mock.calls[0]?.[0]).toMatchObject({
       select: {
         member: {
@@ -594,6 +621,195 @@ describe("hosted ops growth metrics", () => {
   it("returns no percent change when the previous window is zero", () => {
     expect(calculatePercentChange(4, 0)).toBeNull();
     expect(calculatePercentChange(6, 3)).toBe(100);
+  });
+
+  it("reads weekly active members and counts only fulfilled usage top-ups", async () => {
+    const now = new Date("2026-07-06T12:00:00.000Z");
+    queueCurrentMetricMocks();
+    mocks.hostedMember.count
+      .mockResolvedValueOnce(6)
+      .mockResolvedValueOnce(3);
+    mocks.hostedGrowthAggregate.findUniqueOrThrow.mockResolvedValueOnce({
+      trackedFulfilledUsageTopUps: 12,
+    });
+    mocks.hostedMember.findMany.mockResolvedValueOnce([]);
+    mocks.hostedMemberBillingRef.findMany.mockResolvedValueOnce([]);
+    mocks.hostedGrowthDailySnapshot.findMany.mockResolvedValueOnce([]);
+    mocks.hostedMemberBillingRef.count
+      .mockResolvedValueOnce(0)
+      .mockResolvedValueOnce(0);
+
+    const dashboard = await readHostedGrowthDashboard(now);
+
+    expect(dashboard.activeMembers).toEqual({
+      trailing7Days: 6,
+      wowPercent: 100,
+    });
+    expect(dashboard.usageTopUps).toEqual({
+      trackedFulfilled: 12,
+    });
+    expect(mocks.hostedGrowthAggregate.findUniqueOrThrow).toHaveBeenCalledWith({
+      select: {
+        trackedFulfilledUsageTopUps: true,
+      },
+      where: {
+        id: "global",
+      },
+    });
+    expect(mocks.hostedMember.count.mock.calls[5]?.[0]).toMatchObject({
+      where: {
+        hostedGroupRuntime: null,
+        hostedMailboxItems: {
+          some: {
+            kind: "conversation.message",
+            occurredAt: {
+              gte: new Date("2026-06-29T12:00:00.000Z"),
+              lt: new Date("2026-07-06T12:00:00.000Z"),
+            },
+          },
+        },
+        threadContainer: null,
+      },
+    });
+    expect(mocks.hostedMember.count.mock.calls[6]?.[0]).toMatchObject({
+      where: {
+        hostedGroupRuntime: null,
+        hostedMailboxItems: {
+          some: {
+            kind: "conversation.message",
+            occurredAt: {
+              gte: new Date("2026-06-22T12:00:00.000Z"),
+              lt: new Date("2026-06-29T12:00:00.000Z"),
+            },
+          },
+        },
+        threadContainer: null,
+      },
+    });
+  });
+
+  it.each([
+    new Date("2026-07-06T00:05:00.000Z"),
+    new Date("2026-07-06T12:05:00.000Z"),
+  ])(
+    "compares equal rolling active-member windows at %s",
+    async (now) => {
+      queueCurrentMetricMocks();
+      mocks.hostedMember.count
+        .mockResolvedValueOnce(7)
+        .mockResolvedValueOnce(7);
+      mocks.hostedGrowthAggregate.findUniqueOrThrow.mockResolvedValueOnce({
+        trackedFulfilledUsageTopUps: 12,
+      });
+      mocks.hostedMember.findMany.mockResolvedValueOnce([]);
+      mocks.hostedMemberBillingRef.findMany.mockResolvedValueOnce([]);
+      mocks.hostedGrowthDailySnapshot.findMany.mockResolvedValueOnce([]);
+      mocks.hostedMemberBillingRef.count
+        .mockResolvedValueOnce(0)
+        .mockResolvedValueOnce(0);
+
+      const dashboard = await readHostedGrowthDashboard(now);
+
+      expect(dashboard.activeMembers).toEqual({
+        trailing7Days: 7,
+        wowPercent: 0,
+      });
+      expect(mocks.hostedMember.count.mock.calls[5]?.[0]).toMatchObject({
+        where: {
+          hostedMailboxItems: {
+            some: {
+              occurredAt: {
+                gte: addUtcDays(now, -7),
+                lt: now,
+              },
+            },
+          },
+        },
+      });
+      expect(mocks.hostedMember.count.mock.calls[6]?.[0]).toMatchObject({
+        where: {
+          hostedMailboxItems: {
+            some: {
+              occurredAt: {
+                gte: addUtcDays(now, -14),
+                lt: addUtcDays(now, -7),
+              },
+            },
+          },
+        },
+      });
+    },
+  );
+
+  it("leads the scorecard with weekly revenue growth and keeps usage context honest", () => {
+    const scorecardProps = {
+      activeMembers: { trailing7Days: 24, wowPercent: 9.1 },
+      conversion: { converted: 8, matureStarted: 20, percent: 40 },
+      mrrUsdCents: 8_400,
+      newMembers: { trailing7Days: 17, wowPercent: 21.4 },
+      payingCustomers: 31,
+      payingCustomersWowPercent: 6.9,
+      trialStarts: { trailing7Days: 11, wowPercent: 10 },
+      usageTopUps: { trackedFulfilled: 12 },
+    };
+    const markup = renderToStaticMarkup(
+      createElement(GrowthScorecard, {
+        ...scorecardProps,
+        mrrWowPercent: 9.9,
+      }),
+    );
+
+    expect(markup.indexOf("MRR growth per week")).toBeLessThan(
+      markup.indexOf("Current MRR"),
+    );
+    expect(markup).toContain("+9.9%");
+    expect(markup).toMatch(/text-red-700[^>]*>\+9\.9%/u);
+    expect(markup).toContain("Below 10% target");
+    expect(markup).toContain("24 direct members messaged");
+    expect(markup).toContain("Usage pulse, not a retention cohort");
+    expect(markup).toContain("8 of 20 mature trials");
+
+    const targetHitMarkup = renderToStaticMarkup(
+      createElement(GrowthScorecard, {
+        ...scorecardProps,
+        mrrWowPercent: 10,
+      }),
+    );
+    expect(targetHitMarkup).toMatch(/text-primary[^>]*>\+10%/u);
+    expect(targetHitMarkup).toContain("10% target hit");
+    expect(targetHitMarkup).toContain("Tracked fulfilled top-ups");
+    expect(targetHitMarkup).toContain("Retained history + new fulfillments");
+    expect(targetHitMarkup).toContain(">12<");
+
+    const roundedTargetHitMarkup = renderToStaticMarkup(
+      createElement(GrowthScorecard, {
+        ...scorecardProps,
+        mrrWowPercent: 9.96,
+      }),
+    );
+    expect(roundedTargetHitMarkup).toMatch(/text-primary[^>]*>\+10%/u);
+    expect(roundedTargetHitMarkup).toContain("10% target hit");
+
+    const roundedBelowTargetMarkup = renderToStaticMarkup(
+      createElement(GrowthScorecard, {
+        ...scorecardProps,
+        mrrWowPercent: 9.94,
+      }),
+    );
+    expect(roundedBelowTargetMarkup).toMatch(/text-red-700[^>]*>\+9\.9%/u);
+    expect(roundedBelowTargetMarkup).toContain("Below 10% target");
+
+    const noBaselineMarkup = renderToStaticMarkup(
+      createElement(GrowthScorecard, {
+        ...scorecardProps,
+        mrrWowPercent: null,
+      }),
+    );
+    expect(noBaselineMarkup).toMatch(/text-muted-foreground[^>]*>N\/A</u);
+    expect(noBaselineMarkup).toContain("No weekly baseline");
+    expect(noBaselineMarkup).not.toContain(
+      "Closest daily snapshot from six to eight days ago",
+    );
   });
 
   it("selects the closest six to eight day snapshot for live comparisons", () => {

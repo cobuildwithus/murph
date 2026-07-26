@@ -7,6 +7,9 @@ import {
 } from "../device-sync/backfill-diagnostic";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import type {
+  HostedOpsJunctionRecoveryAction,
+  HostedOpsJunctionRecoveryInput,
+  HostedOpsJunctionRecoveryResult,
   HostedOpsDiagnosticReadSummary,
   HostedOpsDiagnosticWindow,
   HostedOpsJunctionDiagnosticInput,
@@ -53,6 +56,62 @@ export async function runHostedOpsJunctionDiagnostic(
     memberId,
     sourceProvider,
     window,
+  });
+}
+
+/**
+ * Runs one operator-triggered recovery action against a member's Junction
+ * source. This is deliberately operator-driven rather than automatic: the
+ * historical-pull trigger lives behind Junction's Link Migration gate, so until
+ * we have observed it restart a real stalled carrier there is nothing proven
+ * enough to put on a timer.
+ *
+ * It reuses the diagnostic runner so connection resolution, admin authority,
+ * and provider response redaction keep exactly one owner.
+ */
+export async function runHostedOpsJunctionRecovery(
+  input: HostedOpsJunctionRecoveryInput,
+): Promise<HostedOpsJunctionRecoveryResult> {
+  const action = normalizeRecoveryAction(input.action);
+  const memberId = normalizeRequiredMemberId(input.memberId);
+  const connectionId = normalizeOptionalConnectionId(input.connectionId);
+  const sourceProvider = normalizeRequiredSourceProvider(input.sourceProvider);
+  const controlPlane = createHostedDeviceSyncDiagnosticControlPlane(input.request);
+  const diagnostic = await runHostedDeviceSyncBackfillDiagnostic({
+    connectionId,
+    controlPlane,
+    memberId,
+    providerName: "junction",
+    restProbe: {
+      endpoint: action,
+      resource: null,
+      sourceProviderSlug: sourceProvider,
+      timeoutSeconds: null,
+    },
+    timeseriesProbeDays: 1,
+    windowEnd: null,
+    windowStart: null,
+  });
+
+  return {
+    action,
+    generatedAt: diagnostic.generatedAt,
+    memberId,
+    ok: true,
+    response: readRecord(readRecord(diagnostic.restProbe?.result)?.response) ?? null,
+    sourceProvider,
+  };
+}
+
+function normalizeRecoveryAction(value: unknown): HostedOpsJunctionRecoveryAction {
+  if (value === "refresh" || value === "trigger_historical_pull") {
+    return value;
+  }
+
+  throw hostedOnboardingError({
+    code: "HOSTED_OPS_JUNCTION_RECOVERY_ACTION_INVALID",
+    httpStatus: 400,
+    message: "Hosted ops Junction recovery requires a supported action.",
   });
 }
 

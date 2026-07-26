@@ -124,6 +124,7 @@ const REQUIRED_STORE_SLUGS = [
   "prisma.hosted_user_crypto_audit",
   "prisma.hosted_ai_usage",
   "prisma.hosted_ai_usage_period",
+  "prisma.hosted_growth_aggregate",
   "prisma.hosted_usage_credit_entry",
   "prisma.hosted_usage_credit_purchase",
   "prisma.hosted_product_feedback",
@@ -336,9 +337,14 @@ describe("HOSTED_ACCOUNT_DATA_STORE_COVERAGE", () => {
 
   it("keeps usage-credit payment and ledger internals out of browser-vault export", () => {
     const bySlug = new Map(HOSTED_ACCOUNT_DATA_STORE_COVERAGE.map((entry) => [entry.slug, entry]));
+    const aggregate = bySlug.get("prisma.hosted_growth_aggregate");
     const entry = bySlug.get("prisma.hosted_usage_credit_entry");
     const purchase = bySlug.get("prisma.hosted_usage_credit_purchase");
 
+    expect(aggregate?.deletion).toBe("documented-retention");
+    expect(aggregate?.note).toContain("unjoinable");
+    expect(aggregate?.note).toContain("tracker cutover");
+    expect(aggregate?.note).toContain("account deletion");
     expect(entry?.note).toContain("browser-vault export omits");
     expect(entry?.note).toContain("semantic source keys");
     expect(purchase?.note).toContain("browser-vault export omits");

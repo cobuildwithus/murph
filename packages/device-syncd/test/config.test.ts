@@ -333,6 +333,7 @@ test("shared provider runtime env key lists stay aligned with the configured pro
   assert.deepEqual(deviceSyncProviderRuntimeVariableEnvKeys, [
     "JUNCTION_ENV",
     "JUNCTION_PROVIDER_FILTER",
+    "JUNCTION_PUSH_SOURCE_RECOVERY_ENABLED",
     "JUNCTION_RECONCILE_DAYS",
     "JUNCTION_RECONCILE_INTERVAL_MS",
     "JUNCTION_REGION",
