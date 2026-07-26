@@ -1,8 +1,8 @@
 # PR 952 prepared-only crypto transaction API
 
-Status: active
+Status: completed
 Created: 2026-07-25
-Updated: 2026-07-25
+Updated: 2026-07-26
 
 ## Goal
 
@@ -53,11 +53,26 @@ Updated: 2026-07-25
 
 - Enforce the invariant through function signatures and typed failure, not
   optional parameters or caller convention.
+- Keep the two transaction owners that discover or create the member id only
+  after `BEGIN` on an explicit legacy bridge. Their KMS work is outside all four
+  per-domain advisory-lock sections, but moving it outside the outer transaction
+  requires changing those owners and is separate follow-up work.
 
 ## Verification
 
-- Commands to run: focused hosted crypto and onboarding tests,
+- Required commands: focused hosted crypto and onboarding tests,
   `pnpm test:diff apps/web/src/lib/hosted-crypto/domain-root-store.ts`,
   `pnpm verify:acceptance`, and the repository ReviewGPT/CI gates.
 - Expected outcomes: all pass; mutation/removal of a prepared candidate fails
   before any signing fallback can occur.
+- The combined #951/#952 focused web suites passed 395 cases, including all
+  directly affected crypto, activation, family, billing, and Stripe-event
+  paths. Hosted-web typecheck also passed.
+- Canonical `pnpm test:diff` passed repository guards, hosted-web typecheck,
+  519 web test files and 6,647 tests, lint, development smoke, and the
+  production build after the final merge resolution.
+- Full `pnpm verify:acceptance` passed on fresh Blacksmith Testbox
+  `tbx_01kyep08d10g4ez18d23jgzv3s` (Actions run `30193281829`): repository
+  guards, workspace typechecks, package coverage, hosted-web verification,
+  production build, and both Cloudflare test lanes completed successfully.
+Completed: 2026-07-26
