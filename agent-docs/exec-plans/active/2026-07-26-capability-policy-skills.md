@@ -65,4 +65,3 @@ skill owner and remain resident on unrelated turns.
 - Run the required prompt-primary preliminary `completion-specialists`
   ReviewGPT pass on an exact pushed head, resolve findings, then perform the
   parent final review.
-
