@@ -49,6 +49,7 @@ import { createMurphPageMetadata } from "@/src/lib/site-metadata";
 import { readHostedPersonalAiUsageStatus } from "@/src/lib/hosted-execution/usage-status";
 import { readHostedUsageCreditProjection } from "@/src/lib/hosted-execution/usage-credits";
 import {
+  estimateHostedUsageCreditMessages,
   getHostedUsageCreditOfferDefinition,
   type HostedUsageCreditOfferCode,
 } from "@/src/lib/hosted-onboarding/usage-credit-offers";
@@ -539,6 +540,7 @@ function projectHostedUsageTopUpOffers(
 
     return {
       amountLabel: formatUsageTopUpAmount(offer.cashAmountMinor),
+      estimatedMessages: estimateHostedUsageCreditMessages(offer.cashAmountMinor),
       offerCode: offer.code,
     };
   });

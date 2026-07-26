@@ -14,9 +14,9 @@ import {
 } from "@/src/lib/murph-contact-routing";
 
 const DESIGN_USAGE_OFFERS = [
-  { amountLabel: "$5", offerCode: "usage_5_usd" },
-  { amountLabel: "$10", offerCode: "usage_10_usd" },
-  { amountLabel: "$25", offerCode: "usage_25_usd" },
+  { amountLabel: "$5", estimatedMessages: 100, offerCode: "usage_5_usd" },
+  { amountLabel: "$10", estimatedMessages: 200, offerCode: "usage_10_usd" },
+  { amountLabel: "$25", estimatedMessages: 500, offerCode: "usage_25_usd" },
 ] as const;
 
 const DESIGN_TOP_UP_CONTACT_OPTIONS: MurphContactOption[] = [

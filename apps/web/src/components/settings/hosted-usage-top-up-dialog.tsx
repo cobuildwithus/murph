@@ -110,7 +110,7 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
     props.scope === "family" && props.targetLabel ? props.targetLabel : null;
   const triggerLabel =
     purchaseTriggerLabel ??
-    (props.scope === "group" ? "Choose amount" : "Add usage");
+    (props.scope === "group" ? "Add messages" : "Add usage");
   const statusContent = purchase
     ? readStatusContent({
         canResumeCheckout: canResume,
@@ -181,9 +181,11 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
               ? `${statusContent.title}${familyTarget && !purchase?.targetConflict ? ` for ${familyTarget}` : ""}`
               : props.offers.length === 0
                 ? "Usage credit unavailable"
-                : familyTarget
-                  ? `Choose an amount for ${familyTarget}`
-                  : "Choose an amount"}
+                : props.scope === "group"
+                  ? "How many messages?"
+                  : familyTarget
+                    ? `Choose an amount for ${familyTarget}`
+                    : "Choose an amount"}
           </DialogTitle>
           <DialogDescription className="max-w-md text-base leading-6">
             {purchase
@@ -197,7 +199,7 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
               : props.offers.length === 0
                 ? "There isn’t a usage-credit offer available for this account right now."
                 : props.scope === "group"
-                  ? "Choose a one-time credit amount for this group."
+                  ? "Shared with everyone in the chat."
                   : familyTarget
                     ? `Choose a one-time credit amount for ${familyTarget}.`
                     : "Choose a one-time credit amount for your account."}
@@ -354,15 +356,18 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
                     id={`${props.scope === "group" ? "group-" : ""}usage-top-up-${index}`}
                     value={offer.offerCode}
                     disabled={hasAttempt}
-                    className="h-20 [&_[data-slot=field-content]]:gap-0 [&_[data-slot=field-content]]:justify-center sm:h-24"
+                    className="h-24 [&_[data-slot=field-content]]:gap-0.5 [&_[data-slot=field-content]]:justify-center sm:h-28"
                     title={
-                      <span className="flex h-5 items-center font-serif text-3xl font-semibold leading-none tabular-nums">
-                        {offer.amountLabel}
+                      <span className="flex h-8 items-center font-serif text-3xl font-semibold leading-none tabular-nums">
+                        <span className="sr-only">About </span>
+                        <span aria-hidden="true">~</span>
+                        {offer.estimatedMessages}
                       </span>
                     }
                     description={
-                      <span className="sr-only">
-                        {props.scope === "group" ? "Group usage credit" : "Usage credit"}
+                      <span className="text-sm font-medium text-muted-foreground">
+                        messages ·{" "}
+                        <span className="tabular-nums">{offer.amountLabel}</span>
                       </span>
                     }
                   />

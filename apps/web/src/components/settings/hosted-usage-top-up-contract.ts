@@ -17,6 +17,7 @@ type HostedUsageTopUpPurchaseStatus = (typeof PURCHASE_STATUSES)[number];
 interface HostedUsageTopUpOffer {
   offerCode: string;
   amountLabel: string;
+  estimatedMessages: number;
 }
 
 interface HostedUsageTopUpActivePurchase {
