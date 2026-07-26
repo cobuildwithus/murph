@@ -639,6 +639,49 @@ test.each([
   },
 );
 
+test("HostedFamilyManager restores a session-bound invite continuation after reload", async () => {
+  const paymentUrl = "https://invoice.stripe.com/i/in_family_capacity_reload";
+  const payload = {
+    addSeatIfNeeded: true,
+    planCode: "edge",
+    targetEmail: "family.member@example.test",
+    targetLabel: "Parent",
+  } as const;
+  const { HostedFamilyManager } = await import(
+    "@/src/components/settings/hosted-family-settings-actions"
+  );
+  const { cleanup, container, window } = await renderClientComponent(
+    createElement(HostedFamilyManager, {
+      ...baseFamilyManagerProps(),
+      initialInvitePaymentContinuation: {
+        paymentUrl,
+        payload,
+      },
+    }),
+    { requireButton: false },
+  );
+
+  try {
+    assert.match(container.textContent ?? "", /Finish family invite/);
+    assert.match(container.textContent ?? "", /family\.member@example\.test/);
+    assert.equal(
+      linkByText(container, "Approve seat charge in Stripe").href,
+      paymentUrl,
+    );
+
+    await clickButton(container, window, "Finish invite");
+
+    expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
+      method: "POST",
+      payload,
+      url: "/api/settings/billing/family/invite",
+    });
+    assert.match(container.textContent ?? "", /Invite created/);
+  } finally {
+    await cleanup();
+  }
+});
+
 test("HostedFamilyManager prevents concurrent Finish invite retries", async () => {
   const paymentUrl = "https://invoice.stripe.com/i/in_family_capacity";
   let rejectFinish: ((reason?: unknown) => void) | undefined;
@@ -891,7 +934,7 @@ test("HostedFamilyManager confirms a member move to Edge", async () => {
     assert.match(container.textContent ?? "", /Manage Mom/);
     assert.match(
       container.textContent ?? "",
-      /Upgrade Mom from Pulse to Edge at \$19\/mo\. The prorated difference will appear on your next invoice\./,
+      /Upgrade Mom from Pulse to Edge at \$19\/mo\. Stripe will charge the prorated difference now and may ask you to approve it\./,
     );
     await clickButton(container, window, "Upgrade to Edge");
 

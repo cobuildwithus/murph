@@ -28,6 +28,7 @@ import {
   canUpgradeHostedBillingPlanToEdge,
 } from "@/src/lib/hosted-onboarding/billing-plans";
 import { readHostedPulseTrialContinuationCookie } from "@/src/lib/hosted-onboarding/billing-pulse-trial-continuation";
+import { readHostedFamilyInviteContinuationCookie } from "@/src/lib/hosted-onboarding/family-invite-continuation";
 import {
   HOSTED_START_PAID_PULSE_RETURN_PARAM,
   HOSTED_START_PAID_PULSE_RETURN_VALUE,
@@ -124,6 +125,14 @@ export default async function SettingsPage({
   const freshPrivySession = settingsData?.freshPrivySession ?? null;
   const familyOwner = settingsData?.familyOwner ?? null;
   const familyAccess = settingsData?.familyAccess ?? null;
+  const familyInvitePaymentContinuation =
+    authenticatedMember !== null && session !== null && familyOwner !== null
+      ? await readHostedFamilyInviteContinuationCookie({
+          groupId: familyOwner.groupId,
+          memberId: authenticatedMember.id,
+          sessionId: session.sessionId,
+        })
+      : null;
   const secureApprovalStatus =
     settingsData?.secureApprovalStatus ?? ({ status: "unavailable" } as const);
   const usageStatus = settingsData?.usageStatus ?? null;
@@ -326,6 +335,9 @@ export default async function SettingsPage({
             Family
           </div>
           <HostedFamilySettings
+            initialInvitePaymentContinuation={
+              familyInvitePaymentContinuation
+            }
             ownerSnapshot={familyOwner}
             usageTopUpActiveMemberId={familyUsageTopUpActiveMemberId}
             usageTopUpActivePurchase={familyUsageTopUpActivePurchase}

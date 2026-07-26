@@ -1932,24 +1932,13 @@ describe("deleteHostedAccountData", () => {
     expect(order).toEqual([
       "prisma",
       "stripe:subscription-cancel",
-      "stripe:customer-balance-read",
       "usage-credit:close",
       "prisma",
-      "stripe:customer-balance-read",
       "stripe:customer-delete",
       "privy:user-delete",
     ]);
     expect(stripe.subscriptions.cancel).toHaveBeenCalledWith("sub_delete_123");
-    expect(stripe.customers.retrieve).toHaveBeenCalledWith(
-      "cus_delete_123",
-      {
-        expand: ["cash_balance", "invoice_credit_balance"],
-      },
-      {
-        maxNetworkRetries: 0,
-        timeout: 5_000,
-      },
-    );
+    expect(stripe.customers.retrieve).not.toHaveBeenCalled();
     expect(stripe.customers.del).toHaveBeenCalledWith(
       "cus_delete_123",
       {},
@@ -1966,96 +1955,100 @@ describe("deleteHostedAccountData", () => {
     });
   });
 
-  it.each([
-    ["credit", { balance: -500 }],
-    ["debit", { balance: 500 }],
-    ["currency credit", { invoice_credit_balance: { usd: -500 } }],
-  ] as const)(
-    "fails closed before local deletion when a Stripe Customer has a %s balance",
-    async (_label, customerBalance) => {
-      const deleteCalls: HostedAccountDeletionPrismaDeleteCall[] = [];
-      const operationOrder: string[] = [];
-      const stripe = {
-        customers: {
-          del: vi.fn(),
-          retrieve: vi.fn(async (customerId: string) => {
-            operationOrder.push("stripe:customer-balance-read");
-            return {
-              ...makeZeroBalanceStripeCustomerForAccountDeletionTest(customerId),
-              ...customerBalance,
-            };
-          }),
-        },
-        subscriptions: {
-          cancel: vi.fn(async () => {
-            operationOrder.push("stripe:subscription-cancel");
-            return { id: "sub_delete_123", status: "canceled" };
-          }),
-          retrieve: vi.fn(async () => ({
-            id: "sub_delete_123",
-            status: "active",
-          })),
-        },
-      };
-      serviceMocks.getHostedOnboardingStripe.mockReturnValue(stripe);
-      const vendorRows = await makeVendorAccountRowsForTest("member_123");
-      const prisma = createHostedAccountDeletionPrismaForTest({
-        ...vendorRows,
-        deleteCalls,
-        onTransaction: () => undefined,
-      });
-
-      await expect(deleteHostedAccountData({
-        memberId: "member_123",
-        prisma,
-        request: new Request("https://join.example.test/settings"),
-      })).rejects.toMatchObject({
-        code: "ACCOUNT_DELETION_STRIPE_CUSTOMER_BALANCE_REMAINS",
-        retryable: false,
-      });
-
-      expect(stripe.customers.retrieve).toHaveBeenCalledWith(
-        "cus_delete_123",
-        {
-          expand: ["cash_balance", "invoice_credit_balance"],
-        },
-        {
-          maxNetworkRetries: 0,
-          timeout: 5_000,
-        },
-      );
-      expect(operationOrder).toEqual([
-        "stripe:subscription-cancel",
-        "stripe:customer-balance-read",
-      ]);
-      expect(deleteCalls).toEqual([]);
-      expect(stripe.customers.del).not.toHaveBeenCalled();
-      expect(
-        serviceMocks.closeHostedUsageCreditPurchasesForAccountDeletion,
-      ).not.toHaveBeenCalled();
-      expect(serviceMocks.deleteHostedPrivyUser).not.toHaveBeenCalled();
-    },
-  );
-
-  it("fails closed before local deletion when Stripe has created a Customer Cash Balance", async () => {
+  it("does not add a new balance gate for an already-known Stripe Customer", async () => {
     const deleteCalls: HostedAccountDeletionPrismaDeleteCall[] = [];
+    const subscriptionsList = vi.fn(async () => ({
+      data: [],
+      has_more: false,
+      object: "list",
+      url: "/v1/subscriptions",
+    }));
     const stripe = {
       customers: {
-        del: vi.fn(),
+        del: vi.fn(async (customerId: string) => ({
+          deleted: true,
+          id: customerId,
+        })),
         retrieve: vi.fn(async (customerId: string) => ({
           ...makeZeroBalanceStripeCustomerForAccountDeletionTest(customerId),
-          cash_balance: {
-            object: "cash_balance",
-          },
+          balance: -500,
+        })),
+      },
+      subscriptions: {
+        cancel: vi.fn(async () => ({
+          id: "sub_delete_123",
+          status: "canceled",
+        })),
+        list: subscriptionsList,
+        retrieve: vi.fn(async () => ({
+          id: "sub_delete_123",
+          status: "active",
         })),
       },
     };
+    installHostedAccountDeletionCustomerGateTestDouble(stripe);
     serviceMocks.getHostedOnboardingStripe.mockReturnValue(stripe);
-    const vendorRows = await makeVendorAccountRowsForTest("member_123", {
-      stripeSubscriptionId: null,
-    });
+    const vendorRows = await makeVendorAccountRowsForTest("member_123");
     const prisma = createHostedAccountDeletionPrismaForTest({
       ...vendorRows,
+      deleteCalls,
+      onTransaction: () => undefined,
+    });
+
+    const result = await deleteHostedAccountData({
+      memberId: "member_123",
+      prisma,
+      request: new Request("https://join.example.test/settings"),
+    });
+
+    expect(deleteCalls.length).toBeGreaterThan(0);
+    expect(stripe.customers.retrieve).not.toHaveBeenCalled();
+    expect(subscriptionsList).not.toHaveBeenCalled();
+    expect(stripe.customers.del).toHaveBeenCalledWith(
+      "cus_delete_123",
+      {},
+      {
+        maxNetworkRetries: 0,
+        timeout: 5_000,
+      },
+    );
+    expect(result.vendorAccounts.stripeCustomer).toEqual({
+      errorCode: null,
+      status: "completed",
+    });
+  });
+
+  it("fails closed when a recovered reservation Customer has a balance", async () => {
+    const reservationId = "hbscr_balance_gate";
+    const deleteCalls: HostedAccountDeletionPrismaDeleteCall[] = [];
+    const billingRefRecord = {
+      ...await makeCheckoutAttemptBillingRefRowForTest({
+        memberId: "member_123",
+      }),
+      stripeCustomerReservationCreatedAt: new Date(Date.now() - 60_000),
+      stripeCustomerReservationId: reservationId,
+    };
+    const stripe = {
+      customers: {
+        create: vi.fn(async () => ({ id: "cus_recovered_balance" })),
+        del: vi.fn(),
+        retrieve: vi.fn(async () => ({
+          ...makeZeroBalanceStripeCustomerForAccountDeletionTest(
+            "cus_recovered_balance",
+            {
+              customerReservationId: reservationId,
+              memberId: "member_123",
+              source: "hosted.auto_pulse_trial",
+            },
+          ),
+          balance: -500,
+        })),
+      },
+    };
+    installHostedAccountDeletionCustomerGateTestDouble(stripe);
+    serviceMocks.getHostedOnboardingStripe.mockReturnValue(stripe);
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      billingRefRecord,
       deleteCalls,
       onTransaction: () => undefined,
     });
@@ -2069,79 +2062,39 @@ describe("deleteHostedAccountData", () => {
       retryable: false,
     });
 
-    expect(stripe.customers.retrieve).toHaveBeenCalledWith(
-      "cus_delete_123",
-      {
-        expand: ["cash_balance", "invoice_credit_balance"],
-      },
-      {
-        maxNetworkRetries: 0,
-        timeout: 5_000,
-      },
-    );
     expect(deleteCalls).toEqual([]);
     expect(stripe.customers.del).not.toHaveBeenCalled();
   });
 
-  it.each([
-    ["missing", "ACCOUNT_DELETION_STRIPE_CUSTOMER_STATE_INCONSISTENT"],
-    ["unexpanded", "ACCOUNT_DELETION_STRIPE_CUSTOMER_BALANCE_REMAINS"],
-  ] as const)(
-    "fails closed when Stripe returns a %s requested Customer Cash Balance expansion",
-    async (cashBalanceState, expectedCode) => {
-      const deleteCalls: HostedAccountDeletionPrismaDeleteCall[] = [];
-      const customer: Record<string, unknown> = {
-        ...makeZeroBalanceStripeCustomerForAccountDeletionTest(
-          "cus_delete_123",
-        ),
-      };
-      delete customer.cash_balance;
-      if (cashBalanceState === "unexpanded") {
-        customer.cash_balance = "cb_unexpanded";
-      }
-      const stripe = {
-        customers: {
-          del: vi.fn(),
-          retrieve: vi.fn(async () => customer),
-        },
-      };
-      serviceMocks.getHostedOnboardingStripe.mockReturnValue(stripe);
-      const vendorRows = await makeVendorAccountRowsForTest("member_123", {
-        stripeSubscriptionId: null,
-      });
-      const prisma = createHostedAccountDeletionPrismaForTest({
-        ...vendorRows,
-        deleteCalls,
-        onTransaction: () => undefined,
-      });
-
-      await expect(deleteHostedAccountData({
-        memberId: "member_123",
-        prisma,
-        request: new Request("https://join.example.test/settings"),
-      })).rejects.toMatchObject({
-        code: expectedCode,
-        retryable: false,
-      });
-
-      expect(deleteCalls).toEqual([]);
-      expect(stripe.customers.del).not.toHaveBeenCalled();
-    },
-  );
-
-  it("fails closed before local deletion when a Stripe Customer still has a live subscription", async () => {
+  it("fails closed when a recovered reservation Customer has live billing", async () => {
+    const reservationId = "hbscr_live_billing_gate";
     const deleteCalls: HostedAccountDeletionPrismaDeleteCall[] = [];
+    const billingRefRecord = {
+      ...await makeCheckoutAttemptBillingRefRowForTest({
+        memberId: "member_123",
+      }),
+      stripeCustomerReservationCreatedAt: new Date(Date.now() - 60_000),
+      stripeCustomerReservationId: reservationId,
+    };
     const stripe = {
       customers: {
+        create: vi.fn(async () => ({ id: "cus_recovered_live" })),
         del: vi.fn(),
-        retrieve: vi.fn(async (customerId: string) =>
-          makeZeroBalanceStripeCustomerForAccountDeletionTest(customerId)),
+        retrieve: vi.fn(async () =>
+          makeZeroBalanceStripeCustomerForAccountDeletionTest(
+            "cus_recovered_live",
+            {
+              customerReservationId: reservationId,
+              memberId: "member_123",
+              source: "hosted.auto_pulse_trial",
+            },
+          )),
       },
       subscriptions: {
         list: vi.fn(async () => ({
           data: [{
-            customer: "cus_delete_123",
-            id: "sub_unexpected_live",
+            customer: "cus_recovered_live",
+            id: "sub_recovered_live",
             status: "active",
           }],
           has_more: false,
@@ -2151,11 +2104,8 @@ describe("deleteHostedAccountData", () => {
       },
     };
     serviceMocks.getHostedOnboardingStripe.mockReturnValue(stripe);
-    const vendorRows = await makeVendorAccountRowsForTest("member_123", {
-      stripeSubscriptionId: null,
-    });
     const prisma = createHostedAccountDeletionPrismaForTest({
-      ...vendorRows,
+      billingRefRecord,
       deleteCalls,
       onTransaction: () => undefined,
     });
@@ -2169,362 +2119,9 @@ describe("deleteHostedAccountData", () => {
       retryable: false,
     });
 
-    expect(stripe.subscriptions.list).toHaveBeenCalledWith(
-      {
-        customer: "cus_delete_123",
-        limit: 100,
-        status: "all",
-      },
-      {
-        maxNetworkRetries: 0,
-        timeout: 5_000,
-      },
-    );
-    expect(deleteCalls).toEqual([]);
-    expect(stripe.customers.del).not.toHaveBeenCalled();
-    expect(
-      serviceMocks.closeHostedUsageCreditPurchasesForAccountDeletion,
-    ).not.toHaveBeenCalled();
-  });
-
-  it("fails closed when a Stripe Customer subscription listing exceeds the bounded page budget", async () => {
-    const deleteCalls: HostedAccountDeletionPrismaDeleteCall[] = [];
-    let pageIndex = 0;
-    const stripe = {
-      customers: {
-        del: vi.fn(),
-        retrieve: vi.fn(async (customerId: string) =>
-          makeZeroBalanceStripeCustomerForAccountDeletionTest(customerId)),
-      },
-      subscriptions: {
-        list: vi.fn(async () => {
-          pageIndex += 1;
-          return {
-            data: [{
-              customer: "cus_delete_123",
-              id: `sub_canceled_${pageIndex}`,
-              status: "canceled",
-            }],
-            has_more: true,
-            object: "list",
-            url: "/v1/subscriptions",
-          };
-        }),
-      },
-    };
-    serviceMocks.getHostedOnboardingStripe.mockReturnValue(stripe);
-    const vendorRows = await makeVendorAccountRowsForTest("member_123", {
-      stripeSubscriptionId: null,
-    });
-    const prisma = createHostedAccountDeletionPrismaForTest({
-      ...vendorRows,
-      deleteCalls,
-      onTransaction: () => undefined,
-    });
-
-    await expect(deleteHostedAccountData({
-      memberId: "member_123",
-      prisma,
-      request: new Request("https://join.example.test/settings"),
-    })).rejects.toMatchObject({
-      code: "ACCOUNT_DELETION_STRIPE_CUSTOMER_SUBSCRIPTIONS_INCOMPLETE",
-      retryable: true,
-    });
-
-    expect(stripe.subscriptions.list).toHaveBeenCalledTimes(10);
     expect(deleteCalls).toEqual([]);
     expect(stripe.customers.del).not.toHaveBeenCalled();
   });
-
-  it("does not delete a Stripe Customer whose balance drifts after local deletion", async () => {
-    const deleteCalls: HostedAccountDeletionPrismaDeleteCall[] = [];
-    const stripe = {
-      customers: {
-        del: vi.fn(),
-        retrieve: vi.fn()
-          .mockResolvedValueOnce(
-            makeZeroBalanceStripeCustomerForAccountDeletionTest(
-              "cus_delete_123",
-            ),
-          )
-          .mockResolvedValueOnce({
-            ...makeZeroBalanceStripeCustomerForAccountDeletionTest(
-              "cus_delete_123",
-            ),
-            balance: -500,
-          }),
-      },
-      subscriptions: {
-        list: vi.fn(async () => ({
-          data: [],
-          has_more: false,
-          object: "list",
-          url: "/v1/subscriptions",
-        })),
-      },
-    };
-    serviceMocks.getHostedOnboardingStripe.mockReturnValue(stripe);
-    const vendorRows = await makeVendorAccountRowsForTest("member_123", {
-      stripeSubscriptionId: null,
-    });
-    const prisma = createHostedAccountDeletionPrismaForTest({
-      ...vendorRows,
-      deleteCalls,
-      onTransaction: () => undefined,
-    });
-
-    const result = await deleteHostedAccountData({
-      memberId: "member_123",
-      prisma,
-      request: new Request("https://join.example.test/settings"),
-    });
-
-    expect(deleteCalls.length).toBeGreaterThan(0);
-    expect(stripe.customers.retrieve).toHaveBeenCalledTimes(2);
-    expect(stripe.customers.del).not.toHaveBeenCalled();
-    expect(result.vendorAccounts.stripeCustomer.status).toBe("failed");
-  });
-
-  it("does not delete a Stripe Customer whose Cash Balance appears after local deletion", async () => {
-    const deleteCalls: HostedAccountDeletionPrismaDeleteCall[] = [];
-    const stripe = {
-      customers: {
-        del: vi.fn(),
-        retrieve: vi.fn()
-          .mockResolvedValueOnce(
-            makeZeroBalanceStripeCustomerForAccountDeletionTest(
-              "cus_delete_123",
-            ),
-          )
-          .mockResolvedValueOnce({
-            ...makeZeroBalanceStripeCustomerForAccountDeletionTest(
-              "cus_delete_123",
-            ),
-            cash_balance: {
-              object: "cash_balance",
-            },
-          }),
-      },
-      subscriptions: {
-        list: vi.fn(async () => ({
-          data: [],
-          has_more: false,
-          object: "list",
-          url: "/v1/subscriptions",
-        })),
-      },
-    };
-    serviceMocks.getHostedOnboardingStripe.mockReturnValue(stripe);
-    const vendorRows = await makeVendorAccountRowsForTest("member_123", {
-      stripeSubscriptionId: null,
-    });
-    const prisma = createHostedAccountDeletionPrismaForTest({
-      ...vendorRows,
-      deleteCalls,
-      onTransaction: () => undefined,
-    });
-
-    const result = await deleteHostedAccountData({
-      memberId: "member_123",
-      prisma,
-      request: new Request("https://join.example.test/settings"),
-    });
-
-    expect(deleteCalls.length).toBeGreaterThan(0);
-    expect(stripe.customers.retrieve).toHaveBeenNthCalledWith(
-      1,
-      "cus_delete_123",
-      {
-        expand: ["cash_balance", "invoice_credit_balance"],
-      },
-      {
-        maxNetworkRetries: 0,
-        timeout: 5_000,
-      },
-    );
-    expect(stripe.customers.retrieve).toHaveBeenNthCalledWith(
-      2,
-      "cus_delete_123",
-      {
-        expand: ["cash_balance", "invoice_credit_balance"],
-      },
-      {
-        maxNetworkRetries: 0,
-        timeout: 5_000,
-      },
-    );
-    expect(stripe.customers.del).not.toHaveBeenCalled();
-    expect(result.vendorAccounts.stripeCustomer.status).toBe("failed");
-  });
-
-  it("does not delete a Stripe Customer whose subscription state drifts after local deletion", async () => {
-    const deleteCalls: HostedAccountDeletionPrismaDeleteCall[] = [];
-    const stripe = {
-      customers: {
-        del: vi.fn(),
-        retrieve: vi.fn(async (customerId: string) =>
-          makeZeroBalanceStripeCustomerForAccountDeletionTest(customerId)),
-      },
-      subscriptions: {
-        list: vi.fn()
-          .mockResolvedValueOnce({
-            data: [],
-            has_more: false,
-            object: "list",
-            url: "/v1/subscriptions",
-          })
-          .mockResolvedValueOnce({
-            data: [{
-              customer: "cus_delete_123",
-              id: "sub_late_live",
-              status: "active",
-            }],
-            has_more: false,
-            object: "list",
-            url: "/v1/subscriptions",
-          }),
-      },
-    };
-    serviceMocks.getHostedOnboardingStripe.mockReturnValue(stripe);
-    const vendorRows = await makeVendorAccountRowsForTest("member_123", {
-      stripeSubscriptionId: null,
-    });
-    const prisma = createHostedAccountDeletionPrismaForTest({
-      ...vendorRows,
-      deleteCalls,
-      onTransaction: () => undefined,
-    });
-
-    const result = await deleteHostedAccountData({
-      memberId: "member_123",
-      prisma,
-      request: new Request("https://join.example.test/settings"),
-    });
-
-    expect(deleteCalls.length).toBeGreaterThan(0);
-    expect(stripe.subscriptions.list).toHaveBeenCalledTimes(2);
-    expect(stripe.customers.del).not.toHaveBeenCalled();
-    expect(result.vendorAccounts.stripeCustomer.status).toBe("failed");
-  });
-
-  it.each([
-    [
-      "a different Customer",
-      {
-        cash_balance: null,
-        balance: 0,
-        id: "cus_delete_other",
-        invoice_credit_balance: {},
-      },
-    ],
-    [
-      "an invalid balance",
-      {
-        cash_balance: null,
-        balance: Number.NaN,
-        id: "cus_delete_123",
-        invoice_credit_balance: {},
-      },
-    ],
-  ])("fails closed when Stripe returns %s during Customer balance validation", async (
-    _label,
-    customer,
-  ) => {
-    const deleteCalls: HostedAccountDeletionPrismaDeleteCall[] = [];
-    const stripe = {
-      customers: {
-        del: vi.fn(),
-        retrieve: vi.fn(async () => customer),
-      },
-    };
-    serviceMocks.getHostedOnboardingStripe.mockReturnValue(stripe);
-    const vendorRows = await makeVendorAccountRowsForTest("member_123", {
-      stripeSubscriptionId: null,
-    });
-    const prisma = createHostedAccountDeletionPrismaForTest({
-      ...vendorRows,
-      deleteCalls,
-      onTransaction: () => undefined,
-    });
-
-    await expect(deleteHostedAccountData({
-      memberId: "member_123",
-      prisma,
-      request: new Request("https://join.example.test/settings"),
-    })).rejects.toMatchObject({
-      code: "ACCOUNT_DELETION_STRIPE_CUSTOMER_STATE_INCONSISTENT",
-      retryable: false,
-    });
-
-    expect(deleteCalls).toEqual([]);
-    expect(stripe.customers.del).not.toHaveBeenCalled();
-  });
-
-  it.each([
-    [
-      "a deterministic invalid request",
-      Object.assign(new Error("Invalid Customer"), {
-        code: "parameter_invalid_string",
-        statusCode: 400,
-        type: "StripeInvalidRequestError",
-      }),
-      "ACCOUNT_DELETION_STRIPE_CUSTOMER_PROVIDER_REJECTED",
-      false,
-    ],
-    [
-      "an ambiguous connection failure",
-      Object.assign(new Error("Connection ended"), {
-        code: "ETIMEDOUT",
-        type: "StripeConnectionError",
-      }),
-      "ACCOUNT_DELETION_STRIPE_CUSTOMER_PROVIDER_UNAVAILABLE",
-      true,
-    ],
-  ] as const)(
-    "classifies %s while validating Stripe Customer balances",
-    async (_label, providerError, expectedCode, expectedRetryable) => {
-      const deleteCalls: HostedAccountDeletionPrismaDeleteCall[] = [];
-      const stripe = {
-        customers: {
-          del: vi.fn(),
-          retrieve: vi.fn(async () => {
-            throw providerError;
-          }),
-        },
-      };
-      serviceMocks.getHostedOnboardingStripe.mockReturnValue(stripe);
-      const vendorRows = await makeVendorAccountRowsForTest("member_123", {
-        stripeSubscriptionId: null,
-      });
-      const prisma = createHostedAccountDeletionPrismaForTest({
-        ...vendorRows,
-        deleteCalls,
-        onTransaction: () => undefined,
-      });
-
-      await expect(deleteHostedAccountData({
-        memberId: "member_123",
-        prisma,
-        request: new Request("https://join.example.test/settings"),
-      })).rejects.toMatchObject({
-        code: expectedCode,
-        retryable: expectedRetryable,
-      });
-
-      expect(stripe.customers.retrieve).toHaveBeenCalledWith(
-        "cus_delete_123",
-        {
-          expand: ["cash_balance", "invoice_credit_balance"],
-        },
-        {
-          maxNetworkRetries: 0,
-          timeout: 5_000,
-        },
-      );
-      expect(deleteCalls).toEqual([]);
-      expect(stripe.customers.del).not.toHaveBeenCalled();
-    },
-  );
 
   it("deletes direct and owned Family Stripe customers during account deletion", async () => {
     const stripe = {
@@ -2566,26 +2163,7 @@ describe("deleteHostedAccountData", () => {
 
     expect(stripe.subscriptions.cancel).toHaveBeenCalledWith("sub_delete_123");
     expect(stripe.subscriptions.cancel).toHaveBeenCalledWith("sub_family_123");
-    expect(stripe.customers.retrieve).toHaveBeenCalledWith(
-      "cus_delete_123",
-      {
-          expand: ["cash_balance", "invoice_credit_balance"],
-      },
-      {
-        maxNetworkRetries: 0,
-        timeout: 5_000,
-      },
-    );
-    expect(stripe.customers.retrieve).toHaveBeenCalledWith(
-      "cus_family_123",
-      {
-          expand: ["cash_balance", "invoice_credit_balance"],
-      },
-      {
-        maxNetworkRetries: 0,
-        timeout: 5_000,
-      },
-    );
+    expect(stripe.customers.retrieve).not.toHaveBeenCalled();
     expect(stripe.customers.del).toHaveBeenCalledWith(
       "cus_delete_123",
       {},
@@ -2731,7 +2309,7 @@ describe("deleteHostedAccountData", () => {
     expect(result.vendorAccounts.privyUser.status).toBe("failed");
   });
 
-  it("fails closed when a Customer reference exists but Stripe is not configured", async () => {
+  it("keeps known Customer deletion best effort when Stripe is not configured", async () => {
     serviceMocks.getHostedOnboardingStripe.mockReturnValue(null);
     serviceMocks.deleteHostedPrivyUser.mockResolvedValue(false);
     const vendorRows = await makeVendorAccountRowsForTest("member_123", {
@@ -2744,16 +2322,18 @@ describe("deleteHostedAccountData", () => {
       onTransaction: () => undefined,
     });
 
-    await expect(deleteHostedAccountData({
+    const result = await deleteHostedAccountData({
       memberId: "member_123",
       prisma,
       request: new Request("https://join.example.test/settings"),
-    })).rejects.toMatchObject({
-      code: "ACCOUNT_DELETION_STRIPE_NOT_CONFIGURED",
-      retryable: false,
     });
-    expect(deleteCalls).toEqual([]);
-    expect(serviceMocks.deleteHostedPrivyUser).not.toHaveBeenCalled();
+
+    expect(deleteCalls.length).toBeGreaterThan(0);
+    expect(result.vendorAccounts.stripeCustomer).toEqual({
+      errorCode: null,
+      status: "skipped_not_configured",
+    });
+    expect(serviceMocks.deleteHostedPrivyUser).toHaveBeenCalled();
   });
 
   it("fails closed when a subscription reference exists but Stripe is not configured", async () => {

@@ -1,4 +1,5 @@
 import { HOSTED_FAMILY_PLAN_DISPLAY } from "@/src/lib/hosted-onboarding/billing-plans";
+import type { HostedFamilyInvitePaymentContinuation } from "@/src/lib/hosted-onboarding/family-invite-continuation-contract";
 import type { HostedFamilyOwnerSnapshot } from "@/src/lib/hosted-onboarding/family-plan";
 import type { MurphContactOption } from "@/src/lib/murph-contact-routing";
 import type {
@@ -14,6 +15,7 @@ import {
 } from "./hosted-family-settings-actions";
 
 export function HostedFamilySettings(props: {
+  initialInvitePaymentContinuation?: HostedFamilyInvitePaymentContinuation | null;
   ownerSnapshot: HostedFamilyOwnerSnapshot;
   usageTopUpActiveMemberId?: string | null;
   usageTopUpActivePurchase?: HostedUsageTopUpActivePurchase | null;
@@ -50,6 +52,9 @@ export function HostedFamilySettings(props: {
       <HostedFamilyManager
         billingActive={snapshot.billingActive}
         billingStatus={snapshot.billingStatus}
+        initialInvitePaymentContinuation={
+          props.initialInvitePaymentContinuation
+        }
         invites={invites}
         members={members}
         plans={snapshot.plans}

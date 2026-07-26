@@ -1385,6 +1385,283 @@ describe("hosted onboarding stripe billing lookup", () => {
   });
 
   it.each([
+    ["plan upgrade", "price_edge", 1],
+    ["Family seat increase", "price_family_pulse", 3],
+  ] as const)(
+    "revokes the current period when its paid %s invoice is fully refunded",
+    async (_description, priceId, quantity) => {
+      const renewalInvoice = makeStripeFinancialInvoice({
+        created: 1_775_000_000,
+        id: "in_required_renewal",
+      });
+      const paidUpdateInvoice = makeStripeFinancialInvoice({
+        billingReason: "subscription_update",
+        created: 1_776_000_000,
+        id: "in_required_update",
+        lines: [
+          makeStripeInvoiceLine({
+            amount: 1_000,
+            invoiceId: "in_required_update",
+            periodEnd: 1_778_000_000,
+            periodStart: 1_776_000_000,
+            priceId,
+            proration: true,
+            quantity,
+            subscriptionId: "sub_123",
+            subscriptionItemId: "si_current",
+          }),
+        ],
+      });
+      mocks.stripeInvoicesRetrieve
+        .mockResolvedValueOnce(paidUpdateInvoice)
+        .mockResolvedValueOnce(renewalInvoice);
+      mocks.stripeInvoicesList.mockResolvedValueOnce({
+        data: [paidUpdateInvoice, renewalInvoice],
+        has_more: false,
+      });
+      mocks.stripeInvoicePaymentsList
+        .mockResolvedValueOnce({
+          data: [makeStripeInvoicePayment({
+            chargeId: "ch_required_update",
+            invoice: paidUpdateInvoice,
+            paymentIntentId: "pi_required_update",
+          })],
+          has_more: false,
+        })
+        .mockResolvedValueOnce({
+          data: [makeStripeInvoicePayment({
+            chargeId: "ch_required_renewal",
+            invoice: renewalInvoice,
+            paymentIntentId: "pi_required_renewal",
+          })],
+          has_more: false,
+        });
+      mocks.stripeRefundsList.mockImplementation(async (params: {
+        charge?: string;
+      }) => ({
+        data: params.charge === "ch_required_update"
+          ? [
+              makeStripeRefund({
+                amount: 1_000,
+                chargeId: "ch_required_update",
+                id: "re_required_update",
+                paymentIntentId: "pi_required_update",
+                status: "succeeded",
+              }),
+            ]
+          : [],
+        has_more: false,
+      }));
+
+      await expect(
+        readHostedStripeRecurringFinancialState(
+          makeStripeSubscription({
+            items: [
+              makeStripeSubscriptionItem({
+                id: "si_current",
+                priceId,
+                quantity,
+              }),
+            ],
+            latestInvoice: paidUpdateInvoice.id,
+          }),
+        ),
+      ).resolves.toMatchObject({
+        collectionState: { kind: "paid" },
+        fullyRefunded: true,
+        invoiceId: paidUpdateInvoice.id,
+      });
+    },
+  );
+
+  it("does not revoke a paid update for a partial refund", async () => {
+    const renewalInvoice = makeStripeFinancialInvoice({
+      created: 1_775_000_000,
+      id: "in_partial_update_renewal",
+    });
+    const paidUpdateInvoice = makeStripeFinancialInvoice({
+      billingReason: "subscription_update",
+      created: 1_776_000_000,
+      id: "in_partial_update",
+      lines: [
+        makeStripeInvoiceLine({
+          amount: 1_000,
+          invoiceId: "in_partial_update",
+          periodEnd: 1_778_000_000,
+          periodStart: 1_776_000_000,
+          priceId: "price_edge",
+          proration: true,
+          quantity: 1,
+          subscriptionId: "sub_123",
+          subscriptionItemId: "si_current",
+        }),
+      ],
+    });
+    mocks.stripeInvoicesRetrieve
+      .mockResolvedValueOnce(paidUpdateInvoice)
+      .mockResolvedValueOnce(renewalInvoice);
+    mocks.stripeInvoicesList.mockResolvedValueOnce({
+      data: [paidUpdateInvoice, renewalInvoice],
+      has_more: false,
+    });
+    mocks.stripeInvoicePaymentsList
+      .mockResolvedValueOnce({
+        data: [makeStripeInvoicePayment({
+          chargeId: "ch_partial_update",
+          invoice: paidUpdateInvoice,
+          paymentIntentId: "pi_partial_update",
+        })],
+        has_more: false,
+      })
+      .mockResolvedValueOnce({
+        data: [makeStripeInvoicePayment({
+          chargeId: "ch_partial_update_renewal",
+          invoice: renewalInvoice,
+          paymentIntentId: "pi_partial_update_renewal",
+        })],
+        has_more: false,
+      });
+    mocks.stripeRefundsList.mockImplementation(async (params: {
+      charge?: string;
+    }) => ({
+      data: params.charge === "ch_partial_update"
+        ? [
+            makeStripeRefund({
+              amount: 500,
+              chargeId: "ch_partial_update",
+              id: "re_partial_update",
+              paymentIntentId: "pi_partial_update",
+              status: "succeeded",
+            }),
+          ]
+        : [],
+      has_more: false,
+    }));
+
+    await expect(
+      readHostedStripeRecurringFinancialState(
+        makeStripeSubscription({
+          items: [
+            makeStripeSubscriptionItem({
+              id: "si_current",
+              priceId: "price_edge",
+            }),
+          ],
+          latestInvoice: paidUpdateInvoice.id,
+        }),
+      ),
+    ).resolves.toMatchObject({
+      fullyRefunded: false,
+    });
+  });
+
+  it("uses the latest paid update that establishes the current item after an earlier update refund", async () => {
+    const renewalInvoice = makeStripeFinancialInvoice({
+      created: 1_775_000_000,
+      id: "in_superseded_update_renewal",
+    });
+    const refundedUpdateInvoice = makeStripeFinancialInvoice({
+      billingReason: "subscription_update",
+      created: 1_776_000_000,
+      id: "in_superseded_update",
+      lines: [
+        makeStripeInvoiceLine({
+          invoiceId: "in_superseded_update",
+          periodEnd: 1_778_000_000,
+          periodStart: 1_776_000_000,
+          priceId: "price_edge",
+          proration: true,
+          quantity: 1,
+          subscriptionId: "sub_123",
+          subscriptionItemId: "si_current",
+        }),
+      ],
+    });
+    const latestUpdateInvoice = makeStripeFinancialInvoice({
+      billingReason: "subscription_update",
+      created: 1_777_000_000,
+      id: "in_latest_update",
+      lines: [
+        makeStripeInvoiceLine({
+          invoiceId: "in_latest_update",
+          periodEnd: 1_778_000_000,
+          periodStart: 1_777_000_000,
+          priceId: "price_edge",
+          proration: true,
+          quantity: 1,
+          subscriptionId: "sub_123",
+          subscriptionItemId: "si_current",
+        }),
+      ],
+    });
+    mocks.stripeInvoicesRetrieve
+      .mockResolvedValueOnce(latestUpdateInvoice)
+      .mockResolvedValueOnce(refundedUpdateInvoice)
+      .mockResolvedValueOnce(renewalInvoice);
+    mocks.stripeInvoicesList.mockResolvedValueOnce({
+      data: [latestUpdateInvoice, refundedUpdateInvoice, renewalInvoice],
+      has_more: false,
+    });
+    mocks.stripeInvoicePaymentsList
+      .mockResolvedValueOnce({
+        data: [makeStripeInvoicePayment({
+          chargeId: "ch_latest_update",
+          invoice: latestUpdateInvoice,
+          paymentIntentId: "pi_latest_update",
+        })],
+        has_more: false,
+      })
+      .mockResolvedValueOnce({
+        data: [makeStripeInvoicePayment({
+          chargeId: "ch_superseded_update",
+          invoice: refundedUpdateInvoice,
+          paymentIntentId: "pi_superseded_update",
+        })],
+        has_more: false,
+      })
+      .mockResolvedValueOnce({
+        data: [makeStripeInvoicePayment({
+          chargeId: "ch_superseded_update_renewal",
+          invoice: renewalInvoice,
+          paymentIntentId: "pi_superseded_update_renewal",
+        })],
+        has_more: false,
+      });
+    mocks.stripeRefundsList.mockImplementation(async (params: {
+      charge?: string;
+    }) => ({
+      data: params.charge === "ch_superseded_update"
+        ? [
+            makeStripeRefund({
+              amount: 1_000,
+              chargeId: "ch_superseded_update",
+              id: "re_superseded_update",
+              paymentIntentId: "pi_superseded_update",
+              status: "succeeded",
+            }),
+          ]
+        : [],
+      has_more: false,
+    }));
+
+    await expect(
+      readHostedStripeRecurringFinancialState(
+        makeStripeSubscription({
+          items: [
+            makeStripeSubscriptionItem({
+              id: "si_current",
+              priceId: "price_edge",
+            }),
+          ],
+          latestInvoice: latestUpdateInvoice.id,
+        }),
+      ),
+    ).resolves.toMatchObject({
+      fullyRefunded: false,
+    });
+  });
+
+  it.each([
     ["a partial refund", 500, false],
     ["a full aggregate refund", 1_000, true],
   ] as const)(
@@ -1888,6 +2165,7 @@ function makeStripeFinancialInvoice(overrides?: {
   amountRemaining?: number;
   attempted?: boolean;
   billingReason?: Stripe.Invoice["billing_reason"];
+  created?: number;
   id?: string;
   linePeriodEnd?: number;
   linePeriodStart?: number;
@@ -1900,6 +2178,7 @@ function makeStripeFinancialInvoice(overrides?: {
     amount_remaining: overrides?.amountRemaining ?? 0,
     attempted: overrides?.attempted ?? true,
     billing_reason: overrides?.billingReason ?? "subscription_cycle",
+    created: overrides?.created ?? 1_775_000_000,
     customer: "cus_123",
     id: overrides?.id ?? "in_123",
     lines: {

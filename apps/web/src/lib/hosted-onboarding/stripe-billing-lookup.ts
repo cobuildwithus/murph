@@ -641,6 +641,7 @@ export async function readHostedStripeRecurringFinancialState(
   const financialState = await readHostedStripePaidInvoicesFinancialState({
     snapshots: paidEntitlementSnapshots,
     stripe,
+    subscription,
   });
 
   return {
@@ -833,6 +834,7 @@ async function readHostedStripePaidInvoicesFinancialState(
       ReturnType<typeof retrieveHostedStripeInvoiceCollectionSnapshot>
     >[];
     stripe: Stripe;
+    subscription: Stripe.Subscription;
   },
 ): Promise<{
   fullyRefunded: boolean;
@@ -856,44 +858,130 @@ async function readHostedStripePaidInvoicesFinancialState(
     payments: paymentReferences,
     stripe: input.stripe,
   });
-  const paidAmount = allocations.reduce(
-    (sum, allocation) => sum + allocation.amountPaid,
-    0,
-  );
   const baseInvoiceId = [...input.snapshots]
     .sort(compareHostedStripeBaseEntitlementInvoice)[0]?.invoice.id ?? null;
-  const baseAllocations = allocations.filter(
-    (allocation) => allocation.invoiceId === baseInvoiceId,
+  const requiredInvoiceIds =
+    await listHostedStripeRequiredEntitlementInvoiceIds({
+      snapshots: input.snapshots,
+      stripe: input.stripe,
+      subscription: input.subscription,
+    });
+  if (baseInvoiceId) {
+    requiredInvoiceIds.add(baseInvoiceId);
+  }
+  return {
+    fullyRefunded: [...requiredInvoiceIds].some((invoiceId) =>
+      isHostedStripeInvoiceFullyRefunded({
+        allocations,
+        invoiceId,
+        refunds,
+      })
+    ),
+    outstandingDispute: disputes.some(hasStripeDisputeFundsOutstanding),
+  };
+}
+
+async function listHostedStripeRequiredEntitlementInvoiceIds(input: {
+  snapshots: readonly Awaited<
+    ReturnType<typeof retrieveHostedStripeInvoiceCollectionSnapshot>
+  >[];
+  stripe: Stripe;
+  subscription: Stripe.Subscription;
+}): Promise<Set<string>> {
+  const currentItems = new Map(
+    input.subscription.items.data.map((item) => [item.id, item]),
   );
-  const basePaymentKeys = new Set(
-    baseAllocations
+  if (currentItems.size !== input.subscription.items.data.length) {
+    throw new Error(
+      "Stripe subscription contained duplicate current entitlement items.",
+    );
+  }
+  const updateSnapshots = [...input.snapshots]
+    .filter((snapshot) =>
+      snapshot.invoice.billing_reason === "subscription_update"
+    )
+    .sort((left, right) =>
+      (readStripeUnixSeconds(right.invoice.created) ?? 0) -
+        (readStripeUnixSeconds(left.invoice.created) ?? 0) ||
+      right.invoice.id.localeCompare(left.invoice.id)
+    );
+  const updateLines = await mapHostedStripeRecurringFinancialReads(
+    updateSnapshots,
+    HOSTED_STRIPE_RECURRING_FINANCIAL_SNAPSHOT_CONCURRENCY,
+    async (snapshot) => ({
+      invoiceId: snapshot.invoice.id,
+      lines: await readStripeInvoiceLines({
+        invoice: snapshot.invoice,
+        stripe: input.stripe,
+      }),
+    }),
+  );
+  const matchedItemIds = new Set<string>();
+  const requiredInvoiceIds = new Set<string>();
+  for (const update of updateLines) {
+    for (const line of update.lines) {
+      const details = line.parent?.subscription_item_details;
+      if (
+        !details?.proration ||
+        details.subscription !== input.subscription.id ||
+        !Number.isSafeInteger(line.amount) ||
+        line.amount <= 0 ||
+        matchedItemIds.has(details.subscription_item)
+      ) {
+        continue;
+      }
+      const currentItem = currentItems.get(details.subscription_item);
+      const targetPriceId = coerceStripeObjectId(
+        line.pricing?.price_details?.price,
+      );
+      if (
+        !currentItem ||
+        !targetPriceId ||
+        coerceStripeObjectId(currentItem.price) !== targetPriceId ||
+        !Number.isSafeInteger(line.quantity) ||
+        line.quantity === null ||
+        line.quantity <= 0 ||
+        currentItem.quantity !== line.quantity
+      ) {
+        continue;
+      }
+      matchedItemIds.add(currentItem.id);
+      requiredInvoiceIds.add(update.invoiceId);
+    }
+  }
+  return requiredInvoiceIds;
+}
+
+function isHostedStripeInvoiceFullyRefunded(input: {
+  allocations: readonly StripeInvoicePaymentAllocation[];
+  invoiceId: string;
+  refunds: readonly Stripe.Refund[];
+}): boolean {
+  const invoiceAllocations = input.allocations.filter(
+    (allocation) => allocation.invoiceId === input.invoiceId,
+  );
+  const invoicePaymentKeys = new Set(
+    invoiceAllocations
       .map(stripeInvoicePaymentReferenceKey)
       .filter((key): key is string => key !== null),
   );
-  const baseFullyRefunded =
-    baseAllocations.length > 0 &&
-    baseAllocations.every(
+  return invoiceAllocations.length > 0 &&
+    invoiceAllocations.every(
       (allocation) => stripeInvoicePaymentReferenceKey(allocation) !== null,
     ) &&
-    [...basePaymentKeys].every((paymentKey) => {
-      const allocatedAmount = allocations
+    [...invoicePaymentKeys].every((paymentKey) => {
+      const allocatedAmount = input.allocations
         .filter((allocation) =>
           stripeInvoicePaymentReferenceKey(allocation) === paymentKey
         )
         .reduce((sum, allocation) => sum + allocation.amountPaid, 0);
-      const refundedAmount = refunds
+      const refundedAmount = input.refunds
         .filter((refund) =>
           stripeRefundPaymentReferenceKey(refund) === paymentKey
         )
         .reduce((sum, refund) => sum + refund.amount, 0);
       return allocatedAmount > 0 && refundedAmount >= allocatedAmount;
     });
-  return {
-    fullyRefunded:
-      paidAmount > 0 &&
-      baseFullyRefunded,
-    outstandingDispute: disputes.some(hasStripeDisputeFundsOutstanding),
-  };
 }
 
 function compareHostedStripeBaseEntitlementInvoice(

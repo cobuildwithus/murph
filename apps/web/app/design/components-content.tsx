@@ -93,6 +93,7 @@ import { buildWhoopAppleHealthSetupGuide } from "@/src/lib/device-sync/whoop-app
 import { MurphAssistantStylePicker } from "@/src/components/murph/murph-assistant-style-picker";
 import {
   FamilyInvitePaymentRecoveryContent,
+  FamilyPlanChangeConfirmationContent,
   HostedFamilyBillingRecoveryNotice,
   HostedFamilyManager,
 } from "@/src/components/settings/hosted-family-settings-actions";
@@ -1096,6 +1097,22 @@ export function ComponentsContent() {
                 paymentUrl="https://invoice.stripe.com/i/design-family-seat"
                 onClose={() => {}}
                 onFinish={() => {}}
+              />
+            </HostedBillingRecoveryPreview>
+            <HostedBillingRecoveryPreview
+              label="Family member · Pulse to Edge · immediate charge"
+              state="family-member-pulse-to-edge-immediate-charge"
+            >
+              <FamilyPlanChangeConfirmationContent
+                canRemove={false}
+                fromTier={{ name: "Pulse", planCode: "pulse", priceLabel: "$7/mo" }}
+                isActing={false}
+                isOwner={false}
+                label="Parent"
+                onCancel={() => {}}
+                onConfirm={() => {}}
+                onRemove={() => {}}
+                toTier={{ name: "Edge", planCode: "edge", priceLabel: "$19/mo" }}
               />
             </HostedBillingRecoveryPreview>
             <HostedBillingRecoveryPreview

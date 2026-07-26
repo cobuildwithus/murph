@@ -64,6 +64,8 @@ const ownerSnapshot = {
 
 beforeEach(async () => {
   vi.clearAllMocks();
+  process.env.HOSTED_APP_SESSION_HMAC_KEY =
+    Buffer.alloc(32, 31).toString("base64url");
   mocks.assertHostedOnboardingMutationOrigin.mockImplementation(() => {});
   mocks.hostedAccountGroupFindUnique.mockResolvedValue({ id: "hbag_family" });
   mocks.getPrisma.mockReturnValue({
@@ -80,6 +82,7 @@ beforeEach(async () => {
   });
   mocks.requireHostedAppSessionFromRequest.mockResolvedValue({
     member: { billingStatus: "active", id: "member_owner", suspendedAt: null },
+    sessionId: "session_owner",
   });
   mocks.readHostedOnboardingEnvironment.mockReturnValue({
     publicBaseUrl: "https://app.murph.test",
@@ -130,10 +133,14 @@ beforeEach(async () => {
   memberRemoveRoute = await import("../app/api/settings/billing/family/members/[memberId]/route");
 });
 
-function inviteRequest(body: Record<string, unknown>) {
+function inviteRequest(body: Record<string, unknown>, cookie?: string) {
   return new Request("https://join.example.test/api/settings/billing/family/invite", {
     body: JSON.stringify(body),
-    headers: { "content-type": "application/json", origin: "https://join.example.test" },
+    headers: {
+      "content-type": "application/json",
+      ...(cookie ? { cookie } : {}),
+      origin: "https://join.example.test",
+    },
     method: "POST",
   });
 }
@@ -166,6 +173,7 @@ test("issues a family invite and returns safe share links", async () => {
       targetPhoneNumber: "+48600000000",
     }),
   );
+  expect(response.headers.get("set-cookie")).toContain("Max-Age=0");
 });
 
 test("returns a Telegram share link only for a Telegram-bound invite", async () => {
@@ -261,6 +269,11 @@ test("adds one paid seat and retries when the plan is full", async () => {
 });
 
 test("preserves the actionable payment URL when adding a Family seat requires authentication", async () => {
+  const requestPayload = {
+    addSeatIfNeeded: true,
+    targetLabel: "Dad",
+    targetPhoneNumber: "+48600000001",
+  };
   const seatLimit = () =>
     hostedOnboardingError({
       code: "HOSTED_FAMILY_SEAT_LIMIT_REACHED",
@@ -274,7 +287,7 @@ test("preserves the actionable payment URL when adding a Family seat requires au
     hostedOnboardingError({
       code: "HOSTED_FAMILY_CAPACITY_PAYMENT_REQUIRED",
       details: {
-        paymentUrl: "https://invoice.stripe.test/in_family_capacity",
+        paymentUrl: "https://invoice.stripe.com/i/in_family_capacity",
       },
       httpStatus: 409,
       message: "Authenticate the Family seat charge in Stripe to finish this change.",
@@ -283,7 +296,7 @@ test("preserves the actionable payment URL when adding a Family seat requires au
   );
 
   const response = await inviteRoute.POST(
-    inviteRequest({ addSeatIfNeeded: true, targetLabel: "Dad", targetPhoneNumber: "+48600000001" }),
+    inviteRequest(requestPayload),
   );
 
   expect(response.status).toBe(409);
@@ -291,7 +304,7 @@ test("preserves the actionable payment URL when adding a Family seat requires au
     error: {
       code: "HOSTED_FAMILY_CAPACITY_PAYMENT_REQUIRED",
       details: {
-        paymentUrl: "https://invoice.stripe.test/in_family_capacity",
+        paymentUrl: "https://invoice.stripe.com/i/in_family_capacity",
       },
       message: "Authenticate the Family seat charge in Stripe to finish this change.",
       retryable: false,
@@ -300,7 +313,41 @@ test("preserves the actionable payment URL when adding a Family seat requires au
   expect(mocks.updateHostedFamilyPlanCapacities).toHaveBeenCalledTimes(1);
   expect(mocks.waitForHostedFamilyPlanCapacities).not.toHaveBeenCalled();
   expect(mocks.issueHostedFamilyInviteTx).toHaveBeenCalledTimes(2);
+  const setCookie = response.headers.get("set-cookie");
+  const continuationToken = readCookieValue(setCookie);
+  const { readHostedFamilyInviteContinuationToken } = await import(
+    "@/src/lib/hosted-onboarding/family-invite-continuation"
+  );
+  expect(readHostedFamilyInviteContinuationToken({
+    groupId: "hbag_family",
+    memberId: "member_owner",
+    sessionId: "session_owner",
+    token: continuationToken,
+  })).toEqual({
+    paymentUrl: "https://invoice.stripe.com/i/in_family_capacity",
+    payload: {
+      addSeatIfNeeded: true,
+      planCode: "pulse",
+      targetLabel: "Dad",
+      targetPhoneNumber: "+48600000001",
+    },
+  });
+
+  const finishedResponse = await inviteRoute.POST(
+    inviteRequest(requestPayload, setCookie?.split(";")[0]),
+  );
+
+  expect(finishedResponse.status).toBe(200);
+  expect(finishedResponse.headers.get("set-cookie")).toContain("Max-Age=0");
 });
+
+function readCookieValue(setCookie: string | null): string {
+  const value = setCookie?.split(";")[0]?.split("=").slice(1).join("=");
+  if (!value) {
+    throw new Error("Continuation cookie value was missing.");
+  }
+  return decodeURIComponent(value);
+}
 
 test("reuses a concurrently-created invite on the pre-buy re-check (no purchase)", async () => {
   mocks.issueHostedFamilyInviteTx

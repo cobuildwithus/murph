@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   getHostedPageAuthSnapshot: vi.fn(),
   getHostedPrivySession: vi.fn(),
   getPrisma: vi.fn(),
+  readHostedFamilyInviteContinuationCookie: vi.fn(),
   readHostedPulseTrialContinuationCookie: vi.fn(),
   PulseTrialBillingContinuation: vi.fn(() =>
     React.createElement("div", null, "Finishing Pulse automatically")),
@@ -137,6 +138,11 @@ vi.mock("@/src/lib/hosted-onboarding/page-auth", () => ({
 vi.mock("@/src/lib/hosted-onboarding/billing-pulse-trial-continuation", () => ({
   readHostedPulseTrialContinuationCookie:
     mocks.readHostedPulseTrialContinuationCookie,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/family-invite-continuation", () => ({
+  readHostedFamilyInviteContinuationCookie:
+    mocks.readHostedFamilyInviteContinuationCookie,
 }));
 
 vi.mock("@/src/lib/prisma", () => ({
@@ -291,6 +297,7 @@ beforeEach(() => {
     ledgerVersion: 0n,
   });
   mocks.readHostedSecureApprovalStatus.mockResolvedValue({ status: "unavailable" });
+  mocks.readHostedFamilyInviteContinuationCookie.mockResolvedValue(null);
   mocks.readHostedPulseTrialContinuationCookie.mockResolvedValue(null);
 });
 
@@ -977,6 +984,7 @@ test("SettingsPage keeps a former Family purchase status-only despite duplicate 
     undefined,
   );
   expect(mocks.HostedFamilySettings).toHaveBeenCalledWith({
+    initialInvitePaymentContinuation: null,
     ownerSnapshot: familyOwner,
     usageTopUpActiveMemberId: "member_family",
     usageTopUpActivePurchase: activePurchase,
@@ -1252,8 +1260,20 @@ test("SettingsPage does not mark an unpaid family owner group as the current pla
     linkedAccounts: [],
     session: {
       privyUserId: "did:privy:user_123",
+      sessionId: "session_123",
     },
   });
+  const inviteContinuation = {
+    paymentUrl: "https://invoice.stripe.com/i/in_family_capacity",
+    payload: {
+      addSeatIfNeeded: true,
+      planCode: "edge",
+      targetEmail: "family.member@example.test",
+    },
+  } as const;
+  mocks.readHostedFamilyInviteContinuationCookie.mockResolvedValueOnce(
+    inviteContinuation,
+  );
   mocks.readHostedFamilyOwnerSnapshotForMember.mockResolvedValue({
     billingActive: false,
     billingStatus: "not_started",
@@ -1293,10 +1313,18 @@ test("SettingsPage does not mark an unpaid family owner group as the current pla
   }), undefined);
   expect(mocks.HostedFamilySettings).toHaveBeenCalledWith(
     expect.objectContaining({
+      initialInvitePaymentContinuation: inviteContinuation,
       usageTopUpOffers: [],
     }),
     undefined,
   );
+  expect(
+    mocks.readHostedFamilyInviteContinuationCookie,
+  ).toHaveBeenCalledWith({
+    groupId: "group_123",
+    memberId: "member_123",
+    sessionId: "session_123",
+  });
 });
 
 test("SettingsPage keeps Family settings available when the top-up catalog is unavailable", async () => {

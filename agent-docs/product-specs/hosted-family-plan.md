@@ -108,6 +108,16 @@ are terminal rather than indefinite pending. These outcomes come from a
 canonical invoice plus InvoicePayments read so the PaymentIntent state, not URL
 presence, controls the classification.
 
+When auto-adding a seat for an invite returns payment-required, Settings keeps
+the exact invite intent and Stripe-hosted recovery URL in a short-lived
+encrypted HttpOnly cookie. The claim is bound to the authenticated member,
+first-party app session, and Family group, expires after 30 minutes, keeps
+contact details out of URLs, and is cleared after the invite succeeds. It is
+only reload-safe presentation state: the invite route still re-runs the
+canonical seat and invite checks, and the cookie grants no billing or group
+authority by itself. Do not add a pending-invite table or second billing owner
+for this browser continuation.
+
 Changing a member's tier is one owner-confirmed action. Web records the target
 in the membership's nullable `pendingPlanCode` while the current tier and access
 remain active, then submits the exact source-to-target composition under the

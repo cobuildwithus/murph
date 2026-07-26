@@ -3,7 +3,7 @@
 import type { HostedBillingStatus } from "@prisma/client";
 import { Check, Copy, Loader2 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useMemo, useRef, useState } from "react";
+import { type ReactNode, useMemo, useRef, useState } from "react";
 
 import {
   HostedOnboardingApiError,
@@ -26,6 +26,7 @@ import { Label } from "@/src/components/ui/label";
 import { PhoneNumberInput } from "@/src/components/ui/phone-number-input";
 import { SegmentedControl } from "@/src/components/ui/segmented-control";
 import type { HostedPlanCode } from "@/src/lib/hosted-onboarding/billing-plans";
+import type { HostedFamilyInvitePaymentContinuation } from "@/src/lib/hosted-onboarding/family-invite-continuation-contract";
 import {
   normalizeHostedEmailAddress,
   normalizeHostedTelegramUsernameForLookup,
@@ -505,9 +506,88 @@ export function HostedFamilyBillingRecoveryNotice(props: {
   );
 }
 
+export function FamilyPlanChangeConfirmationContent(props: {
+  actionError?: string | null;
+  canRemove: boolean;
+  fromTier: FamilyManagerTier;
+  isActing: boolean;
+  isOwner: boolean;
+  label: string;
+  onCancel: () => void;
+  onConfirm: () => void;
+  onRemove: () => void;
+  toTier: FamilyManagerTier;
+  topUpAction?: ReactNode;
+}) {
+  const upgrading = props.toTier.planCode === "edge";
+  const subject = props.isOwner ? "your plan" : props.label;
+
+  return (
+    <>
+      <DialogHeader className="pr-10">
+        <DialogTitle className="font-serif text-2xl/7 font-semibold tracking-normal text-[#2d3436]">
+          {props.isOwner ? "Manage your plan" : `Manage ${props.label}`}
+        </DialogTitle>
+        <DialogDescription className="text-sm leading-6 text-[#736a58]">
+          {upgrading
+            ? `Upgrade ${subject} from ${props.fromTier.name} to ${props.toTier.name} at ${props.toTier.priceLabel}. Stripe will charge the prorated difference now and may ask you to approve it.`
+            : `Downgrade ${subject} from ${props.fromTier.name} to ${props.toTier.name} at ${props.toTier.priceLabel}. Any prorated credit will apply to your next invoice.`}
+        </DialogDescription>
+      </DialogHeader>
+
+      {props.actionError ? (
+        <p
+          role="alert"
+          className="rounded-lg border border-destructive/20 bg-destructive/5 p-3 text-sm text-destructive [overflow-wrap:anywhere]"
+        >
+          {props.actionError}
+        </p>
+      ) : null}
+
+      <div className="flex flex-col gap-2">
+        <Button
+          type="button"
+          size="xl"
+          onClick={props.onConfirm}
+          disabled={props.isActing}
+          className="w-full"
+        >
+          {props.isActing
+            ? "Working..."
+            : upgrading ? "Upgrade to Edge" : "Downgrade to Pulse"}
+        </Button>
+        {props.topUpAction}
+        {props.canRemove ? (
+          <Button
+            type="button"
+            size="xl"
+            variant="destructive"
+            onClick={props.onRemove}
+            disabled={props.isActing}
+            className="w-full"
+          >
+            Remove from Family
+          </Button>
+        ) : null}
+        <Button
+          type="button"
+          size="xl"
+          variant="ghost"
+          onClick={props.onCancel}
+          disabled={props.isActing}
+          className="w-full"
+        >
+          Not now
+        </Button>
+      </div>
+    </>
+  );
+}
+
 export function HostedFamilyManager(props: {
   billingActive: boolean;
   billingStatus: HostedBillingStatus;
+  initialInvitePaymentContinuation?: HostedFamilyInvitePaymentContinuation | null;
   invites: FamilyManagerInvite[];
   members: FamilyManagerMember[];
   plans: Record<HostedPlanCode, {
@@ -535,7 +615,10 @@ export function HostedFamilyManager(props: {
   usageTopUpReturnMemberId?: string | null;
 }) {
   const router = useRouter();
-  const [inviteOpen, setInviteOpen] = useState(false);
+  const [inviteOpen, setInviteOpen] = useState(
+    () => props.initialInvitePaymentContinuation !== null &&
+      props.initialInvitePaymentContinuation !== undefined,
+  );
   const phoneCountryCodeHint = usePhoneCountryCode();
   const [phoneCountryCode, setPhoneCountryCode] = useState(() =>
     resolveInvitePhoneCountryOption(phoneCountryCodeHint).code
@@ -550,7 +633,9 @@ export function HostedFamilyManager(props: {
   const inviteRequestInFlight = useRef(false);
   const [inviteError, setInviteError] = useState<string | null>(null);
   const [invitePaymentRecovery, setInvitePaymentRecovery] =
-    useState<FamilyInvitePaymentRecovery | null>(null);
+    useState<FamilyInvitePaymentRecovery | null>(
+      () => props.initialInvitePaymentContinuation ?? null,
+    );
   const [createdInvite, setCreatedInvite] = useState<CreatedFamilyInvite | null>(null);
   const [createdInviteCopied, setCreatedInviteCopied] = useState(false);
   const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
@@ -828,6 +913,13 @@ export function HostedFamilyManager(props: {
     if (!invitePaymentRecovery) {
       resetInviteForm();
     }
+  }
+
+  if (
+    pendingAction?.kind === "change-plan" &&
+    (!pendingSourceTier || !pendingTargetTier)
+  ) {
+    throw new Error("Family plan change tiers are unavailable.");
   }
 
   return (
@@ -1324,54 +1416,31 @@ export function HostedFamilyManager(props: {
         }
       }}>
         <DialogContent className={DIALOG_CLASS} showCloseButton={!isActing}>
-          <DialogHeader className="pr-10">
-            <DialogTitle className="font-serif text-2xl/7 font-semibold tracking-normal text-[#2d3436]">
-              {pendingAction?.kind === "remove-member"
-                ? "Remove family member"
-                : pendingAction?.kind === "change-plan"
-                  ? pendingAction.isOwner ? "Manage your plan" : `Manage ${pendingAction.label}`
-                    : "Cancel invite"}
-            </DialogTitle>
-            <DialogDescription className="text-sm leading-6 text-[#736a58]">
-              {pendingAction?.kind === "remove-member"
-                ? `Remove ${pendingAction.label}? They keep their own Murph account and data, but their access through your Family plan ends.`
-                : pendingAction?.kind === "change-plan"
-                  ? pendingAction.to === "edge"
-                    ? `Upgrade ${pendingAction.isOwner ? "your plan" : pendingAction.label} from ${pendingSourceTier?.name} to ${pendingTargetTier?.name} at ${pendingTargetTier?.priceLabel}. The prorated difference will appear on your next invoice.`
-                    : `Downgrade ${pendingAction.isOwner ? "your plan" : pendingAction.label} from ${pendingSourceTier?.name} to ${pendingTargetTier?.name} at ${pendingTargetTier?.priceLabel}. Any prorated credit will apply to your next invoice.`
-                  : `Cancel the invite for ${pendingAction?.label ?? "this person"}? The invite link stops working.`}
-            </DialogDescription>
-          </DialogHeader>
-
-          {actionError ? (
-            <p
-              role="alert"
-              className="rounded-lg border border-destructive/20 bg-destructive/5 p-3 text-sm text-destructive [overflow-wrap:anywhere]"
-            >
-              {actionError}
-            </p>
-          ) : null}
-
-          <div className="flex flex-col gap-2">
-            <Button
-              type="button"
-              size="xl"
-              variant={pendingAction?.kind === "remove-member" || pendingAction?.kind === "cancel-invite"
-                ? "destructive"
-                : "default"}
-              onClick={() => void confirmPendingAction()}
-              disabled={isActing}
-              className="w-full"
-            >
-              {isActing
-                ? "Working..."
-                : pendingAction?.kind === "remove-member"
-                  ? "Remove member"
-                  : pendingAction?.kind === "change-plan"
-                    ? pendingAction.to === "edge" ? "Upgrade to Edge" : "Downgrade to Pulse"
-                      : "Cancel invite"}
-            </Button>
-            {pendingAction?.kind === "change-plan" ? (
+          {pendingAction?.kind === "change-plan" &&
+              pendingSourceTier &&
+              pendingTargetTier ? (
+            <FamilyPlanChangeConfirmationContent
+              actionError={actionError}
+              canRemove={pendingAction.canRemove}
+              fromTier={pendingSourceTier}
+              isActing={isActing}
+              isOwner={pendingAction.isOwner}
+              label={pendingAction.label}
+              onCancel={() => {
+                setPendingAction(null);
+                setActionError(null);
+              }}
+              onConfirm={() => void confirmPendingAction()}
+              onRemove={() => {
+                setActionError(null);
+                setPendingAction({
+                  id: pendingAction.id,
+                  kind: "remove-member",
+                  label: pendingAction.label,
+                });
+              }}
+              toTier={pendingTargetTier}
+              topUpAction={(
               <HostedUsageTopUpDialog
                 key={pendingAction.id}
                 activePurchase={
@@ -1393,39 +1462,63 @@ export function HostedFamilyManager(props: {
                 triggerSize="xl"
                 triggerVariant="secondary"
               />
-            ) : null}
-            {pendingAction?.kind === "change-plan" && pendingAction.canRemove ? (
-              <Button
-                type="button"
-                size="xl"
-                variant="destructive"
-                onClick={() => {
-                  setActionError(null);
-                  setPendingAction({
-                    id: pendingAction.id,
-                    kind: "remove-member",
-                    label: pendingAction.label,
-                  });
-                }}
-                disabled={isActing}
-                className="w-full"
-              >
-                Remove from Family
-              </Button>
-            ) : null}
-            <Button
-              type="button"
-              size="xl"
-              variant="ghost"
-              onClick={() => { setPendingAction(null); setActionError(null); }}
-              disabled={isActing}
-              className="w-full"
-            >
-              {pendingAction?.kind === "change-plan"
-                ? "Not now"
-                : "Keep"}
-            </Button>
-          </div>
+              )}
+            />
+          ) : (
+            <>
+              <DialogHeader className="pr-10">
+                <DialogTitle className="font-serif text-2xl/7 font-semibold tracking-normal text-[#2d3436]">
+                  {pendingAction?.kind === "remove-member"
+                    ? "Remove family member"
+                    : "Cancel invite"}
+                </DialogTitle>
+                <DialogDescription className="text-sm leading-6 text-[#736a58]">
+                  {pendingAction?.kind === "remove-member"
+                    ? `Remove ${pendingAction.label}? They keep their own Murph account and data, but their access through your Family plan ends.`
+                    : `Cancel the invite for ${pendingAction?.label ?? "this person"}? The invite link stops working.`}
+                </DialogDescription>
+              </DialogHeader>
+
+              {actionError ? (
+                <p
+                  role="alert"
+                  className="rounded-lg border border-destructive/20 bg-destructive/5 p-3 text-sm text-destructive [overflow-wrap:anywhere]"
+                >
+                  {actionError}
+                </p>
+              ) : null}
+
+              <div className="flex flex-col gap-2">
+                <Button
+                  type="button"
+                  size="xl"
+                  variant="destructive"
+                  onClick={() => void confirmPendingAction()}
+                  disabled={isActing}
+                  className="w-full"
+                >
+                  {isActing
+                    ? "Working..."
+                    : pendingAction?.kind === "remove-member"
+                      ? "Remove member"
+                      : "Cancel invite"}
+                </Button>
+                <Button
+                  type="button"
+                  size="xl"
+                  variant="ghost"
+                  onClick={() => {
+                    setPendingAction(null);
+                    setActionError(null);
+                  }}
+                  disabled={isActing}
+                  className="w-full"
+                >
+                  Keep
+                </Button>
+              </div>
+            </>
+          )}
         </DialogContent>
       </Dialog>
     </div>

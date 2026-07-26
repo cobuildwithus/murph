@@ -716,6 +716,15 @@ export async function deleteHostedAccountData(input: {
     checkoutResult.stripeCustomerId,
     ...familyBillingRefs.map((familyBillingRef) => familyBillingRef.stripeCustomerId),
   ]);
+  const stripeCustomerScope =
+    buildHostedStripeCustomerScopeForAccountDeletion({
+      knownStripeCustomerIds,
+      recoveredStripeCustomerReservation,
+    });
+  await assertHostedStripeCustomersSafeForAccountDeletion({
+    memberId: input.memberId,
+    stripeCustomerScope,
+  });
   await deleteHostedPhoneCallsForAccountDeletion({
     memberIds: deletionMemberIds,
     prisma: input.prisma,
@@ -754,15 +763,6 @@ export async function deleteHostedAccountData(input: {
       .filter((id): id is string => typeof id === "string" && id.length > 0),
     memberId: input.memberId,
     stripeSubscriptionId,
-  });
-  const stripeCustomerScope =
-    buildHostedStripeCustomerScopeForAccountDeletion({
-      knownStripeCustomerIds,
-      recoveredStripeCustomerReservation,
-    });
-  await assertHostedStripeCustomersSafeForAccountDeletion({
-    memberId: input.memberId,
-    stripeCustomerScope,
   });
   await closeHostedUsageCreditPurchasesForAccountDeletion({
     memberIds: deletionMemberIds,
@@ -1257,7 +1257,10 @@ async function assertHostedStripeCustomersSafeForAccountDeletion(input: {
   memberId: string;
   stripeCustomerScope: HostedAccountDeletionStripeCustomerScope;
 }): Promise<void> {
-  if (input.stripeCustomerScope.stripeCustomerIds.length === 0) {
+  // Only a replayed reservation is new, previously unowned provider state.
+  // Existing Customer deletion stays on the established post-delete,
+  // best-effort path instead of introducing a new balance policy gate.
+  if (input.stripeCustomerScope.pulseTrialReservationIdByCustomerId.size === 0) {
     return;
   }
   const stripe = getHostedOnboardingStripe();
@@ -1266,17 +1269,19 @@ async function assertHostedStripeCustomersSafeForAccountDeletion(input: {
       code: "ACCOUNT_DELETION_STRIPE_NOT_CONFIGURED",
       httpStatus: 500,
       message:
-        "Billing is not configured, so your Stripe balance could not be verified. Contact support to delete your account.",
+        "Billing is not configured, so the recovered Stripe Customer could not be verified. Contact support to delete your account.",
     });
   }
 
-  for (const stripeCustomerId of input.stripeCustomerScope.stripeCustomerIds) {
+  for (
+    const [
+      stripeCustomerId,
+      pulseTrialCustomerReservationId,
+    ] of input.stripeCustomerScope.pulseTrialReservationIdByCustomerId
+  ) {
     await inspectHostedStripeCustomerForAccountDeletion({
       memberId: input.memberId,
-      pulseTrialCustomerReservationId:
-        input.stripeCustomerScope.pulseTrialReservationIdByCustomerId.get(
-          stripeCustomerId,
-        ) ?? null,
+      pulseTrialCustomerReservationId,
       stripe,
       stripeCustomerId,
     });
@@ -2163,15 +2168,17 @@ async function deleteHostedStripeCustomerBestEffort(input: {
   }
 
   try {
-    const readiness = await inspectHostedStripeCustomerForAccountDeletion({
-      memberId: input.memberId,
-      pulseTrialCustomerReservationId:
-        input.pulseTrialCustomerReservationId,
-      stripe,
-      stripeCustomerId: input.stripeCustomerId,
-    });
-    if (readiness === "missing") {
-      return { errorCode: null, status: "skipped_no_record" };
+    if (input.pulseTrialCustomerReservationId) {
+      const readiness = await inspectHostedStripeCustomerForAccountDeletion({
+        memberId: input.memberId,
+        pulseTrialCustomerReservationId:
+          input.pulseTrialCustomerReservationId,
+        stripe,
+        stripeCustomerId: input.stripeCustomerId,
+      });
+      if (readiness === "missing") {
+        return { errorCode: null, status: "skipped_no_record" };
+      }
     }
     const deleted = await stripe.customers.del(
       input.stripeCustomerId,

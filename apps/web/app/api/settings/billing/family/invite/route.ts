@@ -15,8 +15,18 @@ import {
   parseHostedPlanCode,
   type HostedPlanCode,
 } from "@/src/lib/hosted-onboarding/billing-plans";
+import {
+  buildHostedFamilyInviteContinuationClearCookie,
+  buildHostedFamilyInviteContinuationCookie,
+} from "@/src/lib/hosted-onboarding/family-invite-continuation";
+import type { HostedFamilyInviteContinuationPayload } from "@/src/lib/hosted-onboarding/family-invite-continuation-contract";
 import { hostedOnboardingError, isHostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
-import { jsonOk, readOptionalJsonObject, withJsonError } from "@/src/lib/hosted-onboarding/http";
+import {
+  jsonError,
+  jsonOk,
+  readOptionalJsonObject,
+  withJsonError,
+} from "@/src/lib/hosted-onboarding/http";
 import { requireHostedAppSessionFromRequest } from "@/src/lib/hosted-onboarding/app-session";
 import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "@/src/lib/hosted-onboarding/shared";
 import { getPrisma } from "@/src/lib/prisma";
@@ -57,8 +67,22 @@ export const POST = withJsonError(async (request: Request) => {
   const canAutoAddSeat =
     body.addSeatIfNeeded === true &&
     hostedFamilyInviteHasReusableTarget({ targetEmail, targetPhoneNumber, targetTelegramUsername });
+  const continuationPayload: HostedFamilyInviteContinuationPayload | null =
+    canAutoAddSeat
+      ? {
+          addSeatIfNeeded: true,
+          planCode,
+          ...(targetEmail ? { targetEmail } : {}),
+          ...(targetLabel ? { targetLabel } : {}),
+          ...(targetPhoneNumber ? { targetPhoneNumber } : {}),
+          ...(targetTelegramUsername ? { targetTelegramUsername } : {}),
+        }
+      : null;
 
-  const issueInvite = () =>
+  type IssuedInvite = Awaited<
+    ReturnType<typeof issueHostedFamilyInviteTx>
+  >;
+  const issueInvite = (): Promise<IssuedInvite> =>
     prisma.$transaction(async (tx) => {
       const group = await ensureHostedAccountGroupForOwnerTx({
         ownerMemberId: auth.member.id,
@@ -85,7 +109,41 @@ export const POST = withJsonError(async (request: Request) => {
     if (!canAutoAddSeat || !isSeatLimitError(error)) {
       throw error;
     }
-    const seatResult = await addSeatThenInvite(prisma, auth.member.id, planCode, issueInvite);
+    let seatResult:
+      | { invite: IssuedInvite }
+      | "syncing"
+      | "unavailable";
+    try {
+      seatResult = await addSeatThenInvite<IssuedInvite>(
+        prisma,
+        auth.member.id,
+        planCode,
+        issueInvite,
+      );
+    } catch (seatError) {
+      const paymentUrl = readHostedFamilyCapacityPaymentUrl(seatError);
+      if (!paymentUrl || !continuationPayload) {
+        throw seatError;
+      }
+      const ownerSnapshot = await readHostedFamilyOwnerSnapshotForMember({
+        memberId: auth.member.id,
+        prisma,
+      });
+      if (!ownerSnapshot) {
+        throw seatError;
+      }
+      return jsonError(seatError, {
+        "Set-Cookie": buildHostedFamilyInviteContinuationCookie({
+          continuation: {
+            paymentUrl,
+            payload: continuationPayload,
+          },
+          groupId: ownerSnapshot.groupId,
+          memberId: auth.member.id,
+          sessionId: auth.sessionId,
+        }),
+      });
+    }
     if (seatResult === "unavailable") {
       throw error;
     }
@@ -103,7 +161,7 @@ export const POST = withJsonError(async (request: Request) => {
 
   const { publicBaseUrl, telegramBotUsername } = readHostedOnboardingEnvironment();
 
-  return jsonOk({
+  const response = jsonOk({
     invite: {
       acceptUrl: buildHostedFamilyInviteAcceptUrl({
         inviteCode: invite.inviteCode,
@@ -123,10 +181,42 @@ export const POST = withJsonError(async (request: Request) => {
       }),
     },
   });
+  response.headers.append(
+    "Set-Cookie",
+    buildHostedFamilyInviteContinuationClearCookie(),
+  );
+  return response;
 });
 
 function isSeatLimitError(error: unknown): boolean {
   return isHostedOnboardingError(error) && error.code === "HOSTED_FAMILY_SEAT_LIMIT_REACHED";
+}
+
+function readHostedFamilyCapacityPaymentUrl(error: unknown): string | null {
+  if (
+    !isHostedOnboardingError(error) ||
+    error.code !== "HOSTED_FAMILY_CAPACITY_PAYMENT_REQUIRED"
+  ) {
+    return null;
+  }
+  const paymentUrl = error.details?.paymentUrl;
+  if (typeof paymentUrl !== "string") {
+    return null;
+  }
+  try {
+    const parsed = new URL(paymentUrl);
+    return parsed.protocol === "https:" &&
+        parsed.username.length === 0 &&
+        parsed.password.length === 0 &&
+        (
+          parsed.origin === "https://invoice.stripe.com" ||
+          parsed.origin === "https://billing.stripe.com"
+        )
+      ? parsed.toString()
+      : null;
+  } catch {
+    return null;
+  }
 }
 
 async function addSeatThenInvite<T>(
