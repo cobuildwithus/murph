@@ -29,11 +29,29 @@ stay off weight, appearance, and health conditions.
 ## Challenge share scopes
 
 Choose the narrowest Vault Share projection scope that matches the agreed
-score. Use daily aggregate records only; never ask for routes, raw workouts,
+score. Use fixed day-keyed projection records only; never ask for routes,
 provider traces, or private 1:1 data for a group challenge.
 
-At kickoff, identify the exact scoring scope and include it with
-`device-sync-status.v0` in the shared read. Do not create a hosted group or post
+Read the scoring scope on its own first. One `read_shared` returns every member
+crossed with every requested scope, and the whole result is refused when it is
+too large, so pulling diagnostics for members who already have data can cost the
+group its entire standings. Only when that first result shows granted scoring
+data actually missing for someone, request `device-sync-status.v0` in a second,
+device-only read for diagnosis. If that diagnostic read is unavailable or too
+large, still publish the standings the first read proved and say only that the
+cause of the missing data is unverified. Never discard verified scoring data
+because diagnostics failed.
+
+Permission-offer evidence belongs to the read that proved it, and only the most
+recent read counts. So if the scoring read shows the scoring scope
+`not_granted` for an eligible participant, post that offer immediately from
+that read, before any device-status read. Do not make the diagnostic read first
+and then try to offer the scoring scope: the later read replaces the evidence
+and the offer is refused, leaving that member with no consent card. When the
+scoring read needs no offer, the diagnostic read may prove and post an offer
+for `device-sync-status.v0` on its own evidence. One offer per turn either way.
+
+Do not create a hosted group or post
 a permission offer as a side effect of challenge kickoff. During later
 standings, Murph may proactively open the existing server-authored permission
 offer only after `read_shared` proves an exact required scope is `not_granted`
@@ -47,10 +65,10 @@ participant may decline it and still join the challenge. The permission offer
 grants only the disclosed Murph group shares; it cannot connect a source or
 grant Apple Health access.
 
-Whenever a challenge turn is authorized under `group-chat`'s rules to send a
-permission request — a `create_join_link` reply, an explicitly requested
-permission flow, or the one evidence-gated standings offer — the request must
-name everything the challenge needs to score, all in that single request:
+Whenever a challenge turn is authorized under `group-chat`'s rules to send an
+*up-front* permission request — a `create_join_link` reply or an explicitly
+requested permission flow — the request must name everything the challenge
+needs to score, all in that single request:
 
 - `group-email.v0` and `device-sync-status.v0`, always.
 - The exact scoring scope (or scopes) for the agreed metric — a steps
@@ -66,6 +84,12 @@ The join page opens with every requested permission preselected; each stays
 an individual choice the member can uncheck before joining. Requesting
 prefills that page — it never pre-grants, so describe it as a prefilled
 request, not as something you cannot preselect and not as automatic sharing.
+
+That all-scopes rule does **not** apply to the evidence-gated standings offer.
+A proactive offer during standings may name only the scopes the most recent
+read proved `not_granted`, because the runtime accepts exactly those and
+spends the turn's one offer attempt on any wider request, leaving the member
+with no card at all.
 
 - Activity minutes for a specific recognized activity alias:
   `{ "projectionKind": "activity-minutes-days.v1", "selector": { "activityKind": "<alias>" } }`
@@ -96,7 +120,14 @@ request, not as something you cannot preselect and not as automatic sharing.
 - Activity score: `activity-score-days.v0`
 - Max heart rate: `max-heart-rate-days.v0`
 - Sleep duration: `sleep-duration-days.v0`
+- Deep sleep minutes: `deep-sleep-days.v0`
+- REM sleep minutes: `rem-sleep-days.v0`
 - Sleep timing: `sleep-times.v0`
+- Every workout's local start time, duration, and type by day: `workouts.v0`
+- The member's currently declared time zone: `time-zone.v0`. This is optional,
+  human-readable context, not a scoring metric or settlement authority. Workout
+  dates still use the event/vault-zone semantics below, and a current time zone
+  neither proves location nor reopens a completed challenge date.
 - VO2 max, resting heart rate, or HRV: `vo2-max-days.v0`,
   `resting-heart-rate-days.v0`, or `hrv-days.v0`
 - Daily nutrition logged from meals: `protein-days.v0` (protein grams),
@@ -107,6 +138,51 @@ request, not as something you cannot preselect and not as automatic sharing.
   every meal that day carries data for that nutrient, so a member with no record
   for a day has no data, which never ranks as zero. Frame standings as the
   nutrient "logged".
+
+For `deep-sleep-days.v0` and `rem-sleep-days.v0`, the producer marks the open
+member-local date `data.provisional: true`; absence means settled. Rank only
+settled records and keep provisional values pending or clearly labeled
+provisional/live until that member's own local day closes. Never substitute a
+reader, group, or schedule clock, disclose the private event/vault timezone, or
+promise a dispatch. Other scopes keep their existing date behavior;
+current-date Steps remains scoreable.
+
+For a challenge such as "any workout starting after 6 PM," normalize the
+configured threshold once at kickoff to an integer number of milliseconds
+after local midnight and persist both the original wording and
+`thresholdLocalMs` in **Rules & metric**. For example, 6:00 PM is
+`64,800,000`. Look up the exact challenge date in that member's `days` and
+score it as qualifying only when
+`days[date].some(w => w.startLocalMs > thresholdLocalMs)`;
+this comparison is deliberately strict, so a workout starting exactly at the
+threshold does not count as after it.
+
+`workouts.v0` reads as `days`, an object keyed by ISO date whose value is
+always that day's list of workouts. Each element discloses only
+`startLocalMs`, `minutes`, and `kindIndex`. Activity kinds are listed once per
+projection in `kinds`, and `kindIndex` is that list's position: a workout's
+activity type is `kinds[workout.kindIndex]`. A generic provider workout with no
+specific sport is disclosed truthfully as `workout`. The projection states `timeSemantics`
+once, and its required value is `canonical-event-zone-or-vault-zone.v0`: the
+local clock uses the canonical event timezone when available and otherwise the
+member vault timezone; it does not prove physical workout location. A settled
+date present with an empty list is a real observed zero and is scoreable as no
+qualifying workout. A date absent from `days` is unobserved: it is not
+`false`, zero, or evidence that no workout happened, so leave the participant
+unscored and report missing data. That same undisclosed zone dates the day.
+
+The projection also carries `calendarClosedThroughDate`, a producer-owned
+completion watermark. Score a workout date only when
+`date <= calendarClosedThroughDate`; a later date is pending, not missing or
+zero, because another workout can still change it. The producer advances this
+watermark only after the date has ended in UTC-12, the last civil timezone to
+leave it. That eligibility threshold can occur up to 26 hours after a member's
+own midnight, but the visible snapshot advances only on the next ordinary
+projection refresh and has no promised finite refresh deadline. Completion can
+never regress when the member's declared timezone changes. Never advance a
+stale snapshot from the reader's clock. A refreshed projection advances the
+watermark through the existing projection wake; do not create a scheduler,
+diagnose missing data, or offer permission for a pending date.
 
 Running zone-specific challenges are not selector-scoped yet. If the group
 explicitly wants zone minutes for all workouts, use `heart-rate-zones-days.v0`;
@@ -147,7 +223,8 @@ vault-cli knowledge upsert --slug challenge-<name>-<start-date> \
 The page carries these sections, kept current:
 
 - **Rules & metric** — the agreed metric, window, and the ruling that
-  settled any dispute about it.
+  settled any dispute about it. For a workout time-of-day rule, also store the
+  original threshold wording and normalized integer `thresholdLocalMs`.
 - **Roster & intros** — each member's name, group-scoped `participantId` (or
   an explicit `unresolved` identity marker), participation state (`in`,
   `pending`, `declined`, or `withdrawn`), any intro or fun fact they volunteered
@@ -164,7 +241,10 @@ The page carries these sections, kept current:
   saved vault image ref of every generated image, and the full script or
   lyrics of any voice memo or song.
 - **Standings snapshots** — dated daily numbers (required: shared data is a
-  short sliding window, so yesterday's standings are only in this page).
+  short sliding window, so yesterday's standings are only in this page). The
+  first settled snapshot for a date owns that published ruling; later imported
+  health data may be recorded as late context, but must not silently rewrite
+  the result the group already received.
 - **Confounders & protected notes** — declared confounders and who is having
   a rough stretch and is off-limits for jokes right now.
 
@@ -253,10 +333,11 @@ Detail is 10/10 or a member explicitly asks this turn for the full rules.
 
    When the hosted group exists, after the model turn has begun and before
    writing the challenge roster, call
-   `murph.group action="read_shared"` exactly once with the exact scoring scope
-   and `device-sync-status.v0`. This is the only kickoff attribution, scoring,
-   and diagnostic read; it must never become prompt preload or other pre-model
-   work. On an interactive group turn, record a returned row's group-scoped
+   `murph.group action="read_shared"` with the exact scoring scope alone. That
+   is the kickoff attribution and scoring read; it must never become prompt
+   preload or other pre-model work. Add the second device-only read described
+   above only when it shows granted scoring data missing for someone. On an
+   interactive group turn, record a returned row's group-scoped
    `participantId` only when an exact current prompt `Sender:` handle appears
    in that row's `currentTurnHandles`. Do not persist or render a handle. Do not
    attach an id from a matching display name, array position, projection
@@ -323,7 +404,8 @@ automation action rules with a `dailyLocal` schedule and
    to the challenge.
 
    After the model turn has begun, call `murph.group action="read_shared"`
-   once with the exact scoring scope and `device-sync-status.v0`. Pass the
+   with the exact scoring scope alone, then the conditional device-only read
+   described under Challenge share scopes. Pass the
    full selector object for selector scopes; a projection kind alone is never
    authority for every selector. Do not request `profile-name.v0`; the direct
    Web snapshot returns a name only when that member's current exact name-sharing
@@ -334,17 +416,23 @@ automation action rules with a `dailyLocal` schedule and
    context as another hosted data path.
 
    `status="ok"` returns every current group member and, for each requested
-   scope, an explicit `grantStatus`, `dataStatus`, and only the bounded records
-   allowed by current exact authority. Each returned `participantId` identifies
-   only that membership in this group; it carries no account, device, provider,
-   or route identity. Left join those members to the challenge roster by exact
+   scope, an explicit `status`, and only the bounded records
+   allowed by current exact authority. A model-size `status="partial"` result
+   keeps every returned member whole and names the still-current capacity-
+   omitted members in `omittedParticipantIds`. Never infer that an omitted
+   member left or infer their score, diagnostic state, or permission state; do
+   not score, diagnose, or offer permission for them, and publish only
+   explicitly partial standings. Each returned `participantId` identifies only
+   that membership in this group; it carries no account, device, provider, or
+   route identity. Left join those members to the challenge roster by exact
    `participantId`, never by display name. Duplicate or changed names do not
    change that join. Leaving and rejoining creates a new `participantId`; do
    not reuse or automatically replace the prior membership id without fresh
    attributable evidence. Never let an empty record set hide an opted-in
-   participant. A challenge participant absent from the current member result
-   is no longer a current member; do not score or diagnose them from retained
-   challenge history. `status="none"` means there is no current hosted group.
+   participant. A challenge participant absent from both the current member
+   rows and `omittedParticipantIds` is no longer a current member; do not score
+   or diagnose them from retained challenge history. `status="none"` means
+   there is no current hosted group.
    `status="unavailable"` returns no roster or projection payload because
    Web could not resolve current authority and the direct bounded snapshot. In
    either case, do not publish standings or try another data path. Say only
@@ -365,35 +453,48 @@ automation action rules with a `dailyLocal` schedule and
    Do not retry on every scheduled run; reconsider only after new attributable
    evidence makes that one association exact.
 
-   Classify every `in` participant in a successful result before composing:
-   `grantStatus="not_granted"` means the group share is not granted;
-   `grantStatus="granted"` plus `dataStatus="missing"` means it is granted but
-   no usable record was returned; and `dataStatus="available"` means use only the
-   returned records. `available` does not make an old record current for this
-   reporting cutoff. Apply `group-chat`'s **Shared fact limits** before scoring.
+   Classify every `in` participant with a returned row in a successful result
+   before composing; capacity-omitted participants remain unverified and
+   unranked:
+   Each projection carries one `status`. `status="not_granted"` means the group
+   share is not granted; `status="missing"` means it is granted but
+   no usable record was returned; and `status="available"` means use only the
+   returned records. If every record otherwise eligible under that scope's
+   producer-owned completion marker is pending, keep the participant pending,
+   skip diagnostics and permission offers, and describe the applicable
+   settlement rule. Apply `group-chat`'s
+   **Shared fact limits** before scoring.
+   A genuinely missing snapshot still follows the recovery evidence order
+   below.
    Never infer a grant from a record or a record from a grant. Never reuse
    remembered numbers — wrong scores turn jokes into noise. A recorded zero is
    a real score; missing data is never a zero.
 3. Apply this evidence order to each participant and stop at the first match:
 
-   - The scoring projection is `granted` and `available`, with current
-     challenge-metric data through the reporting cutoff: rank the participant
-     from that metric evidence.
+   - The scoring projection is `granted` and `available`, with challenge-metric
+     data eligible under the scope's applicable date behavior: rank the
+     participant from that metric evidence.
+   - A completed-date scoring projection is `granted` and `available`, but every
+     record otherwise eligible under the scope's producer-owned completion
+     marker is pending: keep the participant pending and unranked; do not enter
+     diagnostics or permission offers.
    - The scoring projection is `not_granted`: say that the participant has not
      shared that challenge metric with this group. Unless their sharing choices
      record an explicit decline or prior handled offer action for that exact
      scope, include the scope in the one proactive permission offer described
      below.
-   - The scoring projection is `granted` but has no current metric through the
-     reporting cutoff, while `device-sync-status.v0` is `not_granted`: unless
+   - The scoring projection is `granted` but is genuinely missing usable
+     challenge-metric data for reasons other than completed-date eligibility,
+     while `device-sync-status.v0` is `not_granted`: unless
      their sharing choices record an explicit decline or prior handled offer
      action for that exact scope, include the diagnostic scope in the one
      proactive permission offer described below.
-   - The scoring projection is `granted` but has no current metric through the
-     reporting cutoff, while a recent
-     `device-sync-status.v0` record is `available`: you may state its literal
-     source label, coarse status, and, only when useful, the accurately named
-     connection-wide sync-job completion time described below. Treat a
+   - The scoring projection is `granted` but is genuinely missing usable
+     challenge-metric data for reasons other than completed-date eligibility,
+     while a recent `device-sync-status.v0` record is `available`: you may
+     state its literal source label, coarse status, and, only when useful, the
+     accurately named connection-wide sync-job completion time described
+     below. Treat a
      projection whose `observedAt` is more than two local calendar days old as
      stale and unverified. Only
      `needs-reconnect` and `disconnected` support a direct reconnect action,
@@ -409,11 +510,11 @@ automation action rules with a `dailyLocal` schedule and
      Apple Health status, follow the status-specific rules above. If the recent
      projection has an empty `sources` list, say only that this diagnostic
      result contains no visible sources and suggest a private source check.
-   - The scoring projection is `granted` but has no current metric through the
-     reporting cutoff, and diagnostic data is also `granted` but `missing` or
-     stale: report that diagnostic state without guessing about permissions, a
-     disconnected device, source freshness, or whether the participant opened
-     the app.
+   - The scoring projection is `granted` but is genuinely missing usable
+     challenge-metric data for reasons other than completed-date eligibility,
+     and diagnostic data is also `granted` but `missing` or stale: report that
+     diagnostic state without guessing about permissions, a disconnected
+     device, source freshness, or whether the participant opened the app.
 
    Apple does not expose HealthKit read authorization, so never say that a
    participant denied, forgot, or has not approved Apple Health Steps. The
@@ -425,9 +526,9 @@ automation action rules with a `dailyLocal` schedule and
 4. Lead with completeness: say whether the standings are complete or partial
    and how many `in` participants have current metric data. Keep ranked
    participants and people waiting on data in separate parts of the same
-   message. Name every `in` participant who is missing current data, state the
-   evidence-backed status, and give the smallest useful action. Never present a
-   partial table as the full standings.
+   message. Name every `in` participant who is missing current data or pending
+   a completed date, state the evidence-backed status, and give the smallest
+   useful action. Never present a partial table as the full standings.
 
    When current evidence is `not_granted`, state the exact missing group share
    in ordinary language in this same standings response and address the
@@ -436,12 +537,13 @@ automation action rules with a `dailyLocal` schedule and
 
    After `read_shared`, collect the exact scopes eligible for a proactive offer:
    use the scoring scope when that scope is `not_granted`; use
-   `device-sync-status.v0` only when the scoring scope is granted but has no
-   current metric and the diagnostic scope is `not_granted`. Exclude a scope
-   only when every affected participant has either explicitly declined that
-   exact scope or has a handled offer action recorded for that exact participant
-   and scope. A prior handled action for one participant does not cover a newly
-   affected participant. Deduplicate the list.
+   `device-sync-status.v0` only when the scoring scope is granted but genuinely
+   lacks usable metric data and the diagnostic scope is `not_granted`. A
+   completed-date `pending` participant is never eligible for either offer.
+   Exclude a scope only when every affected participant has either explicitly
+   declined that exact scope or has a handled offer action recorded for that
+   exact participant and scope. A prior handled action for one participant does
+   not cover a newly affected participant. Deduplicate the list.
 
    When that list is nonempty and the narrow scheduled action is available,
    call `murph.group action="post_join_offer"` exactly once after the read with
