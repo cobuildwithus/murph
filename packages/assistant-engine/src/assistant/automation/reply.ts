@@ -132,6 +132,11 @@ const ASSISTANT_PROVIDER_USAGE_LIMIT_SUPPRESSION_REASON =
   'assistant provider usage limit reached; auto-reply suppressed until usage is restored.'
 const ASSISTANT_NO_REPLY_SUPPRESSION_REASON =
   'assistant finished without a reply'
+const ASSISTANT_HOSTED_GROUP_REPLY_OVERTAKEN_SUPPRESSION_REASON =
+  'assistant already replied after this group input was received'
+const ASSISTANT_HOSTED_GROUP_REPLY_ACTIVE_DEFER_REASON =
+  'an assistant reply in this group is still being delivered; will retry after delivery settles'
+const ASSISTANT_HOSTED_GROUP_REPLY_CONTINUATION_DELAY_MS = 1_000
 
 type AssistantAutoReplyReceiptRecord =
   Awaited<ReturnType<typeof listAssistantTurnReceipts>>[number]
@@ -704,6 +709,12 @@ async function resolveAssistantAutoReplyGroupOutcome(input: {
     userMessageContent: decision.userMessageContent,
     vault: input.vault,
   })
+  const hostedGroupReplyContinuation =
+    resolveHostedGroupReplyScanContinuation({
+      context: acceptedContext,
+      executionContext: input.executionContext,
+      result,
+    })
   if (isAssistantNoReplyWithoutDeliveryWork(result)) {
     return {
       context: acceptedContext,
@@ -728,6 +739,7 @@ async function resolveAssistantAutoReplyGroupOutcome(input: {
       deferredTerminalSuppressionEvidence,
       outcome: {
         ...createDeferredDeliveryGroupOutcome(result),
+        ...hostedGroupReplyContinuation,
         ...(terminalLinqCleanup ? { terminalLinqCleanup } : {}),
       },
       terminalSuppressedInputIds: [...terminalSuppressedInputIds],
@@ -739,9 +751,34 @@ async function resolveAssistantAutoReplyGroupOutcome(input: {
     deferredTerminalSuppressionEvidence,
     outcome: {
       ...createSuccessfulReplyGroupOutcome(result),
+      ...hostedGroupReplyContinuation,
       ...(terminalLinqCleanup ? { terminalLinqCleanup } : {}),
     },
     terminalSuppressedInputIds: [...terminalSuppressedInputIds],
+  }
+}
+
+function resolveHostedGroupReplyScanContinuation(input: {
+  context: AssistantAutoReplyGroupContext
+  executionContext?: AssistantExecutionContext | null
+  result: AssistantAutoReplySendResult
+}): Partial<
+  Pick<AssistantAutoReplyGroupOutcome, 'nextWakeAt' | 'stopScanning'>
+> {
+  if (
+    !input.executionContext?.hosted ||
+    input.context.firstItem.summary.source !== 'linq' ||
+    input.context.firstItem.summary.conversation.threadIsDirect !== false ||
+    input.result.responseDisposition === 'none'
+  ) {
+    return {}
+  }
+
+  return {
+    nextWakeAt: computeAssistantAutomationRetryAt(
+      ASSISTANT_HOSTED_GROUP_REPLY_CONTINUATION_DELAY_MS,
+    ),
+    stopScanning: true,
   }
 }
 
@@ -1285,6 +1322,24 @@ async function evaluateAssistantAutoReplyGroup(input: {
   }) ?? null
   if (autoReplySkipReason) {
     return createAdvancingSkipDecision(autoReplySkipReason)
+  }
+
+  const hostedGroupReplyState =
+    await resolveHostedGroupAutoReplyOvertake({
+      context: input.group,
+      executionContext: input.executionContext,
+      historyReader: input.historyReader,
+      primaryInput: primaryReplyInput,
+    })
+  if (hostedGroupReplyState === 'suppress') {
+    return createAdvancingSkipDecision(
+      ASSISTANT_HOSTED_GROUP_REPLY_OVERTAKEN_SUPPRESSION_REASON,
+    )
+  }
+  if (hostedGroupReplyState === 'defer') {
+    return createDeferredSkipDecision(
+      ASSISTANT_HOSTED_GROUP_REPLY_ACTIVE_DEFER_REASON,
+    )
   }
 
   const preparedInput = await prepareAssistantAutoReplyInputWithContext({
@@ -4044,6 +4099,120 @@ type AssistantAutoReplyOutboxMessageDelivery = Extract<
   AssistantAutoReplyOutboxDelivery,
   { kind?: 'message' }
 >
+
+async function resolveHostedGroupAutoReplyOvertake(input: {
+  context: AssistantAutoReplyGroupContext
+  executionContext?: AssistantExecutionContext | null
+  historyReader: AssistantAutoReplyHistoryReader
+  primaryInput: AssistantAutoReplyPrimaryInput
+}): Promise<'defer' | 'none' | 'suppress'> {
+  if (
+    !input.executionContext?.hosted ||
+    normalizeNullableString(input.primaryInput.source) !== 'linq' ||
+    input.primaryInput.conversation.threadIsDirect !== false
+  ) {
+    return 'none'
+  }
+
+  const latestReceivedAtMs = readLatestAssistantAutoReplyGroupReceivedAtMs(
+    input.context,
+  )
+  if (latestReceivedAtMs === null) {
+    return 'none'
+  }
+
+  let activeIntentPresent = false
+  const sentAtByTurnId = new Map<string, number>()
+  for (const intent of await input.historyReader.readOutboxIntents()) {
+    if (
+      intent.operation !== null ||
+      intent.answeredMailboxItemIds.length === 0 ||
+      !assistantAutoReplyOutboxIntentMatchesHostedGroup({
+        conversation: input.primaryInput.conversation,
+        intent,
+      })
+    ) {
+      continue
+    }
+
+    switch (intent.status) {
+      case 'awaiting_approval':
+      case 'pending':
+      case 'retryable':
+      case 'sending':
+        activeIntentPresent = true
+        break
+      case 'sent': {
+        const sentAtMs = Date.parse(
+          intent.delivery?.sentAt ?? intent.sentAt ?? '',
+        )
+        if (
+          intent.delivery?.kind !== 'message-reaction' &&
+          Number.isFinite(sentAtMs) &&
+          sentAtMs > latestReceivedAtMs
+        ) {
+          sentAtByTurnId.set(intent.turnId, sentAtMs)
+        }
+        break
+      }
+      case 'abandoned':
+      case 'failed':
+        break
+    }
+  }
+
+  if (
+    sentAtByTurnId.size > 0 &&
+    (await input.historyReader.readReceipts()).some((receipt) => {
+      const sentAtMs = sentAtByTurnId.get(receipt.turnId)
+      const turnStartedAtMs = Date.parse(receipt.startedAt)
+      return sentAtMs !== undefined &&
+        Number.isFinite(turnStartedAtMs) &&
+        latestReceivedAtMs < turnStartedAtMs &&
+        turnStartedAtMs <= sentAtMs
+    })
+  ) {
+    return 'suppress'
+  }
+
+  return activeIntentPresent ? 'defer' : 'none'
+}
+
+function readLatestAssistantAutoReplyGroupReceivedAtMs(
+  context: AssistantAutoReplyGroupContext,
+): number | null {
+  const lastItem = context.items.at(-1)
+  const receivedAtMs = Date.parse(lastItem?.summary.receivedAt ?? '')
+  return Number.isFinite(receivedAtMs) ? receivedAtMs : null
+}
+
+function assistantAutoReplyOutboxIntentMatchesHostedGroup(input: {
+  conversation: AssistantInputConversationRef
+  intent: AssistantAutoReplyOutboxIntent
+}): boolean {
+  if (
+    input.conversation.threadIsDirect !== false ||
+    input.intent.threadIsDirect !== false
+  ) {
+    return false
+  }
+
+  const conversation = conversationRefFromAssistantInputConversation(
+    input.conversation,
+  )
+  const channel = normalizeNullableString(conversation.channel)
+  const identityId = normalizeNullableString(conversation.identityId)
+  const threadId = normalizeNullableString(conversation.threadId)
+  if (!channel || !identityId || !threadId) {
+    return false
+  }
+
+  return (
+    normalizeNullableString(input.intent.channel) === channel &&
+    normalizeNullableString(input.intent.identityId) === identityId &&
+    normalizeNullableString(input.intent.threadId) === threadId
+  )
+}
 
 async function listAssistantAutoReplyMatchingOutboxDeliveries(input: {
   deliveryTarget: string | null

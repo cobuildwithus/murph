@@ -371,7 +371,9 @@ function createCaptureDetail(
 
 function createSentOutboxIntent(input: {
   actorId?: string | null
+  answeredMailboxItemIds?: string[]
   channel?: string
+  createdAt?: string
   identityId?: string | null
   intentId?: string
   message: string
@@ -382,13 +384,16 @@ function createSentOutboxIntent(input: {
   sessionId?: string
   target?: string
   threadId?: string | null
+  threadIsDirect?: boolean | null
 }) {
   const channel = input.channel ?? 'telegram'
   const target = input.target ?? 'thread-1'
   const providerThreadId = input.providerThreadId ?? target
   return {
     actorId: input.actorId === undefined ? 'actor-1' : input.actorId,
+    answeredMailboxItemIds: input.answeredMailboxItemIds ?? [],
     channel,
+    createdAt: input.createdAt ?? input.sentAt,
     delivery: {
       channel,
       idempotencyKey: null,
@@ -406,9 +411,118 @@ function createSentOutboxIntent(input: {
     message: input.message,
     operation: null,
     sessionId: input.sessionId ?? 'session-1',
+    sentAt: input.sentAt,
     status: 'sent',
     threadId: input.threadId === undefined ? providerThreadId : input.threadId,
+    threadIsDirect: input.threadIsDirect ?? true,
   }
+}
+
+function createHostedGroupOutboxIntent(input: {
+  actorId?: string
+  createdAt: string
+  identityId?: string
+  intentId: string
+  sentAt?: string | null
+  status: 'abandoned' | 'awaiting_approval' | 'failed' | 'pending' | 'retryable' | 'sending' | 'sent'
+  threadId?: string
+  turnId?: string
+}) {
+  const sentAt = input.sentAt ?? null
+  return {
+    actorId: input.actorId ?? 'safe_actor_prior',
+    answeredMailboxItemIds: ['mailbox_prior'],
+    channel: 'linq',
+    createdAt: input.createdAt,
+    delivery: input.status === 'sent' && sentAt
+      ? {
+          channel: 'linq',
+          idempotencyKey: null,
+          kind: 'message',
+          messageLength: 19,
+          providerMessageId: 'provider_message_prior',
+          providerThreadId: 'provider_thread_1',
+          sentAt,
+          target: 'provider_thread_1',
+          targetKind: 'thread',
+        }
+      : null,
+    identityId: input.identityId ?? 'safe_acct_1',
+    intentId: input.intentId,
+    message: 'Prior group reply.',
+    operation: null,
+    sentAt,
+    sessionId: 'session_prior',
+    status: input.status,
+    threadId: input.threadId ?? 'safe_thread_1',
+    threadIsDirect: false,
+    turnId: input.turnId ?? `turn_${input.intentId}`,
+  }
+}
+
+function createHostedLinqGroupInput(input: {
+  accountId?: string | null
+  actorId?: string
+  inputId: string
+  receivedAt: string
+  threadId?: string
+  threadIsDirect?: boolean
+}) {
+  return createCapturelessAssistantInputCandidate({
+    accountId: input.accountId === undefined ? 'safe_acct_1' : input.accountId,
+    actorId: input.actorId ?? 'safe_actor_current',
+    conversationThreadId: input.threadId ?? 'safe_thread_1',
+    inputId: input.inputId,
+    occurredAt: input.receivedAt,
+    receivedAt: input.receivedAt,
+    replyTarget: {
+      channel: 'linq',
+      messageId: `provider_${input.inputId}`,
+      threadId: 'provider_thread_1',
+    },
+    source: 'linq',
+    sourceMetadata: {
+      externalThreadRouteAuthorityPresent: true,
+      kind: 'linq',
+      partCount: 1,
+      reactionEligible: true,
+      replyToMessageId: null,
+      service: 'iMessage',
+    },
+    text: 'Current group input.',
+    threadIsDirect: input.threadIsDirect ?? false,
+  })
+}
+
+async function processHostedLinqGroupInput(
+  candidate: AssistantInputCandidate,
+) {
+  const reply = await vi.importActual<
+    typeof import('../src/assistant/automation/reply.ts')
+  >('../src/assistant/automation/reply.ts')
+  const context = reply.createAssistantAutoReplyGroupContext([
+    createCapturelessReplyGroupItem(candidate),
+  ])
+  if (!context) {
+    throw new Error('expected hosted group reply context')
+  }
+
+  return reply.processAssistantAutoReplyGroup({
+    allowSelfAuthored: false,
+    context,
+    deliveryDispatchMode: 'queue-only',
+    enabledChannels: ['linq'],
+    executionContext: {
+      hosted: {
+        memberId: 'member_group_test',
+        userEnvKeys: [],
+      },
+    },
+    inboxServices: createInboxServices(),
+    requestId: null,
+    sessionMaxAgeMs: null,
+    vault: '/tmp/assistant-automation-vault',
+  })
 }
 
 function createTranscriptEntry(input: {
@@ -1597,6 +1711,112 @@ describe('assistant automation scanner', () => {
     }
   })
 
+  it('stops a hosted Linq group scan after the first reply intent is committed', async () => {
+    const first = createHostedLinqGroupInput({
+      actorId: 'safe_actor_first',
+      inputId: 'ain_group_scan_first_012345678901234567',
+      receivedAt: '2026-04-08T00:01:00.000Z',
+    })
+    const second = createHostedLinqGroupInput({
+      actorId: 'safe_actor_second',
+      inputId: 'ain_group_scan_second_01234567890123456',
+      receivedAt: '2026-04-08T00:02:00.000Z',
+    })
+    const candidates = [first, second]
+    const inputSource: AssistantInputSource = {
+      refresh: vi.fn(async () => ({
+        progressed: false,
+        reason: 'no_new_input' as const,
+      })),
+      listInputCandidates: vi.fn(async (input) => {
+        const inputs = candidates
+          .filter((candidate) =>
+            input.afterCursor
+              ? compareAssistantInputCursors(
+                  candidate.event.cursor,
+                  input.afterCursor,
+                ) > 0
+              : true,
+          )
+          .slice(0, input.limit ?? candidates.length)
+        return {
+          inputs,
+          nextCursor: inputs.at(-1)?.event.cursor ?? input.afterCursor ?? null,
+        }
+      }),
+      listNewConversationInputs: vi.fn(async () => ({
+        inputs: [],
+        nextCursor: null,
+      })),
+    }
+    const actualGrouping = await vi.importActual<
+      typeof import('../src/assistant/automation/grouping.ts')
+    >('../src/assistant/automation/grouping.ts')
+    const actualReply = await vi.importActual<
+      typeof import('../src/assistant/automation/reply.ts')
+    >('../src/assistant/automation/reply.ts')
+    groupingMocks.collectAssistantAutoReplyGroup
+      .mockImplementation(actualGrouping.collectAssistantAutoReplyGroup)
+    scannerReplyMocks.applyAssistantAutoReplyProcessResult
+      .mockImplementation(actualReply.applyAssistantAutoReplyProcessResult)
+    scannerReplyMocks.createAssistantAutoReplyGroupContext
+      .mockImplementation(actualReply.createAssistantAutoReplyGroupContext)
+    scannerReplyMocks.processAssistantAutoReplyGroup
+      .mockImplementation(actualReply.processAssistantAutoReplyGroup)
+    replyMocks.sendAssistantMessage.mockResolvedValue({
+      delivery: null,
+      deliveryDeferred: true,
+      deliveryError: null,
+      deliveryIntentId: 'intent_group_scan_first',
+      response: 'One catch-up reply.',
+      session: {
+        sessionId: 'session_group_scan_first',
+      },
+    })
+    const stateUpdates: AssistantAutomationState[] = []
+    const scanner = await vi.importActual<
+      typeof import('../src/assistant/automation/scanner.ts')
+    >('../src/assistant/automation/scanner.ts')
+
+    const result = await scanner.scanAssistantAutomationOnce({
+      deliveryDispatchMode: 'queue-only',
+      executionContext: {
+        hosted: {
+          memberId: 'member_group_scan',
+          userEnvKeys: [],
+        },
+      },
+      inboxServices: createInboxServices(),
+      inputSource,
+      onStateProgress: async (next) => {
+        stateUpdates.push({
+          ...createAutomationState(),
+          autoReply: [...next.autoReply],
+        })
+      },
+      state: createAutomationState({
+        autoReplyChannels: ['linq'],
+      }),
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(result).toMatchObject({
+      currentTurnDeliveryIntentIds: ['intent_group_scan_first'],
+      replies: {
+        considered: 1,
+        nextWakeAt: expect.any(String),
+        replied: 1,
+        skipped: 0,
+      },
+    })
+    expect(replyMocks.sendAssistantMessage).toHaveBeenCalledOnce()
+    expect(scannerReplyMocks.processAssistantAutoReplyGroup).toHaveBeenCalledOnce()
+    expect(readAutoReplyCursor(
+      stateUpdates.at(-1) ?? createAutomationState(),
+      'linq',
+    )).toEqual(first.event.cursor)
+  })
+
   it('advances the auto-reply channel cursor with the processed assistant input cursor', async () => {
     const beforeProviderAcceptedInputs = vi.fn(async () => undefined)
     const onProviderEvent = vi.fn()
@@ -2503,6 +2723,204 @@ describe('assistant auto-reply runtime', () => {
       skipped: 0,
     })
     expect(stopScanning).toBe(false)
+  })
+
+  it('suppresses an older hosted Linq group input after a later room reply was sent', async () => {
+    const hostedInput = createHostedLinqGroupInput({
+      inputId: 'ain_group_overtaken_0123456789012345678',
+      receivedAt: '2026-04-08T00:02:00.000Z',
+    })
+    replyMocks.listAssistantOutboxIntents.mockResolvedValue([
+      createHostedGroupOutboxIntent({
+        createdAt: '2026-04-08T00:04:00.000Z',
+        intentId: 'intent_group_overtake_sent',
+        sentAt: '2026-04-08T00:05:00.000Z',
+        status: 'sent',
+      }),
+    ])
+    replyMocks.listAssistantTurnReceipts.mockResolvedValue([
+      createTurnReceipt({
+        startedAt: '2026-04-08T00:03:00.000Z',
+        turnId: 'turn_intent_group_overtake_sent',
+      }),
+    ])
+    const result = await processHostedLinqGroupInput(hostedInput)
+
+    expect(result).toMatchObject({
+      advanceCursor: true,
+      checkpointRequired: true,
+      failed: 0,
+      replied: 0,
+      skipped: 1,
+      stopScanning: false,
+    })
+    expect(replyMocks.sendAssistantMessage).not.toHaveBeenCalled()
+    expect(evidenceMocks.writeAssistantAutoReplySuppressionEvidence)
+      .toHaveBeenCalledWith(expect.objectContaining({
+        inputIds: [hostedInput.event.inputId],
+        reason: 'assistant already replied after this group input was received',
+      }))
+  })
+
+  it.each([
+    {
+      label: 'older backlog',
+      receivedAt: '2026-04-08T00:02:00.000Z',
+    },
+    {
+      label: 'input received while the reply was running',
+      receivedAt: '2026-04-08T00:05:00.000Z',
+    },
+  ])('defers $label while a room reply is still active', async ({
+    receivedAt,
+  }) => {
+    const hostedInput = createHostedLinqGroupInput({
+      inputId: 'ain_group_active_reply_01234567890123456',
+      receivedAt,
+    })
+    replyMocks.listAssistantOutboxIntents.mockResolvedValue([
+      createHostedGroupOutboxIntent({
+        createdAt: '2026-04-08T00:04:00.000Z',
+        intentId: 'intent_group_overtake_retryable',
+        status: 'retryable',
+      }),
+    ])
+    const result = await processHostedLinqGroupInput(hostedInput)
+
+    expect(result).toMatchObject({
+      advanceCursor: false,
+      failed: 0,
+      nextWakeAt: expect.any(String),
+      replied: 0,
+      skipped: 1,
+      stopScanning: true,
+    })
+    expect(replyMocks.sendAssistantMessage).not.toHaveBeenCalled()
+    expect(evidenceMocks.writeAssistantAutoReplySuppressionEvidence)
+      .not.toHaveBeenCalled()
+  })
+
+  it.each([
+    {
+      label: 'a terminally failed prior reply',
+      prior: createHostedGroupOutboxIntent({
+        createdAt: '2026-04-08T00:04:00.000Z',
+        intentId: 'intent_group_overtake_failed',
+        status: 'failed',
+      }),
+      receivedAt: '2026-04-08T00:02:00.000Z',
+      threadId: 'safe_thread_1',
+      threadIsDirect: false,
+    },
+    {
+      label: 'a current group input received after the prior turn started',
+      prior: createHostedGroupOutboxIntent({
+        createdAt: '2026-04-08T00:04:00.000Z',
+        intentId: 'intent_group_overtake_mid_turn_input',
+        sentAt: '2026-04-08T00:05:00.000Z',
+        status: 'sent',
+      }),
+      receivedAt: '2026-04-08T00:03:00.000Z',
+      threadId: 'safe_thread_1',
+      threadIsDirect: false,
+      turnStartedAt: '2026-04-08T00:02:00.000Z',
+    },
+    {
+      label: 'a sent reply in another group room',
+      prior: createHostedGroupOutboxIntent({
+        createdAt: '2026-04-08T00:04:00.000Z',
+        intentId: 'intent_group_overtake_other_room',
+        sentAt: '2026-04-08T00:05:00.000Z',
+        status: 'sent',
+        threadId: 'safe_thread_other',
+      }),
+      receivedAt: '2026-04-08T00:02:00.000Z',
+      threadId: 'safe_thread_1',
+      threadIsDirect: false,
+      turnStartedAt: '2026-04-08T00:03:00.000Z',
+    },
+    {
+      label: 'a sent reply from another group account',
+      prior: createHostedGroupOutboxIntent({
+        createdAt: '2026-04-08T00:04:00.000Z',
+        identityId: 'safe_acct_other',
+        intentId: 'intent_group_overtake_other_account',
+        sentAt: '2026-04-08T00:05:00.000Z',
+        status: 'sent',
+      }),
+      receivedAt: '2026-04-08T00:02:00.000Z',
+      threadId: 'safe_thread_1',
+      threadIsDirect: false,
+      turnStartedAt: '2026-04-08T00:03:00.000Z',
+    },
+    {
+      label: 'a group input without exact account identity',
+      accountId: null,
+      prior: createHostedGroupOutboxIntent({
+        createdAt: '2026-04-08T00:04:00.000Z',
+        intentId: 'intent_group_overtake_missing_account',
+        sentAt: '2026-04-08T00:05:00.000Z',
+        status: 'sent',
+      }),
+      receivedAt: '2026-04-08T00:02:00.000Z',
+      threadId: 'safe_thread_1',
+      threadIsDirect: false,
+    },
+    {
+      label: 'a same-room sent reply without its turn receipt',
+      prior: createHostedGroupOutboxIntent({
+        createdAt: '2026-04-08T00:04:00.000Z',
+        intentId: 'intent_group_overtake_missing_receipt',
+        sentAt: '2026-04-08T00:05:00.000Z',
+        status: 'sent',
+      }),
+      receivedAt: '2026-04-08T00:02:00.000Z',
+      threadId: 'safe_thread_1',
+      threadIsDirect: false,
+    },
+    {
+      label: 'a later reply beside a direct message',
+      prior: createHostedGroupOutboxIntent({
+        createdAt: '2026-04-08T00:04:00.000Z',
+        intentId: 'intent_group_overtake_direct_boundary',
+        sentAt: '2026-04-08T00:05:00.000Z',
+        status: 'sent',
+      }),
+      receivedAt: '2026-04-08T00:02:00.000Z',
+      threadId: 'safe_thread_1',
+      threadIsDirect: true,
+      turnStartedAt: '2026-04-08T00:03:00.000Z',
+    },
+  ])('keeps the provider path available after $label', async ({
+    accountId,
+    prior,
+    receivedAt,
+    threadId,
+    threadIsDirect,
+    turnStartedAt,
+  }) => {
+    const hostedInput = createHostedLinqGroupInput({
+      accountId,
+      inputId: `ain_group_boundary_${prior.intentId}`,
+      receivedAt,
+      threadId,
+      threadIsDirect,
+    })
+    replyMocks.listAssistantOutboxIntents.mockResolvedValue([prior])
+    if (turnStartedAt) {
+      replyMocks.listAssistantTurnReceipts.mockResolvedValue([
+        createTurnReceipt({
+          startedAt: turnStartedAt,
+          turnId: prior.turnId,
+        }),
+      ])
+    }
+    const result = await processHostedLinqGroupInput(hostedInput)
+
+    expect(result.replied).toBe(1)
+    expect(replyMocks.sendAssistantMessage).toHaveBeenCalledOnce()
+    expect(evidenceMocks.writeAssistantAutoReplySuppressionEvidence)
+      .not.toHaveBeenCalled()
   })
 
   it('defers when terminal evidence is only partially written', async () => {

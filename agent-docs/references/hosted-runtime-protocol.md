@@ -1,6 +1,6 @@
 # Hosted Mailbox Runtime Protocol
 
-Last verified: 2026-07-25
+Last verified: 2026-07-26
 
 ## Decision
 
@@ -269,6 +269,22 @@ resolved to exactly one active linked member, so anonymous administrators,
 Attribution therefore remains bound to the scanner-selected durable operation
 contexts, and active steering cannot add a second participant's identity
 authority to the turn.
+
+Actor-scoped turns do not imply one reply per pending actor or native reply
+anchor. Before provider admission for hosted Linq group input, the assistant
+checks the existing local outbox owner for normal auto-reply intents with
+answered-mailbox evidence in the exact same account/channel/thread. Because one
+scanner pass deliberately shares a cached history reader, committing the first
+group reply stops that pass and schedules a fresh continuation before another
+group can enter the provider. On the fresh pass, an active intent defers the
+pending input without advancing it. Once that intent is sent, only pending input
+whose trusted receive time precedes the intent's recorded turn start is
+overtaken and receives ordinary terminal suppression evidence without another
+provider request. Input received during or after that turn remains replyable
+after delivery settles. Failed and abandoned intents do not overtake later work.
+The comparison ignores actor only to serialize room output; batching,
+accepted-message targeting, shared-data authority, and active steering remain
+actor-scoped.
 
 Telegram sender evidence is additive on the wire: `linqSenderHandles` keeps its
 existing meaning and `telegramSenderHandles` is a separate optional field, so a
@@ -1510,7 +1526,10 @@ Accepted-input journaling, transcript updates, checkpoint bookkeeping,
 provider-request metadata, and outbox intent creation remain on the normal
 local assistant-service path. The same-reply coalescing window closes when the
 bounded batch is selected before provider start; mailbox input that arrives
-after that boundary remains durable staged input for a later turn.
+after that boundary remains durable staged input for a later turn. In a hosted
+Linq group, that later turn first applies the room-level outbox overtaking rule
+above, so backlog recovery does not turn actor or reply-anchor boundaries into a
+burst of individually delivered replies.
 For accepted Linq input positively identified as iMessage, or Telegram input
 with a valid numeric provider message target, the prompt may show the existing
 input id as an opaque `Message ref` when at least one targeting action is
