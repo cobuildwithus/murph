@@ -35,11 +35,14 @@ import {
   listCanonicalEntities,
   listMetricPoints,
   listMetricPointsBatch,
+  readMealNutritionTotals,
   readMemoryDocument,
   resolveAdherenceObservationActivityKind,
   selectMetricSeries,
   summarizeWearableSleepRuntime,
   type CanonicalEntity,
+  type MealNutritionDayTotal,
+  type MealNutritionTotalsResult,
   type MetricSeriesPoint,
 } from "@murphai/query";
 
@@ -177,6 +180,7 @@ type HostedVaultShareOfferOutcome = HostedVaultShareProjectionOfferResult["outco
 
 export interface HostedVaultShareProjectionReadContext {
   activityRowsByVaultAndCutoff?: Map<string, Promise<ActivitySessionProjectionRow[]>>;
+  mealNutritionTotalsByVaultAndCutoff?: Map<string, Promise<MealNutritionTotalsResult>>;
 }
 
 type ProjectableRecordReader = (input: {
@@ -247,6 +251,10 @@ function resolveProjectableRecordReader(
       }
       const spec = getHostedVaultShareDailyMetricProjectionSpec(projectionKind);
       if (spec) {
+        if (spec.source.kind === "meal-nutrition-total") {
+          return ({ context, vaultRoot }) =>
+            readProjectableMealNutritionDays(vaultRoot, spec, context);
+        }
         return ({ vaultRoot }) => readProjectableDailyMetricDays(vaultRoot, spec);
       }
       return null;
@@ -645,6 +653,98 @@ export function selectProjectableDailyMetricDays(
       occurredAt: `${point.date}T00:00:00.000Z`,
       recordKey: point.date,
       ...sourceRevisionField(deriveMetricSeriesPointSourceRevision(point)),
+    });
+
+    if (records.length >= HOSTED_VAULT_SHARE_PROJECTION_DAILY_RECORD_WINDOW) {
+      break;
+    }
+  }
+
+  return records;
+}
+
+export async function readProjectableMealNutritionDays(
+  vaultRoot: string,
+  spec: HostedVaultShareDailyMetricProjectionSpec,
+  context?: HostedVaultShareProjectionReadContext,
+): Promise<HostedVaultShareDeliveryRecord[]> {
+  const nowMs = Date.now();
+  const cutoffDate = new Date(
+    nowMs - HOSTED_VAULT_SHARE_PROJECTION_MAX_DAILY_RECORD_AGE_DAYS * DAY_MS,
+  ).toISOString().slice(0, 10);
+  const summary = await readProjectableMealNutritionTotals(vaultRoot, cutoffDate, context);
+  return selectProjectableMealNutritionDays(summary.days, spec, nowMs);
+}
+
+async function readProjectableMealNutritionTotals(
+  vaultRoot: string,
+  cutoffDate: string,
+  context?: HostedVaultShareProjectionReadContext,
+): Promise<MealNutritionTotalsResult> {
+  if (context) {
+    const cacheKey = `${vaultRoot}\u0000${cutoffDate}`;
+    context.mealNutritionTotalsByVaultAndCutoff ??= new Map();
+    const cached = context.mealNutritionTotalsByVaultAndCutoff.get(cacheKey);
+    if (cached) {
+      return cached;
+    }
+    const read = readProjectableMealNutritionTotals(vaultRoot, cutoffDate);
+    context.mealNutritionTotalsByVaultAndCutoff.set(cacheKey, read);
+    return read;
+  }
+
+  return readMealNutritionTotals(vaultRoot, { from: cutoffDate });
+}
+
+/**
+ * Pure selection over per-day meal nutrition totals. Fails closed on partial
+ * nutrition: a day is emitted only when every meal on that day contributed the
+ * spec's nutrient, so a shared total is never a silent undercount. A complete
+ * true-zero day is real data and is still emitted. Day identity is the meal's
+ * canonical vault-local date; the UTC-midnight occurredAt is transport identity
+ * only and discloses nothing beyond the date the recordKey already carries.
+ */
+export function selectProjectableMealNutritionDays(
+  days: readonly MealNutritionDayTotal[],
+  spec: HostedVaultShareDailyMetricProjectionSpec,
+  nowMs: number,
+): HostedVaultShareDeliveryRecord[] {
+  if (spec.source.kind !== "meal-nutrition-total") {
+    return [];
+  }
+  const totalKey = spec.source.totalKey;
+  const cutoffMs =
+    nowMs - HOSTED_VAULT_SHARE_PROJECTION_MAX_DAILY_RECORD_AGE_DAYS * DAY_MS;
+  const records: HostedVaultShareDeliveryRecord[] = [];
+
+  for (const day of [...days].sort((left, right) => right.date.localeCompare(left.date))) {
+    if (!isStrictIsoDate(day.date)) {
+      continue;
+    }
+    const dayMs = Date.parse(`${day.date}T00:00:00.000Z`);
+    if (!Number.isFinite(dayMs) || dayMs < cutoffMs) {
+      continue;
+    }
+
+    const metric = day.totals[totalKey];
+    if (metric.total === null || metric.mealCount !== day.mealCount) {
+      continue;
+    }
+
+    const value = metric.total;
+    if (!Number.isFinite(value) || value < spec.minValue || value > spec.maxValue) {
+      continue;
+    }
+
+    records.push({
+      data: {
+        date: day.date,
+        metricKey: spec.metricKey,
+        unit: spec.expectedUnit ?? null,
+        value,
+      },
+      occurredAt: `${day.date}T00:00:00.000Z`,
+      recordKey: day.date,
     });
 
     if (records.length >= HOSTED_VAULT_SHARE_PROJECTION_DAILY_RECORD_WINDOW) {
