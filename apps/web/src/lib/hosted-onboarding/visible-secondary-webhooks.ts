@@ -119,6 +119,10 @@ export function withHostedVisibleSecondaryLinqOutcomes(
     }
 
     const context = resolveHostedOnboardingLinqMessageContext(event);
+    if (context.summary.isFromMe) {
+      return response;
+    }
+
     const recognizedSender = HOSTED_LINQ_REASONS_REQUIRING_RECOGNIZED_SENDER.has(reason)
       ? await readHostedLinqSenderRecognized({
           participantContact: context.participantContact,

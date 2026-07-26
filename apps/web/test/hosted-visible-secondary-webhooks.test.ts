@@ -159,6 +159,45 @@ describe("visible secondary webhook outcomes", () => {
   });
 
   it.each([
+    "group-chat",
+    "thread-container-inactive",
+  ] as const)("does not answer an outbound Linq echo classified as %s", async (reason) => {
+    const event = buildOperationalLinqEvent({
+      eventId: `evt_echo_${reason}`,
+      isFromMe: true,
+      messageId: `msg_echo_${reason}`,
+      senderHandle: "+15550000000",
+      senderService: "sms",
+    });
+    const lookupHostedMemberIdentityByPhoneNumber = vi.fn(async () => ({
+      memberId: "member_echo",
+    }) as never);
+    const sendHostedLinqChatMessage = vi.fn();
+    const dependencies: HostedVisibleSecondaryLinqDependencies = {
+      getPrisma: vi.fn(() => ({}) as never),
+      lookupHostedMemberByVerifiedEmailAddress: vi.fn(async () => null),
+      lookupHostedMemberIdentityByPhoneNumber,
+      parseHostedLinqWebhookEvent: vi.fn(() => event),
+      sendHostedLinqChatMessage,
+    };
+    const response = {
+      ignored: true,
+      ok: true as const,
+      reason,
+    };
+    const handler: HostedOnboardingLinqWebhookHandler = vi.fn(async () => response);
+
+    await expect(withHostedVisibleSecondaryLinqOutcomes(handler, dependencies)({
+      rawBody: JSON.stringify(event),
+      signature: "signature",
+      timestamp: "timestamp",
+    })).resolves.toEqual(response);
+
+    expect(lookupHostedMemberIdentityByPhoneNumber).not.toHaveBeenCalled();
+    expect(sendHostedLinqChatMessage).not.toHaveBeenCalled();
+  });
+
+  it.each([
     ["family-invite-not-accepted", true, null, "Family invite"],
     ["unlinked-telegram", true, "https://withmurph.ai/", "choose Telegram"],
     ["ambiguous-telegram-binding", true, null, "isn't linked cleanly"],
@@ -351,6 +390,7 @@ describe("visible secondary webhook outcomes", () => {
 
 function buildOperationalLinqEvent(input: {
   eventId: string;
+  isFromMe?: boolean;
   messageId: string;
   senderHandle: string;
   senderService: "email" | "sms";
@@ -369,8 +409,9 @@ function buildOperationalLinqEvent(input: {
           service: "sms",
         },
       },
-      direction: "inbound",
+      direction: input.isFromMe ? "outbound" : "inbound",
       id: input.messageId,
+      is_from_me: input.isFromMe ?? false,
       parts: [{ type: "text", value: "hello" }],
       recipient_handle: {
         handle: "+15550000000",

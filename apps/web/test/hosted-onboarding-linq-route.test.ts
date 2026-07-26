@@ -211,6 +211,74 @@ describe("hosted onboarding Linq webhook route", () => {
     });
   });
 
+  it.each([
+    "group-chat",
+    "thread-container-inactive",
+  ] as const)("does not send a visible recovery reply for an outbound %s echo", async (reason) => {
+    mocks.handleHostedOnboardingLinqWebhook.mockResolvedValueOnce({
+      ignored: true,
+      ok: true,
+      reason,
+    });
+    const rawBody = JSON.stringify({
+      api_version: "v3",
+      created_at: "2026-07-25T12:00:00.000Z",
+      data: {
+        chat: {
+          id: "chat_visible_echo",
+          is_group: true,
+          owner_handle: {
+            handle: "+15550000000",
+            id: "handle_owner",
+            is_me: true,
+            service: "sms",
+          },
+        },
+        direction: "outbound",
+        id: `msg_visible_echo_${reason}`,
+        is_from_me: true,
+        parts: [{ type: "text", value: "recovery reply" }],
+        recipient_handle: {
+          handle: "+15550000000",
+          id: "handle_recipient",
+          is_me: true,
+          service: "sms",
+        },
+        recipient_phone: "+15550000000",
+        sender_handle: {
+          handle: "+15550000000",
+          id: "handle_sender",
+          is_me: true,
+          service: "sms",
+        },
+        sent_at: "2026-07-25T12:00:00.000Z",
+        service: "sms",
+      },
+      event_id: `evt_visible_echo_${reason}`,
+      event_type: "message.received",
+      webhook_version: "2026-02-03",
+    });
+
+    const response = await hostedOnboardingLinqRoute.POST(
+      new Request("https://join.example.test/api/hosted-onboarding/linq/webhook", {
+        body: rawBody,
+        headers: {
+          "x-webhook-signature": "sha256=test",
+          "x-webhook-timestamp": "1711278000",
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(202);
+    await expect(response.json()).resolves.toEqual({
+      ignored: true,
+      ok: true,
+      reason,
+    });
+    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+  });
+
   it("returns a retryable server response when Linq chat classification is unavailable", async () => {
     mocks.handleHostedOnboardingLinqWebhook.mockRejectedValueOnce(hostedOnboardingError({
       code: "LINQ_CHAT_CLASSIFICATION_UNAVAILABLE",
