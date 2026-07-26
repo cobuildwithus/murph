@@ -8,7 +8,9 @@ import {
   canStartHostedPulseTrialPaidPlan,
   canSwitchHostedBillingPlanToPulse,
   canUpgradeHostedBillingPlanToEdge,
+  getHostedAiUsageMonthlyAllowanceUsdMicros,
   getHostedBillingPlanDefinition,
+  getHostedFamilyAiUsageMonthlyAllowanceForPlan,
   HOSTED_FAMILY_MAX_SEATS,
   HOSTED_FAMILY_MIN_SEATS,
   HOSTED_FAMILY_PLAN_DISPLAY,
@@ -61,6 +63,17 @@ describe("hosted billing launch plan Stripe configuration", () => {
     expect(resolveConfiguredHostedBillingPlanCodes({
       stripePriceIdsByPlan: basePriceIds,
     })).toEqual(["launch_monthly", "launch_edge_monthly"]);
+  });
+
+  it("includes 80% of each direct plan and Family seat price as AI usage", () => {
+    expect(getHostedAiUsageMonthlyAllowanceUsdMicros("launch_monthly"))
+      .toBe(6_400_000n);
+    expect(getHostedAiUsageMonthlyAllowanceUsdMicros("launch_edge_monthly"))
+      .toBe(16_000_000n);
+    expect(getHostedFamilyAiUsageMonthlyAllowanceForPlan("pulse"))
+      .toBe(5_600_000n);
+    expect(getHostedFamilyAiUsageMonthlyAllowanceForPlan("edge"))
+      .toBe(15_200_000n);
   });
 
   it("keeps Pulse Trial as a checkout offer instead of a billing plan", () => {

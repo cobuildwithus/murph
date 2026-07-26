@@ -1263,6 +1263,61 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       { assistantAskRequestTargetKind: "joined_group" },
     )).resolves.toMatchObject({ status: "imported" });
   });
+
+  it("admits only joined-group completions on the dirty-window fast path", async () => {
+    const vaultRoot = await createVaultRoot();
+    const { platform } = createRuntimePlatform();
+    const reviewedWake = buildHostedExecutionAssistantAskCompletedWake({
+      ask: {
+        expiresAt: "2026-07-15T12:10:00.000Z",
+        origin: {
+          assistantInputId: "ain_0123456789abcdef0123456789abcdef",
+          kind: "accepted_input",
+          sessionId: "session_group",
+        },
+        question: "What exercises are assigned today?",
+        requestId: "haask_consented_request_bridge",
+        result: {
+          answer: "Three sets of squats.",
+          outcome: "answered",
+        },
+        targetLabel: null,
+      },
+      eventId: "haask_reviewed_completion_bridge",
+      memberId: TEST_REQUEST.userId,
+      occurredAt: "2026-07-15T12:05:00.000Z",
+    });
+    const reviewedOptions = createBridgeOptions({
+      mailboxPayloadDecoder: createMailboxPayloadDecoder({
+        status: "decoded",
+        wake: reviewedWake,
+      }),
+      platform,
+      vaultRoot,
+    });
+
+    await expect(reviewedOptions.importItem(
+      createAssistantAskMailboxImportItem(reviewedWake),
+      { assistantAskCompletionKind: "joined_group" },
+    )).resolves.toEqual({
+      reasonCode: "assistant_ask.completion_not_admitted",
+      status: "deferred",
+    });
+
+    const joinedWake = createAssistantAskCompletedWake();
+    const joinedOptions = createBridgeOptions({
+      mailboxPayloadDecoder: createMailboxPayloadDecoder({
+        status: "decoded",
+        wake: joinedWake,
+      }),
+      platform,
+      vaultRoot,
+    });
+    await expect(joinedOptions.importItem(
+      createAssistantAskMailboxImportItem(joinedWake),
+      { assistantAskCompletionKind: "joined_group" },
+    )).resolves.toMatchObject({ status: "imported" });
+  });
 });
 
 function createBridgeOptions(input: {

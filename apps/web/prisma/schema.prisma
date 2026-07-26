@@ -1519,7 +1519,7 @@ model HostedVaultShare {
 model HostedThreadContainer {
   memberId                   String              @id @map("member_id")
   ownerMemberId              String              @map("owner_member_id")
-  monthlyUsageLimitUsdMicros BigInt              @default(4500000) @map("monthly_usage_limit_usd_micros")
+  monthlyUsageLimitUsdMicros BigInt              @default(7500000) @map("monthly_usage_limit_usd_micros")
   createdAt                  DateTime            @default(now()) @map("created_at")
   member                     HostedMember        @relation("HostedThreadContainerMember", fields: [memberId], references: [id], onDelete: Cascade)
   owner                      HostedMember        @relation("HostedThreadContainerOwner", fields: [ownerMemberId], references: [id], onDelete: Restrict)

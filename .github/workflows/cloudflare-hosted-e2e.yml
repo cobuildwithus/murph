@@ -161,6 +161,14 @@ jobs:
             slug: junction-wearable-direct-resource-replay
             scenarios: device-sync-junction-wearable-direct-resource-replay
             timeoutMinutes: 35
+          # This is intentionally a separately named check: it recreates the
+          # production 180-second priority inversion and fails after 45 seconds
+          # if a real foreground Linq message cannot replace background ownership.
+          - name: Hosted foreground reply priority E2E
+            fastGate: "1"
+            slug: foreground-reply-priority
+            scenarios: foreground-reply-priority
+            timeoutMinutes: 30
     services:
       postgres:
         image: public.ecr.aws/docker/library/postgres:17

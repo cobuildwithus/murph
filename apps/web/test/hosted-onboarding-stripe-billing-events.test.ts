@@ -19,8 +19,9 @@ const mocks = vi.hoisted(() => ({
   lookupHostedAccountGroupStripeBillingRefByStripeSubscriptionId: vi.fn(),
   prepareHostedMemberStripeBillingWrite: vi.fn(),
   readActiveHostedFamilySponsorship: vi.fn(),
-  readHostedStripeRecurringFinancialState: vi.fn(),
   readHostedMemberFamilyBillingClaim: vi.fn(),
+  readHostedStripeRecurringFinancialState: vi.fn(),
+  reconcileHostedAiUsageGateForBillingModeChangeTx: vi.fn(),
   requireHostedStripeApi: vi.fn(),
   stripeInvoicePaymentsList: vi.fn(),
   stripeInvoicesRetrieve: vi.fn(),
@@ -57,6 +58,18 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-billing-store", async () => {
       mocks.acceptHostedMemberStripeCheckoutCompletionTx,
     clearHostedMemberStripeCheckoutAttemptForSessionTx:
       mocks.clearHostedMemberStripeCheckoutAttemptForSessionTx,
+  };
+});
+
+vi.mock("@/src/lib/hosted-execution/usage-allowance", async () => {
+  const actual = await vi.importActual<
+    typeof import("@/src/lib/hosted-execution/usage-allowance")
+  >("@/src/lib/hosted-execution/usage-allowance");
+
+  return {
+    ...actual,
+    reconcileHostedAiUsageGateForBillingModeChangeTx:
+      mocks.reconcileHostedAiUsageGateForBillingModeChangeTx,
   };
 });
 
@@ -202,8 +215,10 @@ describe("hosted onboarding stripe billing events", () => {
     mocks.applyHostedFamilyStripeCheckoutCompletedTx.mockResolvedValue({ groupId: null });
     mocks.applyHostedFamilyStripeSubscriptionUpdatedTx.mockResolvedValue({
       activations: [],
+      billingModeChangedMemberIds: [],
       groupId: null,
     });
+    mocks.reconcileHostedAiUsageGateForBillingModeChangeTx.mockResolvedValue(undefined);
     mocks.requireHostedStripeApi.mockReturnValue({
       invoicePayments: {
         list: mocks.stripeInvoicePaymentsList,
@@ -1234,8 +1249,10 @@ describe("hosted onboarding stripe billing events", () => {
   it("routes Family subscription updates to group billing without member billing writes", async () => {
     mocks.applyHostedFamilyStripeSubscriptionUpdatedTx.mockResolvedValueOnce({
       activations: [],
+      billingModeChangedMemberIds: ["member_owner"],
       groupId: "hbag_family",
     });
+    const tx = {};
 
     await applyStripeSubscriptionUpdated(
       makeStripeSubscription({
@@ -1250,12 +1267,54 @@ describe("hosted onboarding stripe billing events", () => {
         sourceEventId: "evt_family_sub_updated",
         sourceType: "stripe.customer.subscription.updated",
       },
-      {} as never,
+      tx as never,
     );
 
+    expect(mocks.reconcileHostedAiUsageGateForBillingModeChangeTx).toHaveBeenCalledWith({
+      memberId: "member_owner",
+      now: new Date("2026-04-23T00:00:00.000Z"),
+      tx,
+    });
     expect(mocks.findMemberForStripeSubscription).not.toHaveBeenCalled();
     expect(mocks.writeHostedMemberStripeBillingTx).not.toHaveBeenCalled();
     expect(mocks.activateHostedMemberForPositiveSourceTx).not.toHaveBeenCalled();
+  });
+
+  it("reconciles a direct-to-Family usage handoff from invoice.paid", async () => {
+    mocks.applyHostedFamilyStripeSubscriptionUpdatedTx.mockResolvedValueOnce({
+      activations: [],
+      billingModeChangedMemberIds: ["member_owner"],
+      groupId: "hbag_family",
+    });
+    const tx = {};
+    const subscription = makeStripeSubscription({
+      id: "sub_family",
+      metadata: {
+        accountGroupId: "hbag_family",
+        kind: "hosted_family_plan",
+      },
+    });
+
+    await applyStripeInvoicePaid(
+      makeStripeInvoice({ subscription: subscription.id }),
+      {
+        eventCreatedAt: new Date("2026-04-23T00:00:00.000Z"),
+        occurredAt: "2026-04-23T00:00:00.000Z",
+        sourceEventId: "evt_family_invoice_paid",
+        sourceType: "stripe.invoice.paid",
+      },
+      tx as never,
+      HostedBillingStatus.active,
+      subscription,
+    );
+
+    expect(mocks.reconcileHostedAiUsageGateForBillingModeChangeTx).toHaveBeenCalledWith({
+      memberId: "member_owner",
+      now: new Date("2026-04-23T00:00:00.000Z"),
+      tx,
+    });
+    expect(mocks.findMemberForStripeInvoice).not.toHaveBeenCalled();
+    expect(mocks.writeHostedMemberStripeBillingTx).not.toHaveBeenCalled();
   });
 
   it("prefers configured Pulse prices over stale Edge subscription metadata", async () => {

@@ -20,6 +20,7 @@ vi.mock("@murphai/hosted-execution", async () => {
 });
 
 import {
+  armCanonicalCheckpointPublicationBarrier,
   armCanonicalCheckpointLostAck,
   armSnapshotPublicationCorruption,
   armShutdownCheckpointPublicationBarrier,
@@ -697,7 +698,7 @@ describe("hosted-local test RunnerContainer outbound composition", () => {
       expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
         expect.objectContaining({
           details: {
-            barrierKind: "shutdown_checkpoint_publication",
+            barrierKind: "idle_shutdown_checkpoint_publication",
           },
           userId,
         }),
@@ -716,6 +717,40 @@ describe("hosted-local test RunnerContainer outbound composition", () => {
       );
       expect(realHandler).toHaveBeenCalledTimes(4);
       expect(releaseShutdownCheckpointPublicationBarrier(userId)).toBe(false);
+    } finally {
+      releaseShutdownCheckpointPublicationBarrier(userId);
+    }
+  });
+
+  it("holds one matching canonical checkpoint publication until explicit release", async () => {
+    const userId = "member_canonical_checkpoint_barrier";
+    const realHandler = vi.fn(async () => new Response("checkpoint committed", { status: 200 }));
+    const handler = wrapShutdownCheckpointPublicationBarrierForTest(realHandler);
+    armCanonicalCheckpointPublicationBarrier(userId);
+
+    try {
+      const heldPublication = handler(
+        createCanonicalCheckpointRequest(userId),
+        createOutboundEnv(),
+        { containerId: "opaque-container-id" },
+      );
+      await vi.waitFor(() => {
+        expect(readShutdownCheckpointPublicationBarrierState(userId)).toBe("entered");
+      });
+      expect(realHandler).not.toHaveBeenCalled();
+      expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+        expect.objectContaining({
+          details: {
+            barrierKind: "canonical_runtime_commit_checkpoint_publication",
+          },
+          userId,
+        }),
+      );
+
+      expect(releaseShutdownCheckpointPublicationBarrier(userId)).toBe(true);
+      await expect(heldPublication.then((response) => response.text()))
+        .resolves.toBe("checkpoint committed");
+      expect(realHandler).toHaveBeenCalledTimes(1);
     } finally {
       releaseShutdownCheckpointPublicationBarrier(userId);
     }

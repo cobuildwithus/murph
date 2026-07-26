@@ -5457,11 +5457,15 @@ describe("hosted Family plan", () => {
     );
     const eventCreatedAt = new Date("2026-07-14T12:00:00.000Z");
 
-    await expect(applyHostedFamilyStripeSubscriptionUpdatedTx({
+    const reconciliation = await applyHostedFamilyStripeSubscriptionUpdatedTx({
       dispatchContext: { eventCreatedAt },
       subscription: normalizedSubscription,
       tx: webhookTx,
-    })).resolves.toMatchObject({ groupId: "hbag_family" });
+    });
+    expect(reconciliation).toMatchObject({
+      billingModeChangedMemberIds: ["member_owner"],
+      groupId: "hbag_family",
+    });
 
     expect(webhookTx.hostedAccountGroupBillingRef.upsert).toHaveBeenCalledWith(expect.objectContaining({
       create: expect.objectContaining({

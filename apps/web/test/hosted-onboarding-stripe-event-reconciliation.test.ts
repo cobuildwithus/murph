@@ -25,6 +25,7 @@ const mocks = vi.hoisted(() => ({
   readActiveHostedFamilySponsorship: vi.fn(),
   readHostedMemberBillingSnapshot: vi.fn(),
   reconcileHostedUsageCreditStripeEvent: vi.fn(),
+  reconcileHostedAiUsageGateForBillingModeChangeTx: vi.fn(),
   refreshHostedBillingPlanSwitchToPulsePendingFieldsFromScheduleTx: vi.fn(),
   reconcileHostedFamilyDirectPaidTransitionSubscription: vi.fn(),
   resolveHostedStripeBillingOwner: vi.fn(),
@@ -57,6 +58,18 @@ vi.mock("@/src/lib/hosted-crypto/domain-root-store", () => ({
   prepareHostedCryptoDomainRootCandidates:
     mocks.prepareHostedCryptoDomainRootCandidates,
 }));
+
+vi.mock("@/src/lib/hosted-execution/usage-allowance", async () => {
+  const actual = await vi.importActual<
+    typeof import("@/src/lib/hosted-execution/usage-allowance")
+  >("@/src/lib/hosted-execution/usage-allowance");
+
+  return {
+    ...actual,
+    reconcileHostedAiUsageGateForBillingModeChangeTx:
+      mocks.reconcileHostedAiUsageGateForBillingModeChangeTx,
+  };
+});
 
 vi.mock("@/src/lib/hosted-onboarding/family-plan", async () => {
   const actual = await vi.importActual<
@@ -340,6 +353,7 @@ describe("hosted Stripe event reconciliation", () => {
     mocks.readHostedMemberFamilyBillingClaim.mockResolvedValue(null);
     mocks.readActiveHostedFamilySponsorship.mockResolvedValue(false);
     mocks.readHostedMemberBillingSnapshot.mockResolvedValue(null);
+    mocks.reconcileHostedAiUsageGateForBillingModeChangeTx.mockResolvedValue(undefined);
     mocks.reconcileHostedUsageCreditStripeEvent.mockResolvedValue({ handled: false });
     mocks.refreshHostedBillingPlanSwitchToPulsePendingFieldsFromScheduleTx.mockResolvedValue(undefined);
     mocks.reconcileHostedFamilyDirectPaidTransitionSubscription
@@ -3501,6 +3515,10 @@ describe("hosted Stripe event reconciliation", () => {
           ordering.push("ownership-converged");
           return { groupId: "group_123" };
         });
+      mocks.reconcileHostedAiUsageGateForBillingModeChangeTx
+        .mockImplementationOnce(async () => {
+          ordering.push("usage-reconciled");
+        });
       mocks.applyStripeRecurringFinancialState.mockImplementationOnce(async () => {
         ordering.push("financial-projected");
         return {
@@ -3519,6 +3537,7 @@ describe("hosted Stripe event reconciliation", () => {
       expect(ordering).toEqual([
         "owner-locked",
         "ownership-converged",
+        "usage-reconciled",
         "financial-projected",
       ]);
       expect(mocks.convergeHostedFamilyDirectPaidOwnershipTx).toHaveBeenCalledWith({
@@ -3526,6 +3545,11 @@ describe("hosted Stripe event reconciliation", () => {
         subscription: canonicalSubscription,
         tx: expect.anything(),
         verifiedOwnerMemberId: "member_123",
+      });
+      expect(mocks.reconcileHostedAiUsageGateForBillingModeChangeTx).toHaveBeenCalledWith({
+        memberId: "member_123",
+        now: new Date(event.created * 1000),
+        tx: expect.anything(),
       });
       expect(mocks.applyStripeRecurringFinancialState).toHaveBeenCalledWith(
         expect.objectContaining({

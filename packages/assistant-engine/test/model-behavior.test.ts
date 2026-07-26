@@ -6,6 +6,9 @@ import {
   resolveAssistantModelBehaviorProfile,
 } from '../src/assistant/model-behavior.js'
 import {
+  MURPH_CODEX_BASE_INSTRUCTIONS,
+} from '../src/assistant/codex-base-instructions.js'
+import {
   buildAssistantSystemPrompt,
   buildAssistantMaintenanceSystemPromptWithCacheMetadata,
   buildAssistantSystemNotificationPromptWithCacheMetadata,
@@ -1406,6 +1409,10 @@ describe('assistant local PDF evidence guidance', () => {
 describe('assistant consumption lookup guidance', () => {
   it('treats raw health and meal data as structured logging intent', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
+    const instructionStack = [
+      MURPH_CODEX_BASE_INSTRUCTIONS,
+      prompt,
+    ].join('\n\n')
 
     expect(prompt).toContain(
       'If the content contains health-relevant data',
@@ -1424,6 +1431,12 @@ describe('assistant consumption lookup guidance', () => {
     )
     expect(prompt).toContain(
       'Relevant personal records are core evidence. Read them before answering from general knowledge. Do not repeat reads or add work that cannot change the outcome.',
+    )
+    expect(instructionStack).toContain(
+      'a narrow internal canonical write as part of the requested product behavior',
+    )
+    expect(instructionStack).toContain(
+      'treat that as consent to save the recoverable health data and source provenance in the vault unless they clearly ask not to retain it or ask for explicitly ephemeral analysis only',
     )
   })
 

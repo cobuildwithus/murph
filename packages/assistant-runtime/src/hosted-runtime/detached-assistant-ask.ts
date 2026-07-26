@@ -311,6 +311,7 @@ async function runOneHostedDetachedAssistantAsk(input: {
         ...(input.createGroupSharedReader
           ? { groupSharedReader: input.createGroupSharedReader() }
           : {}),
+        requesterParticipantId: claimed.wake.ask.target.membershipId,
       });
     }
     const result = claimed.wake.ask.target.kind === "consented_member"

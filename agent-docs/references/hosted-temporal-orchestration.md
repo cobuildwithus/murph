@@ -311,10 +311,13 @@ The per-user workflow reads source-less reconciliation facts from web:
 Facts do not contain run/idle decisions, producer source/reason, raw mailbox
 payloads, workspace redacted status, signed usage decisions, or direct wake
 flags. Temporal interprets the facts mechanically: fresh mailbox signals may
-ensure processing directly; carried pointers and timers re-read facts; positive
-mailbox lag ensures processing; due assistant workspace wake ensures normal
-processing; due inbox media retention wake ensures retention-only processing;
-future or absent wakes wait.
+ensure processing directly; carried pointers and timers re-read facts;
+conversation lag or a due assistant workspace wake selects default processing;
+system-only lag selects `system_mailbox` processing; a due inbox media retention
+wake selects `inbox_media_retention` processing when foreground/default work is
+not runnable; future or absent wakes wait. These modes are invocation input, not
+new scheduler state. Foreground/default work must replace an active
+system-mailbox or retention owner instead of waiting for its idle checkpoint.
 
 Usage and product policy blocks are successful reconciliation reads with a
 non-null `blocked` object, never Temporal activity failures. Transport, auth,

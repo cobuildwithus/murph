@@ -9,6 +9,9 @@ import type {
   PreparedHostedCryptoDomainRootCandidates,
 } from "../hosted-crypto/domain-root-store";
 import {
+  reconcileHostedAiUsageGateForBillingModeChangeTx,
+} from "../hosted-execution/usage-allowance";
+import {
   coerceStripeInvoiceSubscriptionId,
   coerceStripeObjectId,
   coerceStripeSubscriptionId,
@@ -829,7 +832,7 @@ export async function applyStripeSubscriptionUpdated(
   dispatchContext: HostedStripeDispatchContext,
   prisma: Prisma.TransactionClient,
 ): Promise<HostedStripeSubscriptionUpdateOutcome> {
-  const familySubscription = await applyHostedFamilyStripeSubscriptionUpdatedTx({
+  const familySubscription = await applyHostedFamilyStripeSubscriptionUpdatedWithUsageTx({
     dispatchContext,
     subscription,
     tx: prisma,
@@ -948,7 +951,7 @@ export async function applyStripeInvoicePaid(
   preparedCryptoDomainRoots?: PreparedHostedCryptoDomainRootCandidates,
 ): Promise<HostedStripeActivationOutcome> {
   if (canonicalSubscription) {
-    const familySubscription = await applyHostedFamilyStripeSubscriptionUpdatedTx({
+    const familySubscription = await applyHostedFamilyStripeSubscriptionUpdatedWithUsageTx({
       dispatchContext,
       subscription: canonicalSubscription,
       tx: prisma,
@@ -1127,6 +1130,23 @@ function buildHostedStripeActivationOutcomeFromFamilySubscription(
     hostedExecutionEventId: firstActivation?.hostedExecutionEventId ?? null,
     welcomeEmailMemberId: null,
   };
+}
+
+async function applyHostedFamilyStripeSubscriptionUpdatedWithUsageTx(input: {
+  dispatchContext: HostedStripeDispatchContext;
+  subscription: Stripe.Subscription;
+  tx: Prisma.TransactionClient;
+}): Promise<HostedFamilyStripeSubscriptionResult> {
+  const familySubscription = await applyHostedFamilyStripeSubscriptionUpdatedTx(input);
+  const now = input.dispatchContext.eventCreatedAt ?? new Date();
+  for (const memberId of familySubscription.billingModeChangedMemberIds ?? []) {
+    await reconcileHostedAiUsageGateForBillingModeChangeTx({
+      memberId,
+      now,
+      tx: input.tx,
+    });
+  }
+  return familySubscription;
 }
 
 function buildEmptyHostedStripeActivationOutcome(): HostedStripeActivationOutcome {

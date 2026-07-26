@@ -11,6 +11,9 @@ import {
   type PreparedHostedCryptoDomainRootCandidates,
 } from "../hosted-crypto/domain-root-store";
 import {
+  reconcileHostedAiUsageGateForBillingModeChangeTx,
+} from "../hosted-execution/usage-allowance";
+import {
   clearHostedBillingPlanSwitchToPulsePendingFieldsForScheduleTx,
   refreshHostedBillingPlanSwitchToPulsePendingFieldsFromScheduleTx,
 } from "./billing-plan-switch-to-pulse-service";
@@ -585,12 +588,19 @@ async function reconcileHostedFamilyTransitionUnderVerifiedOwnerLock(input: {
         : {}),
       verifiedOwnerMemberId: input.memberId,
     });
-  await convergeHostedFamilyDirectPaidOwnershipTx({
+  const convergedOwnership = await convergeHostedFamilyDirectPaidOwnershipTx({
     eventCreatedAt: input.eventCreatedAt,
     subscription: reconciled,
     tx: input.tx,
     verifiedOwnerMemberId: input.memberId,
   });
+  if (convergedOwnership) {
+    await reconcileHostedAiUsageGateForBillingModeChangeTx({
+      memberId: input.memberId,
+      now: input.eventCreatedAt ?? new Date(),
+      tx: input.tx,
+    });
+  }
   const billingOwner = await resolveHostedStripeBillingOwner({
     prisma: input.tx,
     stripeSubscriptionId: reconciled.id,

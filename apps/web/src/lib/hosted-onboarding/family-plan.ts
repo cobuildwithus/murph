@@ -405,6 +405,7 @@ interface HostedAccountGroupStripeObjectMatch {
 
 export type HostedFamilyStripeSubscriptionResult = {
   activations: HostedMemberActivationResult[];
+  billingModeChangedMemberIds?: string[];
   groupId: string | null;
 };
 
@@ -2082,7 +2083,7 @@ export async function applyHostedFamilyStripeSubscriptionUpdatedTx(input: {
   // Provider ownership is structural. Once the exact valid Family
   // subscription is durably bound, retire the same owner's old direct binding
   // even when entitlement remains unpaid/blocked.
-  await clearHostedFamilyOwnerDirectPaidBillingTx({
+  const billingModeChanged = await clearHostedFamilyOwnerDirectPaidBillingTx({
     ownerMemberId: group.ownerMemberId,
     stripeSubscriptionId: subscription.id,
     tx: input.tx,
@@ -2094,6 +2095,9 @@ export async function applyHostedFamilyStripeSubscriptionUpdatedTx(input: {
   ) {
     return {
       activations: [],
+      ...(billingModeChanged
+        ? { billingModeChangedMemberIds: [group.ownerMemberId] }
+        : {}),
       groupId: group.id,
     };
   }
@@ -2114,12 +2118,18 @@ export async function applyHostedFamilyStripeSubscriptionUpdatedTx(input: {
 
     return {
       activations,
+      ...(billingModeChanged
+        ? { billingModeChangedMemberIds: [group.ownerMemberId] }
+        : {}),
       groupId: group.id,
     };
   }
 
   return {
     activations: [],
+    ...(billingModeChanged
+      ? { billingModeChangedMemberIds: [group.ownerMemberId] }
+      : {}),
     groupId: group.id,
   };
 }
@@ -3679,13 +3689,13 @@ async function clearHostedFamilyOwnerDirectPaidBillingTx(input: {
   ownerMemberId: string;
   stripeSubscriptionId: string;
   tx: Prisma.TransactionClient;
-}): Promise<void> {
+}): Promise<boolean> {
   const billingRef = await readHostedMemberStripeBillingRef({
     memberId: input.ownerMemberId,
     prisma: input.tx,
   });
   if (billingRef?.stripeSubscriptionId !== input.stripeSubscriptionId) {
-    return;
+    return false;
   }
 
   await input.tx.hostedMember.update({
@@ -3718,6 +3728,7 @@ async function clearHostedFamilyOwnerDirectPaidBillingTx(input: {
       memberId: input.ownerMemberId,
     },
   });
+  return true;
 }
 
 function buildHostedFamilyDirectPaidUpgradeIdempotencyKey(

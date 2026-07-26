@@ -12,7 +12,9 @@ data and conversations.
 Family supports 2-6 sponsored people. The owner counts as one sponsored person.
 One Family subscription can reserve an exact mix of Pulse seats at
 $7/person/month and Edge seats at $19/person/month. Each member and pending
-invite has one assigned tier and receives that tier's individual usage cap.
+invite has one assigned tier. Each active member's individual monthly usage
+allowance is 80% of that assigned seat price: $5.60 for Pulse and $15.20 for
+Edge.
 
 ## Product Contract
 
@@ -22,8 +24,14 @@ invite has one assigned tier and receives that tier's individual usage cap.
   Active members and pending invites consume capacity from their assigned tier.
 - Family members receive sponsored hosted access while the plan and their
   membership are active.
-- Every sponsored member gets their assigned tier's member-level usage
-  allowance. There is no shared Family usage pool.
+- Every sponsored member gets a member-level usage allowance equal to 80% of
+  their assigned tier's recurring seat price. There is no shared Family usage
+  pool. A member keeps any higher allowance already granted for an authoritative
+  open paid billing period until that period renews; a tier or direct-to-Family
+  billing-mode change still reconciles immediately. The rollout predeploy
+  migration materializes missing rows only for valid current paid billing
+  bounds before the new allowance code is promoted. It skips mutable calendar
+  fallbacks and never rewrites existing spend.
 - The active owner may buy one fixed $5, $10, or $25 usage-credit pack for one
   exact active Family member. The owner pays and that member alone receives the
   credit.
