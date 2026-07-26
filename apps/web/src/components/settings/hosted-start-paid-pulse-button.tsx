@@ -272,92 +272,112 @@ function StartPaidPulseConfirmationDialog(props: {
   onOpenChange: (open: boolean) => void;
   open: boolean;
 }) {
-  const isSubmitting = props.status === "submitting";
-
   return (
     <Dialog open={props.open} onOpenChange={props.onOpenChange}>
       <DialogContent className="max-w-md gap-6 rounded-2xl border border-[#c4a882]/25 bg-[#fffcf6] p-6 text-[#2d3436] ring-[#c4a882]/25 md:p-7">
-        <DialogHeader className="pr-10">
-          <DialogTitle className="font-serif text-2xl/7 font-semibold tracking-normal text-[#2d3436]">
-            Start Pulse
-          </DialogTitle>
-          <DialogDescription className="text-sm leading-6 text-[#736a58]">
-            Your trial ends and Pulse begins at {pulsePriceLabel}/mo.
-          </DialogDescription>
-        </DialogHeader>
+        <StartPaidPulseConfirmationContent
+          errorAction={props.errorAction}
+          errorMessage={props.errorMessage}
+          status={props.status}
+          onCancel={() => props.onOpenChange(false)}
+          onConfirm={props.onConfirm}
+        />
+      </DialogContent>
+    </Dialog>
+  );
+}
 
-        <PlanFeatureCard price={pulsePriceLabel} features={PULSE_FEATURES} />
+export function StartPaidPulseConfirmationContent(props: {
+  errorAction: StartPaidPulseErrorAction;
+  errorMessage: string | null;
+  status: StartPaidPulseStatus;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const isSubmitting = props.status === "submitting";
 
-        {props.errorMessage ? (
-          <p
-            role="alert"
-            className="rounded-lg border border-destructive/20 bg-destructive/5 p-3 text-sm text-destructive"
-          >
-            {props.errorMessage}
+  return (
+    <>
+      <DialogHeader className="pr-10">
+        <DialogTitle className="font-serif text-2xl/7 font-semibold tracking-normal text-[#2d3436]">
+          Start Pulse
+        </DialogTitle>
+        <DialogDescription className="text-sm leading-6 text-[#736a58]">
+          Your trial ends and Pulse begins at {pulsePriceLabel}/mo.
+        </DialogDescription>
+      </DialogHeader>
+
+      <PlanFeatureCard price={pulsePriceLabel} features={PULSE_FEATURES} />
+
+      {props.errorMessage ? (
+        <p
+          role="alert"
+          className="rounded-lg border border-destructive/20 bg-destructive/5 p-3 text-sm text-destructive"
+        >
+          {props.errorMessage}
+        </p>
+      ) : null}
+      {props.status === "billing_pending" ? (
+        // This state can outlast the confirmation window, and when it does the
+        // check never clears on its own. Offer the billing page in the same
+        // breath so the member has a way through instead of a wait with no end.
+        <div
+          role="status"
+          aria-live="polite"
+          className="flex flex-col gap-2 rounded-lg border border-[#c4a882]/25 bg-white/50 p-3 text-sm text-[#736a58]"
+        >
+          <p>
+            Billing is still finishing. Check again, or open billing to finish it there.
           </p>
-        ) : null}
-        {props.status === "billing_pending" ? (
-          // This state can outlast the confirmation window, and when it does the
-          // check never clears on its own. Offer the billing page in the same
-          // breath so the member has a way through instead of a wait with no end.
-          <div
-            role="status"
-            aria-live="polite"
-            className="flex flex-col gap-2 rounded-lg border border-[#c4a882]/25 bg-white/50 p-3 text-sm text-[#736a58]"
-          >
-            <p>
-              Billing is still finishing. Check again, or open billing to finish it there.
-            </p>
-            <BillingPortalButton
-              billingScope="member"
-              variant="ghost"
-              label="Open billing"
-            />
-          </div>
-        ) : null}
-        {isSubmitting ? (
-          <p role="status" aria-live="polite" className="sr-only">
-            Starting Pulse billing.
-          </p>
-        ) : null}
+          <BillingPortalButton
+            billingScope="member"
+            variant="ghost"
+            label="Open billing"
+          />
+        </div>
+      ) : null}
+      {isSubmitting ? (
+        <p role="status" aria-live="polite" className="sr-only">
+          Starting Pulse billing.
+        </p>
+      ) : null}
 
-        <div className="flex flex-col gap-2">
-          {props.errorAction === "billing" ? (
-            <BillingPortalButton
-              billingScope="member"
-              block
-              variant="secondary"
-              label="Open billing"
-            />
-          ) : (
-            <Button
-              type="button"
-              size="xl"
-              onClick={props.onConfirm}
-              disabled={isSubmitting}
-              className="w-full"
-            >
-              {isSubmitting
-                ? "Starting..."
-                : props.status === "billing_pending"
-                  ? "Check status"
-                  : props.errorAction === "retry"
-                    ? "Try again"
-                    : "Start Pulse"}
-            </Button>
-          )}
+      <div className="flex flex-col gap-2">
+        {props.errorAction === "billing" ? (
+          <BillingPortalButton
+            billingScope="member"
+            block
+            variant="secondary"
+            label="Open billing"
+          />
+        ) : (
           <Button
             type="button"
             size="xl"
-            variant="ghost"
-            onClick={() => props.onOpenChange(false)}
+            onClick={props.onConfirm}
             disabled={isSubmitting}
             className="w-full"
           >
-            Cancel
+            {isSubmitting
+              ? "Starting..."
+              : props.status === "billing_pending"
+                ? "Check status"
+                : props.errorAction === "retry"
+                  ? "Try again"
+                  : "Start Pulse"}
           </Button>
-        </div>
-      </DialogContent>
-    </Dialog>
+        )}
+        <Button
+          type="button"
+          size="xl"
+          variant="ghost"
+          onClick={props.onCancel}
+          disabled={isSubmitting}
+          className="w-full"
+        >
+          Cancel
+        </Button>
+      </div>
+    </>
   );
 }

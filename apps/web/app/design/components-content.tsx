@@ -91,9 +91,12 @@ import type { DeviceSyncCompletionDialogModel } from "@/src/lib/device-sync/conn
 import type { HostedConsentStatus } from "@/src/lib/legal/consent";
 import { buildWhoopAppleHealthSetupGuide } from "@/src/lib/device-sync/whoop-apple-health-setup-guide";
 import { MurphAssistantStylePicker } from "@/src/components/murph/murph-assistant-style-picker";
-import { HostedFamilyManager } from "@/src/components/settings/hosted-family-settings-actions";
-import { UpgradeToEdgeButton } from "@/src/components/settings/hosted-plan-upgrade-button";
-import { StartPaidPulseButton } from "@/src/components/settings/hosted-start-paid-pulse-button";
+import {
+  FamilyInvitePaymentRecoveryStep,
+  HostedFamilyManager,
+} from "@/src/components/settings/hosted-family-settings-actions";
+import { EdgeUpgradeConfirmationContent } from "@/src/components/settings/hosted-plan-upgrade-button";
+import { StartPaidPulseConfirmationContent } from "@/src/components/settings/hosted-start-paid-pulse-button";
 import { MurphPersonalitySettingsDialog } from "@/src/components/settings/murph-personality-settings-dialog";
 import { MURPH_TELEGRAM_URL } from "@/src/lib/murph-contact-routing";
 import { DESIGN_USAGE_OFFERS } from "./group-usage-funding-study";
@@ -106,6 +109,26 @@ function Section({ title, children }: { title: string; children: React.ReactNode
       <h2 className="font-mono text-xs uppercase tracking-[0.12em] text-muted-foreground">{title}</h2>
       {children}
     </div>
+  );
+}
+
+function HostedBillingRecoveryPreview(props: {
+  children: React.ReactNode;
+  label: string;
+  state: string;
+}) {
+  return (
+    <Dialog>
+      <article
+        data-design-state={props.state}
+        className="flex min-w-0 flex-col gap-6 rounded-2xl border border-[#c4a882]/25 bg-[#fffcf6] p-5 text-[#2d3436] md:p-6"
+      >
+        <p className="border-b border-[#c4a882]/20 pb-3 font-mono text-[10px] uppercase tracking-[0.12em] text-[#736a58]">
+          {props.label}
+        </p>
+        {props.children}
+      </article>
+    </Dialog>
   );
 }
 
@@ -947,17 +970,98 @@ export function ComponentsContent() {
 
         <Section title="Hosted Billing Recovery Actions">
           <p className="text-sm text-muted-foreground">
-            The real subscription actions keep passive Stripe processing
-            separate from payment recovery and route terminal collection states
-            to Billing. Controls are inert in this synthetic catalog study.
+            Real subscription confirmation and Family invite recovery states,
+            rendered with synthetic provider outcomes. Passive processing stays
+            separate from retry and terminal Billing recovery. Controls are inert.
           </p>
           <div
-            aria-label="Read-only hosted billing recovery actions"
-            className="flex flex-wrap items-center gap-3 rounded-xl border border-border bg-card p-5"
+            aria-label="Read-only hosted billing recovery states"
+            className="grid items-start gap-4 lg:grid-cols-2"
             inert
           >
-            <StartPaidPulseButton>Start Pulse</StartPaidPulseButton>
-            <UpgradeToEdgeButton>Upgrade to Edge</UpgradeToEdgeButton>
+            <HostedBillingRecoveryPreview
+              label="Start Pulse · billing pending"
+              state="start-pulse-billing-pending"
+            >
+              <StartPaidPulseConfirmationContent
+                errorAction={null}
+                errorMessage={null}
+                status="billing_pending"
+                onCancel={() => {}}
+                onConfirm={() => {}}
+              />
+            </HostedBillingRecoveryPreview>
+            <HostedBillingRecoveryPreview
+              label="Start Pulse · terminal Billing recovery"
+              state="start-pulse-terminal-billing-recovery"
+            >
+              <StartPaidPulseConfirmationContent
+                errorAction="billing"
+                errorMessage="Stripe could not collect this invoice. Open billing to update your payment method."
+                status="idle"
+                onCancel={() => {}}
+                onConfirm={() => {}}
+              />
+            </HostedBillingRecoveryPreview>
+            <HostedBillingRecoveryPreview
+              label="Edge · processing"
+              state="edge-processing"
+            >
+              <EdgeUpgradeConfirmationContent
+                errorMessage={null}
+                isUpgrading={false}
+                processing
+                recovery={null}
+                onCancel={() => {}}
+                onConfirm={() => {}}
+              />
+            </HostedBillingRecoveryPreview>
+            <HostedBillingRecoveryPreview
+              label="Edge · retry"
+              state="edge-retry"
+            >
+              <EdgeUpgradeConfirmationContent
+                errorMessage="Stripe could not confirm this plan change. Try again."
+                isUpgrading={false}
+                processing={false}
+                recovery="retry"
+                onCancel={() => {}}
+                onConfirm={() => {}}
+              />
+            </HostedBillingRecoveryPreview>
+            <HostedBillingRecoveryPreview
+              label="Edge · terminal Billing recovery"
+              state="edge-terminal-billing-recovery"
+            >
+              <EdgeUpgradeConfirmationContent
+                errorMessage="Stripe marked this invoice uncollectible. Open billing."
+                isUpgrading={false}
+                processing={false}
+                recovery="billing"
+                onCancel={() => {}}
+                onConfirm={() => {}}
+              />
+            </HostedBillingRecoveryPreview>
+            <HostedBillingRecoveryPreview
+              label="Family invite · payment recovery"
+              state="family-invite-payment-recovery-idle"
+            >
+              <FamilyInvitePaymentRecoveryStep
+                isFinishing={false}
+                paymentUrl="https://invoice.stripe.com/i/design-family-seat"
+                onFinish={() => {}}
+              />
+            </HostedBillingRecoveryPreview>
+            <HostedBillingRecoveryPreview
+              label="Family invite · finishing"
+              state="family-invite-payment-recovery-finishing"
+            >
+              <FamilyInvitePaymentRecoveryStep
+                isFinishing
+                paymentUrl="https://invoice.stripe.com/i/design-family-seat"
+                onFinish={() => {}}
+              />
+            </HostedBillingRecoveryPreview>
           </div>
         </Section>
 

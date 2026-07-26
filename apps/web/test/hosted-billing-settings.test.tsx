@@ -1295,6 +1295,61 @@ describe("HostedBillingSettings", () => {
     await rendered.cleanup();
   });
 
+  test.each([
+    ["an unrecognized code", "HOSTED_BILLING_PLAN_UPGRADE_UNEXPECTED_STATE"],
+    ["no code", null],
+  ])("offers retry for a non-retryable plan-upgrade failure with %s", async (_label, code) => {
+    const { HostedOnboardingApiError } = await import(
+      "@/src/components/hosted-onboarding/client-api"
+    );
+    mocks.requestHostedOnboardingJson
+      .mockRejectedValueOnce(
+        new HostedOnboardingApiError({
+          code,
+          message: "Could not confirm this plan change.",
+          retryable: false,
+        }),
+      )
+      .mockResolvedValueOnce({
+        billingPlanCode: "launch_edge_monthly",
+        status: "upgraded",
+      });
+
+    const { UpgradeToEdgeButton } = await import("@/src/components/settings/hosted-plan-upgrade-button");
+    const rendered = await renderClientComponent(createElement(UpgradeToEdgeButton));
+
+    await act(async () => {
+      rendered.button.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+    });
+    const confirmButton = findLastButtonByText(
+      rendered.window.document,
+      "Upgrade to Edge",
+      rendered.window,
+    );
+    await act(async () => {
+      confirmButton.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+    });
+
+    const dialog = rendered.window.document.querySelector('[role="dialog"]');
+    assert.ok(dialog);
+    assert.match(dialog.textContent ?? "", /Could not confirm this plan change/);
+    assert.doesNotMatch(dialog.textContent ?? "", /Open billing/);
+    const retryButton = findButtonByText(
+      dialog,
+      "Try again",
+      rendered.window,
+    );
+
+    await act(async () => {
+      retryButton.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+    });
+
+    assert.equal(mocks.requestHostedOnboardingJson.mock.calls.length, 2);
+    assert.equal(mocks.routerRefresh.mock.calls.length, 1);
+
+    await rendered.cleanup();
+  });
+
   test("offers a retry only when the plan-upgrade error is retryable", async () => {
     const { HostedOnboardingApiError } = await import(
       "@/src/components/hosted-onboarding/client-api"

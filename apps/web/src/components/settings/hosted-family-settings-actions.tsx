@@ -12,7 +12,7 @@ import {
 import { HOSTED_PHONE_COUNTRY_OPTIONS } from "@/src/components/hosted-onboarding/hosted-phone-country-options";
 import { usePhoneCountryCode } from "@/src/components/hosted-onboarding/phone-country-code-client-provider";
 import { Badge } from "@/src/components/ui/badge";
-import { Button, buttonVariants } from "@/src/components/ui/button";
+import { Button } from "@/src/components/ui/button";
 import {
   Dialog,
   DialogContent,
@@ -93,6 +93,73 @@ interface FamilyInviteRequestPayload {
 interface FamilyInvitePaymentRecovery {
   paymentUrl: string;
   payload: FamilyInviteRequestPayload;
+}
+
+export function FamilyInvitePaymentRecoveryStep(props: {
+  errorMessage?: string | null;
+  isFinishing: boolean;
+  paymentUrl: string;
+  onFinish: () => void;
+}) {
+  return (
+    <div className="flex flex-col gap-4">
+      <div
+        role="status"
+        className="rounded-lg border border-[#c4a882]/25 bg-[#f5f0e8] p-4 text-sm text-[#736a58]"
+      >
+        <p className="font-medium text-[#2d3436]">Seat charge needs approval</p>
+        <p className="mt-1 leading-5">
+          Open Stripe in a new tab and approve the charge. Your invite details stay here
+          until you return to finish the invite.
+        </p>
+      </div>
+
+      {props.errorMessage ? (
+        <p
+          role="alert"
+          className="rounded-lg border border-destructive/20 bg-destructive/5 p-3 text-sm text-destructive [overflow-wrap:anywhere]"
+        >
+          {props.errorMessage}
+        </p>
+      ) : null}
+
+      <div className="flex flex-col gap-2">
+        <Button
+          render={(
+            <a
+              href={props.paymentUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+            />
+          )}
+          nativeButton={false}
+          size="xl"
+          disabled={props.isFinishing}
+          className="w-full"
+        >
+          Approve seat charge in Stripe
+          <span className="sr-only"> (opens in a new tab)</span>
+        </Button>
+        <Button
+          type="button"
+          size="xl"
+          variant="secondary"
+          onClick={props.onFinish}
+          disabled={props.isFinishing}
+          className="w-full"
+        >
+          {props.isFinishing ? (
+            <>
+              <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+              Finishing invite...
+            </>
+          ) : (
+            "Finish invite"
+          )}
+        </Button>
+      </div>
+    </div>
+  );
 }
 
 function inviteContacts(invite: FamilyManagerInvite): string[] {
@@ -1082,19 +1149,13 @@ export function HostedFamilyManager(props: {
               </fieldset>
 
               {invitePaymentRecovery ? (
-                <div
-                  role="status"
-                  className="border-y border-[#c4a882]/25 py-3 text-sm text-[#736a58]"
-                >
-                  <p className="font-medium text-[#2d3436]">Seat charge needs approval</p>
-                  <p className="mt-1 leading-5">
-                    Open Stripe in a new tab and approve the charge. Your invite details stay here
-                    until you return to finish the invite.
-                  </p>
-                </div>
-              ) : null}
-
-              {inviteError ? (
+                <FamilyInvitePaymentRecoveryStep
+                  errorMessage={inviteError}
+                  isFinishing={isInviting}
+                  paymentUrl={invitePaymentRecovery.paymentUrl}
+                  onFinish={() => void submitInvite(invitePaymentRecovery.payload)}
+                />
+              ) : inviteError ? (
                 <p
                   role="alert"
                   className="rounded-lg border border-destructive/20 bg-destructive/5 p-3 text-sm text-destructive [overflow-wrap:anywhere]"
@@ -1104,34 +1165,7 @@ export function HostedFamilyManager(props: {
               ) : null}
 
               <div className="flex flex-col gap-2">
-                {invitePaymentRecovery ? (
-                  <>
-                    <a
-                      href={invitePaymentRecovery.paymentUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className={cn(buttonVariants({ size: "xl", variant: "secondary" }), "w-full")}
-                    >
-                      Approve seat charge in Stripe
-                    </a>
-                    <Button
-                      type="button"
-                      size="xl"
-                      onClick={() => void submitInvite(invitePaymentRecovery.payload)}
-                      disabled={isInviting}
-                      className="w-full"
-                    >
-                      {isInviting ? (
-                        <>
-                          <Loader2 className="size-4 animate-spin" aria-hidden="true" />
-                          Finishing invite...
-                        </>
-                      ) : (
-                        "Finish invite"
-                      )}
-                    </Button>
-                  </>
-                ) : (
+                {!invitePaymentRecovery ? (
                   <Button
                     type="button"
                     size="xl"
@@ -1147,7 +1181,7 @@ export function HostedFamilyManager(props: {
                       "Create invite"
                     )}
                   </Button>
-                )}
+                ) : null}
                 <Button
                   type="button"
                   size="xl"

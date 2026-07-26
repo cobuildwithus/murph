@@ -538,6 +538,16 @@ test.each([
       assert.equal(approvalLink.href, paymentUrl);
       assert.equal(approvalLink.target, "_blank");
       assert.equal(approvalLink.rel, "noopener noreferrer");
+      assert.match(approvalLink.textContent ?? "", /opens in a new tab/);
+      assert.match(approvalLink.className, /\bbg-primary\b/u);
+      const finishButton = buttonByText(container, "Finish invite");
+      assert.match(finishButton.className, /\bbg-secondary\b/u);
+      assert.equal(approvalLink.nextElementSibling, finishButton);
+      const paymentNotice = [
+        ...container.querySelectorAll<HTMLElement>('[role="status"]'),
+      ].find((notice) => notice.textContent?.includes("Seat charge needs approval"));
+      assert.match(paymentNotice?.className ?? "", /\brounded-lg\b/u);
+      assert.match(paymentNotice?.className ?? "", /bg-\[#f5f0e8\]/u);
       assert.match(
         container.textContent ?? "",
         /Your invite details stay here until you return to finish the invite\./,
@@ -602,6 +612,9 @@ test("HostedFamilyManager prevents concurrent Finish invite retries", async () =
     expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledTimes(2);
     assert.equal(finishButton.disabled, true);
     assert.match(finishButton.textContent ?? "", /Finishing invite\.\.\./);
+    const approvalLink = linkByText(container, "Approve seat charge in Stripe");
+    assert.equal(approvalLink.getAttribute("aria-disabled"), "true");
+    assert.equal(approvalLink.getAttribute("data-disabled"), "");
   } finally {
     await cleanup();
   }

@@ -135,6 +135,31 @@ test("footer ownership stays on explicit public surfaces", () => {
   }
 });
 
+test("design catalog keeps the hosted billing recovery state matrix rendered", () => {
+  const source = readFileSync(
+    new URL("../app/design/components-content.tsx", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(source, /data-design-state=\{props\.state\}/u);
+  for (const state of [
+    "start-pulse-billing-pending",
+    "start-pulse-terminal-billing-recovery",
+    "edge-processing",
+    "edge-retry",
+    "edge-terminal-billing-recovery",
+    "family-invite-payment-recovery-idle",
+    "family-invite-payment-recovery-finishing",
+  ]) {
+    assert.match(source, new RegExp(`state="${state}"`, "u"));
+  }
+  assert.match(source, /<StartPaidPulseConfirmationContent/u);
+  assert.match(source, /<EdgeUpgradeConfirmationContent/u);
+  assert.match(source, /<FamilyInvitePaymentRecoveryStep/u);
+  assert.doesNotMatch(source, /<StartPaidPulseButton/u);
+  assert.doesNotMatch(source, /<UpgradeToEdgeButton/u);
+});
+
 test("RootLayout provides default title, description, and preview image metadata", () => {
   assert.ok(metadata.metadataBase instanceof URL);
   assert.equal(metadata.title, "Murph — Health is hard. Don’t do it alone.");

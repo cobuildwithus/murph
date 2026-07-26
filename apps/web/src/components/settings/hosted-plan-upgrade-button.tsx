@@ -182,73 +182,95 @@ function EdgeUpgradeConfirmationDialog(props: {
   return (
     <Dialog open={props.open} onOpenChange={props.onOpenChange}>
       <DialogContent className="max-w-md gap-6 rounded-2xl border border-[#c4a882]/25 bg-[#fffcf6] p-6 text-[#2d3436] ring-[#c4a882]/25 md:p-7">
-        <DialogHeader className="pr-10">
-          <DialogTitle className="font-serif text-2xl/7 font-semibold tracking-normal text-[#2d3436]">
-            Upgrade to Edge
-          </DialogTitle>
-          <DialogDescription className="text-sm leading-6 text-[#736a58]">
-            For when you want the full picture.
-          </DialogDescription>
-        </DialogHeader>
+        <EdgeUpgradeConfirmationContent
+          errorMessage={props.errorMessage}
+          isUpgrading={props.isUpgrading}
+          processing={props.processing}
+          recovery={props.recovery}
+          onCancel={() => props.onOpenChange(false)}
+          onConfirm={props.onConfirm}
+        />
+      </DialogContent>
+    </Dialog>
+  );
+}
 
-        <PlanFeatureCard price={edgePriceLabel} features={EDGE_FEATURES} />
+export function EdgeUpgradeConfirmationContent(props: {
+  errorMessage: string | null;
+  isUpgrading: boolean;
+  processing: boolean;
+  recovery: EdgeUpgradeRecovery;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <>
+      <DialogHeader className="pr-10">
+        <DialogTitle className="font-serif text-2xl/7 font-semibold tracking-normal text-[#2d3436]">
+          Upgrade to Edge
+        </DialogTitle>
+        <DialogDescription className="text-sm leading-6 text-[#736a58]">
+          For when you want the full picture.
+        </DialogDescription>
+      </DialogHeader>
 
-        {props.errorMessage ? (
-          <p
-            role="alert"
-            className="rounded-lg border border-destructive/20 bg-destructive/5 p-3 text-sm text-destructive [overflow-wrap:anywhere]"
-          >
-            {props.errorMessage}
-          </p>
-        ) : null}
-        {props.processing ? (
-          <p
-            role="status"
-            aria-live="polite"
-            className="rounded-lg border border-[#c4a882]/25 bg-white/50 p-3 text-sm text-[#736a58]"
-          >
-            Stripe is still processing this invoice. Check the status again shortly.
-          </p>
-        ) : null}
+      <PlanFeatureCard price={edgePriceLabel} features={EDGE_FEATURES} />
 
-        <div className="flex flex-col gap-2">
-          {props.errorMessage && props.recovery === "billing" ? (
-            <BillingPortalButton
-              billingScope="member"
-              block
-              label="Open billing"
-              variant="secondary"
-            />
-          ) : !props.errorMessage || props.recovery === "retry" ? (
-            <Button
-              type="button"
-              size="xl"
-              onClick={props.onConfirm}
-              disabled={props.isUpgrading}
-              className="w-full"
-            >
-              {props.isUpgrading
-                ? "Upgrading..."
-                : props.processing
-                  ? "Check status"
-                  : props.recovery === "retry"
-                    ? "Try again"
-                    : "Upgrade to Edge"}
-            </Button>
-          ) : null}
+      {props.errorMessage ? (
+        <p
+          role="alert"
+          className="rounded-lg border border-destructive/20 bg-destructive/5 p-3 text-sm text-destructive [overflow-wrap:anywhere]"
+        >
+          {props.errorMessage}
+        </p>
+      ) : null}
+      {props.processing ? (
+        <p
+          role="status"
+          aria-live="polite"
+          className="rounded-lg border border-[#c4a882]/25 bg-white/50 p-3 text-sm text-[#736a58]"
+        >
+          Stripe is still processing this invoice. Check the status again shortly.
+        </p>
+      ) : null}
+
+      <div className="flex flex-col gap-2">
+        {props.errorMessage && props.recovery === "billing" ? (
+          <BillingPortalButton
+            billingScope="member"
+            block
+            label="Open billing"
+            variant="secondary"
+          />
+        ) : !props.errorMessage || props.recovery === "retry" ? (
           <Button
             type="button"
             size="xl"
-            variant="ghost"
-            onClick={() => props.onOpenChange(false)}
+            onClick={props.onConfirm}
             disabled={props.isUpgrading}
             className="w-full"
           >
-            Cancel
+            {props.isUpgrading
+              ? "Upgrading..."
+              : props.processing
+                ? "Check status"
+                : props.recovery === "retry"
+                  ? "Try again"
+                  : "Upgrade to Edge"}
           </Button>
-        </div>
-      </DialogContent>
-    </Dialog>
+        ) : null}
+        <Button
+          type="button"
+          size="xl"
+          variant="ghost"
+          onClick={props.onCancel}
+          disabled={props.isUpgrading}
+          className="w-full"
+        >
+          Cancel
+        </Button>
+      </div>
+    </>
   );
 }
 
@@ -266,7 +288,7 @@ function resolveEdgeUpgradeRecovery(error: unknown): EdgeUpgradeRecovery {
   return error.code &&
       EDGE_UPGRADE_BILLING_RECOVERY_CODES.has(error.code)
     ? "billing"
-    : null;
+    : "retry";
 }
 
 function isHostedStripePaymentActionUrl(value: string): boolean {
