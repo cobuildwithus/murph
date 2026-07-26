@@ -1,6 +1,6 @@
 # Group-funded usage thank-you celebration
 
-Status: active
+Status: completed
 Created: 2026-07-26
 Updated: 2026-07-26
 
@@ -129,3 +129,4 @@ Updated: 2026-07-26
     accepted findings.
   - The exact final PR patch returns `ROUND_OUTCOME: PASS` with zero accepted
     findings.
+Completed: 2026-07-26
