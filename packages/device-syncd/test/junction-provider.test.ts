@@ -160,6 +160,7 @@ function createJunctionProvider(
     clientUserIdSecret: "junction-client-user-id-secret",
     environment: "sandbox",
     region: "us",
+    pushSourceRecoveryEnabled: true,
     summaryResources: ["activity"],
     summaryBackfillDays: 2,
     timeseriesResources: [],
@@ -5694,6 +5695,40 @@ test("Junction client rejects provider deregistration without a Junction user id
   );
 });
 
+test("automatic recovery stays inert until it is explicitly enabled", async () => {
+  const provider = createJunctionProvider(async (input) => {
+    throw new Error(`No request should be made while recovery is disabled: ${readUrl(input)}`);
+  }, {
+    // The vendor enables the trigger endpoint per team, so shipping the code and
+    // switching it on are separate steps. Default-off is what lets this merge
+    // before that request lands.
+    pushSourceRecoveryEnabled: false,
+  });
+  const executor = requireValue(
+    provider.jobExecutor,
+    "Junction provider should expose a job executor.",
+  );
+  const stalledAccount = createStoredAccount({
+    sources: [{
+      displayName: "Garmin",
+      firstSeenAt: "2026-07-01T00:00:00.000Z",
+      lastDataAt: "2026-07-18T00:00:00.000Z",
+      lastErrorCode: null,
+      lastErrorMessage: null,
+      lastSeenAt: "2026-07-20T00:00:00.000Z",
+      resourceCount: 20,
+      sourceProviderSlug: "garmin",
+      status: "connected",
+    }],
+  });
+
+  assert.equal(
+    executor.createScheduledJobs?.(stalledAccount, "2026-07-20T00:00:00.000Z")
+      ?.jobs.find((job) => job.kind === "push_source_recovery"),
+    undefined,
+  );
+});
+
 test("a stalled Garmin source automatically triggers a bounded historical pull", async () => {
   const requests: { body: unknown; url: string }[] = [];
   const provider = createJunctionProvider(async (input, init) => {
@@ -5803,6 +5838,71 @@ test("a stalled Garmin source automatically triggers a bounded historical pull",
   });
   assert.equal(
     executor.createScheduledJobs?.(afterAttempt, "2026-07-20T01:00:00.000Z")
+      ?.jobs.find((job) => job.kind === "push_source_recovery"),
+    undefined,
+  );
+});
+
+test("the executor carries prior attempts through to exhaustion", async () => {
+  let triggerCalls = 0;
+  const provider = createJunctionProvider(async () => {
+    triggerCalls += 1;
+    return createJsonResponse({ success: true }, 202);
+  });
+  const executor = requireValue(
+    provider.jobExecutor,
+    "Junction provider should expose a job executor.",
+  );
+  const staleSources = [{
+    displayName: "Garmin",
+    firstSeenAt: "2026-07-01T00:00:00.000Z",
+    lastDataAt: "2026-07-18T00:00:00.000Z",
+    lastErrorCode: null,
+    lastErrorMessage: null,
+    lastSeenAt: "2026-07-22T00:00:00.000Z",
+    resourceCount: 20,
+    sourceProviderSlug: "garmin",
+    status: "connected" as const,
+  }];
+  // Three attempts already spent on this episode.
+  const priorMetadata = {
+    junctionPushSourceRecoveryAttempts: 3,
+    junctionPushSourceRecoveryLastAttemptAt: "2026-07-20T16:00:00.000Z",
+    junctionPushSourceRecoverySilentSinceAt: "2026-07-18T00:00:00.000Z",
+    junctionPushSourceRecoverySourceProviderSlug: "garmin",
+    junctionPushSourceRecoveryStatus: "triggered",
+  };
+
+  const result = await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      account: createAccount({ metadata: priorMetadata, sources: staleSources }),
+      now: "2026-07-22T16:00:00.000Z",
+    }),
+    createJob("push_source_recovery", {
+      silentSinceAt: "2026-07-18T00:00:00.000Z",
+      sourceProviderSlug: "garmin",
+    }),
+  );
+
+  // Losing the prior count would leave every mutation at "attempt 1", so a
+  // persistently silent source would trigger provider work forever.
+  assert.equal(triggerCalls, 1);
+  assert.equal(
+    (result.metadataPatch as Record<string, unknown>).junctionPushSourceRecoveryAttempts,
+    4,
+  );
+  assert.equal(
+    (result.metadataPatch as Record<string, unknown>).junctionPushSourceRecoveryStatus,
+    "exhausted",
+  );
+
+  const exhausted = createStoredAccount({
+    metadata: { ...priorMetadata, ...(result.metadataPatch as Record<string, unknown>) },
+    sources: staleSources,
+  });
+  assert.equal(
+    executor.createScheduledJobs?.(exhausted, "2026-07-30T00:00:00.000Z")
       ?.jobs.find((job) => job.kind === "push_source_recovery"),
     undefined,
   );

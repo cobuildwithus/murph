@@ -3,6 +3,7 @@ import {
   JUNCTION_CLIENT_USER_ID_SECRET_ENV_KEYS,
   JUNCTION_ENV_ENV_KEYS,
   JUNCTION_PROVIDER_FILTER_ENV_KEYS,
+  JUNCTION_PUSH_SOURCE_RECOVERY_ENABLED_ENV_KEYS,
   JUNCTION_RECONCILE_DAYS_ENV_KEYS,
   JUNCTION_RECONCILE_INTERVAL_MS_ENV_KEYS,
   JUNCTION_REGION_ENV_KEYS,
@@ -15,6 +16,7 @@ import {
 } from "./provider-env.ts";
 import {
   optionalEnv,
+  parseBooleanEnv,
   parseCsvEnv,
   parseIntegerEnv,
 } from "./provider-config-helpers.ts";
@@ -57,6 +59,7 @@ export function readConfiguredJunctionDeviceSyncProviderConfig(
     timeseriesBackfillDays: parseIntegerEnv(env, JUNCTION_TIMESERIES_BACKFILL_DAYS_ENV_KEYS),
     reconcileDays: parseIntegerEnv(env, JUNCTION_RECONCILE_DAYS_ENV_KEYS),
     reconcileIntervalMs: parseIntegerEnv(env, JUNCTION_RECONCILE_INTERVAL_MS_ENV_KEYS),
+    pushSourceRecoveryEnabled: parseBooleanEnv(env, JUNCTION_PUSH_SOURCE_RECOVERY_ENABLED_ENV_KEYS),
     requestTimeoutMs: parseIntegerEnv(env, JUNCTION_REQUEST_TIMEOUT_MS_ENV_KEYS),
     webhookSecret,
     webhookTimestampToleranceMs: parseIntegerEnv(env, JUNCTION_WEBHOOK_TIMESTAMP_TOLERANCE_MS_ENV_KEYS),

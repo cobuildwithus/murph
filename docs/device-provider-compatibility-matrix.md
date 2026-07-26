@@ -102,7 +102,12 @@ that behind Link Migration, which is disabled per team by default, so a gated
 403/404 is reported as `endpointUnavailable` — an "ask support to enable it"
 answer, not a transport failure to retry.
 
-Recovery is automatic. The scheduled pass that detects the stall also derives a
+Recovery is automatic, behind an explicit activation switch
+(`JUNCTION_PUSH_SOURCE_RECOVERY_ENABLED`, default off). The trigger endpoint is
+enabled per team by the vendor, so shipping this code and switching it on are
+deliberately separate steps: the rollout does not wait on a support request, and
+the capability can be switched off again without a deploy if the endpoint
+misbehaves. Once switched on: The scheduled pass that detects the stall also derives a
 bounded recovery attempt from connection metadata, the same way the
 historical-backfill ladder works, so a member never has to notice or act. The
 ladder is episode-scoped on `silentSinceAt`: attempts fire at detection, +6h,

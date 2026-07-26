@@ -287,6 +287,7 @@ export function createJunctionDeviceSyncProvider(
   const summaryBackfillDays = config.summaryBackfillDays ?? DEFAULT_SUMMARY_BACKFILL_DAYS;
   const timeseriesBackfillDays = config.timeseriesBackfillDays ?? DEFAULT_TIMESERIES_BACKFILL_DAYS;
   const reconcileDays = config.reconcileDays ?? DEFAULT_RECONCILE_DAYS;
+  const pushSourceRecoveryEnabled = config.pushSourceRecoveryEnabled === true;
   const reconcileIntervalMs = config.reconcileIntervalMs ?? DEFAULT_RECONCILE_INTERVAL_MS;
   const webhookTimestampToleranceMs =
     config.webhookTimestampToleranceMs ?? DEFAULT_WEBHOOK_TIMESTAMP_TOLERANCE_MS;
@@ -520,6 +521,14 @@ export function createJunctionDeviceSyncProvider(
     account: StoredDeviceSyncAccount,
     now: string,
   ): DeviceSyncJobInput[] {
+    // Off until the vendor enables the trigger endpoint for this team. Shipping
+    // the code and switching it on are separate steps so the rollout does not
+    // depend on a support request landing first, and so it can be switched off
+    // again without a deploy if the endpoint misbehaves.
+    if (!pushSourceRecoveryEnabled) {
+      return [];
+    }
+
     const stale = evaluatePushPrimarySourceStaleness({
       now,
       sources: (account.sources ?? []).map((source) => ({
