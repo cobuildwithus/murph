@@ -229,6 +229,16 @@ available. Profile labels require their separate granted snapshot. Authority,
 decryption, parse, and bound failures return typed unavailability without shared
 records or identity-bearing infrastructure fields.
 
+The Web response is complete. For the model boundary, the assistant-engine
+adapter keys every retained projection by its exact scope and collapses the
+grant/data pair to `not_granted`, `missing`, or `available`. Non-workout record
+arrays remain intact; `workouts.v0` additionally hoists repeated day, kind,
+time-semantics, and completion-watermark fields. If whole member rows still
+exceed the model result limit, the adapter returns `status="partial"` with every
+omitted current membership named in `omittedParticipantIds`. It never truncates
+a member row, treats an omitted member as departed, or alters stored or
+Web-returned truth.
+
 `device-sync-status.v0` is explicit consent only. When that exact grant is in
 the captured authority set, Web derives the result live from its bounded device
 state. It returns only public source labels, coarse connection state, status
