@@ -6,9 +6,9 @@ Updated: 2026-07-25
 
 ## Goal
 
-- Preserve the two-phase common path while making rare loser-subscription
-  cleanup serialize through Stripe cancellation and use a genuinely
-  database-only ownership recheck.
+- Make auto-trial adoption and loser cancellation share one honest
+  serialization boundary, while keeping the cleanup ownership recheck genuinely
+  database-only.
 
 ## Success criteria
 
@@ -16,7 +16,11 @@ Updated: 2026-07-25
   bounded Stripe cancellation settles.
 - The recheck selects only billing status, phase, trial redemption, and the
   blind subscription lookup key; it performs no decrypt or KMS call.
+- Cleanup recognizes the subscription lookup key under every readable privacy
+  key version.
 - A subscription adopted by a concurrent billing flow cannot be cancelled.
+- A subscription cancelled by cleanup cannot later be adopted from a stale
+  provider snapshot.
 - Focused, full acceptance, specialist ReviewGPT, final parent review, final
   ReviewGPT, and CI are green on the pushed head.
 
@@ -36,9 +40,11 @@ Updated: 2026-07-25
 
 ## Risks and mitigations
 
-1. Risk: an external Stripe call extends a rare transaction.
-   Mitigation: keep this only on loser cleanup, preserve the provider-free common
-   path, and use the existing explicit cancellation timeout.
+1. Risk: an external Stripe call extends the finalization and rare cleanup
+   transactions.
+   Mitigation: use one authoritative provider read inside finalization's member
+   lock and the existing explicit five-second request timeout. This is the
+   smallest correct boundary because no durable cancellation fence exists.
 2. Risk: a broad billing read invokes KMS under the lock.
    Mitigation: add a narrow select-only ownership projection and exact selected
    field assertions.
@@ -48,12 +54,19 @@ Updated: 2026-07-25
 1. Trace finalization, member-lock, Stripe timeout, and billing projection paths.
 2. Move the ownership recheck and cancellation into one locked transaction.
 3. Replace the encrypted snapshot with the lookup-key projection.
-4. Add race/selection/timeout proof and run the required gates.
+4. Move the authoritative finalization read inside the same member lock so
+   cleanup cannot win first and be followed by stale adoption.
+5. Match all readable subscription lookup-key versions during cleanup.
+6. Add race/selection/timeout proof and run the required gates.
 
 ## Decisions
 
 - Prefer one rare provider-bearing critical section to a new durable cleanup
   coordination mechanism.
+- Prefer one bounded provider read in the common finalization critical section
+  to a cancellation-fence column, coordination table, or cleanup state machine.
+- The original provider-outside-lock shape was rejected after specialist review
+  proved the reverse cleanup-before-adoption race.
 
 ## Verification
 
@@ -62,3 +75,7 @@ Updated: 2026-07-25
   `pnpm verify:acceptance`, and the repository ReviewGPT/CI gates.
 - Expected outcomes: all pass; the concurrency proof demonstrates that adoption
   and cancellation cannot cross the serialized boundary.
+- Current focused result: the auto-trial service and route suites pass with 76
+  tests. A direct prepared typecheck is presently blocked by an unrelated
+  `hosted-routing/thread-route-store.ts` error on the rebased base; canonical
+  verification will regenerate Prisma artifacts and rerun the lane.

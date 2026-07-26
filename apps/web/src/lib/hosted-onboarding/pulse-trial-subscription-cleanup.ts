@@ -47,7 +47,7 @@ export function classifyHostedPulseTrialCandidateDisposition(input: {
 
 export function classifyHostedPulseTrialCandidateLookupDisposition(input: {
   billingStatus: HostedBillingStatus;
-  candidateStripeSubscriptionLookupKey: string;
+  candidateStripeSubscriptionLookupKeys: readonly string[];
   currentBillingPhase: string | null;
   currentStripeSubscriptionLookupKey: string | null;
   pulseTrialRedeemedAt: Date | null;
@@ -58,9 +58,11 @@ export function classifyHostedPulseTrialCandidateLookupDisposition(input: {
     hasCurrentStripeSubscription: Boolean(
       input.currentStripeSubscriptionLookupKey,
     ),
-    isCurrentStripeSubscription:
-      input.currentStripeSubscriptionLookupKey ===
-      input.candidateStripeSubscriptionLookupKey,
+    isCurrentStripeSubscription: input.currentStripeSubscriptionLookupKey !==
+        null &&
+      input.candidateStripeSubscriptionLookupKeys.includes(
+        input.currentStripeSubscriptionLookupKey,
+      ),
     pulseTrialRedeemedAt: input.pulseTrialRedeemedAt,
   });
 }
