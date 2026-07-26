@@ -1,5 +1,3 @@
-import { randomUUID } from "node:crypto";
-
 import {
   readHostedIngressLatencySource,
   type HostedIngressLatencySource,
@@ -9,9 +7,7 @@ import type {
   CloudflareHostedControlRuntimeEnsureProcessingTiming,
 } from "@murphai/cloudflare-hosted-control/client";
 
-import {
-  readHostedExecutionControlClientIfConfigured,
-} from "../hosted-execution/control";
+import { startHostedDirectRuntimeWakeBestEffort } from "../hosted-execution/direct-runtime-wake";
 import {
   signalHostedMailboxAppendRuntime,
 } from "../hosted-orchestration/signal-runtime";
@@ -129,8 +125,15 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
   // restage with a null reply target, and a gap invocation that imports only
   // already-consumed work finds nothing replyable and exits.
   const directEnsureWake = directEnsureEligible
-    ? startHostedDirectEnsureWakeBestEffort({
-        mailboxItemId,
+    ? startHostedDirectRuntimeWakeBestEffort({
+        onTiming: async (timing) => {
+          await recordHostedDirectEnsureWakeTimingBestEffort({
+            mailboxItemId,
+            source: "linq",
+            timing,
+            userId,
+          });
+        },
         source: "linq",
         userId,
       })
@@ -163,83 +166,6 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
     started: true,
     workflowId: signal.workflowId,
   };
-}
-
-// Starts the direct Cloudflare ensure request immediately and never throws or
-// rejects, including on synchronous client-configuration errors. The returned
-// promise exists only so callers can keep the request alive past the webhook
-// response; the Temporal signal never waits on it.
-function startHostedDirectEnsureWakeBestEffort(wake: {
-  mailboxItemId: string;
-  source: "linq";
-  userId: string;
-}): Promise<void> {
-  const wakeSource = wake.source;
-  let client: ReturnType<typeof readHostedExecutionControlClientIfConfigured>;
-  try {
-    client = readHostedExecutionControlClientIfConfigured();
-  } catch (error) {
-    console.warn("Hosted direct ensure wake client is misconfigured.", {
-      errorName: deriveHostedOnboardingTimingErrorName(error),
-      source: wakeSource,
-    });
-    return Promise.resolve();
-  }
-  if (!client) {
-    return Promise.resolve();
-  }
-
-  try {
-    let directEnsureTiming: CloudflareHostedControlRuntimeEnsureProcessingTiming | null = null;
-    return client
-      .ensureRuntimeProcessing({
-        onTiming: (timing) => {
-          directEnsureTiming = timing;
-        },
-        orchestrationAttemptId: `web-ingress-${randomUUID()}`,
-        userId: wake.userId,
-      })
-      .then((ensureResult) => {
-        if ("kind" in ensureResult) {
-          console.info("Hosted direct ensure wake completed.", {
-            kind: ensureResult.kind,
-            ...(ensureResult.kind === "runtime_processing_accepted"
-              ? { action: ensureResult.action }
-              : {}),
-            source: wakeSource,
-          });
-          return;
-        }
-
-        console.info("Hosted direct ensure wake accepted.", {
-          accepted: ensureResult.accepted,
-          source: wakeSource,
-        });
-      })
-      .catch((error: unknown) => {
-        console.warn("Hosted direct ensure wake failed.", {
-          errorName: deriveHostedOnboardingTimingErrorName(error),
-          source: wakeSource,
-        });
-      })
-      .finally(async () => {
-        if (!directEnsureTiming) {
-          return;
-        }
-        await recordHostedDirectEnsureWakeTimingBestEffort({
-          mailboxItemId: wake.mailboxItemId,
-          source: wakeSource,
-          timing: directEnsureTiming,
-          userId: wake.userId,
-        });
-      });
-  } catch (error) {
-    console.warn("Hosted direct ensure wake failed.", {
-      errorName: deriveHostedOnboardingTimingErrorName(error),
-      source: wakeSource,
-    });
-    return Promise.resolve();
-  }
 }
 
 async function recordHostedDirectEnsureWakeTimingBestEffort(timingRecord: {
