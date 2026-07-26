@@ -11,6 +11,8 @@ export const HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_VERSION =
   "hosted-usage-credit-checkout-v1" as const;
 export const HOSTED_USAGE_CREDIT_CHECKOUT_PURPOSE =
   "hosted_usage_credit" as const;
+export const HOSTED_USAGE_CREDIT_SAVED_CARD_PURPOSE =
+  "hosted_usage_credit_saved_card" as const;
 
 export interface HostedUsageCreditOfferDefinition {
   readonly cashAmountMinor: number;

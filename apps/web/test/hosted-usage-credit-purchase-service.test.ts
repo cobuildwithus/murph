@@ -1,6 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  createHostedStripeBillingEventLookupKey: vi.fn(
+    (value: string | null | undefined) => value ? `billing:${value}` : null,
+  ),
   createHostedStripeCheckoutSessionLookupKey: vi.fn((value: string | null | undefined) =>
     value ? `checkout:${value}` : null
   ),
@@ -18,7 +21,13 @@ const mocks = vi.hoisted(() => ({
     kind: string;
     normalizedValue: string | null;
   }) => input.expectedLookupKey === `${
-    input.kind === "stripe-price" ? "price" : "checkout"
+    input.kind === "stripe-price"
+      ? "price"
+      : input.kind === "stripe-customer"
+        ? "customer"
+        : input.kind === "stripe-billing-event"
+          ? "billing"
+          : "checkout"
   }:${input.normalizedValue}`),
   decryptHostedWebNullableString: vi.fn(async (input: { value?: string | null }) =>
     input.value?.startsWith("encrypted:") ? input.value.slice("encrypted:".length) : null
@@ -42,10 +51,18 @@ const mocks = vi.hoisted(() => ({
   stripeCheckoutExpire: vi.fn(),
   stripeCheckoutList: vi.fn(),
   stripeCheckoutRetrieve: vi.fn(),
+  stripeCustomerRetrieve: vi.fn(),
+  stripePaymentIntentCancel: vi.fn(),
+  stripePaymentIntentCreate: vi.fn(),
+  stripePaymentIntentRetrieve: vi.fn(),
+  stripePaymentMethodsList: vi.fn(),
   stripePriceRetrieve: vi.fn(),
+  stripeSubscriptionsList: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/contact-privacy", () => ({
+  createHostedStripeBillingEventLookupKey:
+    mocks.createHostedStripeBillingEventLookupKey,
   createHostedStripeCheckoutSessionLookupKey:
     mocks.createHostedStripeCheckoutSessionLookupKey,
   createHostedStripeCustomerLookupKey: mocks.createHostedStripeCustomerLookupKey,
@@ -148,7 +165,13 @@ beforeEach(() => {
   mocks.stripeCheckoutExpire.mockReset();
   mocks.stripeCheckoutList.mockReset();
   mocks.stripeCheckoutRetrieve.mockReset();
+  mocks.stripeCustomerRetrieve.mockReset();
+  mocks.stripePaymentIntentCancel.mockReset();
+  mocks.stripePaymentIntentCreate.mockReset();
+  mocks.stripePaymentIntentRetrieve.mockReset();
+  mocks.stripePaymentMethodsList.mockReset();
   mocks.stripePriceRetrieve.mockReset();
+  mocks.stripeSubscriptionsList.mockReset();
   mocks.readHostedMemberStripeBillingRef.mockResolvedValue({
     currentBillingPhase: "paid",
     currentBillingPlanCode: "launch_monthly",
@@ -194,7 +217,15 @@ beforeEach(() => {
             retrieve: mocks.stripeCheckoutRetrieve,
           },
         },
+        customers: { retrieve: mocks.stripeCustomerRetrieve },
+        paymentIntents: {
+          cancel: mocks.stripePaymentIntentCancel,
+          create: mocks.stripePaymentIntentCreate,
+          retrieve: mocks.stripePaymentIntentRetrieve,
+        },
+        paymentMethods: { list: mocks.stripePaymentMethodsList },
         prices: { retrieve: mocks.stripePriceRetrieve },
+        subscriptions: { list: mocks.stripeSubscriptionsList },
       },
       stripeLiveMode: false,
     }),
@@ -212,6 +243,24 @@ beforeEach(() => {
       prices: { retrieve: mocks.stripePriceRetrieve },
     },
     stripeLiveMode: false,
+  });
+  mocks.stripeCustomerRetrieve.mockResolvedValue({
+    id: "cus_group_payer",
+    invoice_settings: { default_payment_method: null },
+    livemode: false,
+    object: "customer",
+  });
+  mocks.stripePaymentMethodsList.mockResolvedValue({
+    data: [],
+    has_more: false,
+    object: "list",
+    url: "/v1/payment_methods",
+  });
+  mocks.stripeSubscriptionsList.mockResolvedValue({
+    data: [],
+    has_more: false,
+    object: "list",
+    url: "/v1/subscriptions",
   });
   mocks.stripePriceRetrieve.mockImplementation(async (priceId: string) =>
     buildStripePriceForId(priceId)
@@ -675,6 +724,78 @@ describe("createHostedUsageCreditCheckout", () => {
     })).resolves.toBeNull();
   });
 
+  it("charges a canonical saved card without opening Checkout", async () => {
+    const fake = createFakePrisma();
+    mocks.stripeCustomerRetrieve.mockResolvedValueOnce({
+      id: "cus_group_payer",
+      invoice_settings: { default_payment_method: "pm_saved_card_123" },
+      livemode: false,
+      object: "customer",
+    });
+    mocks.stripePaymentMethodsList.mockResolvedValueOnce({
+      data: [{
+        customer: "cus_group_payer",
+        id: "pm_saved_card_123",
+        livemode: false,
+        object: "payment_method",
+        type: "card",
+      }],
+      has_more: false,
+      object: "list",
+      url: "/v1/payment_methods",
+    });
+    mocks.stripePaymentIntentCreate.mockImplementationOnce(
+      async (request: Record<string, unknown>) => ({
+        amount: request.amount,
+        amount_received: request.amount,
+        currency: request.currency,
+        customer: request.customer,
+        id: "pi_saved_card_123",
+        latest_charge: "ch_saved_card_123",
+        livemode: false,
+        metadata: request.metadata,
+        object: "payment_intent",
+        status: "succeeded",
+      }),
+    );
+
+    const result = await createHostedGroupUsageCreditCheckout({
+      clientRequestKey: CLIENT_REQUEST_KEY,
+      joinCode: "group_join_code_1234",
+      now: NOW,
+      offerCode: "usage_10_usd",
+      payerMemberId: MEMBER_ID,
+      prisma: fake.prisma as never,
+    });
+
+    expect(result).toMatchObject({ status: "payment_pending" });
+    expect(result).not.toHaveProperty("url");
+    expect(mocks.stripePaymentIntentCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        amount: 1_000,
+        confirm: true,
+        currency: "usd",
+        customer: "cus_group_payer",
+        off_session: true,
+        payment_method: "pm_saved_card_123",
+        setup_future_usage: "off_session",
+      }),
+      {
+        idempotencyKey: expect.stringMatching(
+          /^hosted-usage-credit-saved-card:hucp_/,
+        ),
+      },
+    );
+    expect(mocks.stripeCheckoutCreate).not.toHaveBeenCalled();
+    expect(onlyPurchase(fake.purchases)).toMatchObject({
+      status: "payment_pending",
+      stripeChargeIdEncrypted: "encrypted:ch_saved_card_123",
+      stripeChargeLookupKey: "billing:ch_saved_card_123",
+      stripePaymentIntentIdEncrypted: "encrypted:pi_saved_card_123",
+      stripePaymentIntentLookupKey: "billing:pi_saved_card_123",
+    });
+  });
+
   it("rechecks the exact group thread-container target inside checkout", async () => {
     const fake = createFakePrisma({ groupFundingTargetLocked: false });
 
@@ -818,6 +939,7 @@ describe("createHostedUsageCreditCheckout", () => {
             purchaseId: purchase.id,
             purpose: "hosted_usage_credit",
           },
+          setup_future_usage: "off_session",
         },
       });
       expect(request).not.toHaveProperty("price_data");
@@ -2243,7 +2365,13 @@ function clearStripeProviderMockHistory(): void {
   mocks.stripeCheckoutExpire.mockClear();
   mocks.stripeCheckoutList.mockClear();
   mocks.stripeCheckoutRetrieve.mockClear();
+  mocks.stripeCustomerRetrieve.mockClear();
+  mocks.stripePaymentIntentCancel.mockClear();
+  mocks.stripePaymentIntentCreate.mockClear();
+  mocks.stripePaymentIntentRetrieve.mockClear();
+  mocks.stripePaymentMethodsList.mockClear();
   mocks.stripePriceRetrieve.mockClear();
+  mocks.stripeSubscriptionsList.mockClear();
 }
 
 function expectNoStripeProviderIo(): void {
@@ -2251,7 +2379,13 @@ function expectNoStripeProviderIo(): void {
   expect(mocks.stripeCheckoutExpire).not.toHaveBeenCalled();
   expect(mocks.stripeCheckoutList).not.toHaveBeenCalled();
   expect(mocks.stripeCheckoutRetrieve).not.toHaveBeenCalled();
+  expect(mocks.stripeCustomerRetrieve).not.toHaveBeenCalled();
+  expect(mocks.stripePaymentIntentCancel).not.toHaveBeenCalled();
+  expect(mocks.stripePaymentIntentCreate).not.toHaveBeenCalled();
+  expect(mocks.stripePaymentIntentRetrieve).not.toHaveBeenCalled();
+  expect(mocks.stripePaymentMethodsList).not.toHaveBeenCalled();
   expect(mocks.stripePriceRetrieve).not.toHaveBeenCalled();
+  expect(mocks.stripeSubscriptionsList).not.toHaveBeenCalled();
 }
 
 function buildStripePrice(override: Record<string, unknown> = {}) {

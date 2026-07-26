@@ -7,6 +7,7 @@ import { normalizeNullableString } from "./shared";
 import {
   HOSTED_USAGE_CREDIT_CHECKOUT_PURPOSE,
   HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_VERSION,
+  HOSTED_USAGE_CREDIT_SAVED_CARD_PURPOSE,
 } from "./usage-credit-offers";
 import type {
   HostedUsageCreditPurchaseForReconciliation,
@@ -17,11 +18,16 @@ export type HostedUsageCreditChargeContext = {
   paymentIntent: Stripe.PaymentIntent;
 };
 
-export type HostedUsageCreditPaidCheckoutAuthorization = {
+export type HostedUsageCreditPaymentAuthorization = {
   paymentIntentId: string;
   purchaseId: string;
-  sessionId: string;
+  sessionId: string | null;
 };
+
+export type HostedUsageCreditPaidCheckoutAuthorization =
+  HostedUsageCreditPaymentAuthorization & {
+    sessionId: string;
+  };
 
 export type HostedUsageCreditPreparedPaidCheckout = {
   lineItems: Stripe.ApiList<Stripe.LineItem>;
@@ -85,6 +91,89 @@ export function buildHostedUsageCreditPaidCheckoutAuthorization(input: {
   };
 }
 
+export function assertHostedUsageCreditPaymentIntentMatchesPurchase(input: {
+  paymentIntent: Stripe.PaymentIntent;
+  purchase: HostedUsageCreditPurchaseForReconciliation;
+}): void {
+  const { paymentIntent, purchase } = input;
+  if (paymentIntent.livemode !== purchase.stripeLiveMode) {
+    throw new Error("Usage-credit PaymentIntent environment did not match.");
+  }
+  assertHostedUsageCreditMetadataForPurpose({
+    metadata: paymentIntent.metadata,
+    purchase,
+    purpose: HOSTED_USAGE_CREDIT_SAVED_CARD_PURPOSE,
+  });
+  assertHostedStripeLookupMatches({
+    expectedLookupKey: purchase.stripeCustomerLookupKey,
+    kind: "stripe-customer",
+    value: coerceStripeObjectId(paymentIntent.customer),
+  });
+  if (
+    !Number.isSafeInteger(paymentIntent.amount) ||
+    !Number.isSafeInteger(paymentIntent.amount_received) ||
+    paymentIntent.amount !== purchase.cashAmountMinor ||
+    paymentIntent.amount_received < 0 ||
+    paymentIntent.amount_received > purchase.cashAmountMinor ||
+    normalizeNullableString(paymentIntent.currency)?.toLowerCase() !==
+      purchase.cashCurrency.toLowerCase() ||
+    (
+      paymentIntent.status === "succeeded" &&
+      paymentIntent.amount_received !== purchase.cashAmountMinor
+    )
+  ) {
+    throw new Error("Usage-credit PaymentIntent amount or currency did not match.");
+  }
+  assertHostedStripeBillingEventLookupMatches({
+    expectedLookupKey: purchase.stripePaymentIntentLookupKey,
+    value: paymentIntent.id,
+  });
+  const chargeId = coerceStripeObjectId(paymentIntent.latest_charge);
+  if (purchase.stripeChargeLookupKey) {
+    assertHostedStripeBillingEventLookupMatches({
+      expectedLookupKey: purchase.stripeChargeLookupKey,
+      value: chargeId ?? "",
+    });
+  }
+  if (paymentIntent.status === "succeeded" && !chargeId) {
+    throw new Error("Succeeded usage-credit PaymentIntent did not include a Charge.");
+  }
+}
+
+export function buildHostedUsageCreditDirectPaymentAuthorization(input: {
+  paymentIntent: Stripe.PaymentIntent;
+  purchase: HostedUsageCreditPurchaseForReconciliation;
+}): HostedUsageCreditPaymentAuthorization {
+  assertHostedUsageCreditPaymentIntentMatchesPurchase(input);
+  if (input.paymentIntent.status !== "succeeded") {
+    throw new Error("Usage-credit direct payment was not succeeded.");
+  }
+  return {
+    paymentIntentId: input.paymentIntent.id,
+    purchaseId: input.purchase.id,
+    sessionId: null,
+  };
+}
+
+export function readHostedUsageCreditSavedCardPurchaseId(
+  metadata: Prisma.JsonValue | Stripe.Metadata | null,
+): string | null {
+  const value = readStringRecord(metadata);
+  if (value?.purpose !== HOSTED_USAGE_CREDIT_SAVED_CARD_PURPOSE) {
+    return null;
+  }
+  const expectedKeys = ["policyVersion", "purchaseId", "purpose"];
+  if (
+    Object.keys(value).length !== expectedKeys.length ||
+    expectedKeys.some((key) => !(key in value)) ||
+    value.policyVersion !== HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_VERSION ||
+    !normalizeNullableString(value.purchaseId)
+  ) {
+    throw new Error("Saved-card usage-credit metadata did not match.");
+  }
+  return value.purchaseId;
+}
+
 export function assertHostedUsageCreditChargeContext(input: {
   charge: Stripe.Charge;
   paymentIntent: Stripe.PaymentIntent;
@@ -115,7 +204,7 @@ export function assertHostedUsageCreditChargeContext(input: {
   ) {
     throw new Error("Usage-credit Charge amount or currency did not match.");
   }
-  assertHostedUsageCreditMetadata({
+  assertHostedUsageCreditFinancialMetadata({
     metadata: input.paymentIntent.metadata,
     purchase: input.purchase,
   });
@@ -198,7 +287,7 @@ export function assertHostedUsageCreditSession(input: {
   ) {
     throw new Error("Usage-credit Checkout client reference did not match.");
   }
-  assertHostedUsageCreditMetadata({
+  assertHostedUsageCreditCheckoutMetadata({
     metadata: input.session.metadata,
     purchase: input.purchase,
   });
@@ -265,7 +354,7 @@ export function assertHostedUsageCreditPaymentIdentity(input: {
   if (input.paymentIntent.livemode !== input.purchase.stripeLiveMode) {
     throw new Error("Usage-credit PaymentIntent environment did not match.");
   }
-  assertHostedUsageCreditMetadata({
+  assertHostedUsageCreditCheckoutMetadata({
     metadata: input.paymentIntent.metadata,
     purchase: input.purchase,
   });
@@ -314,15 +403,46 @@ export function assertHostedUsageCreditPaymentIdentity(input: {
   }
 }
 
-function assertHostedUsageCreditMetadata(input: {
+function assertHostedUsageCreditCheckoutMetadata(input: {
   metadata: Prisma.JsonValue | Stripe.Metadata | null;
   purchase: HostedUsageCreditPurchaseForReconciliation;
+}): void {
+  assertHostedUsageCreditMetadataForPurpose({
+    ...input,
+    purpose: HOSTED_USAGE_CREDIT_CHECKOUT_PURPOSE,
+  });
+}
+
+function assertHostedUsageCreditFinancialMetadata(input: {
+  metadata: Prisma.JsonValue | Stripe.Metadata | null;
+  purchase: HostedUsageCreditPurchaseForReconciliation;
+}): void {
+  const metadata = readStringRecord(input.metadata);
+  const purpose = metadata?.purpose;
+  if (
+    purpose !== HOSTED_USAGE_CREDIT_CHECKOUT_PURPOSE &&
+    purpose !== HOSTED_USAGE_CREDIT_SAVED_CARD_PURPOSE
+  ) {
+    throw new Error("Usage-credit payment metadata purpose did not match.");
+  }
+  assertHostedUsageCreditMetadataForPurpose({
+    ...input,
+    purpose,
+  });
+}
+
+function assertHostedUsageCreditMetadataForPurpose(input: {
+  metadata: Prisma.JsonValue | Stripe.Metadata | null;
+  purchase: HostedUsageCreditPurchaseForReconciliation;
+  purpose:
+    | typeof HOSTED_USAGE_CREDIT_CHECKOUT_PURPOSE
+    | typeof HOSTED_USAGE_CREDIT_SAVED_CARD_PURPOSE;
 }): void {
   const metadata = readStringRecord(input.metadata);
   const expected = {
     policyVersion: HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_VERSION,
     purchaseId: input.purchase.id,
-    purpose: HOSTED_USAGE_CREDIT_CHECKOUT_PURPOSE,
+    purpose: input.purpose,
   };
   if (
     input.purchase.checkoutRequestPolicyVersion !==
@@ -331,7 +451,7 @@ function assertHostedUsageCreditMetadata(input: {
     Object.keys(metadata).length !== Object.keys(expected).length ||
     Object.entries(expected).some(([key, value]) => metadata[key] !== value)
   ) {
-    throw new Error("Usage-credit Checkout metadata did not match.");
+    throw new Error("Usage-credit payment metadata did not match.");
   }
 }
 

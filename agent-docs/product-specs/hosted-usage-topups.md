@@ -908,3 +908,30 @@ usage/accounting service.
 - [Billing Credits](https://docs.stripe.com/billing/subscriptions/usage-based/billing-credits)
 - [Token billing](https://docs.stripe.com/billing/token-billing)
 - [Advanced usage-based billing comparison](https://docs.stripe.com/billing/subscriptions/usage-based/advanced/compare)
+
+## Saved-card group funding
+
+Group funding uses an explicit click-to-charge contract. Choosing an amount does
+nothing by itself; pressing **Add messages** authorizes exactly that one-time
+amount for the server-resolved group beneficiary. It never creates recurring
+billing or an automatic refill.
+
+For a signed-in payer, Murph first looks for one unambiguous reusable card: the
+Customer invoice default, a nonterminal Subscription default, or the sole card
+attached to the Customer. Conflicting defaults or multiple cards without a
+canonical default fall back to Stripe Checkout rather than guessing.
+
+The saved-card attempt is a confirmed off-session PaymentIntent with a frozen
+amount, currency, Customer, beneficiary purchase, metadata purpose, and
+purchase-scoped idempotency key. A definitive authentication requirement or
+card failure is canceled before Checkout is created. Ambiguous provider/network
+outcomes remain reconciling and must never start a second charge.
+
+Checkout remains the card-entry and authentication fallback and requests
+`setup_future_usage=off_session`, so a card entered there can be reused on a
+later group contribution. PaymentIntent, refund, and dispute events converge
+through the same encrypted purchase references and usage-credit ledger as
+Checkout. The Stripe webhook endpoint must subscribe to
+`payment_intent.succeeded`, `payment_intent.processing`,
+`payment_intent.payment_failed`, and `payment_intent.canceled` in addition to
+the existing Checkout/refund/dispute events.
