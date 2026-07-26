@@ -58,19 +58,14 @@ const DEFAULT_HOSTED_CODEX_REASONING_EFFORT = "low";
 const DEFAULT_HOSTED_CODEX_APPROVAL_POLICY = "never";
 const DEFAULT_HOSTED_CODEX_SANDBOX = "danger-full-access";
 const HOSTED_CODEX_MULTI_AGENT_USAGE_HINT_TEXT = [
-  "Be proactive about delegation: when part of the work would block your immediate reply and can reasonably be parsed, imported, researched, or otherwise handled in the background, spawn a sub-agent for that bounded piece and reply to the user without waiting on it.",
-  "Typical delegations: parsing or importing uploaded documents, labs, or data files, and background enrichment or research the reply does not depend on.",
-  "Do the work yourself when the user's current request depends on the result.",
-  "Keep each child a one-shot, bounded task with a concrete deliverable, and follow any active route or skill contract for child design and completion proof.",
+  "Use hosted children only for bounded background parsing or import work and optional enrichment or research whose result is not needed in the current reply.",
+  "Follow the active route or skill contract for child design and completion proof.",
 ].join(" ");
-const HOSTED_CODEX_MULTI_AGENT_MODE_HINT_TEXT = [
-  "Murph proactive delegation mode is active.",
-  "Delegate bounded background work that would otherwise block your reply; reply promptly while children run.",
-  "This mode remains active until a later multi-agent mode developer message changes it.",
-].join(" ");
+const HOSTED_CODEX_MULTI_AGENT_MODE_HINT_TEXT =
+  "Murph bounded background delegation mode is active; reply-critical work stays in the root.";
 const HOSTED_CODEX_SUBAGENT_USAGE_HINT_TEXT = [
-  "Complete the bounded assignment yourself and report the result to the root agent.",
-  "Do not spawn or delegate to another child; the root owns any further task split and final confirmation.",
+  "This hosted child is a one-shot leaf.",
+  "Do not spawn or delegate to another child.",
 ].join(" ");
 // Hosted thread cost scales linearly with this ceiling: every tool round-trip
 // re-sends the whole thread, and OpenAI Standard-tier prompt caches evict

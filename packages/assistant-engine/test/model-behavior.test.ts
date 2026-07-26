@@ -69,7 +69,7 @@ describe('assistant execution prompt contract', () => {
     expect(prompt).not.toContain('Treat the user prompt as the execution instructions for this scheduled run')
   })
 
-  it('adds the shared execution contract without changing the calmer Murph voice', () => {
+  it('adds Murph-specific execution behavior without changing the calmer Murph voice', () => {
     const prompt = buildAssistantSystemPrompt({
       assistantCliContract: null,
       assistantHostedDeviceConnectAvailable: true,
@@ -90,21 +90,17 @@ describe('assistant execution prompt contract', () => {
       assistantContextSnapshotPrompt: null,
     })
 
-    expect(prompt).toContain('Execution and stop rules:')
+    expect(prompt).toContain(
+      'Murph progress-delivery and browser-action rules:',
+    )
     expect(prompt).toContain('Turn priority order:')
     expect(prompt).not.toContain('GPT-5 execution bias:')
-    expect(prompt).toContain(
-      'do the work in this turn instead of asking for extra permission',
-    )
     expect(prompt).toContain('Lead the final reply with the result')
     expect(prompt).toContain(
       'trim introductions, repetition, reassurance, and optional background first',
     )
     expect(prompt).not.toContain('Final replies should briefly state')
     expect(prompt).not.toContain('extra nudges')
-    expect(
-      buildAssistantExecutionBehaviorText({ profile: 'gpt5-agentic' }),
-    ).toContain('Prefer direct tool use over telling the user')
   })
 
   it('tells group turns how later responses and finish-without-reply affect completed answers', () => {
@@ -843,26 +839,37 @@ describe('assistant execution prompt contract', () => {
     expect(prompt).not.toContain('feedbackTags')
   })
 
-  it('keeps the default profile on the shared execution guidance only', () => {
+  it('keeps only Murph-specific behavior outside the Codex base kernel', () => {
     const text = buildAssistantExecutionBehaviorText({
       profile: 'default',
     })
 
-    expect(text).toContain('Execution and stop rules:')
+    expect(text).toContain('Murph progress-delivery and browser-action rules:')
+    expect(text).toContain('murph.send_progress_update')
+    expect(text).toContain('For browser-backed real-world action requests')
     expect(text).not.toContain('GPT-5 execution bias:')
-  })
-
-  it('cleans up temporary files without breaking pending delivery work', () => {
-    const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
-
-    expect(prompt).toContain(
-      'Delete temporary files before the turn ends.',
+    expect(text).not.toContain('Execution and stop rules:')
+    expect(text).not.toContain("Complete the user's in-scope request end to end")
+    expect(text).not.toContain(
+      'do the work in this turn instead of asking for extra permission',
     )
-    expect(prompt).toContain(
-      'Keep one only while a pending action needs it, then delete it.',
+    expect(text).not.toContain('If the user gives a short approval')
+    expect(text).not.toContain('For low-risk capture')
+    expect(text).not.toContain('Delete temporary files before the turn ends')
+    expect(text).not.toContain('Prefer direct tool use over telling the user')
+    expect(text).not.toContain('Use lookup/search sparingly')
+
+    expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
+      "Complete the user's in-scope request end to end",
     )
-    expect(prompt).toContain(
-      'Never delete user files or durable vault records.',
+    expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
+      'Use tools directly instead of telling the user',
+    )
+    expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
+      'Make reasonable assumptions for reversible, low-risk work',
+    )
+    expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
+      'ask only when a missing choice materially changes the result',
     )
   })
 
