@@ -1,8 +1,0 @@
-{
-  "id": "init",
-  "command": "vault-cli init --vault <path> [--request-id <id>]",
-  "vaultFixture": "fixtures/minimal-vault",
-  "inputs": [],
-  "goldenOutput": "fixtures/golden-outputs/init",
-  "purpose": "Tracks the expected initialized vault layout without freezing unresolved metadata payloads."
-}

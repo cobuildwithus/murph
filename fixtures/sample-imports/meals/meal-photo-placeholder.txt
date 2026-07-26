@@ -1,3 +1,0 @@
-Placeholder for a future meal photo fixture.
-
-Use this file path in smoke manifests until binary image fixtures are introduced.

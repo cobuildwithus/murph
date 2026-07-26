@@ -1,6 +1,0 @@
-{
-  "schemaVersion": "murph.commons.artifact-manifest.v1",
-  "manifestKey": "source_artifact:post-meal-walking/research-artifacts",
-  "description": "Rights-safe manifest for the Walking After Every Meal research package. Source pages are committed as metadata/extraction pages only; publisher PDFs, PMCID full texts, trial registry pages, consumer web pages, and other copyrighted or externally hosted artifacts are not vendored unless a separate rights review explicitly clears redistribution.",
-  "artifacts": []
-}

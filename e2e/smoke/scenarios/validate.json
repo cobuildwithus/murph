@@ -1,8 +1,0 @@
-{
-  "id": "validate",
-  "command": "vault-cli validate --vault <path> [--request-id <id>]",
-  "vaultFixture": "fixtures/minimal-vault",
-  "inputs": [],
-  "goldenOutput": "fixtures/golden-outputs/validate",
-  "purpose": "Covers validation semantics where malformed journal or experiment frontmatter accumulate structured issues instead of aborting on the first failure."
-}

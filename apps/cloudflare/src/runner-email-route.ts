@@ -1,1 +1,0 @@
-export const HOSTED_EXECUTION_RUNNER_EMAIL_SEND_PATH = "/send";

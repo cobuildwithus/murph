@@ -1,5 +1,0 @@
-Care plan placeholder
-
-- Continue hydration tracking.
-- Review sleep and heart-rate trends.
-- Bring a printed medication list to the next visit.

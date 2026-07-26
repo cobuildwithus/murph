@@ -1,6 +1,0 @@
-{
-  "schemaVersion": "murph.commons.artifact-manifest.v1",
-  "manifestKey": "source_artifact:iliotibial-band-syndrome-rehabilitation/research-artifacts",
-  "description": "Rights-safe empty manifest for the ITBS rehab and return-to-run research run. The normalized extraction artifacts did not nominate redistributable binaries; copyrighted PDFs must not be committed or uploaded unless rights are separately cleared.",
-  "artifacts": []
-}

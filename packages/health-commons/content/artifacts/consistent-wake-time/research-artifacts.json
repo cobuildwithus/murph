@@ -1,6 +1,0 @@
-{
-  "schemaVersion": "murph.commons.artifact-manifest.v1",
-  "manifestKey": "source_artifact:consistent-wake-time-research-artifacts",
-  "description": "Rights-safe artifact manifest for the Consistent Wake Time research run. The canonical ledger and extraction outputs recommend source pages and external links only; no PDFs, full-text binaries, or screenshots are staged for Git or R2 until rights and hashes are reviewed.",
-  "artifacts": []
-}

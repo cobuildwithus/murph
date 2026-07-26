@@ -1,6 +1,0 @@
-**
-!.deploy/
-!.deploy/runner-bundle/
-!.deploy/runner-bundle/**
-!.deploy/runner-smoke-bundle/
-!.deploy/runner-smoke-bundle/**

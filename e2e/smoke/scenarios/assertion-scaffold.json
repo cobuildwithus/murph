@@ -1,8 +1,0 @@
-{
-  "id": "assertion-scaffold",
-  "command": "vault-cli assertion scaffold --vault <path>",
-  "vaultFixture": "fixtures/minimal-vault",
-  "inputs": [],
-  "goldenOutput": "fixtures/golden-outputs/init",
-  "purpose": "Documents the frozen clinical assertion scaffold command surface for release fixture coverage."
-}

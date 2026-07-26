@@ -1,8 +1,0 @@
-{
-  "id": "measurement-add",
-  "command": "vault-cli measurement add --vault <path> [--metric <name> ...] [--value <number> ...] [--unit <unit> ...] [--qualifier <key=value> ...] [--measurement-note <text> ...] [--media <path> ...] [--note <text>] [--title <title>] [--occurred-at <ts>] [--source <source>] [--tag <tag> ...] [--request-id <id>]",
-  "vaultFixture": "fixtures/minimal-vault",
-  "inputs": [],
-  "goldenOutput": "fixtures/golden-outputs/measurement-add",
-  "purpose": "Documents the typed scalar-measurement write surface for grouped metric, value, and unit entries."
-}

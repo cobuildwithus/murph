@@ -1,3 +1,0 @@
-Placeholder for a future meal audio fixture.
-
-Use this file path in smoke manifests until binary audio fixtures are introduced.
