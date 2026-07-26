@@ -56,6 +56,18 @@ until replacement, explicit stop, or account deletion has reduced the prior
 version's contact-row count to zero. Because phone plaintext is never retained,
 old rows cannot be re-tokenized in place.
 
+With no timed expiry, a dormant projection can pin that prior version
+indefinitely. This is an accepted tradeoff: Murph does not silently withdraw a
+member's opt-in merely to complete routine key rotation. Routine rotation must
+wait for the indexed prior-version count to reach zero through replacement,
+Stop/Delete, foreground permission-loss reconciliation, or account deletion.
+For emergency retirement, first disable advisory reads and the affected KMS
+version, then delete each complete projection containing that token version in
+one maintenance transaction, verify the indexed count is zero, and configure a
+new current key. Affected members see sharing Off and must explicitly share
+again; Murph must never leave an enabled projection whose token key is no longer
+readable.
+
 This materially limits a Postgres dump or Postgres-plus-ordinary-content-key
 compromise: neither contains the MAC authority required to test candidate
 phone numbers. It is not zero knowledge. A live Web principal with MAC
