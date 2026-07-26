@@ -4096,7 +4096,7 @@ describe("RunnerContainer", () => {
     expect(destroy).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps an exact abort registered until its child request settles", async () => {
+  it("coalesces concurrent exact aborts until their child request settles", async () => {
     const runnerRequestStarted = createDeferred<void>();
     const runnerResponse = createDeferred<Response>();
     const abortRequestStarted = createDeferred<void>();
@@ -4151,6 +4151,26 @@ describe("RunnerContainer", () => {
       userId: "member_123",
     });
     await abortRequestStarted.promise;
+    const coalescedAbortResult = container.abortWorkspaceInvocation({
+      attemptId: request.attemptId,
+      leaseGeneration: request.leaseGeneration,
+      userId: "member_123",
+    });
+    let coalescedAbortSettled = false;
+    void coalescedAbortResult.then(
+      () => {
+        coalescedAbortSettled = true;
+      },
+      () => {
+        coalescedAbortSettled = true;
+      },
+    );
+
+    await Promise.resolve();
+    expect(coalescedAbortSettled).toBe(false);
+    expect(containerFetch.mock.calls.filter(([url]) =>
+      String(url).endsWith("/internal/workspace-invocation/abort")
+    )).toHaveLength(1);
 
     runnerResponse.resolve(new Response(JSON.stringify(createRunnerResult()), {
       headers: {
@@ -4194,7 +4214,10 @@ describe("RunnerContainer", () => {
     });
 
     abortResponse.resolve(new Response(null, { status: 204 }));
-    await expect(abortResult).resolves.toBe("accepted");
+    await expect(Promise.all([
+      abortResult,
+      coalescedAbortResult,
+    ])).resolves.toEqual(["accepted", "accepted"]);
     await expect(canceledSuccessor).resolves.toMatchObject({
       message: "workspace invocation preempted",
     });
