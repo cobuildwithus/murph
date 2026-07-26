@@ -148,6 +148,20 @@ describe("normalizeHostedProductFeedback", () => {
     expect(normalizeHostedProductFeedback(makeFeedback())).toEqual(makeFeedback());
   });
 
+  it("accepts a newly published changelog id while rejecting unknown ids", () => {
+    const feedback = makeFeedback({
+      relatedChangelogItemIds: ["ask-grok-x-research"],
+      summary: "Interested in asking Grok about X.",
+    });
+
+    expect(normalizeHostedProductFeedback(feedback)).toEqual(feedback);
+    expect(() =>
+      normalizeHostedProductFeedback(makeFeedback({
+        relatedChangelogItemIds: ["not-a-real-item"],
+      })),
+    ).toThrow(HostedOnboardingError);
+  });
+
   it("normalizes bounded summary text", () => {
     expect(normalizeHostedProductFeedback(makeFeedback({
       summary: "  Wants   better message formatting.  ",

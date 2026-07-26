@@ -12,6 +12,8 @@ import {
 } from "@murphai/contracts";
 import { test } from "vitest";
 
+import { normalizeConfiguredDeviceSyncJobInput } from "../src/provider-job-definitions.ts";
+
 import { DeviceSyncError } from "../src/errors.ts";
 import { mergeStoredDeviceSyncMetadataPatch } from "../src/metadata.ts";
 import {
@@ -158,6 +160,7 @@ function createJunctionProvider(
     clientUserIdSecret: "junction-client-user-id-secret",
     environment: "sandbox",
     region: "us",
+    pushSourceRecoveryEnabled: true,
     summaryResources: ["activity"],
     summaryBackfillDays: 2,
     timeseriesResources: [],
@@ -1790,6 +1793,57 @@ test("Junction REST diagnostic probes a compact resource without returning raw r
     JSON.stringify(result),
     /junction-user-1|provider-garmin-1|97|garmin/u,
   );
+});
+
+test("Junction REST diagnostics dispatch a scoped historical pull trigger", async () => {
+  const requests: { body: unknown; method: string; url: string }[] = [];
+  const runTrigger = async (respond: () => Response) => {
+    const provider = createJunctionProvider(async (input, init) => {
+      requests.push({
+        body: init?.body ? JSON.parse(String(init.body)) : null,
+        method: String(init?.method ?? "GET"),
+        url: readUrl(input),
+      });
+      return respond();
+    });
+    const probeRest = provider.diagnostics?.probeRest;
+    assert.ok(probeRest);
+
+    return probeRest({
+      account: createAccount(),
+      endpoint: "trigger_historical_pull",
+      now: "2026-07-24T12:00:00.000Z",
+      resource: null,
+      sourceProviderSlug: "Garmin",
+    });
+  };
+  const readResponse = (result: Awaited<ReturnType<typeof runTrigger>>) =>
+    (result.result as { response?: Record<string, unknown> }).response ?? {};
+
+  const accepted = await runTrigger(() => createJsonResponse({ success: true }, 202));
+  assert.equal(readResponse(accepted).ok, true);
+  assert.equal(readResponse(accepted).accepted, true);
+  assert.equal(readResponse(accepted).endpointUnavailable, false);
+  assert.deepEqual(requests, [
+    {
+      body: { provider: "garmin", user_ids: ["junction-user-1"] },
+      method: "POST",
+      url: "https://api.sandbox.us.junction.com/v2/link/bulk_trigger_historical_pull",
+    },
+  ]);
+  // The operator response must never carry the raw Junction user id.
+  assert.doesNotMatch(JSON.stringify(accepted), /junction-user-1/u);
+
+  requests.length = 0;
+  const gated = await runTrigger(() => createJsonResponse({ detail: "not enabled" }, 403));
+  assert.equal(readResponse(gated).ok, true);
+  assert.equal(readResponse(gated).accepted, false);
+  assert.equal(readResponse(gated).endpointUnavailable, true);
+
+  requests.length = 0;
+  const failed = await runTrigger(() => createJsonResponse({ detail: "boom" }, 500));
+  assert.equal(readResponse(failed).ok, false);
+  assert.equal(readResponse(failed).responseStatus, 500);
 });
 
 test("Junction REST diagnostics use date params for date-only summary resources", async () => {
@@ -5638,6 +5692,482 @@ test("Junction client rejects provider deregistration without a Junction user id
       userId: "  ",
     }),
     /requires a Junction user id/u,
+  );
+});
+
+test("automatic recovery stays inert until it is explicitly enabled", async () => {
+  const provider = createJunctionProvider(async (input) => {
+    throw new Error(`No request should be made while recovery is disabled: ${readUrl(input)}`);
+  }, {
+    // The vendor enables the trigger endpoint per team, so shipping the code and
+    // switching it on are separate steps. Default-off is what lets this merge
+    // before that request lands.
+    pushSourceRecoveryEnabled: false,
+  });
+  const executor = requireValue(
+    provider.jobExecutor,
+    "Junction provider should expose a job executor.",
+  );
+  const stalledAccount = createStoredAccount({
+    sources: [{
+      displayName: "Garmin",
+      firstSeenAt: "2026-07-01T00:00:00.000Z",
+      lastDataAt: "2026-07-18T00:00:00.000Z",
+      lastErrorCode: null,
+      lastErrorMessage: null,
+      lastSeenAt: "2026-07-20T00:00:00.000Z",
+      resourceCount: 20,
+      sourceProviderSlug: "garmin",
+      status: "connected",
+    }],
+  });
+
+  assert.equal(
+    executor.createScheduledJobs?.(stalledAccount, "2026-07-20T00:00:00.000Z")
+      ?.jobs.find((job) => job.kind === "push_source_recovery"),
+    undefined,
+  );
+});
+
+test("a stalled Garmin source automatically triggers a bounded historical pull", async () => {
+  const requests: { body: unknown; url: string }[] = [];
+  const provider = createJunctionProvider(async (input, init) => {
+    requests.push({
+      body: init?.body ? JSON.parse(String(init.body)) : null,
+      url: readUrl(input),
+    });
+    return createJsonResponse({ success: true }, 202);
+  });
+  const executor = requireValue(
+    provider.jobExecutor,
+    "Junction provider should expose a job executor.",
+  );
+  const stalledAccount = createStoredAccount({
+    sources: [
+      {
+        displayName: "Garmin",
+        firstSeenAt: "2026-07-01T00:00:00.000Z",
+        // Junction still lists the source and every resource as available; only
+        // the arrival gap shows the carrier is dead.
+        lastDataAt: "2026-07-18T00:00:00.000Z",
+        lastErrorCode: null,
+        lastErrorMessage: null,
+        lastSeenAt: "2026-07-20T00:00:00.000Z",
+        resourceCount: 20,
+        sourceProviderSlug: "garmin",
+        status: "connected",
+      },
+    ],
+  });
+
+  // Detection alone restores nothing, so the scheduled pass must derive the
+  // recovery attempt without any operator action.
+  const scheduled = executor.createScheduledJobs?.(stalledAccount, "2026-07-20T00:00:00.000Z");
+  const recoveryJob = scheduled?.jobs.find((job) => job.kind === "push_source_recovery");
+  assert.ok(recoveryJob, "a stalled push-primary source must schedule its own recovery");
+  assert.deepEqual(recoveryJob.payload, {
+    silentSinceAt: "2026-07-18T00:00:00.000Z",
+    sourceProviderSlug: "garmin",
+  });
+
+  // Every scheduled job crosses the configured-manifest enqueue boundary before
+  // it is queued. An undeclared kind or payload field throws there, which would
+  // discard the whole scheduled pass before any recovery ran.
+  assert.deepEqual(
+    normalizeConfiguredDeviceSyncJobInput("junction", {
+      kind: recoveryJob.kind,
+      payload: recoveryJob.payload ?? {},
+    }, "scheduler"),
+    {
+      kind: "push_source_recovery",
+      payload: {
+        silentSinceAt: "2026-07-18T00:00:00.000Z",
+        sourceProviderSlug: "garmin",
+      },
+    },
+  );
+
+  const result = await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      account: createAccount({ sources: stalledAccount.sources }),
+      now: "2026-07-20T00:00:00.000Z",
+    }),
+    createJob("push_source_recovery", recoveryJob.payload ?? {}),
+  );
+
+  assert.deepEqual(requests, [
+    {
+      body: { provider: "garmin", user_ids: ["junction-user-1"] },
+      url: "https://api.sandbox.us.junction.com/v2/link/bulk_trigger_historical_pull",
+    },
+  ]);
+  assert.deepEqual(result.metadataPatch, {
+    junctionPushSourceRecoveryAttempts: 1,
+    junctionPushSourceRecoveryLastAttemptAt: "2026-07-20T00:00:00.000Z",
+    junctionPushSourceRecoveryLastFailureCode: null,
+    junctionPushSourceRecoverySilentSinceAt: "2026-07-18T00:00:00.000Z",
+    junctionPushSourceRecoverySourceProviderSlug: "garmin",
+    junctionPushSourceRecoveryStatus: "triggered",
+  });
+
+  // A healthy source schedules nothing, and the recorded attempt keeps the
+  // ladder from re-firing on the very next hourly pass.
+  const healthyAccount = createStoredAccount({
+    sources: [{
+      displayName: "Garmin",
+      firstSeenAt: "2026-07-01T00:00:00.000Z",
+      lastDataAt: "2026-07-19T23:00:00.000Z",
+      lastErrorCode: null,
+      lastErrorMessage: null,
+      lastSeenAt: "2026-07-20T00:00:00.000Z",
+      resourceCount: 20,
+      sourceProviderSlug: "garmin",
+      status: "connected",
+    }],
+  });
+  assert.equal(
+    executor.createScheduledJobs?.(healthyAccount, "2026-07-20T00:00:00.000Z")
+      ?.jobs.find((job) => job.kind === "push_source_recovery"),
+    undefined,
+  );
+
+  const afterAttempt = createStoredAccount({
+    metadata: result.metadataPatch as Record<string, unknown>,
+    sources: stalledAccount.sources,
+  });
+  assert.equal(
+    executor.createScheduledJobs?.(afterAttempt, "2026-07-20T01:00:00.000Z")
+      ?.jobs.find((job) => job.kind === "push_source_recovery"),
+    undefined,
+  );
+});
+
+test("the executor carries prior attempts through to exhaustion", async () => {
+  let triggerCalls = 0;
+  const provider = createJunctionProvider(async () => {
+    triggerCalls += 1;
+    return createJsonResponse({ success: true }, 202);
+  });
+  const executor = requireValue(
+    provider.jobExecutor,
+    "Junction provider should expose a job executor.",
+  );
+  const staleSources = [{
+    displayName: "Garmin",
+    firstSeenAt: "2026-07-01T00:00:00.000Z",
+    lastDataAt: "2026-07-18T00:00:00.000Z",
+    lastErrorCode: null,
+    lastErrorMessage: null,
+    lastSeenAt: "2026-07-22T00:00:00.000Z",
+    resourceCount: 20,
+    sourceProviderSlug: "garmin",
+    status: "connected" as const,
+  }];
+  // Three attempts already spent on this episode.
+  const priorMetadata = {
+    junctionPushSourceRecoveryAttempts: 3,
+    junctionPushSourceRecoveryLastAttemptAt: "2026-07-20T16:00:00.000Z",
+    junctionPushSourceRecoverySilentSinceAt: "2026-07-18T00:00:00.000Z",
+    junctionPushSourceRecoverySourceProviderSlug: "garmin",
+    junctionPushSourceRecoveryStatus: "triggered",
+  };
+
+  const result = await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      account: createAccount({ metadata: priorMetadata, sources: staleSources }),
+      now: "2026-07-22T16:00:00.000Z",
+    }),
+    createJob("push_source_recovery", {
+      silentSinceAt: "2026-07-18T00:00:00.000Z",
+      sourceProviderSlug: "garmin",
+    }),
+  );
+
+  // Losing the prior count would leave every mutation at "attempt 1", so a
+  // persistently silent source would trigger provider work forever.
+  assert.equal(triggerCalls, 1);
+  assert.equal(
+    (result.metadataPatch as Record<string, unknown>).junctionPushSourceRecoveryAttempts,
+    4,
+  );
+  assert.equal(
+    (result.metadataPatch as Record<string, unknown>).junctionPushSourceRecoveryStatus,
+    "exhausted",
+  );
+
+  const exhausted = createStoredAccount({
+    metadata: { ...priorMetadata, ...(result.metadataPatch as Record<string, unknown>) },
+    sources: staleSources,
+  });
+  assert.equal(
+    executor.createScheduledJobs?.(exhausted, "2026-07-30T00:00:00.000Z")
+      ?.jobs.find((job) => job.kind === "push_source_recovery"),
+    undefined,
+  );
+});
+
+test("a failed recovery trigger still burns its attempt instead of retrying forever", async () => {
+  const staleGarminSources = [{
+    displayName: "Garmin",
+    firstSeenAt: "2026-07-01T00:00:00.000Z",
+    lastDataAt: "2026-07-18T00:00:00.000Z",
+    lastErrorCode: null,
+    lastErrorMessage: null,
+    lastSeenAt: "2026-07-20T00:00:00.000Z",
+    resourceCount: 20,
+    sourceProviderSlug: "garmin",
+    status: "connected" as const,
+  }];
+  let triggerCalls = 0;
+  const provider = createJunctionProvider(async () => {
+    triggerCalls += 1;
+    return createJsonResponse({ detail: "boom" }, 500);
+  });
+  const executor = requireValue(
+    provider.jobExecutor,
+    "Junction provider should expose a job executor.",
+  );
+
+  const result = await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      account: createAccount({ sources: staleGarminSources }),
+      now: "2026-07-20T00:00:00.000Z",
+    }),
+    createJob("push_source_recovery", {
+      silentSinceAt: "2026-07-18T00:00:00.000Z",
+      sourceProviderSlug: "garmin",
+    }),
+  );
+
+  // Letting the failure escape would leave the episode at zero attempts, so the
+  // next scheduled pass would derive the identical attempt again, forever.
+  assert.equal(triggerCalls, 1);
+  assert.equal(
+    (result.metadataPatch as Record<string, unknown>).junctionPushSourceRecoveryAttempts,
+    1,
+  );
+  assert.equal(
+    (result.metadataPatch as Record<string, unknown>).junctionPushSourceRecoveryStatus,
+    "triggered",
+  );
+  // The burned attempt stays diagnosable.
+  assert.ok(
+    (result.metadataPatch as Record<string, unknown>).junctionPushSourceRecoveryLastFailureCode,
+  );
+
+  const afterFailure = createStoredAccount({
+    metadata: result.metadataPatch as Record<string, unknown>,
+    sources: [{
+      displayName: "Garmin",
+      firstSeenAt: "2026-07-01T00:00:00.000Z",
+      lastDataAt: "2026-07-18T00:00:00.000Z",
+      lastErrorCode: null,
+      lastErrorMessage: null,
+      lastSeenAt: "2026-07-20T00:00:00.000Z",
+      resourceCount: 20,
+      sourceProviderSlug: "garmin",
+      status: "connected",
+    }],
+  });
+
+  // The next hourly pass must respect the ladder delay, not re-fire.
+  assert.equal(
+    executor.createScheduledJobs?.(afterFailure, "2026-07-20T01:00:00.000Z")
+      ?.jobs.find((job) => job.kind === "push_source_recovery"),
+    undefined,
+  );
+  assert.ok(
+    executor.createScheduledJobs?.(afterFailure, "2026-07-20T06:00:00.000Z")
+      ?.jobs.find((job) => job.kind === "push_source_recovery"),
+  );
+});
+
+test("a recovery job whose episode already ended makes no provider call", async () => {
+  let triggerCalls = 0;
+  const provider = createJunctionProvider(async () => {
+    triggerCalls += 1;
+    return createJsonResponse({ success: true }, 202);
+  });
+  const recoveredSources = [{
+    displayName: "Garmin",
+    firstSeenAt: "2026-07-01T00:00:00.000Z",
+    // A webhook landed between scheduling and execution.
+    lastDataAt: "2026-07-20T00:00:00.000Z",
+    lastErrorCode: null,
+    lastErrorMessage: null,
+    lastSeenAt: "2026-07-20T00:00:00.000Z",
+    resourceCount: 20,
+    sourceProviderSlug: "garmin",
+    status: "connected" as const,
+  }];
+
+  const result = await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      account: createAccount({ sources: recoveredSources }),
+      now: "2026-07-20T00:00:00.000Z",
+    }),
+    createJob("push_source_recovery", {
+      silentSinceAt: "2026-07-18T00:00:00.000Z",
+      sourceProviderSlug: "garmin",
+    }),
+  );
+
+  // Triggering for an ended episode is an avoidable provider mutation, and
+  // recording it would let the scheduler immediately fire again for the newer
+  // episode.
+  assert.equal(triggerCalls, 0);
+  assert.deepEqual(result, {});
+});
+
+test("a gated recovery trigger pauses the episode and resumes after enablement", async () => {
+  const provider = createJunctionProvider(async () =>
+    createJsonResponse({ detail: "not enabled" }, 403)
+  );
+  const executor = requireValue(
+    provider.jobExecutor,
+    "Junction provider should expose a job executor.",
+  );
+  const staleSources = [{
+    displayName: "Garmin",
+    firstSeenAt: "2026-07-01T00:00:00.000Z",
+    lastDataAt: "2026-07-18T00:00:00.000Z",
+    lastErrorCode: null,
+    lastErrorMessage: null,
+    lastSeenAt: "2026-07-20T00:00:00.000Z",
+    resourceCount: 20,
+    sourceProviderSlug: "garmin",
+    status: "connected" as const,
+  }];
+
+  const result = await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      account: createAccount({ sources: staleSources }),
+      now: "2026-07-20T00:00:00.000Z",
+    }),
+    createJob("push_source_recovery", {
+      silentSinceAt: "2026-07-18T00:00:00.000Z",
+      sourceProviderSlug: "garmin",
+    }),
+  );
+
+  // A gated call never reached the recovery mechanism, so it spends no attempt.
+  assert.deepEqual(result.metadataPatch, {
+    junctionPushSourceRecoveryAttempts: 0,
+    junctionPushSourceRecoveryLastAttemptAt: "2026-07-20T00:00:00.000Z",
+    junctionPushSourceRecoveryLastFailureCode: null,
+    junctionPushSourceRecoverySilentSinceAt: "2026-07-18T00:00:00.000Z",
+    junctionPushSourceRecoverySourceProviderSlug: "garmin",
+    junctionPushSourceRecoveryStatus: "unavailable",
+  });
+
+  const gatedAccount = createStoredAccount({
+    metadata: result.metadataPatch as Record<string, unknown>,
+    sources: staleSources,
+  });
+
+  // Not re-probed immediately...
+  assert.equal(
+    executor.createScheduledJobs?.(gatedAccount, "2026-07-20T06:00:00.000Z")
+      ?.jobs.find((job) => job.kind === "push_source_recovery"),
+    undefined,
+  );
+
+  // ...but enablement is a vendor-side change we cannot observe, so a stall
+  // seen before enablement must not be abandoned for the rest of its episode.
+  assert.ok(
+    executor.createScheduledJobs?.(gatedAccount, "2026-07-21T00:00:00.000Z")
+      ?.jobs.find((job) => job.kind === "push_source_recovery"),
+  );
+});
+
+test("Junction client triggers a historical pull for one source", async () => {
+  const requests: { body: unknown; method: string; url: string }[] = [];
+  const client = new JunctionClient({
+    apiKey: "sk_us_test_123",
+    environment: "sandbox",
+    region: "us",
+    fetchImpl: async (input, init) => {
+      requests.push({
+        body: init?.body ? JSON.parse(String(init.body)) : null,
+        method: String(init?.method ?? "GET"),
+        url: readUrl(input),
+      });
+      return createJsonResponse({ success: true }, 202);
+    },
+  });
+
+  const result = await client.bulkTriggerHistoricalPull({
+    sourceProviderSlug: "Garmin",
+    userIds: ["junction-user-1", "junction-user-1", "  "],
+  });
+
+  assert.deepEqual(result, { accepted: true, endpointUnavailable: false });
+  assert.deepEqual(requests, [
+    {
+      body: { provider: "garmin", user_ids: ["junction-user-1"] },
+      method: "POST",
+      url: "https://api.sandbox.us.junction.com/v2/link/bulk_trigger_historical_pull",
+    },
+  ]);
+});
+
+test("Junction client reports a gated historical pull trigger as unavailable rather than failing", async () => {
+  for (const status of [403, 404]) {
+    const client = new JunctionClient({
+      apiKey: "sk_us_test_123",
+      environment: "sandbox",
+      region: "us",
+      fetchImpl: async () => createJsonResponse({ detail: "not enabled" }, status),
+    });
+
+    // Link Migration endpoints are disabled per team by default. That is a
+    // "ask support to enable it" answer, not a transport failure to retry.
+    assert.deepEqual(
+      await client.bulkTriggerHistoricalPull({
+        sourceProviderSlug: "garmin",
+        userIds: ["junction-user-1"],
+      }),
+      { accepted: false, endpointUnavailable: true },
+    );
+  }
+});
+
+test("Junction client surfaces real historical pull trigger failures", async () => {
+  const client = new JunctionClient({
+    apiKey: "sk_us_test_123",
+    environment: "sandbox",
+    region: "us",
+    fetchImpl: async () => createJsonResponse({ detail: "boom" }, 500),
+  });
+
+  await assert.rejects(() => client.bulkTriggerHistoricalPull({
+    sourceProviderSlug: "garmin",
+    userIds: ["junction-user-1"],
+  }));
+});
+
+test("Junction client rejects historical pull triggers without a source or user", async () => {
+  const client = new JunctionClient({
+    apiKey: "sk_us_test_123",
+    environment: "sandbox",
+    region: "us",
+    fetchImpl: async () => {
+      throw new Error("bulkTriggerHistoricalPull should not send an invalid request");
+    },
+  });
+
+  await assert.rejects(
+    () => client.bulkTriggerHistoricalPull({ sourceProviderSlug: " ", userIds: ["u"] }),
+    /require a provider slug/u,
+  );
+  await assert.rejects(
+    () => client.bulkTriggerHistoricalPull({ sourceProviderSlug: "garmin", userIds: ["  "] }),
+    /require at least one user id/u,
   );
 });
 

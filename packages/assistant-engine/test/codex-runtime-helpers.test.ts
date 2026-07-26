@@ -2676,6 +2676,51 @@ describe('Codex assistant registry helpers', () => {
     expect(appServerInput?.sandbox).toBe('read-only')
   })
 
+  it('forwards named maintenance permissions without a legacy sandbox', async () => {
+    codexAppServerMocks.executeCodexAppServerTurn.mockResolvedValueOnce({
+      finalMessage: 'Completed room-model maintenance.',
+      precedingAgentMessageSegments: [],
+      responseDeliveryContextOrdinal: 0,
+      transcriptMessage: 'Completed room-model maintenance.',
+      jsonEvents: [],
+      providerActionCount: 0,
+      sessionId: 'room-model-maintenance-thread',
+      stderr: '',
+      stdout: '',
+      threadId: 'room-model-maintenance-thread',
+      turnId: 'turn-room-model-maintenance',
+    })
+
+    const attempt = await executeCodexAssistantTurnAttemptFromInput({
+      providerConfig: {
+        provider: 'codex-cli',
+        sandbox: 'danger-full-access',
+      },
+      turn: {
+        dynamicTools: [],
+        groupRoomModelMaintenanceAuthorized: true,
+        permissions: 'murph-group-room-model-maintenance',
+        processLifetime: 'one-shot',
+        prompt: 'Refresh the room model.',
+        providerThreadEphemeral: true,
+        runtimeWorkspaceRoots: ['/tmp/provider-tests'],
+        workingDirectory: '/tmp/provider-tests',
+      },
+    })
+
+    expect(attempt.ok).toBe(true)
+    const appServerInput =
+      codexAppServerMocks.executeCodexAppServerTurn.mock.calls[0]?.[0]
+    expect(appServerInput).toMatchObject({
+      ephemeral: true,
+      groupRoomModelMaintenanceAuthorized: true,
+      permissions: 'murph-group-room-model-maintenance',
+      processLifetime: 'one-shot',
+      runtimeWorkspaceRoots: ['/tmp/provider-tests'],
+    })
+    expect(appServerInput?.sandbox).toBeUndefined()
+  })
+
   it('does not replay committed history after stale native resume fails', async () => {
     const traceEvents: AssistantProviderTraceEvent[] = []
 

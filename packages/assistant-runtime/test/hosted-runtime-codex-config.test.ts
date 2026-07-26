@@ -18,6 +18,7 @@ import {
 } from "@murphai/assistant-engine/assistant-skill-assets";
 import {
   MURPH_GROUP_READ_PERMISSION_PROFILE,
+  MURPH_GROUP_ROOM_MODEL_MAINTENANCE_PERMISSION_PROFILE,
 } from "@murphai/hosted-execution/assistant-permissions";
 import {
   HostedAssistantConfigurationError,
@@ -1406,6 +1407,17 @@ test("hosted Codex config TOML omits credential values and runtime authority hea
       '"**/.env.*" = "deny"',
       "",
       `[permissions.${MURPH_GROUP_READ_PERMISSION_PROFILE}.network]`,
+      "enabled = false",
+      "",
+      "# Silent group room-model consolidation uses only its host-owned dynamic tool.",
+      `[permissions.${MURPH_GROUP_ROOM_MODEL_MAINTENANCE_PERMISSION_PROFILE}.filesystem]`,
+      '":minimal" = "read"',
+      "glob_scan_max_depth = 1",
+      "",
+      `[permissions.${MURPH_GROUP_ROOM_MODEL_MAINTENANCE_PERMISSION_PROFILE}.filesystem.":workspace_roots"]`,
+      '"." = "deny"',
+      "",
+      `[permissions.${MURPH_GROUP_ROOM_MODEL_MAINTENANCE_PERMISSION_PROFILE}.network]`,
       "enabled = false",
       "",
       "# Hosted runs should not perform Codex plugin marketplace or remote plugin",

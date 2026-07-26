@@ -927,6 +927,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260725120000_hosted_thread_delivery_route",
       "20260725210000_hosted_member_checkout_attempt",
       "20260726020000_hosted_member_stripe_customer_reservation",
+      "20260726120000_hosted_growth_aggregate",
       "migration_lock.toml",
     ]);
     expect(hostedMemberCheckoutAttemptMigrationSql).toContain(

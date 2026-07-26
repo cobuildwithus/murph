@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildMurphGroupReadPermissionProfileTomlLines,
+  buildMurphGroupRoomModelMaintenancePermissionProfileTomlLines,
 } from "../src/assistant-permissions.ts";
 
 describe("group-read Codex permissions", () => {
@@ -22,6 +23,24 @@ describe("group-read Codex permissions", () => {
       '"**/.env.*" = "deny"',
       "",
       "[permissions.murph-group-read.network]",
+      "enabled = false",
+      "",
+    ]);
+  });
+
+  it("denies workspace and network access to silent room-model maintenance", () => {
+    expect(
+      buildMurphGroupRoomModelMaintenancePermissionProfileTomlLines(),
+    ).toEqual([
+      "# Silent group room-model consolidation uses only its host-owned dynamic tool.",
+      "[permissions.murph-group-room-model-maintenance.filesystem]",
+      '":minimal" = "read"',
+      "glob_scan_max_depth = 1",
+      "",
+      '[permissions.murph-group-room-model-maintenance.filesystem.":workspace_roots"]',
+      '"." = "deny"',
+      "",
+      "[permissions.murph-group-room-model-maintenance.network]",
       "enabled = false",
       "",
     ]);

@@ -27,6 +27,23 @@ Runner bundle assembly esbuild-bundles two boot-critical surfaces with byte budg
 The device-sync package boundary suite also walks the static source graph from the runner's runtime-config entrypoint and rejects provider runtime modules, importer modules, and the Junction SDK. This focused gate catches boot-closure ownership regressions before the packed-bundle guard validates the final esbuild metafile.
 Hosted assistant delivery recovery now relies on committed side-effect state inside the encrypted workspace and the web-owned hosted workspace checkpoint.
 
+## Group Room-Model Rollout
+
+Deploy the first group room-model release as a Cloudflare Worker and runner
+bundle update with `container_rollout=immediate`; no Web deployment is required.
+Require managed-container smoke to report the exact new runner-bundle
+fingerprint before admitting group turns. Existing per-invocation fingerprint
+admission prevents a stale warm container from processing a workspace under the
+new Worker contract.
+
+Before a new runner persists the immutable group room-model automation id, the
+prior runner remains a safe rollback. After the first such write, the new bundle
+is a hard rollback floor for that workspace: an older runner does not recognize
+the id's silent maintenance policy and could treat its next due occurrence as
+an ordinary deliverable automation. Forward-fix on this bundle or newer rather
+than restoring an older runner. After rollout, verify the expected bundle
+fingerprint and confirm a due room-model occurrence records no group delivery.
+
 ## Conversation Consumed-Watermark Rollout
 
 The exact conversation acknowledgement release changes the durable hosted

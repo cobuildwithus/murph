@@ -712,6 +712,8 @@ export type DeviceSyncRestDiagnosticEndpoint =
   | "matrix"
   | "providers"
   | "refresh"
+  // Mutating: asks the provider to re-run its historical pull for one source.
+  | "trigger_historical_pull"
   | "summary"
   | "timeseries";
 

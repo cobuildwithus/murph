@@ -22,13 +22,36 @@ describe("changelog registry", () => {
     expect(ids.length).toBeGreaterThan(0);
   });
 
-  it("publishes the complete July 20 through July 24 shipment set", () => {
+  it("publishes the complete July 20 through July 25 shipment set", () => {
     expect(
-      listChangelogEditions().slice(0, 5).map((edition) => ({
+      listChangelogEditions().slice(0, 6).map((edition) => ({
         id: edition.id,
         itemIds: edition.items.map((item) => item.id),
       })),
     ).toEqual([
+      {
+        id: "2026-07-25",
+        itemIds: [
+          "ask-grok-x-research",
+          "unhinged-style-dial",
+          "group-chat-creative-formats",
+          "telegram-group-sender-attribution",
+          "weather-aware-outdoor-reminders",
+          "group-murph-reads-the-floor",
+          "phone-call-results-return-to-chat",
+          "billing-recovery-finishes",
+          "one-click-launch-consent",
+          "group-usage-pause-in-murphs-voice",
+          "contact-card-in-app-browser-handoff",
+          "experiment-check-ins-survive-stray-files",
+          "group-chat-renames-without-a-hosted-record",
+          "voice-memo-failures-have-a-reason",
+          "safe-database-start-retries",
+          "group-roster-durable-murph-activation",
+          "silent-device-source-stalls-are-visible",
+          "homepage-group-challenge-story",
+        ],
+      },
       {
         id: "2026-07-24",
         itemIds: [
@@ -39,6 +62,8 @@ describe("changelog registry", () => {
           "group-join-permissions-preselected",
           "usage-top-up-returns-to-chat",
           "telegram-signup-completes-setup",
+          "ask-murph-whats-new",
+          "account-deletion-exit-feedback",
         ],
       },
       {
@@ -203,8 +228,8 @@ describe("changelog registry", () => {
   it("keeps the default archive window to seven calendar days", () => {
     const firstPage = resolveChangelogPage(1);
     expect(firstPage?.editions).toHaveLength(7);
-    expect(firstPage?.editions[0]?.publishedOn).toBe("2026-07-24");
-    expect(firstPage?.editions.at(-1)?.publishedOn).toBe("2026-07-18");
+    expect(firstPage?.editions[0]?.publishedOn).toBe("2026-07-25");
+    expect(firstPage?.editions.at(-1)?.publishedOn).toBe("2026-07-19");
   });
 
   it("resolves only known canonical edition cursors", () => {
