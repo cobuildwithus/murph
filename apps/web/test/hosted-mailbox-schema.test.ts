@@ -134,6 +134,9 @@ describe("hosted mailbox workspace Prisma groundwork", () => {
       '"inbox_media_retention_signal_attempted_at" = NULL',
     );
     expect(messageRetentionMigrationSql).toContain(
+      '"version" = "version" + 1',
+    );
+    expect(messageRetentionMigrationSql).toContain(
       'WHERE "snapshot_ref" IS DISTINCT FROM NULL',
     );
   });

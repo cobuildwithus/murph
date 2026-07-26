@@ -548,7 +548,9 @@ This rollout has an irreversible transcript cutover and must use two phases:
 1. Deploy the Cloudflare Worker and stamping-capable runner bundle with
    `container_rollout=immediate`. Drain old warm bundles, prove the deployed
    fingerprint, and verify that newly written user transcript entries carry
-   `contentReceivedAt`.
+   `contentReceivedAt`. This Worker/runner version is also the rollout floor:
+   its ambiguous-completion recovery requires both a workspace-version advance
+   and a changed checkpoint timestamp before it releases a runtime fence.
 2. Before the Web migration, count persisted workspace snapshots and compare
    the aggregate with the existing hourly retention-cron capacity of 25
    snapshots plus an explicit signal-failure allowance. Stop if that queue
@@ -556,11 +558,14 @@ This rollout has an irreversible transcript cutover and must use two phases:
    part of this release.
 3. Record the verified runner-convergence instant, then deploy Web with the
    additive mailbox retention columns. The phase-one migration re-arms every
-   persisted workspace snapshot once. Monitor the existing cron until no due
-   snapshot remains; each restored runtime scrubs receipt-backed captures,
-   parser output, projections, inputs, and stamped transcripts while preserving
-   every unstamped legacy transcript entry. Phase one is incomplete until the
-   queue reaches zero.
+   persisted workspace snapshot once, advances the workspace CAS version, and
+   leaves checkpoint time unchanged. A runtime that read the pre-rearm version
+   must conflict and retry instead of clearing the wake; the Worker must not
+   treat that migration-only version advance as runtime progress. Monitor the
+   existing cron until no due snapshot remains; each restored runtime scrubs
+   receipt-backed captures, parser output, projections, inputs, and stamped
+   transcripts while preserving every unstamped legacy transcript entry.
+   Phase one is incomplete until the queue reaches zero.
 4. Keep legacy unstamped transcript entries intact for 14 complete days after
    the convergence instant and until phase one has drained, whichever is later.
    Newly stamped entries and the other receipt-owned message carriers use their

@@ -705,8 +705,10 @@ delete the journal and input before a later retention wake. The rollout is
 therefore two-phase. Phase one stamps every new user entry and preserves every
 unstamped legacy entry. After immediate runner rollout is verified, operators
 record the fleet-convergence instant and apply the additive mailbox migration,
-which re-arms every persisted snapshot once. The existing hourly cron drains
-that due queue in batches of 25; each wake scrubs receipt-backed captures,
+which re-arms every persisted snapshot once and advances its workspace CAS
+version without changing checkpoint time. Any invocation holding the prior
+version must retry instead of overwriting that wake. The existing hourly cron
+drains the due queue in batches of 25; each wake scrubs receipt-backed captures,
 parser output, projections, inputs, and stamped transcripts while leaving the
 unstamped legacy pair intact. Operators must preflight aggregate queue capacity
 and may not declare phase one complete until no due snapshot remains. After 14
@@ -1295,14 +1297,19 @@ For the active-wake probe, a verifiably stopped container shell
 (`ctx.container.running === false`) is the same explicit no-active-child proof.
 Committed-progress recovery stays in the transport-failure adapter, where the
 transport outcome is the thing being reconciled. Only explicit inactive proof
-may enter accepted committed-progress recovery. A workspace version advance is
-committed prefix progress even when newer durable mailbox lag remains; recovery
-clears the exact fence and the owner-release callback asks Temporal to process
-actionable remaining lag. Mismatch may clear a transport-failure fence because it
-proves that the active child is not the fenced attempt. Active, unsupported,
-error, and timeout probe outcomes preserve the fence regardless of whether a
-status read appears to show progress. Exact successful completion clears the
-fence only by the matching attempt identity.
+may enter accepted committed-progress recovery. A newer workspace version plus
+a changed, non-null checkpoint timestamp proves committed prefix progress even
+when newer durable mailbox lag remains; recovery clears the exact fence and the
+owner-release callback asks Temporal to process actionable remaining lag.
+Version-only administrative transitions are not runtime commit proof. In
+particular, retention rollout rearm advances the workspace CAS version without
+changing checkpoint time, so a runtime that read the pre-rearm workspace cannot
+checkpoint over the due wake and an ambiguous transport failure cannot
+misclassify the migration as runtime completion. Mismatch may clear a
+transport-failure fence because it proves that the active child is not the
+fenced attempt. Active, unsupported, error, and timeout probe outcomes preserve
+the fence regardless of whether a status read appears to show progress. Exact
+successful completion clears the fence only by the matching attempt identity.
 This prevents duplicate replacement while a live child may still be running and
 leaves replacement ownership in the exact identity-aware wake path.
 When the outer RunnerContainer active-operation pointer is missing, a container
