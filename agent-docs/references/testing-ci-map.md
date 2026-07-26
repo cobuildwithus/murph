@@ -87,6 +87,21 @@ grant/debit serialization, and deletion-first cleanup. Stripe remains mocked,
 and component tests do not replace a deployed browser flow, so launch still
 needs the documented test-mode Checkout, webhook, and browser smoke.
 
+Account-deletion cleanup coverage is split at the ownership boundary.
+`hosted-account-data-service.test.ts` proves the encrypted receipt is prepared
+before suspension and inserted in the canonical transaction before member
+removal. `hosted-account-deletion-cleanup.test.ts` proves receipt-bound
+encryption, independent per-target progress, unconfigured-target pending
+state, lease-loss handling, retry convergence, and batch isolation. Cloudflare
+runner tests prove already-absent state is idempotent and full Durable Object
+storage is erased only after R2/container cleanup. The shared control-client
+suite rejects legacy responses without explicit `deleteAllCompleted` evidence,
+and cleanup tests prove never-resolving provider targets return pending at the
+attempt deadline. Participant-lease unit,
+entitlement, allowance, newsletter, and routed-Linq suites prove one seven-day
+predicate and that current inbound can advance only an existing nonremoved
+relationship.
+
 Scheduled Telegram group route-authority coverage is owner-split. Hosted Web
 tests bind the signed callback member to the exact current thread-container
 route and reject a foreign container. Cloudflare tests lock the new signed

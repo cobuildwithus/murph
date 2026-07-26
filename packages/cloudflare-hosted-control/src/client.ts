@@ -65,6 +65,7 @@ export interface CloudflareHostedControlBrowserVaultReplicaAad {
 export interface CloudflareHostedControlUserDataDeletionResult {
   durableObject: {
     alarmCleared: boolean;
+    deleteAllCompleted: boolean;
     stateDeleted: boolean;
   };
   deletedAt: string;
@@ -667,6 +668,10 @@ function parseCloudflareHostedControlUserDataDeletionResult(
       alarmCleared: requireBoolean(
         durableObject.alarmCleared,
         "Cloudflare user-data deletion result durableObject.alarmCleared",
+      ),
+      deleteAllCompleted: requireBoolean(
+        durableObject.deleteAllCompleted,
+        "Cloudflare user-data deletion result durableObject.deleteAllCompleted",
       ),
       stateDeleted: requireBoolean(
         durableObject.stateDeleted,

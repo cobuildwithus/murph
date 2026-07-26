@@ -9,6 +9,7 @@ import {
 export interface HostedRunnerUserDataDeletionBestEffortResult {
   alarmCleared: boolean | null;
   configured: boolean;
+  deleteAllCompleted: boolean | null;
   deleted: boolean;
   errorCode: string | null;
   r2DeletedObjectCount: number | null;
@@ -42,7 +43,9 @@ export async function deleteHostedRunnerUserDataBestEffort(input: {
       ? {
           alarmCleared: result.durableObject.alarmCleared,
           configured: true,
-          deleted: result.durableObject.stateDeleted
+          deleteAllCompleted: result.durableObject.deleteAllCompleted === true,
+          deleted: result.durableObject.deleteAllCompleted === true
+            && result.durableObject.stateDeleted
             && result.durableObject.alarmCleared
             && result.r2.supported
             && !result.r2.skippedUserScopedPrefixes,
@@ -56,6 +59,7 @@ export async function deleteHostedRunnerUserDataBestEffort(input: {
       : {
           alarmCleared: null,
           configured: false,
+          deleteAllCompleted: null,
           deleted: false,
           errorCode: null,
           r2DeletedObjectCount: null,
@@ -75,6 +79,7 @@ export async function deleteHostedRunnerUserDataBestEffort(input: {
     return {
       alarmCleared: null,
       configured: true,
+      deleteAllCompleted: null,
       deleted: false,
       errorCode,
       r2DeletedObjectCount: null,

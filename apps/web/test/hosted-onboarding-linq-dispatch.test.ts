@@ -2036,6 +2036,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       },
       hostedThreadContainerParticipant: {
         findFirst: vi.fn().mockResolvedValue(null),
+        updateMany: vi.fn().mockResolvedValue({ count: 0 }),
       },
       hostedWebhookReceipt: {
         create: vi.fn().mockResolvedValue({}),

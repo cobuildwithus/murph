@@ -953,6 +953,27 @@ describe("createCloudflareHostedControlClient", () => {
     );
   });
 
+  it("rejects legacy deletion responses without full Durable Object erasure evidence", async () => {
+    const result = createUserDataDeletionResult({ userId: "user_123" });
+    const client = createCloudflareHostedControlClient({
+      baseUrl: "https://runner.example.test/root/",
+      fetchImpl: vi.fn(async () =>
+        createJsonResponse({
+          ...result,
+          durableObject: {
+            alarmCleared: true,
+            stateDeleted: true,
+          },
+        })) as typeof fetch,
+      getBearerToken: async () => "Bearer token-123",
+      timeoutMs: 2_500,
+    });
+
+    await expect(client.deleteUserData("user_123")).rejects.toThrow(
+      "Cloudflare user-data deletion result durableObject.deleteAllCompleted must be a boolean.",
+    );
+  });
+
 });
 
 function createJsonResponse(value: unknown, init: ResponseInit = {}): Response {
@@ -1085,6 +1106,7 @@ function createUserDataDeletionResult(input: { userId: string }) {
     deletedAt: "2026-04-29T00:00:00.000Z",
     durableObject: {
       alarmCleared: true,
+      deleteAllCompleted: true,
       stateDeleted: true,
     },
     ok: true,

@@ -346,6 +346,24 @@ function/webhook routes for `ask_murph`, `call_ended`, and `call_analyzed`;
 Murph does not persist raw Retell transcripts, request bodies, recordings, or
 call audio.
 
+## Hosted Account Deletion
+
+Before canonical member removal, `apps/web` inserts one foreign-key-free,
+KMS-encrypted external-cleanup receipt in the same transaction. The receipt is
+the sole post-delete owner of the minimal Cloudflare runtime, Stripe customer,
+and Privy identifiers; target completion is independent, retries use the
+existing retention sweep, and terminal convergence deletes the receipt.
+Immediate provider attempts have a five-second target budget plus a small
+receipt-settlement margin. Retention attempts use a fifteen-second target
+budget and bounded four-receipt concurrency so one slow provider cannot own the
+request or sweep indefinitely.
+
+Cloudflare completion requires an explicit `deleteAllCompleted` result in
+addition to alarm, SQL-state, and R2 completion. A legacy Worker response
+without that capability remains pending. Deploy Cloudflare before web and keep
+the capability-bearing Worker as the rollback floor once web can create these
+receipts; the database migration must precede the web deploy.
+
 ## Hosted Assistant Personalization
 
 `apps/web` remains the canonical projection and mutation owner for hosted tone,
@@ -845,6 +863,16 @@ accepted Linq reply delivery stamps the exact mailbox item with `consumedAt`, so
 a later ensure imports an already-answered item as context-only, while the
 Durable Object write fence coalesces runners that overlap in the same invocation.
 There is no other web-to-Cloudflare prewarm or nudge path.
+
+Participant-derived thread-container authority is a seven-day lease over an
+authoritative provider observation, reused by ordinary access, AI admission,
+usage allowance, and newsletter projection. A non-direct Linq inbound may
+advance only the already-existing, nonremoved relationship for the
+server-resolved sender; it cannot create participant authority, clear a newer
+removal, move `lastSeenAt` backward, or use a provider timestamp later than
+server time. Owner-derived authority remains independent. Partial oversized
+rosters therefore cannot turn an omitted or departed participant into an
+unbounded subscription capability.
 
 Hosted Linq participant-change webhooks are privacy-minimized provider-ledger
 facts, not runtime work. A unique participant addition may set one nullable
