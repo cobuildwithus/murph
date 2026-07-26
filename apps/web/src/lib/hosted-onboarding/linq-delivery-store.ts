@@ -17,6 +17,7 @@ import {
   createHostedLinqDeliverySourceRefLookupKey,
 } from "./linq-observability-identifiers";
 import {
+  buildHostedLinqInviteSignupDeliverySourceRefMemberPrefix,
   buildHostedLinqInviteSignupEffectId,
   type HostedLinqInviteSignupGroupJoinReplyContext,
   parseHostedLinqInviteSignupDeliverySourceRef,
@@ -2044,25 +2045,75 @@ async function resolveHostedLinqFailedDeliveryReopenTx(input: {
         }),
       ),
   ).filter((lookupKey): lookupKey is string => lookupKey !== null);
-  if (newerAttemptLookupKeys.length === 0) {
+  const newerLiveDeliveries =
+    newerAttemptLookupKeys.length === 0
+      ? []
+      : await input.prisma.hostedLinqDelivery.findMany({
+        where: {
+          idempotencyKey: { in: newerAttemptLookupKeys },
+          status: {
+            // Signup attempts stay reclaimable until provider correlation. A
+            // newer `attempted` ordinal still owns this exact reply context, so
+            // an older delayed failure must not reopen it while restart recovery
+            // can continue that newer attempt under the same provider key.
+            in: ["attempted", "provider_dispatch_started", "accepted", "delivered"],
+          },
+        },
+        select: { id: true },
+        take: 1,
+      });
+  if (newerLiveDeliveries.length > 0) {
+    return null;
+  }
+  if (link.groupJoinReplyContext) {
     return link;
   }
-  const newerLiveDeliveries =
+
+  // The daily marker is shared suppression truth across the generic
+  // member/day identity and every exact group-reply identity for that day. A
+  // delayed generic failure may clear it only when no distinct group delivery
+  // still owns that fact. Group failures remain scoped to their exact outreach
+  // above, and same-identity attempt ordering remains fenced by the query above.
+  const genericSourceRefPrefix = buildHostedLinqInviteSignupEffectId({
+    memberId: failedAttempt.memberId,
+    occurredAt: failedAttempt.dayUtc,
+  });
+  const groupSourceRefPrefix =
+    `${buildHostedLinqInviteSignupDeliverySourceRefMemberPrefix(
+      failedAttempt.memberId,
+    )}${failedAttempt.dayUtc}`;
+  const otherLiveDeliveries =
     await input.prisma.hostedLinqDelivery.findMany({
       where: {
-        idempotencyKey: { in: newerAttemptLookupKeys },
+        OR: [
+          { sourceRef: { startsWith: genericSourceRefPrefix } },
+          { sourceRef: { startsWith: groupSourceRefPrefix } },
+        ],
         status: {
-          // Signup attempts stay reclaimable until provider correlation. A
-          // newer `attempted` ordinal still owns this exact reply context, so
-          // an older delayed failure must not reopen it while restart recovery
-          // can continue that newer attempt under the same provider key.
           in: ["attempted", "provider_dispatch_started", "accepted", "delivered"],
         },
+        template: {
+          in: ["invite_signup", "invite_signup_fallback"],
+        },
       },
-      select: { id: true },
-      take: 1,
+      select: { sourceRef: true },
     });
-  return newerLiveDeliveries.length > 0 ? null : link;
+  const distinctLiveIdentity = otherLiveDeliveries.some((delivery) => {
+    const source = parseHostedLinqInviteSignupDeliverySourceRef(
+      delivery.sourceRef,
+    );
+    const attempt = source
+      ? parseHostedLinqInviteSignupEffectId(source.effectId)
+      : null;
+    return Boolean(
+      source?.groupJoinReplyContext
+      && attempt
+      && attempt.memberId === failedAttempt.memberId
+      && attempt.dayUtc === failedAttempt.dayUtc
+      && attempt.sourceEventDigest !== failedAttempt.sourceEventDigest,
+    );
+  });
+  return distinctLiveIdentity ? null : link;
 }
 
 function readHostedLinqAcceptedMilestoneStatus(

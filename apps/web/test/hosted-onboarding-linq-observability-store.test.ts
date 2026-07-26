@@ -379,6 +379,80 @@ describe("hosted Linq observability stores", () => {
     });
   });
 
+  it("keeps the daily signup marker when a delayed generic failure follows a distinct group success", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    const genericEffectId =
+      "linq-invite-signup:member_123:2026-03-26T00:00:00.000Z";
+    const groupEffectId = buildHostedLinqInviteSignupEffectId({
+      memberId: "member_123",
+      occurredAt: "2026-03-26T12:05:00.000Z",
+      sourceEventDigest: "a".repeat(32),
+    });
+    const groupSourceRef = buildHostedLinqInviteSignupDeliverySourceRef({
+      effectId: groupEffectId,
+      groupJoinOutreachId: "hgrpjoa_group_success",
+      groupJoinRepliedAt: "2026-03-26T12:05:00.000Z",
+    });
+    fixture.hostedLinqDeliveryFindFirst.mockResolvedValueOnce({
+      id: "hld_generic_failed",
+      idempotencyKey:
+        createHostedLinqDeliveryIdempotencyLookupKey(genericEffectId),
+      phoneNumberLookupKey: null,
+      sourceRef: genericEffectId,
+      template: "invite_signup",
+    });
+    fixture.hostedLinqDeliveryFindMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ sourceRef: groupSourceRef }]);
+
+    await expect(ingestHostedLinqProviderEventTx({
+      event: requireParsedProviderEvent(buildProviderEvent({
+        createdAt: "2026-03-26T12:10:00.000Z",
+        data: {
+          error: { code: "30007", message: "carrier filtered" },
+          message_id: "provider_msg_generic_delayed",
+          phone_number: "+15550000000",
+          service: "sms",
+        },
+        eventId: "evt_generic_delayed_failure",
+        eventType: "message.failed",
+      })),
+      prisma: fixture.prisma as never,
+    })).resolves.toMatchObject({
+      duplicate: false,
+    });
+
+    expect(fixture.hostedLinqDailyStateUpdateMany).not.toHaveBeenCalled();
+    expect(fixture.hostedGroupJoinOutreachUpdateMany).not.toHaveBeenCalled();
+    expect(fixture.hostedLinqDeliveryFindMany).toHaveBeenNthCalledWith(2, {
+      select: { sourceRef: true },
+      where: {
+        OR: [
+          { sourceRef: { startsWith: genericEffectId } },
+          {
+            sourceRef: {
+              startsWith:
+                `${buildHostedLinqInviteSignupDeliverySourceRefMemberPrefix(
+                  "member_123",
+                )}2026-03-26T00:00:00.000Z`,
+            },
+          },
+        ],
+        status: {
+          in: [
+            "attempted",
+            "provider_dispatch_started",
+            "accepted",
+            "delivered",
+          ],
+        },
+        template: {
+          in: ["invite_signup", "invite_signup_fallback"],
+        },
+      },
+    });
+  });
+
   it("restores onboarding after a delivered invite receipt and ignores non-onboarding terminal receipts", async () => {
     const fixture = createObservabilityPrismaFixture();
     const effectId = "linq-invite-signup:member_123:2026-03-26T00:00:00.000Z";
@@ -3678,6 +3752,48 @@ describe("hosted Linq signup-link delivery attempts", () => {
         memberId: "member_123",
         occurredAt: "2026-03-26T00:00:00.000Z",
       },
+      restoreOnboardingLink: null,
+    });
+  });
+
+  it("does not reopen the daily marker when a buffered generic failure replays after a distinct group success", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    const groupEffectId = buildHostedLinqInviteSignupEffectId({
+      memberId: "member_123",
+      occurredAt: "2026-03-26T12:05:00.000Z",
+      sourceEventDigest: "b".repeat(32),
+    });
+    fixture.hostedLinqProviderEventFindMany.mockResolvedValueOnce([{
+      deliveryStatus: "failed",
+      eventId: "evt_generic_failed_buffered",
+      failureCode: "30007",
+      failureReason: "carrier filtered",
+      phoneNumberLookupKey: null,
+      providerCreatedAt: new Date("2026-03-26T12:10:00.000Z"),
+      service: "sms",
+    }]);
+    fixture.hostedLinqDeliveryFindUnique.mockResolvedValueOnce({
+      sourceRef: BASE_EFFECT_ID,
+      template: "invite_signup",
+    });
+    fixture.hostedLinqDeliveryFindMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{
+        sourceRef: buildHostedLinqInviteSignupDeliverySourceRef({
+          effectId: groupEffectId,
+          groupJoinOutreachId: "hgrpjoa_group_success",
+          groupJoinRepliedAt: "2026-03-26T12:05:00.000Z",
+        }),
+      }]);
+
+    await expect(markHostedLinqDeliveryAcceptedTx({
+      idempotencyKey: BASE_EFFECT_ID,
+      linqChatId: "chat_123",
+      messageId: "provider_msg_generic",
+      prisma: fixture.prisma as never,
+    })).resolves.toEqual({
+      deliveryStatus: "failed",
+      reopenOnboardingLink: null,
       restoreOnboardingLink: null,
     });
   });

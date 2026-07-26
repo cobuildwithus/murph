@@ -40,7 +40,9 @@ import {
   readHostedGroupJoinOutreachReplyContextTx,
 } from "@/src/lib/hosted-groups/group-join-outreach-store";
 import {
+  createHostedLinqChatLookupKey,
   createHostedLinqChatLookupKeyReadCandidates,
+  createHostedLinqMessageLookupKey,
   createHostedPhoneLookupKey,
 } from "@/src/lib/hosted-onboarding/contact-privacy";
 import {
@@ -49,11 +51,14 @@ import {
 } from "@/src/lib/hosted-onboarding/linq-delivery-store";
 import {
   buildHostedLinqInviteSignupDeliverySourceRef,
+  buildHostedLinqInviteSignupEffectId,
 } from "@/src/lib/hosted-onboarding/linq-invite-signup-effect-id";
 import {
   upsertHostedLinqLineForPhoneTx,
 } from "@/src/lib/hosted-onboarding/linq-line-store";
 import { parseHostedLinqWebhookEvent } from "@/src/lib/hosted-onboarding/linq";
+import { ingestHostedLinqProviderEventTx } from "@/src/lib/hosted-onboarding/linq-provider-event-store";
+import { parseHostedLinqProviderEvent } from "@/src/lib/hosted-onboarding/linq-provider-events";
 import {
   buildHostedMemberIdentityPrivateColumns,
 } from "@/src/lib/hosted-onboarding/member-private-codecs";
@@ -119,6 +124,18 @@ describe.skipIf(!runPostgresProof)(
 
       const newerProviderMessageId = `linq-message-newer-${randomUUID()}`;
       const originalProviderMessageId = `linq-message-original-${randomUUID()}`;
+      const genericProviderMessageId = `linq-message-generic-${randomUUID()}`;
+      const genericEffectId = buildHostedLinqInviteSignupEffectId({
+        memberId: participantMemberId,
+        occurredAt: "2026-07-24T19:30:00.000Z",
+      });
+      const genericDeliveryLookupKey =
+        createHostedLinqDeliveryIdempotencyLookupKey(genericEffectId);
+      const genericMessageLookupKey =
+        createHostedLinqMessageLookupKey(genericProviderMessageId);
+      if (!genericDeliveryLookupKey || !genericMessageLookupKey) {
+        throw new Error("Expected generic signup delivery lookup keys.");
+      }
       providerMocks.sendHostedLinqChatMessage
         .mockResolvedValueOnce({
           chatId,
@@ -269,6 +286,34 @@ describe.skipIf(!runPostgresProof)(
         if (!deliveryIdempotencyLookupKey) {
           throw new Error("Expected the signup delivery lookup key.");
         }
+
+        const genericAcceptedAt = new Date("2026-07-24T19:30:00.000Z");
+        await prisma.hostedLinqDelivery.create({
+          data: {
+            acceptedAt: genericAcceptedAt,
+            attemptedAt: new Date("2026-07-24T19:29:59.000Z"),
+            id: `hld_generic_${randomUUID()}`,
+            idempotencyKey: genericDeliveryLookupKey,
+            linqChatLookupKey: createHostedLinqChatLookupKey(chatId),
+            messageLookupKey: genericMessageLookupKey,
+            source: "hosted_webhook_side_effect",
+            sourceRef: genericEffectId,
+            status: "accepted",
+            targetKind: "thread",
+            template: "invite_signup",
+          },
+        });
+        await prisma.hostedLinqDailyState.update({
+          data: {
+            onboardingLinkSentAt: genericAcceptedAt,
+          },
+          where: {
+            memberId_dayUtc: {
+              dayUtc: new Date("2026-07-24T00:00:00.000Z"),
+              memberId: participantMemberId,
+            },
+          },
+        });
 
         // Materialize the exact state left by process termination after the
         // preparation transaction commits and before provider entry. The
@@ -487,6 +532,49 @@ describe.skipIf(!runPostgresProof)(
             idempotencyKey: deliveryIdempotencyLookupKey,
           },
         })).resolves.toEqual({ sourceRef: originalSourceRef });
+
+        const delayedGenericFailure = parseHostedLinqProviderEvent({
+          event: parseHostedLinqWebhookEvent(JSON.stringify({
+            api_version: "v3",
+            created_at: "2026-07-24T20:01:45.000Z",
+            data: {
+              error: {
+                code: "30007",
+                message: "carrier filtered",
+              },
+              message_id: genericProviderMessageId,
+              phone_number: recipientPhone,
+              service: "sms",
+            },
+            event_id: `event-generic-failed-${randomUUID()}`,
+            event_type: "message.failed",
+            trace_id: `trace-generic-failed-${randomUUID()}`,
+            webhook_version: "2026-02-03",
+          })),
+          rawBody: "{}",
+        });
+        if (!delayedGenericFailure) {
+          throw new Error("Expected the delayed generic failure to parse.");
+        }
+        await prisma.$transaction((tx) =>
+          ingestHostedLinqProviderEventTx({
+            event: delayedGenericFailure,
+            prisma: tx,
+          })
+        );
+        await expect(prisma.hostedLinqDelivery.findUnique({
+          select: { status: true },
+          where: { idempotencyKey: genericDeliveryLookupKey },
+        })).resolves.toEqual({ status: "failed" });
+        await expect(prisma.hostedLinqDailyState.findFirst({
+          select: { onboardingLinkSentAt: true },
+          where: {
+            dayUtc: new Date("2026-07-24T00:00:00.000Z"),
+            memberId: participantMemberId,
+          },
+        })).resolves.toEqual({
+          onboardingLinkSentAt: groupSignupAcceptedAt,
+        });
         await expect(prisma.$transaction((tx) =>
           readHostedGroupJoinOutreachReplyContextTx({
             linqChatId: chatId,
