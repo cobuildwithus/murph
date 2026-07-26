@@ -1,6 +1,6 @@
 # PR 951 Stripe cancellation serialization follow-up
 
-Status: active
+Status: completed
 Created: 2026-07-25
 Updated: 2026-07-25
 
@@ -70,12 +70,25 @@ Updated: 2026-07-25
 
 ## Verification
 
-- Commands to run: focused hosted auto-trial tests,
+- Required commands: focused hosted auto-trial tests,
   `pnpm test:diff apps/web/src/lib/hosted-onboarding/auto-trial-enrollment-service.ts`,
   `pnpm verify:acceptance`, and the repository ReviewGPT/CI gates.
 - Expected outcomes: all pass; the concurrency proof demonstrates that adoption
   and cancellation cannot cross the serialized boundary.
 - Current focused result: the auto-trial service and route suites pass with 76
-  tests. A direct prepared typecheck is presently blocked by an unrelated
-  `hosted-routing/thread-route-store.ts` error on the rebased base; canonical
-  verification will regenerate Prisma artifacts and rerun the lane.
+  tests, targeted lint passes, and the hosted-web typecheck passes after the
+  canonical Prisma generation step.
+- Current canonical result: `pnpm test:diff auto-trial service cleanup store`
+  exits successfully after the full hosted-web lane (514 test files and 6,556
+  tests passed, with the documented skips), lint, development smoke, and
+  production build.
+- Current acceptance result: `pnpm verify:acceptance` exits successfully after
+  repository guards, workspace typechecks, package coverage, hosted-web
+  verification, production build, and both Cloudflare test lanes.
+- Current specialist result: the correction-verification pass on
+  `193b3732acf9e9c36ebe547c1cc03d18172ddeb8` reports no findings and
+  `SPECIALIST_OUTCOME: PASS`. It explicitly rechecked the exact error-code
+  assertions and both sides of the shared serialization boundary.
+- Current CI result: all completed checks pass; only the runtime checkpoint E2E
+  lane remains in progress on the pushed implementation head.
+Completed: 2026-07-25

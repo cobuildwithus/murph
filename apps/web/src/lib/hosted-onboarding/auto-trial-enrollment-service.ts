@@ -1070,17 +1070,15 @@ async function finalizeHostedAutoPulseTrialEnrollmentTx(input: {
 /**
  * Rejects a provider judgement that has aged out before the locked write.
  *
- * The subscription was retrieved and judged eligible outside the lock, so an
- * almost-expired trial can pass that judgement and then expire while this
- * attempt waits for the member row. Every other field of the retrieved
- * subscription is frozen at retrieval time and cannot change without another
- * provider read, which must not happen under the lock; the trial's own expiry
- * is the part of that judgement that decays on its own, so it is recomputed
- * against the locked clock. Persisting past it would mark the member active on
- * a trial that has already ended.
+ * The subscription is retrieved and judged eligible while the member lock is
+ * held, but an almost-expired trial can still pass that judgement and then
+ * expire while the member snapshot and activation writes run. Every other
+ * field of the retrieved subscription stays protected from competing cleanup
+ * by the shared lock; the trial's own expiry advances with the clock, so it is
+ * recomputed immediately before the write. Persisting past it would mark the
+ * member active on a trial that has already ended.
  *
- * The failure is the same retryable disposition the pre-lock eligibility check
- * raises, so the caller's retry reruns phase 1 against fresh provider state
+ * The retryable failure makes the caller perform a fresh authoritative read
  * rather than skipping the write and reporting success.
  */
 function assertHostedAutoPulseTrialSnapshotStillFresh(input: {
