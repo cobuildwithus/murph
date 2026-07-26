@@ -20,7 +20,7 @@ Key decisions:
 - Remove model-visible group-avatar generation until the provider supports a genuinely private ingestion lifecycle.
 
 State:
-- Implementation is stable on current `origin/main`; focused, full assistant-engine, and direct hosted delivery proof are green. Product/preliminary/final review gates and final canonical verification remain.
+- Implementation is stable on current `origin/main`; focused, full owner, direct hosted delivery, product-experience, preliminary specialist, and parent final-review proof are green. The final ReviewGPT gate remains; canonical acceptance is blocked by one untouched current-`main` Web type error, and PR design proof is blocked by the unavailable prescribed screenshot-upload credential.
 
 Done:
 - Read the required repository workflow, architecture, product, security, reliability, and completion guidance.
@@ -51,16 +51,20 @@ Done:
 - The reviewer-requested Web `test:diff` was attempted but remained queued behind unrelated shared-host verification; the session-owned waiter was stopped, and the required final canonical run remains pending.
 - The accessibility product re-review found that retry completion still lacked an announcement. Replaced conditional status nodes with one persistent atomic polite region whose text transitions through preparing, unavailable, and ready; the retry proof now asserts the ready announcement and the focused Web lane remains green.
 - The final accessibility rerun found and resolved one capability-copy mismatch: ready now announces Share plus Download only when native file sharing is supported, and announces Download alone otherwise. The final narrow product-experience verdict is `NO FINDINGS`.
+- Rebased cleanly onto the latest `origin/main`, updated PR #966 with all preliminary finding dispositions and the current change shape, and completed the parent final review across descriptor parsing, vault verification, provider-entry ordering, Linq/Telegram delivery, generated capture ownership, fail-closed legacy routes, group-avatar gating, experiment automation, and browser sharing with no additional accepted finding.
+- The final explicit-owner `pnpm test:diff` passed all affected package typechecks and package suites, including 2,669 assistant-engine tests, 1,862 assistant-runtime tests, 1,082 CLI tests, 407 hosted-execution tests, and all dependent owners. App verification then stopped at the unchanged latest-`origin/main` Web error `apps/web/src/lib/hosted-routing/thread-route-store.ts:170` (`length` on `never`); this branch changes neither that file nor the Prisma schema.
+- `pnpm verify:acceptance` reproduced the same untouched current-`main` Web type error after all preceding workspace package typechecks passed; the acceptance dispatcher stopped there before its later stages.
+- PR CI passed the private-media Codex/provider-egress hosted scenario, every other hosted scenario except one pre-existing snapshot-publication fallback case, release package/app verification, repo hygiene, and host support. The snapshot fallback rerun reproduced its post-rejection clean-publication timeout; the exact current-`main` workflow independently fails the same test with the same timeout, proving it is not introduced by this branch.
+- The frontend design gate correctly rejected local-only evidence paths. Repository policy requires Cloudflare Images-hosted desktop/mobile screenshots and explicitly requires reporting a missing local upload credential instead of committing screenshot binaries or using another host.
+- The final local Cloudflare app wrapper could not acquire the shared-host slot behind unrelated repository verification and its session-owned waiter was stopped. Exact-head CI release-app verification is green, and the focused local Cloudflare typecheck, node, and Worker suites passed.
 
 Now:
-- Commit and push preliminary remediation, then perform the parent final review.
+- Close the active execution plan and publish its final exact head.
 
 Next:
-- Run the parent final review, rerun canonical diff/acceptance verification, and close this plan with `scripts/finish-task`.
-- Push the final head, run final ReviewGPT concurrently with CI, and prove merge readiness against current `main`.
+- Close this plan with `scripts/finish-task`, push the final head, then run final ReviewGPT concurrently with CI and prove merge readiness against current `main`, subject to the recorded external/base blockers.
 
 Open questions (UNCONFIRMED if needed):
-- Whether a browser target can be attached before final handoff so the required desktop/mobile design-catalog evidence can be captured; current browser discovery returned no targets.
 - Whether current Linq group-avatar APIs will later expose provider-native byte upload; the current patch deliberately retains fail-closed behavior until that capability exists.
 
 Working set (files/ids/commands):
@@ -76,3 +80,6 @@ Working set (files/ids/commands):
 - focused tests, hosted-local E2E, design catalog, and current owner docs
 - `pnpm test:diff ...`
 - `pnpm verify:acceptance`
+Status: completed
+Updated: 2026-07-25
+Completed: 2026-07-25
