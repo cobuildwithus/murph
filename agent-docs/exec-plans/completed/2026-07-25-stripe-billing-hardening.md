@@ -1,8 +1,8 @@
 # Stripe Billing Hardening
 
-Status: active
+Status: completed
 Created: 2026-07-25
-Updated: 2026-07-25
+Updated: 2026-07-26
 
 ## Goal
 
@@ -122,6 +122,11 @@ Updated: 2026-07-25
   link, and `Finish invite` safely replays the exact owner-locked request. Do not
   persist private invite targets or add a continuation state owner for this
   edge.
+- Preserve the merged PR #951 auto-trial serialization owner: subscription
+  adoption performs its authoritative Stripe read under the member lock, and a
+  no-write loser decision settles bounded cancellation before releasing that
+  same lock. Keep this PR's Customer reservation ahead of that boundary rather
+  than restoring the superseded release-and-reacquire cleanup path.
 - Bound legacy pre-reservation Checkout acceptance to the provider Session
   lifetime plus Stripe's three-day live webhook retry horizon, using the durable
   event receipt time so retries cannot change the decision.
@@ -150,6 +155,15 @@ Updated: 2026-07-25
   including a combined 376-test cross-flow run after the final product fixes.
 - Hosted Web prepared typecheck, focused ESLint with zero warnings, privacy and
   unsafe-cast scans, and `git diff --check` pass on the frozen implementation.
+- After reconciling the merged PR #951 owner and prepared-crypto seam from
+  current `main`, the combined auto-trial suite passes 75 cases and the hosted
+  Web prepared typecheck passes.
+- Canonical diff verification passes on the reconciled head in isolated
+  Testbox `tbx_01kyftvbmepa6c3hrtxen4ns83`, including 7,146 hosted Web tests,
+  lint, typecheck, and the production build.
+- Full `pnpm verify:acceptance` passes for all 31 workspace projects in isolated
+  Testbox `tbx_01kyfv0s35ndtvwamx57yffthj`, including package coverage and both
+  hosted Web and Cloudflare application verification.
 - An isolated migrated Postgres database proved one-winner checkout reservation,
   duplicate Session rejection, and exact-Session-only attempt clearing.
 - Read-only production aggregates found no suspended current billing rows and
@@ -160,3 +174,4 @@ Updated: 2026-07-25
   configuration IDs exist in both Stripe modes and Vercel environments.
 - Hosted desktop/mobile design proof remains blocked from upload because the
   required local Cloudflare Images credential is unavailable.
+Completed: 2026-07-26
