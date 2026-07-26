@@ -149,7 +149,7 @@ export async function reconcileHostedUsageCreditDirectPaymentEventTx(input: {
       );
     }
     const convergence = await reconcileHostedUsageCreditFinancialSnapshotTx({
-      checkoutAuthorization: buildHostedUsageCreditDirectPaymentAuthorization({
+      paymentAuthorization: buildHostedUsageCreditDirectPaymentAuthorization({
         paymentIntent,
         purchase: input.purchase,
       }),

@@ -372,11 +372,15 @@ test("reuses the dialog state machine for a server-scoped group checkout", async
       rendered.container.textContent ?? "",
       /Shared with everyone in the chat\./,
     );
+    assert.match(
+      rendered.container.textContent ?? "",
+      /saved card when available/,
+    );
     await clickRadio(rendered.container, rendered.window, "usage_500");
     await clickButton(
       rendered.container,
       rendered.window,
-      "Continue to checkout · $5",
+      "Add messages · $5",
     );
     expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
       method: "POST",

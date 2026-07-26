@@ -16,6 +16,7 @@ import {
 import {
   HOSTED_USAGE_CREDIT_CHECKOUT_PURPOSE,
   HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_VERSION,
+  HOSTED_USAGE_CREDIT_SAVED_CARD_PURPOSE,
 } from "./usage-credit-offers";
 import {
   decryptHostedWebNullableString,
@@ -43,6 +44,16 @@ export function buildHostedUsageCreditCheckoutMetadata(
     policyVersion: HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_VERSION,
     purchaseId,
     purpose: HOSTED_USAGE_CREDIT_CHECKOUT_PURPOSE,
+  };
+}
+
+export function buildHostedUsageCreditSavedCardMetadata(
+  purchaseId: string,
+): Record<string, string> {
+  return {
+    policyVersion: HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_VERSION,
+    purchaseId,
+    purpose: HOSTED_USAGE_CREDIT_SAVED_CARD_PURPOSE,
   };
 }
 
@@ -225,6 +236,7 @@ function buildHostedUsageCreditStripeCheckoutRequest(input: {
     mode: "payment",
     payment_intent_data: {
       metadata: input.checkoutMetadata,
+      setup_future_usage: "off_session",
     },
     success_url: input.checkoutSuccessUrl,
   };

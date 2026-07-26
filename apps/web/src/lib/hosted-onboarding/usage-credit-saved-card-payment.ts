@@ -15,7 +15,7 @@ import {
   lockHostedMemberRow,
 } from "./shared";
 import {
-  buildHostedUsageCreditCheckoutMetadata,
+  buildHostedUsageCreditSavedCardMetadata,
   buildHostedUsageCreditInvariantError,
   buildHostedUsageCreditStripeUnavailableError,
   encryptHostedUsageCreditPurchaseStripeField,
@@ -154,8 +154,9 @@ async function resolveHostedUsageCreditSavedCard(input: {
 }): Promise<string | null> {
   let customer: Stripe.Customer | Stripe.DeletedCustomer;
   let paymentMethods: Stripe.ApiList<Stripe.PaymentMethod>;
+  let subscriptions: Stripe.ApiList<Stripe.Subscription>;
   try {
-    [customer, paymentMethods] = await Promise.all([
+    [customer, paymentMethods, subscriptions] = await Promise.all([
       input.stripe.customers.retrieve(input.customerId, {
         expand: ["invoice_settings.default_payment_method"],
       }),
@@ -163,6 +164,11 @@ async function resolveHostedUsageCreditSavedCard(input: {
         customer: input.customerId,
         limit: 100,
         type: "card",
+      }),
+      input.stripe.subscriptions.list({
+        customer: input.customerId,
+        limit: 100,
+        status: "all",
       }),
     ]);
   } catch (error) {
@@ -185,7 +191,7 @@ async function resolveHostedUsageCreditSavedCard(input: {
       "saved_card_customer_state_invalid",
     );
   }
-  if (paymentMethods.has_more) {
+  if (paymentMethods.has_more || subscriptions.has_more) {
     return null;
   }
 
@@ -203,14 +209,46 @@ async function resolveHostedUsageCreditSavedCard(input: {
     attachedPaymentMethodIds.add(paymentMethod.id);
   }
 
-  const defaultPaymentMethodId = coerceStripeObjectId(
+  const preferredPaymentMethodIds = new Set<string>();
+  const customerDefaultPaymentMethodId = coerceStripeObjectId(
     customer.invoice_settings.default_payment_method,
   );
   if (
-    defaultPaymentMethodId &&
-    attachedPaymentMethodIds.has(defaultPaymentMethodId)
+    customerDefaultPaymentMethodId &&
+    attachedPaymentMethodIds.has(customerDefaultPaymentMethodId)
   ) {
-    return defaultPaymentMethodId;
+    preferredPaymentMethodIds.add(customerDefaultPaymentMethodId);
+  }
+  for (const subscription of subscriptions.data) {
+    if (
+      subscription.livemode !== input.purchase.stripeLiveMode ||
+      coerceStripeObjectId(subscription.customer) !== input.customerId
+    ) {
+      throw buildHostedUsageCreditInvariantError(
+        "saved_card_subscription_invalid",
+      );
+    }
+    if (
+      subscription.status === "canceled" ||
+      subscription.status === "incomplete_expired"
+    ) {
+      continue;
+    }
+    const subscriptionPaymentMethodId = coerceStripeObjectId(
+      subscription.default_payment_method,
+    );
+    if (
+      subscriptionPaymentMethodId &&
+      attachedPaymentMethodIds.has(subscriptionPaymentMethodId)
+    ) {
+      preferredPaymentMethodIds.add(subscriptionPaymentMethodId);
+    }
+  }
+  if (preferredPaymentMethodIds.size === 1) {
+    return [...preferredPaymentMethodIds][0] ?? null;
+  }
+  if (preferredPaymentMethodIds.size > 1) {
+    return null;
   }
   return attachedPaymentMethodIds.size === 1
     ? [...attachedPaymentMethodIds][0] ?? null
@@ -234,7 +272,7 @@ async function createOrRecoverHostedUsageCreditPaymentIntent(input: {
       currency: input.purchase.cashCurrency,
       customer: input.customerId,
       expand: ["latest_charge"],
-      metadata: buildHostedUsageCreditCheckoutMetadata(input.purchase.id),
+      metadata: buildHostedUsageCreditSavedCardMetadata(input.purchase.id),
       off_session: true,
       payment_method: input.paymentMethodId,
       payment_method_types: ["card"],

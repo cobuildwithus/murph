@@ -61,6 +61,8 @@ import {
   requireHostedUsageCreditPurchasePayerMemberId,
 } from "./usage-credit-purchase-stripe";
 import { logHostedStripeFailure } from "./stripe-error-log";
+import { tryChargeHostedUsageCreditSavedCard } from
+  "./usage-credit-saved-card-payment";
 import {
   buildHostedGroupUsageFundingPath,
   normalizeHostedGroupUsageFundingLocator,
@@ -608,6 +610,23 @@ async function continueHostedUsageCreditCheckout(input: {
     purchase,
     stripe,
   });
+  if (projectHostedUsageCreditPurchaseTarget(purchase).kind === "group") {
+    const directPaymentPurchase = await tryChargeHostedUsageCreditSavedCard({
+      checkoutRequest,
+      now: input.now,
+      prisma: input.prisma,
+      purchase,
+      stripe,
+    });
+    if (directPaymentPurchase) {
+      const projection = await projectHostedUsageCreditCheckoutForCurrentTarget({
+        now: input.now,
+        prisma: input.prisma,
+        purchase: directPaymentPurchase,
+      });
+      return projection.checkout;
+    }
+  }
   let session: Stripe.Checkout.Session;
   try {
     session = await stripe.checkout.sessions.create(checkoutRequest, {

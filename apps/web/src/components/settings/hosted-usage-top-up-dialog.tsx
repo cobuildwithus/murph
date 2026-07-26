@@ -199,7 +199,7 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
               : props.offers.length === 0
                 ? "There isn’t a usage-credit offer available for this account right now."
                 : props.scope === "group"
-                  ? "Shared with everyone in the chat."
+                  ? "Shared with everyone in the chat. We’ll use your saved card when available; Stripe handles card entry or verification when needed."
                   : familyTarget
                     ? `Choose a one-time credit amount for ${familyTarget}.`
                     : "Choose a one-time credit amount for your account."}
@@ -450,9 +450,13 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
                   onClick={() => void controller.startCheckout()}
                 >
                   {controller.checkoutInFlight
-                    ? "Opening checkout…"
+                    ? props.scope === "group"
+                      ? "Adding messages…"
+                      : "Opening checkout…"
                     : controller.selectedOffer
-                      ? `Continue to checkout · ${controller.selectedOffer.amountLabel}`
+                      ? props.scope === "group"
+                        ? `Add messages · ${controller.selectedOffer.amountLabel}`
+                        : `Continue to checkout · ${controller.selectedOffer.amountLabel}`
                       : "Choose an amount"}
                 </Button>
               </div>
