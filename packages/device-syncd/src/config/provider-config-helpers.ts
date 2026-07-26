@@ -50,6 +50,24 @@ export function parsePortEnv(env: DeviceSyncEnvSource, keys: readonly string[]):
   return parsed;
 }
 
+/**
+ * Reads an explicit on/off switch. Absent or anything other than "1"/"true" is
+ * off, so a capability has to be turned on deliberately rather than by a typo.
+ */
+export function parseBooleanEnv(
+  env: DeviceSyncEnvSource,
+  keys: readonly string[],
+): boolean | undefined {
+  const raw = optionalEnv(env, keys);
+
+  if (raw === undefined) {
+    return undefined;
+  }
+
+  const normalized = raw.trim().toLowerCase();
+  return normalized === "1" || normalized === "true";
+}
+
 export function parseCsvEnv(env: DeviceSyncEnvSource, keys: readonly string[]): string[] | undefined {
   const value = optionalEnv(env, keys);
 

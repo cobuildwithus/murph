@@ -6,6 +6,7 @@ import {
   Prisma,
   type HostedMember,
   type HostedMemberIdentity,
+  type PrismaClient,
 } from "@prisma/client";
 import {
   findHostedDomainRootWrap,
@@ -606,6 +607,76 @@ test("scoped domain root cache does not cache failed unwraps", async () => {
     });
     assert.ok(retried.rootKey.some((byte) => byte !== 0));
   });
+});
+
+test("webhook preflight retains a failed unwrap through the following transaction only", async () => {
+  const { decryptMetrics, tx } = await createHostedWebCryptoTransactionFixture();
+  const {
+    provisionActiveHostedDomainRootEnvelopeForUserOnly,
+    unwrapHostedDomainRootForWeb,
+  } = await import("../src/lib/hosted-crypto/domain-root-store");
+  const {
+    runHostedOnboardingWebhookTransaction,
+    warmHostedLinqMailboxPayloadRoot,
+  } = await import("../src/lib/hosted-onboarding/webhook-service");
+
+  await provisionActiveHostedDomainRootEnvelopeForUserOnly({
+    domain: "ingress",
+    prisma: tx.prisma,
+    reason: "test.provision",
+    userId: "member-test-webhook-preflight",
+  });
+
+  resetLocalKmsDecryptMetrics(decryptMetrics, { failAtCall: 1 });
+  let transactionStarted = false;
+  // This fixture supplies the exact raw-query and transaction surface used by
+  // the composition under test; the assertion is confined to that boundary.
+  const prisma = Object.assign(tx.prisma, {
+    $transaction: async <T>(
+      callback: (transaction: Prisma.TransactionClient) => Promise<T>,
+    ): Promise<T> => {
+      transactionStarted = true;
+      expect(decryptMetrics.calls).toHaveLength(1);
+      return callback(tx.prisma);
+    },
+  }) as PrismaClient;
+
+  await expect(runHostedOnboardingWebhookTransaction(
+    prisma,
+    async (transaction) => {
+      await unwrapHostedDomainRootForWeb({
+        domain: "ingress",
+        prisma: transaction,
+        userId: "member-test-webhook-preflight",
+      });
+      return "unexpected";
+    },
+    () => warmHostedLinqMailboxPayloadRoot({
+      prisma,
+      threadRoute: {
+        containerMemberId: "member-test-webhook-preflight",
+      },
+    }),
+  )).rejects.toThrow("Test KMS decrypt failure.");
+
+  expect(transactionStarted).toBe(true);
+  expect(decryptMetrics.calls).toHaveLength(1);
+
+  resetLocalKmsDecryptMetrics(decryptMetrics, { failAtCall: 1 });
+  transactionStarted = false;
+  await expect(runHostedOnboardingWebhookTransaction(
+    prisma,
+    async () => "branch-without-root",
+    () => warmHostedLinqMailboxPayloadRoot({
+      prisma,
+      threadRoute: {
+        containerMemberId: "member-test-webhook-preflight",
+      },
+    }),
+  )).resolves.toBe("branch-without-root");
+
+  expect(transactionStarted).toBe(true);
+  expect(decryptMetrics.calls).toHaveLength(1);
 });
 
 test("webhook-style multi-field crypto reuses one unwrap per domain inside the scope", async () => {
