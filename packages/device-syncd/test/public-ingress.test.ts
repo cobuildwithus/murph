@@ -4273,6 +4273,65 @@ test("public ingress SDK sign-in session intentionally reconnects a disconnected
   assert.equal(connectionEstablishedEvents, 2);
 });
 
+test("public ingress SDK sign-in create withholds a token when disconnect wins during mint", async () => {
+  const store = new InMemoryPublicIngressStore();
+  let resolveTokenMintStarted: (() => void) | null = null;
+  let releaseTokenMint: () => void = () => {
+    throw new Error("SDK token mint release was not initialized.");
+  };
+  const tokenMintStarted = new Promise<void>((resolve) => {
+    resolveTokenMintStarted = resolve;
+  });
+  const tokenMintRelease = new Promise<void>((resolve) => {
+    releaseTokenMint = resolve;
+  });
+  const ingress = createDeviceSyncPublicIngress({
+    publicBaseUrl: "https://sync.example.test/device-sync",
+    registry: createDeviceSyncRegistry([
+      createFakeProvider({
+        sdkConnectionHandler: {
+          async ensureConnection() {
+            return {
+              externalAccountId: "demo-sdk-user-1",
+              tokens: {
+                accessToken: "<REDACTED_ACCESS_TOKEN>",
+              } satisfies ProviderAuthTokens,
+              setupPhase: "source_confirmed",
+            };
+          },
+          async createSignInToken() {
+            resolveTokenMintStarted?.();
+            await tokenMintRelease;
+            return {
+              signInToken: "sdk-sign-in-token-1",
+              environment: "sandbox",
+            };
+          },
+        },
+      }),
+    ]),
+    store,
+  });
+
+  const create = ingress.createSdkSignInSession({
+    provider: "demo",
+    ownerId: "member-1",
+  });
+  await tokenMintStarted;
+  const account = store.getConnectionByExternalAccount("demo", "demo-sdk-user-1");
+  assert.ok(account);
+  store.patchAccountStatus(account.id, "disconnected");
+  releaseTokenMint();
+
+  await assert.rejects(
+    () => create,
+    (error: unknown) =>
+      error instanceof DeviceSyncError
+      && error.code === "SDK_SIGN_IN_RECONNECT_REQUIRED",
+  );
+  assert.equal(store.upsertConnectionCalls, 1);
+});
+
 test("public ingress SDK sign-in resume mints against the exact active account without lifecycle writes", async () => {
   const store = new InMemoryPublicIngressStore();
   let connectionEstablishedEvents = 0;

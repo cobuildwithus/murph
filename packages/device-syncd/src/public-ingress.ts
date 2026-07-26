@@ -720,18 +720,11 @@ export class DeviceSyncPublicIngress {
       externalAccountId: account.externalAccountId,
     });
 
-    // A disconnect can race a provider token mint. Re-read before returning
-    // so a token minted during that race is never handed to the companion.
-    const currentAccount = await this.store.getConnectionById(account.id);
-    if (
-      !currentAccount
-      || currentAccount.provider !== provider.provider
-      || currentAccount.externalAccountId !== account.externalAccountId
-      || !isEstablishedDeviceSyncConnection(currentAccount)
-      || !(await this.connectionBelongsToOwner(currentAccount.id, ownerId))
-    ) {
-      throw sdkSignInReconnectRequired();
-    }
+    const currentAccount = await this.requireCurrentSdkSignInAccount({
+      account,
+      provider,
+      ownerId,
+    });
 
     return {
       account: currentAccount,
@@ -752,11 +745,40 @@ export class DeviceSyncPublicIngress {
       externalAccountId: ensured.connection.externalAccountId,
     });
 
-    return {
+    const currentAccount = await this.requireCurrentSdkSignInAccount({
       account: ensured.account,
+      provider,
+      ownerId: input.ownerId,
+    });
+
+    return {
+      account: currentAccount,
       signInToken: token.signInToken,
       environment: token.environment,
     };
+  }
+
+  private async requireCurrentSdkSignInAccount(input: {
+    account: PublicDeviceSyncAccount;
+    provider: DeviceSyncProvider;
+    ownerId: string;
+  }): Promise<PublicDeviceSyncAccount> {
+    // A disconnect can race a provider token mint. Re-read before returning
+    // so a token minted during that race is never handed to the companion.
+    const ownerId = normalizeString(input.ownerId);
+    const currentAccount = await this.store.getConnectionById(input.account.id);
+    if (
+      !ownerId
+      || !currentAccount
+      || currentAccount.provider !== input.provider.provider
+      || currentAccount.externalAccountId !== input.account.externalAccountId
+      || !isEstablishedDeviceSyncConnection(currentAccount)
+      || !(await this.connectionBelongsToOwner(currentAccount.id, ownerId))
+    ) {
+      throw sdkSignInReconnectRequired();
+    }
+
+    return currentAccount;
   }
 
   private async ensureSdkConnectionForProvider(
