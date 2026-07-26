@@ -1,6 +1,6 @@
 # Hosted Mailbox Runtime Protocol
 
-Last verified: 2026-07-21
+Last verified: 2026-07-25
 
 ## Decision
 
@@ -229,6 +229,16 @@ available. Profile labels require their separate granted snapshot. Authority,
 decryption, parse, and bound failures return typed unavailability without shared
 records or identity-bearing infrastructure fields.
 
+The Web response is complete. For the model boundary, the assistant-engine
+adapter keys every retained projection by its exact scope and collapses the
+grant/data pair to `not_granted`, `missing`, or `available`. Non-workout record
+arrays remain intact; `workouts.v0` additionally hoists repeated day, kind,
+time-semantics, and completion-watermark fields. If whole member rows still
+exceed the model result limit, the adapter returns `status="partial"` with every
+omitted current membership named in `omittedParticipantIds`. It never truncates
+a member row, treats an omitted member as departed, or alters stored or
+Web-returned truth.
+
 `device-sync-status.v0` is explicit consent only. When that exact grant is in
 the captured authority set, Web derives the result live from its bounded device
 state. It returns only public source labels, coarse connection state, status
@@ -365,6 +375,12 @@ foreground/default work arrives, the runner preempts that exact child through
 the existing container abort seam, clears the old fence by identity, and starts
 foreground work. Retention remains recoverable through the workspace's projected
 retention wake instead of becoming a second scheduler concern.
+If a `system_mailbox` invocation owns the active fence when foreground/default
+work arrives, the runner uses the same exact-child abort and identity-cleared
+replacement path. It must start a default-mode child rather than coalescing the
+wake because system-mailbox mode imports only system work and returns before
+assistant admission. A system-mailbox request behind an active default runtime
+remains deferred and cannot broaden that child's admission authority.
 Runtime-fence liveness uses one container probe vocabulary: exact-active,
 inactive, mismatched, or indeterminate. The probe only answers whether the
 container still has the requested fence identity in flight. It does not own
@@ -376,18 +392,46 @@ context. Ambiguous or mismatched foreground ownership is preserved/retried.
 Existing active fences that predate persisted container names resolve through
 the legacy unversioned per-user container name for liveness probes; fresh
 starts still use the current versioned container resolver.
-For foreground/default work behind an `inbox_media_retention` fence, the
-existing workspace-invocation abort seam is the preemption authority when
-liveness is ambiguous. A local exact-pointer abort enters the same
-inactive-fence replacement path. An inactive liveness proof must still send the
-identity-checked abort first so any queued exact retention invocation is
-canceled before the fence is cleared; an inactive result or queued matching
-abort is replacement-safe. Missing-pointer abort delivery without inactive
-proof owns the container lifecycle while it delivers the identity-checked abort.
-A stale result preserves the fence and retries. An accepted or queued result, or
-an ambiguous delivery failure, recycles the old shell fail-closed before the
-container returns `accepted`; only that settled stop allows the controller to
-clear the exact fence and start a replacement.
+For foreground/default work behind an `inbox_media_retention` or
+`system_mailbox` fence, the existing workspace-invocation abort seam is the
+sole preemption authority. UserRunner sends that exact abort directly instead
+of spending foreground command budget on a non-authoritative liveness
+preflight. A local exact-pointer abort enters the same inactive-fence
+replacement path. The container registers the
+exact attempt, lease generation, user, abort controller, and invocation result
+before lifecycle-lock admission. Queued duplicate invokes therefore coalesce,
+and an exact abort can cancel already-queued successors before runner dispatch.
+While that abort is in flight, its exact operation remains the visible queue
+head: liveness reports the same identity, wake fails closed, and no successor
+can dispatch. The abort owner releases that token only after both the child
+abort request and exact invocation cleanup settle. Runtime wake also fails
+closed until the active invocation has reached its runner endpoint, and a child
+`absent` response cannot override a still-registered local operation while child
+admission is in flight. A pointerless wake is also rejected if a destroy request
+or observed stop begins while its child RPC is pending, even when teardown
+settles before the wake response. Conversely, a verified accepted pointerless
+wake publishes its completion before returning so an already-running expiry
+preflight yields instead of destroying that child. Failed fail-closed cleanup
+returns `failed` and preserves the fence; the next exact wake re-enters the same
+abort-and-stop owner instead of leaving that operation permanently active.
+Explicit container destroy aborts every invocation registered before the
+destroy call, including lifecycle-lock successors. New invocation admission
+resumes only after the stop settles and those exact tokens are released, on a
+fresh shell. A delayed abort for a released token rechecks the queue head and
+cannot recycle that replacement shell. If explicit destroy fails, any retained
+exact token becomes cleanup-retryable through the next exact wake rather than
+remaining permanently aborted.
+Priority preemption always sends the identity-checked abort first so any queued
+exact background invocation is canceled before the fence is cleared; an
+inactive result or queued matching abort is replacement-safe. Missing-pointer
+abort delivery keeps an exact abort reservation visible while it owns the
+container lifecycle and delivers the identity-checked abort. Control-plane
+`stopped` status does not bypass that abort, and it is not settled-stop proof
+while platform truth explicitly reports the shell running. A stale result
+preserves the fence and retries. An accepted or queued result, or an ambiguous
+delivery failure, recycles the old shell fail-closed before the container
+returns `accepted`; only an observed stop or non-contradicted stopped status
+allows the controller to clear the exact fence and start a replacement.
 
 The foreground-priority rule does not weaken correctness checks. Wrong-user
 authority, invalid auth, undecryptable mailbox payloads, stale leases, and
@@ -811,9 +855,9 @@ another device-sync wake; dirty coalescing remains the work-queue invariant,
 and any stronger signal-delivery repair must be mailbox-wide. Redacted runtime logs
 remain diagnostic evidence only; they must not be merged into checkpointed
 import status for workflow completion or status projection. The narrow liveness
-exception is the exact `runner.accepted_attempt_failed` event: after web has
-durably recorded that metadata-only row, it may send a cooldown-throttled,
-payload-free `runtime_recheck_requested` Temporal signal. That row carries the
+exception is the exact `runner.accepted_attempt_failed` event: when web receives
+that metadata-only row, it may send a cooldown-throttled, payload-free
+`runtime_recheck_requested` Temporal signal. That row carries the
 fence `attemptId`/`leaseGeneration` plus metadata-only error diagnostics and,
 in `redactedJson`, the `attemptLivenessProbeOutcome` enum
 (`active`/`inactive`/`mismatch`/`unsupported`/`error`/`timeout`) alongside the derived
@@ -827,9 +871,12 @@ RunnerContainer method; it is not proof that the child stopped. That signal only
 interrupts the workflow's current wait so Temporal re-reads web-owned
 reconciliation facts; it sets no mailbox, manual, browser-vault, lag, or
 device-sync work flag.
-The cooldown elects the earliest recent same-user accepted-failure log as the
-signal owner, so concurrent first-failure callbacks produce at most one
-immediate recheck and cannot all suppress each other.
+The cooldown is a per-member claim on `HostedWorkspace`
+(`acceptedAttemptFailureRecheckClaimedAt`), taken with one conditional update, so
+concurrent first-failure callbacks produce at most one immediate recheck and
+cannot all suppress each other. Recovery therefore does not depend on the
+diagnostic row having been written or read back: runtime logs stay purely
+diagnostic and remain subject to ordinary retention.
 Cloudflare only reports the accepted-attempt failure through the existing
 signed runtime-log callback; it does not schedule retries or become a recovery
 orchestrator.
@@ -1257,6 +1304,12 @@ recheck instead of being cleared from the pointer alone; only the wake path may
 then replace the fence after it explicitly reports no active child. Inactive
 liveness is explicit no-active-child proof, so the controller clears and
 replaces that fence directly instead of asking web status to complete it first.
+While RunnerContainer still holds a transport-uncertain exact operation, a
+numeric zero child-health count is not inactive proof because that read can
+overtake child admission. Liveness retains the exact operation while the shell
+is running. An explicit absent wake response initiates the existing exact
+abort-and-stop path and becomes inactive only after that path settles; only a
+verified stopped shell may clear the local operation without the abort.
 For the active-wake probe, a verifiably stopped container shell
 (`ctx.container.running === false`) is the same explicit no-active-child proof.
 Committed-progress recovery stays in the transport-failure adapter, where the
