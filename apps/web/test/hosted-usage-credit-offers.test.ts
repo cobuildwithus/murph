@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  estimateHostedUsageCreditMessages,
   getHostedUsageCreditOfferDefinition,
   HOSTED_USAGE_CREDIT_OFFER_CODES,
   parseHostedUsageCreditOfferCode,
@@ -30,6 +31,16 @@ describe("hosted usage-credit offer catalog", () => {
         grantUsdMicros: 25_000_000n,
       }),
     ]);
+  });
+
+  it("quotes every offer's message estimate from one rate", () => {
+    expect(
+      HOSTED_USAGE_CREDIT_OFFER_CODES.map((code) =>
+        estimateHostedUsageCreditMessages(
+          getHostedUsageCreditOfferDefinition(code).cashAmountMinor,
+        )
+      ),
+    ).toEqual([100, 200, 500]);
   });
 
   it("accepts only exact internal offer codes", () => {

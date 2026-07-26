@@ -67,11 +67,13 @@ The live ownership split is:
 
 Assistant Ask reuses that same ownership split. Web resolves the target and
 return authority, then appends paired encrypted `assistant.ask.requested` and
-`assistant.ask.completed` mailbox items. The group runtime may answer one
-request in a separate read-only one-shot Codex child while its resident
-foreground assistant continues to own writes and sends. The mailbox remains the
-only durable queue and operation state; Cloudflare gains no second container,
-Durable Object state, scheduler, or workflow for this lane.
+`assistant.ask.completed` mailbox items. After each append, Web first signals
+Temporal and then starts the existing payloadless direct `ensure-processing`
+latency hint; the hint has no retry or durable authority. The group runtime may
+answer one request in a separate read-only one-shot Codex child while its
+resident foreground assistant continues to own writes and sends. The mailbox
+remains the only durable queue and operation state; Cloudflare gains no second
+container, Durable Object state, scheduler, or workflow for this lane.
 
 The final seam is:
 
@@ -381,6 +383,11 @@ replacement path. It must start a default-mode child rather than coalescing the
 wake because system-mailbox mode imports only system work and returns before
 assistant admission. A system-mailbox request behind an active default runtime
 remains deferred and cannot broaden that child's admission authority.
+`parseHostedWorkspaceInvocationRequest` is the single wire parser for this
+request contract. Assistant-runtime and Cloudflare transport adapters must
+delegate to that parser instead of reconstructing a partial request, because
+silently omitting `processingMode` turns import-only work back into default
+assistant work and defeats the ownership rule.
 Runtime-fence liveness uses one container probe vocabulary: exact-active,
 inactive, mismatched, or indeterminate. The probe only answers whether the
 container still has the requested fence identity in flight. It does not own
@@ -449,7 +456,9 @@ membership, runtime, mailbox, callback, session, or return-route ids. Web
 derives one stable request identity, pins the origin, destination, membership
 generation, and ten-minute expiry, appends one encrypted
 `assistant.ask.requested` item, then signals the existing group runtime. Exact
-retry reuses that item and cannot resolve a different target.
+retry reuses that item and cannot resolve a different target. Once Temporal
+accepts that pointer-only signal, Web starts one payloadless, no-retry direct
+ensure so an active runtime does not wait for its routine idle checkpoint.
 
 The target runtime rechecks expiry, membership generation, runtime identity,
 and the active write fence before context assembly. It snapshots bounded
@@ -466,17 +475,26 @@ must confirm the exact profile, roots, sealed empty working directory, empty
 instruction sources, and approval policy before model work. Further asks stay
 pending in the mailbox. The resident process remains the sole model-authored
 canonical-content writer and sender, and foreground start, steering, and
-delivery never await the child.
+delivery never await the child. The child also receives the server-bound
+requester membership `participantId`; first-person references map only to the
+`read_shared` member with that exact id. Display name, handle, or member order
+cannot substitute, and the opaque id cannot appear in the answer.
 
-When a joined-group request reaches a dirty warm runtime, the mailbox prefetch
-may import it before the routine idle checkpoint only when the entire fetched
-prefix contains pre-checkpoint-safe system wakes. One shared import context
-revalidates the decoded request target throughout that pre-checkpoint pass,
-including pre-assistant follow-up imports and foreground reruns; a
-consented-member request remains checkpoint-gated regardless of which import
-observes it. Import kicks the existing detached controller; it does not start or
-advance the at-least-180-second idle snapshot. Any unrelated system wake in
-that prefix keeps the whole system prefix checkpoint-gated.
+When a joined-group request or legacy joined-group completion reaches a dirty
+warm runtime, the mailbox prefetch may import it before the routine idle
+checkpoint only when the entire fetched prefix contains pre-checkpoint-safe
+system wakes. One shared import context revalidates the decoded adapter shape
+throughout that pre-checkpoint pass, including pre-assistant follow-up imports
+and foreground reruns; a consented-member request or reviewed completion
+remains checkpoint-gated regardless of which import observes it. Request import
+kicks the existing detached controller; completion import uses the existing
+foreground-causal delivery path. Neither starts or advances the
+at-least-180-second idle snapshot. Any unrelated system wake in that prefix
+keeps the whole system prefix checkpoint-gated. A progressed foreground-causal
+pass re-enters the existing bounded pass loop after admitting any newly arrived
+personal input first, so multiple safe items or a safe item imported during the
+preceding pass drain before checkpoint. No progress, retryable failure,
+cancellation, or mailbox-budget exhaustion stops the drain.
 
 The group runtime returns only the request id and schema-checked bounded answer
 through the signed completion control path. Web reloads the request, rechecks
@@ -485,7 +503,11 @@ route, then appends one deterministic encrypted `assistant.ask.completed` item
 to the bound private runtime. The first committed completion wins. The private
 runtime treats it as correlated untrusted data and may run one output-only
 follow-up after current route validation; it cannot recurse into Assistant Ask
-or invoke side-effecting tools.
+or invoke side-effecting tools. Once Temporal accepts the completion's
+pointer-only signal, Web starts the same payloadless direct ensure so an active
+private runtime can import it immediately. A typed `cannot_answer` bypasses the
+private provider continuation and queues the fixed unavailable-evidence response
+exactly; it cannot be paraphrased into an expiry or execution-failure claim.
 
 If that joined-group completion and private input are both pending, the
 completion uses the existing foreground-causal mailbox lane only when its
@@ -783,20 +805,22 @@ provider secrets, and decrypted mailbox payloads must not be Temporal workflow
 inputs, outputs, or history payloads. The pointer signal only wakes durable
 orchestration; Temporal then re-reads web-owned reconciliation facts and, if
 processing is needed, calls Cloudflare's short-lived `ensure-processing`
-adapter. Linq webhook ingress may additionally fire one best-effort direct
+adapter. Linq webhook ingress and Assistant Ask request/completion append
+handlers may additionally fire one best-effort direct
 `ensure-processing` request (Vercel OIDC, fire and forget, no retries, no
-message payload) after the committed known checkpoint's owner matches and the
-canonical live active-access check succeeds. Web first awaits the unconditional
-Temporal `signalWithStart`; only after Temporal accepts that durable signal does
-web start the direct ensure. An access failure or Temporal acceptance failure
-starts no direct wake. This is a latency hint only, not a second durable wake
-authority: it is Linq-only because accepted Linq reply delivery stamps
-`consumedAt` on the exact `HostedMailboxItem`, so a later ensure imports an
-already-consumed row with a null reply target and cannot answer it again. Do not
-add workflow-side direct-wake flags, derived-floor SQL, or lag netting merely to
-avoid harmless post-delivery no-op ensures. There is no direct web-to-Cloudflare
-message path and no second durable wake authority. Temporal remains the sole
-durable retry and reconciliation owner. The existing
+message payload). Linq first proves the committed known-checkpoint owner and
+canonical live active access; Assistant Ask first completes its normal
+server-bound append checks. Web always awaits the applicable Temporal
+`signalWithStart`; only after Temporal accepts that durable signal does Web
+start the direct ensure. An access failure or Temporal acceptance failure starts
+no direct wake. This is a latency hint only, not a second durable wake authority:
+accepted Linq reply delivery stamps `consumedAt` on the exact
+`HostedMailboxItem`, while Assistant Ask uses deterministic request/completion
+ids, mailbox dedupe, and idempotent continuation delivery. Do not add
+workflow-side direct-wake flags, derived-floor SQL, or lag netting merely to
+avoid harmless post-delivery no-op ensures. There is no direct
+Web-to-Cloudflare message path and no second durable wake authority. Temporal
+remains the sole durable retry and reconciliation owner. The existing
 Temporal scheduled-reconcile
 command also runs one bounded preference-handoff sweep. Web selects live
 `member.preferences.updated` rows above the authoritative system-lane
@@ -855,9 +879,9 @@ another device-sync wake; dirty coalescing remains the work-queue invariant,
 and any stronger signal-delivery repair must be mailbox-wide. Redacted runtime logs
 remain diagnostic evidence only; they must not be merged into checkpointed
 import status for workflow completion or status projection. The narrow liveness
-exception is the exact `runner.accepted_attempt_failed` event: after web has
-durably recorded that metadata-only row, it may send a cooldown-throttled,
-payload-free `runtime_recheck_requested` Temporal signal. That row carries the
+exception is the exact `runner.accepted_attempt_failed` event: when web receives
+that metadata-only row, it may send a cooldown-throttled, payload-free
+`runtime_recheck_requested` Temporal signal. That row carries the
 fence `attemptId`/`leaseGeneration` plus metadata-only error diagnostics and,
 in `redactedJson`, the `attemptLivenessProbeOutcome` enum
 (`active`/`inactive`/`mismatch`/`unsupported`/`error`/`timeout`) alongside the derived
@@ -871,9 +895,12 @@ RunnerContainer method; it is not proof that the child stopped. That signal only
 interrupts the workflow's current wait so Temporal re-reads web-owned
 reconciliation facts; it sets no mailbox, manual, browser-vault, lag, or
 device-sync work flag.
-The cooldown elects the earliest recent same-user accepted-failure log as the
-signal owner, so concurrent first-failure callbacks produce at most one
-immediate recheck and cannot all suppress each other.
+The cooldown is a per-member claim on `HostedWorkspace`
+(`acceptedAttemptFailureRecheckClaimedAt`), taken with one conditional update, so
+concurrent first-failure callbacks produce at most one immediate recheck and
+cannot all suppress each other. Recovery therefore does not depend on the
+diagnostic row having been written or read back: runtime logs stay purely
+diagnostic and remain subject to ordinary retention.
 Cloudflare only reports the accepted-attempt failure through the existing
 signed runtime-log callback; it does not schedule retries or become a recovery
 orchestrator.

@@ -38,8 +38,8 @@ import {
 } from '../automation/shared.js'
 import type { AssistantExecutionContext } from '../execution-context.js'
 import {
-  MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
-  MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_PRIVATE_SUMMARY,
+  resolveMurphManagedMaintenancePolicy,
+  type MurphManagedMaintenancePolicy,
 } from '../managed-automations.js'
 import { readAssistantOnboardingState } from '../onboarding-state.js'
 import {
@@ -1467,10 +1467,12 @@ function resolveAssistantCronNotificationResponsePolicy(
 function resolveAssistantCronNotificationTurnPolicy(
   job: ResolvedAssistantCronJob,
 ): AssistantNotificationTurnPolicy | null {
-  return assistantCronJobIsPreemptibleBackgroundMaintenance(job)
+  const policy = resolveAssistantCronBackgroundMaintenancePolicy(job)
+  return policy
     ? {
         kind: 'maintenance-exact-skip',
-        privateSummary: MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_PRIVATE_SUMMARY,
+        maintenanceProfile: policy.profile,
+        privateSummary: policy.privateSummary,
       }
     : null
 }
@@ -2470,7 +2472,7 @@ export function canonicalAssistantCronSourceIsBackgroundMaintenance(
   source: CanonicalAssistantCronJobRecord,
 ): boolean {
   return source.kind === 'automation' &&
-    source.automationId === MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID
+    resolveMurphManagedMaintenancePolicy(source.automationId) !== null
 }
 
 function resolveAssistantCronRuntimeScope(
@@ -2603,6 +2605,14 @@ function assistantNotificationErrorHasNonReplayableProviderWork(
   }
 
   return Reflect.get(details, 'assistantNotificationProviderNonReplayableWork') === true
+}
+
+function resolveAssistantCronBackgroundMaintenancePolicy(
+  job: ResolvedAssistantCronJob,
+): MurphManagedMaintenancePolicy | null {
+  return job.kind === 'canonical' && job.source.kind === 'automation'
+    ? resolveMurphManagedMaintenancePolicy(job.source.automationId)
+    : null
 }
 
 function assistantCronJobIsPreemptibleBackgroundMaintenance(

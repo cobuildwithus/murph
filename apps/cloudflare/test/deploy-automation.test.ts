@@ -298,7 +298,7 @@ describe("hosted deploy automation helpers", () => {
         image_build_context: "..",
         instance_type: "standard-1",
         max_instances: 1,
-        rollout_active_grace_period: 300,
+        rollout_active_grace_period: 0,
         rollout_step_percentage: [100],
       },
     ]);

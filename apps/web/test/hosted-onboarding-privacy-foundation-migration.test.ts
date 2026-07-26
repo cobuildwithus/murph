@@ -773,6 +773,20 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
+    const hostedObservabilityRetentionMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260725120000_hosted_observability_retention/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    const hostedThreadContainerUsageDefaultMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260726180000_hosted_thread_container_usage_default/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     expect(migrationEntries).toEqual([
       "2026040600_init",
       "20260425000000_drop_legacy_linq_control_plane",
@@ -895,11 +909,74 @@ describe("hosted Prisma baseline migration", () => {
       "20260723230000_hosted_member_assistant_unhinged",
       "20260724160000_hosted_account_exit_reason",
       "20260724180000_device_connection_source_last_data_at",
+      "20260725120000_hosted_observability_retention",
       "20260725120000_hosted_thread_delivery_route",
+      "20260725230000_hosted_paid_usage_legacy_period_cutover",
+      "20260726120000_hosted_growth_aggregate",
+      "20260726180000_hosted_thread_container_usage_default",
       "migration_lock.toml",
     ]);
+    expect(schema).toContain(
+      'monthlyUsageLimitUsdMicros BigInt              @default(7500000) @map("monthly_usage_limit_usd_micros")',
+    );
+    expect(hostedThreadContainerUsageDefaultMigrationSql.trim()).toBe(
+      [
+        'ALTER TABLE "hosted_thread_container"',
+        'ALTER COLUMN "monthly_usage_limit_usd_micros" SET DEFAULT 7500000;',
+      ].join("\n"),
+    );
+    expect(hostedThreadContainerUsageDefaultMigrationSql).not.toMatch(/\bUPDATE\b/u);
     expect(hostedMailboxSubscriptionActionClaimMigrationSql).toContain(
       'ALTER TABLE "hosted_mailbox_item"',
+    );
+    expect(hostedObservabilityRetentionMigrationSql).toContain(
+      [
+        'ALTER TABLE "hosted_workspace"',
+        'ADD COLUMN "accepted_attempt_failure_recheck_claimed_at" TIMESTAMP(3);',
+      ].join("\n"),
+    );
+    for (const [indexName, tableName, orderedColumns] of [
+      ["hosted_runtime_log_at_id_idx", "hosted_runtime_log", '"at", "id"'],
+      [
+        "hosted_ingress_latency_trace_accepted_at_id_idx",
+        "hosted_ingress_latency_trace",
+        '"accepted_at", "id"',
+      ],
+      [
+        "hosted_linq_provider_event_received_at_event_id_idx",
+        "hosted_linq_provider_event",
+        '"received_at", "event_id"',
+      ],
+      [
+        "hosted_mailbox_item_expires_at_id_idx",
+        "hosted_mailbox_item",
+        '"expires_at", "id"',
+      ],
+      [
+        "hosted_mailbox_item_created_at_id_idx",
+        "hosted_mailbox_item",
+        '"created_at", "id"',
+      ],
+      [
+        "hosted_web_session_expires_at_id_idx",
+        "hosted_web_session",
+        '"expires_at", "id"',
+      ],
+      [
+        "hosted_web_session_revoked_at_id_idx",
+        "hosted_web_session",
+        '"revoked_at", "id"',
+      ],
+    ] as const) {
+      expect(hostedObservabilityRetentionMigrationSql).toContain(
+        [
+          `CREATE INDEX CONCURRENTLY "${indexName}"`,
+          `ON "${tableName}"(${orderedColumns});`,
+        ].join("\n"),
+      );
+    }
+    expect(hostedObservabilityRetentionMigrationSql).not.toMatch(
+      /CREATE INDEX "(?:hosted_runtime_log|hosted_ingress_latency_trace|hosted_linq_provider_event|hosted_mailbox_item|hosted_web_session)/u,
     );
     expect(hostedMailboxSubscriptionActionClaimMigrationSql).toContain(
       'ADD COLUMN "subscription_action_claim" TEXT',

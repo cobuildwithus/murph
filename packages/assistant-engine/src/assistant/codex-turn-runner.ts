@@ -5,6 +5,9 @@ import {
   resolveAssistantUsageCredentialSource,
 } from '@murphai/hosted-execution/assistant-usage'
 import {
+  MURPH_GROUP_ROOM_MODEL_MAINTENANCE_PERMISSION_PROFILE,
+} from '@murphai/hosted-execution/assistant-permissions'
+import {
   resolveHostedAiUsageTokenPricingBasis,
 } from '@murphai/hosted-execution/runtime-control'
 import {
@@ -65,6 +68,9 @@ import {
   createAssistantProductFeedbackRecorder,
   type AssistantProgressDelivery,
 } from './turn-progress.js'
+import {
+  MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_AUTOMATION_ID,
+} from './managed-automations.js'
 import type {
   AssistantHostedToolContext,
 } from './hosted-tool-context.js'
@@ -108,16 +114,28 @@ const ASSISTANT_OUTPUT_ONLY_CODEX_CONFIG_OVERRIDES = [
   'features.multi_agent_v2=false',
   'features.tool_suggest=false',
 ] as const
+const ASSISTANT_FILESYSTEM_DISABLED_CODEX_CONFIG_OVERRIDES = [
+  'features.shell_tool=false',
+  'features.multi_agent=false',
+  'features.multi_agent_v2=false',
+  'features.tool_suggest=false',
+] as const
 
 function resolveAssistantCodexConfigOverrides(input: {
+  filesystemDisabledTurn: boolean
   outputOnlyTurn: boolean
   requested: readonly string[] | null
 }): readonly string[] | null {
-  if (!input.outputOnlyTurn) {
+  if (input.outputOnlyTurn) {
+    return ASSISTANT_OUTPUT_ONLY_CODEX_CONFIG_OVERRIDES
+  }
+  if (!input.filesystemDisabledTurn) {
     return input.requested
   }
-
-  return ASSISTANT_OUTPUT_ONLY_CODEX_CONFIG_OVERRIDES
+  return [
+    ...(input.requested ?? []),
+    ...ASSISTANT_FILESYSTEM_DISABLED_CODEX_CONFIG_OVERRIDES,
+  ]
 }
 
 export {
@@ -436,6 +454,15 @@ async function executeAssistantCodexAttempt(input: {
       executionPlan.profile.toolProfile === 'output-only-turn'
     const systemNotificationTurn =
       executionPlan.profile.promptProfile === 'system-notification'
+    const groupRoomModelMaintenanceTurn =
+      executionPlan.profile.toolProfile === 'maintenance-turn' &&
+      executionPlan.input.maintenanceProfile === 'group-room-model' &&
+      executionPlan.input.scheduledInvocationAuthority?.automationId ===
+        MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_AUTOMATION_ID
+    const audience = executionPlan.sharedPlan.conversationPolicy.audience
+    const groupEmailTurn =
+      audience.threadIsDirect === false &&
+      normalizeNullableString(audience.channel)?.toLowerCase() === 'email'
     const attemptResult = await executeCodexAssistantTurnAttemptFromInput({
       providerConfig: {
         approvalPolicy: outputOnlyTurn
@@ -452,7 +479,7 @@ async function executeAssistantCodexAttempt(input: {
         profile: attemptPlan.route.providerOptions.profile,
         provider: attemptPlan.route.provider,
         reasoningEffort: attemptPlan.route.providerOptions.reasoningEffort,
-        sandbox: outputOnlyTurn
+        sandbox: outputOnlyTurn || groupEmailTurn
           ? 'read-only'
           : attemptPlan.route.providerOptions.sandbox,
       },
@@ -467,6 +494,7 @@ async function executeAssistantCodexAttempt(input: {
         authorizeAcceptedMessageTarget:
           executionPlan.authorizeAcceptedMessageTarget ?? null,
         codexConfigOverrides: resolveAssistantCodexConfigOverrides({
+          filesystemDisabledTurn: groupEmailTurn,
           outputOnlyTurn,
           requested: executionPlan.input.codexConfigOverrides ?? null,
         }),
@@ -480,6 +508,7 @@ async function executeAssistantCodexAttempt(input: {
           ? []
           : attemptPlan.routePlan.environments,
         env: attemptEnv,
+        groupRoomModelMaintenanceAuthorized: groupRoomModelMaintenanceTurn,
         hostedToolContext: outputOnlyTurn
           ? null
           : executionPlan.hostedToolContext ?? null,
@@ -514,12 +543,16 @@ async function executeAssistantCodexAttempt(input: {
           productFeedbackRecorder:
             executionPlan.executionContext?.hosted?.productFeedbackRecorder ?? null,
         }),
-        providerThreadEphemeral:
-          executionPlan.input.providerThreadEphemeral ?? null,
+        providerThreadEphemeral: groupRoomModelMaintenanceTurn
+          ? true
+          : executionPlan.input.providerThreadEphemeral ?? null,
         progressDelivery: outputOnlyTurn
           ? null
           : executionPlan.progressDelivery ?? null,
-        ...(systemNotificationTurn
+        permissions: groupRoomModelMaintenanceTurn
+          ? MURPH_GROUP_ROOM_MODEL_MAINTENANCE_PERMISSION_PROFILE
+          : null,
+        ...(systemNotificationTurn || groupRoomModelMaintenanceTurn
           ? { processLifetime: 'one-shot' as const }
           : {}),
         providerFetch: outputOnlyTurn
@@ -531,6 +564,9 @@ async function executeAssistantCodexAttempt(input: {
           : executionPlan.executionContext?.hosted?.publicInternetFetch ?? null,
         requireHostedPrivateImageDelivery:
           !outputOnlyTurn && Boolean(executionPlan.executionContext?.hosted),
+        runtimeWorkspaceRoots: groupRoomModelMaintenanceTurn
+          ? [attemptPlan.routePlan.workingDirectory]
+          : null,
         resume: attemptPlan.routePlan.resume,
         // Per-turn execution policy from the message input, not route identity.
         serviceTier,

@@ -122,6 +122,7 @@ export interface AssistantProviderTurn {
   dynamicTools: readonly AssistantProviderDynamicTool[]
   environments?: readonly Readonly<Record<string, unknown>>[] | null
   env?: NodeJS.ProcessEnv
+  groupRoomModelMaintenanceAuthorized?: boolean | null
   onFinishWithoutReplyAccepted?: ((
     event: AssistantProviderFinishWithoutReplyAcceptedEvent
   ) => Promise<void> | void) | null
@@ -136,9 +137,11 @@ export interface AssistantProviderTurn {
   prompt?: string | null
   productFeedbackRecorder?: AssistantTurnProductFeedbackRecorder | null
   providerThreadEphemeral?: boolean | null
+  permissions?: string | null
   processLifetime?: 'one-shot' | null
   publicInternetFetch?: typeof fetch | null
   requireHostedPrivateImageDelivery?: boolean | null
+  runtimeWorkspaceRoots?: readonly string[] | null
   resume?: AssistantProviderCodexResume | null
   serviceTier?: AssistantProviderServiceTier | null
   sessionContext?: {

@@ -12,7 +12,8 @@ const DEFAULT_DEPLOY_ROOT = path.resolve(
   "..",
   "..",
 );
-const CONTAINER_ROLLOUT_ACTIVE_GRACE_PERIOD_SECONDS = 300;
+const RUNNER_CONTAINER_ROLLOUT_ACTIVE_GRACE_PERIOD_SECONDS = 300;
+const DEPLOY_SMOKE_CONTAINER_ROLLOUT_ACTIVE_GRACE_PERIOD_SECONDS = 0;
 const CONTAINER_ROLLOUT_STEP_PERCENTAGE = [10, 25, 50, 100] as const;
 const CONTAINER_SSH_COMPATIBILITY_FLAG = "containers_pid_namespace";
 
@@ -57,6 +58,7 @@ export function buildHostedWranglerDeployConfig(
   const buildRunnerContainerConfig = (input: {
     className: string;
     maxInstances: number;
+    rolloutActiveGracePeriodSeconds: number;
   }): Record<string, unknown> => {
     const container: Record<string, unknown> = {
       class_name: input.className,
@@ -64,7 +66,7 @@ export function buildHostedWranglerDeployConfig(
       image_build_context: "..",
       instance_type: environment.containerInstanceType,
       max_instances: input.maxInstances,
-      rollout_active_grace_period: CONTAINER_ROLLOUT_ACTIVE_GRACE_PERIOD_SECONDS,
+      rollout_active_grace_period: input.rolloutActiveGracePeriodSeconds,
       rollout_step_percentage: resolveContainerRolloutStepPercentage(input.maxInstances),
     };
 
@@ -91,10 +93,14 @@ export function buildHostedWranglerDeployConfig(
       buildRunnerContainerConfig({
         className: "RunnerContainer",
         maxInstances: environment.containerMaxInstances,
+        rolloutActiveGracePeriodSeconds:
+          RUNNER_CONTAINER_ROLLOUT_ACTIVE_GRACE_PERIOD_SECONDS,
       }),
       buildRunnerContainerConfig({
         className: "DeploySmokeRunnerContainer",
         maxInstances: 1,
+        rolloutActiveGracePeriodSeconds:
+          DEPLOY_SMOKE_CONTAINER_ROLLOUT_ACTIVE_GRACE_PERIOD_SECONDS,
       }),
     ],
     durable_objects: {

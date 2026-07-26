@@ -22,6 +22,7 @@ import {
 import {
   getHostedLinqChatSummary,
   getHostedLinqReactionTargetMessage,
+  shareHostedLinqContactCard,
 } from "@/src/lib/hosted-onboarding/linq-client";
 
 const originalFetch = globalThis.fetch;
@@ -571,6 +572,45 @@ describe("sendHostedLinqReadReceipt", () => {
         signal: expect.any(AbortSignal),
       }),
     );
+  });
+});
+
+describe("shareHostedLinqContactCard", () => {
+  afterEach(() => {
+    if (originalFetch) {
+      vi.stubGlobal("fetch", originalFetch);
+      return;
+    }
+
+    Reflect.deleteProperty(globalThis, "fetch");
+  });
+
+  it("posts the sending line's configured contact card without a request body", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => {
+      void _input;
+      void _init;
+      return new Response(null, { status: 204 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(shareHostedLinqContactCard({
+      chatId: "chat_123",
+    })).resolves.toBeUndefined();
+
+    const firstCall = fetchMock.mock.calls[0];
+    expect(firstCall).toBeDefined();
+    if (!firstCall) {
+      throw new Error("Expected fetch to be called");
+    }
+    const [url, init] = firstCall as [RequestInfo | URL, RequestInit?];
+    expect(url).toEqual(
+      new URL(
+        "chats/chat_123/share_contact_card",
+        "https://linq.example.test/api/partner/v3/",
+      ),
+    );
+    expect(expectRequestInit(init).method).toBe("POST");
+    expect(expectRequestInit(init).body).toBeUndefined();
   });
 });
 

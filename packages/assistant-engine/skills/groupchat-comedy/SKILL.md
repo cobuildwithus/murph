@@ -87,7 +87,11 @@ be a whole sung apology (see Songs).
 ## Canon management
 
 Every chat accrues CANON: named running bits, nicknames, stakes, claims,
-callback-able moments. Track it; it compounds.
+callback-able moments. Track it; it compounds. General cross-day room canon may
+arrive in the injected `group-room-model` page; treat that page as a rough tip
+sheet, not a mandate. Current context wins, and a callback that is technically
+available but forced is worse than a fresh line or silence. Challenge-only
+rules, standings, stakes, and dispatch history stay on the challenge page.
 - Reuse canon as callbacks — a ruling that references a participant's
   day-1 claim lands 10x a fresh joke.
 - **Fan service: when the audience commissions a bit ("make it ask about

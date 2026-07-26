@@ -57,6 +57,13 @@ export class RunnerContainer extends BaseRunnerContainer {
     return { ok: true };
   }
 
+  async armCanonicalCheckpointPublicationBarrierForTest(
+    input: { userId: string },
+  ): Promise<{ ok: true }> {
+    armCanonicalCheckpointPublicationBarrier(input.userId);
+    return { ok: true };
+  }
+
   async armSnapshotPublicationCorruptionForTest(
     input: { userId: string },
   ): Promise<{ ok: true }> {
@@ -174,6 +181,7 @@ export type HostedLocalShutdownCheckpointPublicationBarrierState =
 
 interface HostedLocalShutdownCheckpointPublicationBarrier {
   entered: boolean;
+  reason: "canonical_runtime_commit" | "idle_shutdown";
   release(): void;
   released: Promise<void>;
 }
@@ -287,6 +295,17 @@ export function armSnapshotPublicationCorruption(userId: string): void {
 }
 
 export function armShutdownCheckpointPublicationBarrier(userId: string): void {
+  armCheckpointPublicationBarrier(userId, "idle_shutdown");
+}
+
+export function armCanonicalCheckpointPublicationBarrier(userId: string): void {
+  armCheckpointPublicationBarrier(userId, "canonical_runtime_commit");
+}
+
+function armCheckpointPublicationBarrier(
+  userId: string,
+  reason: "canonical_runtime_commit" | "idle_shutdown",
+): void {
   const normalizedUserId = normalizeShutdownCheckpointPublicationBarrierUserId(userId);
   if (shutdownCheckpointPublicationBarriers.has(normalizedUserId)) {
     throw new Error(
@@ -300,6 +319,7 @@ export function armShutdownCheckpointPublicationBarrier(userId: string): void {
   });
   shutdownCheckpointPublicationBarriers.set(normalizedUserId, {
     entered: false,
+    reason,
     release,
     released,
   });
@@ -337,7 +357,13 @@ export function wrapShutdownCheckpointPublicationBarrierForTest(
     const barrier = userId.length > 0
       ? shutdownCheckpointPublicationBarriers.get(userId)
       : null;
-    if (!barrier || !await isShutdownCheckpointSnapshotCompleteRequest(request)) {
+    if (
+      !barrier
+      || !await isCheckpointPublicationRequestForReason(
+        request,
+        barrier.reason,
+      )
+    ) {
       return await handler(request, env, ctx);
     }
 
@@ -345,10 +371,10 @@ export function wrapShutdownCheckpointPublicationBarrierForTest(
     emitHostedExecutionStructuredLog({
       component: "runner",
       details: {
-        barrierKind: "shutdown_checkpoint_publication",
+        barrierKind: `${barrier.reason}_checkpoint_publication`,
       },
       message:
-        "Hosted-local test paused shutdown checkpoint publication before the real checkpoint commit.",
+        "Hosted-local test paused checkpoint publication before the real checkpoint commit.",
       phase: "checkpoint",
       userId,
     });
@@ -365,7 +391,16 @@ export function wrapShutdownCheckpointPublicationBarrierForTest(
   };
 }
 
-async function isShutdownCheckpointSnapshotCompleteRequest(request: Request): Promise<boolean> {
+async function isCheckpointPublicationRequestForReason(
+  request: Request,
+  reason: "canonical_runtime_commit" | "idle_shutdown",
+): Promise<boolean> {
+  if (
+    reason === "canonical_runtime_commit"
+    && await isCanonicalRuntimeCheckpointRequest(request)
+  ) {
+    return true;
+  }
   if (!isWorkspaceSnapshotCompleteRequest(request)) {
     return false;
   }
@@ -381,7 +416,7 @@ async function isShutdownCheckpointSnapshotCompleteRequest(request: Request): Pr
     && typeof checkpointRequest === "object"
     && !Array.isArray(checkpointRequest)
     && "reason" in checkpointRequest
-    && checkpointRequest.reason === "idle_shutdown",
+    && checkpointRequest.reason === reason,
   );
 }
 
@@ -619,7 +654,9 @@ const hostedLocalTestOutboundByHost: typeof HOSTED_RUNNER_OUTBOUND_BY_HOST = {
   [CLOUDFLARE_HOSTED_TRANSCRIBE_HOST]: (request, env, ctx) =>
     transcribeHandler(request, env.AI ? env : { ...env, AI: hostedLocalTestAiBinding }, ctx),
   [CLOUDFLARE_HOSTED_RUNTIME_HOSTS.webControlPlane]:
-    wrapCanonicalCheckpointLostAckForTest(webControlPlaneHandler),
+    wrapShutdownCheckpointPublicationBarrierForTest(
+      wrapCanonicalCheckpointLostAckForTest(webControlPlaneHandler),
+    ),
   [CLOUDFLARE_HOSTED_RUNTIME_HOSTS.workspaceSnapshotStore]:
     wrapShutdownCheckpointPublicationBarrierForTest(
       wrapSnapshotPublicationCorruptionForTest(workspaceSnapshotStoreHandler),

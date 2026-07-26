@@ -141,6 +141,7 @@ vi.mock("@/src/components/ui/radio-group", () => ({
     children,
     className,
     onValueChange,
+    value,
   }: {
     children?: ReactNode;
     className?: string;
@@ -151,6 +152,9 @@ vi.mock("@/src/components/ui/radio-group", () => ({
       "div",
       {
         className,
+        // Surfaces the controlled selection the real primitive renders as
+        // data-checked, so tests can assert which amount is selected.
+        "data-value": value,
         onClick: (event: ReactMouseEvent<HTMLDivElement>) => {
           const target = event.target;
           if (target instanceof window.HTMLInputElement && target.type === "radio") {
@@ -201,7 +205,7 @@ beforeEach(() => {
   });
 });
 
-test("opens from the settings deep link without preselecting a top-up", async () => {
+test("opens from the settings deep link on the default amount without starting checkout", async () => {
   const { HostedUsageTopUpDialog } = await import(
     "@/src/components/settings/hosted-usage-top-up-dialog"
   );
@@ -232,8 +236,19 @@ test("opens from the settings deep link without preselecting a top-up", async ()
       rendered.container.querySelectorAll<HTMLInputElement>('input[type="radio"]'),
     );
     assert.equal(radioInputs.length, 3);
-    assert.ok(radioInputs.every((input) => input.checked === false));
-    assert.equal(buttonByText(rendered.container, "Choose an amount").disabled, true);
+    // The picker opens on the middle amount so the primary action is live, but
+    // a deep link must never itself request checkout.
+    assert.equal(
+      rendered.container
+        .querySelector('[role="radiogroup"]')
+        ?.getAttribute("data-value"),
+      "usage_1000",
+    );
+    assert.equal(
+      buttonByText(rendered.container, "Continue to checkout · $10").disabled,
+      false,
+    );
+    expect(mocks.requestHostedOnboardingJson).not.toHaveBeenCalled();
     assert.match(
       rendered.container.textContent ?? "",
       /Choose a one-time credit amount for your account\./,
@@ -259,8 +274,12 @@ test("opens from the settings deep link without preselecting a top-up", async ()
       'label[for="usage-top-up-0"]',
     );
     assert.ok(firstAmountCard);
-    assert.equal(firstAmountCard.classList.contains("h-20"), true);
-    assert.equal(firstAmountCard.classList.contains("sm:h-24"), true);
+    assert.equal(firstAmountCard.classList.contains("h-24"), true);
+    assert.equal(firstAmountCard.classList.contains("sm:h-28"), true);
+    // Message estimate leads, price stays secondary, and the estimate is always
+    // rendered as approximate.
+    assert.match(firstAmountCard.textContent ?? "", /~100/);
+    assert.match(firstAmountCard.textContent ?? "", /messages · \$5/);
     assert.equal(
       firstAmountCard.classList.contains(
         "[&_[data-slot=field-content]]:justify-center",
@@ -269,7 +288,7 @@ test("opens from the settings deep link without preselecting a top-up", async ()
     );
     assert.equal(
       firstAmountCard.classList.contains(
-        "[&_[data-slot=field-content]]:gap-0",
+        "[&_[data-slot=field-content]]:gap-0.5",
       ),
       true,
     );
@@ -282,7 +301,7 @@ test("opens from the settings deep link without preselecting a top-up", async ()
       true,
     );
     assert.equal(
-      firstAmountCard.querySelector("span")?.classList.contains("h-5"),
+      firstAmountCard.querySelector("span")?.classList.contains("h-8"),
       true,
     );
     assert.equal(
@@ -291,7 +310,7 @@ test("opens from the settings deep link without preselecting a top-up", async ()
     );
     const selectionActions = buttonByText(
       rendered.container,
-      "Choose an amount",
+      "Continue to checkout · $10",
     ).parentElement;
     assert.ok(selectionActions);
     assert.equal(selectionActions.classList.contains("grid"), true);
@@ -341,17 +360,17 @@ test("reuses the dialog state machine for a server-scoped group checkout", async
   );
 
   try {
-    assert.match(rendered.container.textContent ?? "", /Choose an amount/);
+    assert.match(rendered.container.textContent ?? "", /How many messages\?/);
     const groupTrigger = Array.from(
       rendered.container.querySelectorAll<HTMLButtonElement>("button"),
-    ).find((button) => button.textContent?.trim() === "Choose amount");
+    ).find((button) => button.textContent?.trim() === "Add messages");
     assert.ok(groupTrigger);
     assert.equal(groupTrigger.dataset.size, "xl");
     assert.equal(groupTrigger.dataset.variant, "default");
     assert.equal(groupTrigger.classList.contains("w-full"), true);
     assert.match(
       rendered.container.textContent ?? "",
-      /Choose a one-time credit amount for this group\./,
+      /Shared with everyone in the chat\./,
     );
     await clickRadio(rendered.container, rendered.window, "usage_500");
     await clickButton(
@@ -1467,7 +1486,11 @@ test("lets the member choose a different amount with a fresh request key", async
     assert.equal(buttonByText(rendered.container, "Change amount").dataset.size, "xl");
     await clickButton(rendered.container, rendered.window, "Change amount");
 
-    assert.equal(buttonByText(rendered.container, "Choose an amount").disabled, true);
+    // Changing the amount returns to the same default the picker first offered.
+    assert.equal(
+      buttonByText(rendered.container, "Continue to checkout · $10").disabled,
+      false,
+    );
     expect(focus).toHaveBeenCalledWith({ preventScroll: true });
     assert.equal(
       Array.from(
@@ -2531,9 +2554,9 @@ function textMurphContactOption() {
 
 function usageCreditOffers() {
   return [
-    { amountLabel: "$5", offerCode: "usage_500" },
-    { amountLabel: "$10", offerCode: "usage_1000" },
-    { amountLabel: "$25", offerCode: "usage_2500" },
+    { amountLabel: "$5", estimatedMessages: 100, offerCode: "usage_500" },
+    { amountLabel: "$10", estimatedMessages: 200, offerCode: "usage_1000" },
+    { amountLabel: "$25", estimatedMessages: 500, offerCode: "usage_2500" },
   ] as const;
 }
 

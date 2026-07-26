@@ -59,6 +59,7 @@ import {
   executeMurphDynamicToolRequest,
   isComputerDynamicToolRequest,
   MURPH_ASSISTANT_STYLE_TOOL,
+  MURPH_GROUP_ROOM_MODEL_TOOL,
   type AssistantStyleTurnSettingsOverlay,
   type MurphDynamicToolFinalActionPatch,
   type MurphDynamicToolReactionPatch,
@@ -452,6 +453,7 @@ export interface CodexAppServerTurnInput {
   }) => Promise<void> | void) | null
   onProviderRequestStarted?: ((event: AssistantProviderRequestStartedEvent) => Promise<void> | void) | null
   onTraceEvent?: (event: AssistantProviderTraceEvent) => void
+  groupRoomModelMaintenanceAuthorized?: boolean | null
   materializeWorkspaceArtifacts?: AssistantWorkspaceArtifactMaterializer | null
   productFeedbackRecorder?: AssistantTurnProductFeedbackRecorder | null
   oss?: boolean
@@ -3877,6 +3879,13 @@ async function runCodexAppServerTurnOnProcess(
               tool.namespace === MURPH_ASSISTANT_STYLE_TOOL.namespace &&
               tool.name === MURPH_ASSISTANT_STYLE_TOOL.name,
           ),
+          groupRoomModelAvailable: input.dynamicTools.some(
+            (tool) =>
+              tool.namespace === MURPH_GROUP_ROOM_MODEL_TOOL.namespace &&
+              tool.name === MURPH_GROUP_ROOM_MODEL_TOOL.name,
+          ),
+          groupRoomModelMaintenanceAuthorized:
+            input.groupRoomModelMaintenanceAuthorized === true,
           abortSignal: input.abortSignal
             ? AbortSignal.any([input.abortSignal, dynamicToolAbortController.signal])
             : dynamicToolAbortController.signal,

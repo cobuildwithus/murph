@@ -32,6 +32,7 @@ describe('assistant capability-offers prompt contract', () => {
     const layers = buildAssistantMaintenanceSystemPromptWithCacheMetadata({
       currentLocalDate: '2026-04-15',
       currentTimeZone: 'Asia/Kuala_Lumpur',
+      profile: 'member-memory',
     }).layers
 
     expect(layers.stableRouteCapabilityPrompt).toBe('')
@@ -48,6 +49,25 @@ describe('assistant capability-offers prompt contract', () => {
     ]) {
       expect(layers.prompt).not.toContain(externalSurface)
     }
+  })
+
+  it('keeps group room-model maintenance on the exact knowledge page boundary', () => {
+    const prompt = buildAssistantMaintenanceSystemPromptWithCacheMetadata({
+      currentLocalDate: '2026-07-25',
+      currentTimeZone: 'America/New_York',
+      profile: 'group-room-model',
+    }).prompt
+
+    expect(prompt).toContain(
+      '`murph.group_room_model`',
+    )
+    expect(prompt).toContain('exact `digest` as `expectedDigest`')
+    expect(prompt).toContain('Do not use the shell')
+    expect(prompt).toContain('rough list of fallible participation tips')
+    expect(prompt).toContain('never copy a raw handle into the page')
+    expect(prompt).not.toContain('`vault-cli memory upsert`')
+    expect(prompt).not.toContain(CAPABILITY_OFFERS_HEADER)
+    expect(prompt).not.toContain(PHONE_CALLS_HEADER)
   })
 
   it('keeps offers adjacent, available, and outcome-focused', () => {

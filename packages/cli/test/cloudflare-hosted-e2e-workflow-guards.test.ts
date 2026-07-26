@@ -107,6 +107,7 @@ describe('cloudflare hosted e2e workflow guards', () => {
       'device-sync-junction-wearable-direct-resource-replay',
       'direct-r2-presigned-put',
       'family-sponsored-group-roundtrip',
+      'foreground-reply-priority',
       'idle-checkpoint-deferred-progress',
       'linq-delivery',
       'linq-group-route-drift',
