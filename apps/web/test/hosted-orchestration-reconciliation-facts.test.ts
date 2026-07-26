@@ -21,6 +21,7 @@ const mocks = vi.hoisted(() => ({
   readHostedMailboxLatestPendingConversationItem: vi.fn(),
   readHostedMailboxMaxSeqByLane: vi.fn(),
   readHostedMailboxPayload: vi.fn(),
+  readHostedMailboxWakeByItemId: vi.fn(),
   readHostedMemberCoreState: vi.fn(),
   readHostedWorkspace: vi.fn(),
   requireHostedCloudflareCallbackRequest: vi.fn(),
@@ -43,6 +44,7 @@ vi.mock("@/src/lib/hosted-mailbox/store", () => ({
     mocks.readHostedMailboxLatestPendingConversationItem,
   readHostedMailboxMaxSeqByLane: mocks.readHostedMailboxMaxSeqByLane,
   readHostedMailboxPayload: mocks.readHostedMailboxPayload,
+  readHostedMailboxWakeByItemId: mocks.readHostedMailboxWakeByItemId,
 }));
 
 vi.mock("@/src/lib/hosted-execution/usage-limit-notice", () => ({
@@ -152,6 +154,7 @@ describe("hosted orchestration reconciliation facts", () => {
     ]);
     mocks.readHostedMailboxLatestPendingConversationItem.mockResolvedValue(null);
     mocks.readHostedMailboxPayload.mockResolvedValue(null);
+    mocks.readHostedMailboxWakeByItemId.mockResolvedValue(null);
     mocks.decodeHostedMailboxStoredPayload.mockResolvedValue(null);
     mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({ status: "allowed" });
   });
@@ -889,8 +892,7 @@ describe("hosted orchestration reconciliation facts", () => {
       reason: "ai_usage_denied",
       retryAt: "2026-05-20T12:15:00.000Z",
     });
-    expect(mocks.readHostedMailboxLatestPendingConversationItem).toHaveBeenCalledTimes(1);
-    expect(mocks.readHostedMailboxLatestPendingConversationItem).toHaveBeenCalledWith({
+    expect(mocks.readHostedMailboxLatestPendingConversationItem).toHaveBeenNthCalledWith(1, {
       afterSeq: "2",
       prisma: expect.objectContaining({ kind: "prisma" }),
       userId: MEMBER_ID,
