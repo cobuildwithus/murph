@@ -11,6 +11,8 @@ export const HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_VERSION =
   "hosted-usage-credit-checkout-v1" as const;
 export const HOSTED_USAGE_CREDIT_CHECKOUT_PURPOSE =
   "hosted_usage_credit" as const;
+// Keep direct saved-card PaymentIntents distinct from Checkout-only events while
+// both converge on the same purchase and usage-credit ledger.
 export const HOSTED_USAGE_CREDIT_SAVED_CARD_PURPOSE =
   "hosted_usage_credit_saved_card" as const;
 
