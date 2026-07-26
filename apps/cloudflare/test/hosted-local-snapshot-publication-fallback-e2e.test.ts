@@ -78,6 +78,41 @@ const cleanupPaths: string[] = [];
 let linqStub: HostedLocalLinqStub | null = null;
 let scenario: HostedLocalFullStackScenario | null = null;
 
+describe("snapshot publication observation", () => {
+  it.each([
+    {
+      expectedAdvanced: false,
+      expectedProviderResponseQueue: true,
+      inFlight: false,
+      label: "retained baseline",
+      snapshotId: "baseline",
+    },
+    {
+      expectedAdvanced: true,
+      expectedProviderResponseQueue: false,
+      inFlight: true,
+      label: "published successor still in flight",
+      snapshotId: "successor",
+    },
+  ])("classifies $label independently of clean settlement", ({
+    expectedAdvanced,
+    expectedProviderResponseQueue,
+    inFlight,
+    snapshotId,
+  }) => {
+    const baselineSnapshotRef = createObservationSnapshotRef("baseline");
+    const status = createObservationStatus({
+      inFlight,
+      snapshotRef: createObservationSnapshotRef(snapshotId),
+    });
+    const advanced = hasAdvancedSnapshotPublication(status, baselineSnapshotRef);
+
+    expect(advanced).toBe(expectedAdvanced);
+    expect(!advanced).toBe(expectedProviderResponseQueue);
+    expect(hasCleanSnapshotPublication(status, baselineSnapshotRef)).toBe(false);
+  });
+});
+
 afterAll(async () => {
   await scenario?.stop();
   scenario = null;
@@ -426,6 +461,65 @@ function hasAdvancedSnapshotPublication(
   const snapshotRef = status.workspace?.snapshotRef ?? null;
   return isHostedWorkspaceSnapshotV2Ref(snapshotRef)
     && JSON.stringify(snapshotRef) !== JSON.stringify(baselineSnapshotRef);
+}
+
+function createObservationStatus(input: {
+  inFlight: boolean;
+  snapshotRef: HostedExecutionSnapshotRef;
+}): HostedRunnerStatusResponse {
+  const observedAt = "2026-01-01T00:00:00.000Z";
+  const observationUserId = "member_snapshot_observation";
+  return {
+    inFlight: input.inFlight,
+    lastErrorCode: null,
+    mailboxLag: [],
+    userId: observationUserId,
+    workspace: {
+      createdAt: observedAt,
+      snapshotRef: input.snapshotRef,
+      updatedAt: observedAt,
+      userId: observationUserId,
+      version: "1",
+    },
+  };
+}
+
+function createObservationSnapshotRef(
+  snapshotId: string,
+): HostedExecutionSnapshotRef {
+  const observationUserId = "member_snapshot_observation";
+  const objectKey =
+    `users/${observationUserId}/workspace-snapshots/${snapshotId}.snapshot.enc`;
+  return {
+    archive: {
+      compression: "zstd",
+      encryptedByteSize: 128,
+      encryptedObjectSha256: "b".repeat(64),
+      fileCount: 1,
+      format: "tar",
+      plaintextArchiveSha256: "a".repeat(64),
+      totalPlainBytes: 64,
+    },
+    createdAt: "2026-01-01T00:00:00.000Z",
+    encryption: {
+      aad: {
+        objectKey,
+        purpose: "workspace-snapshot",
+        schema: "murph.hosted-workspace-snapshot.v2",
+        snapshotId,
+        userId: observationUserId,
+      },
+      ivBase64: "AQIDBAUGBwgJCgsM",
+      rootKeyId: "root_key_test",
+      scheme: "murph.hosted-workspace-snapshot-single-object.v1",
+      wrappedDataKey: "wrapped_data_key_test",
+    },
+    objectKey,
+    schema: "murph.hosted-workspace-snapshot.v2",
+    snapshotId,
+    upload: "direct-r2-presigned-put",
+    userId: observationUserId,
+  };
 }
 
 function countSnapshotPublicationFaults(): number {

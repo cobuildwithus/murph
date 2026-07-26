@@ -46,5 +46,6 @@ to equal the retained baseline.
 - Canonical `pnpm verify:acceptance`.
 - Exact-head hosted E2E CI.
 
-Status: active
+Status: completed
 Updated: 2026-07-26
+Completed: 2026-07-26
