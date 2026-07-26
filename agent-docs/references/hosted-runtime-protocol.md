@@ -774,8 +774,8 @@ record the fleet-convergence instant and apply the additive mailbox migration,
 which re-arms every persisted snapshot once and advances its workspace CAS
 version without changing checkpoint time. Any invocation holding the prior
 version must retry instead of overwriting that wake. The existing hourly cron
-drains the due queue in batches of 25; each wake scrubs receipt-backed captures,
-parser output, projections, inputs, and stamped transcripts while leaving the
+signals five due snapshots per successful run; each wake scrubs receipt-backed
+captures, parser output, projections, inputs, and stamped transcripts while leaving the
 unstamped legacy pair intact. Operators must preflight aggregate queue capacity
 and may not declare phase one complete until no due snapshot remains. After 14
 complete days and phase-one drain completion, a separate phase-two migration
