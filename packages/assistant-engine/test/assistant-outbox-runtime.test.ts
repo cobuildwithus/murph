@@ -265,6 +265,7 @@ describe('assistant outbox runtime', () => {
   })
 
   it('abandons an expired retry without entering the messaging provider', async () => {
+    vi.useFakeTimers()
     const { vaultRoot } = await createAssistantVault(
       'assistant-outbox-expired-retry-',
     )
@@ -304,6 +305,7 @@ describe('assistant outbox runtime', () => {
       status: 'retryable',
     })
 
+    vi.setSystemTime(new Date('2099-04-08T00:30:00.001Z'))
     const retry = await dispatchAssistantOutboxIntent({
       force: true,
       intentId: firstAttempt.intent.intentId,
@@ -2024,6 +2026,7 @@ describe('assistant outbox runtime', () => {
       attemptCount: 1,
       delivery: null,
       deliveryConfirmationPending: false,
+      expiresAt: '2026-04-08T01:05:00.000Z',
       lastAttemptAt: '2026-04-08T01:00:00.000Z',
       lastError: null,
       nextAttemptAt: null,
@@ -3665,8 +3668,11 @@ describe('assistant outbox runtime', () => {
   })
 
   it('dispatches a checkpoint-prepared sending intent only when explicitly allowed', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2099-04-08T05:00:01.000Z'))
     const { vaultRoot } = await createAssistantVault('assistant-outbox-prepared-sending-')
     const seeded = await createIntent(vaultRoot, {
+      expiresAt: '2099-04-08T05:00:02.000Z',
       explicitTarget: '123',
       sessionId: 'session-prepared-sending',
       turnId: 'turn-prepared-sending',
@@ -3675,7 +3681,7 @@ describe('assistant outbox runtime', () => {
       deliveryIdempotencyKey: `assistant-outbox:${seeded.intentId}`,
       deliveryTransportIdempotent: false,
       intentId: seeded.intentId,
-      startedAt: '2026-04-08T05:00:00.000Z',
+      startedAt: '2099-04-08T05:00:00.000Z',
       vault: vaultRoot,
     })
     mockedDeliverAssistantMessageOverBinding.mockResolvedValueOnce({
@@ -3685,7 +3691,7 @@ describe('assistant outbox runtime', () => {
         messageLength: seeded.message.length,
         providerMessageId: 'provider-prepared',
         providerThreadId: 'thread-prepared',
-        sentAt: '2026-04-08T05:00:02.000Z',
+        sentAt: '2099-04-08T05:00:01.000Z',
         target: '123',
         targetKind: 'explicit',
       },
@@ -3695,7 +3701,7 @@ describe('assistant outbox runtime', () => {
 
     const skipped = await dispatchAssistantOutboxIntent({
       intentId: seeded.intentId,
-      now: new Date('2026-04-08T05:00:01.000Z'),
+      now: new Date('2099-04-08T05:00:01.000Z'),
       vault: vaultRoot,
     })
     expect(skipped.intent.status).toBe('sending')
@@ -3704,7 +3710,7 @@ describe('assistant outbox runtime', () => {
     const dispatched = await dispatchAssistantOutboxIntent({
       allowPreparedSending: true,
       intentId: seeded.intentId,
-      now: new Date('2026-04-08T05:00:01.000Z'),
+      now: new Date('2099-04-08T05:00:01.000Z'),
       preparedDispatch: {
         deliveryIdempotencyKey: `assistant-outbox:${seeded.intentId}`,
         deliveryTransportIdempotent: false,
@@ -3716,6 +3722,127 @@ describe('assistant outbox runtime', () => {
     expect(expectMessageDelivery(dispatched.intent.delivery).providerMessageId).toBe(
       'provider-prepared',
     )
+  })
+
+  it.each([
+    {
+      dispatchAt: '2099-04-08T00:10:00.001Z',
+      expectedProviderCalls: 1,
+      expectedStatus: 'sent',
+      label: 'before expiry',
+    },
+    {
+      dispatchAt: '2099-04-08T00:40:00.000Z',
+      expectedProviderCalls: 0,
+      expectedStatus: 'abandoned',
+      label: 'after expiry',
+    },
+  ] as const)(
+    'restores a checkpoint-prepared idempotent Linq fallback $label without prepared ownership',
+    async ({
+      dispatchAt,
+      expectedProviderCalls,
+      expectedStatus,
+    }) => {
+      vi.useFakeTimers()
+      const { vaultRoot } = await createAssistantVault(
+        'assistant-outbox-restored-expiring-linq-',
+      )
+      const expiresAt = '2099-04-08T00:30:00.000Z'
+      const seeded = await createIntent(vaultRoot, {
+        channel: 'linq',
+        expiresAt,
+        explicitTarget: 'linq-group-123',
+        message: 'The audio thank-you did not work, but this group is appreciated.',
+        sessionId: 'session-restored-expiring-linq',
+        threadId: 'linq-group-123',
+        threadIsDirect: false,
+        turnId: 'turn-restored-expiring-linq',
+      })
+      await beginAssistantOutboxIntentMirrorPreparedDispatch({
+        deliveryIdempotencyKey: `assistant-outbox:${seeded.intentId}`,
+        deliveryTransportIdempotent: true,
+        intentId: seeded.intentId,
+        startedAt: '2099-04-08T00:00:00.000Z',
+        vault: vaultRoot,
+      })
+      mockedDeliverAssistantMessageOverBinding.mockResolvedValueOnce({
+        delivery: {
+          channel: 'linq',
+          idempotencyKey: `assistant-outbox:${seeded.intentId}`,
+          messageLength: seeded.message.length,
+          providerMessageId: 'provider-restored-expiring-linq',
+          providerThreadId: 'linq-group-123',
+          sentAt: dispatchAt,
+          target: 'linq-group-123',
+          targetKind: 'explicit',
+        },
+        deliveryDeduplicated: false,
+        deliveryTransportIdempotent: true,
+        outboxIntentId: null,
+      })
+      vi.setSystemTime(new Date(dispatchAt))
+
+      const restored = await dispatchAssistantOutboxIntent({
+        intentId: seeded.intentId,
+        now: new Date(dispatchAt),
+        vault: vaultRoot,
+      })
+
+      expect(restored.intent).toMatchObject({
+        expiresAt,
+        status: expectedStatus,
+      })
+      if (expectedStatus === 'abandoned') {
+        expect(restored.intent.lastError).toMatchObject({
+          code: 'ASSISTANT_OUTBOX_INTENT_EXPIRED',
+        })
+      }
+      expect(mockedDeliverAssistantMessageOverBinding)
+        .toHaveBeenCalledTimes(expectedProviderCalls)
+    },
+  )
+
+  it('rechecks expiry after dispatch preparation and before provider entry', async () => {
+    vi.useFakeTimers()
+    const expiresAt = '2099-04-08T00:30:00.000Z'
+    vi.setSystemTime(new Date('2099-04-08T00:29:59.999Z'))
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-outbox-provider-entry-expiry-',
+    )
+    const seeded = await createIntent(vaultRoot, {
+      channel: 'linq',
+      expiresAt,
+      explicitTarget: 'linq-group-123',
+      message: 'A short group thank-you.',
+      sessionId: 'session-provider-entry-expiry',
+      threadId: 'linq-group-123',
+      threadIsDirect: false,
+      turnId: 'turn-provider-entry-expiry',
+    })
+    const clearPreparedIntent = vi.fn(async () => {})
+
+    const expired = await dispatchAssistantOutboxIntent({
+      dispatchHooks: {
+        clearPreparedIntent,
+        prepareDispatchIntent: async () => {
+          vi.setSystemTime(new Date(expiresAt))
+        },
+      },
+      intentId: seeded.intentId,
+      now: new Date('2099-04-08T00:29:59.999Z'),
+      vault: vaultRoot,
+    })
+
+    expect(expired.intent).toMatchObject({
+      expiresAt,
+      lastError: {
+        code: 'ASSISTANT_OUTBOX_INTENT_EXPIRED',
+      },
+      status: 'abandoned',
+    })
+    expect(clearPreparedIntent).toHaveBeenCalledOnce()
+    expect(mockedDeliverAssistantMessageOverBinding).not.toHaveBeenCalled()
   })
 
   it('ignores stale tokenless provider success after a newer retry reclaims the intent', async () => {

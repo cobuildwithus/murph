@@ -640,29 +640,11 @@ async function dispatchAssistantOutboxIntentInternal(input: DispatchAssistantOut
           intent,
         }
       }
-      if (assistantOutboxIntentIsExpired(intent, now)) {
-        return {
-          action: 'expired' as const,
-          intent,
-          intentPath,
-        }
-      }
       return {
         action: 'dispatch' as const,
         intent,
         intentPath,
         sending: intent,
-      }
-    }
-
-    if (
-      (intent.status === 'pending' || intent.status === 'retryable') &&
-      assistantOutboxIntentIsExpired(intent, now)
-    ) {
-      return {
-        action: 'expired' as const,
-        intent,
-        intentPath,
       }
     }
 
@@ -766,27 +748,6 @@ async function dispatchAssistantOutboxIntentInternal(input: DispatchAssistantOut
     return {
       intent: prepared.intent,
       deliveryError: prepared.intent.lastError,
-      session: null,
-    }
-  }
-
-  if (prepared.action === 'expired') {
-    const abandonedIntent = await markAssistantOutboxIntentMirrorTerminal({
-      error: new VaultCliError(
-        'ASSISTANT_OUTBOX_INTENT_EXPIRED',
-        'Assistant outbox intent expired before delivery.',
-        { retryable: false },
-      ),
-      failedAt: now,
-      intent: prepared.intent,
-      intentPath: prepared.intentPath,
-      onlyCurrentStatuses: [prepared.intent.status],
-      status: 'abandoned',
-      vault: input.vault,
-    })
-    return {
-      intent: abandonedIntent,
-      deliveryError: abandonedIntent.lastError,
       session: null,
     }
   }
@@ -979,6 +940,35 @@ async function dispatchAssistantOutboxIntentInternal(input: DispatchAssistantOut
       vault: input.vault,
     })
     preparedDispatchReserved = input.dispatchHooks?.prepareDispatchIntent !== undefined
+
+    const providerEntryAt = new Date()
+    if (assistantOutboxIntentIsExpired(dispatchIntent, providerEntryAt)) {
+      if (preparedDispatchReserved) {
+        await input.dispatchHooks?.clearPreparedIntent?.({
+          intent: dispatchIntent,
+          vault: input.vault,
+        })
+      }
+      preparedDispatchReserved = false
+      const expiredIntent = await markAssistantOutboxIntentMirrorTerminal({
+        error: new VaultCliError(
+          'ASSISTANT_OUTBOX_INTENT_EXPIRED',
+          'Assistant outbox intent expired before delivery.',
+          { retryable: false },
+        ),
+        failedAt: providerEntryAt,
+        intent: dispatchIntent,
+        intentPath: dispatchIntentPath,
+        onlyCurrentStatuses: ['sending'],
+        status: 'abandoned',
+        vault: input.vault,
+      })
+      return {
+        intent: expiredIntent,
+        deliveryError: expiredIntent.lastError,
+        session: null,
+      }
+    }
 
     const delivered = await sendAssistantOutboxDispatchIntent({
       dependencies: withAssistantOutboxSignal(input.dependencies, input.signal),

@@ -294,8 +294,10 @@ label could outlive its sharing authority. It must not pressure anyone else to
 buy usage. The immutable deadline is 30 minutes after the verified payment. It
 survives mailbox import, runtime checkpoint restore, and outbox persistence:
 runtime consumes expired work before model or audio-provider entry, and outbox
-retry abandons it before messaging-provider entry. No import, generation, or
-delivery retry recomputes or extends that deadline.
+rechecks it immediately before every legal messaging-provider entry, including
+stale idempotent recovery after restart. Ambiguous non-idempotent work keeps its
+existing fail-closed reconciliation and cannot re-enter the provider. No
+import, generation, or delivery retry recomputes or extends that deadline.
 
 ## Ownership And Data Flow
 
