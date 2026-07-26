@@ -1,6 +1,6 @@
 # Security
 
-Last verified: 2026-07-25
+Last verified: 2026-07-26
 
 ## Non-Negotiable Rules
 
@@ -89,6 +89,18 @@ Last verified: 2026-07-25
   entries against unused attributable credit. A reconciliation failure keeps
   the receipt retryable rather than suspending the subscription or silently
   completing the event.
+- A funded-group celebration may be created only after that verified grant
+  leaves positive credit and only when the beneficiary resolves to one current
+  thread-container notification destination. Its durable mailbox payload must
+  omit amount, offer, provider and purchase references, funding links, contact
+  data, contributor label, and private payer identity; contributor attribution
+  is always anonymous because an authenticated funder need not belong to the
+  room and queued profile authority could become stale. The isolated provider
+  turn may read only bounded committed group history and may expose only the
+  existing voice-memo and song tools. It receives no CLI, hosted context,
+  shell, files, connected apps, arbitrary network, progress, image, automation,
+  or group-mutation capability, and final egress still revalidates the stored
+  exact group route.
 - Automatic meal-photo capture must remain explicit opt-in. The iOS companion classifies photos locally and may upload only locally re-encoded JPEGs selected after opt-in; it must not send historical-library contents or original photo metadata. Enrollment uses a foreground Privy identity token, but the extension may persist only the dedicated renewable meal-photo bearer and idempotency secret in its shared keychain. Web stores the bearer and installation UUID only as SHA-256 hashes, encrypts the idempotency secret with member- and row-bound AAD, accepts the scoped bearer only for upload or self-revocation, rejects every JPEG application/comment segment, and rechecks each upload before commit. That final check locks the hosted member and any active sponsorship membership/group rows before rereading the same unrevoked enrollment, active access, and launch consent. Each staging attempt owns a distinct per-user object; cleanup must reconcile the mailbox claim before deleting after an ambiguous append and must derive the object path without depending on an access-controlled encryption-context lookup. The server association with an installation UUID is not hardware attestation; without App Attest or proof-of-possession, the upload token remains a bearer credential and must not be described as hardware-bound. Raw JPEGs must never enter Postgres, Temporal payloads, hosted mailbox payloads, logs, fixtures, or diagnostics. Cloudflare may hold them only as ingress-encrypted, per-user private R2 objects until post-checkpoint deletion or the lifecycle backstop makes them eligible for asynchronous deletion at 31 days, one day beyond mailbox recovery retention; that age is not a guaranteed physical-deletion deadline.
 - The Photos-library permission remains the user opt-in boundary; a successful capture automatically ensures the private 9pm closeout without another consent flag. Enrollment and upload require an existing active private iMessage or Telegram thread or a verified email target; this is a deliverability precondition, not another automation opt-in. Web resolves the member-bound, access-checked direct route, reads the verified email only as a chat-route fallback, and carries the private target only in the encrypted mailbox envelope and member vault where ordinary automation delivery requires it. Before a direct email occurrence reaches the provider, the runner must use its existing signed, write-fenced Web-control boundary to replace the saved target with the bound member's current access-checked verified address; a missing or revoked address fails closed. The closeout may remove only a canonical meal whose external reference proves automatic meal capture, and only after the agent has inspected the photo and persisted any supported structure. The canonical mutation verifies current image and manifest receipts before replacing the JPEG with a non-image privacy tombstone.
 - Prefer least-privilege defaults and explicit validation at system boundaries.

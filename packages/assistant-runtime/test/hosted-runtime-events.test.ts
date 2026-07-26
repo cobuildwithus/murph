@@ -2057,7 +2057,7 @@ describe("executeHostedMailboxEvent", () => {
     });
   });
 
-  it("rehydrates execution context after bootstrap before sending notifications", async () => {
+  it("rehydrates execution context and preserves a narrow notification tool profile", async () => {
     const hydratedExecutionContext = {
       hosted: {
         defaultTarget: {
@@ -2082,6 +2082,7 @@ describe("executeHostedMailboxEvent", () => {
       memberId: "member_123",
       notification: {
         instructions: "Send exactly the signup welcome.",
+        notificationToolProfile: "response-audio",
         route: {
           actorId: "hid_linq_actor_123",
           channel: "linq",
@@ -2147,6 +2148,7 @@ describe("executeHostedMailboxEvent", () => {
       },
       identityId: "hid_linq_identity_123",
       instructions: "Send exactly the signup welcome.",
+      notificationToolProfile: "response-audio",
       onTraceEvent: expect.any(Function),
       responsePolicy: null,
       threadId: "hid_linq_thread_123",
@@ -2658,6 +2660,52 @@ describe("executeHostedMailboxEvent", () => {
       runtimeEnv: {},
       vaultRoot: "/tmp/assistant-runtime-events",
     })).rejects.toThrow("required notification failed");
+  });
+
+  it("consumes a required response-audio notification after successful generation makes a later failure non-replayable", async () => {
+    const wake = buildHostedExecutionAssistantNotificationRequestedWake({
+      eventId: "evt_notification_response_audio_non_replayable",
+      memberId: "member_123",
+      notification: {
+        instructions: "Create one short audio thank-you.",
+        notificationToolProfile: "response-audio",
+        responsePolicy: {
+          kind: "require_send",
+        },
+        route: {
+          actorId: null,
+          channel: "telegram",
+          delivery: {
+            kind: "thread",
+            target: "telegram-group-123",
+          },
+          identityId: "identity-group-123",
+          threadId: "telegram-group-123",
+          threadIsDirect: false,
+        },
+      },
+      occurredAt: "2026-04-08T00:00:00.000Z",
+    });
+    mocks.sendAssistantNotification.mockRejectedValueOnce(
+      Object.assign(new Error("Provider output validation failed."), {
+        details: {
+          assistantNotificationProviderNonReplayableWork: true,
+          assistantNotificationStage: "provider",
+        },
+      }),
+    );
+
+    await expect(executeHostedMailboxEvent({
+      wake,
+      executionContext,
+      runtime: createRuntime(),
+      runtimeEnv: {},
+      vaultRoot: "/tmp/assistant-runtime-events",
+    })).resolves.toMatchObject({
+      conversationMetrics: null,
+      mailboxLane: "assistant-notification",
+    });
+    expect(mocks.sendAssistantNotification).toHaveBeenCalledTimes(1);
   });
 
   it("passes participant delivery notification data through unchanged", async () => {

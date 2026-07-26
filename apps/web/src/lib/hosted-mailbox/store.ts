@@ -473,6 +473,7 @@ async function appendHostedMailboxItemWithAssistantInputLookupKeyTx(
 
 export async function appendHostedMailboxEnvelopeTx(input: {
   envelope: HostedMailboxProducerEnvelope;
+  expiresAt?: Date | string | null;
   tx: HostedMailboxMutationTx;
 }): Promise<AppendHostedMailboxItemResult> {
   return appendHostedMailboxEnvelopeInternalTx(input);

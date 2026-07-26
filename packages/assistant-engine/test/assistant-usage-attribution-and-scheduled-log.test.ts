@@ -159,27 +159,20 @@ describe("assistant usage attribution", () => {
   });
 
   it("resolves feature keys, surfaces, triggers, environments, and reporting secrets", () => {
-    expect(resolveAssistantUsageFeatureKey({
-      promptProfile: "conversation",
-    })).toBe("assistant_reply");
+    expect(resolveAssistantUsageFeatureKey({})).toBe("assistant_reply");
     expect(resolveAssistantUsageFeatureKey({
       deliverResponse: false,
-      promptProfile: "conversation",
     })).toBe("assistant_internal_reply");
     expect(resolveAssistantUsageFeatureKey({
-      promptProfile: "conversation",
       turnTrigger: "automation-auto-reply",
     })).toBe("assistant_auto_reply");
     expect(resolveAssistantUsageFeatureKey({
-      promptProfile: "conversation",
       turnTrigger: "automation-cron",
     })).toBe("assistant_cron");
     expect(resolveAssistantUsageFeatureKey({
-      promptProfile: "conversation",
       turnTrigger: "manual-deliver",
     })).toBe("assistant_manual_delivery");
     expect(resolveAssistantUsageFeatureKey({
-      promptProfile: "conversation",
       turnTrigger: "manual-ask",
     })).toBe("assistant_reply");
 

@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "@/src/lib/hosted-onboarding/shared";
 
 const mocks = vi.hoisted(() => ({
+  appendGroupFundingThankYou: vi.fn(),
   applyStripeCheckoutCompleted: vi.fn(),
   applyStripeCheckoutExpired: vi.fn(),
   applyStripeDisputeUpdated: vi.fn(),
@@ -177,6 +178,11 @@ vi.mock("@/src/lib/hosted-onboarding/subscription-cancellation-email", () => ({
     mocks.sendHostedSubscriptionCancellationEmailForMember,
 }));
 
+vi.mock("@/src/lib/hosted-groups/group-usage-funded-notification", () => ({
+  appendHostedGroupUsageFundedNotificationIfApplicable:
+    mocks.appendGroupFundingThankYou,
+}));
+
 vi.mock(
   "@/src/lib/hosted-onboarding/usage-credit-stripe-reconciliation",
   async () => {
@@ -252,6 +258,7 @@ async function reconcileHostedStripeEventById(
 describe("hosted Stripe event reconciliation", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.appendGroupFundingThankYou.mockResolvedValue(false);
     vi.spyOn(console, "info").mockImplementation(() => {});
     mocks.applyStripeCheckoutCompleted.mockResolvedValue({
       activatedMemberId: null,
@@ -492,11 +499,88 @@ describe("hosted Stripe event reconciliation", () => {
     expect(mocks.findMemberForStripeCheckoutSession).not.toHaveBeenCalled();
     expect(mocks.prepareHostedLegacySyntheticFamilyCleanupTx).not.toHaveBeenCalled();
     expect(mocks.applyStripeCheckoutCompleted).not.toHaveBeenCalled();
+    expect(mocks.appendGroupFundingThankYou).toHaveBeenCalledWith({
+      prisma: prisma.client,
+      purchaseId: "hucp_purchase_123",
+    });
     expect(mocks.signalHostedRuntimeRecheckRuntime).toHaveBeenCalledWith({
       abortSignal: expect.any(AbortSignal),
       prisma: prisma.client,
       userId: "member_123",
     });
+    expect(
+      mocks.appendGroupFundingThankYou.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      mocks.signalHostedRuntimeRecheckRuntime.mock.invocationCallOrder[0] ?? 0,
+    );
+  });
+
+  it("rechecks restored usage before retrying a transient group celebration append", async () => {
+    const prisma = createStripeEventPrismaHarness();
+    const event = makeCheckoutCompletedEvent();
+    mocks.stripe.events.retrieve.mockResolvedValue(event);
+    mocks.reconcileHostedUsageCreditStripeEvent.mockResolvedValue({
+      beneficiaryMemberId: "member_123",
+      granted: true,
+      handled: true,
+      purchaseId: "hucp_purchase_123",
+      wakeRequired: true,
+    });
+    mocks.appendGroupFundingThankYou
+      .mockRejectedValueOnce(new HostedUsageCreditStripeRetryableError(
+        new Error("group route is temporarily unavailable"),
+      ))
+      .mockResolvedValueOnce(true);
+
+    await recordHostedStripeEvent({ event, prisma: prisma.client });
+
+    await expect(reconcileHostedStripeEventById({
+      eventId: event.id,
+      prisma: prisma.client,
+    })).resolves.toMatchObject({ status: "failed" });
+    expect(mocks.signalHostedRuntimeRecheckRuntime).toHaveBeenCalledOnce();
+    expect(prisma.rows[0]).toEqual(expect.objectContaining({
+      processedAt: null,
+      status: HostedStripeEventStatus.failed,
+    }));
+
+    prisma.rows[0]!.nextAttemptAt = new Date(0);
+    await expect(reconcileHostedStripeEventById({
+      eventId: event.id,
+      prisma: prisma.client,
+    })).resolves.toMatchObject({ status: "completed" });
+    expect(mocks.appendGroupFundingThankYou).toHaveBeenCalledTimes(2);
+    expect(mocks.signalHostedRuntimeRecheckRuntime).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps restored usage live when a group celebration fails definitively", async () => {
+    const prisma = createStripeEventPrismaHarness();
+    const event = makeCheckoutCompletedEvent();
+    const warningSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    mocks.stripe.events.retrieve.mockResolvedValue(event);
+    mocks.reconcileHostedUsageCreditStripeEvent.mockResolvedValue({
+      beneficiaryMemberId: "member_123",
+      granted: true,
+      handled: true,
+      purchaseId: "hucp_purchase_123",
+      wakeRequired: true,
+    });
+    mocks.appendGroupFundingThankYou.mockRejectedValue(
+      new Error("notification destination is ambiguous"),
+    );
+
+    await recordHostedStripeEvent({ event, prisma: prisma.client });
+    await expect(reconcileHostedStripeEventById({
+      eventId: event.id,
+      prisma: prisma.client,
+    })).resolves.toMatchObject({ status: "completed" });
+
+    expect(mocks.signalHostedRuntimeRecheckRuntime).toHaveBeenCalledOnce();
+    expect(warningSpy).toHaveBeenCalledWith(
+      "Hosted group usage-funded notification was skipped after a non-retryable failure.",
+      { errorName: "Error" },
+    );
+    warningSpy.mockRestore();
   });
 
   it("keeps a paid usage-credit grant claimable after Stripe directs a sixth-attempt retry", async () => {

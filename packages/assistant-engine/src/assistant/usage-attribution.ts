@@ -74,11 +74,6 @@ export function createAssistantUsageReportingUserId(input: {
 
 export function resolveAssistantUsageFeatureKey(input: {
   deliverResponse?: boolean | null
-  promptProfile:
-    | 'assistant-ask-continuation'
-    | 'conversation'
-    | 'maintenance'
-    | 'system-notification'
   turnTrigger?: AssistantTurnTrigger | null
 }): string {
   if (input.deliverResponse === false) {

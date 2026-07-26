@@ -17,6 +17,7 @@ import {
 } from "@murphai/contracts";
 
 import {
+  HOSTED_EXECUTION_ASSISTANT_NOTIFICATION_TOOL_PROFILES,
   HOSTED_EXECUTION_MEAL_PHOTO_MAX_BYTES,
   HOSTED_EXECUTION_LINQ_GROUP_REACTION_CONTEXT_MAX_CHARS,
   isHostedConversationMessageChannel,
@@ -34,6 +35,7 @@ import type {
   HostedExecutionAssistantNotificationDeliveryDispatchMode,
   HostedExecutionAssistantNotificationDeliverySource,
   HostedExecutionAssistantNotificationFirstContactPolicy,
+  HostedExecutionAssistantNotificationToolProfile,
   HostedExecutionClinicalRecordsSyncRequestedEvent,
   HostedExecutionAssistantNotificationRequestedPayload,
   HostedExecutionAssistantNotificationResponsePolicy,
@@ -1316,6 +1318,16 @@ function parseHostedExecutionAssistantNotificationRequestedPayload(
               ),
         }),
     instructions: requireString(record.instructions, `${label}.instructions`),
+    ...(record.notificationToolProfile === undefined
+      ? {}
+      : {
+          notificationToolProfile: record.notificationToolProfile === null
+            ? null
+            : parseHostedExecutionAssistantNotificationToolProfile(
+                record.notificationToolProfile,
+                `${label}.notificationToolProfile`,
+              ),
+        }),
     ...(record.responsePolicy === undefined
       ? {}
       : {
@@ -1353,6 +1365,19 @@ function parseHostedExecutionAssistantNotificationDeliveryDispatchMode(
   }
 
   return mode;
+}
+
+function parseHostedExecutionAssistantNotificationToolProfile(
+  value: unknown,
+  label: string,
+): HostedExecutionAssistantNotificationToolProfile {
+  const profile = requireString(value, label);
+  if (profile === "response-audio") {
+    return profile;
+  }
+  throw new TypeError(
+    `${label} must be one of ${HOSTED_EXECUTION_ASSISTANT_NOTIFICATION_TOOL_PROFILES.join(", ")}.`,
+  );
 }
 
 function parseHostedExecutionAssistantNotificationResponsePolicy(

@@ -43,12 +43,19 @@ The ordinary invocation context and effect-owner checks determine which tools
 are usable.
 
 Detached `assistant.notification.requested` system events are a different kind
-of input, not a scheduled-turn profile. Without a valid occurrence they use one
-isolated output-only formatter with no history, private context, resume
-mutation, tools, or network callbacks; the platform still owns delivery. The
-formatter uses the existing one-shot App Server path so its restrictive launch
-configuration cannot replace the resident ordinary-turn process or interrupt
-detached enrichment.
+of input, not a scheduled-turn profile. Without a valid occurrence they
+normally use one isolated output-only formatter with no history, private
+context, resume mutation, tools, or network callbacks; the platform still owns
+delivery. The one narrow exception is the hosted-group funding celebration:
+it uses an isolated response-audio profile with bounded committed group history
+and exactly the existing voice-memo and song tools. Runtime requires one
+completed audio attempt, validates the matching voice-memo attachment, permits
+text fallback only after a failed attempt, and does not replay successful
+generation after a later failure. It still receives no CLI, hosted context,
+shell, connected apps, arbitrary network, progress, image, or group-mutation
+capability. Both profiles use the existing one-shot App Server
+path so their restrictive launch configuration cannot replace the resident
+ordinary-turn process or interrupt detached enrichment.
 
 Hosted invocation-scoped automation and device authority enters only the
 current root turn through narrow typed dynamic tools backed by existing domain

@@ -545,7 +545,7 @@ describe('Codex model catalog', () => {
     expect(findCodexCatalogModelOptionIndex(null, [])).toBe(0)
   })
 
-  it('enforces the output-only boundary at provider execution', async () => {
+  it('enforces restricted notification boundaries at provider execution', async () => {
     const route = createRoute()
     const session = createAssistantSession({
       providerOptions: route.providerOptions,
@@ -560,6 +560,7 @@ describe('Codex model catalog', () => {
     } satisfies Parameters<typeof executeCodexTurnWithRecovery>[0]['input']
     const unsafeDynamicTools = resolveMurphDynamicTools({
       automationAvailable: true,
+      voiceMemoGenerationAvailable: true,
     })
     const unsafeHostedToolContext: AssistantHostedToolContext = {
       automationTool: { request: vi.fn() },
@@ -693,6 +694,104 @@ describe('Codex model catalog', () => {
     })
     expect(unsafeDynamicTools).not.toEqual([])
     expect(unsafeProgressDelivery.send).not.toHaveBeenCalled()
+
+    const responseAudioDynamicTools = unsafeDynamicTools.filter((tool) =>
+      tool.namespace === 'murph' &&
+      (tool.name === 'generate_voice_memo' || tool.name === 'generate_song')
+    )
+    providerTurnRunnerMocks.buildCodexTurnExecutionPlan.mockResolvedValue({
+      activeTurnSteering: null,
+      executionContext: {
+        hosted: {
+          generatedImageUploader: {
+            uploadGeneratedImage: vi.fn(),
+          },
+          generatedImageUploaderRequired: true,
+          materializeWorkspaceArtifacts: vi.fn(),
+          memberId: 'member-group-celebration',
+          providerFetch: fetch,
+          publicInternetFetch: fetch,
+          userEnvKeys: [],
+        },
+      },
+      hostedToolContext: unsafeHostedToolContext,
+      input,
+      profile: {
+        promptProfile: 'response-audio-notification',
+        toolProfile: 'response-audio-turn',
+        threadScope: 'isolated-thread',
+      },
+      promptTimeContext: {
+        currentLocalDate: '2026-07-20',
+        currentTimeZone: 'UTC',
+      },
+      route,
+      sharedPlan: createSharedPlan(),
+      progressDelivery: unsafeProgressDelivery,
+      turnId: 'turn-group-celebration',
+    } satisfies AssistantCodexTurnExecutionPlan)
+    providerTurnRunnerMocks.buildCodexTurnAttemptPlan.mockResolvedValue({
+      attemptCount: 1,
+      route,
+      routePlan: {
+        assistantContractFingerprint:
+          'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+        assistantCliContract: null,
+        cliEnv: {},
+        codexContinuation: {
+          kind: 'explicit-structured-history',
+        } satisfies AssistantCodexContinuation,
+        developerInstructions: null,
+        diagnosticsPolicy: {
+          environment: 'local',
+          privateIssueCaptureEnabled: false,
+          surface: null,
+        },
+        dynamicTools: responseAudioDynamicTools,
+        environments: [],
+        onboardingGuidanceInjected: false,
+        planningDiagnostics: createRoutePlanningDiagnostics(),
+        promptCacheMetadata: null,
+        resume: null,
+        sessionContext: undefined,
+        systemPrompt: 'Group celebration system prompt.',
+        turnContextPrompt: null,
+        voiceMemoDeliveryChannel: 'telegram',
+        workingDirectory: '/work',
+      } satisfies AssistantRouteTurnPlan,
+      session,
+    } satisfies AssistantCodexAttemptPlan)
+
+    const responseAudioOutcome = await executeCodexTurnWithRecovery({
+      input,
+      plan: createSharedPlan(),
+      resolvedSession: session,
+      route,
+      turnCreatedAt: '2026-07-20T00:00:00.000Z',
+      turnId: 'turn-group-celebration',
+    })
+
+    expect(responseAudioOutcome.kind).toBe('succeeded')
+    const responseAudioProviderInput =
+      providerMocks.executeCodexAssistantTurnAttemptFromInput.mock.calls.at(-1)?.[0]
+    expect(responseAudioProviderInput?.dynamicTools).toEqual(
+      responseAudioDynamicTools,
+    )
+    expect(responseAudioProviderInput?.providerConfig).toMatchObject({
+      approvalPolicy: 'never',
+      sandbox: 'read-only',
+    })
+    expect(responseAudioProviderInput).toMatchObject({
+      environments: [],
+      generatedImageUploader: null,
+      hostedToolContext: null,
+      materializeWorkspaceArtifacts: null,
+      processLifetime: 'one-shot',
+      progressDelivery: null,
+      providerFetch: null,
+      publicInternetFetch: null,
+      requireGeneratedImageUploader: false,
+    })
   })
 
   it('runs immutable room-model maintenance as a one-shot tool-only permission turn', async () => {

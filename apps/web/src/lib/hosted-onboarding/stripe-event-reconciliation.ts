@@ -89,9 +89,16 @@ import {
 import { isHostedOnboardingError } from "./errors";
 import {
   HOSTED_USAGE_CREDIT_STRIPE_PREPARATION_BUDGET,
+  HostedUsageCreditStripeRetryableError,
   isHostedUsageCreditStripeRetryableError,
   reconcileHostedUsageCreditStripeEvent,
 } from "./usage-credit-stripe-reconciliation";
+import {
+  isRetryableHostedUsageCreditDependencyError,
+} from "./usage-credit-stripe-reconciliation-context";
+import {
+  appendHostedGroupUsageFundedNotificationIfApplicable,
+} from "../hosted-groups/group-usage-funded-notification";
 import { signalHostedRuntimeRecheckRuntime } from "../hosted-orchestration/signal-runtime";
 
 // Top-up reads use no SDK retries, hard per-request/KMS bounds, an aggregate
@@ -748,6 +755,21 @@ async function processClaimedHostedStripeEvent(
       usageCreditReconciliation.handled &&
       usageCreditReconciliation.wakeRequired
     ) {
+      let groupFundingNotificationError: unknown = null;
+      if (
+        stripeEvent.type === "checkout.session.completed" ||
+        stripeEvent.type === "checkout.session.async_payment_succeeded"
+      ) {
+        try {
+          await appendHostedGroupUsageFundedNotificationIfApplicable({
+            prisma,
+            purchaseId: usageCreditReconciliation.purchaseId,
+          });
+        } catch (error) {
+          groupFundingNotificationError = error;
+        }
+      }
+
       try {
         await signalHostedUsageCreditRuntimeRecheck({
           prisma,
@@ -760,6 +782,26 @@ async function processClaimedHostedStripeEvent(
         ) {
           throw error;
         }
+      }
+
+      if (groupFundingNotificationError) {
+        if (
+          isRetryableHostedUsageCreditDependencyError(
+            groupFundingNotificationError,
+          )
+        ) {
+          throw new HostedUsageCreditStripeRetryableError(
+            groupFundingNotificationError,
+          );
+        }
+        console.warn(
+          "Hosted group usage-funded notification was skipped after a non-retryable failure.",
+          {
+            errorName: deriveHostedOnboardingTimingErrorName(
+              groupFundingNotificationError,
+            ),
+          },
+        );
       }
     }
     if (legacyFamilySubscriptionId) {

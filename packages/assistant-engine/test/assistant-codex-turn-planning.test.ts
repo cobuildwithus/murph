@@ -389,6 +389,130 @@ describe('assistant Codex turn planning', () => {
     }
   })
 
+  it('plans group celebrations with recent room history and only the two response-audio tools', async () => {
+    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(
+      'PRIVATE_CLI_CONTRACT',
+    )
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(
+      'PRIVATE_CONTEXT_SNAPSHOT',
+    )
+    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportsNativeResume: true,
+    })
+    const vault = await mkdtemp(
+      path.join(os.tmpdir(), 'assistant-group-celebration-plan-'),
+    )
+    const session = createSession({
+      resumeState: {
+        assistantContractFingerprint: 'f'.repeat(64),
+        routeFingerprint: 'route-test',
+        threadId: 'ordinary-group-thread',
+      },
+      turnCount: 2,
+    })
+    session.binding = {
+      actorId: null,
+      channel: 'telegram',
+      conversationKey: 'telegram:group:123',
+      delivery: {
+        kind: 'thread',
+        target: 'telegram-group-123',
+      },
+      identityId: 'telegram-group-identity',
+      threadId: 'telegram-group-123',
+      threadIsDirect: false,
+    }
+
+    try {
+      await appendAssistantTranscriptEntries(vault, session.sessionId, [
+        { kind: 'user', text: 'Bennett keeps calling this the wellness senate.' },
+        { kind: 'assistant', text: 'The wellness senate is now in session.' },
+      ])
+      const plan = await resolveAssistantRouteTurnPlan({
+        executionContext: {
+          hosted: {
+            dynamicContextPrompts: ['PRIVATE_HOSTED_CONTEXT'],
+            memberId: 'member-group-container',
+            providerFetch: fetch,
+            userEnvKeys: [],
+          },
+        },
+        hostedToolContext: {
+          ...createHostedToolContext(),
+          automationTool: { request: vi.fn() },
+          connectedApps: { request: vi.fn() },
+          familyPlanTool: { request: vi.fn() },
+        },
+        input: {
+          ...createMessageInput(),
+          channel: 'telegram',
+          deliverResponse: true,
+          deliveryKind: 'thread',
+          deliveryTarget: 'telegram-group-123',
+          prompt: 'Thank Bennett for adding usage.',
+          threadId: 'telegram-group-123',
+          threadIsDirect: false,
+          turnTrigger: 'manual-deliver',
+          vault,
+        },
+        preferenceContext: {
+          assistantPersona: 'navy-seal',
+          assistantPersonality: {
+            detail: 10,
+            humor: 10,
+            push: 10,
+          },
+          assistantTone: 'casual',
+          assistantVoice: 'warm',
+        },
+        profile: {
+          promptProfile: 'response-audio-notification',
+          threadScope: 'isolated-thread',
+          toolProfile: 'response-audio-turn',
+        },
+        promptTimeContext: {
+          currentLocalDate: '2026-07-25',
+          currentTimeZone: 'America/New_York',
+        },
+        route: createRoute(),
+        session,
+        sharedPlan: createSharedPlan({}, {
+          channel: 'telegram',
+          effectiveThreadIsDirect: false,
+          threadId: 'telegram-group-123',
+          threadIsDirect: false,
+        }),
+      })
+
+      expect(plan.resume).toBeNull()
+      expect(plan.dynamicTools.map((tool) => tool.name).sort()).toEqual([
+        'generate_song',
+        'generate_voice_memo',
+      ])
+      expect(plan.environments).toEqual([])
+      expect(plan.assistantCliContract).toBeNull()
+      expect(plan.sessionContext).toBeUndefined()
+      expect(plan.conversationHistoryMessages).toEqual([
+        { content: 'Bennett keeps calling this the wellness senate.', role: 'user' },
+        { content: 'The wellness senate is now in session.', role: 'assistant' },
+      ])
+      expect(plan.systemPrompt).toContain('response-audio notification')
+      expect(plan.systemPrompt).toContain('murph.generate_voice_memo')
+      expect(plan.systemPrompt).toContain('murph.generate_song')
+      expect(plan.systemPrompt).toContain('Delivery adapter contract:')
+      expect(plan.systemPrompt).not.toContain('PRIVATE_CLI_CONTRACT')
+      expect(plan.systemPrompt).not.toContain('PRIVATE_CONTEXT_SNAPSHOT')
+      expect(plan.systemPrompt).not.toContain('PRIVATE_HOSTED_CONTEXT')
+      expect(plan.assistantPreferredElevenLabsVoiceId).toBe(
+        resolveAssistantVoiceOptionElevenLabsVoiceId('warm'),
+      )
+      expect(planningMocks.readAssistantCliSurfaceBootstrapContext).not.toHaveBeenCalled()
+      expect(planningMocks.readAssistantContextSnapshotPrompt).not.toHaveBeenCalled()
+    } finally {
+      await rm(vault, { force: true, recursive: true })
+    }
+  })
+
   it('resolves no dynamic tools and no non-evidence prompt context for maintenance turns', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(

@@ -714,7 +714,16 @@ Family-member funding use the same purchase lifecycle. Group funding resolves
 the existing opaque join
 code to the group's synthetic `HostedMember`, which remains the beneficiary;
 it adds no group wallet, usage account, or separate funding code. The
-authenticated contributor remains the payer. Family funding authorizes the
+authenticated contributor remains the payer. After a verified positive group
+grant, Web may append one purchase-keyed
+`assistant.notification.requested` item before the existing runtime recheck.
+That item binds the current thread-container route, never falls back to a
+member's direct route, and reaches the ordinary outbox through an isolated
+assistant turn with bounded committed group history and only the existing
+voice-memo and song tools. Its mailbox row expires 30 minutes after payment,
+it carries no contributor label, and the assistant owner enforces one audio
+attempt while treating successful generation as non-replayable. It adds no
+event family, queue, scheduler, migration, or second delivery owner. Family funding authorizes the
 owner, active group billing, and selected active unsuspended direct member at
 new-purchase creation, then freezes the Family group and member selectors in
 the return scope. Exact request-key replay and Stripe reconciliation continue

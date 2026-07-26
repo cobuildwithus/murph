@@ -158,7 +158,7 @@ export async function executeHostedAssistantNotificationWake(input: {
       });
     }
   } catch (error) {
-    if (!shouldSkipFailedHostedAssistantNotification(input.wake)) {
+    if (!shouldSkipFailedHostedAssistantNotification(input.wake, error)) {
       redactedLogEntries.push(
         emitHostedAssistantNotificationLifecycleLog({
           error,
@@ -322,14 +322,30 @@ function emitHostedOnboardingFollowupSeedFailureLog(input: {
 
 function shouldSkipFailedHostedAssistantNotification(
   wake: HostedExecutionAssistantNotificationRequestedWake,
+  error: unknown,
 ): boolean {
   return (
     !isHostedSignupWelcomeNotification(wake)
     && (
       wake.notification.firstContact != null
       || wake.notification.responsePolicy?.kind === "allow_send_or_skip"
+      || assistantNotificationErrorHasNonReplayableProviderWork(error)
     )
   );
+}
+
+function assistantNotificationErrorHasNonReplayableProviderWork(
+  error: unknown,
+): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+  const details = Reflect.get(error, "details");
+  return typeof details === "object"
+    && details !== null
+    && !Array.isArray(details)
+    && Reflect.get(details, "assistantNotificationProviderNonReplayableWork")
+      === true;
 }
 
 function emitHostedAssistantNotificationSkipLog(
@@ -551,6 +567,12 @@ function buildAssistantNotificationInput(
       : null,
     instructions: wake.notification.instructions,
     logDetails: buildHostedAssistantNotificationLogDetails(wake),
+    ...(wake.notification.notificationToolProfile
+      ? {
+          notificationToolProfile:
+            wake.notification.notificationToolProfile,
+        }
+      : {}),
     recordLogEntry,
     responsePolicy: wake.notification.responsePolicy ?? null,
     route: wake.notification.route,
@@ -573,6 +595,7 @@ function buildAssistantNotificationInputFromRoute(input: {
   firstContactPolicy: AssistantNotificationInput["firstContactPolicy"];
   instructions: string;
   logDetails: HostedExecutionStructuredLogDetails;
+  notificationToolProfile?: AssistantNotificationInput["notificationToolProfile"];
   recordLogEntry: (entry: HostedExecutionRedactedLogEntry) => void;
   responsePolicy: AssistantNotificationInput["responsePolicy"];
   route: HostedExecutionAssistantNotificationRoute;
@@ -621,6 +644,9 @@ function buildAssistantNotificationInputFromRoute(input: {
     firstContactPolicy: input.firstContactPolicy,
     identityId: route.identityId,
     instructions: input.instructions,
+    ...(input.notificationToolProfile
+      ? { notificationToolProfile: input.notificationToolProfile }
+      : {}),
     onTraceEvent(event) {
       const contextEntry = emitHostedAssistantContextTraceLog({
         event,

@@ -1,6 +1,6 @@
 # Reliability
 
-Last verified: 2026-07-25
+Last verified: 2026-07-26
 
 ## Current Guardrails
 
@@ -58,6 +58,20 @@ Last verified: 2026-07-25
   database-plus-Temporal recheck handoff are hard-bounded below the derived
   receipt lease, and receipt completion must win its exact attempt fence; a
   timed-out or reclaimed worker remains retryable and cannot report completion.
+- A positive hosted-group grant reuses that same Stripe receipt owner to append
+  one purchase-keyed celebration notification before signaling the existing
+  runtime recheck. Mailbox, delivery, and provider idempotency use the same
+  opaque purchase-derived digest, so webhook replay cannot create another
+  celebration. The mailbox row expires 30 minutes after the verified payment,
+  so a delayed webhook or runtime backlog cannot turn old funding into a later
+  burst of model work. The response-audio turn must complete exactly one voice
+  memo or song attempt; one failed attempt may fall back to text, while a
+  successful generation is non-replayable if later validation or delivery
+  fails. A retryable append failure keeps the receipt retryable, but Web still
+  attempts the usage recheck first so restored capacity is not stranded behind
+  optional celebration work. A definitive route failure may skip the anonymous
+  celebration without rolling back credit or disabling the recheck. There is
+  no second queue, scheduler, retry ledger, or delivery path.
 - Matching usage-credit refund or dispute events must never fall through to the
   subscription suspension path. Live re-fetch plus the same beneficiary lock
   must append replay-safe, capped signed `refund_adjustment` or

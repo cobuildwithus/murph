@@ -75,6 +75,7 @@ import type {
 } from '../hosted-tool-context.js'
 import {
   buildAssistantAskContinuationSystemPromptWithCacheMetadata,
+  buildAssistantResponseAudioNotificationPromptWithCacheMetadata,
   buildAssistantMaintenanceSystemPromptWithCacheMetadata,
   buildAssistantSystemNotificationPromptWithCacheMetadata,
   buildAssistantSystemPromptWithCacheMetadata,
@@ -223,11 +224,13 @@ export type AssistantCodexTurnPromptProfile =
   | 'maintenance'
   | 'assistant-ask-continuation'
   | 'system-notification'
+  | 'response-audio-notification'
 
 export type AssistantCodexTurnToolProfile =
   | 'provider-turn'
   | 'maintenance-turn'
   | 'output-only-turn'
+  | 'response-audio-turn'
 
 export type AssistantCodexThreadScope =
   | 'session-thread'
@@ -462,15 +465,18 @@ export async function resolveAssistantRouteTurnPlan(input: {
     input.hostedToolContext?.personalizationTool != null &&
     input.input.assistantStyleSettingsAuthorized !== false
   const outputOnlyTurn = input.profile.toolProfile === 'output-only-turn'
+  const responseAudioTurn = input.profile.toolProfile === 'response-audio-turn'
   const systemNotificationTurn =
-    input.profile.promptProfile === 'system-notification'
+    input.profile.promptProfile === 'system-notification' ||
+    input.profile.promptProfile === 'response-audio-notification'
   const privateInteractiveProviderTurn =
     privateInteractiveAudience &&
     input.profile.promptProfile === 'conversation' &&
     input.profile.toolProfile === 'provider-turn'
   const shouldUseCommittedTranscriptHistory =
     input.profile.threadScope === 'session-thread' ||
-    input.profile.promptProfile === 'assistant-ask-continuation'
+    input.profile.promptProfile === 'assistant-ask-continuation' ||
+    input.profile.promptProfile === 'response-audio-notification'
   const resolveCommittedTranscriptHistoryMessages = async () =>
     shouldUseCommittedTranscriptHistory
       ? await resolveAssistantCommittedTranscriptHistoryMessages({
@@ -546,7 +552,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
   // model forbidden sources.
   const maintenanceTurn = input.profile.toolProfile === 'maintenance-turn'
   const hostedDynamicContextPrompts =
-    maintenanceTurn || outputOnlyTurn
+    maintenanceTurn || outputOnlyTurn || responseAudioTurn
       ? []
       : input.executionContext?.hosted?.dynamicContextPrompts ?? []
   const groupRoomModelPrompt =
@@ -635,6 +641,14 @@ export async function resolveAssistantRouteTurnPlan(input: {
 
     if (input.profile.promptProfile === 'system-notification') {
       return buildAssistantSystemNotificationPromptWithCacheMetadata({
+        channel: resolvedChannel,
+      }, {
+        toolSchemaHash,
+      })
+    }
+
+    if (input.profile.promptProfile === 'response-audio-notification') {
+      return buildAssistantResponseAudioNotificationPromptWithCacheMetadata({
         channel: resolvedChannel,
       }, {
         toolSchemaHash,
@@ -730,9 +744,9 @@ export async function resolveAssistantRouteTurnPlan(input: {
   // Maintenance turns run without a delivery target and must not expose any
   // external-capable or delivery-facing tool surface, so the gate is the
   // resolved tool set itself rather than prompt text.
-  const dynamicTools = outputOnlyTurn
-      ? []
-      : maintenanceTurn
+  const availableDynamicTools = outputOnlyTurn
+    ? []
+    : maintenanceTurn
       ? input.input.maintenanceProfile === 'group-room-model' &&
         input.input.scheduledInvocationAuthority?.automationId ===
           MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_AUTOMATION_ID
@@ -802,6 +816,12 @@ export async function resolveAssistantRouteTurnPlan(input: {
           privateInteractiveAudience &&
           input.hostedToolContext?.vaultFileSendAvailable === true,
       })
+  const dynamicTools = responseAudioTurn
+    ? availableDynamicTools.filter((tool) =>
+        tool.namespace === 'murph' &&
+        (tool.name === 'generate_voice_memo' || tool.name === 'generate_song')
+      )
+    : availableDynamicTools
   const messageTargetDynamicToolsAvailable =
     dynamicTools.some(
       (tool) => tool.namespace === 'murph' && tool.name === 'select_reply_target',
@@ -887,7 +907,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
     },
     developerInstructions: normalizeNullableString(developerInstructions),
     dynamicTools,
-    environments: outputOnlyTurn ? [] : undefined,
+    environments: outputOnlyTurn || responseAudioTurn ? [] : undefined,
     conversationHistoryMessages:
       conversationHistoryMessages.length > 0
         ? conversationHistoryMessages
@@ -921,7 +941,8 @@ export async function resolveAssistantRouteTurnPlan(input: {
     sessionContext:
       shouldPrepareBootstrapContext &&
       !maintenanceTurn &&
-      !outputOnlyTurn
+      !outputOnlyTurn &&
+      !responseAudioTurn
       ? {
           binding: input.session.binding,
         }

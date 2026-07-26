@@ -1,7 +1,7 @@
 # Hosted Usage Top-Ups
 
 Status: Implemented personal, Family-member, and hosted-group funding
-Last verified: 2026-07-22
+Last verified: 2026-07-26
 
 ## Decision
 
@@ -269,6 +269,30 @@ so deploy-skew retries cannot duplicate a legacy notice. A failed or in-flight
 Linq or Telegram claim returns its durable retry time to runtime
 reconciliation; Temporal owns that recheck while the accepted input remains
 pending. Read-only status reconciliation never invokes a notice provider.
+
+### Group Funding Celebration
+
+A verified paid hosted-group Checkout that leaves positive credit appends one
+idempotent `assistant.notification.requested` item to the synthetic group
+runtime. The item reuses the durable group notification destination and the
+ordinary outbox; there is no second queue, cron, browser callback, or funding
+lifecycle. The existing post-grant runtime recheck imports it.
+
+The notification runs against the existing group session with recent committed
+conversation history and exposes exactly `murph.generate_voice_memo` and
+`murph.generate_song`. Murph chooses one and invents the thank-you; runtime
+validates exactly one completed attempt and that successful generation owns
+exactly one voice-memo attachment. One failed or unavailable attempt may
+degrade to a short text line. Successful generation is non-replayable if later
+provider validation or delivery fails.
+
+The prompt contains no amount, offer, Stripe reference, funding link, or private
+payer identity. It always thanks the contributor anonymously because possession
+of the funding locator does not imply group membership and a queued profile
+label could outlive its sharing authority. It must not pressure anyone else to
+buy usage. The mailbox row expires 30 minutes after the verified payment; an
+already-stale webhook creates no celebration, and expired queued work is absent
+from the normal runtime mailbox projection.
 
 ## Ownership And Data Flow
 
@@ -797,6 +821,13 @@ Stripe and call the same idempotent reconciler by purchase ID.
    grant, the runtime recheck and subsequent usage debit, low direct/group
    next-turn context, the exhausted notice, payer deletion, and later
    negative/positive refund or dispute adjustments in Stripe test mode.
+
+The group-funding celebration extension has its own additive deploy order:
+deploy the hosted-execution parser and assistant runtime/engine consumer bundle
+before enabling the Web producer. Older Web emits no tool profile and remains
+compatible with the new consumer; an older strict mailbox parser can reject the
+new optional field. Roll back Web's producer first and let its function window
+drain before rolling the consumer below this compatibility floor.
 
 Rollback disables new Checkout creation and the Add usage actions first. It
 does not delete purchases or grants and must not disable the existing usage

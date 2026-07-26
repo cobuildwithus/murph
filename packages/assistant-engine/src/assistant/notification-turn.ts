@@ -130,6 +130,14 @@ const ASSISTANT_SYSTEM_NOTIFICATION_TURN_PROFILE: Required<
   threadScope: 'isolated-thread',
   toolProfile: 'output-only-turn',
 }
+const ASSISTANT_RESPONSE_AUDIO_NOTIFICATION_TURN_PROFILE: Required<
+  AssistantCodexTurnThreadScopeProfile
+> = {
+  nativeResumePolicy: 'disabled',
+  promptProfile: 'response-audio-notification',
+  threadScope: 'isolated-thread',
+  toolProfile: 'response-audio-turn',
+}
 const ASSISTANT_NOTIFICATION_MAINTENANCE_CODEX_CONFIG_OVERRIDES = [
   'memories.use_memories=false',
   'memories.generate_memories=false',
@@ -144,6 +152,8 @@ export type AssistantNotificationTurnPolicy = {
   maintenanceProfile: AssistantMaintenanceProfile
   privateSummary: string
 }
+
+export type AssistantNotificationToolProfile = 'response-audio'
 
 export type AssistantNotificationResponsePolicy =
   | { kind: 'allow_send_or_skip' }
@@ -216,6 +226,7 @@ export interface AssistantNotificationInput
   deferCommitUntilDeliveryAccepted?: boolean | null
   firstContactPolicy?: AssistantNotificationFirstContactPolicy | null
   instructions: string
+  notificationToolProfile?: AssistantNotificationToolProfile | null
   turnPolicy?: AssistantNotificationTurnPolicy | null
   responsePolicy?: AssistantNotificationResponsePolicy | null
 }
@@ -379,6 +390,7 @@ export async function sendAssistantNotificationLocal(
       const turnCreatedAt = new Date().toISOString()
       const progressDelivery = null
       let committedDeliveryOutcomeKind: AssistantDeliveryOutcome['kind'] | null = null
+      let responseAudioProviderWorkIsNonReplayable = false
       const typingIndicator =
         isAssistantNotificationMaintenanceExactSkip(input)
           ? null
@@ -493,6 +505,9 @@ export async function sendAssistantNotificationLocal(
             input,
             rawEvents: providerResult.rawEvents ?? [],
           })
+        responseAudioProviderWorkIsNonReplayable =
+          input.notificationToolProfile === 'response-audio' &&
+          nonReplayableProviderWork
         const selectedRoute = providerResult.route
         const providerResumeStateAction =
           resolveAssistantNotificationProviderResumeStateAction({
@@ -523,6 +538,11 @@ export async function sendAssistantNotificationLocal(
         }
         let decision: AssistantNotificationDecision
         try {
+          assertAssistantResponseAudioNotificationToolContract({
+            input,
+            rawEvents: providerResult.rawEvents ?? [],
+            responseMedia: providerResult.responseMedia ?? [],
+          })
           decision = parseAssistantNotificationDecision(providerResult.response)
         } catch (error) {
           throw annotateAssistantNotificationError(
@@ -774,6 +794,13 @@ export async function sendAssistantNotificationLocal(
           deliveryOutcome: committedDeliveryOutcome,
           response: responseText,
           session: committedDeliveryOutcome.session,
+        })
+      } catch (error) {
+        if (!responseAudioProviderWorkIsNonReplayable) {
+          throw error
+        }
+        throw annotateAssistantNotificationError(error, {
+          assistantNotificationProviderNonReplayableWork: true,
         })
       } finally {
         await stopAssistantChannelTypingIndicator(typingIndicator, {
@@ -1492,20 +1519,27 @@ function resolveAssistantNotificationTurnProfile(
   if (isAssistantNotificationMaintenanceExactSkip(input)) {
     return ASSISTANT_MAINTENANCE_TURN_PROFILE
   }
+  if (input.notificationToolProfile === 'response-audio') {
+    return ASSISTANT_RESPONSE_AUDIO_NOTIFICATION_TURN_PROFILE
+  }
   return isAssistantNotificationScheduledOccurrence(input)
     ? null
     : ASSISTANT_SYSTEM_NOTIFICATION_TURN_PROFILE
 }
 
-// Only maintenance turns consume this signal (to decide whether a failed run
-// already performed a non-replayable owned write); it is derived from committed
-// provider events rather than trusted from provider metadata.
+// Maintenance writes and successful response-audio generation are
+// non-replayable. Derive both from committed provider events rather than
+// trusting provider metadata.
 function resolveAssistantNotificationProviderNonReplayableWork(input: {
   input: AssistantNotificationInput
   rawEvents: readonly unknown[]
 }): boolean {
-  return isAssistantNotificationMaintenanceExactSkip(input.input) &&
-    assistantMaintenanceRawEventsIncludeMutation(
+  if (input.input.notificationToolProfile === 'response-audio') {
+    return readAssistantResponseAudioToolAttempts(input.rawEvents)
+      .some((attempt) => attempt.success)
+  }
+  return isAssistantNotificationMaintenanceExactSkip(input.input)
+    && assistantMaintenanceRawEventsIncludeMutation(
       input.rawEvents,
       requireAssistantNotificationMaintenanceProfile(input.input),
     )
@@ -1549,15 +1583,80 @@ function isAssistantMaintenanceMutationCommand(
 function assistantGroupRoomModelDynamicMutationCompleted(
   event: ReturnType<typeof normalizeCodexEvent>,
 ): boolean {
+  const item = readAssistantNotificationCompletedDynamicToolItem(event)
+  if (!item) return false
+  const args = readAssistantNotificationRecord(item?.arguments)
+  return (
+    item?.success === true &&
+    item.namespace === 'murph' &&
+    (item.tool === 'group_room_model' || item.name === 'group_room_model') &&
+    (args?.action === 'upsert' || args?.action === 'delete')
+  )
+}
+
+function assertAssistantResponseAudioNotificationToolContract(input: {
+  input: AssistantNotificationInput
+  rawEvents: readonly unknown[]
+  responseMedia: readonly AssistantResponseMedia[]
+}): void {
+  if (input.input.notificationToolProfile !== 'response-audio') {
+    return
+  }
+
+  const attempts = readAssistantResponseAudioToolAttempts(input.rawEvents)
+  if (attempts.length !== 1) {
+    throw new VaultCliError(
+      'ASSISTANT_NOTIFICATION_RESPONSE_AUDIO_TOOL_COUNT_INVALID',
+      'Response-audio notification must complete exactly one audio tool attempt.',
+    )
+  }
+
+  const successful = attempts[0]?.success === true
+  const voiceMemoCount = input.responseMedia.filter(
+    (media) => media.kind === 'voice_memo',
+  ).length
+  if (voiceMemoCount !== (successful ? 1 : 0)) {
+    throw new VaultCliError(
+      'ASSISTANT_NOTIFICATION_RESPONSE_AUDIO_MEDIA_INVALID',
+      'Response-audio notification media must match its audio tool result.',
+    )
+  }
+}
+
+function readAssistantResponseAudioToolAttempts(
+  rawEvents: readonly unknown[],
+): Array<{ success: boolean }> {
+  const attempts: Array<{ success: boolean }> = []
+  for (const rawEvent of rawEvents) {
+    const item = readAssistantNotificationCompletedDynamicToolItem(
+      normalizeCodexEvent(rawEvent),
+    )
+    if (
+      item?.namespace === 'murph' &&
+      (item.tool === 'generate_voice_memo' ||
+        item.name === 'generate_voice_memo' ||
+        item.tool === 'generate_song' ||
+        item.name === 'generate_song') &&
+      typeof item.success === 'boolean'
+    ) {
+      attempts.push({ success: item.success })
+    }
+  }
+  return attempts
+}
+
+function readAssistantNotificationCompletedDynamicToolItem(
+  event: ReturnType<typeof normalizeCodexEvent>,
+): Record<string, unknown> | null {
   if (
     event.kind !== 'status_item' ||
     event.itemState !== 'completed' ||
     event.itemType !== 'dynamic.tool.call'
   ) {
-    return false
+    return null
   }
   const record = readAssistantNotificationRecord(event.rawEvent)
-  const item =
+  return (
     readAssistantNotificationRecord(record?.item) ??
     readAssistantNotificationRecord(
       readAssistantNotificationRecord(record?.params)?.item,
@@ -1565,12 +1664,6 @@ function assistantGroupRoomModelDynamicMutationCompleted(
     readAssistantNotificationRecord(
       readAssistantNotificationRecord(record?.data)?.item,
     )
-  const args = readAssistantNotificationRecord(item?.arguments)
-  return (
-    item?.success === true &&
-    item.namespace === 'murph' &&
-    (item.tool === 'group_room_model' || item.name === 'group_room_model') &&
-    (args?.action === 'upsert' || args?.action === 'delete')
   )
 }
 

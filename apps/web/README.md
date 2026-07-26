@@ -244,6 +244,13 @@ The hosted Prisma schema keeps ownership sharp and nested:
   frozen Checkout request, and reconciliation state for one intentional
   top-up. `HostedUsageCreditEntry` is the append-only credit source of truth;
   `HostedMember` holds only its bounded balance/version projection.
+  A verified positive grant to a thread-container beneficiary may append one
+  purchase-keyed `assistant.notification.requested` item before the existing
+  runtime recheck. It uses the current exact group route and ordinary outbox;
+  personal and Family-member beneficiaries do not receive this group
+  celebration. The item is anonymous and expires 30 minutes after verified
+  payment so stale or externally funded profile attribution never enters the
+  group turn.
 - `HostedProductFeedback` owns assistant-captured structured product feedback
   with only a bounded product-only summary, kind, and optional changelog ids,
   without storing raw conversation text, health details, tags, topics, or provider payloads
