@@ -191,7 +191,7 @@ async function signalRuntimeRecheckWithDeadline(input: {
 
 async function readDefaultHostedRuntimeRecheckSignal(): Promise<HostedRuntimeRecheckSignal> {
   const runtimeSignalModule = await import("../hosted-orchestration/signal-runtime");
-  return runtimeSignalModule.signalHostedRuntimeRecheckRuntime;
+  return runtimeSignalModule.signalHostedRetentionRuntimeRecheck;
 }
 
 async function retireExpiredMailboxContent(input: {

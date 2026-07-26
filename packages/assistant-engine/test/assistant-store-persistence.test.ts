@@ -9,6 +9,12 @@ import {
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import {
+  appendAssistantAcceptedTurnInputItems,
+} from '../src/assistant/active-turn-input-journal.ts'
+import {
+  upsertAssistantInputEvent,
+} from '../src/assistant/input-store.ts'
+import {
   listAssistantQuarantineEntriesAtPaths,
   quarantineAssistantStateFile,
 } from '../src/assistant/quarantine.ts'
@@ -254,7 +260,26 @@ describe('assistant store persistence seams', () => {
     ])
     await expect(
       readAssistantTranscriptEntries(paths, session.sessionId),
-    ).resolves.toHaveLength(3)
+    ).resolves.toEqual([
+      createTranscriptEntry(
+        'user',
+        'first prompt',
+        '2026-04-08T00:01:00.000Z',
+      ),
+      {
+        contentReceivedAt: '2026-04-08T00:02:00.000Z',
+        createdAt: '2026-04-08T00:02:00.000Z',
+        kind: 'user',
+        schema: 'murph.assistant-transcript-entry.v1',
+        text: 'late follow up',
+      },
+      {
+        createdAt: '2026-04-08T00:03:00.000Z',
+        kind: 'assistant',
+        schema: 'murph.assistant-transcript-entry.v1',
+        text: 'draft answer',
+      },
+    ])
   })
 
   it('treats expired sessions according to last-turn precedence and ignores disabled age limits', () => {
@@ -390,13 +415,19 @@ describe('assistant store persistence seams', () => {
       createTranscriptEntry('error', 'old error', '2026-04-08T00:00:00.000Z'),
       ...Array.from({
         length: 105,
-      }, (_, index) =>
-        createTranscriptEntry(
-          index % 2 === 0 ? 'user' : 'assistant',
+      }, (_, index) => {
+        const kind = index % 2 === 0 ? 'user' : 'assistant'
+        const createdAt =
+          new Date(Date.UTC(2026, 3, 8, 0, index + 1, 0)).toISOString()
+        const entry = createTranscriptEntry(
+          kind,
           `entry-${index}`,
-          new Date(Date.UTC(2026, 3, 8, 0, index + 1, 0)).toISOString(),
-        ),
-      ),
+          createdAt,
+        )
+        return kind === 'user'
+          ? { ...entry, contentReceivedAt: createdAt }
+          : entry
+      }),
       createTranscriptEntry('error', 'recent error', '2026-04-08T03:00:00.000Z'),
     ]
 
@@ -437,6 +468,141 @@ describe('assistant store persistence seams', () => {
     await expect(pruneAssistantTranscriptRetention(paths, {
       signal: controller.signal,
     })).rejects.toBe(reason)
+  })
+
+  it('recovers legacy receipt time and retires unmatched legacy inbound text', async () => {
+    const paths = await createAssistantPaths(
+      'assistant-store-persistence-transcript-receipt-recovery-',
+    )
+    const sessionId = 'session-transcript-receipt-recovery'
+    const mappedCreatedAt = '2026-07-24T00:00:00.000Z'
+    const unmatchedCreatedAt = '2026-07-24T00:01:00.000Z'
+    const inputEvent = await upsertAssistantInputEvent({
+      vault: paths.absoluteVaultRoot,
+      event: {
+        content: {
+          text: 'legacy delayed input',
+          transcriptText: 'legacy delayed input',
+          userMessageContent: [{
+            text: 'legacy delayed input',
+            type: 'text',
+          }],
+        },
+        conversation: {
+          accountId: 'account_receipt_recovery',
+          actorId: 'actor_receipt_recovery',
+          actorIsSelf: false,
+          source: 'linq',
+          threadId: 'thread_receipt_recovery',
+          threadIsDirect: true,
+        },
+        occurredAt: '2026-07-11T00:00:00.000Z',
+        receivedAt: '2026-07-11T00:00:00.000Z',
+        replyTarget: {
+          channel: 'linq',
+          messageId: 'message_receipt_recovery',
+          threadId: 'thread_receipt_recovery',
+        },
+        sourceMetadata: {
+          externalThreadRouteAuthorityPresent: false,
+          kind: 'linq',
+          partCount: 1,
+          reactionEligible: false,
+          replyToMessageId: null,
+          service: null,
+        },
+        sourceRef: {
+          dedupeKey: 'dedupe_receipt_recovery',
+          eventId: 'event_receipt_recovery',
+          itemId: 'item_receipt_recovery',
+          kind: 'hosted-mailbox',
+          lane: 'system',
+          laneSeq: '1',
+          payloadSchema: 'murph.hosted-mailbox-payload.v1',
+          payloadSource: 'inline',
+          source: 'hosted-mailbox',
+          wakeSchema: 'murph.hosted-execution-wake.v1',
+        },
+      },
+    })
+    await appendAssistantAcceptedTurnInputItems({
+      inputs: [{
+        acceptedAt: mappedCreatedAt,
+        contentRef: {
+          kind: 'assistant-input-event',
+          refId: inputEvent.inputId,
+          version: 'murph.assistant-input-event.v1',
+        },
+        id: inputEvent.inputId,
+        source: 'assistant-input',
+        transcriptRef: {
+          entryCreatedAt: mappedCreatedAt,
+          entryIndex: 0,
+          entryKind: 'user',
+          sessionId,
+        },
+      }],
+      now: new Date(mappedCreatedAt),
+      sessionId,
+      turnId: 'turn-transcript-receipt-recovery',
+      vault: paths.absoluteVaultRoot,
+    })
+    await replaceTranscriptEntries(paths, sessionId, [
+      createTranscriptEntry(
+        'user',
+        'legacy delayed input',
+        mappedCreatedAt,
+      ),
+      createTranscriptEntry(
+        'user',
+        'legacy input without trustworthy receipt evidence',
+        unmatchedCreatedAt,
+      ),
+      createTranscriptEntry(
+        'assistant',
+        'assistant output remains available',
+        '2026-07-24T00:02:00.000Z',
+      ),
+    ])
+
+    const now = new Date('2026-07-25T00:00:00.000Z')
+    await expect(pruneAssistantTranscriptRetention(paths, { now }))
+      .resolves.toEqual({
+        entriesRedacted: 2,
+        entriesTrimmed: 0,
+        nextEligibleAt: null,
+        transcriptsTrimmed: 1,
+      })
+    await expect(readAssistantTranscriptEntries(paths, sessionId))
+      .resolves.toEqual([
+        {
+          contentReceivedAt: '2026-07-11T00:00:00.000Z',
+          createdAt: mappedCreatedAt,
+          kind: 'user',
+          schema: 'murph.assistant-transcript-entry.v1',
+          text: '',
+          textRetiredAt: now.toISOString(),
+        },
+        {
+          createdAt: unmatchedCreatedAt,
+          kind: 'user',
+          schema: 'murph.assistant-transcript-entry.v1',
+          text: '',
+          textRetiredAt: now.toISOString(),
+        },
+        createTranscriptEntry(
+          'assistant',
+          'assistant output remains available',
+          '2026-07-24T00:02:00.000Z',
+        ),
+      ])
+    await expect(pruneAssistantTranscriptRetention(paths, { now }))
+      .resolves.toEqual({
+        entriesRedacted: 0,
+        entriesTrimmed: 0,
+        nextEligibleAt: null,
+        transcriptsTrimmed: 0,
+      })
   })
 
   it('initializes and synchronizes the session index store across alias and conversation-key changes', async () => {

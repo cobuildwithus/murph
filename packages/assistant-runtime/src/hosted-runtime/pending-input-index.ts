@@ -97,6 +97,12 @@ const HOSTED_PENDING_ASSISTANT_INPUT_LEGACY_STATE_SCHEMA_VERSION = 1;
 const HOSTED_PENDING_ASSISTANT_INPUT_STATE_KEYS =
   new Set(["backfilled", "handledBatchCursorInputId", "inputIds"]);
 const HOSTED_PENDING_ASSISTANT_INPUT_INSPECTION_WAVE_SIZE = 8;
+const HOSTED_PENDING_INPUT_RETENTION_DELIVERABLE_STATUSES = [
+  "awaiting_approval",
+  "pending",
+  "retryable",
+  "sending",
+] as const;
 type HostedPendingAssistantInputReplyabilityEvent = Pick<
   AssistantInputEventRecord,
   "conversation" | "replyTarget" | "sourceRef"
@@ -198,12 +204,6 @@ export async function runHostedPendingAssistantInputContentRetention(input: {
   input.signal?.throwIfAborted();
   const now = normalizeHostedPendingInputRetentionNow(input.now);
   const cutoffMs = now.getTime() - INBOX_TEXT_RETENTION_WINDOW_MS;
-  const unresolvedInputIds = new Set(
-    await compactHostedUnresolvedAssistantInputIds({
-      signal: input.signal,
-      vaultRoot: input.vaultRoot,
-    }),
-  );
   const listed = await listAssistantInputEvents({
     limit: Number.MAX_SAFE_INTEGER,
     signal: input.signal,
@@ -226,13 +226,11 @@ export async function runHostedPendingAssistantInputContentRetention(input: {
       // retention. Treat them as due and preserve the structural event.
       candidates.push({
         event,
-        terminal:
-          !unresolvedInputIds.has(event.inputId)
-          || await resolveHostedPendingInputRetentionTerminality({
-            event,
-            now,
-            vaultRoot: input.vaultRoot,
-          }),
+        terminal: await resolveHostedPendingInputRetentionTerminality({
+          event,
+          now,
+          vaultRoot: input.vaultRoot,
+        }),
       });
       continue;
     }
@@ -247,13 +245,11 @@ export async function runHostedPendingAssistantInputContentRetention(input: {
     }
     candidates.push({
       event,
-      terminal:
-        !unresolvedInputIds.has(event.inputId)
-        || await resolveHostedPendingInputRetentionTerminality({
-          event,
-          now,
-          vaultRoot: input.vaultRoot,
-        }),
+      terminal: await resolveHostedPendingInputRetentionTerminality({
+        event,
+        now,
+        vaultRoot: input.vaultRoot,
+      }),
     });
   }
 
@@ -332,35 +328,43 @@ async function resolveHostedPendingInputRetentionTerminality(input: {
       ),
       failedAt: input.now,
       intentId,
-      onlyCurrentStatuses: ["awaiting_approval", "pending", "retryable"],
+      onlyCurrentStatuses: HOSTED_PENDING_INPUT_RETENTION_DELIVERABLE_STATUSES,
       status: "abandoned",
       vault: input.vaultRoot,
     });
     if (
       intent === null
-      || !["awaiting_approval", "pending", "retryable"].includes(intent.status)
+      || !isHostedPendingInputRetentionDeliverableStatus(intent.status)
     ) {
       break;
     }
   }
   if (
     intent
-    && ["awaiting_approval", "pending", "retryable"].includes(intent.status)
+    && isHostedPendingInputRetentionDeliverableStatus(intent.status)
   ) {
     // A prepared-dispatch claim can change the ownership token between the
     // by-id read and the locked compare. Retry from the new owner above; if
     // contention persists, fail the retention pass so it never retires the
     // input while leaving a later reply deliverable.
     throw new Error(
-      "Assistant input retention could not terminalize its queued reply intent.",
+      "Assistant input retention could not terminalize its deliverable reply intent.",
     );
   }
 
-  // A sent reply is answered. A currently sending effect may already have
-  // crossed a non-idempotent provider boundary, so retention must not pretend
-  // it was safely cancelled. Pre-dispatch and retryable intents are abandoned
-  // above; failed, abandoned, or missing intents become policy non-replies.
-  return intent?.status === "sent" || intent?.status === "sending";
+  // Only a durable sent outcome proves the member was answered. Every
+  // deliverable state, including a stale sending claim whose provider outcome
+  // is ambiguous, is abandoned above so retention cannot later redispatch it.
+  // Abandoned, failed, or missing intents become policy non-replies.
+  return intent?.status === "sent";
+}
+
+function isHostedPendingInputRetentionDeliverableStatus(
+  status: string,
+): boolean {
+  return HOSTED_PENDING_INPUT_RETENTION_DELIVERABLE_STATUSES.some(
+    (candidate) => candidate === status,
+  );
 }
 
 function resolveHostedPendingInputReceivedAtMs(

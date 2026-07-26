@@ -13,6 +13,7 @@ import {
 } from "@murphai/assistant-engine";
 import {
   createAssistantOutboxIntent,
+  markAssistantOutboxIntentSentById,
   readAssistantOutboxIntent,
   saveAssistantOutboxIntent,
 } from "@murphai/assistant-engine/assistant-outbox";
@@ -29,6 +30,9 @@ import {
   resolveAssistantStatePaths,
 } from "@murphai/runtime-state/node/assistant-state-fs";
 
+import {
+  collectHostedAssistantDeliverySideEffects,
+} from "../src/hosted-runtime/callbacks.ts";
 import {
   compactHostedConversationMailboxHandledItemIds,
   compactHostedPendingAssistantInputIds,
@@ -839,6 +843,17 @@ describe("hosted pending assistant input index", () => {
       },
       vaultRoot,
     });
+    await recordHostedMailboxAssistantInputItem({
+      inputId: event.inputId,
+      mailboxItemId: "item_retention_committed_intent",
+      vault: vaultRoot,
+    });
+    await expect(compactHostedConversationMailboxHandledItemIds({
+      consumedThroughSeq: "11",
+      vaultRoot,
+    })).resolves.toEqual([]);
+    await expect(readHostedPendingAssistantInputIds({ vaultRoot }))
+      .resolves.toEqual([]);
 
     await expect(runHostedPendingAssistantInputContentRetention({
       now: "2026-04-15T00:00:02.000Z",
@@ -855,6 +870,162 @@ describe("hosted pending assistant input index", () => {
       });
     await expect(compactHostedPendingAssistantInputIds({ vaultRoot }))
       .resolves.toEqual([]);
+    await expect(collectHostedAssistantDeliverySideEffects({
+      includeBackgroundDueIntents: true,
+      vaultRoot,
+    })).resolves.toEqual([]);
+  });
+
+  it("abandons idempotent and non-idempotent sending claims before retirement", async () => {
+    const vaultRoot = await createTempVault();
+    await saveAssistantAutomationState(vaultRoot, {
+      autoReply: [{
+        channel: "linq",
+        eligibleAfter: null,
+        enabledAt: "2026-04-01T00:00:00.000Z",
+      }],
+      updatedAt: "2026-04-01T00:00:00.000Z",
+      version: 1,
+    });
+
+    const intentIds: string[] = [];
+    for (const [index, deliveryTransportIdempotent] of [true, false].entries()) {
+      const event = await upsertAssistantInputEvent({
+        vault: vaultRoot,
+        event: createAssistantInputEvent({
+          dedupeKey: `dedupe_retention_sending_${index}`,
+          eventId: `evt_retention_sending_${index}`,
+          itemId: `item_retention_sending_${index}`,
+          lane: "system",
+          laneSeq: String(20 + index),
+          messageId: `msg_retention_sending_${index}`,
+          occurredAt: `2026-04-01T00:00:0${index + 1}.000Z`,
+          receivedAt: `2026-04-01T00:00:1${index + 1}.000Z`,
+          text: "private input with an ambiguous sending reply",
+        }),
+      });
+      await enqueueHostedPendingAssistantInputId({
+        inputId: event.inputId,
+        vaultRoot,
+      });
+      const intent = await createAssistantOutboxIntent({
+        channel: "linq",
+        createdAt: "2026-04-01T00:01:00.000Z",
+        deliveryTransportIdempotent,
+        message: "reply whose stale sending claim must be terminalized",
+        sessionId: `session_retention_sending_${index}`,
+        threadId: "thread_1",
+        threadIsDirect: true,
+        turnId: `turn_retention_sending_${index}`,
+        turnTrigger: "automation-auto-reply",
+        vault: vaultRoot,
+      });
+      await saveAssistantOutboxIntent(vaultRoot, {
+        ...intent,
+        attemptCount: 1,
+        lastAttemptAt: "2026-04-01T00:02:00.000Z",
+        nextAttemptAt: null,
+        status: "sending",
+        updatedAt: "2026-04-01T00:02:00.000Z",
+      });
+      await writeTerminalEvidence({
+        evidenceId: event.inputId,
+        groupInputIds: [event.inputId],
+        terminal: {
+          deliveryIntentId: intent.intentId,
+          kind: "reply_intent_committed",
+          sessionId: `session_retention_sending_${index}`,
+        },
+        vaultRoot,
+      });
+      intentIds.push(intent.intentId);
+    }
+
+    await expect(runHostedPendingAssistantInputContentRetention({
+      now: "2026-04-15T00:00:12.000Z",
+      vaultRoot,
+    })).resolves.toEqual({
+      inputsRetired: 2,
+      inputsSuppressed: 2,
+      nextEligibleAt: null,
+    });
+    for (const intentId of intentIds) {
+      await expect(readAssistantOutboxIntent(vaultRoot, intentId))
+        .resolves.toMatchObject({
+          nextAttemptAt: null,
+          status: "abandoned",
+        });
+    }
+    await expect(collectHostedAssistantDeliverySideEffects({
+      includeBackgroundDueIntents: true,
+      vaultRoot,
+    })).resolves.toEqual([]);
+  });
+
+  it("keeps a genuinely sent linked reply terminal during retirement", async () => {
+    const vaultRoot = await createTempVault();
+    const event = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        dedupeKey: "dedupe_retention_sent",
+        eventId: "evt_retention_sent",
+        itemId: "item_retention_sent",
+        lane: "system",
+        laneSeq: "30",
+        messageId: "msg_retention_sent",
+        occurredAt: "2026-04-01T00:00:01.000Z",
+        receivedAt: "2026-04-01T00:00:02.000Z",
+        text: "private input with a reply already sent",
+      }),
+    });
+    const intent = await createAssistantOutboxIntent({
+      channel: "linq",
+      createdAt: "2026-04-01T00:01:00.000Z",
+      message: "reply already sent",
+      sessionId: "session_retention_sent",
+      threadId: "thread_1",
+      threadIsDirect: true,
+      turnId: "turn_retention_sent",
+      turnTrigger: "automation-auto-reply",
+      vault: vaultRoot,
+    });
+    await markAssistantOutboxIntentSentById({
+      delivery: {
+        channel: "linq",
+        idempotencyKey: null,
+        messageLength: "reply already sent".length,
+        providerMessageId: "linq_message_retention_sent",
+        providerThreadId: "thread_1",
+        sentAt: "2026-04-01T00:02:00.000Z",
+        target: "thread_1",
+        targetKind: "thread",
+      },
+      intentId: intent.intentId,
+      vault: vaultRoot,
+    });
+    await writeTerminalEvidence({
+      evidenceId: event.inputId,
+      groupInputIds: [event.inputId],
+      terminal: {
+        deliveryIntentId: intent.intentId,
+        kind: "reply_intent_committed",
+        sessionId: "session_retention_sent",
+      },
+      vaultRoot,
+    });
+
+    await expect(runHostedPendingAssistantInputContentRetention({
+      now: "2026-04-15T00:00:02.000Z",
+      vaultRoot,
+    })).resolves.toEqual({
+      inputsRetired: 1,
+      inputsSuppressed: 0,
+      nextEligibleAt: null,
+    });
+    await expect(readAssistantOutboxIntent(vaultRoot, intent.intentId))
+      .resolves.toMatchObject({
+        status: "sent",
+      });
   });
 
   it("redacts terminal input content after it leaves the pending index", async () => {

@@ -1,5 +1,6 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
+import * as hostedRuntimeSignals from "@/src/lib/hosted-orchestration/signal-runtime";
 import {
   HOSTED_INBOX_MEDIA_RETENTION_SIGNAL_BATCH_SIZE,
   HOSTED_INBOX_MEDIA_RETENTION_SIGNAL_TIMEOUT_MS,
@@ -11,7 +12,47 @@ import {
   runHostedRetentionCleanup,
 } from "@/src/lib/hosted-retention/cleanup";
 
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
 describe("hosted retention cleanup", () => {
+  it("uses the retention-only runtime signal for due inactive workspaces", async () => {
+    const now = new Date("2026-04-25T12:00:00.000Z");
+    const signalRetentionRecheck = vi.spyOn(
+      hostedRuntimeSignals,
+      "signalHostedRetentionRuntimeRecheck",
+    ).mockResolvedValue({
+      signalAccepted: true,
+      workflowId: "hosted-user-runtime:member_inactive",
+    });
+    const queryRaw = vi.fn()
+      .mockResolvedValueOnce([{
+        policyNonReplies: 0n,
+        retired: 0n,
+        tombstonesDeleted: 0n,
+      }])
+      .mockResolvedValueOnce([{ userId: "member_inactive" }]);
+    const prisma = {
+      $executeRaw: vi.fn().mockResolvedValue(0),
+      $queryRaw: queryRaw,
+      hostedComputerRun: { findMany: vi.fn().mockResolvedValue([]) },
+      hostedRuntimeLog: { deleteMany: vi.fn().mockResolvedValue({ count: 0 }) },
+      hostedWebSession: { deleteMany: vi.fn().mockResolvedValue({ count: 0 }) },
+    };
+
+    await expect(runHostedRetentionCleanup({
+      now,
+      prisma: prisma as never,
+    })).resolves.toMatchObject({
+      inboxMediaRetentionRuntimeSignalFailures: 0,
+      inboxMediaRetentionRuntimeSignalsSent: 1,
+    });
+    expect(signalRetentionRecheck).toHaveBeenCalledWith({
+      userId: "member_inactive",
+    });
+  });
+
   it("deletes expired mailbox items, runtime logs, and stale web sessions", async () => {
     const now = new Date("2026-04-25T12:00:00.000Z");
     const executeRaw = vi.fn().mockResolvedValue(7);

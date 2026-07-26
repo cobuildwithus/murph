@@ -600,17 +600,22 @@ export async function appendAssistantTranscriptEntriesWithRefs(
 
     const existingEntries = await readAssistantTranscriptEntries(paths, sessionId)
     const firstEntryIndex = existingEntries.length
-    const parsed = entries.map((entry) =>
-      assistantTranscriptEntrySchema.parse({
+    const parsed = entries.map((entry) => {
+      const createdAt =
+        normalizeNullableString(entry.createdAt) ?? new Date().toISOString()
+      const contentReceivedAt =
+        normalizeNullableString(entry.contentReceivedAt)
+        ?? (entry.kind === 'user' ? createdAt : null)
+      return assistantTranscriptEntrySchema.parse({
         schema: 'murph.assistant-transcript-entry.v1',
         kind: entry.kind,
         text: entry.text,
-        createdAt: normalizeNullableString(entry.createdAt) ?? new Date().toISOString(),
-        ...(normalizeNullableString(entry.contentReceivedAt)
-          ? { contentReceivedAt: normalizeNullableString(entry.contentReceivedAt) }
+        createdAt,
+        ...(contentReceivedAt
+          ? { contentReceivedAt }
           : {}),
-      }),
-    )
+      })
+    })
     await appendTranscriptEntries(paths, sessionId, parsed)
 
     return {
@@ -709,15 +714,20 @@ function normalizeAssistantConversationSnapshot(
 function parseAssistantTranscriptEntries(
   entries: readonly AssistantTranscriptEntryInput[],
 ): AssistantTranscriptEntry[] {
-  return entries.map((entry) =>
-    assistantTranscriptEntrySchema.parse({
+  return entries.map((entry) => {
+    const createdAt =
+      normalizeNullableString(entry.createdAt) ?? new Date().toISOString()
+    const contentReceivedAt =
+      normalizeNullableString(entry.contentReceivedAt)
+      ?? (entry.kind === 'user' ? createdAt : null)
+    return assistantTranscriptEntrySchema.parse({
       schema: 'murph.assistant-transcript-entry.v1',
       kind: entry.kind,
       text: entry.text,
-      createdAt: normalizeNullableString(entry.createdAt) ?? new Date().toISOString(),
-      ...(normalizeNullableString(entry.contentReceivedAt)
-        ? { contentReceivedAt: normalizeNullableString(entry.contentReceivedAt) }
+      createdAt,
+      ...(contentReceivedAt
+        ? { contentReceivedAt }
         : {}),
-    }),
-  )
+    })
+  })
 }
