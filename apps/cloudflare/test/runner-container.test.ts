@@ -667,6 +667,73 @@ describe("RunnerContainer", () => {
     });
   });
 
+  it("still probes the exact child when invocation ownership is lost mid-call", async () => {
+    const runnerRequestStarted = createDeferred<void>();
+    const runnerResponse = createDeferred<Response>();
+    const request = createRunnerRequest("evt_wake_after_owner_loss");
+    const containerFetch = vi.fn(async (url: string) => {
+      if (url.endsWith("/health")) {
+        return new Response(JSON.stringify(createRunnerHealthResult()), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }
+      if (url.endsWith("/internal/runtime-wake")) {
+        return new Response(null, {
+          headers: {
+            "x-runtime-wake-accepted": "1",
+            "x-runtime-wake-identity-checked": "1",
+          },
+          status: 204,
+        });
+      }
+      if (url.endsWith("/internal/workspace-invocation")) {
+        runnerRequestStarted.resolve(undefined);
+        return await runnerResponse.promise;
+      }
+      throw new Error(`Unexpected runner request URL: ${url}`);
+    });
+    const { container } = createContainerDouble({
+      containerFetch,
+      initialStatus: "running",
+    });
+
+    const invocation = container.invoke({
+      job: {
+        kind: "workspace-invocation",
+        request,
+      },
+      timeoutMs: 30_000,
+      userId: "member_123",
+    });
+    await runnerRequestStarted.promise;
+    Object.assign(container, {
+      workspaceInvocationOperations: [],
+    });
+
+    await expect(container.wakeRuntime({
+      attemptId: request.attemptId,
+      leaseGeneration: request.leaseGeneration,
+      userId: "member_123",
+    })).resolves.toEqual({
+      action: "woken",
+      kind: "accepted",
+    });
+    expect(containerFetch.mock.calls.some(([url]) =>
+      String(url).endsWith("/internal/runtime-wake")
+    )).toBe(true);
+
+    runnerResponse.resolve(new Response(JSON.stringify(createRunnerResult()), {
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      status: 200,
+    }));
+    await expect(invocation).resolves.toEqual(createRunnerResult());
+  });
+
   it("short-circuits a wake probe when platform truth says a pointerless shell is stopped", async () => {
     const { container, containerFetch, getState, startAndWaitForPorts } =
       createContainerDouble({

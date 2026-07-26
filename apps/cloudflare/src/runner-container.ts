@@ -542,6 +542,11 @@ export class RunnerContainer extends Container {
         );
       }
       return await this.invokeHostedExecution(input, operation);
+    }, {
+      // The exact operation is registered synchronously before lifecycle
+      // admission, so pointerless blocking is reserved for lifecycle work
+      // that has no invocation owner.
+      blockPointerlessWake: false,
     });
     operation.result = result;
     this.workspaceInvocationOperations.push(operation);
