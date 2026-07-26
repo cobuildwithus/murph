@@ -132,9 +132,19 @@ owner or lifecycle without production-path proof.
 - Web verification, production build, Cloudflare verification, workspace
   typechecks, Prisma validation/generation, ESLint, privacy scan, and
   `git diff --check` passed.
-- Canonical `pnpm test:diff` and `pnpm verify:acceptance` each reached the same
-  unchanged baseline failure in
-  `packages/cli/test/release-script-coverage-audit.test.ts`: the test expects a
-  sentence absent from the unmodified ReviewGPT prompt on the branch base. The
-  task diff does not touch either side of that assertion. Remote acceptance ran
-  in one fresh Testbox and otherwise completed the full app/package aggregate.
+- After rebasing onto the current base, the conflict-sensitive migration,
+  prompt/funding, image controller/completion, and hosted workspace entrypoint
+  suites passed: 5/5, 18/18, 25/25, and 238/238 respectively.
+- Canonical `pnpm test:diff` in Testbox
+  `tbx_01kye650ccakt2vrtayttkdze2` (Actions run `30185605637`) passed the
+  affected typechecks plus the Assistant Engine and Assistant Runtime suites,
+  then reached 65 Linux-only failures in the unchanged
+  `packages/hosted-local-harness` reverse dependent. An exact base-head run in
+  Testbox `tbx_01kye6dx04grbeyhfj0x3j8a0n` (Actions run `30185735410`)
+  reproduced the identical set: one process cleanup timeout, one MinIO endpoint
+  expectation mismatch, and 63 worker-host bridge failures/timeouts. The task
+  changes no harness file, and those failures occur before its changed runtime
+  inputs are consumed.
+- An earlier full canonical acceptance run completed the Web production build,
+  Cloudflare Node and Workers verification, and every task-owned package suite.
+  Its sole then-baseline CLI prompt assertion was removed by the current base.
