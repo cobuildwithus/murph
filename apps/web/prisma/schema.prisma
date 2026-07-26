@@ -434,9 +434,25 @@ enum HostedUsageCreditPurchaseStatus {
 
 enum HostedUsageCreditEntryKind {
   purchase_grant
+  referral_grant
   usage_debit
   refund_adjustment
   dispute_adjustment
+}
+
+enum HostedUsageReferralPolicyCode {
+  new_person_activation_v1
+  active_group_v1
+}
+
+enum HostedUsageReferralStatus {
+  armed
+  target_bound
+  rewarded
+  superseded
+  canceled
+  expired
+  disqualified
 }
 
 enum HostedCryptoDomain {
@@ -539,6 +555,9 @@ model HostedMember {
   usageCreditPurchasesPaid       HostedUsageCreditPurchase[]     @relation("HostedUsageCreditPurchasePayer")
   usageCreditPurchasesReceived   HostedUsageCreditPurchase[]     @relation("HostedUsageCreditPurchaseBeneficiary")
   usageCreditEntries             HostedUsageCreditEntry[]
+  usageReferralsAsReferrer       HostedUsageReferral[]            @relation("HostedUsageReferralReferrer")
+  usageReferralsAsBeneficiary    HostedUsageReferral[]            @relation("HostedUsageReferralBeneficiary")
+  usageReferralsAsIntroduced     HostedUsageReferral[]            @relation("HostedUsageReferralIntroducedMember")
   consentEvents                  HostedConsentEvent[]
   consentGrants                  HostedConsentGrant[]
   vaultSharesGranted             HostedVaultShare[]              @relation("VaultShareGrantor")
@@ -1350,23 +1369,79 @@ model HostedUsageCreditEntry {
   amountUsdMicros          BigInt                     @map("amount_usd_micros")
   effectiveAt              DateTime                   @map("effective_at")
   semanticSourceKey        String                     @unique(map: "hosted_usage_credit_entry_semantic_source_key") @map("semantic_source_key")
-  purchaseId               String                     @map("purchase_id")
+  purchaseId               String?                    @map("purchase_id")
+  referralId               String?                    @map("referral_id")
   parentGrantEntryId       String?                    @map("parent_grant_entry_id")
   sourceUsageId            String?                    @map("source_usage_id")
   sourceReferenceLookupKey String?                    @map("source_reference_lookup_key")
   createdAt                DateTime                   @default(now()) @map("created_at")
   beneficiary              HostedMember               @relation(fields: [beneficiaryMemberId], references: [id], onDelete: Restrict)
-  purchase                 HostedUsageCreditPurchase  @relation(fields: [purchaseId], references: [id], onDelete: Restrict)
+  purchase                 HostedUsageCreditPurchase? @relation(fields: [purchaseId], references: [id], onDelete: Restrict)
+  referral                 HostedUsageReferral?       @relation(fields: [referralId], references: [id], onDelete: Restrict)
   parentGrant              HostedUsageCreditEntry?    @relation("HostedUsageCreditEntryParentGrant", fields: [parentGrantEntryId], references: [id], onDelete: Restrict)
   childEntries             HostedUsageCreditEntry[]   @relation("HostedUsageCreditEntryParentGrant")
+  grant                    HostedUsageCreditGrant?
 
   @@unique([beneficiaryMemberId, beneficiarySequence], map: "hosted_usage_credit_entry_beneficiary_sequence_key")
   @@unique([sourceUsageId, parentGrantEntryId], map: "hosted_usage_credit_entry_usage_grant_key")
   @@index([beneficiaryMemberId, kind, beneficiarySequence], map: "hosted_usage_credit_entry_beneficiary_kind_idx")
   @@index([purchaseId, beneficiarySequence], map: "hosted_usage_credit_entry_purchase_sequence_idx")
+  @@index([referralId, beneficiarySequence], map: "hosted_usage_credit_entry_referral_sequence_idx")
   @@index([parentGrantEntryId], map: "hosted_usage_credit_entry_parent_grant_idx")
   @@index([sourceReferenceLookupKey], map: "hosted_usage_credit_entry_source_reference_idx")
   @@map("hosted_usage_credit_entry")
+}
+
+/// Mutable remaining-capacity projection for one immutable positive grant
+/// entry. The entry ledger remains the canonical accounting history.
+model HostedUsageCreditGrant {
+  entryId            String                 @id @map("entry_id")
+  remainingUsdMicros BigInt                 @map("remaining_usd_micros")
+  createdAt          DateTime               @default(now()) @map("created_at")
+  updatedAt          DateTime               @updatedAt @map("updated_at")
+  entry              HostedUsageCreditEntry @relation(fields: [entryId], references: [id], onDelete: Restrict)
+
+  @@map("hosted_usage_credit_grant")
+}
+
+model HostedUsageReferral {
+  id                      String                        @id
+  referrerMemberId        String?                       @map("referrer_member_id")
+  beneficiaryMemberId     String                        @map("beneficiary_member_id")
+  introducedMemberId      String?                       @map("introduced_member_id")
+  policyCode              HostedUsageReferralPolicyCode @map("policy_code")
+  policyVersion           String                        @map("policy_version")
+  rewardUsdMicros         BigInt                        @map("reward_usd_micros")
+  status                  HostedUsageReferralStatus     @default(armed)
+  referrerSubjectKey      String?                       @map("referrer_subject_key")
+  targetContainerMemberId String?                       @unique(map: "hosted_usage_referral_target_container_key") @map("target_container_member_id")
+  humanMessageCount       Int                           @default(0) @map("human_message_count")
+  nonReferrerMessageCount Int                           @default(0) @map("non_referrer_message_count")
+  observedEventKeysJson   Json?                         @map("observed_event_keys_json")
+  observedSpeakerKeysJson Json?                         @map("observed_speaker_keys_json")
+  firstHumanMessageAt     DateTime?                     @map("first_human_message_at")
+  lastHumanMessageAt      DateTime?                     @map("last_human_message_at")
+  armedAt                 DateTime                      @map("armed_at")
+  expiresAt               DateTime                      @map("expires_at")
+  targetBoundAt           DateTime?                     @map("target_bound_at")
+  qualifiedAt             DateTime?                     @map("qualified_at")
+  rewardedAt              DateTime?                     @map("rewarded_at")
+  celebrationQueuedAt     DateTime?                     @map("celebration_queued_at")
+  terminalAt              DateTime?                     @map("terminal_at")
+  terminalReason          String?                       @map("terminal_reason")
+  createdAt               DateTime                      @default(now()) @map("created_at")
+  updatedAt               DateTime                      @updatedAt @map("updated_at")
+  referrer                HostedMember?                 @relation("HostedUsageReferralReferrer", fields: [referrerMemberId], references: [id], onDelete: Restrict)
+  beneficiary             HostedMember                  @relation("HostedUsageReferralBeneficiary", fields: [beneficiaryMemberId], references: [id], onDelete: Restrict)
+  introducedMember        HostedMember?                 @relation("HostedUsageReferralIntroducedMember", fields: [introducedMemberId], references: [id], onDelete: Restrict)
+  targetContainer         HostedThreadContainer?        @relation(fields: [targetContainerMemberId], references: [memberId], onDelete: Restrict)
+  creditEntries           HostedUsageCreditEntry[]
+
+  @@index([referrerMemberId, status, armedAt], map: "hosted_usage_referral_referrer_status_armed_idx")
+  @@index([beneficiaryMemberId, rewardedAt], map: "hosted_usage_referral_beneficiary_rewarded_idx")
+  @@index([expiresAt, status], map: "hosted_usage_referral_expiry_status_idx")
+  @@index([introducedMemberId], map: "hosted_usage_referral_introduced_member_idx")
+  @@map("hosted_usage_referral")
 }
 
 model HostedConsentEvent {
@@ -1518,6 +1593,7 @@ model HostedThreadContainer {
   owner                      HostedMember        @relation("HostedThreadContainerOwner", fields: [ownerMemberId], references: [id], onDelete: Restrict)
   participants               HostedThreadContainerParticipant[]
   routes                     HostedThreadRoute[]
+  usageReferralTarget        HostedUsageReferral?
 
   @@index([ownerMemberId])
   @@map("hosted_thread_container")

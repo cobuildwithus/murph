@@ -13,6 +13,17 @@ import {
   readHostedUsageCreditProjection,
   settleHostedUsageCreditForUsageTx,
 } from "@/src/lib/hosted-execution/usage-credits";
+import {
+  handleHostedUsageReferralGroupTool,
+  HOSTED_USAGE_REFERRAL_BENEFICIARY_30D_CAP_USD_MICROS,
+  HOSTED_USAGE_REFERRAL_GROUP_REWARD_USD_MICROS,
+  HOSTED_USAGE_REFERRAL_PERSON_REWARD_USD_MICROS,
+  HOSTED_USAGE_REFERRAL_POLICY_VERSION,
+  reconcileHostedUsageReferralRewardAfterCommit,
+} from "@/src/lib/hosted-growth/usage-referral";
+import {
+  createHostedPhoneLookupKey,
+} from "@/src/lib/hosted-onboarding/contact-privacy";
 import { assertHostedUsageCreditPurchasesReadyForAccountDeletionTx } from "@/src/lib/hosted-onboarding/usage-credit-purchase-account-deletion";
 import { bindHostedUsageCreditStripeReferencesTx } from "@/src/lib/hosted-onboarding/usage-credit-stripe-reconciliation-context";
 import { createPrismaClient } from "@/src/lib/prisma";
@@ -143,6 +154,11 @@ async function cleanupUsageCreditFixture(
   fixture: UsageCreditFixture,
 ): Promise<void> {
   try {
+    await fixture.observer.hostedUsageCreditGrant.deleteMany({
+      where: {
+        entry: { beneficiaryMemberId: fixture.beneficiaryMemberId },
+      },
+    });
     await fixture.observer.hostedUsageCreditEntry.deleteMany({
       where: { beneficiaryMemberId: fixture.beneficiaryMemberId },
     });
@@ -336,6 +352,13 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           granted: false,
         });
         await fixture.thirdClient.$transaction(async (tx) => {
+          await tx.hostedUsageCreditGrant.deleteMany({
+            where: {
+              entry: {
+                beneficiaryMemberId: fixture.beneficiaryMemberId,
+              },
+            },
+          });
           await tx.hostedUsageCreditEntry.deleteMany({
             where: {
               beneficiaryMemberId: fixture.beneficiaryMemberId,
@@ -364,12 +387,19 @@ describe.skipIf(!runPostgresConcurrencyProof)(
               beneficiaryMemberId: fixture.beneficiaryMemberId,
             },
           }),
+          fixture.observer.hostedUsageCreditGrant.count({
+            where: {
+              entry: {
+                beneficiaryMemberId: fixture.beneficiaryMemberId,
+              },
+            },
+          }),
           fixture.observer.hostedUsageCreditEntry.count({
             where: {
               beneficiaryMemberId: fixture.beneficiaryMemberId,
             },
           }),
-        ])).resolves.toEqual([0, 0, 0]);
+        ])).resolves.toEqual([0, 0, 0, 0]);
       } finally {
         await cleanupUsageCreditFixture(fixture);
       }
@@ -534,6 +564,11 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         });
         memberLocked.resolve();
         await releaseDeletion.promise;
+        await tx.hostedUsageCreditGrant.deleteMany({
+          where: {
+            entry: { beneficiaryMemberId: fixture.beneficiaryMemberId },
+          },
+        });
         await tx.hostedUsageCreditEntry.deleteMany({
           where: { beneficiaryMemberId: fixture.beneficiaryMemberId },
         });
@@ -573,10 +608,15 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           fixture.observer.hostedUsageCreditPurchase.count({
             where: { beneficiaryMemberId: fixture.beneficiaryMemberId },
           }),
+          fixture.observer.hostedUsageCreditGrant.count({
+            where: {
+              entry: { beneficiaryMemberId: fixture.beneficiaryMemberId },
+            },
+          }),
           fixture.observer.hostedUsageCreditEntry.count({
             where: { beneficiaryMemberId: fixture.beneficiaryMemberId },
           }),
-        ])).resolves.toEqual([0, 0, 0]);
+        ])).resolves.toEqual([0, 0, 0, 0]);
       } finally {
         releaseDeletion.resolve();
         await Promise.allSettled([
@@ -679,6 +719,451 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         })).resolves.toBe(0);
       } finally {
         await cleanupUsageCreditFixture(fixture);
+      }
+    });
+
+    it("issues an idempotent consumable referral grant without a purchase", async () => {
+      const fixtureId = randomUUID();
+      const referrerMemberId = `member_usage_referral_${fixtureId}`;
+      const targetContainerMemberId = `member_usage_referral_target_${fixtureId}`;
+      const referralId = `hur_usage_referral_${fixtureId}`;
+      const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const now = new Date();
+
+      try {
+        await observer.hostedMember.createMany({
+          data: [
+            {
+              billingStatus: "active",
+              id: referrerMemberId,
+            },
+            {
+              billingStatus: "not_started",
+              id: targetContainerMemberId,
+            },
+          ],
+        });
+        await observer.hostedThreadContainer.create({
+          data: {
+            memberId: targetContainerMemberId,
+            ownerMemberId: referrerMemberId,
+          },
+        });
+        await observer.hostedUsageReferral.create({
+          data: {
+            armedAt: new Date(now.getTime() - 30 * 60_000),
+            beneficiaryMemberId: referrerMemberId,
+            expiresAt: new Date(now.getTime() - 60_000),
+            firstHumanMessageAt: new Date(now.getTime() - 15 * 60_000),
+            humanMessageCount: 15,
+            id: referralId,
+            lastHumanMessageAt: new Date(now.getTime() - 5 * 60_000),
+            nonReferrerMessageCount: 8,
+            observedEventKeysJson: ["event_1"],
+            observedSpeakerKeysJson: ["speaker_1", "speaker_2"],
+            policyCode: "active_group_v1",
+            policyVersion: HOSTED_USAGE_REFERRAL_POLICY_VERSION,
+            qualifiedAt: new Date(now.getTime() - 5 * 60_000),
+            referrerMemberId,
+            referrerSubjectKey: "authenticated-member",
+            rewardUsdMicros: HOSTED_USAGE_REFERRAL_GROUP_REWARD_USD_MICROS,
+            status: "target_bound",
+            targetBoundAt: new Date(now.getTime() - 20 * 60_000),
+            targetContainerMemberId,
+          },
+        });
+
+        await expect(reconcileHostedUsageReferralRewardAfterCommit({
+          prisma: observer,
+          referralId,
+        })).resolves.toBeNull();
+        await expect(reconcileHostedUsageReferralRewardAfterCommit({
+          prisma: observer,
+          referralId,
+        })).resolves.toBeNull();
+        await expect(observer.$transaction((tx) =>
+          settleHostedUsageCreditForUsageTx({
+            beneficiaryMemberId: referrerMemberId,
+            debitUsdMicros: 1_500_000n,
+            effectiveAt: now,
+            sourceUsageId: `usage:${referralId}`,
+            tx,
+          }), transactionOptions)
+        ).resolves.toEqual({
+          absorbedUsdMicros: 0n,
+          balanceUsdMicros: 2_000_000n,
+          debitedUsdMicros: 1_500_000n,
+          ledgerVersion: 2n,
+        });
+
+        await expect(Promise.all([
+          observer.hostedMember.findUniqueOrThrow({
+            select: {
+              usageCreditBalanceUsdMicros: true,
+              usageCreditLedgerVersion: true,
+            },
+            where: { id: referrerMemberId },
+          }),
+          observer.hostedUsageCreditGrant.findMany({
+            select: {
+              entry: {
+                select: {
+                  amountUsdMicros: true,
+                  kind: true,
+                  parentGrantEntryId: true,
+                  purchaseId: true,
+                  referralId: true,
+                },
+              },
+              remainingUsdMicros: true,
+            },
+            where: {
+              entry: { beneficiaryMemberId: referrerMemberId },
+            },
+          }),
+          observer.hostedUsageCreditEntry.findMany({
+            orderBy: { beneficiarySequence: "asc" },
+            select: {
+              amountUsdMicros: true,
+              beneficiarySequence: true,
+              kind: true,
+              parentGrantEntryId: true,
+              purchaseId: true,
+              referralId: true,
+            },
+            where: { beneficiaryMemberId: referrerMemberId },
+          }),
+          observer.hostedUsageReferral.findUniqueOrThrow({
+            select: {
+              observedEventKeysJson: true,
+              observedSpeakerKeysJson: true,
+              rewardedAt: true,
+              status: true,
+            },
+            where: { id: referralId },
+          }),
+        ])).resolves.toEqual([
+          {
+            usageCreditBalanceUsdMicros:
+              2_000_000n,
+            usageCreditLedgerVersion: 2n,
+          },
+          [{
+            entry: {
+              amountUsdMicros:
+                HOSTED_USAGE_REFERRAL_GROUP_REWARD_USD_MICROS,
+              kind: "referral_grant",
+              parentGrantEntryId: null,
+              purchaseId: null,
+              referralId,
+            },
+            remainingUsdMicros: 2_000_000n,
+          }],
+          [
+            {
+              amountUsdMicros:
+                HOSTED_USAGE_REFERRAL_GROUP_REWARD_USD_MICROS,
+              beneficiarySequence: 1n,
+              kind: "referral_grant",
+              parentGrantEntryId: null,
+              purchaseId: null,
+              referralId,
+            },
+            {
+              amountUsdMicros: -1_500_000n,
+              beneficiarySequence: 2n,
+              kind: "usage_debit",
+              parentGrantEntryId: expect.any(String),
+              purchaseId: null,
+              referralId,
+            },
+          ],
+          {
+            observedEventKeysJson: null,
+            observedSpeakerKeysJson: null,
+            rewardedAt: expect.any(Date),
+            status: "rewarded",
+          },
+        ]);
+      } finally {
+        await observer.hostedUsageCreditGrant.deleteMany({
+          where: {
+            entry: { beneficiaryMemberId: referrerMemberId },
+          },
+        });
+        await observer.hostedUsageCreditEntry.deleteMany({
+          where: { beneficiaryMemberId: referrerMemberId },
+        });
+        await observer.hostedUsageReferral.deleteMany({
+          where: { id: referralId },
+        });
+        await observer.hostedThreadContainer.deleteMany({
+          where: { memberId: targetContainerMemberId },
+        });
+        await observer.hostedMember.deleteMany({
+          where: { id: { in: [referrerMemberId, targetContainerMemberId] } },
+        });
+        await observer.$disconnect();
+      }
+    });
+
+    it("serializes different group referrers against one destination cap", async () => {
+      const fixtureId = randomUUID();
+      const sourceContainerMemberId = `member_usage_referral_source_${fixtureId}`;
+      const qualifiedTargetContainerMemberId =
+        `member_usage_referral_qualified_target_${fixtureId}`;
+      const qualifiedReferralId =
+        `hur_usage_referral_filler_0_${fixtureId}`;
+      const referrerMemberIds = [
+        `member_usage_referral_actor_a_${fixtureId}`,
+        `member_usage_referral_actor_b_${fixtureId}`,
+      ] as const;
+      const fillerMemberIds = Array.from(
+        { length: 5 },
+        (_, index) => `member_usage_referral_filler_${index}_${fixtureId}`,
+      );
+      const phoneNumbers = [
+        `+1555${String(Math.floor(Math.random() * 10_000_000)).padStart(7, "0")}`,
+        `+1666${String(Math.floor(Math.random() * 10_000_000)).padStart(7, "0")}`,
+      ] as const;
+      const phoneLookupKeys = phoneNumbers.map((phoneNumber) =>
+        createHostedPhoneLookupKey(phoneNumber)
+      );
+      if (phoneLookupKeys.some((lookupKey) => !lookupKey)) {
+        throw new Error("Expected blind phone lookup keys for referral actors.");
+      }
+      const observer = createPrismaClient({ databaseUrl, poolMax: 5 });
+      const firstClient = createPrismaClient({ databaseUrl, poolMax: 5 });
+      const secondClient = createPrismaClient({ databaseUrl, poolMax: 5 });
+      const now = new Date();
+
+      try {
+        await observer.hostedMember.createMany({
+          data: [
+            {
+              billingStatus: "not_started",
+              id: sourceContainerMemberId,
+            },
+            {
+              billingStatus: "not_started",
+              id: qualifiedTargetContainerMemberId,
+            },
+            ...referrerMemberIds.map((id) => ({
+              billingStatus: "active" as const,
+              id,
+            })),
+            ...fillerMemberIds.map((id) => ({
+              billingStatus: "active" as const,
+              id,
+            })),
+          ],
+        });
+        await observer.hostedThreadContainer.createMany({
+          data: [
+            {
+              memberId: sourceContainerMemberId,
+              ownerMemberId: referrerMemberIds[0],
+            },
+            {
+              memberId: qualifiedTargetContainerMemberId,
+              ownerMemberId: fillerMemberIds[0]!,
+            },
+          ],
+        });
+        await observer.hostedMemberIdentity.createMany({
+          data: referrerMemberIds.map((memberId, index) => ({
+            memberId,
+            phoneLookupKey: phoneLookupKeys[index]!,
+          })),
+        });
+        await observer.hostedUsageReferral.createMany({
+          data: fillerMemberIds.map((referrerMemberId, index) =>
+            index === 0
+              ? {
+                  armedAt: new Date(now.getTime() - 20 * 60_000),
+                  beneficiaryMemberId: sourceContainerMemberId,
+                  expiresAt: new Date(now.getTime() - 60_000),
+                  firstHumanMessageAt:
+                    new Date(now.getTime() - 15 * 60_000),
+                  humanMessageCount: 15,
+                  id: `hur_usage_referral_filler_${index}_${fixtureId}`,
+                  lastHumanMessageAt:
+                    new Date(now.getTime() - 2 * 60_000),
+                  nonReferrerMessageCount: 8,
+                  observedSpeakerKeysJson: ["speaker-a", "speaker-b"],
+                  policyCode: "active_group_v1" as const,
+                  policyVersion: HOSTED_USAGE_REFERRAL_POLICY_VERSION,
+                  qualifiedAt: new Date(now.getTime() - 2 * 60_000),
+                  referrerMemberId,
+                  referrerSubjectKey: `filler-subject-${index}`,
+                  rewardUsdMicros:
+                    HOSTED_USAGE_REFERRAL_GROUP_REWARD_USD_MICROS,
+                  status: "target_bound" as const,
+                  targetBoundAt: new Date(now.getTime() - 15 * 60_000),
+                  targetContainerMemberId: qualifiedTargetContainerMemberId,
+                }
+              : {
+                  armedAt: new Date(now.getTime() - 60_000 - index),
+                  beneficiaryMemberId: sourceContainerMemberId,
+                  expiresAt: new Date(now.getTime() + 24 * 60 * 60_000),
+                  id: `hur_usage_referral_filler_${index}_${fixtureId}`,
+                  policyCode: "active_group_v1" as const,
+                  policyVersion: HOSTED_USAGE_REFERRAL_POLICY_VERSION,
+                  referrerMemberId,
+                  referrerSubjectKey: `filler-subject-${index}`,
+                  rewardUsdMicros:
+                    HOSTED_USAGE_REFERRAL_GROUP_REWARD_USD_MICROS,
+                  status: "armed" as const,
+                }
+          ),
+        });
+
+        for (const [index, referrerMemberId] of referrerMemberIds.entries()) {
+          const read = await handleHostedUsageReferralGroupTool({
+            enabled: true,
+            memberId: sourceContainerMemberId,
+            prisma: observer,
+            request: {
+              action: "read_usage_referral",
+              linqSenderHandles: [phoneNumbers[index]!],
+            },
+          });
+          expect(read).toMatchObject({
+            result: {
+              referral: {
+                availablePolicies: [{
+                  code: "new_person_activation_v1",
+                }],
+              },
+              status: "ok",
+            },
+          });
+          expect(referrerMemberId).toBeTruthy();
+        }
+
+        const results = await Promise.all(
+          referrerMemberIds.map((_, index) =>
+            handleHostedUsageReferralGroupTool({
+              enabled: true,
+              memberId: sourceContainerMemberId,
+              prisma: index === 0 ? firstClient : secondClient,
+              request: {
+                action: "arm_usage_referral",
+                linqSenderHandles: [phoneNumbers[index]!],
+                policyCode: "new_person_activation_v1",
+              },
+            })
+          ),
+        );
+
+        expect(results.map((result) => result.result.status).sort()).toEqual([
+          "ok",
+          "unavailable",
+        ]);
+        expect(await observer.hostedUsageReferral.aggregate({
+          where: {
+            beneficiaryMemberId: sourceContainerMemberId,
+            OR: [
+              {
+                expiresAt: { gt: now },
+                status: { in: ["armed", "target_bound"] },
+              },
+              {
+                qualifiedAt: { not: null },
+                status: "target_bound",
+              },
+            ],
+          },
+          _sum: { rewardUsdMicros: true },
+        })).toEqual({
+          _sum: {
+            rewardUsdMicros:
+              HOSTED_USAGE_REFERRAL_BENEFICIARY_30D_CAP_USD_MICROS
+              - 500_000n,
+          },
+        });
+        expect(await observer.hostedUsageReferral.count({
+          where: {
+            beneficiaryMemberId: sourceContainerMemberId,
+            referrerMemberId: { in: [...referrerMemberIds] },
+            rewardUsdMicros:
+              HOSTED_USAGE_REFERRAL_PERSON_REWARD_USD_MICROS,
+            status: "armed",
+          },
+        })).toBe(1);
+        await expect(reconcileHostedUsageReferralRewardAfterCommit({
+          prisma: observer,
+          referralId: qualifiedReferralId,
+        })).rejects.toMatchObject({
+          code: "HOSTED_THREAD_NOTIFICATION_ROUTE_REQUIRED",
+        });
+        await expect(reconcileHostedUsageReferralRewardAfterCommit({
+          prisma: observer,
+          referralId: qualifiedReferralId,
+        })).rejects.toMatchObject({
+          code: "HOSTED_THREAD_NOTIFICATION_ROUTE_REQUIRED",
+        });
+        await expect(Promise.all([
+          observer.hostedUsageReferral.findUniqueOrThrow({
+            select: { rewardedAt: true, status: true },
+            where: { id: qualifiedReferralId },
+          }),
+          observer.hostedUsageCreditEntry.count({
+            where: {
+              kind: "referral_grant",
+              referralId: qualifiedReferralId,
+            },
+          }),
+        ])).resolves.toEqual([
+          {
+            rewardedAt: expect.any(Date),
+            status: "rewarded",
+          },
+          1,
+        ]);
+      } finally {
+        await observer.hostedUsageCreditGrant.deleteMany({
+          where: { entry: { referralId: qualifiedReferralId } },
+        });
+        await observer.hostedUsageCreditEntry.deleteMany({
+          where: { referralId: qualifiedReferralId },
+        });
+        await observer.hostedUsageReferral.deleteMany({
+          where: { beneficiaryMemberId: sourceContainerMemberId },
+        });
+        await observer.hostedMemberIdentity.deleteMany({
+          where: { memberId: { in: [...referrerMemberIds] } },
+        });
+        await observer.hostedThreadContainer.deleteMany({
+          where: {
+            memberId: {
+              in: [
+                sourceContainerMemberId,
+                qualifiedTargetContainerMemberId,
+              ],
+            },
+          },
+        });
+        await observer.hostedAiUsagePeriod.deleteMany({
+          where: { memberId: sourceContainerMemberId },
+        });
+        await observer.hostedMember.deleteMany({
+          where: {
+            id: {
+              in: [
+                sourceContainerMemberId,
+                qualifiedTargetContainerMemberId,
+                ...referrerMemberIds,
+                ...fillerMemberIds,
+              ],
+            },
+          },
+        });
+        await Promise.all([
+          observer.$disconnect(),
+          firstClient.$disconnect(),
+          secondClient.$disconnect(),
+        ]);
       }
     });
   },

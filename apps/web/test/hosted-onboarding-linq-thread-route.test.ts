@@ -20,6 +20,7 @@ import {
 import {
   createHostedExternalThreadIdentityLookupKey,
   createHostedExternalThreadLookupKey,
+  createHostedLinqMessageLookupKey,
   createHostedPhoneLookupKey,
   createHostedPhoneLookupKeyReadCandidates,
 } from "../src/lib/hosted-onboarding/contact-privacy";
@@ -34,6 +35,19 @@ const secureBoxMocks = vi.hoisted(() => ({
   openHostedUserSecureBoxString: vi.fn(),
   sealHostedUserSecureBoxString: vi.fn(),
 }));
+const usageReferralMocks = vi.hoisted(() => ({
+  bindArmedHostedUsageReferralToNewContainerTx: vi.fn(async () => ({
+    referralId: null,
+  })),
+  observeHostedUsageReferralInboundTx: vi.fn(async (): Promise<{
+    isBoundReferralTarget: boolean;
+    qualificationCandidateReferralId: string | null;
+  }> => ({
+    isBoundReferralTarget: false,
+    qualificationCandidateReferralId: null,
+  })),
+  reconcileHostedUsageReferralRewardAfterCommit: vi.fn(async () => null),
+}));
 
 vi.mock("../src/lib/hosted-routing/thread-route-store", async (importOriginal) => {
   const actual = await importOriginal<
@@ -45,6 +59,15 @@ vi.mock("../src/lib/hosted-routing/thread-route-store", async (importOriginal) =
       actual.requiresHostedThreadDeliveryRouteRefresh,
   };
 });
+
+vi.mock("../src/lib/hosted-growth/usage-referral", () => ({
+  bindArmedHostedUsageReferralToNewContainerTx:
+    usageReferralMocks.bindArmedHostedUsageReferralToNewContainerTx,
+  observeHostedUsageReferralInboundTx:
+    usageReferralMocks.observeHostedUsageReferralInboundTx,
+  reconcileHostedUsageReferralRewardAfterCommit:
+    usageReferralMocks.reconcileHostedUsageReferralRewardAfterCommit,
+}));
 
 vi.mock("../src/lib/hosted-crypto/secure-box", async (importOriginal) => {
   const actual = await importOriginal<
@@ -191,6 +214,14 @@ const TEST_KEYRING_ENTRIES = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  usageReferralMocks.bindArmedHostedUsageReferralToNewContainerTx
+    .mockResolvedValue({ referralId: null });
+  usageReferralMocks.observeHostedUsageReferralInboundTx.mockResolvedValue({
+    isBoundReferralTarget: false,
+    qualificationCandidateReferralId: null,
+  });
+  usageReferralMocks.reconcileHostedUsageReferralRewardAfterCommit
+    .mockResolvedValue(null);
   vi.mocked(prismaModule.getPrisma).mockReset();
   vi.mocked(linqModule.verifyAndParseHostedLinqWebhookRequest).mockReset();
   vi.mocked(linqClient.getHostedLinqChatHandles).mockReset();
@@ -3236,6 +3267,22 @@ describe("Linq group chat auto-provision", () => {
       };
     expect(containerCreate.data.ownerMemberId).toBe("member_owner_123");
     expect(containerCreate.data.monthlyUsageLimitUsdMicros).toBe(4_500_000n);
+    expect(usageReferralMocks.bindArmedHostedUsageReferralToNewContainerTx)
+      .toHaveBeenCalledExactlyOnceWith({
+        occurredAt: new Date("2026-06-24T12:00:00.000Z"),
+        ownerMemberId: "member_owner_123",
+        targetContainerMemberId: containerCreate.data.memberId,
+        tx: prisma,
+      });
+    expect(usageReferralMocks.observeHostedUsageReferralInboundTx)
+      .toHaveBeenCalledExactlyOnceWith({
+        containerMemberId: containerCreate.data.memberId,
+        eventKey: createHostedLinqMessageLookupKey("msg_group_123"),
+        occurredAt: new Date("2026-06-24T12:00:00.000Z"),
+        senderMemberId: null,
+        senderSubjectKey: createHostedPhoneLookupKey("+15551112222"),
+        tx: prisma,
+      });
     expect(prisma.hostedThreadRoute.create).toHaveBeenCalledTimes(1);
     expect(readSingleWakeHandoff(plan)).toMatchObject({
       eventId: "evt_group_123",
@@ -3312,6 +3359,10 @@ describe("Linq group chat auto-provision", () => {
         return null;
       });
     mockSuccessfulGroupProvision({ prisma, senderCore });
+    usageReferralMocks.observeHostedUsageReferralInboundTx.mockResolvedValue({
+      isBoundReferralTarget: true,
+      qualificationCandidateReferralId: "usage_referral_1",
+    });
     vi.mocked(linqClient.getHostedLinqChatHandles).mockImplementation(async () => {
       expect(transactionOpen).toBe(false);
       return [
@@ -3340,6 +3391,11 @@ describe("Linq group chat auto-provision", () => {
       chatId: "chat_group_123",
     });
     expect(linqClient.getHostedLinqChatSummary).not.toHaveBeenCalled();
+    expect(usageReferralMocks.reconcileHostedUsageReferralRewardAfterCommit)
+      .toHaveBeenCalledExactlyOnceWith({
+        prisma,
+        referralId: "usage_referral_1",
+      });
     expect(prisma.hostedThreadContainerParticipant.upsert).toHaveBeenCalledWith(
       expect.objectContaining({
         create: expect.objectContaining({

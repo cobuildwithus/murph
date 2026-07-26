@@ -134,6 +134,7 @@ import {
   HOSTED_RUNTIME_GROUP_SHARED_READ_PARTICIPANT_ID_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_SHARED_READ_SCOPE_KEY_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_SHARED_READ_UNAVAILABLE_REASON_MAX_CODE_POINTS,
+  HOSTED_USAGE_REFERRAL_POLICY_CODES,
   HOSTED_RUNTIME_NEWSLETTER_AUTHORIZED_SHARES_PER_PARTICIPANT_MAX,
   isHostedRuntimeNewsletterAuthorizationProof,
   HOSTED_RUNTIME_NEWSLETTER_HTML_MAX_LENGTH,
@@ -157,6 +158,8 @@ import {
   type HostedRuntimeGroupToolSelfOptOutContext,
   type HostedRuntimeGroupToolRequest,
   type HostedRuntimeGroupToolResponse,
+  type HostedRuntimeUsageReferralSnapshot,
+  type HostedUsageReferralPolicyCode,
   type HostedRuntimeNewsletterAuthorizedShare,
   type HostedRuntimeNewsletterParticipantSummary,
   type HostedRuntimeNewsletterToolRequest,
@@ -1107,6 +1110,40 @@ export function parseHostedRuntimeGroupToolRequest(
     };
   }
   if (
+    action === "read_usage_referral"
+    || action === "cancel_usage_referral"
+  ) {
+    assertAllowedObjectKeys(
+      record,
+      new Set(["action", "linqSenderHandles", "telegramSenderHandles"]),
+      `Hosted runtime group tool ${action} request`,
+    );
+    return {
+      action,
+      ...parseHostedRuntimeGroupSenderHandlesRequest(record),
+    };
+  }
+  if (action === "arm_usage_referral") {
+    assertAllowedObjectKeys(
+      record,
+      new Set([
+        "action",
+        "linqSenderHandles",
+        "policyCode",
+        "telegramSenderHandles",
+      ]),
+      "Hosted runtime group tool arm_usage_referral request",
+    );
+    return {
+      action,
+      ...parseHostedRuntimeGroupSenderHandlesRequest(record),
+      policyCode: parseHostedRuntimeUsageReferralPolicyCode(
+        record.policyCode,
+        "Hosted runtime group tool arm_usage_referral request policyCode",
+      ),
+    };
+  }
+  if (
     action === "read_current"
     || action === "read_usage"
     || action === "list_memberships"
@@ -1399,6 +1436,19 @@ function parseHostedRuntimeGroupToolSelfOptOutContext(
     senderHandle: requireString(record.senderHandle, `${label} senderHandle`),
     source,
   };
+}
+
+function parseHostedRuntimeUsageReferralPolicyCode(
+  value: unknown,
+  label: string,
+): HostedUsageReferralPolicyCode {
+  const code = requireString(value, label);
+  for (const policyCode of HOSTED_USAGE_REFERRAL_POLICY_CODES) {
+    if (code === policyCode) {
+      return policyCode;
+    }
+  }
+  throw new TypeError(`${label} is not supported.`);
 }
 
 /**
@@ -2213,6 +2263,65 @@ export function parseHostedRuntimeGroupToolResponse(
     }
   }
 
+  if (
+    action === "arm_usage_referral"
+    || action === "cancel_usage_referral"
+    || action === "read_usage_referral"
+  ) {
+    const label = `Hosted runtime group tool ${action} response result`;
+    const result = requireObject(record.result, label);
+    const status = requireString(result.status, `${label} status`);
+    if (status === "unavailable") {
+      assertAllowedObjectKeys(
+        result,
+        new Set(["referral", "status", "unavailableReason"]),
+        label,
+      );
+      if (result.referral !== null) {
+        throw new TypeError(`${label} referral must be null when unavailable.`);
+      }
+      return {
+        action,
+        result: {
+          referral: null,
+          status,
+          unavailableReason: parseHostedRuntimeGroupUnavailableReason(
+            result,
+            `${label} unavailableReason`,
+          ),
+        },
+      };
+    }
+    if (status === "ok") {
+      assertAllowedObjectKeys(
+        result,
+        new Set(["outcome", "referral", "status"]),
+        label,
+      );
+      const outcome = requireString(result.outcome, `${label} outcome`);
+      const expectedOutcome = action === "arm_usage_referral"
+        ? "armed"
+        : action === "cancel_usage_referral"
+          ? "canceled"
+          : "read";
+      if (outcome !== expectedOutcome) {
+        throw new TypeError(`${label} outcome does not match its action.`);
+      }
+      return {
+        action,
+        result: {
+          outcome: expectedOutcome,
+          referral: parseHostedRuntimeUsageReferralSnapshot(
+            result.referral,
+            `${label} referral`,
+          ),
+          status,
+        },
+      };
+    }
+    throw new TypeError(`${label} status is not supported.`);
+  }
+
   if (action === "read_shared") {
     return {
       action,
@@ -2522,6 +2631,127 @@ export function parseHostedRuntimeGroupToolResponse(
   }
 
   throw new TypeError("Hosted runtime group tool response action/status is not supported.");
+}
+
+function parseHostedRuntimeUsageReferralSnapshot(
+  value: unknown,
+  label: string,
+): HostedRuntimeUsageReferralSnapshot {
+  const record = requireObject(value, label);
+  assertAllowedObjectKeys(
+    record,
+    new Set(["active", "availablePolicies", "trialCreditNotice"]),
+    label,
+  );
+  const availablePolicyValues = requireArray(
+    record.availablePolicies,
+    `${label} availablePolicies`,
+  );
+  if (availablePolicyValues.length > HOSTED_USAGE_REFERRAL_POLICY_CODES.length) {
+    throw new TypeError(`${label} availablePolicies has too many entries.`);
+  }
+  const seenPolicies = new Set<HostedUsageReferralPolicyCode>();
+  const availablePolicies = availablePolicyValues.map((value, index) => {
+    const policyLabel = `${label} availablePolicies[${index}]`;
+    const policy = requireObject(value, policyLabel);
+    assertAllowedObjectKeys(
+      policy,
+      new Set(["code", "requirementsLabel", "rewardLabel"]),
+      policyLabel,
+    );
+    const code = parseHostedRuntimeUsageReferralPolicyCode(
+      policy.code,
+      `${policyLabel} code`,
+    );
+    if (seenPolicies.has(code)) {
+      throw new TypeError(`${label} availablePolicies must be unique.`);
+    }
+    seenPolicies.add(code);
+    return {
+      code,
+      requirementsLabel: parseHostedRuntimeUsageReferralLabel(
+        policy.requirementsLabel,
+        `${policyLabel} requirementsLabel`,
+      ),
+      rewardLabel: parseHostedRuntimeUsageReferralLabel(
+        policy.rewardLabel,
+        `${policyLabel} rewardLabel`,
+      ),
+    };
+  });
+  const trialCreditNotice = record.trialCreditNotice === null
+    ? null
+    : parseHostedRuntimeUsageReferralLabel(
+        record.trialCreditNotice,
+        `${label} trialCreditNotice`,
+      );
+
+  if (record.active === null) {
+    return { active: null, availablePolicies, trialCreditNotice };
+  }
+  const active = requireObject(record.active, `${label} active`);
+  assertAllowedObjectKeys(
+    active,
+    new Set([
+      "destinationKind",
+      "expiresAt",
+      "policyCode",
+      "rewardLabel",
+      "state",
+    ]),
+    `${label} active`,
+  );
+  const destinationKind = requireString(
+    active.destinationKind,
+    `${label} active destinationKind`,
+  );
+  if (destinationKind !== "group" && destinationKind !== "personal") {
+    throw new TypeError(`${label} active destinationKind is invalid.`);
+  }
+  const state = requireString(active.state, `${label} active state`);
+  if (state !== "armed" && state !== "target_bound") {
+    throw new TypeError(`${label} active state is invalid.`);
+  }
+  const expiresAt = requireString(
+    active.expiresAt,
+    `${label} active expiresAt`,
+  );
+  const expiresAtDate = new Date(expiresAt);
+  if (
+    !Number.isFinite(expiresAtDate.getTime())
+    || expiresAtDate.toISOString() !== expiresAt
+  ) {
+    throw new TypeError(`${label} active expiresAt must be a canonical timestamp.`);
+  }
+
+  return {
+    active: {
+      destinationKind,
+      expiresAt,
+      policyCode: parseHostedRuntimeUsageReferralPolicyCode(
+        active.policyCode,
+        `${label} active policyCode`,
+      ),
+      rewardLabel: parseHostedRuntimeUsageReferralLabel(
+        active.rewardLabel,
+        `${label} active rewardLabel`,
+      ),
+      state,
+    },
+    availablePolicies,
+    trialCreditNotice,
+  };
+}
+
+function parseHostedRuntimeUsageReferralLabel(
+  value: unknown,
+  label: string,
+): string {
+  return parseHostedRuntimeGroupAskBoundedText({
+    label,
+    maxCodePoints: 500,
+    value,
+  });
 }
 
 export function parseHostedRuntimeNewsletterToolRequest(

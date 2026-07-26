@@ -1,6 +1,6 @@
 # Reliability
 
-Last verified: 2026-07-25
+Last verified: 2026-07-26
 
 ## Current Guardrails
 
@@ -58,6 +58,28 @@ Last verified: 2026-07-25
   database-plus-Temporal recheck handoff are hard-bounded below the derived
   receipt lease, and receipt completion must win its exact attempt fence; a
   timed-out or reclaimed worker remains retryable and cannot report completion.
+- Purchase and referral credit share one immutable credit-entry ledger. Each
+  positive entry owns one entry-keyed remaining-capacity projection; settlement
+  consumes those grants FIFO under the beneficiary member lock. The purchase
+  remaining field is only a synchronized expand-phase projection. Refund and
+  dispute reconciliation requires a purchase-backed entry and cannot touch a
+  referral-backed entry. Referral observation stays inside the canonical
+  provider-ingress transaction without acquiring the beneficiary lock.
+  Arming reserves both rolling caps under referrer plus stable-order
+  beneficiary locks, counting recent rewards and every nonexpired active
+  commitment. Qualification records a pre-expiry durable fence with its
+  evidence; post-commit reconciliation rechecks the frozen policy but cannot
+  reject that qualified commitment because processing ran after expiry or
+  another mission armed. The immediate ingress handoff and a bounded
+  Vercel-authenticated minute recovery pass both retry idempotent reward
+  reconciliation. The source mailbox append and its completion fence commit
+  atomically after reward commit. Durable mailbox reconciliation owns a missed
+  wake, so stale route, append, or signal failure cannot reverse or duplicate
+  earned credit. Referral production is disabled through the expand deployment
+  and prior-function drain. The
+  post-drain contract migration resynchronizes purchase projections before it
+  widens and validates the ledger checks; only then may Web enable referral
+  arming, binding, and observation.
 - Matching usage-credit refund or dispute events must never fall through to the
   subscription suspension path. Live re-fetch plus the same beneficiary lock
   must append replay-safe, capped signed `refund_adjustment` or

@@ -544,6 +544,9 @@ type PrismaFixtureBase = {
     findMany?: MockedFunction;
     updateMany?: MockedFunction;
   };
+  hostedUsageReferral?: {
+    findUnique?: MockedFunction;
+  };
   hostedWebhookReceipt?: HostedWebhookReceiptFixture;
   hostedWebhookReceiptSideEffect?: HostedWebhookReceiptSideEffectFixture;
 };
@@ -9652,6 +9655,14 @@ function asPrismaTransactionClient<T extends PrismaFixtureBase>(
   } else {
     prisma.hostedThreadRoute.findFirst ??= vi.fn().mockResolvedValue(null);
     prisma.hostedThreadRoute.updateMany ??= vi.fn().mockResolvedValue({ count: 1 });
+  }
+  if (!prisma.hostedUsageReferral?.findUnique) {
+    Object.defineProperty(prisma, "hostedUsageReferral", {
+      configurable: true,
+      value: {
+        findUnique: vi.fn().mockResolvedValue(null),
+      },
+    });
   }
 
   if (!prisma.hostedWebhookReceiptSideEffect?.deleteMany || !prisma.hostedWebhookReceiptSideEffect?.upsert) {

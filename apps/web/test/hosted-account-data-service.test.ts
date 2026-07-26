@@ -126,6 +126,8 @@ const REQUIRED_STORE_SLUGS = [
   "prisma.hosted_ai_usage_period",
   "prisma.hosted_growth_aggregate",
   "prisma.hosted_usage_credit_entry",
+  "prisma.hosted_usage_credit_grant",
+  "prisma.hosted_usage_referral",
   "prisma.hosted_usage_credit_purchase",
   "prisma.hosted_product_feedback",
   "prisma.hosted_linq_daily_state",
@@ -483,7 +485,7 @@ describe("deleteHostedAccountData", () => {
     });
   });
 
-  it("deletes usage-credit entries before purchases and member rows", async () => {
+  it("deletes usage-credit entries and grants before source and member rows", async () => {
     const deleteCalls: HostedAccountDeletionPrismaDeleteCall[] = [];
     const operationOrder: string[] = [];
     const prisma = createHostedAccountDeletionPrismaForTest({
@@ -500,6 +502,8 @@ describe("deleteHostedAccountData", () => {
 
     expect(result.deletedCounts).toMatchObject({
       "prisma.hosted_usage_credit_entry": 1,
+      "prisma.hosted_usage_credit_grant": 1,
+      "prisma.hosted_usage_referral": 2,
       "prisma.hosted_usage_credit_purchase": 1,
     });
     expect(deleteCalls).toEqual(expect.arrayContaining([
@@ -513,13 +517,34 @@ describe("deleteHostedAccountData", () => {
         },
       },
       {
+        model: "hostedUsageCreditGrant",
+        where: {
+          entry: {
+            OR: [
+              { beneficiaryMemberId: "member_123" },
+              {
+                purchase: {
+                  beneficiaryMemberId: "member_123",
+                },
+              },
+            ],
+          },
+        },
+      },
+      {
         model: "hostedUsageCreditPurchase",
         where: {
           beneficiaryMemberId: "member_123",
         },
       },
     ]));
+    expect(operationOrder.indexOf("delete:hostedUsageCreditGrant")).toBeLessThan(
+      operationOrder.indexOf("delete:hostedUsageCreditEntry"),
+    );
     expect(operationOrder.indexOf("delete:hostedUsageCreditEntry")).toBeLessThan(
+      operationOrder.indexOf("delete:hostedUsageReferral"),
+    );
+    expect(operationOrder.indexOf("delete:hostedUsageReferral")).toBeLessThan(
       operationOrder.indexOf("delete:hostedUsageCreditPurchase"),
     );
     expect(operationOrder.indexOf("delete:hostedUsageCreditPurchase")).toBeLessThan(
@@ -2014,6 +2039,10 @@ function createHostedAccountDeletionPrismaForTest(input: {
       input.deleteCalls?.push({ model, where: args.where });
       return { count: 1 };
     },
+    updateMany: async () => {
+      input.operationOrder?.push(`update:${model}`);
+      return { count: 1 };
+    },
   });
   const transactionPrisma = new Proxy<HostedAccountDeletionPrismaTransactionFake>({
     $executeRaw: async (...args: unknown[]) => {
@@ -2233,6 +2262,7 @@ type HostedAccountDeletionConnectedAppIntentRow = {
 type HostedAccountDeletionPrismaDeleteDelegate = {
   count(args: { where: unknown }): Promise<number>;
   deleteMany(args: { where: unknown }): Promise<{ count: number }>;
+  updateMany(args: unknown): Promise<{ count: number }>;
 };
 
 type HostedAccountDeletionPrismaTransactionFake = {

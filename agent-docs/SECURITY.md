@@ -1,6 +1,6 @@
 # Security
 
-Last verified: 2026-07-25
+Last verified: 2026-07-26
 
 ## Non-Negotiable Rules
 
@@ -42,6 +42,23 @@ Last verified: 2026-07-25
 - Hosted automation record authority is scoped by the active write-fenced member or synthetic-group workspace and its restored canonical vault, not by each record's stored delivery route. A narrow automation port is captured from durable accepted input for the active authenticated root turn and binds new or explicit retarget writes to that trusted route. Invocation-scoped automation and device authority is exposed only through typed root-turn dynamic tools and must be absent from Codex App Server and descendant shell env. The dispatcher must reject descendant, stale-turn, or foreign-thread use. Tool arguments must not let the model select another route. Attended and scheduled root turns use the same dynamic-tool planner; the invocation's actual route, audience, available ports, and accepted-input evidence decide which tools can perform an effect. Non-direct email remains unable to mutate durable room controls because its audience is not authenticated for those controls, not because it runs a reduced assistant profile.
 - Group newsletter setup is valid only from a verified non-direct iMessage or Telegram group route. The structured setup action owns the stable slug, canonical configuration, and exactly one system delivery tag; ordinary model-authored automation writes cannot claim those tags. The ordinary dynamic-tool planner exposes the newsletter email port only when the trusted runtime supplies scheduled email occurrence authority, so a current-chat newsletter receives no email capability. For group-email preparation, the signed callback member resolves the unique hosted group; any legacy request `groupId` is compatibility-only, ignored, and never authority.
 - Interactive group participant attribution comes only from provider-authenticated ingress, never from the model or from message content. Web attaches the sending Telegram user id to non-direct route-authorized inbound only after that id resolves, under row lock, to exactly one active linked member; anonymous administrators, `sender_chat` posts, bots, unlinked users, and direct threads stay unattributed. Sender evidence reaching `read_shared` travels in one field per channel and is matched only against that channel's member identity index, because a numeric Telegram user id normalizes into a valid phone lookup key and would otherwise resolve to an unrelated member; populating both fields fails closed. A Telegram `@username` may accompany the handle for display only; it is optional, user-mutable, and re-registerable, so it is never identity authority.
+- Hosted usage-referral authority is web-owned and current-sender-bound. The
+  model may choose only a versioned policy code after one exact current sender
+  explicitly accepts; it cannot supply a referrer, beneficiary, amount, source,
+  target, route, provider id, counter, or qualification fact. Personal calls
+  bind the callback member. Group calls require exactly one runtime-injected
+  provider-scoped sender handle that resolves to an active personal member;
+  mixed-channel, missing, or ambiguous sender evidence fails closed.
+  Provider adapters store only domain-separated lookup keys and bounded
+  counters. Unlinked Telegram group messages may contribute evidence only for
+  an already-bound target and must remain outside the assistant mailbox,
+  visible setup-reply path, and authorization path. Referral cap commitments
+  and rewards mutate only through the beneficiary lock and server policy
+  catalog; browser state and model output never reserve or grant credit. The
+  Web owner fails arming, binding, and observation closed unless
+  `HOSTED_USAGE_REFERRALS_ENABLED=1`; operators must not enable it until the
+  post-drain ledger contract migration has widened and validated the credit
+  entry constraints.
 - A scheduled non-direct Telegram target is routing data, not authority. Before group tools, shared-data reads, or model work, the runner must ask the signed Web route owner to bind the exact Telegram thread to the callback-authenticated synthetic container member. Persist that exact typed authority on the ordinary outbox, then reassert it immediately before Telegram text, image, reaction, or voice provider entry. A missing owner/effect is retryable, a changed or mismatched owner fails closed, and neither a stored automation target nor a runner-injected provider credential may substitute for the live route assertion. Ordinary current-inbound group replies remain authorized by their admitted route and do not require manufactured scheduled authority.
 - Before adding a new external API, auth surface, wallet surface, storage authority, webhook, or runtime ingress path, document the trust boundary in `ARCHITECTURE.md` and the concrete rules here.
 - Usage-credit Checkout is an authenticated payment boundary, not an assistant

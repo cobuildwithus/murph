@@ -7,6 +7,7 @@ import {
 import {
   createHostedExternalThreadIdentityLookupKey,
   createHostedExternalThreadLookupKey,
+  createHostedTelegramMessageLookupKey,
   createHostedTelegramUsernameLookupKey,
   createHostedTelegramUserLookupKey,
 } from "@/src/lib/hosted-onboarding/contact-privacy";
@@ -25,6 +26,9 @@ const mocks = vi.hoisted(() => {
   const state = {
     drainHostedExecutionOutboxBestEffort: vi.fn(),
     enqueueHostedExecutionOutbox: vi.fn(),
+    bindArmedHostedUsageReferralToNewContainerTx: vi.fn(async () => ({
+      referralId: null,
+    })),
     ensureHostedThreadContainerRouteTx: vi.fn(async () => ({
       activationEventId: null,
       activationMailboxItemId: null,
@@ -85,6 +89,14 @@ const mocks = vi.hoisted(() => {
     })),
     materializePendingHostedGroupJoinConfirmationsBestEffort: vi.fn(async () => {}),
     provisionActiveHostedDomainRootEnvelopeForUserOnly: vi.fn(async () => ({})),
+    observeHostedUsageReferralInboundTx: vi.fn(async (): Promise<{
+      isBoundReferralTarget: boolean;
+      qualificationCandidateReferralId: string | null;
+    }> => ({
+      isBoundReferralTarget: false,
+      qualificationCandidateReferralId: null,
+    })),
+    reconcileHostedUsageReferralRewardAfterCommit: vi.fn(async () => null),
     readHostedThreadRouteByThreadIdentity: vi.fn(async (): Promise<{
       channel: "telegram";
       containerMemberId: string;
@@ -183,6 +195,15 @@ vi.mock("@/src/lib/hosted-routing/thread-route-store", async () => {
   };
 });
 
+vi.mock("@/src/lib/hosted-growth/usage-referral", () => ({
+  bindArmedHostedUsageReferralToNewContainerTx:
+    mocks.bindArmedHostedUsageReferralToNewContainerTx,
+  observeHostedUsageReferralInboundTx:
+    mocks.observeHostedUsageReferralInboundTx,
+  reconcileHostedUsageReferralRewardAfterCommit:
+    mocks.reconcileHostedUsageReferralRewardAfterCommit,
+}));
+
 vi.mock("@/src/lib/hosted-groups/group-join-confirmation", () => ({
   materializePendingHostedGroupJoinConfirmationsBestEffort:
     mocks.materializePendingHostedGroupJoinConfirmationsBestEffort,
@@ -280,6 +301,14 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
       created: false,
       demotedMailboxConsumedAt: null,
     });
+    mocks.bindArmedHostedUsageReferralToNewContainerTx.mockResolvedValue({
+      referralId: null,
+    });
+    mocks.observeHostedUsageReferralInboundTx.mockResolvedValue({
+      isBoundReferralTarget: false,
+      qualificationCandidateReferralId: null,
+    });
+    mocks.reconcileHostedUsageReferralRewardAfterCommit.mockResolvedValue(null);
     mocks.readHostedThreadRouteByThreadIdentity.mockResolvedValue(null);
     mocks.drainHostedExecutionOutboxBestEffort.mockResolvedValue(undefined);
     mocks.enqueueHostedExecutionOutbox.mockResolvedValue(undefined);
@@ -442,6 +471,13 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
 
   it("routes a linked active member's Telegram group message through the thread container", async () => {
     mocks.runtimeEnv.telegramWebhookSecret = "telegram-secret";
+    mocks.ensureHostedThreadContainerRouteTx.mockResolvedValue({
+      activationEventId: null,
+      activationMailboxItemId: null,
+      containerMemberId: "member_telegram_group_container",
+      created: true,
+      demotedMailboxConsumedAt: null,
+    });
     const hostedMemberRoutingUpsert = vi.fn().mockResolvedValue({});
     const prisma = withPrismaTransaction({
       hostedMemberRouting: {
@@ -491,6 +527,25 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
       prisma,
       threadId: "-100123",
     });
+    expect(mocks.bindArmedHostedUsageReferralToNewContainerTx)
+      .toHaveBeenCalledExactlyOnceWith({
+        occurredAt: new Date("2026-03-26T10:56:40.000Z"),
+        ownerMemberId: "member_telegram_owner",
+        targetContainerMemberId: "member_telegram_group_container",
+        tx: prisma,
+      });
+    expect(mocks.observeHostedUsageReferralInboundTx)
+      .toHaveBeenCalledExactlyOnceWith({
+        containerMemberId: "member_telegram_group_container",
+        eventKey: createHostedTelegramMessageLookupKey({
+          chatId: "-100123",
+          messageId: "2",
+        }),
+        occurredAt: new Date("2026-03-26T10:56:40.000Z"),
+        senderMemberId: "member_telegram_owner",
+        senderSubjectKey: createHostedTelegramUserLookupKey("456"),
+        tx: prisma,
+      });
     expect(hostedMemberRoutingUpsert).not.toHaveBeenCalled();
     expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -524,6 +579,63 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
       expectedUserId: "member_telegram_group_container",
       mailboxItemId: "mailbox_telegram:update:322",
     });
+  });
+
+  it("counts an unlinked group sender only as bounded referral evidence", async () => {
+    mocks.runtimeEnv.telegramWebhookSecret = "telegram-secret";
+    mocks.readHostedThreadRouteByThreadIdentity.mockResolvedValue({
+      channel: "telegram",
+      containerMemberId: "member_existing_group_container",
+      owner: { id: "member_telegram_owner" },
+    });
+    mocks.observeHostedUsageReferralInboundTx.mockResolvedValue({
+      isBoundReferralTarget: true,
+      qualificationCandidateReferralId: "usage_referral_1",
+    });
+    const prisma = withPrismaTransaction({
+      hostedMemberRouting: {
+        findMany: vi.fn().mockResolvedValue([]),
+      },
+    });
+
+    await expect(handleHostedOnboardingTelegramWebhook({
+      prisma,
+      rawBody: JSON.stringify({
+        message: {
+          chat: { id: -100123, title: "Family chat", type: "group" },
+          date: 1_774_522_601,
+          from: { first_name: "Casey", id: 789 },
+          message_id: 3,
+          text: "hello murph",
+        },
+        update_id: 323,
+      }),
+      secretToken: "telegram-secret",
+    })).resolves.toEqual({
+      ignored: true,
+      ok: true,
+      reason: "usage-referral-evidence-only",
+    });
+
+    expect(mocks.observeHostedUsageReferralInboundTx)
+      .toHaveBeenCalledExactlyOnceWith({
+        containerMemberId: "member_existing_group_container",
+        eventKey: createHostedTelegramMessageLookupKey({
+          chatId: "-100123",
+          messageId: "3",
+        }),
+        occurredAt: new Date("2026-03-26T10:56:41.000Z"),
+        senderMemberId: null,
+        senderSubjectKey: createHostedTelegramUserLookupKey("789"),
+        tx: prisma,
+      });
+    expect(mocks.reconcileHostedUsageReferralRewardAfterCommit)
+      .toHaveBeenCalledExactlyOnceWith({
+        prisma,
+        referralId: "usage_referral_1",
+      });
+    expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
+    expect(mocks.ensureHostedThreadContainerRouteTx).not.toHaveBeenCalled();
   });
 
   it("reuses an existing Telegram group route for another linked active sender", async () => {

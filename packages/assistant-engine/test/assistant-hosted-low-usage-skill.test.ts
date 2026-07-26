@@ -69,6 +69,9 @@ describe('assistant hosted low-usage skill', () => {
     expect(skill).toContain('matches exactly one `members` row')
     expect(skill).toContain('navigation to Settings > Family')
     expect(skill).toContain('call `murph.group action="read_usage"` once before writing the')
+    expect(skill).toContain('`murph.group action="read_usage_referral"` once')
+    expect(skill).toContain('This only offers')
+    expect(skill).toContain('does not arm one')
     expect(skill).toContain('include it in the same segment as a plain first-party link')
     expect(skill).toContain("Match the room's energy")
     expect(skill).toContain('nominating someone to cover it')
@@ -87,6 +90,9 @@ describe('assistant hosted low-usage skill', () => {
     expect(skill).toContain(
       'A recommendation or low-usage warning is not consent',
     )
+    expect(skill).toContain('Merely describing a referral mission is not consent')
+    expect(skill).toContain('one exact current sender chooses one exact returned policy')
+    expect(skill).toContain('never as a promised number of')
     expect(skill).toContain('require a matching current quote')
     expect(skill).toContain('A bare yes after multiple options is ambiguous')
     expect(skill).toContain(

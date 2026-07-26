@@ -242,8 +242,16 @@ The hosted Prisma schema keeps ownership sharp and nested:
 - `HostedAiUsage` owns the canonical hosted usage ledger
 - `HostedUsageCreditPurchase` owns the immutable payer, beneficiary, offer,
   frozen Checkout request, and reconciliation state for one intentional
-  top-up. `HostedUsageCreditEntry` is the append-only credit source of truth;
-  `HostedMember` holds only its bounded balance/version projection.
+  top-up. `HostedUsageCreditEntry` owns the immutable purchase or referral
+  accounting history, `HostedUsageCreditGrant` stores only each positive
+  entry's remaining-capacity projection, and `HostedMember` holds only its
+  bounded balance/version projection.
+- `HostedUsageReferral` owns one explicitly armed personal referrer, frozen
+  personal-or-group beneficiary, versioned policy, next-new-group binding,
+  bounded provider-neutral qualification evidence, and terminal reward
+  receipt. Provider adapters normalize Linq and Telegram evidence into this
+  Web-owned state; the assistant and browser never own attribution or grant
+  authority.
 - `HostedProductFeedback` owns assistant-captured structured product feedback
   with only a bounded product-only summary, kind, and optional changelog ids,
   without storing raw conversation text, health details, tags, topics, or provider payloads
@@ -435,6 +443,14 @@ Optional but recommended:
 - `HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_JWK`
 - `HOSTED_WEB_CALLBACK_SIGNING_KEY_ID`
 - `HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_KEYRING_JSON`
+
+Rollout gates:
+
+- `HOSTED_USAGE_REFERRALS_ENABLED=1` enables referral arming, fresh-group
+  binding, and qualification observation. Every other value fails closed. Do
+  not enable it until the additive migration is live, the previous Vercel
+  function window has drained, and contract migration
+  `20260726123000_allow_hosted_usage_referral_credit_entries` has applied.
 
 Required when hosted computer-use is enabled:
 
@@ -632,13 +648,21 @@ Hosted managed crypto:
 Hosted AI usage metering:
 
 - Hosted AI usage rows are recorded locally for allowance, audit, and future billing analysis. The hosted app no longer attaches Stripe usage prices at checkout or posts Stripe meter events.
-- Hosted AI included-allowance accounting is app-owned: web prices recorded `HostedAiUsage` rows into allowance columns and maintains `HostedAiUsagePeriod` spend snapshots from current hosted billing state. Subsequent usage-bearing work is blocked when included capacity and purchased usage credit are both exhausted. The operation that crosses the boundary may finish; its accepted input is not discarded.
+- Hosted AI included-allowance accounting is app-owned: web prices recorded `HostedAiUsage` rows into allowance columns and maintains `HostedAiUsagePeriod` spend snapshots from current hosted billing state. Subsequent usage-bearing work is blocked when included capacity and usage credit are both exhausted. The operation that crosses the boundary may finish; its accepted input is not discarded.
 - Retell phone calls use the same ledger through a web-internal deterministic row keyed by the Murph call id. Web records Retell's final provider-reported combined cost, including discounts and transfer-leg cost, and never accepts that cost field from the hosted-runtime usage callback. `transfer_ended` and the pre-armed phone-call reconciliation workflow prevent a provisional transfer cost or lost callback from becoming permanent undercounting.
-- Purchased usage credit is separate from the included-allowance period. A beneficiary-serialized transaction consumes included capacity first, then append-only credit grants in order, while `HostedMember` carries the bounded balance/version hot-path projection. Unused credit carries across allowance periods and does not create subscription entitlement.
+- Usage credit is separate from the included-allowance period. A beneficiary-serialized transaction consumes included capacity first, then purchase/referral grant entries with remaining capacity in FIFO order, while `HostedMember` carries the bounded balance/version hot-path projection. Unused credit carries across allowance periods and does not create subscription entitlement. Stripe refunds and disputes may reverse only purchase-backed entries; earned referral grants are final.
 - Web derives one read-only member plan-usage projection from that same allowance resolver and usage ledger for Settings and `murph.plan_usage`. It persists no forecast and performs no Stripe read. `recommendedAction` is thresholded and may return `add_usage` only for eligible direct paid Pulse and Edge members; the authenticated Settings surface exposes the fixed $5, $10, and $25 catalog. An opted-in `subscriptionActionQuote` returns current terms for an explicit subscription request even below the threshold; it is not a recommendation or consent. Callers that send the original empty request receive the original response shape with that field omitted.
 - Usage-credit Checkout accepts the existing personal self-target, an authenticated active Family owner selecting one exact active unsuspended Family membership, or the existing hosted-group funding target. Family admission re-binds the opaque path selector to the authenticated owner, their active unsuspended group, the exact active member, and that group's canonical `HostedAccountGroupBillingRef` customer. Every flow accepts only a server-owned offer code and single-use request key, uses Stripe `mode=payment`, re-fetches the configured active one-time Price to verify its exact single-currency amount and shape, and explicitly disables Adaptive Pricing; the browser cannot choose an arbitrary amount, Price, Customer, payer, beneficiary, grant, or Checkout URL.
 - A browser return never grants credit. The existing verified Stripe event receipt owner re-fetches Checkout, line-item, PaymentIntent, and Charge facts and commits at most one purchase grant. After a new grant commits, the same durable Stripe-event retry lane requests the normal runtime recheck so preserved blocked input can resume.
 - The purchase schema freezes payer and beneficiary separately. Personal, Family-member, and hosted-group purchases converge on the same append-only beneficiary ledger, Stripe verification, refund/dispute adjustments, status/expire routes, and webhook-only grant path. Family top-ups reuse the active group billing customer; they do not create a personal customer, Family wallet, second ledger, or second credit projection. One payer-wide nonterminal purchase is the ambiguity fence: a conflicting Family target receives no payable URL or retry action, and former-member recovery remains payable only when Settings can show an owner-recognizable frozen beneficiary.
+- Conversational usage referrals reserve their fixed server-catalog reward
+  against referrer and beneficiary caps when armed, bind only the exact
+  referrer's next new group, and freeze pre-expiry qualification in the
+  provider-ingress transaction. Immediate post-commit reconciliation and the
+  bounded minute recovery cron converge on one final referral grant and one
+  atomic source-mailbox celebration fence. Unlinked Telegram group evidence
+  stays silent and outside assistant access; direct setup behavior is
+  unchanged.
 - Web owns the separate `murph.subscription` callback for an explicit private member choice to continue Pulse at trial end, start Pulse now, or upgrade Pulse to Edge. It binds the runtime-supplied accepted input id to the callback member, atomically claims the first action on that existing mailbox row, re-derives current eligibility, and delegates to the existing billing services. An exact retry is allowed and a conflicting action fails closed. Pulse activation keeps its existing Stripe-hosted invoice or Customer Portal handoff when payment is required; a pending Edge change returns Customer Portal without a separate invoice lookup. No custom checkout or second billing owner is introduced.
 - Homepage period facts come from the same allowance owner. Spend accounting ensure-creates a fresh billing or calendar period inside the spend transaction, with no reset cron.
 - Web applies the composed access-and-usage gate in runtime reconciliation and
@@ -1278,6 +1302,7 @@ Internal hosted maintenance and Cloudflare callback routes:
 - `POST /api/internal/computer/runs/:runId/pause-for-user`
 - `POST /api/internal/computer/runs/:runId/finish`
 - `GET /api/internal/hosted-onboarding/stripe/cron`
+- `GET /api/internal/hosted-growth/usage-referral/cron`
 
 The old staged-payload and deleted import completion/release callback routes
 are gone. Cloudflare no longer round-trips through broad mirror CRUD routes,
@@ -1373,7 +1398,7 @@ Current hosted billing assumptions:
   runtime's canonical allowance gate. A row reset verifies the displayed
   current-period and usage-credit versions, then atomically clears current
   included spend and the block while releasing only that capacity epoch's
-  logical notice claim. It preserves immutable usage, purchased credit, billing
+  logical notice claim. It preserves immutable usage, usage credit, billing
   state, mailbox rows, and delivery history, and refuses to race an in-flight
   notice dispatch. After commit it signals the existing runtime recheck; a
   rejected or bounded-timeout wake is returned as a committed partial result

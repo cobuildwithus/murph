@@ -388,6 +388,17 @@ it has been explicitly elevated to a cross-cutting invariant.
   cross-owner purchases may detach the payer only while invalidating in-flight
   payer-era reconciliation, clearing payer-bound ciphertext, and retaining the
   non-secret lookup evidence required to reconcile later refunds or disputes.
+- Earned hosted referral credit also belongs to its frozen beneficiary and has
+  no clawback path. If a referrer or introduced member deletes their account
+  after a surviving group was rewarded, deletion anonymizes the rewarded
+  accounting receipt instead of deleting the group's grant. Unrewarded
+  referral state and all referral state whose beneficiary is deleted are
+  removed.
+- Hosted referral rolling caps reserve armed and bound commitments under the
+  same beneficiary serialization boundary as grants. A qualification timestamp
+  committed inside the provider-ingress transaction freezes a pre-expiry
+  success; delayed reconciliation may revalidate its stored evidence but must
+  not revoke it because wall-clock expiry or later commitments moved.
 - The company-wide tracked fulfilled usage-top-up total seeds from retained
   fulfilled rows at an atomic tracker cutover and does not claim complete
   pre-cutover lifetime history. It then increments from the first successful

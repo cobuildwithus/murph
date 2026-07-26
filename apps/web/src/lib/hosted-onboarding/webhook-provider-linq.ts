@@ -88,6 +88,8 @@ import {
 import { claimHostedLinqProactiveConversationCapacityTx } from "./linq-line-store";
 import { resolveHostedLinqSignupWelcomeDailyLimit } from "./linq-routing-policy";
 import {
+  createHostedEmailLookupKey,
+  createHostedLinqMessageLookupKey,
   createHostedPhoneLookupKey,
   createHostedPhoneLookupKeyReadCandidates,
 } from "./contact-privacy";
@@ -119,6 +121,10 @@ import {
   type HostedLinqParticipantContact,
   type HostedLinqParticipantIdentity,
 } from "./linq-participant-contact";
+import {
+  bindArmedHostedUsageReferralToNewContainerTx,
+  observeHostedUsageReferralInboundTx,
+} from "../hosted-growth/usage-referral";
 const HOSTED_LINQ_MESSAGE_MAX_PARTS = 32;
 const HOSTED_LINQ_CONVERSATION_WAKE_INLINE_TARGET_BYTES = 128 * 1024;
 const HOSTED_LINQ_TEXT_PART_MAX_CHARS = 20_000;
@@ -1423,9 +1429,32 @@ async function planHostedLinqExplicitThreadRouteWebhook(input: {
     });
   }
 
+  let qualificationCandidateReferralId: string | null = null;
+  if (!input.affirmativeReaction) {
+    const eventKey = createHostedLinqMessageLookupKey(summary.messageId);
+    const senderSubjectKey = participantContact.kind === "email"
+      ? createHostedEmailLookupKey(participantContact.value)
+      : createHostedPhoneLookupKey(participantContact.value);
+    if (eventKey && senderSubjectKey) {
+      qualificationCandidateReferralId = (
+        await observeHostedUsageReferralInboundTx({
+          containerMemberId: input.route.containerMemberId,
+          eventKey,
+          occurredAt: new Date(occurredAt),
+          senderMemberId: null,
+          senderSubjectKey,
+          tx: input.prisma,
+        })
+      ).qualificationCandidateReferralId;
+    }
+  }
+
   return logHostedLinqWebhookPlannerDecisionAndReturn(
     buildActiveMemberDirectPlan({
       desiredSideEffects: [],
+      ...(qualificationCandidateReferralId
+        ? { postCommitUsageReferralIds: [qualificationCandidateReferralId] }
+        : {}),
       response: {
         ignored: false,
         ok: true,
@@ -1566,6 +1595,14 @@ async function planHostedLinqGroupChatWebhook(input: {
     createdContainerMemberId = ensureResult.created
       ? ensureResult.containerMemberId
       : null;
+    if (ensureResult.created) {
+      await bindArmedHostedUsageReferralToNewContainerTx({
+        occurredAt: new Date(occurredAt),
+        ownerMemberId: sender.id,
+        targetContainerMemberId: ensureResult.containerMemberId,
+        tx: input.prisma,
+      });
+    }
     demotedMailboxConsumedAt = ensureResult.demotedMailboxConsumedAt;
   } catch (error) {
     if (

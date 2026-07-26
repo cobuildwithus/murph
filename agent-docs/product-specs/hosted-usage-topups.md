@@ -42,7 +42,8 @@ second admission owner or exhaustion policy.
 1. Active subscription or sponsored entitlement remains the prerequisite for
    service. Credit never creates or extends entitlement.
 2. Current-period included allowance is used first.
-3. Purchased usage credit is used next.
+3. Generic usage credit, including purchase and earned-referral grants, is used
+   next.
 4. When neither is available, the usage-limit block remains in force. The
    restored or extended gate must keep accepted conversation input durable and
    pending rather than silently dropping it or inventing a second terminal
@@ -55,13 +56,13 @@ second admission owner or exhaustion policy.
 
 No Stripe request belongs on the model-start or reply critical path. The
 single gate reads only Murph's local durable effective-capacity
-projection: included capacity remaining plus eligible purchased credit
+projection: included capacity remaining plus eligible usage credit
 remaining.
 
 ### Implemented Boundary
 
 `apps/web` owns one composed access-and-usage decision. It blocks provider work
-when included allowance and purchased credit are both exhausted, preserves
+when included allowance and usage credit are both exhausted, preserves
 accepted input for retry, and keeps route-specific notice behavior in the
 existing allowance owner. Cloudflare, Temporal, and the assistant runtime own
 no Stripe, purchase, ledger, or credit-balance state.
@@ -427,16 +428,23 @@ shortcut would be overwritten.
 The allowance resolver derives two independent quantities:
 
 - base included capacity for the usage event's plan and period; and
-- purchased credit still available when the canonical usage event settles.
+- generic usage credit still available when the canonical usage event settles.
 
-Every purchase grant, usage debit, refund adjustment, dispute adjustment, and
-effective-capacity recomputation must acquire the same
+Every purchase or referral grant, usage debit, refund adjustment, dispute
+adjustment, and effective-capacity recomputation must acquire the same
 beneficiary-scoped database lock before any purchase, period, or grant lock.
 Period-row locking alone is insufficient because carryover credit can be
 consumed concurrently by late prior-period and current-period usage. Use one
 fixed lock order across all paths and revalidate rows after acquiring it.
 Credit-aware admission reads the compact balance/version projection from the
 same durable owner.
+
+Purchase fulfillment and conversational referral rewards share the same
+immutable credit-entry ledger and entry-keyed remaining-capacity projection.
+Stripe refunds and disputes remain purchase-only; referral grants are final and
+have no financial reversal path. The referral product and qualification
+contract lives in
+`agent-docs/product-specs/hosted-usage-referrals.md`.
 
 For each newly canonical usage event, under that beneficiary-wide lock:
 

@@ -39,6 +39,57 @@ function buildEmailDeliveryContext(
 }
 
 describe("createHostedGroupToolWithCurrentTurnContext", () => {
+  it("injects the exact current sender into referral actions", async () => {
+    const request = vi.fn().mockResolvedValue({
+      action: "arm_usage_referral",
+      result: { outcome: "armed", referral: null, status: "ok" },
+    });
+    const groupTool = createHostedGroupToolWithCurrentTurnContext({
+      groupToolPort: { request },
+      linqDeliveryContexts: [
+        buildLinqDeliveryContext({
+          directRecipientPhoneNumber: "+15550000001",
+          routeAuthority: ROUTE_AUTHORITY,
+        }),
+      ],
+    });
+
+    await groupTool.request({
+      action: "arm_usage_referral",
+      linqSenderHandles: ["forged"],
+      policyCode: "active_group_v1",
+    });
+
+    expect(request).toHaveBeenLastCalledWith({
+      action: "arm_usage_referral",
+      linqSenderHandles: ["+15550000001"],
+      policyCode: "active_group_v1",
+    });
+  });
+
+  it("denies referral actions on group email where the human sender is not authoritative", async () => {
+    const request = vi.fn();
+    const groupTool = createHostedGroupToolWithCurrentTurnContext({
+      emailDeliveryContexts: [
+        buildEmailDeliveryContext({ senderHandle: "person@example.test" }),
+      ],
+      groupToolPort: { request },
+      linqDeliveryContexts: [],
+    });
+
+    await expect(groupTool.request({
+      action: "read_usage_referral",
+    })).resolves.toEqual({
+      action: "read_usage_referral",
+      result: {
+        referral: null,
+        status: "unavailable",
+        unavailableReason: "authenticated_sender_required",
+      },
+    });
+    expect(request).not.toHaveBeenCalled();
+  });
+
   it("forwards telegram current-turn sender evidence channel-qualified", async () => {
     const request = vi.fn().mockResolvedValue({
       action: "read_shared",

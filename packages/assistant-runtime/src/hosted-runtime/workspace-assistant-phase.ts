@@ -358,6 +358,22 @@ export function createHostedGroupToolWithCurrentTurnContext(input: {
         });
       }
       if (
+        request.action === "read_usage_referral"
+        || request.action === "arm_usage_referral"
+        || request.action === "cancel_usage_referral"
+      ) {
+        const senderHandles = emailIngressPresent
+          ? {}
+          : resolveHostedGroupToolSenderHandles({
+              linqDeliveryContexts: input.linqDeliveryContexts,
+              telegramSenderHandles: input.telegramSenderHandles ?? [],
+            });
+        return await input.groupToolPort.request({
+          ...request,
+          ...senderHandles,
+        });
+      }
+      if (
         request.action !== "read_chat_participants"
         && request.action !== "update_display_name"
         && request.action !== "post_disclosure_request"
@@ -424,6 +440,17 @@ function buildHostedGroupEmailRestrictedActionUnavailable(
       return {
         action: request.action,
         result: { status: "unavailable", unavailableReason },
+      };
+    case "arm_usage_referral":
+    case "cancel_usage_referral":
+    case "read_usage_referral":
+      return {
+        action: request.action,
+        result: {
+          referral: null,
+          status: "unavailable",
+          unavailableReason,
+        },
       };
   }
 }
