@@ -891,14 +891,13 @@ async function listHostedStripeRequiredEntitlementInvoiceIds(input: {
   stripe: Stripe;
   subscription: Stripe.Subscription;
 }): Promise<Set<string>> {
-  // Replay paid item transitions backward from Stripe's current subscription.
-  // Active units are current entitlements; units restored by a later unwind
-  // stay inactive, so an older invoice remains required only while its
-  // economic contribution is still represented. Same-price item identities
-  // can be pooled because Family normalization may consolidate them without
-  // proration.
-  const currentItemFundingStates =
-    new Map<string, HostedStripeEntitlementItemFundingState>();
+  // Stripe may consolidate same-price items without proration, so item IDs
+  // cannot own economic provenance. Build full paid-history quantities per
+  // price, then replay those aggregate transitions backward from the current
+  // licensed subscription. Active units are still represented; units missing
+  // after a later non-invoiced unwind are inactive.
+  let currentFundingStates =
+    new Map<string, boolean[]>();
   const currentItemIds = new Set<string>();
   for (const item of input.subscription.items.data) {
     if (currentItemIds.has(item.id)) {
@@ -921,110 +920,119 @@ async function listHostedStripeRequiredEntitlementInvoiceIds(input: {
         "Stripe subscription contained an invalid current entitlement item.",
       );
     }
-    currentItemFundingStates.set(item.id, {
-      activeUnits: Array.from({ length: quantity }, () => true),
-      priceId,
-    });
+    const currentPriceFunding = currentFundingStates.get(priceId) ?? [];
+    currentPriceFunding.push(
+      ...Array.from({ length: quantity }, () => true),
+    );
+    currentFundingStates.set(priceId, currentPriceFunding);
   }
+  assertHostedStripeEntitlementQuantityBound(
+    new Map(
+      [...currentFundingStates].map(([priceId, units]) => [
+        priceId,
+        units.length,
+      ]),
+    ),
+  );
+
   const updateSnapshots = [...input.snapshots]
     .filter((snapshot) =>
       snapshot.invoice.billing_reason === "subscription_update"
-    )
-    .sort((left, right) =>
-      (readStripeUnixSeconds(right.invoice.created) ?? 0) -
-        (readStripeUnixSeconds(left.invoice.created) ?? 0) ||
-      right.invoice.id.localeCompare(left.invoice.id)
     );
   const updateLines = await mapHostedStripeRecurringFinancialReads(
     updateSnapshots,
     HOSTED_STRIPE_RECURRING_FINANCIAL_SNAPSHOT_CONCURRENCY,
-    async (snapshot) => ({
-      invoiceId: snapshot.invoice.id,
-      lines: await readStripeInvoiceLines({
-        invoice: snapshot.invoice,
-        stripe: input.stripe,
-      }),
-    }),
-  );
-  const requiredInvoiceIds = new Set<string>();
-  for (const update of updateLines) {
-    const transitions =
-      new Map<string, HostedStripeEntitlementItemTransition>();
-    for (const line of update.lines) {
-      const details = line.parent?.subscription_item_details;
-      if (
-        !details?.proration ||
-        coerceStripeObjectId(details.subscription) !== input.subscription.id
-      ) {
-        continue;
-      }
-      const itemId = normalizeNullableString(details.subscription_item);
-      const priceId = coerceStripeObjectId(
-        line.pricing?.price_details?.price,
-      );
-      if (
-        !itemId ||
-        !priceId ||
-        !Number.isSafeInteger(line.amount)
-      ) {
+    async (snapshot): Promise<HostedStripeEntitlementInvoiceDelta> => {
+      const created = readStripeUnixSeconds(snapshot.invoice.created);
+      if (created === null) {
         throw new Error(
-          "Stripe update invoice contained an invalid entitlement transition line.",
+          "Stripe update invoice contained an invalid creation time.",
         );
       }
-      if (line.amount === 0) {
-        continue;
-      }
-      const quantity = readStripePositiveInteger(line.quantity);
-      if (!quantity) {
-        if (!currentItemFundingStates.has(itemId)) {
-          continue;
-        }
-        throw new Error(
-          "Stripe update invoice contained an invalid entitlement transition quantity.",
-        );
-      }
-      if (quantity > HOSTED_FAMILY_MAX_SEATS) {
-        throw new Error(
-          "Stripe update invoice contained an invalid entitlement transition quantity.",
-        );
-      }
-      const transition = transitions.get(itemId) ?? {
-        after: null,
-        before: null,
+      return {
+        created,
+        invoiceId: snapshot.invoice.id,
+        quantityDeltaByPrice:
+          readHostedStripeEntitlementInvoiceQuantityDelta({
+            lines: await readStripeInvoiceLines({
+              invoice: snapshot.invoice,
+              stripe: input.stripe,
+            }),
+            subscriptionId: input.subscription.id,
+          }),
       };
-      const position = line.amount < 0 ? "before" : "after";
-      const candidate = { priceId, quantity };
-      const existing = transition[position];
-      if (
-        existing &&
-        (
-          existing.priceId !== candidate.priceId ||
-          existing.quantity !== candidate.quantity
-        )
-      ) {
-        throw new Error(
-          "Stripe update invoice contained an ambiguous entitlement transition.",
-        );
-      }
-      transition[position] = candidate;
-      transitions.set(itemId, transition);
+    },
+  );
+  if (updateLines.length === 0) {
+    return new Set();
+  }
+
+  const baseSnapshot = [...input.snapshots]
+    .filter((snapshot) =>
+      snapshot.invoice.billing_reason === "subscription_create" ||
+      snapshot.invoice.billing_reason === "subscription_cycle"
+    )
+    .sort(compareHostedStripeBaseEntitlementInvoice)[0];
+  if (!baseSnapshot) {
+    // Without the paid period-start quantities, Stripe has not supplied enough
+    // causal evidence to discard any paid update from the required set.
+    return new Set(updateLines.map((update) => update.invoiceId));
+  }
+
+  const entitlementPriceIds = new Set(currentFundingStates.keys());
+  for (const update of updateLines) {
+    for (const priceId of update.quantityDeltaByPrice.keys()) {
+      entitlementPriceIds.add(priceId);
     }
-    for (const [itemId, transition] of transitions) {
-      replayHostedStripeEntitlementTransitionBackward({
-        currentItemFundingStates,
-        invoiceId: update.invoiceId,
-        itemId,
-        requiredInvoiceIds,
-        transition,
-      });
+  }
+  const baseQuantities = readHostedStripeBaseEntitlementQuantities({
+    entitlementPriceIds,
+    lines: await readStripeInvoiceLines({
+      invoice: baseSnapshot.invoice,
+      stripe: input.stripe,
+    }),
+    subscriptionId: input.subscription.id,
+  });
+  const transitionGroups =
+    buildHostedStripeEntitlementTransitionGroups({
+      baseQuantities,
+      updates: updateLines,
+    });
+
+  const requiredInvoiceIds = new Set<string>();
+  for (const transition of [...transitionGroups].reverse()) {
+    const replay = replayHostedStripeEntitlementTransitionBackward({
+      currentFundingStates,
+      transition,
+    });
+    currentFundingStates = replay.beforeFundingStates;
+    if (
+      replay.required ||
+      transition.invoiceIds.length > 1
+    ) {
+      // Stripe timestamps have second precision. Multiple paid updates in one
+      // second lack a provider-backed causal order, so keep every invoice in
+      // the group rather than ordering by an opaque invoice ID.
+      for (const invoiceId of transition.invoiceIds) {
+        requiredInvoiceIds.add(invoiceId);
+      }
     }
   }
   return requiredInvoiceIds;
 }
 
-interface HostedStripeEntitlementItemFundingState {
-  activeUnits: boolean[];
-  priceId: string;
+type HostedStripeEntitlementQuantityMap = Map<string, number>;
+
+interface HostedStripeEntitlementInvoiceDelta {
+  created: number;
+  invoiceId: string;
+  quantityDeltaByPrice: HostedStripeEntitlementQuantityMap;
+}
+
+interface HostedStripeEntitlementTransitionGroup {
+  afterQuantities: HostedStripeEntitlementQuantityMap;
+  beforeQuantities: HostedStripeEntitlementQuantityMap;
+  invoiceIds: string[];
 }
 
 interface HostedStripeEntitlementTransitionState {
@@ -1037,201 +1045,332 @@ interface HostedStripeEntitlementItemTransition {
   before: HostedStripeEntitlementTransitionState | null;
 }
 
-function replayHostedStripeEntitlementTransitionBackward(input: {
-  currentItemFundingStates: Map<
-    string,
-    HostedStripeEntitlementItemFundingState
-  >;
-  invoiceId: string;
-  itemId: string;
-  requiredInvoiceIds: Set<string>;
-  transition: HostedStripeEntitlementItemTransition;
-}): void {
-  if (!input.transition.after) {
-    if (input.transition.before) {
-      setHostedStripeHistoricalItemFundingState({
-        activeUnits: Array.from(
-          { length: input.transition.before.quantity },
-          () => false,
-        ),
-        currentItemFundingStates: input.currentItemFundingStates,
-        itemId: input.itemId,
-        priceId: input.transition.before.priceId,
-      });
+function readHostedStripeEntitlementInvoiceQuantityDelta(input: {
+  lines: readonly Stripe.InvoiceLineItem[];
+  subscriptionId: string;
+}): HostedStripeEntitlementQuantityMap {
+  const itemTransitions =
+    new Map<string, HostedStripeEntitlementItemTransition>();
+  for (const line of input.lines) {
+    const details = line.parent?.subscription_item_details;
+    if (
+      !details?.proration ||
+      coerceStripeObjectId(details.subscription) !== input.subscriptionId
+    ) {
+      continue;
     }
-    return;
-  }
-  const afterUnits = takeHostedStripeHistoricalItemFundingState({
-    currentItemFundingStates: input.currentItemFundingStates,
-    itemId: input.itemId,
-    priceId: input.transition.after.priceId,
-    quantity: input.transition.after.quantity,
-  });
-  if (!afterUnits) {
-    return;
-  }
-  if (!input.transition.before) {
-    if (afterUnits.some(Boolean)) {
-      input.requiredInvoiceIds.add(input.invoiceId);
-    }
-    return;
-  }
-
-  const before = input.transition.before;
-  const after = input.transition.after;
-  if (before.priceId === after.priceId) {
-    if (after.quantity > before.quantity) {
-      if (afterUnits.slice(before.quantity).some(Boolean)) {
-        input.requiredInvoiceIds.add(input.invoiceId);
-      }
-      setHostedStripeHistoricalItemFundingState({
-        activeUnits: afterUnits.slice(0, before.quantity),
-        currentItemFundingStates: input.currentItemFundingStates,
-        itemId: input.itemId,
-        priceId: before.priceId,
-      });
-      return;
-    }
-    const restored = [...afterUnits];
-    if (before.quantity > after.quantity) {
-      restored.push(
-        ...Array.from(
-          { length: before.quantity - after.quantity },
-          () => false,
-        ),
+    const itemId = normalizeNullableString(details.subscription_item);
+    const priceId = coerceStripeObjectId(
+      line.pricing?.price_details?.price,
+    );
+    if (
+      !itemId ||
+      !priceId ||
+      !Number.isSafeInteger(line.amount)
+    ) {
+      throw new Error(
+        "Stripe update invoice contained an invalid entitlement transition line.",
       );
     }
-    setHostedStripeHistoricalItemFundingState({
-      activeUnits: restored,
-      currentItemFundingStates: input.currentItemFundingStates,
-      itemId: input.itemId,
-      priceId: before.priceId,
-    });
-    return;
-  }
-
-  if (afterUnits.some(Boolean)) {
-    input.requiredInvoiceIds.add(input.invoiceId);
-  }
-  const preserved = afterUnits.slice(
-    0,
-    Math.min(before.quantity, after.quantity),
-  );
-  if (before.quantity > after.quantity) {
-    preserved.push(
-      ...Array.from(
-        { length: before.quantity - after.quantity },
-        () => false,
-      ),
-    );
-  }
-  setHostedStripeHistoricalItemFundingState({
-    activeUnits: preserved,
-    currentItemFundingStates: input.currentItemFundingStates,
-    itemId: input.itemId,
-    priceId: before.priceId,
-  });
-}
-
-function takeHostedStripeHistoricalItemFundingState(input: {
-  currentItemFundingStates: Map<
-    string,
-    HostedStripeEntitlementItemFundingState
-  >;
-  itemId: string;
-  priceId: string;
-  quantity: number;
-}): boolean[] | null {
-  const matchingEntries = [...input.currentItemFundingStates]
-    .filter(([, state]) => state.priceId === input.priceId)
-    .sort(([leftId], [rightId]) => {
-      if (leftId === input.itemId) {
-        return -1;
-      }
-      if (rightId === input.itemId) {
-        return 1;
-      }
-      return leftId.localeCompare(rightId);
-    });
-  const available = matchingEntries.reduce(
-    (sum, [, state]) => sum + state.activeUnits.length,
-    0,
-  );
-  if (available < input.quantity) {
-    return null;
-  }
-
-  let remaining = input.quantity;
-  const taken: boolean[] = [];
-  for (const [stateId, state] of matchingEntries) {
-    if (remaining === 0) {
-      break;
+    if (line.amount === 0) {
+      continue;
     }
-    const takeCount = Math.min(state.activeUnits.length, remaining);
-    taken.push(
-      ...state.activeUnits.splice(
-        state.activeUnits.length - takeCount,
-        takeCount,
-      ),
-    );
-    if (state.activeUnits.length === 0) {
-      input.currentItemFundingStates.delete(stateId);
-    } else if (stateId === input.itemId) {
-      input.currentItemFundingStates.delete(stateId);
-      input.currentItemFundingStates.set(
-        buildHostedStripeConsolidatedFundingStateId({
-          currentItemFundingStates: input.currentItemFundingStates,
-          itemId: input.itemId,
-        }),
-        {
-          activeUnits: state.activeUnits,
-          priceId: state.priceId,
-        },
+    const quantity = readStripePositiveInteger(line.quantity);
+    if (!quantity || quantity > HOSTED_FAMILY_MAX_SEATS) {
+      throw new Error(
+        "Stripe update invoice contained an invalid entitlement transition quantity.",
       );
     }
-    remaining -= takeCount;
+    const transition = itemTransitions.get(itemId) ?? {
+      after: null,
+      before: null,
+    };
+    const position = line.amount < 0 ? "before" : "after";
+    const candidate = { priceId, quantity };
+    const existing = transition[position];
+    if (
+      existing &&
+      (
+        existing.priceId !== candidate.priceId ||
+        existing.quantity !== candidate.quantity
+      )
+    ) {
+      throw new Error(
+        "Stripe update invoice contained an ambiguous entitlement transition.",
+      );
+    }
+    transition[position] = candidate;
+    itemTransitions.set(itemId, transition);
   }
-  return taken;
+
+  const quantityDeltaByPrice: HostedStripeEntitlementQuantityMap =
+    new Map();
+  for (const transition of itemTransitions.values()) {
+    if (transition.before) {
+      addHostedStripeEntitlementQuantityDelta({
+        delta: -transition.before.quantity,
+        priceId: transition.before.priceId,
+        quantityDeltaByPrice,
+      });
+    }
+    if (transition.after) {
+      addHostedStripeEntitlementQuantityDelta({
+        delta: transition.after.quantity,
+        priceId: transition.after.priceId,
+        quantityDeltaByPrice,
+      });
+    }
+  }
+  return quantityDeltaByPrice;
 }
 
-function setHostedStripeHistoricalItemFundingState(input: {
-  activeUnits: boolean[];
-  currentItemFundingStates: Map<
-    string,
-    HostedStripeEntitlementItemFundingState
-  >;
-  itemId: string;
-  priceId: string;
-}): void {
-  if (input.activeUnits.length === 0) {
-    return;
+function readHostedStripeBaseEntitlementQuantities(input: {
+  entitlementPriceIds: ReadonlySet<string>;
+  lines: readonly Stripe.InvoiceLineItem[];
+  subscriptionId: string;
+}): HostedStripeEntitlementQuantityMap {
+  const itemQuantities =
+    new Map<string, HostedStripeEntitlementTransitionState>();
+  for (const line of input.lines) {
+    const details = line.parent?.subscription_item_details;
+    if (
+      !details ||
+      details.proration ||
+      coerceStripeObjectId(details.subscription) !== input.subscriptionId
+    ) {
+      continue;
+    }
+    const itemId = normalizeNullableString(details.subscription_item);
+    const priceId = coerceStripeObjectId(
+      line.pricing?.price_details?.price,
+    );
+    if (!itemId || !priceId) {
+      throw new Error(
+        "Stripe base invoice contained an invalid entitlement line.",
+      );
+    }
+    if (!input.entitlementPriceIds.has(priceId)) {
+      continue;
+    }
+    const quantity = readStripePositiveInteger(line.quantity);
+    if (!quantity || quantity > HOSTED_FAMILY_MAX_SEATS) {
+      throw new Error(
+        "Stripe base invoice contained an invalid entitlement quantity.",
+      );
+    }
+    const candidate = { priceId, quantity };
+    const existing = itemQuantities.get(itemId);
+    if (
+      existing &&
+      (
+        existing.priceId !== candidate.priceId ||
+        existing.quantity !== candidate.quantity
+      )
+    ) {
+      throw new Error(
+        "Stripe base invoice contained an ambiguous entitlement item.",
+      );
+    }
+    itemQuantities.set(itemId, candidate);
   }
-  const existing = input.currentItemFundingStates.get(input.itemId);
-  if (existing) {
+
+  const quantities: HostedStripeEntitlementQuantityMap = new Map();
+  for (const item of itemQuantities.values()) {
+    quantities.set(
+      item.priceId,
+      (quantities.get(item.priceId) ?? 0) + item.quantity,
+    );
+  }
+  assertHostedStripeEntitlementQuantityBound(quantities);
+  return quantities;
+}
+
+function addHostedStripeEntitlementQuantityDelta(input: {
+  delta: number;
+  priceId: string;
+  quantityDeltaByPrice: HostedStripeEntitlementQuantityMap;
+}): void {
+  const next =
+    (input.quantityDeltaByPrice.get(input.priceId) ?? 0) + input.delta;
+  if (!Number.isSafeInteger(next)) {
     throw new Error(
-      "Stripe entitlement transition history reused an unresolved item identity.",
+      "Stripe entitlement quantity delta exceeded the bounded integer shape.",
     );
   }
-  input.currentItemFundingStates.set(input.itemId, {
-    activeUnits: input.activeUnits,
-    priceId: input.priceId,
-  });
+  if (next === 0) {
+    input.quantityDeltaByPrice.delete(input.priceId);
+  } else {
+    input.quantityDeltaByPrice.set(input.priceId, next);
+  }
 }
 
-function buildHostedStripeConsolidatedFundingStateId(input: {
-  currentItemFundingStates: ReadonlyMap<
-    string,
-    HostedStripeEntitlementItemFundingState
-  >;
-  itemId: string;
-}): string {
-  let index = 1;
-  let candidate = `${input.itemId}:consolidated:${index}`;
-  while (input.currentItemFundingStates.has(candidate)) {
-    index += 1;
-    candidate = `${input.itemId}:consolidated:${index}`;
+function buildHostedStripeEntitlementTransitionGroups(input: {
+  baseQuantities: HostedStripeEntitlementQuantityMap;
+  updates: readonly HostedStripeEntitlementInvoiceDelta[];
+}): HostedStripeEntitlementTransitionGroup[] {
+  const updates = [...input.updates].sort(
+    (left, right) => left.created - right.created,
+  );
+  const groups: HostedStripeEntitlementTransitionGroup[] = [];
+  let currentQuantities = new Map(input.baseQuantities);
+
+  for (let index = 0; index < updates.length;) {
+    const created = updates[index]!.created;
+    const sameCreatedUpdates: HostedStripeEntitlementInvoiceDelta[] = [];
+    while (
+      index < updates.length &&
+      updates[index]!.created === created
+    ) {
+      sameCreatedUpdates.push(updates[index]!);
+      index += 1;
+    }
+    const groupedDelta: HostedStripeEntitlementQuantityMap = new Map();
+    for (const update of sameCreatedUpdates) {
+      for (const [priceId, delta] of update.quantityDeltaByPrice) {
+        addHostedStripeEntitlementQuantityDelta({
+          delta,
+          priceId,
+          quantityDeltaByPrice: groupedDelta,
+        });
+      }
+    }
+    const beforeQuantities = new Map(currentQuantities);
+    const afterQuantities = applyHostedStripeEntitlementQuantityDelta({
+      currentQuantities,
+      quantityDeltaByPrice: groupedDelta,
+    });
+    groups.push({
+      afterQuantities,
+      beforeQuantities,
+      invoiceIds: sameCreatedUpdates.map((update) => update.invoiceId),
+    });
+    currentQuantities = afterQuantities;
   }
-  return candidate;
+  return groups;
+}
+
+function applyHostedStripeEntitlementQuantityDelta(input: {
+  currentQuantities: HostedStripeEntitlementQuantityMap;
+  quantityDeltaByPrice: HostedStripeEntitlementQuantityMap;
+}): HostedStripeEntitlementQuantityMap {
+  const nextQuantities = new Map(input.currentQuantities);
+  for (const [priceId, delta] of input.quantityDeltaByPrice) {
+    const next = (nextQuantities.get(priceId) ?? 0) + delta;
+    if (
+      !Number.isSafeInteger(next) ||
+      next < 0 ||
+      next > HOSTED_FAMILY_MAX_SEATS
+    ) {
+      throw new Error(
+        "Stripe paid entitlement history contained an invalid aggregate quantity.",
+      );
+    }
+    if (next === 0) {
+      nextQuantities.delete(priceId);
+    } else {
+      nextQuantities.set(priceId, next);
+    }
+  }
+  assertHostedStripeEntitlementQuantityBound(nextQuantities);
+  return nextQuantities;
+}
+
+function assertHostedStripeEntitlementQuantityBound(
+  quantities: ReadonlyMap<string, number>,
+): void {
+  let total = 0;
+  for (const quantity of quantities.values()) {
+    if (
+      !Number.isSafeInteger(quantity) ||
+      quantity <= 0 ||
+      quantity > HOSTED_FAMILY_MAX_SEATS
+    ) {
+      throw new Error(
+        "Stripe entitlement history contained an invalid aggregate quantity.",
+      );
+    }
+    total += quantity;
+  }
+  if (total > HOSTED_FAMILY_MAX_SEATS) {
+    throw new Error(
+      "Stripe entitlement history exceeded the bounded licensed quantity.",
+    );
+  }
+}
+
+function replayHostedStripeEntitlementTransitionBackward(input: {
+  currentFundingStates: ReadonlyMap<string, readonly boolean[]>;
+  transition: HostedStripeEntitlementTransitionGroup;
+}): {
+  beforeFundingStates: Map<string, boolean[]>;
+  required: boolean;
+} {
+  const priceIds = new Set([
+    ...input.currentFundingStates.keys(),
+    ...input.transition.afterQuantities.keys(),
+    ...input.transition.beforeQuantities.keys(),
+  ]);
+  const priceStates = [...priceIds]
+    .sort()
+    .map((priceId) => {
+      const beforeQuantity =
+        input.transition.beforeQuantities.get(priceId) ?? 0;
+      const afterQuantity =
+        input.transition.afterQuantities.get(priceId) ?? 0;
+      const commonQuantity = Math.min(beforeQuantity, afterQuantity);
+      const currentFunding = [
+        ...(input.currentFundingStates.get(priceId) ?? []),
+      ].sort((left, right) => Number(right) - Number(left));
+      const afterFunding = currentFunding.slice(0, afterQuantity);
+      if (afterFunding.length < afterQuantity) {
+        afterFunding.push(
+          ...Array.from(
+            { length: afterQuantity - afterFunding.length },
+            () => false,
+          ),
+        );
+      }
+      return {
+        afterSurplusFunding: afterFunding.slice(commonQuantity),
+        beforeQuantity,
+        commonFunding: afterFunding.slice(0, commonQuantity),
+        currentBeyondAfter: currentFunding.slice(afterQuantity),
+        priceId,
+      };
+    });
+  const transferFunding = priceStates
+    .flatMap((state) => state.afterSurplusFunding)
+    .sort((left, right) => Number(right) - Number(left));
+  const required = transferFunding.some(Boolean);
+  const beforeFundingStates = new Map<string, boolean[]>();
+  for (const state of priceStates) {
+    const beforeFunding = [...state.commonFunding];
+    const needed = state.beforeQuantity - beforeFunding.length;
+    if (needed > 0) {
+      beforeFunding.push(
+        ...state.currentBeyondAfter.slice(0, needed),
+      );
+    }
+    const transferNeeded = state.beforeQuantity - beforeFunding.length;
+    if (transferNeeded > 0) {
+      beforeFunding.push(...transferFunding.splice(0, transferNeeded));
+    }
+    if (beforeFunding.length < state.beforeQuantity) {
+      beforeFunding.push(
+        ...Array.from(
+          { length: state.beforeQuantity - beforeFunding.length },
+          () => false,
+        ),
+      );
+    }
+    if (beforeFunding.length > 0) {
+      beforeFundingStates.set(state.priceId, beforeFunding);
+    }
+  }
+  return {
+    beforeFundingStates,
+    required,
+  };
 }
 
 function isHostedStripeInvoiceFullyRefunded(input: {
