@@ -467,6 +467,7 @@ describe("expectAdvertisedMurphDynamicTools", () => {
     const baseToolNames = allToolNames.filter((name) =>
       !name.startsWith("murph.computer_")
       && !name.startsWith("murph.connected_apps_")
+      && name !== "murph.group_room_model"
       && name !== "murph.react_to_message"
       && name !== "murph.select_reply_target"
       && name !== "murph.create_phone_call"
@@ -482,6 +483,7 @@ describe("expectAdvertisedMurphDynamicTools", () => {
     expect(allToolNames).toContain("murph.computer_open");
     expect(allToolNames).toContain("murph.connected_apps_manage");
     expect(allToolNames).toContain("murph.create_phone_call");
+    expect(allToolNames).toContain("murph.group_room_model");
     expect(allToolNames).toContain("murph.send_progress_update");
     expect(allToolNames).toContain("murph.ask_grok");
 
@@ -505,6 +507,7 @@ describe("expectAdvertisedMurphDynamicTools", () => {
       {
         connectedAppsAvailable: true,
         computerToolsAvailable: true,
+        groupRoomModelAvailable: true,
         messageTargetingAvailable: true,
         newsletterAvailable: true,
         phoneCallsAvailable: true,

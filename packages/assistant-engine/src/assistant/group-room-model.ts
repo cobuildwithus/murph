@@ -133,7 +133,8 @@ export async function readAssistantGroupRoomModelState(
     if (
       !body ||
       !status ||
-      !assistantGroupRoomModelBodyFitsPrompt(body)
+      !assistantGroupRoomModelBodyFitsPrompt(body) ||
+      assistantGroupRoomModelBodyContainsRawParticipantHandle(body)
     ) {
       return { kind: 'unavailable' }
     }
@@ -311,6 +312,7 @@ function assistantGroupRoomModelBodyContainsRawParticipantHandle(
 ): boolean {
   return (
     /(?:^|[^\p{L}\p{N}])\+\d{7,15}(?!\d)/u.test(body) ||
+    /(?:^|[^\p{L}\p{N}])\d{5,16}(?!\d)/u.test(body) ||
     /\btelegram:[^\s`()[\]{}<>]+/iu.test(body) ||
     /\bparticipant:[^\s`()[\]{}<>]+/iu.test(body) ||
     /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/iu.test(body)

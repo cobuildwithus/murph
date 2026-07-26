@@ -158,6 +158,7 @@ describe('authenticated group room-model tool', () => {
     for (const body of [
       '# Group room model',
       '## People\n- Casey (`+15550000001`) likes dry rulings.',
+      '## People\n- Sender 1234567890 likes dry rulings.',
     ]) {
       const rejected = await executeRequest({
         args: {
@@ -311,6 +312,32 @@ describe('authenticated group room-model tool', () => {
     expect(write.rpcResult.success).toBe(true)
     await expect(readAssistantGroupRoomModelBody({ vaultRoot }))
       .resolves.toContain('Keep mock rulings dry.')
+
+    const current = await executeGroupRoomModelDynamicTool({
+      available: true,
+      managedMaintenanceAuthorized: true,
+      request: requireGroupRoomModelRequest({ action: 'show' }),
+      userActionScope: null,
+      vaultRoot,
+    })
+    const identifyingWrite = await executeGroupRoomModelDynamicTool({
+      available: true,
+      managedMaintenanceAuthorized: true,
+      request: requireGroupRoomModelRequest({
+        action: 'upsert',
+        body: '## People\n- Sender 1234567890 likes dry rulings.',
+        expectedDigest: (
+          JSON.parse(current.rpcResult.contentItems[0]!.text) as {
+            digest: string
+          }
+        ).digest,
+      }),
+      userActionScope: null,
+      vaultRoot,
+    })
+    expect(identifyingWrite.rpcResult.success).toBe(false)
+    await expect(readAssistantGroupRoomModelBody({ vaultRoot }))
+      .resolves.toContain('Keep mock rulings dry.')
   })
 
   it('rejects oversized and selector-bearing arguments', () => {
@@ -374,6 +401,18 @@ describe('authenticated group room-model tool', () => {
         sourcePaths: [],
         status: 'active',
         summary: 'conflicting concept page',
+        title: 'Group room model',
+      }),
+      buildKnowledgeMarkdown({
+        body: '## People\n- Sender 1234567890 likes dry rulings.',
+        compiledAt: '2026-07-25T00:00:00.000Z',
+        librarySlugs: [],
+        pageType: ASSISTANT_GROUP_ROOM_MODEL_PAGE_TYPE,
+        relatedSlugs: [],
+        slug: ASSISTANT_GROUP_ROOM_MODEL_SLUG,
+        sourcePaths: [],
+        status: 'active',
+        summary: null,
         title: 'Group room model',
       }),
     ]) {

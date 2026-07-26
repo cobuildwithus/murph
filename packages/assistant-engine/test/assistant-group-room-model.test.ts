@@ -106,6 +106,56 @@ test('rejects an oversized multibyte room model without replacing the prior page
     .resolves.toBe(priorBody)
 })
 
+test('rejects raw Telegram sender ids and hides identifying stored state', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    'murph-group-room-model-telegram-sender-',
+  )
+  cleanupPaths.push(parentRoot)
+  await initializeVault({ vaultRoot })
+
+  const priorBody = '## People\n- Casey likes dry rulings.'
+  const missing = await readAssistantGroupRoomModelState({ vaultRoot })
+  if (missing.kind !== 'missing') {
+    throw new Error('Expected a missing room model.')
+  }
+  const prior = await replaceAssistantGroupRoomModel({
+    body: priorBody,
+    expectedDigest: missing.digest,
+    vaultRoot,
+  })
+  await expect(replaceAssistantGroupRoomModel({
+    body: '## People\n- Sender 1234567890 likes dry rulings.',
+    expectedDigest: prior.digest,
+    vaultRoot,
+  })).rejects.toMatchObject({
+    code: 'group_room_model_participant_handle_forbidden',
+  })
+  await expect(readAssistantGroupRoomModelBody({ vaultRoot }))
+    .resolves.toBe(priorBody)
+
+  const pagePath = await resolveAssistantVaultPath(
+    vaultRoot,
+    buildKnowledgePageRelativePath(ASSISTANT_GROUP_ROOM_MODEL_SLUG),
+    'file path',
+  )
+  await writeFile(pagePath, buildKnowledgeMarkdown({
+    body: '## People\n- Sender 1234567890 likes dry rulings.',
+    compiledAt: '2026-07-25T00:00:00.000Z',
+    librarySlugs: [],
+    pageType: ASSISTANT_GROUP_ROOM_MODEL_PAGE_TYPE,
+    relatedSlugs: [],
+    slug: ASSISTANT_GROUP_ROOM_MODEL_SLUG,
+    sourcePaths: [],
+    status: 'active',
+    summary: null,
+    title: 'Group room model',
+  }), 'utf8')
+  await expect(readAssistantGroupRoomModelState({ vaultRoot }))
+    .resolves.toEqual({ kind: 'unavailable' })
+  await expect(readAssistantGroupRoomModelPrompt({ vaultRoot }))
+    .resolves.toBeNull()
+})
+
 test('keeps the reserved page out of generic knowledge surfaces', async () => {
   const { parentRoot, vaultRoot } = await createTempVaultContext(
     'murph-group-room-model-append-size-limit-',
