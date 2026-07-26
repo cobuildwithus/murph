@@ -16,12 +16,15 @@ import type { AssistantHostedToolContext } from "../src/assistant/hosted-tool-co
 import type { AssistantProgressDelivery } from "../src/assistant/turn-progress.ts";
 
 describe("murph connected-app dynamic tools", () => {
-  it("keeps shared search and execute descriptions subordinate to conversation scope", () => {
+  it("routes shared search and execute descriptions through the owning skill", () => {
     expect(MURPH_CONNECTED_APPS_SEARCH_TOOL.description).toContain(
-      "conversation prompt defines whether personal connected-account tools are available",
+      "$MURPH_ASSISTANT_SKILLS_ROOT/connected-apps/SKILL.md",
     );
     expect(MURPH_CONNECTED_APPS_EXECUTE_TOOL.description).toContain(
-      "subject to the current conversation scope and server policy",
+      "only when personal accounts are allowed",
+    );
+    expect(MURPH_CONNECTED_APPS_EXECUTE_TOOL.description).toContain(
+      "Writes require skill, schema, and server authority",
     );
     expect(MURPH_CONNECTED_APPS_EXECUTE_TOOL.description).not.toContain(
       "GOOGLECALENDAR_CREATE_EVENT",
