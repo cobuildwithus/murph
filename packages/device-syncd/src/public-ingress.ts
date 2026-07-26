@@ -9,6 +9,7 @@ import {
 import { resolveDeviceProviderConnectionDescriptor } from "@murphai/importers/device-providers/provider-descriptors";
 import {
   buildCommittedConnectionStartOAuthState,
+  DEVICE_SYNC_CONNECTION_START_PENDING_STATE_METADATA_KEY,
   DEVICE_SYNC_SEEDED_CONNECTION_ACCOUNT_ID_STATE_METADATA_KEY,
   DEVICE_SYNC_SEEDED_CONNECTION_SETUP_EXPIRES_AT_STATE_METADATA_KEY,
 } from "./types.ts";
@@ -550,6 +551,26 @@ export class DeviceSyncPublicIngress {
     }
 
     await this.store.deleteExpiredOAuthStates(now);
+    const stageConnectionStart = this.store.stageConnectionStart;
+    if (stageConnectionStart) {
+      await stageConnectionStart.call(this.store, {
+        state,
+        provider: provider.provider,
+        returnTo,
+        ownerId: input.ownerId ?? null,
+        createdAt: now,
+        expiresAt,
+        metadata: {
+          ...buildConnectionStateMetadata({
+            providerMetadata: undefined,
+            connectSourceId: input.connectSourceId ?? null,
+            connectTarget: input.connectTarget ?? null,
+            sourceProviderSlug: input.sourceProviderSlug ?? null,
+          }),
+          [DEVICE_SYNC_CONNECTION_START_PENDING_STATE_METADATA_KEY]: true,
+        },
+      });
+    }
     const started = await beginProviderConnection(provider, {
       state,
       callbackUrl: descriptor.callbackUrl ?? "",
@@ -602,12 +623,21 @@ export class DeviceSyncPublicIngress {
         now,
       });
     } catch (error) {
+      let providerCleanupCompleted = false;
       if (started.connectionSeed) {
-        await this.cleanupRejectedConnectionSeed(
+        providerCleanupCompleted = await this.cleanupRejectedConnectionSeed(
           provider,
           started.connectionSeed,
           error,
         );
+      } else if (
+        isDeviceSyncError(error)
+        && error.code === "CONNECTION_OWNER_UNAVAILABLE"
+      ) {
+        providerCleanupCompleted = true;
+      }
+      if (providerCleanupCompleted) {
+        await this.store.abortConnectionStart?.(state);
       }
       throw error;
     }
@@ -1589,9 +1619,9 @@ export class DeviceSyncPublicIngress {
     provider: DeviceSyncProvider,
     seed: ProviderConnectionSeed,
     error: unknown,
-  ): Promise<void> {
+  ): Promise<boolean> {
     if (!isDeviceSyncError(error) || error.code !== "CONNECTION_OWNER_UNAVAILABLE") {
-      return;
+      return false;
     }
 
     const deleteAccount = provider.connectionHandler?.deleteAccount;
@@ -1606,6 +1636,7 @@ export class DeviceSyncPublicIngress {
     }
 
     await deleteAccount({ externalAccountId: seed.externalAccountId });
+    return true;
   }
 
   private async cleanupPersistedOAuthConnection(

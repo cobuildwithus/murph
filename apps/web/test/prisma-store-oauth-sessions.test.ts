@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { DEVICE_SYNC_CONNECTION_START_PENDING_STATE_METADATA_KEY } from "@murphai/device-syncd/types";
+
 import { PrismaHostedOAuthSessionStore } from "@/src/lib/device-sync/prisma-store/oauth-sessions";
 
 interface MockDeviceOauthSessionRow {
@@ -49,6 +51,44 @@ describe("PrismaHostedOAuthSessionStore.createOAuthState", () => {
           __murphSeededConnectionAccountId: "dsc_seeded",
         },
       }),
+    });
+  });
+});
+
+describe("PrismaHostedOAuthSessionStore.deleteExpiredOAuthStates", () => {
+  it("preserves pending provider starts while deleting ordinary expired callback states", async () => {
+    const deleteMany = vi.fn().mockResolvedValue({ count: 1 });
+    const store = {
+      prisma: {
+        deviceOauthSession: {
+          deleteMany,
+          findMany: vi.fn().mockResolvedValue([
+            {
+              metadataJson: null,
+              state: "ordinary-expired-state",
+            },
+            {
+              metadataJson: {
+                [DEVICE_SYNC_CONNECTION_START_PENDING_STATE_METADATA_KEY]: true,
+              },
+              state: "pending-provider-start",
+            },
+          ]),
+        },
+      },
+      deleteExpiredOAuthStates:
+        PrismaHostedOAuthSessionStore.prototype.deleteExpiredOAuthStates,
+    };
+
+    await expect(
+      store.deleteExpiredOAuthStates("2026-04-13T12:30:00.000Z"),
+    ).resolves.toBe(1);
+    expect(deleteMany).toHaveBeenCalledWith({
+      where: {
+        state: {
+          in: ["ordinary-expired-state"],
+        },
+      },
     });
   });
 });

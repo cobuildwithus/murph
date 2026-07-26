@@ -1524,6 +1524,175 @@ describe("deleteHostedAccountData", () => {
     ]);
   });
 
+  it("falls back to provider revocation when destructive account deletion is unavailable", async () => {
+    const order: string[] = [];
+    const revokeAccess = vi.fn();
+    const storedAccount = {
+      accessTokenExpiresAt: null,
+      connectedAt: "2026-04-27T00:07:00.000Z",
+      createdAt: "2026-04-27T00:07:00.000Z",
+      credential: {
+        kind: "oauth_tokens" as const,
+        tokens: {
+          accessToken: "<REDACTED_ACCESS_TOKEN>",
+          accessTokenExpiresAt: null,
+          refreshToken: "<REDACTED_REFRESH_TOKEN>",
+        },
+      },
+      disconnectGeneration: 0,
+      displayName: "Oura",
+      externalAccountId: "oura-account-123",
+      id: "dsc_oura",
+      keyVersion: "test:v1",
+      lastSyncCompletedAt: null,
+      lastSyncErrorAt: null,
+      lastSyncStartedAt: null,
+      lastWebhookAt: null,
+      metadata: {},
+      nextReconcileAt: null,
+      provider: "oura",
+      scopes: ["daily"],
+      setupExpiresAt: null,
+      setupPhase: null,
+      status: "active" as const,
+      tokenVersion: 1,
+      updatedAt: "2026-04-27T00:07:00.000Z",
+    };
+    const getStoredConnectionAccountForUser = vi.fn(async () => storedAccount);
+    serviceMocks.createHostedDeviceSyncRegistry.mockReturnValue({
+      get: vi.fn(() => ({
+        connectionHandler: {
+          revokeAccess,
+        },
+      })),
+    });
+    serviceMocks.createHostedDeviceSyncControlPlane.mockReturnValue({
+      store: {
+        getStoredConnectionAccountForUser,
+      },
+    });
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      deviceConnections: [
+        {
+          id: "dsc_oura",
+          provider: "oura",
+          providerAccountBlindIndex: "blind-index",
+        },
+      ],
+      onTransaction: () => order.push("prisma"),
+    });
+
+    const result = await deleteHostedAccountData({
+      memberId: "member_123",
+      prisma,
+      request: new Request("https://join.example.test/settings"),
+    });
+
+    expect(revokeAccess).toHaveBeenCalledWith(storedAccount);
+    expect(order).toEqual(["prisma", "prisma"]);
+    expect(result.providerRevocations).toEqual([
+      {
+        connectionId: "dsc_oura",
+        errorCode: null,
+        providerLabel: "Oura",
+        status: "revoked",
+        warningCode: null,
+      },
+    ]);
+  });
+
+  it("blocks deletion while an unexpired provider start has not resolved an upstream user", async () => {
+    const deleteOwnerAccount = vi.fn(async () => "absent" as const);
+    const deleteCalls: HostedAccountDeletionPrismaDeleteCall[] = [];
+    serviceMocks.createHostedDeviceSyncRegistry.mockReturnValue({
+      get: vi.fn(() => ({
+        connectionHandler: {
+          deleteOwnerAccount,
+        },
+      })),
+    });
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      deleteCalls,
+      onTransaction: () => undefined,
+      pendingDeviceConnectionStarts: [
+        {
+          createdAt: new Date("2026-07-26T12:00:00.000Z"),
+          expiresAt: new Date("2099-07-26T12:30:00.000Z"),
+          provider: "junction",
+          state: "pending-junction-start",
+          userId: "member_123",
+        },
+      ],
+    });
+
+    await expect(deleteHostedAccountData({
+      memberId: "member_123",
+      prisma,
+      request: new Request("https://join.example.test/settings"),
+    })).rejects.toMatchObject({
+      code: "ACCOUNT_DELETION_DEVICE_CONNECTION_START_IN_PROGRESS",
+      httpStatus: 409,
+      retryable: true,
+    });
+
+    expect(deleteOwnerAccount).toHaveBeenCalledWith({ ownerId: "member_123" });
+    expect(deleteCalls).not.toContainEqual(expect.objectContaining({
+      model: "deviceOauthSession",
+    }));
+  });
+
+  it("retains pending start ownership until retried provider cleanup succeeds", async () => {
+    const deleteOwnerAccount = vi.fn()
+      .mockRejectedValueOnce(new Error("temporary Junction cleanup failure"))
+      .mockResolvedValue("deleted");
+    const deleteCalls: HostedAccountDeletionPrismaDeleteCall[] = [];
+    serviceMocks.createHostedDeviceSyncRegistry.mockReturnValue({
+      get: vi.fn(() => ({
+        connectionHandler: {
+          deleteOwnerAccount,
+        },
+      })),
+    });
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      deleteCalls,
+      onTransaction: () => undefined,
+      pendingDeviceConnectionStarts: [
+        {
+          createdAt: new Date("2026-07-26T12:00:00.000Z"),
+          expiresAt: new Date("2099-07-26T12:30:00.000Z"),
+          provider: "junction",
+          state: "pending-junction-start",
+          userId: "member_123",
+        },
+      ],
+    });
+
+    await expect(deleteHostedAccountData({
+      memberId: "member_123",
+      prisma,
+      request: new Request("https://join.example.test/settings"),
+    })).rejects.toMatchObject({
+      code: "ACCOUNT_DELETION_PROVIDER_REVOKE_FAILED",
+      httpStatus: 503,
+      retryable: true,
+    });
+    expect(deleteCalls).not.toContainEqual(expect.objectContaining({
+      model: "deviceOauthSession",
+    }));
+
+    await expect(deleteHostedAccountData({
+      memberId: "member_123",
+      prisma,
+      request: new Request("https://join.example.test/settings"),
+    })).resolves.toMatchObject({
+      memberId: "member_123",
+    });
+    expect(deleteOwnerAccount).toHaveBeenCalledTimes(2);
+    expect(deleteCalls).toContainEqual(expect.objectContaining({
+      model: "deviceOauthSession",
+    }));
+  });
+
   it("reports provider registry failures through the account-deletion revocation policy", async () => {
     const order: string[] = [];
     const getStoredConnectionAccountForUser = vi.fn(async () => ({
@@ -1994,6 +2163,13 @@ function createHostedAccountDeletionPrismaForTest(input: {
   identityRecord?: Record<string, unknown> | null;
   onTransaction: () => void;
   operationOrder?: string[];
+  pendingDeviceConnectionStarts?: Array<{
+    createdAt: Date;
+    expiresAt: Date;
+    provider: string;
+    state: string;
+    userId: string | null;
+  }>;
   transactionConnectedAppConnectIntentRows?: HostedAccountDeletionConnectedAppIntentRow[];
   transactionDeviceConnections?: Array<{
     id: string;
@@ -2073,6 +2249,10 @@ function createHostedAccountDeletionPrismaForTest(input: {
   const fakePrisma: unknown = {
     deviceConnection: {
       findMany: async () => input.deviceConnections ?? [],
+    },
+    deviceOauthSession: {
+      ...makeDeleteDelegate("deviceOauthSession"),
+      findMany: async () => input.pendingDeviceConnectionStarts ?? [],
     },
     hostedAccountGroup: {
       findMany: async () => input.familyGroups ?? [],

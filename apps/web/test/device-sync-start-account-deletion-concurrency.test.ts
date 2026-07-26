@@ -3,7 +3,10 @@ import { randomUUID } from "node:crypto";
 import type { Prisma, PrismaClient } from "@prisma/client";
 import { describe, expect, it } from "vitest";
 
-import type { CommitPublicDeviceSyncConnectionStartInput } from "@murphai/device-syncd/types";
+import {
+  DEVICE_SYNC_CONNECTION_START_PENDING_STATE_METADATA_KEY,
+  type CommitPublicDeviceSyncConnectionStartInput,
+} from "@murphai/device-syncd/types";
 
 import { PrismaDeviceSyncControlPlaneStore } from "@/src/lib/device-sync/prisma-store";
 import { createPrismaClient } from "@/src/lib/prisma";
@@ -109,6 +112,19 @@ function createStore(prisma: PrismaClient): PrismaDeviceSyncControlPlaneStore {
   });
 }
 
+async function stageStart(
+  store: PrismaDeviceSyncControlPlaneStore,
+  input: CommitPublicDeviceSyncConnectionStartInput,
+): Promise<void> {
+  await store.stageConnectionStart({
+    ...input.oauthState,
+    metadata: {
+      ...(input.oauthState.metadata ?? {}),
+      [DEVICE_SYNC_CONNECTION_START_PENDING_STATE_METADATA_KEY]: true,
+    },
+  });
+}
+
 function mapTransactions(
   prisma: PrismaClient,
   map: (
@@ -127,18 +143,18 @@ function mapTransactions(
   });
 }
 
-function pauseOAuthStateCreate(input: {
+function pauseOAuthStateFinalize(input: {
   allow: Deferred<void>;
   entered: Deferred<void>;
   tx: Prisma.TransactionClient;
 }): Prisma.TransactionClient {
   const deviceOauthSession = new Proxy(input.tx.deviceOauthSession, {
     get(target, property) {
-      if (property === "create") {
-        return async (args: Prisma.DeviceOauthSessionCreateArgs) => {
+      if (property === "updateMany") {
+        return async (args: Prisma.DeviceOauthSessionUpdateManyArgs) => {
           input.entered.resolve();
           await input.allow.promise;
-          return target.create(args);
+          return target.updateMany(args);
         };
       }
       const value = Reflect.get(target, property, target);
@@ -185,9 +201,13 @@ describe.skipIf(!runPostgresConcurrencyProof)(
       const enteredStateCreate = deferred();
       const allowStateCreate = deferred();
       const deletionPid = deferred<number>();
-      const start = createStore(mapTransactions(fixture.starter, (tx) =>
-        pauseOAuthStateCreate({ allow: allowStateCreate, entered: enteredStateCreate, tx })
-      )).commitConnectionStart(buildStartInput(fixture));
+      const stageStore = createStore(fixture.starter);
+      const commitStore = createStore(mapTransactions(fixture.starter, (tx) =>
+        pauseOAuthStateFinalize({ allow: allowStateCreate, entered: enteredStateCreate, tx })
+      ));
+      const startInput = buildStartInput(fixture);
+      await stageStart(stageStore, startInput);
+      const start = commitStore.commitConnectionStart(startInput);
       let deletion: Promise<{
         connections: Array<{ connectedAt: Date; id: string; userId: string }>;
         states: Array<{
@@ -247,12 +267,61 @@ describe.skipIf(!runPostgresConcurrencyProof)(
       }
     });
 
-    it("rejects seeded and seedless starts when deletion suspends the member first", async () => {
+    it("keeps staged seeded and seedless starts visible when suspension wins before finalization", async () => {
+      const fixture = await createFixture();
+      const store = createStore(fixture.starter);
+      const seededInput = buildStartInput(fixture);
+      const seedlessInput = buildStartInput(fixture, {
+        seed: false,
+        stateSuffix: "-seedless",
+      });
+
+      try {
+        await stageStart(store, seededInput);
+        await stageStart(store, seedlessInput);
+        await fixture.deletion.$transaction(async (tx) => {
+          await tx.$queryRaw`SELECT id FROM hosted_member WHERE id = ${fixture.memberId} FOR UPDATE`;
+          await tx.hostedMember.update({ data: { suspendedAt }, where: { id: fixture.memberId } });
+        });
+
+        await expect(store.commitConnectionStart(seededInput)).rejects.toMatchObject({
+          code: "CONNECTION_OWNER_UNAVAILABLE",
+          httpStatus: 403,
+        });
+        await expect(store.commitConnectionStart(seedlessInput)).rejects.toMatchObject({
+          code: "CONNECTION_OWNER_UNAVAILABLE",
+          httpStatus: 403,
+        });
+        const pendingStates = await fixture.observer.deviceOauthSession.findMany({
+          orderBy: { state: "asc" },
+          where: { userId: fixture.memberId },
+        });
+        expect(pendingStates).toHaveLength(2);
+        for (const pendingState of pendingStates) {
+          expect(pendingState.metadataJson).toMatchObject({
+            [DEVICE_SYNC_CONNECTION_START_PENDING_STATE_METADATA_KEY]: true,
+          });
+        }
+
+        await store.abortConnectionStart(seededInput.oauthState.state);
+        await store.abortConnectionStart(seedlessInput.oauthState.state);
+        await expect(fixture.observer.deviceConnection.count({
+          where: { userId: fixture.memberId },
+        })).resolves.toBe(0);
+        await expect(fixture.observer.deviceOauthSession.count({
+          where: { userId: fixture.memberId },
+        })).resolves.toBe(0);
+      } finally {
+        await cleanupFixture(fixture);
+      }
+    });
+
+    it("rejects seeded and seedless staging when deletion suspends the member first", async () => {
       const fixture = await createFixture();
       const memberSuspended = deferred();
       const releaseDeletion = deferred();
       const startPid = deferred<number>();
-      let start: Promise<void> | null = null;
+      let stage: Promise<void> | null = null;
       const deletion = fixture.deletion.$transaction(async (tx) => {
         await tx.$queryRaw`SELECT id FROM hosted_member WHERE id = ${fixture.memberId} FOR UPDATE`;
         await tx.hostedMember.update({ data: { suspendedAt }, where: { id: fixture.memberId } });
@@ -266,8 +335,9 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           startPid.resolve(await readBackendPid(tx));
           return tx;
         }));
-        start = store.commitConnectionStart(buildStartInput(fixture));
-        const seededStartRejection = expect(start).rejects.toMatchObject({
+        const seededInput = buildStartInput(fixture);
+        stage = stageStart(store, seededInput);
+        const seededStartRejection = expect(stage).rejects.toMatchObject({
           code: "CONNECTION_OWNER_UNAVAILABLE",
           httpStatus: 403,
         });
@@ -276,10 +346,11 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         await deletion;
         await seededStartRejection;
 
-        await expect(store.commitConnectionStart(buildStartInput(fixture, {
+        const seedlessInput = buildStartInput(fixture, {
           seed: false,
           stateSuffix: "-seedless",
-        }))).rejects.toMatchObject({
+        });
+        await expect(stageStart(store, seedlessInput)).rejects.toMatchObject({
           code: "CONNECTION_OWNER_UNAVAILABLE",
           httpStatus: 403,
         });
@@ -291,7 +362,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         })).resolves.toBe(0);
       } finally {
         releaseDeletion.resolve();
-        await Promise.allSettled([deletion, ...(start ? [start] : [])]);
+        await Promise.allSettled([deletion, ...(stage ? [stage] : [])]);
         await cleanupFixture(fixture);
       }
     });

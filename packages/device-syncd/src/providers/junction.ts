@@ -501,6 +501,29 @@ export function createJunctionDeviceSyncProvider(
     await client.deleteUser(userId);
   }
 
+  async function deleteOwnerAccount(
+    input: { ownerId: string },
+  ): Promise<"absent" | "deleted"> {
+    const ownerId = normalizeString(input.ownerId);
+    if (!ownerId) {
+      throw deviceSyncError({
+        code: "JUNCTION_OWNER_ID_REQUIRED",
+        message: "Junction account deletion requires a Murph owner id.",
+        retryable: false,
+        httpStatus: 400,
+      });
+    }
+
+    const clientUserId = buildJunctionClientUserId(config.clientUserIdSecret, ownerId);
+    const user = await client.resolveUser(clientUserId);
+    if (!user) {
+      return "absent";
+    }
+
+    await client.deleteUser(user.userId);
+    return "deleted";
+  }
+
   function createScheduledJobs(
     account: StoredDeviceSyncAccount,
     now: string,
@@ -2447,6 +2470,7 @@ export function createJunctionDeviceSyncProvider(
       beginConnection,
       completeConnection,
       deleteAccount,
+      deleteOwnerAccount,
       revokeAccess,
     },
     sdkConnectionHandler: {
