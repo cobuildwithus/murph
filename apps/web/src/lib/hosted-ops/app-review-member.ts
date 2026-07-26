@@ -8,6 +8,9 @@ import {
   readHostedConsentStatus,
 } from "../legal/consent";
 import { getPrisma } from "../prisma";
+import {
+  prepareHostedCryptoDomainRootCandidates,
+} from "../hosted-crypto/domain-root-store";
 import { lookupHostedMemberIdentityByPrivyUserId } from "../hosted-onboarding/hosted-member-identity-store";
 import { activateHostedMemberForPositiveSourceTx } from "../hosted-onboarding/member-activation";
 import {
@@ -100,6 +103,11 @@ export async function prepareHostedOpsAppReviewMember(input: {
     now,
     prisma,
   });
+  const preparedCryptoDomainRoots =
+    await prepareHostedCryptoDomainRootCandidates({
+      prisma,
+      userId: member.id,
+    });
 
   const activation = await prisma.$transaction((tx) => activateHostedMemberForPositiveSourceTx({
     dispatchContext: {
@@ -109,6 +117,7 @@ export async function prepareHostedOpsAppReviewMember(input: {
       sourceType: "hosted.app_store_review",
     },
     memberId: member.id,
+    preparedCryptoDomainRoots,
     prisma: tx,
     skipIfBillingAlreadyActive: true,
     skipIfPreviouslyActivated: true,

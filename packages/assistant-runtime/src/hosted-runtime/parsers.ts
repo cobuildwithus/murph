@@ -2,7 +2,7 @@ import {
   parseConfiguredDeviceSyncRuntimeConfig,
 } from "@murphai/device-syncd/runtime-config";
 import {
-  parseHostedWorkspaceState,
+  parseHostedWorkspaceInvocationRequest,
 } from "@murphai/hosted-execution/parsers";
 
 import type {
@@ -43,104 +43,7 @@ export function parseHostedAssistantWorkspaceRuntimeJobInput(
 export function parseHostedAssistantWorkspaceRuntimeJobRequest(
   value: unknown,
 ): HostedAssistantWorkspaceRuntimeJobInput["request"] {
-  const record = requireObject(value, "Hosted assistant workspace runtime job request");
-
-  rejectRemovedHostedAssistantRuntimeField(
-    record,
-    "checkpointNextWakeAt",
-    "Hosted assistant workspace runtime job request",
-  );
-  rejectRemovedHostedAssistantRuntimeField(
-    record,
-    "deadlineAt",
-    "Hosted assistant workspace runtime job request",
-  );
-  rejectRemovedHostedAssistantRuntimeField(
-    record,
-    "reason",
-    "Hosted assistant workspace runtime job request",
-  );
-  rejectRemovedHostedAssistantRuntimeField(
-    record,
-    "run",
-    "Hosted assistant workspace runtime job request",
-  );
-  rejectRemovedHostedAssistantRuntimeField(
-    record,
-    "runDrain",
-    "Hosted assistant workspace runtime job request",
-  );
-  rejectRemovedHostedAssistantRuntimeField(
-    record,
-    "runToken",
-    "Hosted assistant workspace runtime job request",
-  );
-  rejectRemovedHostedAssistantRuntimeField(
-    record,
-    "source",
-    "Hosted assistant workspace runtime job request",
-  );
-  rejectRemovedHostedAssistantRuntimeField(
-    record,
-    "targetCommittedSeqHint",
-    "Hosted assistant workspace runtime job request",
-  );
-  rejectRemovedHostedAssistantRuntimeField(
-    record,
-    "wake",
-    "Hosted assistant workspace runtime job request",
-  );
-  return {
-    attemptId: requireString(
-      record.attemptId,
-      "Hosted assistant workspace runtime job request.attemptId",
-    ),
-    ...(record.budget === undefined || record.budget === null
-      ? {}
-      : {
-          budget: parseHostedWorkspaceInvocationBudget(
-            record.budget,
-            "Hosted assistant workspace runtime job request.budget",
-          ),
-        }),
-    ...(record.idleCheckpointDelayMs === undefined
-      ? {}
-      : {
-          idleCheckpointDelayMs: record.idleCheckpointDelayMs === null
-            ? null
-            : requirePositiveInteger(
-                record.idleCheckpointDelayMs,
-                "Hosted assistant workspace runtime job request.idleCheckpointDelayMs",
-              ),
-        }),
-    leaseGeneration: requireNonNegativeBigIntString(
-      record.leaseGeneration,
-      "Hosted assistant workspace runtime job request.leaseGeneration",
-    ),
-    ...(record.providerEgressToken === undefined
-      ? {}
-      : {
-          providerEgressToken: readNullableString(
-            record.providerEgressToken,
-            "Hosted assistant workspace runtime job request.providerEgressToken",
-          ),
-        }),
-    userId: requireString(
-      record.userId,
-      "Hosted assistant workspace runtime job request.userId",
-    ),
-    ...(record.workspace === undefined
-      ? {}
-      : {
-          workspace: record.workspace === null
-            ? null
-            : parseHostedWorkspaceState(record.workspace),
-        }),
-    workspaceVersion: requireNonNegativeBigIntString(
-      record.workspaceVersion,
-      "Hosted assistant workspace runtime job request.workspaceVersion",
-    ),
-  };
+  return parseHostedWorkspaceInvocationRequest(value);
 }
 
 export function parseHostedAssistantRuntimeConfig(
@@ -423,59 +326,6 @@ function requireNumber(value: unknown, label: string): number {
   }
 
   return value;
-}
-
-function requirePositiveInteger(value: unknown, label: string): number {
-  if (
-    typeof value !== "number"
-    || !Number.isSafeInteger(value)
-    || value <= 0
-  ) {
-    throw new TypeError(`${label} must be a positive integer.`);
-  }
-
-  return value;
-}
-
-function requireNonNegativeBigIntString(value: unknown, label: string): string {
-  const raw = requireString(value, label);
-  if (!/^(?:0|[1-9]\d*)$/u.test(raw)) {
-    throw new TypeError(`${label} must be a non-negative integer string.`);
-  }
-
-  return raw;
-}
-
-function parseHostedWorkspaceInvocationBudget(
-  value: unknown,
-  label: string,
-): NonNullable<HostedAssistantWorkspaceRuntimeJobInput["request"]["budget"]> {
-  const record = requireObject(value, label);
-
-  return {
-    ...(record.maxMailboxItems === undefined
-      ? {}
-      : {
-          maxMailboxItems: record.maxMailboxItems === null
-            ? null
-            : requirePositiveInteger(record.maxMailboxItems, `${label}.maxMailboxItems`),
-        }),
-    ...(record.maxRuntimeMs === undefined
-      ? {}
-      : {
-          maxRuntimeMs: record.maxRuntimeMs === null
-            ? null
-            : requirePositiveInteger(record.maxRuntimeMs, `${label}.maxRuntimeMs`),
-        }),
-  };
-}
-
-function readNullableString(value: unknown, label: string): string | null {
-  if (value === null) {
-    return null;
-  }
-
-  return requireString(value, label);
 }
 
 function readOptionalNullableString(value: unknown, label: string): string | null {

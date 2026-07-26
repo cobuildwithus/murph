@@ -2,7 +2,7 @@
 
 Status: Implemented
 
-Last verified: 2026-07-21
+Last verified: 2026-07-26
 
 ## Decision
 
@@ -63,6 +63,7 @@ The target execution surface is:
 executeReadOnlyAssistantAsk({
   workspaceRoot,
   question,
+  requesterParticipantId,
   abortSignal,
 }): Promise<ReadOnlyAssistantAskResult>
 
@@ -71,8 +72,13 @@ type ReadOnlyAssistantAskResult =
   | { outcome: "cannot_answer"; answer?: string };
 ```
 
-The target runtime supplies its already restored workspace root after Web has
-revalidated the request. The wrapper fixes the system contract, committed
+The target runtime supplies its already restored workspace root and the
+server-bound requester membership `participantId` after Web has revalidated the
+request. That id is the exact `read_shared` identity for first-person references
+such as “my”; the child must not infer identity from display name, handle, or
+member order, and must return `cannot_answer` if it cannot bind the needed
+evidence to the exact participant. The id is opaque context and is never
+disclosed in the answer. The wrapper fixes the system contract, committed
 conversation evidence, empty working directory, read-only permission profile,
 and capability-free child configuration. The executor owns no routing,
 persistence, membership, retry, or delivery state. Those remain with their
@@ -225,6 +231,24 @@ message can authorize more work.
 
 If private Murph is already replying, the completion waits in the normal
 mailbox and becomes a later follow-up. It never steals foreground authority.
+
+A legacy joined-group `cannot_answer` is not provider-authored private copy. The
+private runtime queues the fixed unavailable-evidence response exactly and does
+not let another model reinterpret it as an expiry, provider error, or execution
+failure.
+
+After Web durably appends either side of the joined-group request/reply pair, it
+signals the existing Temporal runtime workflow. Only after that signal is
+accepted may Web issue the existing payloadless, no-retry direct
+`ensure-processing` request as a latency hint. Temporal remains the sole durable
+wake/retry owner. A dirty runtime may admit joined-group requests and legacy
+joined-group completions through the existing pre-checkpoint-safe system prefix;
+consented requests and reviewed completions remain checkpoint-gated. Completion
+admission is still ordered against personal input using a read-only pending
+index proof and fails closed on incomplete or invalid evidence. After fresh
+personal input gets first priority, the existing bounded foreground pass loop
+drains each progressed safe causal item before the idle checkpoint and stops on
+no progress, retryable failure, cancellation, or mailbox-budget exhaustion.
 
 ## Foreground group lifecycle
 
@@ -428,7 +452,14 @@ requests drain or expire for ten minutes, then rolls back consumers.
     or an unsafe route suppresses it.
 11. No group message, reaction, typing, session mutation, memory write, or
     model-authored canonical mutation occurs.
-12. Question and answer content stays out of normalized rows, logs, and
+12. The exact requester membership id—not a display name or ordering guess—binds
+    first-person group reads, and it never appears in output.
+13. A typed `cannot_answer` delivers only the fixed unavailable-evidence copy
+    and cannot be restated as expiry or failure.
+14. Request and completion direct wakes start only after Temporal acceptance;
+    dirty-runtime admission bypasses the idle checkpoint only for the exact safe
+    joined-group shapes and never overtakes older personal input.
+15. Question and answer content stays out of normalized rows, logs, and
     analytics.
 
 The production-faithful concurrency test pauses an active group provider turn,

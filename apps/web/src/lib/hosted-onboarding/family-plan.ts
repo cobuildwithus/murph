@@ -112,7 +112,9 @@ import {
 } from "./hosted-member-routing-store";
 import { isHostedStripeLegacyAiUsageMeteredItem } from "./legacy-usage-price";
 import {
+  prepareHostedCryptoDomainRootCandidates,
   provisionActiveHostedDomainRootEnvelopeForUserOnly,
+  type PreparedHostedCryptoDomainRootCandidates,
 } from "../hosted-crypto/domain-root-store";
 import { ensureHostedMemberForPhoneTx } from "./member-identity-service";
 import {
@@ -305,6 +307,7 @@ interface HostedAccountGroupStripeObjectMatch {
 
 export type HostedFamilyStripeSubscriptionResult = {
   activations: HostedMemberActivationResult[];
+  billingModeChangedMemberIds?: string[];
   groupId: string | null;
 };
 
@@ -421,6 +424,145 @@ function hostedFamilyInviteIsFullyUnbound(input: {
   return !input.targetEmailLookupKey &&
     !input.targetPhoneLookupKey &&
     !input.targetTelegramUsernameLookupKey;
+}
+
+type HostedFamilyInviteBindingSnapshot = Pick<
+  HostedAccountGroupInviteSnapshot,
+  | "targetEmailLookupKey"
+  | "targetPhoneLookupKey"
+  | "targetTelegramUsernameLookupKey"
+>;
+
+function assertHostedFamilyInviteIdentityBinding(input: {
+  email?: string | null;
+  invite: HostedFamilyInviteBindingSnapshot;
+  phoneNumber?: string | null;
+  requirePhoneBinding?: boolean;
+  requireWebBinding?: boolean;
+  telegramUsername?: string | null;
+  telegramUsernameWasPresented: boolean;
+}): void {
+  const isFullyUnbound = hostedFamilyInviteIsFullyUnbound(input.invite);
+
+  if (
+    input.requireWebBinding &&
+    input.invite.targetTelegramUsernameLookupKey &&
+    !input.invite.targetPhoneLookupKey &&
+    !input.invite.targetEmailLookupKey
+  ) {
+    throw hostedOnboardingError({
+      code: "HOSTED_FAMILY_WEB_ACCEPT_REQUIRES_CONTACT",
+      httpStatus: 409,
+      message: "Open this invite from Telegram to join.",
+    });
+  }
+
+  if (
+    input.requireWebBinding &&
+    isFullyUnbound &&
+    !normalizePhoneNumber(input.phoneNumber) &&
+    !normalizeHostedEmailAddress(input.email)
+  ) {
+    throw hostedOnboardingError({
+      code: "HOSTED_FAMILY_WEB_ACCEPT_REQUIRES_CONTACT",
+      httpStatus: 409,
+      message: "Sign in with a verified phone number or email address to join.",
+    });
+  }
+
+  if (input.requirePhoneBinding && !input.invite.targetPhoneLookupKey) {
+    throw hostedOnboardingError({
+      code: "HOSTED_FAMILY_INVITE_PHONE_REQUIRED",
+      httpStatus: 403,
+      message: "Open this invite from the invited phone number to join.",
+    });
+  }
+
+  const phoneBindingMatches = Boolean(
+    input.invite.targetPhoneLookupKey &&
+    hostedPhoneLookupKeyMatchesValue(
+      input.phoneNumber,
+      input.invite.targetPhoneLookupKey,
+    ),
+  );
+  const emailBindingMatches = Boolean(
+    input.invite.targetEmailLookupKey &&
+    hostedEmailLookupKeyMatchesValue(
+      input.email,
+      input.invite.targetEmailLookupKey,
+    ),
+  );
+  const telegramBindingMatches = Boolean(
+    input.telegramUsernameWasPresented &&
+    input.invite.targetTelegramUsernameLookupKey &&
+    hostedTelegramUsernameLookupKeyMatchesValue(
+      input.telegramUsername,
+      input.invite.targetTelegramUsernameLookupKey,
+    ),
+  );
+
+  if (
+    normalizeNullableString(input.phoneNumber) &&
+    input.invite.targetPhoneLookupKey &&
+    !phoneBindingMatches
+  ) {
+    throw hostedOnboardingError({
+      code: "HOSTED_FAMILY_INVITE_PHONE_MISMATCH",
+      httpStatus: 403,
+      message: "This family invite was sent to a different phone number.",
+    });
+  }
+
+  if (
+    normalizeNullableString(input.email) &&
+    input.invite.targetEmailLookupKey &&
+    !emailBindingMatches
+  ) {
+    throw hostedOnboardingError({
+      code: "HOSTED_FAMILY_INVITE_EMAIL_MISMATCH",
+      httpStatus: 403,
+      message: "This family invite was sent to a different email address.",
+    });
+  }
+
+  if (
+    input.telegramUsernameWasPresented &&
+    input.invite.targetTelegramUsernameLookupKey &&
+    !telegramBindingMatches
+  ) {
+    throw hostedOnboardingError({
+      code: "HOSTED_FAMILY_INVITE_TELEGRAM_MISMATCH",
+      httpStatus: 403,
+      message: "This family invite was sent to a different Telegram username.",
+    });
+  }
+
+  if (
+    !isFullyUnbound &&
+    !phoneBindingMatches &&
+    !emailBindingMatches &&
+    !telegramBindingMatches
+  ) {
+    if (input.invite.targetPhoneLookupKey) {
+      throw hostedOnboardingError({
+        code: "HOSTED_FAMILY_INVITE_PHONE_MISMATCH",
+        httpStatus: 403,
+        message: "This family invite was sent to a different phone number.",
+      });
+    }
+    if (input.invite.targetEmailLookupKey) {
+      throw hostedOnboardingError({
+        code: "HOSTED_FAMILY_INVITE_EMAIL_MISMATCH",
+        httpStatus: 403,
+        message: "This family invite was sent to a different email address.",
+      });
+    }
+    throw hostedOnboardingError({
+      code: "HOSTED_FAMILY_INVITE_TELEGRAM_MISMATCH",
+      httpStatus: 403,
+      message: "This family invite was sent to a different Telegram username.",
+    });
+  }
 }
 
 type HostedFamilyBillingCheckoutInput =
@@ -1468,7 +1610,7 @@ export async function applyHostedFamilyStripeSubscriptionUpdatedTx(input: {
     // A direct-paid owner conversion reuses the same Stripe subscription. The
     // Family webhook is the single handoff point: only clear the old individual
     // billing owner after the paid Family projection is durably reconciled.
-    await clearHostedFamilyOwnerDirectPaidBillingTx({
+    const billingModeChanged = await clearHostedFamilyOwnerDirectPaidBillingTx({
       ownerMemberId: group.ownerMemberId,
       stripeSubscriptionId: input.subscription.id,
       tx: input.tx,
@@ -1488,6 +1630,9 @@ export async function applyHostedFamilyStripeSubscriptionUpdatedTx(input: {
 
     return {
       activations,
+      billingModeChangedMemberIds: billingModeChanged
+        ? [group.ownerMemberId]
+        : [],
       groupId: group.id,
     };
   }
@@ -1959,13 +2104,13 @@ async function clearHostedFamilyOwnerDirectPaidBillingTx(input: {
   ownerMemberId: string;
   stripeSubscriptionId: string;
   tx: Prisma.TransactionClient;
-}): Promise<void> {
+}): Promise<boolean> {
   const billingRef = await readHostedMemberStripeBillingRef({
     memberId: input.ownerMemberId,
     prisma: input.tx,
   });
   if (billingRef?.stripeSubscriptionId !== input.stripeSubscriptionId) {
-    return;
+    return false;
   }
 
   await input.tx.hostedMember.update({
@@ -1998,6 +2143,7 @@ async function clearHostedFamilyOwnerDirectPaidBillingTx(input: {
       memberId: input.ownerMemberId,
     },
   });
+  return true;
 }
 
 function buildHostedFamilyDirectPaidUpgradeIdempotencyKey(
@@ -2913,12 +3059,45 @@ export async function acceptHostedFamilyInvite(input: {
   const activationHolder: { value: HostedMemberActivationResult | null } = {
     value: null,
   };
+  const inviteBinding = await prisma.hostedAccountGroupInvite.findUnique({
+    select: {
+      acceptedByMemberId: true,
+      status: true,
+      targetEmailLookupKey: true,
+      targetPhoneLookupKey: true,
+      targetTelegramUsernameLookupKey: true,
+    },
+    where: {
+      inviteCode: input.inviteCode,
+    },
+  });
+  if (
+    inviteBinding &&
+    !(
+      inviteBinding.status === "accepted" &&
+      inviteBinding.acceptedByMemberId === input.acceptedMemberId
+    )
+  ) {
+    assertHostedFamilyInviteIdentityBinding({
+      email: input.email,
+      invite: inviteBinding,
+      phoneNumber: input.phoneNumber,
+      requireWebBinding: input.requireWebBinding,
+      telegramUsernameWasPresented: false,
+    });
+  }
+  const preparedCryptoDomainRoots =
+    await prepareHostedCryptoDomainRootCandidates({
+      prisma,
+      userId: input.acceptedMemberId,
+    });
 
   const membership = await prisma.$transaction((tx) => acceptHostedFamilyInviteTx({
     ...input,
     onAcceptedMemberActivated: (result) => {
       activationHolder.value = result;
     },
+    preparedCryptoDomainRoots,
     tx,
   }), HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
   const activation = activationHolder.value;
@@ -3300,6 +3479,7 @@ export async function acceptHostedFamilyInviteTx(input: {
   }) => Promise<void>;
   onAcceptedMemberActivated?: (result: HostedMemberActivationResult) => Promise<void> | void;
   phoneNumber?: string | null;
+  preparedCryptoDomainRoots?: PreparedHostedCryptoDomainRootCandidates;
   requirePhoneBinding?: boolean;
   requireWebBinding?: boolean;
   telegramUsername?: string | null;
@@ -3344,123 +3524,16 @@ export async function acceptHostedFamilyInviteTx(input: {
     }
   }
 
-  const isFullyUnbound = hostedFamilyInviteIsFullyUnbound(invite);
-
-  if (
-    input.requireWebBinding &&
-    invite.targetTelegramUsernameLookupKey &&
-    !invite.targetPhoneLookupKey &&
-    !invite.targetEmailLookupKey
-  ) {
-    throw hostedOnboardingError({
-      code: "HOSTED_FAMILY_WEB_ACCEPT_REQUIRES_CONTACT",
-      httpStatus: 409,
-      message: "Open this invite from Telegram to join.",
-    });
-  }
-
-  if (
-    input.requireWebBinding &&
-    isFullyUnbound &&
-    !normalizePhoneNumber(input.phoneNumber) &&
-    !normalizeHostedEmailAddress(input.email)
-  ) {
-    throw hostedOnboardingError({
-      code: "HOSTED_FAMILY_WEB_ACCEPT_REQUIRES_CONTACT",
-      httpStatus: 409,
-      message: "Sign in with a verified phone number or email address to join.",
-    });
-  }
-
-  if (input.requirePhoneBinding && !invite.targetPhoneLookupKey) {
-    throw hostedOnboardingError({
-      code: "HOSTED_FAMILY_INVITE_PHONE_REQUIRED",
-      httpStatus: 403,
-      message: "Open this invite from the invited phone number to join.",
-    });
-  }
-
-  const phoneBindingMatches = Boolean(
-    invite.targetPhoneLookupKey &&
-    hostedPhoneLookupKeyMatchesValue(input.phoneNumber, invite.targetPhoneLookupKey),
-  );
-  const emailBindingMatches = Boolean(
-    invite.targetEmailLookupKey &&
-    hostedEmailLookupKeyMatchesValue(input.email, invite.targetEmailLookupKey),
-  );
-  const telegramUsernameWasPresented =
-    Object.prototype.hasOwnProperty.call(input, "telegramUsername");
-  const telegramBindingMatches = Boolean(
-    telegramUsernameWasPresented &&
-    invite.targetTelegramUsernameLookupKey &&
-    hostedTelegramUsernameLookupKeyMatchesValue(
-      input.telegramUsername,
-      invite.targetTelegramUsernameLookupKey,
-    ),
-  );
-
-  if (
-    normalizeNullableString(input.phoneNumber) &&
-    invite.targetPhoneLookupKey &&
-    !phoneBindingMatches
-  ) {
-    throw hostedOnboardingError({
-      code: "HOSTED_FAMILY_INVITE_PHONE_MISMATCH",
-      httpStatus: 403,
-      message: "This family invite was sent to a different phone number.",
-    });
-  }
-
-  if (
-    normalizeNullableString(input.email) &&
-    invite.targetEmailLookupKey &&
-    !emailBindingMatches
-  ) {
-    throw hostedOnboardingError({
-      code: "HOSTED_FAMILY_INVITE_EMAIL_MISMATCH",
-      httpStatus: 403,
-      message: "This family invite was sent to a different email address.",
-    });
-  }
-
-  if (
-    telegramUsernameWasPresented &&
-    invite.targetTelegramUsernameLookupKey &&
-    !telegramBindingMatches
-  ) {
-    throw hostedOnboardingError({
-      code: "HOSTED_FAMILY_INVITE_TELEGRAM_MISMATCH",
-      httpStatus: 403,
-      message: "This family invite was sent to a different Telegram username.",
-    });
-  }
-
-  if (
-    !isFullyUnbound &&
-    !phoneBindingMatches &&
-    !emailBindingMatches &&
-    !telegramBindingMatches
-  ) {
-    if (invite.targetPhoneLookupKey) {
-      throw hostedOnboardingError({
-        code: "HOSTED_FAMILY_INVITE_PHONE_MISMATCH",
-        httpStatus: 403,
-        message: "This family invite was sent to a different phone number.",
-      });
-    }
-    if (invite.targetEmailLookupKey) {
-      throw hostedOnboardingError({
-        code: "HOSTED_FAMILY_INVITE_EMAIL_MISMATCH",
-        httpStatus: 403,
-        message: "This family invite was sent to a different email address.",
-      });
-    }
-    throw hostedOnboardingError({
-      code: "HOSTED_FAMILY_INVITE_TELEGRAM_MISMATCH",
-      httpStatus: 403,
-      message: "This family invite was sent to a different Telegram username.",
-    });
-  }
+  assertHostedFamilyInviteIdentityBinding({
+    email: input.email,
+    invite,
+    phoneNumber: input.phoneNumber,
+    requirePhoneBinding: input.requirePhoneBinding,
+    requireWebBinding: input.requireWebBinding,
+    telegramUsername: input.telegramUsername,
+    telegramUsernameWasPresented:
+      Object.prototype.hasOwnProperty.call(input, "telegramUsername"),
+  });
 
   if (invite.status !== "pending" || invite.expiresAt <= now) {
     throw hostedOnboardingError({
@@ -3562,6 +3635,9 @@ export async function acceptHostedFamilyInviteTx(input: {
     const activation = await activateHostedMemberForFamilySponsorshipTx({
       memberId: input.acceptedMemberId,
       occurredAt: now,
+      ...(input.preparedCryptoDomainRoots
+        ? { preparedCryptoDomainRoots: input.preparedCryptoDomainRoots }
+        : {}),
       prisma: input.tx,
       sourceEventId: `family-invite:${invite.id}`,
     });

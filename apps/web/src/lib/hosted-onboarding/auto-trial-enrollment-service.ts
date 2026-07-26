@@ -2,6 +2,10 @@ import { HostedBillingStatus, type Prisma, type PrismaClient } from "@prisma/cli
 import type Stripe from "stripe";
 
 import { getPrisma } from "../prisma";
+import {
+  prepareHostedCryptoDomainRootCandidates,
+  type PreparedHostedCryptoDomainRootCandidates,
+} from "../hosted-crypto/domain-root-store";
 import { runWithHostedDomainRootUnwrapCache } from "../hosted-crypto/domain-root-unwrap-cache";
 import { assertHostedLaunchRequiredConsentGranted } from "../legal/consent";
 import { HOSTED_APP_INITIAL_VISIT_HOME_PATH } from "./app-routes";
@@ -458,6 +462,7 @@ export async function applyHostedAutoPulseTrialCampaignDispositionTx(input: {
   currentMember: HostedMemberBillingSnapshot;
   disposition: Exclude<HostedAutoPulseTrialCampaignDisposition, { kind: "not-applicable" }>;
   now: Date;
+  preparedCryptoDomainRoots?: PreparedHostedCryptoDomainRootCandidates;
   requestOptions: Stripe.RequestOptions;
   stripe: Stripe;
   stripeCustomerId: string;
@@ -504,6 +509,7 @@ export async function applyHostedAutoPulseTrialCampaignDispositionTx(input: {
     lockedNow: input.now,
     memberId: input.currentMember.core.id,
     now: input.now,
+    preparedCryptoDomainRoots: input.preparedCryptoDomainRoots ?? new Map(),
     stripeCustomerId: input.stripeCustomerId,
     subscription: input.disposition.subscription,
     trialSnapshot: readHostedAutoPulseTrialSubscriptionSnapshot(
@@ -615,16 +621,16 @@ async function finalizeHostedAutoPulseTrialEnrollment(input: {
   stripeCustomerId: string;
   subscriptionId: string;
 }): Promise<HostedAutoPulseTrialEnrollmentResult> {
+  const preparedCryptoDomainRoots =
+    await prepareHostedCryptoDomainRootCandidates({
+      prisma: input.prisma,
+      userId: input.memberId,
+    });
   let outcome: HostedAutoPulseTrialFinalizationOutcome;
   try {
     outcome = await runHostedAutoPulseTrialFinalizationWithMemberLockRetry({
-      memberId: input.memberId,
-      now: input.now,
-      priceId: input.priceId,
-      prisma: input.prisma,
-      stripe: input.stripe,
-      stripeCustomerId: input.stripeCustomerId,
-      subscriptionId: input.subscriptionId,
+      ...input,
+      preparedCryptoDomainRoots,
     });
   } catch (error) {
     if (error instanceof HostedMemberStripeMutationLockBusyError) {
@@ -657,6 +663,7 @@ function buildHostedAutoPulseTrialFinalizationBusyError() {
 async function runHostedAutoPulseTrialFinalizationWithMemberLockRetry(input: {
   memberId: string;
   now: Date;
+  preparedCryptoDomainRoots: PreparedHostedCryptoDomainRootCandidates;
   priceId: string;
   prisma: PrismaClient;
   stripe: Stripe;
@@ -702,6 +709,7 @@ async function runHostedAutoPulseTrialFinalizationWithMemberLockRetry(input: {
               lockedNow: new Date(),
               memberId: input.memberId,
               now: input.now,
+              preparedCryptoDomainRoots: input.preparedCryptoDomainRoots,
               stripeCustomerId: input.stripeCustomerId,
               subscription,
               trialSnapshot,
@@ -846,6 +854,7 @@ async function finalizeHostedAutoPulseTrialEnrollmentTx(input: {
   lockedNow: Date;
   memberId: string;
   now: Date;
+  preparedCryptoDomainRoots: PreparedHostedCryptoDomainRootCandidates;
   stripeCustomerId: string;
   subscription: HostedAutoPulseTrialCampaignSubscription;
   trialSnapshot: ReturnType<typeof readHostedAutoPulseTrialSubscriptionSnapshot>;
@@ -951,6 +960,7 @@ async function finalizeHostedAutoPulseTrialEnrollmentTx(input: {
   const activation = await activateHostedMemberForPositiveSourceTx({
     dispatchContext,
     memberId: updatedMember.core.id,
+    preparedCryptoDomainRoots: input.preparedCryptoDomainRoots,
     prisma: input.tx,
     skipIfBillingAlreadyActive: false,
     skipIfPreviouslyActivated: true,
