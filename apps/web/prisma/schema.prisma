@@ -652,13 +652,11 @@ model HostedAddressBookProjection {
   lastMutationOperation String                     @map("last_mutation_operation")
   lastReplacedAt        DateTime?                   @map("last_replaced_at")
   disabledAt            DateTime?                   @map("disabled_at")
-  expiresAt             DateTime?                   @map("expires_at")
   createdAt             DateTime                   @default(now()) @map("created_at")
   updatedAt             DateTime                   @updatedAt @map("updated_at")
   member                HostedMember               @relation(fields: [memberId], references: [id], onDelete: Cascade)
   contacts              HostedAddressBookContact[]
 
-  @@index([expiresAt])
   @@map("hosted_address_book_projection")
 }
 

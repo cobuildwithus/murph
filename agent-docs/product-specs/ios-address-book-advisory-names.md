@@ -52,9 +52,9 @@ lane.
 
 Rotation keeps the current and at most one prior readable version. The
 token-version index is the retirement proof: do not advance the keyring again
-until replacement and expiry have reduced the prior version's contact-row
-count to zero. Because phone plaintext is never retained, old rows cannot be
-re-tokenized in place.
+until replacement, explicit stop, or account deletion has reduced the prior
+version's contact-row count to zero. Because phone plaintext is never retained,
+old rows cannot be re-tokenized in place.
 
 This materially limits a Postgres dump or Postgres-plus-ordinary-content-key
 compromise: neither contains the MAC authority required to test candidate
@@ -71,7 +71,7 @@ The only consumer is the existing route-authorized
 1. Read and reconcile the truthful live Linq/iMessage roster.
 2. Select at most 16 canonical phone handles whose durable activation check
    says they do not yet use Murph.
-3. Resolve only the human group owner's active, unexpired projection.
+3. Resolve only the human group owner's active projection.
 4. Omit ambiguous labels and return each remaining label as
    `unverifiedOwnerContactLabel`.
 5. Treat KMS, consent, storage, timeout, or decryption failure as an empty
@@ -86,9 +86,9 @@ workspace record, or separate advisory-name state. Once the model includes a
 label in generated content, however, that content can exist in the App Server
 provider thread, Murph session/workspace artifacts, the delivered provider
 message, recipient devices, and backups under those surfaces' normal retention
-rules. Stop, permission-loss cleanup, expiry, and account deletion prevent
-future lookups and delete the live projection; they cannot recall content
-already emitted to those surfaces.
+rules. Stop, permission-loss cleanup, and account deletion prevent future
+lookups and delete the live projection; they cannot recall content already
+emitted to those surfaces.
 
 ## Lifecycle
 
@@ -98,12 +98,13 @@ reusing it for a different operation fails. Permission loss triggers deletion
 only when the locally known server revision still matches. Explicit Stop and
 Delete remains available on a newer revision because it only reduces sharing.
 
-An enabled projection expires 120 days after its last replacement. The
-existing hosted retention job deletes child rows and disables expired
-projections in bounded batches. Account deletion explicitly deletes both
-tables before the hosted member. Names already placed in provider messages
-cannot be recalled and remain subject to provider, recipient, device, and
-backup retention.
+An enabled projection remains active until explicit Stop and Delete, account
+deletion, or Contacts permission-loss reconciliation after the companion next
+launches or foregrounds removes it. Revoking Contacts access while the app
+remains closed does not contact the server. Account deletion explicitly deletes
+both tables before the hosted member. Names already placed in provider messages
+cannot be recalled and remain subject to provider, recipient, device, and backup
+retention.
 
 ## Rollout
 
@@ -115,8 +116,8 @@ backup retention.
 4. Configure the dedicated KMS MAC keyring and exact
    `roles/cloudkms.macSignerVerifier` key-level grant.
 5. Deploy iOS and enable `HOSTED_ADDRESS_BOOK_REPLACEMENT_ENABLED=1`.
-6. Verify replacement, deletion, permission-loss cleanup, retention, and
-   account deletion.
+6. Verify replacement, deletion, permission-loss cleanup, persistence across
+   time, and account deletion.
 7. Complete privacy and retention review for App Server provider threads,
    session/workspace artifacts, provider delivery, recipients, and backups.
 8. Enable `HOSTED_ADDRESS_BOOK_ADVISORY_NAMES_ENABLED=1` and exercise one

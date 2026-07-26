@@ -52,7 +52,6 @@ type AddressBookRoute =
 const MEMBER = { id: "member-route-test" };
 const STATUS = {
   enabled: false,
-  expiresAt: null,
   lastReplacedAt: null,
   revision: 2,
   schemaVersion: 1 as const,

@@ -6,8 +6,6 @@ import { PrismaComputerUseStore } from "../computer-use/store";
 import {
   formatHostedExecutionSafeLogErrorDetails,
 } from "../hosted-execution/logging";
-import { expireHostedAddressBookProjections } from "../hosted-address-book/projection";
-
 const DAY_MS = 86_400_000;
 
 export const HOSTED_RUN_LOG_RETENTION_MS = 14 * DAY_MS;
@@ -32,7 +30,6 @@ type HostedRuntimeRecheckSignal = (input: {
 
 export interface HostedRetentionCleanupResult {
   compactedLinqProviderEventDiagnostics: number;
-  expiredAddressBookProjections: number;
   expiredAssistantRuntimeIssuesDeleted: number;
   expiredComputerRunsCleanedUp: number;
   expiredDeviceWebhookTracesDeleted: number;
@@ -77,10 +74,6 @@ export async function runHostedRetentionCleanup(input: {
     now,
     prisma,
   });
-  const expiredAddressBookProjections = await expireAddressBookProjectionBatches({
-    now,
-    prisma,
-  });
   const staleWebSessionsDeleted = await deleteStaleHostedWebSessions({
     now,
     prisma,
@@ -97,7 +90,6 @@ export async function runHostedRetentionCleanup(input: {
 
   return {
     compactedLinqProviderEventDiagnostics,
-    expiredAddressBookProjections,
     expiredAssistantRuntimeIssuesDeleted,
     expiredComputerRunsCleanedUp,
     expiredDeviceWebhookTracesDeleted,
@@ -108,25 +100,6 @@ export async function runHostedRetentionCleanup(input: {
     oldRuntimeLogsDeleted,
     staleWebSessionsDeleted,
   };
-}
-
-async function expireAddressBookProjectionBatches(input: {
-  now: Date;
-  prisma: PrismaClient;
-}): Promise<number> {
-  let total = 0;
-  for (let batch = 0; batch < HOSTED_RETENTION_MAX_BATCHES; batch += 1) {
-    const expired = await expireHostedAddressBookProjections({
-      limit: 25,
-      now: input.now,
-      prisma: input.prisma,
-    });
-    total += expired;
-    if (expired < 25) {
-      break;
-    }
-  }
-  return total;
 }
 
 async function signalDueInboxMediaRetentionRuntimes(input: {

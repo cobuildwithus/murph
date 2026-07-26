@@ -27,7 +27,6 @@ export const HOSTED_ADDRESS_BOOK_LOOKUP_TIMEOUT_MS = 2_000;
 export const HOSTED_ADDRESS_BOOK_REPLACEMENT_BODY_MAX_BYTES = 96 * 1024;
 export const HOSTED_ADDRESS_BOOK_DELETE_BODY_MAX_BYTES = 1024;
 
-const HOSTED_ADDRESS_BOOK_RETENTION_MS = 120 * 24 * 60 * 60 * 1000;
 const HOSTED_ADDRESS_BOOK_NAME_MAX_CODE_POINTS = 48;
 const HOSTED_ADDRESS_BOOK_NAME_MAX_BYTES = 96;
 const HOSTED_ADDRESS_BOOK_NAME_SCOPE = "hosted-address-book-advisory-name:v1";
@@ -82,7 +81,6 @@ type AddressBookMutationOperation = "delete" | "replace";
 
 export interface HostedAddressBookStatus {
   enabled: boolean;
-  expiresAt: string | null;
   lastReplacedAt: string | null;
   revision: number;
   schemaVersion: typeof HOSTED_ADDRESS_BOOK_SCHEMA_VERSION;
@@ -172,7 +170,6 @@ export function parseHostedAddressBookDeleteRequest(
 
 export async function readHostedAddressBookStatus(input: {
   memberId: string;
-  now?: Date;
   prisma: HostedAddressBookPrismaClient;
   source?: NodeJS.ProcessEnv;
 }): Promise<HostedAddressBookStatus> {
@@ -183,7 +180,6 @@ export async function readHostedAddressBookStatus(input: {
     where: { memberId: input.memberId },
   });
   return projectAddressBookStatus({
-    now: input.now ?? new Date(),
     projection,
     replacementEnabled: isFeatureEnabled(
       input.source ?? process.env,
@@ -246,8 +242,6 @@ export async function replaceHostedAddressBookProjection(input: {
     signal: input.signal,
     userId: input.memberId,
   });
-  const expiresAt = new Date(now.getTime() + HOSTED_ADDRESS_BOOK_RETENTION_MS);
-
   return input.prisma.$transaction(async (tx) => {
     await lockHostedMemberRow(tx, input.memberId);
     await assertActiveHostedMemberAccessAllowed({
@@ -284,7 +278,6 @@ export async function replaceHostedAddressBookProjection(input: {
           createdAt: now,
           disabledAt: null,
           enabled: true,
-          expiresAt,
           lastMutationId: input.request.mutationId,
           lastMutationOperation: "replace",
           lastReplacedAt: now,
@@ -295,7 +288,6 @@ export async function replaceHostedAddressBookProjection(input: {
         update: {
           disabledAt: null,
           enabled: true,
-          expiresAt,
           lastMutationId: input.request.mutationId,
           lastMutationOperation: "replace",
           lastReplacedAt: now,
@@ -317,7 +309,6 @@ export async function replaceHostedAddressBookProjection(input: {
     }
     return readHostedAddressBookStatus({
       memberId: input.memberId,
-      now,
       prisma: tx,
       source,
     });
@@ -356,7 +347,6 @@ export async function deleteHostedAddressBookProjection(input: {
           createdAt: now,
           disabledAt: now,
           enabled: false,
-          expiresAt: null,
           lastMutationId: input.request.mutationId,
           lastMutationOperation: "delete",
           lastReplacedAt: null,
@@ -367,7 +357,6 @@ export async function deleteHostedAddressBookProjection(input: {
         update: {
           disabledAt: now,
           enabled: false,
-          expiresAt: null,
           lastMutationId: input.request.mutationId,
           lastMutationOperation: "delete",
           revision,
@@ -378,7 +367,6 @@ export async function deleteHostedAddressBookProjection(input: {
     }
     return readHostedAddressBookStatus({
       memberId: input.memberId,
-      now,
       prisma: tx,
       source,
     });
@@ -419,17 +407,10 @@ export async function readHostedOwnerAddressBookAdvisoryNames(input: {
   }
 
   const projection = await input.prisma.hostedAddressBookProjection.findUnique({
-    select: {
-      enabled: true,
-      expiresAt: true,
-    },
+    select: { enabled: true },
     where: { memberId: container.ownerMemberId },
   });
-  if (
-    !projection?.enabled
-    || !projection.expiresAt
-    || projection.expiresAt.getTime() <= Date.now()
-  ) {
+  if (!projection?.enabled) {
     return new Map();
   }
 
@@ -504,53 +485,6 @@ export async function readHostedOwnerAddressBookAdvisoryNames(input: {
   return new Map(
     [...candidateNames].filter(([, name]) => phonesByName.get(name)?.size === 1),
   );
-}
-
-export async function expireHostedAddressBookProjections(input: {
-  limit?: number;
-  now?: Date;
-  prisma: PrismaClient;
-}): Promise<number> {
-  const now = input.now ?? new Date();
-  const limit = Math.min(Math.max(input.limit ?? 25, 1), 25);
-  const due = await input.prisma.hostedAddressBookProjection.findMany({
-    orderBy: [{ expiresAt: "asc" }, { memberId: "asc" }],
-    select: { memberId: true },
-    take: limit,
-    where: {
-      enabled: true,
-      expiresAt: { lte: now },
-    },
-  });
-  let expired = 0;
-  for (const projection of due) {
-    await input.prisma.$transaction(async (tx) => {
-      await lockHostedMemberRow(tx, projection.memberId);
-      const current = await tx.hostedAddressBookProjection.findUnique({
-        where: { memberId: projection.memberId },
-      });
-      if (!current?.enabled || !current.expiresAt || current.expiresAt > now) {
-        return;
-      }
-      await tx.hostedAddressBookContact.deleteMany({
-        where: { memberId: projection.memberId },
-      });
-      await tx.hostedAddressBookProjection.update({
-        data: {
-          disabledAt: now,
-          enabled: false,
-          expiresAt: null,
-          lastMutationId: crypto.randomUUID(),
-          lastMutationOperation: "delete",
-          revision: { increment: 1 },
-          updatedAt: now,
-        },
-        where: { memberId: projection.memberId },
-      });
-      expired += 1;
-    }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
-  }
-  return expired;
 }
 
 function readHostedAddressBookCrypto(
@@ -699,24 +633,17 @@ async function readOwnerCanUseAddressBookProjection(input: {
 }
 
 function projectAddressBookStatus(input: {
-  now: Date;
   projection: {
     _count: { contacts: number };
     enabled: boolean;
-    expiresAt: Date | null;
     lastReplacedAt: Date | null;
     revision: number;
   } | null;
   replacementEnabled: boolean;
 }): HostedAddressBookStatus {
-  const enabled = Boolean(
-    input.projection?.enabled
-    && input.projection.expiresAt
-    && input.projection.expiresAt > input.now,
-  );
+  const enabled = input.projection?.enabled ?? false;
   return {
     enabled,
-    expiresAt: enabled ? input.projection?.expiresAt?.toISOString() ?? null : null,
     lastReplacedAt: input.projection?.lastReplacedAt?.toISOString() ?? null,
     revision: input.projection?.revision ?? 0,
     schemaVersion: HOSTED_ADDRESS_BOOK_SCHEMA_VERSION,

@@ -6,7 +6,6 @@ CREATE TABLE "hosted_address_book_projection" (
     "last_mutation_operation" TEXT NOT NULL,
     "last_replaced_at" TIMESTAMP(3),
     "disabled_at" TIMESTAMP(3),
-    "expires_at" TIMESTAMP(3),
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updated_at" TIMESTAMP(3) NOT NULL,
 
@@ -23,14 +22,12 @@ CREATE TABLE "hosted_address_book_projection" (
           AND "last_mutation_operation" = 'replace'
           AND "last_replaced_at" IS NOT NULL
           AND "disabled_at" IS NULL
-          AND "expires_at" IS NOT NULL
         )
         OR
         (
           NOT "enabled"
           AND "last_mutation_operation" = 'delete'
           AND "disabled_at" IS NOT NULL
-          AND "expires_at" IS NULL
         )
       )
 );
@@ -50,9 +47,6 @@ CREATE TABLE "hosted_address_book_contact" (
     CONSTRAINT "hosted_address_book_contact_name_ciphertext_check"
       CHECK (length("advisory_name_encrypted") > 0)
 );
-
-CREATE INDEX "hosted_address_book_projection_expires_at_idx"
-  ON "hosted_address_book_projection"("expires_at");
 
 CREATE INDEX "hosted_address_book_contact_phone_token_version_idx"
   ON "hosted_address_book_contact"("phone_token_version");

@@ -1,14 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
-
-const retentionMocks = vi.hoisted(() => ({
-  expireHostedAddressBookProjections: vi.fn(),
-}));
-
-vi.mock("@/src/lib/hosted-address-book/projection", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/src/lib/hosted-address-book/projection")>()),
-  expireHostedAddressBookProjections:
-    retentionMocks.expireHostedAddressBookProjections,
-}));
+import { describe, expect, it, vi } from "vitest";
 
 import {
   HOSTED_DEVICE_WEBHOOK_TRACE_RETENTION_MS,
@@ -63,18 +53,10 @@ function createRetentionPrisma(input?: {
     hostedComputerRun: {
       findMany: vi.fn().mockResolvedValue([]),
     },
-    hostedAddressBookProjection: {
-      findMany: vi.fn().mockResolvedValue([]),
-    },
   };
 }
 
 describe("hosted retention cleanup", () => {
-  beforeEach(() => {
-    retentionMocks.expireHostedAddressBookProjections.mockReset();
-    retentionMocks.expireHostedAddressBookProjections.mockResolvedValue(0);
-  });
-
   it("prunes every high-volume diagnostic table before signaling runtimes", async () => {
     const now = new Date("2026-04-25T12:00:00.000Z");
     const countsByStatement = new Map<string, number>([
@@ -113,7 +95,6 @@ describe("hosted retention cleanup", () => {
       signalRuntimeRecheck,
     })).resolves.toEqual({
       compactedLinqProviderEventDiagnostics: 5,
-      expiredAddressBookProjections: 0,
       expiredAssistantRuntimeIssuesDeleted: 2,
       expiredComputerRunsCleanedUp: 0,
       expiredDeviceWebhookTracesDeleted: 4,
@@ -287,32 +268,6 @@ describe("hosted retention cleanup", () => {
     expect(traceBatches).toBe(HOSTED_RETENTION_MAX_BATCHES);
   });
 
-  it("continues full address-book expiry batches and stops after a partial batch", async () => {
-    const now = new Date("2026-04-25T12:00:00.000Z");
-    retentionMocks.expireHostedAddressBookProjections
-      .mockResolvedValueOnce(25)
-      .mockResolvedValueOnce(3);
-    const prisma = createRetentionPrisma();
-
-    await expect(runHostedRetentionCleanup({
-      now,
-      prisma: prisma as never,
-    })).resolves.toMatchObject({
-      expiredAddressBookProjections: 28,
-    });
-    expect(retentionMocks.expireHostedAddressBookProjections).toHaveBeenCalledTimes(2);
-    expect(retentionMocks.expireHostedAddressBookProjections).toHaveBeenNthCalledWith(1, {
-      limit: 25,
-      now,
-      prisma,
-    });
-    expect(retentionMocks.expireHostedAddressBookProjections).toHaveBeenNthCalledWith(2, {
-      limit: 25,
-      now,
-      prisma,
-    });
-  });
-
   it("runs retention categories one at a time", async () => {
     // Serial database use is the protection this job owes the primary pool.
     // Immediately-resolving mocks would keep passing after a parallel fan-out
@@ -399,7 +354,6 @@ describe("hosted retention cleanup", () => {
       await vi.advanceTimersByTimeAsync(HOSTED_INBOX_MEDIA_RETENTION_SIGNAL_TIMEOUT_MS);
       await expect(cleanup).resolves.toEqual({
         compactedLinqProviderEventDiagnostics: 1,
-        expiredAddressBookProjections: 0,
         expiredAssistantRuntimeIssuesDeleted: 1,
         expiredComputerRunsCleanedUp: 0,
         expiredDeviceWebhookTracesDeleted: 1,

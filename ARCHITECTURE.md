@@ -554,10 +554,11 @@ This is not zero knowledge: the live Web principal with MAC authority can test
 candidates, and provider/runtime processing may pair a live roster handle
 with a label.
 
-One CAS projection row owns revision, replay, enabled state, and 120-day
-expiry; child rows own the tokens and encrypted labels. Full replacement,
-explicit deletion, permission-loss deletion, bounded retention, and account
-deletion use that one lifecycle. The only consumer is the existing
+One CAS projection row owns revision, replay, and enabled state; child rows own
+the tokens and encrypted labels. Full replacement, explicit deletion,
+permission-loss deletion after the companion next reconciles in the foreground,
+and account deletion use that one lifecycle. An enabled projection remains
+active until one of those deletion paths runs. The only consumer is the existing
 route-authorized group participant read. It consults the human group owner's
 projection for at most 16 unregistered phone handles and exposes a match only
 as current-turn `unverifiedOwnerContactLabel` presentation text. It is never
