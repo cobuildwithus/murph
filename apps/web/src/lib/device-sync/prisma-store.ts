@@ -159,6 +159,21 @@ export class PrismaDeviceSyncControlPlaneStore
     return this.connections.upsertConnection(input);
   }
 
+  async stageConnectionStart(oauthState: OAuthStateRecord): Promise<void> {
+    const ownerId = requireHostedConnectionStartOwnerId(oauthState.ownerId);
+    await this.prisma.$transaction(async (tx) => {
+      await lockActiveHostedConnectionStartOwnerTx(tx, ownerId);
+      await this.oauthSessions.createOAuthState(
+        { ...oauthState, ownerId },
+        tx,
+      );
+    });
+  }
+
+  async abortConnectionStart(state: string): Promise<void> {
+    await this.oauthSessions.abortConnectionStart(state);
+  }
+
   async commitConnectionStart(
     input: CommitPublicDeviceSyncConnectionStartInput,
   ): Promise<void> {
@@ -202,7 +217,23 @@ export class PrismaDeviceSyncControlPlaneStore
         seededAccount,
       );
 
-      await this.oauthSessions.createOAuthState(oauthState, tx);
+      const replaced = await this.oauthSessions.replaceStagedConnectionStartOAuthState(
+        oauthState,
+        tx,
+      );
+      if (!replaced) {
+        throw deviceSyncError({
+          code: "CONNECTION_START_STATE_MISSING",
+          message: "The staged device-sync connection start is unavailable.",
+          retryable: true,
+          httpStatus: 409,
+        });
+      }
+      await this.oauthSessions.deleteOtherPendingConnectionStarts({
+        ownerId,
+        provider: oauthState.provider,
+        state: oauthState.state,
+      }, tx);
     });
   }
 

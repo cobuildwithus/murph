@@ -74,6 +74,15 @@ Updated: 2026-07-26
 - The correction must delete the Junction user on account deletion; listing and
   deregistering currently connected sources cannot invalidate a Link token
   issued before deletion.
+- Preliminary specialist review identified missing direct coverage for
+  revocation fallback and negative cleanup authority; both are covered without
+  changing the provider boundary.
+- Product-experience review found that request-owned cleanup was insufficient
+  when an upstream delete failed. Reuse `device_oauth_session` as the
+  pre-provider lifecycle marker so account deletion owns retries without a new
+  table, queue, or reconciler. Only account deletion may resolve and delete a
+  Junction user from the Murph owner id; ordinary commit errors must not guess
+  that a returned provider user was newly created.
 
 ## Verification
 
@@ -84,8 +93,9 @@ Updated: 2026-07-26
   - Focused hosted account-deletion tests (59 tests; the opt-in PostgreSQL
     suite skipped without its environment flag).
   - Focused affected web lint.
-  - The opt-in real-PostgreSQL connection-start/account-deletion proof against
-    the isolated worktree database (2 tests covering both lock orderings).
+  - The initial opt-in real-PostgreSQL connection-start/account-deletion proof
+    against the isolated worktree database (2 tests covering both lock
+    orderings); rerun is required for the expanded three-ordering marker proof.
   - The isolated CLI tests that timed out only inside the broad local fanout,
     including the documented non-persistent harness escape hatch.
 - Canonical `pnpm test:diff <changed paths...>` cleared global guards, all
@@ -95,7 +105,13 @@ Updated: 2026-07-26
   stopped making progress. Each reported timeout passed immediately in focused
   isolation; the changed device-sync and hosted privacy surfaces were already
   green.
-- Still to run: preliminary `completion-specialists`, parent final review,
-  final verification/PR CI, and final `pr-review`.
+- Preliminary `completion-specialists` returned two coverage findings:
+  direct fallback to `revokeAccess` and the negative authority case where an
+  ordinary local failure must not delete a possibly pre-existing Junction
+  user. Both focused tests are now present. Product-experience review also
+  required durable retry ownership for failed in-flight cleanup; the staged
+  lifecycle marker and retry tests address it.
+- Still to run: parent final review, final verification/PR CI, and final
+  `pr-review`.
 - Expected outcomes: all focused and canonical checks pass; both ReviewGPT
   gates return zero accepted findings on the exact pushed head.

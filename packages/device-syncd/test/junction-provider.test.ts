@@ -5212,6 +5212,61 @@ test("Junction provider account deletion treats an absent upstream user as delet
   await requireValue(provider.connectionHandler?.deleteAccount)(createAccount());
 });
 
+test("Junction provider resolves and deletes a raced start from its blinded owner id", async () => {
+  const requests: Array<{ method: string; url: string }> = [];
+  const provider = createJunctionProvider(async (input, init) => {
+    const url = readUrl(input);
+    requests.push({ method: String(init?.method ?? "GET"), url });
+    if (url.startsWith("https://api.sandbox.us.junction.com/v2/user/resolve/")) {
+      return createJsonResponse({ user_id: "junction-raced-user" });
+    }
+    if (url === "https://api.sandbox.us.junction.com/v2/user/junction-raced-user") {
+      return new Response(null, { status: 204 });
+    }
+    throw new Error(`Unexpected request: ${url}`);
+  });
+  const deleteOwnerAccount = requireValue(
+    provider.connectionHandler?.deleteOwnerAccount,
+  );
+
+  await assert.doesNotReject(async () => {
+    assert.equal(
+      await deleteOwnerAccount({ ownerId: "owner-internal-id-123" }),
+      "deleted",
+    );
+  });
+
+  assert.equal(requests.length, 2);
+  assert.equal(requests[0]?.method, "GET");
+  assert.match(
+    requests[0]?.url ?? "",
+    /\/v2\/user\/resolve\/murph_[a-z2-7]+$/u,
+  );
+  assert.doesNotMatch(requests[0]?.url ?? "", /owner-internal-id-123/u);
+  assert.deepEqual(requests[1], {
+    method: "DELETE",
+    url: "https://api.sandbox.us.junction.com/v2/user/junction-raced-user",
+  });
+});
+
+test("Junction provider reports an unresolved raced owner as absent", async () => {
+  const provider = createJunctionProvider(async (input, init) => {
+    assert.equal(String(init?.method ?? "GET"), "GET");
+    assert.match(
+      readUrl(input),
+      /\/v2\/user\/resolve\/murph_[a-z2-7]+$/u,
+    );
+    return createJsonResponse({ message: "missing" }, 404);
+  });
+
+  assert.equal(
+    await requireValue(provider.connectionHandler?.deleteOwnerAccount)({
+      ownerId: "owner-internal-id-123",
+    }),
+    "absent",
+  );
+});
+
 test("Junction provider rejects non-Link routes from hosted web Link", () => {
   assert.deepEqual(normalizeJunctionProviderFilter(["oura", "withings"]), ["oura", "withings"]);
 

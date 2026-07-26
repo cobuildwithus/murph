@@ -1,6 +1,10 @@
 import { PrismaClient, type Prisma } from "@prisma/client";
 
-import type { ConsumeOAuthStateResult, OAuthStateRecord } from "@murphai/device-syncd/types";
+import {
+  DEVICE_SYNC_CONNECTION_START_PENDING_STATE_METADATA_KEY,
+  type ConsumeOAuthStateResult,
+  type OAuthStateRecord,
+} from "@murphai/device-syncd/types";
 
 import { toJsonRecord } from "../shared";
 import { toPrismaJsonObject } from "./prisma-json";
@@ -13,11 +17,32 @@ export class PrismaHostedOAuthSessionStore {
   }
 
   async deleteExpiredOAuthStates(now: string): Promise<number> {
-    const result = await this.prisma.deviceOauthSession.deleteMany({
+    const expiredStates = await this.prisma.deviceOauthSession.findMany({
+      select: {
+        metadataJson: true,
+        state: true,
+      },
       where: {
         expiresAt: {
           lte: new Date(now),
         },
+      },
+    });
+    const deletableStates = expiredStates
+      .filter((record) =>
+        toJsonRecord(record.metadataJson)[
+          DEVICE_SYNC_CONNECTION_START_PENDING_STATE_METADATA_KEY
+        ] !== true
+      )
+      .map((record) => record.state);
+
+    if (deletableStates.length === 0) {
+      return 0;
+    }
+
+    const result = await this.prisma.deviceOauthSession.deleteMany({
+      where: {
+        state: { in: deletableStates },
       },
     });
     return result.count;
@@ -40,6 +65,63 @@ export class PrismaHostedOAuthSessionStore {
     });
 
     return input;
+  }
+
+  async replaceStagedConnectionStartOAuthState(
+    input: OAuthStateRecord,
+    prisma: Prisma.TransactionClient,
+  ): Promise<boolean> {
+    const result = await prisma.deviceOauthSession.updateMany({
+      data: {
+        createdAt: new Date(input.createdAt),
+        expiresAt: new Date(input.expiresAt),
+        metadataJson: toPrismaJsonObject(input.metadata ?? {}),
+        provider: input.provider,
+        returnTo: input.returnTo,
+      },
+      where: {
+        metadataJson: {
+          path: [DEVICE_SYNC_CONNECTION_START_PENDING_STATE_METADATA_KEY],
+          equals: true,
+        },
+        state: input.state,
+        userId: input.ownerId ?? null,
+      },
+    });
+    return result.count === 1;
+  }
+
+  async abortConnectionStart(state: string): Promise<void> {
+    await this.prisma.deviceOauthSession.deleteMany({
+      where: {
+        metadataJson: {
+          path: [DEVICE_SYNC_CONNECTION_START_PENDING_STATE_METADATA_KEY],
+          equals: true,
+        },
+        state,
+      },
+    });
+  }
+
+  async deleteOtherPendingConnectionStarts(
+    input: {
+      ownerId: string;
+      provider: string;
+      state: string;
+    },
+    prisma: Prisma.TransactionClient,
+  ): Promise<void> {
+    await prisma.deviceOauthSession.deleteMany({
+      where: {
+        metadataJson: {
+          path: [DEVICE_SYNC_CONNECTION_START_PENDING_STATE_METADATA_KEY],
+          equals: true,
+        },
+        provider: input.provider,
+        state: { not: input.state },
+        userId: input.ownerId,
+      },
+    });
   }
 
   async consumeOAuthState(

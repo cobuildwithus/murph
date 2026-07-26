@@ -152,6 +152,8 @@ export const DEVICE_SYNC_SEEDED_CONNECTION_ACCOUNT_ID_STATE_METADATA_KEY =
   "__murphSeededConnectionAccountId";
 export const DEVICE_SYNC_SEEDED_CONNECTION_SETUP_EXPIRES_AT_STATE_METADATA_KEY =
   "__murphSeededConnectionSetupExpiresAt";
+export const DEVICE_SYNC_CONNECTION_START_PENDING_STATE_METADATA_KEY =
+  "__murphConnectionStartPending";
 
 export function buildCommittedConnectionStartOAuthState(
   oauthState: OAuthStateRecord,
@@ -397,6 +399,11 @@ export interface DeviceSyncPublicIngressStore {
   ): ConsumeOAuthStateResult | Promise<ConsumeOAuthStateResult>;
   upsertConnection(input: UpsertPublicDeviceSyncConnectionInput): PublicDeviceSyncAccount | Promise<PublicDeviceSyncAccount>;
   /**
+   * Persists the pre-provider lifecycle marker under the active member lock.
+   * Hosted account deletion uses this marker to avoid outrunning provider I/O.
+   */
+  stageConnectionStart?(oauthState: OAuthStateRecord): void | Promise<void>;
+  /**
    * Atomically commits one provider connection start. Hosted stores use the
    * member row as the lifecycle fence and persist the optional provider seed
    * plus OAuth state in the same transaction, so account deletion either
@@ -405,6 +412,8 @@ export interface DeviceSyncPublicIngressStore {
   commitConnectionStart?(
     input: CommitPublicDeviceSyncConnectionStartInput,
   ): void | Promise<void>;
+  /** Removes a staged marker only after the provider start is safely resolved. */
+  abortConnectionStart?(state: string): void | Promise<void>;
   upsertConnectionWithPrevious?(
     input: UpsertPublicDeviceSyncConnectionInput,
   ): UpsertPublicDeviceSyncConnectionResult | Promise<UpsertPublicDeviceSyncConnectionResult>;
@@ -790,6 +799,13 @@ export interface DeviceConnectionHandler {
   refreshTokens?(account: DeviceSyncAccount, options?: { signal?: AbortSignal | null }): Promise<ProviderAuthTokens>;
   /** Destructive provider-user removal for hosted account deletion. */
   deleteAccount?(account: Pick<DeviceSyncAccount, "externalAccountId">): Promise<void>;
+  /**
+   * Resolves and deletes a provider user from the Murph owner id. This is
+   * account-deletion authority for a start that has no committed connection.
+   */
+  deleteOwnerAccount?(input: {
+    ownerId: string;
+  }): Promise<"absent" | "deleted">;
   /** Ordinary device disconnect; providers may preserve their upstream user. */
   revokeAccess?(account: DeviceSyncAccount): Promise<void>;
 }

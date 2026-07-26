@@ -2,6 +2,7 @@ import { type HostedBillingStatus, Prisma, type PrismaClient } from "@prisma/cli
 
 import { sanitizeHostedRuntimeErrorCode } from "@murphai/device-syncd/hosted-runtime";
 import { isDeviceSyncError } from "@murphai/device-syncd/errors";
+import { DEVICE_SYNC_CONNECTION_START_PENDING_STATE_METADATA_KEY } from "@murphai/device-syncd/types";
 
 import { createHostedDeviceSyncControlPlane } from "../device-sync/control-plane";
 import { createHostedDeviceSyncRegistry } from "../device-sync/providers";
@@ -664,6 +665,11 @@ export async function deleteHostedAccountData(input: {
     now: deletionStartedAt,
     prisma: input.prisma,
   });
+  await resolvePendingDeviceConnectionStartsForAccountDeletion({
+    memberIds: deletionMemberIds,
+    now: deletionStartedAt,
+    prisma: input.prisma,
+  });
   await deleteHostedPhoneCallsForAccountDeletion({
     memberIds: deletionMemberIds,
     prisma: input.prisma,
@@ -826,6 +832,80 @@ export async function deleteHostedAccountData(input: {
       stripeSubscription,
     },
   };
+}
+
+async function resolvePendingDeviceConnectionStartsForAccountDeletion(input: {
+  memberIds: readonly string[];
+  now: Date;
+  prisma: PrismaClient;
+}): Promise<void> {
+  const pendingStarts = await input.prisma.deviceOauthSession.findMany({
+    orderBy: [{ userId: "asc" }, { createdAt: "asc" }, { state: "asc" }],
+    select: {
+      expiresAt: true,
+      provider: true,
+      state: true,
+      userId: true,
+    },
+    where: {
+      metadataJson: {
+        path: [DEVICE_SYNC_CONNECTION_START_PENDING_STATE_METADATA_KEY],
+        equals: true,
+      },
+      userId: { in: [...input.memberIds] },
+    },
+  });
+  if (pendingStarts.length === 0) {
+    return;
+  }
+
+  const registry = createHostedDeviceSyncRegistry(process.env);
+  for (const pendingStart of pendingStarts) {
+    const ownerId = pendingStart.userId;
+    if (!ownerId) {
+      continue;
+    }
+
+    const deleteOwnerAccount =
+      registry.get(pendingStart.provider)?.connectionHandler?.deleteOwnerAccount;
+    let cleanupComplete = false;
+    if (deleteOwnerAccount) {
+      try {
+        const result = await deleteOwnerAccount({ ownerId });
+        cleanupComplete = result === "deleted" || pendingStart.expiresAt <= input.now;
+      } catch (error) {
+        throw hostedOnboardingError({
+          code: "ACCOUNT_DELETION_PROVIDER_REVOKE_FAILED",
+          httpStatus: 503,
+          message: "We could not finish disconnecting one of your wearable providers. Retry account deletion, or contact support if it keeps failing.",
+          retryable: true,
+          cause: error,
+        });
+      }
+    } else {
+      cleanupComplete = pendingStart.expiresAt <= input.now;
+    }
+
+    if (!cleanupComplete) {
+      throw hostedOnboardingError({
+        code: "ACCOUNT_DELETION_DEVICE_CONNECTION_START_IN_PROGRESS",
+        httpStatus: 409,
+        message: "A wearable connection is still finishing. Retry account deletion in a moment.",
+        retryable: true,
+      });
+    }
+
+    await input.prisma.deviceOauthSession.deleteMany({
+      where: {
+        metadataJson: {
+          path: [DEVICE_SYNC_CONNECTION_START_PENDING_STATE_METADATA_KEY],
+          equals: true,
+        },
+        state: pendingStart.state,
+        userId: ownerId,
+      },
+    });
+  }
 }
 
 /**
