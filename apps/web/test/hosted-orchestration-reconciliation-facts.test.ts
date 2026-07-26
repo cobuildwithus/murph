@@ -691,7 +691,15 @@ describe("hosted orchestration reconciliation facts", () => {
       now: new Date(reservationExpiry),
       userId: MEMBER_ID,
     });
-    expect(mocks.readHostedMailboxLatestPendingConversationItem).not.toHaveBeenCalled();
+    // Current reconciliation wraps AI-blocked facts with one visible-access
+    // lookup from the absolute conversation floor. Capacity reservation itself
+    // must not perform the separate usage-notice lookup from the replay floor.
+    expect(mocks.readHostedMailboxLatestPendingConversationItem).toHaveBeenCalledTimes(1);
+    expect(mocks.readHostedMailboxLatestPendingConversationItem).toHaveBeenCalledWith({
+      afterSeq: 0n,
+      prisma: expect.objectContaining({ kind: "prisma" }),
+      userId: MEMBER_ID,
+    });
     expect(mocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat).not.toHaveBeenCalled();
     expect(
       mocks.sendClaimedHostedAiUsageLimitNoticeToTelegramThread,

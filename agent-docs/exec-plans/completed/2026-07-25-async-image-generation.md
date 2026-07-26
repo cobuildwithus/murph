@@ -1,6 +1,6 @@
 # Non-blocking hosted image generation
 
-Status: active
+Status: completed
 Created: 2026-07-25
 Updated: 2026-07-26
 
@@ -134,18 +134,24 @@ owner or lifecycle without production-path proof.
   passed.
 - Final hosted-local `codex-image-media-delivery` scenario: 4/4 passed against
   the exact assembled runner bundle after deploy smoke.
+- Rebased runner bundle assembly passed at 1,688,475 bytes for the entrypoint,
+  7,918,477 bytes for static assets, and 9,697,329 bytes total, within the
+  ratcheted component and total limits.
 - Hosted workspace runner: 113/113 passed.
 - Image controller and completion authority: 25/25 passed.
 - Auto-reply-disabled entrypoint recovery: the final 239/239 entrypoint suite
   proves no fabricated completion turn, one reservation-backed settlement with
   `noticeDeliveryTarget: null`, a checkpoint containing the retained completion,
   and ordinary background selection after re-enable.
+- Rebased runtime controller, runner, and entrypoint suites: 378/378 passed.
 - Assistant Engine full suite: 2,731 passed, 5 skipped.
 - Assistant Runtime full suite: 1,928 passed, 2 skipped.
-- Focused Web usage/reservation/status/funding suites: 331/331 passed.
-- Web signaling regression after the final test-fixture correction: 28/28
-  passed.
-- Final Web verification passed: TypeScript, 6,676 tests with 179 skipped,
+- Focused Web usage/reservation route and unit suites: 131/131 passed.
+- Rebased reconciliation facts suite: 43/43 passed after aligning its
+  AI-blocked visible-access assertion with the current absolute-floor lookup;
+  the capacity-reservation path still performs no usage-limit notice lookup or
+  send.
+- Final Web verification passed: TypeScript, 6,753 tests with 179 skipped,
   ESLint with zero errors, dev smoke, and the production Next.js build.
 - Final Cloudflare verification passed: typecheck, 1,935 Node tests, and 2
   Workers-runtime tests.
@@ -171,9 +177,18 @@ owner or lifecycle without production-path proof.
 - An earlier full canonical acceptance run completed the Web production build,
   Cloudflare Node and Workers verification, and every task-owned package suite.
   Its sole then-baseline CLI prompt assertion was removed by the current base.
+- Final repo-wide `pnpm verify:acceptance` passed all workspace typechecks,
+  dependency and boundary guards, documentation and artifact checks, package
+  coverage suites, Web tests/lint/dev smoke/production build, and Cloudflare
+  Node and Workers verification.
 - Preliminary ReviewGPT returned two findings. Both were accepted and resolved:
   the tool contract now distinguishes pending from terminal rejection, and the
   hosted Codex proof uses separate origin and trusted-completion turns with
   exact one-time media attachment.
 - The final product-experience review returned `NO FINDINGS`. Its sole evidence
   gap was closed by extending the entrypoint recovery proof described above.
+- Parent final review returned `NO FINDINGS` after tracing provider dispatch
+  admission, reservation identity and one-time settlement, trusted pending-input
+  completion, disabled-auto-reply recovery, notice suppression, runtime
+  lifecycle ownership, and privacy deletion.
+Completed: 2026-07-26
