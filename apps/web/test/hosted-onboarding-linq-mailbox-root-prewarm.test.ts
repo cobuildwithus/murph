@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 /**
  * The ingress root unwrap reads an envelope and then calls KMS. If the first
@@ -87,8 +87,9 @@ vi.mock("@/src/lib/hosted-onboarding/logging", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/src/lib/hosted-onboarding/logging")>();
   return {
     ...actual,
-    logHostedOnboardingDiagnostic: vi.fn((name: string) => {
+    logHostedOnboardingDiagnostic: vi.fn((name: string, details?: unknown) => {
       diagnostics.push(name);
+      diagnosticDetails.push({ details, name });
     }),
     logHostedOnboardingTiming: vi.fn(),
   };
@@ -103,6 +104,7 @@ vi.mock("@/src/lib/prisma", () => ({
 }));
 
 const diagnostics: string[] = [];
+const diagnosticDetails: Array<{ details: unknown; name: string }> = [];
 
 /** Bytes of the warmed key copy observed at the instant `BEGIN` is issued. */
 let rootKeyAtTransactionOpen: number[] | null = null;
@@ -152,10 +154,15 @@ function buildPrewarmPrisma() {
 }
 
 describe("hosted Linq mailbox payload root prewarm", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   beforeEach(() => {
     calls.length = 0;
     issuedRootKeys.length = 0;
     diagnostics.length = 0;
+    diagnosticDetails.length = 0;
     rootKeyAtTransactionOpen = null;
     vi.clearAllMocks();
     vi.resetModules();
@@ -234,10 +241,39 @@ describe("hosted Linq mailbox payload root prewarm", () => {
       },
     );
 
-    // Warming only moves work earlier, so a failed warm-up must not drop
-    // inbound delivery; the planner still runs and unwraps on its own.
+    // A failed preflight must not drop branches that do not need the root.
     expect(result).toBe("planned");
     expect(calls).toEqual(["warm-failed", "begin", "plan"]);
+  });
+
+  it("reports preflight wait separately from the connection-held duration", async () => {
+    let nowMs = 1_000;
+    vi.spyOn(Date, "now").mockImplementation(() => nowMs);
+    const { runHostedOnboardingWebhookTransaction } = await import(
+      "@/src/lib/hosted-onboarding/webhook-service"
+    );
+    const prisma = {
+      $transaction: vi.fn(async (callback: (tx: unknown) => Promise<unknown>) => {
+        nowMs += 20;
+        return callback({});
+      }),
+    };
+
+    await runHostedOnboardingWebhookTransaction(
+      prisma as never,
+      async () => "planned",
+      async () => {
+        nowMs += 80;
+      },
+    );
+
+    expect(diagnosticDetails).toContainEqual({
+      details: expect.objectContaining({
+        transactionMs: 20,
+        warmUnwrapMs: 80,
+      }),
+      name: "hosted-onboarding.webhook.plan-db",
+    });
   });
 
   it("unwraps the ingress root for the routed member and wipes its key copy", async () => {
@@ -257,6 +293,7 @@ describe("hosted Linq mailbox payload root prewarm", () => {
     expect(unwrapHostedDomainRootForWeb).toHaveBeenCalledExactlyOnceWith({
       domain: "ingress",
       prisma,
+      retainFailureInScopedCache: true,
       userId: "member_prewarm_1",
     });
     // The scoped cache hands out a private copy and expects it wiped; warming
@@ -308,6 +345,7 @@ describe("hosted Linq mailbox payload root prewarm", () => {
       expect(unwrapHostedDomainRootForWeb).toHaveBeenCalledExactlyOnceWith({
         domain: "ingress",
         prisma,
+        retainFailureInScopedCache: true,
         userId: "member_prewarm_1",
       });
       // Observed at the instant the transaction opened, so the plaintext copy

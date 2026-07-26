@@ -999,8 +999,8 @@ export async function handleHostedOnboardingTelegramWebhook(input: {
  * encrypted in place.
  */
 export async function warmHostedLinqMailboxPayloadRoot(input: {
-  prisma: PrismaClient;
-  threadRoute: HostedThreadRouteSnapshot | null;
+  prisma: PrismaClient | Prisma.TransactionClient;
+  threadRoute: Pick<HostedThreadRouteSnapshot, "containerMemberId"> | null;
 }): Promise<void> {
   if (!input.threadRoute) {
     // No established route yet, so there is no known member whose root could be
@@ -1011,6 +1011,7 @@ export async function warmHostedLinqMailboxPayloadRoot(input: {
   const root = await unwrapHostedDomainRootForWeb({
     domain: getHostedCryptoDomainForLane("mailbox-payload"),
     prisma: input.prisma,
+    retainFailureInScopedCache: true,
     userId: input.threadRoute.containerMemberId,
   });
   // The scoped cache hands every caller its own copy and expects that copy to
@@ -1028,32 +1029,42 @@ export async function runHostedOnboardingWebhookTransaction<TResult>(
    */
   warmUnwrapCache?: () => Promise<void>,
 ): Promise<TResult> {
-  const startedAtMs = Date.now();
   const operations: PrismaOperationTiming[] = [];
+  let transactionMs = 0;
+  let warmUnwrapMs: number | undefined;
   try {
     return await runWithPrismaOperationTimings(operations, async () =>
       runWithHostedDomainRootUnwrapCache(async () => {
         if (warmUnwrapCache) {
+          const warmStartedAtMs = Date.now();
           try {
             await warmUnwrapCache();
           } catch (error) {
-            // Warming only moves work earlier; the planner still unwraps on its
-            // own. Inbound delivery must not depend on it, so the guarantee
-            // lives here rather than in each caller, and a failure is reported
-            // instead of disappearing.
+            // A failed preflight must not suppress branches that never need
+            // this root. If the planner does request it, the scoped cache
+            // returns the retained rejection instead of repeating KMS while a
+            // connection is held.
             logHostedOnboardingDiagnostic("hosted-onboarding.webhook.warm-failed", {
               reason: error instanceof Error ? error.name : "unknown",
             });
+          } finally {
+            warmUnwrapMs = Date.now() - warmStartedAtMs;
           }
         }
-        return typeof prisma.$transaction === "function"
-          ? prisma.$transaction(callback)
-          : callback(prisma as Prisma.TransactionClient);
+        const transactionStartedAtMs = Date.now();
+        try {
+          return await (typeof prisma.$transaction === "function"
+            ? prisma.$transaction(callback)
+            : callback(prisma as Prisma.TransactionClient));
+        } finally {
+          transactionMs = Date.now() - transactionStartedAtMs;
+        }
       }),
     );
   } finally {
     logHostedOnboardingDiagnostic("hosted-onboarding.webhook.plan-db", {
-      transactionMs: Date.now() - startedAtMs,
+      transactionMs,
+      ...(warmUnwrapMs === undefined ? {} : { warmUnwrapMs }),
       ...buildHostedWebhookDbTimingLogDetails(operations),
     });
   }
