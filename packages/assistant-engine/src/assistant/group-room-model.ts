@@ -1,9 +1,17 @@
+import { createHash } from 'node:crypto'
 import { readFile, stat } from 'node:fs/promises'
 
-import { parseFrontmatterDocument } from '@murphai/core'
+import {
+  canonicalPathResource,
+  parseFrontmatterDocument,
+  withCanonicalResourceLocks,
+} from '@murphai/core'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { resolveAssistantVaultPath } from '@murphai/vault-usecases/assistant-vault-paths'
+import { loadIntegratedRuntime } from '@murphai/vault-usecases/runtime'
 
 import {
+  buildKnowledgeMarkdown,
   buildKnowledgePageRelativePath,
   GROUP_ROOM_MODEL_KNOWLEDGE_PAGE_MAX_BYTES,
   GROUP_ROOM_MODEL_KNOWLEDGE_PAGE_TYPE,
@@ -34,9 +42,13 @@ const ASSISTANT_GROUP_ROOM_MODEL_PROMPT_FOOTER = [
 ].join(' ')
 
 export type AssistantGroupRoomModelReadState =
-  | { kind: 'missing' }
+  | {
+      digest: string
+      kind: 'missing'
+    }
   | {
       body: string
+      digest: string
       kind: 'present'
       status: string
     }
@@ -59,7 +71,7 @@ export async function readAssistantGroupRoomModelPrompt(input: {
   vaultRoot: string
 }): Promise<string | null> {
   const body = await readAssistantGroupRoomModelBody(input)
-  return body ? buildBoundedAssistantGroupRoomModelPrompt(body) : null
+  return body ? renderAssistantGroupRoomModelPrompt(body) : null
 }
 
 export async function readAssistantGroupRoomModelBody(input: {
@@ -101,7 +113,7 @@ export async function readAssistantGroupRoomModelState(
     }
   } catch (error) {
     return isMissingFileError(error)
-      ? { kind: 'missing' }
+      ? missingAssistantGroupRoomModelState()
       : { kind: 'unavailable' }
   }
 
@@ -118,13 +130,126 @@ export async function readAssistantGroupRoomModelState(
 
     const status = readKnowledgeAttribute(document.attributes, 'status')
     const body = normalizeNullableString(normalizeKnowledgeBody(document.body))
-    if (!body || !status) {
+    if (
+      !body ||
+      !status ||
+      !assistantGroupRoomModelBodyFitsPrompt(body)
+    ) {
       return { kind: 'unavailable' }
     }
-    return { body, kind: 'present', status }
+    return {
+      body,
+      digest: digestAssistantGroupRoomModelState({ body, status }),
+      kind: 'present',
+      status,
+    }
   } catch {
     return { kind: 'unavailable' }
   }
+}
+
+export async function replaceAssistantGroupRoomModel(input: {
+  body: string
+  expectedDigest: string
+  vaultRoot: string
+}): Promise<Extract<AssistantGroupRoomModelReadState, { kind: 'present' }>> {
+  const body = normalizeKnowledgeBody(input.body)
+  assertAssistantGroupRoomModelBodyValid(body)
+  const relativePath = buildKnowledgePageRelativePath(
+    ASSISTANT_GROUP_ROOM_MODEL_SLUG,
+  )
+
+  return await withCanonicalResourceLocks({
+    vaultRoot: input.vaultRoot,
+    resources: [canonicalPathResource(relativePath)],
+    run: async () => {
+      const state = await readAssistantGroupRoomModelState({
+        vaultRoot: input.vaultRoot,
+      })
+      assertAssistantGroupRoomModelMutationState({
+        expectedDigest: input.expectedDigest,
+        state,
+      })
+
+      const savedAt = new Date().toISOString()
+      const markdown = buildKnowledgeMarkdown({
+        body,
+        compiledAt: savedAt,
+        librarySlugs: [],
+        pageType: ASSISTANT_GROUP_ROOM_MODEL_PAGE_TYPE,
+        relatedSlugs: [],
+        slug: ASSISTANT_GROUP_ROOM_MODEL_SLUG,
+        sourcePaths: [],
+        status: 'active',
+        summary: null,
+        title: 'Group room model',
+      })
+      const runtime = await loadIntegratedRuntime()
+      await runtime.core.applyCanonicalWriteBatch({
+        vaultRoot: input.vaultRoot,
+        operationType: 'group_room_model.replace',
+        summary: 'Replaced the group room model.',
+        audit: {
+          action: 'group_room_model_replace',
+          commandName: 'assistantEngine.replaceAssistantGroupRoomModel',
+          summary: 'Replaced the group room model.',
+        },
+        textWrites: [{
+          content: markdown,
+          overwrite: true,
+          relativePath,
+        }],
+      })
+
+      return {
+        body,
+        digest: digestAssistantGroupRoomModelState({
+          body,
+          status: 'active',
+        }),
+        kind: 'present',
+        status: 'active',
+      }
+    },
+  })
+}
+
+export async function deleteAssistantGroupRoomModel(input: {
+  expectedDigest: string
+  vaultRoot: string
+}): Promise<Extract<AssistantGroupRoomModelReadState, { kind: 'missing' }>> {
+  const relativePath = buildKnowledgePageRelativePath(
+    ASSISTANT_GROUP_ROOM_MODEL_SLUG,
+  )
+
+  return await withCanonicalResourceLocks({
+    vaultRoot: input.vaultRoot,
+    resources: [canonicalPathResource(relativePath)],
+    run: async () => {
+      const state = await readAssistantGroupRoomModelState({
+        vaultRoot: input.vaultRoot,
+      })
+      assertAssistantGroupRoomModelMutationState({
+        expectedDigest: input.expectedDigest,
+        state,
+      })
+      if (state.kind === 'present') {
+        const runtime = await loadIntegratedRuntime()
+        await runtime.core.applyCanonicalWriteBatch({
+          vaultRoot: input.vaultRoot,
+          operationType: 'group_room_model.delete',
+          summary: 'Deleted the group room model.',
+          audit: {
+            action: 'group_room_model_delete',
+            commandName: 'assistantEngine.deleteAssistantGroupRoomModel',
+            summary: 'Deleted the group room model.',
+          },
+          deletes: [{ relativePath }],
+        })
+      }
+      return missingAssistantGroupRoomModelState()
+    },
+  })
 }
 
 export function assistantRouteSupportsGroupRoomModel(input: {
@@ -138,41 +263,96 @@ export function assistantRouteSupportsGroupRoomModel(input: {
   return channel === 'linq' || channel === 'telegram'
 }
 
-function buildBoundedAssistantGroupRoomModelPrompt(body: string): string | null {
-  const codePoints = Array.from(body)
-  let low = 0
-  let high = codePoints.length
-  let best: string | null = null
+export function renderAssistantGroupRoomModelPrompt(body: string): string {
+  return [
+    ASSISTANT_GROUP_ROOM_MODEL_PROMPT_HEADER,
+    JSON.stringify({
+      tipsMarkdown: body,
+      truncated: false,
+    }),
+    ASSISTANT_GROUP_ROOM_MODEL_PROMPT_FOOTER,
+  ].join('\n\n')
+}
 
-  while (low <= high) {
-    const mid = Math.floor((low + high) / 2)
-    const candidateBody = normalizeNullableString(
-      codePoints.slice(0, mid).join('').trimEnd(),
+function assertAssistantGroupRoomModelBodyValid(body: string): void {
+  if (!normalizeNullableString(body)) {
+    throw new VaultCliError(
+      'group_room_model_body_required',
+      'Group room-model body must contain durable room guidance.',
     )
-    if (!candidateBody) {
-      low = mid + 1
-      continue
-    }
-    const candidate = [
-      ASSISTANT_GROUP_ROOM_MODEL_PROMPT_HEADER,
-      JSON.stringify({
-        tipsMarkdown: candidateBody,
-        truncated: mid < codePoints.length,
-      }),
-      ASSISTANT_GROUP_ROOM_MODEL_PROMPT_FOOTER,
-    ].join('\n\n')
-    if (
-      assistantConversationHistoryUtf8Bytes(candidate) <=
-        ASSISTANT_GROUP_ROOM_MODEL_PROMPT_MAX_BYTES
-    ) {
-      best = candidate
-      low = mid + 1
-    } else {
-      high = mid - 1
-    }
   }
+  if (!assistantGroupRoomModelBodyFitsPrompt(body)) {
+    throw new VaultCliError(
+      'group_room_model_prompt_too_large',
+      'Group room-model body does not fit the complete advisory prompt.',
+      {
+        maxPromptBytes: ASSISTANT_GROUP_ROOM_MODEL_PROMPT_MAX_BYTES,
+      },
+    )
+  }
+  if (assistantGroupRoomModelBodyContainsRawParticipantHandle(body)) {
+    throw new VaultCliError(
+      'group_room_model_participant_handle_forbidden',
+      'Group room-model body must not contain raw participant handles.',
+    )
+  }
+}
 
-  return best
+function assistantGroupRoomModelBodyFitsPrompt(body: string): boolean {
+  return (
+    assistantConversationHistoryUtf8Bytes(
+      renderAssistantGroupRoomModelPrompt(body),
+    ) <= ASSISTANT_GROUP_ROOM_MODEL_PROMPT_MAX_BYTES
+  )
+}
+
+function assistantGroupRoomModelBodyContainsRawParticipantHandle(
+  body: string,
+): boolean {
+  return (
+    /(?:^|[^\p{L}\p{N}])\+\d{7,15}(?!\d)/u.test(body) ||
+    /\btelegram:[^\s`()[\]{}<>]+/iu.test(body) ||
+    /\bparticipant:[^\s`()[\]{}<>]+/iu.test(body) ||
+    /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/iu.test(body)
+  )
+}
+
+function assertAssistantGroupRoomModelMutationState(input: {
+  expectedDigest: string
+  state: AssistantGroupRoomModelReadState
+}): void {
+  if (input.state.kind === 'unavailable') {
+    throw new VaultCliError(
+      'group_room_model_unavailable',
+      'Group room-model state is unreadable or incompatible.',
+    )
+  }
+  if (input.state.digest !== input.expectedDigest) {
+    throw new VaultCliError(
+      'group_room_model_stale',
+      'Group room-model state changed after it was shown.',
+    )
+  }
+}
+
+function missingAssistantGroupRoomModelState(): Extract<
+  AssistantGroupRoomModelReadState,
+  { kind: 'missing' }
+> {
+  return {
+    digest: digestAssistantGroupRoomModelState({ kind: 'missing' }),
+    kind: 'missing',
+  }
+}
+
+function digestAssistantGroupRoomModelState(
+  state:
+    | { kind: 'missing' }
+    | { body: string; status: string },
+): string {
+  return createHash('sha256')
+    .update(JSON.stringify(state))
+    .digest('hex')
 }
 
 function readKnowledgeAttribute(

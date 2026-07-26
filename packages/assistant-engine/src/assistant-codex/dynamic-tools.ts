@@ -2558,6 +2558,7 @@ export async function executeMurphDynamicToolRequest(input: {
   assistantStyleSettingsOverlay?: AssistantStyleTurnSettingsOverlay | null
   assistantStyleSettingsAvailable?: boolean | null
   groupRoomModelAvailable?: boolean | null
+  groupRoomModelMaintenanceAuthorized?: boolean | null
   abortSignal?: AbortSignal | null
   codexHome?: string | null
   currentResponseMedia?: readonly AssistantResponseMedia[] | null
@@ -2681,6 +2682,8 @@ export async function executeMurphDynamicToolRequest(input: {
     case 'group-room-model':
       return await executeGroupRoomModelDynamicTool({
         available: input.groupRoomModelAvailable === true,
+        managedMaintenanceAuthorized:
+          input.groupRoomModelMaintenanceAuthorized === true,
         request: input.request,
         userActionScope:
           input.hostedToolContext?.currentUserActionScope?.() ?? null,

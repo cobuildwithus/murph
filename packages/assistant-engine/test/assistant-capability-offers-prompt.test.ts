@@ -59,11 +59,12 @@ describe('assistant capability-offers prompt contract', () => {
     }).prompt
 
     expect(prompt).toContain(
-      '`vault-cli knowledge show group-room-model --format json`',
+      '`murph.group_room_model`',
     )
-    expect(prompt).toContain('`vault-cli knowledge upsert`')
+    expect(prompt).toContain('exact `digest` as `expectedDigest`')
+    expect(prompt).toContain('Do not use the shell')
     expect(prompt).toContain('rough list of fallible participation tips')
-    expect(prompt).toContain('must never be rendered to the room')
+    expect(prompt).toContain('never copy a raw handle into the page')
     expect(prompt).not.toContain('`vault-cli memory upsert`')
     expect(prompt).not.toContain(CAPABILITY_OFFERS_HEADER)
     expect(prompt).not.toContain(PHONE_CALLS_HEADER)

@@ -76,13 +76,14 @@ bounded seven-day tail of committed transcripts from those same authenticated
 group-chat channels. It fully rewrites the one page only when the evidence
 materially improves a compact list of room canon, likely person-specific comedy
 preferences, successful Murph formats, retired material, and open callbacks.
-The canonical knowledge write boundary caps that fixed page at 8 KiB of UTF-8
-body content for both scheduled and explicit rewrites, rejecting an oversized
-replacement before the existing page changes.
-The route-authorized `Sender:` handle already present in an admitted group prompt
-may remain beside a room name only as an internal group-local continuity anchor;
-it is never rendered, matched across rooms, or accepted as account, membership,
-tool, permission, or health-share authority.
+One dedicated owner reads, replaces, or deletes the fixed page. Generic
+knowledge show, list, search, append, upsert, and generated index surfaces
+exclude it. Every mutation passes the digest returned by the immediately prior
+show and compares that digest under the same fixed-page lock, so a concurrent
+rewrite cannot be lost. Replacement validates the normalized body and complete
+6 KiB advisory envelope before writing; ordinary prompts never truncate an
+accepted page. Raw `Sender:` handles remain transient evidence attribution and
+cannot be persisted in the page.
 
 Ordinary authenticated hosted group-chat turns read that fixed page directly
 from the same group vault and append a bounded rendering to dynamic turn
@@ -90,7 +91,10 @@ context. An explicit current-room remember, correction, retirement, or forget
 request may fully rewrite the page only through a dynamic tool admitted for
 current accepted input on that authenticated route. Group email neither receives
 the page nor contributes maintenance evidence, and its spoofable sender cannot
-receive the mutation tool. Ordinary prompt reads fail open, but mutation reads
+receive the mutation tool. Silent consolidation receives that same dynamic tool
+only from the immutable managed-automation id, runs in a fresh one-shot Codex
+thread with workspace access denied and network disabled, and has no generic
+knowledge or shell write surface. Ordinary prompt reads fail open, but mutation reads
 distinguish a genuinely missing page from malformed, unreadable, or wrong-type
 fixed-slug state; conflicts stop both explicit and scheduled replacement. The
 rendering is quoted as fallible data and

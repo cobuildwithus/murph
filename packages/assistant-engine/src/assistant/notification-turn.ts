@@ -1517,6 +1517,12 @@ function assistantMaintenanceRawEventsIncludeMutation(
 ): boolean {
   return rawEvents.some((rawEvent) => {
     const event = normalizeCodexEvent(rawEvent)
+    if (
+      profile === 'group-room-model' &&
+      assistantGroupRoomModelDynamicMutationCompleted(event)
+    ) {
+      return true
+    }
     return (
       event.kind === 'status_item' &&
       event.itemType === 'command.execution' &&
@@ -1536,8 +1542,36 @@ function isAssistantMaintenanceMutationCommand(
     return false
   }
   return profile === 'group-room-model'
-    ? /\bvault-cli\b[\s\S]*\bknowledge\s+upsert\b[\s\S]*\bgroup-room-model\b/u.test(normalized)
+    ? false
     : /\bvault-cli\b[\s\S]*\bmemory\s+(?:upsert|update)\b/u.test(normalized)
+}
+
+function assistantGroupRoomModelDynamicMutationCompleted(
+  event: ReturnType<typeof normalizeCodexEvent>,
+): boolean {
+  if (
+    event.kind !== 'status_item' ||
+    event.itemState !== 'completed' ||
+    event.itemType !== 'dynamic.tool.call'
+  ) {
+    return false
+  }
+  const record = readAssistantNotificationRecord(event.rawEvent)
+  const item =
+    readAssistantNotificationRecord(record?.item) ??
+    readAssistantNotificationRecord(
+      readAssistantNotificationRecord(record?.params)?.item,
+    ) ??
+    readAssistantNotificationRecord(
+      readAssistantNotificationRecord(record?.data)?.item,
+    )
+  const args = readAssistantNotificationRecord(item?.arguments)
+  return (
+    item?.success === true &&
+    item.namespace === 'murph' &&
+    (item.tool === 'group_room_model' || item.name === 'group_room_model') &&
+    (args?.action === 'upsert' || args?.action === 'delete')
+  )
 }
 
 function assertAssistantMaintenanceNotificationDecision(input: {

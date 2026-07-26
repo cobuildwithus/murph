@@ -25,7 +25,7 @@ import {
   readDerivedKnowledgeGraphWithIssues,
   readHealthLibraryGraphWithIssues,
   renderDerivedKnowledgeIndex,
-  searchDerivedKnowledgeVault,
+  searchDerivedKnowledgeGraph,
   summarizeKnowledgeBody,
   type DerivedKnowledgeGraph,
   type DerivedKnowledgeGraphIssue,
@@ -36,8 +36,6 @@ import {
   buildKnowledgePageRelativePath,
   deriveKnowledgeTitle,
   extractKnowledgeRelatedSlugsFromBody,
-  GROUP_ROOM_MODEL_KNOWLEDGE_PAGE_MAX_BYTES,
-  GROUP_ROOM_MODEL_KNOWLEDGE_PAGE_TYPE,
   GROUP_ROOM_MODEL_KNOWLEDGE_SLUG,
   normalizeLibrarySlugInputs,
   matchesKnowledgeFilter,
@@ -162,14 +160,7 @@ export async function upsertKnowledgePage(
     title: input.title,
   })
   const slug = normalizeKnowledgeSlug(input.slug ?? initialTitle)
-  assertKnowledgePageBodyWithinLimit({
-    body: normalizedBody,
-    slug,
-  })
-  assertGroupRoomModelKnowledgePageType({
-    pageType: input.pageType,
-    slug,
-  })
+  assertGenericKnowledgePageSlug(slug, 'upsert')
   const initialGraph = await readDerivedKnowledgeGraphWithIssues(input.vault)
   const initialPage = requireUniqueKnowledgePageBySlug(
     initialGraph.graph,
@@ -183,11 +174,6 @@ export async function upsertKnowledgePage(
     run: async () => {
       const { graph } = await readDerivedKnowledgeGraphWithIssues(input.vault)
       const existingPage = requireUniqueKnowledgePageBySlug(graph, slug, 'upsert')
-      await assertGroupRoomModelKnowledgePageIsWritable({
-        existingPage,
-        slug,
-        vault: input.vault,
-      })
       const title = deriveKnowledgeTitle({
         body: input.body,
         existingPage,
@@ -303,71 +289,6 @@ export async function upsertKnowledgePage(
   })
 }
 
-function assertKnowledgePageBodyWithinLimit(input: {
-  body: string
-  slug: string
-}): void {
-  if (
-    input.slug === GROUP_ROOM_MODEL_KNOWLEDGE_SLUG &&
-    Buffer.byteLength(input.body, 'utf8') >
-      GROUP_ROOM_MODEL_KNOWLEDGE_PAGE_MAX_BYTES
-  ) {
-    throw new VaultCliError(
-      'knowledge_page_body_too_large',
-      `Knowledge page "${input.slug}" body must not exceed ${GROUP_ROOM_MODEL_KNOWLEDGE_PAGE_MAX_BYTES} UTF-8 bytes.`,
-      {
-        maxBytes: GROUP_ROOM_MODEL_KNOWLEDGE_PAGE_MAX_BYTES,
-        slug: input.slug,
-      },
-    )
-  }
-}
-
-function assertGroupRoomModelKnowledgePageType(input: {
-  pageType: string | null | undefined
-  slug: string
-}): void {
-  if (
-    input.slug === GROUP_ROOM_MODEL_KNOWLEDGE_SLUG &&
-    normalizeKnowledgeTag(input.pageType ?? '') !==
-      GROUP_ROOM_MODEL_KNOWLEDGE_PAGE_TYPE
-  ) {
-    throw new VaultCliError(
-      'knowledge_page_conflict',
-      `Knowledge page "${input.slug}" requires page type "${GROUP_ROOM_MODEL_KNOWLEDGE_PAGE_TYPE}".`,
-      { slug: input.slug },
-    )
-  }
-}
-
-async function assertGroupRoomModelKnowledgePageIsWritable(input: {
-  existingPage: DerivedKnowledgeNode | null
-  slug: string
-  vault: string
-}): Promise<void> {
-  if (input.slug !== GROUP_ROOM_MODEL_KNOWLEDGE_SLUG) {
-    return
-  }
-  if (
-    input.existingPage?.pageType === GROUP_ROOM_MODEL_KNOWLEDGE_PAGE_TYPE
-  ) {
-    return
-  }
-  if (
-    input.existingPage ||
-    await knowledgeReadableFileExists(
-      input.vault,
-      buildKnowledgePageRelativePath(input.slug),
-    )
-  ) {
-    throw new VaultCliError(
-      'knowledge_page_conflict',
-      `Knowledge page "${input.slug}" exists with incompatible or unreadable state.`,
-      { slug: input.slug },
-    )
-  }
-}
-
 export async function appendKnowledgePageSection(
   input: KnowledgeAppendSectionInput,
   dependencies: KnowledgeServiceDependencies = {},
@@ -385,6 +306,7 @@ export async function appendKnowledgePageSection(
   }
 
   const slug = normalizeKnowledgeSlug(input.slug)
+  assertGenericKnowledgePageSlug(slug, 'append')
   const position = normalizeKnowledgeAppendPosition(input.position)
   const initialGraph = await readDerivedKnowledgeGraphWithIssues(input.vault)
   const initialPage = requireUniqueKnowledgePageBySlug(
@@ -435,7 +357,6 @@ export async function appendKnowledgePageSection(
         position,
         sectionBody,
       })
-      assertKnowledgePageBodyWithinLimit({ body, slug })
       const title = deriveKnowledgeTitle({
         existingPage,
         slug,
@@ -551,7 +472,10 @@ export async function searchKnowledgePages(
   }
 
   const filters = normalizeKnowledgeFilters(input)
-  const result = await searchDerivedKnowledgeVault(input.vault, query, {
+  const graph = toGenericKnowledgeGraph(
+    await readDerivedKnowledgeGraph(input.vault),
+  )
+  const result = searchDerivedKnowledgeGraph(graph, query, {
     limit: input.limit ?? undefined,
     pageType: filters.pageType,
     status: filters.status,
@@ -568,7 +492,9 @@ export async function searchKnowledgePages(
 export async function listKnowledgePages(
   input: KnowledgeListInput,
 ): Promise<KnowledgeListResult> {
-  const graph = await readDerivedKnowledgeGraph(input.vault)
+  const graph = toGenericKnowledgeGraph(
+    await readDerivedKnowledgeGraph(input.vault),
+  )
   const filters = normalizeKnowledgeFilters(input)
   const limit = normalizeKnowledgeListLimit(input.limit)
   const pages = graph.nodes
@@ -598,14 +524,45 @@ function normalizeKnowledgeListLimit(limit: number | null | undefined): number {
   )
 }
 
+function assertGenericKnowledgePageSlug(
+  slug: string,
+  action: 'append' | 'show' | 'upsert',
+): void {
+  if (slug !== GROUP_ROOM_MODEL_KNOWLEDGE_SLUG) {
+    return
+  }
+  throw new VaultCliError(
+    'knowledge_page_reserved',
+    `Knowledge page "${slug}" is owned by its dedicated group room-model surface and cannot be accessed through knowledge ${action}.`,
+    { slug },
+  )
+}
+
+function toGenericKnowledgeGraph(
+  graph: DerivedKnowledgeGraph,
+): DerivedKnowledgeGraph {
+  const nodes = graph.nodes.filter(
+    (node) => node.slug !== GROUP_ROOM_MODEL_KNOWLEDGE_SLUG,
+  )
+  return nodes.length === graph.nodes.length
+    ? graph
+    : {
+        ...graph,
+        bySlug: new Map(nodes.map((node) => [node.slug, node])),
+        nodes,
+      }
+}
+
 export async function getKnowledgePage(
   input: KnowledgeGetInput,
   dependencies: Pick<KnowledgeServiceDependencies, 'readTextFile'> = {},
 ): Promise<KnowledgeGetResult> {
+  const slug = normalizeKnowledgeSlug(input.slug)
+  assertGenericKnowledgePageSlug(slug, 'show')
   const graph = await readDerivedKnowledgeGraph(input.vault)
   const page = requireUniqueKnowledgePageBySlug(
     graph,
-    normalizeKnowledgeSlug(input.slug),
+    slug,
     'get',
   )
 
@@ -633,7 +590,9 @@ export async function rebuildKnowledgeIndex(
     vaultRoot: input.vault,
     resources: [canonicalPathResource(DERIVED_KNOWLEDGE_INDEX_PATH)],
     run: async () => {
-      const graph = await readDerivedKnowledgeGraph(input.vault)
+      const graph = toGenericKnowledgeGraph(
+        await readDerivedKnowledgeGraph(input.vault),
+      )
       const generatedAt = (dependencies.now ?? (() => new Date()))().toISOString()
       const markdown = renderDerivedKnowledgeIndex(graph, generatedAt)
 

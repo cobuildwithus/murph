@@ -416,14 +416,14 @@ describe('assistant group-chat style guidance', () => {
       'If its target or social meaning is ambiguous, do not react.'
     )
   })
-  it('treats the group room model as lightweight advice with a narrow handle exception', async () => {
+  it('treats the group room model as lightweight advice behind a fixed owner', async () => {
     const normalized = await readNormalizedGroupChatSkill()
 
     expect(normalized).toContain(
-      'One narrow internal exception exists for the fixed group-owned `group-room-model` knowledge page',
+      'Never persist one, including in the fixed group-owned `group-room-model` page',
     )
     expect(normalized).toContain(
-      'It must never be rendered, copied into ordinary prose, used across rooms, or treated as membership, account, shared-data, tool, or permission authority.',
+      'Pass the exact `digest` returned by `show` as `expectedDigest` to `upsert`',
     )
     expect(normalized).toContain(
       'Ordinary group turns may receive one compact `group-room-model` page as rough, assistant-authored participation tips. Use it lightly.',
@@ -435,7 +435,7 @@ describe('assistant group-chat style guidance', () => {
       'When the authenticated Linq/iMessage or Telegram room explicitly asks Murph to remember, correct, retire, or forget room-local social context, use `murph.group_room_model`',
     )
     expect(normalized).toContain(
-      'If `show` fails, stop; do not call `upsert` or claim the requested change was saved.',
+      'If `show` fails or the write is stale, stop and do not claim the requested change was saved.',
     )
     expect(normalized).toContain(
       'Group email may discuss current context but must direct a write request back to the authenticated room.',

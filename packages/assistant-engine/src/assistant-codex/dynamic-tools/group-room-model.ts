@@ -5,14 +5,13 @@ import type {
 } from '../../assistant/hosted-tool-context.js'
 import {
   ASSISTANT_GROUP_ROOM_MODEL_PAGE_MAX_BYTES,
-  ASSISTANT_GROUP_ROOM_MODEL_PAGE_TYPE,
-  ASSISTANT_GROUP_ROOM_MODEL_SLUG,
+  deleteAssistantGroupRoomModel,
   readAssistantGroupRoomModelState,
+  replaceAssistantGroupRoomModel,
 } from '../../assistant/group-room-model.js'
 import type {
   SafeToolCallValidationDigest,
 } from '../../assistant/tool-validation-digest.js'
-import { upsertKnowledgePage } from '../../knowledge/service.js'
 import { parseDynamicToolArguments } from './dynamic-tool-wrapper.js'
 
 const groupRoomModelBodySchema = z
@@ -32,6 +31,11 @@ const groupRoomModelArgumentsSchema = z.discriminatedUnion('action', [
   z.object({
     action: z.literal('upsert'),
     body: groupRoomModelBodySchema,
+    expectedDigest: z.string().regex(/^[a-f0-9]{64}$/u),
+  }).strict(),
+  z.object({
+    action: z.literal('delete'),
+    expectedDigest: z.string().regex(/^[a-f0-9]{64}$/u),
   }).strict(),
 ])
 
@@ -39,7 +43,7 @@ export const MURPH_GROUP_ROOM_MODEL_TOOL = {
   namespace: 'murph',
   name: 'group_room_model',
   description:
-    'Read or fully replace the one advisory room-model page for the current authenticated group chat. Use only for an explicit current-room request to remember, correct, retire, or forget social context. Show first, then upsert the complete compact Markdown page. If show fails, stop and do not upsert. This tool is unavailable in group email and never changes participant identity, permissions, health sharing, or personal memory.',
+    'Read, fully replace, or delete the one advisory room-model page owned by the current authenticated group chat. Ordinary group turns may use it only for an explicit current-room request to remember, correct, retire, or forget social context; silent consolidation receives separate immutable automation authority. Show first, then pass the returned expectedDigest to upsert or delete. Upsert must contain the complete compact Markdown page, must fit the complete advisory prompt, and must not contain raw participant handles. If show fails or a write reports stale state, stop. This tool is unavailable in group email and never changes participant identity, permissions, health sharing, or personal memory.',
   inputSchema: z.toJSONSchema(groupRoomModelArgumentsSchema, { io: 'input' }),
 } as const
 
@@ -67,7 +71,7 @@ export function readGroupRoomModelDynamicToolRequest(input: {
 
   const parsed = parseDynamicToolArguments({
     schema: groupRoomModelArgumentsSchema,
-    schemaRootKeys: ['action', 'body'],
+    schemaRootKeys: ['action', 'body', 'expectedDigest'],
     toolName: 'murph.group_room_model',
     value: input.arguments,
   })
@@ -88,6 +92,7 @@ export async function executeGroupRoomModelDynamicTool(input: {
   >
   userActionScope: AssistantHostedUserActionScope | null
   vaultRoot: string | null
+  managedMaintenanceAuthorized?: boolean
   readGroupRoomModelState?: typeof readAssistantGroupRoomModelState
 }): Promise<{
   rpcResult: {
@@ -97,8 +102,13 @@ export async function executeGroupRoomModelDynamicTool(input: {
 }> {
   if (
     !input.available ||
-    input.userActionScope?.conversationScope !== 'group' ||
-    input.userActionScope.acceptedInputIds.length === 0
+    (
+      input.managedMaintenanceAuthorized !== true &&
+      (
+        input.userActionScope?.conversationScope !== 'group' ||
+        input.userActionScope.acceptedInputIds.length === 0
+      )
+    )
   ) {
     return groupRoomModelTextResult(
       false,
@@ -130,19 +140,35 @@ export async function executeGroupRoomModelDynamicTool(input: {
         true,
         JSON.stringify(
           state.kind === 'present'
-            ? { body: state.body, status: state.status }
-            : { body: null, status: 'missing' },
+            ? {
+                body: state.body,
+                digest: state.digest,
+                status: state.status,
+              }
+            : {
+                body: null,
+                digest: state.digest,
+                status: 'missing',
+              },
         ),
       )
     }
 
-    await upsertKnowledgePage({
+    if (input.request.args.action === 'delete') {
+      await deleteAssistantGroupRoomModel({
+        expectedDigest: input.request.args.expectedDigest,
+        vaultRoot: input.vaultRoot,
+      })
+      return groupRoomModelTextResult(
+        true,
+        JSON.stringify({ status: 'deleted' }),
+      )
+    }
+
+    await replaceAssistantGroupRoomModel({
       body: input.request.args.body,
-      pageType: ASSISTANT_GROUP_ROOM_MODEL_PAGE_TYPE,
-      slug: ASSISTANT_GROUP_ROOM_MODEL_SLUG,
-      status: 'active',
-      title: 'Group room model',
-      vault: input.vaultRoot,
+      expectedDigest: input.request.args.expectedDigest,
+      vaultRoot: input.vaultRoot,
     })
     return groupRoomModelTextResult(
       true,

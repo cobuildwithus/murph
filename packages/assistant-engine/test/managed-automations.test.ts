@@ -1053,7 +1053,10 @@ describe('applyMurphManagedAutomations', () => {
     expect(seed.assistantTargetOverride).toEqual({ reasoningEffort: 'high' })
     expect(seed.instructions).toContain('lightweight list of likely tips')
     expect(seed.instructions).toContain('who gets teased about what')
-    expect(seed.instructions).toContain('Raw route-authorized `Sender:` handles')
+    expect(seed.instructions).toContain(
+      'Never copy a raw handle into the page',
+    )
+    expect(seed.instructions).toContain('exact `expectedDigest` returned by show')
     expect(seed.instructions).toContain('Treat the page as advisory')
     expect(seed.instructions).toContain(
       `{"kind":"skip","privateSummary":"${MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_PRIVATE_SUMMARY}"}`,

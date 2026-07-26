@@ -2389,9 +2389,23 @@ test('sendAssistantNotificationLocal isolates detached provider results without 
     providerTurn: {
       ...createProviderResult({
         rawEvents: [
-          createCodexCommandCompletedEvent(
-            'vault-cli knowledge upsert --slug group-room-model --title "Group room model" --page-type group-room-model --status active --body "# tips"',
-          ),
+          {
+            method: 'item/completed',
+            params: {
+              item: {
+                arguments: {
+                  action: 'upsert',
+                  body: '## Tips\n- one useful tip',
+                  expectedDigest: 'a'.repeat(64),
+                },
+                id: 'group-room-model-write',
+                namespace: 'murph',
+                success: true,
+                tool: 'group_room_model',
+                type: 'dynamicToolCall',
+              },
+            },
+          },
         ],
         response: JSON.stringify({
           kind: 'send_message',

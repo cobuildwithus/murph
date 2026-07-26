@@ -72,8 +72,12 @@ import {
   buildAssistantCodexContractFingerprint,
 } from '../src/assistant/codex-contract-fingerprint.js'
 import {
+  MURPH_GROUP_ROOM_MODEL_TOOL,
   resolveMurphDynamicTools,
 } from '../src/assistant-codex/dynamic-tools.js'
+import {
+  MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_AUTOMATION_ID,
+} from '../src/assistant/managed-automations.js'
 import {
   buildAssistantSkillFileRef,
 } from '../src/assistant-skill-assets.js'
@@ -732,6 +736,11 @@ describe('assistant Codex turn planning', () => {
       input: {
         ...createMessageInput(),
         maintenanceProfile: 'group-room-model',
+        scheduledInvocationAuthority: {
+          automationId:
+            MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_AUTOMATION_ID,
+          occurrenceAt: '2026-07-25T08:00:00.000Z',
+        },
       },
       profile: {
         promptProfile: 'maintenance',
@@ -750,10 +759,12 @@ describe('assistant Codex turn planning', () => {
       }),
     })
 
-    expect(plan.dynamicTools).toEqual([])
+    expect(plan.dynamicTools).toEqual([MURPH_GROUP_ROOM_MODEL_TOOL])
     expect(plan.systemPrompt).toContain(
-      '`vault-cli knowledge show group-room-model --format json`',
+      '`murph.group_room_model`',
     )
+    expect(plan.systemPrompt).toContain('exact `digest` as `expectedDigest`')
+    expect(plan.systemPrompt).toContain('Do not use the shell')
     expect(plan.systemPrompt).toContain('rough list of fallible participation tips')
     expect(plan.systemPrompt).not.toContain('`vault-cli memory upsert`')
     expect(plan.systemPrompt).not.toContain(

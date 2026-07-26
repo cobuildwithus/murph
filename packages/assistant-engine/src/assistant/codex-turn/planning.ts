@@ -26,6 +26,9 @@ import {
   readAssistantGroupRoomModelPrompt,
 } from '../group-room-model.js'
 import {
+  MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_AUTOMATION_ID,
+} from '../managed-automations.js'
+import {
   normalizeAssistantExecutionContext,
   type AssistantHostedDeviceConnectProvider,
 } from '../execution-context.js'
@@ -100,6 +103,7 @@ import {
 } from '../message-target-selection.js'
 import { resolveAssistantConversationScope } from '../conversation-policy.js'
 import {
+  MURPH_GROUP_ROOM_MODEL_TOOL,
   resolveMurphDynamicTools,
   type MurphDynamicTool,
 } from '../../assistant-codex/dynamic-tools.js'
@@ -726,9 +730,15 @@ export async function resolveAssistantRouteTurnPlan(input: {
   // Maintenance turns run without a delivery target and must not expose any
   // external-capable or delivery-facing tool surface, so the gate is the
   // resolved tool set itself rather than prompt text.
-  const dynamicTools = maintenanceTurn || outputOnlyTurn
-    ? []
-    : resolveMurphDynamicTools({
+  const dynamicTools = outputOnlyTurn
+      ? []
+      : maintenanceTurn
+      ? input.input.maintenanceProfile === 'group-room-model' &&
+        input.input.scheduledInvocationAuthority?.automationId ===
+          MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_AUTOMATION_ID
+        ? [MURPH_GROUP_ROOM_MODEL_TOOL]
+        : []
+      : resolveMurphDynamicTools({
         assistantStyleSettingsAvailable,
         allowFinishWithoutReply,
         messageTargetingAvailable,

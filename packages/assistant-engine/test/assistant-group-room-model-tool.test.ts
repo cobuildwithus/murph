@@ -78,15 +78,28 @@ describe('authenticated group room-model tool', () => {
 
     const firstBody = [
       '## People',
-      '- Casey (`participant:alpha`) likes dry rulings.',
+      '- Casey likes dry rulings.',
     ].join('\n')
     const updatedBody = [
       '## What to avoid',
       '- Retire the combine nickname.',
     ].join('\n')
 
+    const missing = await executeRequest({
+      args: { action: 'show' },
+      available: true,
+      scope: createUserActionScope('group'),
+      vaultRoot,
+    })
+    const missingState = JSON.parse(
+      missing.rpcResult.contentItems[0]!.text,
+    ) as { digest: string }
     const firstWrite = await executeRequest({
-      args: { action: 'upsert', body: firstBody },
+      args: {
+        action: 'upsert',
+        body: firstBody,
+        expectedDigest: missingState.digest,
+      },
       available: true,
       scope: createUserActionScope('group'),
       vaultRoot,
@@ -98,20 +111,137 @@ describe('authenticated group room-model tool', () => {
       vaultRoot,
     })
     const secondWrite = await executeRequest({
-      args: { action: 'upsert', body: updatedBody },
+      args: {
+        action: 'upsert',
+        body: updatedBody,
+        expectedDigest: (
+          JSON.parse(show.rpcResult.contentItems[0]!.text) as {
+            digest: string
+          }
+        ).digest,
+      },
       available: true,
       scope: createUserActionScope('group'),
       vaultRoot,
     })
 
     expect(firstWrite.rpcResult.success).toBe(true)
-    expect(JSON.parse(show.rpcResult.contentItems[0]!.text)).toEqual({
+    expect(JSON.parse(show.rpcResult.contentItems[0]!.text)).toMatchObject({
       body: firstBody,
       status: 'active',
+      digest: expect.stringMatching(/^[a-f0-9]{64}$/u),
     })
     expect(secondWrite.rpcResult.success).toBe(true)
     await expect(readAssistantGroupRoomModelBody({ vaultRoot }))
       .resolves.toBe(updatedBody)
+  })
+
+  it('binds writes to show state, rejects empty or identifying bodies, and supports explicit deletion', async () => {
+    const { parentRoot, vaultRoot } = await createTempVaultContext(
+      'murph-group-room-model-tool-cas-',
+    )
+    cleanupPaths.push(parentRoot)
+    await initializeVault({ vaultRoot })
+
+    const showMissing = await executeRequest({
+      args: { action: 'show' },
+      available: true,
+      scope: createUserActionScope('group'),
+      vaultRoot,
+    })
+    const missingDigest = (
+      JSON.parse(showMissing.rpcResult.contentItems[0]!.text) as {
+        digest: string
+      }
+    ).digest
+
+    for (const body of [
+      '# Group room model',
+      '## People\n- Casey (`+15550000001`) likes dry rulings.',
+    ]) {
+      const rejected = await executeRequest({
+        args: {
+          action: 'upsert',
+          body,
+          expectedDigest: missingDigest,
+        },
+        available: true,
+        scope: createUserActionScope('group'),
+        vaultRoot,
+      })
+      expect(rejected.rpcResult.success).toBe(false)
+    }
+
+    const created = await executeRequest({
+      args: {
+        action: 'upsert',
+        body: '## People\n- Casey likes dry rulings.',
+        expectedDigest: missingDigest,
+      },
+      available: true,
+      scope: createUserActionScope('group'),
+      vaultRoot,
+    })
+    expect(created.rpcResult.success).toBe(true)
+
+    const stale = await executeRequest({
+      args: {
+        action: 'upsert',
+        body: '## People\n- stale replacement',
+        expectedDigest: missingDigest,
+      },
+      available: true,
+      scope: createUserActionScope('group'),
+      vaultRoot,
+    })
+    expect(stale.rpcResult.success).toBe(false)
+
+    const showCreated = await executeRequest({
+      args: { action: 'show' },
+      available: true,
+      scope: createUserActionScope('group'),
+      vaultRoot,
+    })
+    const createdState = JSON.parse(
+      showCreated.rpcResult.contentItems[0]!.text,
+    ) as { body: string; digest: string }
+    expect(createdState.body).toContain('Casey likes dry rulings.')
+
+    const deleted = await executeRequest({
+      args: {
+        action: 'delete',
+        expectedDigest: createdState.digest,
+      },
+      available: true,
+      scope: createUserActionScope('group'),
+      vaultRoot,
+    })
+    expect(deleted.rpcResult.success).toBe(true)
+    await expect(readAssistantGroupRoomModelBody({ vaultRoot }))
+      .resolves.toBeNull()
+
+    const recreatedShow = await executeRequest({
+      args: { action: 'show' },
+      available: true,
+      scope: createUserActionScope('group'),
+      vaultRoot,
+    })
+    const recreatedMissingDigest = (
+      JSON.parse(recreatedShow.rpcResult.contentItems[0]!.text) as {
+        digest: string
+      }
+    ).digest
+    const recreated = await executeRequest({
+      args: {
+        action: 'upsert',
+        body: '## What to avoid\n- Keep the old nickname retired.',
+        expectedDigest: recreatedMissingDigest,
+      },
+      available: true,
+      scope: createUserActionScope('group'),
+      vaultRoot,
+    })
+    expect(recreated.rpcResult.success).toBe(true)
   })
 
   it('fails closed without declared-tool and current group-input authority', async () => {
@@ -128,7 +258,11 @@ describe('authenticated group room-model tool', () => {
       [true, null],
     ] as const) {
       const result = await executeRequest({
-        args: { action: 'upsert', body: '## Tips\n- should not persist' },
+        args: {
+          action: 'upsert',
+          body: '## Tips\n- should not persist',
+          expectedDigest: 'a'.repeat(64),
+        },
         available,
         scope,
         vaultRoot,
@@ -143,17 +277,54 @@ describe('authenticated group room-model tool', () => {
       .resolves.toBeNull()
   })
 
+  it('admits the same fixed owner for engine-authorized silent maintenance', async () => {
+    const { parentRoot, vaultRoot } = await createTempVaultContext(
+      'murph-group-room-model-tool-maintenance-',
+    )
+    cleanupPaths.push(parentRoot)
+    await initializeVault({ vaultRoot })
+
+    const show = await executeGroupRoomModelDynamicTool({
+      available: true,
+      managedMaintenanceAuthorized: true,
+      request: requireGroupRoomModelRequest({ action: 'show' }),
+      userActionScope: null,
+      vaultRoot,
+    })
+    const expectedDigest = (
+      JSON.parse(show.rpcResult.contentItems[0]!.text) as {
+        digest: string
+      }
+    ).digest
+    const write = await executeGroupRoomModelDynamicTool({
+      available: true,
+      managedMaintenanceAuthorized: true,
+      request: requireGroupRoomModelRequest({
+        action: 'upsert',
+        body: '## Running bits and callbacks\n- Keep mock rulings dry.',
+        expectedDigest,
+      }),
+      userActionScope: null,
+      vaultRoot,
+    })
+
+    expect(write.rpcResult.success).toBe(true)
+    await expect(readAssistantGroupRoomModelBody({ vaultRoot }))
+      .resolves.toContain('Keep mock rulings dry.')
+  })
+
   it('rejects oversized and selector-bearing arguments', () => {
     expect(readRequest({
       action: 'upsert',
       body: 'x'.repeat(ASSISTANT_GROUP_ROOM_MODEL_PAGE_MAX_BYTES + 1),
+      expectedDigest: 'a'.repeat(64),
     })?.kind).toBe('invalid-group-room-model-arguments')
     expect(readRequest({
       action: 'show',
       participantId: 'participant:other',
     })?.kind).toBe('invalid-group-room-model-arguments')
     expect(MURPH_GROUP_ROOM_MODEL_TOOL.description).toContain(
-      'If show fails, stop and do not upsert.',
+      'If show fails or a write reports stale state, stop.',
     )
   })
 
@@ -169,8 +340,23 @@ describe('authenticated group room-model tool', () => {
       buildKnowledgePageRelativePath(ASSISTANT_GROUP_ROOM_MODEL_SLUG),
       'file path',
     )
+    const missing = await executeRequest({
+      args: { action: 'show' },
+      available: true,
+      scope: createUserActionScope('group'),
+      vaultRoot,
+    })
+    const expectedDigest = (
+      JSON.parse(missing.rpcResult.contentItems[0]!.text) as {
+        digest: string
+      }
+    ).digest
     await executeRequest({
-      args: { action: 'upsert', body: '## Tips\n- prior valid tip' },
+      args: {
+        action: 'upsert',
+        body: '## Tips\n- prior valid tip',
+        expectedDigest,
+      },
       available: true,
       scope: createUserActionScope('group'),
       vaultRoot,
@@ -201,7 +387,11 @@ describe('authenticated group room-model tool', () => {
         vaultRoot,
       })
       const replacement = await executeRequest({
-        args: { action: 'upsert', body: '## Tips\n- replacement' },
+        args: {
+          action: 'upsert',
+          body: '## Tips\n- replacement',
+          expectedDigest,
+        },
         available: true,
         scope: createUserActionScope('group'),
         vaultRoot,
@@ -218,7 +408,7 @@ describe('authenticated group room-model tool', () => {
         title: 'Group room model',
         vault: vaultRoot,
       })).rejects.toMatchObject({
-        code: 'knowledge_page_conflict',
+        code: 'knowledge_page_reserved',
       })
       await expect(readFile(pagePath)).resolves.toEqual(priorFile)
     }
@@ -230,8 +420,23 @@ describe('authenticated group room-model tool', () => {
     )
     cleanupPaths.push(parentRoot)
     await initializeVault({ vaultRoot })
+    const missing = await executeRequest({
+      args: { action: 'show' },
+      available: true,
+      scope: createUserActionScope('group'),
+      vaultRoot,
+    })
+    const expectedDigest = (
+      JSON.parse(missing.rpcResult.contentItems[0]!.text) as {
+        digest: string
+      }
+    ).digest
     await executeRequest({
-      args: { action: 'upsert', body: '## Tips\n- prior valid tip' },
+      args: {
+        action: 'upsert',
+        body: '## Tips\n- prior valid tip',
+        expectedDigest,
+      },
       available: true,
       scope: createUserActionScope('group'),
       vaultRoot,
@@ -248,7 +453,11 @@ describe('authenticated group room-model tool', () => {
 
     for (const args of [
       { action: 'show' },
-      { action: 'upsert', body: '## Tips\n- replacement' },
+      {
+        action: 'upsert',
+        body: '## Tips\n- replacement',
+        expectedDigest,
+      },
     ] as const) {
       const result = await executeGroupRoomModelDynamicTool({
         available: true,
