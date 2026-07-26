@@ -41,6 +41,9 @@ describe("paid-usage legacy-period cutover migration", () => {
     expect(migrationSql.match(/25000000::BIGINT/gu)).toHaveLength(2);
     expect(migrationSql.match(/10000000::BIGINT/gu)).toHaveLength(2);
     expect(migrationSql).not.toMatch(/\b(?:UPDATE|DELETE|ALTER)\b/iu);
+    expect(migrationSql).not.toContain("date_trunc");
+    expect(migrationSql).not.toContain("calendar_start");
+    expect(migrationSql).not.toContain("calendar_end");
     expect(migrationSql).not.toMatch(
       /\b(?:5600000|6400000|15200000|16000000)::BIGINT\b/u,
     );
@@ -50,7 +53,7 @@ describe("paid-usage legacy-period cutover migration", () => {
 describe.skipIf(!runPostgresMigrationProof)(
   "paid-usage legacy-period PostgreSQL cutover",
   () => {
-    it("seeds all four open paid cases without rewriting existing or future periods", async () => {
+    it("seeds four authoritative paid periods and skips mutable fallbacks", async () => {
       const client = new pg.Client({ connectionString: databaseUrl });
       await client.connect();
 
@@ -115,8 +118,10 @@ describe.skipIf(!runPostgresMigrationProof)(
           VALUES
             ('direct_pulse', 'active', NULL),
             ('direct_edge', 'active', NULL),
+            ('direct_invalid_period', 'active', NULL),
             ('family_pulse', 'not_started', NULL),
             ('family_edge', 'not_started', NULL),
+            ('family_unpaid', 'not_started', NULL),
             ('family_invalid_oldest', 'not_started', NULL),
             ('direct_wins', 'active', NULL),
             ('existing_period', 'active', NULL),
@@ -145,6 +150,13 @@ describe.skipIf(!runPostgresMigrationProof)(
               'paid',
               CURRENT_TIMESTAMP AT TIME ZONE 'UTC' - INTERVAL '6 days',
               CURRENT_TIMESTAMP AT TIME ZONE 'UTC' + INTERVAL '22 days'
+            ),
+            (
+              'direct_invalid_period',
+              'launch_edge_monthly',
+              'paid',
+              NULL,
+              NULL
             ),
             (
               'direct_wins',
@@ -187,6 +199,7 @@ describe.skipIf(!runPostgresMigrationProof)(
             ('family_pulse_oldest', 'active', NULL),
             ('family_pulse_newer', 'active', NULL),
             ('family_edge_group', 'active', NULL),
+            ('family_unpaid_group', 'active', NULL),
             ('family_invalid_oldest_group', 'active', NULL),
             ('family_invalid_newer_group', 'active', NULL),
             ('direct_wins_group', 'active', NULL),
@@ -222,6 +235,14 @@ describe.skipIf(!runPostgresMigrationProof)(
               'family_edge_group',
               'family_edge',
               'edge',
+              'active',
+              CURRENT_TIMESTAMP AT TIME ZONE 'UTC' - INTERVAL '9 days'
+            ),
+            (
+              'membership_family_unpaid',
+              'family_unpaid_group',
+              'family_unpaid',
+              'pulse',
               'active',
               CURRENT_TIMESTAMP AT TIME ZONE 'UTC' - INTERVAL '9 days'
             ),
@@ -282,6 +303,13 @@ describe.skipIf(!runPostgresMigrationProof)(
             ),
             (
               'family_edge_group',
+              'launch_family_monthly',
+              'paid',
+              CURRENT_TIMESTAMP AT TIME ZONE 'UTC' - INTERVAL '7 days',
+              CURRENT_TIMESTAMP AT TIME ZONE 'UTC' + INTERVAL '21 days'
+            ),
+            (
+              'family_unpaid_group',
               'launch_family_monthly',
               'unpaid',
               CURRENT_TIMESTAMP AT TIME ZONE 'UTC' - INTERVAL '7 days',
@@ -356,21 +384,22 @@ describe.skipIf(!runPostgresMigrationProof)(
               )
                 THEN "period"."period_start" = "direct_ref"."current_period_start"
               WHEN "period"."member_id" = 'family_pulse'
-                THEN "period"."period_start" = "family_ref"."current_period_start"
+                THEN "period"."period_start" = (
+                  SELECT "current_period_start"
+                  FROM "hosted_account_group_billing_ref"
+                  WHERE "group_id" = 'family_pulse_oldest'
+                )
               WHEN "period"."member_id" = 'family_edge'
-                THEN "period"."period_start" = date_trunc(
-                  'month',
-                  CURRENT_TIMESTAMP AT TIME ZONE 'UTC'
+                THEN "period"."period_start" = (
+                  SELECT "current_period_start"
+                  FROM "hosted_account_group_billing_ref"
+                  WHERE "group_id" = 'family_edge_group'
                 )
               ELSE FALSE
             END AS "uses_expected_period"
           FROM "hosted_ai_usage_period" AS "period"
           LEFT JOIN "hosted_member_billing_ref" AS "direct_ref"
             ON "direct_ref"."member_id" = "period"."member_id"
-          LEFT JOIN "hosted_account_group_billing_ref" AS "family_ref"
-            ON
-              "family_ref"."group_id" = 'family_pulse_oldest'
-              AND "period"."member_id" = 'family_pulse'
           ORDER BY "period"."member_id"
         `);
         expect(rows.rows).toEqual([
@@ -417,6 +446,13 @@ describe.skipIf(!runPostgresMigrationProof)(
             uses_expected_period: true,
           },
         ]);
+
+        const skippedFallbacks = await client.query<{ count: string }>(`
+          SELECT COUNT(*)::TEXT AS "count"
+          FROM "hosted_ai_usage_period"
+          WHERE "member_id" IN ('direct_invalid_period', 'family_unpaid')
+        `);
+        expect(skippedFallbacks.rows).toEqual([{ count: "0" }]);
 
         const followingPeriod = await client.query<{ count: string }>(`
           SELECT COUNT(*)::TEXT AS "count"

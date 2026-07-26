@@ -90,14 +90,15 @@ Pulse and Edge therefore include $6.40 and $16.00 from their $8 and $20 prices.
 Family-sponsored Pulse and Edge members separately receive $5.60 and $15.20
 from their $7 and $19 seat prices. Discounts, taxes, prorations, trials, and
 purchased usage credit do not redefine this catalog-owned allowance.
-An already-open paid period keeps a higher included limit that was granted when
-the period began. The price-derived allowance starts on its next paid period;
-an actual plan, Family tier, or direct-to-Family billing-mode change still
-reconciles during the current period. The rollout's predeploy data migration
-materializes a missing legacy-limit row for every open direct or Family paid
-period before the price-derived application code is promoted. It inserts only
-absent current-period rows; existing allowance, spend, and future periods remain
-untouched.
+An authoritative paid billing period that is already open keeps the higher
+included limit granted before this policy change. The price-derived allowance
+starts on its next paid period; an actual plan, Family tier, or
+direct-to-Family billing-mode change still reconciles during the current
+period. The rollout's predeploy data migration materializes a missing
+legacy-limit row only when the direct or Family paid projection supplies valid
+current bounds. It skips calendar fallbacks because their temporary key can be
+replaced by a delayed billing projection without a renewal. Existing allowance,
+spend, and future periods remain untouched.
 
 A forecast requires at least 24 hours of counted usage. It is shown only when
 the observed pace projects exhaustion before the current period ends. The
