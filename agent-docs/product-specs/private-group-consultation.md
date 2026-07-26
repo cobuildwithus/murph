@@ -245,7 +245,10 @@ wake/retry owner. A dirty runtime may admit joined-group requests and legacy
 joined-group completions through the existing pre-checkpoint-safe system prefix;
 consented requests and reviewed completions remain checkpoint-gated. Completion
 admission is still ordered against personal input using a read-only pending
-index proof and fails closed on incomplete or invalid evidence.
+index proof and fails closed on incomplete or invalid evidence. After fresh
+personal input gets first priority, the existing bounded foreground pass loop
+drains each progressed safe causal item before the idle checkpoint and stops on
+no progress, retryable failure, cancellation, or mailbox-budget exhaustion.
 
 ## Foreground group lifecycle
 

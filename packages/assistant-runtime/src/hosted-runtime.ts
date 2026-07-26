@@ -2603,6 +2603,16 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           hostedAssistantInputBatchHasWork(passResult.latestAssistantInputBatch)
             ? passResult.latestAssistantInputBatch
             : null;
+        const shouldContinueForegroundCausalPass = (
+          passResult: HostedWorkspaceRunnerResult,
+        ): boolean =>
+          wakeInput.foregroundCausalOnly === true
+          && passResult.assistantPhaseResult?.progressed === true
+          && !mailboxBudgetExhausted()
+          && readHostedWorkspaceInvocationRedactedNumber(
+            buildHostedWorkspaceRunnerRedactedStatus(passResult),
+            "hostedSystemMailboxRetryableFailed",
+          ) === 0;
         const runSingleForegroundPass = async (
           singleWakeInput: typeof wakeInput,
         ): Promise<HostedWorkspaceRunnerResult> => {
@@ -2648,8 +2658,13 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         let passResult = await runSingleForegroundPass(wakeInput);
         // irreducible: "late foreground input during system work runs before idle checkpointing" fails without this.
         let rerunAssistantInputBatch = resolveForegroundRerunAssistantInputBatch(passResult);
-        while (rerunAssistantInputBatch) {
+        let continueForegroundCausalPass =
+          shouldContinueForegroundCausalPass(passResult);
+        while (rerunAssistantInputBatch || continueForegroundCausalPass) {
           passResult = await runSingleForegroundPass({
+            foregroundCausalOnly:
+              rerunAssistantInputBatch === null
+              && wakeInput.foregroundCausalOnly === true,
             initialAssistantInputBatch: rerunAssistantInputBatch,
             initialMailboxImport: passResult.latestMailboxImport,
             initialMailboxImportContext:
@@ -2679,6 +2694,8 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             signal: wakeInput.signal,
           });
           rerunAssistantInputBatch = resolveForegroundRerunAssistantInputBatch(passResult);
+          continueForegroundCausalPass =
+            shouldContinueForegroundCausalPass(passResult);
         }
         return passResult;
       };

@@ -153,10 +153,13 @@ adapter validation to every import in that pre-checkpoint pass, including
 follow-up imports and foreground reruns, so consented-member requests and
 reviewed completions remain on the ordinary checkpoint path. This starts the
 separate read or private continuation without publishing the routine idle
-snapshot early. When a joined-group completion predates pending personal input,
-it owns one foreground-causal assistant pass, queues Murph's natural response
-through the ordinary idempotent outbox, and leaves that personal input pending
-for the next pass. The cutoff uses the input's occurrence time from the bounded
+snapshot early. Each joined-group completion that predates pending personal
+input owns one foreground-causal assistant pass and queues its response through
+the ordinary idempotent outbox. A progressed safe causal pass re-enters that
+same bounded pass loop so another already-imported safe item cannot fall back to
+the idle checkpoint; newly arrived personal input always runs first, and no
+progress, retryable failure, cancellation, or mailbox-budget exhaustion stops
+the drain. The cutoff uses the input's occurrence time from the bounded
 accepted-input batch already owned by a fresh turn. When no fresh batch exists,
 the cutoff reads the existing complete pending-input index; missing, incomplete,
 or invalid index evidence fails closed without repairing or compacting state on

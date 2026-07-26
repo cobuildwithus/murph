@@ -485,7 +485,11 @@ remains checkpoint-gated regardless of which import observes it. Request import
 kicks the existing detached controller; completion import uses the existing
 foreground-causal delivery path. Neither starts or advances the
 at-least-180-second idle snapshot. Any unrelated system wake in that prefix
-keeps the whole system prefix checkpoint-gated.
+keeps the whole system prefix checkpoint-gated. A progressed foreground-causal
+pass re-enters the existing bounded pass loop after admitting any newly arrived
+personal input first, so multiple safe items or a safe item imported during the
+preceding pass drain before checkpoint. No progress, retryable failure,
+cancellation, or mailbox-budget exhaustion stops the drain.
 
 The group runtime returns only the request id and schema-checked bounded answer
 through the signed completion control path. Web reloads the request, rechecks

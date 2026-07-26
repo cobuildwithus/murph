@@ -5702,7 +5702,7 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
-  test("runs a causal pending-effects system wake before the dirty idle checkpoint", async () => {
+  test("drains causal pending-effects and joined-group completion wakes before the dirty idle checkpoint", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
@@ -5734,7 +5734,10 @@ describe("hosted workspace runtime entrypoint", () => {
               }),
             };
           },
-          async importItem(item) {
+          async importItem(item, context) {
+            if (item.item.kind === "assistant.ask.completed") {
+              assert.equal(context?.assistantAskCompletionKind, "joined_group");
+            }
             events.push(`mailbox.importItem:${item.item.id}`);
             return { status: "imported" };
           },
@@ -5762,8 +5765,22 @@ describe("hosted workspace runtime entrypoint", () => {
                   lane: "system",
                   laneSeq: "1",
                 }));
+                mailboxItems.push(createMailboxItem({
+                  id:
+                    "mailbox_item_entrypoint_"
+                    + "causal_pending_effects_completion",
+                  kind: "assistant.ask.completed",
+                  lane: "system",
+                  laneSeq: "2",
+                }));
                 runtimeWakeSignal.notify();
               }, 0);
+              return {
+                checkpointReason: "assistant_runtime_commit",
+                progressed: true,
+              };
+            }
+            if (assistantPhaseCalls === 2 || assistantPhaseCalls === 3) {
               return {
                 checkpointReason: "assistant_runtime_commit",
                 progressed: true,
@@ -5781,13 +5798,29 @@ describe("hosted workspace runtime entrypoint", () => {
         () => events.join(","),
       );
 
-      assert.equal(assistantPhaseCalls, 2);
-      assert.deepEqual(foregroundCausalOnlyValues, [false, true]);
+      assert.equal(assistantPhaseCalls, 4);
+      assert.deepEqual(
+        foregroundCausalOnlyValues,
+        [false, true, true, true],
+      );
       assert.ok(
         requireEventIndex(
           events,
           "mailbox.importItem:mailbox_item_entrypoint_causal_pending_effects",
         ) < requireEventIndex(events, "snapshot:idle_shutdown"),
+        events.join(","),
+      );
+      assert.ok(
+        requireEventIndex(
+          events,
+          "mailbox.importItem:"
+            + "mailbox_item_entrypoint_causal_pending_effects_completion",
+        ) < requireEventIndex(events, "snapshot:idle_shutdown"),
+        events.join(","),
+      );
+      assert.ok(
+        requireEventIndex(events, "assistant.phase:3")
+          < requireEventIndex(events, "snapshot:idle_shutdown"),
         events.join(","),
       );
       assert.equal(result.status, "idle");
@@ -5895,6 +5928,16 @@ describe("hosted workspace runtime entrypoint", () => {
                 2_000,
                 () => events.join(","),
               );
+              return {
+                checkpointReason: "assistant_runtime_commit",
+                progressed: true,
+              };
+            }
+            if (assistantPhaseCalls === 3) {
+              return {
+                checkpointReason: "assistant_runtime_commit",
+                progressed: true,
+              };
             }
             return { progressed: false };
           },
@@ -5908,8 +5951,11 @@ describe("hosted workspace runtime entrypoint", () => {
         () => events.join(","),
       );
 
-      assert.equal(assistantPhaseCalls, 2);
-      assert.deepEqual(foregroundCausalOnlyValues, [false, true]);
+      assert.equal(assistantPhaseCalls, 4);
+      assert.deepEqual(
+        foregroundCausalOnlyValues,
+        [false, true, true, true],
+      );
       assert.ok(
         requireEventIndex(
           events,
@@ -5918,7 +5964,7 @@ describe("hosted workspace runtime entrypoint", () => {
         events.join(","),
       );
       assert.ok(
-        requireEventIndex(events, "assistant.phase:2")
+        requireEventIndex(events, "assistant.phase:3")
           < requireEventIndex(events, "snapshot:idle_shutdown"),
         events.join(","),
       );
