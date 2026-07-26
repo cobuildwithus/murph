@@ -3678,7 +3678,7 @@ describe("hosted Linq signup-link delivery attempts", () => {
     });
     fixture.hostedLinqDeliveryFindMany.mockResolvedValueOnce([{
       id: "hld_group_newer_dispatch",
-      status: "provider_dispatch_started",
+      status: "attempted",
     }]);
 
     await ingestHostedLinqProviderEventTx({
@@ -3710,7 +3710,7 @@ describe("hosted Linq signup-link delivery attempts", () => {
           ]),
         },
         status: {
-          in: ["provider_dispatch_started", "accepted", "delivered"],
+          in: ["attempted", "provider_dispatch_started", "accepted", "delivered"],
         },
       },
     });

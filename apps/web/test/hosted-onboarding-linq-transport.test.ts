@@ -1375,9 +1375,10 @@ describe("hosted Linq webhook transport", () => {
       idempotencyKey: effect.effectId,
       phoneNumber: "+15550100001",
       prisma,
+      reclaimStalePreProviderAttempt: true,
       source: "hosted_webhook_side_effect",
       sourceRef: effect.effectId,
-      status: "provider_dispatch_started",
+      status: "attempted",
       targetKind: "participant",
       template: "invite_signup_fallback",
     }));
@@ -1853,9 +1854,10 @@ describe("hosted Linq webhook transport", () => {
       idempotencyKey: effect.effectId,
       linqChatId: "chat-1",
       prisma,
+      reclaimStalePreProviderAttempt: true,
       source: "hosted_webhook_side_effect",
       sourceRef: effect.effectId,
-      status: "provider_dispatch_started",
+      status: "attempted",
       targetKind: "thread",
       template: "invite_signup",
     }));

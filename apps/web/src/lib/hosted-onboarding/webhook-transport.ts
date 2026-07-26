@@ -734,6 +734,9 @@ async function prepareHostedLinqSideEffectProviderDispatch(input: {
   startedAtMs: number;
 }): Promise<HostedLinqProviderDispatchPreparation> {
   const template = input.effect.payload.template;
+  const isSignupLinkAttempt =
+    template === "invite_signup"
+    || template === "invite_signup_fallback";
   const target = readHostedLinqSideEffectDeliveryTarget(input.effect.payload);
 
   return await runHostedLinqTransportTransaction(input.prisma, async (prisma) => {
@@ -785,9 +788,15 @@ async function prepareHostedLinqSideEffectProviderDispatch(input: {
         ? { linqChatId: target.linqChatId }
         : { phoneNumber: target.phoneNumber }),
       prisma,
+      ...(isSignupLinkAttempt
+        ? { reclaimStalePreProviderAttempt: true }
+        : {}),
       source: "hosted_webhook_side_effect",
       sourceRef: buildHostedLinqSideEffectDeliverySourceRef(input.effect),
-      status: "provider_dispatch_started",
+      // The effect id is also the stable provider idempotency key and message
+      // seed. Until provider correlation exists, a restart must be able to
+      // reclaim this exact payload instead of stranding it as in-flight.
+      status: isSignupLinkAttempt ? "attempted" : "provider_dispatch_started",
       targetKind: target.targetKind,
       template,
     });

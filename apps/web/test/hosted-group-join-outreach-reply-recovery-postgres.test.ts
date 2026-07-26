@@ -28,6 +28,13 @@ import {
   createHostedPhoneLookupKey,
 } from "@/src/lib/hosted-onboarding/contact-privacy";
 import {
+  HOSTED_AI_USAGE_LIMIT_NOTICE_CLAIM_STALE_MS,
+  claimHostedLinqDeliveryProviderDispatchTx,
+} from "@/src/lib/hosted-onboarding/linq-delivery-store";
+import {
+  buildHostedLinqInviteSignupDeliverySourceRef,
+} from "@/src/lib/hosted-onboarding/linq-invite-signup-effect-id";
+import {
   upsertHostedLinqLineForPhoneTx,
 } from "@/src/lib/hosted-onboarding/linq-line-store";
 import { parseHostedLinqWebhookEvent } from "@/src/lib/hosted-onboarding/linq";
@@ -241,6 +248,30 @@ describe.skipIf(!runPostgresProof)(
           groupJoinCode: joinCode,
           groupJoinOutreachId: outreachId,
         });
+        if (!deliveryIdempotencyLookupKey) {
+          throw new Error("Expected the signup delivery lookup key.");
+        }
+
+        // Materialize the exact state left by process termination after the
+        // preparation transaction commits and before provider entry. The
+        // provider has seen no request and the attempt has no correlation.
+        const crashClaimedAt = new Date();
+        await expect(claimHostedLinqDeliveryProviderDispatchTx({
+          attemptedAt: crashClaimedAt,
+          idempotencyKey: signupLinkEffect.effectId,
+          linqChatId: chatId,
+          prisma,
+          reclaimStalePreProviderAttempt: true,
+          source: "hosted_webhook_side_effect",
+          sourceRef: buildHostedLinqInviteSignupDeliverySourceRef({
+            effectId: signupLinkEffect.effectId,
+            groupJoinOutreachId: outreachId,
+            groupJoinRepliedAt: signupLinkEffect.payload.occurredAt,
+          }),
+          status: "attempted",
+          targetKind: "thread",
+          template: "invite_signup",
+        })).resolves.toMatchObject({ claimed: true });
 
         const scheduledTasks: Array<() => Promise<void>> = [];
         const scheduleAfterResponse = (task: () => Promise<void>) => {
@@ -250,7 +281,45 @@ describe.skipIf(!runPostgresProof)(
           prisma,
           scheduleAfterResponse,
           sideEffects: recoveredPlan.desiredSideEffects,
+        })).resolves.toEqual({
+          sentCount: 0,
+          skipped: [{
+            effectId: signupLinkEffect.effectId,
+            reason: "notice_in_flight",
+            template: "invite_signup",
+          }],
+        });
+        expect(providerMocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+        expect(scheduledTasks).toHaveLength(0);
+
+        // A retry of the same webhook effect after the ambiguity window owns
+        // continuation. It reclaims the exact row and reuses the immutable
+        // effect id, source context, message seed, and provider key.
+        await prisma.hostedLinqDelivery.updateMany({
+          data: {
+            attemptedAt: new Date(
+              Date.now() - HOSTED_AI_USAGE_LIMIT_NOTICE_CLAIM_STALE_MS - 1,
+            ),
+          },
+          where: {
+            idempotencyKey: deliveryIdempotencyLookupKey,
+          },
+        });
+        await expect(drainHostedLinqSideEffectsDirect({
+          prisma,
+          scheduleAfterResponse,
+          sideEffects: recoveredPlan.desiredSideEffects,
         })).resolves.toMatchObject({ sentCount: 1 });
+        expect(providerMocks.sendHostedLinqChatMessage).toHaveBeenCalledTimes(1);
+        expect(providerMocks.sendHostedLinqChatMessage).toHaveBeenLastCalledWith(
+          expect.objectContaining({
+            chatId,
+            idempotencyKey: signupLinkEffect.effectId,
+            message: expect.stringContaining(
+              `/groups/join/${joinCode}?invite=`,
+            ),
+          }),
+        );
 
         expect(scheduledTasks).toHaveLength(1);
         await expect(prisma.hostedGroupJoinOutreach.findUnique({
@@ -266,6 +335,28 @@ describe.skipIf(!runPostgresProof)(
         })).resolves.toEqual({
           repliedAt: new Date("2026-07-24T20:01:00.000Z"),
         });
+
+        const postCrashRecoveryPlan = await prisma.$transaction((tx) =>
+          planHostedOnboardingLinqWebhook({
+            event: buildDirectReplyEvent({
+              chatId,
+              eventId: `event-post-crash-recovery-${randomUUID()}`,
+              messageId: `message-post-crash-recovery-${randomUUID()}`,
+              occurredAt: "2026-07-24T20:01:30.000Z",
+              participantPhone,
+              recipientPhone,
+            }),
+            firstContactAdmitted: true,
+            prisma: tx,
+            requireFirstContactAdmission: true,
+          })
+        );
+        expect(postCrashRecoveryPlan.response).toMatchObject({
+          ignored: true,
+          reason: "signup-link-already-sent",
+        });
+        expect(postCrashRecoveryPlan.desiredSideEffects).toEqual([]);
+        expect(providerMocks.sendHostedLinqChatMessage).toHaveBeenCalledTimes(1);
 
         await ingestHostedLinqProviderEventTx({
           event: buildProviderReceiptEvent({
@@ -313,8 +404,8 @@ describe.skipIf(!runPostgresProof)(
 
         // The provider has accepted attempt two, but its post-response
         // milestone has not run yet. A duplicate failure callback for attempt
-        // one must not reopen either the daily gate or group context during
-        // this provider_dispatch_started window.
+        // one must not reopen either the daily gate or group context while the
+        // newer reclaimable attempt owns this ambiguity window.
         await ingestHostedLinqProviderEventTx({
           event: buildProviderReceiptEvent({
             eventId: `event-first-stale-failed-${randomUUID()}`,

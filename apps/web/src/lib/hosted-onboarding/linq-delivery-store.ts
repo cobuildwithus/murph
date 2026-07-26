@@ -1948,7 +1948,11 @@ async function resolveHostedLinqFailedDeliveryReopenTx(input: {
       where: {
         idempotencyKey: { in: newerAttemptLookupKeys },
         status: {
-          in: ["provider_dispatch_started", "accepted", "delivered"],
+          // Signup attempts stay reclaimable until provider correlation. A
+          // newer `attempted` ordinal still owns this exact reply context, so
+          // an older delayed failure must not reopen it while restart recovery
+          // can continue that newer attempt under the same provider key.
+          in: ["attempted", "provider_dispatch_started", "accepted", "delivered"],
         },
       },
       select: { id: true },
