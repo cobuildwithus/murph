@@ -1180,7 +1180,10 @@ async function releaseRetrievalPageRequest(input: {
     });
     if (released.count !== 1 || input.chargeReservation) return;
     await tx.clinicalRecordRetrievalRun.updateMany({
-      data: { egressBytes: { decrement: PAGE_EGRESS_RESERVATION_BYTES } },
+      data: {
+        egressBytes: { decrement: PAGE_EGRESS_RESERVATION_BYTES },
+        providerRequestCount: { decrement: 1 },
+      },
       where: {
         completedAt: null,
         generation: input.run.generation,

@@ -374,6 +374,41 @@ describe("Clinical Records retrieval control plane", () => {
     })).rejects.toThrow("Transient secure-box failure.");
   });
 
+  it("refunds repeated access-token decrypt failures before provider egress", async () => {
+    const harness = createHarness(["Patient", "Observation"]);
+    const fetchImpl = vi.fn();
+    mocks.openClinicalConnectionSecret.mockImplementation(
+      async (input: { field: string }) => {
+        if (input.field === "patientId") return "patient-1";
+        if (input.field === "accessToken") {
+          throw new Error("Transient access-token secure-box failure.");
+        }
+        return null;
+      },
+    );
+
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      await expect(fetchClinicalRetrievalPage({
+        fetchImpl,
+        memberId: MEMBER_ID,
+        request: pageRequest({
+          requestId: "request_transient_access_token",
+          resourceType: "Observation",
+        }),
+      })).rejects.toThrow("Transient access-token secure-box failure.");
+    }
+
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(harness.state.run.egressBytes).toBe(0);
+    expect(harness.state.run.providerRequestCount).toBe(0);
+    expect([...harness.state.requests.values()]).toEqual([
+      expect.objectContaining({
+        completedAt: null,
+        reservedBytes: 0,
+      }),
+    ]);
+  });
+
   it("lets transient cursor decryption failures remain retryable", async () => {
     createHarness(["Patient", "Observation"]);
     mocks.openClinicalPageCursor.mockRejectedValueOnce(
