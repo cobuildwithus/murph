@@ -1,0 +1,630 @@
+name: Harden saved-card group funding intent lifecycle
+
+on:
+  pull_request:
+    branches:
+      - agent/saved-card-funding-verify-runner
+
+permissions:
+  contents: write
+
+jobs:
+  harden:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/reuse-saved-card-for-group-funding-v2
+          fetch-depth: 0
+      - name: Bind the PaymentIntent before confirmation
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path: str, old: str, new: str) -> None:
+              target = Path(path)
+              content = target.read_text()
+              count = content.count(old)
+              if count != 1:
+                  raise SystemExit(f"{path}: expected one match, found {count}")
+              target.write_text(content.replace(old, new))
+
+          def replace_all(path: str, old: str, new: str, expected: int) -> None:
+              target = Path(path)
+              content = target.read_text()
+              count = content.count(old)
+              if count != expected:
+                  raise SystemExit(
+                      f"{path}: expected {expected} matches, found {count}"
+                  )
+              target.write_text(content.replace(old, new))
+
+          payment_path = (
+              "apps/web/src/lib/hosted-onboarding/"
+              "usage-credit-saved-card-payment.ts"
+          )
+          replace_once(
+              payment_path,
+              '''  const paymentIntent = await createOrRecoverHostedUsageCreditPaymentIntent({
+            customerId,
+            paymentMethodId,
+            purchase: current,
+            stripe: input.stripe,
+          });
+          assertHostedUsageCreditPaymentIntentMatchesPurchase({
+            paymentIntent,
+            purchase: current,
+          });
+
+          if (
+            paymentIntent.status === "succeeded" ||
+            paymentIntent.status === "processing"
+          ) {
+            return bindHostedUsageCreditDirectPaymentIntent({
+              now: input.now,
+              paymentIntent,
+              prisma: input.prisma,
+              purchase: current,
+            });
+          }
+          if (paymentIntent.status === "canceled") {
+            return null;
+          }
+
+          const canceled = await cancelHostedUsageCreditDirectPaymentIntent({
+            paymentIntent,
+            purchase: current,
+            stripe: input.stripe,
+          });
+          assertHostedUsageCreditPaymentIntentMatchesPurchase({
+            paymentIntent: canceled,
+            purchase: current,
+          });
+          if (canceled.status === "succeeded" || canceled.status === "processing") {
+            return bindHostedUsageCreditDirectPaymentIntent({
+              now: input.now,
+              paymentIntent: canceled,
+              prisma: input.prisma,
+              purchase: current,
+            });
+          }
+          if (canceled.status !== "canceled") {
+            throw buildHostedUsageCreditStripeUnavailableError(
+              new Error("Saved-card PaymentIntent did not reach a safe terminal state."),
+              "paymentIntents.cancel.saved-card",
+            );
+          }
+          return null;
+          ''',
+              '''  const createdPaymentIntent =
+            await createOrRecoverHostedUsageCreditPaymentIntent({
+              customerId,
+              paymentMethodId,
+              purchase: current,
+              stripe: input.stripe,
+            });
+          assertHostedUsageCreditPaymentIntentMatchesPurchase({
+            paymentIntent: createdPaymentIntent,
+            purchase: current,
+          });
+
+          const boundPurchase = await bindHostedUsageCreditDirectPaymentIntent({
+            now: input.now,
+            paymentIntent: createdPaymentIntent,
+            prisma: input.prisma,
+            purchase: current,
+          });
+          if (
+            boundPurchase.status !== HostedUsageCreditPurchaseStatus.payment_pending
+          ) {
+            return boundPurchase;
+          }
+          if (
+            createdPaymentIntent.status === "succeeded" ||
+            createdPaymentIntent.status === "processing"
+          ) {
+            return boundPurchase;
+          }
+
+          const paymentIntent = createdPaymentIntent.status === "requires_confirmation"
+            ? await confirmOrRecoverHostedUsageCreditPaymentIntent({
+                paymentIntent: createdPaymentIntent,
+                purchase: boundPurchase,
+                stripe: input.stripe,
+              })
+            : createdPaymentIntent;
+          assertHostedUsageCreditPaymentIntentMatchesPurchase({
+            paymentIntent,
+            purchase: boundPurchase,
+          });
+          if (
+            paymentIntent.status === "succeeded" ||
+            paymentIntent.status === "processing"
+          ) {
+            return bindHostedUsageCreditDirectPaymentIntent({
+              now: input.now,
+              paymentIntent,
+              prisma: input.prisma,
+              purchase: boundPurchase,
+            });
+          }
+
+          const canceled = paymentIntent.status === "canceled"
+            ? paymentIntent
+            : await cancelHostedUsageCreditDirectPaymentIntent({
+                paymentIntent,
+                purchase: boundPurchase,
+                stripe: input.stripe,
+              });
+          assertHostedUsageCreditPaymentIntentMatchesPurchase({
+            paymentIntent: canceled,
+            purchase: boundPurchase,
+          });
+          if (canceled.status === "succeeded" || canceled.status === "processing") {
+            return bindHostedUsageCreditDirectPaymentIntent({
+              now: input.now,
+              paymentIntent: canceled,
+              prisma: input.prisma,
+              purchase: boundPurchase,
+            });
+          }
+          if (canceled.status !== "canceled") {
+            throw buildHostedUsageCreditStripeUnavailableError(
+              new Error("Saved-card PaymentIntent did not reach a safe terminal state."),
+              "paymentIntents.cancel.saved-card",
+            );
+          }
+          const released = await releaseHostedUsageCreditDirectPaymentIntent({
+            now: input.now,
+            paymentIntent: canceled,
+            prisma: input.prisma,
+            purchase: boundPurchase,
+          });
+          return released.status === HostedUsageCreditPurchaseStatus.created
+            ? null
+            : released;
+          ''',
+          )
+
+          replace_once(
+              payment_path,
+              '''  try {
+            return await input.stripe.paymentIntents.create({
+              amount: input.purchase.cashAmountMinor,
+              capture_method: "automatic",
+              confirm: true,
+              currency: input.purchase.cashCurrency,
+              customer: input.customerId,
+              expand: ["latest_charge"],
+              metadata: buildHostedUsageCreditSavedCardMetadata(input.purchase.id),
+              off_session: true,
+              payment_method: input.paymentMethodId,
+              payment_method_types: ["card"],
+              setup_future_usage: "off_session",
+            }, { idempotencyKey });
+          } catch (error) {
+          ''',
+              '''  try {
+            // Creation is deliberately unconfirmed. Persisting the PaymentIntent ID
+            // before confirmation means an ambiguous network response can never leave
+            // an unknown charge racing a Checkout fallback or account deletion.
+            return await input.stripe.paymentIntents.create({
+              amount: input.purchase.cashAmountMinor,
+              capture_method: "automatic",
+              currency: input.purchase.cashCurrency,
+              customer: input.customerId,
+              expand: ["latest_charge"],
+              metadata: buildHostedUsageCreditSavedCardMetadata(input.purchase.id),
+              payment_method: input.paymentMethodId,
+              payment_method_types: ["card"],
+              setup_future_usage: "off_session",
+            }, { idempotencyKey });
+          } catch (error) {
+          ''',
+          )
+
+          marker = '''async function cancelHostedUsageCreditDirectPaymentIntent(input: {
+          '''
+          confirmation = '''async function confirmOrRecoverHostedUsageCreditPaymentIntent(input: {
+            paymentIntent: Stripe.PaymentIntent;
+            purchase: HostedUsageCreditPurchase;
+            stripe: Stripe;
+          }): Promise<Stripe.PaymentIntent> {
+            try {
+              return await input.stripe.paymentIntents.confirm(
+                input.paymentIntent.id,
+                {
+                  expand: ["latest_charge"],
+                  off_session: true,
+                },
+                {
+                  idempotencyKey:
+                    `${buildHostedUsageCreditSavedCardIdempotencyKey(input.purchase.id)}:confirm`,
+                },
+              );
+            } catch {
+              try {
+                return await input.stripe.paymentIntents.retrieve(
+                  input.paymentIntent.id,
+                  { expand: ["latest_charge"] },
+                );
+              } catch (retrieveError) {
+                throw buildHostedUsageCreditStripeUnavailableError(
+                  retrieveError,
+                  "paymentIntents.retrieve.saved-card-confirm-recovery",
+                );
+              }
+            }
+          }
+
+          async function cancelHostedUsageCreditDirectPaymentIntent(input: {
+          '''
+          replace_once(payment_path, marker, confirmation)
+
+          release_marker = '''export function buildHostedUsageCreditSavedCardIdempotencyKey(
+          '''
+          release_function = '''async function releaseHostedUsageCreditDirectPaymentIntent(input: {
+            now: Date;
+            paymentIntent: Stripe.PaymentIntent;
+            prisma: PrismaClient;
+            purchase: HostedUsageCreditPurchase;
+          }): Promise<HostedUsageCreditPurchase> {
+            const payerMemberId = requireHostedUsageCreditPurchasePayerMemberId(
+              input.purchase,
+            );
+            return input.prisma.$transaction(async (tx) => {
+              await lockHostedMemberRow(tx, payerMemberId);
+              const current = await tx.hostedUsageCreditPurchase.findUnique({
+                where: { id: input.purchase.id },
+              });
+              if (!current || current.payerMemberId !== payerMemberId) {
+                throw buildHostedUsageCreditInvariantError(
+                  "saved_card_purchase_missing_before_release",
+                );
+              }
+              if (
+                current.status === HostedUsageCreditPurchaseStatus.created &&
+                !current.stripePaymentIntentLookupKey
+              ) {
+                return current;
+              }
+              if (
+                !current.stripePaymentIntentLookupKey ||
+                !hostedLookupKeyMatchesValue({
+                  expectedLookupKey: current.stripePaymentIntentLookupKey,
+                  kind: "stripe-billing-event",
+                  normalizedValue: input.paymentIntent.id,
+                })
+              ) {
+                throw buildHostedUsageCreditInvariantError(
+                  "saved_card_payment_identity_changed_before_release",
+                );
+              }
+              if (
+                current.status !== HostedUsageCreditPurchaseStatus.payment_pending
+              ) {
+                return current;
+              }
+
+              const updated = await tx.hostedUsageCreditPurchase.updateMany({
+                data: {
+                  lastReconciledAt: input.now,
+                  reconciliationVersion: { increment: 1n },
+                  status: HostedUsageCreditPurchaseStatus.created,
+                  stripeChargeIdEncrypted: null,
+                  stripeChargeLookupKey: null,
+                  stripePaymentIntentIdEncrypted: null,
+                  stripePaymentIntentLookupKey: null,
+                  terminalAt: null,
+                  updatedAt: input.now,
+                },
+                where: {
+                  id: current.id,
+                  reconciliationVersion: current.reconciliationVersion,
+                  status: HostedUsageCreditPurchaseStatus.payment_pending,
+                  stripePaymentIntentLookupKey:
+                    current.stripePaymentIntentLookupKey,
+                },
+              });
+              if (updated.count !== 1) {
+                const raced = await tx.hostedUsageCreditPurchase.findUnique({
+                  where: { id: current.id },
+                });
+                if (
+                  raced &&
+                  raced.payerMemberId === payerMemberId &&
+                  raced.status !== HostedUsageCreditPurchaseStatus.payment_pending
+                ) {
+                  return raced;
+                }
+                throw buildHostedUsageCreditInvariantError(
+                  "saved_card_purchase_release_failed",
+                );
+              }
+              const released = await tx.hostedUsageCreditPurchase.findUnique({
+                where: { id: current.id },
+              });
+              if (!released) {
+                throw buildHostedUsageCreditInvariantError(
+                  "saved_card_purchase_missing_after_release",
+                );
+              }
+              return released;
+            }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+          }
+
+          export function buildHostedUsageCreditSavedCardIdempotencyKey(
+          '''
+          replace_once(payment_path, release_marker, release_function)
+
+          test_path = "apps/web/test/hosted-usage-credit-purchase-service.test.ts"
+          replace_once(
+              test_path,
+              '''  stripePaymentIntentCancel: vi.fn(),
+            stripePaymentIntentCreate: vi.fn(),
+            stripePaymentIntentRetrieve: vi.fn(),
+          ''',
+              '''  stripePaymentIntentCancel: vi.fn(),
+            stripePaymentIntentConfirm: vi.fn(),
+            stripePaymentIntentCreate: vi.fn(),
+            stripePaymentIntentRetrieve: vi.fn(),
+          ''',
+          )
+          replace_all(
+              test_path,
+              '''        paymentIntents: {
+                    cancel: mocks.stripePaymentIntentCancel,
+                    create: mocks.stripePaymentIntentCreate,
+                    retrieve: mocks.stripePaymentIntentRetrieve,
+                  },
+          ''',
+              '''        paymentIntents: {
+                    cancel: mocks.stripePaymentIntentCancel,
+                    confirm: mocks.stripePaymentIntentConfirm,
+                    create: mocks.stripePaymentIntentCreate,
+                    retrieve: mocks.stripePaymentIntentRetrieve,
+                  },
+          ''',
+              2,
+          )
+          replace_once(
+              test_path,
+              '''  mocks.stripePaymentIntentCancel.mockReset();
+            mocks.stripePaymentIntentCreate.mockReset();
+          ''',
+              '''  mocks.stripePaymentIntentCancel.mockReset();
+            mocks.stripePaymentIntentConfirm.mockReset();
+            mocks.stripePaymentIntentCreate.mockReset();
+          ''',
+          )
+          replace_once(
+              test_path,
+              '''  mocks.stripePaymentIntentCancel.mockClear();
+            mocks.stripePaymentIntentCreate.mockClear();
+          ''',
+              '''  mocks.stripePaymentIntentCancel.mockClear();
+            mocks.stripePaymentIntentConfirm.mockClear();
+            mocks.stripePaymentIntentCreate.mockClear();
+          ''',
+          )
+          replace_once(
+              test_path,
+              '''  expect(mocks.stripePaymentIntentCancel).not.toHaveBeenCalled();
+            expect(mocks.stripePaymentIntentCreate).not.toHaveBeenCalled();
+          ''',
+              '''  expect(mocks.stripePaymentIntentCancel).not.toHaveBeenCalled();
+            expect(mocks.stripePaymentIntentConfirm).not.toHaveBeenCalled();
+            expect(mocks.stripePaymentIntentCreate).not.toHaveBeenCalled();
+          ''',
+          )
+
+          tests = Path(test_path)
+          content = tests.read_text()
+          start_token = '''  it("charges a canonical saved card without opening Checkout", async () => {
+          '''
+          end_token = '''  it("rechecks the exact group thread-container target inside checkout", async () => {
+          '''
+          start = content.index(start_token)
+          end = content.index(end_token, start)
+          replacement = '''  it("charges a canonical saved card without opening Checkout", async () => {
+            const fake = createFakePrisma();
+            let paymentMetadata: Record<string, string> = {};
+            mocks.stripeCustomerRetrieve.mockResolvedValueOnce({
+              id: "cus_group_payer",
+              invoice_settings: { default_payment_method: "pm_saved_card_123" },
+              livemode: false,
+              object: "customer",
+            });
+            mocks.stripePaymentMethodsList.mockResolvedValueOnce({
+              data: [{
+                customer: "cus_group_payer",
+                id: "pm_saved_card_123",
+                livemode: false,
+                object: "payment_method",
+                type: "card",
+              }],
+              has_more: false,
+              object: "list",
+              url: "/v1/payment_methods",
+            });
+            mocks.stripePaymentIntentCreate.mockImplementationOnce(
+              async (request: Record<string, unknown>) => {
+                expect(request).not.toHaveProperty("confirm");
+                expect(request).not.toHaveProperty("off_session");
+                paymentMetadata = request.metadata as Record<string, string>;
+                return {
+                  amount: request.amount,
+                  amount_received: 0,
+                  currency: request.currency,
+                  customer: request.customer,
+                  id: "pi_saved_card_123",
+                  latest_charge: null,
+                  livemode: false,
+                  metadata: paymentMetadata,
+                  object: "payment_intent",
+                  status: "requires_confirmation",
+                };
+              },
+            );
+            mocks.stripePaymentIntentConfirm.mockResolvedValueOnce({
+              amount: 1_000,
+              amount_received: 1_000,
+              currency: "usd",
+              customer: "cus_group_payer",
+              id: "pi_saved_card_123",
+              latest_charge: "ch_saved_card_123",
+              livemode: false,
+              metadata: paymentMetadata,
+              object: "payment_intent",
+              status: "succeeded",
+            });
+
+            const result = await createHostedGroupUsageCreditCheckout({
+              clientRequestKey: CLIENT_REQUEST_KEY,
+              joinCode: "group_join_code_1234",
+              now: NOW,
+              offerCode: "usage_10_usd",
+              payerMemberId: MEMBER_ID,
+              prisma: fake.prisma as never,
+            });
+
+            expect(result).toMatchObject({ status: "payment_pending" });
+            expect(result).not.toHaveProperty("url");
+            expect(mocks.stripePaymentIntentCreate).toHaveBeenCalledWith(
+              expect.objectContaining({
+                amount: 1_000,
+                currency: "usd",
+                customer: "cus_group_payer",
+                payment_method: "pm_saved_card_123",
+                setup_future_usage: "off_session",
+              }),
+              {
+                idempotencyKey: expect.stringMatching(
+                  /^hosted-usage-credit-saved-card:hucp_/,
+                ),
+              },
+            );
+            expect(mocks.stripePaymentIntentConfirm).toHaveBeenCalledWith(
+              "pi_saved_card_123",
+              {
+                expand: ["latest_charge"],
+                off_session: true,
+              },
+              {
+                idempotencyKey: expect.stringMatching(/:confirm$/),
+              },
+            );
+            expect(mocks.stripeCheckoutCreate).not.toHaveBeenCalled();
+            expect(onlyPurchase(fake.purchases)).toMatchObject({
+              status: "payment_pending",
+              stripeChargeIdEncrypted: "encrypted:ch_saved_card_123",
+              stripeChargeLookupKey: "billing:ch_saved_card_123",
+              stripePaymentIntentIdEncrypted: "encrypted:pi_saved_card_123",
+              stripePaymentIntentLookupKey: "billing:pi_saved_card_123",
+            });
+          });
+
+          it("cancels a card that needs authentication before opening Checkout", async () => {
+            const fake = createFakePrisma();
+            let paymentMetadata: Record<string, string> = {};
+            mocks.stripeCustomerRetrieve.mockResolvedValueOnce({
+              id: "cus_group_payer",
+              invoice_settings: { default_payment_method: "pm_saved_card_123" },
+              livemode: false,
+              object: "customer",
+            });
+            mocks.stripePaymentMethodsList.mockResolvedValueOnce({
+              data: [{
+                customer: "cus_group_payer",
+                id: "pm_saved_card_123",
+                livemode: false,
+                object: "payment_method",
+                type: "card",
+              }],
+              has_more: false,
+              object: "list",
+              url: "/v1/payment_methods",
+            });
+            mocks.stripePaymentIntentCreate.mockImplementationOnce(
+              async (request: Record<string, unknown>) => {
+                paymentMetadata = request.metadata as Record<string, string>;
+                return {
+                  amount: request.amount,
+                  amount_received: 0,
+                  currency: request.currency,
+                  customer: request.customer,
+                  id: "pi_saved_card_auth",
+                  latest_charge: null,
+                  livemode: false,
+                  metadata: paymentMetadata,
+                  object: "payment_intent",
+                  status: "requires_confirmation",
+                };
+              },
+            );
+            mocks.stripePaymentIntentConfirm.mockResolvedValueOnce({
+              amount: 1_000,
+              amount_received: 0,
+              currency: "usd",
+              customer: "cus_group_payer",
+              id: "pi_saved_card_auth",
+              latest_charge: null,
+              livemode: false,
+              metadata: paymentMetadata,
+              object: "payment_intent",
+              status: "requires_action",
+            });
+            mocks.stripePaymentIntentCancel.mockResolvedValueOnce({
+              amount: 1_000,
+              amount_received: 0,
+              currency: "usd",
+              customer: "cus_group_payer",
+              id: "pi_saved_card_auth",
+              latest_charge: null,
+              livemode: false,
+              metadata: paymentMetadata,
+              object: "payment_intent",
+              status: "canceled",
+            });
+            mocks.stripeCheckoutCreate.mockImplementationOnce(async (request) =>
+              buildStripeSession(request)
+            );
+
+            const result = await createHostedGroupUsageCreditCheckout({
+              clientRequestKey: CLIENT_REQUEST_KEY,
+              joinCode: "group_join_code_1234",
+              now: NOW,
+              offerCode: "usage_10_usd",
+              payerMemberId: MEMBER_ID,
+              prisma: fake.prisma as never,
+            });
+
+            expect(result).toMatchObject({
+              status: "checkout_open",
+              url: "https://checkout.stripe.test/session",
+            });
+            expect(mocks.stripePaymentIntentCancel).toHaveBeenCalledWith(
+              "pi_saved_card_auth",
+              { cancellation_reason: "abandoned" },
+              { idempotencyKey: expect.stringMatching(/:cancel$/) },
+            );
+            expect(mocks.stripeCheckoutCreate).toHaveBeenCalledTimes(1);
+            expect(onlyPurchase(fake.purchases)).toMatchObject({
+              status: "checkout_open",
+              stripePaymentIntentIdEncrypted: null,
+              stripePaymentIntentLookupKey: null,
+            });
+          });
+
+          '''
+          tests.write_text(content[:start] + replacement + content[end:])
+          PY
+          git diff --check
+      - name: Commit hardening
+        run: |
+          git config user.name "OpenAI"
+          git config user.email "openai@users.noreply.github.com"
+          git add apps/web/src/lib/hosted-onboarding/usage-credit-saved-card-payment.ts \
+            apps/web/test/hosted-usage-credit-purchase-service.test.ts
+          git commit -m "fix: bind saved-card intents before confirmation"
+          git push origin HEAD:agent/reuse-saved-card-for-group-funding-v2
