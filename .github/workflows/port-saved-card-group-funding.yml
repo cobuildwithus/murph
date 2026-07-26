@@ -32,6 +32,12 @@ jobs:
               1150af88d1fb6dbd26919a642e09e90957f8cd2a \
               > /tmp/saved-card-group-funding.patch
             git apply --3way --index /tmp/saved-card-group-funding.patch
+            python - <<'PY'
+            from pathlib import Path
+            path = Path("agent-docs/product-specs/hosted-usage-topups.md")
+            path.write_text(path.read_text().rstrip() + "\n")
+            PY
+            git add agent-docs/product-specs/hosted-usage-topups.md
             git diff --cached --check
           } > /tmp/port.log 2>&1
           exit_code=$?
