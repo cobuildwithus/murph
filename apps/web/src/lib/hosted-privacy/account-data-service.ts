@@ -22,7 +22,6 @@ import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import { readHostedMemberStripeBillingRef } from "../hosted-onboarding/hosted-member-billing-store";
 import { readHostedMemberIdentity } from "../hosted-onboarding/hosted-member-identity-store";
 import { readHostedAccountGroupStripeBillingRef } from "../hosted-onboarding/family-plan";
-import { deleteHostedPrivyUser } from "../hosted-onboarding/privy";
 import { buildHostedLinqInviteSignupEffectIdMemberPrefix } from "../hosted-onboarding/linq-invite-signup-effect-id";
 import { getHostedOnboardingStripe } from "../hosted-onboarding/runtime";
 import { logHostedStripeFailure } from "../hosted-onboarding/stripe-error-log";
@@ -34,10 +33,7 @@ import {
   assertHostedUsageCreditPurchasesReadyForAccountDeletionTx,
   closeHostedUsageCreditPurchasesForAccountDeletion,
 } from "../hosted-onboarding/usage-credit-purchase-service";
-import {
-  deleteHostedRunnerUserDataBestEffort,
-  type HostedRunnerUserDataDeletionBestEffortResult,
-} from "../hosted-execution/user-data-delete";
+import type { HostedRunnerUserDataDeletionBestEffortResult } from "../hosted-execution/user-data-delete";
 import {
   terminateHostedUserRuntimeWorkflowBestEffort,
 } from "../hosted-orchestration/workflow-termination";
@@ -52,6 +48,20 @@ import {
   type HostedAccountExitReasonCode,
   isHostedAccountExitReasonCode,
 } from "./account-data-shared";
+import {
+  pendingHostedAccountDeletionCleanupResult,
+  persistHostedAccountDeletionCleanupTx,
+  prepareHostedAccountDeletionCleanup,
+  runHostedAccountDeletionCleanup,
+  type HostedAccountDeletionCleanupRunResult,
+  type HostedAccountVendorDeletionResult,
+  type PreparedHostedAccountDeletionCleanup,
+} from "./account-deletion-cleanup";
+
+export type {
+  HostedAccountVendorDeletionResult,
+  HostedAccountVendorDeletionStatus,
+} from "./account-deletion-cleanup";
 
 export type HostedAccountStoreDeletionMode =
   | "live-delete"
@@ -162,6 +172,12 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
     label: "Hosted group disclosure grants",
     deletion: "live-delete",
     note: "Deletes the member's disclosure grants and every grant in generic groups they own or back. The Settings export remains vault-only; the private list_memberships response exposes the exact granted policy text without exposing other members' grants.",
+  },
+  {
+    slug: "prisma.hosted_account_deletion_cleanup",
+    label: "Encrypted account-deletion cleanup receipt",
+    deletion: "documented-retention",
+    note: "Creates a minimal encrypted retry receipt atomically with account deletion, retries external cleanup through the existing retention sweep, and removes the receipt after Cloudflare, Stripe, and Privy converge.",
   },
   {
     slug: "prisma.hosted_mailbox_item",
@@ -508,17 +524,6 @@ export interface HostedAccountProviderRevocationResult {
   warningCode: string | null;
 }
 
-export type HostedAccountVendorDeletionStatus =
-  | "completed"
-  | "failed"
-  | "skipped_no_record"
-  | "skipped_not_configured";
-
-export interface HostedAccountVendorDeletionResult {
-  errorCode: string | null;
-  status: HostedAccountVendorDeletionStatus;
-}
-
 export interface HostedAccountVendorAccountDeletions {
   privyUser: HostedAccountVendorDeletionResult;
   stripeCustomer: HostedAccountVendorDeletionResult;
@@ -526,6 +531,7 @@ export interface HostedAccountVendorAccountDeletions {
 }
 
 export interface HostedAccountDeletionResult {
+  cleanupPending: boolean;
   cloudflare: HostedRunnerUserDataDeletionBestEffortResult;
   deletedAt: string;
   deletedCounts: HostedAccountDataCounts;
@@ -647,6 +653,23 @@ export async function deleteHostedAccountData(input: {
   ]);
 
   const deletionStartedAt = new Date();
+  let preparedCleanup: PreparedHostedAccountDeletionCleanup;
+  try {
+    preparedCleanup = await prepareHostedAccountDeletionCleanup({
+      now: deletionStartedAt,
+      privyUserId,
+      runtimeMemberIds: deletionMemberIds,
+      stripeCustomerIds,
+    });
+  } catch (error) {
+    throw hostedOnboardingError({
+      code: "ACCOUNT_DELETION_CLEANUP_OWNER_CREATE_FAILED",
+      details: { cause: safeErrorCode(error) },
+      httpStatus: 503,
+      message: "We could not safely schedule complete account cleanup. Retry account deletion.",
+      retryable: true,
+    });
+  }
   await markHostedMembersSuspendedForAccountDeletion({
     memberIds: deletionMemberIds,
     now: deletionStartedAt,
@@ -750,6 +773,18 @@ export async function deleteHostedAccountData(input: {
       connectionIdentities: deviceConnectionIdentities,
       prisma: tx,
     });
+    if (!haveSameStrings(transactionDeletionMemberIds, preparedCleanup.runtimeMemberIds)) {
+      throw hostedOnboardingError({
+        code: "ACCOUNT_DELETION_RUNTIME_SET_CHANGED",
+        httpStatus: 503,
+        message: "Your account changed during deletion. Retry so all hosted runtimes are included.",
+        retryable: true,
+      });
+    }
+    await persistHostedAccountDeletionCleanupTx({
+      cleanup: preparedCleanup,
+      prisma: tx,
+    });
     const deletedCounts = await deleteHostedAccountPrismaRows({
       connectionIdentities: deviceConnectionIdentities,
       memberIds: transactionDeletionMemberIds,
@@ -780,28 +815,28 @@ export async function deleteHostedAccountData(input: {
       userId: memberId,
     }),
   ));
-  const cloudflare = await deleteHostedRunnerUserDataForAccountDeletion({
-    memberIds: deletedRuntimeMemberIds,
-  });
+  let cleanup: HostedAccountDeletionCleanupRunResult;
+  try {
+    cleanup = await runHostedAccountDeletionCleanup({
+      cleanupId: preparedCleanup.id,
+      prisma: input.prisma,
+    });
+  } catch (error) {
+    console.error("Hosted account deletion committed with cleanup pending.", {
+      cleanupIdSuffix: preparedCleanup.id.slice(-8),
+      errorCode: safeErrorCode(error),
+    });
+    cleanup = pendingHostedAccountDeletionCleanupResult(safeErrorCode(error));
+  }
   await Promise.all(deletedRuntimeMemberIds.map((memberId) =>
     terminateHostedUserRuntimeWorkflowBestEffort({
       reason: "account-deleted",
       userId: memberId,
     }),
   ));
-  // Local rows are gone and the subscription is already canceled, so vendor
-  // account deletion is best effort and reported instead of fail-closed.
-  const stripeCustomer = await deleteHostedStripeCustomersBestEffort({
-    memberId: input.memberId,
-    stripeCustomerIds,
-  });
-  const privyUser = await deleteHostedPrivyUserBestEffort({
-    memberId: input.memberId,
-    privyUserId,
-  });
-
   return {
-    cloudflare,
+    cleanupPending: cleanup.cleanupPending,
+    cloudflare: cleanup.cloudflare,
     deletedAt: new Date().toISOString(),
     deletedCounts,
     memberId: input.memberId,
@@ -809,8 +844,7 @@ export async function deleteHostedAccountData(input: {
     retentionNotes: HOSTED_ACCOUNT_RETENTION_NOTES,
     schema: HOSTED_ACCOUNT_DATA_DELETION_SCHEMA,
     vendorAccounts: {
-      privyUser,
-      stripeCustomer,
+      ...cleanup.vendorAccounts,
       stripeSubscription,
     },
   };
@@ -897,73 +931,6 @@ async function listOwnedHostedThreadContainerMemberIds(input: {
   return rows.map((row) => row.memberId);
 }
 
-async function deleteHostedRunnerUserDataForAccountDeletion(input: {
-  memberIds: readonly string[];
-}): Promise<HostedRunnerUserDataDeletionBestEffortResult> {
-  const results = await Promise.all(input.memberIds.map((memberId) =>
-    deleteHostedRunnerUserDataBestEffort({
-      context: "settings.account-data.delete",
-      userId: memberId,
-    }),
-  ));
-
-  return mergeHostedRunnerUserDataDeletionResults(results);
-}
-
-function mergeHostedRunnerUserDataDeletionResults(
-  results: readonly HostedRunnerUserDataDeletionBestEffortResult[],
-): HostedRunnerUserDataDeletionBestEffortResult {
-  if (results.length === 0) {
-    return {
-      alarmCleared: null,
-      configured: false,
-      deleted: false,
-      errorCode: null,
-      r2DeletedObjectCount: null,
-      r2SkippedUserScopedPrefixes: null,
-      r2Supported: null,
-      r2UserScopedSkipReason: null,
-      runnerStateDeleted: null,
-    };
-  }
-
-  return {
-    alarmCleared: mergeNullableBooleans(results.map((result) => result.alarmCleared)),
-    configured: results.some((result) => result.configured),
-    deleted: results.every((result) => result.deleted),
-    errorCode: results.find((result) => result.errorCode)?.errorCode ?? null,
-    r2DeletedObjectCount: sumNullableNumbers(
-      results.map((result) => result.r2DeletedObjectCount),
-    ),
-    r2SkippedUserScopedPrefixes: mergeNullableAnyBooleans(
-      results.map((result) => result.r2SkippedUserScopedPrefixes),
-    ),
-    r2Supported: mergeNullableBooleans(results.map((result) => result.r2Supported)),
-    r2UserScopedSkipReason: results.find((result) => result.r2UserScopedSkipReason)
-      ?.r2UserScopedSkipReason ?? null,
-    runnerStateDeleted: mergeNullableBooleans(
-      results.map((result) => result.runnerStateDeleted),
-    ),
-  };
-}
-
-function mergeNullableBooleans(values: readonly (boolean | null)[]): boolean | null {
-  const present = values.filter((value): value is boolean => value !== null);
-  return present.length === 0 ? null : present.every(Boolean);
-}
-
-function mergeNullableAnyBooleans(values: readonly (boolean | null)[]): boolean | null {
-  const present = values.filter((value): value is boolean => value !== null);
-  return present.length === 0 ? null : present.some(Boolean);
-}
-
-function sumNullableNumbers(values: readonly (number | null)[]): number | null {
-  const present = values.filter((value): value is number => value !== null);
-  return present.length === 0
-    ? null
-    : present.reduce((sum, value) => sum + value, 0);
-}
-
 async function markHostedMembersSuspendedForAccountDeletion(input: {
   memberIds: readonly string[];
   now: Date;
@@ -1005,6 +972,11 @@ async function refreshHostedMembersAccountDeletionFenceTx(input: {
 
 function uniqueStrings(values: readonly string[]): string[] {
   return Array.from(new Set(values));
+}
+
+function haveSameStrings(left: readonly string[], right: readonly string[]): boolean {
+  const rightSet = new Set(right);
+  return left.length === rightSet.size && left.every((value) => rightSet.has(value));
 }
 
 function buildStringInFilter(values: readonly string[]): string | { in: string[] } {
@@ -1173,99 +1145,10 @@ async function cancelHostedStripeSubscriptionForAccountDeletion(input: {
   }
 }
 
-async function deleteHostedStripeCustomerBestEffort(input: {
-  memberId: string;
-  stripeCustomerId: string | null;
-}): Promise<HostedAccountVendorDeletionResult> {
-  if (!input.stripeCustomerId) {
-    return { errorCode: null, status: "skipped_no_record" };
-  }
-
-  const stripe = getHostedOnboardingStripe();
-  if (!stripe) {
-    return { errorCode: null, status: "skipped_not_configured" };
-  }
-
-  try {
-    await stripe.customers.del(input.stripeCustomerId);
-    return { errorCode: null, status: "completed" };
-  } catch (error) {
-    if (isStripeResourceMissingError(error)) {
-      return { errorCode: null, status: "skipped_no_record" };
-    }
-
-    const stripeErrorCode = safeErrorCode(error);
-    const memberId = input.memberId;
-    console.error(
-      `[hosted-privacy] Stripe customer deletion failed after account deletion (memberId=${memberId}, errorCode=${stripeErrorCode}).`,
-    );
-    logHostedStripeFailure({
-      error,
-      operationName: "customers.del.account-deletion",
-    });
-    return { errorCode: stripeErrorCode, status: "failed" };
-  }
-}
-
-async function deleteHostedStripeCustomersBestEffort(input: {
-  memberId: string;
-  stripeCustomerIds: readonly string[];
-}): Promise<HostedAccountVendorDeletionResult> {
-  if (input.stripeCustomerIds.length === 0) {
-    return { errorCode: null, status: "skipped_no_record" };
-  }
-
-  const results = [];
-  for (const stripeCustomerId of input.stripeCustomerIds) {
-    results.push(await deleteHostedStripeCustomerBestEffort({
-      memberId: input.memberId,
-      stripeCustomerId,
-    }));
-  }
-
-  const failed = results.find((result) => result.status === "failed");
-  if (failed) {
-    return failed;
-  }
-
-  if (results.some((result) => result.status === "completed")) {
-    return { errorCode: null, status: "completed" };
-  }
-
-  if (results.some((result) => result.status === "skipped_not_configured")) {
-    return { errorCode: null, status: "skipped_not_configured" };
-  }
-
-  return { errorCode: null, status: "skipped_no_record" };
-}
-
 function dedupeNullableStrings(values: readonly (string | null)[]): string[] {
-  return [...new Set(values.filter((value): value is string =>
+  return uniqueStrings(values.filter((value): value is string =>
     typeof value === "string" && value.length > 0
-  ))];
-}
-
-async function deleteHostedPrivyUserBestEffort(input: {
-  memberId: string;
-  privyUserId: string | null;
-}): Promise<HostedAccountVendorDeletionResult> {
-  if (!input.privyUserId) {
-    return { errorCode: null, status: "skipped_no_record" };
-  }
-
-  try {
-    const deleted = await deleteHostedPrivyUser(input.privyUserId);
-    return deleted
-      ? { errorCode: null, status: "completed" }
-      : { errorCode: null, status: "skipped_not_configured" };
-  } catch (error) {
-    const privyErrorCode = safeErrorCode(error);
-    const memberId = input.memberId;
-    console.error(
-      `[hosted-privacy] Privy user deletion failed after account deletion (memberId=${memberId}, errorCode=${privyErrorCode}).`,
-    );
-    return { errorCode: privyErrorCode, status: "failed" };
-  }
+  ));
 }
 
 function isStripeResourceMissingError(error: unknown): boolean {

@@ -126,7 +126,10 @@ vi.mock("@/src/components/ui/label", () => ({
   Label: createPassthrough("label"),
 }));
 
-import { HostedDataPrivacySettings } from "@/src/components/settings/hosted-data-privacy-settings";
+import {
+  hasIncompleteCleanup,
+  HostedDataPrivacySettings,
+} from "@/src/components/settings/hosted-data-privacy-settings";
 
 const requireFromHostedDataPrivacySettingsTest = createRequire(import.meta.url);
 
@@ -177,6 +180,37 @@ afterEach(async () => {
 });
 
 describe("HostedDataPrivacySettings", () => {
+  test("keeps legacy unconfigured Cloudflare cleanup pending", () => {
+    expect(hasIncompleteCleanup({
+      cloudflare: {
+        configured: false,
+        deleted: false,
+      },
+      deletedAt: "2026-04-29T01:02:03.000Z",
+      vendorAccounts: {
+        privyUser: { errorCode: null, status: "skipped_no_record" },
+        stripeCustomer: { errorCode: null, status: "skipped_no_record" },
+        stripeSubscription: { errorCode: null, status: "completed" },
+      },
+    })).toBe(true);
+  });
+
+  test("uses the durable cleanup owner as the canonical completion result", () => {
+    expect(hasIncompleteCleanup({
+      cleanupPending: false,
+      cloudflare: {
+        configured: false,
+        deleted: false,
+      },
+      deletedAt: "2026-04-29T01:02:03.000Z",
+      vendorAccounts: {
+        privyUser: { errorCode: "pending", status: "failed" },
+        stripeCustomer: { errorCode: "pending", status: "failed" },
+        stripeSubscription: { errorCode: null, status: "completed" },
+      },
+    })).toBe(false);
+  });
+
   test("does not export the browser vault without the sensitive-data acknowledgement", async () => {
     mockHostedVaultExportFlowState({
       acknowledgedSensitiveDownload: false,
@@ -702,7 +736,37 @@ describe("HostedDataPrivacySettings", () => {
       root.render(createElement(HostedDataPrivacySettings, { authenticated: true }));
     });
 
-    assert.ok(container.textContent?.includes("Your account and all your data have been deleted"));
+    assert.ok(
+      container.textContent?.includes(
+        "Your Murph account and active Murph data have been deleted",
+      ),
+    );
+    assert.ok(container.textContent?.includes("Provider and backup copies"));
+    assert.equal([...container.querySelectorAll("button")].length, 0);
+  });
+
+  test("reports durable external cleanup as pending after account deletion", async () => {
+    mockHostedDataPrivacyDeletedState({ cleanupPending: true });
+
+    const { document, window } = loadLinkedom().parseHTML(
+      "<html><body><div id='root'></div></body></html>",
+    );
+    installGlobals(window, document);
+    const container = document.getElementById("root");
+    assert.ok(container);
+
+    const root: Root = createRoot(container);
+    cleanupRender = async () => {
+      await act(async () => {
+        root.unmount();
+      });
+    };
+
+    await act(async () => {
+      root.render(createElement(HostedDataPrivacySettings, { authenticated: true }));
+    });
+
+    assert.ok(container.textContent?.includes("We're finishing some cleanup on our side"));
     assert.equal([...container.querySelectorAll("button")].length, 0);
   });
 });
@@ -759,7 +823,7 @@ function mockHostedDataPrivacyDeleteFlowState(input: {
   ];
 }
 
-function mockHostedDataPrivacyDeletedState() {
+function mockHostedDataPrivacyDeletedState(input: { cleanupPending?: boolean } = {}) {
   mocks.useStateValues = [
     false,
     false,
@@ -774,7 +838,7 @@ function mockHostedDataPrivacyDeletedState() {
     "",
     null,
     true,
-    false,
+    input.cleanupPending ?? false,
     false,
   ];
 }

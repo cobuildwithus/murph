@@ -1,6 +1,6 @@
 # Reliability
 
-Last verified: 2026-07-25
+Last verified: 2026-07-26
 
 ## Current Guardrails
 
@@ -15,6 +15,25 @@ Last verified: 2026-07-25
 - Define startup requirements, health checks, and critical invariants.
 - Document retry/idempotency expectations for writes or background work.
 - Add tests for failure modes before relying on production-side recovery logic.
+- Account deletion must not discard its only external-cleanup owner. The
+  canonical account transaction persists the KMS-encrypted, foreign-key-free
+  receipt before deleting the member. The existing hourly retention sweep
+  retries Cloudflare, Stripe-customer, and Privy-user targets independently;
+  confirmed absence is idempotent success, completed targets are skipped, and
+  unconfigured or ambiguous targets remain pending. Because every provider
+  delete is idempotent and progress is monotonic, concurrent attempts may
+  duplicate a provider request but cannot erase completed progress or report
+  convergence before the receipt itself is deleted.
+- Participant-derived hosted-group access is bounded by the shared seven-day
+  observation lease. Provider rosters larger than the reconciliation cap cannot
+  leave a participant authoritative forever: stale relationships age out.
+  Authenticated Linq inbound can renew only an existing non-removed relationship
+  for the currently resolved identity, and future provider timestamps are
+  clamped to server time. Before denying a quiet route, Web makes one bounded
+  provider read and scans the full returned roster for an existing active
+  participant whose current identity still matches the stored relationship;
+  provider order and the assistant participant projection cap do not decide
+  access.
 - Foreground inbox/parser-backed daemon runs should favor restartable connectors with bounded backoff over permanently dead watch loops, while still keeping low-level restart behavior opt-in and always bounded by the owning abort signal.
 - Networked assistant/provider/channel calls should set explicit timeouts, propagate caller abort signals, and only auto-retry request shapes that are replay-safe or rate-limit directed.
 - Hosted managed-automation reconciliation persists retry generation in the existing workspace checkpoint owner. Only eligible, explicitly retryable failures receive the bounded 30-second, 2-minute, and 10-minute backoff sequence; unclassified or permanent failures are logged without manufacturing another wake, and a later successful pass clears the retry generation.

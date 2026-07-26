@@ -158,7 +158,9 @@ export class RunnerStateStore {
 
     if (!meta) {
       this.userId = null;
-      return { deleted: false };
+      // Deletion is retried from a durable web-side receipt. Absence is the
+      // desired end state, so replay after a successful delete stays complete.
+      return { deleted: true };
     }
 
     this.sql.exec("DELETE FROM runner_meta WHERE singleton = 1");

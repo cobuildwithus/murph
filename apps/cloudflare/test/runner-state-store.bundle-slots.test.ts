@@ -190,7 +190,7 @@ function runnerBundleSlotsTableExists(db: DatabaseSync): boolean {
   return row?.name === "runner_bundle_slots";
 }
 
-describe("RunnerStateStore schema guard", () => {
+  describe("RunnerStateStore schema guard", () => {
   it("drops the retired split runner bundle table during schema migration", async () => {
     const setupLegacyBundleSchema = (database: DatabaseSync) => {
       database.exec(`
@@ -220,6 +220,15 @@ describe("RunnerStateStore schema guard", () => {
     const store = new RunnerStateStore(createDurableObjectState(db));
     await store.bindUser("user-retired-bundle-slots");
     expect(runnerBundleSlotsTableExists(db)).toBe(false);
+  });
+
+  it("treats repeated account-data deletion against absent state as success", async () => {
+    const { db, store } = createRunnerStateStoreHarness();
+
+    await expect(store.deleteStateForUser("user-deleted")).resolves.toEqual({
+      deleted: true,
+    });
+    expect(readRunnerMetaRowCount(db)).toBe(0);
   });
 
   it("creates the current write-fence schema without retired scheduler or invocation columns", async () => {

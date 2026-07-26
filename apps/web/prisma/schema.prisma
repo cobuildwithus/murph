@@ -1540,6 +1540,24 @@ model HostedThreadContainerParticipant {
   @@map("hosted_thread_container_participant")
 }
 
+model HostedAccountDeletionCleanup {
+  id                    String    @id
+  payloadCiphertext     String    @map("payload_ciphertext")
+  kmsKeyName            String    @map("kms_key_name")
+  environment           String
+  cloudflareCompletedAt DateTime? @map("cloudflare_completed_at")
+  stripeCompletedAt     DateTime? @map("stripe_completed_at")
+  privyCompletedAt      DateTime? @map("privy_completed_at")
+  nextAttemptAt         DateTime  @map("next_attempt_at")
+  lastAttemptedAt       DateTime? @map("last_attempted_at")
+  lastErrorCode         String?   @map("last_error_code")
+  createdAt             DateTime  @default(now()) @map("created_at")
+  updatedAt             DateTime  @updatedAt @map("updated_at")
+
+  @@index([nextAttemptAt, createdAt])
+  @@map("hosted_account_deletion_cleanup")
+}
+
 model HostedThreadRoute {
   channel                 String
   threadLookupKey         String                @map("thread_lookup_key")

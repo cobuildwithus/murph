@@ -254,9 +254,11 @@ describe("hosted member access (single resolver)", () => {
       },
     };
 
+    const now = new Date("2026-07-25T18:00:00.000Z");
     await expect(hasActiveHostedThreadContainerAccessWithParticipants({
       container: { suspendedAt: null },
       containerMemberId: "member_container",
+      now,
       owner: person({ billingStatus: HostedBillingStatus.paused }),
       prisma: prisma as never,
     })).resolves.toBe(true);
@@ -267,6 +269,7 @@ describe("hosted member access (single resolver)", () => {
       },
       where: expect.objectContaining({
         containerMemberId: "member_container",
+        lastSeenAt: { gte: new Date("2026-07-18T18:00:00.000Z") },
         removedAt: null,
       }),
     });
@@ -287,8 +290,10 @@ describe("hosted member access (single resolver)", () => {
       },
     };
 
+    const now = new Date("2026-07-25T18:00:00.000Z");
     await expect(readActiveHostedMemberAccess({
       memberId: "member_container",
+      now,
       prisma: prisma as never,
     })).resolves.toBe(true);
 
@@ -302,6 +307,7 @@ describe("hosted member access (single resolver)", () => {
       },
       where: expect.objectContaining({
         containerMemberId: "member_container",
+        lastSeenAt: { gte: new Date("2026-07-18T18:00:00.000Z") },
         removedAt: null,
       }),
     });
