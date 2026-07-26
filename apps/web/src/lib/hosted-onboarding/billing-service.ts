@@ -7,6 +7,7 @@ import {
 } from "@prisma/client";
 import type Stripe from "stripe";
 
+import { prepareHostedCryptoDomainRootCandidates } from "../hosted-crypto/domain-root-store";
 import { getPrisma } from "../prisma";
 import { buildStripeCancelUrl, buildStripeSuccessUrl } from "./billing";
 import {
@@ -807,6 +808,11 @@ async function reconcileHostedBillingCompletedCheckoutSession(input: {
   HostedBillingCheckoutLockedOutcome,
   { kind: "reconciled" }
 >> {
+  const preparedCryptoDomainRoots =
+    await prepareHostedCryptoDomainRootCandidates({
+      prisma: input.prisma,
+      userId: input.memberId,
+    });
   return withHostedMemberStripeMutationLock({
     memberId: input.memberId,
     prisma: input.prisma,
@@ -816,6 +822,7 @@ async function reconcileHostedBillingCompletedCheckoutSession(input: {
         tx,
         undefined,
         input.observedAt,
+        preparedCryptoDomainRoots,
       );
       const member = await tx.hostedMember.findUnique({
         select: {

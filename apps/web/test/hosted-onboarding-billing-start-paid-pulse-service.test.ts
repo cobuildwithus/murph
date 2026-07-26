@@ -13,6 +13,8 @@ const mocks = vi.hoisted(() => ({
   applyStripeRecurringFinancialState: vi.fn(),
   applyStripeSubscriptionUpdated: vi.fn(),
   getPrisma: vi.fn(),
+  prepareHostedCryptoDomainRootCandidates: vi.fn(),
+  preparedCryptoDomainRoots: new Map(),
   signalHostedRuntimeManualWakeBestEffort: vi.fn(),
   prismaClient: {
     $transaction: vi.fn(),
@@ -48,6 +50,11 @@ const mocks = vi.hoisted(() => ({
 
 const invoiceFixtures = new Map<string, Stripe.Invoice>();
 const invoicePaymentFixtures = new Map<string, Stripe.InvoicePayment[]>();
+
+vi.mock("@/src/lib/hosted-crypto/domain-root-store", () => ({
+  prepareHostedCryptoDomainRootCandidates:
+    mocks.prepareHostedCryptoDomainRootCandidates,
+}));
 
 vi.mock("@/src/lib/prisma", () => ({
   getPrisma: mocks.getPrisma,
@@ -91,6 +98,9 @@ describe("startHostedPulseTrialPaidPlan", () => {
     invoiceFixtures.clear();
     invoicePaymentFixtures.clear();
     mocks.getPrisma.mockReturnValue(mocks.prismaClient);
+    mocks.prepareHostedCryptoDomainRootCandidates.mockResolvedValue(
+      mocks.preparedCryptoDomainRoots,
+    );
     mocks.prismaClient.$transaction.mockImplementation(async (callback: (tx: unknown) => Promise<unknown>) =>
       callback(mocks.prismaClient)
     );
@@ -978,6 +988,17 @@ describe("startHostedPulseTrialPaidPlan", () => {
       mocks.prismaClient,
       HostedBillingStatus.active,
       reconciledSubscription,
+      mocks.preparedCryptoDomainRoots,
+    );
+    expect(mocks.prepareHostedCryptoDomainRootCandidates).toHaveBeenCalledWith({
+      prisma: mocks.prismaClient,
+      userId: "member_123",
+    });
+    expect(
+      mocks.prepareHostedCryptoDomainRootCandidates.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      mocks.withHostedMemberStripeMutationLock.mock.invocationCallOrder.at(-1)
+        ?? 0,
     );
     expect(mocks.signalHostedRuntimeManualWakeBestEffort).toHaveBeenCalledWith({
       userId: "member_123",
@@ -1148,6 +1169,7 @@ describe("startHostedPulseTrialPaidPlan", () => {
       mocks.prismaClient,
       HostedBillingStatus.active,
       canonicalSubscription,
+      mocks.preparedCryptoDomainRoots,
     );
     expect(mocks.signalHostedRuntimeManualWakeBestEffort).toHaveBeenCalledWith({
       userId: "member_123",
@@ -2123,6 +2145,7 @@ describe("startHostedPulseTrialPaidPlan", () => {
       mocks.prismaClient,
       HostedBillingStatus.active,
       subscription,
+      mocks.preparedCryptoDomainRoots,
     );
     expect(mocks.stripe.subscriptions.update).not.toHaveBeenCalled();
     expect(mocks.stripe.subscriptions.resume).not.toHaveBeenCalled();
@@ -2686,6 +2709,7 @@ describe("startHostedPulseTrialPaidPlan", () => {
       mocks.prismaClient,
       HostedBillingStatus.active,
       subscription,
+      mocks.preparedCryptoDomainRoots,
     );
     expect(mocks.signalHostedRuntimeManualWakeBestEffort).toHaveBeenCalledWith({
       userId: "member_123",

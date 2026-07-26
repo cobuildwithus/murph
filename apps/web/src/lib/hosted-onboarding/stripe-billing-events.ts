@@ -5,6 +5,9 @@ import {
 } from "@prisma/client";
 import type Stripe from "stripe";
 
+import type {
+  PreparedHostedCryptoDomainRootCandidates,
+} from "../hosted-crypto/domain-root-store";
 import {
   coerceStripeInvoiceSubscriptionId,
   coerceStripeObjectId,
@@ -117,6 +120,7 @@ export async function applyStripeCheckoutCompleted(
   prisma: Prisma.TransactionClient,
   dispatchContext?: HostedStripeDispatchContext,
   observedAt = new Date(),
+  preparedCryptoDomainRoots?: PreparedHostedCryptoDomainRootCandidates,
 ): Promise<HostedStripeActivationOutcome> {
   const familyCheckout = await applyHostedFamilyStripeCheckoutCompletedTx({
     dispatchContext: dispatchContext ?? buildHostedStripeCheckoutSessionDispatchContext(session),
@@ -316,6 +320,9 @@ export async function applyStripeCheckoutCompleted(
     return applyPulseTrialCheckoutCompletedTx({
       dispatchContext: dispatchContext ?? buildHostedStripeCheckoutSessionDispatchContext(session),
       member,
+      ...(preparedCryptoDomainRoots
+        ? { preparedCryptoDomainRoots }
+        : {}),
       session,
       tx: prisma,
     });
@@ -339,6 +346,7 @@ export async function applyStripeCheckoutCompleted(
     dispatchContext:
       dispatchContext ?? buildHostedStripeCheckoutSessionDispatchContext(session),
     memberId: member.core.id,
+    preparedCryptoDomainRoots,
     session,
     tx: prisma,
   });
@@ -347,6 +355,7 @@ export async function applyStripeCheckoutCompleted(
 async function projectAcceptedHostedStandardCheckoutTx(input: {
   dispatchContext: HostedStripeDispatchContext;
   memberId: string;
+  preparedCryptoDomainRoots?: PreparedHostedCryptoDomainRootCandidates;
   session: Stripe.Checkout.Session;
   tx: Prisma.TransactionClient;
 }): Promise<HostedStripeActivationOutcome> {
@@ -404,6 +413,7 @@ async function projectAcceptedHostedStandardCheckoutTx(input: {
       input.tx,
       mapStripeSubscriptionStatusToHostedBillingStatus(subscription.status),
       subscription,
+      input.preparedCryptoDomainRoots,
     );
   }
 
@@ -494,6 +504,7 @@ export async function bindHostedStripeBillingRefsFromCheckoutSessionTx(input: {
 export async function applyPulseTrialCheckoutCompletedTx(input: {
   dispatchContext: HostedStripeDispatchContext;
   member: HostedMemberBillingSnapshot;
+  preparedCryptoDomainRoots?: PreparedHostedCryptoDomainRootCandidates;
   session: Stripe.Checkout.Session;
   tx: Prisma.TransactionClient;
 }): Promise<HostedStripeActivationOutcome> {
@@ -655,6 +666,7 @@ export async function applyPulseTrialCheckoutCompletedTx(input: {
   const activation = await activateHostedMemberForPositiveSourceTx({
     dispatchContext: input.dispatchContext,
     memberId: updatedMember.core.id,
+    preparedCryptoDomainRoots: input.preparedCryptoDomainRoots ?? new Map(),
     prisma: input.tx,
     skipIfBillingAlreadyActive: false,
   });
@@ -933,6 +945,7 @@ export async function applyStripeInvoicePaid(
   prisma: Prisma.TransactionClient,
   canonicalBillingStatus?: HostedBillingStatus | null,
   canonicalSubscription?: Stripe.Subscription | null,
+  preparedCryptoDomainRoots?: PreparedHostedCryptoDomainRootCandidates,
 ): Promise<HostedStripeActivationOutcome> {
   if (canonicalSubscription) {
     const familySubscription = await applyHostedFamilyStripeSubscriptionUpdatedTx({
@@ -1062,6 +1075,9 @@ export async function applyStripeInvoicePaid(
   const activation = await activateHostedMemberForPositiveSourceTx({
     dispatchContext: buildHostedStripeInvoiceActivationDispatchContext(invoice, dispatchContext),
     memberId: updatedMember.core.id,
+    ...(preparedCryptoDomainRoots
+      ? { preparedCryptoDomainRoots }
+      : {}),
     prisma,
     skipIfBillingAlreadyActive: hadActiveBilling,
     skipIfPreviouslyActivated: true,

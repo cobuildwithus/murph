@@ -18,6 +18,7 @@ const activationMocks = vi.hoisted(() => ({
   buildHostedMemberActivationEventId: vi.fn(),
 }));
 const cryptoRootMocks = vi.hoisted(() => ({
+  prepareHostedCryptoDomainRootCandidates: vi.fn(),
   provisionActiveHostedDomainRootEnvelopeForUserOnly: vi.fn(),
 }));
 const identityMocks = vi.hoisted(() => ({
@@ -61,6 +62,8 @@ vi.mock("@/src/lib/hosted-onboarding/member-activation-runtime-wake", () => ({
     activationWakeMocks.signalHostedMemberActivationRuntimeWakeBestEffortResult,
 }));
 vi.mock("@/src/lib/hosted-crypto/domain-root-store", () => ({
+  prepareHostedCryptoDomainRootCandidates:
+    cryptoRootMocks.prepareHostedCryptoDomainRootCandidates,
   provisionActiveHostedDomainRootEnvelopeForUserOnly:
     cryptoRootMocks.provisionActiveHostedDomainRootEnvelopeForUserOnly,
 }));
@@ -303,6 +306,7 @@ describe("hosted Family plan", () => {
       "https://local.withmurph.ai:3443",
     );
     cryptoRootMocks.provisionActiveHostedDomainRootEnvelopeForUserOnly.mockResolvedValue(undefined);
+    cryptoRootMocks.prepareHostedCryptoDomainRootCandidates.mockResolvedValue(new Map());
     identityMocks.ensureHostedMemberForPhoneTx.mockResolvedValue({
       billingStatus: HostedBillingStatus.not_started,
       id: "member_mom",
@@ -1489,6 +1493,9 @@ describe("hosted Family plan", () => {
         memberId: expect.stringMatching(/^hbm_/u),
       }),
     }));
+    expect(
+      activationMocks.activateHostedMemberForFamilySponsorshipTx.mock.calls[0]?.[0],
+    ).not.toHaveProperty("preparedCryptoDomainRoots");
   });
 
   it("accepts a phone plus Telegram invite from the matching phone webhook sender", async () => {
@@ -1517,6 +1524,9 @@ describe("hosted Family plan", () => {
       phoneNumberVerifiedAt: now,
       prisma: tx,
     });
+    expect(
+      activationMocks.activateHostedMemberForFamilySponsorshipTx.mock.calls[0]?.[0],
+    ).not.toHaveProperty("preparedCryptoDomainRoots");
   });
 
   it("rejects a phone plus Telegram invite from the wrong Telegram username", async () => {
@@ -3219,6 +3229,12 @@ describe("hosted Family plan", () => {
   it("signals the accepted member activation mailbox after browser acceptance commits", async () => {
     const tx = createTxMock();
     tx.hostedAccountGroupInvite.findUnique.mockResolvedValueOnce(createPendingInvite());
+    const preparedCryptoDomainRoots = new Map([
+      ["control", { domain: "control" }],
+    ]);
+    cryptoRootMocks.prepareHostedCryptoDomainRootCandidates.mockResolvedValueOnce(
+      preparedCryptoDomainRoots,
+    );
     const prisma = tx as FamilyPlanTxMock & {
       $transaction: ReturnType<typeof vi.fn>;
     };
@@ -3242,6 +3258,18 @@ describe("hosted Family plan", () => {
         source: "family-invite-web-accept",
         timeoutMs: 5_000,
       });
+    expect(cryptoRootMocks.prepareHostedCryptoDomainRootCandidates).toHaveBeenCalledWith({
+      prisma,
+      userId: "member_mom",
+    });
+    expect(
+      cryptoRootMocks.prepareHostedCryptoDomainRootCandidates.mock.invocationCallOrder[0],
+    ).toBeLessThan(prisma.$transaction.mock.invocationCallOrder[0] ?? 0);
+    expect(activationMocks.activateHostedMemberForFamilySponsorshipTx).toHaveBeenCalledWith(
+      expect.objectContaining({
+        preparedCryptoDomainRoots,
+      }),
+    );
   });
 
   it("replays browser acceptance by waking the existing activation mailbox", async () => {

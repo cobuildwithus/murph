@@ -24,6 +24,8 @@ const mocks = vi.hoisted(() => {
     applyStripeCheckoutCompleted: vi.fn(),
     cancelHostedPulseTrialCheckoutLoserSubscription: vi.fn(),
     executeHostedCheckoutSubscriptionCleanup: vi.fn(),
+    prepareHostedCryptoDomainRootCandidates: vi.fn(),
+    preparedCryptoDomainRoots: new Map(),
     requireHostedInviteForBillingCheckout: vi.fn(),
     requireHostedOnboardingPublicBaseUrl: vi.fn(),
     requireHostedStripeCheckoutConfig: vi.fn(),
@@ -33,6 +35,11 @@ const mocks = vi.hoisted(() => {
     sendHostedSignupWelcomeEmailForMemberBestEffort: vi.fn(),
   };
 });
+
+vi.mock("@/src/lib/hosted-crypto/domain-root-store", () => ({
+  prepareHostedCryptoDomainRootCandidates:
+    mocks.prepareHostedCryptoDomainRootCandidates,
+}));
 
 vi.mock("@/src/lib/hosted-onboarding/family-plan", () => ({
   readHostedMemberFamilyBillingClaim:
@@ -145,6 +152,9 @@ describe("createHostedBillingCheckout", () => {
       hostedExecutionEventId: null,
       welcomeEmailMemberId: null,
     });
+    mocks.prepareHostedCryptoDomainRootCandidates.mockResolvedValue(
+      mocks.preparedCryptoDomainRoots,
+    );
     mocks.requireHostedOnboardingPublicBaseUrl.mockReturnValue("https://join.example.test");
     mocks.requireHostedStripeCheckoutConfig.mockReturnValue({
       billingPlanCode: "launch_monthly",
@@ -1205,7 +1215,15 @@ describe("createHostedBillingCheckout", () => {
       expect.any(Object),
       undefined,
       expect.any(Date),
+      mocks.preparedCryptoDomainRoots,
     );
+    expect(mocks.prepareHostedCryptoDomainRootCandidates).toHaveBeenCalledWith({
+      prisma,
+      userId: "member_123",
+    });
+    expect(
+      mocks.prepareHostedCryptoDomainRootCandidates.mock.invocationCallOrder[0],
+    ).toBeLessThan(prisma.$transaction.mock.invocationCallOrder.at(-1) ?? 0);
     expect(
       mocks.signalHostedMemberActivationRuntimeWakeBestEffortResult,
     ).toHaveBeenCalledWith(expect.objectContaining({

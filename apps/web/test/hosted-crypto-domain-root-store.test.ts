@@ -186,7 +186,7 @@ test("detects whether all active hosted crypto domain roots exist for a user", a
   const {
     hasActiveHostedCryptoDomainRootsForUserTx,
     provisionActiveHostedDomainRootEnvelopeForUserOnly,
-    provisionHostedCryptoDomainRootsForUserTx,
+    provisionPreparedHostedCryptoDomainRootsTx,
   } = await import(
     "../src/lib/hosted-crypto/domain-root-store"
   );
@@ -232,7 +232,8 @@ test("detects whether all active hosted crypto domain roots exist for a user", a
     userId: "member-test-1",
   });
 
-  await provisionHostedCryptoDomainRootsForUserTx({
+  await provisionPreparedHostedCryptoDomainRootsTx({
+    prepared: new Map(),
     reason: "test.activation",
     tx: tx.prisma,
     userId: "member-test-1",
@@ -242,6 +243,301 @@ test("detects whether all active hosted crypto domain roots exist for a user", a
     tx: tx.prisma,
     userId: "member-test-1",
   })).resolves.toBe(true);
+});
+
+test("signs hosted domain root envelopes before the provisioning transaction opens", async () => {
+  const signer = await generateP256SigningKeyPair();
+  const cloudflareRecipient = await generateP256EcdhKeyPair();
+  const steps: string[] = [];
+  gcpKmsMock.client = createStepRecordingKmsClient({
+    client: createLocalKmsClient({
+      encryptCalls: [],
+      signCalls: [],
+      signer: signer.privateKey,
+    }),
+    steps,
+  });
+  stubHostedCryptoEnv({
+    cloudflarePublicJwk: cloudflareRecipient.publicJwk,
+    signerPublicKeyPem: signer.publicKeyPem,
+  });
+
+  const { provisionActiveHostedDomainRootEnvelopeForUserOnly } = await import(
+    "../src/lib/hosted-crypto/domain-root-store"
+  );
+  const recorder = createStepRecordingTransaction(steps);
+
+  await provisionActiveHostedDomainRootEnvelopeForUserOnly({
+    domain: "control",
+    prisma: recorder.prisma,
+    reason: "test.two-phase",
+    userId: "member-test-two-phase",
+  });
+
+  assert.deepEqual(steps, [
+    "db.read-active-domains",
+    "kms.encrypt",
+    "kms.asymmetric-sign",
+    "transaction.begin",
+    "db.advisory-lock",
+    "db.read-active-envelope",
+    "db.insert-envelope",
+    "db.insert-audit",
+    "transaction.commit",
+  ]);
+  assert.equal(recorder.persistedEnvelopes.length, 1);
+});
+
+test("prepared hosted domain root candidates stay behind the advisory lock and re-read", async () => {
+  const signer = await generateP256SigningKeyPair();
+  const cloudflareRecipient = await generateP256EcdhKeyPair();
+  const steps: string[] = [];
+  gcpKmsMock.client = createStepRecordingKmsClient({
+    client: createLocalKmsClient({
+      encryptCalls: [],
+      signCalls: [],
+      signer: signer.privateKey,
+    }),
+    steps,
+  });
+  stubHostedCryptoEnv({
+    cloudflarePublicJwk: cloudflareRecipient.publicJwk,
+    signerPublicKeyPem: signer.publicKeyPem,
+  });
+
+  const {
+    prepareHostedCryptoDomainRootCandidates,
+    provisionPreparedHostedCryptoDomainRootsTx,
+  } = await import("../src/lib/hosted-crypto/domain-root-store");
+  const recorder = createStepRecordingTransaction(steps);
+
+  const prepared = await prepareHostedCryptoDomainRootCandidates({
+    prisma: recorder.prisma,
+    userId: "member-test-prepared",
+  });
+  assert.deepEqual([...prepared.keys()].sort(), ["control", "device", "ingress", "runtime"]);
+
+  steps.length = 0;
+  await provisionPreparedHostedCryptoDomainRootsTx({
+    prepared,
+    reason: "test.prepared-activation",
+    tx: recorder.prisma,
+    userId: "member-test-prepared",
+  });
+
+  assert.deepEqual(steps, [
+    "db.advisory-lock",
+    "db.read-active-envelope",
+    "db.insert-envelope",
+    "db.insert-audit",
+    "db.advisory-lock",
+    "db.read-active-envelope",
+    "db.insert-envelope",
+    "db.insert-audit",
+    "db.advisory-lock",
+    "db.read-active-envelope",
+    "db.insert-envelope",
+    "db.insert-audit",
+    "db.advisory-lock",
+    "db.read-active-envelope",
+    "db.insert-envelope",
+    "db.insert-audit",
+  ]);
+  assert.deepEqual(
+    recorder.persistedEnvelopes.map((envelope) => envelope.domain).sort(),
+    ["control", "device", "ingress", "runtime"],
+  );
+});
+
+test("prepared-only provisioning fails closed without signing inside the transaction", async () => {
+  const signer = await generateP256SigningKeyPair();
+  const cloudflareRecipient = await generateP256EcdhKeyPair();
+  const encryptCalls: GcpKmsEncryptInput[] = [];
+  const signCalls: GcpKmsAsymmetricSignInput[] = [];
+  const steps: string[] = [];
+  gcpKmsMock.client = createStepRecordingKmsClient({
+    client: createLocalKmsClient({
+      encryptCalls,
+      signCalls,
+      signer: signer.privateKey,
+    }),
+    steps,
+  });
+  stubHostedCryptoEnv({
+    cloudflarePublicJwk: cloudflareRecipient.publicJwk,
+    signerPublicKeyPem: signer.publicKeyPem,
+  });
+
+  const {
+    HostedCryptoDomainRootCandidateRequiredError,
+    provisionPreparedHostedCryptoDomainRootsTx,
+  } = await import("../src/lib/hosted-crypto/domain-root-store");
+  const recorder = createStepRecordingTransaction(steps);
+
+  await expect(provisionPreparedHostedCryptoDomainRootsTx({
+    prepared: new Map(),
+    reason: "test.missing-prepared-candidate",
+    tx: recorder.prisma,
+    userId: "member-test-missing-candidate",
+  })).rejects.toBeInstanceOf(HostedCryptoDomainRootCandidateRequiredError);
+
+  assert.deepEqual(steps, [
+    "db.advisory-lock",
+    "db.read-active-envelope",
+  ]);
+  assert.equal(encryptCalls.length, 0);
+  assert.equal(signCalls.length, 0);
+  assert.equal(recorder.persistedEnvelopes.length, 0);
+});
+
+test("discards a prepared hosted domain root candidate when another writer wins the race", async () => {
+  const signer = await generateP256SigningKeyPair();
+  const cloudflareRecipient = await generateP256EcdhKeyPair();
+  const encryptCalls: GcpKmsEncryptInput[] = [];
+  gcpKmsMock.client = createLocalKmsClient({
+    encryptCalls,
+    signCalls: [],
+    signer: signer.privateKey,
+  });
+  stubHostedCryptoEnv({
+    cloudflarePublicJwk: cloudflareRecipient.publicJwk,
+    signerPublicKeyPem: signer.publicKeyPem,
+  });
+
+  const {
+    prepareHostedCryptoDomainRootCandidates,
+    provisionActiveHostedDomainRootEnvelopeForUserOnly,
+    provisionPreparedHostedCryptoDomainRootsTx,
+  } = await import("../src/lib/hosted-crypto/domain-root-store");
+  const tx = createCapturingTransaction();
+
+  const prepared = await prepareHostedCryptoDomainRootCandidates({
+    prisma: tx.prisma,
+    userId: "member-test-race",
+  });
+
+  // Another writer commits the control root between phase one and phase two.
+  const winner = await provisionActiveHostedDomainRootEnvelopeForUserOnly({
+    domain: "control",
+    prisma: tx.prisma,
+    reason: "test.race-winner",
+    userId: "member-test-race",
+  });
+  assert.notEqual(winner.rootKeyId, prepared.get("control")?.rootKeyId);
+
+  await provisionPreparedHostedCryptoDomainRootsTx({
+    prepared,
+    reason: "test.race",
+    tx: tx.prisma,
+    userId: "member-test-race",
+  });
+
+  const controlEnvelopes = tx.persistedEnvelopes.filter((envelope) =>
+    envelope.domain === "control");
+  assert.equal(controlEnvelopes.length, 1);
+  assert.equal(controlEnvelopes[0]?.rootKeyId, winner.rootKeyId);
+  for (const domain of ["device", "ingress", "runtime"] as const) {
+    const persisted = tx.persistedEnvelopes.filter((envelope) => envelope.domain === domain);
+    assert.equal(persisted.length, 1);
+    assert.equal(persisted[0]?.rootKeyId, prepared.get(domain)?.rootKeyId);
+  }
+
+  // The discarded candidate's plaintext root key is zeroized like every other,
+  // so losing the race never leaves usable key material behind.
+  assert.ok(encryptCalls.length >= 4);
+  for (const call of encryptCalls) {
+    assert.ok(call.plaintext.every((byte) => byte === 0));
+  }
+});
+
+test("rejects a prepared hosted domain root candidate bound to another user before any database work", async () => {
+  const signer = await generateP256SigningKeyPair();
+  const cloudflareRecipient = await generateP256EcdhKeyPair();
+  const steps: string[] = [];
+  gcpKmsMock.client = createStepRecordingKmsClient({
+    client: createLocalKmsClient({
+      encryptCalls: [],
+      signCalls: [],
+      signer: signer.privateKey,
+    }),
+    steps,
+  });
+  stubHostedCryptoEnv({
+    cloudflarePublicJwk: cloudflareRecipient.publicJwk,
+    signerPublicKeyPem: signer.publicKeyPem,
+  });
+
+  const {
+    prepareHostedCryptoDomainRootCandidates,
+    provisionPreparedHostedCryptoDomainRootsTx,
+  } = await import("../src/lib/hosted-crypto/domain-root-store");
+  const recorder = createStepRecordingTransaction(steps);
+
+  const prepared = await prepareHostedCryptoDomainRootCandidates({
+    prisma: recorder.prisma,
+    userId: "member-test-other",
+  });
+
+  steps.length = 0;
+  await expect(provisionPreparedHostedCryptoDomainRootsTx({
+    prepared,
+    reason: "test.mismatched-candidate-user",
+    tx: recorder.prisma,
+    userId: "member-test-mine",
+  })).rejects.toThrow(/does not match the requested user\/domain/u);
+  // Rejecting after the advisory lock or the re-read would still refuse the
+  // insert, but it would take a per-domain lock on behalf of a candidate the
+  // caller was never allowed to submit. The guard has to run first.
+  assert.deepEqual(steps, []);
+  assert.equal(recorder.persistedEnvelopes.length, 0);
+});
+
+test("rejects a prepared hosted domain root candidate bound to another domain before any database work", async () => {
+  const signer = await generateP256SigningKeyPair();
+  const cloudflareRecipient = await generateP256EcdhKeyPair();
+  const steps: string[] = [];
+  gcpKmsMock.client = createStepRecordingKmsClient({
+    client: createLocalKmsClient({
+      encryptCalls: [],
+      signCalls: [],
+      signer: signer.privateKey,
+    }),
+    steps,
+  });
+  stubHostedCryptoEnv({
+    cloudflarePublicJwk: cloudflareRecipient.publicJwk,
+    signerPublicKeyPem: signer.publicKeyPem,
+  });
+
+  const {
+    prepareHostedCryptoDomainRootCandidates,
+    provisionPreparedHostedCryptoDomainRootsTx,
+  } = await import("../src/lib/hosted-crypto/domain-root-store");
+  const recorder = createStepRecordingTransaction(steps);
+
+  const prepared = await prepareHostedCryptoDomainRootCandidates({
+    prisma: recorder.prisma,
+    userId: "member-test-crossed-domain",
+  });
+  const deviceCandidate = prepared.get("device");
+  assert.ok(deviceCandidate);
+
+  // Same user, so only the domain differs: the device envelope is filed under
+  // the control key. Inserting it would store a device-scoped root as the
+  // control root, and every control-domain decrypt would then reach for wraps
+  // bound to a different domain's encryption context.
+  const crossedDomains = new Map(prepared);
+  crossedDomains.set("control", deviceCandidate);
+
+  steps.length = 0;
+  await expect(provisionPreparedHostedCryptoDomainRootsTx({
+    prepared: crossedDomains,
+    reason: "test.mismatched-candidate-domain",
+    tx: recorder.prisma,
+    userId: "member-test-crossed-domain",
+  })).rejects.toThrow(/does not match the requested user\/domain/u);
+  assert.deepEqual(steps, []);
+  assert.equal(recorder.persistedEnvelopes.length, 0);
 });
 
 test("web runtime crypto context fails closed instead of provisioning missing worker roots", async () => {
@@ -968,6 +1264,16 @@ function createCapturingTransaction(): HostedCryptoTestTransaction {
       const values = args.slice(1);
       const userId = values.find((value): value is string =>
         typeof value === "string" && (value.startsWith("member-") || value.startsWith("hbm_")));
+      if (sql.includes("SELECT DISTINCT domain")) {
+        const domains = new Set(
+          persistedEnvelopes
+            .filter((candidate) => candidate.userId === userId)
+            .filter((candidate) => !inactiveEnvelopeKeys.has(createEnvelopeStatusKey(candidate)))
+            .map((candidate) => candidate.domain),
+        );
+        return [...domains].map((domain) => ({ domain })) as T;
+      }
+
       if (sql.includes("COUNT(DISTINCT domain)")) {
         const domains = new Set(
           persistedEnvelopes
@@ -1018,6 +1324,88 @@ function createEnvelopeStatusKey(input: {
   userId: string;
 }): string {
   return `${input.userId}:${input.domain}`;
+}
+
+/**
+ * Records the ordered KMS and database steps a provisioning call makes, so a
+ * test can prove envelope signing happens before `BEGIN` rather than while a
+ * connection and the per-domain advisory lock are held.
+ */
+function createStepRecordingKmsClient(input: {
+  client: HostedGcpKmsClient;
+  steps: string[];
+}): HostedGcpKmsClient {
+  return {
+    async asymmetricSign(signInput) {
+      input.steps.push("kms.asymmetric-sign");
+      return input.client.asymmetricSign(signInput);
+    },
+    async decrypt(decryptInput) {
+      input.steps.push("kms.decrypt");
+      return input.client.decrypt(decryptInput);
+    },
+    async encrypt(encryptInput) {
+      input.steps.push("kms.encrypt");
+      return input.client.encrypt(encryptInput);
+    },
+  };
+}
+
+function createStepRecordingTransaction(steps: string[]): {
+  persistedEnvelopes: HostedDomainRootKeyEnvelopeV1[];
+  prisma: Prisma.TransactionClient;
+} {
+  const tx = createCapturingTransaction();
+  const base = {
+    $executeRaw: async (...args: Parameters<Prisma.TransactionClient["$executeRaw"]>) => {
+      steps.push(describeHostedCryptoSql(args[0]));
+      return tx.prisma.$executeRaw(...args);
+    },
+    $queryRaw: async <T = unknown>(
+      ...args: Parameters<Prisma.TransactionClient["$queryRaw"]>
+    ): Promise<T> => {
+      steps.push(describeHostedCryptoSql(args[0]));
+      return tx.prisma.$queryRaw<T>(...args);
+    },
+  };
+  // Narrow test double: domain-root-store only uses Prisma raw query helpers
+  // plus the interactive-transaction root here.
+  const recorded = base as Prisma.TransactionClient;
+  return {
+    persistedEnvelopes: tx.persistedEnvelopes,
+    prisma: Object.assign(recorded, {
+      async $transaction<T>(
+        run: (transaction: Prisma.TransactionClient) => Promise<T>,
+      ): Promise<T> {
+        steps.push("transaction.begin");
+        try {
+          return await run(recorded);
+        } finally {
+          steps.push("transaction.commit");
+        }
+      },
+    }),
+  };
+}
+
+function describeHostedCryptoSql(query: unknown): string {
+  const sql = Array.isArray(query) ? query.join(" ") : String(query);
+  if (sql.includes("pg_advisory_xact_lock")) {
+    return "db.advisory-lock";
+  }
+  if (sql.includes("INSERT INTO hosted_user_crypto_envelope")) {
+    return "db.insert-envelope";
+  }
+  if (sql.includes("INSERT INTO hosted_user_crypto_audit")) {
+    return "db.insert-audit";
+  }
+  if (sql.includes("SELECT DISTINCT domain")) {
+    return "db.read-active-domains";
+  }
+  if (sql.includes("FROM hosted_user_crypto_envelope")) {
+    return "db.read-active-envelope";
+  }
+  return `db.other:${sql}`;
 }
 
 function createHostedMemberIdentityTransaction(): HostedCryptoTestTransaction {
