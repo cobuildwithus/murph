@@ -6571,6 +6571,57 @@ describe('assistant cron runtime orchestration', () => {
     expect(cronMocks.sendAssistantMessageLocal).not.toHaveBeenCalled()
   })
 
+  it('uses the vault timezone when a Sunday superlatives occurrence is retimed once', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-12T18:10:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-superlatives-retimed-once-',
+    )
+    addSundaySuperlativesAutomation({
+      schedule: {
+        at: '2026-04-12T18:00:00.000Z',
+        kind: 'at',
+      },
+      vaultRoot,
+    })
+    const resolveScheduledExternalThreadRoute = vi.fn(async () => ({
+      channel: 'telegram' as const,
+      containerMemberId: 'managed-group-runtime',
+      threadId: 'sunday-group-room',
+    }))
+    const activityReader = {
+      read: vi.fn(async () => ({ status: 'ineligible' as const })),
+    }
+    const { claimed, paths } = await claimFirstCanonicalCronJob(vaultRoot)
+
+    const result = await executeClaimedAssistantCronJob({
+      executionContext: {
+        hosted: {
+          managedGroupActivityDecisionReader: activityReader,
+          memberId: 'managed-group-runtime',
+          resolveScheduledExternalThreadRoute,
+          userEnvKeys: [],
+        },
+      },
+      job: claimed,
+      paths,
+      trigger: 'scheduled',
+      vault: vaultRoot,
+    })
+
+    expect(result.run).toMatchObject({
+      outcome: 'skipped_gate',
+      reason: 'managed_group_activity_ineligible',
+    })
+    expect(activityReader.read).toHaveBeenCalledWith({
+      occurrenceAt: '2026-04-12T18:00:00.000Z',
+      policy: 'group-sunday-superlatives-v1',
+      route: { channel: 'telegram', target: 'sunday-group-room' },
+      timeZone: 'UTC',
+    }, expect.objectContaining({ signal: expect.any(AbortSignal) }))
+    expect(cronMocks.sendAssistantMessageLocal).not.toHaveBeenCalled()
+  })
+
   it('delivers eligible Sunday superlatives through the ordinary group notification path', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-12T18:10:00.000Z'))
@@ -9819,6 +9870,7 @@ function addManagedResearchAutomation(input: {
 
 function addSundaySuperlativesAutomation(input: {
   route?: AutomationRoute
+  schedule?: AutomationSchedule
   vaultRoot: string
 }): void {
   getVaultAutomationStore(input.vaultRoot).push({
@@ -9835,7 +9887,7 @@ function addSundaySuperlativesAutomation(input: {
       threadId: 'sunday-group-room',
       threadIsDirect: false,
     },
-    schedule: {
+    schedule: input.schedule ?? {
       expression: '0 18 * * 0',
       kind: 'cron',
     },
