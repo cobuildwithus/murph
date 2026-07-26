@@ -456,7 +456,7 @@ requests drain or expire for ten minutes, then rolls back consumers.
 14. Request and completion direct wakes start only after Temporal acceptance;
     dirty-runtime admission bypasses the idle checkpoint only for the exact safe
     joined-group shapes and never overtakes older personal input.
-12. Question and answer content stays out of normalized rows, logs, and
+15. Question and answer content stays out of normalized rows, logs, and
     analytics.
 
 The production-faithful concurrency test pauses an active group provider turn,

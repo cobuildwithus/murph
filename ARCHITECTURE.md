@@ -148,7 +148,7 @@ untrusted data when the private runtime composes its follow-up. A joined-group
 Ask request and its legacy private completion are safe to admit through the
 runtime's narrow pre-checkpoint system prefix because the detached read has no
 resident write or delivery authority and the completion can only use the
-existing output-only continuation. One shared import policy applies decoded
+existing output-only delivery surfaces. One shared import policy applies decoded
 adapter validation to every import in that pre-checkpoint pass, including
 follow-up imports and foreground reruns, so consented-member requests and
 reviewed completions remain on the ordinary checkpoint path. This starts the

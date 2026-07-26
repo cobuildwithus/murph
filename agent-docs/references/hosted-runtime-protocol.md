@@ -483,7 +483,7 @@ throughout that pre-checkpoint pass, including pre-assistant follow-up imports
 and foreground reruns; a consented-member request or reviewed completion
 remains checkpoint-gated regardless of which import observes it. Request import
 kicks the existing detached controller; completion import uses the existing
-foreground-causal continuation. Neither starts or advances the
+foreground-causal delivery path. Neither starts or advances the
 at-least-180-second idle snapshot. Any unrelated system wake in that prefix
 keeps the whole system prefix checkpoint-gated.
 
