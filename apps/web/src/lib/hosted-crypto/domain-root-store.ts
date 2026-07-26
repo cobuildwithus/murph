@@ -199,9 +199,13 @@ export async function provisionPreparedHostedCryptoDomainRootsTx(input: {
 }
 
 /**
- * Legacy transaction-owned bridge for thread-container creation and inbound
- * family activation. It keeps KMS outside each advisory-lock section, but
- * callers still retain their outer connection while candidates are prepared.
+ * Legacy transaction-owned bridge for owners that cannot know every member id
+ * before `BEGIN`: thread-container creation, inbound Family member activation,
+ * signup/Privy identity creation, and active Family Stripe group activation.
+ * It keeps KMS outside each advisory-lock section, but callers retain their
+ * outer connection while candidates are prepared. Family activation is capped
+ * at six sequential members; a fully rootless member costs three encryptions
+ * plus four signatures, for at most 42 KMS calls and four concurrent calls.
  * New transaction code must use the prepared-only commit API above.
  */
 export async function provisionHostedCryptoDomainRootsForUserTx(input: {
