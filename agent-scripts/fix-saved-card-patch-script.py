@@ -21,14 +21,8 @@ if content.count(authorization_old) != 1:
     raise RuntimeError("Saved-card patch authorization count context was missing.")
 content = content.replace(authorization_old, authorization_new)
 
-purpose_old = ''''''  if (
-    normalizeNullableString(metadata?.purpose) !==
-      HOSTED_USAGE_CREDIT_CHECKOUT_PURPOSE
-  ) {'''
-purpose_new = ''''''  if (
-    normalizeNullableString(metadata?.purpose) !==
-    HOSTED_USAGE_CREDIT_CHECKOUT_PURPOSE
-  ) {'''
+purpose_old = "'''  if (\n    normalizeNullableString(metadata?.purpose) !==\n      HOSTED_USAGE_CREDIT_CHECKOUT_PURPOSE\n  ) {"
+purpose_new = "'''  if (\n    normalizeNullableString(metadata?.purpose) !==\n    HOSTED_USAGE_CREDIT_CHECKOUT_PURPOSE\n  ) {"
 if content.count(purpose_old) != 1:
     raise RuntimeError("Saved-card patch purpose context was missing.")
 content = content.replace(purpose_old, purpose_new)
