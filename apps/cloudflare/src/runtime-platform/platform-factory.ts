@@ -24,6 +24,9 @@ import { createHostedRuntimeGroupToolPort } from "./group-tool-port.ts";
 import { createHostedRuntimeLabsToolPort } from "./labs-tool-port.ts";
 import { createHostedRuntimeNewsletterToolPort } from "./newsletter-tool-port.ts";
 import { createHostedRuntimePlanUsageToolPort } from "./plan-usage-tool-port.ts";
+import {
+  createCloudflarePrivateImageUrlPublisher,
+} from "./private-image-url-publisher.ts";
 import { createHostedRuntimeSubscriptionToolPort } from "./subscription-tool-port.ts";
 import { createHostedRuntimeIssueExportPort } from "./issue-export-port.ts";
 import { createHostedWebRuntimeLatencyTracePort } from "./latency-trace-port.ts";
@@ -103,6 +106,11 @@ export function buildHostedExecutionRuntimePlatform(input: {
     }),
     ...(input.workspaceCheckpointBridge
       ? {
+          privateImageUrlPublisher: createCloudflarePrivateImageUrlPublisher({
+            fetchImpl: trustedInternalFetchImpl,
+            timeoutMs,
+            workspaceCheckpointBridge: input.workspaceCheckpointBridge,
+          }),
           workspaceSnapshotPort: createCloudflareWorkspaceSnapshotPort({
             boundUserId: input.boundUserId,
             fetchImpl: trustedInternalFetchImpl,

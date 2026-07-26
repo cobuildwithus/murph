@@ -124,10 +124,14 @@ import {
   handleRunnerGeneratedImageUploadRequest,
 } from "../src/runner-outbound/generated-images.ts";
 import {
+  handleRunnerPrivateImageUrlPublishRequest,
+} from "../src/runner-outbound/private-image-urls.ts";
+import {
   HOSTED_RUNTIME_MAILBOX_PAYLOAD_DECODE_PATH,
 } from "../src/runtime-mailbox-payload-decode-contract.ts";
 import {
   HOSTED_EXECUTION_RUNNER_GENERATED_IMAGE_UPLOAD_PATH,
+  HOSTED_EXECUTION_RUNNER_PRIVATE_IMAGE_URL_PUBLISH_PATH,
   HOSTED_EXECUTION_RUNNER_TELEGRAM_DOWNLOAD_FILE_PATH,
   HOSTED_EXECUTION_RUNNER_TELEGRAM_GET_FILE_PATH,
 } from "../src/runner-effects-contract.ts";
@@ -3069,7 +3073,145 @@ describe("handleRunnerOutboundRequest", () => {
     expect(fetchMock).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual({
       error:
-        "Generated-image URL upload is disabled; use private provider attachments.",
+        "Legacy generated-image URL uploads have moved to private provider attachments.",
+    });
+  });
+
+  it("publishes a write-fenced Cloudflare Image with signed private delivery", async () => {
+    const runner = createWorkspaceVersionAwareUserRunner();
+    const pngBytes = new Uint8Array([
+      0x89, 0x50, 0x4e, 0x47,
+      0x0d, 0x0a, 0x1a, 0x0a,
+    ]);
+    const imagesUpload = vi.fn(async (
+      image: ArrayBuffer,
+      options: {
+        filename: string;
+        metadata: Readonly<Record<string, unknown>>;
+        requireSignedURLs: true;
+      },
+    ) => {
+      expect(new Uint8Array(image)).toEqual(pngBytes);
+      expect(options).toEqual({
+        filename: "group-avatar.png",
+        metadata: {
+          imageSha256: "hash_123",
+          schema: "murph.group-avatar.v2",
+          source: "murph.group-avatar.reused",
+        },
+        requireSignedURLs: true,
+      });
+      return {
+        requireSignedURLs: true,
+        variants: [
+          "https://imagedelivery.net/account_123/image_123/private",
+        ],
+      };
+    });
+    const nowMs = Date.parse("2026-07-26T12:00:00.000Z");
+    const expiresAtUnixSeconds = Math.floor(nowMs / 1_000) + 86_400;
+    const valueToSign =
+      `/account_123/image_123/private?exp=${expiresAtUnixSeconds}`;
+    const signature = createHmac("sha256", "signing-key")
+      .update(valueToSign)
+      .digest("hex");
+
+    const response = await handleRunnerPrivateImageUrlPublishRequest({
+      env: createRunnerOutboundEnv({
+        CLOUDFLARE_IMAGES_SIGNING_KEY: "signing-key",
+        CLOUDFLARE_IMAGES_VARIANT: "private",
+        IMAGES: {
+          hosted: {
+            upload: imagesUpload,
+          },
+        },
+        USER_RUNNER: { getByName: runner.getByName },
+      }),
+      nowMs,
+      request: new Request(
+        `http://results.worker${HOSTED_EXECUTION_RUNNER_PRIVATE_IMAGE_URL_PUBLISH_PATH}`,
+        {
+          body: JSON.stringify({
+            bytesBase64: Buffer.from(pngBytes).toString("base64"),
+            contentType: "image/png",
+            filename: "group-avatar.png",
+            metadata: {
+              imageSha256: "hash_123",
+              schema: "murph.group-avatar.v2",
+            },
+            source: "murph.group-avatar.reused",
+          }),
+          headers: createMailboxPayloadDecodeHeaders(),
+          method: "POST",
+        },
+      ),
+      userId: "member_123",
+    });
+
+    expect(response.status).toBe(200);
+    expect(runner.ownsActiveInvocationLease).toHaveBeenCalledOnce();
+    expect(imagesUpload).toHaveBeenCalledOnce();
+    await expect(response.json()).resolves.toEqual({
+      expiresAt: new Date(expiresAtUnixSeconds * 1_000).toISOString(),
+      url:
+        `https://imagedelivery.net/account_123/image_123/private?exp=${expiresAtUnixSeconds}&sig=${signature}`,
+    });
+  });
+
+  it("does not fall back to another Cloudflare Image variant", async () => {
+    const runner = createWorkspaceVersionAwareUserRunner();
+    const imagesUpload = vi.fn(async (
+      _image: ArrayBuffer,
+      options: {
+        filename: string;
+        metadata: Readonly<Record<string, unknown>>;
+        requireSignedURLs: true;
+      },
+    ) => {
+      expect(options.filename).toBe("private-image.png");
+      return {
+        requireSignedURLs: true,
+        variants: [
+          "https://imagedelivery.net/account_123/image_123/always-public",
+        ],
+      };
+    });
+
+    const response = await handleRunnerPrivateImageUrlPublishRequest({
+      env: createRunnerOutboundEnv({
+        CLOUDFLARE_IMAGES_SIGNING_KEY: "signing-key",
+        CLOUDFLARE_IMAGES_VARIANT: "private",
+        IMAGES: {
+          hosted: {
+            upload: imagesUpload,
+          },
+        },
+        USER_RUNNER: { getByName: runner.getByName },
+      }),
+      request: new Request(
+        `http://results.worker${HOSTED_EXECUTION_RUNNER_PRIVATE_IMAGE_URL_PUBLISH_PATH}`,
+        {
+          body: JSON.stringify({
+            bytesBase64: Buffer.from(new Uint8Array([
+              0x89, 0x50, 0x4e, 0x47,
+              0x0d, 0x0a, 0x1a, 0x0a,
+            ])).toString("base64"),
+            contentType: "image/png",
+            filename: "../avatar.png",
+            metadata: { schema: "murph.group-avatar.v2" },
+            source: "murph.group-avatar.reused",
+          }),
+          headers: createMailboxPayloadDecodeHeaders(),
+          method: "POST",
+        },
+      ),
+      userId: "member_123",
+    });
+
+    expect(response.status).toBe(502);
+    expect(imagesUpload).toHaveBeenCalledOnce();
+    await expect(response.json()).resolves.toEqual({
+      error: "Private image URL publishing failed.",
     });
   });
 

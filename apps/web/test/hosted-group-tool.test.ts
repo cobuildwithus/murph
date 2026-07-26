@@ -1696,7 +1696,8 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       memberId: "member_container",
       request: {
         action: "set_chat_avatar",
-        groupChatIconUrl: "https://imagedelivery.net/account/avatar/public",
+        groupChatIconUrl:
+          `https://imagedelivery.net/account/avatar/public?exp=2000000000&sig=${"a".repeat(64)}`,
         linqThread: LINQ_THREAD,
       },
     })).resolves.toEqual({
@@ -1709,7 +1710,8 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     );
     expect(mocks.updateHostedLinqChatAvatar).toHaveBeenCalledWith({
       chatId: "chat_group_1",
-      groupChatIconUrl: "https://imagedelivery.net/account/avatar/public",
+      groupChatIconUrl:
+        `https://imagedelivery.net/account/avatar/public?exp=2000000000&sig=${"a".repeat(64)}`,
     });
   });
 
@@ -1757,7 +1759,8 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       memberId: "member_container",
       request: {
         action: "set_chat_avatar",
-        groupChatIconUrl: "https://imagedelivery.net/account/avatar/public",
+        groupChatIconUrl:
+          `https://imagedelivery.net/account/avatar/public?exp=2000000000&sig=${"a".repeat(64)}`,
         linqThread: LINQ_THREAD,
       },
     })).resolves.toEqual({
@@ -1778,7 +1781,8 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       memberId: "member_container",
       request: {
         action: "set_chat_avatar",
-        groupChatIconUrl: "https://imagedelivery.net/account/avatar/public",
+        groupChatIconUrl:
+          `https://imagedelivery.net/account/avatar/public?exp=2000000000&sig=${"a".repeat(64)}`,
         linqThread: LINQ_THREAD,
       },
     })).resolves.toEqual({

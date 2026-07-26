@@ -215,20 +215,19 @@ describe('assistant group-chat comedy skill', () => {
     expect(normalizedMusic).toContain('`groupchat-comedy` owns that call')
   })
 
-  it('keeps group-avatar changes unavailable until delivery is private', async () => {
+  it('uses the private group-avatar action without exposing its delivery URL', async () => {
     const comedy = await readSkill('groupchat-comedy')
     const normalized = comedy.replace(/\s+/gu, ' ')
 
     expect(normalized).toContain(
-      'Group-avatar changes are unavailable until Linq supports a private, provider-ingested image path.',
+      '`murph.group` with `action="set_chat_avatar"`',
     )
     expect(normalized).toContain(
-      'Do not offer, attempt, or narrate the old URL-based avatar action.',
+      "short-lived signed URL only at Linq's URL-only provider boundary",
     )
     expect(normalized).toContain(
-      'without making member images publicly fetchable',
+      'never ask for, expose, repeat, or retain that delivery URL',
     )
-    expect(comedy).not.toContain('action="set_chat_avatar"')
     expect(comedy).not.toContain('preflight_set_chat_avatar')
   })
 

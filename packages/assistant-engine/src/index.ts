@@ -33,6 +33,9 @@ export type {
   AssistantHostedGroupSharedReadRequest,
   AssistantHostedGroupSharedReadResponse,
   AssistantHostedGroupSharedRecord,
+  AssistantHostedPrivateImageUrlPublishInput,
+  AssistantHostedPrivateImageUrlPublisher,
+  AssistantPrivateImageContentType,
 } from './assistant/execution-context.js'
 export {
   flushPendingAssistantRuntimeIssueWrites,

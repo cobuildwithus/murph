@@ -1425,6 +1425,12 @@ export async function runHostedWorkspaceAssistantPhase(
         ...(input.runtime.platform.planUsageToolPort
           ? { planUsageTool: input.runtime.platform.planUsageToolPort }
           : {}),
+        ...(input.runtime.platform.privateImageUrlPublisher
+          ? {
+              privateImageUrlPublisher:
+                input.runtime.platform.privateImageUrlPublisher,
+            }
+          : {}),
         ...(input.runtime.platform.subscriptionToolPort
           ? { subscriptionTool: input.runtime.platform.subscriptionToolPort }
           : {}),

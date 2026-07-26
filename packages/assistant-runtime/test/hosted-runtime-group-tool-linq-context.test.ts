@@ -187,11 +187,13 @@ describe("createHostedGroupToolWithCurrentTurnContext", () => {
 
     await groupTool.request({
       action: "set_chat_avatar",
-      groupChatIconUrl: "https://imagedelivery.net/account/avatar/public",
+      groupChatIconUrl:
+        `https://imagedelivery.net/account/avatar/public?exp=2000000000&sig=${"a".repeat(64)}`,
     });
     expect(request).toHaveBeenLastCalledWith({
       action: "set_chat_avatar",
-      groupChatIconUrl: "https://imagedelivery.net/account/avatar/public",
+      groupChatIconUrl:
+        `https://imagedelivery.net/account/avatar/public?exp=2000000000&sig=${"a".repeat(64)}`,
       linqThread: {
         authority: ROUTE_AUTHORITY,
         chatId: "chat_group_1",
@@ -423,11 +425,13 @@ describe("createHostedGroupToolWithCurrentTurnContext", () => {
 
     await groupTool.request({
       action: "set_chat_avatar",
-      groupChatIconUrl: "https://imagedelivery.net/account/avatar/public",
+      groupChatIconUrl:
+        `https://imagedelivery.net/account/avatar/public?exp=2000000000&sig=${"a".repeat(64)}`,
     });
     expect(request).toHaveBeenLastCalledWith({
       action: "set_chat_avatar",
-      groupChatIconUrl: "https://imagedelivery.net/account/avatar/public",
+      groupChatIconUrl:
+        `https://imagedelivery.net/account/avatar/public?exp=2000000000&sig=${"a".repeat(64)}`,
     });
 
     await groupTool.request({ action: "preflight_set_chat_avatar" });

@@ -33,7 +33,7 @@ export async function handleRunnerGeneratedImageUploadRequest(input: {
   // era. New runners never call this route. Returning 410 makes old runners
   // degrade to text without creating another publicly retrievable object.
   return jsonError(
-    "Generated-image URL upload is disabled; use private provider attachments.",
+    "Legacy generated-image URL uploads have moved to private provider attachments.",
     410,
   );
 }

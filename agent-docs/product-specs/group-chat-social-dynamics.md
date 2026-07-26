@@ -15,13 +15,12 @@ care. Murph should neither dominate the room nor collapse into an addressed-only
 help desk. Its spontaneous timing, callbacks, and occasional surprise are part
 of the value.
 
-Group-avatar mutation is temporarily unavailable. Linq's current avatar
-operation requires a fetchable URL, so `set_chat_avatar` is absent from the
-model-visible group action schema and legacy runtime requests fail closed with
-`private_group_avatar_delivery_unavailable`. Do not stage member or generated
-images publicly to preserve the bit. A future implementation may restore it
-only through a private provider-ingestion lifecycle with bounded expiry and
-deletion.
+Group-avatar mutation remains available without making member or generated
+images public. Murph preflights the current Linq chat authority, resolves or
+generates the canonical bytes in the member vault, and asks the Worker to
+upload them to Cloudflare Images with signed delivery required. Only the
+short-lived signed URL crosses Linq's URL-only avatar boundary; it is never
+shown to the model or stored as Murph media.
 
 ## Working psychological model
 

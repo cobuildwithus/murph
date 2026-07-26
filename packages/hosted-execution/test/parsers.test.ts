@@ -1011,10 +1011,12 @@ describe("parseHostedRuntimeGroupTool", () => {
     });
     expect(parseHostedRuntimeGroupToolRequest({
       action: "set_chat_avatar",
-      groupChatIconUrl: "https://imagedelivery.net/account/avatar/public",
+      groupChatIconUrl:
+        `https://imagedelivery.net/account/avatar/public?exp=2000000000&sig=${"a".repeat(64)}`,
     })).toEqual({
       action: "set_chat_avatar",
-      groupChatIconUrl: "https://imagedelivery.net/account/avatar/public",
+      groupChatIconUrl:
+        `https://imagedelivery.net/account/avatar/public?exp=2000000000&sig=${"a".repeat(64)}`,
     });
     expect(parseHostedRuntimeGroupToolRequest({
       action: "preflight_set_chat_avatar",
@@ -1188,7 +1190,15 @@ describe("parseHostedRuntimeGroupTool", () => {
     expect(() =>
       parseHostedRuntimeGroupToolRequest({
         action: "set_chat_avatar",
-        groupChatIconUrl: "https://imagedelivery.net/account/avatar",
+        groupChatIconUrl:
+          "https://imagedelivery.net/account/avatar/public",
+      })
+    ).toThrow(/groupChatIconUrl is invalid/u);
+    expect(() =>
+      parseHostedRuntimeGroupToolRequest({
+        action: "set_chat_avatar",
+        groupChatIconUrl:
+          `https://imagedelivery.net/account/avatar/public?exp=2000000000&sig=${"a".repeat(64)}&tracking=1`,
       })
     ).toThrow(/groupChatIconUrl is invalid/u);
     expect(() =>

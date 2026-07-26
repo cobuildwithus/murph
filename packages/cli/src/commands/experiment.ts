@@ -1,6 +1,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks'
 import {
   EVENT_SOURCES,
+  EXPERIMENT_PROGRESS_CARD_MAX_CONFOUNDERS,
   EXPERIMENT_STATUSES,
   HEALTH_COMMONS_EXPERIMENT_ONBOARDING_CAUTION_LEVELS,
   HEALTH_COMMONS_EXPERIMENT_ONBOARDING_MISSED_LOG_POLICIES,
@@ -11,10 +12,12 @@ import {
   experimentAssistantSupportSchema,
   experimentFrontmatterSchema,
   experimentOutcomeSchema,
+  experimentProgressCardSchema,
   experimentProgressSnapshotSchema,
   experimentRunPlanSchema,
   experimentRunScheduleIntentSchema,
   jsonObjectSchema,
+  isStrictIsoDate,
   type ExperimentRunScheduleIntent,
   type HealthCommonsExpectedSignalDescription,
   type HealthCommonsTestPlan,
@@ -52,6 +55,9 @@ import {
   normalizeRepeatableTextFlagOption,
 } from '@murphai/vault-usecases'
 import { commonListLimitOptionSchema } from './command-factory-primitives.js'
+import {
+  renderAndSaveExperimentProgressCard,
+} from './experiment-progress-card-image.js'
 import { normalizeOccurredAtOption } from './occurred-at-option.js'
 
 const experimentStatusSchema = z.enum(EXPERIMENT_STATUSES)
@@ -1280,7 +1286,49 @@ const experimentProgressResultSchema = z.object({
   progress: experimentProgressSnapshotSchema,
 })
 
-const experimentProgressCardResultSchema = z.never()
+const experimentProgressCardResultSchema = z.object({
+  experimentId: z.string().min(1),
+  slug: slugSchema,
+  asOf: localDateSchema,
+  card: experimentProgressCardSchema,
+  media: z.object({
+    kind: z.literal('vault_image'),
+    ref: z.string().min(1).max(1024),
+    sha256: z.string().regex(/^[0-9a-f]{64}$/u),
+    filename: z.string().min(1).max(255),
+    contentType: z.literal('image/png'),
+    sizeBytes: z.number().int().positive().max(10 * 1024 * 1024),
+    alt: z.string().min(1).max(500).nullable(),
+    source: z.string().min(1).max(200).nullable(),
+  }).strict(),
+  warnings: z.array(z.string().min(1)),
+})
+
+function parseExperimentProgressCardConfounderOptions(
+  values: readonly string[] | undefined,
+): Array<{ date: string; label: string }> {
+  const entries = normalizeRepeatableTextFlagOption(values) ?? []
+  if (entries.length > EXPERIMENT_PROGRESS_CARD_MAX_CONFOUNDERS) {
+    throw new VaultCliError(
+      'invalid_payload',
+      `--confounder accepts at most ${EXPERIMENT_PROGRESS_CARD_MAX_CONFOUNDERS} entries.`,
+    )
+  }
+
+  return entries.map((entry) => {
+    const separatorIndex = entry.indexOf(':')
+    const date = separatorIndex > 0 ? entry.slice(0, separatorIndex) : ''
+    const label = separatorIndex > 0 ? entry.slice(separatorIndex + 1).trim() : ''
+    if (!isStrictIsoDate(date) || label.length === 0 || label.length > 60) {
+      throw new VaultCliError(
+        'invalid_payload',
+        `Invalid --confounder value "${entry}". Expected "YYYY-MM-DD:label" with a strict date and a 1-60 character label.`,
+      )
+    }
+
+    return { date, label }
+  })
+}
 
 const experimentFollowupDueDecisionSchema = z.object({
   schema: z.literal('murph.experiment-followup-due.v1'),
@@ -2058,7 +2106,7 @@ export function registerExperimentCommands(
 
   experiment.command('progress-card', {
     description:
-      'Compatibility tombstone for the retired public experiment progress-card URL.',
+      'Render one experiment progress card into a private vault image attachment.',
     args: experimentLookupArgSchema,
     options: withBaseOptions({
       asOf: localDateSchema.optional().describe('Optional analysis date in YYYY-MM-DD form.'),
@@ -2070,11 +2118,29 @@ export function registerExperimentCommands(
         ),
     }),
     output: experimentProgressCardResultSchema,
-    async run() {
-      throw new VaultCliError(
-        'EXPERIMENT_PROGRESS_CARD_PRIVATE_DELIVERY_REQUIRED',
-        'Experiment progress cards require private attachment delivery and are temporarily unavailable.',
-      )
+    async run({ args, options }) {
+      const result = await services.query.showExperimentProgressCard({
+        vault: options.vault,
+        requestId: requestIdFromOptions(options),
+        lookup: args.id,
+        asOf: options.asOf,
+        confounders: parseExperimentProgressCardConfounderOptions(
+          options.confounder,
+        ),
+      })
+      const media = await renderAndSaveExperimentProgressCard({
+        card: result.card,
+        experimentId: result.experimentId,
+        vaultRoot: options.vault,
+      })
+      return {
+        experimentId: result.experimentId,
+        slug: result.slug,
+        asOf: result.asOf,
+        card: result.card,
+        media,
+        warnings: [...result.warnings],
+      }
     },
   })
 

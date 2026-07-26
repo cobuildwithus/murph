@@ -21,7 +21,7 @@ import type { MurphManagedAutomationSeed } from './managed-automations.js'
  * Per-experiment managed-automation seeds.
  *
  * Each explicitly opted-in active run gets two bounded lifecycle moments: an
- * early text progress check after three complete intervention days, and a
+ * early private visual progress check after three complete intervention days, and a
  * final review the morning after the intervention ends. Deterministic outcome
  * persistence is separate route-independent maintenance, never a notification
  * automation. The existing managed-automation installer owns route selection,
@@ -388,8 +388,9 @@ function buildProgressMilestoneInstructions(
     // time zones.
     `Read \`vault-cli experiment show ${slug} --format json\` and \`vault-cli experiment progress ${slug} --as-of ${milestoneDate} --format json\` first.`,
     'Skip when the run is no longer active, intervention day four has not arrived, the current intervention window no longer spans four days, this milestone was already shared, or scheduled summaries are not still explicitly enabled in saved assistant support.',
-    'Acknowledge the day-four progress point in text. Congratulate only specific sessions or follow-through proven by current progress; when adherence is zero or unknown, stay neutral rather than claiming completion. Mention at most two metric changes as early signals, with plain uncertainty.',
-    'Sparse or unchanged metric data is not a reason to skip: summarize adherence briefly and say the trend needs more time.',
+    `Otherwise build \`vault-cli experiment progress-card ${slug} --as-of ${milestoneDate} --format json\` and attach its returned \`media\` with \`murph.attach_response_media\`.`,
+    'Acknowledge the day-four progress point. Congratulate only specific sessions or follow-through proven by current progress; when adherence is zero or unknown, stay neutral rather than claiming completion. Mention at most two metric changes as early signals, with plain uncertainty.',
+    'Sparse or unchanged metric data is not a reason to skip: show the adherence card and say the trend needs more time.',
     'Keep it warm, brief, and grounded. Avoid causal claims, score worship, or compliance language.',
   ].join('\n')
 }
@@ -439,11 +440,14 @@ function buildFinalResultsInstructions(
     `Read \`vault-cli experiment show ${slug} --format json\` first. Skip when the run ended early, is no longer eligible for review, its final review was already shared, or scheduled summaries are not still explicitly enabled in saved assistant support.`,
     `The deterministic outcome was persisted by the cron precondition before this turn — do not attempt to write it yourself. Reference the saved outcome record when composing the review.`,
     `The deterministic precondition owns activity-nudge cleanup; do not create, update, or archive automations from this scheduled turn.`,
+    // Pin --as-of to the run's intervention end so the card matches the
+    // outcome the precondition just persisted.
+    `Build \`vault-cli experiment progress-card ${slug} --as-of ${interventionEndDate} --format json\` and attach its returned \`media\` with \`murph.attach_response_media\`.`,
     'Open in text by acknowledging that the planned review point or intervention window has arrived. Congratulate only specific completed sessions or follow-through proven by the saved canonical outcome; when adherence is zero or unknown, neutrally recognize reaching the review instead of claiming completion.',
     'Summarize adherence, the primary result, confidence and confounders in plain language, then ask one lightweight next-decision question: repeat it, adapt it, or leave it alone?',
     'An inconclusive or sparse result is still a result. Do not suppress the completion moment; explain what was learned and what remains uncertain.',
     'Use associated-with or early-signal language rather than causal certainty.',
-    'Warm, concise text is the primary experience. A short celebratory voice memo may replace the text when that tool is available and the result is genuinely worth celebrating.',
+    'The private card plus warm text is the primary experience. If the card cannot be attached, a short celebratory voice memo may replace it when that tool is available; do not try to combine both media types.',
   ].join('\n')
 }
 

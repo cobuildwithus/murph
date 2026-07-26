@@ -103,6 +103,10 @@ const DISALLOWED_RUNNER_SECRET_KEYS = new Set([
   // Platform-owned data API auth is injected by the Worker on matching hosted
   // web egress. The hosted container and member runner secrets must not carry it.
   "MURPH_DATA_API_KEY",
+  // Cloudflare Images signing material stays Worker-only. Private image URL
+  // publishing is exposed to the runtime through the write-fenced effects port.
+  "CLOUDFLARE_IMAGES_SIGNING_KEY",
+  "CLOUDFLARE_IMAGES_VARIANT",
   // This non-secret origin is platform-owned. Member runner secrets cannot
   // redirect Worker-authorized data API egress to arbitrary origins.
   "HOSTED_WEB_BASE_URL",

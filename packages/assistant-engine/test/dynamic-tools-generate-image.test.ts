@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  MURPH_ATTACH_RESPONSE_MEDIA_TOOL,
   MURPH_GENERATE_IMAGE_TOOL,
   MURPH_GROUP_TOOL,
   readMurphDynamicToolRequest,
@@ -125,7 +126,7 @@ describe('murph.generate_image dynamic tool schema', () => {
     })
   })
 
-  it('describes the canonical Murph character sheet only for generated messages', () => {
+  it('describes the canonical Murph character sheet for generated messages and avatars', () => {
     const generateImageReferenceDescription =
       MURPH_GENERATE_IMAGE_TOOL.inputSchema.properties.referenceImageRefs.description
 
@@ -141,11 +142,34 @@ describe('murph.generate_image dynamic tool schema', () => {
     expect(generateImageReferenceDescription).toContain(
       'whenever Murph itself appears',
     )
-    expect(MURPH_GROUP_TOOL.inputSchema.properties).not.toHaveProperty(
-      'referenceImageRefs',
-    )
-    expect(MURPH_GROUP_TOOL.inputSchema.properties.action.enum).not.toContain(
+    expect(MURPH_GROUP_TOOL.inputSchema.properties.referenceImageRefs.description)
+      .toContain('skill-assets/murph-character-sheet-v1.png')
+    expect(MURPH_GROUP_TOOL.inputSchema.properties.action.enum).toContain(
       'set_chat_avatar',
     )
+  })
+
+  it('accepts an exact private vault image descriptor from a trusted command', () => {
+    const media = {
+      alt: 'Private progress',
+      contentType: 'image/png',
+      filename: 'progress.png',
+      kind: 'vault_image',
+      ref: 'raw/captures/progress.png',
+      sha256: 'a'.repeat(64),
+      sizeBytes: 1234,
+      source: 'murph.experiment-progress-card',
+    }
+    expect(readMurphDynamicToolRequest({
+      method: 'item/tool/call',
+      params: {
+        arguments: { media: [media] },
+        namespace: 'murph',
+        tool: MURPH_ATTACH_RESPONSE_MEDIA_TOOL.name,
+      },
+    })).toEqual({
+      kind: 'attach-response-media',
+      media: [media],
+    })
   })
 })

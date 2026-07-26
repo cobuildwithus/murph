@@ -212,10 +212,12 @@ verses, name the actual offense, and sing the last line straight
 
 ## The group photo (chat avatar)
 
-Group-avatar changes are unavailable until Linq supports a private,
-provider-ingested image path. Do not offer, attempt, or narrate the old
-URL-based avatar action. A future private implementation may restore this
-comedy surface without making member images publicly fetchable.
+Use `murph.group` with `action="set_chat_avatar"` when the room asks for a new
+group photo or the running bit clearly earns one. Generate a square image or
+reuse an exact user-sent image ref. The tool keeps the bytes in the vault and
+uses a short-lived signed URL only at Linq's URL-only provider boundary; never
+ask for, expose, repeat, or retain that delivery URL. A visual joke still has
+to clear the same protected-member and health-data rules as any other roast.
 
 ## Voice memos (audio register)
 

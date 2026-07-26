@@ -2,6 +2,7 @@ import type {
   EventSource,
   ExperimentFrontmatter,
   ExperimentOutcome,
+  ExperimentProgressCardData,
   ExperimentRunScheduleIntent,
   ExperimentStatus,
   HealthCommonsExperimentOnboardingPositiveDisposition,
@@ -434,6 +435,21 @@ export interface ExperimentProgressResult {
   slug: string
   asOf: string
   progress: QueryExperimentProgressSummary
+}
+
+export interface ExperimentProgressCardConfounder {
+  date: string
+  label: string
+}
+
+export interface ExperimentProgressCardResult {
+  vault: string
+  experimentId: string
+  lookupId: string
+  slug: string
+  asOf: string
+  card: ExperimentProgressCardData
+  warnings: string[]
 }
 
 export interface ExperimentFollowupDueResult {
@@ -1339,6 +1355,13 @@ export interface QueryServices extends HealthQueryServiceMethods {
       asOf?: string
     },
   ): Promise<ExperimentProgressResult>
+  showExperimentProgressCard(
+    input: CommandContext & {
+      lookup: string
+      asOf?: string
+      confounders?: ReadonlyArray<ExperimentProgressCardConfounder>
+    },
+  ): Promise<ExperimentProgressCardResult>
   showExperimentFollowupDue(
     input: CommandContext & {
       lookup: string

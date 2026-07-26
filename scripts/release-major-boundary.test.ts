@@ -26,18 +26,7 @@ const publicPackageNames = new Set(
   releaseManifest.packages.map((entry: { name: string }) => entry.name),
 );
 const removedContractsRootExports = [
-  "EXPERIMENT_PROGRESS_CARD_VERSION",
-  "EXPERIMENT_PROGRESS_CARD_MAX_WEEKS",
-  "EXPERIMENT_PROGRESS_CARD_MAX_MOVERS",
-  "EXPERIMENT_PROGRESS_CARD_MAX_CONFOUNDERS",
   "EXPERIMENT_PROGRESS_CARD_MAX_ENCODED_LENGTH",
-  "EXPERIMENT_PROGRESS_CARD_DAY_CODES",
-  "ExperimentProgressCardDayCode",
-  "experimentProgressCardSchema",
-  "ExperimentProgressCardData",
-  "ExperimentProgressCardWeek",
-  "ExperimentProgressCardMover",
-  "ExperimentProgressCardConfounder",
   "encodeExperimentProgressCard",
   "decodeExperimentProgressCard",
   "buildExperimentProgressCardPath",

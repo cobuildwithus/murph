@@ -5,6 +5,9 @@ import type {
   HostedRuntimeTelegramFile,
   HostedRuntimeTelegramGetFileRequest,
 } from "@murphai/assistant-runtime/hosted-runtime-worker-contracts";
+import {
+  isHostedRuntimePrivateImageDeliveryUrl,
+} from "@murphai/hosted-execution/runtime-control";
 
 export const HOSTED_EXECUTION_RUNNER_TELEGRAM_GET_FILE_PATH =
   "/telegram/files/get";
@@ -12,6 +15,8 @@ export const HOSTED_EXECUTION_RUNNER_TELEGRAM_DOWNLOAD_FILE_PATH =
   "/telegram/files/download";
 export const HOSTED_EXECUTION_RUNNER_GENERATED_IMAGE_UPLOAD_PATH =
   "/generated-images";
+export const HOSTED_EXECUTION_RUNNER_PRIVATE_IMAGE_URL_PUBLISH_PATH =
+  "/private-image-urls";
 
 const PROVIDER_EFFECT_PATHS = new Set([
   HOSTED_EXECUTION_RUNNER_TELEGRAM_GET_FILE_PATH,
@@ -29,6 +34,19 @@ export interface HostedRunnerProviderEffectErrorResponse {
   providerMessageIds?: string[];
   retryable?: boolean;
   target?: string;
+}
+
+export interface HostedRunnerPrivateImageUrlPublishRequest {
+  bytesBase64: string;
+  contentType: "image/jpeg" | "image/png" | "image/webp";
+  filename: string;
+  metadata: Record<string, string>;
+  source: string;
+}
+
+export interface HostedRunnerPrivateImageUrlPublishResponse {
+  expiresAt: string;
+  url: string;
 }
 
 export function isHostedRunnerProviderEffectPath(pathname: string): boolean {
@@ -72,6 +90,57 @@ export function parseHostedRunnerTelegramDownloadFileResponse(
     file: record.file === null || record.file === undefined
       ? null
       : parseProviderFile(record.file),
+  };
+}
+
+export function parseHostedRunnerPrivateImageUrlPublishRequest(
+  value: unknown,
+): HostedRunnerPrivateImageUrlPublishRequest {
+  const record = requireRecord(value, "Hosted private image URL publish request");
+  const contentType = readRequiredString(record.contentType, "contentType");
+  if (
+    contentType !== "image/jpeg"
+    && contentType !== "image/png"
+    && contentType !== "image/webp"
+  ) {
+    throw new TypeError(
+      "Hosted runner private image URL publish contentType is unsupported.",
+    );
+  }
+  return {
+    bytesBase64: readRequiredString(record.bytesBase64, "bytesBase64"),
+    contentType,
+    filename: readRequiredString(record.filename, "filename"),
+    metadata: readRequiredStringRecord(record.metadata, "metadata"),
+    source: readRequiredString(record.source, "source"),
+  };
+}
+
+export function parseHostedRunnerPrivateImageUrlPublishResponse(
+  value: unknown,
+): HostedRunnerPrivateImageUrlPublishResponse {
+  const record = requireRecord(value, "Hosted private image URL publish response");
+  const expiresAt = readRequiredString(record.expiresAt, "expiresAt");
+  const urlString = readRequiredString(record.url, "url");
+  const expiresAtMs = Date.parse(expiresAt);
+  let url: URL;
+  try {
+    url = new URL(urlString);
+  } catch {
+    throw new TypeError("Hosted private image URL publish response URL is invalid.");
+  }
+  if (
+    !Number.isFinite(expiresAtMs)
+    || !isHostedRuntimePrivateImageDeliveryUrl(url)
+    || Number(url.searchParams.get("exp")) * 1_000 !== expiresAtMs
+  ) {
+    throw new TypeError(
+      "Hosted private image URL publish response is invalid.",
+    );
+  }
+  return {
+    expiresAt: new Date(expiresAtMs).toISOString(),
+    url: url.toString(),
   };
 }
 
@@ -185,6 +254,27 @@ function readRequiredStringArray(value: unknown, label: string): string[] {
   }
   const strings = value.map((entry) => readRequiredString(entry, label));
   return [...new Set(strings)];
+}
+
+function readRequiredStringRecord(
+  value: unknown,
+  label: string,
+): Record<string, string> {
+  const record = requireRecord(
+    value,
+    `Hosted runner provider effect ${label}`,
+  );
+  const result: Record<string, string> = {};
+  for (const [key, entry] of Object.entries(record)) {
+    const normalizedKey = key.trim();
+    if (!normalizedKey) {
+      throw new TypeError(
+        `Hosted runner provider effect ${label} keys must not be blank.`,
+      );
+    }
+    result[normalizedKey] = readRequiredString(entry, `${label}.${normalizedKey}`);
+  }
+  return result;
 }
 
 function readOptionalStringArray(value: unknown, label: string): string[] | null {

@@ -101,6 +101,9 @@ const REQUIRED_R2_PRESIGN_WORKER_SECRETS = {
   HOSTED_R2_PRESIGN_ACCESS_KEY_ID: "r2-access-fixture",
   HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY: "r2-signing-fixture",
 } as const;
+const REQUIRED_PRIVATE_IMAGE_WORKER_SECRET = {
+  CLOUDFLARE_IMAGES_SIGNING_KEY: "images-signing-fixture",
+} as const;
 const VALID_TEST_SSH_ED25519_PUBLIC_KEY =
   "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB";
 
@@ -217,6 +220,9 @@ describe("hosted deploy automation helpers", () => {
     });
     const config = buildHostedWranglerDeployConfig(environment) as {
       ai?: {
+        binding: string;
+      };
+      images?: {
         binding: string;
       };
       containers: Array<{
@@ -369,6 +375,7 @@ describe("hosted deploy automation helpers", () => {
       },
     ]);
     expect(config.ai).toEqual({ binding: "AI" });
+    expect(config.images).toEqual({ binding: "IMAGES" });
     expect(config.vars.HOSTED_WEB_BASE_URL).toBe("https://web.example.test");
     expect(config.vars.AGENTMAIL_BASE_URL).toBeUndefined();
     expect(config.vars.TELEGRAM_BOT_USERNAME).toBe("hosted_bot");
@@ -442,6 +449,9 @@ describe("hosted deploy automation helpers", () => {
       placement: {
         mode: string;
       };
+      images?: {
+        binding: string;
+      };
       version_metadata?: {
         binding: string;
       };
@@ -473,6 +483,9 @@ describe("hosted deploy automation helpers", () => {
       placement: {
         mode: string;
       };
+      images?: {
+        binding: string;
+      };
       version_metadata?: {
         binding: string;
       };
@@ -500,6 +513,7 @@ describe("hosted deploy automation helpers", () => {
     expect(checkedInConfig.durable_objects.bindings).toEqual(generatedConfig.durable_objects.bindings);
     expect(checkedInConfig.migrations).toEqual(generatedConfig.migrations);
     expect(checkedInConfig.placement).toEqual(generatedConfig.placement);
+    expect(checkedInConfig.images).toEqual(generatedConfig.images);
     expect(checkedInConfig).not.toHaveProperty("queues");
     expect(generatedConfig).not.toHaveProperty("queues");
     expect(checkedInConfig.version_metadata).toEqual(generatedConfig.version_metadata);
@@ -1000,6 +1014,7 @@ describe("hosted deploy automation helpers", () => {
     );
 
     expect(buildHostedWorkerSecretsPayload({
+      ...REQUIRED_PRIVATE_IMAGE_WORKER_SECRET,
       AGENTMAIL_API_KEY: "agentmail-secret",
       GARMIN_API_BASE_URL: "https://apis.garmin.com/wellness-api/rest",
       GARMIN_CLIENT_ID: "garmin-client-id",
@@ -1027,6 +1042,7 @@ describe("hosted deploy automation helpers", () => {
       WHATSAPP_VERIFY_TOKEN: "removed-whatsapp-verify-token",
       OPENAI_API_KEY: "openai-key",
     })).toEqual({
+      ...REQUIRED_PRIVATE_IMAGE_WORKER_SECRET,
       HOSTED_EMAIL_SIGNING_SECRET: "email-signing-secret",
       HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: "automation-private-jwk",
       HOSTED_LOG_FINGERPRINT_SECRET: "log-fingerprint-secret",
@@ -1048,6 +1064,7 @@ describe("hosted deploy automation helpers", () => {
 
   it("omits legacy direct Garmin env from worker secret payloads", () => {
     const payload = buildHostedWorkerSecretsPayload({
+      ...REQUIRED_PRIVATE_IMAGE_WORKER_SECRET,
       GARMIN_CLIENT_ID: "garmin-client-id",
       GARMIN_CLIENT_SECRET: "garmin-client-secret",
       HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: "automation-private-jwk",
@@ -1066,6 +1083,7 @@ describe("hosted deploy automation helpers", () => {
 
   it("keeps only known hosted assistant provider env names in deploy automation", () => {
     const providerSecretsPayload = buildHostedWorkerSecretsPayload({
+      ...REQUIRED_PRIVATE_IMAGE_WORKER_SECRET,
       HOSTED_ASSISTANT_BASE_URL: "https://legacy-provider.example.test/v1",
       HOSTED_ASSISTANT_MODEL: "gpt-5.6-terra",
       HOSTED_ASSISTANT_PROVIDER: "openai",
@@ -1088,6 +1106,7 @@ describe("hosted deploy automation helpers", () => {
     expect(providerSecretsPayload.HOSTED_ASSISTANT_PROVIDER_NAME).toBeUndefined();
 
     const platformSecretsPayload = buildHostedWorkerSecretsPayload({
+      ...REQUIRED_PRIVATE_IMAGE_WORKER_SECRET,
       HOSTED_ASSISTANT_BASE_URL: "https://legacy-provider.example.test/v1",
       HOSTED_ASSISTANT_PROVIDER_NAME: "legacy-provider",
       HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: "automation-private-jwk",
@@ -1106,6 +1125,7 @@ describe("hosted deploy automation helpers", () => {
     expect(platformSecretsPayload.HOSTED_ASSISTANT_PROVIDER_NAME).toBeUndefined();
 
     expect(buildHostedWorkerSecretsPayload({
+      ...REQUIRED_PRIVATE_IMAGE_WORKER_SECRET,
       HOSTED_ASSISTANT_API_KEY_ENV: "OPENAI_ENTERPRISE_API_KEY",
       HOSTED_ASSISTANT_MODEL: "gpt-5.6-terra",
       HOSTED_ASSISTANT_PROVIDER: "openai",

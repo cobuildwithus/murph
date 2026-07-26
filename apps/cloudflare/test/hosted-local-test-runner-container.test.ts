@@ -381,7 +381,7 @@ describe("hosted-local test RunnerContainer outbound composition", () => {
     expect(response.status).toBe(410);
     await expect(response.json()).resolves.toEqual({
       error:
-        "Generated-image URL upload is disabled; use private provider attachments.",
+        "Legacy generated-image URL uploads have moved to private provider attachments.",
     });
   });
 

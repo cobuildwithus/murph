@@ -594,7 +594,8 @@ describe("updateHostedLinqChatAvatar", () => {
 
     await expect(updateHostedLinqChatAvatar({
       chatId: "chat_123",
-      groupChatIconUrl: "https://imagedelivery.net/account/avatar/public",
+      groupChatIconUrl:
+        `https://imagedelivery.net/account/avatar/public?exp=2000000000&sig=${"a".repeat(64)}`,
     })).resolves.toBeUndefined();
 
     const firstCall = fetchMock.mock.calls[0];
@@ -606,7 +607,8 @@ describe("updateHostedLinqChatAvatar", () => {
     expect(url).toEqual(new URL("chats/chat_123", "https://linq.example.test/api/partner/v3/"));
     expect(expectRequestInit(init).method).toBe("PUT");
     expect(readJsonRequestBody(init)).toEqual({
-      group_chat_icon: "https://imagedelivery.net/account/avatar/public",
+      group_chat_icon:
+        `https://imagedelivery.net/account/avatar/public?exp=2000000000&sig=${"a".repeat(64)}`,
     });
   });
 

@@ -3,6 +3,7 @@ import "server-only";
 import {
   HOSTED_RUNTIME_GROUP_CHAT_ICON_URL_MAX_LENGTH,
   HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH,
+  isHostedRuntimePrivateImageDeliveryUrl,
 } from "@murphai/hosted-execution/runtime-control";
 import type { TextPart } from "@linqapp/sdk/resources";
 import type {
@@ -626,13 +627,7 @@ function normalizeHostedLinqGroupChatIconUrl(value: unknown): string {
     throw new TypeError("group chat icon url must be a hosted Cloudflare Images URL.");
   }
   const parsed = new URL(normalized);
-  const pathSegments = parsed.pathname.split("/").filter(Boolean);
-  if (
-    parsed.hostname !== "imagedelivery.net"
-    || parsed.search
-    || parsed.hash
-    || pathSegments.length < 3
-  ) {
+  if (!isHostedRuntimePrivateImageDeliveryUrl(parsed)) {
     throw new TypeError("group chat icon url must be a hosted Cloudflare Images URL.");
   }
   return normalized;

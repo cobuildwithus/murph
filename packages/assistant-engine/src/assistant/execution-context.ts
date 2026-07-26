@@ -312,6 +312,28 @@ export interface AssistantPhoneCallPort {
   ): Promise<HostedPhoneCallStartResponse>
 }
 
+export type AssistantPrivateImageContentType =
+  | 'image/jpeg'
+  | 'image/png'
+  | 'image/webp'
+
+export interface AssistantHostedPrivateImageUrlPublishInput {
+  bytes: Uint8Array
+  contentType: AssistantPrivateImageContentType
+  filename: string
+  metadata: Readonly<Record<string, string>>
+  source: string
+}
+
+export interface AssistantHostedPrivateImageUrlPublisher {
+  publishPrivateImageUrl(
+    input: AssistantHostedPrivateImageUrlPublishInput,
+  ): Promise<{
+    expiresAt: string
+    url: string
+  }>
+}
+
 export interface AssistantWorkspaceArtifactMaterializationResult {
   materializedArtifactPaths: ReadonlySet<string>
   missingArtifactPaths: ReadonlySet<string>
@@ -354,6 +376,7 @@ export interface AssistantHostedExecutionContext {
   labsTool?: AssistantHostedLabsTool | null
   newsletterTool?: AssistantHostedNewsletterTool | null
   planUsageTool?: AssistantHostedPlanUsageTool | null
+  privateImageUrlPublisher?: AssistantHostedPrivateImageUrlPublisher | null
   subscriptionTool?: AssistantHostedSubscriptionTool | null
   dynamicContextPrompts?: readonly string[] | null
   materializeWorkspaceArtifacts?: AssistantWorkspaceArtifactMaterializer | null
@@ -433,6 +456,9 @@ export function normalizeAssistantExecutionContext(
     hosted?.subscriptionTool,
   )
   const phoneCalls = normalizeAssistantPhoneCallPort(hosted?.phoneCalls)
+  const privateImageUrlPublisher = normalizeAssistantPrivateImageUrlPublisher(
+    hosted?.privateImageUrlPublisher,
+  )
   const productFeedbackRecorder = normalizeAssistantProductFeedbackRecorder(
     hosted?.productFeedbackRecorder,
   )
@@ -466,6 +492,7 @@ export function normalizeAssistantExecutionContext(
       ...(labsTool ? { labsTool } : {}),
       ...(newsletterTool ? { newsletterTool } : {}),
       ...(planUsageTool ? { planUsageTool } : {}),
+      ...(privateImageUrlPublisher ? { privateImageUrlPublisher } : {}),
       ...(subscriptionTool ? { subscriptionTool } : {}),
       ...(typeof hosted?.materializeWorkspaceArtifacts === 'function'
         ? {
@@ -607,6 +634,18 @@ function normalizeAssistantPhoneCallPort(
 
   return {
     start: input.start.bind(input),
+  }
+}
+
+function normalizeAssistantPrivateImageUrlPublisher(
+  input: AssistantHostedExecutionContext['privateImageUrlPublisher'] | undefined,
+): AssistantHostedPrivateImageUrlPublisher | undefined {
+  if (!input || typeof input.publishPrivateImageUrl !== 'function') {
+    return undefined
+  }
+
+  return {
+    publishPrivateImageUrl: input.publishPrivateImageUrl.bind(input),
   }
 }
 

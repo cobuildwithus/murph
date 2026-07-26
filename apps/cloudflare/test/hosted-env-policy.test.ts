@@ -19,6 +19,7 @@ import {
 } from "../src/runner-egress-intercept.ts";
 
 const requiredWorkerSecrets = {
+  CLOUDFLARE_IMAGES_SIGNING_KEY: "images-signing-fixture",
   HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: "automation-private",
   HOSTED_LOG_FINGERPRINT_SECRET: "log-fingerprint-secret",
   HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET:
@@ -223,6 +224,7 @@ describe("buildHostedWorkerSecretsPayload", () => {
     expect(payload.ELEVENLABS_API_KEY).toBe("elevenlabs-secret");
     expect(payload.XAI_API_KEY).toBe("xai-secret");
     expect(payload.OLLAMA_API_KEY).toBeUndefined();
+    expect(payload.CLOUDFLARE_IMAGES_SIGNING_KEY).toBe("images-signing-fixture");
     expect(payload.HOSTED_LOG_FINGERPRINT_SECRET).toBe("log-fingerprint-secret");
     expect(payload.HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET).toBe(
       "provider-egress-signing-secret",

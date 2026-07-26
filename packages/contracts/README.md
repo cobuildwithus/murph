@@ -21,11 +21,12 @@ Package-local commands:
 
 ## Next major public API boundary
 
-Private-media hardening intentionally removes the experiment progress-card
-schema, types, constants, URL encoder/decoder, and path builder that were
-exported from `@murphai/contracts` 1.2.4. Keeping that codec would preserve a
-public health-data URL representation after its product routes were retired,
-so the removed API must not return as a compatibility shim.
+Private-media hardening retains the experiment progress-card schema, types, and
+bounded rendering constants for private in-vault PNG generation. It
+intentionally removes only the URL encoder/decoder, encoded-length constant,
+and public path builder exported from `@murphai/contracts` 1.2.4. Keeping that
+codec would preserve a public health-data URL representation after its product
+routes were retired, so the URL API must not return as a compatibility shim.
 
 This breaking root-export removal may publish only with the next shared major
 release. `scripts/release-manifest.json` blocks an expected release version

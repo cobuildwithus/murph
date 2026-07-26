@@ -100,6 +100,7 @@ import {
   planExperimentRecord,
   showExperimentFollowupDue,
   showExperimentProgress,
+  showExperimentProgressCard,
   showExperimentRecord,
   showJournalRecord,
   showVaultStats as showVaultStatsUseCase,
@@ -1109,6 +1110,13 @@ function createIntegratedQueryServices(): QueryServices {
       asOf?: string
     }) {
       return showExperimentProgress(input)
+    },
+    async showExperimentProgressCard(input: CommandContext & {
+      lookup: string
+      asOf?: string
+      confounders?: ReadonlyArray<{ date: string; label: string }>
+    }) {
+      return showExperimentProgressCard(input)
     },
     async showExperimentFollowupDue(input: CommandContext & {
       lookup: string

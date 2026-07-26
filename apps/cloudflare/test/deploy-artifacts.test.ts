@@ -1254,6 +1254,7 @@ function createDeployArtifactFixtureSource(): Record<string, string> {
     CF_BUNDLES_BUCKET: "hosted-bundles",
     CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
     CF_WORKER_NAME: "hosted-worker",
+    CLOUDFLARE_IMAGES_SIGNING_KEY: "images-signing-fixture",
     ...requiredHostedCryptoWorkerVars,
     HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: "{\"kty\":\"EC\"}",
     HOSTED_LOG_FINGERPRINT_SECRET: "log-fingerprint-secret",

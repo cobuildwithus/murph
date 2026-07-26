@@ -1018,6 +1018,35 @@ export interface HostedRuntimeGroupSetChatAvatarRequest {
   groupChatIconUrl: string;
 }
 
+export function isHostedRuntimePrivateImageDeliveryUrl(url: URL): boolean {
+  if (
+    url.protocol !== "https:"
+    || url.hostname !== "imagedelivery.net"
+    || url.port
+    || url.username
+    || url.password
+    || url.hash
+    || url.pathname.split("/").filter(Boolean).length < 3
+  ) {
+    return false;
+  }
+  const entries = [...url.searchParams.entries()];
+  if (
+    entries.length !== 2
+    || entries.filter(([key]) => key === "exp").length !== 1
+    || entries.filter(([key]) => key === "sig").length !== 1
+  ) {
+    return false;
+  }
+  const expiresAt = url.searchParams.get("exp");
+  const signature = url.searchParams.get("sig");
+  return expiresAt !== null
+    && /^[1-9][0-9]*$/u.test(expiresAt)
+    && Number.isSafeInteger(Number(expiresAt))
+    && signature !== null
+    && /^[0-9a-f]{64}$/u.test(signature);
+}
+
 /**
  * Injected by the hosted runtime from the current wake's Linq delivery
  * context; never supplied by the model. The web handler asserts the authority
