@@ -1,6 +1,6 @@
 # Coalesce released group backlogs into one assistant turn
 
-Status: active
+Status: completed
 Created: 2026-07-26
 Updated: 2026-07-26
 
@@ -120,28 +120,40 @@ Updated: 2026-07-26
   existing scanner stop/`nextWakeAt`, outbox intent, turn receipt, and terminal
   suppression owners. A fresh scan is simpler than adding cache invalidation or
   a second in-pass room state machine.
+- The preliminary completion-specialists review found no prompt or frontend
+  concern and requested only two coverage boundaries. Its test-only patch was
+  inspected before application and adds exact-turn-start grouped input plus
+  non-reply room-intent exclusions without changing production code.
 
 ## Verification
 
 - Completed:
-  - focused assistant-engine automation runtime suite: 174/174 tests passed
+  - focused assistant-engine automation runtime suite: 177/177 tests passed
   - assistant-engine owner typecheck: passed
   - scanner-level two-actor queue-only regression: passed with one provider
     call, one intent, a continuation wake, and the cursor at the first group
   - product-experience review: `NO FINDINGS` after the parent fixed its
     acknowledgement-race and stale-history findings
   - diff privacy scan and `git diff --check`: passed
-  - rebased `pnpm test:diff ...`: all repo guards and affected typechecks
-    passed; assistant-engine passed 2,725 tests with 5 skipped, assistant CLI
-    passed 128 tests, assistant-runtime passed 1,896 tests with 2 skipped, and
-    assistantd passed 40 tests
+  - post-specialist `pnpm test:diff ...`: all repo guards and affected
+    typechecks passed; assistant-engine passed 2,728 tests with 5 skipped,
+    assistant CLI passed 128 tests, assistant-runtime passed 1,896 tests with 2
+    skipped, and assistantd passed 40 tests
   - an earlier assistant-runtime aggregate run had one unrelated timeout in a
     mixed system/device checkpoint test; its isolated rerun passed in 686 ms
+  - preliminary completion-specialists ReviewGPT: both coverage findings
+    resolved by the inspected test-only patch; focused proof passed
+  - PR CI: all release, coverage, hosted-runtime, and frontend-proof checks
+    passed after rerunning one job that had failed during GitHub container
+    initialization before checkout
 - External local blocker:
   - the final CLI source phase timed out in eight prepared-runtime-dependent
-    tests while waiting on the shared workspace artifact lock; the same
-    unrelated lock contention reproduced across runs and is outside this
-    engine/runtime diff
+    tests while waiting on the shared workspace artifact lock; the same eight
+    unrelated timeouts reproduced in the post-specialist canonical run after
+    every changed and dependent assistant package had passed
+  - `pnpm verify:acceptance` could not reacquire the exclusive shared-host slot
+    after the frozen-lockfile dependency refresh because unrelated worktree
+    verification remained active; no foreign process was interrupted
 - Still required on the exact pushed candidate:
-  - `pnpm verify:acceptance`
-  - preliminary and final ReviewGPT gates plus PR CI
+  - final ReviewGPT gate plus the final-head PR CI rerun
+Completed: 2026-07-26

@@ -420,9 +420,11 @@ function createSentOutboxIntent(input: {
 
 function createHostedGroupOutboxIntent(input: {
   actorId?: string
+  answeredMailboxItemIds?: string[]
   createdAt: string
   identityId?: string
   intentId: string
+  operation?: { kind: 'message-reaction'; reaction: 'heart' } | null
   sentAt?: string | null
   status: 'abandoned' | 'awaiting_approval' | 'failed' | 'pending' | 'retryable' | 'sending' | 'sent'
   threadId?: string
@@ -431,7 +433,7 @@ function createHostedGroupOutboxIntent(input: {
   const sentAt = input.sentAt ?? null
   return {
     actorId: input.actorId ?? 'safe_actor_prior',
-    answeredMailboxItemIds: ['mailbox_prior'],
+    answeredMailboxItemIds: input.answeredMailboxItemIds ?? ['mailbox_prior'],
     channel: 'linq',
     createdAt: input.createdAt,
     delivery: input.status === 'sent' && sentAt
@@ -449,8 +451,8 @@ function createHostedGroupOutboxIntent(input: {
       : null,
     identityId: input.identityId ?? 'safe_acct_1',
     intentId: input.intentId,
-    message: 'Prior group reply.',
-    operation: null,
+    message: input.operation ? '' : 'Prior group reply.',
+    operation: input.operation ?? null,
     sentAt,
     sessionId: 'session_prior',
     status: input.status,
@@ -494,15 +496,15 @@ function createHostedLinqGroupInput(input: {
   })
 }
 
-async function processHostedLinqGroupInput(
-  candidate: AssistantInputCandidate,
+async function processHostedLinqGroupInputs(
+  candidates: readonly AssistantInputCandidate[],
 ) {
   const reply = await vi.importActual<
     typeof import('../src/assistant/automation/reply.ts')
   >('../src/assistant/automation/reply.ts')
-  const context = reply.createAssistantAutoReplyGroupContext([
-    createCapturelessReplyGroupItem(candidate),
-  ])
+  const context = reply.createAssistantAutoReplyGroupContext(
+    candidates.map((candidate) => createCapturelessReplyGroupItem(candidate)),
+  )
   if (!context) {
     throw new Error('expected hosted group reply context')
   }
@@ -523,6 +525,12 @@ async function processHostedLinqGroupInput(
     sessionMaxAgeMs: null,
     vault: '/tmp/assistant-automation-vault',
   })
+}
+
+async function processHostedLinqGroupInput(
+  candidate: AssistantInputCandidate,
+) {
+  return processHostedLinqGroupInputs([candidate])
 }
 
 function createTranscriptEntry(input: {
@@ -2762,6 +2770,46 @@ describe('assistant auto-reply runtime', () => {
       }))
   })
 
+  it('keeps a grouped input at the prior turn-start boundary replyable', async () => {
+    const olderInput = createHostedLinqGroupInput({
+      inputId: 'ain_group_boundary_older_01234567890123',
+      receivedAt: '2026-04-08T00:02:00.000Z',
+    })
+    const boundaryInput = createHostedLinqGroupInput({
+      inputId: 'ain_group_boundary_current_012345678901',
+      receivedAt: '2026-04-08T00:03:00.000Z',
+    })
+    replyMocks.listAssistantOutboxIntents.mockResolvedValue([
+      createHostedGroupOutboxIntent({
+        createdAt: '2026-04-08T00:04:00.000Z',
+        intentId: 'intent_group_boundary_sent',
+        sentAt: '2026-04-08T00:05:00.000Z',
+        status: 'sent',
+      }),
+    ])
+    replyMocks.listAssistantTurnReceipts.mockResolvedValue([
+      createTurnReceipt({
+        startedAt: '2026-04-08T00:03:00.000Z',
+        turnId: 'turn_intent_group_boundary_sent',
+      }),
+    ])
+
+    const result = await processHostedLinqGroupInputs([
+      olderInput,
+      boundaryInput,
+    ])
+
+    expect(result).toMatchObject({
+      advanceCursor: true,
+      failed: 0,
+      replied: 1,
+      skipped: 0,
+    })
+    expect(replyMocks.sendAssistantMessage).toHaveBeenCalledOnce()
+    expect(evidenceMocks.writeAssistantAutoReplySuppressionEvidence)
+      .not.toHaveBeenCalled()
+  })
+
   it.each([
     {
       label: 'older backlog',
@@ -2861,6 +2909,35 @@ describe('assistant auto-reply runtime', () => {
         intentId: 'intent_group_overtake_missing_account',
         sentAt: '2026-04-08T00:05:00.000Z',
         status: 'sent',
+      }),
+      receivedAt: '2026-04-08T00:02:00.000Z',
+      threadId: 'safe_thread_1',
+      threadIsDirect: false,
+    },
+    {
+      label: 'a same-room sent intent without answered mailbox evidence',
+      prior: createHostedGroupOutboxIntent({
+        answeredMailboxItemIds: [],
+        createdAt: '2026-04-08T00:04:00.000Z',
+        intentId: 'intent_group_overtake_unanswered',
+        sentAt: '2026-04-08T00:05:00.000Z',
+        status: 'sent',
+      }),
+      receivedAt: '2026-04-08T00:02:00.000Z',
+      threadId: 'safe_thread_1',
+      threadIsDirect: false,
+      turnStartedAt: '2026-04-08T00:03:00.000Z',
+    },
+    {
+      label: 'a same-room active reaction-only intent',
+      prior: createHostedGroupOutboxIntent({
+        createdAt: '2026-04-08T00:04:00.000Z',
+        intentId: 'intent_group_overtake_reaction',
+        operation: {
+          kind: 'message-reaction',
+          reaction: 'heart',
+        },
+        status: 'retryable',
       }),
       receivedAt: '2026-04-08T00:02:00.000Z',
       threadId: 'safe_thread_1',
