@@ -724,8 +724,10 @@ voice-memo and song tools. Its immutable 30-minute deadline crosses the Web
 mailbox, runtime-local system item, and ordinary outbox intent; the existing
 effect owners consume expired work before model/audio, while the ordinary
 outbox rejects stale dispatch early and the hosted provider-entry guard
-rechecks the same deadline before every actual messaging request. It carries no
-contributor label, and the assistant owner
+finishes asynchronous route/engagement authority and then synchronously
+rechecks the same deadline immediately before every actual messaging request.
+Pre-request rejection remains proven not sent; only post-invocation failure is
+ambiguous. It carries no contributor label, and the assistant owner
 enforces one audio attempt while treating successful generation as
 non-replayable. It adds no event family, queue, scheduler, migration, or second
 delivery owner. Family funding authorizes the

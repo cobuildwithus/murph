@@ -53,9 +53,11 @@ completed audio attempt, validates the matching voice-memo attachment, permits
 text fallback only after a failed attempt, and does not replay successful
 generation after a later failure. The original mailbox deadline is also the
 ordinary outbox intent deadline. The outbox rejects stale dispatch early, and
-hosted delivery rechecks the persisted deadline before every actual Telegram
-or Linq messaging request, including retry and fallback after deferred audio
-generation. It still receives
+the existing hosted injected-fetch owner finishes asynchronous authority work
+and synchronously rechecks the persisted deadline immediately before every
+actual Telegram or Linq messaging request, including retry and fallback after
+deferred audio generation. Pre-request rejection remains proven not sent; only
+post-invocation uncertainty is ambiguous. It still receives
 no CLI, hosted context, shell, connected apps, arbitrary network, progress,
 image, or group-mutation capability. Both profiles use the existing one-shot App Server
 path so their restrictive launch configuration cannot replace the resident

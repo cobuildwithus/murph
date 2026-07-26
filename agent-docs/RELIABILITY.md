@@ -66,12 +66,15 @@ Last verified: 2026-07-26
   remains on the Web mailbox row, the imported runtime-local system item, and
   the ordinary outbox intent. Runtime consumes expired work before model or
   audio-provider entry. The outbox rejects stale dispatch and carries the
-  deadline into the hosted provider-entry guard, which rechecks it before each
-  actual Telegram or Linq messaging request, including retries and fallback
-  after deferred audio generation. Non-idempotent work that may already have
-  entered a provider keeps its existing fail-closed reconciliation and cannot
-  re-enter. Import, restart, generation, or retry therefore cannot extend
-  freshness. The
+  deadline into the existing hosted injected-fetch owner. That owner finishes
+  asynchronous liveness, route-authority, and engagement work, then
+  synchronously rechecks the deadline immediately before each actual Telegram
+  or Linq messaging request, including retries and fallback after deferred
+  audio generation. Rejection before the underlying fetch retains explicit
+  not-sent proof; only failure after invocation uses existing ambiguity
+  handling. Non-idempotent work that may already have entered a provider keeps
+  its existing fail-closed reconciliation and cannot re-enter. Import, restart,
+  generation, or retry therefore cannot extend freshness. The
   response-audio turn must complete exactly one voice
   memo or song attempt; one failed attempt may fall back to text, while a
   successful generation is non-replayable if later validation or delivery

@@ -15,6 +15,9 @@ import {
   normalizeNullableString,
 } from './text/shared.js'
 import { VaultCliError } from './vault-cli-errors.js'
+import {
+  assistantDeliveryErrorProvesProviderNotInvoked,
+} from './assistant/delivery-failure.js'
 
 const DEFAULT_ELEVENLABS_API_BASE_URL = 'https://api.elevenlabs.io'
 const DEFAULT_ELEVENLABS_MODEL_ID = 'eleven_multilingual_v2'
@@ -258,6 +261,9 @@ async function requestElevenLabsAudio(input: {
       filenameExtension: 'mp3',
     }
   } catch (error) {
+    if (assistantDeliveryErrorProvesProviderNotInvoked(error)) {
+      throw error
+    }
     if (error instanceof VaultCliError) {
       throw error
     }

@@ -295,11 +295,13 @@ buy usage. The immutable deadline is 30 minutes after the verified payment. It
 survives mailbox import, runtime checkpoint restore, and outbox persistence:
 runtime consumes expired work before model or audio-provider entry, and outbox
 rejects stale dispatch before handing the same deadline to the hosted
-provider-entry guard. That guard rechecks before each actual Telegram or Linq
-messaging request, including retry and fallback after deferred audio
-generation. Ambiguous non-idempotent work keeps its existing fail-closed
-reconciliation and cannot re-enter the provider. No import, generation, or
-delivery retry recomputes or extends that deadline.
+injected-fetch owner. After all asynchronous liveness, route-authority, and
+engagement work, that owner synchronously rechecks before each actual Telegram
+or Linq messaging request, including retry and fallback after deferred audio
+generation. Pre-request rejection retains explicit not-sent proof; only
+failure after network invocation is ambiguous. Ambiguous non-idempotent work
+keeps its existing fail-closed reconciliation and cannot re-enter the provider.
+No import, generation, or delivery retry recomputes or extends that deadline.
 
 ## Ownership And Data Flow
 

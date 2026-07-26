@@ -727,6 +727,39 @@ test('setTelegramMessageReaction blocks an authority-bound migrated retry', asyn
   expect(fetchImplementation).toHaveBeenCalledTimes(1)
 })
 
+test('setTelegramMessageReaction preserves proven pre-provider rejection', async () => {
+  const preProviderError = Object.assign(
+    new Error('provider entry rejected'),
+    {
+      deliveryMayHaveSucceeded: false as const,
+      retryable: false as const,
+    },
+  )
+  const fetchImplementation = vi.fn(async () => {
+    throw preProviderError
+  })
+
+  await assert.rejects(
+    () =>
+      setTelegramMessageReaction(
+        {
+          reaction: 'heart',
+          target: '123',
+          targetMessageId: '77',
+        },
+        {
+          env: {
+            TELEGRAM_BOT_TOKEN: 'bot-token',
+          },
+          fetchImplementation,
+        },
+      ),
+    (error: unknown) => error === preProviderError,
+  )
+
+  expect(fetchImplementation).toHaveBeenCalledTimes(1)
+})
+
 test('setTelegramMessageReaction surfaces retryable rate limits without local retry delay', async () => {
   const fetchImplementation = vi.fn(async () =>
     createTelegramResponse({

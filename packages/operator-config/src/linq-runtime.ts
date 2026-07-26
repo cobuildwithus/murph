@@ -44,6 +44,7 @@ import {
 } from './message-formatting.js'
 import { VaultCliError } from './vault-cli-errors.js'
 import {
+  assistantDeliveryErrorProvesProviderNotInvoked,
   createAssistantDeliveryBlockedError,
 } from './assistant/delivery-failure.js'
 import type {
@@ -993,8 +994,14 @@ async function fetchLinqResponse(input: {
 }): Promise<LinqFetchResponse> {
   return fetchJsonResponse({
     body: input.body,
-    createTransportError: ({ error, timedOut }) =>
-      createLinqRequestError({
+    createTransportError: ({ error, timedOut }) => {
+      if (
+        error instanceof Error
+        && assistantDeliveryErrorProvesProviderNotInvoked(error)
+      ) {
+        return error
+      }
+      return createLinqRequestError({
         details: input.details,
         error,
         requestOrigin: readRequestOrigin(input.url),
@@ -1006,7 +1013,8 @@ async function fetchLinqResponse(input: {
           input.allowDeleteRetries,
           input.details.hasIdempotencyKey === true,
         ),
-      }),
+      })
+    },
     fetchImplementation: input.fetchImplementation,
     headers: input.headers,
     method: input.method,

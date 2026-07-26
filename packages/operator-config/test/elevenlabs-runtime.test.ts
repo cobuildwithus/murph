@@ -80,6 +80,28 @@ test('elevenlabs runtime leaves audio byte validation to callers', async () => {
   })
 })
 
+test('elevenlabs runtime preserves proven pre-provider rejection', async () => {
+  const preProviderError = Object.assign(
+    new Error('provider entry rejected'),
+    {
+      deliveryMayHaveSucceeded: false as const,
+      retryable: true as const,
+    },
+  )
+
+  await expect(
+    generateElevenLabsSpeech({
+      apiKey: 'elevenlabs-key',
+      fetchImplementation: async () => {
+        throw preProviderError
+      },
+      modelId: 'eleven_multilingual_v2',
+      text: 'Short memo.',
+      voiceId: 'voice_123',
+    }),
+  ).rejects.toBe(preProviderError)
+})
+
 test('elevenlabs runtime resolves env defaults and keeps HTTP failures secret-safe', async () => {
   expect(resolveElevenLabsApiKey({
     ELEVENLABS_API_KEY: ' key ',

@@ -77,6 +77,7 @@ import {
 import { VaultCliError } from "@murphai/operator-config/vault-cli-errors";
 import {
   createAssistantDeliveryTerminalError,
+  markAssistantDeliveryProviderNotInvoked,
 } from "@murphai/operator-config/assistant/delivery-failure";
 
 import type {
@@ -2263,6 +2264,15 @@ async function assertHostedDeliveryCanEnterProvider(input: {
   signal: AbortSignal | null;
 }): Promise<void> {
   await assertHostedDeliveryLiveNow(input);
+  assertHostedDeliveryCanInvokeProvider(input);
+}
+
+function assertHostedDeliveryCanInvokeProvider(input: {
+  expiresAt?: string | null;
+  shouldYieldBackgroundDelivery?: (() => boolean) | null;
+  signal: AbortSignal | null;
+}): void {
+  assertHostedDeliveryLiveness(input.signal);
   if (
     input.expiresAt
     && Date.parse(input.expiresAt) <= Date.now()
@@ -2611,6 +2621,12 @@ async function deliverHostedPreparedAssistantDelivery(input: {
       shouldYieldBackgroundDelivery: input.shouldYieldBackgroundDelivery,
       signal: input.signal,
     });
+  const assertProviderEntryNow = () =>
+    assertHostedDeliveryCanInvokeProvider({
+      expiresAt,
+      shouldYieldBackgroundDelivery: input.shouldYieldBackgroundDelivery,
+      signal: input.signal,
+    });
   const linqDeliveryContexts = input.preparedDispatch?.linqDeliveryContext
     ? [input.preparedDispatch.linqDeliveryContext, ...input.linqDeliveryContexts]
     : input.linqDeliveryContexts;
@@ -2668,6 +2684,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
             userId: input.userId,
           });
         },
+        assertProviderEntryNow,
         onProviderDispatchEntered: () => {
           providerDispatchEntered = true;
         },
@@ -2854,6 +2871,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
                 userId: input.userId,
               });
             },
+            assertProviderEntryNow,
             onTelegramVoiceMemoDispatchEntered: () => {
               providerDispatchEntered = true;
             },
@@ -2915,7 +2933,12 @@ async function deliverHostedPreparedAssistantDelivery(input: {
               env: input.linqEnv,
               fetchImplementation: createHostedProviderFetchBoundary({
                 assertProviderEntryLive,
-                onProviderDispatchEntered: async () => {
+                assertProviderEntryNow,
+                onProviderDispatchEntered: () => {
+                  attemptedAt = new Date();
+                  providerDispatchEntered = true;
+                },
+                prepareProviderDispatch: async () => {
                   await assertHostedAssistantLinqRecentInboundEngagementForDelivery({
                     answeredMailboxItemIds:
                       input.assistantDeliveryEffect.payload.answeredMailboxItemIds,
@@ -2933,8 +2956,6 @@ async function deliverHostedPreparedAssistantDelivery(input: {
                     target: providerTarget,
                     targetKind: "thread",
                   });
-                  attemptedAt = new Date();
-                  providerDispatchEntered = true;
                 },
                 operation: "Hosted assistant Linq reaction delivery",
                 providerFetch: input.providerFetch,
@@ -3271,34 +3292,43 @@ function shouldResetHostedPreparedDeliveryOnPreProviderAbort(input: {
 function createHostedProviderFetchBoundary(input: {
   assertLive?: () => Promise<void>;
   assertProviderEntryLive?: () => Promise<void>;
-  onProviderDispatchEntered?: () => Promise<void> | void;
+  assertProviderEntryNow?: () => void;
+  onProviderDispatchEntered?: () => void;
   onTelegramVoiceMemoDispatchEntered?: () => void;
   operation: string;
+  prepareProviderDispatch?: () => Promise<void> | void;
   providerFetch: typeof fetch | null;
 }): typeof fetch {
-  let providerEntryPromise: Promise<void> | null = null;
-  const enterProviderDispatch = () => {
-    if (!input.onProviderDispatchEntered) {
+  let providerPreparationPromise: Promise<void> | null = null;
+  const prepareProviderDispatch = () => {
+    if (!input.prepareProviderDispatch) {
       return Promise.resolve();
     }
-    providerEntryPromise ??= Promise.resolve().then(
-      input.onProviderDispatchEntered,
+    providerPreparationPromise ??= Promise.resolve().then(
+      input.prepareProviderDispatch,
     );
-    return providerEntryPromise;
+    return providerPreparationPromise;
   };
 
   return (async (request, init) => {
-    await (input.assertProviderEntryLive ?? input.assertLive)?.();
-    const fetchImplementation = requireHostedProviderFetch(
-      input.providerFetch,
-      input.operation,
-    );
-    await enterProviderDispatch();
-    if (
-      input.onTelegramVoiceMemoDispatchEntered &&
-      isTelegramSendVoiceProviderFetchRequest(request)
-    ) {
-      input.onTelegramVoiceMemoDispatchEntered();
+    let fetchImplementation: typeof fetch;
+    try {
+      await (input.assertProviderEntryLive ?? input.assertLive)?.();
+      fetchImplementation = requireHostedProviderFetch(
+        input.providerFetch,
+        input.operation,
+      );
+      await prepareProviderDispatch();
+      input.assertProviderEntryNow?.();
+      if (
+        input.onTelegramVoiceMemoDispatchEntered &&
+        isTelegramSendVoiceProviderFetchRequest(request)
+      ) {
+        input.onTelegramVoiceMemoDispatchEntered();
+      }
+      input.onProviderDispatchEntered?.();
+    } catch (error) {
+      throw markAssistantDeliveryProviderNotInvoked(error);
     }
     const response = await fetchImplementation(request, init);
     await input.assertLive?.();
@@ -3453,7 +3483,12 @@ function createHostedAssistantLinqSendDependency(input: {
       env: input.linqEnv,
       fetchImplementation: createHostedProviderFetchBoundary({
         assertProviderEntryLive: () => assertHostedDeliveryCanEnterProvider(input),
-        onProviderDispatchEntered: async () => {
+        assertProviderEntryNow: () => assertHostedDeliveryCanInvokeProvider(input),
+        onProviderDispatchEntered: () => {
+          attemptedAt = new Date();
+          input.onProviderDispatchEntered?.();
+        },
+        prepareProviderDispatch: async () => {
           const reviewedCompletionExpiresAt = reviewedAssistantAskCompletion
             ? await prepareHostedReviewedAssistantAskProviderEntry({
                 intentId: input.intentId ?? null,
@@ -3506,8 +3541,6 @@ function createHostedAssistantLinqSendDependency(input: {
               { retryable: true },
             );
           }
-          attemptedAt = new Date();
-          input.onProviderDispatchEntered?.();
         },
         operation: "Hosted assistant Linq delivery",
         providerFetch: input.providerFetch,
@@ -3853,7 +3886,12 @@ function createHostedAssistantLinqVoiceMemoSendDependency(input: {
       env: input.linqEnv,
       fetchImplementation: createHostedProviderFetchBoundary({
         assertProviderEntryLive: () => assertHostedDeliveryCanEnterProvider(input),
-        onProviderDispatchEntered: async () => {
+        assertProviderEntryNow: () => assertHostedDeliveryCanInvokeProvider(input),
+        onProviderDispatchEntered: () => {
+          attemptedAt = new Date();
+          input.onProviderDispatchEntered?.();
+        },
+        prepareProviderDispatch: async () => {
           await assertHostedAssistantLinqRecentInboundEngagementForDelivery({
             answeredMailboxItemIds: request.answeredMailboxItemIds,
             authorityCheckOnly: false,
@@ -3870,8 +3908,6 @@ function createHostedAssistantLinqVoiceMemoSendDependency(input: {
             target: providerTarget,
             targetKind: "thread",
           });
-          attemptedAt = new Date();
-          input.onProviderDispatchEntered?.();
         },
         operation: "Hosted assistant Linq voice memo delivery",
         providerFetch: input.providerFetch,

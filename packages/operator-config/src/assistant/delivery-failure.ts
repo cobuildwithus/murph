@@ -81,6 +81,32 @@ export function createAssistantDeliveryTerminalError(
   )
 }
 
+export function assistantDeliveryErrorProvesProviderNotInvoked(
+  error: unknown,
+): boolean {
+  return readRecord(error)?.deliveryMayHaveSucceeded === false
+}
+
+export function markAssistantDeliveryProviderNotInvoked(
+  error: unknown,
+): unknown {
+  if (readRecord(error)?.deliveryMayHaveSucceeded === true) {
+    return error
+  }
+  if (typeof error === 'object' && error !== null) {
+    return Object.assign(error, {
+      deliveryMayHaveSucceeded: false as const,
+    })
+  }
+
+  return Object.assign(
+    new Error('Assistant delivery provider was not invoked.'),
+    {
+      deliveryMayHaveSucceeded: false as const,
+    },
+  )
+}
+
 export function readAssistantDeliveryFailureClass(
   error: unknown,
 ): AssistantDeliveryFailureClass | null {

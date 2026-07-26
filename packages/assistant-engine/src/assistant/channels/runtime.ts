@@ -38,6 +38,7 @@ import {
 } from '@murphai/operator-config/http-retry'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
+  assistantDeliveryErrorProvesProviderNotInvoked,
   createAssistantDeliveryTransientError,
 } from '@murphai/operator-config/assistant/delivery-failure'
 import {
@@ -1927,6 +1928,9 @@ async function sendTelegramTextChunkOnce(input: {
       ...result,
     }
   } catch (error) {
+    if (assistantDeliveryErrorProvesProviderNotInvoked(error)) {
+      throw error
+    }
     return {
       kind: 'request-error',
       failure: Object.assign(
@@ -2021,6 +2025,9 @@ async function sendTelegramPhotoOnce(input: {
       ...result,
     }
   } catch (error) {
+    if (assistantDeliveryErrorProvesProviderNotInvoked(error)) {
+      throw error
+    }
     return {
       kind: 'request-error',
       failure: Object.assign(
@@ -2076,6 +2083,9 @@ async function sendTelegramVoiceMemoOnce(input: {
       ...result,
     }
   } catch (error) {
+    if (assistantDeliveryErrorProvesProviderNotInvoked(error)) {
+      throw error
+    }
     return {
       kind: 'request-error',
       failure: createTelegramVoiceMemoAmbiguousDeliveryFailure({

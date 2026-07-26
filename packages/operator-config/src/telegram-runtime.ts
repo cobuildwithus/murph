@@ -13,6 +13,9 @@ import {
 } from './http-retry.js'
 import { normalizeNullableString } from './text/shared.js'
 import { VaultCliError } from './vault-cli-errors.js'
+import {
+  assistantDeliveryErrorProvesProviderNotInvoked,
+} from './assistant/delivery-failure.js'
 
 const TELEGRAM_SEND_TIMEOUT_MS = 30_000
 const TELEGRAM_TYPING_REFRESH_MS = 4_000
@@ -159,6 +162,9 @@ export async function setTelegramMessageReaction(
       signal: dependencies.signal,
       token,
     }).catch((error) => {
+      if (assistantDeliveryErrorProvesProviderNotInvoked(error)) {
+        throw error
+      }
       throw Object.assign(
         new VaultCliError(
           'ASSISTANT_TELEGRAM_REACTION_FAILED',
