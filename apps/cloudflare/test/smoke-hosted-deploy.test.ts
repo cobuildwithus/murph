@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { Agent } from "undici";
 import { describe, expect, it, vi } from "vitest";
 import { HOSTED_EXECUTION_USER_ID_HEADER } from "@murphai/hosted-execution/contracts";
 import {
@@ -421,7 +422,7 @@ describe("runSmokeHostedDeploy", () => {
     }
   });
 
-  it("executes the deploy-signed runner container smoke when enabled", async () => {
+  it("runs the deploy-signed container smoke with its explicit deadline and dispatcher", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "cloudflare-smoke-manifest-"));
     const manifestPath = path.join(root, ".deploy", "runner-bundle", ".murph-runner-bundle-manifest.json");
     await mkdir(path.dirname(manifestPath), { recursive: true });
@@ -435,14 +436,19 @@ describe("runSmokeHostedDeploy", () => {
       "utf8",
     );
     const fetchCalls: Array<{
+      dispatcher: unknown;
       headers: HeadersInit | undefined;
       method: string | undefined;
+      signal: AbortSignal | null | undefined;
       url: string;
     }> = [];
     const fetchImpl = async (url: RequestInfo | URL, init?: RequestInit) => {
+      const initWithDispatcher = init as RequestInit & { dispatcher?: unknown } | undefined;
       fetchCalls.push({
+        dispatcher: initWithDispatcher?.dispatcher,
         headers: init?.headers,
         method: init?.method,
+        signal: init?.signal,
         url: String(url),
       });
 
@@ -475,20 +481,26 @@ describe("runSmokeHostedDeploy", () => {
       throw new Error(`Unexpected smoke request: ${String(url)}`);
     };
 
-    await runSmokeHostedDeploy({
-      fetchImpl,
-      log() {},
-      source: {
-        HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER: "true",
-        HOSTED_EXECUTION_SMOKE_RUNNER_MANIFEST_PATH: manifestPath,
-        HOSTED_EXECUTION_SMOKE_WORKER_BASE_URL: "https://worker.example.test",
-        HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: TEST_HOSTED_WEB_CALLBACK_PRIVATE_JWK_JSON,
-      },
-    });
+    vi.stubGlobal("fetch", fetchImpl);
+    try {
+      await runSmokeHostedDeploy({
+        log() {},
+        source: {
+          HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER: "true",
+          HOSTED_EXECUTION_SMOKE_RUNNER_MANIFEST_PATH: manifestPath,
+          HOSTED_EXECUTION_SMOKE_WORKER_BASE_URL: "https://worker.example.test",
+          HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: TEST_HOSTED_WEB_CALLBACK_PRIVATE_JWK_JSON,
+        },
+      });
+    } finally {
+      vi.unstubAllGlobals();
+    }
 
     const containerCall = fetchCalls.find((entry) => isContainerSmokeRequest(entry.url));
     expect(containerCall).toBeDefined();
+    expect(containerCall?.dispatcher).toBeInstanceOf(Agent);
     expect(containerCall?.method).toBe("POST");
+    expect(containerCall?.signal).toBeInstanceOf(AbortSignal);
     const headers = new Headers(containerCall?.headers);
     expect(headers.get("x-hosted-execution-signature")).toEqual(expect.any(String));
     expect(headers.get("x-hosted-execution-timestamp")).toEqual(expect.any(String));
@@ -1094,6 +1106,62 @@ describe("runSmokeHostedDeploy", () => {
     })).rejects.toThrow("runner container smoke did not converge within 0ms");
 
     expect(smokeCalls).toBe(1);
+  });
+
+  it("aborts a pending container request at the configured wall-clock deadline", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "cloudflare-smoke-request-deadline-"));
+    const manifestPath = path.join(root, ".deploy", "runner-bundle", ".murph-runner-bundle-manifest.json");
+    await mkdir(path.dirname(manifestPath), { recursive: true });
+    await writeFile(
+      manifestPath,
+      `${JSON.stringify({
+        buildSkipped: false,
+        bundleFingerprint: "expected-bundle",
+        sourceFingerprint: "expected-source",
+      }, null, 2)}\n`,
+      "utf8",
+    );
+
+    const fetchImpl = async (
+      url: RequestInfo | URL,
+      init?: RequestInit,
+    ): Promise<Response> => {
+      if (String(url).endsWith("/")) {
+        return new Response(JSON.stringify({ ok: true, service: "cloudflare-hosted-runner" }), {
+          status: 200,
+        });
+      }
+      if (String(url).endsWith("/health")) {
+        return new Response(JSON.stringify({ ok: true }), { status: 200 });
+      }
+      if (isContainerSmokeRequest(String(url))) {
+        const signal = init?.signal;
+        if (!signal) {
+          throw new Error("Container smoke request did not receive an abort signal.");
+        }
+        return await new Promise<Response>((_resolve, reject) => {
+          if (signal.aborted) {
+            reject(signal.reason);
+            return;
+          }
+          signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+        });
+      }
+
+      throw new Error(`Unexpected smoke request: ${String(url)}`);
+    };
+
+    await expect(runSmokeHostedDeploy({
+      fetchImpl,
+      log() {},
+      source: {
+        HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER: "true",
+        HOSTED_EXECUTION_SMOKE_RUNNER_MANIFEST_PATH: manifestPath,
+        HOSTED_EXECUTION_SMOKE_RUNNER_MAX_WAIT_MS: "10",
+        HOSTED_EXECUTION_SMOKE_WORKER_BASE_URL: "https://worker.example.test",
+        HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: TEST_HOSTED_WEB_CALLBACK_PRIVATE_JWK_JSON,
+      },
+    })).rejects.toThrow("runner container smoke did not converge within 10ms");
   });
 
   it("lets the wall-clock budget preempt a much larger attempt ceiling", async () => {
