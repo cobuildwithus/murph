@@ -1,6 +1,6 @@
 # Deploy smoke HTTP timeout
 
-Status: active
+Status: completed
 Created: 2026-07-26
 Updated: 2026-07-26
 
@@ -77,5 +77,15 @@ Updated: 2026-07-26
   transitive packages outside this change. The new direct `undici` dependency
   is the already-resolved patched `7.28.0`; the lockfile adds only the
   Cloudflare importer entry.
-- Remaining: preliminary specialist review, final ReviewGPT, exact-head CI,
-  merge, and the deployed managed-container smoke.
+- Preliminary specialist review: substantive findings after an approximately
+  14-minute exact-head review with the requested `gpt-5.6-sol` model verified
+  by the response sidecar. Both coverage findings were accepted and resolved
+  with test-only proof for the exact dispatcher options, dispatcher cleanup on
+  success and timeout, and the decreasing per-attempt wall-clock deadline.
+- Post-specialist validation:
+  - focused Cloudflare smoke-hosted-deploy tests (37 tests)
+  - `pnpm --dir apps/cloudflare typecheck`
+  - canonical `pnpm test:diff apps/cloudflare/scripts/smoke-hosted-deploy.shared.ts apps/cloudflare/test/smoke-hosted-deploy.test.ts apps/cloudflare/package.json pnpm-lock.yaml apps/cloudflare/DEPLOY.md`
+- Remaining: final ReviewGPT, exact-head CI, merge, and the deployed
+  managed-container smoke.
+Completed: 2026-07-26

@@ -3,9 +3,31 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { Agent } from "undici";
 import { describe, expect, it, vi } from "vitest";
 import { HOSTED_EXECUTION_USER_ID_HEADER } from "@murphai/hosted-execution/contracts";
+
+const undiciAgentProof = vi.hoisted(() => ({
+  close: vi.fn(async () => {}),
+  constructorOptions: [] as unknown[],
+}));
+
+vi.mock("undici", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("undici")>();
+  return {
+    ...actual,
+    Agent: class Agent {
+      constructor(options: unknown) {
+        undiciAgentProof.constructorOptions.push(options);
+      }
+
+      close(): Promise<void> {
+        return undiciAgentProof.close();
+      }
+    },
+  };
+});
+
+import { Agent } from "undici";
 import {
   readBearerAuthorizationToken,
 } from "../src/auth-adapter.js";
@@ -481,6 +503,8 @@ describe("runSmokeHostedDeploy", () => {
       throw new Error(`Unexpected smoke request: ${String(url)}`);
     };
 
+    undiciAgentProof.close.mockClear();
+    undiciAgentProof.constructorOptions.length = 0;
     vi.stubGlobal("fetch", fetchImpl);
     try {
       await runSmokeHostedDeploy({
@@ -499,6 +523,11 @@ describe("runSmokeHostedDeploy", () => {
     const containerCall = fetchCalls.find((entry) => isContainerSmokeRequest(entry.url));
     expect(containerCall).toBeDefined();
     expect(containerCall?.dispatcher).toBeInstanceOf(Agent);
+    expect(undiciAgentProof.constructorOptions).toEqual([{
+      bodyTimeout: 0,
+      headersTimeout: 0,
+    }]);
+    expect(undiciAgentProof.close).toHaveBeenCalledTimes(1);
     expect(containerCall?.method).toBe("POST");
     expect(containerCall?.signal).toBeInstanceOf(AbortSignal);
     const headers = new Headers(containerCall?.headers);
@@ -1151,17 +1180,23 @@ describe("runSmokeHostedDeploy", () => {
       throw new Error(`Unexpected smoke request: ${String(url)}`);
     };
 
-    await expect(runSmokeHostedDeploy({
-      fetchImpl,
-      log() {},
-      source: {
-        HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER: "true",
-        HOSTED_EXECUTION_SMOKE_RUNNER_MANIFEST_PATH: manifestPath,
-        HOSTED_EXECUTION_SMOKE_RUNNER_MAX_WAIT_MS: "10",
-        HOSTED_EXECUTION_SMOKE_WORKER_BASE_URL: "https://worker.example.test",
-        HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: TEST_HOSTED_WEB_CALLBACK_PRIVATE_JWK_JSON,
-      },
-    })).rejects.toThrow("runner container smoke did not converge within 10ms");
+    undiciAgentProof.close.mockClear();
+    vi.stubGlobal("fetch", fetchImpl);
+    try {
+      await expect(runSmokeHostedDeploy({
+        log() {},
+        source: {
+          HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER: "true",
+          HOSTED_EXECUTION_SMOKE_RUNNER_MANIFEST_PATH: manifestPath,
+          HOSTED_EXECUTION_SMOKE_RUNNER_MAX_WAIT_MS: "10",
+          HOSTED_EXECUTION_SMOKE_WORKER_BASE_URL: "https://worker.example.test",
+          HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: TEST_HOSTED_WEB_CALLBACK_PRIVATE_JWK_JSON,
+        },
+      })).rejects.toThrow("runner container smoke did not converge within 10ms");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+    expect(undiciAgentProof.close).toHaveBeenCalledTimes(1);
   });
 
   it("lets the wall-clock budget preempt a much larger attempt ceiling", async () => {
@@ -1185,6 +1220,7 @@ describe("runSmokeHostedDeploy", () => {
     // 300-attempt ceiling, which is the relationship that let a stalled rollout
     // outlive the deploy job.
     const nowSpy = vi.spyOn(Date, "now").mockImplementation(() => smokeCalls * 5_000);
+    const timeoutSpy = vi.spyOn(AbortSignal, "timeout");
     const fetchImpl = async (url: RequestInfo | URL) => {
       if (String(url).endsWith("/")) {
         return new Response(JSON.stringify({ ok: true, service: "cloudflare-hosted-runner" }), {
@@ -1232,10 +1268,12 @@ describe("runSmokeHostedDeploy", () => {
       // One retry is allowed under budget, then the deadline stops the loop and the
       // failure names attempts, elapsed time, and the underlying mismatch.
       expect(smokeCalls).toBe(2);
+      expect(timeoutSpy.mock.calls.map(([timeoutMs]) => timeoutMs)).toEqual([10_000, 5_000]);
       expect(error?.message).toContain("runner container smoke did not converge within 10000ms");
       expect(error?.message).toContain("(2 attempts, 10000ms elapsed)");
       expect(error?.message).toContain("did not run the expected runner bundle");
     } finally {
+      timeoutSpy.mockRestore();
       nowSpy.mockRestore();
     }
   });
