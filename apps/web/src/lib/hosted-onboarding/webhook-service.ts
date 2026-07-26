@@ -44,6 +44,8 @@ import {
 import {
   runWithHostedDomainRootUnwrapCache,
 } from "../hosted-crypto/domain-root-unwrap-cache";
+import { unwrapHostedDomainRootForWeb } from "../hosted-crypto/domain-root-store";
+import { getHostedCryptoDomainForLane } from "@murphai/runtime-state";
 import {
   runWithPrismaOperationTimings,
   type PrismaOperationTiming,
@@ -71,6 +73,7 @@ import {
   assertHostedThreadRouteEgressAuthority,
   markHostedLinqThreadRouteParticipantAdditionPendingTx,
   readHostedThreadRouteByThreadIdentity,
+  type HostedThreadRouteSnapshot,
 } from "../hosted-routing/thread-route-store";
 import {
   assertHostedLinqRouteAuthorityMatchesTarget,
@@ -286,11 +289,12 @@ export async function handleHostedOnboardingLinqWebhook(input: {
 
     input.signal?.throwIfAborted();
     const prisma = input.prisma ?? getPrisma();
-    const planningEvent = await resolveHostedLinqPlanningEvent({
+    const planningResolution = await resolveHostedLinqPlanningEvent({
       event,
       prisma,
       signal: input.signal,
     });
+    const planningEvent = planningResolution.event;
 
     const currentInboundReply: HostedLinqCurrentInboundReplyProof | null =
       event.event_type === "message.received" && !affirmativeReaction
@@ -329,6 +333,10 @@ export async function handleHostedOnboardingLinqWebhook(input: {
               requireFirstContactAdmission,
               prisma: transaction,
             }),
+          () => warmHostedLinqMailboxPayloadRoot({
+            prisma,
+            threadRoute: planningResolution.threadRoute,
+          }),
         );
       }
 
@@ -561,27 +569,33 @@ export async function handleHostedOnboardingLinqWebhook(input: {
   }
 }
 
+interface HostedLinqPlanningEventResolution {
+  event: Parameters<typeof requireHostedLinqMessageReceivedEvent>[0];
+  /** The route the resolver already read, reused so warming costs no query. */
+  threadRoute: HostedThreadRouteSnapshot | null;
+}
+
 async function resolveHostedLinqPlanningEvent(input: {
   event: Parameters<typeof requireHostedLinqMessageReceivedEvent>[0];
   prisma: PrismaClient;
   signal?: AbortSignal;
-}): Promise<Parameters<typeof requireHostedLinqMessageReceivedEvent>[0]> {
+}): Promise<HostedLinqPlanningEventResolution> {
   if (input.event.event_type !== "message.received") {
-    return input.event;
+    return { event: input.event, threadRoute: null };
   }
 
   const messageEvent = requireHostedLinqMessageReceivedEvent(input.event);
   const webhookIsGroup = messageEvent.data.chat?.is_group;
   if (webhookIsGroup === true) {
     logHostedLinqChatClassification("webhook-group");
-    return messageEvent;
+    return { event: messageEvent, threadRoute: null };
   }
 
   if (messageEvent.data.is_from_me) {
     if (webhookIsGroup === false) {
       logHostedLinqChatClassification("webhook-direct");
     }
-    return messageEvent;
+    return { event: messageEvent, threadRoute: null };
   }
 
   const threadRoute = await readHostedThreadRouteByThreadIdentity({
@@ -631,15 +645,18 @@ async function resolveHostedLinqPlanningEvent(input: {
   }
 
   return {
-    ...messageEvent,
-    data: {
-      ...messageEvent.data,
-      chat: {
-        id: messageEvent.data.chat_id,
-        ...(messageEvent.data.chat ?? {}),
-        is_group: resolvedIsGroup,
+    event: {
+      ...messageEvent,
+      data: {
+        ...messageEvent.data,
+        chat: {
+          id: messageEvent.data.chat_id,
+          ...(messageEvent.data.chat ?? {}),
+          is_group: resolvedIsGroup,
+        },
       },
     },
+    threadRoute,
   };
 }
 
@@ -1023,23 +1040,86 @@ export async function handleHostedOnboardingTelegramWebhook(input: {
   return plan.response;
 }
 
-async function runHostedOnboardingWebhookTransaction<TResult>(
+/**
+ * Unwrapping the ingress root reads an envelope and then calls KMS. Doing that
+ * first inside the planning transaction holds a pooled connection across a
+ * network round trip, which is what lets a slow KMS extend both connection
+ * occupancy and inbound serialization. The unwrap cache is already request
+ * scoped around this transaction, so unwrapping beforehand leaves the
+ * in-transaction encrypt as local AES work against the cached root.
+ *
+ * The route is the one the planning-event resolver already read, so warming
+ * costs no additional query. `laneSeq` is authenticated metadata allocated
+ * inside the transaction, so only the root is warmed; the payload is still
+ * encrypted in place.
+ */
+export async function warmHostedLinqMailboxPayloadRoot(input: {
+  prisma: PrismaClient | Prisma.TransactionClient;
+  threadRoute: Pick<HostedThreadRouteSnapshot, "containerMemberId"> | null;
+}): Promise<void> {
+  if (!input.threadRoute) {
+    // No established route yet, so there is no known member whose root could be
+    // warmed; the planner unwraps as before.
+    return;
+  }
+
+  const root = await unwrapHostedDomainRootForWeb({
+    domain: getHostedCryptoDomainForLane("mailbox-payload"),
+    prisma: input.prisma,
+    retainFailureInScopedCache: true,
+    userId: input.threadRoute.containerMemberId,
+  });
+  // The scoped cache hands every caller its own copy and expects that copy to
+  // be wiped; the cached master is zeroized separately when the scope closes.
+  // Warming needs the unwrap, not the plaintext, so wipe it immediately.
+  root.rootKey.fill(0);
+}
+
+export async function runHostedOnboardingWebhookTransaction<TResult>(
   prisma: PrismaClient,
   callback: (transaction: Prisma.TransactionClient) => Promise<TResult>,
+  /**
+   * Runs inside the unwrap cache but before the transaction opens, so a root
+   * this planner is certain to need is unwrapped without a connection held.
+   */
+  warmUnwrapCache?: () => Promise<void>,
 ): Promise<TResult> {
-  const startedAtMs = Date.now();
   const operations: PrismaOperationTiming[] = [];
+  let transactionMs = 0;
+  let warmUnwrapMs: number | undefined;
   try {
     return await runWithPrismaOperationTimings(operations, async () =>
-      runWithHostedDomainRootUnwrapCache(async () =>
-        typeof prisma.$transaction === "function"
-          ? prisma.$transaction(callback)
-          : callback(prisma as Prisma.TransactionClient),
-      ),
+      runWithHostedDomainRootUnwrapCache(async () => {
+        if (warmUnwrapCache) {
+          const warmStartedAtMs = Date.now();
+          try {
+            await warmUnwrapCache();
+          } catch (error) {
+            // A failed preflight must not suppress branches that never need
+            // this root. If the planner does request it, the scoped cache
+            // returns the retained rejection instead of repeating KMS while a
+            // connection is held.
+            logHostedOnboardingDiagnostic("hosted-onboarding.webhook.warm-failed", {
+              reason: error instanceof Error ? error.name : "unknown",
+            });
+          } finally {
+            warmUnwrapMs = Date.now() - warmStartedAtMs;
+          }
+        }
+        const transactionStartedAtMs = Date.now();
+        try {
+          return await (typeof prisma.$transaction === "function"
+            ? prisma.$transaction(callback)
+            : callback(prisma as Prisma.TransactionClient));
+        } finally {
+          transactionMs = Date.now() - transactionStartedAtMs;
+        }
+      }),
     );
   } finally {
     logHostedOnboardingDiagnostic("hosted-onboarding.webhook.plan-db", {
-      transactionMs: Date.now() - startedAtMs,
+      transactionMs,
+      ...(warmUnwrapMs === undefined ? {} : { warmUnwrapMs }),
       ...buildHostedWebhookDbTimingLogDetails(operations),
     });
   }
