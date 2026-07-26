@@ -195,10 +195,17 @@ describe("applyStripeCheckoutCompleted", () => {
   });
 
   it("activates a metadata-gated Pulse Trial checkout when the expanded subscription is trialing", async () => {
+    const preparedCryptoDomainRoots = new Map([
+      ["control", { domain: "control" }],
+    ]) as never;
+
     await expect(
       applyStripeCheckoutCompleted(
         makePulseTrialCheckoutSession() as never,
         {} as never,
+        undefined,
+        undefined,
+        preparedCryptoDomainRoots,
       ),
     ).resolves.toEqual({
       activatedMemberId: "member_123",
@@ -226,7 +233,7 @@ describe("applyStripeCheckoutCompleted", () => {
         sourceType: "stripe.checkout.session.completed",
       }),
       memberId: "member_123",
-      preparedCryptoDomainRoots: new Map(),
+      preparedCryptoDomainRoots,
       prisma: {},
       skipIfBillingAlreadyActive: false,
     });

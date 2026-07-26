@@ -349,6 +349,56 @@ test("prepared hosted domain root candidates stay behind the advisory lock and r
   );
 });
 
+test("legacy transaction provisioning prepares every candidate before its first advisory lock", async () => {
+  const signer = await generateP256SigningKeyPair();
+  const cloudflareRecipient = await generateP256EcdhKeyPair();
+  const encryptCalls: GcpKmsEncryptInput[] = [];
+  const signCalls: GcpKmsAsymmetricSignInput[] = [];
+  const operationMetrics = createLocalKmsOperationMetrics();
+  const steps: string[] = [];
+  gcpKmsMock.client = createStepRecordingKmsClient({
+    client: createLocalKmsClient({
+      encryptCalls,
+      operationMetrics,
+      signCalls,
+      signer: signer.privateKey,
+    }),
+    steps,
+  });
+  stubHostedCryptoEnv({
+    cloudflarePublicJwk: cloudflareRecipient.publicJwk,
+    signerPublicKeyPem: signer.publicKeyPem,
+  });
+
+  const { provisionHostedCryptoDomainRootsForUserTx } = await import(
+    "../src/lib/hosted-crypto/domain-root-store"
+  );
+  const recorder = createStepRecordingTransaction(steps);
+
+  await provisionHostedCryptoDomainRootsForUserTx({
+    reason: "test.legacy-transaction-bridge",
+    tx: recorder.prisma,
+    userId: "member-test-legacy-bridge",
+  });
+
+  const firstAdvisoryLock = steps.indexOf("db.advisory-lock");
+  assert.notEqual(firstAdvisoryLock, -1);
+  assert.equal(steps[0], "db.read-active-domains");
+  assert.ok(
+    steps.slice(0, firstAdvisoryLock).some((step) => step.startsWith("kms.")),
+  );
+  assert.ok(
+    steps.slice(firstAdvisoryLock).every((step) => !step.startsWith("kms.")),
+  );
+  assert.equal(encryptCalls.length, 3);
+  assert.equal(signCalls.length, 4);
+  assert.equal(operationMetrics.callCount, 7);
+  assert.ok(operationMetrics.maxConcurrent >= 1);
+  assert.ok(operationMetrics.maxConcurrent <= 4);
+  assert.equal(steps.filter((step) => step === "db.advisory-lock").length, 4);
+  assert.equal(recorder.persistedEnvelopes.length, 4);
+});
+
 test("prepared-only provisioning fails closed without signing inside the transaction", async () => {
   const signer = await generateP256SigningKeyPair();
   const cloudflareRecipient = await generateP256EcdhKeyPair();
@@ -1557,21 +1607,27 @@ function capturePersistedEnvelope(
 function createLocalKmsClient(input: {
   decryptMetrics?: LocalKmsDecryptMetrics;
   encryptCalls: GcpKmsEncryptInput[];
+  operationMetrics?: LocalKmsOperationMetrics;
   signCalls: GcpKmsAsymmetricSignInput[];
   signer: CryptoKey;
 }): HostedGcpKmsClient {
   return {
     async asymmetricSign(signInput) {
       input.signCalls.push(signInput);
-      const signature = await crypto.subtle.sign(
-        { hash: "SHA-256", name: "ECDSA" },
-        input.signer,
-        toArrayBuffer(signInput.message),
-      );
-      return {
-        keyVersionName: signInput.keyVersionName,
-        signature: Buffer.from(new Uint8Array(signature)).toString("base64"),
-      };
+      beginLocalKmsOperation(input.operationMetrics);
+      try {
+        const signature = await crypto.subtle.sign(
+          { hash: "SHA-256", name: "ECDSA" },
+          input.signer,
+          toArrayBuffer(signInput.message),
+        );
+        return {
+          keyVersionName: signInput.keyVersionName,
+          signature: Buffer.from(new Uint8Array(signature)).toString("base64"),
+        };
+      } finally {
+        finishLocalKmsOperation(input.operationMetrics);
+      }
     },
     async decrypt(decryptInput) {
       const metrics = input.decryptMetrics;
@@ -1601,12 +1657,51 @@ function createLocalKmsClient(input: {
     },
     async encrypt(encryptInput) {
       input.encryptCalls.push(encryptInput);
-      return {
-        ciphertext: Buffer.from(encryptInput.plaintext).toString("base64"),
-        keyName: encryptInput.keyName,
-      };
+      beginLocalKmsOperation(input.operationMetrics);
+      try {
+        if (input.operationMetrics?.yieldBeforeReturn) {
+          await new Promise((resolve) => setTimeout(resolve, 0));
+        }
+        return {
+          ciphertext: Buffer.from(encryptInput.plaintext).toString("base64"),
+          keyName: encryptInput.keyName,
+        };
+      } finally {
+        finishLocalKmsOperation(input.operationMetrics);
+      }
     },
   };
+}
+
+interface LocalKmsOperationMetrics {
+  activeCount: number;
+  callCount: number;
+  maxConcurrent: number;
+  yieldBeforeReturn: boolean;
+}
+
+function createLocalKmsOperationMetrics(): LocalKmsOperationMetrics {
+  return {
+    activeCount: 0,
+    callCount: 0,
+    maxConcurrent: 0,
+    yieldBeforeReturn: true,
+  };
+}
+
+function beginLocalKmsOperation(metrics: LocalKmsOperationMetrics | undefined): void {
+  if (!metrics) {
+    return;
+  }
+  metrics.activeCount += 1;
+  metrics.callCount += 1;
+  metrics.maxConcurrent = Math.max(metrics.maxConcurrent, metrics.activeCount);
+}
+
+function finishLocalKmsOperation(metrics: LocalKmsOperationMetrics | undefined): void {
+  if (metrics) {
+    metrics.activeCount -= 1;
+  }
 }
 
 interface LocalKmsDecryptMetrics {
