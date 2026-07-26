@@ -13,6 +13,128 @@ async function readSkill(slug: string): Promise<string> {
 }
 
 describe('assistant group challenge diagnostics guidance', () => {
+  it('enumerates sleep-stage and workout-array scoring semantics', async () => {
+    const challenge = (await readSkill('group-challenge')).replace(/\s+/gu, ' ')
+
+    expect(challenge).toContain('Deep sleep minutes: `deep-sleep-days.v0`')
+    expect(challenge).toContain('REM sleep minutes: `rem-sleep-days.v0`')
+    expect(challenge).toContain(
+      "Every workout's local start time, duration, and type by day: `workouts.v0`",
+    )
+    expect(challenge).toContain(
+      'normalize the configured threshold once at kickoff to an integer number of milliseconds after local midnight',
+    )
+    expect(challenge).toContain('6:00 PM is `64,800,000`')
+    expect(challenge).toContain(
+      '`days[date].some(w => w.startLocalMs > thresholdLocalMs)`',
+    )
+    expect(challenge).toContain(
+      'a workout starting exactly at the threshold does not count as after it',
+    )
+    expect(challenge).toContain(
+      'A settled date present with an empty list is a real observed zero and is scoreable as no qualifying workout',
+    )
+    expect(challenge).toContain(
+      'A date absent from `days` is unobserved: it is not `false`, zero, or evidence that no workout happened',
+    )
+    expect(challenge).toContain(
+      '`canonical-event-zone-or-vault-zone.v0`',
+    )
+    expect(challenge).toContain(
+      'canonical event timezone when available and otherwise the member vault timezone',
+    )
+    expect(challenge).toContain(
+      'original threshold wording and normalized integer `thresholdLocalMs`',
+    )
+    expect(challenge).toContain(
+      'Score a workout date only when `date <= calendarClosedThroughDate`',
+    )
+    expect(challenge).toContain(
+      'after the date has ended in UTC-12, the last civil timezone to leave it',
+    )
+    expect(challenge).toContain(
+      'the visible snapshot advances only on the next ordinary projection refresh and has no promised finite refresh deadline',
+    )
+    expect(challenge).toContain(
+      'Never advance a stale snapshot from the reader\'s clock.',
+    )
+    expect(challenge).toContain(
+      'human-readable context, not a scoring metric or settlement authority',
+    )
+    expect(challenge).toContain(
+      'must not silently rewrite the result the group already received',
+    )
+  })
+
+  it('keeps established Steps challenges on their existing date behavior', async () => {
+    const challenge = (await readSkill('group-challenge')).replace(/\s+/gu, ' ')
+
+    expect(challenge).toContain(
+      'For `deep-sleep-days.v0` and `rem-sleep-days.v0`, the producer marks the open member-local date `data.provisional: true`; absence means settled.',
+    )
+    expect(challenge).toContain(
+      'Other scopes keep their existing date behavior; current-date Steps remains scoreable.',
+    )
+    expect(challenge).toContain(
+      'Never substitute a reader, group, or schedule clock',
+    )
+    expect(challenge).not.toContain('scoringTimeZone')
+    expect(challenge).not.toContain('scoringDateRule')
+    expect(challenge).not.toContain('prior-dispatch-local-date-only.v0')
+    expect(challenge).not.toContain(
+      'Use one deterministic date-completeness rule for every challenge',
+    )
+    expect(challenge).not.toContain('For every challenge, also store')
+    expect(challenge).not.toContain(
+      'For a legacy active page missing either field, append both',
+    )
+    expect(challenge).not.toContain('reporting cutoff')
+  })
+
+  it('keeps current-date-only completed-scope evidence pending without diagnostics', async () => {
+    const challenge = (await readSkill('group-challenge')).replace(/\s+/gu, ' ')
+
+    expect(challenge).toContain(
+      'If every record otherwise eligible under that scope\'s producer-owned completion marker is pending, keep the participant pending',
+    )
+    expect(challenge).toContain(
+      'skip diagnostics and permission offers',
+    )
+    expect(challenge).toContain('describe the applicable settlement rule.')
+    expect(challenge).not.toContain('next dispatch')
+    expect(challenge).toContain(
+      'A completed-date `pending` participant is never eligible for either offer.',
+    )
+  })
+
+  it('scores prior-date records for the new completed-date scopes normally', async () => {
+    const challenge = (await readSkill('group-challenge')).replace(/\s+/gu, ' ')
+    const completedDateRule =
+      'For `deep-sleep-days.v0` and `rem-sleep-days.v0`, the producer marks the open member-local date `data.provisional: true`; absence means settled.'
+
+    expect(challenge).toContain(completedDateRule)
+    expect(challenge).toContain(
+      'Rank only settled records',
+    )
+    expect(challenge).toContain(
+      'with challenge-metric data eligible under the scope\'s applicable date behavior: rank the participant from that metric evidence.',
+    )
+  })
+
+  it('routes a genuinely missing snapshot into the existing recovery flow', async () => {
+    const challenge = (await readSkill('group-challenge')).replace(/\s+/gu, ' ')
+
+    expect(challenge).toContain(
+      '`status="missing"` means it is granted but no usable record was returned',
+    )
+    expect(challenge).toContain(
+      'A genuinely missing snapshot still follows the recovery evidence order below.',
+    )
+    expect(challenge).toContain(
+      'The scoring projection is `granted` but is genuinely missing usable challenge-metric data for reasons other than completed-date eligibility, while `device-sync-status.v0` is `not_granted`',
+    )
+  })
+
   it('builds complete or partial standings from the opted-in challenge roster', async () => {
     const challenge = (await readSkill('group-challenge')).replace(/\s+/gu, ' ')
     const groupChat = (await readSkill('group-chat')).replace(/\s+/gu, ' ')
@@ -36,6 +158,15 @@ describe('assistant group challenge diagnostics guidance', () => {
     )
     expect(challenge).toContain(
       '`status="ok"` returns every current group member',
+    )
+    expect(challenge).toContain(
+      'A model-size `status="partial"` result keeps every returned member whole',
+    )
+    expect(challenge).toContain(
+      'Never infer that an omitted member left or infer their score, diagnostic state, or permission state',
+    )
+    expect(challenge).toContain(
+      'do not score, diagnose, or offer permission for them',
     )
     expect(challenge).toContain(
       'Never let an empty record set hide an opted-in participant.',
@@ -68,7 +199,19 @@ describe('assistant group challenge diagnostics guidance', () => {
     expect(groupChat).toContain(
       'It is the only hosted model-facing path to the current Web-owned shared snapshot',
     )
+    expect(groupChat).toContain(
+      'returns every current group member only when `status="ok"`',
+    )
+    expect(groupChat).toContain(
+      'instead names every still-current capacity-omitted member',
+    )
+    expect(groupChat).not.toContain(
+      'returns every current group member with an explicit `status`',
+    )
     expect(groupChat).toContain('rank missing data as zero')
+    expect(groupChat).toContain(
+      'A model-size `status="partial"` result names still-current capacity-omitted members',
+    )
   })
 
   it('records scoped participant keys at kickoff and fails closed for legacy identity backfill', async () => {
@@ -79,7 +222,7 @@ describe('assistant group challenge diagnostics guidance', () => {
       'When the hosted group exists, after the model turn has begun and before writing the challenge roster',
     )
     expect(challenge).toContain(
-      'This is the only kickoff attribution, scoring, and diagnostic read',
+      'That is the kickoff attribution and scoring read',
     )
     expect(challenge).toContain(
       'an exact current prompt `Sender:` handle appears in that row\'s `currentTurnHandles`',
@@ -120,11 +263,12 @@ describe('assistant group challenge diagnostics guidance', () => {
   it('uses the evidence hierarchy and keeps Apple Health uncertainty honest', async () => {
     const challenge = (await readSkill('group-challenge')).replace(/\s+/gu, ' ')
     const evidence = [
-      'The scoring projection is `granted` and `available`, with current challenge-metric data through the reporting cutoff',
+      'The scoring projection is `granted` and `available`, with challenge-metric data eligible under the scope\'s applicable date behavior',
+      'A completed-date scoring projection is `granted` and `available`, but every record otherwise eligible under the scope\'s producer-owned completion marker is pending',
       'The scoring projection is `not_granted`',
-      'The scoring projection is `granted` but has no current metric through the reporting cutoff, while `device-sync-status.v0` is `not_granted`',
-      'The scoring projection is `granted` but has no current metric through the reporting cutoff, while a recent `device-sync-status.v0` record is `available`',
-      'The scoring projection is `granted` but has no current metric through the reporting cutoff, and diagnostic data is also `granted` but `missing` or stale',
+      'The scoring projection is `granted` but is genuinely missing usable challenge-metric data for reasons other than completed-date eligibility, while `device-sync-status.v0` is `not_granted`',
+      'The scoring projection is `granted` but is genuinely missing usable challenge-metric data for reasons other than completed-date eligibility, while a recent `device-sync-status.v0` record is `available`',
+      'The scoring projection is `granted` but is genuinely missing usable challenge-metric data for reasons other than completed-date eligibility, and diagnostic data is also `granted` but `missing` or stale',
     ]
 
     for (let index = 1; index < evidence.length; index += 1) {
@@ -182,7 +326,16 @@ describe('assistant group challenge diagnostics guidance', () => {
     const groupChat = (await readSkill('group-chat')).replace(/\s+/gu, ' ')
 
     expect(challenge).toContain(
-      'At kickoff, identify the exact scoring scope and include it with `device-sync-status.v0` in the shared read.',
+      'Read the scoring scope on its own first.',
+    )
+    // The proactive standings offer must not inherit the up-front all-scopes
+    // rule: the runtime accepts only scopes the most recent read proved
+    // not_granted and spends the turn's one attempt on any wider request.
+    expect(challenge).toContain(
+      'That all-scopes rule does **not** apply to the evidence-gated standings offer.',
+    )
+    expect(challenge).toContain(
+      'may name only the scopes the most recent read proved `not_granted`',
     )
     expect(challenge).toContain(
       'Do not create a hosted group or post a permission offer as a side effect of challenge kickoff.',

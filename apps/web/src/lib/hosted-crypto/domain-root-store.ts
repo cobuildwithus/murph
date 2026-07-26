@@ -86,6 +86,7 @@ export interface UnwrappedHostedDomainRootReference
 async function unwrapWithScopedCache(
   cacheKey: string,
   compute: () => Promise<UnwrappedHostedDomainRoot>,
+  retainFailureInScopedCache = false,
 ): Promise<UnwrappedHostedDomainRoot> {
   const cache = getHostedDomainRootUnwrapCache();
   if (!cache) {
@@ -96,9 +97,11 @@ async function unwrapWithScopedCache(
   if (!pending) {
     pending = compute();
     cache.set(cacheKey, pending);
-    pending.catch(() => {
-      cache.delete(cacheKey);
-    });
+    if (!retainFailureInScopedCache) {
+      pending.catch(() => {
+        cache.delete(cacheKey);
+      });
+    }
   }
   const unwrapped = await pending;
   return {
@@ -187,6 +190,13 @@ export async function provisionActiveHostedDomainRootEnvelopeForUserOnly(input: 
 export async function unwrapHostedDomainRootForWeb(input: {
   domain: HostedCryptoDomain;
   prisma?: HostedCryptoClient;
+  /**
+   * Retains a rejected unwrap only until the current scoped cache closes.
+   * Preflight callers use this when retrying inside the immediately following
+   * transaction would repeat the same provider request while holding a
+   * connection. Ordinary callers continue to evict failures for later retry.
+   */
+  retainFailureInScopedCache?: boolean;
   signal?: AbortSignal;
   userId: string;
 }): Promise<UnwrappedHostedDomainRoot> {
@@ -205,6 +215,7 @@ export async function unwrapHostedDomainRootForWeb(input: {
       const rootKey = await unwrapEnvelopeForWeb({ envelope, signal: input.signal });
       return { envelope, rootKey };
     },
+    input.retainFailureInScopedCache,
   );
   const cache = getHostedDomainRootUnwrapCache();
   const active = cache?.get(activeCacheKey);

@@ -182,10 +182,19 @@ describe("hosted local snapshot publication fallback e2e", () => {
       baselineFaultCount,
     });
     expect(readSnapshotPublicationValidationStatuses()).toContain(409);
-    const retainedSnapshotRef = rejectedPublicationStatus.workspace?.snapshotRef;
-    expect(isHostedWorkspaceSnapshotV2Ref(retainedSnapshotRef ?? null)).toBe(true);
-    if (!retainedSnapshotRef) {
+    const publicationRefAtFaultObservation =
+      rejectedPublicationStatus.workspace?.snapshotRef;
+    expect(isHostedWorkspaceSnapshotV2Ref(publicationRefAtFaultObservation ?? null))
+      .toBe(true);
+    if (!publicationRefAtFaultObservation) {
       throw new Error("Rejected publication did not retain a restorable snapshot.");
+    }
+    const recoveryCompletedBeforeFaultObservation = hasCleanSnapshotPublication(
+      rejectedPublicationStatus,
+      baselineSnapshotRef,
+    );
+    if (!recoveryCompletedBeforeFaultObservation) {
+      expect(publicationRefAtFaultObservation).toEqual(baselineSnapshotRef);
     }
     expect(requireWorkspaceVersion(rejectedPublicationStatus))
       .toBeGreaterThanOrEqual(initialWorkspaceVersion);
@@ -195,10 +204,14 @@ describe("hosted local snapshot publication fallback e2e", () => {
       baselineInvokeFailureDestroyCount,
     });
 
-    requireScenario().queueAssistantResponses([firstReplyText], {
-      matchInputContains: firstInboundText,
-    });
-    const restoredStatus = await waitForCleanSnapshotPublication(retainedSnapshotRef);
+    if (!recoveryCompletedBeforeFaultObservation) {
+      requireScenario().queueAssistantResponses([firstReplyText], {
+        matchInputContains: firstInboundText,
+      });
+    }
+    const restoredStatus = recoveryCompletedBeforeFaultObservation
+      ? rejectedPublicationStatus
+      : await waitForCleanSnapshotPublication(baselineSnapshotRef);
     const restoredSnapshotRef = restoredStatus.workspace?.snapshotRef;
     if (!restoredSnapshotRef || !isHostedWorkspaceSnapshotV2Ref(restoredSnapshotRef)) {
       throw new Error("Recovered provider turn did not publish a clean v2 snapshot.");
@@ -265,7 +278,7 @@ describe("hosted local snapshot publication fallback e2e", () => {
     const finalStatus = await waitForCleanSnapshotPublication(restoredSnapshotRef);
     expect(finalStatus.workspace).not.toBeNull();
     expect(isHostedWorkspaceSnapshotV2Ref(finalStatus.workspace?.snapshotRef ?? null)).toBe(true);
-    expect(finalStatus.workspace?.snapshotRef).not.toEqual(retainedSnapshotRef);
+    expect(finalStatus.workspace?.snapshotRef).not.toEqual(baselineSnapshotRef);
     expect(finalStatus.workspace?.snapshotRef).not.toEqual(restoredSnapshotRef);
     expect(finalStatus.lastErrorCode ?? null).toBeNull();
     expect(finalStatus.mailboxLag.every((lane) => lane.lag === "0")).toBe(true);
@@ -383,14 +396,7 @@ async function waitForCleanSnapshotPublication(
       await sleep(250);
       continue;
     }
-    const snapshotRef = lastStatus.workspace?.snapshotRef ?? null;
-    if (
-      isHostedWorkspaceSnapshotV2Ref(snapshotRef)
-      && JSON.stringify(snapshotRef) !== JSON.stringify(baselineSnapshotRef)
-      && !lastStatus.inFlight
-      && !lastStatus.lastErrorCode
-      && lastStatus.mailboxLag.every((lane) => lane.lag === "0")
-    ) {
+    if (hasCleanSnapshotPublication(lastStatus, baselineSnapshotRef)) {
       return lastStatus;
     }
     await sleep(250);
@@ -400,6 +406,18 @@ async function waitForCleanSnapshotPublication(
     "Timed out waiting for a clean snapshot publication after the one-shot rejection.",
     ...(lastStatus ? [`last status: ${JSON.stringify(lastStatus)}`] : []),
   ]));
+}
+
+function hasCleanSnapshotPublication(
+  status: HostedRunnerStatusResponse,
+  baselineSnapshotRef: HostedExecutionSnapshotRef,
+): boolean {
+  const snapshotRef = status.workspace?.snapshotRef ?? null;
+  return isHostedWorkspaceSnapshotV2Ref(snapshotRef)
+    && JSON.stringify(snapshotRef) !== JSON.stringify(baselineSnapshotRef)
+    && !status.inFlight
+    && !status.lastErrorCode
+    && status.mailboxLag.every((lane) => lane.lag === "0");
 }
 
 function countSnapshotPublicationFaults(): number {
