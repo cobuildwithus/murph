@@ -13,6 +13,8 @@ const LOCAL_KMS_KEY_NAME =
   "projects/murph-local/locations/global/keyRings/hosted-local/cryptoKeys/web-wrap";
 const LOCAL_SIGN_KEY_VERSION =
   "projects/murph-local/locations/global/keyRings/hosted-local/cryptoKeys/authority-sign/cryptoKeyVersions/1";
+const LOCAL_MAC_KEY_VERSION =
+  "projects/murph-local/locations/global/keyRings/hosted-local/cryptoKeys/address-book-mac/cryptoKeyVersions/1";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -441,6 +443,35 @@ describe("hosted crypto local KMS", () => {
       ciphertext: encrypted.ciphertext,
       keyName: LOCAL_KMS_KEY_NAME,
     })).rejects.toThrow();
+  });
+
+  it("derives stable, key-version-bound 256-bit MACs without exposing the key", async () => {
+    const signingKey = await createLocalSigningKey();
+    const client = createHostedGcpKmsClientFromEnv({
+      HOSTED_CRYPTO_GCP_KMS_API_ROOT: LOCAL_KMS_API_ROOT,
+      HOSTED_CRYPTO_LOCAL_AUTHORITY_SIGN_PRIVATE_JWK: signingKey.privateJwkJson,
+      HOSTED_CRYPTO_LOCAL_KMS_WRAP_KEY: Buffer.alloc(32, 9).toString("base64"),
+      NODE_ENV: "test",
+    });
+    const data = new TextEncoder().encode("member-scoped seed");
+
+    const first = await client.macSign({
+      data,
+      keyVersionName: LOCAL_MAC_KEY_VERSION,
+    });
+    const replay = await client.macSign({
+      data,
+      keyVersionName: LOCAL_MAC_KEY_VERSION,
+    });
+    const changed = await client.macSign({
+      data: new TextEncoder().encode("different seed"),
+      keyVersionName: LOCAL_MAC_KEY_VERSION,
+    });
+
+    expect(first.keyVersionName).toBe(LOCAL_MAC_KEY_VERSION);
+    expect(first.mac).toHaveLength(32);
+    expect(first.mac).toEqual(replay.mac);
+    expect(first.mac).not.toEqual(changed.mac);
   });
 
   it("rejects the local KMS shim in production", async () => {

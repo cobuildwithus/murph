@@ -31,6 +31,7 @@ const mocks = vi.hoisted(() => ({
   readHostedGroupMembershipsForMember: vi.fn(),
   readHostedGroupUsageStatus: vi.fn(),
   readHostedGroupSharedDataByRuntimeMemberId: vi.fn(),
+  readHostedOwnerAddressBookAdvisoryNames: vi.fn(),
   recordHostedGroupJoinOfferTx: vi.fn(),
   recordHostedGroupDisclosurePermissionTx: vi.fn(),
   releaseHostedLinqContactCardShareAttempt: vi.fn(),
@@ -156,6 +157,11 @@ vi.mock("@/src/lib/hosted-groups/group-usage-funding", () => ({
   readHostedGroupUsageStatus: mocks.readHostedGroupUsageStatus,
 }));
 
+vi.mock("@/src/lib/hosted-address-book/projection", () => ({
+  readHostedOwnerAddressBookAdvisoryNames:
+    mocks.readHostedOwnerAddressBookAdvisoryNames,
+}));
+
 vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
   signalHostedRuntimeMaintenanceRuntime: vi.fn(),
 }));
@@ -270,6 +276,9 @@ function groupSummaryWithOwnerEmailGrant() {
 describe("handleHostedRuntimeGroupTool", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.lookupHostedMemberIdentityByPhoneNumber.mockReset();
+    mocks.readHostedOwnerAddressBookAdvisoryNames.mockReset();
+    mocks.readHostedOwnerAddressBookAdvisoryNames.mockResolvedValue(new Map());
     mocks.canonicalizeHostedGroupDisclosurePermissionText.mockImplementation(
       (value: string) => value.replaceAll("\r\n", "\n").trim(),
     );
@@ -287,6 +296,7 @@ describe("handleHostedRuntimeGroupTool", () => {
       requestedProjectionScopeKeys: ["steps-days.v0"],
       status: "ok",
     });
+    mocks.readHostedOwnerAddressBookAdvisoryNames.mockResolvedValue(new Map());
     mocks.readHostedGroupMembershipsForMember.mockResolvedValue({
       memberships: [{
         displayName: "Fun-loving runners",
@@ -1625,6 +1635,9 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.lookupHostedMemberIdentityByPhoneNumber.mockReset();
+    mocks.readHostedOwnerAddressBookAdvisoryNames.mockReset();
+    mocks.readHostedOwnerAddressBookAdvisoryNames.mockResolvedValue(new Map());
     mocks.assertHostedLinqRouteEgressAuthority.mockResolvedValue({});
     mocks.canonicalizeHostedGroupDisclosurePermissionText.mockImplementation(
       (value: string) => value.replaceAll("\r\n", "\n").trim(),
@@ -2627,6 +2640,46 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
         participantMemberId: { notIn: ["member_participant"] },
         removedAt: null,
       },
+    });
+  });
+
+  it("adds owner-only advisory names only to unregistered phone participants", async () => {
+    mocks.readHostedOwnerAddressBookAdvisoryNames.mockResolvedValue(new Map([
+      ["+15550000001", "Registered R."],
+      ["+15550000002", "Alex R."],
+    ]));
+    mocks.getHostedLinqChatHandles.mockResolvedValue([
+      { handle: "+15557770000", isMe: true, status: "active" },
+      { handle: "+15550000001", isMe: false, status: "active" },
+      { handle: "+15550000002", isMe: false, status: "active" },
+    ]);
+    mocks.lookupHostedMemberIdentityByPhoneNumber.mockImplementation(
+      async ({ phoneNumber }) => phoneNumber === "+15550000001"
+        ? { core: { id: "member_participant", suspendedAt: null } }
+        : null,
+    );
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_container",
+      request: { action: "read_chat_participants", linqThread: LINQ_THREAD },
+    })).resolves.toEqual({
+      action: "read_chat_participants",
+      result: {
+        participants: [
+          { handle: "+15550000001", hasOwnMurph: true },
+          {
+            handle: "+15550000002",
+            hasOwnMurph: false,
+            ownerAdvisoryName: "Alex R.",
+          },
+        ],
+        status: "ok",
+      },
+    });
+    expect(mocks.readHostedOwnerAddressBookAdvisoryNames).toHaveBeenCalledWith({
+      containerMemberId: "member_container",
+      phoneHandles: ["+15550000002"],
+      prisma: expect.anything(),
     });
   });
 

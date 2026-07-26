@@ -51,6 +51,9 @@ import {
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
   type HostedOnboardingReadClient,
 } from "../hosted-onboarding/shared";
+import {
+  readHostedOwnerAddressBookAdvisoryNames,
+} from "../hosted-address-book/projection";
 import { signalHostedRuntimeMaintenanceRuntime } from "../hosted-orchestration/signal-runtime";
 import { assertHostedLinqRouteEgressAuthority } from "../hosted-routing/thread-route-store";
 import { resolveHostedPublicBaseUrl } from "../hosted-web/public-url";
@@ -1382,6 +1385,28 @@ async function handleHostedRuntimeGroupReadChatParticipants(input: {
     prisma,
     resolvedParticipants,
   });
+
+  try {
+    const ownerAdvisoryNames = await readHostedOwnerAddressBookAdvisoryNames({
+      containerMemberId: input.memberId,
+      phoneHandles: participants.flatMap((participant) =>
+        participant.hasOwnMurph ? [] : [participant.handle]
+      ),
+      prisma,
+    });
+    for (const participant of participants) {
+      const ownerAdvisoryName = participant.hasOwnMurph
+        ? undefined
+        : ownerAdvisoryNames.get(participant.handle);
+      if (ownerAdvisoryName) {
+        participant.ownerAdvisoryName = ownerAdvisoryName;
+      }
+    }
+  } catch {
+    // Address-book labels are optional presentation hints. Any KMS, storage,
+    // consent, or decryption failure omits the entire overlay without changing
+    // the truthful live roster or its activation proof.
+  }
 
   return {
     action: "read_chat_participants",

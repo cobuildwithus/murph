@@ -481,6 +481,53 @@ describe("murph.group dynamic tool", () => {
     expect(modelPayload).not.toContain("handle");
   });
 
+  it("renames owner contact hints so the model sees their unverified authority", async () => {
+    const groupRequest = vi.fn<GroupToolRequest>(async () => ({
+      action: "read_chat_participants",
+      result: {
+        participants: [
+          {
+            handle: "+15551110003",
+            hasOwnMurph: false,
+            ownerAdvisoryName: "Alex R.",
+          },
+        ],
+        status: "ok",
+      },
+    }));
+    const request = readMurphDynamicToolRequest(groupToolCall({
+      action: "read_chat_participants",
+    }));
+    if (!request || request.kind !== "group") {
+      throw new Error("Expected group request.");
+    }
+
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createGroupHostedToolContext({ groupRequest }),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request,
+      vaultRoot: null,
+    });
+
+    expect(readGroupToolPayload(result)).toEqual({
+      action: "read_chat_participants",
+      result: {
+        participants: [{
+          handle: "+15551110003",
+          hasOwnMurph: false,
+          unverifiedOwnerContactLabel: "Alex R.",
+        }],
+        status: "ok",
+      },
+    });
+    expect(JSON.stringify(readGroupToolPayload(result))).not.toContain(
+      "ownerAdvisoryName",
+    );
+  });
+
   it("parses a bounded exact shared-data read without model-supplied authority", () => {
     expect(readMurphDynamicToolRequest(groupToolCall({
       action: "read_shared",

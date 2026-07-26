@@ -1211,6 +1211,12 @@ function createLocalKmsClient(input: {
         }
       }
     },
+    async macSign(macInput) {
+      return {
+        keyVersionName: macInput.keyVersionName,
+        mac: new Uint8Array(32),
+      };
+    },
     async encrypt(encryptInput) {
       input.encryptCalls.push(encryptInput);
       return {

@@ -53,6 +53,9 @@ function createRetentionPrisma(input?: {
     hostedComputerRun: {
       findMany: vi.fn().mockResolvedValue([]),
     },
+    hostedAddressBookProjection: {
+      findMany: vi.fn().mockResolvedValue([]),
+    },
   };
 }
 
@@ -95,6 +98,7 @@ describe("hosted retention cleanup", () => {
       signalRuntimeRecheck,
     })).resolves.toEqual({
       compactedLinqProviderEventDiagnostics: 5,
+      expiredAddressBookProjections: 0,
       expiredAssistantRuntimeIssuesDeleted: 2,
       expiredComputerRunsCleanedUp: 0,
       expiredDeviceWebhookTracesDeleted: 4,
@@ -354,6 +358,7 @@ describe("hosted retention cleanup", () => {
       await vi.advanceTimersByTimeAsync(HOSTED_INBOX_MEDIA_RETENTION_SIGNAL_TIMEOUT_MS);
       await expect(cleanup).resolves.toEqual({
         compactedLinqProviderEventDiagnostics: 1,
+        expiredAddressBookProjections: 0,
         expiredAssistantRuntimeIssuesDeleted: 1,
         expiredComputerRunsCleanedUp: 0,
         expiredDeviceWebhookTracesDeleted: 1,
