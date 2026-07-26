@@ -22,6 +22,7 @@ import {
 import { getHostedPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
 import { readHostedConfiguredUsageCreditOfferCodes } from "@/src/lib/hosted-onboarding/personal-usage-credit-eligibility";
 import {
+  estimateHostedUsageCreditMessages,
   getHostedUsageCreditOfferDefinition,
   type HostedUsageCreditOfferCode,
 } from "@/src/lib/hosted-onboarding/usage-credit-offers";
@@ -208,6 +209,7 @@ function projectHostedUsageTopUpOffers(
     const offer = getHostedUsageCreditOfferDefinition(offerCode);
     return {
       amountLabel: formatUsageTopUpAmount(offer.cashAmountMinor),
+      estimatedMessages: estimateHostedUsageCreditMessages(offer.cashAmountMinor),
       offerCode: offer.code,
     };
   });
