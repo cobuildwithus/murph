@@ -1,6 +1,6 @@
 # PR 932 Round 14 Remediation
 
-Status: active
+Status: completed
 
 ## Goal
 
@@ -41,4 +41,16 @@ the group.
 - Desktop/mobile screenshots from `/design?tab=sections`, hosted for the PR
   design-proof check and packaged for the next exact-head ReviewGPT round.
 
-Updated: 2026-07-25
+## Completion evidence
+
+- Focused Linq observability and transport tests: 139 passed.
+- Isolated real-PostgreSQL group reply recovery proof: 1 passed.
+- Frontend design proof guard: 10 passed.
+- Documentation drift check: passed.
+- Canonical affected-app verification: 6,838 passed, 176 skipped; TypeScript,
+  lint, production build, and development smoke checks passed.
+- Product-experience review: no findings.
+- Rendered desktop and mobile design studies: no overflow and no private data.
+
+Updated: 2026-07-26
+Completed: 2026-07-26
