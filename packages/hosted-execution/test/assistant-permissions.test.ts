@@ -3,7 +3,27 @@ import { describe, expect, it } from "vitest";
 import {
   buildMurphGroupReadPermissionProfileTomlLines,
   buildMurphGroupRoomModelMaintenancePermissionProfileTomlLines,
+  buildMurphHostedRootPermissionProfileTomlLines,
 } from "../src/assistant-permissions.ts";
+
+describe("ordinary hosted root Codex permissions", () => {
+  it("preserves root and network authority while denying the managed auth file", () => {
+    expect(
+      buildMurphHostedRootPermissionProfileTomlLines({
+        managedCodexAuthPath: "/var/lib/murph/.codex-hosted/auth.json",
+      }),
+    ).toEqual([
+      "# Ordinary hosted root turns retain current filesystem and network authority while child tools cannot read the managed Codex credential file.",
+      "[permissions.murph-hosted-root.filesystem]",
+      '":root" = "write"',
+      '"/var/lib/murph/.codex-hosted/auth.json" = "deny"',
+      "",
+      "[permissions.murph-hosted-root.network]",
+      "enabled = true",
+      "",
+    ]);
+  });
+});
 
 describe("group-read Codex permissions", () => {
   it("grants read-only workspace access with non-overlapping secret carve-outs", () => {

@@ -6,6 +6,7 @@ import {
 } from '@murphai/hosted-execution/assistant-usage'
 import {
   MURPH_GROUP_ROOM_MODEL_MAINTENANCE_PERMISSION_PROFILE,
+  MURPH_HOSTED_ROOT_PERMISSION_PROFILE,
 } from '@murphai/hosted-execution/assistant-permissions'
 import {
   resolveHostedAiUsageTokenPricingBasis,
@@ -463,6 +464,12 @@ async function executeAssistantCodexAttempt(input: {
     const groupEmailTurn =
       audience.threadIsDirect === false &&
       normalizeNullableString(audience.channel)?.toLowerCase() === 'email'
+    const ordinaryHostedRootPermissionTurn =
+      executionPlan.executionContext?.hosted != null &&
+      attemptPlan.route.providerOptions.sandbox === 'danger-full-access' &&
+      !outputOnlyTurn &&
+      !groupEmailTurn &&
+      !groupRoomModelMaintenanceTurn
     const attemptResult = await executeCodexAssistantTurnAttemptFromInput({
       providerConfig: {
         approvalPolicy: outputOnlyTurn
@@ -554,7 +561,9 @@ async function executeAssistantCodexAttempt(input: {
           : executionPlan.progressDelivery ?? null,
         permissions: groupRoomModelMaintenanceTurn
           ? MURPH_GROUP_ROOM_MODEL_MAINTENANCE_PERMISSION_PROFILE
-          : null,
+          : ordinaryHostedRootPermissionTurn
+            ? MURPH_HOSTED_ROOT_PERMISSION_PROFILE
+            : null,
         ...(systemNotificationTurn || groupRoomModelMaintenanceTurn
           ? { processLifetime: 'one-shot' as const }
           : {}),
@@ -565,9 +574,10 @@ async function executeAssistantCodexAttempt(input: {
         publicInternetFetch: outputOnlyTurn
           ? null
           : executionPlan.executionContext?.hosted?.publicInternetFetch ?? null,
-        runtimeWorkspaceRoots: groupRoomModelMaintenanceTurn
-          ? [attemptPlan.routePlan.workingDirectory]
-          : null,
+        runtimeWorkspaceRoots:
+          groupRoomModelMaintenanceTurn || ordinaryHostedRootPermissionTurn
+            ? [attemptPlan.routePlan.workingDirectory]
+            : null,
         requireGeneratedImageUploader: outputOnlyTurn
           ? false
           : executionPlan.executionContext?.hosted?.generatedImageUploaderRequired ?? false,

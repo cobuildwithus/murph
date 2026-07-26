@@ -105,6 +105,7 @@ describe("runHostedRunnerSmokeDetailed", () => {
             codexGroupReadRuntimeReadDenied: true,
             codexGroupReadSecretEnvironmentDenied: true,
             codexGroupReadSiblingRootReadDenied: true,
+            codexHostedRootPermissionBoundaryProven: true,
             codexHostedCliSurfaceContractBytes: 37282,
             codexHostedCliSurfaceHotPathProofCount:
               HOSTED_RUNNER_SMOKE_CLI_SURFACE_HOT_PATH_PROOF_COUNT,
@@ -166,6 +167,7 @@ describe("runHostedRunnerSmokeDetailed", () => {
       expect(result.codexGroupReadRuntimeReadDenied).toBe(true);
       expect(result.codexGroupReadSecretEnvironmentDenied).toBe(true);
       expect(result.codexGroupReadSiblingRootReadDenied).toBe(true);
+      expect(result.codexHostedRootPermissionBoundaryProven).toBe(true);
       expect(result.codexHostedCliSurfaceContractBytes).toBe(37282);
       expect(result.codexHostedCliSurfaceHotPathProofCount).toBe(
         HOSTED_RUNNER_SMOKE_CLI_SURFACE_HOT_PATH_PROOF_COUNT,

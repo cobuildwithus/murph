@@ -8,6 +8,7 @@ import {
 } from '@murphai/hosted-execution/env'
 import {
   MURPH_GROUP_ROOM_MODEL_MAINTENANCE_PERMISSION_PROFILE,
+  MURPH_HOSTED_ROOT_PERMISSION_PROFILE,
 } from '@murphai/hosted-execution/assistant-permissions'
 
 const providerMocks = vi.hoisted(() => ({
@@ -689,7 +690,9 @@ describe('Codex model catalog', () => {
       progressDelivery: null,
       providerFetch: null,
       publicInternetFetch: null,
+      permissions: null,
       requireGeneratedImageUploader: false,
+      runtimeWorkspaceRoots: null,
     })
     expect(unsafeDynamicTools).not.toEqual([])
     expect(unsafeProgressDelivery.send).not.toHaveBeenCalled()
@@ -885,6 +888,10 @@ describe('Codex model catalog', () => {
       'features.multi_agent_v2=false',
       'features.tool_suggest=false',
     ])
+    expect(providerInput).toMatchObject({
+      permissions: null,
+      runtimeWorkspaceRoots: null,
+    })
   })
 
   it('drops unsupported rich user parts and keeps flex for supported hosted OpenAI routes', async () => {
@@ -894,6 +901,7 @@ describe('Codex model catalog', () => {
       providerOptions: {
         model: 'gpt-5.6-terra',
         modelProvider: 'hosted-openai',
+        sandbox: 'danger-full-access',
       },
     })
     const session = createAssistantSession({
@@ -1010,6 +1018,10 @@ describe('Codex model catalog', () => {
     const providerInput =
       providerMocks.executeCodexAssistantTurnAttemptFromInput.mock.calls[0]?.[0]
     expect(providerInput?.serviceTier).toBe('flex')
+    expect(providerInput).toMatchObject({
+      permissions: MURPH_HOSTED_ROOT_PERMISSION_PROFILE,
+      runtimeWorkspaceRoots: ['/work'],
+    })
     expect(timeoutSpy).toHaveBeenCalledWith(600_000)
     expect(providerInput?.abortSignal).not.toBe(upstreamAbort.signal)
     expect(providerInput?.abortSignal?.aborted).toBe(false)
@@ -1289,6 +1301,10 @@ describe('Codex model catalog', () => {
     expect(providerInput?.authorizeAcceptedMessageTarget).toBe(
       authorizeAcceptedMessageTarget,
     )
+    expect(providerInput).toMatchObject({
+      permissions: null,
+      runtimeWorkspaceRoots: null,
+    })
   })
 
   it('does not wait for runtime issue recording on a successful turn', async () => {

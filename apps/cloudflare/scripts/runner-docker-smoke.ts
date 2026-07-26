@@ -75,6 +75,9 @@ async function main(): Promise<void> {
     console.log(`codexVersion=${result.codexVersion}`);
     console.log(`codexAppServerHelpBytes=${result.codexAppServerHelpBytes}`);
     console.log(
+      `codexHostedRootPermissionBoundaryProven=${result.codexHostedRootPermissionBoundaryProven}`,
+    );
+    console.log(
       `codexGroupReadPermissionProfileAttested=${result.codexGroupReadPermissionProfileAttested}`,
     );
     console.log(

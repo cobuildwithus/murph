@@ -114,13 +114,31 @@ function buildCodexThreadResumeContextParams(
     workingDirectory: string
   },
 ): Record<string, unknown> {
-  return {
+  const permissions = normalizeNullableString(input.permissions)
+  if (permissions && input.sandbox) {
+    throw new VaultCliError(
+      'ASSISTANT_CODEX_APP_SERVER_REQUEST_INVALID',
+      'Codex app-server requests cannot combine named permissions with a legacy sandbox.',
+      {
+        invalidFields: ['permissions', 'sandbox'],
+        retryable: false,
+      },
+    )
+  }
+
+  return stripUndefinedRpcParams({
     approvalPolicy: mapCodexAppServerApprovalPolicy(input.approvalPolicy),
     cwd: input.workingDirectory,
     model: normalizeNullableString(input.model),
     modelProvider: normalizeNullableString(input.modelProvider),
-    sandbox: mapCodexAppServerSandboxMode(input.sandbox),
-  }
+    permissions,
+    runtimeWorkspaceRoots: input.runtimeWorkspaceRoots
+      ? [...input.runtimeWorkspaceRoots]
+      : undefined,
+    sandbox: permissions
+      ? undefined
+      : mapCodexAppServerSandboxMode(input.sandbox),
+  })
 }
 
 export function buildCodexTurnStartParams(input: {

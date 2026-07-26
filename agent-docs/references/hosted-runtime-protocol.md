@@ -115,6 +115,17 @@ owned App Server before it releases the job slot for another invocation. A stop
 failure poisons the container rather than allowing a replacement invocation to
 reuse ambiguous process state.
 
+Ordinary hosted root threads select the native `murph-hosted-root` permission
+profile. It preserves the current root filesystem write and tool-network
+authority but exact-denies model-invoked child tools the managed
+`CODEX_HOME/auth.json` file. The resident App Server remains outside the child
+sandbox and retains the file-backed login/refresh path. The root profile and
+current workspace roots are supplied and attested on both `thread/start` and
+`thread/resume`; a mismatch is stale execution context and must be rejected
+before `turn/start`. The narrower group-read and room-model profiles remain
+fresh, ephemeral one-shot boundaries, and local, group-email, and output-only
+turn policy is unchanged.
+
 Detached MultiAgent V2 work does not become a process-memory queue. Before the
 root reply, Murph retains a durable accepted input, canonical fact, or raw
 source and gives each child its exact source words, ids, or refs. A loaded skill
@@ -1207,15 +1218,15 @@ workspace may still hit the runtime's format gate on its next wake, so the
 operator rollout gate is zero known v1 hosted snapshots before returning to
 normal traffic.
 
-Hosted Codex auth is system-mailbox runtime-control work, but hosted ChatGPT
-connect is disabled until credentials have an isolated control-plane owner
-outside the hosted tool filesystem. Already-queued connect wakes fail closed
-without starting OAuth. Disconnect remains local-revocation-first for cleanup:
-remote app-server logout is best effort, local `auth.json` deletion is required,
-and a local deletion failure keeps the system-mailbox item retryable instead of
-consuming a revocation request. Any terminal `connected` callback from an old
-in-flight wake prunes local managed `auth.json` and is reported as a failed
-connection cleanup callback, not as a durable connected state.
+Hosted Codex auth is system-mailbox runtime-control work. The short-lived
+account-operation App Server owns connect/disconnect, and the resident App
+Server owns provider refresh and warm continuity; both remain outside the
+model-invoked child-tool sandbox. Ordinary hosted root child tools receive an
+exact deny on managed `auth.json`. A failed connect prunes the local credential
+best effort before recording failure. Disconnect remains
+local-revocation-first for cleanup: remote app-server logout is best effort,
+local `auth.json` deletion is required, and a local deletion failure keeps the
+system-mailbox item retryable instead of consuming a revocation request.
 
 Hosted device-sync webhook freshness is owned by web dirty state, not mailbox
 completion. The route claims the exact provider trace, writes sparse

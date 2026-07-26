@@ -19,6 +19,7 @@ import {
 import {
   MURPH_GROUP_READ_PERMISSION_PROFILE,
   MURPH_GROUP_ROOM_MODEL_MAINTENANCE_PERMISSION_PROFILE,
+  MURPH_HOSTED_ROOT_PERMISSION_PROFILE,
 } from "@murphai/hosted-execution/assistant-permissions";
 import {
   HostedAssistantConfigurationError,
@@ -66,6 +67,7 @@ const testHostedCodexAutocompactionE2e = RUN_HOSTED_CODEX_AUTOCOMPACTION_E2E
 const HOSTED_CODEX_EXPECTED_AUTO_COMPACT_TOKEN_LIMIT = 164_000;
 const HOSTED_CODEX_AUTO_COMPACT_TOKEN_LIMIT_CEILING = 250_000;
 const HOSTED_CODEX_AUTOCOMPACTION_E2E_TOKEN_LIMIT = 12_000;
+const TEST_MANAGED_CODEX_AUTH_PATH = "/var/lib/murph/.codex-hosted/auth.json";
 const HOSTED_CODEX_AUTOCOMPACTION_SUMMARY_SENTINEL =
   "HOSTED_CODEX_AUTOCOMPACTION_SUMMARY_SENTINEL";
 const EXPECTED_MULTI_AGENT_USAGE_HINT = [
@@ -111,6 +113,7 @@ test("hosted Codex provider transport diagnostics expose only safe config metada
 
 test("hosted Codex uses one WebSocket attempt before native HTTPS fallback", () => {
   const config = buildHostedCodexConfigToml({
+    managedCodexAuthPath: TEST_MANAGED_CODEX_AUTH_PATH,
     model: "gpt-5.2",
     provider: {
       id: "hosted-openai",
@@ -216,6 +219,14 @@ test("hosted Codex runtime config writes OpenAI Responses config without secret 
   assert.match(config, /^request_max_retries = 4$/mu);
   assert.match(config, /^stream_max_retries = 0$/mu);
   assert.doesNotMatch(config, /^requires_openai_auth = true$/mu);
+  assert.ok(config.includes([
+    `[permissions.${MURPH_HOSTED_ROOT_PERMISSION_PROFILE}.filesystem]`,
+    '":root" = "write"',
+    `${JSON.stringify(path.join(result.codexHome, "auth.json"))} = "deny"`,
+    "",
+    `[permissions.${MURPH_HOSTED_ROOT_PERMISSION_PROFILE}.network]`,
+    "enabled = true",
+  ].join("\n")));
   assert.match(
     config,
     new RegExp(
@@ -1359,6 +1370,7 @@ test("hosted Codex runtime config rejects non-Codex provider env", async () => {
 
 test("hosted Codex config TOML omits credential values and runtime authority headers", () => {
   const config = buildHostedCodexConfigToml({
+    managedCodexAuthPath: TEST_MANAGED_CODEX_AUTH_PATH,
     model: null,
     provider: {
       id: "openai",
@@ -1391,6 +1403,14 @@ test("hosted Codex config TOML omits credential values and runtime authority hea
       "requires_openai_auth = false",
       "request_max_retries = 4",
       "stream_max_retries = 0",
+      "",
+      "# Ordinary hosted root turns retain current filesystem and network authority while child tools cannot read the managed Codex credential file.",
+      `[permissions.${MURPH_HOSTED_ROOT_PERMISSION_PROFILE}.filesystem]`,
+      '":root" = "write"',
+      `${JSON.stringify(TEST_MANAGED_CODEX_AUTH_PATH)} = "deny"`,
+      "",
+      `[permissions.${MURPH_HOSTED_ROOT_PERMISSION_PROFILE}.network]`,
+      "enabled = true",
       "",
       "# Read-only, ephemeral consultations initiated by a current group member.",
       `[permissions.${MURPH_GROUP_READ_PERMISSION_PROFILE}.filesystem]`,
@@ -1496,6 +1516,7 @@ test("hosted Codex shell policy includes the image-pinned Health Commons package
 
 test("hosted Codex config keeps skill instructions disabled while enabling operator memory", () => {
   const config = buildHostedCodexConfigToml({
+    managedCodexAuthPath: TEST_MANAGED_CODEX_AUTH_PATH,
     model: "gpt-5.6-terra",
     provider: {
       id: "openai",
@@ -1578,9 +1599,13 @@ test("hosted Codex runtime exposes a stable package-owned assistant skill root",
 
   const configA = await readFile(resultA.codexConfigPath, "utf8");
   const configB = await readFile(resultB.codexConfigPath, "utf8");
+  const managedAuthPathA = JSON.stringify(path.join(resultA.codexHome, "auth.json"));
+  const managedAuthPathB = JSON.stringify(path.join(resultB.codexHome, "auth.json"));
 
-  assert.doesNotMatch(configA, /murph-test-a/u);
-  assert.doesNotMatch(configB, /murph-test-b/u);
+  assert.ok(configA.includes(managedAuthPathA));
+  assert.ok(configB.includes(managedAuthPathB));
+  assert.doesNotMatch(configA.replace(managedAuthPathA, ""), /murph-test-a/u);
+  assert.doesNotMatch(configB.replace(managedAuthPathB, ""), /murph-test-b/u);
   assert.match(configA, /"MURPH_ASSISTANT_SKILLS_ROOT"/u);
   assert.match(configB, /"MURPH_ASSISTANT_SKILLS_ROOT"/u);
 });

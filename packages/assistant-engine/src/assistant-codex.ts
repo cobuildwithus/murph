@@ -7,6 +7,7 @@ import path from 'node:path'
 import type {
   HostedCodexAuthAction,
 } from '@murphai/hosted-execution/contracts'
+import { MURPH_HOSTED_ROOT_PERMISSION_PROFILE } from '@murphai/hosted-execution/assistant-permissions'
 import { normalizeNullableString } from '@murphai/operator-config/text/shared'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
@@ -714,16 +715,24 @@ function assertCodexAppServerPermissionRequest(
     return
   }
 
+  const ordinaryHostedRootProfile =
+    permissions === MURPH_HOSTED_ROOT_PERMISSION_PROFILE
   const invalidFields = [
     ...(input.sandbox ? ['sandbox'] : []),
-    ...(normalizeNullableString(input.resumeSessionId) ? ['resumeSessionId'] : []),
-    ...(input.ephemeral === true ? [] : ['ephemeral']),
-    ...(input.processLifetime === 'one-shot' ? [] : ['processLifetime']),
+    ...(ordinaryHostedRootProfile || !normalizeNullableString(input.resumeSessionId)
+      ? []
+      : ['resumeSessionId']),
+    ...(ordinaryHostedRootProfile || input.ephemeral === true ? [] : ['ephemeral']),
+    ...(ordinaryHostedRootProfile || input.processLifetime === 'one-shot'
+      ? []
+      : ['processLifetime']),
   ]
   if (invalidFields.length > 0) {
     throw new VaultCliError(
       'ASSISTANT_CODEX_APP_SERVER_REQUEST_INVALID',
-      'Named Codex permissions require a fresh ephemeral thread in a one-shot process without a legacy sandbox.',
+      ordinaryHostedRootProfile
+        ? 'The ordinary hosted Codex permission profile cannot be combined with a legacy sandbox.'
+        : 'Named Codex permissions require a fresh ephemeral thread in a one-shot process without a legacy sandbox.',
       {
         invalidFields,
         retryable: false,
@@ -4911,33 +4920,23 @@ function assertCodexThreadStartPermissionAttestation(input: {
   threadResult: unknown
 }): void {
   const result = asCodexRecord(input.threadResult)
-  const activePermissionProfile = asCodexRecord(result?.activePermissionProfile)
   const actualCwd = normalizeNullableString(asCodexString(result?.cwd))
-  const actualRoots = asCodexStringArray(result?.runtimeWorkspaceRoots)
   const instructionSources = Array.isArray(result?.instructionSources)
     ? result.instructionSources
     : null
-  const expectedRoots = input.input.runtimeWorkspaceRoots ?? []
-  const mismatchedFields: string[] = []
+  const mismatchedFields = readCodexPermissionAttestationMismatches({
+    input: input.input,
+    result,
+  })
 
-  const permissionProfileMismatch =
-    normalizeNullableString(asCodexString(activePermissionProfile?.id)) !==
-      normalizeNullableString(input.input.permissions) ||
-    normalizeNullableString(asCodexString(activePermissionProfile?.extends)) !== null
-  if (permissionProfileMismatch) {
-    mismatchedFields.push('activePermissionProfile')
-  }
-  if (
-    !actualRoots ||
-    actualRoots.length !== expectedRoots.length ||
-    actualRoots.some((root, index) => path.resolve(root) !== path.resolve(expectedRoots[index] ?? ''))
-  ) {
-    mismatchedFields.push('runtimeWorkspaceRoots')
-  }
   if (!actualCwd || path.resolve(actualCwd) !== input.input.workingDirectory) {
     mismatchedFields.push('cwd')
   }
-  if (instructionSources === null || instructionSources.length !== 0) {
+  if (
+    normalizeNullableString(input.input.permissions) !==
+      MURPH_HOSTED_ROOT_PERMISSION_PROFILE &&
+    (instructionSources === null || instructionSources.length !== 0)
+  ) {
     mismatchedFields.push('instructionSources')
   }
   if (
@@ -4952,12 +4951,44 @@ function assertCodexThreadStartPermissionAttestation(input: {
 
   throw new VaultCliError(
     'ASSISTANT_CODEX_APP_SERVER_PERMISSION_ATTESTATION_FAILED',
-    'Codex app-server did not attest the requested read-only execution context.',
+    'Codex app-server did not attest the requested named-permission execution context.',
     {
       mismatchedFields,
       retryable: false,
     },
   )
+}
+
+function readCodexPermissionAttestationMismatches(input: {
+  input: CodexAppServerPreparedTurnInput
+  result: Record<string, unknown> | null
+}): string[] {
+  const activePermissionProfile = asCodexRecord(
+    input.result?.activePermissionProfile,
+  )
+  const actualRoots = asCodexStringArray(input.result?.runtimeWorkspaceRoots)
+  const expectedRoots = input.input.runtimeWorkspaceRoots ?? []
+  const mismatchedFields: string[] = []
+
+  if (
+    normalizeNullableString(asCodexString(activePermissionProfile?.id)) !==
+      normalizeNullableString(input.input.permissions) ||
+    normalizeNullableString(asCodexString(activePermissionProfile?.extends)) !== null
+  ) {
+    mismatchedFields.push('activePermissionProfile')
+  }
+  if (
+    !actualRoots ||
+    actualRoots.length !== expectedRoots.length ||
+    actualRoots.some(
+      (root, index) =>
+        path.resolve(root) !== path.resolve(expectedRoots[index] ?? ''),
+    )
+  ) {
+    mismatchedFields.push('runtimeWorkspaceRoots')
+  }
+
+  return mismatchedFields
 }
 
 function emitCodexSuppressedFinalMessageTrace(input: {
@@ -5212,6 +5243,12 @@ function assertCodexResumeContextMatches(input: {
   const mismatchedFields = checks
     .filter(([, expected, actual]) => expected !== null && actual !== expected)
     .map(([field]) => field)
+  if (normalizeNullableString(input.input.permissions)) {
+    mismatchedFields.push(...readCodexPermissionAttestationMismatches({
+      input: input.input,
+      result,
+    }))
+  }
   if (mismatchedFields.length === 0) {
     return
   }

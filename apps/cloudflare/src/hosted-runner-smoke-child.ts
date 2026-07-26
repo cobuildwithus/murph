@@ -26,7 +26,9 @@ import {
 import {
   buildMurphGroupReadPermissionProfileTomlLines,
   buildMurphGroupRoomModelMaintenancePermissionProfileTomlLines,
+  buildMurphHostedRootPermissionProfileTomlLines,
   MURPH_GROUP_READ_PERMISSION_PROFILE,
+  MURPH_HOSTED_ROOT_PERMISSION_PROFILE,
 } from "@murphai/hosted-execution/assistant-permissions";
 import {
   HOSTED_CODEX_SHELL_ENVIRONMENT_INHERITANCE,
@@ -214,6 +216,8 @@ async function runSmokeChecks(input: {
       hostedCodexConfig.groupReadSecretEnvironmentDenied,
     codexGroupReadSiblingRootReadDenied:
       hostedCodexConfig.groupReadSiblingRootReadDenied,
+    codexHostedRootPermissionBoundaryProven:
+      hostedCodexConfig.hostedRootPermissionBoundaryProven,
     codexHostedCliSurfaceContractBytes: assistantCliSurface.contractBytes,
     codexHostedCliSurfaceHotPathProofCount: assistantCliSurface.hotPathProofCount,
     codexHostedConfigShellEnvironmentPolicyAllowlisted:
@@ -611,6 +615,7 @@ async function runHostedCodexConfigShellEnvironmentPolicySmoke(input: {
   groupReadRuntimeReadDenied: boolean;
   groupReadSecretEnvironmentDenied: boolean;
   groupReadSiblingRootReadDenied: boolean;
+  hostedRootPermissionBoundaryProven: boolean;
   murphPathBytes: number;
   pythonVersion: string;
   schemaVaultOptionHidden: boolean;
@@ -631,7 +636,13 @@ async function runHostedCodexConfigShellEnvironmentPolicySmoke(input: {
   await chmod(codexHome, 0o700);
 
   const codexConfigPath = path.join(codexHome, "config.toml");
-  await writeFile(codexConfigPath, buildHostedRunnerSmokeCodexConfigToml(), { mode: 0o600 });
+  await writeFile(
+    codexConfigPath,
+    buildHostedRunnerSmokeCodexConfigToml({
+      managedCodexAuthPath: path.join(codexHome, "auth.json"),
+    }),
+    { mode: 0o600 },
+  );
   await chmod(codexConfigPath, 0o600);
 
   const config = await readFile(codexConfigPath, "utf8");
@@ -687,6 +698,8 @@ async function runHostedCodexConfigShellEnvironmentPolicySmoke(input: {
     groupReadSecretEnvironmentDenied:
       shellProbe.groupReadSecretEnvironmentDenied,
     groupReadSiblingRootReadDenied: shellProbe.groupReadSiblingRootReadDenied,
+    hostedRootPermissionBoundaryProven:
+      shellProbe.hostedRootPermissionBoundaryProven,
     murphPathBytes: shellProbe.murphPathBytes,
     pythonVersion: shellProbe.pythonVersion,
     schemaVaultOptionHidden: shellProbe.schemaVaultOptionHidden,
@@ -697,7 +710,9 @@ async function runHostedCodexConfigShellEnvironmentPolicySmoke(input: {
   };
 }
 
-function buildHostedRunnerSmokeCodexConfigToml(): string {
+function buildHostedRunnerSmokeCodexConfigToml(input: {
+  managedCodexAuthPath: string;
+}): string {
   const modelCatalogJson = readHostedCodexModelCatalogJsonPath();
 
   return [
@@ -714,6 +729,7 @@ function buildHostedRunnerSmokeCodexConfigToml(): string {
     // exercises the same PATH semantics as production turns.
     "allow_login_shell = false",
     "",
+    ...buildMurphHostedRootPermissionProfileTomlLines(input),
     ...buildMurphGroupReadPermissionProfileTomlLines(),
     ...buildMurphGroupRoomModelMaintenancePermissionProfileTomlLines(),
     "[skills]",
@@ -756,6 +772,7 @@ async function runCodexAppServerShellEnvironmentProbe(input: {
   groupReadRuntimeReadDenied: boolean;
   groupReadSecretEnvironmentDenied: boolean;
   groupReadSiblingRootReadDenied: boolean;
+  hostedRootPermissionBoundaryProven: boolean;
   murphPathBytes: number;
   pythonVersion: string;
   schemaVaultOptionHidden: boolean;
@@ -967,18 +984,32 @@ async function runCodexAppServerShellEnvironmentProbe(input: {
       "-c",
       "import sys; raise SystemExit(0 if sys.version_info.major == 3 else 1)",
     ]);
-    const vaultCliLlms = await execCommand("vault-cli-llms", [
-      "vault-cli",
-      "--llms",
-      "--format",
-      "json",
-    ]);
+    const vaultCliLlms = await execCommand(
+      "vault-cli-llms",
+      ["vault-cli", "--llms", "--format", "json"],
+      {
+        cwd: input.vaultRoot,
+        permissionProfile: MURPH_HOSTED_ROOT_PERMISSION_PROFILE,
+      },
+    );
     assertRootLlmsHidesVault(vaultCliLlms.stdout);
     const vaultCliProof = await runCodexVaultCliProof({
-      execCommand,
+      execCommand: (label, command) =>
+        execCommand(label, command, {
+          cwd: input.vaultRoot,
+          permissionProfile: MURPH_HOSTED_ROOT_PERMISSION_PROFILE,
+        }),
       expectedVaultId: input.expectedVaultId,
       vaultRoot: input.vaultRoot,
     });
+    const hostedRootPermissionBoundaryProven =
+      await runCodexHostedRootPermissionProbe({
+        codexHome: input.codexHome,
+        execCommand,
+        sendRequest,
+        vaultRoot: input.vaultRoot,
+        workspaceRoot: input.workspaceRoot,
+      });
     const groupReadProof = await runCodexGroupReadPermissionProbe({
       execCommand,
       sendRequest,
@@ -988,6 +1019,7 @@ async function runCodexAppServerShellEnvironmentProbe(input: {
 
     return {
       ...groupReadProof,
+      hostedRootPermissionBoundaryProven,
       murphPathBytes: environmentProbe.murphPathBytes,
       pythonVersion,
       schemaVaultOptionHidden: vaultCliProof.schemaVaultOptionHidden,
@@ -1004,6 +1036,231 @@ async function runCodexAppServerShellEnvironmentProbe(input: {
     child.kill("SIGKILL");
     rejectPendingRequests(new Error("Codex app-server shell env probe was stopped."));
   }
+}
+
+async function runCodexHostedRootPermissionProbe(input: {
+  codexHome: string;
+  execCommand: (
+    label: string,
+    command: readonly string[],
+    options?: CodexCommandExecOptions,
+  ) => Promise<CodexCommandExecResult>;
+  sendRequest: (
+    label: string,
+    method: string,
+    params: unknown,
+    timeoutMs: number,
+  ) => Promise<Record<string, unknown>>;
+  vaultRoot: string;
+  workspaceRoot: string;
+}): Promise<boolean> {
+  const threadStart = await input.sendRequest(
+    "hosted-root-thread-start",
+    "thread/start",
+    {
+      approvalPolicy: "never",
+      cwd: input.vaultRoot,
+      permissions: MURPH_HOSTED_ROOT_PERMISSION_PROFILE,
+      runtimeWorkspaceRoots: [input.vaultRoot],
+    },
+    CODEX_SHELL_ENV_PROBE_TIMEOUT_MS,
+  );
+  const threadId = assertCodexHostedRootThreadAttestation(threadStart.result, {
+    label: "thread/start",
+    vaultRoot: input.vaultRoot,
+  });
+  const threadResume = await input.sendRequest(
+    "hosted-root-thread-resume",
+    "thread/resume",
+    {
+      approvalPolicy: "never",
+      cwd: input.vaultRoot,
+      excludeTurns: true,
+      permissions: MURPH_HOSTED_ROOT_PERMISSION_PROFILE,
+      runtimeWorkspaceRoots: [input.vaultRoot],
+      threadId,
+    },
+    CODEX_SHELL_ENV_PROBE_TIMEOUT_MS,
+  );
+  assertCodexHostedRootThreadAttestation(threadResume.result, {
+    label: "thread/resume",
+    vaultRoot: input.vaultRoot,
+  });
+
+  const managedCodexAuthPath = path.join(input.codexHome, "auth.json");
+  const authorizedFilePath = path.join(
+    input.workspaceRoot,
+    "hosted-root-authorized-read.txt",
+  );
+  const authorizedWritePath = path.join(
+    input.workspaceRoot,
+    "hosted-root-authorized-write.txt",
+  );
+  const managedAuthFixture = "hosted root auth deny fixture\n";
+  const authorizedFileContents = "ordinary hosted root read fixture\n";
+  const authorizedWriteContents = "ordinary hosted root write fixture\n";
+  await writeFile(managedCodexAuthPath, managedAuthFixture, { mode: 0o600 });
+  await chmod(managedCodexAuthPath, 0o600);
+  await writeFile(authorizedFilePath, authorizedFileContents, { mode: 0o600 });
+  await rm(authorizedWritePath, { force: true });
+
+  let acceptedNetworkConnections = 0;
+  const networkServer = createServer((socket) => {
+    acceptedNetworkConnections += 1;
+    socket.end();
+  });
+  const networkPort = await listenOnLoopback(networkServer);
+
+  try {
+    const result = await input.execCommand(
+      "hosted-root-permission-probe",
+      [
+        "node",
+        "-e",
+        buildCodexHostedRootPermissionProbeScript(),
+        JSON.stringify({
+          authorizedFilePath,
+          authorizedFileSha256: sha256Hex(authorizedFileContents),
+          authorizedWriteContents,
+          authorizedWritePath,
+          managedCodexAuthPath,
+          networkPort,
+        }),
+      ],
+      {
+        cwd: input.vaultRoot,
+        permissionProfile: MURPH_HOSTED_ROOT_PERMISSION_PROFILE,
+      },
+    );
+    const proof = readObject(
+      parseJsonFromCommandStdout(result.stdout, "hosted-root-permission-probe"),
+      "Codex hosted-root permission proof",
+    );
+    for (const field of [
+      "authorizedFileRead",
+      "authorizedFileWrite",
+      "managedCodexAuthReadDenied",
+      "networkAllowed",
+    ] as const) {
+      if (proof[field] !== true) {
+        throw new Error(`Codex hosted-root permission proof.${field} must be true.`);
+      }
+    }
+
+    if (await readFile(authorizedWritePath, "utf8") !== authorizedWriteContents) {
+      throw new Error(
+        "Hosted runner smoke hosted-root sandbox did not preserve ordinary filesystem writes.",
+      );
+    }
+    if (await readFile(managedCodexAuthPath, "utf8") !== managedAuthFixture) {
+      throw new Error(
+        "Hosted runner smoke could not prove the managed auth fixture remained present during the denied read.",
+      );
+    }
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    if (acceptedNetworkConnections !== 1) {
+      throw new Error(
+        "Hosted runner smoke hosted-root sandbox did not preserve ordinary network access.",
+      );
+    }
+
+    return true;
+  } finally {
+    await closeServer(networkServer);
+  }
+}
+
+function assertCodexHostedRootThreadAttestation(
+  value: unknown,
+  input: {
+    label: "thread/start" | "thread/resume";
+    vaultRoot: string;
+  },
+): string {
+  const result = readObject(value, `Codex hosted-root ${input.label} result`);
+  const activePermissionProfile = readObject(
+    result.activePermissionProfile,
+    `Codex hosted-root ${input.label} result.activePermissionProfile`,
+  );
+  const runtimeWorkspaceRoots = readArray(
+    result.runtimeWorkspaceRoots,
+    `Codex hosted-root ${input.label} result.runtimeWorkspaceRoots`,
+  );
+  const thread = readObject(
+    result.thread,
+    `Codex hosted-root ${input.label} result.thread`,
+  );
+  const threadId = readString(
+    thread.id,
+    `Codex hosted-root ${input.label} result.thread.id`,
+  );
+  const rootsMatch = runtimeWorkspaceRoots.length === 1
+    && typeof runtimeWorkspaceRoots[0] === "string"
+    && path.resolve(runtimeWorkspaceRoots[0]) === path.resolve(input.vaultRoot);
+
+  if (
+    activePermissionProfile.id !== MURPH_HOSTED_ROOT_PERMISSION_PROFILE
+    || result.approvalPolicy !== "never"
+    || typeof result.cwd !== "string"
+    || path.resolve(result.cwd) !== path.resolve(input.vaultRoot)
+    || !rootsMatch
+  ) {
+    throw new Error(
+      `Codex app-server did not attest the requested hosted-root ${input.label} context.`,
+    );
+  }
+
+  return threadId;
+}
+
+function buildCodexHostedRootPermissionProbeScript(): string {
+  return `
+const crypto = require("node:crypto");
+const fs = require("node:fs");
+const net = require("node:net");
+const input = JSON.parse(process.argv[1]);
+function networkAllowed(port) {
+  return new Promise((resolve) => {
+    const socket = net.connect({ host: "127.0.0.1", port });
+    let settled = false;
+    const finish = (allowed) => {
+      if (settled) return;
+      settled = true;
+      socket.removeAllListeners();
+      socket.destroy();
+      resolve(allowed);
+    };
+    socket.once("connect", () => finish(true));
+    socket.once("error", () => finish(false));
+    socket.setTimeout(1500, () => finish(false));
+  });
+}
+void (async () => {
+  let authorizedFileRead = false;
+  try {
+    const contents = fs.readFileSync(input.authorizedFilePath);
+    authorizedFileRead = crypto.createHash("sha256").update(contents).digest("hex")
+      === input.authorizedFileSha256;
+  } catch {}
+  let authorizedFileWrite = false;
+  try {
+    fs.writeFileSync(input.authorizedWritePath, input.authorizedWriteContents, { mode: 0o600 });
+    authorizedFileWrite = true;
+  } catch {}
+  let managedCodexAuthReadDenied = false;
+  try {
+    fs.readFileSync(input.managedCodexAuthPath, "utf8");
+  } catch {
+    managedCodexAuthReadDenied = true;
+  }
+  process.stdout.write(JSON.stringify({
+    authorizedFileRead,
+    authorizedFileWrite,
+    managedCodexAuthReadDenied,
+    networkAllowed: await networkAllowed(input.networkPort),
+  }));
+})().catch(() => process.exit(1));
+`;
 }
 
 async function runCodexGroupReadPermissionProbe(input: {
