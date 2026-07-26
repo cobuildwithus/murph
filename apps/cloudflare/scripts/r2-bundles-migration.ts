@@ -5,6 +5,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 
+import { createHostedStorageNamespaceId } from "../src/storage-paths.js";
+
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const appDir = path.resolve(scriptDir, "..");
 const lifecycleConfigPath = path.join(appDir, "r2-bundles-lifecycle.json");
@@ -17,6 +19,8 @@ const MIGRATION_MARKER_PREFIX = "_murph/r2-bundles-migration/";
 const SIMPLE_ETAG_PATTERN = /^"[a-f0-9]{32}"$/iu;
 const EMPTY_OBJECT_ETAG = '"d41d8cd98f00b204e9800998ecf8427e"';
 const MAX_REPORTED_FINGERPRINTS = 8;
+const CURRENT_USER_NAMESPACE_PATTERN = /^users\/(hsn_[a-f0-9]{24})\//u;
+const ACTIVE_HOSTED_MEMBER_IDS_SQL = "SELECT id FROM hosted_member ORDER BY id;";
 
 const commonChildEnvironmentNames = [
   "HOME",
@@ -64,11 +68,40 @@ The R2 migration credential must be a temporary Object Read & Write key scoped
 to the source and destination buckets. Credentials remain in child-process
 environment only; they are never placed in command arguments or output.`;
 
+export const R2_BUNDLES_ACTIVE_OWNER_GATE_USAGE = `Usage:
+  pnpm r2:bundles:active-owners -- --source-frozen --source <oc-bucket>
+
+The gate runs only after account-deletion admission and every ordinary R2
+writer is closed. It proves that two stable source inventories contain only
+current user namespaces derived in memory from canonical hosted-member ids.
+No member id, namespace id, or object key is printed or written to disk.
+
+Options:
+  --source <oc-bucket>  Frozen source bucket to inspect.
+  --source-frozen       Assert every producer is paused and issued upload URLs
+                        have expired. Always required.
+  --help                Show this help.
+
+Required local command:
+  murph-prod-psql-ro
+
+Required environment:
+  CLOUDFLARE_ACCOUNT_ID
+  R2_MIGRATION_ACCESS_KEY_ID
+  R2_MIGRATION_SECRET_ACCESS_KEY
+
+Use a temporary Object Read-only key scoped only to the source bucket.`;
+
 export interface R2BundlesMigrationOptions {
   apply: boolean;
   confirmDestination: string | null;
   destination: string;
   prune: number | null;
+  source: string;
+  sourceFrozen: boolean;
+}
+
+export interface R2BundlesActiveOwnerGateOptions {
   source: string;
   sourceFrozen: boolean;
 }
@@ -192,6 +225,37 @@ export function parseR2BucketInfoJson(value: string): R2BucketInfo {
     location: requireString(parsed, "location", "R2 bucket info"),
     name: requireString(parsed, "name", "R2 bucket info"),
   };
+}
+
+export function parseR2BundlesActiveOwnerGateArgs(
+  argv: readonly string[],
+): R2BundlesActiveOwnerGateOptions | { help: true } {
+  const { positionals, values } = parseArgs({
+    allowPositionals: true,
+    args: argv.filter((argument) => argument !== "--"),
+    options: {
+      help: { short: "h", type: "boolean" },
+      source: { type: "string" },
+      "source-frozen": { type: "boolean" },
+    },
+    strict: true,
+  });
+  if (values.help) return { help: true };
+  if (positionals.length > 0) {
+    throw new TypeError("Unexpected positional active-owner gate argument.");
+  }
+
+  const options: R2BundlesActiveOwnerGateOptions = {
+    source: normalizeBucketName(requireFlag(values.source, "--source"), "source"),
+    sourceFrozen: values["source-frozen"] ?? false,
+  };
+  if (!options.sourceFrozen) {
+    throw new TypeError(
+      "The R2 active-owner gate runs only inside the cutover write fence; "
+      + "--source-frozen is required.",
+    );
+  }
+  return options;
 }
 
 export function parseCanonicalLifecycleJson(value: string): R2LifecycleRule[] {
@@ -422,6 +486,122 @@ export async function runR2BundlesMigration(
     `Verified the exact mirror of ${verified.sourceCount.toLocaleString("en-US")} frozen source `
     + "object(s); no source or destination object was changed or deleted.",
   );
+}
+
+export async function runR2BundlesActiveOwnerGate(
+  options: R2BundlesActiveOwnerGateOptions,
+  sourceEnvironment: Readonly<Record<string, string | undefined>> = process.env,
+  dependencies: R2BundlesMigrationDependencies = {},
+): Promise<void> {
+  if (!options.sourceFrozen) {
+    throw new TypeError(
+      "The R2 active-owner gate runs only inside the cutover write fence; "
+      + "--source-frozen is required.",
+    );
+  }
+
+  const runner = dependencies.runner ?? createDefaultCommandRunner();
+  const environment = readMigrationEnvironment(sourceEnvironment);
+  const awsEnvironment = buildAwsMigrationChildEnvironment({
+    accessKeyId: environment.accessKeyId,
+    base: sourceEnvironment,
+    secretAccessKey: environment.secretAccessKey,
+  });
+  const runAws = async (
+    label: string,
+    args: readonly string[],
+  ): Promise<CommandResult> => await runner.run({
+    args,
+    command: "aws",
+    cwd: appDir,
+    env: awsEnvironment,
+    label,
+  });
+
+  const version = await runAws("AWS CLI version check", ["--version"]);
+  if (!/aws-cli\/2\./u.test(`${version.stdout}\n${version.stderr}`)) {
+    throw new Error("R2 active-owner gate requires AWS CLI v2.");
+  }
+
+  const readSourceInventory = async (): Promise<R2ObjectInventoryEntry[]> =>
+    await readR2ObjectInventory({
+      awsEnvironment,
+      bucketName: options.source,
+      endpoint: environment.endpoint,
+      label: "R2 active-owner source inventory read",
+      runner,
+    });
+
+  const firstInventory = await readSourceInventory();
+  const secondInventory = await readSourceInventory();
+  assertStableInventory(
+    firstInventory,
+    secondInventory,
+    "Source inventory changed during the active-owner gate",
+  );
+  assertNoMigrationMarkers(secondInventory);
+  if (secondInventory.length === 0) {
+    throw new Error("Refusing an R2 active-owner gate with an empty source bucket.");
+  }
+
+  const ownerQuery = await runner.run({
+    args: [
+      "-A",
+      "-t",
+      "-X",
+      "-v",
+      "ON_ERROR_STOP=1",
+      "-c",
+      ACTIVE_HOSTED_MEMBER_IDS_SQL,
+    ],
+    command: "murph-prod-psql-ro",
+    cwd: appDir,
+    env: {
+      ...pickEnvironment(sourceEnvironment, commonChildEnvironmentNames),
+      CI: "1",
+      NO_COLOR: "1",
+      PAGER: "cat",
+    },
+    label: "Canonical hosted-member owner query",
+  });
+  const activeMemberIds = parseActiveHostedMemberIds(ownerQuery.stdout);
+  const activeNamespaces = new Set(
+    activeMemberIds.map((memberId) => createHostedStorageNamespaceId(memberId)),
+  );
+  let unownedObjectCount = 0;
+  const observedOwnedNamespaces = new Set<string>();
+  for (const entry of secondInventory) {
+    const namespace = CURRENT_USER_NAMESPACE_PATTERN.exec(entry.key)?.[1] ?? null;
+    if (!namespace || !activeNamespaces.has(namespace)) {
+      unownedObjectCount += 1;
+    } else {
+      observedOwnedNamespaces.add(namespace);
+    }
+  }
+
+  if (unownedObjectCount > 0) {
+    throw new Error(
+      `Frozen source contains ${unownedObjectCount.toLocaleString("en-US")} object(s) `
+      + "outside current hosted-member ownership; destination creation is blocked.",
+    );
+  }
+
+  const log = dependencies.log ?? console.log;
+  log(
+    `Verified ${secondInventory.length.toLocaleString("en-US")} frozen source object(s) `
+    + `across ${observedOwnedNamespaces.size.toLocaleString("en-US")} active `
+    + "hosted-member namespace(s).",
+  );
+}
+
+function parseActiveHostedMemberIds(value: string): string[] {
+  const ids = value.split(/\r?\n/u).filter((line) => line.length > 0);
+  for (const id of ids) {
+    if (id.trim() !== id || /\s/u.test(id)) {
+      throw new TypeError("Canonical hosted-member owner query returned an invalid id.");
+    }
+  }
+  return ids;
 }
 
 async function copyFrozenSource(input: {
@@ -904,13 +1084,35 @@ async function readInventory(
   context: MigrationContext,
   bucketName: string,
 ): Promise<R2ObjectInventoryEntry[]> {
-  const result = await runChild(context, "R2 object inventory read", "aws", [
-    "s3api", "list-objects-v2", "--bucket", bucketName,
-    "--endpoint-url", context.environment.endpoint, "--region", "auto", "--page-size", "1000",
-    "--output", "json", "--query",
-    "Contents[].{key:Key,size:Size,etag:ETag,lastModified:LastModified,storageClass:StorageClass}",
-    "--no-cli-pager",
-  ], true);
+  return await readR2ObjectInventory({
+    awsEnvironment: context.awsEnvironment,
+    bucketName,
+    endpoint: context.environment.endpoint,
+    label: "R2 object inventory read",
+    runner: context.runner,
+  });
+}
+
+async function readR2ObjectInventory(input: {
+  awsEnvironment: NodeJS.ProcessEnv;
+  bucketName: string;
+  endpoint: string;
+  label: string;
+  runner: R2BundlesMigrationCommandRunner;
+}): Promise<R2ObjectInventoryEntry[]> {
+  const result = await input.runner.run({
+    args: [
+      "s3api", "list-objects-v2", "--bucket", input.bucketName,
+      "--endpoint-url", input.endpoint, "--region", "auto", "--page-size", "1000",
+      "--output", "json", "--query",
+      "Contents[].{key:Key,size:Size,etag:ETag,lastModified:LastModified,storageClass:StorageClass}",
+      "--no-cli-pager",
+    ],
+    command: "aws",
+    cwd: appDir,
+    env: input.awsEnvironment,
+    label: input.label,
+  });
   return parseR2ObjectInventoryJson(result.stdout);
 }
 

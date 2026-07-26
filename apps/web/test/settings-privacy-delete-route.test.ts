@@ -1,10 +1,6 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
-import {
-  HOSTED_ACCOUNT_DELETION_ENTRY_LOG_MESSAGE,
-  HOSTED_ACCOUNT_DELETION_SAFE_TERMINAL_LOG_MESSAGE,
-} from "@/src/lib/hosted-privacy/account-deletion-maintenance";
 import { HOSTED_ACCOUNT_DATA_DELETION_SCHEMA } from "@/src/lib/hosted-privacy/account-data-shared";
 
 const mocks = vi.hoisted(() => ({
@@ -55,7 +51,6 @@ describe("settings privacy delete route", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.spyOn(console, "info").mockImplementation(() => {});
     applyRouteDefaults();
   });
 
@@ -94,7 +89,7 @@ describe("settings privacy delete route", () => {
     });
   }
 
-  it("pins the route lifetime used by the migration drain", () => {
+  it("pins the maintenance-bearing route lifetime", () => {
     expect(settingsPrivacyDeleteRoute.maxDuration).toBe(300);
   });
 
@@ -145,19 +140,6 @@ describe("settings privacy delete route", () => {
     expect(mocks.verifyAndConsumeSensitiveActionChallenge.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.deleteHostedAccountData.mock.invocationCallOrder[0],
     );
-    expect(console.info).toHaveBeenCalledWith(
-      HOSTED_ACCOUNT_DELETION_ENTRY_LOG_MESSAGE,
-    );
-    expect(vi.mocked(console.info).mock.invocationCallOrder[0]).toBeLessThan(
-      mocks.requireHostedAppSessionFromRequest.mock.invocationCallOrder[0],
-    );
-    expect(console.info).toHaveBeenCalledWith(
-      HOSTED_ACCOUNT_DELETION_SAFE_TERMINAL_LOG_MESSAGE,
-    );
-    expect(console.info).toHaveBeenCalledTimes(2);
-    expect(mocks.deleteHostedAccountData.mock.invocationCallOrder[0]).toBeLessThan(
-      vi.mocked(console.info).mock.invocationCallOrder[1],
-    );
     expect(mocks.deleteHostedAccountData).toHaveBeenCalledWith({
       memberId: "member_123",
       prisma: mocks.prismaClient,
@@ -177,112 +159,6 @@ describe("settings privacy delete route", () => {
         schema: HOSTED_ACCOUNT_DATA_DELETION_SCHEMA,
       },
     });
-  });
-
-  it.each([
-    { deleted: true, expectedTerminalCount: 1 },
-    { deleted: false, expectedTerminalCount: 0 },
-  ])(
-    "tracks a request held across maintenance activation when aggregate deleted=$deleted",
-    async ({ deleted, expectedTerminalCount }) => {
-      let releaseAuthentication = (): void => {
-        throw new Error("Held account deletion authentication was not started.");
-      };
-      mocks.requireHostedAppSessionFromRequest.mockImplementationOnce(async () => {
-        await new Promise<void>((resolve) => {
-          releaseAuthentication = resolve;
-        });
-        return {
-          member: {
-            id: "member_123",
-          },
-          privyUserId: "privy-user-123",
-          sessionId: "session_123",
-        };
-      });
-      mocks.deleteHostedAccountData.mockResolvedValueOnce({
-        cloudflare: {
-          deleted,
-        },
-        deletedAt: "2026-04-29T01:02:03.000Z",
-        deletedCounts: {
-          "prisma.hosted_member": 1,
-        },
-        memberId: "member_123",
-        schema: HOSTED_ACCOUNT_DATA_DELETION_SCHEMA,
-      });
-      const request = new Request("https://join.example.test/api/settings/privacy/delete", {
-        body: JSON.stringify({
-          authorization: {
-            signature: `0x${"11".repeat(65)}`,
-            token: "sac_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef",
-          },
-          confirmationPhrase: "DELETE MY ACCOUNT",
-        }),
-        headers: {
-          "Content-Type": "application/json",
-          origin: "https://join.example.test",
-        },
-        method: "POST",
-      });
-
-      let responseSettled = false;
-      const responsePromise = settingsPrivacyDeleteRoute.POST(request).finally(() => {
-        responseSettled = true;
-      });
-
-      await vi.waitFor(() => {
-        expect(console.info).toHaveBeenCalledWith(
-          HOSTED_ACCOUNT_DELETION_ENTRY_LOG_MESSAGE,
-        );
-        expect(mocks.requireHostedAppSessionFromRequest).toHaveBeenCalledTimes(1);
-      });
-      expect(responseSettled).toBe(false);
-      expect(mocks.deleteHostedAccountData).not.toHaveBeenCalled();
-      expect(console.info).not.toHaveBeenCalledWith(
-        HOSTED_ACCOUNT_DELETION_SAFE_TERMINAL_LOG_MESSAGE,
-      );
-
-      // Models the production boundary: this old invocation already passed the
-      // unset guard while the marker-bearing maintenance deployment activates.
-      vi.stubEnv("HOSTED_ACCOUNT_DELETION_MAINTENANCE", "1");
-      releaseAuthentication();
-
-      await expect(responsePromise).resolves.toMatchObject({ status: 200 });
-      expect(console.info).toHaveBeenCalledTimes(1 + expectedTerminalCount);
-      expect(vi.mocked(console.info).mock.calls.filter(
-        ([message]) => message === HOSTED_ACCOUNT_DELETION_SAFE_TERMINAL_LOG_MESSAGE,
-      )).toHaveLength(expectedTerminalCount);
-    },
-  );
-
-  it("does not claim safe terminal cleanup when deletion throws after starting", async () => {
-    mocks.deleteHostedAccountData.mockRejectedValueOnce(
-      new Error("ambiguous deletion failure"),
-    );
-    const request = new Request("https://join.example.test/api/settings/privacy/delete", {
-      body: JSON.stringify({
-        authorization: {
-          signature: `0x${"11".repeat(65)}`,
-          token: "sac_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef",
-        },
-        confirmationPhrase: "DELETE MY ACCOUNT",
-      }),
-      headers: {
-        "Content-Type": "application/json",
-        origin: "https://join.example.test",
-      },
-      method: "POST",
-    });
-
-    const response = await settingsPrivacyDeleteRoute.POST(request);
-    expect(response.status).toBe(500);
-    expect(console.info).toHaveBeenCalledWith(
-      HOSTED_ACCOUNT_DELETION_ENTRY_LOG_MESSAGE,
-    );
-    expect(console.info).not.toHaveBeenCalledWith(
-      HOSTED_ACCOUNT_DELETION_SAFE_TERMINAL_LOG_MESSAGE,
-    );
   });
 
   it("rejects a wrong typed phrase before deleting account data", async () => {
@@ -375,12 +251,6 @@ describe("settings privacy delete route", () => {
       expect(mocks.verifyAndConsumeSensitiveActionChallenge).not.toHaveBeenCalled();
       expect(mocks.deleteHostedAccountData).not.toHaveBeenCalled();
       expect(mocks.buildHostedAppSessionClearCookie).not.toHaveBeenCalled();
-      expect(console.info).toHaveBeenCalledWith(
-        HOSTED_ACCOUNT_DELETION_ENTRY_LOG_MESSAGE,
-      );
-      expect(console.info).toHaveBeenCalledWith(
-        HOSTED_ACCOUNT_DELETION_SAFE_TERMINAL_LOG_MESSAGE,
-      );
     });
 
     it("stays available whenever the window flag is not exactly set", async () => {

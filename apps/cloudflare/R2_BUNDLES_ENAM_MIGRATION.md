@@ -23,6 +23,10 @@ source moves.
 - Run the migration only inside the fence. The command requires
   `--source-frozen` in both its read-only and `--apply` forms; there is no
   phase that is safe to run against a live source.
+- Before the destination exists, close account-deletion admission, retire every
+  predecessor invocation, and prove every frozen source object belongs to a
+  current canonical hosted-member namespace. Unknown or unowned placement
+  blocks the migration without printing its key.
 - The OC source remains authoritative until the binding switch and remains the
   rollback source until the first durable ENAM checkpoint. The tool never
   deletes from the OC source.
@@ -177,25 +181,26 @@ shell assignment does nothing: setting or clearing it requires a production
 environment change followed by a deployment that picks it up.
 
 **One rule owns the window.** The control is set before the destination exists
-so it can become the sole admission fence and drain all earlier deletions
-before any copy is possible. It remains set while an ENAM bucket holds copies
-that could still become live, and is cleared the moment OC is the sole
-authority again. The cutover owner owns both edges:
+so it can close admission while every predecessor invocation retires and the
+frozen source is joined to canonical hosted-member ownership. It remains set
+while an ENAM bucket holds copies that could still become live, and is cleared
+the moment OC is the sole authority again. The cutover owner owns both edges:
 
 | Point in the operation | Control |
 | --- | --- |
-| Section 4 and the marker-bearing preparatory deployment | Unset. |
-| Activation and exact pre-fence deletion drain | Set. The destination does not exist yet. |
-| Activation/drain failure | Cleared by a production environment change and deployment before the operation is rebooked. No destination cleanup is needed. |
+| Section 4 | Unset. |
+| Activation, predecessor retirement, and active-owner gate | Set. The destination does not exist yet. |
+| Activation or owner-gate failure | Cleared by a production environment change and deployment before the operation is rebooked. No destination cleanup is needed. |
 | Copy, cutover, proofs, canary | Set. |
 | Any pre-commit abandonment or overrun | Cleared by the abandonment procedure, before writers reopen. |
 | Successful retirement | Cleared in section 8. |
 
-Do not create the destination until activation and the exact drain both pass.
-If a later setup step fails before the copy tool creates the pair marker, leave
-the empty, unbound destination in place, revoke its temporary key, clear the
-control, and rebook. Once the pair marker exists, use the mechanically guarded
-abandonment procedure. No ordinary exit leaves the control set.
+Do not create the destination until activation, the absolute predecessor wait,
+and the active-owner gate all pass. If a later setup step fails before the copy
+tool creates the pair marker, leave the empty, unbound destination in place,
+revoke its temporary key, clear the control, and rebook. Once the pair marker
+exists, use the mechanically guarded abandonment procedure. No ordinary exit
+leaves the control set.
 
 The message makes no timing promise, not even a relative one. This window runs
 from before the copy until OC retirement, which section 8 permits as late as 24
@@ -229,8 +234,9 @@ References: [R2 data location][data-location], [R2 consistency][consistency],
 leading-slash `CopyObject` example][copy-object]. The cutover ordering also
 accounts for [Worker version deployment semantics][worker-versions], [Durable
 Object code-update skew][do-updates], [Durable Object alarms][do-alarms],
-[Vercel runtime-log fields][vercel-runtime-logs], and
-[Vercel CLI log filters][vercel-cli-logs].
+[AWS CLI automatic pagination][aws-cli-pagination],
+[Vercel Function duration limits][vercel-function-duration], and
+[Vercel Skew Protection][vercel-skew-protection].
 
 [data-location]: https://developers.cloudflare.com/r2/reference/data-location/
 [consistency]: https://developers.cloudflare.com/r2/reference/consistency/
@@ -240,8 +246,8 @@ Object code-update skew][do-updates], [Durable Object alarms][do-alarms],
 [worker-versions]: https://developers.cloudflare.com/workers/versions-and-deployments/
 [do-updates]: https://developers.cloudflare.com/durable-objects/platform/known-issues/#code-updates
 [do-alarms]: https://developers.cloudflare.com/durable-objects/api/alarms/
-[vercel-runtime-logs]: https://vercel.com/docs/logs/runtime
-[vercel-cli-logs]: https://vercel.com/docs/cli/logs
+[aws-cli-pagination]: https://docs.aws.amazon.com/cli/latest/userguide/cli-usage-pagination.html
+[vercel-function-duration]: https://vercel.com/docs/functions/configuring-functions/duration
 [vercel-skew-protection]: https://vercel.com/docs/skew-protection
 
 ## 1. Size the window before booking it
@@ -406,181 +412,106 @@ One cutover owner must prove every item below. Abort if any item is uncertain.
 
 Keep the fence through section 7.
 
-## 5. Copy the frozen source and prove the mirror
+## 5. Close deletion admission, prove source ownership, and copy
 
-First qualify the marker-bearing web version while the maintenance flag is
-unset. The delete route pins Vercel `maxDuration` to 300 seconds and emits two
-exact, identifier-free runtime-log messages inside the same Vercel request
-event. Confirm Skew Protection is enabled, then establish one full route
-lifetime of observable quiet before dispatching the preparatory deployment:
+Vercel runtime logs are diagnostic only. Their filters, result limit, and
+retention do not provide a complete-enumeration or bounded-indexing contract,
+so no log query, request count, status, cursor, or flush delay can authorize
+destination creation.
+
+First confirm Skew Protection is enabled. Also confirm this project uses Fluid
+Compute and its ordinary Function default remains 300 seconds; the delete route
+pins the maintenance-bearing version to that same duration:
 
 ```bash
-export ACCOUNT_DELETE_MAX_DURATION_SECONDS=300
 pnpm --dir apps/web exec vercel api /v9/projects/murph --raw 2>/dev/null |
-  jq -er '.skewProtectionMaxAge | numbers | select(. > 0)' >/dev/null
-export MARKERLESS_QUIET_START_UTC="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-sleep "$ACCOUNT_DELETE_MAX_DURATION_SECONDS"
-export MARKER_DEPLOY_CURSOR_UTC="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  jq -e '
+    (.skewProtectionMaxAge | type == "number" and . > 0)
+    and .defaultResourceConfig.fluid == true
+    and .defaultResourceConfig.functionDefaultTimeout == 300
+  ' >/dev/null
 ```
 
-- `Hosted account deletion request entered the guarded route.` is the first
-  handler action, before any guard or await;
-- `Hosted account deletion request reached a safe terminal disposition.` is
-  emitted when the request stops before destructive deletion starts, or only
-  after the existing deletion service's aggregate `cloudflare.deleted` result
-  proves every fanned-out hosted-member R2 and Durable Object cleanup returned
-  successfully.
+Set `HOSTED_ACCOUNT_DELETION_MAINTENANCE=1`, deploy it to 100 percent, prove
+the three route checks from the deferral section, and record its exact
+deployment ID as `MAINTENANCE_DEPLOYMENT_ID`. In that deployment's Vercel menu,
+advance the [Skew Protection Threshold][vercel-skew-protection] to
+`MAINTENANCE_DEPLOYMENT_ID`.
 
-A timeout, process exit, throw after deletion starts,
-`cloudflare.deleted=false`, or missing log leaves the entry unmatched and
-blocks the migration. Request completion, HTTP status, event counts, and
-elapsed time are never deletion proof.
+The later of the 100-percent deployment confirmation and the threshold
+confirmation is the single admission-closing instant. Traffic percentage alone
+is not sufficient because Skew Protection can still address an older
+deployment. Once the threshold is set, no new request can resolve to an older
+unset-guard deployment and every request on the maintenance deployment rejects
+before consuming its sensitive-action challenge.
 
-Wait for the preparatory deployment to reach 100 percent and record its exact
-deployment ID as `MARKER_DEPLOYMENT_ID`. In that deployment's Vercel menu, set
-the [Skew Protection Threshold][vercel-skew-protection] to this deployment.
-Vercel then refuses to resolve requests to every older deployment, including
-requests carrying an old deployment query parameter, header, or cookie. Record
-`MARKER_READY_UTC` only after Vercel confirms the threshold.
-
-The 100-percent traffic boundary alone is not this transition gate: Skew
-Protection can still address an older deployment. Query the entire interval
-from `MARKERLESS_QUIET_START_UTC` through `MARKER_READY_UTC` and require that
-every delete-route invocation, if any, resolved to `MARKER_DEPLOYMENT_ID`.
-Reaching the result bound, a missing deployment ID, or any older deployment
-match is unjoinable and becomes an incident:
+Wait Vercel's current absolute Node.js Function maximum, not a runtime-log
+flush interval and not merely this route's current 300-second setting. This
+retires any already-running predecessor even if a historical deployment had a
+larger explicit duration:
 
 ```bash
-(
-  set -euo pipefail
-  test -n "$MARKERLESS_QUIET_START_UTC"
-  test -n "$MARKER_READY_UTC"
-  test -n "$MARKER_DEPLOYMENT_ID"
-  QUALIFICATION_LOG="$(mktemp)"
-  trap 'rm -f "$QUALIFICATION_LOG"' EXIT
-  pnpm --dir apps/web exec vercel logs --project murph \
-    --environment production --no-branch \
-    --query '/api/settings/privacy/delete' \
-    --since "$MARKERLESS_QUIET_START_UTC" --until "$MARKER_READY_UTC" \
-    --limit 1000 --json >"$QUALIFICATION_LOG"
-  test "$(jq -s 'length' "$QUALIFICATION_LOG")" -lt 1000
-  test "$(
-    jq -s --arg markerDeploymentId "$MARKER_DEPLOYMENT_ID" '
-      [.[] |
-        select(
-          .requestPath == "/api/settings/privacy/delete"
-          and .requestMethod == "POST"
-        ) |
-        (.deploymentId // "") |
-        select(. != $markerDeploymentId)
-      ] | length
-    ' "$QUALIFICATION_LOG"
-  )" = 0
-)
+test -n "$MAINTENANCE_DEPLOYMENT_ID"
+export VERCEL_ABSOLUTE_FUNCTION_MAX_SECONDS=1800
+export DELETION_ADMISSION_CLOSED_UTC="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+sleep "$VERCEL_ABSOLUTE_FUNCTION_MAX_SECONDS"
 ```
 
-After the threshold, wait the route's full 300-second platform-enforced
-maximum duration. Vercel terminates a Function that exceeds its configured
-`maxDuration`; together with the preceding quiet interval and exact deployment
-query, this retires every markerless predecessor invocation. It does not prove
-any deletion result. Keep the qualification inside Vercel's retained
-searchable-log window, and dispatch a fresh marker-bearing preparation rather
-than infer missing history.
+The wait proves only that no pre-threshold Web invocation remains active. It
+does not infer whether a prior deletion completed. That outcome is derived
+from the two existing durable owners instead: the frozen source R2 inventory
+and canonical Postgres `hosted_member` rows.
+
+Before creating the destination, require the lifecycle-managed
+`hosted-email/messages/` and `hosted-meal-photos/images/` prefixes to contain
+zero objects. Copying one would restart its deletion backstop in ENAM, while
+dropping one could lose a pending import. If either prefix cannot be emptied,
+rebook rather than copying or dropping its contents.
+
+Issue a temporary Object Read-only key scoped only to the OC source. Load it
+without terminal echo, then run the active-owner gate:
 
 ```bash
-sleep "$ACCOUNT_DELETE_MAX_DURATION_SECONDS"
+command -v murph-prod-psql-ro >/dev/null
+read -r CLOUDFLARE_ACCOUNT_ID
+read -r R2_MIGRATION_ACCESS_KEY_ID
+read -r -s R2_MIGRATION_SECRET_ACCESS_KEY
+export CLOUDFLARE_ACCOUNT_ID R2_MIGRATION_ACCESS_KEY_ID R2_MIGRATION_SECRET_ACCESS_KEY
+
+pnpm --dir apps/cloudflare r2:bundles:active-owners -- \
+  --source "$SOURCE_BUCKET" --source-frozen
+
+unset R2_MIGRATION_ACCESS_KEY_ID R2_MIGRATION_SECRET_ACCESS_KEY CLOUDFLARE_ACCOUNT_ID
 ```
 
-For the activation:
+Revoke that source-only key immediately. The gate performs two stable,
+paginated source inventories and one complete Keychain-backed read-only query
+of `hosted_member.id`. It derives the deterministic `hsn_` namespace ids in
+memory, reports counts only, and refuses every source object that is not under
+a current hosted-member namespace. It never prints or writes a member id,
+namespace id, object key, or database URL.
 
-1. Begin the tracked interval before the marker deployment was dispatched:
+A request hidden from or delayed in Vercel logs cannot evade this proof. If it
+removed its member row but left even one R2 object, that namespace is unowned
+and destination creation fails. If it completed R2 cleanup, there is no object
+to copy. An empty owner result, unknown key placement, unstable inventory,
+failed automatic pagination, malformed AWS output, failed Postgres query, or
+unowned object all fail closed.
 
-   ```bash
-   export ENTRY_MARKER='Hosted account deletion request entered the guarded route.'
-   export SAFE_TERMINAL_MARKER='Hosted account deletion request reached a safe terminal disposition.'
-   export TRACKED_WINDOW_START_UTC="$MARKER_DEPLOY_CURSOR_UTC"
-   ```
+Any failure keeps OC authoritative and the destination nonexistent. Preserve
+the source, clear the maintenance variable through a production deployment,
+and investigate an unowned-object result as a privacy incident before
+rebooking. Do not delete an ambiguous source object or substitute logs,
+elapsed time, a retrying scan, or a manual count.
 
-2. Set `HOSTED_ACCOUNT_DELETION_MAINTENANCE=1`, deploy it to 100 percent, and
-   prove the three route checks from the deferral section. Record its exact
-   deployment ID as `MAINTENANCE_DEPLOYMENT_ID`.
-
-3. In that deployment's Vercel menu, advance the Skew Protection Threshold to
-   `MAINTENANCE_DEPLOYMENT_ID`. Record the drain cutoff only after Vercel
-   confirms the threshold and the deployment remains at 100 percent. This
-   later boundary is the single admission-closing instant: no new request can
-   resolve to an older unset-guard deployment, every invocation on the
-   maintenance deployment rejects before destructive deletion, and every
-   already-running marker-bearing invocation emitted its entry marker as its
-   first handler action.
-
-4. Wait the full route lifetime plus a small log-flush margin:
-
-   ```bash
-   test -n "$MAINTENANCE_DEPLOYMENT_ID"
-   export FENCE_CLOSED_UTC="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-   sleep "$((ACCOUNT_DELETE_MAX_DURATION_SECONDS + 30))"
-   ```
-
-5. In one fail-closed block, list every delete-route invocation from
-   `TRACKED_WINDOW_START_UTC` through `FENCE_CLOSED_UTC`. Require every matching
-   Vercel request event to carry its opaque event `id`, and require exactly one
-   entry and one safe terminal message in that event's `logs` array. The
-   terminal message may occur after the cutoff because the event is fetched
-   only after the full drain; it remains owned by the same request event.
-   Reaching Vercel's 1,000-result bound is ambiguous and fails:
-
-   ```bash
-   (
-     set -euo pipefail
-     test -n "$TRACKED_WINDOW_START_UTC"
-     test -n "$FENCE_CLOSED_UTC"
-     DRAIN_TMP_DIR="$(mktemp -d)"
-     ROUTE_LOG="$DRAIN_TMP_DIR/delete-route.jsonl"
-     trap 'rm -f "$ROUTE_LOG"; rmdir "$DRAIN_TMP_DIR"' EXIT
-
-     pnpm --dir apps/web exec vercel logs --project murph \
-       --environment production --no-branch \
-       --query '/api/settings/privacy/delete' \
-       --since "$TRACKED_WINDOW_START_UTC" --until "$FENCE_CLOSED_UTC" \
-       --limit 1000 --json >"$ROUTE_LOG"
-     ROUTE_LOG_COUNT="$(jq -s 'length' "$ROUTE_LOG")"
-     test "$ROUTE_LOG_COUNT" -lt 1000
-     test "$(
-       jq -s \
-         --arg entryMarker "$ENTRY_MARKER" \
-         --arg terminalMarker "$SAFE_TERMINAL_MARKER" '
-           [.[] |
-             select(
-               .requestPath == "/api/settings/privacy/delete"
-               and .requestMethod == "POST"
-             ) |
-             select(
-               (.id // "") == ""
-               or ([.logs[]? | select(.message == $entryMarker)] | length) != 1
-               or ([.logs[]? | select(.message == $terminalMarker)] | length) != 1
-             )
-           ] | length
-         ' "$ROUTE_LOG"
-     )" = 0
-   )
-   ```
-
-   An unmatched, duplicated, or unjoinable request blocks destination creation.
-   Clear the maintenance variable through a production deployment, investigate
-   the request as an incident, and rebook. Do not infer safety from a timeout or
-   successful HTTP response.
-
-The focused route regression holds a request after it passes the unset guard
-but before authentication returns, activates the maintenance environment, and
-then releases it into both `cloudflare.deleted=true` and
-`cloudflare.deleted=false`. The entry is visible while held; only the aggregate
-success receives a safe terminal pair. Rehearse the same boundary in
-preproduction with concurrent deletions and a forced web-control timeout. No
-copy becomes eligible unless every pre-fence request has its exact pair.
+The external write fence remains active after this gate. An account deletion
+cannot start, and ordinary writers cannot create another namespace. A
+previously scheduled cleanup may still delete a source object; the migration's
+explicit prune-and-reprove path safely converges that deletion.
 
 Only now define the authoritative production pair, create its dedicated ENAM
-bucket, and issue a separate pair-scoped migration key as in section 2:
+bucket, and issue a new pair-scoped migration key as in section 2. Never reuse
+the revoked source-only owner-gate key:
 
 ```bash
 test "$(gh variable get HOSTED_R2_PRESIGN_BUCKET_NAME --env production)" = "$SOURCE_BUCKET"
@@ -621,19 +552,6 @@ pnpm --dir apps/cloudflare r2:bundles:migrate -- \
 The count must match exactly; a stale count fails closed rather than deleting a
 different set. Record every reported prune count in the private change record.
 Repeat until the read-only proof passes with no divergence in either direction.
-
-The migration refuses to start while anything remains under the
-lifecycle-managed `hosted-email/messages/` or `hosted-meal-photos/images/`
-prefixes, in both the `--apply` and read-only forms, before it creates or
-copies any destination object. Copying such an object would restart its 24-hour
-or 31-day deletion backstop in ENAM, and dropping it would lose a pending
-import when OC is retired; neither is acceptable, so the operation waits for
-the existing import, post-checkpoint cleanup, account-deletion, and lifecycle
-owners to empty those prefixes.
-
-Record a zero-object inventory for both prefixes immediately before the copy.
-If either prefix cannot be emptied, rebook the window rather than copying or
-dropping its contents.
 
 ## 6. Switch and read back all configuration
 

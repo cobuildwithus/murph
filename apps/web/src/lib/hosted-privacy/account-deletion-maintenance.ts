@@ -29,24 +29,6 @@ export const HOSTED_ACCOUNT_DELETION_MAINTENANCE_MESSAGE =
   "Murph is in scheduled maintenance, so we can't delete your account right now. "
   + "Nothing has changed and your request was not started. Please try again after maintenance.";
 
-/**
- * Exact, identifier-free Vercel runtime-log marker emitted before any guard or
- * await in the delete route. Every invocation on the marker-bearing deployment
- * therefore has one request-owned migration proof anchor.
- */
-export const HOSTED_ACCOUNT_DELETION_ENTRY_LOG_MESSAGE =
-  "Hosted account deletion request entered the guarded route.";
-
-/**
- * Paired marker for a request that cannot leave member data behind: either the
- * request stopped before destructive deletion began, or every fanned-out R2
- * and Durable Object cleanup synchronously confirmed success. Once deletion
- * begins, timeout, process exit, throw, or a best-effort false result emits no
- * marker and blocks the migration.
- */
-export const HOSTED_ACCOUNT_DELETION_SAFE_TERMINAL_LOG_MESSAGE =
-  "Hosted account deletion request reached a safe terminal disposition.";
-
 export function assertHostedAccountDeletionAvailable(
   environment: Readonly<Record<string, string | undefined>> = process.env,
 ): void {

@@ -8,20 +8,27 @@ import {
   compareR2ObjectInventories,
   createR2MigrationMarkerKey,
   parseCanonicalLifecycleJson,
+  parseR2BundlesActiveOwnerGateArgs,
   parseR2BundlesMigrationArgs,
   parseR2ObjectInventoryJson,
   parseWranglerLifecycleList,
+  runR2BundlesActiveOwnerGate,
   runR2BundlesMigration,
   type R2BundlesMigrationCommandRunner,
   type R2BundlesMigrationOptions,
   type R2ObjectInventoryEntry,
 } from "../scripts/r2-bundles-migration.js";
+import { createHostedStorageNamespaceId } from "../src/storage-paths.js";
 
 const ACCOUNT_ID = "0123456789abcdef0123456789abcdef";
 const SOURCE_BUCKET = "bundles-source-oc";
 const DESTINATION_BUCKET = "bundles-destination-enam";
 const MARKER_KEY = createR2MigrationMarkerKey(SOURCE_BUCKET, DESTINATION_BUCKET);
 const PRIVATE_KEY = "users/private-member/workspace-snapshots/private-object";
+const ACTIVE_MEMBER_ID = "member_active_fixture";
+const ACTIVE_NAMESPACE = createHostedStorageNamespaceId(ACTIVE_MEMBER_ID);
+const ACTIVE_MEMBER_KEY =
+  `users/${ACTIVE_NAMESPACE}/workspace-snapshots/snapshot_fixture.snapshot.enc`;
 const MIGRATION_ACCESS_KEY = "migration-access-fixture";
 const MIGRATION_SECRET_KEY = "migration-secret-fixture";
 const CLOUDFLARE_TOKEN = "cloudflare-fixture";
@@ -89,6 +96,7 @@ function migrationEnvironment(extra: Record<string, string> = {}): Record<string
 }
 
 interface MockRunnerOptions {
+  activeMemberIds?: string[];
   copyObjectFailure?: Error;
   destinationInventory?: R2ObjectInventoryEntry[];
   destinationInventoryReadHook?: (input: {
@@ -96,6 +104,7 @@ interface MockRunnerOptions {
     readCount: number;
   }) => R2ObjectInventoryEntry[];
   destinationLifecycleEmpty?: boolean;
+  ownerQueryFailure?: Error;
   sourceInventoryReadHook?: (input: {
     inventory: R2ObjectInventoryEntry[];
     readCount: number;
@@ -128,6 +137,13 @@ function createMockRunner(input: MockRunnerOptions = {}): {
         calls.push({ args: call.args, command: call.command, env: call.env });
         if (call.command === "aws" && call.args[0] === "--version") {
           return { stderr: "aws-cli/2.24.21", stdout: "" };
+        }
+        if (call.command === "murph-prod-psql-ro") {
+          if (input.ownerQueryFailure) throw input.ownerQueryFailure;
+          return {
+            stderr: "",
+            stdout: `${(input.activeMemberIds ?? [ACTIVE_MEMBER_ID]).join("\n")}\n`,
+          };
         }
         if (call.command === "pnpm" && call.args.includes("info")) {
           const bucket = call.args[5];
@@ -244,6 +260,113 @@ describe("R2 bundles migration arguments", () => {
       "--apply",
       "--confirm-destination", DESTINATION_BUCKET,
     ])).toEqual(options({ apply: true, confirmDestination: DESTINATION_BUCKET }));
+  });
+});
+
+describe("R2 active-owner gate", () => {
+  it("requires the frozen-source acknowledgement", () => {
+    expect(() => parseR2BundlesActiveOwnerGateArgs([
+      "--source", SOURCE_BUCKET,
+    ])).toThrow("--source-frozen is required");
+    expect(parseR2BundlesActiveOwnerGateArgs([
+      "--",
+      "--source", SOURCE_BUCKET,
+      "--source-frozen",
+    ])).toEqual({
+      source: SOURCE_BUCKET,
+      sourceFrozen: true,
+    });
+  });
+
+  it("joins every stable source object to canonical hosted-member ownership", async () => {
+    const logs: string[] = [];
+    const { calls, runner } = createMockRunner({
+      sourceInventory: [
+        inventoryEntry({ key: ACTIVE_MEMBER_KEY }),
+        inventoryEntry({
+          key: `users/${ACTIVE_NAMESPACE}/runner-secrets.json`,
+        }),
+      ],
+    });
+
+    await runR2BundlesActiveOwnerGate({
+      source: SOURCE_BUCKET,
+      sourceFrozen: true,
+    }, migrationEnvironment({
+      DATABASE_URL: "must-not-reach-a-child",
+    }), {
+      log: (message) => logs.push(message),
+      runner,
+    });
+
+    expect(logs).toEqual([
+      "Verified 2 frozen source object(s) across 1 active hosted-member namespace(s).",
+    ]);
+    const ownerCall = calls.find((call) => call.command === "murph-prod-psql-ro");
+    expect(ownerCall?.env.DATABASE_URL).toBeUndefined();
+    expect(ownerCall?.env.R2_MIGRATION_SECRET_ACCESS_KEY).toBeUndefined();
+  });
+
+  it("blocks an object whose member owner is absent without exposing either identifier", async () => {
+    const { runner } = createMockRunner({
+      activeMemberIds: [],
+      sourceInventory: [inventoryEntry({ key: ACTIVE_MEMBER_KEY })],
+    });
+
+    const error = await runR2BundlesActiveOwnerGate({
+      source: SOURCE_BUCKET,
+      sourceFrozen: true,
+    }, migrationEnvironment(), { runner }).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(Error);
+    expect(String(error)).toContain("outside current hosted-member ownership");
+    expect(String(error)).not.toContain(ACTIVE_MEMBER_ID);
+    expect(String(error)).not.toContain(ACTIVE_NAMESPACE);
+    expect(String(error)).not.toContain(ACTIVE_MEMBER_KEY);
+  });
+
+  it("blocks ambiguous non-current object placement", async () => {
+    const { runner } = createMockRunner({
+      sourceInventory: [inventoryEntry({ key: "bundles/vault/opaque.bundle.json" })],
+    });
+
+    await expect(runR2BundlesActiveOwnerGate({
+      source: SOURCE_BUCKET,
+      sourceFrozen: true,
+    }, migrationEnvironment(), { runner })).rejects.toThrow(
+      "outside current hosted-member ownership",
+    );
+  });
+
+  it("blocks an unstable source inventory before reading owner ids", async () => {
+    const { calls, runner } = createMockRunner({
+      sourceInventory: [inventoryEntry({ key: ACTIVE_MEMBER_KEY })],
+      sourceInventoryReadHook: ({ inventory, readCount }) => readCount === 2
+        ? inventory.map((entry) => ({ ...entry, size: entry.size + 1 }))
+        : inventory,
+    });
+
+    await expect(runR2BundlesActiveOwnerGate({
+      source: SOURCE_BUCKET,
+      sourceFrozen: true,
+    }, migrationEnvironment(), { runner })).rejects.toThrow(
+      "Source inventory changed during the active-owner gate",
+    );
+    expect(calls.some((call) => call.command === "murph-prod-psql-ro")).toBe(false);
+  });
+
+  it("fails closed when canonical owner enumeration fails", async () => {
+    const { runner } = createMockRunner({
+      ownerQueryFailure: new Error("read-only owner query unavailable"),
+      sourceInventory: [inventoryEntry({ key: ACTIVE_MEMBER_KEY })],
+    });
+
+    await expect(runR2BundlesActiveOwnerGate({
+      source: SOURCE_BUCKET,
+      sourceFrozen: true,
+    }, migrationEnvironment(), { runner })).rejects.toThrow(
+      "read-only owner query unavailable",
+    );
   });
 });
 
