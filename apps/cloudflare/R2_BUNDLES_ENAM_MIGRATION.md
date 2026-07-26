@@ -25,7 +25,7 @@ source moves.
   phase that is safe to run against a live source.
 - The OC source remains authoritative until the binding switch and remains the
   rollback source until the first durable ENAM checkpoint. The tool never
-  deletes from either bucket.
+  deletes from the OC source.
 - The destination must equal the source exactly when a run ends. A destination
   object the source no longer has is expected drift, not corruption, and is
   removed by an explicit `--prune <count>` whose count must match what the
