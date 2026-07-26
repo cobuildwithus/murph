@@ -332,6 +332,9 @@ export interface HostedInviteBillingCheckoutSnapshot {
   member: {
     billingStatus: HostedMember["billingStatus"];
     id: string;
+    billingRef: {
+      stripeSubscriptionLookupKey: string | null;
+    } | null;
     identity: {
       phoneLookupKey: string | null;
     } | null;
@@ -356,6 +359,11 @@ export async function requireHostedInviteForBillingCheckout(
       memberId: true,
       member: {
         select: {
+          billingRef: {
+            select: {
+              stripeSubscriptionLookupKey: true,
+            },
+          },
           billingStatus: true,
           id: true,
           identity: {

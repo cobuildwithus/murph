@@ -27,7 +27,15 @@ const mocks = vi.hoisted(() => ({
     sessionId: string | null;
   } | null,
   readHostedConsentStatus: vi.fn(),
+  readHostedMemberOwnsSubscription: vi.fn(),
+  redirect: vi.fn((path: string) => {
+    throw new Error(`NEXT_REDIRECT:${path}`);
+  }),
   resourceHintOrigins: null as readonly string[] | null,
+}));
+
+vi.mock("next/navigation", () => ({
+  redirect: mocks.redirect,
 }));
 
 vi.mock("@/src/components/hosted-onboarding/join-invite-page-view", () => ({
@@ -84,6 +92,10 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-session", () => ({
   getHostedPrivySession: mocks.getHostedPrivySession,
 }));
 
+vi.mock("@/src/lib/hosted-onboarding/hosted-member-billing-store", () => ({
+  readHostedMemberOwnsSubscription: mocks.readHostedMemberOwnsSubscription,
+}));
+
 vi.mock("@/src/components/hosted-onboarding/phone-country-code-provider", () => ({
   PhoneCountryCodeProvider(input: { children: React.ReactNode }) {
     return createElement(
@@ -131,6 +143,7 @@ beforeEach(() => {
   mocks.joinInviteSuccessClientProps = null;
   mocks.resourceHintOrigins = null;
   mocks.getPrisma.mockReturnValue({ prisma: true });
+  mocks.readHostedMemberOwnsSubscription.mockResolvedValue(false);
   mocks.getHostedPageAuthSnapshot.mockResolvedValue({
     authenticated: true,
     authenticatedMember: {
@@ -240,6 +253,84 @@ test("JoinInvitePage builds a server model with the app-session member", async (
   assert.doesNotMatch(markup, /data-hosted-privy-boundary/);
   assert.match(markup, /data-invite-code="invite code"/);
   assert.doesNotMatch(markup, /data-share-code/);
+});
+
+test.each([
+  "incomplete",
+  "paused",
+] as const)(
+  "JoinInvitePage sends a matched %s member with an existing subscription to recovery",
+  async (billingStatus) => {
+    const { default: JoinInvitePage } = await import("../app/join/[inviteCode]/page");
+    mocks.readHostedMemberOwnsSubscription.mockResolvedValueOnce(true);
+    mocks.getHostedPageAuthSnapshot.mockResolvedValueOnce({
+      authenticated: true,
+      authenticatedMember: {
+        billingStatus,
+        createdAt: new Date("2026-07-03T08:00:00.000Z"),
+        id: `member_${billingStatus}`,
+        suspendedAt: null,
+        updatedAt: new Date("2026-07-13T08:00:00.000Z"),
+      },
+      session: {
+        identity: null,
+        linkedAccounts: [],
+        verifiedPrivyUser: { id: "test-privy-user" },
+      },
+    });
+    mocks.getHostedInviteStatus.mockResolvedValueOnce(createStatus({
+      session: {
+        authenticated: true,
+        expiresAt: null,
+        matchesInvite: true,
+      },
+      stage: "active",
+    }));
+
+    await expect(JoinInvitePage({
+      params: Promise.resolve({ inviteCode: "invite-code" }),
+      searchParams: Promise.resolve({ preview: undefined }),
+    })).rejects.toThrow("NEXT_REDIRECT:/settings#subscription");
+
+    expect(mocks.redirect).toHaveBeenCalledWith("/settings#subscription");
+    expect(mocks.joinInvitePageViewProps).toBeNull();
+  },
+);
+
+test("JoinInvitePage leaves a suspended paused member in the blocked flow", async () => {
+  const { default: JoinInvitePage } = await import("../app/join/[inviteCode]/page");
+  mocks.getHostedPageAuthSnapshot.mockResolvedValueOnce({
+    authenticated: true,
+    authenticatedMember: {
+      billingStatus: "paused",
+      createdAt: new Date("2026-07-03T08:00:00.000Z"),
+      id: "member_suspended",
+      suspendedAt: new Date("2026-07-20T08:00:00.000Z"),
+      updatedAt: new Date("2026-07-20T08:00:00.000Z"),
+    },
+    session: {
+      identity: null,
+      linkedAccounts: [],
+      verifiedPrivyUser: { id: "test-privy-user" },
+    },
+  });
+  mocks.getHostedInviteStatus.mockResolvedValueOnce(createStatus({
+    session: {
+      authenticated: true,
+      expiresAt: null,
+      matchesInvite: true,
+    },
+    stage: "blocked",
+  }));
+
+  const markup = renderToStaticMarkup(await JoinInvitePage({
+    params: Promise.resolve({ inviteCode: "invite-code" }),
+    searchParams: Promise.resolve({ preview: undefined }),
+  }));
+
+  expect(mocks.redirect).not.toHaveBeenCalled();
+  expect(mocks.joinInvitePageViewProps?.model.status.stage).toBe("blocked");
+  assert.match(markup, /data-stage="blocked"/);
 });
 
 test("JoinInvitePage keeps Privy-only sessions out of invite and legal gates", async () => {

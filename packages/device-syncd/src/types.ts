@@ -377,6 +377,16 @@ export interface DeviceSyncPublicIngressStore {
   completeWebhookTrace(provider: string, traceId: string, claimToken: string): boolean | Promise<boolean>;
   releaseWebhookTrace(provider: string, traceId: string, claimToken: string): void | Promise<void>;
   markWebhookReceived(accountId: string, now: string): void | Promise<void>;
+  /**
+   * Required, not optional: a push-primary stall is only detectable because
+   * this runs, so a store that silently omitted it would leave the whole signal
+   * dead in production while every test against a fake store still passed.
+   */
+  markConnectionSourceDataReceived(input: {
+    connectionId: string;
+    now: string;
+    sourceProviderSlug: string;
+  }): number | Promise<number>;
 }
 
 export interface DeviceSyncJobInput {
@@ -450,6 +460,13 @@ export interface ProviderWebhookResult {
   occurredAt?: string;
   // Keep top-level parser data narrow; provider-owned jobs may carry sanitized payload hints.
   resourceCategory?: string | null;
+  /**
+   * The connected source whose data this payload carried, when the provider can
+   * name it. Ingress uses it to record per-source data arrival, which is the
+   * only way to tell a live push carrier from one the provider has silently
+   * stopped feeding. Lifecycle events that carry no data leave it unset.
+   */
+  dataSourceProviderSlug?: string | null;
   jobs: DeviceSyncJobInput[];
   unknownAccountAction?: "retry" | "accept";
 }
@@ -474,6 +491,8 @@ export interface DeviceSyncIngressWebhook {
   occurredAt?: string;
   // Accepted and unknown ingress hooks receive stripped summary plus provider-owned job hints.
   resourceCategory?: string | null;
+  /** See `ProviderWebhookResult.dataSourceProviderSlug`. */
+  dataSourceProviderSlug?: string | null;
 }
 
 // Durable webhook work means any exact event work that must be durably merged before acknowledgement:
@@ -693,6 +712,8 @@ export type DeviceSyncRestDiagnosticEndpoint =
   | "matrix"
   | "providers"
   | "refresh"
+  // Mutating: asks the provider to re-run its historical pull for one source.
+  | "trigger_historical_pull"
   | "summary"
   | "timeseries";
 

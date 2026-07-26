@@ -25,6 +25,7 @@ import { readHostedAccountGroupStripeBillingRef } from "../hosted-onboarding/fam
 import { deleteHostedPrivyUser } from "../hosted-onboarding/privy";
 import { buildHostedLinqInviteSignupEffectIdMemberPrefix } from "../hosted-onboarding/linq-invite-signup-effect-id";
 import { getHostedOnboardingStripe } from "../hosted-onboarding/runtime";
+import { logHostedStripeFailure } from "../hosted-onboarding/stripe-error-log";
 import {
   generateHostedAccountExitReasonId,
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
@@ -239,6 +240,12 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
     label: "AI usage allowance period rows",
     deletion: "live-delete",
     note: "Deletes member-scoped included-allowance spend aggregates used by the hosted AI usage gate.",
+  },
+  {
+    slug: "prisma.hosted_growth_aggregate",
+    label: "Anonymous hosted growth totals",
+    deletion: "documented-retention",
+    note: "Retains one unjoinable company-wide tracked fulfilled usage-top-up count with no member, payer, beneficiary, purchase, Stripe, event, or timestamp history. It starts from retained rows at tracker cutover; successful fulfillment then increments it atomically, and account deletion cannot identify a person from it or decrement it.",
   },
   {
     slug: "prisma.hosted_usage_credit_entry",
@@ -1153,6 +1160,10 @@ async function cancelHostedStripeSubscriptionForAccountDeletion(input: {
     console.error(
       `[hosted-privacy] Stripe subscription cancel failed during account deletion (memberId=${memberId}, errorCode=${cancelErrorCode}).`,
     );
+    logHostedStripeFailure({
+      error,
+      operationName: "subscription.cancel.account-deletion",
+    });
     throw hostedOnboardingError({
       code: "ACCOUNT_DELETION_STRIPE_SUBSCRIPTION_CANCEL_FAILED",
       httpStatus: 502,
@@ -1188,6 +1199,10 @@ async function deleteHostedStripeCustomerBestEffort(input: {
     console.error(
       `[hosted-privacy] Stripe customer deletion failed after account deletion (memberId=${memberId}, errorCode=${stripeErrorCode}).`,
     );
+    logHostedStripeFailure({
+      error,
+      operationName: "customers.del.account-deletion",
+    });
     return { errorCode: stripeErrorCode, status: "failed" };
   }
 }

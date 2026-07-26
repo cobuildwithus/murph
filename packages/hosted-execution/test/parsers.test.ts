@@ -524,6 +524,70 @@ describe("parseHostedExecutionEvent", () => {
     });
   });
 
+  it("round-trips external thread route authority for group notifications", () => {
+    expect(
+      parseHostedExecutionEvent({
+        kind: "assistant.notification.requested",
+        notification: {
+          deliveryDispatchMode: "queue-only",
+          deliveryDedupeToken: "phone-call-result:hpc_group",
+          deliveryIdempotencyKey: "phone-call-result:hpc_group",
+          externalThreadRouteAuthority: {
+            accountLookupKey: "linq-account-key",
+            channel: "linq",
+            containerMemberId: "thread-container",
+            threadId: "group-thread",
+          },
+          instructions: "Report the completed call result to this group.",
+          responsePolicy: {
+            kind: "allow_send_or_skip",
+          },
+          route: {
+            actorId: null,
+            channel: "linq",
+            delivery: {
+              kind: "thread",
+              target: "group-thread",
+            },
+            identityId: "group-identity",
+            threadId: "group-session-thread",
+            threadIsDirect: false,
+          },
+        },
+        userId: "thread-container",
+      }),
+    ).toEqual({
+      kind: "assistant.notification.requested",
+      notification: {
+        deliveryDispatchMode: "queue-only",
+        deliveryDedupeToken: "phone-call-result:hpc_group",
+        deliveryIdempotencyKey: "phone-call-result:hpc_group",
+        externalThreadRouteAuthority: {
+          accountLookupKey: "linq-account-key",
+          channel: "linq",
+          containerMemberId: "thread-container",
+          threadId: "group-thread",
+        },
+        instructions: "Report the completed call result to this group.",
+        responsePolicy: {
+          kind: "allow_send_or_skip",
+        },
+        route: {
+          actorId: null,
+          channel: "linq",
+          delivery: {
+            kind: "thread",
+            target: "group-thread",
+          },
+          identityId: "group-identity",
+          threadId: "group-session-thread",
+          threadIsDirect: false,
+        },
+      },
+      userId: "thread-container",
+    });
+  });
+
   it("parses device-sync wake events with hint jobs and revoke warnings", () => {
     expect(
       parseHostedExecutionEvent({
@@ -1354,15 +1418,29 @@ describe("parseHostedRuntimeGroupTool", () => {
       action: "update_display_name",
       result: {
         group: null,
+        status: "ok",
+      },
+    })).toEqual({
+      action: "update_display_name",
+      result: {
+        group: null,
+        status: "ok",
+      },
+    });
+
+    expect(parseHostedRuntimeGroupToolResponse({
+      action: "update_display_name",
+      result: {
+        group: null,
         status: "unavailable",
-        unavailableReason: "group_not_found",
+        unavailableReason: "provider_unavailable",
       },
     })).toEqual({
       action: "update_display_name",
       result: {
         group: null,
         status: "unavailable",
-        unavailableReason: "group_not_found",
+        unavailableReason: "provider_unavailable",
       },
     });
 

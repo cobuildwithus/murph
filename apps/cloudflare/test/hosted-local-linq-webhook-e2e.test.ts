@@ -563,9 +563,9 @@ describe("hosted local Linq webhook e2e", () => {
     expect(requireLinqStub().readObservedMessageText(replySend)).toBe(
       hostedLinqPdfAssistantReplyText,
     );
-    const assistantProviderRequests = requireScenario().assistantProviderRequests.slice(
-      assistantProviderCountBeforeReply,
-    );
+    const assistantProviderRequests = requireScenario().assistantProviderRequests
+      .slice(assistantProviderCountBeforeReply)
+      .filter((request) => request.body.includes("lab-results.pdf"));
     const assistantProviderBody = requireSingleAssistantProviderRequestBody(
       assistantProviderRequests,
       "pdf media provider request",

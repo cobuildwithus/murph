@@ -49,6 +49,10 @@ import {
 import {
   type HostedStripeDispatchContext,
 } from "./stripe-dispatch";
+import {
+  logHostedStripeFailure,
+  withHostedStripeFailureLog,
+} from "./stripe-error-log";
 import { readActiveHostedFamilySponsorship } from "./member-access";
 import {
   requireHostedStripeApi,
@@ -447,6 +451,10 @@ export async function cancelHostedFamilySponsoredCheckoutSubscription(input: {
     ) {
       return;
     }
+    logHostedStripeFailure({
+      error,
+      operationName: "subscription.cancel.family-sponsored-checkout",
+    });
     throw hostedOnboardingError({
       cause: error,
       code: "HOSTED_FAMILY_SPONSORED_CHECKOUT_CLEANUP_FAILED",
@@ -909,12 +917,15 @@ async function readHostedStripeSubscriptionLatestInvoice(
     return null;
   }
 
-  return requireHostedStripeApi().invoices.retrieve(invoiceId, {
-    expand: [
-      "payments.data.payment.charge",
-      "payments.data.payment.payment_intent",
-    ],
-  });
+  return withHostedStripeFailureLog(
+    "invoices.retrieve.subscription-latest",
+    () => requireHostedStripeApi().invoices.retrieve(invoiceId, {
+      expand: [
+        "payments.data.payment.charge",
+        "payments.data.payment.payment_intent",
+      ],
+    }),
+  );
 }
 
 async function hostedStripeRefundMatchesInvoice(refund: Stripe.Refund, invoice: Stripe.Invoice): Promise<boolean> {
@@ -927,15 +938,19 @@ async function hostedStripeRefundMatchesInvoice(refund: Stripe.Refund, invoice: 
     return false;
   }
 
-  const listedPayments = await requireHostedStripeApi().invoicePayments.list({
-    invoice: invoice.id,
-    limit: 100,
-    status: "paid",
-    expand: [
-      "data.payment.charge",
-      "data.payment.payment_intent",
-    ],
-  });
+  const invoiceId = invoice.id;
+  const listedPayments = await withHostedStripeFailureLog(
+    "invoicePayments.list.refund-match",
+    () => requireHostedStripeApi().invoicePayments.list({
+      invoice: invoiceId,
+      limit: 100,
+      status: "paid",
+      expand: [
+        "data.payment.charge",
+        "data.payment.payment_intent",
+      ],
+    }),
+  );
   if (listedPayments.data.some((payment) => hostedStripeRefundMatchesInvoicePayment(refund, payment))) {
     return true;
   }
@@ -1382,7 +1397,10 @@ async function readHostedStripeCheckoutSessionSubscription(
     return null;
   }
 
-  return requireHostedStripeApi().subscriptions.retrieve(subscriptionId);
+  return withHostedStripeFailureLog(
+    "subscription.retrieve.checkout-session",
+    () => requireHostedStripeApi().subscriptions.retrieve(subscriptionId),
+  );
 }
 
 function isPulseTrialCheckoutSessionEntitlementCandidate(
@@ -1557,5 +1575,8 @@ async function readHostedMemberStripeSubscription(
     return null;
   }
 
-  return requireHostedStripeApi().subscriptions.retrieve(subscriptionId);
+  return withHostedStripeFailureLog(
+    "subscription.retrieve.member-billing",
+    () => requireHostedStripeApi().subscriptions.retrieve(subscriptionId),
+  );
 }

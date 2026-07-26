@@ -21,7 +21,8 @@ import {
   ensureHostedWorkspace,
   publishLatestBrowserVaultReplicaRefTx,
   projectHostedRuntimeLog,
-  readAcceptedRuntimeAttemptFailureSignalOwnerLogId,
+  claimHostedAcceptedAttemptFailureRecheck,
+  recordHostedRuntimeLogs,
   recordHostedRuntimeLogTx,
   type HostedRuntimeLogRow,
   type HostedWorkspaceTransactionRunner,
@@ -1800,37 +1801,150 @@ describe("hosted workspace store", () => {
 });
 
 describe("hosted runtime log store", () => {
-  it("selects the earliest recent same-user accepted-failure log as signal owner", async () => {
-    const findFirst = vi.fn<HostedRuntimeLogFindFirst>(async () => ({ id: "runtime_log_prior" }));
+  it("writes a whole runtime log batch as one statement", async () => {
+    const createMany = vi.fn(
+      async (_args: { data: readonly { eventCode: string; id: string }[] }) => ({
+        count: _args.data.length,
+      }),
+    );
+    const create = vi.fn();
     const prisma = Object.assign(Object.create(null), {
-      hostedRuntimeLog: {
-        findFirst,
-      },
-    }) as Parameters<typeof readAcceptedRuntimeAttemptFailureSignalOwnerLogId>[0]["prisma"];
+      hostedRuntimeLog: { create, createMany },
+    }) as Parameters<typeof recordHostedRuntimeLogs>[0]["prisma"];
 
-    const result = await readAcceptedRuntimeAttemptFailureSignalOwnerLogId({
+    const loggedCount = await recordHostedRuntimeLogs({
+      entries: Array.from({ length: 50 }, () => ({
+        component: "mailbox",
+        eventCode: "mailbox.imported",
+        level: "info",
+        phase: "import",
+      })),
       prisma,
-      since: new Date("2026-05-27T12:34:00.000Z"),
       userId: "member_workspace_1",
     });
 
-    expect(result).toBe("runtime_log_prior");
-    expect(findFirst).toHaveBeenCalledWith({
-      orderBy: [
-        { createdAt: "asc" },
-        { id: "asc" },
+    // The pool defaults to 15 clients; 50 independent creates would let one
+    // request outrun the whole pool.
+    expect(createMany).toHaveBeenCalledOnce();
+    expect(create).not.toHaveBeenCalled();
+    expect(createMany.mock.calls[0]?.[0]?.data).toHaveLength(50);
+    expect(loggedCount).toBe(50);
+    expect(new Set(createMany.mock.calls[0]?.[0]?.data.map((row) => row.id)).size)
+      .toBe(50);
+  });
+
+  it("does not touch the database for an empty runtime log batch", async () => {
+    const createMany = vi.fn(async () => ({ count: 0 }));
+    const prisma = Object.assign(Object.create(null), {
+      hostedRuntimeLog: { createMany },
+    }) as Parameters<typeof recordHostedRuntimeLogs>[0]["prisma"];
+
+    expect(await recordHostedRuntimeLogs({
+      entries: [],
+      prisma,
+      userId: "member_workspace_1",
+    })).toBe(0);
+    expect(createMany).not.toHaveBeenCalled();
+  });
+
+  it("rejects a batch entry with a forbidden field just like a single write", async () => {
+    const createMany = vi.fn(async () => ({ count: 0 }));
+    const prisma = Object.assign(Object.create(null), {
+      hostedRuntimeLog: { createMany },
+    }) as Parameters<typeof recordHostedRuntimeLogs>[0]["prisma"];
+
+    await expect(recordHostedRuntimeLogs({
+      entries: [{
+        component: "not_a_real_component",
+        eventCode: "mailbox.imported",
+        level: "info",
+        phase: "import",
+      }],
+      prisma,
+      userId: "member_workspace_1",
+    })).rejects.toThrow(/component/);
+    expect(createMany).not.toHaveBeenCalled();
+  });
+
+  it("writes nothing when a later batch entry is invalid", async () => {
+    // Normalizing the whole batch before the single write is what removes the
+    // partial-success behaviour the per-entry loop had; a valid prefix must not
+    // reach the database when a later entry is rejected.
+    const createMany = vi.fn(async () => ({ count: 0 }));
+    const create = vi.fn();
+    const prisma = Object.assign(Object.create(null), {
+      hostedRuntimeLog: { create, createMany },
+    }) as Parameters<typeof recordHostedRuntimeLogs>[0]["prisma"];
+
+    await expect(recordHostedRuntimeLogs({
+      entries: [
+        {
+          component: "mailbox",
+          eventCode: "mailbox.imported",
+          level: "info",
+          phase: "import",
+        },
+        {
+          component: "not_a_real_component",
+          eventCode: "mailbox.imported",
+          level: "info",
+          phase: "import",
+        },
       ],
-      select: {
-        id: true,
+      prisma,
+      userId: "member_workspace_1",
+    })).rejects.toThrow(/component/);
+
+    expect(createMany).not.toHaveBeenCalled();
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it("claims the accepted-attempt recheck cooldown on workspace control state", async () => {
+    const updateMany = vi.fn(async () => ({ count: 1 }));
+    const prisma = Object.assign(Object.create(null), {
+      hostedWorkspace: { updateMany },
+    }) as Parameters<typeof claimHostedAcceptedAttemptFailureRecheck>[0]["prisma"];
+
+    await expect(claimHostedAcceptedAttemptFailureRecheck({
+      cooldownMs: 30_000,
+      now: "2026-05-27T12:34:30.000Z",
+      prisma,
+      userId: "member_workspace_1",
+    })).resolves.toBe(true);
+
+    // One conditional update decides the owner, so recovery never depends on a
+    // diagnostic row having been written or read back.
+    expect(updateMany).toHaveBeenCalledWith({
+      data: {
+        acceptedAttemptFailureRecheckClaimedAt: new Date("2026-05-27T12:34:30.000Z"),
       },
       where: {
-        createdAt: {
-          gte: new Date("2026-05-27T12:34:00.000Z"),
-        },
-        eventCode: "runner.accepted_attempt_failed",
+        OR: [
+          { acceptedAttemptFailureRecheckClaimedAt: null },
+          {
+            acceptedAttemptFailureRecheckClaimedAt: {
+              lt: new Date("2026-05-27T12:34:00.000Z"),
+            },
+          },
+        ],
         userId: "member_workspace_1",
       },
     });
+  });
+
+  it("does not claim the recheck while another failure owns the cooldown", async () => {
+    const prisma = Object.assign(Object.create(null), {
+      hostedWorkspace: {
+        updateMany: vi.fn(async () => ({ count: 0 })),
+      },
+    }) as Parameters<typeof claimHostedAcceptedAttemptFailureRecheck>[0]["prisma"];
+
+    await expect(claimHostedAcceptedAttemptFailureRecheck({
+      cooldownMs: 30_000,
+      now: "2026-05-27T12:34:30.000Z",
+      prisma,
+      userId: "member_workspace_1",
+    })).resolves.toBe(false);
   });
 
   it("inserts parser-accepted structured log fields", async () => {
@@ -2647,23 +2761,6 @@ interface HostedRuntimeLogCreateArgs {
   };
 }
 
-interface HostedRuntimeLogFindFirstArgs {
-  orderBy: [
-    { createdAt: "asc" },
-    { id: "asc" },
-  ];
-  select: {
-    id: true;
-  };
-  where: {
-    createdAt: {
-      gte: Date;
-    };
-    eventCode: string;
-    userId: string;
-  };
-}
-
 interface HostedMailboxItemFindFirstArgs {
   orderBy: {
     laneSeq: "desc";
@@ -2694,7 +2791,6 @@ type HostedWorkspaceUpdateMany = (args: HostedWorkspaceUpdateManyArgs) => Promis
 type HostedWorkspaceFindUnique = (args: HostedWorkspaceFindUniqueArgs) => Promise<HostedWorkspaceRow | null>;
 type HostedWorkspaceUpsert = (args: HostedWorkspaceUpsertArgs) => Promise<HostedWorkspaceRow>;
 type HostedRuntimeLogCreate = (args: HostedRuntimeLogCreateArgs) => Promise<HostedRuntimeLogRow>;
-type HostedRuntimeLogFindFirst = (args: HostedRuntimeLogFindFirstArgs) => Promise<{ id: string } | null>;
 type HostedMailboxItemFindFirst = (
   args: HostedMailboxItemFindFirstArgs,
 ) => Promise<{ laneSeq: bigint } | null>;

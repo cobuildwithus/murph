@@ -37,6 +37,122 @@ describe('assistant group-chat style guidance', () => {
     )
   })
 
+  it('understands why people use Murph as a low-risk social stage', async () => {
+    const normalized = await readNormalizedGroupChatSkill()
+
+    expect(normalized).toContain(
+      'Murph is the visible recipient, but the room is often the real audience.',
+    )
+    expect(normalized).toContain(
+      'a low-risk reason to share a photo, admit something, ask for attention, or make an ordinary life moment replyable',
+    )
+    expect(normalized).toContain('social alibi')
+    expect(normalized).toContain('shared third object')
+    expect(normalized).toContain('reversible vulnerability')
+    expect(normalized).toContain(
+      'Murph is an active, low-ego stagehand, straight man, referee, and memory — not the main character and not an addressed-only help desk.',
+    )
+    expect(normalized).toContain(
+      'The handoff is beat-local, not a permanent exit',
+    )
+  })
+
+  it('picks the reply that gives the human more stage, not the cleverest line', async () => {
+    const normalized = await readNormalizedGroupChatSkill()
+
+    expect(normalized).toContain(
+      'choose the one that gives the human more stage and the room more natural handles — roast, story, comparison, contradiction, concern, or one-upmanship',
+    )
+    expect(normalized).toContain(
+      'Make the person more interesting, not Murph more impressive.',
+    )
+    expect(normalized).toContain(
+      'Prefer an open premise people can finish over a perfectly closed performance',
+    )
+    expect(normalized).toContain(
+      'Judge a turn by what the humans did next, not by what Murph got back.',
+    )
+    expect(normalized).toContain(
+      'A reply that drew no reaction but started a ten-message human exchange succeeded',
+    )
+  })
+
+  it('adapts after arrival without turning Murph into a command bot', async () => {
+    const normalized = await readNormalizedGroupChatSkill()
+
+    expect(normalized).toContain('Do not use a day count or announce a phase.')
+    expect(normalized).toContain('Arrival.')
+    expect(normalized).toContain('Resident.')
+    expect(normalized).toContain('Self-sustaining.')
+    expect(normalized).toContain(
+      'Proactive banter becomes selective, not rare or forbidden; direct address is not required.',
+    )
+    expect(normalized).toContain(
+      'Keep spontaneous cameos lower-frequency and higher-signal so they remain surprising, but do not disappear.',
+    )
+    expect(normalized).toContain(
+      'Recent Murph speech raises the bar; recent quiet lowers it.',
+    )
+    expect(normalized).not.toMatch(/day three|three days|72 hours/iu)
+  })
+
+  it('protects human-owned turns while preserving open ensemble banter', async () => {
+    const normalized = await readNormalizedGroupChatSkill()
+    const boundary = normalized.indexOf('1. **A participation boundary applies.**')
+    const human = normalized.indexOf('2. **Another human owns this turn.**')
+    const addressed = normalized.indexOf('3. **Murph was addressed.**')
+    const banter = normalized.indexOf('5. **An open ensemble banter beat.**')
+
+    expect(boundary).toBeGreaterThanOrEqual(0)
+    expect(human).toBeGreaterThan(boundary)
+    expect(addressed).toBeGreaterThan(human)
+    expect(banter).toBeGreaterThan(addressed)
+    expect(normalized).not.toContain(
+      'A question was addressed to a specific human.',
+    )
+    expect(normalized).toContain(
+      'This is a current-turn floor rule, not a ban on a later open beat.',
+    )
+    expect(normalized).toContain(
+      'Direct address is not required.',
+    )
+    expect(normalized).toContain(
+      'In a resident room, require a strong opening, not an exceptional one.',
+    )
+    expect(normalized).toContain(
+      'if the reply adds a new premise, dare, or actual continuation, answer it.',
+    )
+  })
+
+  it('makes interruption complaints quiet now without permanently muting Murph', async () => {
+    const normalized = await readNormalizedGroupChatSkill()
+
+    expect(normalized).toContain(
+      'Outside immediate safety, a clear complaint about Murph\'s interruption gets silence on this turn',
+    )
+    expect(normalized).toContain(
+      'do not apologize, acknowledge, react, or make compliance a bit',
+    )
+    expect(normalized).toContain(
+      'continue to rule 3 for the actual ask',
+    )
+    expect(normalized).toContain(
+      'it is not an irreversible room-wide mute',
+    )
+    expect(normalized).toContain(
+      'repeated commissions, several members bringing Murph back in, or sustained positive engagement',
+    )
+    expect(normalized).toContain(
+      'One isolated direct ask earns its answer without automatically resetting everything.',
+    )
+    expect(normalized).toContain(
+      'A bare playful "shut up" is not automatically a boundary',
+    )
+    expect(normalized).toContain(
+      'Agreed scheduled workflows keep their schedule unless the room changes them.',
+    )
+  })
+
   it('caps group message length behind the room Detail ceiling', async () => {
     const normalized = await readNormalizedGroupChatSkill()
 
@@ -152,7 +268,7 @@ describe('assistant group-chat style guidance', () => {
       'Do not wait when someone needs an answer now',
     )
     expect(normalized).toContain(
-      'a comedic interjection can be better precisely because it lands immediately.',
+      'Once the floor is open, timing matters: a fast, specific interjection can be better precisely because it lands in the moment.',
     )
     expect(normalized).toContain(
       'never mention waiting, sleeping, or commands.',
@@ -260,7 +376,7 @@ describe('assistant group-chat style guidance', () => {
       'Nobody writes a recap of what they missed.',
     )
     expect(normalized).toContain(
-      'mostly read and enjoy it; jump in when someone asks you something, when a beat is clearly yours, or when you have a genuinely funny line and you have not already been talking a lot.',
+      'mostly read and enjoy it, but do not become timid. Answer direct asks, take open room requests, and join an open ensemble beat when one specific line would add energy or give the humans something new to pick up.',
     )
     expect(normalized).toContain(
       'Before jumping in, notice how much you have already said recently. If you just posted, the bar for speaking again is much higher.',
@@ -300,4 +416,33 @@ describe('assistant group-chat style guidance', () => {
       'If its target or social meaning is ambiguous, do not react.'
     )
   })
+  it('treats the group room model as lightweight advice behind a fixed owner', async () => {
+    const normalized = await readNormalizedGroupChatSkill()
+
+    expect(normalized).toContain(
+      'Never persist one, including in the fixed group-owned `group-room-model` page',
+    )
+    expect(normalized).toContain(
+      'Pass the exact `digest` returned by `show` as `expectedDigest` to `upsert`',
+    )
+    expect(normalized).toContain(
+      'Ordinary group turns may receive one compact `group-room-model` page as rough, assistant-authored participation tips. Use it lightly.',
+    )
+    expect(normalized).toContain(
+      'Never force a callback merely because the page mentions it',
+    )
+    expect(normalized).toContain(
+      'When the authenticated Linq/iMessage or Telegram room explicitly asks Murph to remember, correct, retire, or forget room-local social context, use `murph.group_room_model`',
+    )
+    expect(normalized).toContain(
+      'If `show` fails or the write is stale, stop and do not claim the requested change was saved.',
+    )
+    expect(normalized).toContain(
+      'Group email may discuss current context but must direct a write request back to the authenticated room.',
+    )
+    expect(normalized).toContain(
+      'Ordinary banter, a single reaction, or a merely successful reply does not justify an immediate page write',
+    )
+  })
+
 })

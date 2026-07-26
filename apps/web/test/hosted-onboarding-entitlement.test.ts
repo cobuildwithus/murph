@@ -396,6 +396,93 @@ describe("hosted runtime AI access decision", () => {
     });
   });
 
+  it("does not grant runtime access to a paused trial that is still in-window", async () => {
+    const prisma = buildRuntimeAiAccessPrisma({
+      billingRef: buildRuntimeAiBillingRef(),
+      billingStatus: HostedBillingStatus.paused,
+    });
+
+    await expect(readHostedRuntimeAiAccessDecision({
+      memberId: "member_paused_trial",
+      now,
+      prisma: prisma as never,
+    })).resolves.toMatchObject({
+      allowed: false,
+      reason: "hosted_access_inactive",
+      userNotice: {
+        code: "billing_inactive",
+      },
+    });
+  });
+
+  it("classifies an expired paused trial as conversion-pending", async () => {
+    const prisma = buildRuntimeAiAccessPrisma({
+      billingRef: buildRuntimeAiBillingRef({
+        currentTrialEndsAt: now,
+      }),
+      billingStatus: HostedBillingStatus.paused,
+    });
+
+    await expect(readHostedRuntimeAiAccessDecision({
+      memberId: "member_paused_trial",
+      now,
+      prisma: prisma as never,
+    })).resolves.toMatchObject({
+      allowed: false,
+      reason: "trial_expired_pending_billing",
+      userNotice: {
+        code: "trial_conversion_pending",
+      },
+    });
+  });
+
+  it("rotates lapsed-access notice copy across deliveries to the same member", async () => {
+    const messages = new Set<string>();
+
+    for (const eventId of ["evt_1", "evt_2", "evt_3", "evt_4", "evt_5", "evt_6"]) {
+      const decision = await readHostedRuntimeAiAccessDecision({
+        memberId: "member_paused_trial",
+        noticeSeed: eventId,
+        now,
+        prisma: buildRuntimeAiAccessPrisma({
+          billingRef: buildRuntimeAiBillingRef({
+            currentTrialEndsAt: now,
+          }),
+          billingStatus: HostedBillingStatus.paused,
+        }) as never,
+      });
+
+      if (!decision.allowed && decision.userNotice) {
+        messages.add(decision.userNotice.message);
+      }
+    }
+
+    // A member texting repeatedly must not receive one sentence verbatim.
+    expect(messages.size).toBeGreaterThan(1);
+  });
+
+  it("keeps the member-stable notice variant when no delivery seed is supplied", async () => {
+    const readDecision = async () => await readHostedRuntimeAiAccessDecision({
+      memberId: "member_paused_trial",
+      now,
+      prisma: buildRuntimeAiAccessPrisma({
+        billingRef: buildRuntimeAiBillingRef({
+          currentTrialEndsAt: now,
+        }),
+        billingStatus: HostedBillingStatus.paused,
+      }) as never,
+    });
+
+    const first = await readDecision();
+    const second = await readDecision();
+
+    expect(first.allowed).toBe(false);
+    expect(second.allowed).toBe(false);
+    expect(
+      first.allowed === false ? first.userNotice?.message : null,
+    ).toBe(second.allowed === false ? second.userNotice?.message : null);
+  });
+
   it("lets active Family sponsorship override stale own trial state", async () => {
     const prisma = buildRuntimeAiAccessPrisma({
       accountGroupMemberships: [{

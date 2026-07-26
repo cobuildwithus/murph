@@ -8,8 +8,12 @@ import {
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  decryptHostedPhoneCallBrief,
   encryptHostedPhoneCallBrief,
 } from "@/src/lib/phone-calls/crypto";
+import type {
+  HostedAssistantNotificationDestination,
+} from "@/src/lib/hosted-routing/assistant-notification-destination";
 import {
   createHostedPhoneCall as createHostedPhoneCallImpl,
 } from "@/src/lib/phone-calls/service";
@@ -50,6 +54,43 @@ const VALID_BRIEF: HostedPhoneCallBrief = {
   to: {
     label: "Eye doctor's office",
     phoneNumber: "+12125550123",
+  },
+};
+
+const DIRECT_NOTIFICATION_DESTINATION: HostedAssistantNotificationDestination = {
+  conversationShape: "direct-member",
+  externalThreadRouteAuthority: null,
+  route: {
+    actorId: "member-actor",
+    channel: "linq",
+    delivery: {
+      kind: "thread",
+      target: "direct-chat",
+    },
+    identityId: "direct-identity",
+    threadId: "direct-thread",
+    threadIsDirect: true,
+  },
+};
+
+const GROUP_NOTIFICATION_DESTINATION: HostedAssistantNotificationDestination = {
+  conversationShape: "thread-container",
+  externalThreadRouteAuthority: {
+    accountLookupKey: "group-account-lookup",
+    channel: "linq",
+    containerMemberId: "member_1",
+    threadId: "group-chat",
+  },
+  route: {
+    actorId: null,
+    channel: "linq",
+    delivery: {
+      kind: "thread",
+      target: "group-chat",
+    },
+    identityId: "group-identity",
+    threadId: "group-thread",
+    threadIsDirect: false,
   },
 };
 
@@ -1707,6 +1748,125 @@ describe("createHostedPhoneCall", () => {
     }]);
   });
 
+  it("forces transfer off for a container-shaped call before private-number lookup", async () => {
+    const created = buildHostedPhoneCall();
+    const store = createPhoneCallStore({ created });
+    const runtime = createPhoneCallRuntime({ providerCallId: "retell_group_call" });
+    const notificationDestinationResolver = vi.fn(async () =>
+      GROUP_NOTIFICATION_DESTINATION);
+    const groupRequesterActivationAsserter = vi.fn(async () => undefined);
+    const transferNumberResolver = vi.fn(async () => "+12125550000");
+
+    await createHostedPhoneCall({
+      brief: VALID_BRIEF,
+      groupRequesterActivationAsserter,
+      inboundMailboxItemIds: ["mailbox_group_request"],
+      memberId: "member_1",
+      notificationDestinationResolver,
+      prisma: store.prisma,
+      requestKey: "phone_call_group_request",
+      runtime: runtime.runtime,
+      transferNumberResolver,
+    });
+
+    const effectiveBrief = {
+      ...VALID_BRIEF,
+      allowTransferToUser: false,
+    };
+    expect(notificationDestinationResolver).toHaveBeenCalledWith({
+      memberId: "member_1",
+      signal: expect.any(AbortSignal),
+    });
+    expect(groupRequesterActivationAsserter).toHaveBeenCalledWith({
+      inboundMailboxItemIds: ["mailbox_group_request"],
+      routeAuthority:
+        GROUP_NOTIFICATION_DESTINATION.externalThreadRouteAuthority,
+      signal: expect.any(AbortSignal),
+    });
+    expect(transferNumberResolver).not.toHaveBeenCalled();
+    expect(runtime.startCalls).toEqual([{
+      brief: effectiveBrief,
+      id: store.createCalls[0]!.data.id,
+      memberId: "member_1",
+      transferNumber: null,
+    }]);
+    await expect(decryptHostedPhoneCallBrief({
+      callId: store.createCalls[0]!.data.id,
+      memberId: "member_1",
+      value: store.createCalls[0]!.data.briefEncrypted,
+    })).resolves.toEqual(effectiveBrief);
+  });
+
+  it("fails before storage or provider work when group requester activation is not proven", async () => {
+    const created = buildHostedPhoneCall();
+    const store = createPhoneCallStore({ created });
+    const runtime = createPhoneCallRuntime({ providerCallId: "retell_unused" });
+    const activationError = new Error("group requester is not activated");
+
+    await expect(createHostedPhoneCall({
+      brief: VALID_BRIEF,
+      groupRequesterActivationAsserter: async () => {
+        throw activationError;
+      },
+      inboundMailboxItemIds: ["mailbox_group_request"],
+      memberId: "member_1",
+      notificationDestinationResolver: async () =>
+        GROUP_NOTIFICATION_DESTINATION,
+      prisma: store.prisma,
+      requestKey: "phone_call_group_request_blocked",
+      runtime: runtime.runtime,
+    })).rejects.toBe(activationError);
+
+    expect(store.findCalls).toEqual([]);
+    expect(store.findFirstCalls).toEqual([]);
+    expect(store.createCalls).toEqual([]);
+    expect(runtime.startCalls).toEqual([]);
+  });
+
+  it("does not inspect group requester evidence for direct calls", async () => {
+    const created = buildHostedPhoneCall();
+    const store = createPhoneCallStore({ created });
+    const runtime = createPhoneCallRuntime({ providerCallId: "retell_direct" });
+    const groupRequesterActivationAsserter = vi.fn(async () => {
+      throw new Error("group-only gate must not run for direct calls");
+    });
+
+    await createHostedPhoneCall({
+      brief: VALID_BRIEF,
+      groupRequesterActivationAsserter,
+      memberId: "member_1",
+      prisma: store.prisma,
+      requestKey: "phone_call_direct_request",
+      runtime: runtime.runtime,
+    });
+
+    expect(groupRequesterActivationAsserter).not.toHaveBeenCalled();
+    expect(runtime.startCalls).toHaveLength(1);
+  });
+
+  it("fails before storage or provider work when result delivery is unavailable", async () => {
+    const created = buildHostedPhoneCall();
+    const store = createPhoneCallStore({ created });
+    const runtime = createPhoneCallRuntime({ providerCallId: "retell_unused" });
+    const routeError = new Error("notification route unavailable");
+
+    await expect(createHostedPhoneCall({
+      brief: VALID_BRIEF,
+      memberId: "member_1",
+      notificationDestinationResolver: async () => {
+        throw routeError;
+      },
+      prisma: store.prisma,
+      requestKey: "phone_call_route_missing",
+      runtime: runtime.runtime,
+    })).rejects.toBe(routeError);
+
+    expect(store.findCalls).toEqual([]);
+    expect(store.findFirstCalls).toEqual([]);
+    expect(store.createCalls).toEqual([]);
+    expect(runtime.startCalls).toEqual([]);
+  });
+
   it("does not resolve a transfer destination when transfer permission is omitted", async () => {
     const created = buildHostedPhoneCall();
     const store = createPhoneCallStore({ created });
@@ -1753,6 +1913,7 @@ function createHostedPhoneCall(input: TestCreateHostedPhoneCallInput) {
 
 function createHostedPhoneCallDirect(input: TestCreateHostedPhoneCallInput) {
   return createHostedPhoneCallImpl({
+    notificationDestinationResolver: async () => DIRECT_NOTIFICATION_DESTINATION,
     originSessionId: "session_phone_call",
     ...input,
   });

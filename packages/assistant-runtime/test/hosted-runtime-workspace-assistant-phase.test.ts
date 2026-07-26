@@ -2916,6 +2916,105 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     );
   });
 
+  it("reports a degraded experiment lifecycle stage without failing the pass", async () => {
+    const logRequests: HostedRuntimeLogRequest[] = [];
+    mocks.applyMurphManagedAutomations.mockResolvedValueOnce({
+      created: 2,
+      experimentLifecycleFailure: new Error("Experiment storage rejected an entry."),
+      skipped: 0,
+      updated: 0,
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      logRequests,
+      now: () => "2026-04-27T00:00:00.000Z",
+    }));
+
+    // The automations that do not depend on the experiment scan still landed.
+    expect(result).toEqual(expect.objectContaining({
+      progressed: true,
+      redactedStatus: expect.objectContaining({
+        murphManagedAutomationCreated: 2,
+        murphManagedAutomationFailed: false,
+      }),
+    }));
+    expect(logRequests.flatMap((request) => request.entries)).toContainEqual(
+      expect.objectContaining({
+        component: "runtime",
+        eventCode: "runner.error",
+        level: "warn",
+        phase: "error",
+        redactedJson: expect.objectContaining({
+          murphManagedAutomationExperimentLifecycleFailed: true,
+          murphManagedAutomationStage: "experiment_lifecycle",
+        }),
+      }),
+    );
+  });
+
+  it("keeps the bounded retry ladder for a transient experiment lifecycle failure", async () => {
+    const logRequests: HostedRuntimeLogRequest[] = [];
+    const transient = Object.assign(new Error("experiment snapshot busy"), {
+      code: "EBUSY",
+    });
+    mocks.applyMurphManagedAutomations.mockResolvedValueOnce({
+      created: 2,
+      experimentLifecycleFailure: transient,
+      skipped: 0,
+      updated: 0,
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      logRequests,
+      now: () => "2026-04-27T00:00:00.000Z",
+    }));
+
+    // First rung of the existing 30s / 2m / 10m ladder, with the unrelated
+    // automations that already landed preserved in the status.
+    expect(result).toEqual(expect.objectContaining({
+      nextWakeAt: "2026-04-27T00:00:30.000Z",
+      progressed: true,
+      redactedStatus: expect.objectContaining({
+        murphManagedAutomationCreated: 2,
+        murphManagedAutomationExperimentLifecycleFailed: true,
+        murphManagedAutomationSetupRetryAttempt: 1,
+        murphManagedAutomationSetupRetryable: true,
+      }),
+    }));
+    // It must not also report the pass as a clean success.
+    expect(result.redactedStatus).not.toEqual(expect.objectContaining({
+      murphManagedAutomationFailed: false,
+    }));
+  });
+
+  it("does not retry a deterministic experiment storage failure", async () => {
+    const logRequests: HostedRuntimeLogRequest[] = [];
+    mocks.applyMurphManagedAutomations.mockResolvedValueOnce({
+      created: 2,
+      experimentLifecycleFailure: Object.assign(
+        new Error("Experiment storage contains an entry that could hold an experiment document."),
+        { code: "EXPERIMENT_STORAGE_INVALID" },
+      ),
+      skipped: 0,
+      updated: 0,
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      logRequests,
+      now: () => "2026-04-27T00:00:00.000Z",
+    }));
+
+    // Retrying an unchanged vault every 30 seconds would buy nothing.
+    expect(result).not.toEqual(expect.objectContaining({
+      nextWakeAt: "2026-04-27T00:00:30.000Z",
+    }));
+    expect(result).toEqual(expect.objectContaining({
+      redactedStatus: expect.objectContaining({
+        murphManagedAutomationCreated: 2,
+      }),
+    }));
+  });
+
   it("logs stable-key metadata failures when background setup stays idle", async () => {
     const logRequests: HostedRuntimeLogRequest[] = [];
     const stableKeyFailure = new Error("metadata unavailable");
@@ -6246,6 +6345,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
                   lastErrorCode: null,
                   lastErrorMessage: null,
                   lastSeenAt: "2026-04-29T00:00:00.000Z",
+                  lastDataAt: null,
                   resourceCount: 0,
                   sourceProviderSlug: "whoop_v2",
                   status: "connected",
@@ -6413,6 +6513,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
                   lastErrorCode: "TOKEN_REFRESH_FAILED",
                   lastErrorMessage: "refresh failed",
                   lastSeenAt: "2026-04-29T00:00:00.000Z",
+                  lastDataAt: null,
                   resourceCount: 0,
                   sourceProviderSlug: "oura",
                   status: "error",
@@ -14672,6 +14773,7 @@ describe("hosted runtime log helpers", () => {
         "Hosted runtime durable log write failed.",
         {
           component: "assistant",
+          entryCount: 1,
           errorName: "TypeError",
           eventCode: "assistant.pass_finished",
         },

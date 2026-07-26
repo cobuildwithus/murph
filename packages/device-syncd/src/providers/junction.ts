@@ -76,6 +76,7 @@ import {
   JunctionClient,
   type JunctionClientConfig,
   type JunctionDateQueryFormat,
+  type JunctionBulkTriggerHistoricalPullResult,
   type JunctionHistoricalPullSnapshot,
   type JunctionProviderConnection,
 } from "./junction-client.ts";
@@ -112,6 +113,16 @@ import type {
   StoredDeviceSyncAccount,
 } from "../types.ts";
 import { classifyDeviceSyncWebhookAcceptanceMode } from "../types.ts";
+import { evaluatePushPrimarySourceStaleness } from "../source-staleness.ts";
+import {
+  JUNCTION_PUSH_SOURCE_RECOVERY_JOB_KIND,
+  JUNCTION_PUSH_SOURCE_RECOVERY_METADATA_KEYS,
+  buildJunctionPushSourceRecoveryMetadataPatch,
+  readJunctionPushSourceRecoveryState,
+  resolveJunctionPushSourceRecoveryAttempts,
+  resolveJunctionPushSourceRecoveryStatus,
+  selectDueJunctionPushSourceRecovery,
+} from "../junction-push-source-recovery.ts";
 
 export type { JunctionDeviceSyncProviderConfig } from "../config/provider-types.ts";
 export { JUNCTION_DEVICE_PROVIDER_DESCRIPTOR };
@@ -276,6 +287,7 @@ export function createJunctionDeviceSyncProvider(
   const summaryBackfillDays = config.summaryBackfillDays ?? DEFAULT_SUMMARY_BACKFILL_DAYS;
   const timeseriesBackfillDays = config.timeseriesBackfillDays ?? DEFAULT_TIMESERIES_BACKFILL_DAYS;
   const reconcileDays = config.reconcileDays ?? DEFAULT_RECONCILE_DAYS;
+  const pushSourceRecoveryEnabled = config.pushSourceRecoveryEnabled === true;
   const reconcileIntervalMs = config.reconcileIntervalMs ?? DEFAULT_RECONCILE_INTERVAL_MS;
   const webhookTimestampToleranceMs =
     config.webhookTimestampToleranceMs ?? DEFAULT_WEBHOOK_TIMESTAMP_TOLERANCE_MS;
@@ -493,9 +505,65 @@ export function createJunctionDeviceSyncProvider(
           priority: JUNCTION_SCHEDULED_RECONCILE_PRIORITY,
         }),
         ...scheduledHistoricalBackfillJobs,
+        ...buildPushSourceRecoveryJobs(account, now),
       ],
       nextReconcileAt,
     };
+  }
+
+  /**
+   * A dead push carrier cannot recover on its own and no pull can rediscover
+   * its data, so the scheduler turns a detected stall into a bounded recovery
+   * attempt. Like the historical-backfill ladder above, the retry state lives in
+   * connection metadata and the job queue holds no second retry identity.
+   */
+  function buildPushSourceRecoveryJobs(
+    account: StoredDeviceSyncAccount,
+    now: string,
+  ): DeviceSyncJobInput[] {
+    // Off until the vendor enables the trigger endpoint for this team. Shipping
+    // the code and switching it on are separate steps so the rollout does not
+    // depend on a support request landing first, and so it can be switched off
+    // again without a deploy if the endpoint misbehaves.
+    if (!pushSourceRecoveryEnabled) {
+      return [];
+    }
+
+    const stale = evaluatePushPrimarySourceStaleness({
+      now,
+      sources: (account.sources ?? []).map((source) => ({
+        firstSeenAt: source.firstSeenAt,
+        lastDataAt: source.lastDataAt,
+        sourceProviderSlug: source.sourceProviderSlug,
+        status: source.status,
+      })),
+    });
+    const due = selectDueJunctionPushSourceRecovery({
+      metadata: account.metadata,
+      now,
+      stale,
+    });
+
+    if (!due) {
+      return [];
+    }
+
+    return [{
+      kind: JUNCTION_PUSH_SOURCE_RECOVERY_JOB_KIND,
+      payload: {
+        silentSinceAt: due.silentSinceAt,
+        sourceProviderSlug: due.sourceProviderSlug,
+      },
+      priority: JUNCTION_HISTORICAL_BACKFILL_RETRY_PRIORITY,
+      availableAt: now,
+      // One attempt per episode may be queued at a time.
+      dedupeKey: sha256Text(JSON.stringify([
+        "junction-push-source-recovery",
+        due.sourceProviderSlug,
+        due.silentSinceAt,
+        readJunctionPushSourceRecoveryState(account.metadata).attempts,
+      ])),
+    }];
   }
 
   // Connect-time retry state is owned by metadata. The scheduler materializes
@@ -627,6 +695,108 @@ export function createJunctionDeviceSyncProvider(
     }
   }
 
+  /**
+   * Asks Junction to re-run the provider's historical pull for one stalled
+   * source. Junction gates this endpoint per team, so a gated answer records a
+   * terminal `unavailable` rather than burning the ladder on retries that
+   * cannot succeed.
+   */
+  async function executePushSourceRecoveryJob(
+    context: ProviderJobContext,
+    job: DeviceSyncJobRecord,
+  ): Promise<ProviderJobResult> {
+    const sourceProviderSlug = normalizeProviderSlug(job.payload.sourceProviderSlug);
+    const silentSinceAt = normalizeString(job.payload.silentSinceAt);
+
+    if (!sourceProviderSlug || !silentSinceAt) {
+      return {};
+    }
+
+    // Scheduling and execution are separate phases. Between them a webhook can
+    // land, the source can disconnect, or a newer stall episode can replace this
+    // one. Triggering anyway would be an avoidable provider mutation against an
+    // episode that already ended, and would let the scheduler immediately fire
+    // again for the newer episode, so an obsolete job completes untouched.
+    const stillStale = evaluatePushPrimarySourceStaleness({
+      now: context.now,
+      sources: (context.account.sources ?? []).map((source) => ({
+        firstSeenAt: source.firstSeenAt,
+        lastDataAt: source.lastDataAt,
+        sourceProviderSlug: source.sourceProviderSlug,
+        status: source.status,
+      })),
+    }).some((entry) =>
+      entry.sourceProviderSlug === sourceProviderSlug
+      && entry.silentSinceAt === silentSinceAt
+    );
+
+    if (!stillStale) {
+      return {};
+    }
+
+    const state = readJunctionPushSourceRecoveryState(context.account.metadata);
+    const isRecordedEpisode = state.silentSinceAt === silentSinceAt
+      && state.sourceProviderSlug === sourceProviderSlug;
+    const priorAttempts = isRecordedEpisode ? state.attempts : 0;
+
+    // This is a one-shot external mutation, so once it can be dispatched the
+    // attempt must be consumed no matter how the pass ends. Deliberately not
+    // cancellable: a foreground yield mid-flight would release the job back to
+    // the queue without its metadata patch, and the remote trigger may already
+    // have been accepted, so the next run would re-send it without advancing
+    // the ladder. Every other Junction job is a replay-safe read; this one is
+    // not. The call is a single POST already bounded by the client timeout.
+    //
+    // Known residual window: the attempt is recorded through the job's metadata
+    // patch, which commits after this returns. If the worker dies or loses its
+    // lease between the provider accepting the POST and that commit, the
+    // reclaimed job re-sends one trigger. Closing it needs either a provider
+    // idempotency key (Junction documents none) or a durable claim written
+    // before the send, which today would mean a second metadata-write owner on
+    // the job context. The bounded consequence -- one extra historical-pull
+    // request per crash, re-delivering data rather than corrupting it -- does
+    // not justify that, so it is accepted and recorded here rather than hidden.
+    //
+    // A failure is recorded rather than thrown for the same reason: letting the
+    // error escape would leave the episode at its previous count and the next
+    // scheduled pass would derive the identical attempt again, indefinitely.
+    let endpointUnavailable = false;
+    let failureCode: string | null = null;
+
+    try {
+      ({ endpointUnavailable } = await client.bulkTriggerHistoricalPull({
+        sourceProviderSlug,
+        userIds: [context.account.externalAccountId],
+      }));
+    } catch (error) {
+      failureCode = isDeviceSyncError(error)
+        ? error.code
+        : "JUNCTION_PUSH_SOURCE_RECOVERY_TRIGGER_FAILED";
+    }
+
+    const attempts = resolveJunctionPushSourceRecoveryAttempts({
+      endpointUnavailable,
+      priorAttempts,
+    });
+
+    return {
+      metadataPatch: {
+        ...buildJunctionPushSourceRecoveryMetadataPatch({
+          attempts,
+          now: context.now,
+          silentSinceAt,
+          sourceProviderSlug,
+          status: resolveJunctionPushSourceRecoveryStatus({
+            attempts,
+            endpointUnavailable,
+          }),
+        }),
+        // Kept so a burned attempt stays diagnosable without a second owner.
+        [JUNCTION_PUSH_SOURCE_RECOVERY_METADATA_KEYS.lastFailureCode]: failureCode,
+      },
+    };
+  }
+
   async function executeJob(
     context: ProviderJobContext,
     job: DeviceSyncJobRecord,
@@ -635,6 +805,10 @@ export function createJunctionDeviceSyncProvider(
 
     if (job.kind === "resource") {
       return executeResourceJob(context, job, skippedOptionalResources);
+    }
+
+    if (job.kind === JUNCTION_PUSH_SOURCE_RECOVERY_JOB_KIND) {
+      return executePushSourceRecoveryJob(context, job);
     }
 
     const window = resolveJobWindow(job, context.now, job.kind === "backfill" ? summaryBackfillDays : reconcileDays);
@@ -1088,6 +1262,39 @@ export function createJunctionDeviceSyncProvider(
             timeoutSeconds,
           },
           response: describeJunctionRefreshUserData(payloadResult),
+        },
+      };
+    }
+
+    if (endpoint === "trigger_historical_pull") {
+      const sourceProviderSlug = normalizeProviderSlug(context.sourceProviderSlug);
+      if (!sourceProviderSlug) {
+        throw deviceSyncError({
+          code: "JUNCTION_TRIGGER_HISTORICAL_PULL_SOURCE_REQUIRED",
+          message: "Junction historical pull triggers require a source provider slug.",
+          retryable: false,
+          httpStatus: 400,
+        });
+      }
+
+      const payloadResult = await runJunctionDiagnosticPayloadCall(() =>
+        client.bulkTriggerHistoricalPull({
+          sourceProviderSlug,
+          userIds: [context.account.externalAccountId],
+        })
+      );
+
+      return {
+        generatedAt: context.now,
+        provider: "junction",
+        result: {
+          request: {
+            endpoint: "trigger_historical_pull",
+            endpointKind: "junction_bulk_trigger_historical_pull",
+            method: "POST",
+            sourceProviderSlug,
+          },
+          response: describeJunctionBulkTriggerHistoricalPull(payloadResult),
         },
       };
     }
@@ -1716,6 +1923,17 @@ export function createJunctionDeviceSyncProvider(
       traceId: verified.messageId,
       occurredAt,
       resourceCategory: resource?.category ?? null,
+      // A historical-pull completion is a data-less notification, so accepting
+      // its fetch job proves nothing arrived. Treating it as delivery would
+      // refresh the arrival signal and hide the very stall this detects.
+      dataSourceProviderSlug: isJunctionDataEvent(eventType)
+          && !(
+            isJunctionHistoricalDataEvent(eventType)
+            && data !== null
+            && isJunctionHistoricalPullCompletedWebhookData(data, externalAccountSelection.userId)
+          )
+        ? sourceProviderSlug
+        : null,
       jobs,
       unknownAccountAction: "accept",
     };
@@ -3092,6 +3310,25 @@ function describeJunctionIntrospectionHistoricalPull(
     notPulledCount: notPulled.length,
     pulled,
     notPulled,
+  };
+}
+
+function describeJunctionBulkTriggerHistoricalPull(
+  result: JunctionDiagnosticPayloadResult<JunctionBulkTriggerHistoricalPullResult>,
+): Record<string, unknown> {
+  if (!result.ok || !result.payload) {
+    return describeJunctionDiagnosticPayloadFailure(
+      result,
+      "JUNCTION_TRIGGER_HISTORICAL_PULL_FAILED",
+    );
+  }
+
+  return {
+    ok: true,
+    accepted: result.payload.accepted,
+    // Link Migration endpoints are disabled per team by default, so this is the
+    // expected answer until Junction support enables them.
+    endpointUnavailable: result.payload.endpointUnavailable,
   };
 }
 

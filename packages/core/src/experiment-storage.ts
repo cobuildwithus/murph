@@ -4,7 +4,6 @@ import { promises as fs } from "node:fs";
 import {
   classifyExperimentStorageFile,
   EXPERIMENTS_DIRECTORY,
-  EXPERIMENT_OUTCOMES_DIRECTORY,
   isExperimentDocumentRelativePath,
   type ExperimentStorageFileKind,
 } from "@murphai/contracts";
@@ -29,6 +28,19 @@ export interface CanonicalExperimentDocumentPathPage {
   relativePaths: string[];
   yielded: boolean;
 }
+
+function isMarkdownFileName(name: string): boolean {
+  return path.extname(name).toLowerCase() === ".md";
+}
+
+/**
+ * Bounds one lifecycle enumeration so a pathological tree cannot run unbounded.
+ *
+ * Experiment storage holds one document per experiment plus one JSON record per
+ * completed outcome, so this sits far above any real vault and exists only as a
+ * ceiling.
+ */
+const MAX_EXPERIMENT_STORAGE_ENTRIES = 16_384;
 
 export function assertExperimentDocumentRelativePath(relativePath: string): void {
   if (isExperimentDocumentRelativePath(relativePath)) {
@@ -114,11 +126,26 @@ export async function listCanonicalExperimentDocumentPaths(
 }
 
 /**
- * Lists only direct experiment documents without walking the outcomes tree.
+ * Lists the canonical experiment documents, bounded and interruptible.
  *
- * Lifecycle maintenance uses this boundary instead of the general storage
- * scan so foreground work can interrupt directory enumeration and so one
- * maintenance pass can never admit an unbounded number of documents.
+ * Callers treat this snapshot as *authoritative absence*: support-series
+ * reconciliation archives automations for experiments it does not name, and
+ * fire-time one-shot lookup consumes an occurrence whose owner it cannot find.
+ * Completeness is therefore the contract, and one rule enforces it at every
+ * depth — the same `classifyExperimentStorageFile` the write policy and
+ * `validateVault` already use, so there is no second notion of what belongs
+ * here to drift apart from.
+ *
+ * Every regular file is classified by its own path. A document is listed, an
+ * outcome record is ignored, and anything else is fatal only when it could
+ * itself be a document — that is, when it is Markdown. That single rule covers
+ * the reserved outcomes subtree without naming it, so a document hidden there
+ * fails closed like any other.
+ *
+ * Directories are pure containers and are walked, never trusted by name, which
+ * is what makes the reclaimed legacy media trees this reader must tolerate
+ * (nested but holding no Markdown) inert without an exemption. Symlinks and
+ * non-regular entries can stand in for a document and stay fatal.
  */
 export async function listCanonicalExperimentDocumentPathsInterruptible(input: {
   vaultRoot: string;
@@ -148,34 +175,75 @@ export async function listCanonicalExperimentDocumentPathsInterruptible(input: {
     return { relativePaths: [], yielded: true };
   }
   const relativePaths: string[] = [];
-  const outcomesDirectoryName = EXPERIMENT_OUTCOMES_DIRECTORY.split("/").at(-1);
+  const pending: Array<{ absolutePath: string; relativePath: string }> = [{
+    absolutePath: experimentRoot.absolutePath,
+    relativePath: EXPERIMENTS_DIRECTORY,
+  }];
+  let inspected = 0;
 
-  for await (const entry of await fs.opendir(experimentRoot.absolutePath)) {
-    if (input.shouldYield?.() === true) {
-      return { relativePaths: [], yielded: true };
+  while (pending.length > 0) {
+    const directory = pending.pop();
+    if (directory === undefined) {
+      break;
     }
 
-    if (entry.isDirectory() && entry.name === outcomesDirectoryName) {
-      continue;
-    }
+    for (
+      const entry of await fs.readdir(directory.absolutePath, { withFileTypes: true })
+    ) {
+      if (input.shouldYield?.() === true) {
+        return { relativePaths: [], yielded: true };
+      }
 
-    const relativePath = `${EXPERIMENTS_DIRECTORY}/${entry.name}`;
-    if (!entry.isFile() || !isExperimentDocumentRelativePath(relativePath)) {
-      throw new VaultError(
-        "EXPERIMENT_STORAGE_INVALID",
-        "Experiment storage contains an unsupported direct entry.",
-        { relativePath },
-      );
-    }
+      inspected += 1;
+      if (inspected > MAX_EXPERIMENT_STORAGE_ENTRIES) {
+        throw new VaultError(
+          "EXPERIMENT_LIFECYCLE_LIMIT_EXCEEDED",
+          "Experiment lifecycle maintenance exceeded its bounded storage limit.",
+          { maxEntries: MAX_EXPERIMENT_STORAGE_ENTRIES },
+        );
+      }
 
-    if (relativePaths.length >= input.maxDocuments) {
-      throw new VaultError(
-        "EXPERIMENT_LIFECYCLE_LIMIT_EXCEEDED",
-        "Experiment lifecycle maintenance exceeded its bounded document limit.",
-        { maxDocuments: input.maxDocuments },
-      );
+      const relativePath = `${directory.relativePath}/${entry.name}`;
+      if (entry.isSymbolicLink() || (!entry.isDirectory() && !entry.isFile())) {
+        throw new VaultError(
+          "EXPERIMENT_STORAGE_INVALID",
+          "Experiment storage contains an entry that could stand in for a document.",
+          { relativePath },
+        );
+      }
+
+      if (entry.isDirectory()) {
+        pending.push({
+          absolutePath: path.join(directory.absolutePath, entry.name),
+          relativePath,
+        });
+        continue;
+      }
+
+      const fileKind = classifyExperimentStorageFile(relativePath);
+      if (fileKind === "outcome") {
+        continue;
+      }
+      if (fileKind === "unsupported") {
+        if (isMarkdownFileName(entry.name)) {
+          throw new VaultError(
+            "EXPERIMENT_STORAGE_INVALID",
+            "Experiment storage contains a Markdown file that is not a canonical document.",
+            { relativePath },
+          );
+        }
+        continue;
+      }
+
+      if (relativePaths.length >= input.maxDocuments) {
+        throw new VaultError(
+          "EXPERIMENT_LIFECYCLE_LIMIT_EXCEEDED",
+          "Experiment lifecycle maintenance exceeded its bounded document limit.",
+          { maxDocuments: input.maxDocuments },
+        );
+      }
+      relativePaths.push(relativePath);
     }
-    relativePaths.push(relativePath);
   }
 
   if (input.shouldYield?.() === true) {

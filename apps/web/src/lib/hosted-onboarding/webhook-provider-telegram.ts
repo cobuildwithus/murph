@@ -2,8 +2,17 @@ import { type Prisma } from "@prisma/client";
 import { buildHostedExecutionTelegramConversationMessageWake } from "@murphai/hosted-execution";
 
 import { appendHostedMailboxEnvelopeTx } from "../hosted-mailbox/store";
-import { ensureHostedThreadContainerRouteTx } from "../hosted-routing/thread-container-service";
-import { readHostedThreadRouteByThreadIdentity } from "../hosted-routing/thread-route-store";
+import {
+  ensureHostedThreadContainerRouteTx,
+  refreshHostedThreadContainerDeliveryRouteTx,
+} from "../hosted-routing/thread-container-service";
+import {
+  HOSTED_TELEGRAM_THREAD_ACCOUNT_LOOKUP_KEY,
+} from "../hosted-routing/thread-delivery-route";
+import {
+  readHostedThreadRouteByThreadIdentity,
+  requiresHostedThreadDeliveryRouteRefresh,
+} from "../hosted-routing/thread-route-store";
 import {
   isHostedMemberSuspended,
 } from "./entitlement";
@@ -33,7 +42,6 @@ import {
   type HostedWebhookPlan,
   type HostedWebhookWakeHandoff,
 } from "./webhook-service-types";
-const HOSTED_TELEGRAM_ACCOUNT_LOOKUP_KEY = "telegram:bot";
 
 export type HostedOnboardingTelegramWebhookResponse = {
   duplicate?: boolean;
@@ -204,15 +212,15 @@ export async function planHostedOnboardingTelegramWebhook(input: {
     });
     if (!threadRoute) {
       try {
-        const created = await ensureHostedThreadContainerRouteTx({
-          accountLookupKey: HOSTED_TELEGRAM_ACCOUNT_LOOKUP_KEY,
+        const ensured = await ensureHostedThreadContainerRouteTx({
+          accountLookupKey: HOSTED_TELEGRAM_THREAD_ACCOUNT_LOOKUP_KEY,
           channel: "telegram",
           occurredAt: new Date(summary.occurredAt),
           ownerMemberId: existingMember.id,
           prisma: input.prisma,
           threadId: telegramMessage.threadId,
         });
-        runtimeMemberId = created.containerMemberId;
+        runtimeMemberId = ensured.containerMemberId;
       } catch (error) {
         if (!isHostedOnboardingError(error) || error.code !== "HOSTED_THREAD_ROUTE_ALREADY_BOUND") {
           throw error;
@@ -228,8 +236,20 @@ export async function planHostedOnboardingTelegramWebhook(input: {
           return buildIgnoredTelegramWebhookPlan("group-chat-provision-unavailable");
         }
       }
+    } else if (requiresHostedThreadDeliveryRouteRefresh({
+      accountLookupKey: HOSTED_TELEGRAM_THREAD_ACCOUNT_LOOKUP_KEY,
+      route: threadRoute,
+      threadId: telegramMessage.threadId,
+    })) {
+      await refreshHostedThreadContainerDeliveryRouteTx({
+        accountLookupKey: HOSTED_TELEGRAM_THREAD_ACCOUNT_LOOKUP_KEY,
+        prisma: input.prisma,
+        route: threadRoute,
+        threadId: telegramMessage.threadId,
+      });
+      runtimeMemberId = threadRoute.containerMemberId;
     }
-    if (threadRoute) {
+    if (runtimeMemberId === existingMember.id && threadRoute) {
       runtimeMemberId = threadRoute.containerMemberId;
     }
   }

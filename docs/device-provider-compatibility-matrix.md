@@ -72,6 +72,52 @@ safe: keep both the inline import and the floor. This follows the device-sync
 ingestion invariants — push delivers early, pull guarantees eventually, and
 neither path gates the other.
 
+A push-primary source has no pull guarantee, so its carrier can die without any
+observable error: the aggregator keeps reporting the connection `connected` with
+every resource `available`, and the floor fetch returns zero rows exactly as it
+would for a member who simply has no new data. Source rows therefore carry
+`last_data_at`, stamped at webhook ingress from the source the payload names.
+This is distinct from `last_seen_at`, which the reconcile projection refreshes
+whenever the aggregator still lists the source and which consequently cannot
+show a stall. Only an inbound payload moves `last_data_at`; the projection must
+leave it alone.
+
+`packages/device-syncd/src/source-staleness.ts` owns which sources are
+push-primary and how long each may stay silent, and the hosted device-sync
+maintenance pass reports breaches as `device-sync.source_stalled` on every pass.
+Suppressing repeats is the alerting layer's job: the pass runs from both an
+explicit device-sync wake and scheduled idle maintenance, so nothing at that
+seam knows how much time one evaluation represents, and a synthetic interval
+would either double-report or skip the first crossing. Evaluation is observation
+only: it never changes source status, gates ingestion, or triggers
+recovery, and a failure to evaluate or report must not fail the sync pass. A
+source that has never delivered is measured from `first_seen_at`, so a connect
+that emits its opening burst and then goes quiet is caught by the same rule.
+
+Recovering a dead push carrier cannot be done by pulling, because there is
+nothing to pull and a data refresh cannot make the provider push again. The only
+lever short of member re-authorization is asking the aggregator to re-run its
+historical pull for that one source (`bulkTriggerHistoricalPull`). Junction ships
+that behind Link Migration, which is disabled per team by default, so a gated
+403/404 is reported as `endpointUnavailable` — an "ask support to enable it"
+answer, not a transport failure to retry.
+
+Recovery is automatic, behind an explicit activation switch
+(`JUNCTION_PUSH_SOURCE_RECOVERY_ENABLED`, default off). The trigger endpoint is
+enabled per team by the vendor, so shipping this code and switching it on are
+deliberately separate steps: the rollout does not wait on a support request, and
+the capability can be switched off again without a deploy if the endpoint
+misbehaves. Once switched on: The scheduled pass that detects the stall also derives a
+bounded recovery attempt from connection metadata, the same way the
+historical-backfill ladder works, so a member never has to notice or act. The
+ladder is episode-scoped on `silentSinceAt`: attempts fire at detection, +6h,
++24h, and +48h, then stop; a gated endpoint records `unavailable` and stops
+immediately because nothing local can enable it; and a source that recovers and
+later stalls again starts a fresh ladder with no reset step. At most one source
+per connection is triggered per pass. `packages/device-syncd/src/junction-push-source-recovery.ts`
+owns that policy. The hosted ops recovery route remains for operator-driven
+one-off triggers and for exercising `refresh`.
+
 Junction historical progress is evaluated per advertised high-signal daily
 source/resource pair: activity, sleep, and `sleep_cycle`. Data in another
 family (for example activity) is not evidence that Garmin sleep or

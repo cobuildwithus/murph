@@ -1,11 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useId, useMemo, useState } from "react";
-import { ExternalLinkIcon, ShieldCheckIcon } from "lucide-react";
+import { CheckIcon, ExternalLinkIcon, MailIcon, ShieldCheckIcon } from "lucide-react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
-import { Button } from "@/src/components/ui/button";
+import { Button, buttonVariants } from "@/src/components/ui/button";
 import { Checkbox } from "@/src/components/ui/checkbox";
+import { Skeleton } from "@/src/components/ui/skeleton";
+import { buildContactSupportMailto } from "@/src/components/support/contact-support-action";
 import {
   HostedOnboardingApiError,
   requestHostedOnboardingJson,
@@ -15,8 +17,12 @@ import type {
   HostedConsentScopeStatus,
   HostedConsentStatus,
 } from "@/src/lib/legal/consent";
+import { cn } from "@/src/lib/utils";
 
 type HostedLegalConsentCardMode = "compact" | "panel";
+type HostedLaunchConsentVariant = "combined" | "health-data" | "legal";
+
+const CONSENT_RETRY_SUPPORT_THRESHOLD = 3;
 
 export interface HostedLegalConsentAcceptanceInput {
   acceptedDocumentVersions: Record<string, string>;
@@ -33,14 +39,33 @@ interface HostedLegalConsentCardProps {
   acceptedPendingLabel?: string;
   acceptScope?: HostedLegalConsentAcceptScope;
   className?: string;
+  declinePending?: boolean;
   initialStatus?: HostedConsentStatus | null;
   launchDescription?: string;
   launchTitle?: string;
   mode?: HostedLegalConsentCardMode;
   onAccepted?: (status: HostedConsentStatus) => void | Promise<void>;
+  onDecline?: () => void;
   onRequirementChange?: (required: boolean) => void;
   preferredScope?: HostedConsentScope;
   source: string;
+}
+
+interface HostedLaunchConsentPromptProps {
+  acceptedPendingLabel?: string;
+  className?: string;
+  declinePending?: boolean;
+  description?: string;
+  documents: HostedConsentScopeStatus["documents"];
+  errorMessage?: string | null;
+  failedAttempts?: number;
+  handoffPending?: boolean;
+  mode?: HostedLegalConsentCardMode;
+  onContinue: () => void;
+  onDecline?: () => void;
+  pending?: boolean;
+  title?: string;
+  variant?: HostedLaunchConsentVariant;
 }
 
 export function HostedLegalConsentCard(props: HostedLegalConsentCardProps) {
@@ -56,37 +81,44 @@ function HostedLegalConsentCardState({
   acceptedPendingLabel = "Continuing...",
   acceptScope = requestHostedConsentAcceptance,
   className,
+  declinePending = false,
   initialStatus = null,
-  launchDescription = "Please review and agree to the following.",
-  launchTitle = "Before you start",
+  launchDescription,
+  launchTitle,
   mode = "panel",
   onAccepted,
+  onDecline,
   onRequirementChange,
   preferredScope = "launch.legal",
   source,
 }: HostedLegalConsentCardProps) {
   const [loadedStatus, setLoadedStatus] = useState<HostedConsentStatus | null>(null);
+  const [statusOverride, setStatusOverride] = useState<HostedConsentStatus | null>(null);
+  const [handoffStatus, setHandoffStatus] = useState<HostedConsentStatus | null>(null);
   const [pending, setPending] = useState(false);
   const [acceptedHandoffPending, setAcceptedHandoffPending] = useState(false);
   const [loading, setLoading] = useState(!initialStatus);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [legalAccepted, setLegalAccepted] = useState(false);
-  const [healthDataAccepted, setHealthDataAccepted] = useState(false);
+  const [failedAttempts, setFailedAttempts] = useState(0);
   const [featureAccepted, setFeatureAccepted] = useState(false);
-  const status = loadedStatus ?? initialStatus;
+  const status = statusOverride ?? loadedStatus ?? initialStatus;
 
   const loadStatus = useCallback(async () => {
     setLoading(true);
     try {
       const nextStatus = await requestHostedLegalConsentStatus();
+      setStatusOverride(null);
       setLoadedStatus(nextStatus);
       setErrorMessage(null);
     } catch (error) {
-      setErrorMessage(readConsentErrorMessage(error, "Could not load Murph legal consent right now."));
+      setErrorMessage(
+        readConsentErrorMessage(error, "Could not load Murph legal consent right now."),
+      );
     } finally {
       setLoading(false);
     }
   }, []);
+
   useEffect(() => {
     if (initialStatus) {
       return;
@@ -99,6 +131,7 @@ function HostedLegalConsentCardState({
           return;
         }
 
+        setStatusOverride(null);
         setLoadedStatus(nextStatus);
         setErrorMessage(null);
       })
@@ -107,7 +140,9 @@ function HostedLegalConsentCardState({
           return;
         }
 
-        setErrorMessage(readConsentErrorMessage(error, "Could not load Murph legal consent right now."));
+        setErrorMessage(
+          readConsentErrorMessage(error, "Could not load Murph legal consent right now."),
+        );
       })
       .finally(() => {
         if (!cancelled) {
@@ -122,9 +157,10 @@ function HostedLegalConsentCardState({
 
   const pendingScopes = useMemo(() => {
     if (!status) return [];
+
     const launchPending = status.launchScopes
-      .filter((s) => !s.granted)
-      .map((s) => s.scope);
+      .filter((scope) => !scope.granted)
+      .map((scope) => scope.scope);
     if (launchPending.length > 0) return launchPending;
 
     const preferred = findConsentScope(status, preferredScope);
@@ -133,90 +169,121 @@ function HostedLegalConsentCardState({
     return [];
   }, [preferredScope, status]);
 
-  const isLaunchFlow = pendingScopes.some((s) => s.startsWith("launch."));
+  const isLaunchFlow = pendingScopes.some((scope) => scope.startsWith("launch."));
   const isFeatureFlow = !isLaunchFlow && pendingScopes.length > 0;
-
-  const legalScope = status ? findConsentScope(status, "launch.legal") : null;
-  const healthDataScope = status ? findConsentScope(status, "launch.health-data") : null;
-
   const featureScope = useMemo(() => {
     if (!isFeatureFlow || !status) return null;
     return findConsentScope(status, preferredScope);
   }, [isFeatureFlow, preferredScope, status]);
+  const launchDocuments = useMemo(
+    () => (status ? collectScopeDocuments(status, pendingScopes) : []),
+    [pendingScopes, status],
+  );
+  const actionPending = pending || acceptedHandoffPending;
+  const canSubmit = isLaunchFlow || (isFeatureFlow && featureAccepted);
+
   useEffect(() => {
     if (!status) return;
     onRequirementChange?.(pendingScopes.length > 0);
   }, [pendingScopes, onRequirementChange, status]);
 
-  const launchLegalChecked = !legalScope || legalScope.granted || legalAccepted;
-  const launchHealthDataChecked =
-    !healthDataScope || healthDataScope.granted || healthDataAccepted;
-  const allChecked = isLaunchFlow
-    ? launchLegalChecked && launchHealthDataChecked
-    : isFeatureFlow
-      ? featureAccepted
-      : false;
-  const actionPending = pending || acceptedHandoffPending;
-
   async function handleAccept() {
-    if (actionPending || !allChecked || !status) return;
+    if (actionPending || !canSubmit || !status) return;
 
     setPending(true);
     setAcceptedHandoffPending(false);
     setErrorMessage(null);
 
-    let latestStatus = status;
+    let latestStatus = handoffStatus ?? status;
     try {
-      for (const scope of pendingScopes) {
-        const scopeStatus = findConsentScope(latestStatus, scope);
-        if (scopeStatus && !scopeStatus.granted) {
-          latestStatus = await acceptScope({
-            acceptedDocumentVersions: Object.fromEntries(
-              scopeStatus.documents.map((document) => [document.id, document.version]),
-            ),
-            currentStatus: latestStatus,
-            scope,
-            source,
-          });
+      if (!handoffStatus) {
+        for (const scope of pendingScopes) {
+          const scopeStatus = findConsentScope(latestStatus, scope);
+          if (scopeStatus && !scopeStatus.granted) {
+            latestStatus = await acceptScope({
+              acceptedDocumentVersions: Object.fromEntries(
+                scopeStatus.documents.map((document) => [document.id, document.version]),
+              ),
+              currentStatus: latestStatus,
+              scope,
+              source,
+            });
+          }
         }
+        setHandoffStatus(latestStatus);
       }
+
       setAcceptedHandoffPending(true);
       if (onAccepted) {
         await onAccepted(latestStatus);
       }
     } catch (error) {
-      setLoadedStatus(latestStatus);
+      const hasRemainingScope = pendingScopes.some(
+        (scope) => !findConsentScope(latestStatus, scope)?.granted,
+      );
+      if (hasRemainingScope && latestStatus !== status) {
+        setStatusOverride(latestStatus);
+      }
       setAcceptedHandoffPending(false);
-      setErrorMessage(readConsentErrorMessage(error, "Could not record Murph legal consent right now."));
+      setFailedAttempts((attempts) => attempts + 1);
+      setErrorMessage(
+        readConsentErrorMessage(error, "Could not record Murph legal consent right now."),
+      );
     } finally {
       setPending(false);
     }
   }
 
   if (!initialStatus && loading) {
+    const declineAction = onDecline ? (
+      <ConsentDeclineButton
+        busy={declinePending}
+        disabled={declinePending}
+        onDecline={onDecline}
+      />
+    ) : null;
+
     return (
       <div
         aria-busy="true"
         aria-live="polite"
         role="status"
-        className={joinClassNames(cardClassName(mode), className)}
+        className={cn(cardClassName(mode), className)}
       >
-        <ConsentSkeleton />
+        <ConsentSkeleton secondaryAction={declineAction} />
       </div>
     );
   }
 
   if (!status && errorMessage) {
     return (
-      <div className={joinClassNames(cardClassName(mode), className)}>
+      <div className={cn(cardClassName(mode), className)}>
         <div className="space-y-4">
           <Alert variant="destructive">
             <AlertTitle>Unable to load Murph legal consent</AlertTitle>
             <AlertDescription>{errorMessage}</AlertDescription>
           </Alert>
-          <Button type="button" onClick={loadStatus} variant="outline" size="lg">
-            Try again
-          </Button>
+          <div
+            className={cn({
+              "grid grid-cols-[7rem_minmax(0,1fr)] gap-3": onDecline,
+            })}
+          >
+            {onDecline ? (
+              <ConsentDeclineButton
+                busy={declinePending}
+                disabled={declinePending}
+                onDecline={onDecline}
+              />
+            ) : null}
+            <Button
+              disabled={declinePending}
+              onClick={loadStatus}
+              size="lg"
+              type="button"
+            >
+              Try again
+            </Button>
+          </div>
         </div>
       </div>
     );
@@ -226,83 +293,228 @@ function HostedLegalConsentCardState({
     return null;
   }
 
-  const title = isLaunchFlow ? launchTitle : "Connect health sources";
-  const description = isLaunchFlow
-    ? launchDescription
-    : "Review and accept the health source consent for this integration.";
-
-  const checkboxes = isLaunchFlow ? (
-    <LaunchConsentCheckboxes
-      legalAccepted={legalAccepted}
-      healthDataAccepted={healthDataAccepted}
-      onLegalChange={setLegalAccepted}
-      onHealthDataChange={setHealthDataAccepted}
-      legalScope={legalScope}
-      healthDataScope={healthDataScope}
-    />
-  ) : featureScope ? (
-    <div className="space-y-3">
-      <DocumentLinks documents={featureScope.documents} />
-      <ConsentCheckbox
-        checked={featureAccepted}
-        onChange={setFeatureAccepted}
-        label="I agree to the above"
+  if (isLaunchFlow) {
+    return (
+      <HostedLaunchConsentPrompt
+        acceptedPendingLabel={acceptedPendingLabel}
+        className={className}
+        declinePending={declinePending}
+        description={launchDescription}
+        documents={launchDocuments}
+        errorMessage={errorMessage}
+        failedAttempts={failedAttempts}
+        handoffPending={acceptedHandoffPending}
+        mode={mode}
+        onContinue={handleAccept}
+        onDecline={onDecline}
+        pending={pending}
+        title={launchTitle}
+        variant={resolveLaunchConsentVariant(pendingScopes)}
       />
-    </div>
-  ) : null;
+    );
+  }
+
+  if (!featureScope) {
+    return null;
+  }
 
   const continueButton = (
     <Button
       aria-busy={actionPending}
-      className={
-        mode === "compact"
-          ? "w-full"
-          : "h-auto min-h-11 max-w-full whitespace-normal"
-      }
+      className={mode === "compact" ? "w-full" : undefined}
       type="button"
       onClick={handleAccept}
-      disabled={!allChecked || actionPending}
+      disabled={!canSubmit || actionPending}
       size={mode === "compact" ? "xl" : "lg"}
     >
-      {acceptedHandoffPending ? acceptedPendingLabel : pending ? "Saving..." : "Continue"}
+      {acceptedHandoffPending
+        ? acceptedPendingLabel
+        : pending
+          ? "Saving..."
+          : "Continue"}
     </Button>
+  );
+
+  const content = (
+    <div className="space-y-5">
+      <div className="space-y-1">
+        <p className="font-serif text-xl font-normal tracking-tight text-foreground">
+          Connect health sources
+        </p>
+        <p className="max-w-2xl text-sm leading-relaxed text-muted-foreground">
+          Review and accept the health source consent for this integration.
+        </p>
+      </div>
+      <div className="space-y-3">
+        <DocumentLinks documents={featureScope.documents} />
+        <ConsentCheckbox
+          checked={featureAccepted}
+          onChange={setFeatureAccepted}
+          label="I agree to the above"
+        />
+      </div>
+      {errorMessage ? (
+        <Alert variant="destructive">
+          <AlertTitle>Unable to record consent</AlertTitle>
+          <AlertDescription>{errorMessage}</AlertDescription>
+        </Alert>
+      ) : null}
+      {continueButton}
+    </div>
+  );
+
+  if (mode === "compact") {
+    return <div className={cn("w-full", className)}>{content}</div>;
+  }
+
+  return (
+    <div className={cn(cardClassName(mode), className)}>
+      <div className="flex items-start gap-3">
+        <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-full border border-border bg-card text-olive">
+          <ShieldCheckIcon className="size-4" aria-hidden />
+        </span>
+        <div className="min-w-0 flex-1">{content}</div>
+      </div>
+    </div>
+  );
+}
+
+export function HostedLaunchConsentPrompt({
+  acceptedPendingLabel = "Continuing...",
+  className,
+  declinePending = false,
+  description,
+  documents,
+  errorMessage = null,
+  failedAttempts = 0,
+  handoffPending = false,
+  mode = "compact",
+  onContinue,
+  onDecline,
+  pending = false,
+  title,
+  variant = "combined",
+}: HostedLaunchConsentPromptProps) {
+  const variantCopy = resolveLaunchConsentCopy(variant);
+  const copy = {
+    actionLabel: variantCopy.actionLabel,
+    assurances: variantCopy.assurances,
+    description: description ?? variantCopy.description,
+    title: title ?? variantCopy.title,
+  };
+  const accepting = pending || handoffPending;
+  const actionPending = accepting || declinePending;
+  const introduction = (
+    <div className="flex flex-col gap-4">
+      <div className="flex flex-col gap-2.5">
+        <p className="font-serif text-2xl font-semibold leading-[1.15] tracking-tight text-foreground">
+          {copy.title}
+        </p>
+        <p className="max-w-[40rem] text-[15px] leading-6 text-pretty text-muted-foreground">
+          {copy.description}
+        </p>
+      </div>
+      {copy.assurances.length > 0 ? (
+        <ul className="flex flex-col gap-2 rounded-xl bg-muted/50 px-3.5 py-3 text-[13px] leading-5 text-foreground/85">
+          {copy.assurances.map((assurance) => (
+            <li className="flex items-start gap-2.5" key={assurance}>
+              <CheckIcon className="mt-[3px] size-3.5 shrink-0 text-olive" aria-hidden />
+              <span>{assurance}</span>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      <LaunchDocumentLinks documents={documents} />
+    </div>
+  );
+  const supportExhausted = failedAttempts >= CONSENT_RETRY_SUPPORT_THRESHOLD;
+  const error = errorMessage ? (
+    <Alert
+      className="rounded-lg border-destructive/25 bg-destructive/[0.07] px-3.5 py-2.5 before:hidden"
+      variant="destructive"
+    >
+      <AlertTitle className="sr-only">Unable to record consent</AlertTitle>
+      <AlertDescription className="text-[13px] leading-5">
+        {errorMessage}
+        {supportExhausted ? " Our team can finish this for you." : null}
+      </AlertDescription>
+    </Alert>
+  ) : null;
+  const consentLabel = handoffPending
+    ? acceptedPendingLabel
+    : pending
+      ? "Saving..."
+      : supportExhausted
+        ? "Try again later"
+        : copy.actionLabel;
+  const primaryButton = (
+    <Button
+      aria-busy={accepting}
+      className={cn(
+        "min-w-0 flex-1 sm:max-w-[13rem]",
+        supportExhausted && "text-muted-foreground",
+      )}
+      disabled={actionPending}
+      onClick={onContinue}
+      size="lg"
+      type="button"
+      variant={supportExhausted ? "outline" : "default"}
+    >
+      {consentLabel}
+    </Button>
+  );
+  const actions = (
+    <div className="flex flex-col gap-3">
+      {supportExhausted ? (
+        <a
+          className={cn(
+            buttonVariants({ size: "lg" }),
+            "w-full",
+          )}
+          href={buildContactSupportMailto({
+            subject: "Murph could not record my consent",
+          })}
+        >
+          <MailIcon aria-hidden />
+          Contact support
+        </a>
+      ) : null}
+      <div
+        className={cn(
+          "flex items-center gap-3",
+          onDecline ? "justify-between" : "justify-end",
+        )}
+      >
+        {onDecline ? (
+          <ConsentDeclineButton
+            busy={declinePending}
+            disabled={actionPending}
+            onDecline={onDecline}
+          />
+        ) : null}
+        {primaryButton}
+      </div>
+    </div>
   );
 
   if (mode === "compact") {
     return (
-      <div className={joinClassNames("w-full space-y-8", className)}>
-        {checkboxes}
-        {errorMessage ? (
-          <Alert variant="destructive">
-            <AlertTitle>Unable to record consent</AlertTitle>
-            <AlertDescription>{errorMessage}</AlertDescription>
-          </Alert>
-        ) : null}
-        {continueButton}
+      <div className={cn("flex w-full flex-col gap-5", className)}>
+        {introduction}
+        {error}
+        {actions}
       </div>
     );
   }
 
   return (
-    <div className={joinClassNames(cardClassName(mode), className)}>
-      <div className="grid grid-cols-[auto_minmax(0,1fr)] items-start gap-x-3 gap-y-5">
-        <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-full border border-border bg-card text-olive">
-          <ShieldCheckIcon className="size-4" aria-hidden />
-        </span>
-        <div className="min-w-0 space-y-1">
-          <p className="font-serif text-xl font-normal tracking-tight text-foreground">{title}</p>
-          <p className="max-w-2xl text-sm leading-relaxed text-muted-foreground">{description}</p>
+    <div className={cn(cardClassName(mode), className)}>
+      <div className="flex flex-col gap-5">
+        <div className="flex min-w-0 flex-col gap-4">
+          {introduction}
+          {error}
         </div>
-        <div className="col-span-2 min-w-0 space-y-5">
-          {checkboxes}
-          {errorMessage ? (
-            <Alert variant="destructive">
-              <AlertTitle>Unable to record consent</AlertTitle>
-              <AlertDescription>{errorMessage}</AlertDescription>
-            </Alert>
-          ) : null}
-          {continueButton}
-        </div>
+        {actions}
       </div>
     </div>
   );
@@ -322,78 +534,27 @@ function requestHostedConsentAcceptance(
   });
 }
 
-function LaunchConsentCheckboxes({
-  legalAccepted,
-  healthDataAccepted,
-  onLegalChange,
-  onHealthDataChange,
-  legalScope,
-  healthDataScope,
+function ConsentDeclineButton({
+  busy,
+  disabled,
+  onDecline,
 }: {
-  healthDataAccepted: boolean;
-  healthDataScope: HostedConsentScopeStatus | null;
-  legalAccepted: boolean;
-  legalScope: HostedConsentScopeStatus | null;
-  onHealthDataChange: (checked: boolean) => void;
-  onLegalChange: (checked: boolean) => void;
+  busy: boolean;
+  disabled: boolean;
+  onDecline: () => void;
 }) {
   return (
-    <div className="space-y-6">
-      <p className="text-[13px] leading-relaxed text-muted-foreground">
-        Murph never sells health data or uses it for advertising or general-purpose AI model
-        training.
-      </p>
-
-      {legalScope && !legalScope.granted ? (
-        <ConsentCheckbox
-          checked={legalAccepted}
-          onChange={onLegalChange}
-          label={
-            <>
-              I agree to the{" "}
-              {legalScope.documents.map((doc, i) => (
-                <span key={doc.id}>
-                  {i > 0 ? (i === legalScope.documents.length - 1 ? " and " : ", ") : ""}
-                  <a
-                    href={doc.href}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="font-medium text-foreground underline-offset-4 hover:underline"
-                  >
-                    {doc.title.replace("Murph ", "")}
-                  </a>
-                </span>
-              ))}
-            </>
-          }
-        />
-      ) : null}
-
-      {healthDataScope && !healthDataScope.granted ? (
-        <ConsentCheckbox
-          checked={healthDataAccepted}
-          onChange={onHealthDataChange}
-          label={
-            <span className="block">
-              I authorize Murph to collect, use, and process the health data I choose to submit or
-              connect to provide the features I request, as described in the{" "}
-              <a
-                href={healthDataScope.documents[0]?.href ?? "#"}
-                target="_blank"
-                rel="noreferrer"
-                className="font-medium text-foreground underline-offset-4 hover:underline"
-              >
-                Consumer Health Data Notice
-              </a>
-              .
-              <span className="mt-1 block text-xs leading-relaxed text-muted-foreground">
-                Disconnect a source anytime to stop collection. Request deletion in Settings.
-              </span>
-            </span>
-          }
-        />
-      ) : null}
-    </div>
+    <Button
+      aria-busy={busy}
+      className="px-3 text-muted-foreground hover:text-foreground"
+      disabled={disabled}
+      onClick={onDecline}
+      size="lg"
+      type="button"
+      variant="ghost"
+    >
+      {busy ? "Declining..." : "Decline"}
+    </Button>
   );
 }
 
@@ -422,6 +583,31 @@ function ConsentCheckbox({
   );
 }
 
+function LaunchDocumentLinks({
+  documents,
+}: {
+  documents: HostedConsentScopeStatus["documents"];
+}) {
+  return (
+    <nav
+      aria-label="Consent documents"
+      className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs leading-5 text-muted-foreground"
+    >
+      {documents.map((document) => (
+        <a
+          className="underline decoration-transparent underline-offset-4 transition-colors hover:text-foreground hover:decoration-border"
+          href={document.href}
+          key={document.id}
+          rel="noreferrer"
+          target="_blank"
+        >
+          {shortDocumentTitle(document.title)}
+        </a>
+      ))}
+    </nav>
+  );
+}
+
 function DocumentLinks({
   documents,
 }: {
@@ -444,6 +630,87 @@ function DocumentLinks({
       ))}
     </ul>
   );
+}
+
+function collectScopeDocuments(
+  status: HostedConsentStatus,
+  scopes: HostedConsentScope[],
+): HostedConsentScopeStatus["documents"] {
+  const documents = new Map<string, HostedConsentScopeStatus["documents"][number]>();
+
+  for (const scope of scopes) {
+    const scopeStatus = findConsentScope(status, scope);
+    for (const document of scopeStatus?.documents ?? []) {
+      documents.set(document.id, document);
+    }
+  }
+
+  return [...documents.values()];
+}
+
+function resolveLaunchConsentVariant(
+  scopes: HostedConsentScope[],
+): HostedLaunchConsentVariant {
+  const legalPending = scopes.includes("launch.legal");
+  const healthDataPending = scopes.includes("launch.health-data");
+
+  if (legalPending && healthDataPending) return "combined";
+  if (healthDataPending) return "health-data";
+  return "legal";
+}
+
+const LAUNCH_CONSENT_ASSURANCES = [
+  "We do not sell health data.",
+  "We do not use Murph-managed health data to train general-purpose AI models.",
+];
+
+function resolveLaunchConsentCopy(variant: HostedLaunchConsentVariant): {
+  actionLabel: string;
+  assurances: string[];
+  description: string;
+  title: string;
+} {
+  if (variant === "legal") {
+    return {
+      actionLabel: "Agree",
+      assurances: [],
+      description: "Review the updated terms and disclosures that govern your use of Murph.",
+      title: "Review Murph’s terms",
+    };
+  }
+
+  if (variant === "health-data") {
+    return {
+      actionLabel: "Consent",
+      assurances: LAUNCH_CONSENT_ASSURANCES,
+      description:
+        "Murph and contracted AI providers use your health data to personalize your experience.",
+      title: "Use your health data",
+    };
+  }
+
+  return {
+    actionLabel: "Consent",
+    assurances: LAUNCH_CONSENT_ASSURANCES,
+    description:
+      "By consenting, you accept the terms and let Murph and contracted AI providers use your health data to personalize your experience.",
+    title: "Use your health data",
+  };
+}
+
+function shortDocumentTitle(title: string): string {
+  switch (title) {
+    case "Murph Terms of Service":
+      return "Terms";
+    case "Murph Privacy Policy":
+      return "Privacy";
+    case "Murph Consumer Health Data Notice":
+      return "Health data";
+    case "Murph Health AI Safety Disclosure":
+      return "AI safety";
+    default:
+      return title.replace(/^Murph\s+/u, "");
+  }
 }
 
 function findConsentScope(
@@ -496,34 +763,37 @@ function readConsentErrorMessage(error: unknown, fallback: string): string {
 function cardClassName(mode: HostedLegalConsentCardMode): string {
   return mode === "compact"
     ? "w-full"
-    : "rounded-2xl border border-border bg-card p-6";
+    : "rounded-xl border border-border bg-card p-5 sm:p-6";
 }
 
-function joinClassNames(...values: Array<string | null | undefined>): string {
-  return values.filter(Boolean).join(" ");
-}
-
-export function ConsentSkeleton() {
+export function ConsentSkeleton({
+  secondaryAction = null,
+}: {
+  secondaryAction?: React.ReactNode;
+} = {}) {
   return (
-    <div className="w-full animate-pulse space-y-8">
-      <div className="space-y-6">
-        <div className="flex items-start gap-4">
-          <div className="size-7 shrink-0 rounded-lg bg-muted" />
-          <div className="flex-1 space-y-2.5 pt-0.5">
-            <div className="h-4 w-full rounded-full bg-muted" />
-            <div className="h-4 w-3/4 rounded-full bg-muted" />
-          </div>
+    <div className="flex w-full flex-col gap-5">
+      <div className="flex flex-col gap-3.5">
+        <Skeleton className="h-2.5 w-28 rounded-full" />
+        <Skeleton className="h-6 w-64 max-w-full rounded-full" />
+        <div className="flex flex-col gap-2.5">
+          <Skeleton className="h-4 w-full rounded-full" />
+          <Skeleton className="h-4 w-4/5 rounded-full" />
         </div>
-        <div className="flex items-start gap-4">
-          <div className="size-7 shrink-0 rounded-lg bg-muted" />
-          <div className="flex-1 space-y-2.5 pt-0.5">
-            <div className="h-4 w-full rounded-full bg-muted" />
-            <div className="h-4 w-full rounded-full bg-muted" />
-            <div className="h-4 w-3/5 rounded-full bg-muted" />
-          </div>
+        <div className="flex gap-2.5">
+          <Skeleton className="h-3 w-12 rounded-full" />
+          <Skeleton className="h-3 w-16 rounded-full" />
+          <Skeleton className="h-3 w-20 rounded-full" />
         </div>
       </div>
-      <div className="h-14 w-full rounded-2xl bg-muted" />
+      <div
+        className={cn({
+          "grid grid-cols-[7rem_minmax(0,1fr)] gap-3": secondaryAction,
+        })}
+      >
+        {secondaryAction}
+        <Skeleton className="h-11 rounded-2xl" />
+      </div>
     </div>
   );
 }

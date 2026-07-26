@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { initializeVault } from '@murphai/core'
 import {
   inboxShowResultSchema,
   type InboxShowResult,
@@ -24,6 +25,10 @@ import type {
   AssistantInputReplyTarget,
   AssistantInputSourceMetadata,
 } from '../src/assistant/input-store.ts'
+import {
+  readAssistantGroupRoomModelState,
+  replaceAssistantGroupRoomModel,
+} from '../src/assistant/group-room-model.ts'
 
 const promptBuilderMocks = vi.hoisted(() => ({
   buildAssistantInputAttachmentPromptBundles: vi.fn(),
@@ -632,7 +637,7 @@ describe('buildAssistantAutoReplyPrompt', () => {
     expect(result.prompt).toContain('Message text:\nmorning crew')
   })
 
-  it('renders the group sender handle and display name for telegram group inbound', () => {
+  it('rejects copied short sender attribution from telegram group inbound', async () => {
     const result = buildAssistantAutoReplyPrompt([
       createPromptInput({
         captureOverrides: { text: 'morning crew', threadIsDirect: false },
@@ -641,7 +646,7 @@ describe('buildAssistantAutoReplyPrompt', () => {
           kind: 'telegram',
           mediaGroupId: null,
           replyContext: null,
-          senderHandle: '1234567890',
+          senderHandle: '456',
           senderUsername: 'alice_example',
         },
       }),
@@ -651,8 +656,34 @@ describe('buildAssistantAutoReplyPrompt', () => {
     if (result.kind !== 'ready') {
       throw new Error('Expected a ready prompt result.')
     }
-    expect(result.prompt).toContain('Sender: 1234567890')
+    const senderAttribution = /^Sender: (\d+)$/mu.exec(result.prompt)
+    expect(senderAttribution?.[0]).toBe('Sender: 456')
     expect(result.prompt).toContain('Sender name: @alice_example')
+    const senderId = senderAttribution?.[1]
+    if (!senderId) {
+      throw new Error('Expected a numeric Telegram sender attribution.')
+    }
+
+    const vaultRoot = await createTempVaultRoot()
+    await initializeVault({ vaultRoot })
+    const roomModel = await readAssistantGroupRoomModelState({ vaultRoot })
+    if (roomModel.kind !== 'missing') {
+      throw new Error('Expected a missing room model.')
+    }
+    for (const body of [
+      `## People\n- **Sender:** ${senderId} likes dry rulings.`,
+      `## People\n- Sender: \`${senderId}\` likes dry rulings.`,
+      `## People\n- __Sender__: ${senderId} likes dry rulings.`,
+      `## People\n- _Sender_: \`${senderId}\` likes dry rulings.`,
+    ]) {
+      await expect(replaceAssistantGroupRoomModel({
+        body,
+        expectedDigest: roomModel.digest,
+        vaultRoot,
+      })).rejects.toMatchObject({
+        code: 'group_room_model_participant_handle_forbidden',
+      })
+    }
   })
 
   it('renders no telegram sender line without an authoritative handle', () => {

@@ -4,6 +4,7 @@
 import {
   type HostedMember,
   type HostedMemberBillingRef,
+  HostedBillingStatus,
   Prisma,
   type PrismaClient,
 } from "@prisma/client";
@@ -763,4 +764,34 @@ function buildHostedStripeBillingLookupAmbiguousError(
       "Stripe billing lookup matched multiple Murph accounts during blind-index rotation. Repair the duplicate binding before retrying.",
     retryable: true,
   });
+}
+
+/**
+ * Presence-only check on the subscription blind index. `incomplete` cannot be
+ * read from billing status alone, so surfaces that must tell recovery apart from
+ * first-time checkout ask this instead of re-deriving it.
+ */
+export async function readHostedMemberOwnsSubscription(input: {
+  billingStatus?: HostedBillingStatus;
+  memberId: string;
+  prisma?: PrismaClient;
+}): Promise<boolean> {
+  // Only `incomplete` is ambiguous between recovery and first-time checkout, so
+  // callers that pass a status skip the read for every other state.
+  if (
+    input.billingStatus !== undefined
+    && input.billingStatus !== HostedBillingStatus.incomplete
+  ) {
+    return false;
+  }
+  const prisma = input.prisma ?? getPrisma();
+  const billingRef = await prisma.hostedMemberBillingRef.findUnique({
+    select: {
+      stripeSubscriptionLookupKey: true,
+    },
+    where: {
+      memberId: input.memberId,
+    },
+  });
+  return Boolean(billingRef?.stripeSubscriptionLookupKey);
 }

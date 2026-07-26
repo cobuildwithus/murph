@@ -42,6 +42,7 @@ import {
   requireHostedOnboardingPublicBaseUrl,
   requireHostedStripeCheckoutConfig,
 } from "./runtime";
+import { withHostedStripeFailureLog } from "./stripe-error-log";
 import {
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
   lockHostedMemberRow,
@@ -142,6 +143,19 @@ export async function createHostedBillingCheckout(
       });
     }
 
+    // Checkout mints a new subscription, and binding it would orphan an existing
+    // one on the same customer rather than replace it. `incomplete` does not by
+    // itself mean first-time: the Stripe status mapper also writes it while an
+    // established subscription is settling. The bound subscription is the single
+    // owner of that irreversible decision, so fail closed when one already exists.
+    if (invite.member.billingRef?.stripeSubscriptionLookupKey) {
+      throw hostedOnboardingError({
+        code: "HOSTED_BILLING_SUBSCRIPTION_ALREADY_EXISTS",
+        message: "This hosted account already has a subscription. Manage it from Settings instead of starting a new one.",
+        httpStatus: 409,
+      });
+    }
+
     await assertHostedMemberBillingStartMessagingReady({
       identity: invite.member.identity,
       prisma,
@@ -186,25 +200,28 @@ export async function createHostedBillingCheckout(
       stripeCustomerId: customerId,
       verifiedEmail,
     });
-    const checkoutSession = await stripe.checkout.sessions.create({
-      cancel_url: buildStripeCancelUrl(publicBaseUrl, invite.inviteCode),
-      client_reference_id: invite.member.id,
-      ...(customerId ? { customer: customerId } : {}),
-      ...(verifiedEmail ? { customer_email: verifiedEmail } : {}),
-      line_items: buildHostedBillingCheckoutLineItems(priceId),
-      metadata: checkoutMetadata,
-      mode: "subscription",
-      payment_method_types: ["card"],
-      subscription_data: {
+    const checkoutSession = await withHostedStripeFailureLog(
+      "checkout.sessions.create.billing-start",
+      () => stripe.checkout.sessions.create({
+        cancel_url: buildStripeCancelUrl(publicBaseUrl, invite.inviteCode),
+        client_reference_id: invite.member.id,
+        ...(customerId ? { customer: customerId } : {}),
+        ...(verifiedEmail ? { customer_email: verifiedEmail } : {}),
+        line_items: buildHostedBillingCheckoutLineItems(priceId),
         metadata: checkoutMetadata,
-        ...(resolvedOffer === HOSTED_PULSE_TRIAL_OFFER
-          ? { trial_period_days: HOSTED_PULSE_TRIAL_DAYS }
-          : {}),
-      },
-      success_url: buildStripeSuccessUrl(publicBaseUrl, invite.inviteCode),
-    }, {
-      idempotencyKey: checkoutIdempotencyKey,
-    });
+        mode: "subscription",
+        payment_method_types: ["card"],
+        subscription_data: {
+          metadata: checkoutMetadata,
+          ...(resolvedOffer === HOSTED_PULSE_TRIAL_OFFER
+            ? { trial_period_days: HOSTED_PULSE_TRIAL_DAYS }
+            : {}),
+        },
+        success_url: buildStripeSuccessUrl(publicBaseUrl, invite.inviteCode),
+      }, {
+        idempotencyKey: checkoutIdempotencyKey,
+      }),
+    );
 
     if (!checkoutSession.url) {
       throw hostedOnboardingError({

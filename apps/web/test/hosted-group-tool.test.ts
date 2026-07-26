@@ -219,6 +219,12 @@ const RENAMED_GROUP_SUMMARY = {
 };
 const SLEEP_SCOPE = { projectionKind: "sleep-times.v0" } as const;
 const SLEEP_DURATION_SCOPE = { projectionKind: "sleep-duration-days.v0" } as const;
+const DEEP_SLEEP_SCOPE = { projectionKind: "deep-sleep-days.v0" } as const;
+const REM_SLEEP_SCOPE = { projectionKind: "rem-sleep-days.v0" } as const;
+const WORKOUTS_SCOPE = {
+  projectionKind: "workouts.v0",
+} as const;
+const PROTEIN_SCOPE = { projectionKind: "protein-days.v0" } as const;
 const RUNNING_SCOPE = buildHostedVaultShareActivityMinutesProjectionScope({
   activityKind: "running",
 });
@@ -806,9 +812,6 @@ describe("handleHostedRuntimeGroupTool", () => {
     expect(mocks.readActiveHostedMemberAccess).toHaveBeenCalledWith(expect.objectContaining({
       memberId: "member_owner",
     }));
-    expect(mocks.readHostedGroupIdByRuntimeMemberId).toHaveBeenCalledWith({
-      runtimeMemberId: "member_group_runtime",
-    });
     expect(mocks.readHostedGroupByRuntimeMemberId).not.toHaveBeenCalled();
     expect(mocks.updateHostedLinqChatDisplayName).toHaveBeenCalledWith({
       chatId: "chat_group_runtime",
@@ -855,8 +858,8 @@ describe("handleHostedRuntimeGroupTool", () => {
     expect(mocks.updateHostedGroupDisplayNameByRuntimeMemberIdTx).not.toHaveBeenCalled();
   });
 
-  it("reports group_not_found when the active runtime has no hosted group to rename", async () => {
-    mocks.readHostedGroupIdByRuntimeMemberId.mockResolvedValue(null);
+  it("renames the chat with a null group when the runtime has no hosted group record", async () => {
+    mocks.updateHostedGroupDisplayNameByRuntimeMemberIdTx.mockResolvedValueOnce(null);
 
     await expect(handleHostedRuntimeGroupTool({
       memberId: "member_group_runtime",
@@ -869,13 +872,73 @@ describe("handleHostedRuntimeGroupTool", () => {
       action: "update_display_name",
       result: {
         group: null,
-        status: "unavailable",
-        unavailableReason: "group_not_found",
+        status: "ok",
       },
     });
 
-    expect(mocks.updateHostedLinqChatDisplayName).not.toHaveBeenCalled();
-    expect(mocks.updateHostedGroupDisplayNameByRuntimeMemberIdTx).not.toHaveBeenCalled();
+    expect(mocks.updateHostedLinqChatDisplayName).toHaveBeenCalledWith({
+      chatId: "chat_group_runtime",
+      displayName: "Unattached group",
+    });
+  });
+
+  it("labels a hosted group created while the chat rename was in flight", async () => {
+    const renamed = {
+      ...groupSummaryWithOwnerEmailGrant(),
+      displayName: RENAMED_GROUP_SUMMARY.displayName,
+    };
+    // The group does not exist when the rename starts; a concurrent
+    // create_join_link commits it while the provider request is in flight.
+    mocks.updateHostedGroupDisplayNameByRuntimeMemberIdTx.mockResolvedValue(null);
+    mocks.updateHostedLinqChatDisplayName.mockImplementationOnce(async () => {
+      mocks.updateHostedGroupDisplayNameByRuntimeMemberIdTx.mockResolvedValue(renamed);
+    });
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_group_runtime",
+      request: {
+        action: "update_display_name",
+        linqThread: GROUP_RUNTIME_LINQ_THREAD,
+        updateDisplayName: { displayName: "Weekly Health Crew" },
+      },
+    })).resolves.toEqual({
+      action: "update_display_name",
+      result: {
+        group: renamed,
+        status: "ok",
+      },
+    });
+
+    expect(mocks.updateHostedGroupDisplayNameByRuntimeMemberIdTx)
+      .toHaveBeenCalledWith(expect.objectContaining({
+        displayName: "Weekly Health Crew",
+        runtimeMemberId: "member_group_runtime",
+      }));
+  });
+
+  it("keeps the accepted rename when storing the hosted group label fails", async () => {
+    mocks.updateHostedGroupDisplayNameByRuntimeMemberIdTx
+      .mockRejectedValueOnce(new Error("transaction unavailable"));
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_group_runtime",
+      request: {
+        action: "update_display_name",
+        linqThread: GROUP_RUNTIME_LINQ_THREAD,
+        updateDisplayName: { displayName: "Weekly Health Crew" },
+      },
+    })).resolves.toEqual({
+      action: "update_display_name",
+      result: {
+        group: null,
+        status: "ok",
+      },
+    });
+
+    expect(mocks.updateHostedLinqChatDisplayName).toHaveBeenCalledWith({
+      chatId: "chat_group_runtime",
+      displayName: "Weekly Health Crew",
+    });
   });
 
   it("does not update the hosted group display name when the provider rejects the chat rename", async () => {
@@ -1276,6 +1339,49 @@ describe("filterHostedRuntimeGroupToolResponseProjectionScopes", () => {
     });
   });
 
+  it("filters a renamed group summary and passes a null group through", () => {
+    const supportedScopeKeys = new Set([
+      buildHostedVaultShareProjectionScopeKey(SLEEP_SCOPE),
+    ]);
+
+    expect(filterHostedRuntimeGroupToolResponseProjectionScopes({
+      action: "update_display_name",
+      result: {
+        group: groupWithSelectorScopes,
+        status: "ok",
+      },
+    }, supportedScopeKeys)).toEqual({
+      action: "update_display_name",
+      result: {
+        group: {
+          ...groupWithSelectorScopes,
+          members: [{
+            ...groupWithSelectorScopes.members[0],
+            grantedVaultShareProjectionKinds: ["sleep-times.v0"],
+            grantedVaultShareProjectionScopes: [SLEEP_SCOPE],
+          }],
+          requestedVaultShareProjectionKinds: ["sleep-times.v0"],
+          requestedVaultShareProjectionScopes: [SLEEP_SCOPE],
+        },
+        status: "ok",
+      },
+    });
+
+    expect(filterHostedRuntimeGroupToolResponseProjectionScopes({
+      action: "update_display_name",
+      result: {
+        group: null,
+        status: "ok",
+      },
+    }, supportedScopeKeys)).toEqual({
+      action: "update_display_name",
+      result: {
+        group: null,
+        status: "ok",
+      },
+    });
+  });
+
   it("keeps selector scopes for current group-tool callers", () => {
     const filtered = filterHostedRuntimeGroupToolResponseProjectionScopes({
       action: "create_join_link",
@@ -1334,14 +1440,23 @@ describe("hosted group join policy", () => {
     }).requestedVaultShareProjectionKinds).toEqual([]);
 
     expect(projectHostedVaultShareProjectionDisplays([
+      { projectionKind: "time-zone.v0" },
       { projectionKind: "group-email.v0" },
       { projectionKind: "sleep-times.v0" },
       SLEEP_DURATION_SCOPE,
+      DEEP_SLEEP_SCOPE,
+      REM_SLEEP_SCOPE,
       { projectionKind: "activity-days.v0" },
+      WORKOUTS_SCOPE,
       RUNNING_SCOPE,
       RUNNING_DISTANCE_SCOPE,
       RUNNING_SESSION_COUNT_SCOPE,
       { projectionKind: "heart-rate-zones-days.v0" },
+      PROTEIN_SCOPE,
+      { projectionKind: "calories-days.v0" },
+      { projectionKind: "carbs-days.v0" },
+      { projectionKind: "fat-days.v0" },
+      { projectionKind: "fiber-days.v0" },
     ])).toEqual([
       {
         description:
@@ -1350,6 +1465,14 @@ describe("hosted group join policy", () => {
         projectionKind: "group-email.v0",
         projectionScope: { projectionKind: "group-email.v0" },
         projectionScopeKey: "group-email.v0",
+      },
+      {
+        description:
+          "Shares your current time-zone name as optional group context. It does not determine score dates or prove your exact location.",
+        label: "Time zone",
+        projectionKind: "time-zone.v0",
+        projectionScope: { projectionKind: "time-zone.v0" },
+        projectionScopeKey: "time-zone.v0",
       },
       {
         description: "Shares your last 7 days of sleep start and end times.",
@@ -1366,6 +1489,20 @@ describe("hosted group join policy", () => {
         projectionScopeKey: "sleep-duration-days.v0",
       },
       {
+        description: "Shares your last 7 days of deep sleep minutes.",
+        label: "Deep sleep",
+        projectionKind: "deep-sleep-days.v0",
+        projectionScope: DEEP_SLEEP_SCOPE,
+        projectionScopeKey: "deep-sleep-days.v0",
+      },
+      {
+        description: "Shares your last 7 days of REM sleep minutes.",
+        label: "REM sleep",
+        projectionKind: "rem-sleep-days.v0",
+        projectionScope: REM_SLEEP_SCOPE,
+        projectionScopeKey: "rem-sleep-days.v0",
+      },
+      {
         description: "Shares your last 7 days of active minutes.",
         label: "Activity minutes",
         projectionKind: "activity-days.v0",
@@ -1373,11 +1510,58 @@ describe("hosted group join policy", () => {
         projectionScopeKey: "activity-days.v0",
       },
       {
+        description: "Shares each workout from the last 7 days, including its local start time, duration, and type. Does not share absolute timestamps, routes, location, heart rate, or provider identity.",
+        label: "Workout details",
+        projectionKind: "workouts.v0",
+        projectionScope: WORKOUTS_SCOPE,
+        projectionScopeKey: "workouts.v0",
+      },
+      {
         description: "Shares your last 7 days of heart-rate zone minutes.",
         label: "Heart-rate zones",
         projectionKind: "heart-rate-zones-days.v0",
         projectionScope: { projectionKind: "heart-rate-zones-days.v0" },
         projectionScopeKey: "heart-rate-zones-days.v0",
+      },
+      {
+        description:
+          "Shares your last 7 days of daily protein totals from meals in Murph, including meals imported from connected apps.",
+        label: "Daily protein",
+        projectionKind: "protein-days.v0",
+        projectionScope: PROTEIN_SCOPE,
+        projectionScopeKey: "protein-days.v0",
+      },
+      {
+        description:
+          "Shares your last 7 days of daily calorie totals from meals in Murph, including meals imported from connected apps.",
+        label: "Daily calories",
+        projectionKind: "calories-days.v0",
+        projectionScope: { projectionKind: "calories-days.v0" },
+        projectionScopeKey: "calories-days.v0",
+      },
+      {
+        description:
+          "Shares your last 7 days of daily carbohydrate totals from meals in Murph, including meals imported from connected apps.",
+        label: "Daily carbs",
+        projectionKind: "carbs-days.v0",
+        projectionScope: { projectionKind: "carbs-days.v0" },
+        projectionScopeKey: "carbs-days.v0",
+      },
+      {
+        description:
+          "Shares your last 7 days of daily fat totals from meals in Murph, including meals imported from connected apps.",
+        label: "Daily fat",
+        projectionKind: "fat-days.v0",
+        projectionScope: { projectionKind: "fat-days.v0" },
+        projectionScopeKey: "fat-days.v0",
+      },
+      {
+        description:
+          "Shares your last 7 days of daily fiber totals from meals in Murph, including meals imported from connected apps.",
+        label: "Daily fiber",
+        projectionKind: "fiber-days.v0",
+        projectionScope: { projectionKind: "fiber-days.v0" },
+        projectionScopeKey: "fiber-days.v0",
       },
       {
         description: "Shares your last 7 days of running minutes.",
@@ -1402,6 +1586,8 @@ describe("hosted group join policy", () => {
       },
     ]);
 
+    expect(HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES)
+      .toContainEqual(PROTEIN_SCOPE);
     expect(projectHostedVaultShareProjectionDisplays(
       HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES,
     ).map((entry) => entry.projectionScopeKey)).toEqual([
@@ -1850,6 +2036,29 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       projectionScopes: diagnosticScopes,
       tx: fakeTx,
     });
+  });
+
+  it("discloses the meal source when a nutrition scope is offered", async () => {
+    const nutritionScopes = [{ projectionKind: "protein-days.v0" as const }];
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_container",
+      request: {
+        action: "post_join_offer",
+        joinOffer: { projectionScopes: nutritionScopes },
+        linqThread: LINQ_THREAD,
+      },
+    })).resolves.toMatchObject({
+      action: "post_join_offer",
+      result: { status: "sent" },
+    });
+
+    expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message:
+          "Like or heart this message to share the following with this group: your Murph profile name and daily protein (nutrition totals come from your meals in Murph, including meals imported from connected apps). To choose different permissions, use https://www.withmurph.ai/groups/join/abc123.",
+      }),
+    );
   });
 
   it("reuses an active covering offer without another provider send", async () => {

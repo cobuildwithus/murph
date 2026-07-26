@@ -25,6 +25,10 @@ import {
   requireHostedStripeBillingPlanConfig,
 } from "./runtime";
 import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "./shared";
+import {
+  describeHostedStripeErrorDetails,
+  logHostedStripeFailure,
+} from "./stripe-error-log";
 
 const SWITCH_TO_PULSE_SOURCE_PLAN = "launch_edge_monthly" satisfies HostedBillingPlanCode;
 const SWITCH_TO_PULSE_TARGET_PLAN = "launch_monthly" satisfies HostedBillingPlanCode;
@@ -803,37 +807,15 @@ async function callHostedStripePlanSwitchOperation<T>(
   try {
     return await operation();
   } catch (error) {
+    logHostedStripeFailure({ error, operationName });
     throw hostedOnboardingError({
       code: "HOSTED_BILLING_STRIPE_PLAN_SWITCH_UNAVAILABLE",
-      details: {
-        operationName,
-        ...describeSafeStripePlanSwitchError(error),
-      },
+      details: describeHostedStripeErrorDetails({ error, operationName }),
       httpStatus: 502,
       message: "Stripe billing is unavailable for plan changes right now. Try again shortly.",
       retryable: true,
     });
   }
-}
-
-function describeSafeStripePlanSwitchError(error: unknown): Record<string, unknown> {
-  if (typeof error !== "object" || error === null) {
-    return {
-      type: typeof error,
-    };
-  }
-
-  const code = Reflect.get(error, "code");
-  const statusCode = Reflect.get(error, "statusCode");
-  const type = Reflect.get(error, "type");
-  const requestId = Reflect.get(error, "requestId");
-
-  return {
-    ...(typeof type === "string" && type.length > 0 ? { type } : {}),
-    ...(typeof code === "string" && code.length > 0 ? { code } : {}),
-    ...(typeof statusCode === "number" ? { statusCode } : {}),
-    requestIdPresent: typeof requestId === "string" && requestId.length > 0,
-  };
 }
 
 function readHostedStripeObjectDate(

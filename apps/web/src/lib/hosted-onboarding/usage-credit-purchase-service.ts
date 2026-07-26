@@ -60,6 +60,7 @@ import {
   requireHostedUsageCreditLookupKey,
   requireHostedUsageCreditPurchasePayerMemberId,
 } from "./usage-credit-purchase-stripe";
+import { logHostedStripeFailure } from "./stripe-error-log";
 import {
   buildHostedGroupUsageFundingPath,
   normalizeHostedGroupUsageFundingLocator,
@@ -613,6 +614,7 @@ async function continueHostedUsageCreditCheckout(input: {
       idempotencyKey: buildHostedUsageCreditCheckoutIdempotencyKey(purchase.id),
     });
   } catch (error) {
+    logHostedStripeFailure({ error, operationName: "checkout.sessions.create" });
     throw hostedOnboardingError({
       code: "HOSTED_USAGE_CREDIT_STRIPE_UNAVAILABLE",
       details: describeSafeHostedUsageCreditStripeError(error),

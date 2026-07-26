@@ -76,6 +76,29 @@ test("passes rendered design-page proof with both hosted viewports", () => {
   );
 });
 
+test("accepts the dedicated consent design catalog and route", () => {
+  const result = validateFrontendDesignProof({
+    changedPaths: [
+      "apps/web/src/components/legal/hosted-legal-consent-card.tsx",
+      "apps/web/app/design/consent-content.tsx",
+    ],
+    prBodyHtml: `
+<h2>Design proof</h2>
+<ul>
+<li>Design page: <code>/design?tab=consent#launch-consent</code></li>
+<li>Desktop screenshot: <img src="https://example.test/consent-desktop.svg"></li>
+<li>Mobile screenshot: <img src="https://example.test/consent-mobile.svg"></li>
+</ul>
+`,
+  });
+
+  assert.deepEqual(result, {
+    errors: [],
+    required: true,
+    uiPaths: ["apps/web/src/components/legal/hosted-legal-consent-card.tsx"],
+  });
+});
+
 test("accepts GitHub-rendered attributes and standalone HTML images", () => {
   const result = validateFrontendDesignProof({
     changedPaths: UI_PATHS,
@@ -116,7 +139,7 @@ test("reports missing catalog, heading, route, and viewport proof", () => {
 `,
     }).errors,
     [
-      "The Design proof section must link to `/design?tab=components` or `/design?tab=sections`.",
+      "The Design proof section must link to `/design?tab=components`, `/design?tab=consent`, or `/design?tab=sections`.",
       "The Design proof section must include a hosted desktop screenshot from the design page.",
       "The Design proof section must include a hosted mobile screenshot from the design page.",
     ],
@@ -173,7 +196,7 @@ test("requires a visible design route or an anchor href", () => {
   });
 
   assert.deepEqual(result.errors, [
-    "The Design proof section must link to `/design?tab=components` or `/design?tab=sections`.",
+    "The Design proof section must link to `/design?tab=components`, `/design?tab=consent`, or `/design?tab=sections`.",
   ]);
 });
 

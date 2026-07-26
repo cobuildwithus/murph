@@ -22,6 +22,17 @@ const PG_CONNECTION_TIMEOUT_MS = 5_000;
 const PG_IDLE_TIMEOUT_MS = 30_000;
 const PRISMA_TRANSACTION_MAX_WAIT_MS = 10_000;
 const PRISMA_TRANSACTION_TIMEOUT_MS = 15_000;
+const DATABASE_RETRY_ATTEMPTS = 2;
+const DATABASE_RETRY_MIN_DELAY_MS = 50;
+const DATABASE_RETRY_MAX_DELAY_MS = 250;
+const POOL_PRESSURE_SAMPLE_INTERVAL_MS = 10_000;
+const SLOW_TRANSACTION_MS = 5_000;
+
+/**
+ * Last pressure sample per pool. Keyed by pool rather than held in a module
+ * variable so a second client cannot suppress the first client's samples.
+ */
+const lastPoolPressureSampleAtMs = new WeakMap<PgPool, number>();
 
 type DatabasePoolFailureCategory =
   | "active_connection_error"
@@ -31,6 +42,7 @@ type DatabasePoolFailureCategory =
   | "idle_connection_error"
   | "pool_checkout_timeout"
   | "tls_error"
+  | "transaction_start_timeout"
   | "unreachable";
 
 const DATABASE_POOL_FAILURE_BY_PRISMA_CODE = new Map<
@@ -78,14 +90,12 @@ export interface CreatePrismaClientInput {
 }
 
 function createPrismaPool(input: CreatePrismaClientInput): PgPool {
-  const poolMax = input.poolMax;
+  const poolMax = resolveDatabasePoolMax(input.poolMax);
   const pool = new Pool({
     connectionString: normalizePrismaConnectionString(input.databaseUrl),
     connectionTimeoutMillis: PG_CONNECTION_TIMEOUT_MS,
     idleTimeoutMillis: PG_IDLE_TIMEOUT_MS,
-    max: typeof poolMax === "number" && Number.isFinite(poolMax) && poolMax > 0
-      ? poolMax
-      : DEFAULT_DATABASE_POOL_MAX,
+    max: poolMax,
   });
 
   attachDatabasePool(pool);
@@ -109,6 +119,7 @@ function createPrismaAdapter(pool: PgPool): PrismaPg {
 
 export function createPrismaClient(input: CreatePrismaClientInput): PrismaClient {
   const logLevels = resolvePrismaLogLevels();
+  const poolMax = resolveDatabasePoolMax(input.poolMax);
   const pool = createPrismaPool(input);
 
   const client = new PrismaClient({
@@ -124,7 +135,7 @@ export function createPrismaClient(input: CreatePrismaClientInput): PrismaClient
   // via collectPrismaOperationTimings; a pass-through everywhere else. The
   // extension keeps the full PrismaClient surface, so the assertion below is
   // a type-level boundary only.
-  return client.$extends({
+  const extended = client.$extends({
     query: {
       $allOperations({ args, model, operation, query }) {
         const timingActive = isPrismaOperationTimingActive();
@@ -138,31 +149,193 @@ export function createPrismaClient(input: CreatePrismaClientInput): PrismaClient
             Date.now() - startedAtMs,
           );
         };
-        return query(args).then(
+        // A checkout timeout means the statement never reached Postgres, so the
+        // operation can be replayed without duplicating an effect.
+        return runWithDatabaseRetry(
+          pool,
+          poolMax,
+          "pool_checkout_timeout",
+          () => query(args),
+        ).then(
           (result) => {
             record();
             return result;
           },
           (error: unknown) => {
             record();
-            const category = resolveDatabasePoolFailureCategory(error);
-            if (category) {
-              reportDatabasePoolFailure(pool, category);
-            }
             throw error;
           },
         );
       },
     },
   }) as PrismaClient;
+
+  return withTransactionStartRetry(extended, pool, poolMax);
+}
+
+/**
+ * Retries one ambiguous connection-establishment failure when the caller proves
+ * the operation never began. Local pool saturation is already backpressure, so
+ * it is reported and returned immediately instead of rejoining the same queue.
+ */
+async function runWithDatabaseRetry<T>(
+  pool: PgPool,
+  poolMax: number,
+  retryableCategory: DatabasePoolFailureCategory,
+  run: () => Promise<T>,
+  canRetry: () => boolean = () => true,
+): Promise<T> {
+  let pendingRetryError: unknown = null;
+  for (let attempt = 1; ; attempt += 1) {
+    const locallyContendedBeforeAttempt = hasLocalDatabasePoolPressure(
+      pool,
+      poolMax,
+    );
+    reportDatabasePoolPressure(pool, poolMax);
+    if (attempt > 1 && locallyContendedBeforeAttempt) {
+      throw pendingRetryError;
+    }
+    try {
+      return await run();
+    } catch (error) {
+      const category = resolveDatabasePoolFailureCategory(error);
+      if (category) {
+        reportDatabasePoolFailure(pool, category);
+      }
+      if (
+        category !== retryableCategory
+        || attempt >= DATABASE_RETRY_ATTEMPTS
+        || !canRetry()
+        || locallyContendedBeforeAttempt
+        || hasLocalDatabasePoolPressure(pool, poolMax)
+      ) {
+        throw error;
+      }
+      pendingRetryError = error;
+      await delay(resolveDatabaseRetryDelayMs());
+    }
+  }
+}
+
+/**
+ * Retries `$transaction` when the transaction never began. Prisma raises that
+ * before it invokes the callback, so no statement ran and no callback side
+ * effect happened; any later failure is left alone because the callback may
+ * have done work. This is the shape a primary switchover takes: PgBouncer holds
+ * the client socket and queues `BEGIN`, and Prisma gives up after `maxWait`.
+ *
+ * The wrapper intercepts one method and forwards everything else untouched, so
+ * model delegates and raw queries keep their normal behaviour.
+ */
+function withTransactionStartRetry(
+  client: PrismaClient,
+  pool: PgPool,
+  poolMax: number,
+): PrismaClient {
+  return new Proxy(client, {
+    get(target, property) {
+      const value = Reflect.get(target, property) as unknown;
+
+      if (property !== "$transaction" || typeof value !== "function") {
+        return value;
+      }
+
+      return async (...args: unknown[]): Promise<unknown> => {
+        const transactionArgument = args[0];
+
+        if (typeof transactionArgument !== "function") {
+          const startedAtMs = Date.now();
+          try {
+            return await runWithDatabaseRetry(
+              pool,
+              poolMax,
+              "transaction_start_timeout",
+              () => Reflect.apply(value, target, args) as Promise<unknown>,
+            );
+          } finally {
+            reportSlowDatabaseBatchTransaction(Date.now() - startedAtMs);
+          }
+        }
+
+        let callbackStarted = false;
+        return runWithDatabaseRetry(
+          pool,
+          poolMax,
+          "transaction_start_timeout",
+          async () => {
+            callbackStarted = false;
+            const acquisitionStartedAtMs = Date.now();
+            const wrappedCallback = async (...callbackArgs: unknown[]) => {
+              callbackStarted = true;
+              reportSlowDatabaseTransactionAcquisition(
+                Date.now() - acquisitionStartedAtMs,
+              );
+              const heldStartedAtMs = Date.now();
+              try {
+                return await Reflect.apply(
+                  transactionArgument,
+                  undefined,
+                  callbackArgs,
+                ) as unknown;
+              } finally {
+                reportSlowDatabaseTransactionHold(
+                  Date.now() - heldStartedAtMs,
+                );
+              }
+            };
+            const transactionArgs = [wrappedCallback, ...args.slice(1)];
+
+            try {
+              return await Reflect.apply(
+                value,
+                target,
+                transactionArgs,
+              ) as unknown;
+            } finally {
+              if (!callbackStarted) {
+                reportSlowDatabaseTransactionAcquisition(
+                  Date.now() - acquisitionStartedAtMs,
+                );
+              }
+            }
+          },
+          () => !callbackStarted,
+        );
+      };
+    },
+  });
+}
+
+function delay(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, milliseconds);
+  });
+}
+
+function resolveDatabaseRetryDelayMs(): number {
+  return DATABASE_RETRY_MIN_DELAY_MS + Math.floor(
+    Math.random()
+      * (DATABASE_RETRY_MAX_DELAY_MS - DATABASE_RETRY_MIN_DELAY_MS + 1),
+  );
 }
 
 function createPrisma(): PrismaClient {
+  const configuredPoolMax = Number.isFinite(DATABASE_POOL_MAX) && DATABASE_POOL_MAX > 0
+    ? DATABASE_POOL_MAX
+    : null;
+
+  // The pool limit is per module runtime, so the effective ceiling is this
+  // number times the live instance count. Say which number is in force and
+  // whether anyone chose it, so an inherited default is never mistaken for a
+  // capacity decision.
+  console.info("Hosted web database pool configured.", {
+    maxConnections: configuredPoolMax ?? DEFAULT_DATABASE_POOL_MAX,
+    source: configuredPoolMax === null ? "default" : "configured",
+  });
+
   return createPrismaClient({
     databaseUrl: assertHostedWebDatabaseUrlConfigured(),
-    poolMax: Number.isFinite(DATABASE_POOL_MAX) && DATABASE_POOL_MAX > 0
-      ? DATABASE_POOL_MAX
-      : DEFAULT_DATABASE_POOL_MAX,
+    poolMax: configuredPoolMax ?? DEFAULT_DATABASE_POOL_MAX,
   });
 }
 
@@ -205,6 +378,12 @@ export function normalizePrismaConnectionString(databaseUrl: string): string {
   return changed ? parsed.toString() : databaseUrl;
 }
 
+function resolveDatabasePoolMax(poolMax?: number): number {
+  return typeof poolMax === "number" && Number.isFinite(poolMax) && poolMax > 0
+    ? poolMax
+    : DEFAULT_DATABASE_POOL_MAX;
+}
+
 function resolveDatabasePoolFailureCategory(
   error: unknown,
 ): DatabasePoolFailureCategory | null {
@@ -240,6 +419,11 @@ function resolveDatabasePoolFailureCategory(
     if (message?.includes("timeout exceeded when trying to connect")) {
       return "pool_checkout_timeout";
     }
+    // Prisma reports every transaction-API fault as P2028, so only the message
+    // separates "never started" from a transaction that ran and then expired.
+    if (message?.includes("Unable to start a transaction in the given time")) {
+      return "transaction_start_timeout";
+    }
     if (message?.includes("Connection terminated due to connection timeout")) {
       return "connection_timeout";
     }
@@ -259,6 +443,70 @@ function reportDatabasePoolFailure(
     idleConnections: normalizePoolCount(pool.idleCount),
     totalConnections: normalizePoolCount(pool.totalCount),
     waitingRequests: normalizePoolCount(pool.waitingCount),
+  });
+}
+
+/**
+ * Reports pool contention before it becomes a failure. A full pool identifies
+ * the first prospective waiter before pg increments `waitingCount`; later
+ * callers remain visible through that count. A healthy pool logs nothing.
+ */
+function reportDatabasePoolPressure(pool: PgPool, poolMax: number): void {
+  const waitingRequests = normalizePoolCount(pool.waitingCount);
+  if (!hasLocalDatabasePoolPressure(pool, poolMax)) {
+    return;
+  }
+
+  const now = Date.now();
+  const lastSampleAtMs = lastPoolPressureSampleAtMs.get(pool) ?? 0;
+  if (now - lastSampleAtMs < POOL_PRESSURE_SAMPLE_INTERVAL_MS) {
+    return;
+  }
+  lastPoolPressureSampleAtMs.set(pool, now);
+
+  console.warn("Hosted web database pool pressure.", {
+    idleConnections: normalizePoolCount(pool.idleCount),
+    totalConnections: normalizePoolCount(pool.totalCount),
+    waitingRequests,
+  });
+}
+
+function hasLocalDatabasePoolPressure(pool: PgPool, poolMax: number): boolean {
+  return normalizePoolCount(pool.waitingCount) > 0
+    || (
+      normalizePoolCount(pool.idleCount) === 0
+      && normalizePoolCount(pool.totalCount) >= poolMax
+    );
+}
+
+function reportSlowDatabaseTransactionAcquisition(durationMs: number): void {
+  reportSlowDatabaseDuration(
+    "Hosted web database slow transaction acquisition.",
+    durationMs,
+  );
+}
+
+function reportSlowDatabaseTransactionHold(durationMs: number): void {
+  reportSlowDatabaseDuration(
+    "Hosted web database slow transaction hold.",
+    durationMs,
+  );
+}
+
+function reportSlowDatabaseBatchTransaction(durationMs: number): void {
+  reportSlowDatabaseDuration(
+    "Hosted web database slow batch transaction.",
+    durationMs,
+  );
+}
+
+function reportSlowDatabaseDuration(message: string, durationMs: number): void {
+  if (durationMs < SLOW_TRANSACTION_MS) {
+    return;
+  }
+
+  console.warn(message, {
+    durationMs: Math.trunc(durationMs),
   });
 }
 
