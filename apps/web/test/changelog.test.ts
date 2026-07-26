@@ -32,10 +32,10 @@ describe("changelog registry", () => {
       {
         id: "2026-07-25",
         itemIds: [
-          "ask-grok-live-x-search",
+          "ask-grok-x-research",
           "unhinged-style-dial",
           "group-chat-creative-formats",
-          "telegram-group-identity-and-one-tap-joins",
+          "telegram-group-sender-attribution",
           "weather-aware-outdoor-reminders",
           "group-murph-reads-the-floor",
           "phone-call-results-return-to-chat",

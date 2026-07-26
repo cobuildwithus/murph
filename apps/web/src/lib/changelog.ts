@@ -67,17 +67,17 @@ const RAW_CHANGELOG_EDITIONS = [
     publishedOn: "2026-07-25",
     title: "A Murph that knows when to speak",
     summary:
-      "Group Murph reads the floor, gets more creative, and handles Telegram one-tap joins. Murph can also check X through Grok, adapt outdoor reminders to the weather, and close billing and phone-call loops that used to strand people.",
+      "Group Murph reads the floor, gets more creative, and knows who is speaking on Telegram. Murph can also ask Grok about X, adapt outdoor reminders to the weather, and close billing and phone-call loops that used to strand people.",
     items: [
       {
-        id: "ask-grok-live-x-search",
+        id: "ask-grok-x-research",
         kind: "feature",
         priority: 5,
         title: "Ask Grok what people are saying on X",
         summary:
-          "Murph can now ask Grok about an account, a topic, or a post you share and bring the live X search answer back into your conversation.",
+          "Murph can now ask Grok to search X about an account, a topic, or a post you share, then bring Grok's returned answer back into your conversation.",
         details:
-          "Murph labels the answer as Grok's report, treats posts as unverified third-party content, and never invents links or authors that the search did not return. The exact provider cost for the call counts toward your Murph usage with no markup.",
+          "Murph labels the answer as Grok's unverified report and is instructed not to add links or authors beyond what Grok returned. The exact provider cost for the call counts toward your Murph usage with no markup.",
         relevanceTags: ["assistant", "search", "x", "research"],
         sourcePullRequests: [911],
         tryIt: {
@@ -114,16 +114,16 @@ const RAW_CHANGELOG_EDITIONS = [
         sourcePullRequests: [938],
       },
       {
-        id: "telegram-group-identity-and-one-tap-joins",
+        id: "telegram-group-sender-attribution",
         kind: "feature",
         priority: 4,
-        title: "Telegram groups know who said yes",
+        title: "Telegram group Murph knows who just spoke",
         summary:
-          "Murph can now attribute a Telegram group message to the linked member who sent it, and a member can accept a group offer from its one-tap Telegram button.",
+          "When a linked member writes in a Telegram group, Murph now attributes that turn to the right person and can use their username when no room name exists.",
         details:
-          "The button stays bound to the offer and the person who received it. Telegram acknowledges every tap so the loading spinner stops, gives a short next step when the person needs to link Telegram, join the group, or accept terms, and explains when a sharing limit blocks the action.",
+          "Challenge opt-ins no longer arrive anonymous, so Murph can tell who accepted and keep the group's conversation and shared state attached to the right member.",
         relevanceTags: ["telegram", "groups", "challenges", "messaging"],
-        sourcePullRequests: [924, 927],
+        sourcePullRequests: [927],
       },
       {
         id: "weather-aware-outdoor-reminders",

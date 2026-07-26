@@ -42,9 +42,9 @@ describe("changelog routes", () => {
     ]);
     expect(items.map((item) => item.id)).toEqual(
       expect.arrayContaining([
-        "ask-grok-live-x-search",
+        "ask-grok-x-research",
         "unhinged-style-dial",
-        "telegram-group-identity-and-one-tap-joins",
+        "telegram-group-sender-attribution",
         "ask-murph-whats-new",
         "account-deletion-exit-feedback",
       ]),
