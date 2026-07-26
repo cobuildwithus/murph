@@ -9,7 +9,9 @@ import {
 import {
   ASSISTANT_GROUP_ROOM_MODEL_EVIDENCE_HEADING,
   ASSISTANT_MAINTENANCE_EVIDENCE_HEADING,
+  ASSISTANT_MANAGED_GROUP_RECAP_EVIDENCE_HEADING,
   buildAssistantMaintenanceConversationEvidence,
+  buildAssistantManagedGroupRecapEvidence,
 } from '../src/assistant/maintenance-evidence.ts'
 import {
   appendAssistantTranscriptEntries,
@@ -31,8 +33,10 @@ afterEach(async () => {
 
 function createEvidenceTestSession(input: {
   channel?: string | null
+  deliveryTarget?: string | null
   lastTurnAt: string | null
   sessionId: string
+  threadId?: string | null
   threadIsDirect?: boolean | null
 }): AssistantSession {
   return parseAssistantSessionRecord({
@@ -57,9 +61,11 @@ function createEvidenceTestSession(input: {
       channel: input.channel ?? null,
       identityId: null,
       actorId: null,
-      threadId: null,
+      threadId: input.threadId ?? null,
       threadIsDirect: input.threadIsDirect ?? null,
-      delivery: null,
+      delivery: input.deliveryTarget
+        ? { kind: 'thread', target: input.deliveryTarget }
+        : null,
     },
     createdAt: '2026-06-01T00:00:00.000Z',
     updatedAt: input.lastTurnAt ?? '2026-06-01T00:00:00.000Z',
@@ -504,4 +510,107 @@ test('returns an explicit empty group evidence section without group sessions', 
 
   expect(evidence).toContain(ASSISTANT_GROUP_ROOM_MODEL_EVIDENCE_HEADING)
   expect(evidence).toContain('Do not create or update the group room model this run.')
+})
+
+test('builds occurrence-anchored route-exact recap evidence with transient sender aliases', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    'murph-managed-group-recap-evidence-',
+  )
+  cleanupPaths.push(parentRoot)
+
+  await saveAssistantSession(
+    vaultRoot,
+    createEvidenceTestSession({
+      channel: 'linq',
+      deliveryTarget: 'weekly-room',
+      lastTurnAt: '2026-07-12T18:00:00.000Z',
+      sessionId: 'session-weekly-room',
+      threadId: 'weekly-room',
+      threadIsDirect: false,
+    }),
+  )
+  await appendAssistantTranscriptEntries(vaultRoot, 'session-weekly-room', [
+    {
+      createdAt: '2026-07-05T18:00:00.000Z',
+      kind: 'user',
+      text: [
+        'Input 1:',
+        'Sender: @raw_handle',
+        'Sender name: Alice Example',
+        'Message ref: provider-message-opaque-id',
+        '',
+        'Message text:',
+        'the plant saga started here',
+      ].join('\n'),
+    },
+    {
+      createdAt: '2026-07-10T20:00:00.000Z',
+      kind: 'assistant',
+      text: 'the fern has entered its legal era',
+    },
+    {
+      createdAt: '2026-07-12T18:00:00.000Z',
+      kind: 'user',
+      text: 'This exact occurrence-boundary entry must be excluded.',
+    },
+  ])
+
+  await saveAssistantSession(
+    vaultRoot,
+    createEvidenceTestSession({
+      channel: 'linq',
+      deliveryTarget: 'other-room',
+      lastTurnAt: '2026-07-11T18:00:00.000Z',
+      sessionId: 'session-other-room',
+      threadId: 'other-room',
+      threadIsDirect: false,
+    }),
+  )
+  await appendAssistantTranscriptEntries(vaultRoot, 'session-other-room', [
+    {
+      createdAt: '2026-07-11T18:00:00.000Z',
+      kind: 'user',
+      text: 'Different room evidence must not cross routes.',
+    },
+  ])
+
+  await saveAssistantSession(
+    vaultRoot,
+    createEvidenceTestSession({
+      channel: 'linq',
+      deliveryTarget: 'weekly-room',
+      lastTurnAt: '2026-07-11T19:00:00.000Z',
+      sessionId: 'session-direct-weekly-room',
+      threadId: 'weekly-room',
+      threadIsDirect: true,
+    }),
+  )
+  await appendAssistantTranscriptEntries(vaultRoot, 'session-direct-weekly-room', [
+    {
+      createdAt: '2026-07-11T19:00:00.000Z',
+      kind: 'user',
+      text: 'Direct-chat evidence must not cross audiences.',
+    },
+  ])
+
+  const evidence = await buildAssistantManagedGroupRecapEvidence({
+    channel: 'linq',
+    occurrenceAt: '2026-07-12T18:00:00.000Z',
+    target: 'weekly-room',
+    timeZone: 'UTC',
+    vault: vaultRoot,
+  })
+
+  expect(evidence).toContain(ASSISTANT_MANAGED_GROUP_RECAP_EVIDENCE_HEADING)
+  expect(evidence).toContain('Participant 1')
+  expect(evidence).toContain('the plant saga started here')
+  expect(evidence).toContain('the fern has entered its legal era')
+  expect(evidence).not.toContain('@raw_handle')
+  expect(evidence).not.toContain('Alice Example')
+  expect(evidence).not.toContain('provider-message-opaque-id')
+  expect(evidence).not.toContain('occurrence-boundary')
+  expect(evidence).not.toContain('Different room evidence')
+  expect(evidence).not.toContain('Direct-chat evidence')
+  expect(evidence).not.toContain('weekly-room')
+  expect(evidence).not.toContain('100')
 })
