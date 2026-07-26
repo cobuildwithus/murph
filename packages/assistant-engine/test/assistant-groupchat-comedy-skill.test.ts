@@ -297,4 +297,20 @@ describe('assistant group-chat comedy skill', () => {
     )
     expect(challenge).not.toContain('polite "harmless" forfeits')
   })
+
+  it('uses general room canon as optional fan service rather than a forced callback', async () => {
+    const comedy = await readSkill('groupchat-comedy')
+    const normalized = comedy.replace(/\s+/gu, ' ')
+
+    expect(normalized).toContain(
+      'General cross-day room canon may arrive in the injected `group-room-model` page; treat that page as a rough tip sheet, not a mandate.',
+    )
+    expect(normalized).toContain(
+      'Current context wins, and a callback that is technically available but forced is worse than a fresh line or silence.',
+    )
+    expect(normalized).toContain(
+      'Challenge-only rules, standings, stakes, and dispatch history stay on the challenge page.',
+    )
+  })
+
 })
