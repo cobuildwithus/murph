@@ -1575,6 +1575,103 @@ describe("deleteHostedAccountData", () => {
     expect(stripe.customers.del).not.toHaveBeenCalled();
   });
 
+  it.each(["open", "complete"] as const)(
+    "validates a recovered reservation before %s direct and Family Checkout effects",
+    async (checkoutStatus) => {
+      const reservationId = `hbscr_checkout_order_${checkoutStatus}`;
+      const directCheckoutSessionId = `cs_test_delete_order_${checkoutStatus}`;
+      const familyCheckoutSessionId =
+        `cs_test_family_delete_order_${checkoutStatus}`;
+      const directBillingRefRecord = {
+        ...await makeCheckoutAttemptBillingRefRowForTest({
+          attemptId: `checkout_attempt_delete_order_${checkoutStatus}`,
+          intentHash: `intent_hash_delete_order_${checkoutStatus}`,
+          memberId: "member_123",
+          sessionId: directCheckoutSessionId,
+        }),
+        stripeCustomerReservationCreatedAt: new Date(Date.now() - 60_000),
+        stripeCustomerReservationId: reservationId,
+      };
+      const familyBillingRefRecord = await makeFamilyBillingRefRowForTest({
+        checkoutAttemptId:
+          `family_checkout_attempt_delete_order_${checkoutStatus}`,
+        checkoutSessionId: familyCheckoutSessionId,
+        groupId: "family_group_123",
+        ownerMemberId: "member_123",
+        stripeCustomerId: `cus_family_delete_order_${checkoutStatus}`,
+        stripeSubscriptionId: null,
+      });
+      const stripe = {
+        checkout: {
+          sessions: {
+            expire: vi.fn(),
+            retrieve: vi.fn(async (sessionId: string) =>
+              sessionId === directCheckoutSessionId
+                ? makeStandardCheckoutSessionForAccountDeletionTest({
+                    attemptId:
+                      `checkout_attempt_delete_order_${checkoutStatus}`,
+                    customerId: `cus_direct_delete_order_${checkoutStatus}`,
+                    intentHash: `intent_hash_delete_order_${checkoutStatus}`,
+                    sessionId: directCheckoutSessionId,
+                    status: checkoutStatus,
+                    subscriptionId: checkoutStatus === "complete"
+                      ? `sub_direct_delete_order_${checkoutStatus}`
+                      : null,
+                  })
+                : makeFamilyCheckoutSessionForAccountDeletionTest({
+                    attemptId:
+                      `family_checkout_attempt_delete_order_${checkoutStatus}`,
+                    customerId: `cus_family_delete_order_${checkoutStatus}`,
+                    sessionId: familyCheckoutSessionId,
+                    status: checkoutStatus,
+                    subscriptionId: checkoutStatus === "complete"
+                      ? `sub_family_delete_order_${checkoutStatus}`
+                      : null,
+                  })),
+          },
+        },
+        customers: {
+          create: vi.fn(async () => ({
+            id: `cus_recovered_delete_order_${checkoutStatus}`,
+          })),
+          retrieve: vi.fn(async () =>
+            makeZeroBalanceStripeCustomerForAccountDeletionTest(
+              `cus_recovered_delete_order_${checkoutStatus}`,
+              {
+                customerReservationId: "hbscr_other",
+                memberId: "member_123",
+                source: "hosted.auto_pulse_trial",
+              },
+            )),
+        },
+      };
+      installHostedAccountDeletionCustomerGateTestDouble(stripe);
+      serviceMocks.getHostedOnboardingStripe.mockReturnValue(stripe);
+      const prisma = createHostedAccountDeletionPrismaForTest({
+        billingRefRecord: directBillingRefRecord,
+        familyBillingRefRecords: [familyBillingRefRecord],
+        familyGroups: [{ id: "family_group_123" }],
+        onTransaction: () => undefined,
+      });
+
+      await expect(deleteHostedAccountData({
+        memberId: "member_123",
+        prisma,
+        request: new Request("https://join.example.test/settings"),
+      })).rejects.toMatchObject({
+        code: "ACCOUNT_DELETION_STRIPE_CUSTOMER_STATE_INCONSISTENT",
+        retryable: false,
+      });
+
+      expect(stripe.checkout.sessions.retrieve).not.toHaveBeenCalled();
+      expect(stripe.checkout.sessions.expire).not.toHaveBeenCalled();
+      expect(serviceMocks.executeHostedCheckoutSubscriptionCleanup).not
+        .toHaveBeenCalled();
+      expect(serviceMocks.applyHostedFamilyStripeCheckoutCompletedTx).not
+        .toHaveBeenCalled();
+    },
+  );
+
   it("classifies a provider failure while replaying a fresh Customer reservation", async () => {
     const reservationId = "hbscr_provider_failure";
     const deleteCalls: HostedAccountDeletionPrismaDeleteCall[] = [];

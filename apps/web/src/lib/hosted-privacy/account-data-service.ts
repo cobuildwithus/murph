@@ -687,6 +687,13 @@ export async function deleteHostedAccountData(input: {
       memberId: input.memberId,
       reservation: stripeCustomerReservation,
     });
+  await assertHostedStripeCustomersSafeForAccountDeletion({
+    memberId: input.memberId,
+    stripeCustomerScope: buildHostedStripeCustomerScopeForAccountDeletion({
+      knownStripeCustomerIds: [],
+      recoveredStripeCustomerReservation,
+    }),
+  });
   const checkoutResult = await reconcileHostedStripeCheckoutSessionForAccountDeletion({
     checkoutAttemptId: postFenceBillingRef?.checkoutAttemptId ?? null,
     checkoutIntentHash: postFenceBillingRef?.checkoutIntentHash ?? null,
@@ -721,10 +728,6 @@ export async function deleteHostedAccountData(input: {
       knownStripeCustomerIds,
       recoveredStripeCustomerReservation,
     });
-  await assertHostedStripeCustomersSafeForAccountDeletion({
-    memberId: input.memberId,
-    stripeCustomerScope,
-  });
   await deleteHostedPhoneCallsForAccountDeletion({
     memberIds: deletionMemberIds,
     prisma: input.prisma,

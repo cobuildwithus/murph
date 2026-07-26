@@ -108,6 +108,14 @@ are terminal rather than indefinite pending. These outcomes come from a
 canonical invoice plus InvoicePayments read so the PaymentIntent state, not URL
 presence, controls the classification.
 
+Recurring financial reconciliation treats the current-period base invoice and
+every paid update whose economic contribution remains in the canonical
+subscription as required funding. Cumulative quantity increases remain
+independently required; a later update supersedes an earlier contribution only
+after a real unwind and paid re-establishment. Non-prorating consolidation of
+same-price items changes identity, not funding provenance. A full refund of any
+still-required invoice blocks the resulting entitlement.
+
 When auto-adding a seat for an invite returns payment-required, Settings keeps
 the exact invite intent and Stripe-hosted recovery URL in a short-lived
 encrypted HttpOnly cookie. The claim is bound to the authenticated member,

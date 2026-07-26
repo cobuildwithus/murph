@@ -1555,10 +1555,276 @@ describe("hosted onboarding stripe billing lookup", () => {
     });
   });
 
-  it("uses the latest paid update that establishes the current item after an earlier update refund", async () => {
+  it("keeps every still-represented cumulative seat increase in the required funding set", async () => {
+    const renewalInvoice = makeStripeFinancialInvoice({
+      created: 1_775_000_000,
+      id: "in_cumulative_renewal",
+      lines: [
+        makeStripeInvoiceLine({
+          invoiceId: "in_cumulative_renewal",
+          periodEnd: 1_778_000_000,
+          periodStart: 1_775_000_000,
+          priceId: "price_family_pulse",
+          quantity: 1,
+          subscriptionId: "sub_123",
+          subscriptionItemId: "si_family_pulse",
+        }),
+      ],
+    });
+    const firstIncreaseInvoice = makeStripeFinancialInvoice({
+      billingReason: "subscription_update",
+      created: 1_776_000_000,
+      id: "in_cumulative_first",
+      lines: [
+        makeStripeInvoiceLine({
+          amount: -1_000,
+          invoiceId: "in_cumulative_first",
+          periodEnd: 1_778_000_000,
+          periodStart: 1_776_000_000,
+          priceId: "price_family_pulse",
+          proration: true,
+          quantity: 1,
+          subscriptionId: "sub_123",
+          subscriptionItemId: "si_family_pulse",
+        }),
+        makeStripeInvoiceLine({
+          amount: 2_000,
+          invoiceId: "in_cumulative_first",
+          periodEnd: 1_778_000_000,
+          periodStart: 1_776_000_000,
+          priceId: "price_family_pulse",
+          proration: true,
+          quantity: 2,
+          subscriptionId: "sub_123",
+          subscriptionItemId: "si_family_pulse",
+        }),
+      ],
+    });
+    const secondIncreaseInvoice = makeStripeFinancialInvoice({
+      billingReason: "subscription_update",
+      created: 1_777_000_000,
+      id: "in_cumulative_second",
+      lines: [
+        makeStripeInvoiceLine({
+          amount: -2_000,
+          invoiceId: "in_cumulative_second",
+          periodEnd: 1_778_000_000,
+          periodStart: 1_777_000_000,
+          priceId: "price_family_pulse",
+          proration: true,
+          quantity: 2,
+          subscriptionId: "sub_123",
+          subscriptionItemId: "si_family_pulse",
+        }),
+        makeStripeInvoiceLine({
+          amount: 3_000,
+          invoiceId: "in_cumulative_second",
+          periodEnd: 1_778_000_000,
+          periodStart: 1_777_000_000,
+          priceId: "price_family_pulse",
+          proration: true,
+          quantity: 3,
+          subscriptionId: "sub_123",
+          subscriptionItemId: "si_family_pulse",
+        }),
+      ],
+    });
+    mocks.stripeInvoicesRetrieve
+      .mockResolvedValueOnce(secondIncreaseInvoice)
+      .mockResolvedValueOnce(firstIncreaseInvoice)
+      .mockResolvedValueOnce(renewalInvoice);
+    mocks.stripeInvoicesList.mockResolvedValueOnce({
+      data: [secondIncreaseInvoice, firstIncreaseInvoice, renewalInvoice],
+      has_more: false,
+    });
+    mocks.stripeInvoicePaymentsList
+      .mockResolvedValueOnce({
+        data: [makeStripeInvoicePayment({
+          chargeId: "ch_cumulative_second",
+          invoice: secondIncreaseInvoice,
+          paymentIntentId: "pi_cumulative_second",
+        })],
+        has_more: false,
+      })
+      .mockResolvedValueOnce({
+        data: [makeStripeInvoicePayment({
+          chargeId: "ch_cumulative_first",
+          invoice: firstIncreaseInvoice,
+          paymentIntentId: "pi_cumulative_first",
+        })],
+        has_more: false,
+      })
+      .mockResolvedValueOnce({
+        data: [makeStripeInvoicePayment({
+          chargeId: "ch_cumulative_renewal",
+          invoice: renewalInvoice,
+          paymentIntentId: "pi_cumulative_renewal",
+        })],
+        has_more: false,
+      });
+    mocks.stripeRefundsList.mockImplementation(async (params: {
+      charge?: string;
+    }) => ({
+      data: params.charge === "ch_cumulative_first"
+        ? [
+            makeStripeRefund({
+              amount: 1_000,
+              chargeId: "ch_cumulative_first",
+              id: "re_cumulative_first",
+              paymentIntentId: "pi_cumulative_first",
+              status: "succeeded",
+            }),
+          ]
+        : [],
+      has_more: false,
+    }));
+
+    await expect(
+      readHostedStripeRecurringFinancialState(
+        makeStripeSubscription({
+          items: [
+            makeStripeSubscriptionItem({
+              id: "si_family_pulse",
+              priceId: "price_family_pulse",
+              quantity: 3,
+            }),
+          ],
+          latestInvoice: secondIncreaseInvoice.id,
+        }),
+      ),
+    ).resolves.toMatchObject({
+      fullyRefunded: true,
+    });
+  });
+
+  it("keeps a paid plan transition required after same-price item consolidation", async () => {
+    const renewalInvoice = makeStripeFinancialInvoice({
+      created: 1_775_000_000,
+      id: "in_consolidated_renewal",
+      lines: [
+        makeStripeInvoiceLine({
+          invoiceId: "in_consolidated_renewal",
+          periodEnd: 1_778_000_000,
+          periodStart: 1_775_000_000,
+          priceId: "price_edge",
+          quantity: 1,
+          subscriptionId: "sub_123",
+          subscriptionItemId: "si_retained_edge",
+        }),
+        makeStripeInvoiceLine({
+          invoiceId: "in_consolidated_renewal",
+          periodEnd: 1_778_000_000,
+          periodStart: 1_775_000_000,
+          priceId: "price_pulse",
+          quantity: 1,
+          subscriptionId: "sub_123",
+          subscriptionItemId: "si_converted_pulse",
+        }),
+      ],
+    });
+    const transitionInvoice = makeStripeFinancialInvoice({
+      billingReason: "subscription_update",
+      created: 1_776_000_000,
+      id: "in_consolidated_transition",
+      lines: [
+        makeStripeInvoiceLine({
+          amount: -1_000,
+          invoiceId: "in_consolidated_transition",
+          periodEnd: 1_778_000_000,
+          periodStart: 1_776_000_000,
+          priceId: "price_pulse",
+          proration: true,
+          quantity: 1,
+          subscriptionId: "sub_123",
+          subscriptionItemId: "si_converted_pulse",
+        }),
+        makeStripeInvoiceLine({
+          amount: 2_000,
+          invoiceId: "in_consolidated_transition",
+          periodEnd: 1_778_000_000,
+          periodStart: 1_776_000_000,
+          priceId: "price_edge",
+          proration: true,
+          quantity: 1,
+          subscriptionId: "sub_123",
+          subscriptionItemId: "si_converted_pulse",
+        }),
+      ],
+    });
+    mocks.stripeInvoicesRetrieve
+      .mockResolvedValueOnce(transitionInvoice)
+      .mockResolvedValueOnce(renewalInvoice);
+    mocks.stripeInvoicesList.mockResolvedValueOnce({
+      data: [transitionInvoice, renewalInvoice],
+      has_more: false,
+    });
+    mocks.stripeInvoicePaymentsList
+      .mockResolvedValueOnce({
+        data: [makeStripeInvoicePayment({
+          chargeId: "ch_consolidated_transition",
+          invoice: transitionInvoice,
+          paymentIntentId: "pi_consolidated_transition",
+        })],
+        has_more: false,
+      })
+      .mockResolvedValueOnce({
+        data: [makeStripeInvoicePayment({
+          chargeId: "ch_consolidated_renewal",
+          invoice: renewalInvoice,
+          paymentIntentId: "pi_consolidated_renewal",
+        })],
+        has_more: false,
+      });
+    mocks.stripeRefundsList.mockImplementation(async (params: {
+      charge?: string;
+    }) => ({
+      data: params.charge === "ch_consolidated_transition"
+        ? [
+            makeStripeRefund({
+              amount: 1_000,
+              chargeId: "ch_consolidated_transition",
+              id: "re_consolidated_transition",
+              paymentIntentId: "pi_consolidated_transition",
+              status: "succeeded",
+            }),
+          ]
+        : [],
+      has_more: false,
+    }));
+
+    await expect(
+      readHostedStripeRecurringFinancialState(
+        makeStripeSubscription({
+          items: [
+            makeStripeSubscriptionItem({
+              id: "si_retained_edge",
+              priceId: "price_edge",
+              quantity: 2,
+            }),
+          ],
+          latestInvoice: transitionInvoice.id,
+        }),
+      ),
+    ).resolves.toMatchObject({
+      fullyRefunded: true,
+    });
+  });
+
+  it("discards an earlier increase only after an unwind and paid re-establishment", async () => {
     const renewalInvoice = makeStripeFinancialInvoice({
       created: 1_775_000_000,
       id: "in_superseded_update_renewal",
+      lines: [
+        makeStripeInvoiceLine({
+          invoiceId: "in_superseded_update_renewal",
+          periodEnd: 1_778_000_000,
+          periodStart: 1_775_000_000,
+          priceId: "price_edge",
+          quantity: 1,
+          subscriptionId: "sub_123",
+          subscriptionItemId: "si_current",
+        }),
+      ],
     });
     const refundedUpdateInvoice = makeStripeFinancialInvoice({
       billingReason: "subscription_update",
@@ -1566,9 +1832,51 @@ describe("hosted onboarding stripe billing lookup", () => {
       id: "in_superseded_update",
       lines: [
         makeStripeInvoiceLine({
+          amount: -1_000,
           invoiceId: "in_superseded_update",
           periodEnd: 1_778_000_000,
           periodStart: 1_776_000_000,
+          priceId: "price_edge",
+          proration: true,
+          quantity: 1,
+          subscriptionId: "sub_123",
+          subscriptionItemId: "si_current",
+        }),
+        makeStripeInvoiceLine({
+          amount: 2_000,
+          invoiceId: "in_superseded_update",
+          periodEnd: 1_778_000_000,
+          periodStart: 1_776_000_000,
+          priceId: "price_edge",
+          proration: true,
+          quantity: 2,
+          subscriptionId: "sub_123",
+          subscriptionItemId: "si_current",
+        }),
+      ],
+    });
+    const unwindInvoice = makeStripeFinancialInvoice({
+      amountPaid: 0,
+      billingReason: "subscription_update",
+      created: 1_776_500_000,
+      id: "in_superseded_unwind",
+      lines: [
+        makeStripeInvoiceLine({
+          amount: -2_000,
+          invoiceId: "in_superseded_unwind",
+          periodEnd: 1_778_000_000,
+          periodStart: 1_776_500_000,
+          priceId: "price_edge",
+          proration: true,
+          quantity: 2,
+          subscriptionId: "sub_123",
+          subscriptionItemId: "si_current",
+        }),
+        makeStripeInvoiceLine({
+          amount: 1_000,
+          invoiceId: "in_superseded_unwind",
+          periodEnd: 1_778_000_000,
+          periodStart: 1_776_500_000,
           priceId: "price_edge",
           proration: true,
           quantity: 1,
@@ -1583,6 +1891,7 @@ describe("hosted onboarding stripe billing lookup", () => {
       id: "in_latest_update",
       lines: [
         makeStripeInvoiceLine({
+          amount: -1_000,
           invoiceId: "in_latest_update",
           periodEnd: 1_778_000_000,
           periodStart: 1_777_000_000,
@@ -1592,14 +1901,31 @@ describe("hosted onboarding stripe billing lookup", () => {
           subscriptionId: "sub_123",
           subscriptionItemId: "si_current",
         }),
+        makeStripeInvoiceLine({
+          amount: 2_000,
+          invoiceId: "in_latest_update",
+          periodEnd: 1_778_000_000,
+          periodStart: 1_777_000_000,
+          priceId: "price_edge",
+          proration: true,
+          quantity: 2,
+          subscriptionId: "sub_123",
+          subscriptionItemId: "si_current",
+        }),
       ],
     });
     mocks.stripeInvoicesRetrieve
       .mockResolvedValueOnce(latestUpdateInvoice)
+      .mockResolvedValueOnce(unwindInvoice)
       .mockResolvedValueOnce(refundedUpdateInvoice)
       .mockResolvedValueOnce(renewalInvoice);
     mocks.stripeInvoicesList.mockResolvedValueOnce({
-      data: [latestUpdateInvoice, refundedUpdateInvoice, renewalInvoice],
+      data: [
+        latestUpdateInvoice,
+        unwindInvoice,
+        refundedUpdateInvoice,
+        renewalInvoice,
+      ],
       has_more: false,
     });
     mocks.stripeInvoicePaymentsList
@@ -1609,6 +1935,10 @@ describe("hosted onboarding stripe billing lookup", () => {
           invoice: latestUpdateInvoice,
           paymentIntentId: "pi_latest_update",
         })],
+        has_more: false,
+      })
+      .mockResolvedValueOnce({
+        data: [],
         has_more: false,
       })
       .mockResolvedValueOnce({
@@ -1651,6 +1981,7 @@ describe("hosted onboarding stripe billing lookup", () => {
             makeStripeSubscriptionItem({
               id: "si_current",
               priceId: "price_edge",
+              quantity: 2,
             }),
           ],
           latestInvoice: latestUpdateInvoice.id,
