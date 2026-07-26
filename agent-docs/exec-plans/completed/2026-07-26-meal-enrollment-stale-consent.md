@@ -1,6 +1,6 @@
 # Automatic meal enrollment stale-consent recovery
 
-Status: active
+Status: completed
 Created: 2026-07-26
 Updated: 2026-07-26
 
@@ -54,9 +54,31 @@ Updated: 2026-07-26
 - Direct production-log and aggregate-database evidence remains read-only and
   private.
 
+## Verification results
+
+- The focused enrollment route suite passed: 15 tests.
+- Canonical `pnpm test:diff` passed on the exact pushed implementation head:
+  530 test files passed with 13 skipped; 6,743 tests passed with 175 skipped;
+  lint, typecheck, build, and smoke checks also passed.
+- `pnpm verify:acceptance` is blocked by an unrelated failure already present
+  on `origin/main`: the CLI release-script coverage audit expects
+  `@cobuild/review-gpt` `^0.5.114` while the base package manifest already
+  declares `^0.5.117`. The focused failing test reproduces without this task's
+  route, test, or documentation changes.
+- Product-experience review returned no findings. The remaining runtime gap is
+  post-deploy proof through the public client; production database inspection
+  stayed aggregate-only and read-only.
+- Preliminary `completion-specialists` review returned PASS with no patch or
+  findings. The response completed in 6 minutes 8 seconds. It is accepted under
+  the repository's documented specialist exception because it exceeded the
+  4-minute floor, the wrapper confirmed the requested GPT-5.6 Sol lane and one
+  ready attachment, the saved response covered every declared lens
+  substantively, and it ended with the required outcome and completion marker.
+
 ## Completion
 
-- Run the required preliminary coverage ReviewGPT pass on the exact pushed
+- Preliminary coverage ReviewGPT passed on the exact pushed implementation
   head.
 - Run parent final review and the final ReviewGPT trust-boundary gate.
 - Close this plan with `scripts/finish-task` after final verification.
+Completed: 2026-07-26
