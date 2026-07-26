@@ -95,6 +95,31 @@ const HOSTED_VAULT_SHARE_PROJECTION_DISPLAY: Record<HostedVaultShareSelectablePr
     label: "Daily max heart rate",
     description: "Shares your last 7 days of max heart rate.",
   },
+  "protein-days.v0": {
+    label: "Daily protein",
+    description:
+      "Shares your last 7 days of daily protein totals from meals in Murph, including meals imported from connected apps.",
+  },
+  "calories-days.v0": {
+    label: "Daily calories",
+    description:
+      "Shares your last 7 days of daily calorie totals from meals in Murph, including meals imported from connected apps.",
+  },
+  "carbs-days.v0": {
+    label: "Daily carbs",
+    description:
+      "Shares your last 7 days of daily carbohydrate totals from meals in Murph, including meals imported from connected apps.",
+  },
+  "fat-days.v0": {
+    label: "Daily fat",
+    description:
+      "Shares your last 7 days of daily fat totals from meals in Murph, including meals imported from connected apps.",
+  },
+  "fiber-days.v0": {
+    label: "Daily fiber",
+    description:
+      "Shares your last 7 days of daily fiber totals from meals in Murph, including meals imported from connected apps.",
+  },
   "resting-heart-rate-days.v0": {
     label: "Resting heart rate",
     description: "Shares your last 7 days of resting heart rate.",

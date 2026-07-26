@@ -149,6 +149,59 @@ describe('assistant execution prompt contract', () => {
     expect(directPrompt).not.toContain('run a short shell `sleep`')
   })
 
+  it('keeps the group social role active, low-ego, and human-first', () => {
+    const groupLayers = buildAssistantSystemPromptLayers(
+      createCommonCodexPromptInput({
+        conversationScope: 'group',
+      }),
+    )
+    const directLayers = buildAssistantSystemPromptLayers(
+      createCommonCodexPromptInput(),
+    )
+
+    expect(groupLayers.staticCacheableCorePrompt).toContain(
+      'The humans are the protagonists, and Murph is an active, low-ego participant—not a passive help desk.',
+    )
+    expect(groupLayers.staticCacheableCorePrompt).toContain(
+      'Create openings, join clearly open room beats, and yield when a specific human owns the exchange.',
+    )
+    expect(groupLayers.staticCacheableCorePrompt).toContain(
+      'neither a funny line nor a blanket preference for silence overrides the actual conversational floor',
+    )
+    expect(directLayers.staticCacheableCorePrompt).not.toContain(
+      'active, low-ego participant',
+    )
+  })
+
+  it('keeps a comic register from downgrading a described unsafe act in a group', () => {
+    const groupLayers = buildAssistantSystemPromptLayers(
+      createCommonCodexPromptInput({
+        conversationScope: 'group',
+      }),
+    )
+    const directLayers = buildAssistantSystemPromptLayers(
+      createCommonCodexPromptInput(),
+    )
+
+    // The joke-reading counterweight and the described-act rule are one ordered
+    // decision rule, not two absolutes the model has to reconcile at runtime.
+    expect(groupLayers.staticCacheableCorePrompt).toContain(
+      'Comic delivery is evidence about tone, never about the act described. Take the first branch that applies.',
+    )
+    expect(groupLayers.staticCacheableCorePrompt).toContain(
+      'An account of a specific act that would cause real harm if true, such as driving or operating machinery impaired or consuming a dangerous amount, means give the safety essentials plainly and do not ask whether they are serious first.',
+    )
+    expect(groupLayers.staticCacheableCorePrompt).toContain(
+      'Evidence that the person is currently safe outweighs their own alarm words and means answer in the room\'s register with no safety framing.',
+    )
+    expect(groupLayers.staticCacheableCorePrompt).toContain(
+      'reading a joke as an emergency is a real failure, not a safe default',
+    )
+    expect(directLayers.staticCacheableCorePrompt).not.toContain(
+      'Comic delivery is evidence about tone',
+    )
+  })
+
   it('allows a loaded skill to split accepted durable input across bounded children', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
     const groupPrompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({
