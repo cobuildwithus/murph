@@ -891,7 +891,51 @@ describe("HostedBillingSettings", () => {
     await rendered.cleanup();
   });
 
-  test("automatically resumes the exact Pulse action after Stripe payment-method completion", async () => {
+  test("shows and confirms start-now timing without posting on render", async () => {
+    mocks.requestHostedPulseTrialContinuation.mockResolvedValueOnce({
+      status: "started",
+    });
+    const { PulseTrialBillingContinuation } = await import(
+      "@/src/components/settings/hosted-start-paid-pulse-button"
+    );
+    const rendered = await renderClientComponent(
+      createElement(PulseTrialBillingContinuation, {
+        action: "start_pulse_now",
+      }),
+      { requireButton: false },
+    );
+
+    assert.equal(mocks.requestHostedPulseTrialContinuation.mock.calls.length, 0);
+    assert.match(
+      rendered.window.document.body.textContent ?? "",
+      /Start paid Pulse now\?/,
+    );
+    assert.match(
+      rendered.window.document.body.textContent ?? "",
+      /trial will end and paid Pulse billing will begin now at \$8\/month/,
+    );
+
+    const confirmButton = findLastButtonByText(
+      rendered.window.document,
+      "End trial and start Pulse",
+      rendered.window,
+    );
+    await act(async () => {
+      confirmButton.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+      confirmButton.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+      await Promise.resolve();
+    });
+
+    assert.deepEqual(mocks.requestHostedPulseTrialContinuation.mock.calls, [[{
+      redirectIfPaymentRequired: false,
+    }]]);
+    assert.deepEqual(mocks.routerReplace.mock.calls, [["/settings#subscription"]]);
+    assert.equal(mocks.routerRefresh.mock.calls.length, 0);
+
+    await rendered.cleanup();
+  });
+
+  test("checks an active continue return without mutating billing and shows a receipt", async () => {
     mocks.requestHostedPulseTrialContinuation.mockResolvedValueOnce({
       status: "continuing",
     });
@@ -899,7 +943,9 @@ describe("HostedBillingSettings", () => {
       "@/src/components/settings/hosted-start-paid-pulse-button"
     );
     const rendered = await renderClientComponent(
-      createElement(PulseTrialBillingContinuation),
+      createElement(PulseTrialBillingContinuation, {
+        action: "continue_pulse",
+      }),
       { requireButton: false },
     );
 
@@ -910,29 +956,110 @@ describe("HostedBillingSettings", () => {
     assert.deepEqual(mocks.requestHostedPulseTrialContinuation.mock.calls, [[{
       redirectIfPaymentRequired: false,
     }]]);
-    assert.deepEqual(mocks.routerReplace.mock.calls, [["/settings#subscription"]]);
-    assert.equal(mocks.routerRefresh.mock.calls.length, 0);
     assert.match(
       rendered.window.document.body.textContent ?? "",
-      /Payment method saved\. Finishing your Pulse update/,
+      /Your Pulse trial is set/,
     );
+    assert.match(
+      rendered.window.document.body.textContent ?? "",
+      /current trial continues as scheduled/,
+    );
+    assert.doesNotMatch(
+      rendered.window.document.body.textContent ?? "",
+      /Not now/,
+    );
+    assert.equal(mocks.routerReplace.mock.calls.length, 0);
+
+    const doneButton = findLastButtonByText(
+      rendered.window.document,
+      "Done",
+      rendered.window,
+    );
+    await act(async () => {
+      doneButton.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+    });
+    assert.deepEqual(mocks.routerReplace.mock.calls, [["/settings#subscription"]]);
 
     await rendered.cleanup();
   });
 
-  test("does not redirect back to Stripe when automatic continuation still lacks payment", async () => {
+  test("shows a paid-plan receipt when the trial converted before the return", async () => {
+    mocks.requestHostedPulseTrialContinuation.mockResolvedValueOnce({
+      status: "started",
+    });
+    const { PulseTrialBillingContinuation } = await import(
+      "@/src/components/settings/hosted-start-paid-pulse-button"
+    );
+    const rendered = await renderClientComponent(
+      createElement(PulseTrialBillingContinuation, {
+        action: "continue_pulse",
+      }),
+      { requireButton: false },
+    );
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    assert.match(
+      rendered.window.document.body.textContent ?? "",
+      /Your Pulse plan is active/,
+    );
+    assert.match(
+      rendered.window.document.body.textContent ?? "",
+      /paid Pulse is active at \$8\/month/,
+    );
+    assert.doesNotMatch(
+      rendered.window.document.body.textContent ?? "",
+      /Start Pulse/,
+    );
+    assert.equal(mocks.routerReplace.mock.calls.length, 0);
+
+    await rendered.cleanup();
+  });
+
+  test("dismisses a recovered Pulse choice without invoking billing", async () => {
+    const { PulseTrialBillingContinuation } = await import(
+      "@/src/components/settings/hosted-start-paid-pulse-button"
+    );
+    const rendered = await renderClientComponent(
+      createElement(PulseTrialBillingContinuation, {
+        action: "start_pulse_now",
+      }),
+      { requireButton: false },
+    );
+
+    const dismissButton = findLastButtonByText(
+      rendered.window.document,
+      "Not now",
+      rendered.window,
+    );
+    await act(async () => {
+      dismissButton.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+    });
+
+    assert.equal(mocks.requestHostedPulseTrialContinuation.mock.calls.length, 0);
+    assert.deepEqual(mocks.routerReplace.mock.calls, [["/settings#subscription"]]);
+    assert.equal(rendered.window.document.body.textContent, "");
+
+    await rendered.cleanup();
+  });
+
+  test("does not redirect back to Stripe until the member explicitly retries", async () => {
     mocks.requestHostedPulseTrialContinuation
       .mockResolvedValueOnce({
         status: "payment_required",
       })
       .mockResolvedValueOnce({
-        status: "started",
+        status: "continuing",
       });
     const { PulseTrialBillingContinuation } = await import(
       "@/src/components/settings/hosted-start-paid-pulse-button"
     );
     const rendered = await renderClientComponent(
-      createElement(PulseTrialBillingContinuation),
+      createElement(PulseTrialBillingContinuation, {
+        action: "continue_pulse",
+      }),
       { requireButton: false },
     );
 
@@ -949,7 +1076,7 @@ describe("HostedBillingSettings", () => {
 
     const retryButton = findLastButtonByText(
       rendered.window.document,
-      "Try again",
+      "Check again",
       rendered.window,
     );
     await act(async () => {
@@ -961,6 +1088,65 @@ describe("HostedBillingSettings", () => {
       [{ redirectIfPaymentRequired: false }],
       [{ redirectIfPaymentRequired: true }],
     ]);
+    assert.match(
+      rendered.window.document.body.textContent ?? "",
+      /Your Pulse trial is set/,
+    );
+    assert.equal(mocks.routerReplace.mock.calls.length, 0);
+
+    await rendered.cleanup();
+  });
+
+  test("sends an ended continue return to a fresh start-now choice", async () => {
+    const { HostedOnboardingApiError } = await import(
+      "@/src/components/hosted-onboarding/client-api"
+    );
+    mocks.requestHostedPulseTrialContinuation.mockRejectedValueOnce(
+      new HostedOnboardingApiError({
+        code: "HOSTED_PULSE_TRIAL_CONTINUE_REQUIRES_START",
+        message:
+          "Your Pulse trial has ended. Review the plan before starting paid Pulse.",
+      }),
+    );
+    const { PulseTrialBillingContinuation } = await import(
+      "@/src/components/settings/hosted-start-paid-pulse-button"
+    );
+    const rendered = await renderClientComponent(
+      createElement(PulseTrialBillingContinuation, {
+        action: "continue_pulse",
+      }),
+      { requireButton: false },
+    );
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    assert.deepEqual(mocks.requestHostedPulseTrialContinuation.mock.calls, [[{
+      redirectIfPaymentRequired: false,
+    }]]);
+    assert.match(
+      rendered.window.document.body.textContent ?? "",
+      /Your trial has ended/,
+    );
+    assert.match(
+      rendered.window.document.body.textContent ?? "",
+      /Paid Pulse was not started from this return/,
+    );
+    assert.equal(mocks.routerReplace.mock.calls.length, 0);
+    assert.doesNotMatch(
+      rendered.window.document.body.textContent ?? "",
+      /Continue after trial/,
+    );
+
+    const gotItButton = findLastButtonByText(
+      rendered.window.document,
+      "Got it",
+      rendered.window,
+    );
+    await act(async () => {
+      gotItButton.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+    });
     assert.deepEqual(mocks.routerReplace.mock.calls, [["/settings#subscription"]]);
 
     await rendered.cleanup();
@@ -980,11 +1166,19 @@ describe("HostedBillingSettings", () => {
       "@/src/components/settings/hosted-start-paid-pulse-button"
     );
     const rendered = await renderClientComponent(
-      createElement(PulseTrialBillingContinuation),
+      createElement(PulseTrialBillingContinuation, {
+        action: "start_pulse_now",
+      }),
       { requireButton: false },
     );
 
+    const confirmButton = findLastButtonByText(
+      rendered.window.document,
+      "End trial and start Pulse",
+      rendered.window,
+    );
     await act(async () => {
+      confirmButton.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
       await Promise.resolve();
     });
 
@@ -1006,11 +1200,19 @@ describe("HostedBillingSettings", () => {
       "@/src/components/settings/hosted-start-paid-pulse-button"
     );
     const rendered = await renderClientComponent(
-      createElement(PulseTrialBillingContinuation),
+      createElement(PulseTrialBillingContinuation, {
+        action: "start_pulse_now",
+      }),
       { requireButton: false },
     );
 
+    const confirmButton = findLastButtonByText(
+      rendered.window.document,
+      "End trial and start Pulse",
+      rendered.window,
+    );
     await act(async () => {
+      confirmButton.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
       await Promise.resolve();
     });
     assert.match(

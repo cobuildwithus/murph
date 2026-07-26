@@ -140,15 +140,17 @@ default payment method, the route issues a short-lived HttpOnly continuation
 claim bound to the authenticated member and app session, then returns Stripe's
 payment-method-update Billing Portal URL. Stripe cancel/back returns to ordinary
 Settings. Only Stripe's successful flow completion returns to the marked
-Settings URL, and Settings automatically repeats the protected POST after the
-server validates that claim. The marker is not billing authority by itself; a
-plain or forged GET must remain read-only. The first accepted automatic POST
-clears the claim. Existing Stripe idempotency makes overlapping valid
-continuations converge on the same subscription mutation.
+Settings URL. After the server validates the claim, Settings either presents
+the recovered `start_pulse_now` terms for fresh confirmation or verifies the
+mutation-free `continue_pulse` state and shows an informational receipt. The
+marker is not billing authority by itself; a plain or forged GET must remain
+read-only. The first accepted browser POST clears the claim. Existing Stripe
+idempotency makes overlapping valid start-now continuations converge on the
+same subscription mutation.
 
 Payment-method continuation is an explicit, default-off service input. The
 Settings start route issues the existing session-bound `start_pulse_now`
-claim; the exact-action continuation route is its sole automatic consumer.
+claim; the exact-action continuation route is its sole browser consumer.
 Conversational `start_pulse_now` and `continue_pulse` calls select a
 signed conversational return whose action is derived from the service's
 existing transition timing. The URL contains the action, expiry, and HMAC but
@@ -158,19 +160,30 @@ the HttpOnly continuation claim bound to that member, app session, and exact
 action. Cancel/back and invalid, expired, copied-to-another-member, or unsigned
 returns go to ordinary Settings without a claim or subscription mutation.
 
-The marked Settings page repeats one protected same-origin POST. That route
-reads the exact action only from the bound claim and dispatches to the existing
-start-now or continue-at-trial-end service; the marker and client cannot select
-an action. Completed, continuing, and billing-pending results clear the claim.
-If Stripe has not exposed the newly saved method yet, Settings shows a terminal
-status instead of opening another automatic portal loop; an explicit retry may
-reuse the still-short-lived exact-action claim and returned Stripe URL. A
-surviving claim from one action can never change the other action's timing.
+The marked Settings page reads the exact action from the bound claim.
+`start_pulse_now` discloses that the trial ends and paid billing begins now, and
+requires a fresh confirmation before one protected same-origin POST.
+`continue_pulse` is not presented as another yes/no billing choice: Settings
+checks the current subscription through the existing service, performs no
+billing mutation while the Stripe trial is active, and shows a receipt that the
+saved payment method and existing post-trial schedule remain in place. If that
+trial has already reconciled to paid, the same mutation-free check shows a
+truthful active-Pulse receipt without contacting Stripe. If the trial ended
+without conversion or Stripe has paused it, the old continue claim fails closed
+without `subscriptions.resume`, and Settings keeps an explanation visible
+until the member dismisses it and makes any fresh start-now choice. The route
+reads the action only from the bound claim; the marker and client cannot select
+or change it. Dismissing a start-now confirmation removes the public marker and
+returns to ordinary Settings without a POST, leaving any surviving claim inert.
+Completed, continuing, and billing-pending results clear the claim. If Stripe
+has not exposed the newly saved method yet, Settings shows a terminal status
+instead of opening another portal loop; an explicit retry may reuse the
+still-short-lived exact-action claim and returned Stripe URL.
 
-While the automatic continuation is starting or waiting for billing, Settings
+While a browser continuation is checking state or waiting for billing, Settings
 shows one busy status and suppresses every other Start Pulse action. A terminal
-automatic failure exposes one manual retry; Stripe can reopen only from that
-new user click, so a propagation delay cannot create an automatic portal loop.
+failure exposes one manual retry; Stripe can reopen only from that new user
+click, so a propagation delay cannot create an automatic portal loop.
 
 Suggested response:
 
@@ -435,9 +448,11 @@ Finish payment
 If payment is required only because the trial subscription has no saved payment
 method, the member's existing confirmation remains the authorization to start
 Pulse. Completing Stripe's payment-method form is the final required
-interaction: the successful Stripe return automatically starts Pulse and shows
-a short status message while billing settles. Canceling or backing out returns
-to Settings without starting billing, and must not loop back into Stripe.
+Stripe interaction. The successful `start_pulse_now` return presents the
+immediate-billing terms again and requires a fresh confirmation before starting
+Pulse. A successful `continue_pulse` return verifies the active trial without a
+billing mutation and shows a receipt. Canceling or backing out returns to
+Settings without starting billing, and must not loop back into Stripe.
 
 ## Non-Goals
 
@@ -468,9 +483,14 @@ Do not add:
   payment URL for the same subscription/customer and never grants paid
   allowance. A missing-card Billing Portal flow uses separate cancel and
   successful-completion return URLs; conversational completion first verifies
-  the short-lived member/action-bound signed return, and every automatic
-  continuation requires the short-lived member/session/action-bound claim.
-  A return marker without the claim performs no POST.
+  the short-lived member/action-bound signed return, and every browser
+  continuation requires the short-lived member/session/action-bound claim. A
+  `start_pulse_now` return performs no POST before fresh confirmation. An active
+  `continue_pulse` return performs no Stripe mutation and presents no false
+  decline; a paid-at-the-boundary return shows the reconciled active plan
+  without contacting Stripe; and a locally active but Stripe-paused trial
+  cannot resume from the old continue claim. A return marker without the claim
+  performs no POST.
 - Pending billing: open or created invoices awaiting automatic Stripe
   collection return `billing_pending` and do not grant paid allowance.
 - Reconciliation: paid allowance opens only after a paid, non-initial invoice is
@@ -486,11 +506,15 @@ Use a Test Clock flow:
 3. Simulate exhausted trial usage in local state.
 4. Click `Start Pulse`.
 5. For a subscription without a default payment method, complete Stripe's
-   payment-method form and verify the app resumes without another click; repeat
-   with cancel/back and verify no billing mutation or redirect loop occurs.
-   Repeat from private-chat `start_pulse_now` and `continue_pulse` links and
-   verify each resumes only its original timing; copied, expired, and tampered
-   return URLs must remain inert.
+   payment-method form and verify the app presents the immediate-billing terms
+   again before starting Pulse; repeat with cancel/back and verify no billing
+   mutation or redirect loop occurs. Repeat from private-chat
+   `start_pulse_now` and `continue_pulse` links: start-now requires fresh
+   confirmation, an active continue return shows the existing-schedule receipt
+   without a Stripe mutation, a paid-at-the-boundary return shows the active
+   paid plan without contacting Stripe, and a just-paused continue return keeps
+   its explanation visible before requiring a fresh start-now choice without
+   resuming. Copied, expired, and tampered return URLs must remain inert.
 6. Verify Stripe receives `trial_end=now`.
 7. Verify Stripe creates the first paid Pulse invoice and starts a new billing
    period.

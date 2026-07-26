@@ -121,16 +121,19 @@ export default async function SettingsPage({
     redirect(pulseTrialPaymentReturn);
   }
 
-  const pulseTrialBillingContinuationPending =
+  const pulseTrialBillingContinuationAction =
     readFirstSearchParamValue(
       resolvedSearchParams[HOSTED_START_PAID_PULSE_RETURN_PARAM],
     ) === HOSTED_START_PAID_PULSE_RETURN_VALUE
     && authenticatedMember !== null
     && session !== null
-    && await readHostedPulseTrialContinuationCookie({
-      memberId: authenticatedMember.id,
-      sessionId: session.sessionId,
-    }) !== null;
+      ? await readHostedPulseTrialContinuationCookie({
+          memberId: authenticatedMember.id,
+          sessionId: session.sessionId,
+        })
+      : null;
+  const pulseTrialBillingContinuationPending =
+    pulseTrialBillingContinuationAction !== null;
 
   const prisma = getPrisma();
   const settingsData = authenticatedMember
@@ -283,7 +286,11 @@ export default async function SettingsPage({
         <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
           Subscription
         </div>
-        {pulseTrialBillingContinuationPending ? <PulseTrialBillingContinuation /> : null}
+        {pulseTrialBillingContinuationAction ? (
+          <PulseTrialBillingContinuation
+            action={pulseTrialBillingContinuationAction}
+          />
+        ) : null}
         <HostedBillingSettings
           authenticated={authenticated}
           billingStatus={authenticatedMember?.billingStatus}

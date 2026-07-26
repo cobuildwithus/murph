@@ -178,7 +178,8 @@ the choice requires no charge, subscription update, payment link, or
 unsolicited explanation. A configured method does not guarantee that a future
 renewal will succeed. If the payment method is missing, web may return a Stripe
 Customer Portal payment-method-update URL. A paused-trial state race remains
-recoverable through the existing Pulse activation service rather than gaining a
+recoverable only through a fresh start-now choice in the existing Pulse
+activation service rather than through the old continue-at-trial-end claim or a
 second resume path. Assistant policy treats an already ended or
 conversion-pending trial as a start-now choice, discloses the current terms,
 and asks for explicit confirmation instead of presenting it as non-charging
@@ -186,11 +187,20 @@ continuation.
 
 After a signed-in member completes a payment-method-update link returned by
 private-chat `continue_pulse` or `start_pulse_now`, the authenticated browser
-return automatically resumes that exact claimed action. The short-lived signed
-return contains no member identifier, and the resulting HttpOnly claim is bound
-to the current member, app session, and action. Cancel, copied-to-another-member,
-expired, tampered, and marker-only returns remain inert. The browser never
-upgrades a continue-at-trial-end choice into an immediate start.
+return recovers that exact claimed action. The
+short-lived signed return contains no member identifier, and the resulting
+HttpOnly claim is bound to the current member, app session, and action.
+`start_pulse_now` discloses that paid billing begins now and requires fresh
+confirmation. An active `continue_pulse` return performs a mutation-free state
+check and shows a receipt that the existing trial remains scheduled to
+continue. If the trial reconciled to paid before the browser return, the same
+read-only path shows the active paid plan without contacting Stripe. If Stripe
+has already paused the trial, the old continue claim fails closed, keeps its
+explanation visible until dismissal, and ordinary Settings requires a fresh
+start-now confirmation before any resume or immediate invoice. Dismissing,
+canceling, copying to another member, and expired, tampered, or marker-only
+returns remain inert. The browser never upgrades a continue-at-trial-end choice
+into an immediate start.
 
 Starting Pulse now uses the existing start-paid-Pulse service. Upgrading to
 Edge uses the existing plan-change service. Pulse activation keeps its existing

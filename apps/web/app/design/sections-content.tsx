@@ -19,6 +19,7 @@ import { GroupJoinStudy } from "./group-join-study";
 import { GrowthScorecardStudy } from "./growth-scorecard-study";
 import { HomeLoadStateStudy } from "./home-load-state-study";
 import { PersonaOnboardingStudy } from "./persona-onboarding-study";
+import { PulseTrialBillingContinuationStudy } from "./pulse-trial-billing-continuation-study";
 import { SettingsAuthRequiredStudy } from "./settings-auth-required-study";
 import {
   GroupUsageFundingStudy,
@@ -109,6 +110,12 @@ export function SectionsContent() {
 
       <StudySection title="Settings sign-in required">
         <SettingsAuthRequiredStudy />
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Pulse billing return confirmation">
+        <PulseTrialBillingContinuationStudy />
       </StudySection>
 
       <Separator />
