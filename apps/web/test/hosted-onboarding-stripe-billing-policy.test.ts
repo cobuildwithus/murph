@@ -271,6 +271,67 @@ describe("hosted onboarding stripe billing policy", () => {
     });
   });
 
+  it("keeps billing-owned suspension authoritative across ordinary billing progress", async () => {
+    const reversalCreatedAt = new Date("2026-04-25T00:00:00.000Z");
+    const invoicePaidCreatedAt = new Date("2026-04-25T00:05:00.000Z");
+    const suspendedMember = makeMemberSnapshot({
+      billingRef: {
+        lastStripeEventCreatedAt: reversalCreatedAt,
+        memberId: "member_123",
+        stripeCustomerId: "cus_123",
+        stripeSubscriptionId: "sub_123",
+      },
+      core: {
+        billingStatus: HostedBillingStatus.unpaid,
+        suspendedAt: reversalCreatedAt,
+      },
+    });
+    mocks.readHostedMemberBillingSnapshot
+      .mockResolvedValueOnce(suspendedMember)
+      .mockResolvedValueOnce(suspendedMember);
+
+    await writeHostedMemberStripeBillingTx({
+      billingStatus: HostedBillingStatus.active,
+      canonicalBillingStatus: HostedBillingStatus.active,
+      dispatchContext: {
+        eventCreatedAt: invoicePaidCreatedAt,
+        occurredAt: invoicePaidCreatedAt.toISOString(),
+        sourceEventId: "evt_invoice_paid_while_reversed",
+        sourceType: "stripe.invoice.paid",
+      },
+      member: suspendedMember,
+      tx: {} as never,
+    });
+
+    expect(mocks.updateHostedMemberCoreState).toHaveBeenNthCalledWith(1, {
+      billingStatus: HostedBillingStatus.unpaid,
+      memberId: "member_123",
+      prisma: {},
+      suspendedAt: null,
+    });
+    expect(mocks.writeHostedMemberStripeBillingRef).toHaveBeenCalledWith({
+      memberId: "member_123",
+      stripeEventCreatedAt: invoicePaidCreatedAt,
+      tx: {},
+    });
+    expect(mocks.updateHostedMemberCoreState).toHaveBeenNthCalledWith(2, {
+      billingStatus: HostedBillingStatus.unpaid,
+      memberId: "member_123",
+      prisma: {},
+      suspendedAt: invoicePaidCreatedAt,
+    });
+    expect(
+      mocks.updateHostedMemberCoreState.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      mocks.writeHostedMemberStripeBillingRef.mock.invocationCallOrder[0] ?? 0,
+    );
+    expect(
+      mocks.writeHostedMemberStripeBillingRef.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      mocks.updateHostedMemberCoreState.mock.invocationCallOrder[1] ?? 0,
+    );
+  });
+
   it("does not mistake the account-deletion fence for a billing-owned suspension", async () => {
     const billingEventCreatedAt = new Date("2026-04-25T00:00:00.000Z");
     const deletionStartedAt = new Date("2026-04-25T00:05:00.000Z");

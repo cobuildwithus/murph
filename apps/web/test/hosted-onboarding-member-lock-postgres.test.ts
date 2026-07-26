@@ -15,7 +15,9 @@ import {
   suspendHostedMemberForBillingReversalTx,
   writeHostedMemberStripeBillingTx,
 } from "@/src/lib/hosted-onboarding/stripe-billing-policy";
+import { assertHostedMemberNotSuspended } from "@/src/lib/hosted-onboarding/entitlement";
 import { runHostedAccountDeletionCleanup } from "@/src/lib/hosted-privacy/account-deletion-cleanup";
+import { deleteHostedAccountData } from "@/src/lib/hosted-privacy/account-data-service";
 import { createPrismaClient } from "@/src/lib/prisma";
 
 const privyProvider = vi.hoisted(() => ({
@@ -30,6 +32,87 @@ const privyProvider = vi.hoisted(() => ({
     }
     return { id: userId };
   }),
+}));
+
+const accountDeletionBoundaries = vi.hoisted(() => ({
+  connectedAppsClient: {
+    deleteAccount: vi.fn(async () => undefined),
+    disconnectAccount: vi.fn(async () => undefined),
+    listAccounts: vi.fn(async () => [{
+      alias: "work",
+      id: "ca_deletion_fence",
+      isDisabled: false,
+      status: "ACTIVE",
+      toolkit: { name: "Mail", slug: "mail" },
+      wordId: "deletion-fence",
+    }]),
+  },
+  connectedAppsRevocationFails: true,
+}));
+
+vi.mock("@/src/lib/connected-apps/composio", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/src/lib/connected-apps/composio")>()),
+  createComposioConnectedAppsClient: vi.fn(() =>
+    accountDeletionBoundaries.connectedAppsClient
+  ),
+}));
+
+vi.mock("@/src/lib/connected-apps/config", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/src/lib/connected-apps/config")>()),
+  readHostedConnectedAppsConfig: vi.fn(() => ({
+    apiKey: "test-key",
+    baseUrl: "https://connected-apps.example.test",
+    maxAccountsPerToolkit: 1,
+    toolkits: ["mail"],
+  })),
+}));
+
+vi.mock("@/src/lib/computer-use/service", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/src/lib/computer-use/service")>()),
+  ComputerUseService: class {
+    async deleteMemberExternalStateForAccountDeletion() {
+      return {
+        browserSessionsDeleted: 0,
+        profilesDeleted: 0,
+      };
+    }
+  },
+}));
+
+vi.mock("@/src/lib/hosted-execution/user-data-delete", () => ({
+  deleteHostedRunnerUserDataBestEffort: vi.fn(async () => ({
+    alarmCleared: true,
+    configured: true,
+    deleteAllCompleted: true,
+    deleted: true,
+    errorCode: null,
+    r2DeletedObjectCount: 0,
+    r2SkippedUserScopedPrefixes: false,
+    r2Supported: true,
+    r2UserScopedSkipReason: null,
+    runnerStateDeleted: true,
+  })),
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/usage-credit-purchase-service", () => ({
+  assertHostedUsageCreditPurchasesReadyForAccountDeletionTx:
+    vi.fn(async () => undefined),
+  closeHostedUsageCreditPurchasesForAccountDeletion:
+    vi.fn(async () => undefined),
+}));
+
+vi.mock("@/src/lib/hosted-orchestration/workflow-termination", () => ({
+  terminateHostedUserRuntimeWorkflowBestEffort: vi.fn(async () => ({
+    configured: false,
+    errorCode: null,
+    notFound: false,
+    terminated: false,
+  })),
+}));
+
+vi.mock("@/src/lib/phone-calls/account-deletion", () => ({
+  assertHostedPhoneCallsReadyForAccountDeletionTx: vi.fn(async () => undefined),
+  deleteHostedPhoneCallsForAccountDeletion: vi.fn(async () => undefined),
 }));
 
 vi.mock("@/src/lib/hosted-crypto/domain-root-store", async () => {
@@ -58,6 +141,16 @@ vi.mock("@/src/lib/hosted-crypto/env", () => ({
     gcpKms: {
       decrypt: async ({ ciphertext }: { ciphertext: string }) => ({
         plaintext: new Uint8Array(Buffer.from(ciphertext, "base64")),
+      }),
+      encrypt: async ({
+        keyName,
+        plaintext,
+      }: {
+        keyName: string;
+        plaintext: Uint8Array;
+      }) => ({
+        ciphertext: Buffer.from(plaintext).toString("base64"),
+        keyName,
       }),
     },
     webWrapKmsKeyName:
@@ -347,6 +440,80 @@ describe.skipIf(!runPostgresConcurrencyProof)(
       }
     });
 
+    it("carries billing-owned suspension through ordinary progress until a fresh restore", async () => {
+      const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const writer = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const memberId = `hbm_billing_progress_${randomUUID()}`;
+      const reversalAt = new Date("2026-07-26T18:00:01.000Z");
+      const invoicePaidAt = new Date("2026-07-26T18:00:02.000Z");
+      const restoreAt = new Date("2026-07-26T18:00:03.000Z");
+
+      await observer.hostedMember.create({
+        data: {
+          billingStatus: HostedBillingStatus.active,
+          id: memberId,
+        },
+      });
+      setHostedSecureBoxStringTestCodecForTests({
+        decrypt(input) {
+          return input.value;
+        },
+        encrypt() {
+          return "hsb-test:billing-progress";
+        },
+      });
+
+      try {
+        await applyBillingReversal({
+          client: writer,
+          eventCreatedAt: reversalAt,
+          member: await requireBillingSnapshot(observer, memberId),
+          sourceEventId: "evt_dispute_progress_withdrawn",
+        });
+        await applyOrdinaryBillingProgress({
+          client: writer,
+          eventCreatedAt: invoicePaidAt,
+          member: await requireBillingSnapshot(observer, memberId),
+          sourceEventId: "evt_invoice_paid_while_reversed",
+        });
+
+        await expect(observer.hostedMember.findUnique({
+          include: { billingRef: true },
+          where: { id: memberId },
+        })).resolves.toMatchObject({
+          billingRef: {
+            lastStripeEventCreatedAt: invoicePaidAt,
+          },
+          billingStatus: HostedBillingStatus.unpaid,
+          suspendedAt: invoicePaidAt,
+        });
+
+        await applyBillingRestore({
+          client: writer,
+          eventCreatedAt: restoreAt,
+          member: await requireBillingSnapshot(observer, memberId),
+          sourceEventId: "evt_dispute_progress_reinstated",
+        });
+
+        await expect(observer.hostedMember.findUnique({
+          include: { billingRef: true },
+          where: { id: memberId },
+        })).resolves.toMatchObject({
+          billingRef: {
+            lastStripeEventCreatedAt: restoreAt,
+          },
+          billingStatus: HostedBillingStatus.active,
+          suspendedAt: null,
+        });
+      } finally {
+        setHostedSecureBoxStringTestCodecForTests(null);
+        await observer.hostedMember.deleteMany({
+          where: { id: memberId },
+        });
+        await disconnectClients([observer, writer]);
+      }
+    });
+
     it("serializes a newer reversal against an older concurrent restore", async () => {
       const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
       const reversalClient = createPrismaClient({ databaseUrl, poolMax: 1 });
@@ -446,6 +613,165 @@ describe.skipIf(!runPostgresConcurrencyProof)(
 describe.skipIf(!runPostgresConcurrencyProof)(
   "hosted Privy re-creation and account-deletion PostgreSQL concurrency",
   () => {
+    it("keeps deletion authoritative over an existing Stripe suspension and terminalizes on retry", async () => {
+      const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const writer = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const memberId = `hbm_deletion_billing_fence_${randomUUID()}`;
+      const reversalAt = new Date("2026-07-26T18:00:01.000Z");
+      const cleanupIdsBefore = new Set(
+        (await observer.hostedAccountDeletionCleanup.findMany({
+          select: { id: true },
+        })).map((cleanup) => cleanup.id),
+      );
+
+      await observer.hostedMember.create({
+        data: {
+          billingStatus: HostedBillingStatus.active,
+          id: memberId,
+        },
+      });
+      await observer.hostedConnectedAppsSession.create({
+        data: {
+          memberId,
+          policyRevision: 1,
+          remoteSessionId: `remote_${randomUUID()}`,
+        },
+      });
+      setHostedSecureBoxStringTestCodecForTests({
+        decrypt(input) {
+          return input.value;
+        },
+        encrypt() {
+          return "hsb-test:deletion-billing-fence";
+        },
+      });
+      accountDeletionBoundaries.connectedAppsRevocationFails = true;
+      accountDeletionBoundaries.connectedAppsClient.disconnectAccount.mockImplementation(
+        async () => {
+          if (accountDeletionBoundaries.connectedAppsRevocationFails) {
+            throw Object.assign(new Error("provider unavailable"), {
+              name: "ProviderUnavailableError",
+            });
+          }
+        },
+      );
+      accountDeletionBoundaries.connectedAppsClient.deleteAccount.mockResolvedValue(undefined);
+
+      try {
+        await applyBillingReversal({
+          client: writer,
+          eventCreatedAt: reversalAt,
+          member: await requireBillingSnapshot(observer, memberId),
+          sourceEventId: "evt_deletion_fence_withdrawn",
+        });
+
+        await expect(deleteHostedAccountData({
+          memberId,
+          prisma: writer,
+          request: new Request("https://app.example.test/settings"),
+        })).rejects.toMatchObject({
+          code: "ACCOUNT_DELETION_PROVIDER_REVOKE_FAILED",
+          retryable: true,
+        });
+
+        const deletionFencedMember = await requireBillingSnapshot(observer, memberId);
+        const deletionStartedAt = deletionFencedMember.core.suspendedAt;
+        if (!deletionStartedAt) {
+          throw new Error("Expected account deletion to leave a durable suspension fence.");
+        }
+        expect(deletionStartedAt.getTime()).not.toBe(reversalAt.getTime());
+        expect(deletionFencedMember.billingRef?.lastStripeEventCreatedAt).toEqual(
+          reversalAt,
+        );
+
+        const ordinaryBillingAt = new Date(deletionStartedAt.getTime() + 60_000);
+        const nextReversalAt = new Date(deletionStartedAt.getTime() + 120_000);
+        const restoreAt = new Date(deletionStartedAt.getTime() + 180_000);
+        await expect(applyOrdinaryBillingProgress({
+          client: writer,
+          eventCreatedAt: ordinaryBillingAt,
+          member: deletionFencedMember,
+          sourceEventId: "evt_deletion_fence_invoice_paid",
+        })).rejects.toMatchObject({
+          code: "HOSTED_MEMBER_SUSPENDED",
+        });
+        await expect(applyBillingReversal({
+          client: writer,
+          eventCreatedAt: nextReversalAt,
+          member: await requireBillingSnapshot(observer, memberId),
+          sourceEventId: "evt_deletion_fence_new_withdrawal",
+        })).rejects.toMatchObject({
+          code: "HOSTED_MEMBER_SUSPENDED",
+        });
+        await expect(applyBillingRestore({
+          client: writer,
+          eventCreatedAt: restoreAt,
+          member: await requireBillingSnapshot(observer, memberId),
+          sourceEventId: "evt_deletion_fence_reinstated",
+        })).rejects.toMatchObject({
+          code: "HOSTED_MEMBER_SUSPENDED",
+        });
+
+        const stillDeletionFenced = await requireBillingSnapshot(observer, memberId);
+        expect(stillDeletionFenced).toMatchObject({
+          billingRef: {
+            lastStripeEventCreatedAt: reversalAt,
+          },
+          core: {
+            billingStatus: HostedBillingStatus.unpaid,
+            suspendedAt: deletionStartedAt,
+          },
+        });
+        let accessError: unknown;
+        try {
+          assertHostedMemberNotSuspended(stillDeletionFenced.core);
+        } catch (error) {
+          accessError = error;
+        }
+        expect(accessError).toMatchObject({
+          code: "HOSTED_MEMBER_SUSPENDED",
+          httpStatus: 403,
+        });
+
+        accountDeletionBoundaries.connectedAppsRevocationFails = false;
+        await expect(deleteHostedAccountData({
+          memberId,
+          prisma: writer,
+          request: new Request("https://app.example.test/settings"),
+        })).resolves.toMatchObject({
+          cleanupPending: false,
+          memberId,
+        });
+        await expect(observer.hostedMember.findUnique({
+          where: { id: memberId },
+        })).resolves.toBeNull();
+        const cleanupIdsAfter = await observer.hostedAccountDeletionCleanup.findMany({
+          select: { id: true },
+        });
+        expect(
+          cleanupIdsAfter.filter((cleanup) => !cleanupIdsBefore.has(cleanup.id)),
+        ).toEqual([]);
+      } finally {
+        accountDeletionBoundaries.connectedAppsRevocationFails = true;
+        setHostedSecureBoxStringTestCodecForTests(null);
+        await observer.hostedMember.deleteMany({
+          where: { id: memberId },
+        });
+        const cleanupIdsAfter = await observer.hostedAccountDeletionCleanup.findMany({
+          select: { id: true },
+        });
+        const unexpectedCleanupIds = cleanupIdsAfter
+          .map((cleanup) => cleanup.id)
+          .filter((id) => !cleanupIdsBefore.has(id));
+        if (unexpectedCleanupIds.length > 0) {
+          await observer.hostedAccountDeletionCleanup.deleteMany({
+            where: { id: { in: unexpectedCleanupIds } },
+          });
+        }
+        await disconnectClients([observer, writer]);
+      }
+    });
+
     it("rejects stale authentication after Privy deletion terminalizes and removes the receipt", async () => {
       const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
       const deletionClient = createPrismaClient({ databaseUrl, poolMax: 1 });
@@ -679,6 +1005,27 @@ async function applyBillingRestore(input: {
       },
       member: input.member,
       suspendedAtOverride: null,
+      tx,
+  }), { timeout: transactionTimeoutMs });
+}
+
+async function applyOrdinaryBillingProgress(input: {
+  client: PrismaClient;
+  eventCreatedAt: Date;
+  member: Awaited<ReturnType<typeof requireBillingSnapshot>>;
+  sourceEventId: string;
+}): Promise<void> {
+  await input.client.$transaction((tx) =>
+    writeHostedMemberStripeBillingTx({
+      billingStatus: HostedBillingStatus.active,
+      canonicalBillingStatus: HostedBillingStatus.active,
+      dispatchContext: {
+        eventCreatedAt: input.eventCreatedAt,
+        occurredAt: input.eventCreatedAt.toISOString(),
+        sourceEventId: input.sourceEventId,
+        sourceType: "stripe.invoice.paid",
+      },
+      member: input.member,
       tx,
     }), { timeout: transactionTimeoutMs });
 }

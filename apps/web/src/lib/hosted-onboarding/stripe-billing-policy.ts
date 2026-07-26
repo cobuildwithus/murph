@@ -162,6 +162,10 @@ export async function writeHostedMemberStripeBillingTx(input: {
     eventCreatedAt: input.dispatchContext.eventCreatedAt,
     sourceType: input.dispatchContext.sourceType,
   });
+  const nextStripeEventCreatedAt = resolveHostedStripeBillingRefEventCreatedAt({
+    billingRef: currentMember.billingRef,
+    dispatchContext: input.dispatchContext,
+  });
 
   const writeBillingRef = () => writeHostedMemberStripeBillingRefTx({
     memberId: currentMember.core.id,
@@ -174,20 +178,19 @@ export async function writeHostedMemberStripeBillingTx(input: {
     currentTrialStartedAt: input.currentTrialStartedAt,
     pulseTrialPolicyVersion: input.pulseTrialPolicyVersion,
     pulseTrialRedeemedAt: input.pulseTrialRedeemedAt,
-    stripeEventCreatedAt: resolveHostedStripeBillingRefEventCreatedAt({
-      billingRef: currentMember.billingRef,
-      dispatchContext: input.dispatchContext,
-    }),
+    stripeEventCreatedAt: nextStripeEventCreatedAt,
     stripeCustomerId: billingRefWriteValues.stripeCustomerId,
     stripeSubscriptionId: billingRefWriteValues.stripeSubscriptionId,
     tx: input.tx,
   });
 
   const intentionalSuspension = input.suspendedAtOverride;
+  const billingOwnsCurrentSuspension =
+    isHostedStripeBillingOwnedSuspension(currentMember);
   if (
     intentionalSuspension !== undefined
     && currentMember.core.suspendedAt
-    && !isHostedStripeBillingOwnedSuspension(currentMember)
+    && !billingOwnsCurrentSuspension
   ) {
     assertHostedMemberNotSuspended(currentMember.core);
   }
@@ -207,6 +210,20 @@ export async function writeHostedMemberStripeBillingTx(input: {
       memberId: currentMember.core.id,
       prisma: input.tx,
       suspendedAt: intentionalSuspension,
+    });
+  } else if (intentionalSuspension === undefined && billingOwnsCurrentSuspension) {
+    await updateHostedMemberCoreState({
+      billingStatus: HostedBillingStatus.unpaid,
+      memberId: currentMember.core.id,
+      prisma: input.tx,
+      suspendedAt: null,
+    });
+    await writeBillingRef();
+    await updateHostedMemberCoreState({
+      billingStatus: HostedBillingStatus.unpaid,
+      memberId: currentMember.core.id,
+      prisma: input.tx,
+      suspendedAt: nextStripeEventCreatedAt,
     });
   } else {
     await updateHostedMemberCoreState({

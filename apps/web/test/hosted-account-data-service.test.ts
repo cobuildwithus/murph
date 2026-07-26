@@ -407,10 +407,14 @@ describe("HOSTED_ACCOUNT_DATA_STORE_COVERAGE", () => {
 describe("deleteHostedAccountData", () => {
   it("keeps the deletion fence when durable cleanup ownership cannot be prepared", async () => {
     const onTransaction = vi.fn();
+    const hostedMemberUpdateCalls: unknown[] = [];
     serviceMocks.prepareHostedAccountDeletionCleanup.mockRejectedValue(
       new Error("kms unavailable"),
     );
-    const prisma = createHostedAccountDeletionPrismaForTest({ onTransaction });
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      hostedMemberUpdateCalls,
+      onTransaction,
+    });
 
     await expect(deleteHostedAccountData({
       memberId: "member_123",
@@ -422,6 +426,14 @@ describe("deleteHostedAccountData", () => {
     });
 
     expect(onTransaction).toHaveBeenCalledTimes(1);
+    expect(hostedMemberUpdateCalls).toEqual([{
+      data: {
+        suspendedAt: expect.any(Date),
+      },
+      where: {
+        id: "member_123",
+      },
+    }]);
     expect(serviceMocks.terminateHostedUserRuntimeWorkflowBestEffort).not.toHaveBeenCalled();
   });
 
@@ -2235,6 +2247,7 @@ function createHostedAccountDeletionPrismaForTest(input: {
     sources?: { sourceProviderSlug: string; status: string }[];
   }>;
   hostedComputerRunRows?: Record<string, unknown>[];
+  hostedMemberUpdateCalls?: unknown[];
   familyBillingRefRecords?: Record<string, unknown>[];
   familyGroups?: Array<{ id: string }>;
   ownedThreadContainerMemberIds?: string[];
@@ -2323,8 +2336,9 @@ function createHostedAccountDeletionPrismaForTest(input: {
     },
     hostedMember: {
       ...makeDeleteDelegate("hostedMember"),
-      updateMany: async () => {
+      updateMany: async (args: unknown) => {
         input.operationOrder?.push("update:hostedMember");
+        input.hostedMemberUpdateCalls?.push(args);
         return { count: 1 };
       },
     },

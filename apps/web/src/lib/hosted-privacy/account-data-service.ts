@@ -994,7 +994,6 @@ async function markHostedMembersSuspendedForAccountDeletion(input: {
       },
       where: {
         id: buildStringInFilter(memberIds),
-        suspendedAt: null,
       },
     });
     return memberIds;
