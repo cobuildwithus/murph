@@ -1,6 +1,6 @@
 # Hosted crypto transaction cleanup
 
-Status: active
+Status: completed
 Created: 2026-07-26
 Updated: 2026-07-26
 
@@ -119,4 +119,17 @@ Updated: 2026-07-26
 - Corrected canonical `pnpm test:diff ...` passed on fresh Blacksmith Testbox
   `tbx_01kygb66rxws8qc7whdmd2z2a0`: repository guards, hosted-web typecheck,
   531 test files / 6,761 tests, lint, development smoke, and production build.
-- Full acceptance, final ReviewGPT, and current-head CI remain pending.
+- Full `pnpm verify:acceptance` completed every workspace, hosted-web,
+  production-build, and Cloudflare lane except CLI package coverage on fresh
+  Blacksmith Testbox `tbx_01kygbgcp8evhvatvy3h7s2e2h`. The single failure is
+  inherited from current `main`: the root manifest declares
+  `@cobuild/review-gpt` `^0.5.117`, while the untouched CLI release audit still
+  asserts `^0.5.114`. This branch changes neither file.
+- Parent final review passed after rebasing onto current `origin/main`.
+  Prepared candidates are consumed only after authoritative locked reads,
+  stale Family or route transitions fail closed, invite preflight cannot grant
+  claim authority, and Linq prewarm hints cannot grant routing authority.
+- Per the completion workflow, current-head CI and the immutable final
+  ReviewGPT gate run after this plan is archived and the final scoped commit is
+  pushed; their outcomes belong in the live PR record.
+Completed: 2026-07-26
