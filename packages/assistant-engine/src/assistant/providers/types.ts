@@ -27,7 +27,6 @@ import type {
   AssistantHostedToolContext,
 } from '../hosted-tool-context.js'
 import type {
-  AssistantHostedGeneratedImageUploader,
   AssistantWorkspaceArtifactMaterializer,
 } from '../execution-context.js'
 import type {
@@ -123,7 +122,6 @@ export interface AssistantProviderTurn {
   dynamicTools: readonly AssistantProviderDynamicTool[]
   environments?: readonly Readonly<Record<string, unknown>>[] | null
   env?: NodeJS.ProcessEnv
-  generatedImageUploader?: AssistantHostedGeneratedImageUploader | null
   onFinishWithoutReplyAccepted?: ((
     event: AssistantProviderFinishWithoutReplyAcceptedEvent
   ) => Promise<void> | void) | null
@@ -140,7 +138,7 @@ export interface AssistantProviderTurn {
   providerThreadEphemeral?: boolean | null
   processLifetime?: 'one-shot' | null
   publicInternetFetch?: typeof fetch | null
-  requireGeneratedImageUploader?: boolean | null
+  requireHostedPrivateImageDelivery?: boolean | null
   resume?: AssistantProviderCodexResume | null
   serviceTier?: AssistantProviderServiceTier | null
   sessionContext?: {

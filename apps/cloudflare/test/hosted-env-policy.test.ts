@@ -106,26 +106,11 @@ describe("buildHostedRunnerContainerEnv", () => {
   it("does not allow runner secrets to override hosted control-plane prefixes", () => {
     const source = {
       HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS: [
-        "CLOUDFLARE_IMAGES_ACCOUNT_ID",
-        "CLOUDFLARE_IMAGES_API_KEY",
-        "CLOUDFLARE_IMAGES_VARIANT",
         "HOSTED_CRYPTO_ENV",
         "HOSTED_WEB_CALLBACK_SIGNING_KEY_ID",
       ].join(","),
     };
 
-    expect(isHostedRunnerSecretKeyAllowed(
-      "CLOUDFLARE_IMAGES_ACCOUNT_ID",
-      source,
-    )).toBe(false);
-    expect(isHostedRunnerSecretKeyAllowed(
-      "CLOUDFLARE_IMAGES_API_KEY",
-      source,
-    )).toBe(false);
-    expect(isHostedRunnerSecretKeyAllowed(
-      "CLOUDFLARE_IMAGES_VARIANT",
-      source,
-    )).toBe(false);
     expect(isHostedRunnerSecretKeyAllowed(
       "HOSTED_CRYPTO_ENV",
       source,
@@ -230,13 +215,11 @@ describe("buildHostedWorkerSecretsPayload", () => {
   it("keeps only worker-owned hosted secrets and the Codex OpenAI provider secret in the worker payload", () => {
     const payload = buildHostedWorkerSecretsPayload({
       ...requiredWorkerSecrets,
-      CLOUDFLARE_IMAGES_API_KEY: "cloudflare-images-token",
       OLLAMA_API_KEY: "ollama-secret",
       VERCEL_AI_API_KEY: "vercel-secret",
       XAI_API_KEY: "xai-secret",
     });
 
-    expect(payload.CLOUDFLARE_IMAGES_API_KEY).toBe("cloudflare-images-token");
     expect(payload.ELEVENLABS_API_KEY).toBe("elevenlabs-secret");
     expect(payload.XAI_API_KEY).toBe("xai-secret");
     expect(payload.OLLAMA_API_KEY).toBeUndefined();

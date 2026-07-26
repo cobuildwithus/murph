@@ -290,7 +290,7 @@ describe('executeGenerateImageTool', () => {
       nextUsageOrdinal: () => usageOrdinal++,
       progressDelivery: null,
       request: firstRequest,
-      requireHostedGeneratedImageUploader: true,
+      requireHostedPrivateImageDelivery: true,
       vaultRoot,
     })
     expect(first.rpcResult).toMatchObject({
@@ -312,7 +312,7 @@ describe('executeGenerateImageTool', () => {
       nextUsageOrdinal: () => usageOrdinal++,
       progressDelivery: null,
       request: secondRequest,
-      requireHostedGeneratedImageUploader: true,
+      requireHostedPrivateImageDelivery: true,
       vaultRoot,
     })
 
@@ -482,7 +482,7 @@ describe('executeGenerateImageTool', () => {
       },
       fetchImpl,
       providerRequestOrdinal: 6,
-      requireHostedGeneratedImageUploader: true,
+      requireHostedPrivateImageDelivery: true,
       vaultRoot,
     })
 
@@ -550,7 +550,7 @@ describe('executeGenerateImageTool', () => {
       },
       fetchImpl,
       providerRequestOrdinal: 1,
-      requireHostedGeneratedImageUploader: true,
+      requireHostedPrivateImageDelivery: true,
     })
 
     expect(fetchImpl).not.toHaveBeenCalled()
@@ -935,7 +935,7 @@ describe('murph.generate_image dynamic tool execution', () => {
       nextUsageOrdinal,
       progressDelivery: null,
       request: request!,
-      requireHostedGeneratedImageUploader: true,
+      requireHostedPrivateImageDelivery: true,
       vaultRoot,
     })
 

@@ -123,13 +123,6 @@ export {
   decideExperimentFollowupDue,
   summarizeExperimentProgress,
 } from "./experiments.ts";
-export { buildExperimentProgressCard } from "./experiment-progress-card.ts";
-export type {
-  BuildExperimentProgressCardOptions,
-  ExperimentProgressCardBiomarkerDirection,
-  ExperimentProgressCardBuildResult,
-  ExperimentProgressCardConfounderInput,
-} from "./experiment-progress-card.ts";
 export {
   resolveAdherenceObservationActivityKind,
   synthesizeLegacySessionAdherenceTargets,

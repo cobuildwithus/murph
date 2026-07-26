@@ -106,7 +106,6 @@ export async function executeGenerateImageTool(input: {
   fetchImpl: typeof fetch
   materializeWorkspaceArtifacts?: AssistantWorkspaceArtifactMaterializer | null
   providerRequestOrdinal: number
-  requireHostedGeneratedImageUploader?: boolean | null
   requireHostedPrivateImageDelivery?: boolean | null
   vaultRoot?: string | null
 }): Promise<GenerateImageToolResult> {
@@ -122,7 +121,6 @@ export async function executeGenerateImageTool(input: {
   const vaultRoot = normalizeNullableString(input.vaultRoot)
   const requireHostedPrivateImageDelivery =
     input.requireHostedPrivateImageDelivery === true
-    || input.requireHostedGeneratedImageUploader === true
   if (requireHostedPrivateImageDelivery && !vaultRoot) {
     return {
       rpcSuccess: false,

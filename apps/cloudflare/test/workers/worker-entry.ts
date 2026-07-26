@@ -302,7 +302,7 @@ async function handleTestRoute(request: Request): Promise<Response | null> {
     url.pathname === "/__test/generated-images/upload-handler-signal"
     && request.method === "POST"
   ) {
-    return Response.json(await exerciseGeneratedImageUploadHandlerSignal(request));
+    return Response.json(await exerciseGeneratedImageUploadTombstone());
   }
 
   if (url.pathname === "/__test/alarm" && request.method === "POST") {
@@ -482,9 +482,7 @@ async function measureRunnerLeaseLatency(request: Request): Promise<{
   };
 }
 
-async function exerciseGeneratedImageUploadHandlerSignal(request: Request): Promise<{
-  observedHasSignal: boolean;
-  observedSignalIsIncoming: boolean;
+async function exerciseGeneratedImageUploadTombstone(): Promise<{
   status: number;
 }> {
   const userId = `member_generated_image_upload_worker_${Date.now()}`;
@@ -503,45 +501,16 @@ async function exerciseGeneratedImageUploadHandlerSignal(request: Request): Prom
   });
 
   const uploadRequest = new Request("http://results.worker/generated-images", {
-    body: JSON.stringify({
-      alt: "Generated image upload worker test",
-      bytesBase64: "UklGRgAAAABXRUJQ",
-      contentType: "image/webp",
-      filename: "generated.webp",
-      metadata: {
-        source: "worker-generated-image-upload-signal",
-      },
-      source: "worker-generated-image-upload-signal",
-    }),
     headers,
     method: "POST",
-    signal: request.signal,
   });
-  let observedHasSignal = false;
-  let observedSignalIsIncoming = false;
   const response = await handleRunnerGeneratedImageUploadRequest({
-    env: {
-      ...readWorkerEnvironmentSource(),
-      CLOUDFLARE_IMAGES_ACCOUNT_ID: "worker-test-account",
-      CLOUDFLARE_IMAGES_API_KEY: "worker-test-token",
-    },
-    fetchImpl: async (_input, init) => {
-      observedHasSignal = init?.signal instanceof AbortSignal;
-      observedSignalIsIncoming = init?.signal === uploadRequest.signal;
-      return Response.json({
-        result: {
-          variants: ["https://imagedelivery.net/worker-test/generated/public"],
-        },
-        success: true,
-      });
-    },
+    env: readWorkerEnvironmentSource(),
     request: uploadRequest,
     userId,
   });
 
   return {
-    observedHasSignal,
-    observedSignalIsIncoming,
     status: response.status,
   };
 }

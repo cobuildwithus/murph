@@ -106,7 +106,6 @@ import type {
 } from "../hosted-email.ts";
 import type {
   AssistantConnectedAppsPort,
-  AssistantHostedGeneratedImageUploader,
 } from "@murphai/assistant-engine";
 import type {
   RuntimeLivenessPort,
@@ -623,7 +622,6 @@ export interface HostedRuntimePlatform {
   effectsPort: HostedRuntimeEffectsPort;
   familyPlanToolPort?: HostedRuntimeFamilyPlanToolPort | null;
   groupToolPort?: HostedRuntimeGroupToolPort | null;
-  generatedImageUploader?: AssistantHostedGeneratedImageUploader | null;
   providerFetch?: typeof fetch | null;
   publicInternetFetch?: typeof fetch | null;
   issueExportPort?: HostedRuntimeIssueExportPort | null;

@@ -93,7 +93,6 @@ export interface HostedLocalDevHarness {
       timeoutMs?: number;
     },
   ): Promise<HostedRunnerStatusResponse>;
-  armGeneratedImageUploadTypeErrorForTest(userId: string): Promise<{ ok: true }>;
   webBaseUrl: string;
   workerBaseUrl: string;
 }
@@ -213,7 +212,6 @@ export async function startHostedLocalDevHarness(input: {
           userId,
         });
       },
-      armGeneratedImageUploadTypeErrorForTest,
       armCanonicalCheckpointLostAckForTest,
       armSnapshotPublicationCorruptionForTest,
       armShutdownCheckpointPublicationBarrierForTest,
@@ -544,23 +542,6 @@ export async function startHostedLocalDevHarness(input: {
     assertHostedLocalTestControlsAvailable("armCanonicalCheckpointLostAckForTest");
     return await requestJsonForRuntime<{ ok: true }>(
       `/__test/users/${encodeURIComponent(userId)}/canonical-checkpoint-lost-ack`,
-      {
-        headers: {
-          [HOSTED_EXECUTION_USER_ID_HEADER]: userId,
-          ...statusHeaders(userId),
-        },
-        method: "POST",
-        signal: AbortSignal.timeout(hostedLocalActivityExpiryTimeoutMs),
-      },
-    );
-  }
-
-  async function armGeneratedImageUploadTypeErrorForTest(
-    userId: string,
-  ): Promise<{ ok: true }> {
-    assertHostedLocalTestControlsAvailable("armGeneratedImageUploadTypeErrorForTest");
-    return await requestJsonForRuntime<{ ok: true }>(
-      `/__test/users/${encodeURIComponent(userId)}/generated-image-upload-type-error`,
       {
         headers: {
           [HOSTED_EXECUTION_USER_ID_HEADER]: userId,

@@ -4,8 +4,6 @@ import { SELF } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 
 interface UploadHandlerSignalResponse {
-  observedHasSignal: boolean;
-  observedSignalIsIncoming: boolean;
   status: number;
 }
 
@@ -20,7 +18,5 @@ describe("generated image upload Worker fetch path", () => {
     const result = await response.json() as UploadHandlerSignalResponse;
 
     expect(result.status).toBe(410);
-    expect(result.observedHasSignal).toBe(false);
-    expect(result.observedSignalIsIncoming).toBe(false);
   });
 });

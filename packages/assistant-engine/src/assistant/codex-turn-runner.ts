@@ -480,9 +480,6 @@ async function executeAssistantCodexAttempt(input: {
           ? []
           : attemptPlan.routePlan.environments,
         env: attemptEnv,
-        generatedImageUploader: outputOnlyTurn
-          ? null
-          : executionPlan.executionContext?.hosted?.generatedImageUploader ?? null,
         hostedToolContext: outputOnlyTurn
           ? null
           : executionPlan.hostedToolContext ?? null,
@@ -532,9 +529,8 @@ async function executeAssistantCodexAttempt(input: {
         publicInternetFetch: outputOnlyTurn
           ? null
           : executionPlan.executionContext?.hosted?.publicInternetFetch ?? null,
-        requireGeneratedImageUploader: outputOnlyTurn
-          ? false
-          : executionPlan.executionContext?.hosted?.generatedImageUploaderRequired ?? false,
+        requireHostedPrivateImageDelivery:
+          !outputOnlyTurn && Boolean(executionPlan.executionContext?.hosted),
         resume: attemptPlan.routePlan.resume,
         // Per-turn execution policy from the message input, not route identity.
         serviceTier,

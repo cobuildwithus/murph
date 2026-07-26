@@ -6,7 +6,6 @@ import type { CanonicalEntity } from "../src/canonical-entities.ts";
 import { createVaultReadModel } from "../src/model.ts";
 import {
   analyzeExperimentOutcome,
-  buildExperimentProgressCard,
   collectExperimentAdherenceCalendar,
   decideExperimentFollowupDue,
   summarizeExperimentProgress,
@@ -14,9 +13,6 @@ import {
 } from "../src/index.ts";
 import {
   type ExperimentAdherenceTarget,
-  buildExperimentProgressCardPath,
-  decodeExperimentProgressCard,
-  EXPERIMENT_PROGRESS_CARD_MAX_WEEKS,
 } from "@murphai/contracts";
 import { countCompletedAdherenceSessions } from "../src/experiment-adherence.ts";
 
@@ -1299,9 +1295,6 @@ test("experiment progress treats partial calendar-less sessions as logged", () =
   const progress = summarizeExperimentProgress(vault, "partial-count-path", {
     asOf: "2026-04-10",
   });
-  const { card } = buildExperimentProgressCard(vault, "partial-count-path", {
-    asOf: "2026-04-10",
-  });
   const outcome = analyzeExperimentOutcome(vault, "partial-count-path", {
     asOf: "2026-04-15",
   });
@@ -1311,7 +1304,6 @@ test("experiment progress treats partial calendar-less sessions as logged", () =
   assert.equal(progress.adherence.loggedSessions, 1);
   assert.notEqual(progress.adherence.status, "not_started");
   assert.notEqual(progress.recommendation.action, "remind");
-  assert.equal(card.sessions.logged, 1);
   assert.deepEqual(outcome.confidence.reasons, [
     "Primary biomarker coverage is insufficient for a strong before-and-after read.",
   ]);
@@ -1350,7 +1342,6 @@ test("SAUNA assumed calendar sessions count as complete and explicit corrections
 
   const progress = summarizeExperimentProgress(vault, "sauna-assumed-cadence", { asOf: "2026-04-12" });
   const calendar = collectExperimentAdherenceCalendar(vault, "sauna-assumed-cadence", { asOf: "2026-04-12" });
-  const { card } = buildExperimentProgressCard(vault, "sauna-assumed-cadence", { asOf: "2026-04-12" });
   const followup = decideExperimentFollowupDue(vault, "sauna-assumed-cadence", {
     kind: "missed-log",
     date: "2026-04-10",
@@ -1370,9 +1361,6 @@ test("SAUNA assumed calendar sessions count as complete and explicit corrections
   assert.equal(progress.adherence.expectedSessionsByNow, 3);
   assert.equal(progress.adherence.assumedSessions, 3);
   assert.equal(progress.adherence.status, "met_target");
-  assert.equal(card.weeks[0].start, "2026-04-06");
-  assert.equal(card.weeks[0].cells, "ANANANN");
-  assert.deepEqual(card.sessions, { logged: 3, assumed: 3, target: 3 });
   assert.equal(followup.action, "skip");
   assert.equal(followup.reason, "session_assumed");
   assert.equal(followup.window.sessionDate, "2026-04-10");
@@ -1449,9 +1437,6 @@ test("TRETINOIN and red-light nightly schedules mix manual confirmations with as
   const calendar = collectExperimentAdherenceCalendar(vault, "tretinoin-red-light-nightly", {
     asOf: "2026-04-12",
   });
-  const { card } = buildExperimentProgressCard(vault, "tretinoin-red-light-nightly", {
-    asOf: "2026-04-12",
-  });
 
   assert.deepEqual(calendar?.cells.map((cell) => [cell.localDate, cell.status]), [
     ["2026-04-08", "assumed"],
@@ -1462,9 +1447,6 @@ test("TRETINOIN and red-light nightly schedules mix manual confirmations with as
   assert.equal(progress.adherence.loggedSessions, 3);
   assert.equal(progress.adherence.assumedSessions, 2);
   assert.equal(progress.adherence.confirmedSessions, 1);
-  assert.equal(card.weeks[0].start, "2026-04-08");
-  assert.equal(card.weeks[0].cells, "ACAOOOO");
-  assert.deepEqual(card.sessions, { logged: 3, assumed: 2, target: 3 });
 });
 
 test("device running schedules keep missed-after-grace gaps and populate sensed sessions", () => {
@@ -1504,9 +1486,6 @@ test("device running schedules keep missed-after-grace gaps and populate sensed 
   const calendar = collectExperimentAdherenceCalendar(vault, "device-running-schedule", {
     asOf: "2026-04-12",
   });
-  const { card } = buildExperimentProgressCard(vault, "device-running-schedule", {
-    asOf: "2026-04-12",
-  });
 
   assert.deepEqual(calendar?.cells.map((cell) => [cell.localDate, cell.status]), [
     ["2026-04-08", "missed"],
@@ -1518,8 +1497,6 @@ test("device running schedules keep missed-after-grace gaps and populate sensed 
   assert.equal(progress.adherence.sensedSessions, 1);
   assert.equal(progress.adherence.assumedSessions, undefined);
   assert.equal(progress.adherence.status, "behind");
-  assert.equal(card.weeks[0].cells, "MCMOOOO");
-  assert.deepEqual(card.sessions, { logged: 1, target: 3 });
 });
 
 test("cardio category experiments count running and swimming but not strength sessions", () => {
@@ -1968,10 +1945,7 @@ for (const scenario of [
     });
 
     const progress = summarizeExperimentProgress(vault, scenario.slug, { asOf: "2026-06-09" });
-    const { card } = buildExperimentProgressCard(vault, scenario.slug, { asOf: "2026-06-09" });
-
     assert.equal(progress.adherence.completedSessions, scenario.expectedCompletedSessions);
-    assert.equal(card.sessions.logged, scenario.expectedCompletedSessions);
   });
 }
 
@@ -2059,12 +2033,10 @@ test("experiment adherence calendar suppresses same-date manual fallback when a 
   });
 
   const calendar = collectExperimentAdherenceCalendar(vault, slug, { asOf: "2026-06-03" });
-  const { card } = buildExperimentProgressCard(vault, slug, { asOf: "2026-06-03" });
 
   assert.equal(calendar?.cells[0]?.status, "satisfied");
   assert.equal(calendar?.cells[0]?.observedCount, 1);
   assert.deepEqual(calendar?.cells[0]?.evidenceIds, ["evt_calendar_same_date_device_run_1"]);
-  assert.equal(card.sessions.logged, 1);
 });
 
 test("experiment adherence calendar suppresses same-date manual activity when a device run matches", () => {
@@ -2108,12 +2080,10 @@ test("experiment adherence calendar suppresses same-date manual activity when a 
   });
 
   const calendar = collectExperimentAdherenceCalendar(vault, slug, { asOf: "2026-06-03" });
-  const { card } = buildExperimentProgressCard(vault, slug, { asOf: "2026-06-03" });
 
   assert.equal(calendar?.cells[0]?.status, "satisfied");
   assert.equal(calendar?.cells[0]?.observedCount, 1);
   assert.deepEqual(calendar?.cells[0]?.evidenceIds, ["evt_calendar_same_date_device_activity_run_1"]);
-  assert.equal(card.sessions.logged, 1);
 });
 
 test("experiment adherence calendar keeps surplus same-date manual evidence after one sensed run", () => {
@@ -4253,528 +4223,4 @@ test("experiment outcome reports sparse primary data as medium-confidence incomp
   );
   assert.match(outcome.conclusion.plainLanguage, /not enough primary biomarker data/u);
   assert.equal(outcome.protocolRef, null);
-});
-
-test("buildExperimentProgressCard projects the run window onto a weekly grid", () => {
-  const vault = createExperimentVault();
-  const { card, warnings } = buildExperimentProgressCard(vault, "sauna-rhr", {
-    asOf: "2026-04-12",
-    confounders: [{ date: "2026-04-09", label: "Alcohol (~5 drinks)" }],
-  });
-
-  // The sessions strip covers the intervention window only (04-08..04-21 =
-  // 14 days = 2 weeks); the baseline period is measurement-only and excluded.
-  assert.equal(card.weeks.length, 2);
-  assert.ok(card.weeks.length <= EXPERIMENT_PROGRESS_CARD_MAX_WEEKS);
-  assert.equal(card.weeks[0].start, "2026-04-08");
-  // No baseline "B" cells, and every code is a valid intervention-window code.
-  const cells = card.weeks.map((week) => week.cells).join("");
-  assert.match(cells, /^[CPMNSO]+$/u);
-  assert.equal(cells.includes("B"), false);
-  // Phase still reflects the whole run (baseline + intervention).
-  assert.equal(card.phase.totalDays, 21);
-  assert.equal(card.phase.day, 12);
-  assert.equal(card.sessions.logged, 2);
-  assert.equal(card.sessions.target, 6);
-  // Confounder annotations pass through verbatim.
-  assert.deepEqual(card.confounders, [
-    { date: "2026-04-09", label: "Alcohol (~5 drinks)" },
-  ]);
-  assert.deepEqual(warnings, []);
-});
-
-test("buildExperimentProgressCard marks logged intervention days as completed", () => {
-  // A daily-schedule run synthesizes an adherence calendar, so logged sessions
-  // resolve to "C" cells and unlogged-but-due days to "M".
-  const vault = createVaultReadModel({
-    vaultRoot: "/virtual/experiment-progress-card",
-    metadata: null,
-    entities: [
-      makeExperiment("active", {
-        runPlan: {
-          baselineStart: "2026-04-01",
-          baselineEnd: "2026-04-07",
-          interventionStart: "2026-04-08",
-          interventionEnd: "2026-04-14",
-          modality: "sauna",
-          targetSessions: 7,
-          schedule: {
-            kind: "dailyLocal",
-            localTime: "19:00",
-            timeZone: "America/New_York",
-          },
-        },
-      }),
-      makeSession({
-        entityId: "evt_01JNV45RHN0TQ9ZXE0A7YSE201",
-        occurredAt: "2026-04-08T23:30:00.000Z",
-      }),
-      makeSession({
-        entityId: "evt_01JNV45RHN0TQ9ZXE0A7YSE202",
-        occurredAt: "2026-04-09T23:30:00.000Z",
-      }),
-    ],
-  });
-
-  const { card } = buildExperimentProgressCard(vault, "sauna-rhr", {
-    asOf: "2026-04-11",
-  });
-
-  assert.equal(card.weeks[0].start, "2026-04-08");
-  // 04-08 and 04-09 logged → completed; later days stay scheduled until their
-  // grace window lapses.
-  assert.match(card.weeks[0].cells, /^CC/u);
-  assert.equal(card.weeks[0].cells.includes("B"), false);
-  assert.ok(card.sessions.logged >= 2);
-});
-
-test("buildExperimentProgressCard surfaces the resting-heart-rate mover with downward sentiment", () => {
-  const { card } = buildExperimentProgressCard(createExperimentVault(), "sauna-rhr", {
-    asOf: "2026-04-12",
-    biomarkerDesiredDirections: [{
-      biomarkerKey: "biomarker:resting-heart-rate",
-      desiredDirection: "lower_or_stable",
-    }],
-  });
-
-  assert.ok(card.movers.length >= 1);
-  const rhr = card.movers[0];
-  assert.match(rhr.label, /heart rate/iu);
-  // RHR fell from baseline, matching its canonical lower-or-stable direction.
-  assert.equal(rhr.direction, "down");
-  assert.equal(rhr.sentiment, "positive");
-  // The headline is an unsigned percent-change magnitude; the arrow shows direction.
-  assert.match(rhr.changePct, /^\d+(?:\.\d+)?%$/u);
-  // The raw change keeps its sign (a fall reads with a minus) and carries the unit.
-  assert.match(rhr.delta, /^−.*bpm$/u);
-});
-
-test("buildExperimentProgressCard interprets an HRV increase independently of a contrary experiment hypothesis", () => {
-  const experiment = makeExperiment("active", {
-    experimentId: "exp_01JNV4458HYPP53JDQCBP1QKHT",
-    slug: "contrary-hrv-hypothesis",
-    runPlan: {
-      baselineStart: "2026-06-01",
-      baselineEnd: "2026-06-03",
-      interventionStart: "2026-06-04",
-      interventionEnd: "2026-06-06",
-      modality: "recovery",
-      targetSessions: 3,
-      minimumUsefulSessions: 1,
-    },
-    analysisPlan: {
-      primaryBiomarkerKey: "biomarker:hrv",
-      secondaryBiomarkerKeys: ["biomarker:hrv-rmssd"],
-      desiredDirection: "decrease",
-      expectedDirections: [{
-        biomarkerKey: "biomarker:hrv-rmssd",
-        direction: "increase",
-      }],
-    },
-    protocolRef: null,
-  });
-  const vault = createVaultReadModel({
-    vaultRoot: "/virtual/experiment-progress-card-hrv-direction",
-    metadata: null,
-    entities: [
-      experiment,
-      makeSample({
-        entityId: "sample_progress_card_hrv_baseline_1",
-        dayKey: "2026-06-01",
-        stream: "hrv",
-        occurredAt: "2026-06-01T06:00:00.000Z",
-        unit: "ms",
-        value: 45,
-      }),
-      makeSample({
-        entityId: "sample_progress_card_hrv_baseline_2",
-        dayKey: "2026-06-02",
-        stream: "hrv",
-        occurredAt: "2026-06-02T06:00:00.000Z",
-        unit: "ms",
-        value: 46,
-      }),
-      makeSample({
-        entityId: "sample_progress_card_hrv_baseline_3",
-        dayKey: "2026-06-03",
-        stream: "hrv",
-        occurredAt: "2026-06-03T06:00:00.000Z",
-        unit: "ms",
-        value: 47,
-      }),
-      makeSample({
-        entityId: "sample_progress_card_hrv_intervention_1",
-        dayKey: "2026-06-04",
-        stream: "hrv",
-        occurredAt: "2026-06-04T06:00:00.000Z",
-        unit: "ms",
-        value: 50,
-      }),
-      makeSample({
-        entityId: "sample_progress_card_hrv_intervention_2",
-        dayKey: "2026-06-05",
-        stream: "hrv",
-        occurredAt: "2026-06-05T06:00:00.000Z",
-        unit: "ms",
-        value: 51,
-      }),
-      makeSample({
-        entityId: "sample_progress_card_hrv_intervention_3",
-        dayKey: "2026-06-06",
-        stream: "hrv",
-        occurredAt: "2026-06-06T06:00:00.000Z",
-        unit: "ms",
-        value: 52,
-      }),
-    ],
-  });
-
-  const progress = summarizeExperimentProgress(vault, "contrary-hrv-hypothesis", {
-    asOf: "2026-06-06",
-  });
-  const outcome = analyzeExperimentOutcome(vault, "contrary-hrv-hypothesis", {
-    asOf: "2026-06-06",
-  });
-  const { card } = buildExperimentProgressCard(vault, "contrary-hrv-hypothesis", {
-    asOf: "2026-06-06",
-    biomarkerDesiredDirections: [{
-      biomarkerKey: "biomarker:hrv-rmssd",
-      desiredDirection: "higher_or_stable",
-    }],
-  });
-
-  assert.equal(progress.signals.length, 2);
-  assert.equal(progress.signals[0]?.biomarkerKey, "biomarker:hrv");
-  assert.equal(progress.signals[0]?.expectedDirection, "decrease");
-  assert.equal(progress.signals[0]?.movedAsExpected, false);
-  assert.equal(progress.signals[1]?.biomarkerKey, "biomarker:hrv-rmssd");
-  assert.equal(progress.signals[1]?.expectedDirection, "increase");
-  assert.equal(progress.signals[1]?.movedAsExpected, true);
-  assert.deepEqual(
-    outcome.metricResults.map((result) => ({
-      biomarkerKey: result.biomarkerKey,
-      expectedDirection: result.expectedDirection,
-      movedAsExpected: result.movedAsExpected,
-    })),
-    [
-      {
-        biomarkerKey: "biomarker:hrv",
-        expectedDirection: "decrease",
-        movedAsExpected: false,
-      },
-      {
-        biomarkerKey: "biomarker:hrv-rmssd",
-        expectedDirection: "increase",
-        movedAsExpected: true,
-      },
-    ],
-  );
-  assert.equal(card.movers.length, 1);
-  assert.equal(card.movers[0]?.direction, "up");
-  assert.equal(card.movers[0]?.sentiment, "positive");
-});
-
-test("buildExperimentProgressCard keeps partial biomarker movement neutral", () => {
-  const experiment = makeExperiment("active", {
-    experimentId: "exp_01JNV4458HYPP53JDQCBP1QKHV",
-    slug: "partial-rhr-signal",
-    runPlan: {
-      baselineStart: "2026-06-01",
-      baselineEnd: "2026-06-03",
-      interventionStart: "2026-06-04",
-      interventionEnd: "2026-06-06",
-      modality: "recovery",
-      targetSessions: 3,
-      minimumUsefulSessions: 1,
-    },
-    analysisPlan: {
-      primaryBiomarkerKey: "biomarker:resting-heart-rate",
-      desiredDirection: "decrease",
-    },
-    protocolRef: null,
-  });
-  const vault = createVaultReadModel({
-    vaultRoot: "/virtual/experiment-progress-card-partial-direction",
-    metadata: null,
-    entities: [
-      experiment,
-      makeObservation({
-        entityId: "evt_progress_card_partial_rhr_baseline",
-        dayKey: "2026-06-01",
-        metric: "resting-heart-rate",
-        occurredAt: "2026-06-01T06:00:00.000Z",
-        unit: "bpm",
-        value: 60,
-      }),
-      makeObservation({
-        entityId: "evt_progress_card_partial_rhr_intervention",
-        dayKey: "2026-06-04",
-        metric: "resting-heart-rate",
-        occurredAt: "2026-06-04T06:00:00.000Z",
-        unit: "bpm",
-        value: 58,
-      }),
-    ],
-  });
-
-  const { card } = buildExperimentProgressCard(vault, "partial-rhr-signal", {
-    asOf: "2026-06-04",
-    biomarkerDesiredDirections: [{
-      biomarkerKey: "biomarker:resting-heart-rate",
-      desiredDirection: "lower_or_stable",
-    }],
-  });
-
-  assert.equal(card.movers[0]?.direction, "down");
-  assert.equal(card.movers[0]?.sentiment, "neutral");
-});
-
-test("buildExperimentProgressCard uses display-grade metric samples for movers", () => {
-  const experiment = makeExperiment("active", {
-    experimentId: "exp_01JNV4458HYPP53JDQCBP1QJMS",
-    slug: "metric-sample-sleep",
-    runPlan: {
-      baselineStart: "2026-06-01",
-      baselineEnd: "2026-06-03",
-      interventionStart: "2026-06-04",
-      interventionEnd: "2026-06-06",
-      modality: "sleep",
-      targetSessions: 3,
-      minimumUsefulSessions: 1,
-    },
-    analysisPlan: {
-      primaryBiomarkerKey: "biomarker:sleep-efficiency",
-      secondaryBiomarkerKeys: [
-        "biomarker:deep-sleep-minutes",
-        "biomarker:resting-heart-rate",
-      ],
-      expectedDirections: [
-        { biomarkerKey: "biomarker:sleep-efficiency", direction: "increase" },
-        { biomarkerKey: "biomarker:deep-sleep-minutes", direction: "increase" },
-        { biomarkerKey: "biomarker:resting-heart-rate", direction: "decrease" },
-      ],
-    },
-  });
-  const metricSamples = [
-    ["2026-06-01", "sleep-efficiency", "percent", 94.8],
-    ["2026-06-02", "sleep-efficiency", "percent", 94.8],
-    ["2026-06-03", "sleep-efficiency", "percent", 94.8],
-    ["2026-06-04", "sleep-efficiency", "percent", 94.1],
-    ["2026-06-05", "sleep-efficiency", "percent", 94.1],
-    ["2026-06-06", "sleep-efficiency", "percent", 94.1],
-    ["2026-06-01", "deep-sleep-minutes", "minutes", 96.4],
-    ["2026-06-02", "deep-sleep-minutes", "minutes", 96.4],
-    ["2026-06-03", "deep-sleep-minutes", "minutes", 96.4],
-    ["2026-06-04", "deep-sleep-minutes", "minutes", 113.8],
-    ["2026-06-05", "deep-sleep-minutes", "minutes", 113.8],
-    ["2026-06-06", "deep-sleep-minutes", "minutes", 113.8],
-    ["2026-06-01", "resting-heart-rate", "bpm", 50.4],
-    ["2026-06-02", "resting-heart-rate", "bpm", 50.4],
-    ["2026-06-03", "resting-heart-rate", "bpm", 50.4],
-    ["2026-06-04", "resting-heart-rate", "bpm", 47.1],
-    ["2026-06-05", "resting-heart-rate", "bpm", 47.1],
-    ["2026-06-06", "resting-heart-rate", "bpm", 47.1],
-  ].map(([dayKey, metric, unit, value], index) =>
-    makeMetricSample({
-      dayKey: String(dayKey),
-      entityId: `smp_progress_card_${index}`,
-      metric: String(metric),
-      occurredAt: `${String(dayKey)}T06:00:00.000Z`,
-      unit: String(unit),
-      value: Number(value),
-    })
-  );
-  const rawMetricSamples = [
-    ["2026-06-04", "sleep-efficiency", "percent", 10],
-    ["2026-06-05", "deep-sleep-minutes", "minutes", 300],
-    ["2026-06-06", "resting-heart-rate", "bpm", 120],
-  ].map(([dayKey, metric, unit, value], index) =>
-    makeMetricSample({
-      dayKey: String(dayKey),
-      entityId: `smp_progress_card_raw_${index}`,
-      metric: String(metric),
-      occurredAt: `${String(dayKey)}T06:00:00.000Z`,
-      quality: "raw",
-      source: "vendor_raw",
-      unit: String(unit),
-      value: Number(value),
-    })
-  );
-  const vault = createVaultReadModel({
-    vaultRoot: "/virtual/experiment-progress-card-metric-samples",
-    metadata: null,
-    entities: [experiment, ...metricSamples, ...rawMetricSamples],
-  });
-
-  const progress = summarizeExperimentProgress(vault, "metric-sample-sleep", {
-    asOf: "2026-06-06",
-  });
-  assert.deepEqual(progress.dataCoverage, {
-    activityProviders: [],
-    baselineDaysAvailable: 3,
-    interventionDaysAvailable: 3,
-    primaryBiomarkerKey: "biomarker:sleep-efficiency",
-    primaryMetricDaysAvailable: 6,
-    status: "sufficient_for_progress",
-    wearableProviders: [],
-  });
-  assert.deepEqual(
-    progress.signals.map((signal) => [
-      signal.biomarkerKey,
-      signal.completeness,
-      signal.baselineMean,
-      signal.interventionMean,
-      signal.deltaAbs,
-    ]),
-    [
-      ["biomarker:sleep-efficiency", "good", 94.8, 94.1, -0.7],
-      ["biomarker:deep-sleep-minutes", "good", 96.4, 113.8, 17.4],
-      ["biomarker:resting-heart-rate", "good", 50.4, 47.1, -3.3],
-    ],
-  );
-
-  const { card, warnings } = buildExperimentProgressCard(vault, "metric-sample-sleep", {
-    asOf: "2026-06-06",
-  });
-  assert.equal(card.movers.length, 2);
-  assert.deepEqual(card.movers.map((mover) => mover.label), [
-    "Deep Sleep Minutes",
-    "Resting Heart Rate",
-  ]);
-  assert.equal(warnings.at(-1), "movers clamped to top 2 of 3 qualifying metrics");
-});
-
-test("buildExperimentProgressCard compares run windows with canonical metric units", () => {
-  const experiment = makeExperiment("active", {
-    experimentId: "exp_01JNV4458HYPP53JDQCBP1QKGS",
-    slug: "mixed-unit-weight",
-    runPlan: {
-      baselineStart: "2026-06-01",
-      baselineEnd: "2026-06-03",
-      interventionStart: "2026-06-04",
-      interventionEnd: "2026-06-06",
-      modality: "nutrition",
-      targetSessions: 3,
-      minimumUsefulSessions: 1,
-    },
-    analysisPlan: {
-      primaryBiomarkerKey: "biomarker:body-weight",
-      desiredDirection: "decrease",
-    },
-  });
-  const metricSamples = [
-    ["2026-06-01", "kg", 80],
-    ["2026-06-02", "kg", 80],
-    ["2026-06-03", "kg", 80],
-    ["2026-06-04", "lb", 180],
-    ["2026-06-05", "lb", 180],
-    ["2026-06-06", "lb", 180],
-  ].map(([dayKey, unit, value], index) =>
-    makeMetricSample({
-      dayKey: String(dayKey),
-      entityId: `smp_weight_mixed_unit_${index}`,
-      metric: "body-weight",
-      occurredAt: `${String(dayKey)}T06:00:00.000Z`,
-      unit: String(unit),
-      value: Number(value),
-    })
-  );
-  const vault = createVaultReadModel({
-    vaultRoot: "/virtual/experiment-progress-card-canonical-units",
-    metadata: null,
-    entities: [experiment, ...metricSamples],
-  });
-
-  const progress = summarizeExperimentProgress(vault, "mixed-unit-weight", {
-    asOf: "2026-06-06",
-  });
-  const signal = progress.signals[0];
-  assert.equal(signal?.biomarkerKey, "biomarker:body-weight");
-  assert.equal(signal?.baselineMean, 80);
-  assert.equal(signal?.interventionMean, 81.65);
-  assert.equal(signal?.deltaAbs, 1.65);
-  assert.equal(signal?.unit, "kg");
-
-  const { card } = buildExperimentProgressCard(vault, "mixed-unit-weight", {
-    asOf: "2026-06-06",
-  });
-  assert.equal(card.movers.length, 1);
-  assert.equal(card.movers[0]?.label, "Body Weight");
-  assert.equal(card.movers[0]?.delta, "+1.7 kg");
-});
-
-test("buildExperimentProgressCard keeps glucose sample-summary points in run windows", () => {
-  const experiment = makeExperiment("active", {
-    experimentId: "exp_01JNV4458HYPP53JDQCBP1QKGT",
-    slug: "glucose-samples",
-    runPlan: {
-      baselineStart: "2026-06-01",
-      baselineEnd: "2026-06-03",
-      interventionStart: "2026-06-04",
-      interventionEnd: "2026-06-06",
-      modality: "nutrition",
-      targetSessions: 3,
-      minimumUsefulSessions: 1,
-    },
-    analysisPlan: {
-      primaryBiomarkerKey: "biomarker:blood-glucose",
-      desiredDirection: "decrease",
-    },
-  });
-  const glucoseSamples = [
-    ["2026-06-01", 96],
-    ["2026-06-02", 96],
-    ["2026-06-03", 96],
-    ["2026-06-04", 102],
-    ["2026-06-05", 102],
-    ["2026-06-06", 102],
-  ].map(([dayKey, value], index) =>
-    makeSample({
-      dayKey: String(dayKey),
-      entityId: `smp_glucose_progress_${index}`,
-      occurredAt: `${String(dayKey)}T12:00:00.000Z`,
-      stream: "glucose",
-      unit: "mg_dL",
-      value: Number(value),
-    })
-  );
-  const vault = createVaultReadModel({
-    vaultRoot: "/virtual/experiment-progress-card-glucose-samples",
-    metadata: null,
-    entities: [experiment, ...glucoseSamples],
-  });
-
-  const progress = summarizeExperimentProgress(vault, "glucose-samples", {
-    asOf: "2026-06-06",
-  });
-  const signal = progress.signals[0];
-  assert.equal(signal?.biomarkerKey, "biomarker:blood-glucose");
-  assert.equal(signal?.baselineMean, 96);
-  assert.equal(signal?.interventionMean, 102);
-  assert.equal(signal?.deltaAbs, 6);
-  assert.equal(signal?.unit, "mg/dL");
-
-  const { card } = buildExperimentProgressCard(vault, "glucose-samples", {
-    asOf: "2026-06-06",
-  });
-  assert.equal(card.movers.length, 1);
-  assert.match(card.movers[0]?.label ?? "", /glucose/iu);
-  assert.equal(card.movers[0]?.delta, "+6 mg/dL");
-});
-
-test("buildExperimentProgressCard emits a card-route path that decodes back to the card", () => {
-  const { card } = buildExperimentProgressCard(createExperimentVault(), "sauna-rhr", {
-    asOf: "2026-04-12",
-  });
-  const path = buildExperimentProgressCardPath(
-    "exp_01JNV4458HYPP53JDQCBP1QJFM",
-    card,
-  );
-
-  assert.match(
-    path,
-    /^\/experiments\/exp_[0-9A-HJKMNP-TV-Z]{26}\/progress-card\/[A-Za-z0-9_-]+\.png$/u,
-  );
-  const payload = path.slice(path.lastIndexOf("/") + 1, -".png".length);
-  assert.deepEqual(decodeExperimentProgressCard(payload), card);
 });

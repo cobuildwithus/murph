@@ -221,7 +221,6 @@ export async function executeCodexAssistantTurnAttempt(
       codexConfigOverrides.length > 0 ? codexConfigOverrides : undefined,
     env: codexProcessEnv,
     fetchImpl: input.providerFetch ?? undefined,
-    hostedGeneratedImageUploader: input.generatedImageUploader ?? null,
     hostedToolContext: input.hostedToolContext ?? null,
     materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts ?? null,
     model: providerConfig.target.model ?? undefined,
@@ -266,8 +265,8 @@ export async function executeCodexAssistantTurnAttempt(
       ? { processLifetime: 'one-shot' as const }
       : {}),
     providerRequestOrdinal: input.providerRequestOrdinal ?? null,
-    requireHostedGeneratedImageUploader:
-      input.requireGeneratedImageUploader ?? false,
+    requireHostedPrivateImageDelivery:
+      input.requireHostedPrivateImageDelivery ?? false,
     images: extractCodexAppServerUserMessageImages(input.userMessageContent),
     excludeResumeTurns: true,
     reasoningEffort: providerConfig.policy.reasoningEffort ?? undefined,

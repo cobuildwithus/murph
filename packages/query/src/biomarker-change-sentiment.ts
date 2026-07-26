@@ -1,10 +1,9 @@
 import type {
-  ExperimentProgressCardMover,
   HealthCommonsBiomarkerDesiredDirection,
 } from "@murphai/contracts";
 
-export type BiomarkerChangeDirection = ExperimentProgressCardMover["direction"];
-export type BiomarkerChangeSentiment = ExperimentProgressCardMover["sentiment"];
+export type BiomarkerChangeDirection = "down" | "neutral" | "up";
+export type BiomarkerChangeSentiment = "negative" | "neutral" | "positive";
 
 /**
  * Interpret a raw biomarker movement without conflating it with an experiment

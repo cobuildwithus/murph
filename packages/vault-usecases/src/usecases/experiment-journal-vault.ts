@@ -1898,57 +1898,6 @@ export async function showExperimentProgress(input: {
   }
 }
 
-export async function showExperimentProgressCard(input: {
-  vault: string
-  lookup: string
-  asOf?: string
-  confounders?: ReadonlyArray<{ date: string; label: string }>
-}) {
-  const { query, readModel, entity, slug } = await resolveExperimentQueryTarget({
-    invalidSlugMessage: 'Experiment progress cards require a canonical slug.',
-    lookup: input.lookup,
-    vault: input.vault,
-  })
-  const frontmatter = requireExperimentFrontmatter(entity)
-  const metricPoints = await readExperimentJournalMetricPoints({
-    asOf: input.asOf,
-    frontmatter,
-    query,
-    vault: input.vault,
-  })
-  const healthCommons = await loadHealthCommonsBiomarkerDirectionRuntime()
-  const biomarkerKeys = [
-    frontmatter.analysisPlan?.primaryBiomarkerKey ?? null,
-    ...(frontmatter.analysisPlan?.secondaryBiomarkerKeys ?? []),
-  ].filter((biomarkerKey): biomarkerKey is string => biomarkerKey !== null)
-  const biomarkerDesiredDirections = uniqueStrings(biomarkerKeys).flatMap((biomarkerKey) => {
-    const desiredDirection =
-      healthCommons.resolveGeneratedHealthCommonsBiomarkerDesiredDirection(
-        biomarkerKey,
-      )
-    return desiredDirection === null
-      ? []
-      : [{ biomarkerKey, desiredDirection }]
-  })
-
-  const { card, warnings } = query.buildExperimentProgressCard(readModel, slug, {
-    asOf: input.asOf,
-    biomarkerDesiredDirections,
-    confounders: input.confounders,
-    metricPoints,
-  })
-
-  return {
-    vault: input.vault,
-    experimentId: entity.entityId,
-    lookupId: entity.entityId,
-    slug,
-    asOf: card.asOf,
-    card,
-    warnings,
-  }
-}
-
 export async function showExperimentFollowupDue(input: {
   vault: string
   lookup: string

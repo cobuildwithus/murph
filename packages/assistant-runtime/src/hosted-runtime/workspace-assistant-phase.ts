@@ -1431,8 +1431,6 @@ export async function runHostedWorkspaceAssistantPhase(
         ...(input.materializeWorkspaceArtifacts
           ? { materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts }
           : {}),
-        generatedImageUploader: input.runtime.platform.generatedImageUploader ?? null,
-        generatedImageUploaderRequired: true,
         ...(input.runtime.platform.productFeedbackPort
           ? { productFeedbackRecorder: input.runtime.platform.productFeedbackPort }
           : {}),

@@ -6,7 +6,6 @@ export * from "./event-lifecycle.ts";
 export * from "./event-raw-references.ts";
 export * from "./examples.ts";
 export * from "./exa-research-scout.ts";
-export * from "./experiment-progress-card.ts";
 export * from "./experiment-storage.ts";
 export * from "./frontmatter.ts";
 export * from "./habitat-catalog.ts";

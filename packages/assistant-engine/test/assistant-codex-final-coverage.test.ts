@@ -563,10 +563,6 @@ describe('Codex model catalog', () => {
       activeTurnSteering: null,
       executionContext: {
         hosted: {
-          generatedImageUploader: {
-            uploadGeneratedImage: vi.fn(),
-          },
-          generatedImageUploaderRequired: true,
           materializeWorkspaceArtifacts: vi.fn(),
           memberId: 'member-system-notification',
           providerFetch: fetch,
@@ -656,14 +652,13 @@ describe('Codex model catalog', () => {
     expect(providerInput).toMatchObject({
       dynamicTools: [],
       environments: [],
-      generatedImageUploader: null,
       hostedToolContext: null,
       materializeWorkspaceArtifacts: null,
       processLifetime: 'one-shot',
       progressDelivery: null,
       providerFetch: null,
       publicInternetFetch: null,
-      requireGeneratedImageUploader: false,
+      requireHostedPrivateImageDelivery: false,
     })
     expect(unsafeDynamicTools).not.toEqual([])
     expect(unsafeProgressDelivery.send).not.toHaveBeenCalled()

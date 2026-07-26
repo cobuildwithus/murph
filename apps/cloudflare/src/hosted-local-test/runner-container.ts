@@ -50,13 +50,6 @@ export type HostedLocalTestRunnerOutboundHandler = (
 ) => Promise<Response>;
 
 export class RunnerContainer extends BaseRunnerContainer {
-  async armGeneratedImageUploadTypeErrorForTest(
-    input: { userId: string },
-  ): Promise<{ ok: true }> {
-    armGeneratedImageUploadTypeError(input.userId);
-    return { ok: true };
-  }
-
   async armCanonicalCheckpointLostAckForTest(
     input: { userId: string },
   ): Promise<{ ok: true }> {
@@ -517,26 +510,7 @@ async function corruptWorkspaceSnapshotCompleteRequest(
   });
 }
 
-const hostedLocalGeneratedImageUrl =
-  "https://imagedelivery.net/hosted-local/generated-image/public";
 export const HOSTED_LOCAL_LINQ_ATTACHMENT_UPLOAD_HOST = "uploads.example.test";
-const generatedImageUploadTypeErrorUsers = new Set<string>();
-
-export function armGeneratedImageUploadTypeError(userId: string): void {
-  const normalized = userId.trim();
-  if (!normalized) {
-    throw new TypeError("Hosted-local generated image upload TypeError control requires a user id.");
-  }
-  generatedImageUploadTypeErrorUsers.add(normalized);
-}
-
-function consumeGeneratedImageUploadTypeError(userId: string): boolean {
-  if (!generatedImageUploadTypeErrorUsers.has(userId)) {
-    return false;
-  }
-  generatedImageUploadTypeErrorUsers.delete(userId);
-  return true;
-}
 
 const hostedLocalOpenAiImagesFetch: typeof fetch = async (input) => {
   const request = input instanceof Request ? input : new Request(input);
@@ -574,25 +548,6 @@ const hostedLocalOpenAiImagesFetch: typeof fetch = async (input) => {
   });
 };
 
-const hostedLocalCloudflareImagesFetch: typeof fetch = async (input, init) => {
-  const request = new Request(input, init);
-  if (request.method !== "POST" || !new URL(request.url).pathname.endsWith("/images/v1")) {
-    return new Response("Unexpected hosted-local Cloudflare Images request.", { status: 502 });
-  }
-
-  return new Response(JSON.stringify({
-    result: {
-      variants: [hostedLocalGeneratedImageUrl],
-    },
-    success: true,
-  }), {
-    headers: {
-      "content-type": "application/json; charset=utf-8",
-    },
-    status: 200,
-  });
-};
-
 const wrapOpenAiImagesForTest: HostedLocalTestRunnerOutboundHandler = (request, env, ctx) => {
   const pathname = new URL(request.url).pathname;
   if (pathname !== "/v1/images/generations" && pathname !== "/v1/images/edits") {
@@ -618,19 +573,11 @@ const wrapGeneratedImageUploadForTest: HostedLocalTestRunnerOutboundHandler = (
   if (!userId) {
     return Promise.resolve(new Response("Unauthorized", { status: 401 }));
   }
-  const fetchImpl = consumeGeneratedImageUploadTypeError(userId)
-    ? hostedLocalCloudflareImagesTypeErrorFetch
-    : hostedLocalCloudflareImagesFetch;
   return handleRunnerGeneratedImageUploadRequest({
     env,
-    fetchImpl,
     request,
     userId,
   });
-};
-
-const hostedLocalCloudflareImagesTypeErrorFetch: typeof fetch = async () => {
-  throw new TypeError("Hosted-local Cloudflare Images upload TypeError.");
 };
 
 const handleHostedLocalLinqAttachmentUpload: HostedLocalTestRunnerOutboundHandler = async (

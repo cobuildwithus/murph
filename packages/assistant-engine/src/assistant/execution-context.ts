@@ -312,26 +312,6 @@ export interface AssistantPhoneCallPort {
   ): Promise<HostedPhoneCallStartResponse>
 }
 
-export type AssistantGeneratedImageContentType =
-  | 'image/jpeg'
-  | 'image/png'
-  | 'image/webp'
-
-export interface AssistantHostedGeneratedImageUploadInput {
-  alt: string | null
-  bytes: Uint8Array
-  contentType: AssistantGeneratedImageContentType
-  filename: string
-  metadata: Record<string, string>
-  source: string
-}
-
-export interface AssistantHostedGeneratedImageUploader {
-  uploadGeneratedImage(
-    input: AssistantHostedGeneratedImageUploadInput,
-  ): Promise<AssistantResponseMedia>
-}
-
 export interface AssistantWorkspaceArtifactMaterializationResult {
   materializedArtifactPaths: ReadonlySet<string>
   missingArtifactPaths: ReadonlySet<string>
@@ -376,8 +356,6 @@ export interface AssistantHostedExecutionContext {
   planUsageTool?: AssistantHostedPlanUsageTool | null
   subscriptionTool?: AssistantHostedSubscriptionTool | null
   dynamicContextPrompts?: readonly string[] | null
-  generatedImageUploader?: AssistantHostedGeneratedImageUploader | null
-  generatedImageUploaderRequired?: boolean | null
   materializeWorkspaceArtifacts?: AssistantWorkspaceArtifactMaterializer | null
   memberId: string
   progressDeliveryDependencies?: AssistantHostedProgressDeliveryDependencies
@@ -437,9 +415,6 @@ export function normalizeAssistantExecutionContext(
   const dynamicContextPrompts = normalizeAssistantDynamicContextPrompts(
     hosted?.dynamicContextPrompts,
   )
-  const generatedImageUploader = normalizeAssistantGeneratedImageUploader(
-    hosted?.generatedImageUploader,
-  )
   const familyPlanTool = normalizeAssistantFamilyPlanTool(hosted?.familyPlanTool)
   const personalizationTool = normalizeAssistantPersonalizationTool(
     hosted?.personalizationTool,
@@ -483,7 +458,6 @@ export function normalizeAssistantExecutionContext(
       ...(assistantConfigurationTool ? { assistantConfigurationTool } : {}),
       ...(connectedApps ? { connectedApps } : {}),
       ...(clinicalRecordsConnectLinkTool ? { clinicalRecordsConnectLinkTool } : {}),
-      ...(generatedImageUploader ? { generatedImageUploader } : {}),
       ...(familyPlanTool ? { familyPlanTool } : {}),
       ...(personalizationTool ? { personalizationTool } : {}),
       ...(groupPermissionOfferTool ? { groupPermissionOfferTool } : {}),
@@ -493,9 +467,6 @@ export function normalizeAssistantExecutionContext(
       ...(newsletterTool ? { newsletterTool } : {}),
       ...(planUsageTool ? { planUsageTool } : {}),
       ...(subscriptionTool ? { subscriptionTool } : {}),
-      ...(hosted?.generatedImageUploaderRequired === true
-        ? { generatedImageUploaderRequired: true }
-        : {}),
       ...(typeof hosted?.materializeWorkspaceArtifacts === 'function'
         ? {
             materializeWorkspaceArtifacts: hosted.materializeWorkspaceArtifacts,
@@ -780,18 +751,6 @@ function normalizeAssistantUsageRecorder(
 
   return {
     recordUsage: input.recordUsage,
-  }
-}
-
-function normalizeAssistantGeneratedImageUploader(
-  input: AssistantHostedExecutionContext['generatedImageUploader'] | undefined,
-): AssistantHostedGeneratedImageUploader | undefined {
-  if (!input || typeof input.uploadGeneratedImage !== 'function') {
-    return undefined
-  }
-
-  return {
-    uploadGeneratedImage: input.uploadGeneratedImage,
   }
 }
 

@@ -3044,66 +3044,12 @@ describe("handleRunnerOutboundRequest", () => {
 
   it("tombstones generated-image URL uploads after the write fence", async () => {
     const runner = createWorkspaceVersionAwareUserRunner();
-    const pngBytes = new Uint8Array([
-      0x89, 0x50, 0x4e, 0x47,
-      0x0d, 0x0a, 0x1a, 0x0a,
-    ]);
-    const fetchMock = vi.fn<typeof fetch>(async (
-      request,
-      init,
-    ) => {
-      const outboundRequest = request instanceof Request
-        ? request
-        : new Request(request, init);
-      expect(outboundRequest.url).toBe(
-        "https://api.cloudflare.com/client/v4/accounts/account_123/images/v1",
-      );
-      expect(outboundRequest.method).toBe("POST");
-      expect(outboundRequest.headers.get("authorization")).toBe("Bearer <redacted>");
-      expect(outboundRequest.signal).toBeInstanceOf(AbortSignal);
-      const form = await outboundRequest.formData();
-      expect(form.get("requireSignedURLs")).toBe("false");
-      expect(form.get("metadata")).toBe(JSON.stringify({
-        model: "gpt-image-2",
-        promptHash: "hash_123",
-        schema: "murph.generated-image.v1",
-      }));
-      const file = form.get("file");
-      expect(file).toBeInstanceOf(File);
-      expect((file as File).name).toBe("generated.png");
-      expect((file as File).type).toBe("image/png");
-
-      return new Response(JSON.stringify({
-        result: {
-          variants: [
-            "https://imagedelivery.net/account_123/image_123/public",
-          ],
-        },
-        success: true,
-      }), {
-        headers: {
-          "content-type": "application/json; charset=utf-8",
-        },
-        status: 200,
-      });
-    });
+    const fetchMock = vi.fn<typeof fetch>();
     vi.stubGlobal("fetch", fetchMock);
 
     const uploadRequest = new Request(
       `http://results.worker${HOSTED_EXECUTION_RUNNER_GENERATED_IMAGE_UPLOAD_PATH}`,
       {
-        body: JSON.stringify({
-          alt: "Generated product image",
-          bytesBase64: Buffer.from(pngBytes).toString("base64"),
-          contentType: "image/png",
-          filename: "generated.png",
-          metadata: {
-            model: "gpt-image-2",
-            promptHash: "hash_123",
-            schema: "murph.generated-image.v1",
-          },
-          source: "gpt-image-2",
-        }),
         headers: createMailboxPayloadDecodeHeaders(),
         method: "POST",
       },
@@ -3111,8 +3057,6 @@ describe("handleRunnerOutboundRequest", () => {
     const response = await handleRunnerOutboundRequest(
       uploadRequest,
       createRunnerOutboundEnv({
-        CLOUDFLARE_IMAGES_ACCOUNT_ID: "account_123",
-        CLOUDFLARE_IMAGES_API_KEY: "<redacted>",
         USER_RUNNER: {
           getByName: runner.getByName,
         },
@@ -3127,89 +3071,6 @@ describe("handleRunnerOutboundRequest", () => {
       error:
         "Generated-image URL upload is disabled; use private provider attachments.",
     });
-  });
-
-  it("does not reach the legacy generated-image upload fetch", async () => {
-    // Regression guard for the production incident: workerd's global `fetch` is
-    // receiver-sensitive, so calling it as a foreign-object method (e.g. the old
-    // `input.fetchImpl(...)` where `fetchImpl` was the bare ambient global) throws
-    // `TypeError: Illegal invocation` synchronously. The frozen vitest workerd
-    // binary does not enforce this, so we assert the invariant explicitly with a
-    // receiver-strict stub: the upload must reach `fetch` with `this === globalThis`
-    // (i.e. routed through `normalizeCloudflareWorkerFetch`), never as a method on a
-    // local object. This test fails on the pre-fix `input.fetchImpl(...)` call shape.
-    const runner = createWorkspaceVersionAwareUserRunner();
-    const pngBytes = new Uint8Array([
-      0x89, 0x50, 0x4e, 0x47,
-      0x0d, 0x0a, 0x1a, 0x0a,
-    ]);
-    let observedReceiver: unknown = "unset";
-    let receiverStrictCallCount = 0;
-    function receiverStrictFetch(
-      this: unknown,
-      _request: RequestInfo | URL,
-      _init?: RequestInit,
-    ): Promise<Response> {
-      receiverStrictCallCount += 1;
-      observedReceiver = this;
-      if (this !== globalThis) {
-        throw new TypeError("Failed to execute 'fetch': Illegal invocation");
-      }
-      return Promise.resolve(new Response(JSON.stringify({
-        result: {
-          variants: [
-            "https://imagedelivery.net/account_123/image_123/public",
-          ],
-        },
-        success: true,
-      }), {
-        headers: {
-          "content-type": "application/json; charset=utf-8",
-        },
-        status: 200,
-      }));
-    }
-    vi.stubGlobal("fetch", receiverStrictFetch as unknown as typeof fetch);
-
-    // Call the handler with NO `fetchImpl` — the exact production dispatch shape
-    // (results.ts must fall back to the ambient global fetch). The handler must
-    // reach it through `normalizeCloudflareWorkerFetch` (global receiver). The
-    // pre-fix `input.fetchImpl(...)` method call would invoke the receiver-strict
-    // stub with `this === input`, which throws and degrades to a 502.
-    const env = createRunnerOutboundEnv({
-      CLOUDFLARE_IMAGES_ACCOUNT_ID: "account_123",
-      CLOUDFLARE_IMAGES_API_KEY: "<redacted>",
-      USER_RUNNER: {
-        getByName: runner.getByName,
-      },
-    });
-    const response = await handleRunnerGeneratedImageUploadRequest({
-      env,
-      request: new Request(
-        `http://results.worker${HOSTED_EXECUTION_RUNNER_GENERATED_IMAGE_UPLOAD_PATH}`,
-        {
-          body: JSON.stringify({
-            alt: "Generated product image",
-            bytesBase64: Buffer.from(pngBytes).toString("base64"),
-            contentType: "image/png",
-            filename: "generated.png",
-            metadata: {
-              model: "gpt-image-2",
-              promptHash: "hash_123",
-              schema: "murph.generated-image.v1",
-            },
-            source: "gpt-image-2",
-          }),
-          headers: createMailboxPayloadDecodeHeaders(),
-          method: "POST",
-        },
-      ),
-      userId: "member_123",
-    });
-
-    expect(response.status).toBe(410);
-    expect(receiverStrictCallCount).toBe(0);
-    expect(observedReceiver).toBe("unset");
   });
 
   it("rejects email sends when the live invocation lease is stale", async () => {

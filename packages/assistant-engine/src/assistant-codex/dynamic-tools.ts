@@ -90,7 +90,6 @@ import {
 import {
   type AssistantHostedGroupSharedReadResponse,
   type AssistantHostedGroupSharedReader,
-  type AssistantHostedGeneratedImageUploader,
   type AssistantWorkspaceArtifactMaterializer,
 } from '../assistant/execution-context.js'
 import {
@@ -2478,7 +2477,6 @@ export async function executeMurphDynamicToolRequest(input: {
   env: NodeJS.ProcessEnv
   fetchImpl: typeof fetch
   hostedToolContext?: AssistantHostedToolContext | null
-  hostedGeneratedImageUploader?: AssistantHostedGeneratedImageUploader | null
   materializeWorkspaceArtifacts?: AssistantWorkspaceArtifactMaterializer | null
   nextUsageOrdinal: () => number
   deliveryContextOrdinal?: number | null
@@ -2486,7 +2484,7 @@ export async function executeMurphDynamicToolRequest(input: {
   progressDelivery: AssistantProgressDelivery | null
   publicFetchImpl?: typeof fetch | null
   request: MurphDynamicToolRequest
-  requireHostedGeneratedImageUploader?: boolean | null
+  requireHostedPrivateImageDelivery?: boolean | null
   vaultRoot?: string | null
   voiceMemoRuntime?: VoiceMemoToolRuntime | null
   askGrokRuntime?: AskGrokToolRuntime | null
@@ -2920,7 +2918,7 @@ export async function executeMurphDynamicToolRequest(input: {
         materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts ?? null,
         providerRequestOrdinal: input.nextUsageOrdinal(),
         requireHostedPrivateImageDelivery:
-          input.requireHostedGeneratedImageUploader ?? false,
+          input.requireHostedPrivateImageDelivery ?? false,
         vaultRoot: input.vaultRoot ?? null,
       })
       return {
