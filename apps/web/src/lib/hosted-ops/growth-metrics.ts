@@ -228,7 +228,7 @@ export interface HostedGrowthDashboard {
     wowPercent: number | null;
   };
   usageTopUps: {
-    totalFulfilled: number;
+    trackedFulfilled: number;
   };
   weeklyRows: HostedGrowthWeeklyRow[];
 }
@@ -690,7 +690,7 @@ export async function readHostedGrowthDashboard(
     }),
     prisma.hostedGrowthAggregate.findUniqueOrThrow({
       select: {
-        fulfilledUsageTopUps: true,
+        trackedFulfilledUsageTopUps: true,
       },
       where: {
         id: HOSTED_GROWTH_AGGREGATE_ID,
@@ -816,7 +816,7 @@ export async function readHostedGrowthDashboard(
       ),
     },
     usageTopUps: {
-      totalFulfilled: growthAggregate.fulfilledUsageTopUps,
+      trackedFulfilled: growthAggregate.trackedFulfilledUsageTopUps,
     },
     weeklyRows,
   };

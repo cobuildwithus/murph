@@ -174,13 +174,13 @@ async function readFulfilledUsageTopUps(
 ): Promise<number> {
   const aggregate = await prisma.hostedGrowthAggregate.findUniqueOrThrow({
     select: {
-      fulfilledUsageTopUps: true,
+      trackedFulfilledUsageTopUps: true,
     },
     where: {
       id: "global",
     },
   });
-  return aggregate.fulfilledUsageTopUps;
+  return aggregate.trackedFulfilledUsageTopUps;
 }
 
 async function readBackendPid(tx: Prisma.TransactionClient): Promise<number> {
@@ -309,7 +309,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
       }
     });
 
-    it("rolls back the lifetime count and retains it after member rows are deleted", async () => {
+    it("rolls back the tracked count and retains it after member rows are deleted", async () => {
       const fixture = await createUsageCreditFixture();
       const initialFulfilledUsageTopUps = await readFulfilledUsageTopUps(
         fixture.observer,

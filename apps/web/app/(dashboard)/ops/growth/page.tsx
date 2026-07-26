@@ -80,7 +80,7 @@ export default async function HostedOpsGrowthPage() {
 
       <section aria-labelledby="growth-revenue-title" className="flex flex-col gap-4">
         <SectionHeading
-          description="Recurring revenue comes from active paid plan definitions. Fulfilled usage top-ups are successful one-time purchases and stay separate from MRR."
+          description="Recurring revenue comes from active paid plan definitions. The tracked top-up total starts with retained fulfilled history at cutover, adds each new first fulfillment, and may omit purchases deleted before tracking began."
           id="growth-revenue-title"
           title="Revenue mix"
         />
@@ -122,9 +122,9 @@ export default async function HostedOpsGrowthPage() {
                 </TableCell>
               </TableRow>
               <TableRow>
-                <TableCell>Fulfilled usage top-ups (lifetime)</TableCell>
+                <TableCell>Tracked fulfilled usage top-ups</TableCell>
                 <TableCell className="text-right">
-                  {formatInteger(dashboard.usageTopUps.totalFulfilled)}
+                  {formatInteger(dashboard.usageTopUps.trackedFulfilled)}
                 </TableCell>
                 <TableCell className="text-right">One-time</TableCell>
               </TableRow>

@@ -343,6 +343,7 @@ describe("HOSTED_ACCOUNT_DATA_STORE_COVERAGE", () => {
 
     expect(aggregate?.deletion).toBe("documented-retention");
     expect(aggregate?.note).toContain("unjoinable");
+    expect(aggregate?.note).toContain("tracker cutover");
     expect(aggregate?.note).toContain("account deletion");
     expect(entry?.note).toContain("browser-vault export omits");
     expect(entry?.note).toContain("semantic source keys");

@@ -195,7 +195,7 @@ Large Fraunces stat number (the value) + DM Mono unit label + delta in sage gree
 
 ### Ops Weekly Growth Scorecard
 On `/ops/growth`, lead with one large Fraunces weekly MRR growth rate and keep
-current MRR, lifetime fulfilled usage top-ups, paying-customer growth, active
+current MRR, tracked fulfilled usage top-ups, paying-customer growth, active
 usage, acquisition, activation, and conversion subordinate. Compare the
 displayed one-decimal rate with the 10% weekly target so the number and verdict
 cannot disagree. A hit uses primary sage. A miss uses Tailwind `red-700` as a

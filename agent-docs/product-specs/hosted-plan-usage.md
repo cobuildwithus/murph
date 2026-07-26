@@ -1,6 +1,6 @@
 # Hosted Plan Usage And Subscription Actions
 
-Last verified: 2026-07-22
+Last verified: 2026-07-26
 Status: Implemented current-state contract
 
 ## Goal
@@ -27,14 +27,17 @@ is its bounded admission and Settings projection. The plan-usage response may
 recommend the authenticated Settings top-up handoff, but it cannot create
 Checkout or grant credit.
 
-The growth dashboard's lifetime fulfilled-top-up total has a different,
+The growth dashboard's tracked fulfilled-top-up total has a different,
 company-wide scope. One anonymous singleton count is seeded from retained
-fulfilled purchases at migration time. A database trigger increments it inside
-the first successful purchase-status transition to fulfilled, including while
-warm older Web bundles drain. It stores no member, purchase, Stripe, event, or
-timing reference, survives account deletion, and is not billing or credit
-authority. Purchase rows and ledger entries keep their existing member-scoped
-deletion behavior.
+fulfilled purchases while the purchase table is locked at tracker cutover. A
+database trigger is installed before the lock is released and increments the
+count inside each later first successful purchase-status transition to
+fulfilled, including while warm older Web bundles drain. Purchases deleted
+before cutover cannot be reconstructed from the local database, so the
+dashboard calls this a tracked total rather than complete lifetime history. The
+counter stores no member, purchase, Stripe, event, or timing reference, survives
+later account deletion, and is not billing or credit authority. Purchase rows
+and ledger entries keep their existing member-scoped deletion behavior.
 
 `@murphai/hosted-execution/plan-usage` owns the strict transport contract.
 Cloudflare carries that contract over the existing signed `web-control.worker`

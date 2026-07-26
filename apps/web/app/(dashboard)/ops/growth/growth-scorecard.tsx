@@ -22,7 +22,7 @@ interface GrowthScorecardProps {
   };
   titleId?: string;
   usageTopUps: {
-    totalFulfilled: number;
+    trackedFulfilled: number;
   };
 }
 
@@ -67,8 +67,9 @@ export function GrowthScorecard(input: GrowthScorecardProps) {
                 value={formatCurrency(input.mrrUsdCents)}
               />
               <SupportingRevenueMetric
-                label="Fulfilled top-ups · lifetime"
-                value={formatInteger(input.usageTopUps.totalFulfilled)}
+                helper="Retained history + new fulfillments"
+                label="Tracked fulfilled top-ups"
+                value={formatInteger(input.usageTopUps.trackedFulfilled)}
               />
             </div>
           </div>
@@ -129,17 +130,25 @@ export function GrowthScorecard(input: GrowthScorecardProps) {
 }
 
 function SupportingRevenueMetric(input: {
+  helper?: string;
   label: string;
   value: string;
 }) {
   return (
-    <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-      <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
-        {input.label}
-      </span>
-      <span className="font-serif text-2xl font-semibold tabular-nums text-foreground">
-        {input.value}
-      </span>
+    <div>
+      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+        <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+          {input.label}
+        </span>
+        <span className="font-serif text-2xl font-semibold tabular-nums text-foreground">
+          {input.value}
+        </span>
+      </div>
+      {input.helper ? (
+        <div className="mt-1 text-xs leading-5 text-muted-foreground">
+          {input.helper}
+        </div>
+      ) : null}
     </div>
   );
 }

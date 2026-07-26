@@ -25,7 +25,7 @@ const STUDY_INPUT = {
     wowPercent: 9.5,
   },
   usageTopUps: {
-    totalFulfilled: 12,
+    trackedFulfilled: 12,
   },
 } satisfies Omit<GrowthScorecardProps, "mrrWowPercent">;
 

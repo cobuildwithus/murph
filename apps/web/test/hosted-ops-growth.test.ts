@@ -124,7 +124,7 @@ describe("hosted ops growth metrics", () => {
     mocks.hostedLinqDelivery.count.mockResolvedValue(0);
     mocks.hostedMailboxItem.count.mockResolvedValue(0);
     mocks.hostedGrowthAggregate.findUniqueOrThrow.mockResolvedValue({
-      fulfilledUsageTopUps: 0,
+      trackedFulfilledUsageTopUps: 0,
     });
     mocks.hostedMember.count.mockResolvedValue(0);
     mocks.requireActiveHostedAppSession.mockResolvedValue({
@@ -489,7 +489,7 @@ describe("hosted ops growth metrics", () => {
       .mockResolvedValueOnce(6)
       .mockResolvedValueOnce(3);
     mocks.hostedGrowthAggregate.findUniqueOrThrow.mockResolvedValueOnce({
-      fulfilledUsageTopUps: 12,
+      trackedFulfilledUsageTopUps: 12,
     });
     mocks.hostedGrowthDailySnapshot.upsert.mockResolvedValueOnce(
       snapshotRow("2026-07-06", 2_900),
@@ -508,10 +508,10 @@ describe("hosted ops growth metrics", () => {
       /Weekly active member growth<\/div><div[^>]*>\+100%<\/div><div[^>]*>6 direct members messaged<\/div>/u,
     );
     expect(markup).toMatch(
-      /Fulfilled top-ups · lifetime<\/span><span[^>]*>12<\/span>/u,
+      /Tracked fulfilled top-ups<\/span><span[^>]*>12<\/span>/u,
     );
     expect(markup).toMatch(
-      /Fulfilled usage top-ups \(lifetime\)<\/td><td[^>]*>12<\/td><td[^>]*>One-time<\/td>/u,
+      /Tracked fulfilled usage top-ups<\/td><td[^>]*>12<\/td><td[^>]*>One-time<\/td>/u,
     );
     expect(mocks.hostedMemberBillingRef.findMany.mock.calls[0]?.[0]).toMatchObject({
       select: {
@@ -630,7 +630,7 @@ describe("hosted ops growth metrics", () => {
       .mockResolvedValueOnce(6)
       .mockResolvedValueOnce(3);
     mocks.hostedGrowthAggregate.findUniqueOrThrow.mockResolvedValueOnce({
-      fulfilledUsageTopUps: 12,
+      trackedFulfilledUsageTopUps: 12,
     });
     mocks.hostedMember.findMany.mockResolvedValueOnce([]);
     mocks.hostedMemberBillingRef.findMany.mockResolvedValueOnce([]);
@@ -646,11 +646,11 @@ describe("hosted ops growth metrics", () => {
       wowPercent: 100,
     });
     expect(dashboard.usageTopUps).toEqual({
-      totalFulfilled: 12,
+      trackedFulfilled: 12,
     });
     expect(mocks.hostedGrowthAggregate.findUniqueOrThrow).toHaveBeenCalledWith({
       select: {
-        fulfilledUsageTopUps: true,
+        trackedFulfilledUsageTopUps: true,
       },
       where: {
         id: "global",
@@ -699,7 +699,7 @@ describe("hosted ops growth metrics", () => {
         .mockResolvedValueOnce(7)
         .mockResolvedValueOnce(7);
       mocks.hostedGrowthAggregate.findUniqueOrThrow.mockResolvedValueOnce({
-        fulfilledUsageTopUps: 12,
+        trackedFulfilledUsageTopUps: 12,
       });
       mocks.hostedMember.findMany.mockResolvedValueOnce([]);
       mocks.hostedMemberBillingRef.findMany.mockResolvedValueOnce([]);
@@ -750,7 +750,7 @@ describe("hosted ops growth metrics", () => {
       payingCustomers: 31,
       payingCustomersWowPercent: 6.9,
       trialStarts: { trailing7Days: 11, wowPercent: 10 },
-      usageTopUps: { totalFulfilled: 12 },
+      usageTopUps: { trackedFulfilled: 12 },
     };
     const markup = renderToStaticMarkup(
       createElement(GrowthScorecard, {
@@ -777,7 +777,8 @@ describe("hosted ops growth metrics", () => {
     );
     expect(targetHitMarkup).toMatch(/text-primary[^>]*>\+10%/u);
     expect(targetHitMarkup).toContain("10% target hit");
-    expect(targetHitMarkup).toContain("Fulfilled top-ups · lifetime");
+    expect(targetHitMarkup).toContain("Tracked fulfilled top-ups");
+    expect(targetHitMarkup).toContain("Retained history + new fulfillments");
     expect(targetHitMarkup).toContain(">12<");
 
     const roundedTargetHitMarkup = renderToStaticMarkup(

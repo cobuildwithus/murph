@@ -1208,10 +1208,12 @@ model HostedGrowthDailySnapshot {
 }
 
 /// Anonymous company-wide growth totals that must outlive member-scoped rows.
-/// The database constrains this model to one `global` row.
+/// The top-up total starts from retained rows at tracker cutover; it is not a
+/// complete pre-cutover purchase ledger. The database constrains this model to
+/// one `global` row.
 model HostedGrowthAggregate {
-  id                       String @id @db.VarChar(32)
-  fulfilledUsageTopUps     Int    @default(0) @map("fulfilled_usage_top_ups")
+  id                          String @id @db.VarChar(32)
+  trackedFulfilledUsageTopUps Int    @default(0) @map("tracked_fulfilled_usage_top_ups")
 
   @@map("hosted_growth_aggregate")
 }
