@@ -28,7 +28,9 @@ Edge.
   their assigned tier's recurring seat price. There is no shared Family usage
   pool. A member keeps any higher allowance already granted for an open paid
   period until that period renews; a tier or direct-to-Family billing-mode
-  change still reconciles immediately.
+  change still reconciles immediately. The rollout predeploy migration
+  materializes missing open-period rows at the legacy limit before the new
+  allowance code is promoted and never rewrites existing spend.
 - The active owner may buy one fixed $5, $10, or $25 usage-credit pack for one
   exact active Family member. The owner pays and that member alone receives the
   credit.

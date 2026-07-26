@@ -93,7 +93,11 @@ purchased usage credit do not redefine this catalog-owned allowance.
 An already-open paid period keeps a higher included limit that was granted when
 the period began. The price-derived allowance starts on its next paid period;
 an actual plan, Family tier, or direct-to-Family billing-mode change still
-reconciles during the current period.
+reconciles during the current period. The rollout's predeploy data migration
+materializes a missing legacy-limit row for every open direct or Family paid
+period before the price-derived application code is promoted. It inserts only
+absent current-period rows; existing allowance, spend, and future periods remain
+untouched.
 
 A forecast requires at least 24 hours of counted usage. It is shown only when
 the observed pace projects exhaustion before the current period ends. The
