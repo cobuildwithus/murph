@@ -75,6 +75,11 @@ Updated: 2026-07-26
 - Product-experience review passed with no findings: both provider entry points
   reuse the existing creation owner, and the change adds no interaction,
   permission, continuation, delivery, or recovery concept.
+- Preliminary specialist review returned one accepted coverage finding in the
+  pre-existing paid-plan scope: `invoice.paid` and `invoice.payment_failed`
+  needed direct-to-Family reconciliation regressions. The test-only artifact
+  at index 0 from the Eragon review thread was inspected, path-checked, and
+  applied without production changes.
 
 ## Verification
 
@@ -88,3 +93,6 @@ Updated: 2026-07-26
   suites passed 89/89; Prisma schema validation and agent-docs drift checks
   passed. Canonical diff verification passed in Blacksmith Testbox
   `tbx_01kyerhrtem0ts8jx3q9fwkpwf`.
+- Specialist remediation proof: the focused Stripe billing-events suite passed
+  36/36; canonical diff verification passed with 6,722 hosted Web tests, Web
+  TypeScript, lint with zero errors, dev smoke, and the production build.

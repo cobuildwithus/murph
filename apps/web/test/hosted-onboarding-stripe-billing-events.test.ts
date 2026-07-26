@@ -628,6 +628,80 @@ describe("hosted onboarding stripe billing events", () => {
     expect(mocks.activateHostedMemberForPositiveSourceTx).not.toHaveBeenCalled();
   });
 
+  it("reconciles a direct-to-Family usage handoff from invoice.paid", async () => {
+    mocks.applyHostedFamilyStripeSubscriptionUpdatedTx.mockResolvedValueOnce({
+      activations: [],
+      billingModeChangedMemberIds: ["member_owner"],
+      groupId: "hbag_family",
+    });
+    const tx = {};
+    const subscription = makeStripeSubscription({
+      id: "sub_family",
+      metadata: {
+        accountGroupId: "hbag_family",
+        kind: "hosted_family_plan",
+      },
+    });
+
+    await applyStripeInvoicePaid(
+      makeStripeInvoice({ subscription: subscription.id }),
+      {
+        eventCreatedAt: new Date("2026-04-23T00:00:00.000Z"),
+        occurredAt: "2026-04-23T00:00:00.000Z",
+        sourceEventId: "evt_family_invoice_paid",
+        sourceType: "stripe.invoice.paid",
+      },
+      tx as never,
+      HostedBillingStatus.active,
+      subscription,
+    );
+
+    expect(mocks.reconcileHostedAiUsageGateForBillingModeChangeTx).toHaveBeenCalledWith({
+      memberId: "member_owner",
+      now: new Date("2026-04-23T00:00:00.000Z"),
+      tx,
+    });
+    expect(mocks.findMemberForStripeInvoice).not.toHaveBeenCalled();
+    expect(mocks.writeHostedMemberStripeBillingTx).not.toHaveBeenCalled();
+  });
+
+  it("reconciles a direct-to-Family usage handoff from invoice.payment_failed", async () => {
+    mocks.applyHostedFamilyStripeSubscriptionUpdatedTx.mockResolvedValueOnce({
+      activations: [],
+      billingModeChangedMemberIds: ["member_owner"],
+      groupId: "hbag_family",
+    });
+    const tx = {};
+    const subscription = makeStripeSubscription({
+      id: "sub_family",
+      metadata: {
+        accountGroupId: "hbag_family",
+        kind: "hosted_family_plan",
+      },
+    });
+
+    await applyStripeInvoicePaymentFailed(
+      makeStripeInvoice({ subscription: subscription.id }),
+      {
+        eventCreatedAt: new Date("2026-04-23T00:00:00.000Z"),
+        occurredAt: "2026-04-23T00:00:00.000Z",
+        sourceEventId: "evt_family_invoice_failed",
+        sourceType: "stripe.invoice.payment_failed",
+      },
+      tx as never,
+      HostedBillingStatus.active,
+      subscription,
+    );
+
+    expect(mocks.reconcileHostedAiUsageGateForBillingModeChangeTx).toHaveBeenCalledWith({
+      memberId: "member_owner",
+      now: new Date("2026-04-23T00:00:00.000Z"),
+      tx,
+    });
+    expect(mocks.findMemberForStripeInvoice).not.toHaveBeenCalled();
+    expect(mocks.writeHostedMemberStripeBillingTx).not.toHaveBeenCalled();
+  });
+
   it("prefers configured Pulse prices over stale Edge subscription metadata", async () => {
     vi.stubEnv("HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY", "price_pulse_base");
     vi.stubEnv("HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_EDGE_MONTHLY", "price_edge_base");
