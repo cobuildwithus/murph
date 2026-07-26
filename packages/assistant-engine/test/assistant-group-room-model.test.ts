@@ -124,7 +124,7 @@ test('rejects raw Telegram sender ids and hides identifying stored state', async
     vaultRoot,
   })
   await expect(replaceAssistantGroupRoomModel({
-    body: '## People\n- Sender 1234567890 likes dry rulings.',
+    body: '## People\n- Sender: 456 likes dry rulings.',
     expectedDigest: prior.digest,
     vaultRoot,
   })).rejects.toMatchObject({
@@ -139,7 +139,7 @@ test('rejects raw Telegram sender ids and hides identifying stored state', async
     'file path',
   )
   await writeFile(pagePath, buildKnowledgeMarkdown({
-    body: '## People\n- Sender 1234567890 likes dry rulings.',
+    body: '## People\n- Sender: 456 likes dry rulings.',
     compiledAt: '2026-07-25T00:00:00.000Z',
     librarySlugs: [],
     pageType: ASSISTANT_GROUP_ROOM_MODEL_PAGE_TYPE,

@@ -158,7 +158,7 @@ describe('authenticated group room-model tool', () => {
     for (const body of [
       '# Group room model',
       '## People\n- Casey (`+15550000001`) likes dry rulings.',
-      '## People\n- Sender 1234567890 likes dry rulings.',
+      '## People\n- Sender: 456 likes dry rulings.',
     ]) {
       const rejected = await executeRequest({
         args: {
@@ -325,7 +325,7 @@ describe('authenticated group room-model tool', () => {
       managedMaintenanceAuthorized: true,
       request: requireGroupRoomModelRequest({
         action: 'upsert',
-        body: '## People\n- Sender 1234567890 likes dry rulings.',
+        body: '## People\n- Sender: 456 likes dry rulings.',
         expectedDigest: (
           JSON.parse(current.rpcResult.contentItems[0]!.text) as {
             digest: string
@@ -404,7 +404,7 @@ describe('authenticated group room-model tool', () => {
         title: 'Group room model',
       }),
       buildKnowledgeMarkdown({
-        body: '## People\n- Sender 1234567890 likes dry rulings.',
+        body: '## People\n- Sender: 456 likes dry rulings.',
         compiledAt: '2026-07-25T00:00:00.000Z',
         librarySlugs: [],
         pageType: ASSISTANT_GROUP_ROOM_MODEL_PAGE_TYPE,
