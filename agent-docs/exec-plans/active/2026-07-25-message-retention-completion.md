@@ -119,6 +119,14 @@ Updated: 2026-07-25
   the PR to a partial guarantee.
 - Treat the round-2 `RETROSPECTIVE_REQUIRED` result as the governing redesign
   checkpoint; do not add another isolated carrier patch.
+- Accept all three preliminary specialist coverage findings. The returned
+  artifact touched tests/direct-proof scaffolding only and passed full hunk
+  inspection plus `git apply --check`; retain terminal conversation IDs in the
+  checkpoint until the server acknowledgement floor advances while asserting
+  that background selection treats their durable suppression as non-runnable.
+- Re-baseline the hosted runner's entry, static-closure, and total byte guards
+  to the measured retention-capable graph. Keep the existing small-growth
+  tolerances and all forbidden-subsystem markers unchanged.
 
 ## Verification
 
@@ -128,8 +136,17 @@ Updated: 2026-07-25
   - Assistant Runtime: 76 files passed; 1,857 tests passed, 2 skipped.
   - Inbox: 24 files passed; 220 tests passed, 3 skipped.
   - Focused Web retention owners: 134 tests passed.
+  - Preliminary `completion-specialists` ReviewGPT: prompt and frontend lenses
+    not applicable; three medium coverage findings accepted and resolved.
+  - Specialist focused proof: Assistant Engine input replay 40 tests passed;
+    Assistant Runtime selection/wake integration 58 tests passed; Web migration
+    inventory 5 tests passed.
   - Isolated local-Postgres migration and Assistant Ask retention proof:
-    2 tests passed after all migrations applied.
+    3 tests passed after all 122 migrations applied, including real snapshot
+    re-arming and sidecar deletion.
+  - Exact hosted-local runner assembly passed with entry 1,657,027 bytes,
+    static boot closure 7,882,562 bytes, and total output 9,605,653 bytes inside
+    the reviewed guards.
   - Scenario-manifest integrity: 204 scenarios, 11 sample inputs, and 28
     golden-output directories passed.
   - Production-path checkpoint/restore regression proves the retained unique
@@ -140,7 +157,6 @@ Updated: 2026-07-25
     an unrelated current-`main` CLI audit mismatch: its unchanged test expects
     wording no longer present in the unchanged ReviewGPT prompt.
 - Remaining completion gates:
-  - Preliminary `completion-specialists` ReviewGPT pass and finding triage.
   - Parent final review and `pnpm verify:acceptance`.
   - `scripts/finish-task`, final pushed-head ReviewGPT, CI, and clean-merge
     proof.

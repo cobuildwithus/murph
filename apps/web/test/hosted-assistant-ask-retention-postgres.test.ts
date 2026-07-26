@@ -68,7 +68,7 @@ describe.skipIf(!runPostgresProof)(
             lane: "system",
             laneSeq: 1n,
             occurredAt: new Date("2026-07-16T12:00:00.000Z"),
-            payloadInlineCiphertext: "encrypted-request-fixture",
+            payloadRef: `hosted-mailbox-payload:${requestId}`,
             payloadSchema: "hosted.execution.wake.v1",
             userId: memberId,
           },
@@ -85,6 +85,15 @@ describe.skipIf(!runPostgresProof)(
             userId: memberId,
           },
         ],
+      });
+
+      await client.hostedMailboxPayload.create({
+        data: {
+          mailboxItemId: requestId,
+          payloadCiphertext: "encrypted-request-sidecar-fixture",
+          payloadSchema: "hosted.execution.wake.v1",
+          userId: memberId,
+        },
       });
 
       await expect(client.hostedMailboxItem.count({
@@ -112,6 +121,9 @@ describe.skipIf(!runPostgresProof)(
           payloadRef: null,
         }),
       ]));
+      await expect(client.hostedMailboxPayload.count({
+        where: { mailboxItemId: requestId },
+      })).resolves.toBe(0);
 
       const delivery = {
         answeredMailboxItemIds: [completionId],

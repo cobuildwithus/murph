@@ -48,9 +48,17 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // 32KB allowance for small reviewed additions. An exact measured ceiling was
 // tried and reverted: it left zero slack, so an unrelated prompt change on main
 // broke assembly. Do not restore the former 250KB operational growth allowance.
-const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_526_767 + 32_768;
-const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_591_691;
-const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 7_774_000;
+//
+// Entry baseline raised 2026-07-25 for the hosted message-content retention
+// owner. Its mailbox, pending-input, transcript, and inbox cleanup paths are
+// intentionally reachable from idle maintenance. The entry measured 1,649,331B
+// in CI; full local assembly measured 9,605,653B total and a 7,882,562B static
+// closure. No forbidden subsystem entered the boot graph; the markers below
+// remain the guard against that regression, while the existing tolerances cover
+// ordinary small authored-code growth.
+const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_605_653 + 32_768;
+const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_649_331;
+const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 7_882_562;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES = 48_000;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_TOLERANCE_BYTES = 96_000;
 // The @murphai package markers are path suffixes, not node_modules-anchored:

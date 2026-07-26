@@ -463,6 +463,41 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     });
   });
 
+  it("schedules pending assistant input content on the shared retention wake", async () => {
+    runHostedPendingAssistantInputContentRetention.mockResolvedValue({
+      inputsRetired: 0,
+      inputsSuppressed: 0,
+      nextEligibleAt: "2026-07-08T00:00:00.000Z",
+    });
+    compactWarmCodexThread.mockResolvedValue({
+      kind: "skipped",
+      reason: "below_threshold",
+      threadContextTokensBefore: 20_000,
+    });
+
+    const outcome = await runHostedIdleCheckpointMaintenance({
+      credentialSource: "platform",
+      memberId: "member_1",
+      model: "gpt-5.6-terra",
+      providerName: "hosted-openai",
+      pendingWork: false,
+      recordUsage: null,
+      resolveAssistantSessionId: null,
+      shutdownSignal: null,
+      vaultRoot: "/vault",
+      wakeSignal: null,
+    });
+
+    expect(runHostedPendingAssistantInputContentRetention).toHaveBeenCalledWith({
+      signal: expect.any(AbortSignal),
+      vaultRoot: "/vault",
+    });
+    expect(outcome).toMatchObject({
+      nextWakeAt: "2026-07-08T00:00:00.000Z",
+      nextWakeReason: "inbox_media_retention",
+    });
+  });
+
   it("schedules captureless transcript content on the shared retention wake", async () => {
     runAssistantTranscriptContentRetention.mockResolvedValue({
       entriesRedacted: 0,
