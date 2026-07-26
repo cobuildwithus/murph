@@ -7,6 +7,7 @@ import {
 } from "@murphai/assistant-engine/assistant-skill-assets";
 import {
   buildMurphGroupReadPermissionProfileTomlLines,
+  buildMurphGroupRoomModelMaintenancePermissionProfileTomlLines,
 } from "@murphai/hosted-execution/assistant-permissions";
 import {
   HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV,
@@ -567,6 +568,7 @@ export function buildHostedCodexConfigToml(input: {
     "",
     ...providerConfigLines,
     ...buildMurphGroupReadPermissionProfileTomlLines(),
+    ...buildMurphGroupRoomModelMaintenancePermissionProfileTomlLines(),
     "# Hosted runs should not perform Codex plugin marketplace or remote plugin",
     "# sync work on cold wake; Murph owns the hosted runtime tool surface.",
     "[features]",

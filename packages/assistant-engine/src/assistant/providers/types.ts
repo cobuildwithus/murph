@@ -124,6 +124,7 @@ export interface AssistantProviderTurn {
   environments?: readonly Readonly<Record<string, unknown>>[] | null
   env?: NodeJS.ProcessEnv
   generatedImageUploader?: AssistantHostedGeneratedImageUploader | null
+  groupRoomModelMaintenanceAuthorized?: boolean | null
   onFinishWithoutReplyAccepted?: ((
     event: AssistantProviderFinishWithoutReplyAcceptedEvent
   ) => Promise<void> | void) | null
@@ -138,8 +139,10 @@ export interface AssistantProviderTurn {
   prompt?: string | null
   productFeedbackRecorder?: AssistantTurnProductFeedbackRecorder | null
   providerThreadEphemeral?: boolean | null
+  permissions?: string | null
   processLifetime?: 'one-shot' | null
   publicInternetFetch?: typeof fetch | null
+  runtimeWorkspaceRoots?: readonly string[] | null
   requireGeneratedImageUploader?: boolean | null
   resume?: AssistantProviderCodexResume | null
   serviceTier?: AssistantProviderServiceTier | null
