@@ -272,8 +272,20 @@ export function ShareResultsCardPanel({
   shareError,
   title,
 }: ShareResultsCardPanelProps) {
+  const previewAnnouncement =
+    previewStatus === "ready"
+      ? canNativeShare
+        ? "Private preview ready. Share and download actions are available."
+        : "Private preview ready. Download is available."
+      : previewStatus === "error"
+        ? "Preview unavailable. Try preparing the image again."
+        : "Preparing private preview.";
+
   return (
     <>
+      <p className="sr-only" role="status" aria-atomic="true">
+        {previewAnnouncement}
+      </p>
       <div className="overflow-hidden rounded-xl border border-border bg-muted/50">
         {previewUrl ? (
           // eslint-disable-next-line @next/next/no-img-element -- private object URL preview
@@ -283,7 +295,9 @@ export function ShareResultsCardPanel({
             className="block aspect-[1200/780] w-full object-cover"
           />
         ) : previewStatus === "error" ? (
-          <div className="flex aspect-[1200/780] flex-col items-center justify-center gap-3 px-8 text-center">
+          <div
+            className="flex aspect-[1200/780] flex-col items-center justify-center gap-3 px-8 text-center"
+          >
             <p className="text-sm font-medium text-foreground">
               Preview unavailable
             </p>
@@ -296,10 +310,7 @@ export function ShareResultsCardPanel({
             </Button>
           </div>
         ) : (
-          <div
-            className="flex aspect-[1200/780] items-center justify-center gap-2 text-sm text-muted-foreground"
-            aria-live="polite"
-          >
+          <div className="flex aspect-[1200/780] items-center justify-center gap-2 text-sm text-muted-foreground">
             <Spinner />
             Preparing private preview
           </div>

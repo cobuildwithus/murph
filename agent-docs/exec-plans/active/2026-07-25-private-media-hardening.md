@@ -46,12 +46,17 @@ Done:
 - The current Web typecheck reaches an unchanged `origin/main` error in `apps/web/src/lib/hosted-routing/thread-route-store.ts:170`; the task diff does not touch that file.
 - The required product-experience re-review returned `NO FINDINGS`; remaining material proof gaps are the full Telegram orchestration path and real interruption/restart or mutated-artifact orchestration path.
 - Added the ready-but-download-only catalog branch requested by the re-review and captured redacted desktop and mobile design-catalog evidence for ready, unsupported, preparing, preview-recovery, and native-share-recovery states through the repository Playwright runtime.
+- Opened draft PR #966 and completed the exact-head preliminary `completion-specialists` ReviewGPT pass with all prompt, frontend, and coverage lenses. It returned three accepted findings and no patch artifact: announce preview failure to assistive technology, prove retry and quiet dismissal transitions, and merge a duplicated OpenClaw progress-command rule.
+- Added `role="status"` to private preview preparation and failure, extended the component proof through failure → retry → ready plus quiet `AbortError` dismissal, and merged the progress-command instruction while preserving scheduled due gating. Scoped Web lint and six component tests pass; the OpenClaw focused canonical owner lane passes.
+- The reviewer-requested Web `test:diff` was attempted but remained queued behind unrelated shared-host verification; the session-owned waiter was stopped, and the required final canonical run remains pending.
+- The accessibility product re-review found that retry completion still lacked an announcement. Replaced conditional status nodes with one persistent atomic polite region whose text transitions through preparing, unavailable, and ready; the retry proof now asserts the ready announcement and the focused Web lane remains green.
+- The final accessibility rerun found and resolved one capability-copy mismatch: ready now announces Share plus Download only when native file sharing is supported, and announces Download alone otherwise. The final narrow product-experience verdict is `NO FINDINGS`.
 
 Now:
-- Commit/push the review candidate and run the preliminary unified prompt/frontend/coverage ReviewGPT pass.
+- Commit and push preliminary remediation, then perform the parent final review.
 
 Next:
-- Resolve preliminary findings, run the parent final review, rerun canonical diff/acceptance verification, and close this plan with `scripts/finish-task`.
+- Run the parent final review, rerun canonical diff/acceptance verification, and close this plan with `scripts/finish-task`.
 - Push the final head, run final ReviewGPT concurrently with CI, and prove merge readiness against current `main`.
 
 Open questions (UNCONFIRMED if needed):

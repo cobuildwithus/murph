@@ -252,6 +252,9 @@ test("keeps native Share hidden when the prepared PNG is not file-shareable", as
       (button) => button.textContent?.trim(),
     )).not.toContain("Share");
     expect(dialog.textContent).toMatch(/Download image/u);
+    expect(dialog.querySelector('[role="status"]')?.textContent).toMatch(
+      /Private preview ready.*Download is available/u,
+    );
     expect(canShare).toHaveBeenCalledOnce();
     expect(nativeShare).not.toHaveBeenCalled();
   } finally {
@@ -259,7 +262,7 @@ test("keeps native Share hidden when the prepared PNG is not file-shareable", as
   }
 });
 
-test("does not expose native Share while the private preview is unavailable", async () => {
+test("announces a private preview failure and recovers through retry", async () => {
   const { ShareResultsCard } = await import(
     "@/src/components/experiments/experiment-detail/share-results-card"
   );
@@ -284,10 +287,32 @@ test("does not expose native Share while the private preview is unavailable", as
 
     const dialog = rendered.container.querySelector('[role="dialog"]');
     assert.ok(dialog);
-    expect(dialog.textContent).toMatch(/Preview unavailable/u);
+    expect(dialog.querySelector('[role="status"]')?.textContent).toMatch(
+      /Preview unavailable/u,
+    );
     expect(Array.from(dialog.querySelectorAll("button")).map(
       (button) => button.textContent?.trim(),
     )).not.toContain("Share");
+
+    const retryButton = Array.from(dialog.querySelectorAll("button")).find(
+      (button) => button.textContent?.trim() === "Try again",
+    );
+    assert.ok(retryButton);
+    await act(async () => {
+      retryButton.dispatchEvent(
+        new rendered.window.Event("click", { bubbles: true }),
+      );
+      await Promise.resolve();
+    });
+    await waitForPreparedPreview(rendered.container);
+
+    expect(mocks.fetch).toHaveBeenCalledTimes(2);
+    expect(dialog.querySelector('[role="status"]')?.textContent).toMatch(
+      /Private preview ready.*Share and download actions are available/u,
+    );
+    expect(Array.from(dialog.querySelectorAll("button")).map(
+      (button) => button.textContent?.trim(),
+    )).toContain("Share");
   } finally {
     await rendered.cleanup();
   }
@@ -335,6 +360,53 @@ test("shows recovery when native file sharing fails for a non-dismissal error", 
       /Sharing couldn't open/u,
     );
     expect(dialog.textContent).toMatch(/download the image/u);
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
+test("keeps native share dismissal quiet while download remains available", async () => {
+  const { ShareResultsCard } = await import(
+    "@/src/components/experiments/experiment-detail/share-results-card"
+  );
+  const rendered = await renderClientComponent(
+    createElement(ShareResultsCard, { cardData }),
+  );
+  const nativeShare = vi.fn().mockRejectedValue(
+    new DOMException("Share dismissed.", "AbortError"),
+  );
+  installNativeFileShare({
+    canShare: vi.fn(() => true),
+    navigator: rendered.window.navigator,
+    share: nativeShare,
+  });
+
+  try {
+    await act(async () => {
+      rendered.button.dispatchEvent(
+        new rendered.window.Event("click", { bubbles: true }),
+      );
+      await Promise.resolve();
+    });
+    await waitForPreparedPreview(rendered.container);
+    const dialog = rendered.container.querySelector('[role="dialog"]');
+    assert.ok(dialog);
+    const shareButton = Array.from(dialog.querySelectorAll("button")).find(
+      (button) => button.textContent?.trim() === "Share",
+    );
+    assert.ok(shareButton);
+
+    await act(async () => {
+      shareButton.dispatchEvent(
+        new rendered.window.Event("click", { bubbles: true }),
+      );
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(nativeShare).toHaveBeenCalledOnce();
+    expect(dialog.querySelector('[role="alert"]')).toBeNull();
+    expect(dialog.textContent).toMatch(/Download image/u);
   } finally {
     await rendered.cleanup();
   }
