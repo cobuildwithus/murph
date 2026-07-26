@@ -1,4 +1,6 @@
 export const MURPH_GROUP_READ_PERMISSION_PROFILE = "murph-group-read" as const;
+export const MURPH_GROUP_ROOM_MODEL_MAINTENANCE_PERMISSION_PROFILE =
+  "murph-group-room-model-maintenance" as const;
 
 export function buildMurphGroupReadPermissionProfileTomlLines(): readonly string[] {
   return [
@@ -17,6 +19,22 @@ export function buildMurphGroupReadPermissionProfileTomlLines(): readonly string
     '"**/.env.*" = "deny"',
     "",
     `[permissions.${MURPH_GROUP_READ_PERMISSION_PROFILE}.network]`,
+    "enabled = false",
+    "",
+  ];
+}
+
+export function buildMurphGroupRoomModelMaintenancePermissionProfileTomlLines(): readonly string[] {
+  return [
+    "# Silent group room-model consolidation uses only its host-owned dynamic tool.",
+    `[permissions.${MURPH_GROUP_ROOM_MODEL_MAINTENANCE_PERMISSION_PROFILE}.filesystem]`,
+    '":minimal" = "read"',
+    "glob_scan_max_depth = 1",
+    "",
+    `[permissions.${MURPH_GROUP_ROOM_MODEL_MAINTENANCE_PERMISSION_PROFILE}.filesystem.":workspace_roots"]`,
+    '"." = "deny"',
+    "",
+    `[permissions.${MURPH_GROUP_ROOM_MODEL_MAINTENANCE_PERMISSION_PROFILE}.network]`,
     "enabled = false",
     "",
   ];
