@@ -99,6 +99,22 @@ scheduled-reminder scenario adds the production-path proof: a real group
 newsletter invokes `read_shared`, wakes from its alarm, and sends only to the
 exact admitted group thread.
 
+Managed group automation coverage is likewise owner-split. Assistant-engine
+reconciliation tests prove default member ownership, explicit group ownership,
+custom unscoped compatibility, and paused wrong-owner archival. Claimed-cron
+tests prove static built-in owner checks run before experiment lifecycle hooks,
+activity evidence, provider/model work, and outbox creation; live route changes
+are rejected again at provider, tool, delivery, and commit boundaries.
+Hosted-execution tests lock the closed activity policy, status-only response,
+and 167/169-hour DST windows. Hosted Web tests prove exact 99/100 canonical
+mailbox semantics, occurrence and commit boundaries, Linq assistant/reaction
+exclusions, Telegram inclusion, exact runtime/route binding, bounded scanning,
+and malformed fail-closed behavior without logging private evidence.
+Cloudflare tests lock the signed status-only port and exact POST allowlist.
+Maintenance-evidence tests prove the eligible recap tail is exact-route,
+occurrence-anchored, bounded, and sender-redacted before the ordinary group
+outbox path.
+
 ## Current CI Workflows
 
 - Linux CI `apps/web verify` invocations default to wrapping the hosted-web production
