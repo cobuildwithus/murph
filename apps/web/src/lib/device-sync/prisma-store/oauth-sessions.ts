@@ -17,32 +17,29 @@ export class PrismaHostedOAuthSessionStore {
   }
 
   async deleteExpiredOAuthStates(now: string): Promise<number> {
-    const expiredStates = await this.prisma.deviceOauthSession.findMany({
+    const pendingStates = await this.prisma.deviceOauthSession.findMany({
       select: {
-        metadataJson: true,
         state: true,
       },
       where: {
         expiresAt: {
           lte: new Date(now),
         },
+        metadataJson: {
+          path: [DEVICE_SYNC_CONNECTION_START_PENDING_STATE_METADATA_KEY],
+          equals: true,
+        },
       },
     });
-    const deletableStates = expiredStates
-      .filter((record) =>
-        toJsonRecord(record.metadataJson)[
-          DEVICE_SYNC_CONNECTION_START_PENDING_STATE_METADATA_KEY
-        ] !== true
-      )
-      .map((record) => record.state);
-
-    if (deletableStates.length === 0) {
-      return 0;
-    }
 
     const result = await this.prisma.deviceOauthSession.deleteMany({
       where: {
-        state: { in: deletableStates },
+        expiresAt: {
+          lte: new Date(now),
+        },
+        ...(pendingStates.length > 0
+          ? { state: { notIn: pendingStates.map((record) => record.state) } }
+          : {}),
       },
     });
     return result.count;
@@ -138,6 +135,16 @@ export class PrismaHostedOAuthSessionStore {
       });
 
       if (!record) {
+        return {
+          status: "missing",
+        };
+      }
+
+      if (
+        toJsonRecord(record.metadataJson)[
+          DEVICE_SYNC_CONNECTION_START_PENDING_STATE_METADATA_KEY
+        ] === true
+      ) {
         return {
           status: "missing",
         };

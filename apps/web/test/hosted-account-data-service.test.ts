@@ -1601,7 +1601,7 @@ describe("deleteHostedAccountData", () => {
     ]);
   });
 
-  it("blocks deletion while an unexpired provider start has not resolved an upstream user", async () => {
+  it("blocks deletion without provider cleanup while an unexpired start may still be running", async () => {
     const deleteOwnerAccount = vi.fn(async () => "absent" as const);
     const deleteCalls: HostedAccountDeletionPrismaDeleteCall[] = [];
     serviceMocks.createHostedDeviceSyncRegistry.mockReturnValue({
@@ -1635,7 +1635,7 @@ describe("deleteHostedAccountData", () => {
       retryable: true,
     });
 
-    expect(deleteOwnerAccount).toHaveBeenCalledWith({ ownerId: "member_123" });
+    expect(deleteOwnerAccount).not.toHaveBeenCalled();
     expect(deleteCalls).not.toContainEqual(expect.objectContaining({
       model: "deviceOauthSession",
     }));
@@ -1659,7 +1659,7 @@ describe("deleteHostedAccountData", () => {
       pendingDeviceConnectionStarts: [
         {
           createdAt: new Date("2026-07-26T12:00:00.000Z"),
-          expiresAt: new Date("2099-07-26T12:30:00.000Z"),
+          expiresAt: new Date("2020-07-26T12:30:00.000Z"),
           provider: "junction",
           state: "pending-junction-start",
           userId: "member_123",

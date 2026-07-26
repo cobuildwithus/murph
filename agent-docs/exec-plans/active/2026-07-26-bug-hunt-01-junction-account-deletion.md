@@ -83,6 +83,11 @@ Updated: 2026-07-26
   table, queue, or reconciler. Only account deletion may resolve and delete a
   Junction user from the Murph owner id; ordinary commit errors must not guess
   that a returned provider user was newly created.
+- Parent review tightened the marker rule: observing or deleting an upstream
+  user does not prove an unexpired provider request has finished. Account
+  deletion therefore fails retryably for every live marker and performs
+  owner-based cleanup only after expiry; exact request-owned cleanup may remove
+  the marker sooner.
 
 ## Verification
 

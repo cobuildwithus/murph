@@ -64,13 +64,6 @@ describe("PrismaHostedOAuthSessionStore.deleteExpiredOAuthStates", () => {
           deleteMany,
           findMany: vi.fn().mockResolvedValue([
             {
-              metadataJson: null,
-              state: "ordinary-expired-state",
-            },
-            {
-              metadataJson: {
-                [DEVICE_SYNC_CONNECTION_START_PENDING_STATE_METADATA_KEY]: true,
-              },
               state: "pending-provider-start",
             },
           ]),
@@ -85,8 +78,11 @@ describe("PrismaHostedOAuthSessionStore.deleteExpiredOAuthStates", () => {
     ).resolves.toBe(1);
     expect(deleteMany).toHaveBeenCalledWith({
       where: {
+        expiresAt: {
+          lte: new Date("2026-04-13T12:30:00.000Z"),
+        },
         state: {
-          in: ["ordinary-expired-state"],
+          notIn: ["pending-provider-start"],
         },
       },
     });
@@ -94,6 +90,24 @@ describe("PrismaHostedOAuthSessionStore.deleteExpiredOAuthStates", () => {
 });
 
 describe("PrismaHostedOAuthSessionStore.consumeOAuthState", () => {
+  it("never exposes a pre-provider lifecycle marker as callback state", async () => {
+    const record = buildOAuthSessionRow({
+      metadataJson: {
+        [DEVICE_SYNC_CONNECTION_START_PENDING_STATE_METADATA_KEY]: true,
+      },
+    });
+    const tx = createTransaction({ record });
+    const store = createStore(tx);
+
+    await expect(
+      store.consumeOAuthState(record.state, record.createdAt.toISOString(), record.provider),
+    ).resolves.toEqual({
+      status: "missing",
+    });
+    expect(tx.deviceOauthSession.updateMany).not.toHaveBeenCalled();
+    expect(tx.deviceOauthSession.deleteMany).not.toHaveBeenCalled();
+  });
+
   it("reports an already-consumed unexpired state as a replay with its stored record", async () => {
     const record = buildOAuthSessionRow({
       consumedAt: new Date("2026-04-13T12:01:00.000Z"),

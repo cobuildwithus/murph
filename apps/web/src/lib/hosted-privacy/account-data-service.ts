@@ -847,39 +847,39 @@ async function resolvePendingDeviceConnectionStartsForAccountDeletion(input: {
     return;
   }
 
-  const registry = createHostedDeviceSyncRegistry(process.env);
+  let registry: ReturnType<typeof createHostedDeviceSyncRegistry> | null = null;
   for (const pendingStart of pendingStarts) {
     const ownerId = pendingStart.userId;
     if (!ownerId) {
       continue;
     }
 
-    const deleteOwnerAccount =
-      registry.get(pendingStart.provider)?.connectionHandler?.deleteOwnerAccount;
-    let cleanupComplete = false;
-    if (deleteOwnerAccount) {
-      try {
-        const result = await deleteOwnerAccount({ ownerId });
-        cleanupComplete = result === "deleted" || pendingStart.expiresAt <= input.now;
-      } catch (error) {
-        throw hostedOnboardingError({
-          code: "ACCOUNT_DELETION_PROVIDER_REVOKE_FAILED",
-          httpStatus: 503,
-          message: "We could not finish disconnecting one of your wearable providers. Retry account deletion, or contact support if it keeps failing.",
-          retryable: true,
-          cause: error,
-        });
-      }
-    } else {
-      cleanupComplete = pendingStart.expiresAt <= input.now;
-    }
-
-    if (!cleanupComplete) {
+    if (pendingStart.expiresAt > input.now) {
       throw hostedOnboardingError({
         code: "ACCOUNT_DELETION_DEVICE_CONNECTION_START_IN_PROGRESS",
         httpStatus: 409,
         message: "A wearable connection is still finishing. Retry account deletion in a moment.",
         retryable: true,
+      });
+    }
+
+    try {
+      registry ??= createHostedDeviceSyncRegistry(process.env);
+      const deleteOwnerAccount =
+        registry.get(pendingStart.provider)?.connectionHandler?.deleteOwnerAccount;
+      if (deleteOwnerAccount) {
+        const result = await deleteOwnerAccount({ ownerId });
+        if (result !== "absent" && result !== "deleted") {
+          throw new TypeError("Provider owner cleanup returned an unsupported result.");
+        }
+      }
+    } catch (error) {
+      throw hostedOnboardingError({
+        code: "ACCOUNT_DELETION_PROVIDER_REVOKE_FAILED",
+        httpStatus: 503,
+        message: "We could not finish disconnecting one of your wearable providers. Retry account deletion, or contact support if it keeps failing.",
+        retryable: true,
+        cause: error,
       });
     }
 
