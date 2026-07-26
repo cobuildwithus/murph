@@ -569,10 +569,10 @@ This rollout has an irreversible transcript cutover and must use two phases:
    its ambiguous-completion recovery requires both a workspace-version advance
    and a changed checkpoint timestamp before it releases a runtime fence.
 2. Before the Web migration, count persisted workspace snapshots and compare
-   the aggregate with the existing hourly retention-cron capacity of 25
-   snapshots plus an explicit signal-failure allowance. Stop if that queue
-   cannot drain safely in the rollout window; do not add a second dispatcher as
-   part of this release.
+   the aggregate with the existing retention-cron capacity of five snapshots
+   per successful hourly run plus an explicit full-run signal-failure
+   allowance. Stop if that queue cannot drain safely in the rollout window; do
+   not add a second dispatcher as part of this release.
 3. Record the verified runner-convergence instant, then deploy Web with the
    additive mailbox retention columns. The phase-one migration re-arms every
    persisted workspace snapshot once, advances the workspace CAS version, and
