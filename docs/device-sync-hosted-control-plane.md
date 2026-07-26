@@ -1,6 +1,6 @@
 # Device Sync Hosted Control Plane
 
-Last verified against repo layout: 2026-07-15
+Last verified against repo layout: 2026-07-26
 
 ## Current split
 
@@ -131,6 +131,8 @@ Postgres should keep only opaque ids, blind indexes, typed summaries, sparse sig
 
 `device_connect_intent` stores short-lived first-party Murph connect claims for hosted assistant-initiated wearable linking. The signed internal connect-link route returns only the first-party `/device/connect/:claim` URL to the runner. Opening that URL requires the authenticated Murph app session for the same member before provider OAuth starts. The provider callback then consumes OAuth state only for that same member. Intent rows must not store raw provider or Junction authorization URLs.
 
+Provider network calls finish before the hosted connection-start transaction begins; Murph does not hold a database transaction or member lock across those calls. After the provider returns, `PrismaDeviceSyncControlPlaneStore.commitConnectionStart` locks the active `hosted_member` row and atomically persists the optional `device_connection` seed plus `device_oauth_session`. Seedless OAuth starts use the same lifecycle fence. If suspension or deletion wins, the local commit rejects; a newly created Junction user is deleted upstream and no Link URL is returned. If start wins, both local rows commit before deletion can acquire the member lock, so deletion observes and removes both.
+
 `device_sync_dirty_connection` is the coalescing point for high-cardinality device webhook backfills. It is keyed by hosted connection ID and tracks `dirty_revision`, `processed_revision`, first/latest dirty timestamps, widened safe windows, compact resource/source counters, and a compact `dirty_resources_json` map. It must not store raw provider request bodies, provider tokens, raw samples, or user-visible health facts. Provider-owned durable webhook work, such as Junction direct data or exact resource/delete/deauthorization jobs needed for later import, is event-triggered work and is stored in `device_sync_dirty_payload` as bounded encrypted/compressed payload rows until the runtime consumes and explicitly acknowledges those row ids.
 
 The companion overnight PRV lane reuses that encrypted payload owner. Its only
@@ -225,7 +227,7 @@ These are the only browser-facing wearable connection start and completion route
 - `GET /api/settings/device-sync/connections/:connectionId/status`
 - `POST /api/settings/device-sync/connections/:connectionId/disconnect`
 
-These are read/manage wearable routes for the hosted settings page. Ordinary reads should come from durable hosted metadata in Postgres. Live execution/runtime inspection belongs only on explicit operational routes.
+These are read/manage wearable routes for the hosted settings page. Ordinary reads should come from durable hosted metadata in Postgres. Live execution/runtime inspection belongs only on explicit operational routes. Ordinary Junction disconnect keeps its per-source semantics and deregisters the currently connected source providers; hosted account deletion is the separate destructive path that deletes the upstream Junction user.
 
 ### Hosted assertion-authenticated browser bridge routes
 

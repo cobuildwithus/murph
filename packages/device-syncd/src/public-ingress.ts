@@ -8,6 +8,11 @@ import {
 } from "./provider-job-definitions.ts";
 import { resolveDeviceProviderConnectionDescriptor } from "@murphai/importers/device-providers/provider-descriptors";
 import {
+  buildCommittedConnectionStartOAuthState,
+  DEVICE_SYNC_SEEDED_CONNECTION_ACCOUNT_ID_STATE_METADATA_KEY,
+  DEVICE_SYNC_SEEDED_CONNECTION_SETUP_EXPIRES_AT_STATE_METADATA_KEY,
+} from "./types.ts";
+import {
   addMilliseconds,
   generateStateCode,
   joinUrl,
@@ -42,7 +47,9 @@ import type {
   HandleOAuthCallbackInput,
   HandleWebhookResult,
   MarkPublicDeviceSyncConnectionSetupFailedResult,
+  OAuthStateRecord,
   ProviderAuthTokens,
+  ProviderConnectionSeed,
   ProviderConnectionResult,
   ProviderBeginConnectionResult,
   PublicDeviceSyncAccount,
@@ -64,12 +71,8 @@ export interface CreateDeviceSyncPublicIngressInput {
 }
 
 const WEBHOOK_TRACE_PROCESSING_TTL_MS = 5 * 60_000;
-const SEEDED_CONNECTION_ACCOUNT_ID_STATE_METADATA_KEY =
-  "__murphSeededConnectionAccountId";
 const SEEDED_CONNECTION_EXTERNAL_ACCOUNT_ID_STATE_METADATA_KEY =
   "__murphSeededConnectionExternalAccountId";
-const SEEDED_CONNECTION_SETUP_EXPIRES_AT_STATE_METADATA_KEY =
-  "__murphSeededConnectionSetupExpiresAt";
 const LEGACY_SEEDED_CONNECTION_UPDATED_AT_STATE_METADATA_KEY =
   "__murphSeededConnectionUpdatedAt";
 const CONNECT_SOURCE_ID_STATE_METADATA_KEY =
@@ -307,9 +310,9 @@ function buildProviderConnectionStateMetadata(
 ): Record<string, unknown> {
   const providerMetadata = { ...metadata };
   delete providerMetadata.ownerId;
-  delete providerMetadata[SEEDED_CONNECTION_ACCOUNT_ID_STATE_METADATA_KEY];
+  delete providerMetadata[DEVICE_SYNC_SEEDED_CONNECTION_ACCOUNT_ID_STATE_METADATA_KEY];
   delete providerMetadata[SEEDED_CONNECTION_EXTERNAL_ACCOUNT_ID_STATE_METADATA_KEY];
-  delete providerMetadata[SEEDED_CONNECTION_SETUP_EXPIRES_AT_STATE_METADATA_KEY];
+  delete providerMetadata[DEVICE_SYNC_SEEDED_CONNECTION_SETUP_EXPIRES_AT_STATE_METADATA_KEY];
   delete providerMetadata[LEGACY_SEEDED_CONNECTION_UPDATED_AT_STATE_METADATA_KEY];
   delete providerMetadata[CONNECT_SOURCE_ID_STATE_METADATA_KEY];
   delete providerMetadata[CONNECT_TARGET_STATE_METADATA_KEY];
@@ -321,9 +324,9 @@ function sanitizeConnectionStateMetadata(
   value: Record<string, unknown> | undefined,
 ): Record<string, unknown> {
   const metadata = sanitizeStoredDeviceSyncMetadata(value ?? {});
-  delete metadata[SEEDED_CONNECTION_ACCOUNT_ID_STATE_METADATA_KEY];
+  delete metadata[DEVICE_SYNC_SEEDED_CONNECTION_ACCOUNT_ID_STATE_METADATA_KEY];
   delete metadata[SEEDED_CONNECTION_EXTERNAL_ACCOUNT_ID_STATE_METADATA_KEY];
-  delete metadata[SEEDED_CONNECTION_SETUP_EXPIRES_AT_STATE_METADATA_KEY];
+  delete metadata[DEVICE_SYNC_SEEDED_CONNECTION_SETUP_EXPIRES_AT_STATE_METADATA_KEY];
   delete metadata[LEGACY_SEEDED_CONNECTION_UPDATED_AT_STATE_METADATA_KEY];
   delete metadata[CONNECT_SOURCE_ID_STATE_METADATA_KEY];
   delete metadata[CONNECT_TARGET_STATE_METADATA_KEY];
@@ -357,7 +360,7 @@ function isBlockedConnectionStateMetadataKey(key: string): boolean {
 function readSeededConnectionAccountId(
   metadata: Record<string, unknown> | undefined,
 ): string | null {
-  const value = metadata?.[SEEDED_CONNECTION_ACCOUNT_ID_STATE_METADATA_KEY];
+  const value = metadata?.[DEVICE_SYNC_SEEDED_CONNECTION_ACCOUNT_ID_STATE_METADATA_KEY];
   return typeof value === "string" ? normalizeString(value) ?? null : null;
 }
 
@@ -371,7 +374,7 @@ function readSeededConnectionExternalAccountId(
 function readSeededConnectionSetupExpiresAt(
   metadata: Record<string, unknown> | undefined,
 ): string | null {
-  const value = metadata?.[SEEDED_CONNECTION_SETUP_EXPIRES_AT_STATE_METADATA_KEY];
+  const value = metadata?.[DEVICE_SYNC_SEEDED_CONNECTION_SETUP_EXPIRES_AT_STATE_METADATA_KEY];
   return typeof value === "string" ? normalizeString(value) ?? null : null;
 }
 
@@ -390,21 +393,6 @@ function readConnectTarget(metadata: Record<string, unknown> | undefined): strin
 function readSourceProviderSlug(metadata: Record<string, unknown> | undefined): string | null {
   const value = metadata?.[SOURCE_PROVIDER_SLUG_STATE_METADATA_KEY];
   return typeof value === "string" ? normalizeString(value) ?? null : null;
-}
-
-function setSeededConnectionStateMetadata(
-  metadata: Record<string, unknown>,
-  account: PublicDeviceSyncAccount,
-): Record<string, unknown> {
-  const setupExpiresAt = normalizeString(account.setupExpiresAt);
-
-  return {
-    ...metadata,
-    [SEEDED_CONNECTION_ACCOUNT_ID_STATE_METADATA_KEY]: account.id,
-    ...(setupExpiresAt
-      ? { [SEEDED_CONNECTION_SETUP_EXPIRES_AT_STATE_METADATA_KEY]: setupExpiresAt }
-      : {}),
-  };
 }
 
 function resolveConnectionSetupPhase(
@@ -572,10 +560,10 @@ export class DeviceSyncPublicIngress {
       sourceProviderSlug: input.sourceProviderSlug ?? null,
     });
 
-    let seededAccount: PublicDeviceSyncAccount | null = null;
+    let connectionSeed: UpsertPublicDeviceSyncConnectionInput | null = null;
     if (started.connectionSeed) {
       validateProviderConnectionCredential(provider, started.connectionSeed.credential);
-      seededAccount = await this.store.upsertConnection({
+      connectionSeed = {
         ownerId: input.ownerId ?? null,
         provider: provider.provider,
         externalAccountId: started.connectionSeed.externalAccountId,
@@ -588,37 +576,36 @@ export class DeviceSyncPublicIngress {
         metadata: started.connectionSeed.metadata ?? {},
         connectedAt: now,
         nextReconcileAt: started.connectionSeed.nextReconcileAt ?? null,
-      });
+      };
     }
 
-    let stateMetadata = buildConnectionStateMetadata({
-      providerMetadata: started.stateMetadata,
-      connectSourceId: input.connectSourceId ?? null,
-      connectTarget: input.connectTarget ?? null,
-      sourceProviderSlug: input.sourceProviderSlug ?? null,
-    });
-    if (seededAccount) {
-      stateMetadata = setSeededConnectionStateMetadata(stateMetadata, seededAccount);
-    }
+    const oauthState: OAuthStateRecord = {
+      state,
+      provider: provider.provider,
+      returnTo,
+      ownerId: input.ownerId ?? null,
+      createdAt: now,
+      expiresAt,
+      metadata: buildConnectionStateMetadata({
+        providerMetadata: started.stateMetadata,
+        connectSourceId: input.connectSourceId ?? null,
+        connectTarget: input.connectTarget ?? null,
+        sourceProviderSlug: input.sourceProviderSlug ?? null,
+      }),
+    };
 
     try {
-      await this.store.createOAuthState({
-        state,
-        provider: provider.provider,
-        returnTo,
-        ownerId: input.ownerId ?? null,
-        createdAt: now,
-        expiresAt,
-        metadata: stateMetadata,
+      await this.commitConnectionStart({
+        connectionSeed,
+        oauthState,
+        provider,
+        now,
       });
     } catch (error) {
-      if (seededAccount) {
-        await this.markSeededConnectionSetupFailed(
+      if (started.connectionSeed) {
+        await this.cleanupRejectedConnectionSeed(
           provider,
-          seededAccount.id,
-          seededAccount.connectedAt,
-          null,
-          now,
+          started.connectionSeed,
           error,
         );
       }
@@ -631,6 +618,46 @@ export class DeviceSyncPublicIngress {
       expiresAt,
       authorizationUrl: started.authorizationUrl,
     };
+  }
+
+  private async commitConnectionStart(input: {
+    connectionSeed: UpsertPublicDeviceSyncConnectionInput | null;
+    now: string;
+    oauthState: OAuthStateRecord;
+    provider: DeviceSyncProvider;
+  }): Promise<void> {
+    const commitConnectionStart = this.store.commitConnectionStart;
+    if (commitConnectionStart) {
+      await commitConnectionStart.call(this.store, {
+        connectionSeed: input.connectionSeed,
+        oauthState: input.oauthState,
+      });
+      return;
+    }
+
+    const seededAccount = input.connectionSeed
+      ? await this.store.upsertConnection(input.connectionSeed)
+      : null;
+    const committedOAuthState = buildCommittedConnectionStartOAuthState(
+      input.oauthState,
+      seededAccount,
+    );
+
+    try {
+      await this.store.createOAuthState(committedOAuthState);
+    } catch (error) {
+      if (seededAccount) {
+        await this.markSeededConnectionSetupFailed(
+          input.provider,
+          seededAccount.id,
+          seededAccount.connectedAt,
+          null,
+          input.now,
+          error,
+        );
+      }
+      throw error;
+    }
   }
 
   async handleOAuthCallback(input: HandleOAuthCallbackInput): Promise<CompleteConnectionResult> {
@@ -1558,6 +1585,29 @@ export class DeviceSyncPublicIngress {
     }
   }
 
+  private async cleanupRejectedConnectionSeed(
+    provider: DeviceSyncProvider,
+    seed: ProviderConnectionSeed,
+    error: unknown,
+  ): Promise<void> {
+    if (!isDeviceSyncError(error) || error.code !== "CONNECTION_OWNER_UNAVAILABLE") {
+      return;
+    }
+
+    const deleteAccount = provider.connectionHandler?.deleteAccount;
+    if (!deleteAccount) {
+      throw deviceSyncError({
+        code: "CONNECTION_START_CLEANUP_UNAVAILABLE",
+        message: "Provider account cleanup is unavailable after connection start was rejected.",
+        retryable: false,
+        httpStatus: 500,
+        cause: error,
+      });
+    }
+
+    await deleteAccount({ externalAccountId: seed.externalAccountId });
+  }
+
   private async cleanupPersistedOAuthConnection(
     provider: DeviceSyncProvider,
     account: PublicDeviceSyncAccount,
@@ -1832,6 +1882,7 @@ export {
 export type {
   BeginConnectionResult,
   ClaimDeviceSyncWebhookTraceInput,
+  CommitPublicDeviceSyncConnectionStartInput,
   CompleteConnectionResult,
   ConsumeOAuthStateResult,
   DeviceConnectionHandler,

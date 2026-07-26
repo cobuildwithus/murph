@@ -147,6 +147,39 @@ export interface OAuthStateRecord {
 }
 
 export type PublicDeviceSyncAccount = DeviceSyncAccountRecord;
+
+export const DEVICE_SYNC_SEEDED_CONNECTION_ACCOUNT_ID_STATE_METADATA_KEY =
+  "__murphSeededConnectionAccountId";
+export const DEVICE_SYNC_SEEDED_CONNECTION_SETUP_EXPIRES_AT_STATE_METADATA_KEY =
+  "__murphSeededConnectionSetupExpiresAt";
+
+export function buildCommittedConnectionStartOAuthState(
+  oauthState: OAuthStateRecord,
+  seededAccount: Pick<PublicDeviceSyncAccount, "id" | "setupExpiresAt"> | null,
+): OAuthStateRecord {
+  if (!seededAccount) {
+    return oauthState;
+  }
+
+  const setupExpiresAt = typeof seededAccount.setupExpiresAt === "string"
+    ? seededAccount.setupExpiresAt.trim()
+    : "";
+
+  return {
+    ...oauthState,
+    metadata: {
+      ...(oauthState.metadata ?? {}),
+      [DEVICE_SYNC_SEEDED_CONNECTION_ACCOUNT_ID_STATE_METADATA_KEY]: seededAccount.id,
+      ...(setupExpiresAt
+        ? {
+            [DEVICE_SYNC_SEEDED_CONNECTION_SETUP_EXPIRES_AT_STATE_METADATA_KEY]:
+              setupExpiresAt,
+          }
+        : {}),
+    },
+  };
+}
+
 export type PublicDeviceConnectionSource = DeviceConnectionSourceRecord;
 export type StoredDeviceConnectionSource = PublicDeviceConnectionSource;
 
@@ -304,6 +337,11 @@ export interface UpsertPublicDeviceSyncConnectionResult {
   previousAccount: PublicDeviceSyncAccount | null;
 }
 
+export interface CommitPublicDeviceSyncConnectionStartInput {
+  connectionSeed?: UpsertPublicDeviceSyncConnectionInput | null;
+  oauthState: OAuthStateRecord;
+}
+
 export interface DeviceSyncWebhookTraceRecord {
   provider: string;
   traceId: string;
@@ -358,6 +396,15 @@ export interface DeviceSyncPublicIngressStore {
     expectedOwnerId?: string,
   ): ConsumeOAuthStateResult | Promise<ConsumeOAuthStateResult>;
   upsertConnection(input: UpsertPublicDeviceSyncConnectionInput): PublicDeviceSyncAccount | Promise<PublicDeviceSyncAccount>;
+  /**
+   * Atomically commits one provider connection start. Hosted stores use the
+   * member row as the lifecycle fence and persist the optional provider seed
+   * plus OAuth state in the same transaction, so account deletion either
+   * observes both records or rejects the start before its provider URL returns.
+   */
+  commitConnectionStart?(
+    input: CommitPublicDeviceSyncConnectionStartInput,
+  ): void | Promise<void>;
   upsertConnectionWithPrevious?(
     input: UpsertPublicDeviceSyncConnectionInput,
   ): UpsertPublicDeviceSyncConnectionResult | Promise<UpsertPublicDeviceSyncConnectionResult>;
@@ -741,6 +788,9 @@ export interface DeviceConnectionHandler {
   beginConnection(input: ProviderBeginConnectionContext): Promise<ProviderBeginConnectionResult>;
   completeConnection(input: ProviderCompleteConnectionContext): Promise<ProviderConnectionResult>;
   refreshTokens?(account: DeviceSyncAccount, options?: { signal?: AbortSignal | null }): Promise<ProviderAuthTokens>;
+  /** Destructive provider-user removal for hosted account deletion. */
+  deleteAccount?(account: Pick<DeviceSyncAccount, "externalAccountId">): Promise<void>;
+  /** Ordinary device disconnect; providers may preserve their upstream user. */
   revokeAccess?(account: DeviceSyncAccount): Promise<void>;
 }
 

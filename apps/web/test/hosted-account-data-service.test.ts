@@ -1443,8 +1443,9 @@ describe("deleteHostedAccountData", () => {
     expect(serviceMocks.deleteHostedRunnerUserDataBestEffort).not.toHaveBeenCalled();
   });
 
-  it("revokes provider-config device connections during hosted account deletion", async () => {
+  it("deletes upstream provider-config accounts during hosted account deletion", async () => {
     const order: string[] = [];
+    const deleteAccount = vi.fn();
     const revokeAccess = vi.fn();
     const getStoredConnectionAccountForUser = vi.fn(async () => ({
       accessTokenExpiresAt: null,
@@ -1477,6 +1478,7 @@ describe("deleteHostedAccountData", () => {
     serviceMocks.createHostedDeviceSyncRegistry.mockReturnValue({
       get: vi.fn(() => ({
         connectionHandler: {
+          deleteAccount,
           revokeAccess,
         },
       })),
@@ -1505,15 +1507,11 @@ describe("deleteHostedAccountData", () => {
     });
 
     expect(getStoredConnectionAccountForUser).toHaveBeenCalledWith("member_123", "dsc_junction");
-    expect(revokeAccess).toHaveBeenCalledTimes(1);
-    expect(revokeAccess).toHaveBeenCalledWith(expect.objectContaining({
-      credential: expect.objectContaining({
-        kind: "provider_config",
-        providerConfigKey: "junction",
-      }),
+    expect(deleteAccount).toHaveBeenCalledTimes(1);
+    expect(deleteAccount).toHaveBeenCalledWith(expect.objectContaining({
       externalAccountId: "junction-user-123",
-      provider: "junction",
     }));
+    expect(revokeAccess).not.toHaveBeenCalled();
     expect(order).toEqual(["prisma", "prisma"]);
     expect(result.providerRevocations).toEqual([
       {
@@ -1901,9 +1899,9 @@ describe("deleteHostedAccountData", () => {
     ]);
   });
 
-  it("blocks hosted account deletion when provider-config revocation fails", async () => {
+  it("blocks hosted account deletion when provider account cleanup fails", async () => {
     const order: string[] = [];
-    const revokeAccess = vi.fn(async () => {
+    const deleteAccount = vi.fn(async () => {
       throw Object.assign(new Error("provider secret should not leak"), {
         name: "ProviderRevokeFailed",
       });
@@ -1939,7 +1937,7 @@ describe("deleteHostedAccountData", () => {
     serviceMocks.createHostedDeviceSyncRegistry.mockReturnValue({
       get: vi.fn(() => ({
         connectionHandler: {
-          revokeAccess,
+          deleteAccount,
         },
       })),
     });
@@ -1971,7 +1969,7 @@ describe("deleteHostedAccountData", () => {
     });
 
     expect(getStoredConnectionAccountForUser).toHaveBeenCalledWith("member_123", "dsc_junction");
-    expect(revokeAccess).toHaveBeenCalledTimes(1);
+    expect(deleteAccount).toHaveBeenCalledTimes(1);
     expect(order).toEqual(["prisma"]);
   });
 });

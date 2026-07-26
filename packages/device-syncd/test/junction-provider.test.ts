@@ -5178,6 +5178,40 @@ test("Junction provider revokes remote provider slugs unless Junction already re
   ]);
 });
 
+test("Junction provider account deletion deletes the upstream Junction user", async () => {
+  const requests: Array<{ method: string; url: string }> = [];
+  const provider = createJunctionProvider(async (input, init) => {
+    requests.push({
+      method: String(init?.method ?? "GET"),
+      url: readUrl(input),
+    });
+    return new Response(null, { status: 204 });
+  });
+  const deleteAccount = requireValue(provider.connectionHandler?.deleteAccount);
+
+  await deleteAccount(createAccount());
+
+  assert.deepEqual(requests, [
+    {
+      method: "DELETE",
+      url: "https://api.sandbox.us.junction.com/v2/user/junction-user-1",
+    },
+  ]);
+});
+
+test("Junction provider account deletion treats an absent upstream user as deleted", async () => {
+  const provider = createJunctionProvider(async (input, init) => {
+    assert.equal(String(init?.method ?? "GET"), "DELETE");
+    assert.equal(
+      readUrl(input),
+      "https://api.sandbox.us.junction.com/v2/user/junction-user-1",
+    );
+    return new Response(null, { status: 404 });
+  });
+
+  await requireValue(provider.connectionHandler?.deleteAccount)(createAccount());
+});
+
 test("Junction provider rejects non-Link routes from hosted web Link", () => {
   assert.deepEqual(normalizeJunctionProviderFilter(["oura", "withings"]), ["oura", "withings"]);
 

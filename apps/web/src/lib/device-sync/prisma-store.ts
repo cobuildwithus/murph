@@ -1,7 +1,10 @@
-import { PrismaClient } from "@prisma/client";
+import { PrismaClient, type Prisma } from "@prisma/client";
 
+import { deviceSyncError } from "@murphai/device-syncd/errors";
+import { buildCommittedConnectionStartOAuthState } from "@murphai/device-syncd/types";
 import type {
   ClaimDeviceSyncWebhookTraceInput,
+  CommitPublicDeviceSyncConnectionStartInput,
   ConsumeOAuthStateResult,
   DeviceSyncPublicIngressStore,
   DeviceSyncWebhookTraceClaimResult,
@@ -14,7 +17,9 @@ import type {
 } from "@murphai/device-syncd/types";
 import type { HostedExecutionDeviceSyncStagedDirtyAck } from "@murphai/device-syncd/hosted-runtime";
 import type { HostedDeviceSyncSecretTestCodec } from "./prisma-store/connection-secrets";
+import { isUniqueViolation } from "./prisma-store/prisma-errors";
 import type { HostedLocalHeartbeatPatch } from "./local-heartbeat";
+import { normalizeNullableString } from "./shared";
 import type { AuthenticatedHostedUser, HostedBrowserAssertionNonceStore } from "./auth";
 import { PrismaHostedAgentSessionStore } from "./prisma-store/agent-sessions";
 import { PrismaHostedBrowserAssertionNonceStore } from "./prisma-store/browser-assertion-nonces";
@@ -152,6 +157,53 @@ export class PrismaDeviceSyncControlPlaneStore
 
   async upsertConnection(input: UpsertPublicDeviceSyncConnectionInput): Promise<PublicDeviceSyncAccount> {
     return this.connections.upsertConnection(input);
+  }
+
+  async commitConnectionStart(
+    input: CommitPublicDeviceSyncConnectionStartInput,
+  ): Promise<void> {
+    try {
+      await this.commitConnectionStartOnce(input);
+    } catch (error) {
+      if (!input.connectionSeed || !isUniqueViolation(error)) {
+        throw error;
+      }
+
+      await this.commitConnectionStartOnce(input);
+    }
+  }
+
+  private async commitConnectionStartOnce(
+    input: CommitPublicDeviceSyncConnectionStartInput,
+  ): Promise<void> {
+    const ownerId = requireHostedConnectionStartOwnerId(input.oauthState.ownerId);
+    const connectionSeed = input.connectionSeed ?? null;
+
+    if (
+      connectionSeed
+      && normalizeNullableString(connectionSeed.ownerId) !== ownerId
+    ) {
+      throw deviceSyncError({
+        code: "CONNECTION_OWNER_MISMATCH",
+        message: "Device-sync connection seed and OAuth state owners must match.",
+        retryable: false,
+        httpStatus: 400,
+      });
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      await lockActiveHostedConnectionStartOwnerTx(tx, ownerId);
+
+      const seededAccount = connectionSeed
+        ? await this.connections.upsertConnectionTx(tx, connectionSeed)
+        : null;
+      const oauthState = buildCommittedConnectionStartOAuthState(
+        { ...input.oauthState, ownerId },
+        seededAccount,
+      );
+
+      await this.oauthSessions.createOAuthState(oauthState, tx);
+    });
   }
 
   async upsertConnectionWithPrevious(
@@ -464,4 +516,40 @@ export class PrismaDeviceSyncControlPlaneStore
     });
   }
 
+}
+
+function requireHostedConnectionStartOwnerId(ownerId: string | null | undefined): string {
+  const normalizedOwnerId = normalizeNullableString(ownerId);
+
+  if (!normalizedOwnerId) {
+    throw deviceSyncError({
+      code: "CONNECTION_OWNER_REQUIRED",
+      message: "Hosted device-sync connections must be initiated by an authenticated Murph user.",
+      retryable: false,
+      httpStatus: 400,
+    });
+  }
+
+  return normalizedOwnerId;
+}
+
+async function lockActiveHostedConnectionStartOwnerTx(
+  prisma: Prisma.TransactionClient,
+  ownerId: string,
+): Promise<void> {
+  const rows = await prisma.$queryRaw<Array<{ active: boolean }>>`
+    SELECT suspended_at IS NULL AS active
+    FROM hosted_member
+    WHERE id = ${ownerId}
+    FOR UPDATE
+  `;
+
+  if (rows[0]?.active !== true) {
+    throw deviceSyncError({
+      code: "CONNECTION_OWNER_UNAVAILABLE",
+      message: "Device sync connections are unavailable for this Murph account.",
+      retryable: false,
+      httpStatus: 403,
+    });
+  }
 }

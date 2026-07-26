@@ -1,6 +1,6 @@
 # Hosted account data deletion and vault export
 
-Last verified: 2026-07-16
+Last verified: 2026-07-26
 
 ## Purpose
 
@@ -60,9 +60,9 @@ The Settings vault export does not include:
 `deleteHostedAccountData` performs deletion in this order:
 
 1. Load the hosted member, decrypted Stripe/Privy vendor account references, and device connection identities.
-2. Suspend the hosted member for account deletion, then best-effort terminate the per-user hosted Temporal runtime workflow with reason `account-deleted` before provider revocation, billing cancellation, or local row deletion starts.
+2. Suspend the hosted member for account deletion, then best-effort terminate the per-user hosted Temporal runtime workflow with reason `account-deleted` before provider revocation, billing cancellation, or local row deletion starts. Hosted connection starts commit their optional connection seed and OAuth state together under this same member-row lifecycle lock, so a start either commits both before suspension or rejects without recreating either row afterward.
 3. Process one bounded Retell cleanup batch containing every durable provider call id, including terminal calls. Active calls are stopped before their provider objects are deleted. A confirmed deletion or confirmed absence clears the local provider id; any ambiguous provider or local-write failure retains the row and id for retry and aborts account deletion. Unbound active reservations are reconciled by their Murph call metadata, and the final Prisma transaction rechecks that no provider id or active reservation remains.
-4. Revoke wearable/device provider access with the existing device-sync provider `revokeAccess` hook before local device rows are deleted. Junction-routed Garmin and other Junction sources are deregistered through Junction when configured; providers without a revocation hook remain local-reference deletion only.
+4. Remove wearable/device provider access before local device rows are deleted. Account deletion uses a provider's destructive `deleteAccount` hook when available and otherwise falls back to `revokeAccess`. Junction account deletion calls `DELETE /v2/user/:userId` and treats an already-missing user as deleted; ordinary device disconnect remains per-source deregistration. Providers without either hook remain local-reference deletion only.
 5. Cancel the Stripe subscription fail-closed: a cancel failure or a missing Stripe client while a subscription reference exists aborts deletion with a structured error. An already-canceled or missing subscription counts as done.
 6. Cancel any Family plan Stripe subscriptions owned by the member before local Family group rows are removed. A family cancel failure also aborts deletion fail-closed.
 7. Delete Kernel browser sessions, every Managed Auth connection for the member's profile, and the profile before deleting Prisma-hosted account rows in a transaction. Inside that transaction, delete usage-credit ledger entries before their purchase rows and delete both before the hosted member row so the financial-record foreign keys fail closed instead of relying on cascades.
@@ -105,12 +105,12 @@ The Settings vault export does not include:
 | `prisma.hosted_invite` | Live delete | Metadata/counts | Deletes invite codes and channel metadata owned by the member. |
 | `prisma.hosted_consent_event` | Live delete | Confirmed data export | Deletes member-scoped consent event history. Confirmed export includes event scope/source/action and document metadata. |
 | `prisma.hosted_consent_grant` | Live delete | Confirmed data export | Deletes member-scoped consent grant state. Confirmed export includes grant scope/source/status and document metadata. |
-| `prisma.device_connection` | Live delete | Metadata/counts | Revokes providers where possible, then deletes connection rows and encrypted token bundles. |
+| `prisma.device_connection` | Live delete | Metadata/counts | Provider cleanup runs first; Junction deletes the upstream user for account deletion while ordinary disconnect remains per-source. The member-row start fence makes a committed seed visible before these rows and encrypted token bundles are deleted. |
 | `prisma.device_sync_companion_capture_receipt` | Live delete | Metadata/counts | Deletes bounded operational replay receipts, identified by connection and source night with an envelope hash, before connection rows. Receipts expire after 30 days and are capped at 64 per connection. |
 | `prisma.device_token_audit` | Live delete | Metadata/counts | Deletes token audit history. |
 | `prisma.device_sync_signal` | Live delete | Metadata/counts | Deletes pre-existing wake/sync signals. Deletion-time provider revocation does not enqueue new disconnect or wake work. |
 | `prisma.device_connect_intent` | Live delete | Metadata/counts | Deletes short-lived hosted device connect intents. Export reports safe metadata only and omits assertion/nonces and routing internals. |
-| `prisma.device_oauth_session` | Live delete | Metadata/counts | Deletes pending provider OAuth state. |
+| `prisma.device_oauth_session` | Live delete | Metadata/counts | Deletes pending provider OAuth state. Hosted starts persist this row atomically with any connection seed under the member lifecycle lock, including seedless OAuth starts, so deletion cannot be followed by a late state recreation. |
 | `prisma.device_agent_session` | Live delete | Metadata/counts | Deletes local agent bearer-token hashes and agent session metadata. |
 | `prisma.device_browser_assertion_nonce` | Live delete | Metadata/counts | Deletes outstanding browser assertion nonces. |
 | `prisma.clinical_record_connect_intent` | Live delete | Metadata/counts | Deletes short-lived member-bound Clinical Records claims; raw claims are never stored or exported. |
@@ -124,7 +124,7 @@ The Settings vault export does not include:
 | `cloudflare.runner_durable_object` | Best-effort delete | Documented only | Hosted execution control clears user runner SQL state and alarms when configured. |
 | `cloudflare.r2_user_artifacts` | Best-effort delete | Documented only | Hosted execution control deletes opaque user bundle, artifact, browser vault replica, runner-secret, and raw-email objects when web-hosted domain root context is available. Root envelopes are canonical in web Postgres. |
 | `temporal.per_user_runtime_workflow` | Best-effort delete | Documented only | Account deletion terminates the per-user hosted Temporal runtime workflow before local deletion starts, after the Prisma deletion commits, and after Cloudflare cleanup, stopping live writers before row deletion and neutralizing sleeping wake flags and runtime-result wake state. |
-| `providers.oura_whoop_strava` | Best-effort delete | Metadata/counts | Existing provider revocation hooks run before local token deletion. Provider-side retention remains provider-controlled. |
+| `providers.oura_whoop_strava` | Best-effort delete | Metadata/counts | Uses destructive provider-account deletion where configured, including the Junction user delete, and otherwise falls back to ordinary provider revocation before local token deletion. Provider-side retention remains provider-controlled. |
 | `providers.linq_telegram_email_messages` | Local reference delete | Metadata/counts | Deletes Murph-hosted mailbox and routing records; external carrier, Telegram, Linq, and email-provider copies are outside this endpoint. |
 | `providers.stripe_privy` | Best-effort delete | Documented only | Cancels the Stripe subscription before local deletion (fail-closed), then deletes the Stripe customer and Privy user best-effort after the local wipe. Outcomes are reported in the deletion result. |
 | `backups` | Documented retention | Documented only | Live data is deleted immediately. Backup copies age out under infrastructure retention and must not be restored except under documented recovery controls. |

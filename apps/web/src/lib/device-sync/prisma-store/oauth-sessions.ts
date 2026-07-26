@@ -1,4 +1,4 @@
-import { PrismaClient } from "@prisma/client";
+import { PrismaClient, type Prisma } from "@prisma/client";
 
 import type { ConsumeOAuthStateResult, OAuthStateRecord } from "@murphai/device-syncd/types";
 
@@ -23,8 +23,11 @@ export class PrismaHostedOAuthSessionStore {
     return result.count;
   }
 
-  async createOAuthState(input: OAuthStateRecord): Promise<OAuthStateRecord> {
-    await this.prisma.deviceOauthSession.create({
+  async createOAuthState(
+    input: OAuthStateRecord,
+    prisma: Prisma.TransactionClient | PrismaClient = this.prisma,
+  ): Promise<OAuthStateRecord> {
+    await prisma.deviceOauthSession.create({
       data: {
         state: input.state,
         userId: input.ownerId ?? null,
