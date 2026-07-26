@@ -1,0 +1,59 @@
+name: Port saved-card group funding onto current main
+
+on:
+  pull_request:
+    branches:
+      - agent/saved-card-funding-port-runner
+
+permissions:
+  contents: write
+
+jobs:
+  port:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/reuse-saved-card-for-group-funding-v2
+          fetch-depth: 0
+      - name: Port the reviewed feature diff
+        id: port
+        continue-on-error: true
+        shell: bash
+        run: |
+          set +e
+          {
+            git fetch origin \
+              agent/reuse-saved-card-for-group-funding \
+              agent/reuse-saved-card-for-group-funding-v2 \
+              main
+            git diff --binary \
+              2c0c14e3f7ab36aa08326aeb0036b5288f8f4dd6 \
+              1150af88d1fb6dbd26919a642e09e90957f8cd2a \
+              > /tmp/saved-card-group-funding.patch
+            git apply --3way --index /tmp/saved-card-group-funding.patch
+            git diff --cached --check
+          } > /tmp/port.log 2>&1
+          exit_code=$?
+          git status --short >> /tmp/port.log 2>&1
+          echo "exit_code=$exit_code" >> "$GITHUB_OUTPUT"
+          exit 0
+      - name: Upload port diagnostic
+        if: steps.port.outputs.exit_code != '0'
+        uses: actions/upload-artifact@v4
+        with:
+          name: saved-card-group-funding-port-log
+          path: |
+            /tmp/port.log
+            /tmp/saved-card-group-funding.patch
+      - name: Commit ported implementation
+        if: steps.port.outputs.exit_code == '0'
+        shell: bash
+        run: |
+          git config user.name "OpenAI"
+          git config user.email "openai@users.noreply.github.com"
+          git commit -m "feat: reuse saved cards for group funding"
+          git push origin HEAD:agent/reuse-saved-card-for-group-funding-v2
+      - name: Fail when the port did not apply cleanly
+        if: steps.port.outputs.exit_code != '0'
+        run: exit 1
