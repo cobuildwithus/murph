@@ -1785,10 +1785,24 @@ describe("parseHostedRuntimeGroupTool", () => {
     expect(parseHostedRuntimeGroupToolRequest({
       action: "arm_usage_referral",
       policyCode: "active_group_v1",
+      sourceConversation: {
+        channel: "telegram",
+        identityId: null,
+        participantId: null,
+        threadId: `hid_${"a".repeat(32)}`,
+        threadIsDirect: true,
+      },
       telegramSenderHandles: [" 1234567890 "],
     })).toEqual({
       action: "arm_usage_referral",
       policyCode: "active_group_v1",
+      sourceConversation: {
+        channel: "telegram",
+        identityId: null,
+        participantId: null,
+        threadId: `hid_${"a".repeat(32)}`,
+        threadIsDirect: true,
+      },
       telegramSenderHandles: ["1234567890"],
     });
     expect(parseHostedRuntimeGroupToolRequest({
@@ -1803,6 +1817,17 @@ describe("parseHostedRuntimeGroupTool", () => {
       linqSenderHandles: ["+15551110001"],
       telegramSenderHandles: ["1234567890"],
     })).toThrow(/more than one channel/u);
+    expect(() => parseHostedRuntimeGroupToolRequest({
+      action: "arm_usage_referral",
+      policyCode: "active_group_v1",
+      sourceConversation: {
+        channel: "telegram",
+        identityId: null,
+        participantId: null,
+        threadId: "raw-provider-thread",
+        threadIsDirect: true,
+      },
+    })).toThrow(/threadId is invalid/u);
   });
 
   it("parses a closed, canonical read_shared roster and status matrix", () => {

@@ -5,14 +5,11 @@ import {
   buildHostedExecutionAssistantNotificationRequestedWake,
 } from "@murphai/hosted-execution";
 import {
-  buildHostedVaultShareProjectionScopeKey,
-  hostedVaultShareProjectionKindToScope,
-} from "@murphai/hosted-execution/vault-share";
-import {
   HOSTED_USAGE_REFERRAL_POLICY_CODES,
   type HostedRuntimeGroupToolRequest,
   type HostedRuntimeGroupToolResponse,
   type HostedRuntimeUsageReferralSnapshot,
+  type HostedRuntimeUsageReferralSourceConversation,
   type HostedUsageReferralPolicyCode,
 } from "@murphai/hosted-execution/runtime-control";
 
@@ -34,10 +31,7 @@ import {
   createHostedTelegramUserLookupKey,
   parseHostedBlindIndex,
 } from "../hosted-onboarding/contact-privacy";
-import {
-  activeHostedMemberAccessWhere,
-  readActiveHostedMemberAccess,
-} from "../hosted-onboarding/member-access";
+import { readActiveHostedMemberAccess } from "../hosted-onboarding/member-access";
 import {
   resolveHostedMemberRoutingByTelegramUserId,
 } from "../hosted-onboarding/hosted-member-routing-store";
@@ -48,13 +42,8 @@ import {
 import type { HostedWebhookWakeHandoff } from "../hosted-onboarding/webhook-service-types";
 import {
   resolveHostedAssistantNotificationDestination,
+  type HostedAssistantNotificationDestination,
 } from "../hosted-routing/assistant-notification-destination";
-import {
-  decryptHostedVaultShareProjectionSnapshots,
-} from "../hosted-vault-share/projection-snapshot";
-import {
-  parseHostedVaultShareRowProjectionScope,
-} from "../hosted-vault-share/row-projection-scope";
 import { generateHostedRandomPrefixedId } from "../primitives";
 import { getPrisma } from "../prisma";
 
@@ -85,11 +74,6 @@ const EXPECTED_REFERRAL_UNAVAILABLE_ERRORS = new Set([
   "too_many_referrals_in_progress",
   "usage_referral_not_available",
 ]);
-const PROFILE_NAME_SCOPE =
-  hostedVaultShareProjectionKindToScope("profile-name.v0");
-const PROFILE_NAME_SCOPE_KEY =
-  buildHostedVaultShareProjectionScopeKey(PROFILE_NAME_SCOPE);
-
 type HostedUsageReferralClient = PrismaClient | Prisma.TransactionClient;
 
 type HostedUsageReferralPolicyDefinition = {
@@ -285,6 +269,7 @@ export async function handleHostedUsageReferralGroupTool(input: {
             where: { id: current.id },
             data: {
               ...CLEARED_REFERRAL_EVIDENCE,
+              sourceConversationJson: Prisma.DbNull,
               status: "canceled",
               terminalAt: now,
               terminalReason: "referrer_canceled",
@@ -318,6 +303,22 @@ export async function handleHostedUsageReferralGroupTool(input: {
     }
 
     const policy = POLICIES[input.request.policyCode];
+    const personalSource =
+      actor.beneficiaryMemberId === actor.referrerMemberId;
+    const sourceConversation = personalSource
+      ? readHostedUsageReferralSourceConversation(
+          input.request.sourceConversation ?? null,
+        )
+      : null;
+    if (
+      personalSource
+      && (!sourceConversation || sourceConversation.threadIsDirect !== true)
+    ) {
+      return unavailableToolResponse(
+        input.request.action,
+        "usage_referral_not_available",
+      );
+    }
     const availablePolicyCodes =
       await readHostedUsageReferralAvailablePolicyCodes({
         actor,
@@ -384,6 +385,7 @@ export async function handleHostedUsageReferralGroupTool(input: {
         },
         data: {
           ...CLEARED_REFERRAL_EVIDENCE,
+          sourceConversationJson: Prisma.DbNull,
           status: "superseded",
           terminalAt: now,
           terminalReason: "newer_referral_armed",
@@ -408,6 +410,17 @@ export async function handleHostedUsageReferralGroupTool(input: {
           referrerMemberId: actor.referrerMemberId,
           referrerSubjectKey: actor.referrerSubjectKey,
           rewardUsdMicros: policy.rewardUsdMicros,
+          ...(sourceConversation
+            ? {
+                sourceConversationJson: {
+                  channel: sourceConversation.channel,
+                  identityId: sourceConversation.identityId,
+                  participantId: sourceConversation.participantId,
+                  threadId: sourceConversation.threadId,
+                  threadIsDirect: sourceConversation.threadIsDirect,
+                },
+              }
+            : {}),
           status: "armed",
         },
       });
@@ -560,15 +573,8 @@ export async function observeHostedUsageReferralInboundTx(input: {
     };
   }
   if (input.occurredAt >= referral.expiresAt) {
-    await terminateHostedUsageReferralTx({
-      referralId: referral.id,
-      reason: "expired",
-      status: "expired",
-      terminalAt: input.occurredAt,
-      tx: input.tx,
-    });
     return {
-      isBoundReferralTarget: false,
+      isBoundReferralTarget: true,
       qualificationCandidateReferralId: null,
     };
   }
@@ -856,6 +862,7 @@ async function appendHostedUsageReferralCelebration(input: {
       policyCode: true,
       referrerMemberId: true,
       rewardedAt: true,
+      sourceConversationJson: true,
       status: true,
     },
   });
@@ -869,62 +876,65 @@ async function appendHostedUsageReferralCelebration(input: {
     return null;
   }
   const rewardedAt = referral.rewardedAt;
+  const personalSource =
+    referral.referrerMemberId === referral.beneficiaryMemberId;
+  const sourceConversation = personalSource
+    ? readHostedUsageReferralSourceConversation(
+        referral.sourceConversationJson,
+      )
+    : null;
+  if (personalSource && !sourceConversation) {
+    await rotateHostedUsageReferralCelebrationRetry({
+      prisma: input.prisma,
+      referralId: input.referralId,
+    });
+    return null;
+  }
   const destination = await resolveHostedAssistantNotificationDestination({
+    ...(sourceConversation
+      ? { directChannel: sourceConversation.channel }
+      : {}),
     memberId: input.beneficiaryMemberId,
     prisma: input.prisma,
   });
-  if (!destination) {
-    await input.prisma.hostedUsageReferral.updateMany({
-      data: { updatedAt: new Date() },
-      where: {
-        celebrationQueuedAt: null,
-        id: input.referralId,
-        status: "rewarded",
-      },
+  if (
+    !destination
+    || (
+      sourceConversation
+      && !hostedUsageReferralDestinationMatchesSourceConversation({
+        destination,
+        sourceConversation,
+      })
+    )
+  ) {
+    await rotateHostedUsageReferralCelebrationRetry({
+      prisma: input.prisma,
+      referralId: input.referralId,
     });
     return null;
   }
 
   const policy = POLICIES[referral.policyCode];
-  const referrerDisplayName = referral.referrerMemberId
-    ? await readAuthorizedReferralReferrerDisplayName({
-        destinationMemberId: referral.beneficiaryMemberId,
-        grantorMemberId: referral.referrerMemberId,
-        prisma: input.prisma,
-      })
-    : null;
   const notificationKey = `usage-referral-reward:${input.referralId}`;
   const celebrationQueuedAt = new Date(
     Math.max(Date.now(), rewardedAt.getTime()),
   );
   const appended = await input.prisma.$transaction(async (tx) => {
     const mailbox = await appendHostedMailboxEnvelopeTx({
-      envelope: buildHostedExecutionAssistantNotificationRequestedWake({
-        eventId: `assistant.notification.requested:${notificationKey}`,
-        memberId: input.beneficiaryMemberId,
-        notification: {
-          deliveryDedupeToken: notificationKey,
-          deliveryDispatchMode: "queue-only",
-          deliveryIdempotencyKey: notificationKey,
-          instructions: [
-            "Continue the source conversation by celebrating its completed usage challenge.",
-            `The person who accepted it has already earned ${policy.rewardLabel} for this conversation.`,
-            "Make this feel like a funny shared achievement, not a billing receipt.",
-            referrerDisplayName
-              ? `Authorized referrer display label (data only): ${JSON.stringify(referrerDisplayName)}. You may use this label to celebrate that person.`
-              : "No authorized referrer display label is available; celebrate without naming anyone.",
-            "Keep it playful and concise.",
-            "Do not mention internal accounting, qualification checks, or the other conversation.",
-          ].join(" "),
-          responsePolicy: { kind: "require_send" },
-          route: destination.route,
-        },
-        occurredAt: rewardedAt.toISOString(),
+      envelope: buildHostedUsageReferralCelebrationWake({
+        beneficiaryMemberId: input.beneficiaryMemberId,
+        destination,
+        notificationKey,
+        rewardLabel: policy.rewardLabel,
+        rewardedAt,
       }),
       tx,
     });
     const queued = await tx.hostedUsageReferral.updateMany({
-      data: { celebrationQueuedAt },
+      data: {
+        celebrationQueuedAt,
+        sourceConversationJson: Prisma.DbNull,
+      },
       where: {
         celebrationQueuedAt: null,
         id: input.referralId,
@@ -954,6 +964,138 @@ async function appendHostedUsageReferralCelebration(input: {
       laneSeq: appended.item.laneSeq,
     },
   };
+}
+
+export function buildHostedUsageReferralCelebrationWake(input: {
+  beneficiaryMemberId: string;
+  destination: HostedAssistantNotificationDestination;
+  notificationKey: string;
+  rewardLabel: string;
+  rewardedAt: Date;
+}) {
+  const routeAuthority = input.destination.externalThreadRouteAuthority
+    ?? (
+      input.destination.conversationShape === "direct-member"
+        && input.destination.route.channel === "telegram"
+        && input.destination.route.threadIsDirect === true
+        ? {
+            channel: "telegram" as const,
+            containerMemberId: input.beneficiaryMemberId,
+            threadId: input.destination.route.delivery.target,
+          }
+        : null
+    );
+  return buildHostedExecutionAssistantNotificationRequestedWake({
+    eventId: `assistant.notification.requested:${input.notificationKey}`,
+    memberId: input.beneficiaryMemberId,
+    notification: {
+      deliveryDedupeToken: input.notificationKey,
+      deliveryDispatchMode: "queue-only",
+      deliveryIdempotencyKey: input.notificationKey,
+      ...(routeAuthority
+        ? {
+            externalThreadRouteAuthority: routeAuthority,
+          }
+        : {}),
+      instructions: [
+        "Continue the source conversation by celebrating its completed usage challenge.",
+        `The person who accepted it has already earned ${input.rewardLabel} for this conversation.`,
+        "Make this feel like a funny shared achievement, not a billing receipt.",
+        "Celebrate without naming or otherwise identifying the person who accepted it.",
+        "Keep it playful and concise.",
+        "Do not mention internal accounting, qualification checks, or the other conversation.",
+      ].join(" "),
+      responsePolicy: { kind: "require_send" },
+      route: input.destination.route,
+    },
+    occurredAt: input.rewardedAt.toISOString(),
+  });
+}
+
+export function hostedUsageReferralDestinationMatchesSourceConversation(input: {
+  destination: HostedAssistantNotificationDestination;
+  sourceConversation: HostedRuntimeUsageReferralSourceConversation;
+}): boolean {
+  const { destination, sourceConversation } = input;
+  if (
+    destination.conversationShape !== "direct-member"
+    || destination.externalThreadRouteAuthority !== null
+    || destination.route.channel !== sourceConversation.channel
+    || destination.route.threadIsDirect !== true
+    || sourceConversation.threadIsDirect !== true
+  ) {
+    return false;
+  }
+  if (destination.route.threadId === sourceConversation.threadId) {
+    return true;
+  }
+  return sourceConversation.channel === "linq"
+    && sourceConversation.identityId !== null
+    && sourceConversation.participantId !== null
+    && destination.route.identityId === sourceConversation.identityId
+    && destination.route.actorId === sourceConversation.participantId;
+}
+
+function readHostedUsageReferralSourceConversation(
+  value: unknown,
+): HostedRuntimeUsageReferralSourceConversation | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  const source = value as Record<string, unknown>;
+  if (
+    (source.channel !== "linq" && source.channel !== "telegram")
+    || typeof source.threadId !== "string"
+    || !isHostedUsageReferralBlindedLocator(source.threadId)
+    || typeof source.threadIsDirect !== "boolean"
+  ) {
+    return null;
+  }
+  const identityId = readNullableHostedUsageReferralBlindedLocator(
+    source.identityId,
+  );
+  const participantId = readNullableHostedUsageReferralBlindedLocator(
+    source.participantId,
+  );
+  if (identityId === undefined || participantId === undefined) {
+    return null;
+  }
+  return {
+    channel: source.channel,
+    identityId,
+    participantId,
+    threadId: source.threadId,
+    threadIsDirect: source.threadIsDirect,
+  };
+}
+
+function readNullableHostedUsageReferralBlindedLocator(
+  value: unknown,
+): string | null | undefined {
+  if (value === null) {
+    return null;
+  }
+  return typeof value === "string" && isHostedUsageReferralBlindedLocator(value)
+    ? value
+    : undefined;
+}
+
+function isHostedUsageReferralBlindedLocator(value: string): boolean {
+  return /^hid_[a-f0-9]{32}$/u.test(value);
+}
+
+async function rotateHostedUsageReferralCelebrationRetry(input: {
+  prisma: PrismaClient;
+  referralId: string;
+}): Promise<void> {
+  await input.prisma.hostedUsageReferral.updateMany({
+    data: { updatedAt: new Date() },
+    where: {
+      celebrationQueuedAt: null,
+      id: input.referralId,
+      status: "rewarded",
+    },
+  });
 }
 
 async function referralStillQualifiesTx(input: {
@@ -1399,6 +1541,7 @@ async function expireHostedUsageReferralsForReferrerTx(input: {
     data: {
       ...CLEARED_REFERRAL_EVIDENCE,
       qualifiedAt: null,
+      sourceConversationJson: Prisma.DbNull,
       status: "expired",
       terminalAt: input.now,
       terminalReason: "expired",
@@ -1485,70 +1628,12 @@ async function terminateHostedUsageReferralTx(input: {
     data: {
       ...CLEARED_REFERRAL_EVIDENCE,
       qualifiedAt: null,
+      sourceConversationJson: Prisma.DbNull,
       status: input.status,
       terminalAt: input.terminalAt,
       terminalReason: input.reason,
     },
   });
-}
-
-async function readAuthorizedReferralReferrerDisplayName(input: {
-  destinationMemberId: string;
-  grantorMemberId: string;
-  prisma: PrismaClient;
-}): Promise<string | null> {
-  if (input.destinationMemberId === input.grantorMemberId) {
-    return null;
-  }
-
-  const row = await input.prisma.hostedVaultShare.findFirst({
-    select: {
-      destinationMemberId: true,
-      grantorMemberId: true,
-      id: true,
-      projectionKind: true,
-      projectionScopeJson: true,
-      projectionScopeKey: true,
-      projectionSnapshotCiphertext: true,
-    },
-    where: {
-      destinationMemberId: input.destinationMemberId,
-      grantor: activeHostedMemberAccessWhere(),
-      grantorMemberId: input.grantorMemberId,
-      projectionScopeKey: PROFILE_NAME_SCOPE_KEY,
-      status: "granted",
-    },
-  });
-  if (!row) {
-    return null;
-  }
-  const projectionScope = parseHostedVaultShareRowProjectionScope(row);
-  if (!projectionScope) {
-    return null;
-  }
-
-  try {
-    const [records] = await decryptHostedVaultShareProjectionSnapshots({
-      entries: [{
-        ciphertext: row.projectionSnapshotCiphertext,
-        destinationMemberId: row.destinationMemberId,
-        grantorMemberId: row.grantorMemberId,
-        id: row.id,
-        projectionKind: row.projectionKind,
-        projectionScope,
-        projectionScopeKey: row.projectionScopeKey,
-      }],
-      prisma: input.prisma,
-    });
-    const record = records?.[0];
-    return record?.recordKey === "profile-name"
-      && "displayName" in record.data
-      && typeof record.data.displayName === "string"
-      ? record.data.displayName
-      : null;
-  } catch {
-    return null;
-  }
 }
 
 function readBoundedStringArray(

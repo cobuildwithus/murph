@@ -1414,6 +1414,7 @@ model HostedUsageReferral {
   rewardUsdMicros         BigInt                        @map("reward_usd_micros")
   status                  HostedUsageReferralStatus     @default(armed)
   referrerSubjectKey      String?                       @map("referrer_subject_key")
+  sourceConversationJson  Json?                         @map("source_conversation_json")
   targetContainerMemberId String?                       @unique(map: "hosted_usage_referral_target_container_key") @map("target_container_member_id")
   humanMessageCount       Int                           @default(0) @map("human_message_count")
   nonReferrerMessageCount Int                           @default(0) @map("non_referrer_message_count")

@@ -4,6 +4,8 @@ import { describe, expect, it, vi } from "vitest";
 import {
   HOSTED_USAGE_REFERRAL_GROUP_MINIMUM_ACTIVITY_SPAN_MS,
   bindArmedHostedUsageReferralToNewContainerTx,
+  buildHostedUsageReferralCelebrationWake,
+  hostedUsageReferralDestinationMatchesSourceConversation,
   observeHostedUsageReferralInboundTx,
   qualifiesHostedActiveGroupReferral,
 } from "@/src/lib/hosted-growth/usage-referral";
@@ -12,6 +14,99 @@ import {
 } from "@/src/lib/hosted-onboarding/contact-privacy";
 
 describe("hosted usage referral policy", () => {
+  it("keeps group authority and detached names out of the celebration wake", () => {
+    const authority = {
+      accountLookupKey: "blinded-account-key",
+      channel: "linq" as const,
+      containerMemberId: "member_source_group",
+      threadId: "provider-group-thread",
+    };
+    const wake = buildHostedUsageReferralCelebrationWake({
+      beneficiaryMemberId: "member_source_group",
+      destination: {
+        conversationShape: "thread-container",
+        externalThreadRouteAuthority: authority,
+        route: {
+          actorId: null,
+          channel: "linq",
+          delivery: { kind: "thread", target: "provider-group-thread" },
+          identityId: `hid_${"1".repeat(32)}`,
+          threadId: `hid_${"2".repeat(32)}`,
+          threadIsDirect: false,
+        },
+      },
+      notificationKey: "usage-referral-reward:referral_1",
+      rewardLabel: "$3.50 of Murph usage",
+      rewardedAt: new Date("2026-07-26T12:00:00.000Z"),
+    });
+
+    expect(wake.notification.externalThreadRouteAuthority).toEqual(authority);
+    expect(wake.notification.instructions).toContain(
+      "Celebrate without naming or otherwise identifying",
+    );
+    expect(wake.notification.instructions).not.toContain("display label");
+  });
+
+  it("accepts only the frozen personal source conversation", () => {
+    const sourceConversation = {
+      channel: "telegram" as const,
+      identityId: null,
+      participantId: null,
+      threadId: `hid_${"3".repeat(32)}`,
+      threadIsDirect: true,
+    };
+    const destination = {
+      conversationShape: "direct-member" as const,
+      externalThreadRouteAuthority: null,
+      route: {
+        actorId: null,
+        channel: "telegram" as const,
+        delivery: { kind: "thread" as const, target: "provider-direct-thread" },
+        identityId: null,
+        threadId: sourceConversation.threadId,
+        threadIsDirect: true,
+      },
+    };
+
+    expect(hostedUsageReferralDestinationMatchesSourceConversation({
+      destination,
+      sourceConversation,
+    })).toBe(true);
+    expect(hostedUsageReferralDestinationMatchesSourceConversation({
+      destination: {
+        ...destination,
+        route: {
+          ...destination.route,
+          channel: "linq",
+        },
+      },
+      sourceConversation,
+    })).toBe(false);
+    expect(hostedUsageReferralDestinationMatchesSourceConversation({
+      destination: {
+        ...destination,
+        route: {
+          ...destination.route,
+          threadId: `hid_${"4".repeat(32)}`,
+        },
+      },
+      sourceConversation,
+    })).toBe(false);
+
+    const wake = buildHostedUsageReferralCelebrationWake({
+      beneficiaryMemberId: "member_personal",
+      destination,
+      notificationKey: "usage-referral-reward:referral_personal",
+      rewardLabel: "$2 of Murph usage",
+      rewardedAt: new Date("2026-07-26T12:00:00.000Z"),
+    });
+    expect(wake.notification.externalThreadRouteAuthority).toEqual({
+      channel: "telegram",
+      containerMemberId: "member_personal",
+      threadId: "provider-direct-thread",
+    });
+  });
+
   it("requires the complete portable active-group threshold", () => {
     const first = new Date("2026-07-26T12:00:00.000Z");
     const last = new Date(
@@ -248,6 +343,74 @@ describe("hosted usage referral policy", () => {
     });
 
     expect(update).not.toHaveBeenCalled();
+  });
+
+  it("preserves a bound referral when post-expiry evidence arrives before valid evidence", async () => {
+    const expiresAt = new Date("2026-07-26T12:10:00.000Z");
+    const referral = {
+      armedAt: new Date("2026-07-26T11:55:00.000Z"),
+      beneficiaryMemberId: "member_source_group",
+      expiresAt,
+      firstHumanMessageAt: null,
+      humanMessageCount: 0,
+      id: "referral_out_of_order",
+      introducedMemberId: null,
+      lastHumanMessageAt: null,
+      nonReferrerMessageCount: 0,
+      observedEventKeysJson: null,
+      observedSpeakerKeysJson: null,
+      policyCode: "active_group_v1" as const,
+      qualifiedAt: null,
+      referrerMemberId: "member_referrer",
+      referrerSubjectKey: "subject_referrer",
+      rewardUsdMicros: 3_500_000n,
+      status: "target_bound",
+      targetBoundAt: new Date("2026-07-26T12:00:00.000Z"),
+      targetContainerMemberId: "member_target_container",
+    };
+    const update = vi.fn().mockImplementation(async (input: {
+      data: Partial<typeof referral>;
+    }) => {
+      Object.assign(referral, input.data);
+      return { ...referral };
+    });
+    const tx = {
+      $executeRaw: vi.fn().mockResolvedValue(1),
+      hostedUsageReferral: {
+        findUnique: vi.fn().mockImplementation(async () => ({ ...referral })),
+        update,
+      },
+    };
+
+    await expect(observeHostedUsageReferralInboundTx({
+      containerMemberId: "member_target_container",
+      enabled: true,
+      eventKey: "event_after_expiry",
+      occurredAt: new Date(expiresAt.getTime() + 1),
+      senderMemberId: "member_other",
+      senderSubjectKey: "subject_other",
+      tx: tx as never,
+    })).resolves.toEqual({
+      isBoundReferralTarget: true,
+      qualificationCandidateReferralId: null,
+    });
+    expect(update).not.toHaveBeenCalled();
+
+    await expect(observeHostedUsageReferralInboundTx({
+      containerMemberId: "member_target_container",
+      enabled: true,
+      eventKey: "event_before_expiry",
+      occurredAt: new Date(expiresAt.getTime() - 1),
+      senderMemberId: "member_other",
+      senderSubjectKey: "subject_other",
+      tx: tx as never,
+    })).resolves.toEqual({
+      isBoundReferralTarget: true,
+      qualificationCandidateReferralId: null,
+    });
+    expect(update).toHaveBeenCalledOnce();
+    expect(referral.humanMessageCount).toBe(1);
+    expect(referral.observedEventKeysJson).toEqual(["event_before_expiry"]);
   });
 
   it("resolves a newly activated Linq participant from blind subject evidence", async () => {

@@ -1005,6 +1005,23 @@ export interface HostedRuntimeGroupToolSenderContext {
   telegramSenderHandles?: readonly string[];
 }
 
+export interface HostedRuntimeUsageReferralSourceConversation {
+  channel: "linq" | "telegram";
+  identityId: string | null;
+  participantId: string | null;
+  threadId: string;
+  threadIsDirect: boolean;
+}
+
+export interface HostedRuntimeUsageReferralSourceContext {
+  /**
+   * Blinded current-conversation locators injected by the hosted runtime. Web
+   * persists them only for a personal reward so its celebration cannot drift
+   * to another direct channel or a newly bound provider conversation.
+   */
+  sourceConversation?: HostedRuntimeUsageReferralSourceConversation;
+}
+
 export const HOSTED_RUNTIME_GROUP_MEMBERSHIPS_MAX = 25;
 
 export interface HostedRuntimeGroupMembershipSummary {
@@ -1159,7 +1176,8 @@ export type HostedRuntimeGroupToolRequest =
   | ({
       action: "arm_usage_referral";
       policyCode: HostedUsageReferralPolicyCode;
-    } & HostedRuntimeGroupToolSenderContext)
+    } & HostedRuntimeGroupToolSenderContext
+      & HostedRuntimeUsageReferralSourceContext)
   | ({ action: "cancel_usage_referral" } & HostedRuntimeGroupToolSenderContext)
   | ({
       action: "read_shared";

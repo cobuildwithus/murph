@@ -45,6 +45,14 @@ describe("createHostedGroupToolWithCurrentTurnContext", () => {
       result: { outcome: "armed", referral: null, status: "ok" },
     });
     const groupTool = createHostedGroupToolWithCurrentTurnContext({
+      currentDeliveryRoute: {
+        channel: "linq",
+        deliveryTarget: "raw-group-thread",
+        identityId: `hid_${"1".repeat(32)}`,
+        participantId: `hid_${"2".repeat(32)}`,
+        threadId: `hid_${"3".repeat(32)}`,
+        threadIsDirect: false,
+      },
       groupToolPort: { request },
       linqDeliveryContexts: [
         buildLinqDeliveryContext({
@@ -58,12 +66,26 @@ describe("createHostedGroupToolWithCurrentTurnContext", () => {
       action: "arm_usage_referral",
       linqSenderHandles: ["forged"],
       policyCode: "active_group_v1",
+      sourceConversation: {
+        channel: "telegram",
+        identityId: null,
+        participantId: null,
+        threadId: `hid_${"f".repeat(32)}`,
+        threadIsDirect: true,
+      },
     });
 
     expect(request).toHaveBeenLastCalledWith({
       action: "arm_usage_referral",
       linqSenderHandles: ["+15550000001"],
       policyCode: "active_group_v1",
+      sourceConversation: {
+        channel: "linq",
+        identityId: `hid_${"1".repeat(32)}`,
+        participantId: `hid_${"2".repeat(32)}`,
+        threadId: `hid_${"3".repeat(32)}`,
+        threadIsDirect: false,
+      },
     });
   });
 

@@ -660,9 +660,11 @@ Hosted AI usage metering:
   referrer's next new group, and freeze pre-expiry qualification in the
   provider-ingress transaction. Immediate post-commit reconciliation and the
   bounded minute recovery cron converge on one final referral grant and one
-  atomic source-mailbox celebration fence. Unlinked Telegram group evidence
-  stays silent and outside assistant access; direct setup behavior is
-  unchanged.
+  atomic source-mailbox celebration fence. Personal arming freezes only blinded
+  source-conversation locators; celebration re-resolves and revalidates that
+  exact direct channel, while group celebration carries live thread authority.
+  Durable celebration copy is unnamed. Unlinked Telegram group evidence stays
+  silent and outside assistant access; direct setup behavior is unchanged.
 - Web owns the separate `murph.subscription` callback for an explicit private member choice to continue Pulse at trial end, start Pulse now, or upgrade Pulse to Edge. It binds the runtime-supplied accepted input id to the callback member, atomically claims the first action on that existing mailbox row, re-derives current eligibility, and delegates to the existing billing services. An exact retry is allowed and a conflicting action fails closed. Pulse activation keeps its existing Stripe-hosted invoice or Customer Portal handoff when payment is required; a pending Edge change returns Customer Portal without a separate invoice lookup. No custom checkout or second billing owner is introduced.
 - Homepage period facts come from the same allowance owner. Spend accounting ensure-creates a fresh billing or calendar period inside the spend transaction, with no reset cron.
 - Web applies the composed access-and-usage gate in runtime reconciliation and

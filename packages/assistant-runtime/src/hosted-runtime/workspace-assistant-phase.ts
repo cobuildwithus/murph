@@ -309,6 +309,7 @@ export type HostedWorkspaceRuntimeAssistantPhase = (
  * the model.
  */
 export function createHostedGroupToolWithCurrentTurnContext(input: {
+  currentDeliveryRoute?: AssistantCurrentDeliveryRoute | null;
   emailDeliveryContexts?: readonly HostedAssistantEmailDeliveryContext[] | null;
   groupEmailIngress?: boolean;
   groupToolPort: NonNullable<HostedRuntimePlatform["groupToolPort"]>;
@@ -368,9 +369,21 @@ export function createHostedGroupToolWithCurrentTurnContext(input: {
               linqDeliveryContexts: input.linqDeliveryContexts,
               telegramSenderHandles: input.telegramSenderHandles ?? [],
             });
+        const sourceContext = resolveHostedUsageReferralSourceContext(
+          input.currentDeliveryRoute,
+        );
+        const referralRequest = request.action === "arm_usage_referral"
+          ? {
+              action: request.action,
+              policyCode: request.policyCode,
+            }
+          : { action: request.action };
         return await input.groupToolPort.request({
-          ...request,
+          ...referralRequest,
           ...senderHandles,
+          ...(request.action === "arm_usage_referral"
+            ? sourceContext
+            : {}),
         });
       }
       if (
@@ -392,6 +405,48 @@ export function createHostedGroupToolWithCurrentTurnContext(input: {
       );
     },
   };
+}
+
+function resolveHostedUsageReferralSourceContext(
+  route: AssistantCurrentDeliveryRoute | null | undefined,
+): Pick<
+  Extract<HostedRuntimeGroupToolRequest, { action: "arm_usage_referral" }>,
+  "sourceConversation"
+> {
+  const channel = normalizeAssistantRouteString(route?.channel)?.toLowerCase();
+  const threadId = normalizeAssistantRouteString(route?.threadId);
+  if (
+    (channel !== "linq" && channel !== "telegram")
+    || !threadId
+    || !/^hid_[a-f0-9]{32}$/u.test(threadId)
+    || typeof route?.threadIsDirect !== "boolean"
+  ) {
+    return {};
+  }
+  const identityId = normalizeHostedUsageReferralBlindedLocator(
+    route.identityId,
+  );
+  const participantId = normalizeHostedUsageReferralBlindedLocator(
+    route.participantId,
+  );
+  return {
+    sourceConversation: {
+      channel,
+      identityId,
+      participantId,
+      threadId,
+      threadIsDirect: route.threadIsDirect,
+    },
+  };
+}
+
+function normalizeHostedUsageReferralBlindedLocator(
+  value: string | null | undefined,
+): string | null {
+  const normalized = normalizeAssistantRouteString(value);
+  return normalized && /^hid_[a-f0-9]{32}$/u.test(normalized)
+    ? normalized
+    : null;
 }
 
 function buildHostedGroupEmailRestrictedActionUnavailable(
@@ -628,6 +683,7 @@ function createHostedAssistantAutomationOperationScope(
       });
       const route = durableContext.route;
       const groupScopedExecutionContext = scopeHostedGroupToolToAssistantOperation({
+        currentDeliveryRoute: route,
         emailDeliveryContexts: [],
         executionContext: scopeInput.executionContext,
         groupSharedReadAvailable: route?.threadIsDirect === false,
@@ -764,6 +820,7 @@ function readHostedAssistantInputLinqDeliveryContext(input: {
 }
 
 function scopeHostedGroupToolToAssistantOperation(input: {
+  currentDeliveryRoute: AssistantCurrentDeliveryRoute | null;
   emailDeliveryContexts: readonly HostedAssistantEmailDeliveryContext[];
   executionContext: AssistantExecutionContext;
   groupSharedReadAvailable: boolean;
@@ -774,6 +831,7 @@ function scopeHostedGroupToolToAssistantOperation(input: {
 }): AssistantExecutionContext {
   const scopedGroupToolPort = input.groupToolPort
     ? createHostedGroupToolWithCurrentTurnContext({
+        currentDeliveryRoute: input.currentDeliveryRoute,
         emailDeliveryContexts: input.emailDeliveryContexts,
         groupEmailIngress: input.groupEmailIngress,
         groupToolPort: input.groupToolPort,

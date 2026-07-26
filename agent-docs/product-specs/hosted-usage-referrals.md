@@ -19,7 +19,8 @@ one exact server-returned policy.
 | `new_person_activation_v1` | The referrer starts a fresh Murph group with a genuinely new person. That person activates their own Murph after the mission was armed and then speaks in the bound target group. | $2 of Murph usage |
 | `active_group_v1` | The referrer starts a fresh Murph group that reaches 15 qualifying human messages, including at least 8 messages from at least 2 non-referrer speakers, across at least 10 minutes. | $3.50 of Murph usage |
 
-The source conversation determines only the reward destination:
+The source conversation determines the reward destination and where completion
+is celebrated:
 
 - a mission armed in a personal conversation rewards that personal member;
 - a mission armed in a group rewards that source group;
@@ -27,6 +28,15 @@ The source conversation determines only the reward destination:
   room;
 - a fixed reward is usage value, not a promised number of messages or days;
 - trial rewards add usage capacity but never extend the trial end date.
+
+Completion is celebrated in that same source conversation. A personal mission
+freezes the runtime-injected, blinded source channel and conversation locators;
+queueing later resolves that channel from current member routing and requires
+the blinded locators to still identify the same direct conversation. A group
+mission uses its synthetic source-container route and live external-thread
+authority. Celebration copy never carries a detached profile name, so a
+durable mailbox item cannot outlive name-sharing permission or account
+deletion.
 
 The referrer's latest unbound mission supersedes their older unbound mission.
 An already-bound target continues qualifying. Earned rewards are final.
@@ -51,8 +61,9 @@ armed -> target_bound -> rewarded
     \---------------> superseded | canceled | expired
 ```
 
-Arming freezes the referrer, beneficiary, policy code and version, reward, and
-seven-day window. The referrer's next newly created thread container binds only
+Arming freezes the referrer, beneficiary, policy code and version, reward,
+seven-day window, and—only for a personal destination—the blinded source
+conversation. The referrer's next newly created thread container binds only
 when its durable owner is that exact referrer and creation happened after
 arming. Existing rooms cannot bind.
 
@@ -77,7 +88,8 @@ Provider adapters pass only:
 - a provider-domain-separated sender subject key.
 
 Raw phone numbers, email addresses, Telegram ids, message ids, and chat ids do
-not enter the referral row. Event and non-referrer speaker keys are bounded,
+not enter the referral row. A personal source stores only runtime-produced
+`hid_` conversation locators. Event and non-referrer speaker keys are bounded,
 deduplicated arrays and are cleared at terminal state.
 
 One admitted inbound human provider message counts once. Murph output,
@@ -85,6 +97,12 @@ reactions, empty unsupported events, and duplicate provider events do not
 count. The portable active-group rule deliberately measures observed
 participation rather than a provider roster: Telegram does not expose the same
 authoritative full-room roster as Linq.
+
+Provider occurrence time, not delivery order, decides admission. Evidence at
+or after expiry is ignored without terminating the bound row, so a decisive
+pre-expiry event delivered later can still qualify. Referrer-serialized
+maintenance expires an unqualified row once no earlier evidence remains to be
+processed.
 
 An unlinked Telegram participant in an already-bound group may contribute only
 bounded referral evidence. Their message remains excluded from the assistant
@@ -135,7 +153,10 @@ oldest qualified or uncelebrated referrals per pass. A missing destination
 rotates to the back by updating the existing referral timestamp, while a missed
 best-effort runtime wake is already owned by durable mailbox reconciliation.
 Missing route authority or notification failure cannot delay, reverse, or
-duplicate the reward.
+duplicate the reward. Group notifications carry the same external-thread
+authority as their route. Personal notifications fail closed when the frozen
+source channel is no longer routed to the same blinded conversation. The
+source locator is cleared once the celebration is durably queued.
 
 ## Abuse bounds
 
@@ -162,8 +183,9 @@ If a referrer or introduced person deletes their account after a surviving
 group already earned the reward, deletion must not claw back that room's
 credit. The rewarded accounting receipt remains only while its beneficiary
 remains and is anonymized by clearing referrer, introduced-member,
-target-container, subject-key, and observation evidence. This minimal receipt
-preserves grant provenance without retaining cross-account identity.
+target-container, subject-key, source-conversation, and observation evidence.
+This minimal receipt preserves grant provenance without retaining cross-account
+identity.
 
 ## Deployment
 

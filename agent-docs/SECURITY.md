@@ -46,7 +46,12 @@ Last verified: 2026-07-26
   model may choose only a versioned policy code after one exact current sender
   explicitly accepts; it cannot supply a referrer, beneficiary, amount, source,
   target, route, provider id, counter, or qualification fact. Personal calls
-  bind the callback member. Group calls require exactly one runtime-injected
+  bind the callback member and persist only runtime-injected blinded locators
+  for the exact source conversation. Celebration queueing re-resolves the
+  frozen channel and requires those locators to match the current direct route;
+  group celebrations carry live external-thread authority. Celebration
+  instructions never persist a detached profile name. Group calls require
+  exactly one runtime-injected
   provider-scoped sender handle that resolves to an active personal member;
   mixed-channel, missing, or ambiguous sender evidence fails closed.
   Provider adapters store only domain-separated lookup keys and bounded

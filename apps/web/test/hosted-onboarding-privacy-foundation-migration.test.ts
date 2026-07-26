@@ -931,6 +931,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260726115900_hosted_usage_referral_entry_kind",
       "20260726120000_hosted_growth_aggregate",
       "20260726120000_hosted_usage_referral_rewards",
+      "20260726124000_hosted_usage_referral_source_conversation",
       "migration_lock.toml",
     ]);
     expect(hostedUsageReferralEntryKindMigrationSql.trim()).toBe(

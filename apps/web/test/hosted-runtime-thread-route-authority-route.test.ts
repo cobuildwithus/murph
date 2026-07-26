@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  assertHostedThreadRouteEgressAuthority: vi.fn(),
+  assertHostedAssistantNotificationRouteAuthority: vi.fn(),
   getPrisma: vi.fn(),
   requireHostedCloudflareCallbackRequest: vi.fn(),
 }));
@@ -11,9 +11,9 @@ vi.mock("@/src/lib/hosted-execution/cloudflare-callback-auth", () => ({
     mocks.requireHostedCloudflareCallbackRequest,
 }));
 
-vi.mock("@/src/lib/hosted-routing/thread-route-store", () => ({
-  assertHostedThreadRouteEgressAuthority:
-    mocks.assertHostedThreadRouteEgressAuthority,
+vi.mock("@/src/lib/hosted-routing/assistant-notification-destination", () => ({
+  assertHostedAssistantNotificationRouteAuthority:
+    mocks.assertHostedAssistantNotificationRouteAuthority,
 }));
 
 vi.mock("@/src/lib/prisma", () => ({
@@ -27,10 +27,12 @@ describe("hosted runtime thread route authority route", () => {
     vi.clearAllMocks();
     mocks.requireHostedCloudflareCallbackRequest.mockResolvedValue("member_123");
     mocks.getPrisma.mockReturnValue({});
-    mocks.assertHostedThreadRouteEgressAuthority.mockResolvedValue({});
+    mocks.assertHostedAssistantNotificationRouteAuthority.mockResolvedValue(
+      undefined,
+    );
   });
 
-  it("delegates exact Telegram route authority to the Web-owned route store", async () => {
+  it("delegates exact Telegram route authority to the Web-owned notification route validator", async () => {
     const authority = {
       channel: "telegram",
       containerMemberId: "member_123",
@@ -47,7 +49,9 @@ describe("hosted runtime thread route authority route", () => {
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ authorized: true });
-    expect(mocks.assertHostedThreadRouteEgressAuthority).toHaveBeenCalledWith({
+    expect(
+      mocks.assertHostedAssistantNotificationRouteAuthority,
+    ).toHaveBeenCalledWith({
       authority,
       prisma: {},
     });
@@ -68,6 +72,8 @@ describe("hosted runtime thread route authority route", () => {
     ));
 
     expect(response.status).toBe(403);
-    expect(mocks.assertHostedThreadRouteEgressAuthority).not.toHaveBeenCalled();
+    expect(
+      mocks.assertHostedAssistantNotificationRouteAuthority,
+    ).not.toHaveBeenCalled();
   });
 });

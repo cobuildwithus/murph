@@ -1355,6 +1355,7 @@ async function deleteHostedAccountPrismaRows(input: {
         observedSpeakerKeysJson: Prisma.DbNull,
         referrerMemberId: null,
         referrerSubjectKey: null,
+        sourceConversationJson: Prisma.DbNull,
         targetContainerMemberId: null,
       },
       where: {

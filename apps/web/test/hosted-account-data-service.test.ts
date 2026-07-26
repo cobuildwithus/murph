@@ -572,6 +572,7 @@ describe("deleteHostedAccountData", () => {
         observedSpeakerKeysJson: expect.anything(),
         referrerMemberId: null,
         referrerSubjectKey: null,
+        sourceConversationJson: expect.anything(),
         targetContainerMemberId: null,
       },
       model: "hostedUsageReferral",

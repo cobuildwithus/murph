@@ -70,13 +70,17 @@ Last verified: 2026-07-26
   commitment. Qualification records a pre-expiry durable fence with its
   evidence; post-commit reconciliation rechecks the frozen policy but cannot
   reject that qualified commitment because processing ran after expiry or
-  another mission armed. The immediate ingress handoff and a bounded
+  another mission armed. A post-expiry event does not terminate the row, so
+  pre-expiry provider evidence delivered later can still qualify. The
+  immediate ingress handoff and a bounded
   Vercel-authenticated minute recovery pass both retry idempotent reward
   reconciliation. The source mailbox append and its completion fence commit
-  atomically after reward commit. Durable mailbox reconciliation owns a missed
-  wake, so stale route, append, or signal failure cannot reverse or duplicate
-  earned credit. Referral production is disabled through the expand deployment
-  and prior-function drain. The
+  atomically after reward commit. Group appends carry live thread authority;
+  personal appends revalidate the frozen blinded source conversation and never
+  drift to another preferred channel. Durable mailbox reconciliation owns a
+  missed wake, so stale route, append, or signal failure cannot reverse or
+  duplicate earned credit. Referral production is disabled through the expand
+  deployment and prior-function drain. The
   post-drain contract migration resynchronizes purchase projections before it
   widens and validates the ledger checks; only then may Web enable referral
   arming, binding, and observation.

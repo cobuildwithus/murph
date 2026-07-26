@@ -7944,7 +7944,12 @@ describe("hosted runtime callbacks", () => {
     expect(providerFetch).toHaveBeenCalledTimes(1);
   });
 
-  it("blocks Telegram provider entry when the live route owner revokes the composed target", async () => {
+  it.each([
+    { audience: "direct", threadIsDirect: true },
+    { audience: "group", threadIsDirect: false },
+  ])("blocks Telegram $audience provider entry when the live route owner revokes the composed target", async ({
+    threadIsDirect,
+  }) => {
     const routeAuthority = {
       channel: "telegram" as const,
       containerMemberId: "member_123",
@@ -7954,7 +7959,7 @@ describe("hosted runtime callbacks", () => {
       bindingDeliveryKind: "thread",
       bindingDeliveryTarget: routeAuthority.threadId,
       threadId: routeAuthority.threadId,
-      threadIsDirect: false,
+      threadIsDirect,
     });
     mocks.readAssistantOutboxIntentMirrorState.mockResolvedValueOnce(
       createMirrorState({

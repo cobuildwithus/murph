@@ -159,6 +159,7 @@ import {
   type HostedRuntimeGroupToolRequest,
   type HostedRuntimeGroupToolResponse,
   type HostedRuntimeUsageReferralSnapshot,
+  type HostedRuntimeUsageReferralSourceConversation,
   type HostedUsageReferralPolicyCode,
   type HostedRuntimeNewsletterAuthorizedShare,
   type HostedRuntimeNewsletterParticipantSummary,
@@ -1130,6 +1131,7 @@ export function parseHostedRuntimeGroupToolRequest(
         "action",
         "linqSenderHandles",
         "policyCode",
+        "sourceConversation",
         "telegramSenderHandles",
       ]),
       "Hosted runtime group tool arm_usage_referral request",
@@ -1137,6 +1139,7 @@ export function parseHostedRuntimeGroupToolRequest(
     return {
       action,
       ...parseHostedRuntimeGroupSenderHandlesRequest(record),
+      ...parseHostedRuntimeUsageReferralSourceContext(record),
       policyCode: parseHostedRuntimeUsageReferralPolicyCode(
         record.policyCode,
         "Hosted runtime group tool arm_usage_referral request policyCode",
@@ -1436,6 +1439,77 @@ function parseHostedRuntimeGroupToolSelfOptOutContext(
     senderHandle: requireString(record.senderHandle, `${label} senderHandle`),
     source,
   };
+}
+
+function parseHostedRuntimeUsageReferralSourceContext(
+  record: Record<string, unknown>,
+): { sourceConversation?: HostedRuntimeUsageReferralSourceConversation } {
+  if (record.sourceConversation === undefined) {
+    return {};
+  }
+  const source = requireObject(
+    record.sourceConversation,
+    "Hosted runtime usage referral source conversation",
+  );
+  assertAllowedObjectKeys(
+    source,
+    new Set([
+      "channel",
+      "identityId",
+      "participantId",
+      "threadId",
+      "threadIsDirect",
+    ]),
+    "Hosted runtime usage referral source conversation",
+  );
+  const channel = requireString(
+    source.channel,
+    "Hosted runtime usage referral source conversation channel",
+  );
+  if (channel !== "linq" && channel !== "telegram") {
+    throw new TypeError(
+      "Hosted runtime usage referral source conversation channel is invalid.",
+    );
+  }
+  return {
+    sourceConversation: {
+      channel,
+      identityId: parseHostedRuntimeUsageReferralBlindedIdentifier(
+        source.identityId,
+        "Hosted runtime usage referral source conversation identityId",
+        true,
+      ),
+      participantId: parseHostedRuntimeUsageReferralBlindedIdentifier(
+        source.participantId,
+        "Hosted runtime usage referral source conversation participantId",
+        true,
+      ),
+      threadId: parseHostedRuntimeUsageReferralBlindedIdentifier(
+        source.threadId,
+        "Hosted runtime usage referral source conversation threadId",
+        false,
+      )!,
+      threadIsDirect: requireBoolean(
+        source.threadIsDirect,
+        "Hosted runtime usage referral source conversation threadIsDirect",
+      ),
+    },
+  };
+}
+
+function parseHostedRuntimeUsageReferralBlindedIdentifier(
+  value: unknown,
+  label: string,
+  nullable: boolean,
+): string | null {
+  if (nullable && value === null) {
+    return null;
+  }
+  const identifier = requireString(value, label);
+  if (!/^hid_[a-f0-9]{32}$/u.test(identifier)) {
+    throw new TypeError(`${label} is invalid.`);
+  }
+  return identifier;
 }
 
 function parseHostedRuntimeUsageReferralPolicyCode(

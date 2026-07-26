@@ -26,7 +26,22 @@ type ReferralState = {
   policyCode: "active_group_v1" | "new_person_activation_v1";
   referrerMemberId: string;
   rewardUsdMicros: bigint;
+  sourceConversationJson?: {
+    channel: "linq" | "telegram";
+    identityId: string | null;
+    participantId: string | null;
+    threadId: string;
+    threadIsDirect: boolean;
+  };
   status: "armed" | "superseded";
+};
+
+const PERSONAL_SOURCE = {
+  channel: "telegram" as const,
+  identityId: null,
+  participantId: null,
+  threadId: `hid_${"1".repeat(32)}`,
+  threadIsDirect: true,
 };
 
 describe("hosted usage referral tool", () => {
@@ -104,6 +119,28 @@ describe("hosted usage referral tool", () => {
     });
   });
 
+  it("does not arm a personal mission without a trusted source conversation", async () => {
+    const { prisma } = buildPrisma();
+
+    await expect(handleHostedUsageReferralGroupTool({
+      enabled: true,
+      memberId: "member_personal",
+      prisma: prisma as never,
+      request: {
+        action: "arm_usage_referral",
+        policyCode: "new_person_activation_v1",
+      },
+    })).resolves.toEqual({
+      action: "arm_usage_referral",
+      result: {
+        referral: null,
+        status: "unavailable",
+        unavailableReason: "usage_referral_not_available",
+      },
+    });
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
   it("freezes the personal destination and supersedes only the older unbound mission", async () => {
     const { prisma, referrals } = buildPrisma();
 
@@ -114,6 +151,7 @@ describe("hosted usage referral tool", () => {
       request: {
         action: "arm_usage_referral",
         policyCode: "new_person_activation_v1",
+        sourceConversation: PERSONAL_SOURCE,
       },
     })).resolves.toMatchObject({
       action: "arm_usage_referral",
@@ -137,6 +175,7 @@ describe("hosted usage referral tool", () => {
       request: {
         action: "arm_usage_referral",
         policyCode: "active_group_v1",
+        sourceConversation: PERSONAL_SOURCE,
       },
     })).resolves.toMatchObject({
       result: {
@@ -162,6 +201,7 @@ describe("hosted usage referral tool", () => {
       beneficiaryMemberId: "member_personal",
       policyCode: "active_group_v1",
       referrerMemberId: "member_personal",
+      sourceConversationJson: PERSONAL_SOURCE,
       status: "armed",
     });
   });
