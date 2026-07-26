@@ -345,6 +345,292 @@ describe("RunnerContainer", () => {
     });
   });
 
+  it("wakes the exact active invocation with an existing queued successor", async () => {
+    const activeRequestStarted = createDeferred<void>();
+    const activeResponse = createDeferred<Response>();
+    let executeCallCount = 0;
+    const containerFetch = vi.fn(async (url: string) => {
+      if (url.endsWith("/health")) {
+        return new Response(JSON.stringify(createRunnerHealthResult()), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }
+      if (url.endsWith("/internal/runtime-wake")) {
+        return new Response(null, {
+          headers: {
+            "x-runtime-wake-accepted": "1",
+            "x-runtime-wake-identity-checked": "1",
+          },
+          status: 204,
+        });
+      }
+      if (url.endsWith("/internal/workspace-invocation")) {
+        executeCallCount += 1;
+        if (executeCallCount === 1) {
+          activeRequestStarted.resolve(undefined);
+          return await activeResponse.promise;
+        }
+        return new Response(JSON.stringify(createRunnerResult()), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }
+      throw new Error(`Unexpected runner request URL: ${url}`);
+    });
+    const { container } = createContainerDouble({
+      containerFetch,
+      initialStatus: "running",
+    });
+    const activeRequest = createRunnerRequest("evt_wake_active_before_queued");
+    const activeInvocation = container.invoke({
+      job: {
+        kind: "workspace-invocation",
+        request: activeRequest,
+      },
+      timeoutMs: 30_000,
+      userId: "member_123",
+    });
+    await activeRequestStarted.promise;
+    const queuedInvocation = container.invoke({
+      job: {
+        kind: "workspace-invocation",
+        request: createRunnerRequest("evt_queued_during_active_wake"),
+      },
+      timeoutMs: 30_000,
+      userId: "member_123",
+    });
+
+    await expect(container.wakeRuntime({
+      attemptId: activeRequest.attemptId,
+      leaseGeneration: activeRequest.leaseGeneration,
+      userId: "member_123",
+    })).resolves.toEqual({
+      action: "woken",
+      kind: "accepted",
+    });
+
+    activeResponse.resolve(new Response(JSON.stringify(createRunnerResult()), {
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      status: 200,
+    }));
+    await expect(activeInvocation).resolves.toEqual(createRunnerResult());
+    await expect(queuedInvocation).resolves.toEqual(createRunnerResult());
+  });
+
+  it("keeps an exact wake accepted when a successor queues during the request", async () => {
+    const activeRequestStarted = createDeferred<void>();
+    const activeResponse = createDeferred<Response>();
+    const wakeRequestStarted = createDeferred<void>();
+    const wakeResponse = createDeferred<Response>();
+    let executeCallCount = 0;
+    const containerFetch = vi.fn(async (url: string) => {
+      if (url.endsWith("/health")) {
+        return new Response(JSON.stringify(createRunnerHealthResult()), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }
+      if (url.endsWith("/internal/runtime-wake")) {
+        wakeRequestStarted.resolve(undefined);
+        return await wakeResponse.promise;
+      }
+      if (url.endsWith("/internal/workspace-invocation")) {
+        executeCallCount += 1;
+        if (executeCallCount === 1) {
+          activeRequestStarted.resolve(undefined);
+          return await activeResponse.promise;
+        }
+        return new Response(JSON.stringify(createRunnerResult()), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }
+      throw new Error(`Unexpected runner request URL: ${url}`);
+    });
+    const { container } = createContainerDouble({
+      containerFetch,
+      initialStatus: "running",
+    });
+    const activeRequest = createRunnerRequest("evt_wake_before_successor_queues");
+    const activeInvocation = container.invoke({
+      job: {
+        kind: "workspace-invocation",
+        request: activeRequest,
+      },
+      timeoutMs: 30_000,
+      userId: "member_123",
+    });
+    await activeRequestStarted.promise;
+
+    const wake = container.wakeRuntime({
+      attemptId: activeRequest.attemptId,
+      leaseGeneration: activeRequest.leaseGeneration,
+      userId: "member_123",
+    });
+    await wakeRequestStarted.promise;
+    const queuedInvocation = container.invoke({
+      job: {
+        kind: "workspace-invocation",
+        request: createRunnerRequest("evt_queued_during_wake_request"),
+      },
+      timeoutMs: 30_000,
+      userId: "member_123",
+    });
+    expect(executeCallCount).toBe(1);
+
+    wakeResponse.resolve(new Response(null, {
+      headers: {
+        "x-runtime-wake-accepted": "1",
+        "x-runtime-wake-identity-checked": "1",
+      },
+      status: 204,
+    }));
+    await expect(wake).resolves.toEqual({
+      action: "woken",
+      kind: "accepted",
+    });
+
+    activeResponse.resolve(new Response(JSON.stringify(createRunnerResult()), {
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      status: 200,
+    }));
+    await expect(activeInvocation).resolves.toEqual(createRunnerResult());
+    await expect(queuedInvocation).resolves.toEqual(createRunnerResult());
+  });
+
+  it("keeps an exact wake unconfirmed until the runner endpoint is ready", async () => {
+    const readinessHealthStarted = createDeferred<void>();
+    const releaseReadinessHealth = createDeferred<void>();
+    const request = createRunnerRequest("evt_wake_during_readiness");
+    const containerFetch = vi.fn(async (url: string) => {
+      if (url.endsWith("/health")) {
+        readinessHealthStarted.resolve(undefined);
+        await releaseReadinessHealth.promise;
+        return new Response(JSON.stringify(createRunnerHealthResult()), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }
+      if (url.endsWith("/internal/workspace-invocation")) {
+        return new Response(JSON.stringify(createRunnerResult()), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }
+      throw new Error(`Unexpected runner request URL: ${url}`);
+    });
+    const { container } = createContainerDouble({
+      containerFetch,
+      initialStatus: "running",
+    });
+
+    const invocation = container.invoke({
+      job: {
+        kind: "workspace-invocation",
+        request,
+      },
+      timeoutMs: 30_000,
+      userId: "member_123",
+    });
+    await readinessHealthStarted.promise;
+
+    await expect(container.wakeRuntime({
+      attemptId: request.attemptId,
+      leaseGeneration: request.leaseGeneration,
+      userId: "member_123",
+    })).resolves.toEqual({
+      kind: "unknown",
+      reason: "active-child-rejected",
+    });
+    expect(containerFetch.mock.calls.some(([url]) =>
+      String(url).endsWith("/internal/runtime-wake")
+    )).toBe(false);
+
+    releaseReadinessHealth.resolve(undefined);
+    await expect(invocation).resolves.toEqual(createRunnerResult());
+  });
+
+  it("keeps an exact wake unconfirmed while child admission is pending", async () => {
+    const runnerRequestStarted = createDeferred<void>();
+    const runnerResponse = createDeferred<Response>();
+    const request = createRunnerRequest("evt_wake_during_child_admission");
+    const containerFetch = vi.fn(async (url: string) => {
+      if (url.endsWith("/health")) {
+        return new Response(JSON.stringify(createRunnerHealthResult()), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }
+      if (url.endsWith("/internal/runtime-wake")) {
+        return new Response(null, {
+          headers: {
+            "x-runtime-wake-absent": "1",
+            "x-runtime-wake-accepted": "0",
+          },
+          status: 204,
+        });
+      }
+      if (url.endsWith("/internal/workspace-invocation")) {
+        runnerRequestStarted.resolve(undefined);
+        return await runnerResponse.promise;
+      }
+      throw new Error(`Unexpected runner request URL: ${url}`);
+    });
+    const { container } = createContainerDouble({
+      containerFetch,
+      initialStatus: "running",
+    });
+
+    const invocation = container.invoke({
+      job: {
+        kind: "workspace-invocation",
+        request,
+      },
+      timeoutMs: 30_000,
+      userId: "member_123",
+    });
+    await runnerRequestStarted.promise;
+
+    await expect(container.wakeRuntime({
+      attemptId: request.attemptId,
+      leaseGeneration: request.leaseGeneration,
+      userId: "member_123",
+    })).resolves.toEqual({
+      kind: "unknown",
+      reason: "active-child-rejected",
+    });
+    expect(containerFetch.mock.calls.some(([url]) =>
+      String(url).endsWith("/internal/runtime-wake")
+    )).toBe(true);
+
+    runnerResponse.resolve(new Response(JSON.stringify(createRunnerResult()), {
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      status: 200,
+    }));
+    await expect(invocation).resolves.toEqual(createRunnerResult());
+  });
+
   it("posts an exact runtime wake when the outer active-operation pointer is missing", async () => {
     const { container, containerFetch } = createContainerDouble({
       containerFetch: vi.fn(async (url: string) => {
@@ -438,6 +724,145 @@ describe("RunnerContainer", () => {
       String(url).endsWith("/internal/runtime-wake")
     )).toBe(true);
     expect(startAndWaitForPorts).not.toHaveBeenCalled();
+  });
+
+  it("rejects a delayed pointerless wake after an exact abort settles", async () => {
+    const wakeRequestStarted = createDeferred<void>();
+    const wakeResponse = createDeferred<Response>();
+    const request = createRunnerRequest("evt_pointerless_wake_abort_aba");
+    const containerFetch = vi.fn(async (url: string) => {
+      if (url.endsWith("/internal/runtime-wake")) {
+        wakeRequestStarted.resolve(undefined);
+        return await wakeResponse.promise;
+      }
+      if (url.endsWith("/internal/workspace-invocation/abort")) {
+        return new Response(null, { status: 204 });
+      }
+      throw new Error(`Unexpected runner request URL: ${url}`);
+    });
+    const { container, destroy } = createContainerDouble({
+      containerFetch,
+      initialStatus: "running",
+    });
+
+    const wake = container.wakeRuntime({
+      attemptId: request.attemptId,
+      leaseGeneration: request.leaseGeneration,
+      userId: "member_123",
+    });
+    await wakeRequestStarted.promise;
+    await expect(container.abortWorkspaceInvocation({
+      attemptId: request.attemptId,
+      leaseGeneration: request.leaseGeneration,
+      userId: "member_123",
+    })).resolves.toBe("accepted");
+
+    wakeResponse.resolve(new Response(null, {
+      headers: {
+        "x-runtime-wake-accepted": "1",
+        "x-runtime-wake-identity-checked": "1",
+      },
+      status: 204,
+    }));
+    await expect(wake).resolves.toEqual({
+      kind: "unknown",
+      reason: "active-child-rejected",
+    });
+    expect(destroy).toHaveBeenCalledOnce();
+  });
+
+  it("keeps a pointerless wake unconfirmed during lifecycle work", async () => {
+    const destroyStarted = createDeferred<void>();
+    const releaseDestroy = createDeferred<void>();
+    let status: "running" | "stopped" = "running";
+    const destroy = vi.fn(async () => {
+      destroyStarted.resolve(undefined);
+      await releaseDestroy.promise;
+      status = "stopped";
+    });
+    const getState = vi.fn(async () => ({
+      lastChange: Date.now(),
+      status,
+    }));
+    const containerFetch = vi.fn(async (url: string) => {
+      throw new Error(`Unexpected runner request URL: ${url}`);
+    });
+    const { container } = createContainerDouble({
+      containerFetch,
+      destroy,
+      getState,
+      initialStatus: "running",
+    });
+
+    const destroyResult = container.destroyInstance();
+    await destroyStarted.promise;
+    await expect(container.wakeRuntime({
+      attemptId: "attempt_pointerless_during_destroy",
+      leaseGeneration: "1",
+      userId: "member_123",
+    })).resolves.toEqual({
+      kind: "unknown",
+      reason: "active-child-rejected",
+    });
+    expect(containerFetch).not.toHaveBeenCalled();
+
+    releaseDestroy.resolve(undefined);
+    await expect(destroyResult).resolves.toBeUndefined();
+  });
+
+  it("rejects a delayed pointerless wake after activity expiry destroys the shell", async () => {
+    const wakeStarted = createDeferred<void>();
+    const wakeResponse = createDeferred<Response>();
+    let status: "running" | "stopped" = "running";
+    const containerFetch = vi.fn(async (url: string) => {
+      if (url.endsWith("/health")) {
+        return new Response(JSON.stringify(createRunnerHealthResult()), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }
+      if (url.endsWith("/internal/runtime-wake")) {
+        wakeStarted.resolve(undefined);
+        return await wakeResponse.promise;
+      }
+      throw new Error(`Unexpected runner request URL: ${url}`);
+    });
+    const destroy = vi.fn(async () => {
+      status = "stopped";
+    });
+    const getState = vi.fn(async () => ({
+      lastChange: Date.now(),
+      status,
+    }));
+    const { container } = createContainerDouble({
+      containerFetch,
+      destroy,
+      getState,
+      initialStatus: "running",
+    });
+
+    const wake = container.wakeRuntime({
+      attemptId: "attempt_pointerless_before_expiry",
+      leaseGeneration: "1",
+      userId: "member_123",
+    });
+    await wakeStarted.promise;
+    await expect(container.onActivityExpired()).resolves.toBeUndefined();
+    expect(destroy).toHaveBeenCalledOnce();
+
+    wakeResponse.resolve(new Response(null, {
+      headers: {
+        "x-runtime-wake-accepted": "1",
+        "x-runtime-wake-identity-checked": "1",
+      },
+      status: 204,
+    }));
+    await expect(wake).resolves.toEqual({
+      kind: "unknown",
+      reason: "active-child-rejected",
+    });
   });
 
   it("keeps active-operation identity rejection ahead of the stopped-shell short-circuit", async () => {
@@ -2598,11 +3023,12 @@ describe("RunnerContainer", () => {
       container.onStart();
       Object.assign(container, {
         renewActivityTimeout,
-        workspaceInvocationActiveOperation: {
+        workspaceInvocationOperations: [{
           attemptId: "attempt_evt_activity_expiry_active",
           leaseGeneration: "11",
+          processingMode: "default",
           userId: "member_123",
-        },
+        }],
       });
       vi.clearAllMocks();
 
@@ -3534,8 +3960,13 @@ describe("RunnerContainer", () => {
 
   it("destroys a warm shell after preempting an active workspace invocation", async () => {
     const runnerRequestSignal = createDeferred<AbortSignal>();
+    const destroyStarted = createDeferred<void>();
+    const allowDestroyToSettle = createDeferred<void>();
     let status: "running" | "stopped" = "running";
+    let executeCallCount = 0;
     const destroy = vi.fn(async () => {
+      destroyStarted.resolve();
+      await allowDestroyToSettle.promise;
       status = "stopped";
     });
     const getState = vi.fn(async () => ({
@@ -3565,6 +3996,15 @@ describe("RunnerContainer", () => {
         throw new Error(`Unexpected runner request URL: ${url}`);
       }
 
+      executeCallCount += 1;
+      if (executeCallCount > 1) {
+        return new Response(JSON.stringify(createRunnerResult()), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }
       const signal = init?.signal;
       if (!(signal instanceof AbortSignal)) {
         throw new Error("Expected active invocation request to receive an abort signal.");
@@ -3596,25 +4036,429 @@ describe("RunnerContainer", () => {
 
     const signal = await runnerRequestSignal.promise;
     expect(signal.aborted).toBe(false);
+    const queuedInvokeResults = [
+      "evt_first_queued_behind_preempted_warm_shell",
+      "evt_second_queued_behind_preempted_warm_shell",
+    ].map((eventId) =>
+      container.invoke({
+        job: {
+          kind: "workspace-invocation",
+          request: createRunnerRequest(eventId),
+        },
+        timeoutMs: 30_000,
+        userId: "member_123",
+      }).catch((error: unknown) => error)
+    );
+    let abortSettled = false;
+    const abortResult = container.abortWorkspaceInvocation({
+      attemptId: request.attemptId,
+      leaseGeneration: request.leaseGeneration,
+      userId: "member_123",
+    });
+    void abortResult.then(
+      () => {
+        abortSettled = true;
+      },
+      () => {
+        abortSettled = true;
+      },
+    );
+
+    await destroyStarted.promise;
+    expect(abortSettled).toBe(false);
+    allowDestroyToSettle.resolve();
+    await expect(abortResult).resolves.toBe("accepted");
+
+    const replacementResult = container.invoke({
+      job: {
+        kind: "workspace-invocation",
+        request: createRunnerRequest("evt_immediate_foreground_replacement"),
+      },
+      timeoutMs: 30_000,
+      userId: "member_123",
+    });
+    await expect(invokeResultPromise).resolves.toMatchObject({
+      message: "workspace invocation preempted",
+    });
+    for (const queuedInvokeResult of queuedInvokeResults) {
+      await expect(queuedInvokeResult).resolves.toMatchObject({
+        message: "workspace invocation preempted",
+      });
+    }
+    await expect(replacementResult).resolves.toEqual(createRunnerResult());
+    expect(containerFetch.mock.calls.some(([url]) =>
+      String(url).endsWith("/internal/workspace-invocation/abort")
+    )).toBe(true);
+    expect(containerFetch.mock.calls.filter(([url]) =>
+      String(url).endsWith("/internal/workspace-invocation")
+    )).toHaveLength(2);
+    expect(startAndWaitForPorts).toHaveBeenCalledOnce();
+    expect(destroy).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps an exact abort registered until its child request settles", async () => {
+    const runnerRequestStarted = createDeferred<void>();
+    const runnerResponse = createDeferred<Response>();
+    const abortRequestStarted = createDeferred<void>();
+    const abortResponse = createDeferred<Response>();
+    let executeCallCount = 0;
+    const containerFetch = vi.fn(async (url: string) => {
+      if (url.endsWith("/health")) {
+        return new Response(JSON.stringify(createRunnerHealthResult()), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }
+      if (url.endsWith("/internal/workspace-invocation/abort")) {
+        abortRequestStarted.resolve(undefined);
+        return await abortResponse.promise;
+      }
+      if (url.endsWith("/internal/workspace-invocation")) {
+        executeCallCount += 1;
+        if (executeCallCount === 1) {
+          runnerRequestStarted.resolve(undefined);
+          return await runnerResponse.promise;
+        }
+        return new Response(JSON.stringify(createRunnerResult()), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }
+      throw new Error(`Unexpected runner request URL: ${url}`);
+    });
+    const { container } = createContainerDouble({
+      containerFetch,
+      initialStatus: "running",
+    });
+    const request = createRunnerRequest("evt_registered_abort_settlement");
+
+    const invocation = container.invoke({
+      job: {
+        kind: "workspace-invocation",
+        request,
+      },
+      timeoutMs: 30_000,
+      userId: "member_123",
+    });
+    await runnerRequestStarted.promise;
+    const abortResult = container.abortWorkspaceInvocation({
+      attemptId: request.attemptId,
+      leaseGeneration: request.leaseGeneration,
+      userId: "member_123",
+    });
+    await abortRequestStarted.promise;
+
+    runnerResponse.resolve(new Response(JSON.stringify(createRunnerResult()), {
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      status: 200,
+    }));
+    await expect(invocation).resolves.toEqual(createRunnerResult());
+    await expect(container.invoke({
+      job: {
+        kind: "workspace-invocation",
+        request,
+      },
+      timeoutMs: 30_000,
+      userId: "member_123",
+    })).resolves.toEqual(createRunnerResult());
+    const canceledSuccessor = container.invoke({
+      job: {
+        kind: "workspace-invocation",
+        request: createRunnerRequest("evt_registered_abort_successor"),
+      },
+      timeoutMs: 30_000,
+      userId: "member_123",
+    }).catch((error: unknown) => error);
+
+    await Promise.resolve();
+    expect(executeCallCount).toBe(1);
+    await expect(container.readActiveRuntimeUserFence()).resolves.toEqual({
+      active: true,
+      attemptId: request.attemptId,
+      leaseGeneration: request.leaseGeneration,
+      userId: "member_123",
+    });
+    await expect(container.wakeRuntime({
+      attemptId: request.attemptId,
+      leaseGeneration: request.leaseGeneration,
+      userId: "member_123",
+    })).resolves.toEqual({
+      kind: "unknown",
+      reason: "active-child-rejected",
+    });
+
+    abortResponse.resolve(new Response(null, { status: 204 }));
+    await expect(abortResult).resolves.toBe("accepted");
+    await expect(canceledSuccessor).resolves.toMatchObject({
+      message: "workspace invocation preempted",
+    });
+
+    await expect(container.invoke({
+      job: {
+        kind: "workspace-invocation",
+        request: createRunnerRequest("evt_after_registered_abort"),
+      },
+      timeoutMs: 30_000,
+      userId: "member_123",
+    })).resolves.toEqual(createRunnerResult());
+    expect(executeCallCount).toBe(2);
+  });
+
+  it("preserves failed preemption until platform stop is observed", async () => {
+    const runnerRequestSignal = createDeferred<AbortSignal>();
+    let status: "running" | "stopped" = "running";
+    const destroy = vi.fn(async () => {
+      throw new Error("destroy did not settle");
+    });
+    const getState = vi.fn(async () => ({
+      lastChange: Date.now(),
+      status,
+    }));
+    const containerFetch = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith("/health")) {
+        return new Response(JSON.stringify(createRunnerHealthResult()), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }
+
+      if (url.endsWith("/internal/workspace-invocation/abort")) {
+        return new Response(null, { status: 204 });
+      }
+
+      if (!url.endsWith("/internal/workspace-invocation")) {
+        throw new Error(`Unexpected runner request URL: ${url}`);
+      }
+
+      const signal = init?.signal;
+      if (!(signal instanceof AbortSignal)) {
+        throw new Error("Expected active invocation request to receive an abort signal.");
+      }
+      runnerRequestSignal.resolve(signal);
+      await new Promise<never>((_resolve, reject) => {
+        signal.addEventListener("abort", () => {
+          reject(signal.reason instanceof Error
+            ? signal.reason
+            : new Error("workspace invocation request aborted"));
+        }, { once: true });
+      });
+    });
+    const { container } = createContainerDouble({
+      containerFetch,
+      destroy,
+      getState,
+      initialStatus: "running",
+    });
+    const request = createRunnerRequest("evt_preempt_unsettled_warm_shell");
+    const invokeResult = container.invoke({
+      job: {
+        kind: "workspace-invocation",
+        request,
+      },
+      timeoutMs: 30_000,
+      userId: "member_123",
+    }).catch((error: unknown) => error);
+
+    await runnerRequestSignal.promise;
     await expect(container.abortWorkspaceInvocation({
       attemptId: request.attemptId,
       leaseGeneration: request.leaseGeneration,
       userId: "member_123",
-    })).resolves.toBe("accepted");
-
-    await expect(invokeResultPromise).resolves.toMatchObject({
-      message: "workspace invocation preempted",
+    })).resolves.toBe("failed");
+    await expect(invokeResult).resolves.toMatchObject({
+      message: "Hosted runner container failed to destroy cleanly.",
     });
-    expect(containerFetch.mock.calls.some(([url]) =>
-      String(url).endsWith("/internal/workspace-invocation/abort")
-    )).toBe(true);
-    expect(startAndWaitForPorts).not.toHaveBeenCalled();
-    expect(destroy).toHaveBeenCalledTimes(1);
+    await expect(container.readActiveRuntimeUserFence()).resolves.toEqual({
+      active: true,
+      attemptId: request.attemptId,
+      leaseGeneration: request.leaseGeneration,
+      userId: "member_123",
+    });
+
+    status = "stopped";
+    await expect(container.wakeRuntime({
+      attemptId: request.attemptId,
+      leaseGeneration: request.leaseGeneration,
+      userId: "member_123",
+    })).resolves.toEqual({
+      kind: "not-wakeable",
+      reason: "no-active-child",
+    });
+    await expect(container.readActiveRuntimeUserFence()).resolves.toEqual({
+      active: false,
+      reason: "no_active_runtime",
+    });
+    await expect(container.abortWorkspaceInvocation({
+      attemptId: request.attemptId,
+      leaseGeneration: request.leaseGeneration,
+      userId: "member_123",
+    })).resolves.toBe("inactive");
+    expect(destroy).toHaveBeenCalledOnce();
   });
 
-  it("keeps active liveness when an accepted workspace response is lost", async () => {
-    let runnerResponseLost = false;
+  it("retries failed invocation cleanup from the next exact wake", async () => {
+    let destroyAttempts = 0;
+    let status: "running" | "stopped" = "running";
+    const destroy = vi.fn(async () => {
+      destroyAttempts += 1;
+      if (destroyAttempts === 1) {
+        throw new Error("destroy did not settle");
+      }
+      status = "stopped";
+    });
+    const getState = vi.fn(async () => ({
+      lastChange: Date.now(),
+      status,
+    }));
+    const containerFetch = vi.fn(async (url: string) => {
+      if (url.endsWith("/health")) {
+        return new Response(JSON.stringify(createRunnerHealthResult()), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }
+      if (url.endsWith("/internal/workspace-invocation/abort")) {
+        return new Response(null, { status: 204 });
+      }
+      if (url.endsWith("/internal/runtime-wake")) {
+        throw new Error("Cleanup retry must settle before runtime wake.");
+      }
+      if (url.endsWith("/internal/workspace-invocation")) {
+        return createInvalidRunnerRequestResponse();
+      }
+      throw new Error(`Unexpected runner request URL: ${url}`);
+    });
+    const { container } = createContainerDouble({
+      containerFetch,
+      destroy,
+      getState,
+      initialStatus: "running",
+    });
+    const request = createRunnerRequest("evt_cleanup_retry_from_exact_wake");
+
+    const invokeError = await container.invoke({
+      job: {
+        kind: "workspace-invocation",
+        request,
+      },
+      timeoutMs: 30_000,
+      userId: "member_123",
+    }).catch((error: unknown) => error);
+    expect(invokeError).toBeInstanceOf(Error);
+    expect(destroy).toHaveBeenCalledOnce();
+    await expect(container.readActiveRuntimeUserFence()).resolves.toEqual({
+      active: true,
+      attemptId: request.attemptId,
+      leaseGeneration: request.leaseGeneration,
+      userId: "member_123",
+    });
+
+    await expect(container.wakeRuntime({
+      attemptId: request.attemptId,
+      leaseGeneration: request.leaseGeneration,
+      userId: "member_123",
+    })).resolves.toEqual({
+      kind: "not-wakeable",
+      reason: "no-active-child",
+    });
+    expect(destroy).toHaveBeenCalledTimes(2);
+    expect(containerFetch.mock.calls.some(([url]) =>
+      String(url).endsWith("/internal/runtime-wake")
+    )).toBe(false);
+    await expect(container.readActiveRuntimeUserFence()).resolves.toEqual({
+      active: false,
+      reason: "no_active_runtime",
+    });
+  });
+
+  it("keeps exact active liveness while preserved cleanup fails concurrently", async () => {
+    const preservedStatusStarted = createDeferred<void>();
+    const releasePreservedStatus = createDeferred<void>();
+    let deferNextStatus = false;
+    const destroy = vi.fn(async () => {
+      throw new Error("destroy did not settle");
+    });
+    const getState = vi.fn(async () => {
+      if (deferNextStatus) {
+        deferNextStatus = false;
+        preservedStatusStarted.resolve(undefined);
+        await releasePreservedStatus.promise;
+      }
+      return {
+        lastChange: Date.now(),
+        status: "running" as const,
+      };
+    });
+    const containerFetch = vi.fn(async (url: string) => {
+      if (url.endsWith("/health")) {
+        return new Response(JSON.stringify({
+          ...createRunnerHealthResult(),
+          activeJobCount: 0,
+        }), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }
+      if (url.endsWith("/internal/workspace-invocation/abort")) {
+        return new Response(null, { status: 204 });
+      }
+      if (url.endsWith("/internal/workspace-invocation")) {
+        throw new Error("Network connection lost");
+      }
+      throw new Error(`Unexpected runner request URL: ${url}`);
+    });
+    const { container } = createContainerDouble({
+      containerFetch,
+      destroy,
+      getState,
+      initialStatus: "running",
+    });
+    const request = createRunnerRequest(
+      "evt_preserved_liveness_during_failed_cleanup",
+    );
+
+    await expect(container.invoke({
+      job: {
+        kind: "workspace-invocation",
+        request,
+      },
+      timeoutMs: 30_000,
+      userId: "member_123",
+    })).rejects.toThrow("Network connection lost");
+
+    deferNextStatus = true;
+    const liveness = container.readActiveRuntimeUserFence();
+    await preservedStatusStarted.promise;
+    await expect(container.abortWorkspaceInvocation({
+      attemptId: request.attemptId,
+      leaseGeneration: request.leaseGeneration,
+      userId: "member_123",
+    })).resolves.toBe("failed");
+    releasePreservedStatus.resolve(undefined);
+
+    await expect(liveness).resolves.toEqual({
+      active: true,
+      attemptId: request.attemptId,
+      leaseGeneration: request.leaseGeneration,
+      userId: "member_123",
+    });
+  });
+
+  it("ignores health zero until an absent wake settles the exact stop", async () => {
     let healthProbeFails = false;
+    let status: "running" | "stopped" = "running";
     const containerFetch = vi.fn(async (url: string) => {
       if (url.endsWith("/health")) {
         if (healthProbeFails) {
@@ -3622,7 +4466,7 @@ describe("RunnerContainer", () => {
         }
         return new Response(JSON.stringify({
           ...createRunnerHealthResult(),
-          activeJobCount: runnerResponseLost ? 1 : 0,
+          activeJobCount: 0,
         }), {
           headers: {
             "content-type": "application/json; charset=utf-8",
@@ -3631,15 +4475,37 @@ describe("RunnerContainer", () => {
         });
       }
 
+      if (url.endsWith("/internal/runtime-wake")) {
+        return new Response(null, {
+          headers: {
+            "x-runtime-wake-absent": "1",
+            "x-runtime-wake-accepted": "0",
+          },
+          status: 204,
+        });
+      }
+
+      if (url.endsWith("/internal/workspace-invocation/abort")) {
+        return new Response(null, { status: 204 });
+      }
+
       if (!url.endsWith("/internal/workspace-invocation")) {
         throw new Error(`Unexpected runner request URL: ${url}`);
       }
 
-      runnerResponseLost = true;
       throw new Error("Network connection lost");
     });
-    const { container, destroy, startAndWaitForPorts } = createContainerDouble({
+    const destroy = vi.fn(async () => {
+      status = "stopped";
+    });
+    const getState = vi.fn(async () => ({
+      lastChange: Date.now(),
+      status,
+    }));
+    const { container, startAndWaitForPorts } = createContainerDouble({
       containerFetch,
+      destroy,
+      getState,
       initialStatus: "running",
     });
     const request = createRunnerRequest("evt_response_lost_after_accept");
@@ -3688,13 +4554,14 @@ describe("RunnerContainer", () => {
     });
 
     healthProbeFails = true;
-    await expect(container.readActiveRuntimeUserFence()).rejects.toThrow(
-      "health probe unavailable",
-    );
+    await expect(container.readActiveRuntimeUserFence()).resolves.toEqual({
+      active: true,
+      attemptId: request.attemptId,
+      leaseGeneration: request.leaseGeneration,
+      userId: "member_123",
+    });
 
     const callsBeforeStaleWake = containerFetch.mock.calls.length;
-    healthProbeFails = false;
-    runnerResponseLost = false;
     await expect(container.wakeRuntime({
       attemptId: request.attemptId,
       leaseGeneration: request.leaseGeneration,
@@ -3705,11 +4572,318 @@ describe("RunnerContainer", () => {
     });
     expect(containerFetch.mock.calls.slice(callsBeforeStaleWake).some(([url]) =>
       String(url).endsWith("/internal/runtime-wake")
-    )).toBe(false);
+    )).toBe(true);
+    expect(containerFetch.mock.calls.slice(callsBeforeStaleWake).some(([url]) =>
+      String(url).endsWith("/internal/workspace-invocation/abort")
+    )).toBe(true);
+    expect(destroy).toHaveBeenCalledOnce();
     await expect(container.readActiveRuntimeUserFence()).resolves.toEqual({
       active: false,
       reason: "no_active_runtime",
     });
+  });
+
+  it("clears a transport-uncertain operation after explicit destroy settles", async () => {
+    let status: "running" | "stopped" = "running";
+    let workspaceFetchCount = 0;
+    const containerFetch = vi.fn(async (url: string) => {
+      if (url.endsWith("/health")) {
+        return new Response(JSON.stringify(createRunnerHealthResult()), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }
+      if (url.endsWith("/internal/workspace-invocation")) {
+        workspaceFetchCount += 1;
+        if (workspaceFetchCount === 1) {
+          throw new Error("Network connection lost");
+        }
+        return new Response(JSON.stringify(createRunnerResult()), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }
+      throw new Error(`Unexpected runner request URL: ${url}`);
+    });
+    const destroy = vi.fn(async () => {
+      status = "stopped";
+    });
+    const getState = vi.fn(async () => ({
+      lastChange: Date.now(),
+      status,
+    }));
+    const startAndWaitForPorts = vi.fn(async () => {
+      status = "running";
+    });
+    const { container } = createContainerDouble({
+      containerFetch,
+      destroy,
+      getState,
+      initialStatus: "running",
+      startAndWaitForPorts,
+    });
+    const firstRequest = createRunnerRequest(
+      "evt_transport_uncertain_before_destroy",
+    );
+
+    await expect(container.invoke({
+      job: {
+        kind: "workspace-invocation",
+        request: firstRequest,
+      },
+      timeoutMs: 30_000,
+      userId: "member_123",
+    })).rejects.toThrow("Network connection lost");
+
+    await expect(container.destroyInstance()).resolves.toBeUndefined();
+    await expect(container.invoke({
+      job: {
+        kind: "workspace-invocation",
+        request: createRunnerRequest("evt_after_transport_uncertain_destroy"),
+      },
+      timeoutMs: 30_000,
+      userId: "member_123",
+    })).resolves.toEqual(createRunnerResult());
+
+    expect(destroy).toHaveBeenCalledOnce();
+    expect(startAndWaitForPorts).toHaveBeenCalledOnce();
+    expect(workspaceFetchCount).toBe(2);
+  });
+
+  it("retries a failed explicit destroy from the next exact wake", async () => {
+    let destroyAttempts = 0;
+    let status: "running" | "stopped" = "running";
+    const containerFetch = vi.fn(async (url: string) => {
+      if (url.endsWith("/health")) {
+        return new Response(JSON.stringify(createRunnerHealthResult()), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }
+      if (url.endsWith("/internal/workspace-invocation/abort")) {
+        return new Response(null, { status: 204 });
+      }
+      if (url.endsWith("/internal/runtime-wake")) {
+        throw new Error("Destroy retry must settle before runtime wake.");
+      }
+      if (url.endsWith("/internal/workspace-invocation")) {
+        throw new Error("Network connection lost");
+      }
+      throw new Error(`Unexpected runner request URL: ${url}`);
+    });
+    const destroy = vi.fn(async () => {
+      destroyAttempts += 1;
+      if (destroyAttempts === 1) {
+        throw new Error("destroy did not settle");
+      }
+      status = "stopped";
+    });
+    const getState = vi.fn(async () => ({
+      lastChange: Date.now(),
+      status,
+    }));
+    const { container } = createContainerDouble({
+      containerFetch,
+      destroy,
+      getState,
+      initialStatus: "running",
+    });
+    const request = createRunnerRequest("evt_failed_destroy_exact_retry");
+
+    await expect(container.invoke({
+      job: {
+        kind: "workspace-invocation",
+        request,
+      },
+      timeoutMs: 30_000,
+      userId: "member_123",
+    })).rejects.toThrow("Network connection lost");
+
+    await expect(container.destroyInstance()).rejects.toThrow(
+      "Hosted runner container failed to destroy cleanly.",
+    );
+    await expect(container.wakeRuntime({
+      attemptId: request.attemptId,
+      leaseGeneration: request.leaseGeneration,
+      userId: "member_123",
+    })).resolves.toEqual({
+      kind: "not-wakeable",
+      reason: "no-active-child",
+    });
+    expect(destroy).toHaveBeenCalledTimes(2);
+    await expect(container.readActiveRuntimeUserFence()).resolves.toEqual({
+      active: false,
+      reason: "no_active_runtime",
+    });
+  });
+
+  it("does not let a delayed stale abort stop a replacement shell", async () => {
+    const abortRequestStarted = createDeferred<void>();
+    const abortResponse = createDeferred<Response>();
+    const replacementRequestStarted = createDeferred<void>();
+    const replacementResponse = createDeferred<Response>();
+    let status: "running" | "stopped" = "running";
+    let workspaceFetchCount = 0;
+    const containerFetch = vi.fn(async (url: string) => {
+      if (url.endsWith("/health")) {
+        return new Response(JSON.stringify(createRunnerHealthResult()), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }
+      if (url.endsWith("/internal/workspace-invocation/abort")) {
+        abortRequestStarted.resolve(undefined);
+        return await abortResponse.promise;
+      }
+      if (url.endsWith("/internal/workspace-invocation")) {
+        workspaceFetchCount += 1;
+        if (workspaceFetchCount === 1) {
+          throw new Error("Network connection lost");
+        }
+        replacementRequestStarted.resolve(undefined);
+        return await replacementResponse.promise;
+      }
+      throw new Error(`Unexpected runner request URL: ${url}`);
+    });
+    const destroy = vi.fn(async () => {
+      status = "stopped";
+    });
+    const getState = vi.fn(async () => ({
+      lastChange: Date.now(),
+      status,
+    }));
+    const startAndWaitForPorts = vi.fn(async () => {
+      status = "running";
+    });
+    const { container } = createContainerDouble({
+      containerFetch,
+      destroy,
+      getState,
+      initialStatus: "running",
+      startAndWaitForPorts,
+    });
+    const staleRequest = createRunnerRequest("evt_delayed_abort_before_destroy");
+
+    await expect(container.invoke({
+      job: {
+        kind: "workspace-invocation",
+        request: staleRequest,
+      },
+      timeoutMs: 30_000,
+      userId: "member_123",
+    })).rejects.toThrow("Network connection lost");
+
+    const staleAbort = container.abortWorkspaceInvocation({
+      attemptId: staleRequest.attemptId,
+      leaseGeneration: staleRequest.leaseGeneration,
+      userId: "member_123",
+    });
+    await abortRequestStarted.promise;
+    await expect(container.destroyInstance()).resolves.toBeUndefined();
+
+    const replacement = container.invoke({
+      job: {
+        kind: "workspace-invocation",
+        request: createRunnerRequest("evt_replacement_after_delayed_abort"),
+      },
+      timeoutMs: 30_000,
+      userId: "member_123",
+    });
+    await replacementRequestStarted.promise;
+
+    abortResponse.resolve(new Response(null, { status: 204 }));
+    await expect(staleAbort).resolves.toBe("accepted");
+    expect(destroy).toHaveBeenCalledOnce();
+
+    replacementResponse.resolve(new Response(JSON.stringify(createRunnerResult()), {
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      status: 200,
+    }));
+    await expect(replacement).resolves.toEqual(createRunnerResult());
+    expect(destroy).toHaveBeenCalledOnce();
+  });
+
+  it("serializes preserved invocation cleanup with lifecycle work", async () => {
+    const readinessHealthStarted = createDeferred<void>();
+    const releaseReadinessHealth = createDeferred<void>();
+    let healthCallCount = 0;
+    let status: "running" | "stopped" = "running";
+    const containerFetch = vi.fn(async (url: string) => {
+      if (url.endsWith("/health")) {
+        healthCallCount += 1;
+        if (healthCallCount === 2) {
+          readinessHealthStarted.resolve(undefined);
+          await releaseReadinessHealth.promise;
+        }
+        return new Response(JSON.stringify(createRunnerHealthResult()), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }
+      if (url.endsWith("/internal/workspace-invocation/abort")) {
+        return new Response(null, { status: 204 });
+      }
+      if (url.endsWith("/internal/workspace-invocation")) {
+        throw new Error("Network connection lost");
+      }
+      throw new Error(`Unexpected runner request URL: ${url}`);
+    });
+    const destroy = vi.fn(async () => {
+      status = "stopped";
+    });
+    const getState = vi.fn(async () => ({
+      lastChange: Date.now(),
+      status,
+    }));
+    const { container } = createContainerDouble({
+      containerFetch,
+      destroy,
+      getState,
+      initialStatus: "running",
+    });
+    const request = createRunnerRequest("evt_serialized_preserved_cleanup");
+
+    await expect(container.invoke({
+      job: {
+        kind: "workspace-invocation",
+        request,
+      },
+      timeoutMs: 30_000,
+      userId: "member_123",
+    })).rejects.toThrow("Network connection lost");
+
+    const readiness = container.ensureReadyForProcessing({
+      timeoutMs: 30_000,
+      userId: "member_123",
+    });
+    await readinessHealthStarted.promise;
+    const abortResult = container.abortWorkspaceInvocation({
+      attemptId: request.attemptId,
+      leaseGeneration: request.leaseGeneration,
+      userId: "member_123",
+    });
+
+    await Promise.resolve();
+    expect(destroy).not.toHaveBeenCalled();
+    releaseReadinessHealth.resolve(undefined);
+    await expect(readiness).resolves.toEqual({
+      action: "already_warm",
+      kind: "ready",
+    });
+    await expect(abortResult).resolves.toBe("accepted");
+    expect(destroy).toHaveBeenCalledOnce();
   });
 
   it("does not report inactive liveness from a missing local pointer while health reports active work", async () => {
@@ -3859,12 +5033,25 @@ describe("RunnerContainer", () => {
       leaseGeneration: staleRequest.leaseGeneration,
       userId: "member_123",
     });
+    const canceledRetry = container.invoke({
+      job: {
+        kind: "workspace-invocation",
+        request: staleRequest,
+      },
+      timeoutMs: 30_000,
+      userId: "member_123",
+    }).catch((error: unknown) => error);
     const replacement = container.invoke({
       job: {
         kind: "workspace-invocation",
         request: replacementRequest,
       },
       timeoutMs: 30_000,
+      userId: "member_123",
+    });
+    const thirdAbort = container.abortWorkspaceInvocation({
+      attemptId: staleRequest.attemptId,
+      leaseGeneration: staleRequest.leaseGeneration,
       userId: "member_123",
     });
 
@@ -3875,10 +5062,271 @@ describe("RunnerContainer", () => {
     firstAbortResponse.resolve(new Response(null, { status: 503 }));
 
     await expect(firstAbort).resolves.toBe("accepted");
-    await expect(secondAbort).resolves.toBe("inactive");
+    await expect(secondAbort).resolves.toBe("accepted");
+    await expect(thirdAbort).resolves.toBe("accepted");
+    await expect(canceledRetry).resolves.toMatchObject({
+      message: "workspace invocation preempted",
+    });
     await expect(replacement).resolves.toEqual(createRunnerResult());
     expect(destroy).toHaveBeenCalledOnce();
     expect(startAndWaitForPorts).toHaveBeenCalledOnce();
+  });
+
+  it("keeps a no-pointer abort exact until fail-closed stop settles", async () => {
+    const destroyStarted = createDeferred<void>();
+    const releaseDestroy = createDeferred<void>();
+    let status: "running" | "stopped" = "running";
+    const request = createRunnerRequest("evt_no_pointer_abort_settlement");
+    const containerFetch = vi.fn(async (url: string) => {
+      if (url.endsWith("/internal/workspace-invocation/abort")) {
+        return new Response(null, { status: 204 });
+      }
+      throw new Error(`Unexpected runner request URL: ${url}`);
+    });
+    const destroy = vi.fn(async () => {
+      destroyStarted.resolve(undefined);
+      await releaseDestroy.promise;
+      status = "stopped";
+    });
+    const getState = vi.fn(async () => ({
+      lastChange: Date.now(),
+      status,
+    }));
+    const { container } = createContainerDouble({
+      containerFetch,
+      destroy,
+      getState,
+      initialStatus: "running",
+    });
+
+    const abortResult = container.abortWorkspaceInvocation({
+      attemptId: request.attemptId,
+      leaseGeneration: request.leaseGeneration,
+      userId: "member_123",
+    });
+    await destroyStarted.promise;
+
+    await expect(container.readActiveRuntimeUserFence()).resolves.toEqual({
+      active: true,
+      attemptId: request.attemptId,
+      leaseGeneration: request.leaseGeneration,
+      userId: "member_123",
+    });
+    await expect(container.wakeRuntime({
+      attemptId: request.attemptId,
+      leaseGeneration: request.leaseGeneration,
+      userId: "member_123",
+    })).resolves.toEqual({
+      kind: "unknown",
+      reason: "active-child-rejected",
+    });
+
+    releaseDestroy.resolve(undefined);
+    await expect(abortResult).resolves.toBe("accepted");
+    await expect(container.readActiveRuntimeUserFence()).resolves.toEqual({
+      active: false,
+      reason: "no_active_runtime",
+    });
+  });
+
+  it("keeps failed no-pointer cleanup indeterminate until an exact retry settles", async () => {
+    const secondDestroyStarted = createDeferred<void>();
+    const releaseSecondDestroy = createDeferred<void>();
+    let destroyAttempts = 0;
+    let status: "running" | "stopped" = "running";
+    const request = createRunnerRequest("evt_no_pointer_abort_retry");
+    const containerFetch = vi.fn(async (url: string) => {
+      if (url.endsWith("/internal/workspace-invocation/abort")) {
+        return new Response(null, { status: 204 });
+      }
+      throw new Error(`Unexpected runner request URL: ${url}`);
+    });
+    const destroy = vi.fn(async () => {
+      destroyAttempts += 1;
+      if (destroyAttempts === 2) {
+        secondDestroyStarted.resolve(undefined);
+        await releaseSecondDestroy.promise;
+      }
+      if (destroyAttempts <= 2) {
+        throw new Error("destroy did not settle");
+      }
+      status = "stopped";
+    });
+    const getState = vi.fn(async () => ({
+      lastChange: Date.now(),
+      status,
+    }));
+    const { container } = createContainerDouble({
+      containerFetch,
+      destroy,
+      getState,
+      initialStatus: "running",
+    });
+
+    await expect(container.abortWorkspaceInvocation({
+      attemptId: request.attemptId,
+      leaseGeneration: request.leaseGeneration,
+      userId: "member_123",
+    })).rejects.toThrow("Hosted runner container failed to destroy cleanly.");
+    await expect(container.readActiveRuntimeUserFence()).rejects.toThrow(
+      "Hosted runner container has an unsettled fail-closed stop.",
+    );
+    await expect(container.wakeRuntime({
+      attemptId: request.attemptId,
+      leaseGeneration: request.leaseGeneration,
+      userId: "member_123",
+    })).resolves.toEqual({
+      kind: "unknown",
+      reason: "active-child-rejected",
+    });
+
+    const invokeResult = container.invoke({
+      job: {
+        kind: "workspace-invocation",
+        request,
+      },
+      timeoutMs: 30_000,
+      userId: "member_123",
+    }).catch((error: unknown) => error);
+    await secondDestroyStarted.promise;
+    const registeredAbort = container.abortWorkspaceInvocation({
+      attemptId: request.attemptId,
+      leaseGeneration: request.leaseGeneration,
+      userId: "member_123",
+    });
+    releaseSecondDestroy.resolve(undefined);
+    await expect(invokeResult).resolves.toMatchObject({
+      message: "Hosted runner container failed to destroy cleanly.",
+    });
+    await expect(registeredAbort).resolves.toBe("failed");
+
+    await expect(container.abortWorkspaceInvocation({
+      attemptId: request.attemptId,
+      leaseGeneration: request.leaseGeneration,
+      userId: "member_123",
+    })).resolves.toBe("accepted");
+    await expect(container.readActiveRuntimeUserFence()).resolves.toEqual({
+      active: false,
+      reason: "no_active_runtime",
+    });
+  });
+
+  it("aborts coalesced exact queued system mailbox invocations before runner dispatch", async () => {
+    const readinessHealthStarted = createDeferred<void>();
+    const releaseReadinessHealth = createDeferred<void>();
+    let holdFirstHealth = true;
+    const request = {
+      ...createRunnerRequest("evt_abort_queued_system_mailbox"),
+      processingMode: "system_mailbox" as const,
+    };
+    const containerFetch = vi.fn(async (url: string) => {
+      if (url.endsWith("/health")) {
+        if (holdFirstHealth) {
+          holdFirstHealth = false;
+          readinessHealthStarted.resolve(undefined);
+          await releaseReadinessHealth.promise;
+        }
+        return new Response(JSON.stringify(createRunnerHealthResult()), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }
+      if (url.endsWith("/internal/workspace-invocation/abort")) {
+        return new Response(null, {
+          headers: {
+            "x-workspace-invocation-abort-status": "accepted",
+          },
+          status: 204,
+        });
+      }
+      if (url.endsWith("/internal/workspace-invocation")) {
+        return new Response(JSON.stringify(createRunnerResult()), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }
+      throw new Error(`Unexpected runner request URL: ${url}`);
+    });
+    const { container } = createContainerDouble({
+      containerFetch,
+      initialStatus: "running",
+    });
+
+    const lockHolder = container.ensureReadyForProcessing({
+      timeoutMs: 30_000,
+      userId: "member_123",
+    });
+    await readinessHealthStarted.promise;
+    const invokeResult = container.invoke({
+      job: {
+        kind: "workspace-invocation",
+        request,
+      },
+      timeoutMs: 30_000,
+      userId: "member_123",
+    }).catch((error: unknown) => error);
+    const duplicateInvokeResult = container.invoke({
+      job: {
+        kind: "workspace-invocation",
+        request,
+      },
+      timeoutMs: 30_000,
+      userId: "member_123",
+    }).catch((error: unknown) => error);
+    await expect(container.abortWorkspaceInvocation({
+      attemptId: request.attemptId,
+      leaseGeneration: `${request.leaseGeneration}-stale`,
+      userId: "member_123",
+    })).resolves.toBe("stale");
+    await expect(container.abortWorkspaceInvocation({
+      attemptId: request.attemptId,
+      leaseGeneration: request.leaseGeneration,
+      userId: "member_other",
+    })).resolves.toBe("stale");
+    const abortResult = container.abortWorkspaceInvocation({
+      attemptId: request.attemptId,
+      leaseGeneration: request.leaseGeneration,
+      userId: "member_123",
+    });
+    const executeCalls = () =>
+      containerFetch.mock.calls.filter(([url]) =>
+        String(url).endsWith("/internal/workspace-invocation")
+      );
+
+    expect(executeCalls()).toHaveLength(0);
+    await expect(container.readActiveRuntimeUserFence()).resolves.toEqual({
+      active: true,
+      attemptId: request.attemptId,
+      leaseGeneration: request.leaseGeneration,
+      userId: "member_123",
+    });
+    await expect(container.wakeRuntime({
+      attemptId: request.attemptId,
+      leaseGeneration: request.leaseGeneration,
+      processingMode: "system_mailbox",
+      userId: "member_123",
+    })).resolves.toEqual({
+      kind: "unknown",
+      reason: "active-child-rejected",
+    });
+    releaseReadinessHealth.resolve(undefined);
+
+    await expect(lockHolder).resolves.toEqual({
+      action: "already_warm",
+      kind: "ready",
+    });
+    await expect(abortResult).resolves.toBe("accepted");
+    await expect(invokeResult).resolves.toMatchObject({
+      message: "workspace invocation preempted",
+    });
+    await expect(duplicateInvokeResult).resolves.toMatchObject({
+      message: "workspace invocation preempted",
+    });
+    expect(executeCalls()).toHaveLength(0);
   });
 
   it("reports inactive liveness from a missing local pointer only after running health is idle", async () => {
@@ -3905,6 +5353,286 @@ describe("RunnerContainer", () => {
       active: false,
       reason: "no_active_runtime",
     });
+  });
+
+  it("rechecks exact coordination before returning inactive liveness", async () => {
+    const firstStatusStarted = createDeferred<void>();
+    const releaseFirstStatus = createDeferred<void>();
+    const runnerRequestStarted = createDeferred<void>();
+    const runnerResponse = createDeferred<Response>();
+    let statusReadCount = 0;
+    const getState = vi.fn(async () => {
+      statusReadCount += 1;
+      if (statusReadCount === 1) {
+        firstStatusStarted.resolve(undefined);
+        await releaseFirstStatus.promise;
+      }
+      return {
+        lastChange: Date.now(),
+        status: "running",
+      };
+    });
+    const containerFetch = vi.fn(async (url: string) => {
+      if (url.endsWith("/health")) {
+        return new Response(JSON.stringify({
+          ...createRunnerHealthResult(),
+          activeJobCount: 0,
+        }), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }
+      if (url.endsWith("/internal/workspace-invocation")) {
+        runnerRequestStarted.resolve(undefined);
+        return await runnerResponse.promise;
+      }
+      throw new Error(`Unexpected runner request URL: ${url}`);
+    });
+    const { container } = createContainerDouble({
+      containerFetch,
+      getState,
+      initialStatus: "running",
+    });
+    const request = createRunnerRequest("evt_liveness_registered_during_probe");
+
+    const liveness = container.readActiveRuntimeUserFence();
+    await firstStatusStarted.promise;
+    const invokeResult = container.invoke({
+      job: {
+        kind: "workspace-invocation",
+        request,
+      },
+      timeoutMs: 30_000,
+      userId: "member_123",
+    });
+    await runnerRequestStarted.promise;
+    releaseFirstStatus.resolve(undefined);
+
+    await expect(liveness).resolves.toEqual({
+      active: true,
+      attemptId: request.attemptId,
+      leaseGeneration: request.leaseGeneration,
+      userId: "member_123",
+    });
+
+    runnerResponse.resolve(new Response(JSON.stringify(createRunnerResult()), {
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      status: 200,
+    }));
+    await expect(invokeResult).resolves.toEqual(createRunnerResult());
+  });
+
+  it("rechecks the preserved owner after asynchronous liveness probes", async () => {
+    const preservedProbesStarted = createDeferred<void>();
+    const releasePreservedProbes = createDeferred<void>();
+    const replacementRequestStarted = createDeferred<void>();
+    const replacementResponse = createDeferred<Response>();
+    let delayedProbeCount = 0;
+    let delayedProbesRemaining = 0;
+    let executeCallCount = 0;
+    let status: "running" | "stopped" = "running";
+    const getState = vi.fn(async () => {
+      if (delayedProbesRemaining > 0) {
+        delayedProbesRemaining -= 1;
+        delayedProbeCount += 1;
+        if (delayedProbeCount === 2) {
+          preservedProbesStarted.resolve(undefined);
+        }
+        await releasePreservedProbes.promise;
+      }
+      return {
+        lastChange: Date.now(),
+        status,
+      };
+    });
+    const destroy = vi.fn(async () => {
+      status = "stopped";
+    });
+    const startAndWaitForPorts = vi.fn(async () => {
+      status = "running";
+    });
+    const containerFetch = vi.fn(async (url: string) => {
+      if (url.endsWith("/health")) {
+        return new Response(JSON.stringify(createRunnerHealthResult()), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }
+      if (url.endsWith("/internal/workspace-invocation/abort")) {
+        return new Response(null, { status: 204 });
+      }
+      if (url.endsWith("/internal/runtime-wake")) {
+        throw new Error("A stale preserved owner must not reach runtime wake.");
+      }
+      if (url.endsWith("/internal/workspace-invocation")) {
+        executeCallCount += 1;
+        if (executeCallCount === 1) {
+          throw new Error("Network connection lost");
+        }
+        replacementRequestStarted.resolve(undefined);
+        return await replacementResponse.promise;
+      }
+      throw new Error(`Unexpected runner request URL: ${url}`);
+    });
+    const { container } = createContainerDouble({
+      containerFetch,
+      destroy,
+      getState,
+      initialStatus: "running",
+      startAndWaitForPorts,
+    });
+    const staleRequest = createRunnerRequest("evt_preserved_owner_replaced");
+    const replacementRequest = createRunnerRequest(
+      "evt_preserved_owner_replacement",
+    );
+
+    await expect(container.invoke({
+      job: {
+        kind: "workspace-invocation",
+        request: staleRequest,
+      },
+      timeoutMs: 30_000,
+      userId: "member_123",
+    })).rejects.toThrow("Network connection lost");
+
+    delayedProbesRemaining = 2;
+    const liveness = container.readActiveRuntimeUserFence();
+    const wake = container.wakeRuntime({
+      attemptId: staleRequest.attemptId,
+      leaseGeneration: staleRequest.leaseGeneration,
+      userId: "member_123",
+    });
+    await preservedProbesStarted.promise;
+    await expect(container.abortWorkspaceInvocation({
+      attemptId: staleRequest.attemptId,
+      leaseGeneration: staleRequest.leaseGeneration,
+      userId: "member_123",
+    })).resolves.toBe("accepted");
+
+    const replacement = container.invoke({
+      job: {
+        kind: "workspace-invocation",
+        request: replacementRequest,
+      },
+      timeoutMs: 30_000,
+      userId: "member_123",
+    });
+    await replacementRequestStarted.promise;
+    releasePreservedProbes.resolve(undefined);
+
+    await expect(liveness).resolves.toEqual({
+      active: true,
+      attemptId: replacementRequest.attemptId,
+      leaseGeneration: replacementRequest.leaseGeneration,
+      userId: "member_123",
+    });
+    await expect(wake).resolves.toEqual({
+      kind: "unknown",
+      reason: "active-child-rejected",
+    });
+    expect(containerFetch.mock.calls.some(([url]) =>
+      String(url).endsWith("/internal/runtime-wake")
+    )).toBe(false);
+
+    replacementResponse.resolve(new Response(JSON.stringify(createRunnerResult()), {
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      status: 200,
+    }));
+    await expect(replacement).resolves.toEqual(createRunnerResult());
+  });
+
+  it("keeps wake unconfirmed when abort starts during preserved status", async () => {
+    const preservedStatusStarted = createDeferred<void>();
+    const releasePreservedStatus = createDeferred<void>();
+    const abortRequestStarted = createDeferred<void>();
+    const abortResponse = createDeferred<Response>();
+    let deferNextStatus = false;
+    let status: "running" | "stopped" = "running";
+    const getState = vi.fn(async () => {
+      if (deferNextStatus) {
+        deferNextStatus = false;
+        preservedStatusStarted.resolve(undefined);
+        await releasePreservedStatus.promise;
+      }
+      return {
+        lastChange: Date.now(),
+        status,
+      };
+    });
+    const destroy = vi.fn(async () => {
+      status = "stopped";
+    });
+    const containerFetch = vi.fn(async (url: string) => {
+      if (url.endsWith("/health")) {
+        return new Response(JSON.stringify(createRunnerHealthResult()), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }
+      if (url.endsWith("/internal/workspace-invocation/abort")) {
+        abortRequestStarted.resolve(undefined);
+        return await abortResponse.promise;
+      }
+      if (url.endsWith("/internal/runtime-wake")) {
+        throw new Error("An aborting preserved invocation must not be woken.");
+      }
+      if (url.endsWith("/internal/workspace-invocation")) {
+        throw new Error("Network connection lost");
+      }
+      throw new Error(`Unexpected runner request URL: ${url}`);
+    });
+    const { container } = createContainerDouble({
+      containerFetch,
+      destroy,
+      getState,
+      initialStatus: "running",
+    });
+    const request = createRunnerRequest("evt_abort_during_preserved_health");
+
+    await expect(container.invoke({
+      job: {
+        kind: "workspace-invocation",
+        request,
+      },
+      timeoutMs: 30_000,
+      userId: "member_123",
+    })).rejects.toThrow("Network connection lost");
+
+    deferNextStatus = true;
+    const wake = container.wakeRuntime({
+      attemptId: request.attemptId,
+      leaseGeneration: request.leaseGeneration,
+      userId: "member_123",
+    });
+    await preservedStatusStarted.promise;
+    const abortResult = container.abortWorkspaceInvocation({
+      attemptId: request.attemptId,
+      leaseGeneration: request.leaseGeneration,
+      userId: "member_123",
+    });
+    await abortRequestStarted.promise;
+    releasePreservedStatus.resolve(undefined);
+
+    await expect(wake).resolves.toEqual({
+      kind: "unknown",
+      reason: "active-child-rejected",
+    });
+    expect(containerFetch.mock.calls.some(([url]) =>
+      String(url).endsWith("/internal/runtime-wake")
+    )).toBe(false);
+
+    abortResponse.resolve(new Response(null, { status: 204 }));
+    await expect(abortResult).resolves.toBe("accepted");
   });
 
   it("reports inactive liveness from a missing local pointer when the container is already gone", async () => {
@@ -4085,7 +5813,7 @@ describe("RunnerContainer", () => {
     });
   });
 
-  it("keeps active liveness when an accepted workspace response body is lost", async () => {
+  it("converges an idle child after an accepted workspace response body is lost", async () => {
     let runnerBodyLost = false;
     const containerFetch = vi.fn(async (url: string) => {
       if (url.endsWith("/health")) {
@@ -4098,6 +5826,20 @@ describe("RunnerContainer", () => {
           },
           status: 200,
         });
+      }
+
+      if (url.endsWith("/internal/runtime-wake")) {
+        return new Response(null, {
+          headers: {
+            "x-runtime-wake-absent": "1",
+            "x-runtime-wake-accepted": "0",
+          },
+          status: 204,
+        });
+      }
+
+      if (url.endsWith("/internal/workspace-invocation/abort")) {
+        return new Response(null, { status: 204 });
       }
 
       if (!url.endsWith("/internal/workspace-invocation")) {
@@ -4163,6 +5905,20 @@ describe("RunnerContainer", () => {
       attemptId: request.attemptId,
       leaseGeneration: request.leaseGeneration,
       userId: "member_123",
+    });
+
+    await expect(container.wakeRuntime({
+      attemptId: request.attemptId,
+      leaseGeneration: request.leaseGeneration,
+      userId: "member_123",
+    })).resolves.toEqual({
+      kind: "not-wakeable",
+      reason: "no-active-child",
+    });
+    expect(destroy).toHaveBeenCalledOnce();
+    await expect(container.readActiveRuntimeUserFence()).resolves.toEqual({
+      active: false,
+      reason: "no_active_runtime",
     });
   });
 
@@ -4520,7 +6276,7 @@ describe("RunnerContainer", () => {
     );
   });
 
-  it("aborts active workspace fetches on destroy so queued invokes are not blocked", async () => {
+  it("aborts active and pre-registered queued workspace fetches on explicit destroy", async () => {
     const firstWorkspaceFetchStarted = createDeferred<void>();
     let workspaceFetchCount = 0;
     const { container } = createContainerDouble({
@@ -4581,16 +6337,28 @@ describe("RunnerContainer", () => {
     const queuedInvoke = container.invoke({
       job: {
         kind: "workspace-invocation",
+        request: createRunnerRequest("evt_queued_before_destroy"),
+      },
+      timeoutMs: 60_000,
+      userId: "member_123",
+    }).catch((error: unknown) => error);
+
+    expect(workspaceFetchCount).toBe(1);
+    const destroyResult = container.destroyInstance();
+    await expect(activeInvoke).resolves.toBeInstanceOf(Error);
+    await expect(queuedInvoke).resolves.toMatchObject({
+      message: "workspace invocation container destroyed",
+    });
+    await expect(destroyResult).resolves.toBeUndefined();
+    const postDestroyInvoke = container.invoke({
+      job: {
+        kind: "workspace-invocation",
         request: createRunnerRequest("evt_queued_after_destroy"),
       },
       timeoutMs: 60_000,
       userId: "member_123",
     });
-
-    expect(workspaceFetchCount).toBe(1);
-    await container.destroyInstance();
-    await expect(activeInvoke).resolves.toBeInstanceOf(Error);
-    await expect(queuedInvoke).resolves.toEqual(createRunnerResult());
+    await expect(postDestroyInvoke).resolves.toEqual(createRunnerResult());
     expect(workspaceFetchCount).toBe(2);
   });
 
@@ -5989,6 +7757,65 @@ describe("RunnerContainer", () => {
     await expect(expiry).resolves.toBeUndefined();
     expect(destroy).not.toHaveBeenCalled();
     expect(renewActivityTimeout).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not destroy when a pointerless wake completes during the final status check", async () => {
+    const wakeStarted = createDeferred<void>();
+    const wakeResponse = createDeferred<Response>();
+    const finalStatusStarted = createDeferred<void>();
+    const releaseFinalStatus = createDeferred<void>();
+    let statusReadCount = 0;
+    const getState = vi.fn(async () => {
+      statusReadCount += 1;
+      if (statusReadCount === 2) {
+        finalStatusStarted.resolve(undefined);
+        await releaseFinalStatus.promise;
+      }
+      return {
+        lastChange: Date.now(),
+        status: "running" as const,
+      };
+    });
+    const containerFetch = vi.fn(async (url: string) => {
+      if (url.endsWith("/health")) {
+        return new Response(JSON.stringify(createRunnerHealthResult()), {
+          headers: { "content-type": "application/json; charset=utf-8" },
+          status: 200,
+        });
+      }
+      if (url.endsWith("/internal/runtime-wake")) {
+        wakeStarted.resolve(undefined);
+        return await wakeResponse.promise;
+      }
+      throw new Error(`Unexpected runner request URL: ${url}`);
+    });
+    const { container, destroy } = createContainerDouble({
+      containerFetch,
+      getState,
+      initialStatus: "running",
+    });
+
+    const wake = container.wakeRuntime({
+      attemptId: "attempt_wake_before_final_status",
+      leaseGeneration: "1",
+      userId: "member_123",
+    });
+    await wakeStarted.promise;
+    const expiry = container.onActivityExpired();
+    await finalStatusStarted.promise;
+
+    wakeResponse.resolve(new Response(null, {
+      headers: {
+        "x-runtime-wake-accepted": "1",
+        "x-runtime-wake-identity-checked": "1",
+      },
+      status: 204,
+    }));
+    await expect(wake).resolves.toMatchObject({ kind: "accepted" });
+    releaseFinalStatus.resolve(undefined);
+
+    await expect(expiry).resolves.toBeUndefined();
+    expect(destroy).not.toHaveBeenCalled();
   });
 
   it.each([

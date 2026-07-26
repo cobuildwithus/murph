@@ -333,14 +333,78 @@ interface RunnerContainerHealth {
   conversationWarmActivityCompletedAtEpochMs: number | null | undefined;
 }
 
-interface RunnerActiveOperationRecord {
+interface RunnerWorkspaceInvocationOperation {
+  abortController: AbortController;
+  abortEndpointReady: boolean;
+  abortResult: Promise<RunnerWorkspaceInvocationAbortStatus> | null;
   attemptId: string;
   leaseGeneration: string;
   processingMode: RunnerRuntimeProcessingMode;
+  requiresFailClosedStopReason:
+    | "cleanup_failed"
+    | "transport_uncertain"
+    | null;
+  result: Promise<HostedExecutionRunnerJobResult> | null;
+  userId: string;
+}
+
+interface RunnerWorkspaceInvocationNoPointerAbort {
+  attemptId: string;
+  leaseGeneration: string;
+  result: Promise<RunnerWorkspaceInvocationAbortStatus>;
   userId: string;
 }
 
 type RunnerRuntimeProcessingMode = HostedWorkspaceInvocationProcessingMode;
+
+function createRunnerWorkspaceInvocationOperation(
+  input: HostedExecutionContainerInvokeInput,
+): RunnerWorkspaceInvocationOperation {
+  return {
+    abortController: new AbortController(),
+    abortEndpointReady: false,
+    abortResult: null,
+    attemptId: input.job.request.attemptId,
+    leaseGeneration: input.job.request.leaseGeneration,
+    processingMode:
+      normalizeRunnerRuntimeProcessingMode(input.job.request.processingMode),
+    requiresFailClosedStopReason: null,
+    result: null,
+    userId: readHostedExecutionRunnerJobUserId(input.job),
+  };
+}
+
+function runnerWorkspaceInvocationOperationMatches(
+  operation: {
+    attemptId: string;
+    leaseGeneration: string;
+    userId: string;
+  },
+  input: {
+    attemptId: string;
+    leaseGeneration: string;
+  },
+  userId: string,
+): boolean {
+  return operation.attemptId === input.attemptId
+    && operation.leaseGeneration === input.leaseGeneration
+    && operation.userId === userId;
+}
+
+function createActiveRuntimeUserFence(
+  operation: {
+    attemptId: string;
+    leaseGeneration: string;
+    userId: string;
+  },
+): WorkerActiveRuntimeUserFenceResult {
+  return {
+    active: true,
+    attemptId: operation.attemptId,
+    leaseGeneration: operation.leaseGeneration,
+    userId: operation.userId,
+  };
+}
 
 export interface RunnerRuntimeWakeInput {
   attemptId: string;
@@ -410,10 +474,10 @@ export class RunnerContainer extends Container {
   private stopGeneration = 0;
   private stopObservers = new Set<() => void>();
   private warmShellInvalidatedByUnsettledDestroy = false;
-  private workspaceInvocationAbortController: AbortController | null = null;
-  private workspaceInvocationActiveOperation: RunnerActiveOperationRecord | null = null;
-  private workspaceInvocationActiveOperationPreservedAfterTransportFailure = false;
-  private workspaceInvocationAbortEndpointReady = false;
+  private pointerlessWakeBlockingLifecycleCount = 0;
+  private workspaceInvocationOperations: RunnerWorkspaceInvocationOperation[] = [];
+  private workspaceInvocationNoPointerAbort:
+    RunnerWorkspaceInvocationNoPointerAbort | null = null;
   private containerInteractionGeneration = 0;
 
   constructor(state: unknown, env: RunnerContainerEnvironmentSource) {
@@ -430,50 +494,146 @@ export class RunnerContainer extends Container {
   ): Promise<HostedExecutionRunnerJobResult> {
     this.noteContainerInteraction();
     const input = parseHostedExecutionContainerInvokeInput(payload);
-    return this.withLifecycleLock(async () =>
-      this.invokeHostedExecution(input)
+    const routeUserId = readHostedExecutionRunnerJobUserId(input.job);
+    if (
+      this.workspaceInvocationNoPointerAbort
+      && runnerWorkspaceInvocationOperationMatches(
+        this.workspaceInvocationNoPointerAbort,
+        input.job.request,
+        routeUserId,
+      )
+    ) {
+      throw new Error(WORKSPACE_INVOCATION_PREEMPTED_ABORT_MESSAGE);
+    }
+    const existingOperation = this.workspaceInvocationOperations.find((operation) =>
+      runnerWorkspaceInvocationOperationMatches(
+        operation,
+        input.job.request,
+        routeUserId,
+      )
     );
+    if (existingOperation) {
+      if (!existingOperation.result) {
+        throw new Error("Hosted runner invocation result was not registered.");
+      }
+      return await existingOperation.result;
+    }
+    const operation = createRunnerWorkspaceInvocationOperation(input);
+    const currentOperation = this.readWorkspaceInvocationOperation();
+    if (
+      currentOperation?.abortResult
+      || currentOperation?.abortController.signal.aborted
+    ) {
+      operation.abortController.abort(
+        new Error(WORKSPACE_INVOCATION_PREEMPTED_ABORT_MESSAGE),
+      );
+    }
+    const result = this.withLifecycleLock(async () => {
+      if (operation.abortController.signal.aborted) {
+        this.removeWorkspaceInvocationOperation(operation);
+        throwIfRunnerContainerOperationAborted(
+          operation.abortController.signal,
+        );
+      }
+      if (this.readWorkspaceInvocationOperation() !== operation) {
+        this.removeWorkspaceInvocationOperation(operation);
+        throw new Error(
+          "Hosted runner container still has an active workspace invocation.",
+        );
+      }
+      return await this.invokeHostedExecution(input, operation);
+    });
+    operation.result = result;
+    this.workspaceInvocationOperations.push(operation);
+    return await result;
   }
 
   async destroyInstance(): Promise<void> {
     this.noteContainerInteraction();
-    this.workspaceInvocationAbortController?.abort(new Error("workspace invocation container destroyed"));
-    await this.withLifecycleLock(async () =>
-      this.stopWarmContainer({
-        reason: "destroy-instance",
-      })
-    );
+    const operationsAtDestroy = [...this.workspaceInvocationOperations];
+    for (const operation of operationsAtDestroy) {
+      if (!operation.abortController.signal.aborted) {
+        operation.abortController.abort(
+          new Error("workspace invocation container destroyed"),
+        );
+      }
+    }
+    try {
+      await this.withLifecycleLock(async () =>
+        this.stopWarmContainer({
+          reason: "destroy-instance",
+        })
+      );
+    } catch (error) {
+      for (const operation of operationsAtDestroy) {
+        if (this.workspaceInvocationOperations.includes(operation)) {
+          operation.requiresFailClosedStopReason = "cleanup_failed";
+        }
+      }
+      throw error;
+    }
+    for (const operation of operationsAtDestroy) {
+      this.removeWorkspaceInvocationOperation(operation);
+    }
   }
 
   async readActiveRuntimeUserFence(): Promise<WorkerActiveRuntimeUserFenceResult> {
     this.noteContainerInteraction();
-    const active = this.workspaceInvocationActiveOperation;
+    const abortInProgress = this.workspaceInvocationNoPointerAbort;
+    if (abortInProgress) {
+      return createActiveRuntimeUserFence(abortInProgress);
+    }
+    const active = this.readWorkspaceInvocationOperation();
     if (!active) {
       const status = await readRunnerContainerStatus(this);
+      if (
+        this.warmShellInvalidatedByUnsettledDestroy
+        && !isRunnerContainerStopped(status)
+      ) {
+        throw new Error(
+          "Hosted runner container has an unsettled fail-closed stop.",
+        );
+      }
+      if (isRunnerContainerStopped(status)) {
+        this.warmShellInvalidatedByUnsettledDestroy = false;
+      }
       if (!isRunnerContainerStopped(status)) {
         const activeInContainer = await this.readWorkspaceInvocationActiveFromHealth();
         if (activeInContainer) {
           throw new Error("Hosted runner container health still reports active workspace work.");
         }
       }
-      return { active: false, reason: "no_active_runtime" };
+      return this.finishInactiveRuntimeFenceRead();
     }
 
-    if (this.workspaceInvocationActiveOperationPreservedAfterTransportFailure) {
-      const activeInContainer =
-        await this.readPreservedWorkspaceInvocationActiveFromContainer();
-      if (!activeInContainer) {
+    if (active.abortResult) {
+      return createActiveRuntimeUserFence(active);
+    }
+    if (active.requiresFailClosedStopReason === "cleanup_failed") {
+      const status = await readRunnerContainerStatus(this);
+      if (this.workspaceInvocationPriorityOwnerChanged(active)) {
+        return this.finishInactiveRuntimeFenceRead();
+      }
+      if (isRunnerContainerStopped(status)) {
+        this.warmShellInvalidatedByUnsettledDestroy = false;
         this.clearPreservedWorkspaceInvocationActiveOperation(active);
-        return { active: false, reason: "no_active_runtime" };
+        return this.finishInactiveRuntimeFenceRead();
+      }
+      return createActiveRuntimeUserFence(active);
+    }
+    if (active.requiresFailClosedStopReason === "transport_uncertain") {
+      const status = await readRunnerContainerStatus(this);
+      if (this.workspaceInvocationPriorityOwnerChanged(active)) {
+        return this.finishInactiveRuntimeFenceRead();
+      }
+      if (isRunnerContainerStopped(status)) {
+        this.warmShellInvalidatedByUnsettledDestroy = false;
+        this.clearPreservedWorkspaceInvocationActiveOperation(active);
+        return this.finishInactiveRuntimeFenceRead();
       }
     }
 
-    return {
-      active: true,
-      attemptId: active.attemptId,
-      leaseGeneration: active.leaseGeneration,
-      userId: active.userId,
-    };
+    return createActiveRuntimeUserFence(active);
   }
 
   async ensureReadyForProcessing(
@@ -506,42 +666,115 @@ export class RunnerContainer extends Container {
     userId: string;
   }): Promise<RunnerWorkspaceInvocationAbortStatus> {
     this.noteContainerInteraction();
-    const active = this.workspaceInvocationActiveOperation;
-    const abortController = this.workspaceInvocationAbortController;
-    if (!active || !abortController) {
-      return await this.abortWorkspaceInvocationWithoutLocalPointer(input);
+    const existingAbort = this.workspaceInvocationNoPointerAbort;
+    if (existingAbort) {
+      if (
+        runnerWorkspaceInvocationOperationMatches(
+          existingAbort,
+          input,
+          input.userId,
+        )
+      ) {
+        return await existingAbort.result;
+      }
+      return "stale";
+    }
+    const active = this.readWorkspaceInvocationOperation();
+    if (!active) {
+      const result = this.abortWorkspaceInvocationWithoutLocalPointer(input);
+      const abortOperation: RunnerWorkspaceInvocationNoPointerAbort = {
+        ...input,
+        result,
+      };
+      this.workspaceInvocationNoPointerAbort = abortOperation;
+      try {
+        return await result;
+      } finally {
+        if (this.workspaceInvocationNoPointerAbort === abortOperation) {
+          this.workspaceInvocationNoPointerAbort = null;
+        }
+      }
     }
     if (
-      active.attemptId !== input.attemptId
-      || active.leaseGeneration !== input.leaseGeneration
-      || active.userId !== input.userId
+      !runnerWorkspaceInvocationOperationMatches(active, input, input.userId)
     ) {
       return "stale";
     }
-    if (this.workspaceInvocationAbortEndpointReady) {
+    if (active.abortResult) {
+      return await active.abortResult;
+    }
+    for (const queuedOperation of this.workspaceInvocationOperations.slice(1)) {
+      if (!queuedOperation.abortController.signal.aborted) {
+        queuedOperation.abortController.abort(
+          new Error(WORKSPACE_INVOCATION_PREEMPTED_ABORT_MESSAGE),
+        );
+      }
+    }
+    const abortResult = this.abortRegisteredWorkspaceInvocation(active, input);
+    active.abortResult = abortResult;
+    const result = await abortResult;
+    if (
+      result === "failed"
+      && active.abortResult === abortResult
+    ) {
+      active.abortResult = null;
+    }
+    return result;
+  }
+
+  private async abortRegisteredWorkspaceInvocation(
+    active: RunnerWorkspaceInvocationOperation,
+    input: {
+      attemptId: string;
+      leaseGeneration: string;
+      userId: string;
+    },
+  ): Promise<RunnerWorkspaceInvocationAbortStatus> {
+    const retryingCleanupFailure =
+      active.requiresFailClosedStopReason === "cleanup_failed";
+    if (active.abortEndpointReady) {
       await this.postWorkspaceInvocationAbort(input);
     }
-    if (this.workspaceInvocationActiveOperationPreservedAfterTransportFailure) {
-      if (!abortController.signal.aborted) {
-        abortController.abort(new Error(WORKSPACE_INVOCATION_PREEMPTED_ABORT_MESSAGE));
-      }
-      if (this.workspaceInvocationActiveOperation === active) {
-        this.workspaceInvocationActiveOperationPreservedAfterTransportFailure = false;
-        this.workspaceInvocationAbortEndpointReady = false;
-        this.workspaceInvocationActiveOperation = null;
-      }
-      if (this.workspaceInvocationAbortController === abortController) {
-        this.workspaceInvocationAbortController = null;
-      }
-      await this.stopWarmContainer({
-        failClosed: true,
-        reason: "invoke-failure",
-      });
+    if (!active.abortController.signal.aborted) {
+      active.abortController.abort(
+        new Error(WORKSPACE_INVOCATION_PREEMPTED_ABORT_MESSAGE),
+      );
+    }
+    if (!active.result) {
+      return "failed";
+    }
+    await active.result.catch(() => undefined);
+    if (this.readWorkspaceInvocationOperation() !== active) {
       return "accepted";
     }
-    if (!abortController.signal.aborted) {
-      abortController.abort(new Error(WORKSPACE_INVOCATION_PREEMPTED_ABORT_MESSAGE));
+    if (
+      active.requiresFailClosedStopReason === "cleanup_failed"
+      && !retryingCleanupFailure
+    ) {
+      return "failed";
     }
+    if (active.requiresFailClosedStopReason) {
+      try {
+        await this.withLifecycleLock(async () =>
+          await this.stopWarmContainer({
+            failClosed: true,
+            reason: "invoke-failure",
+          })
+        );
+      } catch {
+        active.requiresFailClosedStopReason = "cleanup_failed";
+        return "failed";
+      }
+    }
+    if (this.warmShellInvalidatedByUnsettledDestroy) {
+      active.requiresFailClosedStopReason = "cleanup_failed";
+      return "failed";
+    }
+    this.workspaceInvocationOperations =
+      this.workspaceInvocationOperations.filter((operation) =>
+        operation !== active
+        && !operation.abortController.signal.aborted
+      );
     return "accepted";
   }
 
@@ -600,7 +833,13 @@ export class RunnerContainer extends Container {
 
   async wakeRuntime(input: RunnerRuntimeWakeInput): Promise<RunnerRuntimeWakeResult> {
     this.noteContainerInteraction();
-    const active = this.workspaceInvocationActiveOperation;
+    const interactionGeneration = this.containerInteractionGeneration;
+    const destroyRequestAtWakeStart = this.lastDestroyRequest;
+    const stopGenerationAtWakeStart = this.stopGeneration;
+    if (this.workspaceInvocationNoPointerAbort) {
+      return { kind: "unknown", reason: "active-child-rejected" };
+    }
+    const active = this.readWorkspaceInvocationOperation();
     if (
       active
       && (
@@ -616,13 +855,70 @@ export class RunnerContainer extends Container {
       return { kind: "unknown", reason: "active-child-rejected" };
     }
 
-    if (active && this.workspaceInvocationActiveOperationPreservedAfterTransportFailure) {
-      const activeInContainer =
-        await this.readPreservedWorkspaceInvocationActiveFromContainer();
-      if (!activeInContainer) {
+    if (
+      active
+      && (
+        active.abortResult
+        || (
+          active.abortController.signal.aborted
+          && active.requiresFailClosedStopReason !== "cleanup_failed"
+        )
+      )
+    ) {
+      return { kind: "unknown", reason: "active-child-rejected" };
+    }
+
+    if (
+      this.warmShellInvalidatedByUnsettledDestroy
+      && active?.requiresFailClosedStopReason !== "cleanup_failed"
+    ) {
+      return { kind: "unknown", reason: "active-child-rejected" };
+    }
+
+    if (active?.requiresFailClosedStopReason === "cleanup_failed") {
+      const status = await readRunnerContainerStatus(this);
+      if (
+        this.workspaceInvocationPriorityOwnerChanged(active)
+      ) {
+        return { kind: "unknown", reason: "active-child-rejected" };
+      }
+      if (isRunnerContainerStopped(status)) {
+        this.warmShellInvalidatedByUnsettledDestroy = false;
         this.clearPreservedWorkspaceInvocationActiveOperation(active);
+        if (this.workspaceInvocationCoordinationChanged(null)) {
+          return { kind: "unknown", reason: "active-child-rejected" };
+        }
         return { kind: "not-wakeable", reason: "no-active-child" };
       }
+      if (await this.settleExactWorkspaceInvocationForWake(input)) {
+        return { kind: "not-wakeable", reason: "no-active-child" };
+      }
+      return { kind: "unknown", reason: "active-child-rejected" };
+    }
+
+    if (active?.requiresFailClosedStopReason === "transport_uncertain") {
+      const status = await readRunnerContainerStatus(this);
+      if (
+        this.workspaceInvocationCoordinationChanged(active)
+      ) {
+        return { kind: "unknown", reason: "active-child-rejected" };
+      }
+      if (isRunnerContainerStopped(status)) {
+        this.warmShellInvalidatedByUnsettledDestroy = false;
+        this.clearPreservedWorkspaceInvocationActiveOperation(active);
+        if (this.workspaceInvocationCoordinationChanged(null)) {
+          return { kind: "unknown", reason: "active-child-rejected" };
+        }
+        return { kind: "not-wakeable", reason: "no-active-child" };
+      }
+    }
+
+    if (active && !active.abortEndpointReady) {
+      return { kind: "unknown", reason: "active-child-rejected" };
+    }
+
+    if (!active && this.pointerlessWakeBlockingLifecycleCount > 0) {
+      return { kind: "unknown", reason: "active-child-rejected" };
     }
 
     if (!active && this.isPlatformContainerDefinitelyStopped()) {
@@ -693,10 +989,37 @@ export class RunnerContainer extends Container {
       if (acceptedWithoutIdentityProof) {
         return { kind: "unknown", reason: "container-rpc-error" };
       }
+      if (
+        (
+          !active
+          && (
+            this.containerInteractionGeneration !== interactionGeneration
+            || this.lastDestroyRequest !== destroyRequestAtWakeStart
+            || this.stopGeneration !== stopGenerationAtWakeStart
+          )
+        )
+        || this.workspaceInvocationCoordinationChanged(active)
+      ) {
+        return { kind: "unknown", reason: "active-child-rejected" };
+      }
       if (response.ok && accepted) {
+        if (!active) {
+          this.noteContainerInteraction();
+        }
         return { action: pending ? "already_running" : "woken", kind: "accepted" };
       }
       if (response.ok && (absent || legacyNoActiveChild)) {
+        if (active) {
+          if (
+            absent
+            && active.requiresFailClosedStopReason === "transport_uncertain"
+          ) {
+            if (await this.settleExactWorkspaceInvocationForWake(input)) {
+              return { kind: "not-wakeable", reason: "no-active-child" };
+            }
+          }
+          return { kind: "unknown", reason: "active-child-rejected" };
+        }
         return { kind: "not-wakeable", reason: "no-active-child" };
       }
       return { kind: "unknown", reason: "active-child-rejected" };
@@ -925,7 +1248,7 @@ export class RunnerContainer extends Container {
         this.renewPlatformActivityTimeout("activity-expired-interaction-race");
         return;
       }
-      const activeOperation = this.workspaceInvocationActiveOperation;
+      const activeOperation = this.readWorkspaceInvocationOperation();
       if (activeOperation) {
         this.lastActivityExpiryAtMs = Date.now();
         this.renewPlatformActivityTimeout("activity-expired-active-operation");
@@ -1042,7 +1365,7 @@ export class RunnerContainer extends Container {
       ) {
         this.renewPlatformActivityTimeout("activity-expired-cleanup-retained");
       }
-    });
+    }, { blockPointerlessWake: false });
   }
 
   override onStart(): void {
@@ -1066,7 +1389,7 @@ export class RunnerContainer extends Container {
     const cleanExit = params.exitCode === 0;
     const lifecycleDetails = this.buildLifecycleDiagnosticDetails();
     const stopClassification = classifyRunnerContainerStop({
-      activeWorkspaceInvocationPresent: this.workspaceInvocationActiveOperation !== null,
+      activeWorkspaceInvocationPresent: this.workspaceInvocationOperations.length > 0,
       cleanExit,
       destroyRequestPresent: this.lastDestroyRequest !== null,
       idleTtlDeltaMs: readNullableNumber(lifecycleDetails.idleTtlDeltaMs),
@@ -1106,7 +1429,7 @@ export class RunnerContainer extends Container {
     emitHostedExecutionStructuredLog({
       component: "container",
       details: {
-        activeWorkspaceInvocationPresent: this.workspaceInvocationActiveOperation !== null,
+        activeWorkspaceInvocationPresent: this.workspaceInvocationOperations.length > 0,
         lifecycleStage: "onError",
         runnerPort: RUNNER_PORT,
       },
@@ -1124,34 +1447,29 @@ export class RunnerContainer extends Container {
 
   private async invokeHostedExecution(
     input: HostedExecutionContainerInvokeInput,
+    operation: RunnerWorkspaceInvocationOperation,
   ): Promise<HostedExecutionRunnerJobResult> {
     // Dispatch latency stamps (epoch ms, this DO's clock). Sent as headers on
     // the runner POST so the latency trace can split DO dispatch work from
     // Cloudflare container scheduling inside the temporal->runner-accept gap.
     const dispatchInvokeReceivedAtEpochMs = Date.now();
-    const routeUserId = readHostedExecutionRunnerJobUserId(input.job);
+    const routeUserId = operation.userId;
     const logContext: RunnerContainerLogContext = {
-      userId: routeUserId,
-    };
-    const activeOperation: RunnerActiveOperationRecord = {
-      attemptId: input.job.request.attemptId,
-      leaseGeneration: input.job.request.leaseGeneration,
-      processingMode: normalizeRunnerRuntimeProcessingMode(input.job.request.processingMode),
       userId: routeUserId,
     };
     let completedSuccessfully = false;
     this.currentLogContext = logContext;
-    const operationAbortController = new AbortController();
     let activeOperationAcquired = false;
     let cleanupWarmContainerOnFailure = false;
     let invokeFailure: unknown = null;
     let preserveActiveOperationAfterTransportFailure = false;
     let stopRunnerActivityRenewal: (() => void) | null = null;
-    this.workspaceInvocationAbortController = operationAbortController;
-    this.workspaceInvocationActiveOperation = activeOperation;
-    this.workspaceInvocationActiveOperationPreservedAfterTransportFailure = false;
+    const operationAbortController = operation.abortController;
+    operation.abortEndpointReady = false;
+    operation.requiresFailClosedStopReason = null;
 
     try {
+      throwIfRunnerContainerOperationAborted(operationAbortController.signal);
       emitHostedExecutionStructuredLog({
         component: "container",
         details: {
@@ -1175,7 +1493,7 @@ export class RunnerContainer extends Container {
       throwIfRunnerContainerOperationAborted(operationAbortController.signal);
 
       activeOperationAcquired = true;
-      this.workspaceInvocationAbortEndpointReady = true;
+      operation.abortEndpointReady = true;
       stopRunnerActivityRenewal = this.startRunnerActivityRenewal();
       this.noteRunnerActivity("invoke-started");
       this.noteRunnerActivity("runner-request-starting");
@@ -1297,6 +1615,7 @@ export class RunnerContainer extends Container {
       });
       throw error;
     } finally {
+      let cleanupSettled = false;
       try {
         if (activeOperationAcquired) {
           if (!completedSuccessfully) {
@@ -1313,31 +1632,23 @@ export class RunnerContainer extends Container {
             reason: "readiness-failure",
           });
         }
+        cleanupSettled = true;
       } finally {
         stopRunnerActivityRenewal?.();
         this.noteRunnerActivity("invoke-finished");
         if (this.currentLogContext === logContext) {
           this.currentLogContext = null;
         }
-        if (
-          this.workspaceInvocationActiveOperation === activeOperation
-          && !preserveActiveOperationAfterTransportFailure
-        ) {
-          this.workspaceInvocationActiveOperationPreservedAfterTransportFailure = false;
-          this.workspaceInvocationAbortEndpointReady = false;
-          this.workspaceInvocationActiveOperation = null;
-        }
-        if (
-          this.workspaceInvocationActiveOperation === activeOperation
-          && preserveActiveOperationAfterTransportFailure
-        ) {
-          this.workspaceInvocationActiveOperationPreservedAfterTransportFailure = true;
-        }
-        if (
-          this.workspaceInvocationAbortController === operationAbortController
-          && !preserveActiveOperationAfterTransportFailure
-        ) {
-          this.workspaceInvocationAbortController = null;
+        if (preserveActiveOperationAfterTransportFailure) {
+          operation.requiresFailClosedStopReason = "transport_uncertain";
+        } else if (!cleanupSettled) {
+          operation.requiresFailClosedStopReason = "cleanup_failed";
+        } else {
+          operation.abortEndpointReady = false;
+          operation.requiresFailClosedStopReason = null;
+          if (!operation.abortResult) {
+            this.removeWorkspaceInvocationOperation(operation);
+          }
         }
       }
     }
@@ -1385,28 +1696,77 @@ export class RunnerContainer extends Container {
     };
   }
 
-  private async readPreservedWorkspaceInvocationActiveFromContainer(): Promise<boolean> {
-    try {
-      return await this.readWorkspaceInvocationActiveFromHealth();
-    } catch (error) {
-      const status = await readRunnerContainerStatus(this);
-      if (isRunnerContainerStopped(status)) {
-        return false;
-      }
-      throw error;
+  private readWorkspaceInvocationOperation():
+    RunnerWorkspaceInvocationOperation | null {
+    return this.workspaceInvocationOperations[0] ?? null;
+  }
+
+  private readWorkspaceInvocationCoordination(): {
+    attemptId: string;
+    leaseGeneration: string;
+    userId: string;
+  } | null {
+    return this.workspaceInvocationNoPointerAbort
+      ?? this.readWorkspaceInvocationOperation();
+  }
+
+  private finishInactiveRuntimeFenceRead():
+    WorkerActiveRuntimeUserFenceResult {
+    const coordination = this.readWorkspaceInvocationCoordination();
+    if (coordination) {
+      return createActiveRuntimeUserFence(coordination);
+    }
+    if (this.warmShellInvalidatedByUnsettledDestroy) {
+      throw new Error(
+        "Hosted runner container has an unsettled fail-closed stop.",
+      );
+    }
+    return { active: false, reason: "no_active_runtime" };
+  }
+
+  private workspaceInvocationCoordinationChanged(
+    observedOperation: RunnerWorkspaceInvocationOperation | null,
+  ): boolean {
+    return this.workspaceInvocationNoPointerAbort !== null
+      || this.warmShellInvalidatedByUnsettledDestroy
+      || this.readWorkspaceInvocationOperation() !== observedOperation
+      || (
+        observedOperation !== null
+        && (
+          observedOperation.abortResult !== null
+          || observedOperation.abortController.signal.aborted
+        )
+      );
+  }
+
+  private workspaceInvocationPriorityOwnerChanged(
+    observedOperation: RunnerWorkspaceInvocationOperation,
+  ): boolean {
+    return this.workspaceInvocationNoPointerAbort !== null
+      || this.readWorkspaceInvocationOperation() !== observedOperation;
+  }
+
+  private removeWorkspaceInvocationOperation(
+    operation: RunnerWorkspaceInvocationOperation,
+  ): void {
+    const operationIndex = this.workspaceInvocationOperations.indexOf(operation);
+    if (operationIndex >= 0) {
+      this.workspaceInvocationOperations.splice(operationIndex, 1);
     }
   }
 
   private clearPreservedWorkspaceInvocationActiveOperation(
-    active: RunnerActiveOperationRecord,
+    active: RunnerWorkspaceInvocationOperation,
   ): void {
-    if (this.workspaceInvocationActiveOperation !== active) {
+    if (
+      this.readWorkspaceInvocationOperation() !== active
+      || active.abortResult
+    ) {
       return;
     }
-    this.workspaceInvocationActiveOperationPreservedAfterTransportFailure = false;
-    this.workspaceInvocationAbortEndpointReady = false;
-    this.workspaceInvocationActiveOperation = null;
-    this.workspaceInvocationAbortController = null;
+    active.abortEndpointReady = false;
+    active.requiresFailClosedStopReason = null;
+    this.removeWorkspaceInvocationOperation(active);
   }
 
   private async abortWorkspaceInvocationWithoutLocalPointer(input: {
@@ -1429,6 +1789,18 @@ export class RunnerContainer extends Container {
       });
       return "accepted";
     });
+  }
+
+  private async settleExactWorkspaceInvocationForWake(input: {
+    attemptId: string;
+    leaseGeneration: string;
+    userId: string;
+  }): Promise<boolean> {
+    const abortStatus = await this.abortWorkspaceInvocation(input);
+    return (
+      abortStatus === "accepted"
+      || abortStatus === "inactive"
+    ) && !this.workspaceInvocationCoordinationChanged(null);
   }
 
   private async postWorkspaceInvocationAbort(input: {
@@ -1765,77 +2137,82 @@ export class RunnerContainer extends Container {
     ) {
       return true;
     }
-    const destroyRequest = this.destroy().then(
-      () => ({ kind: "destroy-resolved" as const }),
-      (error: unknown) => ({ error, kind: "destroy-rejected" as const }),
-    );
-    const destroySettle = this.waitForDestroyedContainerStopped({
-      destroyStartedAt,
-      failClosed,
-      statusBeforeDestroy,
-      stopGenerationBeforeDestroy,
-    }).then(
-      (settled) => ({ kind: "settle-finished" as const, settled }),
-      (error: unknown) => ({ error, kind: "settle-rejected" as const }),
-    );
-    const firstDestroyOutcome = await Promise.race([
-      destroyRequest,
-      destroySettle,
-    ]);
-
-    if (firstDestroyOutcome.kind === "destroy-rejected") {
-      const error = firstDestroyOutcome.error;
-      if (isSettledRunnerContainerDestroyRaceError(error)) {
-        return true;
-      }
-      emitRunnerContainerLifecycleFailure({
-        destroyLatencyMs: Date.now() - destroyStartedAt,
-        error,
+    this.pointerlessWakeBlockingLifecycleCount += 1;
+    try {
+      const destroyRequest = this.destroy().then(
+        () => ({ kind: "destroy-resolved" as const }),
+        (error: unknown) => ({ error, kind: "destroy-rejected" as const }),
+      );
+      const destroySettle = this.waitForDestroyedContainerStopped({
+        destroyStartedAt,
         failClosed,
-        context,
-        message: "Hosted execution container destroy request failed.",
         statusBeforeDestroy,
-        stage: "destroy",
+        stopGenerationBeforeDestroy,
+      }).then(
+        (settled) => ({ kind: "settle-finished" as const, settled }),
+        (error: unknown) => ({ error, kind: "settle-rejected" as const }),
+      );
+      const firstDestroyOutcome = await Promise.race([
+        destroyRequest,
+        destroySettle,
+      ]);
+
+      if (firstDestroyOutcome.kind === "destroy-rejected") {
+        const error = firstDestroyOutcome.error;
+        if (isSettledRunnerContainerDestroyRaceError(error)) {
+          return true;
+        }
+        emitRunnerContainerLifecycleFailure({
+          destroyLatencyMs: Date.now() - destroyStartedAt,
+          error,
+          failClosed,
+          context,
+          message: "Hosted execution container destroy request failed.",
+          statusBeforeDestroy,
+          stage: "destroy",
+        });
+        if (failClosed) {
+          throw new Error("Hosted runner container failed to destroy cleanly.", { cause: error });
+        }
+        return false;
+      }
+
+      const settledOutcome = firstDestroyOutcome.kind === "destroy-resolved"
+        ? await destroySettle
+        : firstDestroyOutcome;
+      if (settledOutcome.kind === "settle-rejected") {
+        if (failClosed) {
+          throw settledOutcome.error;
+        }
+        return false;
+      }
+
+      const settled = settledOutcome.settled;
+      if (!settled.ok) {
+        return false;
+      }
+      emitHostedExecutionStructuredLog({
+        component: "container",
+        details: {
+          destroyLatencyMs: Date.now() - destroyStartedAt,
+          destroySettleLatencyMs: settled.settleLatencyMs,
+          destroySettleTimeoutMs: RUNNER_DESTROY_SETTLE_TIMEOUT_MS,
+          failClosed,
+          lifecycleStage: "destroyed",
+          observedStatusesAfterDestroy: settled.observedStatuses,
+          settleReason: settled.settleReason,
+          statusAfterDestroy: settled.statusAfterDestroy,
+          stopObservedAfterDestroy: settled.stopObservedAfterDestroy,
+          statusBeforeDestroy,
+        },
+        message: "Hosted execution container destroy completed.",
+        phase: "container.ready",
+        userId: context?.userId,
       });
-      if (failClosed) {
-        throw new Error("Hosted runner container failed to destroy cleanly.", { cause: error });
-      }
-      return false;
+      return true;
+    } finally {
+      this.pointerlessWakeBlockingLifecycleCount -= 1;
     }
-
-    const settledOutcome = firstDestroyOutcome.kind === "destroy-resolved"
-      ? await destroySettle
-      : firstDestroyOutcome;
-    if (settledOutcome.kind === "settle-rejected") {
-      if (failClosed) {
-        throw settledOutcome.error;
-      }
-      return false;
-    }
-
-    const settled = settledOutcome.settled;
-    if (!settled.ok) {
-      return false;
-    }
-    emitHostedExecutionStructuredLog({
-      component: "container",
-      details: {
-        destroyLatencyMs: Date.now() - destroyStartedAt,
-        destroySettleLatencyMs: settled.settleLatencyMs,
-        destroySettleTimeoutMs: RUNNER_DESTROY_SETTLE_TIMEOUT_MS,
-        failClosed,
-        lifecycleStage: "destroyed",
-        observedStatusesAfterDestroy: settled.observedStatuses,
-        settleReason: settled.settleReason,
-        statusAfterDestroy: settled.statusAfterDestroy,
-        stopObservedAfterDestroy: settled.stopObservedAfterDestroy,
-        statusBeforeDestroy,
-      },
-      message: "Hosted execution container destroy completed.",
-      phase: "container.ready",
-      userId: context?.userId,
-    });
-    return true;
   }
 
   private async waitForDestroyedContainerStopped(input: {
@@ -2093,7 +2470,7 @@ export class RunnerContainer extends Container {
     const lastActivityObservedAgeMs = readElapsedMs(this.lastActivityObservedAtMs, nowMs);
 
     return {
-      activeWorkspaceInvocationPresent: this.workspaceInvocationActiveOperation !== null,
+      activeWorkspaceInvocationPresent: this.workspaceInvocationOperations.length > 0,
       containerStartObservedBy: this.containerStartObservedBy,
       containerUptimeMs,
       destroyRequestAgeMs,
@@ -2111,13 +2488,25 @@ export class RunnerContainer extends Container {
     };
   }
 
-  private async withLifecycleLock<T>(work: () => Promise<T>): Promise<T> {
+  private async withLifecycleLock<T>(
+    work: () => Promise<T>,
+    options: {
+      blockPointerlessWake?: boolean;
+    } = {},
+  ): Promise<T> {
+    const blockPointerlessWake = options.blockPointerlessWake ?? true;
     this.lifecycleLockPendingCount += 1;
+    if (blockPointerlessWake) {
+      this.pointerlessWakeBlockingLifecycleCount += 1;
+    }
     const run = async (): Promise<T> => {
       try {
         return await work();
       } finally {
         this.lifecycleLockPendingCount -= 1;
+        if (blockPointerlessWake) {
+          this.pointerlessWakeBlockingLifecycleCount -= 1;
+        }
       }
     };
     const next = this.lifecycleLock.then(run, run);
