@@ -1,6 +1,6 @@
 # Bad-code round 3: withhold SDK tokens after disconnect
 
-Status: active
+Status: completed
 Created: 2026-07-26
 Updated: 2026-07-26
 
@@ -58,4 +58,20 @@ Updated: 2026-07-26
 - Canonical `MURPH_VERIFY_EXECUTOR=crabbox pnpm test:diff packages/device-syncd/src/public-ingress.ts packages/device-syncd/test/public-ingress.test.ts`: the affected device-sync typecheck and 864 tests passed in the Testbox; the wider reverse-dependency lane failed later in unrelated hosted-local harness timing/Docker tests and a vault-usecases test whose generated Health Commons artifact was absent.
 - Round-3 ReviewGPT implementation artifact: inspected in full and applied deliberately; it touched only the shared public-ingress source and reused one effect-time validator across both mint paths.
 - Product-experience review: `NO FINDINGS`; explicit disconnect remains final authority, the existing reconnect-required outcome is the right recovery path, and intentional reconnect plus passive resume remain intact.
-- Preliminary specialist ReviewGPT, parent final review, final canonical rerun, and exact-head PR gates: pending.
+- Preliminary specialist ReviewGPT: `PASS` with no findings or patch artifact. The
+  marked response arrived after 383 seconds on the Mountain lane. Local
+  inspection confirmed the exact PR/head, attached guarded snapshot, requested
+  GPT-5.6 model selection, completion marker, and substantive coverage-lens
+  analysis, so it was accepted under the documented four-minute specialist
+  exception despite the wrapper's conservative 7.5-minute rejection.
+- Parent final review: no findings; the patch keeps one effect-time validator,
+  adds no state or provider calls, and the deterministic race proof exercises
+  the newly shared create-path behavior.
+- Final focused proof: all 66 public-ingress tests and the device-sync package
+  typecheck passed.
+- Final canonical rerun: the affected typechecks and device-sync owner tests
+  passed. The reverse-dependency lane again failed outside the change in the
+  hosted-local process timing test and the vault-usecases metric projection
+  test because its generated Health Commons biomarkers artifact was absent.
+- Exact-head final ReviewGPT and PR CI gates: pending.
+Completed: 2026-07-26
