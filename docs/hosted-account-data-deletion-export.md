@@ -1,6 +1,6 @@
 # Hosted account data deletion and vault export
 
-Last verified: 2026-07-16
+Last verified: 2026-07-25
 
 ## Purpose
 
@@ -65,7 +65,7 @@ The Settings vault export does not include:
 4. Revoke wearable/device provider access with the existing device-sync provider `revokeAccess` hook before local device rows are deleted. Junction-routed Garmin and other Junction sources are deregistered through Junction when configured; providers without a revocation hook remain local-reference deletion only.
 5. Cancel the Stripe subscription fail-closed: a cancel failure or a missing Stripe client while a subscription reference exists aborts deletion with a structured error. An already-canceled or missing subscription counts as done.
 6. Cancel any Family plan Stripe subscriptions owned by the member before local Family group rows are removed. A family cancel failure also aborts deletion fail-closed.
-7. Delete Kernel browser sessions, every Managed Auth connection for the member's profile, and the profile before deleting Prisma-hosted account rows in a transaction. Inside that transaction, delete usage-credit ledger entries before their purchase rows and delete both before the hosted member row so the financial-record foreign keys fail closed instead of relying on cascades.
+7. Delete Kernel browser sessions, every Managed Auth connection for the member's profile, and the profile before deleting Prisma-hosted account rows in a transaction. Inside that transaction, delete usage-credit ledger entries before their purchase rows, delete image-capacity reservations before their settled AI usage rows, and delete all of them before the hosted member row so foreign keys fail closed instead of relying on cascades.
 8. Best-effort terminate the per-user hosted Temporal runtime workflow again after the Prisma transaction commits.
 9. Best-effort call hosted execution control to delete Cloudflare Durable Object state and R2 user artifacts.
 10. Best-effort terminate the per-user hosted Temporal runtime workflow again after Cloudflare cleanup, so any sleeping workflow state that survived a concurrent wake attempt is neutralized.
@@ -96,6 +96,7 @@ The Settings vault export does not include:
 | `prisma.hosted_user_crypto_envelope` | Live delete | Metadata/counts | Deletes signed domain root envelopes. Export reports counts only. |
 | `prisma.hosted_user_crypto_audit` | Live delete | Metadata/counts | Deletes hosted crypto provisioning audit rows. Export reports counts only. |
 | `prisma.hosted_ai_usage` | Live delete | Metadata/counts | Deletes local AI usage rows. Already-submitted vendor metering may remain externally. |
+| `prisma.hosted_ai_usage_reservation` | Live delete | Metadata/counts | Deletes bounded image-capacity reservation metadata before any settled usage rows. Export reports counts only and omits request correlation and estimate inputs. |
 | `prisma.hosted_ai_usage_period` | Live delete | Metadata/counts | Deletes local allowance-period snapshots. Export includes period windows, allowance totals, and billing-state metadata while omitting internal reconciliation identifiers. |
 | `prisma.hosted_usage_credit_entry` | Live delete | Not included in vault export | Deletes append-only usage-credit ledger rows before purchase and member rows. The deletion result reports row counts; browser-vault export omits semantic source keys, source usage references, and per-grant allocation history. |
 | `prisma.hosted_usage_credit_purchase` | Live delete | Not included in vault export | Deletes local purchase state and encrypted Stripe references after its ledger entries. The deletion result reports row counts; browser-vault export omits Checkout URLs and payment identifiers. Stripe retains legally required payment records under its own processes. |

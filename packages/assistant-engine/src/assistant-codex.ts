@@ -171,6 +171,24 @@ export type { CodexAppServerImageInput } from './assistant-codex/images.js'
 export type {
   VoiceMemoToolRuntime,
 } from './assistant-codex/generate-voice-memo-tool.js'
+export {
+  dispatchPreparedAssistantImageGeneration,
+  finalizeAssistantImageGeneration,
+  persistAssistantImageGenerationCapture,
+  prepareAssistantImageGeneration,
+  publishAssistantImageGeneration,
+} from './assistant-codex/generate-image-tool.js'
+export type {
+  AssistantImageGenerationPreflightEstimate,
+  DispatchPreparedAssistantImageGenerationResult,
+  GeneratedAssistantImage,
+  GenerateImageToolArgs,
+  GenerateImageToolResult,
+  PersistAssistantImageGenerationCaptureResult,
+  PersistedAssistantImage,
+  PreparedAssistantImageGenerationProviderInput,
+  PrepareAssistantImageGenerationResult,
+} from './assistant-codex/generate-image-tool.js'
 export type {
   AskGrokToolRuntime,
 } from './assistant-codex/ask-grok-tool.js'

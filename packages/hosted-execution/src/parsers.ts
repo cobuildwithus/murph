@@ -171,6 +171,8 @@ export {
   parseHostedRuntimeLogResponse,
   parseHostedRuntimeUsageRecordRequest,
   parseHostedRuntimeUsageRecordResponse,
+  parseHostedRuntimeUsageAllowanceRequest,
+  parseHostedRuntimeUsageAllowanceResponse,
   parseHostedRuntimeAssistantAskControlRequest,
   parseHostedRuntimeAssistantAskControlResponse,
   parseHostedRuntimeGroupToolRequest,

@@ -20,6 +20,9 @@ import type {
   HostedAssistantReasoningEffortOverride,
 } from "./assistant-model.ts";
 import type {
+  HostedExecutionAssistantImageEstimate,
+  HostedExecutionAssistantImageQuality,
+  HostedExecutionAssistantImageSize,
   HostedExecutionAssistantAskOrigin,
   HostedExecutionAssistantAskResult,
   HostedBrowserVaultReplicaCursorRef,
@@ -791,8 +794,15 @@ export type HostedRuntimeUsageNoticeDeliveryTarget =
       target: string;
     };
 
-export interface HostedRuntimeUsageRecordRequest {
+export const HOSTED_RUNTIME_USAGE_RESERVATION_ID_MAX_LENGTH = 256;
+
+export interface HostedRuntimeUsageRecordOptions {
   noticeDeliveryTarget?: HostedRuntimeUsageNoticeDeliveryTarget | null;
+  reservationId?: string;
+}
+
+export interface HostedRuntimeUsageRecordRequest
+  extends HostedRuntimeUsageRecordOptions {
   usage: AssistantUsageRecord;
 }
 
@@ -800,6 +810,59 @@ export interface HostedRuntimeUsageRecordResponse {
   recorded: boolean;
   usageId: string;
 }
+
+export interface HostedRuntimeUsageAllowanceImageEstimate
+  extends HostedExecutionAssistantImageEstimate {
+  model: "gpt-image-2";
+  quality: HostedExecutionAssistantImageQuality;
+  size: HostedExecutionAssistantImageSize;
+}
+
+export type HostedRuntimeUsageAllowanceRequest =
+  | {
+      action: "reserve_image";
+      estimate: HostedRuntimeUsageAllowanceImageEstimate;
+      requestId: string;
+    }
+  | {
+      action: "mark_dispatched";
+      requestId: string;
+    }
+  | {
+      action: "release";
+      requestId: string;
+    };
+
+export type HostedRuntimeUsageAllowanceResponse =
+  | {
+      action: "reserve_image";
+      requestId: string;
+      status:
+        | "reserved"
+        | "would_exhaust"
+        | "insufficient_capacity"
+        | "already_dispatched"
+        | "already_settled";
+    }
+  | {
+      action: "mark_dispatched";
+      requestId: string;
+      status:
+        | "dispatched"
+        | "already_dispatched"
+        | "already_settled"
+        | "not_dispatchable"
+        | "missing";
+    }
+  | {
+      action: "release";
+      requestId: string;
+      status:
+        | "released"
+        | "already_released"
+        | "not_releasable"
+        | "missing";
+    };
 
 export const HOSTED_PRODUCT_FEEDBACK_KINDS = [
   "feature_interest",

@@ -999,6 +999,532 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   }, 45_000);
 
+  test("keeps image work detached, prioritizes later foreground, and gives completion to a fresh Murph turn", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-image-runtime-"));
+    const snapshotRef = createWorkspaceSnapshotV2Ref(
+      "snapshot-detached-image-generation",
+    );
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const cleanupAbortController = new AbortController();
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const mailboxItems = [
+      createMailboxItem({
+        id: "mailbox_item_image_origin",
+        laneSeq: "1",
+      }),
+    ];
+    const events: string[] = [];
+    const mailboxEvents: string[] = [];
+    const allowanceActions: string[] = [];
+    const recordedImageUsageOptions: unknown[] = [];
+    const originUsageStarted = createDeferred<void>();
+    const originUsageRelease = createDeferred<void>();
+    const providerStarted = createDeferred<void>();
+    const providerRelease = createDeferred<void>();
+    const providerForegroundStarted = createDeferred<void>();
+    const providerForegroundRelease = createDeferred<void>();
+    const captureForegroundStarted = createDeferred<void>();
+    const captureForegroundRelease = createDeferred<void>();
+    const uploadStarted = createDeferred<void>();
+    const uploadRelease = createDeferred<void>();
+    const uploadForegroundStarted = createDeferred<void>();
+    const uploadForegroundRelease = createDeferred<void>();
+    const completionTurnStarted = createDeferred<void>();
+    let originUsageReleased = false;
+    let providerReleased = false;
+    let uploadReleased = false;
+    let completionInputId: string | null = null;
+    let completionText: string | null = null;
+    let resultPromise:
+      ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess> | null = null;
+
+    const releaseAll = () => {
+      originUsageReleased = true;
+      originUsageRelease.resolve();
+      providerReleased = true;
+      providerRelease.resolve();
+      providerForegroundRelease.resolve();
+      captureForegroundRelease.resolve();
+      uploadReleased = true;
+      uploadRelease.resolve();
+      uploadForegroundRelease.resolve();
+    };
+
+    try {
+      resultPromise = runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_detached_image_generation",
+            idleCheckpointDelayMs: 1,
+            leaseGeneration: "7",
+            userId: TEST_USER_ID,
+            workspaceVersion: "0",
+          },
+        }),
+        {
+          async createCheckpointSnapshot() {
+            events.push("snapshot");
+            return {
+              snapshotRef: createBundleRef({
+                hash: "7".repeat(64),
+                key: "users/bundles/member-synthetic/detached-image.bundle.json",
+                size: 512,
+              }),
+            };
+          },
+          async importItem(item) {
+            if (item.item.lane !== "conversation") {
+              return { status: "imported" };
+            }
+            const assistantInputId =
+              await stagePendingLinqAssistantInputForMailboxItem({
+                item: item.item,
+                withLinqSourceMetadata: true,
+                vaultRoot,
+              });
+            events.push(`import:${item.item.id}`);
+            return {
+              assistantInputId,
+              status: "imported",
+            };
+          },
+          platform: {
+            ...createPlatform({
+              mailboxPort: createMailboxPort({
+                events: mailboxEvents,
+                items: mailboxItems,
+              }),
+              workspacePort: createWorkspacePort({
+                checkpointRequests,
+                events,
+                workspace: createWorkspaceState({
+                  snapshotRef,
+                  version: "0",
+                }),
+              }),
+              workspaceSnapshotPort: {
+                async abortSnapshotSession() {
+                  throw new Error(
+                    "Detached image test should not abort snapshot sessions.",
+                  );
+                },
+                async completeSnapshotSession() {
+                  throw new Error(
+                    "Detached image test should not complete snapshot sessions.",
+                  );
+                },
+                async putSnapshotObjectDirect() {
+                  throw new Error(
+                    "Detached image test should not upload workspace snapshots.",
+                  );
+                },
+                async restoreWorkspaceSnapshot(input) {
+                  await initializeVault({
+                    createdAt: TEST_NOW,
+                    vaultRoot: input.durableRoot,
+                  });
+                },
+                async startSnapshotSession() {
+                  throw new Error(
+                    "Detached image test should not start snapshot sessions.",
+                  );
+                },
+              },
+            }),
+            generatedImageUploader: {
+              async uploadGeneratedImage(image) {
+                events.push("upload.started");
+                uploadStarted.resolve();
+                await uploadRelease.promise;
+                events.push("upload.finished");
+                return {
+                  alt: image.alt,
+                  kind: "image",
+                  source: image.source,
+                  url: "https://images.example.test/generated.png",
+                };
+              },
+            },
+            async providerFetch() {
+              events.push("provider.started");
+              providerStarted.resolve();
+              await providerRelease.promise;
+              events.push("provider.finished");
+              return new Response(JSON.stringify({
+                data: [{
+                  b64_json:
+                    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=",
+                }],
+                usage: {
+                  input_tokens: 2,
+                  output_tokens: 5,
+                  total_tokens: 7,
+                },
+              }), {
+                headers: {
+                  "content-type": "application/json",
+                  "x-request-id": "req_detached_image",
+                },
+                status: 200,
+              });
+            },
+            usageAllowancePort: {
+              async applyUsageAllowance(request) {
+                allowanceActions.push(request.action);
+                events.push(`allowance:${request.action}`);
+                switch (request.action) {
+                  case "reserve_image":
+                    return {
+                      action: "reserve_image",
+                      requestId: request.requestId,
+                      status: "reserved",
+                    };
+                  case "mark_dispatched":
+                    return {
+                      action: "mark_dispatched",
+                      requestId: request.requestId,
+                      status: "dispatched",
+                    };
+                  case "release":
+                    return {
+                      action: "release",
+                      requestId: request.requestId,
+                      status: "released",
+                    };
+                }
+              },
+            },
+            usageRecordPort: {
+              async recordUsage(record, options) {
+                events.push(`usage.started:${record.usageId}`);
+                if (record.usageId === "turn_image_origin.attempt-1") {
+                  originUsageStarted.resolve();
+                  await originUsageRelease.promise;
+                }
+                if (record.featureKey === "assistant_generated_image") {
+                  recordedImageUsageOptions.push(options);
+                  events.push("image.usage.recorded");
+                }
+                events.push(`usage.finished:${record.usageId}`);
+                return {
+                  recorded: true,
+                  usageId: record.usageId,
+                };
+              },
+            },
+          },
+          runtimeWakeSignal,
+          signal: cleanupAbortController.signal,
+          async runAssistantPhase(phaseInput) {
+            let acceptedInputIds =
+              [...(
+                phaseInput.initialAssistantInputBatch?.assistantInputIds
+                ?? phaseInput.initialMailboxImport.importResult.assistantInputIds
+                ?? []
+              )];
+            if (acceptedInputIds.length === 0) {
+              const pendingInputIds =
+                await readHostedPendingAssistantInputIds({ vaultRoot });
+              acceptedInputIds = (
+                await Promise.all(pendingInputIds.map(async (inputId) => {
+                  const pendingInput = await readAssistantInputEvent({
+                    inputId,
+                    vault: vaultRoot,
+                  });
+                  return pendingInput?.sourceRef.kind === "hosted-mailbox"
+                    && pendingInput.sourceRef.itemId.startsWith(
+                      "image-completion:",
+                    )
+                    ? inputId
+                    : null;
+                }))
+              ).filter((inputId): inputId is string => inputId !== null);
+            }
+            if (acceptedInputIds.length === 0) {
+              events.push("turn.empty");
+              return { progressed: false };
+            }
+            const acceptedInputs = await Promise.all(
+              acceptedInputIds.map(async (inputId) => {
+                const event = await readAssistantInputEvent({
+                  inputId,
+                  vault: vaultRoot,
+                });
+                assert.ok(event);
+                return event;
+              }),
+            );
+            const releaseAcceptedInputs =
+              await phaseInput.beforeProviderAcceptedInputs?.({
+                acceptedInputs: acceptedInputIds.map((id) => ({
+                  id,
+                  source: "assistant-input",
+                })),
+              });
+            try {
+              const itemIds = acceptedInputs.map((event) => {
+                if (event.sourceRef.kind !== "hosted-mailbox") {
+                  throw new Error(
+                    "Detached image runtime test expected hosted mailbox input.",
+                  );
+                }
+                return event.sourceRef.itemId;
+              });
+              if (itemIds.includes("mailbox_item_image_origin")) {
+                events.push("turn.origin");
+                const originInputId = acceptedInputIds[
+                  itemIds.indexOf("mailbox_item_image_origin")
+                ]!;
+                const registration =
+                  await phaseInput.imageGenerationRegistrar?.register({
+                    args: {
+                      alt: "Generated cyclist",
+                      outputFormat: "png",
+                      prompt: "A cyclist climbing a mountain",
+                      quality: "medium",
+                      size: "1024x1024",
+                    },
+                    origin: {
+                      assistantInputId: originInputId,
+                      kind: "accepted_input",
+                      sessionId: "session_detached_image",
+                    },
+                    providerRequestOrdinal: 1,
+                    toolCallId: "call_detached_image",
+                  });
+                assert.deepEqual(registration, {
+                  status: "admission_pending",
+                });
+                phaseInput.recordDeferredUsage?.(
+                  createAssistantUsageRecord({
+                    sessionId: "session_detached_image",
+                    turnId: "turn_image_origin",
+                    usageId: "turn_image_origin.attempt-1",
+                  }),
+                  [originInputId],
+                );
+              } else if (itemIds.includes("mailbox_item_image_usage_wait")) {
+                events.push("turn.while-origin-usage");
+              } else if (itemIds.includes("mailbox_item_image_provider_wait")) {
+                events.push("turn.while-provider");
+                providerForegroundStarted.resolve();
+                await providerForegroundRelease.promise;
+              } else if (itemIds.includes("mailbox_item_image_capture_wait")) {
+                events.push("turn.before-image-capture");
+                captureForegroundStarted.resolve();
+                await captureForegroundRelease.promise;
+              } else if (itemIds.includes("mailbox_item_image_upload_wait")) {
+                events.push("turn.while-upload");
+                uploadForegroundStarted.resolve();
+                await uploadForegroundRelease.promise;
+              } else {
+                const completionIndex = itemIds.findIndex((itemId) =>
+                  itemId.startsWith("image-completion:")
+                );
+                assert.notEqual(completionIndex, -1);
+                completionInputId = acceptedInputIds[completionIndex] ?? null;
+                const completionInput = acceptedInputs[completionIndex];
+                assert.ok(completionInput);
+                assert.equal(completionInput.sourceRef.kind, "hosted-mailbox");
+                if (completionInput.sourceRef.kind !== "hosted-mailbox") {
+                  throw new Error(
+                    "Image completion test expected hosted mailbox provenance.",
+                  );
+                }
+                assert.equal(completionInput.sourceRef.lane, "system");
+                completionText = completionInput.content.text ?? "";
+                assert.match(
+                  completionText,
+                  /Nothing has been sent or attached automatically\./u,
+                );
+                events.push("turn.image-completion");
+                completionTurnStarted.resolve();
+              }
+
+              for (const acceptedInputId of acceptedInputIds) {
+                await writeSyntheticAssistantAutoReplyTerminalEvidence({
+                  inputId: acceptedInputId,
+                  vaultRoot,
+                });
+              }
+              return {
+                checkpointReason: "assistant_runtime_commit",
+                foregroundReplyFailed: 0,
+                progressed: true,
+              };
+            } finally {
+              await releaseAcceptedInputs?.();
+            }
+          },
+          vaultRoot,
+        },
+      );
+      void resultPromise.catch(() => undefined);
+
+      await withRealTimeout(
+        Promise.race([
+          originUsageStarted.promise,
+          resultPromise.then((runtimeResult) => {
+            throw new Error(
+              `Hosted image runtime finished before origin usage: ${runtimeResult.status}.`,
+            );
+          }),
+        ]),
+        10_000,
+        () => events.join(","),
+      );
+      assert.deepEqual(allowanceActions, []);
+      assert.equal(events.includes("provider.started"), false);
+
+      mailboxItems.push(createMailboxItem({
+        id: "mailbox_item_image_usage_wait",
+        laneSeq: "2",
+        occurredAt: "2026-04-27T00:00:02.000Z",
+      }));
+      runtimeWakeSignal.notify();
+      await waitUntil(() => {
+        assert.ok(events.includes("turn.while-origin-usage"));
+      }, 10_000);
+      assert.equal(originUsageReleased, false);
+      assert.deepEqual(allowanceActions, []);
+      assert.equal(events.includes("provider.started"), false);
+
+      originUsageReleased = true;
+      originUsageRelease.resolve();
+      await withRealTimeout(
+        providerStarted.promise,
+        10_000,
+        () => events.join(","),
+      );
+      assert.deepEqual(allowanceActions.slice(0, 2), [
+        "reserve_image",
+        "mark_dispatched",
+      ]);
+
+      mailboxItems.push(createMailboxItem({
+        id: "mailbox_item_image_provider_wait",
+        laneSeq: "3",
+        occurredAt: "2026-04-27T00:00:03.000Z",
+      }));
+      runtimeWakeSignal.notify();
+      await withRealTimeout(
+        providerForegroundStarted.promise,
+        10_000,
+        () => events.join(","),
+      );
+      assert.equal(providerReleased, false);
+      assert.equal(events.includes("turn.image-completion"), false);
+
+      providerReleased = true;
+      providerRelease.resolve();
+      await waitUntil(() => {
+        assert.ok(events.includes("provider.finished"));
+      }, 10_000);
+      mailboxItems.push(createMailboxItem({
+        id: "mailbox_item_image_capture_wait",
+        laneSeq: "4",
+        occurredAt: "2026-04-27T00:00:04.000Z",
+      }));
+      runtimeWakeSignal.notify();
+      providerForegroundRelease.resolve();
+      await withRealTimeout(
+        captureForegroundStarted.promise,
+        10_000,
+        () => events.join(","),
+      );
+      assert.equal(events.includes("upload.started"), false);
+      captureForegroundRelease.resolve();
+      await withRealTimeout(
+        uploadStarted.promise,
+        10_000,
+        () => events.join(","),
+      );
+      mailboxItems.push(createMailboxItem({
+        id: "mailbox_item_image_upload_wait",
+        laneSeq: "5",
+        occurredAt: "2026-04-27T00:00:05.000Z",
+      }));
+      runtimeWakeSignal.notify();
+      await withRealTimeout(
+        uploadForegroundStarted.promise,
+        10_000,
+        () => events.join(","),
+      );
+      assert.equal(uploadReleased, false);
+      assert.equal(events.includes("turn.image-completion"), false);
+
+      uploadReleased = true;
+      uploadRelease.resolve();
+      await waitUntil(() => {
+        assert.ok(events.includes("upload.finished"));
+      }, 10_000);
+      assert.equal(events.includes("turn.image-completion"), false);
+      uploadForegroundRelease.resolve();
+
+      await withRealTimeout(
+        completionTurnStarted.promise,
+        10_000,
+        () => events.join(","),
+      );
+      const result = await withRealTimeout(
+        resultPromise,
+        30_000,
+        () => events.join(","),
+      );
+
+      assert.ok(completionInputId);
+      assert.match(
+        completionText ?? "",
+        /https:\/\/images\.example\.test\/generated\.png/u,
+      );
+      assert.equal(recordedImageUsageOptions.length, 1);
+      const recordedImageUsageOption = recordedImageUsageOptions[0];
+      assert.ok(
+        recordedImageUsageOption
+        && typeof recordedImageUsageOption === "object"
+        && "reservationId" in recordedImageUsageOption
+        && typeof recordedImageUsageOption.reservationId === "string"
+        && recordedImageUsageOption.reservationId.length > 0,
+      );
+      assert.ok(
+        requireEventIndex(events, "turn.while-origin-usage")
+          < requireEventIndex(events, "allowance:reserve_image"),
+      );
+      assert.ok(
+        requireEventIndex(events, "turn.while-provider")
+          < requireEventIndex(events, "provider.finished"),
+      );
+      assert.ok(
+        requireEventIndex(events, "turn.before-image-capture")
+          < requireEventIndex(events, "upload.started"),
+      );
+      assert.ok(
+        requireEventIndex(events, "turn.while-upload")
+          < requireEventIndex(events, "upload.finished"),
+      );
+      assert.ok(
+        requireEventIndex(events, "upload.finished")
+          < requireEventIndex(events, "turn.image-completion"),
+      );
+      assert.ok(
+        requireEventIndex(events, "image.usage.recorded")
+          < requireEventIndex(events, "snapshot"),
+      );
+      assert.equal(result.status, "scheduled");
+    } finally {
+      releaseAll();
+      cleanupAbortController.abort(new Error("Detached image test cleanup."));
+      if (resultPromise) {
+        await withRealTimeout(
+          resultPromise.catch(() => undefined),
+          5_000,
+          () => `cleanup:${events.join(",")}`,
+        ).catch(() => undefined);
+      }
+      await removeTempRoot(vaultRoot);
+    }
+  }, 45_000);
+
   test("starts a detached model before lazily reading the Web-owned shared snapshot", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const snapshotRef = createWorkspaceSnapshotV2Ref(
@@ -26275,6 +26801,7 @@ async function stageAssistantInputEventForMailboxItem(input: {
   lane?: "conversation" | "system";
   threadId?: string;
   threadIsDirect?: boolean;
+  withLinqSourceMetadata?: boolean;
   vaultRoot: string;
 }): Promise<string> {
   const text = "entrypoint hosted mailbox input";
@@ -26306,6 +26833,17 @@ async function stageAssistantInputEventForMailboxItem(input: {
         messageId: `msg_${input.item.id}`,
         threadId,
       },
+      ...(input.withLinqSourceMetadata
+        ? {
+            sourceMetadata: {
+              kind: "linq" as const,
+              partCount: 0,
+              reactionEligible: false,
+              replyToMessageId: null,
+              service: "iMessage",
+            },
+          }
+        : {}),
       sourceRef: {
         ...(input.causalSeq ? { causalSeq: input.causalSeq } : {}),
         dedupeKey: input.item.dedupeKey,
@@ -26330,6 +26868,7 @@ async function stagePendingLinqAssistantInputForMailboxItem(input: {
   causalSeq?: string;
   item: HostedMailboxItem;
   threadId?: string;
+  withLinqSourceMetadata?: boolean;
   vaultRoot: string;
 }): Promise<string> {
   const inputId = await stageAssistantInputEventForMailboxItem(input);

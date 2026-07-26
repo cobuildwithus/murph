@@ -164,6 +164,13 @@ import {
   type HostedDetachedAssistantAskController,
 } from "./hosted-runtime/detached-assistant-ask.ts";
 import {
+  createHostedImageGenerationController,
+  type HostedImageGenerationController,
+} from "./hosted-runtime/image-generation-controller.ts";
+import {
+  stageHostedImageGenerationCompletionInput,
+} from "./hosted-runtime/image-generation-completion.ts";
+import {
   readHostedSystemMailboxHandledThroughSeq,
 } from "./hosted-runtime/system-mailbox-state.ts";
 import {
@@ -253,6 +260,8 @@ export type {
   HostedRuntimeTelegramGetFileRequest,
   HostedRuntimeTelegramSendRequest,
   HostedRuntimeTelegramSendResponse,
+  HostedRuntimeUsageAllowancePort,
+  HostedRuntimeUsageAllowanceResponse,
   HostedRuntimeUsageRecordResponse,
   HostedRuntimeUsageRecordPort,
   HostedRuntimeWorkspacePort,
@@ -275,6 +284,7 @@ export {
 export {
   parseHostedRuntimeIssueRecordResponse,
   parseHostedRuntimeLatencyTraceResponse,
+  parseHostedRuntimeUsageAllowanceResponse,
   parseHostedRuntimeUsageRecordResponse,
 } from "./hosted-runtime/platform.ts";
 export {
@@ -339,6 +349,7 @@ const HOSTED_INITIAL_CONVERSATION_MAILBOX_IMPORT_LANES = ["conversation"] as con
 const HOSTED_INITIAL_BOOTSTRAP_MAILBOX_IMPORT_LANES = ["system", "conversation"] as const;
 const HOSTED_FOREGROUND_MAILBOX_PREFETCH_LANES = ["conversation", "system"] as const;
 const HOSTED_INITIAL_BOOTSTRAP_PENDING_REASON_CODE = "bootstrap.pending";
+const HOSTED_IMAGE_FORCE_DRAIN_TIMEOUT_MS = 2_500;
 const HOSTED_RUNTIME_ISSUE_POST_CHECKPOINT_EXPORT_TIMEOUT_MS = 2_500;
 const HOSTED_VAULT_FORMAT_MIGRATION_MAX_BUNDLES = 500;
 
@@ -928,6 +939,8 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
   const guardedMailboxPort = guardedRuntime.platform.mailboxPort ?? mailboxPort;
   const guardedWorkspacePort = guardedRuntime.platform.workspacePort ?? workspacePort;
   let detachedAssistantAskController: HostedDetachedAssistantAskController | null = null;
+  let imageGenerationController: HostedImageGenerationController | null = null;
+  let runtimeFailed = false;
   let pauseDetachedAssistantAskBeforeWorkspaceBoundary = async (): Promise<void> => undefined;
   let resumeDetachedAssistantAskAfterWorkspaceBoundary = (): void => undefined;
   let closeDetachedAssistantAskBeforeWorkspaceRelease = async (): Promise<void> => undefined;
@@ -950,6 +963,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
   const phaseLogger = createHostedRuntimePhaseLogger();
   const emitPhaseLog = phaseLogger.emit;
   const pendingDeferredUsageCaptures = new Set<HostedWorkspaceRunnerDeferredUsageCapture>();
+  const pendingImagePassLifecycles = new Set<Promise<void>>();
   const pendingLocalWorkspaceMutationCompletions = new Set<Promise<void>>();
   const pendingMailboxPostCheckpointEffectCompletions = new Set<Promise<void>>();
   const trackCompletion = (
@@ -987,6 +1001,18 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
   };
   const drainLocalWorkspaceMutationsBestEffort = async (): Promise<void> => {
     await Promise.allSettled([...pendingLocalWorkspaceMutationCompletions]);
+  };
+  const trackImagePassLifecycle = (completion: Promise<void>): void => {
+    pendingImagePassLifecycles.add(completion);
+    void completion.then(
+      () => pendingImagePassLifecycles.delete(completion),
+      () => pendingImagePassLifecycles.delete(completion),
+    );
+  };
+  const drainImagePassLifecycles = async (): Promise<void> => {
+    while (pendingImagePassLifecycles.size > 0) {
+      await Promise.all([...pendingImagePassLifecycles]);
+    }
   };
 
   try {
@@ -1718,6 +1744,33 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       return await returnInitialMailboxImportBeforeForeground();
     }
     const runtimeEnv = hostedCodexRuntime.runtimeEnv;
+    const imageProviderFetch = guardedRuntime.platform.providerFetch ?? null;
+    const generatedImageUploader =
+      guardedRuntime.platform.generatedImageUploader ?? null;
+    const imageUsageAllowancePort =
+      guardedRuntime.platform.usageAllowancePort ?? null;
+    const imageUsageRecordPort =
+      guardedRuntime.platform.usageRecordPort ?? null;
+    if (
+      imageProviderFetch
+      && generatedImageUploader
+      && imageUsageAllowancePort
+      && imageUsageRecordPort
+    ) {
+      imageGenerationController = createHostedImageGenerationController({
+        codexHome: hostedCodexRuntime.codexHome,
+        env: hostedCodexRuntime.runtimeEnv,
+        fetchImpl: imageProviderFetch,
+        generatedImageUploader,
+        materializeWorkspaceArtifacts: restored.materializeWorkspaceArtifacts,
+        memberId: input.request.userId,
+        notifyReady: () => {
+          options.runtimeWakeSignal?.notify(Date.now());
+        },
+        usageAllowancePort: imageUsageAllowancePort,
+        vaultRoot: restored.vaultRoot,
+      });
+    }
     let stagedDeviceSyncDirtyAcks: HostedDeviceSyncDirtyProcessedPostCheckpointRecord[] = [];
     let suppressDirtyPendingFetchUntilCheckpoint = false;
     let deviceSyncWorkspaceWakeHandledUntilCheckpoint: HostedWorkspaceRunnerHandledDeviceSyncWake | null = null;
@@ -1768,7 +1821,9 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       initialMailboxImportContext?: HostedWorkspaceRunnerMailboxImportContext | null;
       initialMailboxPrefetch?: HostedMailboxPrefixPrefetch | null;
       requestId: string;
+      persistImageCaptures?: boolean;
       signal?: AbortSignal;
+      stageImageCompletions?: boolean;
       workspace: HostedWorkspaceState | null;
     }): Promise<HostedWorkspaceRunnerResult> => {
       const passSignal = passInput.signal ?? runtimeAbortController.signal;
@@ -1781,6 +1836,54 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       const passForeground = hostedMailboxImportHasForegroundConversationWork(
         passInput.initialMailboxImport ?? null,
       ) || hostedAssistantInputBatchHasWork(passInput.initialAssistantInputBatch ?? null);
+      const imageRegistrationAfterSequence =
+        imageGenerationController?.snapshot().registrationCursor ?? 0;
+      let imageDeferredUsageCapture:
+        HostedWorkspaceRunnerDeferredUsageCapture | null = null;
+      const selectedImageCompletionOperationIds = new Set<string>();
+      let imagePassLifecycleScheduled = false;
+      const scheduleImagePassLifecycle = (phaseSucceeded: boolean): void => {
+        const controller = imageGenerationController;
+        if (!controller || imagePassLifecycleScheduled) {
+          return;
+        }
+        imagePassLifecycleScheduled = true;
+        const imageRegistrationThroughSequence =
+          controller.snapshot().registrationCursor;
+        if (
+          imageRegistrationThroughSequence === imageRegistrationAfterSequence
+          && selectedImageCompletionOperationIds.size === 0
+        ) {
+          return;
+        }
+        const deferredUsageCapture = imageDeferredUsageCapture;
+        const selectedOperationIds =
+          [...selectedImageCompletionOperationIds];
+        const lifecycle = (async () => {
+          // The runner closes this pass-local capture only after the ordinary
+          // Murph turn, outbox delivery, and canonical post-turn writes have
+          // finished. Its outcome is therefore the exact durable usage proof
+          // for registrations created by this pass, never a global aggregate.
+          const usageOutcome = deferredUsageCapture
+            ? await deferredUsageCapture.outcome
+            : null;
+          controller.completeCompletionTurns({
+            operationIds: selectedOperationIds,
+            phaseSucceeded: phaseSucceeded && usageOutcome !== null,
+            successfulUsageIds: usageOutcome?.successfulUsageIds ?? [],
+          });
+          await controller.admitRegistered({
+            afterSequence: imageRegistrationAfterSequence,
+            recordedOriginInputIds:
+              phaseSucceeded
+              && usageOutcome?.failedRecordCount === 0
+                ? usageOutcome.recordedAcceptedInputIds
+                : [],
+            throughSequence: imageRegistrationThroughSequence,
+          });
+        })();
+        trackImagePassLifecycle(lifecycle);
+      };
       emitPhaseLog({
         details: {
           initialMailboxImportProvided: passInput.initialMailboxImport !== undefined,
@@ -1809,9 +1912,58 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             ordinal: passOrdinal,
             startedAtEpochMs: passStartedAtEpochMs,
           },
+          trackDeferredUsageCapture(capture) {
+            if (imageDeferredUsageCapture !== null) {
+              throw new TypeError(
+                "Hosted foreground pass registered more than one deferred usage capture.",
+              );
+            }
+            imageDeferredUsageCapture = capture;
+            trackDeferredUsageCapture(capture);
+          },
           runAssistantPhase: async (phaseInput) => {
             currentAssistantInputId = null;
             try {
+              let imageCapturePersistenceRan = false;
+              const shouldRunImageMaintenance =
+                !passForeground
+                && phaseInput.shouldYieldBackgroundMaintenance?.() !== true;
+              if (
+                passInput.stageImageCompletions === true
+                && shouldRunImageMaintenance
+                && imageGenerationController?.snapshot().ready
+              ) {
+                await imageGenerationController.stageReady(
+                  async (completion) => {
+                    const staged =
+                      await stageHostedImageGenerationCompletionInput({
+                        operation: {
+                          completedAt: completion.completedAt,
+                          id: completion.operationId,
+                        },
+                        originInputId: completion.originAssistantInputId,
+                        outcome: completion.outcome.kind === "ready"
+                          ? {
+                              kind: "ready",
+                              media: completion.outcome.media,
+                            }
+                          : completion.outcome,
+                        vaultRoot: restored.vaultRoot,
+                      });
+                    return {
+                      completionInputId: staged.inputId,
+                    };
+                  },
+                );
+              }
+              if (
+                passInput.persistImageCaptures === true
+                && shouldRunImageMaintenance
+                && imageGenerationController?.snapshot().canonicalWritePending
+              ) {
+                imageCapturePersistenceRan = true;
+                await imageGenerationController.persistReadyCaptures();
+              }
               const phaseAssistantTarget = readConfirmedAssistantTarget();
               const confirmedAssistantTargetEnv = phaseAssistantTarget
                 ? {
@@ -1838,6 +1990,8 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                 currentAssistantInputId: () => currentAssistantInputId,
                 deviceSyncMessagingReturnTarget,
                 deviceSyncWorkspaceWakeHandled: deviceSyncWorkspaceWakeHandledUntilCheckpoint,
+                imageGenerationRegistrar:
+                  imageGenerationController?.registrar ?? null,
                 request: input.request,
                 restored,
                 runtime: phaseRuntime,
@@ -1854,6 +2008,26 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                   const assistantInputIds = acceptedInputs
                     .filter((acceptedInput) => acceptedInput.source === "assistant-input")
                     .map((acceptedInput) => acceptedInput.id);
+                  if (imageGenerationController) {
+                    const selectedOperationIds =
+                      imageGenerationController.selectCompletionInputs({
+                        inputIds: assistantInputIds,
+                        recordDeferredUsage: (
+                          record,
+                          acceptedInputIds,
+                          usageOptions,
+                        ) => {
+                          phaseInput.recordDeferredUsage?.(
+                            record,
+                            acceptedInputIds,
+                            usageOptions,
+                          );
+                        },
+                      });
+                    for (const operationId of selectedOperationIds) {
+                      selectedImageCompletionOperationIds.add(operationId);
+                    }
+                  }
                   const acceptedInputContext =
                     await resolveHostedCurrentInputIdForAcceptedInputs({
                       assistantInputIds,
@@ -1876,7 +2050,14 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                 suppressDirtyPendingFetch: suppressDirtyPendingFetchUntilCheckpoint,
                 signal: passSignal,
               });
-              return phaseResult;
+              return imageCapturePersistenceRan
+                && phaseResult.progressed !== true
+                ? {
+                    ...phaseResult,
+                    checkpointReason: "assistant_runtime_commit",
+                    progressed: true,
+                  }
+                : phaseResult;
             } finally {
               currentAssistantInputId = null;
             }
@@ -1918,8 +2099,10 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             workspace: passInput.workspace,
           });
         recordBrowserVaultReplicaRefreshIntent(passResult);
+        scheduleImagePassLifecycle(true);
         return passResult;
       } catch (error) {
+        scheduleImagePassLifecycle(false);
         emitPhaseLog({
           details: {
             passForeground,
@@ -2590,7 +2773,9 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         invocationLocalProjectedAssistantWakeKey?: string | null;
         preserveDueAssistantWakeOnNoProgress?: boolean;
         requestIdKind: "checkpoint-interrupt" | "checkpoint-wake" | "idle-wake";
+        persistImageCaptures?: boolean;
         signal?: AbortSignal;
+        stageImageCompletions?: boolean;
       }): Promise<HostedWorkspaceRunnerResult> => {
         const resolveForegroundRerunAssistantInputBatch = (
           passResult: HostedWorkspaceRunnerResult,
@@ -2627,7 +2812,11 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
               ?? createHostedRuntimeWakeInitialImportContext(singleWakeInput.latencySeed ?? null),
             initialMailboxPrefetch: singleWakeInput.initialMailboxPrefetch ?? null,
             requestId: `${requestId}:${singleWakeInput.requestIdKind}:${idleWakeOrdinal}`,
+            persistImageCaptures:
+              singleWakeInput.persistImageCaptures === true,
             signal: singleWakeInput.signal,
+            stageImageCompletions:
+              singleWakeInput.stageImageCompletions === true,
             workspace: passWorkspace,
           });
           absorbForegroundPassResult(
@@ -2894,6 +3083,172 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           signal: options.signal,
           systemMailboxAdmission: "pre_checkpoint_safe",
         });
+      const waitForImageGenerationOrRuntimeWake = async (): Promise<
+        HostedRuntimeWakeLatencySeed | null
+      > => {
+        const controller = imageGenerationController;
+        if (!controller) {
+          return null;
+        }
+        const afterVersion = controller.snapshot().version;
+        const runtimeWakeSignal = options.runtimeWakeSignal ?? null;
+        if (!runtimeWakeSignal) {
+          await controller.waitForChange(
+            afterVersion,
+            runtimeAbortController.signal,
+          );
+          return null;
+        }
+
+        const waitAbortController = new AbortController();
+        const waitSignal = AbortSignal.any([
+          runtimeAbortController.signal,
+          waitAbortController.signal,
+        ]);
+        try {
+          const wake = await Promise.race([
+            controller.waitForChange(afterVersion, waitSignal).then(() => null),
+            runtimeWakeSignal.wait(waitSignal).then((notification) =>
+              createHostedRuntimeWakeLatencySeed(notification)
+            ),
+          ]);
+          return wake;
+        } finally {
+          waitAbortController.abort(
+            new DOMException(
+              "Hosted image generation wake race settled.",
+              "AbortError",
+            ),
+          );
+        }
+      };
+      const waitForImagePassLifecycleOrRuntimeWake = async (): Promise<
+        HostedRuntimeWakeLatencySeed | null
+      > => {
+        const lifecycles = [...pendingImagePassLifecycles];
+        if (lifecycles.length === 0) {
+          return null;
+        }
+        const runtimeWakeSignal = options.runtimeWakeSignal ?? null;
+        if (!runtimeWakeSignal) {
+          await Promise.all(lifecycles);
+          return null;
+        }
+
+        const wakeAbortController = new AbortController();
+        const wakeSignal = AbortSignal.any([
+          runtimeAbortController.signal,
+          wakeAbortController.signal,
+        ]);
+        try {
+          return await Promise.race([
+            Promise.all(lifecycles).then(() => null),
+            runtimeWakeSignal.wait(wakeSignal).then((notification) =>
+              createHostedRuntimeWakeLatencySeed(notification)
+            ),
+          ]);
+        } finally {
+          wakeAbortController.abort(
+            new DOMException(
+              "Hosted image pass lifecycle wake race settled.",
+              "AbortError",
+            ),
+          );
+        }
+      };
+      const serviceImageGenerationBeforeRelease = async (): Promise<void> => {
+        const controller = imageGenerationController;
+        if (!controller) {
+          return;
+        }
+
+        while (controller.snapshot().unsettled) {
+          assertRuntimeNotAborted();
+          // Conversation work is admitted before the lower-priority image
+          // completion system input. The subsequent runner keeps its live
+          // foreground watcher open, so a message arriving at the boundary can
+          // still preempt the completion turn.
+          const queuedWakeLatencySeed = consumePendingHostedRuntimeWake(
+            options.runtimeWakeSignal ?? null,
+            null,
+          );
+          const foregroundHandled = await runForegroundMailboxWakeIfWork({
+            latencySeed: queuedWakeLatencySeed,
+            requestIdKind: "checkpoint-interrupt",
+            runAssistantWithoutMailboxWork: false,
+            signal: runtimeAbortController.signal,
+            systemMailboxAdmission: "pre_checkpoint_safe",
+          });
+          if (foregroundHandled) {
+            continue;
+          }
+
+          if (pendingImagePassLifecycles.size > 0) {
+            const lifecycleWake =
+              await waitForImagePassLifecycleOrRuntimeWake();
+            if (lifecycleWake) {
+              const lifecycleWakeHandled =
+                await runForegroundMailboxWakeIfWork({
+                  latencySeed: lifecycleWake,
+                  requestIdKind: "checkpoint-interrupt",
+                  runAssistantWithoutMailboxWork: false,
+                  signal: runtimeAbortController.signal,
+                  systemMailboxAdmission: "pre_checkpoint_safe",
+                });
+              if (lifecycleWakeHandled) {
+                continue;
+              }
+            }
+            continue;
+          }
+
+          const controllerState = controller.snapshot();
+          if (!controllerState.unsettled) {
+            break;
+          }
+          if (
+            controllerState.canonicalWritePending
+            || controllerState.ready
+          ) {
+            await runForegroundPass({
+              latencySeed: queuedWakeLatencySeed,
+              persistImageCaptures:
+                controllerState.canonicalWritePending,
+              requestIdKind: "checkpoint-interrupt",
+              signal: runtimeAbortController.signal,
+              stageImageCompletions: controllerState.ready,
+            });
+            continue;
+          }
+
+          if (!controllerState.active) {
+            // A previously staged completion whose turn did not finish remains
+            // level-triggered in the pending-input index. Retry it through the
+            // ordinary Murph phase without re-staging or auto-sending media.
+            await runForegroundPass({
+              latencySeed: queuedWakeLatencySeed,
+              requestIdKind: "checkpoint-interrupt",
+              signal: runtimeAbortController.signal,
+            });
+            continue;
+          }
+
+          const wakeLatencySeed =
+            await waitForImageGenerationOrRuntimeWake();
+          if (wakeLatencySeed) {
+            const wakeHandled = await runForegroundMailboxWakeIfWork({
+              latencySeed: wakeLatencySeed,
+              requestIdKind: "checkpoint-interrupt",
+              runAssistantWithoutMailboxWork: false,
+              signal: runtimeAbortController.signal,
+              systemMailboxAdmission: "pre_checkpoint_safe",
+            });
+            if (wakeHandled) {
+              continue;
+            }
+          }
+        }
+      };
       const runPostCheckpointMailboxWake = async (input: {
         latencySeed: HostedRuntimeWakeLatencySeed | null;
         shouldContinue: () => boolean;
@@ -2985,6 +3340,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           });
         }
       }
+      await serviceImageGenerationBeforeRelease();
       if (!runtimeStateDirty) {
         // Replay-only mailbox consume acks are already backed by the restored
         // durable checkpoint. If the ack fails and returns a retry wake, route
@@ -2999,6 +3355,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         await closeDetachedAssistantAskBeforeWorkspaceRelease();
       }
       while (runtimeStateDirty) {
+        await serviceImageGenerationBeforeRelease();
         let checkpointWakeLatencySeed: HostedRuntimeWakeLatencySeed | null =
           pendingCheckpointWakeLatencySeed;
         pendingCheckpointWakeLatencySeed = null;
@@ -3455,6 +3812,10 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             }
           }
         }
+        await serviceImageGenerationBeforeRelease();
+        if (runtimeStateDirty) {
+          continue;
+        }
         const browserVaultRefresh = await runOptionalPostCheckpointWork(
           async () =>
             await runBrowserVaultRefreshMaintenance({
@@ -3611,6 +3972,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     });
     return invocationResult;
   } catch (error) {
+    runtimeFailed = true;
     phaseLogger.failOpenPhases({
       error,
       input,
@@ -3630,6 +3992,27 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     await drainDeferredUsageBestEffort();
     throw error;
   } finally {
+    if (imageGenerationController) {
+      const forceImageDrain =
+        runtimeFailed
+        || runtimeAbortController.signal.aborted
+        || imageGenerationController.snapshot().unsettled;
+      if (forceImageDrain) {
+        await imageGenerationController.drain("forced");
+        await withHostedRuntimeTimeout(
+          Promise.allSettled([...pendingImagePassLifecycles]).then(
+            () => undefined,
+          ),
+          HOSTED_IMAGE_FORCE_DRAIN_TIMEOUT_MS,
+          "Timed out draining hosted image pass lifecycle after forced shutdown.",
+        ).catch(() => undefined);
+      } else {
+        await drainImagePassLifecycles();
+        await imageGenerationController.drain("graceful");
+      }
+    } else {
+      await Promise.allSettled([...pendingImagePassLifecycles]);
+    }
     await closeDetachedAssistantAskBeforeWorkspaceRelease();
     hostAbortSignal?.removeEventListener("abort", abortFromHost);
   }

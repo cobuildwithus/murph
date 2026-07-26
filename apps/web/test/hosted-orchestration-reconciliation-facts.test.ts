@@ -3,6 +3,10 @@ import {
 } from "@murphai/hosted-execution/parsers";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
+import type {
+  HostedAiUsageGateDecisionWithSource,
+} from "@/src/lib/hosted-execution/usage-allowance";
+
 const FIXED_NOW = "2026-05-20T12:00:00.000Z";
 const MEMBER_ID = "member_orch_1";
 const UNSAFE_SENTINEL = "UNSAFE_STATUS_SENTINEL";
@@ -631,6 +635,68 @@ describe("hosted orchestration reconciliation facts", () => {
       now: new Date(FIXED_NOW),
       userId: MEMBER_ID,
     });
+  });
+
+  it("retries pending conversation work at reserved-capacity expiry without sending a usage-limit notice", async () => {
+    const reservationExpiry = "2026-05-20T12:05:00.000Z";
+    mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
+      redactedStatusJson: {
+        conversationImportedSeq: "2",
+        systemImportedSeq: "0",
+      },
+    }));
+    mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([
+      { lane: "conversation", maxSeq: "3" },
+      { lane: "system", maxSeq: "0" },
+    ]);
+    mocks.resolveHostedRuntimeAiUsageGate
+      .mockResolvedValueOnce({
+        decision: buildCapacityReservedUsageGateDecision(reservationExpiry),
+        status: "denied",
+      })
+      .mockResolvedValueOnce({ status: "allowed" });
+
+    const blockedResponse = await reconciliationRoute.GET(
+      requestForFacts(),
+      routeContext(),
+    );
+    const blockedFacts = parseHostedRuntimeReconciliationFacts(
+      await blockedResponse.json(),
+    );
+
+    expect(blockedResponse.status).toBe(200);
+    expect(blockedFacts.blocked).toEqual({
+      reason: "ai_usage_denied",
+      retryAt: reservationExpiry,
+    });
+
+    vi.setSystemTime(new Date(reservationExpiry));
+    const allowedResponse = await reconciliationRoute.GET(
+      requestForFacts(),
+      routeContext(),
+    );
+    const allowedFacts = parseHostedRuntimeReconciliationFacts(
+      await allowedResponse.json(),
+    );
+
+    expect(allowedResponse.status).toBe(200);
+    expect(allowedFacts.blocked).toBeNull();
+    expect(mocks.resolveHostedRuntimeAiUsageGate).toHaveBeenNthCalledWith(1, {
+      mode: "mutating",
+      now: new Date(FIXED_NOW),
+      userId: MEMBER_ID,
+    });
+    expect(mocks.resolveHostedRuntimeAiUsageGate).toHaveBeenNthCalledWith(2, {
+      mode: "mutating",
+      now: new Date(reservationExpiry),
+      userId: MEMBER_ID,
+    });
+    expect(mocks.readHostedMailboxLatestPendingConversationItem).not.toHaveBeenCalled();
+    expect(mocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat).not.toHaveBeenCalled();
+    expect(
+      mocks.sendClaimedHostedAiUsageLimitNoticeToTelegramThread,
+    ).not.toHaveBeenCalled();
+    expect(mocks.sendHostedTrialConversionNoticeToLinqChat).not.toHaveBeenCalled();
   });
 
   it("sends the current-chat Linq trial conversion notice when pending conversation work is runtime-denied", async () => {
@@ -1603,6 +1669,27 @@ function buildHostedAccessInactiveUsageGateDecision() {
     remainingUsdMicros: 10_000_000n,
     retryAfter: new Date("2026-07-01T00:00:00.000Z"),
     spentUsdMicros: 0n,
+    userNotice: null,
+  };
+}
+
+function buildCapacityReservedUsageGateDecision(
+  retryAfter: string,
+): Extract<HostedAiUsageGateDecisionWithSource, { allowed: false }> {
+  return {
+    allowed: false,
+    allowanceSource: "direct_paid_member_plan",
+    billingPlanCode: "launch_monthly",
+    limitUsdMicros: 10_000_000n,
+    memberId: MEMBER_ID,
+    periodEnd: new Date("2026-06-01T00:00:00.000Z"),
+    periodStart: new Date("2026-05-01T00:00:00.000Z"),
+    reason: "ai_usage_capacity_reserved",
+    remainingUsdMicros: 0n,
+    retryAfter: new Date(retryAfter),
+    spentUsdMicros: 1_000_000n,
+    usageCreditBalanceUsdMicros: 0n,
+    usageCreditLedgerVersion: 3n,
     userNotice: null,
   };
 }

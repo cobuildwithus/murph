@@ -396,7 +396,8 @@ function buildAssistantLowUsageGuidanceText(): string {
   return [
     "Low hosted usage:",
     "- Only when trusted turn context says this conversation's Murph usage is running low, complete the user's current request first, then read `$MURPH_ASSISTANT_SKILLS_ROOT/hosted-low-usage/SKILL.md` before replying.",
-    "- Follow that skill's single final usage-segment contract, using the `---` delimiter only when the channel reply-style guidance supports bubbles. Do not send a separate warning or repeat one already visible in the recent conversation.",
+    "- When a hosted `murph.generate_image` result instead has trusted structured `status: insufficient_image_capacity`, `reason: would_exhaust`, and `image_started: false`, read that skill and follow its image-capacity-denial branch. Do not infer this state, retry the image, or claim the whole plan is low or exhausted.",
+    "- For an ordinary trusted low-usage heads-up, follow that skill's single final usage-segment contract, using the `---` delimiter only when the channel reply-style guidance supports bubbles. That segment and delimiter contract does not apply to the image-capacity-denial branch. Do not send a separate warning or repeat one already visible in the recent conversation.",
   ].join("\n");
 }
 

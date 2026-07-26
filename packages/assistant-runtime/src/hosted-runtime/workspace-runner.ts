@@ -240,6 +240,7 @@ export interface HostedWorkspaceRunnerAssistantPhaseInput {
   recordDeferredUsage?: ((
     record: AssistantUsageRecord,
     providerRequestAcceptedInputIds?: readonly string[],
+    options?: HostedWorkspaceRunnerDeferredUsageOptions,
   ) => void) | null;
   shouldYieldBackgroundMaintenance?: (() => boolean) | null;
   workspace: HostedWorkspaceState | null;
@@ -252,7 +253,12 @@ export interface HostedWorkspaceRunnerAssistantInputBatch {
   linqDeliveryContexts: readonly HostedAssistantLinqDeliveryContext[];
 }
 
+export interface HostedWorkspaceRunnerDeferredUsageOptions {
+  reservationId?: string;
+}
+
 interface HostedDeferredAssistantUsageRecord {
+  options?: HostedWorkspaceRunnerDeferredUsageOptions;
   providerRequestAcceptedInputIds?: readonly string[];
   record: AssistantUsageRecord;
 }
@@ -335,6 +341,15 @@ export interface HostedWorkspaceRunnerRuntimePassDiagnostics {
 export interface HostedWorkspaceRunnerDeferredUsageCapture {
   completion: Promise<void>;
   drainForProcessFatal(): Promise<void>;
+  outcome: Promise<HostedWorkspaceRunnerDeferredUsageOutcome>;
+}
+
+export interface HostedWorkspaceRunnerDeferredUsageOutcome {
+  failedRecordCount: number;
+  failedUsageIds: readonly string[];
+  recordedAcceptedInputIds: readonly string[];
+  successfulRecordCount: number;
+  successfulUsageIds: readonly string[];
 }
 
 export interface HostedWorkspaceRunnerRuntimeStatusCheckpointInput {
@@ -836,6 +851,11 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
   const runAssistantPhase = input.runAssistantPhase;
   const deferredUsageRecords: HostedDeferredAssistantUsageRecord[] = [];
   const pendingDeferredUsageWrites = new Set<Promise<void>>();
+  const recordedDeferredUsageAcceptedInputIds = new Set<string>();
+  const failedDeferredUsageIds = new Set<string>();
+  const successfulDeferredUsageIds = new Set<string>();
+  let failedDeferredUsageRecordCount = 0;
+  let successfulDeferredUsageRecordCount = 0;
   let deferredUsageWriteTail = Promise.resolve();
   let deferredUsageCaptureClosed = false;
   let deferredUsageCaptureStarted = false;
@@ -844,12 +864,26 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
   const deferredUsageCompletion = new Promise<void>((resolve) => {
     resolveDeferredUsageCompletion = resolve;
   });
+  let resolveDeferredUsageOutcome:
+    (outcome: HostedWorkspaceRunnerDeferredUsageOutcome) => void =
+      () => undefined;
+  const deferredUsageOutcome =
+    new Promise<HostedWorkspaceRunnerDeferredUsageOutcome>((resolve) => {
+      resolveDeferredUsageOutcome = resolve;
+    });
   const resolveDeferredUsageCompletionOnce = (): void => {
     if (deferredUsageCompletionSettled) {
       return;
     }
 
     deferredUsageCompletionSettled = true;
+    resolveDeferredUsageOutcome({
+      failedRecordCount: failedDeferredUsageRecordCount,
+      failedUsageIds: [...failedDeferredUsageIds],
+      recordedAcceptedInputIds: [...recordedDeferredUsageAcceptedInputIds],
+      successfulRecordCount: successfulDeferredUsageRecordCount,
+      successfulUsageIds: [...successfulDeferredUsageIds],
+    });
     resolveDeferredUsageCompletion();
   };
   const maybeResolveDeferredUsageCompletion = (): void => {
@@ -866,10 +900,21 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
     }
 
     const completion = deferredUsageWriteTail.then(async () => {
-      await flushHostedAssistantUsageRecordsBestEffort({
+      const outcome = await flushHostedAssistantUsageRecordsBestEffort({
         input,
         records,
       });
+      failedDeferredUsageRecordCount += outcome.failedRecordCount;
+      successfulDeferredUsageRecordCount += outcome.successfulRecordCount;
+      for (const usageId of outcome.failedUsageIds) {
+        failedDeferredUsageIds.add(usageId);
+      }
+      for (const inputId of outcome.recordedAcceptedInputIds) {
+        recordedDeferredUsageAcceptedInputIds.add(inputId);
+      }
+      for (const usageId of outcome.successfulUsageIds) {
+        successfulDeferredUsageIds.add(usageId);
+      }
     });
     deferredUsageWriteTail = completion.catch(() => undefined);
     pendingDeferredUsageWrites.add(completion);
@@ -903,6 +948,7 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
   input.trackDeferredUsageCapture?.({
     completion: deferredUsageCompletion,
     drainForProcessFatal: drainDeferredUsageCaptureForProcessFatal,
+    outcome: deferredUsageOutcome,
   });
   if (input.signal?.aborted) {
     startDeferredUsageCaptureOnAbort();
@@ -1045,8 +1091,10 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
     recordDeferredUsage(
       record: AssistantUsageRecord,
       providerRequestAcceptedInputIds?: readonly string[],
+      options?: HostedWorkspaceRunnerDeferredUsageOptions,
     ): void {
       const deferredRecord = {
+        ...(options === undefined ? {} : { options: { ...options } }),
         ...(providerRequestAcceptedInputIds === undefined
           ? {}
           : { providerRequestAcceptedInputIds: [...providerRequestAcceptedInputIds] }),
@@ -2311,13 +2359,39 @@ function normalizeHostedUsageNoticeRouteString(
 async function flushHostedAssistantUsageRecordsBestEffort(input: {
   input: HostedWorkspaceRunnerInput;
   records: readonly HostedDeferredAssistantUsageRecord[];
-}): Promise<void> {
+}): Promise<HostedWorkspaceRunnerDeferredUsageOutcome> {
   const usageRecordPort = input.input.platform.usageRecordPort ?? null;
-  if (!usageRecordPort || input.records.length === 0) {
-    return;
+  if (input.records.length === 0) {
+    return {
+      failedRecordCount: 0,
+      failedUsageIds: [],
+      recordedAcceptedInputIds: [],
+      successfulRecordCount: 0,
+      successfulUsageIds: [],
+    };
+  }
+  if (!usageRecordPort) {
+    return {
+      failedRecordCount: input.records.length,
+      failedUsageIds: input.records.map(({ record }) => record.usageId),
+      recordedAcceptedInputIds: [],
+      successfulRecordCount: 0,
+      successfulUsageIds: [],
+    };
   }
 
-  for (const { providerRequestAcceptedInputIds, record } of input.records) {
+  let failedRecordCount = 0;
+  const failedUsageIds = new Set<string>();
+  const recordedAcceptedInputIds = new Set<string>();
+  let successfulRecordCount = 0;
+  const successfulUsageIds = new Set<string>();
+  for (
+    const {
+      options,
+      providerRequestAcceptedInputIds,
+      record,
+    } of input.records
+  ) {
     try {
       const noticeDeliveryTarget =
         await resolveHostedUsageNoticeDeliveryTargetFromAcceptedInputs({
@@ -2325,8 +2399,22 @@ async function flushHostedAssistantUsageRecordsBestEffort(input: {
           memberId: input.input.expectedUserId,
           vaultRoot: input.input.vaultRoot,
         });
-      await usageRecordPort.recordUsage(record, noticeDeliveryTarget);
+      await usageRecordPort.recordUsage(record, {
+        ...(noticeDeliveryTarget === null || noticeDeliveryTarget === undefined
+          ? {}
+          : { noticeDeliveryTarget }),
+        ...(options?.reservationId === undefined
+          ? {}
+          : { reservationId: options.reservationId }),
+      });
+      successfulRecordCount += 1;
+      successfulUsageIds.add(record.usageId);
+      for (const inputId of providerRequestAcceptedInputIds ?? []) {
+        recordedAcceptedInputIds.add(inputId);
+      }
     } catch (error) {
+      failedRecordCount += 1;
+      failedUsageIds.add(record.usageId);
       const diagnostics = buildHostedExecutionSafeErrorDiagnostics(error);
       const safeErrorMessage =
         typeof diagnostics?.errorMessage === "string"
@@ -2360,6 +2448,14 @@ async function flushHostedAssistantUsageRecordsBestEffort(input: {
       }).catch(() => undefined);
     }
   }
+
+  return {
+    failedRecordCount,
+    failedUsageIds: [...failedUsageIds],
+    recordedAcceptedInputIds: [...recordedAcceptedInputIds],
+    successfulRecordCount,
+    successfulUsageIds: [...successfulUsageIds],
+  };
 }
 
 async function writeHostedForegroundMailboxImportFailureRuntimeLog(context: {

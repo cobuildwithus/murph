@@ -20,6 +20,10 @@ import {
 import {
   HOSTED_EXECUTION_ASSISTANT_ASK_QUESTION_MAX_CODE_POINTS,
   HOSTED_EXECUTION_ASSISTANT_ASK_TARGET_LABEL_MAX_CODE_POINTS,
+  HOSTED_EXECUTION_ASSISTANT_IMAGE_PROVIDER_PROMPT_MAX_UTF8_BYTES,
+  HOSTED_EXECUTION_ASSISTANT_IMAGE_QUALITIES,
+  HOSTED_EXECUTION_ASSISTANT_IMAGE_REFERENCE_MAX_COUNT,
+  HOSTED_EXECUTION_ASSISTANT_IMAGE_SIZES,
 } from "../contracts.ts";
 import {
   parseHostedExecutionAssistantAskBoundedText as parseHostedRuntimeGroupAskBoundedText,
@@ -33,6 +37,7 @@ import {
   HOSTED_INGRESS_LATENCY_SOURCES,
   HOSTED_RUNTIME_ASSISTANT_MILESTONES,
   HOSTED_RUNTIME_ASSISTANT_ASK_REQUEST_ID_MAX_CODE_POINTS,
+  HOSTED_RUNTIME_USAGE_RESERVATION_ID_MAX_LENGTH,
   HOSTED_RUNTIME_SIDE_INPUT_UNAVAILABLE_CODES,
   HOSTED_RUNTIME_LATENCY_TRACE_ASSISTANT_INPUT_MAX_IDS,
   HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_KEYS,
@@ -107,6 +112,9 @@ import {
   type HostedRuntimeSideInputUnavailableCode,
   type HostedRuntimeUsageRecordRequest,
   type HostedRuntimeUsageRecordResponse,
+  type HostedRuntimeUsageAllowanceImageEstimate,
+  type HostedRuntimeUsageAllowanceRequest,
+  type HostedRuntimeUsageAllowanceResponse,
   type HostedRuntimeFamilyPlanToolRequest,
   type HostedRuntimeFamilyPlanToolResponse,
   type HostedRuntimeFamilyPlanToolStartCheckoutResponse,
@@ -702,7 +710,7 @@ export function parseHostedRuntimeUsageRecordRequest(
   const record = requireObject(value, "Hosted runtime usage record request");
   assertAllowedObjectKeys(
     record,
-    new Set(["noticeDeliveryTarget", "usage"]),
+    new Set(["noticeDeliveryTarget", "reservationId", "usage"]),
     "Hosted runtime usage record request",
   );
 
@@ -715,6 +723,14 @@ export function parseHostedRuntimeUsageRecordRequest(
             : parseHostedRuntimeUsageNoticeDeliveryTarget(
                 record.noticeDeliveryTarget,
               ),
+        }),
+    ...(record.reservationId === undefined
+      ? {}
+      : {
+          reservationId: parseHostedRuntimeUsageBoundedId(
+            record.reservationId,
+            "Hosted runtime usage record request reservationId",
+          ),
         }),
     usage: parseAssistantUsageRecord(record.usage),
   };
@@ -775,6 +791,218 @@ export function parseHostedRuntimeUsageRecordResponse(
     recorded: requireBoolean(record.recorded, "Hosted runtime usage record response recorded"),
     usageId: requireString(record.usageId, "Hosted runtime usage record response usageId"),
   };
+}
+
+export function parseHostedRuntimeUsageAllowanceRequest(
+  value: unknown,
+): HostedRuntimeUsageAllowanceRequest {
+  const label = "Hosted runtime usage allowance request";
+  const record = requireObject(value, label);
+  const action = requireString(record.action, `${label} action`);
+  const requestId = parseHostedRuntimeUsageBoundedId(
+    record.requestId,
+    `${label} requestId`,
+  );
+
+  switch (action) {
+    case "reserve_image":
+      assertAllowedObjectKeys(
+        record,
+        new Set(["action", "estimate", "requestId"]),
+        label,
+      );
+      return {
+        action,
+        estimate: parseHostedRuntimeUsageAllowanceImageEstimate(record.estimate),
+        requestId,
+      };
+    case "mark_dispatched":
+    case "release":
+      assertAllowedObjectKeys(
+        record,
+        new Set(["action", "requestId"]),
+        label,
+      );
+      return {
+        action,
+        requestId,
+      };
+    default:
+      throw new TypeError(`${label} action is not supported.`);
+  }
+}
+
+export function parseHostedRuntimeUsageAllowanceResponse(
+  value: unknown,
+): HostedRuntimeUsageAllowanceResponse {
+  const label = "Hosted runtime usage allowance response";
+  const record = requireObject(value, label);
+  const action = requireString(record.action, `${label} action`);
+  const requestId = parseHostedRuntimeUsageBoundedId(
+    record.requestId,
+    `${label} requestId`,
+  );
+  const status = requireString(record.status, `${label} status`);
+
+  switch (action) {
+    case "reserve_image": {
+      assertAllowedObjectKeys(
+        record,
+        new Set(["action", "requestId", "status"]),
+        label,
+      );
+      if (
+        status !== "reserved"
+        && status !== "would_exhaust"
+        && status !== "insufficient_capacity"
+        && status !== "already_dispatched"
+        && status !== "already_settled"
+      ) {
+        throw new TypeError(`${label} reserve_image status is not supported.`);
+      }
+      return {
+        action,
+        requestId,
+        status,
+      };
+    }
+    case "mark_dispatched":
+      assertAllowedObjectKeys(
+        record,
+        new Set(["action", "requestId", "status"]),
+        label,
+      );
+      if (
+        status !== "dispatched"
+        && status !== "already_dispatched"
+        && status !== "already_settled"
+        && status !== "not_dispatchable"
+        && status !== "missing"
+      ) {
+        throw new TypeError(
+          `${label} mark_dispatched status is not supported.`,
+        );
+      }
+      return {
+        action,
+        requestId,
+        status,
+      };
+    case "release":
+      assertAllowedObjectKeys(
+        record,
+        new Set(["action", "requestId", "status"]),
+        label,
+      );
+      if (
+        status !== "released"
+        && status !== "already_released"
+        && status !== "not_releasable"
+        && status !== "missing"
+      ) {
+        throw new TypeError(`${label} release status is not supported.`);
+      }
+      return {
+        action,
+        requestId,
+        status,
+      };
+    default:
+      throw new TypeError(`${label} action is not supported.`);
+  }
+}
+
+function parseHostedRuntimeUsageAllowanceImageEstimate(
+  value: unknown,
+): HostedRuntimeUsageAllowanceImageEstimate {
+  const label = "Hosted runtime usage allowance image estimate";
+  const record = requireObject(value, label);
+  assertAllowedObjectKeys(
+    record,
+    new Set([
+      "model",
+      "promptUtf8Bytes",
+      "quality",
+      "referenceImageCount",
+      "size",
+    ]),
+    label,
+  );
+  const model = requireString(record.model, `${label} model`);
+  if (model !== "gpt-image-2") {
+    throw new TypeError(`${label} model is not supported.`);
+  }
+  const promptUtf8Bytes = parseHostedRuntimeUsageAllowanceBoundedInteger({
+    label: `${label} promptUtf8Bytes`,
+    maximum: HOSTED_EXECUTION_ASSISTANT_IMAGE_PROVIDER_PROMPT_MAX_UTF8_BYTES,
+    minimum: 1,
+    value: record.promptUtf8Bytes,
+  });
+  const quality = requireString(record.quality, `${label} quality`);
+  if (
+    !HOSTED_EXECUTION_ASSISTANT_IMAGE_QUALITIES.includes(
+      quality as HostedRuntimeUsageAllowanceImageEstimate["quality"],
+    )
+  ) {
+    throw new TypeError(`${label} quality is not supported.`);
+  }
+  const referenceImageCount = parseHostedRuntimeUsageAllowanceBoundedInteger({
+    label: `${label} referenceImageCount`,
+    maximum: HOSTED_EXECUTION_ASSISTANT_IMAGE_REFERENCE_MAX_COUNT,
+    minimum: 0,
+    value: record.referenceImageCount,
+  });
+  const size = requireString(record.size, `${label} size`);
+  if (
+    !HOSTED_EXECUTION_ASSISTANT_IMAGE_SIZES.includes(
+      size as HostedRuntimeUsageAllowanceImageEstimate["size"],
+    )
+  ) {
+    throw new TypeError(`${label} size is not supported.`);
+  }
+
+  return {
+    model,
+    promptUtf8Bytes,
+    quality: quality as HostedRuntimeUsageAllowanceImageEstimate["quality"],
+    referenceImageCount,
+    size: size as HostedRuntimeUsageAllowanceImageEstimate["size"],
+  };
+}
+
+function parseHostedRuntimeUsageAllowanceBoundedInteger(input: {
+  label: string;
+  maximum: number;
+  minimum: number;
+  value: unknown;
+}): number {
+  const value = requireNumber(input.value, input.label);
+  if (
+    !Number.isSafeInteger(value)
+    || value < input.minimum
+    || value > input.maximum
+  ) {
+    throw new TypeError(
+      `${input.label} must be an integer from ${input.minimum} through ${input.maximum}.`,
+    );
+  }
+  return value;
+}
+
+function parseHostedRuntimeUsageBoundedId(
+  value: unknown,
+  label: string,
+): string {
+  const requestId = requireString(value, label);
+  if (
+    requestId.trim() !== requestId
+    || requestId.length > HOSTED_RUNTIME_USAGE_RESERVATION_ID_MAX_LENGTH
+  ) {
+    throw new TypeError(
+      `${label} must be trimmed and at most ${HOSTED_RUNTIME_USAGE_RESERVATION_ID_MAX_LENGTH} characters.`,
+    );
+  }
+  return requestId;
 }
 
 export function parseHostedRuntimeProductFeedbackRecordRequest(

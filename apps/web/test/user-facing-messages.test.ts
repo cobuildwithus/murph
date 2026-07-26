@@ -10,10 +10,17 @@ const USER_FACING_MESSAGE_MIN_VARIANT_COUNT = 20;
 
 /**
  * The thread notice has room for personality, but every variant still has to
- * say plainly that Murph has stopped rather than only joking around it.
+ * say plainly that new Murph work is paused rather than only joking around it.
  */
-const THREAD_PAUSE_STATED =
-  /paused|out\b|quiet|gone|nothing left|done|no more|zero|dark|silence|tapped|unsupervised|ran? out|time's up/iu;
+const THREAD_PAUSE_STATED = /New work from me is paused now/iu;
+
+const CROSSING_USAGE_LIMIT_TEMPLATE_KEYS = [
+  "linq.ai_usage.trial_limit_reached",
+  "linq.ai_usage.edge_limit_reached",
+  "linq.ai_usage.family_limit_reached",
+  "linq.ai_usage.pulse_upgrade_edge",
+  "linq.ai_usage.thread_limit_reached",
+] as const satisfies readonly UserFacingMessageTemplateKey[];
 
 /** Every group funding ask must point at the room, never at one named payer. */
 const GROUP_FUNDING_ANYONE_PHRASE =
@@ -135,14 +142,28 @@ describe("user-facing message variants", () => {
   it("keeps thread allowance copy neutral while explaining the pause", () => {
     for (const text of collectRenderedTexts("linq.ai_usage.thread_limit_reached")) {
       expect(text).not.toMatch(/trial|upgrade|checkout|Edge|Pulse|top[ -]?up|payer|https?:\/\//iu);
-      expect(text).toMatch(/resets\.$/u);
+      expect(text).toMatch(/(?:until|when)\b.*resets/iu);
+      expect(text).not.toMatch(
+        /nothing left|hit zero|ran out|out for (?:everyone|all of you)|no more me|gone for everyone/iu,
+      );
+    }
+  });
+
+  it("keeps every crossing notice truthful about previously accepted work", () => {
+    for (const key of CROSSING_USAGE_LIMIT_TEMPLATE_KEYS) {
+      for (const text of collectRenderedTexts(key)) {
+        expect(text).toMatch(
+          /New work from me is paused now\. Anything you already asked me for may still arrive\.$/u,
+        );
+        expect(text).not.toMatch(/Anything I already started/iu);
+      }
     }
   });
 
   it("speaks the thread pause as Murph, in first person, to the whole room", () => {
     for (const text of collectRenderedTexts("linq.ai_usage.thread_limit_reached")) {
       expect(text).toMatch(/\b(?:I|I'm|I've|me|my)\b/u);
-      // Murph is the one who ran out, so no variant may narrate the chat's
+      // Murph owns the limit in first person; no variant narrates the chat's
       // account back at the room in the third person.
       expect(text).not.toMatch(/(?:^|\.\s)(?:this|the) chat\b/iu);
       expect(text).not.toMatch(/\bMurph (?:time|usage)\b/iu);
@@ -243,8 +264,8 @@ describe("user-facing message variants", () => {
       }
     }
 
-    // The group notice says the chat is out in plain words, so it carries no
-    // percentage of its own and still never quotes currency.
+    // The group notice states its exhausted capacity in plain words, so it
+    // carries no percentage of its own and still never quotes currency.
     for (const text of collectRenderedTexts("linq.ai_usage.thread_limit_reached")) {
       expect(text).not.toMatch(/\d+%|\$|USD|dollars?/iu);
     }

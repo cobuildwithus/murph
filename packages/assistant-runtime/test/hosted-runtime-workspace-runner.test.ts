@@ -99,6 +99,7 @@ import {
 } from "../src/hosted-runtime/workspace-restore.ts";
 import {
   resolveHostedUsageNoticeDeliveryTargetFromAcceptedInputs,
+  type HostedWorkspaceRunnerDeferredUsageCapture,
   type HostedWorkspaceRunnerAssistantInputBatch,
 } from "../src/hosted-runtime/workspace-runner.ts";
 import {
@@ -6244,7 +6245,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     let resultResolved = false;
     let flushSawPostAssistantCheckpointLog = false;
     const usageRecordPort: HostedRuntimeUsageRecordPort = {
-      async recordUsage(record, noticeDeliveryTarget) {
+      async recordUsage(record, options) {
         flushSawPostAssistantCheckpointLog = logRequests
           .flatMap((request) => request.entries)
           .some((entry) =>
@@ -6253,15 +6254,17 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           );
         events.push("usage:flush:start");
         assert.equal(record.usageId, "turn_runner_usage.attempt-1");
-        assert.deepEqual(noticeDeliveryTarget, {
-          channel: "linq",
-          replyToMessageId: "linq_message_123",
-          routeAuthority: {
+        assert.deepEqual(options, {
+          noticeDeliveryTarget: {
             channel: "linq",
-            containerMemberId: TEST_USER_ID,
-            threadId: "linq_thread_123",
+            replyToMessageId: "linq_message_123",
+            routeAuthority: {
+              channel: "linq",
+              containerMemberId: TEST_USER_ID,
+              threadId: "linq_thread_123",
+            },
+            target: "linq_thread_123",
           },
-          target: "linq_thread_123",
         });
         await usageFlushGate;
         events.push("usage:flush:done");
@@ -6381,10 +6384,10 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     });
     let resultPromise: ReturnType<typeof runHostedWorkspaceUntilIdleOrBudget> | null = null;
     const usageRecordPort: HostedRuntimeUsageRecordPort = {
-      async recordUsage(record, noticeDeliveryTarget) {
+      async recordUsage(record, options) {
         events.push("usage:flush:start");
         assert.equal(record.usageId, "turn_runner_no_progress_usage.attempt-1");
-        assert.equal(noticeDeliveryTarget, undefined);
+        assert.deepEqual(options, {});
         await usageFlushGate;
         events.push("usage:flush:done");
         resolveUsageFlushDone();
@@ -6478,10 +6481,11 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       releaseFirstUsageFlush = resolve;
     });
     let resultPromise: ReturnType<typeof runHostedWorkspaceUntilIdleOrBudget> | null = null;
+    const deferredUsageCaptures: HostedWorkspaceRunnerDeferredUsageCapture[] = [];
     const deferredTargets: Array<unknown> = [];
     const usageRecordPort: HostedRuntimeUsageRecordPort = {
-      async recordUsage(record, noticeDeliveryTarget) {
-        deferredTargets.push(noticeDeliveryTarget);
+      async recordUsage(record, options) {
+        deferredTargets.push(options);
         events.push(`usage:${record.usageId}:start`);
         if (record.usageId === "turn_runner_usage.first") {
           await firstUsageFlushGate;
@@ -6528,10 +6532,15 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           }), ["assistant_input_missing"]);
           input.recordDeferredUsage?.(createAssistantUsageRecord({
             usageId: "turn_runner_usage.second",
-          }));
+          }), undefined, {
+            reservationId: "turn_runner_usage.second",
+          });
           return {
             progressed: false,
           };
+        },
+        trackDeferredUsageCapture(capture) {
+          deferredUsageCaptures.push(capture);
         },
         vaultRoot,
         workspace: createWorkspaceState({ version: "0" }),
@@ -6563,7 +6572,22 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         "usage:turn_runner_usage.second:start",
         "usage:turn_runner_usage.second:done",
       ]);
-      assert.deepEqual(deferredTargets, [null, undefined]);
+      assert.deepEqual(deferredTargets, [
+        {},
+        { reservationId: "turn_runner_usage.second" },
+      ]);
+      const deferredUsageCapture = deferredUsageCaptures[0];
+      assert.ok(deferredUsageCapture);
+      assert.deepEqual(await deferredUsageCapture.outcome, {
+        failedRecordCount: 0,
+        failedUsageIds: [],
+        recordedAcceptedInputIds: ["assistant_input_missing"],
+        successfulRecordCount: 2,
+        successfulUsageIds: [
+          "turn_runner_usage.first",
+          "turn_runner_usage.second",
+        ],
+      });
     } finally {
       releaseFirstUsageFlush();
       if (resultPromise) {

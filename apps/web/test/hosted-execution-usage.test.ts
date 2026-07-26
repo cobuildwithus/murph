@@ -421,6 +421,84 @@ describe("recordHostedAiUsageRecords", () => {
     expect(allowanceMocks.accountHostedAiUsageForAllowanceTx).toHaveBeenCalledOnce();
   });
 
+  it("forwards one reservation settlement inside the usage transaction", async () => {
+    const hostedAiUsageUpsert = vi.fn(
+      async (args: { create: Record<string, unknown> }) => args.create,
+    );
+    const prisma = makeUsagePrismaClient(hostedAiUsageUpsert);
+
+    await expect(recordHostedAiUsageRecords({
+      accountAllowance: true,
+      prisma: prisma as never,
+      reservationId: "image_request_123",
+      trustedUserId: "member_123",
+      usage: [BASE_USAGE_RECORD],
+    })).resolves.toEqual({
+      recordedIds: ["turn_123.attempt-1"],
+    });
+
+    expect(prisma.$transaction).toHaveBeenCalledOnce();
+    expect(allowanceMocks.accountHostedAiUsageForAllowanceTx)
+      .toHaveBeenCalledExactlyOnceWith({
+        memberId: "member_123",
+        record: expect.objectContaining({
+          usageId: "turn_123.attempt-1",
+        }),
+        reservationId: "image_request_123",
+        tx: expect.objectContaining({
+          hostedAiUsage: expect.objectContaining({
+            upsert: hostedAiUsageUpsert,
+          }),
+        }),
+      });
+  });
+
+  it("requires allowance accounting when a reservation settlement is supplied", async () => {
+    const hostedAiUsageUpsert = vi.fn(
+      async (args: { create: Record<string, unknown> }) => args.create,
+    );
+    const prisma = makeUsagePrisma(hostedAiUsageUpsert);
+
+    await expect(recordHostedAiUsageRecords({
+      prisma: prisma as never,
+      reservationId: "image_request_123",
+      trustedUserId: "member_123",
+      usage: [BASE_USAGE_RECORD],
+    })).rejects.toThrow(
+      "Hosted AI usage reservation settlement requires allowance accounting.",
+    );
+
+    expect(hostedAiUsageUpsert).not.toHaveBeenCalled();
+    expect(allowanceMocks.accountHostedAiUsageForAllowanceTx).not.toHaveBeenCalled();
+  });
+
+  it("requires exactly one usage record for one reservation settlement", async () => {
+    const hostedAiUsageUpsert = vi.fn(
+      async (args: { create: Record<string, unknown> }) => args.create,
+    );
+    const prisma = makeUsagePrisma(hostedAiUsageUpsert);
+
+    await expect(recordHostedAiUsageRecords({
+      accountAllowance: true,
+      prisma: prisma as never,
+      reservationId: "image_request_123",
+      trustedUserId: "member_123",
+      usage: [
+        BASE_USAGE_RECORD,
+        {
+          ...BASE_USAGE_RECORD,
+          providerRequestOrdinal: 1,
+          usageId: "turn_123.request-1.attempt-1",
+        },
+      ],
+    })).rejects.toThrow(
+      "Hosted AI usage reservation settlement requires exactly one usage record.",
+    );
+
+    expect(hostedAiUsageUpsert).not.toHaveBeenCalled();
+    expect(allowanceMocks.accountHostedAiUsageForAllowanceTx).not.toHaveBeenCalled();
+  });
+
   it("rolls back valid usage rows when allowance accounting fails generically", async () => {
     const prisma = makeRollbackAwareUsagePrismaClient();
     allowanceMocks.accountHostedAiUsageForAllowanceTx.mockRejectedValue(

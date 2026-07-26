@@ -244,6 +244,33 @@ export const HOSTED_EXECUTION_ASSISTANT_ASK_TARGET_LABEL_MAX_CODE_POINTS = 120;
 export const HOSTED_EXECUTION_ASSISTANT_ASK_PERMISSION_TEXT_MAX_CODE_POINTS = 1_000;
 export const HOSTED_EXECUTION_ASSISTANT_ASK_REQUEST_TTL_MS = 10 * 60 * 1_000;
 
+export const HOSTED_EXECUTION_ASSISTANT_IMAGE_PROMPT_MAX_CODE_POINTS = 4_000;
+export const HOSTED_EXECUTION_ASSISTANT_IMAGE_REFERENCE_MAX_COUNT = 16;
+// The provider prompt may prepend the bounded 118-byte reference-image
+// instruction block to a raw prompt whose every code point occupies four bytes.
+export const HOSTED_EXECUTION_ASSISTANT_IMAGE_PROVIDER_PROMPT_MAX_UTF8_BYTES =
+  (HOSTED_EXECUTION_ASSISTANT_IMAGE_PROMPT_MAX_CODE_POINTS * 4) + 118;
+export const HOSTED_EXECUTION_ASSISTANT_IMAGE_QUALITIES = [
+  "low",
+  "medium",
+  "high",
+] as const;
+export const HOSTED_EXECUTION_ASSISTANT_IMAGE_SIZES = [
+  "1024x1024",
+  "1024x1536",
+  "1536x1024",
+] as const;
+
+export type HostedExecutionAssistantImageQuality =
+  (typeof HOSTED_EXECUTION_ASSISTANT_IMAGE_QUALITIES)[number];
+export type HostedExecutionAssistantImageSize =
+  (typeof HOSTED_EXECUTION_ASSISTANT_IMAGE_SIZES)[number];
+
+export interface HostedExecutionAssistantImageEstimate {
+  promptUtf8Bytes: number;
+  referenceImageCount: number;
+}
+
 export interface HostedExecutionAssistantAskJoinedGroupTarget {
   kind: "joined_group";
   membershipId: string;

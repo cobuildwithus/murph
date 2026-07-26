@@ -20,6 +20,8 @@ export const HOSTED_RUNTIME_CRYPTO_ROOT_PATH =
   "/api/internal/hosted-runtime/crypto-context/root";
 export const HOSTED_RUNTIME_USAGE_RECORD_PATH =
   "/api/internal/hosted-execution/usage/record";
+export const HOSTED_RUNTIME_USAGE_RESERVATION_PATH =
+  "/api/internal/hosted-execution/usage/reservation";
 export const HOSTED_RUNTIME_PRODUCT_FEEDBACK_RECORD_PATH =
   "/api/internal/hosted-execution/product-feedback/record";
 export const HOSTED_RUNTIME_FAMILY_PLAN_TOOL_PATH =

@@ -14,6 +14,12 @@ import {
   readMurphDynamicToolRequest,
   resolveMurphDynamicTools,
 } from '../src/assistant-codex/dynamic-tools.ts'
+import type {
+  AssistantHostedImageGenerationRegistrar,
+} from '../src/assistant/execution-context.ts'
+import type {
+  AssistantHostedToolContext,
+} from '../src/assistant/hosted-tool-context.ts'
 
 const tempRoots: string[] = []
 const pngBytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
@@ -953,6 +959,309 @@ describe('murph.generate_image dynamic tool execution', () => {
     expect(serialized).not.toContain('unsafe key value')
   })
 
+  it('registers accepted-input hosted image work without dispatching or attaching it', async () => {
+    const registrar = {
+      register: vi.fn(async () => ({
+        status: 'admission_pending' as const,
+      })),
+    }
+    const fetchImpl = vi.fn<typeof fetch>()
+    const request = readMurphDynamicToolRequest({
+      id: 10,
+      method: 'item/tool/call',
+      params: {
+        arguments: {
+          prompt: 'Render a clean supplement bottle.',
+        },
+        callId: 'call_hosted_image',
+        namespace: 'murph',
+        tool: 'generate_image',
+      },
+    })
+    const result = await executeMurphDynamicToolRequest({
+      env: {
+        OPENAI_API_KEY: 'openai-test-key',
+      },
+      fetchImpl,
+      hostedGeneratedImageUploader: {
+        uploadGeneratedImage: vi.fn(),
+      },
+      hostedToolContext: createAcceptedInputImageContext(registrar),
+      nextUsageOrdinal: () => 3,
+      progressDelivery: null,
+      request: request!,
+      requireHostedGeneratedImageUploader: true,
+      vaultRoot: '/tmp/unused-hosted-vault',
+    })
+
+    expect(registrar.register).toHaveBeenCalledWith({
+      args: expect.objectContaining({
+        prompt: 'Render a clean supplement bottle.',
+      }),
+      origin: {
+        assistantInputId: 'ain_11111111111111111111111111111111',
+        kind: 'accepted_input',
+        sessionId: 'asst_hosted_image',
+      },
+      providerRequestOrdinal: 3,
+      toolCallId: 'call_hosted_image',
+    })
+    expect(fetchImpl).not.toHaveBeenCalled()
+    expect(result.responseMediaPatch).toBeUndefined()
+    expect(result.usageDraft).toBeUndefined()
+    expect(result.rpcResult).toEqual({
+      success: true,
+      contentItems: [{
+        type: 'inputText',
+        text: JSON.stringify({
+          admission_pending: true,
+          image_started: false,
+          status: 'admission_pending',
+        }),
+      }],
+    })
+  })
+
+  it.each([
+    {
+      includeRegistrar: false,
+      includeToolCallId: true,
+      missing: 'registrar',
+    },
+    {
+      includeRegistrar: true,
+      includeToolCallId: false,
+      missing: 'stable tool-call id',
+    },
+  ])('fails closed before provider dispatch when accepted-input $missing is missing', async ({
+    includeRegistrar,
+    includeToolCallId,
+  }) => {
+    const registrar = {
+      register: vi.fn(async () => ({
+        status: 'admission_pending' as const,
+      })),
+    }
+    const fetchImpl = vi.fn<typeof fetch>()
+    const nextUsageOrdinal = vi.fn(() => 3)
+    const request = readGenerateImageRequest({
+      toolCallId: includeToolCallId ? 'call_hosted_image' : null,
+    })
+
+    const result = await executeMurphDynamicToolRequest({
+      env: {
+        OPENAI_API_KEY: 'openai-test-key',
+      },
+      fetchImpl,
+      hostedGeneratedImageUploader: {
+        uploadGeneratedImage: vi.fn(),
+      },
+      hostedToolContext: createAcceptedInputImageContext(
+        includeRegistrar ? registrar : null,
+      ),
+      nextUsageOrdinal,
+      progressDelivery: null,
+      request: request!,
+      requireHostedGeneratedImageUploader: true,
+      vaultRoot: '/tmp/unused-hosted-vault',
+    })
+
+    expect(fetchImpl).not.toHaveBeenCalled()
+    expect(registrar.register).not.toHaveBeenCalled()
+    expect(nextUsageOrdinal).not.toHaveBeenCalled()
+    expect(result.responseMediaPatch).toBeUndefined()
+    expect(result.usageDraft).toBeUndefined()
+    expect(result.rpcResult).toEqual({
+      success: false,
+      contentItems: [{
+        type: 'inputText',
+        text: JSON.stringify({
+          admission_pending: false,
+          image_started: false,
+          reason: 'unavailable',
+          status: 'rejected',
+        }),
+      }],
+    })
+  })
+
+  it.each([
+    { reason: 'conflict' as const },
+    { reason: 'unavailable' as const },
+  ])('does not dispatch when hosted admission is rejected as $reason', async ({
+    reason,
+  }) => {
+    const registrar = {
+      register: vi.fn(async () => ({
+        reason,
+        status: 'rejected' as const,
+      })),
+    }
+    const fetchImpl = vi.fn<typeof fetch>()
+    const nextUsageOrdinal = vi.fn(() => 3)
+
+    const result = await executeMurphDynamicToolRequest({
+      env: {
+        OPENAI_API_KEY: 'openai-test-key',
+      },
+      fetchImpl,
+      hostedGeneratedImageUploader: {
+        uploadGeneratedImage: vi.fn(),
+      },
+      hostedToolContext: createAcceptedInputImageContext(registrar),
+      nextUsageOrdinal,
+      progressDelivery: null,
+      request: readGenerateImageRequest({
+        toolCallId: 'call_hosted_image',
+      })!,
+      requireHostedGeneratedImageUploader: true,
+      vaultRoot: '/tmp/unused-hosted-vault',
+    })
+
+    expect(registrar.register).toHaveBeenCalledOnce()
+    expect(nextUsageOrdinal).toHaveBeenCalledOnce()
+    expect(fetchImpl).not.toHaveBeenCalled()
+    expect(result.responseMediaPatch).toBeUndefined()
+    expect(result.usageDraft).toBeUndefined()
+    expect(result.rpcResult).toEqual({
+      success: false,
+      contentItems: [{
+        type: 'inputText',
+        text: JSON.stringify({
+          admission_pending: false,
+          image_started: false,
+          reason,
+          status: 'rejected',
+        }),
+      }],
+    })
+  })
+
+  it('returns an inline hosted cache result without provider dispatch', async () => {
+    const cachedMedia = {
+      alt: 'Cached bottle',
+      kind: 'image' as const,
+      source: 'gpt-image-2',
+      url: 'https://imagedelivery.net/account/cached/public',
+    }
+    const registrar = {
+      register: vi.fn(async () => ({
+        result: {
+          responseMedia: [cachedMedia],
+          rpcSuccess: true,
+          rpcText: 'cached image attached',
+          usageDraft: null,
+        },
+        status: 'inline_result' as const,
+      })),
+    }
+    const fetchImpl = vi.fn<typeof fetch>()
+
+    const result = await executeMurphDynamicToolRequest({
+      env: {
+        OPENAI_API_KEY: 'openai-test-key',
+      },
+      fetchImpl,
+      hostedGeneratedImageUploader: {
+        uploadGeneratedImage: vi.fn(),
+      },
+      hostedToolContext: createAcceptedInputImageContext(registrar),
+      nextUsageOrdinal: () => 3,
+      progressDelivery: null,
+      request: readGenerateImageRequest({
+        toolCallId: 'call_hosted_image',
+      })!,
+      requireHostedGeneratedImageUploader: true,
+      vaultRoot: '/tmp/unused-hosted-vault',
+    })
+
+    expect(registrar.register).toHaveBeenCalledOnce()
+    expect(fetchImpl).not.toHaveBeenCalled()
+    expect(result.responseMediaPatch).toEqual({
+      media: [cachedMedia],
+      op: 'append',
+    })
+    expect(result.usageDraft).toBeNull()
+    expect(result.rpcResult).toEqual({
+      success: true,
+      contentItems: [{
+        type: 'inputText',
+        text: 'cached image attached',
+      }],
+    })
+  })
+
+  it('keeps scheduled image generation synchronous', async () => {
+    const vaultRoot = await createTempDir('assistant-scheduled-image-vault-')
+    await initializeVault({ vaultRoot })
+    const registrar = {
+      register: vi.fn(async () => ({
+        status: 'admission_pending' as const,
+      })),
+    }
+    const fetchImpl = vi.fn(async () =>
+      jsonResponse({
+        data: [{ b64_json: Buffer.from(webpBytes).toString('base64') }],
+        usage: {
+          input_tokens: 12,
+          output_tokens: 34,
+          total_tokens: 46,
+        },
+      }))
+    const uploadGeneratedImage = vi.fn(async (input) => ({
+      alt: input.alt,
+      kind: 'image' as const,
+      source: input.source,
+      url: 'https://imagedelivery.net/account/scheduled/public',
+    }))
+
+    const result = await executeMurphDynamicToolRequest({
+      env: {
+        OPENAI_API_KEY: 'openai-test-key',
+      },
+      fetchImpl,
+      hostedGeneratedImageUploader: {
+        uploadGeneratedImage,
+      },
+      hostedToolContext: {
+        ...createAcceptedInputImageContext(registrar),
+        currentInvocationScope: () => ({
+          conversationScope: null,
+          origin: {
+            automationId: 'automation_image_test',
+            kind: 'automation_occurrence',
+            occurrenceAt: '2026-07-25T23:00:00.000Z',
+          },
+        }),
+      },
+      nextUsageOrdinal: () => 3,
+      progressDelivery: null,
+      request: readGenerateImageRequest({
+        toolCallId: 'call_scheduled_image',
+      })!,
+      requireHostedGeneratedImageUploader: true,
+      vaultRoot,
+    })
+
+    expect(registrar.register).not.toHaveBeenCalled()
+    expect(fetchImpl).toHaveBeenCalledOnce()
+    expect(uploadGeneratedImage).toHaveBeenCalledOnce()
+    expect(result.responseMediaPatch).toEqual({
+      media: [{
+        alt: 'Generated image',
+        kind: 'image',
+        source: 'gpt-image-2',
+        url: 'https://imagedelivery.net/account/scheduled/public',
+      }],
+      op: 'append',
+    })
+    expect(result.usageDraft).toMatchObject({
+      providerRequestOrdinal: 3,
+      providerRequestOutcome: 'succeeded',
+    })
+    expect(result.rpcResult.success).toBe(true)
+  })
+
   it('parses a Codex dynamic tool call and appends hosted media with image usage', async () => {
     const vaultRoot = await createTempDir('assistant-image-tool-dynamic-vault-')
     await initializeVault({ vaultRoot })
@@ -1066,6 +1375,46 @@ describe('murph.generate_image dynamic tool execution', () => {
   })
 
 })
+
+function createAcceptedInputImageContext(
+  imageGenerationRegistrar: AssistantHostedImageGenerationRegistrar | null,
+): AssistantHostedToolContext {
+  return {
+    computerToolsAvailable: false,
+    currentHostedDeliveryContext: () => null,
+    currentHostedMailboxItemIds: () => [],
+    currentInvocationScope: () => ({
+      conversationScope: 'direct',
+      origin: {
+        assistantInputId: 'ain_11111111111111111111111111111111',
+        kind: 'accepted_input',
+        sessionId: 'asst_hosted_image',
+      },
+    }),
+    imageGenerationRegistrar,
+    sendVaultFile: vi.fn(),
+    vaultFileSendAvailable: false,
+  }
+}
+
+function readGenerateImageRequest(input: {
+  toolCallId: string | null
+}) {
+  return readMurphDynamicToolRequest({
+    id: 10,
+    method: 'item/tool/call',
+    params: {
+      arguments: {
+        prompt: 'Render a clean supplement bottle.',
+      },
+      ...(input.toolCallId
+        ? { callId: input.toolCallId }
+        : {}),
+      namespace: 'murph',
+      tool: 'generate_image',
+    },
+  })
+}
 
 async function createTempDir(prefix: string): Promise<string> {
   const root = await mkdtemp(path.join(tmpdir(), prefix))

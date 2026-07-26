@@ -8,9 +8,15 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("server-only", () => ({}));
 
-vi.mock("@/src/lib/hosted-execution/usage-allowance", () => ({
-  readHostedAiUsageGate: mocks.readHostedAiUsageGate,
-}));
+vi.mock(
+  "@/src/lib/hosted-execution/usage-allowance",
+  async (importOriginal) => ({
+    ...await importOriginal<
+      typeof import("@/src/lib/hosted-execution/usage-allowance")
+    >(),
+    readHostedAiUsageGate: mocks.readHostedAiUsageGate,
+  }),
+);
 
 vi.mock("@/src/lib/hosted-mailbox/runtime-access", () => ({
   hasHostedRuntimeActiveAccess: mocks.hasHostedRuntimeActiveAccess,
@@ -114,6 +120,44 @@ describe("hosted group usage funding", () => {
     });
   });
 
+  it.each([
+    [900_000n, "healthy", 80],
+    [3_600_000n, "low", 20],
+  ] as const)(
+    "keeps reserved image capacity available at %s actual spend",
+    async (spentUsdMicros, capacityState, remainingPercent) => {
+      const prisma = {
+        hostedGroup: {
+          findUnique: vi.fn(async () => ({ joinCode: "group_join_code_1234" })),
+        },
+        hostedThreadContainer: {
+          findUnique: vi.fn(async () => ({ memberId: "member_group_runtime" })),
+        },
+      };
+      mocks.readHostedAiUsageGate.mockResolvedValue({
+        allowanceSource: "thread_container",
+        allowed: false,
+        limitUsdMicros: 4_500_000n,
+        periodEnd: new Date("2026-08-01T00:00:00.000Z"),
+        reason: "ai_usage_capacity_reserved",
+        remainingUsdMicros: 0n,
+        spentUsdMicros,
+        usageCreditBalanceUsdMicros: 0n,
+      });
+
+      await expect(readHostedGroupUsageStatus({
+        prisma: prisma as never,
+        runtimeMemberId: "member_group_runtime",
+      })).resolves.toEqual({
+        capacityState,
+        fundingUrl:
+          "https://www.withmurph.ai/groups/fund/group_join_code_1234",
+        periodEnd: "2026-08-01T00:00:00.000Z",
+        remainingPercent,
+      });
+    },
+  );
+
   it.each([0n, -1n])(
     "reports zero percent when the period limit %s is not a valid denominator",
     (limitUsdMicros) => {
@@ -123,6 +167,30 @@ describe("hosted group usage funding", () => {
       })).toBe(0);
     },
   );
+
+  it("rejects genuine group access denial", async () => {
+    const prisma = {
+      hostedGroup: {
+        findUnique: vi.fn(async () => ({ joinCode: "group_join_code_1234" })),
+      },
+      hostedThreadContainer: {
+        findUnique: vi.fn(async () => ({ memberId: "member_group_runtime" })),
+      },
+    };
+    mocks.readHostedAiUsageGate.mockResolvedValue({
+      allowanceSource: "thread_container",
+      allowed: false,
+      limitUsdMicros: 4_500_000n,
+      periodEnd: new Date("2026-08-01T00:00:00.000Z"),
+      reason: "hosted_access_inactive",
+      remainingUsdMicros: 4_500_000n,
+    });
+
+    await expect(readHostedGroupUsageStatus({
+      prisma: prisma as never,
+      runtimeMemberId: "member_group_runtime",
+    })).resolves.toBeNull();
+  });
 
   it("derives a signed funding-only locator URL for a chat with no group row", async () => {
     const prisma = {

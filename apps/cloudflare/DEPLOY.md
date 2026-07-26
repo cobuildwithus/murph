@@ -315,6 +315,33 @@ can silently send without the matching fence or blindly retry an ambiguous
 provider call. After both deploys, exercise one denied reply on each enabled
 channel and confirm the prepared row advances at provider entry.
 
+## Interactive Image Reservation Rollout
+
+Roll out interactive image admission in this exact order:
+
+1. Apply the additive hosted AI usage-reservation database migration by itself.
+   Do not activate the Web reservation route or code yet; old Web and runtime
+   behavior remain unchanged.
+2. Deploy the Cloudflare Worker and runner bundle. Keep old Web in place so the
+   new runtime fails interactive image admission closed while the reservation
+   route is absent. Require `deploy:smoke` to match both `bundleFingerprint` and
+   `sourceFingerprint` from `.deploy/runner-bundle`; the normal invocation gate
+   must replace a stale warm shell and fail a stale cold shell closed. Complete
+   the old-bundle rollout and drain before continuing.
+3. Activate the Web reservation route and code.
+
+After cutover, prove one `would_exhaust` decision starts no image provider
+request and one admitted request records origin usage before reservation,
+marks dispatch immediately before provider entry, settles exact usage, and
+level-triggers a fresh Murph turn without automatic image delivery. The new
+Cloudflare/runtime bundle is then the hard rollback floor. Before Web rollback,
+drain image continuations and verify zero dispatched-but-unsettled
+reservations. Old Web fails new image admissions closed but rejects completion
+usage carrying `reservationId`; without that drain, settlement fails and the
+conservative claim remains through its admitted period. Cloudflare/runtime must
+not roll back because an old bundle would reopen legacy unreserved provider
+dispatch.
+
 ## One-Time Cloudflare Setup
 
 Before the first deploy:
@@ -382,7 +409,7 @@ The Cloudflare automation private JWK is only used to unwrap the `cloudflare-aut
 `OPENAI_API_KEY` is required by the standard Worker deploy preflight because the hosted assistant provider path expects Worker-owned OpenAI egress interception. The runner container still receives only an injected-credential placeholder; the raw key stays in the Worker.
 `HOSTED_LOG_FINGERPRINT_SECRET` is required so prompt-cache diagnostics can persist stable, Worker-owned request fingerprints without logging prompts, messages, request bodies, headers, or raw identifiers. It must stay out of hosted runtime env.
 `MURPH_DATA_API_KEY` is required so the Worker can authorize the internal `murph-data-api.worker` product label lookup endpoints (`/api/foods` and `/api/supplements`) without exposing the key to the runner. Hosted web must have `MURPH_LABELS_DB_URL` before serving either route; `MURPH_SUPPLEMENT_DB_URL` is not a runtime fallback.
-Hosted generated-image uploads additionally need optional Worker-owned Cloudflare Images config: `CLOUDFLARE_IMAGES_ACCOUNT_ID`, Worker secret `CLOUDFLARE_IMAGES_API_KEY`, and optional `CLOUDFLARE_IMAGES_VARIANT`. Cloudflare credentials are never forwarded into the runner. Without those values the generation call itself still runs and is billed; the subsequent upload fails with a clear `Generated image upload is not configured` error, so configure Images before enabling image generation in production. The runner cannot see Worker env, so a pre-generation availability check would need a worker-to-container capability field; add that plumbing only if unconfigured-deploy spend shows up in traces.
+Hosted generated-image uploads additionally need optional Worker-owned Cloudflare Images config: `CLOUDFLARE_IMAGES_ACCOUNT_ID`, Worker secret `CLOUDFLARE_IMAGES_API_KEY`, and optional `CLOUDFLARE_IMAGES_VARIANT`. Cloudflare credentials are never forwarded into the runner. The Worker projects only uploader availability into the hosted runtime. When that capability is absent, interactive image preparation fails before allowance reservation or provider dispatch, so the image is neither generated nor billed.
 
 ## Optional Vars
 

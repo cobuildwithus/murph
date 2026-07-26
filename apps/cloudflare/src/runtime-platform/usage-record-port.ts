@@ -21,12 +21,17 @@ export function createHostedRuntimeUsageRecordPort(input: {
   transport: HostedWebControlTransport;
 }): NonNullable<HostedRuntimePlatform["usageRecordPort"]> {
   return {
-    async recordUsage(record, noticeDeliveryTarget) {
+    async recordUsage(record, options) {
       return recordHostedRuntimeUsageRecord({
         boundUserId: input.boundUserId,
         fetchImpl: input.fetchImpl,
-        ...(noticeDeliveryTarget === undefined ? {} : { noticeDeliveryTarget }),
+        ...(options?.noticeDeliveryTarget === undefined
+          ? {}
+          : { noticeDeliveryTarget: options.noticeDeliveryTarget }),
         record,
+        ...(options?.reservationId === undefined
+          ? {}
+          : { reservationId: options.reservationId }),
         timeoutMs: input.timeoutMs,
         transport: input.transport,
       });
@@ -39,6 +44,7 @@ export async function recordHostedRuntimeUsageRecord(input: {
   fetchImpl: typeof fetch;
   noticeDeliveryTarget?: HostedRuntimeUsageNoticeDeliveryTarget | null;
   record: AssistantUsageRecord;
+  reservationId?: string;
   timeoutMs: number;
   transport: HostedWebControlTransport;
 }): Promise<HostedRuntimeUsageRecordResponse> {
@@ -47,6 +53,9 @@ export async function recordHostedRuntimeUsageRecord(input: {
       ...(input.noticeDeliveryTarget === undefined
         ? {}
         : { noticeDeliveryTarget: input.noticeDeliveryTarget }),
+      ...(input.reservationId === undefined
+        ? {}
+        : { reservationId: input.reservationId }),
       usage: input.record,
     },
     boundUserId: input.boundUserId,

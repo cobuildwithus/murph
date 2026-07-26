@@ -6,6 +6,8 @@ import type {
 import { normalizeAssistantBackendTarget } from '@murphai/operator-config/assistant-backend'
 import type { AssistantUsageRecord } from '@murphai/hosted-execution/assistant-usage'
 import type {
+  HostedExecutionAssistantImageQuality,
+  HostedExecutionAssistantImageSize,
   HostedExecutionExternalThreadRouteAuthority,
 } from '@murphai/hosted-execution/contracts'
 import type {
@@ -65,6 +67,8 @@ import type {
 } from '@murphai/hosted-execution/subscription'
 import type { AssistantChannelDependencies } from './channel-adapters.js'
 import type { AssistantConnectedAppsPort } from './connected-apps-port.js'
+import type { AssistantRuntimeIssueInput } from './issue-reporting.js'
+import type { AssistantProviderUsageDraft } from './providers/types.js'
 import { normalizeNullableString } from './shared.js'
 
 export type AssistantChannelTypingDependencies = Pick<
@@ -332,6 +336,53 @@ export interface AssistantHostedGeneratedImageUploader {
   ): Promise<AssistantResponseMedia>
 }
 
+export interface AssistantHostedImageGenerationArgs {
+  readonly alt: string | null
+  readonly outputFormat: 'jpeg' | 'png' | 'webp'
+  readonly prompt: string
+  readonly quality: HostedExecutionAssistantImageQuality
+  readonly referenceImageRefs?: readonly string[]
+  readonly size: HostedExecutionAssistantImageSize
+}
+
+export interface AssistantHostedImageGenerationRegistrationRequest {
+  readonly args: AssistantHostedImageGenerationArgs
+  readonly origin: {
+    readonly assistantInputId: string
+    readonly kind: 'accepted_input'
+    readonly sessionId: string
+  }
+  readonly providerRequestOrdinal: number
+  readonly toolCallId: string
+}
+
+export interface AssistantHostedImageGenerationInlineResult {
+  readonly responseMedia?: readonly AssistantResponseMedia[]
+  readonly rpcSuccess: boolean
+  readonly rpcText: string
+  readonly runtimeIssue?: AssistantRuntimeIssueInput
+  readonly usageDraft?: AssistantProviderUsageDraft | null
+}
+
+export type AssistantHostedImageGenerationRegistrationResult =
+  | {
+      readonly status: 'admission_pending'
+    }
+  | {
+      readonly reason: 'conflict' | 'unavailable'
+      readonly status: 'rejected'
+    }
+  | {
+      readonly result: AssistantHostedImageGenerationInlineResult
+      readonly status: 'inline_result'
+    }
+
+export interface AssistantHostedImageGenerationRegistrar {
+  register(
+    request: AssistantHostedImageGenerationRegistrationRequest,
+  ): Promise<AssistantHostedImageGenerationRegistrationResult>
+}
+
 export interface AssistantWorkspaceArtifactMaterializationResult {
   materializedArtifactPaths: ReadonlySet<string>
   missingArtifactPaths: ReadonlySet<string>
@@ -376,6 +427,7 @@ export interface AssistantHostedExecutionContext {
   planUsageTool?: AssistantHostedPlanUsageTool | null
   subscriptionTool?: AssistantHostedSubscriptionTool | null
   dynamicContextPrompts?: readonly string[] | null
+  imageGenerationRegistrar?: AssistantHostedImageGenerationRegistrar | null
   generatedImageUploader?: AssistantHostedGeneratedImageUploader | null
   generatedImageUploaderRequired?: boolean | null
   materializeWorkspaceArtifacts?: AssistantWorkspaceArtifactMaterializer | null
@@ -440,6 +492,9 @@ export function normalizeAssistantExecutionContext(
   const generatedImageUploader = normalizeAssistantGeneratedImageUploader(
     hosted?.generatedImageUploader,
   )
+  const imageGenerationRegistrar = normalizeAssistantImageGenerationRegistrar(
+    hosted?.imageGenerationRegistrar,
+  )
   const familyPlanTool = normalizeAssistantFamilyPlanTool(hosted?.familyPlanTool)
   const personalizationTool = normalizeAssistantPersonalizationTool(
     hosted?.personalizationTool,
@@ -484,6 +539,7 @@ export function normalizeAssistantExecutionContext(
       ...(connectedApps ? { connectedApps } : {}),
       ...(clinicalRecordsConnectLinkTool ? { clinicalRecordsConnectLinkTool } : {}),
       ...(generatedImageUploader ? { generatedImageUploader } : {}),
+      ...(imageGenerationRegistrar ? { imageGenerationRegistrar } : {}),
       ...(familyPlanTool ? { familyPlanTool } : {}),
       ...(personalizationTool ? { personalizationTool } : {}),
       ...(groupPermissionOfferTool ? { groupPermissionOfferTool } : {}),
@@ -792,6 +848,18 @@ function normalizeAssistantGeneratedImageUploader(
 
   return {
     uploadGeneratedImage: input.uploadGeneratedImage,
+  }
+}
+
+function normalizeAssistantImageGenerationRegistrar(
+  input: AssistantHostedExecutionContext['imageGenerationRegistrar'] | undefined,
+): AssistantHostedImageGenerationRegistrar | undefined {
+  if (!input || typeof input.register !== 'function') {
+    return undefined
+  }
+
+  return {
+    register: input.register.bind(input),
   }
 }
 

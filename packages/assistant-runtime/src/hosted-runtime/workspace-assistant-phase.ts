@@ -48,6 +48,7 @@ import {
   type AssistantExecutionContext,
   type AssistantHostedGroupPermissionOfferTool,
   type AssistantHostedGroupSharedReader,
+  type AssistantHostedImageGenerationRegistrar,
   type AssistantInputEventRecord,
   type MurphManagedAutomationDiagnosticStage,
   type AssistantTurnEnvironment,
@@ -289,6 +290,7 @@ export interface HostedWorkspaceRuntimeAssistantPhaseInput
   runtimeEnv: Readonly<Record<string, string>>;
   beforeProviderAcceptedInputs?: AssistantBeforeProviderAcceptedInputsHook | null;
   currentAssistantInputId?: () => string | null;
+  imageGenerationRegistrar?: AssistantHostedImageGenerationRegistrar | null;
   stagedDirtyAcks?: readonly HostedDeviceSyncDirtyProcessedPostCheckpointRecord[] | null;
   suppressDirtyPendingFetch?: boolean;
   signal?: AbortSignal | null;
@@ -1372,6 +1374,9 @@ export async function runHostedWorkspaceAssistantPhase(
           ? {
               currentAssistantInputId: input.currentAssistantInputId,
             }
+          : {}),
+        ...(input.imageGenerationRegistrar
+          ? { imageGenerationRegistrar: input.imageGenerationRegistrar }
           : {}),
         assistantConfigurationTool:
           input.runtime.platform.assistantConfigurationToolPort ?? null,

@@ -4226,6 +4226,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(platform.latencyTracePort).toBeDefined();
     expect(platform.codexAuthPort).toBeDefined();
     expect(platform.issueExportPort).toBeDefined();
+    expect(platform.usageAllowancePort).toBeDefined();
     expect(platform.usageRecordPort).toBeDefined();
     expect(platform.productFeedbackPort).toBeDefined();
     expect(platform.assistantAskPort).toBeDefined();
@@ -5051,8 +5052,105 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(headers.get("x-hosted-execution-signature")).toMatch(/^[A-Za-z0-9\-_]+$/u);
   });
 
+  it("applies hosted usage allowance commands through the signed web callback seam", async () => {
+    const requestBody = {
+      action: "reserve_image" as const,
+      estimate: {
+        model: "gpt-image-2" as const,
+        promptUtf8Bytes: 128,
+        quality: "medium" as const,
+        referenceImageCount: 1,
+        size: "1024x1024" as const,
+      },
+      requestId: "turn_image_1.request-1.attempt-1",
+    };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      await expect(request.clone().json()).resolves.toEqual(requestBody);
+
+      return new Response(JSON.stringify({
+        action: "reserve_image",
+        requestId: requestBody.requestId,
+        status: "reserved",
+      }), {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        status: 200,
+      });
+    });
+    const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv({
+      HOSTED_WEB_BASE_URL: "https://web.example.test",
+    }));
+    const platform = buildHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      webCallbackSigning: environment.webCallbackSigning,
+      webControlBaseUrl: "https://web.example.test",
+    });
+
+    await expect(
+      platform.usageAllowancePort!.applyUsageAllowance(requestBody),
+    ).resolves.toEqual({
+      action: "reserve_image",
+      requestId: requestBody.requestId,
+      status: "reserved",
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const request = requireFetchRequest(
+      fetchMock.mock.calls[0],
+      "usage allowance fetch",
+    );
+    expect(request.url).toBe(
+      "https://web.example.test/api/internal/hosted-execution/usage/reservation",
+    );
+    expect(request.method).toBe("POST");
+    expect(request.headers.get("x-hosted-execution-user-id")).toBe("member_123");
+    expect(request.headers.get("x-hosted-execution-signature")).toMatch(
+      /^[A-Za-z0-9\-_]+$/u,
+    );
+  });
+
+  it("wraps invalid hosted usage allowance responses", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      action: "reserve_image",
+      requestId: "turn_image_other.request-1.attempt-1",
+      status: "reserved",
+    }), {
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      status: 200,
+    }));
+    const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv({
+      HOSTED_WEB_BASE_URL: "https://web.example.test",
+    }));
+    const platform = buildHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      webCallbackSigning: environment.webCallbackSigning,
+      webControlBaseUrl: "https://web.example.test",
+    });
+
+    await expect(platform.usageAllowancePort!.applyUsageAllowance({
+      action: "reserve_image",
+      estimate: {
+        model: "gpt-image-2",
+        promptUtf8Bytes: 128,
+        quality: "medium",
+        referenceImageCount: 0,
+        size: "1024x1024",
+      },
+      requestId: "turn_image_1.request-1.attempt-1",
+    })).rejects.toThrow(
+      "Hosted usage allowance reservation returned invalid JSON.",
+    );
+  });
+
   it("records hosted usage through the signed web callback seam", async () => {
     const usageRecord = createAssistantUsageRecord();
+    const reservationId = "image_reservation_usage_1";
     const noticeDeliveryTarget = {
       channel: "telegram" as const,
       replyToMessageId: "telegram_message_usage_1",
@@ -5062,6 +5160,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       const request = input instanceof Request ? input : new Request(input, init);
       await expect(request.clone().json()).resolves.toEqual({
         noticeDeliveryTarget,
+        reservationId,
         usage: usageRecord,
       });
 
@@ -5086,7 +5185,10 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     });
 
     await expect(
-      platform.usageRecordPort!.recordUsage(usageRecord, noticeDeliveryTarget),
+      platform.usageRecordPort!.recordUsage(usageRecord, {
+        noticeDeliveryTarget,
+        reservationId,
+      }),
     ).resolves.toEqual({
       recorded: true,
       usageId: "turn_usage.attempt-1",
@@ -5130,7 +5232,9 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     });
 
     await platform.usageRecordPort!.recordUsage(usageRecord);
-    await platform.usageRecordPort!.recordUsage(usageRecord, null);
+    await platform.usageRecordPort!.recordUsage(usageRecord, {
+      noticeDeliveryTarget: null,
+    });
 
     expect(requestBodies).toEqual([
       { usage: usageRecord },

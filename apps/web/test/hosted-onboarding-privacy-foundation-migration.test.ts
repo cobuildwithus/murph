@@ -175,6 +175,8 @@ const HOSTED_MEMBER_RELATION_TYPES = new Set([
   "ClinicalRecordRetrievalRequest",
   "ClinicalRecordRetrievalRun",
   "HostedAiUsage",
+  "HostedAiUsagePeriod",
+  "HostedAiUsageReservation",
   "HostedAccountGroup",
   "HostedAccountGroupBillingRef",
   "HostedAccountGroupInvite",
@@ -187,7 +189,6 @@ const HOSTED_MEMBER_RELATION_TYPES = new Set([
   // VaultShare v0: consent-grant relation only (grantor/destination back-references).
   // No new scalar member data; share payloads stay on the encrypted mailbox path.
   "HostedVaultShare",
-  "HostedAiUsagePeriod",
   "HostedConsentEvent",
   "HostedConsentGrant",
   "HostedThreadContainer",
@@ -780,6 +781,13 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
+    const hostedAiUsageReservationMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260725210000_hosted_ai_usage_reservation/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     expect(migrationEntries).toEqual([
       "2026040600_init",
       "20260425000000_drop_legacy_linq_control_plane",
@@ -904,9 +912,52 @@ describe("hosted Prisma baseline migration", () => {
       "20260724180000_device_connection_source_last_data_at",
       "20260725120000_hosted_observability_retention",
       "20260725120000_hosted_thread_delivery_route",
+      "20260725210000_hosted_ai_usage_reservation",
       "20260726120000_hosted_growth_aggregate",
       "migration_lock.toml",
     ]);
+    expect(hostedAiUsageReservationMigrationSql).toContain(
+      'CREATE TABLE "hosted_ai_usage_reservation"',
+    );
+    expect(hostedAiUsageReservationMigrationSql).toContain(
+      'FOREIGN KEY ("member_id") REFERENCES "hosted_member"("id") ON DELETE CASCADE',
+    );
+    expect(hostedAiUsageReservationMigrationSql).toContain(
+      'FOREIGN KEY ("settled_usage_id", "member_id")',
+    );
+    expect(hostedAiUsageReservationMigrationSql).toContain(
+      'REFERENCES "hosted_ai_usage"("id", "member_id")',
+    );
+    expect(hostedAiUsageReservationMigrationSql).toContain(
+      'CHECK ("estimated_cost_usd_micros" > 0)',
+    );
+    expect(hostedAiUsageReservationMigrationSql).toContain(
+      'CHECK ("prompt_utf8_bytes" BETWEEN 1 AND 16118)',
+    );
+    expect(hostedAiUsageReservationMigrationSql).toContain(
+      'CHECK ("reference_image_count" BETWEEN 0 AND 16)',
+    );
+    expect(hostedAiUsageReservationMigrationSql).toContain(
+      'CHECK ("released_at" IS NULL OR ("dispatched_at" IS NULL AND "settled_usage_id" IS NULL))',
+    );
+    expect(hostedAiUsageReservationMigrationSql).toContain(
+      'CHECK ("settled_usage_id" IS NULL OR ("dispatched_at" IS NOT NULL AND "released_at" IS NULL))',
+    );
+    expect(hostedAiUsageReservationMigrationSql).toContain(
+      'CHECK ("settled_usage_id" IS NULL OR "settled_usage_id" = "request_id")',
+    );
+    expect(hostedAiUsageReservationMigrationSql).toContain(
+      'CREATE UNIQUE INDEX "hosted_ai_usage_reservation_settled_usage_key"',
+    );
+    expect(hostedAiUsageReservationMigrationSql).toContain(
+      'CREATE INDEX "hosted_ai_usage_reservation_active_idx"',
+    );
+    expect(hostedAiUsageReservationMigrationSql).not.toContain(
+      '"expected_usage_id"',
+    );
+    expect(hostedAiUsageReservationMigrationSql).not.toContain('"prompt" TEXT');
+    expect(hostedAiUsageReservationMigrationSql).not.toContain("JSONB");
+    expect(hostedAiUsageReservationMigrationSql).not.toContain('"raw_');
     expect(hostedMailboxSubscriptionActionClaimMigrationSql).toContain(
       'ALTER TABLE "hosted_mailbox_item"',
     );

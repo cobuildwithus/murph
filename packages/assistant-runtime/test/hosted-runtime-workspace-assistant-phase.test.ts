@@ -1102,6 +1102,36 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     );
   });
 
+  it("threads the invocation-local image registrar into ordinary hosted turns", async () => {
+    const imageGenerationRegistrar = {
+      register: vi.fn(async () => ({
+        status: "admission_pending" as const,
+      })),
+    };
+
+    await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      imageGenerationRegistrar,
+    }));
+
+    expect(mocks.hydrateHostedExecutionDefaultTarget).toHaveBeenCalledWith(
+      {
+        hosted: expect.objectContaining({
+          imageGenerationRegistrar,
+        }),
+      },
+      expect.any(Object),
+    );
+    expect(mocks.runHostedAssistantAutomationLane).toHaveBeenCalledWith(
+      expect.objectContaining({
+        executionContext: expect.objectContaining({
+          hosted: expect.objectContaining({
+            imageGenerationRegistrar,
+          }),
+        }),
+      }),
+    );
+  });
+
   it("resolves scheduled Linq routes through egress authority and fails closed", async () => {
     const signal = new AbortController().signal;
     const assertLinqRecentInboundEngagement = vi.fn()
@@ -15107,6 +15137,8 @@ function createPhaseInput(input: {
   conversationImportedCount?: number;
   currentAssistantInputId?:
     HostedWorkspaceRuntimeAssistantPhaseInput["currentAssistantInputId"];
+  imageGenerationRegistrar?:
+    HostedWorkspaceRuntimeAssistantPhaseInput["imageGenerationRegistrar"];
   deviceSyncMessagingReturnTarget?:
     HostedWorkspaceRuntimeAssistantPhaseInput["deviceSyncMessagingReturnTarget"];
   deviceSyncWorkspaceWakeHandled?: HostedWorkspaceRuntimeAssistantPhaseInput["deviceSyncWorkspaceWakeHandled"];
@@ -15167,6 +15199,7 @@ function createPhaseInput(input: {
     clearAssistantAutomationScheduleChanged:
       input.clearAssistantAutomationScheduleChanged,
     currentAssistantInputId: input.currentAssistantInputId,
+    imageGenerationRegistrar: input.imageGenerationRegistrar,
     deviceSyncMessagingReturnTarget: input.deviceSyncMessagingReturnTarget,
     deviceSyncWorkspaceWakeHandled: input.deviceSyncWorkspaceWakeHandled,
     initialAssistantInputBatch: input.initialAssistantInputBatch,

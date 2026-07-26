@@ -33,6 +33,15 @@ describe("assistant plan usage tool", () => {
     expect(MURPH_PLAN_USAGE_TOOL.description).toContain(
       "Only after the member asks for the link or accepts that initial offer",
     );
+    expect(MURPH_PLAN_USAGE_TOOL.description).toContain(
+      'status="insufficient_image_capacity", reason="would_exhaust", and image_started=false counts as one manual 1:1 check',
+    );
+    expect(MURPH_PLAN_USAGE_TOOL.description).toContain(
+      "Never infer that permission from any other image result, estimate, delay, or error",
+    );
+    expect(MURPH_PLAN_USAGE_TOOL.description).toContain(
+      "this exact denial is relevant but is not an ordinary low-usage heads-up",
+    );
   });
 
   it("exposes the tool only when the hosted read port is available", () => {

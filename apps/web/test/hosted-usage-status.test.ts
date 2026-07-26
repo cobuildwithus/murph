@@ -7,9 +7,18 @@ const mocks = vi.hoisted(() => ({
   readHostedPersonalUsageCreditOfferCodes: vi.fn(),
 }));
 
-vi.mock("@/src/lib/hosted-execution/usage-allowance", () => ({
-  readHostedAiUsageGate: mocks.readHostedAiUsageGate,
-}));
+vi.mock(
+  "@/src/lib/hosted-execution/usage-allowance",
+  async (importOriginal) => {
+    const actual = await importOriginal<
+      typeof import("@/src/lib/hosted-execution/usage-allowance")
+    >();
+    return {
+      ...actual,
+      readHostedAiUsageGate: mocks.readHostedAiUsageGate,
+    };
+  },
+);
 
 vi.mock("@/src/lib/hosted-web/public-url", () => ({
   resolveHostedPublicBaseUrl: () => "https://example.test",
@@ -762,6 +771,7 @@ function buildDecision(input: {
   billingPlanCode?: "launch_edge_monthly" | "launch_monthly";
   limitUsdMicros?: bigint;
   reason?:
+    | "ai_usage_capacity_reserved"
     | "ai_usage_limit_exceeded"
     | "hosted_access_inactive"
     | "trial_expired_pending_billing";

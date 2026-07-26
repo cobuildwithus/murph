@@ -21,6 +21,9 @@ export const POST = withJsonError(async (request: Request) => {
     ...(body.noticeDeliveryTarget === undefined
       ? {}
       : { noticeDeliveryTarget: body.noticeDeliveryTarget }),
+    ...(body.reservationId === undefined
+      ? {}
+      : { reservationId: body.reservationId }),
     trustedUserId: userId,
     usage: [usage],
   });

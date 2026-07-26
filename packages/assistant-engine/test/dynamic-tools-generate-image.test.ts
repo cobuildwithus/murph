@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  HOSTED_EXECUTION_ASSISTANT_IMAGE_PROMPT_MAX_CODE_POINTS,
+  HOSTED_EXECUTION_ASSISTANT_IMAGE_QUALITIES,
+  HOSTED_EXECUTION_ASSISTANT_IMAGE_REFERENCE_MAX_COUNT,
+  HOSTED_EXECUTION_ASSISTANT_IMAGE_SIZES,
+} from '@murphai/hosted-execution/contracts'
+
+import {
   MURPH_GENERATE_IMAGE_TOOL,
   MURPH_GROUP_TOOL,
   readMurphDynamicToolRequest,
@@ -29,6 +36,105 @@ describe('murph.generate_image dynamic tool schema', () => {
     expect(MURPH_GENERATE_SONG_TOOL.description).toContain(
       'a known preference or the automation instructions mark music welcome and privacy-safe',
     )
+  })
+
+  it('routes only a trusted image-capacity denial to the existing funding skill', () => {
+    expect(MURPH_GENERATE_IMAGE_TOOL.description).toContain(
+      'status="insufficient_image_capacity", reason="would_exhaust", and image_started=false',
+    )
+    expect(MURPH_GENERATE_IMAGE_TOOL.description).toContain(
+      'do not retry: read the hosted-low-usage skill',
+    )
+    expect(MURPH_GENERATE_IMAGE_TOOL.description).toContain(
+      'without claiming the whole plan is low or exhausted',
+    )
+    expect(MURPH_GROUP_TOOL.description).toContain(
+      'when a trusted hosted murph.generate_image result has status="insufficient_image_capacity", reason="would_exhaust", and image_started=false',
+    )
+    expect(MURPH_GROUP_TOOL.description).toContain(
+      'read usage even if the coarse result may be healthy',
+    )
+    expect(MURPH_GROUP_TOOL.description).toContain(
+      'do not infer this exception from any other image result or error',
+    )
+  })
+
+  it('describes hosted admission and completion without implying automatic work or delivery', () => {
+    expect(MURPH_GENERATE_IMAGE_TOOL.description).toContain(
+      'status="admission_pending" means only that the request was registered',
+    )
+    expect(MURPH_GENERATE_IMAGE_TOOL.description).toContain(
+      'it is not queued, admitted, dispatched, or started',
+    )
+    expect(MURPH_GENERATE_IMAGE_TOOL.description).toContain(
+      'Do not claim the image is underway',
+    )
+    expect(MURPH_GENERATE_IMAGE_TOOL.description).toContain(
+      'do not call generate_image again for the same request in this turn',
+    )
+    expect(MURPH_GENERATE_IMAGE_TOOL.description).toContain(
+      'Nothing is attached or sent automatically',
+    )
+    expect(MURPH_GENERATE_IMAGE_TOOL.description).toContain(
+      'may attach the image with murph.attach_response_media, send any other reply, or finish without reply',
+    )
+  })
+
+  it('uses the hosted image admission limits in its public schema', () => {
+    expect(MURPH_GENERATE_IMAGE_TOOL.inputSchema.properties.prompt.maxLength).toBe(
+      HOSTED_EXECUTION_ASSISTANT_IMAGE_PROMPT_MAX_CODE_POINTS,
+    )
+    expect(MURPH_GENERATE_IMAGE_TOOL.inputSchema.properties.quality.enum).toEqual(
+      [...HOSTED_EXECUTION_ASSISTANT_IMAGE_QUALITIES],
+    )
+    expect(
+      MURPH_GENERATE_IMAGE_TOOL.inputSchema.properties.referenceImageRefs.maxItems,
+    ).toBe(HOSTED_EXECUTION_ASSISTANT_IMAGE_REFERENCE_MAX_COUNT)
+    expect(MURPH_GENERATE_IMAGE_TOOL.inputSchema.properties.size.enum).toEqual(
+      [...HOSTED_EXECUTION_ASSISTANT_IMAGE_SIZES],
+    )
+    expect(MURPH_GROUP_TOOL.inputSchema.properties.prompt.maxLength).toBe(
+      HOSTED_EXECUTION_ASSISTANT_IMAGE_PROMPT_MAX_CODE_POINTS,
+    )
+    expect(MURPH_GROUP_TOOL.inputSchema.properties.quality.enum).toEqual(
+      [...HOSTED_EXECUTION_ASSISTANT_IMAGE_QUALITIES],
+    )
+    expect(MURPH_GROUP_TOOL.inputSchema.properties.referenceImageRefs.maxItems).toBe(
+      HOSTED_EXECUTION_ASSISTANT_IMAGE_REFERENCE_MAX_COUNT,
+    )
+    expect(MURPH_GROUP_TOOL.inputSchema.properties.size.enum).toEqual(['1024x1024'])
+  })
+
+  it('enforces the image prompt limit by Unicode code points', () => {
+    const atLimit = readMurphDynamicToolRequest({
+      method: 'item/tool/call',
+      params: {
+        arguments: {
+          prompt: '🟢'.repeat(
+            HOSTED_EXECUTION_ASSISTANT_IMAGE_PROMPT_MAX_CODE_POINTS,
+          ),
+        },
+        namespace: 'murph',
+        tool: 'generate_image',
+      },
+    })
+    const overLimit = readMurphDynamicToolRequest({
+      method: 'item/tool/call',
+      params: {
+        arguments: {
+          prompt: '🟢'.repeat(
+            HOSTED_EXECUTION_ASSISTANT_IMAGE_PROMPT_MAX_CODE_POINTS + 1,
+          ),
+        },
+        namespace: 'murph',
+        tool: 'generate_image',
+      },
+    })
+
+    expect(atLimit).toMatchObject({ kind: 'generate-image' })
+    expect(overLimit).toMatchObject({
+      kind: 'invalid-generate-image-arguments',
+    })
   })
 
   it('keeps the minimal legacy prompt-only call valid', () => {

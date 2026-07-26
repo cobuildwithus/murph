@@ -7,9 +7,6 @@ import {
   type ReadOnlyAssistantAskResult,
 } from "@murphai/assistant-engine/assistant-ask";
 import {
-  ASSISTANT_USAGE_SCHEMA,
-  createAssistantUsageId,
-  parseAssistantUsageRecord,
   resolveAssistantUsageCredentialSource,
 } from "@murphai/hosted-execution/assistant-usage";
 import type {
@@ -34,6 +31,9 @@ import {
   removeHostedSystemMailboxPendingItemIfCurrent,
   type HostedSystemMailboxPendingItem,
 } from "./system-mailbox-state.ts";
+import {
+  buildHostedStandaloneAssistantUsageRecord,
+} from "./standalone-usage-record.ts";
 
 const HOSTED_DETACHED_ASSISTANT_ASK_RETRY_DELAY_MS = 60_000;
 const HOSTED_DETACHED_ASSISTANT_ASK_ROUTE_ACTIONS = [
@@ -396,48 +396,19 @@ async function recordHostedDetachedAssistantAskUsageBestEffort(input: {
         provider: event.usage.provider,
         userEnvKeys: input.userEnvKeys,
       });
-      const record = parseAssistantUsageRecord({
-        apiKeyEnv: usage.apiKeyEnv,
+      const record = buildHostedStandaloneAssistantUsageRecord({
         attemptCount: input.attemptCount,
-        baseUrl: usage.baseUrl,
-        cacheWriteTokens: usage.cacheWriteTokens,
-        cachedInputTokens: usage.cachedInputTokens,
-        credentialSource,
-        featureKey: "assistant_read_only_ask",
-        gatewayTags: [],
-        inputTokens: usage.inputTokens,
+        attribution: {
+          credentialSource,
+          featureKey: "assistant_read_only_ask",
+          surface: "hosted-runtime",
+          triggerKind: "assistant-ask",
+        },
         memberId: input.memberId,
         occurredAt: input.occurredAt,
-        outputTokens: usage.outputTokens,
-        provider: event.usage.provider,
-        providerName: usage.providerName,
-        providerRequestId: usage.providerRequestId,
-        providerRequestOrdinal: event.usage.providerRequestOrdinal,
-        providerRequestOutcome:
-          event.usage.providerRequestOutcome ?? "succeeded",
-        rawUsageJson: usage.rawUsageJson,
-        rawUsageJsonHash: usage.rawUsageJsonHash,
-        reasoningTokens: usage.reasoningTokens,
-        reportingUserId: null,
-        requestedModel: usage.requestedModel,
-        routeId: null,
-        schema: ASSISTANT_USAGE_SCHEMA,
-        servedModel: usage.servedModel,
+        providerUsage: event.usage,
         sessionId: input.requestId,
-        stripeMeterSource: "murph",
-        surface: "hosted-runtime",
-        tokenPricingBasis: usage.tokenPricingBasis,
-        totalTokens: usage.totalTokens,
-        triggerKind: "assistant-ask",
         turnId,
-        turnProfileJson: usage.turnProfileJson,
-        usageId: createAssistantUsageId({
-          attemptCount: input.attemptCount,
-          providerRequestOrdinal: event.usage.providerRequestOrdinal,
-          turnId,
-        }),
-        usageExtractionSourcePath: usage.usageExtractionSourcePath,
-        usageExtractionVersion: usage.usageExtractionVersion,
       });
       await input.usageRecordPort.recordUsage(record);
     } catch (error) {

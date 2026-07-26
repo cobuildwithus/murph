@@ -231,6 +231,43 @@ describe("hosted ops member usage", () => {
     });
   });
 
+  test("reports temporary reserved capacity from actual period spend", async () => {
+    usageAllowanceMocks.readHostedAiUsageGateSnapshots.mockResolvedValue(
+      new Map([["hbm_person", {
+        decision: makeUsageGateDecision({
+          allowanceSource: "direct_paid_member_plan",
+          memberId: "hbm_person",
+          reason: "ai_usage_capacity_reserved",
+          remainingUsdMicros: 0n,
+          retryAfter: new Date("2026-07-22T18:05:00.000Z"),
+          spentUsdMicros: 450_000n,
+          usageCreditBalanceUsdMicros: 0n,
+          userNotice: null,
+        }),
+        periodPersistedAt: PERIOD_UPDATED_AT,
+      }]]),
+    );
+    const prisma = asPrismaClientForHostedOpsTest({
+      hostedAiUsage: { groupBy: vi.fn(async () => []) },
+      hostedLinqDelivery: { findMany: vi.fn(async () => []) },
+      hostedMailboxItem: { groupBy: vi.fn(async () => []) },
+      hostedMember: {
+        findMany: vi.fn(async () => [makeMember({ id: "hbm_person" })]),
+      },
+    });
+
+    const dashboard = await readHostedOpsMemberUsage(NOW, prisma);
+
+    expect(dashboard.rows[0]).toMatchObject({
+      allowanceStatus: "available",
+      currentPeriod: {
+        blocked: false,
+        remainingUsdMicros: "4050000",
+        spentUsdMicros: "450000",
+      },
+    });
+  });
+
   test("atomically clears included spend and releases only the current notice claim", async () => {
     const tx = createResetTransactionFixture({
       delivery: makeDelivery({ status: "accepted" }),

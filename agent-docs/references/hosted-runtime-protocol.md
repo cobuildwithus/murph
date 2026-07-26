@@ -86,6 +86,8 @@ run local runtime work until idle or budget
 while dirty and before the idle floor, service fresh foreground input and at
   most one exact assistant wake projected by the current foreground phase
   without publishing a snapshot; other wakes do not shorten the floor
+drain every invocation-local interactive image continuation through its fresh
+  canonical Murph turn before workspace release
 at the idle floor, or on shutdown, checkpoint final dirty runtime state with
   checkpoint reason idle_shutdown; commit
   the valid workspace-CAS snapshot even when web observes newer conversation input
@@ -1487,6 +1489,116 @@ provider-request metadata, and outbox intent creation remain on the normal
 local assistant-service path. The same-reply coalescing window closes when the
 bounded batch is selected before provider start; mailbox input that arrives
 after that boundary remains durable staged input for a later turn.
+
+### Interactive Generated-Image Continuation
+
+An interactive accepted-input `murph.generate_image` call does not hold the
+Codex turn open for GPT Image latency. The tool first validates arguments,
+resolves authorized reference bytes, builds the exact final provider prompt,
+and checks the existing generated-capture lookup. A cache hit remains an inline
+tool result. Provider-required work registers under a deterministic operation
+identity derived from the origin `AssistantInputEvent` id and nonempty tool
+call id. Exact replay reuses that operation; conflicting reuse fails closed.
+The immediate structured result is only `status: admission_pending`,
+`admission_pending: true`, and `image_started: false`. A missing registrar or
+tool-call id is unavailable and must not fall back to the synchronous provider
+executor. Local, scheduled, and group-avatar image paths keep that synchronous
+executor because they do not use this hosted interactive continuation.
+
+The originating turn completes its ordinary response path first. The
+invocation-local controller waits for every usage record attributable to that
+turn to be durably accepted by Web before asking the signed usage-allowance
+port to reserve image capacity. Missing or failed origin-usage recording is a
+fail-closed terminal outcome and starts no image provider request. Web locks the
+member allowance, recomputes the canonical gate with active reservations
+subtracted, and applies a conservative server-owned GPT Image estimate from the
+exact final prompt byte count, reference count, model, quality, and size. The
+estimate must be strictly below remaining capacity; equality returns
+`would_exhaust`.
+
+The reservation is allowance state, not image-work state. It freezes the
+admitted period and allowance source, expected immutable image-usage id,
+estimator version, bounded estimate inputs, and lifecycle timestamps; it stores
+no prompt, reference, media, result, route, delivery, mailbox, or job payload.
+A pre-dispatch exact replay must match those immutable facts. An undispatched
+claim expires after five minutes and may be released only before dispatch. A
+dispatched claim stays capacity-active through its admitted period, including
+after an ambiguous provider or process failure. Exact immutable image usage
+settles the same claim and admitted period atomically; a different member or
+usage id fails closed. `already_dispatched` and `already_settled` are
+reconciliation results, never permission to call the provider. Active claim
+pressure is member-wide across all still-live admitted periods rather than
+filtered to the gate's current period, because purchased credit is member-wide
+until settlement. For each undispatched claim, the release candidate is the
+earlier of its admitted period end and `createdAt + five minutes`; for a
+dispatched claim it is the admitted period end. When claim pressure blocks
+work, the capacity-reserved gate uses the earliest candidate across the member
+as `retryAfter`. Capacity denied only by those claims is transient
+`ai_usage_capacity_reserved` state with no reset or usage-limit notice.
+
+After a successful reservation, the controller marks it dispatched immediately
+before the actual GPT Image fetch and owns the provider request under its own
+abort signal. Reservation and provider work continue in the invocation
+background, so the Codex turn and foreground runner do not await their network
+latency. Successful provider output changes the controller to capture-ready;
+the foreground loop selects fresh conversation first, then runs one
+capture-only continuation inside the existing runner
+`HostedCanonicalWritePort`. That short serialized canonical capture write is
+the only image-continuation step that can briefly delay foreground work. It
+does not include the GPT Image request or Cloudflare Images delivery-copy
+upload.
+
+After the canonical capture commits, the controller resumes the Cloudflare
+Images upload in the invocation background. Foreground mailbox import, live
+steering, and ordinary turns remain responsive to that upload network latency.
+Only after the upload completes does the controller stage one trusted
+`AssistantInputEvent` with the original conversation, route, and reply-anchor
+authority but a synthetic system-lane source that never inherits the original
+sender identity, enqueue that exact local input, and leave readiness
+level-triggered until it is selected. Capacity denial, provider failure,
+capture failure, and upload failure stage their trusted outcomes through the
+same continuation seam without automatic delivery.
+
+Selecting that staged input starts a fresh ordinary Murph turn. The image
+result itself never creates an outbox intent or calls a delivery provider.
+Murph may use `murph.attach_response_media` to include the image in its chosen
+reply, send any other response or reaction, or finish without reply. Image
+usage remains bound to that completion input until selection, then follows the
+ordinary deferred usage path after the completion turn reaches its delivery or
+no-reply terminal outcome so a usage-limit notice cannot overtake the image
+result.
+
+Routine checkpoints may proceed while image provider or upload work is in
+flight, but checkpoint publication does not release the workspace owner.
+Graceful invocation return, shutdown, workspace replacement, and fence release
+wait for every registered operation—including denial and failure—to finish its
+provider, capture, and upload phases, stage and service the fresh Murph turn,
+checkpoint its durable result, and settle deferred usage. Forced loss after
+dispatch is not recoverable from a durable image job: the reservation remains
+fail-closed and the provider is never blindly called again. There is no image
+queue, job row, or completion mailbox in Web/Postgres, no image state in
+Temporal, and no second sender.
+
+Rollout is coordinated but ordered. First apply the additive reservation
+database migration alone; old Web and runtime behavior remain unchanged.
+Second deploy Cloudflare/runtime while the older Web deployment's missing
+reservation route makes new interactive image admission fail closed. The
+existing `deploy:smoke` gate must match the exact `bundleFingerprint` and
+`sourceFingerprint` from `.deploy/runner-bundle`; fingerprint mismatch fails
+closed, stale warm shells are replaced, and stale cold shells fail closed.
+Complete that old-bundle rollout and drain before the third step activates the
+Web reservation route and code.
+Post-deploy proof must demonstrate origin usage recorded before reservation,
+`would_exhaust` with no provider call, admitted
+mark-dispatched/provider/settlement ordering, level-triggered fresh-turn
+completion, and no automatic image delivery. After Web cutover, the new
+Cloudflare/runtime bundle is the hard rollback floor. Before a Web rollback,
+drain image continuations and verify no dispatched-but-unsettled reservation
+remains. Old Web fails new image admissions closed but rejects usage records
+carrying `reservationId`; an undrained completion therefore cannot settle and
+its conservative claim remains until the admitted period ends. Cloudflare
+rollback is unsafe because it would restore legacy unreserved dispatch.
+
 For accepted Linq input positively identified as iMessage, or Telegram input
 with a valid numeric provider message target, the prompt may show the existing
 input id as an opaque `Message ref` when at least one targeting action is
@@ -1819,6 +1931,10 @@ Without the fingerprint secret, checkpoint diagnostics omit relative-name hashes
 - hosted member identity/routing/billing/email authorization
 - hosted device-sync authority
 - hosted AI usage ledger, pricing/accounting projection, and monthly allowance aggregate
+- hosted image allowance reservations, including conservative estimate inputs,
+  expected usage identity, admitted period and allowance source, and
+  pre-dispatch/dispatched/settled lifecycle; never image prompts, references,
+  media, results, or delivery state
 - anonymized assistant-runtime issue sink
 - Assistant Ask target resolution, membership-generation and origin binding,
   deterministic request/completion identity, expiry checks, and private return
@@ -1845,6 +1961,9 @@ routing.
 - runtime timers, assistant next wake projection, and inbox media retention wake
   projection
 - checkpoint timing
+- the invocation-local interactive image controller, provider abort lifecycle,
+  trusted completion-input staging, level-triggered readiness, and graceful
+  drain; none is a durable queue or sender
 - the invocation-local one-child Assistant Ask controller, sealed target
   context builder, consented personal candidate pass, fresh outgoing reviewer,
   and exact-child abort/await lifecycle; none is durable queue state
@@ -1869,6 +1988,8 @@ routing.
   recipient unwrap; Cloudflare must not hold GCP KMS decrypt authority
 - signed Assistant Ask Web-control transport and normal runner-container process
   hosting; Cloudflare does not own ask routing, membership, queueing, or results
+- signed image-allowance reserve/dispatch/release transport; Cloudflare does not
+  own image admission policy, reservation truth, completion state, or delivery
 
 Cloudflare does not own product facts, mailbox state, mailbox import progress,
 hosted AI usage spend, assistant channel enablement state, outbox truth, or
@@ -1885,8 +2006,8 @@ durable queue history.
 
 Temporal does not own raw webhook payloads, provider verification headers,
 provider secrets, mailbox payload content, product facts, workspace checkpoint
-truth, or runner coordination. Treat workflow state as durable execution state,
-not as queryable product truth.
+truth, image jobs or completion state, or runner coordination. Treat workflow
+state as durable execution state, not as queryable product truth.
 
 ### Vercel Workflow Owns
 

@@ -27,10 +27,13 @@ vi.mock("@/src/lib/hosted-execution/usage-credits", () => ({
 import {
   accountHostedAiUsageForAllowanceTx,
   checkHostedAiUsageGate,
+  HOSTED_AI_USAGE_RESERVATION_PRE_DISPATCH_TTL_MS,
   priceHostedAiUsageForAllowance,
   readHostedAiUsageGate,
   readHostedAiUsageGateSnapshots,
   reconcileHostedAiUsageAllowancePeriodForMemberTx,
+  releaseHostedAiUsageReservation,
+  reserveHostedImageGenerationCapacity,
   resolveHostedAiUsageGate,
 } from "@/src/lib/hosted-execution/usage-allowance";
 import { buildHostedRetellPhoneCallUsageRecord } from "@/src/lib/hosted-execution/usage-retell";
@@ -154,6 +157,28 @@ type AllowanceQueryRaw = (
   sql: TemplateStringsArray,
   ...params: unknown[]
 ) => Promise<unknown[]>;
+
+interface HostedAiUsageReservationTestRow {
+  allowanceSource: string;
+  createdAt: Date;
+  dispatchedAt: Date | null;
+  estimatedCostUsdMicros: bigint;
+  estimatorVersion: string;
+  imageQuality: string;
+  imageSize: string;
+  memberId: string;
+  periodEnd: Date;
+  periodStart: Date;
+  promptUtf8Bytes: number;
+  referenceImageCount: number;
+  releasedAt: Date | null;
+  requestId: string;
+  settledUsageId: string | null;
+}
+
+type HostedAiUsageReservationTestStore = ReturnType<
+  typeof createHostedAiUsageReservationStore
+>;
 
 function buildMalformedOpenAiImageUsageRecords(input: {
   occurredAt?: AssistantUsageRecord["occurredAt"];
@@ -360,6 +385,53 @@ function buildAggregateOnlyOpenAiImageUsageRecord(): AssistantUsageRecord {
     usageExtractionVersion: "openai-images-v1",
   } satisfies AssistantUsageRecord;
 }
+
+function buildOpenAiImageUsageRecord(input: {
+  usageId?: string;
+} = {}): AssistantUsageRecord {
+  const usageId = input.usageId ?? "turn_image_123.attempt-1";
+  return {
+    ...BASE_USAGE_RECORD,
+    cachedInputTokens: 0,
+    inputTokens: 1_300,
+    outputTokens: 400,
+    provider: "openai-images",
+    providerName: "OpenAI Images",
+    rawUsageJson: {
+      input_tokens: 1_300,
+      input_tokens_details: {
+        cached_tokens: 0,
+        image_tokens: 1_000,
+        text_tokens: 300,
+      },
+      output_tokens: 400,
+      output_tokens_details: {
+        image_tokens: 400,
+        reasoning_tokens: 0,
+        text_tokens: 0,
+      },
+      total_tokens: 1_700,
+    },
+    requestedModel: "gpt-image-2",
+    servedModel: null,
+    sessionId: "asst_image_123",
+    totalTokens: 1_700,
+    turnId: usageId.split(".attempt-")[0] ?? "turn_image_123",
+    usageExtractionSourcePath: "openai.images.generate",
+    usageExtractionVersion: "openai-images-v1",
+    usageId,
+  } satisfies AssistantUsageRecord;
+}
+
+const LOW_SQUARE_IMAGE_CAPACITY_SPEC = {
+  model: "gpt-image-2",
+  promptUtf8Bytes: 1,
+  quality: "low",
+  referenceImageCount: 0,
+  size: "1024x1024",
+} as const;
+
+const LOW_SQUARE_IMAGE_ESTIMATE_USD_MICROS = 6_005n;
 
 describe("hosted AI usage allowance pricing", () => {
   it("prices platform usage from uncached input, cached input, and output tokens", () => {
@@ -3370,6 +3442,29 @@ describe("readHostedAiUsageGate", () => {
     expect(prisma.hostedAiUsagePeriod.update).not.toHaveBeenCalled();
     expect(aggregate).not.toHaveBeenCalled();
   });
+
+  it("reads period spend and active claims from one repeatable-read snapshot", async () => {
+    const tx = createGatePrisma({
+      spentUsdMicros: 1_000_000n,
+    });
+    const transaction = vi.fn(async (
+      run: (client: typeof tx) => Promise<unknown>,
+    ) => run(tx));
+
+    await expect(readHostedAiUsageGate({
+      memberId: "member_123",
+      now: "2026-03-29T12:00:00.000Z",
+      prisma: { $transaction: transaction } as never,
+    })).resolves.toMatchObject({
+      allowed: true,
+      remainingUsdMicros: 9_000_000n,
+      spentUsdMicros: 1_000_000n,
+    });
+    expect(transaction).toHaveBeenCalledExactlyOnceWith(
+      expect.any(Function),
+      { isolationLevel: "RepeatableRead" },
+    );
+  });
 });
 
 describe("readHostedAiUsageGateSnapshots", () => {
@@ -3404,7 +3499,6 @@ describe("readHostedAiUsageGateSnapshots", () => {
     Object.assign(prisma.hostedAiUsagePeriod, { findMany: findPeriods });
     const transaction = vi.fn(async (
       run: (tx: typeof prisma) => Promise<unknown>,
-      _options?: { isolationLevel?: string },
     ) => run(prisma));
 
     const snapshots = await readHostedAiUsageGateSnapshots({
@@ -3472,7 +3566,6 @@ describe("readHostedAiUsageGateSnapshots", () => {
     });
     const increasedTransaction = vi.fn(async (
       run: (tx: typeof increasedPlan) => Promise<unknown>,
-      _options?: { isolationLevel?: string },
     ) => run(increasedPlan));
 
     const increasedSnapshots = await readHostedAiUsageGateSnapshots({
@@ -3513,7 +3606,6 @@ describe("readHostedAiUsageGateSnapshots", () => {
     });
     const decreasedTransaction = vi.fn(async (
       run: (tx: typeof decreasedPlan) => Promise<unknown>,
-      _options?: { isolationLevel?: string },
     ) => run(decreasedPlan));
 
     const decreasedSnapshots = await readHostedAiUsageGateSnapshots({
@@ -3654,9 +3746,642 @@ describe("checkHostedAiUsageGate", () => {
   });
 });
 
+describe("hosted image generation capacity reservations", () => {
+  const now = new Date("2026-03-29T12:00:05.000Z");
+
+  it("subtracts the safety estimate, preserves exact replay, and defers claim-only pressure", async () => {
+    const reservationStore = createHostedAiUsageReservationStore();
+    const prisma = createGatePrisma({
+      hostedAiUsageReservation: reservationStore.delegate,
+      spentUsdMicros: 9_990_000n,
+    });
+
+    await expect(reserveHostedImageGenerationCapacity({
+      memberId: "member_123",
+      now,
+      prisma: prisma as never,
+      requestId: "image_request_1",
+      spec: LOW_SQUARE_IMAGE_CAPACITY_SPEC,
+    })).resolves.toEqual({
+      requestId: "image_request_1",
+      status: "reserved",
+    });
+
+    expect(reservationStore.rows.get("image_request_1")).toMatchObject({
+      estimatedCostUsdMicros: LOW_SQUARE_IMAGE_ESTIMATE_USD_MICROS,
+      estimatorVersion: "gpt-image-2-capacity-2026-07-25-v2",
+      imageQuality: "low",
+      imageSize: "1024x1024",
+      promptUtf8Bytes: 1,
+      referenceImageCount: 0,
+    });
+    await expect(readHostedAiUsageGate({
+      memberId: "member_123",
+      now,
+      prisma: prisma as never,
+    })).resolves.toMatchObject({
+      allowed: true,
+      remainingUsdMicros: 3_995n,
+    });
+
+    await expect(reserveHostedImageGenerationCapacity({
+      memberId: "member_123",
+      now,
+      prisma: prisma as never,
+      requestId: "image_request_1",
+      spec: LOW_SQUARE_IMAGE_CAPACITY_SPEC,
+    })).resolves.toEqual({
+      requestId: "image_request_1",
+      status: "reserved",
+    });
+    expect(reservationStore.delegate.create).toHaveBeenCalledOnce();
+
+    await expect(reserveHostedImageGenerationCapacity({
+      memberId: "member_123",
+      now,
+      prisma: prisma as never,
+      requestId: "image_request_2",
+      spec: LOW_SQUARE_IMAGE_CAPACITY_SPEC,
+    })).resolves.toEqual({
+      requestId: "image_request_2",
+      status: "insufficient_capacity",
+    });
+    expect(reservationStore.rows.has("image_request_2")).toBe(false);
+
+    await expect(reserveHostedImageGenerationCapacity({
+      memberId: "member_123",
+      now,
+      prisma: prisma as never,
+      requestId: "image_request_1",
+      spec: {
+        ...LOW_SQUARE_IMAGE_CAPACITY_SPEC,
+        promptUtf8Bytes: 2,
+      },
+    })).rejects.toThrow(
+      "already exists with different immutable estimate inputs",
+    );
+
+    const storedReplay = reservationStore.rows.get("image_request_1");
+    if (!storedReplay) {
+      throw new Error("Expected the image reservation replay fixture.");
+    }
+    storedReplay.estimatorVersion = "gpt-image-2-capacity-older";
+    await expect(reserveHostedImageGenerationCapacity({
+      memberId: "member_123",
+      now,
+      prisma: prisma as never,
+      requestId: "image_request_1",
+      spec: LOW_SQUARE_IMAGE_CAPACITY_SPEC,
+    })).rejects.toThrow(
+      "already exists with a stale capacity estimate",
+    );
+    storedReplay.estimatorVersion = "gpt-image-2-capacity-2026-07-25-v2";
+    storedReplay.estimatedCostUsdMicros -= 1n;
+    await expect(reserveHostedImageGenerationCapacity({
+      memberId: "member_123",
+      now,
+      prisma: prisma as never,
+      requestId: "image_request_1",
+      spec: LOW_SQUARE_IMAGE_CAPACITY_SPEC,
+    })).rejects.toThrow(
+      "already exists with a stale capacity estimate",
+    );
+  });
+
+  it("keeps positive unreserved capacity by denying an estimate equal to the remainder", async () => {
+    const reservationStore = createHostedAiUsageReservationStore();
+    const prisma = createGatePrisma({
+      hostedAiUsageReservation: reservationStore.delegate,
+      spentUsdMicros:
+        10_000_000n - LOW_SQUARE_IMAGE_ESTIMATE_USD_MICROS,
+    });
+
+    await expect(reserveHostedImageGenerationCapacity({
+      memberId: "member_123",
+      now,
+      prisma: prisma as never,
+      requestId: "image_request_equal_remainder",
+      spec: LOW_SQUARE_IMAGE_CAPACITY_SPEC,
+    })).resolves.toEqual({
+      requestId: "image_request_equal_remainder",
+      status: "would_exhaust",
+    });
+    expect(reservationStore.rows.size).toBe(0);
+  });
+
+  it.each([
+    ["fully claimed", 9_990_000n, 10_000n],
+    ["partially claimed", 9_980_000n, 15_000n],
+  ] as const)(
+    "keeps %s reservation pressure noncommercial",
+    async (_label, spentUsdMicros, activeEstimateUsdMicros) => {
+      const reservationStore = createHostedAiUsageReservationStore([{
+        estimatedCostUsdMicros: activeEstimateUsdMicros,
+        requestId: "turn_image_active_claim.attempt-1",
+      }]);
+      const prisma = createGatePrisma({
+        hostedAiUsageReservation: reservationStore.delegate,
+        spentUsdMicros,
+      });
+
+      await expect(reserveHostedImageGenerationCapacity({
+        memberId: "member_123",
+        now,
+        prisma: prisma as never,
+        requestId: "turn_image_waiting_for_claim.attempt-1",
+        spec: LOW_SQUARE_IMAGE_CAPACITY_SPEC,
+      })).resolves.toEqual({
+        requestId: "turn_image_waiting_for_claim.attempt-1",
+        status: "insufficient_capacity",
+      });
+      expect(
+        reservationStore.rows.has("turn_image_waiting_for_claim.attempt-1"),
+      ).toBe(false);
+    },
+  );
+
+  it("keeps an actual non-fit commercial when claims also consume capacity", async () => {
+    const reservationStore = createHostedAiUsageReservationStore([{
+      estimatedCostUsdMicros: 5_000n,
+      requestId: "turn_image_active_exact_claim.attempt-1",
+    }]);
+    const prisma = createGatePrisma({
+      hostedAiUsageReservation: reservationStore.delegate,
+      spentUsdMicros: 9_995_000n,
+    });
+
+    await expect(reserveHostedImageGenerationCapacity({
+      memberId: "member_123",
+      now,
+      prisma: prisma as never,
+      requestId: "turn_image_actual_non_fit.attempt-1",
+      spec: LOW_SQUARE_IMAGE_CAPACITY_SPEC,
+    })).resolves.toEqual({
+      requestId: "turn_image_actual_non_fit.attempt-1",
+      status: "would_exhaust",
+    });
+    expect(reservationStore.rows.has("turn_image_actual_non_fit.attempt-1"))
+      .toBe(false);
+  });
+
+  it.each(["1024x1536", "1536x1024"] as const)(
+    "rounds medium %s output above the provider calculator cost",
+    async (size) => {
+      const reservationStore = createHostedAiUsageReservationStore();
+      const prisma = createGatePrisma({
+        hostedAiUsageReservation: reservationStore.delegate,
+        spentUsdMicros: 0n,
+      });
+      const requestId = `turn_image_medium_${size}.attempt-1`;
+
+      await expect(reserveHostedImageGenerationCapacity({
+        memberId: "member_123",
+        now,
+        prisma: prisma as never,
+        requestId,
+        spec: {
+          model: "gpt-image-2",
+          promptUtf8Bytes: 100,
+          quality: "medium",
+          referenceImageCount: 2,
+          size,
+        },
+      })).resolves.toEqual({
+        requestId,
+        status: "reserved",
+      });
+      expect(reservationStore.rows.get(requestId)).toMatchObject({
+        estimatedCostUsdMicros: 202_500n,
+        estimatorVersion: "gpt-image-2-capacity-2026-07-25-v2",
+      });
+    },
+  );
+
+  it("stops subtracting released, settled, and expired reservations", async () => {
+    const reservationStore = createHostedAiUsageReservationStore([
+      {
+        periodEnd: now,
+        requestId: "image_request_expired",
+      },
+      {
+        dispatchedAt: new Date("2026-03-29T12:00:01.000Z"),
+        requestId: "turn_image_settled.attempt-1",
+        settledUsageId: "turn_image_settled.attempt-1",
+      },
+    ]);
+    const prisma = createGatePrisma({
+      hostedAiUsageReservation: reservationStore.delegate,
+      spentUsdMicros: 9_990_000n,
+    });
+
+    await reserveHostedImageGenerationCapacity({
+      memberId: "member_123",
+      now,
+      prisma: prisma as never,
+      requestId: "image_request_release",
+      spec: LOW_SQUARE_IMAGE_CAPACITY_SPEC,
+    });
+    await expect(releaseHostedAiUsageReservation({
+      memberId: "member_123",
+      now,
+      prisma: prisma as never,
+      requestId: "image_request_release",
+    })).resolves.toEqual({
+      requestId: "image_request_release",
+      status: "released",
+    });
+    expect(reservationStore.rows.get("image_request_release")?.releasedAt)
+      .toEqual(now);
+    await expect(readHostedAiUsageGate({
+      memberId: "member_123",
+      now,
+      prisma: prisma as never,
+    })).resolves.toMatchObject({
+      allowed: true,
+      remainingUsdMicros: 10_000n,
+    });
+  });
+
+  it("rechecks temporary pre-dispatch pressure at TTL without a limit notice", async () => {
+    const createdAt = new Date(now.getTime() - 60_000);
+    const expiresAt = new Date(
+      createdAt.getTime()
+      + HOSTED_AI_USAGE_RESERVATION_PRE_DISPATCH_TTL_MS,
+    );
+    const reservationStore = createHostedAiUsageReservationStore([{
+      createdAt,
+      estimatedCostUsdMicros: 10_000n,
+      requestId: "image_request_temporary_capacity",
+    }]);
+    const prisma = createGatePrisma({
+      hostedAiUsageReservation: reservationStore.delegate,
+      spentUsdMicros: 9_990_000n,
+    });
+
+    await expect(readHostedAiUsageGate({
+      memberId: "member_123",
+      now,
+      prisma: prisma as never,
+    })).resolves.toMatchObject({
+      allowed: false,
+      reason: "ai_usage_capacity_reserved",
+      retryAfter: expiresAt,
+      userNotice: null,
+    });
+    await expect(readHostedAiUsageGate({
+      memberId: "member_123",
+      now: expiresAt,
+      prisma: prisma as never,
+    })).resolves.toMatchObject({
+      allowed: true,
+      remainingUsdMicros: 10_000n,
+    });
+  });
+
+  it("rechecks reservation pressure at a nearer current-period reset", async () => {
+    const currentPeriodEnd = new Date(now.getTime() + 2 * 60_000);
+    const reservationStore = createHostedAiUsageReservationStore([{
+      createdAt: now,
+      estimatedCostUsdMicros: 10_000n,
+      periodEnd: new Date(now.getTime() + 30 * 60_000),
+      requestId: "image_request_reset_before_ttl",
+    }]);
+    const prisma = createGatePrisma({
+      hostedAiUsageReservation: reservationStore.delegate,
+      periodEnd: currentPeriodEnd,
+      spentUsdMicros: 9_990_000n,
+    });
+
+    await expect(readHostedAiUsageGate({
+      memberId: "member_123",
+      now,
+      prisma: prisma as never,
+    })).resolves.toMatchObject({
+      allowed: false,
+      reason: "ai_usage_capacity_reserved",
+      retryAfter: currentPeriodEnd,
+      userNotice: null,
+    });
+  });
+
+  it("rechecks at an overlapping dispatched claim's nearer period end", async () => {
+    const claimPeriodEnd = new Date(now.getTime() + 60_000);
+    const reservationStore = createHostedAiUsageReservationStore([{
+      dispatchedAt: now,
+      estimatedCostUsdMicros: 10_000n,
+      periodEnd: claimPeriodEnd,
+      requestId: "image_request_dispatched_overlap",
+    }]);
+    const prisma = createGatePrisma({
+      hostedAiUsageReservation: reservationStore.delegate,
+      periodEnd: new Date(now.getTime() + 30 * 60_000),
+      spentUsdMicros: 9_990_000n,
+    });
+
+    await expect(readHostedAiUsageGate({
+      memberId: "member_123",
+      now,
+      prisma: prisma as never,
+    })).resolves.toMatchObject({
+      allowed: false,
+      reason: "ai_usage_capacity_reserved",
+      retryAfter: claimPeriodEnd,
+      userNotice: null,
+    });
+  });
+
+  it("conservatively keeps an overlapping claim against member-wide credit", async () => {
+    const reservationStore = createHostedAiUsageReservationStore([{
+      dispatchedAt: new Date("2026-03-29T12:00:01.000Z"),
+      periodEnd: new Date("2026-04-01T00:00:00.000Z"),
+      periodStart: new Date("2026-03-01T00:00:00.000Z"),
+      requestId: "image_request_old_entitlement_period",
+    }]);
+    const prisma = createGatePrisma({
+      hostedAiUsageReservation: reservationStore.delegate,
+      periodEnd: new Date("2026-04-15T00:00:00.000Z"),
+      periodStart: new Date("2026-03-15T00:00:00.000Z"),
+      spentUsdMicros: 9_990_000n,
+    });
+
+    await expect(readHostedAiUsageGate({
+      memberId: "member_123",
+      now,
+      prisma: prisma as never,
+    })).resolves.toMatchObject({
+      allowed: true,
+      remainingUsdMicros: 3_995n,
+    });
+  });
+
+  it("rejects invalid settlement correlations before accounting provider usage", async () => {
+    const imageRecord = buildOpenAiImageUsageRecord();
+    const dispatchedAt = new Date("2026-03-29T12:00:01.000Z");
+    const invalidCases: Array<{
+      expectedError: string;
+      memberId?: string;
+      record?: AssistantUsageRecord;
+      reservationId: string;
+      rows: Array<
+        Partial<HostedAiUsageReservationTestRow>
+        & Pick<HostedAiUsageReservationTestRow, "requestId">
+      >;
+    }> = [
+      {
+        expectedError: "does not exist",
+        reservationId: "image_request_missing",
+        rows: [],
+      },
+      {
+        expectedError: "belongs to a different member",
+        reservationId: "image_request_wrong_owner",
+        rows: [{
+          dispatchedAt,
+          memberId: "member_other",
+          requestId: "image_request_wrong_owner",
+        }],
+      },
+      {
+        expectedError: "must be dispatched before settlement",
+        reservationId: imageRecord.usageId,
+        rows: [{ requestId: imageRecord.usageId }],
+      },
+      {
+        expectedError: "does not match the expected usage identity",
+        reservationId: "image_request_swapped_usage",
+        rows: [{
+          dispatchedAt,
+          requestId: "image_request_swapped_usage",
+        }],
+      },
+      {
+        expectedError: "Released hosted AI usage reservation cannot settle",
+        reservationId: imageRecord.usageId,
+        rows: [{
+          releasedAt: new Date("2026-03-29T12:00:02.000Z"),
+          requestId: imageRecord.usageId,
+        }],
+      },
+      {
+        expectedError: "can settle only OpenAI Images usage",
+        record: BASE_USAGE_RECORD,
+        reservationId: "image_request_wrong_record",
+        rows: [{
+          dispatchedAt,
+          requestId: "image_request_wrong_record",
+        }],
+      },
+    ];
+
+    for (const invalidCase of invalidCases) {
+      const reservationStore = createHostedAiUsageReservationStore(
+        invalidCase.rows,
+      );
+      const usageUpdateMany = vi.fn(async () => ({ count: 1 }));
+      const tx = createAllowanceTx({
+        executeRaw: vi.fn<AllowanceExecuteRaw>(async () => 1),
+        hostedAiUsageReservation: reservationStore.delegate,
+        hostedAiUsageUpdateMany: usageUpdateMany,
+      });
+
+      await expect(accountHostedAiUsageForAllowanceTx({
+        memberId: invalidCase.memberId ?? "member_123",
+        now,
+        record: invalidCase.record ?? imageRecord,
+        reservationId: invalidCase.reservationId,
+        tx: tx as never,
+      })).rejects.toThrow(invalidCase.expectedError);
+      expect(usageUpdateMany).not.toHaveBeenCalled();
+    }
+  });
+
+  it("does not use already-accounted usage to settle a fresh reservation", async () => {
+    const record = buildOpenAiImageUsageRecord();
+    const reservationStore = createHostedAiUsageReservationStore([{
+      dispatchedAt: new Date("2026-03-29T12:00:01.000Z"),
+      requestId: record.usageId,
+    }]);
+    const tx = createAllowanceTx({
+      executeRaw: vi.fn<AllowanceExecuteRaw>(async () => 1),
+      hostedAiUsageReservation: reservationStore.delegate,
+      hostedAiUsageUpdateMany: vi.fn(async () => ({ count: 0 })),
+    });
+
+    await expect(accountHostedAiUsageForAllowanceTx({
+      memberId: "member_123",
+      now,
+      record,
+      reservationId: record.usageId,
+      tx: tx as never,
+    })).rejects.toThrow(
+      "cannot settle from already-accounted usage",
+    );
+    expect(reservationStore.rows.get(record.usageId)).toMatchObject({
+      settledUsageId: null,
+    });
+    expect(reservationStore.delegate.updateMany).not.toHaveBeenCalled();
+  });
+});
+
+function createHostedAiUsageReservationStore(
+  initialRows: Array<
+    Partial<HostedAiUsageReservationTestRow>
+    & Pick<HostedAiUsageReservationTestRow, "requestId">
+  > = [],
+) {
+  const rows = new Map<string, HostedAiUsageReservationTestRow>(
+    initialRows.map((row) => {
+      const normalized = {
+        allowanceSource: row.allowanceSource ?? "direct_paid_member_plan",
+        createdAt: row.createdAt ?? new Date("2026-03-29T12:00:00.000Z"),
+        dispatchedAt: row.dispatchedAt ?? null,
+        estimatedCostUsdMicros:
+          row.estimatedCostUsdMicros ?? LOW_SQUARE_IMAGE_ESTIMATE_USD_MICROS,
+        estimatorVersion:
+          row.estimatorVersion ?? "gpt-image-2-capacity-2026-07-25-v2",
+        imageQuality: row.imageQuality ?? "low",
+        imageSize: row.imageSize ?? "1024x1024",
+        memberId: row.memberId ?? "member_123",
+        periodEnd: row.periodEnd ?? new Date("2026-04-01T00:00:00.000Z"),
+        periodStart: row.periodStart ?? new Date("2026-03-01T00:00:00.000Z"),
+        promptUtf8Bytes: row.promptUtf8Bytes ?? 1,
+        referenceImageCount: row.referenceImageCount ?? 0,
+        releasedAt: row.releasedAt ?? null,
+        requestId: row.requestId,
+        settledUsageId: row.settledUsageId ?? null,
+      } satisfies HostedAiUsageReservationTestRow;
+      return [normalized.requestId, normalized] as const;
+    }),
+  );
+
+  function matchesWhere(
+    row: HostedAiUsageReservationTestRow,
+    where: Record<string, unknown>,
+  ): boolean {
+    const alternatives = where.OR;
+    if (
+      Array.isArray(alternatives)
+      && !alternatives.some((alternative) =>
+        typeof alternative === "object"
+        && alternative !== null
+        && matchesWhere(row, alternative as Record<string, unknown>)
+      )
+    ) {
+      return false;
+    }
+    if (typeof where.requestId === "string" && row.requestId !== where.requestId) {
+      return false;
+    }
+    if (typeof where.memberId === "string" && row.memberId !== where.memberId) {
+      return false;
+    }
+    for (const field of [
+      "dispatchedAt",
+      "releasedAt",
+      "settledUsageId",
+    ] as const) {
+      const condition = where[field];
+      if (condition === null && row[field] !== null) {
+        return false;
+      }
+      if (
+        typeof condition === "object"
+        && condition !== null
+        && "not" in condition
+        && (condition as { not: unknown }).not === null
+        && row[field] === null
+      ) {
+        return false;
+      }
+    }
+    const periodEnd = where.periodEnd;
+    if (
+      typeof periodEnd === "object"
+      && periodEnd !== null
+      && "gt" in periodEnd
+      && row.periodEnd <= (periodEnd as { gt: Date }).gt
+    ) {
+      return false;
+    }
+    const createdAt = where.createdAt;
+    if (
+      typeof createdAt === "object"
+      && createdAt !== null
+      && "gt" in createdAt
+      && row.createdAt <= (createdAt as { gt: Date }).gt
+    ) {
+      return false;
+    }
+    return true;
+  }
+
+  const delegate = {
+    aggregate: vi.fn(async (args: {
+      where: Record<string, unknown>;
+    }) => {
+      const matches = [...rows.values()]
+        .filter((row) => matchesWhere(row, args.where));
+      return {
+        _min: {
+          createdAt: matches.length > 0
+            ? new Date(Math.min(...matches.map((row) => row.createdAt.getTime())))
+            : null,
+          periodEnd: matches.length > 0
+            ? new Date(Math.min(...matches.map((row) => row.periodEnd.getTime())))
+            : null,
+        },
+        _sum: {
+          estimatedCostUsdMicros: matches
+          .reduce((total, row) => total + row.estimatedCostUsdMicros, 0n),
+        },
+      };
+    }),
+    create: vi.fn(async (args: {
+      data: Omit<
+        HostedAiUsageReservationTestRow,
+        "createdAt" | "dispatchedAt" | "releasedAt" | "settledUsageId"
+      >;
+    }) => {
+      const data = args.data;
+      if (rows.has(data.requestId)) {
+        throw new TypeError("Duplicate hosted AI usage reservation.");
+      }
+      const row = {
+        ...data,
+        createdAt: new Date("2026-03-29T12:00:00.000Z"),
+        dispatchedAt: null,
+        releasedAt: null,
+        settledUsageId: null,
+      };
+      rows.set(data.requestId, row);
+      return row;
+    }),
+    findUnique: vi.fn(async (args: { where: { requestId: string } }) =>
+      rows.get(args.where.requestId) ?? null
+    ),
+    updateMany: vi.fn(async (args: {
+      data: Partial<HostedAiUsageReservationTestRow>;
+      where: Record<string, unknown>;
+    }) => {
+      let count = 0;
+      for (const row of rows.values()) {
+        if (!matchesWhere(row, args.where)) {
+          continue;
+        }
+        Object.assign(row, args.data);
+        count += 1;
+      }
+      return { count };
+    }),
+  };
+
+  return { delegate, rows };
+}
+
 function createAllowanceTx(input: {
   billingPhase?: string | null;
   billingPlanCode?: string;
+  billingStatus?: HostedBillingStatus;
   blockedAt?: Date | null;
   checkoutOffer?: string | null;
   executeRaw: AllowanceExecuteRawMock;
@@ -3666,13 +4391,17 @@ function createAllowanceTx(input: {
   familyPeriodEnd?: Date | null;
   familyPeriodStart?: Date | null;
   hostedAiUsageAggregate?: ReturnType<typeof vi.fn>;
+  hostedAiUsageReservation?: HostedAiUsageReservationTestStore["delegate"];
   hostedAiUsageUpdateMany: ReturnType<typeof vi.fn>;
   limitUsdMicros?: bigint;
+  memberPeriodEnd?: Date;
+  memberPeriodStart?: Date;
   periodEnd?: Date;
   periodStart?: Date;
   pulseTrialPolicyVersion?: string | null;
   pulseTrialRedeemedAt?: Date | null;
   spentUsdMicros?: bigint;
+  suspendedAt?: Date | null;
   threadContainerLimitUsdMicros?: bigint | null;
   trialEndsAt?: Date | null;
   trialStartedAt?: Date | null;
@@ -3710,8 +4439,19 @@ function createAllowanceTx(input: {
       aggregate: input.hostedAiUsageAggregate ?? defaultAggregate,
       updateMany: input.hostedAiUsageUpdateMany,
     },
+    hostedAiUsageReservation:
+      input.hostedAiUsageReservation
+      ?? createHostedAiUsageReservationStore().delegate,
     hostedAiUsagePeriod: {
       createMany: vi.fn(async () => ({ count: 1 })),
+      findUnique: vi.fn(async () => ({
+        billingPlanCode: input.billingPlanCode ?? "launch_monthly",
+        blockedAt: input.blockedAt ?? null,
+        limitUsdMicros: input.limitUsdMicros ?? 10_000_000n,
+        periodEnd: input.periodEnd ?? new Date("2026-04-01T00:00:00.000Z"),
+        periodStart: input.periodStart ?? new Date("2026-03-01T00:00:00.000Z"),
+        spentUsdMicros: input.spentUsdMicros ?? 0n,
+      })),
       findUniqueOrThrow: vi.fn(async () => ({
         billingPlanCode: input.billingPlanCode ?? "launch_monthly",
         blockedAt: input.blockedAt ?? null,
@@ -3775,16 +4515,22 @@ function createAllowanceTx(input: {
           currentBillingPhase: input.billingPhase ?? null,
           currentBillingPlanCode: input.billingPlanCode ?? "launch_monthly",
           currentCheckoutOffer: input.checkoutOffer ?? null,
-          currentPeriodEnd: input.periodEnd ?? new Date("2026-04-01T00:00:00.000Z"),
-          currentPeriodStart: input.periodStart ?? new Date("2026-03-01T00:00:00.000Z"),
+          currentPeriodEnd:
+            input.memberPeriodEnd
+            ?? input.periodEnd
+            ?? new Date("2026-04-01T00:00:00.000Z"),
+          currentPeriodStart:
+            input.memberPeriodStart
+            ?? input.periodStart
+            ?? new Date("2026-03-01T00:00:00.000Z"),
           currentTrialEndsAt: input.trialEndsAt ?? null,
           currentTrialStartedAt: input.trialStartedAt ?? null,
           pulseTrialPolicyVersion: input.pulseTrialPolicyVersion ?? null,
           pulseTrialRedeemedAt: input.pulseTrialRedeemedAt ?? null,
         },
-        billingStatus: HostedBillingStatus.active,
+        billingStatus: input.billingStatus ?? HostedBillingStatus.active,
         id: "member_123",
-        suspendedAt: null,
+        suspendedAt: input.suspendedAt ?? null,
         threadContainer: input.threadContainerLimitUsdMicros == null
           ? null
           : {
@@ -3826,6 +4572,7 @@ function createGatePrisma(input: {
     periodStart: Date;
     spentUsdMicros: bigint;
   } | null;
+  hostedAiUsageReservation?: HostedAiUsageReservationTestStore["delegate"];
   limitUsdMicros?: bigint;
   periodEnd?: Date;
   periodStart?: Date;
@@ -3902,6 +4649,9 @@ function createGatePrisma(input: {
         },
       })),
     },
+    hostedAiUsageReservation:
+      input.hostedAiUsageReservation
+      ?? createHostedAiUsageReservationStore().delegate,
     hostedAiUsagePeriod: {
       createMany: vi.fn(async () => ({ count: 1 })),
       delete: vi.fn(async () => undefined),

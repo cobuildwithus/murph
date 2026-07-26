@@ -2,8 +2,8 @@ const USER_FACING_MESSAGE_MIN_VARIANT_COUNT = 20
 
 /**
  * A percentage stands in for the hidden credit balance on the personal notices.
- * The group thread notice is excluded: its copy already says the chat is out,
- * so the parenthetical only repeats the sentence it follows.
+ * The group thread notice is excluded because its first-person copy already
+ * states that the room's current capacity is exhausted.
  */
 const USAGE_LIMIT_PERCENTAGE_TEMPLATE_KEYS = new Set<string>([
   "linq.ai_usage.edge_limit_reached",
@@ -11,6 +11,20 @@ const USAGE_LIMIT_PERCENTAGE_TEMPLATE_KEYS = new Set<string>([
   "linq.ai_usage.pulse_upgrade_edge",
   "linq.ai_usage.trial_limit_reached",
 ])
+
+/**
+ * Usage accounting closes new admission after the crossing turn finishes, so
+ * any request accepted before that close can still arrive whether or not its
+ * provider work had started. Keep every crossing notice precise about that
+ * boundary instead of claiming Murph has stopped absolutely.
+ */
+const USAGE_LIMIT_ACCEPTED_WORK_TEMPLATE_KEYS = new Set<string>([
+  ...USAGE_LIMIT_PERCENTAGE_TEMPLATE_KEYS,
+  "linq.ai_usage.thread_limit_reached",
+])
+
+const USAGE_LIMIT_ACCEPTED_WORK_CLARIFICATION =
+  "New work from me is paused now. Anything you already asked me for may still arrive."
 
 const USER_FACING_MESSAGE_TEMPLATE_KEYS = [
   "assistant.signup_welcome",
@@ -514,26 +528,26 @@ Sound good?`,
     `You've used Pulse's included allowance for this month. Murph is paused for this usage period.`,
   ],
   "linq.ai_usage.thread_limit_reached": [
-    `Well. I'm out of time for the month, which means all of you are stuck with each other's opinions until it resets.`,
-    `That's me done for the month. Enjoy the silence, everybody, I'll be back when my time resets.`,
-    `I have officially spent every second I had in here this month. Going dark on all of you until it resets.`,
-    `And... that's it. I'm out of time for the month. You're on your own, everyone, until mine resets.`,
-    `I'm out of time in here. Talk amongst yourselves, all of you, until it resets.`,
-    `Right, I've hit zero. No more me for the whole room until my time resets.`,
-    `That was my last drop of time this month. I'm going quiet for all of you until it resets.`,
-    `Out of time, out of things to say. I'm gone for everyone here until it resets.`,
-    `Ran out mid-conversation. Classic. I'm out for everyone until my time resets.`,
-    `I've hit my limit for the month, and not in a fun way. Out for all of you until it resets.`,
-    `That's all I had this month. Everyone in here is unsupervised until my time resets.`,
-    `Well, that's my month gone. Everybody in here is Murph-free until my time resets.`,
-    `Zero. Nothing left. I'm out for everyone in this chat until my time resets.`,
-    `And there goes my last minute of the month. Quiet for all of you until it resets.`,
-    `I'm tapped. Whole room loses me until my time resets.`,
-    `Nothing left in the tank this month. I'm out for everyone here until it resets.`,
-    `Time's up. I'm out, and everybody in here is on their own until my time resets.`,
-    `I just spent my last bit of the month on that. Worth it. Out for all of you until it resets.`,
-    `That's my month. Going quiet on everyone in here until my time resets.`,
-    `I've run out. All of you get peace and quiet until my time resets.`,
+    `Well. I've used this chat's time for the month, so all of you are stuck with each other's opinions until it resets.`,
+    `That's my time for the month. Enjoy the quiet, everybody, until it resets.`,
+    `I've officially spent this chat's time for the month. All of you get a quieter room until it resets.`,
+    `And... that's my time for the month. Everyone gets fewer opinions from me until it resets.`,
+    `I've spent my time in here for the month. Talk amongst yourselves, all of you, until it resets.`,
+    `Right, I've reached this chat's limit. The whole room gets less of me until my time resets.`,
+    `That was my last bit of time this month. All of you get a quieter room until it resets.`,
+    `I've reached my time limit in here. Everyone gets fewer opinions from me until it resets.`,
+    `I hit the limit mid-conversation. Classic. Everybody gets a quieter room until my time resets.`,
+    `I've hit my limit for the month, and not in a fun way. All of you get less of me until it resets.`,
+    `That's all the chat time I had this month. Everyone in here is less supervised until my time resets.`,
+    `Well, I've spent this chat's time for the month. Everybody gets a little less Murph until it resets.`,
+    `I've used this chat's time for the month. Everyone gets a quieter room until my time resets.`,
+    `And there goes my last minute of the month. All of you get a quieter room until it resets.`,
+    `I'm tapped for the month. The whole room gets less of me until my time resets.`,
+    `I've spent this chat's time for the month. Everyone here gets fewer Murph opinions until it resets.`,
+    `Time's up for me this month. Everybody in here gets less commentary until my time resets.`,
+    `I just spent my last bit of the month on that. Worth it. All of you get less of me until it resets.`,
+    `That's my time for the month. Everyone in here gets a quieter room until my time resets.`,
+    `I've used this chat's time for the month. All of you get a little less supervision until my time resets.`,
   ],
   "linq.ai_usage.thread_limit_funding": [
     `Any of you can turn me back on. Or enjoy the peace:
@@ -616,10 +630,14 @@ function renderUserFacingMessageAtIndex<K extends UserFacingMessageTemplateKey>(
 
   const rendered = renderUserFacingMessageTemplate(template, input.context)
 
+  const renderedWithPercentage = USAGE_LIMIT_PERCENTAGE_TEMPLATE_KEYS.has(input.key)
+    ? addUsageLimitPercentage(rendered)
+    : rendered
+
   return {
-    text: USAGE_LIMIT_PERCENTAGE_TEMPLATE_KEYS.has(input.key)
-      ? addUsageLimitPercentage(rendered)
-      : rendered,
+    text: USAGE_LIMIT_ACCEPTED_WORK_TEMPLATE_KEYS.has(input.key)
+      ? `${renderedWithPercentage} ${USAGE_LIMIT_ACCEPTED_WORK_CLARIFICATION}`
+      : renderedWithPercentage,
   }
 }
 

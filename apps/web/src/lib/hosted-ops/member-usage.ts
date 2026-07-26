@@ -3,8 +3,10 @@ import "server-only";
 import { Prisma, type PrismaClient } from "@prisma/client";
 
 import {
+  classifyHostedAiUsageGateDecision,
   readHostedAiUsageGate,
   readHostedAiUsageGateSnapshots,
+  resolveHostedAiUsageGateSpendRemainingUsdMicros,
 } from "../hosted-execution/usage-allowance";
 import {
   HOSTED_AI_USAGE_LIMIT_NOTICE_CLAIM_STALE_MS,
@@ -209,7 +211,7 @@ export async function readHostedOpsMemberUsage(
     if (
       !snapshot?.periodPersistedAt
       || !decision
-      || (!decision.allowed && decision.reason !== "ai_usage_limit_exceeded")
+      || classifyHostedAiUsageGateDecision(decision) === "access_denied"
     ) {
       return [];
     }
@@ -242,10 +244,12 @@ export async function readHostedOpsMemberUsage(
     const last7Days = last7DaysByMember.get(member.id) ?? 0;
     const snapshot = usageGateSnapshots.get(member.id) ?? null;
     const decision = snapshot?.decision ?? null;
-    const allowanceAvailable = decision !== null && (
-      decision.allowed || decision.reason === "ai_usage_limit_exceeded"
-    );
-    const noticeLookupKey = allowanceAvailable && snapshot?.periodPersistedAt
+    const gateClassification = decision
+      ? classifyHostedAiUsageGateDecision(decision)
+      : "access_denied";
+    const allowanceAvailable = gateClassification !== "access_denied";
+    const noticeLookupKey =
+      decision && allowanceAvailable && snapshot?.periodPersistedAt
       ? buildHostedUsageNoticeLookupKey({
           memberId: member.id,
           periodStart: decision.periodStart,
@@ -268,14 +272,16 @@ export async function readHostedOpsMemberUsage(
       currentPeriod: allowanceAvailable && decision && snapshot
         ? {
             blocked: !decision.allowed
-              && decision.reason === "ai_usage_limit_exceeded",
+              && gateClassification === "usage_exhausted",
             idempotencyClaimStatus: noticeLookupKey
               ? noticeStatusByLookupKey.get(noticeLookupKey) ?? null
               : null,
             limitUsdMicros: decision.limitUsdMicros.toString(),
             periodEnd: decision.periodEnd.toISOString(),
             periodStart: decision.periodStart.toISOString(),
-            remainingUsdMicros: decision.remainingUsdMicros.toString(),
+            remainingUsdMicros:
+              resolveHostedAiUsageGateSpendRemainingUsdMicros(decision)
+                .toString(),
             spentUsdMicros: decision.spentUsdMicros.toString(),
             updatedAt: snapshot.periodPersistedAt?.toISOString() ?? null,
             usageCreditBalanceUsdMicros:
@@ -365,8 +371,7 @@ export async function resetHostedOpsMemberUsage(
       prisma: tx,
     });
     if (
-      (!canonicalGate.allowed
-        && canonicalGate.reason !== "ai_usage_limit_exceeded")
+      classifyHostedAiUsageGateDecision(canonicalGate) === "access_denied"
       || canonicalGate.periodStart.getTime() !== input.periodStart.getTime()
       || canonicalGate.usageCreditLedgerVersion
         !== input.expectedUsageCreditLedgerVersion

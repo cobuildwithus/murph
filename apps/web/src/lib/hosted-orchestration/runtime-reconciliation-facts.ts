@@ -38,6 +38,9 @@ import {
   sendClaimedHostedAiUsageLimitNoticeToTelegramThread,
   sendHostedTrialConversionNoticeToLinqChat,
 } from "../hosted-execution/usage-limit-notice";
+import {
+  classifyHostedAiUsageGateDecision,
+} from "../hosted-execution/usage-allowance";
 import { projectHostedAiUsageLimitNoticeForDelivery } from "../hosted-execution/usage-limit-notice-message";
 import { readActiveHostedMemberAccess } from "../hosted-onboarding/member-access";
 import {
@@ -381,9 +384,10 @@ async function sendHostedRuntimeUsageDeniedNoticeForPendingConversation(input: {
   userId: string;
 }): Promise<Date | null> {
   const decision = input.decision;
+  const gateClassification = classifyHostedAiUsageGateDecision(decision);
   if (
     (
-      decision.reason !== "ai_usage_limit_exceeded"
+      gateClassification !== "usage_exhausted"
       && decision.reason !== "trial_expired_pending_billing"
     )
     || !decision.userNotice

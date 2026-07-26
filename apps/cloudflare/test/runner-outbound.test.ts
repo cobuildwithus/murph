@@ -88,6 +88,7 @@ import {
   HOSTED_RUNTIME_PLAN_USAGE_TOOL_PATH,
   HOSTED_RUNTIME_SUBSCRIPTION_TOOL_PATH,
   HOSTED_RUNTIME_THREAD_ROUTE_AUTHORITY_PATH,
+  HOSTED_RUNTIME_USAGE_RESERVATION_PATH,
   HOSTED_RUNTIME_USAGE_RECORD_PATH,
   HOSTED_RUNTIME_VAULT_SHARE_DELIVER_PATH,
   HOSTED_RUNTIME_WORKSPACE_PATH,
@@ -274,6 +275,14 @@ const ALLOWLISTED_WEB_CONTROL_CASES = [
     },
     name: "device-sync reconcile",
     path: "/api/internal/device-sync/reconcile",
+  },
+  {
+    body: {
+      action: "mark_dispatched",
+      requestId: "image_reservation_1",
+    },
+    name: "hosted usage allowance reservation",
+    path: HOSTED_RUNTIME_USAGE_RESERVATION_PATH,
   },
   {
     body: {

@@ -83,6 +83,8 @@ import {
   parseHostedRuntimeRedactedJson,
   parseHostedRuntimeLogRequest,
   parseHostedRuntimeLogResponse,
+  parseHostedRuntimeUsageAllowanceRequest,
+  parseHostedRuntimeUsageAllowanceResponse,
   parseHostedRuntimeUsageRecordRequest,
   parseHostedRuntimeUsageRecordResponse,
   parseHostedRuntimeWebStatusResponse,
@@ -994,9 +996,11 @@ describe("hosted runtime control contracts", () => {
 
     expect(parseHostedRuntimeUsageRecordRequest({
       noticeDeliveryTarget,
+      reservationId: "image_reservation_1",
       usage,
     })).toEqual({
       noticeDeliveryTarget,
+      reservationId: "image_reservation_1",
       usage,
     });
     expect(parseHostedRuntimeUsageRecordRequest({
@@ -1083,6 +1087,10 @@ describe("hosted runtime control contracts", () => {
       usage,
     })).toThrow(/unexpected is not allowed/u);
     expect(() => parseHostedRuntimeUsageRecordRequest({
+      reservationId: " image_reservation_1",
+      usage,
+    })).toThrow(/must be trimmed/u);
+    expect(() => parseHostedRuntimeUsageRecordRequest({
       usage: {
         ...usage,
         usageId: "wrong",
@@ -1106,6 +1114,136 @@ describe("hosted runtime control contracts", () => {
       recorded: true,
       usageId: "",
     })).toThrow(/non-empty string/u);
+  });
+
+  it("parses exact bounded usage allowance reservation commands", () => {
+    const estimate = {
+      model: "gpt-image-2",
+      promptUtf8Bytes: 16_118,
+      quality: "high",
+      referenceImageCount: 16,
+      size: "1536x1024",
+    };
+    const requestId = "turn_image_1.request-1.attempt-1";
+
+    expect(parseHostedRuntimeUsageAllowanceRequest({
+      action: "reserve_image",
+      estimate,
+      requestId,
+    })).toEqual({
+      action: "reserve_image",
+      estimate,
+      requestId,
+    });
+    expect(parseHostedRuntimeUsageAllowanceRequest({
+      action: "mark_dispatched",
+      requestId,
+    })).toEqual({
+      action: "mark_dispatched",
+      requestId,
+    });
+    expect(parseHostedRuntimeUsageAllowanceRequest({
+      action: "release",
+      requestId,
+    })).toEqual({
+      action: "release",
+      requestId,
+    });
+
+    for (
+      const status of [
+        "reserved",
+        "would_exhaust",
+        "insufficient_capacity",
+        "already_dispatched",
+        "already_settled",
+      ] as const
+    ) {
+      expect(parseHostedRuntimeUsageAllowanceResponse({
+        action: "reserve_image",
+        requestId,
+        status,
+      })).toEqual({
+        action: "reserve_image",
+        requestId,
+        status,
+      });
+    }
+    expect(parseHostedRuntimeUsageAllowanceResponse({
+      action: "mark_dispatched",
+      requestId,
+      status: "already_dispatched",
+    })).toEqual({
+      action: "mark_dispatched",
+      requestId,
+      status: "already_dispatched",
+    });
+    expect(parseHostedRuntimeUsageAllowanceResponse({
+      action: "release",
+      requestId,
+      status: "already_released",
+    })).toEqual({
+      action: "release",
+      requestId,
+      status: "already_released",
+    });
+
+    expect(() => parseHostedRuntimeUsageAllowanceRequest({
+      action: "reserve_image",
+      estimate: {
+        ...estimate,
+        prompt: "must never cross this boundary",
+      },
+      requestId,
+    })).toThrow(/estimate\.prompt is not allowed/u);
+    expect(() => parseHostedRuntimeUsageAllowanceRequest({
+      action: "reserve_image",
+      estimate: {
+        ...estimate,
+        promptUtf8Bytes: 16_119,
+      },
+      requestId,
+    })).toThrow(/promptUtf8Bytes must be an integer/u);
+    expect(() => parseHostedRuntimeUsageAllowanceRequest({
+      action: "reserve_image",
+      estimate: {
+        ...estimate,
+        referenceImageCount: 17,
+      },
+      requestId,
+    })).toThrow(/referenceImageCount must be an integer/u);
+    expect(() => parseHostedRuntimeUsageAllowanceRequest({
+      action: "reserve_image",
+      estimate,
+      requestId: ` ${requestId}`,
+    })).toThrow(/requestId must be trimmed/u);
+    expect(() => parseHostedRuntimeUsageAllowanceRequest({
+      action: "reserve_image",
+      estimate,
+      requestId: "u".repeat(257),
+    })).toThrow(/requestId must be trimmed and at most 256 characters/u);
+    expect(() => parseHostedRuntimeUsageAllowanceRequest({
+      action: "release",
+      estimate,
+      requestId,
+    })).toThrow(/estimate is not allowed/u);
+    expect(() => parseHostedRuntimeUsageAllowanceResponse({
+      action: "reserve_image",
+      continuation: "dispatch",
+      requestId,
+      status: "reserved",
+    })).toThrow(/continuation is not allowed/u);
+    expect(() => parseHostedRuntimeUsageAllowanceResponse({
+      action: "reserve_image",
+      requestId,
+      status: "dispatch",
+    })).toThrow(/reserve_image status is not supported/u);
+    expect(() => parseHostedRuntimeUsageAllowanceResponse({
+      action: "release",
+      continuation: "do_not_dispatch",
+      requestId,
+      status: "released",
+    })).toThrow(/continuation is not allowed/u);
   });
 
   it("parses hosted Codex auth updates with exact bounded callback shapes", () => {

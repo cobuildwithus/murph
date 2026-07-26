@@ -725,6 +725,7 @@ describe("hosted execution coverage gaps", () => {
       "HOSTED_RUNTIME_SUBSCRIPTION_TOOL_PATH",
       "HOSTED_RUNTIME_THREAD_ROUTE_AUTHORITY_PATH",
       "HOSTED_RUNTIME_USAGE_RECORD_PATH",
+      "HOSTED_RUNTIME_USAGE_RESERVATION_PATH",
       "HOSTED_RUNTIME_VAULT_SHARE_ACTIVE_KINDS_PATH",
       "HOSTED_RUNTIME_VAULT_SHARE_DELIVER_PATH",
       "HOSTED_RUNTIME_WORKSPACE_CHECKPOINT_PATH",
@@ -735,6 +736,9 @@ describe("hosted execution coverage gaps", () => {
     );
     expect(routeModule.HOSTED_RUNTIME_USAGE_RECORD_PATH).toBe(
       "/api/internal/hosted-execution/usage/record",
+    );
+    expect(routeModule.HOSTED_RUNTIME_USAGE_RESERVATION_PATH).toBe(
+      "/api/internal/hosted-execution/usage/reservation",
     );
     expect(routeModule.HOSTED_RUNTIME_EMAIL_EGRESS_RECIPIENT_PATH).toBe(
       "/api/internal/hosted-runtime/email-egress/recipient",

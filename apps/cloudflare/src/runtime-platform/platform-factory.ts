@@ -39,6 +39,7 @@ import {
 } from "./provider-fetch.ts";
 import { createCloudflareHostedPublicInternetFetch } from "./public-internet-fetch.ts";
 import { createHostedRuntimeProductFeedbackPort } from "./product-feedback-port.ts";
+import { createHostedRuntimeUsageAllowancePort } from "./usage-allowance-port.ts";
 import { createHostedRuntimeUsageRecordPort } from "./usage-record-port.ts";
 import { resolveHostedWebControlTransport } from "./web-control-transport.ts";
 import { createHostedWebWorkspacePort } from "./workspace-port.ts";
@@ -284,6 +285,12 @@ export function buildHostedExecutionRuntimePlatform(input: {
             transport,
           }),
           productFeedbackPort: createHostedRuntimeProductFeedbackPort({
+            boundUserId: input.boundUserId,
+            fetchImpl,
+            timeoutMs,
+            transport,
+          }),
+          usageAllowancePort: createHostedRuntimeUsageAllowancePort({
             boundUserId: input.boundUserId,
             fetchImpl,
             timeoutMs,

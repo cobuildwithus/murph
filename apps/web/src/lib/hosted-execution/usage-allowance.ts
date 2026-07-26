@@ -4,6 +4,15 @@ import {
   type PrismaClient,
 } from "@prisma/client";
 import {
+  HOSTED_EXECUTION_ASSISTANT_IMAGE_PROVIDER_PROMPT_MAX_UTF8_BYTES,
+  HOSTED_EXECUTION_ASSISTANT_IMAGE_QUALITIES,
+  HOSTED_EXECUTION_ASSISTANT_IMAGE_REFERENCE_MAX_COUNT,
+  HOSTED_EXECUTION_ASSISTANT_IMAGE_SIZES,
+  type HostedExecutionAssistantImageEstimate,
+  type HostedExecutionAssistantImageQuality,
+  type HostedExecutionAssistantImageSize,
+} from "@murphai/hosted-execution/contracts";
+import {
   classifyAssistantOpenAiImageUsageBasis,
   type AssistantOpenAiImageUsageTokenBuckets,
   type AssistantOpenAiImageUsageUnpriceableReason,
@@ -62,11 +71,12 @@ import {
 type HostedAiUsageAllowanceClient = PrismaClient | Prisma.TransactionClient;
 export type HostedAiUsageGateDeniedReason =
   | "ai_usage_limit_exceeded"
+  | "ai_usage_capacity_reserved"
   | "hosted_access_inactive"
   | "trial_expired_pending_billing";
 type HostedAiUsageAccessDeniedReason = Exclude<
   HostedAiUsageGateDeniedReason,
-  "ai_usage_limit_exceeded"
+  "ai_usage_capacity_reserved" | "ai_usage_limit_exceeded"
 >;
 
 export type HostedAiUsageGateNoticeCode =
@@ -117,6 +127,21 @@ export type HostedAiUsageGateDecision =
     memberId: string;
     periodEnd: Date;
     periodStart: Date;
+    reason: "ai_usage_capacity_reserved";
+    remainingUsdMicros: bigint;
+    retryAfter: Date;
+    spentUsdMicros: bigint;
+    usageCreditBalanceUsdMicros: bigint;
+    usageCreditLedgerVersion: bigint;
+    userNotice: null;
+  }
+  | {
+    allowed: false;
+    billingPlanCode: HostedBillingPlanCode;
+    limitUsdMicros: bigint;
+    memberId: string;
+    periodEnd: Date;
+    periodStart: Date;
     reason: HostedAiUsageAccessDeniedReason;
     remainingUsdMicros: bigint;
     retryAfter: Date;
@@ -133,6 +158,39 @@ export type HostedAiUsageGateDecisionWithSource =
   | (Extract<HostedAiUsageGateDecision, { allowed: false }> & {
     allowanceSource: HostedAiUsageAllowanceSourceKind;
   });
+
+export type HostedAiUsageGateClassification =
+  | "access_denied"
+  | "allowed"
+  | "capacity_reserved"
+  | "usage_exhausted";
+
+export function classifyHostedAiUsageGateDecision(
+  decision: HostedAiUsageGateDecisionWithSource,
+): HostedAiUsageGateClassification {
+  if (decision.allowed) {
+    return "allowed";
+  }
+  switch (decision.reason) {
+    case "ai_usage_limit_exceeded":
+      return "usage_exhausted";
+    case "ai_usage_capacity_reserved":
+      return "capacity_reserved";
+    case "hosted_access_inactive":
+    case "trial_expired_pending_billing":
+      return "access_denied";
+  }
+}
+
+export function resolveHostedAiUsageGateSpendRemainingUsdMicros(
+  decision: HostedAiUsageGateDecisionWithSource,
+): bigint {
+  const includedRemainingUsdMicros =
+    decision.limitUsdMicros > decision.spentUsdMicros
+      ? decision.limitUsdMicros - decision.spentUsdMicros
+      : 0n;
+  return includedRemainingUsdMicros + decision.usageCreditBalanceUsdMicros;
+}
 
 export interface HostedAiUsageGateSnapshot {
   decision: HostedAiUsageGateDecisionWithSource;
@@ -163,6 +221,49 @@ export interface HostedAiUsageLimitNoticeCandidate {
   sourceUsageId: string;
   usageCreditLedgerVersion: bigint;
   userNotice: HostedAiUsageLimitNotice;
+}
+
+export interface HostedImageGenerationCapacitySpec
+  extends HostedExecutionAssistantImageEstimate {
+  model: "gpt-image-2";
+  quality: HostedExecutionAssistantImageQuality;
+  size: HostedExecutionAssistantImageSize;
+}
+
+export type HostedImageGenerationCapacityReservationDecision =
+  {
+    requestId: string;
+    status:
+      | "reserved"
+      | "would_exhaust"
+      | "insufficient_capacity"
+      | "already_dispatched"
+      | "already_settled";
+  };
+
+type HostedAiUsageReservationState =
+  | "reserved_pre_dispatch"
+  | "dispatched"
+  | "settled"
+  | "released";
+
+export interface HostedAiUsageReservationDispatchResult {
+  requestId: string;
+  status:
+    | "dispatched"
+    | "already_dispatched"
+    | "already_settled"
+    | "not_dispatchable"
+    | "missing";
+}
+
+export interface HostedAiUsageReservationReleaseResult {
+  requestId: string;
+  status:
+    | "released"
+    | "already_released"
+    | "not_releasable"
+    | "missing";
 }
 
 type HostedAiUsageAllowancePricingModelSource =
@@ -433,6 +534,37 @@ const HOSTED_AI_USAGE_ALLOWANCE_OPENAI_IMAGE_CACHED_INPUT_USD_MICROS_PER_MILLION
   2_000_000n;
 const HOSTED_AI_USAGE_ALLOWANCE_OPENAI_IMAGE_OUTPUT_USD_MICROS_PER_MILLION_TOKENS =
   30_000_000n;
+
+const HOSTED_IMAGE_CAPACITY_ESTIMATOR_VERSION =
+  "gpt-image-2-capacity-2026-07-25-v2";
+export const HOSTED_AI_USAGE_RESERVATION_PRE_DISPATCH_TTL_MS = 5 * 60_000;
+const HOSTED_IMAGE_CAPACITY_PROMPT_TOKENS_PER_UTF8_BYTE = 1n;
+// OpenAI publishes GPT Image 2 rates and high-fidelity edit behavior, but no
+// exact input-tokenization formula. This versioned 10k/reference safety
+// estimate intentionally over-reserves against available provider evidence and
+// observed GPT Image 2 edit usage. It is an admission hedge, not a quoted cost
+// or provider guarantee; bump the estimator version if this assumption changes.
+const HOSTED_IMAGE_CAPACITY_INPUT_TOKENS_PER_REFERENCE = 10_000n;
+const HOSTED_IMAGE_CAPACITY_OUTPUT_COST_USD_MICROS = {
+  "1024x1024": {
+    high: 211_000n,
+    low: 6_000n,
+    medium: 53_000n,
+  },
+  "1024x1536": {
+    high: 165_000n,
+    low: 5_000n,
+    medium: 42_000n,
+  },
+  "1536x1024": {
+    high: 165_000n,
+    low: 5_000n,
+    medium: 42_000n,
+  },
+} as const satisfies Record<
+  HostedExecutionAssistantImageSize,
+  Record<HostedExecutionAssistantImageQuality, bigint>
+>;
 
 // Workers AI audio transcription is duration-priced rather than token-priced.
 // Rate: $0.00051 per audio minute, from
@@ -838,6 +970,7 @@ export async function accountHostedAiUsageForAllowanceTx(input: {
   memberId: string;
   now?: Date;
   record: AssistantUsageRecord;
+  reservationId?: string;
   tx: Prisma.TransactionClient;
 }): Promise<HostedAiUsageLimitNoticeCandidate | null> {
   const now = input.now ?? new Date();
@@ -846,6 +979,15 @@ export async function accountHostedAiUsageForAllowanceTx(input: {
     memberId: input.memberId,
     tx: input.tx,
   });
+  const reservation = await resolveHostedAiUsageReservationSettlementTx({
+    memberId: input.memberId,
+    record: input.record,
+    reservationId: input.reservationId,
+    tx: input.tx,
+  });
+  if (reservation?.state === "already_settled") {
+    return null;
+  }
   const memberState = await input.tx.hostedMember.findUnique({
     where: {
       id: input.memberId,
@@ -882,39 +1024,55 @@ export async function accountHostedAiUsageForAllowanceTx(input: {
     throw new TypeError("Hosted AI usage allowance member does not exist.");
   }
   const usageCreditProjection = normalizeHostedAiUsageCreditProjection(memberState);
-  const allowanceAccess = memberState.suspendedAt === null
-    ? await resolveHostedAiUsageAllowanceBillingRefForMember({
-        billingRef: memberState.billingRef,
-        billingStatus: memberState.billingStatus,
-        memberId: input.memberId,
-        tx: input.tx,
-      })
-    : {
-        billingRef: memberState.billingRef,
-        familyAccessActive: false,
-      };
-  const threadContainerAccessActive = await hasHostedAiUsageThreadContainerAccess({
-    container: memberState,
-    containerMemberId: input.memberId,
-    threadContainer: memberState.threadContainer,
-    tx: input.tx,
-  });
-  const period = await ensureHostedAiUsageAllowancePeriodTx({
-    at,
-    billingRef: allowanceAccess.billingRef,
-    memberId: input.memberId,
-    now,
-    threadContainer: memberState.threadContainer,
-    threadContainerAccessActive,
-    tx: input.tx,
-    ...usageCreditProjection,
-  });
+  let period: HostedAiUsageAllowancePeriodResult;
+  if (reservation) {
+    period = await readHostedAiUsageReservationPeriodTx({
+      memberId: input.memberId,
+      reservation,
+      tx: input.tx,
+      ...usageCreditProjection,
+    });
+  } else {
+    const allowanceAccess = memberState.suspendedAt === null
+      ? await resolveHostedAiUsageAllowanceBillingRefForMember({
+          billingRef: memberState.billingRef,
+          billingStatus: memberState.billingStatus,
+          memberId: input.memberId,
+          tx: input.tx,
+        })
+      : {
+          billingRef: memberState.billingRef,
+          familyAccessActive: false,
+        };
+    const threadContainerAccessActive = await hasHostedAiUsageThreadContainerAccess({
+      container: memberState,
+      containerMemberId: input.memberId,
+      threadContainer: memberState.threadContainer,
+      tx: input.tx,
+    });
+    period = await ensureHostedAiUsageAllowancePeriodTx({
+      at,
+      billingRef: allowanceAccess.billingRef,
+      memberId: input.memberId,
+      now,
+      threadContainer: memberState.threadContainer,
+      threadContainerAccessActive,
+      tx: input.tx,
+      ...usageCreditProjection,
+    });
+  }
   if (period.kind === "denied") {
-    await markHostedAiUsageAllowanceDeniedTx({
+    const accounted = await markHostedAiUsageAllowanceDeniedTx({
       memberId: input.memberId,
       now,
       period,
       record: input.record,
+      tx: input.tx,
+    });
+    await settleHostedAiUsageReservationForAccountedUsageTx({
+      accounted,
+      record: input.record,
+      reservation,
       tx: input.tx,
     });
     return null;
@@ -922,7 +1080,7 @@ export async function accountHostedAiUsageForAllowanceTx(input: {
 
   const pricingDecision = resolveHostedAiUsageAllowancePricingDecision(input.record);
   if (pricingDecision.kind === "unpriceable_openai_image") {
-    return accountHostedAiUsageOpenAiImageMalformedForAllowanceTx({
+    const malformed = await accountHostedAiUsageOpenAiImageMalformedForAllowanceTx({
       decision: pricingDecision,
       memberId: input.memberId,
       now,
@@ -930,6 +1088,13 @@ export async function accountHostedAiUsageForAllowanceTx(input: {
       record: input.record,
       tx: input.tx,
     });
+    await settleHostedAiUsageReservationForAccountedUsageTx({
+      accounted: malformed.accounted,
+      record: input.record,
+      reservation,
+      tx: input.tx,
+    });
+    return malformed.limitNoticeCandidate;
   }
   const priced = pricingDecision.priced;
 
@@ -949,19 +1114,34 @@ export async function accountHostedAiUsageForAllowanceTx(input: {
     },
   });
 
-  if (accounted.count !== 1 || !priced.counted) {
+  if (accounted.count !== 1) {
+    await settleHostedAiUsageReservationForAccountedUsageTx({
+      accounted: false,
+      record: input.record,
+      reservation,
+      tx: input.tx,
+    });
     return null;
   }
 
-  return accountHostedAiUsageAllowancePeriodSpendTx({
-    costUsdMicros: priced.costUsdMicros,
-    memberId: input.memberId,
-    now,
-    period,
-    recordOccurredAt: normalizeHostedAiUsageAllowanceDate(input.record.occurredAt),
-    sourceUsageId: input.record.usageId,
+  const limitNoticeCandidate = priced.counted
+    ? await accountHostedAiUsageAllowancePeriodSpendTx({
+        costUsdMicros: priced.costUsdMicros,
+        memberId: input.memberId,
+        now,
+        period,
+        recordOccurredAt: normalizeHostedAiUsageAllowanceDate(input.record.occurredAt),
+        sourceUsageId: input.record.usageId,
+        tx: input.tx,
+      })
+    : null;
+  await settleHostedAiUsageReservationForAccountedUsageTx({
+    accounted: true,
+    record: input.record,
+    reservation,
     tx: input.tx,
   });
+  return limitNoticeCandidate;
 }
 
 async function accountHostedAiUsageOpenAiImageMalformedForAllowanceTx(input: {
@@ -974,7 +1154,10 @@ async function accountHostedAiUsageOpenAiImageMalformedForAllowanceTx(input: {
   period: Extract<HostedAiUsageAllowancePeriodResult, { kind: "period" }>;
   record: AssistantUsageRecord;
   tx: Prisma.TransactionClient;
-}): Promise<HostedAiUsageLimitNoticeCandidate | null> {
+}): Promise<{
+  accounted: boolean;
+  limitNoticeCandidate: HostedAiUsageLimitNoticeCandidate | null;
+}> {
   const blockCostUsdMicros = input.decision.counted
     ? resolveHostedAiUsageAllowanceRemainingUsdMicros(input.period)
     : 0n;
@@ -1009,19 +1192,27 @@ async function accountHostedAiUsageOpenAiImageMalformedForAllowanceTx(input: {
     },
   });
 
-  if (accounted.count !== 1 || !input.decision.counted) {
-    return null;
+  if (accounted.count !== 1) {
+    return {
+      accounted: false,
+      limitNoticeCandidate: null,
+    };
   }
 
-  return accountHostedAiUsageAllowancePeriodSpendTx({
-    costUsdMicros: blockCostUsdMicros,
-    memberId: input.memberId,
-    now: input.now,
-    period: input.period,
-    recordOccurredAt: normalizeHostedAiUsageAllowanceDate(input.record.occurredAt),
-    sourceUsageId: input.record.usageId,
-    tx: input.tx,
-  });
+  return {
+    accounted: true,
+    limitNoticeCandidate: input.decision.counted
+      ? await accountHostedAiUsageAllowancePeriodSpendTx({
+          costUsdMicros: blockCostUsdMicros,
+          memberId: input.memberId,
+          now: input.now,
+          period: input.period,
+          recordOccurredAt: normalizeHostedAiUsageAllowanceDate(input.record.occurredAt),
+          sourceUsageId: input.record.usageId,
+          tx: input.tx,
+        })
+      : null,
+  };
 }
 
 async function markHostedAiUsageAllowanceDeniedTx(input: {
@@ -1030,11 +1221,11 @@ async function markHostedAiUsageAllowanceDeniedTx(input: {
   period: Extract<HostedAiUsageAllowancePeriodResult, { kind: "denied" }>;
   record: AssistantUsageRecord;
   tx: Prisma.TransactionClient;
-}): Promise<void> {
+}): Promise<boolean> {
   const tokenPricingBasis =
     validateHostedAiUsageAllowanceDeniedTokenPricingBasis(input.record);
 
-  await input.tx.hostedAiUsage.updateMany({
+  const accounted = await input.tx.hostedAiUsage.updateMany({
     where: {
       allowanceAccountedAt: null,
       id: input.record.usageId,
@@ -1056,6 +1247,7 @@ async function markHostedAiUsageAllowanceDeniedTx(input: {
       allowancePricingVersion: "hosted-ai-usage-allowance-denied-2026-05-05",
     },
   });
+  return accounted.count === 1;
 }
 
 export async function resolveHostedAiUsageGate(input: {
@@ -1170,9 +1362,15 @@ export async function resolveHostedAiUsageGate(input: {
       });
     }
 
+    const reservationCapacity = await readActiveHostedAiUsageReservationCapacityTx({
+      memberId: input.memberId,
+      now,
+      tx,
+    });
     return buildHostedAiUsageGateDecision({
       memberId: input.memberId,
       period,
+      reservationCapacity,
     });
   });
 }
@@ -1278,11 +1476,19 @@ export async function readHostedAiUsageGate(input: {
       ...usageCreditProjection,
     });
 
+    const reservationCapacity = period.kind === "period"
+      ? await readActiveHostedAiUsageReservationCapacityTx({
+          memberId: input.memberId,
+          now,
+          tx,
+        })
+      : null;
     return buildHostedAiUsageGateDecision({
       memberId: input.memberId,
       period,
+      reservationCapacity,
     });
-  });
+  }, Prisma.TransactionIsolationLevel.RepeatableRead);
 }
 
 /**
@@ -1313,7 +1519,7 @@ export async function readHostedAiUsageGateSnapshots(input: {
       }));
     }
     const currentPeriodKeys = [...decisions.values()].flatMap((decision) =>
-      decision.allowed || decision.reason === "ai_usage_limit_exceeded"
+      classifyHostedAiUsageGateDecision(decision) !== "access_denied"
         ? [{ memberId: decision.memberId, periodStart: decision.periodStart }]
         : []
     );
@@ -1371,6 +1577,665 @@ export async function checkHostedAiUsageGate(input: {
   }
 
   return resolveHostedAiUsageGate(input);
+}
+
+export async function reserveHostedImageGenerationCapacity(input: {
+  memberId: string;
+  now?: Date | string;
+  prisma?: HostedAiUsageAllowanceClient;
+  requestId: string;
+  spec: HostedImageGenerationCapacitySpec;
+}): Promise<HostedImageGenerationCapacityReservationDecision> {
+  const prisma = input.prisma ?? getPrisma();
+  const now = normalizeHostedAiUsageAllowanceDate(input.now ?? new Date());
+  return runHostedAiUsageAllowanceTransaction(
+    prisma,
+    (tx) => reserveHostedImageGenerationCapacityTx({
+      memberId: input.memberId,
+      now,
+      requestId: input.requestId,
+      spec: input.spec,
+      tx,
+    }),
+  );
+}
+
+export async function markHostedAiUsageReservationDispatched(input: {
+  memberId: string;
+  now?: Date | string;
+  prisma?: HostedAiUsageAllowanceClient;
+  requestId: string;
+}): Promise<HostedAiUsageReservationDispatchResult> {
+  const prisma = input.prisma ?? getPrisma();
+  const now = normalizeHostedAiUsageAllowanceDate(input.now ?? new Date());
+  return runHostedAiUsageAllowanceTransaction(
+    prisma,
+    (tx) => markHostedAiUsageReservationDispatchedTx({
+      memberId: input.memberId,
+      now,
+      requestId: input.requestId,
+      tx,
+    }),
+  );
+}
+
+export async function releaseHostedAiUsageReservation(input: {
+  memberId: string;
+  now?: Date | string;
+  prisma?: HostedAiUsageAllowanceClient;
+  requestId: string;
+}): Promise<HostedAiUsageReservationReleaseResult> {
+  const prisma = input.prisma ?? getPrisma();
+  const now = normalizeHostedAiUsageAllowanceDate(input.now ?? new Date());
+  return runHostedAiUsageAllowanceTransaction(
+    prisma,
+    (tx) => releaseHostedAiUsageReservationTx({
+      memberId: input.memberId,
+      now,
+      requestId: input.requestId,
+      tx,
+    }),
+  );
+}
+
+async function reserveHostedImageGenerationCapacityTx(input: {
+  memberId: string;
+  now: Date;
+  requestId: string;
+  spec: HostedImageGenerationCapacitySpec;
+  tx: Prisma.TransactionClient;
+}): Promise<HostedImageGenerationCapacityReservationDecision> {
+  const requestId = requireHostedAiUsageReservationId(input.requestId);
+  const estimate = estimateHostedImageGenerationCapacity(input.spec);
+  if (!estimate) {
+    return {
+      requestId,
+      status: "insufficient_capacity",
+    };
+  }
+
+  await lockHostedAiUsageAllowanceBeneficiaryTx({
+    memberId: input.memberId,
+    tx: input.tx,
+  });
+  const existing = await input.tx.hostedAiUsageReservation.findUnique({
+    where: { requestId },
+  });
+  if (existing) {
+    return buildHostedImageCapacityReplayDecision({
+      existing,
+      estimate,
+      memberId: input.memberId,
+      now: input.now,
+      requestId,
+      spec: input.spec,
+    });
+  }
+
+  const gate = await resolveHostedAiUsageGate({
+    memberId: input.memberId,
+    now: input.now,
+    prisma: input.tx,
+  });
+  const spendRemainingUsdMicros =
+    resolveHostedAiUsageGateSpendRemainingUsdMicros(gate);
+  if (!gate.allowed) {
+    return (
+      gate.reason === "ai_usage_limit_exceeded"
+      || (
+        gate.reason === "ai_usage_capacity_reserved"
+        && estimate.estimatedCostUsdMicros >= spendRemainingUsdMicros
+      )
+    )
+      ? {
+          requestId,
+          status: "would_exhaust",
+        }
+      : {
+          requestId,
+          status: "insufficient_capacity",
+        };
+  }
+
+  if (estimate.estimatedCostUsdMicros >= spendRemainingUsdMicros) {
+    return {
+      requestId,
+      status: "would_exhaust",
+    };
+  }
+  if (estimate.estimatedCostUsdMicros >= gate.remainingUsdMicros) {
+    return {
+      requestId,
+      status: "insufficient_capacity",
+    };
+  }
+
+  await input.tx.hostedAiUsageReservation.create({
+    data: {
+      allowanceSource: gate.allowanceSource,
+      estimatedCostUsdMicros: estimate.estimatedCostUsdMicros,
+      estimatorVersion: HOSTED_IMAGE_CAPACITY_ESTIMATOR_VERSION,
+      imageQuality: input.spec.quality,
+      imageSize: input.spec.size,
+      memberId: input.memberId,
+      periodEnd: gate.periodEnd,
+      periodStart: gate.periodStart,
+      promptUtf8Bytes: input.spec.promptUtf8Bytes,
+      referenceImageCount: input.spec.referenceImageCount,
+      requestId,
+    },
+  });
+  return {
+    requestId,
+    status: "reserved",
+  };
+}
+
+async function markHostedAiUsageReservationDispatchedTx(input: {
+  memberId: string;
+  now: Date;
+  requestId: string;
+  tx: Prisma.TransactionClient;
+}): Promise<HostedAiUsageReservationDispatchResult> {
+  const requestId = requireHostedAiUsageReservationId(input.requestId);
+  await lockHostedAiUsageAllowanceBeneficiaryTx({
+    memberId: input.memberId,
+    tx: input.tx,
+  });
+  const reservation = await input.tx.hostedAiUsageReservation.findUnique({
+    where: { requestId },
+  });
+  if (!reservation) {
+    return {
+      requestId,
+      status: "missing",
+    };
+  }
+  assertHostedAiUsageReservationOwner(reservation, input.memberId);
+  if (reservation.settledUsageId) {
+    return {
+      requestId,
+      status: "already_settled",
+    };
+  }
+  if (reservation.dispatchedAt) {
+    return {
+      requestId,
+      status: "already_dispatched",
+    };
+  }
+  if (reservation.releasedAt || reservation.periodEnd <= input.now) {
+    return {
+      requestId,
+      status: "not_dispatchable",
+    };
+  }
+  if (
+    hasHostedAiUsageReservationPreDispatchExpired({
+      createdAt: reservation.createdAt,
+      now: input.now,
+    })
+  ) {
+    return {
+      requestId,
+      status: "not_dispatchable",
+    };
+  }
+
+  const dispatched = await input.tx.hostedAiUsageReservation.updateMany({
+    data: {
+      dispatchedAt: input.now,
+    },
+    where: {
+      dispatchedAt: null,
+      createdAt: {
+        gt: resolveHostedAiUsageReservationPreDispatchCutoff(input.now),
+      },
+      releasedAt: null,
+      requestId,
+      settledUsageId: null,
+    },
+  });
+  if (dispatched.count !== 1) {
+    throw new TypeError(
+      "Hosted AI usage dispatch lost its locked reservation.",
+    );
+  }
+  return {
+    requestId,
+    status: "dispatched",
+  };
+}
+
+async function releaseHostedAiUsageReservationTx(input: {
+  memberId: string;
+  now: Date;
+  requestId: string;
+  tx: Prisma.TransactionClient;
+}): Promise<HostedAiUsageReservationReleaseResult> {
+  const requestId = requireHostedAiUsageReservationId(input.requestId);
+  await lockHostedAiUsageAllowanceBeneficiaryTx({
+    memberId: input.memberId,
+    tx: input.tx,
+  });
+  const reservation = await input.tx.hostedAiUsageReservation.findUnique({
+    where: { requestId },
+  });
+  if (!reservation) {
+    return {
+      requestId,
+      status: "missing",
+    };
+  }
+  assertHostedAiUsageReservationOwner(reservation, input.memberId);
+  if (reservation.releasedAt) {
+    return {
+      requestId,
+      status: "already_released",
+    };
+  }
+  if (reservation.dispatchedAt || reservation.settledUsageId) {
+    return {
+      requestId,
+      status: "not_releasable",
+    };
+  }
+
+  const released = await input.tx.hostedAiUsageReservation.updateMany({
+    data: {
+      releasedAt: input.now,
+    },
+    where: {
+      dispatchedAt: null,
+      releasedAt: null,
+      requestId,
+      settledUsageId: null,
+    },
+  });
+  if (released.count !== 1) {
+    throw new TypeError(
+      "Hosted AI usage release lost its locked reservation.",
+    );
+  }
+  return {
+    requestId,
+    status: "released",
+  };
+}
+
+interface HostedAiUsageReservationSettlement {
+  allowanceSource: HostedAiUsageAllowanceSourceKind;
+  periodEnd: Date;
+  periodStart: Date;
+  requestId: string;
+  state: "pending" | "already_settled";
+}
+
+async function resolveHostedAiUsageReservationSettlementTx(input: {
+  memberId: string;
+  record: AssistantUsageRecord;
+  reservationId?: string;
+  tx: Prisma.TransactionClient;
+}): Promise<HostedAiUsageReservationSettlement | null> {
+  if (input.reservationId === undefined) {
+    return null;
+  }
+
+  const requestId = requireHostedAiUsageReservationId(input.reservationId);
+  if (!isHostedAiUsageAllowanceOpenAiImageRecord(input.record)) {
+    throw new TypeError(
+      "Hosted AI usage reservations can settle only OpenAI Images usage.",
+    );
+  }
+
+  const reservation = await input.tx.hostedAiUsageReservation.findUnique({
+    where: { requestId },
+  });
+  if (!reservation) {
+    throw new TypeError("Hosted AI usage reservation does not exist.");
+  }
+  assertHostedAiUsageReservationOwner(reservation, input.memberId);
+  if (reservation.requestId !== input.record.usageId) {
+    throw new TypeError(
+      "Hosted AI usage reservation does not match the expected usage identity.",
+    );
+  }
+  if (reservation.releasedAt) {
+    throw new TypeError("Released hosted AI usage reservation cannot settle.");
+  }
+  if (!reservation.dispatchedAt) {
+    throw new TypeError(
+      "Hosted AI usage reservation must be dispatched before settlement.",
+    );
+  }
+  if (reservation.settledUsageId) {
+    if (reservation.settledUsageId !== input.record.usageId) {
+      throw new TypeError(
+        "Hosted AI usage reservation already settled with different usage.",
+      );
+    }
+    return {
+      allowanceSource: requireHostedAiUsageAllowanceSource(
+        reservation.allowanceSource,
+      ),
+      periodEnd: reservation.periodEnd,
+      periodStart: reservation.periodStart,
+      requestId,
+      state: "already_settled",
+    };
+  }
+  return {
+    allowanceSource: requireHostedAiUsageAllowanceSource(
+      reservation.allowanceSource,
+    ),
+    periodEnd: reservation.periodEnd,
+    periodStart: reservation.periodStart,
+    requestId,
+    state: "pending",
+  };
+}
+
+async function readHostedAiUsageReservationPeriodTx(input: {
+  memberId: string;
+  reservation: HostedAiUsageReservationSettlement;
+  tx: Prisma.TransactionClient;
+} & HostedAiUsageCreditProjection): Promise<
+  Extract<HostedAiUsageAllowancePeriodResult, { kind: "period" }>
+> {
+  await lockHostedAiUsageAllowancePeriodTx({
+    memberId: input.memberId,
+    periodStart: input.reservation.periodStart,
+    tx: input.tx,
+  });
+  const period = await input.tx.hostedAiUsagePeriod.findUnique({
+    where: {
+      memberId_periodStart: {
+        memberId: input.memberId,
+        periodStart: input.reservation.periodStart,
+      },
+    },
+    select: {
+      billingPlanCode: true,
+      blockedAt: true,
+      limitUsdMicros: true,
+      periodEnd: true,
+      periodStart: true,
+      spentUsdMicros: true,
+    },
+  });
+  if (
+    !period
+    || period.periodEnd.getTime() !== input.reservation.periodEnd.getTime()
+  ) {
+    throw new TypeError(
+      "Hosted AI usage reservation allowance period is unavailable.",
+    );
+  }
+  const billingPlanCode = parseHostedBillingPlanCode(period.billingPlanCode);
+  if (!billingPlanCode) {
+    throw new TypeError(
+      "Hosted AI usage reservation allowance period has an invalid plan.",
+    );
+  }
+  return {
+    allowanceSource: input.reservation.allowanceSource,
+    billingPlanCode,
+    blockedAt: period.blockedAt,
+    kind: "period",
+    limitUsdMicros: period.limitUsdMicros,
+    periodEnd: period.periodEnd,
+    periodStart: period.periodStart,
+    spentUsdMicros: period.spentUsdMicros,
+    usageCreditBalanceUsdMicros: input.usageCreditBalanceUsdMicros,
+    usageCreditLedgerVersion: input.usageCreditLedgerVersion,
+  };
+}
+
+async function settleHostedAiUsageReservationForAccountedUsageTx(input: {
+  accounted: boolean;
+  record: AssistantUsageRecord;
+  reservation: HostedAiUsageReservationSettlement | null;
+  tx: Prisma.TransactionClient;
+}): Promise<void> {
+  if (!input.reservation) {
+    return;
+  }
+  if (!input.accounted) {
+    if (input.reservation.state === "already_settled") {
+      return;
+    }
+    throw new TypeError(
+      "Hosted AI usage reservation cannot settle from already-accounted usage.",
+    );
+  }
+  if (input.reservation.state === "already_settled") {
+    throw new TypeError(
+      "Hosted AI usage reservation is settled but its usage is unaccounted.",
+    );
+  }
+
+  const settled = await input.tx.hostedAiUsageReservation.updateMany({
+    data: {
+      settledUsageId: input.record.usageId,
+    },
+    where: {
+      dispatchedAt: {
+        not: null,
+      },
+      releasedAt: null,
+      requestId: input.reservation.requestId,
+      settledUsageId: null,
+    },
+  });
+  if (settled.count !== 1) {
+    throw new TypeError(
+      "Hosted AI usage reservation settlement lost its locked reservation.",
+    );
+  }
+}
+
+interface StoredHostedImageCapacityReservation {
+  allowanceSource: string;
+  createdAt: Date;
+  dispatchedAt: Date | null;
+  imageQuality: string;
+  imageSize: string;
+  estimatedCostUsdMicros: bigint;
+  estimatorVersion: string;
+  memberId: string;
+  periodEnd: Date;
+  periodStart: Date;
+  promptUtf8Bytes: number;
+  referenceImageCount: number;
+  releasedAt: Date | null;
+  settledUsageId: string | null;
+}
+
+function buildHostedImageCapacityReplayDecision(input: {
+  estimate: {
+    estimatedCostUsdMicros: bigint;
+  };
+  existing: StoredHostedImageCapacityReservation;
+  memberId: string;
+  now: Date;
+  requestId: string;
+  spec: HostedImageGenerationCapacitySpec;
+}): HostedImageGenerationCapacityReservationDecision {
+  assertHostedAiUsageReservationOwner(input.existing, input.memberId);
+  if (
+    input.existing.imageQuality !== input.spec.quality
+    || input.existing.imageSize !== input.spec.size
+    || input.existing.promptUtf8Bytes !== input.spec.promptUtf8Bytes
+    || input.existing.referenceImageCount !== input.spec.referenceImageCount
+  ) {
+    throw new TypeError(
+      "Hosted AI usage reservation already exists with different immutable estimate inputs.",
+    );
+  }
+  const state = resolveHostedImageCapacityReservationState(input.existing);
+  if (state === "dispatched") {
+    return {
+      requestId: input.requestId,
+      status: "already_dispatched",
+    };
+  }
+  if (state === "settled") {
+    return {
+      requestId: input.requestId,
+      status: "already_settled",
+    };
+  }
+  if (
+    input.existing.estimatorVersion !== HOSTED_IMAGE_CAPACITY_ESTIMATOR_VERSION
+    || input.existing.estimatedCostUsdMicros
+      !== input.estimate.estimatedCostUsdMicros
+  ) {
+    throw new TypeError(
+      "Hosted AI usage reservation already exists with a stale capacity estimate.",
+    );
+  }
+  if (state === "released") {
+    return {
+      requestId: input.requestId,
+      status: "insufficient_capacity",
+    };
+  }
+  if (input.existing.periodEnd <= input.now) {
+    return {
+      requestId: input.requestId,
+      status: "insufficient_capacity",
+    };
+  }
+  if (
+    hasHostedAiUsageReservationPreDispatchExpired({
+      createdAt: input.existing.createdAt,
+      now: input.now,
+    })
+  ) {
+    return {
+      requestId: input.requestId,
+      status: "insufficient_capacity",
+    };
+  }
+  return {
+    requestId: input.requestId,
+    status: "reserved",
+  };
+}
+
+function resolveHostedImageCapacityReservationState(
+  reservation: Pick<
+    StoredHostedImageCapacityReservation,
+    "dispatchedAt" | "releasedAt" | "settledUsageId"
+  >,
+): HostedAiUsageReservationState {
+  if (reservation.settledUsageId) {
+    return "settled";
+  }
+  if (reservation.releasedAt) {
+    return "released";
+  }
+  if (reservation.dispatchedAt) {
+    return "dispatched";
+  }
+  return "reserved_pre_dispatch";
+}
+
+function assertHostedAiUsageReservationOwner(
+  reservation: Pick<StoredHostedImageCapacityReservation, "memberId">,
+  memberId: string,
+): void {
+  if (reservation.memberId !== memberId) {
+    throw new TypeError(
+      "Hosted AI usage reservation already belongs to a different member.",
+    );
+  }
+}
+
+function requireHostedAiUsageReservationId(value: string): string {
+  if (
+    typeof value !== "string"
+    || value.length < 1
+    || value.length > 256
+    || value.trim() !== value
+  ) {
+    throw new TypeError("Hosted AI usage reservation id is invalid.");
+  }
+  return value;
+}
+
+function requireHostedAiUsageAllowanceSource(
+  value: string,
+): HostedAiUsageAllowanceSourceKind {
+  switch (value) {
+    case "direct_paid_member_plan":
+    case "direct_trial":
+    case "family_sponsored_plan":
+    case "thread_container":
+      return value;
+    default:
+      throw new TypeError(
+        "Hosted AI usage reservation allowance source is invalid.",
+      );
+  }
+}
+
+function hasHostedAiUsageReservationPreDispatchExpired(input: {
+  createdAt: Date;
+  now: Date;
+}): boolean {
+  return input.createdAt <= resolveHostedAiUsageReservationPreDispatchCutoff(
+    input.now,
+  );
+}
+
+function resolveHostedAiUsageReservationPreDispatchCutoff(now: Date): Date {
+  return new Date(
+    now.getTime() - HOSTED_AI_USAGE_RESERVATION_PRE_DISPATCH_TTL_MS,
+  );
+}
+
+function estimateHostedImageGenerationCapacity(
+  spec: HostedImageGenerationCapacitySpec,
+): {
+  estimatedCostUsdMicros: bigint;
+} | null {
+  if (
+    spec.model !== "gpt-image-2"
+    || !HOSTED_EXECUTION_ASSISTANT_IMAGE_QUALITIES.includes(spec.quality)
+    || !HOSTED_EXECUTION_ASSISTANT_IMAGE_SIZES.includes(spec.size)
+    || !Number.isSafeInteger(spec.promptUtf8Bytes)
+    || spec.promptUtf8Bytes < 1
+    || spec.promptUtf8Bytes
+      > HOSTED_EXECUTION_ASSISTANT_IMAGE_PROVIDER_PROMPT_MAX_UTF8_BYTES
+    || !Number.isSafeInteger(spec.referenceImageCount)
+    || spec.referenceImageCount < 0
+    || spec.referenceImageCount
+      > HOSTED_EXECUTION_ASSISTANT_IMAGE_REFERENCE_MAX_COUNT
+  ) {
+    return null;
+  }
+
+  const promptTokenSafetyEstimate =
+    BigInt(spec.promptUtf8Bytes) * HOSTED_IMAGE_CAPACITY_PROMPT_TOKENS_PER_UTF8_BYTE;
+  const referenceImageTokenSafetyEstimate =
+    BigInt(spec.referenceImageCount)
+    * HOSTED_IMAGE_CAPACITY_INPUT_TOKENS_PER_REFERENCE;
+  const promptCostUsdMicros = priceTokenBucketUsdMicros(
+    promptTokenSafetyEstimate,
+    HOSTED_AI_USAGE_ALLOWANCE_OPENAI_IMAGE_TEXT_INPUT_USD_MICROS_PER_MILLION_TOKENS,
+  );
+  const referenceImageCostUsdMicros = priceTokenBucketUsdMicros(
+    referenceImageTokenSafetyEstimate,
+    HOSTED_AI_USAGE_ALLOWANCE_OPENAI_IMAGE_INPUT_USD_MICROS_PER_MILLION_TOKENS,
+  );
+  const outputCostUsdMicros =
+    HOSTED_IMAGE_CAPACITY_OUTPUT_COST_USD_MICROS[spec.size][spec.quality];
+  const estimatedCostUsdMicros =
+    promptCostUsdMicros + referenceImageCostUsdMicros + outputCostUsdMicros;
+  return {
+    estimatedCostUsdMicros,
+  };
 }
 
 function resolveHostedAiUsageInactiveGateDecision(input: {
@@ -1440,6 +2305,7 @@ function resolveHostedAiUsageInactiveGateDecision(input: {
 function buildHostedAiUsageGateDecision(input: {
   memberId: string;
   period: HostedAiUsageAllowancePeriodResult;
+  reservationCapacity?: HostedAiUsageReservationCapacity | null;
 }): HostedAiUsageGateDecisionWithSource {
   const period = input.period;
   if (period.kind === "denied") {
@@ -1464,10 +2330,37 @@ function buildHostedAiUsageGateDecision(input: {
   const baseRemainingUsdMicros = period.limitUsdMicros > period.spentUsdMicros
     ? period.limitUsdMicros - period.spentUsdMicros
     : 0n;
-  const remainingUsdMicros =
+  const capacityBeforeReservationsUsdMicros =
     baseRemainingUsdMicros + period.usageCreditBalanceUsdMicros;
+  const reservedUsdMicros =
+    input.reservationCapacity?.reservedUsdMicros ?? 0n;
+  const remainingUsdMicros =
+    capacityBeforeReservationsUsdMicros > reservedUsdMicros
+      ? capacityBeforeReservationsUsdMicros - reservedUsdMicros
+      : 0n;
 
   if (remainingUsdMicros === 0n) {
+    if (capacityBeforeReservationsUsdMicros > 0n && reservedUsdMicros > 0n) {
+      return {
+        allowed: false,
+        allowanceSource: period.allowanceSource,
+        billingPlanCode: period.billingPlanCode,
+        limitUsdMicros: period.limitUsdMicros,
+        memberId: input.memberId,
+        periodEnd: period.periodEnd,
+        periodStart: period.periodStart,
+        reason: "ai_usage_capacity_reserved",
+        remainingUsdMicros,
+        retryAfter: earliestHostedAiUsageCapacityReleaseAt([
+          input.reservationCapacity?.earliestCapacityReleaseAt ?? null,
+          period.periodEnd,
+        ]) ?? period.periodEnd,
+        spentUsdMicros: period.spentUsdMicros,
+        usageCreditBalanceUsdMicros: period.usageCreditBalanceUsdMicros,
+        usageCreditLedgerVersion: period.usageCreditLedgerVersion,
+        userNotice: null,
+      };
+    }
     return {
       allowed: false,
       allowanceSource: period.allowanceSource,
@@ -2173,6 +3066,93 @@ async function lockHostedAiUsageAllowanceBeneficiaryTx(input: {
     WHERE "id" = ${input.memberId}
     FOR UPDATE
   `;
+}
+
+interface HostedAiUsageReservationCapacity {
+  earliestCapacityReleaseAt: Date | null;
+  reservedUsdMicros: bigint;
+}
+
+async function readActiveHostedAiUsageReservationCapacityTx(input: {
+  memberId: string;
+  now: Date;
+  tx: Prisma.TransactionClient;
+}): Promise<HostedAiUsageReservationCapacity> {
+  // Keep claims member-wide across overlapping entitlement periods. Purchased
+  // usage credit is also member-wide and is not debited until settlement, so
+  // period-filtering would expose the same credit to concurrent work twice.
+  const activeWhere = {
+    OR: [
+      {
+        dispatchedAt: {
+          not: null,
+        },
+      },
+      {
+        createdAt: {
+          gt: resolveHostedAiUsageReservationPreDispatchCutoff(input.now),
+        },
+        dispatchedAt: null,
+      },
+    ],
+    memberId: input.memberId,
+    periodEnd: {
+      gt: input.now,
+    },
+    releasedAt: null,
+    settledUsageId: null,
+  } satisfies Prisma.HostedAiUsageReservationWhereInput;
+  const active = await input.tx.hostedAiUsageReservation.aggregate({
+    _min: {
+      periodEnd: true,
+    },
+    _sum: {
+      estimatedCostUsdMicros: true,
+    },
+    where: activeWhere,
+  });
+  const preDispatch = await input.tx.hostedAiUsageReservation.aggregate({
+    _min: {
+      createdAt: true,
+    },
+    where: {
+      createdAt: {
+        gt: resolveHostedAiUsageReservationPreDispatchCutoff(input.now),
+      },
+      dispatchedAt: null,
+      memberId: input.memberId,
+      periodEnd: {
+        gt: input.now,
+      },
+      releasedAt: null,
+      settledUsageId: null,
+    },
+  });
+  const preDispatchExpiry = preDispatch._min.createdAt
+    ? new Date(
+        preDispatch._min.createdAt.getTime()
+        + HOSTED_AI_USAGE_RESERVATION_PRE_DISPATCH_TTL_MS,
+      )
+    : null;
+  return {
+    earliestCapacityReleaseAt: earliestHostedAiUsageCapacityReleaseAt([
+      active._min.periodEnd,
+      preDispatchExpiry,
+    ]),
+    reservedUsdMicros: active._sum.estimatedCostUsdMicros ?? 0n,
+  };
+}
+
+function earliestHostedAiUsageCapacityReleaseAt(
+  values: readonly (Date | null)[],
+): Date | null {
+  let earliest: Date | null = null;
+  for (const value of values) {
+    if (value && (!earliest || value < earliest)) {
+      earliest = value;
+    }
+  }
+  return earliest;
 }
 
 async function runHostedAiUsageAllowanceTransaction<T>(

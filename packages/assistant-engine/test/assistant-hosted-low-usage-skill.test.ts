@@ -23,11 +23,32 @@ describe('assistant hosted low-usage skill', () => {
     )
 
     expect(skill?.triggerHint).toContain('trusted hosted turn context')
+    expect(skill?.triggerHint).toContain('insufficient_image_capacity')
+    expect(skill?.triggerHint).toContain('reason would_exhaust')
     expect(skill?.triggerHint).toContain('Family-sponsored Murph')
     expect(skill?.triggerHint).toContain('hosted group conversation')
     expect(buildAssistantSkillFileRef('hosted-low-usage')).toBe(
       '$MURPH_ASSISTANT_SKILLS_ROOT/hosted-low-usage/SKILL.md',
     )
+  })
+
+  it('handles only a trusted image-capacity denial without overstating exhaustion', async () => {
+    const skill = await readLowUsageSkill()
+
+    expect(skill).toContain('`status: insufficient_image_capacity`')
+    expect(skill).toContain('`reason: would_exhaust`')
+    expect(skill).toContain('`image_started: false`')
+    expect(skill).toContain('image did not start')
+    expect(skill).toContain('not proof')
+    expect(skill).toContain("member's whole plan or the group's whole period")
+    expect(skill).toContain('Do not retry automatically')
+    expect(skill).toContain('wait for a new explicit request')
+    expect(skill).toContain('Do not append a separate low-usage heads-up')
+    expect(skill).toContain('Keep this first mention link-free')
+    expect(skill).toContain('once even when its coarse')
+    expect(skill).toContain('state returns `healthy`')
+    expect(skill).toContain('Do not invoke another sales skill')
+    expect(skill).toContain('Do not apply the first-heads-up shape')
   })
 
   it('keeps the first heads-up to one short final segment', async () => {

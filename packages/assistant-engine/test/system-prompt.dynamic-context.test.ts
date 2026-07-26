@@ -40,13 +40,25 @@ describe('assistant dynamic context prompt blocks', () => {
         '$MURPH_ASSISTANT_SKILLS_ROOT/hosted-low-usage/SKILL.md',
       )
       expect(layers.stableRouteCapabilityPrompt).toContain(
-        'single final usage-segment contract',
+        'For an ordinary trusted low-usage heads-up',
+      )
+      expect(layers.stableRouteCapabilityPrompt).toContain(
+        "follow that skill's single final usage-segment contract",
       )
       expect(layers.stableRouteCapabilityPrompt).toContain(
         '`---` delimiter only when the channel reply-style guidance supports bubbles',
       )
       expect(layers.stableRouteCapabilityPrompt).toContain(
+        'segment and delimiter contract does not apply to the image-capacity-denial branch',
+      )
+      expect(layers.stableRouteCapabilityPrompt).toContain(
         'Do not send a separate warning or repeat one already visible',
+      )
+      expect(layers.stableRouteCapabilityPrompt).toContain(
+        '`status: insufficient_image_capacity`, `reason: would_exhaust`, and `image_started: false`',
+      )
+      expect(layers.stableRouteCapabilityPrompt).toContain(
+        'Do not infer this state, retry the image, or claim the whole plan is low or exhausted',
       )
     },
   )

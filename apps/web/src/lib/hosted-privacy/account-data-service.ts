@@ -236,6 +236,12 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
     note: "Deletes member-scoped usage rows. Already-submitted external billing/metering data may remain under vendor retention.",
   },
   {
+    slug: "prisma.hosted_ai_usage_reservation",
+    label: "AI usage capacity reservations",
+    deletion: "live-delete",
+    note: "Deletes member-scoped image-capacity reservation metadata before its settled usage rows. Export reports counts only and omits request correlation and bounded estimate inputs.",
+  },
+  {
     slug: "prisma.hosted_ai_usage_period",
     label: "AI usage allowance period rows",
     deletion: "live-delete",
@@ -1314,6 +1320,7 @@ async function deleteHostedAccountPrismaRows(input: {
   record("prisma.hosted_usage_credit_purchase", await input.prisma.hostedUsageCreditPurchase.deleteMany({
     where: buildHostedUsageCreditPurchaseDeletionWhere(memberIdFilter),
   }));
+  record("prisma.hosted_ai_usage_reservation", await input.prisma.hostedAiUsageReservation.deleteMany({ where: { memberId: memberIdFilter } }));
   record("prisma.hosted_ai_usage", await input.prisma.hostedAiUsage.deleteMany({ where: { memberId: memberIdFilter } }));
   record("prisma.hosted_ai_usage_period", await input.prisma.hostedAiUsagePeriod.deleteMany({ where: { memberId: memberIdFilter } }));
   record("prisma.hosted_product_feedback", await input.prisma.hostedProductFeedback.deleteMany({ where: { memberId: memberIdFilter } }));

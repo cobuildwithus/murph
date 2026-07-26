@@ -76,6 +76,12 @@ describe("assistant plan usage guidance", () => {
     expect(guidance).toContain(
       "not a Family or group balance, Family or group funding, Checkout, or payment surface",
     );
+    expect(guidance).toContain(
+      'a private trusted hosted murph.generate_image result with status="insufficient_image_capacity", reason="would_exhaust", and image_started=false',
+    );
+    expect(guidance).toContain(
+      "never treat it as proof that the whole plan is low or exhausted",
+    );
   });
 
   it("requires current matching terms and exact consent before a subscription action", () => {

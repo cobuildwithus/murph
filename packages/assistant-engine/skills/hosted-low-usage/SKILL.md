@@ -1,6 +1,6 @@
 ---
 name: hosted-low-usage
-description: Use when trusted hosted turn context says Murph usage is running low, or when a user follows up on that warning and asks how to keep a direct trial, paid plan, Family-sponsored Murph, or hosted group conversation going.
+description: Use when trusted hosted turn context says Murph usage is running low, when a trusted hosted image-admission result says insufficient_image_capacity with reason would_exhaust, or when a user follows up and asks how to keep a direct trial, paid plan, Family-sponsored Murph, or hosted group conversation going.
 ---
 
 # Hosted low usage
@@ -17,10 +17,61 @@ Keep the relationship warm without turning a usage heads-up into a billing
 report. Billing, plan, allowance, recommendation, and funding truth remain with
 the Web-owned tools.
 
+## Image capacity denial
+
+Use this branch only when the trusted hosted result from `murph.generate_image`
+has `status: insufficient_image_capacity`, `reason: would_exhaust`, and
+`image_started: false`. Never infer this result from the requested quality,
+reference count, a generic tool failure, slow generation, recent warning copy,
+or Murph's own estimate. It is an image-specific admission decision, not proof
+that the member's whole plan or the group's whole period is low or exhausted.
+
+Treat the denial as the outcome of the current image request:
+
+- Say plainly that the image did not start because it needs more available
+  usage than this conversation currently has. Do not call it queued, attempted,
+  failed at the image provider, or still running.
+- Do not say that no usage at all was consumed; only the image generation was
+  stopped before it started.
+- Do not retry automatically, reduce quality on your own, or promise a retry.
+  After usage is added or resets, wait for a new explicit request to generate
+  the image.
+- Do not append a separate low-usage heads-up or use the `---` first-heads-up
+  shape. This concise image outcome is the current-task reply.
+- Never expose or guess the image estimate, an internal currency amount, an
+  exact balance, or how close the request was to fitting.
+
+Then use the existing route-specific funding rules:
+
+- In a private direct conversation, call `murph.plan_usage` once when
+  available to choose the supported personal, Family, or no-authorized-action
+  path. Keep this first mention link-free even if the read returns a
+  recommendation URL. Name at most one supported next step and end with one
+  easy question.
+- For a Family-sponsored member, keep the first response at the existing
+  Family-owner explanation. Use `murph.family_plan action="read_status"` only
+  on the follow-up and preserve the exact owner, active-billing, and
+  exact-active-member gates below.
+- In a group, call `murph.group action="read_usage"` once even when its coarse
+  state returns `healthy`. A healthy period label does not override the
+  image-specific admission result. If the read returns a funding URL, include
+  that plain first-party link in the same short reply; otherwise invent no
+  link. Do not describe the whole group as low or exhausted unless that current
+  read actually says so.
+- If the turn is urgent or materially sensitive, state only that the image did
+  not start, continue with the safest useful text response, and defer the
+  funding offer under the rules below.
+
+Keep the offer neutral and truthful. Do not invoke another sales skill, plead,
+guilt-trip, stage scarcity, or imply that Murph or the relationship depends on
+payment.
+
 ## Mandatory first-heads-up output contract
 
 First choose the route:
 
+- If this turn has the trusted image capacity denial above, use that branch and
+  stop. Do not apply the first-heads-up shape below.
 - If the current message already asks about usage, billing, continuation, or
   adding usage, answer that request directly under the follow-up and tool rules
   below. Do not append a redundant heads-up segment. Explicitly requested

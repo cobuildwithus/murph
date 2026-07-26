@@ -4,7 +4,11 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 
 import type { Prisma, PrismaClient } from "@prisma/client";
 
-import { readHostedAiUsageGate } from "../hosted-execution/usage-allowance";
+import {
+  classifyHostedAiUsageGateDecision,
+  readHostedAiUsageGate,
+  resolveHostedAiUsageGateSpendRemainingUsdMicros,
+} from "../hosted-execution/usage-allowance";
 import { hasHostedRuntimeActiveAccess } from "../hosted-mailbox/runtime-access";
 import { readHostedAppSessionHmacKey } from "../hosted-onboarding/app-session-config";
 import { resolveHostedPublicBaseUrl } from "../hosted-web/public-url";
@@ -114,14 +118,18 @@ export async function readHostedGroupUsageStatus(input: {
     }),
     hasHostedRuntimeActiveAccess(input.runtimeMemberId, { prisma }),
   ]);
+  const gateClassification = classifyHostedAiUsageGateDecision(decision);
   if (
     !container
     || !hasActiveAccess
     || decision.allowanceSource !== "thread_container"
-    || (!decision.allowed && decision.reason !== "ai_usage_limit_exceeded")
+    || gateClassification === "access_denied"
   ) {
     return null;
   }
+  const remainingUsdMicros = gateClassification === "capacity_reserved"
+    ? resolveHostedAiUsageGateSpendRemainingUsdMicros(decision)
+    : decision.remainingUsdMicros;
 
   // A group without an owner-created join code (including one with no
   // HostedGroup row at all) still gets a funding URL through the signed
@@ -132,7 +140,7 @@ export async function readHostedGroupUsageStatus(input: {
   return {
     capacityState: classifyHostedGroupUsageCapacity({
       limitUsdMicros: decision.limitUsdMicros,
-      remainingUsdMicros: decision.remainingUsdMicros,
+      remainingUsdMicros,
     }),
     fundingUrl: locator
       ? buildHostedGroupUsageFundingUrl({ joinCode: locator })
@@ -140,7 +148,7 @@ export async function readHostedGroupUsageStatus(input: {
     periodEnd: decision.periodEnd.toISOString(),
     remainingPercent: calculateHostedGroupUsageRemainingPercent({
       limitUsdMicros: decision.limitUsdMicros,
-      remainingUsdMicros: decision.remainingUsdMicros,
+      remainingUsdMicros,
     }),
   };
 }

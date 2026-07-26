@@ -2,6 +2,10 @@ import { Buffer } from 'node:buffer'
 
 import type { ImageGenerateParamsNonStreaming } from 'openai/resources/images'
 
+import type {
+  HostedExecutionAssistantImageQuality,
+  HostedExecutionAssistantImageSize,
+} from '@murphai/hosted-execution/contracts'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 
 export const OPENAI_IMAGE_GENERATION_MODEL = 'gpt-image-2'
@@ -14,8 +18,8 @@ export const OPENAI_IMAGE_GENERATION_USAGE_EXTRACTION_VERSION =
   'openai-images-v1'
 
 export type OpenAiImageOutputFormat = 'jpeg' | 'png' | 'webp'
-export type OpenAiImageQuality = 'high' | 'low' | 'medium'
-export type OpenAiImageSize = '1024x1024' | '1024x1536' | '1536x1024'
+export type OpenAiImageQuality = HostedExecutionAssistantImageQuality
+export type OpenAiImageSize = HostedExecutionAssistantImageSize
 
 export interface OpenAiImageReferenceInput {
   bytes: Uint8Array

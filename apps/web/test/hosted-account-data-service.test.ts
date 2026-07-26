@@ -123,6 +123,7 @@ const REQUIRED_STORE_SLUGS = [
   "prisma.hosted_user_crypto_envelope",
   "prisma.hosted_user_crypto_audit",
   "prisma.hosted_ai_usage",
+  "prisma.hosted_ai_usage_reservation",
   "prisma.hosted_ai_usage_period",
   "prisma.hosted_growth_aggregate",
   "prisma.hosted_usage_credit_entry",
@@ -351,6 +352,15 @@ describe("HOSTED_ACCOUNT_DATA_STORE_COVERAGE", () => {
     expect(purchase?.note).toContain("payment identifiers");
     expect(purchase?.note).toContain("Stripe retains records it is legally required to keep");
   });
+
+  it("keeps image-capacity reservation internals out of browser-vault export", () => {
+    const reservation = HOSTED_ACCOUNT_DATA_STORE_COVERAGE.find((entry) =>
+      entry.slug === "prisma.hosted_ai_usage_reservation");
+
+    expect(reservation?.deletion).toBe("live-delete");
+    expect(reservation?.note).toContain("Export reports counts only");
+    expect(reservation?.note).toContain("omits request correlation");
+  });
 });
 
 
@@ -524,6 +534,36 @@ describe("deleteHostedAccountData", () => {
     );
     expect(operationOrder.indexOf("delete:hostedUsageCreditPurchase")).toBeLessThan(
       operationOrder.indexOf("delete:hostedMember"),
+    );
+  });
+
+  it("deletes image-capacity reservations before their settled usage rows", async () => {
+    const deleteCalls: HostedAccountDeletionPrismaDeleteCall[] = [];
+    const operationOrder: string[] = [];
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      deleteCalls,
+      onTransaction: () => operationOrder.push("transaction"),
+      operationOrder,
+    });
+
+    const result = await deleteHostedAccountData({
+      memberId: "member_123",
+      prisma,
+      request: new Request("https://join.example.test/settings"),
+    });
+
+    expect(result.deletedCounts).toMatchObject({
+      "prisma.hosted_ai_usage": 1,
+      "prisma.hosted_ai_usage_reservation": 1,
+    });
+    expect(deleteCalls).toEqual(expect.arrayContaining([
+      {
+        model: "hostedAiUsageReservation",
+        where: { memberId: "member_123" },
+      },
+    ]));
+    expect(operationOrder.indexOf("delete:hostedAiUsageReservation")).toBeLessThan(
+      operationOrder.indexOf("delete:hostedAiUsage"),
     );
   });
 

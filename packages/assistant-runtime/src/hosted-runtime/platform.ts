@@ -40,7 +40,9 @@ import type {
   HostedRuntimeProductFeedbackRecordResponse,
   HostedCodexAuthUpdate,
   HostedCodexAuthUpdateResponse,
-  HostedRuntimeUsageNoticeDeliveryTarget,
+  HostedRuntimeUsageAllowanceRequest,
+  HostedRuntimeUsageAllowanceResponse as HostedExecutionRuntimeUsageAllowanceResponse,
+  HostedRuntimeUsageRecordOptions,
   HostedRuntimeUsageRecordResponse as HostedExecutionRuntimeUsageRecordResponse,
   HostedWorkspaceCheckpointRequest,
   HostedWorkspaceCheckpointResponse,
@@ -421,8 +423,14 @@ export interface HostedRuntimeClinicalRecordsPort {
 export interface HostedRuntimeUsageRecordPort {
   recordUsage(
     record: AssistantUsageRecord,
-    noticeDeliveryTarget?: HostedRuntimeUsageNoticeDeliveryTarget | null,
+    options?: HostedRuntimeUsageRecordOptions,
   ): Promise<HostedRuntimeUsageRecordResponse>;
+}
+
+export interface HostedRuntimeUsageAllowancePort {
+  applyUsageAllowance(
+    request: HostedRuntimeUsageAllowanceRequest,
+  ): Promise<HostedRuntimeUsageAllowanceResponse>;
 }
 
 export interface HostedRuntimeIssueExportPort {
@@ -639,6 +647,7 @@ export interface HostedRuntimePlatform {
   runtimeLivenessIntervalMs?: number | null;
   runtimeLivenessPort?: RuntimeLivenessPort | null;
   runtimeLivenessRequired?: boolean | null;
+  usageAllowancePort?: HostedRuntimeUsageAllowancePort | null;
   usageRecordPort?: HostedRuntimeUsageRecordPort | null;
   vaultSharePort?: HostedRuntimeVaultSharePort | null;
   workspacePort?: HostedRuntimeWorkspacePort | null;
@@ -647,10 +656,13 @@ export interface HostedRuntimePlatform {
 
 export type HostedRuntimeIssueRecordResponse = HostedRuntimeIssueExportResponse;
 export type HostedRuntimeLatencyTraceRecordResponse = HostedRuntimeLatencyTraceResponse;
+export type HostedRuntimeUsageAllowanceResponse =
+  HostedExecutionRuntimeUsageAllowanceResponse;
 export type HostedRuntimeUsageRecordResponse = HostedExecutionRuntimeUsageRecordResponse;
 
 export {
   parseHostedRuntimeIssueExportResponse as parseHostedRuntimeIssueRecordResponse,
   parseHostedRuntimeLatencyTraceResponse,
+  parseHostedRuntimeUsageAllowanceResponse,
   parseHostedRuntimeUsageRecordResponse,
 } from "@murphai/hosted-execution/parsers";

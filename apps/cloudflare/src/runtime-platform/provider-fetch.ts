@@ -545,6 +545,7 @@ const HOSTED_RUNTIME_INTERNAL_OPERATION_DESCRIPTIONS: Record<string, string> = {
   product_feedback_recording: "Hosted product feedback recording",
   runtime_latency_trace: "Hosted runtime latency trace",
   runtime_log_write: "Hosted runtime log write",
+  usage_allowance_reservation: "Hosted usage allowance reservation",
   usage_recording: "Hosted usage recording",
   workspace_checkpoint: "Hosted workspace checkpoint",
   workspace_read: "Hosted workspace read",

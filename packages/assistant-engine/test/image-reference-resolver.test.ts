@@ -5,7 +5,12 @@ import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 import {
+  HOSTED_EXECUTION_ASSISTANT_IMAGE_REFERENCE_MAX_COUNT,
+} from '@murphai/hosted-execution/contracts'
+
+import {
   MAX_GENERATE_IMAGE_REFERENCE_BYTES,
+  MAX_GENERATE_IMAGE_REFERENCE_COUNT,
   MAX_GENERATE_IMAGE_REFERENCE_TOTAL_BYTES,
   normalizeGenerateImageReferenceRef,
   resolveGenerateImageReferences,
@@ -369,6 +374,9 @@ describe('image-reference-resolver', () => {
   })
 
   it('rejects files larger than the per-file budget while allowing generated-image-sized refs', async () => {
+    expect(MAX_GENERATE_IMAGE_REFERENCE_COUNT).toBe(
+      HOSTED_EXECUTION_ASSISTANT_IMAGE_REFERENCE_MAX_COUNT,
+    )
     expect(MAX_GENERATE_IMAGE_REFERENCE_BYTES).toBe(10 * 1024 * 1024)
     expect(MAX_GENERATE_IMAGE_REFERENCE_TOTAL_BYTES).toBe(32 * 1024 * 1024)
 

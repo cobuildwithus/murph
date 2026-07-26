@@ -45,12 +45,12 @@ import {
 } from './openai-image-generation.js'
 
 export interface GenerateImageToolArgs {
-  alt: string | null
-  outputFormat: OpenAiImageOutputFormat
-  prompt: string
-  quality: OpenAiImageQuality
-  referenceImageRefs?: readonly string[]
-  size: OpenAiImageSize
+  readonly alt: string | null
+  readonly outputFormat: OpenAiImageOutputFormat
+  readonly prompt: string
+  readonly quality: OpenAiImageQuality
+  readonly referenceImageRefs?: readonly string[]
+  readonly size: OpenAiImageSize
 }
 
 export interface GenerateImageToolResult {
@@ -102,24 +102,108 @@ type ExistingGeneratedImageCapture =
       status: 'missing'
     }
 
-export async function executeGenerateImageTool(input: {
-  abortSignal?: AbortSignal | null
+export interface AssistantImageGenerationPreflightEstimate {
+  model: typeof OPENAI_IMAGE_GENERATION_MODEL
+  promptUtf8Bytes: number
+  quality: OpenAiImageQuality
+  referenceImageCount: number
+  size: OpenAiImageSize
+}
+
+interface AssistantImageGenerationFinalizationContext {
+  readonly args: GenerateImageToolArgs
+  readonly captureIdentity: GeneratedImageCaptureIdentity | null
+  readonly codexHome: string | null
+  readonly hostedGeneratedImageUploader:
+    AssistantHostedGeneratedImageUploader | null
+  readonly promptHash: string
+  readonly referenceImages: readonly ResolvedGenerateImageReference[]
+  readonly vaultRoot: string | null
+}
+
+export interface PreparedAssistantImageGenerationProviderInput {
+  readonly apiKey: string
+  readonly finalization: AssistantImageGenerationFinalizationContext
+  readonly providerPrompt: string
+  readonly providerRequestOrdinal: number
+}
+
+export interface GeneratedAssistantImage {
+  readonly bytes: Uint8Array
+  readonly finalization: AssistantImageGenerationFinalizationContext
+  readonly savedCapture: SavedGeneratedImageCapture | null
+  readonly usageDraft: AssistantProviderUsageDraft | null
+}
+
+export interface PersistedAssistantImage {
+  readonly bytes: Uint8Array
+  readonly finalization: AssistantImageGenerationFinalizationContext
+  readonly persistedCapture: SavedGeneratedImageCapture | null
+  readonly usageDraft: AssistantProviderUsageDraft | null
+}
+
+export type PersistAssistantImageGenerationCaptureResult =
+  | {
+      persisted: PersistedAssistantImage
+      status: 'persisted'
+    }
+  | {
+      result: GenerateImageToolResult
+      status: 'failed'
+    }
+
+export type PrepareAssistantImageGenerationResult =
+  | {
+      generated: GeneratedAssistantImage
+      status: 'cached'
+    }
+  | {
+      estimate: AssistantImageGenerationPreflightEstimate
+      prepared: PreparedAssistantImageGenerationProviderInput
+      status: 'provider_required'
+    }
+  | {
+      result: GenerateImageToolResult
+      status: 'terminal'
+    }
+
+export type DispatchPreparedAssistantImageGenerationResult =
+  | {
+      generated: GeneratedAssistantImage
+      status: 'generated'
+    }
+  | {
+      result: GenerateImageToolResult
+      status: 'pre_dispatch_failed'
+    }
+  | {
+      result: GenerateImageToolResult
+      status: 'provider_failed'
+    }
+
+export interface PrepareAssistantImageGenerationInput {
   args: GenerateImageToolArgs
   captureIdempotencyKey?: string | null
   codexHome?: string | null
   env: NodeJS.ProcessEnv
-  fetchImpl: typeof fetch
   hostedGeneratedImageUploader?: AssistantHostedGeneratedImageUploader | null
   materializeWorkspaceArtifacts?: AssistantWorkspaceArtifactMaterializer | null
   providerRequestOrdinal: number
   requireHostedGeneratedImageUploader?: boolean | null
   vaultRoot?: string | null
-}): Promise<GenerateImageToolResult> {
+}
+
+export async function prepareAssistantImageGeneration(
+  input: PrepareAssistantImageGenerationInput,
+): Promise<PrepareAssistantImageGenerationResult> {
   const apiKey = normalizeNullableString(input.env.OPENAI_API_KEY)
   if (!apiKey) {
     return {
-      rpcSuccess: false,
-      rpcText: 'OPENAI_API_KEY is required for image generation',
+      result: {
+        rpcSuccess: false,
+        rpcText: 'OPENAI_API_KEY is required for image generation',
+      },
+      status: 'terminal',
     }
   }
 
@@ -128,12 +212,16 @@ export async function executeGenerateImageTool(input: {
     !input.hostedGeneratedImageUploader
   ) {
     return {
-      rpcSuccess: false,
-      rpcText: 'hosted image upload is not available for this turn',
+      result: {
+        rpcSuccess: false,
+        rpcText: 'hosted image upload is not available for this turn',
+      },
+      status: 'terminal',
     }
   }
 
-  const referenceImageRefs = input.args.referenceImageRefs ?? []
+  const args = freezeGenerateImageToolArgs(input.args)
+  const referenceImageRefs = args.referenceImageRefs ?? []
   const vaultRoot = normalizeNullableString(input.vaultRoot)
   if (
     referenceImageRefs.length > 0 &&
@@ -141,16 +229,19 @@ export async function executeGenerateImageTool(input: {
     hasVaultReferenceImageRef(referenceImageRefs)
   ) {
     return {
-      rpcSuccess: false,
-      rpcText: 'image references are unavailable for this turn',
+      result: {
+        rpcSuccess: false,
+        rpcText: 'image references are unavailable for this turn',
+      },
+      status: 'terminal',
     }
   }
 
-  const promptHash = hashGeneratedImagePrompt(input.args.prompt)
+  const promptHash = hashGeneratedImagePrompt(args.prompt)
   const captureIdentity = vaultRoot
     ? buildGeneratedImageCaptureIdentity({
         idempotencyKey: input.captureIdempotencyKey ?? null,
-        outputFormat: input.args.outputFormat,
+        outputFormat: args.outputFormat,
       })
     : null
   let existingCapture: ExistingGeneratedImageCapture = { status: 'missing' }
@@ -158,183 +249,312 @@ export async function executeGenerateImageTool(input: {
     try {
       existingCapture = await findExistingGeneratedImageCapture({
         captureIdentity,
-        outputFormat: input.args.outputFormat,
+        outputFormat: args.outputFormat,
         vaultRoot,
       })
     } catch {
       return {
-        rpcSuccess: false,
-        rpcText: 'saved generated image lookup could not be loaded',
+        result: {
+          rpcSuccess: false,
+          rpcText: 'saved generated image lookup could not be loaded',
+        },
+        status: 'terminal',
       }
     }
   }
-  let generatedImageBytes: Uint8Array
-  let referenceImages: ResolvedGenerateImageReference[] = []
-  let savedCapture: SavedGeneratedImageCapture | null = null
-  let usageDraft: AssistantProviderUsageDraft | null = null
 
   if (existingCapture.status === 'deleted') {
     return {
-      rpcSuccess: false,
-      rpcText: 'saved generated image was deleted; make a new image request',
+      result: {
+        rpcSuccess: false,
+        rpcText: 'saved generated image was deleted; make a new image request',
+      },
+      status: 'terminal',
     }
   }
 
   if (existingCapture.status === 'live') {
-    generatedImageBytes = existingCapture.bytes
-    savedCapture = existingCapture.capture
-  } else {
-    try {
-      referenceImages = referenceImageRefs.length > 0
-        ? await resolveGenerateImageReferences({
-            materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts ?? null,
-            refs: referenceImageRefs,
-            skillsRoot: resolveAssistantSkillsRoot(),
-            vaultRoot: vaultRoot ?? '',
-          })
-        : []
-    } catch (error) {
-      if (isAbortError(error)) {
-        throw error
-      }
-      return {
+    const finalization = freezeAssistantImageGenerationFinalizationContext({
+      args,
+      captureIdentity,
+      codexHome: input.codexHome ?? input.env.CODEX_HOME ?? null,
+      hostedGeneratedImageUploader:
+        input.hostedGeneratedImageUploader ?? null,
+      promptHash,
+      referenceImages: [],
+      vaultRoot,
+    })
+    return {
+      generated: Object.freeze({
+        bytes: existingCapture.bytes,
+        finalization,
+        savedCapture: existingCapture.capture,
+        usageDraft: null,
+      }),
+      status: 'cached',
+    }
+  }
+
+  let referenceImages: ResolvedGenerateImageReference[]
+  try {
+    referenceImages = referenceImageRefs.length > 0
+      ? await resolveGenerateImageReferences({
+          materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts ?? null,
+          refs: referenceImageRefs,
+          skillsRoot: resolveAssistantSkillsRoot(),
+          vaultRoot: vaultRoot ?? '',
+        })
+      : []
+  } catch (error) {
+    if (isAbortError(error)) {
+      throw error
+    }
+    return {
+      result: {
         rpcSuccess: false,
         rpcText: 'image references could not be loaded',
+      },
+      status: 'terminal',
+    }
+  }
+
+  const finalization = freezeAssistantImageGenerationFinalizationContext({
+    args,
+    captureIdentity,
+    codexHome: input.codexHome ?? input.env.CODEX_HOME ?? null,
+    hostedGeneratedImageUploader:
+      input.hostedGeneratedImageUploader ?? null,
+    promptHash,
+    referenceImages,
+    vaultRoot,
+  })
+  const providerPrompt = buildGenerateImagePromptWithReferences({
+    prompt: args.prompt,
+    referenceImageCount: referenceImages.length,
+  })
+  return {
+    estimate: Object.freeze({
+      model: OPENAI_IMAGE_GENERATION_MODEL,
+      promptUtf8Bytes: Buffer.byteLength(providerPrompt, 'utf8'),
+      quality: args.quality,
+      referenceImageCount: referenceImages.length,
+      size: args.size,
+    }),
+    prepared: Object.freeze({
+      apiKey,
+      finalization,
+      providerPrompt,
+      providerRequestOrdinal: input.providerRequestOrdinal,
+    }),
+    status: 'provider_required',
+  }
+}
+
+export async function dispatchPreparedAssistantImageGeneration(input: {
+  abortSignal?: AbortSignal | null
+  beforeDispatch?: (() => Promise<void> | void) | null
+  fetchImpl: typeof fetch
+  prepared: PreparedAssistantImageGenerationProviderInput
+}): Promise<DispatchPreparedAssistantImageGenerationResult> {
+  const finalization = input.prepared.finalization
+  const referenceImages = finalization.referenceImages
+  const operation: GenerateImageOperation = referenceImages.length > 0
+    ? 'image_generation_with_references'
+    : 'image_generation'
+  const usageExtractionSourcePath: GenerateImageUsageExtractionSourcePath =
+    referenceImages.length > 0 ? 'openai.images.edit' : 'openai.images.generate'
+  let providerFetchStarted = false
+  const fetchAfterDispatchClaim: typeof fetch = async (url, init) => {
+    await input.beforeDispatch?.()
+    providerFetchStarted = true
+    return input.fetchImpl(url, init)
+  }
+
+  let openAiResult: Awaited<ReturnType<typeof generateOpenAiImage>>
+  try {
+    openAiResult = await generateOpenAiImage({
+      abortSignal: input.abortSignal ?? null,
+      apiKey: input.prepared.apiKey,
+      fetchImpl: fetchAfterDispatchClaim,
+      outputFormat: finalization.args.outputFormat,
+      prompt: input.prepared.providerPrompt,
+      quality: finalization.args.quality,
+      referenceImages,
+      size: finalization.args.size,
+    })
+  } catch (error) {
+    if (!providerFetchStarted) {
+      return {
+        result: {
+          rpcSuccess: false,
+          rpcText: 'image generation was not dispatched',
+        },
+        status: 'pre_dispatch_failed',
       }
     }
-
-    const operation: GenerateImageOperation = referenceImages.length > 0
-      ? 'image_generation_with_references'
-      : 'image_generation'
-    const usageExtractionSourcePath: GenerateImageUsageExtractionSourcePath =
-      referenceImages.length > 0 ? 'openai.images.edit' : 'openai.images.generate'
-
-    let openAiResult: Awaited<ReturnType<typeof generateOpenAiImage>>
-    try {
-      openAiResult = await generateOpenAiImage({
-        abortSignal: input.abortSignal ?? null,
-        apiKey,
-        fetchImpl: input.fetchImpl,
-        outputFormat: input.args.outputFormat,
-        prompt: buildGenerateImagePromptWithReferences({
-          prompt: input.args.prompt,
-          referenceImageCount: referenceImages.length,
-        }),
-        quality: input.args.quality,
-        referenceImages,
-        size: input.args.size,
-      })
-    } catch (error) {
-      if (isAbortError(error)) {
-        throw error
-      }
-      return {
+    if (isAbortError(error)) {
+      throw error
+    }
+    return {
+      result: {
         rpcSuccess: false,
         rpcText: 'image generation failed',
-      }
+      },
+      status: 'provider_failed',
     }
+  }
 
-    const hasValidGeneratedImageBytes = isValidGeneratedImageBytes({
-      bytes: openAiResult.imageBytes,
-      outputFormat: input.args.outputFormat,
-    })
-    usageDraft = buildGeneratedImageUsageDraft({
-      args: input.args,
-      operation,
-      providerRequestId: openAiResult.providerRequestId,
-      providerRequestOrdinal: input.providerRequestOrdinal,
-      providerRequestOutcome: hasValidGeneratedImageBytes ? 'succeeded' : 'partial',
-      rawUsageJson: openAiResult.rawUsageJson,
-      referenceImageCount: referenceImages.length,
-      referenceImageSha256s: referenceImages.map((reference) => reference.sha256),
-      referenceImageSourceRefSha256s: referenceImages.map(
-        (reference) => reference.sourceRefSha256,
-      ),
-      referenceImageTotalBytes: sumReferenceImageBytes(referenceImages),
-      usage: openAiResult.usage,
-      usageExtractionSourcePath,
-    })
+  const hasValidGeneratedImageBytes = isValidGeneratedImageBytes({
+    bytes: openAiResult.imageBytes,
+    outputFormat: finalization.args.outputFormat,
+  })
+  const usageDraft = buildGeneratedImageUsageDraft({
+    args: finalization.args,
+    operation,
+    providerRequestId: openAiResult.providerRequestId,
+    providerRequestOrdinal: input.prepared.providerRequestOrdinal,
+    providerRequestOutcome: hasValidGeneratedImageBytes ? 'succeeded' : 'partial',
+    rawUsageJson: openAiResult.rawUsageJson,
+    referenceImageCount: referenceImages.length,
+    referenceImageSha256s: referenceImages.map((reference) => reference.sha256),
+    referenceImageSourceRefSha256s: referenceImages.map(
+      (reference) => reference.sourceRefSha256,
+    ),
+    referenceImageTotalBytes: sumReferenceImageBytes(referenceImages),
+    usage: openAiResult.usage,
+    usageExtractionSourcePath,
+  })
 
-    if (!hasValidGeneratedImageBytes) {
-      return {
+  if (!hasValidGeneratedImageBytes) {
+    return {
+      result: {
         rpcSuccess: false,
         rpcText: 'image generation returned invalid image data',
         usageDraft,
-      }
+      },
+      status: 'provider_failed',
     }
+  }
 
-    generatedImageBytes = openAiResult.imageBytes
+  return {
+    generated: Object.freeze({
+      bytes: openAiResult.imageBytes,
+      finalization,
+      savedCapture: null,
+      usageDraft,
+    }),
+    status: 'generated',
+  }
+}
 
-    if (vaultRoot) {
-      try {
-        savedCapture = await saveGeneratedImageCapture({
-          args: input.args,
-          bytes: generatedImageBytes,
-          captureIdentity,
-          promptHash,
-          referenceImages,
-          vaultRoot,
-        })
-      } catch (error) {
-        if (
-          captureIdentity &&
-          isVaultError(error) &&
-          error.code === 'CAPTURE_LOOKUP_EXISTS'
-        ) {
-          try {
-            const resolvedCapture = await findExistingGeneratedImageCapture({
-              captureIdentity,
-              outputFormat: input.args.outputFormat,
-              vaultRoot,
-            })
-            if (resolvedCapture.status === 'live') {
-              generatedImageBytes = resolvedCapture.bytes
-              savedCapture = resolvedCapture.capture
-            } else if (resolvedCapture.status === 'deleted') {
-              return {
+export async function persistAssistantImageGenerationCapture(
+  generated: GeneratedAssistantImage,
+): Promise<PersistAssistantImageGenerationCaptureResult> {
+  const finalization = generated.finalization
+  let generatedImageBytes = generated.bytes
+  let savedCapture = generated.savedCapture
+
+  if (!savedCapture && finalization.vaultRoot) {
+    try {
+      savedCapture = await saveGeneratedImageCapture({
+        args: finalization.args,
+        bytes: generatedImageBytes,
+        captureIdentity: finalization.captureIdentity,
+        promptHash: finalization.promptHash,
+        referenceImages: finalization.referenceImages,
+        vaultRoot: finalization.vaultRoot,
+      })
+    } catch (error) {
+      if (
+        finalization.captureIdentity &&
+        isVaultError(error) &&
+        error.code === 'CAPTURE_LOOKUP_EXISTS'
+      ) {
+        try {
+          const resolvedCapture = await findExistingGeneratedImageCapture({
+            captureIdentity: finalization.captureIdentity,
+            outputFormat: finalization.args.outputFormat,
+            vaultRoot: finalization.vaultRoot,
+          })
+          if (resolvedCapture.status === 'live') {
+            generatedImageBytes = resolvedCapture.bytes
+            savedCapture = resolvedCapture.capture
+          } else if (resolvedCapture.status === 'deleted') {
+            return {
+              result: {
                 rpcSuccess: false,
                 rpcText: 'saved generated image was deleted; make a new image request',
-                usageDraft,
-              }
-            } else {
-              return {
+                usageDraft: generated.usageDraft,
+              },
+              status: 'failed',
+            }
+          } else {
+            return {
+              result: {
                 rpcSuccess: false,
                 rpcText: 'image generated but vault save failed',
-                usageDraft,
-              }
+                usageDraft: generated.usageDraft,
+              },
+              status: 'failed',
             }
-          } catch {
-            return {
+          }
+        } catch {
+          return {
+            result: {
               rpcSuccess: false,
               rpcText: 'image generated but vault save failed',
-              usageDraft,
-            }
+              usageDraft: generated.usageDraft,
+            },
+            status: 'failed',
           }
-        } else {
-          return {
+        }
+      } else {
+        return {
+          result: {
             rpcSuccess: false,
             rpcText: 'image generated but vault save failed',
-            usageDraft,
-          }
+            usageDraft: generated.usageDraft,
+          },
+          status: 'failed',
         }
       }
     }
   }
 
+  return {
+    persisted: Object.freeze({
+      bytes: generatedImageBytes,
+      finalization,
+      persistedCapture: savedCapture,
+      usageDraft: generated.usageDraft,
+    }),
+    status: 'persisted',
+  }
+}
+
+export async function publishAssistantImageGeneration(
+  persisted: PersistedAssistantImage,
+): Promise<GenerateImageToolResult> {
+  const finalization = persisted.finalization
+  const savedCapture = persisted.persistedCapture
+  const hostedGeneratedImageUploader =
+    finalization.hostedGeneratedImageUploader
   try {
-    if (input.hostedGeneratedImageUploader) {
-      const media = await input.hostedGeneratedImageUploader.uploadGeneratedImage({
-        alt: input.args.alt ?? 'Generated image',
-        bytes: generatedImageBytes,
-        contentType: generatedImageContentType(input.args.outputFormat),
-        filename: generatedImageFilename(input.args.outputFormat),
+    if (hostedGeneratedImageUploader) {
+      const media = await hostedGeneratedImageUploader.uploadGeneratedImage({
+        alt: finalization.args.alt ?? 'Generated image',
+        bytes: persisted.bytes,
+        contentType: generatedImageContentType(finalization.args.outputFormat),
+        filename: generatedImageFilename(finalization.args.outputFormat),
         metadata: {
           model: OPENAI_IMAGE_GENERATION_MODEL,
-          promptHash,
-          ...(referenceImages.length > 0
+          promptHash: finalization.promptHash,
+          ...(finalization.referenceImages.length > 0
             ? {
-                referenceImageCount: String(referenceImages.length),
-                referenceImageSetHash: hashReferenceImageSet(referenceImages),
+                referenceImageCount: String(finalization.referenceImages.length),
+                referenceImageSetHash: hashReferenceImageSet(
+                  finalization.referenceImages,
+                ),
               }
             : {}),
           schema: 'murph.generated-image.v1',
@@ -349,14 +569,14 @@ export async function executeGenerateImageTool(input: {
           : 'generated image attached to the final response',
         savedCaptureId: savedCapture?.captureId ?? null,
         savedImageRef: savedCapture?.imageRef ?? null,
-        usageDraft,
+        usageDraft: persisted.usageDraft,
       }
     }
 
     const localPath = await writeLocalGeneratedImage({
-      bytes: generatedImageBytes,
-      codexHome: input.codexHome ?? input.env.CODEX_HOME ?? null,
-      outputFormat: input.args.outputFormat,
+      bytes: persisted.bytes,
+      codexHome: finalization.codexHome,
+      outputFormat: finalization.args.outputFormat,
     })
     return {
       rpcSuccess: true,
@@ -365,23 +585,65 @@ export async function executeGenerateImageTool(input: {
         : `generated image saved at ${localPath.displayPath}`,
       savedCaptureId: savedCapture?.captureId ?? null,
       savedImageRef: savedCapture?.imageRef ?? null,
-      usageDraft,
+      usageDraft: persisted.usageDraft,
     }
   } catch (error) {
-    if (!input.hostedGeneratedImageUploader) {
+    if (!hostedGeneratedImageUploader) {
       return {
         rpcSuccess: false,
         rpcText: 'image generated but local save failed',
-        usageDraft,
+        usageDraft: persisted.usageDraft,
       }
     }
     return {
       rpcSuccess: false,
       rpcText: 'image generated but upload failed',
       runtimeIssue: buildGeneratedImageUploadIssue(error),
-      usageDraft,
+      usageDraft: persisted.usageDraft,
     }
   }
+}
+
+export async function finalizeAssistantImageGeneration(
+  generated: GeneratedAssistantImage,
+): Promise<GenerateImageToolResult> {
+  const capture = await persistAssistantImageGenerationCapture(generated)
+  if (capture.status === 'failed') {
+    return capture.result
+  }
+  return publishAssistantImageGeneration(capture.persisted)
+}
+
+export async function executeGenerateImageTool(input: {
+  abortSignal?: AbortSignal | null
+  args: GenerateImageToolArgs
+  captureIdempotencyKey?: string | null
+  codexHome?: string | null
+  env: NodeJS.ProcessEnv
+  fetchImpl: typeof fetch
+  hostedGeneratedImageUploader?: AssistantHostedGeneratedImageUploader | null
+  materializeWorkspaceArtifacts?: AssistantWorkspaceArtifactMaterializer | null
+  providerRequestOrdinal: number
+  requireHostedGeneratedImageUploader?: boolean | null
+  vaultRoot?: string | null
+}): Promise<GenerateImageToolResult> {
+  const preparation = await prepareAssistantImageGeneration(input)
+  if (preparation.status === 'terminal') {
+    return preparation.result
+  }
+  if (preparation.status === 'cached') {
+    return finalizeAssistantImageGeneration(preparation.generated)
+  }
+
+  const dispatch = await dispatchPreparedAssistantImageGeneration({
+    abortSignal: input.abortSignal ?? null,
+    fetchImpl: input.fetchImpl,
+    prepared: preparation.prepared,
+  })
+  if (dispatch.status !== 'generated') {
+    return dispatch.result
+  }
+  return finalizeAssistantImageGeneration(dispatch.generated)
 }
 
 function buildGeneratedImageUploadIssue(error: unknown): AssistantRuntimeIssueInput {
@@ -420,6 +682,26 @@ function hasVaultReferenceImageRef(refs: readonly string[]): boolean {
   } catch {
     return false
   }
+}
+
+function freezeGenerateImageToolArgs(
+  args: GenerateImageToolArgs,
+): GenerateImageToolArgs {
+  return Object.freeze({
+    ...args,
+    ...(args.referenceImageRefs
+      ? { referenceImageRefs: Object.freeze([...args.referenceImageRefs]) }
+      : {}),
+  })
+}
+
+function freezeAssistantImageGenerationFinalizationContext(
+  context: AssistantImageGenerationFinalizationContext,
+): AssistantImageGenerationFinalizationContext {
+  return Object.freeze({
+    ...context,
+    referenceImages: Object.freeze([...context.referenceImages]),
+  })
 }
 
 async function saveGeneratedImageCapture(input: {

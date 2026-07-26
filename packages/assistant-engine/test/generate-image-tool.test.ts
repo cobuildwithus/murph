@@ -1,13 +1,22 @@
 import { Buffer } from 'node:buffer'
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
+import { access, mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 
-import { deleteEvent, initializeVault } from '@murphai/core'
-import { describe, expect, it } from 'vitest'
+import {
+  deleteEvent,
+  findCaptureByLookup,
+  initializeVault,
+} from '@murphai/core'
+import { describe, expect, it, vi } from 'vitest'
 
 import {
+  dispatchPreparedAssistantImageGeneration,
   executeGenerateImageTool,
+  finalizeAssistantImageGeneration,
+  persistAssistantImageGenerationCapture,
+  prepareAssistantImageGeneration,
+  publishAssistantImageGeneration,
 } from '../src/assistant-codex/generate-image-tool.js'
 import {
   MURPH_ASSISTANT_SKILLS_ROOT_ENV,
@@ -23,6 +32,337 @@ async function withTempDir<T>(fn: (dir: string) => Promise<T>): Promise<T> {
     await rm(dir, { force: true, recursive: true })
   }
 }
+
+describe('assistant image generation phases', () => {
+  it('prepares validated references and conservative preflight inputs without provider I/O', async () => {
+    await withTempDir(async (root) => {
+      const vaultRoot = path.join(root, 'vault')
+      await initializeVault({ vaultRoot })
+      const refPath = path.join(vaultRoot, 'raw', 'inbox', 'reference.png')
+      await mkdir(path.dirname(refPath), { recursive: true })
+      await writeFile(refPath, PNG_BYTES)
+
+      const prompt = 'Draw a snowman ☃'
+      const providerPrompt = [
+        'Use the attached reference image in the provided order.',
+        'The user prompt may refer to them as image 1, image 2, etc.',
+        '',
+        prompt,
+      ].join('\n')
+      const preparation = await prepareAssistantImageGeneration({
+        args: {
+          alt: 'Snowman',
+          outputFormat: 'png',
+          prompt,
+          quality: 'high',
+          referenceImageRefs: ['raw/inbox/reference.png'],
+          size: '1024x1536',
+        },
+        env: { OPENAI_API_KEY: 'test-key' },
+        providerRequestOrdinal: 3,
+        vaultRoot,
+      })
+
+      expect(preparation.status).toBe('provider_required')
+      if (preparation.status !== 'provider_required') {
+        throw new Error('expected provider-required image preparation')
+      }
+      expect(preparation.estimate).toEqual({
+        model: 'gpt-image-2',
+        promptUtf8Bytes: Buffer.byteLength(providerPrompt, 'utf8'),
+        quality: 'high',
+        referenceImageCount: 1,
+        size: '1024x1536',
+      })
+      expect(preparation.prepared.providerPrompt).toBe(providerPrompt)
+      expect(preparation.prepared.providerRequestOrdinal).toBe(3)
+      expect(preparation.prepared.finalization.referenceImages).toHaveLength(1)
+      expect(preparation.prepared.finalization.referenceImages[0]?.bytes)
+        .toEqual(Buffer.from(PNG_BYTES))
+      expect(Object.isFrozen(preparation.prepared)).toBe(true)
+      expect(Object.isFrozen(preparation.prepared.finalization)).toBe(true)
+      expect(Object.isFrozen(preparation.prepared.finalization.args)).toBe(true)
+    })
+  })
+
+  it('persists the canonical capture before publishing the generated image', async () => {
+    await withTempDir(async (root) => {
+      const vaultRoot = path.join(root, 'vault')
+      await initializeVault({ vaultRoot })
+      const order: string[] = []
+      const uploadGeneratedImage = vi.fn(async (input) => {
+        order.push('upload')
+        return {
+          alt: input.alt,
+          kind: 'image' as const,
+          source: input.source,
+          url: 'https://imagedelivery.net/account/generated/public',
+        }
+      })
+      const preparation = await prepareAssistantImageGeneration({
+        args: {
+          alt: 'Generated dot',
+          outputFormat: 'png',
+          prompt: 'Draw a dot.',
+          quality: 'low',
+          size: '1024x1024',
+        },
+        captureIdempotencyKey: 'phase-test:dot',
+        env: { OPENAI_API_KEY: 'test-key' },
+        hostedGeneratedImageUploader: { uploadGeneratedImage },
+        providerRequestOrdinal: 4,
+        requireHostedGeneratedImageUploader: true,
+        vaultRoot,
+      })
+      if (preparation.status !== 'provider_required') {
+        throw new Error('expected provider-required image preparation')
+      }
+
+      const dispatch = await dispatchPreparedAssistantImageGeneration({
+        beforeDispatch: () => {
+          order.push('before-dispatch')
+        },
+        fetchImpl: async () => {
+          order.push('provider-fetch')
+          return openAiPngResponse()
+        },
+        prepared: preparation.prepared,
+      })
+
+      expect(dispatch.status).toBe('generated')
+      expect(order).toEqual(['before-dispatch', 'provider-fetch'])
+      expect(uploadGeneratedImage).not.toHaveBeenCalled()
+      if (dispatch.status !== 'generated') {
+        throw new Error('expected generated image')
+      }
+      expect(dispatch.generated.usageDraft).toMatchObject({
+        provider: 'openai-images',
+        providerRequestOrdinal: 4,
+        providerRequestOutcome: 'succeeded',
+      })
+
+      const persistence = await persistAssistantImageGenerationCapture(
+        dispatch.generated,
+      )
+
+      expect(persistence.status).toBe('persisted')
+      expect(order).toEqual(['before-dispatch', 'provider-fetch'])
+      expect(uploadGeneratedImage).not.toHaveBeenCalled()
+      if (persistence.status !== 'persisted') {
+        throw new Error('expected persisted image')
+      }
+      expect(persistence.persisted.persistedCapture).toMatchObject({
+        captureId: expect.stringMatching(/^evt_/u),
+        imageRef: expect.stringMatching(/^raw\/captures\/.+\.png$/u),
+      })
+      await expect(findCaptureByLookup({
+        lookupKey: 'murph.generated-image.capture.v1:phase-test:dot',
+        vaultRoot,
+      })).resolves.toMatchObject({ status: 'live' })
+
+      const result = await publishAssistantImageGeneration(
+        persistence.persisted,
+      )
+
+      expect(order).toEqual(['before-dispatch', 'provider-fetch', 'upload'])
+      expect(result).toMatchObject({
+        rpcSuccess: true,
+        savedCaptureId: expect.stringMatching(/^evt_/u),
+        savedImageRef: expect.stringMatching(/^raw\/captures\/.+\.png$/u),
+      })
+    })
+  })
+
+  it('publishes a persisted image without touching canonical storage', async () => {
+    await withTempDir(async (root) => {
+      const vaultRoot = path.join(root, 'vault')
+      await initializeVault({ vaultRoot })
+      const uploadGeneratedImage = vi.fn(async (input) => ({
+        alt: input.alt,
+        kind: 'image' as const,
+        source: input.source,
+        url: 'https://imagedelivery.net/account/generated/public',
+      }))
+      const preparation = await prepareAssistantImageGeneration({
+        args: {
+          alt: 'Generated dot',
+          outputFormat: 'png',
+          prompt: 'Draw a dot.',
+          quality: 'low',
+          size: '1024x1024',
+        },
+        captureIdempotencyKey: 'phase-test:publish-only',
+        env: { OPENAI_API_KEY: 'test-key' },
+        hostedGeneratedImageUploader: { uploadGeneratedImage },
+        providerRequestOrdinal: 5,
+        requireHostedGeneratedImageUploader: true,
+        vaultRoot,
+      })
+      if (preparation.status !== 'provider_required') {
+        throw new Error('expected provider-required image preparation')
+      }
+      const dispatch = await dispatchPreparedAssistantImageGeneration({
+        fetchImpl: async () => openAiPngResponse(),
+        prepared: preparation.prepared,
+      })
+      if (dispatch.status !== 'generated') {
+        throw new Error('expected generated image')
+      }
+      const persistence = await persistAssistantImageGenerationCapture(
+        dispatch.generated,
+      )
+      if (persistence.status !== 'persisted') {
+        throw new Error('expected persisted image')
+      }
+
+      await rm(vaultRoot, { force: true, recursive: true })
+      const result = await publishAssistantImageGeneration(
+        persistence.persisted,
+      )
+
+      expect(result.rpcSuccess).toBe(true)
+      expect(uploadGeneratedImage).toHaveBeenCalledOnce()
+      await expect(access(vaultRoot)).rejects.toThrow()
+    })
+  })
+
+  it('distinguishes a failed pre-dispatch claim and never calls the provider', async () => {
+    const preparation = await prepareAssistantImageGeneration({
+      args: {
+        alt: null,
+        outputFormat: 'png',
+        prompt: 'Draw a dot.',
+        quality: 'low',
+        size: '1024x1024',
+      },
+      env: { OPENAI_API_KEY: 'test-key' },
+      providerRequestOrdinal: 1,
+    })
+    if (preparation.status !== 'provider_required') {
+      throw new Error('expected provider-required image preparation')
+    }
+    const fetchImpl = vi.fn<typeof fetch>()
+
+    const dispatch = await dispatchPreparedAssistantImageGeneration({
+      beforeDispatch: () => {
+        throw new Error('reservation claim failed')
+      },
+      fetchImpl,
+      prepared: preparation.prepared,
+    })
+
+    expect(dispatch).toEqual({
+      result: {
+        rpcSuccess: false,
+        rpcText: 'image generation was not dispatched',
+      },
+      status: 'pre_dispatch_failed',
+    })
+    expect(fetchImpl).not.toHaveBeenCalled()
+  })
+
+  it('retains available provider usage when dispatched output is invalid', async () => {
+    const preparation = await prepareAssistantImageGeneration({
+      args: {
+        alt: null,
+        outputFormat: 'png',
+        prompt: 'Draw a dot.',
+        quality: 'low',
+        size: '1024x1024',
+      },
+      env: { OPENAI_API_KEY: 'test-key' },
+      providerRequestOrdinal: 8,
+    })
+    if (preparation.status !== 'provider_required') {
+      throw new Error('expected provider-required image preparation')
+    }
+
+    const dispatch = await dispatchPreparedAssistantImageGeneration({
+      fetchImpl: async () => new Response(JSON.stringify({
+        data: [{
+          b64_json: Buffer.from([0x00, 0x01]).toString('base64'),
+        }],
+        usage: {
+          input_tokens: 2,
+          output_tokens: 5,
+          total_tokens: 7,
+        },
+      }), {
+        headers: { 'content-type': 'application/json' },
+        status: 200,
+      }),
+      prepared: preparation.prepared,
+    })
+
+    expect(dispatch.status).toBe('provider_failed')
+    if (dispatch.status !== 'provider_failed') {
+      throw new Error('expected dispatched provider failure')
+    }
+    expect(dispatch.result).toMatchObject({
+      rpcSuccess: false,
+      rpcText: 'image generation returned invalid image data',
+      usageDraft: {
+        providerRequestOrdinal: 8,
+        providerRequestOutcome: 'partial',
+        usage: {
+          inputTokens: 2,
+          outputTokens: 5,
+          totalTokens: 7,
+        },
+      },
+    })
+  })
+
+  it('returns a cached result before re-resolving transient references', async () => {
+    await withTempDir(async (root) => {
+      const vaultRoot = path.join(root, 'vault')
+      const codexHome = path.join(root, 'codex-home')
+      const refPath = path.join(vaultRoot, 'raw', 'inbox', 'reference.png')
+      await initializeVault({ vaultRoot })
+      await mkdir(path.dirname(refPath), { recursive: true })
+      await writeFile(refPath, PNG_BYTES)
+      const args = {
+        alt: null,
+        outputFormat: 'png' as const,
+        prompt: 'Use image 1.',
+        quality: 'low' as const,
+        referenceImageRefs: ['raw/inbox/reference.png'],
+        size: '1024x1024' as const,
+      }
+      const first = await executeGenerateImageTool({
+        args,
+        captureIdempotencyKey: 'phase-test:cached',
+        codexHome,
+        env: { OPENAI_API_KEY: 'test-key' },
+        fetchImpl: async () => openAiPngResponse(),
+        providerRequestOrdinal: 1,
+        vaultRoot,
+      })
+      expect(first.rpcSuccess).toBe(true)
+      await rm(refPath)
+
+      const preparation = await prepareAssistantImageGeneration({
+        args,
+        captureIdempotencyKey: 'phase-test:cached',
+        codexHome,
+        env: { OPENAI_API_KEY: 'test-key' },
+        providerRequestOrdinal: 2,
+        vaultRoot,
+      })
+
+      expect(preparation.status).toBe('cached')
+      if (preparation.status !== 'cached') {
+        throw new Error('expected cached image preparation')
+      }
+      expect(preparation.generated.usageDraft).toBeNull()
+      const replay = await finalizeAssistantImageGeneration(
+        preparation.generated,
+      )
+      expect(replay.rpcSuccess).toBe(true)
+      expect(replay.savedImageRef).toBe(first.savedImageRef)
+    })
+  })
+})
 
 describe('executeGenerateImageTool reference images', () => {
   it('does not require a vault root when no reference image refs are provided', async () => {

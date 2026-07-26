@@ -5,6 +5,9 @@ import {
   RAW_CAPTURES_DIRECTORY,
   RAW_INBOX_DIRECTORY,
 } from '@murphai/contracts'
+import {
+  HOSTED_EXECUTION_ASSISTANT_IMAGE_REFERENCE_MAX_COUNT,
+} from '@murphai/hosted-execution/contracts'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { resolveAssistantVaultPath } from '@murphai/vault-usecases/assistant-vault-paths'
 
@@ -39,7 +42,8 @@ const AUTHORIZED_REFERENCE_IMAGE_PATH_PREFIXES = [
 const SKILL_ASSET_REFERENCE_IMAGE_PATH_PREFIX = 'skill-assets/' as const
 const SKILL_ASSET_SHARED_DIRECTORY = 'shared'
 
-export const MAX_GENERATE_IMAGE_REFERENCE_COUNT = 16
+export const MAX_GENERATE_IMAGE_REFERENCE_COUNT =
+  HOSTED_EXECUTION_ASSISTANT_IMAGE_REFERENCE_MAX_COUNT
 // The per-file cap matches the generated-image output cap so a saved
 // raw/captures/** generated image can be reused as an exact reference. The
 // aggregate cap remains sized for the hosted runner Worker proxy budget:

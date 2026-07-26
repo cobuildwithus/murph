@@ -119,7 +119,64 @@ Last verified: 2026-07-25
   401/invalid-grant requires
   reauthorization, a 403 degrades only the affected family, and retryable
   transport/429/5xx failures do not silently terminalize useful credentials.
-- Hosted generated-image turns must fail before the provider call if the runtime platform has no generated-image uploader, and must treat Cloudflare Images upload failure as a structured tool failure rather than silently returning inaccessible media.
+- Interactive hosted image generation is two-phase. The ordinary Murph turn
+  performs bounded preparation and an inline cache lookup, then registers
+  provider-required work without awaiting it. Admission starts only after every
+  originating-turn usage record is durably accepted. Missing usage proof,
+  registration authority, tool-call identity, provider transport, or generated
+  image uploader fails before provider dispatch; Cloudflare Images upload
+  failure becomes a trusted completion failure rather than inaccessible media.
+  Reservation and the abortable provider request run in the invocation
+  background. Successful provider output re-enters the existing runner only for
+  one capture-only write under `HostedCanonicalWritePort`; after that canonical
+  capture commits, Cloudflare Images upload continues in the invocation
+  background. Foreground work can wait briefly for that serialized capture
+  write, never for provider or delivery-copy upload network latency. Local,
+  scheduled, and group-avatar generation remain synchronous.
+- Web/Postgres serializes conservative image allowance reservations under the
+  member owner. Every allowance gate subtracts active claims, equality with
+  remaining capacity is `would_exhaust`, and replay must match the immutable
+  estimate inputs, expected usage identity, admitted usage period, and allowance
+  source. Undispatched claims expire after five minutes and may be released only
+  before dispatch. Once marked dispatched, ambiguous work retains its claim
+  through the admitted period; actual image usage settles that exact claim
+  atomically, including when completion crosses the period boundary. Never
+  infer provider work from `already_dispatched` or `already_settled`, and never
+  blindly redispatch after process loss. Active claims reduce capacity
+  member-wide across every still-live admitted period. For each undispatched
+  claim, capacity release is the earlier of its admitted period end and
+  five-minute expiry; for a dispatched claim it is the admitted period end.
+  When claim pressure blocks work, the capacity-reserved gate uses the earliest
+  such point across the member as `retryAfter`. Reservation-only pressure is
+  transient and produces no reset or usage-limit notice.
+- Image completion, denial, and failure stage trusted local assistant input and
+  level-trigger the existing runtime wake; they do not create an outbox intent
+  or automatic progress/delivery effect. Before capture enters the canonical
+  writer, fresh conversation remains higher priority; input arriving during the
+  short capture write waits only for that serialization. After a successful
+  upload, a fresh ordinary Murph turn may attach the result through
+  `murph.attach_response_media`, choose any other response, or finish without
+  reply. Graceful shutdown, invocation return, workspace replacement, and fence
+  release drain every registered image continuation through capture, upload,
+  that turn, its checkpoint, and usage settlement before releasing the
+  workspace. This adds no Web image job or completion mailbox and no Temporal
+  image state.
+- Deploy interactive image admission as one coordinated three-step sequence:
+  apply the additive reservation migration alone with old code unchanged;
+  deploy Cloudflare/runtime and require `deploy:smoke` to match the exact
+  `.deploy/runner-bundle` bundle and source fingerprints, replace stale warm
+  shells, fail stale cold shells closed, and prove old bundles have drained
+  while old Web makes image admission fail closed; then activate the Web
+  reservation route and code. Post-deploy proof must cover origin usage before
+  reservation, `would_exhaust` without provider dispatch, mark-dispatched
+  immediately before provider entry, exact usage settlement, level-triggered
+  fresh-turn completion, and no automatic delivery. After Web cutover, the new
+  Cloudflare/runtime bundle is the rollback floor. Before a Web rollback, drain
+  image continuations and verify no dispatched-but-unsettled reservation
+  remains. Old Web fails new image admissions closed but rejects usage records
+  carrying `reservationId`, so an undrained completion cannot settle and its
+  conservative claim remains through the admitted period. Cloudflare rollback
+  would restore legacy unreserved dispatch and is forbidden.
 - Hosted generated voice memo turns must treat ElevenLabs generation, Linq attachment upload, or Telegram delivery-time generation failures as structured tool or delivery failures. When response media carries a transcript, the existing final channel adapter uses that transcript as the text fallback if audio preparation or delivery fails and reports success only after either audio or fallback text is accepted; it adds no queue or delivery owner. Linq derives the fallback provider-effect identity from the persisted delivery key, or from the attachment identity when no delivery intent exists, so the fallback crosses the existing dispatch fence without reusing the text or native-voice claim. Final Linq and Telegram voice memo sends are not replay-safe unless the provider later documents idempotency for those native voice-message endpoints, so outbox transport idempotency must stay false for voice memo media and retries must follow the confirmation-pending/fail-closed path when the fallback is absent or also fails.
 - Hosted clinical-record retrieval is finite by resource-family, page-count, page-size, total-byte, per-page resource-count, and total resource-count caps. Runtime stops with a fixed terminal result before import when a provider page would cross a raw-manifest resource cap. Its durable work identity is the pointer-only mailbox `{runId, generation}`; exact validated page URLs—not randomized cursor ciphertext—own logical provider-page identity. Web owns run-bound opaque cursors and provider claims, while vault-usecases atomically checkpoints each accepted bounded page under `.runtime/operations/clinical-records/**` before honoring foreground preemption. A retry resumes at the next unfinished cursor without replaying completed pages. Raw pages plus the manifest commit atomically only after semantic validation and a fresh web authority check; canonical mutation receives a second authority check. Byte-identical replays are idempotent, conflicting replay bytes fail closed, and terminal completion or rejection clears the operational checkpoint. `authorization-required` is terminalized by web and must not receive a second runtime outcome.
 - Clinical retrieval plans are frozen per run. Query-aware work is ordered by

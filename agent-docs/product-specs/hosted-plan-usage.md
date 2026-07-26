@@ -93,8 +93,33 @@ that purchased credit remains effective without folding it into the plan
 percentage, exposing its exact remaining dollar amount, or exposing the
 internal included allowance value. When included usage is exhausted, Settings
 may explain that Murph will use remaining usage credit without quantifying it.
-The operation that crosses effective capacity may finish, but subsequent
-usage-bearing work blocks and accepted conversation input remains pending.
+An ordinary operation that crosses effective capacity may finish, but
+subsequent usage-bearing work blocks and accepted conversation input remains
+pending. Hosted image generation is the explicit expensive-operation
+exception: Web must admit and reserve its bounded estimate before the image
+provider starts. That admission runs only after the originating assistant
+phase has completed and Web has durably acknowledged all of that phase's usage
+records. Failed or missing origin-usage accounting starts neither a reservation
+nor an image provider request.
+
+Reservation and provider work continue in the invocation background after the
+originating turn. Successful provider output is committed as a capture through
+the runner's existing `HostedCanonicalWritePort` before Cloudflare Images
+upload continues in the background. Foreground work may wait only for that
+short serialized canonical capture write, never for provider or delivery-copy
+upload network latency. After upload, a trusted completion input starts a fresh
+ordinary Murph turn; the image result never sends itself.
+
+Active reservation pressure applies member-wide across every still-live
+admitted period; it is not filtered to the period currently resolved by the
+ordinary gate because purchased credit remains member-wide until settlement.
+For each undispatched claim, capacity can return at the earlier of its admitted
+period end and its five-minute pre-dispatch expiry. For a dispatched claim,
+capacity can return only at its admitted period end. When claim pressure blocks
+work, the capacity-reserved gate uses the earliest candidate across the member
+as `retryAfter`. Reservation-only pressure is transient
+`ai_usage_capacity_reserved` state and must not produce a reset or usage-limit
+notice.
 
 A forecast requires at least 24 hours of counted usage. It is shown only when
 the observed pace projects exhaustion before the current period ends. The
@@ -246,6 +271,22 @@ instead of appending a redundant heads-up. Every rendered
 personal limit notice states the included allowance as 100% used before the
 channel-specific follow-up copy.
 
+Image-admission denial is not that ordinary low-usage heads-up. When the
+trusted `murph.generate_image` result has
+`status: insufficient_image_capacity`, `reason: would_exhaust`, and
+`image_started: false`, the image provider did not start. Murph says so
+plainly, does not retry automatically, and does not claim that the member's
+whole plan or the group's whole period is low or exhausted. The reply does not
+use the heads-up's final `---` segment. After usage is added or resets, another
+image attempt requires a new explicit request.
+
+In a private conversation, that exact structured result authorizes one manual
+`murph.plan_usage` read under the existing personal and Family funding rules;
+it does not authorize billing mutation or a first-message link. In a group, it
+authorizes one `murph.group action="read_usage"` call even when the coarse
+period state is `healthy`; only the returned first-party funding URL may be
+shared. Neither read exposes the estimate or changes image-admission authority.
+
 Before claiming delivery, web re-authorizes a personal target against current
 member routing or an external Linq target against persisted thread authority.
 An omitted target means no accepted conversation and permits the legacy
@@ -313,8 +354,9 @@ plan recommendation.
 runtime callback, not from the model. Murph may call it only when a member asks
 about their current plan or included usage, explicitly asks to manage billing
 or an unsupported Family account change, or when a trusted runtime instruction
-requests one manual private check. A trusted check authorizes the read only; it
-does not authorize a billing action or a proactive payment link.
+requests one manual private check, or when the exact trusted image-admission
+denial above occurs in a private conversation. A trusted check authorizes the
+read only; it does not authorize a billing action or a proactive payment link.
 
 Do not turn this read into onboarding automation, a recurring threshold
 watcher, or a group-chat money prompt. Do not name a group payer, invent a
@@ -381,10 +423,11 @@ add a separate scheduler or money-prompt lifecycle.
 ## Non-Goals
 
 The subscription-action surface adds one nullable action claim to the existing
-mailbox row. The composed usage system adds no second admission gate, persisted
-forecast, billing queue, cron, trial-ending webhook, automatic nudge, group
-wallet or usage account, automatic model switch, custom card form, App Clip,
-or mini app. It does not add a general Stripe API tool: the subscription action contract
+mailbox row. Apart from the narrow image reservation above, the composed usage
+system adds no second admission gate, persisted forecast, billing queue, cron,
+trial-ending webhook, automatic nudge, group wallet or usage account, automatic
+model switch, custom card form, App Clip, or mini app. It does not add a
+general Stripe API tool: the subscription action contract
 exposes only the three current web-owned operations above, and personal and
 Family-member usage top-ups remain authenticated Stripe-hosted Settings
 handoffs. Group funding
@@ -402,6 +445,28 @@ old Web is unsupported because old Web rejects the opt-in request and does not
 provide the durable claim. Roll back Cloudflare before Web; the nullable column
 may remain. This order also preserves the originating-notice-target
 compatibility contract described in `hosted-plan-downgrades.md`.
+
+The image-reservation addition uses a separate three-step hard-cut order:
+
+1. Apply the additive reservation database migration alone. Existing Web and
+   runtime code remains unchanged.
+2. Deploy Cloudflare/runtime, require `deploy:smoke` to match the exact
+   `.deploy/runner-bundle` `bundleFingerprint` and `sourceFingerprint`, replace
+   stale warm shells, fail stale cold shells closed, and complete the old-bundle
+   rollout and drain while old Web makes new interactive image work fail
+   closed.
+3. Activate the Web reservation route and code.
+
+After activation, the new Cloudflare/runtime bundle is the rollback floor:
+before a Web rollback, drain image continuations and verify no
+dispatched-but-unsettled reservation remains. Old Web fails new image admissions
+closed but rejects usage records carrying `reservationId`; without the drain,
+exact settlement fails and the conservative claim remains until its admitted
+period ends. Rolling Cloudflare/runtime back independently reopens unreserved
+dispatch and is unsupported. Post-deploy proof covers origin usage before
+reservation, `would_exhaust` without provider dispatch, mark-dispatched
+immediately before provider entry, exact usage settlement, level-triggered
+fresh-turn completion, and no automatic delivery.
 
 Existing billing mechanics remain in:
 

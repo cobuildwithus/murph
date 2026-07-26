@@ -860,6 +860,86 @@ after staged work drains, then remove runtime support.
 
 12. The hosted `apps/cloudflare` execution plane accepts ensure-processing requests over its narrow internal HTTP surface — callback-signed from the Temporal orchestrator, or Vercel OIDC-authenticated from web ingress as a best-effort Linq direct wake whose trigger is recorded in orchestration latency diagnostics as `triggeredByWebDirect` derived from the authorizing credential — plus Vercel OIDC-authenticated browser-vault session, deletion, and user-status requests, with one additional signed deploy-smoke route for managed-container release verification. The ensure-processing adapter starts, wakes, or accepts pending processing for the exact active write-fenced runtime and returns after that intent is accepted rather than after runtime idle; Cloudflare alarms remain write-fence alarm cleanup rather than semantic schedulers. Browser-vault refresh is hosted runtime work represented by web-owned system-mailbox rows and orchestrated by Temporal, not a separate worker path. There is no Cloudflare Queue wake executor or fallback; duplicate delivery safety belongs to mailbox event-id dedupe, Temporal signal coalescing, and Linq delivery-time `consumedAt` stamps. The direct Durable Object methods restore ephemeral local execution context from encrypted hosted workspace snapshots, inject a method-based hosted runtime platform into `packages/assistant-runtime`, and keep deployment topology app-local. Hosted is a thin containerized runner over the same local runtime input spine: it restores the workspace, stages mailbox conversation rows as assistant input, runs the local scanner/active-turn machinery, imports a bounded same-wake mailbox batch during initial selection or the required pre-scan refresh, freezes that batch before provider start while leaving later rows pending, imports late active-turn mailbox rows through an invocation-local foreground loop, steers same-conversation input into the live Codex turn when one exists, journals accepted input, may hot-service only the exact assistant wake projected by the current foreground assistant phase once before the idle floor while dirty without publishing a snapshot, and keeps the invocation dirty until the runtime-owned idle-floor—or last-chance shutdown—`idle_shutdown` checkpoint publishes the updated workspace. Mailbox payload decrypt is a narrow Worker-owned runtime write-fence capability: the container calls a mailbox decode hook through the normal `web-control.worker` virtual host, Cloudflare Container outbound interception dispatches it inside the Worker, the Worker verifies the runtime write fence and returns only a parsed hosted wake or blocked result, and the container does not receive ingress root keys, private JWKs, callback-signing private material, or root-fetch authority for mailbox import. The canonical runtime-to-worker authority model is normal internal virtual-host fetches plus runtime write-fence headers, with no public runner callback endpoint; generic side-effect authority is `attemptId`, write-fence generation, and bound user, while workspace version remains only checkpoint/restore compare-and-swap freshness. Provider egress for intercepted OpenAI, ElevenLabs, Exa, Mapbox, Linq, Telegram, hosted data API, and Workers AI transcription calls stays Worker-mediated through Cloudflare Container per-host outbound handlers for default provider/internal hosts, while the catch-all outbound handler remains an explicit open-internet passthrough for arbitrary hosted-agent HTTP/HTTPS egress and runtime-configured provider override hosts. Native child-process integrations for OpenAI, Exa, Mapbox, `murph_data_api`, and `workers_ai_transcribe` receive a signed Murph provider credential in the provider's native credential slot; Worker egress validates that credential's provider/user/runner identity against UserRunner's current active runtime state before injecting the real Worker-owned credential. Generated image turns use that OpenAI egress path for GPT Image 2, persist validated image bytes as canonical capture media under `raw/captures/**` when a vault is available, and use the write-fenced `results.worker/generated-images` effect only to upload the delivery copy to Cloudflare Images; Cloudflare Images credentials stay Worker-owned and are never forwarded into hosted runtime env. Generated voice memo turns store bounded transcript/config metadata only; Linq turns upload generated MP3 bytes into a Linq attachment during tool execution, while Telegram turns generate bounded MP3 bytes at final delivery and send them through Telegram `sendVoice` without persisting the bytes. ElevenLabs, Linq, and Telegram credentials stay Worker-owned sentinels in hosted runtime env. Hosted audio transcription is the same Worker-owned shape: the parser pipeline POSTs ffmpeg-prepared audio bytes to the fixed `murph-transcribe.worker/v1/transcribe` host, the Worker authorizes the signed `workers_ai_transcribe` provider credential, exact write-fence proof, or a provider-egress token, calls the Workers AI binding (`@cf/openai/whisper-large-v3-turbo`), and returns only bounded transcript JSON; Workers AI account context never enters the runtime env and the runner image ships no local speech model. Direct invocation mints runner-scoped provider credentials into the explicit supervisor-env projection, the runtime platform attaches exact write-fence headers or provider-egress tokens where the client path can carry them, and Worker secret injection strips runtime authority headers before upstream egress. The open-internet passthrough also strips runtime authority headers and never injects Worker-owned provider credentials. Intercepted providers validate exact write-fence headers, provider-egress token proof, or a runner-scoped signed provider credential; there is no tokenless active-user-fence provider authorization path. Delivery providers (Linq and Telegram) and ElevenLabs continue to require exact write-fence headers or a provider-egress token, so they can only be reached through the runtime's wrapped fetch that routes through the outbound-intent journal owning recipient binding and idempotency. ElevenLabs is constrained to `POST /v1/text-to-speech/:voice_id` with the MP3 output format, Exa is constrained to `POST /search`, and Mapbox remains constrained to allowed read-only GET allowlisted path families. The container supervisor pins Codex, native TLS, Node, Python requests, and curl CA bundle env to Cloudflare's runtime HTTPS-interception CA path, rewires the installed `codex` command to the native binary so the long-lived process is the native app-server, and direct invocation preserves those CA pointers plus Cloudflare-managed proxy env without accepting user overrides for transport settings. The outer native container shell may stay warm per user for the configured idle lifecycle; when Cloudflare reports `sleepAfter` activity expiry, RunnerContainer yields to any active foreground invocation or tears down an idle warm shell, and it never records pending checkpoint intent or posts a host-owned checkpoint job. The private container bridge is reached only through the container Durable Object's internal `containerFetch`, keeps a plain `/health` check plus validated `POST /internal/workspace-invocation`, rejects concurrent workspace invocations, exposes only an internal `POST /internal/runtime-wake` callback into the active invocation, and no longer carries a second per-shell bearer-token layer. The direct hosted invocation uses per-user warm workspace roots with invocation-local writable cache and temp roots. The per-user runner keeps only write-fence state, direct-R2 snapshot upload sessions, and other short-lived coordination state in Durable Object storage while writing v2 checkpoints as a single encrypted object through a presigned R2 PUT URL; the Worker never streams the snapshot body and there is no Worker request-body fallback. Gateway state here is projection or cache only, not a second durable authority. Broad worker control seams are intentionally gone: no generic user-env CRUD route surface, no dispatch-payload CRUD or staged dispatch control plane, no deleted sharing CRUD, no local-vault import payload CRUD, no broad pending-usage store routes, and no mutable gateway control routes. Narrow signed callbacks back into `apps/web` remain only where execution still needs them, such as device connect-link initiation, hosted device-sync runtime snapshot/apply callbacks against the web-owned authority, assistant-configuration reads and mutations against web-owned member preferences, product-feedback recording into web-owned rows, and direct hosted usage recording into the web-owned ledger. Missing crypto fails closed outside the explicit activation-time provisioning path, and platform-envelope key material must still fail startup immediately when malformed.
 
+### Hosted interactive image generation
+
+Interactive hosted `murph.generate_image` calls prepare and validate the
+provider request, resolve authorized references, and check the existing capture
+lookup during the ordinary Murph turn. A cache hit remains an inline tool
+result. Provider-required work instead registers one invocation-local
+continuation keyed by the accepted assistant input and tool call, then returns
+truthful `admission_pending` / `image_started: false` state so the current turn
+can finish without waiting for image latency. Missing registration authority or
+tool-call identity fails closed; it never falls through to synchronous provider
+work. Local, scheduled, and group-avatar generation keep the existing
+synchronous executor.
+
+After the originating turn's usage has been durably recorded, the runtime asks
+the signed Web allowance owner for a conservative image reservation. Web locks
+the member allowance, subtracts every active reservation from ordinary gate
+reads, and reserves only when its server-owned estimate is strictly below the
+remaining included-plus-credit capacity. The reservation freezes the admitted
+period, allowance source, and expected immutable image-usage identity. It
+stores bounded estimate metadata and lifecycle only—never prompts, reference
+contents, media, result, delivery, mailbox, or job state. This is the narrow
+exception to ordinary crossing-operation behavior: `would_exhaust` starts no
+image provider request and may activate the existing respectful funding
+conversation. Active reservation pressure is member-wide across every
+still-live admitted period. For an undispatched claim, capacity can return at
+the earlier of its admitted period end and five-minute pre-dispatch expiry; a
+dispatched claim can return capacity only at its admitted period end. The gate
+uses the earliest such point as the capacity-reserved gate's `retryAfter` when
+that pressure blocks work. Reservation pressure alone is transient and emits
+no reset or usage-limit notice.
+
+For an admitted operation, reservation and provider dispatch continue in the
+invocation background. The runtime marks the reservation dispatched
+immediately before the abortable GPT Image request. Successful provider output
+then enters one capture-only continuation inside the existing runner
+`HostedCanonicalWritePort`; that short serialized canonical write is the only
+image-continuation step that can briefly delay foreground work. After capture
+commits, the Cloudflare Images delivery-copy upload resumes in the invocation
+background. Neither provider nor upload network latency holds the foreground
+runner.
+
+Only after that upload completes does the runtime stage trusted local assistant
+input and level-trigger the existing wake. Capacity denial, provider failure,
+capture failure, and upload failure stage the corresponding trusted outcome
+through the same seam. A fresh ordinary Murph turn chooses its normal final
+action: it may attach the generated media with
+`murph.attach_response_media`, send different text or media, react, or finish
+without reply. Image completion itself never creates or sends an outbox
+message, and it emits no automatic progress update.
+
+Foreground conversation input is selected ahead of an image continuation
+before its canonical capture write begins; input arriving during that short
+write waits only for the serialized write. Routine checkpoints may occur while
+provider or upload work is in flight, but graceful workspace release waits for
+every registered continuation to finish capture and upload, stage and service
+its ordinary Murph completion turn, checkpoint, and settle usage. An abandoned
+pre-dispatch reservation expires after its bounded claim window; after
+dispatch, ambiguity remains charged through the admitted period and is never
+blindly redispatched. Web owns no image queue or completion mailbox, and
+Temporal owns no image workflow or image state.
+
+This cross-plane change rolls out as one coordinated three-step sequence.
+First apply the additive reservation database migration alone; old Web and
+runtime behavior remain unchanged. Second deploy Cloudflare/runtime while the
+old Web route still makes new interactive image requests fail closed.
+`deploy:smoke` must match the exact `bundleFingerprint` and
+`sourceFingerprint` from `.deploy/runner-bundle`, replace stale warm shells,
+fail stale cold shells closed, and prove the old-bundle drain. Only then
+activate the Web reservation route and code. Post-deploy proof must cover
+origin usage recorded before reservation, a `would_exhaust` denial with no
+provider call, mark-dispatched immediately before provider entry, exact usage
+settlement, level-triggered fresh-turn completion, and no automatic delivery.
+Once Web is live, the new Cloudflare/runtime bundle is the rollback floor:
+before a Web rollback, drain image continuations and verify no
+dispatched-but-unsettled reservation remains. Old Web fails new image admission
+closed but rejects usage records carrying `reservationId`; without the drain,
+exact settlement fails and the conservative claim remains until its admitted
+period ends. Rolling Cloudflare back would reopen legacy unreserved provider
+dispatch and is not permitted.
+
 Reconciliation evaluates engagement and AI-usage authorization for runnable model work even when deterministic system lag is present. Authorized conversation/default work owns the foreground pass and imports system items before the assistant phase without letting a retryable system item starve fresh conversation. When model work is blocked, or system lag is the only work, the existing `system_mailbox` mode imports only the system lane and returns before assistant execution. It adds no queue, scheduler, cursor, or durable state owner.
 
 Hosted Exa egress is narrower than the path allowlist alone: before injecting

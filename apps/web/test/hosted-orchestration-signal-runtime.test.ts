@@ -782,6 +782,16 @@ describe("hosted runtime Temporal signaling", () => {
     mocks.prisma.$transaction.mockImplementationOnce(async (callback) =>
       await callback({
         ...explicitPrisma,
+        hostedAiUsageReservation: {
+          aggregate: vi.fn()
+            .mockResolvedValueOnce({
+              _min: { periodEnd: null },
+              _sum: { estimatedCostUsdMicros: null },
+            })
+            .mockResolvedValueOnce({
+              _min: { createdAt: null },
+            }),
+        },
         hostedAiUsagePeriod: {
           findUnique: vi.fn(async () => null),
         },

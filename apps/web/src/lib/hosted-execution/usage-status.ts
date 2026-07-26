@@ -22,7 +22,9 @@ import { readHostedMemberCoreState } from "../hosted-onboarding/hosted-member-st
 import { sanitizeHostedOnboardingStructuredLogDetails } from "../hosted-onboarding/logging";
 import { readHostedPersonalUsageCreditOfferCodes } from "../hosted-onboarding/personal-usage-credit-eligibility";
 import {
+  classifyHostedAiUsageGateDecision,
   readHostedAiUsageGate,
+  resolveHostedAiUsageGateSpendRemainingUsdMicros,
   type HostedAiUsageGateDecisionWithSource,
 } from "./usage-allowance";
 
@@ -90,12 +92,13 @@ export async function projectHostedPersonalAiUsageStatus(input: {
     };
   }
 
-  const usageLimitExceeded = !decision.allowed
-    && decision.reason === "ai_usage_limit_exceeded";
+  const gateClassification = classifyHostedAiUsageGateDecision(decision);
+  const usageLimitExceeded = gateClassification === "usage_exhausted";
 
-  if (!decision.allowed && !usageLimitExceeded) {
+  if (gateClassification === "access_denied") {
     const trialConversionPending =
-      decision.reason === "trial_expired_pending_billing";
+      !decision.allowed
+      && decision.reason === "trial_expired_pending_billing";
     const shouldResolveAvailableAction = trialConversionPending
       && (includeSubscriptionActionQuote || actionUrl !== null);
     const availableAction = shouldResolveAvailableAction
@@ -138,12 +141,17 @@ export async function projectHostedPersonalAiUsageStatus(input: {
   const includedUsageExhausted =
     decision.spentUsdMicros >= decision.limitUsdMicros;
   const exhausted = usageLimitExceeded;
+  const spendRemainingUsdMicros =
+    resolveHostedAiUsageGateSpendRemainingUsdMicros(decision);
   const usedPercent = calculateUsedPercent({
     exhausted: includedUsageExhausted,
     limit: decision.limitUsdMicros,
     spent: decision.spentUsdMicros,
   });
-  const forecast = exhausted || decision.spentUsdMicros <= 0n
+  const forecast =
+    exhausted
+      || spendRemainingUsdMicros <= 0n
+      || decision.spentUsdMicros <= 0n
     ? null
     : await buildUsageForecast({
         memberId: input.memberId,

@@ -524,6 +524,7 @@ model HostedMember {
   accountGroupInvitesSent        HostedAccountGroupInvite[]       @relation("HostedAccountGroupInviteSender")
   accountGroupInvitesAccepted    HostedAccountGroupInvite[]       @relation("HostedAccountGroupInviteAcceptor")
   aiUsage                        HostedAiUsage[]
+  aiUsageReservations            HostedAiUsageReservation[]
   linqDailyStates                HostedLinqDailyState[]
   linqContactCardShares          HostedLinqContactCardShare[]
   identity                       HostedMemberIdentity?
@@ -1769,7 +1770,9 @@ model HostedAiUsage {
   createdAt                  DateTime     @default(now()) @map("created_at")
   updatedAt                  DateTime     @updatedAt @map("updated_at")
   member                     HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  settledReservation         HostedAiUsageReservation? @relation("HostedAiUsageReservationSettlement")
 
+  @@unique([id, memberId], map: "hosted_ai_usage_id_member_key")
   @@unique([turnId, attemptCount, providerRequestOrdinal], map: "hosted_ai_usage_turn_attempt_provider_request_idx")
   @@index([featureKey, createdAt])
   @@index([memberId, allowancePeriodStart])
@@ -1778,6 +1781,30 @@ model HostedAiUsage {
   @@index([stripeMeterStatus, stripeMeterNextAttemptAt, occurredAt], map: "hosted_ai_usage_stripe_meter_due_idx")
   @@index([surface, createdAt])
   @@map("hosted_ai_usage")
+}
+
+model HostedAiUsageReservation {
+  requestId              String         @id @map("request_id")
+  memberId               String         @map("member_id")
+  estimatorVersion       String         @map("estimator_version")
+  imageQuality           String         @map("image_quality")
+  imageSize              String         @map("image_size")
+  promptUtf8Bytes        Int            @map("prompt_utf8_bytes")
+  referenceImageCount    Int            @map("reference_image_count")
+  estimatedCostUsdMicros BigInt         @map("estimated_cost_usd_micros")
+  allowanceSource        String         @map("allowance_source")
+  periodStart            DateTime       @map("period_start")
+  periodEnd              DateTime       @map("period_end")
+  dispatchedAt           DateTime?      @map("dispatched_at")
+  releasedAt             DateTime?      @map("released_at")
+  settledUsageId         String?        @map("settled_usage_id")
+  createdAt              DateTime       @default(now()) @map("created_at")
+  member                 HostedMember   @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  settledUsage           HostedAiUsage? @relation("HostedAiUsageReservationSettlement", fields: [settledUsageId, memberId], references: [id, memberId], onDelete: Cascade, map: "hosted_ai_usage_reservation_settled_usage_fkey")
+
+  @@unique([settledUsageId, memberId], map: "hosted_ai_usage_reservation_settled_usage_key")
+  @@index([memberId, settledUsageId, releasedAt, periodEnd], map: "hosted_ai_usage_reservation_active_idx")
+  @@map("hosted_ai_usage_reservation")
 }
 
 model HostedAiUsagePeriod {

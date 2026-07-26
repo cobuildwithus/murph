@@ -37,6 +37,8 @@ export type {
   HostedRuntimeTelegramGetFileRequest,
   HostedRuntimeTelegramSendRequest,
   HostedRuntimeTelegramSendResponse,
+  HostedRuntimeUsageAllowancePort,
+  HostedRuntimeUsageAllowanceResponse,
   HostedRuntimeUsageRecordPort,
   HostedRuntimeUsageRecordResponse,
   HostedRuntimeWorkspacePort,
@@ -58,6 +60,7 @@ export {
   parseHostedRuntimeAssistantResponseMedia,
   parseHostedRuntimeIssueRecordResponse,
   parseHostedRuntimeLatencyTraceResponse,
+  parseHostedRuntimeUsageAllowanceResponse,
   parseHostedRuntimeUsageRecordResponse,
 } from "./hosted-runtime/platform.ts";
 export {

@@ -89,6 +89,7 @@ type StoredHostedAiUsageImmutableFields = Prisma.HostedAiUsageGetPayload<{
 export async function recordHostedAiUsageRecords(input: {
   accountAllowance?: boolean;
   prisma?: HostedAiUsageClient;
+  reservationId?: string;
   trustedUserId?: string | null;
   usage: readonly unknown[];
 }): Promise<RecordHostedAiUsageResult> {
@@ -102,6 +103,7 @@ export async function recordHostedAiUsageRecordsAndSendLimitNotices(input: {
   accountAllowance?: boolean;
   noticeDeliveryTarget?: HostedRuntimeUsageNoticeDeliveryTarget | null;
   prisma?: PrismaClient;
+  reservationId?: string;
   trustedUserId?: string | null;
   usage: readonly unknown[];
 }): Promise<RecordHostedAiUsageResult> {
@@ -148,11 +150,26 @@ export async function recordHostedRetellPhoneCallUsageTx(input: {
 async function recordHostedAiUsageRecordsForAccounting(input: {
   accountAllowance?: boolean;
   prisma?: HostedAiUsageClient;
+  reservationId?: string;
   trustedUserId?: string | null;
   usage: readonly unknown[];
 }): Promise<RecordHostedAiUsageAccountingResult> {
   const prisma = input.prisma ?? getPrisma();
   const records = dedupeHostedAiUsageRecords(parseHostedAiUsageRecords(input.usage));
+  if (
+    input.reservationId !== undefined
+  ) {
+    if (input.accountAllowance !== true) {
+      throw new TypeError(
+        "Hosted AI usage reservation settlement requires allowance accounting.",
+      );
+    }
+    if (records.length !== 1) {
+      throw new TypeError(
+        "Hosted AI usage reservation settlement requires exactly one usage record.",
+      );
+    }
+  }
   const recordedIds: string[] = [];
   const limitNoticeCandidates: HostedAiUsageLimitNoticeCandidate[] = [];
 
@@ -169,6 +186,9 @@ async function recordHostedAiUsageRecordsForAccounting(input: {
         return accountHostedAiUsageForAllowanceTx({
           memberId,
           record,
+          ...(input.reservationId === undefined
+            ? {}
+            : { reservationId: input.reservationId }),
           tx,
         });
       }

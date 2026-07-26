@@ -23,7 +23,7 @@ export const ASSISTANT_SKILLS = [
     slug: 'hosted-low-usage',
     name: 'hosted-low-usage',
     triggerHint:
-      'Use when trusted hosted turn context says Murph usage is running low, or when a user follows up on that warning and asks how to keep a direct trial, paid plan, Family-sponsored Murph, or hosted group conversation going.',
+      'Use when trusted hosted turn context says Murph usage is running low, when a trusted hosted image-admission result says insufficient_image_capacity with reason would_exhaust, or when a user follows up and asks how to keep a direct trial, paid plan, Family-sponsored Murph, or hosted group conversation going.',
   },
   {
     slug: 'experiment-onboarding',
