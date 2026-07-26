@@ -1162,6 +1162,47 @@ describe("deleteHostedAccountData", () => {
     expect(result.cleanupPending).toBe(true);
   });
 
+  it("degrades an immediate cleanup exception to durable pending after local deletion commits", async () => {
+    const operationOrder: string[] = [];
+    const cleanupError = Object.assign(new Error("kms unavailable"), {
+      name: "KmsUnavailableError",
+    });
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    serviceMocks.runHostedAccountDeletionCleanup.mockImplementation(async () => {
+      operationOrder.push("cleanup");
+      throw cleanupError;
+    });
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      onTransaction: () => operationOrder.push("transaction"),
+      operationOrder,
+    });
+
+    try {
+      const result = await deleteHostedAccountData({
+        memberId: "member_123",
+        prisma,
+        request: new Request("https://join.example.test/settings"),
+      });
+
+      expect(operationOrder).toContain("delete:hostedMember");
+      expect(operationOrder).toContain("cleanup");
+      expect(operationOrder.indexOf("delete:hostedMember")).toBeLessThan(
+        operationOrder.indexOf("cleanup"),
+      );
+      expect(serviceMocks.persistHostedAccountDeletionCleanupTx).toHaveBeenCalledTimes(1);
+      expect(serviceMocks.pendingHostedAccountDeletionCleanupResult).toHaveBeenCalledWith(
+        "KmsUnavailableError",
+      );
+      expect(result.cleanupPending).toBe(true);
+      expect(result.vendorAccounts).toMatchObject({
+        privyUser: { errorCode: "KmsUnavailableError", status: "failed" },
+        stripeCustomer: { errorCode: "KmsUnavailableError", status: "failed" },
+      });
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
+
   it("reports vendor deletions as not configured when the vendor clients are absent", async () => {
     serviceMocks.getHostedOnboardingStripe.mockReturnValue(null);
     serviceMocks.runHostedAccountDeletionCleanup.mockResolvedValue(

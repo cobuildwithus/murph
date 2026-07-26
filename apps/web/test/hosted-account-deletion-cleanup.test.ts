@@ -178,6 +178,39 @@ describe("hosted account deletion cleanup", () => {
     expect(store.row).not.toBeNull();
   });
 
+  it("treats already-absent vendor records as completed", async () => {
+    const store = new CleanupStore();
+    const now = new Date("2026-07-26T18:00:00.000Z");
+    const deleteStripeCustomer = vi.fn().mockRejectedValue({
+      code: "resource_missing",
+      type: "StripeInvalidRequestError",
+    });
+    mocks.getHostedOnboardingStripe.mockReturnValue({
+      customers: { del: deleteStripeCustomer },
+    });
+    mocks.deleteHostedPrivyUser.mockRejectedValue({ status: 404 });
+    const prepared = await createCleanup(store, now, {
+      privyUserId: "privy_user_1",
+      stripeCustomerIds: ["cus_1"],
+    });
+
+    await expect(runHostedAccountDeletionCleanup({
+      cleanupId: prepared.id,
+      now,
+      prisma: store.prisma as never,
+    })).resolves.toMatchObject({
+      cleanupPending: false,
+      vendorAccounts: {
+        privyUser: { errorCode: null, status: "completed" },
+        stripeCustomer: { errorCode: null, status: "completed" },
+      },
+    });
+
+    expect(store.row).toBeNull();
+    expect(deleteStripeCustomer).toHaveBeenCalledTimes(1);
+    expect(mocks.deleteHostedPrivyUser).toHaveBeenCalledTimes(1);
+  });
+
   it("keeps Privy cleanup pending when the identity is bound to a live member", async () => {
     const store = new CleanupStore();
     const now = new Date("2026-07-26T18:00:00.000Z");

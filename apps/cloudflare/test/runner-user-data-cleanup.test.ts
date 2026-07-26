@@ -99,6 +99,34 @@ describe("hosted runner user data cleanup", () => {
     expect(stateStore.deleteStateCallCount).toBe(1);
   });
 
+  it("retries after Durable Object deleteAll fails without reporting completion", async () => {
+    const deleteAllError = new Error("Durable Object deleteAll failed");
+    const durable = createDurableObjectHarness({ deleteAllError });
+    const stateStore = createDeletionStateStore();
+    const request = {
+      bucket: new ListableMemoryEncryptedR2Bucket(),
+      runnerContainerNamespace: null,
+      runnerRuntimeEnvSource: {},
+      state: durable.state,
+      stateStore,
+      userId: USER_ID,
+    };
+
+    await expect(deleteHostedRunnerUserData(request)).rejects.toBe(deleteAllError);
+    expect(stateStore.deleteStateCallCount).toBe(1);
+    expect(durable.deleteAllCount).toBe(1);
+
+    await expect(deleteHostedRunnerUserData(request)).resolves.toMatchObject({
+      durableObject: {
+        alarmCleared: true,
+        deleteAllCompleted: true,
+        stateDeleted: true,
+      },
+    });
+    expect(stateStore.deleteStateCallCount).toBe(2);
+    expect(durable.deleteAllCount).toBe(2);
+  });
+
   it("does not delete Durable Object state or alarms when R2 cleanup fails", async () => {
     const durable = createDurableObjectHarness();
     const stateStore = createDeletionStateStore();
@@ -408,6 +436,7 @@ class FailingListableR2Bucket extends ListableMemoryEncryptedR2Bucket {
 }
 
 function createDurableObjectHarness(input: {
+  deleteAllError?: Error;
   deleteFailures?: ReadonlyMap<string, Error>;
 } = {}): {
   alarmDeleteCount: number;
@@ -428,6 +457,9 @@ function createDurableObjectHarness(input: {
     },
     deleteAll: async () => {
       deleteAllCount += 1;
+      if (input.deleteAllError && deleteAllCount === 1) {
+        throw input.deleteAllError;
+      }
       storageValues.clear();
     },
     deleteAlarm: async () => {

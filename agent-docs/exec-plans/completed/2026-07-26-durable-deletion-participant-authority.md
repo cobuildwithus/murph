@@ -1,6 +1,6 @@
 # Durable account-deletion cleanup and bounded participant authority
 
-Status: active
+Status: completed
 Created: 2026-07-26
 Updated: 2026-07-26
 
@@ -77,14 +77,17 @@ Updated: 2026-07-26
 - Product-experience review:
   - Accepted and fixed the legacy-Worker false-completion seam by requiring explicit Durable Object `deleteAll` evidence.
   - Accepted and fixed unbounded provider cleanup by adding immediate/retry attempt budgets and fixed retry-batch concurrency.
-  - The in-app Browser was unavailable, so rendered desktop/mobile proof could not be captured. The reusable pending and completed states are registered in `/design?tab=components` and `/design?tab=sections`, and component tests cover both states.
+  - The in-app Browser was unavailable, so installed Playwright captured clean desktop and mobile proof of the reusable account-deletion design-catalog section. The reusable pending and completed states are registered in `/design?tab=components` and `/design?tab=sections`, and component tests cover both states.
+  - Hosted proof upload remains blocked because the least-privilege Cloudflare Images credentials are not configured in either the shell or the project environment.
   - The configured Claude visual review could not run because its provider account had no remaining credits.
 - Canonical verification:
-  - `MURPH_VERIFY_EXECUTOR=crabbox pnpm test:diff apps/web apps/cloudflare packages/cloudflare-hosted-control` passed in Blacksmith Testbox `tbx_01kyep30qdg9s664ekjtzwaw4g` (GitHub Actions run `30193324227`).
-  - `MURPH_VERIFY_EXECUTOR=crabbox pnpm verify:acceptance` passed in Blacksmith Testbox `tbx_01kyep7a9s43908gvvt3m0n14b` (GitHub Actions run `30193396991`).
-  - The successful diff gate included 6,651 web tests, 1,930 Cloudflare tests, 46 shared-control tests, lint, typechecks, dev smoke, and the production web build.
+  - `MURPH_VERIFY_EXECUTOR=crabbox pnpm test:diff apps/web apps/cloudflare packages/cloudflare-hosted-control` passed after specialist remediation in Blacksmith Testbox `tbx_01kyfxwgzqn863rth3g7m55qjf` (GitHub Actions run `30216609062`).
+  - `MURPH_VERIFY_EXECUTOR=crabbox pnpm verify:acceptance` passed in Blacksmith Testbox `tbx_01kyfvpjaqw051tmjbh1t8vm03` (GitHub Actions run `30215249909`).
+  - The successful final diff gate included 6,662 web tests, 1,931 Cloudflare tests, 47 shared-control tests, lint, typechecks, dev smoke, and the production web build.
+- Preliminary specialist review:
+  - Prompt and frontend lenses were clean on the corrected candidate.
+  - Accepted both coverage findings and added direct regression proof for Durable Object `deleteAll` failure/replay, already-absent provider classification, and immediate-cleanup rejection degrading to a durable pending result.
 - Remaining completion gates:
-  - preliminary `completion-specialists` ReviewGPT on the exact pushed PR head;
-  - parent final review and any required remediation verification;
   - final ReviewGPT plus green PR CI on the immutable final head;
   - clean merge proof against the latest base.
+Completed: 2026-07-26
