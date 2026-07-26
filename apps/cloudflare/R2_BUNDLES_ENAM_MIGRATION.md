@@ -176,21 +176,26 @@ environment for the `murph` web project. It is not read from a file and a bare
 shell assignment does nothing: setting or clearing it requires a production
 environment change followed by a deployment that picks it up.
 
-**One rule owns the window.** The control is set only while an ENAM bucket
-holds copies that could still become live, and cleared the moment OC is the
-sole authority again. The cutover owner owns both edges. Deriving every exit
-from that one rule is what keeps the control from outliving the operation:
+**One rule owns the window.** The control is set before the destination exists
+so it can become the sole admission fence and drain all earlier deletions
+before any copy is possible. It remains set while an ENAM bucket holds copies
+that could still become live, and is cleared the moment OC is the sole
+authority again. The cutover owner owns both edges:
 
 | Point in the operation | Control |
 | --- | --- |
-| Anything before the copy, including every section 4 abort | Never set. Section 5 sets it immediately before the first object is copied, after the destination bucket exists and every other fence check has passed. |
+| Section 4 and the marker-bearing preparatory deployment | Unset. |
+| Activation and exact pre-fence deletion drain | Set. The destination does not exist yet. |
+| Activation/drain failure | Cleared by a production environment change and deployment before the operation is rebooked. No destination cleanup is needed. |
 | Copy, cutover, proofs, canary | Set. |
 | Any pre-commit abandonment or overrun | Cleared by the abandonment procedure, before writers reopen. |
 | Successful retirement | Cleared in section 8. |
 
-Because activation is the last step before copying, an abort during the fence
-happens while the control is still unset and needs no unwinding at all. There
-is no ordinary exit that leaves it set.
+Do not create the destination until activation and the exact drain both pass.
+If a later setup step fails before the copy tool creates the pair marker, leave
+the empty, unbound destination in place, revoke its temporary key, clear the
+control, and rebook. Once the pair marker exists, use the mechanically guarded
+abandonment procedure. No ordinary exit leaves the control set.
 
 The message makes no timing promise, not even a relative one. This window runs
 from before the copy until OC retirement, which section 8 permits as late as 24
@@ -388,9 +393,9 @@ One cutover owner must prove every item below. Abort if any item is uncertain.
    that can write BUNDLES.
 3. Confirm every runner has no invocation in flight and the mailbox is drained.
 4. Record the last possible presigned PUT time and wait ten full minutes.
-5. Do not set the deletion-window control yet. Section 5 sets it immediately
-   before the copy, once the destination exists, so that an abort anywhere in
-   this section leaves nothing to unwind.
+5. Do not set the deletion-window control yet. Section 5 activates and proves
+   it before creating the destination, so an abort anywhere in this section
+   leaves nothing to unwind.
 6. Do not claim that `HostedUserRunner` cleanup alarms are stopped. They fire on
    schedule with no invocation, and the platform retries an attempt that failed
    earlier, so one can delete a source object at any point in the window. That
@@ -402,8 +407,153 @@ Keep the fence through section 7.
 
 ## 5. Copy the frozen source and prove the mirror
 
-Define the authoritative production pair, create its dedicated ENAM bucket,
-and issue a separate pair-scoped migration key as in section 2:
+First qualify the marker-bearing web version while the maintenance flag is
+unset. Record `MARKER_DEPLOY_CURSOR_UTC` immediately before dispatching that
+preparatory deployment. It emits two exact, identifier-free Vercel runtime-log
+messages in the same request:
+
+```bash
+export MARKER_DEPLOY_CURSOR_UTC="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+```
+
+- `Hosted account deletion admitted before destructive effects.` immediately
+  before the deletion service;
+- `Hosted account deletion confirmed terminal across R2 and durable state.`
+  only when the service's aggregate `cloudflare.deleted` result proves every
+  fanned-out hosted-member R2 and Durable Object cleanup returned successfully.
+
+Vercel supplies the shared `requestId`. A timeout, process exit,
+`cloudflare.deleted=false`, or missing log leaves the admission unmatched and
+therefore blocks the migration; request completion, HTTP status, event counts,
+and elapsed time are never terminal proof.
+
+Wait for the preparatory deployment to reach 100 percent and record
+`MARKER_READY_UTC`. If its predecessor did not contain both markers, inspect
+that predecessor's logs from `MARKER_DEPLOY_CURSOR_UTC` through
+`MARKER_READY_UTC` for `POST /api/settings/privacy/delete` and require exact
+zero. An invocation on a markerless version cannot be joined mechanically, so
+any match fails this qualification and becomes an incident. A later
+qualification whose predecessor already contains both markers includes those
+requests in the exact join below instead. Keep the whole qualification inside
+Vercel's retained searchable-log window; if the cursor is no longer queryable,
+dispatch a fresh marker-bearing preparation rather than infer missing history.
+
+For the activation:
+
+1. In the cutover shell, record the fence cursor **before** inspecting earlier
+   admissions. This ordering closes the scan-to-cursor race:
+
+   ```bash
+   export ADMISSION_MARKER='Hosted account deletion admitted before destructive effects.'
+   export TERMINAL_MARKER='Hosted account deletion confirmed terminal across R2 and durable state.'
+   export FENCE_CURSOR_UTC="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+   ```
+
+2. In one fail-closed block, list every delete-route invocation from the
+   preparatory deployment cursor up to the fence cursor. Require every matching
+   log to carry a Vercel `requestId`, and require exactly one admission and one
+   terminal marker for each unique request before the cursor. This intentionally
+   blocks even an invocation that never reached authorization if its safety
+   cannot be distinguished from missing logs. Reaching Vercel's 1,000-result
+   bound is ambiguous and therefore fails:
+
+   ```bash
+   (
+     set -euo pipefail
+     test -n "$MARKER_DEPLOY_CURSOR_UTC"
+     test -n "$FENCE_CURSOR_UTC"
+     ADMISSION_TMP_DIR="$(mktemp -d)"
+     ROUTE_LOG="$ADMISSION_TMP_DIR/delete-route.jsonl"
+     REQUEST_IDS="$ADMISSION_TMP_DIR/request-ids.txt"
+     trap 'rm -f "$ROUTE_LOG" "$REQUEST_IDS"; rmdir "$ADMISSION_TMP_DIR"' EXIT
+
+     pnpm --dir apps/web exec vercel logs --project murph \
+       --environment production --no-branch \
+       --query '/api/settings/privacy/delete' \
+       --since "$MARKER_DEPLOY_CURSOR_UTC" --until "$FENCE_CURSOR_UTC" \
+       --limit 1000 --json >"$ROUTE_LOG"
+     ROUTE_LOG_COUNT="$(jq -s 'length' "$ROUTE_LOG")"
+     test "$ROUTE_LOG_COUNT" -lt 1000
+     UNJOINABLE_LOG_COUNT="$(
+       jq -s '
+         [.[] |
+           select(
+             (.path == "/api/settings/privacy/delete"
+               or .requestPath == "/api/settings/privacy/delete"
+               or .proxy.path == "/api/settings/privacy/delete")
+             and (.method == "POST" or .proxy.method == "POST")
+           ) |
+           select((.requestId // "") == "")
+         ] | length
+       ' "$ROUTE_LOG"
+     )"
+     test "$UNJOINABLE_LOG_COUNT" = 0
+     jq -r '
+       select(
+         (.path == "/api/settings/privacy/delete"
+           or .requestPath == "/api/settings/privacy/delete"
+           or .proxy.path == "/api/settings/privacy/delete")
+         and (.method == "POST" or .proxy.method == "POST")
+       ) | .requestId
+     ' "$ROUTE_LOG" | sort -u >"$REQUEST_IDS"
+
+     while IFS= read -r REQUEST_ID; do
+         test -n "$REQUEST_ID"
+         ADMISSION_COUNT="$(
+           pnpm --dir apps/web exec vercel logs --project murph \
+             --environment production --no-branch --request-id "$REQUEST_ID" \
+             --query "$ADMISSION_MARKER" --since "$MARKER_DEPLOY_CURSOR_UTC" \
+             --until "$FENCE_CURSOR_UTC" --limit 2 --json |
+             jq -s --arg marker "$ADMISSION_MARKER" \
+               '[.[] | select(.message == $marker)] | length'
+         )"
+         TERMINAL_COUNT="$(
+           pnpm --dir apps/web exec vercel logs --project murph \
+             --environment production --no-branch --request-id "$REQUEST_ID" \
+             --query "$TERMINAL_MARKER" --since "$MARKER_DEPLOY_CURSOR_UTC" \
+             --until "$FENCE_CURSOR_UTC" --limit 2 --json |
+             jq -s --arg marker "$TERMINAL_MARKER" \
+               '[.[] | select(.message == $marker)] | length'
+         )"
+         test "$ADMISSION_COUNT" = 1
+         test "$TERMINAL_COUNT" = 1
+     done <"$REQUEST_IDS"
+   )
+   ```
+
+3. Set `HOSTED_ACCOUNT_DELETION_MAINTENANCE=1`, deploy to 100 percent, and
+   prove the three route checks from the deferral section.
+4. Query from the already-recorded fence cursor through the present and require
+   exact zero admissions:
+
+   ```bash
+   (
+     set -euo pipefail
+     ADMISSION_COUNT="$(
+       pnpm --dir apps/web exec vercel logs --project murph \
+         --environment production --no-branch --query "$ADMISSION_MARKER" \
+         --since "$FENCE_CURSOR_UTC" --limit 1 --json |
+         jq -s --arg marker "$ADMISSION_MARKER" \
+           '[.[] | select(.message == $marker)] | length'
+     )"
+     test "$ADMISSION_COUNT" = 0
+   )
+   ```
+
+   Any marker means a deletion crossed the fence. Do not create the
+   destination. Clear the maintenance variable through a production deployment,
+   investigate the unmatched request as an incident, and rebook.
+
+The focused route regressions prove admission precedes a deliberately held
+effect, terminal remains absent while it is held, and terminal is emitted only
+after the aggregate Cloudflare result succeeds. Rehearse in preproduction with
+two concurrent deletions, including one that fans out and one held across
+activation, plus a forced web-control timeout. No copy may become eligible
+unless every pre-cursor request has its exact terminal pair and the
+post-cursor admission count is zero.
+
+Only now define the authoritative production pair, create its dedicated ENAM
+bucket, and issue a separate pair-scoped migration key as in section 2:
 
 ```bash
 test "$(gh variable get HOSTED_R2_PRESIGN_BUCKET_NAME --env production)" = "$SOURCE_BUCKET"
@@ -412,86 +562,6 @@ pnpm --dir apps/cloudflare exec wrangler r2 bucket create "$DESTINATION_BUCKET" 
 pnpm --dir apps/cloudflare exec wrangler r2 bucket info "$SOURCE_BUCKET" --json
 pnpm --dir apps/cloudflare exec wrangler r2 bucket info "$DESTINATION_BUCKET" --json
 ```
-
-Now open the deletion window, as the last step before any object is copied:
-set `HOSTED_ACCOUNT_DELETION_MAINTENANCE=1` in the Vercel production
-environment, deploy, and prove the three checks from the deferral section.
-
-**Then prove zero deletion admissions across the deployment boundary.** Both
-guards run once, at request entry. A deletion accepted by the previous
-deployment keeps running through provider revocation, database deletion, and
-Cloudflare object deletion, and nothing re-checks the flag partway through.
-The web route therefore emits the exact identifier-free runtime-log marker
-`Hosted account deletion admitted before destructive effects.` synchronously
-after consuming the sensitive-action challenge and immediately before calling
-the deletion service. Vercel groups that marker with its own `requestId`,
-`deploymentId`, UTC timestamp, route, and method fields.
-
-The marker must already be present in the 100-percent production deployment
-before this maintenance activation deploy starts. During that preparatory
-rollout, inspect the predecessor deployment's `POST
-/api/settings/privacy/delete` invocations that overlap the rollout. If any
-existed, stop scheduling the migration until its Cloudflare structured event
-`Hosted runner user data deletion completed.` proves terminal R2 and Durable
-Object cleanup; an HTTP `200`, a completed Vercel invocation, or
-`cloudflare.deleted=false` is not terminal proof.
-
-For the activation deploy:
-
-1. Inspect every admission marker from the moment the preparatory deployment
-   first received traffic through the present. Establish the terminal
-   Cloudflare event above for every marker. Only after those direct proofs
-   leave no earlier deletion in flight, record a fresh UTC cursor in the
-   cutover shell:
-
-   ```bash
-   export ADMISSION_MARKER='Hosted account deletion admitted before destructive effects.'
-   export ADMISSION_CURSOR_UTC="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-   printf 'export ADMISSION_MARKER=%q\nexport ADMISSION_CURSOR_UTC=%q\n' \
-     "$ADMISSION_MARKER" "$ADMISSION_CURSOR_UTC"
-   ```
-
-   Paste the two printed `export` commands into a second terminal; do not
-   recompute the cursor there. Start the live query immediately:
-
-   ```bash
-   pnpm --dir apps/web exec vercel logs --project murph --environment production \
-     --no-branch --query "$ADMISSION_MARKER" --since "$ADMISSION_CURSOR_UTC" \
-     --json --follow
-   ```
-
-2. Set the flag, deploy, and keep the query live until the deployment reaches
-   100 percent and the three route checks pass.
-3. Back in the original cutover shell, query again from the recorded cursor
-   through the current time and require an exact zero:
-
-   ```bash
-   (
-     set -euo pipefail
-     ADMISSION_COUNT="$(
-       pnpm --dir apps/web exec vercel logs --project murph \
-         --environment production --no-branch --query "$ADMISSION_MARKER" \
-         --since "$ADMISSION_CURSOR_UTC" --json |
-         jq -s --arg marker "$ADMISSION_MARKER" \
-           '[.[] | select(.message == $marker)] | length'
-     )"
-     test "$ADMISSION_COUNT" = 0
-   )
-   ```
-
-   If even one marker exists, do not copy. The destination still contains no
-   copies: abandon it, clear the deletion window, establish the admitted
-   request's terminal Cloudflare outcome as an incident, and rebook.
-4. Proceed only when both the live and bounded queries contain zero admission
-   markers. Do not use request completion, HTTP status, or elapsed time as a
-   substitute.
-
-The focused route regression holds the deletion service after authorization
-and proves the marker is emitted before that held effect. Rehearse the
-operational gate the same way in preproduction: a deliberately held request
-must appear in the query before it completes and force the zero-admission path
-to abandon. Only after the three route checks and this zero-admission proof pass
-does anything get copied.
 
 Run the copy, then the read-only proof immediately before editing variables:
 

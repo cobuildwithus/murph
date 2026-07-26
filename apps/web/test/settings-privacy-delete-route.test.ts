@@ -1,7 +1,10 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
-import { HOSTED_ACCOUNT_DELETION_ADMISSION_LOG_MESSAGE } from "@/src/lib/hosted-privacy/account-deletion-maintenance";
+import {
+  HOSTED_ACCOUNT_DELETION_ADMISSION_LOG_MESSAGE,
+  HOSTED_ACCOUNT_DELETION_TERMINAL_LOG_MESSAGE,
+} from "@/src/lib/hosted-privacy/account-deletion-maintenance";
 import { HOSTED_ACCOUNT_DATA_DELETION_SCHEMA } from "@/src/lib/hosted-privacy/account-data-shared";
 
 const mocks = vi.hoisted(() => ({
@@ -78,6 +81,9 @@ describe("settings privacy delete route", () => {
       "murph-session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0",
     );
     mocks.deleteHostedAccountData.mockResolvedValue({
+      cloudflare: {
+        deleted: true,
+      },
       deletedAt: "2026-04-29T01:02:03.000Z",
       deletedCounts: {
         "prisma.hosted_member": 1,
@@ -143,6 +149,12 @@ describe("settings privacy delete route", () => {
     expect(vi.mocked(console.info).mock.invocationCallOrder[0]).toBeLessThan(
       mocks.deleteHostedAccountData.mock.invocationCallOrder[0],
     );
+    expect(console.info).toHaveBeenCalledWith(
+      HOSTED_ACCOUNT_DELETION_TERMINAL_LOG_MESSAGE,
+    );
+    expect(mocks.deleteHostedAccountData.mock.invocationCallOrder[0]).toBeLessThan(
+      vi.mocked(console.info).mock.invocationCallOrder[1],
+    );
     expect(mocks.deleteHostedAccountData).toHaveBeenCalledWith({
       memberId: "member_123",
       prisma: mocks.prismaClient,
@@ -173,6 +185,9 @@ describe("settings privacy delete route", () => {
         releaseDeletion = resolve;
       });
       return {
+        cloudflare: {
+          deleted: true,
+        },
         deletedAt: "2026-04-29T01:02:03.000Z",
         deletedCounts: {
           "prisma.hosted_member": 1,
@@ -208,9 +223,51 @@ describe("settings privacy delete route", () => {
       expect(mocks.deleteHostedAccountData).toHaveBeenCalledTimes(1);
     });
     expect(responseSettled).toBe(false);
+    expect(console.info).not.toHaveBeenCalledWith(
+      HOSTED_ACCOUNT_DELETION_TERMINAL_LOG_MESSAGE,
+    );
 
     releaseDeletion();
     await expect(responsePromise).resolves.toMatchObject({ status: 200 });
+    expect(console.info).toHaveBeenCalledWith(
+      HOSTED_ACCOUNT_DELETION_TERMINAL_LOG_MESSAGE,
+    );
+  });
+
+  it("does not claim terminal storage cleanup for a best-effort false result", async () => {
+    mocks.deleteHostedAccountData.mockResolvedValueOnce({
+      cloudflare: {
+        deleted: false,
+      },
+      deletedAt: "2026-04-29T01:02:03.000Z",
+      deletedCounts: {
+        "prisma.hosted_member": 1,
+      },
+      memberId: "member_123",
+      schema: HOSTED_ACCOUNT_DATA_DELETION_SCHEMA,
+    });
+    const request = new Request("https://join.example.test/api/settings/privacy/delete", {
+      body: JSON.stringify({
+        authorization: {
+          signature: `0x${"11".repeat(65)}`,
+          token: "sac_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef",
+        },
+        confirmationPhrase: "DELETE MY ACCOUNT",
+      }),
+      headers: {
+        "Content-Type": "application/json",
+        origin: "https://join.example.test",
+      },
+      method: "POST",
+    });
+
+    await expect(settingsPrivacyDeleteRoute.POST(request)).resolves.toMatchObject({ status: 200 });
+    expect(console.info).toHaveBeenCalledWith(
+      HOSTED_ACCOUNT_DELETION_ADMISSION_LOG_MESSAGE,
+    );
+    expect(console.info).not.toHaveBeenCalledWith(
+      HOSTED_ACCOUNT_DELETION_TERMINAL_LOG_MESSAGE,
+    );
   });
 
   it("rejects a wrong typed phrase before deleting account data", async () => {
@@ -305,6 +362,9 @@ describe("settings privacy delete route", () => {
       expect(mocks.buildHostedAppSessionClearCookie).not.toHaveBeenCalled();
       expect(console.info).not.toHaveBeenCalledWith(
         HOSTED_ACCOUNT_DELETION_ADMISSION_LOG_MESSAGE,
+      );
+      expect(console.info).not.toHaveBeenCalledWith(
+        HOSTED_ACCOUNT_DELETION_TERMINAL_LOG_MESSAGE,
       );
 
       vi.unstubAllEnvs();

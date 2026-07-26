@@ -31,13 +31,20 @@ export const HOSTED_ACCOUNT_DELETION_MAINTENANCE_MESSAGE =
 
 /**
  * Exact, identifier-free Vercel runtime-log marker for a deletion that passed
- * both guards and consumed its sensitive-action challenge. The migration
- * runbook treats any marker across the maintenance deployment boundary as a
- * reason to abandon before copying; it never infers terminal R2 deletion from
- * HTTP completion or elapsed time.
+ * both guards and consumed its sensitive-action challenge.
  */
 export const HOSTED_ACCOUNT_DELETION_ADMISSION_LOG_MESSAGE =
   "Hosted account deletion admitted before destructive effects.";
+
+/**
+ * Paired marker emitted in the same Vercel request only after every fanned-out
+ * hosted-member cleanup has synchronously confirmed its R2 and Durable Object
+ * effects. The migration runbook joins the two markers by Vercel requestId and
+ * never treats HTTP completion, elapsed time, or a best-effort false result as
+ * terminal proof.
+ */
+export const HOSTED_ACCOUNT_DELETION_TERMINAL_LOG_MESSAGE =
+  "Hosted account deletion confirmed terminal across R2 and durable state.";
 
 export function assertHostedAccountDeletionAvailable(
   environment: Readonly<Record<string, string | undefined>> = process.env,

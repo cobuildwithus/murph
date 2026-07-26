@@ -11,6 +11,7 @@ import {
 import {
   assertHostedAccountDeletionAvailable,
   HOSTED_ACCOUNT_DELETION_ADMISSION_LOG_MESSAGE,
+  HOSTED_ACCOUNT_DELETION_TERMINAL_LOG_MESSAGE,
 } from "@/src/lib/hosted-privacy/account-deletion-maintenance";
 import { HOSTED_ACCOUNT_PRIVACY_REQUEST_BODY_LIMIT_BYTES } from "@/src/lib/hosted-privacy/account-data-shared";
 import { getPrisma } from "@/src/lib/prisma";
@@ -55,6 +56,14 @@ export const POST = withJsonError(async (request: Request) => {
     prisma,
     request,
   });
+
+  // `deleted` aggregates every hosted-member cleanup and is true only after
+  // each R2 and Durable Object result has returned successfully. A timeout or
+  // best-effort failure deliberately leaves this admission without a terminal
+  // marker, so the migration gate fails closed.
+  if (result.cloudflare.deleted) {
+    console.info(HOSTED_ACCOUNT_DELETION_TERMINAL_LOG_MESSAGE);
+  }
 
   const response = jsonOk({ ok: true, result });
   response.headers.append("Set-Cookie", buildHostedAppSessionClearCookie());
