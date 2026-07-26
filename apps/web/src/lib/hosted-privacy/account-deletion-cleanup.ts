@@ -12,18 +12,23 @@ import {
   type HostedRunnerUserDataDeletionBestEffortResult,
 } from "../hosted-execution/user-data-delete";
 import { describeHostedExecutionSafeLogErrorCode } from "../hosted-execution/logging";
+import {
+  createHostedPrivyUserLookupKey,
+  createHostedPrivyUserLookupKeyReadCandidates,
+} from "../hosted-onboarding/contact-privacy";
 import { deleteHostedPrivyUser } from "../hosted-onboarding/privy";
 import { getHostedOnboardingStripe } from "../hosted-onboarding/runtime";
 
 const CLEANUP_SCHEMA = "murph.hosted-account-deletion-cleanup.v1" as const;
 const CLEANUP_BATCH_SIZE = 25;
 const CLEANUP_BATCH_CONCURRENCY = 4;
+const CLEANUP_RUNTIME_DELETE_CONCURRENCY = 4;
 const CLEANUP_LEASE_MS = 5 * 60_000;
 const CLEANUP_RETRY_BASE_MS = 5 * 60_000;
 const CLEANUP_RETRY_MAX_MS = 24 * 60 * 60_000;
 const CLEANUP_IDENTIFIER_LIMIT = 1_024;
-const CLEANUP_RECEIPT_SETTLEMENT_BUDGET_MS = 250;
 const CLEANUP_TARGET_TIMEOUT_ERROR_CODE = "ACCOUNT_DELETION_CLEANUP_TARGET_TIMEOUT";
+const CLEANUP_PRIVY_REBOUND_ERROR_CODE = "ACCOUNT_DELETION_PRIVY_IDENTITY_REBOUND";
 
 export const HOSTED_ACCOUNT_DELETION_IMMEDIATE_ATTEMPT_TIMEOUT_MS = 5_000;
 export const HOSTED_ACCOUNT_DELETION_RETRY_ATTEMPT_TIMEOUT_MS = 15_000;
@@ -54,8 +59,11 @@ export interface PreparedHostedAccountDeletionCleanup {
   nextAttemptAt: Date;
   payloadCiphertext: string;
   privyCompletedAt: Date | null;
+  privyUserLookupKey: string | null;
   runtimeMemberIds: readonly string[];
+  stripeCustomerIds: readonly string[];
   stripeCompletedAt: Date | null;
+  stripeSubscriptionIds: readonly string[];
 }
 
 export interface HostedAccountDeletionCleanupRunResult {
@@ -79,6 +87,7 @@ export async function prepareHostedAccountDeletionCleanup(input: {
   privyUserId: string | null;
   runtimeMemberIds: readonly string[];
   stripeCustomerIds: readonly string[];
+  stripeSubscriptionIds?: readonly string[];
 }): Promise<PreparedHostedAccountDeletionCleanup> {
   assertValidDate(input.now);
   const id = `hbadc_${randomBytes(18).toString("base64url")}`;
@@ -87,7 +96,12 @@ export async function prepareHostedAccountDeletionCleanup(input: {
     throw new TypeError("Hosted account deletion cleanup requires a runtime member.");
   }
   const stripeCustomerIds = uniqueIdentifiers(input.stripeCustomerIds, "Stripe customer");
+  const stripeSubscriptionIds = uniqueIdentifiers(
+    input.stripeSubscriptionIds ?? [],
+    "Stripe subscription",
+  );
   const privyUserId = optionalIdentifier(input.privyUserId, "Privy user");
+  const privyUserLookupKey = createHostedPrivyUserLookupKey(privyUserId);
   const cryptoConfig = getHostedWebCryptoConfig();
   const encrypted = await cryptoConfig.gcpKms.encrypt({
     additionalAuthenticatedData: cleanupAad({
@@ -111,8 +125,11 @@ export async function prepareHostedAccountDeletionCleanup(input: {
     nextAttemptAt: input.now,
     payloadCiphertext: encrypted.ciphertext,
     privyCompletedAt: privyUserId === null ? input.now : null,
+    privyUserLookupKey,
     runtimeMemberIds,
+    stripeCustomerIds,
     stripeCompletedAt: stripeCustomerIds.length === 0 ? input.now : null,
+    stripeSubscriptionIds,
   };
 }
 
@@ -129,6 +146,7 @@ export async function persistHostedAccountDeletionCleanupTx(input: {
       nextAttemptAt: input.cleanup.nextAttemptAt,
       payloadCiphertext: input.cleanup.payloadCiphertext,
       privyCompletedAt: input.cleanup.privyCompletedAt,
+      privyUserLookupKey: input.cleanup.privyUserLookupKey,
       stripeCompletedAt: input.cleanup.stripeCompletedAt,
     },
   });
@@ -143,17 +161,11 @@ export async function runHostedAccountDeletionCleanup(input: {
   const now = input.now ?? new Date();
   assertValidDate(now);
   const attemptTimeoutMs = normalizeAttemptTimeoutMs(input.attemptTimeoutMs);
-  return await withinCleanupDeadline({
-    operation: runClaimedHostedAccountDeletionCleanup({
-      attemptTimeoutMs,
-      cleanupId: input.cleanupId,
-      now,
-      prisma: input.prisma,
-    }),
-    timeoutMs: attemptTimeoutMs + CLEANUP_RECEIPT_SETTLEMENT_BUDGET_MS,
-    timeoutResult: pendingHostedAccountDeletionCleanupResult(
-      "ACCOUNT_DELETION_CLEANUP_ATTEMPT_TIMEOUT",
-    ),
+  return await runClaimedHostedAccountDeletionCleanup({
+    attemptTimeoutMs,
+    cleanupId: input.cleanupId,
+    now,
+    prisma: input.prisma,
   });
 }
 
@@ -199,30 +211,21 @@ async function runClaimedHostedAccountDeletionCleanup(input: {
 
   try {
     const payload = await decryptCleanupPayload(cleanup);
+    const deadline = createCleanupDeadline(attemptTimeoutMs);
     const [cloudflare, stripeCustomer, privyUser] = await Promise.all([
       cleanup.cloudflareCompletedAt
         ? completedCloudflareResult()
-        : withinCleanupDeadline({
-            operation: deleteHostedRunnerData(
-              payload.runtimeMemberIds,
-              attemptTimeoutMs,
-            ),
-            timeoutMs: attemptTimeoutMs,
-            timeoutResult: timedOutCloudflareResult(),
-          }),
+        : deleteHostedRunnerData(payload.runtimeMemberIds, deadline),
       cleanup.stripeCompletedAt
         ? completedOrSkippedVendorResult(payload.stripeCustomerIds.length > 0)
-        : withinCleanupDeadline({
-            operation: deleteStripeCustomers(payload.stripeCustomerIds),
-            timeoutMs: attemptTimeoutMs,
-            timeoutResult: timedOutVendorResult(),
-          }),
+        : deleteStripeCustomers(payload.stripeCustomerIds, deadline),
       cleanup.privyCompletedAt
         ? completedOrSkippedVendorResult(payload.privyUserId !== null)
-        : withinCleanupDeadline({
-            operation: deletePrivyUser(payload.privyUserId),
-            timeoutMs: attemptTimeoutMs,
-            timeoutResult: timedOutVendorResult(),
+        : deletePrivyUser({
+            deadline,
+            prisma: input.prisma,
+            privyUserId: payload.privyUserId,
+            privyUserLookupKey: cleanup.privyUserLookupKey,
           }),
     ]);
     const cloudflareCompletedAt = cleanup.cloudflareCompletedAt
@@ -401,20 +404,47 @@ function parseCleanupPayload(value: unknown): CleanupPayload {
 
 async function deleteHostedRunnerData(
   runtimeMemberIds: readonly string[],
-  timeoutMs: number,
+  deadline: CleanupDeadline,
 ): Promise<HostedRunnerUserDataDeletionBestEffortResult> {
-  const results = await Promise.all(runtimeMemberIds.map((userId) =>
-    deleteHostedRunnerUserDataBestEffort({
-      context: "account-deletion-cleanup",
-      timeoutMs,
-      userId,
-    })
-  ));
-  return mergeCloudflareDeletionResults(results);
+  const results: HostedRunnerUserDataDeletionBestEffortResult[] = [];
+  let nextIndex = 0;
+  const workers = Array.from({
+    length: Math.min(CLEANUP_RUNTIME_DELETE_CONCURRENCY, runtimeMemberIds.length),
+  }, async () => {
+    while (!cleanupDeadlineExpired(deadline)) {
+      const index = nextIndex;
+      if (index >= runtimeMemberIds.length) {
+        return;
+      }
+      nextIndex += 1;
+      results[index] = await deleteHostedRunnerUserDataBestEffort({
+        context: "account-deletion-cleanup",
+        signal: deadline.signal,
+        timeoutMs: remainingCleanupDeadlineMs(deadline),
+        userId: runtimeMemberIds[index]!,
+      });
+    }
+  });
+  await Promise.all(workers);
+  const deadlineIncomplete = (
+    cleanupDeadlineExpired(deadline)
+    || results.filter((result) => result !== undefined).length < runtimeMemberIds.length
+  );
+  if (deadlineIncomplete) {
+    results.push(timedOutCloudflareResult());
+  }
+  const merged = mergeCloudflareDeletionResults(results);
+  return deadlineIncomplete
+    ? {
+        ...merged,
+        errorCode: CLEANUP_TARGET_TIMEOUT_ERROR_CODE,
+      }
+    : merged;
 }
 
 async function deleteStripeCustomers(
   stripeCustomerIds: readonly string[],
+  deadline: CleanupDeadline,
 ): Promise<HostedAccountVendorDeletionResult> {
   if (stripeCustomerIds.length === 0) {
     return { errorCode: null, status: "skipped_no_record" };
@@ -425,9 +455,18 @@ async function deleteStripeCustomers(
   }
 
   for (const customerId of stripeCustomerIds) {
+    if (cleanupDeadlineExpired(deadline)) {
+      return timedOutVendorResult();
+    }
     try {
-      await stripe.customers.del(customerId);
+      await stripe.customers.del(customerId, {}, {
+        maxNetworkRetries: 0,
+        timeout: remainingCleanupDeadlineMs(deadline),
+      });
     } catch (error) {
+      if (cleanupDeadlineExpired(deadline)) {
+        return timedOutVendorResult();
+      }
       if (!isStripeResourceMissingError(error)) {
         return { errorCode: safeErrorCode(error), status: "failed" };
       }
@@ -436,22 +475,83 @@ async function deleteStripeCustomers(
   return { errorCode: null, status: "completed" };
 }
 
-async function deletePrivyUser(
-  privyUserId: string | null,
-): Promise<HostedAccountVendorDeletionResult> {
+async function deletePrivyUser(input: {
+  deadline: CleanupDeadline;
+  prisma: PrismaClient;
+  privyUserId: string | null;
+  privyUserLookupKey: string | null;
+}): Promise<HostedAccountVendorDeletionResult> {
+  const privyUserId = input.privyUserId;
   if (!privyUserId) {
     return { errorCode: null, status: "skipped_no_record" };
   }
+  const lookupKeys = createHostedPrivyUserLookupKeyReadCandidates(privyUserId);
+  if (
+    !input.privyUserLookupKey
+    || !lookupKeys.includes(input.privyUserLookupKey)
+  ) {
+    return {
+      errorCode: "ACCOUNT_DELETION_PRIVY_LOOKUP_MISMATCH",
+      status: "failed",
+    };
+  }
+  if (cleanupDeadlineExpired(input.deadline)) {
+    return timedOutVendorResult();
+  }
+  const reboundIdentity = await input.prisma.hostedMemberIdentity.findFirst({
+    select: { memberId: true },
+    where: {
+      privyUserLookupKey: {
+        in: lookupKeys,
+      },
+    },
+  });
+  if (reboundIdentity) {
+    return {
+      errorCode: CLEANUP_PRIVY_REBOUND_ERROR_CODE,
+      status: "failed",
+    };
+  }
+  if (cleanupDeadlineExpired(input.deadline)) {
+    return timedOutVendorResult();
+  }
   try {
-    const deleted = await deleteHostedPrivyUser(privyUserId);
+    const deleted = await deleteHostedPrivyUser(privyUserId, {
+      maxRetries: 0,
+      signal: input.deadline.signal,
+      timeout: remainingCleanupDeadlineMs(input.deadline),
+    });
     return deleted
       ? { errorCode: null, status: "completed" }
       : { errorCode: null, status: "skipped_not_configured" };
   } catch (error) {
+    if (cleanupDeadlineExpired(input.deadline)) {
+      return timedOutVendorResult();
+    }
     return isExplicitResourceMissingError(error)
       ? { errorCode: null, status: "completed" }
       : { errorCode: safeErrorCode(error), status: "failed" };
   }
+}
+
+interface CleanupDeadline {
+  expiresAtEpochMs: number;
+  signal: AbortSignal;
+}
+
+function createCleanupDeadline(timeoutMs: number): CleanupDeadline {
+  return {
+    expiresAtEpochMs: Date.now() + timeoutMs,
+    signal: AbortSignal.timeout(timeoutMs),
+  };
+}
+
+function cleanupDeadlineExpired(deadline: CleanupDeadline): boolean {
+  return deadline.signal.aborted || deadline.expiresAtEpochMs <= Date.now();
+}
+
+function remainingCleanupDeadlineMs(deadline: CleanupDeadline): number {
+  return Math.max(1, deadline.expiresAtEpochMs - Date.now());
 }
 
 function mergeCloudflareDeletionResults(
@@ -547,26 +647,6 @@ function timedOutVendorResult(): HostedAccountVendorDeletionResult {
     errorCode: CLEANUP_TARGET_TIMEOUT_ERROR_CODE,
     status: "failed",
   };
-}
-
-async function withinCleanupDeadline<T>(input: {
-  operation: Promise<T>;
-  timeoutMs: number;
-  timeoutResult: T;
-}): Promise<T> {
-  let timeout: ReturnType<typeof setTimeout> | undefined;
-  try {
-    return await Promise.race([
-      input.operation,
-      new Promise<T>((resolve) => {
-        timeout = setTimeout(() => resolve(input.timeoutResult), input.timeoutMs);
-      }),
-    ]);
-  } finally {
-    if (timeout !== undefined) {
-      clearTimeout(timeout);
-    }
-  }
 }
 
 function completedOrSkippedVendorResult(

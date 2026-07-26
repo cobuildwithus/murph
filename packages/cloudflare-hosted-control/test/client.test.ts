@@ -918,6 +918,25 @@ describe("createCloudflareHostedControlClient", () => {
     expectNoRunContractFields(result);
   });
 
+  it("includes bearer-token acquisition in the user-data deletion deadline", async () => {
+    const abort = new AbortController();
+    const fetchImpl = vi.fn() as unknown as typeof fetch;
+    const client = createCloudflareHostedControlClient({
+      baseUrl: "https://runner.example.test/root/",
+      fetchImpl,
+      getBearerToken: () => new Promise(() => undefined),
+      timeoutMs: 2_500,
+    });
+    const deletion = client.deleteUserData("user_123", {
+      signal: abort.signal,
+    });
+
+    abort.abort(new Error("cleanup deadline reached"));
+
+    await expect(deletion).rejects.toThrow("cleanup deadline reached");
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
   it("rejects user data deletion responses for another user", async () => {
     const client = createCloudflareHostedControlClient({
       baseUrl: "https://runner.example.test/root/",

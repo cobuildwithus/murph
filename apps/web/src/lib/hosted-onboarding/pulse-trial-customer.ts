@@ -8,6 +8,7 @@ export function buildHostedPulseTrialCustomerIdempotencyKey(memberId: string): s
 
 export async function createHostedPulseTrialStripeCustomer(input: {
   memberId: string;
+  requestOptions?: Stripe.RequestOptions;
   stripe: Stripe;
 }): Promise<string> {
   const customer = await withHostedStripeFailureLog(
@@ -18,6 +19,7 @@ export async function createHostedPulseTrialStripeCustomer(input: {
         source: "hosted.auto_pulse_trial",
       },
     }, {
+      ...input.requestOptions,
       idempotencyKey: buildHostedPulseTrialCustomerIdempotencyKey(input.memberId),
     }),
   );

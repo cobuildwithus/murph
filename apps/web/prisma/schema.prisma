@@ -1295,6 +1295,7 @@ model HostedAccountDeletionCleanup {
   payloadCiphertext     String    @map("payload_ciphertext")
   kmsKeyName            String    @map("kms_key_name")
   environment           String
+  privyUserLookupKey    String?   @map("privy_user_lookup_key")
   cloudflareCompletedAt DateTime? @map("cloudflare_completed_at")
   stripeCompletedAt     DateTime? @map("stripe_completed_at")
   privyCompletedAt      DateTime? @map("privy_completed_at")
@@ -1308,6 +1309,7 @@ model HostedAccountDeletionCleanup {
   updatedAt             DateTime  @updatedAt @map("updated_at")
 
   @@index([nextAttemptAt, leaseExpiresAt])
+  @@index([privyUserLookupKey, privyCompletedAt])
   @@map("hosted_account_deletion_cleanup")
 }
 

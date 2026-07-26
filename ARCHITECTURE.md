@@ -353,10 +353,20 @@ KMS-encrypted external-cleanup receipt in the same transaction. The receipt is
 the sole post-delete owner of the minimal Cloudflare runtime, Stripe customer,
 and Privy identifiers; target completion is independent, retries use the
 existing retention sweep, and terminal convergence deletes the receipt.
-Immediate provider attempts have a five-second target budget plus a small
-receipt-settlement margin. Retention attempts use a fifteen-second target
-budget and bounded four-receipt concurrency so one slow provider cannot own the
-request or sweep indefinitely.
+Account deletion first locks and suspends the owner plus every owned thread
+container, and every relationship writer that can add a runtime, Stripe, Family,
+or Privy target shares that member lock and rejects suspended owners. The final
+deletion transaction locks the same owner first and rejects any target-set
+change before persisting the receipt or deleting local rows. A searchable,
+non-reversible Privy lookup key on an incomplete receipt blocks identity
+re-creation and lets retries prove that a newly bound identity cannot be
+deleted.
+
+Immediate provider attempts share one five-second abortable deadline. Retention
+attempts share one fifteen-second abortable deadline, use bounded four-receipt
+concurrency, and delete Cloudflare runtime targets through a four-worker pool.
+Cloudflare authorization acquisition and provider fetches are inside the
+deadline; queued targets are left for the next retry after it expires.
 
 Cloudflare completion requires an explicit `deleteAllCompleted` result in
 addition to alarm, SQL-state, and R2 completion. A legacy Worker response

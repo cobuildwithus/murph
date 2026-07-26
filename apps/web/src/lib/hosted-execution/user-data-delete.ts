@@ -20,6 +20,7 @@ export interface HostedRunnerUserDataDeletionBestEffortResult {
 }
 
 export async function deleteHostedRunnerUserData(input: {
+  signal?: AbortSignal;
   timeoutMs?: number;
   userId: string;
 }): Promise<CloudflareHostedControlUserDataDeletionResult | null> {
@@ -29,11 +30,14 @@ export async function deleteHostedRunnerUserData(input: {
     return null;
   }
 
-  return await client.deleteUserData(input.userId);
+  return await (input.signal
+    ? client.deleteUserData(input.userId, { signal: input.signal })
+    : client.deleteUserData(input.userId));
 }
 
 export async function deleteHostedRunnerUserDataBestEffort(input: {
   context?: string;
+  signal?: AbortSignal;
   timeoutMs?: number;
   userId: string;
 }): Promise<HostedRunnerUserDataDeletionBestEffortResult> {

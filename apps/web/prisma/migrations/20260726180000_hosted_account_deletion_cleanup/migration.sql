@@ -3,6 +3,7 @@ CREATE TABLE "hosted_account_deletion_cleanup" (
   "payload_ciphertext" TEXT NOT NULL,
   "kms_key_name" TEXT NOT NULL,
   "environment" TEXT NOT NULL,
+  "privy_user_lookup_key" TEXT,
   "cloudflare_completed_at" TIMESTAMP(3),
   "stripe_completed_at" TIMESTAMP(3),
   "privy_completed_at" TIMESTAMP(3),
@@ -20,3 +21,6 @@ CREATE TABLE "hosted_account_deletion_cleanup" (
 
 CREATE INDEX "hosted_account_deletion_cleanup_next_attempt_at_lease_expires_at_idx"
   ON "hosted_account_deletion_cleanup"("next_attempt_at", "lease_expires_at");
+
+CREATE INDEX "hosted_account_deletion_cleanup_privy_user_lookup_key_privy_completed_at_idx"
+  ON "hosted_account_deletion_cleanup"("privy_user_lookup_key", "privy_completed_at");

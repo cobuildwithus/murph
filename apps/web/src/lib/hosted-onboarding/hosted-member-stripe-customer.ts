@@ -33,10 +33,6 @@ export async function ensureHostedMemberStripeCustomer(input: {
   }
 
   const { stripe } = requireHostedStripeApiMode();
-  const candidateStripeCustomerId = await createHostedPulseTrialStripeCustomer({
-    memberId: input.memberId,
-    stripe,
-  });
 
   return prisma.$transaction(async (tx) => {
     await lockHostedMemberRow(tx, input.memberId);
@@ -55,6 +51,15 @@ export async function ensureHostedMemberStripeCustomer(input: {
       memberId: input.memberId,
       prisma: tx,
     });
+    const candidateStripeCustomerId = current?.stripeCustomerId
+      ?? await createHostedPulseTrialStripeCustomer({
+        memberId: input.memberId,
+        requestOptions: {
+          maxNetworkRetries: 2,
+          timeout: 5_000,
+        },
+        stripe,
+      });
     const billingRef = current?.stripeCustomerId
       ? current
       : await bindHostedMemberStripeCustomerIdIfMissingTx({

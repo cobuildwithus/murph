@@ -1079,6 +1079,35 @@ function restoreEnvValue(key: string, value: string | undefined): void {
 }
 
 describe("Linq explicit external-thread routing", () => {
+  it("locks and rejects a suspended owner before creating a thread container", async () => {
+    const prisma = createStatefulThreadRoutePrisma();
+    vi.mocked(hostedMemberStore.readHostedMemberCoreState).mockResolvedValue({
+      billingStatus: HostedBillingStatus.active,
+      createdAt: new Date("2026-06-24T00:00:00.000Z"),
+      id: "member_owner_123",
+      suspendedAt: new Date("2026-06-24T00:01:00.000Z"),
+      updatedAt: new Date("2026-06-24T00:01:00.000Z"),
+    });
+
+    await expect(
+      ensureHostedThreadContainerRouteTx({
+        accountLookupKey: createHostedPhoneLookupKey("+15550000000"),
+        channel: "linq",
+        occurredAt: new Date("2026-06-24T00:02:00.000Z"),
+        ownerMemberId: "member_owner_123",
+        prisma: prisma as unknown as Prisma.TransactionClient,
+        threadId: "chat_suspended_123",
+      }),
+    ).rejects.toMatchObject({
+      code: "HOSTED_MEMBER_SUSPENDED",
+    });
+
+    expect(prisma.$queryRaw).toHaveBeenCalledOnce();
+    expect(hostedMemberStore.createHostedMember).not.toHaveBeenCalled();
+    expect(prisma.hostedThreadContainer.create).not.toHaveBeenCalled();
+    expect(prisma.hostedThreadRoute.create).not.toHaveBeenCalled();
+  });
+
   it("rejects thread containers as owners of nested thread containers", async () => {
     const prisma = createStatefulThreadRoutePrisma();
     prisma.seedThreadContainer({

@@ -18,6 +18,7 @@ import {
 } from "../connected-apps/config";
 import { resolveHostedDeviceSyncBrowserProviderLabel } from "../device-sync/provider-label";
 import { acquireHostedWebhookTraceOwnerLockTx } from "../device-sync/webhook-trace-owner-lock";
+import { createHostedPrivyUserLookupKey } from "../hosted-onboarding/contact-privacy";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import { readHostedMemberStripeBillingRef } from "../hosted-onboarding/hosted-member-billing-store";
 import { readHostedMemberIdentity } from "../hosted-onboarding/hosted-member-identity-store";
@@ -624,43 +625,28 @@ export async function deleteHostedAccountData(input: {
     });
   }
 
-  // Decrypt vendor account ids before their rows are deleted below.
-  const billingRef = await readHostedMemberStripeBillingRef({
-    memberId: input.memberId,
-    prisma: input.prisma,
-  });
-  const identity = await readHostedMemberIdentity({
-    memberId: input.memberId,
-    prisma: input.prisma,
-  });
-  const familyBillingRefs = await listHostedFamilyBillingRefsOwnedByMember({
-    memberId: input.memberId,
-    prisma: input.prisma,
-  });
-  const stripeCustomerId = billingRef?.stripeCustomerId ?? null;
-  const stripeSubscriptionId = billingRef?.stripeSubscriptionId ?? null;
-  const stripeCustomerIds = dedupeNullableStrings([
-    stripeCustomerId,
-    ...familyBillingRefs.map((familyBillingRef) => familyBillingRef.stripeCustomerId),
-  ]);
-  const privyUserId = identity?.privyUserId ?? null;
-  const ownedThreadContainerMemberIds = await listOwnedHostedThreadContainerMemberIds({
+  const deletionStartedAt = new Date();
+  const deletionMemberIds = await markHostedMembersSuspendedForAccountDeletion({
+    now: deletionStartedAt,
     ownerMemberId: input.memberId,
     prisma: input.prisma,
   });
-  const deletionMemberIds = uniqueStrings([
-    input.memberId,
-    ...ownedThreadContainerMemberIds,
-  ]);
+  // The suspension fence is committed before provider identifiers are
+  // decrypted so relationship writers cannot add ownership outside this
+  // durable cleanup snapshot.
+  const deletionTargets = await readHostedAccountDeletionExternalTargets({
+    memberId: input.memberId,
+    prisma: input.prisma,
+  });
 
-  const deletionStartedAt = new Date();
   let preparedCleanup: PreparedHostedAccountDeletionCleanup;
   try {
     preparedCleanup = await prepareHostedAccountDeletionCleanup({
       now: deletionStartedAt,
-      privyUserId,
+      privyUserId: deletionTargets.privyUserId,
       runtimeMemberIds: deletionMemberIds,
-      stripeCustomerIds,
+      stripeCustomerIds: deletionTargets.stripeCustomerIds,
+      stripeSubscriptionIds: deletionTargets.stripeSubscriptionIds,
     });
   } catch (error) {
     throw hostedOnboardingError({
@@ -671,11 +657,6 @@ export async function deleteHostedAccountData(input: {
       retryable: true,
     });
   }
-  await markHostedMembersSuspendedForAccountDeletion({
-    memberIds: deletionMemberIds,
-    now: deletionStartedAt,
-    prisma: input.prisma,
-  });
   await deleteHostedPhoneCallsForAccountDeletion({
     memberIds: deletionMemberIds,
     prisma: input.prisma,
@@ -709,11 +690,9 @@ export async function deleteHostedAccountData(input: {
   // Cancel the subscription before local rows are deleted and fail closed:
   // a deleted account must never keep an active Stripe subscription billing it.
   const stripeSubscription = await cancelHostedStripeSubscriptionsForAccountDeletion({
-    familyStripeSubscriptionIds: familyBillingRefs
-      .map((familyBillingRef) => familyBillingRef.stripeSubscriptionId)
-      .filter((id): id is string => typeof id === "string" && id.length > 0),
+    familyStripeSubscriptionIds: deletionTargets.familyStripeSubscriptionIds,
     memberId: input.memberId,
-    stripeSubscriptionId,
+    stripeSubscriptionId: deletionTargets.directStripeSubscriptionId,
   });
   await closeHostedUsageCreditPurchasesForAccountDeletion({
     memberIds: deletionMemberIds,
@@ -727,6 +706,10 @@ export async function deleteHostedAccountData(input: {
     });
   }
   const databaseDeletion: HostedAccountDeletionDatabaseResult = await input.prisma.$transaction(async (tx) => {
+    await lockHostedMemberForAccountDeletionTx({
+      memberId: input.memberId,
+      prisma: tx,
+    });
     const transactionDeletionMemberIds = uniqueStrings([
       input.memberId,
       ...await listOwnedHostedThreadContainerMemberIds({
@@ -735,7 +718,7 @@ export async function deleteHostedAccountData(input: {
       }),
     ]);
 
-    for (const memberId of transactionDeletionMemberIds) {
+    for (const memberId of transactionDeletionMemberIds.slice(1)) {
       await lockHostedMemberForAccountDeletionTx({
         memberId,
         prisma: tx,
@@ -744,6 +727,10 @@ export async function deleteHostedAccountData(input: {
     await refreshHostedMembersAccountDeletionFenceTx({
       memberIds: transactionDeletionMemberIds,
       now: deletionStartedAt,
+      prisma: tx,
+    });
+    const transactionDeletionTargets = await readHostedAccountDeletionExternalTargets({
+      memberId: input.memberId,
       prisma: tx,
     });
     await assertHostedUsageCreditPurchasesReadyForAccountDeletionTx({
@@ -774,14 +761,13 @@ export async function deleteHostedAccountData(input: {
       connectionIdentities: deviceConnectionIdentities,
       prisma: tx,
     });
-    if (!haveSameStrings(transactionDeletionMemberIds, preparedCleanup.runtimeMemberIds)) {
-      throw hostedOnboardingError({
-        code: "ACCOUNT_DELETION_RUNTIME_SET_CHANGED",
-        httpStatus: 503,
-        message: "Your account changed during deletion. Retry so every hosted runtime is included.",
-        retryable: true,
-      });
-    }
+    assertHostedAccountDeletionTargetsUnchanged({
+      current: {
+        ...transactionDeletionTargets,
+        runtimeMemberIds: transactionDeletionMemberIds,
+      },
+      prepared: preparedCleanup,
+    });
     await persistHostedAccountDeletionCleanupTx({
       cleanup: preparedCleanup,
       prisma: tx,
@@ -933,13 +919,70 @@ async function listOwnedHostedThreadContainerMemberIds(input: {
   return rows.map((row) => row.memberId);
 }
 
+interface HostedAccountDeletionExternalTargets {
+  directStripeSubscriptionId: string | null;
+  familyStripeSubscriptionIds: string[];
+  privyUserId: string | null;
+  stripeCustomerIds: string[];
+  stripeSubscriptionIds: string[];
+}
+
+async function readHostedAccountDeletionExternalTargets(input: {
+  memberId: string;
+  prisma: HostedAccountDataPrisma;
+}): Promise<HostedAccountDeletionExternalTargets> {
+  const [billingRef, identity, familyBillingRefs] = await Promise.all([
+    readHostedMemberStripeBillingRef({
+      memberId: input.memberId,
+      prisma: input.prisma,
+    }),
+    readHostedMemberIdentity({
+      memberId: input.memberId,
+      prisma: input.prisma,
+    }),
+    listHostedFamilyBillingRefsOwnedByMember({
+      memberId: input.memberId,
+      prisma: input.prisma,
+    }),
+  ]);
+  const directStripeSubscriptionId = billingRef?.stripeSubscriptionId ?? null;
+  const familyStripeSubscriptionIds = dedupeNullableStrings(
+    familyBillingRefs.map((billing) => billing.stripeSubscriptionId),
+  );
+
+  return {
+    directStripeSubscriptionId,
+    familyStripeSubscriptionIds,
+    privyUserId: identity?.privyUserId ?? null,
+    stripeCustomerIds: dedupeNullableStrings([
+      billingRef?.stripeCustomerId ?? null,
+      ...familyBillingRefs.map((billing) => billing.stripeCustomerId),
+    ]),
+    stripeSubscriptionIds: dedupeNullableStrings([
+      directStripeSubscriptionId,
+      ...familyStripeSubscriptionIds,
+    ]),
+  };
+}
+
 async function markHostedMembersSuspendedForAccountDeletion(input: {
-  memberIds: readonly string[];
   now: Date;
+  ownerMemberId: string;
   prisma: PrismaClient;
-}): Promise<void> {
-  await input.prisma.$transaction(async (tx) => {
-    for (const memberId of input.memberIds) {
+}): Promise<string[]> {
+  return input.prisma.$transaction(async (tx) => {
+    await lockHostedMemberForAccountDeletionTx({
+      memberId: input.ownerMemberId,
+      prisma: tx,
+    });
+    const memberIds = uniqueStrings([
+      input.ownerMemberId,
+      ...await listOwnedHostedThreadContainerMemberIds({
+        ownerMemberId: input.ownerMemberId,
+        prisma: tx,
+      }),
+    ]);
+    for (const memberId of memberIds.slice(1)) {
       await lockHostedMemberForAccountDeletionTx({
         memberId,
         prisma: tx,
@@ -950,10 +993,11 @@ async function markHostedMembersSuspendedForAccountDeletion(input: {
         suspendedAt: input.now,
       },
       where: {
-        id: buildStringInFilter(input.memberIds),
+        id: buildStringInFilter(memberIds),
         suspendedAt: null,
       },
     });
+    return memberIds;
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
 }
 
@@ -979,6 +1023,40 @@ function uniqueStrings(values: readonly string[]): string[] {
 function haveSameStrings(left: readonly string[], right: readonly string[]): boolean {
   const rightSet = new Set(right);
   return left.length === rightSet.size && left.every((value) => rightSet.has(value));
+}
+
+function assertHostedAccountDeletionTargetsUnchanged(input: {
+  current: HostedAccountDeletionExternalTargets & {
+    runtimeMemberIds: readonly string[];
+  };
+  prepared: PreparedHostedAccountDeletionCleanup;
+}): void {
+  if (!haveSameStrings(input.current.runtimeMemberIds, input.prepared.runtimeMemberIds)) {
+    throw hostedOnboardingError({
+      code: "ACCOUNT_DELETION_RUNTIME_SET_CHANGED",
+      httpStatus: 503,
+      message: "Your account changed during deletion. Retry so every hosted runtime is included.",
+      retryable: true,
+    });
+  }
+  const currentPrivyUserLookupKey = createHostedPrivyUserLookupKey(
+    input.current.privyUserId,
+  );
+  if (
+    currentPrivyUserLookupKey !== input.prepared.privyUserLookupKey
+    || !haveSameStrings(input.current.stripeCustomerIds, input.prepared.stripeCustomerIds)
+    || !haveSameStrings(
+      input.current.stripeSubscriptionIds,
+      input.prepared.stripeSubscriptionIds,
+    )
+  ) {
+    throw hostedOnboardingError({
+      code: "ACCOUNT_DELETION_EXTERNAL_TARGET_SET_CHANGED",
+      httpStatus: 503,
+      message: "Your account changed during deletion. Retry so every provider record is included.",
+      retryable: true,
+    });
+  }
 }
 
 function buildStringInFilter(values: readonly string[]): string | { in: string[] } {

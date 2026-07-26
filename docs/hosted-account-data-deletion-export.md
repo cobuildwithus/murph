@@ -168,6 +168,17 @@ Deletion cannot guarantee immediate erasure in systems Murph does not control. T
 
 Stripe and Privy vendor accounts are actively deleted by the deletion workflow itself: the subscription is canceled fail-closed before the local wipe, and the encrypted deletion receipt retains retry ownership for the customer and Privy user afterward. Local usage-credit purchase rows and their encrypted Stripe references are deleted with the account. Stripe retains records it is legally required to keep (for example invoices and payment records) under its own documented processes after the customer object is deleted.
 
+The owner and owned thread-container members are locked and suspended before
+the external-target snapshot is prepared. Runtime, direct and Family Stripe,
+and Privy relationship writers serialize on that lifecycle fence and reject a
+suspended owner; the destructive transaction re-reads the complete target set
+under the same owner-first lock and aborts if it changed. Incomplete cleanup
+receipts keep a searchable non-reversible Privy lookup key so a deleted identity
+cannot be recreated while a delayed retry still owns deletion authority.
+Provider work shares one abortable attempt deadline, with Cloudflare bearer
+acquisition and request execution inside that deadline and runtime deletions
+limited to a fixed worker pool.
+
 Retell call objects are actively deleted before the local wipe. The local phone-call row remains available for retry until Retell confirms deletion or confirms that the object is already absent; account deletion does not report success while a Retell provider id remains.
 
 ## Tests
@@ -180,7 +191,7 @@ Retell call objects are actively deleted before the local wipe. The local phone-
 - non-empty notes plus valid deletion/export modes for each store.
 - deletion ordering that stops the Temporal runtime before local deletion, atomically persists cleanup ownership before member removal, keeps external cleanup after Prisma commit, and skips external cleanup when the transaction fails.
 - Temporal workflow termination ordering before deletion, after Prisma commit, and after Cloudflare cleanup, plus hosted reconciliation-facts blocking for deleted, inactive, or unconfigured users.
-- durable external cleanup: receipt-bound KMS encryption, atomic receipt ownership, independent target progress, idempotent retry, unconfigured-target and legacy-Worker pending state, provider-attempt deadlines, lease-loss handling, and bounded batch isolation.
+- durable external cleanup: receipt-bound KMS encryption, atomic receipt ownership, independent target progress, idempotent retry, searchable Privy deletion authority, lifecycle-fenced target snapshots, unconfigured-target and legacy-Worker pending state, abortable provider-attempt deadlines, lease-loss handling, fixed Cloudflare worker concurrency, and bounded batch isolation.
 - Family account cleanup: owned Family subscriptions cancel fail-closed, Family memberships/invites/billing refs are deleted with account rows, and Family Stripe customer references are deduped with direct billing customer cleanup.
 - Retell cleanup: terminal and active provider objects are deleted, active calls stop first, confirmed absence is retry-safe, ambiguous failures retain local provider ids, bounded extra batches require retry, and the final transaction rejects any remaining provider id or active reservation.
 - usage-credit cleanup: store coverage includes purchase and ledger rows, deletion counts both stores, and ledger entries are deleted before purchases and hosted member rows.

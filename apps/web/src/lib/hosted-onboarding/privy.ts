@@ -91,14 +91,21 @@ export async function readHostedPrivyUserById(privyUserId: string): Promise<Host
 
 // Deletes the Privy user record itself (account deletion). Returns false when
 // the management client is not configured; throws when the Privy API call fails.
-export async function deleteHostedPrivyUser(privyUserId: string): Promise<boolean> {
+export async function deleteHostedPrivyUser(
+  privyUserId: string,
+  options?: {
+    maxRetries?: number;
+    signal?: AbortSignal;
+    timeout?: number;
+  },
+): Promise<boolean> {
   const client = getHostedPrivyManagementClient();
 
   if (!client) {
     return false;
   }
 
-  await client.users().delete(privyUserId);
+  await client.users().delete(privyUserId, options);
   return true;
 }
 

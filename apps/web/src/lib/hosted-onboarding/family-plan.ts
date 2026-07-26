@@ -1054,6 +1054,22 @@ export async function writeHostedAccountGroupStripeBillingTx(input: {
   }
 
   await lockHostedMemberRow(input.tx, group.ownerMemberId);
+  const currentGroup = await input.tx.hostedAccountGroup.findUnique({
+    select: {
+      owner: {
+        select: { suspendedAt: true },
+      },
+      suspendedAt: true,
+    },
+    where: { id: input.groupId },
+  });
+  if (
+    !currentGroup
+    || isHostedMemberSuspended(currentGroup.owner.suspendedAt)
+    || isHostedMemberSuspended(currentGroup.suspendedAt)
+  ) {
+    return null;
+  }
 
   const currentBillingRef = await input.tx.hostedAccountGroupBillingRef.findUnique({
     select: hostedAccountGroupBillingRefSelect,

@@ -80,6 +80,7 @@ describe("hosted account deletion cleanup", () => {
     });
 
     expect(cleanup.runtimeMemberIds).toEqual(["member_1", "member_group_1"]);
+    expect(cleanup.privyUserLookupKey).toMatch(/^hbidx:privy-user:/u);
     const encryptInput = mocks.kmsEncrypt.mock.calls[0]?.[0];
     expect(encryptInput?.keyName).toBe(KMS_KEY_NAME);
     expect(JSON.parse(String(encryptInput?.additionalAuthenticatedData))).toEqual({
@@ -177,6 +178,65 @@ describe("hosted account deletion cleanup", () => {
     expect(store.row).not.toBeNull();
   });
 
+  it("keeps Privy cleanup pending when the identity is bound to a live member", async () => {
+    const store = new CleanupStore();
+    const now = new Date("2026-07-26T18:00:00.000Z");
+    store.livePrivyMemberId = "member_recreated";
+    const prepared = await createCleanup(store, now, {
+      privyUserId: "privy_user_1",
+    });
+
+    await expect(runHostedAccountDeletionCleanup({
+      cleanupId: prepared.id,
+      now,
+      prisma: store.prisma as never,
+    })).resolves.toMatchObject({
+      cleanupPending: true,
+      vendorAccounts: {
+        privyUser: {
+          errorCode: "ACCOUNT_DELETION_PRIVY_IDENTITY_REBOUND",
+          status: "failed",
+        },
+      },
+    });
+
+    expect(mocks.deleteHostedPrivyUser).not.toHaveBeenCalled();
+    expect(store.row?.privyCompletedAt).toBeNull();
+  });
+
+  it("bounds Cloudflare deletion work with a fixed worker pool", async () => {
+    const store = new CleanupStore();
+    const now = new Date("2026-07-26T18:00:00.000Z");
+    let active = 0;
+    let maxActive = 0;
+    mocks.deleteHostedRunnerUserDataBestEffort.mockImplementation(async () => {
+      active += 1;
+      maxActive = Math.max(maxActive, active);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      active -= 1;
+      return makeCloudflareDeletionResult({ deleted: true });
+    });
+    const prepared = await prepareHostedAccountDeletionCleanup({
+      now,
+      privyUserId: null,
+      runtimeMemberIds: Array.from({ length: 12 }, (_, index) => `member_${index}`),
+      stripeCustomerIds: [],
+    });
+    await persistHostedAccountDeletionCleanupTx({
+      cleanup: prepared,
+      prisma: store.prisma as never,
+    });
+
+    await expect(runHostedAccountDeletionCleanup({
+      cleanupId: prepared.id,
+      now,
+      prisma: store.prisma as never,
+    })).resolves.toMatchObject({ cleanupPending: false });
+
+    expect(mocks.deleteHostedRunnerUserDataBestEffort).toHaveBeenCalledTimes(12);
+    expect(maxActive).toBe(4);
+  });
+
   it("does not report completion after losing the receipt lease", async () => {
     const store = new CleanupStore();
     const now = new Date("2026-07-26T18:00:00.000Z");
@@ -221,11 +281,32 @@ describe("hosted account deletion cleanup", () => {
     vi.useFakeTimers();
     const store = new CleanupStore();
     const now = new Date("2026-07-26T18:00:00.000Z");
-    const never = new Promise<never>(() => undefined);
-    mocks.deleteHostedRunnerUserDataBestEffort.mockReturnValue(never);
-    mocks.deleteHostedPrivyUser.mockReturnValue(never);
+    mocks.deleteHostedRunnerUserDataBestEffort.mockImplementation(
+      ({ signal }: { signal: AbortSignal }) => new Promise((resolve) => {
+        signal.addEventListener("abort", () => resolve(makeCloudflareDeletionResult({
+          deleted: false,
+          errorCode: "AbortError",
+        })), { once: true });
+      }),
+    );
+    mocks.deleteHostedPrivyUser.mockImplementation(
+      (_userId: string, options: { signal: AbortSignal }) =>
+        new Promise((_resolve, reject) => {
+          options.signal.addEventListener("abort", () => reject(options.signal.reason), {
+            once: true,
+          });
+        }),
+    );
     mocks.getHostedOnboardingStripe.mockReturnValue({
-      customers: { del: vi.fn(() => never) },
+      customers: {
+        del: vi.fn((
+          _customerId: string,
+          _params: unknown,
+          options: { timeout: number },
+        ) => new Promise((_resolve, reject) => {
+          setTimeout(() => reject(new Error("Stripe request timed out")), options.timeout);
+        })),
+      },
     });
     const prepared = await createCleanup(store, now, {
       privyUserId: "privy_user_1",
@@ -261,6 +342,46 @@ describe("hosted account deletion cleanup", () => {
       attemptCount: 1,
       leaseToken: null,
     });
+  });
+
+  it("does not launch queued runtime deletions after the deadline", async () => {
+    vi.useFakeTimers();
+    const store = new CleanupStore();
+    const now = new Date("2026-07-26T18:00:00.000Z");
+    mocks.deleteHostedRunnerUserDataBestEffort.mockImplementation(
+      ({ signal }: { signal: AbortSignal }) => new Promise((resolve) => {
+        signal.addEventListener("abort", () => resolve(makeCloudflareDeletionResult({
+          deleted: false,
+          errorCode: "AbortError",
+        })), { once: true });
+      }),
+    );
+    const prepared = await prepareHostedAccountDeletionCleanup({
+      now,
+      privyUserId: null,
+      runtimeMemberIds: Array.from({ length: 12 }, (_, index) => `member_${index}`),
+      stripeCustomerIds: [],
+    });
+    await persistHostedAccountDeletionCleanupTx({
+      cleanup: prepared,
+      prisma: store.prisma as never,
+    });
+
+    const run = runHostedAccountDeletionCleanup({
+      attemptTimeoutMs: 50,
+      cleanupId: prepared.id,
+      now,
+      prisma: store.prisma as never,
+    });
+    await vi.advanceTimersByTimeAsync(50);
+
+    await expect(run).resolves.toMatchObject({
+      cleanupPending: true,
+      cloudflare: {
+        errorCode: "ACCOUNT_DELETION_CLEANUP_TARGET_TIMEOUT",
+      },
+    });
+    expect(mocks.deleteHostedRunnerUserDataBestEffort).toHaveBeenCalledTimes(4);
   });
 });
 
@@ -299,6 +420,7 @@ interface CleanupRow {
   nextAttemptAt: Date;
   payloadCiphertext: string;
   privyCompletedAt: Date | null;
+  privyUserLookupKey: string | null;
   stripeCompletedAt: Date | null;
   updatedAt: Date;
 }
@@ -317,9 +439,15 @@ type CleanupUpdate = Partial<Omit<CleanupRow, "attemptCount">> & {
 
 class CleanupStore {
   blockReceiptDelete = false;
+  livePrivyMemberId: string | null = null;
   row: CleanupRow | null = null;
 
   readonly prisma = {
+    hostedMemberIdentity: {
+      findFirst: async () => this.livePrivyMemberId
+        ? { memberId: this.livePrivyMemberId }
+        : null,
+    },
     hostedAccountDeletionCleanup: {
       create: async ({ data }: {
         data: Omit<CleanupRow,
@@ -417,13 +545,14 @@ class CleanupStore {
 function makeCloudflareDeletionResult(input: {
   configured?: boolean;
   deleted: boolean;
+  errorCode?: string | null;
 }) {
   return {
     alarmCleared: input.deleted,
     configured: input.configured ?? true,
     deleteAllCompleted: input.deleted,
     deleted: input.deleted,
-    errorCode: null,
+    errorCode: input.errorCode ?? null,
     r2DeletedObjectCount: input.deleted ? 0 : null,
     r2SkippedUserScopedPrefixes: input.deleted ? false : null,
     r2Supported: input.deleted ? true : null,

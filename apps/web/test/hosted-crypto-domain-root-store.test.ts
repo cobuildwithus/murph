@@ -1033,6 +1033,9 @@ function createHostedMemberIdentityTransaction(): HostedCryptoTestTransaction {
   return {
     ...tx,
     prisma: Object.assign(tx.prisma, {
+      hostedAccountDeletionCleanup: {
+        findFirst: async () => null,
+      },
       hostedMemberIdentity,
     }),
   };
