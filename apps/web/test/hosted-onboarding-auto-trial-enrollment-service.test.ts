@@ -2721,8 +2721,16 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
   });
 
   it.each([
-    ["canceled", { status: "canceled" }],
-    ["paused", { status: "paused" }],
+    [
+      "canceled",
+      { status: "canceled" },
+      "HOSTED_AUTO_PULSE_TRIAL_SUBSCRIPTION_CHANGED",
+    ],
+    [
+      "paused",
+      { status: "paused" },
+      "HOSTED_AUTO_PULSE_TRIAL_SUBSCRIPTION_CHANGED",
+    ],
     [
       "expired",
       {
@@ -2730,14 +2738,16 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
           new Date("2026-06-14T12:00:04.000Z").getTime() / 1000,
         ),
       },
+      "HOSTED_AUTO_PULSE_TRIAL_DATES_MISSING",
     ],
   ])("rejects a provider trial that becomes %s before the locked activation write", async (
     _label,
     currentOverrides,
+    expectedCode,
   ) => {
     const prisma = makePrisma();
     mocks.stripe.subscriptions.retrieve.mockImplementationOnce(async () => {
-      expect(prisma.isTransactionActive()).toBe(false);
+      expect(prisma.isTransactionActive()).toBe(true);
       return makeTrialSubscription(currentOverrides);
     });
 
@@ -2749,7 +2759,10 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
       },
       now: new Date("2026-06-14T12:00:05.000Z"),
       prisma: prisma as never,
-    })).rejects.toBeDefined();
+    })).rejects.toMatchObject({
+      code: expectedCode,
+      retryable: true,
+    });
 
     expect(mocks.stripe.subscriptions.create).toHaveBeenCalledOnce();
     expect(mocks.stripe.subscriptions.retrieve).toHaveBeenCalledOnce();
@@ -2773,7 +2786,10 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
       },
       now: new Date("2026-06-14T12:00:05.000Z"),
       prisma: makePrisma() as never,
-    })).rejects.toBeDefined();
+    })).rejects.toMatchObject({
+      code: "HOSTED_AUTO_PULSE_TRIAL_DATES_MISSING",
+      retryable: true,
+    });
 
     expect(mocks.writeHostedMemberStripeBillingTx).not.toHaveBeenCalled();
     expect(mocks.activateHostedMemberForPositiveSourceTx).not.toHaveBeenCalled();
