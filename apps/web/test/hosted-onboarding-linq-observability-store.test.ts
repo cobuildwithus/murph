@@ -3555,6 +3555,41 @@ describe("hosted Linq signup-link delivery attempts", () => {
     });
   });
 
+  it.each(["invite_signup", "invite_signup_fallback"] as const)(
+    "surfaces the delivered %s chat when the accepted milestone replays a buffered receipt",
+    async (template: "invite_signup" | "invite_signup_fallback") => {
+      const fixture = createObservabilityPrismaFixture();
+      fixture.hostedLinqProviderEventFindMany.mockResolvedValueOnce([{
+        deliveryStatus: "delivered",
+        eventId: "evt_delivered_buffered",
+        failureCode: null,
+        failureReason: null,
+        phoneNumberLookupKey: null,
+        providerCreatedAt: new Date("2026-03-26T12:02:00.000Z"),
+        service: "iMessage",
+      }]);
+      fixture.hostedLinqDeliveryFindUnique.mockResolvedValueOnce({
+        sourceRef: BASE_EFFECT_ID,
+        template,
+      });
+
+      await expect(markHostedLinqDeliveryAcceptedTx({
+        idempotencyKey: BASE_EFFECT_ID,
+        linqChatId: "chat_123",
+        messageId: "provider_msg_123",
+        prisma: fixture.prisma as never,
+      })).resolves.toEqual({
+        reopenOnboardingLink: null,
+        restoreOnboardingLink: {
+          linqChatId: "chat_123",
+          memberId: "member_123",
+          occurredAt: "2026-03-26T00:00:00.000Z",
+          service: "iMessage",
+        },
+      });
+    },
+  );
+
   it("restores the onboarding link when a delivered receipt advances an invite delivery", async () => {
     const fixture = createObservabilityPrismaFixture();
     fixture.hostedLinqDeliveryFindFirst.mockResolvedValueOnce({
@@ -3568,9 +3603,10 @@ describe("hosted Linq signup-link delivery attempts", () => {
     await expect(applyHostedLinqDeliveryReceiptTx({
       event: requireParsedProviderEvent(buildProviderEvent({
         data: {
+          chat_id: "chat_123",
           message_id: "provider_msg_a2",
           phone_number: "+15550000000",
-          service: "sms",
+          service: "iMessage",
         },
         eventId: "evt_delivered_a2",
         eventType: "message.delivered",
@@ -3582,8 +3618,10 @@ describe("hosted Linq signup-link delivery attempts", () => {
       phoneNumberLookupKey: null,
       reopenOnboardingLink: null,
       restoreOnboardingLink: {
+        linqChatId: "chat_123",
         memberId: "member_123",
         occurredAt: "2026-03-26T00:00:00.000Z",
+        service: "iMessage",
       },
     });
   });

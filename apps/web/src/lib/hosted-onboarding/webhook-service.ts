@@ -55,6 +55,7 @@ import {
 } from "./webhook-db-timing";
 import {
   drainHostedLinqSideEffectsDirect,
+  queueHostedLinqContactCardShareAfterDeliveredInviteSignup,
 } from "./webhook-transport";
 import {
   buildHostedLinqFirstContactAdmissionClassifierUnavailableDecision,
@@ -185,6 +186,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
       const providerResult = await ingestHostedLinqProviderEventDirect({
         event: providerEvent,
         prisma,
+        scheduleAfterResponse: input.scheduleAfterResponse,
       });
       const reactionResult = await handleHostedGroupJoinOfferReaction({
         event: providerEvent,
@@ -253,6 +255,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
         : await ingestHostedLinqProviderEventDirect({
             event: providerEvent,
             prisma,
+            scheduleAfterResponse: input.scheduleAfterResponse,
           });
       await scheduleHostedLinqProviderAlertEmails({
         alertIds: providerResult.alertIds,
@@ -802,14 +805,25 @@ function buildHostedLinqCurrentInboundReplyProof(
 async function ingestHostedLinqProviderEventDirect(input: {
   event: Parameters<typeof ingestHostedLinqProviderEventTx>[0]["event"];
   prisma: PrismaClient;
+  scheduleAfterResponse?: HostedWebhookPostResponseScheduler;
 }): Promise<Awaited<ReturnType<typeof ingestHostedLinqProviderEventTx>>> {
-  return runHostedOnboardingWebhookTransaction(
+  const providerResult = await runHostedOnboardingWebhookTransaction(
     input.prisma,
     (transaction) => ingestHostedLinqProviderEventTx({
       event: input.event,
       prisma: transaction,
     }),
   );
+  if (providerResult.restoreOnboardingLink) {
+    void queueHostedLinqContactCardShareAfterDeliveredInviteSignup({
+      chatId: providerResult.restoreOnboardingLink.linqChatId,
+      memberId: providerResult.restoreOnboardingLink.memberId,
+      prisma: input.prisma,
+      scheduleAfterResponse: input.scheduleAfterResponse,
+      service: providerResult.restoreOnboardingLink.service,
+    });
+  }
+  return providerResult;
 }
 
 async function ingestHostedLinqParticipantEventDirect(input: {
