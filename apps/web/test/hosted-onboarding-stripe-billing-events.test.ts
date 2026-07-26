@@ -228,6 +228,9 @@ describe("hosted onboarding stripe billing events", () => {
       id: "in_paid_123",
       subscription: "sub_123",
     });
+    const preparedCryptoDomainRoots = new Map([
+      ["control", { domain: "control" }],
+    ]) as never;
 
     await expect(
       applyStripeInvoicePaid(
@@ -240,6 +243,8 @@ describe("hosted onboarding stripe billing events", () => {
         },
         {} as never,
         HostedBillingStatus.active,
+        undefined,
+        preparedCryptoDomainRoots,
       ),
     ).resolves.toEqual({
       activatedMemberId: "member_123",
@@ -273,6 +278,7 @@ describe("hosted onboarding stripe billing events", () => {
         sourceType: "stripe.invoice.paid",
       },
       memberId: "member_123",
+      preparedCryptoDomainRoots,
       prisma: {},
       skipIfBillingAlreadyActive: false,
       skipIfPreviouslyActivated: true,

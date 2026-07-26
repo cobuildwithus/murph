@@ -6,6 +6,7 @@ import {
 } from "@prisma/client";
 import type Stripe from "stripe";
 
+import { prepareHostedCryptoDomainRootCandidates } from "../hosted-crypto/domain-root-store";
 import { signalHostedRuntimeManualWakeBestEffort } from "../hosted-orchestration/manual-wake";
 import { sha256Hex } from "../primitives";
 import { getPrisma } from "../prisma";
@@ -1077,6 +1078,11 @@ async function reconcileHostedPulseTrialStartPaidInvoice(input: {
   prisma: PrismaClient;
   subscription: Stripe.Subscription;
 }): Promise<void> {
+  const preparedCryptoDomainRoots =
+    await prepareHostedCryptoDomainRootCandidates({
+      prisma: input.prisma,
+      userId: input.memberId,
+    });
   await input.prisma.$transaction(async (tx) => {
     await applyStripeInvoicePaid(
       input.invoice,
@@ -1084,6 +1090,7 @@ async function reconcileHostedPulseTrialStartPaidInvoice(input: {
       tx,
       HostedBillingStatus.active,
       input.subscription,
+      preparedCryptoDomainRoots,
     );
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
 

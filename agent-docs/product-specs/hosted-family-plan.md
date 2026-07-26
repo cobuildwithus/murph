@@ -217,6 +217,13 @@ Sponsored access must fail closed when:
 Privacy access for export and deletion must remain available under the existing
 privacy rules even after sponsored access is revoked.
 
+Active Stripe reconciliation revalidates sponsorship and direct-paid authority
+for at most six active members, then activates those members sequentially in
+the owning transaction. Legacy root preparation therefore has a maximum
+rootless fanout of 42 KMS calls: three encryptions and four signatures per
+member, with at most four concurrent provider calls because member activation
+itself is sequential.
+
 An actively sponsored member cannot start a separate direct checkout. If a
 direct checkout opened before Family acceptance completes afterward, checkout
 and subscription reconciliation must leave it unbound and cancel that
@@ -306,7 +313,10 @@ connection, export, deletion, and other account management tasks. The family
 MVP should not require a web visit for a straightforward Telegram or
 Messages invite acceptance. For unbound invites, a signed-in hosted member may
 tap Accept on the web page, and their verified phone or email identity becomes
-the claimant.
+the claimant. For bound invites, the server rejects a mismatching verified
+identity before crypto preparation and repeats the same binding assertion
+inside the claim transaction, so provider failure cannot replace the actionable
+identity error and a concurrent retarget still fails closed.
 
 ## Acceptance Copy
 
