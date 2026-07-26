@@ -127,6 +127,8 @@ test('rejects raw Telegram sender ids and hides identifying stored state', async
     '## People\n- Sender: 456 likes dry rulings.',
     '## People\n- **Sender:** 456 likes dry rulings.',
     '## People\n- Sender: `456` likes dry rulings.',
+    '## People\n- __Sender__: 456 likes dry rulings.',
+    '## People\n- _Sender_: `456` likes dry rulings.',
   ]
   for (const body of identifyingBodies) {
     await expect(replaceAssistantGroupRoomModel({

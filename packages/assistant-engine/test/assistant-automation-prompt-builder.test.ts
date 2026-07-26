@@ -673,6 +673,8 @@ describe('buildAssistantAutoReplyPrompt', () => {
     for (const body of [
       `## People\n- **Sender:** ${senderId} likes dry rulings.`,
       `## People\n- Sender: \`${senderId}\` likes dry rulings.`,
+      `## People\n- __Sender__: ${senderId} likes dry rulings.`,
+      `## People\n- _Sender_: \`${senderId}\` likes dry rulings.`,
     ]) {
       await expect(replaceAssistantGroupRoomModel({
         body,

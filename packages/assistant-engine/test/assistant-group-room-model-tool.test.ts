@@ -161,6 +161,8 @@ describe('authenticated group room-model tool', () => {
       '## People\n- Sender: 456 likes dry rulings.',
       '## People\n- **Sender:** 456 likes dry rulings.',
       '## People\n- Sender: `456` likes dry rulings.',
+      '## People\n- __Sender__: 456 likes dry rulings.',
+      '## People\n- _Sender_: `456` likes dry rulings.',
     ]) {
       const rejected = await executeRequest({
         args: {
@@ -331,6 +333,8 @@ describe('authenticated group room-model tool', () => {
       '## People\n- Sender: 456 likes dry rulings.',
       '## People\n- **Sender:** 456 likes dry rulings.',
       '## People\n- Sender: `456` likes dry rulings.',
+      '## People\n- __Sender__: 456 likes dry rulings.',
+      '## People\n- _Sender_: `456` likes dry rulings.',
     ]) {
       const identifyingWrite = await executeGroupRoomModelDynamicTool({
         available: true,
@@ -402,6 +406,8 @@ describe('authenticated group room-model tool', () => {
       '## People\n- Sender: 456 likes dry rulings.',
       '## People\n- **Sender:** 456 likes dry rulings.',
       '## People\n- Sender: `456` likes dry rulings.',
+      '## People\n- __Sender__: 456 likes dry rulings.',
+      '## People\n- _Sender_: `456` likes dry rulings.',
     ]
     for (const conflictingFile of [
       '---\nslug: group-room-model\npageType: [broken\n---\n\nprior bytes',
