@@ -158,6 +158,7 @@ vi.mock("@/src/lib/hosted-groups/group-usage-funding", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-address-book/projection", () => ({
+  HOSTED_ADDRESS_BOOK_LOOKUP_TIMEOUT_MS: 2_000,
   readHostedOwnerAddressBookAdvisoryNames:
     mocks.readHostedOwnerAddressBookAdvisoryNames,
 }));
@@ -196,6 +197,9 @@ import {
   handleHostedRuntimeGroupTool,
   reconcileHostedThreadContainerParticipants,
 } from "@/src/lib/hosted-groups/group-tool";
+import {
+  HOSTED_ADDRESS_BOOK_LOOKUP_TIMEOUT_MS,
+} from "@/src/lib/hosted-address-book/projection";
 import {
   filterHostedRuntimeGroupToolResponseProjectionScopes,
 } from "@/src/lib/hosted-groups/group-tool-scope-filter";
@@ -2711,6 +2715,45 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
         status: "ok",
       },
     });
+  });
+
+  it("returns the truthful roster when advisory lookup never settles", async () => {
+    vi.useFakeTimers();
+    try {
+      mocks.readHostedOwnerAddressBookAdvisoryNames.mockReturnValue(
+        new Promise(() => {}),
+      );
+      mocks.getHostedLinqChatHandles.mockResolvedValue([
+        { handle: "+15557770000", isMe: true, status: "active" },
+        { handle: "+15550000001", isMe: false, status: "active" },
+        { handle: "+15550000002", isMe: false, status: "active" },
+      ]);
+      mocks.lookupHostedMemberIdentityByPhoneNumber.mockImplementation(
+        async ({ phoneNumber }) => phoneNumber === "+15550000001"
+          ? { core: { id: "member_participant", suspendedAt: null } }
+          : null,
+      );
+
+      const response = handleHostedRuntimeGroupTool({
+        memberId: "member_container",
+        request: { action: "read_chat_participants", linqThread: LINQ_THREAD },
+      });
+      await vi.advanceTimersByTimeAsync(
+        HOSTED_ADDRESS_BOOK_LOOKUP_TIMEOUT_MS,
+      );
+      await expect(response).resolves.toEqual({
+        action: "read_chat_participants",
+        result: {
+          participants: [
+            { handle: "+15550000001", hasOwnMurph: true },
+            { handle: "+15550000002", hasOwnMurph: false },
+          ],
+          status: "ok",
+        },
+      });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("bounds read_chat_participants lookups and reconcile writes to the roster cap", async () => {

@@ -383,6 +383,15 @@ describe("hosted address-book projection lifecycle", () => {
       storedContactCount: 0,
     });
     expect(ownerStore.contacts).toEqual([]);
+    vi.mocked(crypto.kms.macSign).mockClear();
+    await expect(readHostedOwnerAddressBookAdvisoryNames({
+      containerMemberId: "thread-container",
+      crypto,
+      phoneHandles: ["+12125550100"],
+      prisma: ownerStore as never,
+      source: SOURCE,
+    })).resolves.toEqual(new Map());
+    expect(crypto.kms.macSign).not.toHaveBeenCalled();
     await expect(deleteHostedAddressBookProjection({
       memberId: "owner-member",
       prisma: ownerStore as never,

@@ -81,6 +81,15 @@ The model sees the label only for the current tool result and is explicitly
 told that it is untrusted presentation text with no identity, membership,
 consent, routing, instruction, or persistence authority.
 
+The lookup does not write a canonical profile, mailbox item, runtime log,
+workspace record, or separate advisory-name state. Once the model includes a
+label in generated content, however, that content can exist in the App Server
+provider thread, Murph session/workspace artifacts, the delivered provider
+message, recipient devices, and backups under those surfaces' normal retention
+rules. Stop, permission-loss cleanup, expiry, and account deletion prevent
+future lookups and delete the live projection; they cannot recall content
+already emitted to those surfaces.
+
 ## Lifecycle
 
 Replacement and deletion are full-list compare-and-swap mutations over one
@@ -99,13 +108,31 @@ backup retention.
 ## Rollout
 
 1. Apply the additive Postgres migration.
-2. Deploy the Web consumer with both gates off.
-3. Configure the dedicated KMS MAC keyring and exact
+2. Deploy the updated Cloudflare runner consumer while the current Web producer
+   still emits the old payload; verify its bundle fingerprint and an unlabeled
+   roster smoke.
+3. Deploy Web with both gates off.
+4. Configure the dedicated KMS MAC keyring and exact
    `roles/cloudkms.macSignerVerifier` key-level grant.
-4. Deploy iOS and enable `HOSTED_ADDRESS_BOOK_REPLACEMENT_ENABLED=1`.
-5. Verify replacement, deletion, permission-loss cleanup, retention, and
+5. Deploy iOS and enable `HOSTED_ADDRESS_BOOK_REPLACEMENT_ENABLED=1`.
+6. Verify replacement, deletion, permission-loss cleanup, retention, and
    account deletion.
-6. Enable `HOSTED_ADDRESS_BOOK_ADVISORY_NAMES_ENABLED=1`.
+7. Complete privacy and retention review for App Server provider threads,
+   session/workspace artifacts, provider delivery, recipients, and backups.
+8. Enable `HOSTED_ADDRESS_BOOK_ADVISORY_NAMES_ENABLED=1` and exercise one
+   labeled `read_chat_participants` result end to end.
 
-Rollback disables advisory reads first and replacement second. DELETE remains
-available so disabling a producer cannot trap stored data.
+The strict Web-to-runner response contract has this compatibility matrix:
+
+| Producer/consumer state | Compatible |
+| --- | --- |
+| Old Web payload to updated runner | Yes |
+| Updated Web with advisory reads off to old runner | Yes |
+| Updated Web labeled payload to old runner | No |
+| Updated Web labeled payload to updated runner | Yes |
+
+This needs no compatibility shim because the advisory-read gate prevents the
+only incompatible payload until the new consumer is live. Rollback disables
+advisory reads before rolling back the runner, then disables replacement if
+needed. DELETE remains available so disabling a producer cannot trap stored
+data.

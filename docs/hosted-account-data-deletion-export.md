@@ -81,7 +81,7 @@ The Settings vault export does not include:
 | `prisma.hosted_sensitive_action_challenge` | Live delete | Not exported secret | Deletes hashed authorization challenges and durable Assistant approval decisions stored in the same member-scoped table. Raw tokens, signatures, action hashes, and wallet authorization material are never exported. |
 | `prisma.hosted_member_identity` | Live delete | Confirmed data export | Deletes Privy identity and encrypted contact hints. Confirmed export includes decrypted user-facing phone, Privy, and wallet fields while omitting lookup keys and active phone-code attempt IDs. |
 | `prisma.hosted_address_book_projection` | Live delete | Metadata/counts | Deletes the member's opt-in projection revision, enabled state, and expiry before the member row. Export reports metadata/counts only. |
-| `prisma.hosted_address_book_contact` | Live delete | Not exported secret | Deletes member-scoped phone tokens and encrypted advisory labels before the projection. Export never includes tokens, ciphertext, projected names, or third-party phone values. |
+| `prisma.hosted_address_book_contact` | Live delete | Not exported secret | Deletes member-scoped phone tokens and encrypted advisory labels before the projection, preventing subsequent advisory lookup. Export never includes tokens, ciphertext, projected names, or third-party phone values. Labels already emitted into model/provider content cannot be recalled. |
 | `prisma.hosted_member_routing` | Live delete | Confirmed data export | Deletes encrypted Linq, Telegram, and reply-alias routing bindings. Confirmed export includes decrypted user-facing routing IDs while omitting lookup keys. |
 | `prisma.hosted_member_email_authorization` | Live delete | Confirmed data export | Deletes verified-email and direct-public-sender authorization records. Confirmed export includes addresses when available while omitting lookup keys. |
 | `prisma.hosted_member_billing_ref` | Local reference delete | Confirmed data export | Deletes local encrypted Stripe references. Confirmed export includes local Stripe customer/subscription references. The Stripe subscription and customer themselves are canceled/deleted by the vendor-account deletion step. |
@@ -159,6 +159,10 @@ The hosted runtime reconciliation-facts endpoint also fails closed for stale wor
 Deletion cannot guarantee immediate erasure in systems Murph does not control. The deletion/export result therefore always carries retention notes for:
 
 - Linq, Telegram, carrier, and email-provider copies of messages or routing events already delivered to those external systems;
+- App Server provider threads, Murph session/workspace artifacts, provider
+  messages, recipient devices, and backups that already contain an emitted
+  address-book advisory label; deleting the live projection prevents future
+  lookups but cannot recall that generated content;
 - infrastructure backups and restore media that age out under documented retention.
 
 Stripe and Privy vendor accounts are actively deleted by the deletion workflow itself: the subscription is canceled fail-closed before the local wipe, and the customer and Privy user are deleted best-effort afterward. Local usage-credit purchase rows and their encrypted Stripe references are deleted with the account. Stripe retains records it is legally required to keep (for example invoices and payment records) under its own documented processes after the customer object is deleted.

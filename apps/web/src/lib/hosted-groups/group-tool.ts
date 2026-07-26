@@ -52,6 +52,7 @@ import {
   type HostedOnboardingReadClient,
 } from "../hosted-onboarding/shared";
 import {
+  HOSTED_ADDRESS_BOOK_LOOKUP_TIMEOUT_MS,
   readHostedOwnerAddressBookAdvisoryNames,
 } from "../hosted-address-book/projection";
 import { signalHostedRuntimeMaintenanceRuntime } from "../hosted-orchestration/signal-runtime";
@@ -1387,13 +1388,14 @@ async function handleHostedRuntimeGroupReadChatParticipants(input: {
   });
 
   try {
-    const ownerAdvisoryNames = await readHostedOwnerAddressBookAdvisoryNames({
-      containerMemberId: input.memberId,
-      phoneHandles: participants.flatMap((participant) =>
-        participant.hasOwnMurph ? [] : [participant.handle]
-      ),
-      prisma,
-    });
+    const ownerAdvisoryNames =
+      await readHostedOwnerAddressBookAdvisoryNamesWithinDeadline({
+        containerMemberId: input.memberId,
+        phoneHandles: participants.flatMap((participant) =>
+          participant.hasOwnMurph ? [] : [participant.handle]
+        ),
+        prisma,
+      });
     for (const participant of participants) {
       const ownerAdvisoryName = participant.hasOwnMurph
         ? undefined
@@ -1412,6 +1414,33 @@ async function handleHostedRuntimeGroupReadChatParticipants(input: {
     action: "read_chat_participants",
     result: { participants, status: "ok" },
   };
+}
+
+async function readHostedOwnerAddressBookAdvisoryNamesWithinDeadline(
+  input: Parameters<typeof readHostedOwnerAddressBookAdvisoryNames>[0],
+): Promise<ReadonlyMap<string, string>> {
+  const lookup = readHostedOwnerAddressBookAdvisoryNames(input);
+  // Prisma operations do not consume AbortSignal. Bound the entire optional
+  // overlay at its caller so a stuck read can never delay the truthful roster.
+  // The underlying lookup still receives its own KMS abort signal, and this
+  // handler makes a rejection after the deadline explicitly harmless.
+  void lookup.catch(() => undefined);
+
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<ReadonlyMap<string, string>>((resolve) => {
+    timeout = setTimeout(
+      () => resolve(new Map()),
+      HOSTED_ADDRESS_BOOK_LOOKUP_TIMEOUT_MS,
+    );
+  });
+
+  try {
+    return await Promise.race([lookup, deadline]);
+  } finally {
+    if (timeout !== undefined) {
+      clearTimeout(timeout);
+    }
+  }
 }
 
 export type HostedThreadContainerResolvedParticipant = {
