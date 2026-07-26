@@ -291,9 +291,11 @@ The prompt contains no amount, offer, Stripe reference, funding link, or private
 payer identity. It always thanks the contributor anonymously because possession
 of the funding locator does not imply group membership and a queued profile
 label could outlive its sharing authority. It must not pressure anyone else to
-buy usage. The mailbox row expires 30 minutes after the verified payment; an
-already-stale webhook creates no celebration, and expired queued work is absent
-from the normal runtime mailbox projection.
+buy usage. The immutable deadline is 30 minutes after the verified payment. It
+survives mailbox import, runtime checkpoint restore, and outbox persistence:
+runtime consumes expired work before model or audio-provider entry, and outbox
+retry abandons it before messaging-provider entry. No import, generation, or
+delivery retry recomputes or extends that deadline.
 
 ## Ownership And Data Flow
 

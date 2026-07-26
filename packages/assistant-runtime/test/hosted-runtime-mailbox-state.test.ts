@@ -549,6 +549,7 @@ function buildPendingSystemMailboxItem(input: {
 }): HostedSystemMailboxPendingItem {
   return {
     attemptCount: 0,
+    expiresAt: null,
     itemId: input.itemId,
     lastAttemptAt: null,
     lastErrorCode: null,

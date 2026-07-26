@@ -135,6 +135,7 @@ export interface AssistantMessageInput extends AssistantSessionResolutionFields 
   codexCommand?: string
   deliverResponse?: boolean
   deliveryDispatchMode?: AssistantOutboxDispatchMode
+  deliveryExpiresAt?: string | null
   deliveryIdempotencyKey?: string | null
   answeredMailboxItemIds?: readonly string[] | null
   reviewedAssistantAskCompletionExpiresAt?: string | null

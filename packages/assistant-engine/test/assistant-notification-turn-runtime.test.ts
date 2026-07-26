@@ -3169,6 +3169,7 @@ test('sendAssistantNotificationLocal delivers one attachment after one successfu
     })
 
   await expect(sendAssistantNotificationLocal({
+    deliveryExpiresAt: '2026-07-27T00:30:00.000Z',
     instructions: 'Create a brief group celebration.',
     notificationToolProfile: 'response-audio',
     responsePolicy: { kind: 'require_send' },
@@ -3179,6 +3180,7 @@ test('sendAssistantNotificationLocal delivers one attachment after one successfu
     },
   })
   expect(deliverMessage).toHaveBeenCalledWith(expect.objectContaining({
+    expiresAt: '2026-07-27T00:30:00.000Z',
     media: [voiceMemo],
   }))
 })

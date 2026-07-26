@@ -252,6 +252,7 @@ export type AssistantOutboxCreateIntentInput = {
   deliveryTransportIdempotent?: boolean
   emailHtml?: string | null
   externalThreadRouteAuthority?: AssistantOutboxIntent['externalThreadRouteAuthority']
+  expiresAt?: string | null
   explicitTarget?: string | null
   identityId?: string | null
   initialState?:
@@ -413,6 +414,7 @@ export async function createAssistantOutboxIntent(
       sessionId: input.sessionId,
       turnId: input.turnId,
       createdAt,
+      expiresAt: input.expiresAt ?? undefined,
       updatedAt: createdAt,
       lastAttemptAt: null,
       nextAttemptAt:
@@ -638,11 +640,29 @@ async function dispatchAssistantOutboxIntentInternal(input: DispatchAssistantOut
           intent,
         }
       }
+      if (assistantOutboxIntentIsExpired(intent, now)) {
+        return {
+          action: 'expired' as const,
+          intent,
+          intentPath,
+        }
+      }
       return {
         action: 'dispatch' as const,
         intent,
         intentPath,
         sending: intent,
+      }
+    }
+
+    if (
+      (intent.status === 'pending' || intent.status === 'retryable') &&
+      assistantOutboxIntentIsExpired(intent, now)
+    ) {
+      return {
+        action: 'expired' as const,
+        intent,
+        intentPath,
       }
     }
 
@@ -746,6 +766,27 @@ async function dispatchAssistantOutboxIntentInternal(input: DispatchAssistantOut
     return {
       intent: prepared.intent,
       deliveryError: prepared.intent.lastError,
+      session: null,
+    }
+  }
+
+  if (prepared.action === 'expired') {
+    const abandonedIntent = await markAssistantOutboxIntentMirrorTerminal({
+      error: new VaultCliError(
+        'ASSISTANT_OUTBOX_INTENT_EXPIRED',
+        'Assistant outbox intent expired before delivery.',
+        { retryable: false },
+      ),
+      failedAt: now,
+      intent: prepared.intent,
+      intentPath: prepared.intentPath,
+      onlyCurrentStatuses: [prepared.intent.status],
+      status: 'abandoned',
+      vault: input.vault,
+    })
+    return {
+      intent: abandonedIntent,
+      deliveryError: abandonedIntent.lastError,
       session: null,
     }
   }
@@ -1137,6 +1178,7 @@ export async function deliverAssistantOutboxMessage(input: {
   dispatchHooks?: AssistantOutboxDispatchHooks
   dispatchMode?: AssistantOutboxDispatchMode
   externalThreadRouteAuthority?: AssistantOutboxIntent['externalThreadRouteAuthority']
+  expiresAt?: string | null
   explicitTarget?: string | null
   identityId?: string | null
   media?: readonly AssistantResponseMedia[] | null
@@ -1166,6 +1208,7 @@ export async function deliverAssistantOutboxMessage(input: {
     deliverySource: input.deliverySource ?? null,
     deliveryTransportIdempotent: input.deliveryTransportIdempotent,
     externalThreadRouteAuthority: input.externalThreadRouteAuthority ?? null,
+    expiresAt: input.expiresAt ?? null,
     explicitTarget: input.explicitTarget,
     identityId: input.identityId,
     media: input.media,
@@ -1245,6 +1288,14 @@ export async function deliverAssistantOutboxMessage(input: {
       normalizeAssistantDeliveryError(new Error('Assistant outbound delivery failed.')),
     session: dispatched.session ?? null,
   }
+}
+
+function assistantOutboxIntentIsExpired(
+  intent: AssistantOutboxIntent,
+  now: Date,
+): boolean {
+  const expiresAt = intent.expiresAt ?? null
+  return expiresAt !== null && Date.parse(expiresAt) <= now.getTime()
 }
 
 function throwIfAssistantOutboxSignalAborted(signal?: AbortSignal): void {

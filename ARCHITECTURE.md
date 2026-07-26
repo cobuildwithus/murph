@@ -720,10 +720,13 @@ grant, Web may append one purchase-keyed
 That item binds the current thread-container route, never falls back to a
 member's direct route, and reaches the ordinary outbox through an isolated
 assistant turn with bounded committed group history and only the existing
-voice-memo and song tools. Its mailbox row expires 30 minutes after payment,
-it carries no contributor label, and the assistant owner enforces one audio
-attempt while treating successful generation as non-replayable. It adds no
-event family, queue, scheduler, migration, or second delivery owner. Family funding authorizes the
+voice-memo and song tools. Its immutable 30-minute deadline crosses the Web
+mailbox, runtime-local system item, and ordinary outbox intent; the existing
+effect owners terminally consume expired work before model/audio or messaging
+provider entry. It carries no contributor label, and the assistant owner
+enforces one audio attempt while treating successful generation as
+non-replayable. It adds no event family, queue, scheduler, migration, or second
+delivery owner. Family funding authorizes the
 owner, active group billing, and selected active unsuspended direct member at
 new-purchase creation, then freezes the Family group and member selectors in
 the return scope. Exact request-key replay and Stripe reconciliation continue

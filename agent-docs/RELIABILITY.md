@@ -62,9 +62,12 @@ Last verified: 2026-07-26
   one purchase-keyed celebration notification before signaling the existing
   runtime recheck. Mailbox, delivery, and provider idempotency use the same
   opaque purchase-derived digest, so webhook replay cannot create another
-  celebration. The mailbox row expires 30 minutes after the verified payment,
-  so a delayed webhook or runtime backlog cannot turn old funding into a later
-  burst of model work. The response-audio turn must complete exactly one voice
+  celebration. One immutable deadline, 30 minutes after verified payment,
+  remains on the Web mailbox row, the imported runtime-local system item, and
+  the ordinary outbox intent. Runtime consumes expired work before model or
+  audio-provider entry, and the outbox abandons an expired pending or prepared
+  retry before messaging-provider entry, so import, restart, or retry cannot
+  extend freshness. The response-audio turn must complete exactly one voice
   memo or song attempt; one failed attempt may fall back to text, while a
   successful generation is non-replayable if later validation or delivery
   fails. A retryable append failure keeps the receipt retryable, but Web still

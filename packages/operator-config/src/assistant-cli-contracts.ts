@@ -836,6 +836,7 @@ export const assistantOutboxIntentSchema = z
     sessionId: assistantSessionIdSchema,
     turnId: assistantTurnIdSchema,
     createdAt: isoTimestampSchema,
+    expiresAt: isoTimestampSchema.optional(),
     updatedAt: isoTimestampSchema,
     lastAttemptAt: isoTimestampSchema.nullable(),
     nextAttemptAt: isoTimestampSchema.nullable(),

@@ -61,6 +61,7 @@ export async function executeHostedMailboxEvent(input: {
   shouldYieldAssistantAskCompletion?: (() => boolean) | null;
   shouldYieldClinicalRecords?: (() => boolean) | null;
   shouldYieldDeviceSync?: (() => boolean) | null;
+  sourceMailboxItemExpiresAt?: string | null;
   sourceMailboxItemId?: string | null;
   runtime: Pick<
     NormalizedHostedAssistantRuntimeConfig,
@@ -120,6 +121,7 @@ export async function executeHostedMailboxEvent(input: {
       ? { shouldYieldDeviceSync: input.shouldYieldDeviceSync }
       : {}),
     sourceMailboxItemId: input.sourceMailboxItemId ?? null,
+    sourceMailboxItemExpiresAt: input.sourceMailboxItemExpiresAt ?? null,
     vaultRoot: input.vaultRoot,
   });
 
@@ -152,6 +154,7 @@ async function handleHostedMailboxEvent(input: {
   shouldYieldAssistantAskCompletion?: (() => boolean) | null;
   shouldYieldClinicalRecords?: (() => boolean) | null;
   shouldYieldDeviceSync?: (() => boolean) | null;
+  sourceMailboxItemExpiresAt: string | null;
   sourceMailboxItemId: string | null;
   vaultRoot: string;
 }): Promise<HostedMailboxOutcome> {
@@ -179,6 +182,7 @@ async function handleHostedMailboxEvent(input: {
       ? { shouldYieldDeviceSync: input.shouldYieldDeviceSync }
       : {}),
     sourceMailboxItemId: input.sourceMailboxItemId,
+    sourceMailboxItemExpiresAt: input.sourceMailboxItemExpiresAt,
     vaultRoot: input.vaultRoot,
   });
 }
@@ -199,6 +203,7 @@ async function executeHostedSystemWake(input: {
   shouldYieldAssistantAskCompletion?: (() => boolean) | null;
   shouldYieldClinicalRecords?: (() => boolean) | null;
   shouldYieldDeviceSync?: (() => boolean) | null;
+  sourceMailboxItemExpiresAt: string | null;
   sourceMailboxItemId: string | null;
   vaultRoot: string;
 }): Promise<HostedMailboxOutcome> {
@@ -236,6 +241,7 @@ async function executeHostedSystemWake(input: {
         wake: input.wake,
         executionContext: input.executionContext,
         forceQueueOnly: input.forceQueueOnlyAssistantNotification,
+        sourceMailboxItemExpiresAt: input.sourceMailboxItemExpiresAt,
         sourceMailboxItemId: input.sourceMailboxItemId,
         turnEnvironment: createHostedAssistantTurnEnvironment({
           operatorHomeRoot: input.operatorHomeRoot,

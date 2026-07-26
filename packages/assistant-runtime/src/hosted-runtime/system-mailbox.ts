@@ -197,6 +197,7 @@ export async function enqueueHostedSystemMailboxItem(input: {
   }
   const nextItem: HostedSystemMailboxPendingItem = {
     attemptCount: 0,
+    expiresAt: input.item.item.expiresAt ?? null,
     itemId: input.item.item.id,
     lastAttemptAt: null,
     lastErrorCode: null,
@@ -251,8 +252,11 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
   const prepared = await updateHostedSystemMailboxState(
     input.vaultRoot,
     (state) => {
+      const livePending = state.pending.filter((item) =>
+        !hostedSystemMailboxPendingItemIsExpired(item, startedAt)
+      );
       const selectionState = {
-        pending: state.pending.filter((item) =>
+        pending: livePending.filter((item) =>
           (
             input.allowedRouteActions != null
             || item.routeAction !== "run-assistant-ask"
@@ -282,7 +286,9 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
       if (!pending) {
         return {
           result: null,
-          state,
+          state: {
+            pending: livePending,
+          },
         };
       }
 
@@ -298,7 +304,7 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
       return {
         result: nextItem,
         state: {
-          pending: state.pending.map((item) =>
+          pending: livePending.map((item) =>
             item.itemId === pending.itemId ? nextItem : item
           ),
         },
@@ -585,6 +591,7 @@ async function executePendingHostedSystemMailboxItem(input: {
         }
       : {}),
     sourceMailboxItemId: input.pendingItem.itemId,
+    sourceMailboxItemExpiresAt: input.pendingItem.expiresAt,
     vaultRoot: input.vaultRoot,
     wake: input.pendingItem.wake,
   });
@@ -634,6 +641,7 @@ function hostedSystemMailboxPendingItemsMatchForClaim(
 ): boolean {
   return left.itemId === right.itemId
     && left.attemptCount === right.attemptCount
+    && left.expiresAt === right.expiresAt
     && left.lastAttemptAt === right.lastAttemptAt
     && left.mailboxDedupeKey === right.mailboxDedupeKey
     && left.mailboxLaneSeq === right.mailboxLaneSeq
@@ -643,6 +651,24 @@ function hostedSystemMailboxPendingItemsMatchForClaim(
     && left.requestId === right.requestId
     && left.routeAction === right.routeAction
     && left.status === right.status;
+}
+
+function hostedSystemMailboxPendingItemIsExpired(
+  item: HostedSystemMailboxPendingItem,
+  now: string,
+): boolean {
+  if (
+    item.routeAction !== "dispatch-assistant-notification"
+    || item.status === "recording"
+    || item.expiresAt === null
+  ) {
+    return false;
+  }
+  const expiresAtMs = Date.parse(item.expiresAt);
+  const nowMs = Date.parse(now);
+  return Number.isFinite(expiresAtMs)
+    && Number.isFinite(nowMs)
+    && expiresAtMs <= nowMs;
 }
 
 export async function recordHostedDeviceSyncDirtyPostCheckpointRecord(input: {

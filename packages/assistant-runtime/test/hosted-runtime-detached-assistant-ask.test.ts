@@ -858,6 +858,7 @@ function createPendingAsk(input: {
 }): HostedSystemMailboxPendingItem {
   return {
     attemptCount: 0,
+    expiresAt: "2026-07-15T12:10:00.000Z",
     itemId: input.itemId,
     lastAttemptAt: null,
     lastErrorCode: null,
@@ -912,6 +913,7 @@ function createPendingCompletion(input: {
 }): HostedSystemMailboxPendingItem {
   return {
     attemptCount: 0,
+    expiresAt: "2026-07-15T12:10:00.000Z",
     itemId: input.itemId,
     lastAttemptAt: null,
     lastErrorCode: null,

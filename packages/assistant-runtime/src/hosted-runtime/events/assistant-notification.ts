@@ -118,6 +118,7 @@ export async function executeHostedAssistantNotificationWake(input: {
   wake: HostedExecutionAssistantNotificationRequestedWake;
   executionContext: AssistantExecutionContext;
   forceQueueOnly?: boolean;
+  sourceMailboxItemExpiresAt?: string | null;
   sourceMailboxItemId?: string | null;
   turnEnvironment?: AssistantTurnEnvironment | null;
   vaultRoot: string;
@@ -139,6 +140,7 @@ export async function executeHostedAssistantNotificationWake(input: {
         input.executionContext,
         input.forceQueueOnly === true,
         input.vaultRoot,
+        input.sourceMailboxItemExpiresAt ?? null,
         input.sourceMailboxItemId ?? null,
         input.turnEnvironment ?? null,
         (entry) => {
@@ -541,6 +543,7 @@ function buildAssistantNotificationInput(
   executionContext: AssistantExecutionContext,
   forceQueueOnly: boolean,
   vault: string,
+  sourceMailboxItemExpiresAt: string | null,
   sourceMailboxItemId: string | null,
   turnEnvironment: AssistantTurnEnvironment | null,
   recordLogEntry: (entry: HostedExecutionRedactedLogEntry) => void,
@@ -552,6 +555,9 @@ function buildAssistantNotificationInput(
       ? "queue-only"
       : wake.notification.deliveryDispatchMode ?? undefined,
     deliveryIdempotencyKey: wake.notification.deliveryIdempotencyKey ?? null,
+    ...(sourceMailboxItemExpiresAt
+      ? { deliveryExpiresAt: sourceMailboxItemExpiresAt }
+      : {}),
     executionContext,
     ...(wake.notification.externalThreadRouteAuthority
       ? {
@@ -589,6 +595,7 @@ function buildAssistantNotificationInputFromRoute(input: {
   deliveryDedupeToken: AssistantNotificationInput["deliveryDedupeToken"];
   deliveryDispatchMode: AssistantNotificationInput["deliveryDispatchMode"];
   deliveryIdempotencyKey: AssistantNotificationInput["deliveryIdempotencyKey"];
+  deliveryExpiresAt?: AssistantNotificationInput["deliveryExpiresAt"];
   executionContext: AssistantExecutionContext;
   externalThreadRouteAuthority?:
     AssistantNotificationInput["outboxExternalThreadRouteAuthority"];
@@ -616,6 +623,9 @@ function buildAssistantNotificationInputFromRoute(input: {
     deliveryDedupeToken: input.deliveryDedupeToken,
     deliveryDispatchMode: input.deliveryDispatchMode,
     deliveryIdempotencyKey: input.deliveryIdempotencyKey,
+    ...(input.deliveryExpiresAt
+      ? { deliveryExpiresAt: input.deliveryExpiresAt }
+      : {}),
     hostedDeliveryIdempotency: {
       assistantTurnOrdinal: input.assistantTurnOrdinal,
       conversationId: hashHostedAssistantNotificationDeliveryKeyParts([

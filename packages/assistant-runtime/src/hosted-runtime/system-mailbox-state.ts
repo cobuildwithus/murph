@@ -59,6 +59,7 @@ export type HostedSystemMailboxRouteAction =
 
 export interface HostedSystemMailboxPendingItem {
   attemptCount: number;
+  expiresAt: string | null;
   itemId: string;
   lastAttemptAt: string | null;
   lastErrorCode: string | null;
@@ -237,6 +238,7 @@ export async function setHostedDeviceSyncDenseRawRetentionMailboxWakeAt(input: {
   };
   const nextItem: HostedSystemMailboxPendingItem = {
     attemptCount: 0,
+    expiresAt: null,
     itemId,
     lastAttemptAt: null,
     lastErrorCode: null,
@@ -446,6 +448,12 @@ function parseHostedSystemMailboxPendingItem(value: unknown): HostedSystemMailbo
       record.attemptCount ?? 0,
       "hosted system mailbox attemptCount",
     ),
+    expiresAt: record.expiresAt === undefined
+      ? null
+      : readNullableIsoTimestamp(
+          record.expiresAt,
+          "hosted system mailbox expiresAt",
+        ),
     lastAttemptAt: record.lastAttemptAt === null || record.lastAttemptAt === undefined
       ? null
       : readRequiredString(record.lastAttemptAt, "hosted system mailbox lastAttemptAt"),
@@ -725,6 +733,7 @@ function hostedSystemMailboxPendingItemsMatch(
 ): boolean {
   return left.itemId === right.itemId
     && left.attemptCount === right.attemptCount
+    && left.expiresAt === right.expiresAt
     && left.lastAttemptAt === right.lastAttemptAt
     && left.mailboxDedupeKey === right.mailboxDedupeKey
     && left.mailboxLaneSeq === right.mailboxLaneSeq

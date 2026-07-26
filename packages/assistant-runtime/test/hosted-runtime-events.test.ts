@@ -2109,6 +2109,7 @@ describe("executeHostedMailboxEvent", () => {
       operatorHomeRoot,
       runtime,
       runtimeEnv,
+      sourceMailboxItemExpiresAt: "2026-04-08T00:30:00.000Z",
       vaultRoot: "/tmp/assistant-runtime-events",
     });
 
@@ -2134,6 +2135,7 @@ describe("executeHostedMailboxEvent", () => {
       channel: "linq",
       deliveryDedupeToken: null,
       deliveryDispatchMode: undefined,
+      deliveryExpiresAt: "2026-04-08T00:30:00.000Z",
       deliveryIdempotencyKey: null,
       deliveryKind: "thread",
       deliverySource: null,

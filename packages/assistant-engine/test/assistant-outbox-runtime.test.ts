@@ -264,6 +264,64 @@ describe('assistant outbox runtime', () => {
     }
   })
 
+  it('abandons an expired retry without entering the messaging provider', async () => {
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-outbox-expired-retry-',
+    )
+    const expiresAt = '2099-04-08T00:30:00.000Z'
+    mockedDeliverAssistantMessageOverBinding.mockRejectedValueOnce(
+      new VaultCliError(
+        'HOSTED_BACKGROUND_DELIVERY_YIELDED',
+        'Hosted background delivery yielded before provider entry.',
+        {
+          assistantDeliveryFailureClass: 'transient',
+          retryable: true,
+        },
+      ),
+    )
+
+    const firstAttempt = await deliverAssistantOutboxMessage({
+      channel: 'telegram',
+      expiresAt,
+      explicitTarget: 'telegram-group-123',
+      message: 'A short group thank-you.',
+      sessionId: 'session-expired-retry',
+      threadId: 'telegram-group-123',
+      threadIsDirect: false,
+      turnId: 'turn-expired-retry',
+      vault: vaultRoot,
+    })
+
+    expect(firstAttempt.kind).toBe('queued')
+    expect(firstAttempt.intent).toMatchObject({
+      expiresAt,
+      status: 'retryable',
+    })
+    await expect(
+      readAssistantOutboxIntent(vaultRoot, firstAttempt.intent.intentId),
+    ).resolves.toMatchObject({
+      expiresAt,
+      status: 'retryable',
+    })
+
+    const retry = await dispatchAssistantOutboxIntent({
+      force: true,
+      intentId: firstAttempt.intent.intentId,
+      now: new Date('2099-04-08T00:30:00.001Z'),
+      vault: vaultRoot,
+    })
+
+    expect(retry.intent).toMatchObject({
+      expiresAt,
+      lastError: {
+        code: 'ASSISTANT_OUTBOX_INTENT_EXPIRED',
+      },
+      nextAttemptAt: null,
+      status: 'abandoned',
+    })
+    expect(mockedDeliverAssistantMessageOverBinding).toHaveBeenCalledOnce()
+  })
+
   it('fails closed before mutating a same-token message target or native reply marker', async () => {
     const { vaultRoot } = await createAssistantVault('assistant-outbox-native-reply-dedupe-')
     const first = await createAssistantOutboxIntent({
@@ -4428,6 +4486,7 @@ async function createIntent(
     channel: string | null
     createdAt: string
     deliveryIdempotencyKey: string | null
+    expiresAt: string | null
     dedupeToken: string | null
     explicitTarget: string | null
     identityId: string | null
@@ -4453,6 +4512,7 @@ async function createIntent(
     channel: overrides.channel ?? 'telegram',
     createdAt: overrides.createdAt,
     deliveryIdempotencyKey: overrides.deliveryIdempotencyKey,
+    expiresAt: overrides.expiresAt,
     dedupeToken:
       overrides.dedupeToken === undefined
         ? `${sessionId}:${turnId}`

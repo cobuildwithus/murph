@@ -195,6 +195,7 @@ export interface AssistantNotificationInput
       | 'beforeProviderAcceptedInputs'
       | 'codexCommand'
       | 'deliveryDispatchMode'
+      | 'deliveryExpiresAt'
       | 'deliveryIdempotencyKey'
       | 'deliveryReplyToMessageId'
       | 'deliverySource'
@@ -1271,6 +1272,9 @@ function buildAssistantNotificationMessageInput(
     conversation: input.conversation,
     deliverResponse: true,
     deliveryDispatchMode: input.deliveryDispatchMode,
+    ...(input.deliveryExpiresAt
+      ? { deliveryExpiresAt: input.deliveryExpiresAt }
+      : {}),
     deliveryKind: input.deliveryKind,
     deliveryIdempotencyKey: input.deliveryIdempotencyKey ?? null,
     reviewedAssistantAskCompletionExpiresAt:
@@ -1377,6 +1381,9 @@ async function deliverAssistantNotificationMessage(input: {
     answeredMailboxItemIds: input.input.answeredMailboxItemIds ?? [],
     reviewedAssistantAskCompletionExpiresAt:
       input.input.reviewedAssistantAskCompletionExpiresAt ?? null,
+    ...(input.input.deliveryExpiresAt
+      ? { expiresAt: input.input.deliveryExpiresAt }
+      : {}),
     automationAuthority: input.input.outboxAutomationAuthority ?? null,
     externalThreadRouteAuthority:
       input.input.outboxExternalThreadRouteAuthority ?? null,

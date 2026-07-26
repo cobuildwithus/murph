@@ -51,9 +51,11 @@ it uses an isolated response-audio profile with bounded committed group history
 and exactly the existing voice-memo and song tools. Runtime requires one
 completed audio attempt, validates the matching voice-memo attachment, permits
 text fallback only after a failed attempt, and does not replay successful
-generation after a later failure. It still receives no CLI, hosted context,
-shell, connected apps, arbitrary network, progress, image, or group-mutation
-capability. Both profiles use the existing one-shot App Server
+generation after a later failure. The original mailbox deadline is also the
+ordinary outbox intent deadline, so a pending or prepared retry is abandoned
+before messaging-provider entry rather than delivered late. It still receives
+no CLI, hosted context, shell, connected apps, arbitrary network, progress,
+image, or group-mutation capability. Both profiles use the existing one-shot App Server
 path so their restrictive launch configuration cannot replace the resident
 ordinary-turn process or interrupt detached enrichment.
 

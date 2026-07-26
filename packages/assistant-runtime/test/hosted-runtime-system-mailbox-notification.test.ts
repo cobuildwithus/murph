@@ -134,6 +134,7 @@ describe("hosted system mailbox notification execution context", () => {
 
   it("keeps hosted member context on queued notification wakes", async () => {
     const workspace = await createHostedRuntimeWorkspace("murph-hosted-system-mailbox-");
+    const expiresAt = "2026-04-27T00:30:00.000Z";
     const wake = buildHostedExecutionAssistantNotificationRequestedWake({
       eventId: "assistant.notification.requested:member-context",
       memberId: "member_123",
@@ -164,7 +165,7 @@ describe("hosted system mailbox notification execution context", () => {
     try {
       assert.deepEqual(
         await enqueueHostedSystemMailboxItem({
-          item: createResolvedNotificationItem(),
+          item: createResolvedNotificationItem({ expiresAt }),
           vaultRoot: workspace.vaultRoot,
           wake,
         }),
@@ -193,6 +194,7 @@ describe("hosted system mailbox notification execution context", () => {
             }),
           }),
           forceQueueOnlyAssistantNotification: true,
+          sourceMailboxItemExpiresAt: expiresAt,
           sourceMailboxItemId: "mailbox_item_system_notification",
           wake: expect.objectContaining({
             kind: "assistant.notification.requested",
@@ -203,6 +205,65 @@ describe("hosted system mailbox notification execution context", () => {
         mocks.executeHostedMailboxEvent.mock.calls[0]?.[0]
           .executionContext.hosted,
       ).not.toHaveProperty("groupTool");
+    } finally {
+      await workspace.cleanup();
+    }
+  });
+
+  it("persists an imported deadline and consumes expired work before execution", async () => {
+    const workspace = await createHostedRuntimeWorkspace("murph-hosted-system-mailbox-");
+    const expiresAt = "2026-04-27T00:30:00.000Z";
+    const wake = buildHostedExecutionAssistantNotificationRequestedWake({
+      eventId: "assistant.notification.requested:expired-response-audio",
+      memberId: "member_123",
+      notification: {
+        instructions: "Create one short audio thank-you.",
+        notificationToolProfile: "response-audio",
+        responsePolicy: {
+          kind: "require_send",
+        },
+        route: {
+          actorId: null,
+          channel: "telegram",
+          delivery: {
+            kind: "thread",
+            target: "telegram-group-123",
+          },
+          identityId: "identity-group-123",
+          threadId: "telegram-group-123",
+          threadIsDirect: false,
+        },
+      },
+      occurredAt: FIXED_NOW,
+    });
+
+    try {
+      await enqueueHostedSystemMailboxItem({
+        item: createResolvedNotificationItem({ expiresAt }),
+        vaultRoot: workspace.vaultRoot,
+        wake,
+      });
+
+      await expect(readHostedSystemMailboxState(workspace.vaultRoot)).resolves
+        .toMatchObject({
+          pending: [{
+            expiresAt,
+            itemId: "mailbox_item_system_notification",
+          }],
+        });
+
+      const prepared = await prepareHostedSystemMailboxItemForCheckpoint({
+        executionContext: null,
+        now: () => expiresAt,
+        runtime: createRuntime({}),
+        runtimeEnv: {},
+        vaultRoot: workspace.vaultRoot,
+      });
+
+      expect(prepared).toBeNull();
+      expect(mocks.executeHostedMailboxEvent).not.toHaveBeenCalled();
+      await expect(readHostedSystemMailboxState(workspace.vaultRoot)).resolves
+        .toEqual({ pending: [] });
     } finally {
       await workspace.cleanup();
     }
@@ -719,6 +780,7 @@ describe("hosted system mailbox notification execution context", () => {
     );
     const item: HostedSystemMailboxPendingItem = {
       attemptCount: 1,
+      expiresAt: null,
       itemId: "mailbox_item_clinical_record_cancel",
       lastAttemptAt: FIXED_NOW,
       lastErrorCode: null,
@@ -2602,13 +2664,14 @@ function createRuntime(
 }
 
 function createResolvedNotificationItem(overrides: Partial<{
+  expiresAt: string | null;
   id: string;
   laneSeq: string;
 }> = {}): HostedMailboxResolvedImportItem {
   const item: HostedMailboxItem = {
     createdAt: FIXED_NOW,
     dedupeKey: "assistant.notification.requested:gateway-billing",
-    expiresAt: null,
+    expiresAt: overrides.expiresAt ?? null,
     id: overrides.id ?? "mailbox_item_system_notification",
     kind: "assistant.notification.requested",
     lane: "system",
@@ -2748,6 +2811,7 @@ function createPendingMemberPreferencesItem(input: {
 }): HostedSystemMailboxPendingItem {
   return {
     attemptCount: 0,
+    expiresAt: null,
     itemId: input.itemId,
     lastAttemptAt: null,
     lastErrorCode: null,
