@@ -8,11 +8,14 @@ const HOSTED_LINQ_INVITE_SIGNUP_SOURCE_REF_PREFIX =
 export type HostedLinqInviteSignupGroupJoinReplyContext = {
   outreachId: string;
   repliedAt: string;
+  sourceEventId: string | null;
 };
 
 export type HostedLinqInviteSignupDeliverySourceRef = {
   effectId: string;
   groupJoinReplyContext: HostedLinqInviteSignupGroupJoinReplyContext | null;
+  occurredAt: string | null;
+  sourceEventId: string | null;
 };
 
 /**
@@ -96,32 +99,42 @@ export function buildHostedLinqInviteSignupDeliverySourceRef(input: {
   effectId: string;
   groupJoinOutreachId?: string | null;
   groupJoinRepliedAt?: string | null;
+  sourceEventId?: string | null;
 }): string {
   const groupJoinOutreachId = input.groupJoinOutreachId?.trim() ?? "";
   const groupJoinRepliedAt = input.groupJoinRepliedAt?.trim() ?? "";
-  if (!groupJoinOutreachId && !groupJoinRepliedAt) {
+  const sourceEventId = input.sourceEventId?.trim() ?? "";
+  if (!groupJoinOutreachId && !sourceEventId) {
     return input.effectId;
   }
   if (
     !parseHostedLinqInviteSignupEffectId(input.effectId)
-    || !groupJoinOutreachId
     || !groupJoinRepliedAt
   ) {
     throw new TypeError(
-      "Hosted Linq group-join signup delivery source requires a valid effect, outreach, and reply time.",
+      "Hosted Linq signup delivery source requires a valid effect and occurrence time.",
     );
   }
   const repliedAt = new Date(groupJoinRepliedAt);
   if (Number.isNaN(repliedAt.getTime())) {
     throw new TypeError(
-      "Hosted Linq group-join signup delivery source requires a valid reply time.",
+      "Hosted Linq signup delivery source requires a valid occurrence time.",
     );
   }
-  return `${HOSTED_LINQ_INVITE_SIGNUP_SOURCE_REF_PREFIX}${JSON.stringify([
-    input.effectId,
-    groupJoinOutreachId,
-    repliedAt.toISOString(),
-  ])}`;
+  return `${HOSTED_LINQ_INVITE_SIGNUP_SOURCE_REF_PREFIX}${JSON.stringify(
+    sourceEventId
+      ? [
+          input.effectId,
+          groupJoinOutreachId || null,
+          repliedAt.toISOString(),
+          sourceEventId,
+        ]
+      : [
+          input.effectId,
+          groupJoinOutreachId,
+          repliedAt.toISOString(),
+        ],
+  )}`;
 }
 
 export function parseHostedLinqInviteSignupDeliverySourceRef(
@@ -135,6 +148,8 @@ export function parseHostedLinqInviteSignupDeliverySourceRef(
     return {
       effectId: normalized,
       groupJoinReplyContext: null,
+      occurredAt: null,
+      sourceEventId: null,
     };
   }
   if (!normalized.startsWith(HOSTED_LINQ_INVITE_SIGNUP_SOURCE_REF_PREFIX)) {
@@ -151,21 +166,31 @@ export function parseHostedLinqInviteSignupDeliverySourceRef(
   }
   if (
     !Array.isArray(decoded)
-    || decoded.length !== 3
+    || (decoded.length !== 3 && decoded.length !== 4)
     || typeof decoded[0] !== "string"
-    || typeof decoded[1] !== "string"
+    || (
+      typeof decoded[1] !== "string"
+      && !(decoded.length === 4 && decoded[1] === null)
+    )
     || typeof decoded[2] !== "string"
+    || (decoded.length === 4 && typeof decoded[3] !== "string")
     || !parseHostedLinqInviteSignupEffectId(decoded[0])
-    || !decoded[1].trim()
+    || (typeof decoded[1] === "string" && !decoded[1].trim())
     || Number.isNaN(new Date(decoded[2]).getTime())
+    || (decoded.length === 4 && !decoded[3].trim())
   ) {
     return null;
   }
   return {
     effectId: decoded[0],
-    groupJoinReplyContext: {
-      outreachId: decoded[1].trim(),
-      repliedAt: new Date(decoded[2]).toISOString(),
-    },
+    groupJoinReplyContext: typeof decoded[1] === "string"
+      ? {
+          outreachId: decoded[1].trim(),
+          repliedAt: new Date(decoded[2]).toISOString(),
+          sourceEventId: decoded.length === 4 ? decoded[3].trim() : null,
+        }
+      : null,
+    occurredAt: new Date(decoded[2]).toISOString(),
+    sourceEventId: decoded.length === 4 ? decoded[3].trim() : null,
   };
 }

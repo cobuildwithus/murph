@@ -360,6 +360,17 @@ export async function isHostedGroupJoinOutreachReplyDeliveryAuthorizedTx(input: 
   outreachId: string;
   tx: HostedGroupJoinOutreachReplyAuthorityClient;
 }): Promise<boolean> {
+  const context = await readHostedGroupJoinOutreachReplyDeliveryContextTx({
+    outreachId: input.outreachId,
+    tx: input.tx,
+  });
+  return context?.joinCode === input.groupJoinCode.trim();
+}
+
+export async function readHostedGroupJoinOutreachReplyDeliveryContextTx(input: {
+  outreachId: string;
+  tx: HostedGroupJoinOutreachReplyAuthorityClient;
+}): Promise<{ joinCode: string } | null> {
   await acquireHostedGroupJoinOutreachDrainLockTx(input.tx);
 
   const outreach = await input.tx.hostedGroupJoinOutreach.findUnique({
@@ -378,7 +389,7 @@ export async function isHostedGroupJoinOutreachReplyDeliveryAuthorizedTx(input: 
     || outreach.repliedAt
     || outreach.skippedAt
   ) {
-    return false;
+    return null;
   }
 
   const offer = await input.tx.hostedGroupJoinOffer.findUnique({
@@ -394,13 +405,14 @@ export async function isHostedGroupJoinOutreachReplyDeliveryAuthorizedTx(input: 
       },
     },
   });
-  return Boolean(
+  const joinCode =
     offer
     && offer.groupId === outreach.groupId
     && !offer.revokedAt
     && offer.group.runtimeMemberId
-    && offer.group.joinCode?.trim() === input.groupJoinCode.trim(),
-  );
+      ? offer.group.joinCode?.trim() ?? null
+      : null;
+  return joinCode ? { joinCode } : null;
 }
 
 export async function consumeHostedGroupJoinOutreachReplyContextTx(input: {

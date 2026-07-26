@@ -297,6 +297,36 @@ describe("hosted onboarding Linq webhook route", () => {
     });
   });
 
+  it("maps an in-flight required signup delivery to a retryable 503 response", async () => {
+    mocks.handleHostedOnboardingLinqWebhook.mockRejectedValue(
+      hostedOnboardingError({
+        code: "HOSTED_LINQ_SIGNUP_DELIVERY_IN_FLIGHT",
+        httpStatus: 503,
+        message:
+          "The signup link is still recovering. Retry this webhook after the current delivery attempt expires.",
+        retryable: true,
+      }),
+    );
+
+    const response = await hostedOnboardingLinqRoute.POST(
+      new Request("https://join.example.test/api/hosted-onboarding/linq/webhook", {
+        method: "POST",
+        body: JSON.stringify({ ok: true }),
+      }),
+    );
+
+    expect(response.status).toBe(503);
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "HOSTED_LINQ_SIGNUP_DELIVERY_IN_FLIGHT",
+        message:
+          "The signup link is still recovering. Retry this webhook after the current delivery attempt expires.",
+        retryable: true,
+      },
+    });
+  });
+
   it("rejects oversized webhook bodies before invoking the Linq service", async () => {
     const response = await hostedOnboardingLinqRoute.POST(
       new Request("https://join.example.test/api/hosted-onboarding/linq/webhook", {

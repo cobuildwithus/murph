@@ -442,12 +442,29 @@ export async function handleHostedOnboardingLinqWebhook(input: {
     });
 
     if (plan.desiredSideEffects.length > 0) {
-      await drainHostedLinqSideEffectsDirect({
+      const drainResult = await drainHostedLinqSideEffectsDirect({
         prisma,
         scheduleAfterResponse: input.scheduleAfterResponse,
         sideEffects: plan.desiredSideEffects,
         signal: input.signal,
       });
+      const pendingRequiredSignup = drainResult.skipped.find(
+        (skip) =>
+          (
+            skip.template === "invite_signup"
+            || skip.template === "invite_signup_fallback"
+          )
+          && skip.reason === "notice_in_flight",
+      );
+      if (pendingRequiredSignup) {
+        throw hostedOnboardingError({
+          code: "HOSTED_LINQ_SIGNUP_DELIVERY_IN_FLIGHT",
+          httpStatus: 503,
+          message:
+            "The signup link is still recovering. Retry this webhook after the current delivery attempt expires.",
+          retryable: true,
+        });
+      }
     }
 
     scheduleHostedLinqProviderEventIngestionBestEffort({

@@ -285,19 +285,43 @@ type HostedLinqDeliveryProviderDispatchClaimInput = {
   template?: string | null;
 };
 
+export type HostedLinqDeliveryProviderDispatchClaim = {
+  claimed: boolean;
+  id: string | null;
+  intentMismatch?: boolean;
+  retryAt?: Date;
+  sourceRef?: string | null;
+};
+
 export async function claimHostedLinqDeliveryProviderDispatchTx(
   input: HostedLinqDeliveryProviderDispatchClaimInput,
-): Promise<{ claimed: boolean; id: string | null; retryAt?: Date }> {
+): Promise<HostedLinqDeliveryProviderDispatchClaim> {
   return claimHostedLinqDeliveryProviderDispatchWithIdTx(
     input,
     buildHostedLinqDeliveryId,
   );
 }
 
+export async function readHostedLinqDeliveryProviderDispatchIntentTx(input: {
+  idempotencyKey: string;
+  prisma: HostedLinqDeliveryClient;
+}): Promise<{ sourceRef: string | null } | null> {
+  const idempotencyKey = createHostedLinqDeliveryIdempotencyLookupKey(
+    input.idempotencyKey,
+  );
+  if (!idempotencyKey) {
+    return null;
+  }
+  return input.prisma.hostedLinqDelivery.findUnique({
+    where: { idempotencyKey },
+    select: { sourceRef: true },
+  });
+}
+
 async function claimHostedLinqDeliveryProviderDispatchWithIdTx(
   input: HostedLinqDeliveryProviderDispatchClaimInput,
   buildDeliveryId: (idempotencyKey: string) => string,
-): Promise<{ claimed: boolean; id: string | null; retryAt?: Date }> {
+): Promise<HostedLinqDeliveryProviderDispatchClaim> {
   const attemptedAt = input.attemptedAt ?? new Date();
   const idempotencyKey = createHostedLinqDeliveryIdempotencyLookupKey(
     normalizeNullable(input.idempotencyKey),
@@ -391,7 +415,7 @@ export async function recordHostedLinqRuntimeProviderDispatchFenceTx(input: {
   prisma: HostedLinqDeliveryClient;
   sourceRef?: string | null;
   targetKind?: string | null;
-}): Promise<{ claimed: boolean; id: string | null; retryAt?: Date }> {
+}): Promise<HostedLinqDeliveryProviderDispatchClaim> {
   const attemptedAt = input.attemptedAt ?? new Date();
   return await claimHostedLinqDeliveryProviderDispatchTx({
     attemptedAt,
@@ -1617,12 +1641,16 @@ const hostedLinqDeliveryLifecycleSelect = {
   failedAt: true,
   id: true,
   lastReceiptAt: true,
+  linqChatLookupKey: true,
   messageLookupKey: true,
   phoneNumberLookupKey: true,
   retryAfterAt: true,
   skippedAt: true,
   source: true,
+  sourceRef: true,
   status: true,
+  targetKind: true,
+  template: true,
 } satisfies Prisma.HostedLinqDeliverySelect;
 
 function isHostedLinqTerminalTelegramUsageLimitFailure(input: {
@@ -1721,20 +1749,55 @@ async function claimExistingHostedLinqDeliveryProviderDispatchTx(input: {
     failedAt: Date | null;
     id: string;
     lastReceiptAt: Date | null;
+    linqChatLookupKey: string | null;
     messageLookupKey: string | null;
+    phoneNumberLookupKey: string | null;
     retryAfterAt: Date | null;
     skippedAt: Date | null;
     source: string | null;
+    sourceRef: string | null;
     status: string;
+    targetKind: string | null;
+    template: string | null;
   };
   prisma: HostedLinqDeliveryClient;
   reclaimStalePreProviderAttempt?: boolean;
   source: string;
-}): Promise<{ claimed: boolean; id: string | null; retryAt?: Date }> {
+}): Promise<HostedLinqDeliveryProviderDispatchClaim> {
   if (isHostedLinqDeliveryProviderCorrelated(input.delivery)) {
     return {
       claimed: false,
       id: input.delivery.id,
+    };
+  }
+
+  if (
+    isHostedLinqInviteSignupDeliveryTemplate(input.data.template)
+    && (
+      input.delivery.linqChatLookupKey !== input.data.linqChatLookupKey
+      || input.delivery.phoneNumberLookupKey !== input.data.phoneNumberLookupKey
+      || input.delivery.sourceRef !== input.data.sourceRef
+      || input.delivery.targetKind !== input.data.targetKind
+      || input.delivery.template !== input.data.template
+    )
+  ) {
+    return {
+      claimed: false,
+      id: input.delivery.id,
+      intentMismatch: true,
+      sourceRef: input.delivery.sourceRef,
+    };
+  }
+
+  const inFlight = resolveHostedLinqDeliveryInFlightState({
+    attemptedAt: input.attemptedAt,
+    delivery: input.delivery,
+  });
+  if (inFlight.inFlight) {
+    return {
+      claimed: false,
+      id: input.delivery.id,
+      ...(inFlight.retryAt ? { retryAt: inFlight.retryAt } : {}),
     };
   }
 

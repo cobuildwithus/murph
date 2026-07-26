@@ -29,6 +29,7 @@ const mocks = vi.hoisted(() => ({
   readHostedMemberHomeLinqRoute: vi.fn(),
   readHostedMemberRoutingState: vi.fn(),
   readHostedLinqDailyState: vi.fn(),
+  readHostedLinqDeliveryProviderDispatchIntentTx: vi.fn(),
   readHostedMemberSnapshot: vi.fn(),
   checkHostedAiUsageGate: vi.fn(),
   sendHostedLinqChatMessage: vi.fn(),
@@ -164,6 +165,8 @@ vi.mock("@/src/lib/hosted-onboarding/linq-delivery-store", async () => {
   return {
     ...actual,
     claimHostedLinqDeliveryProviderDispatchTx: mocks.claimHostedLinqDeliveryProviderDispatchTx,
+    readHostedLinqDeliveryProviderDispatchIntentTx:
+      mocks.readHostedLinqDeliveryProviderDispatchIntentTx,
   };
 });
 
@@ -190,6 +193,9 @@ import {
 import {
   createHostedLinqProviderEventLookupKey,
 } from "@/src/lib/hosted-onboarding/linq-observability-identifiers";
+import {
+  buildHostedLinqInviteSignupDeliverySourceRef,
+} from "@/src/lib/hosted-onboarding/linq-invite-signup-effect-id";
 import { handleHostedOnboardingLinqWebhook } from "@/src/lib/hosted-onboarding/webhook-service";
 
 describe("hosted onboarding Linq webhook hard-cut flows", () => {
@@ -223,6 +229,7 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     mocks.releaseHostedLinqOnboardingLinkNoticeClaim.mockResolvedValue(undefined);
     mocks.releaseHostedLinqQuotaReplyNoticeClaim.mockResolvedValue(undefined);
     mocks.readHostedLinqDailyState.mockResolvedValue(null);
+    mocks.readHostedLinqDeliveryProviderDispatchIntentTx.mockResolvedValue(null);
     mocks.readHostedMailboxItemByDedupeKey.mockResolvedValue(null);
     mocks.incrementHostedLinqInboundDailyState.mockResolvedValue({
       dayUtc: new Date("2026-03-26T00:00:00.000Z"),
@@ -1167,17 +1174,22 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
       id: "invite_123",
       inviteCode: "code_first_contact",
     });
-    mocks.claimHostedLinqDeliveryProviderDispatchTx
-      .mockResolvedValueOnce({
-        claimed: true,
-        id: "hld_first_contact",
-      })
-      .mockResolvedValueOnce({
-        claimed: false,
-        id: "hld_first_contact",
-      });
+    const expectedIdempotencyKey =
+      "linq-invite-signup:member_123:2026-03-26T00:00:00.000Z";
+    const firstSourceRef = buildHostedLinqInviteSignupDeliverySourceRef({
+      effectId: expectedIdempotencyKey,
+      groupJoinRepliedAt: "2026-03-26T12:00:00.000Z",
+      sourceEventId: "evt_first_contact_one",
+    });
+    mocks.readHostedLinqDeliveryProviderDispatchIntentTx
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ sourceRef: firstSourceRef });
+    mocks.claimHostedLinqDeliveryProviderDispatchTx.mockResolvedValueOnce({
+      claimed: true,
+      id: "hld_first_contact",
+    });
 
-    await handleHostedOnboardingLinqWebhook({
+    const laterInboundResponse = await handleHostedOnboardingLinqWebhook({
       rawBody: buildLinqMessageWebhookBody({
         eventId: "evt_first_contact_one",
         messageId: "msg_first_contact_one",
@@ -1197,26 +1209,18 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     });
 
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledTimes(1);
-    const expectedIdempotencyKey = "linq-invite-signup:member_123:2026-03-26T00:00:00.000Z";
-    expect(mocks.claimHostedLinqDeliveryProviderDispatchTx).toHaveBeenCalledTimes(2);
+    expect(laterInboundResponse).toMatchObject({
+      ok: true,
+      reason: "sent-signup-link",
+    });
+    expect(mocks.claimHostedLinqDeliveryProviderDispatchTx).toHaveBeenCalledTimes(1);
     expect(mocks.claimHostedLinqDeliveryProviderDispatchTx).toHaveBeenNthCalledWith(
       1,
       expect.objectContaining({
         idempotencyKey: expectedIdempotencyKey,
         linqChatId: "chat_123",
         source: "hosted_webhook_side_effect",
-        sourceRef: expectedIdempotencyKey,
-        targetKind: "thread",
-        template: "invite_signup",
-      }),
-    );
-    expect(mocks.claimHostedLinqDeliveryProviderDispatchTx).toHaveBeenNthCalledWith(
-      2,
-      expect.objectContaining({
-        idempotencyKey: expectedIdempotencyKey,
-        linqChatId: "chat_123",
-        source: "hosted_webhook_side_effect",
-        sourceRef: expectedIdempotencyKey,
+        sourceRef: firstSourceRef,
         targetKind: "thread",
         template: "invite_signup",
       }),

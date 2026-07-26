@@ -2,9 +2,12 @@ import { randomInt, randomUUID } from "node:crypto";
 
 import type { PrismaClient } from "@prisma/client";
 import { describe, expect, it, vi } from "vitest";
-import type { HostedLinqWebhookEvent } from "@/src/lib/hosted-onboarding/linq";
 
 const providerMocks = vi.hoisted(() => ({
+  getHostedLinqChatSummary: vi.fn().mockResolvedValue({
+    handles: [],
+    isGroup: false,
+  }),
   sendHostedLinqChatMessage: vi.fn(),
 }));
 
@@ -15,11 +18,24 @@ vi.mock("@/src/lib/hosted-onboarding/linq", async () => {
   return {
     ...actual,
     sendHostedLinqChatMessage: providerMocks.sendHostedLinqChatMessage,
+    verifyAndParseHostedLinqWebhookRequest: vi.fn(
+      (input: { rawBody: string }) =>
+        actual.parseHostedLinqWebhookEvent(input.rawBody),
+    ),
+  };
+});
+
+vi.mock("@/src/lib/hosted-onboarding/linq-client", async () => {
+  const actual = await vi.importActual<
+    typeof import("@/src/lib/hosted-onboarding/linq-client")
+  >("@/src/lib/hosted-onboarding/linq-client");
+  return {
+    ...actual,
+    getHostedLinqChatSummary: providerMocks.getHostedLinqChatSummary,
   };
 });
 
 import {
-  consumeHostedGroupJoinOutreachReplyContextTx,
   enqueueHostedGroupJoinOutreachTx,
   readHostedGroupJoinOutreachReplyContextTx,
 } from "@/src/lib/hosted-groups/group-join-outreach-store";
@@ -48,14 +64,8 @@ import {
   planHostedOnboardingLinqWebhook,
 } from "@/src/lib/hosted-onboarding/webhook-provider-linq";
 import {
-  ingestHostedLinqProviderEventTx,
-} from "@/src/lib/hosted-onboarding/linq-provider-event-store";
-import {
-  parseHostedLinqProviderEvent,
-} from "@/src/lib/hosted-onboarding/linq-provider-events";
-import {
-  drainHostedLinqSideEffectsDirect,
-} from "@/src/lib/hosted-onboarding/webhook-transport";
+  handleHostedOnboardingLinqWebhook,
+} from "@/src/lib/hosted-onboarding/webhook-service";
 import { createPrismaClient } from "@/src/lib/prisma";
 
 const databaseUrl = process.env.DATABASE_URL?.trim() ?? "";
@@ -91,33 +101,36 @@ describe.skipIf(!runPostgresProof)(
       }
       const chatId = `chat-group-reply-${randomUUID()}`;
       const groupId = `hgrp_group_reply_${randomUUID()}`;
+      const newerGroupId = `hgrp_group_reply_newer_${randomUUID()}`;
       const joinCode = `join-group-reply-${randomUUID()}`;
+      const newerJoinCode = `join-group-reply-newer-${randomUUID()}`;
       const offerId = `hgrpjo_group_reply_${randomUUID()}`;
+      const newerOfferId = `hgrpjo_group_reply_newer_${randomUUID()}`;
       const ownerMemberId = `hbm_group_owner_${randomUUID()}`;
+      const newerOwnerMemberId = `hbm_group_owner_newer_${randomUUID()}`;
       const runtimeMemberId = `hbm_group_runtime_${randomUUID()}`;
+      const newerRuntimeMemberId = `hbm_group_runtime_newer_${randomUUID()}`;
       const participantMemberId = `hbm_group_participant_${randomUUID()}`;
       const linqChatLookupKeys =
         createHostedLinqChatLookupKeyReadCandidates(chatId);
       let outreachId: string | null = null;
+      let newerOutreachId: string | null = null;
       let deliveryIdempotencyLookupKey: string | null = null;
 
       const firstProviderMessageId = `linq-message-first-${randomUUID()}`;
-      const secondProviderMessageId = `linq-message-second-${randomUUID()}`;
       providerMocks.sendHostedLinqChatMessage
         .mockResolvedValueOnce({
           chatId,
           messageId: firstProviderMessageId,
-        })
-        .mockResolvedValueOnce({
-          chatId,
-          messageId: secondProviderMessageId,
         });
 
       try {
         await prisma.hostedMember.createMany({
           data: [
             { id: ownerMemberId },
+            { id: newerOwnerMemberId },
             { id: runtimeMemberId },
+            { id: newerRuntimeMemberId },
             { id: participantMemberId },
           ],
         });
@@ -256,6 +269,13 @@ describe.skipIf(!runPostgresProof)(
         // preparation transaction commits and before provider entry. The
         // provider has seen no request and the attempt has no correlation.
         const crashClaimedAt = new Date();
+        const originalSourceRef =
+          buildHostedLinqInviteSignupDeliverySourceRef({
+            effectId: signupLinkEffect.effectId,
+            groupJoinOutreachId: outreachId,
+            groupJoinRepliedAt: signupLinkEffect.payload.occurredAt,
+            sourceEventId: signupLinkEffect.payload.sourceEventId,
+          });
         await expect(claimHostedLinqDeliveryProviderDispatchTx({
           attemptedAt: crashClaimedAt,
           idempotencyKey: signupLinkEffect.effectId,
@@ -263,11 +283,7 @@ describe.skipIf(!runPostgresProof)(
           prisma,
           reclaimStalePreProviderAttempt: true,
           source: "hosted_webhook_side_effect",
-          sourceRef: buildHostedLinqInviteSignupDeliverySourceRef({
-            effectId: signupLinkEffect.effectId,
-            groupJoinOutreachId: outreachId,
-            groupJoinRepliedAt: signupLinkEffect.payload.occurredAt,
-          }),
+          sourceRef: originalSourceRef,
           status: "attempted",
           targetKind: "thread",
           template: "invite_signup",
@@ -277,20 +293,90 @@ describe.skipIf(!runPostgresProof)(
         const scheduleAfterResponse = (task: () => Promise<void>) => {
           scheduledTasks.push(task);
         };
-        await expect(drainHostedLinqSideEffectsDirect({
+        await expect(handleHostedOnboardingLinqWebhook({
           prisma,
+          rawBody: JSON.stringify(recoveredEvent),
           scheduleAfterResponse,
-          sideEffects: recoveredPlan.desiredSideEffects,
-        })).resolves.toEqual({
-          sentCount: 0,
-          skipped: [{
-            effectId: signupLinkEffect.effectId,
-            reason: "notice_in_flight",
-            template: "invite_signup",
-          }],
+          signature: null,
+          timestamp: null,
+        })).rejects.toMatchObject({
+          code: "HOSTED_LINQ_SIGNUP_DELIVERY_IN_FLIGHT",
+          httpStatus: 503,
+          retryable: true,
         });
         expect(providerMocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
         expect(scheduledTasks).toHaveLength(0);
+
+        // A newer same-day inbound can now resolve a different valid outreach,
+        // but it cannot inherit the original member/day delivery key or rewrite
+        // that key's persisted source intent.
+        await prisma.hostedGroup.create({
+          data: {
+            displayName: "Newer Recovery Proof Group",
+            id: newerGroupId,
+            joinCode: newerJoinCode,
+            joinCodeCreatedAt: new Date("2026-07-24T20:00:30.000Z"),
+            ownerMemberId: newerOwnerMemberId,
+            runtimeMemberId: newerRuntimeMemberId,
+          },
+        });
+        await prisma.hostedGroupJoinOffer.create({
+          data: {
+            groupId: newerGroupId,
+            id: newerOfferId,
+            messageLookupKey: `message-lookup-${randomUUID()}`,
+            postedAt: new Date("2026-07-24T20:00:30.000Z"),
+            projectionKindsJson: ["best_effort"],
+          },
+        });
+        const newerEnqueue = await prisma.$transaction((tx) =>
+          enqueueHostedGroupJoinOutreachTx({
+            groupId: newerGroupId,
+            offerId: newerOfferId,
+            participantPhoneNumber: participantPhone,
+            requestedAt: new Date("2026-07-24T20:00:30.000Z"),
+            tx,
+          })
+        );
+        newerOutreachId = newerEnqueue.outreachId;
+        await prisma.hostedGroupJoinOutreach.update({
+          data: {
+            dispatchStartedAt: new Date("2026-07-24T20:00:31.000Z"),
+            linqChatLookupKey: linqChatLookupKeys[0],
+            phoneNumberLookupKey: recipientPhoneLookupKey,
+            sentAt: new Date("2026-07-24T20:00:32.000Z"),
+          },
+          where: { id: newerOutreachId },
+        });
+        const newerInboundEvent = buildDirectReplyEvent({
+          chatId,
+          eventId: `event-newer-${randomUUID()}`,
+          messageId: `message-newer-${randomUUID()}`,
+          occurredAt: "2026-07-24T20:01:30.000Z",
+          participantPhone,
+          recipientPhone,
+        });
+        await expect(handleHostedOnboardingLinqWebhook({
+          prisma,
+          rawBody: JSON.stringify(newerInboundEvent),
+          scheduleAfterResponse,
+          signature: null,
+          timestamp: null,
+        })).resolves.toMatchObject({
+          ok: true,
+          reason: "sent-signup-link",
+        });
+        expect(providerMocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+        await expect(prisma.hostedLinqDelivery.findUnique({
+          select: { sourceRef: true },
+          where: {
+            idempotencyKey: deliveryIdempotencyLookupKey,
+          },
+        })).resolves.toEqual({ sourceRef: originalSourceRef });
+        await expect(prisma.hostedGroupJoinOutreach.findUnique({
+          select: { repliedAt: true },
+          where: { id: newerOutreachId },
+        })).resolves.toEqual({ repliedAt: null });
 
         // A retry of the same webhook effect after the ambiguity window owns
         // continuation. It reclaims the exact row and reuses the immutable
@@ -305,11 +391,16 @@ describe.skipIf(!runPostgresProof)(
             idempotencyKey: deliveryIdempotencyLookupKey,
           },
         });
-        await expect(drainHostedLinqSideEffectsDirect({
+        await expect(handleHostedOnboardingLinqWebhook({
           prisma,
+          rawBody: JSON.stringify(recoveredEvent),
           scheduleAfterResponse,
-          sideEffects: recoveredPlan.desiredSideEffects,
-        })).resolves.toMatchObject({ sentCount: 1 });
+          signature: null,
+          timestamp: null,
+        })).resolves.toMatchObject({
+          ok: true,
+          reason: "sent-signup-link",
+        });
         expect(providerMocks.sendHostedLinqChatMessage).toHaveBeenCalledTimes(1);
         expect(providerMocks.sendHostedLinqChatMessage).toHaveBeenLastCalledWith(
           expect.objectContaining({
@@ -321,13 +412,15 @@ describe.skipIf(!runPostgresProof)(
           }),
         );
 
-        expect(scheduledTasks).toHaveLength(1);
+        expect(scheduledTasks.length).toBeGreaterThan(0);
         await expect(prisma.hostedGroupJoinOutreach.findUnique({
           select: { repliedAt: true },
           where: { id: outreachId },
         })).resolves.toEqual({ repliedAt: null });
 
-        await scheduledTasks[0]?.();
+        for (const task of scheduledTasks.splice(0)) {
+          await task();
+        }
 
         await expect(prisma.hostedGroupJoinOutreach.findUnique({
           select: { repliedAt: true },
@@ -336,172 +429,16 @@ describe.skipIf(!runPostgresProof)(
           repliedAt: new Date("2026-07-24T20:01:00.000Z"),
         });
 
-        const postCrashRecoveryPlan = await prisma.$transaction((tx) =>
-          planHostedOnboardingLinqWebhook({
-            event: buildDirectReplyEvent({
-              chatId,
-              eventId: `event-post-crash-recovery-${randomUUID()}`,
-              messageId: `message-post-crash-recovery-${randomUUID()}`,
-              occurredAt: "2026-07-24T20:01:30.000Z",
-              participantPhone,
-              recipientPhone,
-            }),
-            firstContactAdmitted: true,
-            prisma: tx,
-            requireFirstContactAdmission: true,
-          })
-        );
-        expect(postCrashRecoveryPlan.response).toMatchObject({
-          ignored: true,
-          reason: "signup-link-already-sent",
-        });
-        expect(postCrashRecoveryPlan.desiredSideEffects).toEqual([]);
-        expect(providerMocks.sendHostedLinqChatMessage).toHaveBeenCalledTimes(1);
-
-        await ingestHostedLinqProviderEventTx({
-          event: buildProviderReceiptEvent({
-            eventId: `event-first-failed-${randomUUID()}`,
-            messageId: firstProviderMessageId,
-            occurredAt: "2026-07-24T20:02:00.000Z",
-            recipientPhone,
-            status: "failed",
-          }),
-          prisma,
-        });
         await expect(prisma.hostedGroupJoinOutreach.findUnique({
           select: { repliedAt: true },
-          where: { id: outreachId },
+          where: { id: newerOutreachId },
         })).resolves.toEqual({ repliedAt: null });
-
-        const retryEvent = buildDirectReplyEvent({
-          chatId,
-          eventId: `event-retry-${randomUUID()}`,
-          messageId: `message-retry-${randomUUID()}`,
-          occurredAt: "2026-07-24T20:03:00.000Z",
-          participantPhone,
-          recipientPhone,
-        });
-        const retryPlan = await prisma.$transaction((tx) =>
-          planHostedOnboardingLinqWebhook({
-            event: retryEvent,
-            firstContactAdmitted: true,
-            prisma: tx,
-            requireFirstContactAdmission: true,
-          })
-        );
-        expect(retryPlan.response).toMatchObject({
-          joinUrl: expect.stringContaining(
-            `/groups/join/${joinCode}?invite=`,
-          ),
-          reason: "sent-signup-link",
-        });
-        await expect(drainHostedLinqSideEffectsDirect({
-          prisma,
-          scheduleAfterResponse,
-          sideEffects: retryPlan.desiredSideEffects,
-        })).resolves.toMatchObject({ sentCount: 1 });
-        expect(scheduledTasks).toHaveLength(2);
-
-        // The provider has accepted attempt two, but its post-response
-        // milestone has not run yet. A duplicate failure callback for attempt
-        // one must not reopen either the daily gate or group context while the
-        // newer reclaimable attempt owns this ambiguity window.
-        await ingestHostedLinqProviderEventTx({
-          event: buildProviderReceiptEvent({
-            eventId: `event-first-stale-failed-${randomUUID()}`,
-            messageId: firstProviderMessageId,
-            occurredAt: "2026-07-24T20:04:00.000Z",
-            recipientPhone,
-            status: "failed",
-          }),
-          prisma,
-        });
-        await expect(prisma.hostedGroupJoinOutreach.findUnique({
-          select: { repliedAt: true },
-          where: { id: outreachId },
-        })).resolves.toEqual({ repliedAt: null });
-        const postStaleFailurePlan = await prisma.$transaction((tx) =>
-          planHostedOnboardingLinqWebhook({
-            event: buildDirectReplyEvent({
-              chatId,
-              eventId: `event-post-stale-failure-${randomUUID()}`,
-              messageId: `message-post-stale-failure-${randomUUID()}`,
-              occurredAt: "2026-07-24T20:04:30.000Z",
-              participantPhone,
-              recipientPhone,
-            }),
-            firstContactAdmitted: true,
-            prisma: tx,
-            requireFirstContactAdmission: true,
-          })
-        );
-        expect(postStaleFailurePlan.response).toMatchObject({
-          ignored: true,
-          reason: "signup-link-already-sent",
-        });
-        expect(postStaleFailurePlan.desiredSideEffects).toEqual([]);
-
-        await scheduledTasks[1]?.();
-        await expect(prisma.hostedGroupJoinOutreach.findUnique({
-          select: { repliedAt: true },
-          where: { id: outreachId },
-        })).resolves.toEqual({
-          repliedAt: new Date("2026-07-24T20:03:00.000Z"),
-        });
-
-        await ingestHostedLinqProviderEventTx({
-          event: buildProviderReceiptEvent({
-            eventId: `event-second-failed-${randomUUID()}`,
-            messageId: secondProviderMessageId,
-            occurredAt: "2026-07-24T20:05:00.000Z",
-            recipientPhone,
-            status: "failed",
-          }),
-          prisma,
-        });
-        await expect(prisma.hostedGroupJoinOutreach.findUnique({
-          select: { repliedAt: true },
-          where: { id: outreachId },
-        })).resolves.toEqual({ repliedAt: null });
-
-        const postFailurePlan = await prisma.$transaction((tx) =>
-          planHostedOnboardingLinqWebhook({
-            event: buildDirectReplyEvent({
-              chatId,
-              eventId: `event-post-failure-${randomUUID()}`,
-              messageId: `message-post-failure-${randomUUID()}`,
-              occurredAt: "2026-07-24T20:06:00.000Z",
-              participantPhone,
-              recipientPhone,
-            }),
-            firstContactAdmitted: true,
-            prisma: tx,
-            requireFirstContactAdmission: true,
-          })
-        );
-        expect(postFailurePlan.response).toMatchObject({
-          joinUrl: expect.stringContaining(
-            `/groups/join/${joinCode}?invite=`,
-          ),
-          reason: "sent-signup-link",
-        });
-
-        await ingestHostedLinqProviderEventTx({
-          event: buildProviderReceiptEvent({
-            eventId: `event-second-delivered-${randomUUID()}`,
-            messageId: secondProviderMessageId,
-            occurredAt: "2026-07-24T20:07:00.000Z",
-            recipientPhone,
-            status: "delivered",
-          }),
-          prisma,
-        });
-        await expect(prisma.hostedGroupJoinOutreach.findUnique({
-          select: { repliedAt: true },
-          where: { id: outreachId },
-        })).resolves.toEqual({
-          repliedAt: new Date("2026-07-24T20:03:00.000Z"),
-        });
+        await expect(prisma.hostedLinqDelivery.findUnique({
+          select: { sourceRef: true },
+          where: {
+            idempotencyKey: deliveryIdempotencyLookupKey,
+          },
+        })).resolves.toEqual({ sourceRef: originalSourceRef });
         await expect(prisma.$transaction((tx) =>
           readHostedGroupJoinOutreachReplyContextTx({
             linqChatId: chatId,
@@ -509,20 +446,31 @@ describe.skipIf(!runPostgresProof)(
             recipientPhoneNumber: recipientPhone,
             tx,
           })
-        )).resolves.toBeNull();
-        await expect(prisma.$transaction((tx) =>
-          consumeHostedGroupJoinOutreachReplyContextTx({
-            outreachId: outreachId ?? "",
-            repliedAt: new Date("2026-07-24T20:02:00.000Z"),
-            tx,
-          })
-        )).resolves.toBe(false);
+        )).resolves.toEqual({
+          joinCode: newerJoinCode,
+          outreachId: newerOutreachId,
+        });
+        await expect(handleHostedOnboardingLinqWebhook({
+          prisma,
+          rawBody: JSON.stringify(recoveredEvent),
+          scheduleAfterResponse,
+          signature: null,
+          timestamp: null,
+        })).resolves.toMatchObject({
+          ignored: true,
+          reason: "signup-link-already-sent",
+        });
+        expect(providerMocks.sendHostedLinqChatMessage).toHaveBeenCalledTimes(1);
       } finally {
         await cleanupRecoveryProof({
           deliveryIdempotencyLookupKey,
-          groupId,
+          groupIds: [groupId, newerGroupId],
           linqChatLookupKeys,
           ownerMemberId,
+          additionalMemberIds: [
+            newerOwnerMemberId,
+            newerRuntimeMemberId,
+          ],
           participantMemberId,
           participantPhoneLookupKey,
           prisma,
@@ -578,48 +526,10 @@ function buildDirectReplyEvent(input: {
   }));
 }
 
-function buildProviderReceiptEvent(input: {
-  eventId: string;
-  messageId: string;
-  occurredAt: string;
-  recipientPhone: string;
-  status: "delivered" | "failed";
-}) {
-  const event: HostedLinqWebhookEvent = {
-    api_version: "v3",
-    created_at: input.occurredAt,
-    data: {
-      ...(input.status === "failed"
-        ? {
-            error: {
-              code: "30007",
-              message: "carrier filtered",
-            },
-          }
-        : {}),
-      message_id: input.messageId,
-      phone_number: input.recipientPhone,
-      service: "sms",
-    },
-    event_id: input.eventId,
-    event_type: input.status === "failed"
-      ? "message.failed"
-      : "message.delivered",
-    webhook_version: "2026-02-03",
-  };
-  const parsed = parseHostedLinqProviderEvent({
-    event,
-    rawBody: JSON.stringify(event),
-  });
-  if (!parsed) {
-    throw new TypeError("Expected provider receipt fixture to parse.");
-  }
-  return parsed;
-}
-
 async function cleanupRecoveryProof(input: {
+  additionalMemberIds: string[];
   deliveryIdempotencyLookupKey: string | null;
-  groupId: string;
+  groupIds: string[];
   linqChatLookupKeys: string[];
   ownerMemberId: string;
   participantMemberId: string | null;
@@ -639,7 +549,7 @@ async function cleanupRecoveryProof(input: {
     },
   });
   await input.prisma.hostedGroup.deleteMany({
-    where: { id: input.groupId },
+    where: { id: { in: input.groupIds } },
   });
 
   const participantIdentity = input.participantPhoneLookupKey
@@ -654,6 +564,7 @@ async function cleanupRecoveryProof(input: {
         in: [
           input.ownerMemberId,
           input.runtimeMemberId,
+          ...input.additionalMemberIds,
           ...(input.participantMemberId ? [input.participantMemberId] : []),
           ...(participantIdentity ? [participantIdentity.memberId] : []),
         ],

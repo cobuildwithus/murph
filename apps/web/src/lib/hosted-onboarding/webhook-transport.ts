@@ -13,6 +13,7 @@ import {
   claimHostedLinqDeliveryProviderDispatchTx,
   markHostedLinqDeliveryAcceptedTx,
   markHostedLinqDeliverySendFailedTx,
+  readHostedLinqDeliveryProviderDispatchIntentTx,
   resolveHostedLinqInviteSignupDispatchEffectIdTx,
 } from "./linq-delivery-store";
 import {
@@ -31,6 +32,7 @@ import { normalizePhoneNumber } from "./phone";
 import {
   buildHostedLinqInviteSignupDeliverySourceRef,
   buildHostedLinqInviteSignupEffectId,
+  parseHostedLinqInviteSignupDeliverySourceRef,
 } from "./linq-invite-signup-effect-id";
 import {
   claimHostedLinqQuotaReplyNotice,
@@ -59,6 +61,7 @@ import {
 import {
   consumeHostedGroupJoinOutreachReplyContextTx,
   isHostedGroupJoinOutreachReplyDeliveryAuthorizedTx,
+  readHostedGroupJoinOutreachReplyDeliveryContextTx,
 } from "../hosted-groups/group-join-outreach-store";
 import {
   sanitizeHostedOnboardingStructuredLogDetails,
@@ -136,6 +139,7 @@ export type HostedLinqInviteSignupMessagePayload = {
   occurredAt: string;
   replyToMessageId: string | null;
   service?: string | null;
+  sourceEventId: string;
   threadIsDirect?: boolean | null;
   template: "invite_signup";
 };
@@ -150,6 +154,7 @@ export type HostedLinqInviteSignupFallbackMessagePayload = {
   memberPhone: string;
   occurredAt: string;
   replyToMessageId: null;
+  sourceEventId: string;
   template: "invite_signup_fallback";
 };
 
@@ -336,16 +341,34 @@ type HostedLinqSideEffectDrainInput = {
   signal?: AbortSignal;
 };
 
+type HostedLinqSignupMessageSideEffect = HostedLinqMessageSideEffect & {
+  payload:
+    | HostedLinqInviteSignupFallbackMessagePayload
+    | HostedLinqInviteSignupMessagePayload;
+};
+
 type HostedLinqSideEffectDrainSkipReason =
   | "effect_unresolved"
   | "notice_already_claimed"
   | "notice_in_flight"
+  | "notice_intent_mismatch"
   | "notice_target_unauthorized";
 
 type HostedLinqProviderDispatchPreparation =
-  | "claimed"
-  | "in_flight"
-  | "target_unauthorized";
+  | {
+      effect: HostedLinqMessageSideEffect;
+      status: "claimed";
+    }
+  | {
+      retryAt?: Date;
+      status: "in_flight";
+    }
+  | {
+      status: "intent_mismatch";
+    }
+  | {
+      status: "target_unauthorized";
+    };
 
 type HostedLinqSideEffectSendSkip = {
   reason: Exclude<HostedLinqSideEffectDrainSkipReason, "effect_unresolved">;
@@ -476,7 +499,10 @@ async function sendHostedLinqSideEffect(
       ? effect.payload
       : null;
   const deliveryAttemptTask = usageLimitPayload
-    ? Promise.resolve<HostedLinqProviderDispatchPreparation>("claimed")
+    ? Promise.resolve<HostedLinqProviderDispatchPreparation>({
+        effect,
+        status: "claimed",
+      })
     : prepareHostedLinqSideEffectProviderDispatch({
         effect,
         prisma: options.prisma,
@@ -488,27 +514,36 @@ async function sendHostedLinqSideEffect(
 
   try {
     const preparation = await deliveryAttemptTask;
-    if (preparation === "target_unauthorized") {
+    if (preparation.status === "target_unauthorized") {
       return { reason: "notice_target_unauthorized" };
     }
-    if (preparation === "in_flight") {
-      return { reason: "notice_in_flight" };
+    if (preparation.status === "intent_mismatch") {
+      return { reason: "notice_intent_mismatch" };
+    }
+    if (preparation.status === "in_flight") {
+      return {
+        reason: "notice_in_flight",
+        ...(preparation.retryAt ? { retryAt: preparation.retryAt } : {}),
+      };
     }
 
-    if (effect.payload.template === "invite_signup_fallback") {
+    deliveryEffect = preparation.effect;
+    providerIdempotencyKey = deliveryEffect.effectId;
+
+    if (deliveryEffect.payload.template === "invite_signup_fallback") {
       const result = await createHostedLinqChat({
-        from: effect.payload.assignedRecipientPhone,
-        idempotencyKey: effect.effectId,
-        message: await buildHostedLinqSideEffectMessage(effect, options.prisma),
+        from: deliveryEffect.payload.assignedRecipientPhone,
+        idempotencyKey: deliveryEffect.effectId,
+        message: await buildHostedLinqSideEffectMessage(deliveryEffect, options.prisma),
         signal: options.signal,
-        to: [effect.payload.memberPhone],
+        to: [deliveryEffect.payload.memberPhone],
       });
 
       scheduleHostedLinqDeliveryMilestoneAfterAttempt({
         attemptTask: deliveryAttemptTask,
         milestoneTask: () => markHostedLinqDeliveryAcceptedBestEffort({
           chatId: result.chatId,
-          effect,
+          effect: deliveryEffect,
           messageId: result.messageId,
           prisma: options.prisma,
         }),
@@ -517,7 +552,10 @@ async function sendHostedLinqSideEffect(
       return null;
     }
 
-    const message = await buildHostedLinqSideEffectMessage(effect, options.prisma);
+    const message = await buildHostedLinqSideEffectMessage(
+      deliveryEffect,
+      options.prisma,
+    );
     if (usageLimitPayload) {
       requireHostedOnboardingLinqConfig();
       options.signal?.throwIfAborted();
@@ -561,15 +599,23 @@ async function sendHostedLinqSideEffect(
         : { ...effect, effectId: dispatch.idempotencyKey };
     }
 
+    const deliveryChatId = readHostedLinqSideEffectChatId(
+      deliveryEffect.payload,
+    );
+    if (!deliveryChatId) {
+      throw new TypeError(
+        "Hosted Linq thread side-effect dispatch requires a chat id.",
+      );
+    }
     const result = await sendHostedLinqChatMessage({
-      chatId: effect.payload.chatId,
+      chatId: deliveryChatId,
       idempotencyKey: providerIdempotencyKey,
       message,
-      replyToMessageId: effect.payload.replyToMessageId,
+      replyToMessageId: deliveryEffect.payload.replyToMessageId,
       signal: options.signal,
     });
     const acceptedMilestone = () => markHostedLinqDeliveryAcceptedBestEffort({
-      chatId: result.chatId ?? effect.payload.chatId,
+      chatId: result.chatId ?? deliveryChatId,
       effect: deliveryEffect,
       messageId: result.messageId,
       prisma: options.prisma,
@@ -592,7 +638,7 @@ async function sendHostedLinqSideEffect(
     ) {
       await deliveryAttemptTask;
       await markHostedLinqDeliveryFailedBestEffort({
-        effect,
+        effect: deliveryEffect,
         error,
         prisma: options.prisma,
       });
@@ -617,7 +663,7 @@ async function sendHostedLinqSideEffect(
       scheduleHostedLinqDeliveryMilestoneAfterAttempt({
         attemptTask: deliveryAttemptTask,
         milestoneTask: () => markHostedLinqDeliveryFailedBestEffort({
-          effect,
+          effect: deliveryEffect,
           error,
           prisma: options.prisma,
         }),
@@ -733,34 +779,51 @@ async function prepareHostedLinqSideEffectProviderDispatch(input: {
   prisma: HostedLinqTransportPersistenceClient;
   startedAtMs: number;
 }): Promise<HostedLinqProviderDispatchPreparation> {
-  const template = input.effect.payload.template;
-  const isSignupLinkAttempt =
-    template === "invite_signup"
-    || template === "invite_signup_fallback";
-  const target = readHostedLinqSideEffectDeliveryTarget(input.effect.payload);
+  const signupEffect = isHostedLinqSignupMessageSideEffect(input.effect)
+    ? input.effect
+    : null;
 
   return await runHostedLinqTransportTransaction(input.prisma, async (prisma) => {
-    if (
-      input.effect.payload.template === "invite_signup"
-      || input.effect.payload.template === "invite_signup_fallback"
-    ) {
-      await lockHostedMemberRow(prisma, input.effect.payload.memberId);
+    let dispatchEffect = input.effect;
+    let dispatchSourceRef = buildHostedLinqSideEffectDeliverySourceRef(
+      input.effect,
+    );
+    if (signupEffect) {
+      await lockHostedMemberRow(prisma, signupEffect.payload.memberId);
       const invite = await prisma.hostedInvite.findUnique({
         select: { id: true },
         where: {
-          id: input.effect.payload.inviteId,
+          id: signupEffect.payload.inviteId,
           member: { suspendedAt: null },
-          memberId: input.effect.payload.memberId,
+          memberId: signupEffect.payload.memberId,
         },
       });
       if (!invite) {
-        return "target_unauthorized";
+        return { status: "target_unauthorized" };
       }
+      const persistedIntent =
+        await readHostedLinqDeliveryProviderDispatchIntentTx({
+          idempotencyKey: signupEffect.effectId,
+          prisma,
+        });
+      const recoveredIntent = await resolveHostedLinqSignupDispatchIntentTx({
+        effect: signupEffect,
+        persistedSourceRef: persistedIntent?.sourceRef ?? null,
+        persistedIntentExists: persistedIntent !== null,
+        prisma,
+      });
+      if (recoveredIntent.status !== "resolved") {
+        return { status: recoveredIntent.status };
+      }
+      const signupDispatchEffect = recoveredIntent.effect;
+      dispatchEffect = signupDispatchEffect;
+      dispatchSourceRef = recoveredIntent.sourceRef;
+
       const groupJoinOutreachId =
-        input.effect.payload.groupJoinOutreachId?.trim() ?? "";
+        signupDispatchEffect.payload.groupJoinOutreachId?.trim() ?? "";
       if (groupJoinOutreachId) {
         const groupJoinCode =
-          input.effect.payload.groupJoinCode?.trim() ?? "";
+          signupDispatchEffect.payload.groupJoinCode?.trim() ?? "";
         if (
           !groupJoinCode
           || !await isHostedGroupJoinOutreachReplyDeliveryAuthorizedTx({
@@ -769,39 +832,167 @@ async function prepareHostedLinqSideEffectProviderDispatch(input: {
             tx: prisma,
           })
         ) {
-          return "target_unauthorized";
+          return { status: "target_unauthorized" };
         }
       }
     }
 
+    const template = dispatchEffect.payload.template;
+    const target = readHostedLinqSideEffectDeliveryTarget(dispatchEffect.payload);
     if (target.linqChatId) {
       await acquireHostedLinqChatOwnershipLockTx({
         chatId: target.linqChatId,
         tx: prisma,
       });
-      await assertHostedLinqSideEffectRouteAuthority(input.effect, prisma);
+      await assertHostedLinqSideEffectRouteAuthority(dispatchEffect, prisma);
     }
     const claim = await claimHostedLinqDeliveryProviderDispatchTx({
       attemptedAt: new Date(input.startedAtMs),
-      idempotencyKey: input.effect.effectId,
+      idempotencyKey: dispatchEffect.effectId,
       ...(target.linqChatId
         ? { linqChatId: target.linqChatId }
         : { phoneNumber: target.phoneNumber }),
       prisma,
-      ...(isSignupLinkAttempt
+      ...(signupEffect
         ? { reclaimStalePreProviderAttempt: true }
         : {}),
       source: "hosted_webhook_side_effect",
-      sourceRef: buildHostedLinqSideEffectDeliverySourceRef(input.effect),
+      sourceRef: dispatchSourceRef,
       // The effect id is also the stable provider idempotency key and message
       // seed. Until provider correlation exists, a restart must be able to
       // reclaim this exact payload instead of stranding it as in-flight.
-      status: isSignupLinkAttempt ? "attempted" : "provider_dispatch_started",
+      status: signupEffect ? "attempted" : "provider_dispatch_started",
       targetKind: target.targetKind,
       template,
     });
-    return claim.claimed ? "claimed" : "in_flight";
+    if (claim.claimed) {
+      return {
+        effect: dispatchEffect,
+        status: "claimed",
+      };
+    }
+    if (claim.intentMismatch) {
+      return { status: "intent_mismatch" };
+    }
+    return {
+      ...(claim.retryAt ? { retryAt: claim.retryAt } : {}),
+      status: "in_flight",
+    };
   });
+}
+
+async function resolveHostedLinqSignupDispatchIntentTx(input: {
+  effect: HostedLinqSignupMessageSideEffect;
+  persistedIntentExists: boolean;
+  persistedSourceRef: string | null;
+  prisma: Prisma.TransactionClient;
+}): Promise<
+  | {
+      effect: HostedLinqSignupMessageSideEffect;
+      sourceRef: string;
+      status: "resolved";
+    }
+  | {
+      status: "intent_mismatch" | "target_unauthorized";
+    }
+> {
+  const currentSourceRef = buildHostedLinqSideEffectDeliverySourceRef(
+    input.effect,
+  );
+  if (
+    !input.persistedIntentExists
+    || input.persistedSourceRef === currentSourceRef
+  ) {
+    return {
+      effect: input.effect,
+      sourceRef: currentSourceRef,
+      status: "resolved",
+    };
+  }
+
+  const payload = input.effect.payload;
+  const persistedSource = parseHostedLinqInviteSignupDeliverySourceRef(
+    input.persistedSourceRef,
+  );
+  if (
+    persistedSource?.effectId !== input.effect.effectId
+  ) {
+    return { status: "intent_mismatch" };
+  }
+
+  if (!persistedSource.sourceEventId) {
+    const currentOutreachId = payload.groupJoinOutreachId?.trim() ?? "";
+    const persistedGroupContext = persistedSource.groupJoinReplyContext;
+    if (
+      (
+        persistedGroupContext
+        && (
+          currentOutreachId !== persistedGroupContext.outreachId
+          || new Date(payload.occurredAt).toISOString()
+            !== persistedGroupContext.repliedAt
+        )
+      )
+      || (!persistedGroupContext && currentOutreachId)
+    ) {
+      return { status: "intent_mismatch" };
+    }
+    return {
+      effect: input.effect,
+      sourceRef: input.persistedSourceRef ?? currentSourceRef,
+      status: "resolved",
+    };
+  }
+
+  if (persistedSource.sourceEventId !== payload.sourceEventId) {
+    return { status: "intent_mismatch" };
+  }
+
+  if (!persistedSource.groupJoinReplyContext) {
+    return {
+      effect: {
+        ...input.effect,
+        payload: {
+          ...payload,
+          groupJoinCode: undefined,
+          groupJoinOutreachId: undefined,
+          occurredAt: persistedSource.occurredAt ?? payload.occurredAt,
+        },
+      },
+      sourceRef: input.persistedSourceRef ?? currentSourceRef,
+      status: "resolved",
+    };
+  }
+
+  const originalContext =
+    await readHostedGroupJoinOutreachReplyDeliveryContextTx({
+      outreachId: persistedSource.groupJoinReplyContext.outreachId,
+      tx: input.prisma,
+    });
+  if (!originalContext) {
+    return { status: "target_unauthorized" };
+  }
+
+  return {
+    effect: {
+      ...input.effect,
+      payload: {
+        ...payload,
+        groupJoinCode: originalContext.joinCode,
+        groupJoinOutreachId:
+          persistedSource.groupJoinReplyContext.outreachId,
+        occurredAt: persistedSource.groupJoinReplyContext.repliedAt,
+      },
+    },
+    sourceRef: input.persistedSourceRef ?? currentSourceRef,
+    status: "resolved",
+  };
+}
+
+function isHostedLinqSignupMessageSideEffect(
+  effect: HostedLinqMessageSideEffect,
+): effect is HostedLinqSignupMessageSideEffect {
+  return effect.payload.template === "invite_signup"
+    || effect.payload.template === "invite_signup_fallback";
 }
 
 async function markHostedLinqDeliveryAcceptedBestEffort(input: {
@@ -876,16 +1067,14 @@ function buildHostedLinqSideEffectDeliverySourceRef(
 ): string {
   const payload = effect.payload;
   if (
-    (
-      payload.template === "invite_signup"
-      || payload.template === "invite_signup_fallback"
-    )
-    && payload.groupJoinOutreachId?.trim()
+    payload.template === "invite_signup"
+    || payload.template === "invite_signup_fallback"
   ) {
     return buildHostedLinqInviteSignupDeliverySourceRef({
       effectId: effect.effectId,
       groupJoinOutreachId: payload.groupJoinOutreachId,
       groupJoinRepliedAt: payload.occurredAt,
+      sourceEventId: payload.sourceEventId,
     });
   }
   return effect.effectId;
@@ -1177,6 +1366,7 @@ function buildHostedWebhookLinqMessagePayload(
         occurredAt: input.occurredAt,
         replyToMessageId,
         ...(input.service === undefined ? {} : { service: input.service }),
+        sourceEventId: input.sourceEventId,
         ...(input.threadIsDirect === undefined ? {} : { threadIsDirect: input.threadIsDirect }),
         template: input.template,
       };
@@ -1195,6 +1385,7 @@ function buildHostedWebhookLinqMessagePayload(
         memberPhone: input.memberPhone,
         occurredAt: input.occurredAt,
         replyToMessageId: null,
+        sourceEventId: input.sourceEventId,
         template: input.template,
       };
   }

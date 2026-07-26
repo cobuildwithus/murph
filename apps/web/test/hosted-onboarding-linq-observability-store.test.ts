@@ -1422,11 +1422,15 @@ describe("hosted Linq observability stores", () => {
         failedAt: null,
         id: "hld_concurrent_claim",
         lastReceiptAt: null,
+        linqChatLookupKey: null,
         messageLookupKey: null,
         phoneNumberLookupKey: null,
         skippedAt: null,
         source: "hosted_webhook_side_effect",
+        sourceRef: "linq-invite-signup:member_123:2026-03-26T00:00:00.000Z",
         status: "attempted",
+        targetKind: "thread",
+        template: "invite_signup",
       });
     fixture.hostedLinqDeliveryCreateMany.mockResolvedValueOnce({ count: 0 });
     fixture.hostedLinqDeliveryUpdateMany.mockResolvedValueOnce({ count: 0 });
@@ -1442,6 +1446,7 @@ describe("hosted Linq observability stores", () => {
     })).resolves.toEqual({
       claimed: false,
       id: "hld_concurrent_claim",
+      retryAt: new Date("2026-03-26T12:15:00.000Z"),
     });
 
     expect(fixture.hostedLinqDeliveryCreateMany).toHaveBeenCalledWith({
@@ -1460,11 +1465,16 @@ describe("hosted Linq observability stores", () => {
       failedAt: null,
       id: "hld_in_flight",
       lastReceiptAt: null,
+      linqChatLookupKey:
+        createHostedLinqChatLookupKeyReadCandidates("chat_123")[0],
       messageLookupKey: null,
       phoneNumberLookupKey: null,
       skippedAt: null,
       source: "hosted_webhook_side_effect",
+      sourceRef: "linq-invite-signup:member_123:2026-03-26T00:00:00.000Z",
       status: "provider_dispatch_started",
+      targetKind: "thread",
+      template: "invite_signup",
     });
     fixture.hostedLinqDeliveryUpdateMany.mockResolvedValueOnce({ count: 0 });
 
@@ -1480,24 +1490,11 @@ describe("hosted Linq observability stores", () => {
     })).resolves.toEqual({
       claimed: false,
       id: "hld_in_flight",
+      retryAt: new Date("2026-03-26T12:15:00.000Z"),
     });
 
     expect(fixture.hostedLinqDeliveryCreate).not.toHaveBeenCalled();
-    expect(fixture.hostedLinqDeliveryUpdateMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: expect.objectContaining({
-          id: "hld_in_flight",
-          OR: expect.arrayContaining([
-            expect.objectContaining({
-              attemptedAt: {
-                lte: new Date("2026-03-26T11:45:30.000Z"),
-              },
-              status: "attempted",
-            }),
-          ]),
-        }),
-      }),
-    );
+    expect(fixture.hostedLinqDeliveryUpdateMany).not.toHaveBeenCalled();
   });
 
   it("reclaims stale same-source Linq usage rows through provider idempotency", async () => {
@@ -2132,7 +2129,7 @@ describe("hosted Linq observability stores", () => {
       status: "in_flight",
     });
 
-    expect(fixture.hostedLinqDeliveryFindUnique).toHaveBeenCalledTimes(2);
+    expect(fixture.hostedLinqDeliveryFindUnique).toHaveBeenCalledTimes(1);
   });
 
   it.each([
@@ -2376,11 +2373,16 @@ describe("hosted Linq observability stores", () => {
       failedAt: null,
       id: "hld_stale_attempt",
       lastReceiptAt: null,
+      linqChatLookupKey:
+        createHostedLinqChatLookupKeyReadCandidates("chat_123")[0],
       messageLookupKey: null,
       phoneNumberLookupKey: null,
       skippedAt: null,
       source: "hosted_webhook_side_effect",
+      sourceRef: "linq-invite-signup:member_123:2026-03-26T00:00:00.000Z",
       status: "attempted",
+      targetKind: "thread",
+      template: "invite_signup",
     });
     fixture.hostedLinqDeliveryUpdateMany.mockResolvedValueOnce({ count: 1 });
 
@@ -2411,6 +2413,49 @@ describe("hosted Linq observability stores", () => {
         }),
       }),
     );
+  });
+
+  it("does not mutate a stale signup row when the retry intent differs", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    const attemptedAt = new Date("2026-03-26T12:30:00.000Z");
+    fixture.hostedLinqDeliveryFindUnique.mockResolvedValueOnce({
+      acceptedAt: null,
+      attemptedAt: new Date("2026-03-26T12:00:00.000Z"),
+      deliveredAt: null,
+      failedAt: null,
+      id: "hld_stale_attempt",
+      lastReceiptAt: null,
+      linqChatLookupKey:
+        createHostedLinqChatLookupKeyReadCandidates("chat_123")[0],
+      messageLookupKey: null,
+      phoneNumberLookupKey: null,
+      retryAfterAt: null,
+      skippedAt: null,
+      source: "hosted_webhook_side_effect",
+      sourceRef: "persisted-source-ref",
+      status: "attempted",
+      targetKind: "thread",
+      template: "invite_signup",
+    });
+
+    await expect(claimHostedLinqDeliveryProviderDispatchTx({
+      attemptedAt,
+      idempotencyKey: "linq-invite-signup:member_123:2026-03-26T00:00:00.000Z",
+      linqChatId: "chat_123",
+      prisma: fixture.prisma as never,
+      reclaimStalePreProviderAttempt: true,
+      source: "hosted_webhook_side_effect",
+      sourceRef: "different-source-ref",
+      targetKind: "thread",
+      template: "invite_signup",
+    })).resolves.toEqual({
+      claimed: false,
+      id: "hld_stale_attempt",
+      intentMismatch: true,
+      sourceRef: "persisted-source-ref",
+    });
+
+    expect(fixture.hostedLinqDeliveryUpdateMany).not.toHaveBeenCalled();
   });
 
   it("records accepted Linq transcript fallback and consumes its answered mailbox rows", async () => {
@@ -3462,6 +3507,7 @@ describe("hosted Linq signup-link delivery attempts", () => {
       effectId: second,
       groupJoinOutreachId: "hgrpjoa_opaque",
       groupJoinRepliedAt: "2026-03-26T12:34:56.000Z",
+      sourceEventId: "evt_group_reply",
     });
     expect(sourceRef.startsWith(
       buildHostedLinqInviteSignupDeliverySourceRefMemberPrefix("member_123"),
@@ -3474,8 +3520,23 @@ describe("hosted Linq signup-link delivery attempts", () => {
       groupJoinReplyContext: {
         outreachId: "hgrpjoa_opaque",
         repliedAt: "2026-03-26T12:34:56.000Z",
+        sourceEventId: "evt_group_reply",
       },
+      occurredAt: "2026-03-26T12:34:56.000Z",
+      sourceEventId: "evt_group_reply",
     });
+    const genericSourceRef = buildHostedLinqInviteSignupDeliverySourceRef({
+      effectId: BASE_EFFECT_ID,
+      groupJoinRepliedAt: "2026-03-26T12:34:56.000Z",
+      sourceEventId: "evt_generic_reply",
+    });
+    expect(parseHostedLinqInviteSignupDeliverySourceRef(genericSourceRef))
+      .toEqual({
+        effectId: BASE_EFFECT_ID,
+        groupJoinReplyContext: null,
+        occurredAt: "2026-03-26T12:34:56.000Z",
+        sourceEventId: "evt_generic_reply",
+      });
   });
 
   it("keeps the base attempt while no delivery row blocks it", async () => {
@@ -3578,6 +3639,7 @@ describe("hosted Linq signup-link delivery attempts", () => {
         groupJoinReplyContext: {
           outreachId: "hgrpjoa_buffered",
           repliedAt: "2026-03-26T12:01:00.000Z",
+          sourceEventId: null,
         },
         memberId: "member_123",
         occurredAt: "2026-03-26T00:00:00.000Z",

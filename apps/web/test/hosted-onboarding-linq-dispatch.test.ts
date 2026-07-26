@@ -33,6 +33,7 @@ const mocks = vi.hoisted(() => {
   const state = {
     deriveHostedOnboardingTimingErrorName: vi.fn(() => "Error"),
     claimHostedLinqDeliveryProviderDispatchTx: vi.fn(),
+    readHostedLinqDeliveryProviderDispatchIntentTx: vi.fn(),
     claimHostedLinqOnboardingLinkNotice: vi.fn(),
     claimHostedLinqQuotaReplyNotice: vi.fn(),
     markHostedLinqOnboardingLinkNoticeSent: vi.fn(),
@@ -253,6 +254,8 @@ vi.mock("@/src/lib/hosted-onboarding/linq-delivery-store", async () => {
   return {
     ...actual,
     claimHostedLinqDeliveryProviderDispatchTx: mocks.claimHostedLinqDeliveryProviderDispatchTx,
+    readHostedLinqDeliveryProviderDispatchIntentTx:
+      mocks.readHostedLinqDeliveryProviderDispatchIntentTx,
   };
 });
 
@@ -570,6 +573,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       claimed: true,
       id: "hld_claimed",
     });
+    mocks.readHostedLinqDeliveryProviderDispatchIntentTx.mockResolvedValue(null);
     mocks.claimHostedLinqOnboardingLinkNotice.mockResolvedValue(true);
     mocks.claimHostedLinqQuotaReplyNotice.mockResolvedValue(true);
     mocks.markHostedLinqOnboardingLinkNoticeSent.mockResolvedValue(true);
@@ -4075,6 +4079,60 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       mocks.markHostedLinqOnboardingLinkNoticeSent.mock.invocationCallOrder[0],
     );
     expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
+  });
+
+  it("fails retryably when the required signup delivery is still in flight", async () => {
+    const invite = {
+      channel: "linq",
+      id: "invite_in_flight",
+      inviteCode: "code_in_flight",
+      memberId: "member_in_flight",
+      sentAt: null,
+      status: "pending",
+    };
+    mocks.claimHostedLinqDeliveryProviderDispatchTx.mockResolvedValueOnce({
+      claimed: false,
+      id: "hld_in_flight",
+      retryAt: new Date("2026-03-26T12:15:00.000Z"),
+    });
+    const prisma = asPrismaTransactionClient({
+      $queryRaw: vi.fn().mockResolvedValue([]),
+      hostedWebhookReceipt: buildHostedWebhookReceiptFixture(),
+      hostedInvite: {
+        create: vi.fn().mockResolvedValue(invite),
+        findFirst: vi.fn().mockResolvedValue(null),
+        findUnique: vi.fn().mockResolvedValue(invite),
+        update: vi.fn(),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedMember: {
+        create: vi.fn().mockResolvedValue({
+          accountGroupMemberships: [],
+          billingStatus: HostedBillingStatus.not_started,
+          id: "member_in_flight",
+          phoneLookupKey: "+15551234567",
+        }),
+        findUnique: vi.fn().mockResolvedValue(null),
+        update: vi.fn(),
+      },
+    });
+
+    await expect(handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody: buildHostedLinqWebhookBody({
+        eventId: "evt_signup_in_flight",
+        service: "iMessage",
+      }),
+      signature: null,
+      timestamp: null,
+    })).rejects.toMatchObject({
+      code: "HOSTED_LINQ_SIGNUP_DELIVERY_IN_FLIGHT",
+      httpStatus: 503,
+      retryable: true,
+    });
+
+    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+    expect(mocks.markHostedLinqOnboardingLinkNoticeSent).not.toHaveBeenCalled();
   });
 
   it("does not create a pending signup route when the inbound Linq line is not assignable", async () => {
