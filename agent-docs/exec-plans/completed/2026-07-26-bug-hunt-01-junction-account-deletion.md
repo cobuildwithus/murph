@@ -1,6 +1,6 @@
 # Close Junction account-deletion authorization race
 
-Status: active
+Status: completed
 Created: 2026-07-26
 Updated: 2026-07-26
 
@@ -116,7 +116,25 @@ Updated: 2026-07-26
   user. Both focused tests are now present. Product-experience review also
   required durable retry ownership for failed in-flight cleanup; the staged
   lifecycle marker and retry tests address it.
-- Still to run: parent final review, final verification/PR CI, and final
-  `pr-review`.
+- Parent final review completed and tightened live-marker handling so callback
+  consumption and account deletion cannot treat a pre-provider marker as a
+  finished request.
+- Final focused verification passed after rebasing onto current `main`:
+  package tests (44 files, 871 tests), package and hosted-web typechecks,
+  affected lint, hosted account/store tests (105 tests), and the three-ordering
+  PostgreSQL proof.
+- Canonical Crabbox `test:diff` Testbox
+  `tbx_01kygckq56xyfcgvzvnzzmrayn` passed the patch owners and affected
+  typechecks, then stopped on untouched remote-harness failures: a MinIO image
+  fallback assertion and a vault-usecases test whose Health Commons artifact
+  had not been prepared.
+- Canonical Crabbox `verify:acceptance` Testbox
+  `tbx_01kygcrt6xcc3y8ayzecg774c2` prepared Health Commons successfully and
+  passed the relevant typecheck, hosted-web tests/lint, and device-sync coverage
+  surfaces. It stopped on the untouched CLI release audit expecting ReviewGPT
+  `^0.5.114` while current `main` declares `^0.5.117`; the isolated test
+  reproduces the same mismatch locally, and this branch changes neither file.
+- Still to run: final `pr-review` and PR CI on the immutable pushed head.
 - Expected outcomes: all focused and canonical checks pass; both ReviewGPT
   gates return zero accepted findings on the exact pushed head.
+Completed: 2026-07-26
