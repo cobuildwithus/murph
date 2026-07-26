@@ -2258,10 +2258,21 @@ function assertHostedBackgroundDeliveryNotYielded(input: {
 
 async function assertHostedDeliveryCanEnterProvider(input: {
   assertLiveness?: () => Promise<void>;
+  expiresAt?: string | null;
   shouldYieldBackgroundDelivery?: (() => boolean) | null;
   signal: AbortSignal | null;
 }): Promise<void> {
   await assertHostedDeliveryLiveNow(input);
+  if (
+    input.expiresAt
+    && Date.parse(input.expiresAt) <= Date.now()
+  ) {
+    throw new VaultCliError(
+      "ASSISTANT_OUTBOX_INTENT_EXPIRED",
+      "Assistant outbox intent expired before delivery.",
+      { retryable: false },
+    );
+  }
   assertHostedBackgroundDeliveryNotYielded(input);
 }
 
@@ -2592,6 +2603,14 @@ async function deliverHostedPreparedAssistantDelivery(input: {
     sendingGraceMs: HOSTED_NON_IDEMPOTENT_CONFIRMATION_GRACE_MS,
     vault: input.vaultRoot,
   });
+  const expiresAt = mirrorState.intent?.expiresAt ?? null;
+  const assertProviderEntryLive = () =>
+    assertHostedDeliveryCanEnterProvider({
+      assertLiveness: input.assertLiveness,
+      expiresAt,
+      shouldYieldBackgroundDelivery: input.shouldYieldBackgroundDelivery,
+      signal: input.signal,
+    });
   const linqDeliveryContexts = input.preparedDispatch?.linqDeliveryContext
     ? [input.preparedDispatch.linqDeliveryContext, ...input.linqDeliveryContexts]
     : input.linqDeliveryContexts;
@@ -2632,6 +2651,29 @@ async function deliverHostedPreparedAssistantDelivery(input: {
       && mirrorState.intent?.externalThreadRouteAuthority?.channel === "telegram"
         ? mirrorState.intent.externalThreadRouteAuthority.threadId
         : null;
+    const createTelegramProviderFetch = (providerEntry: {
+      operation: string;
+      signal: AbortSignal | null;
+      target: string;
+    }) =>
+      createHostedProviderFetchBoundary({
+        assertProviderEntryLive: async () => {
+          await assertProviderEntryLive();
+          await assertHostedTelegramThreadRouteAuthorityAtProviderEntry({
+            assistantDeliveryEffect: input.assistantDeliveryEffect,
+            effectsPort: input.effectsPort,
+            intent: mirrorState.intent,
+            signal: providerEntry.signal,
+            target: providerEntry.target,
+            userId: input.userId,
+          });
+        },
+        onProviderDispatchEntered: () => {
+          providerDispatchEntered = true;
+        },
+        operation: providerEntry.operation,
+        providerFetch: input.providerFetch,
+      });
     const dispatched = await dispatchAssistantOutboxIntent({
       dispatchHooks: {
         preflightDispatchIntent: async ({ intent, now: preflightNow, vault }) =>
@@ -2658,7 +2700,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
             );
           }
 
-          await assertHostedDeliveryCanEnterProvider(input);
+          await assertProviderEntryLive();
           const providerTarget =
             await resolveHostedDirectEmailRecipientAtProviderEntry({
               assistantDeliveryEffect: input.assistantDeliveryEffect,
@@ -2733,47 +2775,37 @@ async function deliverHostedPreparedAssistantDelivery(input: {
           return result;
         },
         sendTelegram: async (request) => {
-          await assertHostedDeliveryCanEnterProvider(input);
-          const authorityBoundTarget =
-            await assertHostedTelegramThreadRouteAuthorityAtProviderEntry({
-              assistantDeliveryEffect: input.assistantDeliveryEffect,
-              effectsPort: input.effectsPort,
-              intent: mirrorState.intent,
+          const dependencies = requireHostedProviderFetchDependencies({
+            ...(telegramAuthorityBoundTarget
+              ? { authorityBoundTarget: telegramAuthorityBoundTarget }
+              : {}),
+            env: input.telegramEnv,
+            fetchImplementation: createTelegramProviderFetch({
+              operation: "Hosted assistant Telegram delivery",
               signal: input.signal,
               target: request.target,
-              userId: input.userId,
-            });
-          const dependencies = requireHostedProviderFetchDependencies({
-            ...(authorityBoundTarget ? { authorityBoundTarget } : {}),
-            env: input.telegramEnv,
-            fetchImplementation: input.providerFetch,
+            }),
             ...(input.signal ? { signal: input.signal } : {}),
           }, "Hosted assistant Telegram delivery");
-          providerDispatchEntered = true;
           const result = await sendTelegramMessage(request, dependencies);
           await assertHostedDeliveryLiveNow(input);
           return result;
         },
         sendTelegramImage: async (request) => {
-          await assertHostedDeliveryCanEnterProvider(input);
-          const authorityBoundTarget =
-            await assertHostedTelegramThreadRouteAuthorityAtProviderEntry({
-              assistantDeliveryEffect: input.assistantDeliveryEffect,
-              effectsPort: input.effectsPort,
-              intent: mirrorState.intent,
+          const dependencies = requireHostedProviderFetchDependencies({
+            ...(telegramAuthorityBoundTarget
+              ? { authorityBoundTarget: telegramAuthorityBoundTarget }
+              : {}),
+            env: input.telegramEnv,
+            fetchImplementation: createTelegramProviderFetch({
+              operation: "Hosted assistant Telegram image delivery",
               signal: request.signal ?? input.signal,
               target: request.target,
-              userId: input.userId,
-            });
-          const dependencies = requireHostedProviderFetchDependencies({
-            ...(authorityBoundTarget ? { authorityBoundTarget } : {}),
-            env: input.telegramEnv,
-            fetchImplementation: input.providerFetch,
+            }),
             ...(request.signal ?? input.signal
               ? { signal: request.signal ?? input.signal ?? undefined }
               : {}),
           }, "Hosted assistant Telegram image delivery");
-          providerDispatchEntered = true;
           const result = await sendTelegramImageMessage({
             idempotencyKey: request.idempotencyKey ?? null,
             media: request.media,
@@ -2785,23 +2817,18 @@ async function deliverHostedPreparedAssistantDelivery(input: {
           return result;
         },
         setTelegramMessageReaction: async (request) => {
-          await assertHostedDeliveryCanEnterProvider(input);
-          const authorityBoundTarget =
-            await assertHostedTelegramThreadRouteAuthorityAtProviderEntry({
-              assistantDeliveryEffect: input.assistantDeliveryEffect,
-              effectsPort: input.effectsPort,
-              intent: mirrorState.intent,
+          const dependencies = requireHostedProviderFetchDependencies({
+            ...(telegramAuthorityBoundTarget
+              ? { authorityBoundTarget: telegramAuthorityBoundTarget }
+              : {}),
+            env: input.telegramEnv,
+            fetchImplementation: createTelegramProviderFetch({
+              operation: "Hosted assistant Telegram reaction delivery",
               signal: input.signal,
               target: request.target,
-              userId: input.userId,
-            });
-          const dependencies = requireHostedProviderFetchDependencies({
-            ...(authorityBoundTarget ? { authorityBoundTarget } : {}),
-            env: input.telegramEnv,
-            fetchImplementation: input.providerFetch,
+            }),
             ...(input.signal ? { signal: input.signal } : {}),
           }, "Hosted assistant Telegram reaction delivery");
-          providerDispatchEntered = true;
           const result = await setTelegramMessageReaction(request, dependencies);
           await assertHostedDeliveryLiveNow(input);
           return result;
@@ -2814,7 +2841,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
           fetchImplementation: createHostedProviderFetchBoundary({
             assertLive: () => assertHostedDeliveryLiveNow(input),
             assertProviderEntryLive: async () => {
-              await assertHostedDeliveryCanEnterProvider(input);
+              await assertProviderEntryLive();
               const target = readHostedAssistantDeliveryPayloadTarget(
                 input.assistantDeliveryEffect.payload,
               ).target;
@@ -2840,6 +2867,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
           assertLiveness: input.assertLiveness,
           effectsPort: input.effectsPort,
           expectedDedupeKey: input.assistantDeliveryEffect.fingerprint,
+          expiresAt,
           intentId: input.assistantDeliveryEffect.effectId,
           linqEnv: input.linqEnv,
           linqDeliveryContexts,
@@ -2856,6 +2884,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
         sendLinqVoiceMemo: createHostedAssistantLinqVoiceMemoSendDependency({
           assertLiveness: input.assertLiveness,
           effectsPort: input.effectsPort,
+          expiresAt,
           linqEnv: input.linqEnv,
           linqDeliveryContexts,
           threadIsDirect: input.assistantDeliveryEffect.payload.threadIsDirect ?? null,
@@ -2885,7 +2914,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
             }, {
               env: input.linqEnv,
               fetchImplementation: createHostedProviderFetchBoundary({
-                assertProviderEntryLive: () => assertHostedDeliveryCanEnterProvider(input),
+                assertProviderEntryLive,
                 onProviderDispatchEntered: async () => {
                   await assertHostedAssistantLinqRecentInboundEngagementForDelivery({
                     answeredMailboxItemIds:
@@ -3323,6 +3352,7 @@ function createHostedAssistantLinqSendDependency(input: {
     "assertLinqRecentInboundEngagement" | "recordLinqDeliveryOutcome"
   > | null;
   expectedDedupeKey?: string | null;
+  expiresAt?: string | null;
   intentId?: string | null;
   linqDeliveryContexts?: readonly HostedAssistantLinqDeliveryContext[] | null;
   linqEnv: NodeJS.ProcessEnv;
@@ -3769,6 +3799,7 @@ function createHostedAssistantLinqVoiceMemoSendDependency(input: {
     HostedRuntimeEffectsPort,
     "assertLinqRecentInboundEngagement" | "recordLinqDeliveryOutcome"
   > | null;
+  expiresAt?: string | null;
   intentId?: string | null;
   linqDeliveryContexts?: readonly HostedAssistantLinqDeliveryContext[] | null;
   linqEnv: NodeJS.ProcessEnv;

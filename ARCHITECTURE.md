@@ -723,8 +723,9 @@ assistant turn with bounded committed group history and only the existing
 voice-memo and song tools. Its immutable 30-minute deadline crosses the Web
 mailbox, runtime-local system item, and ordinary outbox intent; the existing
 effect owners consume expired work before model/audio, while the ordinary
-outbox rechecks the same deadline immediately before every legal messaging
-provider entry. It carries no contributor label, and the assistant owner
+outbox rejects stale dispatch early and the hosted provider-entry guard
+rechecks the same deadline before every actual messaging request. It carries no
+contributor label, and the assistant owner
 enforces one audio attempt while treating successful generation as
 non-replayable. It adds no event family, queue, scheduler, migration, or second
 delivery owner. Family funding authorizes the

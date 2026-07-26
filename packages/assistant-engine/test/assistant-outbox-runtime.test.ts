@@ -3845,6 +3845,45 @@ describe('assistant outbox runtime', () => {
     expect(mockedDeliverAssistantMessageOverBinding).not.toHaveBeenCalled()
   })
 
+  it('terminally fails when the channel provider-entry boundary rejects an expired intent', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2099-04-08T00:29:59.999Z'))
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-outbox-channel-provider-expiry-',
+    )
+    const seeded = await createIntent(vaultRoot, {
+      expiresAt: '2099-04-08T00:30:00.000Z',
+      message: 'A short group thank-you.',
+      sessionId: 'session-channel-provider-expiry',
+      turnId: 'turn-channel-provider-expiry',
+    })
+    mockedDeliverAssistantMessageOverBinding.mockRejectedValueOnce(
+      new VaultCliError(
+        'ASSISTANT_OUTBOX_INTENT_EXPIRED',
+        'Assistant outbox intent expired before delivery.',
+        { retryable: false },
+      ),
+    )
+
+    const failed = await dispatchAssistantOutboxIntent({
+      force: true,
+      intentId: seeded.intentId,
+      now: new Date('2099-04-08T00:29:59.999Z'),
+      vault: vaultRoot,
+    })
+
+    expect(failed.intent).toMatchObject({
+      lastError: {
+        code: 'ASSISTANT_OUTBOX_INTENT_EXPIRED',
+        diagnosticContext: {
+          retryable: false,
+        },
+      },
+      nextAttemptAt: null,
+      status: 'failed',
+    })
+  })
+
   it('ignores stale tokenless provider success after a newer retry reclaims the intent', async () => {
     const { vaultRoot } = await createAssistantVault('assistant-outbox-tokenless-success-race-')
     const seeded = await createIntent(vaultRoot, {

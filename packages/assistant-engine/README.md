@@ -52,9 +52,10 @@ and exactly the existing voice-memo and song tools. Runtime requires one
 completed audio attempt, validates the matching voice-memo attachment, permits
 text fallback only after a failed attempt, and does not replay successful
 generation after a later failure. The original mailbox deadline is also the
-ordinary outbox intent deadline, so the outbox rechecks it immediately before
-every legal messaging-provider entry, including stale idempotent recovery after
-restart. It still receives
+ordinary outbox intent deadline. The outbox rejects stale dispatch early, and
+hosted delivery rechecks the persisted deadline before every actual Telegram
+or Linq messaging request, including retry and fallback after deferred audio
+generation. It still receives
 no CLI, hosted context, shell, connected apps, arbitrary network, progress,
 image, or group-mutation capability. Both profiles use the existing one-shot App Server
 path so their restrictive launch configuration cannot replace the resident

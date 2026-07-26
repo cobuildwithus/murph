@@ -65,11 +65,13 @@ Last verified: 2026-07-26
   celebration. One immutable deadline, 30 minutes after verified payment,
   remains on the Web mailbox row, the imported runtime-local system item, and
   the ordinary outbox intent. Runtime consumes expired work before model or
-  audio-provider entry, and the outbox rechecks the deadline immediately before
-  every legal messaging-provider entry, including idempotent stale-sending
-  recovery after restart. Non-idempotent work that may already have entered a
-  provider keeps its existing fail-closed reconciliation and cannot re-enter.
-  Import, restart, or retry therefore cannot extend freshness. The
+  audio-provider entry. The outbox rejects stale dispatch and carries the
+  deadline into the hosted provider-entry guard, which rechecks it before each
+  actual Telegram or Linq messaging request, including retries and fallback
+  after deferred audio generation. Non-idempotent work that may already have
+  entered a provider keeps its existing fail-closed reconciliation and cannot
+  re-enter. Import, restart, generation, or retry therefore cannot extend
+  freshness. The
   response-audio turn must complete exactly one voice
   memo or song attempt; one failed attempt may fall back to text, while a
   successful generation is non-replayable if later validation or delivery

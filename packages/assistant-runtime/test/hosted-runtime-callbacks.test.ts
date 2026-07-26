@@ -111,7 +111,18 @@ vi.mock("@murphai/assistant-engine", async () => {
     saveAssistantOutboxIntentIfUnchanged:
       mocks.saveAssistantOutboxIntentIfUnchanged,
     sendLinqMessage: mocks.sendLinqMessage,
-    sendTelegramMessage: mocks.sendTelegramMessage,
+    async sendTelegramMessage(
+      ...args: Parameters<typeof actual.sendTelegramMessage>
+    ) {
+      const providerFetch = args[1]?.fetchImplementation;
+      if (!providerFetch) {
+        throw new Error("Expected hosted Telegram provider fetch boundary.");
+      }
+      await providerFetch("https://api.telegram.example/sendMessage", {
+        method: "POST",
+      });
+      return await mocks.sendTelegramMessage(...args);
+    },
     sendTelegramVoiceMemoMessage: mocks.sendTelegramVoiceMemoMessage,
     shouldDispatchAssistantOutboxIntent: mocks.shouldDispatchAssistantOutboxIntent,
   };
@@ -169,7 +180,18 @@ vi.mock("@murphai/operator-config/telegram-runtime", async () => {
   >("@murphai/operator-config/telegram-runtime");
   return {
     ...actual,
-    setTelegramMessageReaction: mocks.setTelegramMessageReaction,
+    async setTelegramMessageReaction(
+      ...args: Parameters<typeof actual.setTelegramMessageReaction>
+    ) {
+      const providerFetch = args[1]?.fetchImplementation;
+      if (!providerFetch) {
+        throw new Error("Expected hosted Telegram reaction provider fetch boundary.");
+      }
+      await providerFetch("https://api.telegram.example/setMessageReaction", {
+        method: "POST",
+      });
+      return await mocks.setTelegramMessageReaction(...args);
+    },
   };
 });
 
@@ -5496,7 +5518,7 @@ describe("hosted runtime callbacks", () => {
     mocks.findAssistantAutoReplyDeliveryIntentIds.mockResolvedValue(new Set([effect.effectId]));
     mocks.hasAssistantAutoReplyChannel.mockReturnValue(false);
     mocks.readAssistantAutomationState.mockResolvedValue({ autoReply: [] });
-    mocks.readAssistantOutboxIntentMirrorState.mockResolvedValue(
+    mocks.readAssistantOutboxIntentMirrorState.mockResolvedValueOnce(
       createMirrorState({
         channel: "telegram",
         delivery: null,
@@ -6043,7 +6065,7 @@ describe("hosted runtime callbacks", () => {
     });
     let shouldYield = false;
     const yieldedCounts: number[] = [];
-    mocks.readAssistantOutboxIntentMirrorState.mockResolvedValueOnce(
+    mocks.readAssistantOutboxIntentMirrorState.mockResolvedValue(
       createMirrorState(
         {
           delivery: null,
@@ -7710,15 +7732,14 @@ describe("hosted runtime callbacks", () => {
       message: "hello from hosted",
       replyToMessageId: null,
       target: "chat_123",
-    }, {
+    }, expect.objectContaining({
       env: {
         TELEGRAM_API_BASE_URL: "https://api.telegram.example",
         TELEGRAM_BOT_TOKEN: "telegram-token",
         TELEGRAM_FILE_BASE_URL: "https://files.telegram.example",
       },
-      fetchImplementation: providerFetch,
-      signal: undefined,
-    });
+      fetchImplementation: expect.any(Function),
+    }));
     expect(outcomes).toEqual([
       expect.objectContaining({
         deliveryStatus: "sent",
@@ -7941,7 +7962,7 @@ describe("hosted runtime callbacks", () => {
       expect.objectContaining({ target: routeAuthority.threadId }),
       expect.objectContaining({ authorityBoundTarget: routeAuthority.threadId }),
     );
-    expect(providerFetch).toHaveBeenCalledTimes(1);
+    expect(providerFetch).toHaveBeenCalledTimes(2);
   });
 
   it("blocks Telegram provider entry when the live route owner revokes the composed target", async () => {
@@ -8057,15 +8078,14 @@ describe("hosted runtime callbacks", () => {
       reaction: "heart",
       target: "chat_123",
       targetMessageId: "message_1",
-    }, {
+    }, expect.objectContaining({
       env: {
         TELEGRAM_API_BASE_URL: "https://api.telegram.example",
         TELEGRAM_BOT_TOKEN: "telegram-token",
         TELEGRAM_FILE_BASE_URL: "https://files.telegram.example",
       },
-      fetchImplementation: providerFetch,
-      signal: undefined,
-    });
+      fetchImplementation: expect.any(Function),
+    }));
     expect(outcomes).toEqual([
       expect.objectContaining({
         deliveryStatus: "sent",
@@ -10273,6 +10293,98 @@ describe("hosted runtime callbacks", () => {
     ]);
   });
 
+  it("blocks Telegram audio and fallback provider entry when expiry crosses during deferred generation", async () => {
+    vi.useFakeTimers();
+    const expiresAt = "2099-04-08T00:30:00.000Z";
+    vi.setSystemTime(new Date("2099-04-08T00:29:59.999Z"));
+    const effect = createEffect({
+      bindingDeliveryKind: "thread",
+      bindingDeliveryTarget: "chat_123",
+      transportIdempotent: false,
+    });
+    mocks.readAssistantOutboxIntentMirrorState.mockResolvedValue(
+      createMirrorState({
+        delivery: null,
+        expiresAt,
+        intentId: "intent_123",
+        lastError: null,
+        status: "pending",
+      }),
+    );
+    mocks.sendTelegramMessage.mockResolvedValueOnce({
+      providerMessageId: "telegram-fallback-message",
+      target: "chat_123",
+    });
+    let audioError: unknown = null;
+    let fallbackError: unknown = null;
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+      const voiceMemoFetch =
+        dependencies.telegramVoiceMemoRuntime?.fetchImplementation;
+      assert.equal(typeof voiceMemoFetch, "function");
+      await voiceMemoFetch(
+        "https://api.elevenlabs.io/v1/text-to-speech/voice_murph?output_format=mp3_44100_128",
+        { method: "POST" },
+      );
+      try {
+        await voiceMemoFetch(
+          "https://api.telegram.example/bottelegram-token/sendVoice",
+          { method: "POST" },
+        );
+      } catch (error) {
+        audioError = error;
+      }
+      try {
+        await dependencies.sendTelegram({
+          idempotencyKey: "assistant-outbox:intent_123",
+          message: "A short text fallback.",
+          replyToMessageId: null,
+          target: "chat_123",
+        });
+      } catch (error) {
+        fallbackError = error;
+      }
+      return createDispatchResult({
+        status: "failed",
+      }, {
+        code: "ASSISTANT_OUTBOX_INTENT_EXPIRED",
+        message: "Assistant outbox intent expired before delivery.",
+      });
+    });
+    const providerFetch = vi.fn<typeof fetch>(async (request) => {
+      expect(String(request)).toContain("https://api.elevenlabs.io/");
+      vi.setSystemTime(new Date(expiresAt));
+      return new Response(null, { status: 204 });
+    });
+
+    const outcomes = await drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub(),
+      platformEnv: {
+        TELEGRAM_BOT_TOKEN: "telegram-token",
+      },
+      providerFetch,
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    });
+
+    expect(audioError).toMatchObject({
+      code: "ASSISTANT_OUTBOX_INTENT_EXPIRED",
+    });
+    expect(fallbackError).toMatchObject({
+      code: "ASSISTANT_OUTBOX_INTENT_EXPIRED",
+    });
+    expect(providerFetch).toHaveBeenCalledTimes(1);
+    expect(String(providerFetch.mock.calls[0]?.[0])).toContain(
+      "https://api.elevenlabs.io/",
+    );
+    expect(outcomes).toEqual([
+      expect.objectContaining({
+        deliveryStatus: "failed",
+        retryable: false,
+      }),
+    ]);
+  });
+
   it("fails closed instead of using ambient fetch when hosted outbox provider fetch is missing", async () => {
     const effect = createEffect();
     mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
@@ -11616,6 +11728,101 @@ describe("hosted runtime callbacks", () => {
       }),
       { signal: expect.any(AbortSignal) },
     );
+  });
+
+  it("blocks Linq text fallback when expiry crosses after voice provider entry", async () => {
+    vi.useFakeTimers();
+    const expiresAt = "2099-04-08T00:30:00.000Z";
+    vi.setSystemTime(new Date("2099-04-08T00:29:59.999Z"));
+    const effect = createEffect({
+      bindingDeliveryKind: "thread",
+      bindingDeliveryTarget: "linq_chat_current",
+      channel: "linq",
+      explicitTarget: "linq_chat_current",
+      media: [createHostedVoiceMemoMedia({
+        transcript: "A short text fallback.",
+      })],
+      threadIsDirect: false,
+      transportIdempotent: false,
+    });
+    mocks.readAssistantOutboxIntentMirrorState.mockResolvedValue(
+      createMirrorState({
+        delivery: null,
+        expiresAt,
+        intentId: "intent_123",
+        lastError: null,
+        status: "pending",
+      }),
+    );
+    mocks.sendLinqVoiceMemoMessage.mockRejectedValueOnce(
+      new VaultCliError(
+        "LINQ_API_REQUEST_FAILED",
+        "Linq rejected the voice memo.",
+        {
+          failureStage: "http",
+          operation: "send_voice_memo",
+          retryable: false,
+          status: 400,
+        },
+      ),
+    );
+    let fallbackError: unknown = null;
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+      try {
+        await dependencies.sendLinqVoiceMemo({
+          attachmentId: "attachment_voice_1",
+          target: "linq_chat_current",
+        });
+      } catch {
+        // The adapter's next legal action is its transcript fallback.
+      }
+      try {
+        await dependencies.sendLinq({
+          idempotencyKey: "assistant-outbox:intent_123",
+          message: "A short text fallback.",
+          replyToMessageId: null,
+          target: "linq_chat_current",
+          targetKind: "thread",
+        });
+      } catch (error) {
+        fallbackError = error;
+      }
+      return createDispatchResult({
+        status: "failed",
+      }, {
+        code: "ASSISTANT_OUTBOX_INTENT_EXPIRED",
+        message: "Assistant outbox intent expired before delivery.",
+      });
+    });
+    const providerFetch = vi.fn<typeof fetch>(async () => {
+      vi.setSystemTime(new Date(expiresAt));
+      return new Response(null, { status: 204 });
+    });
+    const assertRecentInbound = vi.fn(async (request) =>
+      buildClaimedLinqEngagementResult(request)
+    );
+
+    const outcomes = await drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        assertLinqRecentInboundEngagement: assertRecentInbound,
+      }),
+      providerFetch,
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    });
+
+    expect(fallbackError).toMatchObject({
+      code: "ASSISTANT_OUTBOX_INTENT_EXPIRED",
+    });
+    expect(providerFetch).toHaveBeenCalledTimes(1);
+    expect(mocks.sendLinqMessage).not.toHaveBeenCalled();
+    expect(outcomes).toEqual([
+      expect.objectContaining({
+        deliveryStatus: "failed",
+        retryable: false,
+      }),
+    ]);
   });
 
   it("sends hosted Linq voice memos to the same-wake concrete chat target", async () => {
