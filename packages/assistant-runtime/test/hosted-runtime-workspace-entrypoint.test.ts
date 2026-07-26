@@ -1568,6 +1568,364 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   }, 45_000);
 
+  test("settles detached image usage without a disabled completion turn and retains it for re-enable", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-image-disabled-runtime-"));
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const cleanupAbortController = new AbortController();
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const checkpointPendingInputIds: string[][] = [];
+    const events: string[] = [];
+    const allowanceActions: string[] = [];
+    const mailboxItems = [
+      createMailboxItem({
+        id: "mailbox_item_image_auto_reply_disabled_origin",
+        laneSeq: "1",
+      }),
+    ];
+    const providerStarted = createDeferred<void>();
+    const providerRelease = createDeferred<void>();
+    const imageUsageOptions: unknown[] = [];
+    const usageRecordPort = {
+      async recordUsage(
+        record: AssistantUsageRecord,
+        options?: unknown,
+      ) {
+        events.push(`usage:${record.featureKey ?? "turn"}`);
+        if (record.featureKey === "assistant_generated_image") {
+          imageUsageOptions.push(options);
+        }
+        return {
+          recorded: true,
+          usageId: record.usageId,
+        };
+      },
+    };
+    let originInputId: string | null = null;
+    let completionTurnCount = 0;
+    let resultPromise:
+      ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess> | null = null;
+
+    try {
+      resultPromise = runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_image_auto_reply_disabled",
+            idleCheckpointDelayMs: 1,
+            leaseGeneration: "7",
+            userId: TEST_USER_ID,
+            workspaceVersion: "0",
+          },
+        }),
+        {
+          async createCheckpointSnapshot() {
+            const pendingInputIds =
+              await readHostedPendingAssistantInputIds({ vaultRoot });
+            checkpointPendingInputIds.push(pendingInputIds);
+            events.push("snapshot");
+            return {
+              snapshotRef: createBundleRef({
+                hash: "6".repeat(64),
+                key: "users/bundles/member-synthetic/image-auto-reply-disabled.bundle.json",
+                size: 512,
+              }),
+            };
+          },
+          async importItem(item) {
+            originInputId = await stagePendingLinqAssistantInputForMailboxItem({
+              item: item.item,
+              withLinqSourceMetadata: true,
+              vaultRoot,
+            });
+            events.push("import.origin");
+            return {
+              assistantInputId: originInputId,
+              status: "imported",
+            };
+          },
+          platform: {
+            ...createPlatform({
+              mailboxPort: createMailboxPort({ events, items: mailboxItems }),
+              workspacePort: createWorkspacePort({
+                checkpointRequests,
+                events,
+                workspace: createWorkspaceState({ version: "0" }),
+              }),
+            }),
+            generatedImageUploader: {
+              async uploadGeneratedImage(image) {
+                events.push("upload");
+                return {
+                  alt: image.alt,
+                  kind: "image",
+                  source: image.source,
+                  url: "https://images.example.test/disabled-in-flight.png",
+                };
+              },
+            },
+            async providerFetch() {
+              events.push("provider.started");
+              providerStarted.resolve();
+              await providerRelease.promise;
+              events.push("provider.finished");
+              return new Response(JSON.stringify({
+                data: [{
+                  b64_json:
+                    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=",
+                }],
+                usage: {
+                  input_tokens: 2,
+                  output_tokens: 5,
+                  total_tokens: 7,
+                },
+              }), {
+                headers: {
+                  "content-type": "application/json",
+                  "x-request-id": "req_image_auto_reply_disabled",
+                },
+                status: 200,
+              });
+            },
+            usageAllowancePort: {
+              async applyUsageAllowance(request) {
+                allowanceActions.push(request.action);
+                switch (request.action) {
+                  case "reserve_image":
+                    return {
+                      action: "reserve_image",
+                      requestId: request.requestId,
+                      status: "reserved",
+                    };
+                  case "mark_dispatched":
+                    return {
+                      action: "mark_dispatched",
+                      requestId: request.requestId,
+                      status: "dispatched",
+                    };
+                  case "release":
+                    return {
+                      action: "release",
+                      requestId: request.requestId,
+                      status: "released",
+                    };
+                }
+              },
+            },
+            usageRecordPort,
+          },
+          runtimeWakeSignal,
+          signal: cleanupAbortController.signal,
+          async runAssistantPhase(phaseInput) {
+            const runnableInputIds =
+              await compactHostedPendingAssistantInputIds({ vaultRoot });
+            const acceptedInputs = await Promise.all(
+              runnableInputIds.map(async (inputId) => {
+                const event = await readAssistantInputEvent({
+                  inputId,
+                  vault: vaultRoot,
+                });
+                assert.ok(event);
+                return event;
+              }),
+            );
+            if (
+              acceptedInputs.some(
+                (event) =>
+                  event.sourceRef.kind === "hosted-mailbox"
+                  && event.sourceRef.itemId.startsWith("image-completion:"),
+              )
+            ) {
+              completionTurnCount += 1;
+              throw new Error(
+                "Disabled auto-reply must not admit the image completion to Murph.",
+              );
+            }
+            if (!originInputId || !runnableInputIds.includes(originInputId)) {
+              return { progressed: false };
+            }
+
+            const releaseAcceptedInputs =
+              await phaseInput.beforeProviderAcceptedInputs?.({
+                acceptedInputs: [{
+                  id: originInputId,
+                  source: "assistant-input",
+                }],
+              });
+            try {
+              assert.deepEqual(
+                await phaseInput.imageGenerationRegistrar?.register({
+                  args: {
+                    alt: "Generated cyclist",
+                    outputFormat: "png",
+                    prompt: "A cyclist climbing a mountain",
+                    quality: "medium",
+                    size: "1024x1024",
+                  },
+                  origin: {
+                    assistantInputId: originInputId,
+                    kind: "accepted_input",
+                    sessionId: "session_image_auto_reply_disabled",
+                  },
+                  providerRequestOrdinal: 1,
+                  toolCallId: "call_image_auto_reply_disabled",
+                }),
+                { status: "admission_pending" },
+              );
+              phaseInput.recordDeferredUsage?.(
+                createAssistantUsageRecord({
+                  sessionId: "session_image_auto_reply_disabled",
+                  turnId: "turn_image_auto_reply_disabled_origin",
+                  usageId: "turn_image_auto_reply_disabled_origin.attempt-1",
+                }),
+                [originInputId],
+              );
+              await writeSyntheticAssistantAutoReplyTerminalEvidence({
+                inputId: originInputId,
+                vaultRoot,
+              });
+              events.push("turn.origin");
+              return {
+                checkpointReason: "assistant_runtime_commit",
+                progressed: true,
+              };
+            } finally {
+              await releaseAcceptedInputs?.();
+            }
+          },
+          vaultRoot,
+        },
+      );
+      void resultPromise.catch(() => undefined);
+
+      await withRealTimeout(
+        providerStarted.promise,
+        10_000,
+        () => events.join(","),
+      );
+      await saveAssistantAutomationState(vaultRoot, {
+        autoReply: [],
+        updatedAt: "2026-04-27T00:00:01.000Z",
+        version: 1,
+      });
+      events.push("auto-reply.disabled");
+      providerRelease.resolve();
+
+      const result = await withRealTimeout(
+        resultPromise,
+        30_000,
+        () => events.join(","),
+      );
+      const pendingInputIds =
+        await readHostedPendingAssistantInputIds({ vaultRoot });
+      const pendingEvents = await Promise.all(
+        pendingInputIds.map((inputId) =>
+          readAssistantInputEvent({ inputId, vault: vaultRoot })
+        ),
+      );
+      const completionInput = pendingEvents.find(
+        (event) =>
+          event?.sourceRef.kind === "hosted-mailbox"
+          && event.sourceRef.itemId.startsWith("image-completion:"),
+      );
+
+      assert.ok(completionInput);
+      assert.equal(completionInput.projection.status, "not_attempted");
+      assert.ok(pendingInputIds.includes(completionInput.inputId));
+      assert.ok(
+        checkpointPendingInputIds.some((inputIds) =>
+          inputIds.includes(completionInput.inputId)
+        ),
+        "A durable checkpoint must include the staged image completion.",
+      );
+      assert.deepEqual(
+        await compactHostedPendingAssistantInputIds({ vaultRoot }),
+        [],
+      );
+      assert.deepEqual(
+        await inspectHostedPendingAssistantInputWakeCandidate({ vaultRoot }),
+        {
+          hasCandidate: false,
+          indexComplete: true,
+        },
+      );
+      assert.equal(completionTurnCount, 0);
+      assert.equal(imageUsageOptions.length, 1);
+      assert.ok(
+        imageUsageOptions[0]
+        && typeof imageUsageOptions[0] === "object"
+        && "reservationId" in imageUsageOptions[0]
+        && typeof imageUsageOptions[0].reservationId === "string"
+        && imageUsageOptions[0].reservationId.length > 0,
+      );
+      assert.ok(
+        imageUsageOptions[0]
+        && typeof imageUsageOptions[0] === "object"
+        && "noticeDeliveryTarget" in imageUsageOptions[0]
+        && imageUsageOptions[0].noticeDeliveryTarget === null,
+      );
+      assert.deepEqual(allowanceActions, [
+        "reserve_image",
+        "mark_dispatched",
+      ]);
+      assert.ok(
+        requireEventIndex(events, "auto-reply.disabled")
+          < requireEventIndex(events, "provider.finished"),
+      );
+      assert.ok(
+        requireEventIndex(events, "usage:assistant_generated_image")
+          < requireEventIndex(events, "snapshot"),
+      );
+      assert.equal(result.status, "idle");
+
+      await saveAssistantAutomationState(vaultRoot, {
+        autoReply: [{
+          channel: "linq",
+          eligibleAfter: null,
+          enabledAt: "2026-04-27T00:00:02.000Z",
+        }],
+        updatedAt: "2026-04-27T00:00:02.000Z",
+        version: 1,
+      });
+      events.push("auto-reply.enabled");
+      assert.deepEqual(
+        await compactHostedPendingAssistantInputIds({ vaultRoot }),
+        [completionInput.inputId],
+      );
+      assert.deepEqual(
+        await selectHostedAssistantInputIds({
+          mode: "background",
+          vaultRoot,
+        }),
+        {
+          inputIds: [completionInput.inputId],
+          mode: "background",
+          pendingInputIds: [completionInput.inputId],
+        },
+      );
+      assert.deepEqual(
+        await inspectHostedPendingAssistantInputWakeCandidate({ vaultRoot }),
+        {
+          hasCandidate: true,
+          indexComplete: true,
+        },
+      );
+      assert.equal(completionTurnCount, 0);
+      assert.equal(imageUsageOptions.length, 1);
+    } finally {
+      providerRelease.resolve();
+      cleanupAbortController.abort(
+        new Error("Image auto-reply disabled test cleanup."),
+      );
+      if (resultPromise) {
+        await withRealTimeout(
+          resultPromise.catch(() => undefined),
+          5_000,
+          () => `cleanup:${events.join(",")}`,
+        ).catch(() => undefined);
+      }
+      await removeTempRoot(vaultRoot);
+    }
+  }, 45_000);
+
   test("starts a detached model before lazily reading the Web-owned shared snapshot", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const snapshotRef = createWorkspaceSnapshotV2Ref(

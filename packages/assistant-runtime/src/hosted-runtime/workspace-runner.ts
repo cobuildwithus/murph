@@ -255,6 +255,7 @@ export interface HostedWorkspaceRunnerAssistantInputBatch {
 
 export interface HostedWorkspaceRunnerDeferredUsageOptions {
   reservationId?: string;
+  suppressNoticeDelivery?: true;
 }
 
 interface HostedDeferredAssistantUsageRecord {
@@ -2398,15 +2399,20 @@ async function flushHostedAssistantUsageRecords(input: {
     while (true) {
       try {
         const noticeDeliveryTarget =
-          await resolveHostedUsageNoticeDeliveryTargetFromAcceptedInputs({
-            inputIds: providerRequestAcceptedInputIds ?? [],
-            memberId: input.input.expectedUserId,
-            vaultRoot: input.input.vaultRoot,
-          });
+          options?.suppressNoticeDelivery === true
+            ? null
+            : await resolveHostedUsageNoticeDeliveryTargetFromAcceptedInputs({
+                inputIds: providerRequestAcceptedInputIds ?? [],
+                memberId: input.input.expectedUserId,
+                vaultRoot: input.input.vaultRoot,
+              });
         const usageOptions = {
-          ...(noticeDeliveryTarget === null || noticeDeliveryTarget === undefined
-            ? {}
-            : { noticeDeliveryTarget }),
+          ...(options?.suppressNoticeDelivery === true
+            ? { noticeDeliveryTarget: null }
+            : noticeDeliveryTarget === null
+              || noticeDeliveryTarget === undefined
+              ? {}
+              : { noticeDeliveryTarget }),
           ...(options?.reservationId === undefined
             ? {}
             : { reservationId: options.reservationId }),

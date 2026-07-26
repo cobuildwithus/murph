@@ -175,6 +175,7 @@ import {
 } from "./hosted-runtime/system-mailbox-state.ts";
 import {
   compactHostedConversationMailboxHandledItemIds,
+  compactHostedPendingAssistantInputIds,
   collectHostedPendingAssistantInputMediaRetentionProtections,
 } from "./hosted-runtime/pending-input-index.ts";
 import {
@@ -1925,15 +1926,75 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             currentAssistantInputId = null;
             try {
               let imageCapturePersistenceRan = false;
+              let imageCompletionStagingRan = false;
+              const selectImageCompletionInputIds = (
+                assistantInputIds: readonly string[],
+              ): void => {
+                const controller = imageGenerationController;
+                if (!controller || assistantInputIds.length === 0) {
+                  return;
+                }
+                const selectedOperationIds =
+                  controller.selectCompletionInputs({
+                    inputIds: assistantInputIds,
+                    recordDeferredUsage: (
+                      record,
+                      acceptedInputIds,
+                      usageOptions,
+                    ) => {
+                      phaseInput.recordDeferredUsage?.(
+                        record,
+                        acceptedInputIds,
+                        usageOptions,
+                      );
+                    },
+                  });
+                for (const operationId of selectedOperationIds) {
+                  selectedImageCompletionOperationIds.add(operationId);
+                }
+              };
               const shouldRunImageMaintenance =
                 !passForeground
                 && phaseInput.shouldYieldBackgroundMaintenance?.() !== true;
+              const selectUnrunnableImageCompletionInputs =
+                async (): Promise<void> => {
+                const controller = imageGenerationController;
+                if (
+                  !controller
+                  || !shouldRunImageMaintenance
+                  || !controller.hasUnselectedCompletion()
+                ) {
+                  return;
+                }
+                const selectedOperationIds =
+                  controller.selectUnrunnableCompletionInputs({
+                    recordDeferredUsage: (
+                      record,
+                      acceptedInputIds,
+                      usageOptions,
+                    ) => {
+                      phaseInput.recordDeferredUsage?.(
+                        record,
+                        acceptedInputIds,
+                        usageOptions,
+                      );
+                    },
+                    runnableInputIds:
+                      await compactHostedPendingAssistantInputIds({
+                        signal: passSignal,
+                        vaultRoot: restored.vaultRoot,
+                      }),
+                  });
+                for (const operationId of selectedOperationIds) {
+                  selectedImageCompletionOperationIds.add(operationId);
+                }
+              };
               if (
                 passInput.stageImageCompletions === true
                 && shouldRunImageMaintenance
                 && imageGenerationController?.snapshot().ready
               ) {
-                await imageGenerationController.stageReady(
+                const staged = await imageGenerationController.stageReady(
                   async (completion) => {
                     const staged =
                       await stageHostedImageGenerationCompletionInput({
@@ -1955,6 +2016,8 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                     };
                   },
                 );
+                imageCompletionStagingRan =
+                  staged.stagedOperationIds.length > 0;
               }
               if (
                 passInput.persistImageCaptures === true
@@ -1964,6 +2027,12 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                 imageCapturePersistenceRan = true;
                 await imageGenerationController.persistReadyCaptures();
               }
+              // A channel may stop auto-replying while provider work is in
+              // flight. Settle that completed provider call now and let the
+              // durable pending-input owner retain the completion for any
+              // later re-enable; do not spin this invocation or fabricate a
+              // Murph turn, terminal evidence, send, or attachment.
+              await selectUnrunnableImageCompletionInputs();
               const phaseAssistantTarget = readConfirmedAssistantTarget();
               const confirmedAssistantTargetEnv = phaseAssistantTarget
                 ? {
@@ -1981,76 +2050,79 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                     },
                   }
                 : foregroundRuntime;
-              const phaseResult = await (
-                options.runAssistantPhase ?? runHostedWorkspaceAssistantPhase
-              )({
-                ...phaseInput,
-                foregroundCausalOnly:
-                  passInput.foregroundCausalOnly === true,
-                currentAssistantInputId: () => currentAssistantInputId,
-                deviceSyncMessagingReturnTarget,
-                deviceSyncWorkspaceWakeHandled: deviceSyncWorkspaceWakeHandledUntilCheckpoint,
-                imageGenerationRegistrar:
-                  imageGenerationController?.registrar ?? null,
-                request: input.request,
-                restored,
-                runtime: phaseRuntime,
-                runtimeEnv: {
-                  ...runtimeEnv,
-                  ...(confirmedAssistantTargetEnv ?? {}),
-                },
-                beforeProviderAcceptedInputs: async ({
-                  acceptedInputs,
-                }) => {
-                  const acceptedInputsOnlyAssistant = acceptedInputs.every(
-                    (acceptedInput) => acceptedInput.source === "assistant-input",
-                  );
-                  const assistantInputIds = acceptedInputs
-                    .filter((acceptedInput) => acceptedInput.source === "assistant-input")
-                    .map((acceptedInput) => acceptedInput.id);
-                  if (imageGenerationController) {
-                    const selectedOperationIds =
-                      imageGenerationController.selectCompletionInputs({
-                        inputIds: assistantInputIds,
-                        recordDeferredUsage: (
-                          record,
-                          acceptedInputIds,
-                          usageOptions,
-                        ) => {
-                          phaseInput.recordDeferredUsage?.(
-                            record,
-                            acceptedInputIds,
-                            usageOptions,
-                          );
-                        },
-                      });
-                    for (const operationId of selectedOperationIds) {
-                      selectedImageCompletionOperationIds.add(operationId);
-                    }
-                  }
-                  const acceptedInputContext =
-                    await resolveHostedCurrentInputIdForAcceptedInputs({
-                      assistantInputIds,
-                      vaultRoot: restored.vaultRoot,
-                    });
-                  currentAssistantInputId = acceptedInputsOnlyAssistant
-                    ? acceptedInputContext.currentInputId
-                    : null;
-                  if (acceptedInputContext.conversationActivity !== "not_observed") {
-                    notifyHostedConversationActivityObservedBestEffort(
-                      options.onConversationActivityObserved,
-                      acceptedInputContext.conversationActivity,
-                    );
-                  }
-                  return () => {
-                    currentAssistantInputId = null;
-                  };
-                },
-                stagedDirtyAcks: stagedDeviceSyncDirtyAcks,
-                suppressDirtyPendingFetch: suppressDirtyPendingFetchUntilCheckpoint,
-                signal: passSignal,
-              });
-              return imageCapturePersistenceRan
+              const phaseResult = await (async () => {
+                try {
+                  return await (
+                    options.runAssistantPhase ?? runHostedWorkspaceAssistantPhase
+                  )({
+                    ...phaseInput,
+                    foregroundCausalOnly:
+                      passInput.foregroundCausalOnly === true,
+                    currentAssistantInputId: () => currentAssistantInputId,
+                    deviceSyncMessagingReturnTarget,
+                    deviceSyncWorkspaceWakeHandled:
+                      deviceSyncWorkspaceWakeHandledUntilCheckpoint,
+                    imageGenerationRegistrar:
+                      imageGenerationController?.registrar ?? null,
+                    request: input.request,
+                    restored,
+                    runtime: phaseRuntime,
+                    runtimeEnv: {
+                      ...runtimeEnv,
+                      ...(confirmedAssistantTargetEnv ?? {}),
+                    },
+                    beforeProviderAcceptedInputs: async ({
+                      acceptedInputs,
+                    }) => {
+                      const acceptedInputsOnlyAssistant =
+                        acceptedInputs.every(
+                          (acceptedInput) =>
+                            acceptedInput.source === "assistant-input",
+                        );
+                      const assistantInputIds = acceptedInputs
+                        .filter(
+                          (acceptedInput) =>
+                            acceptedInput.source === "assistant-input",
+                        )
+                        .map((acceptedInput) => acceptedInput.id);
+                      selectImageCompletionInputIds(assistantInputIds);
+                      const acceptedInputContext =
+                        await resolveHostedCurrentInputIdForAcceptedInputs({
+                          assistantInputIds,
+                          vaultRoot: restored.vaultRoot,
+                        });
+                      currentAssistantInputId = acceptedInputsOnlyAssistant
+                        ? acceptedInputContext.currentInputId
+                        : null;
+                      if (
+                        acceptedInputContext.conversationActivity
+                          !== "not_observed"
+                      ) {
+                        notifyHostedConversationActivityObservedBestEffort(
+                          options.onConversationActivityObserved,
+                          acceptedInputContext.conversationActivity,
+                        );
+                      }
+                      return () => {
+                        currentAssistantInputId = null;
+                      };
+                    },
+                    stagedDirtyAcks: stagedDeviceSyncDirtyAcks,
+                    suppressDirtyPendingFetch:
+                      suppressDirtyPendingFetchUntilCheckpoint,
+                    signal: passSignal,
+                  });
+                } finally {
+                  // Recheck after provider acceptance so a concurrent
+                  // auto-reply disable cannot strand an already staged
+                  // completion between the runnable scan and the turn.
+                  await selectUnrunnableImageCompletionInputs();
+                }
+              })();
+              return (
+                imageCapturePersistenceRan
+                || imageCompletionStagingRan
+              )
                 && phaseResult.progressed !== true
                 ? {
                     ...phaseResult,

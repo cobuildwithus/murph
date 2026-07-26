@@ -637,7 +637,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           requestId: reservationId,
         })).resolves.toEqual({
           requestId: reservationId,
-          status: "not_dispatchable",
+          status: "would_exhaust",
         });
         await expect(
           fixture.observer.hostedAiUsageReservation.findUniqueOrThrow({

@@ -211,7 +211,10 @@ describe("hosted image generation controller", () => {
 
     const recorded: {
       acceptedInputIds: readonly string[] | undefined;
-      options: { reservationId?: string } | undefined;
+      options: {
+        reservationId?: string;
+        suppressNoticeDelivery?: true;
+      } | undefined;
       record: AssistantUsageRecord;
     }[] = [];
     const selected = harness.controller.selectCompletionInputs({
@@ -261,6 +264,72 @@ describe("hosted image generation controller", () => {
     expect(reserveRequests.map(({ requestId }) => requestId)).toEqual(
       recorded.map(({ record }) => record.usageId),
     );
+  });
+
+  it("settles an unrunnable staged completion without selecting it twice", async () => {
+    const harness = createHarness();
+    const before = harness.controller.snapshot().registrationCursor;
+    await harness.controller.registrar.register(createRegistrationRequest());
+    await harness.controller.admitRegistered({
+      afterSequence: before,
+      recordedOriginInputIds: ["ain_origin"],
+      throughSequence: harness.controller.snapshot().registrationCursor,
+    });
+    harness.providerGate.resolve();
+    await vi.waitFor(() => {
+      expect(harness.controller.snapshot().canonicalWritePending).toBe(true);
+    });
+    await harness.controller.persistReadyCaptures();
+    await harness.controller.drain("graceful");
+    await harness.controller.stageReady(async () => ({
+      completionInputId: "ain_completion_unrunnable",
+    }));
+    expect(harness.controller.hasUnselectedCompletion()).toBe(true);
+
+    expect(harness.controller.selectUnrunnableCompletionInputs({
+      recordDeferredUsage() {
+        throw new Error("A runnable completion must remain Murph-owned.");
+      },
+      runnableInputIds: ["ain_completion_unrunnable"],
+    })).toEqual([]);
+    expect(harness.controller.hasUnselectedCompletion()).toBe(true);
+
+    const recorded: {
+      acceptedInputIds: readonly string[] | undefined;
+      options: { reservationId?: string } | undefined;
+      record: AssistantUsageRecord;
+    }[] = [];
+    const selected =
+      harness.controller.selectUnrunnableCompletionInputs({
+        recordDeferredUsage(record, acceptedInputIds, options) {
+          recorded.push({ acceptedInputIds, options, record });
+        },
+        runnableInputIds: [],
+      });
+    expect(selected).toHaveLength(1);
+    expect(harness.controller.hasUnselectedCompletion()).toBe(false);
+    expect(recorded).toHaveLength(1);
+    expect(recorded[0]).toEqual({
+      acceptedInputIds: undefined,
+      options: {
+        reservationId: recorded[0]!.record.usageId,
+        suppressNoticeDelivery: true,
+      },
+      record: recorded[0]!.record,
+    });
+    expect(harness.controller.selectUnrunnableCompletionInputs({
+      recordDeferredUsage() {
+        throw new Error("Unrunnable settlement must remain idempotent.");
+      },
+      runnableInputIds: [],
+    })).toEqual([]);
+
+    harness.controller.completeCompletionTurns({
+      operationIds: selected,
+      phaseSucceeded: true,
+      successfulUsageIds: [recorded[0]!.record.usageId],
+    });
+    expect(harness.controller.snapshot().unsettled).toBe(false);
   });
 
   it("persists capture canonically, then publishes off-path before becoming ready", async () => {
@@ -369,26 +438,43 @@ describe("hosted image generation controller", () => {
     },
   );
 
-  it("does not call the provider when the dispatch claim is ambiguous", async () => {
-    const harness = createHarness({ markStatus: "already_dispatched" });
-    const before = harness.controller.snapshot().registrationCursor;
-    await harness.controller.registrar.register(createRegistrationRequest());
+  it.each([
+    {
+      markStatus: "already_dispatched",
+      outcome: { kind: "unavailable", reason: "dispatch_unavailable" },
+    },
+    {
+      markStatus: "would_exhaust",
+      outcome: { kind: "would_exhaust" },
+    },
+  ] as const)(
+    "does not call the provider when the dispatch claim returns $markStatus",
+    async ({ markStatus, outcome }) => {
+      const harness = createHarness({ markStatus });
+      const before = harness.controller.snapshot().registrationCursor;
+      await harness.controller.registrar.register(createRegistrationRequest());
 
-    await harness.controller.admitRegistered({
-      afterSequence: before,
-      recordedOriginInputIds: ["ain_origin"],
-      throughSequence: harness.controller.snapshot().registrationCursor,
-    });
-    await harness.controller.drain("graceful");
+      await harness.controller.admitRegistered({
+        afterSequence: before,
+        recordedOriginInputIds: ["ain_origin"],
+        throughSequence: harness.controller.snapshot().registrationCursor,
+      });
+      await harness.controller.drain("graceful");
 
-    expect(harness.providerFetchCount()).toBe(0);
-    expect(harness.allowanceRequests.map(({ action }) => action)).toEqual([
-      "reserve_image",
-      "mark_dispatched",
-      "release",
-    ]);
-    expect(harness.controller.snapshot().ready).toBe(true);
-  });
+      expect(harness.providerFetchCount()).toBe(0);
+      expect(harness.allowanceRequests.map(({ action }) => action)).toEqual([
+        "reserve_image",
+        "mark_dispatched",
+        "release",
+      ]);
+      const outcomes: unknown[] = [];
+      await harness.controller.stageReady(async (input) => {
+        outcomes.push(input.outcome);
+        return { completionInputId: `ain_completion_${markStatus}` };
+      });
+      expect(outcomes).toEqual([outcome]);
+    },
+  );
 
   it("keeps provider-failure usage for the completion turn", async () => {
     const harness = createHarness({ dispatchMode: "provider_failed" });

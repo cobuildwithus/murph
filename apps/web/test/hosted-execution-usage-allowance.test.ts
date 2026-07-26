@@ -3899,9 +3899,80 @@ describe("hosted image generation capacity reservations", () => {
       requestId,
     })).resolves.toEqual({
       requestId,
+      status: "would_exhaust",
+    });
+    expect(reservationStore.rows.get(requestId)?.dispatchedAt).toBeNull();
+  });
+
+  it("keeps an expired pre-dispatch reservation noncommercial", async () => {
+    const requestId = "image_request_expired_before_dispatch";
+    const reservationStore = createHostedAiUsageReservationStore([{
+      createdAt: new Date(
+        now.getTime() - HOSTED_AI_USAGE_RESERVATION_PRE_DISPATCH_TTL_MS - 1,
+      ),
+      requestId,
+    }]);
+    const prisma = createGatePrisma({
+      hostedAiUsageReservation: reservationStore.delegate,
+      spentUsdMicros: 0n,
+    });
+
+    await expect(markHostedAiUsageReservationDispatched({
+      memberId: "member_123",
+      now,
+      prisma: prisma as never,
+      requestId,
+    })).resolves.toEqual({
+      requestId,
       status: "not_dispatchable",
     });
     expect(reservationStore.rows.get(requestId)?.dispatchedAt).toBeNull();
+  });
+
+  it("keeps aggregate reservation pressure noncommercial at dispatch", async () => {
+    const requestId = "image_request_dispatch_claim_pressure";
+    const reservationStore = createHostedAiUsageReservationStore();
+    const gateInput = {
+      hostedAiUsageReservation: reservationStore.delegate,
+      spentUsdMicros: 10_000_000n,
+      usageCreditBalanceUsdMicros: 30_000n,
+    };
+    const prisma = createGatePrisma(gateInput);
+
+    await expect(reserveHostedImageGenerationCapacity({
+      memberId: "member_123",
+      now,
+      prisma: prisma as never,
+      requestId,
+      spec: LOW_SQUARE_IMAGE_CAPACITY_SPEC,
+    })).resolves.toEqual({
+      requestId,
+      status: "reserved",
+    });
+    const current = reservationStore.rows.get(requestId);
+    if (!current) {
+      throw new Error("Expected the current image reservation fixture.");
+    }
+    reservationStore.rows.set(
+      "image_request_competing_dispatch_claim",
+      {
+        ...current,
+        estimatedCostUsdMicros: 10_000n,
+        requestId: "image_request_competing_dispatch_claim",
+      },
+    );
+    gateInput.usageCreditBalanceUsdMicros = 12_000n;
+
+    await expect(markHostedAiUsageReservationDispatched({
+      memberId: "member_123",
+      now,
+      prisma: prisma as never,
+      requestId,
+    })).resolves.toEqual({
+      requestId,
+      status: "not_dispatchable",
+    });
+    expect(current.dispatchedAt).toBeNull();
   });
 
   it.each([

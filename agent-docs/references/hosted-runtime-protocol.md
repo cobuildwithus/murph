@@ -1555,25 +1555,32 @@ Only after the upload completes does the controller stage one trusted
 `AssistantInputEvent` with the original conversation, route, and reply-anchor
 authority but a synthetic system-lane source that never inherits the original
 sender identity, enqueue that exact local input, and leave readiness
-level-triggered until it is selected. Capacity denial, provider failure,
+level-triggered until it becomes runnable. Capacity denial, provider failure,
 capture failure, and upload failure stage their trusted outcomes through the
 same continuation seam without automatic delivery.
 
-Selecting that staged input starts a fresh ordinary Murph turn. The image
+Accepting that staged input into an ordinary phase starts a fresh Murph turn. The image
 result itself never creates an outbox intent or calls a delivery provider.
 Murph may use `murph.attach_response_media` to include the image in its chosen
 reply, send any other response or reaction, or finish without reply. Image
-usage remains bound to that completion input until selection, then follows the
-ordinary deferred usage path after the completion turn reaches its delivery or
-no-reply terminal outcome so a usage-limit notice cannot overtake the image
-result.
+usage remains bound to that completion input until the input either enters the
+ordinary phase or is proven non-runnable. The ordinary case follows deferred
+usage after the completion turn reaches its delivery or no-reply terminal
+outcome, so a usage-limit notice cannot overtake the image result. If auto-reply
+is disabled before acceptance, the current invocation starts no Murph turn and
+no sender. It settles the exact reservation-backed usage with
+`noticeDeliveryTarget: null`, leaves the durable completion input pending under
+the ordinary pending-input owner, and allows a future ordinary phase to consume
+it if auto-reply is re-enabled.
 
 Routine checkpoints may proceed while image provider or upload work is in
 flight, but checkpoint publication does not release the workspace owner.
 Graceful invocation return, shutdown, workspace replacement, and fence release
 wait for every registered operation—including denial and failure—to finish its
-provider, capture, and upload phases, stage and service the fresh Murph turn,
-checkpoint its durable result, and settle deferred usage. Forced loss after
+provider, capture, and upload phases and stage its trusted input. Runnable
+completion then drains through the fresh Murph turn, checkpoint, and deferred
+usage; non-runnable completion drains through explicit notice-suppressed exact
+settlement while its existing pending input remains durable. Forced loss after
 dispatch is not recoverable from a durable image job: the reservation remains
 fail-closed and the provider is never blindly called again. There is no image
 queue, job row, or completion mailbox in Web/Postgres, no image state in

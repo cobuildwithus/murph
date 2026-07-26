@@ -1169,15 +1169,26 @@ describe("hosted runtime control contracts", () => {
         status,
       });
     }
-    expect(parseHostedRuntimeUsageAllowanceResponse({
-      action: "mark_dispatched",
-      requestId,
-      status: "already_dispatched",
-    })).toEqual({
-      action: "mark_dispatched",
-      requestId,
-      status: "already_dispatched",
-    });
+    for (
+      const status of [
+        "dispatched",
+        "already_dispatched",
+        "already_settled",
+        "would_exhaust",
+        "not_dispatchable",
+        "missing",
+      ] as const
+    ) {
+      expect(parseHostedRuntimeUsageAllowanceResponse({
+        action: "mark_dispatched",
+        requestId,
+        status,
+      })).toEqual({
+        action: "mark_dispatched",
+        requestId,
+        status,
+      });
+    }
     expect(parseHostedRuntimeUsageAllowanceResponse({
       action: "release",
       requestId,

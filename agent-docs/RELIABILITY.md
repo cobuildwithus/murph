@@ -156,11 +156,16 @@ Last verified: 2026-07-25
   short capture write waits only for that serialization. After a successful
   upload, a fresh ordinary Murph turn may attach the result through
   `murph.attach_response_media`, choose any other response, or finish without
-  reply. Graceful shutdown, invocation return, workspace replacement, and fence
-  release drain every registered image continuation through capture, upload,
-  that turn, its checkpoint, and usage settlement before releasing the
-  workspace. This adds no Web image job or completion mailbox and no Temporal
-  image state.
+  reply. If auto-reply is disabled before the completion becomes runnable, the
+  runtime invokes no Murph turn and no sender: it settles the exact
+  reservation-backed usage with notice delivery explicitly suppressed, leaves
+  the durable completion input pending under the ordinary pending-input owner,
+  and permits a later ordinary turn to consume it if auto-reply is re-enabled.
+  Graceful shutdown, invocation return, workspace replacement, and fence
+  release drain every registered image continuation through capture and upload,
+  then through either the fresh turn, its checkpoint, and usage settlement or
+  that non-runnable exact-settlement path, before releasing the workspace. This
+  adds no Web image job or completion mailbox and no Temporal image state.
 - Deploy interactive image admission as one coordinated three-step sequence:
   apply the additive reservation migration alone with old code unchanged;
   deploy Cloudflare/runtime and require `deploy:smoke` to match the exact

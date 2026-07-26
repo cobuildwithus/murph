@@ -107,8 +107,12 @@ originating turn. Successful provider output is committed as a capture through
 the runner's existing `HostedCanonicalWritePort` before Cloudflare Images
 upload continues in the background. Foreground work may wait only for that
 short serialized canonical capture write, never for provider or delivery-copy
-upload network latency. After upload, a trusted completion input starts a fresh
-ordinary Murph turn; the image result never sends itself.
+upload network latency. After upload, a runnable trusted completion input
+starts a fresh ordinary Murph turn; the image result never sends itself. If
+auto-reply is disabled first, the runtime starts no Murph turn or sender. It
+settles the exact reserved usage with notice delivery explicitly suppressed and
+leaves the trusted completion durable and pending for an ordinary turn after
+any later re-enable.
 
 Active reservation pressure applies member-wide across every still-live
 admitted period; it is not filtered to the period currently resolved by the

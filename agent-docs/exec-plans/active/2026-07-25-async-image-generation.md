@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-07-25
-Updated: 2026-07-25
+Updated: 2026-07-26
 
 ## Goal
 
@@ -17,6 +17,9 @@ Updated: 2026-07-25
 - New conversation messages can reach the model while the image operation runs.
 - Image completion or failure becomes a trusted input on the exact originating conversation and wakes a normal Murph turn.
 - Completion never sends an exact or automatic message. Murph may use `murph.attach_response_media` and compose any ordinary reply allowed in that turn.
+- If auto-reply is disabled before completion becomes runnable, no Murph turn or
+  sender runs: usage settles with notices explicitly suppressed, while the
+  trusted completion remains durable pending input for a later ordinary turn.
 - A deterministic replay cannot start the same image operation twice. Distinct tool calls in one accepted turn remain distinct operations.
 - After the originating turn's usage is durably recorded, Web atomically admits and reserves estimated image allowance before provider dispatch. Insufficient capacity starts no image call and returns a structured result that routes through the existing hosted-low-usage and group-funding behavior.
 - Usage finalization consumes or releases the matching reservation exactly once. Usage-limit notices truthfully distinguish paused new work from already-started work that may still arrive.
@@ -55,6 +58,12 @@ Updated: 2026-07-25
    Mitigation: retain the dispatched reservation through its captured usage period and fail closed. GPT Image has no usable idempotency/status recovery contract, so never retry an ambiguous dispatched call automatically.
 7. Risk: completion bypasses Murph and produces a rigid or contextually wrong message.
    Mitigation: stage only a trusted conversation-scoped input containing the validated completion result. The normal Murph turn remains the sole reply and media-composition owner.
+8. Risk: disabling auto-reply while an image is in flight leaves its invocation
+   waiting forever or emits a fallback usage notice.
+   Mitigation: classify every staged but non-runnable completion in the
+   background maintenance loop, settle its reservation-backed usage with
+   explicit notice suppression, and leave the durable pending input untouched
+   for the ordinary owner.
 
 ## Tasks
 
@@ -118,20 +127,33 @@ owner or lifecycle without production-path proof.
 
 ## Verification
 
-- Real PostgreSQL reservation concurrency/lifecycle: 4/4 passed after all 122
-  migrations applied to a fresh database; schema diff was clean.
+- Real PostgreSQL reservation concurrency/lifecycle: 5/5 passed after all 125
+  migrations applied to a fresh isolated database, which was removed after the
+  proof.
 - Hosted provider/foreground/upload/fresh-turn interleaving scenario: 1/1
   passed.
+- Final hosted-local `codex-image-media-delivery` scenario: 4/4 passed against
+  the exact assembled runner bundle after deploy smoke.
 - Hosted workspace runner: 113/113 passed.
 - Image controller and completion authority: 25/25 passed.
-- Assistant Engine full suite: 2,681 passed.
-- Assistant Runtime full suite: 1,875 passed.
+- Auto-reply-disabled entrypoint recovery: the final 239/239 entrypoint suite
+  proves no fabricated completion turn, one reservation-backed settlement with
+  `noticeDeliveryTarget: null`, a checkpoint containing the retained completion,
+  and ordinary background selection after re-enable.
+- Assistant Engine full suite: 2,731 passed, 5 skipped.
+- Assistant Runtime full suite: 1,928 passed, 2 skipped.
 - Focused Web usage/reservation/status/funding suites: 331/331 passed.
 - Web signaling regression after the final test-fixture correction: 28/28
   passed.
-- Web verification, production build, Cloudflare verification, workspace
-  typechecks, Prisma validation/generation, ESLint, privacy scan, and
-  `git diff --check` passed.
+- Final Web verification passed: TypeScript, 6,676 tests with 179 skipped,
+  ESLint with zero errors, dev smoke, and the production Next.js build.
+- Final Cloudflare verification passed: typecheck, 1,935 Node tests, and 2
+  Workers-runtime tests.
+- Final local canonical
+  `pnpm test:diff apps/web apps/cloudflare packages/assistant-engine packages/assistant-runtime packages/hosted-execution`
+  passed every affected package/app typecheck, test, boundary, build, and
+  policy guard. The configured Testbox lane was unavailable on this machine, so
+  the dispatcher used its canonical local fallback.
 - After rebasing onto the current base, the conflict-sensitive migration,
   prompt/funding, image controller/completion, and hosted workspace entrypoint
   suites passed: 5/5, 18/18, 25/25, and 238/238 respectively.
@@ -142,9 +164,16 @@ owner or lifecycle without production-path proof.
   `packages/hosted-local-harness` reverse dependent. An exact base-head run in
   Testbox `tbx_01kye6dx04grbeyhfj0x3j8a0n` (Actions run `30185735410`)
   reproduced the identical set: one process cleanup timeout, one MinIO endpoint
-  expectation mismatch, and 63 worker-host bridge failures/timeouts. The task
-  changes no harness file, and those failures occur before its changed runtime
-  inputs are consumed.
+  expectation mismatch, and 63 worker-host bridge failures/timeouts. The
+  `packages/hosted-local-harness` owner is unchanged, and those failures occur
+  before the changed runtime inputs are consumed. The final canonical local run
+  subsequently passed all 410 harness tests plus its package-boundary proof.
 - An earlier full canonical acceptance run completed the Web production build,
   Cloudflare Node and Workers verification, and every task-owned package suite.
   Its sole then-baseline CLI prompt assertion was removed by the current base.
+- Preliminary ReviewGPT returned two findings. Both were accepted and resolved:
+  the tool contract now distinguishes pending from terminal rejection, and the
+  hosted Codex proof uses separate origin and trusted-completion turns with
+  exact one-time media attachment.
+- The final product-experience review returned `NO FINDINGS`. Its sole evidence
+  gap was closed by extending the entrypoint recovery proof described above.

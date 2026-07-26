@@ -851,6 +851,7 @@ export type HostedRuntimeUsageAllowanceResponse =
         | "dispatched"
         | "already_dispatched"
         | "already_settled"
+        | "would_exhaust"
         | "not_dispatchable"
         | "missing";
     }

@@ -904,22 +904,28 @@ runner.
 Only after that upload completes does the runtime stage trusted local assistant
 input and level-trigger the existing wake. Capacity denial, provider failure,
 capture failure, and upload failure stage the corresponding trusted outcome
-through the same seam. A fresh ordinary Murph turn chooses its normal final
-action: it may attach the generated media with
+through the same seam. When that input is runnable, a fresh ordinary Murph turn
+chooses its normal final action: it may attach the generated media with
 `murph.attach_response_media`, send different text or media, react, or finish
-without reply. Image completion itself never creates or sends an outbox
-message, and it emits no automatic progress update.
+without reply. If auto-reply is disabled before the input becomes runnable, the
+runtime starts no Murph turn or sender. It settles the exact reservation-backed
+usage with notice delivery explicitly suppressed and leaves the trusted input
+durable and pending for an ordinary turn after any later re-enable. Image
+completion itself never creates or sends an outbox message, and it emits no
+automatic progress update.
 
 Foreground conversation input is selected ahead of an image continuation
 before its canonical capture write begins; input arriving during that short
 write waits only for the serialized write. Routine checkpoints may occur while
 provider or upload work is in flight, but graceful workspace release waits for
-every registered continuation to finish capture and upload, stage and service
-its ordinary Murph completion turn, checkpoint, and settle usage. An abandoned
-pre-dispatch reservation expires after its bounded claim window; after
-dispatch, ambiguity remains charged through the admitted period and is never
-blindly redispatched. Web owns no image queue or completion mailbox, and
-Temporal owns no image workflow or image state.
+every registered continuation to finish capture and upload, stage its trusted
+input, and then either service the runnable ordinary Murph completion turn
+through checkpoint and usage settlement or take the non-runnable,
+notice-suppressed exact-settlement path while preserving that pending input in
+the checkpoint. An abandoned pre-dispatch reservation expires after its
+bounded claim window; after dispatch, ambiguity remains charged through the
+admitted period and is never blindly redispatched. Web owns no image queue or
+completion mailbox, and Temporal owns no image workflow or image state.
 
 This cross-plane change rolls out as one coordinated three-step sequence.
 First apply the additive reservation database migration alone; old Web and

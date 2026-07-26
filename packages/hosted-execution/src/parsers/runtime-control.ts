@@ -876,6 +876,7 @@ export function parseHostedRuntimeUsageAllowanceResponse(
         status !== "dispatched"
         && status !== "already_dispatched"
         && status !== "already_settled"
+        && status !== "would_exhaust"
         && status !== "not_dispatchable"
         && status !== "missing"
       ) {

@@ -253,6 +253,7 @@ export interface HostedAiUsageReservationDispatchResult {
     | "dispatched"
     | "already_dispatched"
     | "already_settled"
+    | "would_exhaust"
     | "not_dispatchable"
     | "missing";
 }
@@ -1789,7 +1790,15 @@ async function markHostedAiUsageReservationDispatchedTx(input: {
   if (!dispatchGate.allowed) {
     return {
       requestId,
-      status: "not_dispatchable",
+      status:
+        dispatchGate.reason === "ai_usage_limit_exceeded"
+        || (
+          dispatchGate.reason === "ai_usage_capacity_reserved"
+          && reservation.estimatedCostUsdMicros
+            >= resolveHostedAiUsageGateSpendRemainingUsdMicros(dispatchGate)
+        )
+          ? "would_exhaust"
+          : "not_dispatchable",
     };
   }
 

@@ -86,14 +86,29 @@ export interface HostedImageGenerationController {
     successfulUsageIds: readonly string[];
   }): void;
   drain(mode: "forced" | "graceful"): Promise<void>;
+  hasUnselectedCompletion(): boolean;
   persistReadyCaptures(): Promise<void>;
   selectCompletionInputs(input: {
     inputIds: readonly string[];
     recordDeferredUsage(
       record: AssistantUsageRecord,
       acceptedInputIds?: readonly string[],
-      options?: { reservationId?: string },
+      options?: {
+        reservationId?: string;
+        suppressNoticeDelivery?: true;
+      },
     ): void;
+  }): string[];
+  selectUnrunnableCompletionInputs(input: {
+    recordDeferredUsage(
+      record: AssistantUsageRecord,
+      acceptedInputIds?: readonly string[],
+      options?: {
+        reservationId?: string;
+        suppressNoticeDelivery?: true;
+      },
+    ): void;
+    runnableInputIds: readonly string[];
   }): string[];
   snapshot(): HostedImageGenerationControllerSnapshot;
   stageReady(
@@ -280,12 +295,23 @@ class ImageGenerationController implements HostedImageGenerationController {
     }
   }
 
+  hasUnselectedCompletion(): boolean {
+    return [...this.operations.values()].some((operation) =>
+      operation.phase === "completion"
+      && !operation.completionSelected
+      && operation.completionInputId !== null
+    );
+  }
+
   selectCompletionInputs(input: {
     inputIds: readonly string[];
     recordDeferredUsage(
       record: AssistantUsageRecord,
       acceptedInputIds?: readonly string[],
-      options?: { reservationId?: string },
+      options?: {
+        reservationId?: string;
+        suppressNoticeDelivery?: true;
+      },
     ): void;
   }): string[] {
     const inputIds = new Set(input.inputIds);
@@ -304,6 +330,48 @@ class ImageGenerationController implements HostedImageGenerationController {
           operation.usageRecord,
           [operation.completionInputId],
           { reservationId: operation.usageId },
+        );
+      }
+      operation.completionSelected = true;
+      selected.push(operation.id);
+      this.signal();
+    }
+    return selected;
+  }
+
+  selectUnrunnableCompletionInputs(input: {
+    recordDeferredUsage(
+      record: AssistantUsageRecord,
+      acceptedInputIds?: readonly string[],
+      options?: {
+        reservationId?: string;
+        suppressNoticeDelivery?: true;
+      },
+    ): void;
+    runnableInputIds: readonly string[];
+  }): string[] {
+    const runnableInputIds = new Set(input.runnableInputIds);
+    const selected: string[] = [];
+    for (const operation of this.operations.values()) {
+      if (
+        operation.phase !== "completion"
+        || operation.completionSelected
+        || !operation.completionInputId
+        || runnableInputIds.has(operation.completionInputId)
+      ) {
+        continue;
+      }
+      if (operation.usageRecord) {
+        // No Murph turn accepted this input. Explicit notice suppression keeps
+        // settlement route-free, so a usage-limit notice cannot overtake the
+        // durable completion if the channel is enabled again later.
+        input.recordDeferredUsage(
+          operation.usageRecord,
+          undefined,
+          {
+            reservationId: operation.usageId,
+            suppressNoticeDelivery: true,
+          },
         );
       }
       operation.completionSelected = true;
@@ -630,7 +698,7 @@ class ImageGenerationController implements HostedImageGenerationController {
         );
       } else {
         await this.release(operation);
-        this.setReady(operation, unavailableOutcome("dispatch_unavailable"));
+        this.setReady(operation, dispatchDeniedOutcome(markStatus));
       }
     } catch {
       if (this.forced || abort.signal.aborted) {
@@ -640,7 +708,7 @@ class ImageGenerationController implements HostedImageGenerationController {
         this.setReady(operation, unavailableOutcome("provider_failed"));
       } else {
         await this.release(operation);
-        this.setReady(operation, unavailableOutcome("dispatch_unavailable"));
+        this.setReady(operation, dispatchDeniedOutcome(markStatus));
       }
     } finally {
       operation.providerAbort = null;
@@ -801,6 +869,18 @@ function unavailableOutcome(
   reason: HostedImageGenerationUnavailableReason,
 ): Extract<HostedImageGenerationStageOutcome, { kind: "unavailable" }> {
   return { kind: "unavailable", reason };
+}
+
+function dispatchDeniedOutcome(
+  status:
+    Extract<
+      HostedRuntimeUsageAllowanceResponse,
+      { action: "mark_dispatched" }
+    >["status"] | null,
+): HostedImageGenerationStageOutcome {
+  return status === "would_exhaust"
+    ? { kind: "would_exhaust" }
+    : unavailableOutcome("dispatch_unavailable");
 }
 
 function inline(

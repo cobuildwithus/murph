@@ -6471,6 +6471,92 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     }
   });
 
+  test("suppresses notice delivery while settling usage for an unrunnable completion", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
+    const { mailboxPort } = createMailboxPort({ items: [] });
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const deferredUsageCaptures: HostedWorkspaceRunnerDeferredUsageCapture[] = [];
+    let attempts = 0;
+    const usageRecordPort: HostedRuntimeUsageRecordPort = {
+      async recordUsage(record, options) {
+        attempts += 1;
+        assert.equal(record.usageId, "turn_runner_usage.unrunnable");
+        assert.deepEqual(options, {
+          noticeDeliveryTarget: null,
+          reservationId: "turn_runner_usage.unrunnable",
+        });
+        return {
+          recorded: true,
+          usageId: record.usageId,
+        };
+      },
+    };
+
+    try {
+      await runHostedWorkspaceUntilIdleOrBudget({
+        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+          attemptId: "attempt_synthetic_runner_usage_notice_suppression",
+          expectedWorkspaceVersion: "0",
+          leaseGeneration: "1",
+          nextWakeAt: null,
+          nextWakeReason: null,
+          snapshotRef: null,
+        }),
+        expectedUserId: TEST_USER_ID,
+        async importItem() {
+          throw new Error("No mailbox import expected.");
+        },
+        initialMailboxImport: createCheckpointedMailboxImportResult(),
+        limitPerLane: 10,
+        platform: createPlatform({
+          mailboxPort,
+          usageRecordPort,
+          workspacePort: createWorkspacePort({ checkpointRequests }),
+        }),
+        requestId: "request_synthetic_runner_usage_notice_suppression",
+        runtimeLogContext: {
+          attemptId: "attempt_synthetic_runner_usage_notice_suppression",
+          leaseGeneration: "1",
+          workspaceVersion: "0",
+        },
+        async runAssistantPhase(input) {
+          input.recordDeferredUsage?.(createAssistantUsageRecord({
+            usageId: "turn_runner_usage.unrunnable",
+          }), undefined, {
+            reservationId: "turn_runner_usage.unrunnable",
+            suppressNoticeDelivery: true,
+          });
+          return {
+            progressed: false,
+          };
+        },
+        trackDeferredUsageCapture(capture) {
+          deferredUsageCaptures.push(capture);
+        },
+        vaultRoot,
+        workspace: createWorkspaceState({ version: "0" }),
+        now: () => TEST_NOW,
+      });
+
+      assert.equal(attempts, 1);
+      assert.deepEqual(
+        await withTestTimeout(deferredUsageCaptures[0]!.outcome, 1_000),
+        {
+          failedRecordCount: 0,
+          failedUsageIds: [],
+          recordedAcceptedInputIds: [],
+          successfulRecordCount: 1,
+          successfulUsageIds: ["turn_runner_usage.unrunnable"],
+        },
+      );
+    } finally {
+      await rm(vaultRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
   test("retries reservation-backed deferred usage until exact settlement while ordinary usage stays best-effort", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
     const { mailboxPort } = createMailboxPort({ items: [] });
