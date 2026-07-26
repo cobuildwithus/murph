@@ -1,18 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  after: vi.fn((task: () => Promise<void>) => {
-    void task();
-  }),
   handleHostedRuntimeAssistantAskControl: vi.fn(),
   requireHostedCloudflareCallbackRequest: vi.fn(),
-  signalHostedMailboxAppendRuntime: vi.fn(),
+  scheduleHostedMailboxWakeAfterResponse: vi.fn(),
 }));
 
-vi.mock("next/server", async () => {
-  const actual = await vi.importActual<typeof import("next/server")>("next/server");
-  return { ...actual, after: mocks.after };
-});
 vi.mock("@/src/lib/hosted-execution/cloudflare-callback-auth", () => ({
   requireHostedCloudflareCallbackRequest:
     mocks.requireHostedCloudflareCallbackRequest,
@@ -21,8 +14,9 @@ vi.mock("@/src/lib/hosted-groups/group-assistant-ask", () => ({
   handleHostedRuntimeAssistantAskControl:
     mocks.handleHostedRuntimeAssistantAskControl,
 }));
-vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
-  signalHostedMailboxAppendRuntime: mocks.signalHostedMailboxAppendRuntime,
+vi.mock("@/src/lib/hosted-orchestration/mailbox-wake", () => ({
+  scheduleHostedMailboxWakeAfterResponse:
+    mocks.scheduleHostedMailboxWakeAfterResponse,
 }));
 
 import { POST } from "@/app/api/internal/hosted-execution/assistant-asks/runtime/route";
@@ -50,7 +44,6 @@ describe("Hosted Assistant Ask runtime route", () => {
     mocks.requireHostedCloudflareCallbackRequest.mockResolvedValue(
       "member-group-runtime",
     );
-    mocks.signalHostedMailboxAppendRuntime.mockResolvedValue(undefined);
   });
 
   it("requires the active runtime write fence before signature verification", async () => {
@@ -124,12 +117,10 @@ describe("Hosted Assistant Ask runtime route", () => {
       action: "complete",
       status: "completed",
     });
-    expect(mocks.after).toHaveBeenCalledTimes(1);
-    await vi.waitFor(() => {
-      expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
-        expectedUserId: "member-personal",
-        mailboxItemId: "aask_done_one",
-      });
+    expect(mocks.scheduleHostedMailboxWakeAfterResponse).toHaveBeenCalledWith({
+      directWakeSource: "assistant-ask-completion",
+      expectedUserId: "member-personal",
+      mailboxItemId: "aask_done_one",
     });
   });
 

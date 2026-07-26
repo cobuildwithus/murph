@@ -126,6 +126,12 @@ describe("hosted-local harness", () => {
       name: "snapshot-publication-fallback",
       testControls: true,
     });
+    expect(resolveHostedLocalE2eScenarios("foreground-reply-priority")[0]).toEqual({
+      dedicatedVitestProcess: true,
+      file: "apps/cloudflare/test/hosted-local-foreground-reply-priority-e2e.test.ts",
+      name: "foreground-reply-priority",
+      testControls: true,
+    });
     for (const [name, file] of [
       ["canonical-receipt-lost-ack-recovery", "hosted-local-canonical-receipt-lost-ack-recovery"],
       ["computer-handoff-linq-roundtrip", "hosted-local-computer-handoff-linq-roundtrip"],
@@ -210,6 +216,7 @@ describe("hosted-local harness", () => {
     for (const name of [
       "canonical-receipt-lost-ack-recovery",
       "codex-image-media-delivery",
+      "foreground-reply-priority",
       "retryable-outbox-foreground-restart",
       "shutdown-checkpoint-conversation-ahead",
       "snapshot-publication-fallback",
@@ -275,6 +282,12 @@ describe("hosted-local harness", () => {
     expect(workflow).toContain([
       "- name: Linq reminder + onboarding follow-up E2E",
       '            fastGate: "1"',
+    ].join("\n"));
+    expect(workflow).toContain([
+      "- name: Hosted foreground reply priority E2E",
+      '            fastGate: "1"',
+      "            slug: foreground-reply-priority",
+      "            scenarios: foreground-reply-priority",
     ].join("\n"));
     expectCodexCliInstallContract(workflow);
   });

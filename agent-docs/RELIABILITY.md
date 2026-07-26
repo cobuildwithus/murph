@@ -77,6 +77,18 @@ Last verified: 2026-07-25
   pinned to the original target and membership generation; expiry is the
   existing ten-minute mailbox deadline, with no second lease, timer, status
   row, or delivery ledger.
+- Assistant Ask request and completion appends first signal the existing Temporal
+  workflow, then may issue the shared payloadless, no-retry direct
+  `ensure-processing` latency hint. Temporal acceptance failure starts no direct
+  wake. A dirty runtime admits only the exact joined-group request and legacy
+  completion shapes through the pre-checkpoint-safe system prefix; consented or
+  reviewed shapes remain checkpoint-gated. Completion ordering uses the
+  existing pending-input occurrence proof, and incomplete or invalid index
+  evidence rejects the shortcut without repairing state.
+- A legacy joined-group `cannot_answer` queues the fixed
+  unavailable-evidence response exactly. It must not start a private provider
+  continuation that can invent an expiry, provider failure, or execution
+  failure.
 - Scheduled group Assistant Ask stays inside the ordinary scheduled Codex turn:
   start the selected requests, then use ordinary shell waits and exact replay to
   poll every accepted request until it returns completed or unavailable. The
