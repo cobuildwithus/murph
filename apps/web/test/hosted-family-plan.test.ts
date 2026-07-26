@@ -104,6 +104,7 @@ import {
   hostedFamilyInviteHasReusableTarget,
   issueHostedFamilyInviteFromOwnerTx,
   issueHostedFamilyInviteTx,
+  prepareHostedFamilyStripeActivationCryptoDomainRoots,
   prepareHostedLegacySyntheticFamilyCleanupTx,
   readHostedFamilyCheckoutSessionIdFromUrl,
   resolveHostedFamilyChatNotificationRouteTx,
@@ -2707,6 +2708,44 @@ describe("hosted Family plan", () => {
       });
     expect(tx.hostedAccountGroupInvite.updateMany).not.toHaveBeenCalled();
     expect(tx.hostedAccountGroupMembership.upsert).not.toHaveBeenCalled();
+    expect(cryptoRootMocks.prepareHostedCryptoDomainRootCandidates).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    {
+      invite: createPendingInvite({
+        expiresAt: new Date("2026-06-18T11:59:59.999Z"),
+      }),
+      label: "expired",
+    },
+    {
+      invite: createPendingInvite({
+        status: "revoked",
+      }),
+      label: "revoked",
+    },
+  ])("rejects an already-$label browser invite before crypto preparation", async ({
+    invite,
+  }) => {
+    const tx = createTxMock();
+    tx.hostedAccountGroupInvite.findUnique.mockResolvedValueOnce(invite);
+    const prisma = tx as FamilyPlanTxMock & {
+      $transaction: ReturnType<typeof vi.fn>;
+    };
+    prisma.$transaction = vi.fn((callback) => callback(tx));
+
+    await expect(acceptHostedFamilyInvite({
+      acceptedMemberId: "member_mom",
+      inviteCode: "invite_phone",
+      now: new Date("2026-06-18T12:00:00.000Z"),
+      prisma: prisma as never,
+    })).rejects.toMatchObject({
+      code: "HOSTED_FAMILY_INVITE_NOT_ACTIVE",
+      httpStatus: 410,
+    });
+
+    expect(cryptoRootMocks.prepareHostedCryptoDomainRootCandidates).not.toHaveBeenCalled();
+    expect(prisma.$transaction).not.toHaveBeenCalled();
   });
 
   it("revalidates a browser invite retarget inside the acceptance transaction", async () => {
@@ -2792,6 +2831,50 @@ describe("hosted Family plan", () => {
     expect(prisma.$transaction).toHaveBeenCalledTimes(1);
     expect(tx.hostedAccountGroupInvite.updateMany).not.toHaveBeenCalled();
     expect(tx.hostedAccountGroupMembership.upsert).not.toHaveBeenCalled();
+  });
+
+  it("uses a fresh transaction clock when an invite expires during crypto preparation", async () => {
+    vi.useFakeTimers();
+    try {
+      const tx = createTxMock();
+      const expiresAt = new Date("2026-06-18T12:00:00.000Z");
+      tx.hostedAccountGroupInvite.findUnique.mockResolvedValue(
+        createPendingInvite({
+          expiresAt,
+          targetEmailLookupKey: createHostedEmailLookupKey("mom@example.com"),
+        }),
+      );
+      const prisma = tx as FamilyPlanTxMock & {
+        $transaction: ReturnType<typeof vi.fn>;
+      };
+      prisma.$transaction = vi.fn((callback) => callback(tx));
+      vi.setSystemTime(new Date("2026-06-18T11:59:59.000Z"));
+      cryptoRootMocks.prepareHostedCryptoDomainRootCandidates.mockImplementationOnce(
+        async () => {
+          vi.setSystemTime(expiresAt);
+          return new Map();
+        },
+      );
+
+      await expect(acceptHostedFamilyInvite({
+        acceptedMemberId: "member_mom",
+        email: "mom@example.com",
+        inviteCode: "invite_email",
+        prisma: prisma as never,
+        requireWebBinding: true,
+      })).rejects.toMatchObject({
+        code: "HOSTED_FAMILY_INVITE_NOT_ACTIVE",
+        httpStatus: 410,
+      });
+
+      expect(cryptoRootMocks.prepareHostedCryptoDomainRootCandidates)
+        .toHaveBeenCalledTimes(1);
+      expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+      expect(tx.hostedAccountGroupInvite.updateMany).not.toHaveBeenCalled();
+      expect(tx.hostedAccountGroupMembership.upsert).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("revalidates Family seat authority inside the browser acceptance transaction", async () => {
@@ -3032,11 +3115,18 @@ describe("hosted Family plan", () => {
   it("activates active family members when Stripe marks the group subscription active", async () => {
     const tx = createTxMock();
     const eventCreatedAt = new Date("2026-06-18T12:30:00.000Z");
+    const ownerPrepared = new Map();
+    const memberPrepared = new Map();
+    const preparedCryptoDomainRootsByMember = new Map([
+      ["member_mom", memberPrepared],
+      ["member_owner", ownerPrepared],
+    ]);
 
     await expect(applyHostedFamilyStripeSubscriptionUpdatedTx({
       dispatchContext: {
         eventCreatedAt,
       },
+      preparedCryptoDomainRootsByMember,
       subscription: makeFamilyStripeSubscription(),
       tx,
     })).resolves.toMatchObject({
@@ -3072,6 +3162,7 @@ describe("hosted Family plan", () => {
       {
         memberId: "member_owner",
         occurredAt: eventCreatedAt,
+        preparedCryptoDomainRoots: ownerPrepared,
         prisma: tx,
         sourceEventId: "family-subscription:sub_family",
       },
@@ -3081,13 +3172,103 @@ describe("hosted Family plan", () => {
       {
         memberId: "member_mom",
         occurredAt: eventCreatedAt,
+        preparedCryptoDomainRoots: memberPrepared,
         prisma: tx,
         sourceEventId: "family-subscription:sub_family",
       },
     );
   });
 
-  it("bounds rootless Family Stripe activation to six sequential legacy bridges", async () => {
+  it("prepares at most six Family members sequentially before reconciliation", async () => {
+    const tx = createTxMock();
+    const memberships = Array.from(
+      { length: HOSTED_FAMILY_MAX_SEATS },
+      (_, index) => ({
+        memberId: `member_${index}`,
+      }),
+    );
+    tx.hostedAccountGroupMembership.findMany.mockResolvedValue(memberships);
+    let activeCalls = 0;
+    let maxConcurrentCalls = 0;
+    cryptoRootMocks.prepareHostedCryptoDomainRootCandidates.mockImplementation(
+      async ({ userId }) => {
+        activeCalls += 1;
+        maxConcurrentCalls = Math.max(maxConcurrentCalls, activeCalls);
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        activeCalls -= 1;
+        return new Map([["control", { domain: "control", userId }]]);
+      },
+    );
+
+    const prepared = await prepareHostedFamilyStripeActivationCryptoDomainRoots({
+      prisma: tx as never,
+      subscription: makeFamilyStripeSubscription({
+        itemQuantity: HOSTED_FAMILY_MAX_SEATS,
+      }),
+    });
+
+    expect([...prepared.keys()]).toEqual(memberships.map(({ memberId }) => memberId));
+    expect(cryptoRootMocks.prepareHostedCryptoDomainRootCandidates)
+      .toHaveBeenCalledTimes(HOSTED_FAMILY_MAX_SEATS);
+    expect(maxConcurrentCalls).toBe(1);
+    expect(tx.hostedAccountGroupMembership.findMany).toHaveBeenCalledWith({
+      orderBy: {
+        memberId: "asc",
+      },
+      select: {
+        memberId: true,
+      },
+      take: HOSTED_FAMILY_MAX_SEATS + 1,
+      where: {
+        groupId: "hbag_family",
+        status: "active",
+      },
+    });
+  });
+
+  it("prepares a direct-paid owner for the in-transaction Family conversion", async () => {
+    const tx = createTxMock();
+    tx.hostedAccountGroupMembership.findMany.mockResolvedValue([
+      { memberId: "member_owner" },
+      { memberId: "member_mom" },
+    ]);
+    tx.hostedMember.findUnique.mockResolvedValue({
+      billingRef: {
+        currentBillingPhase: "paid",
+      },
+      billingStatus: HostedBillingStatus.active,
+    });
+    cryptoRootMocks.prepareHostedCryptoDomainRootCandidates.mockResolvedValue(
+      new Map([["control", { domain: "control", userId: "member_owner" }]]),
+    );
+
+    const prepared = await prepareHostedFamilyStripeActivationCryptoDomainRoots({
+      prisma: tx as never,
+      subscription: makeFamilyStripeSubscription(),
+    });
+
+    expect([...prepared.keys()]).toEqual(["member_owner"]);
+    expect(cryptoRootMocks.prepareHostedCryptoDomainRootCandidates)
+      .toHaveBeenCalledExactlyOnceWith({
+        prisma: tx,
+        userId: "member_owner",
+      });
+    expect(tx.hostedMember.findUnique).toHaveBeenCalledExactlyOnceWith({
+      select: {
+        billingRef: {
+          select: {
+            currentBillingPhase: true,
+          },
+        },
+        billingStatus: true,
+      },
+      where: {
+        id: "member_mom",
+      },
+    });
+  });
+
+  it("bounds active Family reconciliation to six sequential prepared commits", async () => {
     const tx = createTxMock();
     const memberships = Array.from(
       { length: HOSTED_FAMILY_MAX_SEATS },
@@ -3099,6 +3280,12 @@ describe("hosted Family plan", () => {
       }),
     );
     tx.hostedAccountGroupMembership.findMany.mockResolvedValue(memberships);
+    const preparedCryptoDomainRootsByMember = new Map(
+      memberships.map(({ memberId }) => [
+        memberId,
+        new Map(),
+      ] as const),
+    );
     let activeCalls = 0;
     let maxConcurrentCalls = 0;
     activationMocks.activateHostedMemberForFamilySponsorshipTx.mockImplementation(
@@ -3120,6 +3307,7 @@ describe("hosted Family plan", () => {
       dispatchContext: {
         eventCreatedAt: new Date("2026-06-18T12:30:00.000Z"),
       },
+      preparedCryptoDomainRootsByMember,
       subscription: makeFamilyStripeSubscription({
         itemQuantity: HOSTED_FAMILY_MAX_SEATS,
       }),
@@ -3131,6 +3319,9 @@ describe("hosted Family plan", () => {
 
     expect(tx.hostedAccountGroupMembership.findMany).toHaveBeenCalledTimes(3);
     expect(tx.hostedAccountGroupMembership.findMany).toHaveBeenNthCalledWith(3, {
+      orderBy: {
+        memberId: "asc",
+      },
       select: {
         memberId: true,
       },
@@ -3144,15 +3335,11 @@ describe("hosted Family plan", () => {
     expect(tx.hostedMember.findUnique).toHaveBeenCalledTimes(HOSTED_FAMILY_MAX_SEATS);
     expect(activationMocks.activateHostedMemberForFamilySponsorshipTx)
       .toHaveBeenCalledTimes(HOSTED_FAMILY_MAX_SEATS);
-    // The legacy-bridge domain-root test proves that one fully rootless call
-    // performs three encryptions plus four signatures. Six sequential calls
-    // here therefore compose to the documented 42-call provider maximum.
     expect(
       activationMocks.activateHostedMemberForFamilySponsorshipTx.mock.calls.every(
-        ([activationInput]) => !Object.prototype.hasOwnProperty.call(
-          activationInput,
-          "preparedCryptoDomainRoots",
-        ),
+        ([activationInput]) =>
+          activationInput.preparedCryptoDomainRoots
+          === preparedCryptoDomainRootsByMember.get(activationInput.memberId),
       ),
     ).toBe(true);
     expect(maxConcurrentCalls).toBe(1);
@@ -3457,6 +3644,7 @@ describe("hosted Family plan", () => {
     expect(activationMocks.activateHostedMemberForFamilySponsorshipTx).toHaveBeenCalledWith({
       memberId: "member_owner",
       occurredAt: eventCreatedAt,
+      preparedCryptoDomainRoots: new Map(),
       prisma: tx,
       sourceEventId: "family-subscription:sub_family",
     });

@@ -80,6 +80,11 @@ vi.mock("@/src/lib/hosted-onboarding/webhook-provider-linq", async (importOrigin
         response: { ok: true as const, reason: "prewarm-owner-boundary-plan" },
       };
     }),
+    resolveHostedLinqMailboxPayloadRootPrewarmMemberId: vi.fn(
+      async ({ threadRoute }: {
+        threadRoute: { containerMemberId: string } | null;
+      }) => threadRoute?.containerMemberId ?? "member_direct_prewarm",
+    ),
   };
 });
 
@@ -286,6 +291,7 @@ describe("hosted Linq mailbox payload root prewarm", () => {
     const prisma = {} as never;
 
     await warmHostedLinqMailboxPayloadRoot({
+      event: JSON.parse(buildLinqMessageWebhookBody()),
       prisma,
       threadRoute: { containerMemberId: "member_prewarm_1" } as never,
     });
@@ -302,20 +308,27 @@ describe("hosted Linq mailbox payload root prewarm", () => {
     expect([...(issuedRootKeys[0] ?? [])]).toEqual([0, 0, 0, 0]);
   });
 
-  it("does not unwrap when no route is established", async () => {
+  it("unwraps the resolver's direct member when no route is established", async () => {
     const { warmHostedLinqMailboxPayloadRoot } = await import(
       "@/src/lib/hosted-onboarding/webhook-service"
     );
     const { unwrapHostedDomainRootForWeb } = await import(
       "@/src/lib/hosted-crypto/domain-root-store"
     );
+    const prisma = {} as never;
 
     await warmHostedLinqMailboxPayloadRoot({
-      prisma: {} as never,
+      event: JSON.parse(buildLinqMessageWebhookBody()),
+      prisma,
       threadRoute: null,
     });
 
-    expect(unwrapHostedDomainRootForWeb).not.toHaveBeenCalled();
+    expect(unwrapHostedDomainRootForWeb).toHaveBeenCalledExactlyOnceWith({
+      domain: "ingress",
+      prisma,
+      retainFailureInScopedCache: true,
+      userId: "member_direct_prewarm",
+    });
   });
 
   // The helper-level tests above pin each piece. These drive the real webhook
@@ -354,7 +367,7 @@ describe("hosted Linq mailbox payload root prewarm", () => {
       expect(diagnostics).not.toContain("hosted-onboarding.webhook.warm-failed");
     });
 
-    it("does not warm when webhook metadata already says the chat is a group", async () => {
+    it("warms an established route when webhook metadata says the chat is a group", async () => {
       const { handleHostedOnboardingLinqWebhook } = await import(
         "@/src/lib/hosted-onboarding/webhook-service"
       );
@@ -373,12 +386,14 @@ describe("hosted Linq mailbox payload root prewarm", () => {
         timestamp: null,
       });
 
-      // Pinning the known gap so it cannot close or widen silently: the
-      // resolver returns before reading a route, so there is nothing to warm
-      // and this branch still takes its first unwrap inside the transaction.
-      expect(readHostedThreadRouteByThreadIdentity).not.toHaveBeenCalled();
-      expect(unwrapHostedDomainRootForWeb).not.toHaveBeenCalled();
-      expect(calls).toEqual(["begin", "plan", "commit"]);
+      expect(readHostedThreadRouteByThreadIdentity).toHaveBeenCalledTimes(1);
+      expect(unwrapHostedDomainRootForWeb).toHaveBeenCalledExactlyOnceWith({
+        domain: "ingress",
+        prisma,
+        retainFailureInScopedCache: true,
+        userId: "member_prewarm_1",
+      });
+      expect(calls).toEqual(["read-route", "unwrap", "begin", "plan", "commit"]);
     });
   });
 });
