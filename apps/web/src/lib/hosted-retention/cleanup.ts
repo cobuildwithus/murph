@@ -10,19 +10,31 @@ import {
 const DAY_MS = 86_400_000;
 
 export const HOSTED_RUN_LOG_RETENTION_MS = 14 * DAY_MS;
-export const HOSTED_RUN_LOG_AUTOMATION_DETAIL_RETENTION_MS = 7 * DAY_MS;
+export const HOSTED_RUN_LOG_VERBOSE_RETENTION_MS = 7 * DAY_MS;
 export const HOSTED_MAILBOX_RETENTION_MS = 30 * DAY_MS;
 export const HOSTED_WEB_SESSION_RETENTION_MS = 30 * DAY_MS;
-export const HOSTED_INBOX_MEDIA_RETENTION_SIGNAL_BATCH_SIZE = 25;
-export const HOSTED_INBOX_MEDIA_RETENTION_SIGNAL_CONCURRENCY = 5;
+export const HOSTED_INGRESS_LATENCY_TRACE_RETENTION_MS = 7 * DAY_MS;
+export const HOSTED_DEVICE_WEBHOOK_TRACE_RETENTION_MS = 30 * DAY_MS;
+export const HOSTED_LINQ_PROVIDER_EVENT_DIAGNOSTIC_RETENTION_MS = 7 * DAY_MS;
+// Every diagnostic category is deleted in ordered batches with an explicit
+// per-run ceiling, so one hourly invocation can never open a long delete
+// transaction against the production pool.
+export const HOSTED_RETENTION_BATCH_SIZE = 5_000;
+export const HOSTED_RETENTION_MAX_BATCHES = 4;
+export const HOSTED_INBOX_MEDIA_RETENTION_SIGNAL_BATCH_SIZE = 5;
 export const HOSTED_INBOX_MEDIA_RETENTION_SIGNAL_TIMEOUT_MS = 10_000;
 
 type HostedRuntimeRecheckSignal = (input: {
+  abortSignal?: AbortSignal;
   userId: string;
 }) => Promise<unknown>;
 
 export interface HostedRetentionCleanupResult {
+  compactedLinqProviderEventDiagnostics: number;
+  expiredAssistantRuntimeIssuesDeleted: number;
   expiredComputerRunsCleanedUp: number;
+  expiredDeviceWebhookTracesDeleted: number;
+  expiredIngressLatencyTracesDeleted: number;
   expiredMailboxItemsDeleted: number;
   inboxMediaRetentionRuntimeSignalFailures: number;
   inboxMediaRetentionRuntimeSignalsSent: number;
@@ -45,6 +57,24 @@ export async function runHostedRetentionCleanup(input: {
     now,
     prisma,
   });
+  // Serial by design: these are background deletes and must never fan out
+  // across the same pool that serves user-facing control-plane work.
+  const expiredIngressLatencyTracesDeleted = await deleteExpiredIngressLatencyTraces({
+    now,
+    prisma,
+  });
+  const expiredAssistantRuntimeIssuesDeleted = await deleteExpiredAssistantRuntimeIssues({
+    now,
+    prisma,
+  });
+  const expiredDeviceWebhookTracesDeleted = await deleteExpiredDeviceWebhookTraces({
+    now,
+    prisma,
+  });
+  const compactedLinqProviderEventDiagnostics = await compactOldLinqProviderEventDiagnostics({
+    now,
+    prisma,
+  });
   const staleWebSessionsDeleted = await deleteStaleHostedWebSessions({
     now,
     prisma,
@@ -60,7 +90,11 @@ export async function runHostedRetentionCleanup(input: {
   });
 
   return {
+    compactedLinqProviderEventDiagnostics,
+    expiredAssistantRuntimeIssuesDeleted,
     expiredComputerRunsCleanedUp,
+    expiredDeviceWebhookTracesDeleted,
+    expiredIngressLatencyTracesDeleted,
     expiredMailboxItemsDeleted,
     inboxMediaRetentionRuntimeSignalFailures: mediaRetentionSignals.failures,
     inboxMediaRetentionRuntimeSignalsSent: mediaRetentionSignals.sent,
@@ -99,29 +133,19 @@ async function signalDueInboxMediaRetentionRuntimes(input: {
 
   let failures = 0;
   let sent = 0;
-  let nextIndex = 0;
-  const workerCount = Math.min(
-    HOSTED_INBOX_MEDIA_RETENTION_SIGNAL_CONCURRENCY,
-    workspaces.length,
-  );
-  await Promise.all(Array.from({ length: workerCount }, async () => {
-    while (true) {
-      const workspace = workspaces[nextIndex];
-      nextIndex += 1;
-      if (!workspace) {
-        return;
-      }
-      const ok = await signalRuntimeRecheckWithDeadline({
-        signalRuntimeRecheck,
-        userId: workspace.userId,
-      });
-      if (ok) {
-        sent += 1;
-      } else {
-        failures += 1;
-      }
+  const results = await Promise.all(workspaces.map(
+    (workspace) => signalRuntimeRecheckWithDeadline({
+      signalRuntimeRecheck,
+      userId: workspace.userId,
+    }),
+  ));
+  for (const ok of results) {
+    if (ok) {
+      sent += 1;
+    } else {
+      failures += 1;
     }
-  }));
+  }
 
   return { failures, sent };
 }
@@ -153,16 +177,25 @@ async function signalRuntimeRecheckWithDeadline(input: {
   signalRuntimeRecheck: HostedRuntimeRecheckSignal;
   userId: string;
 }): Promise<boolean> {
+  const abortController = new AbortController();
   let timeout: ReturnType<typeof setTimeout> | null = null;
   const timeoutPromise = new Promise<"timeout">((resolve) => {
     timeout = setTimeout(
-      () => resolve("timeout"),
+      () => {
+        abortController.abort(
+          new Error("Hosted inbox media retention runtime signal timed out."),
+        );
+        resolve("timeout");
+      },
       HOSTED_INBOX_MEDIA_RETENTION_SIGNAL_TIMEOUT_MS,
     );
   });
-  const signalPromise = input.signalRuntimeRecheck({
-    userId: input.userId,
-  }).then(
+  const signalPromise = Promise.resolve().then(() =>
+    input.signalRuntimeRecheck({
+      abortSignal: abortController.signal,
+      userId: input.userId,
+    })
+  ).then(
     () => "sent" as const,
     (error: unknown) => {
       console.error("Hosted inbox media retention runtime signal failed.", {
@@ -190,34 +223,173 @@ async function deleteExpiredMailboxItems(input: {
   prisma: PrismaClient;
 }): Promise<number> {
   const cutoff = new Date(input.now.getTime() - HOSTED_MAILBOX_RETENTION_MS);
-  return await input.prisma.$executeRaw`
-    DELETE FROM "hosted_mailbox_item"
-    WHERE "expires_at" <= ${input.now}
-       OR "created_at" < ${cutoff}
-  `;
+  const expired = await runRetentionBatches(() => input.prisma.$executeRaw`
+    WITH doomed AS (
+      SELECT "id"
+      FROM "hosted_mailbox_item"
+      WHERE "expires_at" <= ${input.now}
+      ORDER BY "expires_at" ASC, "id" ASC
+      LIMIT ${HOSTED_RETENTION_BATCH_SIZE}
+    )
+    DELETE FROM "hosted_mailbox_item" AS mailbox_item
+    USING doomed
+    WHERE mailbox_item."id" = doomed."id"
+  `);
+  const aged = await runRetentionBatches(() => input.prisma.$executeRaw`
+    WITH doomed AS (
+      SELECT "id"
+      FROM "hosted_mailbox_item"
+      WHERE "created_at" < ${cutoff}
+      ORDER BY "created_at" ASC, "id" ASC
+      LIMIT ${HOSTED_RETENTION_BATCH_SIZE}
+    )
+    DELETE FROM "hosted_mailbox_item" AS mailbox_item
+    USING doomed
+    WHERE mailbox_item."id" = doomed."id"
+  `);
+  return expired + aged;
 }
 
+// Verbose levels are the overwhelming majority of the table and are only ever
+// read while an incident is fresh; warn/error keep the longer window.
 async function deleteOldHostedRuntimeLogs(input: {
   now: Date;
   prisma: PrismaClient;
 }): Promise<number> {
   const cutoff = new Date(input.now.getTime() - HOSTED_RUN_LOG_RETENTION_MS);
-  const automationDetailCutoff = new Date(
-    input.now.getTime() - HOSTED_RUN_LOG_AUTOMATION_DETAIL_RETENTION_MS,
+  const verboseCutoff = new Date(
+    input.now.getTime() - HOSTED_RUN_LOG_VERBOSE_RETENTION_MS,
   );
-  const result = await input.prisma.hostedRuntimeLog.deleteMany({
-    where: {
-      OR: [
-        { at: { lt: cutoff } },
-        {
-          eventCode: "assistant.automation_detail",
-          at: { lt: automationDetailCutoff },
-        },
-      ],
-    },
-  });
+  return await runRetentionBatches(() => input.prisma.$executeRaw`
+    WITH doomed AS (
+      SELECT "id"
+      FROM "hosted_runtime_log"
+      WHERE "at" < ${verboseCutoff}
+        AND ("at" < ${cutoff} OR "level" NOT IN ('warn', 'error'))
+      ORDER BY "at" ASC, "id" ASC
+      LIMIT ${HOSTED_RETENTION_BATCH_SIZE}
+    )
+    DELETE FROM "hosted_runtime_log" AS runtime_log
+    USING doomed
+    WHERE runtime_log."id" = doomed."id"
+  `);
+}
 
-  return result.count;
+async function deleteExpiredIngressLatencyTraces(input: {
+  now: Date;
+  prisma: PrismaClient;
+}): Promise<number> {
+  const cutoff = new Date(
+    input.now.getTime() - HOSTED_INGRESS_LATENCY_TRACE_RETENTION_MS,
+  );
+  return await runRetentionBatches(() => input.prisma.$executeRaw`
+    WITH doomed AS (
+      SELECT "id"
+      FROM "hosted_ingress_latency_trace"
+      WHERE "accepted_at" < ${cutoff}
+      ORDER BY "accepted_at" ASC, "id" ASC
+      LIMIT ${HOSTED_RETENTION_BATCH_SIZE}
+    )
+    DELETE FROM "hosted_ingress_latency_trace" AS trace
+    USING doomed
+    WHERE trace."id" = doomed."id"
+  `);
+}
+
+// The rows already carry their own expiry; nothing was enforcing it.
+async function deleteExpiredAssistantRuntimeIssues(input: {
+  now: Date;
+  prisma: PrismaClient;
+}): Promise<number> {
+  return await runRetentionBatches(() => input.prisma.$executeRaw`
+    WITH doomed AS (
+      SELECT "id"
+      FROM "hosted_assistant_runtime_issue"
+      WHERE "expires_at" <= ${input.now}
+      ORDER BY "expires_at" ASC, "id" ASC
+      LIMIT ${HOSTED_RETENTION_BATCH_SIZE}
+    )
+    DELETE FROM "hosted_assistant_runtime_issue" AS issue
+    USING doomed
+    WHERE issue."id" = doomed."id"
+  `);
+}
+
+// `device_sync_signal` is deliberately absent: its `webhook_hint` rows are the
+// companion status read model for per-resource `lastReceivedAt`, so deleting
+// old rows would report an established device as "waiting for first data".
+//
+// Only processed traces expire; an in-flight claim is still the duplicate gate.
+async function deleteExpiredDeviceWebhookTraces(input: {
+  now: Date;
+  prisma: PrismaClient;
+}): Promise<number> {
+  const cutoff = new Date(
+    input.now.getTime() - HOSTED_DEVICE_WEBHOOK_TRACE_RETENTION_MS,
+  );
+  return await runRetentionBatches(() => input.prisma.$executeRaw`
+    WITH doomed AS (
+      SELECT "provider", "trace_id"
+      FROM "device_webhook_trace"
+      WHERE "status" = 'processed'
+        AND "received_at" < ${cutoff}
+      ORDER BY "received_at" ASC, "provider" ASC, "trace_id" ASC
+      LIMIT ${HOSTED_RETENTION_BATCH_SIZE}
+    )
+    DELETE FROM "device_webhook_trace" AS trace
+    USING doomed
+    WHERE trace."provider" = doomed."provider"
+      AND trace."trace_id" = doomed."trace_id"
+  `);
+}
+
+// The provider-event row is the durable webhook duplicate gate and must not be
+// deleted. Only its optional diagnostic JSON expires.
+async function compactOldLinqProviderEventDiagnostics(input: {
+  now: Date;
+  prisma: PrismaClient;
+}): Promise<number> {
+  const cutoff = new Date(
+    input.now.getTime() - HOSTED_LINQ_PROVIDER_EVENT_DIAGNOSTIC_RETENTION_MS,
+  );
+  return await runRetentionBatches(() => input.prisma.$executeRaw`
+    WITH compactable AS (
+      SELECT "event_id"
+      FROM "hosted_linq_provider_event"
+      WHERE "received_at" < ${cutoff}
+        AND (
+          "extraction_json" IS NOT NULL
+          OR "payload_sanitized_json" IS NOT NULL
+          OR "payload_shape_json" IS NOT NULL
+        )
+      ORDER BY "received_at" ASC, "event_id" ASC
+      LIMIT ${HOSTED_RETENTION_BATCH_SIZE}
+    )
+    UPDATE "hosted_linq_provider_event" AS provider_event
+    SET
+      "extraction_json" = NULL,
+      "payload_sanitized_json" = NULL,
+      "payload_shape_json" = NULL
+    FROM compactable
+    WHERE provider_event."event_id" = compactable."event_id"
+  `);
+}
+
+// Runs one bounded batch at a time and stops as soon as a batch comes back
+// short, so a normal hour does one statement and a backlog drains over hours.
+async function runRetentionBatches(
+  mutateBatch: () => Promise<number>,
+): Promise<number> {
+  let affected = 0;
+  for (let batch = 0; batch < HOSTED_RETENTION_MAX_BATCHES; batch += 1) {
+    const count = await mutateBatch();
+    affected += count;
+    if (count < HOSTED_RETENTION_BATCH_SIZE) {
+      break;
+    }
+  }
+
+  return affected;
 }
 
 async function deleteStaleHostedWebSessions(input: {
@@ -225,24 +397,31 @@ async function deleteStaleHostedWebSessions(input: {
   prisma: PrismaClient;
 }): Promise<number> {
   const cutoff = new Date(input.now.getTime() - HOSTED_WEB_SESSION_RETENTION_MS);
-  const result = await input.prisma.hostedWebSession.deleteMany({
-    where: {
-      OR: [
-        {
-          expiresAt: {
-            lt: cutoff,
-          },
-        },
-        {
-          revokedAt: {
-            lt: cutoff,
-          },
-        },
-      ],
-    },
-  });
-
-  return result.count;
+  const expired = await runRetentionBatches(() => input.prisma.$executeRaw`
+    WITH doomed AS (
+      SELECT "id"
+      FROM "hosted_web_session"
+      WHERE "expires_at" < ${cutoff}
+      ORDER BY "expires_at" ASC, "id" ASC
+      LIMIT ${HOSTED_RETENTION_BATCH_SIZE}
+    )
+    DELETE FROM "hosted_web_session" AS web_session
+    USING doomed
+    WHERE web_session."id" = doomed."id"
+  `);
+  const revoked = await runRetentionBatches(() => input.prisma.$executeRaw`
+    WITH doomed AS (
+      SELECT "id"
+      FROM "hosted_web_session"
+      WHERE "revoked_at" < ${cutoff}
+      ORDER BY "revoked_at" ASC, "id" ASC
+      LIMIT ${HOSTED_RETENTION_BATCH_SIZE}
+    )
+    DELETE FROM "hosted_web_session" AS web_session
+    USING doomed
+    WHERE web_session."id" = doomed."id"
+  `);
+  return expired + revoked;
 }
 
 function normalizeRetentionDate(value: Date | string): Date {
