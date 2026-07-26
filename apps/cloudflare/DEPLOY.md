@@ -549,22 +549,35 @@ This rollout has an irreversible transcript cutover and must use two phases:
    `container_rollout=immediate`. Drain old warm bundles, prove the deployed
    fingerprint, and verify that newly written user transcript entries carry
    `contentReceivedAt`.
-2. Deploy Web with the additive mailbox retention columns. This phase-one
-   migration must not re-arm persisted workspace snapshots. Record the verified
-   runner-convergence instant.
-3. Keep legacy unstamped transcript entries intact for 14 complete days after
-   that instant. Newly stamped entries and the other receipt-owned message
-   carriers continue using their exact inclusive 14-day deadlines.
-4. Only after the full interval, ship a separate phase-two migration that
-   re-arms persisted snapshots and enables retirement of every remaining
+2. Before the Web migration, count persisted workspace snapshots and compare
+   the aggregate with the existing hourly retention-cron capacity of 25
+   snapshots plus an explicit signal-failure allowance. Stop if that queue
+   cannot drain safely in the rollout window; do not add a second dispatcher as
+   part of this release.
+3. Record the verified runner-convergence instant, then deploy Web with the
+   additive mailbox retention columns. The phase-one migration re-arms every
+   persisted workspace snapshot once. Monitor the existing cron until no due
+   snapshot remains; each restored runtime scrubs receipt-backed captures,
+   parser output, projections, inputs, and stamped transcripts while preserving
+   every unstamped legacy transcript entry. Phase one is incomplete until the
+   queue reaches zero.
+4. Keep legacy unstamped transcript entries intact for 14 complete days after
+   the convergence instant and until phase one has drained, whichever is later.
+   Newly stamped entries and the other receipt-owned message carriers use their
+   exact inclusive 14-day deadlines after their initial snapshot drain.
+5. Only after both gates, ship a separate phase-two migration that
+   re-arms persisted snapshots again and enables retirement of every remaining
    unstamped user transcript entry. Verify retention wake convergence,
    checkpoint publication, policy-non-reply counts, and content-retirement
    counts before declaring the cutover complete.
 
 Do not infer legacy receipt time from transcript creation, accepted-turn
-journals, or input events, and do not apply the phase-two rearm early. Normal
-snapshot cleanup can discard those joins, so an early scrub can irreversibly
-erase recent user context while leaving the paired assistant reply.
+journals, or input events, and do not enable the phase-two legacy scrub early.
+Normal snapshot cleanup can discard those joins, so an early scrub can
+irreversibly erase recent user context while leaving the paired assistant
+reply. The phase-one rearm and drain gate are required: omitting either one
+strands other receipt-backed message carriers in dormant snapshots beyond
+their deadline.
 
 ### Retired WhatsApp configuration
 

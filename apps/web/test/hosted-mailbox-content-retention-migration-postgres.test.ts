@@ -24,12 +24,25 @@ if (
 describe.skipIf(!runPostgresMigrationProof)(
   "hosted mailbox content-retention migration",
   () => {
-    it("adds mailbox columns without re-arming persisted snapshots in phase one", async () => {
+    it("adds mailbox columns and re-arms only persisted snapshots in phase one", async () => {
       const migrationSql = await readFile(migrationUrl, "utf8");
       const client = new pg.Client({ connectionString: databaseUrl });
       await client.connect();
 
       try {
+        await client.query("BEGIN");
+        const timestampResult = await client.query<{
+          transactionTimestamp: string;
+        }>(`
+          SELECT to_char(
+            CURRENT_TIMESTAMP::TIMESTAMP(3),
+            'YYYY-MM-DD"T"HH24:MI:SS.MS'
+          ) AS "transactionTimestamp"
+        `);
+        const transactionTimestamp =
+          timestampResult.rows[0]?.transactionTimestamp ?? null;
+        expect(transactionTimestamp).not.toBeNull();
+
         await client.query(`
           CREATE TEMP TABLE "hosted_mailbox_item" (
             "id" TEXT PRIMARY KEY
@@ -97,16 +110,17 @@ describe.skipIf(!runPostgresMigrationProof)(
           },
           {
             userId: "snapshot-existing-wake",
-            signalAttemptedAt: "2026-07-25T18:00:00.000",
-            wakeAt: "2099-01-01T00:00:00.000",
+            signalAttemptedAt: null,
+            wakeAt: transactionTimestamp,
           },
           {
             userId: "snapshot-missing-wake",
-            signalAttemptedAt: "2026-07-25T18:00:00.000",
-            wakeAt: null,
+            signalAttemptedAt: null,
+            wakeAt: transactionTimestamp,
           },
         ]);
       } finally {
+        await client.query("ROLLBACK");
         await client.end();
       }
     });

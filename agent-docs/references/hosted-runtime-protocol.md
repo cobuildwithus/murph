@@ -703,13 +703,18 @@ Assistant transcript retention uses only the user entry's stamped
 events are not fallback receipt owners: normal settled-snapshot cleanup may
 delete the journal and input before a later retention wake. The rollout is
 therefore two-phase. Phase one stamps every new user entry and preserves every
-unstamped legacy entry; its additive mailbox migration does not re-arm existing
-workspace snapshots. After immediate runner rollout is verified, operators
-record the fleet-convergence instant and wait 14 complete days. A separate
-phase-two migration may then re-arm persisted snapshots and the runtime may
-retire every remaining unstamped user entry. Until that interval has elapsed,
-rearming or fail-closed legacy scrubbing is forbidden because it can erase
-recent paired conversation history irreversibly.
+unstamped legacy entry. After immediate runner rollout is verified, operators
+record the fleet-convergence instant and apply the additive mailbox migration,
+which re-arms every persisted snapshot once. The existing hourly cron drains
+that due queue in batches of 25; each wake scrubs receipt-backed captures,
+parser output, projections, inputs, and stamped transcripts while leaving the
+unstamped legacy pair intact. Operators must preflight aggregate queue capacity
+and may not declare phase one complete until no due snapshot remains. After 14
+complete days and phase-one drain completion, a separate phase-two migration
+may re-arm persisted snapshots again and the runtime may retire every remaining
+unstamped user entry. Until both gates pass, fail-closed legacy scrubbing is
+forbidden because it can erase recent paired conversation history
+irreversibly.
 
 Accepted Linq reply delivery carries an earlier copy of the same exact-item
 consume authority:
