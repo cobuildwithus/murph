@@ -2754,6 +2754,101 @@ describe("murph.newsletter dynamic tool", () => {
     }
   });
 
+  it("excludes challenge-only nutrient grants from newsletter shared reads", async () => {
+    const vaultRoot = await mkdtemp(join(tmpdir(), "assistant-codex-newsletter-nutrient-"));
+    try {
+      await initializeVault({ timezone: "UTC", vaultRoot });
+      const newsletterRequest = vi.fn<NewsletterToolRequest>(async () => ({
+        action: "prepare",
+        result: {
+          authorizationProof: NEWSLETTER_AUTHORIZATION_PROOF,
+          groupId: "group_1",
+          missingEmailParticipants: [],
+          participants: [
+            {
+              authorizedShares: [
+                { projectionScopeKey: "steps-days.v0", shareId: "share-steps" },
+                { projectionScopeKey: "calories-days.v0", shareId: "share-cal" },
+                { projectionScopeKey: "carbs-days.v0", shareId: "share-carb" },
+                { projectionScopeKey: "fat-days.v0", shareId: "share-fat" },
+                { projectionScopeKey: "fiber-days.v0", shareId: "share-fiber" },
+              ],
+              hasEmail: true,
+              memberId: "member_a",
+            },
+          ],
+          status: "ok",
+        },
+      }));
+      const groupSharedReader: AssistantHostedGroupSharedReader = {
+        request: vi.fn<AssistantHostedGroupSharedReader["request"]>(async ({
+          projectionScopes,
+        }) => {
+          // The member granted four nutrient scopes for a challenge, but the
+          // newsletter is only configured for steps; the reader must never be
+          // asked for the challenge-only nutrient scopes.
+          expect(projectionScopes).toEqual([{ projectionKind: "steps-days.v0" }]);
+          return {
+            members: [{
+              currentTurnHandles: [],
+              displayName: "Ada",
+              memberId: "member_a",
+              participantId: "participant_a",
+              projections: [{
+                dataStatus: "available",
+                grantStatus: "granted",
+                projectionScope: { projectionKind: "steps-days.v0" },
+                projectionScopeKey: "steps-days.v0",
+                records: [{
+                  data: { date: "2026-07-06", metricKey: "steps", unit: "count", value: 7_000 },
+                  occurredAt: "2026-07-06T00:00:00.000Z",
+                  recordKey: "2026-07-06",
+                }],
+              }],
+            }],
+            requestedProjectionScopeKeys: ["steps-days.v0"],
+            status: "ok",
+          };
+        }),
+      };
+      const request = readMurphDynamicToolRequest(newsletterToolCall({
+        action: "prepare",
+      }));
+      if (!request || request.kind !== "newsletter") {
+        throw new Error("Expected newsletter request.");
+      }
+
+      const result = await executeMurphDynamicToolRequest({
+        env: {},
+        fetchImpl: fetch,
+        hostedToolContext: createNewsletterHostedToolContext({
+          groupSharedReader,
+          newsletterRequest,
+          occurrenceAt: "2026-07-07T03:30:00.000Z",
+        }),
+        nextUsageOrdinal: () => 1,
+        progressDelivery: null,
+        request,
+        vaultRoot,
+      });
+
+      expect(groupSharedReader.request).toHaveBeenCalledTimes(1);
+      const payload = readNewsletterToolPayload(result);
+      expect(payload).toMatchObject({
+        action: "prepare",
+        result: {
+          members: [{ memberId: "member_a", weeklyStats: [{ stream: "steps" }] }],
+        },
+      });
+      const serialized = JSON.stringify(payload);
+      for (const nutrientKey of ["dietary-calories", "carbs-grams", "fat-grams", "fiber-grams"]) {
+        expect(serialized).not.toContain(nutrientKey);
+      }
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
   it.each([
     {
       finalParticipants: [

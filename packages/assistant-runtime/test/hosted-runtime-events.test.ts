@@ -1830,6 +1830,65 @@ describe("executeHostedMailboxEvent", () => {
     });
   });
 
+  it("propagates detached group route authority into the assistant outbox", async () => {
+    const externalThreadRouteAuthority = {
+      accountLookupKey: "linq-account-key",
+      channel: "linq" as const,
+      containerMemberId: "group-runtime-member",
+      threadId: "linq-group-chat",
+    };
+    const wake = buildHostedExecutionAssistantNotificationRequestedWake({
+      eventId: "evt_group_notification",
+      memberId: "group-runtime-member",
+      notification: {
+        deliveryDispatchMode: "queue-only",
+        deliveryDedupeToken: "phone-call-result:hpc_group",
+        deliveryIdempotencyKey: "phone-call-result:hpc_group",
+        externalThreadRouteAuthority,
+        instructions: "Report the completed call result to this group.",
+        responsePolicy: { kind: "allow_send_or_skip" },
+        route: {
+          actorId: null,
+          channel: "linq",
+          delivery: {
+            kind: "thread",
+            target: "linq-group-chat",
+          },
+          identityId: "group-identity",
+          threadId: "group-thread",
+          threadIsDirect: false,
+        },
+      },
+      occurredAt: "2026-07-25T12:00:00.000Z",
+    });
+
+    await executeHostedMailboxEvent({
+      wake,
+      executionContext: {
+        hosted: {
+          memberId: "group-runtime-member",
+          userEnvKeys: [],
+        },
+      },
+      runtime: createRuntime(),
+      runtimeEnv: {},
+      vaultRoot: "/tmp/assistant-runtime-events",
+    });
+
+    expect(mocks.sendAssistantNotification).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actorId: null,
+        bindingDeliveryTarget: "linq-group-chat",
+        channel: "linq",
+        deliveryKind: "thread",
+        deliveryTarget: null,
+        outboxExternalThreadRouteAuthority: externalThreadRouteAuthority,
+        threadId: "group-thread",
+        threadIsDirect: false,
+      }),
+    );
+  });
+
   it("delivers embedded member activation signup welcomes and seeds onboarding follow-up", async () => {
     const seededNextWakeAt = "2026-04-09T17:30:00.000Z";
     mocks.upsertAssistantCronAutomation.mockResolvedValueOnce({
