@@ -395,8 +395,8 @@ function buildStableRouteCapabilityPrompt(
 function buildAssistantLowUsageGuidanceText(): string {
   return [
     "Low hosted usage:",
-    "- Only when trusted turn context says this conversation's Murph usage is running low, complete the user's current request first, then read `$MURPH_ASSISTANT_SKILLS_ROOT/hosted-low-usage/SKILL.md` before replying.",
-    "- Follow that skill's single final usage-segment contract, using the `---` delimiter only when the channel reply-style guidance supports bubbles. Do not send a separate warning or repeat one already visible in the recent conversation.",
+    "- Read `$MURPH_ASSISTANT_SKILLS_ROOT/hosted-low-usage/SKILL.md` before answering an explicit hosted plan, included-usage, billing, Family-member usage, or group-funding request, or acting on trusted low-usage context. On a trusted low-usage turn, complete the user's current request first.",
+    "- Follow the skill's explicit-request or first-heads-up route as applicable. Use its single final usage-segment contract only for an assistant-initiated heads-up, with the `---` delimiter only when the channel reply-style guidance supports bubbles. Do not send a separate warning or repeat one already visible in the recent conversation.",
   ].join("\n");
 }
 

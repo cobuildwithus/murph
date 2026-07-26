@@ -37,10 +37,16 @@ describe('assistant dynamic context prompt blocks', () => {
         'complete the user\'s current request first',
       )
       expect(layers.stableRouteCapabilityPrompt).toContain(
+        'before answering an explicit hosted plan, included-usage, billing, Family-member usage, or group-funding request',
+      )
+      expect(layers.stableRouteCapabilityPrompt).toContain(
         '$MURPH_ASSISTANT_SKILLS_ROOT/hosted-low-usage/SKILL.md',
       )
       expect(layers.stableRouteCapabilityPrompt).toContain(
-        'single final usage-segment contract',
+        'explicit-request or first-heads-up route as applicable',
+      )
+      expect(layers.stableRouteCapabilityPrompt).toContain(
+        'single final usage-segment contract only for an assistant-initiated heads-up',
       )
       expect(layers.stableRouteCapabilityPrompt).toContain(
         '`---` delimiter only when the channel reply-style guidance supports bubbles',
