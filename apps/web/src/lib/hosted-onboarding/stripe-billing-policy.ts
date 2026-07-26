@@ -255,7 +255,11 @@ export async function suspendHostedMemberForBillingReversalTx(input: {
   stripeCustomerId?: string | null;
   tx: Prisma.TransactionClient;
 }): Promise<void> {
-  await writeHostedMemberStripeBillingTx({
+  if (input.member.core.suspendedAt) {
+    return;
+  }
+
+  const updatedMember = await writeHostedMemberStripeBillingTx({
     billingStatus: HostedBillingStatus.unpaid,
     canonicalBillingStatus: input.canonicalBillingStatus,
     dispatchContext: {
@@ -266,8 +270,16 @@ export async function suspendHostedMemberForBillingReversalTx(input: {
     },
     member: input.member,
     stripeCustomerId: input.stripeCustomerId,
-    suspendedAtOverride: input.dispatchContext.eventCreatedAt,
     tx: input.tx,
+  });
+  if (!updatedMember) {
+    return;
+  }
+
+  await updateHostedMemberCoreState({
+    memberId: updatedMember.core.id,
+    prisma: input.tx,
+    suspendedAt: input.dispatchContext.eventCreatedAt,
   });
 }
 

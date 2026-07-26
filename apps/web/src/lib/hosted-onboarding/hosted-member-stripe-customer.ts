@@ -55,7 +55,7 @@ export async function ensureHostedMemberStripeCustomer(input: {
       ?? await createHostedPulseTrialStripeCustomer({
         memberId: input.memberId,
         requestOptions: {
-          maxNetworkRetries: 2,
+          maxNetworkRetries: 0,
           timeout: 5_000,
         },
         stripe,

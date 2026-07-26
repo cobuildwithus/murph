@@ -76,7 +76,7 @@ describe("ensureHostedMemberStripeCustomer", () => {
     expect(mocks.createHostedPulseTrialStripeCustomer).toHaveBeenCalledWith({
       memberId: "member_payer",
       requestOptions: {
-        maxNetworkRetries: 2,
+        maxNetworkRetries: 0,
         timeout: 5_000,
       },
       stripe: "stripe-client",

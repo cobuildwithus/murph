@@ -1649,6 +1649,42 @@ describe("completeHostedPrivyVerification", () => {
     expect(prisma.hostedInvite.create).not.toHaveBeenCalled();
   });
 
+  it("rolls back re-creation when deletion becomes visible after the initial check", async () => {
+    const findPendingCleanup = vi.fn()
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ id: "cleanup_pending" });
+    const prisma = asCompleteHostedPrivyVerificationPrisma({
+      hostedAccountDeletionCleanup: {
+        findFirst: findPendingCleanup,
+      },
+      hostedInvite: {
+        create: vi.fn(),
+        findFirst: vi.fn(),
+      },
+      hostedMember: {
+        create: vi.fn().mockResolvedValue(makeMember({
+          id: "member_recreated",
+        })),
+        findUnique: vi.fn().mockResolvedValue(null),
+      },
+    });
+
+    await expect(completeHostedPrivyVerification({
+      identity: makeIdentity(),
+      now: NOW,
+      prisma,
+    })).rejects.toMatchObject({
+      code: "PRIVY_ACCOUNT_DELETION_IN_PROGRESS",
+      httpStatus: 409,
+      retryable: true,
+    });
+
+    expect(findPendingCleanup).toHaveBeenCalledTimes(2);
+    expect(prisma.hostedMember.create).toHaveBeenCalledOnce();
+    expect(prisma.hostedMemberIdentity.upsert).toHaveBeenCalledOnce();
+    expect(prisma.hostedInvite.create).not.toHaveBeenCalled();
+  });
+
   it("resolves phone auth by the asserted phone even when a linked wallet points elsewhere", async () => {
     const phoneMember = makeMember({ id: "member_phone" });
     const walletMember = makeMember({

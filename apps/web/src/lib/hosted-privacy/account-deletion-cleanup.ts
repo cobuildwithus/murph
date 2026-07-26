@@ -210,8 +210,8 @@ async function runClaimedHostedAccountDeletionCleanup(input: {
   }
 
   try {
-    const payload = await decryptCleanupPayload(cleanup);
     const deadline = createCleanupDeadline(attemptTimeoutMs);
+    const payload = await decryptCleanupPayload(cleanup, deadline.signal);
     const [cloudflare, stripeCustomer, privyUser] = await Promise.all([
       cleanup.cloudflareCompletedAt
         ? completedCloudflareResult()
@@ -364,6 +364,7 @@ export function pendingHostedAccountDeletionCleanupResult(
 
 async function decryptCleanupPayload(
   cleanup: HostedAccountDeletionCleanup,
+  signal: AbortSignal,
 ): Promise<CleanupPayload> {
   const cryptoConfig = getHostedWebCryptoConfig();
   if (cleanup.environment !== cryptoConfig.env) {
@@ -376,6 +377,7 @@ async function decryptCleanupPayload(
     }),
     ciphertext: cleanup.payloadCiphertext,
     keyName: cleanup.kmsKeyName,
+    signal,
   });
   return parseCleanupPayload(
     JSON.parse(new TextDecoder().decode(decrypted.plaintext)),

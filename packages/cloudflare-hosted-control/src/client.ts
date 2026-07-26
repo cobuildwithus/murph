@@ -981,10 +981,6 @@ async function requestHostedExecutionAuthorizedJson<TResponse>(input: {
   timeoutMs: number | undefined;
 }): Promise<TResponse> {
   const url = new URL(input.path.replace(/^\/+/, ""), `${input.baseUrl}/`);
-  const signal = createHostedExecutionRequestSignal({
-    signal: input.signal,
-    timeoutMs: input.timeoutMs,
-  });
 
   if (input.request.search) {
     url.search = input.request.search;
@@ -998,7 +994,7 @@ async function requestHostedExecutionAuthorizedJson<TResponse>(input: {
     "authorization",
     await waitForHostedExecutionRequest(
       input.getAuthorizationHeader(),
-      signal,
+      input.signal,
     ),
   );
   const tokenAcquiredAtEpochMs = tokenAcquireStartedAtEpochMs === null
@@ -1036,12 +1032,16 @@ async function requestHostedExecutionAuthorizedJson<TResponse>(input: {
 
   await input.onRequestAttempted?.();
 
+  const requestSignal = createHostedExecutionRequestSignal({
+    signal: input.signal,
+    timeoutMs: input.timeoutMs,
+  });
   const response = await input.fetchImpl(url.toString(), {
     ...(input.request.body === undefined ? {} : { body: input.request.body }),
     headers,
     method: input.request.method,
     redirect: "error",
-    signal,
+    signal: requestSignal,
   });
   const directEnsureResponseReceivedAtEpochMs = directEnsureRequestStartedAtEpochMs === null
     ? null

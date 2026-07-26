@@ -378,6 +378,10 @@ export async function ensureHostedMemberForPrivyIdentityResolutionTx(input: {
       signupPhoneCodeSentAt: null,
       signupPhoneNumber: null,
     });
+    await assertHostedPrivyAccountDeletionNotPendingTx({
+      prisma: input.prisma,
+      privyUserId: input.identity.userId,
+    });
     return {
       created: true,
       member: createdMember,

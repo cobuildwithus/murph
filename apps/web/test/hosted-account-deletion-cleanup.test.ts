@@ -377,6 +377,43 @@ describe("hosted account deletion cleanup", () => {
     });
   });
 
+  it("starts the shared attempt deadline before decrypting the cleanup payload", async () => {
+    vi.useFakeTimers();
+    const store = new CleanupStore();
+    const now = new Date("2026-07-26T18:00:00.000Z");
+    const prepared = await createCleanup(store, now, {
+      privyUserId: "privy_user_1",
+      stripeCustomerIds: ["cus_1"],
+    });
+    mocks.kmsDecrypt.mockImplementation(
+      ({ signal }: { signal: AbortSignal }) =>
+        new Promise((_resolve, reject) => {
+          signal.addEventListener("abort", () => reject(signal.reason), {
+            once: true,
+          });
+        }),
+    );
+
+    const run = runHostedAccountDeletionCleanup({
+      attemptTimeoutMs: 50,
+      cleanupId: prepared.id,
+      now,
+      prisma: store.prisma as never,
+    });
+    await vi.advanceTimersByTimeAsync(50);
+
+    await expect(run).rejects.toMatchObject({ name: "TimeoutError" });
+    expect(mocks.kmsDecrypt).toHaveBeenCalledWith(expect.objectContaining({
+      signal: expect.any(AbortSignal),
+    }));
+    expect(mocks.deleteHostedRunnerUserDataBestEffort).not.toHaveBeenCalled();
+    expect(mocks.deleteHostedPrivyUser).not.toHaveBeenCalled();
+    expect(store.row).toMatchObject({
+      attemptCount: 1,
+      leaseToken: null,
+    });
+  });
+
   it("does not launch queued runtime deletions after the deadline", async () => {
     vi.useFakeTimers();
     const store = new CleanupStore();

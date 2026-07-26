@@ -375,7 +375,7 @@ describe("createHostedBillingCheckout", () => {
       },
     }, {
       idempotencyKey: "hosted-auto-pulse-trial-customer:member_123",
-      maxNetworkRetries: 2,
+      maxNetworkRetries: 0,
       timeout: 5_000,
     });
     expect(prisma.hostedMemberBillingRef.upsert).toHaveBeenCalledWith(
