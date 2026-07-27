@@ -19495,15 +19495,6 @@ async function writeSuccessfulContextCompactionTurn(input: {
       },
     },
   }))
-  input.child.stdout.write(jsonLine({
-    method: 'item/started',
-    params: {
-      item: {
-        id: input.itemId,
-        type: 'context_compaction',
-      },
-    },
-  }))
   const turnStart = await waitForRpcMethod(input.child, 'turn/start')
   input.child.stdout.write(jsonLine({
     id: turnStart.id,
@@ -19519,6 +19510,15 @@ async function writeSuccessfulContextCompactionTurn(input: {
       item: {
         id: input.itemId,
         type: 'contextCompaction',
+      },
+    },
+  }))
+  input.child.stdout.write(jsonLine({
+    method: 'item/started',
+    params: {
+      item: {
+        id: input.itemId,
+        type: 'context_compaction',
       },
     },
   }))
