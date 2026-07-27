@@ -1980,7 +1980,9 @@ mailbox item early. Invalid marker chronology cannot hide still-unconsumed work.
 The terminal leaf alone uses max-timestamp merge semantics: replay carries the
 original evidence time and cannot extend grace, while a genuinely new
 post-recovery suppression commit advances the marker and receives a fresh
-bounded checkpoint window. Every other latency leaf remains assign-once.
+bounded checkpoint window. Recovery preserves that evidence timestamp per
+assistant input; a newer suppression for another input cannot refresh an older
+trace. Every other latency leaf remains assign-once.
 Durable consumption remains the long-term terminal proof and the rolling-deploy
 or best-effort-link fallback after handling is otherwise known.
 Accepted grouped Linq replies keep the complete answered mailbox-item set on the

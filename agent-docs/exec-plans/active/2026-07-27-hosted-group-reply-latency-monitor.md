@@ -50,7 +50,8 @@ Updated: 2026-07-27
    impossible timestamp chronology, and reopen the trace unless durable
    consumption arrives within the normal checkpoint horizon plus buffer. Let a
    genuinely newer post-recovery commit refresh grace while stale replay keeps
-   its original timestamp.
+   its original timestamp, preserving that timestamp per input when recovery
+   repairs more than one suppression partition.
 2. Risk: grouped reply rebatching drops earlier answered items.
    Mitigation: monotonically union coverage only while the outbox intent is
    active and keep terminal intents immutable.

@@ -223,7 +223,8 @@ not enter evidence; and attachment-only input fails closed before provider work.
   that projection uses the existing nonblocking assistant-milestone port.
   The latency-store proof also shows a newer post-recovery suppression timestamp
   advances checkpoint grace while stale evidence replay cannot roll it back or
-  extend it.
+  extend it. Split suppression-repair coverage keeps each input partition bound
+  to its own evidence timestamp so one partition cannot refresh another.
   `apps/web/vercel.json` registers that read-only monitor at a five-minute
   cadence. The hosted-local foreground-priority leg additionally uses real
   PostgreSQL, authenticated cron HTTP, and the Linq stub boundary to prove one
