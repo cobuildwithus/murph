@@ -2,7 +2,9 @@
 
 ## Status
 
-Active.
+Complete. The implementation and local verification are finished; the
+PR-specific final ReviewGPT and CI gates continue on the exact pushed closure
+head.
 
 ## Why
 
@@ -52,3 +54,23 @@ later anomaly opens a fresh incident with a fresh idempotency identity.
 - Preliminary `completion-specialists` coverage lens
 - Product-experience review and parent final call-path review
 - Final ReviewGPT exact-head gate and required PR CI
+
+## Results
+
+- The stale-incident lifecycle regression and the concurrent-state regression
+  both fail before their respective corrections and pass afterward.
+- The accepted preliminary specialist patch adds direct coverage for missing
+  state, anomalous disabled health, in-flight sends, retryable failed sends,
+  and invalid-kind rows.
+- The full alert-monitor file passes with 17 tests.
+- Canonical diff verification passes with 539 Web test files passing, 13
+  skipped, 6,869 tests passing, and 188 skipped; typecheck, lint, development
+  smoke, and the production build also pass.
+- `pnpm verify:acceptance` passes on the same production source, including all
+  workspace typechecks, package coverage, application verification, and the
+  production web build.
+- Product-experience and parent final reviews found no remaining critical,
+  high, or medium issue.
+Status: completed
+Updated: 2026-07-27
+Completed: 2026-07-27
