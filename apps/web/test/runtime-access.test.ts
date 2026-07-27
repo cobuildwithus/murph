@@ -112,6 +112,7 @@ describe("requireHostedRuntimeActiveAccessForUpdateTx", () => {
       },
       where: expect.objectContaining({
         containerMemberId: "member_group_runtime",
+        lastSeenAt: { gte: expect.any(Date) },
         removedAt: null,
       }),
     });

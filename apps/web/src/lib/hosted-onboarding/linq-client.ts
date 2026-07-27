@@ -344,6 +344,7 @@ function readHostedLinqCanonicalChat(
 export async function getHostedLinqChatHandles(input: {
   chatId: string;
   signal?: AbortSignal;
+  timeoutMs?: number;
 }): Promise<HostedLinqChatHandleSummary[]> {
   return (await getHostedLinqChatSummary(input)).handles;
 }

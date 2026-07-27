@@ -73,6 +73,8 @@ const DESIGN_CREDIT_BACKED_USAGE_STATUS: HostedPlanUsageAvailableStatus = {
 
 function GroupUsageFundingStudy() {
   const [groupFulfilledPreviewKey, setGroupFulfilledPreviewKey] = useState(0);
+  const [groupPaymentRecoveryPreviewKey, setGroupPaymentRecoveryPreviewKey] =
+    useState(0);
   const [fulfilledPreviewKey, setFulfilledPreviewKey] = useState(0);
   const [multiChannelPreviewKey, setMultiChannelPreviewKey] = useState(0);
 
@@ -93,6 +95,11 @@ function GroupUsageFundingStudy() {
           }
           groupName="Sunday sleep crew"
         />
+        <p className="mt-3 text-sm leading-6 text-muted-foreground">
+          The amount dialog authorizes one contribution at a time. Murph uses a
+          saved card when available; Stripe collects or verifies the card when
+          needed.
+        </p>
       </div>
       <div
         className="flex w-full max-w-xl flex-col items-start gap-3"
@@ -111,6 +118,12 @@ function GroupUsageFundingStudy() {
             onClick={() => setGroupFulfilledPreviewKey((key) => key + 1)}
           >
             Preview group usage added
+          </Button>
+          <Button
+            variant="outline"
+            onClick={() => setGroupPaymentRecoveryPreviewKey((key) => key + 1)}
+          >
+            Preview group payment recovery
           </Button>
           <Button
             variant="outline"
@@ -135,6 +148,22 @@ function GroupUsageFundingStudy() {
               status: "fulfilled",
             }}
             deferTerminalRefreshUntilClose
+            initialOpen
+            offers={[]}
+            scope="group"
+          />
+        ) : null}
+        {groupPaymentRecoveryPreviewKey > 0 ? (
+          <HostedUsageTopUpDialog
+            key={groupPaymentRecoveryPreviewKey}
+            activePurchase={{
+              cancelAllowed: true,
+              offerCode: "usage_25_usd",
+              purchaseId: "hucp_design_pending_0",
+              retryAllowed: true,
+              status: "payment_pending",
+            }}
+            checkoutUrl="/api/design/usage-credit-preview"
             initialOpen
             offers={[]}
             scope="group"
