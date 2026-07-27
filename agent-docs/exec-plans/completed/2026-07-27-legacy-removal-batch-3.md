@@ -1,6 +1,6 @@
 # Legacy removal batch 3
 
-Status: active
+Status: completed
 Created: 2026-07-27
 Updated: 2026-07-27
 
@@ -95,3 +95,9 @@ Updated: 2026-07-27
   release matrix still required before completion.
 - `git diff --check`, the staged privacy scan, and source/config stale-name
   searches passed.
+- Preliminary `completion-specialists` ReviewGPT pass on pushed head
+  `520f4930977b51eb12a85f1084e4ab4c3a5061cb` returned
+  `SPECIALIST_OUTCOME: PASS` with zero findings and no patch. GPT-5.6 Pro
+  verified the exact head, unchanged spread ordering, retained long-running and
+  E2E overrides, and focused coverage sufficiency.
+Completed: 2026-07-27
