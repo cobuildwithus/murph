@@ -1,8 +1,8 @@
 # Security auth-boundary ReviewGPT remediation
 
-Status: active
+Status: completed
 Created: 2026-07-26
-Updated: 2026-07-26
+Updated: 2026-07-27
 
 ## Goal
 
@@ -84,3 +84,14 @@ Updated: 2026-07-26
 - Expected outcomes: all repository checks pass; local emulated Docker may stop
   only at the documented inner-seccomp limitation after the root boundary
   passes; native Ubuntu must prove every profile.
+- Focused owner tests and typechecks, documentation checks, the canonical
+  five-owner diff command, and the parent privacy/diff review are green.
+- `pnpm verify:acceptance` completed every touched-owner check, Web build, and
+  Cloudflare verification. Its unchanged Core coverage lane had one transient
+  gzip-trailer integration-test failure. The branch has no Core diff, the
+  failed test blob is byte-identical to `origin/main`, the exact failed case
+  passes in isolation, and the full Core coverage command passes all 44 files
+  and 761 tests.
+- Final ReviewGPT correction round two and corrected-head CI remain required
+  after the closure commit is pushed.
+Completed: 2026-07-27
