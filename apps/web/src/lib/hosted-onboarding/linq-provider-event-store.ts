@@ -15,11 +15,29 @@ import {
   markHostedLinqOnboardingLinkNoticeSent,
   releaseHostedLinqOnboardingLinkNoticeClaim,
 } from "./linq-daily-state";
-import type { ParsedHostedLinqProviderEvent } from "./linq-provider-events";
+import {
+  isHostedLinqAffirmativeReaction,
+  type ParsedHostedLinqProviderEvent,
+} from "./linq-provider-events";
 import { toHostedOnboardingLogIdSuffix } from "./logging";
 import { sha256Hex } from "../primitives";
 
 type HostedLinqProviderEventClient = PrismaClient | Prisma.TransactionClient;
+
+const HOSTED_LINQ_GROUP_JOIN_APPLICATION_PENDING = "pending";
+const HOSTED_LINQ_GROUP_JOIN_APPLICATION_APPLIED_PREFIX = "applied:";
+
+export type HostedLinqGroupJoinApplicationTxResult =
+  | {
+      eventLookupKey: string;
+      kind: typeof HOSTED_LINQ_GROUP_JOIN_APPLICATION_PENDING;
+    }
+  | {
+      eventLookupKey: string;
+      kind: "applied";
+      membershipId: string;
+    }
+  | { kind: "unavailable" };
 
 export async function ingestHostedLinqProviderEventTx(input: {
   event: ParsedHostedLinqProviderEvent;
@@ -49,6 +67,20 @@ export async function ingestHostedLinqProviderEventTx(input: {
       extractionVersion: 1,
       failureCode: input.event.failureCode,
       failureReason: input.event.failureReason,
+      // No default/backfill is intentional. Only new reaction rows with the
+      // complete immutable context required by the join transaction are
+      // pending. Rows written by an older deployment stay null and therefore
+      // cannot be mistaken for unconsumed affirmations during rollout.
+      groupJoinApplicationState: isHostedLinqAffirmativeReaction({
+        customEmoji: input.event.reactionCustomEmoji,
+        eventType: input.event.eventType,
+        reactionType: input.event.reactionType,
+      })
+        && input.event.linqChatLookupKey
+        && input.event.messageLookupKey
+        && input.event.payloadHash
+        ? HOSTED_LINQ_GROUP_JOIN_APPLICATION_PENDING
+        : null,
       linqChatLookupKey: input.event.linqChatLookupKey,
       messageIdSuffix: input.event.messageIdSuffix,
       messageLookupKey: input.event.messageLookupKey,
@@ -131,6 +163,125 @@ export async function ingestHostedLinqProviderEventTx(input: {
       ? { restoreOnboardingLink: deliveryReceipt.restoreOnboardingLink }
       : {}),
   };
+}
+
+/**
+ * Locks and validates the one durable owner for applying a Linq join
+ * affirmation. A null application state is intentionally not pending: it
+ * identifies provider-event rows written before this owner existed (or by an
+ * older deployment during rollout), and therefore fails closed.
+ */
+export async function lockHostedLinqGroupJoinApplicationTx(input: {
+  eventId: string;
+  linqChatLookupKeyReadCandidates: readonly string[];
+  messageLookupKeyReadCandidates: readonly string[];
+  payloadHash: string;
+  tx: Prisma.TransactionClient;
+}): Promise<HostedLinqGroupJoinApplicationTxResult> {
+  const eventLookupKey = createHostedLinqProviderEventLookupKey(input.eventId);
+  const linqChatLookupKeyReadCandidates = normalizeHostedLinqLookupKeyCandidates(
+    input.linqChatLookupKeyReadCandidates,
+  );
+  const messageLookupKeyReadCandidates = normalizeHostedLinqLookupKeyCandidates(
+    input.messageLookupKeyReadCandidates,
+  );
+  const payloadHash = input.payloadHash.trim();
+  if (
+    linqChatLookupKeyReadCandidates.length === 0
+    || messageLookupKeyReadCandidates.length === 0
+    || payloadHash.length === 0
+  ) {
+    return { kind: "unavailable" };
+  }
+
+  await input.tx.$queryRaw`
+    SELECT 1
+    FROM "hosted_linq_provider_event"
+    WHERE "event_id" = ${eventLookupKey}
+    FOR UPDATE
+  `;
+  const event = await input.tx.hostedLinqProviderEvent.findUnique({
+    where: { eventId: eventLookupKey },
+    select: {
+      eventType: true,
+      groupJoinApplicationState: true,
+      linqChatLookupKey: true,
+      messageLookupKey: true,
+      payloadHash: true,
+    },
+  });
+  if (
+    !event
+    || event.eventType !== "reaction.added"
+    || !event.linqChatLookupKey
+    || !linqChatLookupKeyReadCandidates.includes(event.linqChatLookupKey)
+    || !event.messageLookupKey
+    || !messageLookupKeyReadCandidates.includes(event.messageLookupKey)
+    || event.payloadHash !== payloadHash
+  ) {
+    return { kind: "unavailable" };
+  }
+  if (event.groupJoinApplicationState === HOSTED_LINQ_GROUP_JOIN_APPLICATION_PENDING) {
+    return {
+      eventLookupKey,
+      kind: HOSTED_LINQ_GROUP_JOIN_APPLICATION_PENDING,
+    };
+  }
+  const appliedMembershipId = readHostedLinqGroupJoinAppliedMembershipId(
+    event.groupJoinApplicationState,
+  );
+  if (appliedMembershipId) {
+    return {
+      eventLookupKey,
+      kind: "applied",
+      membershipId: appliedMembershipId,
+    };
+  }
+  return { kind: "unavailable" };
+}
+
+export async function markHostedLinqGroupJoinApplicationAppliedTx(input: {
+  eventLookupKey: string;
+  membershipId: string;
+  tx: Prisma.TransactionClient;
+}): Promise<void> {
+  const membershipId = input.membershipId.trim();
+  if (!membershipId) {
+    throw new Error("Hosted Linq group join application requires a membership id.");
+  }
+  const updated = await input.tx.hostedLinqProviderEvent.updateMany({
+    where: {
+      eventId: input.eventLookupKey,
+      groupJoinApplicationState: HOSTED_LINQ_GROUP_JOIN_APPLICATION_PENDING,
+    },
+    data: {
+      groupJoinApplicationState:
+        `${HOSTED_LINQ_GROUP_JOIN_APPLICATION_APPLIED_PREFIX}${membershipId}`,
+    },
+  });
+  if (updated.count !== 1) {
+    throw new Error("Hosted Linq group join application state changed unexpectedly.");
+  }
+}
+
+function readHostedLinqGroupJoinAppliedMembershipId(
+  value: string | null,
+): string | null {
+  if (!value?.startsWith(HOSTED_LINQ_GROUP_JOIN_APPLICATION_APPLIED_PREFIX)) {
+    return null;
+  }
+  const membershipId = value.slice(
+    HOSTED_LINQ_GROUP_JOIN_APPLICATION_APPLIED_PREFIX.length,
+  );
+  return membershipId.length > 0 ? membershipId : null;
+}
+
+function normalizeHostedLinqLookupKeyCandidates(
+  values: readonly (string | null | undefined)[],
+): string[] {
+  return [...new Set(values
+    .map((value) => value?.trim() ?? "")
+    .filter((value) => value.length > 0))];
 }
 
 function isHostedRuntimeOwnedOutboundEcho(

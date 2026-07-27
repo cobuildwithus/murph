@@ -10,7 +10,10 @@ import {
 } from "../hosted-onboarding/linq-provider-events";
 import { readActiveHostedMemberAccess } from "../hosted-onboarding/member-access";
 import { normalizePhoneNumber } from "../hosted-onboarding/phone";
-import { createHostedExternalThreadIdentityLookupKeyReadCandidates } from "../hosted-onboarding/contact-privacy";
+import {
+  createHostedExternalThreadIdentityLookupKeyReadCandidates,
+  createHostedLinqChatLookupKeyReadCandidates,
+} from "../hosted-onboarding/contact-privacy";
 import {
   acceptHostedGroupOfferAffirmation,
   type HostedGroupOfferAffirmationKind,
@@ -65,6 +68,7 @@ export async function handleHostedGroupJoinOfferReaction(input: {
     !input.event.linqChatId
     || !input.event.linqMessageId
     || !input.event.messageLookupKey
+    || !input.event.payloadHash
     || !input.event.reactionFromHandle
   ) {
     return skipHostedGroupJoinOfferReaction({
@@ -99,6 +103,11 @@ export async function handleHostedGroupJoinOfferReaction(input: {
     affirmationEventId: input.event.eventId,
     channel: "linq",
     kinds,
+    linqApplicationContext: {
+      linqChatLookupKeyReadCandidates:
+        createHostedLinqChatLookupKeyReadCandidates(input.event.linqChatId),
+      payloadHash: input.event.payloadHash,
+    },
     memberId: member.id,
     messageLookupKeyReadCandidates,
     now: input.event.providerCreatedAt,

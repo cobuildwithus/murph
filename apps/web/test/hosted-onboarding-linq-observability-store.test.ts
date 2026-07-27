@@ -154,6 +154,39 @@ describe("hosted Linq observability stores", () => {
     },
   );
 
+  it("marks newly received Linq reactions explicitly pending for group-join application", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    const event = requireParsedProviderEvent(buildProviderEvent({
+      data: {
+        chat_id: "chat_group_123",
+        from_handle: { handle: "+15551234567", service: "iMessage" },
+        line: { phone_number: "+15550000000" },
+        message_id: "msg_offer_123",
+        reacted_at: "2026-03-26T12:01:00.000Z",
+        reaction_type: "love",
+      },
+      eventId: "evt_reaction_123",
+      eventType: "reaction.added",
+    }));
+
+    await ingestHostedLinqProviderEventTx({
+      event,
+      prisma: fixture.prisma as never,
+    });
+
+    expect(fixture.hostedLinqProviderEventCreateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          eventType: "reaction.added",
+          groupJoinApplicationState: "pending",
+          linqChatLookupKey: event.linqChatLookupKey,
+          messageLookupKey: event.messageLookupKey,
+          payloadHash: event.payloadHash,
+        }),
+      }),
+    );
+  });
+
   it("persists message.sent correlation without advancing delivery or line health", async () => {
     const fixture = createObservabilityPrismaFixture();
     const messageId = "provider_message_sent_sms";

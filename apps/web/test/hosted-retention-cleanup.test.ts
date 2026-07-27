@@ -167,6 +167,7 @@ describe("hosted retention cleanup", () => {
     expect(sqlOf(linqCall)).toContain('"extraction_json" = NULL');
     expect(sqlOf(linqCall)).toContain('"payload_sanitized_json" = NULL');
     expect(sqlOf(linqCall)).toContain('"payload_shape_json" = NULL');
+    expect(sqlOf(linqCall)).not.toContain('"group_join_application_state"');
     expect(linqCall.slice(1)).toEqual([
       new Date(now.getTime() - HOSTED_LINQ_PROVIDER_EVENT_DIAGNOSTIC_RETENTION_MS),
       HOSTED_RETENTION_BATCH_SIZE,

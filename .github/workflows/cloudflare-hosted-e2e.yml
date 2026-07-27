@@ -267,6 +267,7 @@ jobs:
           apps/web/test/hosted-accepted-attempt-recheck-postgres-concurrency.test.ts
           apps/web/test/hosted-assistant-ask-retention-postgres.test.ts
           apps/web/test/hosted-execution-usage-postgres-concurrency.test.ts
+          apps/web/test/hosted-group-join-offer-replay-postgres.test.ts
           apps/web/test/hosted-onboarding-linq-home-routing-postgres.test.ts
           apps/web/test/hosted-onboarding-member-lock-postgres.test.ts
           apps/web/test/hosted-onboarding-telegram-routing-postgres.test.ts

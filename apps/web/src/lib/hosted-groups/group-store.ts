@@ -48,6 +48,10 @@ import { assertHostedMemberNotSuspended } from "../hosted-onboarding/entitlement
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import { activeHostedMemberAccessWhere } from "../hosted-onboarding/member-access";
 import {
+  lockHostedLinqGroupJoinApplicationTx,
+  markHostedLinqGroupJoinApplicationAppliedTx,
+} from "../hosted-onboarding/linq-provider-event-store";
+import {
   generateHostedGroupId,
   generateHostedGroupJoinOfferId,
   generateHostedGroupMemberId,
@@ -166,9 +170,10 @@ export type HostedGroupJoinOfferPostPreparation =
   | { kind: "unavailable" };
 
 export interface HostedGroupJoinOfferAcceptanceTxResult
-  extends HostedGroupJoinAcceptanceTxResult {
+  extends Omit<HostedGroupJoinAcceptanceTxResult, "membershipId"> {
   joinCode: string;
   messageLookupKey: string;
+  membershipId: string | null;
   selectedVaultShareProjectionKinds: HostedVaultShareProjectionKind[];
   selectedVaultShareProjectionScopes: HostedVaultShareProjectionScope[];
 }
@@ -1396,6 +1401,11 @@ export async function prepareHostedGroupJoinOfferPostTx(input: {
 export async function acceptHostedGroupJoinOfferTx(input: {
   channel: HostedGroupOfferChannel;
   confirmationPublicBaseUrl?: string | null;
+  linqAffirmation?: {
+    eventId: string;
+    linqChatLookupKeyReadCandidates: readonly string[];
+    payloadHash: string;
+  };
   memberId: string;
   messageLookupKeyReadCandidates: readonly string[];
   now: Date;
@@ -1441,7 +1451,6 @@ export async function acceptHostedGroupJoinOfferTx(input: {
       messageLookupKey: {
         in: messageLookupKeyReadCandidates,
       },
-      revokedAt: null,
     },
     select: {
       groupId: true,
@@ -1474,6 +1483,77 @@ export async function acceptHostedGroupJoinOfferTx(input: {
       retryable: false,
     });
   }
+  let linqApplication: Awaited<
+    ReturnType<typeof lockHostedLinqGroupJoinApplicationTx>
+  > | null = null;
+  if (input.channel === "linq") {
+    linqApplication = input.linqAffirmation
+      ? await lockHostedLinqGroupJoinApplicationTx({
+          eventId: input.linqAffirmation.eventId,
+          linqChatLookupKeyReadCandidates:
+            input.linqAffirmation.linqChatLookupKeyReadCandidates,
+          messageLookupKeyReadCandidates,
+          payloadHash: input.linqAffirmation.payloadHash,
+          tx: input.tx,
+        })
+      : { kind: "unavailable" };
+    if (linqApplication.kind === "unavailable") {
+      throw hostedOnboardingError({
+        code: "HOSTED_GROUP_JOIN_OFFER_NOT_FOUND",
+        httpStatus: 404,
+        message: "This group offer is no longer active.",
+        retryable: false,
+      });
+    }
+  }
+
+  const selectedVaultShareProjectionScopes = normalizeHostedVaultShareProjectionScopes(
+    offer.projectionKindsJson,
+  );
+  const selectedVaultShareProjectionKinds = [
+    ...new Set(selectedVaultShareProjectionScopes.map((scope) => scope.projectionKind)),
+  ];
+  if (linqApplication?.kind === "applied") {
+    // The event already committed this join. Serialize with leave, then recover
+    // only the exact membership identity that event accepted for post-commit
+    // confirmation recovery. Do not attach an old event to a later rejoin, and
+    // do not revisit any grant code: a later share revocation or leave is newer
+    // user intent.
+    await lockHostedMemberRow(input.tx, input.memberId);
+    const existingMembership = await input.tx.hostedGroupMember.findUnique({
+      where: {
+        groupId_memberId: {
+          groupId: group.id,
+          memberId: input.memberId,
+        },
+      },
+      select: { id: true },
+    });
+    const appliedMembership = existingMembership?.id === linqApplication.membershipId
+      ? existingMembership
+      : null;
+    return {
+      alreadyMember: appliedMembership !== null,
+      grantedVaultShareProjectionKinds: [],
+      grantedVaultShareProjectionScopes: [],
+      groupId: group.id,
+      joinCode: group.joinCode,
+      messageLookupKey: offer.messageLookupKey,
+      membershipId: appliedMembership?.id ?? null,
+      revokedVaultShareProjectionKinds: [],
+      revokedVaultShareProjectionScopes: [],
+      selectedVaultShareProjectionKinds,
+      selectedVaultShareProjectionScopes,
+    };
+  }
+  if (offer.revokedAt) {
+    throw hostedOnboardingError({
+      code: "HOSTED_GROUP_JOIN_OFFER_REVOKED",
+      httpStatus: 410,
+      message: "This group offer has been revoked.",
+      retryable: false,
+    });
+  }
   if (!group.runtimeMemberId) {
     throw hostedOnboardingError({
       code: "HOSTED_GROUP_NOT_ACTIVE",
@@ -1500,13 +1580,6 @@ export async function acceptHostedGroupJoinOfferTx(input: {
       retryable: false,
     });
   }
-
-  const selectedVaultShareProjectionScopes = normalizeHostedVaultShareProjectionScopes(
-    offer.projectionKindsJson,
-  );
-  const selectedVaultShareProjectionKinds = [
-    ...new Set(selectedVaultShareProjectionScopes.map((scope) => scope.projectionKind)),
-  ];
   const accepted = await acceptHostedGroupJoinTx({
     additiveOnly: true,
     confirmationPublicBaseUrl: input.confirmationPublicBaseUrl ?? null,
@@ -1518,6 +1591,13 @@ export async function acceptHostedGroupJoinOfferTx(input: {
     selectedVaultShareProjectionScopes,
     tx: input.tx,
   });
+  if (linqApplication?.kind === "pending") {
+    await markHostedLinqGroupJoinApplicationAppliedTx({
+      eventLookupKey: linqApplication.eventLookupKey,
+      membershipId: accepted.membershipId,
+      tx: input.tx,
+    });
+  }
 
   return {
     ...accepted,

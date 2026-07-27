@@ -342,8 +342,9 @@ async function deleteExpiredDeviceWebhookTraces(input: {
   `);
 }
 
-// The provider-event row is the durable webhook duplicate gate and must not be
-// deleted. Only its optional diagnostic JSON expires.
+// The provider-event row is the durable webhook duplicate gate and Linq
+// group-join application owner, so neither the row nor application state may
+// expire. Only its optional diagnostic JSON is compacted.
 async function compactOldLinqProviderEventDiagnostics(input: {
   now: Date;
   prisma: PrismaClient;

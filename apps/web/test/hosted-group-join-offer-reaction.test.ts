@@ -7,6 +7,7 @@ import { createPrismaClient } from "@/src/lib/prisma";
 import {
   createHostedExternalThreadIdentityLookupKey,
   createHostedExternalThreadIdentityLookupKeyReadCandidates,
+  createHostedLinqChatLookupKeyReadCandidates,
   createHostedLinqMessageLookupKey,
   createHostedLinqMessageLookupKeyReadCandidates,
 } from "@/src/lib/hosted-onboarding/contact-privacy";
@@ -83,6 +84,7 @@ describe("handleHostedGroupJoinOfferReaction", () => {
     mocks.acceptHostedGroupJoinOfferTx.mockResolvedValue({
       alreadyMember: false,
       grantedVaultShareProjectionKinds: ["profile-name.v0", "sleep-times.v0"],
+      grantedVaultShareProjectionScopes: [],
       groupId: "group_1",
       joinCode: "join_1",
       joinConfirmationSignal: {
@@ -92,7 +94,9 @@ describe("handleHostedGroupJoinOfferReaction", () => {
       messageLookupKey: "hbidx:linq-message:v1:offer",
       membershipId: "membership_1",
       revokedVaultShareProjectionKinds: [],
+      revokedVaultShareProjectionScopes: [],
       selectedVaultShareProjectionKinds: ["sleep-times.v0"],
+      selectedVaultShareProjectionScopes: [],
     });
     mocks.lookupHostedMemberIdentityByPhoneNumber.mockResolvedValue({
       core: { id: "member_reactor", suspendedAt: null },
@@ -129,6 +133,12 @@ describe("handleHostedGroupJoinOfferReaction", () => {
     expect(mocks.acceptHostedGroupJoinOfferTx).toHaveBeenCalledWith(
       expect.objectContaining({
         confirmationPublicBaseUrl: "https://murph.example",
+        linqAffirmation: {
+          eventId: event.eventId,
+          linqChatLookupKeyReadCandidates:
+            createHostedLinqChatLookupKeyReadCandidates("chat_group_1"),
+          payloadHash: event.payloadHash,
+        },
         memberId: "member_reactor",
         messageLookupKeyReadCandidates: expect.arrayContaining([
           expect.stringMatching(/^hbidx:linq-message:/u),
@@ -168,6 +178,39 @@ describe("handleHostedGroupJoinOfferReaction", () => {
       prisma,
       timeoutMs: expect.any(Number),
     });
+  });
+
+  it("accepts an already-applied replay without regranting and retries confirmation", async () => {
+    mocks.acceptHostedGroupJoinOfferTx.mockResolvedValueOnce({
+      alreadyMember: true,
+      grantedVaultShareProjectionKinds: [],
+      grantedVaultShareProjectionScopes: [],
+      groupId: "group_1",
+      joinCode: "join_1",
+      messageLookupKey: "hbidx:linq-message:v1:offer",
+      membershipId: "membership_1",
+      revokedVaultShareProjectionKinds: [],
+      revokedVaultShareProjectionScopes: [],
+      selectedVaultShareProjectionKinds: ["sleep-times.v0"],
+      selectedVaultShareProjectionScopes: [],
+    });
+    const prisma = createPrismaStub();
+
+    await expect(handleHostedGroupJoinOfferReaction({
+      event: parseReactionEvent({ reactionType: "love" }),
+      prisma,
+    })).resolves.toEqual({ reason: "accepted", status: "accepted" });
+
+    expect(mocks.materializePendingHostedGroupJoinConfirmationsBestEffort).toHaveBeenCalledWith({
+      memberId: "member_reactor",
+      membershipId: "membership_1",
+      prisma,
+      timeoutMs: expect.any(Number),
+    });
+    expect(mocks.signalHostedGroupJoinConfirmationRuntimeBestEffort).not.toHaveBeenCalled();
+    expect(mocks.signalHostedRuntimeMaintenanceRuntime).not.toHaveBeenCalled();
+    expect(mocks.enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort)
+      .not.toHaveBeenCalled();
   });
 
   it("grants only the exact permission bound to an exact Like and existing membership", async () => {
@@ -262,12 +305,15 @@ describe("handleHostedGroupJoinOfferReaction", () => {
     mocks.acceptHostedGroupJoinOfferTx.mockResolvedValueOnce({
       alreadyMember: false,
       grantedVaultShareProjectionKinds: ["profile-name.v0", "group-email.v0"],
+      grantedVaultShareProjectionScopes: [],
       groupId: "group_1",
       joinCode: "join_1",
       messageLookupKey: "hbidx:linq-message:v1:offer",
       membershipId: "membership_1",
       revokedVaultShareProjectionKinds: [],
+      revokedVaultShareProjectionScopes: [],
       selectedVaultShareProjectionKinds: ["group-email.v0"],
+      selectedVaultShareProjectionScopes: [],
     });
     const event = parseReactionEvent({
       reactionType: "like",
@@ -370,12 +416,15 @@ describe("handleHostedGroupJoinOfferReaction", () => {
     mocks.acceptHostedGroupJoinOfferTx.mockResolvedValueOnce({
       alreadyMember: false,
       grantedVaultShareProjectionKinds: ["profile-name.v0", "sleep-times.v0"],
+      grantedVaultShareProjectionScopes: [],
       groupId: "group_1",
       joinCode: "join_1",
       messageLookupKey: storedMessageLookupKey,
       membershipId: "membership_1",
       revokedVaultShareProjectionKinds: [],
+      revokedVaultShareProjectionScopes: [],
       selectedVaultShareProjectionKinds: ["sleep-times.v0"],
+      selectedVaultShareProjectionScopes: [],
     });
     const event = parseReactionEvent({
       reactionType: "like",

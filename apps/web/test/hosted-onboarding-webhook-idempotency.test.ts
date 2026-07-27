@@ -550,6 +550,7 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
         data: expect.objectContaining({
           eventId: createHostedLinqProviderEventLookupKey("evt_reaction_123"),
           eventType: "reaction.added",
+          groupJoinApplicationState: "pending",
         }),
         skipDuplicates: true,
       }),

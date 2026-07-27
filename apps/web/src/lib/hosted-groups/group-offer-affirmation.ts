@@ -66,6 +66,10 @@ export async function acceptHostedGroupOfferAffirmation(input: {
   assertActorStillBound?: (tx: Prisma.TransactionClient) => Promise<void>;
   channel: HostedGroupOfferChannel;
   kinds: readonly HostedGroupOfferAffirmationKind[];
+  linqApplicationContext?: {
+    linqChatLookupKeyReadCandidates: readonly string[];
+    payloadHash: string;
+  };
   memberId: string;
   messageLookupKeyReadCandidates: readonly string[];
   now: Date;
@@ -126,6 +130,16 @@ export async function acceptHostedGroupOfferAffirmation(input: {
       acceptHostedGroupJoinOfferTx({
         channel: input.channel,
         confirmationPublicBaseUrl: resolveHostedPublicBaseUrl(),
+        ...(input.channel === "linq" && input.linqApplicationContext
+          ? {
+              linqAffirmation: {
+                eventId: input.affirmationEventId,
+                linqChatLookupKeyReadCandidates:
+                  input.linqApplicationContext.linqChatLookupKeyReadCandidates,
+                payloadHash: input.linqApplicationContext.payloadHash,
+              },
+            }
+          : {}),
         memberId: input.memberId,
         messageLookupKeyReadCandidates: input.messageLookupKeyReadCandidates,
         now: input.now,
@@ -150,13 +164,15 @@ export async function acceptHostedGroupOfferAffirmation(input: {
       timeoutMs: readHostedPostCommitRemainingMs(postCommitDeadlineMs),
     });
   }
-  await materializePendingHostedGroupJoinConfirmationsBestEffort({
-    memberId: input.memberId,
-    membershipId: result.membershipId,
-    prisma: input.prisma,
-    ...(input.signal ? { signal: input.signal } : {}),
-    timeoutMs: readHostedPostCommitRemainingMs(postCommitDeadlineMs),
-  });
+  if (result.membershipId) {
+    await materializePendingHostedGroupJoinConfirmationsBestEffort({
+      memberId: input.memberId,
+      membershipId: result.membershipId,
+      prisma: input.prisma,
+      ...(input.signal ? { signal: input.signal } : {}),
+      timeoutMs: readHostedPostCommitRemainingMs(postCommitDeadlineMs),
+    });
+  }
 
   if (result.grantedVaultShareProjectionKinds.length > 0) {
     await runHostedGroupOfferAffirmationPostCommitBestEffort({

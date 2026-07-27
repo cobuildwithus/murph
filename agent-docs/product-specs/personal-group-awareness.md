@@ -2,7 +2,7 @@
 
 Status: Implemented
 
-Last verified: 2026-07-15
+Last verified: 2026-07-26
 
 ## User outcome
 
@@ -85,10 +85,13 @@ future sharing end, and Murph-owned projected copies are queued for cleanup.
 This does not remove the person from the iMessage chat or erase historical
 messages, provider copies, backups, or copies already shared outside Murph. A
 provider output already accepted before departure can still arrive once.
-Because membership remains row-presence truth, an old affirmative join reaction
-that the existing system later accepts can create a fresh membership after a
-leave. Fencing that provider replay would require the lifecycle/epoch machinery
-deliberately excluded from this minimal behavior.
+Membership remains row-presence truth, while the durable Linq provider-event
+row separately fences exact join-reaction replay. New affirmative reactions are
+explicitly pending and record the accepted membership id in the same
+transaction as the join. Replaying that event after a later leave or share
+revocation is an accepted no-op, and it cannot attach confirmation recovery to
+a membership created by a newer reaction. Legacy provider-event rows without
+application state fail closed.
 
 ## Deployment compatibility
 
@@ -104,6 +107,13 @@ roll back below the floor, roll Cloudflare back first and then Web. The hard cut
 does not require immediate container rollout because both old and new runners
 accept the current Web response, but post-deploy proof must exercise one private
 `list_memberships` read and check for group-tool response parse failures.
+
+For the Linq replay fence, apply the nullable
+`hosted_linq_provider_event.group_join_application_state` expansion before
+deploying Web code that writes or reads it. The column has no default or
+backfill: rows written before the expansion, including deploy-skew writes from
+an older Web binary, stay distinguishable and fail closed. No Cloudflare
+runtime or wire change is involved.
 
 ## Direct proof
 

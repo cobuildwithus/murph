@@ -155,15 +155,18 @@ Last verified: 2026-07-26
 - Assistant turns and outbound sends should prefer system-emitted receipts plus idempotent outbox intents over model-authored logs. The receipt trail must stay non-canonical, compact, and safe to inspect through `murph status` / `murph doctor` even when transcripts are partially corrupted.
 - Assistant observability and recovery surfaces should stay persisted and replay-safe: diagnostics/status snapshots must tolerate missing files, and fault-injection coverage should exercise retryable provider/delivery/automation failure paths before those recovery hooks are trusted.
 - Observability writes (logs, latency traces, diagnostics, metrics) must never block user-facing latency: queue or fire-and-forget them off the reply hot path and flush at invocation end, per the `Foreground Reply Critical Path` invariants in `docs/contracts/00-invariants.md`. Only warn/error crash-tail writes may block, bounded by the process exit backstop.
-- Chat-affirmation group joins (Linq reaction, Telegram inline button) are
-  at-least-once, not exactly-once. The provider-event ledger records that an
-  event was *received*, not that it was *applied*, so a redelivered event
-  re-runs acceptance. Membership creation is the only non-idempotent step: the
-  disclosure path derives its grant id from the affirmation event, but
-  `leaveHostedGroupMemberTx` deletes the membership row, so a redelivery that
-  lands after a departure can silently rejoin that member. Gating acceptance on
-  the ledger's duplicate flag is not the fix: it would drop legitimate joins
-  whenever a first attempt failed after the ledger write. Closing this needs a
-  consumed-event record written in the same transaction as acceptance; it is
-  deliberately deferred until a real occurrence or a broader offer-state change
-  justifies the table.
+- Linq join-offer reactions are delivered at least once, but
+  `HostedLinqProviderEvent` is also their durable application owner. A newly
+  received reaction with complete event/message/chat context is explicitly
+  `pending`; rows written before this state existed (or by an older deployment
+  during rollout) remain `NULL` and fail closed. Join acceptance locks the group
+  and exact provider-event row, verifies the persisted message, chat, and payload
+  binding, and changes `pending` to an applied state carrying the accepted
+  membership id in the same transaction as the membership and share grants. An
+  applied redelivery is an accepted no-op: it may retry durable join-confirmation
+  materialization only while that exact membership still exists, but it cannot
+  attach itself to a later rejoin, regrant a later-revoked share, or recreate a
+  member after leave. A genuinely new reaction has its own `pending` row and can
+  express a later intent to rejoin. Never use the provider receipt's `duplicate`
+  result as this gate: a receipt committed before a failed acceptance must remain
+  retryable.

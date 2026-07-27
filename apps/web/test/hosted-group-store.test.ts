@@ -72,6 +72,11 @@ const GROUP_EMAIL_SCOPE = hostedVaultShareProjectionKindToScope("group-email.v0"
 const SLEEP_SCOPE = hostedVaultShareProjectionKindToScope("sleep-times.v0");
 const SLEEP_DURATION_SCOPE = hostedVaultShareProjectionKindToScope("sleep-duration-days.v0");
 const ACTIVITY_SCOPE = hostedVaultShareProjectionKindToScope("activity-days.v0");
+const LINQ_AFFIRMATION = {
+  eventId: "evt_reaction_123",
+  linqChatLookupKeyReadCandidates: ["hbidx:linq-chat:v1:chat"],
+  payloadHash: "payload_hash_1",
+} as const;
 
 const JOIN_POLICY = {
   requestedVaultShareProjectionKinds: ["sleep-times.v0"],
@@ -112,6 +117,10 @@ function buildTx(input?: {
     membershipId: string | null;
     nextMembershipId?: string;
   };
+  linqApplicationState?: string | null;
+  linqEventChatLookupKey?: string;
+  linqEventMessageLookupKey?: string;
+  linqEventPayloadHash?: string;
   offerMessageLookupKey?: string;
   offerProjectionKinds?: string[];
   requestedProjectionKinds?: string[];
@@ -129,6 +138,10 @@ function buildTx(input?: {
     findUnique: ReturnType<typeof vi.fn>;
     updateMany: ReturnType<typeof vi.fn>;
   };
+  hostedLinqProviderEvent: {
+    findUnique: ReturnType<typeof vi.fn>;
+    updateMany: ReturnType<typeof vi.fn>;
+  };
   hostedThreadRoute: {
     findFirst: ReturnType<typeof vi.fn>;
   };
@@ -137,6 +150,13 @@ function buildTx(input?: {
     findUnique: ReturnType<typeof vi.fn>;
   };
 } {
+  const linqApplicationState: {
+    value: string | null;
+  } = {
+    value: input?.linqApplicationState === undefined
+      ? "pending"
+      : input.linqApplicationState,
+  };
   return createPrismaStub({
     $queryRaw: vi.fn(async () => []),
     hostedGroup: {
@@ -251,6 +271,27 @@ function buildTx(input?: {
         return { id: membershipId };
       }),
       update: vi.fn(async () => ({})),
+    },
+    hostedLinqProviderEvent: {
+      findUnique: vi.fn(async () => ({
+        eventType: "reaction.added",
+        groupJoinApplicationState: linqApplicationState.value,
+        linqChatLookupKey: input?.linqEventChatLookupKey
+          ?? LINQ_AFFIRMATION.linqChatLookupKeyReadCandidates[0],
+        messageLookupKey: input?.linqEventMessageLookupKey
+          ?? input?.offerMessageLookupKey
+          ?? "hbidx:linq-message:v1:offer",
+        payloadHash: input?.linqEventPayloadHash ?? LINQ_AFFIRMATION.payloadHash,
+      })),
+      updateMany: vi.fn(async (args: {
+        data: { groupJoinApplicationState: string };
+      }) => {
+        if (linqApplicationState.value !== "pending") {
+          return { count: 0 };
+        }
+        linqApplicationState.value = args.data.groupJoinApplicationState;
+        return { count: 1 };
+      }),
     },
     hostedMember: {
       findUnique: vi.fn(async () => ({ suspendedAt: null })),
@@ -1099,6 +1140,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
 
     await expect(acceptHostedGroupJoinOfferTx({
       channel: "linq",
+      linqAffirmation: LINQ_AFFIRMATION,
       memberId: "member_grantor",
       messageLookupKeyReadCandidates: ["hbidx:linq-message:v1:offer"],
       now,
@@ -1134,7 +1176,183 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     // the current-version gate stays on web joins only.
     expect(mocks.assertHostedHistoricalLaunchConsentGranted).toHaveBeenCalledTimes(1);
     expect(mocks.assertHostedLaunchRequiredConsentGranted).not.toHaveBeenCalled();
+    expect(tx.hostedLinqProviderEvent.updateMany).toHaveBeenCalledWith({
+      data: { groupJoinApplicationState: "applied:membership_existing" },
+      where: {
+        eventId: expect.stringMatching(/^hbid:linq\.provider-event:/u),
+        groupJoinApplicationState: "pending",
+      },
+    });
   });
+
+  it("keeps a received Linq event pending after a failed attempt and accepts its exact retry", async () => {
+    const tx = buildTx({ activeGroupGrantCount: 0 });
+    mocks.assertHostedHistoricalLaunchConsentGranted
+      .mockRejectedValueOnce(hostedOnboardingError({
+        code: "HOSTED_CONSENT_REQUIRED",
+        httpStatus: 403,
+        message: "Accept the Murph legal consent before continuing.",
+      }))
+      .mockResolvedValueOnce(undefined);
+    const input = {
+      channel: "linq" as const,
+      linqAffirmation: LINQ_AFFIRMATION,
+      memberId: "member_grantor",
+      messageLookupKeyReadCandidates: ["hbidx:linq-message:v1:offer"],
+      now: new Date("2026-07-01T00:00:00.000Z"),
+      threadIdentityLookupKeyReadCandidates: ["hbidx:external-thread-identity:v1:thread"],
+      tx,
+    };
+
+    await expect(acceptHostedGroupJoinOfferTx(input)).rejects.toMatchObject({
+      code: "HOSTED_CONSENT_REQUIRED",
+    });
+    expect(tx.hostedLinqProviderEvent.updateMany).not.toHaveBeenCalled();
+
+    await expect(acceptHostedGroupJoinOfferTx(input)).resolves.toMatchObject({
+      membershipId: "membership_created",
+    });
+    expect(tx.hostedLinqProviderEvent.updateMany).toHaveBeenCalledTimes(1);
+  });
+
+  it("treats an already-applied Linq event as a no-op while preserving confirmation recovery", async () => {
+    const tx = buildTx({
+      existingMembershipId: "membership_existing",
+      linqApplicationState: "applied:membership_existing",
+    });
+
+    await expect(acceptHostedGroupJoinOfferTx({
+      channel: "linq",
+      linqAffirmation: LINQ_AFFIRMATION,
+      memberId: "member_grantor",
+      messageLookupKeyReadCandidates: ["hbidx:linq-message:v1:offer"],
+      now: new Date("2026-07-01T00:00:01.000Z"),
+      threadIdentityLookupKeyReadCandidates: ["hbidx:external-thread-identity:v1:thread"],
+      tx,
+    })).resolves.toMatchObject({
+      alreadyMember: true,
+      grantedVaultShareProjectionKinds: [],
+      membershipId: "membership_existing",
+      revokedVaultShareProjectionKinds: [],
+    });
+
+    expect(tx.hostedGroupMember.create).not.toHaveBeenCalled();
+    expect(mocks.grantHostedVaultShareTx).not.toHaveBeenCalled();
+    expect(tx.hostedLinqProviderEvent.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("keeps an applied Linq replay recoverable after the original offer is revoked", async () => {
+    const tx = buildTx({
+      existingMembershipId: "membership_existing",
+      linqApplicationState: "applied:membership_existing",
+      revokedOfferAt: new Date("2026-07-01T00:00:01.000Z"),
+    });
+
+    await expect(acceptHostedGroupJoinOfferTx({
+      channel: "linq",
+      linqAffirmation: LINQ_AFFIRMATION,
+      memberId: "member_grantor",
+      messageLookupKeyReadCandidates: ["hbidx:linq-message:v1:offer"],
+      now: new Date("2026-07-01T00:00:02.000Z"),
+      threadIdentityLookupKeyReadCandidates: ["hbidx:external-thread-identity:v1:thread"],
+      tx,
+    })).resolves.toMatchObject({
+      alreadyMember: true,
+      grantedVaultShareProjectionKinds: [],
+      membershipId: "membership_existing",
+      revokedVaultShareProjectionKinds: [],
+    });
+
+    expect(tx.hostedGroupMember.create).not.toHaveBeenCalled();
+    expect(mocks.grantHostedVaultShareTx).not.toHaveBeenCalled();
+  });
+
+  it("does not recreate membership for an already-applied Linq event after leave", async () => {
+    const tx = buildTx({ linqApplicationState: "applied:membership_left" });
+
+    await expect(acceptHostedGroupJoinOfferTx({
+      channel: "linq",
+      linqAffirmation: LINQ_AFFIRMATION,
+      memberId: "member_grantor",
+      messageLookupKeyReadCandidates: ["hbidx:linq-message:v1:offer"],
+      now: new Date("2026-07-01T00:00:01.000Z"),
+      threadIdentityLookupKeyReadCandidates: ["hbidx:external-thread-identity:v1:thread"],
+      tx,
+    })).resolves.toMatchObject({
+      alreadyMember: false,
+      grantedVaultShareProjectionKinds: [],
+      membershipId: null,
+    });
+
+    expect(tx.hostedGroupMember.create).not.toHaveBeenCalled();
+    expect(mocks.grantHostedVaultShareTx).not.toHaveBeenCalled();
+  });
+
+  it("does not attach an old applied event to a membership created by a later rejoin", async () => {
+    const tx = buildTx({
+      existingMembershipId: "membership_new",
+      linqApplicationState: "applied:membership_old",
+    });
+
+    await expect(acceptHostedGroupJoinOfferTx({
+      channel: "linq",
+      linqAffirmation: LINQ_AFFIRMATION,
+      memberId: "member_grantor",
+      messageLookupKeyReadCandidates: ["hbidx:linq-message:v1:offer"],
+      now: new Date("2026-07-01T00:00:01.000Z"),
+      threadIdentityLookupKeyReadCandidates: ["hbidx:external-thread-identity:v1:thread"],
+      tx,
+    })).resolves.toMatchObject({
+      alreadyMember: false,
+      grantedVaultShareProjectionKinds: [],
+      membershipId: null,
+      revokedVaultShareProjectionKinds: [],
+    });
+
+    expect(tx.hostedGroupMember.create).not.toHaveBeenCalled();
+    expect(mocks.grantHostedVaultShareTx).not.toHaveBeenCalled();
+  });
+
+  it("fails closed for legacy Linq provider-event rows with no application state", async () => {
+    const tx = buildTx({ linqApplicationState: null });
+
+    await expect(acceptHostedGroupJoinOfferTx({
+      channel: "linq",
+      linqAffirmation: LINQ_AFFIRMATION,
+      memberId: "member_grantor",
+      messageLookupKeyReadCandidates: ["hbidx:linq-message:v1:offer"],
+      now: new Date("2026-07-01T00:00:00.000Z"),
+      threadIdentityLookupKeyReadCandidates: ["hbidx:external-thread-identity:v1:thread"],
+      tx,
+    })).rejects.toMatchObject({ code: "HOSTED_GROUP_JOIN_OFFER_NOT_FOUND" });
+
+    expect(tx.hostedGroupMember.create).not.toHaveBeenCalled();
+    expect(mocks.grantHostedVaultShareTx).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["chat", { linqEventChatLookupKey: "hbidx:linq-chat:v1:different" }],
+    ["message", { linqEventMessageLookupKey: "hbidx:linq-message:v1:different" }],
+    ["payload", { linqEventPayloadHash: "different_payload_hash" }],
+  ] as const)(
+    "fails closed when a Linq retry does not match the stored event %s binding",
+    async (_binding, fixtureInput) => {
+      const tx = buildTx(fixtureInput);
+
+      await expect(acceptHostedGroupJoinOfferTx({
+        channel: "linq",
+        linqAffirmation: LINQ_AFFIRMATION,
+        memberId: "member_grantor",
+        messageLookupKeyReadCandidates: ["hbidx:linq-message:v1:offer"],
+        now: new Date("2026-07-01T00:00:00.000Z"),
+        threadIdentityLookupKeyReadCandidates: ["hbidx:external-thread-identity:v1:thread"],
+        tx,
+      })).rejects.toMatchObject({ code: "HOSTED_GROUP_JOIN_OFFER_NOT_FOUND" });
+
+      expect(tx.hostedGroupMember.create).not.toHaveBeenCalled();
+      expect(mocks.grantHostedVaultShareTx).not.toHaveBeenCalled();
+    },
+  );
 
   it("fails a join offer closed when launch consent was never granted", async () => {
     const tx = buildTx({ activeGroupGrantCount: 0 });
@@ -1146,6 +1364,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
 
     await expect(acceptHostedGroupJoinOfferTx({
       channel: "linq",
+      linqAffirmation: LINQ_AFFIRMATION,
       memberId: "member_grantor",
       messageLookupKeyReadCandidates: ["hbidx:linq-message:v1:offer"],
       now: new Date("2026-07-01T00:00:00.000Z"),
@@ -1173,6 +1392,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     await expect(acceptHostedGroupJoinOfferTx({
       channel: "linq",
       confirmationPublicBaseUrl: "https://murph.example",
+      linqAffirmation: LINQ_AFFIRMATION,
       memberId: "member_grantor",
       messageLookupKeyReadCandidates: ["hbidx:linq-message:v1:offer"],
       now,
@@ -1216,6 +1436,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
 
     await expect(acceptHostedGroupJoinOfferTx({
       channel: "linq",
+      linqAffirmation: LINQ_AFFIRMATION,
       memberId: "member_grantor",
       messageLookupKeyReadCandidates: ["hbidx:linq-message:v1:offer"],
       now,
@@ -1271,6 +1492,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
 
     await expect(acceptHostedGroupJoinOfferTx({
       channel: "linq",
+      linqAffirmation: LINQ_AFFIRMATION,
       memberId: "member_grantor",
       messageLookupKeyReadCandidates,
       now,
@@ -1320,6 +1542,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
 
     await expect(acceptHostedGroupJoinOfferTx({
       channel: "linq",
+      linqAffirmation: LINQ_AFFIRMATION,
       memberId: "member_grantor",
       messageLookupKeyReadCandidates: ["hbidx:linq-message:v1:offer"],
       now: new Date("2026-07-01T00:06:00.000Z"),
@@ -1356,6 +1579,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
 
     await expect(acceptHostedGroupJoinOfferTx({
       channel: "linq",
+      linqAffirmation: LINQ_AFFIRMATION,
       memberId: "member_grantor",
       messageLookupKeyReadCandidates: [firstOffer.messageLookupKey],
       now,
@@ -2173,6 +2397,10 @@ function buildStatefulJoinOfferTx(): PrismaClient & {
     findUnique: ReturnType<typeof vi.fn>;
     updateMany: ReturnType<typeof vi.fn>;
   };
+  hostedLinqProviderEvent: {
+    findUnique: ReturnType<typeof vi.fn>;
+    updateMany: ReturnType<typeof vi.fn>;
+  };
   hostedThreadRoute: {
     findFirst: ReturnType<typeof vi.fn>;
   };
@@ -2196,6 +2424,7 @@ function buildStatefulJoinOfferTx(): PrismaClient & {
     projectionKindsJson: Prisma.InputJsonValue;
     revokedAt: Date | null;
   }> = [];
+  let linqApplicationState = "pending";
 
   return createPrismaStub({
     $queryRaw: vi.fn(async () => []),
@@ -2265,6 +2494,24 @@ function buildStatefulJoinOfferTx(): PrismaClient & {
       create: vi.fn(async () => ({ id: "membership_created" })),
       findUnique: vi.fn(async () => null),
       update: vi.fn(async () => ({})),
+    },
+    hostedLinqProviderEvent: {
+      findUnique: vi.fn(async () => ({
+        eventType: "reaction.added",
+        groupJoinApplicationState: linqApplicationState,
+        linqChatLookupKey: LINQ_AFFIRMATION.linqChatLookupKeyReadCandidates[0],
+        messageLookupKey: offers[0]?.messageLookupKey ?? null,
+        payloadHash: LINQ_AFFIRMATION.payloadHash,
+      })),
+      updateMany: vi.fn(async (args: {
+        data: { groupJoinApplicationState: string };
+      }) => {
+        if (linqApplicationState !== "pending") {
+          return { count: 0 };
+        }
+        linqApplicationState = args.data.groupJoinApplicationState;
+        return { count: 1 };
+      }),
     },
     hostedMember: {
       findUnique: vi.fn(async () => ({ suspendedAt: null })),
