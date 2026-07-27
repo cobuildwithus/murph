@@ -74,7 +74,9 @@ vi.mock("@/src/lib/phone-calls/account-deletion", () => ({
 import { HostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { createHostedLinqDeliverySourceRefLookupKey } from "@/src/lib/hosted-onboarding/linq-observability-identifiers";
 import {
+  buildHostedLinqInviteSignupDeliverySourceRef,
   buildHostedLinqInviteSignupDeliverySourceRefMemberPrefix,
+  buildHostedLinqInviteSignupEffectId,
   buildHostedLinqInviteSignupGroupJoinSourceRefFragment,
 } from "@/src/lib/hosted-onboarding/linq-invite-signup-effect-id";
 import { ComposioConnectedAppsRequestError } from "@/src/lib/connected-apps/composio";
@@ -532,6 +534,98 @@ describe("deleteHostedAccountData", () => {
       .toBeLessThan(models.indexOf("hostedGroupJoinOutreach"));
     expect(models.indexOf("hostedGroupJoinOutreach"))
       .toBeLessThan(models.indexOf("hostedGroup"));
+  });
+
+  it("locks an affected participant before the drain and reprojects its daily signup marker", async () => {
+    const participantMemberId = "member_group_participant";
+    const occurredAt = new Date("2026-07-27T14:00:00.000Z");
+    const outreachId = "hgrpjoa_owned_projection";
+    const sourceRef = buildHostedLinqInviteSignupDeliverySourceRef({
+      effectId: buildHostedLinqInviteSignupEffectId({
+        memberId: participantMemberId,
+        occurredAt,
+        sourceEventDigest: "a".repeat(32),
+      }),
+      groupJoinOutreachId: outreachId,
+      groupJoinRepliedAt: occurredAt.toISOString(),
+    });
+    const dailyStateUpdates: unknown[] = [];
+    const operationOrder: string[] = [];
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      dailyStateUpdates,
+      groupJoinDeliveryRows: [{ sourceRef }],
+      groupJoinOutreachOwnedGroupIds: ["hgrp_owned_projection"],
+      groupJoinOutreachRows: [{
+        dispatchStartedAt: occurredAt,
+        id: outreachId,
+        sentAt: occurredAt,
+        skippedAt: null,
+      }],
+      liveSignupDeliveryRows: [],
+      onTransaction: () => operationOrder.push("transaction"),
+      operationOrder,
+    });
+
+    await deleteHostedAccountData({
+      memberId: "member_123",
+      prisma,
+      request: new Request("https://join.example.test/settings"),
+    });
+
+    expect(operationOrder.indexOf(`queryRaw:${participantMemberId}`))
+      .toBeGreaterThanOrEqual(0);
+    expect(operationOrder.indexOf(`queryRaw:${participantMemberId}`))
+      .toBeLessThan(operationOrder.indexOf("executeRaw"));
+    expect(dailyStateUpdates).toContainEqual({
+      data: { onboardingLinkSentAt: null },
+      where: {
+        dayUtc: new Date("2026-07-27T00:00:00.000Z"),
+        memberId: participantMemberId,
+        onboardingLinkSentAt: { not: null },
+      },
+    });
+  });
+
+  it("retries instead of taking a newly discovered participant lock after the drain", async () => {
+    const occurredAt = new Date("2026-07-27T15:00:00.000Z");
+    const outreachId = "hgrpjoa_projection_drift";
+    const sourceRef = buildHostedLinqInviteSignupDeliverySourceRef({
+      effectId: buildHostedLinqInviteSignupEffectId({
+        memberId: "member_projection_drift",
+        occurredAt,
+        sourceEventDigest: "b".repeat(32),
+      }),
+      groupJoinOutreachId: outreachId,
+      groupJoinRepliedAt: occurredAt.toISOString(),
+    });
+    const deleteCalls: HostedAccountDeletionPrismaDeleteCall[] = [];
+    const operationOrder: string[] = [];
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      deleteCalls,
+      groupJoinDeliveryRows: [],
+      groupJoinDeliveryRowsAfterLock: [{ sourceRef }],
+      groupJoinOutreachOwnedGroupIds: ["hgrp_projection_drift"],
+      groupJoinOutreachRows: [{
+        id: outreachId,
+        sentAt: occurredAt,
+      }],
+      onTransaction: () => operationOrder.push("transaction"),
+      operationOrder,
+    });
+
+    await expect(deleteHostedAccountData({
+      memberId: "member_123",
+      prisma,
+      request: new Request("https://join.example.test/settings"),
+    })).rejects.toMatchObject({
+      code: "ACCOUNT_DELETION_GROUP_JOIN_PROJECTION_CHANGED",
+      httpStatus: 503,
+      retryable: true,
+    });
+
+    expect(operationOrder).not.toContain("queryRaw:member_projection_drift");
+    expect(deleteCalls.filter((call) => call.model === "hostedLinqDelivery"))
+      .toHaveLength(1);
   });
 
   it("deletes pre-member group-join outreach and its provider correlation", async () => {
@@ -2160,6 +2254,7 @@ function createHostedAccountDeletionPrismaForTest(input: {
   connectedAppConnectIntentRows?: HostedAccountDeletionConnectedAppIntentRow[];
   connectedAppsSession?: boolean;
   countResults?: Record<string, number>;
+  dailyStateUpdates?: unknown[];
   deleteCalls?: HostedAccountDeletionPrismaDeleteCall[];
   deviceConnections?: Array<{
     id: string;
@@ -2174,12 +2269,15 @@ function createHostedAccountDeletionPrismaForTest(input: {
   identityRecord?: Record<string, unknown> | null;
   groupJoinOutreachOwnedGroupIds?: readonly string[];
   groupJoinOutreachPhoneLookupKeys?: readonly string[];
+  groupJoinDeliveryRows?: readonly { sourceRef: string | null }[];
+  groupJoinDeliveryRowsAfterLock?: readonly { sourceRef: string | null }[];
   groupJoinOutreachRows?: readonly {
     dispatchStartedAt?: Date | null;
     id: string;
     sentAt?: Date | null;
     skippedAt?: Date | null;
   }[];
+  liveSignupDeliveryRows?: readonly { sourceRef: string | null }[];
   onTransaction: () => void;
   operationOrder?: string[];
   transactionConnectedAppConnectIntentRows?: HostedAccountDeletionConnectedAppIntentRow[];
@@ -2190,6 +2288,7 @@ function createHostedAccountDeletionPrismaForTest(input: {
     sources?: { sourceProviderSlug: string; status: string }[];
   }>;
 }): Parameters<typeof deleteHostedAccountData>[0]["prisma"] {
+  let groupJoinDeliveryReadCount = 0;
   const makeDeleteDelegate = (model: string): HostedAccountDeletionPrismaDeleteDelegate => ({
     count: async () => {
       input.operationOrder?.push(`count:${model}`);
@@ -2200,7 +2299,7 @@ function createHostedAccountDeletionPrismaForTest(input: {
       input.deleteCalls?.push({ model, where: args.where });
       return { count: 1 };
     },
-    findMany: async () => (
+    findMany: async (args) => (
       model === "hostedMemberIdentity"
         ? (input.groupJoinOutreachPhoneLookupKeys ?? []).map((phoneLookupKey) => ({
             phoneLookupKey,
@@ -2209,6 +2308,18 @@ function createHostedAccountDeletionPrismaForTest(input: {
           ? (input.groupJoinOutreachOwnedGroupIds ?? []).map((id) => ({ id }))
           : model === "hostedGroupJoinOutreach"
             ? input.groupJoinOutreachRows ?? []
+            : model === "hostedLinqDelivery"
+              ? (
+                  args.where
+                  && typeof args.where === "object"
+                  && "status" in args.where
+                )
+                ? input.liveSignupDeliveryRows ?? []
+                : groupJoinDeliveryReadCount++ === 0
+                  ? input.groupJoinDeliveryRows ?? []
+                  : input.groupJoinDeliveryRowsAfterLock
+                    ?? input.groupJoinDeliveryRows
+                    ?? []
             : []
     ),
   });
@@ -2223,8 +2334,14 @@ function createHostedAccountDeletionPrismaForTest(input: {
       }
       return 1;
     },
-    $queryRaw: async () => {
+    $queryRaw: async (...args: unknown[]) => {
       input.operationOrder?.push("queryRaw");
+      const memberId = args.slice(1).find((value): value is string =>
+        typeof value === "string" && value.startsWith("member_")
+      );
+      if (memberId) {
+        input.operationOrder?.push(`queryRaw:${memberId}`);
+      }
       return [{ id: "member_123" }];
     },
     deviceConnection: {
@@ -2255,6 +2372,13 @@ function createHostedAccountDeletionPrismaForTest(input: {
       ...makeDeleteDelegate("hostedMember"),
       updateMany: async () => {
         input.operationOrder?.push("update:hostedMember");
+        return { count: 1 };
+      },
+    },
+    hostedLinqDailyState: {
+      ...makeDeleteDelegate("hostedLinqDailyState"),
+      updateMany: async (args: unknown) => {
+        input.dailyStateUpdates?.push(args);
         return { count: 1 };
       },
     },
@@ -2467,6 +2591,9 @@ type HostedAccountDeletionPrismaTransactionFake = {
   };
   hostedConnectedAppConnectIntent: HostedAccountDeletionPrismaDeleteDelegate & {
     findMany: () => Promise<unknown[]>;
+  };
+  hostedLinqDailyState: HostedAccountDeletionPrismaDeleteDelegate & {
+    updateMany: (args: unknown) => Promise<{ count: number }>;
   };
   hostedThreadContainer: HostedAccountDeletionPrismaDeleteDelegate & {
     findMany: () => Promise<Array<{ memberId: string }>>;

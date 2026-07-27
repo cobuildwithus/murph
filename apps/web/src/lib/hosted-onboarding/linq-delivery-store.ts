@@ -2050,42 +2050,10 @@ async function resolveHostedLinqFailedDeliveryReopenTx(input: {
   // deliveries for the member/day. Recompute from that complete set after any
   // failed identity. The caller holds the member row lock, so the result is
   // independent of terminal receipt order, including concurrent failures.
-  const genericSourceRefPrefix = buildHostedLinqInviteSignupEffectId({
+  const liveAttempts = await readHostedLinqInviteSignupLiveAttemptsTx({
+    dayUtc: failedAttempt.dayUtc,
     memberId: failedAttempt.memberId,
-    occurredAt: failedAttempt.dayUtc,
-  });
-  const groupSourceRefPrefix =
-    `${buildHostedLinqInviteSignupDeliverySourceRefMemberPrefix(
-      failedAttempt.memberId,
-    )}${failedAttempt.dayUtc}`;
-  const otherLiveDeliveries =
-    await input.prisma.hostedLinqDelivery.findMany({
-      where: {
-        OR: [
-          { sourceRef: { startsWith: genericSourceRefPrefix } },
-          { sourceRef: { startsWith: groupSourceRefPrefix } },
-        ],
-        status: {
-          in: ["attempted", "provider_dispatch_started", "accepted", "delivered"],
-        },
-        template: {
-          in: ["invite_signup", "invite_signup_fallback"],
-        },
-      },
-      select: { sourceRef: true },
-    });
-  const liveAttempts = otherLiveDeliveries.flatMap((delivery) => {
-    const source = parseHostedLinqInviteSignupDeliverySourceRef(
-      delivery.sourceRef,
-    );
-    const attempt = source
-      ? parseHostedLinqInviteSignupEffectId(source.effectId)
-      : null;
-    return attempt
-      && attempt.memberId === failedAttempt.memberId
-      && attempt.dayUtc === failedAttempt.dayUtc
-      ? [attempt]
-      : [];
+    prisma: input.prisma,
   });
   const sameIdentityStillLive = liveAttempts.some(
     (attempt) =>
@@ -2100,6 +2068,60 @@ async function resolveHostedLinqFailedDeliveryReopenTx(input: {
   return link.groupJoinReplyContext
     ? { ...link, releaseDailySuppression: true }
     : link;
+}
+
+async function readHostedLinqInviteSignupLiveAttemptsTx(input: {
+  dayUtc: string;
+  memberId: string;
+  prisma: HostedLinqDeliveryClient;
+}): Promise<Array<NonNullable<
+  ReturnType<typeof parseHostedLinqInviteSignupEffectId>
+>>> {
+  const genericSourceRefPrefix = buildHostedLinqInviteSignupEffectId({
+    memberId: input.memberId,
+    occurredAt: input.dayUtc,
+  });
+  const groupSourceRefPrefix =
+    `${buildHostedLinqInviteSignupDeliverySourceRefMemberPrefix(
+      input.memberId,
+    )}${input.dayUtc}`;
+  const liveDeliveries = await input.prisma.hostedLinqDelivery.findMany({
+    where: {
+      OR: [
+        { sourceRef: { startsWith: genericSourceRefPrefix } },
+        { sourceRef: { startsWith: groupSourceRefPrefix } },
+      ],
+      status: {
+        in: ["attempted", "provider_dispatch_started", "accepted", "delivered"],
+      },
+      template: {
+        in: ["invite_signup", "invite_signup_fallback"],
+      },
+    },
+    select: { sourceRef: true },
+  });
+  return liveDeliveries.flatMap((delivery) => {
+    const source = parseHostedLinqInviteSignupDeliverySourceRef(
+      delivery.sourceRef,
+    );
+    const attempt = source
+      ? parseHostedLinqInviteSignupEffectId(source.effectId)
+      : null;
+    return attempt
+      && attempt.memberId === input.memberId
+      && attempt.dayUtc === input.dayUtc
+      ? [attempt]
+      : [];
+  });
+}
+
+export async function hasHostedLinqInviteSignupLiveDeliveryTx(input: {
+  dayUtc: string;
+  memberId: string;
+  prisma: HostedLinqDeliveryClient;
+}): Promise<boolean> {
+  const liveAttempts = await readHostedLinqInviteSignupLiveAttemptsTx(input);
+  return liveAttempts.length > 0;
 }
 
 function readHostedLinqAcceptedMilestoneStatus(

@@ -10,6 +10,33 @@ const providerMocks = vi.hoisted(() => ({
   }),
   sendHostedLinqChatMessage: vi.fn(),
 }));
+const accountDeletionMocks = vi.hoisted(() => ({
+  assertHostedPhoneCallsReadyForAccountDeletionTx:
+    vi.fn().mockResolvedValue(undefined),
+  assertHostedUsageCreditPurchasesReadyForAccountDeletionTx:
+    vi.fn().mockResolvedValue(undefined),
+  closeHostedUsageCreditPurchasesForAccountDeletion:
+    vi.fn().mockResolvedValue(undefined),
+  deleteHostedPhoneCallsForAccountDeletion:
+    vi.fn().mockResolvedValue(undefined),
+  deleteHostedRunnerUserDataBestEffort: vi.fn().mockResolvedValue({
+    alarmCleared: true,
+    configured: true,
+    deleted: true,
+    errorCode: null,
+    r2DeletedObjectCount: 0,
+    r2SkippedUserScopedPrefixes: false,
+    r2Supported: true,
+    r2UserScopedSkipReason: null,
+    runnerStateDeleted: true,
+  }),
+  terminateHostedUserRuntimeWorkflowBestEffort: vi.fn().mockResolvedValue({
+    configured: true,
+    errorCode: null,
+    notFound: false,
+    terminated: true,
+  }),
+}));
 
 vi.mock("@/src/lib/hosted-onboarding/linq", async () => {
   const actual = await vi.importActual<
@@ -32,6 +59,58 @@ vi.mock("@/src/lib/hosted-onboarding/linq-client", async () => {
   return {
     ...actual,
     getHostedLinqChatSummary: providerMocks.getHostedLinqChatSummary,
+  };
+});
+
+vi.mock(
+  "@/src/lib/hosted-onboarding/usage-credit-purchase-service",
+  async () => {
+    const actual = await vi.importActual<
+      typeof import("@/src/lib/hosted-onboarding/usage-credit-purchase-service")
+    >("@/src/lib/hosted-onboarding/usage-credit-purchase-service");
+    return {
+      ...actual,
+      assertHostedUsageCreditPurchasesReadyForAccountDeletionTx:
+        accountDeletionMocks
+          .assertHostedUsageCreditPurchasesReadyForAccountDeletionTx,
+      closeHostedUsageCreditPurchasesForAccountDeletion:
+        accountDeletionMocks.closeHostedUsageCreditPurchasesForAccountDeletion,
+    };
+  },
+);
+
+vi.mock("@/src/lib/hosted-execution/user-data-delete", async () => {
+  const actual = await vi.importActual<
+    typeof import("@/src/lib/hosted-execution/user-data-delete")
+  >("@/src/lib/hosted-execution/user-data-delete");
+  return {
+    ...actual,
+    deleteHostedRunnerUserDataBestEffort:
+      accountDeletionMocks.deleteHostedRunnerUserDataBestEffort,
+  };
+});
+
+vi.mock("@/src/lib/hosted-orchestration/workflow-termination", async () => {
+  const actual = await vi.importActual<
+    typeof import("@/src/lib/hosted-orchestration/workflow-termination")
+  >("@/src/lib/hosted-orchestration/workflow-termination");
+  return {
+    ...actual,
+    terminateHostedUserRuntimeWorkflowBestEffort:
+      accountDeletionMocks.terminateHostedUserRuntimeWorkflowBestEffort,
+  };
+});
+
+vi.mock("@/src/lib/phone-calls/account-deletion", async () => {
+  const actual = await vi.importActual<
+    typeof import("@/src/lib/phone-calls/account-deletion")
+  >("@/src/lib/phone-calls/account-deletion");
+  return {
+    ...actual,
+    assertHostedPhoneCallsReadyForAccountDeletionTx:
+      accountDeletionMocks.assertHostedPhoneCallsReadyForAccountDeletionTx,
+    deleteHostedPhoneCallsForAccountDeletion:
+      accountDeletionMocks.deleteHostedPhoneCallsForAccountDeletion,
   };
 });
 
@@ -62,6 +141,7 @@ import { parseHostedLinqProviderEvent } from "@/src/lib/hosted-onboarding/linq-p
 import {
   buildHostedMemberIdentityPrivateColumns,
 } from "@/src/lib/hosted-onboarding/member-private-codecs";
+import { lockHostedMemberRow } from "@/src/lib/hosted-onboarding/shared";
 import {
   createHostedLinqDeliveryIdempotencyLookupKey,
   createHostedLinqProviderEventLookupKey,
@@ -72,6 +152,7 @@ import {
 import {
   handleHostedOnboardingLinqWebhook,
 } from "@/src/lib/hosted-onboarding/webhook-service";
+import { deleteHostedAccountData } from "@/src/lib/hosted-privacy/account-data-service";
 import { createPrismaClient } from "@/src/lib/prisma";
 
 const databaseUrl = process.env.DATABASE_URL?.trim() ?? "";
@@ -609,13 +690,39 @@ describe.skipIf(!runPostgresProof)(
         });
         expect(providerMocks.sendHostedLinqChatMessage).toHaveBeenCalledTimes(2);
 
-        // Once every group-aware identity also fails, the same member-owned
-        // projection must converge to open regardless of receipt order.
+        // Production account deletion removes the first group destination and
+        // its correlation. The distinct live group identity must continue to
+        // justify shared suppression.
+        await deleteHostedAccountData({
+          memberId: ownerMemberId,
+          prisma,
+          request: new Request("https://join.example.test/settings"),
+        });
+        await expect(prisma.hostedLinqDelivery.findFirst({
+          select: { id: true },
+          where: {
+            messageLookupKey:
+              createHostedLinqMessageLookupKey(originalProviderMessageId),
+          },
+        })).resolves.toBeNull();
+        await expect(prisma.hostedLinqDailyState.findFirst({
+          select: { onboardingLinkSentAt: true },
+          where: {
+            dayUtc: new Date("2026-07-24T00:00:00.000Z"),
+            memberId: participantMemberId,
+          },
+        })).resolves.toEqual({
+          onboardingLinkSentAt: groupSignupAcceptedAt,
+        });
+
+        // A receipt that loses its deleted provider correlation cannot be the
+        // projection owner. The deletion transaction must already have
+        // converged the marker.
         await prisma.$transaction((tx) =>
           ingestHostedLinqProviderEventTx({
             event: buildParsedFailureReceipt({
-              eventId: `event-newer-group-failed-${randomUUID()}`,
-              messageId: newerProviderMessageId,
+              eventId: `event-original-group-failed-${randomUUID()}`,
+              messageId: originalProviderMessageId,
               occurredAt: "2026-07-24T20:02:10.000Z",
               recipientPhone,
             }),
@@ -631,11 +738,28 @@ describe.skipIf(!runPostgresProof)(
         })).resolves.toEqual({
           onboardingLinkSentAt: groupSignupAcceptedAt,
         });
+
+        // Removing the final live group identity clears the participant's
+        // marker inside deleteHostedAccountData before the group cascade.
+        await deleteHostedAccountData({
+          memberId: newerOwnerMemberId,
+          prisma,
+          request: new Request("https://join.example.test/settings"),
+        });
+        await expect(prisma.hostedLinqDailyState.findFirst({
+          select: { onboardingLinkSentAt: true },
+          where: {
+            dayUtc: new Date("2026-07-24T00:00:00.000Z"),
+            memberId: participantMemberId,
+          },
+        })).resolves.toEqual({
+          onboardingLinkSentAt: null,
+        });
         await prisma.$transaction((tx) =>
           ingestHostedLinqProviderEventTx({
             event: buildParsedFailureReceipt({
-              eventId: `event-original-group-failed-${randomUUID()}`,
-              messageId: originalProviderMessageId,
+              eventId: `event-newer-group-failed-${randomUUID()}`,
+              messageId: newerProviderMessageId,
               occurredAt: "2026-07-24T20:02:20.000Z",
               recipientPhone,
             }),
@@ -652,11 +776,8 @@ describe.skipIf(!runPostgresProof)(
           onboardingLinkSentAt: null,
         });
 
-        // The exact group owner may disappear before the next inbound. That
-        // must not strand the ordinary signup retry behind the old marker.
-        await prisma.hostedGroup.deleteMany({
-          where: { id: { in: [groupId, newerGroupId] } },
-        });
+        // Both exact group owners are gone before the next inbound. The
+        // participant must still receive an ordinary signup retry.
         const retryInboundEvent = buildDirectReplyEvent({
           chatId,
           eventId: `event-retry-${randomUUID()}`,
@@ -859,6 +980,201 @@ describe.skipIf(!runPostgresProof)(
         }
       },
     );
+
+    it("serializes an in-flight failure receipt with group-owner account deletion", async () => {
+      const deletionPrisma = createPrismaClient({ databaseUrl, poolMax: 2 });
+      const receiptPrisma = createPrismaClient({ databaseUrl, poolMax: 2 });
+      const ownerMemberId = `hbm_a_delete_owner_${randomUUID()}`;
+      const participantMemberId = `hbm_z_delete_participant_${randomUUID()}`;
+      const groupId = `hgrp_delete_race_${randomUUID()}`;
+      const offerId = `hgrpjo_delete_race_${randomUUID()}`;
+      const outreachId = `hgrpjoa_delete_race_${randomUUID()}`;
+      const acceptedAt = new Date("2026-07-27T16:00:00.000Z");
+      const dayUtc = new Date("2026-07-27T00:00:00.000Z");
+      const participantPhone = createUniqueTestPhone("+1202");
+      const participantPhoneLookupKey =
+        createHostedPhoneLookupKey(participantPhone);
+      const recipientPhone = createUniqueTestPhone("+1303");
+      const recipientPhoneLookupKey =
+        createHostedPhoneLookupKey(recipientPhone);
+      const providerMessageId = `linq-delete-race-${randomUUID()}`;
+      const messageLookupKey =
+        createHostedLinqMessageLookupKey(providerMessageId);
+      const effectId = buildHostedLinqInviteSignupEffectId({
+        memberId: participantMemberId,
+        occurredAt: acceptedAt,
+        sourceEventDigest: randomUUID().replaceAll("-", "").slice(0, 32),
+      });
+      const sourceRef = buildHostedLinqInviteSignupDeliverySourceRef({
+        effectId,
+        groupJoinOutreachId: outreachId,
+        groupJoinRepliedAt: acceptedAt.toISOString(),
+      });
+      const deliveryLookupKey =
+        createHostedLinqDeliveryIdempotencyLookupKey(effectId);
+      const rawEventId = `event-delete-race-${randomUUID()}`;
+      if (
+        !participantPhoneLookupKey
+        || !recipientPhoneLookupKey
+        || !messageLookupKey
+        || !deliveryLookupKey
+      ) {
+        throw new Error("Expected account-deletion race lookup keys.");
+      }
+
+      let releaseReceiptLock = () => {};
+      const receiptMayContinue = new Promise<void>((resolve) => {
+        releaseReceiptLock = resolve;
+      });
+      let reportReceiptLock = () => {};
+      const receiptLocked = new Promise<void>((resolve) => {
+        reportReceiptLock = resolve;
+      });
+
+      try {
+        await deletionPrisma.hostedMember.createMany({
+          data: [
+            { id: ownerMemberId },
+            { id: participantMemberId },
+          ],
+        });
+        await deletionPrisma.hostedGroup.create({
+          data: {
+            displayName: "Deletion Race Group",
+            id: groupId,
+            joinCode: `join-delete-race-${randomUUID()}`,
+            joinCodeCreatedAt: acceptedAt,
+            ownerMemberId,
+            runtimeMemberId: ownerMemberId,
+          },
+        });
+        await deletionPrisma.hostedGroupJoinOffer.create({
+          data: {
+            groupId,
+            id: offerId,
+            messageLookupKey: `offer-delete-race-${randomUUID()}`,
+            postedAt: acceptedAt,
+            projectionKindsJson: ["best_effort"],
+          },
+        });
+        await deletionPrisma.hostedGroupJoinOutreach.create({
+          data: {
+            groupId,
+            id: outreachId,
+            nextAttemptAt: acceptedAt,
+            offerId,
+            participantPhoneEncrypted: "encrypted-test-phone",
+            participantPhoneLookupKey,
+            repliedAt: acceptedAt,
+            requestedAt: acceptedAt,
+            sentAt: acceptedAt,
+          },
+        });
+        await deletionPrisma.hostedLinqDailyState.create({
+          data: {
+            dayUtc,
+            firstSeenAt: acceptedAt,
+            lastSeenAt: acceptedAt,
+            memberId: participantMemberId,
+            onboardingLinkSentAt: acceptedAt,
+          },
+        });
+        await deletionPrisma.hostedLinqDelivery.create({
+          data: {
+            acceptedAt,
+            attemptedAt: acceptedAt,
+            id: `hld_delete_race_${randomUUID()}`,
+            idempotencyKey: deliveryLookupKey,
+            messageLookupKey,
+            source: "hosted_webhook_side_effect",
+            sourceRef,
+            status: "accepted",
+            targetKind: "thread",
+            template: "invite_signup",
+          },
+        });
+
+        const failureReceipt = buildParsedFailureReceipt({
+          eventId: rawEventId,
+          messageId: providerMessageId,
+          occurredAt: "2026-07-27T16:01:00.000Z",
+          recipientPhone,
+        });
+        const receipt = receiptPrisma.$transaction(async (tx) => {
+          await lockHostedMemberRow(tx, participantMemberId);
+          reportReceiptLock();
+          await receiptMayContinue;
+          return ingestHostedLinqProviderEventTx({
+            event: failureReceipt,
+            prisma: tx,
+          });
+        });
+        await receiptLocked;
+        let deletionSettled = false;
+        const deletion = deleteHostedAccountData({
+          memberId: ownerMemberId,
+          prisma: deletionPrisma,
+          request: new Request("https://join.example.test/settings"),
+        }).finally(() => {
+          deletionSettled = true;
+        });
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        expect(deletionSettled).toBe(false);
+        releaseReceiptLock();
+
+        await expect(withTimeout(
+          Promise.all([receipt, deletion]),
+          10_000,
+        )).resolves.toBeDefined();
+        await expect(deletionPrisma.hostedLinqDailyState.findUnique({
+          select: { onboardingLinkSentAt: true },
+          where: {
+            memberId_dayUtc: {
+              dayUtc,
+              memberId: participantMemberId,
+            },
+          },
+        })).resolves.toEqual({ onboardingLinkSentAt: null });
+        await expect(deletionPrisma.hostedLinqDelivery.findUnique({
+          select: { id: true },
+          where: { idempotencyKey: deliveryLookupKey },
+        })).resolves.toBeNull();
+        await expect(deletionPrisma.hostedGroup.findUnique({
+          select: { id: true },
+          where: { id: groupId },
+        })).resolves.toBeNull();
+      } finally {
+        releaseReceiptLock();
+        const eventLookupKey =
+          createHostedLinqProviderEventLookupKey(rawEventId);
+        await deletionPrisma.hostedLinqAlert.deleteMany({
+          where: { eventId: eventLookupKey },
+        });
+        await deletionPrisma.hostedLinqProviderEvent.deleteMany({
+          where: { eventId: eventLookupKey },
+        });
+        await deletionPrisma.hostedLinqDelivery.deleteMany({
+          where: { idempotencyKey: deliveryLookupKey },
+        });
+        await deletionPrisma.hostedGroup.deleteMany({
+          where: { id: groupId },
+        });
+        await deletionPrisma.hostedMember.deleteMany({
+          where: {
+            id: {
+              in: [ownerMemberId, participantMemberId],
+            },
+          },
+        });
+        await deletionPrisma.hostedLinqLine.deleteMany({
+          where: { phoneNumberLookupKey: recipientPhoneLookupKey },
+        });
+        await Promise.all([
+          deletionPrisma.$disconnect(),
+          receiptPrisma.$disconnect(),
+        ]);
+      }
+    });
   },
 );
 
@@ -1010,4 +1326,26 @@ function isClearlyLocalPostgresUrl(value: string): boolean {
   const effectiveHost = (hostOverrides[0] || parsed.hostname).toLowerCase();
   return ["127.0.0.1", "::1", "[::1]", "localhost"].includes(effectiveHost)
     || effectiveHost.startsWith("/");
+}
+
+async function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+): Promise<T> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_resolve, reject) => {
+        timeout = setTimeout(
+          () => reject(new Error(`Timed out after ${timeoutMs}ms.`)),
+          timeoutMs,
+        );
+      }),
+    ]);
+  } finally {
+    if (timeout) {
+      clearTimeout(timeout);
+    }
+  }
 }

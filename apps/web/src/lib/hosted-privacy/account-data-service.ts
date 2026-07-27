@@ -27,15 +27,24 @@ import { HOSTED_GROUP_JOIN_OUTREACH_DELIVERY_SOURCE } from "@/src/lib/hosted-gro
 import { acquireHostedGroupJoinOutreachDrainLockTx } from "@/src/lib/hosted-groups/group-join-outreach-store";
 import { createHostedLinqDeliverySourceRefLookupKey } from "@/src/lib/hosted-onboarding/linq-observability-identifiers";
 import {
+  hasHostedLinqInviteSignupLiveDeliveryTx,
+} from "../hosted-onboarding/linq-delivery-store";
+import {
+  releaseHostedLinqOnboardingLinkNoticeClaim,
+} from "../hosted-onboarding/linq-daily-state";
+import {
   buildHostedLinqInviteSignupDeliverySourceRefMemberPrefix,
   buildHostedLinqInviteSignupEffectIdMemberPrefix,
   buildHostedLinqInviteSignupGroupJoinSourceRefFragment,
+  parseHostedLinqInviteSignupDeliverySourceRef,
+  parseHostedLinqInviteSignupEffectId,
 } from "../hosted-onboarding/linq-invite-signup-effect-id";
 import { getHostedOnboardingStripe } from "../hosted-onboarding/runtime";
 import { logHostedStripeFailure } from "../hosted-onboarding/stripe-error-log";
 import {
   generateHostedAccountExitReasonId,
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
+  lockHostedMemberRow,
 } from "../hosted-onboarding/shared";
 import {
   assertHostedUsageCreditPurchasesReadyForAccountDeletionTx,
@@ -729,12 +738,33 @@ export async function deleteHostedAccountData(input: {
         prisma: tx,
       }),
     ]);
-
-    for (const memberId of transactionDeletionMemberIds) {
-      await lockHostedMemberForAccountDeletionTx({
-        memberId,
+    const transactionDeletionMemberIdFilter = buildStringInFilter(
+      transactionDeletionMemberIds,
+    );
+    const projectionSnapshot =
+      await readHostedGroupJoinOutreachDeletionSnapshot({
+        memberIdFilter: transactionDeletionMemberIdFilter,
         prisma: tx,
       });
+    const projectionMemberIds = uniqueStrings(
+      readHostedLinqSignupProjectionIdentities(
+        projectionSnapshot.deliveries,
+      ).map((identity) => identity.memberId),
+    );
+    const deletionMemberIdSet = new Set(transactionDeletionMemberIds);
+    const lockedProjectionMemberIds = new Set(
+      [...transactionDeletionMemberIds, ...projectionMemberIds].sort(),
+    );
+
+    for (const memberId of lockedProjectionMemberIds) {
+      if (deletionMemberIdSet.has(memberId)) {
+        await lockHostedMemberForAccountDeletionTx({
+          memberId,
+          prisma: tx,
+        });
+      } else {
+        await lockHostedMemberRow(tx, memberId);
+      }
     }
     await refreshHostedMembersAccountDeletionFenceTx({
       memberIds: transactionDeletionMemberIds,
@@ -771,6 +801,7 @@ export async function deleteHostedAccountData(input: {
     });
     const deletedCounts = await deleteHostedAccountPrismaRows({
       connectionIdentities: deviceConnectionIdentities,
+      lockedProjectionMemberIds,
       memberIds: transactionDeletionMemberIds,
       prisma: tx,
     });
@@ -1074,10 +1105,121 @@ function buildHostedLinqInviteSignupDeliveryWhere(
   };
 }
 
+type HostedGroupJoinOutreachDeletionSnapshot = {
+  deliveries: Array<{ sourceRef: string | null }>;
+  deliveryWhere: Prisma.HostedLinqDeliveryWhereInput | null;
+  outreachIds: string[];
+};
+
+type HostedLinqSignupProjectionIdentity = {
+  dayUtc: string;
+  memberId: string;
+};
+
+async function readHostedGroupJoinOutreachDeletionSnapshot(input: {
+  memberIdFilter: string | { in: string[] };
+  prisma: Prisma.TransactionClient;
+}): Promise<HostedGroupJoinOutreachDeletionSnapshot> {
+  const identities = await input.prisma.hostedMemberIdentity.findMany({
+    where: { memberId: input.memberIdFilter },
+    select: { phoneLookupKey: true },
+  });
+  const phoneLookupKeys = uniqueStrings(
+    identities
+      .map((identity) => identity.phoneLookupKey)
+      .filter((lookupKey): lookupKey is string => Boolean(lookupKey)),
+  );
+  const ownedGroups = await input.prisma.hostedGroup.findMany({
+    where: {
+      OR: [
+        { ownerMemberId: input.memberIdFilter },
+        { runtimeMemberId: input.memberIdFilter },
+      ],
+    },
+    select: { id: true },
+  });
+  const ownedGroupIds = ownedGroups.map((group) => group.id);
+  if (phoneLookupKeys.length === 0 && ownedGroupIds.length === 0) {
+    return { deliveries: [], deliveryWhere: null, outreachIds: [] };
+  }
+
+  const outreaches = await input.prisma.hostedGroupJoinOutreach.findMany({
+    where: {
+      OR: [
+        ...(phoneLookupKeys.length > 0
+          ? [{ participantPhoneLookupKey: { in: phoneLookupKeys } }]
+          : []),
+        ...(ownedGroupIds.length > 0
+          ? [{ groupId: { in: ownedGroupIds } }]
+          : []),
+      ],
+    },
+    select: { id: true },
+  });
+  const outreachIds = outreaches.map((outreach) => outreach.id);
+  if (outreachIds.length === 0) {
+    return { deliveries: [], deliveryWhere: null, outreachIds: [] };
+  }
+
+  const deliverySourceRefs = outreachIds
+    .map((outreachId) => createHostedLinqDeliverySourceRefLookupKey(outreachId))
+    .filter((lookupKey): lookupKey is string => Boolean(lookupKey));
+  const deliveryWhere: Prisma.HostedLinqDeliveryWhereInput = {
+    OR: [
+      ...(deliverySourceRefs.length > 0
+        ? [{
+            source: HOSTED_GROUP_JOIN_OUTREACH_DELIVERY_SOURCE,
+            sourceRef: { in: deliverySourceRefs },
+          }]
+        : []),
+      ...outreachIds.map((outreachId) => ({
+        source: "hosted_webhook_side_effect",
+        sourceRef: {
+          contains:
+            buildHostedLinqInviteSignupGroupJoinSourceRefFragment(outreachId),
+        },
+        template: {
+          in: ["invite_signup", "invite_signup_fallback"],
+        },
+      })),
+    ],
+  };
+  const deliveries = await input.prisma.hostedLinqDelivery.findMany({
+    select: { sourceRef: true },
+    where: deliveryWhere,
+  });
+
+  return { deliveries, deliveryWhere, outreachIds };
+}
+
+function readHostedLinqSignupProjectionIdentities(
+  deliveries: readonly { sourceRef: string | null }[],
+): HostedLinqSignupProjectionIdentity[] {
+  const identities = new Map<string, HostedLinqSignupProjectionIdentity>();
+  for (const delivery of deliveries) {
+    const source = parseHostedLinqInviteSignupDeliverySourceRef(
+      delivery.sourceRef,
+    );
+    if (!source?.groupJoinReplyContext) {
+      continue;
+    }
+    const attempt = parseHostedLinqInviteSignupEffectId(source.effectId);
+    if (!attempt) {
+      continue;
+    }
+    const identity = {
+      dayUtc: attempt.dayUtc,
+      memberId: attempt.memberId,
+    };
+    identities.set(`${identity.memberId}\0${identity.dayUtc}`, identity);
+  }
+  return [...identities.values()];
+}
 
 async function deleteHostedGroupJoinOutreachRowsForMembers(
   prisma: Prisma.TransactionClient,
   memberIdFilter: string | { in: string[] },
+  lockedProjectionMemberIds: ReadonlySet<string>,
 ): Promise<{ deliveryCount: number; outreachCount: number }> {
   // The outreach row and its provider correlation are one privacy record, and the
   // correlation's only link is its source reference. Two things make that fragile,
@@ -1093,42 +1235,26 @@ async function deleteHostedGroupJoinOutreachRowsForMembers(
   // before the outreach row is gone.
   await acquireHostedGroupJoinOutreachDrainLockTx(prisma);
 
-  const identities = await prisma.hostedMemberIdentity.findMany({
-    where: { memberId: memberIdFilter },
-    select: { phoneLookupKey: true },
+  const snapshot = await readHostedGroupJoinOutreachDeletionSnapshot({
+    memberIdFilter,
+    prisma,
   });
-  const phoneLookupKeys = uniqueStrings(
-    identities
-      .map((identity) => identity.phoneLookupKey)
-      .filter((lookupKey): lookupKey is string => Boolean(lookupKey)),
-  );
-  const ownedGroups = await prisma.hostedGroup.findMany({
-    where: {
-      OR: [
-        { ownerMemberId: memberIdFilter },
-        { runtimeMemberId: memberIdFilter },
-      ],
-    },
-    select: { id: true },
-  });
-  const ownedGroupIds = ownedGroups.map((group) => group.id);
-  if (phoneLookupKeys.length === 0 && ownedGroupIds.length === 0) {
+  if (!snapshot.deliveryWhere) {
     return { deliveryCount: 0, outreachCount: 0 };
   }
-
-  const outreaches = await prisma.hostedGroupJoinOutreach.findMany({
-    where: {
-      OR: [
-        ...(phoneLookupKeys.length > 0
-          ? [{ participantPhoneLookupKey: { in: phoneLookupKeys } }]
-          : []),
-        ...(ownedGroupIds.length > 0 ? [{ groupId: { in: ownedGroupIds } }] : []),
-      ],
-    },
-    select: { id: true },
-  });
-  if (outreaches.length === 0) {
-    return { deliveryCount: 0, outreachCount: 0 };
+  const projectionIdentities = readHostedLinqSignupProjectionIdentities(
+    snapshot.deliveries,
+  );
+  const unlockedProjectionMember = projectionIdentities.find(
+    (identity) => !lockedProjectionMemberIds.has(identity.memberId),
+  );
+  if (unlockedProjectionMember) {
+    throw hostedOnboardingError({
+      code: "ACCOUNT_DELETION_GROUP_JOIN_PROJECTION_CHANGED",
+      httpStatus: 503,
+      message: "Group join delivery state changed during account deletion. Retry account deletion before local account records are removed.",
+      retryable: true,
+    });
   }
 
   // Deletion preempts any pending dispatch rather than waiting for one. The
@@ -1139,38 +1265,25 @@ async function deleteHostedGroupJoinOutreachRowsForMembers(
   // provider failure defers a row, so a retry-pending outreach would look live
   // indefinitely and strand this deletion after it has already suspended the
   // member, revoked providers, and cancelled billing.
-  const outreachIds = outreaches.map((outreach) => outreach.id);
-  const deliverySourceRefs = outreachIds
-    .map((outreachId) => createHostedLinqDeliverySourceRefLookupKey(outreachId))
-    .filter((lookupKey): lookupKey is string => Boolean(lookupKey));
-  const deliveries = outreachIds.length > 0
-    ? await prisma.hostedLinqDelivery.deleteMany({
-        where: {
-          OR: [
-            ...(deliverySourceRefs.length > 0
-              ? [{
-                  source: HOSTED_GROUP_JOIN_OUTREACH_DELIVERY_SOURCE,
-                  sourceRef: { in: deliverySourceRefs },
-                }]
-              : []),
-            ...outreachIds.map((outreachId) => ({
-              source: "hosted_webhook_side_effect",
-              sourceRef: {
-                contains:
-                  buildHostedLinqInviteSignupGroupJoinSourceRefFragment(
-                    outreachId,
-                  ),
-              },
-              template: {
-                in: ["invite_signup", "invite_signup_fallback"],
-              },
-            })),
-          ],
-        },
-      })
-    : { count: 0 };
+  const deliveries = await prisma.hostedLinqDelivery.deleteMany({
+    where: snapshot.deliveryWhere,
+  });
+  for (const identity of projectionIdentities) {
+    const hasLiveDelivery = await hasHostedLinqInviteSignupLiveDeliveryTx({
+      dayUtc: identity.dayUtc,
+      memberId: identity.memberId,
+      prisma,
+    });
+    if (!hasLiveDelivery) {
+      await releaseHostedLinqOnboardingLinkNoticeClaim({
+        memberId: identity.memberId,
+        occurredAt: identity.dayUtc,
+        prisma,
+      });
+    }
+  }
   const removed = await prisma.hostedGroupJoinOutreach.deleteMany({
-    where: { id: { in: outreachIds } },
+    where: { id: { in: snapshot.outreachIds } },
   });
 
   return { deliveryCount: deliveries.count, outreachCount: removed.count };
@@ -1410,6 +1523,7 @@ function isStripeResourceMissingError(error: unknown): boolean {
 
 async function deleteHostedAccountPrismaRows(input: {
   connectionIdentities: readonly DeviceConnectionIdentity[];
+  lockedProjectionMemberIds: ReadonlySet<string>;
   memberIds: readonly string[];
   prisma: Prisma.TransactionClient;
 }): Promise<HostedAccountDataCounts> {
@@ -1460,6 +1574,7 @@ async function deleteHostedAccountPrismaRows(input: {
     await deleteHostedGroupJoinOutreachRowsForMembers(
       input.prisma,
       memberIdFilter,
+      input.lockedProjectionMemberIds,
     );
   recordCount(
     "prisma.hosted_group_join_outreach",
