@@ -378,6 +378,9 @@ export function createHostedGroupToolWithCurrentTurnContext(input: {
       }
       const linqThread = resolveHostedGroupToolLinqThreadContext(
         input.linqDeliveryContexts,
+        request.action === "read_chat_participants"
+          ? "imessage_or_sms"
+          : "imessage_only",
       );
       return await input.groupToolPort.request(
         linqThread ? { ...request, linqThread } : request,
@@ -525,14 +528,19 @@ function resolveHostedGroupToolLinqSenderHandles(
 
 function resolveHostedGroupToolLinqThreadContext(
   contexts: readonly HostedAssistantLinqDeliveryContext[],
+  serviceScope: "imessage_only" | "imessage_or_sms" = "imessage_only",
 ): HostedRuntimeGroupToolLinqThreadContext | null {
   const eligible = new Map<string, HostedRuntimeGroupToolLinqThreadContext>();
   for (const context of contexts) {
     const authority = context.routeAuthority;
+    const service = context.service?.trim().toLowerCase();
     if (
       !authority
       || authority.threadId.trim().length === 0
-      || context.service?.trim().toLowerCase() !== "imessage"
+      || (
+        service !== "imessage"
+        && (serviceScope !== "imessage_or_sms" || service !== "sms")
+      )
       || context.threadIsDirect !== false
     ) {
       continue;
