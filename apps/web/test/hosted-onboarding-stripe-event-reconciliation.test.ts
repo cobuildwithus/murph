@@ -20,6 +20,7 @@ const mocks = vi.hoisted(() => ({
   findMemberForStripeSubscription: vi.fn(),
   listHostedStripeCheckoutSessionMemberIds: vi.fn(),
   prepareHostedCryptoDomainRootCandidates: vi.fn(),
+  prepareHostedFamilyStripeActivationCryptoDomainRoots: vi.fn(),
   prepareHostedLegacySyntheticFamilyCleanupTx: vi.fn(),
   readActiveHostedFamilySponsorship: vi.fn(),
   readHostedMemberBillingSnapshot: vi.fn(),
@@ -69,6 +70,8 @@ vi.mock("@/src/lib/hosted-onboarding/family-plan", async () => {
       activations: [],
       groupId: null,
     })),
+    prepareHostedFamilyStripeActivationCryptoDomainRoots:
+      mocks.prepareHostedFamilyStripeActivationCryptoDomainRoots,
     prepareHostedLegacySyntheticFamilyCleanupTx:
       mocks.prepareHostedLegacySyntheticFamilyCleanupTx,
   };
@@ -293,6 +296,9 @@ describe("hosted Stripe event reconciliation", () => {
     });
     mocks.listHostedStripeCheckoutSessionMemberIds.mockResolvedValue(["member_123"]);
     mocks.prepareHostedCryptoDomainRootCandidates.mockResolvedValue(new Map());
+    mocks.prepareHostedFamilyStripeActivationCryptoDomainRoots.mockResolvedValue(
+      new Map(),
+    );
     mocks.prepareHostedLegacySyntheticFamilyCleanupTx.mockResolvedValue(null);
     mocks.readActiveHostedFamilySponsorship.mockResolvedValue(false);
     mocks.readHostedMemberBillingSnapshot.mockResolvedValue(null);
@@ -404,6 +410,7 @@ describe("hosted Stripe event reconciliation", () => {
       "active",
       makeCanonicalSubscription(),
       preparedCryptoDomainRoots,
+      expect.any(Map),
     );
     expect(mocks.prepareHostedCryptoDomainRootCandidates).toHaveBeenCalledWith({
       prisma: prisma.client,
@@ -1032,6 +1039,7 @@ describe("hosted Stripe event reconciliation", () => {
       canonicalSubscription,
       expect.anything(),
       expect.anything(),
+      expect.any(Map),
     );
   });
 
@@ -1067,6 +1075,8 @@ describe("hosted Stripe event reconciliation", () => {
       expect.anything(),
       HostedBillingStatus.active,
       canonicalSubscription,
+      undefined,
+      expect.any(Map),
     );
   });
 
@@ -1470,6 +1480,7 @@ describe("hosted Stripe event reconciliation", () => {
       canonicalSubscription,
       expect.anything(),
       prisma.client,
+      expect.any(Map),
     );
     expect(mocks.cancelHostedFamilySponsoredCheckoutSubscription).toHaveBeenCalledWith({
       subscriptionId: "sub_123",
@@ -1511,6 +1522,8 @@ describe("hosted Stripe event reconciliation", () => {
       prisma.client,
       "active",
       canonicalSubscription,
+      undefined,
+      expect.any(Map),
     );
     expect(mocks.cancelHostedFamilySponsoredCheckoutSubscription).toHaveBeenCalledWith({
       subscriptionId: "sub_123",
@@ -1718,16 +1731,26 @@ describe("hosted Stripe event reconciliation", () => {
   it("uses the live Stripe subscription state instead of a stale subscription event payload", async () => {
     const prisma = createStripeEventPrismaHarness();
     const event = makeSubscriptionUpdatedEvent();
+    const preparedFamilyCryptoDomainRoots = new Map([
+      ["member_family_owner", new Map()],
+      ["member_family_child", new Map()],
+    ]);
     const canonicalSubscription = makeCanonicalSubscription({
       customer: "cus_subscription",
       id: "sub_123",
       metadata: {
-        memberId: "member_123",
+        accountGroupId: "hbag_family",
+        billingPlanCode: "launch_family_monthly",
+        kind: "hosted_family_plan",
       },
       status: "active",
     });
     mocks.stripe.events.retrieve.mockResolvedValue(event);
     mocks.stripe.subscriptions.retrieve.mockResolvedValue(canonicalSubscription);
+    mocks.findMemberForStripeSubscription.mockResolvedValue(null);
+    mocks.prepareHostedFamilyStripeActivationCryptoDomainRoots.mockResolvedValueOnce(
+      preparedFamilyCryptoDomainRoots,
+    );
     mocks.applyStripeSubscriptionUpdated.mockResolvedValueOnce({
       activatedMemberId: "member_family_owner",
       activatedMembers: [
@@ -1778,11 +1801,127 @@ describe("hosted Stripe event reconciliation", () => {
         sourceType: "stripe.customer.subscription.updated",
       }),
       expect.anything(),
+      preparedFamilyCryptoDomainRoots,
     );
+    expect(mocks.prepareHostedFamilyStripeActivationCryptoDomainRoots)
+      .toHaveBeenCalledWith({
+        prisma: prisma.client,
+        subscription: canonicalSubscription,
+      });
+    expect(
+      mocks.prepareHostedFamilyStripeActivationCryptoDomainRoots.mock
+        .invocationCallOrder[0],
+    ).toBeLessThan(
+      vi.mocked(prisma.client.$transaction).mock.invocationCallOrder.at(-1) ?? 0,
+    );
+    expect(mocks.prepareHostedCryptoDomainRootCandidates).not.toHaveBeenCalled();
     expect(mocks.stripe.subscriptions.retrieve).toHaveBeenCalledWith("sub_123");
   });
 
-  it("locks the direct member before retrieving canonical subscription state", async () => {
+  it("prepares Family candidates when a reused subscription still resolves its direct owner", async () => {
+    const prisma = createStripeEventPrismaHarness();
+    const event = makeSubscriptionUpdatedEvent();
+    const eventSubscription = event.data.object as Stripe.Subscription;
+    eventSubscription.metadata = {
+      ...eventSubscription.metadata,
+      kind: "hosted_family_plan",
+    };
+    const preparedFamilyCryptoDomainRoots = new Map([
+      ["member_123", new Map([["control", { domain: "control" }]])],
+      ["member_family_child", new Map([["control", { domain: "control" }]])],
+    ]);
+    const canonicalSubscription = makeCanonicalSubscription({
+      customer: "cus_subscription",
+      id: "sub_123",
+      metadata: {
+        accountGroupId: "hbag_family",
+        billingPlanCode: "launch_family_monthly",
+        kind: "hosted_family_plan",
+      },
+      status: "active",
+    });
+    mocks.stripe.events.retrieve.mockResolvedValue(event);
+    mocks.stripe.subscriptions.retrieve.mockResolvedValue(canonicalSubscription);
+    mocks.findMemberForStripeSubscription.mockResolvedValue({
+      core: { id: "member_123" },
+    });
+    mocks.prepareHostedFamilyStripeActivationCryptoDomainRoots.mockResolvedValue(
+      preparedFamilyCryptoDomainRoots,
+    );
+
+    await recordHostedStripeEvent({ event, prisma: prisma.client });
+    await expect(reconcileHostedStripeEventById({
+      eventId: event.id,
+      prisma: prisma.client,
+    })).resolves.toMatchObject({ status: "completed" });
+
+    expect(mocks.prepareHostedFamilyStripeActivationCryptoDomainRoots)
+      .toHaveBeenCalledWith({
+        prisma: prisma.client,
+        subscription: canonicalSubscription,
+      });
+    expect(mocks.applyStripeSubscriptionUpdated).toHaveBeenCalledWith(
+      canonicalSubscription,
+      expect.anything(),
+      expect.anything(),
+      preparedFamilyCryptoDomainRoots,
+    );
+    expect(mocks.prepareHostedCryptoDomainRootCandidates).not.toHaveBeenCalled();
+  });
+
+  it("prepares Family candidates for a paid invoice still owned by the prior direct billing ref", async () => {
+    const prisma = createStripeEventPrismaHarness();
+    const event = makeInvoicePaidEvent();
+    const preparedFamilyCryptoDomainRoots = new Map([
+      ["member_123", new Map([["control", { domain: "control" }]])],
+      ["member_family_child", new Map([["control", { domain: "control" }]])],
+    ]);
+    const canonicalSubscription = makeCanonicalSubscription({
+      customer: "cus_subscription",
+      id: "sub_123",
+      metadata: {
+        accountGroupId: "hbag_family",
+        billingPlanCode: "launch_family_monthly",
+        kind: "hosted_family_plan",
+      },
+      status: "active",
+    });
+    mocks.stripe.events.retrieve.mockResolvedValue(event);
+    mocks.stripe.subscriptions.retrieve.mockResolvedValue(canonicalSubscription);
+    mocks.findMemberForStripeInvoice.mockResolvedValue({
+      core: { id: "member_123" },
+    });
+    mocks.findMemberForStripeSubscription.mockResolvedValue({
+      core: { id: "member_123" },
+    });
+    mocks.prepareHostedFamilyStripeActivationCryptoDomainRoots.mockResolvedValue(
+      preparedFamilyCryptoDomainRoots,
+    );
+
+    await recordHostedStripeEvent({ event, prisma: prisma.client });
+    await expect(reconcileHostedStripeEventById({
+      eventId: event.id,
+      prisma: prisma.client,
+    })).resolves.toMatchObject({ status: "completed" });
+
+    expect(mocks.prepareHostedFamilyStripeActivationCryptoDomainRoots)
+      .toHaveBeenCalledWith({
+        prisma: prisma.client,
+        subscription: canonicalSubscription,
+      });
+    expect(mocks.applyStripeInvoicePaid).toHaveBeenCalledWith(
+      event.data.object,
+      expect.anything(),
+      expect.anything(),
+      HostedBillingStatus.active,
+      canonicalSubscription,
+      undefined,
+      preparedFamilyCryptoDomainRoots,
+    );
+    expect(mocks.prepareHostedCryptoDomainRootCandidates).not.toHaveBeenCalled();
+  });
+
+  it("prepares from a live subscription snapshot and re-retrieves after the member lock", async () => {
     const prisma = createStripeEventPrismaHarness();
     const event = makeSubscriptionUpdatedEvent();
     const canonicalSubscription = makeCanonicalSubscription({
@@ -1793,8 +1932,8 @@ describe("hosted Stripe event reconciliation", () => {
       },
       status: "trialing",
     });
-    const retrieveStarted = makeDeferred<void>();
-    const releaseRetrieve = makeDeferred<Stripe.Subscription>();
+    const authoritativeRetrieveStarted = makeDeferred<void>();
+    const releaseAuthoritativeRetrieve = makeDeferred<Stripe.Subscription>();
     const ordering: string[] = [];
     mocks.stripe.events.retrieve.mockResolvedValue(event);
     mocks.findMemberForStripeSubscription.mockImplementation(async (input: {
@@ -1809,11 +1948,16 @@ describe("hosted Stripe event reconciliation", () => {
       ordering.push("member-locked");
       return [];
     });
-    mocks.stripe.subscriptions.retrieve.mockImplementation(async () => {
-      ordering.push("subscription-retrieved");
-      retrieveStarted.resolve(undefined);
-      return releaseRetrieve.promise;
-    });
+    mocks.stripe.subscriptions.retrieve
+      .mockImplementationOnce(async () => {
+        ordering.push("subscription-preflight");
+        return canonicalSubscription;
+      })
+      .mockImplementationOnce(async () => {
+        ordering.push("subscription-authoritative");
+        authoritativeRetrieveStarted.resolve(undefined);
+        return releaseAuthoritativeRetrieve.promise;
+      });
     mocks.applyStripeSubscriptionUpdated.mockImplementationOnce(async () => {
       ordering.push("billing-written");
       return {
@@ -1830,27 +1974,30 @@ describe("hosted Stripe event reconciliation", () => {
       prisma: prisma.client,
     });
 
-    await retrieveStarted.promise;
+    await authoritativeRetrieveStarted.promise;
     expect(ordering).toEqual([
+      "subscription-preflight",
       "member-resolved",
       "member-locked",
-      "subscription-retrieved",
+      "subscription-authoritative",
     ]);
 
-    releaseRetrieve.resolve(canonicalSubscription);
+    releaseAuthoritativeRetrieve.resolve(canonicalSubscription);
     await expect(reconciliation).resolves.toMatchObject({ status: "completed" });
 
     expect(ordering).toEqual([
+      "subscription-preflight",
       "member-resolved",
       "member-locked",
-      "subscription-retrieved",
+      "subscription-authoritative",
       "member-resolved",
       "billing-written",
     ]);
     expect(mocks.findMemberForStripeSubscription).toHaveBeenCalledWith({
       prisma: prisma.client,
-      subscription: event.data.object,
+      subscription: canonicalSubscription,
     });
+    expect(mocks.findMemberForStripeSubscription).toHaveBeenCalledTimes(2);
     expect(prisma.client.$transaction).toHaveBeenCalledWith(
       expect.any(Function),
       {
@@ -1866,9 +2013,13 @@ describe("hosted Stripe event reconciliation", () => {
     const event = makeSubscriptionUpdatedEvent();
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     mocks.stripe.events.retrieve.mockResolvedValue(event);
-    mocks.stripe.subscriptions.retrieve.mockResolvedValue(makeCanonicalSubscription({
-      metadata: { memberId: "member_456" },
-    }));
+    mocks.stripe.subscriptions.retrieve
+      .mockResolvedValueOnce(makeCanonicalSubscription({
+        metadata: { memberId: "member_123" },
+      }))
+      .mockResolvedValueOnce(makeCanonicalSubscription({
+        metadata: { memberId: "member_456" },
+      }));
     mocks.findMemberForStripeSubscription.mockImplementation(async (input: {
       subscription: Stripe.Subscription;
     }) => ({
@@ -2165,11 +2316,12 @@ describe("hosted Stripe event reconciliation", () => {
       expect.anything(),
       HostedBillingStatus.past_due,
       canonicalSubscription,
+      expect.any(Map),
     );
     expect(mocks.stripe.subscriptions.retrieve).toHaveBeenCalledWith("sub_123");
   });
 
-  it("locks the direct member before retrieving invoice canonical subscription state", async () => {
+  it("prepares from a live invoice subscription and re-retrieves after the member lock", async () => {
     const prisma = createStripeEventPrismaHarness();
     const event = makeInvoicePaymentFailedEvent();
     const canonicalSubscription = makeCanonicalSubscription({
@@ -2177,8 +2329,8 @@ describe("hosted Stripe event reconciliation", () => {
       id: "sub_123",
       status: "past_due",
     });
-    const retrieveStarted = makeDeferred<void>();
-    const releaseRetrieve = makeDeferred<Stripe.Subscription>();
+    const authoritativeRetrieveStarted = makeDeferred<void>();
+    const releaseAuthoritativeRetrieve = makeDeferred<Stripe.Subscription>();
     const ordering: string[] = [];
     mocks.stripe.events.retrieve.mockResolvedValue(event);
     mocks.findMemberForStripeInvoice.mockImplementation(async () => {
@@ -2189,11 +2341,16 @@ describe("hosted Stripe event reconciliation", () => {
       ordering.push("member-locked");
       return [];
     });
-    mocks.stripe.subscriptions.retrieve.mockImplementation(async () => {
-      ordering.push("subscription-retrieved");
-      retrieveStarted.resolve(undefined);
-      return releaseRetrieve.promise;
-    });
+    mocks.stripe.subscriptions.retrieve
+      .mockImplementationOnce(async () => {
+        ordering.push("subscription-preflight");
+        return canonicalSubscription;
+      })
+      .mockImplementationOnce(async () => {
+        ordering.push("subscription-authoritative");
+        authoritativeRetrieveStarted.resolve(undefined);
+        return releaseAuthoritativeRetrieve.promise;
+      });
     mocks.applyStripeInvoicePaymentFailed.mockImplementationOnce(async () => {
       ordering.push("billing-written");
     });
@@ -2204,20 +2361,22 @@ describe("hosted Stripe event reconciliation", () => {
       prisma: prisma.client,
     });
 
-    await retrieveStarted.promise;
+    await authoritativeRetrieveStarted.promise;
     expect(ordering).toEqual([
+      "subscription-preflight",
       "member-resolved",
       "member-locked",
-      "subscription-retrieved",
+      "subscription-authoritative",
     ]);
 
-    releaseRetrieve.resolve(canonicalSubscription);
+    releaseAuthoritativeRetrieve.resolve(canonicalSubscription);
     await expect(reconciliation).resolves.toMatchObject({ status: "completed" });
 
     expect(ordering).toEqual([
+      "subscription-preflight",
       "member-resolved",
       "member-locked",
-      "subscription-retrieved",
+      "subscription-authoritative",
       "member-resolved",
       "billing-written",
     ]);
@@ -2315,6 +2474,7 @@ describe("hosted Stripe event reconciliation", () => {
       expect.anything(),
       HostedBillingStatus.past_due,
       canonicalSubscription,
+      expect.any(Map),
     );
   });
 
@@ -2358,6 +2518,7 @@ describe("hosted Stripe event reconciliation", () => {
         sourceType: `stripe.${type}`,
       }),
       expect.anything(),
+      expect.any(Map),
     );
   });
 

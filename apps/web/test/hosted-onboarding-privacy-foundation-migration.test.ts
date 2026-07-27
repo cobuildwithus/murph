@@ -249,6 +249,13 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
+    const hostedUserCryptoEnvelopeMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260501000000_hosted_user_crypto_envelopes/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     const dropHostedShareTablesMigrationSql = readFileSync(
       new URL(
         "../prisma/migrations/20260428010000_drop_hosted_share_tables/migration.sql",
@@ -918,6 +925,12 @@ describe("hosted Prisma baseline migration", () => {
       "20260726180000_hosted_thread_container_usage_default",
       "migration_lock.toml",
     ]);
+    expect(hostedUserCryptoEnvelopeMigrationSql).toContain(
+      "CREATE UNIQUE INDEX hosted_user_crypto_envelope_one_active_per_domain_idx",
+    );
+    expect(hostedUserCryptoEnvelopeMigrationSql).toMatch(
+      /ON hosted_user_crypto_envelope\(user_id, domain\)\s+WHERE status = 'active'/u,
+    );
     expect(schema).toContain(
       'monthlyUsageLimitUsdMicros BigInt              @default(7500000) @map("monthly_usage_limit_usd_micros")',
     );
