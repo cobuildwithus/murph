@@ -195,7 +195,39 @@ export async function writeHostedMemberStripeBillingTx(input: {
     assertHostedMemberNotSuspended(currentMember.core);
   }
   if (intentionalSuspension === undefined && billingOwnsCurrentSuspension) {
-    return currentMember;
+    const stripeCustomerId = currentMember.billingRef?.stripeCustomerId
+      ? undefined
+      : billingRefWriteValues.stripeCustomerId || undefined;
+    const stripeSubscriptionId = currentMember.billingRef?.stripeSubscriptionId
+      ? undefined
+      : billingRefWriteValues.stripeSubscriptionId || undefined;
+    const suspendedAt = currentMember.core.suspendedAt;
+
+    if ((!stripeCustomerId && !stripeSubscriptionId) || !suspendedAt) {
+      return currentMember;
+    }
+
+    await updateHostedMemberCoreState({
+      memberId: currentMember.core.id,
+      prisma: input.tx,
+      suspendedAt: null,
+    });
+    await writeHostedMemberStripeBillingRefTx({
+      memberId: currentMember.core.id,
+      stripeCustomerId,
+      stripeSubscriptionId,
+      tx: input.tx,
+    });
+    await updateHostedMemberCoreState({
+      memberId: currentMember.core.id,
+      prisma: input.tx,
+      suspendedAt,
+    });
+
+    return readHostedMemberBillingSnapshot({
+      memberId: currentMember.core.id,
+      prisma: input.tx,
+    });
   }
 
   if (intentionalSuspension !== undefined && intentionalSuspension !== null) {

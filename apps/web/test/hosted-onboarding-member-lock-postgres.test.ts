@@ -563,14 +563,31 @@ describe.skipIf(!runPostgresConcurrencyProof)(
 
     it.each([
       {
+        billingIdentity: "fully bound",
         label: "restoration completes before ordinary progress",
+        prebindSubscription: true,
         restoreCompletesLast: false,
       },
       {
+        billingIdentity: "fully bound",
         label: "ordinary progress completes before a delayed restoration",
+        prebindSubscription: true,
         restoreCompletesLast: true,
       },
-    ])("reconciles $label without stranding the member", async ({
+      {
+        billingIdentity: "customer-only",
+        label: "restoration retries before ordinary progress",
+        prebindSubscription: false,
+        restoreCompletesLast: false,
+      },
+      {
+        billingIdentity: "customer-only",
+        label: "ordinary progress completes before a delayed restoration",
+        prebindSubscription: false,
+        restoreCompletesLast: true,
+      },
+    ])("reconciles $label for a $billingIdentity member without stranding access", async ({
+      prebindSubscription,
       restoreCompletesLast,
     }) => {
       const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
@@ -622,8 +639,8 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         decrypt(input) {
           return input.value;
         },
-        encrypt() {
-          return "hsb-test:restore-reconciliation";
+        encrypt(input) {
+          return input.value;
         },
       });
       stripeProvider.eventsRetrieve.mockImplementation(async (eventId: string) => {
@@ -656,7 +673,11 @@ describe.skipIf(!runPostgresConcurrencyProof)(
             },
             member: initialMember,
             stripeCustomerId: customerId,
-            stripeSubscriptionId: subscriptionId,
+            ...(prebindSubscription
+              ? {
+                  stripeSubscriptionId: subscriptionId,
+                }
+              : {}),
             tx,
           }), { timeout: transactionTimeoutMs });
         await applyBillingReversal({
@@ -707,7 +728,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
             prisma: restoreClient,
           })).resolves.toMatchObject({
             eventId: restoreEvent.id,
-            status: "completed",
+            status: prebindSubscription ? "completed" : "failed",
           });
           await expect(reconcileHostedStripeEventById({
             eventId: ordinaryEvent.id,
@@ -716,6 +737,31 @@ describe.skipIf(!runPostgresConcurrencyProof)(
             eventId: ordinaryEvent.id,
             status: "completed",
           });
+          if (!prebindSubscription) {
+            await expect(observer.hostedStripeEvent.findUnique({
+              where: {
+                eventId: restoreEvent.id,
+              },
+            })).resolves.toMatchObject({
+              lastErrorCode: "HOSTED_STRIPE_SUBSCRIPTION_IDENTITY_PENDING",
+              status: HostedStripeEventStatus.failed,
+            });
+            await observer.hostedStripeEvent.update({
+              data: {
+                nextAttemptAt: new Date(0),
+              },
+              where: {
+                eventId: restoreEvent.id,
+              },
+            });
+            await expect(reconcileHostedStripeEventById({
+              eventId: restoreEvent.id,
+              prisma: restoreClient,
+            })).resolves.toMatchObject({
+              eventId: restoreEvent.id,
+              status: "completed",
+            });
+          }
         }
 
         await expect(observer.hostedMember.findUnique({
@@ -723,9 +769,12 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           where: { id: memberId },
         })).resolves.toMatchObject({
           billingRef: {
-            lastStripeEventCreatedAt: restoreCompletesLast
-              ? restoreAt
-              : ordinaryAt,
+            lastStripeEventCreatedAt:
+              prebindSubscription && !restoreCompletesLast
+                ? ordinaryAt
+                : restoreAt,
+            stripeCustomerLookupKey: expect.any(String),
+            stripeSubscriptionLookupKey: expect.any(String),
           },
           billingStatus: HostedBillingStatus.active,
           suspendedAt: null,

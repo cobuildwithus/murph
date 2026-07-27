@@ -303,6 +303,70 @@ describe("hosted onboarding stripe billing policy", () => {
     expect(mocks.writeHostedMemberStripeBillingRef).not.toHaveBeenCalled();
   });
 
+  it("binds only missing provider identity during billing-owned suspension", async () => {
+    const reversalCreatedAt = new Date("2026-04-25T00:00:00.000Z");
+    const subscriptionCreatedAt = new Date("2026-04-25T00:05:00.000Z");
+    const suspendedMember = makeMemberSnapshot({
+      billingRef: {
+        lastStripeEventCreatedAt: reversalCreatedAt,
+        memberId: "member_123",
+        stripeCustomerId: "cus_123",
+        stripeSubscriptionId: null,
+      },
+      core: {
+        billingStatus: HostedBillingStatus.unpaid,
+        suspendedAt: reversalCreatedAt,
+      },
+    });
+    const boundSuspendedMember = makeMemberSnapshot({
+      billingRef: {
+        lastStripeEventCreatedAt: reversalCreatedAt,
+        memberId: "member_123",
+        stripeCustomerId: "cus_123",
+        stripeSubscriptionId: "sub_123",
+      },
+      core: {
+        billingStatus: HostedBillingStatus.unpaid,
+        suspendedAt: reversalCreatedAt,
+      },
+    });
+    mocks.readHostedMemberBillingSnapshot
+      .mockResolvedValueOnce(suspendedMember)
+      .mockResolvedValueOnce(boundSuspendedMember);
+
+    await expect(writeHostedMemberStripeBillingTx({
+      billingStatus: HostedBillingStatus.active,
+      canonicalBillingStatus: HostedBillingStatus.active,
+      dispatchContext: {
+        eventCreatedAt: subscriptionCreatedAt,
+        occurredAt: subscriptionCreatedAt.toISOString(),
+        sourceEventId: "evt_subscription_while_reversed",
+        sourceType: "stripe.customer.subscription.updated",
+      },
+      member: suspendedMember,
+      stripeCustomerId: "cus_123",
+      stripeSubscriptionId: "sub_123",
+      tx: {} as never,
+    })).resolves.toEqual(boundSuspendedMember);
+
+    expect(mocks.updateHostedMemberCoreState).toHaveBeenNthCalledWith(1, {
+      memberId: "member_123",
+      prisma: {},
+      suspendedAt: null,
+    });
+    expect(mocks.writeHostedMemberStripeBillingRef).toHaveBeenCalledWith({
+      memberId: "member_123",
+      stripeCustomerId: undefined,
+      stripeSubscriptionId: "sub_123",
+      tx: {},
+    });
+    expect(mocks.updateHostedMemberCoreState).toHaveBeenNthCalledWith(2, {
+      memberId: "member_123",
+      prisma: {},
+      suspendedAt: reversalCreatedAt,
+    });
+  });
+
   it("does not mistake the account-deletion fence for a billing-owned suspension", async () => {
     const billingEventCreatedAt = new Date("2026-04-25T00:00:00.000Z");
     const deletionStartedAt = new Date("2026-04-25T00:05:00.000Z");
