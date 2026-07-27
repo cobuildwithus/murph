@@ -19,7 +19,9 @@ Key decisions:
 - Keep the browser share-card POST/no-store flow and the public URL tombstones unchanged.
 
 State:
-- Implementation, focused verification, and pre-commit owner verification are complete; exact-head PR review gates remain.
+- Implementation, preliminary remediation, parent review, latest-main reconciliation,
+  and final verification are complete. The plan is ready to close before the final
+  exact-head ReviewGPT/CI gate.
 
 Done:
 - Read the applicable repository, security, reliability, Cloudflare, and completion guidance.
@@ -31,13 +33,38 @@ Done:
 - Added focused contracts, CLI, assistant, runtime, Web adapter, Cloudflare signing/upload, retry, and deploy-config coverage.
 - Regenerated the checked CLI skill hash after restoring the progress-card command and proved the generated package surface.
 - Added the required Images binding and signing-key fixtures to hosted-local and deploy-preflight parity checks.
-- Passed all affected package typechecks and focused tests. The canonical diff lane exercised the full affected workspace; its only remaining failure was an unrelated load-sensitive setup-wizard input race that passed immediately in isolation. The affected owners that followed it were then run serially and passed, including Cloudflare (1,928 tests) and Web (6,579 tests).
+- Passed the feature-parity preliminary specialist pass and resolved both accepted
+  findings: scheduled automation cannot invoke group-avatar mutation, and the
+  browser native-share error path has direct download-fallback proof.
+- Passed the full affected canonical diff lane after preliminary remediation,
+  including all package/app typechecks, 2,723 assistant-engine tests, 1,897
+  assistant-runtime tests, 1,082 CLI tests, 6,797 Web tests, 1,986 Cloudflare
+  Node tests, both Worker tests, package boundaries, lint, dev smoke, and builds.
+- Ran `pnpm verify:acceptance`. Every workspace typecheck, documentation guard,
+  runtime/package-shape check, artifact guard, and affected suite passed except
+  one setup-wizard interaction that timed out only under the heavily parallel
+  lane. The complete setup CLI suite then passed serially with coverage (124/124),
+  proving that failure is load-sensitive and unrelated to this diff.
+- Merged current `main` normally and resolved three overlapping seams by keeping
+  both testing-map owner descriptions, retaining the new managed-group activity
+  port while continuing to delete the obsolete public generated-image uploader,
+  and adopting the new terse group tool contract while retaining private-avatar
+  policy in its owning skill and runtime.
+- Post-merge canonical verification passed all repository guards, affected
+  typechecks, 2,753 assistant-engine tests, 128 assistant CLI tests, 1,897
+  assistant-runtime tests, 40 assistantd tests, 1,082 CLI tests, and 124 setup
+  CLI tests. The final Cloudflare app step waited ten minutes for the non-FIFO
+  shared-host slot and was cancelled before tests started; the full pre-merge
+  Cloudflare suite and exact-head remote Cloudflare/hosted CI were already green.
 
 Now:
-- Create the candidate commit, reconcile with current `main`, and complete the exact-head preliminary specialist pass.
+- Close and archive this execution plan in the final scoped commit.
 
 Next:
-- Run final canonical verification, close the plan, push the final head, and complete the final ReviewGPT/CI correction loop.
+- Push the closed-plan head, update the PR contract, and complete the final
+  ReviewGPT/CI correction loop. The frontend design-proof check remains blocked
+  until the repository-prescribed Cloudflare Images upload credential is
+  available for the already-rendered synthetic screenshots.
 
 Open questions:
 - None.
@@ -48,5 +75,6 @@ Working set:
 - `apps/web/src/lib/hosted-{groups,onboarding}/**`
 - relevant architecture/security/reliability/verification docs and focused tests
 
-Status: active
-Updated: 2026-07-26
+Status: completed
+Updated: 2026-07-27
+Completed: 2026-07-27
