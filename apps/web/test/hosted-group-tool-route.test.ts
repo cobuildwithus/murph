@@ -14,6 +14,7 @@ import {
 const mocks = vi.hoisted(() => ({
   handleTool: vi.fn(),
   requireJsonCallback: vi.fn(),
+  scheduleHostedMailboxWakeAfterResponse: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-execution/cloudflare-callback-auth", () => ({
@@ -22,6 +23,10 @@ vi.mock("@/src/lib/hosted-execution/cloudflare-callback-auth", () => ({
 
 vi.mock("@/src/lib/hosted-groups/group-tool", () => ({
   handleHostedRuntimeGroupTool: mocks.handleTool,
+}));
+vi.mock("@/src/lib/hosted-orchestration/mailbox-wake", () => ({
+  scheduleHostedMailboxWakeAfterResponse:
+    mocks.scheduleHostedMailboxWakeAfterResponse,
 }));
 
 type RouteModule = typeof import(
@@ -146,4 +151,42 @@ describe("hosted group tool route", () => {
       });
     },
   );
+
+  it("schedules accepted Ask requests through the shared direct wake path", async () => {
+    const body = {
+      action: "ask",
+      groupLabel: "100 Club",
+      originAssistantInputId: `ain_${"a".repeat(32)}`,
+      originSessionId: "session_private",
+      question: "What exercises are scheduled today?",
+    };
+    mocks.handleTool.mockImplementationOnce(async (input) => {
+      input.scheduleMailboxWake({
+        expectedUserId: "member-group-runtime",
+        mailboxItemId: "aask_req_direct_wake",
+      });
+      return {
+        action: "ask",
+        requestId: "aask_req_direct_wake",
+        status: "accepted",
+      };
+    });
+    const request = new Request(
+      `https://join.example.test${HOSTED_RUNTIME_GROUP_TOOL_PATH}`,
+      {
+        body: JSON.stringify(body),
+        headers: { "content-type": "application/json" },
+        method: "POST",
+      },
+    );
+
+    const response = await route.POST(request);
+
+    expect(response.status).toBe(200);
+    expect(mocks.scheduleHostedMailboxWakeAfterResponse).toHaveBeenCalledWith({
+      directWakeSource: "assistant-ask-request",
+      expectedUserId: "member-group-runtime",
+      mailboxItemId: "aask_req_direct_wake",
+    });
+  });
 });

@@ -12130,10 +12130,12 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
   });
 
-  it("keeps assistant ask completions out of a causal-only pass without an input cutoff", async () => {
+  it("keeps assistant ask completions out when pending-input ordering is incomplete", async () => {
     const now = "2026-04-27T00:03:00.000Z";
     const armedWakeAt = "2026-04-27T00:08:00.000Z";
-    mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValueOnce(null);
+    mocks.resolveHostedPendingAssistantInputWakeAt.mockResolvedValue(now);
+    mocks.resolveHostedOldestPendingAssistantInputAt.mockResolvedValue(null);
+    mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValue(null);
 
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
       assistantInputIds: [],
@@ -12152,11 +12154,69 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         allowedWakeKinds: ["runtime.pending-effects-reconcile-requested"],
       }),
     );
-    expect(mocks.resolveHostedOldestPendingAssistantInputAt).not.toHaveBeenCalled();
+    expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).toHaveBeenCalledWith(
+      expect.objectContaining({
+        allowedRouteActions: ["continue-assistant-ask"],
+        allowedWakeKinds: ["assistant.ask.completed"],
+        assistantAskCompletionOccurredBefore: null,
+      }),
+    );
+    expect(mocks.resolveHostedPendingAssistantInputWakeAt).toHaveBeenCalledWith({
+      inspectOnly: true,
+      now: expect.any(Function),
+      vaultRoot: "/tmp/murph-vault",
+    });
+    expect(mocks.resolveHostedOldestPendingAssistantInputAt).toHaveBeenCalledWith({
+      signal: null,
+      vaultRoot: "/tmp/murph-vault",
+    });
     expect(mocks.resolveHostedOldestAssistantInputOccurredAt).not.toHaveBeenCalled();
     expect(result).toEqual(expect.objectContaining({
       nextWakeAt: armedWakeAt,
       progressed: false,
+    }));
+  });
+
+  it("drains a causal-only assistant ask completion when no private input is pending", async () => {
+    const now = "2026-04-27T00:03:00.000Z";
+    const completionItem = createAssistantAskCompletionSystemMailboxItem();
+    mocks.resolveHostedPendingAssistantInputWakeAt.mockResolvedValue(null);
+    mocks.prepareHostedSystemMailboxItemForCheckpoint
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({
+        item: completionItem,
+        itemId: completionItem.itemId,
+        metrics: {
+          bootstrapResult: null,
+          conversationMetrics: null,
+          mailboxLane: "assistant-ask-completion",
+          redactedLogEntries: [],
+        },
+        status: "processed",
+      });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      assistantInputIds: [],
+      foregroundCausalOnly: true,
+      conversationImportedCount: 0,
+      importedCount: 1,
+      now: () => now,
+    }));
+
+    expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        allowedRouteActions: ["continue-assistant-ask"],
+        allowedWakeKinds: ["assistant.ask.completed"],
+      }),
+    );
+    expect(
+      mocks.prepareHostedSystemMailboxItemForCheckpoint.mock.calls[1]?.[0],
+    ).not.toHaveProperty("assistantAskCompletionOccurredBefore");
+    expect(mocks.resolveHostedOldestPendingAssistantInputAt).not.toHaveBeenCalled();
+    expect(result).toEqual(expect.objectContaining({
+      checkpointReason: "system_mailbox_receipt",
+      progressed: true,
     }));
   });
 

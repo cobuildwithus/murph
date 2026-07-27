@@ -48,12 +48,14 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // 32KB allowance for small reviewed additions. The group room-model feature
 // measured 9,586,139B in CI and 9,621,769B in the local production assembly on
 // 2026-07-25; use the larger measured closure. Its growth stays within the
-// existing assistant-engine boot graph and adds no forbidden subsystem. An exact
-// measured ceiling was tried and reverted: it left zero slack, so an unrelated
-// prompt change on main broke assembly. Do not restore the former 250KB
-// operational growth allowance.
+// existing assistant-engine boot graph and adds no forbidden subsystem. The
+// Junction push-source recovery runtime from #964 also raised the measured
+// macOS entry chunk to 1,639,869B without adding a forbidden boot input. An
+// exact measured ceiling was tried and reverted: it left zero slack, so an
+// unrelated prompt change on main broke assembly. Do not restore the former
+// 250KB operational growth allowance.
 const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_621_769 + 32_768;
-const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_591_691;
+const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_639_869;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 7_774_000;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES = 48_000;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_TOLERANCE_BYTES = 96_000;

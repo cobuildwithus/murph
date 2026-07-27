@@ -7,7 +7,7 @@ Cloudflare-hosted execution plane for the hosted Murph path.
 ## What This App Owns
 
 - ensure-processing requests (callback-signed from the Temporal orchestrator or
-  Vercel OIDC-authenticated direct Linq ingress wakes from `apps/web`) plus Vercel
+  Vercel OIDC-authenticated direct Linq and Assistant Ask latency wakes from `apps/web`) plus Vercel
   OIDC-authenticated browser/session/status/deletion control requests from
   `apps/web`
 - per-user execution coordination in `USER_RUNNER`
@@ -31,7 +31,7 @@ Internal control routes:
 
 - `POST /internal/users/:userId/runtime/ensure-processing` is the idempotent
   processing adapter; it accepts either the Temporal orchestrator's callback
-  signature or web's Vercel OIDC credential for the Linq direct-wake latency
+  signature or web's Vercel OIDC credential for the direct-wake latency
   hint (dispatched by presented credential, never falling through a failed
   one), records which trigger won as the `triggeredByWebDirect` orchestration
   latency leaf, and starts, wakes, or accepts a pending runtime wake for only
