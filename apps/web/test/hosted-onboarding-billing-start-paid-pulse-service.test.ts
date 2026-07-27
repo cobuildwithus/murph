@@ -12,6 +12,8 @@ import {
 const mocks = vi.hoisted(() => ({
   applyStripeInvoicePaid: vi.fn(),
   getPrisma: vi.fn(),
+  prepareHostedCryptoDomainRootCandidates: vi.fn(),
+  preparedCryptoDomainRoots: new Map(),
   signalHostedRuntimeManualWakeBestEffort: vi.fn(),
   prismaClient: {
     $transaction: vi.fn(),
@@ -33,6 +35,11 @@ const mocks = vi.hoisted(() => ({
       update: vi.fn(),
     },
   },
+}));
+
+vi.mock("@/src/lib/hosted-crypto/domain-root-store", () => ({
+  prepareHostedCryptoDomainRootCandidates:
+    mocks.prepareHostedCryptoDomainRootCandidates,
 }));
 
 vi.mock("@/src/lib/prisma", () => ({
@@ -70,6 +77,9 @@ describe("startHostedPulseTrialPaidPlan", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.getPrisma.mockReturnValue(mocks.prismaClient);
+    mocks.prepareHostedCryptoDomainRootCandidates.mockResolvedValue(
+      mocks.preparedCryptoDomainRoots,
+    );
     mocks.prismaClient.$transaction.mockImplementation(async (callback: (tx: unknown) => Promise<unknown>) =>
       callback(mocks.prismaClient)
     );
@@ -224,7 +234,7 @@ describe("startHostedPulseTrialPaidPlan", () => {
       memberId: "member_123",
       now: new Date("2026-05-06T00:00:00.000Z"),
     })).rejects.toMatchObject({
-      code: "HOSTED_PULSE_TRIAL_START_PAID_UNSUPPORTED",
+      code: "HOSTED_PULSE_TRIAL_CONTINUE_REQUIRES_START",
       httpStatus: 409,
     });
 
@@ -236,7 +246,28 @@ describe("startHostedPulseTrialPaidPlan", () => {
     expect(mocks.withHostedMemberStripeMutationLock).not.toHaveBeenCalled();
   });
 
-  test("resumes when the local Pulse trial is active but Stripe has just paused it", async () => {
+  test("returns the reconciled paid plan without contacting Stripe", async () => {
+    mocks.readHostedMemberStripeBillingRef.mockResolvedValueOnce(makeBillingRef({
+      currentBillingPhase: "paid",
+    }));
+
+    await expect(continueHostedPulseTrialPaidPlan({
+      memberId: "member_123",
+      now: new Date("2026-05-06T00:00:00.000Z"),
+    })).resolves.toEqual({
+      billingPlanCode: "launch_monthly",
+      status: "started",
+    });
+
+    expect(mocks.requireHostedStripeBillingPlanConfig).not.toHaveBeenCalled();
+    expect(mocks.stripe.subscriptions.retrieve).not.toHaveBeenCalled();
+    expect(mocks.stripe.billingPortal.sessions.create).not.toHaveBeenCalled();
+    expect(mocks.stripe.subscriptions.update).not.toHaveBeenCalled();
+    expect(mocks.stripe.subscriptions.resume).not.toHaveBeenCalled();
+    expect(mocks.withHostedMemberStripeMutationLock).not.toHaveBeenCalled();
+  });
+
+  test("requires a fresh start-now choice when Stripe has just paused the local trial", async () => {
     mocks.readHostedMemberStripeBillingRef.mockResolvedValueOnce(makeBillingRef({
       currentBillingPhase: "trial",
     }));
@@ -254,16 +285,16 @@ describe("startHostedPulseTrialPaidPlan", () => {
     await expect(continueHostedPulseTrialPaidPlan({
       memberId: "member_123",
       now: new Date("2026-05-06T00:00:00.000Z"),
-    })).resolves.toEqual({
-      billingPlanCode: "launch_monthly",
-      status: "billing_pending",
+    })).rejects.toMatchObject({
+      code: "HOSTED_PULSE_TRIAL_CONTINUE_REQUIRES_START",
+      httpStatus: 409,
     });
 
     expect(mocks.stripe.subscriptions.retrieve).toHaveBeenCalledTimes(1);
     expect(mocks.stripe.billingPortal.sessions.create).not.toHaveBeenCalled();
-    expect(mocks.withHostedMemberStripeMutationLock).toHaveBeenCalledTimes(1);
-    expect(mocks.stripe.subscriptions.update).toHaveBeenCalledTimes(1);
-    expect(mocks.stripe.subscriptions.resume).toHaveBeenCalledTimes(1);
+    expect(mocks.withHostedMemberStripeMutationLock).not.toHaveBeenCalled();
+    expect(mocks.stripe.subscriptions.update).not.toHaveBeenCalled();
+    expect(mocks.stripe.subscriptions.resume).not.toHaveBeenCalled();
   });
 
   test("routes no-card trials through Stripe payment-method setup before ending the trial", async () => {
@@ -690,6 +721,16 @@ describe("startHostedPulseTrialPaidPlan", () => {
       mocks.prismaClient,
       HostedBillingStatus.active,
       reconciledSubscription,
+      mocks.preparedCryptoDomainRoots,
+    );
+    expect(mocks.prepareHostedCryptoDomainRootCandidates).toHaveBeenCalledWith({
+      prisma: mocks.prismaClient,
+      userId: "member_123",
+    });
+    expect(
+      mocks.prepareHostedCryptoDomainRootCandidates.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      mocks.prismaClient.$transaction.mock.invocationCallOrder[0] ?? 0,
     );
     expect(mocks.signalHostedRuntimeManualWakeBestEffort).toHaveBeenCalledWith({
       userId: "member_123",
@@ -853,6 +894,7 @@ describe("startHostedPulseTrialPaidPlan", () => {
       mocks.prismaClient,
       HostedBillingStatus.active,
       canonicalSubscription,
+      mocks.preparedCryptoDomainRoots,
     );
     expect(mocks.signalHostedRuntimeManualWakeBestEffort).toHaveBeenCalledWith({
       userId: "member_123",
@@ -1483,7 +1525,7 @@ describe("startHostedPulseTrialPaidPlan", () => {
     expect(mocks.stripe.subscriptions.resume).not.toHaveBeenCalled();
   });
 
-  test("returns paused no-card conversational continuations through the signed exact-action bridge", async () => {
+  test("does not reopen payment setup for a paused continue-at-trial-end choice", async () => {
     mocks.readHostedMemberCoreState.mockResolvedValueOnce({
       billingStatus: HostedBillingStatus.paused,
       createdAt: new Date("2026-05-01T00:00:00.000Z"),
@@ -1509,26 +1551,12 @@ describe("startHostedPulseTrialPaidPlan", () => {
       memberId: "member_123",
       now: new Date("2026-05-06T00:00:00.000Z"),
       paymentMethodContinuation: "conversation",
-    })).resolves.toEqual({
-      billingPlanCode: "launch_monthly",
-      paymentUrl: "https://billing.stripe.test/session_123",
-      status: "payment_required",
+    })).rejects.toMatchObject({
+      code: "HOSTED_PULSE_TRIAL_CONTINUE_REQUIRES_START",
+      httpStatus: 409,
     });
 
-    expect(mocks.stripe.billingPortal.sessions.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        flow_data: expect.objectContaining({
-          after_completion: {
-            redirect: {
-              return_url: expect.stringMatching(
-                /^https:\/\/join\.example\.test\/api\/settings\/billing\/pulse-trial-continuation\?action=continue_pulse&expires=[0-9]+&signature=[A-Za-z0-9_-]{43}$/u,
-              ),
-            },
-            type: "redirect",
-          },
-        }),
-      }),
-    );
+    expect(mocks.stripe.billingPortal.sessions.create).not.toHaveBeenCalled();
     expect(mocks.stripe.subscriptions.update).not.toHaveBeenCalled();
     expect(mocks.stripe.subscriptions.resume).not.toHaveBeenCalled();
   });
@@ -1803,6 +1831,7 @@ describe("startHostedPulseTrialPaidPlan", () => {
       mocks.prismaClient,
       HostedBillingStatus.active,
       subscription,
+      mocks.preparedCryptoDomainRoots,
     );
     expect(mocks.signalHostedRuntimeManualWakeBestEffort).toHaveBeenCalledWith({
       userId: "member_123",

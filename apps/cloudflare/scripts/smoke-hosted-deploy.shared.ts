@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { Agent } from "undici";
 import {
   buildCloudflareHostedControlUserStatusPath,
 } from "@murphai/cloudflare-hosted-control/routes";
@@ -214,37 +215,58 @@ export async function runSmokeHostedDeploy(input: {
     : null;
 
   if (shouldSmokeRunnerContainer) {
-    const convergedAttempt = await assertRunnerContainerSmoke({
-      fetchImpl,
-      log,
-      source,
-      url: buildRunnerContainerSmokeUrl({
-        directR2PresignedPut: shouldSmokeDirectR2PresignedPut,
-        liveModelTurn: false,
-        smokeBaseUrl,
-      }),
-      versionOverrideHeaders,
-      expectDirectR2PresignedPut: shouldSmokeDirectR2PresignedPut,
-      expectLiveModelTurnModel: null,
-    });
-    if (shouldSmokeLiveModelTurn) {
-      await assertRunnerContainerSmoke({
-        expectDirectR2PresignedPut: false,
-        expectLiveModelTurnModel: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
-        fetchImpl,
+    let runnerSmokeDispatcher: Agent | null = null;
+    let runnerSmokeFetchImpl = fetchImpl;
+    if (!input.fetchImpl) {
+      runnerSmokeDispatcher = new Agent({
+        bodyTimeout: 0,
+        headersTimeout: 0,
+      });
+      const dispatcher = runnerSmokeDispatcher;
+      runnerSmokeFetchImpl = (resource, init) => {
+        const initWithDispatcher: RequestInit & { dispatcher: Agent } = {
+          ...init,
+          dispatcher,
+        };
+        return fetch(resource, initWithDispatcher);
+      };
+    }
+
+    try {
+      const convergedAttempt = await assertRunnerContainerSmoke({
+        fetchImpl: runnerSmokeFetchImpl,
         log,
         source,
-        // Stay on the container the bundle phase proved current. Live model turn
-        // failures are non-retryable, so restarting the attempt counter here would
-        // send this phase back to a pre-rollout container.
-        pinnedAttempt: convergedAttempt,
         url: buildRunnerContainerSmokeUrl({
-          directR2PresignedPut: false,
-          liveModelTurn: true,
+          directR2PresignedPut: shouldSmokeDirectR2PresignedPut,
+          liveModelTurn: false,
           smokeBaseUrl,
         }),
         versionOverrideHeaders,
+        expectDirectR2PresignedPut: shouldSmokeDirectR2PresignedPut,
+        expectLiveModelTurnModel: null,
       });
+      if (shouldSmokeLiveModelTurn) {
+        await assertRunnerContainerSmoke({
+          expectDirectR2PresignedPut: false,
+          expectLiveModelTurnModel: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
+          fetchImpl: runnerSmokeFetchImpl,
+          log,
+          source,
+          // Stay on the container the bundle phase proved current. Live model turn
+          // failures are non-retryable, so restarting the attempt counter here would
+          // send this phase back to a pre-rollout container.
+          pinnedAttempt: convergedAttempt,
+          url: buildRunnerContainerSmokeUrl({
+            directR2PresignedPut: false,
+            liveModelTurn: true,
+            smokeBaseUrl,
+          }),
+          versionOverrideHeaders,
+        });
+      }
+    } finally {
+      await runnerSmokeDispatcher?.close();
     }
   }
 
@@ -293,6 +315,10 @@ async function assertRunnerContainerSmoke(input: {
   const lastAttempt = input.pinnedAttempt ?? retryPolicy.maxAttempts;
 
   for (let attempt = firstAttempt; attempt <= lastAttempt; attempt += 1) {
+    const elapsedBeforeAttemptMs = Date.now() - startedAtMs;
+    const requestDeadline = AbortSignal.timeout(
+      Math.max(1, retryPolicy.maxWaitMs - elapsedBeforeAttemptMs),
+    );
     try {
       assertSmokeRunnerBundleManifest(
         // Each attempt addresses its own smoke Durable Object, so a retry gets a
@@ -301,7 +327,11 @@ async function assertRunnerContainerSmoke(input: {
         // containers roll out gradually, so the first instance can legitimately be
         // pre-rollout, and polling it keeps it below the idle TTL that would
         // otherwise replace it.
-        await readRunnerContainerSmoke({ ...input, attempt }),
+        await readRunnerContainerSmoke({
+          ...input,
+          attempt,
+          signal: requestDeadline,
+        }),
         expectedManifest,
         {
           retryable: retryableFailures,
@@ -310,6 +340,13 @@ async function assertRunnerContainerSmoke(input: {
       return attempt;
     } catch (error) {
       const elapsedMs = Date.now() - startedAtMs;
+      if (requestDeadline.aborted || elapsedMs >= retryPolicy.maxWaitMs) {
+        const lastFailure = error instanceof Error ? error.message : String(error);
+        throw new Error(
+          `runner container smoke did not converge within ${retryPolicy.maxWaitMs}ms `
+            + `(${attempt} attempts, ${elapsedMs}ms elapsed). Last failure: ${lastFailure}`,
+        );
+      }
       if (
         !retryableFailures ||
         attempt >= lastAttempt ||
@@ -341,6 +378,7 @@ async function readRunnerContainerSmoke(input: {
   expectDirectR2PresignedPut: boolean;
   expectLiveModelTurnModel: string | null;
   fetchImpl: FetchLike;
+  signal: AbortSignal;
   source: EnvSource;
   url: string;
   versionOverrideHeaders: Record<string, string> | undefined;
@@ -363,6 +401,7 @@ async function readRunnerContainerSmoke(input: {
       ...signatureHeaders,
     },
     method: "POST",
+    signal: input.signal,
   });
 
   if (!response.ok) {

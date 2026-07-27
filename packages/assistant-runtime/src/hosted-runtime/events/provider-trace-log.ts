@@ -342,6 +342,7 @@ const HOSTED_ASSISTANT_PROVIDER_PROMPT_SIZE_BOOLEAN_KEYS = [
   "resumeCodexThreadIdPresent",
 ] as const;
 const HOSTED_ASSISTANT_PROVIDER_PROMPT_SIZE_NUMBER_KEYS = [
+  "baseInstructionsBytes",
   "conversationContextBytes",
   "developerInstructionsBytes",
   "dynamicToolCount",

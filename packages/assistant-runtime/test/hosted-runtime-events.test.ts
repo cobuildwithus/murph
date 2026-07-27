@@ -1369,6 +1369,7 @@ describe("executeHostedMailboxEvent", () => {
           schema: "murph.assistant-provider-prompt-size-diagnostics.v1",
           type: "assistant.provider.prompt_size",
           providerPromptDiagnosticKind: "primary",
+          baseInstructionsBytes: 768,
           providerPromptBytes: 4096,
           userPromptBytes: 5,
           turnContextPromptBytes: 2048,
@@ -1394,6 +1395,7 @@ describe("executeHostedMailboxEvent", () => {
       message: "Hosted assistant provider prompt-size diagnostics captured.",
       phase: "wake.running",
       redacted: expect.objectContaining({
+        baseInstructionsBytes: 768,
         conversationContextBytes: 256,
         conversationContextPresent: true,
         developerInstructionsBytes: 1024,

@@ -85,6 +85,10 @@ unavailable reason `group_not_supported` before exposing personal usage facts.
 Inactive hosted access and a trial awaiting conversion also return explicit
 unavailable states.
 
+Every newly created Linq or Telegram group thread starts with a persisted $7.50
+included-usage limit. This is prospective: existing group-thread rows keep
+their stored limit.
+
 Usage is cost-weighted included capacity across models and modalities. It is
 not a token count or cash balance. Used and remaining included percentages are
 bounded integers that sum to 100. An included period reports 100% used even
@@ -95,6 +99,22 @@ internal included allowance value. When included usage is exhausted, Settings
 may explain that Murph will use remaining usage credit without quantifying it.
 The operation that crosses effective capacity may finish, but subsequent
 usage-bearing work blocks and accepted conversation input remains pending.
+
+For paid access, the included monthly usage value is exactly 80% of the
+server-owned recurring amount for that member's billing mode and tier. Direct
+Pulse and Edge therefore include $6.40 and $16.00 from their $8 and $20 prices.
+Family-sponsored Pulse and Edge members separately receive $5.60 and $15.20
+from their $7 and $19 seat prices. Discounts, taxes, prorations, trials, and
+purchased usage credit do not redefine this catalog-owned allowance.
+An authoritative paid billing period that is already open keeps the higher
+included limit granted before this policy change. The price-derived allowance
+starts on its next paid period; an actual plan, Family tier, or
+direct-to-Family billing-mode change still reconciles during the current
+period. The rollout's predeploy data migration materializes a missing
+legacy-limit row only when the direct or Family paid projection supplies valid
+current bounds. It skips calendar fallbacks because their temporary key can be
+replaced by a delayed billing projection without a renewal. Existing allowance,
+spend, and future periods remain untouched.
 
 A forecast requires at least 24 hours of counted usage. It is shown only when
 the observed pace projects exhaustion before the current period ends. The
@@ -178,7 +198,8 @@ the choice requires no charge, subscription update, payment link, or
 unsolicited explanation. A configured method does not guarantee that a future
 renewal will succeed. If the payment method is missing, web may return a Stripe
 Customer Portal payment-method-update URL. A paused-trial state race remains
-recoverable through the existing Pulse activation service rather than gaining a
+recoverable only through a fresh start-now choice in the existing Pulse
+activation service rather than through the old continue-at-trial-end claim or a
 second resume path. Assistant policy treats an already ended or
 conversion-pending trial as a start-now choice, discloses the current terms,
 and asks for explicit confirmation instead of presenting it as non-charging
@@ -186,11 +207,26 @@ continuation.
 
 After a signed-in member completes a payment-method-update link returned by
 private-chat `continue_pulse` or `start_pulse_now`, the authenticated browser
-return automatically resumes that exact claimed action. The short-lived signed
-return contains no member identifier, and the resulting HttpOnly claim is bound
-to the current member, app session, and action. Cancel, copied-to-another-member,
-expired, tampered, and marker-only returns remain inert. The browser never
-upgrades a continue-at-trial-end choice into an immediate start.
+return recovers that exact claimed action. The
+short-lived signed return contains no member identifier, and the resulting
+HttpOnly claim is bound to the current member, app session, and action.
+`start_pulse_now` discloses that paid billing begins now and requires fresh
+confirmation. An active `continue_pulse` return performs a mutation-free state
+check and shows a receipt that the existing trial remains scheduled to
+continue. If the trial reconciled to paid before the browser return, the same
+read-only path shows the active paid plan without contacting Stripe. If Stripe
+has already paused the trial, the old continue claim fails closed, keeps its
+explanation visible until dismissal, and ordinary Settings requires a fresh
+start-now confirmation before any resume or immediate invoice. Dismissing,
+canceling, copying to another member, and expired, tampered, or marker-only
+returns remain inert. The browser never upgrades a continue-at-trial-end choice
+into an immediate start. Each continuation POST carries the server-rendered
+action as compare-only metadata; the route rejects any mismatch with the
+member/session/action-bound cookie before billing dispatch and still derives
+the operation only from that cookie. Successful responses leave the bounded
+cookie untouched so an older in-flight response cannot clear a newer return
+from another tab. The public marker removal keeps completed or dismissed
+returns inert, and the existing short expiry bounds any surviving claim.
 
 Starting Pulse now uses the existing start-paid-Pulse service. Upgrading to
 Edge uses the existing plan-change service. Pulse activation keeps its existing

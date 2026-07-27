@@ -8,7 +8,17 @@ import {
   type HostedExecutionWake,
 } from "@murphai/hosted-execution/contracts";
 import type { HostedRuntimeEnsureProcessingResponse } from "@murphai/hosted-execution/orchestration-control";
-import type { HostedRunnerStatusResponse } from "@murphai/hosted-execution/runtime-control";
+import {
+  parseHostedRuntimeManagedGroupActivityDecisionResponse,
+} from "@murphai/hosted-execution/parsers";
+import {
+  HOSTED_RUNTIME_MANAGED_GROUP_ACTIVITY_DECISION_PATH,
+} from "@murphai/hosted-execution/routes";
+import type {
+  HostedRunnerStatusResponse,
+  HostedRuntimeManagedGroupActivityDecisionRequest,
+  HostedRuntimeManagedGroupActivityDecisionResponse,
+} from "@murphai/hosted-execution/runtime-control";
 import {
   HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV,
 } from "@murphai/assistant-runtime/hosted-runtime-contracts";
@@ -49,6 +59,10 @@ import {
   appendHostedWakeAndWakeWorker,
 } from "./hosted-local-wake.js";
 import {
+  createHostedWebCallbackSignatureHeaders,
+  readHostedWebCallbackSigningEnvironment,
+} from "../../src/web-callback-auth.ts";
+import {
   sanitizeHostedFailureText,
   sanitizeHostedStatusForFailureLog,
   startHostedLocalDevHarness,
@@ -63,6 +77,8 @@ import {
   readHostedJunctionDeviceSyncReplayDrainStatus,
   seedHostedJunctionDeviceSyncConnection,
   seedHostedJunctionDeviceSyncReplay,
+  seedHostedHistoricalConversationWakesForTest,
+  seedHostedGroupForThreadContainerForTest,
   seedHostedActiveLinqMember,
   seedHostedActiveMember,
   type HostedJunctionDeviceSyncConnectionSeedInput,
@@ -134,6 +150,10 @@ export interface HostedLocalFullStackScenario {
     channel: "linq" | "telegram";
     threadId: string;
   }): Promise<HostedThreadRouteForTest | null>;
+  readHostedManagedGroupActivityDecision(input: {
+    request: HostedRuntimeManagedGroupActivityDecisionRequest;
+    userId: string;
+  }): Promise<HostedRuntimeManagedGroupActivityDecisionResponse>;
   runWake(
     wake: HostedExecutionWake,
     userId: string,
@@ -148,6 +168,13 @@ export interface HostedLocalFullStackScenario {
     wake: HostedExecutionWake,
     userId: string,
   ): Promise<HostedMailboxAppendForTestResponse>;
+  seedHostedHistoricalConversationWakes(input: {
+    userId: string;
+    wakes: readonly HostedExecutionWake[];
+  }): Promise<number>;
+  seedHostedGroupForThreadContainer(input: {
+    containerMemberId: string;
+  }): Promise<string>;
   harness: HostedLocalDevHarness;
   runtimeEnv: NodeJS.ProcessEnv;
   stop(): Promise<void>;
@@ -422,6 +449,41 @@ export async function startHostedLocalFullStackScenario(input: {
           ...routeInput,
           environment: buildScenarioSeedEnvironment(),
         }),
+      readHostedManagedGroupActivityDecision: async (decisionInput) => {
+        const requestBody = JSON.stringify(decisionInput.request);
+        const url = new URL(
+          HOSTED_RUNTIME_MANAGED_GROUP_ACTIVITY_DECISION_PATH,
+          `${scenarioHarness.webBaseUrl}/`,
+        );
+        const callbackSigning = readHostedWebCallbackSigningEnvironment(
+          scenarioHarness.workerRuntimeEnv ?? scenarioHarness.runtimeEnv,
+        );
+        const signatureHeaders = await createHostedWebCallbackSignatureHeaders({
+          environment: callbackSigning,
+          method: "POST",
+          path: url.pathname,
+          payload: requestBody,
+          search: url.search,
+          userId: decisionInput.userId,
+        });
+        const response = await fetch(url, {
+          body: requestBody,
+          headers: {
+            ...signatureHeaders,
+            "content-type": "application/json; charset=utf-8",
+            [HOSTED_EXECUTION_USER_ID_HEADER]: decisionInput.userId,
+          },
+          method: "POST",
+        });
+        if (!response.ok) {
+          throw new Error(
+            `Hosted managed group activity decision returned HTTP ${response.status}.`,
+          );
+        }
+        return parseHostedRuntimeManagedGroupActivityDecisionResponse(
+          await response.json(),
+        );
+      },
       runWake: async (wake, userId, runInput) =>
         await appendHostedWakeAndWakeWorker({
           environment: buildScenarioSeedEnvironment(),
@@ -436,6 +498,16 @@ export async function startHostedLocalFullStackScenario(input: {
           harness: scenarioHarness,
           userId,
           wake,
+        }),
+      seedHostedHistoricalConversationWakes: async (seedInput) =>
+        await seedHostedHistoricalConversationWakesForTest({
+          ...seedInput,
+          environment: buildScenarioSeedEnvironment(),
+        }),
+      seedHostedGroupForThreadContainer: async (seedInput) =>
+        await seedHostedGroupForThreadContainerForTest({
+          ...seedInput,
+          environment: buildScenarioSeedEnvironment(),
         }),
       harness: scenarioHarness,
       seedActiveHostedLinqMember: async (seedInput) => {

@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+
 export {
   bindHostedActiveLinqHomeChat,
   bindHostedActiveTelegramMember,
@@ -22,11 +24,18 @@ import type { HostedBrowserVaultReplicaRef } from "@murphai/hosted-execution/con
 import type { HostedExecutionSnapshotRef } from "@murphai/hosted-execution/contracts";
 import type { HostedExecutionWake } from "@murphai/hosted-execution/contracts";
 import { parseHostedExecutionWake } from "@murphai/hosted-execution/parsers";
+import {
+  HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
+} from "@murphai/hosted-execution/runtime-control";
 
 import { createHostedWebSmokeEnvironment } from "../../next-artifacts";
 import type { HostedRuntimeTemporalSignalClient } from "../../src/lib/hosted-orchestration/temporal-client";
 
 const hostedPrismaModuleSpecifier = new URL("../../src/lib/prisma.ts", import.meta.url).href;
+const hostedMailboxEncryptionModuleSpecifier = new URL(
+  "../../src/lib/hosted-mailbox/encryption.ts",
+  import.meta.url,
+).href;
 const hostedMailboxStoreModuleSpecifier = new URL(
   "../../src/lib/hosted-mailbox/store.ts",
   import.meta.url,
@@ -37,6 +46,10 @@ const hostedWorkspaceStoreModuleSpecifier = new URL(
 ).href;
 const hostedThreadRouteStoreModuleSpecifier = new URL(
   "../../src/lib/hosted-routing/thread-route-store.ts",
+  import.meta.url,
+).href;
+const hostedGroupStoreModuleSpecifier = new URL(
+  "../../src/lib/hosted-groups/group-store.ts",
   import.meta.url,
 ).href;
 const hostedTemporalClientModuleSpecifier = new URL(
@@ -72,6 +85,7 @@ type HostedTestPrismaClient =
   & HostedUsageLimitForTestPrismaClient
   & HostedUsageCreditForTestPrismaClient
   & HostedComputerUseForTestPrismaClient
+  & HostedIngressLatencyForTestPrismaClient
   & HostedLinqWorkspaceIsolationForTestPrismaClient
   & HostedWorkspaceSeedForTestPrismaClient
   & HostedUsageDiagnosticsForTestPrismaClient;
@@ -81,6 +95,7 @@ interface HostedTestPrismaFactoryClient {
   $transaction<T>(callback: (tx: unknown) => Promise<T>): Promise<T>;
   hostedMailboxItem: {
     count(args: unknown): Promise<number>;
+    create(args: unknown): Promise<{ id: string }>;
     findUniqueOrThrow(args: unknown): Promise<{
       consumedAt: Date | null;
       dedupeKey: string;
@@ -116,6 +131,28 @@ interface HostedLinqWorkspaceIsolationForTestPrismaClient {
   };
   hostedWorkspace: {
     findUnique(args: unknown): Promise<{ version: bigint } | null>;
+    updateMany(args: unknown): Promise<{ count: number }>;
+  };
+}
+
+interface HostedIngressLatencyForTestPrismaClient {
+  hostedIngressLatencyTrace: {
+    findMany(args: unknown): Promise<Array<{
+      id: string;
+      linqDelivery: {
+        acceptedAt: Date;
+      } | null;
+    }>>;
+    findFirst(args: unknown): Promise<{
+      id: string;
+      linqDelivery: {
+        acceptedAt: Date;
+      } | null;
+    } | null>;
+    update(args: unknown): Promise<{
+      acceptedAt: Date;
+      id: string;
+    }>;
   };
 }
 
@@ -343,6 +380,22 @@ interface HostedMailboxAppendForTestStoreModule {
   }>;
 }
 
+interface HostedMailboxEncryptionForTestModule {
+  encryptHostedMailboxPayloadString(input: {
+    dedupeKey: string;
+    itemId: string;
+    kind: string;
+    lane: string;
+    laneSeq: bigint;
+    occurredAt: string;
+    payloadSchema: string;
+    payloadStorage: "inline";
+    prisma: HostedTestPrismaClient;
+    userId: string;
+    value: string;
+  }): Promise<string | null>;
+}
+
 interface HostedWorkspaceSeedForTestPrismaClient {
   $disconnect(): Promise<void>;
 }
@@ -474,6 +527,15 @@ interface HostedThreadRouteForTestModule {
       id: string;
     };
   } | null>;
+}
+
+interface HostedGroupStoreForTestModule {
+  ensureHostedGroupForThreadContainerTx(input: {
+    containerMemberId: string;
+    kind?: string | null;
+    now: Date;
+    tx: unknown;
+  }): Promise<{ id: string }>;
 }
 
 export interface HostedThreadRouteForTest {
@@ -616,6 +678,94 @@ export async function appendHostedExecutionWakeForTest(input: {
   });
 }
 
+export async function seedHostedHistoricalConversationWakesForTest(input: {
+  consumedAt?: Date | string;
+  environment?: NodeJS.ProcessEnv;
+  wakes: readonly (HostedExecutionWake | unknown)[];
+  userId: string;
+}): Promise<number> {
+  if (input.wakes.length === 0) {
+    return 0;
+  }
+  const consumedAt = input.consumedAt === undefined
+    ? new Date()
+    : new Date(input.consumedAt);
+  if (!Number.isFinite(consumedAt.getTime())) {
+    throw new TypeError("Hosted mailbox consumed-at test timestamp is invalid.");
+  }
+
+  return withHostedWebTestkitDeps(input.environment, async (deps) => {
+    const hostedMailboxEncryption =
+      await loadHostedMailboxEncryptionForTestModule();
+    let inserted = 0;
+    for (const [index, rawWake] of input.wakes.entries()) {
+      const wake = parseHostedExecutionWake(rawWake);
+      if (wake.kind !== "conversation.message" || wake.userId !== input.userId) {
+        throw new TypeError(
+          "Historical conversation wake must match its synthetic runtime.",
+        );
+      }
+      const itemId = randomUUID();
+      const laneSeq = -BigInt(index + 1);
+      const serialized = JSON.stringify(wake);
+      const payloadInlineCiphertext =
+        await hostedMailboxEncryption.encryptHostedMailboxPayloadString({
+          dedupeKey: wake.eventId,
+          itemId,
+          kind: wake.kind,
+          lane: "conversation",
+          laneSeq,
+          occurredAt: wake.occurredAt,
+          payloadSchema: HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
+          payloadStorage: "inline",
+          prisma: deps.prisma,
+          userId: input.userId,
+          value: serialized,
+        });
+      if (!payloadInlineCiphertext) {
+        throw new TypeError(
+          "Historical conversation wake encryption returned no ciphertext.",
+        );
+      }
+      await deps.prisma.hostedMailboxItem.create({
+        data: {
+          consumedAt,
+          dedupeKey: wake.eventId,
+          id: itemId,
+          kind: wake.kind,
+          lane: "conversation",
+          laneSeq,
+          occurredAt: new Date(wake.occurredAt),
+          payloadBytes: Buffer.byteLength(serialized, "utf8"),
+          payloadInlineCiphertext,
+          payloadSchema: HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
+          userId: input.userId,
+        },
+        select: { id: true },
+      });
+      inserted += 1;
+    }
+    return inserted;
+  });
+}
+
+export async function seedHostedGroupForThreadContainerForTest(input: {
+  containerMemberId: string;
+  environment?: NodeJS.ProcessEnv;
+}): Promise<string> {
+  return withHostedWebTestkitDeps(input.environment, async (deps) => {
+    const hostedGroupStore = await loadHostedGroupStoreForTestModule();
+    const group = await deps.prisma.$transaction(async (tx) =>
+      await hostedGroupStore.ensureHostedGroupForThreadContainerTx({
+        containerMemberId: input.containerMemberId,
+        kind: "custom",
+        now: new Date(),
+        tx,
+      }));
+    return group.id;
+  });
+}
+
 export async function readHostedMailboxItemForTest(input: {
   dedupeKey: string;
   environment?: NodeJS.ProcessEnv;
@@ -645,6 +795,131 @@ export async function readHostedMailboxItemForTest(input: {
       kind: item.kind,
       lane: item.lane,
       laneSeq: item.laneSeq.toString(),
+    };
+  });
+}
+
+export async function setLatestHostedLinqReplyLatencyForTest(input: {
+  environment?: NodeJS.ProcessEnv;
+  latencyMs: number;
+  userId: string;
+}): Promise<{
+  acceptedAt: string;
+  deliveryAcceptedAt: string;
+  traceId: string;
+}> {
+  if (!Number.isSafeInteger(input.latencyMs) || input.latencyMs < 0) {
+    throw new RangeError("Hosted Linq reply-latency test control requires a non-negative integer.");
+  }
+
+  return withHostedWebTestkitDeps(input.environment, async (deps) => {
+    const deadlineAt = Date.now() + 30_000;
+    let trace: Awaited<
+      ReturnType<
+        HostedIngressLatencyForTestPrismaClient["hostedIngressLatencyTrace"]["findFirst"]
+      >
+    > = null;
+    while (Date.now() < deadlineAt) {
+      trace = await deps.prisma.hostedIngressLatencyTrace.findFirst({
+        orderBy: {
+          acceptedAt: "desc",
+        },
+        select: {
+          id: true,
+          linqDelivery: {
+            select: {
+              acceptedAt: true,
+            },
+          },
+        },
+        where: {
+          linqDelivery: {
+            isNot: null,
+          },
+          source: "linq",
+          userId: input.userId,
+        },
+      });
+      if (trace?.linqDelivery) {
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+    if (!trace?.linqDelivery) {
+      throw new Error(
+        "Timed out waiting for an accepted Hosted Linq delivery trace.",
+      );
+    }
+
+    const deliveryAcceptedAt = trace.linqDelivery.acceptedAt;
+    const acceptedAt = new Date(deliveryAcceptedAt.getTime() - input.latencyMs);
+    await deps.prisma.hostedIngressLatencyTrace.update({
+      data: {
+        acceptedAt,
+      },
+      select: {
+        acceptedAt: true,
+        id: true,
+      },
+      where: {
+        id: trace.id,
+      },
+    });
+    return {
+      acceptedAt: acceptedAt.toISOString(),
+      deliveryAcceptedAt: deliveryAcceptedAt.toISOString(),
+      traceId: trace.id,
+    };
+  });
+}
+
+export async function normalizeHostedLinqLatencyTracesForTest(input: {
+  environment?: NodeJS.ProcessEnv;
+  userIds: readonly string[];
+}): Promise<{ updatedCount: number }> {
+  if (input.userIds.length === 0 || input.userIds.some((userId) => !userId.trim())) {
+    throw new TypeError(
+      "Hosted Linq latency normalization requires non-empty user ids.",
+    );
+  }
+
+  return withHostedWebTestkitDeps(input.environment, async (deps) => {
+    const traces = await deps.prisma.hostedIngressLatencyTrace.findMany({
+      select: {
+        id: true,
+        linqDelivery: {
+          select: {
+            acceptedAt: true,
+          },
+        },
+      },
+      where: {
+        source: "linq",
+        userId: {
+          in: [...new Set(input.userIds)],
+        },
+      },
+    });
+    const unresolvedAcceptedAt = new Date();
+    for (const trace of traces) {
+      await deps.prisma.hostedIngressLatencyTrace.update({
+        data: {
+          acceptedAt: trace.linqDelivery
+            ? new Date(trace.linqDelivery.acceptedAt.getTime() - 1_000)
+            : unresolvedAcceptedAt,
+        },
+        select: {
+          acceptedAt: true,
+          id: true,
+        },
+        where: {
+          id: trace.id,
+        },
+      });
+    }
+
+    return {
+      updatedCount: traces.length,
     };
   });
 }
@@ -794,6 +1069,28 @@ export async function seedHostedWorkspaceCheckpointForTest(input: {
       status: checkpoint.status,
       version: checkpoint.workspace?.version ?? workspace.version,
     };
+  });
+}
+
+export async function seedHostedWorkspaceInboxMediaRetentionWakeForTest(input: {
+  environment?: NodeJS.ProcessEnv;
+  userId: string;
+  wakeAt: Date | string;
+}): Promise<void> {
+  return withHostedWebTestkitDeps(input.environment, async (deps) => {
+    const result = await deps.prisma.hostedWorkspace.updateMany({
+      data: {
+        inboxMediaRetentionWakeAt: new Date(input.wakeAt),
+      },
+      where: {
+        userId: input.userId,
+      },
+    });
+    if (result.count !== 1) {
+      throw new Error(
+        "Hosted-local retention wake seed requires exactly one existing workspace.",
+      );
+    }
   });
 }
 
@@ -1360,6 +1657,14 @@ async function loadHostedWorkspaceSeedForTestModules(): Promise<HostedWorkspaceS
   };
 }
 
+async function loadHostedMailboxEncryptionForTestModule(): Promise<
+  HostedMailboxEncryptionForTestModule
+> {
+  return await import(
+    hostedMailboxEncryptionModuleSpecifier
+  ) as HostedMailboxEncryptionForTestModule;
+}
+
 async function loadHostedTemporalClientModule(): Promise<HostedTemporalClientModule> {
   return await import(hostedTemporalClientModuleSpecifier) as HostedTemporalClientModule;
 }
@@ -1395,6 +1700,10 @@ async function createHostedComputerUseServiceForTest(
 
 async function loadHostedThreadRouteForTestModule(): Promise<HostedThreadRouteForTestModule> {
   return await import(hostedThreadRouteStoreModuleSpecifier) as HostedThreadRouteForTestModule;
+}
+
+async function loadHostedGroupStoreForTestModule(): Promise<HostedGroupStoreForTestModule> {
+  return await import(hostedGroupStoreModuleSpecifier) as HostedGroupStoreForTestModule;
 }
 
 async function createHostedTestPrisma(

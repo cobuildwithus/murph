@@ -3377,6 +3377,10 @@ describe("hosted-member-store", () => {
     });
     const prisma = {
       $executeRaw: executeRaw,
+      $queryRaw: vi.fn().mockResolvedValue([{ id: "member_123" }]),
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue({ suspendedAt: null }),
+      },
       hostedMemberBillingRef: {
         findMany,
         upsert,
@@ -3449,6 +3453,35 @@ describe("hosted-member-store", () => {
     });
   });
 
+  it("rejects Stripe billing ref writes after the member is suspended", async () => {
+    const upsert = vi.fn();
+    const prisma = {
+      $queryRaw: vi.fn().mockResolvedValue([{ id: "member_123" }]),
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue({
+          suspendedAt: new Date("2026-07-20T12:00:00.000Z"),
+        }),
+      },
+      hostedMemberBillingRef: {
+        findMany: vi.fn(),
+        upsert,
+      },
+    } as never;
+
+    await expect(
+      writeHostedMemberStripeBillingRefTx({
+        memberId: "member_123",
+        stripeCustomerId: "cus_123",
+        stripeSubscriptionId: "sub_123",
+        tx: prisma,
+      }),
+    ).rejects.toMatchObject({
+      code: "HOSTED_MEMBER_SUSPENDED",
+    });
+
+    expect(upsert).not.toHaveBeenCalled();
+  });
+
   it("rejects Stripe billing ref writes when another member already owns a rotated lookup candidate", async () => {
     setHostedContactPrivacyKeyring({
       currentVersion: "v2",
@@ -3469,6 +3502,10 @@ describe("hosted-member-store", () => {
     const upsert = vi.fn().mockResolvedValue({});
     const prisma = {
       $executeRaw: executeRaw,
+      $queryRaw: vi.fn().mockResolvedValue([{ id: "member_123" }]),
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue({ suspendedAt: null }),
+      },
       hostedMemberBillingRef: {
         findMany,
         upsert,
@@ -3526,6 +3563,10 @@ describe("hosted-member-store", () => {
     });
     const prisma = {
       $executeRaw: vi.fn().mockResolvedValue(0),
+      $queryRaw: vi.fn().mockResolvedValue([{ id: "member_123" }]),
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue({ suspendedAt: null }),
+      },
       hostedMemberBillingRef: {
         findMany,
         upsert,
@@ -3627,6 +3668,10 @@ describe("hosted-member-store", () => {
     });
     const prisma = {
       $executeRaw: vi.fn().mockResolvedValue(0),
+      $queryRaw: vi.fn().mockResolvedValue([{ id: "member_123" }]),
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue({ suspendedAt: null }),
+      },
       hostedMemberBillingRef: {
         findMany,
         upsert,
@@ -3686,6 +3731,9 @@ describe("hosted-member-store", () => {
     const prisma = {
       $executeRaw: vi.fn().mockResolvedValue(0),
       $queryRaw: vi.fn().mockResolvedValue([]),
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue({ suspendedAt: null }),
+      },
       hostedMemberBillingRef: {
         findMany,
         findUnique: vi.fn().mockResolvedValue(null),
@@ -3754,6 +3802,9 @@ describe("hosted-member-store", () => {
     const prisma = {
       $executeRaw: vi.fn().mockResolvedValue(0),
       $queryRaw: vi.fn().mockResolvedValue([]),
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue({ suspendedAt: null }),
+      },
       hostedMemberBillingRef: {
         findMany,
         findUnique: vi.fn().mockResolvedValue({
@@ -3808,6 +3859,9 @@ describe("hosted-member-store", () => {
     const prisma = {
       $executeRaw: vi.fn().mockResolvedValue(0),
       $queryRaw: vi.fn().mockResolvedValue([]),
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue({ suspendedAt: null }),
+      },
       hostedMemberBillingRef: {
         findMany,
         findUnique: vi.fn().mockResolvedValue({

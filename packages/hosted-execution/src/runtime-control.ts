@@ -907,6 +907,41 @@ export type HostedRuntimeAssistantAskControlResponse =
 
 export type HostedRuntimeGroupToolAction = HostedRuntimeGroupToolRequest["action"];
 
+export const HOSTED_RUNTIME_MANAGED_GROUP_ACTIVITY_POLICIES = [
+  "group-sunday-superlatives-v1",
+] as const;
+
+export type HostedRuntimeManagedGroupActivityPolicy =
+  (typeof HOSTED_RUNTIME_MANAGED_GROUP_ACTIVITY_POLICIES)[number];
+
+export const HOSTED_RUNTIME_MANAGED_GROUP_ACTIVITY_DECISION_STATUSES = [
+  "eligible",
+  "ineligible",
+  "unavailable",
+] as const;
+
+export type HostedRuntimeManagedGroupActivityDecisionStatus =
+  (typeof HOSTED_RUNTIME_MANAGED_GROUP_ACTIVITY_DECISION_STATUSES)[number];
+
+export const HOSTED_RUNTIME_MANAGED_GROUP_ACTIVITY_DECISION_REQUEST_MAX_BYTES =
+  1_024;
+
+export interface HostedRuntimeManagedGroupActivityRoute {
+  channel: "linq" | "telegram";
+  target: string;
+}
+
+export interface HostedRuntimeManagedGroupActivityDecisionRequest {
+  occurrenceAt: string;
+  policy: HostedRuntimeManagedGroupActivityPolicy;
+  route: HostedRuntimeManagedGroupActivityRoute;
+  timeZone: string;
+}
+
+export interface HostedRuntimeManagedGroupActivityDecisionResponse {
+  status: HostedRuntimeManagedGroupActivityDecisionStatus;
+}
+
 export const HOSTED_RUNTIME_GROUP_KINDS = [
   "couple",
   "custom",
@@ -1050,11 +1085,17 @@ export const HOSTED_RUNTIME_GROUP_SHARED_READ_PARTICIPANT_ID_MAX_CODE_POINTS = 2
 export const HOSTED_RUNTIME_GROUP_SHARED_READ_DISPLAY_NAME_MAX_CODE_POINTS = 200;
 export const HOSTED_RUNTIME_GROUP_SHARED_READ_SCOPE_KEY_MAX_CODE_POINTS = 256;
 export const HOSTED_RUNTIME_GROUP_SHARED_READ_UNAVAILABLE_REASON_MAX_CODE_POINTS = 500;
+export const HOSTED_RUNTIME_GROUP_OWNER_ADVISORY_NAME_MAX_CODE_POINTS = 48;
 
 export interface HostedRuntimeGroupChatParticipant {
   handle: string;
   /** Durable activation proof, not current access or membership in this group. */
   hasOwnMurph: boolean;
+  /**
+   * Optional, unverified, current-turn label from the human group owner's
+   * address-book projection. It grants no identity or routing authority.
+   */
+  ownerAdvisoryName?: string;
 }
 
 export interface HostedRuntimeGroupSharedReadRequest {

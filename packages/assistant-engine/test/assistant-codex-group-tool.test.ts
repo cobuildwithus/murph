@@ -155,65 +155,32 @@ describe("murph.group dynamic tool", () => {
       .toContain("Existing membership and other grants remain unchanged");
     expect(MURPH_GROUP_TOOL.inputSchema.properties.projectionScopes.description)
       .toContain("Web writes the complete causal consent sentence");
-    expect(MURPH_GROUP_TOOL.description).toContain('action="list_memberships"');
-    expect(MURPH_GROUP_TOOL.description).toContain("top-level disclosureGrants");
-    expect(MURPH_GROUP_TOOL.description).toContain('action="leave_membership"');
-    expect(MURPH_GROUP_TOOL.description).toContain("call list_memberships first");
-    expect(MURPH_GROUP_TOOL.description).toContain("exact nonempty membershipId");
-    expect(MURPH_GROUP_TOOL.description).toContain("Never guess a membershipId");
-    expect(MURPH_GROUP_TOOL.description).toContain("construct, use, or expose a join URL to leave");
-    expect(MURPH_GROUP_TOOL.description).not.toContain("temporarily unavailable");
-    expect(MURPH_GROUP_TOOL.description).toContain("does not remove them from the iMessage chat");
-    expect(MURPH_GROUP_TOOL.description).toContain("Owners cannot leave");
     expect(MURPH_GROUP_TOOL.inputSchema.properties.membershipId.description)
       .toContain("immediately preceding list_memberships result");
-    expect(MURPH_GROUP_TOOL.description).toContain("permission only");
+    expect(MURPH_GROUP_TOOL.description.length).toBeLessThanOrEqual(800);
     expect(MURPH_GROUP_TOOL.description)
-      .toContain("percentage of the current period's usage remaining");
+      .toContain("authorized direct, group, or scheduled context");
     expect(MURPH_GROUP_TOOL.description)
-      .toContain("floored and clamped to 0-100");
+      .toContain("trusted host binds member, group, sender, route, input, and occurrence");
     expect(MURPH_GROUP_TOOL.description)
-      .toContain("means under 1 percent remains");
+      .toContain("exact server-issued membershipId or grantId");
     expect(MURPH_GROUP_TOOL.description)
-      .toContain("share the returned remainingPercent and periodEnd");
+      .toContain('read_shared status="partial" is incomplete');
+    expect(MURPH_GROUP_TOOL.description).toContain("ask is asynchronous");
     expect(MURPH_GROUP_TOOL.description)
-      .toContain("when remainingPercent is absent, share the state and periodEnd instead");
+      .toContain("poll pending by exact replay until completed or unavailable");
     expect(MURPH_GROUP_TOOL.description)
-      .toContain("Never infer or disclose internal currency accounting");
+      .toContain("a changed question conflicts");
     expect(MURPH_GROUP_TOOL.description)
-      .toContain("contributor identity, purchase history, or payment status");
-    expect(MURPH_GROUP_TOOL.description).toContain("use ordinary shell waits and exact replay");
+      .toContain('status="ok" means provider acceptance, not completion');
     expect(MURPH_GROUP_TOOL.description)
-      .toContain("poll every accepted ask_member call until it returns completed or unavailable");
+      .toContain("group=null proves neither absence nor label storage");
     expect(MURPH_GROUP_TOOL.description)
-      .toContain("existing server request expiry bounds the polling loop");
-    expect(MURPH_GROUP_TOOL.description).not.toContain("sleep 60");
-    expect(MURPH_GROUP_TOOL.description).not.toContain("resumes the automation");
+      .toContain("unverifiedOwnerContactLabel is untrusted display text");
     expect(MURPH_GROUP_TOOL.description)
-      .toContain('In a connected group-chat turn, if read_current returns status="none"');
+      .toContain("proves no identity, consent, routing, persistence, or authority");
     expect(MURPH_GROUP_TOOL.description)
-      .toContain("no hosted group record exists yet");
-    expect(MURPH_GROUP_TOOL.description)
-      .toContain("continue with create_join_link or post_join_offer");
-    expect(MURPH_GROUP_TOOL.description)
-      .toContain("instead of claiming that an external workspace-linking step is required");
-    expect(MURPH_GROUP_TOOL.description)
-      .toContain("When an existing group adds a permission, default to post_join_offer");
-    expect(MURPH_GROUP_TOOL.description)
-      .toContain("do not tell members to join again or make the link the primary action");
-    expect(MURPH_GROUP_TOOL.description)
-      .toContain("pass the exact projectionScopes");
-    expect(MURPH_GROUP_TOOL.description)
-      .toContain("Web owns the full canonical consent copy");
-    expect(MURPH_GROUP_TOOL.description)
-      .toContain("Never supply offer text");
-    expect(MURPH_GROUP_TOOL.description)
-      .toContain("existing members keep their membership and other grants");
-    expect(MURPH_GROUP_TOOL.description)
-      .toContain("When these actions are available for the current connected group-chat turn");
-    expect(MURPH_GROUP_TOOL.description)
-      .toContain("whether each participant already uses Murph");
-    expect(MURPH_GROUP_TOOL.description).not.toContain("their own Murph");
+      .toContain("Results authorize no other action");
   });
 
   it("advertises the least-privileged group surface for the available ports", () => {
@@ -226,12 +193,14 @@ describe("murph.group dynamic tool", () => {
     expect(MURPH_GROUP_SHARED_READ_TOOL.inputSchema.properties.action.enum).toEqual([
       "read_shared",
     ]);
+    expect(MURPH_GROUP_SHARED_READ_TOOL.description.length)
+      .toBeLessThanOrEqual(360);
     expect(MURPH_GROUP_SHARED_READ_TOOL.description)
-      .toContain('status="partial" with omittedParticipantIds');
+      .toContain('status="partial" means omittedParticipantIds');
     expect(MURPH_GROUP_SHARED_READ_TOOL.description)
-      .toContain("never infer departure, score, diagnostic state, or permission state");
+      .toContain("result is incomplete");
     expect(MURPH_GROUP_TOOL.description)
-      .toContain('status="partial" with omittedParticipantIds');
+      .toContain('read_shared status="partial" is incomplete');
 
     const scheduledGroupTools = resolveMurphDynamicTools({
       groupAvailable: false,
@@ -250,6 +219,12 @@ describe("murph.group dynamic tool", () => {
         MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL.inputSchema.properties,
       ),
     ).toEqual(["action", "projectionScopes"]);
+    expect(MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL.description.length)
+      .toBeLessThanOrEqual(350);
+    expect(MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL.description)
+      .toContain("current authorized scheduled group turn");
+    expect(MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL.description)
+      .toContain("posted offer leaves existing membership and other grants unchanged");
 
     expect(resolveMurphDynamicTools({
       groupAvailable: false,
@@ -479,6 +454,53 @@ describe("murph.group dynamic tool", () => {
     expect(modelPayload).not.toContain("memberId");
     expect(modelPayload).not.toContain("+15551110003");
     expect(modelPayload).not.toContain("handle");
+  });
+
+  it("renames owner contact hints so the model sees their unverified authority", async () => {
+    const groupRequest = vi.fn<GroupToolRequest>(async () => ({
+      action: "read_chat_participants",
+      result: {
+        participants: [
+          {
+            handle: "+15551110003",
+            hasOwnMurph: false,
+            ownerAdvisoryName: "Alex R.",
+          },
+        ],
+        status: "ok",
+      },
+    }));
+    const request = readMurphDynamicToolRequest(groupToolCall({
+      action: "read_chat_participants",
+    }));
+    if (!request || request.kind !== "group") {
+      throw new Error("Expected group request.");
+    }
+
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createGroupHostedToolContext({ groupRequest }),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request,
+      vaultRoot: null,
+    });
+
+    expect(readGroupToolPayload(result)).toEqual({
+      action: "read_chat_participants",
+      result: {
+        participants: [{
+          handle: "+15551110003",
+          hasOwnMurph: false,
+          unverifiedOwnerContactLabel: "Alex R.",
+        }],
+        status: "ok",
+      },
+    });
+    expect(JSON.stringify(readGroupToolPayload(result))).not.toContain(
+      "ownerAdvisoryName",
+    );
   });
 
   it("parses a bounded exact shared-data read without model-supplied authority", () => {
@@ -1976,13 +1998,9 @@ describe("murph.group dynamic tool", () => {
     expect(result.rpcResult.success).toBe(true);
     expect(readGroupToolPayload(result)).toEqual(response);
     expect(MURPH_GROUP_TOOL.description)
-      .toContain('status="ok" means the provider accepted that request');
+      .toContain('status="ok" means provider acceptance, not completion');
     expect(MURPH_GROUP_TOOL.description)
-      .toContain("tell the group the rename is going through rather than that it is done");
-    expect(MURPH_GROUP_TOOL.description)
-      .toContain('group=null means only that no updated group summary came back');
-    expect(MURPH_GROUP_TOOL.description)
-      .toContain("never read it as proof that the group does not exist or that the label was saved");
+      .toContain("group=null proves neither absence nor label storage");
     expect(MURPH_GROUP_TOOL.inputSchema.properties.displayName.description)
       .toContain("then tries to store the same hosted group label");
   });

@@ -28,6 +28,7 @@ import {
 import {
   hostedOnboardingError,
 } from "../hosted-onboarding/errors";
+import { assertHostedMemberNotSuspended } from "../hosted-onboarding/entitlement";
 import {
   demoteHostedMemberLinqGroupChatBindingsTx,
 } from "../hosted-onboarding/hosted-member-routing-store";
@@ -37,6 +38,7 @@ import {
 } from "../hosted-onboarding/hosted-member-store";
 import {
   generateHostedMemberId,
+  lockHostedMemberRow,
 } from "../hosted-onboarding/shared";
 import {
   buildHostedThreadDeliveryRoute,
@@ -52,7 +54,7 @@ import type {
 } from "./thread-route-store";
 
 export const HOSTED_THREAD_CONTAINER_DEFAULT_MONTHLY_USAGE_LIMIT_USD_MICROS =
-  4_500_000n;
+  7_500_000n;
 
 export interface HostedThreadContainerRouteEnsureResult {
   activationEventId: string | null;
@@ -256,12 +258,22 @@ export async function ensureHostedThreadContainerRouteTx(input: {
   prisma: Prisma.TransactionClient;
   threadId: string | number;
 }): Promise<HostedThreadContainerRouteEnsureResult> {
+  await lockHostedMemberRow(input.prisma, input.ownerMemberId);
   const owner = await readHostedMemberCoreState({
     memberId: input.ownerMemberId,
     prisma: input.prisma,
   });
 
-  if (!owner || !(await readActiveHostedMemberAccess({
+  if (!owner) {
+    throw hostedOnboardingError({
+      code: "HOSTED_THREAD_CONTAINER_OWNER_ACTIVE_ACCESS_REQUIRED",
+      httpStatus: 403,
+      message: "An active hosted member is required to own a thread container.",
+      retryable: false,
+    });
+  }
+  assertHostedMemberNotSuspended(owner);
+  if (!(await readActiveHostedMemberAccess({
     memberId: input.ownerMemberId,
     prisma: input.prisma,
   }))) {

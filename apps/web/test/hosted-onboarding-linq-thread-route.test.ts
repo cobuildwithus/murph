@@ -236,6 +236,7 @@ beforeEach(() => {
 
 function buildLinqMessageReceivedEvent(input: {
   chatId?: string;
+  createdAt?: string;
   eventId?: string;
   isFromMe?: boolean;
   isGroup?: boolean | null;
@@ -249,7 +250,7 @@ function buildLinqMessageReceivedEvent(input: {
   const service = input.service ?? "iMessage";
   return {
     api_version: "2026-01-01",
-    created_at: "2026-06-24T12:00:00.000Z",
+    created_at: input.createdAt ?? "2026-06-24T12:00:00.000Z",
     data: {
       chat: {
         id: input.chatId ?? "chat_group_123",
@@ -278,7 +279,7 @@ function buildLinqMessageReceivedEvent(input: {
       },
       preferred_service: service,
       recipient_phone: recipient,
-      received_at: "2026-06-24T12:00:00.000Z",
+      received_at: input.createdAt ?? "2026-06-24T12:00:00.000Z",
       sender_handle: {
         handle: input.sender ?? "+15551112222",
         id: "sender_handle_123",
@@ -1078,6 +1079,35 @@ function restoreEnvValue(key: string, value: string | undefined): void {
 }
 
 describe("Linq explicit external-thread routing", () => {
+  it("locks and rejects a suspended owner before creating a thread container", async () => {
+    const prisma = createStatefulThreadRoutePrisma();
+    vi.mocked(hostedMemberStore.readHostedMemberCoreState).mockResolvedValue({
+      billingStatus: HostedBillingStatus.active,
+      createdAt: new Date("2026-06-24T00:00:00.000Z"),
+      id: "member_owner_123",
+      suspendedAt: new Date("2026-06-24T00:01:00.000Z"),
+      updatedAt: new Date("2026-06-24T00:01:00.000Z"),
+    });
+
+    await expect(
+      ensureHostedThreadContainerRouteTx({
+        accountLookupKey: createHostedPhoneLookupKey("+15550000000"),
+        channel: "linq",
+        occurredAt: new Date("2026-06-24T00:02:00.000Z"),
+        ownerMemberId: "member_owner_123",
+        prisma: prisma as unknown as Prisma.TransactionClient,
+        threadId: "chat_suspended_123",
+      }),
+    ).rejects.toMatchObject({
+      code: "HOSTED_MEMBER_SUSPENDED",
+    });
+
+    expect(prisma.$queryRaw).toHaveBeenCalledOnce();
+    expect(hostedMemberStore.createHostedMember).not.toHaveBeenCalled();
+    expect(prisma.hostedThreadContainer.create).not.toHaveBeenCalled();
+    expect(prisma.hostedThreadRoute.create).not.toHaveBeenCalled();
+  });
+
   it("rejects thread containers as owners of nested thread containers", async () => {
     const prisma = createStatefulThreadRoutePrisma();
     prisma.seedThreadContainer({
@@ -1457,6 +1487,13 @@ describe("Linq explicit external-thread routing", () => {
     expect(hostedMemberStore.createHostedMember).toHaveBeenCalledTimes(1);
     expect(domainRootStore.provisionHostedCryptoDomainRootsForUserTx).toHaveBeenCalledTimes(1);
     expect(prisma.hostedThreadContainer.create).toHaveBeenCalledTimes(1);
+    expect(prisma.hostedThreadContainer.create).toHaveBeenCalledWith({
+      data: {
+        memberId: "member_thread_container_123",
+        monthlyUsageLimitUsdMicros: 7_500_000n,
+        ownerMemberId: "member_owner_123",
+      },
+    });
     expect(prisma.hostedThreadRoute.create).toHaveBeenCalledTimes(1);
     expect(prisma.hostedThreadRoute.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
@@ -2941,7 +2978,12 @@ describe("Linq group chat auto-provision", () => {
           tx: prisma,
         });
         expect(prisma.hostedThreadContainer.create).not.toHaveBeenCalled();
-        expect(memberIdentityStore.lookupHostedMemberIdentityByPhoneNumber).not.toHaveBeenCalled();
+        expect(
+          memberIdentityStore.lookupHostedMemberIdentityByPhoneNumber,
+        ).toHaveBeenCalledWith({
+          phoneNumber: "+15551112222",
+          prisma,
+        });
         expect(info).toHaveBeenCalledWith(
           "Hosted onboarding diagnostic: hosted-onboarding.webhook.linq.chat-classification.",
           {
@@ -2954,6 +2996,42 @@ describe("Linq group chat auto-provision", () => {
       }
     },
   );
+
+  it("renews only the authenticated sender's existing roster lease on routed inbound", async () => {
+    const prisma = createStatefulThreadRoutePrisma();
+    seedExistingGroupRoute(prisma);
+    mockSenderLookup(senderCore);
+    mockAllowedThreadUsage();
+    vi.mocked(prismaModule.getPrisma).mockReturnValue(prisma as never);
+    vi.mocked(linqModule.verifyAndParseHostedLinqWebhookRequest).mockReturnValue(
+      buildLinqMessageReceivedEvent({
+        createdAt: "2026-07-25T12:00:00.000Z",
+        isGroup: true,
+      }) as never,
+    );
+    vi.mocked(linqClient.getHostedLinqChatHandles).mockResolvedValue([]);
+
+    await expect(handleHostedOnboardingLinqWebhook({
+      rawBody: "{}",
+      signature: null,
+      timestamp: null,
+    })).resolves.toMatchObject({
+      ignored: false,
+      ok: true,
+      reason: "wake-appended-thread-route",
+    });
+
+    expect(prisma.hostedThreadContainerParticipant.updateMany).toHaveBeenCalledWith({
+      data: { lastSeenAt: new Date("2026-07-25T12:00:00.000Z") },
+      where: {
+        containerMemberId: "member_thread_container_123",
+        lastSeenAt: { lt: new Date("2026-07-25T12:00:00.000Z") },
+        participantMemberId: "member_owner_123",
+        removedAt: null,
+      },
+    });
+    expect(prisma.hostedThreadContainerParticipant.upsert).not.toHaveBeenCalled();
+  });
 
   it("fails closed as group when the pre-read route disappears before planning", async () => {
     const prisma = createStatefulThreadRoutePrisma();
@@ -3044,7 +3122,12 @@ describe("Linq group chat auto-provision", () => {
       }),
       tx: prisma,
     });
-    expect(memberIdentityStore.lookupHostedMemberIdentityByPhoneNumber).not.toHaveBeenCalled();
+    expect(
+      memberIdentityStore.lookupHostedMemberIdentityByPhoneNumber,
+    ).toHaveBeenCalledWith({
+      phoneNumber: "+15551112222",
+      prisma,
+    });
   });
 
   it.each([
@@ -3204,11 +3287,11 @@ describe("Linq group chat auto-provision", () => {
       allowed: true,
       allowanceSource: "thread_container",
       billingPlanCode: "launch_monthly",
-      limitUsdMicros: 4_500_000n,
+      limitUsdMicros: 7_500_000n,
       memberId: "member_thread_container_123",
       periodEnd: new Date("2026-07-01T00:00:00.000Z"),
       periodStart: new Date("2026-06-01T00:00:00.000Z"),
-      remainingUsdMicros: 4_500_000n,
+      remainingUsdMicros: 7_500_000n,
       spentUsdMicros: 0n,
       usageCreditBalanceUsdMicros: 0n,
       usageCreditLedgerVersion: 0n,
@@ -3234,7 +3317,7 @@ describe("Linq group chat auto-provision", () => {
         };
       };
     expect(containerCreate.data.ownerMemberId).toBe("member_owner_123");
-    expect(containerCreate.data.monthlyUsageLimitUsdMicros).toBe(4_500_000n);
+    expect(containerCreate.data.monthlyUsageLimitUsdMicros).toBe(7_500_000n);
     expect(prisma.hostedThreadRoute.create).toHaveBeenCalledTimes(1);
     expect(readSingleWakeHandoff(plan)).toMatchObject({
       eventId: "evt_group_123",

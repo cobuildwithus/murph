@@ -2185,14 +2185,15 @@ describe('assistant Codex turn planning', () => {
         },
       },
     })
+    expect(groupTools[0]?.description.length).toBeLessThanOrEqual(350)
     expect(groupTools[0]?.description).toContain(
-      'a handled offer action for that exact participant and scope',
+      'current authorized scheduled group turn',
     )
     expect(groupTools[0]?.description).toContain(
-      'A handled action for one participant never covers another.',
+      'trusted host binds group, route, and offer copy',
     )
-    expect(groupTools[0]?.description).not.toContain(
-      'already received an offer',
+    expect(groupTools[0]?.description).toContain(
+      'A posted offer leaves existing membership and other grants unchanged.',
     )
     expect(groupPermissionOfferRequest).not.toHaveBeenCalled()
     expect(groupSharedRead).not.toHaveBeenCalled()
@@ -2206,14 +2207,12 @@ describe('assistant Codex turn planning', () => {
       (tool) =>
         tool.namespace === 'murph' && tool.name === 'send_progress_update',
     )
+    expect(groupProgressTool?.description.length).toBeLessThanOrEqual(240)
     expect(groupProgressTool?.description).toContain(
-      'Use this much more sparingly than in a direct conversation.',
+      'only before a real reply-critical wait',
     )
     expect(groupProgressTool?.description).toContain(
-      'Skip challenge setup, the next setup question, permission offers, routine standings reads, and short tool sequences.',
-    )
-    expect(groupProgressTool?.description).not.toContain(
-      'even when each lookup is routine',
+      'do not repeat or use it as a final answer',
     )
     expect(attendedPlan.systemPrompt).toContain('murph.send_progress_update')
     expect(attendedPlan.systemPrompt).toContain(
@@ -2267,11 +2266,12 @@ describe('assistant Codex turn planning', () => {
       (tool) =>
         tool.namespace === 'murph' && tool.name === 'send_progress_update',
     )
+    expect(directProgressTool?.description.length).toBeLessThanOrEqual(260)
     expect(directProgressTool?.description).toContain(
-      'even when each lookup is routine',
+      'only before a real reply-critical wait',
     )
     expect(directProgressTool?.description).not.toContain(
-      'Use this much more sparingly than in a direct conversation.',
+      'current group',
     )
     expect(directPlan.systemPrompt).toContain('murph.send_progress_update')
     expect(directPlan.systemPrompt).toContain(

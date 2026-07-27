@@ -118,6 +118,71 @@ export async function sealHostedUserSecureBoxString(input: {
   }
 }
 
+export async function sealHostedUserSecureBoxStrings(input: {
+  entries: ReadonlyArray<{
+    aad: Omit<HostedSecureBoxAadFields, "domain" | "lane" | "scope" | "tenant" | "userId">;
+    scope: string;
+    value: string;
+  }>;
+  lane: HostedCryptoLane;
+  prisma?: HostedSecureBoxPrismaClient;
+  signal?: AbortSignal;
+  userId: string;
+}): Promise<string[]> {
+  if (!WEB_SEAL_LANES.has(input.lane)) {
+    throw new Error(`Web is not allowed to encrypt hosted ${input.lane} values.`);
+  }
+  if (input.entries.length === 0) {
+    return [];
+  }
+  const testCodec = getHostedSecureBoxStringTestCodecForTests();
+  if (testCodec) {
+    return input.entries.map((entry) =>
+      testCodec.encrypt({
+        aad: entry.aad,
+        lane: input.lane,
+        scope: entry.scope,
+        userId: input.userId,
+        value: entry.value,
+      })
+    );
+  }
+
+  const domain = getHostedCryptoDomainForLane(input.lane);
+  const { unwrapHostedDomainRootForWeb } = await import("./domain-root-store");
+  const { envelope, rootKey } = await unwrapHostedDomainRootForWeb({
+    domain,
+    prisma: input.prisma,
+    signal: input.signal,
+    userId: input.userId,
+  });
+  try {
+    return await Promise.all(input.entries.map(async (entry) => {
+      const aad = buildHostedSecureBoxAad({
+        ...entry.aad,
+        domain,
+        lane: input.lane,
+        scope: entry.scope,
+        tenant: "murph-hosted",
+        userId: input.userId,
+      });
+      return serializeHostedSecureBoxEnvelope(
+        await sealHostedSecureBox({
+          aad,
+          domain,
+          lane: input.lane,
+          plaintext: new TextEncoder().encode(entry.value),
+          rootKey,
+          rootKeyId: envelope.rootKeyId,
+          scope: entry.scope,
+        }),
+      );
+    }));
+  } finally {
+    rootKey.fill(0);
+  }
+}
+
 export async function openHostedUserSecureBoxString(input: {
   aad: Omit<HostedSecureBoxAadFields, "domain" | "lane" | "scope" | "tenant" | "userId">;
   lane: HostedCryptoLane;

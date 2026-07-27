@@ -37,6 +37,8 @@
     "deploy:artifacts": "pnpm runner:bundle && pnpm deploy:config:render && pnpm deploy:secrets:render && pnpm deploy:artifacts:validate",
     "deploy:artifacts:validate": "pnpm --dir ../.. exec tsx --tsconfig apps/cloudflare/tsconfig.scripts.json apps/cloudflare/scripts/validate-deploy-artifacts.ts",
     "images:cleanup": "pnpm --dir ../.. exec tsx --tsconfig apps/cloudflare/tsconfig.scripts.json apps/cloudflare/scripts/cleanup-container-images.ts",
+    "r2:bundles:active-owners": "pnpm --dir ../.. exec tsx --tsconfig apps/cloudflare/tsconfig.scripts.json apps/cloudflare/scripts/verify-r2-bundles-active-owners.ts",
+    "r2:bundles:migrate": "pnpm --dir ../.. exec tsx --tsconfig apps/cloudflare/tsconfig.scripts.json apps/cloudflare/scripts/migrate-r2-bundles.ts",
     "r2:lifecycle:apply": "pnpm --dir ../.. exec tsx --tsconfig apps/cloudflare/tsconfig.scripts.json apps/cloudflare/scripts/apply-r2-lifecycle.ts",
     "deploy:worker:apply": "pnpm --dir ../.. exec tsx --tsconfig apps/cloudflare/tsconfig.scripts.json apps/cloudflare/scripts/deploy-worker-version.ts",
     "deploy:worker": "pnpm deploy:artifacts && pnpm runner:docker:base -- --force && pnpm deploy:worker:apply",
@@ -83,6 +85,7 @@
     "esbuild": "^0.28.1",
     "tsx": "^4.20.6",
     "typescript": "^7.0.2",
+    "undici": "7.28.0",
     "vitest": "^4.1.6",
     "wrangler": "^4.90.0"
   }

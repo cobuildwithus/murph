@@ -6,6 +6,7 @@ import {
 } from "@prisma/client";
 import type Stripe from "stripe";
 
+import { prepareHostedCryptoDomainRootCandidates } from "../hosted-crypto/domain-root-store";
 import { signalHostedRuntimeManualWakeBestEffort } from "../hosted-orchestration/manual-wake";
 import { sha256Hex } from "../primitives";
 import { getPrisma } from "../prisma";
@@ -189,11 +190,18 @@ async function transitionHostedPulseTrialPaidPlan(
   });
 
   assertHostedPulseTrialStartPaidRecoverableSourceState({ billingRef });
-  const canStart =
-    parseHostedBillingPhase(billingRef?.currentBillingPhase) === "trial";
+  const currentBillingPhase =
+    parseHostedBillingPhase(billingRef?.currentBillingPhase);
+  const canStart = currentBillingPhase === "trial";
 
   if (input.timing === "at_trial_end" && !canStart) {
-    throw buildHostedPulseTrialStartPaidUnsupportedError();
+    if (currentBillingPhase === "paid") {
+      return {
+        billingPlanCode: START_PAID_PULSE_PLAN,
+        status: "started",
+      };
+    }
+    throw buildHostedPulseTrialContinueRequiresStartError();
   }
 
   const stripeCustomerId = billingRef?.stripeCustomerId ?? null;
@@ -232,6 +240,10 @@ async function transitionHostedPulseTrialPaidPlan(
       currentBillingPhase: billingRef?.currentBillingPhase,
       currentCheckoutOffer: billingRef?.currentCheckoutOffer,
     });
+
+  if (input.timing === "at_trial_end" && canResumePausedAutoTrial) {
+    throw buildHostedPulseTrialContinueRequiresStartError();
+  }
 
   const resolveExistingInvoiceResult = () => maybeResolveHostedPulseTrialStartPaidPostMutationInvoiceResult({
     invoice: readExpandedLatestInvoice(subscription),
@@ -380,6 +392,15 @@ function buildHostedPulseTrialStartPaidUnsupportedError(): Error {
     code: "HOSTED_PULSE_TRIAL_START_PAID_UNSUPPORTED",
     httpStatus: 409,
     message: "This Pulse update is only available while your Pulse trial is active.",
+  });
+}
+
+function buildHostedPulseTrialContinueRequiresStartError(): Error {
+  return hostedOnboardingError({
+    code: "HOSTED_PULSE_TRIAL_CONTINUE_REQUIRES_START",
+    httpStatus: 409,
+    message:
+      "Your Pulse trial has ended. Review the plan before starting paid Pulse.",
   });
 }
 
@@ -1077,6 +1098,11 @@ async function reconcileHostedPulseTrialStartPaidInvoice(input: {
   prisma: PrismaClient;
   subscription: Stripe.Subscription;
 }): Promise<void> {
+  const preparedCryptoDomainRoots =
+    await prepareHostedCryptoDomainRootCandidates({
+      prisma: input.prisma,
+      userId: input.memberId,
+    });
   await input.prisma.$transaction(async (tx) => {
     await applyStripeInvoicePaid(
       input.invoice,
@@ -1084,6 +1110,7 @@ async function reconcileHostedPulseTrialStartPaidInvoice(input: {
       tx,
       HostedBillingStatus.active,
       input.subscription,
+      preparedCryptoDomainRoots,
     );
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
 

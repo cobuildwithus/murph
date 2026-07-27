@@ -273,6 +273,12 @@ const HOSTED_PRE_CHECKPOINT_CAUSAL_ROUTE_ACTIONS = [
 const HOSTED_PRE_CHECKPOINT_CAUSAL_WAKE_KINDS = [
   "runtime.pending-effects-reconcile-requested",
 ] as const;
+const HOSTED_PRE_CHECKPOINT_ASSISTANT_ASK_COMPLETION_ROUTE_ACTIONS = [
+  "continue-assistant-ask",
+] as const;
+const HOSTED_PRE_CHECKPOINT_ASSISTANT_ASK_COMPLETION_WAKE_KINDS = [
+  "assistant.ask.completed",
+] as const;
 const HOSTED_ASSISTANT_ASK_COMPLETION_FIRST_ATTEMPT_ALERT_MS = 60_000;
 const HOSTED_MEMBER_PREFERENCE_PRE_PLANNING_MAX_ITEMS = 10;
 
@@ -1407,6 +1413,12 @@ export async function runHostedWorkspaceAssistantPhase(
         ...(deviceTool ? { deviceTool } : {}),
         ...(input.runtime.platform.familyPlanToolPort
           ? { familyPlanTool: input.runtime.platform.familyPlanToolPort }
+          : {}),
+        ...(input.runtime.platform.managedGroupActivityDecisionPort
+          ? {
+              managedGroupActivityDecisionReader:
+                input.runtime.platform.managedGroupActivityDecisionPort,
+            }
           : {}),
         ...(input.runtime.platform.labsToolPort
           ? { labsTool: input.runtime.platform.labsToolPort }
@@ -4164,7 +4176,7 @@ async function runSystemMailboxMaintenancePhase(input: {
         signal: phaseInput.signal ?? null,
         vaultRoot: phaseInput.restored.vaultRoot,
       });
-  const foregroundCausalPreparation =
+  let foregroundCausalPreparation =
     (
       pendingAssistantInputWakeAt !== null
       || phaseInput.foregroundCausalOnly === true
@@ -4189,6 +4201,43 @@ async function runSystemMailboxMaintenancePhase(input: {
           vaultRoot: phaseInput.restored.vaultRoot,
         })
       : null;
+  if (
+    phaseInput.foregroundCausalOnly === true
+    && foregroundCausalPreparation === null
+  ) {
+    pendingAssistantInputWakeAt = await resolvePendingAssistantInputWakeAt(
+      phaseInput,
+      { inspectOnly: true },
+    );
+    const preCheckpointCompletionOccurredBefore =
+      pendingAssistantInputWakeAt === null
+        ? undefined
+        : await resolveHostedOldestPendingAssistantInputAt({
+            signal: phaseInput.signal ?? null,
+            vaultRoot: phaseInput.restored.vaultRoot,
+          });
+    foregroundCausalPreparation =
+      await prepareHostedSystemMailboxItemForCheckpoint({
+        allowedRouteActions:
+          HOSTED_PRE_CHECKPOINT_ASSISTANT_ASK_COMPLETION_ROUTE_ACTIONS,
+        allowedWakeKinds:
+          HOSTED_PRE_CHECKPOINT_ASSISTANT_ASK_COMPLETION_WAKE_KINDS,
+        ...(preCheckpointCompletionOccurredBefore === undefined
+          ? {}
+          : {
+              assistantAskCompletionOccurredBefore:
+                preCheckpointCompletionOccurredBefore,
+            }),
+        executionContext: input.executionContext,
+        ...(phaseInput.now ? { now: phaseInput.now } : {}),
+        operatorHomeRoot: phaseInput.restored.operatorHomeRoot,
+        runtime: phaseInput.runtime,
+        runtimeEnv: phaseInput.runtimeEnv,
+        signal: phaseInput.signal ?? null,
+        shouldYieldBackgroundMaintenance: null,
+        vaultRoot: phaseInput.restored.vaultRoot,
+      });
+  }
   const foregroundCausalAttempted = foregroundCausalPreparation !== null;
   if (
     phaseInput.foregroundCausalOnly === true

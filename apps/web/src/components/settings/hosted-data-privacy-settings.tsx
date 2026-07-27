@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { forwardRef, useEffect, useRef, useState } from "react";
 import { Download, Trash2 } from "lucide-react";
 
 import {
@@ -46,6 +46,7 @@ interface HostedAccountVendorDeletionSummary {
 interface HostedAccountDeleteResponse {
   ok: true;
   result: {
+    cleanupPending?: boolean;
     cloudflare: {
       configured: boolean;
       deleted: boolean;
@@ -201,7 +202,7 @@ function HostedDataPrivacySettingsAuthorized(props: { authenticated: boolean }) 
         },
         url: "/api/settings/privacy/delete",
       });
-      setCleanupPending(hasIncompleteCleanup(response.result));
+      setCleanupPending(hasIncompleteHostedAccountDeletionCleanup(response.result));
       setDeleted(true);
       setDialogOpen(false);
       setConfirmationPhrase("");
@@ -275,14 +276,10 @@ function HostedDataPrivacySettingsAuthorized(props: { authenticated: boolean }) 
   if (deleted) {
     return (
       <>
-        <Alert ref={deletedAlertRef} role="status" aria-live="polite" tabIndex={-1}>
-          <AlertTitle>Account deleted</AlertTitle>
-          <AlertDescription>
-            {cleanupPending
-              ? "Your account was deleted. We're finishing some cleanup on our side, no action needed. Redirecting to the home page."
-              : "Your account and all your data have been deleted. Redirecting to the home page."}
-          </AlertDescription>
-        </Alert>
+        <HostedAccountDeletionStatus
+          cleanupPending={cleanupPending}
+          ref={deletedAlertRef}
+        />
         <HostedPrivyLogout onDone={() => setPrivyLogoutDone(true)} />
       </>
     );
@@ -462,14 +459,40 @@ function HostedDataPrivacyUnavailable(props: { authenticated: boolean }) {
   );
 }
 
-function hasIncompleteCleanup(result: HostedAccountDeleteResponse["result"]): boolean {
+export const HostedAccountDeletionStatus = forwardRef<HTMLDivElement, {
+  cleanupPending: boolean;
+}>(function HostedAccountDeletionStatus(props, ref) {
+  return (
+    <Alert
+      ref={ref}
+      role="status"
+      aria-live="polite"
+      tabIndex={-1}
+    >
+      <AlertTitle>Account deleted</AlertTitle>
+      <AlertDescription>
+        {props.cleanupPending
+          ? "Your account was deleted. We're finishing some cleanup on our side, no action needed. Redirecting to the home page."
+          : "Your account and live Murph data have been deleted. Redirecting to the home page."}
+      </AlertDescription>
+    </Alert>
+  );
+});
+
+export function hasIncompleteHostedAccountDeletionCleanup(
+  result: HostedAccountDeleteResponse["result"],
+): boolean {
+  if (typeof result.cleanupPending === "boolean") {
+    return result.cleanupPending;
+  }
+
   const vendorStatuses = [
     result.vendorAccounts.privyUser.status,
     result.vendorAccounts.stripeCustomer.status,
     result.vendorAccounts.stripeSubscription.status,
   ];
   return vendorStatuses.some((status) => status === "failed" || status === "skipped_not_configured")
-    || (result.cloudflare.configured && !result.cloudflare.deleted);
+    || !result.cloudflare.deleted;
 }
 
 function buildVaultExportFilename(generatedAt: string): string {

@@ -18,6 +18,7 @@ const activationMocks = vi.hoisted(() => ({
   buildHostedMemberActivationEventId: vi.fn(),
 }));
 const cryptoRootMocks = vi.hoisted(() => ({
+  prepareHostedCryptoDomainRootCandidates: vi.fn(),
   provisionActiveHostedDomainRootEnvelopeForUserOnly: vi.fn(),
 }));
 const identityMocks = vi.hoisted(() => ({
@@ -56,6 +57,8 @@ vi.mock("@/src/lib/hosted-onboarding/member-activation-runtime-wake", () => ({
     activationWakeMocks.signalHostedMemberActivationRuntimeWakeBestEffortResult,
 }));
 vi.mock("@/src/lib/hosted-crypto/domain-root-store", () => ({
+  prepareHostedCryptoDomainRootCandidates:
+    cryptoRootMocks.prepareHostedCryptoDomainRootCandidates,
   provisionActiveHostedDomainRootEnvelopeForUserOnly:
     cryptoRootMocks.provisionActiveHostedDomainRootEnvelopeForUserOnly,
 }));
@@ -97,9 +100,11 @@ import {
   createHostedFamilyBillingCheckout,
   ensureHostedAccountGroupForOwnerTx,
   hasHostedAccountGroupMembershipAccess,
+  HOSTED_FAMILY_MAX_SEATS,
   hostedFamilyInviteHasReusableTarget,
   issueHostedFamilyInviteFromOwnerTx,
   issueHostedFamilyInviteTx,
+  prepareHostedFamilyStripeActivationCryptoDomainRoots,
   prepareHostedLegacySyntheticFamilyCleanupTx,
   readHostedFamilyCheckoutSessionIdFromUrl,
   resolveHostedFamilyChatNotificationRouteTx,
@@ -265,6 +270,7 @@ describe("hosted Family plan", () => {
       "https://local.withmurph.ai:3443",
     );
     cryptoRootMocks.provisionActiveHostedDomainRootEnvelopeForUserOnly.mockResolvedValue(undefined);
+    cryptoRootMocks.prepareHostedCryptoDomainRootCandidates.mockResolvedValue(new Map());
     identityMocks.ensureHostedMemberForPhoneTx.mockResolvedValue({
       billingStatus: HostedBillingStatus.not_started,
       id: "member_mom",
@@ -1451,6 +1457,9 @@ describe("hosted Family plan", () => {
         memberId: expect.stringMatching(/^hbm_/u),
       }),
     }));
+    expect(
+      activationMocks.activateHostedMemberForFamilySponsorshipTx.mock.calls[0]?.[0],
+    ).not.toHaveProperty("preparedCryptoDomainRoots");
   });
 
   it("accepts a phone plus Telegram invite from the matching phone webhook sender", async () => {
@@ -1479,6 +1488,9 @@ describe("hosted Family plan", () => {
       phoneNumberVerifiedAt: now,
       prisma: tx,
     });
+    expect(
+      activationMocks.activateHostedMemberForFamilySponsorshipTx.mock.calls[0]?.[0],
+    ).not.toHaveProperty("preparedCryptoDomainRoots");
   });
 
   it("rejects a phone plus Telegram invite from the wrong Telegram username", async () => {
@@ -2553,6 +2565,12 @@ describe("hosted Family plan", () => {
   it("signals the accepted member activation mailbox after browser acceptance commits", async () => {
     const tx = createTxMock();
     tx.hostedAccountGroupInvite.findUnique.mockResolvedValueOnce(createPendingInvite());
+    const preparedCryptoDomainRoots = new Map([
+      ["control", { domain: "control" }],
+    ]);
+    cryptoRootMocks.prepareHostedCryptoDomainRootCandidates.mockResolvedValueOnce(
+      preparedCryptoDomainRoots,
+    );
     const prisma = tx as FamilyPlanTxMock & {
       $transaction: ReturnType<typeof vi.fn>;
     };
@@ -2576,11 +2594,107 @@ describe("hosted Family plan", () => {
         source: "family-invite-web-accept",
         timeoutMs: 5_000,
       });
+    expect(cryptoRootMocks.prepareHostedCryptoDomainRootCandidates).toHaveBeenCalledWith({
+      prisma,
+      userId: "member_mom",
+    });
+    expect(
+      cryptoRootMocks.prepareHostedCryptoDomainRootCandidates.mock.invocationCallOrder[0],
+    ).toBeLessThan(prisma.$transaction.mock.invocationCallOrder[0] ?? 0);
+    expect(activationMocks.activateHostedMemberForFamilySponsorshipTx).toHaveBeenCalledWith(
+      expect.objectContaining({
+        preparedCryptoDomainRoots,
+      }),
+    );
+  });
+
+  it("returns a missing browser invite before crypto preparation", async () => {
+    const tx = createTxMock();
+    tx.hostedAccountGroupInvite.findUnique.mockResolvedValueOnce(null);
+    cryptoRootMocks.prepareHostedCryptoDomainRootCandidates.mockRejectedValue(
+      new Error("KMS unavailable"),
+    );
+    const prisma = tx as FamilyPlanTxMock & {
+      $transaction: ReturnType<typeof vi.fn>;
+    };
+    prisma.$transaction = vi.fn((callback) => callback(tx));
+
+    await expect(acceptHostedFamilyInvite({
+      acceptedMemberId: "member_mom",
+      inviteCode: "missing_invite",
+      prisma: prisma as never,
+    })).rejects.toMatchObject({
+      code: "HOSTED_FAMILY_INVITE_NOT_FOUND",
+      httpStatus: 404,
+    });
+
+    expect(cryptoRootMocks.prepareHostedCryptoDomainRootCandidates).not.toHaveBeenCalled();
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it("rejects a wrong-phone browser identity before crypto preparation", async () => {
+    const tx = createTxMock();
+    tx.hostedAccountGroupInvite.findUnique.mockResolvedValue({
+      ...createPendingInvite(),
+      targetPhoneLookupKey: createHostedPhoneLookupKey("+48600000000"),
+    });
+    cryptoRootMocks.prepareHostedCryptoDomainRootCandidates.mockRejectedValue(
+      new Error("KMS unavailable"),
+    );
+    const prisma = tx as FamilyPlanTxMock & {
+      $transaction: ReturnType<typeof vi.fn>;
+    };
+    prisma.$transaction = vi.fn((callback) => callback(tx));
+
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      await expect(acceptHostedFamilyInvite({
+        acceptedMemberId: "member_mom",
+        inviteCode: "invite_phone",
+        phoneNumber: "+48 700 000 000",
+        prisma: prisma as never,
+        requireWebBinding: true,
+      })).rejects.toMatchObject({
+        code: "HOSTED_FAMILY_INVITE_PHONE_MISMATCH",
+        httpStatus: 403,
+      });
+    }
+
+    expect(cryptoRootMocks.prepareHostedCryptoDomainRootCandidates).not.toHaveBeenCalled();
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it("rejects a wrong-email browser identity before crypto preparation", async () => {
+    const tx = createTxMock();
+    tx.hostedAccountGroupInvite.findUnique.mockResolvedValue({
+      ...createPendingInvite(),
+      targetEmailLookupKey: createHostedEmailLookupKey("mom@example.com"),
+    });
+    cryptoRootMocks.prepareHostedCryptoDomainRootCandidates.mockRejectedValue(
+      new Error("KMS unavailable"),
+    );
+    const prisma = tx as FamilyPlanTxMock & {
+      $transaction: ReturnType<typeof vi.fn>;
+    };
+    prisma.$transaction = vi.fn((callback) => callback(tx));
+
+    await expect(acceptHostedFamilyInvite({
+      acceptedMemberId: "member_mom",
+      email: "someone-else@example.com",
+      inviteCode: "invite_email",
+      prisma: prisma as never,
+      requireWebBinding: true,
+    })).rejects.toMatchObject({
+      code: "HOSTED_FAMILY_INVITE_EMAIL_MISMATCH",
+      httpStatus: 403,
+    });
+
+    expect(cryptoRootMocks.prepareHostedCryptoDomainRootCandidates).not.toHaveBeenCalled();
+    expect(prisma.$transaction).not.toHaveBeenCalled();
   });
 
   it("replays browser acceptance by waking the existing activation mailbox", async () => {
     const tx = createTxMock();
-    tx.hostedAccountGroupInvite.findUnique.mockResolvedValueOnce({
+    tx.hostedAccountGroupInvite.findUnique.mockResolvedValue({
       ...createPendingInvite(),
       acceptedByMemberId: "member_mom",
       status: "accepted",
@@ -2616,6 +2730,203 @@ describe("hosted Family plan", () => {
         source: "family-invite-web-accept",
         timeoutMs: 5_000,
       });
+    expect(tx.hostedAccountGroupInvite.updateMany).not.toHaveBeenCalled();
+    expect(tx.hostedAccountGroupMembership.upsert).not.toHaveBeenCalled();
+    expect(cryptoRootMocks.prepareHostedCryptoDomainRootCandidates).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    {
+      invite: createPendingInvite({
+        expiresAt: new Date("2026-06-18T11:59:59.999Z"),
+      }),
+      label: "expired",
+    },
+    {
+      invite: createPendingInvite({
+        status: "revoked",
+      }),
+      label: "revoked",
+    },
+  ])("rejects an already-$label browser invite before crypto preparation", async ({
+    invite,
+  }) => {
+    const tx = createTxMock();
+    tx.hostedAccountGroupInvite.findUnique.mockResolvedValueOnce(invite);
+    const prisma = tx as FamilyPlanTxMock & {
+      $transaction: ReturnType<typeof vi.fn>;
+    };
+    prisma.$transaction = vi.fn((callback) => callback(tx));
+
+    await expect(acceptHostedFamilyInvite({
+      acceptedMemberId: "member_mom",
+      inviteCode: "invite_phone",
+      now: new Date("2026-06-18T12:00:00.000Z"),
+      prisma: prisma as never,
+    })).rejects.toMatchObject({
+      code: "HOSTED_FAMILY_INVITE_NOT_ACTIVE",
+      httpStatus: 410,
+    });
+
+    expect(cryptoRootMocks.prepareHostedCryptoDomainRootCandidates).not.toHaveBeenCalled();
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it("revalidates a browser invite retarget inside the acceptance transaction", async () => {
+    const tx = createTxMock();
+    tx.hostedAccountGroupInvite.findUnique
+      .mockResolvedValueOnce({
+        ...createPendingInvite(),
+        targetEmailLookupKey: createHostedEmailLookupKey("mom@example.com"),
+      })
+      .mockResolvedValueOnce({
+        ...createPendingInvite(),
+        targetEmailLookupKey: createHostedEmailLookupKey("other@example.com"),
+      });
+    const prisma = tx as FamilyPlanTxMock & {
+      $transaction: ReturnType<typeof vi.fn>;
+    };
+    prisma.$transaction = vi.fn((callback) => callback(tx));
+
+    await expect(acceptHostedFamilyInvite({
+      acceptedMemberId: "member_mom",
+      email: "mom@example.com",
+      inviteCode: "invite_email",
+      prisma: prisma as never,
+      requireWebBinding: true,
+    })).rejects.toMatchObject({
+      code: "HOSTED_FAMILY_INVITE_EMAIL_MISMATCH",
+      httpStatus: 403,
+    });
+
+    expect(cryptoRootMocks.prepareHostedCryptoDomainRootCandidates).toHaveBeenCalledWith({
+      prisma,
+      userId: "member_mom",
+    });
+    expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+    expect(tx.hostedAccountGroupInvite.updateMany).not.toHaveBeenCalled();
+    expect(tx.hostedAccountGroupMembership.upsert).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    {
+      label: "expiry",
+      transactionInvite: createPendingInvite({
+        expiresAt: new Date("2026-06-18T11:59:59.999Z"),
+      }),
+    },
+    {
+      label: "revocation",
+      transactionInvite: createPendingInvite({
+        status: "revoked",
+      }),
+    },
+  ])("revalidates browser invite $label inside the acceptance transaction", async ({
+    transactionInvite,
+  }) => {
+    const tx = createTxMock();
+    const matchingInvite = createPendingInvite({
+      targetEmailLookupKey: createHostedEmailLookupKey("mom@example.com"),
+    });
+    tx.hostedAccountGroupInvite.findUnique
+      .mockResolvedValueOnce(matchingInvite)
+      .mockResolvedValueOnce({
+        ...transactionInvite,
+        targetEmailLookupKey: matchingInvite.targetEmailLookupKey,
+      });
+    const prisma = tx as FamilyPlanTxMock & {
+      $transaction: ReturnType<typeof vi.fn>;
+    };
+    prisma.$transaction = vi.fn((callback) => callback(tx));
+
+    await expect(acceptHostedFamilyInvite({
+      acceptedMemberId: "member_mom",
+      email: "mom@example.com",
+      inviteCode: "invite_email",
+      now: new Date("2026-06-18T12:00:00.000Z"),
+      prisma: prisma as never,
+      requireWebBinding: true,
+    })).rejects.toMatchObject({
+      code: "HOSTED_FAMILY_INVITE_NOT_ACTIVE",
+      httpStatus: 410,
+    });
+
+    expect(cryptoRootMocks.prepareHostedCryptoDomainRootCandidates).toHaveBeenCalledTimes(1);
+    expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+    expect(tx.hostedAccountGroupInvite.updateMany).not.toHaveBeenCalled();
+    expect(tx.hostedAccountGroupMembership.upsert).not.toHaveBeenCalled();
+  });
+
+  it("uses a fresh transaction clock when an invite expires during crypto preparation", async () => {
+    vi.useFakeTimers();
+    try {
+      const tx = createTxMock();
+      const expiresAt = new Date("2026-06-18T12:00:00.000Z");
+      tx.hostedAccountGroupInvite.findUnique.mockResolvedValue(
+        createPendingInvite({
+          expiresAt,
+          targetEmailLookupKey: createHostedEmailLookupKey("mom@example.com"),
+        }),
+      );
+      const prisma = tx as FamilyPlanTxMock & {
+        $transaction: ReturnType<typeof vi.fn>;
+      };
+      prisma.$transaction = vi.fn((callback) => callback(tx));
+      vi.setSystemTime(new Date("2026-06-18T11:59:59.000Z"));
+      cryptoRootMocks.prepareHostedCryptoDomainRootCandidates.mockImplementationOnce(
+        async () => {
+          vi.setSystemTime(expiresAt);
+          return new Map();
+        },
+      );
+
+      await expect(acceptHostedFamilyInvite({
+        acceptedMemberId: "member_mom",
+        email: "mom@example.com",
+        inviteCode: "invite_email",
+        prisma: prisma as never,
+        requireWebBinding: true,
+      })).rejects.toMatchObject({
+        code: "HOSTED_FAMILY_INVITE_NOT_ACTIVE",
+        httpStatus: 410,
+      });
+
+      expect(cryptoRootMocks.prepareHostedCryptoDomainRootCandidates)
+        .toHaveBeenCalledTimes(1);
+      expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+      expect(tx.hostedAccountGroupInvite.updateMany).not.toHaveBeenCalled();
+      expect(tx.hostedAccountGroupMembership.upsert).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("revalidates Family seat authority inside the browser acceptance transaction", async () => {
+    const tx = createTxMock({
+      activeMembershipCount: 4,
+      billedSeatCount: 4,
+    });
+    tx.hostedAccountGroupInvite.findUnique.mockResolvedValue(createPendingInvite({
+      targetEmailLookupKey: createHostedEmailLookupKey("mom@example.com"),
+    }));
+    const prisma = tx as FamilyPlanTxMock & {
+      $transaction: ReturnType<typeof vi.fn>;
+    };
+    prisma.$transaction = vi.fn((callback) => callback(tx));
+
+    await expect(acceptHostedFamilyInvite({
+      acceptedMemberId: "member_mom",
+      email: "mom@example.com",
+      inviteCode: "invite_email",
+      prisma: prisma as never,
+      requireWebBinding: true,
+    })).rejects.toMatchObject({
+      code: "HOSTED_FAMILY_SEAT_LIMIT_REACHED",
+      httpStatus: 409,
+    });
+
+    expect(cryptoRootMocks.prepareHostedCryptoDomainRootCandidates).toHaveBeenCalledTimes(1);
+    expect(prisma.$transaction).toHaveBeenCalledTimes(1);
     expect(tx.hostedAccountGroupInvite.updateMany).not.toHaveBeenCalled();
     expect(tx.hostedAccountGroupMembership.upsert).not.toHaveBeenCalled();
   });
@@ -2828,11 +3139,18 @@ describe("hosted Family plan", () => {
   it("activates active family members when Stripe marks the group subscription active", async () => {
     const tx = createTxMock();
     const eventCreatedAt = new Date("2026-06-18T12:30:00.000Z");
+    const ownerPrepared = new Map();
+    const memberPrepared = new Map();
+    const preparedCryptoDomainRootsByMember = new Map([
+      ["member_mom", memberPrepared],
+      ["member_owner", ownerPrepared],
+    ]);
 
     await expect(applyHostedFamilyStripeSubscriptionUpdatedTx({
       dispatchContext: {
         eventCreatedAt,
       },
+      preparedCryptoDomainRootsByMember,
       subscription: makeFamilyStripeSubscription(),
       tx,
     })).resolves.toMatchObject({
@@ -2868,6 +3186,7 @@ describe("hosted Family plan", () => {
       {
         memberId: "member_owner",
         occurredAt: eventCreatedAt,
+        preparedCryptoDomainRoots: ownerPrepared,
         prisma: tx,
         sourceEventId: "family-subscription:sub_family",
       },
@@ -2877,10 +3196,177 @@ describe("hosted Family plan", () => {
       {
         memberId: "member_mom",
         occurredAt: eventCreatedAt,
+        preparedCryptoDomainRoots: memberPrepared,
         prisma: tx,
         sourceEventId: "family-subscription:sub_family",
       },
     );
+  });
+
+  it("prepares at most six Family members sequentially before reconciliation", async () => {
+    const tx = createTxMock();
+    const memberships = Array.from(
+      { length: HOSTED_FAMILY_MAX_SEATS },
+      (_, index) => ({
+        memberId: `member_${index}`,
+      }),
+    );
+    tx.hostedAccountGroupMembership.findMany.mockResolvedValue(memberships);
+    let activeCalls = 0;
+    let maxConcurrentCalls = 0;
+    cryptoRootMocks.prepareHostedCryptoDomainRootCandidates.mockImplementation(
+      async ({ userId }) => {
+        activeCalls += 1;
+        maxConcurrentCalls = Math.max(maxConcurrentCalls, activeCalls);
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        activeCalls -= 1;
+        return new Map([["control", { domain: "control", userId }]]);
+      },
+    );
+
+    const prepared = await prepareHostedFamilyStripeActivationCryptoDomainRoots({
+      prisma: tx as never,
+      subscription: makeFamilyStripeSubscription({
+        itemQuantity: HOSTED_FAMILY_MAX_SEATS,
+      }),
+    });
+
+    expect([...prepared.keys()]).toEqual(memberships.map(({ memberId }) => memberId));
+    expect(cryptoRootMocks.prepareHostedCryptoDomainRootCandidates)
+      .toHaveBeenCalledTimes(HOSTED_FAMILY_MAX_SEATS);
+    expect(maxConcurrentCalls).toBe(1);
+    expect(tx.hostedAccountGroupMembership.findMany).toHaveBeenCalledWith({
+      orderBy: {
+        memberId: "asc",
+      },
+      select: {
+        memberId: true,
+      },
+      take: HOSTED_FAMILY_MAX_SEATS + 1,
+      where: {
+        groupId: "hbag_family",
+        status: "active",
+      },
+    });
+  });
+
+  it("prepares a direct-paid owner for the in-transaction Family conversion", async () => {
+    const tx = createTxMock();
+    tx.hostedAccountGroupMembership.findMany.mockResolvedValue([
+      { memberId: "member_owner" },
+      { memberId: "member_mom" },
+    ]);
+    tx.hostedMember.findUnique.mockResolvedValue({
+      billingRef: {
+        currentBillingPhase: "paid",
+      },
+      billingStatus: HostedBillingStatus.active,
+    });
+    cryptoRootMocks.prepareHostedCryptoDomainRootCandidates.mockResolvedValue(
+      new Map([["control", { domain: "control", userId: "member_owner" }]]),
+    );
+
+    const prepared = await prepareHostedFamilyStripeActivationCryptoDomainRoots({
+      prisma: tx as never,
+      subscription: makeFamilyStripeSubscription(),
+    });
+
+    expect([...prepared.keys()]).toEqual(["member_owner"]);
+    expect(cryptoRootMocks.prepareHostedCryptoDomainRootCandidates)
+      .toHaveBeenCalledExactlyOnceWith({
+        prisma: tx,
+        userId: "member_owner",
+      });
+    expect(tx.hostedMember.findUnique).toHaveBeenCalledExactlyOnceWith({
+      select: {
+        billingRef: {
+          select: {
+            currentBillingPhase: true,
+          },
+        },
+        billingStatus: true,
+      },
+      where: {
+        id: "member_mom",
+      },
+    });
+  });
+
+  it("bounds active Family reconciliation to six sequential prepared commits", async () => {
+    const tx = createTxMock();
+    const memberships = Array.from(
+      { length: HOSTED_FAMILY_MAX_SEATS },
+      (_, index) => ({
+        id: `hbagm_member_${index}`,
+        memberId: `member_${index}`,
+        pendingPlanCode: null,
+        planCode: "pulse",
+      }),
+    );
+    tx.hostedAccountGroupMembership.findMany.mockResolvedValue(memberships);
+    const preparedCryptoDomainRootsByMember = new Map(
+      memberships.map(({ memberId }) => [
+        memberId,
+        new Map(),
+      ] as const),
+    );
+    let activeCalls = 0;
+    let maxConcurrentCalls = 0;
+    activationMocks.activateHostedMemberForFamilySponsorshipTx.mockImplementation(
+      async ({ memberId }) => {
+        activeCalls += 1;
+        maxConcurrentCalls = Math.max(maxConcurrentCalls, activeCalls);
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        activeCalls -= 1;
+        return {
+          activated: true,
+          hostedExecutionEventId: "member.activated:family",
+          hostedExecutionMailboxItemId: "mailbox_member_activation",
+          memberId,
+        };
+      },
+    );
+
+    await expect(applyHostedFamilyStripeSubscriptionUpdatedTx({
+      dispatchContext: {
+        eventCreatedAt: new Date("2026-06-18T12:30:00.000Z"),
+      },
+      preparedCryptoDomainRootsByMember,
+      subscription: makeFamilyStripeSubscription({
+        itemQuantity: HOSTED_FAMILY_MAX_SEATS,
+      }),
+      tx,
+    })).resolves.toMatchObject({
+      activations: memberships.map(({ memberId }) => ({ memberId })),
+      groupId: "hbag_family",
+    });
+
+    expect(tx.hostedAccountGroupMembership.findMany).toHaveBeenCalledTimes(3);
+    expect(tx.hostedAccountGroupMembership.findMany).toHaveBeenNthCalledWith(3, {
+      orderBy: {
+        memberId: "asc",
+      },
+      select: {
+        memberId: true,
+      },
+      where: {
+        groupId: "hbag_family",
+        status: "active",
+      },
+    });
+    expect(tx.hostedAccountGroupMembership.findFirst)
+      .toHaveBeenCalledTimes(HOSTED_FAMILY_MAX_SEATS);
+    expect(tx.hostedMember.findUnique).toHaveBeenCalledTimes(HOSTED_FAMILY_MAX_SEATS);
+    expect(activationMocks.activateHostedMemberForFamilySponsorshipTx)
+      .toHaveBeenCalledTimes(HOSTED_FAMILY_MAX_SEATS);
+    expect(
+      activationMocks.activateHostedMemberForFamilySponsorshipTx.mock.calls.every(
+        ([activationInput]) =>
+          activationInput.preparedCryptoDomainRoots
+          === preparedCryptoDomainRootsByMember.get(activationInput.memberId),
+      ),
+    ).toBe(true);
+    expect(maxConcurrentCalls).toBe(1);
   });
 
   it("projects exact mixed-tier quantities from one Family subscription", async () => {
@@ -3182,6 +3668,7 @@ describe("hosted Family plan", () => {
     expect(activationMocks.activateHostedMemberForFamilySponsorshipTx).toHaveBeenCalledWith({
       memberId: "member_owner",
       occurredAt: eventCreatedAt,
+      preparedCryptoDomainRoots: new Map(),
       prisma: tx,
       sourceEventId: "family-subscription:sub_family",
     });
@@ -3768,11 +4255,15 @@ describe("hosted Family plan", () => {
     );
     const eventCreatedAt = new Date("2026-07-14T12:00:00.000Z");
 
-    await expect(applyHostedFamilyStripeSubscriptionUpdatedTx({
+    const reconciliation = await applyHostedFamilyStripeSubscriptionUpdatedTx({
       dispatchContext: { eventCreatedAt },
       subscription: updatedSubscription,
       tx: webhookTx,
-    })).resolves.toMatchObject({ groupId: "hbag_family" });
+    });
+    expect(reconciliation).toMatchObject({
+      billingModeChangedMemberIds: ["member_owner"],
+      groupId: "hbag_family",
+    });
 
     expect(webhookTx.hostedAccountGroupBillingRef.upsert).toHaveBeenCalledWith(expect.objectContaining({
       create: expect.objectContaining({
@@ -4055,6 +4546,29 @@ describe("hosted Family plan", () => {
         lastStripeEventCreatedAt: expect.anything(),
       }),
     }));
+  });
+
+  it("does not bind Family Stripe identifiers after the owner is suspended", async () => {
+    const tx = createTxMock();
+    tx.hostedAccountGroup.findUnique
+      .mockResolvedValueOnce(createPendingInvite().group)
+      .mockResolvedValueOnce({
+        owner: {
+          suspendedAt: new Date("2026-06-18T12:29:00.000Z"),
+        },
+        suspendedAt: null,
+      });
+
+    await expect(writeHostedAccountGroupStripeBillingTx({
+      billingStatus: HostedBillingStatus.active,
+      groupId: "hbag_family",
+      stripeCustomerId: "cus_family",
+      stripeSubscriptionId: "sub_family",
+      tx,
+    })).resolves.toBeNull();
+
+    expect(tx.$queryRaw).toHaveBeenCalledOnce();
+    expect(tx.hostedAccountGroupBillingRef.upsert).not.toHaveBeenCalled();
   });
 
   it("does not match subscription events by customer alone", async () => {
@@ -4664,7 +5178,12 @@ function createTxMock(input: {
     hostedAccountGroup: {
       create: vi.fn().mockResolvedValue(group),
       findFirst: vi.fn().mockResolvedValue(group),
-      findUnique: vi.fn().mockResolvedValue(group),
+      findUnique: vi.fn().mockResolvedValue({
+        ...group,
+        owner: {
+          suspendedAt: null,
+        },
+      }),
       update: vi.fn().mockResolvedValue(group),
     },
     hostedAccountGroupBillingRef: {
