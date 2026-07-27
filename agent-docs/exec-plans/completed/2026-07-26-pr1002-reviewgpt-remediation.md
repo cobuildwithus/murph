@@ -1,6 +1,6 @@
 # PR 1002 ReviewGPT remediation
 
-Status: active
+Status: completed
 Created: 2026-07-26
 Updated: 2026-07-26
 
@@ -93,3 +93,4 @@ Updated: 2026-07-26
   `tbx_01kygjpd0n86qngdgtn0e93yag`.
 - The exact-head ReviewGPT correction round and GitHub CI inspection follow the
   final plan-closing push.
+Completed: 2026-07-26
