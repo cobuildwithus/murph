@@ -879,11 +879,12 @@ async function resolvePendingDeviceConnectionStartsForAccountDeletion(input: {
       registry ??= createHostedDeviceSyncRegistry(process.env);
       const deleteOwnerAccount =
         registry.get(pendingStart.provider)?.connectionHandler?.deleteOwnerAccount;
-      if (deleteOwnerAccount) {
-        const result = await deleteOwnerAccount({ ownerId });
-        if (result !== "absent" && result !== "deleted") {
-          throw new TypeError("Provider owner cleanup returned an unsupported result.");
-        }
+      if (!deleteOwnerAccount) {
+        throw new TypeError("Provider owner cleanup is unavailable.");
+      }
+      const result = await deleteOwnerAccount({ ownerId });
+      if (result !== "absent" && result !== "deleted") {
+        throw new TypeError("Provider owner cleanup returned an unsupported result.");
       }
     } catch (error) {
       throw hostedOnboardingError({

@@ -89,6 +89,33 @@ describe("PrismaHostedOAuthSessionStore.deleteExpiredOAuthStates", () => {
   });
 });
 
+describe("PrismaHostedOAuthSessionStore.consumeStagedConnectionStart", () => {
+  it("consumes only the exact request marker and leaves sibling starts outside the predicate", async () => {
+    const tx = createTransaction({});
+    const store = {
+      consumeStagedConnectionStart:
+        PrismaHostedOAuthSessionStore.prototype.consumeStagedConnectionStart,
+    };
+
+    await expect(store.consumeStagedConnectionStart({
+      ownerId: "user_123",
+      provider: "junction",
+      state: "exact-start",
+    }, tx as never)).resolves.toBe(true);
+    expect(tx.deviceOauthSession.deleteMany).toHaveBeenCalledWith({
+      where: {
+        metadataJson: {
+          path: [DEVICE_SYNC_CONNECTION_START_PENDING_STATE_METADATA_KEY],
+          equals: true,
+        },
+        provider: "junction",
+        state: "exact-start",
+        userId: "user_123",
+      },
+    });
+  });
+});
+
 describe("PrismaHostedOAuthSessionStore.consumeOAuthState", () => {
   it("never exposes a pre-provider lifecycle marker as callback state", async () => {
     const record = buildOAuthSessionRow({

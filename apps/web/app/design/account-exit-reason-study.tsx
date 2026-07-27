@@ -3,6 +3,7 @@
 import { useState } from "react";
 
 import { AccountExitReasonStep } from "@/src/components/settings/account-exit-reason-step";
+import { AccountDeletionConfirmationStep } from "@/src/components/settings/account-deletion-confirmation-step";
 import type { HostedAccountExitReasonCode } from "@/src/lib/hosted-privacy/account-data-shared";
 
 export function AccountExitReasonStudy() {
@@ -13,12 +14,10 @@ export function AccountExitReasonStudy() {
       id="account-exit-reason"
     >
       <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
-        The first step of the delete-account dialog in{" "}
-        <code>/settings</code>. Answering is optional: Skip always moves straight
-        to the confirmation step, and Continue only turns on once a reason is
-        picked. The note field appears after a reason is chosen so a written note
-        always arrives attached to one. The live step is interactive here; the
-        two previews below are inert.
+        The delete-account flow in <code>/settings</code>. The exit reason is
+        optional. A retryable wearable-start conflict keeps the confirmation
+        phrase in place, explains the temporary block, and offers one fresh
+        retry. The live reason step is interactive here; the previews are inert.
       </p>
 
       <StepFrame label="Interactive">
@@ -47,6 +46,18 @@ export function AccountExitReasonStudy() {
           />
         </StepFrame>
       </div>
+
+      <StepFrame inert label="Wearable start still finishing · retry available" state="retryable">
+        <AccountDeletionConfirmationStep
+          confirmationPhrase="DELETE MY ACCOUNT"
+          error="A wearable connection is still finishing. Retry account deletion in a moment."
+          onCancel={() => undefined}
+          onConfirmationPhraseChange={() => undefined}
+          onSubmit={() => undefined}
+          pending={false}
+          retryAvailable
+        />
+      </StepFrame>
     </div>
   );
 }

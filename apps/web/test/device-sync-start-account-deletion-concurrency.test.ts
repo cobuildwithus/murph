@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import {
   DEVICE_SYNC_CONNECTION_START_PENDING_STATE_METADATA_KEY,
   type CommitPublicDeviceSyncConnectionStartInput,
+  type CommitPublicDeviceSyncSdkConnectionStartInput,
 } from "@murphai/device-syncd/types";
 
 import { PrismaDeviceSyncControlPlaneStore } from "@/src/lib/device-sync/prisma-store";
@@ -104,6 +105,24 @@ function buildStartInput(
   };
 }
 
+function buildSdkStartInput(
+  fixture: Fixture,
+  options: { stateSuffix?: string } = {},
+): CommitPublicDeviceSyncSdkConnectionStartInput {
+  return {
+    connectionSeed: {
+      connectedAt,
+      credential: { kind: "provider_config", providerConfigKey: "junction" },
+      externalAccountId: fixture.externalAccountId,
+      ownerId: fixture.memberId,
+      provider: "junction",
+      reuseEstablishedConnection: true,
+      setupPhase: "source_confirmed",
+    },
+    state: `${fixture.state}${options.stateSuffix ?? "-sdk"}`,
+  };
+}
+
 function createStore(prisma: PrismaClient): PrismaDeviceSyncControlPlaneStore {
   return new PrismaDeviceSyncControlPlaneStore({
     codec: testCodec,
@@ -165,6 +184,67 @@ function pauseOAuthStateFinalize(input: {
     get(target, property) {
       if (property === "deviceOauthSession") {
         return deviceOauthSession;
+      }
+      const value = Reflect.get(target, property, target);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+}
+
+function pauseStagedStartConsume(input: {
+  allow: Deferred<void>;
+  entered: Deferred<void>;
+  tx: Prisma.TransactionClient;
+}): Prisma.TransactionClient {
+  const deviceOauthSession = new Proxy(input.tx.deviceOauthSession, {
+    get(target, property) {
+      if (property === "deleteMany") {
+        return async (args: Prisma.DeviceOauthSessionDeleteManyArgs) => {
+          input.entered.resolve();
+          await input.allow.promise;
+          return target.deleteMany(args);
+        };
+      }
+      const value = Reflect.get(target, property, target);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+  return new Proxy(input.tx, {
+    get(target, property) {
+      if (property === "deviceOauthSession") {
+        return deviceOauthSession;
+      }
+      const value = Reflect.get(target, property, target);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+}
+
+function pauseMissingConnectionLookup(input: {
+  allow: Deferred<void>;
+  entered: Deferred<void>;
+  tx: Prisma.TransactionClient;
+}): Prisma.TransactionClient {
+  const deviceConnection = new Proxy(input.tx.deviceConnection, {
+    get(target, property) {
+      if (property === "findUnique") {
+        return async (args: Prisma.DeviceConnectionFindUniqueArgs) => {
+          const result = await target.findUnique(args);
+          if (!result) {
+            input.entered.resolve();
+            await input.allow.promise;
+          }
+          return result;
+        };
+      }
+      const value = Reflect.get(target, property, target);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+  return new Proxy(input.tx, {
+    get(target, property) {
+      if (property === "deviceConnection") {
+        return deviceConnection;
       }
       const value = Reflect.get(target, property, target);
       return typeof value === "function" ? value.bind(target) : value;
@@ -267,6 +347,41 @@ describe.skipIf(!runPostgresConcurrencyProof)(
       }
     });
 
+    it("a successful start consumes only its own marker while a sibling provider request remains live", async () => {
+      const fixture = await createFixture();
+      const store = createStore(fixture.starter);
+      const firstInput = buildStartInput(fixture, { stateSuffix: "-first" });
+      const secondInput = buildStartInput(fixture, { stateSuffix: "-second" });
+
+      try {
+        await stageStart(store, firstInput);
+        await stageStart(store, secondInput);
+        await store.commitConnectionStart(secondInput);
+
+        const states = await fixture.observer.deviceOauthSession.findMany({
+          orderBy: { state: "asc" },
+          select: { metadataJson: true, state: true },
+          where: { userId: fixture.memberId },
+        });
+        expect(states).toEqual([
+          {
+            metadataJson: expect.objectContaining({
+              [DEVICE_SYNC_CONNECTION_START_PENDING_STATE_METADATA_KEY]: true,
+            }),
+            state: firstInput.oauthState.state,
+          },
+          {
+            metadataJson: expect.not.objectContaining({
+              [DEVICE_SYNC_CONNECTION_START_PENDING_STATE_METADATA_KEY]: true,
+            }),
+            state: secondInput.oauthState.state,
+          },
+        ]);
+      } finally {
+        await cleanupFixture(fixture);
+      }
+    });
+
     it("keeps staged seeded and seedless starts visible when suspension wins before finalization", async () => {
       const fixture = await createFixture();
       const store = createStore(fixture.starter);
@@ -303,12 +418,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           });
         }
 
-        await store.abortConnectionStart(seededInput.oauthState.state);
-        await store.abortConnectionStart(seedlessInput.oauthState.state);
         await expect(fixture.observer.deviceConnection.count({
-          where: { userId: fixture.memberId },
-        })).resolves.toBe(0);
-        await expect(fixture.observer.deviceOauthSession.count({
           where: { userId: fixture.memberId },
         })).resolves.toBe(0);
       } finally {
@@ -363,6 +473,224 @@ describe.skipIf(!runPostgresConcurrencyProof)(
       } finally {
         releaseDeletion.resolve();
         await Promise.allSettled([deletion, ...(stage ? [stage] : [])]);
+        await cleanupFixture(fixture);
+      }
+    });
+
+    it("retains an SDK marker and creates no local connection when suspension wins after staging", async () => {
+      const fixture = await createFixture();
+      const store = createStore(fixture.starter);
+      const sdkInput = buildSdkStartInput(fixture);
+
+      try {
+        await store.stageConnectionStart({
+          createdAt: connectedAt,
+          expiresAt: setupExpiresAt,
+          metadata: {
+            [DEVICE_SYNC_CONNECTION_START_PENDING_STATE_METADATA_KEY]: true,
+          },
+          ownerId: fixture.memberId,
+          provider: "junction",
+          returnTo: null,
+          state: sdkInput.state,
+        });
+        await fixture.deletion.$transaction(async (tx) => {
+          await tx.$queryRaw`SELECT id FROM hosted_member WHERE id = ${fixture.memberId} FOR UPDATE`;
+          await tx.hostedMember.update({ data: { suspendedAt }, where: { id: fixture.memberId } });
+        });
+
+        await expect(store.commitSdkConnectionStart(sdkInput)).rejects.toMatchObject({
+          code: "CONNECTION_OWNER_UNAVAILABLE",
+          httpStatus: 403,
+        });
+        await expect(fixture.observer.deviceConnection.count({
+          where: { userId: fixture.memberId },
+        })).resolves.toBe(0);
+        await expect(fixture.observer.deviceOauthSession.findUnique({
+          where: { state: sdkInput.state },
+        })).resolves.toMatchObject({
+          metadataJson: expect.objectContaining({
+            [DEVICE_SYNC_CONNECTION_START_PENDING_STATE_METADATA_KEY]: true,
+          }),
+        });
+      } finally {
+        await cleanupFixture(fixture);
+      }
+    });
+
+    it("resolves a cross-owner SDK insert race as an ownership conflict and retains the losing marker", async () => {
+      const fixture = await createFixture();
+      const challenger = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const challengerMemberId = `member_device_start_challenger_${randomUUID()}`;
+      const firstLookupEntered = deferred();
+      const secondLookupEntered = deferred();
+      const allowConnectionInsert = deferred();
+      const firstStore = createStore(mapTransactions(fixture.starter, (tx) =>
+        pauseMissingConnectionLookup({
+          allow: allowConnectionInsert,
+          entered: firstLookupEntered,
+          tx,
+        })
+      ));
+      const secondStore = createStore(mapTransactions(challenger, (tx) =>
+        pauseMissingConnectionLookup({
+          allow: allowConnectionInsert,
+          entered: secondLookupEntered,
+          tx,
+        })
+      ));
+      const firstInput = buildSdkStartInput(fixture, { stateSuffix: "-sdk-first" });
+      const secondInput: CommitPublicDeviceSyncSdkConnectionStartInput = {
+        connectionSeed: {
+          ...firstInput.connectionSeed,
+          ownerId: challengerMemberId,
+        },
+        state: `${fixture.state}-sdk-second`,
+      };
+      let starts: Array<Promise<unknown>> = [];
+
+      try {
+        await fixture.observer.hostedMember.create({ data: { id: challengerMemberId } });
+        await firstStore.stageConnectionStart({
+          createdAt: connectedAt,
+          expiresAt: setupExpiresAt,
+          metadata: {
+            [DEVICE_SYNC_CONNECTION_START_PENDING_STATE_METADATA_KEY]: true,
+          },
+          ownerId: fixture.memberId,
+          provider: "junction",
+          returnTo: null,
+          state: firstInput.state,
+        });
+        await secondStore.stageConnectionStart({
+          createdAt: connectedAt,
+          expiresAt: setupExpiresAt,
+          metadata: {
+            [DEVICE_SYNC_CONNECTION_START_PENDING_STATE_METADATA_KEY]: true,
+          },
+          ownerId: challengerMemberId,
+          provider: "junction",
+          returnTo: null,
+          state: secondInput.state,
+        });
+
+        starts = [
+          firstStore.commitSdkConnectionStart(firstInput),
+          secondStore.commitSdkConnectionStart(secondInput),
+        ];
+        await Promise.all([firstLookupEntered.promise, secondLookupEntered.promise]);
+        allowConnectionInsert.resolve();
+        const results = await Promise.allSettled(starts);
+        const fulfilled = results.filter((result) => result.status === "fulfilled");
+        const rejected = results.filter((result) => result.status === "rejected");
+
+        expect(fulfilled).toHaveLength(1);
+        expect(rejected).toHaveLength(1);
+        expect(rejected[0]?.reason).toMatchObject({
+          code: "CONNECTION_OWNERSHIP_CONFLICT",
+          httpStatus: 409,
+        });
+        await expect(fixture.observer.deviceConnection.count({
+          where: {
+            userId: { in: [fixture.memberId, challengerMemberId] },
+          },
+        })).resolves.toBe(1);
+        const pendingMarkers = await fixture.observer.deviceOauthSession.findMany({
+          select: { state: true, userId: true },
+          where: {
+            metadataJson: {
+              path: [DEVICE_SYNC_CONNECTION_START_PENDING_STATE_METADATA_KEY],
+              equals: true,
+            },
+            userId: { in: [fixture.memberId, challengerMemberId] },
+          },
+        });
+        expect(pendingMarkers).toHaveLength(1);
+        const winnerIndex = results.findIndex((result) => result.status === "fulfilled");
+        expect(pendingMarkers[0]).toEqual({
+          state: winnerIndex === 0 ? secondInput.state : firstInput.state,
+          userId: winnerIndex === 0 ? challengerMemberId : fixture.memberId,
+        });
+      } finally {
+        allowConnectionInsert.resolve();
+        await Promise.allSettled(starts);
+        await fixture.observer.deviceOauthSession.deleteMany({
+          where: { userId: challengerMemberId },
+        });
+        await fixture.observer.deviceConnection.deleteMany({
+          where: { userId: challengerMemberId },
+        });
+        await fixture.observer.hostedMember.deleteMany({
+          where: { id: challengerMemberId },
+        });
+        await challenger.$disconnect();
+        await cleanupFixture(fixture);
+      }
+    });
+
+    it("atomically commits an SDK connection before a waiting deletion can observe it", async () => {
+      const fixture = await createFixture();
+      const enteredMarkerConsume = deferred();
+      const allowMarkerConsume = deferred();
+      const deletionPid = deferred<number>();
+      const stageStore = createStore(fixture.starter);
+      const commitStore = createStore(mapTransactions(fixture.starter, (tx) =>
+        pauseStagedStartConsume({
+          allow: allowMarkerConsume,
+          entered: enteredMarkerConsume,
+          tx,
+        })
+      ));
+      const sdkInput = buildSdkStartInput(fixture);
+      await stageStore.stageConnectionStart({
+        createdAt: connectedAt,
+        expiresAt: setupExpiresAt,
+        metadata: {
+          [DEVICE_SYNC_CONNECTION_START_PENDING_STATE_METADATA_KEY]: true,
+        },
+        ownerId: fixture.memberId,
+        provider: "junction",
+        returnTo: null,
+        state: sdkInput.state,
+      });
+      const start = commitStore.commitSdkConnectionStart(sdkInput);
+      let deletion: Promise<{
+        connections: number;
+        pendingStarts: number;
+      }> | null = null;
+
+      try {
+        await enteredMarkerConsume.promise;
+        deletion = fixture.deletion.$transaction(async (tx) => {
+          deletionPid.resolve(await readBackendPid(tx));
+          await tx.$queryRaw`SELECT id FROM hosted_member WHERE id = ${fixture.memberId} FOR UPDATE`;
+          await tx.hostedMember.update({ data: { suspendedAt }, where: { id: fixture.memberId } });
+          return {
+            connections: await tx.deviceConnection.count({
+              where: { userId: fixture.memberId },
+            }),
+            pendingStarts: await tx.deviceOauthSession.count({
+              where: {
+                metadataJson: {
+                  path: [DEVICE_SYNC_CONNECTION_START_PENDING_STATE_METADATA_KEY],
+                  equals: true,
+                },
+                userId: fixture.memberId,
+              },
+            }),
+          };
+        }, { timeout: 15_000 });
+
+        await waitForBlockedBackend(fixture.observer, await deletionPid.promise);
+        allowMarkerConsume.resolve();
+        const [, observed] = await Promise.all([start, deletion]);
+        expect(observed).toEqual({
+          connections: 1,
+          pendingStarts: 0,
+        });
+      } finally {
+        allowMarkerConsume.resolve();
+        await Promise.allSettled([start, ...(deletion ? [deletion] : [])]);
         await cleanupFixture(fixture);
       }
     });

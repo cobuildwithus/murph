@@ -344,6 +344,11 @@ export interface CommitPublicDeviceSyncConnectionStartInput {
   oauthState: OAuthStateRecord;
 }
 
+export interface CommitPublicDeviceSyncSdkConnectionStartInput {
+  connectionSeed: UpsertPublicDeviceSyncConnectionInput;
+  state: string;
+}
+
 export interface DeviceSyncWebhookTraceRecord {
   provider: string;
   traceId: string;
@@ -412,8 +417,14 @@ export interface DeviceSyncPublicIngressStore {
   commitConnectionStart?(
     input: CommitPublicDeviceSyncConnectionStartInput,
   ): void | Promise<void>;
-  /** Removes a staged marker only after the provider start is safely resolved. */
-  abortConnectionStart?(state: string): void | Promise<void>;
+  /**
+   * Atomically persists an SDK-created connection and consumes only that
+   * request's staged marker under the same active-member lifecycle fence.
+   */
+  commitSdkConnectionStart?(
+    input: CommitPublicDeviceSyncSdkConnectionStartInput,
+  ): UpsertPublicDeviceSyncConnectionResult
+    | Promise<UpsertPublicDeviceSyncConnectionResult>;
   upsertConnectionWithPrevious?(
     input: UpsertPublicDeviceSyncConnectionInput,
   ): UpsertPublicDeviceSyncConnectionResult | Promise<UpsertPublicDeviceSyncConnectionResult>;

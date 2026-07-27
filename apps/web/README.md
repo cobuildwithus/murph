@@ -1234,6 +1234,15 @@ Hosted settings-authenticated wearable routes:
 - `POST /api/settings/device-sync/connections/:connectionId/disconnect`
 - `POST /api/settings/email/sync`
 
+Account deletion uses the active `hosted_member` row as the lifecycle fence for
+every hosted Link, OAuth, and companion SDK wearable start. Each request owns
+one staged marker until its own atomic commit or account-deletion cleanup;
+sibling starts never remove one another's markers. A live marker returns a
+retryable deletion response. Settings keeps the confirmation context visible,
+restores browser-vault session observation, and obtains fresh sensitive-action
+authorization for the member's explicit retry. Missing provider cleanup
+capability retains the marker and fails closed.
+
 Assertion-authenticated browser-to-agent bridge routes:
 
 - `POST /api/device-sync/agents/pair`

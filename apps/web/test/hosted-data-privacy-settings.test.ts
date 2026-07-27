@@ -690,6 +690,94 @@ describe("HostedDataPrivacySettings", () => {
     expect(container.textContent).not.toContain("Could not delete your account right now.");
   });
 
+  test("keeps retryable in-progress deletion failures in place and reauthorizes the retry", async () => {
+    mockHostedDataPrivacyDeleteFlowState();
+    const { HostedOnboardingApiError } = await import(
+      "@/src/components/hosted-onboarding/client-api"
+    );
+    mocks.requestHostedOnboardingJson
+      .mockRejectedValueOnce(
+        new HostedOnboardingApiError({
+          code: "ACCOUNT_DELETION_DEVICE_CONNECTION_START_IN_PROGRESS",
+          message: "A wearable connection is still finishing. Retry account deletion in a moment.",
+          retryable: true,
+        }),
+      )
+      .mockResolvedValueOnce({
+        ok: true,
+        result: {
+          cloudflare: { configured: true, deleted: true },
+          deletedAt: "2026-04-29T01:02:03.000Z",
+          vendorAccounts: {
+            privyUser: { errorCode: null, status: "completed" },
+            stripeCustomer: { errorCode: null, status: "completed" },
+            stripeSubscription: { errorCode: null, status: "completed" },
+          },
+        },
+      });
+
+    const { document, window } = loadLinkedom().parseHTML(
+      "<html><body><div id='root'></div></body></html>",
+    );
+    installGlobals(window, document);
+    const container = document.getElementById("root");
+    assert.ok(container);
+
+    const root: Root = createRoot(container);
+    cleanupRender = async () => {
+      await act(async () => {
+        root.unmount();
+      });
+    };
+
+    await act(async () => {
+      root.render(createElement(HostedDataPrivacySettings, { authenticated: true }));
+    });
+
+    await clickButton(container, "Delete account", window);
+    expect(mocks.publishBrowserVaultSessionEnding).toHaveBeenCalledTimes(1);
+    expect(mocks.publishBrowserVaultSessionInvalidation).toHaveBeenCalledTimes(1);
+    expect(mocks.reloadCurrentHostedAuthDocument).not.toHaveBeenCalled();
+
+    await clickButton(container, "Delete account", window);
+    expect(mocks.authorize).toHaveBeenCalledTimes(2);
+    expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledTimes(2);
+    expect(mocks.requestHostedOnboardingJson.mock.calls[0]?.[0]?.payload)
+      .toMatchObject({ confirmationPhrase: "DELETE MY ACCOUNT" });
+    expect(mocks.requestHostedOnboardingJson.mock.calls[1]?.[0]?.payload)
+      .toMatchObject({ confirmationPhrase: "DELETE MY ACCOUNT" });
+  });
+
+  test("renders the retryable deletion explanation as an alert with one retry action", async () => {
+    mockHostedDataPrivacyDeleteFlowState({
+      deleteRetryAvailable: true,
+      dialogError: "A wearable connection is still finishing. Retry account deletion in a moment.",
+    });
+
+    const { document, window } = loadLinkedom().parseHTML(
+      "<html><body><div id='root'></div></body></html>",
+    );
+    installGlobals(window, document);
+    const container = document.getElementById("root");
+    assert.ok(container);
+
+    const root: Root = createRoot(container);
+    cleanupRender = async () => {
+      await act(async () => {
+        root.unmount();
+      });
+    };
+
+    await act(async () => {
+      root.render(createElement(HostedDataPrivacySettings, { authenticated: true }));
+    });
+
+    const alert = container.querySelector("[role='alert']");
+    assert.ok(alert);
+    expect(alert.textContent).toContain("A wearable connection is still finishing.");
+    expect(findButton(container, "Retry deletion").disabled).toBe(false);
+  });
+
   test("an authorization failure does not invalidate an unchanged session", async () => {
     mockHostedDataPrivacyDeleteFlowState();
     mocks.authorize.mockRejectedValueOnce(new Error("authorization unavailable"));
@@ -782,7 +870,8 @@ describe("HostedDataPrivacySettings", () => {
 // Values follow the component's useState declaration order:
 // exportPending, exportDialogOpen, acknowledgedSensitiveDownload, exportDialogError,
 // exportSuccess, deletePending, dialogOpen, dialogStep, exitReason, exitNote,
-// confirmationPhrase, dialogError, deleted, cleanupPending, privyLogoutDone.
+// confirmationPhrase, dialogError, deleteRetryAvailable, deleted, cleanupPending,
+// privyLogoutDone.
 function mockHostedVaultExportFlowState(input: {
   acknowledgedSensitiveDownload?: boolean;
 } = {}) {
@@ -802,11 +891,13 @@ function mockHostedVaultExportFlowState(input: {
     false,
     false,
     false,
+    false,
   ];
 }
 
 function mockHostedDataPrivacyDeleteFlowState(input: {
   confirmationPhrase?: string;
+  deleteRetryAvailable?: boolean;
   dialogError?: string | null;
   exitNote?: string;
   exitReason?: string | null;
@@ -826,6 +917,7 @@ function mockHostedDataPrivacyDeleteFlowState(input: {
     input.exitNote ?? "",
     input.confirmationPhrase ?? "DELETE MY ACCOUNT",
     input.dialogError ?? null,
+    input.deleteRetryAvailable ?? false,
     false,
     false,
     false,
@@ -846,6 +938,7 @@ function mockHostedDataPrivacyDeletedState() {
     "",
     "",
     null,
+    false,
     true,
     false,
     false,

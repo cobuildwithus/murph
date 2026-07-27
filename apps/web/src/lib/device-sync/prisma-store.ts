@@ -5,6 +5,7 @@ import { buildCommittedConnectionStartOAuthState } from "@murphai/device-syncd/t
 import type {
   ClaimDeviceSyncWebhookTraceInput,
   CommitPublicDeviceSyncConnectionStartInput,
+  CommitPublicDeviceSyncSdkConnectionStartInput,
   ConsumeOAuthStateResult,
   DeviceSyncPublicIngressStore,
   DeviceSyncWebhookTraceClaimResult,
@@ -170,10 +171,6 @@ export class PrismaDeviceSyncControlPlaneStore
     });
   }
 
-  async abortConnectionStart(state: string): Promise<void> {
-    await this.oauthSessions.abortConnectionStart(state);
-  }
-
   async commitConnectionStart(
     input: CommitPublicDeviceSyncConnectionStartInput,
   ): Promise<void> {
@@ -229,11 +226,48 @@ export class PrismaDeviceSyncControlPlaneStore
           httpStatus: 409,
         });
       }
-      await this.oauthSessions.deleteOtherPendingConnectionStarts({
+    });
+  }
+
+  async commitSdkConnectionStart(
+    input: CommitPublicDeviceSyncSdkConnectionStartInput,
+  ): Promise<UpsertPublicDeviceSyncConnectionResult> {
+    try {
+      return await this.commitSdkConnectionStartOnce(input);
+    } catch (error) {
+      if (!isUniqueViolation(error)) {
+        throw error;
+      }
+
+      return this.commitSdkConnectionStartOnce(input);
+    }
+  }
+
+  private async commitSdkConnectionStartOnce(
+    input: CommitPublicDeviceSyncSdkConnectionStartInput,
+  ): Promise<UpsertPublicDeviceSyncConnectionResult> {
+    const ownerId = requireHostedConnectionStartOwnerId(input.connectionSeed.ownerId);
+
+    return this.prisma.$transaction(async (tx) => {
+      await lockActiveHostedConnectionStartOwnerTx(tx, ownerId);
+      const persisted = await this.connections.upsertConnectionWithPreviousTx(
+        tx,
+        { ...input.connectionSeed, ownerId },
+      );
+      const consumed = await this.oauthSessions.consumeStagedConnectionStart({
         ownerId,
-        provider: oauthState.provider,
-        state: oauthState.state,
+        provider: input.connectionSeed.provider,
+        state: input.state,
       }, tx);
+      if (!consumed) {
+        throw deviceSyncError({
+          code: "CONNECTION_START_STATE_MISSING",
+          message: "The staged device-sync connection start is unavailable.",
+          retryable: true,
+          httpStatus: 409,
+        });
+      }
+      return persisted;
     });
   }
 

@@ -88,37 +88,26 @@ export class PrismaHostedOAuthSessionStore {
     return result.count === 1;
   }
 
-  async abortConnectionStart(state: string): Promise<void> {
-    await this.prisma.deviceOauthSession.deleteMany({
-      where: {
-        metadataJson: {
-          path: [DEVICE_SYNC_CONNECTION_START_PENDING_STATE_METADATA_KEY],
-          equals: true,
-        },
-        state,
-      },
-    });
-  }
-
-  async deleteOtherPendingConnectionStarts(
+  async consumeStagedConnectionStart(
     input: {
       ownerId: string;
       provider: string;
       state: string;
     },
     prisma: Prisma.TransactionClient,
-  ): Promise<void> {
-    await prisma.deviceOauthSession.deleteMany({
+  ): Promise<boolean> {
+    const result = await prisma.deviceOauthSession.deleteMany({
       where: {
         metadataJson: {
           path: [DEVICE_SYNC_CONNECTION_START_PENDING_STATE_METADATA_KEY],
           equals: true,
         },
         provider: input.provider,
-        state: { not: input.state },
+        state: input.state,
         userId: input.ownerId,
       },
     });
+    return result.count === 1;
   }
 
   async consumeOAuthState(

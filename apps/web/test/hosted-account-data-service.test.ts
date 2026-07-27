@@ -1695,6 +1695,87 @@ describe("deleteHostedAccountData", () => {
     }));
   });
 
+  it.each([
+    {
+      name: "provider registry entry",
+      registryValue: null,
+    },
+    {
+      name: "owner cleanup handler",
+      registryValue: {
+        connectionHandler: {},
+      },
+    },
+  ])("fails closed when an expired start has no $name", async ({ registryValue }) => {
+    const deleteCalls: HostedAccountDeletionPrismaDeleteCall[] = [];
+    serviceMocks.createHostedDeviceSyncRegistry.mockReturnValue({
+      get: vi.fn(() => registryValue),
+    });
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      deleteCalls,
+      onTransaction: () => undefined,
+      pendingDeviceConnectionStarts: [
+        {
+          createdAt: new Date("2026-07-26T12:00:00.000Z"),
+          expiresAt: new Date("2020-07-26T12:30:00.000Z"),
+          provider: "junction",
+          state: "pending-junction-start",
+          userId: "member_123",
+        },
+      ],
+    });
+
+    await expect(deleteHostedAccountData({
+      memberId: "member_123",
+      prisma,
+      request: new Request("https://join.example.test/settings"),
+    })).rejects.toMatchObject({
+      code: "ACCOUNT_DELETION_PROVIDER_REVOKE_FAILED",
+      httpStatus: 503,
+      retryable: true,
+    });
+    expect(deleteCalls).not.toContainEqual(expect.objectContaining({
+      model: "deviceOauthSession",
+    }));
+  });
+
+  it("clears an expired start after the provider proves the owner is absent", async () => {
+    const deleteOwnerAccount = vi.fn(async () => "absent" as const);
+    const deleteCalls: HostedAccountDeletionPrismaDeleteCall[] = [];
+    serviceMocks.createHostedDeviceSyncRegistry.mockReturnValue({
+      get: vi.fn(() => ({
+        connectionHandler: {
+          deleteOwnerAccount,
+        },
+      })),
+    });
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      deleteCalls,
+      onTransaction: () => undefined,
+      pendingDeviceConnectionStarts: [
+        {
+          createdAt: new Date("2026-07-26T12:00:00.000Z"),
+          expiresAt: new Date("2020-07-26T12:30:00.000Z"),
+          provider: "junction",
+          state: "pending-junction-start",
+          userId: "member_123",
+        },
+      ],
+    });
+
+    await expect(deleteHostedAccountData({
+      memberId: "member_123",
+      prisma,
+      request: new Request("https://join.example.test/settings"),
+    })).resolves.toMatchObject({
+      memberId: "member_123",
+    });
+    expect(deleteOwnerAccount).toHaveBeenCalledWith({ ownerId: "member_123" });
+    expect(deleteCalls).toContainEqual(expect.objectContaining({
+      model: "deviceOauthSession",
+    }));
+  });
+
   it("reports provider registry failures through the account-deletion revocation policy", async () => {
     const order: string[] = [];
     const getStoredConnectionAccountForUser = vi.fn(async () => ({

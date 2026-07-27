@@ -328,6 +328,15 @@ Caution-rating dots (1–5 filled sand dots) + "Who should avoid" list + "Precau
 ### Inputs / Fields
 Cream background, 1px warm border, rounded-md (10px). Focus: border shifts to sage (`#7a8c6e`), no glow. Mono labels above, body placeholder inside. Category and library filters use the `Select` dropdown, not a horizontal toggle pill row — toggle rows look broken in the active state when one pill has primary fill and the rest sit on transparent muted-surface, and they don't compress at small widths. Search inputs only appear when there are enough rows to need them (>~15 entries); below that, the dropdown alone is enough.
 
+### Sensitive Deletion Retry
+When account deletion is temporarily blocked by an in-flight provider action,
+keep the confirmation dialog and exact typed phrase in place. Show the
+server-owned explanation in the existing destructive alert treatment and
+rename the single destructive action to `Retry deletion`. A retry always asks
+for fresh sensitive-action authorization. Do not add a second dialog, progress
+tracker, countdown, or automatic retry, and do not reload away a definitive
+retryable response.
+
 ### Murph Safe Search and Product Evidence
 The public `/search` page uses the editorial paper system without an app-shell
 dashboard. Lead with one direct question, one large explicit-submit field, and

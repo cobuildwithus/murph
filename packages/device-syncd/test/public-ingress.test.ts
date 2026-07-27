@@ -10,6 +10,7 @@ import { scopeWebhookTraceId, sha256Text } from "../src/shared.ts";
 import type {
   ClaimDeviceSyncWebhookTraceInput,
   CommitPublicDeviceSyncConnectionStartInput,
+  CommitPublicDeviceSyncSdkConnectionStartInput,
   ConsumeOAuthStateResult,
   DeviceConnectionHandler,
   DeviceJobExecutor,
@@ -1876,11 +1877,14 @@ test("public ingress rejects provider-config connection seeds with the wrong pro
   assert.equal(store.getConnectionByExternalAccount("junction", "external-account-1"), null);
 });
 
-test("public ingress deletes an unpersisted provider user when the active-owner fence rejects Link start", async () => {
+test("public ingress retains the exact marker without destructive cleanup when the active-owner fence rejects Link start", async () => {
   const order: string[] = [];
   class SuspendedOwnerStore extends InMemoryPublicIngressStore {
-    stageConnectionStart(_input: OAuthStateRecord): void {
+    stagedStates: OAuthStateRecord[] = [];
+
+    stageConnectionStart(input: OAuthStateRecord): void {
       order.push("local-stage");
+      this.stagedStates.push(input);
     }
 
     commitConnectionStart(
@@ -1895,13 +1899,10 @@ test("public ingress deletes an unpersisted provider user when the active-owner 
       });
     }
 
-    abortConnectionStart(_state: string): void {
-      order.push("local-abort");
-    }
   }
 
   const store = new SuspendedOwnerStore();
-  const deletedAccounts: Array<{ externalAccountId: string }> = [];
+  const deleteAccount = vi.fn();
   const provider = createFakeProvider({
     provider: "junction",
     credentialPolicy: {
@@ -1943,10 +1944,7 @@ test("public ingress deletes an unpersisted provider user when the active-owner 
     async completeConnection() {
       throw new Error("Link callback is not expected after a rejected start.");
     },
-    async deleteAccount(account) {
-      order.push("provider-delete");
-      deletedAccounts.push({ externalAccountId: account.externalAccountId });
-    },
+    deleteAccount,
   });
   const ingress = createDeviceSyncPublicIngress({
     publicBaseUrl: "https://sync.example.test/device-sync",
@@ -1968,12 +1966,15 @@ test("public ingress deletes an unpersisted provider user when the active-owner 
     "local-stage",
     "provider-begin",
     "local-commit",
-    "provider-delete",
-    "local-abort",
   ]);
-  assert.deepEqual(deletedAccounts, [
-    { externalAccountId: "junction-user-suspended" },
-  ]);
+  assert.equal(deleteAccount.mock.calls.length, 0);
+  assert.equal(store.stagedStates.length, 1);
+  assert.equal(
+    store.stagedStates[0]?.metadata?.[
+      DEVICE_SYNC_CONNECTION_START_PENDING_STATE_METADATA_KEY
+    ],
+    true,
+  );
   assert.equal(store.upsertConnectionCalls, 0);
   assert.equal(
     store.getConnectionByExternalAccount("junction", "junction-user-suspended"),
@@ -1985,7 +1986,6 @@ test("public ingress does not delete a seeded provider user for unrelated local 
   const commitFailure = new Error("OAuth state write failed");
   class FailingStore extends InMemoryPublicIngressStore {
     stagedStates: OAuthStateRecord[] = [];
-    abortedStates: string[] = [];
 
     stageConnectionStart(input: OAuthStateRecord): void {
       this.stagedStates.push(input);
@@ -1995,10 +1995,6 @@ test("public ingress does not delete a seeded provider user for unrelated local 
       _input: CommitPublicDeviceSyncConnectionStartInput,
     ): never {
       throw commitFailure;
-    }
-
-    abortConnectionStart(state: string): void {
-      this.abortedStates.push(state);
     }
   }
 
@@ -2067,95 +2063,6 @@ test("public ingress does not delete a seeded provider user for unrelated local 
     ],
     true,
   );
-  assert.deepEqual(store.abortedStates, []);
-});
-
-test("public ingress retains staged ownership when rejected-seed cleanup fails", async () => {
-  const cleanupFailure = new Error("temporary Junction cleanup failure");
-  class SuspendedOwnerStore extends InMemoryPublicIngressStore {
-    stagedStates: OAuthStateRecord[] = [];
-    abortedStates: string[] = [];
-
-    stageConnectionStart(input: OAuthStateRecord): void {
-      this.stagedStates.push(input);
-    }
-
-    commitConnectionStart(
-      _input: CommitPublicDeviceSyncConnectionStartInput,
-    ): never {
-      throw deviceSyncError({
-        code: "CONNECTION_OWNER_UNAVAILABLE",
-        message: "Device sync connections are unavailable for this Murph account.",
-        retryable: false,
-        httpStatus: 403,
-      });
-    }
-
-    abortConnectionStart(state: string): void {
-      this.abortedStates.push(state);
-    }
-  }
-
-  const store = new SuspendedOwnerStore();
-  const provider = createFakeProvider({
-    provider: "junction",
-    credentialPolicy: {
-      kind: "provider_config",
-      providerConfigKey: "junction",
-    },
-    descriptor: {
-      provider: "junction",
-      displayName: "Junction",
-      transportModes: ["external_link", "scheduled_poll"],
-      connection: {
-        kind: "external_link",
-        callbackPath: "/connect/junction/callback",
-      },
-      normalization: {
-        metricFamilies: ["activity"],
-        snapshotParser: "schema",
-      },
-      sourcePriorityHints: {
-        defaultPriority: 60,
-        metricFamilies: {
-          activity: 60,
-        },
-      },
-    },
-    async beginConnection() {
-      return {
-        authorizationUrl: "https://junction.example/link",
-        connectionSeed: {
-          externalAccountId: "junction-user-suspended",
-          credential: {
-            kind: "provider_config",
-            providerConfigKey: "junction",
-          },
-        },
-      };
-    },
-    async completeConnection() {
-      throw new Error("Link callback is not expected after a rejected start.");
-    },
-    async deleteAccount() {
-      throw cleanupFailure;
-    },
-  });
-  const ingress = createDeviceSyncPublicIngress({
-    publicBaseUrl: "https://sync.example.test/device-sync",
-    registry: createDeviceSyncRegistry([provider]),
-    store,
-  });
-
-  await assert.rejects(
-    () => ingress.startConnection({
-      ownerId: "member-suspended",
-      provider: "junction",
-    }),
-    (error: unknown) => error === cleanupFailure,
-  );
-  assert.equal(store.stagedStates.length, 1);
-  assert.deepEqual(store.abortedStates, []);
 });
 
 test("public ingress applies the owner lifecycle fence to seedless OAuth starts", async () => {
@@ -4537,7 +4444,7 @@ test("public ingress SDK sign-in session ensures the account before minting and 
 
   const first = await ingress.createSdkSignInSession({
     provider: "demo",
-    ownerId: "member-1",
+    ownerId: "  member-1  ",
   });
 
   assert.equal(first.signInToken, "sdk-sign-in-token-1");
@@ -4563,7 +4470,7 @@ test("public ingress SDK sign-in session ensures the account before minting and 
     "ensure:member-1",
     "mint:demo-sdk-user-1",
   ]);
-  assert.equal(store.upsertConnectionCalls, 1);
+  assert.equal(store.upsertConnectionCalls, 2);
   assert.deepEqual(connectionEvents, [
     { accountId: first.account.id, initialJobs: 1 },
   ]);
@@ -4573,6 +4480,83 @@ test("public ingress SDK sign-in session ensures the account before minting and 
   const resolved = await store.getConnectionByExternalAccount("demo", "demo-sdk-user-1");
   assert.equal(resolved?.id, first.account.id);
   assert.equal(resolved?.status, "active");
+});
+
+test("public ingress fences SDK provider creation and withholds the token when suspension wins", async () => {
+  const order: string[] = [];
+  class SuspendedOwnerStore extends InMemoryPublicIngressStore {
+    stagedStates: OAuthStateRecord[] = [];
+
+    stageConnectionStart(input: OAuthStateRecord): void {
+      order.push("local-stage");
+      this.stagedStates.push(input);
+    }
+
+    commitSdkConnectionStart(
+      _input: CommitPublicDeviceSyncSdkConnectionStartInput,
+    ): never {
+      order.push("local-commit");
+      throw deviceSyncError({
+        code: "CONNECTION_OWNER_UNAVAILABLE",
+        message: "Device sync connections are unavailable for this Murph account.",
+        retryable: false,
+        httpStatus: 403,
+      });
+    }
+  }
+
+  const store = new SuspendedOwnerStore();
+  const createSignInToken = vi.fn();
+  const deleteAccount = vi.fn();
+  const ingress = createDeviceSyncPublicIngress({
+    publicBaseUrl: "https://sync.example.test/device-sync",
+    registry: createDeviceSyncRegistry([
+      createFakeProvider({
+        deleteAccount,
+        sdkConnectionHandler: {
+          async ensureConnection() {
+            order.push("provider-ensure");
+            return {
+              externalAccountId: "existing-junction-user",
+              tokens: {
+                accessToken: "<REDACTED_ACCESS_TOKEN>",
+              },
+              setupPhase: "source_confirmed",
+            };
+          },
+          createSignInToken,
+        },
+      }),
+    ]),
+    store,
+  });
+
+  await assert.rejects(
+    () => ingress.createSdkSignInSession({
+      provider: "demo",
+      ownerId: "member-suspended",
+    }),
+    (error: unknown) =>
+      error instanceof DeviceSyncError
+      && error.code === "CONNECTION_OWNER_UNAVAILABLE"
+      && error.httpStatus === 403,
+  );
+
+  assert.deepEqual(order, [
+    "local-stage",
+    "provider-ensure",
+    "local-commit",
+  ]);
+  assert.equal(createSignInToken.mock.calls.length, 0);
+  assert.equal(deleteAccount.mock.calls.length, 0);
+  assert.equal(store.upsertConnectionCalls, 0);
+  assert.equal(store.stagedStates.length, 1);
+  assert.equal(
+    store.stagedStates[0]?.metadata?.[
+      DEVICE_SYNC_CONNECTION_START_PENDING_STATE_METADATA_KEY
+    ],
+    true,
+  );
 });
 
 test("public ingress SDK sign-in session intentionally reconnects a disconnected account", async () => {

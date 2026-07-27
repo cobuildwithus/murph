@@ -159,6 +159,19 @@ export class PrismaHostedConnectionStore {
     return this.buildUpsertedConnectionAccount(result.record, input);
   }
 
+  async upsertConnectionWithPreviousTx(
+    tx: Prisma.TransactionClient,
+    input: UpsertPublicDeviceSyncConnectionInput,
+  ): Promise<UpsertPublicDeviceSyncConnectionResult> {
+    const result = await this.upsertConnectionRecords(input, tx);
+    return {
+      account: this.buildUpsertedConnectionAccount(result.record, input),
+      previousAccount: result.previousRecord
+        ? this.buildUpsertedConnectionAccount(result.previousRecord, input)
+        : null,
+    };
+  }
+
   private async upsertConnectionRecords(
     input: UpsertPublicDeviceSyncConnectionInput,
     tx?: Prisma.TransactionClient,

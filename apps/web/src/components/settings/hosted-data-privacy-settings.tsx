@@ -19,8 +19,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/src/components/ui/dialog";
-import { Input } from "@/src/components/ui/input";
-import { Label } from "@/src/components/ui/label";
 import {
   loadBrowserVaultReplica,
   normalizeBrowserVaultError,
@@ -36,6 +34,7 @@ import {
 } from "@/src/lib/hosted-privacy/account-data-shared";
 
 import { AccountExitReasonStep } from "./account-exit-reason-step";
+import { AccountDeletionConfirmationStep } from "./account-deletion-confirmation-step";
 import { HostedSettingsSessionState } from "./hosted-settings-session-state";
 
 interface HostedAccountVendorDeletionSummary {
@@ -63,6 +62,8 @@ const DEFAULT_VAULT_EXPORT_FILENAME = "murph-vault-export.json";
 const VAULT_EXPORT_MIME_TYPE = "application/json; charset=utf-8";
 const POST_DELETE_REDIRECT_DELAY_MS = 2_500;
 const POST_DELETE_REDIRECT_FALLBACK_MS = 8_000;
+const RETRYABLE_DEVICE_CONNECTION_START_DELETION_ERROR =
+  "ACCOUNT_DELETION_DEVICE_CONNECTION_START_IN_PROGRESS";
 
 export function HostedDataPrivacySettings(props: {
   authenticated: boolean;
@@ -89,6 +90,7 @@ function HostedDataPrivacySettingsAuthorized(props: { authenticated: boolean }) 
   const [exitNote, setExitNote] = useState("");
   const [confirmationPhrase, setConfirmationPhrase] = useState("");
   const [dialogError, setDialogError] = useState<string | null>(null);
+  const [deleteRetryAvailable, setDeleteRetryAvailable] = useState(false);
   const [deleted, setDeleted] = useState(false);
   const [cleanupPending, setCleanupPending] = useState(false);
   const [privyLogoutDone, setPrivyLogoutDone] = useState(false);
@@ -180,6 +182,7 @@ function HostedDataPrivacySettingsAuthorized(props: { authenticated: boolean }) 
 
     setDeletePending(true);
     setDialogError(null);
+    setDeleteRetryAvailable(false);
     let sessionEndingDispatched = false;
     let receivedReplacementHeaders = false;
 
@@ -206,10 +209,14 @@ function HostedDataPrivacySettingsAuthorized(props: { authenticated: boolean }) 
       setDialogOpen(false);
       setConfirmationPhrase("");
     } catch (requestError) {
+      const retryAvailable = isRetryableDeviceConnectionStartDeletionError(requestError);
       if (sessionEndingDispatched && !receivedReplacementHeaders) {
         publishBrowserVaultSessionInvalidation();
-        reloadCurrentHostedAuthDocument();
+        if (!retryAvailable) {
+          reloadCurrentHostedAuthDocument();
+        }
       }
+      setDeleteRetryAvailable(retryAvailable);
       setDialogError(requestError instanceof HostedOnboardingApiError
         ? requestError.message
         : "Could not delete your account right now.");
@@ -238,6 +245,7 @@ function HostedDataPrivacySettingsAuthorized(props: { authenticated: boolean }) 
   function openDialog() {
     setConfirmationPhrase("");
     setDialogError(null);
+    setDeleteRetryAvailable(false);
     setDialogStep("reason");
     setExitReason(null);
     setExitNote("");
@@ -252,6 +260,7 @@ function HostedDataPrivacySettingsAuthorized(props: { authenticated: boolean }) 
     setDialogOpen(false);
     setConfirmationPhrase("");
     setDialogError(null);
+    setDeleteRetryAvailable(false);
     setDialogStep("reason");
     setExitReason(null);
     setExitNote("");
@@ -376,11 +385,6 @@ function HostedDataPrivacySettingsAuthorized(props: { authenticated: boolean }) 
                 : "Permanently deletes your account and all your data, including your subscription and login. This cannot be undone."}
             </DialogDescription>
           </DialogHeader>
-          {dialogError ? (
-            <p role="alert" className="rounded-lg border border-destructive/20 bg-destructive/5 p-3 text-sm text-destructive">
-              {dialogError}
-            </p>
-          ) : null}
           {dialogStep === "reason" ? (
             <AccountExitReasonStep
               note={exitNote}
@@ -391,41 +395,28 @@ function HostedDataPrivacySettingsAuthorized(props: { authenticated: boolean }) 
               onSkip={skipExitReason}
             />
           ) : (
-            <>
-              <div className="flex flex-col gap-2">
-                <Label htmlFor="hosted-account-delete-phrase">Type <span className="font-mono">{HOSTED_ACCOUNT_DELETION_CONFIRMATION_PHRASE}</span> to confirm</Label>
-                <Input
-                  autoComplete="off"
-                  className="h-12 text-base"
-                  disabled={deletePending}
-                  id="hosted-account-delete-phrase"
-                  inputMode="text"
-                  value={confirmationPhrase}
-                  onChange={(event) => setConfirmationPhrase(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter") {
-                      event.preventDefault();
-                      void handleDeleteConfirmed();
-                    }
-                  }}
-                  aria-invalid={confirmationPhrase.length > 0 && !phraseMatches}
-                  placeholder={HOSTED_ACCOUNT_DELETION_CONFIRMATION_PHRASE}
-                />
-              </div>
-              <div className="flex flex-col gap-2">
-                <Button type="button" size="xl" variant="destructive" onClick={() => void handleDeleteConfirmed()} disabled={!deleteReady} className="w-full">
-                  {deletePending ? "Deleting..." : "Delete account"}
-                </Button>
-                <Button type="button" size="xl" variant="ghost" onClick={closeDialog} disabled={deletePending} className="w-full">
-                  Cancel
-                </Button>
-              </div>
-            </>
+            <AccountDeletionConfirmationStep
+              confirmationPhrase={confirmationPhrase}
+              error={dialogError}
+              onCancel={closeDialog}
+              onConfirmationPhraseChange={setConfirmationPhrase}
+              onSubmit={() => void handleDeleteConfirmed()}
+              pending={deletePending}
+              retryAvailable={deleteRetryAvailable}
+            />
           )}
         </DialogContent>
       </Dialog>
     </div>
   );
+}
+
+function isRetryableDeviceConnectionStartDeletionError(
+  error: unknown,
+): error is HostedOnboardingApiError {
+  return error instanceof HostedOnboardingApiError
+    && error.code === RETRYABLE_DEVICE_CONNECTION_START_DELETION_ERROR
+    && error.retryable;
 }
 
 function HostedDataPrivacyUnavailable(props: { authenticated: boolean }) {

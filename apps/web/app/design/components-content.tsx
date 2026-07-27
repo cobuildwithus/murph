@@ -20,6 +20,7 @@ import {
   HostedEmailMurphContactDialog,
   WebmailIcon,
 } from "@/src/components/settings/hosted-email-murph-contact-dialog";
+import { AccountDeletionConfirmationStep } from "@/src/components/settings/account-deletion-confirmation-step";
 import {
   ASSISTANT_MODEL_CHOICE_CARD_CLASSES,
   AssistantModelArtwork,
@@ -697,6 +698,25 @@ export function ComponentsContent() {
           <div className="flex flex-col gap-4">
             <Alert><AlertTitle>Experiment in progress</AlertTitle><AlertDescription>Day 15 of 28. Next session scheduled for this evening.</AlertDescription></Alert>
             <Alert variant="destructive"><AlertTitle>Oura disconnected</AlertTitle><AlertDescription>Reconnect your ring to continue tracking metrics.</AlertDescription></Alert>
+          </div>
+        </Section>
+
+        <Separator />
+
+        <Section title="Account deletion confirmation">
+          <div
+            className="w-full max-w-md rounded-2xl border border-border bg-background p-6"
+            inert
+          >
+            <AccountDeletionConfirmationStep
+              confirmationPhrase="DELETE MY ACCOUNT"
+              error="A wearable connection is still finishing. Retry account deletion in a moment."
+              onCancel={() => undefined}
+              onConfirmationPhraseChange={() => undefined}
+              onSubmit={() => undefined}
+              pending={false}
+              retryAvailable
+            />
           </div>
         </Section>
 

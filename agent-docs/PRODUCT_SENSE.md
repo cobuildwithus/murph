@@ -1,6 +1,6 @@
 # Product Sense
 
-Last verified: 2026-07-22
+Last verified: 2026-07-26
 
 ## Current Posture
 
@@ -148,6 +148,10 @@ Assistant runtime state is never the source of truth for these objects.
   or deletion easy.
 - Prefer the lowest-burden useful response. Silence and “leave it alone” are
   valid outcomes.
+- When a sensitive destructive action is explicitly retryable, preserve the
+  member's entered context and explain the temporary blocker in place. Retry
+  must obtain fresh authority; ambiguous outcomes still fail closed and
+  revalidate the session.
 - Rank learning, confidence, and life fit before engagement or protocol volume.
 - Any experiment result that can be shared or aggregated must stay tied to the
   exact protocol revision, test plan, and confidence language that produced it.

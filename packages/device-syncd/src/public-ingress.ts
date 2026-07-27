@@ -50,7 +50,6 @@ import type {
   MarkPublicDeviceSyncConnectionSetupFailedResult,
   OAuthStateRecord,
   ProviderAuthTokens,
-  ProviderConnectionSeed,
   ProviderConnectionResult,
   ProviderBeginConnectionResult,
   PublicDeviceSyncAccount,
@@ -615,32 +614,12 @@ export class DeviceSyncPublicIngress {
       }),
     };
 
-    try {
-      await this.commitConnectionStart({
-        connectionSeed,
-        oauthState,
-        provider,
-        now,
-      });
-    } catch (error) {
-      let providerCleanupCompleted = false;
-      if (started.connectionSeed) {
-        providerCleanupCompleted = await this.cleanupRejectedConnectionSeed(
-          provider,
-          started.connectionSeed,
-          error,
-        );
-      } else if (
-        isDeviceSyncError(error)
-        && error.code === "CONNECTION_OWNER_UNAVAILABLE"
-      ) {
-        providerCleanupCompleted = true;
-      }
-      if (providerCleanupCompleted) {
-        await this.store.abortConnectionStart?.(state);
-      }
-      throw error;
-    }
+    await this.commitConnectionStart({
+      connectionSeed,
+      oauthState,
+      provider,
+      now,
+    });
 
     return {
       provider: provider.provider,
@@ -809,8 +788,19 @@ export class DeviceSyncPublicIngress {
       externalAccountId: ensured.connection.externalAccountId,
     });
 
+    const currentAccount = await this.store.getConnectionById(ensured.account.id);
+    if (
+      !currentAccount
+      || currentAccount.provider !== provider.provider
+      || currentAccount.externalAccountId !== ensured.connection.externalAccountId
+      || !isEstablishedDeviceSyncConnection(currentAccount)
+      || !(await this.connectionBelongsToOwner(currentAccount.id, ensured.ownerId))
+    ) {
+      throw sdkSignInReconnectRequired();
+    }
+
     return {
-      account: ensured.account,
+      account: currentAccount,
       signInToken: token.signInToken,
       environment: token.environment,
     };
@@ -826,6 +816,7 @@ export class DeviceSyncPublicIngress {
     account: PublicDeviceSyncAccount;
     connection: ProviderConnectionResult;
     handler: NonNullable<DeviceSyncProvider["sdkConnectionHandler"]>;
+    ownerId: string;
   }> {
     const handler = provider.sdkConnectionHandler;
 
@@ -849,51 +840,65 @@ export class DeviceSyncPublicIngress {
     }
 
     const now = toIsoTimestamp(new Date());
+    const state = generateStateCode();
+    const expiresAt = addMilliseconds(now, this.sessionTtlMs);
+    const stageConnectionStart = this.store.stageConnectionStart;
+    const commitSdkConnectionStart = this.store.commitSdkConnectionStart;
+    const usesHostedLifecycleFence = Boolean(
+      stageConnectionStart && commitSdkConnectionStart,
+    );
+
+    await this.store.deleteExpiredOAuthStates(now);
+    if (usesHostedLifecycleFence && stageConnectionStart) {
+      await stageConnectionStart.call(this.store, {
+        state,
+        provider: provider.provider,
+        returnTo: null,
+        ownerId,
+        createdAt: now,
+        expiresAt,
+        metadata: {
+          [DEVICE_SYNC_CONNECTION_START_PENDING_STATE_METADATA_KEY]: true,
+        },
+      });
+    }
+
     const descriptor = this.describeProvider(provider);
     const connection = await handler.ensureConnection({ ownerId, now });
     const initialJobs = connection.initialJobs?.map((job) =>
       normalizeConfiguredDeviceSyncJobInput(provider.provider, job, "sdk sign-in")
     );
     const setupPhase = resolveConnectionSetupPhase(connection, descriptor.connectionKind);
-    const existingAccount = await this.store.getConnectionByExternalAccount(
-      provider.provider,
-      connection.externalAccountId,
-    );
-    const canReuseExistingAccount = existingAccount
-      ? await this.canReuseEstablishedSdkConnection(existingAccount, ownerId)
-      : false;
-
-    let account: PublicDeviceSyncAccount;
-    let previousAccount = existingAccount;
-    if (canReuseExistingAccount && existingAccount) {
-      account = existingAccount;
-    } else {
-      const persisted = await this.upsertConnectionWithPrevious({
-        ownerId,
-        provider: provider.provider,
-        externalAccountId: connection.externalAccountId,
-        displayName: connection.displayName ?? null,
-        status: "active",
+    const connectionSeed: UpsertPublicDeviceSyncConnectionInput = {
+      ownerId,
+      provider: provider.provider,
+      externalAccountId: connection.externalAccountId,
+      displayName: connection.displayName ?? null,
+      status: "active",
+      setupPhase,
+      setupExpiresAt: resolveConnectionSetupExpiresAt({
+        connection,
         setupPhase,
-        setupExpiresAt: resolveConnectionSetupExpiresAt({
-          connection,
-          setupPhase,
-          seededSetupExpiresAt: null,
-        }),
-        scopes: connection.scopes?.length
-          ? [...connection.scopes]
-          : [...descriptor.defaultScopes],
-        credential: resolveAndValidateProviderConnectionCredential(provider, connection),
-        metadata: connection.metadata ?? {},
-        reuseEstablishedConnection: true,
-        connectedAt: now,
-        nextReconcileAt: connection.nextReconcileAt ?? null,
-      });
-      account = persisted.account;
-      previousAccount = persisted.previousAccount;
-    }
+        seededSetupExpiresAt: null,
+      }),
+      scopes: connection.scopes?.length
+        ? [...connection.scopes]
+        : [...descriptor.defaultScopes],
+      credential: resolveAndValidateProviderConnectionCredential(provider, connection),
+      metadata: connection.metadata ?? {},
+      reuseEstablishedConnection: true,
+      connectedAt: now,
+      nextReconcileAt: connection.nextReconcileAt ?? null,
+    };
+    const persisted = usesHostedLifecycleFence && commitSdkConnectionStart
+      ? await commitSdkConnectionStart.call(this.store, {
+          connectionSeed,
+          state,
+        })
+      : await this.upsertConnectionWithPrevious(connectionSeed);
+    const { account, previousAccount } = persisted;
 
-    if (!canReuseExistingAccount && shouldRunSdkConnectionEstablishedHook(previousAccount)) {
+    if (shouldRunSdkConnectionEstablishedHook(previousAccount)) {
       await this.runSdkConnectionEstablishedHook({
         account,
         connection: {
@@ -909,6 +914,7 @@ export class DeviceSyncPublicIngress {
       account,
       connection,
       handler,
+      ownerId,
     };
   }
 
@@ -926,17 +932,6 @@ export class DeviceSyncPublicIngress {
     );
     const account = await this.store.upsertConnection(input);
     return { account, previousAccount };
-  }
-
-  private async canReuseEstablishedSdkConnection(
-    account: PublicDeviceSyncAccount,
-    ownerId: string,
-  ): Promise<boolean> {
-    if (!isEstablishedDeviceSyncConnection(account)) {
-      return false;
-    }
-
-    return await this.connectionBelongsToOwner(account.id, ownerId);
   }
 
   private async connectionBelongsToOwner(
@@ -1615,30 +1610,6 @@ export class DeviceSyncPublicIngress {
     }
   }
 
-  private async cleanupRejectedConnectionSeed(
-    provider: DeviceSyncProvider,
-    seed: ProviderConnectionSeed,
-    error: unknown,
-  ): Promise<boolean> {
-    if (!isDeviceSyncError(error) || error.code !== "CONNECTION_OWNER_UNAVAILABLE") {
-      return false;
-    }
-
-    const deleteAccount = provider.connectionHandler?.deleteAccount;
-    if (!deleteAccount) {
-      throw deviceSyncError({
-        code: "CONNECTION_START_CLEANUP_UNAVAILABLE",
-        message: "Provider account cleanup is unavailable after connection start was rejected.",
-        retryable: false,
-        httpStatus: 500,
-        cause: error,
-      });
-    }
-
-    await deleteAccount({ externalAccountId: seed.externalAccountId });
-    return true;
-  }
-
   private async cleanupPersistedOAuthConnection(
     provider: DeviceSyncProvider,
     account: PublicDeviceSyncAccount,
@@ -1914,6 +1885,7 @@ export type {
   BeginConnectionResult,
   ClaimDeviceSyncWebhookTraceInput,
   CommitPublicDeviceSyncConnectionStartInput,
+  CommitPublicDeviceSyncSdkConnectionStartInput,
   CompleteConnectionResult,
   ConsumeOAuthStateResult,
   DeviceConnectionHandler,
