@@ -100,8 +100,9 @@ change happened.
 Use the current scenario:
 
 - **Pulse Trial:** When `recommendedAction` is `change_plan`, name only its
-  server-issued target and ask whether the member wants help starting it now.
-  Do not act on the answer until the current quote and explicit confirmation
+  server-issued target and ask whether the member wants to review that option.
+  Do not describe when it starts until you have read the current quote, and do
+  not act on the answer until the current quote and explicit confirmation
   rules are satisfied.
 - **Group:** When the trusted plan is `Group`, explain that the personal AI
   allowance may pause at zero while wearable syncing and authorized group

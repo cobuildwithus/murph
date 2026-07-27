@@ -2115,15 +2115,18 @@ describe('assistant codex runtime', () => {
       AssistantHostedToolContext['subscriptionTool']
     > = {
       async request(request) {
-        subscriptionCalls.push(request.action)
+        const targetPlanCode = request.action === 'change_plan'
+          ? request.targetPlanCode
+          : request.action
+        subscriptionCalls.push(targetPlanCode)
         if (subscriptionCalls.length === 1) {
           firstRequestStarted.resolve()
           await releaseFirstRequest.promise
         }
 
-        return request.action === 'upgrade_edge'
+        return targetPlanCode === 'launch_edge_monthly'
           ? {
-              action: request.action,
+              action: 'change_plan',
               plan: {
                 code: 'launch_edge_monthly',
                 displayName: 'Edge',
@@ -2133,7 +2136,7 @@ describe('assistant codex runtime', () => {
               status: 'completed',
             }
           : {
-              action: request.action,
+              action: 'change_plan',
               plan: {
                 code: 'launch_monthly',
                 displayName: 'Pulse',
@@ -2178,7 +2181,11 @@ describe('assistant codex runtime', () => {
             id: 73,
             method: 'item/tool/call',
             params: {
-              arguments: { action: 'start_pulse_now' },
+              arguments: {
+                action: 'change_plan',
+                quoteId: 'signed-pulse-quote',
+                targetPlanCode: 'launch_monthly',
+              },
               namespace: 'murph',
               tool: 'subscription',
             },
@@ -2187,7 +2194,11 @@ describe('assistant codex runtime', () => {
             id: 74,
             method: 'item/tool/call',
             params: {
-              arguments: { action: 'upgrade_edge' },
+              arguments: {
+                action: 'change_plan',
+                quoteId: 'signed-edge-quote',
+                targetPlanCode: 'launch_edge_monthly',
+              },
               namespace: 'murph',
               tool: 'subscription',
             },
@@ -2195,7 +2206,7 @@ describe('assistant codex runtime', () => {
 
           await firstRequestStarted.promise
           try {
-            expect(subscriptionCalls).toEqual(['start_pulse_now'])
+            expect(subscriptionCalls).toEqual(['launch_monthly'])
           } finally {
             releaseFirstRequest.resolve()
           }
@@ -2209,7 +2220,7 @@ describe('assistant codex runtime', () => {
             id: 74,
             result: { success: false },
           })
-          expect(subscriptionCalls).toEqual(['start_pulse_now'])
+          expect(subscriptionCalls).toEqual(['launch_monthly'])
 
           child.stdout.write(jsonLine({
             method: 'item/completed',

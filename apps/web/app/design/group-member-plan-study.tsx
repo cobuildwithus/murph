@@ -84,10 +84,10 @@ export function GroupMemberPlanStudy() {
         </div>
       </StudyState>
 
-      <StudyState label="Keep Pulse after the trial">
+      <StudyState label="Choose Group after the trial">
         <div className="grid gap-4 lg:grid-cols-2">
-          <TrialContinuationCard status="idle" />
-          <TrialContinuationCard status="continuing" />
+          <GroupTrialContinuationCard status="idle" />
+          <GroupTrialContinuationCard status="continuing" />
         </div>
       </StudyState>
 
@@ -112,7 +112,7 @@ export function GroupMemberPlanStudy() {
   );
 }
 
-function TrialContinuationCard(props: {
+function GroupTrialContinuationCard(props: {
   status: "continuing" | "idle";
 }) {
   return (
@@ -127,7 +127,7 @@ function TrialContinuationCard(props: {
           onCancel={NOOP}
           onConfirm={NOOP}
           status={props.status}
-          targetPlanCode="launch_monthly"
+          targetPlanCode="launch_group_monthly"
           timing="at_trial_end"
         />
       </div>

@@ -156,17 +156,29 @@ export function HostedBillingSettings(props: {
               : props.canSwitchToGroup === true &&
                   (pulseCurrent || edgeCurrent)
                 ? (
-                    <SwitchToGroupButton
-                      block
-                      currentPeriodEnd={currentPeriodEndIso}
-                      currentPlanCode={
-                        edgeCurrent
-                          ? "launch_edge_monthly"
-                          : "launch_monthly"
-                      }
-                    >
-                      Choose Group
-                    </SwitchToGroupButton>
+                    isPulseTrial
+                      ? (
+                          <StartPaidPulseButton
+                            block
+                            targetPlanCode="launch_group_monthly"
+                            timing="at_trial_end"
+                          >
+                            Choose Group
+                          </StartPaidPulseButton>
+                        )
+                      : (
+                          <SwitchToGroupButton
+                            block
+                            currentPeriodEnd={currentPeriodEndIso}
+                            currentPlanCode={
+                              edgeCurrent
+                                ? "launch_edge_monthly"
+                                : "launch_monthly"
+                            }
+                          >
+                            Choose Group
+                          </SwitchToGroupButton>
+                        )
                   )
                 : null,
           current: groupCurrent,

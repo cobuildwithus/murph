@@ -216,6 +216,73 @@ describe("HostedBillingSettings", () => {
     assert.match(markup, /Keep Pulse/);
   });
 
+  test("chooses Group from the eligible trial card without ending the trial", async () => {
+    mocks.requestHostedTrialPlanStartPaid.mockResolvedValueOnce({
+      status: "continuing",
+    });
+    const { HostedBillingSettings } = await import(
+      "@/src/components/settings/hosted-billing-settings"
+    );
+    const rendered = await renderClientComponent(createElement(
+      HostedBillingSettings,
+      {
+        authenticated: true,
+        canStartPaidPulse: true,
+        canSwitchToGroup: true,
+        currentBillingPhase: "trial",
+        currentBillingPlanCode: "launch_monthly",
+        currentCheckoutOffer: "pulse_trial_7d",
+        currentPeriodEnd: new Date("2026-08-02T04:00:00.000Z"),
+        showGroupPlan: true,
+      },
+    ));
+
+    const chooseGroupButton = findButtonByText(
+      rendered.window.document,
+      "Choose Group",
+      rendered.window,
+    );
+    await act(async () => {
+      chooseGroupButton.dispatchEvent(
+        new rendered.window.Event("click", { bubbles: true }),
+      );
+    });
+
+    const confirmationText =
+      rendered.window.document.body.textContent ?? "";
+    assert.match(
+      confirmationText,
+      /Your current trial continues\. Group begins at \$3\.50\/month when it ends\./,
+    );
+    assert.doesNotMatch(confirmationText, /Down from|charged immediately/);
+
+    const confirmButton = findLastButtonByText(
+      rendered.window.document,
+      "Choose Group",
+      rendered.window,
+    );
+    await act(async () => {
+      confirmButton.dispatchEvent(
+        new rendered.window.Event("click", { bubbles: true }),
+      );
+    });
+
+    assert.deepEqual(
+      mocks.requestHostedTrialPlanStartPaid.mock.calls,
+      [[{
+        targetPlanCode: "launch_group_monthly",
+        timing: "at_trial_end",
+      }]],
+    );
+    assert.match(
+      rendered.window.document.body.textContent ?? "",
+      /Group is set for after your trial/,
+    );
+    assert.equal(mocks.routerRefresh.mock.calls.length, 1);
+
+    await rendered.cleanup();
+  });
+
   test("keeps Group members on the ordinary upgrade path to Pulse and Edge", async () => {
     const { HostedBillingSettings } = await import(
       "@/src/components/settings/hosted-billing-settings"

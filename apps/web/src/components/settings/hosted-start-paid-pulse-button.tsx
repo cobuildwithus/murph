@@ -695,7 +695,9 @@ export function StartPaidPulseConfirmationContent(props: {
                 : props.errorAction === "retry"
                   ? "Try again"
                   : timing === "at_trial_end"
-                    ? `Keep ${targetPlanName}`
+                    ? targetPlanCode === "launch_group_monthly"
+                      ? "Choose Group"
+                      : "Keep Pulse"
                     : `Start ${targetPlanName}`}
           </Button>
         ) : null}

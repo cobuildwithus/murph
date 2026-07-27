@@ -47,7 +47,6 @@ import {
   type HostedPlanUsageToolRequest,
 } from '@murphai/hosted-execution/plan-usage'
 import {
-  hostedRuntimeSubscriptionToolRequestSchema,
   type HostedRuntimeSubscriptionToolRequest,
 } from '@murphai/hosted-execution/subscription'
 import {
@@ -493,50 +492,43 @@ export const MURPH_SUBSCRIPTION_TOOL = {
   description:
     'Apply exactly one private hosted subscription action explicitly confirmed by the current user in this turn. Quoted actions require a current matching plan_usage quote; copy its targetPlanCode and quoteId. Exact replay of the same input and action is idempotent; a different action requires new eligible user input. Only payment_required includes paymentUrl; completed, pending, and no_action_required do not prove a payment method or future charge.',
   inputSchema: {
-    oneOf: [
-      {
-        type: 'object',
-        additionalProperties: false,
-        properties: {
-          action: {
-            type: 'string',
-            enum: ['change_plan'],
-          },
-          targetPlanCode: {
-            type: 'string',
-            enum: [
-              'launch_group_monthly',
-              'launch_monthly',
-              'launch_edge_monthly',
-            ],
-          },
-          quoteId: {
-            type: 'string',
-            minLength: 1,
-            maxLength: 1024,
-          },
-        },
-        required: ['action', 'targetPlanCode', 'quoteId'],
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      action: {
+        type: 'string',
+        enum: ['change_plan'],
       },
-      {
-        type: 'object',
-        additionalProperties: false,
-        properties: {
-          action: {
-            type: 'string',
-            enum: [
-              'continue_pulse',
-              'start_pulse_now',
-              'upgrade_pulse',
-              'upgrade_edge',
-            ],
-          },
-        },
-        required: ['action'],
+      targetPlanCode: {
+        type: 'string',
+        enum: [
+          'launch_group_monthly',
+          'launch_monthly',
+          'launch_edge_monthly',
+        ],
       },
-    ],
+      quoteId: {
+        type: 'string',
+        minLength: 1,
+        maxLength: 1024,
+      },
+    },
+    required: ['action', 'targetPlanCode', 'quoteId'],
   },
 } as const
+
+type HostedModelSubscriptionToolRequest = Extract<
+  HostedRuntimeSubscriptionToolRequest,
+  { action: 'change_plan' }
+>
+
+const hostedModelSubscriptionToolRequestSchema: z.ZodType<
+  HostedModelSubscriptionToolRequest
+> = z.object({
+  action: z.literal('change_plan'),
+  quoteId: z.string().min(1).max(1024),
+  targetPlanCode: z.enum(HOSTED_PLAN_USAGE_DIRECT_BILLING_PLAN_CODES),
+}).strict()
 
 export const MURPH_PERSONALIZATION_TOOL = {
   namespace: 'murph',
@@ -2082,7 +2074,7 @@ export type MurphDynamicToolRequest =
     }
   | {
       kind: 'subscription'
-      request: HostedRuntimeSubscriptionToolRequest
+      request: HostedModelSubscriptionToolRequest
     }
   | {
       kind: 'assistant-configuration'
@@ -3278,7 +3270,7 @@ async function executePlanUsageTool(input: {
 
 async function executeSubscriptionTool(input: {
   hostedToolContext: AssistantHostedToolContext | null
-  request: HostedRuntimeSubscriptionToolRequest
+  request: HostedModelSubscriptionToolRequest
 }): Promise<MurphDynamicToolExecutionResult> {
   const subscriptionTool = input.hostedToolContext?.subscriptionTool ?? null
   const assistantInputId = subscriptionTool
@@ -3293,17 +3285,12 @@ async function executeSubscriptionTool(input: {
 
   try {
     const result = await subscriptionTool.request(
-      input.request.action === 'change_plan'
-        ? {
-            action: input.request.action,
-            assistantInputId,
-            quoteId: input.request.quoteId,
-            targetPlanCode: input.request.targetPlanCode,
-          }
-        : {
-            action: input.request.action,
-            assistantInputId,
-          },
+      {
+        action: input.request.action,
+        assistantInputId,
+        quoteId: input.request.quoteId,
+        targetPlanCode: input.request.targetPlanCode,
+      },
     )
     return toolTextResult(true, safeToolPayloadText(result))
   } catch {
@@ -5236,10 +5223,10 @@ function parseSubscriptionArguments(
 ):
   | {
       ok: true
-      request: HostedRuntimeSubscriptionToolRequest
+      request: HostedModelSubscriptionToolRequest
     }
   | { ok: false; validationDigest: SafeToolCallValidationDigest } {
-  const parsed = hostedRuntimeSubscriptionToolRequestSchema.safeParse(value)
+  const parsed = hostedModelSubscriptionToolRequestSchema.safeParse(value)
   if (!parsed.success) {
     return {
       ok: false,
