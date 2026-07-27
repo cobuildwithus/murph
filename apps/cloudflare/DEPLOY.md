@@ -36,6 +36,13 @@ running its hint or queued jobs. Runtime applies echo the hydrated epoch as
 `observedConnectedAt`; Web rejects connection, credential, local-state, and
 source writes after OAuth replacement changes that epoch.
 
+When hydration accepts a replacement epoch, the same local SQLite transaction
+retires queued, retryable, and leased credential-scoped jobs before exposing the
+replacement credentials. The existing companion-HRV resource exception remains
+runnable because that accepted payload does not depend on provider
+authorization. Web performs the matching dirty-state supersession under its
+connection mutation lock.
+
 Deploy Cloudflare and the runner bundle first with
 `container_rollout=immediate`, and require managed-container smoke to report the
 exact new bundle fingerprint. Then deploy Web so new producers append the

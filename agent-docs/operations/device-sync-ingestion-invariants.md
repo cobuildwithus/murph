@@ -208,7 +208,13 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
    `updatedAt` epoch. Seeded connection flows carry that same revision in their
    one-time state and recheck it inside the existing upsert transaction, so an
    old callback cannot adopt, replace, or fail a newer reconnect. Stale work
-   therefore cannot clear a newer local connection or token. Recovery does not
+   therefore cannot clear a newer local connection or token. A replacement
+   `connectedAt` epoch also supersedes every credential-scoped durable effect:
+   Web revalidates webhook admission and clears old dirty work under the
+   connection lock and dirty-marker row lock, while runtime hydration retires
+   old queued, retryable, and leased jobs inside the credential-replacement
+   transaction. The established companion-HRV resource path remains pending
+   because its accepted payload is authorization-independent. Recovery does not
    use an automatic export endpoint, operator action, or vendor support.
    Hosted runtime account hydration keys by the control plane's opaque hosted
    connection id before mutable provider identity. A terminal privacy scrub

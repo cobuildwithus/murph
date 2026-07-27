@@ -62,6 +62,9 @@ import {
   readHostedStoredTokenBundle,
   type HostedDeviceSyncSecretTestCodec,
 } from "./connection-secrets";
+import {
+  supersedeHostedCredentialScopedDirtyStateForConnectionTx,
+} from "./dirty-connections";
 import { toPrismaJsonObject } from "./prisma-json";
 
 export {
@@ -262,6 +265,13 @@ export class PrismaHostedConnectionStore {
           },
           ...hostedConnectionRecordArgs,
         });
+        if (existing.connectedAt.getTime() !== connectedAt.getTime()) {
+          await supersedeHostedCredentialScopedDirtyStateForConnectionTx({
+            connectionId: existing.id,
+            tx,
+            userId: existing.userId,
+          });
+        }
         return {
           record: updated,
           previousRecord: existing,

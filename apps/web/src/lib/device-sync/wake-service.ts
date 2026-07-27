@@ -1022,7 +1022,24 @@ async function persistHostedDeviceSyncWebhookAccepted(input: {
   userId: string;
 }): Promise<void> {
   const result = await retryHostedDirtyStateContention(async () =>
-    input.store.prisma.$transaction(async (tx) => {
+    input.store.withConnectionMutationLock(input.connectionId, async (tx) => {
+      const current = await input.store.getConnectionForUser(
+        input.userId,
+        input.connectionId,
+        tx,
+      );
+      if (
+        !current
+        || current.provider !== input.provider
+        || current.status !== "active"
+        || current.connectedAt !== input.expectedConnectedAt
+      ) {
+        await completeHostedWebhookTraceTx(input, tx);
+        return {
+          wakeMailboxItemId: null,
+        };
+      }
+
       // Level webhooks may be coalesced only after committed dirty state exists.
       // Durable webhook work must be persisted or retried; dirty state alone never satisfies it.
       // Dirty state dedupes work; only the clean-to-dirty transition appends a durable runtime handoff.

@@ -1,6 +1,6 @@
 # PR 1025 durable epoch-work remediation
 
-Status: active
+Status: completed
 Created: 2026-07-27
 Updated: 2026-07-27
 
@@ -49,6 +49,37 @@ Updated: 2026-07-27
    acceptance, parent review, ReviewGPT correction verification, and exact-head
    CI.
 
+## Evidence to date
+
+- Final ReviewGPT round 1 on exact head
+  `8ed25ecbbe5783af25fcdf53ad718b5f31f477fe` proved that wake and apply
+  fencing alone left epoch-A local jobs and hosted dirty work runnable under
+  epoch-B credentials.
+- The pre-fix local runtime regression left the seeded epoch-A job queued after
+  hydrating epoch B. The correction now terminalizes running, retryable,
+  future-dated, deauthorization, delete, resource, and reconcile work with
+  `HOSTED_CONNECTION_EPOCH_REPLACED`.
+- The stale webhook admission regression proves that an epoch change between
+  ingress read and dirty-state commit completes the claimed trace without
+  writing dirty state or a wake.
+- The reconnect cleanup regression proves that credential-scoped encrypted
+  payloads are deleted while an authorization-independent companion-HRV
+  payload remains pending. The cleanup locks the dirty-marker row inside the
+  existing reconnect transaction, so a concurrent runtime acknowledgement
+  serializes instead of aborting credential replacement.
+- The two assistant-runtime owner files pass all 151 tests; the three focused
+  Web owner files pass all 144 tests. Device-syncd, assistant-runtime, and
+  hosted Web typechecks, scoped Web lint, and documentation drift checks pass.
+- Canonical local `pnpm test:diff` passed on rerun across every selected owner
+  and affected workspace lane, including 6,870 Web tests, 1,992 Cloudflare Node
+  tests, and both Cloudflare Workers tests. The first final attempt hit the
+  unchanged 1 ms preference-handoff timing case after 6,869 other Web tests
+  passed; its exact isolated suite then passed all 9 tests in 16 ms before the
+  complete canonical rerun went green.
+- Full local `pnpm verify:acceptance` passed across all package coverage,
+  6,870 Web tests, the Web production build, 1,992 Cloudflare Node tests, and
+  both Cloudflare Workers tests.
+
 ## Deployment
 
 - Keep the existing runner-first order. Deploy the epoch-aware runner and
@@ -56,4 +87,4 @@ Updated: 2026-07-27
   wake and reconnect behavior.
 - The Web correction uses existing schema and is safe after the runner floor is
   established.
-
+Completed: 2026-07-27

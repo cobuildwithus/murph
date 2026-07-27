@@ -124,6 +124,16 @@ echoes the hydrated epoch as `observedConnectedAt` on control-plane applies, so
 Web rejects connection, credential, local-state, and source writes after OAuth
 replacement changes the epoch.
 
+The epoch also fences the durable work behind a wake. Webhook acceptance
+rechecks the active provider and `connectedAt` under the existing connection
+mutation lock before writing dirty state; a stale claim completes as a
+superseded no-op. Replacing the connection epoch under that same lock marks
+compact credential-scoped dirty work processed under its row lock and deletes
+its encrypted payload rows. A simultaneous runtime acknowledgement therefore
+finishes first or observes the supersession on retry instead of aborting
+reconnect. Already-accepted companion-HRV payloads remain pending because their
+canonical import is authorization-independent.
+
 For the first production rollout, deploy Cloudflare and the runner with
 `container_rollout=immediate`, prove the exact new runner fingerprint, and then
 deploy Web. The short runner-first window fails closed for legacy

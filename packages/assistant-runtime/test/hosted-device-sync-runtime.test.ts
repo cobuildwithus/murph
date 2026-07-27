@@ -5402,7 +5402,7 @@ describe("hosted device-sync runtime", () => {
     }
   });
 
-  test("supersedes an old disconnect wake after hydrating a replacement connection epoch", async () => {
+  test("supersedes an old disconnect wake and all credential-scoped work after hydrating a replacement connection epoch", async () => {
     const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
       "hosted-device-sync-runtime-",
     );
@@ -5417,14 +5417,51 @@ describe("hosted device-sync runtime", () => {
         provider: "demo",
         state: begin.state,
       });
-      const pendingJob = getStore(service).enqueueJob({
+      const store = getStore(service);
+      const runningJob = store.enqueueJob({
         accountId: connected.account.id,
-        availableAt: "2026-04-06T12:00:00.000Z",
-        kind: "replacement-epoch-job",
-        payload: { source: "replacement" },
-        priority: 1,
+        availableAt: "2026-04-06T09:00:00.000Z",
+        kind: "initial",
+        payload: { source: "epoch-a-running" },
+        priority: 100,
         provider: connected.account.provider,
       });
+      assert.equal(
+        store.claimDueJob("epoch-a-worker", "2026-04-06T09:01:00.000Z", 60_000)?.id,
+        runningJob.id,
+      );
+      const retryableJob = store.enqueueJob({
+        accountId: connected.account.id,
+        availableAt: "2026-04-06T09:02:00.000Z",
+        kind: "backfill",
+        maxAttempts: 3,
+        payload: { source: "epoch-a-retry" },
+        priority: 90,
+        provider: connected.account.provider,
+      });
+      store.failJob(
+        retryableJob.id,
+        "2026-04-06T09:02:01.000Z",
+        "PROVIDER_RETRY",
+        "Provider asked the worker to retry.",
+        "2026-04-06T12:30:00.000Z",
+        true,
+      );
+      const pendingJobs = [
+        "deauthorization",
+        "delete",
+        "resource",
+        "reconcile",
+      ].map((kind, index) =>
+        store.enqueueJob({
+          accountId: connected.account.id,
+          availableAt: `2026-04-06T1${index + 2}:00:00.000Z`,
+          kind,
+          payload: { source: `epoch-a-${kind}` },
+          priority: index,
+          provider: connected.account.provider,
+        })
+      );
       const snapshot = buildRuntimeSnapshot({
         connectedAt: "2026-04-06T10:00:00.000Z",
         connectionId: "hosted_conn_disconnect_wake_replacement",
@@ -5516,7 +5553,14 @@ describe("hosted device-sync runtime", () => {
         ),
         "replacement-refresh-token",
       );
-      assert.equal(getStore(service).getJobById(pendingJob.id)?.status, "queued");
+      for (const job of [runningJob, retryableJob, ...pendingJobs]) {
+        const supersededJob = store.getJobById(job.id);
+        assert.equal(supersededJob?.status, "dead");
+        assert.equal(
+          supersededJob?.lastErrorCode,
+          "HOSTED_CONNECTION_EPOCH_REPLACED",
+        );
+      }
 
       await reconcileHostedDeviceSyncControlPlaneState({
         deviceSyncPort,
@@ -5538,7 +5582,7 @@ describe("hosted device-sync runtime", () => {
     }
   });
 
-  test("consumes a legacy connection-scoped wake without epoch authority as a no-op", async () => {
+  test("consumes a legacy connection-scoped wake without applying its hint and retires pre-replacement work", async () => {
     const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
       "hosted-device-sync-runtime-",
     );
@@ -5602,7 +5646,12 @@ describe("hosted device-sync runtime", () => {
 
       assert.equal(dirtyFetchCalls, 0);
       assert.equal(getStore(service).getAccountById(connected.account.id)?.status, "active");
-      assert.equal(getStore(service).getJobById(pendingJob.id)?.status, "queued");
+      const supersededJob = getStore(service).getJobById(pendingJob.id);
+      assert.equal(supersededJob?.status, "dead");
+      assert.equal(
+        supersededJob?.lastErrorCode,
+        "HOSTED_CONNECTION_EPOCH_REPLACED",
+      );
     } finally {
       closeHostedRuntimeDeviceSyncService(service);
       await cleanup();
@@ -5675,10 +5724,10 @@ describe("hosted device-sync runtime", () => {
 
       const deadJob = getStore(service).getJobById(pendingJob.id);
       assert.equal(deadJob?.status, "dead");
-      assert.equal(deadJob?.lastErrorCode, "HOSTED_DEVICE_SYNC_DISCONNECTED");
+      assert.equal(deadJob?.lastErrorCode, "HOSTED_CONNECTION_EPOCH_REPLACED");
       assert.equal(
         deadJob?.lastErrorMessage,
-        "Hosted device-sync wake marked the connection as disconnected.",
+        "Device-sync work belonged to a replaced hosted connection epoch.",
       );
     } finally {
       closeHostedRuntimeDeviceSyncService(service);
@@ -5736,7 +5785,7 @@ describe("hosted device-sync runtime", () => {
         code: job.lastErrorCode,
         status: job.status,
       })), [{
-        code: "HOSTED_DEVICE_SYNC_REAUTHORIZATION_REQUIRED",
+        code: "HOSTED_CONNECTION_EPOCH_REPLACED",
         status: "dead",
       }]);
     } finally {

@@ -1,8 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { DEVICE_SYNC_DISCONNECT_IN_PROGRESS_ERROR_CODE } from "@murphai/device-syncd/public-account";
 
-const { randomBytesMock } = vi.hoisted(() => ({
+const { randomBytesMock, supersedeDirtyStateMock } = vi.hoisted(() => ({
   randomBytesMock: vi.fn((length: number) => Buffer.from(Array.from({ length }, (_, index) => index))),
+  supersedeDirtyStateMock: vi.fn(async () => ({
+    retainedCompanionPayloadCount: 0,
+    supersededPayloadCount: 0,
+  })),
 }));
 
 vi.mock("node:crypto", async () => {
@@ -10,6 +14,17 @@ vi.mock("node:crypto", async () => {
   return {
     ...actual,
     randomBytes: randomBytesMock,
+  };
+});
+
+vi.mock("@/src/lib/device-sync/prisma-store/dirty-connections", async () => {
+  const actual = await vi.importActual<
+    typeof import("@/src/lib/device-sync/prisma-store/dirty-connections")
+  >("@/src/lib/device-sync/prisma-store/dirty-connections");
+  return {
+    ...actual,
+    supersedeHostedCredentialScopedDirtyStateForConnectionTx:
+      supersedeDirtyStateMock,
   };
 });
 
@@ -824,6 +839,11 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
         tokenVersion: 1,
       }),
     }));
+    expect(supersedeDirtyStateMock).toHaveBeenCalledWith({
+      connectionId: "dsc_123",
+      tx,
+      userId: "user-123",
+    });
     expect(stored.status).toBe("active");
     expect(stored.lastErrorCode).toBeNull();
     expect(stored.lastErrorMessage).toBeNull();

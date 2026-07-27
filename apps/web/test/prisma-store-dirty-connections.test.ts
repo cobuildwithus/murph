@@ -9,11 +9,136 @@ import {
   serializeCompanionHrvRmssdObservation,
 } from "@murphai/contracts";
 
-import { PrismaHostedDirtyConnectionStore } from "@/src/lib/device-sync/prisma-store/dirty-connections";
+import {
+  PrismaHostedDirtyConnectionStore,
+  supersedeHostedCredentialScopedDirtyStateForConnectionTx,
+} from "@/src/lib/device-sync/prisma-store/dirty-connections";
 import { sealHostedDeviceSyncDirtyPayloadJson } from "@/src/lib/device-sync/prisma-store/dirty-payloads";
 import { setHostedSecureBoxStringTestCodecForTests } from "@/src/lib/hosted-crypto/secure-box";
 
 describe("PrismaHostedDirtyConnectionStore dirty pending state", () => {
+  it("supersedes reconnect-bound dirty work while retaining companion HRV payloads", async () => {
+    installHostedSecureBoxStringTestCodec();
+    const connectionId = "dsc_epoch_replacement";
+    const userId = "member_epoch_replacement";
+    const dirtyRevision = 4n;
+
+    try {
+      const credentialPayload = await sealHostedDeviceSyncDirtyPayloadJson({
+        connectionId,
+        dirtyRevision,
+        payloadId: "dsp_credential",
+        provider: "junction",
+        userId,
+        value: {
+          count: 1,
+          jobKind: "deauthorization",
+          payload: {
+            webhookDataJson: JSON.stringify({ event: "deauthorize" }),
+          },
+          resource: "deauthorization",
+        },
+      });
+      const companionPayload = await sealHostedDeviceSyncDirtyPayloadJson({
+        connectionId,
+        dirtyRevision,
+        payloadId: "dsp_companion",
+        provider: "junction",
+        userId,
+        value: {
+          count: 1,
+          jobKind: "resource",
+          payload: {
+            resource: COMPANION_HRV_RMSSD_RESOURCE,
+          },
+          resource: COMPANION_HRV_RMSSD_RESOURCE,
+        },
+      });
+      const updateMany = vi.fn(async () => ({ count: 1 }));
+      const deleteMany = vi.fn(async () => ({ count: 1 }));
+      const tx = {
+        $queryRaw: vi.fn(async (query: unknown) => {
+          expect(query).toBeDefined();
+          return [{ connectionId }];
+        }),
+        deviceSyncDirtyConnection: {
+          findFirst: vi.fn(async () => ({
+            connectionId,
+            dirtyRevision,
+            latestDirtyAt: new Date("2026-07-27T04:00:00.000Z"),
+            processedRevision: 1n,
+            userId,
+          })),
+          updateMany,
+        },
+        deviceSyncDirtyPayload: {
+          deleteMany,
+          findMany: vi.fn(async () => [
+            {
+              connectionId,
+              dirtyRevision,
+              id: "dsp_credential",
+              provider: "junction",
+              resourceEncrypted: credentialPayload,
+            },
+            {
+              connectionId,
+              dirtyRevision,
+              id: "dsp_companion",
+              provider: "junction",
+              resourceEncrypted: companionPayload,
+            },
+          ]),
+        },
+      };
+
+      await expect(
+        supersedeHostedCredentialScopedDirtyStateForConnectionTx({
+          connectionId,
+          tx: tx as never,
+          userId,
+        }),
+      ).resolves.toEqual({
+        retainedCompanionPayloadCount: 1,
+        supersededPayloadCount: 1,
+      });
+      expect(tx.$queryRaw).toHaveBeenCalledOnce();
+      const lockQuery = tx.$queryRaw.mock.calls[0]?.[0] as {
+        sql?: string;
+      };
+      expect(lockQuery.sql).toContain("device_sync_dirty_connection");
+      expect(lockQuery.sql).toContain("FOR UPDATE");
+      expect(updateMany).toHaveBeenCalledWith({
+        data: {
+          dirtyResourcesJson: {},
+          firstDirtyAt: new Date("2026-07-27T04:00:00.000Z"),
+          processedRevision: dirtyRevision,
+          resourceCategoryCountsJson: {},
+          sourceProviderCountsJson: {},
+          windowEnd: null,
+          windowStart: null,
+        },
+        where: {
+          connectionId,
+          dirtyRevision,
+          processedRevision: 1n,
+          userId,
+        },
+      });
+      expect(deleteMany).toHaveBeenCalledWith({
+        where: {
+          connectionId,
+          id: {
+            in: ["dsp_credential"],
+          },
+          userId,
+        },
+      });
+    } finally {
+      installHostedSecureBoxStringTestCodec();
+    }
+  });
+
   it("preseals dirty payload rows before opening store-owned transactions", async () => {
     let insideTransaction = false;
     const encryptInsideTransaction: boolean[] = [];

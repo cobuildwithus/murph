@@ -84,6 +84,104 @@ const COMPANION_HRV_NIGHT_RECEIPT_MAX_PER_CONNECTION = 64;
 
 export type CompanionHrvNightReceiptInspection = "conflict" | "exact" | "missing";
 
+export async function supersedeHostedCredentialScopedDirtyStateForConnectionTx(input: {
+  connectionId: string;
+  tx: HostedPrismaTransactionClient;
+  userId: string;
+}): Promise<{
+  retainedCompanionPayloadCount: number;
+  supersededPayloadCount: number;
+}> {
+  await input.tx.$queryRaw<Array<{ connectionId: string }>>(Prisma.sql`
+    SELECT connection_id AS "connectionId"
+    FROM device_sync_dirty_connection
+    WHERE connection_id = ${input.connectionId}
+    FOR UPDATE
+  `);
+  const existing = await input.tx.deviceSyncDirtyConnection.findFirst({
+    where: {
+      connectionId: input.connectionId,
+      userId: input.userId,
+    },
+  });
+  if (!existing) {
+    return {
+      retainedCompanionPayloadCount: 0,
+      supersededPayloadCount: 0,
+    };
+  }
+
+  const payloadRows = await input.tx.deviceSyncDirtyPayload.findMany({
+    select: {
+      connectionId: true,
+      dirtyRevision: true,
+      id: true,
+      provider: true,
+      resourceEncrypted: true,
+    },
+    where: {
+      connectionId: input.connectionId,
+      userId: input.userId,
+    },
+  });
+  const supersededPayloadIds: string[] = [];
+  let retainedCompanionPayloadCount = 0;
+  for (const row of payloadRows) {
+    const resource = await readDirtyPayloadResourceJson({
+      row,
+      tx: input.tx,
+      userId: input.userId,
+    });
+    if (
+      row.provider === "junction"
+      && resource?.jobKind === "resource"
+      && resource.payload?.resource === COMPANION_HRV_RMSSD_RESOURCE
+    ) {
+      retainedCompanionPayloadCount += 1;
+    } else {
+      supersededPayloadIds.push(row.id);
+    }
+  }
+
+  const updated = await input.tx.deviceSyncDirtyConnection.updateMany({
+    data: {
+      dirtyResourcesJson: toNullablePrismaJsonValue({}),
+      firstDirtyAt: existing.latestDirtyAt,
+      processedRevision: existing.dirtyRevision,
+      resourceCategoryCountsJson: toNullablePrismaJsonValue({}),
+      sourceProviderCountsJson: toNullablePrismaJsonValue({}),
+      windowEnd: null,
+      windowStart: null,
+    },
+    where: {
+      connectionId: input.connectionId,
+      dirtyRevision: existing.dirtyRevision,
+      processedRevision: existing.processedRevision,
+      userId: input.userId,
+    },
+  });
+  if (updated.count === 0) {
+    throw createDirtyStateContentionError("ack");
+  }
+
+  if (supersededPayloadIds.length > 0) {
+    await input.tx.deviceSyncDirtyPayload.deleteMany({
+      where: {
+        connectionId: input.connectionId,
+        id: {
+          in: supersededPayloadIds,
+        },
+        userId: input.userId,
+      },
+    });
+  }
+
+  return {
+    retainedCompanionPayloadCount,
+    supersededPayloadCount: supersededPayloadIds.length,
+  };
+}
+
 interface DirtyPayloadHydrationBudget {
   exhausted: boolean;
   maxEstimatedBytes: number;

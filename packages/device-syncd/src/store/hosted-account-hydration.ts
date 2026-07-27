@@ -24,6 +24,7 @@ import {
   getHostedConnectionIdForAccountId,
   listUnboundAccountsByConnectionEpoch,
 } from "./accounts.ts";
+import { markPendingDeviceSyncJobsDeadForAccount } from "./jobs.ts";
 
 type EncryptedProviderAuthTokens = ProviderAuthTokens & {
   accessTokenEncrypted: string;
@@ -784,6 +785,9 @@ export function hydrateHostedAccount(
         : 0;
 
     if (existing) {
+      const connectionEpochReplaced = status === "active"
+        && hydrationPlan.connectionAccepted
+        && existing.connectedAt !== connectedAt;
       database.prepare(`
         update device_connection
         set hosted_connection_id = coalesce(?, hosted_connection_id),
@@ -864,6 +868,15 @@ export function hydrateHostedAccount(
         rowUpdatedAt,
         existing.id,
       );
+
+      if (connectionEpochReplaced) {
+        markPendingDeviceSyncJobsDeadForAccount(database, {
+          accountId: existing.id,
+          code: "HOSTED_CONNECTION_EPOCH_REPLACED",
+          message: "Device-sync work belonged to a replaced hosted connection epoch.",
+          now: rowUpdatedAt,
+        });
+      }
 
       return getAccountById(database, existing.id)!;
     }
