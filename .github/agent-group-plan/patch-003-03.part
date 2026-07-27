@@ -1,0 +1,85 @@
+029,6 @@ function buildHostedBillingPlanSwitchCurrentPhaseParams(input: {
+     end_date: input.context.currentPeriodEndUnix,
+     items: [
+       {
+-        price: input.context.edgeConfig.priceId,
++        price: input.context.sourceConfig.priceId,
+         quantity: 1,
+       },
+@@ -993,6 +1052,6 @@ function buildHostedBillingPlanSwitchFuturePhaseParams(
+     },
+     items: [
+       {
+-        price: context.pulseConfig.priceId,
++        price: context.targetConfig.priceId,
+         quantity: 1,
+       },
+@@ -1008,9 +1067,9 @@ function buildHostedBillingPlanSwitchScheduleMetadata(
+   context: HostedSwitchScheduleContext,
+ ): Stripe.MetadataParam {
+   return {
+-    billingPlanCode: SWITCH_TO_PULSE_TARGET_PLAN,
++    billingPlanCode: context.targetPlanCode,
+     checkoutOffer: HOSTED_STANDARD_CHECKOUT_OFFER,
+     memberId: context.memberId,
+-    murphPlanSwitch: SWITCH_TO_PULSE_MARKER,
++    murphPlanSwitch: resolveHostedBillingPlanSwitchMarker(context),
+   };
+ }
+@@ -1064,5 +1123,5 @@ function isHostedBillingPlanSwitchToPulseScheduleCompatible(
+     currentPhase.start_date < context.currentPeriodEndUnix &&
+     currentPhase.end_date === context.currentPeriodEndUnix &&
+     hasHostedStripeSchedulePhaseItems(currentPhase, {
+-      recurringPriceId: context.edgeConfig.priceId,
++      recurringPriceId: context.sourceConfig.priceId,
+     }) &&
+@@ -1072,6 +1131,6 @@ function isHostedBillingPlanSwitchToPulseScheduleCompatible(
+     isHostedBillingPlanSwitchScheduleMetadataCompatible(futurePhase.metadata, context) &&
+     hasHostedStripeTrialMetadataClears(futurePhase.metadata) &&
+     hasHostedStripeSchedulePhaseItems(futurePhase, {
+-      recurringPriceId: context.pulseConfig.priceId,
++      recurringPriceId: context.targetConfig.priceId,
+     });
+ }
+@@ -1128,7 +1187,8 @@ function hasHostedBillingPlanSwitchCurrentPhaseCanonicalState(input: {
+     coerceStripeObjectId(input.currentPhase.default_payment_method) ===
+       coerceStripeObjectId(input.subscription.default_payment_method) &&
+     input.currentPhase.collection_method ===
+       input.subscription.collection_method &&
+     input.currentPhase.description === input.subscription.description &&
+-    input.currentPhase.trial_end === null &&
++    (input.currentPhase.trial_end ?? null) ===
++      (input.subscription.trial_end ?? null) &&
+     hasExactHostedStripeSchedulePhaseItems(
+@@ -1192,8 +1252,9 @@ function isHostedBillingPlanSwitchScheduleMetadataCompatible(
+   metadata: Stripe.Metadata | null,
+   context: HostedSwitchScheduleContext,
+ ): boolean {
+-  return metadata?.murphPlanSwitch === SWITCH_TO_PULSE_MARKER &&
++  return metadata?.murphPlanSwitch ===
++      resolveHostedBillingPlanSwitchMarker(context) &&
+     metadata.memberId === context.memberId &&
+-    metadata.billingPlanCode === SWITCH_TO_PULSE_TARGET_PLAN &&
++    metadata.billingPlanCode === context.targetPlanCode &&
+     metadata.checkoutOffer === HOSTED_STANDARD_CHECKOUT_OFFER;
+ }
+@@ -1235,3 +1235,4 @@ async function persistHostedBillingPlanSwitchToPulsePendingFields(input: {
+     expectedStripeSubscriptionId: input.context.stripeSubscriptionId,
+     member,
++    targetPlanCode: input.context.targetPlanCode,
+   });
+@@ -1244,6 +1305,6 @@ async function persistHostedBillingPlanSwitchToPulsePendingFields(input: {
+   await writeHostedMemberStripeBillingRefTx({
+     memberId: input.context.memberId,
+     scheduledBillingEffectiveAt: input.context.currentPeriodEnd,
+-    scheduledBillingPlanCode: SWITCH_TO_PULSE_TARGET_PLAN,
++    scheduledBillingPlanCode: input.context.targetPlanCode,
+     stripeSubscriptionScheduleId: input.schedule.id,
+     tx: input.tx,
+@@ -1256,9 +1317,19 @@ function buildHostedBillingPlanSwitchToPulseCreateIdempotencyKey(
+   context: HostedSwitchScheduleContext,
+ ): string {
++  if (isLegacyEdgeToPulseSwitch(context)) {
++    return `hosted-billing-switch-to-pulse:create:${sha256Hex(JSON.stringify({
++      currentPeriodEnd: context.currentPeriodEndUnix,
++      memberId: context.memberId,
