@@ -1,6 +1,6 @@
 # Bad-code round 3: refund pre-egress clinical request budget
 
-Status: active
+Status: completed
 Created: 2026-07-26
 Updated: 2026-07-26
 
@@ -83,5 +83,19 @@ Updated: 2026-07-26
   apps/web/src/lib/clinical-records/retrieval.ts
   apps/web/test/clinical-records-retrieval.test.ts`: passed end-to-end in the
   isolated Testbox, including affected tests, typechecks, and Web verification.
-- Preliminary specialist ReviewGPT, parent final review, exact-head final
-  ReviewGPT, and PR CI: pending.
+- Preliminary specialist ReviewGPT returned one accepted coverage finding: add
+  direct proof that an ambiguous provider fetch remains charged and that a
+  stale pre-egress release cannot refund a newer claimant. Its exact-thread
+  `reviewgpt-coverage.patch` touched only the focused test file, passed
+  `git apply --check`, was inspected in full, and was applied deliberately.
+- Post-specialist focused proof: the clinical retrieval file passed all 49
+  tests, including the two new guard cases.
+- Parent final review: no findings; `providerRequestStarted` flips immediately
+  before the awaited provider fetch, the release compare-and-set keys the exact
+  claim version and reservation, and both counter decrements remain in the
+  existing transaction after the winning release.
+- Final canonical rerun after the specialist coverage patch: passed end-to-end
+  in the isolated Testbox, including affected tests, typechecks, and Web
+  verification.
+- Exact-head final ReviewGPT and PR CI: pending.
+Completed: 2026-07-26
