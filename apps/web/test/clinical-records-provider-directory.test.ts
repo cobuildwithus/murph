@@ -10,8 +10,8 @@ import {
 import {
   EPIC_ACQUISITION_POLICY,
   EPIC_ACQUISITION_POLICY_ID,
+  EPIC_BETA_REQUESTED_BASE_SCOPES,
   EPIC_BETA_RESOURCE_TYPES,
-  EPIC_LEGACY_BETA_RESOURCE_TYPES,
   buildEpicBetaRetrievalPlan,
 } from "@/src/lib/clinical-records/epic-policy";
 import { selectSmartRequestedScopes } from "@/src/lib/clinical-records/smart";
@@ -31,6 +31,10 @@ describe("Clinical Records provider directory", () => {
     expect(directory.sourceBundleSha256).toMatch(/^[a-f0-9]{64}$/u);
     expect(new Set(directory.entries.map((entry) => entry.id)).size).toBe(directory.entries.length);
     expect(directory.entries.every((entry) => entry.policyId === EPIC_ACQUISITION_POLICY_ID)).toBe(true);
+    expect(directory.entries.every((entry) =>
+      JSON.stringify(entry.requestedBaseScopes)
+        === JSON.stringify(EPIC_BETA_REQUESTED_BASE_SCOPES)
+    )).toBe(true);
     expect(directory.entries.every((entry) =>
       JSON.stringify(entry.resourceTypes) === JSON.stringify(EPIC_BETA_RESOURCE_TYPES)
     )).toBe(true);
@@ -222,30 +226,27 @@ describe("Clinical Records provider directory", () => {
     expect(() => parseClinicalProviderDirectory(makeDirectory({
       clientIdEnvironmentKey: "EPIC_SMART_OTHER_CLIENT_ID",
     }))).toThrow(/client-id configuration is unsupported/u);
-    expect(() => parseClinicalProviderDirectory(makeDirectory({
-      resourceTypes: ["Patient", "Observation", "DiagnosticReport", "DocumentReference"],
-    }))).toThrow(/does not match the Epic beta FHIR policy/u);
   });
 
-  it("reads v1 for one compatibility window and rejects unknown v2 policy references", () => {
-    const v1 = parseClinicalProviderDirectory(makeDirectory({}));
-    expect(v1.schema).toBe("murph.clinical-provider-directory.v1");
-    expect(v1.sourceBundleSha256).toBeNull();
-    expect(v1.entries[0]).toMatchObject({ policyId: EPIC_ACQUISITION_POLICY_ID });
+  it("rejects obsolete schemas and unknown policy references", () => {
+    expect(() => parseClinicalProviderDirectory({
+      ...makeDirectory({}),
+      schema: "murph.clinical-provider-directory.v1",
+    })).toThrow(/schema is unsupported/u);
 
-    expect(() => parseClinicalProviderDirectory(makeDirectoryV2({
+    expect(() => parseClinicalProviderDirectory(makeDirectory({
       policyId: "unknown-policy",
     }))).toThrow(/unknown policy/u);
   });
 
   it("rejects unsorted v2 entries and invalid capability overrides", () => {
-    const first = makeDirectoryV2({ id: "epic-z-brand" });
-    const secondEntry = makeDirectoryV2({ id: "epic-a-brand" }).entries[0];
+    const first = makeDirectory({ id: "epic-z-brand" });
+    const secondEntry = makeDirectory({ id: "epic-a-brand" }).entries[0];
     expect(() => parseClinicalProviderDirectory({
       ...first,
       entries: [first.entries[0], secondEntry],
     })).toThrow(/strictly sorted/u);
-    expect(() => parseClinicalProviderDirectory(makeDirectoryV2({
+    expect(() => parseClinicalProviderDirectory(makeDirectory({
       capabilityOverrides: [{
         evidenceVersion: "test-evidence-v1",
         queryScopeId: "unknown-query",
@@ -255,14 +256,14 @@ describe("Clinical Records provider directory", () => {
   });
 
   it("requires the exact owned policy and rejects malformed hashes and capability evidence", () => {
-    expect(() => parseClinicalProviderDirectory(makeDirectoryV2({
+    expect(() => parseClinicalProviderDirectory(makeDirectory({
       policies: [
         { ...EPIC_ACQUISITION_POLICY, id: "z-policy" },
         { ...EPIC_ACQUISITION_POLICY, id: "a-policy" },
       ],
       policyId: "z-policy",
     }))).toThrow(/exactly one owned policy/u);
-    expect(() => parseClinicalProviderDirectory(makeDirectoryV2({
+    expect(() => parseClinicalProviderDirectory(makeDirectory({
       policies: [{
         ...EPIC_ACQUISITION_POLICY,
         registrationApis: [
@@ -272,13 +273,13 @@ describe("Clinical Records provider directory", () => {
         ],
       }],
     }))).toThrow(/exactly match the owned Epic policy/u);
-    expect(() => parseClinicalProviderDirectory(makeDirectoryV2({
+    expect(() => parseClinicalProviderDirectory(makeDirectory({
       policies: [{
         ...EPIC_ACQUISITION_POLICY,
         registrationApis: EPIC_ACQUISITION_POLICY.registrationApis.slice(1),
       }],
     }))).toThrow(/exactly match the owned Epic policy/u);
-    expect(() => parseClinicalProviderDirectory(makeDirectoryV2({
+    expect(() => parseClinicalProviderDirectory(makeDirectory({
       sourceBundleSha256: "not-a-sha256",
     }))).toThrow(/source bundle hash/u);
 
@@ -287,26 +288,26 @@ describe("Clinical Records provider directory", () => {
       queryScopeId,
       support: "verified",
     });
-    expect(() => parseClinicalProviderDirectory(makeDirectoryV2({
+    expect(() => parseClinicalProviderDirectory(makeDirectory({
       capabilityOverrides: [
         verified("patient-demographics"),
         verified("diagnostic-reports"),
       ],
     }))).toThrow(/capability overrides must be strictly sorted/u);
-    expect(() => parseClinicalProviderDirectory(makeDirectoryV2({
+    expect(() => parseClinicalProviderDirectory(makeDirectory({
       capabilityOverrides: [
         verified("diagnostic-reports"),
         verified("diagnostic-reports"),
       ],
     }))).toThrow(/capability overrides must be strictly sorted/u);
-    expect(() => parseClinicalProviderDirectory(makeDirectoryV2({
+    expect(() => parseClinicalProviderDirectory(makeDirectory({
       capabilityOverrides: [{
         evidenceVersion: "test-evidence-v1",
         queryScopeId: "diagnostic-reports",
         support: "maybe",
       }],
     }))).toThrow(/support is invalid/u);
-    expect(() => parseClinicalProviderDirectory(makeDirectoryV2({
+    expect(() => parseClinicalProviderDirectory(makeDirectory({
       capabilityOverrides: [{
         evidenceVersion: "",
         queryScopeId: "diagnostic-reports",
@@ -323,13 +324,16 @@ function readCommittedDirectory() {
   )));
 }
 
-function makeDirectoryV2(overrides: {
+function makeDirectory(overrides: {
   capabilityOverrides?: Array<{
     evidenceVersion: string;
     queryScopeId: string;
     support: string;
   }>;
+  clientIdEnvironmentKey?: string;
+  fhirBaseUrl?: string;
   id?: string;
+  locations?: Array<Array<string | null>>;
   policies?: unknown[];
   policyId?: string;
   sourceBundleSha256?: string;
@@ -341,40 +345,16 @@ function makeDirectoryV2(overrides: {
       ...(overrides.capabilityOverrides
         ? { capabilityOverrides: overrides.capabilityOverrides }
         : {}),
-      clientIdEnvironmentKey: "EPIC_SMART_CLIENT_ID",
-      fhirBaseUrl: "https://fhir.example.test/FHIR/R4",
+      clientIdEnvironmentKey: overrides.clientIdEnvironmentKey ?? "EPIC_SMART_CLIENT_ID",
+      fhirBaseUrl: overrides.fhirBaseUrl ?? "https://fhir.example.test/FHIR/R4",
       id: overrides.id ?? "epic-test-brand",
-      locations: [],
+      locations: overrides.locations ?? [],
       policyId: overrides.policyId ?? EPIC_ACQUISITION_POLICY_ID,
     }],
     generatedAt,
     policies: overrides.policies ?? [EPIC_ACQUISITION_POLICY],
-    schema: "murph.clinical-provider-directory.v2",
+    schema: CLINICAL_PROVIDER_DIRECTORY_SCHEMA,
     sourceBundleSha256: overrides.sourceBundleSha256 ?? "0".repeat(64),
     version: "test-v2",
-  };
-}
-
-function makeDirectory(overrides: {
-  clientIdEnvironmentKey?: string;
-  locations?: Array<Array<string | null>>;
-  fhirBaseUrl?: string;
-  resourceTypes?: string[];
-}) {
-  return {
-    entries: [{
-      aliases: ["Test Health"],
-      brandName: "Test Health System",
-      clientIdEnvironmentKey: overrides.clientIdEnvironmentKey ?? "EPIC_SMART_CLIENT_ID",
-      locations: overrides.locations ?? [],
-      fhirBaseUrl: overrides.fhirBaseUrl ?? "https://fhir.example.test/FHIR/R4",
-      id: "epic-test-brand",
-      requestedBaseScopes: ["openid", "fhirUser", "launch/patient"],
-      resourceTypes: overrides.resourceTypes ?? [...EPIC_LEGACY_BETA_RESOURCE_TYPES],
-      sourceSystem: "epic-fhir",
-    }],
-    generatedAt,
-    schema: "murph.clinical-provider-directory.v1",
-    version: "test-v1",
   };
 }

@@ -17,6 +17,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import {
   MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID,
   MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_AUTOMATION_ID,
+  MURPH_GROUP_SUNDAY_SUPERLATIVES_AUTOMATION_ID,
   MURPH_MANAGED_AUTOMATIONS,
   MURPH_ONBOARDING_FOLLOWUP_AUTOMATION,
   MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
@@ -801,7 +802,7 @@ describe('applyMurphManagedAutomations core integration', () => {
     })
   })
 
-  it('creates only group room-model maintenance for a hosted group route', async () => {
+  it('creates group managed automations for a hosted group route', async () => {
     const vaultRoot = await createVaultRoot()
     const groupRoute = {
       ...defaultRoute,
@@ -819,7 +820,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       },
       vaultRoot,
     })).resolves.toEqual({
-      created: 1,
+      created: 2,
       skipped: 0,
       updated: 0,
     })
@@ -835,6 +836,18 @@ describe('applyMurphManagedAutomations core integration', () => {
         expression: '0 4 * * 2,5',
       },
       slug: 'group-room-model-consolidation',
+      status: 'active',
+    })
+    await expect(showAutomation({
+      automationId: MURPH_GROUP_SUNDAY_SUPERLATIVES_AUTOMATION_ID,
+      vaultRoot,
+    })).resolves.toMatchObject({
+      automationId: MURPH_GROUP_SUNDAY_SUPERLATIVES_AUTOMATION_ID,
+      route: groupRoute,
+      schedule: {
+        kind: 'cron',
+      },
+      slug: 'group-sunday-superlatives',
       status: 'active',
     })
     await expect(showAutomation({

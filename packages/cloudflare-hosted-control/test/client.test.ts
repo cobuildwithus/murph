@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   HOSTED_EXECUTION_USER_ID_HEADER,
@@ -19,6 +19,10 @@ import {
 type ObservedRequest = { init?: RequestInit; url: string };
 
 describe("createCloudflareHostedControlClient", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("exposes only the narrowed execution-plane helpers", () => {
     const client = createCloudflareHostedControlClient({
       baseUrl: "https://runner.example.test",
@@ -918,6 +922,57 @@ describe("createCloudflareHostedControlClient", () => {
     expectNoRunContractFields(result);
   });
 
+  it("includes bearer-token acquisition in the user-data deletion deadline", async () => {
+    const abort = new AbortController();
+    const fetchImpl = vi.fn() as unknown as typeof fetch;
+    const client = createCloudflareHostedControlClient({
+      baseUrl: "https://runner.example.test/root/",
+      fetchImpl,
+      getBearerToken: () => new Promise(() => undefined),
+      timeoutMs: 2_500,
+    });
+    const deletion = client.deleteUserData("user_123", {
+      signal: abort.signal,
+    });
+
+    abort.abort(new Error("cleanup deadline reached"));
+
+    await expect(deletion).rejects.toThrow("cleanup deadline reached");
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("keeps the default timeout scoped to fetch when no caller signal is supplied", async () => {
+    vi.useFakeTimers();
+    let resolveBearerToken!: (token: string) => void;
+    const bearerToken = new Promise<string>((resolve) => {
+      resolveBearerToken = resolve;
+    });
+    const fetchImpl = vi.fn(async () =>
+      createJsonResponse(createUserDataDeletionResult({ userId: "user_123" }))) as typeof fetch;
+    const client = createCloudflareHostedControlClient({
+      baseUrl: "https://runner.example.test/root/",
+      fetchImpl,
+      getBearerToken: () => bearerToken,
+      timeoutMs: 50,
+    });
+
+    const outcome = client.deleteUserData("user_123").then(
+      (result) => ({ result }),
+      (error: unknown) => ({ error }),
+    );
+    await vi.advanceTimersByTimeAsync(100);
+
+    expect(fetchImpl).not.toHaveBeenCalled();
+    resolveBearerToken("token-123");
+    await expect(outcome).resolves.toMatchObject({
+      result: {
+        ok: true,
+        userId: "user_123",
+      },
+    });
+    expect(fetchImpl).toHaveBeenCalledOnce();
+  });
+
   it("rejects user data deletion responses for another user", async () => {
     const client = createCloudflareHostedControlClient({
       baseUrl: "https://runner.example.test/root/",
@@ -950,6 +1005,27 @@ describe("createCloudflareHostedControlClient", () => {
 
     await expect(client.deleteUserData("user_123")).rejects.toThrow(
       "Cloudflare user-data deletion result r2.deletedObjectCount must be a non-negative integer.",
+    );
+  });
+
+  it("rejects legacy deletion responses without full Durable Object erasure evidence", async () => {
+    const result = createUserDataDeletionResult({ userId: "user_123" });
+    const client = createCloudflareHostedControlClient({
+      baseUrl: "https://runner.example.test/root/",
+      fetchImpl: vi.fn(async () =>
+        createJsonResponse({
+          ...result,
+          durableObject: {
+            alarmCleared: true,
+            stateDeleted: true,
+          },
+        })) as typeof fetch,
+      getBearerToken: async () => "Bearer token-123",
+      timeoutMs: 2_500,
+    });
+
+    await expect(client.deleteUserData("user_123")).rejects.toThrow(
+      "Cloudflare user-data deletion result durableObject.deleteAllCompleted must be a boolean.",
     );
   });
 
@@ -1085,6 +1161,7 @@ function createUserDataDeletionResult(input: { userId: string }) {
     deletedAt: "2026-04-29T00:00:00.000Z",
     durableObject: {
       alarmCleared: true,
+      deleteAllCompleted: true,
       stateDeleted: true,
     },
     ok: true,

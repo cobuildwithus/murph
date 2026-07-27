@@ -1954,6 +1954,23 @@ explicitly appends one.
 `HostedRuntimeLog` is redacted observability, not correctness state. Logs may be
 lossy and must not contain plaintext messages, transcripts, vault data,
 provider payloads, secrets, local paths, or direct personal identifiers.
+Web runs one Vercel-authenticated reply-latency monitor every five minutes over
+the existing `HostedIngressLatencyTrace`, accepted `HostedLinqDelivery`, and
+conversation `consumed_at` facts. The fixed product boundary is 30 seconds. A
+recent accepted delivery at or above that boundary is anomalous; a trace at or
+above the boundary is unresolved only when it has neither accepted delivery nor
+durable consumed evidence. This second condition prevents a best-effort missing
+delivery link from becoming a false page after handling is already known.
+One fixed-kind `HostedLinqAlert` row provides the incident claim, provider
+idempotency identity, retry lease, and active state. A healthy scan silently
+clears the claim so a later incident receives a new identity; the monitor does
+not send a potentially misleading recovery message from aged observability
+data. The configured destination is an opaque existing dedicated Linq chat ID.
+Persisted and delivered evidence is aggregate counts and durations only: no
+message content, member, phone, chat, mailbox, delivery, or trace identifiers.
+The monitor is observability-only: it does not append mailbox work, signal
+Temporal, wake Cloudflare, alter usage gates, or participate in foreground
+reply ownership.
 Orchestration phase telemetry is interpreted causally: direct-request routing
 ends at the Cloudflare route/auth stamps, Durable Object activation ends at
 `userRunnerEnsureStartedAtEpochMs`, stale-fence recovery is the active-wake and

@@ -149,6 +149,10 @@ class HostedLegacyFamilyCleanupPendingError extends Error {
   readonly code = "HOSTED_LEGACY_FAMILY_CLEANUP_PENDING";
 }
 
+class HostedStripeSubscriptionIdentityPendingError extends Error {
+  readonly code = "HOSTED_STRIPE_SUBSCRIPTION_IDENTITY_PENDING";
+}
+
 class HostedStripeEventRetrieveRetryableError extends Error {
   readonly code = "HOSTED_STRIPE_EVENT_RETRIEVE_RETRYABLE";
 
@@ -425,12 +429,16 @@ async function processHostedStripeEventRecord(
     case "charge.dispute.closed":
     case "charge.dispute.funds_reinstated":
     case "charge.dispute.funds_withdrawn":
-      await applyStripeDisputeUpdated(
+      if (await applyStripeDisputeUpdated(
         payload as Stripe.Dispute,
         dispatchContext,
         prisma,
         processingContext.customerId,
-      );
+      ) === "subscription_identity_pending") {
+        throw new HostedStripeSubscriptionIdentityPendingError(
+          "Stripe subscription identity is pending.",
+        );
+      }
       return buildEmptyHostedStripeEventProcessingResult();
     default:
       return buildEmptyHostedStripeEventProcessingResult();
@@ -913,6 +921,7 @@ async function processClaimedHostedStripeEvent(
   } catch (error) {
     const poisoned = claimed.attemptCount >= STRIPE_EVENT_MAX_ATTEMPTS &&
       !(error instanceof HostedLegacyFamilyCleanupPendingError) &&
+      !(error instanceof HostedStripeSubscriptionIdentityPendingError) &&
       !(error instanceof HostedStripeEventRetrieveRetryableError) &&
       !usageCreditEventHandled &&
       !isHostedUsageCreditStripeRetryableError(error);

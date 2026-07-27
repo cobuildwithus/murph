@@ -61,8 +61,8 @@ delivery or access until an acceptance event proves it.
 ## Member usage handoff
 
 For an explicit request to add usage for a Family member, first call
-`read_status`. Provide the exact absolute Family Settings URL named by the
-`murph.family_plan` tool description only when all three conditions hold:
+`read_status`. Provide `https://www.withmurph.ai/settings#family` only when all
+three conditions hold:
 
 - `owner: true`
 - `billingActive: true`

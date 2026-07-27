@@ -276,11 +276,6 @@ export async function ensureHostedAutoPulseTrialEnrollment(
   assertHostedAutoPulseTrialEligible(initialMember);
 
   const metadata = buildHostedAutoPulseTrialMetadata(invite.member.id);
-  const candidateStripeCustomerId = initialMember.billingRef?.stripeCustomerId ??
-    await createHostedPulseTrialStripeCustomer({
-      memberId: invite.member.id,
-      stripe,
-    });
 
   let reservation: HostedAutoPulseTrialReservationOutcome;
   try {
@@ -305,6 +300,12 @@ export async function ensureHostedAutoPulseTrialEnrollment(
           }
 
           assertHostedAutoPulseTrialEligible(currentMember);
+          const candidateStripeCustomerId = currentMember.billingRef?.stripeCustomerId
+            ?? await createHostedPulseTrialStripeCustomer({
+              memberId: invite.member.id,
+              requestOptions: HOSTED_AUTO_PULSE_TRIAL_STRIPE_AUTHORITY_REQUEST_OPTIONS,
+              stripe,
+            });
           const reservedBillingRef = currentMember.billingRef?.stripeCustomerId
             ? currentMember.billingRef
             : await bindHostedMemberStripeCustomerIdIfMissingTx({

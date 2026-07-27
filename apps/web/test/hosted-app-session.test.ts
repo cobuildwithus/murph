@@ -191,6 +191,44 @@ describe("hosted app session", () => {
     expect(harness.records.map((record) => record.id)).toContain("hws_other_privy");
   });
 
+  it("does not issue a session after the locked member enters account deletion", async () => {
+    const { issueHostedAppSession } = await import(
+      "@/src/lib/hosted-onboarding/app-session"
+    );
+    mocks.readHostedMemberCoreState.mockResolvedValueOnce(createHostedMember({
+      suspendedAt: new Date("2026-05-02T00:00:00.000Z"),
+    }));
+
+    await expect(issueHostedAppSession({
+      memberId: "member_123",
+      now: new Date("2026-05-02T00:00:01.000Z"),
+      privyUserId: "did:privy:user_123",
+    })).rejects.toMatchObject({
+      code: "HOSTED_MEMBER_SUSPENDED",
+      httpStatus: 403,
+    });
+
+    expect(harness.transactionHostedWebSession.create).not.toHaveBeenCalled();
+  });
+
+  it("does not issue a session after account deletion removes the locked member", async () => {
+    const { issueHostedAppSession } = await import(
+      "@/src/lib/hosted-onboarding/app-session"
+    );
+    mocks.readHostedMemberCoreState.mockResolvedValueOnce(null);
+
+    await expect(issueHostedAppSession({
+      memberId: "member_123",
+      now: new Date("2026-05-02T00:00:01.000Z"),
+      privyUserId: "did:privy:user_123",
+    })).rejects.toMatchObject({
+      code: "HOSTED_MEMBER_NOT_FOUND",
+      httpStatus: 404,
+    });
+
+    expect(harness.transactionHostedWebSession.create).not.toHaveBeenCalled();
+  });
+
   it("resolves a valid request cookie into a hosted member session", async () => {
     const {
       getHostedAppSessionFromRequest,
@@ -260,6 +298,7 @@ describe("hosted app session", () => {
         now: new Date("2099-01-01T00:00:00.000Z"),
         privyUserId: "did:privy:user_123",
       });
+      mocks.readHostedMemberCoreState.mockClear();
       mutate(findStoredSession(result.sessionId));
 
       await expect(
@@ -280,6 +319,7 @@ describe("hosted app session", () => {
       now: new Date("2099-01-01T00:00:00.000Z"),
       privyUserId: "did:privy:user_123",
     });
+    mocks.readHostedMemberCoreState.mockClear();
     const original = findStoredSession(result.sessionId);
     const originalToken = readSetCookieToken(result.cookie);
     const bearer = originalToken.slice(originalToken.lastIndexOf(".") + 1);
@@ -310,6 +350,7 @@ describe("hosted app session", () => {
       now: new Date("2099-01-01T00:00:00.000Z"),
       privyUserId: "did:privy:user_123",
     });
+    mocks.readHostedMemberCoreState.mockClear();
     const token = readSetCookieToken(result.cookie);
     const lastSeparatorIndex = token.lastIndexOf(".");
     const substitutedToken = `${token.slice(0, lastSeparatorIndex + 1)}${"A".repeat(43)}`;
@@ -372,6 +413,7 @@ describe("hosted app session", () => {
       now: new Date("2020-01-01T00:00:00.000Z"),
       privyUserId: "did:privy:user_123",
     });
+    mocks.readHostedMemberCoreState.mockClear();
 
     await expect(getHostedAppSessionFromRequest(requestWithCookie(expired.cookie))).resolves.toBeNull();
     expect(mocks.readHostedMemberCoreState).not.toHaveBeenCalled();
@@ -381,6 +423,7 @@ describe("hosted app session", () => {
       now: new Date("2099-02-01T00:00:00.000Z"),
       privyUserId: "did:privy:user_123",
     });
+    mocks.readHostedMemberCoreState.mockClear();
     const revokedRecord = findStoredSession(revoked.sessionId);
     revokedRecord.revokedAt = new Date("2099-02-02T00:00:00.000Z");
 
@@ -482,6 +525,7 @@ describe("hosted app session", () => {
       now: new Date("2099-01-01T00:00:00.000Z"),
       privyUserId: "did:privy:user_123",
     });
+    mocks.readHostedMemberCoreState.mockClear();
     const request = requestWithCookie(issued.cookie);
     const original = process.env.HOSTED_APP_SESSION_HMAC_KEY;
 
@@ -712,7 +756,22 @@ function readSetCookieToken(cookie: string): string {
   return decodeURIComponent(firstPart.slice(separatorIndex + 1));
 }
 
-function createHostedMember() {
+function createHostedMember(
+  overrides: Partial<ReturnType<typeof createHostedMemberBase>> = {},
+) {
+  return {
+    ...createHostedMemberBase(),
+    ...overrides,
+  };
+}
+
+function createHostedMemberBase(): {
+  billingStatus: string;
+  createdAt: Date;
+  id: string;
+  suspendedAt: Date | null;
+  updatedAt: Date;
+} {
   return {
     billingStatus: "active",
     createdAt: new Date("2026-05-02T00:00:00.000Z"),

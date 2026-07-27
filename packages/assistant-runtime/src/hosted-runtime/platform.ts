@@ -34,6 +34,8 @@ import type {
   HostedRuntimeAssistantAskControlResponse,
   HostedRuntimeGroupToolRequest,
   HostedRuntimeGroupToolResponse,
+  HostedRuntimeManagedGroupActivityDecisionRequest,
+  HostedRuntimeManagedGroupActivityDecisionResponse,
   HostedRuntimeNewsletterToolRequest,
   HostedRuntimeNewsletterToolResponse,
   HostedRuntimeProductFeedbackRecord,
@@ -471,6 +473,13 @@ export interface HostedRuntimeGroupToolPort {
   ): Promise<HostedRuntimeGroupToolResponse>;
 }
 
+export interface HostedRuntimeManagedGroupActivityDecisionPort {
+  read(
+    request: HostedRuntimeManagedGroupActivityDecisionRequest,
+    context?: { signal?: AbortSignal | null },
+  ): Promise<HostedRuntimeManagedGroupActivityDecisionResponse>;
+}
+
 export interface HostedRuntimeNewsletterToolPort {
   request(
     request: HostedRuntimeNewsletterToolRequest,
@@ -623,6 +632,7 @@ export interface HostedRuntimePlatform {
   effectsPort: HostedRuntimeEffectsPort;
   familyPlanToolPort?: HostedRuntimeFamilyPlanToolPort | null;
   groupToolPort?: HostedRuntimeGroupToolPort | null;
+  managedGroupActivityDecisionPort?: HostedRuntimeManagedGroupActivityDecisionPort | null;
   generatedImageUploader?: AssistantHostedGeneratedImageUploader | null;
   providerFetch?: typeof fetch | null;
   publicInternetFetch?: typeof fetch | null;
