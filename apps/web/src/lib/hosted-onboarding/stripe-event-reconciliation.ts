@@ -1312,7 +1312,7 @@ async function processHostedStripeEventWithDiscoveredMemberLock(
     processingContext.canonicalSubscription.status !== "canceled" &&
     processingContext.canonicalSubscription.status !== "incomplete_expired"
   ) {
-    throw new Error(
+    throw new HostedStripeSubscriptionIdentityPendingError(
       "Canonical recurring financial owner was unavailable for locked processing.",
     );
   }
