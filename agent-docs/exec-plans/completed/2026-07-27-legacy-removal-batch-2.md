@@ -1,8 +1,8 @@
 # Legacy removal batch 2
 
-Status: active
+Status: completed
 Created: 2026-07-27
-Updated: 2026-07-27
+Updated: 2026-07-26
 
 ## Goal
 
@@ -72,3 +72,12 @@ Updated: 2026-07-27
   the routed workspace guards.
 - `git diff --check`, the staged privacy scan, and stale compatibility-helper
   searches passed.
+- Preliminary `completion-specialists` ReviewGPT pass on pushed head
+  `38f7cf0924fa29bd877ea40d2521aab528da7084` returned
+  `SPECIALIST_OUTCOME: PASS` with zero findings and no patch. The response took
+  354 seconds in the selected Pro lane and was accepted under the repository's
+  documented 4-minute specialist threshold after confirming the exact turn,
+  attached audit package, completion marker, and substantive coverage analysis;
+  the package's conservative 7.5-minute attestation rejection was not treated
+  as a failed substantive review.
+Completed: 2026-07-26
