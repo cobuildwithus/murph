@@ -409,7 +409,7 @@ describe("createHostedGroupToolWithCurrentTurnContext", () => {
       linqDeliveryContexts: [
         buildLinqDeliveryContext({
           routeAuthority: smsRouteAuthority,
-          service: "sms",
+          service: "SMS",
           target: "chat_sms_group",
         }),
       ],
@@ -428,7 +428,7 @@ describe("createHostedGroupToolWithCurrentTurnContext", () => {
     expect(request).toHaveBeenLastCalledWith({ action: "share_contact_card" });
   });
 
-  it("fails participant reads closed for ambiguous or direct SMS contexts", async () => {
+  it("fails participant reads closed for ambiguous, direct, or unsupported-service contexts", async () => {
     const request = vi.fn().mockResolvedValue({
       action: "read_chat_participants",
       result: {
@@ -465,6 +465,20 @@ describe("createHostedGroupToolWithCurrentTurnContext", () => {
     });
 
     await directGroupTool.request({ action: "read_chat_participants" });
+    expect(request).toHaveBeenLastCalledWith({ action: "read_chat_participants" });
+
+    const unsupportedServiceGroupTool = createHostedGroupToolWithCurrentTurnContext({
+      groupToolPort: { request },
+      linqDeliveryContexts: [
+        buildLinqDeliveryContext({
+          routeAuthority: { ...ROUTE_AUTHORITY, threadId: "chat_rcs_group" },
+          service: "RCS",
+          target: "chat_rcs_group",
+        }),
+      ],
+    });
+
+    await unsupportedServiceGroupTool.request({ action: "read_chat_participants" });
     expect(request).toHaveBeenLastCalledWith({ action: "read_chat_participants" });
   });
 

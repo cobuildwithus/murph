@@ -60,3 +60,13 @@ Updated: 2026-07-27
 - `pnpm docs:drift`: passed.
 - `git diff --check`: passed.
 - `product-experience-review`: `NO FINDINGS`; no material evidence gaps.
+- Preliminary `completion-specialists` ReviewGPT:
+  - prompt and frontend lenses not applicable.
+  - coverage lens reported one accepted test gap: the success fixture used normalized lowercase `sms`, and no explicit route-authorized `RCS` denial was covered.
+  - the returned artifact was inspected in full, touched only the focused test, and passed `git apply --check`.
+  - accepted test hunks now use provider-shaped `SMS` and prove `RCS` remains unavailable; focused Vitest passed (17 tests).
+- Post-remediation canonical rerun:
+  - repository guards, assistant-runtime typecheck, and assistant-runtime tests passed (1,898 passed, 2 skipped).
+  - the Cloudflare reverse-dependent step waited ten minutes for the shared-host slot and was stopped through the exact task-owned process.
+  - the required Crabbox fallback failed before Testbox creation because the installed Blacksmith Testbox provider rejected the canonical dispatcher's required `--stop-after` lifecycle option.
+  - the unchanged production source had already completed the full local canonical lane before the test-only remediation, including Cloudflare verification (2,012 Node tests and 2 Workers tests).
