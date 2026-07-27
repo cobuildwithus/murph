@@ -1834,8 +1834,14 @@ function readTerminalNonReplyPhaseBreakdownMergeUpdate(
   });
   const incomingAt =
     incoming.assistant?.terminalNonReplyCommittedAtEpochMs;
+  const assistant =
+    typeof merged.value.assistant === "object"
+    && merged.value.assistant !== null
+    && !Array.isArray(merged.value.assistant)
+      ? merged.value.assistant
+      : {};
   const storedAt =
-    merged.value.assistant?.terminalNonReplyCommittedAtEpochMs;
+    assistant.terminalNonReplyCommittedAtEpochMs;
   if (
     incomingAt !== undefined
     && typeof storedAt === "number"
@@ -1845,7 +1851,7 @@ function readTerminalNonReplyPhaseBreakdownMergeUpdate(
       phaseBreakdownJson: {
         ...merged.value,
         assistant: {
-          ...merged.value.assistant,
+          ...assistant,
           terminalNonReplyCommittedAtEpochMs: incomingAt,
         },
       },
