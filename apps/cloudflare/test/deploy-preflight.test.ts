@@ -30,6 +30,7 @@ function createRequiredWorkerDeployEnv(overrides: Record<string, string | undefi
     HOSTED_CRYPTO_ENV: "production",
     HOSTED_EXECUTION_DEPLOY_CONTEXT: "production",
     HOSTED_EXECUTION_CONTAINER_ROLLOUT: "immediate",
+    HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT: "production",
     HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME: "murph-web",
     HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG: "murph-team",
     HOSTED_R2_PRESIGN_ACCESS_KEY_ID: "r2-access-fixture",
@@ -51,6 +52,24 @@ function createRequiredWorkerDeployEnv(overrides: Record<string, string | undefi
   };
 }
 
+function createRequiredPreviewWorkerDeployEnv(
+  overrides: Record<string, string | undefined> = {},
+): EnvSource {
+  return createRequiredWorkerDeployEnv({
+    CF_BUNDLES_BUCKET: "hosted-bundles-staging",
+    CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-staging",
+    CF_PUBLIC_BASE_URL: "https://hosted-runner-staging.example.test",
+    CF_WORKER_NAME: "hosted-runner-staging",
+    HOSTED_CRYPTO_ENV: "preview",
+    HOSTED_EXECUTION_DEPLOY_CONTEXT: "preview",
+    HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT: "preview",
+    HOSTED_R2_PRESIGN_BUCKET_NAME: "hosted-bundles-staging",
+    HOSTED_WEB_BASE_URL: "https://web-staging.example.test",
+    HOSTED_WEB_PRODUCTION_BASE_URL: "https://app.example.test",
+    ...overrides,
+  });
+}
+
 describe("deploy preflight helpers", () => {
   it("requires the base deploy environment regardless of deploy mode", () => {
     expect(listMissingHostedDeployEnvironment({}, { deployWorker: false })).toEqual([
@@ -68,6 +87,7 @@ describe("deploy preflight helpers", () => {
     }, { deployWorker: true })).toEqual([
       "CF_PUBLIC_BASE_URL",
       "HOSTED_EXECUTION_DEPLOY_CONTEXT",
+      "HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT",
       "HOSTED_WEB_BASE_URL",
       "HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG",
       "HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME",
@@ -115,7 +135,7 @@ describe("deploy preflight helpers", () => {
       HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG: "   ",
       HOSTED_WEB_BASE_URL: "   ",
     }, { deployWorker: true })).toThrowError(
-      "Missing required GitHub environment variables for deploy workflow: CF_BUNDLES_PREVIEW_BUCKET CF_PUBLIC_BASE_URL HOSTED_EXECUTION_DEPLOY_CONTEXT HOSTED_WEB_BASE_URL HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID HOSTED_CRYPTO_ENV HOSTED_R2_PRESIGN_ACCOUNT_ID HOSTED_R2_PRESIGN_BUCKET_NAME HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK HOSTED_LOG_FINGERPRINT_SECRET HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET HOSTED_R2_PRESIGN_ACCESS_KEY_ID HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK MURPH_DATA_API_KEY OPENAI_API_KEY",
+      "Missing required GitHub environment variables for deploy workflow: CF_BUNDLES_PREVIEW_BUCKET CF_PUBLIC_BASE_URL HOSTED_EXECUTION_DEPLOY_CONTEXT HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT HOSTED_WEB_BASE_URL HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID HOSTED_CRYPTO_ENV HOSTED_R2_PRESIGN_ACCOUNT_ID HOSTED_R2_PRESIGN_BUCKET_NAME HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK HOSTED_LOG_FINGERPRINT_SECRET HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET HOSTED_R2_PRESIGN_ACCESS_KEY_ID HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK MURPH_DATA_API_KEY OPENAI_API_KEY",
     );
   });
 
@@ -137,6 +157,69 @@ describe("deploy preflight helpers", () => {
     expect(listMissingHostedDeployEnvironment(createRequiredWorkerDeployEnv({
       HOSTED_WEB_PRODUCTION_BASE_URL: undefined,
     }), { deployWorker: true })).toContain("HOSTED_WEB_PRODUCTION_BASE_URL");
+  });
+
+  it("requires an explicit production web origin for preview worker deploys", () => {
+    expect(listMissingHostedDeployEnvironment(createRequiredPreviewWorkerDeployEnv({
+      HOSTED_WEB_PRODUCTION_BASE_URL: undefined,
+    }), { deployWorker: true })).toContain("HOSTED_WEB_PRODUCTION_BASE_URL");
+  });
+
+  it("allows a preview deploy only through visibly scoped isolated resources", () => {
+    expect(() => assertHostedDeployEnvironment(
+      createRequiredPreviewWorkerDeployEnv(),
+      { deployWorker: true },
+    )).not.toThrow();
+  });
+
+  it("allows the R2 binding and preview binding to share one staging ENAM bucket", () => {
+    expect(
+      listHostedDeployEnvironmentInvariantErrors(
+        createRequiredPreviewWorkerDeployEnv(),
+        { deployWorker: true },
+      ),
+    ).toEqual([]);
+  });
+
+  it("rejects preview deploys that retain production crypto or OIDC context", () => {
+    expect(listHostedDeployEnvironmentInvariantErrors(
+      createRequiredPreviewWorkerDeployEnv({
+        HOSTED_CRYPTO_ENV: "production",
+        HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT: "production",
+      }),
+      { deployWorker: true },
+    )).toEqual(expect.arrayContaining([
+      "preview deploys must set HOSTED_CRYPTO_ENV=preview.",
+      "preview deploys must set HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT=preview.",
+    ]));
+  });
+
+  it("rejects preview deploys with unscoped Worker or R2 resource names", () => {
+    expect(listHostedDeployEnvironmentInvariantErrors(
+      createRequiredPreviewWorkerDeployEnv({
+        CF_BUNDLES_BUCKET: "hosted-bundles",
+        CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles",
+        CF_WORKER_NAME: "hosted-runner",
+        HOSTED_R2_PRESIGN_BUCKET_NAME: "hosted-bundles",
+      }),
+      { deployWorker: true },
+    )).toEqual(expect.arrayContaining([
+      "CF_WORKER_NAME must contain a preview or staging name segment for preview deploys.",
+      "CF_BUNDLES_BUCKET must contain a preview or staging name segment for preview deploys.",
+      "CF_BUNDLES_PREVIEW_BUCKET must contain a preview or staging name segment for preview deploys.",
+    ]));
+  });
+
+  it("rejects preview deploys with an unscoped or production hosted Web origin", () => {
+    expect(listHostedDeployEnvironmentInvariantErrors(
+      createRequiredPreviewWorkerDeployEnv({
+        HOSTED_WEB_BASE_URL: "https://app.example.test",
+      }),
+      { deployWorker: true },
+    )).toEqual(expect.arrayContaining([
+      "HOSTED_WEB_BASE_URL must use a preview or staging origin in preview deploys.",
+      "preview deploys must not set HOSTED_WEB_BASE_URL to HOSTED_WEB_PRODUCTION_BASE_URL.",
+    ]));
   });
 
   it("requires the direct-R2 presign bucket to match the Worker R2 binding bucket", () => {
@@ -488,6 +571,7 @@ describe("deploy preflight helpers", () => {
           HOSTED_CRYPTO_ENV: "development",
           HOSTED_EXECUTION_CONTAINER_ROLLOUT: "gradual",
           HOSTED_EXECUTION_DEPLOY_CONTEXT: "development",
+          HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT: "development",
           HOSTED_WEB_BASE_URL: "http://127.0.0.1:3000",
           HOSTED_WEB_PRODUCTION_BASE_URL: undefined,
         }),
@@ -550,6 +634,7 @@ describe("deploy preflight helpers", () => {
       CF_PUBLIC_BASE_URL: "http://localhost:8787",
       HOSTED_CRYPTO_ENV: "development",
       HOSTED_EXECUTION_DEPLOY_CONTEXT: "development",
+      HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT: "development",
       HOSTED_WEB_BASE_URL: "http://127.0.0.1:3000",
       HOSTED_WEB_PRODUCTION_BASE_URL: undefined,
     }), { deployWorker: true })).not.toThrow();
@@ -588,6 +673,19 @@ describe("deploy preflight helpers", () => {
       },
     )).resolves.toContain(
       "HOSTED_WEB_BASE_URL must not resolve to private-network addresses in production deploys.",
+    );
+  });
+
+  it("rejects preview deploy hostnames that resolve to private-network addresses", async () => {
+    await expect(listHostedDeployEnvironmentInvariantErrorsAsync(
+      createRequiredPreviewWorkerDeployEnv(),
+      { deployWorker: true },
+      {
+        resolveHostnameAddresses: async (hostname) =>
+          hostname === "web-staging.example.test" ? ["10.1.2.3"] : ["8.8.8.8"],
+      },
+    )).resolves.toContain(
+      "HOSTED_WEB_BASE_URL must not resolve to private-network addresses in preview deploys.",
     );
   });
 
