@@ -1,6 +1,6 @@
 # Reliability
 
-Last verified: 2026-07-26
+Last verified: 2026-07-27
 
 ## Current Guardrails
 
@@ -28,6 +28,17 @@ Last verified: 2026-07-26
   the frozen Session expiry. An ambiguous response must
   not mint a replacement purchase or create a second payable Session. The
   member may begin another purchase only after the existing one is terminal.
+- Personal and Family subscription Checkout binds the provider Session before
+  returning its URL. A new personal plan first settles the exact prior Session
+  and retains that owner until a replacement Session exists, then
+  compare-and-swaps the exact binding under the member lock. A failed provider
+  create therefore retries the same undisclosed replacement instead of
+  replaying the retired Checkout. A transient Family binding failure likewise
+  leaves its same-attempt Session undisclosed and replayable; definitive stale
+  ownership rejects and expires it. Account deletion gives all
+  bound subscription-Session retrieval and expiry calls one shared five-second
+  foreground deadline with provider retries disabled; timeout or ambiguous
+  terminal state preserves local ownership for a later member-initiated retry.
 - Family usage-credit creation rechecks owner, group billing, active membership,
   and beneficiary status inside the purchase transaction. Exact request-key
   replay keeps the already-frozen purchase identity but rechecks mutable Family

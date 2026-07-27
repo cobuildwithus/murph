@@ -1052,14 +1052,23 @@ describe("deleteHostedAccountData", () => {
   });
 
   it("expires an open subscription Checkout Session before local billing ownership is deleted", async () => {
+    type CheckoutSessionCall = (
+      sessionId: string,
+      params: object,
+      options: { maxNetworkRetries: number; timeout: number },
+    ) => Promise<{
+      id: string;
+      mode?: string;
+      status: string;
+    }>;
     const stripe = {
       checkout: {
         sessions: {
-          expire: vi.fn(async () => ({
+          expire: vi.fn<CheckoutSessionCall>(async () => ({
             id: "cs_delete_open_123",
             status: "expired",
           })),
-          retrieve: vi.fn(async () => ({
+          retrieve: vi.fn<CheckoutSessionCall>(async () => ({
             id: "cs_delete_open_123",
             mode: "subscription",
             status: "open",
@@ -1090,7 +1099,23 @@ describe("deleteHostedAccountData", () => {
 
     expect(stripe.checkout.sessions.expire).toHaveBeenCalledWith(
       "cs_delete_open_123",
+      {},
+      expect.objectContaining({
+        maxNetworkRetries: 0,
+        timeout: expect.any(Number),
+      }),
     );
+    expect(stripe.checkout.sessions.retrieve).toHaveBeenCalledWith(
+      "cs_delete_open_123",
+      {},
+      expect.objectContaining({
+        maxNetworkRetries: 0,
+        timeout: expect.any(Number),
+      }),
+    );
+    const retrieveOptions = stripe.checkout.sessions.retrieve.mock.calls[0]?.[2];
+    expect(retrieveOptions?.timeout).toBeGreaterThan(0);
+    expect(retrieveOptions?.timeout).toBeLessThanOrEqual(5_000);
     expect(stripe.subscriptions.cancel).not.toHaveBeenCalled();
     expect(serviceMocks.prepareHostedAccountDeletionCleanup).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -1154,6 +1179,95 @@ describe("deleteHostedAccountData", () => {
       stripeSubscriptionIds: ["sub_checkout_race_123"],
     });
   });
+
+  it.each([
+    ["Stripe is not configured", "not-configured", "ACCOUNT_DELETION_STRIPE_NOT_CONFIGURED"],
+    ["the initial provider read fails", "retrieve-failed", "ACCOUNT_DELETION_STRIPE_CHECKOUT_CLOSE_FAILED"],
+    ["expiry remains open", "expiry-still-open", "ACCOUNT_DELETION_STRIPE_CHECKOUT_CLOSE_FAILED"],
+    ["the Session is not a subscription Checkout", "wrong-mode", "ACCOUNT_DELETION_STRIPE_CHECKOUT_UNRESOLVED"],
+    ["the completed Session has no Customer", "missing-customer", "ACCOUNT_DELETION_STRIPE_CHECKOUT_SYNCING"],
+    ["the completed Session has no Subscription", "missing-subscription", "ACCOUNT_DELETION_STRIPE_CHECKOUT_SYNCING"],
+  ] as const)(
+    "preserves local ownership when %s",
+    async (_label, scenario, expectedCode) => {
+      const expire = vi.fn();
+      const retrieve = vi.fn();
+      if (scenario !== "not-configured") {
+        const stripe = {
+          checkout: {
+            sessions: {
+              expire,
+              retrieve,
+            },
+          },
+          subscriptions: {
+            cancel: vi.fn(),
+            retrieve: vi.fn(),
+          },
+        };
+        serviceMocks.getHostedOnboardingStripe.mockReturnValue(stripe);
+      }
+      if (scenario === "retrieve-failed") {
+        retrieve.mockRejectedValueOnce(new Error("provider unavailable"));
+      } else if (scenario === "expiry-still-open") {
+        retrieve.mockResolvedValue({
+          id: "cs_delete_unresolved_123",
+          mode: "subscription",
+          status: "open",
+        });
+        expire.mockRejectedValueOnce(new Error("expiry outcome unknown"));
+      } else if (scenario === "wrong-mode") {
+        retrieve.mockResolvedValueOnce({
+          id: "cs_delete_unresolved_123",
+          mode: "payment",
+          status: "complete",
+        });
+      } else if (scenario === "missing-customer") {
+        retrieve.mockResolvedValueOnce({
+          customer: null,
+          id: "cs_delete_unresolved_123",
+          mode: "subscription",
+          status: "complete",
+          subscription: "sub_checkout_123",
+        });
+      } else if (scenario === "missing-subscription") {
+        retrieve.mockResolvedValueOnce({
+          customer: "cus_checkout_123",
+          id: "cs_delete_unresolved_123",
+          mode: "subscription",
+          status: "complete",
+          subscription: null,
+        });
+      }
+
+      const vendorRows = await makeVendorAccountRowsForTest("member_123", {
+        stripeCheckoutSessionId: "cs_delete_unresolved_123",
+        stripeCustomerId: null,
+        stripeSubscriptionId: null,
+      });
+      const deleteCalls: HostedAccountDeletionPrismaDeleteCall[] = [];
+      const prisma = createHostedAccountDeletionPrismaForTest({
+        ...vendorRows,
+        deleteCalls,
+        onTransaction: () => undefined,
+      });
+
+      await expect(deleteHostedAccountData({
+        memberId: "member_123",
+        prisma,
+        request: new Request("https://join.example.test/settings"),
+      })).rejects.toMatchObject({
+        code: expectedCode,
+        ...(scenario === "not-configured" ? {} : { retryable: true }),
+      });
+
+      expect(serviceMocks.prepareHostedAccountDeletionCleanup).not.toHaveBeenCalled();
+      expect(serviceMocks.persistHostedAccountDeletionCleanupTx).not.toHaveBeenCalled();
+      expect(deleteCalls).not.toContainEqual(expect.objectContaining({
+        model: "hostedMember",
+      }));
+    },
+  );
 
   it("captures direct and owned Family customer IDs in one cleanup receipt", async () => {
     const stripe = {

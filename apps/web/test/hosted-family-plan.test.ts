@@ -4196,7 +4196,60 @@ describe("hosted Family plan", () => {
       retryable: true,
     });
 
-    expect(expire).toHaveBeenCalledWith("cs_test_familyDeleteRace123");
+    expect(expire).toHaveBeenCalledWith(
+      "cs_test_familyDeleteRace123",
+      {},
+      {
+        maxNetworkRetries: 0,
+        timeout: 5_000,
+      },
+    );
+  });
+
+  it("keeps an undisclosed Family Session replayable after a transient binding failure", async () => {
+    const group = {
+      billingStatus: HostedBillingStatus.not_started,
+      id: "hbag_family",
+      ownerMemberId: "member_owner",
+      suspendedAt: null,
+    };
+    const tx = createTxMock({
+      billedSeatCount: null,
+      group,
+    });
+    tx.hostedAccountGroupBillingRef.findUnique.mockResolvedValueOnce(null);
+    tx.hostedMember.findUnique.mockResolvedValueOnce({
+      billingStatus: HostedBillingStatus.not_started,
+      suspendedAt: null,
+    });
+    const transientBindingError = new Error("Database transaction failed");
+    const prisma = tx as FamilyPlanTxMock & {
+      $transaction: ReturnType<typeof vi.fn>;
+    };
+    prisma.$transaction = vi.fn()
+      .mockImplementationOnce((callback) => callback(tx))
+      .mockRejectedValueOnce(transientBindingError);
+    const expire = vi.fn();
+    runtimeMocks.requireHostedStripeApi.mockReturnValueOnce({
+      checkout: {
+        sessions: {
+          create: vi.fn().mockResolvedValue({
+            id: "cs_test_familyTransient123",
+            url: "https://checkout.stripe.com/c/pay/cs_test_familyTransient123",
+          }),
+          expire,
+        },
+      },
+    });
+
+    await expect(createHostedFamilyBillingCheckout({
+      groupId: "hbag_family",
+      ownerMemberId: "member_owner",
+      prisma: prisma as never,
+      seatCount: 2,
+    })).rejects.toBe(transientBindingError);
+
+    expect(expire).not.toHaveBeenCalled();
   });
 
   it("converts an active direct paid owner subscription into Family billing without creating a second checkout", async () => {

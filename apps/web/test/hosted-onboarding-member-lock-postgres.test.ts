@@ -12,9 +12,11 @@ import { describe, expect, it, vi } from "vitest";
 import { setHostedSecureBoxStringTestCodecForTests } from "@/src/lib/hosted-crypto/secure-box";
 import { createHostedPrivyUserLookupKey } from "@/src/lib/hosted-onboarding/contact-privacy";
 import {
+  bindHostedMemberStripeCheckoutSessionTx,
   HostedMemberStripeMutationLockBusyError,
   withHostedMemberStripeMutationLockForOps,
 } from "@/src/lib/hosted-onboarding/hosted-member-billing-store";
+import { bindHostedFamilyCheckoutSessionTx } from "@/src/lib/hosted-onboarding/family-plan";
 import { readHostedMemberBillingSnapshot } from "@/src/lib/hosted-onboarding/hosted-member-store";
 import { ensureHostedMemberForPrivyIdentityResolutionTx } from "@/src/lib/hosted-onboarding/member-identity-service";
 import {
@@ -62,6 +64,8 @@ const accountDeletionBoundaries = vi.hoisted(() => ({
 
 const stripeProvider = vi.hoisted(() => ({
   chargesRetrieve: vi.fn(),
+  checkoutSessionsExpire: vi.fn(),
+  checkoutSessionsRetrieve: vi.fn(),
   eventsRetrieve: vi.fn(),
   subscriptionsRetrieve: vi.fn(),
 }));
@@ -159,6 +163,12 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", async () => {
     charges: {
       retrieve: stripeProvider.chargesRetrieve,
     },
+    checkout: {
+      sessions: {
+        expire: stripeProvider.checkoutSessionsExpire,
+        retrieve: stripeProvider.checkoutSessionsRetrieve,
+      },
+    },
     events: {
       retrieve: stripeProvider.eventsRetrieve,
     },
@@ -169,6 +179,7 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", async () => {
 
   return {
     ...actual,
+    getHostedOnboardingStripe: () => stripe,
     requireHostedStripeApi: () => stripe,
     requireHostedStripeApiMode: () => ({
       stripe,
@@ -318,6 +329,227 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         await disconnectClients([owner, contender]);
       }
     });
+
+    it.each([
+      { kind: "personal", label: "personal" },
+      { kind: "family", label: "Family" },
+    ] as const)(
+      "makes deletion wait for a committed $label Checkout binding and expire the captured Session",
+      async ({ kind }) => {
+        const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
+        const bindingClient = createPrismaClient({ databaseUrl, poolMax: 1 });
+        const deletionClient = createPrismaClient({ databaseUrl, poolMax: 1 });
+        const fixtureId = randomUUID();
+        const memberId = `hbm_checkout_bind_first_${fixtureId}`;
+        const groupId = `hbag_checkout_bind_first_${fixtureId}`;
+        const attemptId = `attempt_checkout_bind_first_${fixtureId}`;
+        const sessionId = `cs_checkout_bind_first_${fixtureId}`;
+        const bindingReady = createDeferred();
+        const releaseBinding = createDeferred();
+        let binding: Promise<void> | null = null;
+        let deletion: Promise<unknown> | null = null;
+
+        await createCheckoutBindingConcurrencyFixture({
+          attemptId,
+          groupId,
+          kind,
+          memberId,
+          prisma: observer,
+        });
+        setHostedSecureBoxStringTestCodecForTests({
+          decrypt(input) {
+            return input.value;
+          },
+          encrypt(input) {
+            return input.value;
+          },
+        });
+        stripeProvider.checkoutSessionsRetrieve.mockResolvedValue({
+          id: sessionId,
+          mode: "subscription",
+          status: "open",
+        });
+        stripeProvider.checkoutSessionsExpire.mockResolvedValue({
+          id: sessionId,
+          mode: "subscription",
+          status: "expired",
+        });
+
+        try {
+          binding = bindingClient.$transaction(async (tx) => {
+            await bindCheckoutSessionForConcurrencyTest({
+              attemptId,
+              groupId,
+              kind,
+              memberId,
+              sessionId,
+              tx,
+            });
+            bindingReady.resolve();
+            await releaseBinding.promise;
+          }, { timeout: transactionTimeoutMs });
+          await bindingReady.promise;
+
+          deletion = deleteHostedAccountData({
+            memberId,
+            prisma: deletionClient,
+            request: new Request("https://app.example.test/settings"),
+          });
+          await expectPromisePending(
+            deletion,
+            "Account deletion should wait for the Checkout binding transaction.",
+          );
+          expect(stripeProvider.checkoutSessionsRetrieve).not.toHaveBeenCalled();
+
+          releaseBinding.resolve();
+          await expect(binding).resolves.toBeUndefined();
+          await expect(deletion).resolves.toMatchObject({
+            cleanupPending: false,
+            memberId,
+          });
+
+          expect(stripeProvider.checkoutSessionsRetrieve).toHaveBeenCalledWith(
+            sessionId,
+            {},
+            expect.objectContaining({
+              maxNetworkRetries: 0,
+              timeout: expect.any(Number),
+            }),
+          );
+          expect(stripeProvider.checkoutSessionsExpire).toHaveBeenCalledWith(
+            sessionId,
+            {},
+            expect.objectContaining({
+              maxNetworkRetries: 0,
+              timeout: expect.any(Number),
+            }),
+          );
+          await expect(observer.hostedMember.findUnique({
+            where: { id: memberId },
+          })).resolves.toBeNull();
+        } finally {
+          releaseBinding.resolve();
+          await Promise.allSettled([
+            ...(binding ? [binding] : []),
+            ...(deletion ? [deletion] : []),
+          ]);
+          stripeProvider.checkoutSessionsExpire.mockReset();
+          stripeProvider.checkoutSessionsRetrieve.mockReset();
+          setHostedSecureBoxStringTestCodecForTests(null);
+          await observer.hostedAccountGroup.deleteMany({
+            where: { id: groupId },
+          });
+          await observer.hostedMember.deleteMany({
+            where: { id: memberId },
+          });
+          await disconnectClients([observer, bindingClient, deletionClient]);
+        }
+      },
+    );
+
+    it.each([
+      { kind: "personal", label: "personal" },
+      { kind: "family", label: "Family" },
+    ] as const)(
+      "makes a $label Checkout binding wait for deletion suspension and reject without persisting",
+      async ({ kind }) => {
+        const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
+        const bindingClient = createPrismaClient({ databaseUrl, poolMax: 1 });
+        const deletionClient = createPrismaClient({ databaseUrl, poolMax: 1 });
+        const fixtureId = randomUUID();
+        const memberId = `hbm_checkout_delete_first_${fixtureId}`;
+        const groupId = `hbag_checkout_delete_first_${fixtureId}`;
+        const attemptId = `attempt_checkout_delete_first_${fixtureId}`;
+        const sessionId = `cs_checkout_delete_first_${fixtureId}`;
+        const suspensionWritten = createDeferred();
+        const allowSuspensionCommit = createDeferred();
+        const suspensionCommitted = createDeferred();
+        const allowDeletionContinue = createDeferred();
+        let binding: Promise<void> | null = null;
+        let deletion: Promise<unknown> | null = null;
+
+        await createCheckoutBindingConcurrencyFixture({
+          attemptId,
+          groupId,
+          kind,
+          memberId,
+          prisma: observer,
+        });
+        setHostedSecureBoxStringTestCodecForTests({
+          decrypt(input) {
+            return input.value;
+          },
+          encrypt(input) {
+            return input.value;
+          },
+        });
+
+        try {
+          deletion = deleteHostedAccountData({
+            memberId,
+            prisma: pauseAccountDeletionAfterSuspension({
+              allowDeletionContinue,
+              allowSuspensionCommit,
+              prisma: deletionClient,
+              suspensionCommitted,
+              suspensionWritten,
+            }),
+            request: new Request("https://app.example.test/settings"),
+          });
+          await suspensionWritten.promise;
+
+          binding = bindingClient.$transaction((tx) =>
+            bindCheckoutSessionForConcurrencyTest({
+              attemptId,
+              groupId,
+              kind,
+              memberId,
+              sessionId,
+              tx,
+            }), { timeout: transactionTimeoutMs });
+          await expectPromisePending(
+            binding,
+            "Checkout binding should wait for the deletion suspension transaction.",
+          );
+
+          allowSuspensionCommit.resolve();
+          await suspensionCommitted.promise;
+          await expect(binding).rejects.toMatchObject({
+            code: kind === "personal"
+              ? "HOSTED_MEMBER_SUSPENDED"
+              : "HOSTED_FAMILY_CHECKOUT_ATTEMPT_STALE",
+          });
+          allowDeletionContinue.resolve();
+          await expect(deletion).resolves.toMatchObject({
+            cleanupPending: false,
+            memberId,
+          });
+
+          expect(stripeProvider.checkoutSessionsRetrieve).not.toHaveBeenCalled();
+          expect(stripeProvider.checkoutSessionsExpire).not.toHaveBeenCalled();
+          await expect(observer.hostedMember.findUnique({
+            where: { id: memberId },
+          })).resolves.toBeNull();
+        } finally {
+          allowSuspensionCommit.resolve();
+          allowDeletionContinue.resolve();
+          await Promise.allSettled([
+            ...(binding ? [binding] : []),
+            ...(deletion ? [deletion] : []),
+          ]);
+          stripeProvider.checkoutSessionsExpire.mockReset();
+          stripeProvider.checkoutSessionsRetrieve.mockReset();
+          setHostedSecureBoxStringTestCodecForTests(null);
+          await observer.hostedAccountGroup.deleteMany({
+            where: { id: groupId },
+          });
+          await observer.hostedMember.deleteMany({
+            where: { id: memberId },
+          });
+          await disconnectClients([observer, bindingClient, deletionClient]);
+        }
+      },
+    );
 
     it.each([
       {
@@ -1262,6 +1494,152 @@ describe.skipIf(!runPostgresConcurrencyProof)(
     });
   },
 );
+
+async function createCheckoutBindingConcurrencyFixture(input: {
+  attemptId: string;
+  groupId: string;
+  kind: "family" | "personal";
+  memberId: string;
+  prisma: PrismaClient;
+}): Promise<void> {
+  await input.prisma.hostedMember.create({
+    data: {
+      billingStatus: HostedBillingStatus.not_started,
+      id: input.memberId,
+    },
+  });
+  if (input.kind === "family") {
+    await input.prisma.hostedAccountGroup.create({
+      data: {
+        id: input.groupId,
+        ownerMemberId: input.memberId,
+      },
+    });
+    await input.prisma.hostedAccountGroupBillingRef.create({
+      data: {
+        checkoutAttemptId: input.attemptId,
+        checkoutCreatedAt: new Date(),
+        checkoutSeatCount: 2,
+        currentBillingPlanCode: "launch_family_monthly",
+        groupId: input.groupId,
+      },
+    });
+  }
+}
+
+async function bindCheckoutSessionForConcurrencyTest(input: {
+  attemptId: string;
+  groupId: string;
+  kind: "family" | "personal";
+  memberId: string;
+  sessionId: string;
+  tx: Prisma.TransactionClient;
+}): Promise<void> {
+  if (input.kind === "personal") {
+    await bindHostedMemberStripeCheckoutSessionTx({
+      memberId: input.memberId,
+      stripeCheckoutSessionId: input.sessionId,
+      tx: input.tx,
+    });
+    return;
+  }
+
+  await bindHostedFamilyCheckoutSessionTx({
+    attemptId: input.attemptId,
+    group: {
+      id: input.groupId,
+      ownerMemberId: input.memberId,
+    },
+    sessionId: input.sessionId,
+    tx: input.tx,
+  });
+}
+
+function pauseAccountDeletionAfterSuspension(input: {
+  allowDeletionContinue: Deferred<void>;
+  allowSuspensionCommit: Deferred<void>;
+  prisma: PrismaClient;
+  suspensionCommitted: Deferred<void>;
+  suspensionWritten: Deferred<void>;
+}): PrismaClient {
+  let wrapNextTransaction = true;
+  return new Proxy<PrismaClient>(input.prisma, {
+    get(target, property) {
+      if (property === "$transaction") {
+        return async (
+          callback: (tx: Prisma.TransactionClient) => Promise<unknown>,
+          options?: { maxWait?: number; timeout?: number },
+        ) => {
+          if (!wrapNextTransaction) {
+            return target.$transaction(callback, options);
+          }
+          wrapNextTransaction = false;
+          const result = await target.$transaction(
+            (tx) => callback(pauseAfterHostedMemberSuspensionUpdate({
+              allowSuspensionCommit: input.allowSuspensionCommit,
+              suspensionWritten: input.suspensionWritten,
+              tx,
+            })),
+            options,
+          );
+          input.suspensionCommitted.resolve();
+          await input.allowDeletionContinue.promise;
+          return result;
+        };
+      }
+
+      const value = Reflect.get(target, property, target);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+}
+
+function pauseAfterHostedMemberSuspensionUpdate(input: {
+  allowSuspensionCommit: Deferred<void>;
+  suspensionWritten: Deferred<void>;
+  tx: Prisma.TransactionClient;
+}): Prisma.TransactionClient {
+  const hostedMember = new Proxy(input.tx.hostedMember, {
+    get(target, property) {
+      if (property === "updateMany") {
+        return async (args: Prisma.HostedMemberUpdateManyArgs) => {
+          const result = await target.updateMany(args);
+          input.suspensionWritten.resolve();
+          await input.allowSuspensionCommit.promise;
+          return result;
+        };
+      }
+      const value = Reflect.get(target, property, target);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+
+  return new Proxy<Prisma.TransactionClient>(input.tx, {
+    get(target, property) {
+      if (property === "hostedMember") {
+        return hostedMember;
+      }
+      const value = Reflect.get(target, property, target);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+}
+
+async function expectPromisePending(
+  promise: Promise<unknown>,
+  message: string,
+): Promise<void> {
+  const outcome = await Promise.race([
+    promise.then(
+      () => "settled",
+      () => "settled",
+    ),
+    new Promise<"pending">((resolve) => {
+      setTimeout(() => resolve("pending"), 75);
+    }),
+  ]);
+  expect(outcome, message).toBe("pending");
+}
 
 function pauseBeforeAccountDeletionReceiptRead(input: {
   allowAuthenticationReceiptRead: Deferred<void>;

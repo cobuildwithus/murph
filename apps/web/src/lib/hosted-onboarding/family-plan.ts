@@ -1904,11 +1904,13 @@ export async function createHostedFamilyBillingCheckout(input: {
       });
     }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
   } catch (error) {
-    await expireHostedStripeCheckoutSessionBestEffort({
-      operationName: "checkout.sessions.expire.family-bind-failed",
-      sessionId: checkoutSession.id,
-      stripe,
-    });
+    if (shouldExpireHostedFamilyCheckoutAfterBindFailure(error)) {
+      await expireHostedStripeCheckoutSessionBestEffort({
+        operationName: "checkout.sessions.expire.family-bind-rejected",
+        sessionId: checkoutSession.id,
+        stripe,
+      });
+    }
     throw error;
   }
 
@@ -1917,6 +1919,15 @@ export async function createHostedFamilyBillingCheckout(input: {
     url: buildHostedFamilyCheckoutRedirectUrl({ checkoutUrl: checkoutSession.url }) ??
       checkoutSession.url,
   };
+}
+
+function shouldExpireHostedFamilyCheckoutAfterBindFailure(error: unknown): boolean {
+  if (!isHostedOnboardingError(error)) {
+    return false;
+  }
+
+  return error.code === "HOSTED_FAMILY_CHECKOUT_ATTEMPT_STALE"
+    || error.code === "HOSTED_FAMILY_CHECKOUT_IN_PROGRESS";
 }
 
 function isHostedFamilyDirectPaidUpgradeInput(
@@ -2582,7 +2593,7 @@ async function writeHostedFamilyCheckoutAttemptTx(input: {
   });
 }
 
-async function bindHostedFamilyCheckoutSessionTx(input: {
+export async function bindHostedFamilyCheckoutSessionTx(input: {
   attemptId: string;
   group: Pick<HostedAccountGroupAccessSnapshot, "id" | "ownerMemberId">;
   sessionId: string;

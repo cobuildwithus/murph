@@ -31,6 +31,7 @@ import { readHostedMemberIdentity } from "../hosted-onboarding/hosted-member-ide
 import { readHostedAccountGroupStripeBillingRef } from "../hosted-onboarding/family-plan";
 import { buildHostedLinqInviteSignupEffectIdMemberPrefix } from "../hosted-onboarding/linq-invite-signup-effect-id";
 import { getHostedOnboardingStripe } from "../hosted-onboarding/runtime";
+import { isHostedStripeResourceMissingError } from "../hosted-onboarding/stripe-checkout-session-lifecycle";
 import { logHostedStripeFailure } from "../hosted-onboarding/stripe-error-log";
 import {
   generateHostedAccountExitReasonId,
@@ -1247,25 +1248,39 @@ async function closeHostedSubscriptionCheckoutSessionsForAccountDeletion(input: 
 
   const stripeCustomerIds: string[] = [];
   const stripeSubscriptionIds: string[] = [];
+  const deadlineAtMs =
+    Date.now() + HOSTED_ACCOUNT_DELETION_IMMEDIATE_ATTEMPT_TIMEOUT_MS;
   for (const sessionId of input.stripeCheckoutSessionIds) {
     let session: Stripe.Checkout.Session;
     try {
-      session = await stripe.checkout.sessions.retrieve(sessionId);
+      session = await stripe.checkout.sessions.retrieve(
+        sessionId,
+        {},
+        requireHostedAccountDeletionStripeCheckoutRequestOptions(deadlineAtMs),
+      );
       if (session.status === "open") {
         try {
-          session = await stripe.checkout.sessions.expire(sessionId);
+          session = await stripe.checkout.sessions.expire(
+            sessionId,
+            {},
+            requireHostedAccountDeletionStripeCheckoutRequestOptions(deadlineAtMs),
+          );
         } catch (error) {
-          if (isStripeResourceMissingError(error)) {
+          if (isHostedStripeResourceMissingError(error)) {
             continue;
           }
-          session = await stripe.checkout.sessions.retrieve(sessionId);
+          session = await stripe.checkout.sessions.retrieve(
+            sessionId,
+            {},
+            requireHostedAccountDeletionStripeCheckoutRequestOptions(deadlineAtMs),
+          );
           if (session.status === "open") {
             throw error;
           }
         }
       }
     } catch (error) {
-      if (isStripeResourceMissingError(error)) {
+      if (isHostedStripeResourceMissingError(error)) {
         continue;
       }
       if (isHostedOnboardingError(error)) {
@@ -1315,6 +1330,24 @@ async function closeHostedSubscriptionCheckoutSessionsForAccountDeletion(input: 
   };
 }
 
+function requireHostedAccountDeletionStripeCheckoutRequestOptions(
+  deadlineAtMs: number,
+): Stripe.RequestOptions {
+  const timeout = deadlineAtMs - Date.now();
+  if (timeout <= 0) {
+    throw hostedOnboardingError({
+      code: "ACCOUNT_DELETION_STRIPE_CHECKOUT_CLOSE_FAILED",
+      httpStatus: 502,
+      message: "We could not close active billing checkout in time. Retry account deletion.",
+      retryable: true,
+    });
+  }
+  return {
+    maxNetworkRetries: 0,
+    timeout,
+  };
+}
+
 async function cancelHostedStripeSubscriptionForAccountDeletion(input: {
   memberId: string;
   stripeSubscriptionId: string | null;
@@ -1342,7 +1375,7 @@ async function cancelHostedStripeSubscriptionForAccountDeletion(input: {
     }
     return { errorCode: null, status: "completed" };
   } catch (error) {
-    if (isStripeResourceMissingError(error)) {
+    if (isHostedStripeResourceMissingError(error)) {
       return { errorCode: null, status: "skipped_no_record" };
     }
 
@@ -1368,17 +1401,6 @@ function dedupeNullableStrings(values: readonly (string | null)[]): string[] {
   return uniqueStrings(values.filter((value): value is string =>
     typeof value === "string" && value.length > 0
   ));
-}
-
-function isStripeResourceMissingError(error: unknown): boolean {
-  if (typeof error !== "object" || error === null) {
-    return false;
-  }
-
-  const type = Reflect.get(error, "type");
-  return Reflect.get(error, "code") === "resource_missing"
-    && typeof type === "string"
-    && type.startsWith("Stripe");
 }
 
 async function deleteHostedAccountPrismaRows(input: {

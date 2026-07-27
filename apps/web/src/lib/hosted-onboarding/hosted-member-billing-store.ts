@@ -438,6 +438,7 @@ export async function bindHostedMemberStripeCustomerIdIfMissing(input: {
 
 export async function bindHostedMemberStripeCheckoutSessionTx(input: {
   memberId: string;
+  replaceStripeCheckoutSessionId?: string | null;
   stripeCheckoutSessionId: string;
   tx: Prisma.TransactionClient;
 }): Promise<HostedMemberStripeBillingRefSnapshot> {
@@ -470,9 +471,15 @@ export async function bindHostedMemberStripeCheckoutSessionTx(input: {
   const currentBillingRef = await input.tx.hostedMemberBillingRef.findUnique({
     where: { memberId: input.memberId },
   });
+  const replaceStripeCheckoutSessionLookupKey =
+    createHostedStripeCheckoutSessionLookupKey(
+      input.replaceStripeCheckoutSessionId,
+    );
   if (
     currentBillingRef?.stripeCheckoutSessionLookupKey
     && currentBillingRef.stripeCheckoutSessionLookupKey !== stripeCheckoutSessionLookupKey
+    && currentBillingRef.stripeCheckoutSessionLookupKey
+      !== replaceStripeCheckoutSessionLookupKey
   ) {
     throw hostedOnboardingError({
       code: "HOSTED_BILLING_CHECKOUT_IN_PROGRESS",
