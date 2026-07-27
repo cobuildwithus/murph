@@ -177,6 +177,7 @@ jobs:
           POSTGRES_PASSWORD: postgres
           POSTGRES_USER: postgres
         options: >-
+          --restart unless-stopped
           --health-cmd "pg_isready -U postgres -d murph_test"
           --health-interval 10s
           --health-timeout 5s
@@ -201,6 +202,20 @@ jobs:
 
       - name: Install deps
         run: pnpm install --frozen-lockfile
+
+      # The production Cloudflare VM permits the runner's nested Codex
+      # permission sandbox. GitHub's outer Docker defaults deny the same user
+      # namespace, so align this disposable test host before Miniflare creates
+      # runner containers. The native Codex profile remains the inner
+      # filesystem/network enforcement boundary.
+      - name: Enable nested Codex permission sandbox
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          scripts/prepare-ci-nested-codex-sandbox.sh
+          timeout 60 bash -c \
+            'until exec 3<>/dev/tcp/127.0.0.1/5432; do sleep 1; done'
 
       - name: Install Codex CLI for hosted-local model catalog
         shell: bash

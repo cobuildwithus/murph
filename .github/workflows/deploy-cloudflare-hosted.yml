@@ -76,6 +76,9 @@ jobs:
         with:
           node-version-file: .nvmrc
 
+      - name: Enable nested Codex permission sandbox
+        run: scripts/prepare-ci-nested-codex-sandbox.sh
+
       - name: Start Postgres
         shell: bash
         run: |
@@ -184,6 +187,9 @@ jobs:
         with:
           node-version-file: .nvmrc
 
+      - name: Enable nested Codex permission sandbox
+        run: scripts/prepare-ci-nested-codex-sandbox.sh
+
       - name: Start Postgres
         shell: bash
         run: |
@@ -290,6 +296,9 @@ jobs:
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
           node-version-file: .nvmrc
+
+      - name: Enable nested Codex permission sandbox
+        run: scripts/prepare-ci-nested-codex-sandbox.sh
 
       - name: Start Postgres
         shell: bash

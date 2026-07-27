@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs'
+import { readFileSync, statSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -11,6 +11,11 @@ const hostedDeployWorkflowPath = path.join(
   '.github',
   'workflows',
   'deploy-cloudflare-hosted.yml',
+)
+const nestedCodexSandboxScriptPath = path.join(
+  repoRoot,
+  'scripts',
+  'prepare-ci-nested-codex-sandbox.sh',
 )
 
 function extractWorkflowJob(workflow: string, jobName: string): string {
@@ -37,6 +42,7 @@ function expectPostgresServiceContract(workflow: string, expectedServiceCount: n
   )
   expect(workflow.match(/--health-retries 10/g)).toHaveLength(expectedServiceCount)
   expect(workflow.match(/- 5432:5432/g)).toHaveLength(expectedServiceCount)
+  expect(workflow.match(/--restart unless-stopped/g)).toHaveLength(expectedServiceCount)
 }
 
 function extractHostedLocalE2eScenarios(workflow: string): string[] {
@@ -82,6 +88,8 @@ function expectStableRequiredAggregator(input: {
 describe('cloudflare hosted e2e workflow guards', () => {
   it('provisions a real local postgres service for hosted local e2e jobs', () => {
     const workflow = readFileSync(hostedE2eWorkflowPath, 'utf8')
+    const deployWorkflow = readFileSync(hostedDeployWorkflowPath, 'utf8')
+    const nestedCodexSandboxScript = readFileSync(nestedCodexSandboxScriptPath, 'utf8')
     const hostedLocalE2eScenarios = extractHostedLocalE2eScenarios(workflow)
     const postgresBackedScenarioCount = hostedLocalE2eScenarios.filter(
       (scenario) => scenario !== 'direct-r2-presigned-put',
@@ -96,6 +104,27 @@ describe('cloudflare hosted e2e workflow guards', () => {
     expect(workflow).not.toContain('packages: read')
     expect(workflow).not.toContain('docker login ghcr.io')
     expectHostedLocalCodexCliInstall(workflow)
+    expect(statSync(nestedCodexSandboxScriptPath).mode & 0o111).not.toBe(0)
+    expect(nestedCodexSandboxScript).toContain(
+      'sudo sysctl --write kernel.apparmor_restrict_unprivileged_userns=0',
+    )
+    expect(nestedCodexSandboxScript).toContain(
+      'test "$(sysctl --values kernel.apparmor_restrict_unprivileged_userns)" = "0"',
+    )
+    expect(nestedCodexSandboxScript).toContain(
+      'sudo jq \'. + {"seccomp-profile": "unconfined"}\'',
+    )
+    expect(nestedCodexSandboxScript).toContain(
+      'sudo dockerd --validate --config-file "${docker_config_path}"',
+    )
+    expect(nestedCodexSandboxScript).toContain('sudo systemctl restart docker')
+    expect(workflow.match(/scripts\/prepare-ci-nested-codex-sandbox\.sh/g))
+      .toHaveLength(1)
+    expect(deployWorkflow.match(/scripts\/prepare-ci-nested-codex-sandbox\.sh/g))
+      .toHaveLength(3)
+    expect(workflow).toContain(
+      "'until exec 3<>/dev/tcp/127.0.0.1/5432; do sleep 1; done'",
+    )
     expect(hostedLocalE2eScenarios).not.toHaveLength(0)
     expect(postgresBackedScenarioCount).toBeGreaterThan(0)
     expectPostgresServiceContract(workflow, 1)
