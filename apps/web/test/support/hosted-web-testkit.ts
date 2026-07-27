@@ -679,6 +679,7 @@ export async function setLatestHostedLinqReplyLatencyForTest(input: {
 }): Promise<{
   acceptedAt: string;
   deliveryAcceptedAt: string;
+  traceId: string;
 }> {
   if (!Number.isSafeInteger(input.latencyMs) || input.latencyMs < 0) {
     throw new RangeError("Hosted Linq reply-latency test control requires a non-negative integer.");
@@ -740,6 +741,7 @@ export async function setLatestHostedLinqReplyLatencyForTest(input: {
     return {
       acceptedAt: acceptedAt.toISOString(),
       deliveryAcceptedAt: deliveryAcceptedAt.toISOString(),
+      traceId: trace.id,
     };
   });
 }

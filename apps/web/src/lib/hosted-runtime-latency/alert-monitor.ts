@@ -323,6 +323,13 @@ async function claimHostedRuntimeLatencyAlertTransition(input: {
     "alert_sent" | "disabled"
   >;
 }> {
+  if (
+    input.state.status === MONITOR_STATUS.alertSending
+    && !isHostedRuntimeLatencySendLeaseExpired(input.state, input.now)
+  ) {
+    return { action: null, outcome: "coalesced" };
+  }
+
   if (input.health.anomalous) {
     if (input.state.status === MONITOR_STATUS.alerting) {
       return { action: null, outcome: "incident_active" };
@@ -338,12 +345,6 @@ async function claimHostedRuntimeLatencyAlertTransition(input: {
 
   if (input.state.status === MONITOR_STATUS.healthy) {
     return { action: null, outcome: "healthy" };
-  }
-  if (
-    input.state.status === MONITOR_STATUS.alertSending
-    && !isHostedRuntimeLatencySendLeaseExpired(input.state, input.now)
-  ) {
-    return { action: null, outcome: "coalesced" };
   }
   if (input.state.status === MONITOR_STATUS.alerting) {
     const cleared = await input.prisma.hostedLinqAlert.updateMany({

@@ -112,14 +112,20 @@ Updated: 2026-07-27
   - Required repository checks and PR CI are green.
 - Results so far:
   - The focused Web monitor/cron/approved-cron suite passed 47 tests.
-  - The final hosted-local run passed all five cases. Measured reply latencies
-    were 19.563 seconds (system mailbox), 7.257 seconds (retention),
-    8.254 seconds (stale invocation), and 11.367 seconds (active turn), all
+  - The post-review hosted-local run passed all five cases. Measured reply
+    latencies were 13.134 seconds (system mailbox), 8.549 seconds (retention),
+    7.997 seconds (stale invocation), and 11.960 seconds (active turn), all
     below the fixed 30-second deadline. The fifth case proved alert send,
     lost-ack retry with the same body and idempotency key, coalescing, silent
-    healthy clear, and a new alert identity on recurrence.
+    healthy clear, a new alert identity on recurrence, and the absence of
+    seeded customer/trace identifiers and message content from real alert
+    egress.
   - Canonical `pnpm test:diff ...` passed in one fresh Crabbox/Blacksmith
     Testbox: 532 Web test files and 6,753 Web tests passed, with Cloudflare
     verification, lint, typecheck, and build also green.
   - Product-experience review returned no findings after recovery texts were
     removed and the real cron/PostgreSQL/Linq proof was added.
+  - Preliminary ReviewGPT findings were resolved with a fresh-send lease guard,
+    a deferred overlapping-cron/exact-expiry test, real-egress privacy
+    assertions, and an exact five-minute schedule guard. The post-remediation
+    focused suite passed 48 tests.

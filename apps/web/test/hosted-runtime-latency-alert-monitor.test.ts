@@ -296,6 +296,67 @@ describe("hosted runtime latency alert monitor", () => {
     expect(result.outcome).toBe("coalesced");
     expect(sendLinqMessage).not.toHaveBeenCalled();
   });
+
+  it("coalesces a live send lease and reclaims it at the exact expiry", async () => {
+    const fixture = createMonitorPrismaFixture([
+      latencyRow({
+        acceptedAt: "2026-07-26T15:58:00.000Z",
+      }),
+    ]);
+    let releaseFirstSend = () => {};
+    const firstSendBlocked = new Promise<void>((resolve) => {
+      releaseFirstSend = resolve;
+    });
+    let sendOrdinal = 0;
+    const sendLinqMessage = vi.fn(async (input: LinqSendInput) => {
+      void input;
+      sendOrdinal += 1;
+      if (sendOrdinal === 1) {
+        await firstSendBlocked;
+      }
+      return {
+        chatId: "opaque-alert-chat",
+        messageId: `provider-message-${sendOrdinal}`,
+      };
+    });
+
+    const first = runHostedRuntimeLatencyAlertMonitor({
+      env: alertEnv,
+      now,
+      prisma: fixture.prisma,
+      sendLinqMessage,
+    });
+    await vi.waitFor(() => {
+      expect(sendLinqMessage).toHaveBeenCalledTimes(1);
+    });
+
+    const overlapping = await runHostedRuntimeLatencyAlertMonitor({
+      env: alertEnv,
+      now: instant("2026-07-26T16:01:00.000Z"),
+      prisma: fixture.prisma,
+      sendLinqMessage,
+    });
+    const expired = await runHostedRuntimeLatencyAlertMonitor({
+      env: alertEnv,
+      now: instant("2026-07-26T16:04:00.000Z"),
+      prisma: fixture.prisma,
+      sendLinqMessage,
+    });
+    releaseFirstSend();
+    await expect(first).resolves.toMatchObject({
+      outcome: "alert_sent",
+    });
+
+    expect(overlapping.outcome).toBe("coalesced");
+    expect(expired.outcome).toBe("alert_sent");
+    expect(sendLinqMessage).toHaveBeenCalledTimes(2);
+    expect(sendLinqMessage.mock.calls[1]?.[0].idempotencyKey).toBe(
+      sendLinqMessage.mock.calls[0]?.[0].idempotencyKey,
+    );
+    expect(sendLinqMessage.mock.calls[1]?.[0].message).toBe(
+      sendLinqMessage.mock.calls[0]?.[0].message,
+    );
+  });
 });
 
 function latencyRow(input: {

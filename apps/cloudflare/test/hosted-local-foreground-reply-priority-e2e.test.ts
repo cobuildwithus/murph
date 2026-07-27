@@ -379,7 +379,7 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
   }, 180_000);
 
   it("pages one operator incident through the real cron, database, and Linq boundary", async () => {
-    await setLatestHostedLinqReplyLatencyForTest({
+    const anomalousTrace = await setLatestHostedLinqReplyLatencyForTest({
       environment: requireScenario().runtimeEnv,
       latencyMs: 31_000,
       userId: retentionProbe.userId,
@@ -411,6 +411,24 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
     expect(incidentIdempotencyKey).toMatch(
       /^murph\/runtime-latency\/[0-9a-f-]+\/alert$/u,
     );
+    const privateAlertFragments = [
+      anomalousTrace.traceId,
+      latencyAlertChatId,
+      runId,
+      ...allProbeIdentities.flatMap((identity) => [
+        identity.chatId,
+        identity.homePhone,
+        identity.memberPhone,
+        identity.userId,
+      ]),
+      `evt_priority_inbox_media_retention_${runId}`,
+      `msg_priority_inbox_media_retention_${runId}`,
+      "Reply while retention-only work is active.",
+      "Foreground reply won over retention-only work.",
+    ];
+    for (const privateFragment of privateAlertFragments) {
+      expect(incidentBody).not.toContain(privateFragment);
+    }
     expect(failedAttempts.every((request) => request.body === incidentBody)).toBe(true);
 
     const retried = await requestLatencyAlertCron();
