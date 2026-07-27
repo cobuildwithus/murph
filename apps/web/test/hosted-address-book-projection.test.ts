@@ -189,6 +189,40 @@ describe("hosted address-book request parsing", () => {
 });
 
 describe("hosted address-book projection lifecycle", () => {
+  it("stores the full supported projection without truncation", async () => {
+    const store = new AddressBookPrismaStub("owner-member");
+    const crypto = makeAddressBookCrypto();
+    const request = parseHostedAddressBookReplaceRequest({
+      baseRevision: 0,
+      contacts: Array.from(
+        { length: HOSTED_ADDRESS_BOOK_MAX_CONTACTS },
+        (_, index) => ({
+          advisoryName: "Alex",
+          phoneNumber: `+1202555${String(index).padStart(4, "0")}`,
+        }),
+      ),
+      mutationId: "4f5150c8-a9bc-42d3-b975-a289481a3140",
+      schemaVersion: 1,
+    });
+
+    await expect(replaceHostedAddressBookProjection({
+      crypto,
+      memberId: "owner-member",
+      prisma: store as never,
+      request,
+      source: SOURCE,
+    })).resolves.toMatchObject({
+      enabled: true,
+      revision: 1,
+      storedContactCount: HOSTED_ADDRESS_BOOK_MAX_CONTACTS,
+    });
+    expect(store.contacts).toHaveLength(HOSTED_ADDRESS_BOOK_MAX_CONTACTS);
+    expect(new Set(store.contacts.map((row) => row.phoneToken)).size).toBe(
+      HOSTED_ADDRESS_BOOK_MAX_CONTACTS,
+    );
+    expect(crypto.kms.macSign).toHaveBeenCalledTimes(1);
+  });
+
   it("stores only member-scoped phone tokens and resolves owner-only advisory names", async () => {
     const store = new AddressBookPrismaStub("owner-member");
     const crypto = makeAddressBookCrypto();
