@@ -38,7 +38,20 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cat .github/agent-group-plan/patch-* > /tmp/murph-group-plan.patch
+          cat \
+            .github/agent-group-plan/patch-001 \
+            .github/agent-group-plan/patch-002 \
+            .github/agent-group-plan/patch-003-00.part \
+            .github/agent-group-plan/patch-003-01.part \
+            .github/agent-group-plan/patch-003-02.part \
+            .github/agent-group-plan/patch-003-03.part \
+            .github/agent-group-plan/patch-004 \
+            .github/agent-group-plan/patch-005 \
+            .github/agent-group-plan/patch-006 \
+            .github/agent-group-plan/patch-007 \
+            .github/agent-group-plan/patch-008 \
+            .github/agent-group-plan/patch-009 \
+            > /tmp/murph-group-plan.patch
           git apply --check --whitespace=error-all /tmp/murph-group-plan.patch > /tmp/group-plan-apply.log 2>&1
           git apply --whitespace=fix /tmp/murph-group-plan.patch >> /tmp/group-plan-apply.log 2>&1
           git diff --check >> /tmp/group-plan-apply.log 2>&1
@@ -59,6 +72,13 @@ jobs:
           cat /tmp/group-plan-apply.log
           exit 1
 
+      - name: Upload applied patch
+        uses: actions/upload-artifact@v4
+        with:
+          name: group-plan-applied-patch
+          path: /tmp/murph-group-plan.patch
+          retention-days: 1
+
       - name: Enable pnpm
         shell: bash
         run: corepack enable
@@ -70,29 +90,44 @@ jobs:
       - name: Run focused Group plan tests
         shell: bash
         run: |
-          set -euo pipefail
-          pnpm --dir apps/web exec vitest run \
-            --config vitest.workspace.ts \
-            --no-coverage \
-            test/hosted-group-plan-policy.test.ts \
-            test/hosted-onboarding-billing-plans.test.ts \
-            test/hosted-onboarding-env.test.ts \
-            test/hosted-billing-settings.test.tsx \
-            test/hosted-usage-status.test.ts \
-            test/hosted-subscription-tool.test.ts \
-            test/hosted-subscription-tool-route.test.ts \
-            test/user-facing-messages.test.ts
-          pnpm --dir packages/hosted-execution exec vitest run \
-            test/plan-usage.test.ts \
-            test/subscription.test.ts
-          pnpm --dir packages/assistant-engine exec vitest run \
-            test/assistant-subscription-tool.test.ts
-          pnpm --dir packages/hosted-local-harness exec vitest run \
-            test/dev-hosted-local/stripe.test.ts
+          set -o pipefail
+          {
+            pnpm --dir apps/web exec vitest run \
+              --config vitest.workspace.ts \
+              --no-coverage \
+              test/hosted-group-plan-policy.test.ts \
+              test/hosted-onboarding-billing-plans.test.ts \
+              test/hosted-onboarding-env.test.ts \
+              test/hosted-billing-settings.test.tsx \
+              test/hosted-usage-status.test.ts \
+              test/hosted-subscription-tool.test.ts \
+              test/hosted-subscription-tool-route.test.ts \
+              test/user-facing-messages.test.ts
+            pnpm --dir packages/hosted-execution exec vitest run \
+              test/plan-usage.test.ts \
+              test/subscription.test.ts
+            pnpm --dir packages/assistant-engine exec vitest run \
+              test/assistant-subscription-tool.test.ts
+            pnpm --dir packages/hosted-local-harness exec vitest run \
+              test/dev-hosted-local/stripe.test.ts
+          } 2>&1 | tee /tmp/group-plan-tests.log
 
       - name: Run prepared typecheck
         shell: bash
-        run: pnpm typecheck:prepared
+        run: |
+          set -o pipefail
+          pnpm typecheck:prepared 2>&1 | tee /tmp/group-plan-typecheck.log
+
+      - name: Upload validation diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: group-plan-validation-diagnostics
+          path: |
+            /tmp/group-plan-tests.log
+            /tmp/group-plan-typecheck.log
+          if-no-files-found: warn
+          retention-days: 1
 
       - name: Commit verified implementation
         shell: bash
