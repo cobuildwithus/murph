@@ -1207,7 +1207,7 @@ describe("hosted web production migration guard", () => {
     );
   });
 
-  test("does not register device-sync recovery as a Vercel cron", async () => {
+  test("registers only the approved Vercel cron routes", async () => {
     const vercelJson = JSON.parse(
       await readFile(path.join(appRoot, "vercel.json"), "utf8"),
     ) as {
@@ -1224,6 +1224,7 @@ describe("hosted web production migration guard", () => {
       "/api/internal/hosted-growth/snapshot/cron",
       "/api/internal/hosted-onboarding/linq/contact-card/cron",
       "/api/internal/hosted-onboarding/stripe/cron",
+      "/api/internal/hosted-runtime/latency-alert/cron",
     ]);
     assert.ok(!cronPaths.includes("/api/internal/device-sync/dirty-sweeper/cron"));
   });
