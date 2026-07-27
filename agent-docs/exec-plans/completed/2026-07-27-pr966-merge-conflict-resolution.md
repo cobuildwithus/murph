@@ -11,27 +11,35 @@ Constraints/Assumptions:
 - Do not add new state owners, compatibility machinery, or feature scope unless a proven conflict makes the existing owners insufficient.
 
 State:
-- Active.
+- Implementation and local verification complete; exact-head ReviewGPT correction review and CI remain post-push gates.
 
 Done:
 - Read the current workflow, architecture, invariant, security, reliability, frontend, verification, and PR-review guidance.
 - Located the clean existing PR worktree and fetched the latest PR branch and `origin/main`.
-- Confirmed PR 966 is open, draft, and currently conflicting with `main`.
+- Confirmed PR 966 is open and draft.
 - Confirmed ReviewGPT round 8 passed on the pre-merge head and that manual conflict resolution requires the ordinary next-round path.
+- Resolved all 11 behavior-bearing conflicts while preserving private vault attachments, encrypted temporary R2 avatar staging, account-deletion serialization, async image wakeup, and the obsolete public-route tombstones.
+- Merged the later changelog base update cleanly and recorded current `origin/main` as a branch ancestor.
+- Published and verified synthetic desktop/mobile design-catalog screenshots, then added the hosted Markdown image links and required design-proof metadata to the PR body.
+- Passed focused assistant-engine, assistant-runtime, Cloudflare Node, and hosted-local image-media-delivery checks.
+- Passed affected owner and reverse-dependent typechecks.
+- Passed canonical `pnpm test:diff ...`, including all affected package suites, hosted-web tests/lint/dev smoke/production build, and Cloudflare Node/Workers verification.
+- Passed canonical `pnpm verify:acceptance`, including all workspace typechecks, package coverage and package-boundary checks, fixture coverage, hosted-web tests/lint/dev smoke/production build, and Cloudflare Node/Workers verification.
 
 Now:
-- Merge `origin/main`, inventory every conflict and affected call path, and resolve each conflict against current owner docs and tests.
+- Close this plan and push the exact locally verified head.
 
 Next:
-- Run focused and canonical verification, inspect the full resolved diff, commit and push the merge, complete design proof, run ReviewGPT correction review and CI, then mark the PR ready when all merge gates are green.
+- Run the required ReviewGPT correction round concurrently with CI, remediate any qualifying finding, confirm the latest base remains an ancestor, and mark PR 966 ready only when every required check is green.
 
 Open questions:
-- Whether the prescribed Cloudflare Images design-proof upload credentials are now available locally without printing or persisting them.
+- None.
 
 Working set:
 - Every path reported unmerged by the normal `origin/main` merge.
 - Directly affected private-media, generated-delivery, group-avatar, experiment-card, account-deletion, deploy, and verification owners.
 - PR 966 body and local ignored design-proof artifacts.
 
-Status: active
+Status: completed
 Updated: 2026-07-27
+Completed: 2026-07-27
