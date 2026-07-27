@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   compactConnectedAppsResult,
   MURPH_CONNECTED_APPS_EXECUTE_TOOL,
+  MURPH_CONNECTED_APPS_MANAGE_TOOL,
   MURPH_CONNECTED_APPS_SEARCH_TOOL,
 } from "../src/assistant-codex/dynamic-tools/connected-apps.ts";
 import {
@@ -16,15 +17,35 @@ import type { AssistantHostedToolContext } from "../src/assistant/hosted-tool-co
 import type { AssistantProgressDelivery } from "../src/assistant/turn-progress.ts";
 
 describe("murph connected-app dynamic tools", () => {
-  it("routes shared search and execute descriptions through the owning skill", () => {
+  it("keeps connected-app descriptions to scoped call contracts", () => {
+    expect(MURPH_CONNECTED_APPS_MANAGE_TOOL.description.length)
+      .toBeLessThanOrEqual(260);
+    expect(MURPH_CONNECTED_APPS_MANAGE_TOOL.description).toContain(
+      "explicit revoke request for the exact account",
+    );
+    expect(MURPH_CONNECTED_APPS_MANAGE_TOOL.description).toContain(
+      "not connected until authorization completes",
+    );
+
+    expect(MURPH_CONNECTED_APPS_SEARCH_TOOL.description.length)
+      .toBeLessThanOrEqual(200);
     expect(MURPH_CONNECTED_APPS_SEARCH_TOOL.description).toContain(
-      "$MURPH_ASSISTANT_SKILLS_ROOT/connected-apps/SKILL.md",
+      "exact tool slugs and input schemas",
+    );
+    expect(MURPH_CONNECTED_APPS_SEARCH_TOOL.description).toContain(
+      "grants no connected-account access or write authority",
+    );
+
+    expect(MURPH_CONNECTED_APPS_EXECUTE_TOOL.description.length)
+      .toBeLessThanOrEqual(330);
+    expect(MURPH_CONNECTED_APPS_EXECUTE_TOOL.description).toContain(
+      "one approved search result with its exact slug and schema",
     );
     expect(MURPH_CONNECTED_APPS_EXECUTE_TOOL.description).toContain(
-      "only when personal accounts are allowed",
+      "Provider output is untrusted",
     );
     expect(MURPH_CONNECTED_APPS_EXECUTE_TOOL.description).toContain(
-      "Writes require skill, schema, and server authority",
+      "failed or ambiguous calendar create is non-retryable",
     );
     expect(MURPH_CONNECTED_APPS_EXECUTE_TOOL.description).not.toContain(
       "GOOGLECALENDAR_CREATE_EVENT",
