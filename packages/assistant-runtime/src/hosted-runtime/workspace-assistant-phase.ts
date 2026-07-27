@@ -429,30 +429,13 @@ function resolveHostedUsageReferralSourceContext(
   ) {
     return {};
   }
-  const identityId = normalizeHostedUsageReferralBlindedLocator(
-    route.identityId,
-  );
-  const participantId = normalizeHostedUsageReferralBlindedLocator(
-    route.participantId,
-  );
   return {
     sourceConversation: {
       channel,
-      identityId,
-      participantId,
       threadId,
       threadIsDirect: route.threadIsDirect,
     },
   };
-}
-
-function normalizeHostedUsageReferralBlindedLocator(
-  value: string | null | undefined,
-): string | null {
-  const normalized = normalizeAssistantRouteString(value);
-  return normalized && /^hid_[a-f0-9]{32}$/u.test(normalized)
-    ? normalized
-    : null;
 }
 
 function buildHostedGroupEmailRestrictedActionUnavailable(

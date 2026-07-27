@@ -662,10 +662,11 @@ Hosted AI usage metering:
   25-hour late-evidence grace before referrer-serialized expiry becomes final.
   Immediate post-commit reconciliation and the bounded minute recovery cron
   converge on one final referral grant and one atomic source-mailbox
-  celebration fence. Personal arming freezes only blinded source-conversation
-  locators; celebration re-resolves and revalidates that exact direct channel,
-  and personal Linq delivery uses an explicit source target that cannot fall
-  back to a newer home route. Group celebration carries live thread authority.
+  celebration fence. Personal arming freezes only the source channel, blinded
+  exact-thread locator, and directness fact; celebration requires the same
+  direct thread, and personal Linq delivery uses an explicit source target that
+  cannot fall back to a newer home route. Group celebration carries live
+  thread authority.
   Durable celebration copy is unnamed. Unlinked Telegram group evidence stays
   silent and outside assistant access; direct setup behavior is unchanged.
 - Web owns the separate `murph.subscription` callback for an explicit private member choice to continue Pulse at trial end, start Pulse now, or upgrade Pulse to Edge. It binds the runtime-supplied accepted input id to the callback member, atomically claims the first action on that existing mailbox row, re-derives current eligibility, and delegates to the existing billing services. An exact retry is allowed and a conflicting action fails closed. Pulse activation keeps its existing Stripe-hosted invoice or Customer Portal handoff when payment is required; a pending Edge change returns Customer Portal without a separate invoice lookup. No custom checkout or second billing owner is introduced.

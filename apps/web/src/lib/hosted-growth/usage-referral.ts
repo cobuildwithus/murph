@@ -423,8 +423,6 @@ export async function handleHostedUsageReferralGroupTool(input: {
             ? {
                 sourceConversationJson: {
                   channel: sourceConversation.channel,
-                  identityId: sourceConversation.identityId,
-                  participantId: sourceConversation.participantId,
                   threadId: sourceConversation.threadId,
                   threadIsDirect: sourceConversation.threadIsDirect,
                 },
@@ -1066,33 +1064,11 @@ function readHostedUsageReferralSourceConversation(
   ) {
     return null;
   }
-  const identityId = readNullableHostedUsageReferralBlindedLocator(
-    source.identityId,
-  );
-  const participantId = readNullableHostedUsageReferralBlindedLocator(
-    source.participantId,
-  );
-  if (identityId === undefined || participantId === undefined) {
-    return null;
-  }
   return {
     channel: source.channel,
-    identityId,
-    participantId,
     threadId: source.threadId,
     threadIsDirect: source.threadIsDirect,
   };
-}
-
-function readNullableHostedUsageReferralBlindedLocator(
-  value: unknown,
-): string | null | undefined {
-  if (value === null) {
-    return null;
-  }
-  return typeof value === "string" && isHostedUsageReferralBlindedLocator(value)
-    ? value
-    : undefined;
 }
 
 function isHostedUsageReferralBlindedLocator(value: string): boolean {

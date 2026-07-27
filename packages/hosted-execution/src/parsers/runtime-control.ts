@@ -1454,13 +1454,7 @@ function parseHostedRuntimeUsageReferralSourceContext(
   );
   assertAllowedObjectKeys(
     source,
-    new Set([
-      "channel",
-      "identityId",
-      "participantId",
-      "threadId",
-      "threadIsDirect",
-    ]),
+    new Set(["channel", "threadId", "threadIsDirect"]),
     "Hosted runtime usage referral source conversation",
   );
   const channel = requireString(
@@ -1475,21 +1469,10 @@ function parseHostedRuntimeUsageReferralSourceContext(
   return {
     sourceConversation: {
       channel,
-      identityId: parseHostedRuntimeUsageReferralBlindedIdentifier(
-        source.identityId,
-        "Hosted runtime usage referral source conversation identityId",
-        true,
-      ),
-      participantId: parseHostedRuntimeUsageReferralBlindedIdentifier(
-        source.participantId,
-        "Hosted runtime usage referral source conversation participantId",
-        true,
-      ),
       threadId: parseHostedRuntimeUsageReferralBlindedIdentifier(
         source.threadId,
         "Hosted runtime usage referral source conversation threadId",
-        false,
-      )!,
+      ),
       threadIsDirect: requireBoolean(
         source.threadIsDirect,
         "Hosted runtime usage referral source conversation threadIsDirect",
@@ -1501,11 +1484,7 @@ function parseHostedRuntimeUsageReferralSourceContext(
 function parseHostedRuntimeUsageReferralBlindedIdentifier(
   value: unknown,
   label: string,
-  nullable: boolean,
-): string | null {
-  if (nullable && value === null) {
-    return null;
-  }
+): string {
   const identifier = requireString(value, label);
   if (!/^hid_[a-f0-9]{32}$/u.test(identifier)) {
     throw new TypeError(`${label} is invalid.`);

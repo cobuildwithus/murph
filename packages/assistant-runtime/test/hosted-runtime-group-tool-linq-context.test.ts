@@ -68,8 +68,6 @@ describe("createHostedGroupToolWithCurrentTurnContext", () => {
       policyCode: "active_group_v1",
       sourceConversation: {
         channel: "telegram",
-        identityId: null,
-        participantId: null,
         threadId: `hid_${"f".repeat(32)}`,
         threadIsDirect: true,
       },
@@ -81,8 +79,6 @@ describe("createHostedGroupToolWithCurrentTurnContext", () => {
       policyCode: "active_group_v1",
       sourceConversation: {
         channel: "linq",
-        identityId: `hid_${"1".repeat(32)}`,
-        participantId: `hid_${"2".repeat(32)}`,
         threadId: `hid_${"3".repeat(32)}`,
         threadIsDirect: false,
       },

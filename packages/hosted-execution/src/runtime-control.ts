@@ -1007,17 +1007,15 @@ export interface HostedRuntimeGroupToolSenderContext {
 
 export interface HostedRuntimeUsageReferralSourceConversation {
   channel: "linq" | "telegram";
-  identityId: string | null;
-  participantId: string | null;
   threadId: string;
   threadIsDirect: boolean;
 }
 
 export interface HostedRuntimeUsageReferralSourceContext {
   /**
-   * Blinded current-conversation locators injected by the hosted runtime. Web
-   * persists them only for a personal reward so its celebration cannot drift
-   * to another direct channel or a newly bound provider conversation.
+   * Blinded current-conversation locator injected by the hosted runtime. Web
+   * persists it only for a personal reward so its celebration cannot drift to
+   * another direct channel or a newly bound provider conversation.
    */
   sourceConversation?: HostedRuntimeUsageReferralSourceConversation;
 }

@@ -46,9 +46,9 @@ Last verified: 2026-07-26
   model may choose only a versioned policy code after one exact current sender
   explicitly accepts; it cannot supply a referrer, beneficiary, amount, source,
   target, route, provider id, counter, or qualification fact. Personal calls
-  bind the callback member and persist only runtime-injected blinded locators
-  for the exact source conversation. Celebration queueing re-resolves the
-  frozen channel and requires those locators to match the current direct route.
+  bind the callback member and persist only the runtime-injected source channel,
+  blinded exact-thread locator, and directness fact. Celebration queueing
+  re-resolves the frozen channel and requires the same direct thread.
   A personal Linq wake freezes that resolved source as an explicit delivery
   target so provider entry cannot replace it with a newer home route; source
   revocation fails closed. Group celebrations carry live external-thread

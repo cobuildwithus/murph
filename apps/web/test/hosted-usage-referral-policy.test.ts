@@ -51,8 +51,6 @@ describe("hosted usage referral policy", () => {
   it("accepts only the frozen personal source conversation", () => {
     const sourceConversation = {
       channel: "telegram" as const,
-      identityId: null,
-      participantId: null,
       threadId: `hid_${"3".repeat(32)}`,
       threadIsDirect: true,
     };
@@ -120,10 +118,10 @@ describe("hosted usage referral policy", () => {
       threadId: "provider-direct-thread",
     });
 
+    const stableLinqIdentityId = `hid_${"6".repeat(32)}`;
+    const stableLinqParticipantId = `hid_${"5".repeat(32)}`;
     const linqSourceConversation = {
       channel: "linq" as const,
-      identityId: `hid_${"6".repeat(32)}`,
-      participantId: `hid_${"5".repeat(32)}`,
       threadId: `hid_${"7".repeat(32)}`,
       threadIsDirect: true,
     };
@@ -131,13 +129,13 @@ describe("hosted usage referral policy", () => {
       conversationShape: "direct-member" as const,
       externalThreadRouteAuthority: null,
       route: {
-        actorId: linqSourceConversation.participantId,
+        actorId: stableLinqParticipantId,
         channel: "linq" as const,
         delivery: {
           kind: "thread" as const,
           target: "provider-linq-source-thread",
         },
-        identityId: linqSourceConversation.identityId,
+        identityId: stableLinqIdentityId,
         threadId: linqSourceConversation.threadId,
         threadIsDirect: true,
       },

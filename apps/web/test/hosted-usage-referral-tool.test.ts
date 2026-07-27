@@ -28,8 +28,6 @@ type ReferralState = {
   rewardUsdMicros: bigint;
   sourceConversationJson?: {
     channel: "linq" | "telegram";
-    identityId: string | null;
-    participantId: string | null;
     threadId: string;
     threadIsDirect: boolean;
   };
@@ -38,8 +36,6 @@ type ReferralState = {
 
 const PERSONAL_SOURCE = {
   channel: "telegram" as const,
-  identityId: null,
-  participantId: null,
   threadId: `hid_${"1".repeat(32)}`,
   threadIsDirect: true,
 };

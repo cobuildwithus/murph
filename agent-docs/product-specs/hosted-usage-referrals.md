@@ -30,9 +30,9 @@ is celebrated:
 - trial rewards add usage capacity but never extend the trial end date.
 
 Completion is celebrated in that same source conversation. A personal mission
-freezes the runtime-injected, blinded source channel and conversation locators;
-queueing later resolves that channel from current member routing and requires
-the blinded locators to still identify the same direct conversation. A group
+freezes the runtime-injected source channel, blinded exact-thread locator, and
+directness fact; queueing later resolves that channel from current member
+routing and requires the same direct thread. A group
 mission uses its synthetic source-container route and live external-thread
 authority. Celebration copy never carries a detached profile name, so a
 durable mailbox item cannot outlive name-sharing permission or account
