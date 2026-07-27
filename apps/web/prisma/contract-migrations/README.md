@@ -25,6 +25,16 @@ only after Vercel reports the production deployment as successful, a bounded
 drain wait has elapsed, and the production alias still points at that
 deployment.
 
+The historical
+`20260720233000_hosted_group_usage_funding_invariants` directory remains
+immutable, but the runner omits it because
+`20260727040000_relax_hosted_usage_credit_detached_direct_proof` is the sole
+owner of those two constraints. That backward-compatible Prisma predeploy
+migration installs the constraints on a fresh database or replaces the earlier
+strict definition before sessionless direct payments can be served. Do not
+restore the superseded contract migration to the postdeploy list; doing so
+would reintroduce the Checkout-Session requirement after promotion.
+
 Contract migration SQL must be safe to run inside one transaction and should be
 idempotent where PostgreSQL supports it, for example `DROP COLUMN IF EXISTS`.
 The runner sets short transaction-local lock and statement timeouts before each

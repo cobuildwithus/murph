@@ -218,7 +218,7 @@ export async function reconcileHostedUsageCreditCheckoutEventTx(input: {
       throw new Error("Paid usage-credit Checkout lacked a financial snapshot.");
     }
     const convergence = await reconcileHostedUsageCreditFinancialSnapshotTx({
-      checkoutAuthorization,
+      paymentAuthorization: checkoutAuthorization,
       effectiveAt: deriveHostedUsageCreditFinancialEffectiveAt({
         event: input.event,
         snapshot,

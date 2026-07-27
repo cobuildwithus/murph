@@ -113,11 +113,37 @@ Last verified: 2026-07-26
   payable URL or retry permission only for an exact server-approved target.
   Former Family beneficiaries are always status/cancel-only; historical labels
   and contact hints are display data, not payment authority.
+- Saved-card group funding may select only one canonical card already attached
+  to the authenticated payer's verified Stripe Customer: one consistent
+  Customer or nonterminal Subscription default, or the sole attached card.
+  The browser cannot supply a PaymentMethod. Conflicting defaults or ambiguous
+  attached cards must use Checkout. The server creates the PaymentIntent
+  unconfirmed, stores its encrypted exact reference on the frozen purchase,
+  then confirms it off session. The payer-row lock rechecks that the payer is
+  active and the purchase is still `created`; a deletion or terminal-state
+  race cancels the unbound intent and never confirms it. An ambiguous
+  confirmation remains bound and
+  retryable; only verified `canceled` state may clear that binding and permit
+  Checkout fallback. While that payment is nonterminal, recovery remains bound
+  to its frozen offer and original client request; a different submitted amount
+  fails closed and the browser does not expose amount changes. Choosing an amount has no payment effect, and each
+  explicit **Add messages** click authorizes only the selected one-time charge.
+  No raw card data enters Murph.
+- Direct-purchase cancellation requires only authenticated payer ownership of
+  the opaque purchase ID. Beneficiary, group-locator, or current target
+  authority may gate retry but must not gate cancellation. Payer deletion may
+  detach a fulfilled sessionless purchase only after clearing payer-encrypted
+  references and retaining its non-secret PaymentIntent/Charge lookup proof for
+  later refund or dispute reconciliation. PostgreSQL enforces that proof
+  directly: a detached fulfilled row must remain paid, terminal, reconciled,
+  and carry both lookup keys, while the separate ciphertext constraint rejects
+  any retained payer-encrypted Stripe value.
 - Stripe proves payment; it does not own Murph usage capacity. A browser return
-  or client-reported Session state must never grant credit. The verified Stripe
-  receipt owner must re-fetch and bind the live one-time Session, line item,
-  PaymentIntent, Charge, Customer, currency, amount, mode, and fixed-purpose
-  metadata to the immutable purchase before appending one grant. Stripe
+  or client-reported Session or PaymentIntent state must never grant credit.
+  The verified Stripe receipt owner must re-fetch and bind the live one-time
+  Session when present, PaymentIntent, Charge, Customer, currency, amount, mode,
+  and fixed-purpose metadata to the immutable purchase before appending one
+  grant. Checkout additionally requires the exact line item. Stripe
   metadata contains only opaque purchase and fixed purpose/version values.
   Provider references use the existing keyed-lookup plus encrypted-value
   pattern and must not enter URLs, logs, prompts, assistant state, fixtures, or
@@ -292,6 +318,7 @@ Last verified: 2026-07-26
 - The hosted `murph.submit_product_feedback` dynamic tool is a model-controlled intake surface for product feedback only. Expose it only for hosted provider requests with accepted user-authored assistant input, and use it only after explicit product frustration, a feature request, product interest including shipped changelog items, clear inferred workflow friction, or repeated Murph-observed product/tool friction. The payload must stay to allowlisted feedback kind, a concise bounded product-only summary, plus optional server-validated changelog ids; it must not store health data, raw user wording, raw conversation text, user identifiers, contact details, secrets, provider payloads, tags, topics, or unrelated context. Shared parsing and web persistence must scrub high-confidence contact details and secret-shaped tokens before recording, but that deterministic scrub is a last guardrail rather than permission to send raw sensitive text. Cloudflare may reach the web recording route only through the signed web-control callback allowlist; `apps/web` owns the member-bound Postgres rows and response surfaces should return only opaque feedback ids plus recorded/dedup status.
 - The hosted `murph.personalization` dynamic tool is a callback-bound current-runtime tone/voice control surface. Expose it only when the active hosted execution context carries the dedicated personalization port; planning may register it for a private direct turn or an authenticated hosted Linq group turn, never for group email or an unverified audience. Do not route it through the shell-facing CLI or add a second authority token. Cloudflare must validate the active runtime write fence before forwarding its signed `web-control.worker` callback, forward the validated fence headers, and sign only the fence-bound runtime member; missing, stale, wrong-generation, or cross-member fences fail closed. In a direct runtime that member is the person. In a hosted group it is the synthetic thread container, never the current speaker or another participant. The runner commit timeout must exceed the web-control timeout by at least five seconds so a committed personalization change cannot be reported as an ordinary outer timeout. New conversation mailbox rows may persist only a nullable server-keyed lookup of their existing deterministic assistant input id as operational metadata; do not persist the raw id there or change the mailbox wire contract, `sourceRef`, or event id. For an update, the runtime forwards only the terminal input id from a locally revalidated, bounded exact-successor provider batch instead of forwarding a numeric sequence. Inside the mutation transaction, web must derive every configured lookup-key version from the callback id, bind the callback runtime member and one matching key to one live conversation-lane `conversation.message` row, and derive the canonical causal sequence from that row. Missing, legacy, mismatched, or ambiguous identity must fail closed; neither a model-supplied nor runtime-supplied sequence or member id is an accepted fallback. For a synthetic thread container, web must also prove that the exact input is a non-direct Linq wake with present, current route authority whose thread and container both match that callback member; email, direct, missing, stale, or cross-room authority fails closed. The web callback must recheck the participant-aware canonical hosted-runtime access gate at the read/write boundary, strictly reject unknown or empty update fields, and accept only shared tone/voice enums. Results may return only effective tone/voice enums, read-only model and Sol-availability context, literal-false model-change fields, and saved/unchanged status; they must not expose billing records, participant identity data, mailbox contents, vault state, secrets, or provider errors. Model and reasoning mutations remain exclusively owned by `murph.assistant_configuration`, which uses the same terminal-input authority for eligible member-bound direct updates without passkey approval and remains unavailable in groups. Generic callback failure must remain generic and must never be presented as evidence that a member lacks Edge access.
 - A person-runtime assistant-style update must prove that its exact accepted wake is direct: Linq must be explicitly direct, email must be explicitly direct and style-authorized, and the hosted Telegram person route remains direct-only. This positive check prevents a retained or mislabeled non-direct input from falling through to private preferences when no thread-container row exists.
+- Participant-derived thread-container authority is leased, not permanent. Every access, AI-allowance, usage, and newsletter read must use the shared seven-day `lastSeenAt` predicate with `removedAt: null`. Ordinary authenticated Linq inbound may renew only an existing relationship for the currently resolved hosted identity; it must not create a participant row, clear a removal, move `lastSeenAt` backward, or accept a provider timestamp later than server time. Before denying an expired route, Web may read the full current provider roster. That authoritative path may create or reinstate exactly the current authenticated sender only after the roster contains the normalized contact, the contact re-resolves to the same active hosted identity, and the canonical participant row is upserted; other roster candidates remain update-only and must re-resolve to their existing member. Display handles, roster order, and the assistant participant cap are never authority.
 - Hosted `murph.assistant_style` mutations may use a numeric sequence only after
   the signed Web personalization port binds the terminal provider-accepted input
   id from a locally revalidated exact-successor batch to the callback member and

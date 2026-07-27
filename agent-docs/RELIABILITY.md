@@ -15,6 +15,39 @@ Last verified: 2026-07-27
 - Define startup requirements, health checks, and critical invariants.
 - Document retry/idempotency expectations for writes or background work.
 - Add tests for failure modes before relying on production-side recovery logic.
+- Account deletion must not discard its only external-cleanup owner. The
+  canonical account transaction persists the KMS-encrypted, foreign-key-free
+  receipt before deleting the member. The existing hourly retention sweep
+  retries Cloudflare, Stripe-customer, and Privy-user targets independently;
+  confirmed absence is idempotent success, completed targets are skipped, and
+  unconfigured, timed-out, or ambiguous targets remain pending. The deletion
+  request returns `cleanupPending` immediately after the canonical transaction
+  instead of waiting on those providers. Each retention attempt has a bounded
+  target deadline, and the bounded batch runs receipts concurrently so one
+  stalled vendor does not block unrelated retention work. Because every
+  provider delete is idempotent and progress is monotonic, concurrent attempts
+  may duplicate a provider request but cannot erase completed progress or
+  report convergence before the receipt itself is deleted.
+- Every direct subscription Checkout attempt is an encrypted member-owned row;
+  Family retains its single encrypted session in the existing billing attempt
+  owner. After Stripe creates a session, Checkout creation re-locks the owner
+  and returns the URL only after binding that reference; if suspension or
+  deletion won, it expires the session instead. Account deletion suspends
+  first, re-reads all direct attempts and Family billing owners, expires every
+  open session, absorbs an expiry/completion race by canceling the resulting
+  subscription, and only then prepares the final customer-cleanup receipt.
+- Participant-derived hosted-group access is bounded by the shared seven-day
+  observation lease. Provider rosters larger than the reconciliation cap cannot
+  leave a participant authoritative forever: stale relationships age out.
+  Authenticated Linq inbound can renew only an existing non-removed relationship
+  for the currently resolved identity, and future provider timestamps are
+  clamped to server time. Before denying a quiet route, Web makes one bounded
+  provider read and scans the full returned roster. It may create or reinstate
+  exactly the authenticated current sender after the roster handle re-resolves
+  to the same active hosted identity; otherwise it may renew only an existing
+  active participant whose current identity still matches the stored
+  relationship. Provider order and the assistant participant projection cap do
+  not decide access.
 - Foreground inbox/parser-backed daemon runs should favor restartable connectors with bounded backoff over permanently dead watch loops, while still keeping low-level restart behavior opt-in and always bounded by the owning abort signal.
 - Networked assistant/provider/channel calls should set explicit timeouts, propagate caller abort signals, and only auto-retry request shapes that are replay-safe or rate-limit directed.
 - The hosted reply-latency operator alert remains one singleton incident owner.
@@ -47,6 +80,38 @@ Last verified: 2026-07-27
   the frozen Session expiry. An ambiguous response must
   not mint a replacement purchase or create a second payable Session. The
   member may begin another purchase only after the existing one is terminal.
+- Current-policy group funding may create one unconfirmed saved-card
+  PaymentIntent with a purchase-derived idempotency key. The producer must bind
+  its encrypted exact reference under the payer lock before confirmation. The
+  locked bind must re-read both payer suspension and purchase status; a
+  suspension, deletion, or terminal transition that wins first leaves the
+  intent unbound, canceled, and never confirmed. A succeeded or processing
+  event for an unbound intent remains in the existing Stripe receipt retry lane
+  instead of being acknowledged without a grant.
+  Confirmation and cancellation use separate stable keys. An ambiguous
+  confirmation keeps the purchase `payment_pending`; exact request replay
+  retrieves and continues only that intent. A fresh request for the same
+  target may recover a nonterminal purchase only when its offer matches the
+  frozen offer; a different amount fails closed, and the client keeps the
+  original amount and request key locked while the outcome is uncertain.
+  Authentication or card failure
+  may fall back to Checkout only after the exact intent is verified canceled
+  and its binding is cleared under the same reconciliation fence. Direct
+  PaymentIntent events reuse the existing Stripe receipt and financial
+  reconciliation owner rather than adding a retry queue.
+- The Vercel predeploy migration replaces the detached-payer checks before the
+  saved-card producer can serve traffic. That replacement is backward
+  compatible with the old application, retains the PaymentIntent/Charge and
+  ciphertext-clearing invariants, and removes only the impossible
+  Checkout-Session requirement for fulfilled direct payments. The superseded
+  postdeploy constraint installer stays out of the contract-migration run so a
+  later workflow cannot re-tighten the schema after promotion.
+- The payer-owned cancel endpoint also owns a sessionless direct
+  `payment_pending` purchase. It retrieves and cancels only the exact bound
+  intent, preserves succeeded or processing state for webhook settlement, and
+  terminalizes only provider-proven cancellation. Cancellation is payer
+  authority and remains available from Settings or another target's conflict
+  state; retry and confirmation remain exact-target capabilities.
 - Family usage-credit creation rechecks owner, group billing, active membership,
   and beneficiary status inside the purchase transaction. Exact request-key
   replay keeps the already-frozen purchase identity but rechecks mutable Family
@@ -72,8 +137,8 @@ Last verified: 2026-07-27
   becoming debt. A committed grant clears the current usage block when capacity
   becomes positive and makes the normal runtime recheck a retry-owned
   post-commit obligation, so accepted blocked input remains pending and can
-  resume. Duplicate Checkout and webhook delivery must converge on the same
-  purchase, grant, and recheck outcome. Provider/KMS preparation and the full
+  resume. Duplicate Checkout, PaymentIntent, and webhook delivery must converge
+  on the same purchase, grant, and recheck outcome. Provider/KMS preparation and the full
   database-plus-Temporal recheck handoff are hard-bounded below the derived
   receipt lease, and receipt completion must win its exact attempt fence; a
   timed-out or reclaimed worker remains retryable and cannot report completion.

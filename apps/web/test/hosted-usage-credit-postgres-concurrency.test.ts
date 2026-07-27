@@ -1,11 +1,13 @@
 import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
 
 import {
   HostedUsageCreditPurchaseStatus,
   type Prisma,
   type PrismaClient,
 } from "@prisma/client";
-import { describe, expect, it } from "vitest";
+import pg from "pg";
+import { beforeAll, describe, expect, it } from "vitest";
 
 import {
   grantHostedUsageCreditForPurchaseTx,
@@ -49,6 +51,13 @@ import { createPrismaClient } from "@/src/lib/prisma";
 const databaseUrl = process.env.DATABASE_URL?.trim() ?? "";
 const runPostgresConcurrencyProof =
   process.env.MURPH_TEST_POSTGRES_CONCURRENCY === "1";
+const detachedDirectProofMigrationSql = readFileSync(
+  new URL(
+    "../prisma/migrations/20260727040000_relax_hosted_usage_credit_detached_direct_proof/migration.sql",
+    import.meta.url,
+  ),
+  "utf8",
+);
 
 if (
   runPostgresConcurrencyProof &&
@@ -88,6 +97,7 @@ function createDeferred<T = void>(): Deferred<T> {
 }
 
 async function createUsageCreditFixture(input: {
+  directTerminalCrossOwner?: boolean;
   terminalCrossOwner?: boolean;
 } = {}): Promise<UsageCreditFixture> {
   if (!databaseUrl) {
@@ -96,7 +106,9 @@ async function createUsageCreditFixture(input: {
 
   const fixtureId = randomUUID();
   const beneficiaryMemberId = `member_usage_credit_lock_${fixtureId}`;
-  const payerMemberId = input.terminalCrossOwner
+  const terminalCrossOwner =
+    input.terminalCrossOwner || input.directTerminalCrossOwner;
+  const payerMemberId = terminalCrossOwner
     ? `member_usage_credit_payer_${fixtureId}`
     : beneficiaryMemberId;
   const purchaseId = `hucp_usage_credit_lock_${fixtureId}`;
@@ -133,7 +145,7 @@ async function createUsageCreditFixture(input: {
       id: purchaseId,
       offerCode: "usage_5_usd",
       payerMemberId,
-      ...(input.terminalCrossOwner
+      ...(terminalCrossOwner
         ? {
             lastReconciledAt: new Date("2026-07-16T12:05:00.000Z"),
             paidAt: new Date("2026-07-16T12:05:00.000Z"),
@@ -141,9 +153,14 @@ async function createUsageCreditFixture(input: {
             status: HostedUsageCreditPurchaseStatus.fulfilled,
             stripeChargeIdEncrypted: `encrypted-charge:${fixtureId}`,
             stripeChargeLookupKey: `charge-lookup:${fixtureId}`,
-            stripeCheckoutSessionIdEncrypted: `encrypted-session:${fixtureId}`,
-            stripeCheckoutSessionLookupKey: `session-lookup:${fixtureId}`,
-            stripeCheckoutUrlEncrypted: `encrypted-url:${fixtureId}`,
+            ...(input.directTerminalCrossOwner
+              ? {}
+              : {
+                  stripeCheckoutSessionIdEncrypted:
+                    `encrypted-session:${fixtureId}`,
+                  stripeCheckoutSessionLookupKey: `session-lookup:${fixtureId}`,
+                  stripeCheckoutUrlEncrypted: `encrypted-url:${fixtureId}`,
+                }),
             stripePaymentIntentIdEncrypted: `encrypted-payment-intent:${fixtureId}`,
             stripePaymentIntentLookupKey: `payment-intent-lookup:${fixtureId}`,
             terminalAt: new Date("2026-07-16T12:05:00.000Z"),
@@ -252,6 +269,16 @@ function isClearlyLocalPostgresUrl(value: string): boolean {
 describe.skipIf(!runPostgresConcurrencyProof)(
   "hosted usage-credit PostgreSQL serialization",
   () => {
+    beforeAll(async () => {
+      const client = new pg.Client({ connectionString: databaseUrl });
+      await client.connect();
+      try {
+        await client.query(detachedDirectProofMigrationSql);
+      } finally {
+        await client.end();
+      }
+    });
+
     it("grants one ledger entry when two grant replays race", async () => {
       const fixture = await createUsageCreditFixture();
       const paidAt = new Date("2026-07-16T12:01:00.000Z");
@@ -1685,5 +1712,111 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         ]);
       }
     });
+
+    it("detaches a fulfilled sessionless direct purchase under the migrated constraint", async () => {
+      const fixture = await createUsageCreditFixture({
+        directTerminalCrossOwner: true,
+      });
+      const detachedAt = new Date("2026-07-16T12:06:00.000Z");
+
+      try {
+        await fixture.observer.hostedMember.update({
+          data: { suspendedAt: detachedAt },
+          where: { id: fixture.payerMemberId },
+        });
+        await fixture.firstClient.$transaction(async (tx) => {
+          await assertHostedUsageCreditPurchasesReadyForAccountDeletionTx({
+            memberIds: [fixture.payerMemberId],
+            now: detachedAt,
+            prisma: tx,
+          });
+          await tx.hostedMember.delete({
+            where: { id: fixture.payerMemberId },
+          });
+        }, transactionOptions);
+
+        await expect(
+          fixture.observer.hostedUsageCreditPurchase.findUniqueOrThrow({
+            select: {
+              payerMemberId: true,
+              reconciliationVersion: true,
+              status: true,
+              stripeChargeIdEncrypted: true,
+              stripeChargeLookupKey: true,
+              stripeCheckoutSessionIdEncrypted: true,
+              stripeCheckoutSessionLookupKey: true,
+              stripeCustomerIdEncrypted: true,
+              stripePaymentIntentIdEncrypted: true,
+              stripePaymentIntentLookupKey: true,
+              stripePriceIdEncrypted: true,
+            },
+            where: { id: fixture.purchaseId },
+          }),
+        ).resolves.toEqual({
+          payerMemberId: null,
+          reconciliationVersion: 1n,
+          status: HostedUsageCreditPurchaseStatus.fulfilled,
+          stripeChargeIdEncrypted: null,
+          stripeChargeLookupKey: expect.any(String),
+          stripeCheckoutSessionIdEncrypted: null,
+          stripeCheckoutSessionLookupKey: null,
+          stripeCustomerIdEncrypted: null,
+          stripePaymentIntentIdEncrypted: null,
+          stripePaymentIntentLookupKey: expect.any(String),
+          stripePriceIdEncrypted: null,
+        });
+      } finally {
+        await cleanupUsageCreditFixture(fixture);
+      }
+    });
+
+    it.each(["payment_intent", "charge"] as const)(
+      "rejects detached direct proof without its %s lookup",
+      async (missingLookup) => {
+        const fixture = await createUsageCreditFixture({
+          directTerminalCrossOwner: true,
+        });
+
+        try {
+          const detachWithoutProof = missingLookup === "payment_intent"
+            ? fixture.observer.$executeRaw`
+                UPDATE "hosted_usage_credit_purchase"
+                SET
+                  "payer_member_id" = NULL,
+                  "stripe_price_id_encrypted" = NULL,
+                  "stripe_customer_id_encrypted" = NULL,
+                  "stripe_checkout_session_id_encrypted" = NULL,
+                  "stripe_checkout_url_encrypted" = NULL,
+                  "stripe_payment_intent_id_encrypted" = NULL,
+                  "stripe_payment_intent_lookup_key" = NULL,
+                  "stripe_charge_id_encrypted" = NULL
+                WHERE "id" = ${fixture.purchaseId}
+              `
+            : fixture.observer.$executeRaw`
+                UPDATE "hosted_usage_credit_purchase"
+                SET
+                  "payer_member_id" = NULL,
+                  "stripe_price_id_encrypted" = NULL,
+                  "stripe_customer_id_encrypted" = NULL,
+                  "stripe_checkout_session_id_encrypted" = NULL,
+                  "stripe_checkout_url_encrypted" = NULL,
+                  "stripe_payment_intent_id_encrypted" = NULL,
+                  "stripe_charge_id_encrypted" = NULL,
+                  "stripe_charge_lookup_key" = NULL
+                WHERE "id" = ${fixture.purchaseId}
+              `;
+
+          await expect(detachWithoutProof).rejects.toThrow();
+          await expect(
+            fixture.observer.hostedUsageCreditPurchase.findUniqueOrThrow({
+              select: { payerMemberId: true },
+              where: { id: fixture.purchaseId },
+            }),
+          ).resolves.toEqual({ payerMemberId: fixture.payerMemberId });
+        } finally {
+          await cleanupUsageCreditFixture(fixture);
+        }
+      },
+    );
   },
 );

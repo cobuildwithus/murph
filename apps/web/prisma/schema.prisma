@@ -545,6 +545,7 @@ model HostedMember {
   identity                       HostedMemberIdentity?
   routing                        HostedMemberRouting?
   billingRef                     HostedMemberBillingRef?
+  subscriptionCheckouts          HostedMemberSubscriptionCheckout[]
   emailAuthorization             HostedMemberEmailAuthorization?
   hostedMailboxItems             HostedMailboxItem[]
   hostedMailboxPayloads          HostedMailboxPayload[]
@@ -909,6 +910,17 @@ model HostedMemberBillingRef {
   member                        HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
 
   @@map("hosted_member_billing_ref")
+}
+
+model HostedMemberSubscriptionCheckout {
+  stripeCheckoutSessionLookupKey String       @id @map("stripe_checkout_session_lookup_key")
+  stripeCheckoutSessionIdEncrypted String     @map("stripe_checkout_session_id_encrypted")
+  memberId                       String       @map("member_id")
+  createdAt                      DateTime     @default(now()) @map("created_at")
+  member                         HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@index([memberId])
+  @@map("hosted_member_subscription_checkout")
 }
 
 model HostedMemberEmailAuthorization {

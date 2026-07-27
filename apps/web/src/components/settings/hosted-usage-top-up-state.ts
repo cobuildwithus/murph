@@ -30,6 +30,7 @@ interface HostedUsageTopUpSelectionScreen {
 }
 
 interface HostedUsageTopUpPurchaseScreen {
+  cancelAllowed: boolean;
   checkoutError: string | null;
   checkoutUrl: string | null;
   kind: "purchase";
@@ -142,6 +143,7 @@ function createHostedUsageTopUpState(input: {
     open: input.purchaseReturn !== null || input.initialOpen,
     screen: {
       ...createPurchaseScreen(purchaseId),
+      cancelAllowed: input.activePurchase?.cancelAllowed === true,
       checkoutUrl:
         status === "checkout_open" &&
         input.activePurchase?.targetConflict !== true &&
@@ -153,7 +155,7 @@ function createHostedUsageTopUpState(input: {
           ? readOptionalRestartAt(input.activePurchase?.restartAt)
           : null,
       retryOfferCode:
-        status === "reconciling" &&
+        (status === "reconciling" || status === "payment_pending") &&
         input.activePurchase?.targetConflict !== true &&
         input.activePurchase?.retryAllowed
           ? input.activePurchase.offerCode
@@ -398,6 +400,7 @@ function screenFromResponse(
     : null;
   return {
     ...createPurchaseScreen(response.purchaseId),
+    cancelAllowed: response.cancelAllowed,
     checkoutUrl:
       !response.targetConflict && response.status === "checkout_open"
         ? responseUrl ?? previous?.checkoutUrl ?? null
@@ -431,6 +434,7 @@ function createPurchaseScreen(
   purchaseId: string,
 ): HostedUsageTopUpPurchaseScreen {
   return {
+    cancelAllowed: false,
     checkoutError: null,
     checkoutUrl: null,
     kind: "purchase",
