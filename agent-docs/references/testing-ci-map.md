@@ -195,8 +195,11 @@ not enter evidence; and attachment-only input fails closed before provider work.
   wake-up jitter, the ten-minute-plus-jitter retry/recurrence floor,
   provider-idempotent retry, naturally distinct later-incident copy, PII-free
   evidence, fail-safe scan truncation, pre-provider recovery cancellation,
-  provider-boundary quiet-hour deferral with fresh wake-time evidence, and
-  post-provider recovery coalescing until the admitted effect settles.
+  zero-attempt quiet-hour deferral with fresh first-alert wake evidence, exact
+  ambiguous retry identity across quiet hours, and post-provider recovery
+  coalescing until the admitted effect settles. Row-version race cases prove
+  stale healthy candidates cannot report recovery or bypass pacing after a
+  concurrent incident cycles the singleton back to healthy.
   `apps/web/vercel.json` registers that read-only monitor at a five-minute
   cadence. The hosted-local foreground-priority leg additionally uses real
   PostgreSQL, authenticated cron HTTP, and the Linq stub boundary to prove one

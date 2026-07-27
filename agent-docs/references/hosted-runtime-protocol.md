@@ -1964,19 +1964,21 @@ suppresses provider sends from 11 PM through 7 AM local time. A stable per-day
 delay of up to ten minutes spreads deferred alerts across more than one
 five-minute cron tick instead of resuming every alert at the same quiet-hours
 boundary. Detection and healthy-state transitions continue while sends are
-suppressed. After a claim, the monitor re-reads latency health and operator
-local time, then compares the exact sending attempt immediately before provider
-entry. Recovery at that boundary cancels the claim without calling Linq; if
-quiet hours began during the scan, the same incident becomes durably deferred
-without provider entry. A later claim for that known-unsent incident rebuilds
-its body from current health and checked-at time; exact body preservation is
-reserved for a provider attempt that may already have succeeded. Once the
-provider call has been admitted, another healthy scan coalesces against the
-bounded four-minute send lease rather than reporting recovery while delivery
-is still unknown. After the call settles or fails, or after the lease expires,
-a healthy scan silently clears sending, failed, deferred, or accepted active
-state. Provider admission is the cancellation boundary: an admitted request
-may still complete.
+suppressed. Before provider entry, the monitor re-reads latency health and
+operator local time. Recovery or quiet hours at that boundary make no
+provider-attempt state change. The subsequent singleton compare-and-swap is
+fenced by the candidate row's `updatedAt` version and is the sole admission
+boundary: only it enters sending state, increments attempt count, and advances
+`lastAttemptedAt` immediately before Linq. The same version comparison makes a
+stale recovery coalesce if another incident changed and then restored the
+visible status. A known-unsent first alert therefore has no incident or pacing
+boundary to carry overnight and later builds current evidence; a blocked retry
+whose prior provider call may have succeeded keeps its exact incident body,
+idempotency key, and real attempt time. Once a provider call has been admitted,
+another healthy scan coalesces against the bounded four-minute send lease rather
+than reporting recovery while delivery is still unknown. After the call settles
+or fails, or after the lease expires, a healthy scan silently clears sending,
+failed, or accepted active state. An admitted request may still complete.
 Persisted and delivered evidence is aggregate counts and durations only: no
 message content, member, phone, chat, mailbox, delivery, or trace identifiers.
 The monitor is observability-only: it does not append mailbox work, signal

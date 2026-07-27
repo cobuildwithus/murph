@@ -26,13 +26,16 @@ Last verified: 2026-07-26
   may already have succeeded preserves the exact body and idempotency key;
   distinct incidents vary through current aggregate evidence and checked-at
   time, never random padding or synonym churn. Fresh health and operator-time
-  rechecks plus an exact-claim comparison immediately before provider entry
-  cancel recovered or superseded claims and durably defer a claim if quiet
-  hours began during the scan. Resuming a known-unsent deferred claim rebuilds
-  current evidence and checked-at copy under the same incident identity. After
-  provider entry, healthy scans coalesce against the bounded four-minute send
-  lease until the attempt settles or expires; only then may the persisted
-  incident become healthy.
+  rechecks precede the one exact row-version compare-and-swap that admits
+  provider entry, increments attempt count, and advances the provider-attempt
+  timestamp. The same version fence makes a stale recovery coalesce rather than
+  report healthy after a concurrent incident cycles back to the same status.
+  Recovery or quiet hours before admission leave attempt state untouched: a
+  known-unsent first alert later builds current evidence, while an ambiguous
+  prior attempt retains its exact body, key, and pacing boundary. After provider
+  entry, healthy scans coalesce against the bounded four-minute send lease until
+  the attempt settles or expires; only then may the persisted incident become
+  healthy.
 - Hosted managed-automation reconciliation persists retry generation in the existing workspace checkpoint owner. Only eligible, explicitly retryable failures receive the bounded 30-second, 2-minute, and 10-minute backoff sequence; unclassified or permanent failures are logged without manufacturing another wake, and a later successful pass clears the retry generation.
 - Managed automation ownership is exact-seed and route-authority based. Built-in seeds without an explicit scope default to `member`; member seeds run only on personal/direct routes, while `authenticated-group` seeds run only on live non-direct Linq/iMessage or Telegram routes. Group email is excluded. Reconciliation archives every nonterminal wrong-owner built-in record, including paused records, while already archived records and caller-supplied unscoped custom seeds retain their prior behavior. Claimed static built-ins resolve the current immutable seed by automation id before lifecycle hooks and revalidate the same owner and live route before evidence, provider admission, tools, delivery, and commit; editable tags, slugs, titles, and instructions cannot acquire authority. Dynamically generated experiment-lifecycle seeds remain on their existing path until their separately coordinated owner exposes an exact resolver. Immutable personal-memory and group-room-model ids still exclusively select silent maintenance policy and its provider-admission replay barrier. The hosted Sunday superlatives id instead uses the ordinary notification/outbox path and first obtains a status-only Web decision over a bounded seven-local-calendar-day mailbox scan. `ineligible`, `unavailable`, malformed, stale-route, or over-cap activity evidence consumes the occurrence as a gate skip before lifecycle/model/outbox work. An eligible occurrence then reads a bounded exact-route projection from existing structured input events; rendered prompts and transcripts are not reparsed, attachment-bearing inputs are excluded, and unavailable or empty structured evidence is another pre-provider gate skip. No retry can move the activity or composition window because the claimed occurrence and vault timezone are immutable, and no counter, queue, parser protocol, cursor, or second scheduler is introduced.
 - Closed integration-ingest months compact only in the abortable hosted idle-shutdown lane. Core publishes a verified deterministic gzip before deleting raw bytes, normal readers and amendments stream bounded gzip output, and startup repairs only an independently valid, newline-terminated, byte-identical raw/gzip pair. A wake preserves foreground priority; a 30-second pass budget or ordinary compaction failure leaves any unfinished source intact and does not block checkpointing. Remaining raw months are the next pass's durable worklist, while a non-identical representation pair fails closed without a repair queue or marker.

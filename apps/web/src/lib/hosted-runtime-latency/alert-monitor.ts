@@ -32,7 +32,6 @@ const HOSTED_RUNTIME_LATENCY_QUIET_HOURS_END_HOUR = 7;
 const HOSTED_RUNTIME_LATENCY_QUIET_HOURS_START_HOUR = 23;
 
 const MONITOR_STATUS = {
-  alertDeferred: "latency_alert_deferred",
   alertFailed: "latency_alert_failed",
   alertSending: "latency_alert_sending",
   alerting: "latency_alerting",
@@ -118,7 +117,7 @@ export async function runHostedRuntimeLatencyAlertMonitor(input: {
     now,
     prisma,
   });
-  const claim = await claimHostedRuntimeLatencyAlertTransition({
+  const transition = await prepareHostedRuntimeLatencyAlertTransition({
     health,
     now,
     prisma,
@@ -126,21 +125,21 @@ export async function runHostedRuntimeLatencyAlertMonitor(input: {
     timeZone: alertConfig.timeZone,
   });
 
-  if (!claim.action) {
+  if (!transition.candidateState) {
     return {
       configured: true,
       health,
-      outcome: claim.outcome,
+      outcome: transition.outcome,
     };
   }
 
-  const admission = await admitHostedRuntimeLatencyAlertSend({
-    action: claim.action,
+  const admission = await claimHostedRuntimeLatencyAlertSend({
     now: input.now,
     prisma,
+    state: transition.candidateState,
     timeZone: alertConfig.timeZone,
   });
-  if (!admission.admitted) {
+  if (!admission.action) {
     return {
       configured: true,
       health: admission.health,
@@ -149,16 +148,17 @@ export async function runHostedRuntimeLatencyAlertMonitor(input: {
   }
 
   const sendLinqMessage = input.sendLinqMessage ?? sendHostedLinqChatMessage;
+  const action = admission.action;
   try {
     const sent = await sendLinqMessage({
       chatId: alertConfig.chatId,
-      idempotencyKey: buildHostedRuntimeLatencyAlertIdempotencyKey(claim.action),
-      message: claim.action.message,
+      idempotencyKey: buildHostedRuntimeLatencyAlertIdempotencyKey(action),
+      message: action.message,
       signal: input.signal,
     });
     await completeHostedRuntimeLatencyAlertTransition({
-      action: claim.action,
-      attemptedAt: claim.action.attemptedAt,
+      action,
+      attemptedAt: action.attemptedAt,
       completedAt: input.now ?? new Date(),
       prisma,
       providerMessageId: sent.messageId,
@@ -166,8 +166,8 @@ export async function runHostedRuntimeLatencyAlertMonitor(input: {
   } catch (error) {
     const errorCode = readHostedRuntimeLatencyAlertErrorCode(error);
     await failHostedRuntimeLatencyAlertTransition({
-      action: claim.action,
-      attemptedAt: claim.action.attemptedAt,
+      action,
+      attemptedAt: action.attemptedAt,
       errorCode,
       prisma,
     });
@@ -340,14 +340,14 @@ async function ensureHostedRuntimeLatencyMonitorState(input: {
   return state;
 }
 
-async function claimHostedRuntimeLatencyAlertTransition(input: {
+async function prepareHostedRuntimeLatencyAlertTransition(input: {
   health: HostedRuntimeLatencyHealth;
   now: Date;
   prisma: HostedRuntimeLatencyPrismaClient;
   state: HostedLinqAlert;
   timeZone: string;
 }): Promise<{
-  action: HostedRuntimeLatencyClaimedAction | null;
+  candidateState: HostedLinqAlert | null;
   outcome: Exclude<
     HostedRuntimeLatencyAlertMonitorOutcome,
     "alert_sent" | "disabled"
@@ -355,7 +355,7 @@ async function claimHostedRuntimeLatencyAlertTransition(input: {
 }> {
   if (input.health.anomalous) {
     if (input.state.status === MONITOR_STATUS.alerting) {
-      return { action: null, outcome: "incident_active" };
+      return { candidateState: null, outcome: "incident_active" };
     }
     const deferred = readHostedRuntimeLatencyAlertDeferral({
       now: input.now,
@@ -363,25 +363,20 @@ async function claimHostedRuntimeLatencyAlertTransition(input: {
       timeZone: input.timeZone,
     });
     if (deferred) {
-      return { action: null, outcome: deferred };
+      return { candidateState: null, outcome: deferred };
     }
 
-    return claimHostedRuntimeLatencyAlertSend({
-      health: input.health,
-      now: input.now,
-      prisma: input.prisma,
-      state: input.state,
-    });
+    return { candidateState: input.state, outcome: "coalesced" };
   }
 
   if (input.state.status === MONITOR_STATUS.healthy) {
-    return { action: null, outcome: "healthy" };
+    return { candidateState: null, outcome: "healthy" };
   }
   if (
     input.state.status === MONITOR_STATUS.alertSending
     && !isHostedRuntimeLatencySendLeaseExpired(input.state, input.now)
   ) {
-    return { action: null, outcome: "coalesced" };
+    return { candidateState: null, outcome: "coalesced" };
   }
 
   const cleared = await input.prisma.hostedLinqAlert.updateMany({
@@ -397,24 +392,24 @@ async function claimHostedRuntimeLatencyAlertTransition(input: {
     },
   });
   return {
-    action: null,
+    candidateState: null,
     outcome: cleared.count === 1 ? "healthy" : "coalesced",
   };
 }
 
-async function admitHostedRuntimeLatencyAlertSend(input: {
-  action: HostedRuntimeLatencyClaimedAction;
+async function claimHostedRuntimeLatencyAlertSend(input: {
   now?: Date;
   prisma: HostedRuntimeLatencyPrismaClient;
+  state: HostedLinqAlert;
   timeZone: string;
 }): Promise<
   | {
-      admitted: true;
+      action: HostedRuntimeLatencyClaimedAction;
       health: HostedRuntimeLatencyHealth;
       outcome: null;
     }
   | {
-      admitted: false;
+      action: null;
       health: HostedRuntimeLatencyHealth;
       outcome: "coalesced" | "deferred_quiet_hours" | "healthy";
     }
@@ -424,16 +419,11 @@ async function admitHostedRuntimeLatencyAlertSend(input: {
     now: healthCheckedAt,
     prisma: input.prisma,
   });
-  const exactClaim = {
-    id: HOSTED_RUNTIME_LATENCY_MONITOR_ID,
-    lastAttemptedAt: input.action.attemptedAt,
-    status: MONITOR_STATUS.alertSending,
-  };
 
   if (!health.anomalous) {
     const recoveryCheckedAt = input.now ?? new Date();
     const cleared = await input.prisma.hostedLinqAlert.updateMany({
-      where: exactClaim,
+      where: buildHostedRuntimeLatencyStateCompare(input.state),
       data: {
         detailsJson: buildHostedRuntimeLatencyAlertDetails({
           health,
@@ -445,56 +435,23 @@ async function admitHostedRuntimeLatencyAlertSend(input: {
       },
     });
     return {
-      admitted: false,
+      action: null,
       health,
       outcome: cleared.count === 1 ? "healthy" : "coalesced",
     };
-  }
-
-  const claimed = await input.prisma.hostedLinqAlert.count({
-    where: exactClaim,
-  });
-  if (claimed !== 1) {
-    return { admitted: false, health, outcome: "coalesced" };
   }
 
   const admissionCheckedAt = input.now ?? new Date();
   if (
     isHostedRuntimeLatencyQuietTime(admissionCheckedAt, input.timeZone)
   ) {
-    const deferred = await input.prisma.hostedLinqAlert.updateMany({
-      where: exactClaim,
-      data: {
-        status: MONITOR_STATUS.alertDeferred,
-      },
-    });
     return {
-      admitted: false,
+      action: null,
       health,
-      outcome: deferred.count === 1
-        ? "deferred_quiet_hours"
-        : "coalesced",
+      outcome: "deferred_quiet_hours",
     };
   }
 
-  return { admitted: true, health, outcome: null };
-}
-
-interface HostedRuntimeLatencyClaimedAction {
-  attemptedAt: Date;
-  incidentId: string;
-  message: string;
-}
-
-async function claimHostedRuntimeLatencyAlertSend(input: {
-  health: HostedRuntimeLatencyHealth;
-  now: Date;
-  prisma: HostedRuntimeLatencyPrismaClient;
-  state: HostedLinqAlert;
-}): Promise<{
-  action: HostedRuntimeLatencyClaimedAction | null;
-  outcome: "coalesced";
-}> {
   const incidentId = input.state.status === MONITOR_STATUS.healthy
     ? randomUUID()
     : readHostedRuntimeLatencyIncidentId(input.state);
@@ -510,8 +467,8 @@ async function claimHostedRuntimeLatencyAlertSend(input: {
     || input.state.status === MONITOR_STATUS.alertFailed
     ? readHostedRuntimeLatencyAlertMessage(input.state)
     : buildHostedRuntimeLatencyAlertMessage({
-        health: input.health,
-        now: input.now,
+        health,
+        now: admissionCheckedAt,
       });
   if (!message) {
     throw hostedOnboardingError({
@@ -527,31 +484,39 @@ async function claimHostedRuntimeLatencyAlertSend(input: {
       attemptCount: {
         increment: 1,
       },
-      claimedAt: input.now,
+      claimedAt: admissionCheckedAt,
       detailsJson: buildHostedRuntimeLatencyAlertDetails({
-        health: input.health,
+        health,
         incidentId,
         message,
-        now: input.now,
+        now: admissionCheckedAt,
         phase: "alert",
       }),
-      lastAttemptedAt: input.now,
+      lastAttemptedAt: admissionCheckedAt,
       lastErrorCode: null,
       lastProviderStatus: null,
       status: MONITOR_STATUS.alertSending,
     },
   });
 
+  if (claimed.count !== 1) {
+    return { action: null, health, outcome: "coalesced" };
+  }
   return {
-    action: claimed.count === 1
-      ? {
-          attemptedAt: input.now,
-          incidentId,
-          message,
-        }
-      : null,
-    outcome: "coalesced",
+    action: {
+      attemptedAt: admissionCheckedAt,
+      incidentId,
+      message,
+    },
+    health,
+    outcome: null,
   };
+}
+
+interface HostedRuntimeLatencyClaimedAction {
+  attemptedAt: Date;
+  incidentId: string;
+  message: string;
 }
 
 async function completeHostedRuntimeLatencyAlertTransition(input: {
@@ -599,10 +564,8 @@ async function failHostedRuntimeLatencyAlertTransition(input: {
 function buildHostedRuntimeLatencyStateCompare(state: HostedLinqAlert) {
   return {
     id: HOSTED_RUNTIME_LATENCY_MONITOR_ID,
-    ...(state.status === MONITOR_STATUS.alertSending
-      ? { lastAttemptedAt: state.lastAttemptedAt }
-      : {}),
     status: state.status,
+    updatedAt: state.updatedAt,
   };
 }
 
