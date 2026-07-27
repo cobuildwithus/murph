@@ -253,16 +253,25 @@ only the 42 candidate-generation calls now run before the transaction. The
 per-domain advisory locks are transaction-scoped, so post-commit prewarm work
 inside the same transaction also extends their lifetime.
 
-An active sponsorship, persisted Family checkout attempt, or bound Family
-subscription prevents a member from starting a separate direct checkout. If a
-direct checkout opened before Family billing claimed the member and completes
-afterward, reconciliation leaves it unbound and cancels that superseded
-subscription after the database transaction. It automatically refunds only the
-ordinary one-invoice/one-payment case; balance credits, credit notes, partial
-refunds, and multiple payment allocations require support instead of guessed
-accounting. A Family conversion may clear an owner's prior direct billing
-reference only when it names the same Stripe subscription that became the
-Family subscription; never erase a different subscription reference.
+A live Family owner—an active sponsorship, a nonterminal bound subscription,
+or a checkout attempt created within the prior 24 hours—prevents a member from
+starting a separate direct checkout. An exact expired-Session event clears only
+the matching Family attempt; terminal subscriptions and older abandoned
+attempts do not become permanent claims. A directly paid beneficiary is not
+claimed because active Family reconciliation deliberately skips that member.
+
+If a direct checkout opened before Family billing claimed the member and
+completes afterward, reconciliation leaves it unbound and cancels that
+superseded subscription after the database transaction. An already accepted
+direct subscription remains the owner when its Checkout, subscription, or
+invoice event is replayed after a later Family attempt. Duplicate cleanup
+automatically refunds only one provable paid invoice and completes only after
+Stripe reports the full refund `succeeded`; balance credits, credit notes,
+partial or pending refunds, multiple paid invoices, and multiple payment
+allocations remain retryable or require support instead of guessed accounting.
+A Family conversion may clear an owner's prior direct billing reference only
+when it names the same Stripe subscription that became the Family subscription;
+never erase a different subscription reference.
 
 ## Invite Issuance
 

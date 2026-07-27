@@ -144,6 +144,7 @@ export const HOSTED_FAMILY_BILLING_PLAN_CODE = "launch_family_monthly" as const;
 export const HOSTED_FAMILY_STRIPE_PRICE_ID_ENV_KEY =
   "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_SEAT_MONTHLY";
 export const HOSTED_FAMILY_STRIPE_METADATA_KIND = "hosted_family_plan";
+const HOSTED_FAMILY_CHECKOUT_CLAIM_MAX_AGE_MS = 24 * 60 * 60_000;
 const HOSTED_FAMILY_STRIPE_CHECKOUT_SESSION_ID_PATTERN = /^cs_(?:test|live)_[A-Za-z0-9]+$/u;
 
 export interface HostedFamilyChatNotificationRequest {
@@ -1041,6 +1042,7 @@ export async function readHostedAccountGroupStripeBillingRef(input: {
  */
 export async function readHostedMemberFamilyBillingClaim(input: {
   memberId: string;
+  now?: Date;
   prisma: HostedOnboardingReadClient;
 }): Promise<HostedMemberFamilyBillingClaim | null> {
   const memberships = await input.prisma.hostedAccountGroupMembership.findMany({
@@ -1051,6 +1053,7 @@ export async function readHostedMemberFamilyBillingClaim(input: {
           billingRef: {
             select: {
               checkoutAttemptId: true,
+              checkoutCreatedAt: true,
               stripeSubscriptionIdEncrypted: true,
             },
           },
@@ -1066,6 +1069,16 @@ export async function readHostedMemberFamilyBillingClaim(input: {
       status: "active",
     },
   });
+  if (
+    memberships.length > 0
+    && await hasHostedFamilyMemberDirectPaid({
+      memberId: input.memberId,
+      prisma: input.prisma,
+    })
+  ) {
+    return null;
+  }
+  const nowMs = (input.now ?? new Date()).getTime();
   const claims: HostedMemberFamilyBillingClaim[] = [];
   for (const { group } of memberships) {
     if (
@@ -1079,7 +1092,10 @@ export async function readHostedMemberFamilyBillingClaim(input: {
       });
       continue;
     }
-    if (group.billingRef?.stripeSubscriptionIdEncrypted) {
+    if (
+      group.billingStatus !== HostedBillingStatus.canceled
+      && group.billingRef?.stripeSubscriptionIdEncrypted
+    ) {
       claims.push({
         groupId: group.id,
         kind: "bound_subscription",
@@ -1087,7 +1103,12 @@ export async function readHostedMemberFamilyBillingClaim(input: {
       });
       continue;
     }
-    if (group.billingRef?.checkoutAttemptId) {
+    if (
+      group.billingRef?.checkoutAttemptId
+      && group.billingRef.checkoutCreatedAt
+      && nowMs - group.billingRef.checkoutCreatedAt.getTime()
+        < HOSTED_FAMILY_CHECKOUT_CLAIM_MAX_AGE_MS
+    ) {
       claims.push({
         checkoutAttemptId: group.billingRef.checkoutAttemptId,
         groupId: group.id,
@@ -1105,6 +1126,66 @@ export async function readHostedMemberFamilyBillingClaim(input: {
     });
   }
   return claims[0] ?? null;
+}
+
+/**
+ * Family Checkout expiry is group-scoped, so it cannot use the direct-member
+ * expiry lookup. The attempt and blind Session key predicates ensure a delayed
+ * expiry event cannot clear a replacement attempt.
+ */
+export async function applyHostedFamilyStripeCheckoutExpiredTx(input: {
+  session: Stripe.Checkout.Session;
+  tx: Prisma.TransactionClient;
+}): Promise<boolean> {
+  if (input.session.metadata?.kind !== HOSTED_FAMILY_STRIPE_METADATA_KIND) {
+    return false;
+  }
+
+  const groupId = normalizeNullableString(input.session.metadata.accountGroupId);
+  const ownerMemberId = normalizeNullableString(
+    input.session.metadata.ownerMemberId,
+  );
+  const checkoutAttemptId = normalizeNullableString(
+    input.session.metadata.checkoutAttemptId,
+  );
+  const stripeCheckoutSessionLookupKey =
+    createHostedStripeCheckoutSessionLookupKey(input.session.id);
+  if (
+    !groupId
+    || !ownerMemberId
+    || !checkoutAttemptId
+    || !stripeCheckoutSessionLookupKey
+  ) {
+    return true;
+  }
+
+  const group = await input.tx.hostedAccountGroup.findUnique({
+    select: {
+      id: true,
+      ownerMemberId: true,
+    },
+    where: { id: groupId },
+  });
+  if (!group || group.ownerMemberId !== ownerMemberId) {
+    return true;
+  }
+
+  await lockHostedMemberRow(input.tx, group.ownerMemberId);
+  await input.tx.hostedAccountGroupBillingRef.updateMany({
+    data: {
+      checkoutAttemptId: null,
+      checkoutCreatedAt: null,
+      checkoutSeatCount: null,
+      stripeCheckoutSessionIdEncrypted: null,
+      stripeCheckoutSessionLookupKey: null,
+    },
+    where: {
+      checkoutAttemptId,
+      groupId: group.id,
+      stripeCheckoutSessionLookupKey,
+    },
+  });
+  return true;
 }
 
 /**

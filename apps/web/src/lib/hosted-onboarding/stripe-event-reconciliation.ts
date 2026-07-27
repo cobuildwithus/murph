@@ -72,6 +72,7 @@ import {
 } from "./stripe-error-log";
 import {
   cleanupHostedStandardCheckoutLoser,
+  HostedStripeCheckoutLoserCleanupPendingError,
 } from "./stripe-checkout-loser-cleanup";
 import { readActiveHostedFamilySponsorship } from "./member-access";
 import {
@@ -931,6 +932,7 @@ async function processClaimedHostedStripeEvent(
   } catch (error) {
     const poisoned = claimed.attemptCount >= STRIPE_EVENT_MAX_ATTEMPTS &&
       !(error instanceof HostedLegacyFamilyCleanupPendingError) &&
+      !(error instanceof HostedStripeCheckoutLoserCleanupPendingError) &&
       !(error instanceof HostedStripeSubscriptionIdentityPendingError) &&
       !(error instanceof HostedStripeEventRetrieveRetryableError) &&
       !usageCreditEventHandled &&

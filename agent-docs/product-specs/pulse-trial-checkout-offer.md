@@ -407,7 +407,9 @@ support rather than risking a second subscription.
 `checkout.session.completed` accepts exactly one standard subscription as the
 member's billing owner. A later completion cannot overwrite it: reconciliation
 cancels the superseded subscription and automatically refunds only a provable
-one-invoice/one-payment charge. Customer Balance, credit-note, partial-refund,
+one-paid-invoice/one-payment charge. Cleanup completes only after Stripe reports
+the full refund `succeeded`; a pending refund remains owned by the existing
+retry path. Customer Balance, credit-note, partial-refund, multiple-paid-invoice,
 or multi-allocation cases stay canceled and surface a support-required error;
 the application does not reconstruct historical Stripe accounting.
 

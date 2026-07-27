@@ -3,6 +3,9 @@ import type Stripe from "stripe";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "@/src/lib/hosted-onboarding/shared";
+import {
+  HostedStripeCheckoutLoserCleanupPendingError,
+} from "@/src/lib/hosted-onboarding/stripe-checkout-loser-cleanup";
 
 const mocks = vi.hoisted(() => ({
   applyStripeCheckoutCompleted: vi.fn(),
@@ -137,10 +140,17 @@ vi.mock("@/src/lib/hosted-onboarding/stripe-billing-events", () => ({
     mocks.cancelHostedPulseTrialCheckoutLoserSubscription,
 }));
 
-vi.mock("@/src/lib/hosted-onboarding/stripe-checkout-loser-cleanup", () => ({
-  cleanupHostedStandardCheckoutLoser:
-    mocks.cleanupHostedStandardCheckoutLoser,
-}));
+vi.mock("@/src/lib/hosted-onboarding/stripe-checkout-loser-cleanup", async () => {
+  const actual = await vi.importActual<
+    typeof import("@/src/lib/hosted-onboarding/stripe-checkout-loser-cleanup")
+  >("@/src/lib/hosted-onboarding/stripe-checkout-loser-cleanup");
+
+  return {
+    ...actual,
+    cleanupHostedStandardCheckoutLoser:
+      mocks.cleanupHostedStandardCheckoutLoser,
+  };
+});
 
 vi.mock("@/src/lib/hosted-onboarding/stripe-billing-lookup", async () => {
   const actual = await vi.importActual<
@@ -548,6 +558,38 @@ describe("hosted Stripe event reconciliation", () => {
         prisma.client.hostedStripeEvent.updateMany,
       ).mock.invocationCallOrder.at(-1) ?? 0,
     );
+  });
+
+  it("keeps a nonterminal duplicate refund claimable beyond the poison cap", async () => {
+    const prisma = createStripeEventPrismaHarness();
+    const event = makeCheckoutCompletedEvent();
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    mocks.stripe.events.retrieve.mockResolvedValue(event);
+    mocks.applyStripeCheckoutCompleted.mockResolvedValueOnce({
+      activatedMemberId: null,
+      cleanupStandardCheckoutStripeSubscriptionId: "sub_loser",
+      hostedExecutionEventId: null,
+      welcomeEmailMemberId: null,
+    });
+    mocks.cleanupHostedStandardCheckoutLoser.mockRejectedValueOnce(
+      new HostedStripeCheckoutLoserCleanupPendingError(),
+    );
+
+    await recordHostedStripeEvent({ event, prisma: prisma.client });
+    prisma.rows[0]!.attemptCount = 5;
+
+    await expect(reconcileHostedStripeEventById({
+      eventId: event.id,
+      prisma: prisma.client,
+    })).resolves.toMatchObject({ status: "failed" });
+
+    expect(prisma.rows[0]).toEqual(expect.objectContaining({
+      attemptCount: 6,
+      lastErrorCode: "HOSTED_BILLING_CHECKOUT_CLEANUP_PENDING",
+      processedAt: null,
+      status: HostedStripeEventStatus.failed,
+    }));
+    errorSpy.mockRestore();
   });
 
   it("reconciles usage-credit Checkout before subscription-shaped handling", async () => {

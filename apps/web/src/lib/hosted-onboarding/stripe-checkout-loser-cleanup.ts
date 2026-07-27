@@ -1,7 +1,9 @@
 import type Stripe from "stripe";
 
-import { coerceStripeObjectId } from "./billing";
-import { hostedOnboardingError } from "./errors";
+import {
+  HostedOnboardingError,
+  hostedOnboardingError,
+} from "./errors";
 import { requireHostedStripeApi } from "./runtime";
 import { withHostedStripeFailureLog } from "./stripe-error-log";
 
@@ -14,6 +16,20 @@ type RefundTarget =
       charge?: never;
       paymentIntent: string;
     };
+
+export class HostedStripeCheckoutLoserCleanupPendingError
+  extends HostedOnboardingError {
+  constructor() {
+    super({
+      code: "HOSTED_BILLING_CHECKOUT_CLEANUP_PENDING",
+      httpStatus: 409,
+      message:
+        "A superseded Stripe subscription was canceled, but its refund is still pending. Try again after Stripe finishes processing it.",
+      retryable: true,
+    });
+    this.name = "HostedStripeCheckoutLoserCleanupPendingError";
+  }
+}
 
 /**
  * Stops a superseded standard Checkout subscription and refunds only the
@@ -29,22 +45,8 @@ export async function cleanupHostedStandardCheckoutLoser(input: {
   const stripe = input.stripe ?? requireHostedStripeApi();
   const subscription = await withHostedStripeFailureLog(
     "subscription.retrieve.checkout-loser",
-    () => stripe.subscriptions.retrieve(input.stripeSubscriptionId, {
-      expand: ["latest_invoice"],
-    }),
+    () => stripe.subscriptions.retrieve(input.stripeSubscriptionId),
   );
-  const invoice = await readLatestInvoice({
-    stripe,
-    subscription,
-  });
-  const paidAmount = readPositiveInteger(invoice?.amount_paid);
-  const refundTarget = paidAmount && invoice
-    ? await readExactOrdinaryRefundTarget({
-        invoice,
-        paidAmount,
-        stripe,
-      })
-    : null;
 
   if (
     subscription.status !== "canceled"
@@ -66,10 +68,36 @@ export async function cleanupHostedStandardCheckoutLoser(input: {
     );
   }
 
-  if (!paidAmount) {
+  const invoices = await withHostedStripeFailureLog(
+    "invoices.list.checkout-loser",
+    () => stripe.invoices.list({
+      limit: 2,
+      subscription: subscription.id,
+    }),
+  );
+  if (invoices.has_more) {
+    throw buildCheckoutLoserCleanupSupportError();
+  }
+  const paidInvoices = invoices.data.filter(
+    (invoice) => readPositiveInteger(invoice.amount_paid) !== null,
+  );
+  if (paidInvoices.length === 0) {
     return;
   }
-  if (!refundTarget || !invoice) {
+  if (paidInvoices.length !== 1) {
+    throw buildCheckoutLoserCleanupSupportError();
+  }
+  const [invoice] = paidInvoices;
+  const paidAmount = readPositiveInteger(invoice?.amount_paid);
+  if (!invoice || !paidAmount) {
+    throw buildCheckoutLoserCleanupSupportError();
+  }
+  const refundTarget = await readExactOrdinaryRefundTarget({
+    invoice,
+    paidAmount,
+    stripe,
+  });
+  if (!refundTarget) {
     throw buildCheckoutLoserCleanupSupportError();
   }
 
@@ -82,20 +110,25 @@ export async function cleanupHostedStandardCheckoutLoser(input: {
       limit: 100,
     }),
   );
-  const activeRefundAmount = existingRefunds.data.reduce(
+  const succeededRefundAmount = existingRefunds.data.reduce(
     (total, refund) =>
-      refund.status === "failed" || refund.status === "canceled"
-        ? total
-        : total + refund.amount,
+      refund.status === "succeeded" ? total + refund.amount : total,
     0,
   );
   if (existingRefunds.has_more) {
     throw buildCheckoutLoserCleanupSupportError();
   }
-  if (activeRefundAmount === paidAmount) {
+  if (existingRefunds.data.some((refund) =>
+    refund.status !== "succeeded"
+    && refund.status !== "failed"
+    && refund.status !== "canceled"
+  )) {
+    throw new HostedStripeCheckoutLoserCleanupPendingError();
+  }
+  if (succeededRefundAmount === paidAmount) {
     return;
   }
-  if (activeRefundAmount !== 0) {
+  if (succeededRefundAmount !== 0) {
     throw buildCheckoutLoserCleanupSupportError();
   }
 
@@ -115,27 +148,15 @@ export async function cleanupHostedStandardCheckoutLoser(input: {
       ].join(":"),
     }),
   );
-  if (refund.status === "failed" || refund.status === "canceled") {
+  if (refund.status !== "succeeded") {
+    if (refund.status !== "failed" && refund.status !== "canceled") {
+      throw new HostedStripeCheckoutLoserCleanupPendingError();
+    }
     throw buildCheckoutLoserCleanupSupportError();
   }
-}
-
-async function readLatestInvoice(input: {
-  stripe: Stripe;
-  subscription: Stripe.Subscription;
-}): Promise<Stripe.Invoice | null> {
-  const latestInvoice = input.subscription.latest_invoice;
-  if (latestInvoice && typeof latestInvoice === "object") {
-    return latestInvoice;
+  if (refund.amount !== paidAmount) {
+    throw buildCheckoutLoserCleanupSupportError();
   }
-  const invoiceId = coerceStripeObjectId(latestInvoice);
-  if (!invoiceId) {
-    return null;
-  }
-  return withHostedStripeFailureLog(
-    "invoices.retrieve.checkout-loser",
-    () => input.stripe.invoices.retrieve(invoiceId),
-  );
 }
 
 async function readExactOrdinaryRefundTarget(input: {

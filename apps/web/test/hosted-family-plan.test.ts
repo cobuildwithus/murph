@@ -91,6 +91,7 @@ import {
   acceptHostedFamilyInviteFromTelegramTx,
   acceptHostedFamilyInviteFromPhoneTx,
   acceptHostedFamilyInviteTx,
+  applyHostedFamilyStripeCheckoutExpiredTx,
   applyHostedFamilyStripeCheckoutCompletedTx,
   applyHostedFamilyStripeSubscriptionUpdatedTx,
   buildHostedFamilyCheckoutRedirectUrl,
@@ -337,6 +338,7 @@ describe("hosted Family plan", () => {
       group: {
         billingRef: {
           checkoutAttemptId: null,
+          checkoutCreatedAt: null,
           stripeSubscriptionIdEncrypted: "encrypted:sub_family",
         },
         billingStatus: HostedBillingStatus.not_started,
@@ -356,6 +358,7 @@ describe("hosted Family plan", () => {
       group: {
         billingRef: {
           checkoutAttemptId: "family_attempt_123",
+          checkoutCreatedAt: new Date("2026-07-27T00:00:00.000Z"),
           stripeSubscriptionIdEncrypted: null,
         },
         billingStatus: HostedBillingStatus.not_started,
@@ -374,6 +377,7 @@ describe("hosted Family plan", () => {
 
     await expect(readHostedMemberFamilyBillingClaim({
       memberId: "member_mom",
+      now: new Date("2026-07-27T12:00:00.000Z"),
       prisma: tx,
     })).resolves.toEqual(expected);
 
@@ -385,6 +389,106 @@ describe("hosted Family plan", () => {
         },
       }),
     );
+  });
+
+  it.each([
+    {
+      billingRef: {
+        checkoutAttemptId: null,
+        checkoutCreatedAt: null,
+        stripeSubscriptionIdEncrypted: "encrypted:sub_family",
+      },
+      billingStatus: HostedBillingStatus.canceled,
+      label: "a terminal Family subscription",
+    },
+    {
+      billingRef: {
+        checkoutAttemptId: "family_attempt_stale",
+        checkoutCreatedAt: new Date("2026-07-25T00:00:00.000Z"),
+        stripeSubscriptionIdEncrypted: null,
+      },
+      billingStatus: HostedBillingStatus.not_started,
+      label: "a stale Family Checkout attempt",
+    },
+  ])("does not report $label as live billing ownership", async ({
+    billingRef,
+    billingStatus,
+  }) => {
+    const tx = createTxMock();
+    tx.hostedAccountGroupMembership.findMany.mockResolvedValueOnce([{
+      group: {
+        billingRef,
+        billingStatus,
+        id: "hbag_family",
+        ownerMemberId: "member_owner",
+        suspendedAt: null,
+      },
+    }]);
+
+    await expect(readHostedMemberFamilyBillingClaim({
+      memberId: "member_mom",
+      now: new Date("2026-07-27T12:00:00.000Z"),
+      prisma: tx,
+    })).resolves.toBeNull();
+  });
+
+  it("does not claim a directly paid beneficiary whom Family activation skips", async () => {
+    const tx = createTxMock();
+    tx.hostedMember.findUnique.mockResolvedValueOnce({
+      billingRef: {
+        currentBillingPhase: "paid",
+      },
+      billingStatus: HostedBillingStatus.active,
+      suspendedAt: null,
+    });
+    tx.hostedAccountGroupMembership.findMany.mockResolvedValueOnce([{
+      group: {
+        billingRef: {
+          checkoutAttemptId: "family_attempt_123",
+          checkoutCreatedAt: new Date("2026-07-27T00:00:00.000Z"),
+          stripeSubscriptionIdEncrypted: null,
+        },
+        billingStatus: HostedBillingStatus.not_started,
+        id: "hbag_family",
+        ownerMemberId: "member_owner",
+        suspendedAt: null,
+      },
+    }]);
+
+    await expect(readHostedMemberFamilyBillingClaim({
+      memberId: "member_mom",
+      now: new Date("2026-07-27T12:00:00.000Z"),
+      prisma: tx,
+    })).resolves.toBeNull();
+  });
+
+  it("clears only the exact expired Family Checkout attempt", async () => {
+    const tx = createTxMock();
+    const session = makeFamilyStripeCheckoutSession({
+      checkoutAttemptId: "family_attempt_expired",
+      sessionId: "cs_test_familyexpired",
+      subscriptionId: null,
+    });
+
+    await expect(applyHostedFamilyStripeCheckoutExpiredTx({
+      session,
+      tx,
+    })).resolves.toBe(true);
+
+    expect(tx.hostedAccountGroupBillingRef.updateMany).toHaveBeenCalledWith({
+      data: {
+        checkoutAttemptId: null,
+        checkoutCreatedAt: null,
+        checkoutSeatCount: null,
+        stripeCheckoutSessionIdEncrypted: null,
+        stripeCheckoutSessionLookupKey: null,
+      },
+      where: {
+        checkoutAttemptId: "family_attempt_expired",
+        groupId: "hbag_family",
+        stripeCheckoutSessionLookupKey: expect.any(String),
+      },
+    });
   });
 
   it("fails closed when more than one Family billing owner claims the member", async () => {
@@ -403,6 +507,7 @@ describe("hosted Family plan", () => {
         group: {
           billingRef: {
             checkoutAttemptId: "family_attempt_second",
+            checkoutCreatedAt: new Date("2026-07-27T00:00:00.000Z"),
             stripeSubscriptionIdEncrypted: null,
           },
           billingStatus: HostedBillingStatus.not_started,

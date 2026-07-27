@@ -11,7 +11,6 @@ const mocks = vi.hoisted(() => ({
   findMemberForStripeSubscription: vi.fn(),
   listHostedStripeCheckoutSessionMemberIds: vi.fn(),
   lockHostedMemberRow: vi.fn(),
-  readActiveHostedFamilySponsorship: vi.fn(),
   readHostedMemberFamilyBillingClaim: vi.fn(),
   readHostedMemberBillingSnapshot: vi.fn(),
   requireHostedStripeApi: vi.fn(),
@@ -21,17 +20,6 @@ const mocks = vi.hoisted(() => ({
   writeHostedMemberStripeBillingRef: vi.fn(),
   writeHostedMemberStripeBillingTx: vi.fn(),
 }));
-
-vi.mock("@/src/lib/hosted-onboarding/member-access", async () => {
-  const actual = await vi.importActual<
-    typeof import("@/src/lib/hosted-onboarding/member-access")
-  >("@/src/lib/hosted-onboarding/member-access");
-
-  return {
-    ...actual,
-    readActiveHostedFamilySponsorship: mocks.readActiveHostedFamilySponsorship,
-  };
-});
 
 vi.mock("@/src/lib/hosted-onboarding/family-plan", async () => {
   const actual = await vi.importActual<
@@ -142,7 +130,6 @@ describe("applyStripeCheckoutCompleted", () => {
     mocks.findMemberForStripeSubscription.mockResolvedValue(null);
     mocks.listHostedStripeCheckoutSessionMemberIds.mockResolvedValue(["member_123"]);
     mocks.readHostedMemberBillingSnapshot.mockResolvedValue(makeMemberSnapshot());
-    mocks.readActiveHostedFamilySponsorship.mockResolvedValue(false);
     mocks.readHostedMemberFamilyBillingClaim.mockResolvedValue(null);
     mocks.acceptHostedMemberStripeCheckoutCompletionTx.mockResolvedValue({
       billingRef: {},
@@ -276,7 +263,14 @@ describe("applyStripeCheckoutCompleted", () => {
   });
 
   it("cancels a direct subscription event received after Family sponsorship", async () => {
-    mocks.readActiveHostedFamilySponsorship.mockResolvedValueOnce(true);
+    mocks.findMemberForStripeSubscription.mockResolvedValueOnce(
+      makeMemberSnapshot(),
+    );
+    mocks.readHostedMemberFamilyBillingClaim.mockResolvedValueOnce({
+      groupId: "hbag_family",
+      kind: "active_sponsorship",
+      ownerMemberId: "member_owner",
+    });
     const subscription = {
       ...makePulseTrialSubscription(),
       id: "sub_superseded",
@@ -302,8 +296,43 @@ describe("applyStripeCheckoutCompleted", () => {
       subscriptionCancellationEmail: null,
     });
 
-    expect(mocks.findMemberForStripeSubscription).not.toHaveBeenCalled();
+    expect(mocks.findMemberForStripeSubscription).toHaveBeenCalledWith({
+      prisma: {},
+      subscription,
+    });
     expect(mocks.writeHostedMemberStripeBillingTx).not.toHaveBeenCalled();
+  });
+
+  it("preserves the accepted direct subscription across a later Family claim", async () => {
+    mocks.findMemberForStripeSubscription.mockResolvedValueOnce(
+      makeMemberSnapshot(),
+    );
+    const subscription = {
+      ...makePulseTrialSubscription(),
+      id: "sub_123",
+      metadata: {
+        billingPlanCode: "launch_monthly",
+        checkoutOffer: "standard",
+        memberId: "member_123",
+      },
+      status: "active",
+    };
+
+    await expect(applyStripeSubscriptionUpdated(
+      subscription as never,
+      {
+        eventCreatedAt: new Date("2025-04-12T00:00:01.000Z"),
+        occurredAt: "2025-04-12T00:00:01.000Z",
+        sourceEventId: "evt_subscription_updated_123",
+        sourceType: "stripe.customer.subscription.updated",
+      },
+      {} as never,
+    )).resolves.toMatchObject({
+      subscriptionCancellationEmail: null,
+    });
+
+    expect(mocks.readHostedMemberFamilyBillingClaim).not.toHaveBeenCalled();
+    expect(mocks.writeHostedMemberStripeBillingTx).toHaveBeenCalledOnce();
   });
 
   it("treats an already-absent sponsored checkout subscription as cleaned up", async () => {
@@ -398,6 +427,22 @@ describe("applyStripeCheckoutCompleted", () => {
       prisma: {},
       skipIfBillingAlreadyActive: false,
     });
+  });
+
+  it("preserves an accepted Pulse Trial owner across a later Family attempt", async () => {
+    await expect(
+      applyStripeCheckoutCompleted(
+        makePulseTrialCheckoutSession() as never,
+        {} as never,
+      ),
+    ).resolves.toEqual({
+      activatedMemberId: "member_123",
+      hostedExecutionEventId: "wake_123",
+      welcomeEmailMemberId: "member_123",
+    });
+
+    expect(mocks.readHostedMemberFamilyBillingClaim).not.toHaveBeenCalled();
+    expect(mocks.cancelStripeSubscription).not.toHaveBeenCalled();
   });
 
   it("accepts legacy seven-day Pulse Trial checkout metadata for in-flight sessions", async () => {

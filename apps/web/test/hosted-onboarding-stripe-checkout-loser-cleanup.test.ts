@@ -6,6 +6,7 @@ import { cleanupHostedStandardCheckoutLoser } from
 
 describe("cleanupHostedStandardCheckoutLoser", () => {
   const invoicePaymentsList = vi.fn();
+  const invoicesList = vi.fn();
   const refundsCreate = vi.fn();
   const refundsList = vi.fn();
   const subscriptionCancel = vi.fn();
@@ -13,6 +14,9 @@ describe("cleanupHostedStandardCheckoutLoser", () => {
   const stripe = {
     invoicePayments: {
       list: invoicePaymentsList,
+    },
+    invoices: {
+      list: invoicesList,
     },
     refunds: {
       create: refundsCreate,
@@ -26,6 +30,10 @@ describe("cleanupHostedStandardCheckoutLoser", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    invoicesList.mockResolvedValue({
+      data: [makePaidInvoice()],
+      has_more: false,
+    });
     refundsList.mockResolvedValue({ data: [], has_more: false });
     refundsCreate.mockResolvedValue({
       amount: 2_000,
@@ -200,6 +208,12 @@ describe("cleanupHostedStandardCheckoutLoser", () => {
   });
 
   it("cancels but requires support when account balance affected the invoice", async () => {
+    invoicesList.mockResolvedValue({
+      data: [makePaidInvoice({
+        starting_balance: -500,
+      })],
+      has_more: false,
+    });
     subscriptionRetrieve.mockResolvedValue(
       makeSubscription(makePaidInvoice({
         starting_balance: -500,
@@ -220,6 +234,13 @@ describe("cleanupHostedStandardCheckoutLoser", () => {
   });
 
   it("cancels an unpaid loser without inventing a refund", async () => {
+    invoicesList.mockResolvedValue({
+      data: [makePaidInvoice({
+        amount_paid: 0,
+        status: "open",
+      })],
+      has_more: false,
+    });
     subscriptionRetrieve.mockResolvedValue(
       makeSubscription(makePaidInvoice({
         amount_paid: 0,
@@ -235,6 +256,146 @@ describe("cleanupHostedStandardCheckoutLoser", () => {
     expect(subscriptionCancel).toHaveBeenCalledOnce();
     expect(invoicePaymentsList).not.toHaveBeenCalled();
     expect(refundsList).not.toHaveBeenCalled();
+    expect(refundsCreate).not.toHaveBeenCalled();
+  });
+
+  it("keeps a pending refund retryable and never creates a second refund", async () => {
+    subscriptionRetrieve.mockResolvedValue(
+      makeSubscription(makePaidInvoice()),
+    );
+    invoicePaymentsList.mockResolvedValue({
+      data: [{
+        amount_paid: 2_000,
+        amount_requested: 2_000,
+        payment: {
+          payment_intent: {
+            amount_received: 2_000,
+            id: "pi_loser",
+            status: "succeeded",
+          },
+          type: "payment_intent",
+        },
+      }],
+      has_more: false,
+    });
+    refundsList
+      .mockResolvedValueOnce({
+        data: [],
+        has_more: false,
+      })
+      .mockResolvedValueOnce({
+        data: [{
+          amount: 2_000,
+          status: "succeeded",
+        }],
+        has_more: false,
+      });
+    refundsCreate.mockResolvedValueOnce({
+      amount: 2_000,
+      status: "pending",
+    });
+
+    await expect(cleanupHostedStandardCheckoutLoser({
+      stripe,
+      stripeSubscriptionId: "sub_loser",
+    })).rejects.toMatchObject({
+      code: "HOSTED_BILLING_CHECKOUT_CLEANUP_PENDING",
+      retryable: true,
+    });
+    await expect(cleanupHostedStandardCheckoutLoser({
+      stripe,
+      stripeSubscriptionId: "sub_loser",
+    })).resolves.toBeUndefined();
+
+    expect(refundsCreate).toHaveBeenCalledOnce();
+    expect(refundsCreate).toHaveBeenCalledWith(
+      expect.anything(),
+      {
+        idempotencyKey:
+          "hosted-checkout-loser-refund:sub_loser:in_loser",
+      },
+    );
+  });
+
+  it("keeps an existing nonterminal refund retryable", async () => {
+    subscriptionRetrieve.mockResolvedValue(
+      makeSubscription(makePaidInvoice()),
+    );
+    invoicePaymentsList.mockResolvedValue({
+      data: [{
+        amount_paid: 2_000,
+        amount_requested: 2_000,
+        payment: {
+          payment_intent: {
+            amount_received: 2_000,
+            id: "pi_loser",
+            status: "succeeded",
+          },
+          type: "payment_intent",
+        },
+      }],
+      has_more: false,
+    });
+    refundsList.mockResolvedValue({
+      data: [{
+        amount: 2_000,
+        status: "requires_action",
+      }],
+      has_more: false,
+    });
+
+    await expect(cleanupHostedStandardCheckoutLoser({
+      stripe,
+      stripeSubscriptionId: "sub_loser",
+    })).rejects.toMatchObject({
+      code: "HOSTED_BILLING_CHECKOUT_CLEANUP_PENDING",
+      retryable: true,
+    });
+
+    expect(refundsCreate).not.toHaveBeenCalled();
+  });
+
+  it("requires support when more than one paid subscription invoice exists", async () => {
+    subscriptionRetrieve.mockResolvedValue(
+      makeSubscription(makePaidInvoice()),
+    );
+    invoicesList.mockResolvedValue({
+      data: [
+        makePaidInvoice({ id: "in_loser_latest" }),
+        makePaidInvoice({ id: "in_loser_prior" }),
+      ],
+      has_more: false,
+    });
+
+    await expect(cleanupHostedStandardCheckoutLoser({
+      stripe,
+      stripeSubscriptionId: "sub_loser",
+    })).rejects.toMatchObject({
+      code: "HOSTED_BILLING_CHECKOUT_CLEANUP_REQUIRES_SUPPORT",
+    });
+
+    expect(subscriptionCancel).toHaveBeenCalledOnce();
+    expect(invoicePaymentsList).not.toHaveBeenCalled();
+    expect(refundsCreate).not.toHaveBeenCalled();
+  });
+
+  it("requires support when subscription invoice history is paginated", async () => {
+    subscriptionRetrieve.mockResolvedValue(
+      makeSubscription(makePaidInvoice()),
+    );
+    invoicesList.mockResolvedValue({
+      data: [makePaidInvoice()],
+      has_more: true,
+    });
+
+    await expect(cleanupHostedStandardCheckoutLoser({
+      stripe,
+      stripeSubscriptionId: "sub_loser",
+    })).rejects.toMatchObject({
+      code: "HOSTED_BILLING_CHECKOUT_CLEANUP_REQUIRES_SUPPORT",
+    });
+
+    expect(subscriptionCancel).toHaveBeenCalledOnce();
     expect(refundsCreate).not.toHaveBeenCalled();
   });
 });
