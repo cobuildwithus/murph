@@ -94,11 +94,13 @@ removal, open subscription Checkout Sessions are expired, and a concurrent
 Checkout completion contributes its Customer and Subscription to the captured
 cleanup set before cancellation. Hosted billing and Family-plan tests prove a
 Session is bound before its URL is returned and expired when deletion wins the
-post-provider member lock. `hosted-account-deletion-cleanup.test.ts` proves receipt-bound
-encryption, independent per-target progress, unconfigured-target pending
-state, lease-loss handling, retry convergence, and batch isolation. Cloudflare
-runner tests prove already-absent state is idempotent and full Durable Object
-storage is erased only after R2/container cleanup. The shared control-client
+post-provider member lock; both also prove the shared deletion-maintenance flag
+rejects subscription Checkout before a transaction or Stripe call begins.
+`hosted-account-deletion-cleanup.test.ts` proves receipt-bound encryption,
+independent per-target progress, unconfigured-target pending state, lease-loss
+handling, retry convergence, and batch isolation. Cloudflare runner tests prove
+already-absent state is idempotent and full Durable Object storage is erased
+only after R2/container cleanup. The shared control-client
 suite rejects legacy responses without explicit `deleteAllCompleted` evidence,
 and cleanup tests prove never-resolving provider targets return pending at the
 attempt deadline. Participant-lease unit,

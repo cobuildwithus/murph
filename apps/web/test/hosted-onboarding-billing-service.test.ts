@@ -1,5 +1,5 @@
 import { HostedBillingStatus } from "@prisma/client";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => {
   const stripe = {
@@ -102,6 +102,7 @@ describe("createHostedBillingCheckout", () => {
     vi.clearAllMocks();
     vi.spyOn(console, "info").mockImplementation(() => {});
     delete process.env.HOSTED_PULSE_TRIAL_CHECKOUT_ENABLED;
+    vi.stubEnv("HOSTED_ACCOUNT_DELETION_MAINTENANCE", "");
     mocks.readActiveHostedFamilySponsorship.mockResolvedValue(false);
     mocks.requireHostedOnboardingPublicBaseUrl.mockReturnValue("https://join.example.test");
     mocks.requireHostedStripeCheckoutConfig.mockReturnValue({
@@ -122,6 +123,30 @@ describe("createHostedBillingCheckout", () => {
       status: "open",
     });
     mocks.stripe.customers.create.mockResolvedValue({ id: "cus_pulse_trial_123" });
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("rejects personal subscription Checkout while deletion maintenance is active", async () => {
+    vi.stubEnv("HOSTED_ACCOUNT_DELETION_MAINTENANCE", "1");
+
+    await expect(
+      createHostedBillingCheckout({
+        inviteCode: "invite-code",
+        member: makeAuthenticatedMember(),
+        now: new Date("2026-03-27T12:00:00.000Z"),
+        prisma: makePrisma() as never,
+      }),
+    ).rejects.toMatchObject({
+      code: "subscription_checkout_maintenance",
+      httpStatus: 503,
+      retryable: true,
+    });
+
+    expect(mocks.requireHostedInviteForBillingCheckout).not.toHaveBeenCalled();
+    expect(mocks.stripe.checkout.sessions.create).not.toHaveBeenCalled();
   });
 
   it("returns alreadyActive when the invite member already has active billing", async () => {

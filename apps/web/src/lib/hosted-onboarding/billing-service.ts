@@ -5,6 +5,9 @@ import {
 import type Stripe from "stripe";
 
 import { getPrisma } from "../prisma";
+import {
+  assertHostedSubscriptionCheckoutAvailable,
+} from "../hosted-privacy/account-deletion-maintenance";
 import { buildStripeCancelUrl, buildStripeSuccessUrl } from "./billing";
 import {
   HOSTED_PULSE_TRIAL_DAYS,
@@ -90,6 +93,7 @@ export function buildHostedBillingCheckoutLineItems(priceId: string): HostedBill
 export async function createHostedBillingCheckout(
   input: HostedBillingCheckoutInput,
 ): Promise<{ alreadyActive: boolean; url: string | null }> {
+  assertHostedSubscriptionCheckoutAvailable();
   const prisma = input.prisma ?? getPrisma();
   const billingPlanCode = input.billingPlanCode ?? getHostedDefaultBillingPlanCode();
   const checkoutOffer = input.checkoutOffer ?? HOSTED_STANDARD_CHECKOUT_OFFER;

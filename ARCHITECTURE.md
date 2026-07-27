@@ -453,19 +453,18 @@ The final locked transaction also rechecks the bound Session set, so replacing
 a Session cannot escape the captured cleanup boundary.
 
 The first bind-before-return deployment requires a deletion-maintenance
-cutover, not an ordinary additive rollout. Activate
-`HOSTED_ACCOUNT_DELETION_MAINTENANCE=1` on the current Web deployment and prove
-both deletion entry points fail closed before applying the additive migration
-or deploying the new writer. After the migration and new Web deployment, wait
-for prior Vercel functions to drain and recheck the production alias. While
-deletion remains disabled, enumerate every still-open personal subscription
-Checkout Session issued before convergence from Stripe's Murph metadata, expire
-it, and reconcile or cancel any completion that wins the expiry race. Lift
-maintenance only after that set is terminal and the bind-before-return writer
-is live everywhere. The first converged fence-capable Web deployment is the
-account-deletion rollback floor; rolling back below it requires activating
-maintenance first, draining the rollback deployment, repeating the pre-fence
-Session sweep, and only then restoring deletion.
+cutover, not an ordinary additive rollout. The sole lifecycle and deployment
+authority is
+`agent-docs/operations/hosted-account-deletion-maintenance.md`: the maintenance
+deployment rejects deletion and subscription Checkout, advances Vercel's Skew
+Protection Threshold, waits the absolute Function maximum, and proves a
+predecessor-pinned authenticated browser reaches neither effect. Only then is
+the pre-fence personal Session set finite and safe to terminalize. Maintenance
+lifts only after that set is terminal, the bind-before-return writer is live
+everywhere, and no other named purpose remains active. The first converged
+fence-capable Web deployment is the account-deletion rollback floor; an
+emergency rollback below it keeps maintenance active until the fence writer,
+skew closure, and empty Session sweep are restored.
 
 Immediate provider attempts share one five-second abortable deadline. Retention
 attempts share one fifteen-second abortable deadline, use bounded four-receipt

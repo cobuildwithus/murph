@@ -205,6 +205,7 @@ describe("hosted Family plan", () => {
 
   beforeEach(() => {
     vi.resetAllMocks();
+    vi.stubEnv("HOSTED_ACCOUNT_DELETION_MAINTENANCE", "");
     process.env.HOSTED_CONTACT_PRIVACY_KEYS = `v1:${TEST_CONTACT_PRIVACY_KEY}`;
     process.env.HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION = "v1";
     process.env.HOSTED_ONBOARDING_PUBLIC_BASE_URL = "https://local.withmurph.ai:3443";
@@ -280,6 +281,7 @@ describe("hosted Family plan", () => {
   });
 
   afterEach(() => {
+    vi.unstubAllEnvs();
     restoreEnvValue("HOSTED_CONTACT_PRIVACY_KEYS", previousHostedContactPrivacyKeys);
     restoreEnvValue(
       "HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION",
@@ -310,6 +312,37 @@ describe("hosted Family plan", () => {
       previousHostedOnboardingPublicBaseUrl,
     );
     clearHostedOnboardingEnvCache();
+  });
+
+  it("rejects Family subscription Checkout while deletion maintenance is active", async () => {
+    const tx = createTxMock({
+      billedSeatCount: null,
+      group: {
+        billingStatus: HostedBillingStatus.not_started,
+        id: "hbag_family",
+        ownerMemberId: "member_owner",
+        suspendedAt: null,
+      },
+    });
+    const prisma = tx as FamilyPlanTxMock & {
+      $transaction: ReturnType<typeof vi.fn>;
+    };
+    prisma.$transaction = vi.fn((callback) => callback(tx));
+    vi.stubEnv("HOSTED_ACCOUNT_DELETION_MAINTENANCE", "1");
+
+    await expect(createHostedFamilyBillingCheckout({
+      groupId: "hbag_family",
+      ownerMemberId: "member_owner",
+      prisma: prisma as never,
+      seatCount: 2,
+    })).rejects.toMatchObject({
+      code: "subscription_checkout_maintenance",
+      httpStatus: 503,
+      retryable: true,
+    });
+
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(runtimeMocks.requireHostedStripeApi).not.toHaveBeenCalled();
   });
 
   it("authorizes an active unsuspended Family beneficiary against group billing", async () => {

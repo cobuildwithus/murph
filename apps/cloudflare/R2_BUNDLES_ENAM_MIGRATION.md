@@ -146,16 +146,14 @@ window, so count equality is not a source-safety proof. The mechanically bound
 destination-only credential, exact pair marker, and denied source probe are the
 proof that abandonment had no authority over OC.
 
-Then release the deletion window before reopening anything. Once the
-destination is gone, OC is the sole authoritative bucket again and deletion is
-safe, so leaving the control set would disable a privacy-critical flow for no
-reason:
-
-1. remove `HOSTED_ACCOUNT_DELETION_MAINTENANCE` from the Vercel production
-   environment and deploy;
-2. prove an authenticated `account.delete` challenge request succeeds again and
-   that the delete route no longer returns `503`; and
-3. only then reopen ordinary writers and rebook.
+Then release the `r2-bundles-enam` purpose before reopening anything. Once the
+destination is gone, OC is the sole authoritative bucket again and this
+migration no longer needs deletion maintenance. Follow the shared
+`agent-docs/operations/hosted-account-deletion-maintenance.md` release
+procedure: clear and deploy the flag only if no other purpose remains active,
+then prove the protected effects either reach the application or remain
+correctly closed by the other purpose. Only then reopen ordinary writers and
+rebook.
 
 If the operation aborted before section 5 set the control, there is nothing to
 clear here; confirm it is unset rather than assuming it.
@@ -181,27 +179,28 @@ environment for the `murph` web project. It is not read from a file and a bare
 shell assignment does nothing: setting or clearing it requires a production
 environment change followed by a deployment that picks it up.
 
-**One rule owns the window.** The control is set before the destination exists
-so it can close admission while every predecessor invocation retires and the
-frozen source is joined to canonical hosted-member ownership. It remains set
-while an ENAM bucket holds copies that could still become live, and is cleared
-the moment OC is the sole authority again. The cutover owner owns both edges:
+The shared lifecycle in
+`agent-docs/operations/hosted-account-deletion-maintenance.md` owns both edges
+of the flag. This migration opens the `r2-bundles-enam` purpose before the
+destination exists, keeps it active while an ENAM bucket holds copies that
+could still become live, and releases only that purpose when OC is the sole
+authority again:
 
 | Point in the operation | Control |
 | --- | --- |
 | Section 4 | Unset. |
 | Activation, predecessor retirement, and active-owner gate | Set. The destination does not exist yet. |
-| Activation or owner-gate failure | Cleared by a production environment change and deployment before the operation is rebooked. No destination cleanup is needed. |
+| Activation or owner-gate failure | Release `r2-bundles-enam`; clear through a production deployment only if the shared owner has no other active purpose. No destination cleanup is needed. |
 | Copy, cutover, proofs, canary | Set. |
-| Any pre-commit abandonment or overrun | Cleared by the abandonment procedure, before writers reopen. |
-| Successful retirement | Cleared in section 8. |
+| Any pre-commit abandonment or overrun | Release `r2-bundles-enam` through the abandonment procedure before writers reopen; another purpose may keep the flag set. |
+| Successful retirement | Release `r2-bundles-enam` in section 8; clear only if it was the final purpose. |
 
 Do not create the destination until activation, the absolute predecessor wait,
 and the active-owner gate all pass. If a later setup step fails before the copy
 tool creates the pair marker, leave the empty, unbound destination in place,
-revoke its temporary key, clear the control, and rebook. Once the pair marker
-exists, use the mechanically guarded abandonment procedure. No ordinary exit
-leaves the control set.
+revoke its temporary key, release this migration's purpose, and rebook. Once
+the pair marker exists, use the mechanically guarded abandonment procedure. No
+ordinary exit leaves an unowned purpose.
 
 The message makes no timing promise, not even a relative one. This window runs
 from before the copy until OC retirement, which section 8 permits as late as 24
@@ -216,10 +215,13 @@ Set it as directed in section 5:
 vercel env add HOSTED_ACCOUNT_DELETION_MAINTENANCE production   # 1
 ```
 
-Redeploy production, then prove all three checks before copying:
-`POST /api/settings/sensitive-action-challenge` with `account.delete` and
-`POST /api/settings/privacy/delete` must each return `503` with
-`account_deletion_maintenance`, and `vault.export` must still return `200`.
+Redeploy production, then prove every protected effect in
+`agent-docs/operations/hosted-account-deletion-maintenance.md` before copying.
+In particular, `POST /api/settings/sensitive-action-challenge` with
+`account.delete` and `POST /api/settings/privacy/delete` must each return `503`
+with `account_deletion_maintenance`, subscription Checkout must return `503`
+with `subscription_checkout_maintenance`, and `vault.export` must still return
+`200`.
 
 The challenge route is the one members hit first, so declining there means a
 member who tries during the window is told before any passkey approval and
@@ -227,8 +229,8 @@ before any browser-vault teardown, with the dialog still open and an unspent
 authorization. The delete route keeps the same guard as the effect boundary, so
 a direct request cannot bypass the window.
 
-The whole control — module, one variable, and both call sites — is deleted with
-the runbook.
+This runbook never deletes the shared maintenance module, environment contract,
+or effect guards. Their lifecycle belongs only to the shared owner.
 
 References: [R2 data location][data-location], [R2 consistency][consistency],
 [R2 authentication][r2-auth], [R2 S3 compatibility][s3-api], and [R2's current
@@ -453,7 +455,7 @@ larger explicit duration:
 
 ```bash
 test -n "$MAINTENANCE_DEPLOYMENT_ID"
-export VERCEL_ABSOLUTE_FUNCTION_MAX_SECONDS=1800
+: "${VERCEL_ABSOLUTE_FUNCTION_MAX_SECONDS:?set from the current official Vercel Function limit}"
 export DELETION_ADMISSION_CLOSED_UTC="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 sleep "$VERCEL_ABSOLUTE_FUNCTION_MAX_SECONDS"
 ```
@@ -509,7 +511,8 @@ snapshot reference, unstable inventory, failed automatic pagination, malformed
 AWS output, failed Postgres query, or unowned object all fail closed.
 
 Any failure keeps OC authoritative and the destination nonexistent. Preserve
-the source, clear the maintenance variable through a production deployment,
+the source, release the `r2-bundles-enam` purpose through the shared maintenance
+owner, clear through a production deployment only if no other purpose remains,
 and investigate an unowned-object result as a privacy incident before
 rebooking. Do not delete an ambiguous source object or substitute logs,
 elapsed time, a retrying scan, or a manual count.
@@ -670,11 +673,12 @@ empty, and retire only the matching production and preview OC buckets. Then:
    deploy immediately, and require the ENAM direct-R2 smoke;
 3. revoke the transition, old runtime, and production pair-scoped migration
    credentials;
-4. remove `HOSTED_ACCOUNT_DELETION_MAINTENANCE` from the Vercel production
-   environment, deploy, and prove both an `account.delete` challenge request and
-   the delete route reach the application again; and
-5. delete this runbook, migration script, tests, package command, and the
-   account-deletion maintenance module and its call site in one cleanup PR.
+4. release the `r2-bundles-enam` purpose through
+   `agent-docs/operations/hosted-account-deletion-maintenance.md`; clear and
+   deploy the flag only if no other purpose remains, then prove the protected
+   effects have the expected shared state; and
+5. delete this runbook, migration script, tests, and package command in one
+   cleanup PR. Do not delete the shared maintenance module or its guards.
 
 Retirement does not require OC/ENAM parity after the commit point: new ENAM
 checkpoints and orphan cleanup legitimately diverge them. It does require all

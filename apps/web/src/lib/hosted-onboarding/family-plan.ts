@@ -19,6 +19,9 @@ import { materializePendingHostedGroupJoinConfirmationsBestEffort } from "../hos
 import { renderUserFacingMessage } from "../hosted-messages/user-facing-messages";
 import { getPrisma } from "../prisma";
 import {
+  assertHostedSubscriptionCheckoutAvailable,
+} from "../hosted-privacy/account-deletion-maintenance";
+import {
   encryptHostedWebNullableString,
   decryptHostedWebNullableString,
 } from "../hosted-web/encryption";
@@ -1750,6 +1753,7 @@ export async function createHostedFamilyBillingCheckout(input: {
   prisma?: PrismaClient;
   seatCount?: unknown;
 }): Promise<{ alreadyActive: boolean; url: string | null }> {
+  assertHostedSubscriptionCheckoutAvailable();
   const prisma = input.prisma ?? getPrisma();
   const seatCount = normalizeHostedFamilySeatCount(input.seatCount ?? HOSTED_FAMILY_MIN_SEATS);
   let stripeApi: ReturnType<typeof requireHostedStripeApi> | null = null;
