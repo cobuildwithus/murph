@@ -1,8 +1,8 @@
 # Hosted runtime latency alerts
 
-Status: active
+Status: completed
 Created: 2026-07-26
-Updated: 2026-07-27
+Updated: 2026-07-26
 
 ## Goal
 
@@ -129,3 +129,14 @@ Updated: 2026-07-27
     a deferred overlapping-cron/exact-expiry test, real-egress privacy
     assertions, and an exact five-minute schedule guard. The post-remediation
     focused suite passed 48 tests.
+  - The PR #967 bite-check rebuilt a runnable bundle with only that PR's two
+    production runtime files inversed while leaving the current CI test intact.
+    The system-mailbox case failed in 31.562 seconds because foreground
+    admission did not replace the held `system_mailbox` owner; Temporal returned
+    `retry_later`, no assistant-provider request started, and the other three
+    reply controls passed. Reapplying the exact forward patch restored a clean
+    task head.
+  - Canonical `pnpm verify:acceptance` passed in Blacksmith Testbox
+    `tbx_01kygkr9xqdhzs5newqtenqksz`; the delegated GitHub Actions evidence is
+    run `30230395869`.
+Completed: 2026-07-26
