@@ -37,7 +37,11 @@ export type HostedTelegramAccessNoticeDeliveryResult =
   | { status: "sent" };
 
 type HostedTelegramAccessNoticeDispatchClaim =
-  | { attemptedAt: Date; status: "claimed" }
+  | {
+      attemptedAt: Date;
+      status: "claimed";
+      target: TelegramThreadTarget;
+    }
   | { status: "already_notified" }
   | { retryAt: Date; status: "in_flight" }
   | { status: "not_applicable" };
@@ -104,6 +108,7 @@ export async function sendHostedTelegramAccessNotice(
         dispatch.claim = await claimHostedTelegramAccessNoticeDispatch({
           idempotencyKey,
           input,
+          target,
         });
         if (dispatch.claim.status !== "claimed") {
           throw new Error(
@@ -224,6 +229,7 @@ async function sendHostedTelegramUnanchoredAccessNotice(input: {
   const claim = await claimHostedTelegramAccessNoticeDispatch({
     idempotencyKey: input.idempotencyKey,
     input: input.input,
+    target: input.target,
   });
   if (claim.status !== "claimed") {
     return claim;
@@ -233,7 +239,7 @@ async function sendHostedTelegramUnanchoredAccessNotice(input: {
     await sendHostedTelegramTextMessage({
       message: input.input.message,
       replyToMessageId: null,
-      target: input.target,
+      target: claim.target,
     });
   } catch (error) {
     if (
@@ -273,14 +279,8 @@ async function sendHostedTelegramUnanchoredAccessNotice(input: {
 
 async function claimHostedTelegramAccessNoticeDispatch(input: {
   idempotencyKey: string;
-  input: {
-    authorizedTelegramUserId?: string;
-    memberId: string;
-    prisma: PrismaClient;
-    sentAt?: Date;
-    sourceEventId: string;
-    target: string;
-  };
+  input: HostedTelegramAccessNoticeInput;
+  target: TelegramThreadTarget;
 }): Promise<HostedTelegramAccessNoticeDispatchClaim> {
   const attemptedAt = input.input.sentAt ?? new Date();
   return await input.input.prisma.$transaction(
@@ -315,7 +315,17 @@ async function claimHostedTelegramAccessNoticeDispatch(input: {
         template: HOSTED_TELEGRAM_ACCESS_NOTICE_TEMPLATE,
       });
       if (delivery.claimed) {
-        return { attemptedAt, status: "claimed" };
+        return {
+          attemptedAt,
+          status: "claimed",
+          target: resolveHostedTelegramAccessNoticeDispatchTarget({
+            authorizedTelegramUserId: input.input.authorizedTelegramUserId,
+            currentInboundSenderStillAuthorized,
+            fallbackTarget: input.target,
+            replyToMessageId: input.input.replyToMessageId,
+            routingTelegramThreadId: routing?.telegramThreadId ?? null,
+          }),
+        };
       }
       if (delivery.retryAt) {
         return {
@@ -326,6 +336,29 @@ async function claimHostedTelegramAccessNoticeDispatch(input: {
       return { status: "already_notified" };
     },
   );
+}
+
+function resolveHostedTelegramAccessNoticeDispatchTarget(input: {
+  authorizedTelegramUserId?: string;
+  currentInboundSenderStillAuthorized: boolean;
+  fallbackTarget: TelegramThreadTarget;
+  replyToMessageId: string | null;
+  routingTelegramThreadId: string | null;
+}): TelegramThreadTarget {
+  if (
+    input.replyToMessageId !== null
+    || !input.currentInboundSenderStillAuthorized
+    || !input.authorizedTelegramUserId
+  ) {
+    return input.fallbackTarget;
+  }
+
+  const storedTarget = input.routingTelegramThreadId
+    ? parseTelegramThreadTarget(input.routingTelegramThreadId)
+    : null;
+  return storedTarget?.chatId === input.authorizedTelegramUserId
+    ? storedTarget
+    : input.fallbackTarget;
 }
 
 async function markHostedTelegramAccessNoticeRetryable(input: {
