@@ -164,6 +164,11 @@ exact admitted group thread.
   checkpoint remains held. Its separately named workflow leg makes this latency
   invariant visible without replacing the two aggregate required checks.
 - After hosted scenarios initialize the schema, the Linq route-authority matrix leg runs the focused real-PostgreSQL proofs for deterministic hosted usage replay, both participant-addition route-row orderings, the canonical chat-ownership-before-route-row order shared by usage-limit dispatch and route-key convergence, and device-sync exact-payload plus companion-receipt lock order against concurrent account deletion.
+- That matrix starts from the hosted-local harness's intentional `prisma db
+  push` schema. The usage-credit PostgreSQL suite therefore applies the exact
+  checked-in detached direct-payment migration before creating fixtures, so
+  its positive detachment and missing-proof rejections exercise migration-only
+  constraints instead of silently testing the unconstrained Prisma schema.
 - `.github/workflows/release.yml` uses GitHub-hosted `ubuntu-24.04`, installs once, runs `pnpm release:check` with `MURPH_TEST_LANES_PARALLEL=1`, `MURPH_APP_VERIFY_PARALLEL=1`, and `MURPH_VERIFY_STEP_PARALLEL=1` so the release verification lane uses the parallel package/smoke branches and parallel app substeps without enabling full app/package overlap unless `MURPH_ACCEPTANCE_APP_VERIFY_WITH_COVERAGE=1` is set explicitly, while the same deterministic hosted-web build placeholders keep `apps/web verify` on its truthful build path without injecting production DB or production hosted device secrets, then packs the publishable tarballs once for upload/publication.
 - Vercel deploys of `apps/web` use the checked-in Vercel build command
   `pnpm release:production:migrate && pnpm build`, so the guarded migration

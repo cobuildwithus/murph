@@ -1,11 +1,13 @@
 import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
 
 import {
   HostedUsageCreditPurchaseStatus,
   type Prisma,
   type PrismaClient,
 } from "@prisma/client";
-import { describe, expect, it } from "vitest";
+import pg from "pg";
+import { beforeAll, describe, expect, it } from "vitest";
 
 import {
   grantHostedUsageCreditForPurchaseTx,
@@ -20,6 +22,13 @@ import { createPrismaClient } from "@/src/lib/prisma";
 const databaseUrl = process.env.DATABASE_URL?.trim() ?? "";
 const runPostgresConcurrencyProof =
   process.env.MURPH_TEST_POSTGRES_CONCURRENCY === "1";
+const detachedDirectProofMigrationSql = readFileSync(
+  new URL(
+    "../prisma/migrations/20260727040000_relax_hosted_usage_credit_detached_direct_proof/migration.sql",
+    import.meta.url,
+  ),
+  "utf8",
+);
 
 if (
   runPostgresConcurrencyProof &&
@@ -226,6 +235,16 @@ function isClearlyLocalPostgresUrl(value: string): boolean {
 describe.skipIf(!runPostgresConcurrencyProof)(
   "hosted usage-credit PostgreSQL serialization",
   () => {
+    beforeAll(async () => {
+      const client = new pg.Client({ connectionString: databaseUrl });
+      await client.connect();
+      try {
+        await client.query(detachedDirectProofMigrationSql);
+      } finally {
+        await client.end();
+      }
+    });
+
     it("grants one ledger entry when two grant replays race", async () => {
       const fixture = await createUsageCreditFixture();
       const paidAt = new Date("2026-07-16T12:01:00.000Z");
