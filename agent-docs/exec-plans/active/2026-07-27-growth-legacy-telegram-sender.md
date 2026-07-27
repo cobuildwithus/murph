@@ -67,6 +67,10 @@ Updated: 2026-07-27
   validation error on the authenticated growth route.
 - The fix is data robustness only; it does not change visual presentation, so
   no design-catalog component or screenshot is required.
+- The preliminary specialist review found one low-severity coverage gap:
+  admission-time `senderMemberId` authority was not proven when the provider
+  sender field is absent. The finding was accepted, its test-only patch was
+  inspected in full and applied, and no production change was required.
 
 ## Verification
 
@@ -87,3 +91,5 @@ Updated: 2026-07-27
     zero errors, dev smoke, and the production build.
   - `pnpm verify:acceptance` passed its workspace coverage, app, package
     boundary, hygiene, typecheck, and production-build lanes.
+  - The specialist-provided matrix case passed in the focused 27-test growth
+    suite; the canonical diff lane is rerun below against that coverage delta.
