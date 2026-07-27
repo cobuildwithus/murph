@@ -1,6 +1,6 @@
 # Remove iMessage Off-Hours Reminder Guard
 
-Status: active
+Status: completed
 Created: 2026-07-27
 Updated: 2026-07-27
 
@@ -65,3 +65,6 @@ Updated: 2026-07-27
   - `pnpm --filter @murphai/assistant-engine typecheck`: passed.
   - The focused real-e2e file loads successfully but its scenario is skipped unless `MURPH_RUN_REAL_CODEX_E2E=1`; neither supported provider-key environment is configured locally, so the live provider assertion remains an explicit credential-bound evidence gap.
   - Focused prompt plus midnight runtime proof after applying the patch: 2 files passed, 25 tests passed, 188 skipped by the name filter.
+- Parent final review: `NO FINDINGS`. The complete diff preserves the existing automation consent, route, lifecycle, pacing, and line-health owners; the only production-code change is deletion of the obsolete four-line prompt block.
+- PR CI at remediated head `282ed06187`: all checks passed, including release build/typecheck, assistant/CLI/platform package coverage, both CLI host matrices, all required hosted E2E gates, and the directly relevant Linq reminder plus onboarding follow-up E2E.
+Completed: 2026-07-27
