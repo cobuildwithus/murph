@@ -376,6 +376,23 @@ describe("hosted deploy automation helpers", () => {
     expect(config.secrets?.required).toEqual([...HOSTED_WORKER_REQUIRED_SECRET_NAMES]);
   });
 
+  it("passes an explicit preview OIDC environment through to generated Worker vars", () => {
+    const environment = readHostedDeployAutomationEnvironment({
+      CF_BUNDLES_BUCKET: "hosted-bundles-staging",
+      CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-staging",
+      CF_WORKER_NAME: "hosted-worker-staging",
+      ...REQUIRED_HOSTED_CRYPTO_WORKER_VARS,
+      HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT: "preview",
+    });
+
+    const config = buildHostedWranglerDeployConfig(environment) as {
+      vars: Record<string, string>;
+    };
+
+    expect(environment.workerVars.HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT).toBe("preview");
+    expect(config.vars.HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT).toBe("preview");
+  });
+
   it("rejects partial numeric deploy automation values", () => {
     for (const runnerReadyTimeout of ["60000ms", "1e3"]) {
       expect(() =>
@@ -551,6 +568,15 @@ describe("hosted deploy automation helpers", () => {
       ].map((match) => [match[1] ?? "", match[2] ?? ""] as const),
     );
 
+    expect(workflow).toContain(`      environment:
+        description: GitHub environment to deploy from
+        required: true
+        default: production
+        type: choice
+        options:
+          - preview
+          - production`);
+
     for (const expectedLine of [
       "CF_CONTAINER_INSTANCE_TYPE: ${{ vars.CF_CONTAINER_INSTANCE_TYPE || '{\"vcpu\":2,\"memory_mib\":6144,\"disk_mb\":6000}' }}",
       "CF_CONTAINER_MAX_INSTANCES: ${{ vars.CF_CONTAINER_MAX_INSTANCES || '1000' }}",
@@ -658,6 +684,7 @@ describe("hosted deploy automation helpers", () => {
     // the literal values: a job-timeout reduction is exactly the drift that would
     // silently restore an unattributed cancelled-job failure.
     const deployJob = readWorkflowJobBlock(workflow, "deploy");
+    expect(deployJob).toContain("    environment: ${{ inputs.environment }}");
     const deployTimeoutMinutes = Number(
       /^\s*timeout-minutes:\s*(\d+)\s*$/mu.exec(deployJob)?.[1] ?? "",
     );

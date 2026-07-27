@@ -1,8 +1,8 @@
 # Reusable Cloudflare Preview Staging Lane
 
-Status: active
+Status: completed
 Created: 2026-07-26
-Updated: 2026-07-26
+Updated: 2026-07-27
 
 ## Goal
 
@@ -96,12 +96,19 @@ Updated: 2026-07-26
 
 ## Verification
 
-- Commands to run:
-  - focused deploy preflight and deploy-automation tests
-  - `pnpm test:diff ...`
-  - `pnpm verify:acceptance`
-  - preliminary `completion-specialists` ReviewGPT and final ReviewGPT gate
-  - required PR CI
-- Expected outcomes:
-  - preview misconfiguration is rejected before any provider mutation
-  - production deploy behavior and defaults remain covered and unchanged
+- Focused deploy preflight/deploy-automation verification passed: 82 tests and
+  the Cloudflare package typecheck.
+- Canonical diff verification passed: 1,999 Cloudflare Node tests and 2
+  Workers-runtime tests.
+- `pnpm verify:acceptance` passed, including repository typechecks, package
+  coverage, hosted Web build/tests, and Cloudflare app verification.
+- Preliminary `completion-specialists` review found two coverage gaps. Both
+  were accepted and resolved by locking the workflow selection-to-config path
+  and directly covering Worker/Web HTTPS and public-DNS preview boundaries.
+- The first pushed candidate head passed all required PR CI.
+- Provider-name/status audit confirmed that the isolated Vercel preview
+  data/crypto/control-plane boundary is incomplete. No Cloudflare Worker, R2
+  resource, GitHub Environment value, Vercel variable, secret, database, or
+  production resource was mutated; live bootstrap and rehearsal stop at that
+  prerequisite.
+Completed: 2026-07-27

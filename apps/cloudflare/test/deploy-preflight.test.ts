@@ -222,6 +222,31 @@ describe("deploy preflight helpers", () => {
     ]));
   });
 
+  it("rejects preview deploys with an unscoped Worker origin", () => {
+    expect(listHostedDeployEnvironmentInvariantErrors(
+      createRequiredPreviewWorkerDeployEnv({
+        CF_PUBLIC_BASE_URL: "https://hosted-runner.example.test",
+      }),
+      { deployWorker: true },
+    )).toContain(
+      "CF_PUBLIC_BASE_URL must use a preview or staging origin in preview deploys.",
+    );
+  });
+
+  it.each([
+    "CF_PUBLIC_BASE_URL",
+    "HOSTED_WEB_BASE_URL",
+  ] as const)("requires preview %s to use HTTPS", (label) => {
+    expect(listHostedDeployEnvironmentInvariantErrors(
+      createRequiredPreviewWorkerDeployEnv({
+        [label]: label === "CF_PUBLIC_BASE_URL"
+          ? "http://hosted-runner-staging.example.test"
+          : "http://web-staging.example.test",
+      }),
+      { deployWorker: true },
+    )).toContain(`${label} must be a valid preview HTTPS URL.`);
+  });
+
   it("requires the direct-R2 presign bucket to match the Worker R2 binding bucket", () => {
     expect(listHostedDeployEnvironmentInvariantErrors(createRequiredWorkerDeployEnv({
       HOSTED_R2_PRESIGN_BUCKET_NAME: "other-bundles",
@@ -676,18 +701,34 @@ describe("deploy preflight helpers", () => {
     );
   });
 
-  it("rejects preview deploy hostnames that resolve to private-network addresses", async () => {
-    await expect(listHostedDeployEnvironmentInvariantErrorsAsync(
+  it("allows preview deploy hostnames when both resolve to public addresses", async () => {
+    await expect(assertHostedDeployEnvironmentAsync(
       createRequiredPreviewWorkerDeployEnv(),
       { deployWorker: true },
       {
-        resolveHostnameAddresses: async (hostname) =>
-          hostname === "web-staging.example.test" ? ["10.1.2.3"] : ["8.8.8.8"],
+        resolveHostnameAddresses: async () => ["8.8.8.8", "2001:4860:4860::8888"],
       },
-    )).resolves.toContain(
-      "HOSTED_WEB_BASE_URL must not resolve to private-network addresses in preview deploys.",
-    );
+    )).resolves.toBeUndefined();
   });
+
+  it.each([
+    ["CF_PUBLIC_BASE_URL", "hosted-runner-staging.example.test"],
+    ["HOSTED_WEB_BASE_URL", "web-staging.example.test"],
+  ] as const)(
+    "rejects preview %s when it resolves to a private-network address",
+    async (label, privateHostname) => {
+      await expect(listHostedDeployEnvironmentInvariantErrorsAsync(
+        createRequiredPreviewWorkerDeployEnv(),
+        { deployWorker: true },
+        {
+          resolveHostnameAddresses: async (hostname) =>
+            hostname === privateHostname ? ["10.1.2.3"] : ["8.8.8.8"],
+        },
+      )).resolves.toContain(
+        `${label} must not resolve to private-network addresses in preview deploys.`,
+      );
+    },
+  );
 
   it("parses truthy deploy-worker flag values", () => {
     expect(parseDeployWorkerFlag("true")).toBe(true);
