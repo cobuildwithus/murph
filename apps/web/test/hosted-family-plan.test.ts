@@ -83,6 +83,7 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
 import {
   createHostedEmailLookupKey,
   createHostedPhoneLookupKey,
+  createHostedStripeCheckoutSessionLookupKey,
   createHostedTelegramUserLookupKey,
   createHostedTelegramUsernameLookupKey,
 } from "@/src/lib/hosted-onboarding/contact-privacy";
@@ -4835,11 +4836,13 @@ describe("hosted Family plan", () => {
       billedSeatCount: null,
       group,
     });
-    tx.hostedAccountGroupBillingRef.findUnique.mockResolvedValueOnce({
+    tx.hostedAccountGroupBillingRef.findUnique.mockResolvedValue({
       ...createBillingRefMock({
         checkoutAttemptId: "hbfca_current",
         checkoutSeatCount: 2,
         stripeCheckoutSessionIdEncrypted: `encrypted:${sessionId}`,
+        stripeCheckoutSessionLookupKey:
+          createHostedStripeCheckoutSessionLookupKey(sessionId),
         stripeSubscriptionIdEncrypted: null,
       }),
       group,
@@ -4847,6 +4850,7 @@ describe("hosted Family plan", () => {
     const retrieve = vi.fn().mockResolvedValue(makeFamilyStripeCheckoutSession({
       checkoutAttemptId: "hbfca_current",
       sessionId,
+      status: "expired",
       subscriptionId: null,
       url: null,
     }));
@@ -4858,8 +4862,9 @@ describe("hosted Family plan", () => {
       },
     });
 
+    const prisma = createFamilyPlanPrismaMock(tx);
     await expect(resolveHostedFamilyCheckoutRedirectUrl({
-      prisma: tx as never,
+      prisma: prisma as never,
       sessionId,
     })).rejects.toMatchObject({
       code: "HOSTED_FAMILY_CHECKOUT_SESSION_UNAVAILABLE",
@@ -4881,6 +4886,58 @@ describe("hosted Family plan", () => {
         ),
       },
     });
+    expect(prisma.$transaction).toHaveBeenCalledOnce();
+    expect(tx.$queryRaw).toHaveBeenCalled();
+  });
+
+  it("keeps a completed unavailable Family checkout bound for deletion reconciliation", async () => {
+    const sessionId = "cs_test_completedunavailable123";
+    const group = {
+      billingStatus: HostedBillingStatus.not_started,
+      id: "hbag_family",
+      ownerMemberId: "member_owner",
+      suspendedAt: null,
+    };
+    const tx = createTxMock({
+      billedSeatCount: null,
+      group,
+    });
+    tx.hostedAccountGroupBillingRef.findUnique.mockResolvedValue({
+      ...createBillingRefMock({
+        checkoutAttemptId: "hbfca_current",
+        checkoutSeatCount: 2,
+        stripeCheckoutSessionIdEncrypted: `encrypted:${sessionId}`,
+        stripeCheckoutSessionLookupKey:
+          createHostedStripeCheckoutSessionLookupKey(sessionId),
+        stripeSubscriptionIdEncrypted: null,
+      }),
+      group,
+    });
+    const retrieve = vi.fn().mockResolvedValue(makeFamilyStripeCheckoutSession({
+      checkoutAttemptId: "hbfca_current",
+      sessionId,
+      status: "complete",
+      url: null,
+    }));
+    runtimeMocks.requireHostedStripeApi.mockReturnValueOnce({
+      checkout: {
+        sessions: {
+          retrieve,
+        },
+      },
+    });
+    const prisma = createFamilyPlanPrismaMock(tx);
+
+    await expect(resolveHostedFamilyCheckoutRedirectUrl({
+      prisma: prisma as never,
+      sessionId,
+    })).rejects.toMatchObject({
+      code: "HOSTED_FAMILY_CHECKOUT_SESSION_UNAVAILABLE",
+      httpStatus: 410,
+    });
+
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(tx.hostedAccountGroupBillingRef.updateMany).not.toHaveBeenCalled();
   });
 
   it("rejects a checkout redirect for a synthetic Family owner", async () => {
@@ -5148,6 +5205,7 @@ function createBillingRefMock(overrides: Partial<{
   groupId: string;
   lastStripeEventCreatedAt: Date | null;
   stripeCheckoutSessionIdEncrypted: string | null;
+  stripeCheckoutSessionLookupKey: string | null;
   stripeCustomerIdEncrypted: string | null;
   stripeSubscriptionIdEncrypted: string | null;
   stripeSubscriptionItemIdEncrypted: string | null;
@@ -5189,6 +5247,10 @@ function createBillingRefMock(overrides: Partial<{
     lastStripeEventCreatedAt: resolveNullableOverride("lastStripeEventCreatedAt", null),
     stripeCheckoutSessionIdEncrypted: resolveNullableOverride(
       "stripeCheckoutSessionIdEncrypted",
+      null,
+    ),
+    stripeCheckoutSessionLookupKey: resolveNullableOverride(
+      "stripeCheckoutSessionLookupKey",
       null,
     ),
     stripeCustomerIdEncrypted: resolveNullableOverride(
@@ -5410,6 +5472,7 @@ function createTxMock(input: {
 function makeFamilyStripeCheckoutSession(input: {
   checkoutAttemptId?: string | null;
   sessionId?: string;
+  status?: Stripe.Checkout.Session["status"];
   subscriptionId?: string | null;
   url?: string | null;
 } = {}): Stripe.Checkout.Session {
@@ -5427,6 +5490,7 @@ function makeFamilyStripeCheckoutSession(input: {
     },
     mode: "subscription",
     object: "checkout.session",
+    status: input.status ?? "open",
     subscription: input.subscriptionId === undefined ? "sub_family" : input.subscriptionId,
     url: input.url === undefined
       ? "https://checkout.stripe.com/c/pay/cs_test_family123"
@@ -5434,6 +5498,14 @@ function makeFamilyStripeCheckoutSession(input: {
   };
 
   return session as Stripe.Checkout.Session;
+}
+
+function createFamilyPlanPrismaMock(tx: FamilyPlanTxMock) {
+  return Object.assign(tx, {
+    $transaction: vi.fn(async (
+      run: (transaction: Prisma.TransactionClient) => Promise<unknown>,
+    ) => run(tx)),
+  });
 }
 
 function makeFamilyStripeSubscriptionEvent(): Stripe.Event {

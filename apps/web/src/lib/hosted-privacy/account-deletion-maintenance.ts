@@ -1,15 +1,14 @@
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 
 /**
- * Temporary control for the OC-to-ENAM bundles migration in
- * `apps/cloudflare/R2_BUNDLES_ENAM_MIGRATION.md`.
+ * Temporary admission control for account-deletion cutovers whose complete
+ * provider target set cannot be derived by the currently deployed Web code.
  *
- * During that cutover two buckets hold the member's objects and either one can
- * still become the active bucket. The runtime deletion path only ever targets
- * the currently active bucket, so a deletion accepted inside the window could
- * leave data behind in the bucket that later becomes live. Rather than accept
- * a deletion we cannot complete everywhere, we decline it for the length of the
- * window.
+ * Current uses are the OC-to-ENAM bundles migration documented in
+ * `apps/cloudflare/R2_BUNDLES_ENAM_MIGRATION.md` and the first deployment of
+ * the subscription Checkout Session deletion fence. The latter must keep this
+ * gate active until old Web functions drain and every open personal Checkout
+ * Session issued before bind-before-return convergence is terminal.
  *
  * The flag is the only authority and the message makes no timing promise, not
  * even a relative one. The window runs from before the copy until OC
@@ -18,8 +17,9 @@ import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
  * open. Recovery guidance is stated as a condition instead, which stays true
  * for as long as the window lasts.
  *
- * Delete this module, its env var, and both call sites with the runbook once
- * the OC buckets are retired.
+ * Delete this module, its env var, and both call sites only after every current
+ * cutover that names this boundary has completed and its rollback floor is no
+ * longer needed.
  */
 export const HOSTED_ACCOUNT_DELETION_MAINTENANCE_ENV = "HOSTED_ACCOUNT_DELETION_MAINTENANCE";
 

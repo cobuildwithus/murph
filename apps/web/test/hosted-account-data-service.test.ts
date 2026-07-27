@@ -1180,6 +1180,78 @@ describe("deleteHostedAccountData", () => {
     });
   });
 
+  it("captures and cancels billing created after a completed Family redirect loses its URL", async () => {
+    const stripe = {
+      checkout: {
+        sessions: {
+          expire: vi.fn(),
+          retrieve: vi.fn(async () => ({
+            customer: "cus_family_checkout_race_123",
+            id: "cs_family_delete_complete_123",
+            mode: "subscription",
+            status: "complete",
+            subscription: "sub_family_checkout_race_123",
+          })),
+        },
+      },
+      subscriptions: {
+        cancel: vi.fn(async () => ({
+          id: "sub_family_checkout_race_123",
+          status: "canceled",
+        })),
+        retrieve: vi.fn(async () => ({
+          id: "sub_family_checkout_race_123",
+          status: "active",
+        })),
+      },
+    };
+    serviceMocks.getHostedOnboardingStripe.mockReturnValue(stripe);
+    const vendorRows = await makeVendorAccountRowsForTest("member_123", {
+      stripeCheckoutSessionId: null,
+      stripeCustomerId: null,
+      stripeSubscriptionId: null,
+    });
+    const familyBillingRefRecord = await makeFamilyBillingRefRowForTest({
+      groupId: "family_group_123",
+      ownerMemberId: "member_123",
+      stripeCheckoutSessionId: "cs_family_delete_complete_123",
+      stripeCustomerId: null,
+      stripeSubscriptionId: null,
+    });
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      ...vendorRows,
+      familyBillingRefRecords: [familyBillingRefRecord],
+      familyGroups: [{ id: "family_group_123" }],
+      onTransaction: () => undefined,
+    });
+
+    await deleteHostedAccountData({
+      memberId: "member_123",
+      prisma,
+      request: new Request("https://join.example.test/settings"),
+    });
+
+    expect(stripe.checkout.sessions.expire).not.toHaveBeenCalled();
+    expect(stripe.checkout.sessions.retrieve).toHaveBeenCalledWith(
+      "cs_family_delete_complete_123",
+      {},
+      expect.objectContaining({
+        maxNetworkRetries: 0,
+        timeout: expect.any(Number),
+      }),
+    );
+    expect(stripe.subscriptions.cancel).toHaveBeenCalledWith(
+      "sub_family_checkout_race_123",
+    );
+    expect(serviceMocks.prepareHostedAccountDeletionCleanup).toHaveBeenCalledWith({
+      now: expect.any(Date),
+      privyUserId: "privy-user-delete-123",
+      runtimeMemberIds: ["member_123"],
+      stripeCustomerIds: ["cus_family_checkout_race_123"],
+      stripeSubscriptionIds: ["sub_family_checkout_race_123"],
+    });
+  });
+
   it.each([
     ["Stripe is not configured", "not-configured", "ACCOUNT_DELETION_STRIPE_NOT_CONFIGURED"],
     ["the initial provider read fails", "retrieve-failed", "ACCOUNT_DELETION_STRIPE_CHECKOUT_CLOSE_FAILED"],
@@ -2764,10 +2836,20 @@ async function makeVendorAccountRowsForTest(memberId: string, overrides?: {
 async function makeFamilyBillingRefRowForTest(input: {
   groupId: string;
   ownerMemberId: string;
+  stripeCheckoutSessionId?: string | null;
   stripeCustomerId: string | null;
   stripeSubscriptionId: string | null;
 }): Promise<Record<string, unknown>> {
-  const [stripeCustomerIdEncrypted, stripeSubscriptionIdEncrypted] = await Promise.all([
+  const [
+    stripeCheckoutSessionIdEncrypted,
+    stripeCustomerIdEncrypted,
+    stripeSubscriptionIdEncrypted,
+  ] = await Promise.all([
+    encryptHostedWebNullableString({
+      field: "hosted-account-group-billing-ref.stripe-checkout-session-id",
+      memberId: input.ownerMemberId,
+      value: input.stripeCheckoutSessionId ?? null,
+    }),
     encryptHostedWebNullableString({
       field: "hosted-account-group-billing-ref.stripe-customer-id",
       memberId: input.ownerMemberId,
@@ -2793,6 +2875,10 @@ async function makeFamilyBillingRefRowForTest(input: {
     },
     groupId: input.groupId,
     lastStripeEventCreatedAt: new Date("2026-04-23T00:00:00.000Z"),
+    stripeCheckoutSessionIdEncrypted,
+    stripeCheckoutSessionLookupKey: createHostedStripeCheckoutSessionLookupKey(
+      input.stripeCheckoutSessionId,
+    ),
     stripeCustomerIdEncrypted,
     stripeSubscriptionIdEncrypted,
   };

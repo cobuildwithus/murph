@@ -16,7 +16,10 @@ import {
   HostedMemberStripeMutationLockBusyError,
   withHostedMemberStripeMutationLockForOps,
 } from "@/src/lib/hosted-onboarding/hosted-member-billing-store";
-import { bindHostedFamilyCheckoutSessionTx } from "@/src/lib/hosted-onboarding/family-plan";
+import {
+  bindHostedFamilyCheckoutSessionTx,
+  clearExpiredHostedFamilyCheckoutAttemptForSessionTx,
+} from "@/src/lib/hosted-onboarding/family-plan";
 import { readHostedMemberBillingSnapshot } from "@/src/lib/hosted-onboarding/hosted-member-store";
 import { ensureHostedMemberForPrivyIdentityResolutionTx } from "@/src/lib/hosted-onboarding/member-identity-service";
 import {
@@ -550,6 +553,240 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         }
       },
     );
+
+    it("makes deletion wait for an expired Family redirect clear that owns the member lock", async () => {
+      const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const redirectClient = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const deletionClient = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const fixtureId = randomUUID();
+      const sessionSuffix = fixtureId.replaceAll("-", "");
+      const memberId = `hbm_family_redirect_clear_first_${fixtureId}`;
+      const groupId = `hbag_family_redirect_clear_first_${fixtureId}`;
+      const attemptId = `attempt_family_redirect_clear_first_${fixtureId}`;
+      const sessionId = `cs_test_redirectclear${sessionSuffix}`;
+      const clearReady = createDeferred();
+      const releaseClear = createDeferred();
+      let clear: Promise<void> | null = null;
+      let deletion: Promise<unknown> | null = null;
+
+      await createCheckoutBindingConcurrencyFixture({
+        attemptId,
+        groupId,
+        kind: "family",
+        memberId,
+        prisma: observer,
+      });
+      setHostedSecureBoxStringTestCodecForTests({
+        decrypt(input) {
+          return input.value;
+        },
+        encrypt(input) {
+          return input.value;
+        },
+      });
+      await observer.$transaction((tx) =>
+        bindHostedFamilyCheckoutSessionTx({
+          attemptId,
+          group: {
+            id: groupId,
+            ownerMemberId: memberId,
+          },
+          sessionId,
+          tx,
+        }));
+
+      try {
+        clear = redirectClient.$transaction(async (tx) => {
+          await expect(clearExpiredHostedFamilyCheckoutAttemptForSessionTx({
+            group: {
+              id: groupId,
+              ownerMemberId: memberId,
+            },
+            session: {
+              id: sessionId,
+              status: "expired",
+            },
+            tx,
+          })).resolves.toBe(true);
+          clearReady.resolve();
+          await releaseClear.promise;
+        }, { timeout: transactionTimeoutMs });
+        await clearReady.promise;
+
+        deletion = deleteHostedAccountData({
+          memberId,
+          prisma: deletionClient,
+          request: new Request("https://app.example.test/settings"),
+        });
+        await expectPromisePending(
+          deletion,
+          "Account deletion should wait for the expired redirect clear transaction.",
+        );
+
+        releaseClear.resolve();
+        await expect(clear).resolves.toBeUndefined();
+        await expect(deletion).resolves.toMatchObject({
+          cleanupPending: false,
+          memberId,
+        });
+
+        expect(stripeProvider.checkoutSessionsRetrieve).not.toHaveBeenCalled();
+        expect(stripeProvider.checkoutSessionsExpire).not.toHaveBeenCalled();
+      } finally {
+        releaseClear.resolve();
+        await Promise.allSettled([
+          ...(clear ? [clear] : []),
+          ...(deletion ? [deletion] : []),
+        ]);
+        stripeProvider.checkoutSessionsExpire.mockReset();
+        stripeProvider.checkoutSessionsRetrieve.mockReset();
+        setHostedSecureBoxStringTestCodecForTests(null);
+        await observer.hostedAccountGroup.deleteMany({
+          where: { id: groupId },
+        });
+        await observer.hostedMember.deleteMany({
+          where: { id: memberId },
+        });
+        await disconnectClients([observer, redirectClient, deletionClient]);
+      }
+    });
+
+    it("keeps an expired Family redirect bound when deletion suspension owns the member lock", async () => {
+      const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const redirectClient = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const deletionClient = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const fixtureId = randomUUID();
+      const sessionSuffix = fixtureId.replaceAll("-", "");
+      const memberId = `hbm_family_redirect_delete_first_${fixtureId}`;
+      const groupId = `hbag_family_redirect_delete_first_${fixtureId}`;
+      const attemptId = `attempt_family_redirect_delete_first_${fixtureId}`;
+      const sessionId = `cs_test_redirectdelete${sessionSuffix}`;
+      const suspensionWritten = createDeferred();
+      const allowSuspensionCommit = createDeferred();
+      const suspensionCommitted = createDeferred();
+      const allowDeletionContinue = createDeferred();
+      let clear: Promise<boolean> | null = null;
+      let deletion: Promise<unknown> | null = null;
+
+      await createCheckoutBindingConcurrencyFixture({
+        attemptId,
+        groupId,
+        kind: "family",
+        memberId,
+        prisma: observer,
+      });
+      setHostedSecureBoxStringTestCodecForTests({
+        decrypt(input) {
+          return input.value;
+        },
+        encrypt(input) {
+          return input.value;
+        },
+      });
+      await observer.$transaction((tx) =>
+        bindHostedFamilyCheckoutSessionTx({
+          attemptId,
+          group: {
+            id: groupId,
+            ownerMemberId: memberId,
+          },
+          sessionId,
+          tx,
+        }));
+      stripeProvider.checkoutSessionsRetrieve.mockResolvedValue({
+        id: sessionId,
+        mode: "subscription",
+        status: "open",
+      });
+      stripeProvider.checkoutSessionsExpire.mockResolvedValue({
+        id: sessionId,
+        mode: "subscription",
+        status: "expired",
+      });
+
+      try {
+        deletion = deleteHostedAccountData({
+          memberId,
+          prisma: pauseAccountDeletionAfterSuspension({
+            allowDeletionContinue,
+            allowSuspensionCommit,
+            prisma: deletionClient,
+            suspensionCommitted,
+            suspensionWritten,
+          }),
+          request: new Request("https://app.example.test/settings"),
+        });
+        await suspensionWritten.promise;
+
+        clear = redirectClient.$transaction((tx) =>
+          clearExpiredHostedFamilyCheckoutAttemptForSessionTx({
+            group: {
+              id: groupId,
+              ownerMemberId: memberId,
+            },
+            session: {
+              id: sessionId,
+              status: "expired",
+            },
+            tx,
+          }), { timeout: transactionTimeoutMs });
+        await expectPromisePending(
+          clear,
+          "Expired redirect clear should wait for deletion suspension.",
+        );
+
+        allowSuspensionCommit.resolve();
+        await suspensionCommitted.promise;
+        await expect(clear).resolves.toBe(false);
+        await expect(observer.hostedAccountGroupBillingRef.findUnique({
+          select: { stripeCheckoutSessionLookupKey: true },
+          where: { groupId },
+        })).resolves.toMatchObject({
+          stripeCheckoutSessionLookupKey: expect.stringMatching(
+            /^hbidx:stripe-checkout-session:v1:/u,
+          ),
+        });
+
+        allowDeletionContinue.resolve();
+        await expect(deletion).resolves.toMatchObject({
+          cleanupPending: false,
+          memberId,
+        });
+        expect(stripeProvider.checkoutSessionsRetrieve).toHaveBeenCalledWith(
+          sessionId,
+          {},
+          expect.objectContaining({
+            maxNetworkRetries: 0,
+            timeout: expect.any(Number),
+          }),
+        );
+        expect(stripeProvider.checkoutSessionsExpire).toHaveBeenCalledWith(
+          sessionId,
+          {},
+          expect.objectContaining({
+            maxNetworkRetries: 0,
+            timeout: expect.any(Number),
+          }),
+        );
+      } finally {
+        allowSuspensionCommit.resolve();
+        allowDeletionContinue.resolve();
+        await Promise.allSettled([
+          ...(clear ? [clear] : []),
+          ...(deletion ? [deletion] : []),
+        ]);
+        stripeProvider.checkoutSessionsExpire.mockReset();
+        stripeProvider.checkoutSessionsRetrieve.mockReset();
+        setHostedSecureBoxStringTestCodecForTests(null);
+        await observer.hostedAccountGroup.deleteMany({
+          where: { id: groupId },
+        });
+        await observer.hostedMember.deleteMany({
+          where: { id: memberId },
+        });
+        await disconnectClients([observer, redirectClient, deletionClient]);
+      }
+    });
 
     it.each([
       {

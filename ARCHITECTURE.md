@@ -440,13 +440,32 @@ same member lock. Starting a new personal plan first proves the prior bound
 Session terminal, retains that owner while Stripe creates the replacement,
 then compare-and-swaps only that exact binding under the same lock. The
 terminal Session identity derives the replacement's Stripe idempotency scope,
-so a failed create retries the same undisclosed replacement.
+so a failed create retries the same undisclosed replacement. The Family
+Checkout redirect is also a billing-reference writer: a missing provider URL
+never clears a completed or ambiguous Session, and only a provider-proven
+expired Session may clear its exact binding after locking and rechecking the
+current unsuspended owner.
 Account deletion expires each open bound Session before local removal under one
 shared five-second Stripe deadline. If Stripe completed a Session concurrently,
 deletion adds that Session's Customer and Subscription to the
 cleanup/cancellation target set instead; ambiguous provider state fails closed.
 The final locked transaction also rechecks the bound Session set, so replacing
 a Session cannot escape the captured cleanup boundary.
+
+The first bind-before-return deployment requires a deletion-maintenance
+cutover, not an ordinary additive rollout. Activate
+`HOSTED_ACCOUNT_DELETION_MAINTENANCE=1` on the current Web deployment and prove
+both deletion entry points fail closed before applying the additive migration
+or deploying the new writer. After the migration and new Web deployment, wait
+for prior Vercel functions to drain and recheck the production alias. While
+deletion remains disabled, enumerate every still-open personal subscription
+Checkout Session issued before convergence from Stripe's Murph metadata, expire
+it, and reconcile or cancel any completion that wins the expiry race. Lift
+maintenance only after that set is terminal and the bind-before-return writer
+is live everywhere. The first converged fence-capable Web deployment is the
+account-deletion rollback floor; rolling back below it requires activating
+maintenance first, draining the rollback deployment, repeating the pre-fence
+Session sweep, and only then restoring deletion.
 
 Immediate provider attempts share one five-second abortable deadline. Retention
 attempts share one fifteen-second abortable deadline, use bounded four-receipt

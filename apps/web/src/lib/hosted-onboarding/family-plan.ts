@@ -2723,7 +2723,7 @@ export function buildHostedFamilyCheckoutRedirectUrl(input: {
 }
 
 export async function resolveHostedFamilyCheckoutRedirectUrl(input: {
-  prisma?: HostedOnboardingReadClient;
+  prisma?: PrismaClient;
   sessionId: string;
 }): Promise<string> {
   const sessionId = normalizeNullableString(input.sessionId);
@@ -2763,11 +2763,14 @@ export async function resolveHostedFamilyCheckoutRedirectUrl(input: {
 
   const checkoutUrl = normalizeNullableString(session.url);
   if (!checkoutUrl) {
-    await clearHostedFamilyCheckoutAttemptForSession({
-      groupId: group.id,
-      prisma,
-      sessionId,
-    });
+    if (session.status === "expired") {
+      await prisma.$transaction((tx) =>
+        clearExpiredHostedFamilyCheckoutAttemptForSessionTx({
+          group,
+          session,
+          tx,
+        }), HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+    }
     throw hostedOnboardingError({
       code: "HOSTED_FAMILY_CHECKOUT_SESSION_UNAVAILABLE",
       httpStatus: 410,
@@ -2778,19 +2781,53 @@ export async function resolveHostedFamilyCheckoutRedirectUrl(input: {
   return checkoutUrl;
 }
 
-async function clearHostedFamilyCheckoutAttemptForSession(input: {
-  groupId: string;
-  prisma: HostedOnboardingReadClient;
-  sessionId: string;
-}): Promise<void> {
+export async function clearExpiredHostedFamilyCheckoutAttemptForSessionTx(input: {
+  group: Pick<HostedAccountGroupAccessSnapshot, "id" | "ownerMemberId">;
+  session: Pick<Stripe.Checkout.Session, "id" | "status">;
+  tx: Prisma.TransactionClient;
+}): Promise<boolean> {
+  if (input.session.status !== "expired") {
+    return false;
+  }
   const stripeCheckoutSessionLookupKey = createHostedStripeCheckoutSessionLookupKey(
-    input.sessionId,
+    input.session.id,
   );
   if (!stripeCheckoutSessionLookupKey) {
-    return;
+    return false;
   }
 
-  await input.prisma.hostedAccountGroupBillingRef.updateMany({
+  await lockHostedMemberRow(input.tx, input.group.ownerMemberId);
+  const [currentGroup, currentOwner, currentBillingRef] = await Promise.all([
+    input.tx.hostedAccountGroup.findUnique({
+      select: hostedAccountGroupAccessSelect,
+      where: { id: input.group.id },
+    }),
+    input.tx.hostedMember.findUnique({
+      select: { suspendedAt: true },
+      where: { id: input.group.ownerMemberId },
+    }),
+    input.tx.hostedAccountGroupBillingRef.findUnique({
+      select: { stripeCheckoutSessionLookupKey: true },
+      where: { groupId: input.group.id },
+    }),
+  ]);
+  if (
+    !currentGroup
+    || currentGroup.ownerMemberId !== input.group.ownerMemberId
+    || isHostedMemberSuspended(currentGroup.suspendedAt)
+    || !currentOwner
+    || isHostedMemberSuspended(currentOwner.suspendedAt)
+    || currentBillingRef?.stripeCheckoutSessionLookupKey !==
+      stripeCheckoutSessionLookupKey
+  ) {
+    return false;
+  }
+  await assertHostedFamilyOwnerIsPersonalMember({
+    ownerMemberId: input.group.ownerMemberId,
+    prisma: input.tx,
+  });
+
+  const updated = await input.tx.hostedAccountGroupBillingRef.updateMany({
     data: {
       checkoutAttemptId: null,
       checkoutCreatedAt: null,
@@ -2799,10 +2836,11 @@ async function clearHostedFamilyCheckoutAttemptForSession(input: {
       stripeCheckoutSessionLookupKey: null,
     },
     where: {
-      groupId: input.groupId,
+      groupId: input.group.id,
       stripeCheckoutSessionLookupKey,
     },
   });
+  return updated.count === 1;
 }
 
 export async function createHostedAccountGroupForOwner(input: {

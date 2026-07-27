@@ -35,7 +35,10 @@ Last verified: 2026-07-27
   create therefore retries the same undisclosed replacement instead of
   replaying the retired Checkout. A transient Family binding failure likewise
   leaves its same-attempt Session undisclosed and replayable; definitive stale
-  ownership rejects and expires it. Account deletion gives all
+  ownership rejects and expires it. A Family redirect with no provider URL
+  clears only a provider-proven expired exact Session under that owner lock;
+  completed or ambiguous Sessions remain bound for webhook or deletion
+  reconciliation. Account deletion gives all
   bound subscription-Session retrieval and expiry calls one shared five-second
   foreground deadline with provider retries disabled; timeout or ambiguous
   terminal state preserves local ownership for a later member-initiated retry.
