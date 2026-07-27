@@ -145,7 +145,7 @@ describe("device sync companion address-book route", () => {
       prisma: mocks.prisma,
     });
     expect(mocks.readJsonObject).toHaveBeenCalledWith(request, {
-      limitBytes: 96 * 1024,
+      limitBytes: 192 * 1024,
     });
     expect(mocks.parseHostedAddressBookReplaceRequest).toHaveBeenCalledWith(rawBody);
     expect(mocks.replaceHostedAddressBookProjection).toHaveBeenCalledWith({

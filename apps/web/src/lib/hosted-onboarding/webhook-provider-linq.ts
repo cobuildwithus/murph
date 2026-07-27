@@ -62,6 +62,9 @@ import {
   readHostedMailboxItemByDedupeKey,
 } from "../hosted-mailbox/store";
 import {
+  renewHostedThreadContainerParticipantAccessTx,
+} from "../hosted-groups/thread-container-participant-access";
+import {
   bindHostedMemberHomeLinqChat,
   bindHostedMemberPendingLinqChatAndTrackInbound,
   buildActiveMemberDirectPlan,
@@ -1378,6 +1381,7 @@ async function planHostedLinqExplicitThreadRouteWebhook(input: {
   context: ReturnType<typeof resolveHostedOnboardingLinqMessageContext>;
   event: HostedLinqWebhookEvent;
   prisma: Prisma.TransactionClient;
+  resolvedParticipantMemberId?: string;
   route: HostedThreadRouteSnapshot;
   sourceMailboxConsumedAt?: Date | null;
 }): Promise<HostedOnboardingLinqDirectPlan> {
@@ -1388,8 +1392,30 @@ async function planHostedLinqExplicitThreadRouteWebhook(input: {
     summary,
   } = input.context;
 
+  const participantAccessNow = new Date();
+  let senderMemberId: string | null = null;
+  if (
+    !summary.isFromMe
+    && messageEvent.data.message.parts.length > 0
+    && participantContact
+    && !shouldIgnoreHostedLinqForLocalInboundGuard({
+      isFromMe: summary.isFromMe,
+      participantContact,
+    })
+  ) {
+    senderMemberId = await renewHostedThreadContainerParticipantAccessFromInboundTx({
+      containerMemberId: input.route.containerMemberId,
+      now: participantAccessNow,
+      occurredAt,
+      participantContact,
+      prisma: input.prisma,
+      resolvedParticipantMemberId: input.resolvedParticipantMemberId,
+    });
+  }
+
   const containerAccessActive = await readActiveHostedMemberAccess({
     memberId: input.route.containerMemberId,
+    now: participantAccessNow,
     prisma: input.prisma,
   });
 
@@ -1504,6 +1530,7 @@ async function planHostedLinqExplicitThreadRouteWebhook(input: {
       participantContact,
       rawParts: messageEvent.data.message.parts,
       routeAuthority,
+      ...(senderMemberId ? { senderMemberId } : {}),
       userId: input.route.containerMemberId,
     });
 
@@ -1821,6 +1848,7 @@ async function planHostedLinqGroupChatWebhook(input: {
     context: input.context,
     event: input.event,
     prisma: input.prisma,
+    resolvedParticipantMemberId: sender.id,
     route,
     sourceMailboxConsumedAt: demotedMailboxConsumedAt,
   });
@@ -2077,6 +2105,7 @@ function buildHostedLinqConversationWakeForMailbox(input: {
   participantContact: HostedLinqParticipantIdentity;
   rawParts: HostedLinqMessageReceivedEvent["data"]["message"]["parts"];
   routeAuthority?: HostedLinqThreadRouteEgressAuthority | null;
+  senderMemberId?: string;
   userId: string;
 }): ReturnType<typeof buildHostedExecutionLinqConversationMessageWake> {
   const fullWake = buildHostedExecutionLinqConversationMessageWake({
@@ -2099,6 +2128,7 @@ function buildHostedLinqConversationWakeForMailbox(input: {
       ? { phoneLookupKey: input.participantContact.lookupKey }
       : {}),
     ...(input.routeAuthority ? { routeAuthority: input.routeAuthority } : {}),
+    ...(input.senderMemberId ? { senderMemberId: input.senderMemberId } : {}),
     userId: input.userId,
   });
   if (serializedHostedLinqWakeBytes(fullWake) <= HOSTED_LINQ_CONVERSATION_WAKE_INLINE_TARGET_BYTES) {
@@ -2125,6 +2155,7 @@ function buildHostedLinqConversationWakeForMailbox(input: {
       ? { phoneLookupKey: input.participantContact.lookupKey }
       : {}),
     ...(input.routeAuthority ? { routeAuthority: input.routeAuthority } : {}),
+    ...(input.senderMemberId ? { senderMemberId: input.senderMemberId } : {}),
     userId: input.userId,
   });
   if (serializedHostedLinqWakeBytes(compactWake) <= HOSTED_LINQ_CONVERSATION_WAKE_INLINE_TARGET_BYTES) {
@@ -2151,6 +2182,7 @@ function buildHostedLinqConversationWakeForMailbox(input: {
       ? { phoneLookupKey: input.participantContact.lookupKey }
       : {}),
     ...(input.routeAuthority ? { routeAuthority: input.routeAuthority } : {}),
+    ...(input.senderMemberId ? { senderMemberId: input.senderMemberId } : {}),
     userId: input.userId,
   });
 }
@@ -2369,6 +2401,39 @@ function serializedHostedLinqWakeBytes(
   wake: ReturnType<typeof buildHostedExecutionLinqConversationMessageWake>,
 ): number {
   return new TextEncoder().encode(JSON.stringify(wake)).byteLength;
+}
+
+async function renewHostedThreadContainerParticipantAccessFromInboundTx(input: {
+  containerMemberId: string;
+  now: Date;
+  occurredAt: string;
+  participantContact: HostedLinqParticipantContact;
+  prisma: Prisma.TransactionClient;
+  resolvedParticipantMemberId?: string;
+}): Promise<string | null> {
+  const participantMemberId = input.resolvedParticipantMemberId ?? (
+    input.participantContact.kind === "phone"
+      ? (await lookupHostedMemberIdentityByPhoneNumberForLinqWebhook({
+          phoneNumber: input.participantContact.value,
+          prisma: input.prisma,
+        }))?.core.id
+      : (await lookupHostedMemberByVerifiedEmailAddress({
+          address: input.participantContact.value,
+          prisma: input.prisma,
+        }))?.core.id
+  ) ?? null;
+  if (!participantMemberId) {
+    return null;
+  }
+
+  await renewHostedThreadContainerParticipantAccessTx({
+    containerMemberId: input.containerMemberId,
+    now: input.now,
+    observedAt: new Date(input.occurredAt),
+    participantMemberId,
+    prisma: input.prisma,
+  });
+  return participantMemberId;
 }
 
 async function lookupHostedMemberIdentityByPhoneNumberForLinqWebhook(input: {

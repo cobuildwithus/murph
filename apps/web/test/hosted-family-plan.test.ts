@@ -4548,6 +4548,29 @@ describe("hosted Family plan", () => {
     }));
   });
 
+  it("does not bind Family Stripe identifiers after the owner is suspended", async () => {
+    const tx = createTxMock();
+    tx.hostedAccountGroup.findUnique
+      .mockResolvedValueOnce(createPendingInvite().group)
+      .mockResolvedValueOnce({
+        owner: {
+          suspendedAt: new Date("2026-06-18T12:29:00.000Z"),
+        },
+        suspendedAt: null,
+      });
+
+    await expect(writeHostedAccountGroupStripeBillingTx({
+      billingStatus: HostedBillingStatus.active,
+      groupId: "hbag_family",
+      stripeCustomerId: "cus_family",
+      stripeSubscriptionId: "sub_family",
+      tx,
+    })).resolves.toBeNull();
+
+    expect(tx.$queryRaw).toHaveBeenCalledOnce();
+    expect(tx.hostedAccountGroupBillingRef.upsert).not.toHaveBeenCalled();
+  });
+
   it("does not match subscription events by customer alone", async () => {
     const tx = createTxMock();
     tx.hostedAccountGroupBillingRef.findMany.mockImplementation(async ({ where }) => {
@@ -5155,7 +5178,12 @@ function createTxMock(input: {
     hostedAccountGroup: {
       create: vi.fn().mockResolvedValue(group),
       findFirst: vi.fn().mockResolvedValue(group),
-      findUnique: vi.fn().mockResolvedValue(group),
+      findUnique: vi.fn().mockResolvedValue({
+        ...group,
+        owner: {
+          suspendedAt: null,
+        },
+      }),
       update: vi.fn().mockResolvedValue(group),
     },
     hostedAccountGroupBillingRef: {

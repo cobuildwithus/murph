@@ -11,7 +11,10 @@ Murph needs a public, living Health Commons for protocol pages, biomarker pages,
 The Health Commons is not a private user vault, not a raw research warehouse, and not a feed of raw personal results.
 
 - Public reusable health knowledge belongs in `packages/health-commons/content/**` as typed pages and small manifests.
-- Public protocol indexes, route bundles, runnable artifacts, and Start surfaces include only unhidden runnable protocols. `draft` and `deprecated` protocols are not runnable or directly startable. A statusless legacy protocol remains runnable for compatibility until its content is migrated.
+- Public protocol indexes, route bundles, runnable artifacts, biomarker rankings,
+  and Start surfaces include only unhidden protocols with an explicit
+  `field-testing`, `reviewed`, or `community` status. Missing, `draft`, and
+  `deprecated` statuses are not runnable or directly startable.
 - Generated runtime projections and catalog artifacts materialize under `packages/health-commons/generated/**` as ignored build artifacts. Generated projections may include authored or placeholder community outcome fields, but run-derived aggregate summaries from opted-in Murph runs are future work.
 - Private user runs and private outcome cards continue to live outside the Health Commons, bound to exact commons keys and revisions.
 - Explicit public contributions may inform generated cohort summaries, but raw private run records never become article prose.

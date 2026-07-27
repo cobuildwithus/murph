@@ -2460,6 +2460,77 @@ describe('assistant outbox runtime', () => {
     expect(mockedDeliverAssistantMessageOverBinding).toHaveBeenCalledOnce()
   })
 
+  it('fails an active revision-matching retired Sunday intent before provider entry', async () => {
+    const retiredAutomationId = 'automation_01K55N7S9X4Q2M6P8R3T0V1WYZ'
+    const { vaultRoot } = await createInitializedAssistantVault(
+      'assistant-outbox-retired-sunday-',
+    )
+    const scaffold = scaffoldAutomationPayload()
+    const automation = await upsertAutomation({
+      ...scaffold,
+      automationId: retiredAutomationId,
+      continuityPolicy: 'fresh',
+      instructions: 'Legacy Sunday group superlatives instructions.',
+      now: new Date('2026-07-26T17:59:00.000Z'),
+      route: {
+        ...scaffold.route,
+        deliveryTarget: 'telegram-group-thread',
+        threadId: 'telegram-group-thread',
+        threadIsDirect: false,
+      },
+      schedule: { kind: 'cron', expression: '0 18 * * 0' },
+      slug: 'group-sunday-superlatives',
+      status: 'active',
+      tags: ['assistant', 'scheduled', 'murph-managed'],
+      title: 'Sunday group superlatives',
+      vaultRoot,
+    })
+    const queued = await deliverAssistantOutboxMessage({
+      automationAuthority: {
+        automationId: automation.record.automationId,
+        expectedUpdatedAt: automation.record.updatedAt,
+      },
+      channel: 'telegram',
+      dispatchMode: 'queue-only',
+      explicitTarget: 'telegram-group-thread',
+      message: 'Legacy Sunday group superlatives.',
+      sessionId: 'session-outbox-retired-sunday',
+      threadId: 'telegram-group-thread',
+      threadIsDirect: false,
+      turnId: 'turn-outbox-retired-sunday',
+      vault: vaultRoot,
+    })
+
+    expect(queued.intent).toMatchObject({
+      automationAuthority: {
+        automationId: retiredAutomationId,
+        expectedUpdatedAt: automation.record.updatedAt,
+      },
+      status: 'pending',
+    })
+    await expect(showAutomation({
+      automationId: retiredAutomationId,
+      vaultRoot,
+    })).resolves.toMatchObject({
+      automationId: retiredAutomationId,
+      status: 'active',
+      updatedAt: automation.record.updatedAt,
+    })
+
+    const dispatched = await dispatchAssistantOutboxIntent({
+      force: true,
+      intentId: queued.intent.intentId,
+      now: new Date('2026-07-26T18:00:00.000Z'),
+      vault: vaultRoot,
+    })
+
+    expect(dispatched.intent.status).toBe('failed')
+    expect(dispatched.deliveryError).toMatchObject({
+      code: 'ASSISTANT_AUTOMATION_DELIVERY_AUTHORITY_STALE',
+    })
+    expect(mockedDeliverAssistantMessageOverBinding).not.toHaveBeenCalled()
+  })
+
   it.each([
     { label: 'paused', status: 'paused' as const },
     { label: 'stopped', status: 'archived' as const },
