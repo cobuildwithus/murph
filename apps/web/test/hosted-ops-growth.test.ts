@@ -14,6 +14,7 @@ import {
 } from "../src/lib/hosted-onboarding/contact-privacy";
 import {
   createHostedLinqParticipantContact,
+  createHostedLinqParticipantContactLookupKeyReadCandidates,
 } from "../src/lib/hosted-onboarding/linq-participant-contact";
 import {
   addUtcDays,
@@ -727,6 +728,12 @@ describe("hosted ops growth metrics", () => {
         phoneLookupKey: previousPhone.lookupKey,
       },
     ]);
+    mocks.hostedMemberEmailAuthorization.findMany.mockResolvedValueOnce([
+      {
+        memberId: "member_monthly",
+        verifiedEmailLookupKey: monthlyEmail.lookupKey,
+      },
+    ]);
     mocks.hostedMemberRouting.findMany.mockResolvedValueOnce([
       {
         memberId: "member_telegram",
@@ -746,7 +753,7 @@ describe("hosted ops growth metrics", () => {
     const dashboard = await readHostedGrowthDashboard(now);
 
     expect(dashboard.activeUsers).toEqual({
-      trailing30Days: 7,
+      trailing30Days: 6,
       trailing7Days: 4,
       wowPercent: 300,
     });
@@ -818,6 +825,63 @@ describe("hosted ops growth metrics", () => {
       },
     });
     expect(mocks.decodeHostedMailboxStoredPayload).toHaveBeenCalledTimes(6);
+  });
+
+  it("rejects group sender evidence that resolves to multiple members", async () => {
+    const restoreKeyring = configureHostedContactPrivacyKeyringForTest({
+      currentVersion: "v2",
+      entries: {
+        v1: "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=",
+        v2: "MTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTE=",
+      },
+    });
+
+    try {
+      const now = new Date("2026-07-06T12:00:00.000Z");
+      const email = requireLinqContact("email", "rotated@example.test");
+      const [currentLookupKey, previousLookupKey] =
+        createHostedLinqParticipantContactLookupKeyReadCandidates({
+          kind: email.kind,
+          value: email.value,
+        });
+      if (!currentLookupKey || !previousLookupKey) {
+        throw new Error("Expected current and previous email lookup keys.");
+      }
+
+      queueCurrentMetricMocks();
+      mocks.hostedMailboxItem.findMany.mockResolvedValueOnce([
+        buildLinqGroupMailboxRow({
+          contact: email,
+          containerMemberId: "thread_container_one",
+          occurredAt: new Date("2026-07-05T12:00:00.000Z"),
+        }),
+      ]);
+      mocks.hostedMemberEmailAuthorization.findMany.mockResolvedValueOnce([
+        {
+          memberId: "member_current_key",
+          verifiedEmailLookupKey: currentLookupKey,
+        },
+        {
+          memberId: "member_previous_key",
+          verifiedEmailLookupKey: previousLookupKey,
+        },
+      ]);
+      mocks.hostedGrowthAggregate.findUniqueOrThrow.mockResolvedValueOnce({
+        trackedFulfilledUsageTopUps: 12,
+      });
+      mocks.hostedMember.findMany.mockResolvedValueOnce([]);
+      mocks.hostedMemberBillingRef.findMany.mockResolvedValueOnce([]);
+      mocks.hostedGrowthDailySnapshot.findMany.mockResolvedValueOnce([]);
+      mocks.hostedMemberBillingRef.count
+        .mockResolvedValueOnce(0)
+        .mockResolvedValueOnce(0);
+
+      await expect(readHostedGrowthDashboard(now)).rejects.toThrow(
+        "Hosted growth group sender matched multiple registered members.",
+      );
+    } finally {
+      restoreKeyring();
+    }
   });
 
   it.each([
@@ -1215,6 +1279,46 @@ function requireTelegramLookupKey(userId: string): string {
     throw new Error("Expected a valid Telegram user lookup key.");
   }
   return lookupKey;
+}
+
+function configureHostedContactPrivacyKeyringForTest(input: {
+  currentVersion: string;
+  entries: Record<string, string>;
+}): () => void {
+  const previousKeys = process.env.HOSTED_CONTACT_PRIVACY_KEYS;
+  const previousCurrentVersion =
+    process.env.HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION;
+
+  process.env.HOSTED_CONTACT_PRIVACY_KEYS = Object.entries(input.entries)
+    .map(([version, key]) => `${version}:${key}`)
+    .join(",");
+  process.env.HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION = input.currentVersion;
+  clearHostedOnboardingEnvCache();
+
+  return () => {
+    restoreEnvValue("HOSTED_CONTACT_PRIVACY_KEYS", previousKeys);
+    restoreEnvValue(
+      "HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION",
+      previousCurrentVersion,
+    );
+    clearHostedOnboardingEnvCache();
+  };
+}
+
+function clearHostedOnboardingEnvCache(): void {
+  delete (
+    globalThis as typeof globalThis & {
+      __murphHostedOnboardingEnv?: unknown;
+    }
+  ).__murphHostedOnboardingEnv;
+}
+
+function restoreEnvValue(key: string, value: string | undefined): void {
+  if (value === undefined) {
+    delete process.env[key];
+    return;
+  }
+  process.env[key] = value;
 }
 
 function buildLinqGroupMailboxRow(input: {
