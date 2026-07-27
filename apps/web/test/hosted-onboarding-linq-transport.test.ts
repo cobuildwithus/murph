@@ -2596,6 +2596,7 @@ function createInviteSignupPrismaFixture(
         revokedAt: null,
         group: {
           joinCode: input.groupJoinCode ?? "join-group",
+          runtimeMember: { suspendedAt: null },
           runtimeMemberId: "member-runtime",
         },
       }),

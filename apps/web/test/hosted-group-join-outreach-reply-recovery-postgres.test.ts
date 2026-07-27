@@ -1,6 +1,6 @@
 import { randomInt, randomUUID } from "node:crypto";
 
-import type { PrismaClient } from "@prisma/client";
+import type { Prisma, PrismaClient } from "@prisma/client";
 import { describe, expect, it, vi } from "vitest";
 
 const providerMocks = vi.hoisted(() => ({
@@ -115,6 +115,7 @@ vi.mock("@/src/lib/phone-calls/account-deletion", async () => {
 });
 
 import {
+  acquireHostedGroupJoinOutreachDrainLockTx,
   enqueueHostedGroupJoinOutreachTx,
   readHostedGroupJoinOutreachReplyContextTx,
 } from "@/src/lib/hosted-groups/group-join-outreach-store";
@@ -146,6 +147,10 @@ import {
   createHostedLinqDeliveryIdempotencyLookupKey,
   createHostedLinqProviderEventLookupKey,
 } from "@/src/lib/hosted-onboarding/linq-observability-identifiers";
+import {
+  createHostedWebhookLinqMessageSideEffect,
+  drainHostedLinqSideEffectsDirect,
+} from "@/src/lib/hosted-onboarding/webhook-transport";
 import {
   planHostedOnboardingLinqWebhook,
 } from "@/src/lib/hosted-onboarding/webhook-provider-linq";
@@ -817,6 +822,7 @@ describe.skipIf(!runPostgresProof)(
           runtimeMemberId,
         });
         await prisma.$disconnect();
+        vi.unstubAllEnvs();
       }
     });
 
@@ -981,202 +987,353 @@ describe.skipIf(!runPostgresProof)(
       },
     );
 
-    it("serializes an in-flight failure receipt with group-owner account deletion", async () => {
-      const deletionPrisma = createPrismaClient({ databaseUrl, poolMax: 2 });
-      const receiptPrisma = createPrismaClient({ databaseUrl, poolMax: 2 });
-      const ownerMemberId = `hbm_a_delete_owner_${randomUUID()}`;
-      const participantMemberId = `hbm_z_delete_participant_${randomUUID()}`;
-      const groupId = `hgrp_delete_race_${randomUUID()}`;
-      const offerId = `hgrpjo_delete_race_${randomUUID()}`;
-      const outreachId = `hgrpjoa_delete_race_${randomUUID()}`;
-      const acceptedAt = new Date("2026-07-27T16:00:00.000Z");
-      const dayUtc = new Date("2026-07-27T00:00:00.000Z");
-      const participantPhone = createUniqueTestPhone("+1202");
-      const participantPhoneLookupKey =
-        createHostedPhoneLookupKey(participantPhone);
-      const recipientPhone = createUniqueTestPhone("+1303");
-      const recipientPhoneLookupKey =
-        createHostedPhoneLookupKey(recipientPhone);
-      const providerMessageId = `linq-delete-race-${randomUUID()}`;
-      const messageLookupKey =
-        createHostedLinqMessageLookupKey(providerMessageId);
-      const effectId = buildHostedLinqInviteSignupEffectId({
-        memberId: participantMemberId,
-        occurredAt: acceptedAt,
-        sourceEventDigest: randomUUID().replaceAll("-", "").slice(0, 32),
+    it("lets a reply already holding the drain finish before the same deletion request", async () => {
+      vi.stubEnv(
+        "HOSTED_ONBOARDING_PUBLIC_BASE_URL",
+        "https://join.example.test",
+      );
+      const fixture = await createDeletionReplyRaceFixture();
+      let releaseReply = () => {};
+      const replyMayContinue = new Promise<void>((resolve) => {
+        releaseReply = resolve;
       });
-      const sourceRef = buildHostedLinqInviteSignupDeliverySourceRef({
-        effectId,
-        groupJoinOutreachId: outreachId,
-        groupJoinRepliedAt: acceptedAt.toISOString(),
+      let reportReplyDrain = () => {};
+      const replyOwnsDrain = new Promise<void>((resolve) => {
+        reportReplyDrain = resolve;
       });
-      const deliveryLookupKey =
-        createHostedLinqDeliveryIdempotencyLookupKey(effectId);
-      const rawEventId = `event-delete-race-${randomUUID()}`;
-      if (
-        !participantPhoneLookupKey
-        || !recipientPhoneLookupKey
-        || !messageLookupKey
-        || !deliveryLookupKey
-      ) {
-        throw new Error("Expected account-deletion race lookup keys.");
-      }
-
-      let releaseReceiptLock = () => {};
-      const receiptMayContinue = new Promise<void>((resolve) => {
-        releaseReceiptLock = resolve;
-      });
-      let reportReceiptLock = () => {};
-      const receiptLocked = new Promise<void>((resolve) => {
-        reportReceiptLock = resolve;
-      });
+      let cleanupCalls = 0;
+      accountDeletionMocks.deleteHostedPhoneCallsForAccountDeletion
+        .mockReset()
+        .mockImplementation(async () => {
+          cleanupCalls += 1;
+        });
+      providerMocks.sendHostedLinqChatMessage
+        .mockReset()
+        .mockResolvedValue({
+          chatId: fixture.chatId,
+          messageId: `linq-delete-fence-${randomUUID()}`,
+        });
 
       try {
-        await deletionPrisma.hostedMember.createMany({
-          data: [
-            { id: ownerMemberId },
-            { id: participantMemberId },
-          ],
-        });
-        await deletionPrisma.hostedGroup.create({
-          data: {
-            displayName: "Deletion Race Group",
-            id: groupId,
-            joinCode: `join-delete-race-${randomUUID()}`,
-            joinCodeCreatedAt: acceptedAt,
-            ownerMemberId,
-            runtimeMemberId: ownerMemberId,
-          },
-        });
-        await deletionPrisma.hostedGroupJoinOffer.create({
-          data: {
-            groupId,
-            id: offerId,
-            messageLookupKey: `offer-delete-race-${randomUUID()}`,
-            postedAt: acceptedAt,
-            projectionKindsJson: ["best_effort"],
-          },
-        });
-        await deletionPrisma.hostedGroupJoinOutreach.create({
-          data: {
-            groupId,
-            id: outreachId,
-            nextAttemptAt: acceptedAt,
-            offerId,
-            participantPhoneEncrypted: "encrypted-test-phone",
-            participantPhoneLookupKey,
-            repliedAt: acceptedAt,
-            requestedAt: acceptedAt,
-            sentAt: acceptedAt,
-          },
-        });
-        await deletionPrisma.hostedLinqDailyState.create({
-          data: {
-            dayUtc,
-            firstSeenAt: acceptedAt,
-            lastSeenAt: acceptedAt,
-            memberId: participantMemberId,
-            onboardingLinkSentAt: acceptedAt,
-          },
-        });
-        await deletionPrisma.hostedLinqDelivery.create({
-          data: {
-            acceptedAt,
-            attemptedAt: acceptedAt,
-            id: `hld_delete_race_${randomUUID()}`,
-            idempotencyKey: deliveryLookupKey,
-            messageLookupKey,
-            source: "hosted_webhook_side_effect",
-            sourceRef,
-            status: "accepted",
-            targetKind: "thread",
-            template: "invite_signup",
-          },
-        });
-
-        const failureReceipt = buildParsedFailureReceipt({
-          eventId: rawEventId,
-          messageId: providerMessageId,
-          occurredAt: "2026-07-27T16:01:00.000Z",
-          recipientPhone,
-        });
-        const receipt = receiptPrisma.$transaction(async (tx) => {
-          await lockHostedMemberRow(tx, participantMemberId);
-          reportReceiptLock();
-          await receiptMayContinue;
-          return ingestHostedLinqProviderEventTx({
-            event: failureReceipt,
+        const reply = fixture.replyPrisma.$transaction(async (tx) => {
+          await lockHostedMemberRow(tx, fixture.participantMemberId);
+          await acquireHostedGroupJoinOutreachDrainLockTx(tx);
+          reportReplyDrain();
+          await replyMayContinue;
+          return drainDeletionReplyEffect({
+            effect: fixture.effect,
             prisma: tx,
           });
         });
-        await receiptLocked;
+        await replyOwnsDrain;
+
         let deletionSettled = false;
         const deletion = deleteHostedAccountData({
-          memberId: ownerMemberId,
-          prisma: deletionPrisma,
+          memberId: fixture.ownerMemberId,
+          prisma: fixture.deletionPrisma,
           request: new Request("https://join.example.test/settings"),
         }).finally(() => {
           deletionSettled = true;
         });
         await new Promise((resolve) => setTimeout(resolve, 50));
+        expect(cleanupCalls).toBe(0);
         expect(deletionSettled).toBe(false);
-        releaseReceiptLock();
+        releaseReply();
 
-        await expect(withTimeout(
-          Promise.all([receipt, deletion]),
+        const [replyResult] = await withTimeout(
+          Promise.all([reply, deletion]),
           10_000,
-        )).resolves.toBeDefined();
-        await expect(deletionPrisma.hostedLinqDailyState.findUnique({
-          select: { onboardingLinkSentAt: true },
-          where: {
-            memberId_dayUtc: {
-              dayUtc,
-              memberId: participantMemberId,
-            },
-          },
-        })).resolves.toEqual({ onboardingLinkSentAt: null });
-        await expect(deletionPrisma.hostedLinqDelivery.findUnique({
-          select: { id: true },
-          where: { idempotencyKey: deliveryLookupKey },
-        })).resolves.toBeNull();
-        await expect(deletionPrisma.hostedGroup.findUnique({
-          select: { id: true },
-          where: { id: groupId },
-        })).resolves.toBeNull();
+        );
+        expect(replyResult).toMatchObject({ sentCount: 1, skipped: [] });
+        expect(cleanupCalls).toBe(1);
+        expect(providerMocks.sendHostedLinqChatMessage).toHaveBeenCalledTimes(1);
+        await expectDeletionReplyRaceConverged(fixture);
       } finally {
-        releaseReceiptLock();
-        const eventLookupKey =
-          createHostedLinqProviderEventLookupKey(rawEventId);
-        await deletionPrisma.hostedLinqAlert.deleteMany({
-          where: { eventId: eventLookupKey },
+        releaseReply();
+        await cleanupDeletionReplyRaceFixture(fixture);
+        accountDeletionMocks.deleteHostedPhoneCallsForAccountDeletion
+          .mockReset()
+          .mockResolvedValue(undefined);
+        providerMocks.sendHostedLinqChatMessage.mockReset();
+        vi.unstubAllEnvs();
+      }
+    });
+
+    it("rejects a reply after the deletion suspension fence and completes that request", async () => {
+      vi.stubEnv(
+        "HOSTED_ONBOARDING_PUBLIC_BASE_URL",
+        "https://join.example.test",
+      );
+      const fixture = await createDeletionReplyRaceFixture();
+      let releaseDeletion = () => {};
+      const deletionMayContinue = new Promise<void>((resolve) => {
+        releaseDeletion = resolve;
+      });
+      let reportSuspensionFence = () => {};
+      const suspensionFenceCommitted = new Promise<void>((resolve) => {
+        reportSuspensionFence = resolve;
+      });
+      let cleanupCalls = 0;
+      accountDeletionMocks.deleteHostedPhoneCallsForAccountDeletion
+        .mockReset()
+        .mockImplementation(async () => {
+          cleanupCalls += 1;
+          reportSuspensionFence();
+          await deletionMayContinue;
         });
-        await deletionPrisma.hostedLinqProviderEvent.deleteMany({
-          where: { eventId: eventLookupKey },
+      providerMocks.sendHostedLinqChatMessage.mockReset();
+
+      try {
+        const deletion = deleteHostedAccountData({
+          memberId: fixture.ownerMemberId,
+          prisma: fixture.deletionPrisma,
+          request: new Request("https://join.example.test/settings"),
         });
-        await deletionPrisma.hostedLinqDelivery.deleteMany({
-          where: { idempotencyKey: deliveryLookupKey },
+        await suspensionFenceCommitted;
+        await expect(fixture.replyPrisma.hostedMember.findUnique({
+          select: { suspendedAt: true },
+          where: { id: fixture.runtimeMemberId },
+        })).resolves.toEqual({
+          suspendedAt: expect.any(Date),
         });
-        await deletionPrisma.hostedGroup.deleteMany({
-          where: { id: groupId },
+
+        const replyResult = await drainDeletionReplyEffect({
+          effect: fixture.effect,
+          prisma: fixture.replyPrisma,
         });
-        await deletionPrisma.hostedMember.deleteMany({
-          where: {
-            id: {
-              in: [ownerMemberId, participantMemberId],
-            },
-          },
+        expect(replyResult).toMatchObject({
+          sentCount: 0,
+          skipped: [{
+            effectId: fixture.effect.effectId,
+            reason: "notice_target_unauthorized",
+            template: "invite_signup",
+          }],
         });
-        await deletionPrisma.hostedLinqLine.deleteMany({
-          where: { phoneNumberLookupKey: recipientPhoneLookupKey },
-        });
-        await Promise.all([
-          deletionPrisma.$disconnect(),
-          receiptPrisma.$disconnect(),
-        ]);
+        expect(providerMocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+        releaseDeletion();
+
+        await expect(withTimeout(deletion, 10_000)).resolves.toBeDefined();
+        expect(cleanupCalls).toBe(1);
+        await expectDeletionReplyRaceConverged(fixture);
+      } finally {
+        releaseDeletion();
+        await cleanupDeletionReplyRaceFixture(fixture);
+        accountDeletionMocks.deleteHostedPhoneCallsForAccountDeletion
+          .mockReset()
+          .mockResolvedValue(undefined);
+        providerMocks.sendHostedLinqChatMessage.mockReset();
+        vi.unstubAllEnvs();
       }
     });
   },
 );
+
+type DeletionReplyRaceFixture = {
+  chatId: string;
+  deletionPrisma: PrismaClient;
+  deliveryLookupKey: string;
+  effect: ReturnType<typeof createHostedWebhookLinqMessageSideEffect>;
+  groupId: string;
+  inviteId: string;
+  joinCode: string;
+  offerId: string;
+  outreachId: string;
+  ownerMemberId: string;
+  participantMemberId: string;
+  replyPrisma: PrismaClient;
+  runtimeMemberId: string;
+};
+
+async function createDeletionReplyRaceFixture():
+  Promise<DeletionReplyRaceFixture> {
+  const deletionPrisma = createPrismaClient({ databaseUrl, poolMax: 2 });
+  const replyPrisma = createPrismaClient({ databaseUrl, poolMax: 2 });
+  const ownerMemberId = `hbm_delete_owner_${randomUUID()}`;
+  const runtimeMemberId = `hbm_delete_runtime_${randomUUID()}`;
+  const participantMemberId = `hbm_delete_participant_${randomUUID()}`;
+  const groupId = `hgrp_delete_fence_${randomUUID()}`;
+  const offerId = `hgrpjo_delete_fence_${randomUUID()}`;
+  const outreachId = `hgrpjoa_delete_fence_${randomUUID()}`;
+  const inviteId = `hinv_delete_fence_${randomUUID()}`;
+  const chatId = `chat-delete-fence-${randomUUID()}`;
+  const joinCode = `join-delete-fence-${randomUUID()}`;
+  const occurredAt = new Date("2026-07-27T16:00:00.000Z");
+  const participantPhoneLookupKey = createHostedPhoneLookupKey(
+    createUniqueTestPhone("+1202"),
+  );
+  if (!participantPhoneLookupKey) {
+    throw new Error("Expected an account-deletion fence phone lookup key.");
+  }
+  const effect = createHostedWebhookLinqMessageSideEffect({
+    chatId,
+    groupJoinCode: joinCode,
+    groupJoinOutreachId: outreachId,
+    inviteId,
+    memberId: participantMemberId,
+    occurredAt: occurredAt.toISOString(),
+    sourceEventId: `event-delete-fence-${randomUUID()}`,
+    template: "invite_signup",
+  });
+  const deliveryLookupKey =
+    createHostedLinqDeliveryIdempotencyLookupKey(effect.effectId);
+  if (!deliveryLookupKey) {
+    throw new Error("Expected an account-deletion fence delivery lookup key.");
+  }
+
+  await deletionPrisma.hostedMember.createMany({
+    data: [
+      { id: ownerMemberId },
+      { id: runtimeMemberId },
+      { id: participantMemberId },
+    ],
+  });
+  await deletionPrisma.hostedThreadContainer.create({
+    data: {
+      memberId: runtimeMemberId,
+      ownerMemberId,
+    },
+  });
+  await deletionPrisma.hostedGroup.create({
+    data: {
+      displayName: "Deletion Fence Group",
+      id: groupId,
+      joinCode,
+      joinCodeCreatedAt: occurredAt,
+      ownerMemberId,
+      runtimeMemberId,
+    },
+  });
+  await deletionPrisma.hostedGroupJoinOffer.create({
+    data: {
+      groupId,
+      id: offerId,
+      messageLookupKey: `offer-delete-fence-${randomUUID()}`,
+      postedAt: occurredAt,
+      projectionKindsJson: ["best_effort"],
+    },
+  });
+  await deletionPrisma.hostedGroupJoinOutreach.create({
+    data: {
+      groupId,
+      id: outreachId,
+      nextAttemptAt: occurredAt,
+      offerId,
+      participantPhoneEncrypted: "encrypted-test-phone",
+      participantPhoneLookupKey,
+      requestedAt: occurredAt,
+      sentAt: occurredAt,
+    },
+  });
+  await deletionPrisma.hostedInvite.create({
+    data: {
+      expiresAt: new Date("2026-07-28T16:00:00.000Z"),
+      id: inviteId,
+      inviteCode: `invite-delete-fence-${randomUUID()}`,
+      memberId: participantMemberId,
+    },
+  });
+
+  return {
+    chatId,
+    deletionPrisma,
+    deliveryLookupKey,
+    effect,
+    groupId,
+    inviteId,
+    joinCode,
+    offerId,
+    outreachId,
+    ownerMemberId,
+    participantMemberId,
+    replyPrisma,
+    runtimeMemberId,
+  };
+}
+
+async function drainDeletionReplyEffect(input: {
+  effect: DeletionReplyRaceFixture["effect"];
+  prisma: Prisma.TransactionClient | PrismaClient;
+}) {
+  const scheduledTasks: Array<() => Promise<void>> = [];
+  const result = await drainHostedLinqSideEffectsDirect({
+    prisma: input.prisma,
+    scheduleAfterResponse: (task) => {
+      scheduledTasks.push(task);
+    },
+    sideEffects: [input.effect],
+  });
+  for (const task of scheduledTasks) {
+    await task();
+  }
+  return result;
+}
+
+async function expectDeletionReplyRaceConverged(
+  fixture: DeletionReplyRaceFixture,
+): Promise<void> {
+  const dailyState = await fixture.deletionPrisma.hostedLinqDailyState.findUnique({
+    select: { onboardingLinkSentAt: true },
+    where: {
+      memberId_dayUtc: {
+        dayUtc: new Date("2026-07-27T00:00:00.000Z"),
+        memberId: fixture.participantMemberId,
+      },
+    },
+  });
+  expect(dailyState?.onboardingLinkSentAt ?? null).toBeNull();
+  await expect(fixture.deletionPrisma.hostedLinqDelivery.findUnique({
+    select: { id: true },
+    where: { idempotencyKey: fixture.deliveryLookupKey },
+  })).resolves.toBeNull();
+  await expect(fixture.deletionPrisma.hostedGroup.findUnique({
+    select: { id: true },
+    where: { id: fixture.groupId },
+  })).resolves.toBeNull();
+  await expect(fixture.deletionPrisma.hostedGroupJoinOutreach.findUnique({
+    select: { id: true },
+    where: { id: fixture.outreachId },
+  })).resolves.toBeNull();
+  await expect(fixture.deletionPrisma.hostedMember.findMany({
+    select: { id: true },
+    where: {
+      id: {
+        in: [fixture.ownerMemberId, fixture.runtimeMemberId],
+      },
+    },
+  })).resolves.toEqual([]);
+}
+
+async function cleanupDeletionReplyRaceFixture(
+  fixture: DeletionReplyRaceFixture,
+): Promise<void> {
+  await fixture.deletionPrisma.hostedLinqDelivery.deleteMany({
+    where: { idempotencyKey: fixture.deliveryLookupKey },
+  });
+  await fixture.deletionPrisma.hostedGroup.deleteMany({
+    where: { id: fixture.groupId },
+  });
+  await fixture.deletionPrisma.hostedThreadContainer.deleteMany({
+    where: { memberId: fixture.runtimeMemberId },
+  });
+  await fixture.deletionPrisma.hostedInvite.deleteMany({
+    where: { id: fixture.inviteId },
+  });
+  await fixture.deletionPrisma.hostedMember.deleteMany({
+    where: {
+      id: {
+        in: [
+          fixture.ownerMemberId,
+          fixture.runtimeMemberId,
+          fixture.participantMemberId,
+        ],
+      },
+    },
+  });
+  await Promise.all([
+    fixture.deletionPrisma.$disconnect(),
+    fixture.replyPrisma.$disconnect(),
+  ]);
+}
 
 function buildDirectReplyEvent(input: {
   chatId: string;

@@ -575,7 +575,7 @@ describe("deleteHostedAccountData", () => {
     expect(operationOrder.indexOf(`queryRaw:${participantMemberId}`))
       .toBeGreaterThanOrEqual(0);
     expect(operationOrder.indexOf(`queryRaw:${participantMemberId}`))
-      .toBeLessThan(operationOrder.indexOf("executeRaw"));
+      .toBeLessThan(operationOrder.lastIndexOf("executeRaw"));
     expect(dailyStateUpdates).toContainEqual({
       data: { onboardingLinkSentAt: null },
       where: {
@@ -584,48 +584,6 @@ describe("deleteHostedAccountData", () => {
         onboardingLinkSentAt: { not: null },
       },
     });
-  });
-
-  it("retries instead of taking a newly discovered participant lock after the drain", async () => {
-    const occurredAt = new Date("2026-07-27T15:00:00.000Z");
-    const outreachId = "hgrpjoa_projection_drift";
-    const sourceRef = buildHostedLinqInviteSignupDeliverySourceRef({
-      effectId: buildHostedLinqInviteSignupEffectId({
-        memberId: "member_projection_drift",
-        occurredAt,
-        sourceEventDigest: "b".repeat(32),
-      }),
-      groupJoinOutreachId: outreachId,
-      groupJoinRepliedAt: occurredAt.toISOString(),
-    });
-    const deleteCalls: HostedAccountDeletionPrismaDeleteCall[] = [];
-    const operationOrder: string[] = [];
-    const prisma = createHostedAccountDeletionPrismaForTest({
-      deleteCalls,
-      groupJoinDeliveryRows: [],
-      groupJoinDeliveryRowsAfterLock: [{ sourceRef }],
-      groupJoinOutreachOwnedGroupIds: ["hgrp_projection_drift"],
-      groupJoinOutreachRows: [{
-        id: outreachId,
-        sentAt: occurredAt,
-      }],
-      onTransaction: () => operationOrder.push("transaction"),
-      operationOrder,
-    });
-
-    await expect(deleteHostedAccountData({
-      memberId: "member_123",
-      prisma,
-      request: new Request("https://join.example.test/settings"),
-    })).rejects.toMatchObject({
-      code: "ACCOUNT_DELETION_GROUP_JOIN_PROJECTION_CHANGED",
-      httpStatus: 503,
-      retryable: true,
-    });
-
-    expect(operationOrder).not.toContain("queryRaw:member_projection_drift");
-    expect(deleteCalls.filter((call) => call.model === "hostedLinqDelivery"))
-      .toHaveLength(1);
   });
 
   it("deletes pre-member group-join outreach and its provider correlation", async () => {
@@ -1471,12 +1429,14 @@ describe("deleteHostedAccountData", () => {
 
     const firstLockIndex = operationOrder.indexOf("queryRaw");
     const suspensionIndex = operationOrder.indexOf("update:hostedMember");
+    const suspensionDrainIndex = operationOrder.indexOf("executeRaw");
     const runCleanupIndex = operationOrder.indexOf("find:hostedComputerRun");
     const finalLockIndex = operationOrder.lastIndexOf("queryRaw");
     const runDeleteIndex = operationOrder.indexOf("delete:hostedComputerRun");
     expect(firstLockIndex).toBeGreaterThanOrEqual(0);
     expect(suspensionIndex).toBeGreaterThan(firstLockIndex);
-    expect(runCleanupIndex).toBeGreaterThan(suspensionIndex);
+    expect(suspensionDrainIndex).toBeGreaterThan(suspensionIndex);
+    expect(runCleanupIndex).toBeGreaterThan(suspensionDrainIndex);
     expect(runCleanupIndex).toBeLessThan(finalLockIndex);
     expect(runDeleteIndex).toBeGreaterThan(finalLockIndex);
   });
@@ -2270,7 +2230,6 @@ function createHostedAccountDeletionPrismaForTest(input: {
   groupJoinOutreachOwnedGroupIds?: readonly string[];
   groupJoinOutreachPhoneLookupKeys?: readonly string[];
   groupJoinDeliveryRows?: readonly { sourceRef: string | null }[];
-  groupJoinDeliveryRowsAfterLock?: readonly { sourceRef: string | null }[];
   groupJoinOutreachRows?: readonly {
     dispatchStartedAt?: Date | null;
     id: string;
@@ -2288,7 +2247,6 @@ function createHostedAccountDeletionPrismaForTest(input: {
     sources?: { sourceProviderSlug: string; status: string }[];
   }>;
 }): Parameters<typeof deleteHostedAccountData>[0]["prisma"] {
-  let groupJoinDeliveryReadCount = 0;
   const makeDeleteDelegate = (model: string): HostedAccountDeletionPrismaDeleteDelegate => ({
     count: async () => {
       input.operationOrder?.push(`count:${model}`);
@@ -2315,11 +2273,7 @@ function createHostedAccountDeletionPrismaForTest(input: {
                   && "status" in args.where
                 )
                 ? input.liveSignupDeliveryRows ?? []
-                : groupJoinDeliveryReadCount++ === 0
-                  ? input.groupJoinDeliveryRows ?? []
-                  : input.groupJoinDeliveryRowsAfterLock
-                    ?? input.groupJoinDeliveryRows
-                    ?? []
+                : input.groupJoinDeliveryRows ?? []
             : []
     ),
   });

@@ -145,7 +145,11 @@ describe("hosted group join outreach store", () => {
       label: "live matching context",
       offer: {
         groupId: "hgrp_opaque",
-        group: { joinCode: "join_opaque", runtimeMemberId: "hbm_runtime" },
+        group: {
+          joinCode: "join_opaque",
+          runtimeMember: { suspendedAt: null },
+          runtimeMemberId: "hbm_runtime",
+        },
         revokedAt: null,
       },
       outreach: {
@@ -161,7 +165,11 @@ describe("hosted group join outreach store", () => {
       label: "already consumed context",
       offer: {
         groupId: "hgrp_opaque",
-        group: { joinCode: "join_opaque", runtimeMemberId: "hbm_runtime" },
+        group: {
+          joinCode: "join_opaque",
+          runtimeMember: { suspendedAt: null },
+          runtimeMemberId: "hbm_runtime",
+        },
         revokedAt: null,
       },
       outreach: {
@@ -177,8 +185,34 @@ describe("hosted group join outreach store", () => {
       label: "revoked offer",
       offer: {
         groupId: "hgrp_opaque",
-        group: { joinCode: "join_opaque", runtimeMemberId: "hbm_runtime" },
+        group: {
+          joinCode: "join_opaque",
+          runtimeMember: { suspendedAt: null },
+          runtimeMemberId: "hbm_runtime",
+        },
         revokedAt: new Date("2026-07-24T16:01:00.000Z"),
+      },
+      outreach: {
+        groupId: "hgrp_opaque",
+        offerId: "hgrpjo_opaque",
+        repliedAt: null,
+        sentAt: new Date("2026-07-24T16:00:00.000Z"),
+        skippedAt: null,
+      },
+    },
+    {
+      expected: false,
+      label: "suspended group runtime",
+      offer: {
+        groupId: "hgrp_opaque",
+        group: {
+          joinCode: "join_opaque",
+          runtimeMember: {
+            suspendedAt: new Date("2026-07-24T16:01:00.000Z"),
+          },
+          runtimeMemberId: "hbm_runtime",
+        },
+        revokedAt: null,
       },
       outreach: {
         groupId: "hgrp_opaque",
@@ -193,7 +227,11 @@ describe("hosted group join outreach store", () => {
       label: "group without a runtime",
       offer: {
         groupId: "hgrp_opaque",
-        group: { joinCode: "join_opaque", runtimeMemberId: null },
+        group: {
+          joinCode: "join_opaque",
+          runtimeMember: null,
+          runtimeMemberId: null,
+        },
         revokedAt: null,
       },
       outreach: {

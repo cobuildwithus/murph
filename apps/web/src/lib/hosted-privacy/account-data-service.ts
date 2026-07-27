@@ -801,7 +801,6 @@ export async function deleteHostedAccountData(input: {
     });
     const deletedCounts = await deleteHostedAccountPrismaRows({
       connectionIdentities: deviceConnectionIdentities,
-      lockedProjectionMemberIds,
       memberIds: transactionDeletionMemberIds,
       prisma: tx,
     });
@@ -1035,6 +1034,11 @@ async function markHostedMembersSuspendedForAccountDeletion(input: {
         suspendedAt: null,
       },
     });
+    // Suspension is the account-deletion authority fence for group replies.
+    // A preparation that already owns the drain finishes before this commits
+    // and is included in the later deletion snapshot. Every later preparation
+    // acquires the drain after commit and rejects the suspended group runtime.
+    await acquireHostedGroupJoinOutreachDrainLockTx(tx);
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
 }
 
@@ -1219,7 +1223,6 @@ function readHostedLinqSignupProjectionIdentities(
 async function deleteHostedGroupJoinOutreachRowsForMembers(
   prisma: Prisma.TransactionClient,
   memberIdFilter: string | { in: string[] },
-  lockedProjectionMemberIds: ReadonlySet<string>,
 ): Promise<{ deliveryCount: number; outreachCount: number }> {
   // The outreach row and its provider correlation are one privacy record, and the
   // correlation's only link is its source reference. Two things make that fragile,
@@ -1245,17 +1248,6 @@ async function deleteHostedGroupJoinOutreachRowsForMembers(
   const projectionIdentities = readHostedLinqSignupProjectionIdentities(
     snapshot.deliveries,
   );
-  const unlockedProjectionMember = projectionIdentities.find(
-    (identity) => !lockedProjectionMemberIds.has(identity.memberId),
-  );
-  if (unlockedProjectionMember) {
-    throw hostedOnboardingError({
-      code: "ACCOUNT_DELETION_GROUP_JOIN_PROJECTION_CHANGED",
-      httpStatus: 503,
-      message: "Group join delivery state changed during account deletion. Retry account deletion before local account records are removed.",
-      retryable: true,
-    });
-  }
 
   // Deletion preempts any pending dispatch rather than waiting for one. The
   // existing egress authority already owns that boundary: it refuses the send
@@ -1523,7 +1515,6 @@ function isStripeResourceMissingError(error: unknown): boolean {
 
 async function deleteHostedAccountPrismaRows(input: {
   connectionIdentities: readonly DeviceConnectionIdentity[];
-  lockedProjectionMemberIds: ReadonlySet<string>;
   memberIds: readonly string[];
   prisma: Prisma.TransactionClient;
 }): Promise<HostedAccountDataCounts> {
@@ -1574,7 +1565,6 @@ async function deleteHostedAccountPrismaRows(input: {
     await deleteHostedGroupJoinOutreachRowsForMembers(
       input.prisma,
       memberIdFilter,
-      input.lockedProjectionMemberIds,
     );
   recordCount(
     "prisma.hosted_group_join_outreach",

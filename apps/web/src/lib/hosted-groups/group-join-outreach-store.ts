@@ -400,6 +400,11 @@ export async function readHostedGroupJoinOutreachReplyDeliveryContextTx(input: {
       group: {
         select: {
           joinCode: true,
+          runtimeMember: {
+            select: {
+              suspendedAt: true,
+            },
+          },
           runtimeMemberId: true,
         },
       },
@@ -410,6 +415,7 @@ export async function readHostedGroupJoinOutreachReplyDeliveryContextTx(input: {
     && offer.groupId === outreach.groupId
     && !offer.revokedAt
     && offer.group.runtimeMemberId
+    && offer.group.runtimeMember?.suspendedAt === null
       ? offer.group.joinCode?.trim() ?? null
       : null;
   return joinCode ? { joinCode } : null;
