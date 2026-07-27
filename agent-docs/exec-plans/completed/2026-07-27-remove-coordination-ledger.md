@@ -1,6 +1,6 @@
 # Remove the coordination ledger
 
-Status: active
+Status: completed
 Created: 2026-07-27
 Updated: 2026-07-27
 
@@ -46,10 +46,11 @@ Updated: 2026-07-27
 
 ## Tasks
 
-1. Delete the ledger and remove live documentation/configuration references.
-2. Delete ledger parsing and mutation from `scripts/finish-task`.
-3. Replace ledger-coupled tests with absence and plan-lifecycle coverage.
-4. Run focused verification, review the full diff, and close the plan.
+1. [x] Delete the ledger and remove live documentation/configuration references.
+2. [x] Delete ledger parsing and mutation from `scripts/finish-task`.
+3. [x] Replace ledger-coupled tests with absence and plan-lifecycle coverage.
+4. [x] Run focused verification and review the full diff.
+5. [x] Close the plan through the simplified `scripts/finish-task` path.
 
 ## Decisions
 
@@ -66,9 +67,12 @@ Updated: 2026-07-27
 - Passed: `git diff --check`.
 - Passed: residue search limited to live workflow sources; only the intentional
   regression assertion and this migration plan still name the removed path.
+- Passed: preliminary `completion-specialists` ReviewGPT prompt and coverage
+  lenses with no findings and no coverage patch.
 - Canonical `pnpm test:diff <touched paths>` passed repo guards, all 436
   repo-tool tests, and the affected CLI typecheck. Its unchanged CLI suite was
   blocked by eight assistant subprocess tests timing out at 60 seconds each,
   followed by nine unchanged experiment-suite failures. Both failing files are
   unchanged from the branch base; the task-specific test file passes
   independently.
+Completed: 2026-07-27
