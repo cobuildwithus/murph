@@ -206,9 +206,14 @@ Required:
   the [Cloudflare Images upload API](https://developers.cloudflare.com/api/resources/images/subresources/v1/methods/create/)
   using `CLOUDFLARE_IMAGES_ACCOUNT_ID` and a least-privilege `Images Write` API
   token supplied only as local `CLOUDFLARE_IMAGES_API_KEY`. Set
-  `requireSignedURLs=false`, embed a returned public
-  `https://imagedelivery.net/...` variant URL in the PR body, and confirm the
-  URL renders. Retain the local capture only until required review packaging is
+  `requireSignedURLs=false`. From any repository worktree, run
+  `pnpm design-proof:upload -- <desktop-image> <mobile-image>`; the command
+  preserves exported environment values and otherwise reads only those two
+  settings from the invoking checkout and then the Git-discovered primary
+  checkout, without copying or printing the credential. Embed each returned
+  public `https://imagedelivery.net/...` variant URL in the PR body, and confirm
+  the URL renders (the command also performs a bounded render check before
+  printing it). Retain the local capture only until required review packaging is
   complete, then delete it. Never print, commit, persist in repository files,
   or pass the credential to ReviewGPT or another external reviewer; if the
   local credential is unavailable, report the blocker instead of committing
