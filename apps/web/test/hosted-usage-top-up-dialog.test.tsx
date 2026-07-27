@@ -340,11 +340,8 @@ test("opens from the settings deep link on the default amount without starting c
 });
 
 test("reuses the dialog state machine for a server-scoped group checkout", async () => {
-  mocks.requestHostedOnboardingJson.mockResolvedValueOnce({
-    purchaseId: "hucp_group_checkout",
-    status: "checkout_open",
-    url: "https://checkout.stripe.test/group-session",
-  });
+  const checkout = deferred<unknown>();
+  mocks.requestHostedOnboardingJson.mockReturnValueOnce(checkout.promise);
   const { HostedUsageTopUpDialog } = await import(
     "@/src/components/settings/hosted-usage-top-up-dialog"
   );
@@ -382,6 +379,16 @@ test("reuses the dialog state machine for a server-scoped group checkout", async
       rendered.window,
       "Add messages · $5",
     );
+    assert.equal(
+      buttonByText(rendered.container, "Adding messages…").getAttribute(
+        "aria-busy",
+      ),
+      "true",
+    );
+    assert.equal(
+      buttonByText(rendered.container, "Adding messages…").disabled,
+      true,
+    );
     expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
       method: "POST",
       payload: {
@@ -391,6 +398,18 @@ test("reuses the dialog state machine for a server-scoped group checkout", async
       signal: expect.any(AbortSignal),
       url: "/api/groups/fund/group_join_code_1234/usage-credit/checkout",
     });
+
+    await act(async () => {
+      checkout.resolve({
+        purchaseId: "hucp_group_checkout",
+        status: "checkout_open",
+        url: "https://checkout.stripe.test/group-session",
+      });
+      await Promise.resolve();
+    });
+    expect(rendered.assign).toHaveBeenCalledWith(
+      "https://checkout.stripe.test/group-session",
+    );
   } finally {
     await rendered.cleanup();
   }

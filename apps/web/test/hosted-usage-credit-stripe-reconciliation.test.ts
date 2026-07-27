@@ -415,6 +415,49 @@ describe("hosted usage-credit Stripe reconciliation", () => {
     }));
   });
 
+  it.each([
+    ["payment_intent.payment_failed", "requires_payment_method"],
+    ["payment_intent.canceled", "canceled"],
+  ] as const)(
+    "keeps an owned saved-card PaymentIntent pending after %s",
+    async (eventType, status) => {
+      const harness = createUsageCreditStripePrismaHarness({
+        checkoutRequestPolicyVersion: "hosted-usage-credit-checkout-v2",
+        status: HostedUsageCreditPurchaseStatus.payment_pending,
+        stripeCheckoutSessionIdEncrypted: null,
+        stripeCheckoutSessionLookupKey: null,
+        stripePaymentIntentLookupKey: "stripe-billing-event:pi_usage_123",
+      });
+      const paymentIntent = makePaymentIntent({
+        amountReceived: 0,
+        latestCharge: null,
+        purpose: "saved_card",
+        status,
+      });
+      mocks.stripe.paymentIntents.retrieve.mockResolvedValue(paymentIntent);
+
+      await expect(reconcileHostedUsageCreditStripeEvent({
+        event: makeDirectPaymentEvent(eventType, paymentIntent),
+        prisma: harness.client,
+      })).resolves.toMatchObject({
+        granted: false,
+        handled: true,
+        wakeRequired: false,
+      });
+
+      expect(mocks.stripe.paymentIntents.retrieve).toHaveBeenCalledWith(
+        "pi_usage_123",
+        { expand: ["latest_charge"] },
+        BOUNDED_STRIPE_READ_OPTIONS,
+      );
+      expect(mocks.grantUsageCredit).not.toHaveBeenCalled();
+      expect(harness.purchase).toEqual(expect.objectContaining({
+        status: HostedUsageCreditPurchaseStatus.payment_pending,
+        terminalAt: null,
+      }));
+    },
+  );
+
   it("acknowledges a terminal saved-card event after Checkout fallback owns the purchase", async () => {
     const harness = createUsageCreditStripePrismaHarness({
       checkoutRequestPolicyVersion: "hosted-usage-credit-checkout-v2",

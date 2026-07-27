@@ -73,6 +73,8 @@ const DESIGN_CREDIT_BACKED_USAGE_STATUS: HostedPlanUsageAvailableStatus = {
 
 function GroupUsageFundingStudy() {
   const [groupFulfilledPreviewKey, setGroupFulfilledPreviewKey] = useState(0);
+  const [groupPaymentRecoveryPreviewKey, setGroupPaymentRecoveryPreviewKey] =
+    useState(0);
   const [fulfilledPreviewKey, setFulfilledPreviewKey] = useState(0);
   const [multiChannelPreviewKey, setMultiChannelPreviewKey] = useState(0);
 
@@ -119,6 +121,12 @@ function GroupUsageFundingStudy() {
           </Button>
           <Button
             variant="outline"
+            onClick={() => setGroupPaymentRecoveryPreviewKey((key) => key + 1)}
+          >
+            Preview group payment recovery
+          </Button>
+          <Button
+            variant="outline"
             onClick={() => setFulfilledPreviewKey((key) => key + 1)}
           >
             Preview usage added with Text Murph
@@ -140,6 +148,21 @@ function GroupUsageFundingStudy() {
               status: "fulfilled",
             }}
             deferTerminalRefreshUntilClose
+            initialOpen
+            offers={[]}
+            scope="group"
+          />
+        ) : null}
+        {groupPaymentRecoveryPreviewKey > 0 ? (
+          <HostedUsageTopUpDialog
+            key={groupPaymentRecoveryPreviewKey}
+            activePurchase={{
+              offerCode: "usage_25_usd",
+              purchaseId: "hucp_design_pending_0",
+              retryAllowed: true,
+              status: "payment_pending",
+            }}
+            checkoutUrl="/api/design/usage-credit-preview"
             initialOpen
             offers={[]}
             scope="group"
