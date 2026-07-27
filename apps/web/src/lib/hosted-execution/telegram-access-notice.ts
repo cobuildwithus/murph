@@ -3,6 +3,7 @@ import {
 } from "@murphai/cloudflare-hosted-control/client";
 import {
   parseTelegramThreadTarget,
+  type TelegramThreadTarget,
 } from "@murphai/messaging-ingress/telegram-webhook";
 import type { PrismaClient } from "@prisma/client";
 
@@ -15,6 +16,8 @@ import {
   lockHostedMemberRoutingStateTx,
   readHostedMemberRoutingState,
 } from "../hosted-onboarding/hosted-member-routing-store";
+import { isHostedOnboardingError } from "../hosted-onboarding/errors";
+import { sendHostedTelegramTextMessage } from "../hosted-onboarding/telegram-client";
 import { sha256Hex } from "../primitives";
 import { readHostedExecutionControlClientIfConfigured } from "./control";
 
@@ -39,19 +42,37 @@ type HostedTelegramAccessNoticeDispatchClaim =
   | { retryAt: Date; status: "in_flight" }
   | { status: "not_applicable" };
 
-export async function sendHostedTelegramAccessNotice(input: {
+type HostedTelegramAccessNoticeInput = {
   authorizedTelegramUserId?: string;
   memberId: string;
   message: string;
   noticeCode: string;
   prisma: PrismaClient;
-  replyToMessageId: string;
+  replyToMessageId: string | null;
   sentAt?: Date;
   sourceEventId: string;
   target: string;
-}): Promise<HostedTelegramAccessNoticeDeliveryResult> {
-  if (!parseTelegramThreadTarget(input.target)) {
+};
+
+export async function sendHostedTelegramAccessNotice(
+  input: HostedTelegramAccessNoticeInput,
+): Promise<HostedTelegramAccessNoticeDeliveryResult> {
+  const target = parseTelegramThreadTarget(input.target);
+  if (!target) {
     return { status: "not_applicable" };
+  }
+
+  const idempotencyKey = buildHostedTelegramAccessNoticeIdempotencyKey(input);
+  if (input.replyToMessageId === null) {
+    // A group-origin recovery targets the sender's private chat, where the
+    // group's message id is not a valid reply anchor. Keep the existing durable
+    // claim and use Web's established unanchored Telegram text transport rather
+    // than creating a second delivery owner or weakening target authorization.
+    return await sendHostedTelegramUnanchoredAccessNotice({
+      idempotencyKey,
+      input,
+      target,
+    });
   }
 
   const controlClient = readHostedExecutionControlClientIfConfigured(
@@ -67,7 +88,6 @@ export async function sendHostedTelegramAccessNotice(input: {
     };
   }
 
-  const idempotencyKey = buildHostedTelegramAccessNoticeIdempotencyKey(input);
   const dispatch: {
     claim: HostedTelegramAccessNoticeDispatchClaim | null;
   } = { claim: null };
@@ -196,6 +216,61 @@ export function buildHostedTelegramAccessNoticeIdempotencyKey(input: {
   })).slice(0, 32)}`;
 }
 
+async function sendHostedTelegramUnanchoredAccessNotice(input: {
+  idempotencyKey: string;
+  input: HostedTelegramAccessNoticeInput;
+  target: TelegramThreadTarget;
+}): Promise<HostedTelegramAccessNoticeDeliveryResult> {
+  const claim = await claimHostedTelegramAccessNoticeDispatch({
+    idempotencyKey: input.idempotencyKey,
+    input: input.input,
+  });
+  if (claim.status !== "claimed") {
+    return claim;
+  }
+
+  try {
+    await sendHostedTelegramTextMessage({
+      message: input.input.message,
+      replyToMessageId: null,
+      target: input.target,
+    });
+  } catch (error) {
+    if (
+      isHostedOnboardingError(error)
+      && error.code === "HOSTED_TELEGRAM_BOT_TOKEN_NOT_CONFIGURED"
+    ) {
+      return await markHostedTelegramAccessNoticeRetryable({
+        attemptedAt: claim.attemptedAt,
+        failureCode: error.code,
+        failureReason: error.message,
+        idempotencyKey: input.idempotencyKey,
+        prisma: input.input.prisma,
+      });
+    }
+
+    // A direct Bot API request that throws after dispatch may already have
+    // reached Telegram. Terminalize the exact event instead of risking a second
+    // private recovery message on webhook replay.
+    await markHostedLinqDeliverySendFailedTx({
+      expectedAttemptedAt: claim.attemptedAt,
+      failedAt: claim.attemptedAt,
+      failureCode: readHostedTelegramAccessNoticeFailureCode(error),
+      failureReason: error instanceof Error ? error.message : null,
+      idempotencyKey: input.idempotencyKey,
+      prisma: input.input.prisma,
+    });
+    return { status: "already_notified" };
+  }
+
+  await markHostedLinqDeliveryAcceptedTx({
+    acceptedAt: claim.attemptedAt,
+    idempotencyKey: input.idempotencyKey,
+    prisma: input.input.prisma,
+  });
+  return { status: "sent" };
+}
+
 async function claimHostedTelegramAccessNoticeDispatch(input: {
   idempotencyKey: string;
   input: {
@@ -294,4 +369,17 @@ function resolveHostedTelegramAccessNoticeRetryAt(input: {
     ? retryAfterSeconds * 1_000
     : HOSTED_TELEGRAM_ACCESS_NOTICE_RETRY_MS;
   return new Date(input.sentAt.getTime() + retryMs);
+}
+
+function readHostedTelegramAccessNoticeFailureCode(error: unknown): string {
+  const code = error && typeof error === "object" && "code" in error
+    && typeof error.code === "string"
+    ? error.code.trim()
+    : "";
+  if (code) {
+    return code;
+  }
+  return error instanceof Error && error.name
+    ? error.name
+    : "telegram_access_notice_dispatch_unconfirmed";
 }
