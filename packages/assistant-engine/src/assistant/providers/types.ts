@@ -122,6 +122,7 @@ export interface AssistantProviderTurn {
   dynamicTools: readonly AssistantProviderDynamicTool[]
   environments?: readonly Readonly<Record<string, unknown>>[] | null
   env?: NodeJS.ProcessEnv
+  groupConversation?: boolean | null
   groupRoomModelMaintenanceAuthorized?: boolean | null
   onFinishWithoutReplyAccepted?: ((
     event: AssistantProviderFinishWithoutReplyAcceptedEvent

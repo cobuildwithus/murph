@@ -225,6 +225,7 @@ export async function executeCodexAssistantTurnAttempt(
       codexConfigOverrides.length > 0 ? codexConfigOverrides : undefined,
     env: codexProcessEnv,
     fetchImpl: input.providerFetch ?? undefined,
+    groupConversation: input.groupConversation === true,
     groupRoomModelMaintenanceAuthorized:
       input.groupRoomModelMaintenanceAuthorized === true,
     hostedToolContext: input.hostedToolContext ?? null,

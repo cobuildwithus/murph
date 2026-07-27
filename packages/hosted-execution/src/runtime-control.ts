@@ -907,41 +907,6 @@ export type HostedRuntimeAssistantAskControlResponse =
 
 export type HostedRuntimeGroupToolAction = HostedRuntimeGroupToolRequest["action"];
 
-export const HOSTED_RUNTIME_MANAGED_GROUP_ACTIVITY_POLICIES = [
-  "group-sunday-superlatives-v1",
-] as const;
-
-export type HostedRuntimeManagedGroupActivityPolicy =
-  (typeof HOSTED_RUNTIME_MANAGED_GROUP_ACTIVITY_POLICIES)[number];
-
-export const HOSTED_RUNTIME_MANAGED_GROUP_ACTIVITY_DECISION_STATUSES = [
-  "eligible",
-  "ineligible",
-  "unavailable",
-] as const;
-
-export type HostedRuntimeManagedGroupActivityDecisionStatus =
-  (typeof HOSTED_RUNTIME_MANAGED_GROUP_ACTIVITY_DECISION_STATUSES)[number];
-
-export const HOSTED_RUNTIME_MANAGED_GROUP_ACTIVITY_DECISION_REQUEST_MAX_BYTES =
-  1_024;
-
-export interface HostedRuntimeManagedGroupActivityRoute {
-  channel: "linq" | "telegram";
-  target: string;
-}
-
-export interface HostedRuntimeManagedGroupActivityDecisionRequest {
-  occurrenceAt: string;
-  policy: HostedRuntimeManagedGroupActivityPolicy;
-  route: HostedRuntimeManagedGroupActivityRoute;
-  timeZone: string;
-}
-
-export interface HostedRuntimeManagedGroupActivityDecisionResponse {
-  status: HostedRuntimeManagedGroupActivityDecisionStatus;
-}
-
 export const HOSTED_RUNTIME_GROUP_KINDS = [
   "couple",
   "custom",

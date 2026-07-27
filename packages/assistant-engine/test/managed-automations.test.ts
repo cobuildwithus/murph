@@ -124,7 +124,6 @@ import {
   MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID,
   MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_AUTOMATION_ID,
   MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_PRIVATE_SUMMARY,
-  MURPH_GROUP_SUNDAY_SUPERLATIVES_AUTOMATION_ID,
   MURPH_MANAGED_AUTOMATIONS,
   MURPH_ONBOARDING_FOLLOWUP_AUTOMATION,
   MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
@@ -135,7 +134,6 @@ import {
   MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
   applyMurphManagedAutomations,
   ensureAutomaticMealCloseoutAutomation,
-  resolveMurphManagedAutomationOwnerScope,
   resolveMurphManagedAutomationSeed,
   resolveMurphManagedMaintenancePolicy,
   type MurphManagedAutomationSeed,
@@ -171,7 +169,6 @@ const EXPECTED_MANAGED_SPREAD_CRONS = {
   insight: { kind: 'cron', expression: '0 13 * * 0' },
   improvementCoach: { kind: 'cron', expression: '30 17 * * 2' },
   researchScout: { kind: 'cron', expression: '0 14 * * 3' },
-  sundaySuperlatives: { kind: 'cron', expression: '30 19 * * 0' },
 } as const
 
 const EXPECTED_PRODUCT_NOTES_SCHEDULE = {
@@ -446,7 +443,11 @@ describe('applyMurphManagedAutomations', () => {
       updated: 0,
       yielded: true,
     })
-    expect(managedAutomationMocks.showAutomation).not.toHaveBeenCalled()
+    expect(managedAutomationMocks.showAutomation).toHaveBeenCalledOnce()
+    expect(managedAutomationMocks.showAutomation).toHaveBeenCalledWith({
+      automationId: 'automation_01K55N7S9X4Q2M6P8R3T0V1WYZ',
+      vaultRoot,
+    })
     expect(managedAutomationMocks.upsertAutomation).not.toHaveBeenCalled()
   })
 
@@ -1074,35 +1075,25 @@ describe('applyMurphManagedAutomations', () => {
     ).toBeNull()
   })
 
-  it('defines Sunday superlatives as one immutable group-owned ordinary notification', () => {
+  it('resolves the immutable group-owned seed by id', () => {
     const seed = MURPH_MANAGED_AUTOMATIONS.find(
       (entry) =>
-        entry.automationId === MURPH_GROUP_SUNDAY_SUPERLATIVES_AUTOMATION_ID,
+        entry.automationId === MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_AUTOMATION_ID,
     )
     if (!seed || seed.schedule.kind !== 'cron') {
-      throw new Error('Expected the Sunday superlatives cron seed.')
+      throw new Error('Expected the group room-model cron seed.')
     }
 
     expect(seed).toMatchObject({
-      automationId: 'automation_01K55N7S9X4Q2M6P8R3T0V1WYZ',
+      automationId: MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_AUTOMATION_ID,
       continuityPolicy: 'fresh',
       hostedRuntimeOnly: true,
       ownerScope: 'authenticated-group',
-      schedule: { kind: 'cron', expression: '0 18 * * 0' },
-      slug: 'group-sunday-superlatives',
+      schedule: { kind: 'cron', expression: '0 4 * * 2,5' },
+      slug: 'group-room-model-consolidation',
     })
-    expect(seed.tags).not.toContain('runtime-maintenance')
-    expect(seed.instructions).toContain('2-4 concrete moments')
-    expect(seed.instructions).toContain('Murph is a light host, not the protagonist')
-    expect(seed.instructions).toContain('never output those aliases')
-    expect(seed.instructions).toContain('No winner/loser framing')
-    expect(seed.instructions).toContain('Do not make judgments involving health')
-    expect(seed.instructions).toContain('Prefer no post')
     expect(resolveMurphManagedAutomationSeed(seed.automationId)).toBe(seed)
-    expect(resolveMurphManagedAutomationOwnerScope(seed.automationId))
-      .toBe('authenticated-group')
     expect(resolveMurphManagedAutomationSeed('automation_custom')).toBeNull()
-    expect(resolveMurphManagedAutomationOwnerScope('automation_custom')).toBeNull()
   })
 
   it('installs the automatic meal closeout idempotently at 9pm local time', async () => {
@@ -1624,7 +1615,7 @@ describe('applyMurphManagedAutomations', () => {
     )
   })
 
-  it('creates only group-owned managed automations for group chat routes', async () => {
+  it('creates only the group-owned room model automation for group chat routes', async () => {
     const result = await applyMurphManagedAutomations({
       defaultRoute: groupChatRoute,
       now: new Date('2026-07-09T14:00:00.000Z'),
@@ -1636,11 +1627,11 @@ describe('applyMurphManagedAutomations', () => {
     })
 
     expect(result).toEqual({
-      created: 2,
+      created: 1,
       skipped: 0,
       updated: 0,
     })
-    expect(managedAutomationMocks.records.size).toBe(2)
+    expect(managedAutomationMocks.records.size).toBe(1)
     expect(
       managedAutomationMocks.records.get(
         MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_AUTOMATION_ID,
@@ -1648,15 +1639,6 @@ describe('applyMurphManagedAutomations', () => {
     ).toMatchObject({
       route: groupChatRoute,
       schedule: { kind: 'cron', expression: '0 4 * * 2,5' },
-      status: 'active',
-    })
-    expect(
-      managedAutomationMocks.records.get(
-        MURPH_GROUP_SUNDAY_SUPERLATIVES_AUTOMATION_ID,
-      ),
-    ).toMatchObject({
-      route: groupChatRoute,
-      schedule: EXPECTED_MANAGED_SPREAD_CRONS.sundaySuperlatives,
       status: 'active',
     })
     expect(
@@ -1687,21 +1669,13 @@ describe('applyMurphManagedAutomations', () => {
     })
 
     expect(result).toEqual({
-      created: 2,
+      created: 1,
       skipped: 0,
       updated: 0,
     })
     expect(
       managedAutomationMocks.records.get(
         MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_AUTOMATION_ID,
-      ),
-    ).toMatchObject({
-      route: telegramGroupRoute,
-      status: 'active',
-    })
-    expect(
-      managedAutomationMocks.records.get(
-        MURPH_GROUP_SUNDAY_SUPERLATIVES_AUTOMATION_ID,
       ),
     ).toMatchObject({
       route: telegramGroupRoute,
@@ -1848,10 +1822,10 @@ describe('applyMurphManagedAutomations', () => {
   it('archives paused group built-ins that are persisted on a direct route', async () => {
     const seed = MURPH_MANAGED_AUTOMATIONS.find(
       (entry) =>
-        entry.automationId === MURPH_GROUP_SUNDAY_SUPERLATIVES_AUTOMATION_ID,
+        entry.automationId === MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_AUTOMATION_ID,
     )
     if (!seed) {
-      throw new Error('Expected the Sunday superlatives seed.')
+      throw new Error('Expected the group room-model seed.')
     }
     managedAutomationMocks.records.set(seed.automationId, {
       automationId: seed.automationId,
@@ -1879,6 +1853,34 @@ describe('applyMurphManagedAutomations', () => {
       updated: 1,
     })
     expect(managedAutomationMocks.records.get(seed.automationId)?.status)
+      .toBe('archived')
+  })
+
+  it('archives a persisted Sunday superlatives record after its seed is removed', async () => {
+    const retiredAutomationId = 'automation_01K55N7S9X4Q2M6P8R3T0V1WYZ'
+    managedAutomationMocks.records.set(retiredAutomationId, {
+      automationId: retiredAutomationId,
+      continuityPolicy: 'fresh',
+      instructions: 'Legacy group recap instructions.',
+      route: groupChatRoute,
+      schedule: { kind: 'cron', expression: '0 18 * * 0' },
+      slug: 'group-sunday-superlatives',
+      status: 'paused',
+      summary: null,
+      tags: ['assistant', 'scheduled', 'murph-managed'],
+      title: 'Sunday group superlatives',
+    })
+
+    await applyMurphManagedAutomations({
+      defaultRoute: groupChatRoute,
+      now: new Date('2026-07-26T14:00:00.000Z'),
+      runtimeEnv: {
+        [HOSTED_RUNTIME_PROCESS_ENV]: '1',
+      },
+      vaultRoot,
+    })
+
+    expect(managedAutomationMocks.records.get(retiredAutomationId)?.status)
       .toBe('archived')
   })
 

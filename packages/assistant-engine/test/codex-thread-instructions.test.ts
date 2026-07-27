@@ -192,6 +192,7 @@ describe('Codex thread instructions', () => {
           ? [MURPH_GROUP_ROOM_MODEL_TOOL]
           : [],
         env: {},
+        groupConversation: scenario.maintenance,
         groupRoomModelMaintenanceAuthorized: scenario.maintenance,
         permissions: scenario.maintenance
           ? 'murph-group-room-model-maintenance'
@@ -210,6 +211,7 @@ describe('Codex thread instructions', () => {
       )
       expect(appServerInput?.developerInstructions).toBe(scenario.contract)
       expect(appServerInput?.ephemeral).toBe(true)
+      expect(appServerInput?.groupConversation).toBe(scenario.maintenance)
       expect(appServerInput?.processLifetime).toBe('one-shot')
       if (scenario.maintenance) {
         expect(appServerInput?.dynamicTools).toHaveLength(1)
