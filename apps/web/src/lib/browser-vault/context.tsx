@@ -59,8 +59,58 @@ export interface BrowserVaultContextValue {
 }
 
 const BrowserVaultContext = createContext<BrowserVaultContextValue | null>(null);
+const DISABLED_BROWSER_VAULT_CONTEXT: BrowserVaultContextValue = {
+  client: null,
+  dataVersion: null,
+  deviceSyncImportPending: false,
+  error: null,
+  freshness: "stale",
+  ref: null,
+  refresh: () => Promise.resolve(),
+  refreshPending: false,
+  status: "empty",
+  workspaceVersion: null,
+};
 
-export function BrowserVaultProvider({ children, initialMemberId }: {
+export function BrowserVaultProvider({
+  children,
+  initialMemberId,
+  loadEnabled = true,
+}: {
+  children: ReactNode;
+  initialMemberId: string | null;
+  loadEnabled?: boolean;
+}) {
+  if (!loadEnabled) {
+    return (
+      <DisabledBrowserVaultProvider>
+        {children}
+      </DisabledBrowserVaultProvider>
+    );
+  }
+
+  return (
+    <ActiveBrowserVaultProvider initialMemberId={initialMemberId}>
+      {children}
+    </ActiveBrowserVaultProvider>
+  );
+}
+
+function DisabledBrowserVaultProvider({ children }: { children: ReactNode }) {
+  useLayoutEffect(() => {
+    // A landing-page warm load may predate the server consent check. Drop any
+    // decrypted snapshot before the blocked dashboard can expose it.
+    clearBrowserVaultWarmState();
+  }, []);
+
+  return (
+    <BrowserVaultContext.Provider value={DISABLED_BROWSER_VAULT_CONTEXT}>
+      {children}
+    </BrowserVaultContext.Provider>
+  );
+}
+
+function ActiveBrowserVaultProvider({ children, initialMemberId }: {
   children: ReactNode;
   initialMemberId: string | null;
 }) {
@@ -264,7 +314,9 @@ export function BrowserVaultProvider({ children, initialMemberId }: {
     return unsubscribe;
   }, [clearDecryptedClient]);
 
-  useEffect(() => {
+  // The disabled branch clears adopted warm work during layout. Retire this
+  // branch in the same phase so abort settlement cannot start a replacement.
+  useLayoutEffect(() => {
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;

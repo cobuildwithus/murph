@@ -55,6 +55,7 @@ describe('assistant hosted low-usage skill', () => {
 
   it('routes only supported direct, Family, and group options', async () => {
     const skill = await readLowUsageSkill()
+    const normalizedSkill = skill.replace(/\s+/gu, ' ')
 
     expect(skill).toContain('**Pulse Trial:**')
     expect(skill).toContain('**Direct paid Pulse or Edge:**')
@@ -65,6 +66,21 @@ describe('assistant hosted low-usage skill', () => {
     expect(skill).toContain('Family plan owner may')
     expect(skill).toContain('add one-time usage for this active member')
     expect(skill).toContain('`murph.family_plan action="read_status"`')
+    expect(normalizedSkill).toContain(
+      '`murph.family_plan action="read_status"` once when available before wording the heads-up',
+    )
+    expect(normalizedSkill).toContain(
+      '`members` row with `isOwner: true` and `status: "active"`',
+    )
+    expect(normalizedSkill).toContain(
+      'Use the Family status read above before choosing second- or third-person wording',
+    )
+    expect(normalizedSkill).toContain(
+      'Do not make a confirmed owner correct a third-person "the owner can" statement',
+    )
+    expect(normalizedSkill).toContain(
+      'on that turn when available, even if this heads-up already checked owner status',
+    )
     expect(skill).toContain('`owner: true`, `billingActive: true`')
     expect(skill).toContain('matches exactly one `members` row')
     expect(skill).toContain('navigation to Settings > Family')

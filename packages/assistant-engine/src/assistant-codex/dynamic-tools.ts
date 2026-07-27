@@ -406,7 +406,7 @@ export const MURPH_FAMILY_PLAN_TOOL = {
   namespace: 'murph',
   name: 'family_plan',
   description:
-    'Read private Family plan status, start Family checkout, or create an invite. Call only for the current member\'s explicit Family account request. Treat returned URLs and invite records as the exact result: do not claim checkout, activation, invitation, payment, or usage completion beyond the returned status.',
+    'Read Family status, start checkout, or invite. Allow `read_status` for an explicit Family request or trusted private low-usage Family context. Checkout and invite actions require the current member\'s explicit request. Treat results as exact; never claim activation, invitation, payment, or usage completion.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
