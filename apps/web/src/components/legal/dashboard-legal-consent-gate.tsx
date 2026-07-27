@@ -7,6 +7,13 @@ import {
   type HostedLegalConsentAcceptScope,
 } from "@/src/components/legal/hosted-legal-consent-card";
 import { reloadCurrentHostedAuthDocument } from "@/src/components/hosted-onboarding/hosted-auth-navigation";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/src/components/ui/dialog";
 import type { HostedConsentStatus } from "@/src/lib/legal/consent";
 
 export function DashboardLegalConsentGate({
@@ -27,47 +34,34 @@ export function DashboardLegalConsentGate({
     return null;
   }
 
+  const title = isUpdate ? "Review what changed" : "Finish your consent";
+  const description = isUpdate
+    ? "We updated Murph's legal documents. Accept the current versions to get your full dashboard back."
+    : "Accept the remaining documents to connect health sources and use your full dashboard.";
+
   return (
-    <section
-      aria-labelledby="dashboard-legal-consent-title"
-      className="mx-auto max-w-2xl py-4 md:py-10"
-      data-dashboard-legal-consent-gate="true"
-    >
-      <p className="font-mono text-[10px] font-medium uppercase tracking-[0.11em] text-muted-foreground">
-        {isUpdate ? "Updated legal documents" : "Consent required"}
-      </p>
-      <h1
-        className="mt-3 font-serif text-3xl font-semibold leading-tight tracking-tight text-foreground"
-        id="dashboard-legal-consent-title"
+    <Dialog open>
+      <DialogContent
+        className="max-h-[calc(100dvh-2rem)] gap-6 overflow-y-auto rounded-2xl border border-border bg-popover p-6 sm:max-w-xl sm:p-8"
+        data-dashboard-legal-consent-gate="true"
+        showCloseButton={false}
       >
-        {isUpdate ? "Review what changed" : "Finish your consent"}
-      </h1>
-      <p className="mt-3 max-w-xl text-[15px] leading-relaxed text-muted-foreground">
-        {isUpdate ? (
-          <>
-            We updated Murph&apos;s legal documents. Accept the current versions
-            to get your full dashboard back.
-          </>
-        ) : (
-          <>
-            Accept the remaining documents to connect health sources and use
-            your full dashboard.
-          </>
-        )}
-      </p>
-      <HostedLegalConsentCard
-        acceptedPendingLabel="Refreshing your dashboard"
-        acceptScope={acceptScope}
-        className="mt-7"
-        initialStatus={initialStatus}
-        launchDescription={
-          isUpdate ? "Two quick items." : "Accept each remaining item to continue."
-        }
-        launchTitle={isUpdate ? "Current documents" : "Required documents"}
-        onAccepted={onAccepted}
-        source={isUpdate ? "dashboard-legal-update" : "dashboard-legal-recovery"}
-      />
-    </section>
+        <DialogHeader className="sr-only">
+          <DialogTitle>{title}</DialogTitle>
+          <DialogDescription>{description}</DialogDescription>
+        </DialogHeader>
+        <HostedLegalConsentCard
+          acceptedPendingLabel="Refreshing your dashboard"
+          acceptScope={acceptScope}
+          initialStatus={initialStatus}
+          launchDescription={description}
+          launchTitle={title}
+          mode="compact"
+          onAccepted={onAccepted}
+          source={isUpdate ? "dashboard-legal-update" : "dashboard-legal-recovery"}
+        />
+      </DialogContent>
+    </Dialog>
   );
 }
 
