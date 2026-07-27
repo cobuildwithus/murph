@@ -129,17 +129,28 @@ Updated: 2026-07-27
 - Product-experience review found one stale iMessage-only opt-out instruction;
   the product spec and group-chat skill now both describe authenticated
   Linq/iMessage and Telegram message authority.
+- Preliminary ReviewGPT accepted the architecture and identified two coverage
+  gaps. Focused Web tests now cover the temporary legacy group-call requester
+  fallback for Linq and Telegram, including wrong-route, ambiguous-requester,
+  and inactive-member rejection.
+- The registered hosted-local usage scenario now proves that three durable
+  blocked group messages from two senders and two native reply anchors resume
+  as one provider request and one outbound reply, retain three exact
+  `message_ref` values with sender/reply context, and all reach consumed
+  mailbox state.
 - The first full canonical pass proved all guards, typechecks, Assistant Engine,
   Assistant Runtime, CLI, and Hosted Execution owners green. The downstream
   hosted-local owner then stopped at its pre-existing missing-dist preparation
-  guard before exercising task code; final canonical verification will run
-  again after reconciling the branch with current `main`.
+  guard before exercising task code. Building the package directly resolved
+  the local prerequisite; final canonical verification will run again on the
+  completed patch.
 
 ## Verification
 
 - Commands to run:
   - Focused Assistant Engine and hosted Web tests selected from the returned
     patch and final touched call paths.
+  - `pnpm hosted-local e2e usage-limit-ambiguous-send --no-bundle`
   - `pnpm test:diff <touched owner paths...>`
   - `pnpm verify:acceptance`
   - Required product-experience, preliminary `completion-specialists`, parent,
