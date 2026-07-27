@@ -3555,6 +3555,7 @@ describe("runHostedAssistantAutomationLane", () => {
       onEvent: expect.any(Function),
       onProviderEvent: expect.any(Function),
       onProviderRequestStarted: expect.any(Function),
+      onTerminalNonReplyCommitted: expect.any(Function),
       onTraceEvent: expect.any(Function),
       requestId: "req_123",
       shouldDeferCron: expect.any(Function),
