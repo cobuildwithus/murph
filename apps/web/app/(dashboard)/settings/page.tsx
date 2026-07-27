@@ -13,6 +13,7 @@ import type {
 } from "@/src/components/settings/hosted-usage-top-up-dialog";
 import { HostedDataPrivacySettings } from "@/src/components/settings/hosted-data-privacy-settings";
 import { SettingsAuthRequired } from "./settings-auth-required";
+import { HostedFamilySelfUsageTopUpHost } from "@/src/components/settings/hosted-family-self-usage-top-up-host";
 import { HostedFamilySettings } from "@/src/components/settings/hosted-family-settings";
 import { HostedPasskeySettings } from "@/src/components/settings/hosted-passkey-settings";
 import { PulseTrialBillingContinuation } from "@/src/components/settings/hosted-start-paid-pulse-button";
@@ -41,6 +42,8 @@ import { hasHostedMemberOwnActiveBilling } from "@/src/lib/hosted-onboarding/ent
 import {
   readHostedFamilyAccessForMember,
   readHostedFamilyOwnerSnapshotForMember,
+  type HostedFamilyOwnerMemberRow,
+  type HostedFamilyOwnerSnapshot,
 } from "@/src/lib/hosted-onboarding/family-plan";
 import { getHostedPrivySession } from "@/src/lib/hosted-onboarding/hosted-session";
 import { getHostedDashboardPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
@@ -94,8 +97,9 @@ export default async function SettingsPage({
   const resolvedSearchParams = searchParams ? await searchParams : {};
   const openEmailLink =
     readFirstSearchParamValue(resolvedSearchParams.addEmail) === "true";
-  const openUsageTopUp =
-    readOnlySearchParamValue(resolvedSearchParams.addUsage) === "true";
+  const addUsageTarget = readOnlySearchParamValue(resolvedSearchParams.addUsage);
+  const openPersonalUsageTopUp = addUsageTarget === "true";
+  const requestedFamilyOwnerUsageTopUp = addUsageTarget === "family";
   const openVoiceLink =
     readFirstSearchParamValue(resolvedSearchParams.voice) === "true";
   const usageTopUpPurchaseReturn = readUsageTopUpPurchaseReturn(
@@ -160,6 +164,10 @@ export default async function SettingsPage({
   const billingRef = settingsSnapshot?.billingRef ?? null;
   const routing = settingsSnapshot?.routing ?? null;
   const activeFamilyOwner = familyOwner?.billingActive === true;
+  const familyOwnerUsageTopUpMember = resolveFamilyOwnerUsageTopUpMember({
+    requested: requestedFamilyOwnerUsageTopUp,
+    snapshot: familyOwner,
+  });
   const sponsoredMember = familyAccess !== null && familyOwner === null;
   const usageTopUpOffers = usageTopUpActivePurchase
     ? []
@@ -185,6 +193,19 @@ export default async function SettingsPage({
         : null;
   const familyUsageTopUpActiveMemberId =
     familyUsageTopUpActivePurchase?.target.beneficiaryMemberId ?? null;
+  const familyOwnerUsageTopUpActivePurchase = familyOwnerUsageTopUpMember
+    ? familyUsageTopUpActivePurchase?.target.beneficiaryMemberId ===
+        familyOwnerUsageTopUpMember.memberId
+      ? familyUsageTopUpActivePurchase
+      : usageTopUpActivePurchase
+        ? {
+            ...usageTopUpActivePurchase,
+            retryAllowed: false,
+            targetConflict: true as const,
+            url: undefined,
+          }
+        : null
+    : null;
   const personalUsageTopUpPurchaseReturn =
     usageTopUpPurchaseReturn
     && usageTopUpReturnTarget?.kind === "personal"
@@ -206,6 +227,18 @@ export default async function SettingsPage({
     familyUsageTopUpPurchaseReturn
       ? usageTopUpReturnTarget?.beneficiaryMemberId ?? null
       : null;
+  const familyOwnerUsageTopUpPurchaseReturn =
+    familyOwnerUsageTopUpMember
+    && familyUsageTopUpReturnMemberId === familyOwnerUsageTopUpMember.memberId
+      ? familyUsageTopUpPurchaseReturn
+      : null;
+  const openFamilyOwnerUsageTopUp = Boolean(
+    familyOwnerUsageTopUpMember
+      && (
+        requestedFamilyOwnerUsageTopUp
+        || familyOwnerUsageTopUpPurchaseReturn
+      ),
+  );
   const canStartFamily =
     authenticatedMember != null &&
     !activeFamilyOwner &&
@@ -328,7 +361,7 @@ export default async function SettingsPage({
           usageStatus={usageStatus}
           usageTopUpActivePurchase={personalUsageTopUpActivePurchase}
           usageTopUpContactOptions={usageTopUpContactOptions}
-          usageTopUpInitialOpen={openUsageTopUp}
+          usageTopUpInitialOpen={openPersonalUsageTopUp}
           usageTopUpOffers={usageTopUpOffers}
           usageTopUpPurchaseReturn={personalUsageTopUpPurchaseReturn}
         />
@@ -363,6 +396,17 @@ export default async function SettingsPage({
             usageTopUpPurchaseReturn={familyUsageTopUpPurchaseReturn}
             usageTopUpReturnMemberId={familyUsageTopUpReturnMemberId}
           />
+          {familyOwnerUsageTopUpMember ? (
+            <HostedFamilySelfUsageTopUpHost
+              activePurchase={familyOwnerUsageTopUpActivePurchase}
+              contactOptions={usageTopUpContactOptions}
+              initialOpen={openFamilyOwnerUsageTopUp}
+              memberId={familyOwnerUsageTopUpMember.memberId}
+              offers={familyUsageTopUpOffers}
+              purchaseReturn={familyOwnerUsageTopUpPurchaseReturn}
+              targetLabel={familyOwnerUsageTopUpMember.label ?? "you"}
+            />
+          ) : null}
         </section>
       ) : null}
 
@@ -515,6 +559,27 @@ async function readSettingsPageData(input: {
     usageTopUpOfferCodes,
     usageTopUpReturnTarget,
   };
+}
+
+function resolveFamilyOwnerUsageTopUpMember(input: {
+  requested: boolean;
+  snapshot: HostedFamilyOwnerSnapshot | null;
+}): HostedFamilyOwnerMemberRow | null {
+  if (
+    !input.requested ||
+    !input.snapshot?.billingActive ||
+    input.snapshot.suspendedAt
+  ) {
+    return null;
+  }
+
+  const matches = input.snapshot.members.filter(
+    (member) =>
+      member.isOwner &&
+      member.memberId === input.snapshot?.ownerMemberId &&
+      member.status === "active",
+  );
+  return matches.length === 1 ? matches[0] ?? null : null;
 }
 
 function readHostedConfiguredUsageCreditOfferCodesSafely(): readonly HostedUsageCreditOfferCode[] {
