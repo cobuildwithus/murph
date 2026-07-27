@@ -106,6 +106,25 @@ scheduled-reminder scenario adds the production-path proof: a real group
 newsletter invokes `read_shared`, wakes from its alarm, and sends only to the
 exact admitted group thread.
 
+Managed group automation coverage is likewise owner-split. Assistant-engine
+reconciliation tests prove default member ownership, explicit group ownership,
+custom unscoped compatibility, and paused wrong-owner archival. Claimed-cron
+tests prove static built-in owner checks run before experiment lifecycle hooks,
+activity evidence, provider/model work, and outbox creation; live route changes
+are rejected again at provider, tool, delivery, and commit boundaries.
+Hosted-execution tests lock the closed activity policy, status-only response,
+and 167/169-hour DST windows. Hosted Web tests prove exact 99/100 canonical
+mailbox semantics, occurrence and commit boundaries, Linq assistant/reaction
+exclusions, Telegram inclusion, exact runtime/route binding, bounded scanning,
+and malformed fail-closed behavior without logging private evidence.
+Cloudflare tests lock the signed status-only port and exact POST allowlist.
+Maintenance-evidence tests prove recap composition is projected from exact-
+route structured input events, occurrence-anchored, bounded, and sender-redacted
+before the ordinary group outbox path. Delimiter-bearing human text stays one
+quoted message; rendered transcript structure is ignored; attachment
+descriptors, extracted text, filenames, stored paths, and lifecycle metadata do
+not enter evidence; and attachment-only input fails closed before provider work.
+
 ## Current CI Workflows
 
 - Linux CI `apps/web verify` invocations default to wrapping the hosted-web production
@@ -158,9 +177,19 @@ exact admitted group thread.
   production 180-second idle floor, seeds every registered system wake kind,
   and separately stages system-mailbox, retention-only, stale-owner, and active
   foreground contention. Each real signed Linq inbound must produce exactly one
-  accepted outbound Linq request within 45 seconds while any staged background
+  accepted outbound Linq request within 30 seconds while any staged background
   checkpoint remains held. Its separately named workflow leg makes this latency
   invariant visible without replacing the two aggregate required checks.
+- `apps/web/test/hosted-runtime-latency-alert-{monitor,cron}.test.ts` locks the
+  same exact 30-second boundary for completed and still-unresolved Linq traces,
+  excludes consumed traces with best-effort missing delivery links, and proves
+  cron auth, incident claim coalescing, provider-idempotent retry, later
+  recurrence, PII-free copy, and fail-safe scan truncation.
+  `apps/web/vercel.json` registers that read-only monitor at a five-minute
+  cadence. The hosted-local foreground-priority leg additionally uses real
+  PostgreSQL, authenticated cron HTTP, and the Linq stub boundary to prove one
+  accepted operator alert through a lost-ack retry, active-incident coalescing,
+  silent healthy reset, and a new alert for recurrence.
 - After hosted scenarios initialize the schema, the Linq route-authority matrix leg runs the focused real-PostgreSQL proofs for deterministic hosted usage replay, both participant-addition route-row orderings, the canonical chat-ownership-before-route-row order shared by usage-limit dispatch and route-key convergence, and device-sync exact-payload plus companion-receipt lock order against concurrent account deletion.
 - `.github/workflows/release.yml` uses GitHub-hosted `ubuntu-24.04`, installs once, runs `pnpm release:check` with `MURPH_TEST_LANES_PARALLEL=1`, `MURPH_APP_VERIFY_PARALLEL=1`, and `MURPH_VERIFY_STEP_PARALLEL=1` so the release verification lane uses the parallel package/smoke branches and parallel app substeps without enabling full app/package overlap unless `MURPH_ACCEPTANCE_APP_VERIFY_WITH_COVERAGE=1` is set explicitly, while the same deterministic hosted-web build placeholders keep `apps/web verify` on its truthful build path without injecting production DB or production hosted device secrets, then packs the publishable tarballs once for upload/publication.
 - Vercel deploys of `apps/web` use the checked-in Vercel build command

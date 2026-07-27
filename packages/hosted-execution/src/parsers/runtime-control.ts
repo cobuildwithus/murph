@@ -1,4 +1,8 @@
 import {
+  normalizeIanaTimeZone,
+  normalizeStrictIsoTimestamp,
+} from "@murphai/contracts";
+import {
   parseHostedExecutionDeviceSyncRuntimeApplyRequest,
   parseHostedExecutionDeviceSyncRuntimeSnapshotRequest,
   parseHostedExecutionDeviceSyncWakeHint,
@@ -135,6 +139,8 @@ import {
   HOSTED_RUNTIME_GROUP_SHARED_READ_PARTICIPANT_ID_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_SHARED_READ_SCOPE_KEY_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_SHARED_READ_UNAVAILABLE_REASON_MAX_CODE_POINTS,
+  HOSTED_RUNTIME_MANAGED_GROUP_ACTIVITY_DECISION_STATUSES,
+  HOSTED_RUNTIME_MANAGED_GROUP_ACTIVITY_POLICIES,
   HOSTED_USAGE_REFERRAL_POLICY_CODES,
   HOSTED_RUNTIME_NEWSLETTER_AUTHORIZED_SHARES_PER_PARTICIPANT_MAX,
   isHostedRuntimeNewsletterAuthorizationProof,
@@ -159,6 +165,8 @@ import {
   type HostedRuntimeGroupToolSelfOptOutContext,
   type HostedRuntimeGroupToolRequest,
   type HostedRuntimeGroupToolResponse,
+  type HostedRuntimeManagedGroupActivityDecisionRequest,
+  type HostedRuntimeManagedGroupActivityDecisionResponse,
   type HostedRuntimeUsageReferralSnapshot,
   type HostedRuntimeUsageReferralSourceConversation,
   type HostedUsageReferralPolicyCode,
@@ -1303,6 +1311,74 @@ export function parseHostedRuntimeGroupToolRequest(
     };
   }
   throw new TypeError("Hosted runtime group tool action is not supported.");
+}
+
+export function parseHostedRuntimeManagedGroupActivityDecisionRequest(
+  value: unknown,
+): HostedRuntimeManagedGroupActivityDecisionRequest {
+  const label = "Hosted runtime managed group activity decision request";
+  const record = requireObject(value, label);
+  assertAllowedObjectKeys(
+    record,
+    new Set(["occurrenceAt", "policy", "route", "timeZone"]),
+    label,
+  );
+  const occurrenceAt = normalizeStrictIsoTimestamp(
+    requireString(record.occurrenceAt, `${label} occurrenceAt`),
+  );
+  if (!occurrenceAt) {
+    throw new TypeError(`${label} occurrenceAt is invalid.`);
+  }
+  const policy = requireString(record.policy, `${label} policy`);
+  if (!HOSTED_RUNTIME_MANAGED_GROUP_ACTIVITY_POLICIES.includes(
+    policy as (typeof HOSTED_RUNTIME_MANAGED_GROUP_ACTIVITY_POLICIES)[number],
+  )) {
+    throw new TypeError(`${label} policy is invalid.`);
+  }
+  const timeZone = normalizeIanaTimeZone(
+    requireString(record.timeZone, `${label} timeZone`),
+  );
+  if (!timeZone) {
+    throw new TypeError(`${label} timeZone is invalid.`);
+  }
+  const route = requireObject(record.route, `${label} route`);
+  assertAllowedObjectKeys(
+    route,
+    new Set(["channel", "target"]),
+    `${label} route`,
+  );
+  const channel = requireString(route.channel, `${label} route channel`);
+  if (channel !== "linq" && channel !== "telegram") {
+    throw new TypeError(`${label} route channel is invalid.`);
+  }
+  const target = requireString(route.target, `${label} route target`).trim();
+  if (!target) {
+    throw new TypeError(`${label} route target is required.`);
+  }
+
+  return {
+    occurrenceAt,
+    policy: policy as HostedRuntimeManagedGroupActivityDecisionRequest["policy"],
+    route: { channel, target },
+    timeZone,
+  };
+}
+
+export function parseHostedRuntimeManagedGroupActivityDecisionResponse(
+  value: unknown,
+): HostedRuntimeManagedGroupActivityDecisionResponse {
+  const label = "Hosted runtime managed group activity decision response";
+  const record = requireObject(value, label);
+  assertAllowedObjectKeys(record, new Set(["status"]), label);
+  const status = requireString(record.status, `${label} status`);
+  if (!HOSTED_RUNTIME_MANAGED_GROUP_ACTIVITY_DECISION_STATUSES.includes(
+    status as (typeof HOSTED_RUNTIME_MANAGED_GROUP_ACTIVITY_DECISION_STATUSES)[number],
+  )) {
+    throw new TypeError(`${label} status is invalid.`);
+  }
+  return {
+    status: status as HostedRuntimeManagedGroupActivityDecisionResponse["status"],
+  };
 }
 
 function parseHostedRuntimeGroupUpdateDisplayNameRequest(

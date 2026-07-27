@@ -22,6 +22,7 @@ vi.mock("@/src/lib/legal/consent", async (importOriginal) => ({
 import {
   deleteHostedAddressBookProjection,
   HOSTED_ADDRESS_BOOK_MAX_CONTACTS,
+  HOSTED_ADDRESS_BOOK_REPLACEMENT_BODY_MAX_BYTES,
   parseHostedAddressBookDeleteRequest,
   parseHostedAddressBookMacKeyring,
   parseHostedAddressBookReplaceRequest,
@@ -94,13 +95,45 @@ describe("hosted address-book request parsing", () => {
       ),
       mutationId: "4f5150c8-a9bc-42d3-b975-a289481a3140",
       schemaVersion: 1,
-    })).toThrow(/at most 512/u);
+    })).toThrow(/at most 1000/u);
+    const maximumProjection = Array.from(
+      { length: HOSTED_ADDRESS_BOOK_MAX_CONTACTS },
+      (_, index) => ({
+        advisoryName: "Alex",
+        phoneNumber: `+1202${String(index).padStart(7, "0")}`,
+      }),
+    );
+    expect(parseHostedAddressBookReplaceRequest({
+      baseRevision: 0,
+      contacts: maximumProjection,
+      mutationId: "4f5150c8-a9bc-42d3-b975-a289481a3140",
+      schemaVersion: 1,
+    }).contacts).toHaveLength(HOSTED_ADDRESS_BOOK_MAX_CONTACTS);
     expect(parseHostedAddressBookReplaceRequest({
       baseRevision: 0,
       contacts: [],
       mutationId: "4f5150c8-a9bc-42d3-b975-a289481a3140",
       schemaVersion: 1,
     })).toMatchObject({ contacts: [] });
+  });
+
+  it("keeps a maximum-size projection inside the transport body ceiling", () => {
+    const serialized = JSON.stringify({
+      baseRevision: Number.MAX_SAFE_INTEGER,
+      contacts: Array.from(
+        { length: HOSTED_ADDRESS_BOOK_MAX_CONTACTS },
+        () => ({
+          advisoryName: "é".repeat(48),
+          phoneNumber: `+${"1".repeat(15)}`,
+        }),
+      ),
+      mutationId: "4f5150c8-a9bc-42d3-b975-a289481a3140",
+      schemaVersion: 1,
+    });
+
+    expect(Buffer.byteLength(serialized, "utf8")).toBeLessThanOrEqual(
+      HOSTED_ADDRESS_BOOK_REPLACEMENT_BODY_MAX_BYTES,
+    );
   });
 
   it("rejects role labels, extra fields, noncanonical mutations, and invalid deletes", () => {
@@ -156,6 +189,40 @@ describe("hosted address-book request parsing", () => {
 });
 
 describe("hosted address-book projection lifecycle", () => {
+  it("stores the full supported projection without truncation", async () => {
+    const store = new AddressBookPrismaStub("owner-member");
+    const crypto = makeAddressBookCrypto();
+    const request = parseHostedAddressBookReplaceRequest({
+      baseRevision: 0,
+      contacts: Array.from(
+        { length: HOSTED_ADDRESS_BOOK_MAX_CONTACTS },
+        (_, index) => ({
+          advisoryName: "Alex",
+          phoneNumber: `+1202555${String(index).padStart(4, "0")}`,
+        }),
+      ),
+      mutationId: "4f5150c8-a9bc-42d3-b975-a289481a3140",
+      schemaVersion: 1,
+    });
+
+    await expect(replaceHostedAddressBookProjection({
+      crypto,
+      memberId: "owner-member",
+      prisma: store as never,
+      request,
+      source: SOURCE,
+    })).resolves.toMatchObject({
+      enabled: true,
+      revision: 1,
+      storedContactCount: HOSTED_ADDRESS_BOOK_MAX_CONTACTS,
+    });
+    expect(store.contacts).toHaveLength(HOSTED_ADDRESS_BOOK_MAX_CONTACTS);
+    expect(new Set(store.contacts.map((row) => row.phoneToken)).size).toBe(
+      HOSTED_ADDRESS_BOOK_MAX_CONTACTS,
+    );
+    expect(crypto.kms.macSign).toHaveBeenCalledTimes(1);
+  });
+
   it("stores only member-scoped phone tokens and resolves owner-only advisory names", async () => {
     const store = new AddressBookPrismaStub("owner-member");
     const crypto = makeAddressBookCrypto();
