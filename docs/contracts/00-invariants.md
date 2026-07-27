@@ -149,11 +149,17 @@ it has been explicitly elevated to a cross-cutting invariant.
   maintenance, retention, cleanup, projection, and scheduled wakes must not
   shorten it. Only the exact assistant retry or follow-up wake projected
   directly by the current foreground assistant phase may run as foreground
-  work inside that window without publishing a snapshot. Inherited, committed,
-  durability-gated, and shutdown-time wakes do not use this exception. If the
-  hot pass dirties state, the full quiet window starts again. An actual host
-  termination may use the separate last-chance durability path, but durably
-  staged foreground work still wins.
+  work inside that window without publishing a snapshot. The only other
+  exception is a server-identified, fixed-destination, transport-idempotent
+  phone-call-result or usage-referral-reward notification: after fresh
+  conversation work has priority, the runtime may select that exact durable
+  mailbox family, compose it queue-only, persist its causal outbox intent, and
+  drain it before the idle floor. Generic notifications and unrelated pending
+  outbox work remain excluded. Inherited, committed, durability-gated, and
+  shutdown-time wakes do not otherwise use this exception. If the hot pass
+  dirties state, the full quiet window starts again. An actual host termination
+  may use the separate last-chance durability path, but durably staged
+  foreground work still wins.
   Current-turn durability barriers may run only for facts the current reply or
   effect consumes. Before provider start, that is limited to accepted-input and
   turn-ownership proof; before an irreversible send, to the minimal outbox

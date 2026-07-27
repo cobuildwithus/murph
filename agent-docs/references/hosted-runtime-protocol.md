@@ -39,8 +39,11 @@ The live ownership split is:
   invocation and passes the single `idleCheckpointDelayMs` runtime policy knob.
   The runtime, not the host, keeps dirty state warm through the configured idle
   floor. The exact assistant wake projected directly by the current foreground
-  assistant phase may run once before that floor without checkpointing;
-  inherited or committed wakes and durability barriers remain checkpoint-first.
+  assistant phase may run once before that floor without checkpointing. The
+  exact phone-call-result and usage-referral-reward notification families may
+  also run queue-only through their causal outbox intent after fresh
+  conversation work has priority; generic notifications remain excluded.
+  Inherited or committed wakes and durability barriers remain checkpoint-first.
   At the idle floor, or on shutdown, the runtime checkpoints remaining dirty
   state before returning success. When Cloudflare reports container activity
   expiry, the shell yields to any active foreground operation; otherwise it runs
@@ -496,6 +499,16 @@ pass re-enters the existing bounded pass loop after admitting any newly arrived
 personal input first, so multiple safe items or a safe item imported during the
 preceding pass drain before checkpoint. No progress, retryable failure,
 cancellation, or mailbox-budget exhaustion stops the drain.
+
+The same bounded pass admits only
+`assistant.notification.requested:phone-call-result:*` and
+`assistant.notification.requested:usage-referral-reward:*`. Import eligibility
+does not grant dispatch authority: the foreground-causal system-mailbox selector
+must match the exact dedupe-key family again, then collect only the outbox intent
+returned by that mailbox execution. Its persisted `sending` transition precedes
+provider entry, replay observes the same intent, and an older generic
+notification or unrelated pending delivery cannot hitchhike. Fresh conversation
+input continues to preempt this pass.
 
 The group runtime returns only the request id and schema-checked bounded answer
 through the signed completion control path. Web reloads the request, rechecks

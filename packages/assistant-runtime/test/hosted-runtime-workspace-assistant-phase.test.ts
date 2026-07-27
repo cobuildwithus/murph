@@ -12,6 +12,7 @@ import {
   type HostedRuntimeLogRequest,
 } from "@murphai/hosted-execution/runtime-control";
 import {
+  buildHostedExecutionAssistantNotificationRequestedWake,
   buildHostedExecutionPendingEffectsReconcileRequestedWake,
   buildHostedExecutionRuntimeControlWake,
 } from "@murphai/hosted-execution";
@@ -12076,6 +12077,134 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     );
   });
 
+  it.each([
+    {
+      dedupeKey:
+        "assistant.notification.requested:phone-call-result:phone_call_123",
+      label: "phone-call result",
+    },
+    {
+      dedupeKey:
+        "assistant.notification.requested:usage-referral-reward:referral_123",
+      label: "usage-referral reward",
+    },
+  ])("drains an exact $label through the causal-only fixed-route outbox once", async ({
+    dedupeKey,
+  }) => {
+    const completionItem = createExternalCompletionSystemMailboxItem({
+      dedupeKey,
+    });
+    const deliveryEffect: HostedAssistantDeliverySideEffect = {
+      ...createDeliveryEffect(),
+      effectId: `effect_${completionItem.itemId}`,
+      payload: {
+        ...createDeliveryEffect().payload,
+        channel: "linq",
+        explicitTarget: "linq_source_thread",
+        idempotencyKey: dedupeKey.replace(
+          "assistant.notification.requested:",
+          "",
+        ),
+        identityId: "hbidx:phone:v1:test",
+        threadId: "linq_source_thread",
+        threadIsDirect: false,
+      },
+    };
+    const deliveryIntentId = `intent_${completionItem.itemId}`;
+    mocks.prepareHostedSystemMailboxItemForCheckpoint
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({
+        item: completionItem,
+        itemId: completionItem.itemId,
+        metrics: {
+          bootstrapResult: null,
+          conversationMetrics: null,
+          deliveryIntentIds: [deliveryIntentId],
+          mailboxLane: "assistant-notification",
+          redactedLogEntries: [],
+        },
+        status: "processed",
+      });
+    mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
+      deliveryEffect,
+    ]);
+    mocks.drainHostedPreparedAssistantDeliveries.mockResolvedValueOnce([
+      {
+        cleanupMessages: [],
+        cleanupTargetAliases: [],
+        deliveryChannel: "linq",
+        deliveryErrorCode: null,
+        deliveryErrorMessage: null,
+        deliveryStatus: "sent",
+        effectFingerprint: deliveryEffect.fingerprint,
+        effectId: deliveryEffect.effectId,
+        journalMethod: "PUT",
+        journalStatus: "200",
+        providerMessageId: "provider_completion_123",
+        providerMessageIds: [],
+        providerThreadId: "linq_source_thread",
+        retryable: false,
+        target: "linq_source_thread",
+        targetKind: "explicit",
+      },
+    ]);
+
+    const input = createPhaseInput({
+      assistantInputIds: [],
+      foregroundCausalOnly: true,
+      conversationImportedCount: 0,
+      importedCount: 1,
+      now: () => "2026-04-27T00:03:00.000Z",
+    });
+    const result = await runHostedWorkspaceAssistantPhase(input);
+
+    expect(mocks.prepareHostedSystemMailboxItemForCheckpoint)
+      .toHaveBeenNthCalledWith(
+        3,
+        expect.objectContaining({
+          allowedMailboxDedupeKeyPrefixes: [
+            "assistant.notification.requested:phone-call-result:",
+            "assistant.notification.requested:usage-referral-reward:",
+          ],
+          allowedRouteActions: ["dispatch-assistant-notification"],
+          allowedWakeKinds: ["assistant.notification.requested"],
+        }),
+      );
+    expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledWith({
+      actionApprovalPort: null,
+      includeBackgroundDueIntents: false,
+      preferredEffectIds: [],
+      preferredIntentIds: [deliveryIntentId],
+      vaultRoot: "/tmp/murph-vault",
+    });
+    expect(result).toEqual(expect.objectContaining({
+      checkpointReason: "outbox_sending",
+      progressed: true,
+    }));
+
+    await result.afterCheckpoint?.();
+
+    expect(mocks.drainHostedPreparedAssistantDeliveries).toHaveBeenCalledTimes(1);
+    expect(mocks.drainHostedPreparedAssistantDeliveries).toHaveBeenCalledWith(
+      expect.objectContaining({
+        assistantDeliveryEffects: [expect.objectContaining({
+          effectId: deliveryEffect.effectId,
+          payload: expect.objectContaining({
+            explicitTarget: "linq_source_thread",
+            threadId: "linq_source_thread",
+          }),
+        })],
+        shouldYieldBackgroundDelivery: null,
+        wake: completionItem.wake,
+      }),
+    );
+
+    const replay = await runHostedWorkspaceAssistantPhase(input);
+    expect(replay.progressed).toBe(false);
+    expect(mocks.drainHostedPreparedAssistantDeliveries).toHaveBeenCalledTimes(1);
+  });
+
   it("keeps managed setup out of a causal-only exact delivery pass", async () => {
     const now = "2026-04-27T00:00:00.000Z";
     const pendingEffectsItem = createPendingEffectsReconcileSystemMailboxItem();
@@ -12161,6 +12290,12 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         assistantAskCompletionOccurredBefore: null,
       }),
     );
+    expect(
+      mocks.prepareHostedSystemMailboxItemForCheckpoint.mock.calls.some(
+        ([request]) =>
+          Object.hasOwn(request, "allowedMailboxDedupeKeyPrefixes"),
+      ),
+    ).toBe(false);
     expect(mocks.resolveHostedPendingAssistantInputWakeAt).toHaveBeenCalledWith({
       inspectOnly: true,
       now: expect.any(Function),
@@ -15675,6 +15810,48 @@ function createSentDeliveryOutcome(): HostedAssistantDeliveryOutcome {
     retryable: false,
     target: null,
     targetKind: null,
+  };
+}
+
+function createExternalCompletionSystemMailboxItem(input: {
+  dedupeKey: string;
+}) {
+  const deliveryKey = input.dedupeKey.replace(
+    "assistant.notification.requested:",
+    "",
+  );
+  const itemId = input.dedupeKey.includes("phone-call-result")
+    ? "system_mailbox_item_phone_call_completion"
+    : "system_mailbox_item_usage_referral_completion";
+  return {
+    ...createSystemMailboxItem(),
+    itemId,
+    mailboxDedupeKey: input.dedupeKey,
+    requestId: `request_${itemId}`,
+    wake: buildHostedExecutionAssistantNotificationRequestedWake({
+      eventId: input.dedupeKey,
+      memberId: "member_synthetic_phase",
+      notification: {
+        deliveryDedupeToken: deliveryKey,
+        deliveryIdempotencyKey: deliveryKey,
+        instructions: "Celebrate the completed external task.",
+        responsePolicy: {
+          kind: "allow_send_or_skip",
+        },
+        route: {
+          actorId: null,
+          channel: "linq",
+          delivery: {
+            kind: "thread",
+            target: "linq_source_thread",
+          },
+          identityId: "hbidx:phone:v1:test",
+          threadId: "linq_source_thread",
+          threadIsDirect: false,
+        },
+      },
+      occurredAt: "2026-04-27T00:02:00.000Z",
+    }),
   };
 }
 

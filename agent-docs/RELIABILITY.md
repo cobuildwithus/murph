@@ -128,10 +128,13 @@ Last verified: 2026-07-27
   `assistant.notification.requested:phone-call-result:*` and
   `assistant.notification.requested:usage-referral-reward:*`. Their stable
   mailbox identity and idempotent delivery let them interrupt the idle floor;
-  every other notification remains checkpoint-gated. Referral recovery also
-  re-signals bounded oldest unconsumed celebration items, so a post-commit
-  signal failure remains recoverable from the existing mailbox without another
-  queue or state machine.
+  the foreground-causal selector rechecks those exact dedupe-key families,
+  carries only the just-created causal outbox intent into the existing
+  write-ahead provider drain, and leaves generic notifications or unrelated
+  pending outbox work checkpoint-gated. Fresh conversation input retains
+  priority. Referral recovery also re-signals bounded oldest unconsumed
+  celebration items, so a post-commit signal failure remains recoverable from
+  the existing mailbox without another queue or state machine.
 - A legacy joined-group `cannot_answer` queues the fixed
   unavailable-evidence response exactly. It must not start a private provider
   continuation that can invent an expiry, provider failure, or execution

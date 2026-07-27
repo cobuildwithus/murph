@@ -273,6 +273,16 @@ const HOSTED_PRE_CHECKPOINT_CAUSAL_ROUTE_ACTIONS = [
 const HOSTED_PRE_CHECKPOINT_CAUSAL_WAKE_KINDS = [
   "runtime.pending-effects-reconcile-requested",
 ] as const;
+const HOSTED_PRE_CHECKPOINT_EXTERNAL_COMPLETION_ROUTE_ACTIONS = [
+  "dispatch-assistant-notification",
+] as const;
+const HOSTED_PRE_CHECKPOINT_EXTERNAL_COMPLETION_WAKE_KINDS = [
+  "assistant.notification.requested",
+] as const;
+const HOSTED_PRE_CHECKPOINT_EXTERNAL_COMPLETION_DEDUPE_KEY_PREFIXES = [
+  "assistant.notification.requested:phone-call-result:",
+  "assistant.notification.requested:usage-referral-reward:",
+] as const;
 const HOSTED_PRE_CHECKPOINT_ASSISTANT_ASK_COMPLETION_ROUTE_ACTIONS = [
   "continue-assistant-ask",
 ] as const;
@@ -4300,6 +4310,29 @@ async function runSystemMailboxMaintenancePhase(input: {
         vaultRoot: phaseInput.restored.vaultRoot,
       });
   }
+  if (
+    phaseInput.foregroundCausalOnly === true
+    && foregroundCausalPreparation === null
+    && pendingAssistantInputWakeAt === null
+  ) {
+    foregroundCausalPreparation =
+      await prepareHostedSystemMailboxItemForCheckpoint({
+        allowedMailboxDedupeKeyPrefixes:
+          HOSTED_PRE_CHECKPOINT_EXTERNAL_COMPLETION_DEDUPE_KEY_PREFIXES,
+        allowedRouteActions:
+          HOSTED_PRE_CHECKPOINT_EXTERNAL_COMPLETION_ROUTE_ACTIONS,
+        allowedWakeKinds:
+          HOSTED_PRE_CHECKPOINT_EXTERNAL_COMPLETION_WAKE_KINDS,
+        executionContext: input.executionContext,
+        ...(phaseInput.now ? { now: phaseInput.now } : {}),
+        operatorHomeRoot: phaseInput.restored.operatorHomeRoot,
+        runtime: phaseInput.runtime,
+        runtimeEnv: phaseInput.runtimeEnv,
+        signal: phaseInput.signal ?? null,
+        shouldYieldBackgroundMaintenance: null,
+        vaultRoot: phaseInput.restored.vaultRoot,
+      });
+  }
   const foregroundCausalAttempted = foregroundCausalPreparation !== null;
   if (
     phaseInput.foregroundCausalOnly === true
@@ -4551,7 +4584,9 @@ async function runSystemMailboxMaintenancePhase(input: {
         preferredEffectIds: resolveHostedSystemMailboxPreferredEffectIds(
           systemMailboxPreparation,
         ),
-        preferredIntentIds: [],
+        preferredIntentIds: resolveHostedSystemMailboxPreferredIntentIds(
+          systemMailboxPreparation,
+        ),
         vaultRoot: phaseInput.restored.vaultRoot,
       })
       : [];
@@ -7887,6 +7922,16 @@ function resolveHostedSystemMailboxPreferredEffectIds(
     return [];
   }
   return [preparation.item.wake.effectId];
+}
+
+function resolveHostedSystemMailboxPreferredIntentIds(
+  preparation: HostedSystemMailboxCheckpointPreparation,
+): readonly string[] {
+  if (!("metrics" in preparation)) {
+    return [];
+  }
+
+  return preparation.metrics.deliveryIntentIds ?? [];
 }
 
 function shouldFastDispatchAssistantDeliveryEffects(input: {

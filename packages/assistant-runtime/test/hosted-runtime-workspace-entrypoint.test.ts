@@ -22,6 +22,8 @@ import {
   persistCanonicalInboxCapture,
 } from "@murphai/inboxd";
 import {
+  buildHostedExecutionAssistantNotificationRequestedWake,
+  buildHostedExecutionMemberActivatedWake,
   buildHostedExecutionRuntimeControlWake,
 } from "@murphai/hosted-execution";
 import {
@@ -32,6 +34,7 @@ import {
   getAssistantCronStatus,
   listAssistantTranscriptEntries,
   MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID,
+  listAssistantOutboxIntents,
   readAssistantContextSnapshotState,
   recordHostedMailboxAssistantInputItem,
   resolveAssistantSession,
@@ -231,6 +234,12 @@ import {
   type HostedWorkspaceRuntimeJobOptions,
   type HostedWorkspaceSnapshotCheckpointRequestBuilderInput,
 } from "../src/hosted-runtime.ts";
+import {
+  runHostedWorkspaceAssistantPhase,
+} from "../src/hosted-runtime/workspace-assistant-phase.ts";
+import {
+  prepareHostedWakeContext,
+} from "../src/hosted-runtime/context.ts";
 import {
   createHostedWorkspaceRuntimeBridgeJobOptions,
   type HostedWorkspaceSnapshotArchiveBuilder,
@@ -5948,6 +5957,275 @@ describe("hosted workspace runtime entrypoint", () => {
           assert.ok(idleCheckpointIndex < importIndex, events.join(","));
         }
         assert.equal(result.status, "idle");
+      } finally {
+        await removeTempRoot(vaultRoot);
+      }
+    });
+  }
+
+  for (const completion of [
+    {
+      dedupeKey:
+        "assistant.notification.requested:phone-call-result:phone_call_real_path",
+      label: "phone-call result",
+    },
+    {
+      dedupeKey:
+        "assistant.notification.requested:usage-referral-reward:referral_real_path",
+      label: "usage-referral reward",
+    },
+  ] as const) {
+    test(`delivers a ${completion.label} through the real causal mailbox and outbox before idle shutdown`, async () => {
+      const vaultRoot = await mkdtemp(
+        path.join(tmpdir(), "murph-workspace-entrypoint-"),
+      );
+      const events: string[] = [];
+      const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+      const mailboxItems: HostedMailboxItem[] = [];
+      const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+      const deliveryKey = completion.dedupeKey.replace(
+        "assistant.notification.requested:",
+        "",
+      );
+      let activeVaultRoot = vaultRoot;
+      let assistantPhaseCalls = 0;
+      const providerFetch = vi.fn<typeof fetch>(async (request, init) => {
+        const method =
+          init?.method
+          ?? (request instanceof Request ? request.method : "GET");
+        const url =
+          request instanceof Request
+            ? request.url
+            : String(request);
+        if (method === "POST" && url.includes("/messages")) {
+          events.push(`provider.send:${deliveryKey}`);
+          return new Response(
+            JSON.stringify({
+              message: {
+                id: `provider_${deliveryKey.replaceAll(":", "_")}`,
+              },
+            }),
+            {
+              headers: { "content-type": "application/json" },
+              status: 200,
+            },
+          );
+        }
+        return new Response(null, { status: 204 });
+      });
+
+      try {
+        await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+        const resultPromise = runHostedWorkspaceRuntimeJobInProcess(
+          createWorkspaceRuntimeJobInput({
+            forwardedEnv: {
+              LINQ_API_TOKEN: "synthetic-linq-token",
+            },
+            request: {
+              attemptId:
+                `attempt_synthetic_external_completion_real_${
+                  completion.label === "phone-call result" ? "phone" : "referral"
+                }`,
+              idleCheckpointDelayMs: 200,
+              leaseGeneration: "7",
+              userId: TEST_USER_ID,
+              workspaceVersion: "0",
+            },
+          }),
+          {
+            async createCheckpointSnapshot(snapshotInput) {
+              events.push(`snapshot:${snapshotInput.reason}`);
+              return {
+                snapshotRef: createBundleRef({
+                  hash:
+                    snapshotInput.reason === "idle_shutdown"
+                      ? "e".repeat(64)
+                      : "d".repeat(64),
+                  key:
+                    "users/bundles/member-synthetic/"
+                    + `${completion.label.replaceAll(" ", "-")}-real-path.bundle.json`,
+                  size: 512,
+                }),
+              };
+            },
+            async importItem(item) {
+              events.push(`mailbox.importItem:${item.item.id}`);
+              const outcome = await enqueueHostedSystemMailboxItem({
+                item,
+                vaultRoot: activeVaultRoot,
+                wake: buildHostedExecutionAssistantNotificationRequestedWake({
+                  eventId: completion.dedupeKey,
+                  memberId: TEST_USER_ID,
+                  notification: {
+                    deliveryDispatchMode: "queue-only",
+                    deliveryDedupeToken: deliveryKey,
+                    deliveryIdempotencyKey: deliveryKey,
+                    externalThreadRouteAuthority: {
+                      accountLookupKey: "linq-account-key",
+                      channel: "linq",
+                      containerMemberId: TEST_USER_ID,
+                      threadId: "linq_source_thread",
+                    },
+                    instructions: "Send the fixed completion text.",
+                    responsePolicy: {
+                      kind: "require_send_exact_text",
+                      text: "Mission complete.",
+                    },
+                    route: {
+                      actorId: null,
+                      channel: "linq",
+                      delivery: {
+                        kind: "thread",
+                        target: "linq_source_thread",
+                      },
+                      identityId: "hbidx:phone:v1:test",
+                      threadId: "linq_source_thread",
+                      threadIsDirect: false,
+                    },
+                  },
+                  occurredAt: TEST_NOW,
+                }),
+              });
+              return outcome;
+            },
+            platform: {
+              ...createPlatform({
+                mailboxPort: createMailboxPort({
+                  events,
+                  items: mailboxItems,
+                }),
+                workspacePort: createWorkspacePort({
+                  checkpointRequests,
+                  events,
+                  workspace: createWorkspaceState({ version: "0" }),
+                }),
+              }),
+              effectsPort: {
+                async assertExternalThreadRouteAuthority(authority) {
+                  assert.equal(authority.threadId, "linq_source_thread");
+                },
+                async assertLinqRecentInboundEngagement(request) {
+                  assert.equal(request.target, "linq_source_thread");
+                  return { providerDispatchClaimed: true };
+                },
+                async readRawEmailMessage() {
+                  return null;
+                },
+                async recordLinqDeliveryOutcome(request) {
+                  events.push(
+                    `provider.record:${request.providerThreadId ?? request.target}`,
+                  );
+                },
+                async sendEmail() {},
+              },
+              providerFetch,
+            },
+            runtimeWakeSignal,
+            async runAssistantPhase(input) {
+              assistantPhaseCalls += 1;
+              events.push(`assistant.phase:${assistantPhaseCalls}`);
+              if (assistantPhaseCalls === 1) {
+                activeVaultRoot = input.restored.vaultRoot;
+                await prepareHostedWakeContext(
+                  activeVaultRoot,
+                  buildHostedExecutionMemberActivatedWake({
+                    eventId: "member.activated:external-completion-real-path",
+                    memberChannels: {
+                      email: false,
+                      linq: true,
+                      telegram: false,
+                    },
+                    memberId: TEST_USER_ID,
+                    occurredAt: TEST_NOW,
+                    timeZone: "UTC",
+                  }),
+                  input.runtimeEnv,
+                  input.runtime.resolvedConfig,
+                  {
+                    operatorHomeRoot: input.restored.operatorHomeRoot,
+                  },
+                );
+                setTimeout(() => {
+                  mailboxItems.push(createMailboxItem({
+                    dedupeKey: completion.dedupeKey,
+                    id: `mailbox_item_${deliveryKey.replaceAll(":", "_")}`,
+                    kind: "assistant.notification.requested",
+                    lane: "system",
+                    laneSeq: "1",
+                  }));
+                  runtimeWakeSignal.notify();
+                }, 0);
+                return {
+                  checkpointReason: "assistant_runtime_commit",
+                  progressed: true,
+                };
+              }
+              assert.equal(input.foregroundCausalOnly, true);
+              if (assistantPhaseCalls === 2) {
+                const pendingSystemMailbox =
+                  (await readHostedSystemMailboxState(activeVaultRoot)).pending;
+                assert.deepEqual(
+                  pendingSystemMailbox.map((item) => ({
+                    mailboxDedupeKey: item.mailboxDedupeKey,
+                    routeAction: item.routeAction,
+                    wakeKind: item.wake.kind,
+                  })),
+                  [{
+                    mailboxDedupeKey: completion.dedupeKey,
+                    routeAction: "dispatch-assistant-notification",
+                    wakeKind: "assistant.notification.requested",
+                  }],
+                  events.join(","),
+                );
+                assert.equal(
+                  await resolveHostedPendingAssistantInputWakeAt({
+                    vaultRoot: activeVaultRoot,
+                  }),
+                  null,
+                );
+              }
+              const phaseResult = await runHostedWorkspaceAssistantPhase(input);
+              events.push(
+                `outbox.after-phase:${
+                  (await listAssistantOutboxIntents(activeVaultRoot))
+                    .map((intent) => intent.status)
+                    .join("|")
+                }`,
+              );
+              return phaseResult;
+            },
+            vaultRoot,
+          },
+        );
+
+        await withRealTimeout(
+          resultPromise,
+          5_000,
+          () => events.join(","),
+        );
+        const providerEvent = `provider.send:${deliveryKey}`;
+
+        assert.equal(
+          events.filter((event) => event === providerEvent).length,
+          1,
+          events.join(","),
+        );
+        assert.ok(
+          requireEventIndex(events, "outbox.after-phase:sending")
+            < requireEventIndex(events, providerEvent),
+          events.join(","),
+        );
+        assert.ok(
+          requireEventIndex(events, providerEvent)
+            < requireEventIndex(events, "outbox.after-phase:sent"),
+          events.join(","),
+        );
+        assert.ok(
+          requireEventIndex(events, providerEvent)
+            < requireEventIndex(events, "snapshot:idle_shutdown"),
+          events.join(","),
+        );
+        assert.ok(assistantPhaseCalls >= 3);
       } finally {
         await removeTempRoot(vaultRoot);
       }
