@@ -1,6 +1,6 @@
 # PR 966 Late Base Integration
 
-Status: active
+Status: completed
 Created: 2026-07-27
 Updated: 2026-07-27
 
@@ -54,11 +54,24 @@ Updated: 2026-07-27
 
 - Treat this base advance as behavior-bearing because it changes the same
   deletion and Linq trust boundaries as PR 966.
+- The only manual conflict was the durable documentation index. Preserve the
+  new saved-card ownership description and PR 966's private generated-image
+  plus encrypted avatar-staging descriptions together.
+- Account-deletion and Linq implementation changes merged automatically; prove
+  their combined result directly instead of rewriting either owner.
 
 ## Verification
 
-- Commands to run:
-  - focused tests selected from the actual overlap
-  - canonical verification if manual code resolution changes the candidate
-- Expected outcomes:
-  - no private-media, deletion, authorization, or Linq regression
+- Focused hosted account-deletion, Linq, privacy-migration, and usage-credit
+  tests: passed, 220 tests.
+- Canonical `pnpm test:diff apps/web agent-docs/index.md`: passed.
+  - all repository guards and workspace boundaries passed
+  - merged hosted-web TypeScript check passed
+  - 6,930 hosted-web tests passed with expected skips
+  - lint passed with zero errors
+  - dev smoke and production build passed
+- The earlier exact candidate also passed canonical full acceptance before this
+  base-only update. Per the completion workflow, the clean base integration
+  receives the affected-owner rerun above and exact-head CI rather than a
+  duplicate full acceptance run.
+Completed: 2026-07-27
