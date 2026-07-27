@@ -63,6 +63,200 @@ export interface ChangelogPage {
 
 const RAW_CHANGELOG_EDITIONS = [
   {
+    id: "2026-07-27",
+    publishedOn: "2026-07-27",
+    title: "Reminders on your time, not ours",
+    summary:
+      "iMessage reminders can now land at the overnight time you actually ask for, the iPhone app can recover updated consent without sending you to the web, and long-running group chats keep their maintenance out of the conversation.",
+    items: [
+      {
+        id: "overnight-imessage-reminders",
+        kind: "improvement",
+        priority: 5,
+        title: "Midnight means midnight",
+        summary:
+          "Ask Murph for an iMessage reminder at 2 AM and it now saves the time you chose instead of warning you away, suggesting a nearby hour, or asking for one more confirmation.",
+        details:
+          "Your own quiet-hour settings and Murph's existing pacing, line-health, consent, and routing safeguards still apply.",
+        relevanceTags: ["reminders", "imessage", "automation", "messaging"],
+        sourcePullRequests: [1027],
+      },
+      {
+        id: "iphone-consent-recovery",
+        kind: "improvement",
+        priority: 5,
+        title: "Missing launch consent stays inside the iPhone app",
+        summary:
+          "If launch consent is missing, the Murph app now presents the current documents and one clear I Consent action, then resumes the setup or sync flow that was waiting.",
+        details:
+          "Home, Settings, legal links, account deletion, and sign-out remain available. Health and automatic meal access pause only when the account has no complete historical consent.",
+        relevanceTags: ["iphone", "consent", "onboarding", "privacy"],
+        sourcePullRequests: [1022],
+      },
+      {
+        id: "group-compaction-stays-quiet",
+        kind: "improvement",
+        priority: 4,
+        title: "Long group chats tidy themselves up quietly",
+        summary:
+          "When a group conversation gets very long, Murph now compacts its working thread during idle time and keeps the synthetic maintenance update out of the room.",
+        details:
+          "The final reply, real progress, errors, and usage accounting still arrive normally. Personal conversations keep their existing in-turn compaction update.",
+        relevanceTags: ["groups", "assistant", "performance", "messaging"],
+        sourcePullRequests: [1019],
+      },
+    ],
+  },
+  {
+    id: "2026-07-26",
+    publishedOn: "2026-07-26",
+    title: "Group memory, clearer recovery",
+    summary:
+      "Group Murph can hold onto a room's rhythm, signup and access problems now answer with a way forward, and billing, meal capture, and deletion recover without leaving people stranded.",
+    items: [
+      {
+        id: "group-room-memory",
+        kind: "feature",
+        priority: 5,
+        title: "Group Murph remembers the room",
+        summary:
+          "A group chat can now keep one small, room-local set of recurring bits, preferences, and house rules so Murph does not have to rediscover the room every time.",
+        details:
+          "The current conversation, safety, and explicit room settings always outrank these fallible notes. The group can correct or forget them, and Murph uses a callback only when it naturally fits.",
+        relevanceTags: ["groups", "assistant", "memory", "personalization"],
+        sourcePullRequests: [950],
+      },
+      {
+        id: "contact-card-after-invite-signup",
+        kind: "feature",
+        priority: 4,
+        title: "Murph's contact card arrives after invite signup",
+        summary:
+          "After a delivered iMessage invite signup reply, Murph now shares the verified line's native contact card in that direct or group thread so the new member can save it without hunting for it.",
+        details:
+          "The automatic share stays on the line that delivered the reply and remains replay-safe across retries.",
+        relevanceTags: ["onboarding", "contacts", "groups", "messaging"],
+        sourcePullRequests: [915],
+      },
+      {
+        id: "secondary-onboarding-outcomes-visible",
+        kind: "improvement",
+        priority: 5,
+        title: "Setup problems answer with the next step",
+        summary:
+          "An expired Family invite, an unavailable group connection, a messy Telegram link, or a setup link that was already sent now gets a plain reply instead of looking like Murph ignored the message.",
+        details:
+          "Direct chats can receive the account-specific recovery step. Group replies stay generic so Murph does not disclose anyone's membership or billing state to the room.",
+        relevanceTags: ["onboarding", "messaging", "telegram", "reliability"],
+        sourcePullRequests: [957],
+      },
+      {
+        id: "recognized-members-always-get-an-answer",
+        kind: "improvement",
+        priority: 5,
+        title: "Recognized members are no longer silently dropped",
+        summary:
+          "When a paused, lapsed, or otherwise blocked member texts Murph from a recognized direct chat, Murph now answers with the existing access or subscription recovery path.",
+        details:
+          "The reply is bound to the current inbound identity and remains replay-safe across iMessage and Telegram.",
+        relevanceTags: ["messaging", "billing", "access", "reliability"],
+        sourcePullRequests: [954],
+      },
+      {
+        id: "group-funding-speaks-in-messages",
+        kind: "improvement",
+        priority: 4,
+        title: "Group top-ups speak in messages, not credit",
+        summary:
+          "The group funding page now says how many messages each one-time top-up is expected to add, with the price secondary and the middle option ready to choose.",
+        details:
+          "The counts stay approximate because real model and media costs vary, but every funding surface now derives them from the same estimate.",
+        relevanceTags: ["groups", "billing", "usage", "copy"],
+        sourcePullRequests: [],
+      },
+      {
+        id: "included-usage-follows-plan",
+        kind: "improvement",
+        priority: 4,
+        title: "Included usage now follows the plan",
+        summary:
+          "Paid Pulse and Edge access now derives included monthly AI usage from the recurring plan price instead of a separate fixed allowance.",
+        details:
+          "The included amount is 80% of the catalog price for the member's billing mode and tier. An open period keeps any higher existing amount until renewal, and newly created group chats begin with their own $7.50 included limit.",
+        relevanceTags: ["billing", "usage", "plans", "groups"],
+        sourcePullRequests: [962],
+      },
+      {
+        id: "pulse-return-survives-sign-out",
+        kind: "improvement",
+        priority: 4,
+        title: "A paid Pulse return survives sign-out",
+        summary:
+          "If you finish the Pulse payment flow and return to Settings in a signed-out browser, Murph now preserves the signed handoff through authentication and resumes it for the right member.",
+        details:
+          "Expired, duplicated, altered, or wrong-member returns stay inert.",
+        relevanceTags: ["billing", "pulse", "auth", "settings"],
+        sourcePullRequests: [955],
+      },
+      {
+        id: "meal-enrollment-survives-stale-consent",
+        kind: "improvement",
+        priority: 4,
+        title: "Automatic meal capture survives a document refresh",
+        summary:
+          "An active member who already granted both launch permissions can now turn on automatic meal capture even when a newer legal-document version made the recorded acceptance stale.",
+        details:
+          "No consent or partial consent still fails closed, and every upload continues to recheck current access and the historical grants.",
+        relevanceTags: ["meals", "iphone", "consent", "reliability"],
+        sourcePullRequests: [1003],
+      },
+      {
+        id: "grok-long-answers-explain-the-cutoff",
+        kind: "improvement",
+        priority: 3,
+        title: "Long X answers keep more of the useful part",
+        summary:
+          "Murph now keeps up to twice as much of a long Grok answer about X and says plainly when the returned result was cut short.",
+        details:
+          "The unverified answer remains isolated from Murph's own instructions, and Murph does not invent missing posts, links, or authors to fill the gap.",
+        relevanceTags: ["assistant", "search", "x", "reliability"],
+        sourcePullRequests: [945],
+      },
+      {
+        id: "account-deletion-cleanup-retries",
+        kind: "improvement",
+        priority: 3,
+        title: "Account deletion cleanup keeps its place",
+        summary:
+          "If cleanup is interrupted after account deletion begins, Murph now retains the exact remaining work and safely resumes it instead of losing ownership between systems.",
+        details:
+          "Stale billing or access events cannot quietly restore a deleted member while cleanup is still draining.",
+        relevanceTags: ["privacy", "account", "deletion", "reliability"],
+        sourcePullRequests: [974],
+      },
+      {
+        id: "destructive-requests-check-targets",
+        kind: "improvement",
+        priority: 3,
+        title: "Destructive requests check the target first",
+        summary:
+          "Before deleting or overwriting something, Murph is now explicitly instructed to verify the exact target and prefer a recoverable path when one exists.",
+        relevanceTags: ["assistant", "safety", "privacy"],
+        sourcePullRequests: [],
+      },
+      {
+        id: "homepage-cards-fit-small-iphones",
+        kind: "improvement",
+        priority: 2,
+        title: "Homepage examples fit the smallest iPhones",
+        summary:
+          "The newsletter, bloodwork, errands, and recovery cards now recompose at 320 to 390 pixels instead of squeezing desktop-sized artifacts into the phone.",
+        relevanceTags: ["homepage", "iphone", "design", "polish"],
+        sourcePullRequests: [961],
+      },
+    ],
+  },
+  {
     id: "2026-07-25",
     publishedOn: "2026-07-25",
     title: "A Murph that knows when to speak",
