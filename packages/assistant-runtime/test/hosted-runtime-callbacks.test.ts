@@ -64,6 +64,7 @@ const mocks = vi.hoisted(() => ({
   sendTelegramVoiceMemoMessage: vi.fn(),
   shouldDispatchAssistantOutboxIntent: vi.fn(),
   useActualLinqMessage: false,
+  useActualLinqReaction: false,
   useActualLinqVoiceMemoMessage: false,
   useActualTelegramMessage: false,
   useActualTelegramVoiceMemoMessage: false,
@@ -197,6 +198,9 @@ vi.mock("@murphai/assistant-engine/assistant-channel-runtime", async () => {
     async setLinqMessageReaction(
       ...args: Parameters<typeof actual.setLinqMessageReaction>
     ) {
+      if (mocks.useActualLinqReaction) {
+        return await actual.setLinqMessageReaction(...args);
+      }
       const providerFetch = args[1]?.fetchImplementation;
       if (!providerFetch) {
         throw new Error("Expected hosted Linq provider fetch boundary.");
@@ -474,6 +478,7 @@ beforeEach(() => {
   vi.useRealTimers();
   vi.clearAllMocks();
   mocks.useActualLinqMessage = false;
+  mocks.useActualLinqReaction = false;
   mocks.useActualLinqVoiceMemoMessage = false;
   mocks.useActualTelegramMessage = false;
   mocks.useActualTelegramVoiceMemoMessage = false;
@@ -9161,6 +9166,8 @@ describe("hosted runtime callbacks", () => {
         transportIdempotent: false,
       });
       const assertRecentInbound = vi.fn(assertLinqEngagementWithExistingProviderClaim);
+      mocks.useActualLinqReaction = kind === "reaction";
+      mocks.useActualLinqVoiceMemoMessage = kind === "voice";
       mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
         if (kind === "reaction") {
           await dependencies.setLinqMessageReaction({
@@ -11902,7 +11909,7 @@ describe("hosted runtime callbacks", () => {
     );
   });
 
-  it("blocks Linq text fallback when expiry crosses after voice provider entry", async () => {
+  it("attempts Linq text fallback after the voice provider claim becomes irreversible", async () => {
     vi.useFakeTimers();
     const expiresAt = "2099-04-08T00:30:00.000Z";
     vi.setSystemTime(new Date("2099-04-08T00:29:59.999Z"));
@@ -11980,13 +11987,12 @@ describe("hosted runtime callbacks", () => {
     });
 
     expect(fallbackError).toMatchObject({
-      code: "ASSISTANT_OUTBOX_INTENT_EXPIRED",
-      deliveryMayHaveSucceeded: false,
+      code: "LINQ_API_REQUEST_FAILED",
     });
     const providerUrls =
       providerFetch.mock.calls.map(([request]) => String(request));
     expect(providerUrls[0]).toContain("/voicememo");
-    expect(providerUrls.filter((url) => url.includes("/messages"))).toEqual([]);
+    expect(providerUrls.filter((url) => url.includes("/messages"))).toHaveLength(1);
     expect(mocks.sendLinqMessage).not.toHaveBeenCalled();
     expect(outcomes).toEqual([
       expect.objectContaining({
@@ -11996,7 +12002,7 @@ describe("hosted runtime callbacks", () => {
     ]);
   });
 
-  it("blocks the real Linq adapter when engagement claiming crosses the persisted expiry", async () => {
+  it("completes the real Linq adapter after the durable claim becomes irreversible", async () => {
     vi.useFakeTimers();
     const expiresAt = "2099-04-08T00:30:00.000Z";
     vi.setSystemTime(new Date("2099-04-08T00:29:59.999Z"));
@@ -12019,17 +12025,31 @@ describe("hosted runtime callbacks", () => {
     );
     mocks.useActualLinqMessage = true;
     mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
-      await dependencies.sendLinq({
+      const delivery = await dependencies.sendLinq({
         idempotencyKey: "assistant-outbox:intent_123",
         message: "A short group thank-you.",
         replyToMessageId: null,
         target: "linq_chat_current",
         targetKind: "thread",
       });
-      throw new Error("unreachable after expiry");
+      return createDispatchResult({
+        delivery: createDelivery({
+          channel: "linq",
+          providerMessageId: delivery.providerMessageId,
+          target: delivery.target,
+          targetKind: "thread",
+        }),
+        status: "sent",
+      });
     });
-    const assertRecentInbound = vi.fn(async (request) => {
+    let shouldYield = false;
+    const assertRecentInbound = vi.fn(async (request: {
+      authorityCheckOnly: boolean;
+      providerDispatchExpiresAt?: string | null;
+    }) => {
+      expect(request.providerDispatchExpiresAt).toBe(expiresAt);
       vi.setSystemTime(new Date(expiresAt));
+      shouldYield = true;
       return buildClaimedLinqEngagementResult(request);
     });
     const providerFetch = vi.fn<typeof fetch>(async () =>
@@ -12040,20 +12060,20 @@ describe("hosted runtime callbacks", () => {
       })
     );
 
-    await expect(drainHostedPreparedAssistantDeliveries({
+    const recordLinqDeliveryOutcome = vi.fn(async () => undefined);
+    const outcomes = await drainHostedPreparedAssistantDeliveries({
       assistantDeliveryEffects: [effect],
       effectsPort: createHostedRuntimeEffectsPortStub({
         assertLinqRecentInboundEngagement: assertRecentInbound,
+        recordLinqDeliveryOutcome,
       }),
       forwardedEnv: {
         LINQ_API_TOKEN: "linq-token",
       },
       providerFetch,
+      shouldYieldBackgroundDelivery: () => shouldYield,
       vaultRoot: HOSTED_WAKE.vaultRoot,
       wake: HOSTED_WAKE.wake,
-    })).rejects.toMatchObject({
-      code: "ASSISTANT_OUTBOX_INTENT_EXPIRED",
-      deliveryMayHaveSucceeded: false,
     });
 
     expect(assertRecentInbound).toHaveBeenCalledTimes(1);
@@ -12061,7 +12081,19 @@ describe("hosted runtime callbacks", () => {
       providerFetch.mock.calls
         .map(([request]) => String(request))
         .filter((url) => url.includes("/messages")),
-    ).toEqual([]);
+    ).toHaveLength(1);
+    expect(recordLinqDeliveryOutcome).toHaveBeenCalledWith(
+      expect.objectContaining({
+        acceptedAt: expect.any(String),
+        idempotencyKey: "assistant-outbox:intent_123",
+      }),
+      { signal: expect.any(AbortSignal) },
+    );
+    expect(outcomes).toEqual([
+      expect.objectContaining({
+        deliveryStatus: "sent",
+      }),
+    ]);
   });
 
   it("sends hosted Linq voice memos to the same-wake concrete chat target", async () => {

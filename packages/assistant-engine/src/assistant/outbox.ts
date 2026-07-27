@@ -942,7 +942,10 @@ async function dispatchAssistantOutboxIntentInternal(input: DispatchAssistantOut
     preparedDispatchReserved = input.dispatchHooks?.prepareDispatchIntent !== undefined
 
     const providerEntryAt = new Date()
-    if (assistantOutboxIntentIsExpired(dispatchIntent, providerEntryAt)) {
+    if (
+      assistantOutboxIntentIsExpired(dispatchIntent, providerEntryAt) &&
+      !assistantOutboxIntentDelegatesExpiryToHostedLinqClaim(dispatchIntent)
+    ) {
       if (preparedDispatchReserved) {
         await input.dispatchHooks?.clearPreparedIntent?.({
           intent: dispatchIntent,
@@ -1286,6 +1289,15 @@ function assistantOutboxIntentIsExpired(
 ): boolean {
   const expiresAt = intent.expiresAt ?? null
   return expiresAt !== null && Date.parse(expiresAt) <= now.getTime()
+}
+
+function assistantOutboxIntentDelegatesExpiryToHostedLinqClaim(
+  intent: AssistantOutboxIntent,
+): boolean {
+  return (
+    intent.channel === 'linq' &&
+    intent.externalThreadRouteAuthority?.channel === 'linq'
+  )
 }
 
 function throwIfAssistantOutboxSignalAborted(signal?: AbortSignal): void {

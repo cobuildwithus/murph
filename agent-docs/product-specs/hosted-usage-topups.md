@@ -294,14 +294,19 @@ label could outlive its sharing authority. It must not pressure anyone else to
 buy usage. The immutable deadline is 30 minutes after the verified payment. It
 survives mailbox import, runtime checkpoint restore, and outbox persistence:
 runtime consumes expired work before model or audio-provider entry, and outbox
-rejects stale dispatch before handing the same deadline to the hosted
-injected-fetch owner. After all asynchronous liveness, route-authority, and
-engagement work, that owner synchronously rechecks before each actual Telegram
-or Linq messaging request, including retry and fallback after deferred audio
-generation. Pre-request rejection retains explicit not-sent proof; only
-failure after network invocation is ambiguous. Ambiguous non-idempotent work
-keeps its existing fail-closed reconciliation and cannot re-enter the provider.
-No import, generation, or delivery retry recomputes or extends that deadline.
+rejects stale Telegram dispatch before the same deadline reaches the exact
+raw-fetch check, including retry and fallback after deferred audio generation.
+Hosted Linq instead delegates the final deadline decision to the existing Web
+transaction that owns its durable provider-dispatch claim. Runtime finishes
+asynchronous preparation, performs its local liveness/yield check immediately
+before requesting the claim, and passes the immutable deadline. Web rejects an
+expired new claim without writing the fence; an existing unresolved claim
+remains already-started. Once a claim succeeds, it is the irreversible
+provider-entry boundary, so no later local expiry or yield veto may strand it
+before the raw request. Pre-claim rejection retains explicit not-sent proof;
+post-claim uncertainty is ambiguous. Ambiguous non-idempotent work keeps
+its existing fail-closed reconciliation and cannot re-enter the provider. No
+import, generation, or delivery retry recomputes or extends that deadline.
 
 ## Ownership And Data Flow
 

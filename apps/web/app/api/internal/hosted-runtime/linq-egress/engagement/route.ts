@@ -53,6 +53,10 @@ export const POST = withJsonError(async (request: Request) => {
   const fromPhoneNumber = readOptionalBodyString(body.fromPhoneNumber);
   const idempotencyKey = readOptionalBodyString(body.idempotencyKey);
   const intentId = readOptionalBodyString(body.intentId);
+  const providerDispatchExpiresAt =
+    parseOptionalProviderDispatchExpiresAt(
+      body.providerDispatchExpiresAt,
+    );
   const replyToMessageId = readOptionalBodyString(body.replyToMessageId);
   const target = readOptionalBodyString(body.target);
   const targetKind = readOptionalBodyString(body.targetKind);
@@ -135,6 +139,9 @@ export const POST = withJsonError(async (request: Request) => {
         });
       }
       const claim = await recordHostedLinqRuntimeProviderDispatchFenceTx({
+        ...(providerDispatchExpiresAt
+          ? { expiresAt: new Date(providerDispatchExpiresAt) }
+          : {}),
         idempotencyKey,
         linqChatId: providerTargetKind === "participant" ? null : providerTarget,
         phoneNumber: fromPhoneNumber,
@@ -142,6 +149,14 @@ export const POST = withJsonError(async (request: Request) => {
         sourceRef: intentId ?? idempotencyKey,
         targetKind: providerTargetKind,
       });
+      if (claim.expired) {
+        throw hostedOnboardingError({
+          code: "HOSTED_LINQ_PROVIDER_DISPATCH_EXPIRED",
+          httpStatus: 410,
+          message: "Hosted Linq provider dispatch expired before it was claimed.",
+          retryable: false,
+        });
+      }
       if (!claim.claimed) {
         throw hostedOnboardingError({
           code: "HOSTED_LINQ_PROVIDER_DISPATCH_ALREADY_STARTED",
@@ -228,6 +243,29 @@ function parseOptionalAssistantAskCompletionExpiresAt(
     code: "HOSTED_LINQ_EGRESS_ASSISTANT_ASK_COMPLETION_EXPIRY_INVALID",
     httpStatus: 400,
     message: "Hosted Linq egress Assistant Ask completion expiry must be a canonical timestamp.",
+    retryable: false,
+  });
+}
+
+function parseOptionalProviderDispatchExpiresAt(
+  value: unknown,
+): string | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  const normalized = typeof value === "string" ? value.trim() : "";
+  const parsed = Date.parse(normalized);
+  if (
+    normalized
+    && Number.isFinite(parsed)
+    && new Date(parsed).toISOString() === normalized
+  ) {
+    return normalized;
+  }
+  throw hostedOnboardingError({
+    code: "HOSTED_LINQ_PROVIDER_DISPATCH_EXPIRY_INVALID",
+    httpStatus: 400,
+    message: "Hosted Linq provider dispatch expiry must be a canonical timestamp.",
     retryable: false,
   });
 }

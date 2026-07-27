@@ -942,6 +942,74 @@ describe("hosted Linq egress authority", () => {
     });
   });
 
+  it("rejects an expired provider-dispatch claim before writing the durable fence", async () => {
+    const prisma = createPrismaStub({
+      homeChatId: "chat-home",
+    });
+    mocks.getPrisma.mockReturnValue(prisma);
+
+    const response = await postHostedLinqEgressEngagement(
+      new Request("https://internal.example.test/engagement", {
+        body: JSON.stringify({
+          authorityCheckOnly: false,
+          idempotencyKey: "assistant-outbox:intent-expired",
+          providerDispatchExpiresAt: "2000-01-01T00:00:00.000Z",
+          target: "chat-home",
+          targetKind: "thread",
+        }),
+        headers: {
+          "content-type": "application/json",
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(410);
+    await expect(response.json()).resolves.toMatchObject({
+      error: {
+        code: "HOSTED_LINQ_PROVIDER_DISPATCH_EXPIRED",
+        retryable: false,
+      },
+    });
+    expect(prisma.hostedLinqDelivery.createMany).not.toHaveBeenCalled();
+  });
+
+  it("rechecks provider-dispatch expiry after the durable claim lookup", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2099-04-08T00:29:59.999Z"));
+      const prisma = createPrismaStub({
+        homeChatId: "chat-home",
+      });
+      prisma.hostedLinqDelivery.findUnique.mockImplementationOnce(async () => {
+        vi.setSystemTime(new Date("2099-04-08T00:30:00.000Z"));
+        return null;
+      });
+      mocks.getPrisma.mockReturnValue(prisma);
+
+      const response = await postHostedLinqEgressEngagement(
+        new Request("https://internal.example.test/engagement", {
+          body: JSON.stringify({
+            authorityCheckOnly: false,
+            idempotencyKey: "assistant-outbox:intent-expired-during-claim",
+            providerDispatchExpiresAt: "2099-04-08T00:30:00.000Z",
+            target: "chat-home",
+            targetKind: "thread",
+          }),
+          headers: {
+            "content-type": "application/json",
+          },
+          method: "POST",
+        }),
+      );
+
+      expect(response.status).toBe(410);
+      expect(prisma.hostedLinqDelivery.createMany).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("revalidates Assistant Ask authority before claiming provider dispatch", async () => {
     const observedOrder: string[] = [];
     const prisma = createPrismaStub({
@@ -1231,7 +1299,7 @@ describe("hosted Linq egress authority", () => {
     expect(prisma.hostedLinqDelivery.createMany).not.toHaveBeenCalled();
   });
 
-  it("reports an already-active provider claim without erasing its state", async () => {
+  it("reports an already-active provider claim after expiry without erasing its state", async () => {
     const attemptedAt = new Date("2026-06-01T12:00:00.000Z");
     const prisma = createPrismaStub({
       homeChatId: "chat-home",
@@ -1258,6 +1326,7 @@ describe("hosted Linq egress authority", () => {
         body: JSON.stringify({
           authorityCheckOnly: false,
           idempotencyKey: "assistant-outbox:intent-active",
+          providerDispatchExpiresAt: "2000-01-01T00:00:00.000Z",
           target: "chat-home",
           targetKind: "thread",
         }),

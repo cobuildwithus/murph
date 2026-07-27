@@ -760,6 +760,39 @@ test('setTelegramMessageReaction preserves proven pre-provider rejection', async
   expect(fetchImplementation).toHaveBeenCalledTimes(1)
 })
 
+test('setLinqMessageReaction preserves explicit confirmation-pending evidence', async () => {
+  const confirmationPending = Object.assign(
+    new VaultCliError(
+      'ASSISTANT_DELIVERY_CONFIRMATION_PENDING',
+      'Hosted Linq provider dispatch may already have started.',
+      { retryable: false },
+    ),
+    {
+      deliveryMayHaveSucceeded: true as const,
+    },
+  )
+  const fetchImplementation = vi.fn(async () => {
+    throw confirmationPending
+  })
+
+  await expect(
+    setLinqMessageReaction(
+      {
+        reaction: 'heart',
+        targetMessageId: 'message-123',
+      },
+      {
+        env: {
+          LINQ_API_TOKEN: 'linq-token',
+        },
+        fetchImplementation,
+      },
+    ),
+  ).rejects.toBe(confirmationPending)
+
+  expect(fetchImplementation).toHaveBeenCalledTimes(1)
+})
+
 test('setTelegramMessageReaction surfaces retryable rate limits without local retry delay', async () => {
   const fetchImplementation = vi.fn(async () =>
     createTelegramResponse({

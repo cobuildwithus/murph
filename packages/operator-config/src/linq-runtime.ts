@@ -44,7 +44,7 @@ import {
 } from './message-formatting.js'
 import { VaultCliError } from './vault-cli-errors.js'
 import {
-  assistantDeliveryErrorProvesProviderNotInvoked,
+  assistantDeliveryErrorHasProviderInvocationEvidence,
   createAssistantDeliveryBlockedError,
 } from './assistant/delivery-failure.js'
 import type {
@@ -997,7 +997,7 @@ async function fetchLinqResponse(input: {
     createTransportError: ({ error, timedOut }) => {
       if (
         error instanceof Error
-        && assistantDeliveryErrorProvesProviderNotInvoked(error)
+        && assistantDeliveryErrorHasProviderInvocationEvidence(error)
       ) {
         return error
       }

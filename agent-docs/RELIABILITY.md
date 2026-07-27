@@ -65,16 +65,21 @@ Last verified: 2026-07-26
   celebration. One immutable deadline, 30 minutes after verified payment,
   remains on the Web mailbox row, the imported runtime-local system item, and
   the ordinary outbox intent. Runtime consumes expired work before model or
-  audio-provider entry. The outbox rejects stale dispatch and carries the
-  deadline into the existing hosted injected-fetch owner. That owner finishes
-  asynchronous liveness, route-authority, and engagement work, then
-  synchronously rechecks the deadline immediately before each actual Telegram
-  or Linq messaging request, including retries and fallback after deferred
-  audio generation. Rejection before the underlying fetch retains explicit
-  not-sent proof; only failure after invocation uses existing ambiguity
-  handling. Non-idempotent work that may already have entered a provider keeps
-  its existing fail-closed reconciliation and cannot re-enter. Import, restart,
-  generation, or retry therefore cannot extend freshness. The
+  audio-provider entry. Telegram keeps ordinary outbox rejection plus the exact
+  raw-fetch deadline check, including retries and fallback after deferred audio
+  generation. Hosted Linq delegates its final deadline decision to the existing
+  Web transaction that owns the durable provider-dispatch claim. Runtime
+  finishes asynchronous preparation, performs one local liveness/yield check
+  immediately before requesting that claim, and passes the immutable deadline.
+  Web rejects an expired new claim without writing the fence, while an existing
+  unresolved claim remains already-started for restart-safe reconciliation.
+  Once a claim succeeds, it is the irreversible provider-entry boundary and no
+  later local expiry or yield veto may strand it before the raw Linq request.
+  Pre-claim rejection retains explicit not-sent proof; post-claim uncertainty
+  uses existing ambiguity handling. Non-idempotent work that may already
+  have entered a provider keeps its existing fail-closed reconciliation and
+  cannot re-enter. Import, restart, generation, or retry therefore cannot
+  extend freshness. The
   response-audio turn must complete exactly one voice
   memo or song attempt; one failed attempt may fall back to text, while a
   successful generation is non-replayable if later validation or delivery

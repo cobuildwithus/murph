@@ -722,11 +722,16 @@ member's direct route, and reaches the ordinary outbox through an isolated
 assistant turn with bounded committed group history and only the existing
 voice-memo and song tools. Its immutable 30-minute deadline crosses the Web
 mailbox, runtime-local system item, and ordinary outbox intent; the existing
-effect owners consume expired work before model/audio, while the ordinary
-outbox rejects stale dispatch early and the hosted provider-entry guard
-finishes asynchronous route/engagement authority and then synchronously
-rechecks the same deadline immediately before every actual messaging request.
-Pre-request rejection remains proven not sent; only post-invocation failure is
+effect owners consume expired work before model/audio. Telegram keeps the
+ordinary outbox rejection and exact raw-fetch deadline check. Hosted Linq
+delegates the final check to the existing Web transaction that owns its durable
+provider-dispatch claim: runtime finishes asynchronous preparation, performs
+its local liveness/yield check immediately before requesting the claim, and
+passes the immutable deadline. Web rejects an expired new claim without
+writing the fence; an existing unresolved claim remains already-started.
+A successful claim is the irreversible provider-entry boundary, so no later
+local expiry or yield check may veto the corresponding raw Linq request.
+Pre-claim rejection remains proven not sent; uncertainty after the claim is
 ambiguous. It carries no contributor label, and the assistant owner
 enforces one audio attempt while treating successful generation as
 non-replayable. It adds no event family, queue, scheduler, migration, or second

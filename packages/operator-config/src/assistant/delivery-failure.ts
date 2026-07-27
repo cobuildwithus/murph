@@ -87,6 +87,13 @@ export function assistantDeliveryErrorProvesProviderNotInvoked(
   return readRecord(error)?.deliveryMayHaveSucceeded === false
 }
 
+export function assistantDeliveryErrorHasProviderInvocationEvidence(
+  error: unknown,
+): boolean {
+  const evidence = readRecord(error)?.deliveryMayHaveSucceeded
+  return evidence === true || evidence === false
+}
+
 export function markAssistantDeliveryProviderNotInvoked(
   error: unknown,
 ): unknown {

@@ -52,12 +52,17 @@ and exactly the existing voice-memo and song tools. Runtime requires one
 completed audio attempt, validates the matching voice-memo attachment, permits
 text fallback only after a failed attempt, and does not replay successful
 generation after a later failure. The original mailbox deadline is also the
-ordinary outbox intent deadline. The outbox rejects stale dispatch early, and
-the existing hosted injected-fetch owner finishes asynchronous authority work
-and synchronously rechecks the persisted deadline immediately before every
-actual Telegram or Linq messaging request, including retry and fallback after
-deferred audio generation. Pre-request rejection remains proven not sent; only
-post-invocation uncertainty is ambiguous. It still receives
+ordinary outbox intent deadline. Telegram retains ordinary outbox rejection and
+the exact raw-fetch deadline check, including retry and fallback after deferred
+audio generation. Hosted Linq delegates its final expiry decision to the
+existing Web transaction that owns the durable provider-dispatch claim:
+runtime completes asynchronous preparation, performs one local liveness/yield
+check immediately before the claim, and passes the immutable deadline. Web
+rejects an expired new claim without writing the fence; an existing unresolved
+claim remains already-started. A successful claim is irreversible provider
+entry, so the corresponding raw request has no later local expiry or yield
+veto. Pre-claim rejection remains proven not sent; only post-claim uncertainty
+is ambiguous. It still receives
 no CLI, hosted context, shell, connected apps, arbitrary network, progress,
 image, or group-mutation capability. Both profiles use the existing one-shot App Server
 path so their restrictive launch configuration cannot replace the resident

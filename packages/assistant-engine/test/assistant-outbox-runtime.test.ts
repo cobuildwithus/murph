@@ -3845,6 +3845,61 @@ describe('assistant outbox runtime', () => {
     expect(mockedDeliverAssistantMessageOverBinding).not.toHaveBeenCalled()
   })
 
+  it('delegates hosted Linq expiry to the durable provider-dispatch claim', async () => {
+    vi.useFakeTimers()
+    const expiresAt = '2099-04-08T00:30:00.000Z'
+    vi.setSystemTime(new Date('2099-04-08T00:29:59.999Z'))
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-outbox-hosted-linq-claim-expiry-',
+    )
+    const seeded = await createIntent(vaultRoot, {
+      channel: 'linq',
+      expiresAt,
+      explicitTarget: 'linq-group-123',
+      externalThreadRouteAuthority: {
+        accountLookupKey: 'hbidx:phone:v1:linq-group-123',
+        channel: 'linq',
+        containerMemberId: 'member-group-123',
+        threadId: 'linq-group-123',
+      },
+      message: 'A short group thank-you.',
+      sessionId: 'session-hosted-linq-claim-expiry',
+      threadId: 'linq-group-123',
+      threadIsDirect: false,
+      turnId: 'turn-hosted-linq-claim-expiry',
+    })
+    mockedDeliverAssistantMessageOverBinding.mockRejectedValueOnce(
+      Object.assign(new VaultCliError(
+        'HOSTED_LINQ_PROVIDER_DISPATCH_EXPIRED',
+        'Hosted Linq provider dispatch expired before it was claimed.',
+        { retryable: false },
+      ), {
+        deliveryMayHaveSucceeded: false,
+      }),
+    )
+
+    const failed = await dispatchAssistantOutboxIntent({
+      dispatchHooks: {
+        clearPreparedIntent: vi.fn(async () => undefined),
+        prepareDispatchIntent: async () => {
+          vi.setSystemTime(new Date(expiresAt))
+        },
+      },
+      intentId: seeded.intentId,
+      now: new Date('2099-04-08T00:29:59.999Z'),
+      vault: vaultRoot,
+    })
+
+    expect(mockedDeliverAssistantMessageOverBinding).toHaveBeenCalledOnce()
+    expect(failed.intent).toMatchObject({
+      expiresAt,
+      lastError: {
+        code: 'HOSTED_LINQ_PROVIDER_DISPATCH_EXPIRED',
+      },
+      status: 'failed',
+    })
+  })
+
   it('terminally fails when the channel provider-entry boundary rejects an expired intent', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2099-04-08T00:29:59.999Z'))
@@ -4655,6 +4710,8 @@ async function createIntent(
     expiresAt: string | null
     dedupeToken: string | null
     explicitTarget: string | null
+    externalThreadRouteAuthority:
+      AssistantOutboxIntent['externalThreadRouteAuthority']
     identityId: string | null
     message: string
     nativeReplyRequested: true
@@ -4684,6 +4741,7 @@ async function createIntent(
         ? `${sessionId}:${turnId}`
         : overrides.dedupeToken,
     explicitTarget: overrides.explicitTarget ?? null,
+    externalThreadRouteAuthority: overrides.externalThreadRouteAuthority,
     identityId: overrides.identityId ?? 'participant-1',
     media: overrides.media ?? [],
     message: overrides.message ?? `${sessionId}:${turnId}:message`,

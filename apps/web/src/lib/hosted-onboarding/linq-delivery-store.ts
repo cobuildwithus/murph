@@ -271,6 +271,7 @@ type HostedLinqDeliveryProviderDispatchClaimInput = {
   attemptedAt?: Date;
   idempotencyKey?: string | null;
   linqChatId?: string | null;
+  notAfter?: Date;
   phoneNumber?: string | null;
   prisma: HostedLinqDeliveryClient;
   reclaimStalePreProviderAttempt?: boolean;
@@ -283,7 +284,12 @@ type HostedLinqDeliveryProviderDispatchClaimInput = {
 
 export async function claimHostedLinqDeliveryProviderDispatchTx(
   input: HostedLinqDeliveryProviderDispatchClaimInput,
-): Promise<{ claimed: boolean; id: string | null; retryAt?: Date }> {
+): Promise<{
+  claimed: boolean;
+  expired?: true;
+  id: string | null;
+  retryAt?: Date;
+}> {
   return claimHostedLinqDeliveryProviderDispatchWithIdTx(
     input,
     buildHostedLinqDeliveryId,
@@ -293,7 +299,12 @@ export async function claimHostedLinqDeliveryProviderDispatchTx(
 async function claimHostedLinqDeliveryProviderDispatchWithIdTx(
   input: HostedLinqDeliveryProviderDispatchClaimInput,
   buildDeliveryId: (idempotencyKey: string) => string,
-): Promise<{ claimed: boolean; id: string | null; retryAt?: Date }> {
+): Promise<{
+  claimed: boolean;
+  expired?: true;
+  id: string | null;
+  retryAt?: Date;
+}> {
   const attemptedAt = input.attemptedAt ?? new Date();
   const idempotencyKey = createHostedLinqDeliveryIdempotencyLookupKey(
     normalizeNullable(input.idempotencyKey),
@@ -340,6 +351,25 @@ async function claimHostedLinqDeliveryProviderDispatchWithIdTx(
     where: { idempotencyKey },
     select: hostedLinqDeliveryLifecycleSelect,
   });
+  const expiryObservedAt = input.attemptedAt ?? new Date();
+  if (input.notAfter && input.notAfter <= expiryObservedAt) {
+    if (
+      existing
+      && existing.status
+        === HOSTED_LINQ_DELIVERY_PROVIDER_DISPATCH_STARTED_STATUS
+      && isHostedLinqDeliveryPreProvider(existing)
+    ) {
+      return {
+        claimed: false,
+        id: existing.id,
+      };
+    }
+    return {
+      claimed: false,
+      expired: true,
+      id: existing?.id ?? null,
+    };
+  }
   if (existing) {
     return claimExistingHostedLinqDeliveryProviderDispatchTx({
       attemptedAt,
@@ -381,18 +411,24 @@ async function claimHostedLinqDeliveryProviderDispatchWithIdTx(
 
 export async function recordHostedLinqRuntimeProviderDispatchFenceTx(input: {
   attemptedAt?: Date;
+  expiresAt?: Date;
   idempotencyKey: string;
   linqChatId?: string | null;
   phoneNumber?: string | null;
   prisma: HostedLinqDeliveryClient;
   sourceRef?: string | null;
   targetKind?: string | null;
-}): Promise<{ claimed: boolean; id: string | null; retryAt?: Date }> {
-  const attemptedAt = input.attemptedAt ?? new Date();
+}): Promise<{
+  claimed: boolean;
+  expired?: true;
+  id: string | null;
+  retryAt?: Date;
+}> {
   return await claimHostedLinqDeliveryProviderDispatchTx({
-    attemptedAt,
+    ...(input.attemptedAt ? { attemptedAt: input.attemptedAt } : {}),
     idempotencyKey: input.idempotencyKey,
     linqChatId: input.linqChatId,
+    notAfter: input.expiresAt,
     phoneNumber: input.phoneNumber,
     prisma: input.prisma,
     source: "hosted_runtime_linq_delivery",
