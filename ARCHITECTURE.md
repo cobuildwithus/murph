@@ -641,9 +641,11 @@ permission-loss deletion after the companion next reconciles in the foreground,
 and account deletion use that one lifecycle. An enabled projection remains
 active until one of those deletion paths runs. The only consumer is the existing
 route-authorized group participant read. It consults the human group owner's
-projection for at most 16 unregistered phone handles and exposes a match only
-as current-turn `unverifiedOwnerContactLabel` presentation text. It is never
-identity, membership, consent, routing, profile, invite, or signup authority.
+projection for at most 16 canonical phone participant handles, independently
+of each participant's durable `hasOwnMurph` activation result, and exposes a
+match only as current-turn `unverifiedOwnerContactLabel` presentation text. It
+is never identity, membership, consent, routing, profile, invite, or signup
+authority, and it cannot override a registered participant's Murph identity.
 Failures omit the optional overlay without changing the truthful live roster.
 The full boundary and rollout contract is
 `agent-docs/product-specs/ios-address-book-advisory-names.md`.

@@ -1,12 +1,13 @@
 # iOS address-book advisory names
 
-Last verified: 2026-07-26
+Last verified: 2026-07-27
 
 ## Product boundary
 
 The iOS companion may offer one optional Contacts step after Apple Health.
 Sharing lets Murph use a familiar, unverified first-name label for an
-unregistered phone participant in a group owned by the sharing member.
+phone participant in a group owned by the sharing member, whether or not that
+participant already uses Murph.
 Skipping makes no permission request and performs no backend mutation.
 
 This is not a contact importer, invite system, signup prefill, global social
@@ -100,8 +101,8 @@ The only consumer is the existing route-authorized
 `read_chat_participants` operation:
 
 1. Read and reconcile the truthful live Linq/iMessage roster.
-2. Select at most 16 canonical phone handles whose durable activation check
-   says they do not yet use Murph.
+2. Select at most 16 canonical phone handles while retaining each handle's
+   durable activation result independently.
 3. Resolve only the human group owner's active projection.
 4. Omit ambiguous labels and return each remaining label as
    `unverifiedOwnerContactLabel`.
@@ -111,6 +112,9 @@ The only consumer is the existing route-authorized
 The model sees the label only for the current tool result and is explicitly
 told that it is untrusted presentation text with no identity, membership,
 consent, routing, instruction, or persistence authority.
+For a registered participant, the label remains only the owner's private
+presentation hint: it does not replace or modify that participant's Murph
+identity, and `hasOwnMurph` remains a separate durable-activation fact.
 
 The lookup does not write a canonical profile, mailbox item, runtime log,
 workspace record, or separate advisory-name state. Once the model includes a
