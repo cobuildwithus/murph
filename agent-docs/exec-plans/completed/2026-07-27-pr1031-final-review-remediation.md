@@ -1,6 +1,6 @@
 # PR 1031 final review remediation
 
-Status: active
+Status: completed
 Created: 2026-07-27
 Updated: 2026-07-27
 
@@ -67,6 +67,8 @@ without adding a daemon, scheduler, retry owner, or persisted product state:
 - After round-3 remediation, the canonical forced-local diff verifier passed
   shell and Node syntax, hosted guards, repo-tool typecheck, dependency policy,
   and the complete repo-tool suite: 30 files and 447 tests.
+- Exact-head CI on `387c1c85b1439829d5e4d7c7c7b569c54a3953a4`
+  passed all 27 checks.
 
 ## Round 2 retrospective decision
 
@@ -110,3 +112,17 @@ Continue by redesigning in place:
   the transport-loss regression now invokes the production wrapper instead of
   duplicating its shell fragment, and a second production-wrapper regression
   proves nonzero verifier status and exact run-directory cleanup.
+
+## Round 4 outcome
+
+Final ReviewGPT correction round 4 reviewed
+`387c1c85b1439829d5e4d7c7c7b569c54a3953a4` with the requested Pro response
+model and returned no findings with `ROUND_OUTCOME: PASS`. It confirmed the
+detached candidate materialization, production lock wrapper, transport-loss
+exclusion, nonzero status propagation, exact cleanup, and continued adherence
+to the completed redesign-in-place decision.
+
+The production-faithful static-host smoke remains an operator setup check
+because no dedicated credential-free account or SSH alias was supplied to this
+task. PR 1031 remains draft until that one-time host setup is available.
+Completed: 2026-07-27
