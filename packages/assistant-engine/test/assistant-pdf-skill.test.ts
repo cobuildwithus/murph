@@ -27,7 +27,7 @@ describe('assistant PDF skill', () => {
     })
 
     expect(prompt).toContain(
-      'Execution/artifacts: computer-use, pdf, music-generation.',
+      'Artifacts: pdf, music-generation.',
     )
     expect(prompt).toContain(
       '$MURPH_ASSISTANT_SKILLS_ROOT/<slug>/SKILL.md',

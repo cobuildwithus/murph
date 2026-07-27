@@ -92,6 +92,18 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
     note: "Confirmed export includes decrypted user-facing phone, Privy, and wallet identity fields while omitting lookup keys and active phone-code attempt IDs.",
   },
   {
+    slug: "prisma.hosted_address_book_projection",
+    label: "Optional address-book projection state",
+    deletion: "live-delete",
+    note: "Deletes sharing status, mutation history, revision, and retention timestamps. Export reports status and counts only, never mutation identifiers.",
+  },
+  {
+    slug: "prisma.hosted_address_book_contact",
+    label: "Encrypted address-book advisory names and member-scoped phone tokens",
+    deletion: "live-delete",
+    note: "Deletes every encrypted advisory name and keyed phone token before the projection owner. Export omits names, ciphertext, tokens, and token versions.",
+  },
+  {
     slug: "prisma.hosted_member_routing",
     label: "Linq, Telegram, reply-alias routing bindings",
     deletion: "live-delete",
@@ -1397,6 +1409,8 @@ async function deleteHostedAccountPrismaRows(input: {
   record("prisma.hosted_invite", await input.prisma.hostedInvite.deleteMany({ where: { memberId: memberIdFilter } }));
   record("prisma.hosted_consent_event", await input.prisma.hostedConsentEvent.deleteMany({ where: { memberId: memberIdFilter } }));
   record("prisma.hosted_consent_grant", await input.prisma.hostedConsentGrant.deleteMany({ where: { memberId: memberIdFilter } }));
+  record("prisma.hosted_address_book_contact", await input.prisma.hostedAddressBookContact.deleteMany({ where: { memberId: memberIdFilter } }));
+  record("prisma.hosted_address_book_projection", await input.prisma.hostedAddressBookProjection.deleteMany({ where: { memberId: memberIdFilter } }));
   record("prisma.hosted_workspace", await input.prisma.hostedWorkspace.deleteMany({ where: { userId: memberIdFilter } }));
   record("prisma.hosted_computer_handoff", await input.prisma.hostedComputerHandoff.deleteMany({ where: { memberId: memberIdFilter } }));
   record("prisma.hosted_computer_run", await input.prisma.hostedComputerRun.deleteMany({ where: { memberId: memberIdFilter } }));
