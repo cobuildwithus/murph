@@ -68,6 +68,7 @@ import {
   writeAssistantChatErrorArtifacts,
 } from './artifacts.js'
 import {
+  findAssistantAutoReplyDeliveryIntentIds,
   readAssistantAutoReplyTerminalEvidenceByEvidenceId,
   type AssistantAutoReplyTerminalEvidence,
   writeAssistantAutoReplyReplyIntentEvidence,
@@ -1330,6 +1331,7 @@ async function evaluateAssistantAutoReplyGroup(input: {
       executionContext: input.executionContext,
       historyReader: input.historyReader,
       primaryInput: primaryReplyInput,
+      vault: input.vault,
     })
   if (hostedGroupReplyState === 'suppress') {
     return createAdvancingSkipDecision(
@@ -4105,6 +4107,7 @@ async function resolveHostedGroupAutoReplyOvertake(input: {
   executionContext?: AssistantExecutionContext | null
   historyReader: AssistantAutoReplyHistoryReader
   primaryInput: AssistantAutoReplyPrimaryInput
+  vault: string
 }): Promise<'defer' | 'none' | 'suppress'> {
   if (
     !input.executionContext?.hosted ||
@@ -4123,15 +4126,22 @@ async function resolveHostedGroupAutoReplyOvertake(input: {
 
   let activeIntentPresent = false
   const sentAtByTurnId = new Map<string, number>()
-  for (const intent of await input.historyReader.readOutboxIntents()) {
-    if (
-      intent.operation !== null ||
-      intent.answeredMailboxItemIds.length === 0 ||
-      !assistantAutoReplyOutboxIntentMatchesHostedGroup({
-        conversation: input.primaryInput.conversation,
-        intent,
-      })
-    ) {
+  const candidateIntents = (
+    await input.historyReader.readOutboxIntents()
+  ).filter((intent) =>
+    intent.operation === null &&
+    intent.answeredMailboxItemIds.length > 0 &&
+    assistantAutoReplyOutboxIntentMatchesHostedGroup({
+      conversation: input.primaryInput.conversation,
+      intent,
+    }),
+  )
+  const autoReplyIntentIds = await findAssistantAutoReplyDeliveryIntentIds({
+    intents: candidateIntents,
+    vault: input.vault,
+  })
+  for (const intent of candidateIntents) {
+    if (!autoReplyIntentIds.has(intent.intentId)) {
       continue
     }
 

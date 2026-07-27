@@ -106,6 +106,7 @@ const replyMocks = vi.hoisted(() => ({
 
 const evidenceMocks = vi.hoisted(() => ({
   assistantAutoReplyTerminalEvidenceExists: vi.fn(),
+  findAssistantAutoReplyDeliveryIntentIds: vi.fn(),
   hasCompleteAssistantAutoReplyTerminalEvidence: vi.fn(),
   readAssistantAutoReplyTerminalEvidenceByEvidenceId: vi.fn(),
   writeAssistantAutoReplyReplyIntentEvidence: vi.fn(),
@@ -122,6 +123,8 @@ vi.mock('../src/assistant/automation/artifacts.ts', () => ({
 vi.mock('../src/assistant/automation/evidence.ts', () => ({
   assistantAutoReplyTerminalEvidenceExists:
     evidenceMocks.assistantAutoReplyTerminalEvidenceExists,
+  findAssistantAutoReplyDeliveryIntentIds:
+    evidenceMocks.findAssistantAutoReplyDeliveryIntentIds,
   hasCompleteAssistantAutoReplyTerminalEvidence:
     evidenceMocks.hasCompleteAssistantAutoReplyTerminalEvidence,
   readAssistantAutoReplyTerminalEvidenceByEvidenceId:
@@ -1331,6 +1334,11 @@ beforeEach(() => {
   evidenceMocks.assistantAutoReplyTerminalEvidenceExists
     .mockReset()
     .mockResolvedValue(false)
+  evidenceMocks.findAssistantAutoReplyDeliveryIntentIds
+    .mockReset()
+    .mockImplementation(async (input: {
+      intents: readonly { intentId: string }[]
+    }) => new Set(input.intents.map((intent) => intent.intentId)))
   evidenceMocks.hasCompleteAssistantAutoReplyTerminalEvidence
     .mockReset()
     .mockImplementation(async (input: {
@@ -2844,6 +2852,59 @@ describe('assistant auto-reply runtime', () => {
       stopScanning: true,
     })
     expect(replyMocks.sendAssistantMessage).not.toHaveBeenCalled()
+    expect(evidenceMocks.writeAssistantAutoReplySuppressionEvidence)
+      .not.toHaveBeenCalled()
+  })
+
+  it.each([
+    {
+      label: 'active',
+      prior: createHostedGroupOutboxIntent({
+        createdAt: '2026-04-08T00:04:00.000Z',
+        intentId: 'intent_group_assistant_ask_active',
+        status: 'retryable',
+      }),
+    },
+    {
+      label: 'sent',
+      prior: createHostedGroupOutboxIntent({
+        createdAt: '2026-04-08T00:04:00.000Z',
+        intentId: 'intent_group_assistant_ask_sent',
+        sentAt: '2026-04-08T00:05:00.000Z',
+        status: 'sent',
+      }),
+    },
+  ])('keeps later group input replyable beside an $label Assistant Ask carrier', async ({
+    prior,
+  }) => {
+    const hostedInput = createHostedLinqGroupInput({
+      inputId: `ain_group_after_${prior.intentId}`,
+      receivedAt: '2026-04-08T00:02:00.000Z',
+    })
+    replyMocks.listAssistantOutboxIntents.mockResolvedValue([prior])
+    replyMocks.listAssistantTurnReceipts.mockResolvedValue([
+      createTurnReceipt({
+        startedAt: '2026-04-08T00:03:00.000Z',
+        turnId: prior.turnId,
+      }),
+    ])
+    evidenceMocks.findAssistantAutoReplyDeliveryIntentIds
+      .mockResolvedValue(new Set())
+
+    const result = await processHostedLinqGroupInput(hostedInput)
+
+    expect(result).toMatchObject({
+      advanceCursor: true,
+      failed: 0,
+      replied: 1,
+      skipped: 0,
+    })
+    expect(evidenceMocks.findAssistantAutoReplyDeliveryIntentIds)
+      .toHaveBeenCalledWith({
+        intents: [prior],
+        vault: '/tmp/assistant-automation-vault',
+      })
+    expect(replyMocks.sendAssistantMessage).toHaveBeenCalledOnce()
     expect(evidenceMocks.writeAssistantAutoReplySuppressionEvidence)
       .not.toHaveBeenCalled()
   })

@@ -273,18 +273,20 @@ authority to the turn.
 Actor-scoped turns do not imply one reply per pending actor or native reply
 anchor. Before provider admission for hosted Linq group input, the assistant
 checks the existing local outbox owner for normal auto-reply intents with
-answered-mailbox evidence in the exact same account/channel/thread. Because one
-scanner pass deliberately shares a cached history reader, committing the first
-group reply stops that pass and schedules a fresh continuation before another
-group can enter the provider. On the fresh pass, an active intent defers the
-pending input without advancing it. Once that intent is sent, only pending input
-whose trusted receive time precedes the intent's recorded turn start is
-overtaken and receives ordinary terminal suppression evidence without another
-provider request. Input received during or after that turn remains replyable
-after delivery settles. Failed and abandoned intents do not overtake later work.
-The comparison ignores actor only to serialize room output; batching,
-accepted-message targeting, shared-data authority, and active steering remain
-actor-scoped.
+answered-mailbox evidence, existing auto-reply provenance (or legacy auto-reply
+receipt metadata), and the exact same account/channel/thread. Generic
+notification carriers such as accepted-input Assistant Ask completions are not
+eligible. Because one scanner pass deliberately shares a cached history reader,
+committing the first group reply stops that pass and schedules a fresh
+continuation before another group can enter the provider. On the fresh pass, an
+active intent defers the pending input without advancing it. Once that intent is
+sent, only pending input whose trusted receive time precedes the intent's
+recorded turn start is overtaken and receives ordinary terminal suppression
+evidence without another provider request. Input received during or after that
+turn remains replyable after delivery settles. Failed and abandoned intents do
+not overtake later work. The comparison ignores actor only to serialize room
+output; batching, accepted-message targeting, shared-data authority, and active
+steering remain actor-scoped.
 
 Telegram sender evidence is additive on the wire: `linqSenderHandles` keeps its
 existing meaning and `telegramSenderHandles` is a separate optional field, so a
