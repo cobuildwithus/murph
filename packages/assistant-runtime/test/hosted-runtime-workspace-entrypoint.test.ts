@@ -5829,6 +5829,131 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
+  for (const completion of [
+    {
+      dedupeKey:
+        "assistant.notification.requested:phone-call-result:phone_call_synthetic",
+      label: "phone-call result",
+      preCheckpointSafe: true,
+    },
+    {
+      dedupeKey:
+        "assistant.notification.requested:usage-referral-reward:referral_synthetic",
+      label: "usage-referral reward",
+      preCheckpointSafe: true,
+    },
+    {
+      dedupeKey:
+        "assistant.notification.requested:generic:notification_synthetic",
+      label: "generic notification",
+      preCheckpointSafe: false,
+    },
+  ] as const) {
+    test(`${completion.preCheckpointSafe ? "runs" : "keeps"} a ${
+      completion.label
+    } ${completion.preCheckpointSafe ? "before" : "behind"} the dirty idle checkpoint`, async () => {
+      const vaultRoot = await mkdtemp(
+        path.join(tmpdir(), "murph-workspace-entrypoint-"),
+      );
+      const events: string[] = [];
+      const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+      const mailboxItems: HostedMailboxItem[] = [];
+      const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+      let assistantPhaseCalls = 0;
+
+      try {
+        await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+        const resultPromise = runHostedWorkspaceRuntimeJobInProcess(
+          createWorkspaceRuntimeJobInput({
+            request: {
+              attemptId: `attempt_synthetic_external_completion_${
+                completion.preCheckpointSafe ? "safe" : "gated"
+              }`,
+              idleCheckpointDelayMs: 200,
+              leaseGeneration: "7",
+              userId: TEST_USER_ID,
+              workspaceVersion: "0",
+            },
+          }),
+          {
+            async createCheckpointSnapshot(snapshotInput) {
+              events.push(`snapshot:${snapshotInput.reason}`);
+              return {
+                snapshotRef: createBundleRef({
+                  hash: "f".repeat(64),
+                  key:
+                    "users/bundles/member-synthetic/"
+                    + "external-completion-dirty-wake.bundle.json",
+                  size: 512,
+                }),
+              };
+            },
+            async importItem(item) {
+              events.push(`mailbox.importItem:${item.item.id}`);
+              return { status: "imported" };
+            },
+            platform: createPlatform({
+              mailboxPort: createMailboxPort({
+                events,
+                items: mailboxItems,
+              }),
+              workspacePort: createWorkspacePort({
+                checkpointRequests,
+                events,
+                workspace: createWorkspaceState({ version: "0" }),
+              }),
+            }),
+            runtimeWakeSignal,
+            async runAssistantPhase() {
+              assistantPhaseCalls += 1;
+              if (assistantPhaseCalls === 1) {
+                setTimeout(() => {
+                  mailboxItems.push(createMailboxItem({
+                    dedupeKey: completion.dedupeKey,
+                    id: "mailbox_item_entrypoint_external_completion",
+                    kind: "assistant.notification.requested",
+                    lane: "system",
+                    laneSeq: "1",
+                  }));
+                  runtimeWakeSignal.notify();
+                }, 0);
+                return {
+                  checkpointReason: "assistant_runtime_commit",
+                  progressed: true,
+                };
+              }
+              return { progressed: false };
+            },
+            vaultRoot,
+          },
+        );
+
+        const result = await withRealTimeout(
+          resultPromise,
+          2_000,
+          () => events.join(","),
+        );
+        const importIndex = requireEventIndex(
+          events,
+          "mailbox.importItem:mailbox_item_entrypoint_external_completion",
+        );
+        const idleCheckpointIndex = requireEventIndex(
+          events,
+          "snapshot:idle_shutdown",
+        );
+
+        if (completion.preCheckpointSafe) {
+          assert.ok(importIndex < idleCheckpointIndex, events.join(","));
+        } else {
+          assert.ok(idleCheckpointIndex < importIndex, events.join(","));
+        }
+        assert.equal(result.status, "idle");
+      } finally {
+        await removeTempRoot(vaultRoot);
+      }
+    });
+  }
+
   test("runs a joined-group completion before the dirty idle checkpoint", async () => {
     const vaultRoot = await mkdtemp(
       path.join(tmpdir(), "murph-workspace-entrypoint-"),

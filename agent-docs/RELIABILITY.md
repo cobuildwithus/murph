@@ -1,6 +1,6 @@
 # Reliability
 
-Last verified: 2026-07-26
+Last verified: 2026-07-27
 
 ## Current Guardrails
 
@@ -123,6 +123,15 @@ Last verified: 2026-07-26
   reviewed shapes remain checkpoint-gated. Completion ordering uses the
   existing pending-input occurrence proof, and incomplete or invalid index
   evidence rejects the shortcut without repairing state.
+- The same dirty-runtime prefix admits only two server-identified,
+  replay-safe external-completion notification families:
+  `assistant.notification.requested:phone-call-result:*` and
+  `assistant.notification.requested:usage-referral-reward:*`. Their stable
+  mailbox identity and idempotent delivery let them interrupt the idle floor;
+  every other notification remains checkpoint-gated. Referral recovery also
+  re-signals bounded oldest unconsumed celebration items, so a post-commit
+  signal failure remains recoverable from the existing mailbox without another
+  queue or state machine.
 - A legacy joined-group `cannot_answer` queues the fixed
   unavailable-evidence response exactly. It must not start a private provider
   continuation that can invent an expiry, provider failure, or execution

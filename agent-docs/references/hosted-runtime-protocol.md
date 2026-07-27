@@ -1,6 +1,6 @@
 # Hosted Mailbox Runtime Protocol
 
-Last verified: 2026-07-25
+Last verified: 2026-07-27
 
 ## Decision
 
@@ -85,9 +85,10 @@ import mailbox prefix into local runtime state and stage AssistantInputEvent row
 pull pending device-sync dirty rows
 for Linq input with link parts, attachment-bearing non-email input, and direct raw email, run best-effort local inbox projection plus audio/video transcript enrichment without checkpointing it
 run local runtime work until idle or budget
-while dirty and before the idle floor, service fresh foreground input and at
-  most one exact assistant wake projected by the current foreground phase
-  without publishing a snapshot; other wakes do not shorten the floor
+while dirty and before the idle floor, service fresh foreground input, the
+  exact safe Assistant Ask shapes, and only replay-safe phone-call-result or
+  usage-referral-reward notifications without publishing a snapshot; other
+  wakes do not shorten the floor
 at the idle floor, or on shutdown, checkpoint final dirty runtime state with
   checkpoint reason idle_shutdown; commit
   the valid workspace-CAS snapshot even when web observes newer conversation input

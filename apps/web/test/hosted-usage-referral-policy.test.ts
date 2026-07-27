@@ -2,6 +2,7 @@ import { HostedBillingStatus } from "@prisma/client";
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  buildHostedUsageReferralRewardLabel,
   HOSTED_USAGE_REFERRAL_GROUP_MINIMUM_ACTIVITY_SPAN_MS,
   HOSTED_USAGE_REFERRAL_LATE_EVIDENCE_GRACE_MS,
   bindArmedHostedUsageReferralToNewContainerTx,
@@ -37,8 +38,14 @@ describe("hosted usage referral policy", () => {
         },
       },
       notificationKey: "usage-referral-reward:referral_1",
-      rewardLabel: "$3.50 of Murph usage",
+      rewardLabel:
+        "about 70 more messages on the model this room is using now",
       rewardedAt: new Date("2026-07-26T12:00:00.000Z"),
+      styleBand: {
+        humor: 8,
+        tone: "casual",
+        unhinged: 4,
+      },
     });
 
     expect(wake.notification.externalThreadRouteAuthority).toEqual(authority);
@@ -46,6 +53,37 @@ describe("hosted usage referral policy", () => {
       "Celebrate without naming or otherwise identifying",
     );
     expect(wake.notification.instructions).not.toContain("display label");
+    expect(wake.notification.instructions).toContain(
+      "tone=casual; Humor=8/10; Unhinged=4/10",
+    );
+    expect(wake.notification.instructions).toContain(
+      "Keep any edge aimed at Murph",
+    );
+    expect(wake.notification.instructions).not.toContain("$3.50");
+  });
+
+  it("labels rewards by effective model without inventing a Luna estimate", () => {
+    expect(buildHostedUsageReferralRewardLabel({
+      destinationKind: "group",
+      model: "gpt-5.6-sol",
+      policyCode: "new_person_activation_v1",
+    })).toBe(
+      "about 50 more messages on the model this room is using now",
+    );
+    expect(buildHostedUsageReferralRewardLabel({
+      destinationKind: "personal",
+      model: "gpt-5.6-terra",
+      policyCode: "active_group_v1",
+    })).toBe(
+      "about 140 more messages on the model your Murph is using now",
+    );
+    expect(buildHostedUsageReferralRewardLabel({
+      destinationKind: "personal",
+      model: "gpt-5.6-luna",
+      policyCode: "new_person_activation_v1",
+    })).toBe(
+      "bonus usage on the model your Murph is using now",
+    );
   });
 
   it("accepts only the frozen personal source conversation", () => {
@@ -109,8 +147,14 @@ describe("hosted usage referral policy", () => {
       beneficiaryMemberId: "member_personal",
       destination,
       notificationKey: "usage-referral-reward:referral_personal",
-      rewardLabel: "$2 of Murph usage",
+      rewardLabel:
+        "about 100 more messages on the model your Murph is using now",
       rewardedAt: new Date("2026-07-26T12:00:00.000Z"),
+      styleBand: {
+        humor: 3,
+        tone: "formal",
+        unhinged: 0,
+      },
     });
     expect(wake.notification.externalThreadRouteAuthority).toEqual({
       channel: "telegram",
@@ -163,8 +207,14 @@ describe("hosted usage referral policy", () => {
       beneficiaryMemberId: "member_personal",
       destination: linqDestination,
       notificationKey: "usage-referral-reward:referral_personal_linq",
-      rewardLabel: "$2 of Murph usage",
+      rewardLabel:
+        "about 100 more messages on the model your Murph is using now",
       rewardedAt: new Date("2026-07-26T12:00:00.000Z"),
+      styleBand: {
+        humor: 3,
+        tone: "formal",
+        unhinged: 0,
+      },
     });
     expect(linqWake.notification.route.delivery).toEqual({
       kind: "explicit",

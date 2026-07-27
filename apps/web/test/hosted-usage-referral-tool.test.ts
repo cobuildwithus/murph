@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   readActiveHostedMemberAccess: vi.fn(),
+  readHostedMemberAssistantModelPreference: vi.fn(),
   readHostedPersonalAiUsageStatus: vi.fn(),
 }));
 
@@ -11,6 +12,11 @@ vi.mock("@/src/lib/hosted-onboarding/member-access", () => ({
 
 vi.mock("@/src/lib/hosted-execution/usage-status", () => ({
   readHostedPersonalAiUsageStatus: mocks.readHostedPersonalAiUsageStatus,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/assistant-model-preference", () => ({
+  readHostedMemberAssistantModelPreference:
+    mocks.readHostedMemberAssistantModelPreference,
 }));
 
 import {
@@ -44,6 +50,9 @@ describe("hosted usage referral tool", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.readActiveHostedMemberAccess.mockResolvedValue(true);
+    mocks.readHostedMemberAssistantModelPreference.mockResolvedValue({
+      model: "gpt-5.6-terra",
+    });
     mocks.readHostedPersonalAiUsageStatus.mockResolvedValue({
       accessKind: "paid",
       forecast: null,
@@ -102,15 +111,50 @@ describe("hosted usage referral tool", () => {
           availablePolicies: [
             {
               code: "new_person_activation_v1",
-              rewardLabel: "$2 of Murph usage",
+              rewardLabel:
+                "about 100 more messages on the model your Murph is using now",
             },
             {
               code: "active_group_v1",
-              rewardLabel: "$3.50 of Murph usage",
+              requirementsLabel:
+                "Start a fresh group and make it genuinely active, with multiple people actually talking.",
+              rewardLabel:
+                "about 140 more messages on the model your Murph is using now",
             },
           ],
         },
         status: "ok",
+      },
+    });
+  });
+
+  it("resolves approximate reward capacity from the current personal model", async () => {
+    mocks.readHostedMemberAssistantModelPreference.mockResolvedValue({
+      model: "gpt-5.6-sol",
+    });
+    const { prisma } = buildPrisma();
+
+    await expect(handleHostedUsageReferralGroupTool({
+      enabled: true,
+      memberId: "member_personal",
+      prisma: prisma as never,
+      request: { action: "read_usage_referral" },
+    })).resolves.toMatchObject({
+      result: {
+        referral: {
+          availablePolicies: [
+            {
+              code: "new_person_activation_v1",
+              rewardLabel:
+                "about 50 more messages on the model your Murph is using now",
+            },
+            {
+              code: "active_group_v1",
+              rewardLabel:
+                "about 70 more messages on the model your Murph is using now",
+            },
+          ],
+        },
       },
     });
   });

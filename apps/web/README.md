@@ -679,13 +679,19 @@ Hosted AI usage metering:
   referrer's next new group, and freeze pre-expiry qualification in the
   provider-ingress transaction. Bound commitments remain reserved for a
   25-hour late-evidence grace before referrer-serialized expiry becomes final.
+  The assistant-facing reward label is an approximate current-model message
+  estimate recomputed at each read and again at celebration; Luna uses a generic
+  fallback. Exact qualification counters remain server-only.
   Immediate post-commit reconciliation and the bounded minute recovery cron
   converge on one final referral grant and one atomic source-mailbox
-  celebration fence. Personal arming freezes only the source channel, blinded
-  exact-thread locator, and directness fact; celebration requires the same
-  direct thread, and personal Linq delivery uses an explicit source target that
-  cannot fall back to a newer home route. Group celebration carries live
-  thread authority.
+  celebration fence. Recovery also re-signals bounded oldest unconsumed
+  celebration items after a failed Temporal signal. Personal arming freezes
+  only the source channel, blinded exact-thread locator, and directness fact;
+  celebration requires the same direct thread, and personal Linq delivery uses
+  an explicit source target that cannot fall back to a newer home route. Group
+  celebration carries live thread authority. The isolated completion formatter
+  receives only resolved tone, Humor, and Unhinged values, never transcript
+  history.
   Durable celebration copy is unnamed. Unlinked Telegram group evidence stays
   silent and outside assistant access; direct setup behavior is unchanged.
 - Web owns the separate `murph.subscription` callback for an explicit private member choice to continue Pulse at trial end, start Pulse now, or upgrade Pulse to Edge. It binds the runtime-supplied accepted input id to the callback member, atomically claims the first action on that existing mailbox row, re-derives current eligibility, and delegates to the existing billing services. An exact retry is allowed and a conflicting action fails closed. Pulse activation keeps its existing Stripe-hosted invoice or Customer Portal handoff when payment is required; a pending Edge change returns Customer Portal without a separate invoice lookup. No custom checkout or second billing owner is introduced.

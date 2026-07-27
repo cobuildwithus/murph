@@ -16,8 +16,8 @@ one exact server-returned policy.
 
 | Policy | Qualification | Reward |
 | --- | --- | --- |
-| `new_person_activation_v1` | The referrer starts a fresh Murph group with a genuinely new person. That person activates their own Murph after the mission was armed and then speaks in the bound target group. | $2 of Murph usage |
-| `active_group_v1` | The referrer starts a fresh Murph group that reaches 15 qualifying human messages, including at least 8 messages from at least 2 non-referrer speakers, across at least 10 minutes. | $3.50 of Murph usage |
+| `new_person_activation_v1` | The referrer starts a fresh Murph group with a genuinely new person. That person activates their own Murph after the mission was armed and then speaks in the bound target group. | $2 credit; presented as about 50 current Sol messages or 100 current Terra messages |
+| `active_group_v1` | The referrer starts a fresh Murph group that reaches 15 qualifying human messages, including at least 8 messages from at least 2 non-referrer speakers, across at least 10 minutes. | $3.50 credit; presented as about 70 current Sol messages or 140 current Terra messages |
 
 The source conversation determines the reward destination and where completion
 is celebrated:
@@ -26,7 +26,10 @@ is celebrated:
 - a mission armed in a group rewards that source group;
 - each group participant may independently arm and earn a mission for the same
   room;
-- a fixed reward is usage value, not a promised number of messages or days;
+- the fixed ledger reward remains usage value, while the tool recomputes an
+  approximate message-capacity label from the destination's current effective
+  model both when read and when completion is celebrated;
+- a model without a catalog estimate receives a generic bonus-usage label;
 - trial rewards add usage capacity but never extend the trial end date.
 
 Completion is celebrated in that same source conversation. A personal mission
@@ -40,6 +43,10 @@ deletion. A queued personal Linq celebration uses the existing explicit-target
 delivery shape for that resolved source. Provider entry rechecks the fixed
 target and records terminal delivery failure if authority moved or was revoked;
 it never replaces the source with a newer home conversation.
+The isolated celebration receives only a server-resolved tone, Humor, and
+Unhinged band. It receives no raw transcript or room history and therefore
+cannot claim a callback; it keeps any edge aimed at Murph rather than an absent
+person.
 
 The referrer's latest unbound mission supersedes their older unbound mission.
 An already-bound target continues qualifying. Earned rewards are final.
@@ -158,9 +165,11 @@ Reward completion is replay-safe. The source celebration is a derived mailbox
 notification appended after the reward commits. Its mailbox append and
 `celebrationQueuedAt` fence commit in one transaction. The webhook path attempts
 that append immediately; a Vercel-authenticated minute cron retries at most 50
-oldest qualified or uncelebrated referrals per pass. A missing destination
-rotates to the back by updating the existing referral timestamp, while a missed
-best-effort runtime wake is already owned by durable mailbox reconciliation.
+oldest qualified or uncelebrated referrals and re-signals at most 50 oldest
+unconsumed referral-celebration mailbox items per pass. A missing destination
+rotates to the back by updating the existing referral timestamp. A failed
+best-effort signal leaves the exact mailbox item eligible for the next bounded
+pass rather than creating another queue or notification.
 Missing route authority or notification failure cannot delay, reverse, or
 duplicate the reward. Group notifications carry the same external-thread
 authority as their route. Personal notifications fail closed when the frozen

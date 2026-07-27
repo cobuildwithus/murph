@@ -5,6 +5,11 @@ import {
   buildHostedExecutionAssistantNotificationRequestedWake,
 } from "@murphai/hosted-execution";
 import {
+  HOSTED_ASSISTANT_SOL_MODEL,
+  HOSTED_ASSISTANT_TERRA_MODEL,
+  type HostedAssistantProductModel,
+} from "@murphai/hosted-execution/assistant-model";
+import {
   HOSTED_USAGE_REFERRAL_POLICY_CODES,
   type HostedRuntimeGroupToolRequest,
   type HostedRuntimeGroupToolResponse,
@@ -12,6 +17,10 @@ import {
   type HostedRuntimeUsageReferralSourceConversation,
   type HostedUsageReferralPolicyCode,
 } from "@murphai/hosted-execution/runtime-control";
+import {
+  resolveAssistantEffectiveStyle,
+  type AssistantTonePreference,
+} from "@murphai/contracts";
 
 import { appendHostedMailboxEnvelopeTx } from "../hosted-mailbox/store";
 import { readHostedGroupUsageStatus } from "../hosted-groups/group-usage-funding";
@@ -35,6 +44,12 @@ import { readActiveHostedMemberAccess } from "../hosted-onboarding/member-access
 import {
   resolveHostedMemberRoutingByTelegramUserId,
 } from "../hosted-onboarding/hosted-member-routing-store";
+import {
+  readHostedMemberAssistantModelPreference,
+} from "../hosted-onboarding/assistant-model-preference";
+import {
+  readHostedMemberAssistantPreferences,
+} from "../hosted-onboarding/member-preferences";
 import { normalizePhoneNumber } from "../hosted-onboarding/phone";
 import {
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
@@ -80,24 +95,33 @@ type HostedUsageReferralClient = PrismaClient | Prisma.TransactionClient;
 
 type HostedUsageReferralPolicyDefinition = {
   code: HostedUsageReferralPolicyCode;
+  messageEstimates: {
+    sol: number;
+    terra: number;
+  };
   requirementsLabel: string;
-  rewardLabel: string;
   rewardUsdMicros: bigint;
 };
 
 const POLICIES = {
   new_person_activation_v1: {
     code: "new_person_activation_v1",
+    messageEstimates: {
+      sol: 50,
+      terra: 100,
+    },
     requirementsLabel:
       "Start a fresh group with one new person, help them get their own Murph set up, then have them say hi in that group.",
-    rewardLabel: "$2 of Murph usage",
     rewardUsdMicros: HOSTED_USAGE_REFERRAL_PERSON_REWARD_USD_MICROS,
   },
   active_group_v1: {
     code: "active_group_v1",
+    messageEstimates: {
+      sol: 70,
+      terra: 140,
+    },
     requirementsLabel:
-      "Start a fresh group that reaches 15 human messages, including 8 from at least two other people, over 10 minutes.",
-    rewardLabel: "$3.50 of Murph usage",
+      "Start a fresh group and make it genuinely active, with multiple people actually talking.",
     rewardUsdMicros: HOSTED_USAGE_REFERRAL_GROUP_REWARD_USD_MICROS,
   },
 } as const satisfies Record<
@@ -109,6 +133,30 @@ interface HostedUsageReferralActor {
   beneficiaryMemberId: string;
   referrerMemberId: string;
   referrerSubjectKey: string;
+}
+
+interface HostedUsageReferralCelebrationStyleBand {
+  humor: number;
+  tone: AssistantTonePreference;
+  unhinged: number;
+}
+
+export function buildHostedUsageReferralRewardLabel(input: {
+  destinationKind: "group" | "personal";
+  model: HostedAssistantProductModel;
+  policyCode: HostedUsageReferralPolicyCode;
+}): string {
+  const subject = input.destinationKind === "group"
+    ? "this room"
+    : "your Murph";
+  const estimate = input.model === HOSTED_ASSISTANT_SOL_MODEL
+    ? POLICIES[input.policyCode].messageEstimates.sol
+    : input.model === HOSTED_ASSISTANT_TERRA_MODEL
+      ? POLICIES[input.policyCode].messageEstimates.terra
+      : null;
+  return estimate === null
+    ? `bonus usage on the model ${subject} is using now`
+    : `about ${estimate} more messages on the model ${subject} is using now`;
 }
 
 function outstandingHostedUsageReferralCommitmentWhere(
@@ -897,13 +945,24 @@ async function appendHostedUsageReferralCelebration(input: {
     });
     return null;
   }
-  const destination = await resolveHostedAssistantNotificationDestination({
-    ...(sourceConversation
-      ? { directChannel: sourceConversation.channel }
-      : {}),
-    memberId: input.beneficiaryMemberId,
-    prisma: input.prisma,
-  });
+  const [destination, destinationModel, preferences] = await Promise.all([
+    resolveHostedAssistantNotificationDestination({
+      ...(sourceConversation
+        ? { directChannel: sourceConversation.channel }
+        : {}),
+      memberId: input.beneficiaryMemberId,
+      prisma: input.prisma,
+    }),
+    readHostedUsageReferralDestinationModel({
+      beneficiaryMemberId: referral.beneficiaryMemberId,
+      destinationKind: personalSource ? "personal" : "group",
+      prisma: input.prisma,
+    }),
+    readHostedMemberAssistantPreferences({
+      memberId: input.beneficiaryMemberId,
+      prisma: input.prisma,
+    }),
+  ]);
   if (
     !destination
     || (
@@ -922,6 +981,26 @@ async function appendHostedUsageReferralCelebration(input: {
   }
 
   const policy = POLICIES[referral.policyCode];
+  const destinationKind = personalSource ? "personal" : "group";
+  const effectiveStyle = resolveAssistantEffectiveStyle({
+    ...(preferences.persona ? { persona: preferences.persona } : {}),
+    personality: {
+      ...(preferences.personality.detail === null
+        ? {}
+        : { detail: preferences.personality.detail }),
+      ...(preferences.personality.humor === null
+        ? {}
+        : { humor: preferences.personality.humor }),
+      ...(preferences.personality.push === null
+        ? {}
+        : { push: preferences.personality.push }),
+      ...(preferences.personality.unhinged === null
+        ? {}
+        : { unhinged: preferences.personality.unhinged }),
+    },
+    ...(preferences.tone ? { tone: preferences.tone } : {}),
+    ...(preferences.voice ? { voice: preferences.voice } : {}),
+  });
   const notificationKey = `usage-referral-reward:${input.referralId}`;
   const celebrationQueuedAt = new Date(
     Math.max(Date.now(), rewardedAt.getTime()),
@@ -932,8 +1011,17 @@ async function appendHostedUsageReferralCelebration(input: {
         beneficiaryMemberId: input.beneficiaryMemberId,
         destination,
         notificationKey,
-        rewardLabel: policy.rewardLabel,
+        rewardLabel: buildHostedUsageReferralRewardLabel({
+          destinationKind,
+          model: destinationModel,
+          policyCode: policy.code,
+        }),
         rewardedAt,
+        styleBand: {
+          humor: effectiveStyle.personality.humor,
+          tone: effectiveStyle.tone,
+          unhinged: effectiveStyle.personality.unhinged,
+        },
       }),
       tx,
     });
@@ -979,6 +1067,7 @@ export function buildHostedUsageReferralCelebrationWake(input: {
   notificationKey: string;
   rewardLabel: string;
   rewardedAt: Date;
+  styleBand: HostedUsageReferralCelebrationStyleBand;
 }) {
   const routeAuthority = input.destination.externalThreadRouteAuthority
     ?? (
@@ -1020,6 +1109,10 @@ export function buildHostedUsageReferralCelebrationWake(input: {
         "Continue the source conversation by celebrating its completed usage challenge.",
         `The person who accepted it has already earned ${input.rewardLabel} for this conversation.`,
         "Make this feel like a funny shared achievement, not a billing receipt.",
+        `Server-supplied destination style band: tone=${input.styleBand.tone}; Humor=${input.styleBand.humor}/10; Unhinged=${input.styleBand.unhinged}/10.`,
+        "Match that band naturally without mentioning settings.",
+        "This isolated completion has no transcript or room callback, so do not invent one.",
+        "Keep any edge aimed at Murph and do not sexualize or degrade an absent person.",
         "Celebrate without naming or otherwise identifying the person who accepted it.",
         "Keep it playful and concise.",
         "Do not mention internal accounting, qualification checks, or the other conversation.",
@@ -1417,7 +1510,16 @@ async function readHostedUsageReferralSnapshot(input: {
   prisma: HostedUsageReferralClient;
 }): Promise<HostedRuntimeUsageReferralSnapshot> {
   const now = input.now ?? new Date();
-  const [active, availablePolicyCodes, personalUsage] = await Promise.all([
+  const destinationKind =
+    input.actor.beneficiaryMemberId === input.actor.referrerMemberId
+      ? "personal"
+      : "group";
+  const [
+    active,
+    availablePolicyCodes,
+    personalUsage,
+    destinationModel,
+  ] = await Promise.all([
     input.prisma.hostedUsageReferral.findFirst({
       orderBy: [{ armedAt: "desc" }, { id: "desc" }],
       where: {
@@ -1443,6 +1545,11 @@ async function readHostedUsageReferralSnapshot(input: {
           prisma: input.prisma,
         })
       : Promise.resolve(null),
+    readHostedUsageReferralDestinationModel({
+      beneficiaryMemberId: input.actor.beneficiaryMemberId,
+      destinationKind,
+      prisma: input.prisma,
+    }),
   ]);
 
   return {
@@ -1454,14 +1561,22 @@ async function readHostedUsageReferralSnapshot(input: {
               : "group",
           expiresAt: active.expiresAt.toISOString(),
           policyCode: active.policyCode,
-          rewardLabel: POLICIES[active.policyCode].rewardLabel,
+          rewardLabel: buildHostedUsageReferralRewardLabel({
+            destinationKind,
+            model: destinationModel,
+            policyCode: active.policyCode,
+          }),
           state: active.status === "armed" ? "armed" : "target_bound",
         }
       : null,
     availablePolicies: availablePolicyCodes.map((code) => ({
           code,
           requirementsLabel: POLICIES[code].requirementsLabel,
-          rewardLabel: POLICIES[code].rewardLabel,
+          rewardLabel: buildHostedUsageReferralRewardLabel({
+            destinationKind,
+            model: destinationModel,
+            policyCode: code,
+          }),
         })),
     trialCreditNotice:
       personalUsage !== null
@@ -1470,6 +1585,21 @@ async function readHostedUsageReferralSnapshot(input: {
         ? "Bonus usage does not extend the trial end date."
         : null,
   };
+}
+
+async function readHostedUsageReferralDestinationModel(input: {
+  beneficiaryMemberId: string;
+  destinationKind: "group" | "personal";
+  prisma: HostedUsageReferralClient;
+}): Promise<HostedAssistantProductModel> {
+  if (input.destinationKind === "group") {
+    return HOSTED_ASSISTANT_SOL_MODEL;
+  }
+  const resolution = await readHostedMemberAssistantModelPreference({
+    memberId: input.beneficiaryMemberId,
+    prisma: input.prisma,
+  });
+  return resolution.model;
 }
 
 async function assertHostedUsageReferralRewardCapacityTx(input: {

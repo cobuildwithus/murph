@@ -522,6 +522,17 @@ async function hostedMailboxPrefetchContainsOnlyPreCheckpointSafeSystemWakes(
         item.kind === "runtime.pending-effects-reconcile-requested"
         || item.kind === "assistant.ask.requested"
         || item.kind === "assistant.ask.completed"
+        || (
+          item.kind === "assistant.notification.requested"
+          && (
+            item.dedupeKey.startsWith(
+              "assistant.notification.requested:phone-call-result:",
+            )
+            || item.dedupeKey.startsWith(
+              "assistant.notification.requested:usage-referral-reward:",
+            )
+          )
+        )
       )
     );
 }

@@ -16,6 +16,7 @@ export interface HostedUsageReferralRecoveryResult {
   failed: number;
   pending: number;
   queued: number;
+  resignaled: number;
   scanned: number;
 }
 
@@ -28,23 +29,43 @@ export async function recoverPendingHostedUsageReferrals(input: {
   prisma?: PrismaClient;
 } = {}): Promise<HostedUsageReferralRecoveryResult> {
   const prisma = input.prisma ?? getPrisma();
-  const referrals = await prisma.hostedUsageReferral.findMany({
-    orderBy: [{ updatedAt: "asc" }, { id: "asc" }],
-    select: { id: true },
-    take: HOSTED_USAGE_REFERRAL_RECOVERY_BATCH_SIZE,
-    where: {
-      OR: [
-        {
-          qualifiedAt: { not: null },
-          status: "target_bound",
+  const [referrals, unconsumedCelebrations] = await Promise.all([
+    prisma.hostedUsageReferral.findMany({
+      orderBy: [{ updatedAt: "asc" }, { id: "asc" }],
+      select: { id: true },
+      take: HOSTED_USAGE_REFERRAL_RECOVERY_BATCH_SIZE,
+      where: {
+        OR: [
+          {
+            qualifiedAt: { not: null },
+            status: "target_bound",
+          },
+          {
+            celebrationQueuedAt: null,
+            status: "rewarded",
+          },
+        ],
+      },
+    }),
+    prisma.hostedMailboxItem.findMany({
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+      select: {
+        id: true,
+        laneSeq: true,
+        userId: true,
+      },
+      take: HOSTED_USAGE_REFERRAL_RECOVERY_BATCH_SIZE,
+      where: {
+        consumedAt: null,
+        dedupeKey: {
+          startsWith:
+            "assistant.notification.requested:usage-referral-reward:",
         },
-        {
-          celebrationQueuedAt: null,
-          status: "rewarded",
-        },
-      ],
-    },
-  });
+        kind: "assistant.notification.requested",
+        lane: "system",
+      },
+    }),
+  ]);
 
   let failed = 0;
   let pending = 0;
@@ -75,11 +96,27 @@ export async function recoverPendingHostedUsageReferrals(input: {
           prisma,
         });
       } catch {
-        // The mailbox item is durable. Existing mailbox reconciliation owns a
-        // missed best-effort wake after this point.
+        // The mailbox item is durable and the next bounded pass re-signals it.
       }
     } catch {
       failed += 1;
+    }
+  }
+
+  for (const celebration of unconsumedCelebrations) {
+    try {
+      await signalHostedMailboxAppendRuntime({
+        expectedUserId: celebration.userId,
+        knownCheckpoint: {
+          lane: "system",
+          laneSeq: celebration.laneSeq.toString(),
+          userId: celebration.userId,
+        },
+        mailboxItemId: celebration.id,
+        prisma,
+      });
+    } catch {
+      // The next bounded recovery pass re-signals this same unconsumed item.
     }
   }
 
@@ -87,6 +124,7 @@ export async function recoverPendingHostedUsageReferrals(input: {
     failed,
     pending,
     queued,
-    scanned: referrals.length,
+    resignaled: unconsumedCelebrations.length,
+    scanned: referrals.length + unconsumedCelebrations.length,
   };
 }

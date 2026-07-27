@@ -86,13 +86,25 @@ describe('assistant hosted low-usage skill', () => {
 
   it('preserves explicit billing confirmation and payment truth', async () => {
     const skill = await readLowUsageSkill()
+    const normalizedSkill = skill.replace(/\s+/gu, ' ')
 
     expect(skill).toContain(
       'A recommendation or low-usage warning is not consent',
     )
     expect(skill).toContain('Merely describing a referral mission is not consent')
     expect(skill).toContain('one exact current sender chooses one exact returned policy')
-    expect(skill).toContain('never as a promised number of')
+    expect(normalizedSkill).toContain('Treat returned message counts as approximate')
+    expect(normalizedSkill).toContain('Never reveal qualification counters')
+    expect(normalizedSkill).toContain(
+      'Start a fresh group and make it genuinely active, with multiple people actually talking.',
+    )
+    expect(normalizedSkill).toContain(
+      'introduce me to your mom and I can bring this group roughly another 50 messages',
+    )
+    expect(normalizedSkill).toContain('Murph is the butt of the joke')
+    expect(normalizedSkill).toContain('Do not reuse the mom line as a template')
+    expect(normalizedSkill).toContain('Do not sexualize or degrade the absent person')
+    expect(normalizedSkill).toContain('Do not say "sign up your mom"')
     expect(skill).toContain('require a matching current quote')
     expect(skill).toContain('A bare yes after multiple options is ambiguous')
     expect(skill).toContain(
