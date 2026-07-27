@@ -20,12 +20,6 @@ import {
   HOSTED_RUNNER_OUTBOUND_BY_HOST,
 } from "../runner-egress-intercept.ts";
 import {
-  HOSTED_EXECUTION_RUNNER_GENERATED_IMAGE_UPLOAD_PATH,
-} from "../runner-effects-contract.ts";
-import {
-  handleRunnerGeneratedImageUploadRequest,
-} from "../runner-outbound/generated-images.ts";
-import {
   HOSTED_RUNNER_BOUND_USER_ID_HEADER,
 } from "../runner-outbound/headers.ts";
 import type {
@@ -50,6 +44,20 @@ export type HostedLocalTestRunnerOutboundHandler = (
 ) => Promise<Response>;
 
 export class RunnerContainer extends BaseRunnerContainer {
+  async armGeneratedImageProviderBarrierForTest(
+    _input: { userId: string },
+  ): Promise<{ ok: true }> {
+    armGeneratedImageProviderBarrier();
+    return { ok: true };
+  }
+
+  async releaseGeneratedImageProviderBarrierForTest(
+    _input: { userId: string },
+  ): Promise<{ ok: true }> {
+    releaseGeneratedImageProviderBarrier();
+    return { ok: true };
+  }
+
   async armCanonicalCheckpointLostAckForTest(
     input: { userId: string },
   ): Promise<{ ok: true }> {
@@ -545,6 +553,24 @@ async function corruptWorkspaceSnapshotCompleteRequest(
 }
 
 export const HOSTED_LOCAL_LINQ_ATTACHMENT_UPLOAD_HOST = "uploads.example.test";
+let generatedImageProviderBarrier: Promise<void> | null = null;
+let releaseGeneratedImageProvider: (() => void) | null = null;
+
+function armGeneratedImageProviderBarrier(): void {
+  if (generatedImageProviderBarrier) {
+    throw new Error("Hosted-local generated image provider barrier is already armed.");
+  }
+  generatedImageProviderBarrier = new Promise<void>((resolve) => {
+    releaseGeneratedImageProvider = resolve;
+  });
+}
+
+function releaseGeneratedImageProviderBarrier(): void {
+  const release = releaseGeneratedImageProvider;
+  generatedImageProviderBarrier = null;
+  releaseGeneratedImageProvider = null;
+  release?.();
+}
 
 const hostedLocalOpenAiImagesFetch: typeof fetch = async (input) => {
   const request = input instanceof Request ? input : new Request(input);
@@ -556,6 +582,7 @@ const hostedLocalOpenAiImagesFetch: typeof fetch = async (input) => {
     return new Response("Unexpected hosted-local OpenAI Images request.", { status: 502 });
   }
 
+  await generatedImageProviderBarrier;
   return new Response(JSON.stringify({
     data: [{ b64_json: "UklGRgAAAABXRUJQ" }],
     usage: {
@@ -593,25 +620,6 @@ const wrapOpenAiImagesForTest: HostedLocalTestRunnerOutboundHandler = (request, 
     ctx,
     hostedLocalOpenAiImagesFetch,
   );
-};
-
-const wrapGeneratedImageUploadForTest: HostedLocalTestRunnerOutboundHandler = (
-  request,
-  env,
-  ctx,
-) => {
-  if (new URL(request.url).pathname !== HOSTED_EXECUTION_RUNNER_GENERATED_IMAGE_UPLOAD_PATH) {
-    return effectsPortHandler(request, env, ctx);
-  }
-  const userId = request.headers.get(HOSTED_RUNNER_BOUND_USER_ID_HEADER)?.trim() ?? "";
-  if (!userId) {
-    return Promise.resolve(new Response("Unauthorized", { status: 401 }));
-  }
-  return handleRunnerGeneratedImageUploadRequest({
-    env,
-    request,
-    userId,
-  });
 };
 
 const handleHostedLocalLinqAttachmentUpload: HostedLocalTestRunnerOutboundHandler = async (
@@ -661,7 +669,7 @@ const hostedLocalTestOutboundByHost: typeof HOSTED_RUNNER_OUTBOUND_BY_HOST = {
     wrapShutdownCheckpointPublicationBarrierForTest(
       wrapSnapshotPublicationCorruptionForTest(workspaceSnapshotStoreHandler),
     ),
-  [CLOUDFLARE_HOSTED_RUNTIME_HOSTS.effectsPort]: wrapGeneratedImageUploadForTest,
+  [CLOUDFLARE_HOSTED_RUNTIME_HOSTS.effectsPort]: effectsPortHandler,
   [HOSTED_LOCAL_LINQ_ATTACHMENT_UPLOAD_HOST]: handleHostedLocalLinqAttachmentUpload,
   "api.openai.com": wrapOpenAiImagesForTest,
 };

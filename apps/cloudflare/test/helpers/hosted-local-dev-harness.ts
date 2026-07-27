@@ -93,6 +93,8 @@ export interface HostedLocalDevHarness {
       timeoutMs?: number;
     },
   ): Promise<HostedRunnerStatusResponse>;
+  armGeneratedImageProviderBarrierForTest(userId: string): Promise<{ ok: true }>;
+  releaseGeneratedImageProviderBarrierForTest(userId: string): Promise<{ ok: true }>;
   webBaseUrl: string;
   workerBaseUrl: string;
 }
@@ -212,6 +214,7 @@ export async function startHostedLocalDevHarness(input: {
           userId,
         });
       },
+      armGeneratedImageProviderBarrierForTest,
       armCanonicalCheckpointLostAckForTest,
       armSnapshotPublicationCorruptionForTest,
       armShutdownCheckpointPublicationBarrierForTest,
@@ -219,6 +222,7 @@ export async function startHostedLocalDevHarness(input: {
       dropRunnerActiveOperationForTest,
       expireRunnerActivityForTest,
       readShutdownCheckpointPublicationBarrierForTest,
+      releaseGeneratedImageProviderBarrierForTest,
       releaseShutdownCheckpointPublicationBarrierForTest,
       runHostedAlarmInvocationForTest: requireTestControls(runHostedAlarmInvocationForTest),
       runHostedManualInvocationForTest: requireTestControls(runHostedManualInvocationForTest),
@@ -542,6 +546,40 @@ export async function startHostedLocalDevHarness(input: {
     assertHostedLocalTestControlsAvailable("armCanonicalCheckpointLostAckForTest");
     return await requestJsonForRuntime<{ ok: true }>(
       `/__test/users/${encodeURIComponent(userId)}/canonical-checkpoint-lost-ack`,
+      {
+        headers: {
+          [HOSTED_EXECUTION_USER_ID_HEADER]: userId,
+          ...statusHeaders(userId),
+        },
+        method: "POST",
+        signal: AbortSignal.timeout(hostedLocalActivityExpiryTimeoutMs),
+      },
+    );
+  }
+
+  async function armGeneratedImageProviderBarrierForTest(
+    userId: string,
+  ): Promise<{ ok: true }> {
+    assertHostedLocalTestControlsAvailable("armGeneratedImageProviderBarrierForTest");
+    return await requestJsonForRuntime<{ ok: true }>(
+      `/__test/users/${encodeURIComponent(userId)}/generated-image-provider-barrier/arm`,
+      {
+        headers: {
+          [HOSTED_EXECUTION_USER_ID_HEADER]: userId,
+          ...statusHeaders(userId),
+        },
+        method: "POST",
+        signal: AbortSignal.timeout(hostedLocalActivityExpiryTimeoutMs),
+      },
+    );
+  }
+
+  async function releaseGeneratedImageProviderBarrierForTest(
+    userId: string,
+  ): Promise<{ ok: true }> {
+    assertHostedLocalTestControlsAvailable("releaseGeneratedImageProviderBarrierForTest");
+    return await requestJsonForRuntime<{ ok: true }>(
+      `/__test/users/${encodeURIComponent(userId)}/generated-image-provider-barrier/release`,
       {
         headers: {
           [HOSTED_EXECUTION_USER_ID_HEADER]: userId,

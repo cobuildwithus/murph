@@ -1129,6 +1129,22 @@ checkpoint can contain it. Portable support bundles omit all `.runtime/**`; the
 generic `exports/assistant-deliveries/**` path remains ordinary checkpointed
 vault data and receives no deletion or path-specific packaging authority.
 Existing global file-type exclusions still apply regardless of directory.
+
+Hosted dynamic image generation is invocation-local background work. The tool
+returns after launch so the current assistant turn can continue. Provider work
+stays detached; the canonical capture save waits for an invocation boundary and
+uses the existing receipt checkpoint against the latest workspace. After the
+private capture is ready, the runtime upserts one trusted system input containing
+its exact `vault_image` descriptor on the original route, registers that input
+with the ordinary pending assistant-input index, and notifies the existing wake
+signal. Normal foreground selection therefore keeps fresh conversation ahead of
+the completion and owns completion retry and terminal evidence. Provider
+completion starts the existing generic usage recorder without awaiting it, and
+image delivery never waits for accounting or diagnostic writes. This adds no
+durable image job, mailbox kind, scheduler, reservation, allowance
+implementation, or image-specific usage lifecycle. Runner loss may drop
+unfinished provider work.
+
 Detached `assistant.notification.requested` work remains output-only and cannot
 mutate resident conversation history or native provider resume state. A completed phone
 call is delivered as an ordinary `assistant.notification.requested` system-mailbox
@@ -1949,10 +1965,36 @@ above the boundary is unresolved only when it has neither accepted delivery nor
 durable consumed evidence. This second condition prevents a best-effort missing
 delivery link from becoming a false page after handling is already known.
 One fixed-kind `HostedLinqAlert` row provides the incident claim, provider
-idempotency identity, retry lease, and active state. A healthy scan silently
-clears the claim so a later incident receives a new identity; the monitor does
-not send a potentially misleading recovery message from aged observability
-data. The configured destination is an opaque existing dedicated Linq chat ID.
+idempotency identity, last provider-attempt boundary, and active state. A
+healthy scan silently clears the claim so a later incident receives a new
+identity, but preserves the last attempt/success timestamps as the cross-
+incident pacing floor; the monitor does not send a potentially misleading
+recovery message from aged observability data. Every provider attempt,
+including an uncertain retry, is separated from the prior attempt or success
+by at least ten minutes plus stable bounded jitter. Uncertain retries reuse the
+exact incident body and provider idempotency key. Separate incidents carry
+fresh aggregate evidence and a fresh checked-at timestamp rather than
+artificial text variation. The configured destination is an opaque existing
+dedicated Linq chat ID, and its separately configured IANA operator timezone
+suppresses provider sends from 11 PM through 7 AM local time. A stable per-day
+delay of up to ten minutes spreads deferred alerts across more than one
+five-minute cron tick instead of resuming every alert at the same quiet-hours
+boundary. Detection and healthy-state transitions continue while sends are
+suppressed. Before provider entry, the monitor re-reads latency health and
+operator local time. Recovery or quiet hours at that boundary make no
+provider-attempt state change. The subsequent singleton compare-and-swap is
+fenced by the candidate row's `updatedAt` version and is the sole admission
+boundary: only it enters sending state, increments attempt count, and advances
+`lastAttemptedAt` immediately before Linq. The same version comparison makes a
+stale recovery coalesce if another incident changed and then restored the
+visible status. A known-unsent first alert therefore has no incident or pacing
+boundary to carry overnight and later builds current evidence; a blocked retry
+whose prior provider call may have succeeded keeps its exact incident body,
+idempotency key, and real attempt time. Once a provider call has been admitted,
+another healthy scan coalesces against the bounded four-minute send lease rather
+than reporting recovery while delivery is still unknown. After the call settles
+or fails, or after the lease expires, a healthy scan silently clears sending,
+failed, or accepted active state. An admitted request may still complete.
 Persisted and delivered evidence is aggregate counts and durations only: no
 message content, member, phone, chat, mailbox, delivery, or trace identifiers.
 The monitor is observability-only: it does not append mailbox work, signal

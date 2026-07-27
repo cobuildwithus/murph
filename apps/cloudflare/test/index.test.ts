@@ -346,6 +346,8 @@ describe("cloudflare worker routes", () => {
       "test-run-until-idle",
       "test-run-alarm",
       "test-canonical-checkpoint-lost-ack",
+      "test-arm-generated-image-provider-barrier",
+      "test-release-generated-image-provider-barrier",
       "test-snapshot-publication-corruption",
       "test-shutdown-checkpoint-publication-barrier",
       "test-container-activity-expired",

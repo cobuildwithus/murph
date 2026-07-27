@@ -270,7 +270,6 @@ describe("hosted-local test RunnerContainer outbound composition", () => {
     for (const [host, handler] of Object.entries(HOSTED_RUNNER_OUTBOUND_BY_HOST)) {
       if (
         host === HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.transcribe
-        || host === HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.effectsPort
         || host === HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.openAi
         || host === HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.webControlPlane
         || host === HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.workspaceSnapshotStore
@@ -355,7 +354,7 @@ describe("hosted-local test RunnerContainer outbound composition", () => {
       HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.effectsPort
     ];
     if (!handler) {
-      throw new Error("Wrapped generated-image outbound handler is missing.");
+      throw new Error("Generated-image outbound handler is missing.");
     }
     const userId = "member_123";
 

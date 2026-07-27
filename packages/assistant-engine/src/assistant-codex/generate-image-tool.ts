@@ -105,6 +105,7 @@ export async function executeGenerateImageTool(input: {
   env: NodeJS.ProcessEnv
   fetchImpl: typeof fetch
   materializeWorkspaceArtifacts?: AssistantWorkspaceArtifactMaterializer | null
+  persistGeneratedImageCapture?: (<T>(write: () => Promise<T>) => Promise<T>) | null
   providerRequestOrdinal: number
   requireHostedPrivateImageDelivery?: boolean | null
   vaultRoot?: string | null
@@ -260,7 +261,7 @@ export async function executeGenerateImageTool(input: {
 
     if (vaultRoot) {
       try {
-        savedCapture = await saveGeneratedImageCapture({
+        const saveCapture = () => saveGeneratedImageCapture({
           args: input.args,
           bytes: generatedImageBytes,
           captureIdentity,
@@ -268,6 +269,9 @@ export async function executeGenerateImageTool(input: {
           referenceImages,
           vaultRoot,
         })
+        savedCapture = input.persistGeneratedImageCapture
+          ? await input.persistGeneratedImageCapture(saveCapture)
+          : await saveCapture()
       } catch (error) {
         if (
           captureIdentity &&

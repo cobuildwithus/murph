@@ -379,6 +379,23 @@ describe("hosted deploy automation helpers", () => {
     expect(config.secrets?.required).toEqual([...HOSTED_WORKER_REQUIRED_SECRET_NAMES]);
   });
 
+  it("passes an explicit preview OIDC environment through to generated Worker vars", () => {
+    const environment = readHostedDeployAutomationEnvironment({
+      CF_BUNDLES_BUCKET: "hosted-bundles-staging",
+      CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-staging",
+      CF_WORKER_NAME: "hosted-worker-staging",
+      ...REQUIRED_HOSTED_CRYPTO_WORKER_VARS,
+      HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT: "preview",
+    });
+
+    const config = buildHostedWranglerDeployConfig(environment) as {
+      vars: Record<string, string>;
+    };
+
+    expect(environment.workerVars.HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT).toBe("preview");
+    expect(config.vars.HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT).toBe("preview");
+  });
+
   it("rejects partial numeric deploy automation values", () => {
     for (const runnerReadyTimeout of ["60000ms", "1e3"]) {
       expect(() =>
@@ -554,6 +571,15 @@ describe("hosted deploy automation helpers", () => {
       ].map((match) => [match[1] ?? "", match[2] ?? ""] as const),
     );
 
+    expect(workflow).toContain(`      environment:
+        description: GitHub environment to deploy from
+        required: true
+        default: production
+        type: choice
+        options:
+          - preview
+          - production`);
+
     for (const expectedLine of [
       "CF_CONTAINER_INSTANCE_TYPE: ${{ vars.CF_CONTAINER_INSTANCE_TYPE || '{\"vcpu\":2,\"memory_mib\":6144,\"disk_mb\":6000}' }}",
       "CF_CONTAINER_MAX_INSTANCES: ${{ vars.CF_CONTAINER_MAX_INSTANCES || '1000' }}",
@@ -562,14 +588,15 @@ describe("hosted deploy automation helpers", () => {
       "CF_WEB_CONTROL_TIMEOUT_MS: ${{ vars.CF_WEB_CONTROL_TIMEOUT_MS }}",
       "HOSTED_EXECUTION_CONTAINER_ROLLOUT: ${{ inputs.container_rollout }}",
       "HOSTED_EXECUTION_DEPLOY_CONTEXT: ${{ inputs.environment }}",
+      "HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT: ${{ inputs.environment }}",
       "HOSTED_EXECUTION_RUNNER_ENV_PROFILES: ${{ vars.HOSTED_EXECUTION_RUNNER_ENV_PROFILES || 'exa,hosted-email,linq,mapbox,telegram' }}",
       "HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: ${{ vars.HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS }}",
       "HOSTED_EXECUTION_RUNNER_LIFECYCLE_REEVALUATION_MS: ${{ vars.HOSTED_EXECUTION_RUNNER_LIFECYCLE_REEVALUATION_MS }}",
       "HOSTED_EXECUTION_SMOKE_DIRECT_R2_PRESIGNED_PUT: ${{ inputs.container_rollout == 'immediate' && 'true' || 'false' }}",
-      "HOSTED_EXECUTION_SMOKE_LIVE_MODEL_TURN: ${{ inputs.live_model_turn && 'true' || 'false' }}",
+      "HOSTED_EXECUTION_SMOKE_LIVE_MODEL_TURN: ${{ inputs.environment == 'production' && inputs.live_model_turn && 'true' || 'false' }}",
       'HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER: "true"',
       "live_model_turn:",
-      "description: Run one real gpt-5.6-terra turn in the deployed container smoke",
+      "description: Run one real gpt-5.6-terra turn in production deploy smoke",
       'HOSTED_EXECUTION_SMOKE_RUNNER_MAX_ATTEMPTS: "300"',
       'HOSTED_EXECUTION_SMOKE_RUNNER_RETRY_DELAY_MS: "3000"',
       'HOSTED_EXECUTION_SMOKE_RUNNER_MAX_WAIT_MS: "1200000"',
@@ -590,6 +617,7 @@ describe("hosted deploy automation helpers", () => {
       "name: Codex cache-prefix E2E gate",
       "skip_predeploy_e2e:",
       "description: Skip predeploy hosted-local E2E gates",
+      "          - preview",
       "if: ${{ !inputs.skip_predeploy_e2e && github.ref == 'refs/heads/main' && github.ref_protected }}",
       "if: ${{ inputs.deploy_worker && !inputs.skip_predeploy_e2e && github.ref == 'refs/heads/main' && github.ref_protected }}",
       "name: Linq delivery E2E gate",
@@ -659,6 +687,7 @@ describe("hosted deploy automation helpers", () => {
     // the literal values: a job-timeout reduction is exactly the drift that would
     // silently restore an unattributed cancelled-job failure.
     const deployJob = readWorkflowJobBlock(workflow, "deploy");
+    expect(deployJob).toContain("    environment: ${{ inputs.environment }}");
     const deployTimeoutMinutes = Number(
       /^\s*timeout-minutes:\s*(\d+)\s*$/mu.exec(deployJob)?.[1] ?? "",
     );
@@ -809,6 +838,10 @@ describe("hosted deploy automation helpers", () => {
       expect(workflowEnvBindings.get(name)).toBe("vars");
     }
     for (const name of HOSTED_WORKER_OPTIONAL_VAR_NAMES) {
+      if (name === "HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT") {
+        expect(workflowEnvBindings.get(name)).toBeUndefined();
+        continue;
+      }
       expect(workflowEnvBindings.get(name)).toBe("vars");
     }
     expect(workflowEnvBindings.get("XAI_API_BASE_URL")).toBeUndefined();

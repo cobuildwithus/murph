@@ -357,7 +357,7 @@ export const MURPH_GENERATE_IMAGE_TOOL = {
   namespace: 'murph',
   name: 'generate_image',
   description:
-    `Generate one image with GPT Image 2 only when the user requests an image, a known preference supports visual help, or a loaded skill or product flow explicitly marks images welcome and privacy-safe. Optionally use ordered reference images from vault media or ${MURPH_CHARACTER_SHEET_REFERENCE_IMAGE_REF}. Attach ${MURPH_CHARACTER_SHEET_REFERENCE_IMAGE_REF}, Murph's canonical character sheet, whenever Murph itself appears in a generated image. When referenceImageRefs is provided, describe in the prompt how image 1, image 2, etc. should be used. When a vault is available, generated images are saved as canonical capture media under raw/captures/** for later reuse. Hosted runs also attach the generated image to the final response; local runs also save it under CODEX_HOME/generated_images.`,
+    `Generate one image with GPT Image 2 only when the user requests an image, a known preference supports visual help, or a loaded skill or product flow explicitly marks images welcome and privacy-safe. Optionally use ordered reference images from vault media or ${MURPH_CHARACTER_SHEET_REFERENCE_IMAGE_REF}. Attach ${MURPH_CHARACTER_SHEET_REFERENCE_IMAGE_REF}, Murph's canonical character sheet, whenever Murph itself appears in a generated image. When referenceImageRefs is provided, describe in the prompt how image 1, image 2, etc. should be used. When a vault is available, generated images are saved as canonical capture media under raw/captures/** for later reuse. Hosted runs start generation in the background and return immediately; when generation finishes, private media is provided in a later trusted system input. Local runs remain synchronous and also save the image under CODEX_HOME/generated_images.`,
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -1880,7 +1880,7 @@ export interface MurphDynamicToolExecutionResult {
   responseMediaPatch?: MurphDynamicToolResponseMediaPatch
   rpcResult: MurphDynamicToolRpcResult
   // Specific runtime issues a tool wants recorded off-path via the assistant
-  // runtime's existing issue owner (e.g. a generated-image upload failure).
+  // runtime's existing issue owner (e.g. a generated-media delivery failure).
   runtimeIssueInputs?: readonly AssistantRuntimeIssueInput[]
   usageDraft?: AssistantProviderUsageDraft | null
 }
@@ -2568,11 +2568,14 @@ function currentHostedMailboxItemId(
 }
 
 function buildGeneratedImageCaptureIdempotencyKey(
-  toolCallIdInput: string | null,
+  input: {
+    scope: 'generate-image' | 'group-avatar'
+    toolCallId: string | null
+  },
 ): string | null {
-  const toolCallId = normalizeNullableString(toolCallIdInput)
+  const toolCallId = normalizeNullableString(input.toolCallId)
   return toolCallId
-    ? `murph.dynamic-tool.generate-image:${toolCallId}`
+    ? `murph.dynamic-tool.${input.scope}:${toolCallId}`
     : null
 }
 
@@ -3045,17 +3048,74 @@ export async function executeMurphDynamicToolRequest(input: {
         return toolTextResult(false, 'image generation cannot be combined with a voice memo')
       }
 
+      const providerRequestOrdinal = input.nextUsageOrdinal()
+      const captureIdempotencyKey = buildGeneratedImageCaptureIdempotencyKey({
+        toolCallId: readGeneratedImageToolCallId(input.request),
+        scope: 'generate-image',
+      })
+      const imageGenerationLauncher =
+        input.hostedToolContext?.imageGenerationLauncher ?? null
+      const originAssistantInputId =
+        input.hostedToolContext?.currentAssistantInputId?.() ?? null
+      const operationId =
+        captureIdempotencyKey
+        ?? `murph.dynamic-tool.generate-image:${originAssistantInputId}:${providerRequestOrdinal}`
+      const generateImageArgs = input.request.args
+      if (
+        imageGenerationLauncher
+        && originAssistantInputId
+      ) {
+        const launch = imageGenerationLauncher.launch({
+          operationId,
+          originAssistantInputId,
+          run: async (signal, persistCanonicalWrite) => {
+            const result = await executeGenerateImageTool({
+              abortSignal: signal,
+              args: generateImageArgs,
+              captureIdempotencyKey: operationId,
+              codexHome: input.codexHome ?? null,
+              env: input.env,
+              fetchImpl: input.fetchImpl,
+              materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts ?? null,
+              persistGeneratedImageCapture: persistCanonicalWrite,
+              providerRequestOrdinal,
+              requireHostedPrivateImageDelivery: true,
+              vaultRoot: input.vaultRoot ?? null,
+            })
+            if (result.usageDraft) {
+              input.hostedToolContext?.recordDetachedUsage?.({
+                effectiveEnv: input.env,
+                operationId,
+                originAssistantInputId,
+                usageDraft: result.usageDraft,
+              })
+            }
+            return {
+              media: result.rpcSuccess
+                ? result.responseMedia?.[0] ?? null
+                : null,
+              runtimeIssue: null,
+              savedImageRef: result.savedImageRef ?? null,
+            }
+          },
+        })
+        return toolTextResult(
+          true,
+          launch === 'already-started'
+            ? 'image generation was already started for this operation'
+            : 'image generation started in the background; continue without waiting; when it finishes, private media will be provided in a later trusted system input',
+        )
+      }
+
       const result = await executeGenerateImageTool({
         abortSignal: input.abortSignal ?? null,
-        args: input.request.args,
-        captureIdempotencyKey: buildGeneratedImageCaptureIdempotencyKey(
-          readGeneratedImageToolCallId(input.request),
-        ),
+        args: generateImageArgs,
+        captureIdempotencyKey,
         codexHome: input.codexHome ?? null,
         env: input.env,
         fetchImpl: input.fetchImpl,
         materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts ?? null,
-        providerRequestOrdinal: input.nextUsageOrdinal(),
+        providerRequestOrdinal,
         requireHostedPrivateImageDelivery:
           input.requireHostedPrivateImageDelivery ?? false,
         vaultRoot: input.vaultRoot ?? null,
@@ -4043,9 +4103,10 @@ async function prepareGroupAvatarRuntimeRequest(input: {
     const generated = await executeGenerateImageTool({
       abortSignal: input.abortSignal,
       args: avatar.args,
-      captureIdempotencyKey: buildGeneratedImageCaptureIdempotencyKey(
-        input.toolCallId,
-      ),
+      captureIdempotencyKey: buildGeneratedImageCaptureIdempotencyKey({
+        scope: 'group-avatar',
+        toolCallId: input.toolCallId,
+      }),
       env: input.env,
       fetchImpl: input.fetchImpl,
       materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts,

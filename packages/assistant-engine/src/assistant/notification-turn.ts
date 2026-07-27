@@ -350,6 +350,7 @@ export async function sendAssistantNotificationLocal(
         !isAssistantNotificationMaintenanceExactSkip(input)
           ? executionContext?.hosted ?? null
           : null
+      const route = resolveAssistantTurnRoute(messageInput, defaults, resolved)
       const hostedToolContext = hostedExecutionContext
         ? createAssistantHostedToolContext({
             beforeToolExecution: input.beforeToolExecution
@@ -372,10 +373,10 @@ export async function sendAssistantNotificationLocal(
                 next: result.result,
               })
             },
+            route,
             session: resolved.session,
           })
         : null
-      const route = resolveAssistantTurnRoute(messageInput, defaults, resolved)
       const turnCreatedAt = new Date().toISOString()
       const progressDelivery = null
       let committedDeliveryOutcomeKind: AssistantDeliveryOutcome['kind'] | null = null
