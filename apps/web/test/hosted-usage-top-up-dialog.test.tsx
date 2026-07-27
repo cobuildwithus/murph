@@ -629,6 +629,70 @@ test("keeps a server-projected cross-target Checkout status-only before interact
   }
 });
 
+test("keeps payer-owned cancellation available for a cross-target direct payment", async () => {
+  mocks.requestHostedOnboardingJson.mockImplementation(async (request: {
+    method: string;
+  }) => request.method === "POST"
+    ? {
+        purchaseId: "hucp_other_direct_target",
+        status: "expired",
+      }
+    : {
+        cancelAllowed: true,
+        purchaseId: "hucp_other_direct_target",
+        status: "payment_pending",
+      });
+  const { HostedUsageTopUpDialog } = await import(
+    "@/src/components/settings/hosted-usage-top-up-dialog"
+  );
+  const rendered = await renderClientComponent(
+    createElement(HostedUsageTopUpDialog, {
+      activePurchase: {
+        cancelAllowed: true,
+        offerCode: "usage_10_usd",
+        purchaseId: "hucp_other_direct_target",
+        retryAllowed: false,
+        status: "payment_pending",
+        targetConflict: true,
+      },
+      offers: [],
+      scope: "group",
+    }),
+    {
+      location: { href: "https://example.test/groups/fund/group_join_code_1234" },
+      requireButton: false,
+    },
+  );
+
+  try {
+    await clickButton(rendered.container, rendered.window, "Check payment");
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    assert.equal(
+      buttonByText(rendered.container, "Cancel payment").disabled,
+      false,
+    );
+    assert.equal(hasButton(rendered.container, "Retry payment"), false);
+
+    await clickButton(rendered.container, rendered.window, "Cancel payment");
+
+    expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
+      credentials: "same-origin",
+      headers: { accept: "application/json" },
+      method: "POST",
+      signal: expect.any(AbortSignal),
+      url:
+        "/api/settings/billing/usage-credit/purchases/hucp_other_direct_target/expire",
+    });
+    assert.match(rendered.container.textContent ?? "", /Other checkout canceled/);
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
 test("does not advertise Retry for a suspended reconciling purchase", async () => {
   mocks.requestHostedOnboardingJson.mockResolvedValue({
     purchaseId: "hucp_suspended_reconciling",

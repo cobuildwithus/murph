@@ -1058,6 +1058,81 @@ describe("createHostedUsageCreditCheckout", () => {
     });
   });
 
+  it("never confirms an intent that lost the account-deletion binding race", async () => {
+    const fake = createFakePrisma();
+    mocks.getPrisma.mockReturnValue(fake.prisma);
+    mockCanonicalSavedCard();
+    let deletionSession: ReturnType<typeof buildStripeSession> | null = null;
+    mocks.stripeCheckoutCreate.mockImplementationOnce(async (request) => {
+      deletionSession = buildStripeSession(request);
+      return deletionSession;
+    });
+    mocks.stripeCheckoutRetrieve.mockImplementationOnce(async () => {
+      if (!deletionSession) {
+        throw new Error("Expected account deletion to reconstruct Checkout.");
+      }
+      return deletionSession;
+    });
+    mocks.stripeCheckoutExpire.mockImplementationOnce(async () => {
+      if (!deletionSession) {
+        throw new Error("Expected account deletion to reconstruct Checkout.");
+      }
+      return { ...deletionSession, status: "expired", url: null };
+    });
+    mocks.stripePaymentIntentCreate.mockImplementationOnce(async () => {
+      const purchase = onlyPurchase(fake.purchases);
+      fake.member.suspendedAt = NOW;
+      await closeHostedUsageCreditPurchasesForAccountDeletion({
+        memberIds: [MEMBER_ID],
+        now: new Date(NOW.getTime() + 1_000),
+      });
+      await assertHostedUsageCreditPurchasesReadyForAccountDeletionTx({
+        memberIds: [MEMBER_ID],
+        now: new Date(NOW.getTime() + 2_000),
+        prisma: fake.prisma as never,
+      });
+      return buildSavedCardPaymentIntent({
+        amountReceived: 0,
+        latestCharge: null,
+        purchaseId: String(purchase.id),
+        status: "requires_confirmation",
+      });
+    });
+    mocks.stripePaymentIntentCancel.mockImplementationOnce(
+      async (paymentIntentId: string) => buildSavedCardPaymentIntent({
+        amountReceived: 0,
+        latestCharge: null,
+        purchaseId: String(onlyPurchase(fake.purchases).id),
+        status: paymentIntentId === "pi_saved_card_123"
+          ? "canceled"
+          : "requires_confirmation",
+      }),
+    );
+
+    await expect(createHostedGroupUsageCreditCheckout({
+      clientRequestKey: CLIENT_REQUEST_KEY,
+      joinCode: "group_join_code_1234",
+      now: NOW,
+      offerCode: "usage_10_usd",
+      payerMemberId: MEMBER_ID,
+      prisma: fake.prisma as never,
+    })).rejects.toBeTruthy();
+
+    expect(mocks.stripePaymentIntentConfirm).not.toHaveBeenCalled();
+    expect(mocks.stripePaymentIntentCancel).toHaveBeenCalledWith(
+      "pi_saved_card_123",
+      { cancellation_reason: "abandoned" },
+      expect.objectContaining({
+        idempotencyKey: expect.stringContaining(":cancel"),
+      }),
+    );
+    expect(onlyPurchase(fake.purchases)).toMatchObject({
+      payerMemberId: null,
+      status: "expired",
+      stripePaymentIntentLookupKey: null,
+    });
+  });
+
   it("resumes the same durably bound intent after an ambiguous confirmation response", async () => {
     const fake = createFakePrisma();
     mockCanonicalSavedCard();
@@ -2162,6 +2237,143 @@ describe("expireHostedUsageCreditCheckout", () => {
     });
   });
 
+  it("cancels a payer-owned sessionless direct attempt and releases the purchase fence", async () => {
+    const fake = createFakePrisma();
+    mocks.getPrisma.mockReturnValue(fake.prisma);
+    mockCanonicalSavedCard();
+    const readUnconfirmedIntent = () => buildSavedCardPaymentIntent({
+      amountReceived: 0,
+      latestCharge: null,
+      purchaseId: String(onlyPurchase(fake.purchases).id),
+      status: "requires_confirmation",
+    });
+    mocks.stripePaymentIntentCreate.mockImplementationOnce(
+      async () => readUnconfirmedIntent(),
+    );
+    mocks.stripePaymentIntentConfirm.mockRejectedValueOnce(
+      new Error("connection lost"),
+    );
+    mocks.stripePaymentIntentRetrieve
+      .mockRejectedValueOnce(new Error("connection lost"))
+      .mockImplementationOnce(async () => ({
+        ...readUnconfirmedIntent(),
+        status: "requires_payment_method",
+      }));
+    mocks.stripePaymentIntentCancel.mockImplementationOnce(async () => ({
+      ...readUnconfirmedIntent(),
+      status: "canceled",
+    }));
+
+    await expect(createHostedGroupUsageCreditCheckout({
+      clientRequestKey: CLIENT_REQUEST_KEY,
+      joinCode: "group_join_code_1234",
+      now: NOW,
+      offerCode: "usage_10_usd",
+      payerMemberId: MEMBER_ID,
+      prisma: fake.prisma as never,
+    })).rejects.toMatchObject({
+      code: "HOSTED_USAGE_CREDIT_STRIPE_UNAVAILABLE",
+    });
+    const purchase = onlyPurchase(fake.purchases);
+
+    await expect(readHostedActiveUsageCreditPurchaseForPayer({
+      now: new Date(NOW.getTime() + 30_000),
+      payerMemberId: MEMBER_ID,
+      prisma: fake.prisma as never,
+      serverApprovedPayableTargets: [],
+    })).resolves.toMatchObject({
+      cancelAllowed: true,
+      retryAllowed: false,
+      status: "payment_pending",
+    });
+    await expect(readHostedUsageCreditPurchaseStatus({
+      payerMemberId: MEMBER_ID,
+      prisma: fake.prisma as never,
+      purchaseId: String(purchase.id),
+    })).resolves.toMatchObject({
+      cancelAllowed: true,
+      status: "payment_pending",
+    });
+
+    await expect(expireHostedUsageCreditCheckout({
+      now: new Date(NOW.getTime() + 60_000),
+      payerMemberId: MEMBER_ID,
+      purchaseId: String(purchase.id),
+    })).resolves.toMatchObject({
+      purchaseId: purchase.id,
+      status: "expired",
+    });
+
+    expect(mocks.stripeCheckoutRetrieve).not.toHaveBeenCalled();
+    expect(mocks.stripeCheckoutExpire).not.toHaveBeenCalled();
+    expect(mocks.stripePaymentIntentCancel).toHaveBeenCalledOnce();
+    expect(purchase).toMatchObject({
+      lastReconciledAt: new Date(NOW.getTime() + 60_000),
+      status: "expired",
+      terminalAt: new Date(NOW.getTime() + 60_000),
+    });
+  });
+
+  it.each([
+    ["processing", 0, null],
+    ["succeeded", 1_000, "ch_saved_card_123"],
+  ] as const)(
+    "does not clear a direct attempt when cancellation observes %s",
+    async (status, amountReceived, latestCharge) => {
+      const fake = createFakePrisma();
+      mocks.getPrisma.mockReturnValue(fake.prisma);
+      mockCanonicalSavedCard();
+      const readUnconfirmedIntent = () => buildSavedCardPaymentIntent({
+        amountReceived: 0,
+        latestCharge: null,
+        purchaseId: String(onlyPurchase(fake.purchases).id),
+        status: "requires_confirmation",
+      });
+      mocks.stripePaymentIntentCreate.mockImplementationOnce(
+        async () => readUnconfirmedIntent(),
+      );
+      mocks.stripePaymentIntentConfirm.mockRejectedValueOnce(
+        new Error("connection lost"),
+      );
+      mocks.stripePaymentIntentRetrieve
+        .mockRejectedValueOnce(new Error("connection lost"))
+        .mockImplementationOnce(async () => buildSavedCardPaymentIntent({
+          amountReceived,
+          latestCharge,
+          purchaseId: String(onlyPurchase(fake.purchases).id),
+          status,
+        }));
+
+      await expect(createHostedGroupUsageCreditCheckout({
+        clientRequestKey: CLIENT_REQUEST_KEY,
+        joinCode: "group_join_code_1234",
+        now: NOW,
+        offerCode: "usage_10_usd",
+        payerMemberId: MEMBER_ID,
+        prisma: fake.prisma as never,
+      })).rejects.toMatchObject({
+        code: "HOSTED_USAGE_CREDIT_STRIPE_UNAVAILABLE",
+      });
+      const purchase = onlyPurchase(fake.purchases);
+
+      await expect(expireHostedUsageCreditCheckout({
+        now: new Date(NOW.getTime() + 60_000),
+        payerMemberId: MEMBER_ID,
+        purchaseId: String(purchase.id),
+      })).resolves.toMatchObject({
+        purchaseId: purchase.id,
+        status: "payment_pending",
+      });
+
+      expect(mocks.stripePaymentIntentCancel).not.toHaveBeenCalled();
+      expect(purchase).toMatchObject({
+        status: "payment_pending",
+        stripePaymentIntentLookupKey: "billing:pi_saved_card_123",
+        terminalAt: null,
+      });
+    },
+  );
+
   it.each([
     { paymentStatus: "unpaid", sessionStatus: "complete" },
     { paymentStatus: "paid", sessionStatus: "open" },
@@ -2306,6 +2518,104 @@ describe("usage-credit account-deletion convergence", () => {
       memberIds: ["member_group_runtime"],
       prisma: fake.prisma as never,
     })).resolves.toBeUndefined();
+  });
+
+  it("detaches a fulfilled direct purchase without reconstructing Checkout", async () => {
+    const fake = createFakePrisma();
+    mocks.getPrisma.mockReturnValue(fake.prisma);
+    const purchase = {
+      beneficiaryMemberId: "member_group_runtime",
+      id: "hucp_direct_group_purchase",
+      lastReconciledAt: NOW,
+      paidAt: NOW,
+      payerMemberId: MEMBER_ID,
+      reconciliationVersion: 0n,
+      status: "fulfilled",
+      stripeChargeIdEncrypted: "encrypted:ch_direct_123",
+      stripeChargeLookupKey: "billing:ch_direct_123",
+      stripeCheckoutSessionIdEncrypted: null,
+      stripeCheckoutSessionLookupKey: null,
+      stripeCheckoutUrlEncrypted: null,
+      stripeCustomerIdEncrypted: "encrypted:cus_group_payer",
+      stripeCustomerLookupKey: "customer:cus_group_payer",
+      stripePaymentIntentIdEncrypted: "encrypted:pi_direct_123",
+      stripePaymentIntentLookupKey: "billing:pi_direct_123",
+      stripePriceIdEncrypted: "encrypted:price_usage_10",
+      terminalAt: NOW,
+      updatedAt: NOW,
+    };
+    fake.purchases.set(String(purchase.id), purchase);
+    fake.member.suspendedAt = NOW;
+
+    await expect(closeHostedUsageCreditPurchasesForAccountDeletion({
+      memberIds: [MEMBER_ID],
+      now: new Date(NOW.getTime() + 1_000),
+    })).resolves.toBeUndefined();
+    expectNoStripeProviderIo();
+
+    await expect(assertHostedUsageCreditPurchasesReadyForAccountDeletionTx({
+      memberIds: [MEMBER_ID],
+      now: new Date(NOW.getTime() + 2_000),
+      prisma: fake.prisma as never,
+    })).resolves.toBeUndefined();
+
+    expect(purchase).toMatchObject({
+      payerMemberId: null,
+      reconciliationVersion: 1n,
+      stripeChargeIdEncrypted: null,
+      stripeCheckoutSessionIdEncrypted: null,
+      stripeCustomerIdEncrypted: null,
+      stripePaymentIntentIdEncrypted: null,
+      stripePriceIdEncrypted: null,
+    });
+    expect(purchase.stripeChargeLookupKey).toBe("billing:ch_direct_123");
+    expect(purchase.stripeCheckoutSessionLookupKey).toBeNull();
+    expect(purchase.stripePaymentIntentLookupKey).toBe(
+      "billing:pi_direct_123",
+    );
+  });
+
+  it("waits for a durably bound direct payment before deleting its payer", async () => {
+    const fake = createFakePrisma();
+    mocks.getPrisma.mockReturnValue(fake.prisma);
+    const purchase = {
+      beneficiaryMemberId: "member_group_runtime",
+      id: "hucp_pending_direct_group_purchase",
+      lastReconciledAt: null,
+      paidAt: null,
+      payerMemberId: MEMBER_ID,
+      reconciliationVersion: 1n,
+      status: "payment_pending",
+      stripeChargeIdEncrypted: null,
+      stripeChargeLookupKey: null,
+      stripeCheckoutSessionIdEncrypted: null,
+      stripeCheckoutSessionLookupKey: null,
+      stripeCheckoutUrlEncrypted: null,
+      stripeCustomerIdEncrypted: "encrypted:cus_group_payer",
+      stripeCustomerLookupKey: "customer:cus_group_payer",
+      stripePaymentIntentIdEncrypted: "encrypted:pi_direct_123",
+      stripePaymentIntentLookupKey: "billing:pi_direct_123",
+      stripePriceIdEncrypted: "encrypted:price_usage_10",
+      terminalAt: null,
+      updatedAt: NOW,
+    };
+    fake.purchases.set(String(purchase.id), purchase);
+    fake.member.suspendedAt = NOW;
+
+    await expect(closeHostedUsageCreditPurchasesForAccountDeletion({
+      memberIds: [MEMBER_ID],
+      now: new Date(NOW.getTime() + 1_000),
+    })).rejects.toMatchObject({
+      code: "ACCOUNT_DELETION_USAGE_CREDIT_PAYMENT_PENDING",
+      retryable: true,
+    });
+
+    expectNoStripeProviderIo();
+    expect(purchase).toMatchObject({
+      payerMemberId: MEMBER_ID,
+      status: "payment_pending",
+      stripePaymentIntentLookupKey: "billing:pi_direct_123",
+    });
   });
 
   it("expires a bound open Session before permitting local deletion", async () => {

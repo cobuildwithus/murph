@@ -415,6 +415,32 @@ describe("hosted usage-credit Stripe reconciliation", () => {
     }));
   });
 
+  it("keeps an unbound saved-card success retryable instead of consuming it", async () => {
+    const harness = createUsageCreditStripePrismaHarness({
+      checkoutRequestPolicyVersion: "hosted-usage-credit-checkout-v2",
+      status: HostedUsageCreditPurchaseStatus.created,
+      stripeChargeLookupKey: null,
+      stripeCheckoutSessionIdEncrypted: null,
+      stripeCheckoutSessionLookupKey: null,
+      stripePaymentIntentLookupKey: null,
+    });
+    const paymentIntent = makePaymentIntent({ purpose: "saved_card" });
+
+    const result = reconcileHostedUsageCreditStripeEvent({
+      event: makeDirectPaymentEvent("payment_intent.succeeded", paymentIntent),
+      prisma: harness.client,
+    });
+    await expect(result).rejects.toSatisfy(
+      isHostedUsageCreditStripeRetryableError,
+    );
+
+    expect(mocks.stripe.paymentIntents.retrieve).not.toHaveBeenCalled();
+    expect(mocks.grantUsageCredit).not.toHaveBeenCalled();
+    expect(harness.purchase.status).toBe(
+      HostedUsageCreditPurchaseStatus.created,
+    );
+  });
+
   it.each([
     ["payment_intent.payment_failed", "requires_payment_method"],
     ["payment_intent.canceled", "canceled"],
@@ -838,6 +864,45 @@ describe("hosted usage-credit Stripe reconciliation", () => {
     expect(mocks.reconcileRefundNetReversal).toHaveBeenCalled();
   });
 
+  it("reconciles a direct refund after the payer account was detached", async () => {
+    const harness = createUsageCreditStripePrismaHarness({
+      checkoutRequestPolicyVersion: "hosted-usage-credit-checkout-v2",
+      payerMemberId: null,
+      status: HostedUsageCreditPurchaseStatus.fulfilled,
+      stripeChargeLookupKey: "stripe-billing-event:ch_usage_123",
+      stripeCheckoutSessionIdEncrypted: null,
+      stripeCheckoutSessionLookupKey: null,
+      stripePaymentIntentLookupKey: "stripe-billing-event:pi_usage_123",
+      terminalAt: new Date("2026-07-16T03:20:00.000Z"),
+    });
+    mocks.stripe.paymentIntents.retrieve.mockResolvedValue(
+      makePaymentIntent({ purpose: "saved_card" }),
+    );
+    mocks.stripe.charges.retrieve.mockResolvedValue(
+      makeCharge({ amountRefunded: 250 }),
+    );
+    mocks.stripe.refunds.list.mockResolvedValue(
+      makeRefundList([makeRefund()]),
+    );
+    mockExistingUsageCreditGrant();
+
+    await expect(reconcileHostedUsageCreditStripeEvent({
+      event: makeRefundEvent(),
+      prisma: harness.client,
+    })).resolves.toMatchObject({
+      beneficiaryMemberId: "member_beneficiary",
+      handled: true,
+      purchaseId: "hucp_purchase_123",
+    });
+
+    expect(mocks.stripe.checkout.sessions.list).not.toHaveBeenCalled();
+    expect(mocks.stripe.checkout.sessions.retrieve).not.toHaveBeenCalled();
+    expect(mocks.decryptStripeField).not.toHaveBeenCalled();
+    expect(mocks.encryptStripeField).not.toHaveBeenCalled();
+    expect(mocks.reconcileRefundNetReversal).toHaveBeenCalled();
+    expect(harness.purchase.payerMemberId).toBeNull();
+  });
+
   it("reconciles a terminal refund after the payer account was detached", async () => {
     const harness = createUsageCreditStripePrismaHarness({
       payerMemberId: null,
@@ -900,6 +965,42 @@ describe("hosted usage-credit Stripe reconciliation", () => {
     expect(mocks.reconcileDisputeNetReversal).toHaveBeenCalled();
     expect(mocks.decryptStripeField).not.toHaveBeenCalled();
     expect(mocks.encryptStripeField).not.toHaveBeenCalled();
+    expect(harness.purchase.payerMemberId).toBeNull();
+  });
+
+  it("reconciles a direct dispute after the payer account was detached", async () => {
+    const harness = createUsageCreditStripePrismaHarness({
+      checkoutRequestPolicyVersion: "hosted-usage-credit-checkout-v2",
+      payerMemberId: null,
+      status: HostedUsageCreditPurchaseStatus.fulfilled,
+      stripeChargeLookupKey: "stripe-billing-event:ch_usage_123",
+      stripeCheckoutSessionIdEncrypted: null,
+      stripeCheckoutSessionLookupKey: null,
+      stripePaymentIntentLookupKey: "stripe-billing-event:pi_usage_123",
+      terminalAt: new Date("2026-07-16T03:20:00.000Z"),
+    });
+    mocks.stripe.paymentIntents.retrieve.mockResolvedValue(
+      makePaymentIntent({ purpose: "saved_card" }),
+    );
+    mocks.stripe.disputes.list.mockResolvedValue(
+      makeDisputeList([makeDispute({ withdrawnAmount: 250 })]),
+    );
+    mockExistingUsageCreditGrant();
+
+    await expect(reconcileHostedUsageCreditStripeEvent({
+      event: makeDisputeEvent("charge.dispute.funds_withdrawn"),
+      prisma: harness.client,
+    })).resolves.toMatchObject({
+      beneficiaryMemberId: "member_beneficiary",
+      handled: true,
+      purchaseId: "hucp_purchase_123",
+    });
+
+    expect(mocks.stripe.checkout.sessions.list).not.toHaveBeenCalled();
+    expect(mocks.stripe.checkout.sessions.retrieve).not.toHaveBeenCalled();
+    expect(mocks.decryptStripeField).not.toHaveBeenCalled();
+    expect(mocks.encryptStripeField).not.toHaveBeenCalled();
+    expect(mocks.reconcileDisputeNetReversal).toHaveBeenCalled();
     expect(harness.purchase.payerMemberId).toBeNull();
   });
 

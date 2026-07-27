@@ -371,9 +371,14 @@ against the mutable catalog, mint a replacement attempt, or require a second
 browser authorization. While a group purchase is nonterminal, a fresh request
 key for that same target may recover it only when the submitted offer still
 matches the frozen offer; a different amount conflicts instead of continuing
-the earlier payment under new button copy. Account deletion suspends new Checkout creation and
-resolves or expires every outstanding nonterminal purchase involving the
-deleted member before removing local owner state.
+the earlier payment under new button copy. Account deletion suspends new
+payment creation. A direct intent that already won the payer-lock binding
+boundary remains `payment_pending` until the existing Stripe-event owner
+settles it; deletion does not race it with a second cancellation decision. The
+payer-owned cancel endpoint can retrieve and cancel that exact sessionless
+intent from Settings or any target-conflict surface without beneficiary or
+locator authority. A safely canceled intent terminalizes the purchase and
+releases the payer-wide fence.
 
 Financial records do not cascade blindly through the Prisma relations. When a
 beneficiary is deleted, its ledger entries and purchases are removed before the
@@ -383,6 +388,13 @@ reconciliation-version fence so payer-era preparation must retry, and clears
 encrypted provider references while retaining non-secret lookup keys needed for
 later refund or dispute reconciliation. Stripe retains payment records under
 its required retention.
+
+A fulfilled direct purchase is valid terminal proof without a Checkout
+Session. Payer deletion clears its encrypted PaymentIntent, Charge, Customer,
+and Price references, retains the non-secret Customer, PaymentIntent, and
+Charge lookup evidence, and leaves both Session references null. Later refund
+and dispute events re-fetch the saved-card PaymentIntent and reconcile through
+that retained payerless proof.
 
 Browser-vault export omits payment identifiers, Checkout URLs, semantic source
 keys, usage references, and allocation history.
@@ -530,11 +542,14 @@ funding route share this sequence:
     card attached to the payer Customer. Conflicting Customer/Subscription
     defaults or multiple cards without one canonical choice skip this path.
 12. When a canonical card exists, create one unconfirmed PaymentIntent with a
-    purchase-derived idempotency key, bind its encrypted reference to the
-    purchase, and only then confirm it off session. A retry retrieves and
-    continues that exact bound intent. A definitive authentication or card
-    failure must reach verified `canceled` state before its binding is cleared
-    and Checkout may begin. An ambiguous outcome remains `payment_pending` and
+    purchase-derived idempotency key. Under the payer-row lock, re-read the
+    payer and purchase, bind only an active payer's still-`created` purchase to
+    that exact intent, and only then confirm it off session. If suspension,
+    deletion, or another terminal transition wins that lock, cancel the
+    unbound intent and never confirm it. A retry retrieves and continues only
+    an exact already-bound intent. A definitive authentication or card failure
+    must reach verified `canceled` state before its binding is cleared and
+    Checkout may begin. An ambiguous outcome remains `payment_pending` and
     cannot start a second payment. The client keeps the original amount and
     request key locked for recovery and does not offer amount changes until the
     purchase becomes terminal.
@@ -873,11 +888,13 @@ Current focused unit and component coverage exercises:
   pre-Stripe purchase row, stable idempotency key within the derived creation
   window, no-I/O cutoff, and active-purchase fence through expiry;
 - group saved-card selection, create-before-confirm persistence, exact-intent
-  retry after an ambiguous confirmation response, verified cancellation before
-  Checkout fallback, cross-offer recovery refusal, locked client amount/key,
-  and first-time group card saving;
+  retry after an ambiguous confirmation response, account-deletion-before-bind
+  cancellation with no confirmation, verified cancellation before Checkout
+  fallback, cross-offer recovery refusal, locked client amount/key, and
+  first-time group card saving;
 - payer-bound status and cancel-expiry routes, CSRF rejection, and paid-state
-  precedence over cancellation;
+  precedence over cancellation, including sessionless direct cancellation from
+  a target-conflict surface;
 - grant/debit replay, included-first FIFO settlement, crossing overrun, capped
   signed refund/dispute adjustments through fake Prisma transaction clients;
 - real PostgreSQL grant replay, beneficiary-before-purchase lock ordering,
@@ -885,7 +902,8 @@ Current focused unit and component coverage exercises:
   isolated database;
 - live-state Stripe reconciliation through mocks, including paid, delayed,
   failed, expired, direct saved-card success/processing/late terminal events,
-  Checkout-free refunds, spoofed-Price, `charge.refunded` provenance, and
+  retryable unbound success events, Checkout-free refunds, payerless direct
+  refunds/disputes, spoofed-Price, `charge.refunded` provenance, and
   one-time-versus-subscription dispatch cases;
 - composed usage blocking, carryover credit, trial and group behavior, and
   current-period block clearing; and

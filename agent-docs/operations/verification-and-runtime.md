@@ -159,8 +159,10 @@ with the named owner coverage or verification command.
 Saved-card group-funding changes stay on the full `apps/web` acceptance lane.
 Focused iteration must cover canonical card selection, durable PaymentIntent
 binding before confirmation, exact-intent recovery after ambiguous responses,
-verified cancellation before Checkout fallback, direct webhook fulfillment,
-refund/dispute convergence without a Checkout Session, and the shared dialog.
+account-deletion-before-bind cancellation, verified cancellation before
+Checkout fallback, payer-owned sessionless cancellation, direct webhook
+fulfillment, payerless refund/dispute convergence without a Checkout Session,
+and the shared dialog.
 These provider-backed tests remain mocked; release proof still needs the
 documented Stripe test-mode and desktop/mobile browser smokes.
 

@@ -141,11 +141,23 @@ export function assertHostedUsageCreditPaymentIntentMatchesPurchase(input: {
   }
 }
 
+export function assertHostedUsageCreditBoundPaymentIntentMatchesPurchase(input: {
+  paymentIntent: Stripe.PaymentIntent;
+  purchase: HostedUsageCreditPurchaseForReconciliation;
+}): void {
+  if (!input.purchase.stripePaymentIntentLookupKey) {
+    throw new Error(
+      "Usage-credit PaymentIntent was not durably bound to its purchase.",
+    );
+  }
+  assertHostedUsageCreditPaymentIntentMatchesPurchase(input);
+}
+
 export function buildHostedUsageCreditDirectPaymentAuthorization(input: {
   paymentIntent: Stripe.PaymentIntent;
   purchase: HostedUsageCreditPurchaseForReconciliation;
 }): HostedUsageCreditPaymentAuthorization {
-  assertHostedUsageCreditPaymentIntentMatchesPurchase(input);
+  assertHostedUsageCreditBoundPaymentIntentMatchesPurchase(input);
   if (input.paymentIntent.status !== "succeeded") {
     throw new Error("Usage-credit direct payment was not succeeded.");
   }

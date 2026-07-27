@@ -96,7 +96,11 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
     purchase?.status === "checkout_open" &&
     purchase.checkoutUrl !== null;
   const canCancel =
-    !returnedFromSuccessfulCheckout && purchase?.status === "checkout_open";
+    !returnedFromSuccessfulCheckout &&
+    (
+      purchase?.status === "checkout_open" ||
+      purchase?.cancelAllowed === true
+    );
   const canRetry =
     purchase !== null &&
     !purchase.targetConflict &&
@@ -276,8 +280,12 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
                   }}
                 >
                   {purchase.operation === "canceling_checkout"
-                    ? "Canceling checkout…"
-                    : "Cancel checkout"}
+                    ? purchase.status === "payment_pending"
+                      ? "Canceling payment…"
+                      : "Canceling checkout…"
+                    : purchase.status === "payment_pending"
+                      ? "Cancel payment"
+                      : "Cancel checkout"}
                 </Button>
               ) : null}
               {canRetry ? (

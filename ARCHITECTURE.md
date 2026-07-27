@@ -764,11 +764,17 @@ I/O and, together with the single purchase-status lifecycle and stable
 purchase-derived idempotency key, permits identical creation retries for a
 derived 30-minute window, and fences ambiguity through its frozen 90-minute
 expiry. Current-policy group funding may bind one unconfirmed saved-card
-PaymentIntent to that row before confirmation. Ambiguous confirmation remains
+PaymentIntent to that row before confirmation. The payer-row lock is the
+linearization boundary: it rechecks active payer and still-created purchase
+state, and a deletion or terminal transition that wins first cancels the
+unbound intent without confirmation. Ambiguous confirmation remains
 recoverable only through that exact encrypted reference; a definitive failure
 must be verified canceled before the purchase can return to `created` and open
-Checkout. Checkout-entered cards are saved only for later explicit group
-contributions. The financial movements described above use only signed
+Checkout. The existing payer-owned cancel path also resolves a sessionless
+direct attempt, while fulfilled sessionless purchases detach by clearing
+encrypted payer references and retaining lookup evidence for later
+refund/dispute reconciliation. Checkout-entered cards are saved only for later
+explicit group contributions. The financial movements described above use only signed
 `refund_adjustment` and `dispute_adjustment` ledger entries; there are no
 separate reversal or restoration kinds. Personal, hosted-group, and
 Family-member funding use the same purchase lifecycle. Group funding resolves

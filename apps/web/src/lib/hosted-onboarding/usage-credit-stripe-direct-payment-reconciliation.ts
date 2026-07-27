@@ -15,7 +15,7 @@ import {
   retrieveHostedUsageCreditFinancialSnapshot,
 } from "./usage-credit-stripe-financial-reconciliation";
 import {
-  assertHostedUsageCreditPaymentIntentMatchesPurchase,
+  assertHostedUsageCreditBoundPaymentIntentMatchesPurchase,
   buildHostedUsageCreditDirectPaymentAuthorization,
   readHostedUsageCreditSavedCardPurchaseId,
 } from "./usage-credit-stripe-payment-proof";
@@ -90,7 +90,7 @@ export async function prepareHostedUsageCreditDirectPaymentEvent(input: {
       "Direct usage-credit PaymentIntent environment or identity did not match.",
     );
   }
-  assertHostedUsageCreditPaymentIntentMatchesPurchase({
+  assertHostedUsageCreditBoundPaymentIntentMatchesPurchase({
     paymentIntent,
     purchase: input.purchase,
   });
@@ -146,7 +146,7 @@ export async function reconcileHostedUsageCreditDirectPaymentEventTx(input: {
   }
 
   const { paymentIntent, privateReferences, snapshot } = input.prepared;
-  assertHostedUsageCreditPaymentIntentMatchesPurchase({
+  assertHostedUsageCreditBoundPaymentIntentMatchesPurchase({
     paymentIntent,
     purchase: input.purchase,
   });

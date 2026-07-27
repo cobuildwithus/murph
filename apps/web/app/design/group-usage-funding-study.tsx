@@ -157,6 +157,7 @@ function GroupUsageFundingStudy() {
           <HostedUsageTopUpDialog
             key={groupPaymentRecoveryPreviewKey}
             activePurchase={{
+              cancelAllowed: true,
               offerCode: "usage_25_usd",
               purchaseId: "hucp_design_pending_0",
               retryAllowed: true,

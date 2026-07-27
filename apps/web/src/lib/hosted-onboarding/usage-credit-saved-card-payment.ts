@@ -27,11 +27,23 @@ import {
 } from "./usage-credit-purchase-stripe";
 import { HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_VERSION } from
   "./usage-credit-offers";
-import { assertHostedUsageCreditPaymentIntentMatchesPurchase } from
-  "./usage-credit-stripe-payment-proof";
+import {
+  assertHostedUsageCreditBoundPaymentIntentMatchesPurchase,
+  assertHostedUsageCreditPaymentIntentMatchesPurchase,
+} from "./usage-credit-stripe-payment-proof";
 
 const HOSTED_USAGE_CREDIT_SAVED_CARD_IDEMPOTENCY_PREFIX =
   "hosted-usage-credit-saved-card";
+
+type HostedUsageCreditDirectPaymentBinding =
+  | {
+      kind: "bound";
+      purchase: HostedUsageCreditPurchase;
+    }
+  | {
+      kind: "not_bound";
+      purchase: HostedUsageCreditPurchase;
+    };
 
 export async function tryChargeHostedUsageCreditSavedCard(input: {
   checkoutRequest: Stripe.Checkout.SessionCreateParams;
@@ -41,6 +53,7 @@ export async function tryChargeHostedUsageCreditSavedCard(input: {
   stripe: Stripe;
 }): Promise<HostedUsageCreditPurchase | null> {
   let current = await readCurrentHostedUsageCreditPurchase(input);
+  const payerMemberId = requireHostedUsageCreditPurchasePayerMemberId(current);
   if (
     current.stripeCheckoutSessionLookupKey ||
     (
@@ -100,14 +113,23 @@ export async function tryChargeHostedUsageCreditSavedCard(input: {
       paymentIntent,
       purchase: current,
     });
-    current = await bindHostedUsageCreditDirectPaymentIntent({
+    const binding = await bindHostedUsageCreditDirectPaymentIntent({
       now: input.now,
+      payerMemberId,
       paymentIntent,
       prisma: input.prisma,
       purchase: current,
     });
+    if (binding.kind === "not_bound") {
+      return cancelUnboundHostedUsageCreditDirectPaymentIntent({
+        paymentIntent,
+        purchase: binding.purchase,
+        stripe: input.stripe,
+      });
+    }
+    current = binding.purchase;
   }
-  assertHostedUsageCreditPaymentIntentMatchesPurchase({
+  assertHostedUsageCreditBoundPaymentIntentMatchesPurchase({
     paymentIntent,
     purchase: current,
   });
@@ -116,19 +138,23 @@ export async function tryChargeHostedUsageCreditSavedCard(input: {
     paymentIntent.status === "succeeded" ||
     paymentIntent.status === "processing"
   ) {
-    return bindHostedUsageCreditDirectPaymentIntent({
-      now: input.now,
-      paymentIntent,
-      prisma: input.prisma,
-      purchase: current,
-    });
+    return requireHostedUsageCreditDirectPaymentBinding(
+      await bindHostedUsageCreditDirectPaymentIntent({
+        now: input.now,
+        payerMemberId,
+        paymentIntent,
+        prisma: input.prisma,
+        purchase: current,
+      }),
+    );
   }
   if (paymentIntent.status === "canceled") {
-    return releaseCanceledHostedUsageCreditDirectPaymentIntent({
+    return transitionCanceledHostedUsageCreditDirectPaymentIntent({
       now: input.now,
       paymentIntent,
       prisma: input.prisma,
       purchase: current,
+      transition: "release",
     });
   }
 
@@ -143,7 +169,7 @@ export async function tryChargeHostedUsageCreditSavedCard(input: {
         purchase: current,
         stripe: input.stripe,
       });
-    assertHostedUsageCreditPaymentIntentMatchesPurchase({
+    assertHostedUsageCreditBoundPaymentIntentMatchesPurchase({
       paymentIntent: resolvedPaymentIntent,
       purchase: current,
     });
@@ -152,12 +178,15 @@ export async function tryChargeHostedUsageCreditSavedCard(input: {
     resolvedPaymentIntent.status === "succeeded" ||
     resolvedPaymentIntent.status === "processing"
   ) {
-    return bindHostedUsageCreditDirectPaymentIntent({
-      now: input.now,
-      paymentIntent: resolvedPaymentIntent,
-      prisma: input.prisma,
-      purchase: current,
-    });
+    return requireHostedUsageCreditDirectPaymentBinding(
+      await bindHostedUsageCreditDirectPaymentIntent({
+        now: input.now,
+        payerMemberId,
+        paymentIntent: resolvedPaymentIntent,
+        prisma: input.prisma,
+        purchase: current,
+      }),
+    );
   }
 
   const canceled = await cancelHostedUsageCreditDirectPaymentIntent({
@@ -165,17 +194,20 @@ export async function tryChargeHostedUsageCreditSavedCard(input: {
     purchase: current,
     stripe: input.stripe,
   });
-  assertHostedUsageCreditPaymentIntentMatchesPurchase({
+  assertHostedUsageCreditBoundPaymentIntentMatchesPurchase({
     paymentIntent: canceled,
     purchase: current,
   });
   if (canceled.status === "succeeded" || canceled.status === "processing") {
-    return bindHostedUsageCreditDirectPaymentIntent({
-      now: input.now,
-      paymentIntent: canceled,
-      prisma: input.prisma,
-      purchase: current,
-    });
+    return requireHostedUsageCreditDirectPaymentBinding(
+      await bindHostedUsageCreditDirectPaymentIntent({
+        now: input.now,
+        payerMemberId,
+        paymentIntent: canceled,
+        prisma: input.prisma,
+        purchase: current,
+      }),
+    );
   }
   if (canceled.status !== "canceled") {
     throw buildHostedUsageCreditStripeUnavailableError(
@@ -183,11 +215,12 @@ export async function tryChargeHostedUsageCreditSavedCard(input: {
       "paymentIntents.cancel.saved-card",
     );
   }
-  return releaseCanceledHostedUsageCreditDirectPaymentIntent({
+  return transitionCanceledHostedUsageCreditDirectPaymentIntent({
     now: input.now,
     paymentIntent: canceled,
     prisma: input.prisma,
     purchase: current,
+    transition: "release",
   });
 }
 
@@ -480,11 +513,116 @@ async function cancelHostedUsageCreditDirectPaymentIntent(input: {
   }
 }
 
-async function releaseCanceledHostedUsageCreditDirectPaymentIntent(input: {
+async function cancelUnboundHostedUsageCreditDirectPaymentIntent(input: {
+  paymentIntent: Stripe.PaymentIntent;
+  purchase: HostedUsageCreditPurchase;
+  stripe: Stripe;
+}): Promise<HostedUsageCreditPurchase> {
+  const canceled = await cancelHostedUsageCreditDirectPaymentIntent({
+    paymentIntent: input.paymentIntent,
+    purchase: input.purchase,
+    stripe: input.stripe,
+  });
+  assertHostedUsageCreditPaymentIntentMatchesPurchase({
+    paymentIntent: canceled,
+    purchase: input.purchase,
+  });
+  if (canceled.status !== "canceled") {
+    throw buildHostedUsageCreditStripeUnavailableError(
+      new Error(
+        "Unbound saved-card PaymentIntent could not be proven canceled.",
+      ),
+      "paymentIntents.cancel.saved-card-unbound",
+    );
+  }
+  if (input.purchase.stripePaymentIntentLookupKey) {
+    throw buildHostedUsageCreditInvariantError(
+      "saved_card_unbound_payment_became_bound",
+    );
+  }
+  return input.purchase;
+}
+
+export async function cancelHostedUsageCreditDirectPayment(input: {
+  now: Date;
+  prisma: PrismaClient;
+  purchase: HostedUsageCreditPurchase;
+  stripe: Stripe;
+}): Promise<HostedUsageCreditPurchase> {
+  const payerMemberId = requireHostedUsageCreditPurchasePayerMemberId(
+    input.purchase,
+  );
+  const paymentIntent = await retrieveBoundHostedUsageCreditPaymentIntent({
+    prisma: input.prisma,
+    purchase: input.purchase,
+    stripe: input.stripe,
+  });
+  assertHostedUsageCreditBoundPaymentIntentMatchesPurchase({
+    paymentIntent,
+    purchase: input.purchase,
+  });
+  if (
+    paymentIntent.status === "succeeded" ||
+    paymentIntent.status === "processing"
+  ) {
+    return requireHostedUsageCreditDirectPaymentBinding(
+      await bindHostedUsageCreditDirectPaymentIntent({
+        now: input.now,
+        payerMemberId,
+        paymentIntent,
+        prisma: input.prisma,
+        purchase: input.purchase,
+      }),
+    );
+  }
+
+  const canceled = await cancelHostedUsageCreditDirectPaymentIntent({
+    paymentIntent,
+    purchase: input.purchase,
+    stripe: input.stripe,
+  });
+  assertHostedUsageCreditBoundPaymentIntentMatchesPurchase({
+    paymentIntent: canceled,
+    purchase: input.purchase,
+  });
+  if (canceled.status === "succeeded" || canceled.status === "processing") {
+    return requireHostedUsageCreditDirectPaymentBinding(
+      await bindHostedUsageCreditDirectPaymentIntent({
+        now: input.now,
+        payerMemberId,
+        paymentIntent: canceled,
+        prisma: input.prisma,
+        purchase: input.purchase,
+      }),
+    );
+  }
+  if (canceled.status !== "canceled") {
+    throw buildHostedUsageCreditStripeUnavailableError(
+      new Error("Saved-card PaymentIntent did not reach a safe terminal state."),
+      "paymentIntents.cancel.saved-card-expire",
+    );
+  }
+  const expired = await transitionCanceledHostedUsageCreditDirectPaymentIntent({
+    now: input.now,
+    paymentIntent: canceled,
+    prisma: input.prisma,
+    purchase: input.purchase,
+    transition: "expire",
+  });
+  if (!expired) {
+    throw buildHostedUsageCreditInvariantError(
+      "saved_card_payment_expire_failed",
+    );
+  }
+  return expired;
+}
+
+async function transitionCanceledHostedUsageCreditDirectPaymentIntent(input: {
   now: Date;
   paymentIntent: Stripe.PaymentIntent;
   prisma: PrismaClient;
   purchase: HostedUsageCreditPurchase;
+  transition: "expire" | "release";
 }): Promise<HostedUsageCreditPurchase | null> {
   if (input.paymentIntent.status !== "canceled") {
     throw buildHostedUsageCreditInvariantError(
@@ -520,14 +658,20 @@ async function releaseCanceledHostedUsageCreditDirectPaymentIntent(input: {
 
     const released = await tx.hostedUsageCreditPurchase.updateMany({
       data: {
-        lastReconciledAt: null,
+        lastReconciledAt: input.transition === "expire" ? input.now : null,
         reconciliationVersion: { increment: 1n },
-        status: HostedUsageCreditPurchaseStatus.created,
-        stripeChargeIdEncrypted: null,
-        stripeChargeLookupKey: null,
-        stripePaymentIntentIdEncrypted: null,
-        stripePaymentIntentLookupKey: null,
-        terminalAt: null,
+        status: input.transition === "expire"
+          ? HostedUsageCreditPurchaseStatus.expired
+          : HostedUsageCreditPurchaseStatus.created,
+        ...(input.transition === "release"
+          ? {
+              stripeChargeIdEncrypted: null,
+              stripeChargeLookupKey: null,
+              stripePaymentIntentIdEncrypted: null,
+              stripePaymentIntentLookupKey: null,
+            }
+          : {}),
+        terminalAt: input.transition === "expire" ? input.now : null,
         updatedAt: input.now,
       },
       where: {
@@ -539,22 +683,34 @@ async function releaseCanceledHostedUsageCreditDirectPaymentIntent(input: {
     });
     if (released.count !== 1) {
       throw buildHostedUsageCreditInvariantError(
-        "saved_card_payment_release_failed",
+        input.transition === "expire"
+          ? "saved_card_payment_expire_failed"
+          : "saved_card_payment_release_failed",
       );
     }
-    return null;
+    if (input.transition === "release") {
+      return null;
+    }
+    const expired = await tx.hostedUsageCreditPurchase.findUnique({
+      where: { id: current.id },
+    });
+    if (!expired) {
+      throw buildHostedUsageCreditInvariantError(
+        "saved_card_purchase_missing_after_expire",
+      );
+    }
+    return expired;
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
 }
 
 async function bindHostedUsageCreditDirectPaymentIntent(input: {
   now: Date;
+  payerMemberId: string;
   paymentIntent: Stripe.PaymentIntent;
   prisma: PrismaClient;
   purchase: HostedUsageCreditPurchase;
-}): Promise<HostedUsageCreditPurchase> {
-  const payerMemberId = requireHostedUsageCreditPurchasePayerMemberId(
-    input.purchase,
-  );
+}): Promise<HostedUsageCreditDirectPaymentBinding> {
+  const payerMemberId = input.payerMemberId;
   const paymentIntentLookupKey = requireHostedUsageCreditLookupKey(
     createHostedStripeBillingEventLookupKey(input.paymentIntent.id),
     "payment_intent",
@@ -566,54 +722,99 @@ async function bindHostedUsageCreditDirectPaymentIntent(input: {
         "charge",
       )
     : null;
-  const [stripePaymentIntentIdEncrypted, stripeChargeIdEncrypted] =
-    await Promise.all([
-      encryptHostedUsageCreditPurchaseStripeField({
-        field: HOSTED_USAGE_CREDIT_PURCHASE_STRIPE_PRIVATE_FIELDS.paymentIntentId,
-        payerMemberId,
-        prisma: input.prisma,
-        value: input.paymentIntent.id,
-      }),
-      encryptHostedUsageCreditPurchaseStripeField({
-        field: HOSTED_USAGE_CREDIT_PURCHASE_STRIPE_PRIVATE_FIELDS.chargeId,
-        payerMemberId,
-        prisma: input.prisma,
-        value: chargeId,
-      }),
-    ]);
-
   return input.prisma.$transaction(async (tx) => {
     await lockHostedMemberRow(tx, payerMemberId);
     const current = await tx.hostedUsageCreditPurchase.findUnique({
       where: { id: input.purchase.id },
     });
-    if (!current || current.payerMemberId !== payerMemberId) {
+    const payer = await tx.hostedMember.findUnique({
+      select: { suspendedAt: true },
+      where: { id: payerMemberId },
+    });
+    if (!current) {
       throw buildHostedUsageCreditInvariantError(
         "saved_card_purchase_missing",
       );
     }
-    if (
+    const alreadyBound = Boolean(
       current.stripePaymentIntentLookupKey &&
-      !hostedLookupKeyMatchesValue({
+      hostedLookupKeyMatchesValue({
         expectedLookupKey: current.stripePaymentIntentLookupKey,
         kind: "stripe-billing-event",
         normalizedValue: input.paymentIntent.id,
-      })
+      }),
+    );
+    if (
+      current.stripePaymentIntentLookupKey &&
+      !alreadyBound
     ) {
       throw buildHostedUsageCreditInvariantError(
         "saved_card_payment_identity_changed",
       );
     }
-    if (current.status === HostedUsageCreditPurchaseStatus.fulfilled) {
-      return current;
+    if (current.payerMemberId !== payerMemberId) {
+      if (
+        current.payerMemberId === null &&
+        (
+          (
+            alreadyBound &&
+            current.status === HostedUsageCreditPurchaseStatus.fulfilled
+          ) ||
+          (
+            !alreadyBound &&
+            current.status !== HostedUsageCreditPurchaseStatus.created &&
+            current.status !== HostedUsageCreditPurchaseStatus.payment_pending
+          )
+        )
+      ) {
+        return {
+          kind: alreadyBound ? "bound" : "not_bound",
+          purchase: current,
+        };
+      }
+      throw buildHostedUsageCreditInvariantError(
+        "saved_card_purchase_missing",
+      );
     }
     if (
-      current.status !== HostedUsageCreditPurchaseStatus.created &&
-      current.status !== HostedUsageCreditPurchaseStatus.payment_pending
+      alreadyBound &&
+      current.status === HostedUsageCreditPurchaseStatus.fulfilled
     ) {
-      return current;
+      return { kind: "bound", purchase: current };
+    }
+    if (
+      (
+        alreadyBound &&
+        current.status !== HostedUsageCreditPurchaseStatus.payment_pending
+      ) ||
+      (
+        !alreadyBound &&
+        (
+          current.status !== HostedUsageCreditPurchaseStatus.created ||
+          !payer ||
+          payer.suspendedAt
+        )
+      )
+    ) {
+      return { kind: "not_bound", purchase: current };
     }
 
+    const [stripePaymentIntentIdEncrypted, stripeChargeIdEncrypted] =
+      await Promise.all([
+        encryptHostedUsageCreditPurchaseStripeField({
+          field:
+            HOSTED_USAGE_CREDIT_PURCHASE_STRIPE_PRIVATE_FIELDS.paymentIntentId,
+          payerMemberId,
+          prisma: tx,
+          value: input.paymentIntent.id,
+        }),
+        encryptHostedUsageCreditPurchaseStripeField({
+          field: HOSTED_USAGE_CREDIT_PURCHASE_STRIPE_PRIVATE_FIELDS.chargeId,
+          payerMemberId,
+          prisma: tx,
+          value: chargeId,
+        }),
+      ]);
     const updated = await tx.hostedUsageCreditPurchase.updateMany({
       data: {
         reconciliationVersion: { increment: 1n },
@@ -636,12 +837,12 @@ async function bindHostedUsageCreditDirectPaymentIntent(input: {
       where: {
         id: current.id,
         reconciliationVersion: current.reconciliationVersion,
-        status: {
-          in: [
-            HostedUsageCreditPurchaseStatus.created,
-            HostedUsageCreditPurchaseStatus.payment_pending,
-          ],
-        },
+        status: alreadyBound
+          ? HostedUsageCreditPurchaseStatus.payment_pending
+          : HostedUsageCreditPurchaseStatus.created,
+        stripePaymentIntentLookupKey: alreadyBound
+          ? current.stripePaymentIntentLookupKey
+          : null,
       },
     });
     if (updated.count !== 1) {
@@ -657,8 +858,19 @@ async function bindHostedUsageCreditDirectPaymentIntent(input: {
         "saved_card_purchase_missing_after_bind",
       );
     }
-    return bound;
+    return { kind: "bound", purchase: bound };
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+}
+
+function requireHostedUsageCreditDirectPaymentBinding(
+  binding: HostedUsageCreditDirectPaymentBinding,
+): HostedUsageCreditPurchase {
+  if (binding.kind === "not_bound") {
+    throw buildHostedUsageCreditInvariantError(
+      "saved_card_payment_binding_lost",
+    );
+  }
+  return binding.purchase;
 }
 
 export function buildHostedUsageCreditSavedCardIdempotencyKey(

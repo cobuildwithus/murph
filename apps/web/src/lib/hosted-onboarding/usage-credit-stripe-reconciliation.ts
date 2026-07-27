@@ -270,18 +270,32 @@ async function prepareHostedUsageCreditStripeReconciliation(input: {
       prepared,
     };
   }
-  return candidate.eventKind === "direct_payment"
-    ? {
-        kind: "handled",
-        result: {
-          beneficiaryMemberId: candidate.beneficiaryMemberId,
-          granted: false,
-          handled: true,
-          purchaseId: candidate.purchaseId,
-          wakeRequired: false,
-        },
-      }
-    : { kind: "unhandled" };
+  if (
+    candidate.eventKind === "direct_payment" &&
+    (
+      input.event.type === "payment_intent.succeeded" ||
+      input.event.type === "payment_intent.processing"
+    )
+  ) {
+    throw buildHostedUsageCreditStripeRetryableError(
+      new Error(
+        "Direct usage-credit payment event arrived before its exact intent was bound.",
+      ),
+    );
+  }
+  if (candidate.eventKind === "direct_payment") {
+    return {
+      kind: "handled",
+      result: {
+        beneficiaryMemberId: candidate.beneficiaryMemberId,
+        granted: false,
+        handled: true,
+        purchaseId: candidate.purchaseId,
+        wakeRequired: false,
+      },
+    };
+  }
+  return { kind: "unhandled" };
 }
 
 async function reconcileDeletedExpiredUsageCreditCheckout(input: {

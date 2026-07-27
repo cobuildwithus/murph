@@ -81,13 +81,22 @@ Last verified: 2026-07-25
   The browser cannot supply a PaymentMethod. Conflicting defaults or ambiguous
   attached cards must use Checkout. The server creates the PaymentIntent
   unconfirmed, stores its encrypted exact reference on the frozen purchase,
-  then confirms it off session. An ambiguous confirmation remains bound and
+  then confirms it off session. The payer-row lock rechecks that the payer is
+  active and the purchase is still `created`; a deletion or terminal-state
+  race cancels the unbound intent and never confirms it. An ambiguous
+  confirmation remains bound and
   retryable; only verified `canceled` state may clear that binding and permit
   Checkout fallback. While that payment is nonterminal, recovery remains bound
   to its frozen offer and original client request; a different submitted amount
   fails closed and the browser does not expose amount changes. Choosing an amount has no payment effect, and each
   explicit **Add messages** click authorizes only the selected one-time charge.
   No raw card data enters Murph.
+- Direct-purchase cancellation requires only authenticated payer ownership of
+  the opaque purchase ID. Beneficiary, group-locator, or current target
+  authority may gate retry but must not gate cancellation. Payer deletion may
+  detach a fulfilled sessionless purchase only after clearing payer-encrypted
+  references and retaining its non-secret PaymentIntent/Charge lookup proof for
+  later refund or dispute reconciliation.
 - Stripe proves payment; it does not own Murph usage capacity. A browser return
   or client-reported Session or PaymentIntent state must never grant credit.
   The verified Stripe receipt owner must re-fetch and bind the live one-time

@@ -30,7 +30,12 @@ Last verified: 2026-07-25
   member may begin another purchase only after the existing one is terminal.
 - Current-policy group funding may create one unconfirmed saved-card
   PaymentIntent with a purchase-derived idempotency key. The producer must bind
-  its encrypted exact reference under the payer lock before confirmation.
+  its encrypted exact reference under the payer lock before confirmation. The
+  locked bind must re-read both payer suspension and purchase status; a
+  suspension, deletion, or terminal transition that wins first leaves the
+  intent unbound, canceled, and never confirmed. A succeeded or processing
+  event for an unbound intent remains in the existing Stripe receipt retry lane
+  instead of being acknowledged without a grant.
   Confirmation and cancellation use separate stable keys. An ambiguous
   confirmation keeps the purchase `payment_pending`; exact request replay
   retrieves and continues only that intent. A fresh request for the same
@@ -42,6 +47,12 @@ Last verified: 2026-07-25
   and its binding is cleared under the same reconciliation fence. Direct
   PaymentIntent events reuse the existing Stripe receipt and financial
   reconciliation owner rather than adding a retry queue.
+- The payer-owned cancel endpoint also owns a sessionless direct
+  `payment_pending` purchase. It retrieves and cancels only the exact bound
+  intent, preserves succeeded or processing state for webhook settlement, and
+  terminalizes only provider-proven cancellation. Cancellation is payer
+  authority and remains available from Settings or another target's conflict
+  state; retry and confirmation remain exact-target capabilities.
 - Family usage-credit creation rechecks owner, group billing, active membership,
   and beneficiary status inside the purchase transaction. Exact request-key
   replay keeps the already-frozen purchase identity but rechecks mutable Family
