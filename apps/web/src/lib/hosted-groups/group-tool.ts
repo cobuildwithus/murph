@@ -1406,15 +1406,11 @@ async function handleHostedRuntimeGroupReadChatParticipants(input: {
     const ownerAdvisoryNames =
       await readHostedOwnerAddressBookAdvisoryNamesWithinDeadline({
         containerMemberId: input.memberId,
-        phoneHandles: participants.flatMap((participant) =>
-          participant.hasOwnMurph ? [] : [participant.handle]
-        ),
+        phoneHandles: participants.map((participant) => participant.handle),
         prisma,
       });
     for (const participant of participants) {
-      const ownerAdvisoryName = participant.hasOwnMurph
-        ? undefined
-        : ownerAdvisoryNames.get(participant.handle);
+      const ownerAdvisoryName = ownerAdvisoryNames.get(participant.handle);
       if (ownerAdvisoryName) {
         participant.ownerAdvisoryName = ownerAdvisoryName;
       }

@@ -491,7 +491,7 @@ describe("murph.group dynamic tool", () => {
         participants: [
           {
             handle: "+15551110003",
-            hasOwnMurph: false,
+            hasOwnMurph: true,
             ownerAdvisoryName: "Alex R.",
           },
         ],
@@ -520,7 +520,7 @@ describe("murph.group dynamic tool", () => {
       result: {
         participants: [{
           handle: "+15551110003",
-          hasOwnMurph: false,
+          hasOwnMurph: true,
           unverifiedOwnerContactLabel: "Alex R.",
         }],
         status: "ok",
