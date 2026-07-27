@@ -1,5 +1,6 @@
 interface GrowthScorecardProps {
-  activeMembers: {
+  activeConversations: {
+    trailing30Days: number;
     trailing7Days: number;
     wowPercent: number | null;
   };
@@ -82,10 +83,12 @@ export function GrowthScorecard(input: GrowthScorecardProps) {
             />
             <GrowthSignal
               className="border-t border-border/60 sm:border-l sm:border-t-0 lg:border-l-0 lg:border-t"
-              detail={`${formatInteger(input.activeMembers.trailing7Days)} direct members messaged`}
-              helper="Usage pulse, not a retention cohort"
-              label="Weekly active member growth"
-              value={formatGrowthRate(input.activeMembers.wowPercent)}
+              detail={`${formatInteger(input.activeConversations.trailing30Days)} MAU across personal + group chats`}
+              helper={formatActiveConversationChange(
+                input.activeConversations.wowPercent,
+              )}
+              label="Weekly active conversations"
+              value={`${formatInteger(input.activeConversations.trailing7Days)} WAU`}
             />
           </div>
         </div>
@@ -258,6 +261,16 @@ function formatWindowChange(value: number | null): string {
   }
 
   return `${formatGrowthRate(value)} versus the prior seven days`;
+}
+
+function formatActiveConversationChange(value: number | null): string {
+  const activityDefinition = "At least one inbound message per rolling window";
+
+  if (value === null) {
+    return `No prior-week WAU baseline · ${activityDefinition}`;
+  }
+
+  return `${formatGrowthRate(value)} WAU versus the prior seven days · ${activityDefinition}`;
 }
 
 function formatInteger(value: number): string {

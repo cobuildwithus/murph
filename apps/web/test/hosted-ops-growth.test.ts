@@ -40,6 +40,7 @@ const mocks = vi.hoisted(() => ({
   },
   hostedMailboxItem: {
     count: vi.fn(),
+    groupBy: vi.fn(),
   },
   hostedMember: {
     count: vi.fn(),
@@ -123,6 +124,7 @@ describe("hosted ops growth metrics", () => {
     mocks.getPrisma.mockReturnValue(prisma);
     mocks.hostedLinqDelivery.count.mockResolvedValue(0);
     mocks.hostedMailboxItem.count.mockResolvedValue(0);
+    mocks.hostedMailboxItem.groupBy.mockResolvedValue([]);
     mocks.hostedGrowthAggregate.findUniqueOrThrow.mockResolvedValue({
       trackedFulfilledUsageTopUps: 0,
     });
@@ -485,9 +487,10 @@ describe("hosted ops growth metrics", () => {
   it("counts own-paid or family-paid members in the mature converted count query", async () => {
     queueCurrentMetricMocks();
     queueCurrentMetricMocks();
-    mocks.hostedMember.count
-      .mockResolvedValueOnce(6)
-      .mockResolvedValueOnce(3);
+    mocks.hostedMailboxItem.groupBy
+      .mockResolvedValueOnce(activeConversationRows(6))
+      .mockResolvedValueOnce(activeConversationRows(3))
+      .mockResolvedValueOnce(activeConversationRows(9));
     mocks.hostedGrowthAggregate.findUniqueOrThrow.mockResolvedValueOnce({
       trackedFulfilledUsageTopUps: 12,
     });
@@ -505,7 +508,7 @@ describe("hosted ops growth metrics", () => {
 
     expect(markup).toContain("MRR growth per week");
     expect(markup).toMatch(
-      /Weekly active member growth<\/div><div[^>]*>\+100%<\/div><div[^>]*>6 direct members messaged<\/div>/u,
+      /Weekly active conversations<\/div><div[^>]*>6 WAU<\/div><div[^>]*>9 MAU across personal \+ group chats<\/div>/u,
     );
     expect(markup).toMatch(
       /Tracked fulfilled top-ups<\/span><span[^>]*>12<\/span>/u,
@@ -623,12 +626,22 @@ describe("hosted ops growth metrics", () => {
     expect(calculatePercentChange(6, 3)).toBe(100);
   });
 
-  it("reads weekly active members and counts only fulfilled usage top-ups", async () => {
+  it("reads WAU and MAU across personal and group conversations", async () => {
     const now = new Date("2026-07-06T12:00:00.000Z");
     queueCurrentMetricMocks();
-    mocks.hostedMember.count
-      .mockResolvedValueOnce(6)
-      .mockResolvedValueOnce(3);
+    mocks.hostedMailboxItem.groupBy
+      .mockResolvedValueOnce([
+        { userId: "member_direct" },
+        { userId: "group_runtime" },
+        { userId: "thread_container" },
+      ])
+      .mockResolvedValueOnce([{ userId: "member_previous" }])
+      .mockResolvedValueOnce([
+        { userId: "member_direct" },
+        { userId: "group_runtime" },
+        { userId: "thread_container" },
+        { userId: "member_monthly" },
+      ]);
     mocks.hostedGrowthAggregate.findUniqueOrThrow.mockResolvedValueOnce({
       trackedFulfilledUsageTopUps: 12,
     });
@@ -641,9 +654,10 @@ describe("hosted ops growth metrics", () => {
 
     const dashboard = await readHostedGrowthDashboard(now);
 
-    expect(dashboard.activeMembers).toEqual({
-      trailing7Days: 6,
-      wowPercent: 100,
+    expect(dashboard.activeConversations).toEqual({
+      trailing30Days: 4,
+      trailing7Days: 3,
+      wowPercent: 200,
     });
     expect(dashboard.usageTopUps).toEqual({
       trackedFulfilled: 12,
@@ -656,34 +670,34 @@ describe("hosted ops growth metrics", () => {
         id: "global",
       },
     });
-    expect(mocks.hostedMember.count.mock.calls[5]?.[0]).toMatchObject({
+    expect(mocks.hostedMailboxItem.groupBy.mock.calls[0]?.[0]).toEqual({
+      by: ["userId"],
       where: {
-        hostedGroupRuntime: null,
-        hostedMailboxItems: {
-          some: {
-            kind: "conversation.message",
-            occurredAt: {
-              gte: new Date("2026-06-29T12:00:00.000Z"),
-              lt: new Date("2026-07-06T12:00:00.000Z"),
-            },
-          },
+        kind: "conversation.message",
+        occurredAt: {
+          gte: new Date("2026-06-29T12:00:00.000Z"),
+          lt: new Date("2026-07-06T12:00:00.000Z"),
         },
-        threadContainer: null,
       },
     });
-    expect(mocks.hostedMember.count.mock.calls[6]?.[0]).toMatchObject({
+    expect(mocks.hostedMailboxItem.groupBy.mock.calls[1]?.[0]).toEqual({
+      by: ["userId"],
       where: {
-        hostedGroupRuntime: null,
-        hostedMailboxItems: {
-          some: {
-            kind: "conversation.message",
-            occurredAt: {
-              gte: new Date("2026-06-22T12:00:00.000Z"),
-              lt: new Date("2026-06-29T12:00:00.000Z"),
-            },
-          },
+        kind: "conversation.message",
+        occurredAt: {
+          gte: new Date("2026-06-22T12:00:00.000Z"),
+          lt: new Date("2026-06-29T12:00:00.000Z"),
         },
-        threadContainer: null,
+      },
+    });
+    expect(mocks.hostedMailboxItem.groupBy.mock.calls[2]?.[0]).toEqual({
+      by: ["userId"],
+      where: {
+        kind: "conversation.message",
+        occurredAt: {
+          gte: new Date("2026-06-06T12:00:00.000Z"),
+          lt: new Date("2026-07-06T12:00:00.000Z"),
+        },
       },
     });
   });
@@ -692,12 +706,13 @@ describe("hosted ops growth metrics", () => {
     new Date("2026-07-06T00:05:00.000Z"),
     new Date("2026-07-06T12:05:00.000Z"),
   ])(
-    "compares equal rolling active-member windows at %s",
+    "compares equal rolling active-conversation windows at %s",
     async (now) => {
       queueCurrentMetricMocks();
-      mocks.hostedMember.count
-        .mockResolvedValueOnce(7)
-        .mockResolvedValueOnce(7);
+      mocks.hostedMailboxItem.groupBy
+        .mockResolvedValueOnce(activeConversationRows(7))
+        .mockResolvedValueOnce(activeConversationRows(7))
+        .mockResolvedValueOnce(activeConversationRows(21));
       mocks.hostedGrowthAggregate.findUniqueOrThrow.mockResolvedValueOnce({
         trackedFulfilledUsageTopUps: 12,
       });
@@ -710,31 +725,32 @@ describe("hosted ops growth metrics", () => {
 
       const dashboard = await readHostedGrowthDashboard(now);
 
-      expect(dashboard.activeMembers).toEqual({
+      expect(dashboard.activeConversations).toEqual({
+        trailing30Days: 21,
         trailing7Days: 7,
         wowPercent: 0,
       });
-      expect(mocks.hostedMember.count.mock.calls[5]?.[0]).toMatchObject({
+      expect(mocks.hostedMailboxItem.groupBy.mock.calls[0]?.[0]).toMatchObject({
         where: {
-          hostedMailboxItems: {
-            some: {
-              occurredAt: {
-                gte: addUtcDays(now, -7),
-                lt: now,
-              },
-            },
+          occurredAt: {
+            gte: addUtcDays(now, -7),
+            lt: now,
           },
         },
       });
-      expect(mocks.hostedMember.count.mock.calls[6]?.[0]).toMatchObject({
+      expect(mocks.hostedMailboxItem.groupBy.mock.calls[1]?.[0]).toMatchObject({
         where: {
-          hostedMailboxItems: {
-            some: {
-              occurredAt: {
-                gte: addUtcDays(now, -14),
-                lt: addUtcDays(now, -7),
-              },
-            },
+          occurredAt: {
+            gte: addUtcDays(now, -14),
+            lt: addUtcDays(now, -7),
+          },
+        },
+      });
+      expect(mocks.hostedMailboxItem.groupBy.mock.calls[2]?.[0]).toMatchObject({
+        where: {
+          occurredAt: {
+            gte: addUtcDays(now, -30),
+            lt: now,
           },
         },
       });
@@ -743,7 +759,11 @@ describe("hosted ops growth metrics", () => {
 
   it("leads the scorecard with weekly revenue growth and keeps usage context honest", () => {
     const scorecardProps = {
-      activeMembers: { trailing7Days: 24, wowPercent: 9.1 },
+      activeConversations: {
+        trailing30Days: 61,
+        trailing7Days: 24,
+        wowPercent: 9.1,
+      },
       conversion: { converted: 8, matureStarted: 20, percent: 40 },
       mrrUsdCents: 8_400,
       newMembers: { trailing7Days: 17, wowPercent: 21.4 },
@@ -765,8 +785,10 @@ describe("hosted ops growth metrics", () => {
     expect(markup).toContain("+9.9%");
     expect(markup).toMatch(/text-red-700[^>]*>\+9\.9%/u);
     expect(markup).toContain("Below 10% target");
-    expect(markup).toContain("24 direct members messaged");
-    expect(markup).toContain("Usage pulse, not a retention cohort");
+    expect(markup).toContain("24 WAU");
+    expect(markup).toContain("61 MAU across personal + group chats");
+    expect(markup).toContain("+9.1% WAU versus the prior seven days");
+    expect(markup).toContain("At least one inbound message per rolling window");
     expect(markup).toContain("8 of 20 mature trials");
 
     const targetHitMarkup = renderToStaticMarkup(
@@ -1048,6 +1070,12 @@ function queueCurrentMetricMocks() {
       planCapacities: [{ billedQuantity: 1, planCode: "pulse" }],
     },
   ]);
+}
+
+function activeConversationRows(count: number) {
+  return Array.from({ length: count }, (_, index) => ({
+    userId: `conversation_${index + 1}`,
+  }));
 }
 
 function snapshotRow(date: string, mrrUsdCents: number) {

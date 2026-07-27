@@ -202,7 +202,8 @@ export interface HostedGrowthTrialCohortRow {
 }
 
 export interface HostedGrowthDashboard {
-  activeMembers: {
+  activeConversations: {
+    trailing30Days: number;
     trailing7Days: number;
     wowPercent: number | null;
   };
@@ -594,8 +595,9 @@ export async function readHostedGrowthDashboard(
   const currentCalendarSevenDayStart = addUtcDays(todayStart, -6);
   const previousCalendarSevenDayStart = addUtcDays(todayStart, -13);
   const currentCalendarSevenDayEnd = addUtcDays(todayStart, 1);
-  const activeMembersCurrentStart = addUtcDays(now, -7);
-  const activeMembersPreviousStart = addUtcDays(now, -14);
+  const activeConversationsCurrentStart = addUtcDays(now, -7);
+  const activeConversationsPreviousStart = addUtcDays(now, -14);
+  const activeConversationsMonthlyStart = addUtcDays(now, -30);
 
   const [
     current,
@@ -605,8 +607,9 @@ export async function readHostedGrowthDashboard(
     matureStarted,
     matureConverted,
     growthAggregate,
-    activeMembersTrailing7Days,
-    activeMembersPrevious7Days,
+    activeConversationsTrailing7DayRows,
+    activeConversationsPrevious7DayRows,
+    activeConversationsTrailing30DayRows,
   ] = await Promise.all([
     readCurrentHostedGrowthMetrics(now, prisma),
     prisma.hostedMember.findMany({
@@ -696,31 +699,33 @@ export async function readHostedGrowthDashboard(
         id: HOSTED_GROWTH_AGGREGATE_ID,
       },
     }),
-    prisma.hostedMember.count({
+    prisma.hostedMailboxItem.groupBy({
+      by: ["userId"],
       where: {
-        ...realHostedMemberWhere,
-        hostedMailboxItems: {
-          some: {
-            kind: INBOUND_MESSAGE_MAILBOX_KIND,
-            occurredAt: {
-              gte: activeMembersCurrentStart,
-              lt: now,
-            },
-          },
+        kind: INBOUND_MESSAGE_MAILBOX_KIND,
+        occurredAt: {
+          gte: activeConversationsCurrentStart,
+          lt: now,
         },
       },
     }),
-    prisma.hostedMember.count({
+    prisma.hostedMailboxItem.groupBy({
+      by: ["userId"],
       where: {
-        ...realHostedMemberWhere,
-        hostedMailboxItems: {
-          some: {
-            kind: INBOUND_MESSAGE_MAILBOX_KIND,
-            occurredAt: {
-              gte: activeMembersPreviousStart,
-              lt: activeMembersCurrentStart,
-            },
-          },
+        kind: INBOUND_MESSAGE_MAILBOX_KIND,
+        occurredAt: {
+          gte: activeConversationsPreviousStart,
+          lt: activeConversationsCurrentStart,
+        },
+      },
+    }),
+    prisma.hostedMailboxItem.groupBy({
+      by: ["userId"],
+      where: {
+        kind: INBOUND_MESSAGE_MAILBOX_KIND,
+        occurredAt: {
+          gte: activeConversationsMonthlyStart,
+          lt: now,
         },
       },
     }),
@@ -774,11 +779,12 @@ export async function readHostedGrowthDashboard(
   );
 
   return {
-    activeMembers: {
-      trailing7Days: activeMembersTrailing7Days,
+    activeConversations: {
+      trailing30Days: activeConversationsTrailing30DayRows.length,
+      trailing7Days: activeConversationsTrailing7DayRows.length,
       wowPercent: calculatePercentChange(
-        activeMembersTrailing7Days,
-        activeMembersPrevious7Days,
+        activeConversationsTrailing7DayRows.length,
+        activeConversationsPrevious7DayRows.length,
       ),
     },
     capturedAt: now.toISOString(),
