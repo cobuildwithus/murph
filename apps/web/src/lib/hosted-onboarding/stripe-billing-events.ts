@@ -1508,10 +1508,10 @@ export async function applyStripeDisputeUpdated(
   dispatchContext: Pick<HostedStripeDispatchContext, "eventCreatedAt" | "sourceEventId" | "sourceType">,
   prisma: Prisma.TransactionClient,
   customerId?: string | null,
-): Promise<void> {
+): Promise<"applied" | "subscription_identity_pending"> {
   const outcome = classifyHostedStripeDisputeOutcome(dispute, dispatchContext.sourceType);
   if (outcome === "ignore") {
-    return;
+    return "applied";
   }
 
   const member = await findMemberForStripeReversal({
@@ -1523,7 +1523,7 @@ export async function applyStripeDisputeUpdated(
   });
 
   if (!member) {
-    return;
+    return "applied";
   }
 
   const billingDispatchContext = {
@@ -1536,12 +1536,12 @@ export async function applyStripeDisputeUpdated(
   if (outcome === "restore") {
     const subscription = await readHostedMemberStripeSubscription(member);
     if (!subscription) {
-      return;
+      return "subscription_identity_pending";
     }
 
     const canonicalBillingStatus = mapStripeSubscriptionStatusToHostedBillingStatus(subscription.status);
     if (canonicalBillingStatus !== HostedBillingStatus.active) {
-      return;
+      return "applied";
     }
 
     const { canonicalBillingStatus: resolvedCanonicalBillingStatus, member: preparedMember } =
@@ -1567,7 +1567,7 @@ export async function applyStripeDisputeUpdated(
       suspendedAtOverride: null,
       tx: prisma,
     });
-    return;
+    return "applied";
   }
 
   const { canonicalBillingStatus, member: preparedMember } = await prepareHostedMemberStripeBillingWrite({
@@ -1582,6 +1582,7 @@ export async function applyStripeDisputeUpdated(
     stripeCustomerId: customerId ?? undefined,
     tx: prisma,
   });
+  return "applied";
 }
 
 type HostedStripeDisputeOutcome = "ignore" | "restore" | "suspend";

@@ -39,6 +39,7 @@ vi.mock("@/src/lib/hosted-onboarding/shared", async () => {
 
 import {
   prepareHostedMemberStripeBillingWrite,
+  suspendHostedMemberForBillingReversalTx,
   writeHostedMemberStripeBillingRefIfFreshTx,
   writeHostedMemberStripeBillingTx,
 } from "@/src/lib/hosted-onboarding/stripe-billing-policy";
@@ -191,6 +192,252 @@ describe("hosted onboarding stripe billing policy", () => {
       stripeSubscriptionId: "sub_456",
       tx,
     });
+  });
+
+  it("writes billing progress before applying an intentional reversal suspension", async () => {
+    const eventCreatedAt = new Date("2026-04-25T00:00:00.000Z");
+    const tx = { __tag: "tx" };
+
+    await suspendHostedMemberForBillingReversalTx({
+      canonicalBillingStatus: HostedBillingStatus.active,
+      dispatchContext: {
+        eventCreatedAt,
+        sourceEventId: "evt_refund_full",
+        sourceType: "stripe.refund.created",
+      },
+      member: makeMemberSnapshot(),
+      stripeCustomerId: "cus_123",
+      tx: tx as never,
+    });
+
+    expect(mocks.writeHostedMemberStripeBillingRef).toHaveBeenCalledOnce();
+    expect(mocks.updateHostedMemberCoreState).toHaveBeenCalledOnce();
+    expect(mocks.updateHostedMemberCoreState).toHaveBeenCalledWith({
+      billingStatus: HostedBillingStatus.unpaid,
+      memberId: "member_123",
+      prisma: tx,
+      suspendedAt: eventCreatedAt,
+    });
+    expect(
+      mocks.writeHostedMemberStripeBillingRef.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      mocks.updateHostedMemberCoreState.mock.invocationCallOrder[0] ?? 0,
+    );
+  });
+
+  it("treats replay of an already-applied reversal suspension as idempotent", async () => {
+    const eventCreatedAt = new Date("2026-04-25T00:00:00.000Z");
+    const suspendedMember = makeMemberSnapshot({
+      billingRef: {
+        lastStripeEventCreatedAt: eventCreatedAt,
+        memberId: "member_123",
+        stripeCustomerId: "cus_123",
+        stripeSubscriptionId: "sub_123",
+      },
+      core: {
+        billingStatus: HostedBillingStatus.unpaid,
+        suspendedAt: eventCreatedAt,
+      },
+    });
+    mocks.readHostedMemberBillingSnapshot.mockResolvedValue(suspendedMember);
+
+    await suspendHostedMemberForBillingReversalTx({
+      canonicalBillingStatus: HostedBillingStatus.active,
+      dispatchContext: {
+        eventCreatedAt,
+        sourceEventId: "evt_dispute_funds_withdrawn",
+        sourceType: "stripe.charge.dispute.funds_withdrawn",
+      },
+      member: suspendedMember,
+      stripeCustomerId: "cus_123",
+      tx: {} as never,
+    });
+
+    expect(mocks.lockHostedMemberRow).toHaveBeenCalledOnce();
+    expect(mocks.updateHostedMemberCoreState).toHaveBeenNthCalledWith(1, {
+      billingStatus: HostedBillingStatus.unpaid,
+      memberId: "member_123",
+      prisma: {},
+      suspendedAt: null,
+    });
+    expect(mocks.writeHostedMemberStripeBillingRef).toHaveBeenCalledOnce();
+    expect(mocks.updateHostedMemberCoreState).toHaveBeenNthCalledWith(2, {
+      billingStatus: HostedBillingStatus.unpaid,
+      memberId: "member_123",
+      prisma: {},
+      suspendedAt: eventCreatedAt,
+    });
+  });
+
+  it("leaves billing-owned suspension untouched across ordinary billing progress", async () => {
+    const reversalCreatedAt = new Date("2026-04-25T00:00:00.000Z");
+    const invoicePaidCreatedAt = new Date("2026-04-25T00:05:00.000Z");
+    const suspendedMember = makeMemberSnapshot({
+      billingRef: {
+        lastStripeEventCreatedAt: reversalCreatedAt,
+        memberId: "member_123",
+        stripeCustomerId: "cus_123",
+        stripeSubscriptionId: "sub_123",
+      },
+      core: {
+        billingStatus: HostedBillingStatus.unpaid,
+        suspendedAt: reversalCreatedAt,
+      },
+    });
+    mocks.readHostedMemberBillingSnapshot.mockResolvedValue(suspendedMember);
+
+    await expect(writeHostedMemberStripeBillingTx({
+      billingStatus: HostedBillingStatus.active,
+      canonicalBillingStatus: HostedBillingStatus.active,
+      dispatchContext: {
+        eventCreatedAt: invoicePaidCreatedAt,
+        occurredAt: invoicePaidCreatedAt.toISOString(),
+        sourceEventId: "evt_invoice_paid_while_reversed",
+        sourceType: "stripe.invoice.paid",
+      },
+      member: suspendedMember,
+      tx: {} as never,
+    })).resolves.toBe(suspendedMember);
+
+    expect(mocks.updateHostedMemberCoreState).not.toHaveBeenCalled();
+    expect(mocks.writeHostedMemberStripeBillingRef).not.toHaveBeenCalled();
+  });
+
+  it("binds missing provider identity from a stale event during billing-owned suspension", async () => {
+    const subscriptionCreatedAt = new Date("2026-04-25T00:00:00.000Z");
+    const reversalCreatedAt = new Date("2026-04-25T00:05:00.000Z");
+    const suspendedMember = makeMemberSnapshot({
+      billingRef: {
+        lastStripeEventCreatedAt: reversalCreatedAt,
+        memberId: "member_123",
+        stripeCustomerId: "cus_123",
+        stripeSubscriptionId: null,
+      },
+      core: {
+        billingStatus: HostedBillingStatus.unpaid,
+        suspendedAt: reversalCreatedAt,
+      },
+    });
+    const boundSuspendedMember = makeMemberSnapshot({
+      billingRef: {
+        lastStripeEventCreatedAt: reversalCreatedAt,
+        memberId: "member_123",
+        stripeCustomerId: "cus_123",
+        stripeSubscriptionId: "sub_123",
+      },
+      core: {
+        billingStatus: HostedBillingStatus.unpaid,
+        suspendedAt: reversalCreatedAt,
+      },
+    });
+    mocks.readHostedMemberBillingSnapshot
+      .mockResolvedValueOnce(suspendedMember)
+      .mockResolvedValueOnce(boundSuspendedMember);
+
+    await expect(writeHostedMemberStripeBillingTx({
+      billingStatus: HostedBillingStatus.active,
+      canonicalBillingStatus: HostedBillingStatus.active,
+      dispatchContext: {
+        eventCreatedAt: subscriptionCreatedAt,
+        occurredAt: subscriptionCreatedAt.toISOString(),
+        sourceEventId: "evt_subscription_while_reversed",
+        sourceType: "stripe.customer.subscription.updated",
+      },
+      member: suspendedMember,
+      stripeCustomerId: "cus_123",
+      stripeSubscriptionId: "sub_123",
+      tx: {} as never,
+    })).resolves.toEqual(boundSuspendedMember);
+
+    expect(mocks.updateHostedMemberCoreState).toHaveBeenNthCalledWith(1, {
+      memberId: "member_123",
+      prisma: {},
+      suspendedAt: null,
+    });
+    expect(mocks.writeHostedMemberStripeBillingRef).toHaveBeenCalledWith({
+      memberId: "member_123",
+      stripeCustomerId: undefined,
+      stripeSubscriptionId: "sub_123",
+      tx: {},
+    });
+    expect(mocks.updateHostedMemberCoreState).toHaveBeenNthCalledWith(2, {
+      memberId: "member_123",
+      prisma: {},
+      suspendedAt: reversalCreatedAt,
+    });
+  });
+
+  it("does not mistake the account-deletion fence for a billing-owned suspension", async () => {
+    const billingEventCreatedAt = new Date("2026-04-25T00:00:00.000Z");
+    const deletionStartedAt = new Date("2026-04-25T00:05:00.000Z");
+    const deletingMember = makeMemberSnapshot({
+      billingRef: {
+        lastStripeEventCreatedAt: billingEventCreatedAt,
+        memberId: "member_123",
+        stripeCustomerId: "cus_123",
+        stripeSubscriptionId: "sub_123",
+      },
+      core: {
+        billingStatus: HostedBillingStatus.unpaid,
+        suspendedAt: deletionStartedAt,
+      },
+    });
+    mocks.readHostedMemberBillingSnapshot.mockResolvedValueOnce(deletingMember);
+
+    await expect(suspendHostedMemberForBillingReversalTx({
+      canonicalBillingStatus: HostedBillingStatus.active,
+      dispatchContext: {
+        eventCreatedAt: new Date("2026-04-25T00:10:00.000Z"),
+        sourceEventId: "evt_dispute_newer",
+        sourceType: "stripe.charge.dispute.funds_withdrawn",
+      },
+      member: deletingMember,
+      stripeCustomerId: "cus_123",
+      tx: {} as never,
+    })).rejects.toMatchObject({
+      code: "HOSTED_MEMBER_SUSPENDED",
+      httpStatus: 403,
+    });
+
+    expect(mocks.updateHostedMemberCoreState).not.toHaveBeenCalled();
+    expect(mocks.writeHostedMemberStripeBillingRef).not.toHaveBeenCalled();
+  });
+
+  it("does not let an older restore clear the account-deletion fence", async () => {
+    const billingEventCreatedAt = new Date("2026-04-25T00:00:00.000Z");
+    const deletingMember = makeMemberSnapshot({
+      billingRef: {
+        lastStripeEventCreatedAt: billingEventCreatedAt,
+        memberId: "member_123",
+        stripeCustomerId: "cus_123",
+        stripeSubscriptionId: "sub_123",
+      },
+      core: {
+        billingStatus: HostedBillingStatus.unpaid,
+        suspendedAt: new Date("2026-04-25T00:05:00.000Z"),
+      },
+    });
+    mocks.readHostedMemberBillingSnapshot.mockResolvedValueOnce(deletingMember);
+
+    await expect(writeHostedMemberStripeBillingTx({
+      billingStatus: HostedBillingStatus.active,
+      canonicalBillingStatus: HostedBillingStatus.active,
+      dispatchContext: {
+        eventCreatedAt: new Date("2026-04-25T00:10:00.000Z"),
+        occurredAt: "2026-04-25T00:10:00.000Z",
+        sourceEventId: "evt_dispute_restore",
+        sourceType: "stripe.charge.dispute.funds_reinstated",
+      },
+      member: deletingMember,
+      suspendedAtOverride: null,
+      tx: {} as never,
+    })).rejects.toMatchObject({
+      code: "HOSTED_MEMBER_SUSPENDED",
+      httpStatus: 403,
+    });
+
+    expect(mocks.updateHostedMemberCoreState).not.toHaveBeenCalled();
+    expect(mocks.writeHostedMemberStripeBillingRef).not.toHaveBeenCalled();
   });
 
   it("does not let invoice.payment_failed promote a non-active member back to active", async () => {

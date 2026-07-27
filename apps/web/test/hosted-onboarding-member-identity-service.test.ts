@@ -546,8 +546,17 @@ function requireHostedEmailLookupKey(value: string): string {
 function asRootPrisma<T extends object>(tx: T): T & {
   $transaction: ReturnType<typeof vi.fn>;
 } {
-  return {
+  const innerTx = {
+    hostedAccountDeletionCleanup: {
+      findFirst: vi.fn().mockResolvedValue(null),
+    },
     ...tx,
-    $transaction: vi.fn(async (callback: (innerTx: T) => Promise<unknown>) => callback(tx)),
+  };
+  return {
+    ...innerTx,
+    $transaction: vi.fn(
+      async (callback: (transaction: T) => Promise<unknown>) =>
+        callback(innerTx as T),
+    ),
   };
 }
