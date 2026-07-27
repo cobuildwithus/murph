@@ -65,6 +65,16 @@ the one remote check for acceptance; otherwise use the remote diff lane. Retry
 an unchanged head only after a concrete infrastructure failure and record that
 reason in the completion evidence.
 
+### Required post-landing trust-root proof
+
+One case does not require a ten-minute local admission wait: after a change to
+`.github/workflows/crabbox.yml` or the trusted entrypoint lands on the default
+branch, run exactly one explicitly forced canonical remote check to prove that
+new trust root. This is required boundary validation, not ordinary capacity
+fallback; do not manufacture a local wait first. Use acceptance when the landed
+change requires acceptance coverage, otherwise use `test:diff`, and retain the
+same lifecycle bounds and evidence.
+
 ### Environment and Vercel boundary
 
 The default Crabbox/Blacksmith lane is synthetic and secret-free:

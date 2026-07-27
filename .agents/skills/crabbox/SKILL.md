@@ -15,15 +15,17 @@ pnpm verify:acceptance
 ```
 
 Those commands stay local by default. Use
-`MURPH_VERIFY_EXECUTOR=crabbox` only as the documented explicit escalation when
-the local shared-host verifier cannot admit required work promptly. Within the
-local path, canonical acceptance intentionally selects the bounded composed
-profile on hosts with at least 12 logical CPUs; ordinary commands and smaller
-hosts keep their conservative shared-host caps. Every explicit remote check
-creates a fresh one-shot Testbox whose hydration route is pinned by the
-dispatcher. Reusable lease IDs are rejected because the available lease
-metadata does not prove the Blacksmith organization that installed the
-root-owned trust entrypoint.
+`MURPH_VERIFY_EXECUTOR=crabbox` only under the decision rule in
+`agent-docs/operations/verification-and-runtime.md`: ordinary escalation follows
+a 10-minute local admission wait, while a workflow or trusted-entrypoint change
+requires one post-landing trust-root proof without that wait. Within the local
+path, canonical acceptance intentionally selects the bounded composed profile
+on hosts with at least 12 logical CPUs; ordinary commands and smaller hosts keep
+their conservative shared-host caps. Every explicit remote check creates a
+fresh one-shot Testbox whose hydration route is pinned by the dispatcher.
+Reusable lease IDs are rejected because the available lease metadata does not
+prove the Blacksmith organization that installed the root-owned trust
+entrypoint.
 
 ## Environment and sync boundary
 

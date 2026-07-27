@@ -61,6 +61,10 @@ Updated: 2026-07-26
   state or another scheduler.
 - Keep the existing 16-vCPU job in this change; local-first selection removes
   the dominant invocation-frequency cost without adding a second hydration job.
+- Accepted the preliminary review finding that an absolute admission-wait rule
+  conflicted with mandatory trust-root validation. Ordinary remote escalation
+  requires the wait; workflow or entrypoint changes require one post-landing
+  proof without manufacturing a wait.
 
 ## Verification
 
