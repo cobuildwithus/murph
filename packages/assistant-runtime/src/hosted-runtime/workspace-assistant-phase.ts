@@ -16,7 +16,6 @@ import {
   type HostedRuntimeGroupToolLinqThreadContext,
   type HostedRuntimeGroupToolRequest,
   type HostedRuntimeGroupToolResponse,
-  type HostedRuntimeGroupToolSelfOptOutContext,
   type HostedWorkspaceCheckpointReason,
   type HostedRuntimeRedactedJson,
   type HostedRuntimeRedactedObject,
@@ -310,9 +309,10 @@ export type HostedWorkspaceRuntimeAssistantPhase = (
  * contexts (the web DB stores hashed lookup keys). Inject them here so the
  * model never supplies its own thread target.
  *
- * Current-turn sender evidence is injected the same way and for the same
- * reason: it must come from the accepted inputs for this operation, never from
- * the model.
+ * Aggregate current-turn sender handles used by shared reads are injected the
+ * same way. Participant-specific effects arrive with exact accepted-message
+ * evidence already resolved by assistant-engine, so this wrapper does not
+ * infer one owner from the whole turn.
  */
 export function createHostedGroupToolWithCurrentTurnContext(input: {
   emailDeliveryContexts?: readonly HostedAssistantEmailDeliveryContext[] | null;
@@ -330,20 +330,8 @@ export function createHostedGroupToolWithCurrentTurnContext(input: {
         && request.action !== "read_current"
         && request.action !== "read_usage"
         && request.action !== "read_shared"
-        && request.action !== "revoke_own_email_share"
       ) {
         return buildHostedGroupEmailRestrictedActionUnavailable(request);
-      }
-      if (request.action === "revoke_own_email_share") {
-        if (emailIngressPresent) {
-          return await input.groupToolPort.request({ action: request.action });
-        }
-        const selfOptOut = resolveHostedGroupToolSelfOptOutContext({
-          linqDeliveryContexts: input.linqDeliveryContexts,
-        });
-        return await input.groupToolPort.request(
-          selfOptOut ? { action: request.action, selfOptOut } : { action: request.action },
-        );
       }
       if (request.action === "read_shared") {
         const sharedReadRequest = {
@@ -391,8 +379,7 @@ function buildHostedGroupEmailRestrictedActionUnavailable(
       action:
         | "read_current"
         | "read_shared"
-        | "read_usage"
-        | "revoke_own_email_share";
+        | "read_usage";
     }
   >,
 ): HostedRuntimeGroupToolResponse {
@@ -427,34 +414,12 @@ function buildHostedGroupEmailRestrictedActionUnavailable(
     case "leave_membership":
     case "post_disclosure_request":
     case "revoke_disclosure_grant":
+    case "revoke_own_email_share":
       return {
         action: request.action,
         result: { status: "unavailable", unavailableReason },
       };
   }
-}
-
-function resolveHostedGroupToolSelfOptOutContext(input: {
-  linqDeliveryContexts: readonly HostedAssistantLinqDeliveryContext[];
-}): HostedRuntimeGroupToolSelfOptOutContext | null {
-  const eligible = new Map<string, HostedRuntimeGroupToolSelfOptOutContext>();
-  // Hosted email reply aliases authenticate the route, not the human From
-  // header. Do not turn parsed From into self-opt-out authority.
-  for (const context of input.linqDeliveryContexts) {
-    if (context.threadIsDirect !== false) {
-      continue;
-    }
-    const senderHandle = context.directRecipientPhoneNumber?.trim();
-    if (!senderHandle) {
-      continue;
-    }
-    eligible.set(JSON.stringify(["linq", senderHandle]), {
-      senderHandle,
-      source: "linq",
-    });
-  }
-
-  return eligible.size === 1 ? [...eligible.values()][0] ?? null : null;
 }
 
 /**

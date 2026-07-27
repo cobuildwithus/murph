@@ -59,6 +59,7 @@ export interface AssistantAutoReplyPromptInput {
   occurredAt: string
   projection: AssistantAutoReplyPromptProjection | null
   receivedAt: string | null
+  replyContext?: string | null
   replyTarget: AssistantInputReplyTarget | null
   source: string
   sourceMetadata: AssistantInputSourceMetadata | null
@@ -126,8 +127,9 @@ export function buildAssistantAutoReplyPrompt(
         promptUnavailableNote: renderAssistantInputPromptUnavailableNote(entry),
         projectionReasonCode: entry.projection?.reasonCode ?? null,
         projectionStatus: entry.projection?.status ?? null,
-        replyContext: entry.telegramMetadata?.replyContext ?? null,
-        senderHandle: readAssistantInputGroupSenderHandle(entry.sourceMetadata),
+        replyContext:
+          entry.replyContext ?? entry.telegramMetadata?.replyContext ?? null,
+        senderHandle: readAssistantInputSenderLabel(entry),
         senderName: readAssistantInputGroupSenderName(entry.sourceMetadata),
         totalInputs: inputs.length,
       })
@@ -197,8 +199,9 @@ export async function prepareAssistantAutoReplyInput(
         promptUnavailableNote: renderAssistantInputPromptUnavailableNote(entry),
         projectionReasonCode: entry.projection?.reasonCode ?? null,
         projectionStatus: entry.projection?.status ?? null,
-        replyContext: entry.telegramMetadata?.replyContext ?? null,
-        senderHandle: readAssistantInputGroupSenderHandle(entry.sourceMetadata),
+        replyContext:
+          entry.replyContext ?? entry.telegramMetadata?.replyContext ?? null,
+        senderHandle: readAssistantInputSenderLabel(entry),
         senderName: readAssistantInputGroupSenderName(entry.sourceMetadata),
         totalInputs: preparedInputs.length,
       })
@@ -313,6 +316,23 @@ function readAssistantInputGroupSenderHandle(
 ): string | null {
   return metadata?.kind === 'linq' || metadata?.kind === 'telegram'
     ? normalizeNullableString(metadata.senderHandle)
+    : null
+}
+
+function readAssistantInputSenderLabel(input: {
+  conversation: AssistantInputConversationRef
+  sourceMetadata: AssistantInputSourceMetadata | null
+}): string | null {
+  const senderHandle = readAssistantInputGroupSenderHandle(input.sourceMetadata)
+  if (senderHandle) {
+    return senderHandle
+  }
+
+  return input.conversation.threadIsDirect === false &&
+      (input.sourceMetadata?.kind === 'linq' ||
+        input.sourceMetadata?.kind === 'telegram') &&
+      input.sourceMetadata.externalThreadRouteAuthorityPresent === true
+    ? 'unavailable'
     : null
 }
 
@@ -598,7 +618,9 @@ function buildAssistantAutoReplyContextLines(
         : `${firstInput.occurredAt} -> ${lastInput.occurredAt}`
     }`,
     `Thread: ${firstInput.conversation.threadId ?? 'unknown'}`,
-    `Actor: ${firstInput.conversation.actorId ?? 'unknown'} | self=${String(firstInput.actorIsSelf)}`,
+    firstInput.conversation.threadIsDirect === false
+      ? null
+      : `Actor: ${firstInput.conversation.actorId ?? 'unknown'} | self=${String(firstInput.actorIsSelf)}`,
     inputs.length > 1 ? `Grouped inputs: ${inputs.length}` : null,
     mediaGroupId ? 'Telegram media group: present' : null,
   ]

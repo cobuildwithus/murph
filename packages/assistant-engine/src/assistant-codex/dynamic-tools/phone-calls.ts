@@ -28,8 +28,13 @@ const PHONE_CALL_BRIEF_ROOT_KEYS = [
   'successCriteria',
   'timeZone',
   'to',
+  'message_ref',
 ] as const
 const SYNTHETIC_INITIAL_ACCEPTED_INPUT_ID = 'initial'
+const ACCEPTED_MESSAGE_REF_PATTERN = /^ain_[0-9a-f]{32}$/u
+const phoneCallArgumentsSchema = hostedPhoneCallBriefSchema.extend({
+  message_ref: z.string().regex(ACCEPTED_MESSAGE_REF_PATTERN).optional(),
+})
 
 export const MURPH_CREATE_PHONE_CALL_TOOL = {
   namespace: 'murph',
@@ -41,15 +46,17 @@ export const MURPH_CREATE_PHONE_CALL_TOOL = {
     'Before a real appointment booking, rescheduling, cancellation, or waitlist call, read $MURPH_ASSISTANT_SKILLS_ROOT/appointment-scheduling/SKILL.md and satisfy its ready-to-act gate with a completed, user-approved readiness brief; an information-only or connectivity-test call must stay non-mutating, remain separate, and never count as appointment readiness.',
     'Put only user-approved, call-relevant, disclosable facts in shareableFacts.',
     'Group-chat calls never transfer to one participant; Murph forces allowTransferToUser=false for group calls.',
+    'In a group chat, message_ref is required and must be the exact opaque Message ref beside the accepted message whose sender requested or approved this call. The host reloads that message and derives the provider sender; never supply a canonical member id.',
     'Do not put the user transfer phone number in shareableFacts; Murph resolves verified transfer numbers server-side.',
   ].join(' '),
-  inputSchema: z.toJSONSchema(hostedPhoneCallBriefSchema, { io: 'input' }),
+  inputSchema: z.toJSONSchema(phoneCallArgumentsSchema, { io: 'input' }),
 } as const
 
 export type PhoneCallDynamicToolRequest =
   | {
       brief: HostedPhoneCallBrief
       kind: 'create-phone-call'
+      messageRef: string | null
     }
   | {
       kind: 'invalid-phone-call-arguments'
@@ -65,15 +72,25 @@ export function readPhoneCallDynamicToolRequest(input: {
   }
 
   const parsed = parseDynamicToolArguments({
-    schema: hostedPhoneCallBriefSchema,
+    schema: phoneCallArgumentsSchema,
     schemaRootKeys: PHONE_CALL_BRIEF_ROOT_KEYS,
     toolName: 'murph.create_phone_call',
     value: input.arguments,
   })
 
-  return parsed.ok
-    ? { brief: parsed.args, kind: 'create-phone-call' }
-    : { kind: 'invalid-phone-call-arguments', validationDigest: parsed.validationDigest }
+  if (!parsed.ok) {
+    return {
+      kind: 'invalid-phone-call-arguments',
+      validationDigest: parsed.validationDigest,
+    }
+  }
+
+  const { message_ref: messageRef = null, ...brief } = parsed.args
+  return {
+    brief,
+    kind: 'create-phone-call',
+    messageRef,
+  }
 }
 
 export function createPhoneCallRequestKey(input: {

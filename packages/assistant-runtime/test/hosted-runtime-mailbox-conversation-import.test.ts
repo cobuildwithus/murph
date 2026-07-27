@@ -1767,7 +1767,7 @@ describe("hosted mailbox conversation import adapter", () => {
     assert.equal(candidates.inputs[0]?.event.groupReactionContext, undefined);
   });
 
-  test("uses Telegram sender for group actor scoping and prompt attribution", async () => {
+  test("uses Telegram sender for blinded actor identity and prompt attribution", async () => {
     const parentRoot = await mkdtemp(
       path.join(tmpdir(), "murph-hosted-input-telegram-group-"),
     );

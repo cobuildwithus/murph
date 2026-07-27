@@ -18,6 +18,9 @@ import type {
   AssistantHostedToolContext,
   AssistantHostedToolRequestKeyScope,
 } from "../src/assistant/hosted-tool-context.js";
+import type {
+  AssistantAcceptedMessageTargetAuthorizer,
+} from "../src/assistant/message-target-selection.js";
 
 const BASE_BRIEF: HostedPhoneCallBrief = {
   allowTransferToUser: true,
@@ -37,6 +40,10 @@ const BASE_BRIEF: HostedPhoneCallBrief = {
     phoneNumber: "+12125550123",
   },
 };
+
+
+const GROUP_REQUEST_INPUT_ID = `ain_${"a".repeat(32)}`;
+const OTHER_GROUP_INPUT_ID = `ain_${"b".repeat(32)}`;
 
 const BASE_SCOPE: AssistantHostedToolRequestKeyScope = {
   acceptedInputIds: ["assistant_input_1"],
@@ -79,6 +86,12 @@ describe("assistant phone calls", () => {
     );
     expect(MURPH_CREATE_PHONE_CALL_TOOL.description).toContain(
       "Group-chat calls never transfer to one participant",
+    );
+    expect(MURPH_CREATE_PHONE_CALL_TOOL.description).toContain(
+      "message_ref is required",
+    );
+    expect(MURPH_CREATE_PHONE_CALL_TOOL.description).toContain(
+      "never supply a canonical member id",
     );
   });
 
@@ -285,14 +298,14 @@ describe("assistant phone calls", () => {
     );
   });
 
-  it("canonicalizes group transfer permission before request-key creation and dispatch", async () => {
+  it("uses the exact accepted group message for requester authority and request-key identity", async () => {
     const effectiveBrief = {
       ...BASE_BRIEF,
       allowTransferToUser: false,
     };
     const phoneCallScope = {
       ...BASE_SCOPE,
-      acceptedInputIds: ["group_phone_call_input"],
+      acceptedInputIds: [OTHER_GROUP_INPUT_ID, GROUP_REQUEST_INPUT_ID],
       conversationScope: "group" as const,
       originSessionId: "session_group_phone_call",
     };
@@ -300,12 +313,24 @@ describe("assistant phone calls", () => {
       brief: effectiveBrief,
       scope: phoneCallScope,
     });
+    const groupRequester = {
+      assistantInputId: GROUP_REQUEST_INPUT_ID,
+      senderHandle: "+15551110003",
+      source: "linq" as const,
+    };
+    const authorizeAcceptedMessageTarget = vi.fn(async () => ({
+      participant: groupRequester,
+      targetInputId: GROUP_REQUEST_INPUT_ID,
+    }));
     const start = vi.fn(async () => ({
       phoneCallId: "hpc_group",
       status: "calling" as const,
     }));
     const request = readMurphDynamicToolRequest(dynamicToolCall({
-      argumentsValue: BASE_BRIEF,
+      argumentsValue: {
+        ...BASE_BRIEF,
+        message_ref: GROUP_REQUEST_INPUT_ID,
+      },
       tool: MURPH_CREATE_PHONE_CALL_TOOL.name,
     }));
     if (!request || request.kind !== "create-phone-call") {
@@ -313,6 +338,8 @@ describe("assistant phone calls", () => {
     }
 
     await executeMurphDynamicToolRequest({
+      authorizeAcceptedMessageTarget,
+      deliveryContextOrdinal: 0,
       env: {},
       fetchImpl: fetch,
       hostedToolContext: createHostedToolContext({
@@ -324,14 +351,134 @@ describe("assistant phone calls", () => {
       request,
     });
 
+    expect(authorizeAcceptedMessageTarget).toHaveBeenCalledWith({
+      action: "participant-effect",
+      deliveryContextOrdinal: 0,
+      messageRef: GROUP_REQUEST_INPUT_ID,
+    });
     expect(start).toHaveBeenCalledWith({
       brief: effectiveBrief,
-      inboundMailboxItemIds: ["mailbox_item_1"],
+      groupRequester,
       originSessionId: "session_group_phone_call",
       requestKey: expectedRequestKey,
     }, {
       signal: null,
     });
+  });
+
+  it.each([
+    ["missing message_ref", BASE_BRIEF, async (): ReturnType<
+      AssistantAcceptedMessageTargetAuthorizer
+    > => ({
+      participant: {
+        assistantInputId: GROUP_REQUEST_INPUT_ID,
+        senderHandle: "+15551110003",
+        source: "linq" as const,
+      },
+      targetInputId: GROUP_REQUEST_INPUT_ID,
+    })],
+    ["invented message_ref", { ...BASE_BRIEF, message_ref: GROUP_REQUEST_INPUT_ID }, async (): ReturnType<
+      AssistantAcceptedMessageTargetAuthorizer
+    > => null],
+    [
+      "cross-message requester",
+      { ...BASE_BRIEF, message_ref: GROUP_REQUEST_INPUT_ID },
+      async (): ReturnType<AssistantAcceptedMessageTargetAuthorizer> => ({
+        participant: {
+          assistantInputId: OTHER_GROUP_INPUT_ID,
+          senderHandle: "+15551110002",
+          source: "linq" as const,
+        },
+        targetInputId: GROUP_REQUEST_INPUT_ID,
+      }),
+    ],
+  ] as const)("fails closed for group phone calls with %s", async (
+    _case,
+    argumentsValue,
+    authorizeAcceptedMessageTarget,
+  ) => {
+    const start = vi.fn();
+    const request = readMurphDynamicToolRequest(dynamicToolCall({
+      argumentsValue,
+      tool: MURPH_CREATE_PHONE_CALL_TOOL.name,
+    }));
+    if (!request || request.kind !== "create-phone-call") {
+      throw new Error("Expected create phone call request.");
+    }
+
+    const result = await executeMurphDynamicToolRequest({
+      authorizeAcceptedMessageTarget,
+      deliveryContextOrdinal: 0,
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createHostedToolContext({
+        currentUserActionScope: () => ({
+          ...BASE_SCOPE,
+          acceptedInputIds: [OTHER_GROUP_INPUT_ID, GROUP_REQUEST_INPUT_ID],
+          conversationScope: "group",
+          originSessionId: "session_group_phone_call",
+        }),
+        phoneCalls: { start },
+      }),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request,
+    });
+
+    expect(result.rpcResult.success).toBe(false);
+    expect(start).not.toHaveBeenCalled();
+  });
+
+  it("keeps group requester authorization failures neutral", async () => {
+    const groupRequester = {
+      assistantInputId: GROUP_REQUEST_INPUT_ID,
+      senderHandle: "+15551110003",
+      source: "linq" as const,
+    };
+    const request = readMurphDynamicToolRequest(dynamicToolCall({
+      argumentsValue: {
+        ...BASE_BRIEF,
+        message_ref: GROUP_REQUEST_INPUT_ID,
+      },
+      tool: MURPH_CREATE_PHONE_CALL_TOOL.name,
+    }));
+    if (!request || request.kind !== "create-phone-call") {
+      throw new Error("Expected create phone call request.");
+    }
+
+    const result = await executeMurphDynamicToolRequest({
+      authorizeAcceptedMessageTarget: async () => ({
+        participant: groupRequester,
+        targetInputId: GROUP_REQUEST_INPUT_ID,
+      }),
+      deliveryContextOrdinal: 0,
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createHostedToolContext({
+        currentUserActionScope: () => ({
+          ...BASE_SCOPE,
+          acceptedInputIds: [GROUP_REQUEST_INPUT_ID],
+          conversationScope: "group",
+          originSessionId: "session_group_phone_call",
+        }),
+        phoneCalls: {
+          start: vi.fn(async () => {
+            throw {
+              code:
+                "HOSTED_GROUP_PHONE_CALL_REQUESTER_ACTIVATION_REQUIRED",
+            };
+          }),
+        },
+      }),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request,
+    });
+
+    expect(result.rpcResult.contentItems[0]?.text).toBe(
+      "the group phone call could not be started for the selected participant",
+    );
+    expect(result.rpcResult.contentItems[0]?.text).not.toContain("set one up");
   });
 
   it.each([

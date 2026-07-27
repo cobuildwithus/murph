@@ -133,6 +133,17 @@ export type HostedExecutionTelegramExternalThreadRouteAuthority =
     channel: "telegram";
   };
 
+/**
+ * Provider-authenticated sender evidence for one exact accepted group message.
+ * The assistant runtime derives this after reloading the opaque assistant
+ * input id; the model never supplies a canonical member id.
+ */
+export interface HostedExecutionAcceptedGroupMessageParticipant {
+  assistantInputId: string;
+  senderHandle: string;
+  source: "linq" | "telegram";
+}
+
 export interface HostedExecutionBaseEvent {
   kind: HostedExecutionEventKind;
   userId: string;

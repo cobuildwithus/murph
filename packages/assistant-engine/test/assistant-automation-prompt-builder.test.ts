@@ -157,6 +157,7 @@ function createPromptInput(input: {
   inputId?: string
   projectionReasonCode?: string | null
   projectionStatus?: AssistantInputProjectionStatus | null
+  replyContext?: string | null
   replyTarget?: AssistantInputReplyTarget | null
   sourceMetadata?: AssistantInputSourceMetadata | null
   telegramMetadata?: TelegramAutoReplyMetadata | null
@@ -232,6 +233,7 @@ function createPromptInput(input: {
         }
       : null,
     receivedAt: parsedCapture.receivedAt,
+    replyContext: input.replyContext ?? null,
     replyTarget: input.replyTarget ?? null,
     source: parsedCapture.source,
     sourceMetadata: input.sourceMetadata ?? null,
@@ -686,7 +688,7 @@ describe('buildAssistantAutoReplyPrompt', () => {
     }
   })
 
-  it('renders no telegram sender line without an authoritative handle', () => {
+  it('marks an authenticated group sender unavailable without treating a display name as authority', () => {
     const result = buildAssistantAutoReplyPrompt([
       createPromptInput({
         captureOverrides: { text: 'morning crew', threadIsDirect: false },
@@ -706,7 +708,7 @@ describe('buildAssistantAutoReplyPrompt', () => {
     if (result.kind !== 'ready') {
       throw new Error('Expected a ready prompt result.')
     }
-    expect(result.prompt).not.toContain('Sender:')
+    expect(result.prompt).toContain('Sender: unavailable')
     expect(result.prompt).not.toContain('Sender name:')
     expect(result.prompt).not.toContain('alice_example')
   })
@@ -1160,6 +1162,86 @@ describe('buildAssistantAutoReplyPrompt', () => {
       'Reply context:\nReplying to: Poll Lunch? [Pizza | Salad]',
     )
     expect(result.prompt).not.toContain('Message text:')
+  })
+
+  it('keeps each mixed group message attributed and omits a turn-wide actor', () => {
+    const firstInputId = 'ain_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+    const secondInputId = 'ain_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+    const result = buildAssistantAutoReplyPrompt([
+      createPromptInput({
+        captureOverrides: {
+          actorId: 'hashed-actor-a',
+          captureId: 'capture-group-a',
+          eventId: 'event-group-a',
+          source: 'linq',
+          text: 'Alice request',
+          threadIsDirect: false,
+        },
+        inputId: firstInputId,
+        replyContext: 'The sender explicitly replied to assistant message A.',
+        replyTarget: {
+          channel: 'linq',
+          messageId: 'linq-inbound-a',
+          threadId: 'provider-room-1',
+        },
+        sourceMetadata: {
+          externalThreadRouteAuthorityPresent: true,
+          kind: 'linq',
+          partCount: 1,
+          reactionEligible: true,
+          replyToMessageId: 'linq-assistant-a',
+          senderHandle: '+15551110000',
+          service: 'iMessage',
+        },
+      }),
+      createPromptInput({
+        captureOverrides: {
+          actorId: 'hashed-actor-b',
+          captureId: 'capture-group-b',
+          eventId: 'event-group-b',
+          occurredAt: '2026-04-08T00:00:02.000Z',
+          source: 'linq',
+          text: 'Bob request',
+          threadIsDirect: false,
+        },
+        inputId: secondInputId,
+        replyContext: 'The sender explicitly replied to assistant message B.',
+        replyTarget: {
+          channel: 'linq',
+          messageId: 'linq-inbound-b',
+          threadId: 'provider-room-1',
+        },
+        sourceMetadata: {
+          externalThreadRouteAuthorityPresent: true,
+          kind: 'linq',
+          partCount: 1,
+          reactionEligible: true,
+          replyToMessageId: 'linq-assistant-b',
+          senderHandle: '+15552220000',
+          service: 'iMessage',
+        },
+      }),
+    ])
+
+    expect(result.kind).toBe('ready')
+    if (result.kind !== 'ready') {
+      throw new Error('Expected a ready prompt result.')
+    }
+    expect(result.prompt).toContain(
+      `Input 1:\nMessage ref: ${firstInputId}\n\nSender: +15551110000`,
+    )
+    expect(result.prompt).toContain(
+      `Input 2:\nMessage ref: ${secondInputId}\n\nSender: +15552220000`,
+    )
+    expect(result.prompt).toContain(
+      'Reply context:\nThe sender explicitly replied to assistant message A.',
+    )
+    expect(result.prompt).toContain(
+      'Reply context:\nThe sender explicitly replied to assistant message B.',
+    )
+    expect(result.prompt).not.toContain('Actor:')
+    expect(result.prompt).not.toContain('hashed-actor-a')
+    expect(result.prompt).not.toContain('hashed-actor-b')
   })
 
   it('builds grouped prompt text with reply context and attachment excerpts', () => {

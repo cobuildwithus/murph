@@ -1411,9 +1411,10 @@ function createHostedConversationAssistantInputConversation(
         identifierBlind,
         "telegram:bot",
       ),
-      // Blind the same sender value stored for the prompt so group actor
-      // scoping matches Linq: initial batching splits on actor change and
-      // admission stops at a foreign participant.
+      // Blind the same sender value stored for per-message prompt attribution
+      // and direct-conversation identity. Authenticated group-room batching may
+      // span actor changes; participant effects re-resolve the exact accepted
+      // message instead of treating this turn-wide actor as authority.
       actorId: hashNullableHostedAssistantConversationIdentifier(
         identifierBlind,
         readHostedTelegramGroupSenderHandle(wake),

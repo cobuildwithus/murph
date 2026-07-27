@@ -13,6 +13,11 @@ const ROUTE_AUTHORITY = {
   threadId: "chat_group_1",
 };
 const PRIVATE_ASSISTANT_INPUT_ID = `ain_${"3".repeat(32)}`;
+const EXACT_GROUP_PARTICIPANT = {
+  assistantInputId: `ain_${"4".repeat(32)}`,
+  senderHandle: "+15550000002",
+  source: "linq" as const,
+};
 
 function buildLinqDeliveryContext(
   overrides: Partial<HostedAssistantLinqDeliveryContext>,
@@ -452,22 +457,25 @@ describe("createHostedGroupToolWithCurrentTurnContext", () => {
 
   });
 
-  it("does not use unauthenticated email From as newsletter opt-out authority", async () => {
-    const request = vi.fn().mockResolvedValue({
-      action: "revoke_own_email_share",
-      result: {
-        status: "unavailable",
-        unavailableReason: "sender_unavailable",
-      },
-    });
+  it("does not let unauthenticated email ingress carry exact participant effects", async () => {
+    const request = vi.fn();
     const groupTool = createHostedGroupToolWithCurrentTurnContext({
       emailDeliveryContexts: [buildEmailDeliveryContext({})],
       groupToolPort: { request },
       linqDeliveryContexts: [],
     });
 
-    await groupTool.request({ action: "revoke_own_email_share" });
-    expect(request).toHaveBeenLastCalledWith({ action: "revoke_own_email_share" });
+    await expect(groupTool.request({
+      action: "revoke_own_email_share",
+      participant: EXACT_GROUP_PARTICIPANT,
+    })).resolves.toEqual({
+      action: "revoke_own_email_share",
+      result: {
+        status: "unavailable",
+        unavailableReason: "authenticated_sender_required",
+      },
+    });
+    expect(request).not.toHaveBeenCalled();
 
     await groupTool.request({ action: "read_current" });
     expect(request).toHaveBeenLastCalledWith({ action: "read_current" });
@@ -578,15 +586,17 @@ describe("createHostedGroupToolWithCurrentTurnContext", () => {
     });
     expect(request).not.toHaveBeenCalled();
 
-    request.mockResolvedValueOnce({
+    await expect(groupTool.request({
+      action: "revoke_own_email_share",
+      participant: EXACT_GROUP_PARTICIPANT,
+    })).resolves.toEqual({
       action: "revoke_own_email_share",
       result: {
         status: "unavailable",
-        unavailableReason: "sender_unavailable",
+        unavailableReason: "authenticated_sender_required",
       },
     });
-    await groupTool.request({ action: "revoke_own_email_share" });
-    expect(request).toHaveBeenLastCalledWith({ action: "revoke_own_email_share" });
+    expect(request).not.toHaveBeenCalled();
 
     request.mockResolvedValueOnce({
       action: "read_shared",
@@ -626,7 +636,7 @@ describe("createHostedGroupToolWithCurrentTurnContext", () => {
     expect(request).not.toHaveBeenCalled();
   });
 
-  it("injects the current group chat sender into newsletter opt-out", async () => {
+  it("passes exact accepted-message participant evidence through without whole-turn inference", async () => {
     const request = vi.fn().mockResolvedValue({
       action: "revoke_own_email_share",
       result: { revokedCount: 1, status: "revoked" },
@@ -638,42 +648,20 @@ describe("createHostedGroupToolWithCurrentTurnContext", () => {
           directRecipientPhoneNumber: "+15550000001",
           routeAuthority: ROUTE_AUTHORITY,
         }),
-      ],
-    });
-
-    await groupTool.request({ action: "revoke_own_email_share" });
-    expect(request).toHaveBeenLastCalledWith({
-      action: "revoke_own_email_share",
-      selfOptOut: {
-        senderHandle: "+15550000001",
-        source: "linq",
-      },
-    });
-  });
-
-  it("keeps newsletter opt-out independent of read_shared route attribution", async () => {
-    const request = vi.fn().mockResolvedValue({
-      action: "revoke_own_email_share",
-      result: { revokedCount: 1, status: "revoked" },
-    });
-    const groupTool = createHostedGroupToolWithCurrentTurnContext({
-      groupToolPort: { request },
-      linqDeliveryContexts: [
         buildLinqDeliveryContext({
-          directRecipientPhoneNumber: "+15550000001",
-          routeAuthority: null,
-          service: null,
+          directRecipientPhoneNumber: "+15550000003",
+          routeAuthority: ROUTE_AUTHORITY,
         }),
       ],
     });
 
-    await groupTool.request({ action: "revoke_own_email_share" });
+    await groupTool.request({
+      action: "revoke_own_email_share",
+      participant: EXACT_GROUP_PARTICIPANT,
+    });
     expect(request).toHaveBeenLastCalledWith({
       action: "revoke_own_email_share",
-      selfOptOut: {
-        senderHandle: "+15550000001",
-        source: "linq",
-      },
+      participant: EXACT_GROUP_PARTICIPANT,
     });
   });
 
@@ -734,24 +722,4 @@ describe("createHostedGroupToolWithCurrentTurnContext", () => {
     });
   });
 
-  it("fails closed when newsletter opt-out has ambiguous current senders", async () => {
-    const request = vi.fn().mockResolvedValue({
-      action: "revoke_own_email_share",
-      result: {
-        status: "unavailable",
-        unavailableReason: "sender_unavailable",
-      },
-    });
-    const groupTool = createHostedGroupToolWithCurrentTurnContext({
-      emailDeliveryContexts: [
-        buildEmailDeliveryContext({ senderHandle: "one@example.test" }),
-        buildEmailDeliveryContext({ senderHandle: "two@example.test" }),
-      ],
-      groupToolPort: { request },
-      linqDeliveryContexts: [],
-    });
-
-    await groupTool.request({ action: "revoke_own_email_share" });
-    expect(request).toHaveBeenLastCalledWith({ action: "revoke_own_email_share" });
-  });
 });

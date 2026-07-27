@@ -18591,7 +18591,7 @@ describe('steered final segments', () => {
     const rejectedRef = `ain_${'3'.repeat(32)}`
     const finalReplyRef = `ain_${'4'.repeat(32)}`
     const authorizeAcceptedMessageTarget = vi.fn(async (input: {
-      action: 'native-reply' | 'reaction'
+      action: 'native-reply' | 'participant-effect' | 'reaction'
       deliveryContextOrdinal: number
       messageRef: string
     }) => input.messageRef === rejectedRef

@@ -1023,15 +1023,30 @@ describe("parseHostedRuntimeGroupTool", () => {
     });
     expect(parseHostedRuntimeGroupToolRequest({
       action: "revoke_own_email_share",
+      participant: {
+        assistantInputId: "ain_11111111111111111111111111111111",
+        senderHandle: "  +15551110000  ",
+        source: "linq",
+      },
+    })).toEqual({
+      action: "revoke_own_email_share",
+      participant: {
+        assistantInputId: "ain_11111111111111111111111111111111",
+        senderHandle: "+15551110000",
+        source: "linq",
+      },
+    });
+    expect(parseHostedRuntimeGroupToolRequest({
+      action: "revoke_own_email_share",
       selfOptOut: {
-        senderHandle: "person@example.test",
-        source: "email",
+        senderHandle: "+15551110000",
+        source: "linq",
       },
     })).toEqual({
       action: "revoke_own_email_share",
       selfOptOut: {
-        senderHandle: "person@example.test",
-        source: "email",
+        senderHandle: "+15551110000",
+        source: "linq",
       },
     });
 
@@ -1201,9 +1216,33 @@ describe("parseHostedRuntimeGroupTool", () => {
     expect(() =>
       parseHostedRuntimeGroupToolRequest({
         action: "revoke_own_email_share",
-        selfOptOut: { senderHandle: "person@example.test", source: "sms" },
+        participant: {
+          assistantInputId: "ain_11111111111111111111111111111111",
+          senderHandle: "+15551110000",
+          source: "sms",
+        },
       })
     ).toThrow(/not supported/u);
+    expect(() =>
+      parseHostedRuntimeGroupToolRequest({
+        action: "revoke_own_email_share",
+        participant: {
+          assistantInputId: "ain_not_exact",
+          senderHandle: "+15551110000",
+          source: "linq",
+        },
+      })
+    ).toThrow(/assistantInputId is invalid/u);
+    expect(() =>
+      parseHostedRuntimeGroupToolRequest({
+        action: "revoke_own_email_share",
+        participant: {
+          assistantInputId: "ain_11111111111111111111111111111111",
+          senderHandle: "   ",
+          source: "telegram",
+        },
+      })
+    ).toThrow(/senderHandle is invalid/u);
   });
 
   it("parses bounded self-membership responses without accepting roster fields", () => {

@@ -146,6 +146,7 @@ import {
   normalizeNullableString,
 } from './shared.js'
 import {
+  resolveAssistantAcceptedMessageParticipant,
   resolveAssistantAcceptedMessageTarget,
   type AssistantAcceptedMessageTargetAuthorizer,
 } from './message-target-selection.js'
@@ -943,18 +944,54 @@ export async function sendAssistantMessageLocal(
         const acceptedInputIdsByDeliveryContextOrdinal: string[][] = [
           [...acceptedInputIdsForProviderRequest],
         ]
+        function resolveAcceptedInputIdsThroughDeliveryContextOrdinal(
+          deliveryContextOrdinal: number,
+        ): readonly string[] {
+          if (
+            deliveryContextOrdinal >=
+              acceptedInputIdsByDeliveryContextOrdinal.length
+          ) {
+            return [...acceptedInputIdsForProviderRequest]
+          }
+          return [
+            ...new Set(
+              acceptedInputIdsByDeliveryContextOrdinal
+                .slice(0, deliveryContextOrdinal + 1)
+                .flat(),
+            ),
+          ]
+        }
         const authorizeAcceptedMessageTarget: AssistantAcceptedMessageTargetAuthorizer =
           async (authorizationInput) => {
             const acceptedInputIds =
-              acceptedInputIdsByDeliveryContextOrdinal[
-                authorizationInput.deliveryContextOrdinal
-              ]
+              authorizationInput.action === 'participant-effect'
+                ? resolveAcceptedInputIdsThroughDeliveryContextOrdinal(
+                    authorizationInput.deliveryContextOrdinal,
+                  )
+                : acceptedInputIdsByDeliveryContextOrdinal[
+                    authorizationInput.deliveryContextOrdinal
+                  ]
             const deliveryContext =
               replyDeliveryContexts[authorizationInput.deliveryContextOrdinal]
             if (!acceptedInputIds || !deliveryContext) {
               return null
             }
             try {
+              if (authorizationInput.action === 'participant-effect') {
+                return await resolveAssistantAcceptedMessageParticipant({
+                  acceptedInputIds,
+                  messageRef: authorizationInput.messageRef,
+                  route: resolveAssistantCurrentAudienceDeliveryFields({
+                    input: applyAssistantReplyDeliveryContext({
+                      context: deliveryContext,
+                      input: currentInput,
+                    }),
+                    session: currentSession,
+                    sharedPlan,
+                  }),
+                  vault: currentInput.vault,
+                })
+              }
               const target = await resolveAssistantAcceptedMessageTarget({
                 acceptedInputIds,
                 action: authorizationInput.action,
@@ -980,27 +1017,9 @@ export async function sendAssistantMessageLocal(
               throw error
             }
           }
-        // Cumulative through the ordinal: the no-reply hook is a pre-marker
-        // durability fence over every input already admitted into the provider
-        // turn, while each per-ordinal entry stays exact for target
-        // authorization and effect-time revalidation.
-        const resolveAcceptedInputIdsThroughDeliveryContextOrdinal = (
-          deliveryContextOrdinal: number,
-        ): readonly string[] => {
-          if (
-            deliveryContextOrdinal >=
-              acceptedInputIdsByDeliveryContextOrdinal.length
-          ) {
-            return [...acceptedInputIdsForProviderRequest]
-          }
-          return [
-            ...new Set(
-              acceptedInputIdsByDeliveryContextOrdinal
-                .slice(0, deliveryContextOrdinal + 1)
-                .flat(),
-            ),
-          ]
-        }
+        // Cumulative through the ordinal: the no-reply hook and participant
+        // effects may reference any input already admitted into the provider
+        // turn. Native replies and reactions remain exact to one ordinal.
         const admissionMs = elapsedSince(admissionStartedAt)
         const preProviderSetupMs = elapsedSince(lockAcquiredAt)
         emitHostedAssistantContextTimingTrace({

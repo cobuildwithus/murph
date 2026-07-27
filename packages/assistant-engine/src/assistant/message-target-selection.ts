@@ -1,6 +1,9 @@
 import {
   parseTelegramThreadTarget,
 } from '@murphai/messaging-ingress/telegram-webhook'
+import type {
+  HostedExecutionAcceptedGroupMessageParticipant,
+} from '@murphai/hosted-execution/contracts'
 import {
   looksLikePrivateAssistantRoutePlaceholder,
 } from '@murphai/operator-config/assistant/current-delivery-route'
@@ -8,6 +11,7 @@ import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { getAssistantChannelAdapter } from './channel-adapters.js'
 import {
   readAssistantInputEvent,
+  type AssistantInputEventRecord,
   type AssistantInputConversationRef,
   type AssistantInputReplyTarget,
   type AssistantInputSourceMetadata,
@@ -15,10 +19,17 @@ import {
 import { normalizeNullableString } from './shared.js'
 
 export type AssistantAcceptedMessageTargetAuthorizer = (input: {
-  action: 'native-reply' | 'reaction'
+  action: 'native-reply' | 'participant-effect' | 'reaction'
   deliveryContextOrdinal: number
   messageRef: string
-}) => Promise<{ targetInputId: string } | null>
+}) => Promise<
+  | { targetInputId: string }
+  | {
+      participant: HostedExecutionAcceptedGroupMessageParticipant
+      targetInputId: string
+    }
+  | null
+>
 
 export function readAssistantTargetProviderScalar(
   value: string | null | undefined,
@@ -121,58 +132,13 @@ export async function resolveAssistantAcceptedMessageTarget(input: {
   deliveryReplyToMessageId: string
   targetInputId: string
 }> {
-  if (!input.acceptedInputIds.includes(input.messageRef)) {
-    throw createAssistantMessageTargetUnavailableError()
-  }
-
-  const event = await readAssistantInputEvent({
-    inputId: input.messageRef,
+  const resolved = await resolveAssistantAcceptedMessage({
+    acceptedInputIds: input.acceptedInputIds,
+    messageRef: input.messageRef,
+    route: input.route,
     vault: input.vault,
   })
-  if (
-    !event ||
-    event.inputId !== input.messageRef ||
-    readAssistantInputMessageRef({
-      conversation: event.conversation,
-      inputId: event.inputId,
-      replyTarget: event.replyTarget,
-      source: event.conversation?.source ?? '',
-      sourceMetadata: event.sourceMetadata,
-    }) !== input.messageRef
-  ) {
-    throw createAssistantMessageTargetUnavailableError()
-  }
-
-  const channel = normalizeNullableString(input.route.channel)?.toLowerCase() ?? null
-  const conversation = event.conversation
-  const replyTarget = event.replyTarget
-  if (
-    !supportsAssistantAcceptedMessageTargetingRoute(input.route) ||
-    !conversation ||
-    normalizeNullableString(conversation.source)?.toLowerCase() !== channel ||
-    (channel === 'linq' &&
-      normalizeNullableString(conversation.accountId) !==
-        normalizeNullableString(input.route.identityId)) ||
-    normalizeNullableString(conversation.threadId) !==
-      normalizeNullableString(input.route.threadId) ||
-    conversation.threadIsDirect !== input.route.threadIsDirect ||
-    (conversation.threadIsDirect === true &&
-      normalizeNullableString(conversation.actorId) !==
-        normalizeNullableString(input.route.actorId)) ||
-    !replyTarget ||
-    normalizeNullableString(replyTarget.channel)?.toLowerCase() !== channel ||
-    readAssistantTargetProviderScalar(replyTarget.threadId) !==
-      readAssistantTargetProviderScalar(input.route.explicitTarget)
-  ) {
-    throw createAssistantMessageTargetUnavailableError()
-  }
-
-  const providerMessageId = readAssistantTargetProviderScalar(
-    replyTarget.messageId,
-  )
-  if (!providerMessageId) {
-    throw createAssistantMessageTargetUnavailableError()
-  }
+  const { channel, event, providerMessageId } = resolved
 
   const sourceMetadata = event.sourceMetadata
   if (input.action === 'native-reply') {
@@ -210,6 +176,124 @@ export async function resolveAssistantAcceptedMessageTarget(input: {
     deliveryReplyToMessageId: providerMessageId,
     targetInputId: event.inputId,
   }
+}
+
+export async function resolveAssistantAcceptedMessageParticipant(input: {
+  acceptedInputIds: readonly string[]
+  messageRef: string
+  route: {
+    actorId?: string | null
+    channel?: string | null
+    explicitTarget?: string | null
+    identityId?: string | null
+    threadId?: string | null
+    threadIsDirect?: boolean | null
+  }
+  vault: string
+}): Promise<{
+  participant: HostedExecutionAcceptedGroupMessageParticipant
+  targetInputId: string
+}> {
+  const { channel, event } = await resolveAssistantAcceptedMessage(input)
+  const conversation = event.conversation
+  const metadata = event.sourceMetadata
+  const senderHandle =
+    metadata?.kind === channel
+      ? normalizeNullableString(metadata.senderHandle)
+      : null
+  if (
+    conversation?.threadIsDirect !== false ||
+    conversation.actorIsSelf ||
+    (channel !== 'linq' && channel !== 'telegram') ||
+    (metadata?.kind !== 'linq' && metadata?.kind !== 'telegram') ||
+    metadata.externalThreadRouteAuthorityPresent !== true ||
+    !senderHandle
+  ) {
+    throw createAssistantMessageTargetUnavailableError()
+  }
+
+  return {
+    participant: {
+      assistantInputId: event.inputId,
+      senderHandle,
+      source: channel,
+    },
+    targetInputId: event.inputId,
+  }
+}
+
+async function resolveAssistantAcceptedMessage(input: {
+  acceptedInputIds: readonly string[]
+  messageRef: string
+  route: {
+    actorId?: string | null
+    channel?: string | null
+    explicitTarget?: string | null
+    identityId?: string | null
+    threadId?: string | null
+    threadIsDirect?: boolean | null
+  }
+  vault: string
+}): Promise<{
+  channel: 'linq' | 'telegram'
+  event: AssistantInputEventRecord
+  providerMessageId: string
+}> {
+  if (!input.acceptedInputIds.includes(input.messageRef)) {
+    throw createAssistantMessageTargetUnavailableError()
+  }
+
+  const event = await readAssistantInputEvent({
+    inputId: input.messageRef,
+    vault: input.vault,
+  })
+  if (
+    !event ||
+    event.inputId !== input.messageRef ||
+    readAssistantInputMessageRef({
+      conversation: event.conversation,
+      inputId: event.inputId,
+      replyTarget: event.replyTarget,
+      source: event.conversation?.source ?? '',
+      sourceMetadata: event.sourceMetadata,
+    }) !== input.messageRef
+  ) {
+    throw createAssistantMessageTargetUnavailableError()
+  }
+
+  const channel = normalizeNullableString(input.route.channel)?.toLowerCase() ?? null
+  const conversation = event.conversation
+  const replyTarget = event.replyTarget
+  if (
+    !supportsAssistantAcceptedMessageTargetingRoute(input.route) ||
+    (channel !== 'linq' && channel !== 'telegram') ||
+    !conversation ||
+    normalizeNullableString(conversation.source)?.toLowerCase() !== channel ||
+    (channel === 'linq' &&
+      normalizeNullableString(conversation.accountId) !==
+        normalizeNullableString(input.route.identityId)) ||
+    normalizeNullableString(conversation.threadId) !==
+      normalizeNullableString(input.route.threadId) ||
+    conversation.threadIsDirect !== input.route.threadIsDirect ||
+    (conversation.threadIsDirect === true &&
+      normalizeNullableString(conversation.actorId) !==
+        normalizeNullableString(input.route.actorId)) ||
+    !replyTarget ||
+    normalizeNullableString(replyTarget.channel)?.toLowerCase() !== channel ||
+    readAssistantTargetProviderScalar(replyTarget.threadId) !==
+      readAssistantTargetProviderScalar(input.route.explicitTarget)
+  ) {
+    throw createAssistantMessageTargetUnavailableError()
+  }
+
+  const providerMessageId = readAssistantTargetProviderScalar(
+    replyTarget.messageId,
+  )
+  if (!providerMessageId) {
+    throw createAssistantMessageTargetUnavailableError()
+  }
+
+  return { channel, event, providerMessageId }
 }
 
 function createAssistantMessageTargetUnavailableError(): VaultCliError {

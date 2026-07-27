@@ -1,6 +1,6 @@
 # Hosted Mailbox Runtime Protocol
 
-Last verified: 2026-07-25
+Last verified: 2026-07-27
 
 ## Decision
 
@@ -259,16 +259,29 @@ existing accepted-input and route-binding work is unchanged. The only Web read
 occurs inside the adapter's request method after the model invokes `read_shared`.
 No roster or authority snapshot is preloaded into scheduled context.
 
-Interactive Linq and Telegram group turns are actor-scoped. The importer
-derives blinded `actorId` from the same trimmed sender value stored for the
-prompt; initial batching splits on actor change, and pre-provider plus live
-admission stop at a foreign group actor. Telegram supplies that sender only on
-route-authorized non-direct inbound whose webhook-authenticated user id already
-resolved to exactly one active linked member, so anonymous administrators,
-`sender_chat` messages, bots, and unlinked senders stay unattributed.
-Attribution therefore remains bound to the scanner-selected durable operation
-contexts, and active steering cannot add a second participant's identity
-authority to the turn.
+Interactive Linq and Telegram group turns are room-scoped for batching while
+participant authority remains message-scoped. The importer derives blinded
+`actorId` from the same trimmed sender value stored for per-message prompt
+attribution, but an authenticated non-direct exact-successor burst may batch
+and steer across actor and native reply-anchor changes when its room, account,
+delivery route, audience, projection readiness, reaction rules, and 50-input
+bound remain stable. Telegram supplies sender evidence only on route-authorized
+non-direct inbound whose webhook-authenticated user id already resolved to
+exactly one active linked member, so anonymous administrators, `sender_chat`
+messages, bots, and unlinked senders stay unattributed. Every admitted message
+keeps its own opaque accepted-message ref and reply context. A participant
+effect reloads that exact accepted input and derives provider sender evidence;
+the compound turn's actor is never participant authority.
+
+The accepted-message participant wire is an expand/contract rollout. Deploy
+Web first: its phone-call endpoint accepts the new `groupRequester` evidence
+and the legacy `inboundMailboxItemIds` fallback, and its group-tool parser
+accepts the new `participant` evidence and the legacy `selfOptOut` fallback.
+Both legacy fallbacks revalidate their existing server-owned evidence and exist
+only at this runner-facing compatibility boundary. Then deploy the Worker and
+runner; new runners send only exact accepted-message participant evidence.
+Roll back runner/Worker before Web. Remove the legacy fields only after all
+warm old runners have drained and deployed smoke proves the new runner bundle.
 
 Telegram sender evidence is additive on the wire: `linqSenderHandles` keeps its
 existing meaning and `telegramSenderHandles` is a separate optional field, so a
@@ -979,10 +992,12 @@ Those watermarks live in the bounded canonical companion document
 value document. The canonical selector admits a bounded, cursor-ordered compound
 batch. Foreground begins with the oldest fresh input in the current wake and
 considers only later fresh siblings; background begins with the oldest replyable
-pending input. The batch continues only across the same canonical conversation,
-the same provider-native reply anchor, and exact-successor positive per-member
-causal sequences. A gap, missing or legacy sequence, boundary change, or the
-50-input bound ends the batch and leaves the remainder pending. During that
+pending input. The batch continues only across exact-successor positive
+per-member causal sequences and either one direct-conversation actor/provider-
+native reply anchor or one authenticated non-direct room with stable account,
+delivery route, audience, projection readiness, and reaction boundary. A gap,
+missing or legacy sequence, boundary change, or the 50-input bound ends the
+batch and leaves the remainder pending. During that
 turn, the accepted-input boundary passes the terminal provider input id to the
 private hosted style operation. The signed Web transaction binds that id to the
 member's live conversation row and derives the compound turn frontier; the
@@ -1469,8 +1484,10 @@ The assistant engine admits the frozen same-wake compound batch before provider
 start without broad hosted mailbox rediscovery. While a Codex turn is live,
 later mailbox input may still be imported and staged. Its exact staged input ID
 may join through the generic live-steering path only when the stored event is
-the next positive causal-sequence successor and preserves the conversation,
-delivery route, native reply anchor, account/audience, and group actor. A
+the next positive causal-sequence successor and preserves the direct actor and
+native reply anchor, or for an authenticated non-direct group preserves the
+room, delivery route, account/audience, projection readiness, and reaction
+boundary. A
 projection-pending input is a causal barrier until the existing
 projection-completion notification retries it; terminal projection failure is
 still replyable through the normal fallback. Duplicate staging and

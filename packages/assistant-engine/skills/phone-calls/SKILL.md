@@ -51,6 +51,14 @@ consent, or in-the-moment judgment is likely unless the user says not to
 transfer. Set it to `false` for information-only calls, simple status checks,
 group calls, or any call where a transfer would surprise the user.
 
+For a group-chat call, pass the exact opaque `message_ref` printed beside the
+accepted message whose sender requested or approved the call. Do not infer one
+requester from every message in the turn, reuse another participant's ref, or
+supply a canonical member id. The host reloads that exact accepted input and
+Web revalidates the provider sender's current room membership and Murph
+activation. If exact participant authority is unavailable, do not place the
+call; the normal conversational reply may still continue.
+
 ## Interpret results truthfully
 
 `murph.create_phone_call` returns a start status and call id, not the

@@ -1,6 +1,9 @@
 import "server-only";
 
 import type { PrismaClient } from "@prisma/client";
+import type {
+  HostedExecutionAcceptedGroupMessageParticipant,
+} from "@murphai/hosted-execution/contracts";
 import {
   HOSTED_RUNTIME_GROUP_CHAT_ICON_URL_MAX_LENGTH,
   HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX,
@@ -97,6 +100,7 @@ import {
 import { sha256Hex } from "../primitives";
 import {
   lookupHostedGroupParticipantMemberByHandle,
+  lookupHostedGroupParticipantMemberByProviderEvidence,
 } from "./participant-member";
 
 export const HOSTED_THREAD_CONTAINER_PARTICIPANT_RECONCILE_MAX =
@@ -275,6 +279,7 @@ export async function handleHostedRuntimeGroupTool(input: {
   if (input.request.action === "revoke_own_email_share") {
     return handleHostedRuntimeGroupRevokeOwnEmailShare({
       memberId: input.memberId,
+      participant: input.request.participant ?? null,
       selfOptOut: input.request.selfOptOut ?? null,
     });
   }
@@ -640,6 +645,7 @@ async function readHostedRuntimeGroupOwnerActiveAccess(input: {
 
 async function handleHostedRuntimeGroupRevokeOwnEmailShare(input: {
   memberId: string;
+  participant: HostedExecutionAcceptedGroupMessageParticipant | null;
   selfOptOut: HostedRuntimeGroupToolSelfOptOutContext | null;
 }): Promise<HostedRuntimeGroupToolResponse> {
   const unavailable = (unavailableReason: string): HostedRuntimeGroupToolResponse => ({
@@ -650,17 +656,26 @@ async function handleHostedRuntimeGroupRevokeOwnEmailShare(input: {
   if (!await hasHostedRuntimeActiveAccess(input.memberId)) {
     return unavailable("runtime_inactive");
   }
-  if (!input.selfOptOut) {
+  if (!input.participant && !input.selfOptOut) {
     return unavailable("sender_unavailable");
   }
-
+  const selfOptOut = input.selfOptOut;
   const prisma = getPrisma();
-  let participant: Awaited<ReturnType<typeof lookupSelfOptOutParticipantMember>> | null;
+  let participant: Awaited<
+    ReturnType<typeof lookupHostedGroupParticipantMemberByProviderEvidence>
+  > | Awaited<ReturnType<typeof lookupSelfOptOutParticipantMember>> | null;
   try {
-    participant = await lookupSelfOptOutParticipantMember({
-      context: input.selfOptOut,
-      prisma,
-    });
+    participant = input.participant
+      ? await lookupHostedGroupParticipantMemberByProviderEvidence({
+          participant: input.participant,
+          prisma,
+        })
+      : selfOptOut
+        ? await lookupSelfOptOutParticipantMember({
+            context: selfOptOut,
+            prisma,
+          })
+        : null;
   } catch {
     return unavailable("membership_lookup_unavailable");
   }

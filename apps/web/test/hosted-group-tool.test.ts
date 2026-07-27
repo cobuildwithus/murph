@@ -20,6 +20,7 @@ const mocks = vi.hoisted(() => ({
   leaveHostedGroupMemberTx: vi.fn(),
   lookupHostedMemberByVerifiedEmailAddress: vi.fn(),
   lookupHostedMemberIdentityByPhoneNumber: vi.fn(),
+  lookupHostedMemberRoutingByTelegramUserId: vi.fn(),
   prepareHostedGroupJoinOfferPostTx: vi.fn(),
   readActiveHostedMemberAccess: vi.fn(),
   readActiveHostedGroupDisclosureGrantsForGroup: vi.fn(),
@@ -75,6 +76,11 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-identity-store", () => ({
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({
   lookupHostedMemberByVerifiedEmailAddress: mocks.lookupHostedMemberByVerifiedEmailAddress,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", () => ({
+  lookupHostedMemberRoutingByTelegramUserId:
+    mocks.lookupHostedMemberRoutingByTelegramUserId,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/linq-client", () => ({
@@ -281,6 +287,7 @@ describe("handleHostedRuntimeGroupTool", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.lookupHostedMemberIdentityByPhoneNumber.mockReset();
+    mocks.lookupHostedMemberRoutingByTelegramUserId.mockReset();
     mocks.readHostedOwnerAddressBookAdvisoryNames.mockReset();
     mocks.readHostedOwnerAddressBookAdvisoryNames.mockResolvedValue(new Map());
     mocks.canonicalizeHostedGroupDisclosurePermissionText.mockImplementation(
@@ -1131,14 +1138,17 @@ describe("handleHostedRuntimeGroupTool", () => {
     expect(mocks.createHostedGroupJoinLinkForOwnedThreadContainerTx).not.toHaveBeenCalled();
   });
 
-  it("fails closed for unauthenticated email sender self-opt-out", async () => {
+  it("fails closed when the exact accepted message sender cannot be resolved", async () => {
+    mocks.lookupHostedMemberIdentityByPhoneNumber.mockResolvedValue(null);
+
     await expect(handleHostedRuntimeGroupTool({
       memberId: "member_group_runtime",
       request: {
         action: "revoke_own_email_share",
-        selfOptOut: {
-          senderHandle: "spoofed-member@example.test",
-          source: "email",
+        participant: {
+          assistantInputId: `ain_${"1".repeat(32)}`,
+          senderHandle: "+15550000001",
+          source: "linq",
         },
       },
     })).resolves.toEqual({
@@ -1149,13 +1159,12 @@ describe("handleHostedRuntimeGroupTool", () => {
       },
     });
 
-    expect(mocks.lookupHostedMemberByVerifiedEmailAddress).not.toHaveBeenCalled();
     expect(mocks.revokeHostedGroupMemberEmailShareTx).not.toHaveBeenCalled();
   });
 
-  it("revokes only the current authenticated linq sender's group newsletter email share", async () => {
+  it("revokes only the member resolved from the exact request-bearing Linq message", async () => {
     mocks.lookupHostedMemberIdentityByPhoneNumber.mockResolvedValue({
-      core: { id: "member_sender", suspendedAt: null },
+      core: { id: "member_exact_sender", suspendedAt: null },
     });
     mocks.revokeHostedGroupMemberEmailShareTx.mockResolvedValue({
       groupId: "hgrp_123",
@@ -1167,8 +1176,9 @@ describe("handleHostedRuntimeGroupTool", () => {
       memberId: "member_group_runtime",
       request: {
         action: "revoke_own_email_share",
-        selfOptOut: {
-          senderHandle: "+15550000001",
+        participant: {
+          assistantInputId: `ain_${"2".repeat(32)}`,
+          senderHandle: "+15550000002",
           source: "linq",
         },
       },
@@ -1181,17 +1191,77 @@ describe("handleHostedRuntimeGroupTool", () => {
     });
 
     expect(mocks.lookupHostedMemberIdentityByPhoneNumber).toHaveBeenCalledWith(
-      expect.objectContaining({ phoneNumber: "+15550000001" }),
+      expect.objectContaining({ phoneNumber: "+15550000002" }),
     );
     expect(mocks.revokeHostedGroupMemberEmailShareTx).toHaveBeenCalledWith(
       expect.objectContaining({
         groupRuntimeMemberId: "member_group_runtime",
-        memberId: "member_sender",
+        memberId: "member_exact_sender",
       }),
+    );
+    expect(JSON.stringify(
+      mocks.revokeHostedGroupMemberEmailShareTx.mock.calls[0]?.[0],
+    )).not.toContain("member_other_sender");
+  });
+
+  it("accepts the legacy self-opt-out request at the Web rollout boundary", async () => {
+    mocks.lookupHostedMemberIdentityByPhoneNumber.mockResolvedValue({
+      core: { id: "member_legacy_sender", suspendedAt: null },
+    });
+    mocks.revokeHostedGroupMemberEmailShareTx.mockResolvedValue({
+      groupId: "hgrp_123",
+      kind: "ok",
+      revokedCount: 1,
+    });
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_group_runtime",
+      request: {
+        action: "revoke_own_email_share",
+        selfOptOut: {
+          senderHandle: "+15550000003",
+          source: "linq",
+        },
+      },
+    })).resolves.toMatchObject({
+      action: "revoke_own_email_share",
+      result: { status: "revoked" },
+    });
+
+    expect(mocks.lookupHostedMemberIdentityByPhoneNumber).toHaveBeenCalledWith(
+      expect.objectContaining({ phoneNumber: "+15550000003" }),
     );
   });
 
-  it("fails closed when the resolved opt-out sender no longer has active access", async () => {
+  it("resolves Telegram requester evidence through the canonical routing binding", async () => {
+    mocks.lookupHostedMemberRoutingByTelegramUserId.mockResolvedValue({
+      core: { id: "member_telegram_sender", suspendedAt: null },
+    });
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_group_runtime",
+      request: {
+        action: "revoke_own_email_share",
+        participant: {
+          assistantInputId: `ain_${"3".repeat(32)}`,
+          senderHandle: "telegram-user-123",
+          source: "telegram",
+        },
+      },
+    })).resolves.toMatchObject({
+      action: "revoke_own_email_share",
+      result: { status: "revoked" },
+    });
+
+    expect(mocks.lookupHostedMemberRoutingByTelegramUserId).toHaveBeenCalledWith(
+      expect.objectContaining({ telegramUserId: "telegram-user-123" }),
+    );
+    expect(mocks.revokeHostedGroupMemberEmailShareTx).toHaveBeenCalledWith(
+      expect.objectContaining({ memberId: "member_telegram_sender" }),
+    );
+  });
+
+  it("fails closed when the resolved exact sender no longer has active access", async () => {
     mocks.lookupHostedMemberIdentityByPhoneNumber.mockResolvedValue({
       core: { id: "member_sender", suspendedAt: null },
     });
@@ -1201,7 +1271,8 @@ describe("handleHostedRuntimeGroupTool", () => {
       memberId: "member_group_runtime",
       request: {
         action: "revoke_own_email_share",
-        selfOptOut: {
+        participant: {
+          assistantInputId: `ain_${"4".repeat(32)}`,
           senderHandle: "+15550000001",
           source: "linq",
         },
@@ -1217,7 +1288,7 @@ describe("handleHostedRuntimeGroupTool", () => {
     expect(mocks.revokeHostedGroupMemberEmailShareTx).not.toHaveBeenCalled();
   });
 
-  it("reports already_removed when the current sender had no active email share", async () => {
+  it("reports already_removed when the exact sender had no active email share", async () => {
     mocks.lookupHostedMemberIdentityByPhoneNumber.mockResolvedValue({
       core: { id: "member_sender", suspendedAt: null },
     });
@@ -1231,7 +1302,8 @@ describe("handleHostedRuntimeGroupTool", () => {
       memberId: "member_group_runtime",
       request: {
         action: "revoke_own_email_share",
-        selfOptOut: {
+        participant: {
+          assistantInputId: `ain_${"5".repeat(32)}`,
           senderHandle: "+15550000001",
           source: "linq",
         },
@@ -1243,21 +1315,6 @@ describe("handleHostedRuntimeGroupTool", () => {
         status: "already_removed",
       },
     });
-  });
-
-  it("fails closed when email-share revocation has no injected sender", async () => {
-    await expect(handleHostedRuntimeGroupTool({
-      memberId: "member_group_runtime",
-      request: { action: "revoke_own_email_share" },
-    })).resolves.toEqual({
-      action: "revoke_own_email_share",
-      result: {
-        status: "unavailable",
-        unavailableReason: "sender_unavailable",
-      },
-    });
-
-    expect(mocks.revokeHostedGroupMemberEmailShareTx).not.toHaveBeenCalled();
   });
 });
 

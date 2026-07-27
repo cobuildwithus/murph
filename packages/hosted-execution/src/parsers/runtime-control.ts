@@ -20,6 +20,7 @@ import {
 import {
   HOSTED_EXECUTION_ASSISTANT_ASK_QUESTION_MAX_CODE_POINTS,
   HOSTED_EXECUTION_ASSISTANT_ASK_TARGET_LABEL_MAX_CODE_POINTS,
+  type HostedExecutionAcceptedGroupMessageParticipant,
 } from "../contracts.ts";
 import {
   parseHostedExecutionAssistantAskBoundedText as parseHostedRuntimeGroupAskBoundedText,
@@ -1248,19 +1249,38 @@ export function parseHostedRuntimeGroupToolRequest(
   if (action === "revoke_own_email_share") {
     assertAllowedObjectKeys(
       record,
-      new Set(["action", "selfOptOut"]),
+      new Set(["action", "participant", "selfOptOut"]),
       "Hosted runtime group tool revoke_own_email_share request",
     );
-    if (record.selfOptOut === undefined || record.selfOptOut === null) {
-      return { action };
+    if (
+      record.participant !== undefined
+      && record.participant !== null
+      && record.selfOptOut !== undefined
+      && record.selfOptOut !== null
+    ) {
+      throw new TypeError(
+        "Hosted runtime group tool revoke_own_email_share request has conflicting participant authorities.",
+      );
     }
-    return {
-      action,
-      selfOptOut: parseHostedRuntimeGroupToolSelfOptOutContext(
-        record.selfOptOut,
-        "Hosted runtime group tool revoke_own_email_share request selfOptOut",
-      ),
-    };
+    if (record.participant !== undefined && record.participant !== null) {
+      return {
+        action,
+        participant: parseHostedRuntimeGroupToolParticipant(
+          record.participant,
+          "Hosted runtime group tool revoke_own_email_share request participant",
+        ),
+      };
+    }
+    if (record.selfOptOut !== undefined && record.selfOptOut !== null) {
+      return {
+        action,
+        selfOptOut: parseHostedRuntimeGroupToolSelfOptOutContext(
+          record.selfOptOut,
+          "Hosted runtime group tool revoke_own_email_share request selfOptOut",
+        ),
+      };
+    }
+    return { action };
   }
   throw new TypeError("Hosted runtime group tool action is not supported.");
 }
@@ -1386,6 +1406,43 @@ function parseHostedRuntimeGroupJoinOfferMessageTemplate(value: unknown): string
   return template;
 }
 
+function parseHostedRuntimeGroupToolParticipant(
+  value: unknown,
+  label: string,
+): HostedExecutionAcceptedGroupMessageParticipant {
+  const record = requireObject(value, label);
+  assertAllowedObjectKeys(
+    record,
+    new Set(["assistantInputId", "senderHandle", "source"]),
+    label,
+  );
+  const source = requireString(record.source, `${label} source`);
+  if (source !== "linq" && source !== "telegram") {
+    throw new TypeError("Hosted runtime group tool participant source is not supported.");
+  }
+  const assistantInputId = requireString(
+    record.assistantInputId,
+    `${label} assistantInputId`,
+  );
+  if (!/^ain_[0-9a-f]{32}$/u.test(assistantInputId)) {
+    throw new TypeError("Hosted runtime group tool participant assistantInputId is invalid.");
+  }
+  const senderHandle = requireString(
+    record.senderHandle,
+    `${label} senderHandle`,
+  ).trim();
+  if (senderHandle.length === 0 || senderHandle.length > 512) {
+    throw new TypeError(
+      "Hosted runtime group tool participant senderHandle is invalid.",
+    );
+  }
+  return {
+    assistantInputId,
+    senderHandle,
+    source,
+  };
+}
+
 function parseHostedRuntimeGroupToolSelfOptOutContext(
   value: unknown,
   label: string,
@@ -1394,7 +1451,9 @@ function parseHostedRuntimeGroupToolSelfOptOutContext(
   assertAllowedObjectKeys(record, new Set(["senderHandle", "source"]), label);
   const source = requireString(record.source, `${label} source`);
   if (source !== "email" && source !== "linq") {
-    throw new TypeError("Hosted runtime group tool self opt-out source is not supported.");
+    throw new TypeError(
+      "Hosted runtime group tool self opt-out source is not supported.",
+    );
   }
   return {
     senderHandle: requireString(record.senderHandle, `${label} senderHandle`),

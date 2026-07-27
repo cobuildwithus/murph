@@ -712,9 +712,15 @@ Never silently share health data that the message did not disclose, never add
 offer text or another URL, and never repeatedly re-offer to someone who
 declined.
 
-If a member asks to be removed from the newsletter in an iMessage group chat,
-call `murph.group` with `action="revoke_own_email_share"`. That revokes only the
-current authenticated sender's own `group-email.v0` grant. Telegram group
-messages and email replies do not carry that self-opt-out authority; direct the
-member to settings or their private Murph chat instead. Do not remove anyone
-else, change their health-sharing grants, or ask for their raw email address.
+If a member asks to be removed from the newsletter in an authenticated
+Linq/iMessage or Telegram group chat, call `murph.group` with
+`action="revoke_own_email_share"` and the exact opaque `message_ref` printed
+beside that member's request-bearing accepted message.
+That ref selects only that provider-authenticated sender's own
+`group-email.v0` grant, including when other people spoke in the same compound
+turn. Never infer the requester from the whole turn, reuse another message's
+ref, or supply a member id. Missing or unattributed sender evidence makes the
+action unavailable without preventing a normal reply. Email replies do not
+carry this self-opt-out authority; direct the member to settings or their
+private Murph chat instead. Do not remove anyone else, change their
+health-sharing grants, or ask for their raw email address.

@@ -8,6 +8,7 @@ import type {
 } from "@murphai/hosted-execution";
 import type {
   HostedPhoneCallBrief,
+  HostedPhoneCallGroupRequester,
   HostedPhoneCallStartResponse,
 } from "@murphai/hosted-execution/phone-calls";
 import {
@@ -111,6 +112,7 @@ type HostedPhoneCallNotificationDestinationResolver = (input: {
 }) => Promise<HostedAssistantNotificationDestination>;
 
 type HostedGroupPhoneCallRequesterActivationAsserter = (input: {
+  groupRequester: HostedPhoneCallGroupRequester | null;
   inboundMailboxItemIds: readonly string[];
   routeAuthority: HostedExecutionExternalThreadRouteAuthority;
   signal?: AbortSignal;
@@ -119,6 +121,7 @@ type HostedGroupPhoneCallRequesterActivationAsserter = (input: {
 export async function createHostedPhoneCall(input: {
   brief: HostedPhoneCallBrief;
   crypto?: HostedPhoneCallCrypto;
+  groupRequester?: HostedPhoneCallGroupRequester;
   groupRequesterActivationAsserter?: HostedGroupPhoneCallRequesterActivationAsserter;
   inboundMailboxItemIds?: readonly string[];
   memberId: string;
@@ -173,6 +176,7 @@ async function createHostedPhoneCallWithinDeadline(input: Parameters<
       input.groupRequesterActivationAsserter
       ?? assertHostedGroupPhoneCallRequesterHasOwnMurph;
     await assertGroupRequesterActivation({
+      groupRequester: input.groupRequester ?? null,
       inboundMailboxItemIds: input.inboundMailboxItemIds ?? [],
       routeAuthority,
       signal: input.signal,

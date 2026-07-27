@@ -8,26 +8,78 @@ import {
 } from "@murphai/hosted-execution";
 import {
   HOSTED_PHONE_CALL_INBOUND_MAILBOX_ITEM_IDS_MAX,
+  type HostedPhoneCallGroupRequester,
 } from "@murphai/hosted-execution/phone-calls";
-
 import {
   lookupHostedGroupParticipantMemberByHandle,
+  lookupHostedGroupParticipantMemberByProviderEvidence,
 } from "../hosted-groups/participant-member";
 import { readHostedMailboxWakeByItemId } from "../hosted-mailbox/store";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import { hasHostedMemberActivationProof } from "../hosted-onboarding/member-activation";
 import { resolveHostedMemberRoutingByTelegramUserId } from "../hosted-onboarding/hosted-member-routing-store";
-import type { HostedOnboardingReadClient } from "../hosted-onboarding/shared";
+import type {
+  HostedOnboardingReadClient,
+} from "../hosted-onboarding/shared";
 import { getPrisma } from "../prisma";
 
 export async function assertHostedGroupPhoneCallRequesterHasOwnMurph(input: {
+  groupRequester: HostedPhoneCallGroupRequester | null;
+  inboundMailboxItemIds?: readonly string[];
+  prisma?: HostedOnboardingReadClient;
+  routeAuthority: HostedExecutionExternalThreadRouteAuthority;
+  signal?: AbortSignal;
+}): Promise<void> {
+  if (!input.groupRequester) {
+    await assertLegacyHostedGroupPhoneCallRequesterHasOwnMurph({
+      ...input,
+      inboundMailboxItemIds: input.inboundMailboxItemIds ?? [],
+    });
+    return;
+  }
+  const participant = normalizeHostedGroupPhoneCallRequester(
+    input.groupRequester,
+  );
+  if (
+    !participant
+    || participant.source !== input.routeAuthority.channel
+    || (
+      input.routeAuthority.channel !== "linq"
+      && input.routeAuthority.channel !== "telegram"
+    )
+  ) {
+    throwHostedGroupPhoneCallRequesterActivationRequired();
+  }
+
+  const prisma = input.prisma ?? getPrisma();
+  input.signal?.throwIfAborted();
+  const requester = await lookupHostedGroupParticipantMemberByProviderEvidence({
+    participant,
+    prisma,
+  });
+  input.signal?.throwIfAborted();
+  if (!requester) {
+    throwHostedGroupPhoneCallRequesterActivationRequired();
+  }
+
+  if (
+    !await hasHostedMemberActivationProof({
+      memberId: requester.core.id,
+      prisma,
+    })
+  ) {
+    throwHostedGroupPhoneCallRequesterActivationRequired();
+  }
+}
+
+async function assertLegacyHostedGroupPhoneCallRequesterHasOwnMurph(input: {
   inboundMailboxItemIds: readonly string[];
   prisma?: HostedOnboardingReadClient;
   routeAuthority: HostedExecutionExternalThreadRouteAuthority;
   signal?: AbortSignal;
 }): Promise<void> {
   const mailboxItemIds = normalizeHostedGroupPhoneCallMailboxItemIds(
-    input.inboundMailboxItemIds,
+    input.inboundMailboxItemIds ?? [],
   );
   if (mailboxItemIds.length === 0) {
     throwHostedGroupPhoneCallRequesterActivationRequired();
@@ -35,15 +87,11 @@ export async function assertHostedGroupPhoneCallRequesterHasOwnMurph(input: {
 
   const prisma = input.prisma ?? getPrisma();
   let requesterMemberId: string | null = null;
-
   for (const mailboxItemId of mailboxItemIds) {
     input.signal?.throwIfAborted();
-    const wake = await readHostedMailboxWakeByItemId({
-      mailboxItemId,
-      prisma,
-    });
+    const wake = await readHostedMailboxWakeByItemId({ mailboxItemId, prisma });
     const memberId = wake
-      ? await resolveHostedGroupPhoneCallRequesterMemberId({
+      ? await resolveLegacyHostedGroupPhoneCallRequesterMemberId({
           prisma,
           routeAuthority: input.routeAuthority,
           wake,
@@ -70,7 +118,7 @@ export async function assertHostedGroupPhoneCallRequesterHasOwnMurph(input: {
   }
 }
 
-async function resolveHostedGroupPhoneCallRequesterMemberId(input: {
+async function resolveLegacyHostedGroupPhoneCallRequesterMemberId(input: {
   prisma: HostedOnboardingReadClient;
   routeAuthority: HostedExecutionExternalThreadRouteAuthority;
   wake: HostedExecutionWake;
@@ -85,8 +133,6 @@ async function resolveHostedGroupPhoneCallRequesterMemberId(input: {
     return null;
   }
 
-  // The authenticated inbound wake is the current participation proof. The
-  // roster table is a best-effort Linq projection and is not Telegram-complete.
   if (
     input.routeAuthority.channel === "linq"
     && isHostedLinqConversationMessageWake(input.wake)
@@ -101,7 +147,6 @@ async function resolveHostedGroupPhoneCallRequesterMemberId(input: {
     ) {
       return null;
     }
-
     const lookup = await lookupHostedGroupParticipantMemberByHandle({
       handle: senderHandle,
       prisma: input.prisma,
@@ -114,7 +159,8 @@ async function resolveHostedGroupPhoneCallRequesterMemberId(input: {
     && isHostedTelegramConversationMessageWake(input.wake)
   ) {
     const message = input.wake.message.telegramMessage;
-    const telegramUserId = normalizeHostedGroupPhoneCallSenderHandle(message.from);
+    const telegramUserId =
+      normalizeHostedGroupPhoneCallSenderHandle(message.from);
     if (
       message.threadId !== input.routeAuthority.threadId
       || message.threadIsDirect !== false
@@ -122,16 +168,12 @@ async function resolveHostedGroupPhoneCallRequesterMemberId(input: {
     ) {
       return null;
     }
-
     const resolution = await resolveHostedMemberRoutingByTelegramUserId({
       prisma: input.prisma,
       telegramUserId,
     });
-    return resolution.status === "found"
-      ? resolution.lookup.core.id
-      : null;
+    return resolution.status === "found" ? resolution.lookup.core.id : null;
   }
-
   return null;
 }
 
@@ -167,7 +209,6 @@ function normalizeHostedGroupPhoneCallMailboxItemIds(
   ) {
     return [];
   }
-
   const normalized = new Set<string>();
   for (const value of values) {
     const mailboxItemId = typeof value === "string" ? value.trim() : "";
@@ -184,6 +225,27 @@ function normalizeHostedGroupPhoneCallSenderHandle(
 ): string | null {
   const normalized = typeof value === "string" ? value.trim() : "";
   return normalized ? normalized : null;
+}
+
+function normalizeHostedGroupPhoneCallRequester(
+  value: HostedPhoneCallGroupRequester | null,
+): HostedPhoneCallGroupRequester | null {
+  if (
+    !value
+    || !/^ain_[0-9a-f]{32}$/u.test(value.assistantInputId)
+    || (value.source !== "linq" && value.source !== "telegram")
+  ) {
+    return null;
+  }
+  const senderHandle = value.senderHandle.trim();
+  if (!senderHandle || senderHandle.length > 512) {
+    return null;
+  }
+  return {
+    assistantInputId: value.assistantInputId,
+    senderHandle,
+    source: value.source,
+  };
 }
 
 function throwHostedGroupPhoneCallRequesterActivationRequired(): never {

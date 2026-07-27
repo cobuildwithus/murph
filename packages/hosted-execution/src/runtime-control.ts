@@ -20,6 +20,7 @@ import type {
   HostedAssistantReasoningEffortOverride,
 } from "./assistant-model.ts";
 import type {
+  HostedExecutionAcceptedGroupMessageParticipant,
   HostedExecutionAssistantAskOrigin,
   HostedExecutionAssistantAskResult,
   HostedBrowserVaultReplicaCursorRef,
@@ -1028,6 +1029,8 @@ export interface HostedRuntimeGroupToolLinqThreadContext {
   chatId: string;
 }
 
+// Legacy runner-to-Web request shape retained at the old-facing control-plane
+// boundary during the accepted-message participant rollout.
 export interface HostedRuntimeGroupToolSelfOptOutContext {
   senderHandle: string;
   source: "email" | "linq";
@@ -1165,6 +1168,7 @@ export type HostedRuntimeGroupToolRequest =
   | { action: "share_contact_card"; linqThread?: HostedRuntimeGroupToolLinqThreadContext | null }
   | {
       action: "revoke_own_email_share";
+      participant?: HostedExecutionAcceptedGroupMessageParticipant | null;
       selfOptOut?: HostedRuntimeGroupToolSelfOptOutContext | null;
     };
 
