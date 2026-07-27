@@ -1050,11 +1050,17 @@ export const HOSTED_RUNTIME_GROUP_SHARED_READ_PARTICIPANT_ID_MAX_CODE_POINTS = 2
 export const HOSTED_RUNTIME_GROUP_SHARED_READ_DISPLAY_NAME_MAX_CODE_POINTS = 200;
 export const HOSTED_RUNTIME_GROUP_SHARED_READ_SCOPE_KEY_MAX_CODE_POINTS = 256;
 export const HOSTED_RUNTIME_GROUP_SHARED_READ_UNAVAILABLE_REASON_MAX_CODE_POINTS = 500;
+export const HOSTED_RUNTIME_GROUP_OWNER_ADVISORY_NAME_MAX_CODE_POINTS = 48;
 
 export interface HostedRuntimeGroupChatParticipant {
   handle: string;
   /** Durable activation proof, not current access or membership in this group. */
   hasOwnMurph: boolean;
+  /**
+   * Optional, unverified, current-turn label from the human group owner's
+   * address-book projection. It grants no identity or routing authority.
+   */
+  ownerAdvisoryName?: string;
 }
 
 export interface HostedRuntimeGroupSharedReadRequest {
