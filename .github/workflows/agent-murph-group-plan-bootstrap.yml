@@ -32,7 +32,15 @@ jobs:
           fetch-depth: 0
           ref: agent/murph-group-plan
 
-      - name: Assemble and apply patch
+      - name: Merge current billing base in the worktree
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "Codex"
+          git config user.email "codex@users.noreply.github.com"
+          git merge --no-edit origin/agent/stripe-billing-hardening
+
+      - name: Assemble and partially apply patch
         id: apply
         continue-on-error: true
         shell: bash
@@ -52,32 +60,67 @@ jobs:
             .github/agent-group-plan/patch-008 \
             .github/agent-group-plan/patch-009 \
             > /tmp/murph-group-plan.patch
-          git apply --check --whitespace=error-all /tmp/murph-group-plan.patch > /tmp/group-plan-apply.log 2>&1
-          git apply --whitespace=fix /tmp/murph-group-plan.patch >> /tmp/group-plan-apply.log 2>&1
-          git diff --check >> /tmp/group-plan-apply.log 2>&1
 
-      - name: Upload patch diagnostics
-        if: steps.apply.outcome == 'failure'
+          set +e
+          git apply --reject --whitespace=fix /tmp/murph-group-plan.patch \
+            > /tmp/group-plan-apply.log 2>&1
+          apply_status=$?
+          git diff --check >> /tmp/group-plan-apply.log 2>&1
+          diff_status=$?
+          set -e
+
+          mkdir -p /tmp/group-plan-rebase/tree
+          cp /tmp/murph-group-plan.patch /tmp/group-plan-rebase/original.patch
+          cp /tmp/group-plan-apply.log /tmp/group-plan-rebase/apply.log
+          git diff --binary > /tmp/group-plan-rebase/partially-applied.patch
+          python - <<'PY'
+          from pathlib import Path
+          import re
+          import shutil
+
+          root = Path('.')
+          output = Path('/tmp/group-plan-rebase/tree')
+          patch = Path('/tmp/murph-group-plan.patch').read_text()
+          paths = set(re.findall(r'^diff --git a/(.+?) b/(.+?)$', patch, re.M)[0][0] for _ in [])
+          paths = set()
+          for left, right in re.findall(r'^diff --git a/(.+?) b/(.+?)$', patch, re.M):
+              paths.add(right)
+          paths.update(
+              str(path.relative_to(root)).removesuffix('.rej')
+              for path in root.rglob('*.rej')
+          )
+          for relative in sorted(paths):
+              source = root / relative
+              if source.is_file():
+                  target = output / relative
+                  target.parent.mkdir(parents=True, exist_ok=True)
+                  shutil.copy2(source, target)
+              reject = root / f'{relative}.rej'
+              if reject.is_file():
+                  target = output / f'{relative}.rej'
+                  target.parent.mkdir(parents=True, exist_ok=True)
+                  shutil.copy2(reject, target)
+          PY
+
+          if [ "$apply_status" -ne 0 ] || [ "$diff_status" -ne 0 ]; then
+            exit 1
+          fi
+
+      - name: Upload rebase worktree
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: group-plan-apply-diagnostics
-          path: /tmp/group-plan-apply.log
+          name: group-plan-rebase-worktree
+          path: /tmp/group-plan-rebase
           if-no-files-found: error
           retention-days: 1
 
-      - name: Fail after patch diagnostics
+      - name: Fail after rebase diagnostics
         if: steps.apply.outcome == 'failure'
         shell: bash
         run: |
           cat /tmp/group-plan-apply.log
           exit 1
-
-      - name: Upload applied patch
-        uses: actions/upload-artifact@v4
-        with:
-          name: group-plan-applied-patch
-          path: /tmp/murph-group-plan.patch
-          retention-days: 1
 
       - name: Enable pnpm
         shell: bash
@@ -135,9 +178,8 @@ jobs:
           set -euo pipefail
           rm -rf .github/agent-group-plan
           rm -f .github/workflows/agent-murph-group-plan-bootstrap.yml
+          find . -name '*.rej' -delete
           git diff --check
-          git config user.name "Codex"
-          git config user.email "codex@users.noreply.github.com"
           git add -A
           git commit -m "Add eligible Murph Group plan"
           git push origin HEAD:agent/murph-group-plan
