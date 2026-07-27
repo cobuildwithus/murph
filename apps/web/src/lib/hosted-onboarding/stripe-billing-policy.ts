@@ -84,6 +84,56 @@ export async function writeHostedMemberStripeBillingTx(input: {
     return null;
   }
 
+  const intentionalSuspension = input.suspendedAtOverride;
+  const billingOwnsCurrentSuspension =
+    isHostedStripeBillingOwnedSuspension(currentMember);
+  if (intentionalSuspension === undefined && billingOwnsCurrentSuspension) {
+    const identityIsCompatible =
+      hostedStripeBillingRefValueMatches(
+        currentMember.billingRef?.stripeCustomerId,
+        input.stripeCustomerId,
+      )
+      && hostedStripeBillingRefValueMatches(
+        currentMember.billingRef?.stripeSubscriptionId,
+        input.stripeSubscriptionId,
+      );
+    const stripeCustomerId =
+      identityIsCompatible && !currentMember.billingRef?.stripeCustomerId
+        ? input.stripeCustomerId || undefined
+        : undefined;
+    const stripeSubscriptionId =
+      identityIsCompatible && !currentMember.billingRef?.stripeSubscriptionId
+        ? input.stripeSubscriptionId || undefined
+        : undefined;
+    const suspendedAt = currentMember.core.suspendedAt;
+
+    if ((!stripeCustomerId && !stripeSubscriptionId) || !suspendedAt) {
+      return currentMember;
+    }
+
+    await updateHostedMemberCoreState({
+      memberId: currentMember.core.id,
+      prisma: input.tx,
+      suspendedAt: null,
+    });
+    await writeHostedMemberStripeBillingRefTx({
+      memberId: currentMember.core.id,
+      stripeCustomerId,
+      stripeSubscriptionId,
+      tx: input.tx,
+    });
+    await updateHostedMemberCoreState({
+      memberId: currentMember.core.id,
+      prisma: input.tx,
+      suspendedAt,
+    });
+
+    return readHostedMemberBillingSnapshot({
+      memberId: currentMember.core.id,
+      prisma: input.tx,
+    });
+  }
+
   const freshnessPolicy = input.freshnessPolicy ?? "strict";
   if (shouldRejectPulseTrialEntitlementWriteForCurrentMember({
     billingRef: currentMember.billingRef,
@@ -184,9 +234,6 @@ export async function writeHostedMemberStripeBillingTx(input: {
     tx: input.tx,
   });
 
-  const intentionalSuspension = input.suspendedAtOverride;
-  const billingOwnsCurrentSuspension =
-    isHostedStripeBillingOwnedSuspension(currentMember);
   if (
     intentionalSuspension !== undefined
     && currentMember.core.suspendedAt
@@ -194,42 +241,6 @@ export async function writeHostedMemberStripeBillingTx(input: {
   ) {
     assertHostedMemberNotSuspended(currentMember.core);
   }
-  if (intentionalSuspension === undefined && billingOwnsCurrentSuspension) {
-    const stripeCustomerId = currentMember.billingRef?.stripeCustomerId
-      ? undefined
-      : billingRefWriteValues.stripeCustomerId || undefined;
-    const stripeSubscriptionId = currentMember.billingRef?.stripeSubscriptionId
-      ? undefined
-      : billingRefWriteValues.stripeSubscriptionId || undefined;
-    const suspendedAt = currentMember.core.suspendedAt;
-
-    if ((!stripeCustomerId && !stripeSubscriptionId) || !suspendedAt) {
-      return currentMember;
-    }
-
-    await updateHostedMemberCoreState({
-      memberId: currentMember.core.id,
-      prisma: input.tx,
-      suspendedAt: null,
-    });
-    await writeHostedMemberStripeBillingRefTx({
-      memberId: currentMember.core.id,
-      stripeCustomerId,
-      stripeSubscriptionId,
-      tx: input.tx,
-    });
-    await updateHostedMemberCoreState({
-      memberId: currentMember.core.id,
-      prisma: input.tx,
-      suspendedAt,
-    });
-
-    return readHostedMemberBillingSnapshot({
-      memberId: currentMember.core.id,
-      prisma: input.tx,
-    });
-  }
-
   if (intentionalSuspension !== undefined && intentionalSuspension !== null) {
     if (currentMember.core.suspendedAt) {
       await updateHostedMemberCoreState({

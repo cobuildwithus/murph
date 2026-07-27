@@ -583,10 +583,26 @@ describe.skipIf(!runPostgresConcurrencyProof)(
       {
         billingIdentity: "customer-only",
         label: "ordinary progress completes before a delayed restoration",
+        ordinaryCreatedBeforeReversal: false,
+        prebindSubscription: false,
+        restoreCompletesLast: true,
+      },
+      {
+        billingIdentity: "customer-only",
+        label: "restoration retries before stale ordinary progress",
+        ordinaryCreatedBeforeReversal: true,
+        prebindSubscription: false,
+        restoreCompletesLast: false,
+      },
+      {
+        billingIdentity: "customer-only",
+        label: "stale ordinary progress completes before a delayed restoration",
+        ordinaryCreatedBeforeReversal: true,
         prebindSubscription: false,
         restoreCompletesLast: true,
       },
     ])("reconciles $label for a $billingIdentity member without stranding access", async ({
+      ordinaryCreatedBeforeReversal = false,
       prebindSubscription,
       restoreCompletesLast,
     }) => {
@@ -600,7 +616,9 @@ describe.skipIf(!runPostgresConcurrencyProof)(
       const initialBillingAt = new Date("2026-07-26T18:00:00.000Z");
       const reversalAt = new Date("2026-07-26T18:00:01.000Z");
       const restoreAt = new Date("2026-07-26T18:00:02.000Z");
-      const ordinaryAt = new Date("2026-07-26T18:00:03.000Z");
+      const ordinaryAt = ordinaryCreatedBeforeReversal
+        ? new Date("2026-07-26T18:00:00.500Z")
+        : new Date("2026-07-26T18:00:03.000Z");
       const subscription = makeActiveStripeSubscription({
         customerId,
         memberId,
@@ -715,6 +733,19 @@ describe.skipIf(!runPostgresConcurrencyProof)(
             eventId: ordinaryEvent.id,
             status: "completed",
           });
+          if (!prebindSubscription) {
+            await expect(requireBillingSnapshot(observer, memberId)).resolves.toMatchObject({
+              billingRef: {
+                lastStripeEventCreatedAt: reversalAt,
+                stripeCustomerId: customerId,
+                stripeSubscriptionId: subscriptionId,
+              },
+              core: {
+                billingStatus: HostedBillingStatus.unpaid,
+                suspendedAt: reversalAt,
+              },
+            });
+          }
           releaseRestoreChargeRead.resolve(
             makeStripeCharge({ chargeId, customerId }),
           );
@@ -738,6 +769,17 @@ describe.skipIf(!runPostgresConcurrencyProof)(
             status: "completed",
           });
           if (!prebindSubscription) {
+            await expect(requireBillingSnapshot(observer, memberId)).resolves.toMatchObject({
+              billingRef: {
+                lastStripeEventCreatedAt: reversalAt,
+                stripeCustomerId: customerId,
+                stripeSubscriptionId: subscriptionId,
+              },
+              core: {
+                billingStatus: HostedBillingStatus.unpaid,
+                suspendedAt: reversalAt,
+              },
+            });
             await expect(observer.hostedStripeEvent.findUnique({
               where: {
                 eventId: restoreEvent.id,

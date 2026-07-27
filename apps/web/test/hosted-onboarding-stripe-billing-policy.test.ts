@@ -303,9 +303,9 @@ describe("hosted onboarding stripe billing policy", () => {
     expect(mocks.writeHostedMemberStripeBillingRef).not.toHaveBeenCalled();
   });
 
-  it("binds only missing provider identity during billing-owned suspension", async () => {
-    const reversalCreatedAt = new Date("2026-04-25T00:00:00.000Z");
-    const subscriptionCreatedAt = new Date("2026-04-25T00:05:00.000Z");
+  it("binds missing provider identity from a stale event during billing-owned suspension", async () => {
+    const subscriptionCreatedAt = new Date("2026-04-25T00:00:00.000Z");
+    const reversalCreatedAt = new Date("2026-04-25T00:05:00.000Z");
     const suspendedMember = makeMemberSnapshot({
       billingRef: {
         lastStripeEventCreatedAt: reversalCreatedAt,
