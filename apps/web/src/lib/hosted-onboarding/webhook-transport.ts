@@ -6,6 +6,7 @@ import type {
 import {
   type HostedAiUsageGateNoticeCode,
 } from "../hosted-execution/usage-allowance";
+import { LINQ_API_DEFAULT_TIMEOUT_MS } from "../linq/api";
 import { sha256Hex } from "../primitives";
 import { hostedOnboardingError } from "./errors";
 import {
@@ -382,13 +383,16 @@ type HostedLinqSideEffectSendSkip = {
 
 type HostedLinqProviderFenceState = {
   providerRequestCompleted: boolean;
+  providerRequestStarted: boolean;
+  startedAtMs: number;
 };
 
+const HOSTED_GROUP_JOIN_PROVIDER_FENCE_LOCK_TIMEOUT_MS = 1_500;
+const HOSTED_GROUP_JOIN_PROVIDER_FENCE_COMMIT_MARGIN_MS = 2_000;
 const HOSTED_GROUP_JOIN_PROVIDER_FENCE_TRANSACTION_OPTIONS = {
   maxWait: 5_000,
-  // Linq's provider request has a ten-second timeout. Keep the transaction
-  // alive long enough to commit the correlated result without widening the
-  // ordinary signup or non-signup transport path.
+  // The provider body remains inside its ten-second request timeout. Provider
+  // entry is refused unless that full timeout and the commit margin remain.
   timeout: 15_000,
 } as const;
 
@@ -458,6 +462,8 @@ async function drainHostedLinqSideEffectWithProviderFence(
   > => {
     const providerFenceState: HostedLinqProviderFenceState = {
       providerRequestCompleted: false,
+      providerRequestStarted: false,
+      startedAtMs: performance.now(),
     };
     try {
       return {
@@ -470,7 +476,10 @@ async function drainHostedLinqSideEffectWithProviderFence(
         status: "completed",
       };
     } catch (error) {
-      if (providerFenceState.providerRequestCompleted) {
+      if (
+        !providerFenceState.providerRequestStarted
+        || providerFenceState.providerRequestCompleted
+      ) {
         throw error;
       }
       // Commit the attempted/failed delivery consequence and reopened exact
@@ -539,7 +548,9 @@ async function drainHostedLinqSideEffectDirect(
   }
 
   if (isHostedInviteLinqMessagePayload(effect.payload)) {
-    await markHostedLinqNoticeSentForSideEffect(effect, input.prisma);
+    if (!input.completeProviderOutcomeBeforeReturn) {
+      await markHostedLinqNoticeSentForSideEffect(effect, input.prisma);
+    }
     await markHostedInviteSentBestEffort(effect.payload.inviteId, input.prisma);
   }
   return { sentCount: 1, skipped: [] };
@@ -651,6 +662,7 @@ async function sendHostedLinqSideEffect(
     : prepareHostedLinqSideEffectProviderDispatch({
         effect,
         prisma: options.prisma,
+        providerFenceState: options.providerFenceState,
         startedAtMs,
       });
   let deliveryEffect = effect;
@@ -676,10 +688,15 @@ async function sendHostedLinqSideEffect(
     providerIdempotencyKey = deliveryEffect.effectId;
 
     if (deliveryEffect.payload.template === "invite_signup_fallback") {
+      const message = await buildHostedLinqSideEffectMessage(
+        deliveryEffect,
+        options.prisma,
+      );
+      beginHostedGroupJoinProviderRequest(options.providerFenceState);
       const result = await createHostedLinqChat({
         from: deliveryEffect.payload.assignedRecipientPhone,
         idempotencyKey: deliveryEffect.effectId,
-        message: await buildHostedLinqSideEffectMessage(deliveryEffect, options.prisma),
+        message,
         signal: options.signal,
         to: [deliveryEffect.payload.memberPhone],
       });
@@ -762,6 +779,7 @@ async function sendHostedLinqSideEffect(
         "Hosted Linq thread side-effect dispatch requires a chat id.",
       );
     }
+    beginHostedGroupJoinProviderRequest(options.providerFenceState);
     const result = await sendHostedLinqChatMessage({
       chatId: deliveryChatId,
       idempotencyKey: providerIdempotencyKey,
@@ -800,7 +818,13 @@ async function sendHostedLinqSideEffect(
       || effect.payload.template === "invite_signup_fallback"
     ) {
       await deliveryAttemptTask;
-      if (!options.providerFenceState?.providerRequestCompleted) {
+      if (
+        (
+          !options.providerFenceState
+          || options.providerFenceState.providerRequestStarted
+        )
+        && !options.providerFenceState?.providerRequestCompleted
+      ) {
         await markHostedLinqDeliveryFailedBestEffort({
           effect: deliveryEffect,
           error,
@@ -1032,6 +1056,7 @@ function readHostedLinqSideEffectDeliveryTarget(payload: HostedLinqMessagePayloa
 async function prepareHostedLinqSideEffectProviderDispatch(input: {
   effect: HostedLinqMessageSideEffect;
   prisma: HostedLinqTransportPersistenceClient;
+  providerFenceState?: HostedLinqProviderFenceState;
   startedAtMs: number;
 }): Promise<HostedLinqProviderDispatchPreparation> {
   const signupEffect = isHostedLinqSignupMessageSideEffect(input.effect)
@@ -1044,7 +1069,13 @@ async function prepareHostedLinqSideEffectProviderDispatch(input: {
       input.effect,
     );
     if (signupEffect) {
-      await lockHostedMemberRow(prisma, signupEffect.payload.memberId);
+      await lockHostedMemberRow(
+        prisma,
+        signupEffect.payload.memberId,
+        input.providerFenceState
+          ? { timeoutMs: HOSTED_GROUP_JOIN_PROVIDER_FENCE_LOCK_TIMEOUT_MS }
+          : {},
+      );
       const invite = await prisma.hostedInvite.findUnique({
         select: { id: true },
         where: {
@@ -1140,6 +1171,30 @@ async function prepareHostedLinqSideEffectProviderDispatch(input: {
       status: "in_flight",
     };
   });
+}
+
+function beginHostedGroupJoinProviderRequest(
+  providerFenceState: HostedLinqProviderFenceState | undefined,
+): void {
+  if (!providerFenceState) {
+    return;
+  }
+  const elapsedMs = performance.now() - providerFenceState.startedAtMs;
+  const requiredRemainingMs =
+    LINQ_API_DEFAULT_TIMEOUT_MS
+    + HOSTED_GROUP_JOIN_PROVIDER_FENCE_COMMIT_MARGIN_MS;
+  const remainingMs =
+    HOSTED_GROUP_JOIN_PROVIDER_FENCE_TRANSACTION_OPTIONS.timeout
+    - elapsedMs;
+  if (remainingMs < requiredRemainingMs) {
+    throw hostedOnboardingError({
+      code: "HOSTED_LINQ_PROVIDER_FENCE_BUDGET_EXHAUSTED",
+      httpStatus: 503,
+      message: "Hosted Linq provider fence budget was exhausted before dispatch.",
+      retryable: true,
+    });
+  }
+  providerFenceState.providerRequestStarted = true;
 }
 
 async function resolveHostedLinqSignupDispatchIntentTx(input: {

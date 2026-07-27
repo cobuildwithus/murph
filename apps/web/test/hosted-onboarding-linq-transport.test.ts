@@ -338,7 +338,7 @@ describe("hosted Linq webhook transport", () => {
         repliedAt: "2026-03-26T12:00:00.000Z",
       },
     });
-    expect(markHostedLinqOnboardingLinkNoticeSent).toHaveBeenCalledTimes(2);
+    expect(markHostedLinqOnboardingLinkNoticeSent).toHaveBeenCalledTimes(1);
     expect(prisma.hostedGroupJoinOutreach.updateMany).toHaveBeenCalledWith({
       data: {
         repliedAt: new Date("2026-03-26T12:00:00.000Z"),
@@ -402,6 +402,52 @@ describe("hosted Linq webhook transport", () => {
     expect(markHostedLinqDeliveryAcceptedTx).not.toHaveBeenCalled();
     expect(prisma.hostedGroupJoinOutreach.updateMany).not.toHaveBeenCalled();
     expect(scheduleAfterResponse).not.toHaveBeenCalled();
+  });
+
+  it("rolls back before provider entry when the full request budget no longer remains", async () => {
+    const effect = createHostedWebhookLinqMessageSideEffect({
+      chatId: "chat-1",
+      groupJoinCode: "join-group",
+      groupJoinOutreachId: "hgrpjoa-provider-budget",
+      inviteId: "invite-1",
+      memberId: "member-1",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      replyToMessageId: "message-1",
+      service: "sms",
+      sourceEventId: "event-group-provider-budget",
+      threadIsDirect: true,
+      template: "invite_signup",
+    });
+    const prisma = createInviteSignupPrismaFixture();
+    const performanceNow = vi.spyOn(performance, "now")
+      .mockReturnValueOnce(0)
+      .mockReturnValue(3_001);
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    try {
+      await expect(
+        drainHostedLinqSideEffectsDirect({
+          prisma: prisma as never,
+          sideEffects: [effect],
+        }),
+      ).rejects.toMatchObject({
+        code: "HOSTED_LINQ_PROVIDER_FENCE_BUDGET_EXHAUSTED",
+        httpStatus: 503,
+        retryable: true,
+      });
+    } finally {
+      errorSpy.mockRestore();
+      performanceNow.mockRestore();
+    }
+
+    expect(prisma.$transaction).toHaveBeenCalledWith(
+      expect.any(Function),
+      { maxWait: 5_000, timeout: 15_000 },
+    );
+    expect(prisma.$queryRaw).toHaveBeenCalledTimes(2);
+    expect(sendHostedLinqChatMessage).not.toHaveBeenCalled();
+    expect(markHostedLinqDeliverySendFailedTx).not.toHaveBeenCalled();
+    expect(markHostedLinqOnboardingLinkNoticeSent).not.toHaveBeenCalled();
   });
 
   it("rolls back the group provider fence when accepted correlation fails", async () => {
@@ -716,7 +762,7 @@ describe("hosted Linq webhook transport", () => {
     });
 
     expect(scheduleAfterResponse).not.toHaveBeenCalled();
-    expect(markHostedLinqOnboardingLinkNoticeSent).toHaveBeenCalledTimes(1);
+    expect(markHostedLinqOnboardingLinkNoticeSent).not.toHaveBeenCalled();
     expect(releaseHostedLinqOnboardingLinkNoticeClaim).toHaveBeenCalledWith({
       memberId: "member-1",
       occurredAt: "2026-03-26T00:00:00.000Z",

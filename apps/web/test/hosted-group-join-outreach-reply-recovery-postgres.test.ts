@@ -1,4 +1,5 @@
 import { randomInt, randomUUID } from "node:crypto";
+import { createServer, type Server } from "node:http";
 
 import type { Prisma, PrismaClient } from "@prisma/client";
 import { describe, expect, it, vi } from "vitest";
@@ -170,6 +171,7 @@ vi.mock("@/src/lib/phone-calls/account-deletion", async () => {
 });
 
 import {
+  acquireHostedGroupJoinOutreachDrainLockTx,
   enqueueHostedGroupJoinOutreachTx,
   readHostedGroupJoinOutreachReplyContextTx,
 } from "@/src/lib/hosted-groups/group-join-outreach-store";
@@ -190,6 +192,9 @@ import {
 import {
   upsertHostedLinqLineForPhoneTx,
 } from "@/src/lib/hosted-onboarding/linq-line-store";
+import {
+  sendHostedLinqChatMessage as sendHostedLinqChatMessageOverHttp,
+} from "@/src/lib/hosted-onboarding/linq-client";
 import { parseHostedLinqWebhookEvent } from "@/src/lib/hosted-onboarding/linq";
 import { ingestHostedLinqProviderEventTx } from "@/src/lib/hosted-onboarding/linq-provider-event-store";
 import { parseHostedLinqProviderEvent } from "@/src/lib/hosted-onboarding/linq-provider-events";
@@ -1145,6 +1150,272 @@ describe.skipIf(!runPostgresProof)(
       }
     });
 
+    it("aborts a stalled provider body before fence expiry while deletion waits", async () => {
+      vi.stubEnv(
+        "HOSTED_ONBOARDING_PUBLIC_BASE_URL",
+        "https://join.example.test",
+      );
+      const fixture = await createDeletionReplyRaceFixture();
+      let reportHeadersFlushed = () => {};
+      const headersFlushed = new Promise<void>((resolve) => {
+        reportHeadersFlushed = resolve;
+      });
+      let providerConnectionClosed = false;
+      const server = createServer((_request, response) => {
+        response.on("close", () => {
+          providerConnectionClosed = true;
+        });
+        response.writeHead(200, {
+          "content-type": "application/json",
+        });
+        response.flushHeaders();
+        response.write(
+          `{"chat_id":${JSON.stringify(fixture.chatId)},"message":{"id":`,
+        );
+        reportHeadersFlushed();
+      });
+      const apiBaseUrl = await listenOnLoopback(server);
+      vi.stubEnv("LINQ_API_BASE_URL", apiBaseUrl);
+      vi.stubEnv("LINQ_API_TOKEN", "test-token");
+      clearHostedOnboardingEnvCache();
+      let cleanupCalls = 0;
+      accountDeletionMocks.runHostedAccountDeletionCleanup
+        .mockReset()
+        .mockImplementation(async () => {
+          cleanupCalls += 1;
+          return makeDeletionCleanupRunResult();
+        });
+      providerMocks.sendHostedLinqChatMessage
+        .mockReset()
+        .mockImplementation(sendHostedLinqChatMessageOverHttp);
+      const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+      let deletionPromise: ReturnType<typeof deleteHostedAccountData> | null =
+        null;
+      let replyPromise: ReturnType<typeof drainDeletionReplyEffect> | null =
+        null;
+
+      try {
+        replyPromise = drainDeletionReplyEffect({
+          effect: fixture.effect,
+          prisma: fixture.replyPrisma,
+        });
+        await headersFlushed;
+
+        let deletionSettled = false;
+        deletionPromise = deleteHostedAccountData({
+          memberId: fixture.ownerMemberId,
+          prisma: fixture.deletionPrisma,
+          request: new Request("https://join.example.test/settings"),
+        }).finally(() => {
+          deletionSettled = true;
+        });
+        await new Promise((resolve) => setTimeout(resolve, 1_000));
+        expect(deletionSettled).toBe(false);
+        expect(cleanupCalls).toBe(0);
+
+        const replyError = await withTimeout(
+          replyPromise.then(
+            () => null,
+            (error: unknown) => error,
+          ),
+          15_000,
+        );
+        expect(replyError).toMatchObject({
+          code: "LINQ_SEND_FAILED",
+          httpStatus: 502,
+          message: "Linq outbound reply timed out.",
+          retryable: true,
+        });
+        expect(replyError).not.toMatchObject({ code: "P2028" });
+        await expect(withTimeout(deletionPromise, 15_000)).resolves.toBeDefined();
+        expect(cleanupCalls).toBe(1);
+        await vi.waitFor(() => {
+          expect(providerConnectionClosed).toBe(true);
+        });
+        await expectDeletionReplyRaceConverged(fixture);
+      } finally {
+        await Promise.allSettled([
+          ...(replyPromise ? [replyPromise] : []),
+          ...(deletionPromise ? [deletionPromise] : []),
+        ]);
+        errorSpy.mockRestore();
+        await closeTestServer(server);
+        await cleanupDeletionReplyRaceFixture(fixture);
+        accountDeletionMocks.runHostedAccountDeletionCleanup
+          .mockReset()
+          .mockResolvedValue(makeDeletionCleanupRunResult());
+        providerMocks.sendHostedLinqChatMessage.mockReset();
+        vi.unstubAllEnvs();
+        clearHostedOnboardingEnvCache();
+      }
+    }, 40_000);
+
+    it("times out drain contention before provider entry without a durable attempt", async () => {
+      vi.stubEnv(
+        "HOSTED_ONBOARDING_PUBLIC_BASE_URL",
+        "https://join.example.test",
+      );
+      const fixture = await createDeletionReplyRaceFixture();
+      let releaseDrain = () => {};
+      const drainMayRelease = new Promise<void>((resolve) => {
+        releaseDrain = resolve;
+      });
+      let reportDrainOwned = () => {};
+      const drainOwned = new Promise<void>((resolve) => {
+        reportDrainOwned = resolve;
+      });
+      const holdingDrain = fixture.deletionPrisma.$transaction(async (tx) => {
+        await acquireHostedGroupJoinOutreachDrainLockTx(tx);
+        reportDrainOwned();
+        await drainMayRelease;
+      });
+      providerMocks.sendHostedLinqChatMessage
+        .mockReset()
+        .mockResolvedValue({
+          chatId: fixture.chatId,
+          messageId: `linq-lock-budget-${randomUUID()}`,
+        });
+      const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+      try {
+        await drainOwned;
+        const reply = drainDeletionReplyEffect({
+          effect: fixture.effect,
+          prisma: fixture.replyPrisma,
+        });
+        await expect(withTimeout(reply, 5_000)).rejects.toBeDefined();
+        expect(providerMocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+        await expect(fixture.replyPrisma.hostedLinqDelivery.findUnique({
+          select: { id: true },
+          where: { idempotencyKey: fixture.deliveryLookupKey },
+        })).resolves.toBeNull();
+      } finally {
+        releaseDrain();
+        await holdingDrain;
+        errorSpy.mockRestore();
+        await cleanupDeletionReplyRaceFixture(fixture);
+        providerMocks.sendHostedLinqChatMessage.mockReset();
+        vi.unstubAllEnvs();
+      }
+    });
+
+    it("leaves buffered group failure unsuppressed and permits a fresh generic retry", async () => {
+      vi.stubEnv(
+        "HOSTED_ONBOARDING_PUBLIC_BASE_URL",
+        "https://join.example.test",
+      );
+      const fixture = await createDeletionReplyRaceFixture();
+      const providerMessageId = `linq-buffered-failure-${randomUUID()}`;
+      const failureEventId = `event-buffered-failure-${randomUUID()}`;
+      const failureEventLookupKey =
+        createHostedLinqProviderEventLookupKey(failureEventId);
+      const genericEffect = createHostedWebhookLinqMessageSideEffect({
+        chatId: fixture.chatId,
+        inviteId: fixture.inviteId,
+        memberId: fixture.participantMemberId,
+        occurredAt: "2026-07-27T16:01:00.000Z",
+        sourceEventId: `event-generic-retry-${randomUUID()}`,
+        template: "invite_signup",
+      });
+      const genericDeliveryLookupKey =
+        createHostedLinqDeliveryIdempotencyLookupKey(genericEffect.effectId);
+      if (!failureEventLookupKey || !genericDeliveryLookupKey) {
+        throw new Error("Expected buffered-failure proof lookup keys.");
+      }
+      providerMocks.sendHostedLinqChatMessage
+        .mockReset()
+        .mockResolvedValueOnce({
+          chatId: fixture.chatId,
+          messageId: providerMessageId,
+        })
+        .mockResolvedValueOnce({
+          chatId: fixture.chatId,
+          messageId: `linq-generic-retry-${randomUUID()}`,
+        });
+
+      try {
+        await fixture.deletionPrisma.hostedLinqDailyState.create({
+          data: {
+            dayUtc: new Date("2026-07-27T00:00:00.000Z"),
+            firstSeenAt: new Date("2026-07-27T16:00:00.000Z"),
+            lastSeenAt: new Date("2026-07-27T16:00:00.000Z"),
+            memberId: fixture.participantMemberId,
+          },
+        });
+        await fixture.deletionPrisma.$transaction((tx) =>
+          ingestHostedLinqProviderEventTx({
+            event: buildParsedFailureReceipt({
+              eventId: failureEventId,
+              messageId: providerMessageId,
+              occurredAt: "2026-07-27T16:00:01.000Z",
+              recipientPhone: createUniqueTestPhone("+1303"),
+            }),
+            prisma: tx,
+          })
+        );
+
+        await expect(drainDeletionReplyEffect({
+          effect: fixture.effect,
+          prisma: fixture.replyPrisma,
+        })).resolves.toMatchObject({ sentCount: 1, skipped: [] });
+        await expect(fixture.replyPrisma.hostedLinqDelivery.findUnique({
+          select: { status: true },
+          where: { idempotencyKey: fixture.deliveryLookupKey },
+        })).resolves.toEqual({ status: "failed" });
+        const dailyStateAfterBufferedFailure =
+          await fixture.replyPrisma.hostedLinqDailyState.findUnique({
+          select: { onboardingLinkSentAt: true },
+          where: {
+            memberId_dayUtc: {
+              dayUtc: new Date("2026-07-27T00:00:00.000Z"),
+              memberId: fixture.participantMemberId,
+            },
+          },
+        });
+        expect(
+          dailyStateAfterBufferedFailure?.onboardingLinkSentAt ?? null,
+        ).toBeNull();
+        await expect(fixture.replyPrisma.hostedGroupJoinOutreach.findUnique({
+          select: { repliedAt: true },
+          where: { id: fixture.outreachId },
+        })).resolves.toEqual({ repliedAt: null });
+
+        await expect(drainDeletionReplyEffect({
+          effect: genericEffect,
+          prisma: fixture.replyPrisma,
+        })).resolves.toMatchObject({ sentCount: 1, skipped: [] });
+        expect(providerMocks.sendHostedLinqChatMessage).toHaveBeenCalledTimes(2);
+        await expect(fixture.replyPrisma.hostedLinqDailyState.findUnique({
+          select: { onboardingLinkSentAt: true },
+          where: {
+            memberId_dayUtc: {
+              dayUtc: new Date("2026-07-27T00:00:00.000Z"),
+              memberId: fixture.participantMemberId,
+            },
+          },
+        })).resolves.toEqual({
+          onboardingLinkSentAt: expect.any(Date),
+        });
+      } finally {
+        await fixture.deletionPrisma.hostedLinqAlert.deleteMany({
+          where: { eventId: failureEventLookupKey },
+        });
+        await fixture.deletionPrisma.hostedLinqProviderEvent.deleteMany({
+          where: { eventId: failureEventLookupKey },
+        });
+        await fixture.deletionPrisma.hostedLinqDelivery.deleteMany({
+          where: {
+            idempotencyKey: {
+              in: [fixture.deliveryLookupKey, genericDeliveryLookupKey],
+            },
+          },
+        });
+        await cleanupDeletionReplyRaceFixture(fixture);
+        providerMocks.sendHostedLinqChatMessage.mockReset();
+        vi.unstubAllEnvs();
+      }
+    });
+
     it("rejects a reply after the deletion suspension fence and completes that request", async () => {
       vi.stubEnv(
         "HOSTED_ONBOARDING_PUBLIC_BASE_URL",
@@ -1602,6 +1873,38 @@ async function cleanupRecoveryProof(input: {
 
 function createUniqueTestPhone(prefix: "+1202" | "+1303"): string {
   return `${prefix}${String(randomInt(0, 10_000_000)).padStart(7, "0")}`;
+}
+
+async function listenOnLoopback(server: Server): Promise<string> {
+  await new Promise<void>((resolve) => {
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  const address = server.address();
+  if (!address || typeof address === "string") {
+    throw new Error("Expected a loopback provider test server address.");
+  }
+  return `http://127.0.0.1:${address.port}/api/partner/v3`;
+}
+
+async function closeTestServer(server: Server): Promise<void> {
+  server.closeAllConnections();
+  await new Promise<void>((resolve, reject) => {
+    server.close((error) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+      resolve();
+    });
+  });
+}
+
+function clearHostedOnboardingEnvCache(): void {
+  delete (
+    globalThis as typeof globalThis & {
+      __murphHostedOnboardingEnv?: unknown;
+    }
+  ).__murphHostedOnboardingEnv;
 }
 
 function isClearlyLocalPostgresUrl(value: string): boolean {

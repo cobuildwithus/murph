@@ -87,6 +87,14 @@ export type HostedAccountStoreDeletionMode =
   | "local-reference-delete"
   | "documented-retention";
 
+const HOSTED_ACCOUNT_DELETION_SUSPENSION_FENCE_TRANSACTION_OPTIONS = {
+  ...HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
+  // Group-aware provider fences expire after fifteen seconds. Deletion gets a
+  // strictly larger callback budget so an admitted bounded send can commit its
+  // correlated consequence before suspension crosses the shared drain.
+  timeout: 20_000,
+} as const;
+
 export interface HostedAccountDataStoreCoverageEntry {
   readonly slug: string;
   readonly label: string;
@@ -1066,7 +1074,7 @@ async function markHostedMembersSuspendedForAccountDeletion(input: {
     // the suspended group runtime.
     await acquireHostedGroupJoinOutreachDrainLockTx(tx);
     return memberIds;
-  }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+  }, HOSTED_ACCOUNT_DELETION_SUSPENSION_FENCE_TRANSACTION_OPTIONS);
 }
 
 async function refreshHostedMembersAccountDeletionFenceTx(input: {
