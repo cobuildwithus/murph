@@ -373,6 +373,14 @@ export interface DeviceSyncPublicIngressStore {
     externalAccountId: string,
   ): PublicDeviceSyncAccount | null | Promise<PublicDeviceSyncAccount | null>;
   getConnectionOwnerId?(accountId: string): string | null | Promise<string | null>;
+  /**
+   * Performs the final SDK sign-in authority check against one current store
+   * snapshot. Implementations must include account identity, ownership, and
+   * established lifecycle state in the same effect-time read.
+   */
+  isSdkSignInAuthorityCurrent(
+    input: SdkSignInAuthorityInput,
+  ): boolean | Promise<boolean>;
   claimWebhookTrace(input: ClaimDeviceSyncWebhookTraceInput): DeviceSyncWebhookTraceClaimResult | Promise<DeviceSyncWebhookTraceClaimResult>;
   completeWebhookTrace(provider: string, traceId: string, claimToken: string): boolean | Promise<boolean>;
   releaseWebhookTrace(provider: string, traceId: string, claimToken: string): void | Promise<void>;
@@ -387,6 +395,13 @@ export interface DeviceSyncPublicIngressStore {
     now: string;
     sourceProviderSlug: string;
   }): number | Promise<number>;
+}
+
+export interface SdkSignInAuthorityInput {
+  accountId: string;
+  externalAccountId: string;
+  ownerId: string;
+  provider: string;
 }
 
 export interface DeviceSyncJobInput {
