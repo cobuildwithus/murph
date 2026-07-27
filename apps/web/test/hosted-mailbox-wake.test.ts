@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   after: vi.fn(),
@@ -29,6 +29,10 @@ describe("hosted mailbox wake handoff", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.startHostedDirectRuntimeWakeBestEffort.mockResolvedValue(undefined);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it("starts the direct latency hint only after Temporal accepts durable signaling", async () => {
@@ -63,6 +67,7 @@ describe("hosted mailbox wake handoff", () => {
     expect(mocks.after).toHaveBeenCalledWith(expect.any(Function));
     expect(order).toEqual(["temporal", "direct"]);
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      abortSignal: expect.any(AbortSignal),
       expectedUserId: "member-private",
       mailboxItemId: "aask_done_one",
     });
@@ -80,6 +85,38 @@ describe("hosted mailbox wake handoff", () => {
     })).rejects.toThrow("Temporal unavailable");
 
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledTimes(1);
+    expect(mocks.after).not.toHaveBeenCalled();
+    expect(mocks.startHostedDirectRuntimeWakeBestEffort).not.toHaveBeenCalled();
+  });
+
+  it("aborts an unsettled Temporal handoff before the caller budget expires", async () => {
+    vi.useFakeTimers();
+    let temporalSignal: AbortSignal | undefined;
+    let resolveTemporal!: () => void;
+    mocks.signalHostedMailboxAppendRuntime.mockImplementationOnce(
+      (input: { abortSignal?: AbortSignal }) => {
+        temporalSignal = input.abortSignal;
+        return new Promise<void>((resolve) => {
+          resolveTemporal = resolve;
+        });
+      },
+    );
+
+    const handoff = handoffHostedMailboxWake({
+      directWakeSource: "assistant-ask-request",
+      expectedUserId: "member-group-runtime",
+      mailboxItemId: "aask_req_timeout",
+      timeoutMs: 25,
+    });
+    const rejection = expect(handoff).rejects.toThrow(
+      "Hosted post-commit handoff timed out",
+    );
+
+    await vi.advanceTimersByTimeAsync(25);
+    await rejection;
+    expect(temporalSignal?.aborted).toBe(true);
+    resolveTemporal();
+    await Promise.resolve();
     expect(mocks.after).not.toHaveBeenCalled();
     expect(mocks.startHostedDirectRuntimeWakeBestEffort).not.toHaveBeenCalled();
   });

@@ -106,11 +106,12 @@ describe("Hosted Assistant Ask runtime route", () => {
       response: { action: "complete", status: "completed" },
     });
 
-    const response = await POST(runtimeRequest({
+    const request = runtimeRequest({
       action: "complete",
       requestId: "aask_req_one",
       result: { answer: "Three sets of squats.", outcome: "answered" },
-    }));
+    });
+    const response = await POST(request);
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
@@ -121,6 +122,7 @@ describe("Hosted Assistant Ask runtime route", () => {
       directWakeSource: "assistant-ask-completion",
       expectedUserId: "member-personal",
       mailboxItemId: "aask_done_one",
+      signal: request.signal,
     });
   });
 

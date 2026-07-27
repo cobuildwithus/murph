@@ -49,6 +49,7 @@ export const POST = withJsonError(async (request: Request) => {
     await handoffHostedMailboxWake({
       ...result.mailboxWake,
       directWakeSource: "assistant-ask-completion",
+      signal: request.signal,
     });
   }
   return jsonOk(result.response);

@@ -184,6 +184,7 @@ describe("hosted group tool route", () => {
 
     expect(response.status).toBe(200);
     expect(mocks.handoffHostedMailboxWake).toHaveBeenCalledWith({
+      signal: request.signal,
       directWakeSource: "assistant-ask-request",
       expectedUserId: "member-group-runtime",
       mailboxItemId: "aask_req_direct_wake",
@@ -275,6 +276,7 @@ describe("hosted group tool route", () => {
 
     expect(response.status).toBe(500);
     expect(mocks.handoffHostedMailboxWake).toHaveBeenCalledWith({
+      signal: request.signal,
       directWakeSource: "assistant-ask-request",
       expectedUserId: "member-grantor",
       mailboxItemId: "aask_req_disclosure_one",

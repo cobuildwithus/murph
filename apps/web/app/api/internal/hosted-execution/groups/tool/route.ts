@@ -46,6 +46,7 @@ export const POST = withJsonError(async (request: Request) => {
         handoffHostedMailboxWake({
           ...wake,
           directWakeSource: "assistant-ask-request",
+          signal: request.signal,
         }),
     }),
     supportedProjectionScopeKeys,

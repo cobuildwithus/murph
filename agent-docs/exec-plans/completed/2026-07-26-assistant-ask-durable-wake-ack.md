@@ -2,7 +2,7 @@
 
 Status: completed
 Created: 2026-07-26
-Updated: 2026-07-26
+Updated: 2026-07-27
 
 ## Goal
 
@@ -82,8 +82,31 @@ Updated: 2026-07-26
 - The final `pnpm verify:acceptance` passed in Blacksmith Testbox
   `tbx_01kygrx928pye9p8sk8r25fvry`, including the full package and application
   acceptance surface.
+- Final ReviewGPT round 1 on immutable head
+  `e1f737a704120f14df0c013b0d4540027b4f5625` found two request-path gaps:
+  the awaited Temporal operation lacked a request-cancelable deadline, and the
+  Cloudflare group-tool boundary did not exact-replay a committed Ask after a
+  retryable handoff failure.
+- Remediation will reuse the existing bounded post-commit helper and add one
+  in-memory exact retry for only `ask` / `ask_member` under the existing total
+  Web-control budget. No durable owner or retry service is added.
+- The final-review regressions proved the missing behavior before remediation:
+  an unsettled Temporal signal outlived the caller budget, and the Cloudflare
+  group-tool boundary returned the first retryable transport failure without
+  exact replay.
+- The bounded handoff remediation passed 15 focused Web tests. The exact-replay
+  remediation passed its four focused Cloudflare tests and the full
+  Cloudflare Node lane (109 files, 1,989 tests).
+- The post-remediation canonical `pnpm test:diff ...` passed in Blacksmith
+  Testbox `tbx_01kygxj6xmxv7k3raq0jyjha01`.
+- The post-remediation `pnpm verify:acceptance` passed in Blacksmith Testbox
+  `tbx_01kygy2168e5brb3shaz97mez6`, including the full package and application
+  acceptance surface.
+- Parent final review confirmed the request abort signal reaches the bounded
+  Temporal operation, the direct wake remains post-acceptance best effort, and
+  only idempotent Ask actions replay once under one total timeout budget.
 
 ## Deployment
 
-- Web-only control-flow correction. No Cloudflare/runtime API or schema change.
-Completed: 2026-07-26
+- Web/Cloudflare control-flow correction only. No runtime wire or schema change.
+Completed: 2026-07-27
