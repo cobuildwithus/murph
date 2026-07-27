@@ -76,7 +76,6 @@ export function HostedBillingSettings(props: {
   scheduledBillingEffectiveAt?: Date | null;
   scheduledBillingPlanCode?: unknown;
   pulseTrialBillingContinuationPending?: boolean;
-  usageCreditBalanceUsdMicros?: string | null;
   usageStatus?: HostedPlanUsageStatus | null;
   usageTopUpActivePurchase?: HostedUsageTopUpActivePurchase | null;
   usageTopUpContactOptions?: readonly MurphContactOption[];
@@ -199,7 +198,6 @@ export function HostedBillingSettings(props: {
       <PlanUsageBand
         pulseTrialBillingContinuationPending={pulseTrialBillingContinuationPending}
         status={props.usageStatus}
-        usageCreditBalanceUsdMicros={props.usageCreditBalanceUsdMicros}
         usageTopUpActivePurchase={props.usageTopUpActivePurchase}
         usageTopUpContactOptions={props.usageTopUpContactOptions}
         usageTopUpInitialOpen={props.usageTopUpInitialOpen}
@@ -231,7 +229,6 @@ export function HostedBillingSettings(props: {
 function PlanUsageBand(props: {
   pulseTrialBillingContinuationPending: boolean;
   status?: HostedPlanUsageStatus | null;
-  usageCreditBalanceUsdMicros?: string | null;
   usageTopUpActivePurchase?: HostedUsageTopUpActivePurchase | null;
   usageTopUpContactOptions?: readonly MurphContactOption[];
   usageTopUpInitialOpen?: boolean;
@@ -268,12 +265,12 @@ function PlanUsageBand(props: {
     return (
       <>
         <div
-          aria-label="Pulse Trial included AI usage"
+          aria-label="Pulse Trial AI usage"
           className="flex flex-col gap-3 rounded-xl border border-border bg-card p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5"
         >
           <div>
             <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
-              Included AI usage
+              AI usage
             </p>
             <p className="mt-1 font-serif text-xl font-semibold tracking-tight text-foreground">
               Trial ended
@@ -283,7 +280,7 @@ function PlanUsageBand(props: {
                 ? props.pulseTrialBillingContinuationPending
                   ? "Finishing your Pulse update."
                   : "Start Pulse to keep Murph replying."
-                : "Your included trial usage is no longer active."}
+                : "Your trial usage is no longer active."}
             </p>
           </div>
           {canShowStartAction ? (
@@ -301,13 +298,8 @@ function PlanUsageBand(props: {
     : `Resets ${periodEndLabel}`;
   const action = status.recommendedAction;
   const forecast = status.forecast
-    ? `At your recent pace, included usage may run out in about ${status.forecast.estimatedDaysRemaining} ${status.forecast.estimatedDaysRemaining === 1 ? "day" : "days"}.`
+    ? `At your recent pace, usage may run out in about ${status.forecast.estimatedDaysRemaining} ${status.forecast.estimatedDaysRemaining === 1 ? "day" : "days"}.`
     : null;
-  const hasUsageCredit = hasPositiveUsageCreditBalance(
-    props.usageCreditBalanceUsdMicros,
-  );
-  const willUseUsageCredit =
-    status.remainingPercent === 0 && hasUsageCredit;
   const usageTopUpDialog = (
     <HostedUsageTopUpDialog
       activePurchase={props.usageTopUpActivePurchase}
@@ -320,13 +312,13 @@ function PlanUsageBand(props: {
 
   return (
     <div
-      aria-label={`${status.planName} included AI usage`}
+      aria-label={`${status.planName} AI usage`}
       className="flex flex-col gap-4 rounded-xl border border-border bg-card p-4 sm:p-5"
     >
       <div className="flex flex-col gap-1 sm:flex-row sm:items-baseline sm:justify-between sm:gap-4">
         <div>
           <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
-            Included AI usage
+            AI usage
           </p>
           <p className="mt-1 font-serif text-xl font-semibold tracking-tight text-foreground">
             {status.planName}
@@ -348,16 +340,11 @@ function PlanUsageBand(props: {
               {` · ${status.remainingPercent}% remaining`}
             </span>
           </p>
-          {willUseUsageCredit ? (
-            <p className="text-sm text-pretty text-muted-foreground">
-              You&apos;ve used this period&apos;s included usage. Murph will use
-              your remaining usage credit.
-            </p>
-          ) : status.status === "exhausted" ? (
+          {status.status === "exhausted" ? (
             <p className="text-sm text-pretty text-muted-foreground">
               {props.usageTopUpOffers.length > 0
-                ? "You've used this period's included usage and any usage credit. Add usage to continue."
-                : "You've used this period's available usage. Murph pauses new usage until more capacity is available."}
+                ? "You've used all available usage. Add usage to continue."
+                : "You've used all available usage. Murph pauses new usage until more capacity is available."}
             </p>
           ) : forecast ? (
             <p className="text-sm text-pretty text-muted-foreground">{forecast}</p>
@@ -463,14 +450,4 @@ function formatHostedBillingDate(value: Date): string {
     timeZone: "UTC",
     year: "numeric",
   }).format(value);
-}
-
-function hasPositiveUsageCreditBalance(
-  value: string | null | undefined,
-): boolean {
-  if (typeof value !== "string" || !/^[0-9]+$/u.test(value)) {
-    return false;
-  }
-
-  return BigInt(value) > 0n;
 }

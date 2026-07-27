@@ -715,7 +715,7 @@ describe("readHostedPersonalAiUsageStatus", () => {
     expect(mocks.readHostedAiUsageGate).not.toHaveBeenCalled();
   });
 
-  it("keeps an allowed credit-backed account active after included usage reaches 100%", async () => {
+  it("folds purchased credit into the overall usage percentage", async () => {
     mocks.readHostedAiUsageGate.mockResolvedValue(buildDecision({
       limitUsdMicros: 10_000_000n,
       remainingUsdMicros: 3_000_000n,
@@ -730,13 +730,58 @@ describe("readHostedPersonalAiUsageStatus", () => {
       prisma: buildPrisma(null) as never,
       publicBaseUrl: null,
     })).resolves.toMatchObject({
-      recommendedAction: {
-        kind: "add_usage",
-        url: "/settings?addUsage=true#subscription",
-      },
-      remainingPercent: 0,
+      recommendedAction: null,
+      remainingPercent: 24,
       status: "active",
-      usedPercent: 100,
+      usedPercent: 76,
+    });
+  });
+
+  it("moves the overall usage bar backward immediately after a top-up", async () => {
+    mocks.readHostedAiUsageGate.mockResolvedValue(buildDecision({
+      limitUsdMicros: 10_000_000n,
+      remainingUsdMicros: 6_700_000n,
+      spentUsdMicros: 8_300_000n,
+      usageCreditBalanceUsdMicros: 5_000_000n,
+      usageCreditLedgerVersion: 4n,
+    }));
+
+    await expect(readHostedPersonalAiUsageStatus({
+      memberId: "member_recent_top_up",
+      now: NOW,
+      prisma: buildPrisma(null) as never,
+      publicBaseUrl: null,
+    })).resolves.toMatchObject({
+      forecast: null,
+      recommendedAction: null,
+      remainingPercent: 45,
+      status: "active",
+      usedPercent: 55,
+    });
+  });
+
+  it("forecasts exhaustion against overall available capacity", async () => {
+    mocks.readHostedAiUsageGate.mockResolvedValue(buildDecision({
+      limitUsdMicros: 10_000_000n,
+      remainingUsdMicros: 7_000_000n,
+      spentUsdMicros: 8_000_000n,
+      usageCreditBalanceUsdMicros: 5_000_000n,
+      usageCreditLedgerVersion: 4n,
+    }));
+
+    await expect(readHostedPersonalAiUsageStatus({
+      memberId: "member_credit_forecast",
+      now: NOW,
+      prisma: buildPrisma(new Date("2026-07-01T12:00:00.000Z")) as never,
+      publicBaseUrl: null,
+    })).resolves.toMatchObject({
+      forecast: {
+        estimatedDaysRemaining: 2,
+        estimatedExhaustionAt: "2026-07-05T06:00:00.000Z",
+      },
+      remainingPercent: 47,
+      status: "active",
+      usedPercent: 53,
     });
   });
 

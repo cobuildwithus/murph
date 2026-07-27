@@ -1,11 +1,11 @@
 # Hosted Plan Usage And Subscription Actions
 
-Last verified: 2026-07-26
+Last verified: 2026-07-27
 Status: Implemented current-state contract
 
 ## Goal
 
-Give a member one honest view of their current included AI usage, block new
+Give a member one honest view of all currently available AI usage, block new
 usage-bearing work when included and purchased capacity are both exhausted,
 and let a private Murph conversation carry out the smallest billing action the
 member clearly chooses. Settings and Murph's read-only plan-usage tool consume
@@ -21,11 +21,14 @@ hosted usage ledger. It also selects any billing action shown to the member.
 The projection is a read: it does not write a forecast, query Stripe, create a
 usage period, or change billing state.
 
-Purchased credit stays separate from the included-allowance period. The
-append-only credit ledger is canonical, and the compact member balance/version
-is its bounded admission and Settings projection. The plan-usage response may
-recommend the authenticated Settings top-up handoff, but it cannot create
-Checkout or grant credit.
+Purchased credit stays separate from the included-allowance period in storage
+and consumption order. The append-only credit ledger is canonical, and the
+compact member balance/version remains its bounded admission projection. The
+plan-usage read combines current-period spend with every included or purchased
+unit of capacity the gate says remains, so Settings and the assistant receive
+one overall percentage without receiving internal allowance or credit values.
+The response may recommend the authenticated Settings top-up handoff, but it
+cannot create Checkout or grant credit.
 
 The growth dashboard's tracked fulfilled-top-up total has a different,
 company-wide scope. One anonymous singleton count is seeded from retained
@@ -89,16 +92,17 @@ Every newly created Linq or Telegram group thread starts with a persisted $7.50
 included-usage limit. This is prospective: existing group-thread rows keep
 their stored limit.
 
-Usage is cost-weighted included capacity across models and modalities. It is
-not a token count or cash balance. Used and remaining included percentages are
-bounded integers that sum to 100. An included period reports 100% used even
-while purchased credit still keeps effective capacity positive. Settings shows
-that purchased credit remains effective without folding it into the plan
-percentage, exposing its exact remaining dollar amount, or exposing the
-internal included allowance value. When included usage is exhausted, Settings
-may explain that Murph will use remaining usage credit without quantifying it.
-The operation that crosses effective capacity may finish, but subsequent
-usage-bearing work blocks and accepted conversation input remains pending.
+Usage is cost-weighted capacity across models and modalities. It is not a token
+count or cash balance. Used and remaining percentages are bounded integers that
+sum to 100. Their denominator is current-period spend plus every unit of
+effective capacity still available from the plan and purchased credit. A
+fulfilled top-up can therefore move the percentage backward immediately.
+Settings still exposes neither the exact purchased-credit balance nor the
+internal included-allowance value. At a monthly reset, period spend returns to
+zero, the plan allowance replenishes, and unused purchased credit remains
+available. The operation that crosses effective capacity may finish, but
+subsequent usage-bearing work blocks and accepted conversation input remains
+pending.
 
 For paid access, the included monthly usage value is exactly 80% of the
 server-owned recurring amount for that member's billing mode and tier. Direct
@@ -116,16 +120,17 @@ current bounds. It skips calendar fallbacks because their temporary key can be
 replaced by a delayed billing projection without a renewal. Existing allowance,
 spend, and future periods remain untouched.
 
-A forecast requires at least 24 hours of counted usage. It is shown only when
-the observed pace projects exhaustion before the current period ends. The
-forecast is conservative and optional; the product must not invent one when
-the projection omits it.
+A forecast requires at least 24 hours of counted usage. It uses the same
+overall effective capacity as the percentage and is shown only when the
+observed pace projects exhaustion before the current period ends. The forecast
+is conservative and optional; the product must not invent one when the
+projection omits it.
 
 ## Actions
 
-`apps/web` may return `recommendedAction` only when included usage is
-exhausted, the forecast projects exhaustion, or at least 80% of included usage
-is used. Trial access may recommend **Start Pulse now** with the
+`apps/web` may return `recommendedAction` only when all available usage is
+exhausted, the forecast projects exhaustion, or at least 80% of overall
+available usage is used. Trial access may recommend **Start Pulse now** with the
 current monthly price. An eligible direct paid Pulse or Edge member may receive
 **Add usage**, which opens the authenticated fixed-pack Settings dialog. Pulse's
 Edge upgrade remains on the plan card. Family and group contexts do not receive

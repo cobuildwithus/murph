@@ -52,7 +52,6 @@ import { getPrisma } from "@/src/lib/prisma";
 import { readHostedSecureApprovalStatus } from "@/src/lib/sensitive-actions/secure-approval-status";
 import { createMurphPageMetadata } from "@/src/lib/site-metadata";
 import { readHostedPersonalAiUsageStatus } from "@/src/lib/hosted-execution/usage-status";
-import { readHostedUsageCreditProjection } from "@/src/lib/hosted-execution/usage-credits";
 import {
   estimateHostedUsageCreditMessages,
   getHostedUsageCreditOfferDefinition,
@@ -152,7 +151,6 @@ export default async function SettingsPage({
   const secureApprovalStatus =
     settingsData?.secureApprovalStatus ?? ({ status: "unavailable" } as const);
   const usageStatus = settingsData?.usageStatus ?? null;
-  const usageCreditProjection = settingsData?.usageCreditProjection ?? null;
   const usageTopUpOfferCodes = settingsData?.usageTopUpOfferCodes ?? [];
   const usageTopUpActivePurchase = settingsData?.usageTopUpActivePurchase ?? null;
   const usageTopUpReturnTarget = settingsData?.usageTopUpReturnTarget ?? null;
@@ -322,9 +320,6 @@ export default async function SettingsPage({
           currentPeriodEnd={billingRef?.currentPeriodEnd}
           scheduledBillingEffectiveAt={billingRef?.scheduledBillingEffectiveAt}
           scheduledBillingPlanCode={billingRef?.scheduledBillingPlanCode}
-          usageCreditBalanceUsdMicros={
-            usageCreditProjection?.balanceUsdMicros.toString() ?? null
-          }
           usageStatus={usageStatus}
           usageTopUpActivePurchase={personalUsageTopUpActivePurchase}
           usageTopUpContactOptions={usageTopUpContactOptions}
@@ -470,10 +465,6 @@ async function readSettingsPageData(input: {
     memberId,
     prisma,
   });
-  const usageCreditProjection = await readHostedUsageCreditProjection({
-    beneficiaryMemberId: memberId,
-    prisma,
-  });
   const usageTopUpOfferCodes = await readHostedPersonalUsageCreditOfferCodes({
     memberId,
     prisma,
@@ -509,7 +500,6 @@ async function readSettingsPageData(input: {
     freshPrivySession: await freshPrivySessionPromise,
     secureApprovalStatus: await secureApprovalStatusPromise,
     settingsSnapshot,
-    usageCreditProjection,
     usageStatus,
     usageTopUpActivePurchase,
     usageTopUpOfferCodes,
