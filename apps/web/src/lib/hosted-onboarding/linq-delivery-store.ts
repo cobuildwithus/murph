@@ -48,6 +48,7 @@ type HostedLinqDeliveryProviderDispatchData = {
   failedAt: null;
   failureCode: null;
   failureReason: null;
+  groupJoinOutreachId: string | null;
   linqChatLookupKey: string | null;
   phoneNumberHint: string | null;
   phoneNumberLookupKey: string | null;
@@ -282,6 +283,7 @@ export async function resolveHostedLinqInviteSignupDispatchEffectIdTx(input: {
 
 type HostedLinqDeliveryProviderDispatchClaimInput = {
   attemptedAt?: Date;
+  groupJoinOutreachId?: string | null;
   idempotencyKey?: string | null;
   linqChatId?: string | null;
   phoneNumber?: string | null;
@@ -314,6 +316,7 @@ export async function readHostedLinqDeliveryProviderDispatchIntentTx(input: {
   idempotencyKey: string;
   prisma: HostedLinqDeliveryClient;
 }): Promise<{
+  groupJoinOutreachId: string | null;
   providerCorrelated: boolean;
   sourceRef: string | null;
 } | null> {
@@ -328,6 +331,7 @@ export async function readHostedLinqDeliveryProviderDispatchIntentTx(input: {
     select: {
       acceptedAt: true,
       deliveredAt: true,
+      groupJoinOutreachId: true,
       lastReceiptAt: true,
       messageLookupKey: true,
       sourceRef: true,
@@ -336,6 +340,7 @@ export async function readHostedLinqDeliveryProviderDispatchIntentTx(input: {
   });
   return delivery
     ? {
+        groupJoinOutreachId: delivery.groupJoinOutreachId,
         providerCorrelated: isHostedLinqDeliveryProviderCorrelated(delivery),
         sourceRef: delivery.sourceRef,
       }
@@ -368,6 +373,7 @@ async function claimHostedLinqDeliveryProviderDispatchWithIdTx(
     failedAt: null,
     failureCode: null,
     failureReason: null,
+    groupJoinOutreachId: normalizeNullable(input.groupJoinOutreachId),
     linqChatLookupKey: createHostedLinqChatLookupKey(input.linqChatId),
     phoneNumberHint: phoneNumber ? readHostedPhoneHint(phoneNumber) : null,
     phoneNumberLookupKey,
@@ -1202,6 +1208,7 @@ export async function markHostedAiUsageLimitNoticeDeliveryRetryableTx(input: {
 export async function markHostedLinqDeliverySkippedTx(input: {
   failureCode?: string | null;
   failureReason?: string | null;
+  groupJoinOutreachId?: string | null;
   idempotencyKey?: string | null;
   linqChatId?: string | null;
   phoneNumber?: string | null;
@@ -1234,6 +1241,7 @@ export async function markHostedLinqDeliverySkippedTx(input: {
       normalizeNullable(input.failureReason)
         ?? "Linq/iMessage send skipped before provider dispatch.",
     ),
+    groupJoinOutreachId: normalizeNullable(input.groupJoinOutreachId),
     linqChatLookupKey: createHostedLinqChatLookupKey(input.linqChatId),
     phoneNumberHint: phoneNumber ? readHostedPhoneHint(phoneNumber) : null,
     phoneNumberLookupKey,
@@ -1693,6 +1701,7 @@ const hostedLinqDeliveryLifecycleSelect = {
   deliveredAt: true,
   failureCode: true,
   failedAt: true,
+  groupJoinOutreachId: true,
   id: true,
   lastReceiptAt: true,
   linqChatLookupKey: true,
@@ -1801,6 +1810,7 @@ async function claimExistingHostedLinqDeliveryProviderDispatchTx(input: {
     attemptedAt: Date;
     deliveredAt: Date | null;
     failedAt: Date | null;
+    groupJoinOutreachId: string | null;
     id: string;
     lastReceiptAt: Date | null;
     linqChatLookupKey: string | null;
@@ -1832,6 +1842,7 @@ async function claimExistingHostedLinqDeliveryProviderDispatchTx(input: {
     isHostedLinqInviteSignupDeliveryTemplate(input.data.template)
     && (
       input.delivery.linqChatLookupKey !== input.data.linqChatLookupKey
+      || input.delivery.groupJoinOutreachId !== input.data.groupJoinOutreachId
       || input.delivery.phoneNumberLookupKey !== input.data.phoneNumberLookupKey
       || input.delivery.sourceRef !== input.data.sourceRef
       || input.delivery.targetKind !== input.data.targetKind

@@ -2,7 +2,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   acquireDrainLock: vi.fn(),
-  assertParticipantAuthority: vi.fn(),
   claimDelivery: vi.fn(),
   countHomeBindings: vi.fn(),
   claimLineCapacity: vi.fn(),
@@ -12,14 +11,19 @@ const mocks = vi.hoisted(() => ({
   lookupMember: vi.fn(),
   markDeliveryAccepted: vi.fn(),
   markDeliveryFailed: vi.fn(),
+  markSkippedDelivery: vi.fn(),
   readParticipantPhone: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/contact-privacy", () => ({
+  createHostedEmailLookupKey: (value: string | null | undefined) =>
+    value ? `email:${value}` : null,
   createHostedLinqChatLookupKey: (value: string | null | undefined) =>
     value ? `chat:${value}` : null,
   createHostedLinqMessageLookupKey: (value: string | null | undefined) =>
     value ? `message:${value}` : null,
+  createHostedPhoneLookupKey: (value: string | null | undefined) =>
+    value ? `phone:${value}` : null,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/linq-delivery-store", () => ({
@@ -43,17 +47,17 @@ vi.mock("@/src/lib/hosted-onboarding/linq-client", () => ({
   createHostedLinqChat: mocks.createChat,
 }));
 
-vi.mock("@/src/lib/hosted-onboarding/linq-egress-engagement", () => ({
-  assertHostedLinqGroupJoinOutreachParticipantEgressAuthority:
-    mocks.assertParticipantAuthority,
-}));
-
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-identity-store", () => ({
   lookupHostedMemberIdentityByPhoneNumber: mocks.lookupMember,
 }));
 
 vi.mock("@/src/lib/hosted-groups/group-join-outreach-store", () => ({
+  HOSTED_GROUP_JOIN_OUTREACH_DELIVERY_SOURCE: "hosted_group_join_outreach",
+  HOSTED_GROUP_JOIN_OUTREACH_TEMPLATE: "group_join_outreach",
   acquireHostedGroupJoinOutreachDrainLockTx: mocks.acquireDrainLock,
+  buildHostedGroupJoinOutreachIdempotencyKey: (outreachId: string) =>
+    `group-join-outreach:${outreachId}`,
+  markHostedGroupJoinOutreachSkippedDeliveryTx: mocks.markSkippedDelivery,
   readHostedGroupJoinOutreachParticipantPhone: mocks.readParticipantPhone,
 }));
 
@@ -88,7 +92,6 @@ describe("hosted group join outreach drain", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.acquireDrainLock.mockResolvedValue(undefined);
-    mocks.assertParticipantAuthority.mockResolvedValue(undefined);
     mocks.claimDelivery.mockResolvedValue({
       claimed: true,
       id: "hld_opaque",
@@ -107,6 +110,7 @@ describe("hosted group join outreach drain", () => {
       restoreOnboardingLink: null,
     });
     mocks.markDeliveryFailed.mockResolvedValue(undefined);
+    mocks.markSkippedDelivery.mockResolvedValue(undefined);
     mocks.readParticipantPhone.mockReturnValue("+15551234567");
   });
 
@@ -128,13 +132,6 @@ describe("hosted group join outreach drain", () => {
       limit: 10,
       phoneNumberLookupKey: "line_lookup_1",
       prisma: expect.anything(),
-    });
-    expect(mocks.assertParticipantAuthority).toHaveBeenCalledWith({
-      fromPhoneNumber: "+15550000001",
-      idempotencyKey: "group-join-outreach:hgrpjoa_opaque",
-      outreachId: "hgrpjoa_opaque",
-      prisma,
-      targetPhoneNumber: "+15551234567",
     });
     expect(mocks.createChat).toHaveBeenCalledTimes(1);
     const send = mocks.createChat.mock.calls[0]?.[0] as {
@@ -242,16 +239,24 @@ describe("hosted group join outreach drain", () => {
       });
 
       expect(mocks.createChat).not.toHaveBeenCalled();
-      expect(mocks.assertParticipantAuthority).not.toHaveBeenCalled();
-      expect(updateMany).toHaveBeenCalledWith(
-        expect.objectContaining({
-          data: expect.objectContaining(
-            refusal.expected.kind === "skipped"
-              ? { skipReason: refusal.expected.reason }
-              : { lastDeferralReason: refusal.expected.reason },
-          ),
-        }),
-      );
+      if (refusal.expected.kind === "skipped") {
+        expect(mocks.markSkippedDelivery).toHaveBeenCalledWith(
+          expect.objectContaining({
+            now: NOW,
+            outreachId: "hgrpjoa_opaque",
+            reason: refusal.expected.reason,
+          }),
+        );
+        expect(updateMany).not.toHaveBeenCalled();
+      } else {
+        expect(updateMany).toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: expect.objectContaining({
+              lastDeferralReason: refusal.expected.reason,
+            }),
+          }),
+        );
+      }
     });
   }
 
@@ -320,11 +325,7 @@ describe("hosted group join outreach drain", () => {
     expect(mocks.markDeliveryFailed).toHaveBeenCalledWith(
       expect.objectContaining({ retryAfterAt: null }),
     );
-    expect(updateMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({ skipReason: "provider_rejected" }),
-      }),
-    );
+    expect(updateMany).not.toHaveBeenCalled();
   });
 
   it("stops after the provider attempt ceiling", async () => {
@@ -340,11 +341,7 @@ describe("hosted group join outreach drain", () => {
       reason: "provider_attempt_limit",
     });
 
-    expect(updateMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({ skipReason: "provider_attempt_limit" }),
-      }),
-    );
+    expect(updateMany).not.toHaveBeenCalled();
   });
 
   it("reports idle without touching the provider when nothing is due", async () => {
@@ -677,14 +674,11 @@ function createPrismaStub(options?: {
 } {
   const updateMany = vi.fn(async () => ({ count: 1 }));
   const dueOutreach = {
-    attemptCount: 0,
-    dispatchStartedAt: null,
-    groupId: "hgrp_opaque",
+    attemptCount: options?.attemptCount ?? 0,
     id: "hgrpjoa_opaque",
     offerId: "hgrpjo_opaque",
     participantPhoneEncrypted: "encrypted",
     participantPhoneLookupKey: "participant_lookup_1",
-    phoneNumberLookupKey: options?.pinnedLineKey ?? null,
     requestedAt: NOW,
   };
   const tx = {
@@ -720,6 +714,16 @@ function createPrismaStub(options?: {
       })),
       update: vi.fn(async () => dueOutreach),
       updateMany,
+    },
+    hostedLinqDelivery: {
+      findFirst: vi.fn(async () =>
+        options?.pinnedLineKey
+          ? { phoneNumberLookupKey: options.pinnedLineKey }
+          : null,
+      ),
+      findMany: vi.fn(async () => (options?.recentLineKeys ?? []).map(
+        (phoneNumberLookupKey) => ({ phoneNumberLookupKey }),
+      )),
     },
   };
   const prisma = {

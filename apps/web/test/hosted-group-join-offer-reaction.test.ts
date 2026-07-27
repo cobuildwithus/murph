@@ -321,7 +321,6 @@ describe("handleHostedGroupJoinOfferReaction", () => {
       }),
     );
     expect(mocks.enqueueHostedGroupJoinOutreachTx).toHaveBeenCalledWith({
-      groupId: "hgrp_opaque",
       offerId: "hgrpjo_opaque",
       participantPhoneNumber: "+15551234567",
       // Reaction events carry `reacted_at` as providerCreatedAt, matching the

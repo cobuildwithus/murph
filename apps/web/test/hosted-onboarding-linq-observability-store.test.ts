@@ -1494,6 +1494,7 @@ describe("hosted Linq observability stores", () => {
         attemptedAt,
         deliveredAt: null,
         failedAt: null,
+        groupJoinOutreachId: null,
         id: "hld_concurrent_claim",
         lastReceiptAt: null,
         linqChatLookupKey: null,
@@ -1537,6 +1538,7 @@ describe("hosted Linq observability stores", () => {
       attemptedAt: new Date("2026-03-26T12:00:00.000Z"),
       deliveredAt: null,
       failedAt: null,
+      groupJoinOutreachId: null,
       id: "hld_in_flight",
       lastReceiptAt: null,
       linqChatLookupKey:
@@ -2445,6 +2447,7 @@ describe("hosted Linq observability stores", () => {
       attemptedAt: new Date("2026-03-26T12:00:00.000Z"),
       deliveredAt: null,
       failedAt: null,
+      groupJoinOutreachId: null,
       id: "hld_stale_attempt",
       lastReceiptAt: null,
       linqChatLookupKey:
@@ -3890,26 +3893,7 @@ describe("hosted Linq signup-link delivery attempts", () => {
       prisma: fixture.prisma as never,
     });
 
-    expect(fixture.hostedGroupJoinOutreachUpdateMany)
-      .toHaveBeenNthCalledWith(1, {
-        data: { repliedAt: null },
-        where: {
-          id: "hgrpjoa_receipt",
-          repliedAt: new Date(repliedAt),
-          sentAt: { not: null },
-          skippedAt: null,
-        },
-      });
-    expect(fixture.hostedGroupJoinOutreachUpdateMany)
-      .toHaveBeenNthCalledWith(2, {
-        data: { repliedAt: new Date(repliedAt) },
-        where: {
-          id: "hgrpjoa_receipt",
-          repliedAt: null,
-          sentAt: { not: null },
-          skippedAt: null,
-        },
-      });
+    expect(fixture.hostedGroupJoinOutreachUpdateMany).not.toHaveBeenCalled();
     expect(fixture.hostedLinqDailyStateUpdateMany)
       .toHaveBeenNthCalledWith(1, {
         data: {

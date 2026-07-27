@@ -171,7 +171,10 @@ vi.mock("@/src/lib/phone-calls/account-deletion", async () => {
 });
 
 import {
+  HOSTED_GROUP_JOIN_OUTREACH_DELIVERY_SOURCE,
+  HOSTED_GROUP_JOIN_OUTREACH_TEMPLATE,
   acquireHostedGroupJoinOutreachDrainLockTx,
+  buildHostedGroupJoinOutreachIdempotencyKey,
   enqueueHostedGroupJoinOutreachTx,
   readHostedGroupJoinOutreachReplyContextTx,
 } from "@/src/lib/hosted-groups/group-join-outreach-store";
@@ -350,7 +353,6 @@ describe.skipIf(!runPostgresProof)(
         });
         const enqueue = await prisma.$transaction((tx) =>
           enqueueHostedGroupJoinOutreachTx({
-            groupId,
             offerId,
             participantPhoneNumber: participantPhone,
             requestedAt: new Date("2026-07-24T19:00:00.000Z"),
@@ -358,14 +360,14 @@ describe.skipIf(!runPostgresProof)(
           })
         );
         outreachId = enqueue.outreachId;
-        await prisma.hostedGroupJoinOutreach.update({
-          data: {
-            dispatchStartedAt: new Date("2026-07-24T19:01:00.000Z"),
-            linqChatLookupKey: null,
-            phoneNumberLookupKey: recipientPhoneLookupKey,
-            sentAt: new Date("2026-07-24T19:02:00.000Z"),
-          },
-          where: { id: outreachId },
+        await recordAcceptedGroupJoinOutreachOpener({
+          acceptedAt: new Date("2026-07-24T19:02:00.000Z"),
+          attemptedAt: new Date("2026-07-24T19:01:00.000Z"),
+          chatId: null,
+          messageId: `linq-message-opener-${randomUUID()}`,
+          outreachId,
+          prisma,
+          recipientPhoneLookupKey,
         });
 
         const blockedEvent = buildDirectReplyEvent({
@@ -389,10 +391,6 @@ describe.skipIf(!runPostgresProof)(
           ignored: true,
           reason: "unassignable-home-line",
         });
-        await expect(prisma.hostedGroupJoinOutreach.findUnique({
-          select: { repliedAt: true },
-          where: { id: outreachId },
-        })).resolves.toEqual({ repliedAt: null });
 
         const recoveredEvent = buildDirectReplyEvent({
           chatId,
@@ -477,6 +475,7 @@ describe.skipIf(!runPostgresProof)(
           });
         await expect(claimHostedLinqDeliveryProviderDispatchTx({
           attemptedAt: crashClaimedAt,
+          groupJoinOutreachId: outreachId,
           idempotencyKey: signupLinkEffect.effectId,
           linqChatId: chatId,
           prisma,
@@ -530,7 +529,6 @@ describe.skipIf(!runPostgresProof)(
         });
         const newerEnqueue = await prisma.$transaction((tx) =>
           enqueueHostedGroupJoinOutreachTx({
-            groupId: newerGroupId,
             offerId: newerOfferId,
             participantPhoneNumber: participantPhone,
             requestedAt: new Date("2026-07-24T20:00:30.000Z"),
@@ -538,14 +536,14 @@ describe.skipIf(!runPostgresProof)(
           })
         );
         newerOutreachId = newerEnqueue.outreachId;
-        await prisma.hostedGroupJoinOutreach.update({
-          data: {
-            dispatchStartedAt: new Date("2026-07-24T20:00:31.000Z"),
-            linqChatLookupKey: linqChatLookupKeys[0],
-            phoneNumberLookupKey: recipientPhoneLookupKey,
-            sentAt: new Date("2026-07-24T20:00:32.000Z"),
-          },
-          where: { id: newerOutreachId },
+        await recordAcceptedGroupJoinOutreachOpener({
+          acceptedAt: new Date("2026-07-24T20:00:32.000Z"),
+          attemptedAt: new Date("2026-07-24T20:00:31.000Z"),
+          chatId,
+          messageId: `linq-message-opener-newer-${randomUUID()}`,
+          outreachId: newerOutreachId,
+          prisma,
+          recipientPhoneLookupKey,
         });
         const newerInboundEvent = buildDirectReplyEvent({
           chatId,
@@ -588,12 +586,6 @@ describe.skipIf(!runPostgresProof)(
         for (const task of scheduledTasks.splice(0)) {
           await task();
         }
-        await expect(prisma.hostedGroupJoinOutreach.findUnique({
-          select: { repliedAt: true },
-          where: { id: newerOutreachId },
-        })).resolves.toEqual({
-          repliedAt: new Date("2026-07-24T20:01:30.000Z"),
-        });
         const dailyStateAfterNewerGroup =
           await prisma.hostedLinqDailyState.findFirst({
           select: { onboardingLinkSentAt: true },
@@ -648,30 +640,11 @@ describe.skipIf(!runPostgresProof)(
         // is durable before the drain-owning send returns. Unrelated generic
         // post-response work may still remain scheduled.
         expect(scheduledTasks.length).toBeGreaterThan(0);
-        await expect(prisma.hostedGroupJoinOutreach.findUnique({
-          select: { repliedAt: true },
-          where: { id: outreachId },
-        })).resolves.toEqual({
-          repliedAt: new Date("2026-07-24T20:01:00.000Z"),
-        });
 
         for (const task of scheduledTasks.splice(0)) {
           await task();
         }
 
-        await expect(prisma.hostedGroupJoinOutreach.findUnique({
-          select: { repliedAt: true },
-          where: { id: outreachId },
-        })).resolves.toEqual({
-          repliedAt: new Date("2026-07-24T20:01:00.000Z"),
-        });
-
-        await expect(prisma.hostedGroupJoinOutreach.findUnique({
-          select: { repliedAt: true },
-          where: { id: newerOutreachId },
-        })).resolves.toEqual({
-          repliedAt: new Date("2026-07-24T20:01:30.000Z"),
-        });
         await expect(prisma.hostedLinqDailyState.findFirst({
           select: { onboardingLinkSentAt: true },
           where: {
@@ -1375,10 +1348,6 @@ describe.skipIf(!runPostgresProof)(
         expect(
           dailyStateAfterBufferedFailure?.onboardingLinkSentAt ?? null,
         ).toBeNull();
-        await expect(fixture.replyPrisma.hostedGroupJoinOutreach.findUnique({
-          select: { repliedAt: true },
-          where: { id: fixture.outreachId },
-        })).resolves.toEqual({ repliedAt: null });
 
         await expect(drainDeletionReplyEffect({
           effect: genericEffect,
@@ -1623,15 +1592,22 @@ async function createDeletionReplyRaceFixture():
   });
   await deletionPrisma.hostedGroupJoinOutreach.create({
     data: {
-      groupId,
       id: outreachId,
       nextAttemptAt: occurredAt,
       offerId,
       participantPhoneEncrypted: "encrypted-test-phone",
       participantPhoneLookupKey,
       requestedAt: occurredAt,
-      sentAt: occurredAt,
     },
+  });
+  await recordAcceptedGroupJoinOutreachOpener({
+    acceptedAt: occurredAt,
+    attemptedAt: occurredAt,
+    chatId,
+    messageId: `linq-message-delete-opener-${randomUUID()}`,
+    outreachId,
+    prisma: deletionPrisma,
+    recipientPhoneLookupKey: null,
   });
   await deletionPrisma.hostedInvite.create({
     data: {
@@ -1869,6 +1845,43 @@ async function cleanupRecoveryProof(input: {
       where: { phoneNumberLookupKey: input.recipientPhoneLookupKey },
     });
   }
+}
+
+async function recordAcceptedGroupJoinOutreachOpener(input: {
+  acceptedAt: Date;
+  attemptedAt: Date;
+  chatId: string | null;
+  messageId: string;
+  outreachId: string;
+  prisma: PrismaClient;
+  recipientPhoneLookupKey: string | null;
+}): Promise<void> {
+  const idempotencyKey = createHostedLinqDeliveryIdempotencyLookupKey(
+    buildHostedGroupJoinOutreachIdempotencyKey(input.outreachId),
+  );
+  const messageLookupKey = createHostedLinqMessageLookupKey(input.messageId);
+  if (!idempotencyKey || !messageLookupKey) {
+    throw new Error("Expected group join outreach opener delivery lookup keys.");
+  }
+  await input.prisma.hostedLinqDelivery.create({
+    data: {
+      acceptedAt: input.acceptedAt,
+      attemptedAt: input.attemptedAt,
+      groupJoinOutreachId: input.outreachId,
+      id: `hld_group_join_opener_${randomUUID()}`,
+      idempotencyKey,
+      linqChatLookupKey: input.chatId
+        ? createHostedLinqChatLookupKey(input.chatId)
+        : null,
+      messageLookupKey,
+      phoneNumberLookupKey: input.recipientPhoneLookupKey,
+      source: HOSTED_GROUP_JOIN_OUTREACH_DELIVERY_SOURCE,
+      sourceRef: input.outreachId,
+      status: "accepted",
+      targetKind: "participant",
+      template: HOSTED_GROUP_JOIN_OUTREACH_TEMPLATE,
+    },
+  });
 }
 
 function createUniqueTestPhone(prefix: "+1202" | "+1303"): string {

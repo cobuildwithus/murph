@@ -1179,15 +1179,11 @@ function buildHostedGroupJoinOfferMessage(input: {
   joinUrl: string;
   projectionScopes: readonly HostedVaultShareProjectionScope[];
 }): string {
-  // A reaction from someone who does not use Murph yet can cause Murph to open a
-  // private thread, so the offer discloses it: an unannounced first text is the
-  // part a recipient would not expect. It says "may" rather than "will" because
-  // the outreach is refused for phone regions with no derivable safe send window,
-  // and one group message cannot promise per-recipient eligibility. The link stays
-  // as the control for choosing different permissions, and works for everyone.
+  // The link stays as the control for choosing different permissions, and works
+  // for everyone.
   return `Like or heart this message to share the following with this group: ${
     renderHostedGroupJoinOfferScopeSentence(input.projectionScopes)
-  }. If you do not use Murph yet, Murph may text you privately to help you join. To choose different permissions, use ${input.joinUrl}.`;
+  }. To choose different permissions, use ${input.joinUrl}.`;
 }
 
 async function enqueueGroupOwnerNewsletterEmailNeededNudgeIfGrantedBestEffort(input: {

@@ -23,9 +23,9 @@ import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import { readHostedMemberStripeBillingRef } from "../hosted-onboarding/hosted-member-billing-store";
 import { readHostedMemberIdentity } from "../hosted-onboarding/hosted-member-identity-store";
 import { readHostedAccountGroupStripeBillingRef } from "../hosted-onboarding/family-plan";
-import { HOSTED_GROUP_JOIN_OUTREACH_DELIVERY_SOURCE } from "@/src/lib/hosted-groups/group-join-outreach-drain";
-import { acquireHostedGroupJoinOutreachDrainLockTx } from "@/src/lib/hosted-groups/group-join-outreach-store";
-import { createHostedLinqDeliverySourceRefLookupKey } from "@/src/lib/hosted-onboarding/linq-observability-identifiers";
+import {
+  acquireHostedGroupJoinOutreachDrainLockTx,
+} from "@/src/lib/hosted-groups/group-join-outreach-store";
 import {
   hasHostedLinqInviteSignupLiveDeliveryTx,
 } from "../hosted-onboarding/linq-delivery-store";
@@ -35,7 +35,6 @@ import {
 import {
   buildHostedLinqInviteSignupDeliverySourceRefMemberPrefix,
   buildHostedLinqInviteSignupEffectIdMemberPrefix,
-  buildHostedLinqInviteSignupGroupJoinSourceRefFragment,
   parseHostedLinqInviteSignupDeliverySourceRef,
   parseHostedLinqInviteSignupEffectId,
 } from "../hosted-onboarding/linq-invite-signup-effect-id";
@@ -1228,7 +1227,11 @@ async function readHostedGroupJoinOutreachDeletionSnapshot(input: {
           ? [{ participantPhoneLookupKey: { in: phoneLookupKeys } }]
           : []),
         ...(ownedGroupIds.length > 0
-          ? [{ groupId: { in: ownedGroupIds } }]
+          ? [{
+              offer: {
+                groupId: { in: ownedGroupIds },
+              },
+            }]
           : []),
       ],
     },
@@ -1239,28 +1242,8 @@ async function readHostedGroupJoinOutreachDeletionSnapshot(input: {
     return { deliveries: [], deliveryWhere: null, outreachIds: [] };
   }
 
-  const deliverySourceRefs = outreachIds
-    .map((outreachId) => createHostedLinqDeliverySourceRefLookupKey(outreachId))
-    .filter((lookupKey): lookupKey is string => Boolean(lookupKey));
   const deliveryWhere: Prisma.HostedLinqDeliveryWhereInput = {
-    OR: [
-      ...(deliverySourceRefs.length > 0
-        ? [{
-            source: HOSTED_GROUP_JOIN_OUTREACH_DELIVERY_SOURCE,
-            sourceRef: { in: deliverySourceRefs },
-          }]
-        : []),
-      ...outreachIds.map((outreachId) => ({
-        source: "hosted_webhook_side_effect",
-        sourceRef: {
-          contains:
-            buildHostedLinqInviteSignupGroupJoinSourceRefFragment(outreachId),
-        },
-        template: {
-          in: ["invite_signup", "invite_signup_fallback"],
-        },
-      })),
-    ],
+    groupJoinOutreachId: { in: outreachIds },
   };
   const deliveries = await input.prisma.hostedLinqDelivery.findMany({
     select: { sourceRef: true },
@@ -1298,18 +1281,10 @@ async function deleteHostedGroupJoinOutreachRowsForMembers(
   prisma: Prisma.TransactionClient,
   memberIdFilter: string | { in: string[] },
 ): Promise<{ deliveryCount: number; outreachCount: number }> {
-  // The outreach row and its provider correlation are one privacy record, and the
-  // correlation's only link is its source reference. Two things make that fragile,
-  // so both are handled here rather than by a second owner:
-  //
-  // The stored source reference is a digest, not the logical outreach id, because
-  // the delivery store normalizes every non-invite reference. Deleting by raw id
-  // would match nothing and then remove the rows that derive the digest.
-  //
-  // Both the minute drain and group-reply delivery preparation can create a
-  // correlation concurrently. Their shared advisory lock serializes both paths
-  // with this transaction, so no correlation can appear after its delete and
-  // before the outreach row is gone.
+  // The outreach row and its delivery rows are one privacy record. Both the
+  // minute drain and group-reply delivery preparation cross this same drain, so
+  // no related delivery can appear after the delete and before the outreach row
+  // is gone.
   await acquireHostedGroupJoinOutreachDrainLockTx(prisma);
 
   const snapshot = await readHostedGroupJoinOutreachDeletionSnapshot({

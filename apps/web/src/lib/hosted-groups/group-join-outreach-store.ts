@@ -1,6 +1,6 @@
 import "server-only";
 
-import type { Prisma, PrismaClient } from "@prisma/client";
+import type { Prisma } from "@prisma/client";
 
 import { sha256Hex } from "../primitives";
 import {
@@ -8,6 +8,9 @@ import {
   createHostedPhoneLookupKey,
   createHostedPhoneLookupKeyReadCandidates,
 } from "../hosted-onboarding/contact-privacy";
+import {
+  markHostedLinqDeliverySkippedTx,
+} from "../hosted-onboarding/linq-delivery-store";
 import { normalizePhoneNumber } from "../hosted-onboarding/phone";
 import { generateHostedGroupJoinOutreachId } from "../hosted-onboarding/shared";
 import {
@@ -15,17 +18,31 @@ import {
   encryptHostedGroupJoinOutreachPhoneNumber,
 } from "./group-join-outreach-phone-codec";
 
-type HostedGroupJoinOutreachMutationClient =
-  Pick<PrismaClient, "hostedGroupJoinOutreach">;
 type HostedGroupJoinOutreachDrainLockClient =
   Pick<Prisma.TransactionClient, "$executeRaw">;
 type HostedGroupJoinOutreachReplyAuthorityClient =
   Pick<
     Prisma.TransactionClient,
-    "$executeRaw" | "hostedGroupJoinOffer" | "hostedGroupJoinOutreach"
+    "$executeRaw" | "hostedGroupJoinOutreach" | "hostedLinqDelivery"
   >;
 
 const HOSTED_GROUP_JOIN_OUTREACH_REACTION_REMOVED_REASON = "reaction_removed";
+export const HOSTED_GROUP_JOIN_OUTREACH_DELIVERY_SOURCE =
+  "hosted_group_join_outreach";
+export const HOSTED_GROUP_JOIN_OUTREACH_TEMPLATE = "group_join_outreach";
+const HOSTED_GROUP_JOIN_OUTREACH_IDEMPOTENCY_PREFIX = "group-join-outreach:";
+const HOSTED_GROUP_JOIN_SIGNUP_DELIVERY_LIVE_STATUSES = [
+  "attempted",
+  "provider_dispatch_started",
+  "accepted",
+  "delivered",
+] as const;
+
+export function buildHostedGroupJoinOutreachIdempotencyKey(
+  outreachId: string,
+): string {
+  return `${HOSTED_GROUP_JOIN_OUTREACH_IDEMPOTENCY_PREFIX}${outreachId}`;
+}
 
 export async function acquireHostedGroupJoinOutreachDrainLockTx(
   tx: HostedGroupJoinOutreachDrainLockClient,
@@ -40,7 +57,6 @@ export type EnqueueHostedGroupJoinOutreachTxResult =
   | { kind: "enqueued"; outreachId: string };
 
 export async function enqueueHostedGroupJoinOutreachTx(input: {
-  groupId: string;
   offerId: string;
   participantPhoneNumber: string;
   requestedAt: Date;
@@ -87,7 +103,6 @@ export async function enqueueHostedGroupJoinOutreachTx(input: {
   const outreachId = generateHostedGroupJoinOutreachId();
   const created = await input.tx.hostedGroupJoinOutreach.createMany({
     data: [{
-      groupId: input.groupId,
       id: outreachId,
       nextAttemptAt: input.requestedAt,
       offerId: input.offerId,
@@ -140,7 +155,6 @@ export type RevokeHostedGroupJoinOutreachTxResult =
  */
 export async function revokeHostedGroupJoinOutreachForRemovedReactionTx(input: {
   allowMissingRowTombstone: boolean;
-  groupId: string;
   now: Date;
   offerId: string;
   participantPhoneNumber: string;
@@ -176,27 +190,37 @@ export async function revokeHostedGroupJoinOutreachForRemovedReactionTx(input: {
         in: participantPhoneLookupKeyReadCandidates,
       },
     },
-    select: { dispatchStartedAt: true, id: true, sentAt: true, skippedAt: true },
+    select: {
+      deliveries: {
+        orderBy: { attemptedAt: "desc" },
+        select: {
+          acceptedAt: true,
+          deliveredAt: true,
+          failedAt: true,
+          skippedAt: true,
+          status: true,
+        },
+        where: {
+          source: HOSTED_GROUP_JOIN_OUTREACH_DELIVERY_SOURCE,
+          template: HOSTED_GROUP_JOIN_OUTREACH_TEMPLATE,
+        },
+      },
+      id: true,
+    },
   });
 
   if (existing) {
-    if (existing.dispatchStartedAt || existing.sentAt) {
+    if (existing.deliveries.some((delivery) => delivery.skippedAt === null)) {
       return { kind: "dispatch_started" };
     }
-    if (existing.skippedAt) {
+    if (existing.deliveries.length > 0) {
       return { kind: "not_pending" };
     }
-    await input.tx.hostedGroupJoinOutreach.updateMany({
-      where: {
-        dispatchStartedAt: null,
-        id: existing.id,
-        sentAt: null,
-        skippedAt: null,
-      },
-      data: {
-        skipReason: HOSTED_GROUP_JOIN_OUTREACH_REACTION_REMOVED_REASON,
-        skippedAt: input.now,
-      },
+    await markHostedGroupJoinOutreachSkippedDeliveryTx({
+      now: input.now,
+      outreachId: existing.id,
+      reason: HOSTED_GROUP_JOIN_OUTREACH_REACTION_REMOVED_REASON,
+      tx: input.tx,
     });
     return { kind: "revoked" };
   }
@@ -211,7 +235,6 @@ export async function revokeHostedGroupJoinOutreachForRemovedReactionTx(input: {
   const outreachId = generateHostedGroupJoinOutreachId();
   await input.tx.hostedGroupJoinOutreach.createMany({
     data: [{
-      groupId: input.groupId,
       id: outreachId,
       nextAttemptAt: input.now,
       offerId: input.offerId,
@@ -221,12 +244,35 @@ export async function revokeHostedGroupJoinOutreachForRemovedReactionTx(input: {
       }),
       participantPhoneLookupKey,
       requestedAt: input.now,
-      skipReason: HOSTED_GROUP_JOIN_OUTREACH_REACTION_REMOVED_REASON,
-      skippedAt: input.now,
     }],
     skipDuplicates: true,
   });
+  await markHostedGroupJoinOutreachSkippedDeliveryTx({
+    now: input.now,
+    outreachId,
+    reason: HOSTED_GROUP_JOIN_OUTREACH_REACTION_REMOVED_REASON,
+    tx: input.tx,
+  });
   return { kind: "revoked" };
+}
+
+export async function markHostedGroupJoinOutreachSkippedDeliveryTx(input: {
+  now: Date;
+  outreachId: string;
+  reason: string;
+  tx: Prisma.TransactionClient;
+}): Promise<void> {
+  await markHostedLinqDeliverySkippedTx({
+    groupJoinOutreachId: input.outreachId,
+    idempotencyKey: buildHostedGroupJoinOutreachIdempotencyKey(input.outreachId),
+    prisma: input.tx,
+    reason: input.reason,
+    skippedAt: input.now,
+    source: HOSTED_GROUP_JOIN_OUTREACH_DELIVERY_SOURCE,
+    sourceRef: input.outreachId,
+    targetKind: "participant",
+    template: HOSTED_GROUP_JOIN_OUTREACH_TEMPLATE,
+  });
 }
 
 export function readHostedGroupJoinOutreachParticipantPhone(input: {
@@ -274,85 +320,87 @@ export async function readHostedGroupJoinOutreachReplyContextTx(input: {
     return null;
   }
 
-  const outreaches = await input.tx.hostedGroupJoinOutreach.findMany({
+  const deliveries = await input.tx.hostedLinqDelivery.findMany({
     orderBy: [
-      { sentAt: "desc" },
-      { requestedAt: "desc" },
+      { attemptedAt: "desc" },
       { id: "desc" },
     ],
     where: {
-      participantPhoneLookupKey: { in: participantPhoneLookupKeys },
-      repliedAt: null,
-      sentAt: { not: null },
-      skippedAt: null,
+      groupJoinOutreach: {
+        is: {
+          participantPhoneLookupKey: { in: participantPhoneLookupKeys },
+        },
+      },
+      groupJoinOutreachId: { not: null },
+      source: HOSTED_GROUP_JOIN_OUTREACH_DELIVERY_SOURCE,
+      template: HOSTED_GROUP_JOIN_OUTREACH_TEMPLATE,
       OR: [
-        { linqChatLookupKey: { in: linqChatLookupKeys } },
-        ...(recipientPhoneLookupKeys.length > 0
-          ? [{
-              linqChatLookupKey: null,
-              phoneNumberLookupKey: { in: recipientPhoneLookupKeys },
-            }]
-          : []),
+        { acceptedAt: { not: null } },
+        { deliveredAt: { not: null } },
+        { status: { in: ["accepted", "delivered"] } },
       ],
+      AND: [{
+        OR: [
+          { linqChatLookupKey: { in: linqChatLookupKeys } },
+          ...(recipientPhoneLookupKeys.length > 0
+            ? [{
+                linqChatLookupKey: null,
+                phoneNumberLookupKey: { in: recipientPhoneLookupKeys },
+              }]
+            : []),
+        ],
+      }],
     },
     select: {
-      groupId: true,
+      groupJoinOutreachId: true,
       id: true,
       linqChatLookupKey: true,
-      offerId: true,
-    },
-  });
-  if (outreaches.length === 0) {
-    return null;
-  }
-
-  const offers = await input.tx.hostedGroupJoinOffer.findMany({
-    where: {
-      id: { in: outreaches.map((outreach) => outreach.offerId) },
-      revokedAt: null,
-    },
-    select: {
-      groupId: true,
-      id: true,
-      group: {
+      phoneNumberLookupKey: true,
+      groupJoinOutreach: {
         select: {
-          joinCode: true,
-          runtimeMemberId: true,
+          id: true,
+          offer: {
+            select: {
+              revokedAt: true,
+              group: {
+                select: {
+                  joinCode: true,
+                  runtimeMember: {
+                    select: {
+                      suspendedAt: true,
+                    },
+                  },
+                  runtimeMemberId: true,
+                },
+              },
+            },
+          },
         },
       },
     },
   });
-  const validOfferByOutreachKey = new Map(
-    offers.flatMap((offer) => {
-      const joinCode = offer.group.runtimeMemberId
-        ? offer.group.joinCode?.trim() ?? null
-        : null;
-      return joinCode
-        ? [[`${offer.id}\0${offer.groupId}`, joinCode] as const]
-        : [];
-    }),
-  );
-  const isValid = (candidate: (typeof outreaches)[number]) =>
-    validOfferByOutreachKey.has(`${candidate.offerId}\0${candidate.groupId}`);
-  const outreach =
-    outreaches.find((candidate) =>
-      candidate.linqChatLookupKey !== null
-      && linqChatLookupKeys.includes(candidate.linqChatLookupKey)
-      && isValid(candidate)
-    )
-    ?? outreaches.find((candidate) =>
-      candidate.linqChatLookupKey === null && isValid(candidate)
-    );
-  if (!outreach) {
+  if (deliveries.length === 0) {
     return null;
   }
 
-  const joinCode = validOfferByOutreachKey.get(
-    `${outreach.offerId}\0${outreach.groupId}`,
-  );
-  return joinCode
-    ? { joinCode, outreachId: outreach.id }
-    : null;
+  for (const preferExactChat of [true, false]) {
+    for (const delivery of deliveries) {
+      const exactChat = delivery.linqChatLookupKey !== null
+        && linqChatLookupKeys.includes(delivery.linqChatLookupKey);
+      if (preferExactChat !== exactChat) {
+        continue;
+      }
+      const context = await readAvailableHostedGroupJoinOutreachDeliveryContextTx({
+        delivery,
+        tx: input.tx,
+      });
+      if (context) {
+        return context;
+      }
+    }
+  }
+
+  return null;
 }
 
 export async function isHostedGroupJoinOutreachReplyDeliveryAuthorizedTx(input: {
@@ -373,88 +421,122 @@ export async function readHostedGroupJoinOutreachReplyDeliveryContextTx(input: {
 }): Promise<{ joinCode: string } | null> {
   await acquireHostedGroupJoinOutreachDrainLockTx(input.tx);
 
-  const outreach = await input.tx.hostedGroupJoinOutreach.findUnique({
-    where: { id: input.outreachId },
-    select: {
-      groupId: true,
-      offerId: true,
-      repliedAt: true,
-      sentAt: true,
-      skippedAt: true,
+  const outreach = await input.tx.hostedGroupJoinOutreach.findFirst({
+    where: {
+      deliveries: {
+        some: {
+          source: HOSTED_GROUP_JOIN_OUTREACH_DELIVERY_SOURCE,
+          template: HOSTED_GROUP_JOIN_OUTREACH_TEMPLATE,
+          OR: [
+            { acceptedAt: { not: null } },
+            { deliveredAt: { not: null } },
+            { status: { in: ["accepted", "delivered"] } },
+          ],
+        },
+      },
+      id: input.outreachId,
     },
-  });
-  if (
-    !outreach
-    || !outreach.sentAt
-    || outreach.repliedAt
-    || outreach.skippedAt
-  ) {
-    return null;
-  }
-
-  const offer = await input.tx.hostedGroupJoinOffer.findUnique({
-    where: { id: outreach.offerId },
     select: {
-      groupId: true,
-      revokedAt: true,
-      group: {
+      offer: {
         select: {
-          joinCode: true,
-          runtimeMember: {
+          revokedAt: true,
+          group: {
             select: {
-              suspendedAt: true,
+              joinCode: true,
+              runtimeMember: {
+                select: {
+                  suspendedAt: true,
+                },
+              },
+              runtimeMemberId: true,
             },
           },
-          runtimeMemberId: true,
         },
       },
     },
   });
-  const joinCode =
-    offer
-    && offer.groupId === outreach.groupId
-    && !offer.revokedAt
-    && offer.group.runtimeMemberId
-    && offer.group.runtimeMember?.suspendedAt === null
-      ? offer.group.joinCode?.trim() ?? null
-      : null;
+  if (!outreach) {
+    return null;
+  }
+  if (await hasHostedGroupJoinOutreachLiveSignupDeliveryTx({
+    outreachId: input.outreachId,
+    tx: input.tx,
+  })) {
+    return null;
+  }
+  const joinCode = readHostedGroupJoinOutreachOfferJoinCode(outreach.offer);
   return joinCode ? { joinCode } : null;
 }
 
-export async function consumeHostedGroupJoinOutreachReplyContextTx(input: {
-  outreachId: string;
-  repliedAt: Date;
-  tx: HostedGroupJoinOutreachMutationClient;
-}): Promise<boolean> {
-  const consumed = await input.tx.hostedGroupJoinOutreach.updateMany({
-    where: {
-      id: input.outreachId,
-      repliedAt: null,
-      sentAt: { not: null },
-      skippedAt: null,
-    },
-    data: {
-      repliedAt: input.repliedAt,
-    },
-  });
-  return consumed.count === 1;
+async function readAvailableHostedGroupJoinOutreachDeliveryContextTx(input: {
+  delivery: {
+    groupJoinOutreach: {
+      id: string;
+      offer: {
+        group: {
+          joinCode: string | null;
+          runtimeMember: {
+            suspendedAt: Date | null;
+          } | null;
+          runtimeMemberId: string | null;
+        };
+        revokedAt: Date | null;
+      };
+    } | null;
+    groupJoinOutreachId: string | null;
+  };
+  tx: HostedGroupJoinOutreachReplyAuthorityClient;
+}): Promise<{ joinCode: string; outreachId: string } | null> {
+  const outreach = input.delivery.groupJoinOutreach;
+  if (!outreach || !input.delivery.groupJoinOutreachId) {
+    return null;
+  }
+  if (await hasHostedGroupJoinOutreachLiveSignupDeliveryTx({
+    outreachId: input.delivery.groupJoinOutreachId,
+    tx: input.tx,
+  })) {
+    return null;
+  }
+  const joinCode = readHostedGroupJoinOutreachOfferJoinCode(outreach.offer);
+  return joinCode
+    ? { joinCode, outreachId: outreach.id }
+    : null;
 }
 
-export async function reopenHostedGroupJoinOutreachReplyContextTx(input: {
+async function hasHostedGroupJoinOutreachLiveSignupDeliveryTx(input: {
   outreachId: string;
-  repliedAt: Date;
-  tx: HostedGroupJoinOutreachMutationClient;
+  tx: Pick<Prisma.TransactionClient, "hostedLinqDelivery">;
 }): Promise<boolean> {
-  const reopened = await input.tx.hostedGroupJoinOutreach.updateMany({
+  const delivery = await input.tx.hostedLinqDelivery.findFirst({
     where: {
-      id: input.outreachId,
-      repliedAt: input.repliedAt,
-      sentAt: { not: null },
-      skippedAt: null,
+      groupJoinOutreachId: input.outreachId,
+      template: {
+        in: ["invite_signup", "invite_signup_fallback"],
+      },
+      OR: [
+        { acceptedAt: { not: null } },
+        { deliveredAt: { not: null } },
+        { status: { in: [...HOSTED_GROUP_JOIN_SIGNUP_DELIVERY_LIVE_STATUSES] } },
+      ],
     },
-    data: {
-      repliedAt: null,
-    },
+    select: { id: true },
   });
-  return reopened.count === 1;
+  return Boolean(delivery);
+}
+
+function readHostedGroupJoinOutreachOfferJoinCode(input: {
+  group: {
+    joinCode: string | null;
+    runtimeMember: {
+      suspendedAt: Date | null;
+    } | null;
+    runtimeMemberId: string | null;
+  };
+  revokedAt: Date | null;
+}): string | null {
+  return !input.revokedAt
+    && input.group.runtimeMemberId
+    && input.group.runtimeMember?.suspendedAt === null
+    ? input.group.joinCode?.trim() ?? null
+    : null;
 }

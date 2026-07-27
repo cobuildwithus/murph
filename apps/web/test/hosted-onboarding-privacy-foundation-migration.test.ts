@@ -1252,13 +1252,22 @@ describe("hosted Prisma baseline migration", () => {
       'hosted_group_join_outreach_offer_participant_key',
     );
     expect(hostedGroupJoinOutreachMigrationSql).toContain(
-      'REFERENCES "hosted_linq_line"("phone_number_lookup_key")',
+      'REFERENCES "hosted_group_join_offer"("id")',
+    );
+    expect(hostedGroupJoinOutreachMigrationSql).toContain(
+      'ADD COLUMN "group_join_outreach_id" TEXT',
+    );
+    expect(hostedGroupJoinOutreachMigrationSql).toContain(
+      'hosted_linq_delivery_group_join_outreach_status_idx',
+    );
+    expect(hostedGroupJoinOutreachMigrationSql).toContain(
+      'REFERENCES "hosted_group_join_outreach"("id")',
     );
     expect(hostedGroupJoinOutreachMigrationSql).not.toContain(
       '"participant_phone_number"',
     );
     expect(hostedGroupJoinOutreachMigrationSql).not.toContain(
-      'REFERENCES "hosted_group_join_offer"',
+      'REFERENCES "hosted_linq_line"("phone_number_lookup_key")',
     );
     for (const sql of [
       'CREATE TABLE "hosted_group_disclosure_permission"',

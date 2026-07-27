@@ -1474,7 +1474,6 @@ model HostedGroup {
   runtimeMember     HostedMember?       @relation("HostedGroupRuntimeMember", fields: [runtimeMemberId], references: [id], onDelete: SetNull)
   members           HostedGroupMember[]
   joinOffers        HostedGroupJoinOffer[]
-  joinOutreaches    HostedGroupJoinOutreach[]
   disclosurePermissions HostedGroupDisclosurePermission[]
 
   @@index([ownerMemberId])
@@ -1491,38 +1490,29 @@ model HostedGroupJoinOffer {
   postedAt            DateTime    @map("posted_at")
   revokedAt           DateTime?   @map("revoked_at")
   group               HostedGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  joinOutreaches       HostedGroupJoinOutreach[]
 
   @@index([groupId, revokedAt, postedAt])
   @@map("hosted_group_join_offer")
 }
 
 model HostedGroupJoinOutreach {
-  id                        String          @id
-  groupId                   String          @map("group_id")
-  offerId                   String          @map("offer_id")
-  participantPhoneLookupKey String          @map("participant_phone_lookup_key")
-  participantPhoneEncrypted String          @map("participant_phone_encrypted")
-  requestedAt               DateTime        @map("requested_at")
-  nextAttemptAt             DateTime        @map("next_attempt_at")
-  dispatchStartedAt         DateTime?       @map("dispatch_started_at")
-  attemptCount              Int             @default(0) @map("attempt_count")
-  phoneNumberLookupKey      String?         @map("phone_number_lookup_key")
-  linqChatLookupKey         String?         @map("linq_chat_lookup_key")
-  sentAt                    DateTime?       @map("sent_at")
-  repliedAt                 DateTime?       @map("replied_at")
-  skippedAt                 DateTime?       @map("skipped_at")
-  skipReason                String?         @map("skip_reason")
-  lastDeferredAt            DateTime?       @map("last_deferred_at")
-  lastDeferralReason        String?         @map("last_deferral_reason")
-  createdAt                 DateTime        @default(now()) @map("created_at")
-  updatedAt                 DateTime        @updatedAt @map("updated_at")
-  group                     HostedGroup     @relation(fields: [groupId], references: [id], onDelete: Cascade)
-  line                      HostedLinqLine? @relation(fields: [phoneNumberLookupKey], references: [phoneNumberLookupKey], onDelete: SetNull)
+  id                        String               @id
+  offerId                   String               @map("offer_id")
+  participantPhoneLookupKey String               @map("participant_phone_lookup_key")
+  participantPhoneEncrypted String               @map("participant_phone_encrypted")
+  requestedAt               DateTime             @map("requested_at")
+  nextAttemptAt             DateTime             @map("next_attempt_at")
+  attemptCount              Int                  @default(0) @map("attempt_count")
+  lastDeferralReason        String?              @map("last_deferral_reason")
+  createdAt                 DateTime             @default(now()) @map("created_at")
+  updatedAt                 DateTime             @updatedAt @map("updated_at")
+  offer                     HostedGroupJoinOffer @relation(fields: [offerId], references: [id], onDelete: Cascade)
+  deliveries                HostedLinqDelivery[]
 
   @@unique([offerId, participantPhoneLookupKey], map: "hosted_group_join_outreach_offer_participant_key")
-  @@index([sentAt, skippedAt, nextAttemptAt, requestedAt], map: "hosted_group_join_outreach_due_idx")
-  @@index([participantPhoneLookupKey, dispatchStartedAt, sentAt], map: "hosted_group_join_outreach_participant_attempt_idx")
-  @@index([linqChatLookupKey, sentAt], map: "hosted_group_join_outreach_chat_idx")
+  @@index([nextAttemptAt, requestedAt], map: "hosted_group_join_outreach_due_idx")
+  @@index([participantPhoneLookupKey, nextAttemptAt], map: "hosted_group_join_outreach_participant_due_idx")
   @@map("hosted_group_join_outreach")
 }
 
@@ -1686,7 +1676,6 @@ model HostedLinqLine {
   providerEvents             HostedLinqProviderEvent[]
   deliveries                 HostedLinqDelivery[]
   alerts                     HostedLinqAlert[]
-  groupJoinOutreaches        HostedGroupJoinOutreach[]
 
   @@index([healthStatus, egressPolicy])
   @@index([configuredAt, egressPolicy, healthStatus])
@@ -1741,6 +1730,7 @@ model HostedLinqDelivery {
   source               String
   sourceRef            String?  @map("source_ref")
   template             String?
+  groupJoinOutreachId  String?  @map("group_join_outreach_id")
   phoneNumberLookupKey String?  @map("phone_number_lookup_key")
   phoneNumberHint      String?  @map("phone_number_hint")
   targetKind           String?  @map("target_kind")
@@ -1762,10 +1752,12 @@ model HostedLinqDelivery {
   skipReason           String?  @map("skip_reason")
   createdAt            DateTime @default(now()) @map("created_at")
   updatedAt            DateTime @updatedAt @map("updated_at")
+  groupJoinOutreach    HostedGroupJoinOutreach? @relation(fields: [groupJoinOutreachId], references: [id], onDelete: SetNull)
   line                 HostedLinqLine? @relation(fields: [phoneNumberLookupKey], references: [phoneNumberLookupKey], onDelete: SetNull)
   alerts               HostedLinqAlert[]
   ingressLatencyTraces HostedIngressLatencyTrace[]
 
+  @@index([groupJoinOutreachId, status, attemptedAt], map: "hosted_linq_delivery_group_join_outreach_status_idx")
   @@index([phoneNumberLookupKey, attemptedAt])
   @@index([status, attemptedAt])
   @@index([linqChatLookupKey, attemptedAt])

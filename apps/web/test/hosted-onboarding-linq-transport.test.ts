@@ -338,18 +338,9 @@ describe("hosted Linq webhook transport", () => {
         repliedAt: "2026-03-26T12:00:00.000Z",
       },
     });
+    expect(claimInput?.groupJoinOutreachId).toBe("hgrpjoa-1");
     expect(markHostedLinqOnboardingLinkNoticeSent).toHaveBeenCalledTimes(1);
-    expect(prisma.hostedGroupJoinOutreach.updateMany).toHaveBeenCalledWith({
-      data: {
-        repliedAt: new Date("2026-03-26T12:00:00.000Z"),
-      },
-      where: {
-        id: "hgrpjoa-1",
-        repliedAt: null,
-        sentAt: { not: null },
-        skippedAt: null,
-      },
-    });
+    expect(prisma.hostedGroupJoinOutreach.updateMany).not.toHaveBeenCalled();
   });
 
   it("commits a failed group provider attempt before surfacing the error", async () => {
@@ -581,6 +572,7 @@ describe("hosted Linq webhook transport", () => {
       template: "invite_signup",
     });
     vi.mocked(readHostedLinqDeliveryProviderDispatchIntentTx).mockResolvedValueOnce({
+      groupJoinOutreachId: null,
       providerCorrelated: false,
       sourceRef: buildHostedLinqInviteSignupDeliverySourceRef({
         effectId: effect.effectId,
@@ -601,6 +593,7 @@ describe("hosted Linq webhook transport", () => {
 
     expect(claimHostedLinqDeliveryProviderDispatchTx).toHaveBeenCalledWith(
       expect.objectContaining({
+        groupJoinOutreachId: "hgrpjoa-a",
         idempotencyKey: effect.effectId,
         sourceRef: buildHostedLinqInviteSignupDeliverySourceRef({
           effectId: effect.effectId,
@@ -652,6 +645,7 @@ describe("hosted Linq webhook transport", () => {
       });
     vi.mocked(readHostedLinqDeliveryProviderDispatchIntentTx)
       .mockResolvedValue({
+        groupJoinOutreachId: null,
         providerCorrelated: false,
         sourceRef: persistedSourceRef,
       });
@@ -667,6 +661,7 @@ describe("hosted Linq webhook transport", () => {
 
     expect(claimHostedLinqDeliveryProviderDispatchTx).toHaveBeenCalledWith(
       expect.objectContaining({
+        groupJoinOutreachId: "hgrpjoa-a",
         idempotencyKey: originalEffect.effectId,
         sourceRef: persistedSourceRef,
       }),
@@ -711,16 +706,13 @@ describe("hosted Linq webhook transport", () => {
     });
 
     expect(prisma.$executeRaw).toHaveBeenCalledTimes(1);
-    expect(prisma.hostedGroupJoinOutreach.findUnique).toHaveBeenCalledWith({
-      select: {
-        groupId: true,
-        offerId: true,
-        repliedAt: true,
-        sentAt: true,
-        skippedAt: true,
-      },
-      where: { id: "hgrpjoa-deleted" },
-    });
+    expect(prisma.hostedGroupJoinOutreach.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          id: "hgrpjoa-deleted",
+        }),
+      }),
+    );
     expect(claimHostedLinqDeliveryProviderDispatchTx).not.toHaveBeenCalled();
     expect(sendHostedLinqChatMessage).not.toHaveBeenCalled();
   });
@@ -768,15 +760,7 @@ describe("hosted Linq webhook transport", () => {
       occurredAt: "2026-03-26T00:00:00.000Z",
       prisma: expect.any(Object),
     });
-    expect(prisma.hostedGroupJoinOutreach.updateMany).toHaveBeenCalledWith({
-      data: { repliedAt: null },
-      where: {
-        id: "hgrpjoa-failed",
-        repliedAt: new Date("2026-03-26T12:00:00.000Z"),
-        sentAt: { not: null },
-        skippedAt: null,
-      },
-    });
+    expect(prisma.hostedGroupJoinOutreach.updateMany).not.toHaveBeenCalled();
   });
 
   it("awaits one share when accepted-milestone replay finds an earlier delivered receipt", async () => {
@@ -2714,22 +2698,27 @@ function createInviteSignupPrismaFixture(
       update: vi.fn().mockResolvedValue({}),
     },
     hostedGroupJoinOutreach: {
-      findUnique: vi.fn().mockResolvedValue(
+      findFirst: vi.fn().mockResolvedValue(
         input.groupReplyAuthorized === false
           ? null
           : {
-              groupId: "group-1",
-              offerId: "offer-1",
-              repliedAt: null,
-              sentAt: new Date("2026-03-26T11:00:00.000Z"),
-              skippedAt: null,
+              offer: {
+                group: {
+                  joinCode: input.groupJoinCode ?? "join-group",
+                  runtimeMember: { suspendedAt: null },
+                  runtimeMemberId: "member-runtime",
+                },
+                revokedAt: null,
+              },
             },
       ),
       updateMany: vi.fn().mockResolvedValue({ count: 1 }),
     },
+    hostedLinqDelivery: {
+      findFirst: vi.fn().mockResolvedValue(null),
+    },
     hostedGroupJoinOffer: {
       findUnique: vi.fn().mockResolvedValue({
-        groupId: "group-1",
         revokedAt: null,
         group: {
           joinCode: input.groupJoinCode ?? "join-group",

@@ -18,10 +18,6 @@ import {
 import type { ParsedHostedLinqProviderEvent } from "./linq-provider-events";
 import { toHostedOnboardingLogIdSuffix } from "./logging";
 import { sha256Hex } from "../primitives";
-import {
-  consumeHostedGroupJoinOutreachReplyContextTx,
-  reopenHostedGroupJoinOutreachReplyContextTx,
-} from "../hosted-groups/group-join-outreach-store";
 
 type HostedLinqProviderEventClient = PrismaClient | Prisma.TransactionClient;
 
@@ -87,13 +83,6 @@ export async function ingestHostedLinqProviderEventTx(input: {
   if (deliveryReceipt.reopenOnboardingLink) {
     const groupJoinReplyContext =
       deliveryReceipt.reopenOnboardingLink.groupJoinReplyContext;
-    if (groupJoinReplyContext) {
-      await reopenHostedGroupJoinOutreachReplyContextTx({
-        outreachId: groupJoinReplyContext.outreachId,
-        repliedAt: new Date(groupJoinReplyContext.repliedAt),
-        tx: input.prisma,
-      });
-    }
     if (
       !groupJoinReplyContext
       || deliveryReceipt.reopenOnboardingLink.releaseDailySuppression === true
@@ -106,20 +95,11 @@ export async function ingestHostedLinqProviderEventTx(input: {
     }
   }
   if (deliveryReceipt.restoreOnboardingLink) {
-    const groupJoinReplyContext =
-      deliveryReceipt.restoreOnboardingLink.groupJoinReplyContext;
     await markHostedLinqOnboardingLinkNoticeSent({
       memberId: deliveryReceipt.restoreOnboardingLink.memberId,
       occurredAt: deliveryReceipt.restoreOnboardingLink.occurredAt,
       prisma: input.prisma,
     });
-    if (groupJoinReplyContext) {
-      await consumeHostedGroupJoinOutreachReplyContextTx({
-        outreachId: groupJoinReplyContext.outreachId,
-        repliedAt: new Date(groupJoinReplyContext.repliedAt),
-        tx: input.prisma,
-      });
-    }
   }
   const outboundEchoDelivery = isHostedRuntimeOwnedOutboundEcho(input.event)
     ? await readHostedLinqDeliveryForProviderMessageTx({

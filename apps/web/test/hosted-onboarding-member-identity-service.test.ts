@@ -547,6 +547,7 @@ function asRootPrisma<T extends object>(tx: T): T & {
   $transaction: ReturnType<typeof vi.fn>;
 } {
   const innerTx = {
+    $executeRaw: vi.fn().mockResolvedValue(0),
     hostedAccountDeletionCleanup: {
       findFirst: vi.fn().mockResolvedValue(null),
     },

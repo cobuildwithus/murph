@@ -88,12 +88,10 @@ vi.mock("@/src/lib/phone-calls/account-deletion", () => ({
 }));
 
 import { HostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
-import { createHostedLinqDeliverySourceRefLookupKey } from "@/src/lib/hosted-onboarding/linq-observability-identifiers";
 import {
   buildHostedLinqInviteSignupDeliverySourceRef,
   buildHostedLinqInviteSignupDeliverySourceRefMemberPrefix,
   buildHostedLinqInviteSignupEffectId,
-  buildHostedLinqInviteSignupGroupJoinSourceRefFragment,
 } from "@/src/lib/hosted-onboarding/linq-invite-signup-effect-id";
 import { createHostedPrivyUserLookupKey } from "@/src/lib/hosted-onboarding/contact-privacy";
 import { ComposioConnectedAppsRequestError } from "@/src/lib/connected-apps/composio";
@@ -554,19 +552,14 @@ describe("deleteHostedAccountData", () => {
   });
 
   it("preempts a pending dispatch instead of stranding the deletion", async () => {
-    // `dispatchStartedAt` is never cleared when a retryable failure defers a row,
-    // so treating it as a live call would block deletion indefinitely after the
-    // account was already suspended and its providers revoked. The egress
-    // authority refuses the send once the row is gone, so deletion proceeds.
+    // In-flight provider ownership is represented by delivery rows and crossed
+    // by the shared drain. The outreach row itself must not strand deletion.
     const deleteCalls: HostedAccountDeletionPrismaDeleteCall[] = [];
     const prisma = createHostedAccountDeletionPrismaForTest({
       deleteCalls,
       groupJoinOutreachPhoneLookupKeys: ["hbidx:phone:v1:participant"],
       groupJoinOutreachRows: [{
-        dispatchStartedAt: new Date("2026-07-25T09:00:00.000Z"),
         id: "hgrpjoa_inflight",
-        sentAt: null,
-        skippedAt: null,
       }],
       onTransaction: () => undefined,
     });
@@ -590,10 +583,7 @@ describe("deleteHostedAccountData", () => {
       deleteCalls,
       groupJoinOutreachOwnedGroupIds: ["hgrp_owned"],
       groupJoinOutreachRows: [{
-        dispatchStartedAt: null,
         id: "hgrpjoa_owned",
-        sentAt: null,
-        skippedAt: null,
       }],
       onTransaction: () => undefined,
     });
@@ -608,26 +598,7 @@ describe("deleteHostedAccountData", () => {
       {
         model: "hostedLinqDelivery",
         where: {
-          OR: [
-            {
-              source: "hosted_group_join_outreach",
-              sourceRef: {
-                in: [createHostedLinqDeliverySourceRefLookupKey("hgrpjoa_owned")],
-              },
-            },
-            {
-              source: "hosted_webhook_side_effect",
-              sourceRef: {
-                contains:
-                  buildHostedLinqInviteSignupGroupJoinSourceRefFragment(
-                    "hgrpjoa_owned",
-                  ),
-              },
-              template: {
-                in: ["invite_signup", "invite_signup_fallback"],
-              },
-            },
-          ],
+          groupJoinOutreachId: { in: ["hgrpjoa_owned"] },
         },
       },
       {
@@ -637,7 +608,13 @@ describe("deleteHostedAccountData", () => {
     ]));
 
     const models = deleteCalls.map((call) => call.model);
-    expect(models.indexOf("hostedLinqDelivery"))
+    const outreachDeliveryIndex = deleteCalls.findIndex((call) =>
+      call.model === "hostedLinqDelivery"
+      && typeof call.where === "object"
+      && call.where !== null
+      && "groupJoinOutreachId" in call.where
+    );
+    expect(outreachDeliveryIndex)
       .toBeLessThan(models.indexOf("hostedGroupJoinOutreach"));
     expect(models.indexOf("hostedGroupJoinOutreach"))
       .toBeLessThan(models.indexOf("hostedGroup"));
@@ -663,10 +640,7 @@ describe("deleteHostedAccountData", () => {
       groupJoinDeliveryRows: [{ sourceRef }],
       groupJoinOutreachOwnedGroupIds: ["hgrp_owned_projection"],
       groupJoinOutreachRows: [{
-        dispatchStartedAt: occurredAt,
         id: outreachId,
-        sentAt: occurredAt,
-        skippedAt: null,
       }],
       liveSignupDeliveryRows: [],
       onTransaction: () => operationOrder.push("transaction"),
@@ -702,10 +676,7 @@ describe("deleteHostedAccountData", () => {
       deleteCalls,
       groupJoinOutreachPhoneLookupKeys: ["hbidx:phone:v1:participant"],
       groupJoinOutreachRows: [{
-        dispatchStartedAt: null,
         id: "hgrpjoa_opaque",
-        sentAt: null,
-        skippedAt: null,
       }],
       onTransaction: () => undefined,
     });
@@ -724,26 +695,7 @@ describe("deleteHostedAccountData", () => {
       {
         model: "hostedLinqDelivery",
         where: {
-          OR: [
-            {
-              source: "hosted_group_join_outreach",
-              sourceRef: {
-                in: [createHostedLinqDeliverySourceRefLookupKey("hgrpjoa_opaque")],
-              },
-            },
-            {
-              source: "hosted_webhook_side_effect",
-              sourceRef: {
-                contains:
-                  buildHostedLinqInviteSignupGroupJoinSourceRefFragment(
-                    "hgrpjoa_opaque",
-                  ),
-              },
-              template: {
-                in: ["invite_signup", "invite_signup_fallback"],
-              },
-            },
-          ],
+          groupJoinOutreachId: { in: ["hgrpjoa_opaque"] },
         },
       },
     ]));
@@ -2491,10 +2443,7 @@ function createHostedAccountDeletionPrismaForTest(input: {
   groupJoinOutreachPhoneLookupKeys?: readonly string[];
   groupJoinDeliveryRows?: readonly { sourceRef: string | null }[];
   groupJoinOutreachRows?: readonly {
-    dispatchStartedAt?: Date | null;
     id: string;
-    sentAt?: Date | null;
-    skippedAt?: Date | null;
   }[];
   liveSignupDeliveryRows?: readonly { sourceRef: string | null }[];
   onTransaction: () => void;

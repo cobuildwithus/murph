@@ -3,7 +3,6 @@ import "server-only";
 import type { Prisma, PrismaClient } from "@prisma/client";
 
 import { sha256Hex } from "../primitives";
-import { createHostedLinqChatLookupKey } from "../hosted-onboarding/contact-privacy";
 import {
   claimHostedLinqDeliveryProviderDispatchTx,
   markHostedLinqDeliveryAcceptedTx,
@@ -15,9 +14,11 @@ import {
   type HostedLinqAssignableHomeLine,
 } from "../hosted-onboarding/linq-line-store";
 import { createHostedLinqChat } from "../hosted-onboarding/linq-client";
-import { assertHostedLinqGroupJoinOutreachParticipantEgressAuthority } from "../hosted-onboarding/linq-egress-engagement";
 import { lookupHostedMemberIdentityByPhoneNumber } from "../hosted-onboarding/hosted-member-identity-store";
-import { isHostedOnboardingError } from "../hosted-onboarding/errors";
+import {
+  hostedOnboardingError,
+  isHostedOnboardingError,
+} from "../hosted-onboarding/errors";
 import {
   logHostedOnboardingDiagnostic,
   toHostedOnboardingLogIdSuffix,
@@ -28,20 +29,21 @@ import {
 } from "../hosted-onboarding/linq-routing-policy";
 import { countHostedMemberHomeLinqBindingsByRecipientPhone } from "../hosted-onboarding/hosted-member-routing-linq";
 import {
-  HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
-} from "../hosted-onboarding/shared";
+  acquireHostedLinqParticipantPhoneLockTx,
+} from "../hosted-onboarding/linq-participant-contact";
+import { LINQ_API_DEFAULT_TIMEOUT_MS } from "../linq/api";
 import {
   decideHostedGroupJoinOutreachSendWindow,
 } from "./group-join-outreach-window";
 import {
+  HOSTED_GROUP_JOIN_OUTREACH_DELIVERY_SOURCE,
+  HOSTED_GROUP_JOIN_OUTREACH_TEMPLATE,
   acquireHostedGroupJoinOutreachDrainLockTx,
+  buildHostedGroupJoinOutreachIdempotencyKey,
+  markHostedGroupJoinOutreachSkippedDeliveryTx,
   readHostedGroupJoinOutreachParticipantPhone,
 } from "./group-join-outreach-store";
 
-export const HOSTED_GROUP_JOIN_OUTREACH_DELIVERY_SOURCE =
-  "hosted_group_join_outreach";
-const HOSTED_GROUP_JOIN_OUTREACH_TEMPLATE = "group_join_outreach";
-const HOSTED_GROUP_JOIN_OUTREACH_IDEMPOTENCY_PREFIX = "group-join-outreach:";
 const HOSTED_GROUP_JOIN_OUTREACH_LINE_PACE_MS = 60_000;
 const HOSTED_GROUP_JOIN_OUTREACH_PACE_JITTER_MS = 30_000;
 const HOSTED_GROUP_JOIN_OUTREACH_MAX_PER_SWEEP = 10;
@@ -50,6 +52,13 @@ const HOSTED_GROUP_JOIN_OUTREACH_RESERVED_WELCOME_SLOTS = 10;
 const HOSTED_GROUP_JOIN_OUTREACH_NO_LINE_RETRY_MS = 15 * 60_000;
 const HOSTED_GROUP_JOIN_OUTREACH_PROVIDER_RETRY_MS = 15 * 60_000;
 const HOSTED_GROUP_JOIN_OUTREACH_MAX_PROVIDER_ATTEMPTS = 5;
+const HOSTED_GROUP_JOIN_PROVIDER_FENCE_LOCK_TIMEOUT_MS = 1_500;
+const HOSTED_GROUP_JOIN_PROVIDER_FENCE_COMMIT_MARGIN_MS = 2_000;
+const HOSTED_GROUP_JOIN_PROVIDER_FENCE_TRANSACTION_TIMEOUT_MS = 15_000;
+const HOSTED_GROUP_JOIN_PROVIDER_FENCE_TRANSACTION_OPTIONS = {
+  maxWait: 5_000,
+  timeout: HOSTED_GROUP_JOIN_PROVIDER_FENCE_TRANSACTION_TIMEOUT_MS,
+} as const;
 const MINUTES_PER_DAY = 24 * 60;
 
 export type HostedGroupJoinOutreachDrainResult =
@@ -57,25 +66,6 @@ export type HostedGroupJoinOutreachDrainResult =
   | { kind: "idle" }
   | { kind: "sent"; outreachId: string }
   | { kind: "skipped"; outreachId: string; reason: string };
-
-type HostedGroupJoinOutreachClaim = {
-  attemptedAt: Date;
-  fromPhoneNumber: string;
-  idempotencyKey: string;
-  message: string;
-  outreachId: string;
-  participantPhoneNumber: string;
-};
-
-type HostedGroupJoinOutreachClaimResult =
-  | HostedGroupJoinOutreachDrainResult
-  | { kind: "dispatch"; claim: HostedGroupJoinOutreachClaim };
-
-export function buildHostedGroupJoinOutreachIdempotencyKey(
-  outreachId: string,
-): string {
-  return `${HOSTED_GROUP_JOIN_OUTREACH_IDEMPOTENCY_PREFIX}${outreachId}`;
-}
 
 /**
  * Variants for the one private first-contact text.
@@ -219,122 +209,25 @@ export async function drainOneHostedGroupJoinOutreach(input: {
   signal?: AbortSignal;
 }): Promise<HostedGroupJoinOutreachDrainResult> {
   const now = input.now ?? new Date();
-  const claimResult = await input.prisma.$transaction(
-    async (tx) => claimOneHostedGroupJoinOutreachTx({ now, tx }),
-    HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
-  );
-  if (claimResult.kind !== "dispatch") {
-    logHostedGroupJoinOutreachDrainResult(claimResult);
-    return claimResult;
-  }
-
-  const { claim } = claimResult;
-  try {
-    await assertHostedLinqGroupJoinOutreachParticipantEgressAuthority({
-      fromPhoneNumber: claim.fromPhoneNumber,
-      idempotencyKey: claim.idempotencyKey,
-      outreachId: claim.outreachId,
-      prisma: input.prisma,
-      targetPhoneNumber: claim.participantPhoneNumber,
-    });
-    const sent = await createHostedLinqChat({
-      from: claim.fromPhoneNumber,
-      idempotencyKey: claim.idempotencyKey,
-      message: claim.message,
+  const result = await input.prisma.$transaction(
+    async (tx) => drainOneHostedGroupJoinOutreachTx({
+      now,
       ...(input.signal ? { signal: input.signal } : {}),
-      to: [claim.participantPhoneNumber],
-    });
-
-    await input.prisma.$transaction(async (tx) => {
-      await markHostedLinqDeliveryAcceptedTx({
-        acceptedAt: new Date(),
-        idempotencyKey: claim.idempotencyKey,
-        linqChatId: sent.chatId,
-        messageId: sent.messageId,
-        prisma: tx,
-      });
-      await tx.hostedGroupJoinOutreach.updateMany({
-        where: {
-          id: claim.outreachId,
-          sentAt: null,
-          skippedAt: null,
-        },
-        data: {
-          linqChatLookupKey: createHostedLinqChatLookupKey(sent.chatId),
-          sentAt: new Date(),
-        },
-      });
-    }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
-
-    const result: HostedGroupJoinOutreachDrainResult = {
-      kind: "sent",
-      outreachId: claim.outreachId,
-    };
-    logHostedGroupJoinOutreachDrainResult(result);
-    return result;
-  } catch (error) {
-    const retryable = !isHostedOnboardingError(error) || error.retryable;
-    const result = await input.prisma.$transaction(async (tx) => {
-      const outreach = await tx.hostedGroupJoinOutreach.findUnique({
-        where: { id: claim.outreachId },
-        select: { attemptCount: true },
-      });
-      const terminal = !retryable
-        || (outreach?.attemptCount ?? HOSTED_GROUP_JOIN_OUTREACH_MAX_PROVIDER_ATTEMPTS)
-          >= HOSTED_GROUP_JOIN_OUTREACH_MAX_PROVIDER_ATTEMPTS;
-      const failedAt = new Date();
-      const nextAttemptAt = new Date(
-        failedAt.getTime() + HOSTED_GROUP_JOIN_OUTREACH_PROVIDER_RETRY_MS,
-      );
-      await markHostedLinqDeliverySendFailedTx({
-        expectedAttemptedAt: claim.attemptedAt,
-        failedAt,
-        failureCode: readHostedGroupJoinOutreachFailureCode(error),
-        failureReason: "Hosted group join outreach provider dispatch failed.",
-        idempotencyKey: claim.idempotencyKey,
-        prisma: tx,
-        retryAfterAt: terminal ? null : nextAttemptAt,
-      });
-      await tx.hostedGroupJoinOutreach.updateMany({
-        where: {
-          id: claim.outreachId,
-          sentAt: null,
-          skippedAt: null,
-        },
-        data: terminal
-          ? {
-              skippedAt: failedAt,
-              skipReason: retryable
-                ? "provider_attempt_limit"
-                : "provider_rejected",
-            }
-          : {
-              lastDeferredAt: failedAt,
-              lastDeferralReason: "provider_retry",
-              nextAttemptAt,
-            },
-      });
-      return terminal
-        ? {
-            kind: "skipped" as const,
-            outreachId: claim.outreachId,
-            reason: retryable ? "provider_attempt_limit" : "provider_rejected",
-          }
-        : {
-            kind: "deferred" as const,
-            outreachId: claim.outreachId,
-            reason: "provider_retry",
-          };
-    }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
-    logHostedGroupJoinOutreachDrainResult(result);
-    return result;
-  }
+      transactionStartedAtMs: Date.now(),
+      tx,
+    }),
+    HOSTED_GROUP_JOIN_PROVIDER_FENCE_TRANSACTION_OPTIONS,
+  );
+  logHostedGroupJoinOutreachDrainResult(result);
+  return result;
 }
 
-async function claimOneHostedGroupJoinOutreachTx(input: {
+async function drainOneHostedGroupJoinOutreachTx(input: {
   now: Date;
+  signal?: AbortSignal;
+  transactionStartedAtMs: number;
   tx: Prisma.TransactionClient;
-}): Promise<HostedGroupJoinOutreachClaimResult> {
+}): Promise<HostedGroupJoinOutreachDrainResult> {
   await acquireHostedGroupJoinOutreachDrainLockTx(input.tx);
 
   const outreach = await input.tx.hostedGroupJoinOutreach.findFirst({
@@ -343,19 +236,34 @@ async function claimOneHostedGroupJoinOutreachTx(input: {
       { id: "asc" },
     ],
     where: {
+      deliveries: {
+        none: {
+          source: HOSTED_GROUP_JOIN_OUTREACH_DELIVERY_SOURCE,
+          template: HOSTED_GROUP_JOIN_OUTREACH_TEMPLATE,
+          OR: [
+            { acceptedAt: { not: null } },
+            { deliveredAt: { not: null } },
+            { skippedAt: { not: null } },
+            { status: { in: ["accepted", "delivered", "skipped"] } },
+            {
+              failedAt: { not: null },
+              retryAfterAt: null,
+            },
+            {
+              retryAfterAt: null,
+              status: "failed",
+            },
+          ],
+        },
+      },
       nextAttemptAt: { lte: input.now },
-      sentAt: null,
-      skippedAt: null,
     },
     select: {
       attemptCount: true,
-      dispatchStartedAt: true,
-      groupId: true,
       id: true,
       offerId: true,
       participantPhoneEncrypted: true,
       participantPhoneLookupKey: true,
-      phoneNumberLookupKey: true,
       requestedAt: true,
     },
   });
@@ -376,10 +284,15 @@ async function claimOneHostedGroupJoinOutreachTx(input: {
     });
   }
 
+  await acquireHostedLinqParticipantPhoneLockTx({
+    lockTimeoutMs: HOSTED_GROUP_JOIN_PROVIDER_FENCE_LOCK_TIMEOUT_MS,
+    phoneNumber: participantPhoneNumber,
+    tx: input.tx,
+  });
+
   const offer = await input.tx.hostedGroupJoinOffer.findUnique({
     where: { id: outreach.offerId },
     select: {
-      groupId: true,
       revokedAt: true,
       group: {
         select: {
@@ -391,7 +304,7 @@ async function claimOneHostedGroupJoinOutreachTx(input: {
       },
     },
   });
-  if (!offer || offer.groupId !== outreach.groupId) {
+  if (!offer) {
     return skipHostedGroupJoinOutreachTx({
       now: input.now,
       outreachId: outreach.id,
@@ -465,13 +378,15 @@ async function claimOneHostedGroupJoinOutreachTx(input: {
   const linePaceWindowMs = HOSTED_GROUP_JOIN_OUTREACH_LINE_PACE_MS
     + readHostedGroupJoinOutreachPaceJitterMs(outreach.id);
   const recentlyUsedLineKeys = new Set(
-    (await input.tx.hostedGroupJoinOutreach.findMany({
+    (await input.tx.hostedLinqDelivery.findMany({
       where: {
-        dispatchStartedAt: {
+        attemptedAt: {
           gt: new Date(input.now.getTime() - linePaceWindowMs),
         },
-        id: { not: outreach.id },
+        groupJoinOutreachId: { not: outreach.id },
         phoneNumberLookupKey: { not: null },
+        source: HOSTED_GROUP_JOIN_OUTREACH_DELIVERY_SOURCE,
+        template: HOSTED_GROUP_JOIN_OUTREACH_TEMPLATE,
       },
       select: { phoneNumberLookupKey: true },
     }))
@@ -510,21 +425,35 @@ async function claimOneHostedGroupJoinOutreachTx(input: {
   // A row keeps the line it was first dispatched from, but only while that line is
   // still usable. If the pinned line has gone unhealthy or left the pool, the row
   // is re-assigned instead of waiting on it forever: the provider idempotency key
-  // is derived from the outreach id rather than the line, and the row's selected
-  // line is rewritten below before dispatch, so the egress authority follows it.
+  // is derived from the outreach id rather than the line, and the next delivery
+  // claim carries the selected line.
   // A pinned line that is merely inside its pace window is a wait, not a move.
-  const pinnedLine = outreach.phoneNumberLookupKey
+  const existingDelivery = await input.tx.hostedLinqDelivery.findFirst({
+    orderBy: [
+      { attemptedAt: "desc" },
+      { id: "desc" },
+    ],
+    where: {
+      groupJoinOutreachId: outreach.id,
+      phoneNumberLookupKey: { not: null },
+      source: HOSTED_GROUP_JOIN_OUTREACH_DELIVERY_SOURCE,
+      template: HOSTED_GROUP_JOIN_OUTREACH_TEMPLATE,
+    },
+    select: { phoneNumberLookupKey: true },
+  });
+  const pinnedLineKey = existingDelivery?.phoneNumberLookupKey ?? null;
+  const pinnedLine = pinnedLineKey
     ? healthyLines.find(
         (candidate) =>
-          candidate.phoneNumberLookupKey === outreach.phoneNumberLookupKey,
+          candidate.phoneNumberLookupKey === pinnedLineKey,
       ) ?? null
     : null;
   const pinnedLineIsPacedOut = Boolean(
-    outreach.phoneNumberLookupKey
+    pinnedLineKey
       && !pinnedLine
       && allHealthyLines.some(
         (candidate) =>
-          candidate.phoneNumberLookupKey === outreach.phoneNumberLookupKey,
+          candidate.phoneNumberLookupKey === pinnedLineKey,
       ),
   );
   if (pinnedLineIsPacedOut) {
@@ -547,7 +476,7 @@ async function claimOneHostedGroupJoinOutreachTx(input: {
     // Losing a pinned line is a health transition, not proof the pool is spent for
     // the rest of the day, so it keeps the short retry. Only a row that was never
     // pinned and found no capacity waits for the next day's window.
-    const lostPinnedLine = Boolean(outreach.phoneNumberLookupKey);
+    const lostPinnedLine = Boolean(pinnedLineKey);
     return deferHostedGroupJoinOutreachTx({
       nextAttemptAt: lostPinnedLine
         ? new Date(
@@ -567,8 +496,20 @@ async function claimOneHostedGroupJoinOutreachTx(input: {
   }
 
   const idempotencyKey = buildHostedGroupJoinOutreachIdempotencyKey(outreach.id);
+  if (!hasHostedGroupJoinOutreachProviderFenceBudget(input.transactionStartedAtMs)) {
+    return deferHostedGroupJoinOutreachTx({
+      nextAttemptAt: new Date(
+        input.now.getTime() + HOSTED_GROUP_JOIN_OUTREACH_PROVIDER_RETRY_MS,
+      ),
+      now: input.now,
+      outreachId: outreach.id,
+      reason: "provider_fence_budget",
+      tx: input.tx,
+    });
+  }
   const deliveryClaim = await claimHostedLinqDeliveryProviderDispatchTx({
     attemptedAt: input.now,
+    groupJoinOutreachId: outreach.id,
     idempotencyKey,
     phoneNumber: line.phoneNumber,
     prisma: input.tx,
@@ -602,30 +543,61 @@ async function claimOneHostedGroupJoinOutreachTx(input: {
     where: { id: outreach.id },
     data: {
       attemptCount: { increment: 1 },
-      dispatchStartedAt: input.now,
-      lastDeferredAt: null,
       lastDeferralReason: null,
       nextAttemptAt: new Date(
         input.now.getTime() + HOSTED_GROUP_JOIN_OUTREACH_PROVIDER_RETRY_MS,
       ),
-      phoneNumberLookupKey: line.phoneNumberLookupKey,
     },
   });
 
-  return {
-    kind: "dispatch",
-    claim: {
-      attemptedAt: input.now,
-      fromPhoneNumber: line.phoneNumber,
+  if (!hasHostedGroupJoinOutreachProviderFenceBudget(input.transactionStartedAtMs)) {
+    return recordHostedGroupJoinOutreachProviderFailureTx({
+      error: hostedOnboardingError({
+        code: "HOSTED_GROUP_JOIN_OUTREACH_PROVIDER_FENCE_EXHAUSTED",
+        httpStatus: 503,
+        message: "Hosted group join outreach provider fence ran out of time.",
+        retryable: true,
+      }),
+      idempotencyKey,
+      nextAttemptCount: outreach.attemptCount + 1,
+      now: input.now,
+      outreachId: outreach.id,
+      tx: input.tx,
+    });
+  }
+
+  try {
+    const sent = await createHostedLinqChat({
+      from: line.phoneNumber,
       idempotencyKey,
       message: buildHostedGroupJoinOutreachMessage({
         groupDisplayName: offer.group.displayName,
         outreachId: outreach.id,
       }),
+      ...(input.signal ? { signal: input.signal } : {}),
+      to: [participantPhoneNumber],
+    });
+    await markHostedLinqDeliveryAcceptedTx({
+      acceptedAt: new Date(),
+      idempotencyKey,
+      linqChatId: sent.chatId,
+      messageId: sent.messageId,
+      prisma: input.tx,
+    });
+    return {
+      kind: "sent",
       outreachId: outreach.id,
-      participantPhoneNumber,
-    },
-  };
+    };
+  } catch (error) {
+    return recordHostedGroupJoinOutreachProviderFailureTx({
+      error,
+      idempotencyKey,
+      nextAttemptCount: outreach.attemptCount + 1,
+      now: input.now,
+      outreachId: outreach.id,
+      tx: input.tx,
+    });
+  }
 }
 
 async function claimHostedGroupJoinOutreachLineCapacityTx(input: {
@@ -691,6 +663,62 @@ async function claimHostedGroupJoinOutreachLineCapacityTx(input: {
   return null;
 }
 
+function hasHostedGroupJoinOutreachProviderFenceBudget(
+  transactionStartedAtMs: number,
+): boolean {
+  const elapsedMs = Date.now() - transactionStartedAtMs;
+  return HOSTED_GROUP_JOIN_PROVIDER_FENCE_TRANSACTION_TIMEOUT_MS - elapsedMs
+    >= LINQ_API_DEFAULT_TIMEOUT_MS
+      + HOSTED_GROUP_JOIN_PROVIDER_FENCE_COMMIT_MARGIN_MS;
+}
+
+async function recordHostedGroupJoinOutreachProviderFailureTx(input: {
+  error: unknown;
+  idempotencyKey: string;
+  nextAttemptCount: number;
+  now: Date;
+  outreachId: string;
+  tx: Prisma.TransactionClient;
+}): Promise<HostedGroupJoinOutreachDrainResult> {
+  const retryable = !isHostedOnboardingError(input.error) || input.error.retryable;
+  const terminal = !retryable
+    || input.nextAttemptCount >= HOSTED_GROUP_JOIN_OUTREACH_MAX_PROVIDER_ATTEMPTS;
+  const failedAt = new Date();
+  const nextAttemptAt = new Date(
+    failedAt.getTime() + HOSTED_GROUP_JOIN_OUTREACH_PROVIDER_RETRY_MS,
+  );
+  await markHostedLinqDeliverySendFailedTx({
+    expectedAttemptedAt: input.now,
+    failedAt,
+    failureCode: readHostedGroupJoinOutreachFailureCode(input.error),
+    failureReason: "Hosted group join outreach provider dispatch failed.",
+    idempotencyKey: input.idempotencyKey,
+    prisma: input.tx,
+    retryAfterAt: terminal ? null : nextAttemptAt,
+  });
+  if (!terminal) {
+    await input.tx.hostedGroupJoinOutreach.updateMany({
+      where: { id: input.outreachId },
+      data: {
+        lastDeferralReason: "provider_retry",
+        nextAttemptAt,
+      },
+    });
+  }
+
+  return terminal
+    ? {
+        kind: "skipped",
+        outreachId: input.outreachId,
+        reason: retryable ? "provider_attempt_limit" : "provider_rejected",
+      }
+    : {
+        kind: "deferred",
+        outreachId: input.outreachId,
+        reason: "provider_retry",
+      };
+}
+
 function startOfUtcDay(value: Date): Date {
   return new Date(Date.UTC(
     value.getUTCFullYear(),
@@ -723,13 +751,8 @@ async function deferHostedGroupJoinOutreachTx(input: {
   tx: Prisma.TransactionClient;
 }): Promise<HostedGroupJoinOutreachDrainResult> {
   await input.tx.hostedGroupJoinOutreach.updateMany({
-    where: {
-      id: input.outreachId,
-      sentAt: null,
-      skippedAt: null,
-    },
+    where: { id: input.outreachId },
     data: {
-      lastDeferredAt: input.now,
       lastDeferralReason: input.reason,
       nextAttemptAt: input.nextAttemptAt,
     },
@@ -747,16 +770,11 @@ async function skipHostedGroupJoinOutreachTx(input: {
   reason: string;
   tx: Prisma.TransactionClient;
 }): Promise<HostedGroupJoinOutreachDrainResult> {
-  await input.tx.hostedGroupJoinOutreach.updateMany({
-    where: {
-      id: input.outreachId,
-      sentAt: null,
-      skippedAt: null,
-    },
-    data: {
-      skipReason: input.reason,
-      skippedAt: input.now,
-    },
+  await markHostedGroupJoinOutreachSkippedDeliveryTx({
+    now: input.now,
+    outreachId: input.outreachId,
+    reason: input.reason,
+    tx: input.tx,
   });
   return {
     kind: "skipped",

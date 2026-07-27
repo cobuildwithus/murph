@@ -65,10 +65,8 @@ import {
   acquireHostedLinqChatOwnershipLockTx,
 } from "../hosted-routing/linq-chat-ownership-lock";
 import {
-  consumeHostedGroupJoinOutreachReplyContextTx,
   isHostedGroupJoinOutreachReplyDeliveryAuthorizedTx,
   readHostedGroupJoinOutreachReplyDeliveryContextTx,
-  reopenHostedGroupJoinOutreachReplyContextTx,
 } from "../hosted-groups/group-join-outreach-store";
 import {
   sanitizeHostedOnboardingStructuredLogDetails,
@@ -572,7 +570,8 @@ async function requiresHostedGroupJoinProviderFence(
       prisma,
     });
   return Boolean(
-    parseHostedLinqInviteSignupDeliverySourceRef(
+    persistedIntent?.groupJoinOutreachId
+    || parseHostedLinqInviteSignupDeliverySourceRef(
       persistedIntent?.sourceRef ?? null,
     )?.groupJoinReplyContext,
   );
@@ -1068,6 +1067,7 @@ async function prepareHostedLinqSideEffectProviderDispatch(input: {
     let dispatchSourceRef = buildHostedLinqSideEffectDeliverySourceRef(
       input.effect,
     );
+    let dispatchGroupJoinOutreachId: string | null = null;
     if (signupEffect) {
       await lockHostedMemberRow(
         prisma,
@@ -1123,6 +1123,7 @@ async function prepareHostedLinqSideEffectProviderDispatch(input: {
         ) {
           return { status: "target_unauthorized" };
         }
+        dispatchGroupJoinOutreachId = groupJoinOutreachId;
       }
     }
 
@@ -1137,6 +1138,9 @@ async function prepareHostedLinqSideEffectProviderDispatch(input: {
     }
     const claim = await claimHostedLinqDeliveryProviderDispatchTx({
       attemptedAt: new Date(input.startedAtMs),
+      ...(dispatchGroupJoinOutreachId
+        ? { groupJoinOutreachId: dispatchGroupJoinOutreachId }
+        : {}),
       idempotencyKey: dispatchEffect.effectId,
       ...(target.linqChatId
         ? { linqChatId: target.linqChatId }
@@ -1295,9 +1299,9 @@ async function markHostedLinqDeliveryAcceptedBestEffort(input: {
     // A terminal receipt can beat this milestone write (it only just learned
     // the provider message id); the milestone replays that receipt and this
     // applies the same daily-state consequence as live receipt ingestion.
-    // Milestone and consequence commit atomically. A failure reopens only its
-    // exact group context, while the shared member/day suppression clears only
-    // after the final live signup delivery fails.
+    // Milestone and consequence commit atomically. Group reply availability is
+    // derived from live delivery rows; the shared member/day suppression clears
+    // only after the final live signup delivery fails.
     const milestone = await runHostedLinqTransportTransaction(input.prisma, async (prisma) => {
       const milestone = await markHostedLinqDeliveryAcceptedTx({
         idempotencyKey: input.effect.effectId,
@@ -1308,13 +1312,6 @@ async function markHostedLinqDeliveryAcceptedBestEffort(input: {
       if (milestone.reopenOnboardingLink) {
         const groupJoinReplyContext =
           milestone.reopenOnboardingLink.groupJoinReplyContext;
-        if (groupJoinReplyContext) {
-          await reopenHostedGroupJoinOutreachReplyContextTx({
-            outreachId: groupJoinReplyContext.outreachId,
-            repliedAt: new Date(groupJoinReplyContext.repliedAt),
-            tx: prisma,
-          });
-        }
         if (
           !groupJoinReplyContext
           || milestone.reopenOnboardingLink.releaseDailySuppression === true
@@ -1343,14 +1340,6 @@ async function markHostedLinqDeliveryAcceptedBestEffort(input: {
           occurredAt: payload.occurredAt,
           prisma,
         });
-        const groupJoinOutreachId = payload.groupJoinOutreachId?.trim();
-        if (groupJoinOutreachId) {
-          await consumeHostedGroupJoinOutreachReplyContextTx({
-            outreachId: groupJoinOutreachId,
-            repliedAt: new Date(payload.occurredAt),
-            tx: prisma,
-          });
-        }
       }
       return milestone;
     });

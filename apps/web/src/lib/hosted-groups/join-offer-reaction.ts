@@ -123,7 +123,6 @@ export async function handleHostedGroupJoinOfferReaction(input: {
         });
         return revokeHostedGroupJoinOutreachForRemovedReactionTx({
           allowMissingRowTombstone: regionSupportedForRemoval,
-          groupId: offer.groupId,
           now: input.event.providerCreatedAt,
           offerId: offer.offerId,
           participantPhoneNumber,
@@ -181,7 +180,6 @@ export async function handleHostedGroupJoinOfferReaction(input: {
           return;
         }
         await enqueueHostedGroupJoinOutreachTx({
-          groupId: offer.groupId,
           offerId: offer.offerId,
           participantPhoneNumber,
           requestedAt: input.event.providerCreatedAt,
