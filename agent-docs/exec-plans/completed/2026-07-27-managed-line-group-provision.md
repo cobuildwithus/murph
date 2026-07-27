@@ -1,6 +1,6 @@
 # Managed Linq line authority for group provisioning
 
-Status: active
+Status: completed
 Created: 2026-07-27
 Updated: 2026-07-27
 
@@ -76,3 +76,4 @@ Updated: 2026-07-27
 - Expected outcomes: focused diff-aware verification passes; if it is blocked
   by unrelated workspace state, report the exact blocker and strongest focused
   proof run.
+Completed: 2026-07-27
