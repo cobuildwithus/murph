@@ -206,14 +206,21 @@ Required:
   the [Cloudflare Images upload API](https://developers.cloudflare.com/api/resources/images/subresources/v1/methods/create/)
   using `CLOUDFLARE_IMAGES_ACCOUNT_ID` and a least-privilege `Images Write` API
   token supplied only as local `CLOUDFLARE_IMAGES_API_KEY`. Set
-  `requireSignedURLs=false`, embed a returned public
-  `https://imagedelivery.net/...` variant URL in the PR body, and confirm the
-  URL renders. Retain the local capture only until required review packaging is
-  complete, then delete it. Never print, commit, persist in repository files,
-  or pass the credential to ReviewGPT or another external reviewer; if the
-  local credential is unavailable, report the blocker instead of committing
-  proof images. Proof screenshots must not contain private member data. PRs
-  without a user-facing frontend UI diff may write `Not applicable`.
+  `requireSignedURLs=false`. From any repository worktree, run
+  `pnpm design-proof:upload -- <desktop-image> <mobile-image>`; the command
+  preserves exported environment values and otherwise reads only those two
+  settings from the invoking checkout and then the Git-discovered primary
+  checkout, without copying or printing the credential. Embed each returned
+  public `https://imagedelivery.net/...` variant URL in the PR body, and confirm
+  the URL renders. Before printing it, the command performs a bounded HTTP
+  delivery check for a successful `image/*` response; this does not replace the
+  visual confirmation in the PR body. Retain the local capture only until
+  required review packaging is complete, then delete it. Never print, commit,
+  persist in repository files, or pass the credential to ReviewGPT or another
+  external reviewer; if the local credential is unavailable, report the
+  blocker instead of committing proof images. Proof screenshots must not
+  contain private member data. PRs without a user-facing frontend UI diff may
+  write `Not applicable`.
 
 Optional when relevant: the rollout plan or follow-up PR that flips the gate, and any deliberately deferred work.
 
