@@ -1,6 +1,6 @@
 # Shrink assistant tool descriptions to call contracts
 
-Status: active
+Status: completed
 Created: 2026-07-26
 Updated: 2026-07-26
 
@@ -104,7 +104,24 @@ Updated: 2026-07-26
     the failure was established, the exact session-owned process group was
     terminated and verified absent rather than leaving it to drain hours of
     additional timeout windows.
+  - The corrected-head diff lane repeated the passing guards, affected
+    typechecks, and package suites above before the same eight unrelated
+    `assistant-cli.test.ts` cases reached their 60-second host timeouts. Its
+    exact session-owned process group was likewise terminated and verified
+    absent.
+  - All GitHub checks on the corrected pushed head passed, including release
+    build/typecheck, Assistant/CLI/platform coverage, app verification, CLI host
+    matrices, E2E gates, frontend design, and repository hygiene.
   - Preliminary ReviewGPT prompt/coverage pass returned one accepted medium
     finding for missing resident billing truth and no coverage artifact. The
     correction is the compact router rule and assembled-prompt regression proof
     described above; the preliminary pass is not rerun for this correction.
+  - Parent final review found no additional issues; `git diff --check` is clean
+    and the production diff changes only descriptions plus the resident billing
+    router.
+  - `pnpm verify:acceptance` was started but could not acquire the repository's
+    exclusive shared-host slot because an unrelated `apps/web verify` process
+    remained active. After several minutes of fail-closed waiting, only this
+    task's queued command was cancelled. The pushed-head GitHub acceptance
+    checks listed above are green.
+Completed: 2026-07-26
