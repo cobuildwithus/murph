@@ -11,6 +11,7 @@ import {
 
 import { getPrisma } from "../prisma";
 import {
+  createHostedStripeCheckoutSessionLookupKey,
   createHostedStripeCustomerLookupKey,
   createHostedStripeCustomerLookupKeyReadCandidates,
   createHostedStripeSubscriptionLookupKey,
@@ -44,6 +45,7 @@ export interface HostedMemberStripeBillingRefSnapshot {
   pulseTrialRedeemedAt?: Date | null;
   scheduledBillingEffectiveAt?: Date | null;
   scheduledBillingPlanCode?: string | null;
+  stripeCheckoutSessionId?: string | null;
   stripeCustomerId: string | null;
   stripeSubscriptionId: string | null;
   stripeSubscriptionScheduleId?: string | null;
@@ -434,6 +436,90 @@ export async function bindHostedMemberStripeCustomerIdIfMissing(input: {
   }), HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
 }
 
+export async function bindHostedMemberStripeCheckoutSessionTx(input: {
+  memberId: string;
+  stripeCheckoutSessionId: string;
+  tx: Prisma.TransactionClient;
+}): Promise<HostedMemberStripeBillingRefSnapshot> {
+  const stripeCheckoutSessionLookupKey = createHostedStripeCheckoutSessionLookupKey(
+    input.stripeCheckoutSessionId,
+  );
+  if (!stripeCheckoutSessionLookupKey) {
+    throw hostedOnboardingError({
+      code: "HOSTED_BILLING_CHECKOUT_SESSION_INVALID",
+      httpStatus: 502,
+      message: "Stripe Checkout returned an invalid session identifier.",
+      retryable: true,
+    });
+  }
+
+  await lockHostedMemberRow(input.tx, input.memberId);
+  const member = await input.tx.hostedMember.findUnique({
+    select: { suspendedAt: true },
+    where: { id: input.memberId },
+  });
+  if (!member) {
+    throw hostedOnboardingError({
+      code: "HOSTED_MEMBER_NOT_FOUND",
+      httpStatus: 404,
+      message: "Hosted member record was not found.",
+    });
+  }
+  assertHostedMemberNotSuspended(member);
+
+  const currentBillingRef = await input.tx.hostedMemberBillingRef.findUnique({
+    where: { memberId: input.memberId },
+  });
+  if (
+    currentBillingRef?.stripeCheckoutSessionLookupKey
+    && currentBillingRef.stripeCheckoutSessionLookupKey !== stripeCheckoutSessionLookupKey
+  ) {
+    throw hostedOnboardingError({
+      code: "HOSTED_BILLING_CHECKOUT_IN_PROGRESS",
+      httpStatus: 409,
+      message: "Billing checkout is already in progress. Finish the existing checkout before starting another.",
+      retryable: true,
+    });
+  }
+
+  const privateColumns = await buildHostedMemberBillingPrivateColumns({
+    memberId: input.memberId,
+    prisma: input.tx,
+    stripeCheckoutSessionId: input.stripeCheckoutSessionId,
+    stripeCustomerId: null,
+    stripeSubscriptionId: null,
+  });
+
+  try {
+    const billingRef = await input.tx.hostedMemberBillingRef.upsert({
+      create: {
+        ...privateColumns,
+        memberId: input.memberId,
+        stripeCheckoutSessionLookupKey,
+        stripeCustomerLookupKey: null,
+        stripeSubscriptionLookupKey: null,
+      },
+      update: {
+        stripeCheckoutSessionIdEncrypted:
+          privateColumns.stripeCheckoutSessionIdEncrypted,
+        stripeCheckoutSessionLookupKey,
+      },
+      where: { memberId: input.memberId },
+    });
+    return projectHostedMemberStripeBillingRefSnapshot(billingRef, input.tx);
+  } catch (error) {
+    if (isPrismaUniqueConstraintError(error)) {
+      throw hostedOnboardingError({
+        code: "STRIPE_CHECKOUT_SESSION_IDENTITY_CONFLICT",
+        httpStatus: 500,
+        message: "Stripe Checkout matched a different Murph account.",
+        retryable: true,
+      });
+    }
+    throw error;
+  }
+}
+
 export async function projectHostedMemberStripeBillingRefSnapshot(
   billingRef: HostedMemberBillingRef,
   prisma?: HostedOnboardingReadClient,
@@ -461,6 +547,9 @@ export async function projectHostedMemberStripeBillingRefSnapshot(
       : {}),
     ...(billingRef.scheduledBillingPlanCode
       ? { scheduledBillingPlanCode: billingRef.scheduledBillingPlanCode }
+      : {}),
+    ...(privateState.stripeCheckoutSessionId
+      ? { stripeCheckoutSessionId: privateState.stripeCheckoutSessionId }
       : {}),
     stripeCustomerId: privateState.stripeCustomerId,
     stripeSubscriptionId: privateState.stripeSubscriptionId,
@@ -612,6 +701,10 @@ async function buildHostedMemberBillingRefUpdateData(
       stripeSubscriptionId: input.stripeSubscriptionId,
       stripeSubscriptionScheduleId: undefined,
     })).stripeSubscriptionIdEncrypted;
+    if (input.stripeSubscriptionId) {
+      data.stripeCheckoutSessionIdEncrypted = null;
+      data.stripeCheckoutSessionLookupKey = null;
+    }
   }
   if (input.stripeSubscriptionScheduleId !== undefined) {
     data.stripeSubscriptionScheduleLookupKey = createHostedStripeSubscriptionScheduleLookupKey(

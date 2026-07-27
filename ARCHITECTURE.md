@@ -434,6 +434,15 @@ non-reversible Privy lookup key on an incomplete receipt blocks identity
 re-creation and lets retries prove that a newly bound identity cannot be
 deleted.
 
+Personal and Family subscription Checkout URLs are returned only after the
+encrypted Checkout Session id is bound to the existing billing owner under the
+same member lock. Account deletion expires each open bound Session before local
+removal. If Stripe completed a Session concurrently, deletion adds that
+Session's Customer and Subscription to the cleanup/cancellation target set
+instead; ambiguous provider state fails closed. The final locked transaction
+also rechecks the bound Session set, so replacing a Session cannot escape the
+captured cleanup boundary.
+
 Immediate provider attempts share one five-second abortable deadline. Retention
 attempts share one fifteen-second abortable deadline, use bounded four-receipt
 concurrency, and delete Cloudflare runtime targets through a four-worker pool.

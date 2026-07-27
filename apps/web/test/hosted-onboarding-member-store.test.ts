@@ -3441,6 +3441,7 @@ describe("hosted-member-store", () => {
         pulseTrialRedeemedAt: null,
         scheduledBillingEffectiveAt: null,
         scheduledBillingPlanCode: null,
+        stripeCheckoutSessionIdEncrypted: null,
         stripeCustomerIdEncrypted: expect.stringMatching(/^hsb-test:/u),
         stripeCustomerLookupKey: expect.stringMatching(/^hbidx:stripe-customer:v1:/u),
         stripeSubscriptionIdEncrypted: expect.stringMatching(/^hsb-test:/u),
@@ -3449,6 +3450,8 @@ describe("hosted-member-store", () => {
         stripeSubscriptionScheduleLookupKey: null,
       },
       update: {
+        stripeCheckoutSessionIdEncrypted: null,
+        stripeCheckoutSessionLookupKey: null,
         stripeCustomerIdEncrypted: expect.stringMatching(/^hsb-test:/u),
         stripeCustomerLookupKey: expect.stringMatching(/^hbidx:stripe-customer:v1:/u),
         stripeSubscriptionIdEncrypted: expect.stringMatching(/^hsb-test:/u),
@@ -3630,6 +3633,7 @@ describe("hosted-member-store", () => {
         pulseTrialRedeemedAt: null,
         scheduledBillingEffectiveAt: null,
         scheduledBillingPlanCode: null,
+        stripeCheckoutSessionIdEncrypted: null,
         stripeCustomerIdEncrypted: expect.stringMatching(/^hsb-test:/u),
         stripeCustomerLookupKey: expect.stringMatching(/^hbidx:stripe-customer:v1:/u),
         stripeSubscriptionIdEncrypted: expect.stringMatching(/^hsb-test:/u),
@@ -3639,6 +3643,8 @@ describe("hosted-member-store", () => {
       },
       update: {
         lastStripeEventCreatedAt: freshnessAt,
+        stripeCheckoutSessionIdEncrypted: null,
+        stripeCheckoutSessionLookupKey: null,
         stripeCustomerIdEncrypted: expect.stringMatching(/^hsb-test:/u),
         stripeCustomerLookupKey: expect.stringMatching(/^hbidx:stripe-customer:v1:/u),
         stripeSubscriptionIdEncrypted: expect.stringMatching(/^hsb-test:/u),
@@ -3783,6 +3789,7 @@ describe("hosted-member-store", () => {
       },
       create: {
         memberId: "member_123",
+        stripeCheckoutSessionIdEncrypted: null,
         stripeCustomerIdEncrypted: expect.stringMatching(/^hsb-test:/u),
         stripeCustomerLookupKey: expect.stringMatching(/^hbidx:stripe-customer:v1:/u),
         stripeSubscriptionIdEncrypted: null,

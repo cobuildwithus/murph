@@ -138,6 +138,8 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
     'stripeSubscriptionIdEncrypted String? @map("stripe_subscription_id_encrypted")',
     'stripeSubscriptionScheduleLookupKey String? @unique @map("stripe_subscription_schedule_lookup_key")',
     'stripeSubscriptionScheduleIdEncrypted String? @map("stripe_subscription_schedule_id_encrypted")',
+    'stripeCheckoutSessionLookupKey String? @unique @map("stripe_checkout_session_lookup_key")',
+    'stripeCheckoutSessionIdEncrypted String? @map("stripe_checkout_session_id_encrypted")',
     'lastStripeEventCreatedAt DateTime? @map("last_stripe_event_created_at")',
     'currentBillingPhase String? @map("current_billing_phase")',
     'currentBillingPlanCode String? @map("current_billing_plan_code")',
@@ -924,6 +926,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260726180000_hosted_account_deletion_cleanup",
       "20260726180000_hosted_address_book_projection",
       "20260726180000_hosted_thread_container_usage_default",
+      "20260727090000_hosted_member_subscription_checkout_fence",
       "migration_lock.toml",
     ]);
     expect(hostedUserCryptoEnvelopeMigrationSql).toContain(

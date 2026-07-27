@@ -4146,6 +4146,59 @@ describe("hosted Family plan", () => {
     }));
   });
 
+  it("expires a created Family Checkout Session when owner deletion wins the binding lock", async () => {
+    const group = {
+      billingStatus: HostedBillingStatus.not_started,
+      id: "hbag_family",
+      ownerMemberId: "member_owner",
+      suspendedAt: null,
+    };
+    const tx = createTxMock({
+      billedSeatCount: null,
+      group,
+    });
+    tx.hostedAccountGroupBillingRef.findUnique.mockResolvedValueOnce(null);
+    tx.hostedMember.findUnique
+      .mockResolvedValueOnce({
+        billingStatus: HostedBillingStatus.not_started,
+        suspendedAt: null,
+      })
+      .mockResolvedValueOnce({
+        suspendedAt: new Date("2026-07-27T12:00:00.000Z"),
+      });
+    const prisma = tx as FamilyPlanTxMock & {
+      $transaction: ReturnType<typeof vi.fn>;
+    };
+    prisma.$transaction = vi.fn((callback) => callback(tx));
+    const expire = vi.fn().mockResolvedValue({
+      id: "cs_test_familyDeleteRace123",
+      status: "expired",
+    });
+    runtimeMocks.requireHostedStripeApi.mockReturnValueOnce({
+      checkout: {
+        sessions: {
+          create: vi.fn().mockResolvedValue({
+            id: "cs_test_familyDeleteRace123",
+            url: "https://checkout.stripe.com/c/pay/cs_test_familyDeleteRace123",
+          }),
+          expire,
+        },
+      },
+    });
+
+    await expect(createHostedFamilyBillingCheckout({
+      groupId: "hbag_family",
+      ownerMemberId: "member_owner",
+      prisma: prisma as never,
+      seatCount: 2,
+    })).rejects.toMatchObject({
+      code: "HOSTED_FAMILY_CHECKOUT_ATTEMPT_STALE",
+      retryable: true,
+    });
+
+    expect(expire).toHaveBeenCalledWith("cs_test_familyDeleteRace123");
+  });
+
   it("converts an active direct paid owner subscription into Family billing without creating a second checkout", async () => {
     const group = {
       billingStatus: HostedBillingStatus.not_started,

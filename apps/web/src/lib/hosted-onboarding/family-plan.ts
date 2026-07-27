@@ -136,6 +136,7 @@ import {
   logHostedStripeFailure,
   withHostedStripeFailureLog,
 } from "./stripe-error-log";
+import { expireHostedStripeCheckoutSessionBestEffort } from "./stripe-checkout-session-lifecycle";
 
 export { HOSTED_FAMILY_MAX_SEATS, HOSTED_FAMILY_MIN_SEATS } from "./billing-plans";
 
@@ -1882,20 +1883,34 @@ export async function createHostedFamilyBillingCheckout(input: {
   );
 
   if (!checkoutSession.url) {
+    await expireHostedStripeCheckoutSessionBestEffort({
+      operationName: "checkout.sessions.expire.family-missing-url",
+      sessionId: checkoutSession.id,
+      stripe,
+    });
     throw hostedOnboardingError({
       code: "CHECKOUT_URL_MISSING",
       httpStatus: 502,
       message: "Stripe Checkout did not return a redirect URL.",
     });
   }
-  await prisma.$transaction(async (tx) => {
-    await bindHostedFamilyCheckoutSessionTx({
-      attemptId: checkoutInput.checkoutAttemptId,
-      group: checkoutInput.group,
+  try {
+    await prisma.$transaction(async (tx) => {
+      await bindHostedFamilyCheckoutSessionTx({
+        attemptId: checkoutInput.checkoutAttemptId,
+        group: checkoutInput.group,
+        sessionId: checkoutSession.id,
+        tx,
+      });
+    }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+  } catch (error) {
+    await expireHostedStripeCheckoutSessionBestEffort({
+      operationName: "checkout.sessions.expire.family-bind-failed",
       sessionId: checkoutSession.id,
-      tx,
+      stripe,
     });
-  }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+    throw error;
+  }
 
   return {
     alreadyActive: false,
@@ -2560,8 +2575,6 @@ async function writeHostedFamilyCheckoutAttemptTx(input: {
       checkoutCreatedAt: now,
       checkoutSeatCount: input.seatCount,
       currentBillingPlanCode: HOSTED_FAMILY_BILLING_PLAN_CODE,
-      stripeCheckoutSessionIdEncrypted: null,
-      stripeCheckoutSessionLookupKey: null,
     },
     where: {
       groupId: input.group.id,
@@ -2575,9 +2588,60 @@ async function bindHostedFamilyCheckoutSessionTx(input: {
   sessionId: string;
   tx: Prisma.TransactionClient;
 }): Promise<void> {
+  await lockHostedMemberRow(input.tx, input.group.ownerMemberId);
+  const [currentGroup, currentOwner] = await Promise.all([
+    input.tx.hostedAccountGroup.findUnique({
+      select: hostedAccountGroupAccessSelect,
+      where: { id: input.group.id },
+    }),
+    input.tx.hostedMember.findUnique({
+      select: { suspendedAt: true },
+      where: { id: input.group.ownerMemberId },
+    }),
+  ]);
+  if (
+    !currentGroup
+    || currentGroup.ownerMemberId !== input.group.ownerMemberId
+    || isHostedMemberSuspended(currentGroup.suspendedAt)
+    || !currentOwner
+    || isHostedMemberSuspended(currentOwner.suspendedAt)
+  ) {
+    throw hostedOnboardingError({
+      code: "HOSTED_FAMILY_CHECKOUT_ATTEMPT_STALE",
+      httpStatus: 409,
+      message: "Family checkout changed before Stripe returned a session. Start Family checkout again.",
+      retryable: true,
+    });
+  }
+
   const stripeCheckoutSessionLookupKey = createHostedStripeCheckoutSessionLookupKey(
     input.sessionId,
   );
+  if (!stripeCheckoutSessionLookupKey) {
+    throw hostedOnboardingError({
+      code: "HOSTED_FAMILY_CHECKOUT_SESSION_INVALID",
+      httpStatus: 502,
+      message: "Stripe Checkout returned an invalid session identifier.",
+      retryable: true,
+    });
+  }
+  const currentBillingRef = await input.tx.hostedAccountGroupBillingRef.findUnique({
+    select: {
+      stripeCheckoutSessionLookupKey: true,
+    },
+    where: { groupId: input.group.id },
+  });
+  if (
+    currentBillingRef?.stripeCheckoutSessionLookupKey
+    && currentBillingRef.stripeCheckoutSessionLookupKey !== stripeCheckoutSessionLookupKey
+  ) {
+    throw hostedOnboardingError({
+      code: "HOSTED_FAMILY_CHECKOUT_IN_PROGRESS",
+      httpStatus: 409,
+      message: "Family checkout is already in progress. Finish the existing checkout before starting another.",
+      retryable: true,
+    });
+  }
   const stripeCheckoutSessionIdEncrypted = await encryptHostedWebNullableString({
     field: HOSTED_ACCOUNT_GROUP_BILLING_STRIPE_CHECKOUT_SESSION_FIELD,
     memberId: input.group.ownerMemberId,
@@ -2592,6 +2656,10 @@ async function bindHostedFamilyCheckoutSessionTx(input: {
     where: {
       checkoutAttemptId: input.attemptId,
       groupId: input.group.id,
+      OR: [
+        { stripeCheckoutSessionLookupKey: null },
+        { stripeCheckoutSessionLookupKey },
+      ],
     },
   });
   if (updated.count !== 1) {

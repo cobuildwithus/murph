@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => {
     checkout: {
       sessions: {
         create: vi.fn(),
+        expire: vi.fn(),
       },
     },
     customers: {
@@ -109,6 +110,10 @@ describe("createHostedBillingCheckout", () => {
     mocks.stripe.checkout.sessions.create.mockResolvedValue({
       id: "cs_123",
       url: "https://billing.example.test/session_123",
+    });
+    mocks.stripe.checkout.sessions.expire.mockResolvedValue({
+      id: "cs_123",
+      status: "expired",
     });
     mocks.stripe.customers.create.mockResolvedValue({ id: "cus_pulse_trial_123" });
   });
@@ -251,6 +256,19 @@ describe("createHostedBillingCheckout", () => {
     expect(mocks.stripe.checkout.sessions.create.mock.calls[0]?.[1]).toEqual({
       idempotencyKey: "hosted-billing-checkout:member_123:invite-code:launch_monthly:offer:782b59f134ce:items:a071a65166f8:email:8ba467122dd5",
     });
+    expect(prisma.hostedMemberBillingRef.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({
+          memberId: "member_123",
+          stripeCheckoutSessionLookupKey:
+            expect.stringMatching(/^hbidx:stripe-checkout-session:v1:/u),
+        }),
+        update: expect.objectContaining({
+          stripeCheckoutSessionLookupKey:
+            expect.stringMatching(/^hbidx:stripe-checkout-session:v1:/u),
+        }),
+      }),
+    );
     expect(consoleInfo).toHaveBeenCalledWith(
       "Hosted onboarding timing.",
       expect.objectContaining({
@@ -259,6 +277,24 @@ describe("createHostedBillingCheckout", () => {
         step: "hosted-onboarding.billing.create-checkout",
       }),
     );
+  });
+
+  it("expires a created Checkout Session when account deletion wins the binding lock", async () => {
+    mocks.requireHostedInviteForBillingCheckout.mockResolvedValue(makeInvite());
+    const prisma = makePrisma({
+      memberSuspendedAt: new Date("2026-03-27T12:00:01.000Z"),
+    });
+
+    await expect(createHostedBillingCheckout({
+      inviteCode: "invite-code",
+      member: makeAuthenticatedMember(),
+      now: new Date("2026-03-27T12:00:00.000Z"),
+      prisma: prisma as never,
+    })).rejects.toMatchObject({
+      code: "HOSTED_MEMBER_SUSPENDED",
+    });
+
+    expect(mocks.stripe.checkout.sessions.expire).toHaveBeenCalledWith("cs_123");
   });
 
   it("creates checkout for the selected Edge monthly plan", async () => {
@@ -586,7 +622,7 @@ describe("createHostedBillingCheckout", () => {
       prisma: prisma as never,
     });
 
-    expect(prisma.hostedMemberBillingRef.findUnique).toHaveBeenCalledTimes(1);
+    expect(prisma.hostedMemberBillingRef.findUnique).toHaveBeenCalledTimes(2);
     expect(mocks.stripe.customers.create).not.toHaveBeenCalled();
     expect(mocks.stripe.customers.update).not.toHaveBeenCalled();
     expect(mocks.stripe.checkout.sessions.create).toHaveBeenCalledWith(
@@ -701,6 +737,17 @@ describe("createHostedBillingCheckout", () => {
     const prisma = makePrisma({
       findUniqueResults: [
         null,
+        null,
+        {
+          memberId: "member_123",
+          ...(await buildHostedMemberBillingPrivateColumns({
+            memberId: "member_123",
+            stripeCustomerId: "cus_existing",
+            stripeSubscriptionId: null,
+          })),
+          stripeCustomerLookupKey: "hbidx:stripe-customer:v1:existing",
+          stripeSubscriptionLookupKey: null,
+        },
         {
           memberId: "member_123",
           ...(await buildHostedMemberBillingPrivateColumns({
@@ -826,12 +873,19 @@ function makePrisma(input: {
     stripeSubscriptionIdEncrypted: string | null;
     stripeSubscriptionLookupKey: string | null;
   } | null>;
+  memberSuspendedAt?: Date | null;
 } = {}) {
-  const findUnique = input.findUniqueResults
-    ? vi.fn()
-        .mockResolvedValueOnce(input.findUniqueResults[0] ?? null)
-        .mockResolvedValueOnce(input.findUniqueResults[1] ?? null)
-    : vi.fn().mockResolvedValue(input.billingRef ?? null);
+  const findUnique = vi.fn();
+  if (input.findUniqueResults) {
+    for (const result of input.findUniqueResults) {
+      findUnique.mockResolvedValueOnce(result ?? null);
+    }
+    findUnique.mockResolvedValue(
+      input.findUniqueResults[input.findUniqueResults.length - 1] ?? null,
+    );
+  } else {
+    findUnique.mockResolvedValue(input.billingRef ?? null);
+  }
   const upsert = vi.fn().mockImplementation(
     async (inputData: {
       create: {
@@ -867,7 +921,7 @@ function makePrisma(input: {
     $queryRaw: vi.fn().mockResolvedValue([]),
     hostedMember: {
       findUnique: vi.fn().mockResolvedValue({
-        suspendedAt: null,
+        suspendedAt: input.memberSuspendedAt ?? null,
       }),
     },
     hostedMemberBillingRef: {

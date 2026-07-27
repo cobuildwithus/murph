@@ -21,6 +21,7 @@ import { buildHostedBillingOfferMetadata } from "./billing-offer-metadata";
 import { isHostedMemberSuspended } from "./entitlement";
 import { hostedOnboardingError } from "./errors";
 import {
+  bindHostedMemberStripeCheckoutSessionTx,
   bindHostedMemberStripeCustomerIdIfMissingTx,
   readHostedMemberStripeBillingRef,
 } from "./hosted-member-billing-store";
@@ -49,6 +50,7 @@ import {
   normalizeNullableString,
 } from "./shared";
 import { createHostedPulseTrialStripeCustomer } from "./pulse-trial-customer";
+import { expireHostedStripeCheckoutSessionBestEffort } from "./stripe-checkout-session-lifecycle";
 
 export interface HostedBillingCheckoutInput {
   billingPlanCode?: HostedBillingPlanCode;
@@ -224,11 +226,33 @@ export async function createHostedBillingCheckout(
     );
 
     if (!checkoutSession.url) {
+      await expireHostedStripeCheckoutSessionBestEffort({
+        operationName: "checkout.sessions.expire.billing-start-missing-url",
+        sessionId: checkoutSession.id,
+        stripe,
+      });
       throw hostedOnboardingError({
         code: "CHECKOUT_URL_MISSING",
         message: "Stripe Checkout did not return a redirect URL.",
         httpStatus: 502,
       });
+    }
+    try {
+      await prisma.$transaction(
+        (tx) => bindHostedMemberStripeCheckoutSessionTx({
+          memberId: invite.member.id,
+          stripeCheckoutSessionId: checkoutSession.id,
+          tx,
+        }),
+        HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
+      );
+    } catch (error) {
+      await expireHostedStripeCheckoutSessionBestEffort({
+        operationName: "checkout.sessions.expire.billing-start-bind-failed",
+        sessionId: checkoutSession.id,
+        stripe,
+      });
+      throw error;
     }
 
     finishHostedOnboardingTiming(timing, "completed", {

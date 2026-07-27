@@ -90,7 +90,11 @@ needs the documented test-mode Checkout, webhook, and browser smoke.
 Account-deletion cleanup coverage is split at the ownership boundary.
 `hosted-account-data-service.test.ts` proves the encrypted receipt is prepared
 before suspension and inserted in the canonical transaction before member
-removal. `hosted-account-deletion-cleanup.test.ts` proves receipt-bound
+removal, open subscription Checkout Sessions are expired, and a concurrent
+Checkout completion contributes its Customer and Subscription to the captured
+cleanup set before cancellation. Hosted billing and Family-plan tests prove a
+Session is bound before its URL is returned and expired when deletion wins the
+post-provider member lock. `hosted-account-deletion-cleanup.test.ts` proves receipt-bound
 encryption, independent per-target progress, unconfigured-target pending
 state, lease-loss handling, retry convergence, and batch isolation. Cloudflare
 runner tests prove already-absent state is idempotent and full Durable Object
