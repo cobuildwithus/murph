@@ -70,6 +70,9 @@ import {
   logHostedStripeFailure,
   withHostedStripeFailureLog,
 } from "./stripe-error-log";
+import {
+  cleanupHostedStandardCheckoutLoser,
+} from "./stripe-checkout-loser-cleanup";
 import { readActiveHostedFamilySponsorship } from "./member-access";
 import {
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
@@ -322,6 +325,7 @@ async function processHostedStripeEventRecord(
   activatedMembers: HostedStripeActivatedMemberOutcome[];
   cleanupFamilySponsoredStripeSubscriptionId: string | null;
   cleanupPulseTrialStripeSubscriptionId: string | null;
+  cleanupStandardCheckoutStripeSubscriptionId: string | null;
   hostedExecutionEventId: string | null;
   subscriptionCancellationEmail: HostedSubscriptionCancellationEmailCandidate | null;
   welcomeEmailMemberId: string | null;
@@ -842,6 +846,12 @@ async function processClaimedHostedStripeEvent(
         memberId: processingMemberId,
         prisma,
         subscriptionId: result.cleanupPulseTrialStripeSubscriptionId,
+      });
+    }
+    if (result.cleanupStandardCheckoutStripeSubscriptionId) {
+      await cleanupHostedStandardCheckoutLoser({
+        stripeSubscriptionId:
+          result.cleanupStandardCheckoutStripeSubscriptionId,
       });
     }
     if (result.welcomeEmailMemberId) {
@@ -1436,6 +1446,7 @@ function mapHostedStripeActivationOutcome(
     activatedMembers?: HostedStripeActivatedMemberOutcome[];
     cleanupFamilySponsoredStripeSubscriptionId?: string | null;
     cleanupPulseTrialStripeSubscriptionId?: string | null;
+    cleanupStandardCheckoutStripeSubscriptionId?: string | null;
     hostedExecutionEventId: string | null;
     welcomeEmailMemberId?: string | null;
   },
@@ -1444,6 +1455,7 @@ function mapHostedStripeActivationOutcome(
   activatedMembers: HostedStripeActivatedMemberOutcome[];
   cleanupFamilySponsoredStripeSubscriptionId: string | null;
   cleanupPulseTrialStripeSubscriptionId: string | null;
+  cleanupStandardCheckoutStripeSubscriptionId: string | null;
   hostedExecutionEventId: string | null;
   subscriptionCancellationEmail: HostedSubscriptionCancellationEmailCandidate | null;
   welcomeEmailMemberId: string | null;
@@ -1455,6 +1467,8 @@ function mapHostedStripeActivationOutcome(
       outcome.cleanupFamilySponsoredStripeSubscriptionId ?? null,
     cleanupPulseTrialStripeSubscriptionId:
       outcome.cleanupPulseTrialStripeSubscriptionId ?? null,
+    cleanupStandardCheckoutStripeSubscriptionId:
+      outcome.cleanupStandardCheckoutStripeSubscriptionId ?? null,
     hostedExecutionEventId: outcome.hostedExecutionEventId,
     subscriptionCancellationEmail: null,
     welcomeEmailMemberId: outcome.welcomeEmailMemberId ?? null,
@@ -1467,6 +1481,7 @@ function mapHostedStripeSubscriptionUpdateOutcome(
     activatedMembers?: HostedStripeActivatedMemberOutcome[];
     cleanupFamilySponsoredStripeSubscriptionId?: string | null;
     cleanupPulseTrialStripeSubscriptionId?: string | null;
+    cleanupStandardCheckoutStripeSubscriptionId?: string | null;
     hostedExecutionEventId?: string | null;
     subscriptionCancellationEmail?: HostedSubscriptionCancellationEmailCandidate | null;
     welcomeEmailMemberId?: string | null;
@@ -1476,6 +1491,7 @@ function mapHostedStripeSubscriptionUpdateOutcome(
   activatedMembers: HostedStripeActivatedMemberOutcome[];
   cleanupFamilySponsoredStripeSubscriptionId: string | null;
   cleanupPulseTrialStripeSubscriptionId: string | null;
+  cleanupStandardCheckoutStripeSubscriptionId: string | null;
   hostedExecutionEventId: string | null;
   subscriptionCancellationEmail: HostedSubscriptionCancellationEmailCandidate | null;
   welcomeEmailMemberId: string | null;
@@ -1487,6 +1503,8 @@ function mapHostedStripeSubscriptionUpdateOutcome(
       outcome?.cleanupFamilySponsoredStripeSubscriptionId ?? null,
     cleanupPulseTrialStripeSubscriptionId:
       outcome?.cleanupPulseTrialStripeSubscriptionId ?? null,
+    cleanupStandardCheckoutStripeSubscriptionId:
+      outcome?.cleanupStandardCheckoutStripeSubscriptionId ?? null,
     hostedExecutionEventId: outcome?.hostedExecutionEventId ?? null,
     subscriptionCancellationEmail:
       outcome?.subscriptionCancellationEmail ?? null,
@@ -1499,6 +1517,7 @@ function buildEmptyHostedStripeEventProcessingResult(): {
   activatedMembers: HostedStripeActivatedMemberOutcome[];
   cleanupFamilySponsoredStripeSubscriptionId: string | null;
   cleanupPulseTrialStripeSubscriptionId: string | null;
+  cleanupStandardCheckoutStripeSubscriptionId: string | null;
   hostedExecutionEventId: string | null;
   subscriptionCancellationEmail: HostedSubscriptionCancellationEmailCandidate | null;
   welcomeEmailMemberId: string | null;
@@ -1508,6 +1527,7 @@ function buildEmptyHostedStripeEventProcessingResult(): {
     activatedMembers: [],
     cleanupFamilySponsoredStripeSubscriptionId: null,
     cleanupPulseTrialStripeSubscriptionId: null,
+    cleanupStandardCheckoutStripeSubscriptionId: null,
     hostedExecutionEventId: null,
     subscriptionCancellationEmail: null,
     welcomeEmailMemberId: null,

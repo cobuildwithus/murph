@@ -27,7 +27,6 @@ import {
 } from "@/src/lib/hosted-onboarding/billing-plans";
 import {
   buildHostedBillingCheckoutLineItems,
-  deriveHostedBillingCheckoutOfferBindingKey,
 } from "@/src/lib/hosted-onboarding/billing-service";
 
 describe("hosted billing launch plan Stripe configuration", () => {
@@ -338,26 +337,4 @@ describe("hosted billing launch plan Stripe configuration", () => {
     ]);
   });
 
-  it("binds Stripe checkout idempotency to the checkout offer and trial policy", () => {
-    const standard = deriveHostedBillingCheckoutOfferBindingKey({
-      checkoutOffer: "standard",
-    });
-    const trial = deriveHostedBillingCheckoutOfferBindingKey({
-      checkoutOffer: "pulse_trial_7d",
-    });
-
-    expect(standard).not.toBe(trial);
-    expect(deriveHostedBillingCheckoutOfferBindingKey({
-      checkoutOffer: "pulse_trial_7d",
-      trialPolicyVersion: "future-policy",
-    })).not.toBe(trial);
-    expect(deriveHostedBillingCheckoutOfferBindingKey({
-      checkoutOffer: "pulse_trial_7d",
-      trialDurationDays: 10,
-    })).not.toBe(trial);
-    expect(deriveHostedBillingCheckoutOfferBindingKey({
-      checkoutOffer: "pulse_trial_7d",
-      trialUsageLimitUsdMicros: 5_000_000n,
-    })).not.toBe(trial);
-  });
 });

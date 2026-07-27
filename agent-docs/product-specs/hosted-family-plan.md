@@ -1,6 +1,6 @@
 # Hosted Family Plan
 
-Last verified: 2026-07-25
+Last verified: 2026-07-27
 
 ## Purpose
 
@@ -115,6 +115,12 @@ further plan or removal actions until the webhook clears it.
 Member plan swaps use Stripe prorations on the next invoice: upgrades add the
 prorated difference and downgrades add the corresponding credit. The owner sees
 the target per-person monthly price before confirming.
+
+Explicit capacity changes use `always_invoice` for both increases and
+reductions so Stripe records the resulting charge or credit on an invoice.
+Increases also fail if immediate payment cannot complete. A reduction must not
+use `proration_behavior: "none"` because that silently discards the owner's
+mid-cycle credit.
 
 Core invariant:
 
@@ -247,13 +253,16 @@ only the 42 candidate-generation calls now run before the transaction. The
 per-domain advisory locks are transaction-scoped, so post-commit prewarm work
 inside the same transaction also extends their lifetime.
 
-An actively sponsored member cannot start a separate direct checkout. If a
-direct checkout opened before Family acceptance completes afterward, checkout
-and subscription reconciliation must leave it unbound and cancel that
-superseded subscription after the database transaction. A Family conversion
-may clear an owner's prior direct billing reference only when it names the same
-Stripe subscription that became the Family subscription; never erase a
-different subscription reference.
+An active sponsorship, persisted Family checkout attempt, or bound Family
+subscription prevents a member from starting a separate direct checkout. If a
+direct checkout opened before Family billing claimed the member and completes
+afterward, reconciliation leaves it unbound and cancels that superseded
+subscription after the database transaction. It automatically refunds only the
+ordinary one-invoice/one-payment case; balance credits, credit notes, partial
+refunds, and multiple payment allocations require support instead of guessed
+accounting. A Family conversion may clear an owner's prior direct billing
+reference only when it names the same Stripe subscription that became the
+Family subscription; never erase a different subscription reference.
 
 ## Invite Issuance
 

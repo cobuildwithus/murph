@@ -23,6 +23,7 @@ const mocks = vi.hoisted(() => {
     applyStripeCheckoutCompleted: vi.fn(),
     cancelHostedFamilySponsoredCheckoutSubscription: vi.fn(),
     cancelHostedPulseTrialCheckoutLoserSubscription: vi.fn(),
+    cleanupHostedStandardCheckoutLoser: vi.fn(),
     findMemberForStripeObject: vi.fn(),
     getHostedInviteStatus: vi.fn(),
     listHostedStripeCheckoutSessionMemberIds: vi.fn(),
@@ -105,6 +106,11 @@ vi.mock("@/src/lib/hosted-onboarding/stripe-billing-events", () => ({
     mocks.cancelHostedPulseTrialCheckoutLoserSubscription,
 }));
 
+vi.mock("@/src/lib/hosted-onboarding/stripe-checkout-loser-cleanup", () => ({
+  cleanupHostedStandardCheckoutLoser:
+    mocks.cleanupHostedStandardCheckoutLoser,
+}));
+
 import { reconcileHostedBillingCheckoutSuccess } from "@/src/lib/hosted-onboarding/billing-success-service";
 
 const checkoutSubscriptionStatuses = [
@@ -152,6 +158,7 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
     });
     mocks.cancelHostedFamilySponsoredCheckoutSubscription.mockResolvedValue(undefined);
     mocks.cancelHostedPulseTrialCheckoutLoserSubscription.mockResolvedValue(undefined);
+    mocks.cleanupHostedStandardCheckoutLoser.mockResolvedValue(undefined);
     mocks.sendHostedSignupWelcomeEmailForMemberBestEffort.mockResolvedValue(undefined);
     mocks.getHostedInviteStatus.mockResolvedValue(createStatus({
       stage: "activating",
@@ -399,6 +406,36 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
       subscriptionId: "sub_superseded",
     });
     expect(mocks.cancelHostedPulseTrialCheckoutLoserSubscription).not.toHaveBeenCalled();
+  });
+
+  it("cleans up a superseded standard checkout on the browser path", async () => {
+    const tx = {
+      __tag: "tx",
+      $queryRaw: vi.fn(async () => []),
+    };
+    const prisma = {
+      $transaction: vi.fn(async (
+        callback: (innerTx: typeof tx) => Promise<unknown>,
+      ) => callback(tx)),
+    };
+    mocks.applyStripeCheckoutCompleted.mockResolvedValueOnce({
+      activatedMemberId: null,
+      cleanupStandardCheckoutStripeSubscriptionId: "sub_loser",
+      hostedExecutionEventId: null,
+      welcomeEmailMemberId: null,
+    });
+
+    await expect(reconcileHostedBillingCheckoutSuccess({
+      inviteCode: "invite-code",
+      member: createAuthenticatedMember(),
+      prisma: prisma as never,
+      sessionId: "cs_123",
+    })).resolves.toEqual(createStatus({ stage: "activating" }));
+
+    expect(mocks.cleanupHostedStandardCheckoutLoser).toHaveBeenCalledWith({
+      stripe: mocks.stripe,
+      stripeSubscriptionId: "sub_loser",
+    });
   });
 
   it("passes checkout welcome candidates through the durable welcome gate without waking runtime", async () => {

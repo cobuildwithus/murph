@@ -14,15 +14,18 @@ const mocks = vi.hoisted(() => ({
   applyStripeSubscriptionUpdated: vi.fn(),
   cancelHostedFamilySponsoredCheckoutSubscription: vi.fn(),
   cancelHostedPulseTrialCheckoutLoserSubscription: vi.fn(),
+  clearHostedMemberStripeCheckoutAttemptForSessionTx: vi.fn(),
   clearHostedBillingPlanSwitchToPulsePendingFieldsForScheduleTx: vi.fn(),
   findMemberForStripeCheckoutSession: vi.fn(),
   findMemberForStripeInvoice: vi.fn(),
   findMemberForStripeSubscription: vi.fn(),
   listHostedStripeCheckoutSessionMemberIds: vi.fn(),
+  cleanupHostedStandardCheckoutLoser: vi.fn(),
   prepareHostedCryptoDomainRootCandidates: vi.fn(),
   prepareHostedFamilyStripeActivationCryptoDomainRoots: vi.fn(),
   prepareHostedLegacySyntheticFamilyCleanupTx: vi.fn(),
   readActiveHostedFamilySponsorship: vi.fn(),
+  readHostedMemberFamilyBillingClaim: vi.fn(),
   readHostedMemberBillingSnapshot: vi.fn(),
   reconcileHostedUsageCreditStripeEvent: vi.fn(),
   refreshHostedBillingPlanSwitchToPulsePendingFieldsFromScheduleTx: vi.fn(),
@@ -74,6 +77,20 @@ vi.mock("@/src/lib/hosted-onboarding/family-plan", async () => {
       mocks.prepareHostedFamilyStripeActivationCryptoDomainRoots,
     prepareHostedLegacySyntheticFamilyCleanupTx:
       mocks.prepareHostedLegacySyntheticFamilyCleanupTx,
+    readHostedMemberFamilyBillingClaim:
+      mocks.readHostedMemberFamilyBillingClaim,
+  };
+});
+
+vi.mock("@/src/lib/hosted-onboarding/hosted-member-billing-store", async () => {
+  const actual = await vi.importActual<
+    typeof import("@/src/lib/hosted-onboarding/hosted-member-billing-store")
+  >("@/src/lib/hosted-onboarding/hosted-member-billing-store");
+
+  return {
+    ...actual,
+    clearHostedMemberStripeCheckoutAttemptForSessionTx:
+      mocks.clearHostedMemberStripeCheckoutAttemptForSessionTx,
   };
 });
 
@@ -118,6 +135,11 @@ vi.mock("@/src/lib/hosted-onboarding/stripe-billing-events", () => ({
     mocks.cancelHostedFamilySponsoredCheckoutSubscription,
   cancelHostedPulseTrialCheckoutLoserSubscription:
     mocks.cancelHostedPulseTrialCheckoutLoserSubscription,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/stripe-checkout-loser-cleanup", () => ({
+  cleanupHostedStandardCheckoutLoser:
+    mocks.cleanupHostedStandardCheckoutLoser,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/stripe-billing-lookup", async () => {
@@ -284,6 +306,7 @@ describe("hosted Stripe event reconciliation", () => {
     });
     mocks.cancelHostedFamilySponsoredCheckoutSubscription.mockResolvedValue(undefined);
     mocks.cancelHostedPulseTrialCheckoutLoserSubscription.mockResolvedValue(undefined);
+    mocks.cleanupHostedStandardCheckoutLoser.mockResolvedValue(undefined);
     mocks.clearHostedBillingPlanSwitchToPulsePendingFieldsForScheduleTx.mockResolvedValue(undefined);
     mocks.findMemberForStripeCheckoutSession.mockResolvedValue({
       core: { id: "member_123" },
@@ -301,6 +324,10 @@ describe("hosted Stripe event reconciliation", () => {
     );
     mocks.prepareHostedLegacySyntheticFamilyCleanupTx.mockResolvedValue(null);
     mocks.readActiveHostedFamilySponsorship.mockResolvedValue(false);
+    mocks.readHostedMemberFamilyBillingClaim.mockResolvedValue(null);
+    mocks.clearHostedMemberStripeCheckoutAttemptForSessionTx.mockResolvedValue(
+      true,
+    );
     mocks.readHostedMemberBillingSnapshot.mockResolvedValue(null);
     mocks.reconcileHostedUsageCreditStripeEvent.mockResolvedValue({ handled: false });
     mocks.refreshHostedBillingPlanSwitchToPulsePendingFieldsFromScheduleTx.mockResolvedValue(undefined);
@@ -489,6 +516,38 @@ describe("hosted Stripe event reconciliation", () => {
     expect(mocks.sendHostedSignupNotificationEmailForMemberBestEffort).not.toHaveBeenCalled();
     expect(mocks.sendHostedSubscriptionCancellationEmailForMember).not.toHaveBeenCalled();
     expect(mocks.prepareHostedCryptoDomainRootCandidates).not.toHaveBeenCalled();
+  });
+
+  it("finishes superseded standard Checkout cleanup before completing its receipt", async () => {
+    const prisma = createStripeEventPrismaHarness();
+    const event = makeCheckoutCompletedEvent();
+    mocks.stripe.events.retrieve.mockResolvedValue(event);
+    mocks.applyStripeCheckoutCompleted.mockResolvedValueOnce({
+      activatedMemberId: null,
+      cleanupStandardCheckoutStripeSubscriptionId: "sub_loser",
+      hostedExecutionEventId: null,
+      welcomeEmailMemberId: null,
+    });
+
+    await recordHostedStripeEvent({ event, prisma: prisma.client });
+
+    await expect(reconcileHostedStripeEventById({
+      eventId: event.id,
+      prisma: prisma.client,
+    })).resolves.toMatchObject({
+      status: "completed",
+    });
+
+    expect(mocks.cleanupHostedStandardCheckoutLoser).toHaveBeenCalledWith({
+      stripeSubscriptionId: "sub_loser",
+    });
+    expect(
+      mocks.cleanupHostedStandardCheckoutLoser.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      vi.mocked(
+        prisma.client.hostedStripeEvent.updateMany,
+      ).mock.invocationCallOrder.at(-1) ?? 0,
+    );
   });
 
   it("reconciles usage-credit Checkout before subscription-shaped handling", async () => {

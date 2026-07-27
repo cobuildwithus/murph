@@ -30,6 +30,9 @@ import {
   cancelHostedFamilySponsoredCheckoutSubscription,
   cancelHostedPulseTrialCheckoutLoserSubscription,
 } from "./stripe-billing-events";
+import {
+  cleanupHostedStandardCheckoutLoser,
+} from "./stripe-checkout-loser-cleanup";
 
 export async function reconcileHostedBillingCheckoutSuccess(input: {
   inviteCode: string;
@@ -82,6 +85,13 @@ export async function reconcileHostedBillingCheckoutSuccess(input: {
       subscriptionId: activationOutcome.cleanupPulseTrialStripeSubscriptionId,
     });
   }
+  if (activationOutcome.cleanupStandardCheckoutStripeSubscriptionId) {
+    await cleanupHostedStandardCheckoutLoser({
+      stripe,
+      stripeSubscriptionId:
+        activationOutcome.cleanupStandardCheckoutStripeSubscriptionId,
+    });
+  }
   await nudgeHostedCheckoutSuccessActivationRunner({
     ...activationOutcome,
     prisma,
@@ -106,6 +116,7 @@ async function applyHostedCheckoutSessionSuccess(input: {
   activatedMemberId: string | null;
   cleanupPulseTrialStripeSubscriptionId?: string | null;
   cleanupFamilySponsoredStripeSubscriptionId?: string | null;
+  cleanupStandardCheckoutStripeSubscriptionId?: string | null;
   hostedExecutionEventId: string | null;
   welcomeEmailMemberId: string | null;
 }> {
@@ -120,6 +131,7 @@ async function applyHostedCheckoutSessionSuccess(input: {
     activatedMemberId: string | null;
     cleanupPulseTrialStripeSubscriptionId?: string | null;
     cleanupFamilySponsoredStripeSubscriptionId?: string | null;
+    cleanupStandardCheckoutStripeSubscriptionId?: string | null;
     hostedExecutionEventId: string | null;
     welcomeEmailMemberId: string | null;
   } = {

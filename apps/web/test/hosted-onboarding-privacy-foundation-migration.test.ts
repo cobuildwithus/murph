@@ -133,6 +133,8 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
   ],
   HostedMemberBillingRef: [
     'memberId String @unique @map("member_id")',
+    'stripeCheckoutSessionLookupKey String? @unique @map("stripe_checkout_session_lookup_key")',
+    'stripeCheckoutSessionIdEncrypted String? @map("stripe_checkout_session_id_encrypted")',
     'stripeCustomerLookupKey String? @unique @map("stripe_customer_lookup_key")',
     'stripeCustomerIdEncrypted String? @map("stripe_customer_id_encrypted")',
     'stripeSubscriptionLookupKey String? @unique @map("stripe_subscription_lookup_key")',
@@ -151,6 +153,9 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
     'pulseTrialPolicyVersion String? @map("pulse_trial_policy_version")',
     'currentTrialStartedAt DateTime? @map("current_trial_started_at")',
     'currentTrialEndsAt DateTime? @map("current_trial_ends_at")',
+    'checkoutAttemptId String? @map("checkout_attempt_id")',
+    'checkoutIntentHash String? @map("checkout_intent_hash")',
+    'checkoutCreatedAt DateTime? @map("checkout_created_at")',
     'createdAt DateTime @default(now()) @map("created_at")',
     'updatedAt DateTime @updatedAt @map("updated_at")',
   ],
@@ -933,6 +938,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260726180000_hosted_thread_container_usage_default",
       "20260727040000_relax_hosted_usage_credit_detached_direct_proof",
       "20260727120000_hosted_member_checkout_session",
+      "20260727200000_hosted_member_checkout_attempt",
       "migration_lock.toml",
     ]);
     expect(hostedUserCryptoEnvelopeMigrationSql).toContain(
@@ -2028,6 +2034,36 @@ describe("hosted Prisma baseline migration", () => {
         `${modelName} must stay scalar-only. Add a typed column or a dedicated owner table instead of a catch-all Json blob.`,
       ).toEqual([]);
     }
+  });
+
+  it("adds only nullable Checkout-attempt columns and their lookup index", () => {
+    const migrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260727200000_hosted_member_checkout_attempt/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+
+    expect(migrationSql).toContain(
+      'ADD COLUMN "checkout_attempt_id" TEXT',
+    );
+    expect(migrationSql).toContain(
+      'ADD COLUMN "checkout_created_at" TIMESTAMP(3)',
+    );
+    expect(migrationSql).toContain(
+      'ADD COLUMN "checkout_intent_hash" TEXT',
+    );
+    expect(migrationSql).toContain(
+      'ADD COLUMN "stripe_checkout_session_id_encrypted" TEXT',
+    );
+    expect(migrationSql).toContain(
+      'ADD COLUMN "stripe_checkout_session_lookup_key" TEXT',
+    );
+    expect(migrationSql).not.toContain("NOT NULL");
+    expect(migrationSql).toMatch(
+      /CREATE UNIQUE INDEX\s+"hosted_member_billing_ref_stripe_checkout_session_lookup_key_key"/u,
+    );
   });
 });
 

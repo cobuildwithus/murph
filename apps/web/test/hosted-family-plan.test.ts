@@ -5087,6 +5087,64 @@ describe("hosted Family plan", () => {
     expect(tx.hostedAccountGroupBillingRef.update).not.toHaveBeenCalled();
   });
 
+  it("invoices a Family capacity reduction instead of silently discarding proration", async () => {
+    const tx = createTxMock({
+      activeMembershipCount: 1,
+      billedSeatCount: 4,
+      pendingInviteCount: 0,
+    });
+    tx.hostedAccountGroupMembership.findMany.mockResolvedValue([
+      { memberId: "member_owner", planCode: "pulse" },
+    ]);
+    tx.hostedAccountGroupPlanCapacity.findMany.mockResolvedValue([
+      { billedQuantity: 2, planCode: "pulse" },
+      { billedQuantity: 2, planCode: "edge" },
+    ]);
+    const prisma = tx as FamilyPlanTxMock & {
+      $transaction: ReturnType<typeof vi.fn>;
+    };
+    prisma.$transaction = vi.fn((callback) => callback(tx));
+    const stripeSubscriptionUpdate = vi.fn().mockResolvedValue(
+      makeFamilyStripeSubscription({
+        edgeItemQuantity: 1,
+        itemQuantity: 1,
+      }),
+    );
+    runtimeMocks.requireHostedStripeApi.mockReturnValue({
+      subscriptions: {
+        retrieve: vi.fn().mockResolvedValue(
+          makeFamilyStripeSubscription({
+            edgeItemQuantity: 2,
+            itemQuantity: 2,
+          }),
+        ),
+        update: stripeSubscriptionUpdate,
+      },
+    });
+
+    await updateHostedFamilyPlanCapacities({
+      groupId: "hbag_family",
+      now: new Date("2026-06-18T12:00:00.000Z"),
+      ownerMemberId: "member_owner",
+      prisma: prisma as never,
+      targetCapacities: { edge: 1, pulse: 1 },
+    });
+
+    expect(stripeSubscriptionUpdate).toHaveBeenCalledWith(
+      "sub_family",
+      expect.objectContaining({
+        items: [
+          { id: "si_family", quantity: 1 },
+          { id: "si_family_edge", quantity: 1 },
+        ],
+        proration_behavior: "always_invoice",
+      }),
+      expect.any(Object),
+    );
+    const updateParams = stripeSubscriptionUpdate.mock.calls[0]?.[1];
+    expect(updateParams).not.toHaveProperty("payment_behavior");
+  });
+
   it("serializes concurrent tier-capacity changes through the owner Stripe lock", async () => {
     const tx = createTxMock({
       activeMembershipCount: 1,

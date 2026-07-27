@@ -295,6 +295,24 @@ export interface HostedAccountGroupBillingRefSnapshot
   stripeSubscriptionId: string | null;
 }
 
+export type HostedMemberFamilyBillingClaim =
+  | {
+      groupId: string;
+      kind: "active_sponsorship";
+      ownerMemberId: string;
+    }
+  | {
+      checkoutAttemptId: string;
+      groupId: string;
+      kind: "checkout_attempt";
+      ownerMemberId: string;
+    }
+  | {
+      groupId: string;
+      kind: "bound_subscription";
+      ownerMemberId: string;
+    };
+
 export interface HostedAccountGroupBillingLookup {
   billingRef: HostedAccountGroupBillingRefSnapshot;
   group: HostedAccountGroupAccessSnapshot;
@@ -1014,6 +1032,79 @@ export async function readHostedAccountGroupStripeBillingRef(input: {
   });
 
   return billingRef ? projectHostedAccountGroupBillingRefSnapshot(billingRef, prisma) : null;
+}
+
+/**
+ * A Family membership can own billing before it grants active access. Direct
+ * Checkout must respect the persisted Family attempt or subscription as well
+ * as an already-active sponsorship.
+ */
+export async function readHostedMemberFamilyBillingClaim(input: {
+  memberId: string;
+  prisma: HostedOnboardingReadClient;
+}): Promise<HostedMemberFamilyBillingClaim | null> {
+  const memberships = await input.prisma.hostedAccountGroupMembership.findMany({
+    orderBy: { groupId: "asc" },
+    select: {
+      group: {
+        select: {
+          billingRef: {
+            select: {
+              checkoutAttemptId: true,
+              stripeSubscriptionIdEncrypted: true,
+            },
+          },
+          billingStatus: true,
+          id: true,
+          ownerMemberId: true,
+          suspendedAt: true,
+        },
+      },
+    },
+    where: {
+      memberId: input.memberId,
+      status: "active",
+    },
+  });
+  const claims: HostedMemberFamilyBillingClaim[] = [];
+  for (const { group } of memberships) {
+    if (
+      !group.suspendedAt
+      && group.billingStatus === HostedBillingStatus.active
+    ) {
+      claims.push({
+        groupId: group.id,
+        kind: "active_sponsorship",
+        ownerMemberId: group.ownerMemberId,
+      });
+      continue;
+    }
+    if (group.billingRef?.stripeSubscriptionIdEncrypted) {
+      claims.push({
+        groupId: group.id,
+        kind: "bound_subscription",
+        ownerMemberId: group.ownerMemberId,
+      });
+      continue;
+    }
+    if (group.billingRef?.checkoutAttemptId) {
+      claims.push({
+        checkoutAttemptId: group.billingRef.checkoutAttemptId,
+        groupId: group.id,
+        kind: "checkout_attempt",
+        ownerMemberId: group.ownerMemberId,
+      });
+    }
+  }
+  if (claims.length > 1) {
+    throw hostedOnboardingError({
+      code: "HOSTED_FAMILY_BILLING_CLAIM_AMBIGUOUS",
+      httpStatus: 500,
+      message:
+        "This member has conflicting Family billing ownership. Contact support before changing billing.",
+    });
+  }
+  return claims[0] ?? null;
 }
 
 /**
@@ -2509,7 +2600,7 @@ async function updateHostedFamilyStripeCapacitiesUnderOwnerLock(input: {
             }
           : {
               ...(increase ? { payment_behavior: "error_if_incomplete" as const } : {}),
-              proration_behavior: increase ? "always_invoice" as const : "none" as const,
+              proration_behavior: "always_invoice" as const,
             }),
       },
       {
