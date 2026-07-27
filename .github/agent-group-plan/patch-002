@@ -1,0 +1,401 @@
+     const { body, inviteCode } = await requireHostedInviteCodeFromRequest(request);
+-    const billingPlanCode = parseHostedBillingPlanCode(body.billingPlanCode);
++    const billingPlanCode = parseHostedPublicBillingPlanCode(body.billingPlanCode);
+     const checkoutOffer = parseHostedPublicBillingCheckoutOffer(body.checkoutOffer);
+@@ -33,5 +33,5 @@ export const POST = withJsonError(async (request: Request) => {
+       throw hostedOnboardingError({
+         code: "HOSTED_BILLING_PLAN_INVALID",
+         httpStatus: 400,
+-        message: "billingPlanCode must be one of the configured Murph billing plans.",
++        message: "billingPlanCode must be a public Murph signup plan.",
+       });
+diff --git a/apps/web/src/components/hosted-onboarding/client-api.ts b/apps/web/src/components/hosted-onboarding/client-api.ts
+--- a/apps/web/src/components/hosted-onboarding/client-api.ts
++++ b/apps/web/src/components/hosted-onboarding/client-api.ts
+@@ -2,4 +2,4 @@ import type { HostedInviteStatusPayload } from "@/src/lib/hosted-onboarding/typ
+ import type {
+-  HostedBillingPlanCode,
++  HostedPublicBillingPlanCode,
+   HostedPublicBillingCheckoutOffer,
+ } from "@/src/lib/hosted-onboarding/billing-plans";
+@@ -138,7 +138,7 @@ export async function requestHostedOnboardingJson<T>(input: {
+ }
+ 
+ export async function requestHostedBillingCheckout(input: {
+-  billingPlanCode?: HostedBillingPlanCode | null;
++  billingPlanCode?: HostedPublicBillingPlanCode | null;
+   checkoutOffer?: HostedPublicBillingCheckoutOffer | null;
+   inviteCode: string;
+ }): Promise<HostedBillingCheckoutResponse> {
+diff --git a/apps/web/src/components/hosted-onboarding/join-invite-islands.tsx b/apps/web/src/components/hosted-onboarding/join-invite-islands.tsx
+--- a/apps/web/src/components/hosted-onboarding/join-invite-islands.tsx
++++ b/apps/web/src/components/hosted-onboarding/join-invite-islands.tsx
+@@ -11,6 +11,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
+ import { Button } from "@/src/components/ui/button";
+ import { PaymentButton } from "@/src/components/ui/payment-button";
+-import type {
+-  HostedBillingPlanCode,
+-  HostedPublicBillingCheckoutOffer,
++import {
++  parseHostedPublicBillingPlanCode,
++  type HostedBillingPlanCode,
++  type HostedPublicBillingCheckoutOffer,
+ } from "@/src/lib/hosted-onboarding/billing-plans";
+@@ -307,8 +308,13 @@ export function JoinInviteCheckoutPlanButtonIsland({
+       throw new Error("This plan is not available yet.");
+     }
+ 
++    const publicPlanCode = parseHostedPublicBillingPlanCode(planCode);
++    if (!publicPlanCode) {
++      throw new Error("This signup plan is not available.");
++    }
++
+     const payload = await requestHostedBillingCheckout({
+-      billingPlanCode: planCode,
++      billingPlanCode: publicPlanCode,
+       ...(checkoutOffer ? { checkoutOffer } : {}),
+       inviteCode,
+     });
+diff --git a/apps/web/src/lib/hosted-onboarding/billing-plan-change-service.ts b/apps/web/src/lib/hosted-onboarding/billing-plan-change-service.ts
+--- a/apps/web/src/lib/hosted-onboarding/billing-plan-change-service.ts
++++ b/apps/web/src/lib/hosted-onboarding/billing-plan-change-service.ts
+@@ -12,8 +12,9 @@ import {
+   coerceStripeObjectId,
+ } from "./billing";
+ import {
+-  canUpgradeHostedBillingPlanToEdge,
++  canUpgradeHostedBillingPlan,
+   HOSTED_STANDARD_CHECKOUT_OFFER,
++  isHostedBillingPlanImmediateUpgrade,
+   isHostedPulseTrialBillingState,
+   parseHostedBillingPlanCode,
+   type HostedBillingPlanCode,
+@@ -56,26 +57,26 @@ import { createHostedStripePortalSession } from "./stripe-portal";
+ 
+ export type HostedBillingPlanUpgradeResult =
+   | {
+-    billingPlanCode: "launch_edge_monthly";
++    billingPlanCode: HostedBillingPlanCode;
+     status: "already_on_plan";
+   }
+   | {
+-    billingPlanCode: "launch_edge_monthly";
++    billingPlanCode: HostedBillingPlanCode;
+     status: "upgraded";
+   }
+   | {
+-    billingPlanCode: "launch_monthly";
++    billingPlanCode: HostedBillingPlanCode;
+     paymentUrl: string;
+     status: "payment_required";
+   }
+   | {
+-    billingPlanCode: "launch_monthly";
++    billingPlanCode: HostedBillingPlanCode;
+     status: "processing";
+   };
+ 
+ type HostedBillingPlanUpgradeLockedResult =
+   | HostedBillingPlanUpgradeResult
+   | {
+-      billingPlanCode: "launch_monthly";
++      billingPlanCode: HostedBillingPlanCode;
+       status: "financially_blocked";
+     };
+@@ -105,15 +106,7 @@ export async function upgradeHostedBillingPlan(input: {
+ 
+   assertHostedMemberOwnActiveBillingAllowed(member);
+ 
+-  const targetPlanCode = input.targetPlanCode;
+-  if (targetPlanCode !== "launch_edge_monthly") {
+-    throw hostedOnboardingError({
+-      code: "HOSTED_BILLING_PLAN_UPGRADE_UNSUPPORTED",
+-      httpStatus: 400,
+-      message: "This plan change is not supported.",
+-    });
+-  }
+-
++  const targetPlanCode = input.targetPlanCode;
+   const billingRef = await readHostedMemberStripeBillingRef({
+     memberId: input.memberId,
+     prisma,
+@@ -142,5 +135,6 @@ export async function upgradeHostedBillingPlan(input: {
+   };
+   assertHostedBillingPlanUpgradeAllowed(transition);
+   assertHostedBillingPlanUpgradeSourceState({
+     billingRef,
++    targetPlanCode,
+   });
+@@ -195,6 +189,6 @@ export async function upgradeHostedBillingPlan(input: {
+ async function resolveHostedBillingPlanUpgradeAlreadyAppliedWithLockedOwner(input: {
+   expectedBillingRef: HostedMemberStripeBillingRefSnapshot;
+   memberId: string;
+-  targetPlanCode: "launch_edge_monthly";
++  targetPlanCode: HostedBillingPlanCode;
+   tx: Prisma.TransactionClient;
+ }): Promise<HostedBillingPlanUpgradeResult> {
+@@ -222,6 +216,6 @@ async function upgradeHostedBillingPlanWithLockedOwner(input: {
+   memberId: string;
+   now: Date;
+   targetConfig: ReturnType<typeof requireHostedStripeBillingPlanConfig>;
+-  targetPlanCode: "launch_edge_monthly";
++  targetPlanCode: HostedBillingPlanCode;
+   tx: Prisma.TransactionClient;
+ }): Promise<HostedBillingPlanUpgradeLockedResult> {
+@@ -240,5 +234,6 @@ async function upgradeHostedBillingPlanWithLockedOwner(input: {
+   };
+   assertHostedBillingPlanUpgradeAllowed(transition);
+   assertHostedBillingPlanUpgradeSourceState({
+     billingRef,
++    targetPlanCode: input.targetPlanCode,
+   });
+@@ -295,6 +290,7 @@ async function upgradeHostedBillingPlanWithLockedOwner(input: {
+       return collectionResult;
+     }
+     return await finalizeAppliedHostedBillingPlanUpgrade({
++      currentPlanCode: transition.currentPlanCode,
+       memberId: input.memberId,
+       now: input.now,
+       tx: input.tx,
+@@ -468,6 +464,7 @@ async function upgradeHostedBillingPlanWithLockedOwner(input: {
+   }
+ 
+   return await finalizeAppliedHostedBillingPlanUpgrade({
++    currentPlanCode: transition.currentPlanCode,
+     memberId: input.memberId,
+     now: input.now,
+     tx: input.tx,
+@@ -507,6 +504,7 @@ async function readHostedBillingPlanUpgradeLockedSource(input: {
+ }
+ 
+ async function finalizeAppliedHostedBillingPlanUpgrade(input: {
++  currentPlanCode: HostedBillingPlanCode;
+   memberId: string;
+   now: Date;
+   stripe: Stripe;
+@@ -514,16 +512,7 @@ async function finalizeAppliedHostedBillingPlanUpgrade(input: {
+   stripeCustomerId: string;
+   stripeSubscriptionId: string;
+   subscription: Stripe.Subscription;
+-  targetPlanCode: "launch_edge_monthly";
++  targetPlanCode: HostedBillingPlanCode;
+   targetPriceId: string;
+   tx: Prisma.TransactionClient;
+-}): Promise<
+-  | {
+-      billingPlanCode: "launch_edge_monthly";
+-      status: "upgraded";
+-    }
+-  | {
+-      billingPlanCode: "launch_monthly";
+-      status: "financially_blocked";
+-    }
+-> {
++}): Promise<HostedBillingPlanUpgradeLockedResult> {
+@@ -554,7 +543,7 @@ async function finalizeAppliedHostedBillingPlanUpgrade(input: {
+   });
+   if (!projected) {
+     return {
+-      billingPlanCode: "launch_monthly",
++      billingPlanCode: input.currentPlanCode,
+       status: "financially_blocked",
+     };
+   }
+@@ -568,12 +557,15 @@ function assertHostedBillingPlanUpgradeAllowed(input: {
+   currentPlanCode: HostedBillingPlanCode | null;
+   targetPlanCode: HostedBillingPlanCode;
+ }): asserts input is {
+-  currentPlanCode: "launch_monthly";
+-  targetPlanCode: "launch_edge_monthly";
++  currentPlanCode: HostedBillingPlanCode;
++  targetPlanCode: HostedBillingPlanCode;
+ } {
+   if (
+-    input.targetPlanCode === "launch_edge_monthly" &&
+-    input.currentPlanCode === "launch_monthly"
++    input.currentPlanCode !== null &&
++    isHostedBillingPlanImmediateUpgrade({
++      currentPlanCode: input.currentPlanCode,
++      targetPlanCode: input.targetPlanCode,
++    })
+   ) {
+     return;
+   }
+@@ -590,11 +582,13 @@ function assertHostedBillingPlanUpgradeAllowed(input: {
+ 
+ function assertHostedBillingPlanUpgradeSourceState(input: {
+   billingRef: HostedMemberStripeBillingRefSnapshot | null;
++  targetPlanCode: HostedBillingPlanCode;
+ }): void {
+-  if (canUpgradeHostedBillingPlanToEdge({
++  if (canUpgradeHostedBillingPlan({
+     currentBillingPhase: input.billingRef?.currentBillingPhase,
+     currentBillingPlanCode: input.billingRef?.currentBillingPlanCode,
+     currentCheckoutOffer: input.billingRef?.currentCheckoutOffer,
++    targetPlanCode: input.targetPlanCode,
+   })) {
+     return;
+   }
+@@ -608,6 +602,6 @@ function assertHostedBillingPlanUpgradeSourceState(input: {
+     throw hostedOnboardingError({
+       code: "HOSTED_BILLING_PLAN_UPGRADE_TRIAL_UNSUPPORTED",
+       httpStatus: 409,
+-      message: "Finish trial billing before upgrading to Edge.",
++      message: "Finish trial billing before changing plans.",
+     });
+   }
+@@ -704,6 +698,6 @@ async function cleanupAppliedHostedBillingPlanUpgradeSubscriptionItems(input: {
+   stripe: Stripe;
+   stripeSubscriptionId: string;
+   subscription: Stripe.Subscription;
+-  targetPlanCode: "launch_edge_monthly";
++  targetPlanCode: HostedBillingPlanCode;
+   targetPriceId: string;
+ }): Promise<Stripe.Subscription> {
+@@ -790,5 +784,5 @@ function buildHostedBillingSubscriptionItemsUnsupportedError(): Error {
+ 
+ function buildHostedBillingPlanUpgradeSubscriptionMetadata(input: {
+   memberId: string;
+-  targetPlanCode: "launch_edge_monthly";
++  targetPlanCode: HostedBillingPlanCode;
+ }): Stripe.MetadataParam {
+@@ -811,6 +805,6 @@ async function normalizeAppliedHostedBillingPlanUpgradeSubscription(input: {
+   stripe: Stripe;
+   stripeSubscriptionId: string;
+   subscription: Stripe.Subscription;
+-  targetPlanCode: "launch_edge_monthly";
++  targetPlanCode: HostedBillingPlanCode;
+   targetPriceId: string;
+ }): Promise<Stripe.Subscription> {
+@@ -852,4 +846,4 @@ function isHostedBillingPlanUpgradeSubscriptionMetadataNormalized(input: {
+   memberId: string;
+   subscription: Stripe.Subscription;
+-  targetPlanCode: "launch_edge_monthly";
++  targetPlanCode: HostedBillingPlanCode;
+ }): boolean {
+@@ -989,6 +983,6 @@ async function reconcileAppliedHostedBillingPlanUpgrade(input: {
+   stripeCustomerId: string;
+   stripeSubscriptionId: string;
+   subscription: Stripe.Subscription;
+-  targetPlanCode: "launch_edge_monthly";
++  targetPlanCode: HostedBillingPlanCode;
+   tx: Prisma.TransactionClient;
+ }): Promise<boolean> {
+@@ -1083,6 +1077,6 @@ async function retrieveHostedBillingPlanUpgradeInvoiceSnapshotById(input: {
+ }
+ 
+ async function resolveHostedBillingPlanUpgradeFinancialPreflight(input: {
+-  currentPlanCode: "launch_monthly";
++  currentPlanCode: HostedBillingPlanCode;
+   now: Date;
+   stripe: Stripe;
+@@ -1132,6 +1126,6 @@ async function resolveHostedBillingPlanUpgradeFinancialPreflight(input: {
+ }
+ 
+ async function maybeResolveHostedBillingPlanUpgradeExistingCollection(input: {
+-  currentPlanCode: "launch_monthly";
++  currentPlanCode: HostedBillingPlanCode;
+   invoiceSnapshot: HostedStripeInvoiceCollectionSnapshot | null;
+   now: Date;
+@@ -1183,6 +1177,6 @@ async function maybeResolveHostedBillingPlanUpgradeExistingCollection(input: {
+ }
+ 
+ async function resolveHostedBillingPlanUpgradeAppliedCollection(input: {
+-  currentPlanCode: "launch_monthly";
++  currentPlanCode: HostedBillingPlanCode;
+   invoiceSnapshot: HostedStripeInvoiceCollectionSnapshot | null;
+   now: Date;
+@@ -1251,5 +1245,5 @@ async function resolveHostedBillingPlanUpgradeAppliedCollection(input: {
+ }
+ 
+ function resolveHostedBillingPlanUpgradeProcessingResult(input: {
+-  currentPlanCode: "launch_monthly";
++  currentPlanCode: HostedBillingPlanCode;
+ }): HostedBillingPlanUpgradeResult {
+@@ -1260,6 +1254,6 @@ function resolveHostedBillingPlanUpgradeProcessingResult(input: {
+ }
+ 
+ async function resolveHostedBillingPlanUpgradePaymentRequiredResult(input: {
+-  currentPlanCode: "launch_monthly";
++  currentPlanCode: HostedBillingPlanCode;
+   invoiceSnapshot: HostedStripeInvoiceCollectionSnapshot | null;
+   stripe: Stripe;
+@@ -1306,6 +1300,6 @@ function readHostedBillingPlanUpgradeStripeUrl(input: {
+ }
+ 
+ async function resolveHostedBillingPlanUpgradePendingResult(input: {
+-  currentPlanCode: "launch_monthly";
++  currentPlanCode: HostedBillingPlanCode;
+   invoiceSnapshot: HostedStripeInvoiceCollectionSnapshot | null;
+   now: Date;
+diff --git a/apps/web/app/api/settings/billing/upgrade-plan/route.ts b/apps/web/app/api/settings/billing/upgrade-plan/route.ts
+--- a/apps/web/app/api/settings/billing/upgrade-plan/route.ts
++++ b/apps/web/app/api/settings/billing/upgrade-plan/route.ts
+@@ -20,10 +20,10 @@ export const POST = withJsonError(async (request: Request) => {
+   });
+   const targetPlanCode = parseHostedBillingPlanCode(body.targetPlanCode);
+ 
+-  if (targetPlanCode !== "launch_edge_monthly") {
++  if (!targetPlanCode) {
+     throw hostedOnboardingError({
+       code: "HOSTED_BILLING_PLAN_UPGRADE_TARGET_INVALID",
+       httpStatus: 400,
+-      message: "targetPlanCode must be launch_edge_monthly.",
++      message: "targetPlanCode must be a configured Murph billing plan.",
+     });
+   }
+diff --git a/apps/web/src/lib/hosted-onboarding/billing-plan-switch-to-pulse-service.ts b/apps/web/src/lib/hosted-onboarding/billing-plan-switch-to-pulse-service.ts
+--- a/apps/web/src/lib/hosted-onboarding/billing-plan-switch-to-pulse-service.ts
++++ b/apps/web/src/lib/hosted-onboarding/billing-plan-switch-to-pulse-service.ts
+@@ -11,6 +11,6 @@ import { getPrisma } from "../prisma";
+ import { coerceStripeObjectId } from "./billing";
+ import {
+-  canSwitchHostedBillingPlanToPulse,
++  canScheduleHostedBillingPlanChange,
+   HOSTED_STANDARD_CHECKOUT_OFFER,
+   parseHostedBillingPhase,
+   parseHostedBillingPlanCode,
+@@ -19,2 +19,5 @@ import {
+ } from "./billing-plans";
++import {
++  assertHostedBillingPlanSelectable,
++} from "./billing-plan-eligibility";
+ import { assertHostedMemberOwnActiveBillingAllowed } from "./entitlement";
+@@ -40,7 +43,10 @@ import {
+   isHostedStripeRetryableFailure,
+ } from "./stripe-billing-state";
+ 
+-const SWITCH_TO_PULSE_SOURCE_PLAN = "launch_edge_monthly" satisfies HostedBillingPlanCode;
+-const SWITCH_TO_PULSE_TARGET_PLAN = "launch_monthly" satisfies HostedBillingPlanCode;
+-const SWITCH_TO_PULSE_MARKER = "edge_to_pulse_at_period_end";
++const LEGACY_EDGE_TO_PULSE_SOURCE_PLAN =
++  "launch_edge_monthly" satisfies HostedBillingPlanCode;
++const LEGACY_EDGE_TO_PULSE_TARGET_PLAN =
++  "launch_monthly" satisfies HostedBillingPlanCode;
++const LEGACY_EDGE_TO_PULSE_MARKER = "edge_to_pulse_at_period_end";
++const DIRECT_PLAN_SWITCH_MARKER = "direct_plan_at_period_end_v1";
+ const SWITCH_TO_PULSE_UPDATE_OPERATION_VERSION = "v2";
+@@ -52,17 +58,20 @@ const STRIPE_TRIAL_METADATA_KEYS = [
+ ] as const;
+ 
+-export type HostedBillingPlanSwitchToPulseResult =
++export type HostedBillingPlanSwitchResult =
+   | {
+     effectiveAt: string;
+-    scheduledBillingPlanCode: "launch_monthly";
++    scheduledBillingPlanCode: HostedBillingPlanCode;
+     status: "already_scheduled";
+   }
+   | {
+     effectiveAt: string;
+-    scheduledBillingPlanCode: "launch_monthly";
++    scheduledBillingPlanCode: HostedBillingPlanCode;
+     status: "scheduled";
+   };
+ 
++export type HostedBillingPlanSwitchToPulseResult =
++  HostedBillingPlanSwitchResult;
++
+ interface HostedStripePlanConfig {
+   priceId: string;
+ }
