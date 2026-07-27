@@ -1,6 +1,6 @@
 # Collapse hosted group backlog into one attributable room turn
 
-Status: active
+Status: completed
 Created: 2026-07-26
 Updated: 2026-07-27
 
@@ -138,19 +138,26 @@ Updated: 2026-07-27
   as one provider request and one outbound reply, retain three exact
   `message_ref` values with sender/reply context, and all reach consumed
   mailbox state.
-- The first full canonical pass proved all guards, typechecks, Assistant Engine,
-  Assistant Runtime, CLI, and Hosted Execution owners green. The downstream
-  hosted-local owner then stopped at its pre-existing missing-dist preparation
-  guard before exercising task code. Building the package directly resolved
-  the local prerequisite; final canonical verification will run again on the
-  completed patch.
+- The exact-head hosted-local usage scenario passed after rebuilding the runner
+  bundle. The focused Web group-call compatibility suite passed 14 tests.
+- Exact-head canonical diff verification passed every affected owner:
+  Assistant Engine (2,771 tests), Assistant Runtime (1,896), hosted execution
+  (419), hosted-local harness (410), Web (6,871), Cloudflare node (1,989), and
+  all affected typechecks, boundaries, lint, and supporting package suites.
+- Full acceptance verification passed all repository guards, typechecks,
+  fixture smoke coverage, package coverage, app verification, and built-package
+  boundaries.
+- Parent architecture review found no additional state owner, suppression
+  mechanism, queue, manager, or abstraction to delete. The one retained
+  compatibility branch is intentionally temporary at the old-runner/Web
+  deployment boundary.
 
 ## Verification
 
 - Commands to run:
   - Focused Assistant Engine and hosted Web tests selected from the returned
     patch and final touched call paths.
-  - `pnpm hosted-local e2e usage-limit-ambiguous-send --no-bundle`
+  - `pnpm hosted-local e2e usage-limit-ambiguous-send`
   - `pnpm test:diff <touched owner paths...>`
   - `pnpm verify:acceptance`
   - Required product-experience, preliminary `completion-specialists`, parent,
@@ -162,3 +169,4 @@ Updated: 2026-07-27
     request-bearing message authorizes only that participant's effect.
   - Direct-message behavior and all route/audience/causal boundaries remain
     unchanged.
+Completed: 2026-07-27
