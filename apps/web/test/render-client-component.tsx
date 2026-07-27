@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 import path from "node:path";
 
-import { act, type ReactElement } from "react";
+import { act, startTransition, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { vi } from "vitest";
 
@@ -17,6 +17,7 @@ type RenderClientComponentResult<TButton extends HTMLButtonElement | null> = {
   reload: ReturnType<typeof vi.fn>;
   replaceState: ReturnType<typeof vi.fn>;
   rerender: (element: ReactElement) => Promise<void>;
+  rerenderInTransition: (element: ReactElement) => Promise<void>;
   window: Window & typeof globalThis;
 };
 
@@ -122,6 +123,25 @@ export async function renderClientComponent(
       await act(async () => {
         root.render(nextElement);
       });
+    },
+    rerenderInTransition: async (nextElement: ReactElement) => {
+      const previousActEnvironment: unknown = Reflect.get(
+        globalThis,
+        "IS_REACT_ACT_ENVIRONMENT",
+      );
+      Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", false);
+      try {
+        startTransition(() => {
+          root.render(nextElement);
+        });
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      } finally {
+        Reflect.set(
+          globalThis,
+          "IS_REACT_ACT_ENVIRONMENT",
+          previousActEnvironment,
+        );
+      }
     },
     window,
   };
