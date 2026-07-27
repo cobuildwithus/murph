@@ -2,6 +2,8 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 
+import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
+
 const mocks = vi.hoisted(() => ({
   getPrisma: vi.fn(),
   parseHostedConsentAcceptRequest: vi.fn(),
@@ -45,6 +47,10 @@ const STATUS = {
   schema: "murph.hosted-consent-status.v1" as const,
   scopes: [],
 };
+const RECORDED_STATUS = {
+  ...STATUS,
+  launchGranted: true,
+};
 
 let route: CompanionConsentRoute;
 
@@ -60,10 +66,7 @@ describe("device sync companion legal consent route", () => {
       member: MEMBER,
     });
     mocks.readHostedConsentStatus.mockResolvedValue(STATUS);
-    mocks.recordHostedLaunchRequiredConsent.mockResolvedValue({
-      ...STATUS,
-      launchGranted: true,
-    });
+    mocks.recordHostedLaunchRequiredConsent.mockResolvedValue(RECORDED_STATUS);
   });
 
   it("reads the member's canonical consent status with Privy bearer auth", async () => {
@@ -105,6 +108,7 @@ describe("device sync companion legal consent route", () => {
       const response = await route.POST(request);
 
       expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toEqual(RECORDED_STATUS);
       expect(mocks.readHostedOnboardingJsonObject).toHaveBeenCalledWith(request, {
         limitBytes: 8 * 1024,
         tooLargeErrorCode: "CONSENT_REQUEST_TOO_LARGE",
@@ -120,6 +124,34 @@ describe("device sync companion legal consent route", () => {
       });
     },
   );
+
+  it("rejects unauthenticated writes before reading or recording consent", async () => {
+    const request = new Request(
+      "https://app.example.test/api/device-sync/companion/legal-consent",
+      { method: "POST" },
+    );
+    mocks.requirePrivyMemberAuthFromBearerToken.mockRejectedValue(
+      hostedOnboardingError({
+        code: "AUTH_REQUIRED",
+        httpStatus: 401,
+        message: "Sign in to continue.",
+      }),
+    );
+
+    const response = await route.POST(request);
+
+    expect(response.status).toBe(401);
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "AUTH_REQUIRED",
+        message: "Sign in to continue.",
+        retryable: false,
+      },
+    });
+    expect(mocks.readHostedOnboardingJsonObject).not.toHaveBeenCalled();
+    expect(mocks.parseHostedConsentAcceptRequest).not.toHaveBeenCalled();
+    expect(mocks.recordHostedLaunchRequiredConsent).not.toHaveBeenCalled();
+  });
 
   it("rejects optional feature scopes without writing a grant", async () => {
     const request = new Request(
