@@ -4,14 +4,21 @@ import {
   buildTelegramThreadTarget,
   extractTelegramMessage,
 } from "@murphai/messaging-ingress/telegram-webhook";
+import type { HostedMember, PrismaClient } from "@prisma/client";
 
 import { getPrisma } from "../prisma";
 import { lookupHostedMemberIdentityByPhoneNumber } from "./hosted-member-identity-store";
+import { readHostedMemberRoutingState } from "./hosted-member-routing-store";
 import { lookupHostedMemberByVerifiedEmailAddress } from "./hosted-member-store";
 import {
   parseHostedLinqWebhookEvent,
   sendHostedLinqChatMessage,
 } from "./linq";
+import { getHostedLinqChatSummary } from "./linq-client";
+import {
+  buildHostedGroupChatAccessRecoveryMessage,
+  resolveHostedRecognizedInboundAccess,
+} from "./recognized-inbound-access";
 import { requireHostedOnboardingPublicBaseUrl } from "./runtime";
 import type { HostedOnboardingReadClient } from "./shared";
 import {
@@ -29,10 +36,13 @@ export type HostedOnboardingLinqWebhookHandler = typeof handleHostedOnboardingLi
 export type HostedOnboardingTelegramWebhookHandler = typeof handleHostedOnboardingTelegramWebhook;
 
 export type HostedVisibleSecondaryLinqDependencies = {
+  getHostedLinqChatSummary?: typeof getHostedLinqChatSummary;
   getPrisma: typeof getPrisma;
   lookupHostedMemberByVerifiedEmailAddress: typeof lookupHostedMemberByVerifiedEmailAddress;
   lookupHostedMemberIdentityByPhoneNumber: typeof lookupHostedMemberIdentityByPhoneNumber;
   parseHostedLinqWebhookEvent: typeof parseHostedLinqWebhookEvent;
+  readHostedMemberRoutingState?: typeof readHostedMemberRoutingState;
+  resolveHostedRecognizedInboundAccess?: typeof resolveHostedRecognizedInboundAccess;
   sendHostedLinqChatMessage: typeof sendHostedLinqChatMessage;
 };
 
@@ -44,10 +54,13 @@ export type HostedVisibleSecondaryTelegramDependencies = {
 };
 
 const defaultLinqDependencies: HostedVisibleSecondaryLinqDependencies = {
+  getHostedLinqChatSummary,
   getPrisma,
   lookupHostedMemberByVerifiedEmailAddress,
   lookupHostedMemberIdentityByPhoneNumber,
   parseHostedLinqWebhookEvent,
+  readHostedMemberRoutingState,
+  resolveHostedRecognizedInboundAccess,
   sendHostedLinqChatMessage,
 };
 
@@ -87,9 +100,15 @@ const HOSTED_LINQ_VISIBLE_SECONDARY_REASONS = new Set([
 const HOSTED_LINQ_REASONS_REQUIRING_RECOGNIZED_SENDER = new Set([
   "group-chat",
   "home-line-capacity-exhausted",
+  "thread-container-inactive",
   "unassignable-home-line",
   "unattested-direct-chat",
   "unknown-home-line",
+]);
+
+const HOSTED_LINQ_PRIVATE_GROUP_RECOVERY_REASONS = new Set([
+  "group-chat",
+  "thread-container-inactive",
 ]);
 
 const HOSTED_TELEGRAM_VISIBLE_SECONDARY_REASONS = new Set([
@@ -99,6 +118,16 @@ const HOSTED_TELEGRAM_VISIBLE_SECONDARY_REASONS = new Set([
   "telegram-binding-changed",
   "unlinked-telegram",
 ]);
+
+type HostedVisibleSecondaryLinqSender = Pick<
+  HostedMember,
+  "id" | "suspendedAt"
+>;
+
+type HostedVisibleSecondaryLinqPrivateRecovery = {
+  chatId: string;
+  message: string;
+};
 
 export function withHostedVisibleSecondaryLinqOutcomes(
   handler: HostedOnboardingLinqWebhookHandler,
@@ -123,16 +152,40 @@ export function withHostedVisibleSecondaryLinqOutcomes(
       return response;
     }
 
+    const prisma = input.prisma ?? dependencies.getPrisma();
     const recognizedSender = HOSTED_LINQ_REASONS_REQUIRING_RECOGNIZED_SENDER.has(reason)
-      ? await readHostedLinqSenderRecognized({
+      ? await readHostedLinqSender({
           participantContact: context.participantContact,
-          prisma: input.prisma ?? dependencies.getPrisma(),
+          prisma,
           dependencies,
         })
-      : false;
+      : null;
+    const privateRecovery =
+      recognizedSender && HOSTED_LINQ_PRIVATE_GROUP_RECOVERY_REASONS.has(reason)
+        ? await resolveHostedLinqPrivateGroupRecovery({
+            currentChatId: context.summary.chatId,
+            eventId: event.event_id,
+            prisma,
+            sender: recognizedSender,
+            dependencies,
+            ...(input.signal ? { signal: input.signal } : {}),
+          })
+        : null;
+    if (privateRecovery) {
+      await dependencies.sendHostedLinqChatMessage({
+        chatId: privateRecovery.chatId,
+        idempotencyKey: `visible-secondary-private:${event.event_id}`,
+        message: privateRecovery.message,
+        replyToMessageId: null,
+        ...(input.signal ? { signal: input.signal } : {}),
+      });
+
+      return buildVisibleSecondaryResponse(response, reason);
+    }
+
     const message = resolveHostedLinqVisibleSecondaryReply({
       reason,
-      recognizedSender,
+      recognizedSender: Boolean(recognizedSender),
     });
     if (!message) {
       return response;
@@ -244,29 +297,100 @@ export function resolveHostedTelegramVisibleSecondaryReply(input: {
   }
 }
 
-async function readHostedLinqSenderRecognized(input: {
+async function readHostedLinqSender(input: {
   participantContact: ReturnType<
     typeof resolveHostedOnboardingLinqMessageContext
   >["participantContact"];
   prisma: HostedOnboardingReadClient;
   dependencies: HostedVisibleSecondaryLinqDependencies;
-}): Promise<boolean> {
+}): Promise<HostedVisibleSecondaryLinqSender | null> {
   const participantContact = input.participantContact;
   if (!participantContact) {
-    return false;
+    return null;
   }
 
-  if (participantContact.kind === "phone") {
-    return Boolean(await input.dependencies.lookupHostedMemberIdentityByPhoneNumber({
-      phoneNumber: participantContact.value,
-      prisma: input.prisma,
-    }));
+  const memberLookup = participantContact.kind === "phone"
+    ? await input.dependencies.lookupHostedMemberIdentityByPhoneNumber({
+        phoneNumber: participantContact.value,
+        prisma: input.prisma,
+      })
+    : await input.dependencies.lookupHostedMemberByVerifiedEmailAddress({
+        address: participantContact.value,
+        prisma: input.prisma,
+      });
+  if (!memberLookup) {
+    return null;
   }
 
-  return Boolean(await input.dependencies.lookupHostedMemberByVerifiedEmailAddress({
-    address: participantContact.value,
+  return {
+    id: memberLookup.core.id,
+    suspendedAt: memberLookup.core.suspendedAt,
+  };
+}
+
+async function resolveHostedLinqPrivateGroupRecovery(input: {
+  currentChatId: string;
+  dependencies: HostedVisibleSecondaryLinqDependencies;
+  eventId: string;
+  prisma: PrismaClient;
+  sender: HostedVisibleSecondaryLinqSender;
+  signal?: AbortSignal;
+}): Promise<HostedVisibleSecondaryLinqPrivateRecovery | null> {
+  const readRoutingState =
+    input.dependencies.readHostedMemberRoutingState
+    ?? readHostedMemberRoutingState;
+  const initialRouting = await readRoutingState({
+    memberId: input.sender.id,
     prisma: input.prisma,
-  }));
+  });
+  const privateChatId = initialRouting?.linqChatId?.trim() ?? "";
+  if (!privateChatId || privateChatId === input.currentChatId.trim()) {
+    return null;
+  }
+
+  const readChatSummary =
+    input.dependencies.getHostedLinqChatSummary
+    ?? getHostedLinqChatSummary;
+  try {
+    const privateChat = await readChatSummary({
+      chatId: privateChatId,
+      ...(input.signal ? { signal: input.signal } : {}),
+    });
+    if (privateChat.isGroup !== false) {
+      return null;
+    }
+  } catch {
+    // Never disclose account state to a route whose direct audience cannot be
+    // re-attested. The ordinary privacy-safe group response remains available.
+    return null;
+  }
+
+  const resolveAccess =
+    input.dependencies.resolveHostedRecognizedInboundAccess
+    ?? resolveHostedRecognizedInboundAccess;
+  const access = await resolveAccess({
+    allowSignupFallback: true,
+    inviteChannel: "linq",
+    member: input.sender,
+    noticeSeed: input.eventId,
+    prisma: input.prisma,
+  });
+  if (access.kind === "allowed" || access.kind === "silent") {
+    return null;
+  }
+
+  const currentRouting = await readRoutingState({
+    memberId: input.sender.id,
+    prisma: input.prisma,
+  });
+  if (currentRouting?.linqChatId?.trim() !== privateChatId) {
+    return null;
+  }
+
+  return {
+    chatId: privateChatId,
+    message: buildHostedGroupChatAccessRecoveryMessage(access.message),
+  };
 }
 
 function buildHostedSignupUrl(publicBaseUrl: string): string {
