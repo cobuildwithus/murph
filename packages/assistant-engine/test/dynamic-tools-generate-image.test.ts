@@ -1,10 +1,16 @@
-import { describe, expect, it } from 'vitest'
+import { Buffer } from 'node:buffer'
+
+import { describe, expect, it, vi } from 'vitest'
 
 import {
   MURPH_GENERATE_IMAGE_TOOL,
   MURPH_GROUP_TOOL,
+  executeMurphDynamicToolRequest,
   readMurphDynamicToolRequest,
 } from '../src/assistant-codex/dynamic-tools.js'
+import type {
+  AssistantHostedToolContext,
+} from '../src/assistant/hosted-tool-context.js'
 import {
   MURPH_GENERATE_SONG_TOOL,
 } from '../src/assistant-codex/dynamic-tools/generate-song.js'
@@ -29,6 +35,92 @@ describe('murph.generate_image dynamic tool schema', () => {
     expect(MURPH_GENERATE_SONG_TOOL.description).toContain(
       'a known preference or the automation instructions mark music welcome and privacy-safe',
     )
+  })
+
+  it('returns immediately when the hosted runtime launches image generation', async () => {
+    let releaseProvider = (): void => undefined
+    const providerHeld = new Promise<void>((resolve) => {
+      releaseProvider = resolve
+    })
+    const fetchImpl = vi.fn(async () => {
+      await providerHeld
+      return new Response(JSON.stringify({
+        data: [{
+          b64_json: Buffer.from([
+            0x52, 0x49, 0x46, 0x46,
+            0x00, 0x00, 0x00, 0x00,
+            0x57, 0x45, 0x42, 0x50,
+          ]).toString('base64'),
+        }],
+      }), {
+        headers: { 'content-type': 'application/json' },
+        status: 200,
+      })
+    })
+    let generation: Promise<unknown> | null = null
+    const hostedToolContext = {
+      computerToolsAvailable: false,
+      currentAssistantInputId: () => 'input_image_origin',
+      currentHostedDeliveryContext: () => null,
+      currentHostedMailboxItemIds: () => [],
+      imageGenerationLauncher: {
+        launch(input) {
+          generation = input.run(new AbortController().signal)
+          return 'started' as const
+        },
+      },
+      sendVaultFile: async () => ({
+        filename: 'unused',
+        status: 'denied' as const,
+      }),
+      vaultFileSendAvailable: false,
+    } satisfies AssistantHostedToolContext
+    const uploader = {
+      uploadGeneratedImage: vi.fn(async () => ({
+        alt: 'Generated image',
+        kind: 'image' as const,
+        source: 'gpt-image-1',
+        url: 'https://imagedelivery.net/account/generated/public',
+      })),
+    }
+
+    const result = await executeMurphDynamicToolRequest({
+      env: { OPENAI_API_KEY: 'test-key' },
+      fetchImpl,
+      hostedGeneratedImageUploader: uploader,
+      hostedToolContext,
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request: {
+        args: {
+          alt: null,
+          outputFormat: 'webp',
+          prompt: 'Draw a calm sunrise.',
+          quality: 'medium',
+          referenceImageRefs: [],
+          size: '1024x1024',
+        },
+        kind: 'generate-image',
+      },
+      requireHostedGeneratedImageUploader: true,
+    })
+
+    expect(result.rpcResult).toMatchObject({
+      success: true,
+      contentItems: [{
+        text: expect.stringContaining('continue without waiting'),
+      }],
+    })
+    expect(fetchImpl).toHaveBeenCalledOnce()
+    expect(uploader.uploadGeneratedImage).not.toHaveBeenCalled()
+
+    releaseProvider()
+    await expect(generation).resolves.toMatchObject({
+      media: [{
+        url: 'https://imagedelivery.net/account/generated/public',
+      }],
+      success: true,
+    })
   })
 
   it('keeps the minimal legacy prompt-only call valid', () => {

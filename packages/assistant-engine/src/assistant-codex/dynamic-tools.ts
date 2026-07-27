@@ -3007,19 +3007,65 @@ export async function executeMurphDynamicToolRequest(input: {
         return toolTextResult(false, 'image generation cannot be combined with a voice memo')
       }
 
+      const providerRequestOrdinal = input.nextUsageOrdinal()
+      const captureIdempotencyKey = buildGeneratedImageCaptureIdempotencyKey({
+        toolCallId: readGeneratedImageToolCallId(input.request),
+        scope: 'generate-image',
+      })
+      const imageGenerationLauncher =
+        input.hostedToolContext?.imageGenerationLauncher ?? null
+      const originAssistantInputId =
+        input.hostedToolContext?.currentAssistantInputId?.() ?? null
+      const operationId =
+        captureIdempotencyKey
+        ?? `murph.dynamic-tool.generate-image:${originAssistantInputId}:${providerRequestOrdinal}`
+      const generateImageArgs = input.request.args
+      if (
+        imageGenerationLauncher
+        && originAssistantInputId
+        && input.hostedGeneratedImageUploader
+      ) {
+        const launch = imageGenerationLauncher.launch({
+          operationId,
+          originAssistantInputId,
+          run: async (signal) => {
+            const result = await executeGenerateImageTool({
+              abortSignal: signal,
+              args: generateImageArgs,
+              captureIdempotencyKey: operationId,
+              codexHome: input.codexHome ?? null,
+              env: input.env,
+              fetchImpl: input.fetchImpl,
+              hostedGeneratedImageUploader: input.hostedGeneratedImageUploader ?? null,
+              materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts ?? null,
+              providerRequestOrdinal,
+              requireHostedGeneratedImageUploader: true,
+              vaultRoot: input.vaultRoot ?? null,
+            })
+            return {
+              media: result.responseMedia ?? [],
+              success: result.rpcSuccess,
+            }
+          },
+        })
+        return toolTextResult(
+          true,
+          launch === 'already-started'
+            ? 'image generation is already running; its result will arrive as a new system input'
+            : 'image generation started; continue without waiting because its uploaded result will arrive as a new system input',
+        )
+      }
+
       const result = await executeGenerateImageTool({
         abortSignal: input.abortSignal ?? null,
-        args: input.request.args,
-        captureIdempotencyKey: buildGeneratedImageCaptureIdempotencyKey({
-          toolCallId: readGeneratedImageToolCallId(input.request),
-          scope: 'generate-image',
-        }),
+        args: generateImageArgs,
+        captureIdempotencyKey,
         codexHome: input.codexHome ?? null,
         env: input.env,
         fetchImpl: input.fetchImpl,
         hostedGeneratedImageUploader: input.hostedGeneratedImageUploader ?? null,
         materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts ?? null,
-        providerRequestOrdinal: input.nextUsageOrdinal(),
+        providerRequestOrdinal,
         requireHostedGeneratedImageUploader:
           input.requireHostedGeneratedImageUploader ?? false,
         vaultRoot: input.vaultRoot ?? null,

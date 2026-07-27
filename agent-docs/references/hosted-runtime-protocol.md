@@ -1129,6 +1129,18 @@ checkpoint can contain it. Portable support bundles omit all `.runtime/**`; the
 generic `exports/assistant-deliveries/**` path remains ordinary checkpointed
 vault data and receives no deletion or path-specific packaging authority.
 Existing global file-type exclusions still apply regardless of directory.
+
+Hosted dynamic image generation is invocation-local background work. The tool
+returns after launch so the current assistant turn can continue. After provider
+generation, canonical capture save, and hosted upload finish, the runtime stages
+one trusted system input on the original accepted conversation route and
+notifies the existing runtime wake signal. The foreground pass loop folds a
+completion that arrives during active work into the next assistant-input batch;
+otherwise the wake interrupts the dirty idle window before its routine
+checkpoint. This adds no durable image job, mailbox kind, scheduler, retry
+owner, reservation, allowance, or image-specific usage lifecycle. Runner loss
+may drop unfinished invocation-local work.
+
 Detached `assistant.notification.requested` work remains output-only and cannot
 mutate resident conversation history or native provider resume state. A completed phone
 call is delivered as an ordinary `assistant.notification.requested` system-mailbox

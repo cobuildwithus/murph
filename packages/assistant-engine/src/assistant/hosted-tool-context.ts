@@ -28,6 +28,7 @@ import type {
   AssistantHostedGroupPermissionOfferTool,
   AssistantHostedGroupSharedReader,
   AssistantHostedGroupTool,
+  AssistantHostedImageGenerationLauncher,
   AssistantHostedLabsTool,
   AssistantHostedNewsletterTool,
   AssistantHostedPersonalizationTool,
@@ -93,6 +94,7 @@ export interface AssistantHostedToolContext {
   readonly groupSharedReader?: AssistantHostedGroupSharedReader | null
   readonly groupTool?: AssistantHostedGroupTool | null
   readonly labsTool?: AssistantHostedLabsTool | null
+  readonly imageGenerationLauncher?: AssistantHostedImageGenerationLauncher | null
   readonly newsletterTool?: AssistantHostedNewsletterTool | null
   readonly personalizationTool?: AssistantHostedPersonalizationTool | null
   readonly planUsageTool?: AssistantHostedPlanUsageTool | null
@@ -233,6 +235,7 @@ export function createAssistantHostedToolContext(input: {
     groupSharedReader: executionContext?.groupSharedReader ?? null,
     groupTool: executionContext?.groupTool ?? null,
     labsTool: executionContext?.labsTool ?? null,
+    imageGenerationLauncher: executionContext?.imageGenerationLauncher ?? null,
     newsletterTool,
     personalizationTool: executionContext?.personalizationTool ?? null,
     planUsageTool: executionContext?.planUsageTool ?? null,

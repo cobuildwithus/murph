@@ -33,6 +33,8 @@ export type {
   AssistantHostedGroupSharedReadRequest,
   AssistantHostedGroupSharedReadResponse,
   AssistantHostedGroupSharedRecord,
+  AssistantHostedImageGenerationCompletion,
+  AssistantHostedImageGenerationLauncher,
 } from './assistant/execution-context.js'
 export {
   flushPendingAssistantRuntimeIssueWrites,
