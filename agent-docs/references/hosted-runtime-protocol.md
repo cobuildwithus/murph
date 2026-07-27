@@ -1949,10 +1949,24 @@ above the boundary is unresolved only when it has neither accepted delivery nor
 durable consumed evidence. This second condition prevents a best-effort missing
 delivery link from becoming a false page after handling is already known.
 One fixed-kind `HostedLinqAlert` row provides the incident claim, provider
-idempotency identity, retry lease, and active state. A healthy scan silently
-clears the claim so a later incident receives a new identity; the monitor does
-not send a potentially misleading recovery message from aged observability
-data. The configured destination is an opaque existing dedicated Linq chat ID.
+idempotency identity, last provider-attempt boundary, and active state. A
+healthy scan silently clears the claim so a later incident receives a new
+identity, but preserves the last attempt/success timestamps as the cross-
+incident pacing floor; the monitor does not send a potentially misleading
+recovery message from aged observability data. Every provider attempt,
+including an uncertain retry, is separated from the prior attempt or success
+by at least ten minutes plus stable bounded jitter. Uncertain retries reuse the
+exact incident body and provider idempotency key. Separate incidents carry
+fresh aggregate evidence and a fresh checked-at timestamp rather than
+artificial text variation. The configured destination is an opaque existing
+dedicated Linq chat ID, and its separately configured IANA operator timezone
+suppresses provider sends from 11 PM through 7 AM local time. A stable per-day
+delay of up to ten minutes spreads deferred alerts across more than one
+five-minute cron tick instead of resuming every alert at the same quiet-hours
+boundary. Detection and healthy-state transitions continue while sends are
+suppressed. A healthy scan clears sending and failed state as well as an
+accepted active incident, so recovered stale evidence cannot page after its
+quiet-hours or pacing deferral.
 Persisted and delivered evidence is aggregate counts and durations only: no
 message content, member, phone, chat, mailbox, delivery, or trace identifiers.
 The monitor is observability-only: it does not append mailbox work, signal

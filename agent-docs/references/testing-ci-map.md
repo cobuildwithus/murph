@@ -191,13 +191,15 @@ not enter evidence; and attachment-only input fails closed before provider work.
 - `apps/web/test/hosted-runtime-latency-alert-{monitor,cron}.test.ts` locks the
   same exact 30-second boundary for completed and still-unresolved Linq traces,
   excludes consumed traces with best-effort missing delivery links, and proves
-  cron auth, incident claim coalescing, provider-idempotent retry, later
-  recurrence, PII-free copy, and fail-safe scan truncation.
+  cron auth, incident claim coalescing, operator-time quiet hours, stable
+  wake-up jitter, the ten-minute-plus-jitter retry/recurrence floor,
+  provider-idempotent retry, naturally distinct later-incident copy, PII-free
+  evidence, and fail-safe scan truncation.
   `apps/web/vercel.json` registers that read-only monitor at a five-minute
   cadence. The hosted-local foreground-priority leg additionally uses real
   PostgreSQL, authenticated cron HTTP, and the Linq stub boundary to prove one
-  accepted operator alert through a lost-ack retry, active-incident coalescing,
-  silent healthy reset, and a new alert for recurrence.
+  accepted operator alert through a paced lost-ack retry, active-incident
+  coalescing, silent healthy reset, and a paced new alert for recurrence.
 - After hosted scenarios initialize the schema, the Linq route-authority matrix leg runs the focused real-PostgreSQL proofs for deterministic hosted usage replay, both participant-addition route-row orderings, the canonical chat-ownership-before-route-row order shared by usage-limit dispatch and route-key convergence, and device-sync exact-payload plus companion-receipt lock order against concurrent account deletion.
 - `.github/workflows/release.yml` uses GitHub-hosted `ubuntu-24.04`, installs once, runs `pnpm release:check` with `MURPH_TEST_LANES_PARALLEL=1`, `MURPH_APP_VERIFY_PARALLEL=1`, and `MURPH_VERIFY_STEP_PARALLEL=1` so the release verification lane uses the parallel package/smoke branches and parallel app substeps without enabling full app/package overlap unless `MURPH_ACCEPTANCE_APP_VERIFY_WITH_COVERAGE=1` is set explicitly, while the same deterministic hosted-web build placeholders keep `apps/web verify` on its truthful build path without injecting production DB or production hosted device secrets, then packs the publishable tarballs once for upload/publication.
 - Vercel deploys of `apps/web` use the checked-in Vercel build command

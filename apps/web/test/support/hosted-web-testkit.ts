@@ -86,6 +86,7 @@ type HostedTestPrismaClient =
   & HostedUsageCreditForTestPrismaClient
   & HostedComputerUseForTestPrismaClient
   & HostedIngressLatencyForTestPrismaClient
+  & HostedRuntimeLatencyAlertForTestPrismaClient
   & HostedLinqWorkspaceIsolationForTestPrismaClient
   & HostedWorkspaceSeedForTestPrismaClient
   & HostedUsageDiagnosticsForTestPrismaClient;
@@ -152,6 +153,19 @@ interface HostedIngressLatencyForTestPrismaClient {
     update(args: unknown): Promise<{
       acceptedAt: Date;
       id: string;
+    }>;
+  };
+}
+
+interface HostedRuntimeLatencyAlertForTestPrismaClient {
+  hostedLinqAlert: {
+    findUnique(args: unknown): Promise<{
+      lastAttemptedAt: Date | null;
+      sentAt: Date | null;
+    } | null>;
+    update(args: unknown): Promise<{
+      lastAttemptedAt: Date | null;
+      sentAt: Date | null;
     }>;
   };
 }
@@ -921,6 +935,49 @@ export async function normalizeHostedLinqLatencyTracesForTest(input: {
     return {
       updatedCount: traces.length,
     };
+  });
+}
+
+export async function ageHostedRuntimeLatencyAlertForTest(input: {
+  ageMs: number;
+  environment?: NodeJS.ProcessEnv;
+}): Promise<{ updated: boolean }> {
+  if (!Number.isSafeInteger(input.ageMs) || input.ageMs < 0) {
+    throw new RangeError(
+      "Hosted runtime latency alert test age requires a non-negative integer.",
+    );
+  }
+
+  return withHostedWebTestkitDeps(input.environment, async (deps) => {
+    const monitorId = "hosted-runtime-latency-monitor:v1";
+    const state = await deps.prisma.hostedLinqAlert.findUnique({
+      select: {
+        lastAttemptedAt: true,
+        sentAt: true,
+      },
+      where: {
+        id: monitorId,
+      },
+    });
+    if (!state) {
+      return { updated: false };
+    }
+
+    const agedAt = new Date(Date.now() - input.ageMs);
+    await deps.prisma.hostedLinqAlert.update({
+      data: {
+        lastAttemptedAt: state.lastAttemptedAt ? agedAt : null,
+        sentAt: state.sentAt ? agedAt : null,
+      },
+      select: {
+        lastAttemptedAt: true,
+        sentAt: true,
+      },
+      where: {
+        id: monitorId,
+      },
+    });
+    return { updated: true };
   });
 }
 

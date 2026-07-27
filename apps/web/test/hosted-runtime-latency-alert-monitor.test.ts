@@ -2,6 +2,7 @@ import type { HostedLinqAlert } from "@prisma/client";
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  HOSTED_RUNTIME_LATENCY_ALERT_MINIMUM_INTERVAL_MS,
   HOSTED_RUNTIME_REPLY_LATENCY_ALERT_THRESHOLD_MS,
   runHostedRuntimeLatencyAlertMonitor,
   summarizeHostedRuntimeLatencyRows,
@@ -11,6 +12,7 @@ import {
 const now = instant("2026-07-26T16:00:00.000Z");
 const alertEnv = {
   HOSTED_RUNTIME_LATENCY_ALERT_LINQ_CHAT_ID: "opaque-alert-chat",
+  HOSTED_RUNTIME_LATENCY_ALERT_TIME_ZONE: "America/Los_Angeles",
 };
 
 describe("hosted runtime latency health", () => {
@@ -138,7 +140,7 @@ describe("hosted runtime latency alert monitor", () => {
     expect(sentMessage).not.toContain("provider-message-1");
   });
 
-  it("retries a failed alert with the same provider idempotency key", async () => {
+  it("rate-limits a failed alert before retrying the exact provider effect", async () => {
     const fixture = createMonitorPrismaFixture([
       latencyRow({
         acceptedAt: "2026-07-26T15:58:00.000Z",
@@ -165,14 +167,21 @@ describe("hosted runtime latency alert monitor", () => {
     })).rejects.toMatchObject({
       code: "HOSTED_RUNTIME_LATENCY_ALERT_SEND_FAILED",
     });
-    fixture.setRows([]);
-    const retried = await runHostedRuntimeLatencyAlertMonitor({
+    const deferred = await runHostedRuntimeLatencyAlertMonitor({
       env: alertEnv,
       now: instant("2026-07-26T16:05:00.000Z"),
       prisma: fixture.prisma,
       sendLinqMessage,
     });
+    const retried = await runHostedRuntimeLatencyAlertMonitor({
+      env: alertEnv,
+      now: instant("2026-07-26T16:20:00.000Z"),
+      prisma: fixture.prisma,
+      sendLinqMessage,
+    });
 
+    expect(HOSTED_RUNTIME_LATENCY_ALERT_MINIMUM_INTERVAL_MS).toBe(10 * 60_000);
+    expect(deferred.outcome).toBe("deferred_rate_limit");
     expect(retried.outcome).toBe("alert_sent");
     expect(sendLinqMessage).toHaveBeenCalledTimes(2);
     expect(sendLinqMessage.mock.calls[0]?.[0].idempotencyKey).toBe(
@@ -186,6 +195,44 @@ describe("hosted runtime latency alert monitor", () => {
     );
     expect(fixture.readState()?.lastErrorCode).toBeNull();
     expect(fixture.readState()?.status).toBe("latency_alerting");
+  });
+
+  it("clears a failed incident that recovers instead of paging stale evidence", async () => {
+    const fixture = createMonitorPrismaFixture([
+      latencyRow({
+        acceptedAt: "2026-07-26T15:58:00.000Z",
+      }),
+    ]);
+    const sendLinqMessage = vi.fn(async () => {
+      throw new Error("private provider detail");
+    });
+
+    await expect(runHostedRuntimeLatencyAlertMonitor({
+      env: alertEnv,
+      now,
+      prisma: fixture.prisma,
+      sendLinqMessage,
+    })).rejects.toMatchObject({
+      code: "HOSTED_RUNTIME_LATENCY_ALERT_SEND_FAILED",
+    });
+    fixture.setRows([]);
+    const cleared = await runHostedRuntimeLatencyAlertMonitor({
+      env: alertEnv,
+      now: instant("2026-07-26T16:05:00.000Z"),
+      prisma: fixture.prisma,
+      sendLinqMessage,
+    });
+    const stayedHealthy = await runHostedRuntimeLatencyAlertMonitor({
+      env: alertEnv,
+      now: instant("2026-07-26T16:20:00.000Z"),
+      prisma: fixture.prisma,
+      sendLinqMessage,
+    });
+
+    expect(cleared.outcome).toBe("healthy");
+    expect(stayedHealthy.outcome).toBe("healthy");
+    expect(sendLinqMessage).toHaveBeenCalledTimes(1);
+    expect(fixture.readState()?.status).toBe("latency_healthy");
   });
 
   it("silently clears an incident and alerts again on a later recurrence", async () => {
@@ -220,29 +267,39 @@ describe("hosted runtime latency alert monitor", () => {
         acceptedAt: "2026-07-26T16:08:00.000Z",
       }),
     ]);
-    const recurred = await runHostedRuntimeLatencyAlertMonitor({
+    const deferred = await runHostedRuntimeLatencyAlertMonitor({
       env: alertEnv,
       now: instant("2026-07-26T16:10:00.000Z"),
       prisma: fixture.prisma,
       sendLinqMessage,
     });
-    const healthy = await runHostedRuntimeLatencyAlertMonitor({
+    const recurred = await runHostedRuntimeLatencyAlertMonitor({
       env: alertEnv,
-      now: instant("2026-07-26T16:11:00.000Z"),
+      now: instant("2026-07-26T16:20:00.000Z"),
+      prisma: fixture.prisma,
+      sendLinqMessage,
+    });
+    const active = await runHostedRuntimeLatencyAlertMonitor({
+      env: alertEnv,
+      now: instant("2026-07-26T16:21:00.000Z"),
       prisma: fixture.prisma,
       sendLinqMessage,
     });
 
     expect(cleared.outcome).toBe("healthy");
+    expect(deferred.outcome).toBe("deferred_rate_limit");
     expect(recurred.outcome).toBe("alert_sent");
-    expect(healthy.outcome).toBe("incident_active");
+    expect(active.outcome).toBe("incident_active");
     expect(sendLinqMessage).toHaveBeenCalledTimes(2);
     expect(sendLinqMessage.mock.calls[1]?.[0].idempotencyKey).not.toBe(
       sendLinqMessage.mock.calls[0]?.[0].idempotencyKey,
     );
+    expect(sendLinqMessage.mock.calls[1]?.[0].message).not.toBe(
+      sendLinqMessage.mock.calls[0]?.[0].message,
+    );
   });
 
-  it("does not create alert state or send when no dedicated chat is configured", async () => {
+  it("does not create alert state or send when alerting is unconfigured", async () => {
     const fixture = createMonitorPrismaFixture([
       latencyRow({
         acceptedAt: "2026-07-26T15:58:00.000Z",
@@ -267,6 +324,118 @@ describe("hosted runtime latency alert monitor", () => {
     expect(result.health.anomalous).toBe(true);
     expect(fixture.alertUpsert).not.toHaveBeenCalled();
     expect(sendLinqMessage).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [
+      "dedicated chat",
+      { HOSTED_RUNTIME_LATENCY_ALERT_TIME_ZONE: "America/Los_Angeles" },
+    ],
+    [
+      "operator time zone",
+      { HOSTED_RUNTIME_LATENCY_ALERT_LINQ_CHAT_ID: "opaque-alert-chat" },
+    ],
+  ])("fails visibly when the configured alert is missing its %s", async (
+    _missing,
+    env,
+  ) => {
+    const fixture = createMonitorPrismaFixture([
+      latencyRow({
+        acceptedAt: "2026-07-26T15:58:00.000Z",
+      }),
+    ]);
+
+    await expect(runHostedRuntimeLatencyAlertMonitor({
+      env,
+      now,
+      prisma: fixture.prisma,
+    })).rejects.toMatchObject({
+      code: "HOSTED_RUNTIME_LATENCY_ALERT_CONFIG_INCOMPLETE",
+    });
+    expect(fixture.alertUpsert).not.toHaveBeenCalled();
+  });
+
+  it("rejects an invalid operator time zone without creating alert state", async () => {
+    const fixture = createMonitorPrismaFixture([
+      latencyRow({
+        acceptedAt: "2026-07-26T15:58:00.000Z",
+      }),
+    ]);
+
+    await expect(runHostedRuntimeLatencyAlertMonitor({
+      env: {
+        HOSTED_RUNTIME_LATENCY_ALERT_LINQ_CHAT_ID: "opaque-alert-chat",
+        HOSTED_RUNTIME_LATENCY_ALERT_TIME_ZONE: "Mars/Olympus",
+      },
+      now,
+      prisma: fixture.prisma,
+    })).rejects.toMatchObject({
+      code: "HOSTED_RUNTIME_LATENCY_ALERT_TIME_ZONE_INVALID",
+    });
+    expect(fixture.alertUpsert).not.toHaveBeenCalled();
+  });
+
+  it("suppresses overnight sends in the configured operator time zone", async () => {
+    const rows = [
+      latencyRow({
+        acceptedAt: "2026-07-26T05:58:00.000Z",
+      }),
+    ];
+    const overnightFixture = createMonitorPrismaFixture(rows);
+    const daytimeFixture = createMonitorPrismaFixture(rows);
+    const sendLinqMessage = vi.fn(async (input: LinqSendInput) => ({
+      chatId: input.chatId,
+      messageId: "provider-message",
+    }));
+
+    const overnight = await runHostedRuntimeLatencyAlertMonitor({
+      env: alertEnv,
+      now: instant("2026-07-26T06:00:00.000Z"),
+      prisma: overnightFixture.prisma,
+      sendLinqMessage,
+    });
+    const daytime = await runHostedRuntimeLatencyAlertMonitor({
+      env: {
+        ...alertEnv,
+        HOSTED_RUNTIME_LATENCY_ALERT_TIME_ZONE: "Asia/Tokyo",
+      },
+      now: instant("2026-07-26T06:00:00.000Z"),
+      prisma: daytimeFixture.prisma,
+      sendLinqMessage,
+    });
+
+    expect(overnight.outcome).toBe("deferred_quiet_hours");
+    expect(daytime.outcome).toBe("alert_sent");
+    expect(sendLinqMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it("adds stable wake-up jitter after quiet hours", async () => {
+    const fixture = createMonitorPrismaFixture([
+      latencyRow({
+        acceptedAt: "2026-07-26T13:58:00.000Z",
+      }),
+    ]);
+    const sendLinqMessage = vi.fn(async (input: LinqSendInput) => ({
+      chatId: input.chatId,
+      messageId: "provider-message",
+    }));
+
+    const wakeBoundary = await runHostedRuntimeLatencyAlertMonitor({
+      env: alertEnv,
+      now: instant("2026-07-26T14:00:00.000Z"),
+      prisma: fixture.prisma,
+      sendLinqMessage,
+    });
+    const afterJitter = await runHostedRuntimeLatencyAlertMonitor({
+      env: alertEnv,
+      now: instant("2026-07-26T14:10:00.000Z"),
+      prisma: fixture.prisma,
+      sendLinqMessage,
+    });
+
+    expect(wakeBoundary.outcome).toBe("deferred_quiet_hours");
+    expect(afterJitter.outcome).toBe("alert_sent");
+    expect(sendLinqMessage).toHaveBeenCalledTimes(1);
   });
 
   it("does not send when a concurrent cron already won the incident claim", async () => {
@@ -297,7 +466,7 @@ describe("hosted runtime latency alert monitor", () => {
     expect(sendLinqMessage).not.toHaveBeenCalled();
   });
 
-  it("coalesces a live send lease and reclaims it at the exact expiry", async () => {
+  it("coalesces a live send and reclaims it only after the paced retry window", async () => {
     const fixture = createMonitorPrismaFixture([
       latencyRow({
         acceptedAt: "2026-07-26T15:58:00.000Z",
@@ -336,9 +505,21 @@ describe("hosted runtime latency alert monitor", () => {
       prisma: fixture.prisma,
       sendLinqMessage,
     });
-    const expired = await runHostedRuntimeLatencyAlertMonitor({
+    const oldLeaseBoundary = await runHostedRuntimeLatencyAlertMonitor({
       env: alertEnv,
       now: instant("2026-07-26T16:04:00.000Z"),
+      prisma: fixture.prisma,
+      sendLinqMessage,
+    });
+    const minimumBoundary = await runHostedRuntimeLatencyAlertMonitor({
+      env: alertEnv,
+      now: instant("2026-07-26T16:10:00.000Z"),
+      prisma: fixture.prisma,
+      sendLinqMessage,
+    });
+    const expired = await runHostedRuntimeLatencyAlertMonitor({
+      env: alertEnv,
+      now: instant("2026-07-26T16:20:00.000Z"),
       prisma: fixture.prisma,
       sendLinqMessage,
     });
@@ -348,6 +529,8 @@ describe("hosted runtime latency alert monitor", () => {
     });
 
     expect(overlapping.outcome).toBe("coalesced");
+    expect(oldLeaseBoundary.outcome).toBe("coalesced");
+    expect(minimumBoundary.outcome).toBe("coalesced");
     expect(expired.outcome).toBe("alert_sent");
     expect(sendLinqMessage).toHaveBeenCalledTimes(2);
     expect(sendLinqMessage.mock.calls[1]?.[0].idempotencyKey).toBe(
