@@ -21,6 +21,7 @@ interface HostedUsageTopUpOffer {
 }
 
 interface HostedUsageTopUpActivePurchase {
+  cancelAllowed?: true;
   offerCode: string;
   purchaseId: string;
   restartAt?: string;
@@ -51,6 +52,7 @@ interface HostedUsageTopUpDialogProps {
 }
 
 interface HostedUsageTopUpPurchaseResponse {
+  cancelAllowed: boolean;
   purchaseId: string;
   recovered: boolean;
   restartAt: string | null;
@@ -67,6 +69,7 @@ function readPurchaseResponse(value: unknown): HostedUsageTopUpPurchaseResponse 
     value.purchaseId.trim().length === 0 ||
     value.purchaseId.length > 200 ||
     !isPurchaseStatus(value.status) ||
+    (value.cancelAllowed !== undefined && value.cancelAllowed !== true) ||
     (value.recovered !== undefined && value.recovered !== true) ||
     (value.restartAt !== undefined &&
       (value.status !== "reconciling" ||
@@ -81,6 +84,7 @@ function readPurchaseResponse(value: unknown): HostedUsageTopUpPurchaseResponse 
   }
 
   return {
+    cancelAllowed: value.cancelAllowed === true,
     purchaseId: value.purchaseId,
     recovered: value.recovered === true,
     restartAt: typeof value.restartAt === "string" ? value.restartAt : null,

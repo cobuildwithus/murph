@@ -47,6 +47,38 @@ Last verified: 2026-07-26
   the frozen Session expiry. An ambiguous response must
   not mint a replacement purchase or create a second payable Session. The
   member may begin another purchase only after the existing one is terminal.
+- Current-policy group funding may create one unconfirmed saved-card
+  PaymentIntent with a purchase-derived idempotency key. The producer must bind
+  its encrypted exact reference under the payer lock before confirmation. The
+  locked bind must re-read both payer suspension and purchase status; a
+  suspension, deletion, or terminal transition that wins first leaves the
+  intent unbound, canceled, and never confirmed. A succeeded or processing
+  event for an unbound intent remains in the existing Stripe receipt retry lane
+  instead of being acknowledged without a grant.
+  Confirmation and cancellation use separate stable keys. An ambiguous
+  confirmation keeps the purchase `payment_pending`; exact request replay
+  retrieves and continues only that intent. A fresh request for the same
+  target may recover a nonterminal purchase only when its offer matches the
+  frozen offer; a different amount fails closed, and the client keeps the
+  original amount and request key locked while the outcome is uncertain.
+  Authentication or card failure
+  may fall back to Checkout only after the exact intent is verified canceled
+  and its binding is cleared under the same reconciliation fence. Direct
+  PaymentIntent events reuse the existing Stripe receipt and financial
+  reconciliation owner rather than adding a retry queue.
+- The Vercel predeploy migration replaces the detached-payer checks before the
+  saved-card producer can serve traffic. That replacement is backward
+  compatible with the old application, retains the PaymentIntent/Charge and
+  ciphertext-clearing invariants, and removes only the impossible
+  Checkout-Session requirement for fulfilled direct payments. The superseded
+  postdeploy constraint installer stays out of the contract-migration run so a
+  later workflow cannot re-tighten the schema after promotion.
+- The payer-owned cancel endpoint also owns a sessionless direct
+  `payment_pending` purchase. It retrieves and cancels only the exact bound
+  intent, preserves succeeded or processing state for webhook settlement, and
+  terminalizes only provider-proven cancellation. Cancellation is payer
+  authority and remains available from Settings or another target's conflict
+  state; retry and confirmation remain exact-target capabilities.
 - Family usage-credit creation rechecks owner, group billing, active membership,
   and beneficiary status inside the purchase transaction. Exact request-key
   replay keeps the already-frozen purchase identity but rechecks mutable Family
@@ -72,8 +104,8 @@ Last verified: 2026-07-26
   becoming debt. A committed grant clears the current usage block when capacity
   becomes positive and makes the normal runtime recheck a retry-owned
   post-commit obligation, so accepted blocked input remains pending and can
-  resume. Duplicate Checkout and webhook delivery must converge on the same
-  purchase, grant, and recheck outcome. Provider/KMS preparation and the full
+  resume. Duplicate Checkout, PaymentIntent, and webhook delivery must converge
+  on the same purchase, grant, and recheck outcome. Provider/KMS preparation and the full
   database-plus-Temporal recheck handoff are hard-bounded below the derived
   receipt lease, and receipt completion must win its exact attempt fence; a
   timed-out or reclaimed worker remains retryable and cannot report completion.

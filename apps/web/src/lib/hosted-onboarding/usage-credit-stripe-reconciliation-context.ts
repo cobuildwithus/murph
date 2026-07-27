@@ -301,7 +301,7 @@ export async function buildHostedUsageCreditStripePrivateReferences(input: {
   paymentIntentId: string | null;
   prisma: HostedUsageCreditPurchaseReadClient;
   purchase: HostedUsageCreditPurchaseForReconciliation;
-  sessionId: string;
+  sessionId: string | null;
 }): Promise<HostedUsageCreditStripePrivateReferences> {
   const payerMemberId = input.purchase.payerMemberId;
   const encryptPrivateReference = (

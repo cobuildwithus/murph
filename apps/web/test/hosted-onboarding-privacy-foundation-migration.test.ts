@@ -924,6 +924,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260726180000_hosted_account_deletion_cleanup",
       "20260726180000_hosted_address_book_projection",
       "20260726180000_hosted_thread_container_usage_default",
+      "20260727040000_relax_hosted_usage_credit_detached_direct_proof",
       "migration_lock.toml",
     ]);
     expect(hostedUserCryptoEnvelopeMigrationSql).toContain(
