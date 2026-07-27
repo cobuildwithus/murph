@@ -34,6 +34,7 @@ import { useHostedUsageTopUpDialog } from "./use-hosted-usage-top-up-dialog";
 function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
   const controller = useHostedUsageTopUpDialog(props);
   const { screen } = controller.state;
+  const dialogContentRef = useRef<HTMLDivElement>(null);
   const firstOfferRef = useRef<HTMLSpanElement>(null);
   const focusTitleAfterPurchaseActionRef = useRef(false);
   const titleRef = useRef<HTMLHeadingElement>(null);
@@ -42,7 +43,21 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
   useEffect(() => {
     const previousScreen = previousScreenRef.current;
     previousScreenRef.current = screen;
-    if (
+    const enteredSelectionRecovery =
+      screen.kind === "selection" &&
+      screen.attempt.kind === "locked" &&
+      screen.attempt.error !== null &&
+      (
+        previousScreen.kind !== "selection" ||
+        previousScreen.attempt.kind !== "locked" ||
+        previousScreen.attempt.error === null
+      );
+    if (controller.state.open && enteredSelectionRecovery) {
+      if (dialogContentRef.current) {
+        dialogContentRef.current.scrollTop = 0;
+      }
+      titleRef.current?.focus({ preventScroll: true });
+    } else if (
       controller.state.open &&
       previousScreen.kind === "selection" &&
       screen.kind === "purchase"
@@ -182,6 +197,7 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
         </DialogTrigger>
       ) : null}
       <DialogContent
+        ref={dialogContentRef}
         className="max-h-[calc(100dvh-2rem)] gap-7 overflow-y-auto border border-border bg-popover p-6 sm:max-w-xl sm:p-8"
         initialFocus={titleRef}
       >

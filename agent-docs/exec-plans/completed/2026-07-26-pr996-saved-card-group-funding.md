@@ -1,6 +1,6 @@
 # PR 996 saved-card group funding completion
 
-Status: active
+Status: completed
 Created: 2026-07-26
 Updated: 2026-07-26
 
@@ -43,6 +43,10 @@ Updated: 2026-07-26
    Mitigation: keep the original amount and request key locked in the group UI,
    and reject same-target active-purchase recovery when the submitted offer
    differs from the frozen offer.
+6. Risk: the added recovery content can leave a short mobile viewport scrolled
+   below the dialog identity and close control.
+   Mitigation: on the first locked-recovery transition, restore the real dialog
+   scroll container to the top and focus its title without scrolling.
 
 ## Tasks
 
@@ -68,27 +72,41 @@ Updated: 2026-07-26
   ambiguous-response amount-consent gap: group recovery now names the uncertain
   payment, hides amount changes, reuses the exact request key, and fails closed
   on a new-key offer mismatch server-side.
+- The valid preliminary specialist pass returned two accepted findings. The
+  test-only artifact now proves that a rejected cancellation followed by a
+  succeeded retrieval cannot open Checkout, and the parent-owned frontend fix
+  restores the mobile dialog heading/focus before showing recovery.
+- Two earlier preliminary attempts were invalid tooling/evidence passes rather
+  than substantive reviews: the first omitted the required model confirmation;
+  the second captured a ghost action under hover. Both gaps were corrected
+  without changing the reviewed product behavior before the one valid pass.
 
 ## Verification
 
-- `pnpm exec vitest run --config apps/web/vitest.config.ts apps/web/test/hosted-usage-credit-purchase-service.test.ts apps/web/test/hosted-usage-credit-stripe-reconciliation.test.ts apps/web/test/hosted-usage-top-up-dialog.test.tsx --no-coverage` — 161 tests passed after the accepted product-review consent fix.
+- `pnpm exec vitest run --config apps/web/vitest.config.ts apps/web/test/hosted-usage-credit-purchase-service.test.ts apps/web/test/hosted-usage-credit-stripe-reconciliation.test.ts apps/web/test/hosted-usage-top-up-dialog.test.tsx --no-coverage` — 164 tests passed after the accepted product-review consent fix and first specialist coverage patch.
+- `pnpm exec vitest run --config apps/web/vitest.config.ts apps/web/test/hosted-usage-credit-purchase-service.test.ts apps/web/test/hosted-usage-top-up-dialog.test.tsx --no-coverage` — 121 tests passed after the valid preliminary specialist findings were resolved.
 - `pnpm --dir apps/web typecheck:prepared` — passed.
 - `pnpm --dir apps/web lint` — passed with zero errors; remaining warnings are
   pre-existing outside the task after task-owned warnings were removed.
 - `MURPH_CRABBOX_BLACKSMITH=1 pnpm test:diff apps/web` — passed in one
   one-shot 16-vCPU Testbox; app tests, lint, typecheck, build, dev smoke, and
   repository guards all passed.
+- The same canonical command passed again after the preliminary specialist
+  remediation in one-shot Testbox `tbx_01kygjnznzw8b4p84wgettbqgf`.
 - `MURPH_CRABBOX_BLACKSMITH=1 pnpm verify:acceptance` — the Web and Cloudflare
   app verification surfaces passed, but the repo-wide command failed on the
   unrelated current-`main` CLI release-audit mismatch: the test expects
   `@cobuild/review-gpt` `^0.5.114` while the root manifest already declares
   `^0.5.117`. Neither file is changed by this task.
-- Desktop 1440x1000 and mobile 390x844 `/design?tab=sections` screenshots of
-  the real selected-$10 group dialog were inspected and uploaded through the
-  required public image transport; both delivery URLs return image responses.
+- Desktop 1440x1000 and mobile 390x844 `/design?tab=sections` screenshots cover
+  the real selection, direct-charge loading, ambiguous-response recovery, and
+  exhausted pending-payment recovery states. The ambiguous mobile state was
+  recaptured after the focus/scroll correction with its full heading and close
+  control visible on entry.
 - Claude Code Fable UI double-check was attempted after rendered evidence was
   stable and stopped at explicit usage-credit exhaustion, the documented
   non-blocking gap.
-- Canonical diff coverage, full acceptance, product experience review,
-  preliminary specialist ReviewGPT, final ReviewGPT, and exact-head CI are
-  pending.
+- Product-experience review, preliminary specialist ReviewGPT, parent final
+  review, and exact-head substantive CI are complete. Final ReviewGPT and its
+  final-head CI pass remain pending.
+Completed: 2026-07-26

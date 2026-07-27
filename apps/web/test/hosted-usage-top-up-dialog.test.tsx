@@ -87,17 +87,32 @@ vi.mock("@/src/components/ui/dialog", async () => {
         { value: { onOpenChange, open } },
         children,
       ),
-    DialogContent: ({
-      children,
-      className,
-      showCloseButton: _showCloseButton,
-    }: HTMLAttributes<HTMLDivElement> & { showCloseButton?: boolean }) => {
+    DialogContent: React.forwardRef<
+      HTMLDivElement,
+      HTMLAttributes<HTMLDivElement> & { showCloseButton?: boolean }
+    >(function DialogContent(
+      {
+        children,
+        className,
+        showCloseButton: _showCloseButton,
+      },
+      ref,
+    ) {
       void _showCloseButton;
       const context = React.useContext(DialogContext);
       return context.open
-        ? createElement("div", { className, role: "dialog" }, children)
+        ? createElement(
+            "div",
+            {
+              className,
+              "data-slot": "dialog-content",
+              ref,
+              role: "dialog",
+            },
+            children,
+          )
         : null;
-    },
+    }),
     DialogDescription: (props: HTMLAttributes<HTMLParagraphElement>) =>
       createElement("p", props),
     DialogHeader: (props: HTMLAttributes<HTMLDivElement>) =>
@@ -1010,9 +1025,20 @@ test("keeps an uncertain group payment locked to the original amount and request
   );
 
   try {
+    const dialog = rendered.container.querySelector<HTMLElement>(
+      '[data-slot="dialog-content"]',
+    );
+    const title = rendered.container.querySelector("h2");
+    assert.ok(dialog);
+    assert.ok(title);
+    dialog.scrollTop = 240;
+    const focus = vi.spyOn(title, "focus");
+
     await clickRadio(rendered.container, rendered.window, "usage_2500");
     await clickButton(rendered.container, rendered.window, "Add messages · $25");
 
+    assert.equal(dialog.scrollTop, 0);
+    expect(focus).toHaveBeenCalledWith({ preventScroll: true });
     assert.match(
       rendered.container.textContent ?? "",
       /We couldn’t confirm this payment yet/,

@@ -1005,6 +1005,59 @@ describe("createHostedUsageCreditCheckout", () => {
     });
   });
 
+  it("does not open Checkout when an ambiguous cancel reveals the saved-card payment succeeded", async () => {
+    const fake = createFakePrisma();
+    mockCanonicalSavedCard();
+    const readUnconfirmedIntent = () => buildSavedCardPaymentIntent({
+      amountReceived: 0,
+      latestCharge: null,
+      purchaseId: String(onlyPurchase(fake.purchases).id),
+      status: "requires_confirmation",
+    });
+    mocks.stripePaymentIntentCreate.mockImplementationOnce(
+      async () => readUnconfirmedIntent(),
+    );
+    mocks.stripePaymentIntentConfirm.mockRejectedValueOnce(
+      new Error("authentication required"),
+    );
+    mocks.stripePaymentIntentRetrieve
+      .mockImplementationOnce(async () => ({
+        ...readUnconfirmedIntent(),
+        status: "requires_action",
+      }))
+      .mockImplementationOnce(async () => buildSavedCardPaymentIntent({
+        amountReceived: 1_000,
+        latestCharge: "ch_saved_card_123",
+        purchaseId: String(onlyPurchase(fake.purchases).id),
+        status: "succeeded",
+      }));
+    mocks.stripePaymentIntentCancel.mockRejectedValueOnce(
+      new Error("connection lost"),
+    );
+
+    const result = await createHostedGroupUsageCreditCheckout({
+      clientRequestKey: CLIENT_REQUEST_KEY,
+      joinCode: "group_join_code_1234",
+      now: NOW,
+      offerCode: "usage_10_usd",
+      payerMemberId: MEMBER_ID,
+      prisma: fake.prisma as never,
+    });
+
+    expect(result).toMatchObject({ status: "payment_pending" });
+    expect(result).not.toHaveProperty("url");
+    expect(mocks.stripePaymentIntentCancel).toHaveBeenCalledOnce();
+    expect(mocks.stripePaymentIntentRetrieve).toHaveBeenCalledTimes(2);
+    expect(mocks.stripeCheckoutCreate).not.toHaveBeenCalled();
+    expect(onlyPurchase(fake.purchases)).toMatchObject({
+      status: "payment_pending",
+      stripeChargeIdEncrypted: "encrypted:ch_saved_card_123",
+      stripeChargeLookupKey: "billing:ch_saved_card_123",
+      stripePaymentIntentIdEncrypted: "encrypted:pi_saved_card_123",
+      stripePaymentIntentLookupKey: "billing:pi_saved_card_123",
+    });
+  });
+
   it("resumes the same durably bound intent after an ambiguous confirmation response", async () => {
     const fake = createFakePrisma();
     mockCanonicalSavedCard();
