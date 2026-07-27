@@ -1,0 +1,111 @@
+illingRef?.stripeSubscriptionId)
+   ) {
+@@ -387,6 +432,6 @@ function assertHostedBillingPlanSwitchToPulseSourceState(input: {
+   throw hostedOnboardingError({
+     code: "HOSTED_BILLING_PLAN_SWITCH_UNSUPPORTED",
+     httpStatus: 400,
+-    message: "This plan change is not supported.",
++    message: "This scheduled plan change is not supported.",
+   });
+ }
+@@ -402,4 +447,5 @@ function assertHostedBillingPlanSwitchLockedSource(input: {
+     billingStatus: HostedBillingStatus;
+     suspendedAt?: Date | null;
+   } | null;
++  targetPlanCode: HostedBillingPlanCode;
+ }): void {
+@@ -420,8 +466,9 @@ function assertHostedBillingPlanSwitchLockedSource(input: {
+ 
+   try {
+     assertHostedMemberOwnActiveBillingAllowed(input.member);
+-    assertHostedBillingPlanSwitchToPulseSourceState({
++    assertHostedBillingPlanSwitchSourceState({
+       billingRef: input.billingRef,
+       member: input.member,
++      targetPlanCode: input.targetPlanCode,
+     });
+   } catch {
+@@ -438,25 +485,34 @@ function buildHostedBillingPlanSwitchContextFromLocalPendingState(input: {
+   const stripeCustomerId = input.billingRef.stripeCustomerId;
+   const currentPeriodEnd = input.billingRef.scheduledBillingEffectiveAt;
++  const sourcePlanCode = parseHostedBillingPlanCode(
++    input.billingRef.currentBillingPlanCode,
++  );
++  const targetPlanCode = parseHostedBillingPlanCode(
++    input.billingRef.scheduledBillingPlanCode,
++  );
+ 
+   if (
+     !stripeCustomerId ||
+     !stripeSubscriptionId ||
+     !currentPeriodEnd ||
+-    input.billingRef.scheduledBillingPlanCode !== SWITCH_TO_PULSE_TARGET_PLAN
++    !sourcePlanCode ||
++    !targetPlanCode
+   ) {
+     return null;
+   }
+ 
+-  const edgeConfig = requireHostedSwitchPlanConfig(SWITCH_TO_PULSE_SOURCE_PLAN);
+-  const pulseConfig = requireHostedSwitchPlanConfig(SWITCH_TO_PULSE_TARGET_PLAN);
++  const sourceConfig = requireHostedSwitchPlanConfig(sourcePlanCode);
++  const targetConfig = requireHostedSwitchPlanConfig(targetPlanCode);
+ 
+   return {
+     currentPeriodEnd,
+     currentPeriodEndUnix: toUnixSeconds(currentPeriodEnd),
+-    edgeConfig,
+     memberId: input.memberId,
+-    pulseConfig,
++    sourceConfig,
++    sourcePlanCode,
+     stripeCustomerId,
+     stripeSubscriptionId,
++    targetConfig,
++    targetPlanCode,
+   };
+ }
+@@ -474,9 +529,13 @@ function requireHostedSwitchPlanConfig(
+ }
+ 
+ function assertHostedStripeSubscriptionScheduleableState(input: {
++  allowTrialing: boolean;
+   now: Date;
+   subscription: Stripe.Subscription;
+ }): void {
+-  if (input.subscription.status !== "active") {
++  if (
++    input.subscription.status !== "active" &&
++    !(input.allowTrialing && input.subscription.status === "trialing")
++  ) {
+     throw buildHostedStripeSubscriptionStateUnsupportedError("status");
+   }
+@@ -523,13 +582,13 @@ function readHostedStripeSubscriptionItemCurrentPeriodEnd(
+   return null;
+ }
+ 
+-function assertHostedStripeCanonicalEdgeSubscriptionItems(input: {
+-  edgeConfig: HostedStripePlanConfig;
++function assertHostedStripeCanonicalSourceSubscriptionItems(input: {
++  sourceConfig: HostedStripePlanConfig;
+   subscription: Stripe.Subscription;
+ }): void {
+   const items = input.subscription.items?.data ?? [];
+-  const recurringItems = items.filter((item) => item.price?.id === input.edgeConfig.priceId);
++  const recurringItems = items.filter((item) => item.price?.id === input.sourceConfig.priceId);
+   const unsupportedItems = items.filter((item) =>
+-    item.price?.id !== input.edgeConfig.priceId &&
++    item.price?.id !== input.sourceConfig.priceId &&
+     !isHostedStripeLegacyAiUsageMeteredItem(item)
+   );
+@@ -808,7 +867,7 @@ function readHostedStripeUnsupportedSchedulePhaseReason(
+   for (const item of phase.items) {
+     const priceId = coerceStripeObjectId(item.price);
+     if (
+-      priceId !== context.edgeConfig.priceId
+-      && priceId !== context.pulseConfig.priceId
++      priceId !== context.sourceConfig.priceId
++      && priceId !== context.targetConfig.priceId
+     ) {
+       continue;
+@@ -970,6 +1
