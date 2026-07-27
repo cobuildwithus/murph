@@ -237,4 +237,53 @@ describe("hosted group tool route", () => {
       },
     });
   });
+
+  it("does not acknowledge an accepted member Ask when its durable handoff rejects", async () => {
+    mocks.handoffHostedMailboxWake.mockRejectedValueOnce(
+      new Error("Temporal unavailable"),
+    );
+    const body = {
+      action: "ask_member",
+      grantId: "grant_sleep",
+      origin: {
+        assistantInputId: `ain_${"b".repeat(32)}`,
+        kind: "accepted_input",
+        sessionId: "session_group",
+      },
+      question: "How has the grantor been sleeping lately?",
+    };
+    mocks.handleTool.mockImplementationOnce(async (input) => {
+      await input.scheduleMailboxWake({
+        expectedUserId: "member-grantor",
+        mailboxItemId: "aask_req_disclosure_one",
+      });
+      return {
+        action: "ask_member",
+        result: { status: "accepted" },
+      };
+    });
+    const request = new Request(
+      `https://join.example.test${HOSTED_RUNTIME_GROUP_TOOL_PATH}`,
+      {
+        body: JSON.stringify(body),
+        headers: { "content-type": "application/json" },
+        method: "POST",
+      },
+    );
+
+    const response = await route.POST(request);
+
+    expect(response.status).toBe(500);
+    expect(mocks.handoffHostedMailboxWake).toHaveBeenCalledWith({
+      directWakeSource: "assistant-ask-request",
+      expectedUserId: "member-grantor",
+      mailboxItemId: "aask_req_disclosure_one",
+    });
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "INTERNAL_ERROR",
+        message: "Internal error.",
+      },
+    });
+  });
 });

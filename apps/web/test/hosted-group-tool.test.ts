@@ -531,6 +531,38 @@ describe("handleHostedRuntimeGroupTool", () => {
     });
   });
 
+  it("does not acknowledge a grant-bound ask when its durable mailbox handoff rejects", async () => {
+    const signalError = new Error("Temporal unavailable");
+    const scheduleMailboxWake = vi.fn().mockRejectedValue(signalError);
+    mocks.requestHostedGroupMemberAssistantAsk.mockResolvedValue({
+      mailboxWake: {
+        expectedUserId: "member_grantor",
+        mailboxItemId: "aask_req_disclosure_one",
+      },
+      result: { status: "accepted" },
+    });
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_group_runtime",
+      request: {
+        action: "ask_member",
+        grantId: "grant_sleep",
+        origin: {
+          assistantInputId: `ain_${"b".repeat(32)}`,
+          kind: "accepted_input",
+          sessionId: "session_group",
+        },
+        question: "How has the grantor been sleeping lately?",
+      },
+      scheduleMailboxWake,
+    })).rejects.toBe(signalError);
+
+    expect(scheduleMailboxWake).toHaveBeenCalledWith({
+      expectedUserId: "member_grantor",
+      mailboxItemId: "aask_req_disclosure_one",
+    });
+  });
+
   it("revokes grants only for the signed personal member", async () => {
     mocks.hostedThreadContainerFindUnique.mockResolvedValue(null);
 
