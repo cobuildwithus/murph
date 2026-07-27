@@ -199,6 +199,44 @@ describe("Crabbox verification environment", () => {
     );
   });
 
+  it("cleans only an exact opaque static SSH run workspace", () => {
+    const tempRoot = makeTempRoot();
+    const runRoot = path.join(tempRoot, "runs");
+    const workspaceRoot = path.join(
+      runRoot,
+      "0123456789abcdef-fedcba9876543210",
+    );
+    mkdirSync(workspaceRoot, { recursive: true });
+    writeFileSync(path.join(workspaceRoot, "candidate.txt"), "candidate\n");
+
+    expect(callSshModule(
+      "parseSshVerificationRequest",
+      ["--cleanup-static-workspace", "test:diff", "scripts"],
+    )).toEqual({
+      cleanupOnly: false,
+      cleanupWorkspace: true,
+      verificationArgs: ["test:diff", "scripts"],
+    });
+    expect(callSshModule(
+      "parseSshVerificationRequest",
+      ["--cleanup-static-workspace-only"],
+    )).toEqual({
+      cleanupOnly: true,
+      cleanupWorkspace: true,
+      verificationArgs: [],
+    });
+    expect(callSshModule(
+      "cleanupStaticWorkspace",
+      { runRoot, workspaceRoot },
+    )).toBeNull();
+    expect(existsSync(workspaceRoot)).toBe(false);
+
+    expect(callSshModuleFailure(
+      "assertSafeStaticWorkspace",
+      { runRoot, workspaceRoot: runRoot },
+    )).toContain("one opaque run directory");
+  });
+
   it("retains SSH entrypoint ownership until its verifier group exits on SIGHUP", async () => {
     const tempRoot = makeTempRoot();
     const binDir = path.join(tempRoot, "bin");
@@ -403,18 +441,31 @@ function callModuleFailure(exportName: string, argument: unknown): string {
   return result.stderr;
 }
 
+function callSshModule<T>(exportName: string, argument: unknown): T {
+  const result = runModuleCall(exportName, argument, sshRunnerPath);
+  expect(result.status, result.stderr).toBe(0);
+  return JSON.parse(result.stdout) as T;
+}
+
+function callSshModuleFailure(exportName: string, argument: unknown): string {
+  const result = runModuleCall(exportName, argument, sshRunnerPath);
+  expect(result.status).toBe(2);
+  return result.stderr;
+}
+
 function runModuleCall(
   exportName: string,
   argument: unknown,
+  modulePath = runnerPath,
 ): ReturnType<typeof spawnSync> & { stderr: string; stdout: string } {
-  const moduleUrl = pathToFileURL(runnerPath).href;
+  const moduleUrl = pathToFileURL(modulePath).href;
   const source = `
     const module = await import(${JSON.stringify(moduleUrl)});
     try {
       const result = module[process.env.MURPH_TEST_EXPORT](
         JSON.parse(process.env.MURPH_TEST_ARGUMENT_JSON),
       );
-      process.stdout.write(JSON.stringify(result));
+      process.stdout.write(JSON.stringify(result ?? null));
     } catch (error) {
       process.stderr.write(error instanceof Error ? error.message : String(error));
       process.exitCode = 2;

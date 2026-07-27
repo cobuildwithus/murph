@@ -6,13 +6,15 @@ Updated: 2026-07-27
 
 ## Goal
 
-Close the two accepted final ReviewGPT lifecycle findings without adding a
-daemon, scheduler, retry owner, or persisted product state:
+Close the accepted final ReviewGPT lifecycle and candidate-authority findings
+without adding a daemon, scheduler, retry owner, or persisted product state:
 
-- forward `SIGHUP` through each existing detached process owner and retain
-  ownership until its exact child group exits;
-- sync every explicit remote verification from one immutable, Git-backed
-  candidate snapshot instead of rereading the initiating checkout.
+- bind remote capacity to the remote verifier rather than local transport
+  lifetime;
+- derive admission and executed bytes from one immutable Git candidate without
+  rereading the initiating checkout;
+- preserve implicit no-argument `test:diff` scope in the materialized
+  candidate.
 
 ## Invariants
 
@@ -27,11 +29,14 @@ daemon, scheduler, retry owner, or persisted product state:
 
 ## Work
 
-1. Add a process-owned remote candidate snapshot and invoke Crabbox from it.
-2. Forward `SIGHUP` through dispatcher and remote verification child groups.
-3. Add focused races and process-lifecycle regressions.
+1. Freeze and validate one process-owned remote candidate, then invoke Crabbox
+   from a base-`HEAD`, dirty materialization of that tree.
+2. Give every static invocation a unique remote directory and make the remote
+   verifier inherit the native macOS capacity-lock descriptor.
+3. Add focused capture-race, implicit-diff, transport-loss, exact-cleanup, and
+   process-lifecycle regressions.
 4. Update durable docs and the PR contract, run canonical verification, close
-   this plan, push, and run correction-verification round 2 with exact-head CI.
+   this plan, push, and run correction-verification round 3 with exact-head CI.
 
 ## Review evidence
 
@@ -57,3 +62,33 @@ daemon, scheduler, retry owner, or persisted product state:
   while an unrelated long-running web verification owned the shared host. The
   isolated package retry reproduced the host-memory failure. Exact-head CI and
   correction ReviewGPT remain the completion gates.
+- After the round-2 redesign, shell and Node syntax checks passed and the
+  complete repo-tool suite passed: 30 files and 445 tests.
+
+## Round 2 retrospective decision
+
+Round 2 required a retrospective because the remediation repeated both
+round-1 mechanisms and grew config/tooling and tests substantially without
+closing the actual boundaries. The findings are accepted:
+
+- local Crabbox process-group exit does not acknowledge remote SSH verifier
+  completion;
+- the mutable checkout is still read between pre-capture validation and
+  `git stash create`;
+- recommitting the materialized candidate as a clean `HEAD` erases implicit
+  `test:diff` scope.
+
+Continue by redesigning in place:
+
+1. Freeze one Git candidate, then derive its base, captured index, policy
+   validation, logged tree proof, executed bytes, and dirty diff scope from
+   that object. A mutable-checkout preflight remains only as a fail-fast
+   operator guard.
+2. Use a run-unique opaque static work directory and macOS `lockf` around the
+   remote verifier. The remote kernel lock, not local transport lifetime, is
+   the single worker-capacity authority.
+3. Let the SSH runner remove only its exact run directory after its child group
+   is empty.
+4. Delete synthetic recommit/origin reconstruction and duplicate local
+   process-group polling. Add no daemon, queue, scheduler, reconciliation, or
+   persisted product state.

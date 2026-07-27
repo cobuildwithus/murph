@@ -288,14 +288,18 @@ Last verified: 2026-07-27
   synthetic test environment.
   Static SSH must use only a validated local SSH-config alias, a dedicated
   standard macOS account with no personal, product, cloud, Keychain, `.env*`,
-  or Full Disk Access authority, an isolated opaque workspace per initiating
-  worktree, full resync, and the existing local artifact lock. After admission,
-  the dispatcher must materialize and verify one immutable Git candidate, log
-  its tree id, and sync from that candidate rather than rereading the editable
-  checkout. The lock serializes cooperating artifact producers and remote
-  workspace reuse; it is not an editor lock. Candidate code has arbitrary
-  execution authority within that account, so a personal or credential-bearing
-  account is never an acceptable worker.
+  or Full Disk Access authority, an isolated opaque workspace per invocation,
+  and full resync. A mutable-checkout preflight may fail fast, but remote
+  admission, sensitive-path checks, logged tree proof, and executed bytes must
+  derive from one frozen Git candidate. Materialization must preserve the
+  initiating base `HEAD` with that candidate staged so implicit diff selection
+  remains intact. The local artifact lock protects cooperating local producers
+  and candidate capture only. A native macOS `lockf` descriptor inherited by
+  the remote verifier is the sole static-worker capacity authority; the
+  verifier must retain it through exact child-group cleanup and delete only
+  its exact run directory. Candidate code has arbitrary execution authority
+  within that account, so a personal or credential-bearing account is never
+  an acceptable worker.
   The Blacksmith workflow must retain read-only repository contents permission,
   no GitHub Environment, no OIDC permission, no Actions-secret references, and
   pinned actions. The dispatcher must pin the Blacksmith organization,

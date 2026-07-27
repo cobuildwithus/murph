@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { spawn, spawnSync } from "node:child_process";
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -19,7 +19,9 @@ const TRUSTED_CRABBOX_ENTRYPOINT = "/usr/local/bin/murph-crabbox-verify";
 const SSH_PROVIDER = "ssh";
 const SSH_TARGET = "macos";
 const SSH_WORK_ROOT = "/Users/Shared/murph-crabbox";
-const SSH_VERIFICATION_ENTRYPOINT = "scripts/crabbox/run-ssh-verification.mjs";
+const SSH_RUN_ROOT = `${SSH_WORK_ROOT}/runs`;
+const SSH_VERIFICATION_ENTRYPOINT =
+  "scripts/crabbox/run-ssh-locked-verification.sh";
 const SNAPSHOT_ORIGIN = "https://github.com/cobuildwithus/murph.git";
 const WORKSPACE_ARTIFACT_LOCK = "scripts/run-with-workspace-artifact-lock.mjs";
 const SAFE_CRABBOX_CLI_ENVIRONMENT_NAMES = [
@@ -186,12 +188,12 @@ export function buildSshInvocation(request, hostAlias, repoRoot) {
       "--full-resync",
       "--preflight",
       "--preflight-tools",
-      "git,rsync,node,corepack",
+      "git,rsync,node,corepack,lockf",
       "--label",
       `murph ${request.verificationCommand}`,
       "--timing-json",
       "--",
-      "node",
+      "/bin/sh",
       SSH_VERIFICATION_ENTRYPOINT,
       request.verificationCommand,
       ...request.commandArgs,
@@ -203,14 +205,20 @@ export function buildSshInvocation(request, hostAlias, repoRoot) {
   };
 }
 
-export function buildSshWorktreeIdentity(repoRoot) {
+export function buildSshWorktreeIdentity(
+  repoRoot,
+  runToken = randomBytes(8).toString("hex"),
+) {
+  if (!/^[a-f0-9]{16}$/u.test(runToken)) {
+    throw new Error("Static SSH verification run token must be 16 lowercase hex characters.");
+  }
   const digest = createHash("sha256")
     .update(path.resolve(repoRoot))
     .digest("hex")
     .slice(0, 16);
   return {
     staticId: `static_murph_${digest}`,
-    workRoot: `${SSH_WORK_ROOT}/${digest}`,
+    workRoot: `${SSH_RUN_ROOT}/${digest}-${runToken}`,
   };
 }
 
@@ -266,7 +274,6 @@ export async function runVerification(argv, env = process.env) {
     return await runChild(invocation, childEnvironment);
   }
 
-  assertSafeRemoteSync(repoRoot, childEnvironment);
   const candidate = createRemoteCandidateSnapshot(repoRoot, childEnvironment);
   process.stderr.write(
     `[verification-dispatch] candidate-tree=${candidate.tree}\n`,
@@ -311,50 +318,115 @@ export function createRemoteCandidateSnapshot(
     path.join(os.tmpdir(), "murph-remote-candidate-"),
   );
   try {
+    // This mutable-checkout pass is a fail-fast operator guard. The frozen
+    // candidate below is the authority admitted for remote execution.
+    assertSafeRemoteSync(repoRoot, environment);
     const candidateCommit = createCandidateCommit(repoRoot, environment);
+    const baseCommit = candidateCommit
+      ? readGitValue(
+          repoRoot,
+          ["rev-parse", `${candidateCommit}^1`],
+          environment,
+          "candidate base commit",
+        )
+      : readGitValue(
+          repoRoot,
+          ["rev-parse", "HEAD"],
+          environment,
+          "clean candidate base commit",
+        );
+    const sourceBranch = readGitValue(
+      repoRoot,
+      ["symbolic-ref", "--short", "HEAD"],
+      environment,
+      "source branch",
+    );
     const candidateTree = readGitValue(
       repoRoot,
-      ["rev-parse", `${candidateCommit}^{tree}`],
+      ["rev-parse", `${candidateCommit ?? baseCommit}^{tree}`],
       environment,
       "candidate tree",
     );
+    const indexTree = candidateCommit
+      ? readGitValue(
+          repoRoot,
+          ["rev-parse", `${candidateCommit}^2^{tree}`],
+          environment,
+          "candidate index tree",
+        )
+      : candidateTree;
     const sensitivePaths = findSensitiveRemoteSyncPaths(
       listGitPaths(
         repoRoot,
-        ["ls-tree", "-r", "-z", "--name-only", candidateCommit],
+        ["ls-tree", "-r", "-z", "--name-only", candidateTree],
         environment,
       ),
     );
     if (sensitivePaths.length > 0) {
       throw new Error(renderSensitiveRemoteSyncError(sensitivePaths));
     }
+    assertCandidateAdditionsMatchIndex(
+      repoRoot,
+      { baseCommit, candidateTree, indexTree },
+      environment,
+    );
 
-    const archivePath = path.join(snapshotRoot, "candidate.tar");
     runCheckedCommand(
       "git",
       [
-        "archive",
-        "--format=tar",
-        `--output=${archivePath}`,
-        candidateCommit,
+        "clone",
+        "--quiet",
+        "--no-checkout",
+        "--depth=1",
+        "--single-branch",
+        "--branch",
+        sourceBranch,
+        pathToFileURL(repoRoot).href,
+        snapshotRoot,
       ],
       { cwd: repoRoot, env: environment },
-      "materialize the remote verification candidate archive",
+      "initialize the remote verification candidate repository",
     );
-    runCheckedCommand(
-      "tar",
-      ["-xf", archivePath, "-C", snapshotRoot],
-      { cwd: snapshotRoot, env: environment },
-      "extract the remote verification candidate",
+    const materializedBase = readGitValue(
+      snapshotRoot,
+      ["rev-parse", "HEAD"],
+      environment,
+      "materialized base commit",
     );
-    rmSync(archivePath);
+    if (materializedBase !== baseCommit) {
+      throw new Error(
+        "Remote verification candidate clone did not preserve the initiating HEAD.",
+      );
+    }
 
+    const candidateIndexPath = path.join(
+      snapshotRoot,
+      ".git",
+      "candidate-index",
+    );
+    const candidateIndexEnvironment = {
+      ...environment,
+      GIT_INDEX_FILE: candidateIndexPath,
+    };
     runCheckedCommand(
       "git",
-      ["init", "--quiet", "--initial-branch=snapshot"],
-      { cwd: snapshotRoot, env: environment },
-      "initialize the remote verification candidate",
+      ["read-tree", candidateTree],
+      { cwd: repoRoot, env: candidateIndexEnvironment },
+      "read the frozen remote verification candidate tree",
     );
+    runCheckedCommand(
+      "git",
+      [
+        "checkout-index",
+        "--all",
+        "--force",
+        `--prefix=${snapshotRoot}${path.sep}`,
+      ],
+      { cwd: repoRoot, env: candidateIndexEnvironment },
+      "materialize the frozen remote verification candidate tree",
+    );
+    rmSync(candidateIndexPath, { force: true });
+
     runCheckedCommand(
       "git",
       ["add", "--all", "--force"],
@@ -372,32 +444,12 @@ export function createRemoteCandidateSnapshot(
         "Remote verification candidate materialization changed the admitted Git tree.",
       );
     }
+    assertSafeRemoteSync(snapshotRoot, environment);
     runCheckedCommand(
       "git",
-      [
-        "-c",
-        "core.hooksPath=/dev/null",
-        "-c",
-        "user.name=Crabbox Snapshot",
-        "-c",
-        "user.email=crabbox-snapshot@users.noreply.github.com",
-        "-c",
-        "commit.gpgSign=false",
-        "commit",
-        "--quiet",
-        "--no-gpg-sign",
-        "--no-verify",
-        "-m",
-        "verification candidate",
-      ],
+      ["remote", "set-url", "origin", SNAPSHOT_ORIGIN],
       { cwd: snapshotRoot, env: environment },
-      "commit the remote verification candidate",
-    );
-    runCheckedCommand(
-      "git",
-      ["remote", "add", "origin", SNAPSHOT_ORIGIN],
-      { cwd: snapshotRoot, env: environment },
-      "bind the remote verification candidate repository",
+      "bind the remote verification candidate to its public origin",
     );
 
     let disposed = false;
@@ -534,6 +586,129 @@ function listGitPaths(repoRoot, args, environment) {
   return result.stdout.split("\0").filter(Boolean);
 }
 
+function assertCandidateAdditionsMatchIndex(
+  repoRoot,
+  { baseCommit, candidateTree, indexTree },
+  environment,
+) {
+  const baseEntries = readGitTreeEntries(repoRoot, baseCommit, environment);
+  const candidateEntries = readGitTreeEntries(
+    repoRoot,
+    candidateTree,
+    environment,
+  );
+  const indexEntries = readGitTreeEntries(repoRoot, indexTree, environment);
+  const renamedTargets = readRenamedIndexTargets(
+    repoRoot,
+    baseCommit,
+    indexTree,
+    environment,
+  );
+  const partiallyStagedAdditions = [];
+
+  for (const [filePath, candidateEntry] of candidateEntries) {
+    if (baseEntries.has(filePath)) {
+      continue;
+    }
+    if (
+      indexEntries.get(filePath) === candidateEntry ||
+      renamedTargets.has(filePath)
+    ) {
+      continue;
+    }
+    partiallyStagedAdditions.push(filePath);
+  }
+
+  if (partiallyStagedAdditions.length > 0) {
+    throw new Error(
+      "Remote verification candidate capture found a new path whose current contents were not fully staged.",
+    );
+  }
+}
+
+function readGitTreeEntries(repoRoot, treeish, environment) {
+  const result = spawnSync(
+    "git",
+    ["ls-tree", "-r", "-z", "--full-tree", treeish],
+    {
+      cwd: repoRoot,
+      encoding: "utf8",
+      env: environment,
+      maxBuffer: 16 * 1024 * 1024,
+    },
+  );
+  if (result.status !== 0) {
+    throw new Error("Unable to inspect the frozen remote verification Git tree.");
+  }
+
+  const entries = new Map();
+  for (const record of result.stdout.split("\0")) {
+    if (!record) {
+      continue;
+    }
+    const separator = record.indexOf("\t");
+    if (separator < 0) {
+      throw new Error("Unable to parse the frozen remote verification Git tree.");
+    }
+    entries.set(record.slice(separator + 1), record.slice(0, separator));
+  }
+  return entries;
+}
+
+function readRenamedIndexTargets(
+  repoRoot,
+  baseCommit,
+  indexTree,
+  environment,
+) {
+  const result = spawnSync(
+    "git",
+    [
+      "diff-tree",
+      "--no-commit-id",
+      "--name-status",
+      "-r",
+      "-M",
+      "-z",
+      baseCommit,
+      indexTree,
+    ],
+    {
+      cwd: repoRoot,
+      encoding: "utf8",
+      env: environment,
+      maxBuffer: 16 * 1024 * 1024,
+    },
+  );
+  if (result.status !== 0) {
+    throw new Error("Unable to inspect frozen remote verification renames.");
+  }
+
+  const fields = result.stdout.split("\0");
+  const renamedTargets = new Set();
+  for (let index = 0; index < fields.length;) {
+    const status = fields[index++];
+    if (!status) {
+      break;
+    }
+    if (status.startsWith("R")) {
+      index += 1;
+      const target = fields[index++];
+      if (!target) {
+        throw new Error("Unable to parse frozen remote verification renames.");
+      }
+      renamedTargets.add(target);
+      continue;
+    }
+    if (status.startsWith("C")) {
+      index += 2;
+      continue;
+    }
+    index += 1;
+  }
+  return renamedTargets;
+}
+
 function createCandidateCommit(repoRoot, environment) {
   const result = spawnSync(
     "git",
@@ -549,12 +724,7 @@ function createCandidateCommit(repoRoot, environment) {
     throw new Error("Unable to create the remote verification candidate.");
   }
   const candidateCommit = result.stdout.trim();
-  return candidateCommit || readGitValue(
-    repoRoot,
-    ["rev-parse", "HEAD"],
-    environment,
-    "clean candidate commit",
-  );
+  return candidateCommit || null;
 }
 
 function readGitValue(repoRoot, args, environment, description) {
@@ -723,54 +893,22 @@ function runChild(invocation, env) {
       reject(error);
     });
     child.once("exit", (code, signal) => {
-      void waitForProcessGroupExit(child.pid, useDetachedProcessGroup).then(
-        () => {
-          cleanup();
-          if (signal === "SIGINT") {
-            resolve(130);
-            return;
-          }
-          if (signal === "SIGHUP") {
-            resolve(129);
-            return;
-          }
-          if (signal) {
-            resolve(143);
-            return;
-          }
-          resolve(code ?? 1);
-        },
-        (error) => {
-          cleanup();
-          reject(error);
-        },
-      );
+      cleanup();
+      if (signal === "SIGINT") {
+        resolve(130);
+        return;
+      }
+      if (signal === "SIGHUP") {
+        resolve(129);
+        return;
+      }
+      if (signal) {
+        resolve(143);
+        return;
+      }
+      resolve(code ?? 1);
     });
   });
-}
-
-async function waitForProcessGroupExit(processGroupId, enabled) {
-  if (!enabled || !processGroupId) {
-    return;
-  }
-  while (isProcessGroupRunning(processGroupId)) {
-    await new Promise((resolve) => setTimeout(resolve, 20));
-  }
-}
-
-function isProcessGroupRunning(processGroupId) {
-  try {
-    process.kill(-processGroupId, 0);
-    return true;
-  } catch (error) {
-    if (error && typeof error === "object" && error.code === "ESRCH") {
-      return false;
-    }
-    if (error && typeof error === "object" && error.code === "EPERM") {
-      return true;
-    }
-    throw error;
-  }
 }
 
 function signalChild(child, useDetachedProcessGroup, signal) {

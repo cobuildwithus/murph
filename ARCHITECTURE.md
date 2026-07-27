@@ -1210,14 +1210,18 @@ The repository uses the current verification commands described in
 by default and exposes two explicit, fail-closed, secret-free remote executors:
 Crabbox's first-party static SSH provider for a dedicated macOS worker account,
 and its direct Blacksmith Testbox provider for the bounded paid fallback. The
-static lane derives one opaque workspace per initiating worktree. After
-admission, the dispatcher materializes one process-owned immutable Git
-candidate, verifies and logs its tree id, and performs a full sync from that
-candidate under the existing local artifact lock. Later checkout writes cannot
-change the run. Foreground owners propagate terminal disconnects through their
-exact child process groups and retain the lock and snapshot until those
-descendants exit. The lane reuses the same synthetic verification core and adds
-no daemon, coordinator, queue, scheduler, shared checkout, or product state.
+static lane derives one opaque lease id per initiating worktree and creates a
+unique remote directory for every invocation. After admission, the dispatcher
+materializes one process-owned immutable Git candidate over its original base
+`HEAD`, verifies and logs its tree id, and performs a full sync from that
+candidate. Later checkout writes cannot change the run, while the dirty
+candidate preserves implicit diff scope. A native macOS `lockf` descriptor
+inherited by the verifier is the single remote-capacity owner until its exact
+child groups exit, after which the verifier removes only that run directory.
+The local artifact lock protects cooperating local producers and candidate
+capture, not remote completion. The lane reuses the same synthetic verification
+core and adds no daemon, coordinator, queue, scheduler, shared checkout, or
+product state.
 
 Ordinary Vitest output is contained beneath one marked process-owned temp root
 that is removed at teardown and recovered conservatively after an abrupt stop.

@@ -365,18 +365,20 @@ describe("verification dispatcher", () => {
     expect(flagValue(args, "--target")).toBe("macos");
     expect(flagValue(args, "--static-host")).toBe("worker-mac.local");
     expect(flagValue(args, "--static-work-root")).toMatch(
-      /^\/Users\/Shared\/murph-crabbox\/[a-f0-9]{16}$/u,
+      /^\/Users\/Shared\/murph-crabbox\/runs\/[a-f0-9]{16}-[a-f0-9]{16}$/u,
     );
     expect(args).toContain("--full-resync");
     expect(args).toContain("--preflight");
-    expect(flagValue(args, "--preflight-tools")).toBe("git,rsync,node,corepack");
+    expect(flagValue(args, "--preflight-tools")).toBe(
+      "git,rsync,node,corepack,lockf",
+    );
     expect(args).not.toContain("--allow-env");
     expect(args).not.toContain("--env-from-profile");
     expect(args).not.toContain("--keep");
     expect(args).not.toContain("--ttl");
     expect(args.slice(-4)).toEqual([
-      "node",
-      "scripts/crabbox/run-ssh-verification.mjs",
+      "/bin/sh",
+      "scripts/crabbox/run-ssh-locked-verification.sh",
       "test:diff",
       "packages/assistant-engine",
     ]);
@@ -396,8 +398,10 @@ describe("verification dispatcher", () => {
       "buildSshWorktreeIdentity",
       "/workspace/two",
     );
-    expect(repeatedIdentity).toEqual(firstIdentity);
-    expect(secondIdentity).not.toEqual(firstIdentity);
+    expect(repeatedIdentity.staticId).toBe(firstIdentity.staticId);
+    expect(repeatedIdentity.workRoot).not.toBe(firstIdentity.workRoot);
+    expect(secondIdentity.staticId).not.toBe(firstIdentity.staticId);
+    expect(secondIdentity.workRoot).not.toBe(firstIdentity.workRoot);
     expect(Object.values(firstIdentity).join(" ")).not.toContain("/workspace/one");
 
     expect(callDispatcherExport<Record<string, unknown>>(
@@ -549,7 +553,7 @@ describe("verification dispatcher", () => {
     }
   });
 
-  it("syncs one immutable candidate after admission instead of rereading the checkout", async () => {
+  it("freezes one candidate before provider sync and preserves implicit diff scope", async () => {
     const tempRoot = makeTempRoot();
     const repoDir = path.join(tempRoot, "repo");
     const scriptsDir = path.join(repoDir, "scripts");
@@ -558,6 +562,7 @@ describe("verification dispatcher", () => {
     const providerReleasePath = path.join(tempRoot, "provider-release");
     const providerCapturePath = path.join(tempRoot, "provider-capture.txt");
     const providerCwdPath = path.join(tempRoot, "provider-cwd.txt");
+    const providerDiffPath = path.join(tempRoot, "provider-diff.txt");
     mkdirSync(scriptsDir, { recursive: true });
     writeFileSync(
       path.join(scriptsDir, "verification-dispatch.mjs"),
@@ -583,6 +588,7 @@ describe("verification dispatcher", () => {
         '  if [ -e delete.txt ]; then printf "deleted=present\\n"; else printf "deleted=absent\\n"; fi',
         '  if [ -e late.txt ]; then printf "late=present\\n"; else printf "late=absent\\n"; fi',
         `} > ${shellQuote(providerCapturePath)}`,
+        `git diff --name-only HEAD -- > ${shellQuote(providerDiffPath)}`,
       ].join("\n"),
     );
     runGit(repoDir, ["init", "--quiet"]);
@@ -610,7 +616,6 @@ describe("verification dispatcher", () => {
       [
         realpathSync(path.join(scriptsDir, "verification-dispatch.mjs")),
         "test:diff",
-        "tracked.txt",
       ],
       {
         cwd: repoDir,
@@ -647,6 +652,13 @@ describe("verification dispatcher", () => {
       expect(Buffer.concat(stderrChunks).toString("utf8")).toMatch(
         /\[verification-dispatch\] candidate-tree=[a-f0-9]{40}\n/u,
       );
+      expect(readFileSync(providerDiffPath, "utf8").trim().split("\n"))
+        .toEqual(expect.arrayContaining([
+          "delete.txt",
+          "rename-new.txt",
+          "staged-new.txt",
+          "tracked.txt",
+        ]));
       expect(existsSync(readFileSync(providerCwdPath, "utf8").trim())).toBe(false);
     } finally {
       if (!existsSync(providerReleasePath)) {
@@ -659,54 +671,19 @@ describe("verification dispatcher", () => {
     }
   });
 
-  it("keeps lock ownership through SIGHUP cleanup before the same worker can retry", async () => {
+  it("rejects a staged addition changed while the frozen candidate is captured", async () => {
     const tempRoot = makeTempRoot();
     const repoDir = path.join(tempRoot, "repo");
     const scriptsDir = path.join(repoDir, "scripts");
     const binDir = path.join(tempRoot, "bin");
-    const providerReadyPath = path.join(tempRoot, "provider-ready");
-    const providerHupPath = path.join(tempRoot, "provider-hup");
-    const providerPidPath = path.join(tempRoot, "provider-pid");
-    const providerCwdPath = path.join(tempRoot, "provider-cwd");
-    const descendantHupPath = path.join(tempRoot, "descendant-hup");
-    const descendantPidPath = path.join(tempRoot, "descendant-pid");
-    const retryPath = path.join(tempRoot, "retry-complete");
+    const captureReadyPath = path.join(tempRoot, "capture-ready");
+    const captureReleasePath = path.join(tempRoot, "capture-release");
+    const providerPath = path.join(tempRoot, "provider-started");
     mkdirSync(scriptsDir, { recursive: true });
-    for (const scriptName of [
-      "verification-dispatch.mjs",
-      "run-with-workspace-artifact-lock.mjs",
-    ]) {
-      writeFileSync(
-        path.join(scriptsDir, scriptName),
-        readFileSync(path.join(repoRoot, "scripts", scriptName), "utf8"),
-        "utf8",
-      );
-    }
-    writeExecutable(
-      path.join(binDir, "slow-provider-child"),
-      [
-        "#!/bin/sh",
-        `printf "%s\\n" "$$" > ${shellQuote(descendantPidPath)}`,
-        `trap ': > ${shellQuote(descendantHupPath)}; sleep 0.25; exit 129' HUP`,
-        `: > ${shellQuote(providerReadyPath)}`,
-        "while :; do sleep 0.05; done",
-      ].join("\n"),
-    );
-    writeExecutable(
-      path.join(binDir, "crabbox"),
-      [
-        "#!/bin/sh",
-        'if [ "${1:-}" = "--version" ]; then exit 0; fi',
-        `if [ -f ${shellQuote(providerHupPath)} ]; then`,
-        `  : > ${shellQuote(retryPath)}`,
-        "  exit 0",
-        "fi",
-        `printf "%s\\n" "$$" > ${shellQuote(providerPidPath)}`,
-        `pwd > ${shellQuote(providerCwdPath)}`,
-        `trap ': > ${shellQuote(providerHupPath)}; exit 129' HUP`,
-        "slow-provider-child &",
-        "wait",
-      ].join("\n"),
+    writeFileSync(
+      path.join(scriptsDir, "verification-dispatch.mjs"),
+      readFileSync(dispatcherPath, "utf8"),
+      "utf8",
     );
     runGit(repoDir, ["init", "--quiet"]);
     runGit(repoDir, ["add", "scripts"]);
@@ -720,81 +697,181 @@ describe("verification dispatcher", () => {
       "-m",
       "initial",
     ]);
+    writeFileSync(path.join(repoDir, "staged-new.txt"), "staged\n", "utf8");
+    runGit(repoDir, ["add", "staged-new.txt"]);
 
-    const baseEnvironment = {
-      ...withoutVerificationRoutingEnvironment(process.env),
-      HOME: path.join(tempRoot, "home"),
-      MURPH_VERIFY_EXECUTOR: "ssh",
-      MURPH_VERIFY_SSH_HOST: "worker-mac",
-      PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ""}`,
-    };
-    const lockWrapperPath = path.join(
-      scriptsDir,
-      "run-with-workspace-artifact-lock.mjs",
+    const realGit = spawnSync("/bin/sh", ["-c", "command -v git"], {
+      encoding: "utf8",
+    }).stdout.trim();
+    expect(realGit).not.toBe("");
+    writeExecutable(
+      path.join(binDir, "git"),
+      [
+        "#!/bin/sh",
+        'if [ "${1:-}" = "stash" ] && [ "${2:-}" = "create" ]; then',
+        `  : > ${shellQuote(captureReadyPath)}`,
+        `  while [ ! -f ${shellQuote(captureReleasePath)} ]; do sleep 0.05; done`,
+        "fi",
+        `exec ${shellQuote(realGit)} "$@"`,
+      ].join("\n"),
     );
-    const dispatcherPathInRepo = realpathSync(
-      path.join(scriptsDir, "verification-dispatch.mjs"),
+    writeExecutable(
+      path.join(binDir, "crabbox"),
+      [
+        "#!/bin/sh",
+        'if [ "${1:-}" = "--version" ]; then exit 0; fi',
+        `: > ${shellQuote(providerPath)}`,
+      ].join("\n"),
     );
-    const firstRun = spawn(
+
+    const dispatcher = spawn(
       process.execPath,
       [
-        lockWrapperPath,
-        "remote test:diff",
-        "--",
-        process.execPath,
-        dispatcherPathInRepo,
+        realpathSync(path.join(scriptsDir, "verification-dispatch.mjs")),
         "test:diff",
-        "scripts/verification-dispatch.mjs",
       ],
       {
         cwd: repoDir,
-        env: baseEnvironment,
-        stdio: "ignore",
+        env: {
+          ...insideWorkspaceArtifactLockEnvironment(process.env),
+          HOME: path.join(tempRoot, "home"),
+          MURPH_VERIFY_EXECUTOR: "ssh",
+          MURPH_VERIFY_SSH_HOST: "worker-mac",
+          PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ""}`,
+        },
+        stdio: ["ignore", "ignore", "pipe"],
       },
     );
-    const lockPath = path.join(
-      repoDir,
-      ".git",
-      "murph-locks",
-      "workspace-artifacts.lock",
-    );
+    const stderrChunks: Buffer[] = [];
+    dispatcher.stderr.on("data", (chunk: Buffer) => stderrChunks.push(chunk));
     try {
-      await waitForFile(providerReadyPath, 15_000);
-      const providerPid = Number.parseInt(
-        readFileSync(providerPidPath, "utf8").trim(),
-        10,
+      await waitForFile(captureReadyPath);
+      writeFileSync(
+        path.join(repoDir, "staged-new.txt"),
+        "changed-during-capture\n",
+        "utf8",
       );
-      const descendantPid = Number.parseInt(
-        readFileSync(descendantPidPath, "utf8").trim(),
-        10,
-      );
-      expect(Number.isInteger(providerPid)).toBe(true);
-      expect(Number.isInteger(descendantPid)).toBe(true);
-      expect(existsSync(lockPath)).toBe(true);
-      firstRun.kill("SIGHUP");
+      writeFileSync(captureReleasePath, "release\n", "utf8");
 
-      await waitForFile(providerHupPath);
-      expect(firstRun.exitCode).toBeNull();
-      expect(existsSync(lockPath)).toBe(true);
-      expect(await waitForChild(firstRun)).toEqual({ code: 143, signal: null });
-      await waitForCondition(
-        () => !isProcessRunning(providerPid),
-        "the SIGHUP-owned provider process to exit",
+      expect(await waitForChild(dispatcher)).toEqual({ code: 1, signal: null });
+      expect(Buffer.concat(stderrChunks).toString("utf8")).toContain(
+        "new path whose current contents were not fully staged",
       );
-      await waitForCondition(
-        () => !isProcessRunning(descendantPid),
-        "the SIGHUP-owned provider descendant to exit",
-      );
-      expect(existsSync(providerHupPath)).toBe(true);
-      expect(existsSync(descendantHupPath)).toBe(true);
-      expect(existsSync(lockPath)).toBe(false);
-      expect(existsSync(readFileSync(providerCwdPath, "utf8").trim())).toBe(false);
+      expect(existsSync(providerPath)).toBe(false);
+    } finally {
+      if (!existsSync(captureReleasePath)) {
+        writeFileSync(captureReleasePath, "release\n", "utf8");
+      }
+      if (dispatcher.exitCode === null && dispatcher.signalCode === null) {
+        dispatcher.kill("SIGHUP");
+      }
+      await Promise.allSettled([waitForChild(dispatcher)]);
+    }
+  });
 
-      const retry = spawn(
+  it.runIf(process.platform === "darwin")(
+    "keeps the static worker busy when transport exits before remote completion",
+    async () => {
+      const tempRoot = makeTempRoot();
+      const repoDir = path.join(tempRoot, "repo");
+      const scriptsDir = path.join(repoDir, "scripts");
+      const binDir = path.join(tempRoot, "bin");
+      const remoteReadyPath = path.join(tempRoot, "remote-ready");
+      const remoteReleasePath = path.join(tempRoot, "remote-release");
+      const remoteDonePath = path.join(tempRoot, "remote-done");
+      const remotePidPath = path.join(tempRoot, "remote-pid");
+      const providerStartedPath = path.join(tempRoot, "provider-started");
+      const providerCwdPath = path.join(tempRoot, "provider-cwd");
+      const remoteLockPath = path.join(tempRoot, "worker.lock");
+      const blockedPath = path.join(tempRoot, "retry-blocked");
+      const overlapPath = path.join(tempRoot, "overlap");
+      const retryPath = path.join(tempRoot, "retry-complete");
+      const lockedRemoteCommand = shellQuote(
+        'exec 9>"$1"; /usr/bin/lockf -t 0 9; exec slow-remote-verifier',
+      );
+      mkdirSync(scriptsDir, { recursive: true });
+      for (const scriptName of [
+        "verification-dispatch.mjs",
+        "run-with-workspace-artifact-lock.mjs",
+      ]) {
+        writeFileSync(
+          path.join(scriptsDir, scriptName),
+          readFileSync(path.join(repoRoot, "scripts", scriptName), "utf8"),
+          "utf8",
+        );
+      }
+      writeExecutable(
+        path.join(binDir, "slow-remote-verifier"),
+        [
+          "#!/bin/sh",
+          `: > ${shellQuote(remoteReadyPath)}`,
+          `while [ ! -f ${shellQuote(remoteReleasePath)} ]; do sleep 0.05; done`,
+          `: > ${shellQuote(remoteDonePath)}`,
+        ].join("\n"),
+      );
+      writeExecutable(
+        path.join(binDir, "crabbox"),
+        [
+          "#!/bin/sh",
+          'if [ "${1:-}" = "--version" ]; then exit 0; fi',
+          `if [ ! -f ${shellQuote(providerStartedPath)} ]; then`,
+          `  : > ${shellQuote(providerStartedPath)}`,
+          `  pwd > ${shellQuote(providerCwdPath)}`,
+          `  nohup /bin/sh -c ${lockedRemoteCommand} sh ${
+            shellQuote(remoteLockPath)
+          } >/dev/null 2>&1 &`,
+          `  printf "%s\\n" "$!" > ${shellQuote(remotePidPath)}`,
+          `  while [ ! -f ${shellQuote(remoteReadyPath)} ]; do sleep 0.05; done`,
+          "  exit 255",
+          "fi",
+          `if [ ! -f ${shellQuote(remoteReleasePath)} ]; then`,
+          `  if /usr/bin/lockf -k -t 0 ${shellQuote(remoteLockPath)} sh -c ${
+            shellQuote(`: > ${overlapPath}`)
+          }; then`,
+          "    exit 0",
+          "  else",
+          "    status=$?",
+          "  fi",
+          `  : > ${shellQuote(blockedPath)}`,
+          "  exit \"$status\"",
+          "fi",
+          `/usr/bin/lockf -k -t 0 ${shellQuote(remoteLockPath)} sh -c ${
+            shellQuote(`: > ${retryPath}`)
+          }`,
+        ].join("\n"),
+      );
+      runGit(repoDir, ["init", "--quiet"]);
+      runGit(repoDir, ["add", "scripts"]);
+      runGit(repoDir, [
+        "-c",
+        "user.name=Crabbox Test",
+        "-c",
+        "user.email=crabbox-test@users.noreply.github.com",
+        "commit",
+        "--quiet",
+        "-m",
+        "initial",
+      ]);
+
+      const baseEnvironment = {
+        ...withoutVerificationRoutingEnvironment(process.env),
+        HOME: path.join(tempRoot, "home"),
+        MURPH_VERIFY_EXECUTOR: "ssh",
+        MURPH_VERIFY_SSH_HOST: "worker-mac",
+        PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ""}`,
+      };
+      const lockWrapperPath = path.join(
+        scriptsDir,
+        "run-with-workspace-artifact-lock.mjs",
+      );
+      const dispatcherPathInRepo = realpathSync(
+        path.join(scriptsDir, "verification-dispatch.mjs"),
+      );
+      const runRemoteDiff = () => spawn(
         process.execPath,
         [
           lockWrapperPath,
-          "remote test:diff retry",
+          "remote test:diff",
           "--",
           process.execPath,
           dispatcherPathInRepo,
@@ -807,16 +884,65 @@ describe("verification dispatcher", () => {
           stdio: "ignore",
         },
       );
-      expect(await waitForChild(retry)).toEqual({ code: 0, signal: null });
-      expect(existsSync(retryPath)).toBe(true);
-      expect(existsSync(lockPath)).toBe(false);
-    } finally {
-      if (firstRun.exitCode === null && firstRun.signalCode === null) {
-        firstRun.kill("SIGHUP");
+      const lockPath = path.join(
+        repoDir,
+        ".git",
+        "murph-locks",
+        "workspace-artifacts.lock",
+      );
+      try {
+        const firstRun = runRemoteDiff();
+        expect(await waitForChild(firstRun)).toEqual({
+          code: 255,
+          signal: null,
+        });
+        const remotePid = Number.parseInt(
+          readFileSync(remotePidPath, "utf8").trim(),
+          10,
+        );
+        expect(Number.isInteger(remotePid)).toBe(true);
+        expect(isProcessRunning(remotePid)).toBe(true);
+        expect(existsSync(lockPath)).toBe(false);
+        expect(existsSync(readFileSync(providerCwdPath, "utf8").trim())).toBe(
+          false,
+        );
+
+        expect((await waitForChild(runRemoteDiff())).code).not.toBe(0);
+        expect(existsSync(blockedPath)).toBe(true);
+        expect(existsSync(overlapPath)).toBe(false);
+        expect(existsSync(retryPath)).toBe(false);
+        expect(existsSync(lockPath)).toBe(false);
+
+        writeFileSync(remoteReleasePath, "release\n", "utf8");
+        await waitForFile(remoteDonePath);
+        await waitForCondition(
+          () => !isProcessRunning(remotePid),
+          "the remotely locked verifier to exit",
+        );
+
+        expect(await waitForChild(runRemoteDiff())).toEqual({
+          code: 0,
+          signal: null,
+        });
+        expect(existsSync(retryPath)).toBe(true);
+        expect(existsSync(lockPath)).toBe(false);
+      } finally {
+        if (!existsSync(remoteReleasePath)) {
+          writeFileSync(remoteReleasePath, "release\n", "utf8");
+        }
+        if (existsSync(remotePidPath)) {
+          const remotePid = Number.parseInt(
+            readFileSync(remotePidPath, "utf8").trim(),
+            10,
+          );
+          await waitForCondition(
+            () => !isProcessRunning(remotePid),
+            "the test-owned remote verifier to exit",
+          );
+        }
       }
-      await Promise.allSettled([waitForChild(firstRun)]);
-    }
-  });
+    },
+  );
 
   it("identifies sensitive files before remote Git-managed sync", () => {
     expect(callDispatcherExport<string[]>(

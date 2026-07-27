@@ -51,19 +51,20 @@ entrypoint.
   and hydration job before the Testbox is created and hydrated. Do not warm a
   lease separately or replace those arguments with mutable local profile or
   config routing.
-- Both remote providers can sync Git-tracked and untracked non-ignored paths.
-  The dispatcher admits only modified tracked files, tracked
-  renames/deletions, ignored files, and new files whose current contents are
-  fully staged. Ordinary untracked, intent-to-add, staged-then-changed
-  additions, unmerged, and unsupported Git states fail before delegation. It
-  then rejects known credential, vault, runtime-state, private-document, and
-  local-artifact paths from the cached/tracked set. Matching local paths are
-  also ignored in `.gitignore`.
-- After admission, the dispatcher materializes one process-owned, immutable
-  Git candidate, verifies its tree, logs that tree id, and runs Crabbox from
-  the candidate rather than the editable checkout. Later checkout writes and
-  late untracked files cannot enter the run. Exact cleanup removes the
-  candidate when the provider exits.
+- Provider transport can sync untracked non-ignored paths, so the dispatcher
+  never delegates from the mutable checkout. It first rejects the current
+  checkout when it contains ordinary untracked, intent-to-add,
+  staged-then-changed additions, unmerged, or unsupported Git states.
+  Modified tracked files, tracked renames/deletions, ignored files, and new
+  files whose current contents are fully staged are eligible.
+- The dispatcher then freezes one Git candidate and derives its base commit,
+  captured index, sensitive-path check, and executed tree from that immutable
+  object. New paths must match the captured index. It materializes the original
+  base `HEAD` with the frozen candidate staged in its index and worktree,
+  preserving implicit no-argument `test:diff` scope. It verifies and logs that
+  tree before running Crabbox. Later checkout writes and late untracked files
+  cannot enter the run. Exact cleanup removes the local candidate when the
+  provider exits.
 - Fully staged new source and modified tracked content leave the host so the
   Testbox verifies the exact candidate change. Never stage private data to bypass
   the Git-state refusal.
@@ -82,13 +83,16 @@ entrypoint.
   `MURPH_VERIFY_REQUIRES_VERCEL_ENV=1` and keep that command local.
 - Static SSH uses only a safe alias from `MURPH_VERIFY_SSH_HOST`, a dedicated
   standard macOS account with no personal or product credentials, a
-  per-worktree opaque workspace below `/Users/Shared/murph-crabbox`, full
-  resync, and the existing local artifact lock. The lock serializes cooperating
-  artifact producers and reuse of that workspace; it is not an editor lock.
-  The dispatcher and remote verifier retain ownership through `SIGHUP`, reap
-  their exact child process groups, and only then release the lock and
-  candidate. Static SSH never forwards an SSH agent or environment allowlist.
-  Follow the one-time host setup and doctor command in the verification guide.
+  run-unique opaque workspace below `/Users/Shared/murph-crabbox/runs`, and
+  full resync. The existing local artifact lock protects cooperating local
+  producers and candidate capture only; it is neither an editor lock nor the
+  remote capacity authority. On the Mac, native `lockf` places one
+  kernel-owned lock on a descriptor inherited by the verifier. A busy worker
+  fails closed without waiting or falling back. The verifier holds that
+  descriptor while it reaps its exact child process groups, then removes only
+  its exact run directory. Static SSH never forwards an SSH agent or
+  environment allowlist. Follow the one-time host setup and doctor command in
+  the verification guide.
 
 ## Controls
 

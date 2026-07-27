@@ -65,8 +65,9 @@ Prepare the worker once:
    `murph-worker`; use `IdentityFile` and `IdentitiesOnly yes` in the local SSH
    config instead of forwarding an agent.
 3. Give only that account access to `/Users/Shared/murph-crabbox`. Install
-   `git`, `rsync`, `tar`, `sh`, Node `>=24.14.1`, and Corepack; the repository
-   pins pnpm `10.33.0`. Make those tools visible in the account's
+   `git`, `rsync`, Node `>=24.14.1`, and Corepack; the repository pins pnpm
+   `10.33.0`. The native `/bin/sh` and `/usr/bin/lockf` must also be present.
+   Make `git`, `rsync`, `node`, `corepack`, and `lockf` visible in the account's
    non-interactive SSH `PATH`; the doctor probe must see the same command
    surface that a run will use.
 4. Keep the Mac awake while it is offered as a worker, then prove reachability:
@@ -80,30 +81,41 @@ crabbox doctor \
   --doctor-probe-ssh
 ```
 
-Each local worktree derives a deterministic opaque static lease id and its own
-subdirectory below `/Users/Shared/murph-crabbox`; the local path itself is never
-sent, only its truncated cryptographic digest. The existing per-worktree
-artifact lock serializes cooperating artifact producers and reuse of that
-remote workspace while separate worktrees remain isolated; it does not try to
-lock editors or the filesystem. After admission, the dispatcher creates one
-process-owned Git snapshot, verifies and logs its tree id, and invokes Crabbox
-from that immutable candidate with full resync. Later checkout writes and late
-untracked files therefore cannot change the running candidate. The dispatcher
-removes the exact snapshot after the provider process tree exits. The remote
-account may retain only machine-level package-manager caches outside those
-workspaces.
+Each local worktree derives a deterministic opaque static lease id. Every
+invocation adds a fresh opaque token and syncs into its own directory below
+`/Users/Shared/murph-crabbox/runs`; the local path itself is never sent, only
+its truncated cryptographic digest. The per-worktree artifact lock protects
+cooperating local artifact producers and candidate capture. It does not lock
+editors, prove remote completion, or serialize the Mac.
 
-The SSH path forwards no environment allowlist. Candidate code starts through
-`scripts/crabbox/run-ssh-verification.mjs`, which rebuilds the same synthetic
-test-only environment as the Blacksmith path. The dedicated account is the
-trust boundary: candidate code can execute arbitrary repository commands on
-that account, so never reuse a personal or credential-bearing account. Static
-SSH is host-managed and has no provider TTL or automatic machine shutdown; stop
-offering the Mac by disabling Remote Login or removing its authorized key.
-On `SIGHUP`, the lock wrapper, dispatcher, and remote verifier retain ownership
-while forwarding the signal through their exact child process groups. A retry
-can acquire the workspace only after those descendants exit and the local lock
-and snapshot are removed.
+Before freezing, the dispatcher performs a fail-fast check of the mutable
+checkout. It then captures one Git candidate and derives its base commit,
+captured index, remote admission, and sensitive-path checks from that immutable
+object. New paths must match the captured index. The local candidate keeps the
+captured base commit as `HEAD` and stages the frozen tree in its index and
+worktree, so both explicit paths and implicit no-argument `test:diff` retain
+their scope. The dispatcher verifies and logs the tree, invokes Crabbox from
+that candidate with full resync, and removes the local snapshot when the
+provider exits. Later checkout writes and late untracked files cannot enter the
+run.
+
+On the worker, `/Users/Shared/murph-crabbox/verification.lock` is the single
+static-worker capacity boundary. Native `lockf -t 0` acquires it on a file
+descriptor inherited by the remote verifier. A concurrent invocation fails
+closed as busy without waiting or falling back. If local transport disappears,
+the remote verifier still owns the kernel lock while it reaps its exact child
+process groups. It then removes only its run-unique directory. The remote
+account may retain only machine-level package-manager caches outside those
+directories.
+
+The SSH path forwards no environment allowlist. Candidate code enters through
+`scripts/crabbox/run-ssh-locked-verification.sh`; its Node verifier rebuilds
+the same synthetic test-only environment as the Blacksmith path. The dedicated
+account is the trust boundary: candidate code can execute arbitrary repository
+commands on that account, so never reuse a personal or credential-bearing
+account. Static SSH is host-managed and has no provider TTL or automatic
+machine shutdown; stop offering the Mac by disabling Remote Login or removing
+its authorized key.
 
 ### Ten-minute local admission fallback
 
