@@ -12205,6 +12205,104 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(mocks.drainHostedPreparedAssistantDeliveries).toHaveBeenCalledTimes(1);
   });
 
+  it.each([
+    {
+      dedupeKey:
+        "assistant.notification.requested:phone-call-result:phone_call_telegram",
+      label: "phone-call result",
+    },
+    {
+      dedupeKey:
+        "assistant.notification.requested:usage-referral-reward:referral_telegram",
+      label: "usage-referral reward",
+    },
+  ])("defers an exact Telegram $label to the checkpoint-gated outbox", async ({
+    dedupeKey,
+  }) => {
+    const now = "2026-04-27T00:03:00.000Z";
+    const completionItem = createExternalCompletionSystemMailboxItem({
+      dedupeKey,
+    });
+    const baseDeliveryEffect = createDeliveryEffect();
+    const deliveryEffect: HostedAssistantDeliverySideEffect = {
+      ...baseDeliveryEffect,
+      effectId: `effect_${completionItem.itemId}`,
+      payload: {
+        ...baseDeliveryEffect.payload,
+        channel: "telegram",
+        explicitTarget: "telegram_source_thread",
+        idempotencyKey: dedupeKey.replace(
+          "assistant.notification.requested:",
+          "",
+        ),
+        identityId: "telegram-bot",
+        threadId: "telegram_source_thread",
+        threadIsDirect: false,
+        transportIdempotent: false,
+      },
+    };
+    const deliveryIntentId = `intent_${completionItem.itemId}`;
+    mocks.prepareHostedSystemMailboxItemForCheckpoint
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({
+        item: completionItem,
+        itemId: completionItem.itemId,
+        metrics: {
+          bootstrapResult: null,
+          conversationMetrics: null,
+          deliveryIntentIds: [deliveryIntentId],
+          mailboxLane: "assistant-notification",
+          redactedLogEntries: [],
+        },
+        status: "processed",
+      });
+    mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
+      deliveryEffect,
+    ]);
+    mocks.resolveHostedAssistantOutboxNextWakeAt.mockResolvedValueOnce(now);
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      assistantInputIds: [],
+      foregroundCausalOnly: true,
+      conversationImportedCount: 0,
+      importedCount: 1,
+      now: () => now,
+    }));
+
+    expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledWith({
+      actionApprovalPort: null,
+      includeBackgroundDueIntents: false,
+      preferredEffectIds: [],
+      preferredIntentIds: [deliveryIntentId],
+      vaultRoot: "/tmp/murph-vault",
+    });
+    expect(mocks.resolveHostedAssistantOutboxNextWakeAt).toHaveBeenCalledWith({
+      vaultRoot: "/tmp/murph-vault",
+    });
+    expect(
+      mocks.prepareHostedAssistantDeliveryEffectsForDispatch,
+    ).not.toHaveBeenCalled();
+    expect(result).toEqual(expect.objectContaining({
+      checkpointReason: "system_mailbox_receipt",
+      nextWakeAt: now,
+      progressed: true,
+      redactedStatus: expect.objectContaining({
+        hostedOutboxPendingDeliveryEffects: 1,
+      }),
+    }));
+    expect(result.afterCheckpointKeepsForegroundImportLoop).toBeUndefined();
+
+    const postCheckpoint = await result.afterCheckpoint?.();
+
+    expect(mocks.drainHostedPreparedAssistantDeliveries).not.toHaveBeenCalled();
+    expect(postCheckpoint).toEqual(expect.objectContaining({
+      checkpointReason: "system_mailbox_receipt",
+      nextWakeAt: now,
+      nextWakeReason: "assistant",
+    }));
+  });
+
   it("keeps managed setup out of a causal-only exact delivery pass", async () => {
     const now = "2026-04-27T00:00:00.000Z";
     const pendingEffectsItem = createPendingEffectsReconcileSystemMailboxItem();
@@ -15599,7 +15697,7 @@ function createDeliveryEffect(): HostedAssistantDeliverySideEffect {
       answeredMailboxItemIds: [],
       bindingDeliveryKind: null,
       bindingDeliveryTarget: null,
-      channel: "telegram",
+      channel: "linq",
       deliverySourceKey: null,
       explicitTarget: null,
       identityId: null,
