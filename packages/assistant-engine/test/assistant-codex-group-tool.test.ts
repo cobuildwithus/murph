@@ -85,7 +85,7 @@ const webpBytes = new Uint8Array([
 const EARLIER_ASSISTANT_INPUT_ID = `ain_${"1".repeat(32)}`;
 const FRESH_ASSISTANT_INPUT_ID = `ain_${"2".repeat(32)}`;
 const SIGNED_PRIVATE_IMAGE_URL =
-  `https://imagedelivery.net/account/image/public?exp=2000000000&sig=${"a".repeat(64)}`;
+  `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}?exp=2000000000`;
 
 describe("murph.group dynamic tool", () => {
   it("advertises the supported actions", () => {
@@ -2372,7 +2372,7 @@ describe("murph.group dynamic tool", () => {
         result: { status: "requested" },
       });
       expect(JSON.stringify(readGroupToolPayload(result))).not.toContain(
-        "imagedelivery.net",
+        "murph-hosted.cobuildwithus.workers.dev",
       );
       expect(result.responseMediaPatch).toBeUndefined();
       expect(privateImageUrlPublish).toHaveBeenCalledOnce();
@@ -2464,7 +2464,7 @@ describe("murph.group dynamic tool", () => {
         result: { status: "requested" },
       });
       expect(JSON.stringify(readGroupToolPayload(result))).not.toContain(
-        "imagedelivery.net",
+        "murph-hosted.cobuildwithus.workers.dev",
       );
       expect(privateImageUrlPublish).toHaveBeenCalledWith(
         expect.objectContaining({

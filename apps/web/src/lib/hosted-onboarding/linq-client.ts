@@ -645,11 +645,11 @@ function normalizeRequiredHttpsUrl(value: unknown, label: string): string {
 function normalizeHostedLinqGroupChatIconUrl(value: unknown): string {
   const normalized = normalizeRequiredHttpsUrl(value, "group chat icon url");
   if (normalized.length > HOSTED_RUNTIME_GROUP_CHAT_ICON_URL_MAX_LENGTH) {
-    throw new TypeError("group chat icon url must be a hosted Cloudflare Images URL.");
+    throw new TypeError("group chat icon url must be a hosted private media URL.");
   }
   const parsed = new URL(normalized);
   if (!isHostedRuntimePrivateImageDeliveryUrl(parsed)) {
-    throw new TypeError("group chat icon url must be a hosted Cloudflare Images URL.");
+    throw new TypeError("group chat icon url must be a hosted private media URL.");
   }
   return normalized;
 }

@@ -38,6 +38,7 @@ import {
   buildHostedMailboxPayloadScope,
   buildHostedMailboxPayloadSecureBoxAad,
   HOSTED_MAILBOX_PAYLOAD_SCHEMA,
+  isHostedRuntimePrivateImageDeliveryUrl,
   type HostedWorkspaceReadResponse,
 } from "@murphai/hosted-execution/runtime-control";
 import {
@@ -3077,54 +3078,21 @@ describe("handleRunnerOutboundRequest", () => {
     });
   });
 
-  it("publishes a write-fenced Cloudflare Image with signed private delivery", async () => {
+  it("publishes one encrypted write-fenced R2 object behind an opaque capability", async () => {
     const runner = createWorkspaceVersionAwareUserRunner();
     const pngBytes = new Uint8Array([
       0x89, 0x50, 0x4e, 0x47,
       0x0d, 0x0a, 0x1a, 0x0a,
     ]);
-    const imagesUpload = vi.fn(async (
-      image: ArrayBuffer,
-      options: {
-        filename: string;
-        metadata: Readonly<Record<string, unknown>>;
-        requireSignedURLs: true;
-      },
-    ) => {
-      expect(new Uint8Array(image)).toEqual(pngBytes);
-      expect(options).toEqual({
-        filename: "group-avatar.png",
-        metadata: {
-          imageSha256: "hash_123",
-          schema: "murph.group-avatar.v2",
-          source: "murph.group-avatar.reused",
-        },
-        requireSignedURLs: true,
-      });
-      return {
-        requireSignedURLs: true,
-        variants: [
-          "https://imagedelivery.net/account_123/image_123/private",
-        ],
-      };
-    });
+    const bucket = createPrivateMediaTestBucket();
     const nowMs = Date.parse("2026-07-26T12:00:00.000Z");
     const expiresAtUnixSeconds = Math.floor(nowMs / 1_000) + 86_400;
-    const valueToSign =
-      `/account_123/image_123/private?exp=${expiresAtUnixSeconds}`;
-    const signature = createHmac("sha256", "signing-key")
-      .update(valueToSign)
-      .digest("hex");
 
     const response = await handleRunnerPrivateImageUrlPublishRequest({
       env: createRunnerOutboundEnv({
-        CLOUDFLARE_IMAGES_SIGNING_KEY: "signing-key",
-        CLOUDFLARE_IMAGES_VARIANT: "private",
-        IMAGES: {
-          hosted: {
-            upload: imagesUpload,
-          },
-        },
+        BUNDLES: bucket.api,
+        HOSTED_PRIVATE_MEDIA_CAPABILITY_SECRET:
+          "private-media-capability-secret-fixture",
         USER_RUNNER: { getByName: runner.getByName },
       }),
       nowMs,
@@ -3150,45 +3118,34 @@ describe("handleRunnerOutboundRequest", () => {
 
     expect(response.status).toBe(200);
     expect(runner.ownsActiveInvocationLease).toHaveBeenCalledOnce();
-    expect(imagesUpload).toHaveBeenCalledOnce();
-    await expect(response.json()).resolves.toEqual({
-      expiresAt: new Date(expiresAtUnixSeconds * 1_000).toISOString(),
-      url:
-        `https://imagedelivery.net/account_123/image_123/private?exp=${expiresAtUnixSeconds}&sig=${signature}`,
-    });
+    expect(bucket.put).toHaveBeenCalledOnce();
+    expect(bucket.objects).toHaveLength(1);
+    expect(new TextDecoder().decode(bucket.objects[0]?.[1])).not.toContain(
+      Buffer.from(pngBytes).toString("base64"),
+    );
+    const payload = await response.json() as {
+      expiresAt: string;
+      url: string;
+    };
+    expect(payload.expiresAt).toBe(
+      new Date(expiresAtUnixSeconds * 1_000).toISOString(),
+    );
+    expect(isHostedRuntimePrivateImageDeliveryUrl(new URL(payload.url))).toBe(
+      true,
+    );
   });
 
-  it("does not fall back to another Cloudflare Image variant", async () => {
+  it("reuses the same encrypted R2 object after a lost publish response", async () => {
     const runner = createWorkspaceVersionAwareUserRunner();
-    const imagesUpload = vi.fn(async (
-      _image: ArrayBuffer,
-      options: {
-        filename: string;
-        metadata: Readonly<Record<string, unknown>>;
-        requireSignedURLs: true;
-      },
-    ) => {
-      expect(options.filename).toBe("private-image.png");
-      return {
-        requireSignedURLs: true,
-        variants: [
-          "https://imagedelivery.net/account_123/image_123/always-public",
-        ],
-      };
+    const bucket = createPrivateMediaTestBucket();
+    const env = createRunnerOutboundEnv({
+      BUNDLES: bucket.api,
+      HOSTED_PRIVATE_MEDIA_CAPABILITY_SECRET:
+        "private-media-capability-secret-fixture",
+      USER_RUNNER: { getByName: runner.getByName },
     });
-
-    const response = await handleRunnerPrivateImageUrlPublishRequest({
-      env: createRunnerOutboundEnv({
-        CLOUDFLARE_IMAGES_SIGNING_KEY: "signing-key",
-        CLOUDFLARE_IMAGES_VARIANT: "private",
-        IMAGES: {
-          hosted: {
-            upload: imagesUpload,
-          },
-        },
-        USER_RUNNER: { getByName: runner.getByName },
-      }),
-      request: new Request(
+    const createRequest = () =>
+      new Request(
         `http://results.worker${HOSTED_EXECUTION_RUNNER_PRIVATE_IMAGE_URL_PUBLISH_PATH}`,
         {
           body: JSON.stringify({
@@ -3204,15 +3161,23 @@ describe("handleRunnerOutboundRequest", () => {
           headers: createMailboxPayloadDecodeHeaders(),
           method: "POST",
         },
-      ),
+      );
+
+    const first = await handleRunnerPrivateImageUrlPublishRequest({
+      env,
+      request: createRequest(),
+      userId: "member_123",
+    });
+    const retry = await handleRunnerPrivateImageUrlPublishRequest({
+      env,
+      request: createRequest(),
       userId: "member_123",
     });
 
-    expect(response.status).toBe(502);
-    expect(imagesUpload).toHaveBeenCalledOnce();
-    await expect(response.json()).resolves.toEqual({
-      error: "Private image URL publishing failed.",
-    });
+    expect(first.status).toBe(200);
+    expect(retry.status).toBe(200);
+    expect(bucket.put).toHaveBeenCalledOnce();
+    expect(bucket.objects).toHaveLength(1);
   });
 
   it("rejects email sends when the live invocation lease is stale", async () => {
@@ -9987,6 +9952,35 @@ function createWorkspaceSnapshotBundleTestBucket(input: {
     api,
     deleted,
     objects,
+  };
+}
+
+function createPrivateMediaTestBucket() {
+  const values = new Map<string, Uint8Array>();
+  const put = vi.fn(async (key: string, value: R2PutValueLike) => {
+    values.set(key, await readTestR2PutValue(value));
+  });
+  const api: RunnerOutboundEnvironmentSource["BUNDLES"] = {
+    async get(key: string) {
+      const value = values.get(key);
+      return value
+        ? {
+            async arrayBuffer() {
+              return toArrayBuffer(value);
+            },
+            key,
+            size: value.byteLength,
+          }
+        : null;
+    },
+    put,
+  };
+  return {
+    api,
+    get objects() {
+      return [...values.entries()];
+    },
+    put,
   };
 }
 

@@ -1662,7 +1662,6 @@ describe("buildWranglerLocalDevConfig", () => {
     const config = buildWranglerLocalDevConfig({});
 
     expect(config.ai).toEqual({ binding: "AI" });
-    expect(config.images).toEqual({ binding: "IMAGES" });
     expect(config.send_email).toEqual([{ name: "HOSTED_EMAIL" }]);
     expect(config.version_metadata).toEqual({ binding: "CF_VERSION_METADATA" });
   });
@@ -1674,7 +1673,6 @@ describe("buildWranglerLocalDevConfig", () => {
     });
 
     expect(config).not.toHaveProperty("ai");
-    expect(config.images).toEqual({ binding: "IMAGES" });
     expect(config.send_email).toEqual([{ name: "HOSTED_EMAIL" }]);
     expect(config.version_metadata).toEqual({ binding: "CF_VERSION_METADATA" });
   });

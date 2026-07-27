@@ -18,7 +18,6 @@ export const HOSTED_WORKER_REQUIRED_VAR_NAMES = [
 ] as const;
 
 export const HOSTED_WORKER_OPTIONAL_VAR_NAMES = [
-  "CLOUDFLARE_IMAGES_VARIANT",
   "DEVICE_SYNC_PUBLIC_BASE_URL",
   ...deviceSyncProviderRuntimeVariableEnvKeys,
   "HOSTED_EMAIL_DEFAULT_SUBJECT",

@@ -464,9 +464,10 @@ from the two existing durable owners instead: the frozen source R2 inventory
 and canonical Postgres `hosted_member` rows.
 
 Before creating the destination, require the lifecycle-managed
-`hosted-email/messages/` and `hosted-meal-photos/images/` prefixes to contain
-zero objects. Copying one would restart its deletion backstop in ENAM, while
-dropping one could lose a pending import. If either prefix cannot be emptied,
+`hosted-email/messages/`, `hosted-private-media/images/`, and
+`hosted-meal-photos/images/` prefixes to contain zero objects. Copying one would
+restart its deletion backstop in ENAM, while dropping one could lose a pending
+import or an in-flight Linq avatar fetch. If any prefix cannot be emptied,
 rebook rather than copying or dropping its contents.
 
 Issue a temporary Object Read-only key scoped only to the OC source. Load it

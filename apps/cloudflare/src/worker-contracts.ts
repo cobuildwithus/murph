@@ -13,22 +13,6 @@ export interface WorkerAiBindingLike {
   run(model: string, input: Record<string, unknown>): Promise<unknown>;
 }
 
-export interface WorkerImagesBindingLike {
-  hosted: {
-    upload(
-      image: ArrayBuffer,
-      options: {
-        filename: string;
-        metadata: Readonly<Record<string, unknown>>;
-        requireSignedURLs: true;
-      },
-    ): Promise<{
-      requireSignedURLs: boolean;
-      variants: string[];
-    }>;
-  };
-}
-
 export type WorkerProviderEgressTokenValidationRejectReason =
   | "missing_provider_egress_token"
   | "missing_runner_state"
@@ -169,8 +153,7 @@ export interface WorkerEnvironmentContract<
     tag?: string;
     timestamp?: string;
   };
-  CLOUDFLARE_IMAGES_SIGNING_KEY?: string;
-  CLOUDFLARE_IMAGES_VARIANT?: string;
+  HOSTED_PRIVATE_MEDIA_CAPABILITY_SECRET?: string;
   HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS?: string;
   HOSTED_AI_USAGE_REPORTING_SECRET?: string;
   HOSTED_LOG_FINGERPRINT_SECRET?: string;
@@ -195,7 +178,6 @@ export interface WorkerEnvironmentContract<
   HOSTED_R2_PRESIGN_CONTROL_ENDPOINT?: string;
   HOSTED_R2_PRESIGN_ENDPOINT?: string;
   HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY?: string;
-  IMAGES?: WorkerImagesBindingLike;
   HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT?: string;
   HOSTED_EXECUTION_RUNNER_HOST_ALIAS?: string;
   MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED?: string;

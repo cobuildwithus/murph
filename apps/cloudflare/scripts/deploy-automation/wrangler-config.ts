@@ -146,9 +146,6 @@ export function buildHostedWranglerDeployConfig(
     ai: {
       binding: "AI",
     },
-    images: {
-      binding: "IMAGES",
-    },
     ...(sendEmailBindings.length > 0
       ? {
           send_email: sendEmailBindings,

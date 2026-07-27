@@ -84,9 +84,6 @@
   "ai": {
     "binding": "AI"
   },
-  "images": {
-    "binding": "IMAGES"
-  },
   "send_email": [
     {
       "name": "HOSTED_EMAIL"

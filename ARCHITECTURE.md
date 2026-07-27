@@ -986,10 +986,17 @@ Reconciliation evaluates engagement and AI-usage authorization for runnable mode
 Linq group-avatar mutation is the one private-image provider boundary that
 requires a fetchable URL. After the group tool preflights current chat
 authority, the runtime resolves canonical vault bytes and calls the
-write-fenced `results.worker/private-image-urls` effect. The Worker uploads
-through its account-scoped Images binding with signed delivery required and returns a one-day signed
-URL for the immediate Linq mutation. That URL is ephemeral provider input,
-never the internal media representation, model output, or outbox state.
+write-fenced `results.worker/private-image-urls` effect. The Worker stores one
+deterministic application-encrypted object under the member's opaque
+private-media R2 prefix and returns a one-day AES-GCM capability on Murph's
+fixed Worker origin for the immediate Linq mutation. The public GET route
+decrypts and hash/size/signature-verifies the object, responds with
+`private, no-store`, and reveals no member id, object key, storage namespace, or
+image hash in the URL. Retry reuses the same object without refreshing its R2
+age. The 24-hour R2 lifecycle and account deletion own cleanup without treating
+provider acceptance as fetch proof. That URL is ephemeral provider input,
+never the internal media representation, model output, outbox state, or log
+payload.
 
 Hosted Exa egress is narrower than the path allowlist alone: before injecting
 the Worker-owned key, `apps/cloudflare` must validate the exact bounded

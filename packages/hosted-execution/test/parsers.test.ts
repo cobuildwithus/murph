@@ -1012,11 +1012,20 @@ describe("parseHostedRuntimeGroupTool", () => {
     expect(parseHostedRuntimeGroupToolRequest({
       action: "set_chat_avatar",
       groupChatIconUrl:
-        `https://imagedelivery.net/account/avatar/public?exp=2000000000&sig=${"a".repeat(64)}`,
+        `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}?exp=2000000000`,
     })).toEqual({
       action: "set_chat_avatar",
       groupChatIconUrl:
-        `https://imagedelivery.net/account/avatar/public?exp=2000000000&sig=${"a".repeat(64)}`,
+        `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}?exp=2000000000`,
+    });
+    expect(parseHostedRuntimeGroupToolRequest({
+      action: "set_chat_avatar",
+      groupChatIconUrl:
+        `https://imagedelivery.net/account/avatar/private?exp=2000000000&sig=${"a".repeat(64)}`,
+    })).toEqual({
+      action: "set_chat_avatar",
+      groupChatIconUrl:
+        `https://imagedelivery.net/account/avatar/private?exp=2000000000&sig=${"a".repeat(64)}`,
     });
     expect(parseHostedRuntimeGroupToolRequest({
       action: "preflight_set_chat_avatar",
@@ -1191,14 +1200,14 @@ describe("parseHostedRuntimeGroupTool", () => {
       parseHostedRuntimeGroupToolRequest({
         action: "set_chat_avatar",
         groupChatIconUrl:
-          "https://imagedelivery.net/account/avatar/public",
+          `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}`,
       })
     ).toThrow(/groupChatIconUrl is invalid/u);
     expect(() =>
       parseHostedRuntimeGroupToolRequest({
         action: "set_chat_avatar",
         groupChatIconUrl:
-          `https://imagedelivery.net/account/avatar/public?exp=2000000000&sig=${"a".repeat(64)}&tracking=1`,
+          `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}?exp=2000000000&tracking=1`,
       })
     ).toThrow(/groupChatIconUrl is invalid/u);
     expect(() =>

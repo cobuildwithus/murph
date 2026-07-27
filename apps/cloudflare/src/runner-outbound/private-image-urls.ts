@@ -3,6 +3,10 @@ import {
   parseHostedRunnerPrivateImageUrlPublishRequest,
 } from "../runner-effects-contract.ts";
 import {
+  readHostedPrivateMediaCapabilitySecret,
+  stageHostedPrivateMedia,
+} from "../private-media.ts";
+import {
   requireRunnerRuntimeWriteFenceWrite,
   RunnerRuntimeWriteFenceError,
 } from "./write-fence.ts";
@@ -13,7 +17,6 @@ import type {
 const PRIVATE_IMAGE_PUBLISH_BODY_LIMIT_BYTES = 14 * 1024 * 1024;
 const PRIVATE_IMAGE_FILE_LIMIT_BYTES = 10 * 1024 * 1024;
 const PRIVATE_IMAGE_METADATA_LIMIT_BYTES = 1024;
-const PRIVATE_IMAGE_URL_LIFETIME_SECONDS = 24 * 60 * 60;
 
 export async function handleRunnerPrivateImageUrlPublishRequest(input: {
   env: RunnerOutboundEnvironmentSource;
@@ -56,11 +59,8 @@ export async function handleRunnerPrivateImageUrlPublishRequest(input: {
     throw error;
   }
 
-  const signingKey = readRequiredEnvString(
-    input.env,
-    "CLOUDFLARE_IMAGES_SIGNING_KEY",
-  );
-  if (!input.env.IMAGES || !signingKey) {
+  const capabilitySecret = readHostedPrivateMediaCapabilitySecret(input.env);
+  if (!capabilitySecret) {
     return jsonError("Private image URL publishing is not configured.", 503);
   }
 
@@ -84,93 +84,21 @@ export async function handleRunnerPrivateImageUrlPublishRequest(input: {
     throw error;
   }
 
-  let uploadedImage;
   try {
-    uploadedImage = await input.env.IMAGES.hosted.upload(
-      copyBytesToArrayBuffer(bytes),
-      {
-        filename: normalizePrivateImageFilename(
-          request.filename,
-          request.contentType,
-        ),
-        metadata,
-        requireSignedURLs: true,
-      },
-    );
-  } catch {
-    return jsonError("Private image upload failed.", 502);
-  }
-  if (uploadedImage.requireSignedURLs !== true) {
-    return jsonError("Private image upload failed.", 502);
-  }
-
-  try {
-    const unsignedUrl = readCloudflareImageVariantUrl(
-      uploadedImage.variants,
-      readOptionalEnvString(input.env, "CLOUDFLARE_IMAGES_VARIANT") ?? "public",
-    );
-    const signed = await signCloudflareImageDeliveryUrl({
-      expiresAtUnixSeconds: Math.floor((input.nowMs ?? Date.now()) / 1_000)
-        + PRIVATE_IMAGE_URL_LIFETIME_SECONDS,
-      signingKey,
-      unsignedUrl,
+    const staged = await stageHostedPrivateMedia({
+      bucket: input.env.BUNDLES,
+      bytes,
+      capabilitySecret,
+      contentType: request.contentType,
+      nowMs: input.nowMs,
+      userId: input.userId,
     });
-    return json(signed);
+    return json({
+      expiresAt: staged.expiresAt,
+      url: staged.url,
+    });
   } catch {
     return jsonError("Private image URL publishing failed.", 502);
-  }
-}
-
-export async function signCloudflareImageDeliveryUrl(input: {
-  expiresAtUnixSeconds: number;
-  signingKey: string;
-  unsignedUrl: string;
-}): Promise<{ expiresAt: string; url: string }> {
-  const expiresAtUnixSeconds = Math.floor(input.expiresAtUnixSeconds);
-  if (!Number.isSafeInteger(expiresAtUnixSeconds) || expiresAtUnixSeconds <= 0) {
-    throw new TypeError("Private image URL expiry is invalid.");
-  }
-  const url = new URL(input.unsignedUrl);
-  assertUnsignedCloudflareImageDeliveryUrl(url);
-  url.searchParams.set("exp", String(expiresAtUnixSeconds));
-  const valueToSign = `${url.pathname}?${url.searchParams.toString()}`;
-  const encoder = new TextEncoder();
-  const key = await crypto.subtle.importKey(
-    "raw",
-    encoder.encode(input.signingKey),
-    { hash: "SHA-256", name: "HMAC" },
-    false,
-    ["sign"],
-  );
-  const signature = await crypto.subtle.sign(
-    "HMAC",
-    key,
-    encoder.encode(valueToSign),
-  );
-  url.searchParams.set(
-    "sig",
-    [...new Uint8Array(signature)]
-      .map((value) => value.toString(16).padStart(2, "0"))
-      .join(""),
-  );
-  return {
-    expiresAt: new Date(expiresAtUnixSeconds * 1_000).toISOString(),
-    url: url.toString(),
-  };
-}
-
-function assertUnsignedCloudflareImageDeliveryUrl(url: URL): void {
-  if (
-    url.protocol !== "https:"
-    || url.hostname !== "imagedelivery.net"
-    || url.port
-    || url.username
-    || url.password
-    || url.search
-    || url.hash
-    || url.pathname.split("/").filter(Boolean).length < 3
-  ) {
-    throw new TypeError("Cloudflare Images upload returned an invalid URL.");
   }
 }
 
@@ -190,12 +118,6 @@ function decodeBase64Image(value: string): Uint8Array {
     bytes[index] = binary.charCodeAt(index);
   }
   return bytes;
-}
-
-function copyBytesToArrayBuffer(bytes: Uint8Array): ArrayBuffer {
-  const copy = new Uint8Array(bytes.byteLength);
-  copy.set(bytes);
-  return copy.buffer;
 }
 
 function assertPrivateImageBytes(input: {
@@ -242,48 +164,4 @@ function assertPrivateImageMetadata(metadata: Record<string, string>): void {
   ) {
     throw new RangeError("Private image metadata is too large.");
   }
-}
-
-function normalizePrivateImageFilename(
-  filename: string,
-  contentType: "image/jpeg" | "image/png" | "image/webp",
-): string {
-  const fallback =
-    `private-image.${contentType === "image/jpeg" ? "jpg" : contentType.slice(6)}`;
-  const normalized = filename.trim();
-  return /^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/u.test(normalized)
-    ? normalized
-    : fallback;
-}
-
-function readCloudflareImageVariantUrl(
-  variants: readonly string[],
-  variant: string,
-): string {
-  const preferred = variants.find((entry) =>
-    entry.endsWith(`/${variant}`)
-  );
-  if (!preferred) {
-    throw new TypeError("Cloudflare Images upload did not return a URL.");
-  }
-  const url = new URL(preferred);
-  assertUnsignedCloudflareImageDeliveryUrl(url);
-  return url.toString();
-}
-
-function readRequiredEnvString(
-  env: Readonly<Record<string, unknown>>,
-  key: string,
-): string | null {
-  return readOptionalEnvString(env, key);
-}
-
-function readOptionalEnvString(
-  env: Readonly<Record<string, unknown>>,
-  key: string,
-): string | null {
-  const value = env[key];
-  return typeof value === "string" && value.trim().length > 0
-    ? value.trim()
-    : null;
 }

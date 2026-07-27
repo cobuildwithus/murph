@@ -1053,7 +1053,41 @@ export interface HostedRuntimeGroupSetChatAvatarRequest {
   groupChatIconUrl: string;
 }
 
+export const HOSTED_RUNTIME_PRIVATE_MEDIA_DELIVERY_ORIGIN =
+  "https://murph-hosted.cobuildwithus.workers.dev";
+export const HOSTED_RUNTIME_PRIVATE_MEDIA_DELIVERY_PATH_PREFIX =
+  "/private-media/v1/";
+const HOSTED_RUNTIME_PRIVATE_MEDIA_DELIVERY_PATH_PATTERN =
+  /^\/private-media\/v1\/v1\.[A-Za-z0-9_-]{16}\.[A-Za-z0-9_-]{32,1024}$/u;
+
 export function isHostedRuntimePrivateImageDeliveryUrl(url: URL): boolean {
+  if (isLegacyHostedRuntimePrivateImageDeliveryUrl(url)) {
+    return true;
+  }
+  if (
+    url.origin !== HOSTED_RUNTIME_PRIVATE_MEDIA_DELIVERY_ORIGIN
+    || url.port
+    || url.username
+    || url.password
+    || url.hash
+    || !HOSTED_RUNTIME_PRIVATE_MEDIA_DELIVERY_PATH_PATTERN.test(url.pathname)
+  ) {
+    return false;
+  }
+  const entries = [...url.searchParams.entries()];
+  if (
+    entries.length !== 1
+    || entries.filter(([key]) => key === "exp").length !== 1
+  ) {
+    return false;
+  }
+  const expiresAt = url.searchParams.get("exp");
+  return expiresAt !== null
+    && /^[1-9][0-9]*$/u.test(expiresAt)
+    && Number.isSafeInteger(Number(expiresAt));
+}
+
+function isLegacyHostedRuntimePrivateImageDeliveryUrl(url: URL): boolean {
   if (
     url.protocol !== "https:"
     || url.hostname !== "imagedelivery.net"

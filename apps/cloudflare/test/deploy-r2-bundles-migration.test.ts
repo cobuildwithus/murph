@@ -45,6 +45,11 @@ enabled:  Yes
 prefix:   hosted-email/messages/
 action:   Expire objects after 1 days
 
+name:     delete-hosted-private-media-after-24h
+enabled:  Yes
+prefix:   hosted-private-media/images/
+action:   Expire objects after 1 days
+
 name:     delete-hosted-meal-photos-after-31d
 enabled:  Yes
 prefix:   hosted-meal-photos/images/
@@ -601,6 +606,12 @@ describe("R2 lifecycle parsing", () => {
         id: "delete-hosted-meal-photos-after-31d",
         prefix: "hosted-meal-photos/images/",
       },
+      {
+        days: 1,
+        enabled: true,
+        id: "delete-hosted-private-media-after-24h",
+        prefix: "hosted-private-media/images/",
+      },
     ]);
   });
 
@@ -608,7 +619,7 @@ describe("R2 lifecycle parsing", () => {
     expect(parseWranglerLifecycleList(
       lifecycleOutput(SOURCE_BUCKET),
       SOURCE_BUCKET,
-    )).toHaveLength(2);
+    )).toHaveLength(3);
     expect(() => parseWranglerLifecycleList(
       lifecycleOutput(SOURCE_BUCKET).replace("enabled:  Yes", "enabled:  Maybe"),
       SOURCE_BUCKET,
@@ -971,6 +982,7 @@ describe("R2 migration orchestration", () => {
 
   it.each([
     ["raw email", "hosted-email/messages/transient-email"],
+    ["private media", "hosted-private-media/images/transient-media"],
     ["staged meal photo", "hosted-meal-photos/images/transient-photo"],
   ])("refuses to start while a staged %s object remains", async (_label, key) => {
     const staged = inventoryEntry({ key });

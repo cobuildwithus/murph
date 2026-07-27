@@ -3,6 +3,7 @@ import { isIP } from "node:net";
 
 import {
   HOSTED_AI_USAGE_ALLOWANCE_ACCEPTED_MODEL_IDS,
+  HOSTED_RUNTIME_PRIVATE_MEDIA_DELIVERY_ORIGIN,
   isHostedAiUsageAllowancePricedModelId,
 } from "@murphai/hosted-execution/runtime-control";
 import {
@@ -201,6 +202,18 @@ export function listHostedDeployEnvironmentInvariantErrors(
     return errors;
   }
 
+  const privateMediaCapabilitySecret = normalizeOptionalString(
+    source.HOSTED_PRIVATE_MEDIA_CAPABILITY_SECRET,
+  );
+  if (
+    privateMediaCapabilitySecret
+    && privateMediaCapabilitySecret.length < 32
+  ) {
+    errors.push(
+      "HOSTED_PRIVATE_MEDIA_CAPABILITY_SECRET must contain at least 32 characters.",
+    );
+  }
+
   const bundlesBucket = normalizeOptionalString(source.CF_BUNDLES_BUCKET);
   const presignBucket = normalizeOptionalString(source.HOSTED_R2_PRESIGN_BUCKET_NAME);
   if (bundlesBucket && presignBucket && presignBucket !== bundlesBucket) {
@@ -339,6 +352,16 @@ export function listHostedDeployEnvironmentInvariantErrors(
     if (result) {
       productionUrls.set(label, result);
     }
+  }
+
+  const publicWorkerOrigin = productionUrls.get("CF_PUBLIC_BASE_URL")?.normalized;
+  if (
+    publicWorkerOrigin
+    && publicWorkerOrigin !== HOSTED_RUNTIME_PRIVATE_MEDIA_DELIVERY_ORIGIN
+  ) {
+    errors.push(
+      `production deploys must set CF_PUBLIC_BASE_URL=${HOSTED_RUNTIME_PRIVATE_MEDIA_DELIVERY_ORIGIN} for private-media capability delivery.`,
+    );
   }
 
   const hostedWebBaseUrl = productionUrls.get("HOSTED_WEB_BASE_URL")?.normalized;

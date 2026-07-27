@@ -102,7 +102,7 @@ const REQUIRED_R2_PRESIGN_WORKER_SECRETS = {
   HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY: "r2-signing-fixture",
 } as const;
 const REQUIRED_PRIVATE_IMAGE_WORKER_SECRET = {
-  CLOUDFLARE_IMAGES_SIGNING_KEY: "images-signing-fixture",
+  HOSTED_PRIVATE_MEDIA_CAPABILITY_SECRET: "images-signing-fixture",
 } as const;
 const VALID_TEST_SSH_ED25519_PUBLIC_KEY =
   "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB";
@@ -220,9 +220,6 @@ describe("hosted deploy automation helpers", () => {
     });
     const config = buildHostedWranglerDeployConfig(environment) as {
       ai?: {
-        binding: string;
-      };
-      images?: {
         binding: string;
       };
       containers: Array<{
@@ -375,7 +372,6 @@ describe("hosted deploy automation helpers", () => {
       },
     ]);
     expect(config.ai).toEqual({ binding: "AI" });
-    expect(config.images).toEqual({ binding: "IMAGES" });
     expect(config.vars.HOSTED_WEB_BASE_URL).toBe("https://web.example.test");
     expect(config.vars.AGENTMAIL_BASE_URL).toBeUndefined();
     expect(config.vars.TELEGRAM_BOT_USERNAME).toBe("hosted_bot");
@@ -449,9 +445,6 @@ describe("hosted deploy automation helpers", () => {
       placement: {
         mode: string;
       };
-      images?: {
-        binding: string;
-      };
       version_metadata?: {
         binding: string;
       };
@@ -483,9 +476,6 @@ describe("hosted deploy automation helpers", () => {
       placement: {
         mode: string;
       };
-      images?: {
-        binding: string;
-      };
       version_metadata?: {
         binding: string;
       };
@@ -513,7 +503,6 @@ describe("hosted deploy automation helpers", () => {
     expect(checkedInConfig.durable_objects.bindings).toEqual(generatedConfig.durable_objects.bindings);
     expect(checkedInConfig.migrations).toEqual(generatedConfig.migrations);
     expect(checkedInConfig.placement).toEqual(generatedConfig.placement);
-    expect(checkedInConfig.images).toEqual(generatedConfig.images);
     expect(checkedInConfig).not.toHaveProperty("queues");
     expect(generatedConfig).not.toHaveProperty("queues");
     expect(checkedInConfig.version_metadata).toEqual(generatedConfig.version_metadata);
@@ -781,9 +770,15 @@ describe("hosted deploy automation helpers", () => {
     ]).toHaveLength(3);
     expect(workflow).not.toContain("services:");
     expect(workflow).toContain('          )"\n          if [[ -z "${latest_log}" ]]; then');
+    const workflowSecretName = (name: string): string =>
+      name === "HOSTED_PRIVATE_MEDIA_CAPABILITY_SECRET"
+        ? "CLOUDFLARE_IMAGES_SIGNING_KEY"
+        : name;
     for (const name of HOSTED_WORKER_REQUIRED_SECRET_NAMES) {
       expect(workflowEnvBindings.get(name)).toBeUndefined();
-      expect(workflow).toContain(`${name}: \${{ secrets.${name} }}`);
+      expect(workflow).toContain(
+        `${name}: \${{ secrets.${workflowSecretName(name)} }}`,
+      );
     }
     const renderWorkerSecretsStep = workflow.slice(
       renderWorkerSecretsStepIndex,
@@ -794,7 +789,9 @@ describe("hosted deploy automation helpers", () => {
       workflow.indexOf("\n      - name:", deployWorkerStepIndex + 1),
     );
     for (const name of HOSTED_WORKER_REQUIRED_SECRET_NAMES) {
-      expect(deployWorkerStep).toContain(`${name}: \${{ secrets.${name} }}`);
+      expect(deployWorkerStep).toContain(
+        `${name}: \${{ secrets.${workflowSecretName(name)} }}`,
+      );
     }
     const validateDeployEnvStep = workflow.slice(
       validateDeployEnvStepIndex,
@@ -804,7 +801,9 @@ describe("hosted deploy automation helpers", () => {
       "HOSTED_EXECUTION_CONTAINER_ROLLOUT: ${{ inputs.container_rollout }}",
     );
     for (const name of HOSTED_WORKER_REQUIRED_SECRET_NAMES) {
-      expect(validateDeployEnvStep).toContain(`${name}: \${{ secrets.${name} }}`);
+      expect(validateDeployEnvStep).toContain(
+        `${name}: \${{ secrets.${workflowSecretName(name)} }}`,
+      );
     }
     for (const name of HOSTED_WORKER_REQUIRED_VAR_NAMES) {
       expect(workflowEnvBindings.get(name)).toBe("vars");

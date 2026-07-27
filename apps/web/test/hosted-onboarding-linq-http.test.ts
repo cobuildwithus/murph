@@ -635,7 +635,7 @@ describe("updateHostedLinqChatAvatar", () => {
     await expect(updateHostedLinqChatAvatar({
       chatId: "chat_123",
       groupChatIconUrl:
-        `https://imagedelivery.net/account/avatar/public?exp=2000000000&sig=${"a".repeat(64)}`,
+        `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}?exp=2000000000`,
     })).resolves.toBeUndefined();
 
     const firstCall = fetchMock.mock.calls[0];
@@ -648,7 +648,31 @@ describe("updateHostedLinqChatAvatar", () => {
     expect(expectRequestInit(init).method).toBe("PUT");
     expect(readJsonRequestBody(init)).toEqual({
       group_chat_icon:
-        `https://imagedelivery.net/account/avatar/public?exp=2000000000&sig=${"a".repeat(64)}`,
+        `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}?exp=2000000000`,
+    });
+  });
+
+  it("accepts the prior signed Images shape while old runners drain", async () => {
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL, _init?: RequestInit) => {
+        void _input;
+        void _init;
+        return createJsonResponse({ status: "pending" }, 200);
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const legacyUrl =
+      `https://imagedelivery.net/account/avatar/private?exp=2000000000&sig=${"a".repeat(64)}`;
+
+    await expect(updateHostedLinqChatAvatar({
+      chatId: "chat_123",
+      groupChatIconUrl: legacyUrl,
+    })).resolves.toBeUndefined();
+
+    expect(readJsonRequestBody(
+      expectRequestInit(fetchMock.mock.calls[0]?.[1]),
+    )).toEqual({
+      group_chat_icon: legacyUrl,
     });
   });
 
@@ -671,7 +695,7 @@ describe("updateHostedLinqChatAvatar", () => {
     await expect(updateHostedLinqChatAvatar({
       chatId: "chat_123",
       groupChatIconUrl: "https://example.com/avatar.png",
-    })).rejects.toThrow(/hosted Cloudflare Images URL/u);
+    })).rejects.toThrow(/hosted private media URL/u);
 
     expect(fetchMock).not.toHaveBeenCalled();
   });

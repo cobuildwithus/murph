@@ -13,6 +13,7 @@ export type HostedStorageScope =
   | "bundle"
   | "email-raw"
   | "meal-photo"
+  | "private-media"
   | "runner-secrets";
 
 export interface HostedCipherEnvelope {
@@ -292,5 +293,6 @@ const HOSTED_STORAGE_SCOPES = new Set<HostedStorageScope>([
   "bundle",
   "email-raw",
   "meal-photo",
+  "private-media",
   "runner-secrets",
 ]);
