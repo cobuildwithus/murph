@@ -18,7 +18,8 @@ import { logHostedStripeFailure } from "../hosted-onboarding/stripe-error-log";
 
 const HOSTED_ACCOUNT_DELETION_CLEANUP_SCHEMA =
   "murph.hosted-account-deletion-cleanup.v1" as const;
-const HOSTED_ACCOUNT_DELETION_CLEANUP_BATCH_SIZE = 25;
+const HOSTED_ACCOUNT_DELETION_CLEANUP_BATCH_SIZE = 5;
+const HOSTED_ACCOUNT_DELETION_CLEANUP_TARGET_TIMEOUT_MS = 5_000;
 const HOSTED_ACCOUNT_DELETION_CLEANUP_RETRY_MS = 60 * 60_000;
 const HOSTED_ACCOUNT_DELETION_CLEANUP_IDENTIFIER_MAX = 1_024;
 
@@ -156,17 +157,28 @@ export async function runHostedAccountDeletionCleanup(input: {
     const [cloudflare, stripeCustomer, privyUser] = await Promise.all([
       cleanup.cloudflareCompletedAt
         ? Promise.resolve(completedCloudflareResult())
-        : deleteHostedRunnerData(payload.runtimeMemberIds),
+        : withCleanupDeadline(
+            deleteHostedRunnerData(payload.runtimeMemberIds),
+            pendingHostedAccountDeletionCleanupResult(
+              "ACCOUNT_DELETION_CLEANUP_TIMEOUT",
+            ).cloudflare,
+          ),
       cleanup.stripeCompletedAt
         ? Promise.resolve(completedOrSkippedVendorResult(
             payload.stripeCustomerIds.length > 0,
           ))
-        : deleteStripeCustomers(payload.stripeCustomerIds),
+        : withCleanupDeadline(
+            deleteStripeCustomers(payload.stripeCustomerIds),
+            timedOutVendorDeletionResult(),
+          ),
       cleanup.privyCompletedAt
         ? Promise.resolve(completedOrSkippedVendorResult(
             payload.privyUserId !== null,
           ))
-        : deletePrivyUser(payload.privyUserId),
+        : withCleanupDeadline(
+            deletePrivyUser(payload.privyUserId),
+            timedOutVendorDeletionResult(),
+          ),
     ]);
     const updateData = buildProgressUpdate({
       cleanup,
@@ -252,10 +264,7 @@ export async function drainHostedAccountDeletionCleanupBatch(input: {
     },
   });
 
-  let completed = 0;
-  let failed = 0;
-  let pending = 0;
-  for (const row of rows) {
+  const outcomes = await Promise.all(rows.map(async (row) => {
     try {
       const result = await runHostedAccountDeletionCleanup({
         cleanupId: row.id,
@@ -263,16 +272,27 @@ export async function drainHostedAccountDeletionCleanupBatch(input: {
         prisma: input.prisma,
       });
       if (result.cleanupPending) {
-        pending += 1;
-      } else {
-        completed += 1;
+        return "pending" as const;
       }
+      return "completed" as const;
     } catch (error) {
-      failed += 1;
       console.error("Hosted account deletion cleanup retry failed.", {
         cleanupIdSuffix: row.id.slice(-8),
         errorCode: safeCleanupErrorCode(error),
       });
+      return "failed" as const;
+    }
+  }));
+  let completed = 0;
+  let failed = 0;
+  let pending = 0;
+  for (const outcome of outcomes) {
+    if (outcome === "completed") {
+      completed += 1;
+    } else if (outcome === "failed") {
+      failed += 1;
+    } else {
+      pending += 1;
     }
   }
 
@@ -281,6 +301,35 @@ export async function drainHostedAccountDeletionCleanupBatch(input: {
     failed,
     pending,
     selected: rows.length,
+  };
+}
+
+function withCleanupDeadline<TResult>(
+  operation: Promise<TResult>,
+  timedOutResult: TResult,
+): Promise<TResult> {
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(
+      () => resolve(timedOutResult),
+      HOSTED_ACCOUNT_DELETION_CLEANUP_TARGET_TIMEOUT_MS,
+    );
+    operation.then(
+      (result) => {
+        clearTimeout(timeout);
+        resolve(result);
+      },
+      (error: unknown) => {
+        clearTimeout(timeout);
+        reject(error);
+      },
+    );
+  });
+}
+
+function timedOutVendorDeletionResult(): HostedAccountVendorDeletionResult {
+  return {
+    errorCode: "ACCOUNT_DELETION_CLEANUP_TIMEOUT",
+    status: "failed",
   };
 }
 

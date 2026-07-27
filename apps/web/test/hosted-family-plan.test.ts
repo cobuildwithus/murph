@@ -3934,6 +3934,66 @@ describe("hosted Family plan", () => {
     }));
   });
 
+  it("expires a Family Checkout session when account deletion wins the owner fence", async () => {
+    const group = {
+      billingStatus: HostedBillingStatus.not_started,
+      id: "hbag_family",
+      ownerMemberId: "member_owner",
+      suspendedAt: null,
+    };
+    const tx = createTxMock({
+      billedSeatCount: null,
+      group,
+    });
+    tx.hostedAccountGroupBillingRef.findUnique.mockResolvedValueOnce(null);
+    const prisma = tx as FamilyPlanTxMock & {
+      $transaction: ReturnType<typeof vi.fn>;
+    };
+    let transactionCount = 0;
+    prisma.$transaction = vi.fn((callback) => {
+      transactionCount += 1;
+      if (transactionCount === 2) {
+        tx.hostedMember.findUnique.mockResolvedValueOnce({
+          suspendedAt: new Date("2026-07-27T00:00:00.000Z"),
+        });
+      }
+      return callback(tx);
+    });
+    const checkoutExpire = vi.fn().mockResolvedValue({
+      customer: null,
+      status: "expired",
+      subscription: null,
+    });
+    runtimeMocks.requireHostedStripeApi.mockReturnValueOnce({
+      checkout: {
+        sessions: {
+          create: vi.fn().mockResolvedValue({
+            id: "cs_test_familyDelete123",
+            url: "https://checkout.stripe.com/c/pay/cs_test_familyDelete123",
+          }),
+          expire: checkoutExpire,
+          retrieve: vi.fn().mockResolvedValue({
+            customer: null,
+            status: "open",
+            subscription: null,
+          }),
+        },
+      },
+    });
+
+    await expect(createHostedFamilyBillingCheckout({
+      groupId: "hbag_family",
+      ownerMemberId: "member_owner",
+      prisma: prisma as never,
+      seatCount: 2,
+    })).rejects.toMatchObject({
+      code: "HOSTED_MEMBER_SUSPENDED",
+    });
+
+    expect(checkoutExpire).toHaveBeenCalledWith("cs_test_familyDelete123");
+    expect(tx.hostedAccountGroupBillingRef.updateMany).not.toHaveBeenCalled();
+  });
+
   it("converts an active direct paid owner subscription into Family billing without creating a second checkout", async () => {
     const group = {
       billingStatus: HostedBillingStatus.not_started,

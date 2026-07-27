@@ -49,6 +49,8 @@ import {
   normalizeNullableString,
 } from "./shared";
 import { createHostedPulseTrialStripeCustomer } from "./pulse-trial-customer";
+import { closeUnboundHostedSubscriptionCheckout } from "./subscription-checkout-lifecycle";
+import { bindHostedMemberSubscriptionCheckoutTx } from "./subscription-checkout-store";
 
 export interface HostedBillingCheckoutInput {
   billingPlanCode?: HostedBillingPlanCode;
@@ -222,6 +224,37 @@ export async function createHostedBillingCheckout(
         idempotencyKey: checkoutIdempotencyKey,
       }),
     );
+
+    let checkoutOwned = false;
+    try {
+      checkoutOwned = await prisma.$transaction(
+        (tx) => bindHostedMemberSubscriptionCheckoutTx({
+          memberId: invite.member.id,
+          stripeCheckoutSessionId: checkoutSession.id,
+          tx,
+        }),
+        HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
+      );
+    } catch (error) {
+      await closeUnboundHostedSubscriptionCheckout({
+        deleteSessionCustomer: customerId === null,
+        sessionId: checkoutSession.id,
+        stripe,
+      });
+      throw error;
+    }
+    if (!checkoutOwned) {
+      await closeUnboundHostedSubscriptionCheckout({
+        deleteSessionCustomer: customerId === null,
+        sessionId: checkoutSession.id,
+        stripe,
+      });
+      throw hostedOnboardingError({
+        code: "HOSTED_MEMBER_SUSPENDED",
+        httpStatus: 403,
+        message: "This hosted account is suspended. Contact support to restore access.",
+      });
+    }
 
     if (!checkoutSession.url) {
       throw hostedOnboardingError({

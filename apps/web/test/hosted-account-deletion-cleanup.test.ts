@@ -214,6 +214,48 @@ describe("hosted account deletion cleanup", () => {
     expect(store.row).not.toBeNull();
   });
 
+  it("bounds a stalled target and keeps its durable receipt pending", async () => {
+    vi.useFakeTimers();
+    try {
+      const store = new CleanupStore();
+      const now = new Date("2026-07-25T18:00:00.000Z");
+      mocks.deleteHostedRunnerUserDataBestEffort.mockReturnValueOnce(
+        new Promise(() => undefined),
+      );
+      const prepared = await prepareHostedAccountDeletionCleanup({
+        now,
+        privyUserId: null,
+        runtimeMemberIds: ["member_1"],
+        stripeCustomerIds: [],
+      });
+      await persistHostedAccountDeletionCleanupTx({
+        cleanup: prepared,
+        prisma: store.prisma as never,
+      });
+
+      const run = runHostedAccountDeletionCleanup({
+        cleanupId: prepared.id,
+        now,
+        prisma: store.prisma as never,
+      });
+      await vi.advanceTimersByTimeAsync(5_000);
+
+      await expect(run).resolves.toMatchObject({
+        cleanupPending: true,
+        cloudflare: {
+          deleted: false,
+          errorCode: "ACCOUNT_DELETION_CLEANUP_TIMEOUT",
+        },
+      });
+      expect(store.row).toMatchObject({
+        lastErrorCode: "ACCOUNT_DELETION_CLEANUP_TIMEOUT",
+        nextAttemptAt: new Date("2026-07-25T19:00:00.000Z"),
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("treats confirmed vendor absence as idempotent success", async () => {
     const store = new CleanupStore();
     const now = new Date("2026-07-25T18:00:00.000Z");
@@ -371,7 +413,7 @@ describe("hosted account deletion cleanup", () => {
         { createdAt: "asc" },
       ],
       select: { id: true },
-      take: 25,
+      take: 5,
       where: {
         nextAttemptAt: { lte: now },
       },

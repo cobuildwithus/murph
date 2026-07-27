@@ -150,6 +150,10 @@ type HostedLinqExistingMemberMatch =
   | "phone-identity"
   | "verified-email";
 type HostedLinqDailyState = Awaited<ReturnType<typeof incrementHostedLinqInboundDailyState>>;
+interface VerifiedHostedLinqInboundParticipant {
+  contact: HostedLinqParticipantContact;
+  memberId: string;
+}
 
 export async function planHostedOnboardingLinqWebhook(input: {
   affirmativeReaction?: boolean;
@@ -1172,6 +1176,7 @@ async function planHostedLinqExplicitThreadRouteWebhook(input: {
   } = input.context;
 
   const participantAccessNow = new Date();
+  let verifiedInboundParticipant: VerifiedHostedLinqInboundParticipant | null = null;
   if (
     !summary.isFromMe
     && messageEvent.data.message.parts.length > 0
@@ -1181,7 +1186,8 @@ async function planHostedLinqExplicitThreadRouteWebhook(input: {
       participantContact,
     })
   ) {
-    await renewHostedThreadContainerParticipantLeaseFromInboundTx({
+    verifiedInboundParticipant =
+      await renewHostedThreadContainerParticipantLeaseFromInboundTx({
       containerMemberId: input.route.containerMemberId,
       now: participantAccessNow,
       occurredAt,
@@ -1201,6 +1207,7 @@ async function planHostedLinqExplicitThreadRouteWebhook(input: {
       containerMemberId: input.route.containerMemberId,
       now: participantAccessNow,
       prisma: input.prisma,
+      verifiedInboundParticipant,
     });
     containerAccessActive = await readActiveHostedMemberAccess({
       memberId: input.route.containerMemberId,
@@ -2193,7 +2200,7 @@ async function renewHostedThreadContainerParticipantLeaseFromInboundTx(input: {
   occurredAt: string;
   participantContact: HostedLinqParticipantContact;
   prisma: Prisma.TransactionClient;
-}): Promise<void> {
+}): Promise<VerifiedHostedLinqInboundParticipant | null> {
   const lookup = input.participantContact.kind === "phone"
     ? await lookupHostedMemberIdentityByPhoneNumberForLinqWebhook({
         phoneNumber: input.participantContact.value,
@@ -2205,7 +2212,7 @@ async function renewHostedThreadContainerParticipantLeaseFromInboundTx(input: {
       });
   const participantMemberId = lookup?.core.id ?? null;
   if (!participantMemberId) {
-    return;
+    return null;
   }
 
   await renewHostedThreadContainerParticipantLeaseTx({
@@ -2215,6 +2222,10 @@ async function renewHostedThreadContainerParticipantLeaseFromInboundTx(input: {
     participantMemberId,
     prisma: input.prisma,
   });
+  return {
+    contact: input.participantContact,
+    memberId: participantMemberId,
+  };
 }
 
 async function renewHostedThreadContainerParticipantLeaseFromRosterTx(input: {
@@ -2222,6 +2233,7 @@ async function renewHostedThreadContainerParticipantLeaseFromRosterTx(input: {
   containerMemberId: string;
   now: Date;
   prisma: Prisma.TransactionClient;
+  verifiedInboundParticipant: VerifiedHostedLinqInboundParticipant | null;
 }): Promise<void> {
   let handles: readonly HostedLinqChatHandleSummary[];
   try {
@@ -2258,6 +2270,56 @@ async function renewHostedThreadContainerParticipantLeaseFromRosterTx(input: {
   }
   if (currentContactsByLookupKey.size === 0) {
     return;
+  }
+
+  const verifiedInboundContact = input.verifiedInboundParticipant
+    ? createHostedLinqParticipantContactLookupKeyReadCandidates(
+        input.verifiedInboundParticipant.contact,
+      ).some((lookupKey) => currentContactsByLookupKey.has(lookupKey))
+    : false;
+  if (verifiedInboundContact && input.verifiedInboundParticipant) {
+    const lookup = input.verifiedInboundParticipant.contact.kind === "phone"
+      ? await lookupHostedMemberIdentityByPhoneNumberForLinqWebhook({
+          phoneNumber: input.verifiedInboundParticipant.contact.value,
+          prisma: input.prisma,
+        })
+      : await lookupHostedMemberByVerifiedEmailAddress({
+          address: input.verifiedInboundParticipant.contact.value,
+          prisma: input.prisma,
+        });
+    if (lookup?.core.id === input.verifiedInboundParticipant.memberId) {
+      const activeParticipant = await input.prisma.hostedMember.findFirst({
+        select: { id: true },
+        where: {
+          ...activeHostedMemberAccessWhere(),
+          id: input.verifiedInboundParticipant.memberId,
+        },
+      });
+      if (activeParticipant) {
+        await input.prisma.hostedThreadContainerParticipant.upsert({
+          create: {
+            containerMemberId: input.containerMemberId,
+            firstSeenAt: input.now,
+            handleLookupKey: input.verifiedInboundParticipant.contact.lookupKey,
+            lastSeenAt: input.now,
+            participantMemberId: input.verifiedInboundParticipant.memberId,
+            removedAt: null,
+          },
+          update: {
+            handleLookupKey: input.verifiedInboundParticipant.contact.lookupKey,
+            lastSeenAt: input.now,
+            removedAt: null,
+          },
+          where: {
+            containerMemberId_participantMemberId: {
+              containerMemberId: input.containerMemberId,
+              participantMemberId: input.verifiedInboundParticipant.memberId,
+            },
+          },
+        });
+        return;
+      }
+    }
   }
 
   const candidates = await input.prisma.hostedThreadContainerParticipant.findMany({
