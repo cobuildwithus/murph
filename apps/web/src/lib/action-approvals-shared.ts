@@ -11,8 +11,13 @@ export type HostedActionApprovalStatus =
   | "denied"
   | "expired";
 
+export type HostedActionApprovalContinuation =
+  | "automatic"
+  | "return-to-conversation";
+
 export interface HostedActionApprovalView {
   approvalId: string;
+  continuation: HostedActionApprovalContinuation;
   expiresAt: string;
   presentation: HostedActionApprovalPresentation;
   returnContactKind: HostedActionApprovalReturnContactKind | null;

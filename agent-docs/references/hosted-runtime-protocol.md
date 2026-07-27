@@ -1024,7 +1024,11 @@ bounded delivery-effect reconciliation without continuing the assistant
 automation lane. Reconciliation uses an observation-only approval read that
 cannot create or refresh an approval cycle; only an explicit new action request
 may refresh a denied or expired cycle. The row is never authorization or outcome
-truth.
+truth. Connected-app mutations do not create a parked runtime effect, so this
+wake cannot reconstruct or execute a calendar create, rename, or disconnect.
+Their approval page returns the member to Murph; a fresh exact tool invocation
+rebuilds the trusted Web-owned request and consumes the approval immediately
+before provider egress.
 Secure-action approval and denial use this shape because the exact attachment,
 destination, and delivery identity remain in the runtime-owned parked intent.
 When a pending vault-file action must surface an approval capability, the

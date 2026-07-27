@@ -26,8 +26,12 @@ import {
   type HostedActionApprovalResult,
   type HostedActionApprovalReturnContactKind,
 } from "@murphai/hosted-execution/action-approval";
+import {
+  HOSTED_CONNECTED_APPS_ACTION_ID_PREFIX,
+} from "@murphai/hosted-execution/connected-apps";
 
 import type {
+  HostedActionApprovalContinuation,
   HostedActionApprovalStatus,
   HostedActionApprovalView,
 } from "./action-approvals-shared";
@@ -401,6 +405,7 @@ export async function decideHostedActionApprovalTx(input: {
 
   const approval: HostedActionApprovalView = {
     approvalId: input.approval.approvalId,
+    continuation: resolveHostedActionApprovalContinuation(input.approval.actionId),
     expiresAt: expiresAt.toISOString(),
     presentation: input.approval.presentation,
     returnContactKind: input.approval.returnContactKind,
@@ -718,11 +723,20 @@ function buildHostedActionApprovalView(
 
   return {
     approvalId: identity.approvalId,
+    continuation: resolveHostedActionApprovalContinuation(identity.actionId),
     expiresAt: identity.expiresAt.toISOString(),
     presentation: identity.presentation,
     returnContactKind: identity.returnContactKind,
     status: readHostedActionApprovalPresentationStatus(approval, now),
   };
+}
+
+export function resolveHostedActionApprovalContinuation(
+  actionId: string,
+): HostedActionApprovalContinuation {
+  return actionId.startsWith(HOSTED_CONNECTED_APPS_ACTION_ID_PREFIX)
+    ? "return-to-conversation"
+    : "automatic";
 }
 
 function requireHostedActionApprovalIdentity(

@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 export const HOSTED_CONNECTED_APPS_PATH = "/api/internal/connected-apps";
+export const HOSTED_CONNECTED_APPS_ACTION_ID_PREFIX = "connected-app:";
 
 export const hostedConnectedAppsToolkitSchema = z
   .string()
@@ -76,7 +77,6 @@ export const hostedConnectedAppsExecuteInputSchema = z
   .object({
     account: hostedConnectedAppsAccountSelectorSchema.optional(),
     arguments: z.record(z.string(), z.unknown()).default({}),
-    agentApproved: z.literal(true).optional(),
     toolSlug: hostedConnectedAppsToolSlugSchema,
   })
   .strict();

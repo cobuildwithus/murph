@@ -1,6 +1,9 @@
-import type { LucideIcon } from "lucide-react";
+import { ShieldCheck, type LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
 
+import type {
+  HostedActionApprovalContinuation,
+} from "@/src/lib/action-approvals-shared";
 import { cn } from "@/src/lib/utils";
 
 type BadgeTone = "primary" | "muted";
@@ -12,6 +15,83 @@ interface ActionApprovalScreenProps {
   caveat?: ReactNode;
   children?: ReactNode;
   title: string;
+}
+
+export const ACTION_APPROVAL_RETURN_TO_CONTINUE =
+  "Return to the Murph conversation where you requested this action, then ask Murph to continue.";
+
+const ACTION_APPROVAL_CAVEAT =
+  "If any approved detail changes, Murph will ask again.";
+
+export function ActionApprovalPresentationBody({ body }: { body: string }) {
+  const segments = body.split(" · ");
+  return (
+    <div className="space-y-2 break-words">
+      {segments.map((segment, index) => (
+        <p key={`${index}:${segment}`}>{segment}</p>
+      ))}
+    </div>
+  );
+}
+
+export function ActionApprovalRequestScreen({
+  body,
+  children,
+  title,
+}: {
+  body: ReactNode;
+  children?: ReactNode;
+  title: string;
+}) {
+  return (
+    <ActionApprovalScreen
+      badgeIcon={ShieldCheck}
+      body={body}
+      caveat={ACTION_APPROVAL_CAVEAT}
+      title={title}
+    >
+      {children}
+    </ActionApprovalScreen>
+  );
+}
+
+export function ActionApprovalDecisionMessage({
+  continuation,
+  redirectTo,
+  showOutcome = true,
+  status,
+}: {
+  continuation: HostedActionApprovalContinuation;
+  redirectTo: string | null;
+  showOutcome?: boolean;
+  status: "approved" | "denied";
+}) {
+  if (redirectTo !== null) {
+    return (
+      <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+        {status === "approved" ? "Approval saved." : "Request denied."}{" "}
+        <a className="text-[#5a6e32] underline-offset-4 hover:underline" href={redirectTo}>
+          Return to Murph
+        </a>
+      </p>
+    );
+  }
+  if (status === "denied") {
+    return (
+      <p className="text-sm leading-6 text-muted-foreground">
+        {showOutcome ? "Request denied. " : null}
+        Murph will not continue this action.
+      </p>
+    );
+  }
+  return (
+    <p className="text-sm leading-6 text-muted-foreground">
+      {showOutcome ? "Approval saved. " : null}
+      {continuation === "return-to-conversation"
+        ? ACTION_APPROVAL_RETURN_TO_CONTINUE
+        : "Murph can continue this action."}
+    </p>
+  );
 }
 
 export function ActionApprovalScreen({

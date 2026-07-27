@@ -44,18 +44,16 @@ describe("hosted connected-app contracts", () => {
           summary: "Annual physical",
           timezone: "America/New_York",
         },
-        agentApproved: true,
         toolSlug: "GOOGLECALENDAR_CREATE_EVENT",
       }),
     ).toMatchObject({
       account: "calendar",
-      agentApproved: true,
       toolSlug: "GOOGLECALENDAR_CREATE_EVENT",
     });
     expect(
       hostedConnectedAppsExecuteInputSchema.safeParse({
         account: "calendar",
-        agentApproved: false,
+        agentApproved: true,
         arguments: {},
         toolSlug: "GOOGLECALENDAR_CREATE_EVENT",
       }).success,

@@ -1,10 +1,13 @@
 "use client";
 
-import { ShieldCheck } from "lucide-react";
 import { useState } from "react";
 
 import { requestHostedOnboardingJson } from "@/src/components/hosted-onboarding/client-api";
-import { ActionApprovalScreen } from "@/src/components/sensitive-actions/action-approval-screen";
+import {
+  ActionApprovalDecisionMessage,
+  ActionApprovalPresentationBody,
+  ActionApprovalRequestScreen,
+} from "@/src/components/sensitive-actions/action-approval-screen";
 import { AuthButton } from "@/src/components/ui/auth-button";
 import { Button } from "@/src/components/ui/button";
 import type {
@@ -15,10 +18,8 @@ import type { SensitiveActionChallengeResponse } from "@/src/lib/sensitive-actio
 
 import { useSensitiveActionAuthorization } from "./use-sensitive-action-authorization";
 
-type Submission = "approving" | "denying" | "returning" | null;
-
-const APPROVAL_CAVEAT =
-  "Murph must ask again if the file, destination, or any other detail changes.";
+type Submission = "approving" | "denying" | null;
+type TerminalDecision = "approved" | "denied";
 
 export function ActionApprovalCard({
   approval,
@@ -27,6 +28,8 @@ export function ActionApprovalCard({
 }) {
   const authorization = useSensitiveActionAuthorization();
   const [submission, setSubmission] = useState<Submission>(null);
+  const [terminalDecision, setTerminalDecision] =
+    useState<TerminalDecision | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [redirectTo, setRedirectTo] = useState<string | null>(null);
   const endpointBase = `/api/action-approvals/${encodeURIComponent(approval.approvalId)}`;
@@ -61,25 +64,32 @@ export function ActionApprovalCard({
     }
   }
 
-  async function submitDecision(payload: Record<string, unknown>) {
+  async function submitDecision(payload: {
+    authorization?: unknown;
+    decision: TerminalDecision;
+  }) {
     const response = await requestHostedOnboardingJson<HostedActionApprovalDecisionResponse>({
       method: "POST",
       payload,
       url: `${endpointBase}/decision`,
     });
+    if (response.status !== payload.decision) {
+      throw new Error("Secure approval returned an unexpected decision.");
+    }
 
     const nextRedirectTo =
       typeof response.redirectTo === "string" && response.redirectTo.length > 0
         ? response.redirectTo
         : null;
     setRedirectTo(nextRedirectTo);
-    setSubmission("returning");
+    setTerminalDecision(response.status);
+    setSubmission(null);
     if (nextRedirectTo) {
       window.location.assign(nextRedirectTo);
     }
   }
 
-  const busy = submission !== null;
+  const busy = submission !== null || terminalDecision !== null;
   const clientAuthenticationRequired =
     authorization.setup.ready && !authorization.setup.clientAuthenticated;
   const primaryLabel = clientAuthenticationRequired
@@ -87,20 +97,17 @@ export function ActionApprovalCard({
     : authorization.setup.pendingLabel
     ?? (submission === "approving" ? "Verifying approval…" : "Approve with passkey");
   const busyStatus = authorization.setup.pendingLabel
-    ?? (submission === "approving"
-      ? "Verifying approval…"
-      : submission === "denying"
-        ? "Denying…"
-        : submission === "returning"
-          ? "Approval saved. Returning to Murph…"
-          : null);
+    ?? readBusyStatus({
+      continuation: approval.continuation,
+      redirectTo,
+      submission,
+      terminalDecision,
+    });
   const surfacedError = error ?? authorization.setup.error;
 
   return (
-    <ActionApprovalScreen
-      badgeIcon={ShieldCheck}
-      body={<p className="break-words">{approval.presentation.body}</p>}
-      caveat={APPROVAL_CAVEAT}
+    <ActionApprovalRequestScreen
+      body={<ActionApprovalPresentationBody body={approval.presentation.body} />}
       title={approval.presentation.title}
     >
       {surfacedError ? (
@@ -145,23 +152,46 @@ export function ActionApprovalCard({
           </p>
         ) : null}
 
-        {submission === "returning" ? (
-          redirectTo ? (
-            <p className="mt-5 font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
-              Redirecting…{" "}
-              <a className="text-[#5a6e32] underline-offset-4 hover:underline" href={redirectTo}>
-                Return to Murph
-              </a>
-            </p>
-          ) : (
-            <p className="mt-5 text-sm leading-6 text-muted-foreground">
-              Approval saved. Return to the Murph thread where you requested this file.
-            </p>
-          )
+        {terminalDecision !== null ? (
+          <div className="mt-5">
+            <ActionApprovalDecisionMessage
+              continuation={approval.continuation}
+              redirectTo={redirectTo}
+              status={terminalDecision}
+            />
+          </div>
         ) : null}
       </div>
-    </ActionApprovalScreen>
+    </ActionApprovalRequestScreen>
   );
+}
+
+function readBusyStatus(input: {
+  continuation: HostedActionApprovalView["continuation"];
+  redirectTo: string | null;
+  submission: Submission;
+  terminalDecision: TerminalDecision | null;
+}): string | null {
+  if (input.submission === "approving") {
+    return "Verifying approval…";
+  }
+  if (input.submission === "denying") {
+    return "Denying…";
+  }
+  if (input.terminalDecision === "denied") {
+    return input.redirectTo
+      ? "Request denied. Returning to Murph…"
+      : "Request denied. Murph will not continue this action.";
+  }
+  if (input.terminalDecision !== "approved") {
+    return null;
+  }
+  if (input.continuation === "return-to-conversation") {
+    return "Approval saved. Return to Murph and ask to continue.";
+  }
+  return input.redirectTo
+    ? "Approval saved. Returning to Murph…"
+    : "Approval saved. Murph can continue this action.";
 }
 
 function readErrorMessage(value: unknown): string {

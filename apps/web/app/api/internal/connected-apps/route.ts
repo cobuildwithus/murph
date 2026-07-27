@@ -93,7 +93,6 @@ function resolveGroupSafeConnectedAppsRequest(
   }
   return request.operation === "execute"
     && request.input.account === undefined
-    && request.input.agentApproved === undefined
     && isHostedConnectedAppsServiceTool(request.input.toolSlug)
     ? request
     : null;

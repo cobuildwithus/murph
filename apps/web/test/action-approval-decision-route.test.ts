@@ -113,6 +113,7 @@ describe("hosted action approval decision route", () => {
     }) => ({
       approval: {
         approvalId: APPROVAL_ID,
+        continuation: "automatic",
         expiresAt: input.decision === "approved"
           ? "2026-07-10T18:15:00.000Z"
           : PENDING_APPROVAL.expiresAt.toISOString(),
@@ -148,6 +149,7 @@ describe("hosted action approval decision route", () => {
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
       approvalId: APPROVAL_ID,
+      continuation: "automatic",
       expiresAt: "2026-07-10T18:15:00.000Z",
       presentation: PENDING_APPROVAL.presentation,
       redirectTo: "sms:+15550000000",

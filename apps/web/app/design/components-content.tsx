@@ -10,6 +10,12 @@ import {
 } from "@/app/(dashboard)/home/device-sync-completion-dialog";
 import { ComputerHandoffFloatingIsland } from "@/src/components/computer-use/computer-handoff-floating-island";
 import { GroupUsageFundingCard } from "@/src/components/hosted-groups/group-usage-funding-card";
+import {
+  ActionApprovalDecisionMessage,
+  ActionApprovalPresentationBody,
+  ActionApprovalRequestScreen,
+  ActionApprovalScreen,
+} from "@/src/components/sensitive-actions/action-approval-screen";
 import { MetricCard } from "@/src/components/ui/metric-card";
 import { TimelineEntry } from "@/src/components/ui/timeline-entry";
 import { ConclusionCard } from "@/src/components/conclusion-card";
@@ -329,6 +335,62 @@ export function ComponentsContent() {
           <h1 className="font-serif text-4xl font-semibold tracking-tight text-foreground">Components</h1>
           <p className="mt-2 text-sm text-muted-foreground">Shadcn base UI + custom Murph components. Colors and typography live in the Brand tab.</p>
         </div>
+
+        <Separator />
+
+        <Section title="Secure connected-app approval">
+          <div data-design-action-approval-state="pending" inert>
+            <ActionApprovalRequestScreen
+              body={(
+                <ActionApprovalPresentationBody
+                  body={[
+                    "Account: Google Calendar — calendar",
+                    "Event: Annual physical",
+                    "Starts: 2026-08-04 at 10:00 AM",
+                    "Duration: 30 minutes",
+                    "Time zone: America/New_York",
+                    "Location: Main Street clinic",
+                    "This approval binds the complete account ID and exact provider arguments, including server-set calendar and meeting options.",
+                  ].join(" · ")}
+                />
+              )}
+              title="Create this calendar event?"
+            >
+              <div className="mt-7 border-t border-[#c4a882]/25 pt-6">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                  <Button className="w-full sm:w-auto" size="lg">
+                    Approve with passkey
+                  </Button>
+                  <Button
+                    className="w-full sm:w-auto sm:px-5"
+                    size="lg"
+                    variant="ghost"
+                  >
+                    Deny
+                  </Button>
+                </div>
+              </div>
+            </ActionApprovalRequestScreen>
+          </div>
+
+          <div data-design-action-approval-state="continue" inert>
+            <ActionApprovalScreen
+              badgeIcon={CheckCircle2}
+              body="You approved this action."
+              title="Approved"
+            >
+              <div className="mt-7 border-t border-[#c4a882]/25 pt-6">
+                <ActionApprovalDecisionMessage
+                  continuation="return-to-conversation"
+                  redirectTo={null}
+                  showOutcome={false}
+                  status="approved"
+                />
+              </div>
+            </ActionApprovalScreen>
+          </div>
+
+        </Section>
 
         <Separator />
 

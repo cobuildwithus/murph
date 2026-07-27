@@ -1,13 +1,20 @@
 import "server-only";
 
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 
 import type { Prisma, PrismaClient } from "@prisma/client";
+import type {
+  HostedActionApprovalRequest,
+  HostedActionApprovalResult,
+} from "@murphai/hosted-execution/action-approval";
 import type {
   HostedConnectedAppsManageInput,
   HostedConnectedAppsRequest,
 } from "@murphai/hosted-execution/connected-apps";
 
+import {
+  buildHostedConnectedAppsMutationApprovalRequest,
+} from "./action-approval";
 import {
   ComposioConnectedAppsRequestError,
   createComposioConnectedAppsClient,
@@ -23,6 +30,10 @@ import {
   isHostedConnectedAppsServiceTool,
   readHostedConnectedAppsConfig,
 } from "./config";
+import {
+  consumeHostedActionApproval,
+  requestHostedActionApproval,
+} from "@/src/lib/action-approvals";
 import { resolveHostedPublicBaseUrl } from "@/src/lib/hosted-web/public-url";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { readActiveHostedMemberAccess } from "../hosted-onboarding/member-access";
@@ -89,7 +100,6 @@ export async function executeHostedConnectedAppsRequest(input: {
       case "execute": {
         const {
           account: selector,
-          agentApproved,
           arguments: argumentsValue,
           toolSlug,
         } = input.request.input;
@@ -121,13 +131,6 @@ export async function executeHostedConnectedAppsRequest(input: {
         const writePolicy = getHostedConnectedAppsCalendarWritePolicy(toolSlug);
         if (writePolicy) {
           assertHostedConnectedAppToolkit(config, writePolicy.toolkit);
-          if (!agentApproved) {
-            throw hostedOnboardingError({
-              code: "CONNECTED_APPS_AGENT_APPROVAL_REQUIRED",
-              httpStatus: 400,
-              message: "Approve the calendar event before adding it.",
-            });
-          }
           const unsupportedArguments = Object.keys(argumentsValue).filter(
             (key) => !writePolicy.allowedArguments.includes(key),
           );
@@ -162,12 +165,29 @@ export async function executeHostedConnectedAppsRequest(input: {
               message: "Choose an account that matches the calendar action.",
             });
           }
+          const completeArguments = {
+            ...argumentsValue,
+            ...writePolicy.forcedArguments,
+          };
+          const authorization = await authorizeHostedConnectedAppsMutation({
+            memberId: input.memberId,
+            prisma,
+            request: buildHostedConnectedAppsMutationApprovalRequest({
+              account,
+              arguments: completeArguments,
+              memberId: input.memberId,
+              operation: "calendar-create",
+              providerVersion: writePolicy.version,
+              toolSlug,
+            }),
+          });
+          if (!authorization.approved) {
+            return authorization.result;
+          }
+
           return await client.executeDirect({
             account: account.id,
-            arguments: {
-              ...argumentsValue,
-              ...writePolicy.forcedArguments,
-            },
+            arguments: completeArguments,
             toolSlug,
             version: writePolicy.version,
           }).catch((error: unknown) => {
@@ -418,6 +438,20 @@ async function executeConnectedAppsManagement(input: {
         selector: input.input.account,
         scope: "all-owned",
       });
+      const authorization = await authorizeHostedConnectedAppsMutation({
+        memberId: input.memberId,
+        prisma: input.prisma,
+        request: buildHostedConnectedAppsMutationApprovalRequest({
+          account,
+          alias: input.input.alias,
+          memberId: input.memberId,
+          operation: "rename",
+        }),
+      });
+      if (!authorization.approved) {
+        return authorization.result;
+      }
+
       await input.client.renameAccount(account.id, input.input.alias);
       return {
         account: {
@@ -434,6 +468,19 @@ async function executeConnectedAppsManagement(input: {
         selector: input.input.account,
         scope: "all-owned",
       });
+      const authorization = await authorizeHostedConnectedAppsMutation({
+        memberId: input.memberId,
+        prisma: input.prisma,
+        request: buildHostedConnectedAppsMutationApprovalRequest({
+          account,
+          memberId: input.memberId,
+          operation: "disconnect",
+        }),
+      });
+      if (!authorization.approved) {
+        return authorization.result;
+      }
+
       await input.client.disconnectAccount(account.id);
       return {
         account: presentConnectedAccount(account, input.config),
@@ -441,6 +488,50 @@ async function executeConnectedAppsManagement(input: {
       };
     }
   }
+}
+
+async function authorizeHostedConnectedAppsMutation(input: {
+  memberId: string;
+  prisma: PrismaClient;
+  request: HostedActionApprovalRequest;
+}): Promise<
+  | { approved: true }
+  | {
+      approved: false;
+      result: Exclude<HostedActionApprovalResult, { status: "approved" }>;
+    }
+> {
+  const approval = await requestHostedActionApproval({
+    memberId: input.memberId,
+    prisma: input.prisma,
+    request: input.request,
+  });
+  if (approval.status !== "approved") {
+    return {
+      approved: false,
+      result: approval,
+    };
+  }
+
+  const consumed = await consumeHostedActionApproval({
+    memberId: input.memberId,
+    prisma: input.prisma,
+    request: {
+      approvalGeneration: approval.approvalGeneration,
+      // Each provider attempt must win a new approval cycle rather than reuse
+      // same-consumer idempotence after an ambiguous non-idempotent write.
+      consumerId: `connected-app-egress:${randomUUID()}`,
+      request: input.request,
+    },
+  });
+  if (consumed.status !== "approved") {
+    return {
+      approved: false,
+      result: consumed,
+    };
+  }
+
+  return { approved: true };
 }
 
 async function ensureHostedConnectedAppsSession(input: {

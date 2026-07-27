@@ -313,6 +313,7 @@ describe("hosted action approvals", () => {
       prisma: deps.prisma,
     })).resolves.toMatchObject({
       approvalId: requested.approvalId,
+      continuation: "automatic",
       status: "approved",
     });
     await expect(readHostedActionApprovalObservation({

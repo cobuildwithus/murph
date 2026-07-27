@@ -106,7 +106,7 @@ describe("murph connected-app dynamic tools", () => {
     });
   });
 
-  it("preserves explicit agent approval for calendar creation", () => {
+  it("rejects legacy model-authored calendar approval", () => {
     const request = readMurphDynamicToolRequest(dynamicToolCall({
       argumentsValue: {
         account: "calendar",
@@ -124,12 +124,7 @@ describe("murph connected-app dynamic tools", () => {
     }));
 
     expect(request).toMatchObject({
-      args: {
-        account: "calendar",
-        agentApproved: true,
-        toolSlug: "GOOGLECALENDAR_CREATE_EVENT",
-      },
-      kind: "connected-apps-execute",
+      kind: "invalid-connected-apps-arguments",
     });
   });
 
@@ -180,6 +175,47 @@ describe("murph connected-app dynamic tools", () => {
     });
   });
 
+  it("surfaces pending exact approval without treating it as provider failure", async () => {
+    const connectedApps: AssistantConnectedAppsPort = {
+      request: vi.fn(async () => ({
+        result: {
+          approvalId: `haa_${"A".repeat(32)}`,
+          approvalUrl: "https://hosted.example.test/approve/test",
+          expiresAt: "2026-07-01T14:15:00.000Z",
+          status: "pending",
+        },
+      })),
+    };
+
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createHostedToolContext(connectedApps),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: createProgressDelivery(),
+      request: {
+        args: {
+          account: "calendar",
+          arguments: {
+            event_duration_hour: 0,
+            event_duration_minutes: 30,
+            start_datetime: "2026-07-01T10:00:00-04:00",
+            summary: "Annual physical",
+            timezone: "America/New_York",
+          },
+          toolSlug: "GOOGLECALENDAR_CREATE_EVENT",
+        },
+        kind: "connected-apps-execute",
+      },
+    });
+
+    expect(result.rpcResult.success).toBe(true);
+    expect(JSON.parse(result.rpcResult.contentItems[0]!.text)).toMatchObject({
+      approvalUrl: "https://hosted.example.test/approve/test",
+      status: "pending",
+    });
+  });
+
   it("surfaces calendar-create failures as no-retry ambiguous outcomes", async () => {
     const connectedApps: AssistantConnectedAppsPort = {
       request: vi.fn(async () => {
@@ -201,7 +237,6 @@ describe("murph connected-app dynamic tools", () => {
       request: {
         args: {
           account: "calendar",
-          agentApproved: true,
           arguments: {
             event_duration_hour: 0,
             event_duration_minutes: 30,

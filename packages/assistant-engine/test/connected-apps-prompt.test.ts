@@ -63,7 +63,10 @@ describe('connected-apps skill and system-prompt coverage', () => {
     for (const requiredContract of [
       'GOOGLECALENDAR_CREATE_EVENT',
       'OUTLOOK_CALENDAR_CREATE_EVENT',
-      'agentApproved: true',
+      'requires exact user approval',
+      'approval saves permission',
+      'approvalUrl',
+      'return to the same',
       'event_duration_hour',
       'event_duration_minutes',
       'end_datetime',

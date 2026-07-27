@@ -145,7 +145,16 @@ describe("internal connected-apps route", () => {
     ));
 
     expect(response.status).toBe(200);
-    expect(mocks.executeHostedConnectedAppsRequest).toHaveBeenCalledTimes(1);
+    expect(mocks.executeHostedConnectedAppsRequest).toHaveBeenCalledWith({
+      memberId: "member_group",
+      request: {
+        input: {
+          arguments: { lat: 40.7, lon: -74 },
+          toolSlug: "OPENWEATHER_API_GET_CURRENT_WEATHER",
+        },
+        operation: "execute",
+      },
+    });
   });
 
   it("rejects personal connected-account operations from a synthetic group container", async () => {

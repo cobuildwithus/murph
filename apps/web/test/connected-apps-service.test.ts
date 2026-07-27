@@ -2,10 +2,18 @@ import { createHash } from "node:crypto";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+const approvalMocks = vi.hoisted(() => ({
+  consumeHostedActionApproval: vi.fn(),
+  requestHostedActionApproval: vi.fn(),
+}));
 const prismaMocks = vi.hoisted(() => ({
   getPrisma: vi.fn(),
 }));
 
+vi.mock("@/src/lib/action-approvals", () => ({
+  consumeHostedActionApproval: approvalMocks.consumeHostedActionApproval,
+  requestHostedActionApproval: approvalMocks.requestHostedActionApproval,
+}));
 vi.mock("@/src/lib/prisma", () => ({
   getPrisma: prismaMocks.getPrisma,
 }));
@@ -241,6 +249,13 @@ describe("connected-app service", () => {
     vi.stubEnv("COMPOSIO_CONNECTED_APP_TOOLKITS", "gmail,googlecalendar");
     vi.stubEnv("COMPOSIO_MAX_ACCOUNTS_PER_TOOLKIT", "5");
     vi.stubEnv("HOSTED_ONBOARDING_PUBLIC_BASE_URL", "https://hosted.example.test");
+    approvalMocks.requestHostedActionApproval.mockResolvedValue(
+      pendingConnectedAppApproval(),
+    );
+    approvalMocks.consumeHostedActionApproval.mockResolvedValue({
+      approvalId: TEST_APPROVAL_ID,
+      status: "expired",
+    });
   });
 
   afterEach(() => {
@@ -666,6 +681,8 @@ describe("connected-app service", () => {
       httpStatus: 400,
     });
     expect(executeFetch).toHaveBeenCalledTimes(2);
+    expect(approvalMocks.requestHostedActionApproval).not.toHaveBeenCalled();
+    expect(approvalMocks.consumeHostedActionApproval).not.toHaveBeenCalled();
   });
 
   it("executes OpenWeather through Composio with the server-held API key", async () => {
@@ -738,10 +755,27 @@ describe("connected-app service", () => {
     expect(executeFetch).not.toHaveBeenCalled();
   });
 
-  it("requires agent approval and safe arguments for calendar creation", async () => {
+  it("returns exact calendar approval without mutation and rejects unsafe arguments", async () => {
     installPrismaHarness();
-    const executeFetch = vi.fn(async (): Promise<Response> => {
-      throw new Error("Calendar writes should be rejected before contacting Composio.");
+    const executeFetch = vi.fn(async (
+      url: string | URL | Request,
+    ): Promise<Response> => {
+      const parsed = new URL(String(url));
+      if (parsed.pathname === "/api/v3.1/connected_accounts") {
+        return jsonResponse({
+          items: [
+            {
+              alias: "calendar",
+              id: "ca_calendar",
+              is_disabled: false,
+              status: "ACTIVE",
+              toolkit: { name: "Google Calendar", slug: "googlecalendar" },
+              word_id: "quiet-calendar",
+            },
+          ],
+        });
+      }
+      throw new Error("Calendar writes must not reach Composio before approval.");
     });
     const request = {
       fetchImpl: executeFetch,
@@ -762,10 +796,23 @@ describe("connected-app service", () => {
       },
     };
 
-    await expect(executeHostedConnectedAppsRequest(request)).rejects.toMatchObject({
-      code: "CONNECTED_APPS_AGENT_APPROVAL_REQUIRED",
-      httpStatus: 400,
-    });
+    await expect(executeHostedConnectedAppsRequest(request)).resolves.toEqual(
+      pendingConnectedAppApproval(),
+    );
+    expect(approvalMocks.requestHostedActionApproval).toHaveBeenCalledWith(
+      expect.objectContaining({
+        memberId: "hbm_member",
+        request: expect.objectContaining({
+          actionKind: "connected-app.calendar-create.v1",
+          presentation: expect.objectContaining({
+            body: expect.stringContaining("Event: Annual physical"),
+          }),
+        }),
+      }),
+    );
+    expect(approvalMocks.consumeHostedActionApproval).not.toHaveBeenCalled();
+    expect(executeFetch).toHaveBeenCalledTimes(1);
+
     await expect(executeHostedConnectedAppsRequest({
       ...request,
       request: {
@@ -776,18 +823,19 @@ describe("connected-app service", () => {
             ...request.request.input.arguments,
             attendees: ["provider@example.com"],
           },
-          agentApproved: true as const,
         },
       },
     })).rejects.toMatchObject({
       code: "CONNECTED_APPS_WRITE_ARGUMENT_NOT_ALLOWED",
       httpStatus: 400,
     });
-    expect(executeFetch).not.toHaveBeenCalled();
+    expect(approvalMocks.requestHostedActionApproval).toHaveBeenCalledTimes(1);
+    expect(executeFetch).toHaveBeenCalledTimes(1);
   });
 
-  it("executes confirmed calendar creation through the direct tool endpoint", async () => {
+  it("consumes one exact approval before direct calendar creation", async () => {
     installPrismaHarness();
+    approveConnectedAppMutation();
     const requests: Array<{ body: unknown; url: URL }> = [];
     const executeFetch = vi.fn(async (
       url: string | URL | Request,
@@ -838,12 +886,20 @@ describe("connected-app service", () => {
             summary: "Annual physical",
             timezone: "America/New_York",
           },
-          agentApproved: true as const,
           toolSlug: "GOOGLECALENDAR_CREATE_EVENT",
         },
         operation: "execute",
       },
     })).resolves.toEqual({ eventId: "evt_123" });
+    expect(approvalMocks.consumeHostedActionApproval).toHaveBeenCalledWith(
+      expect.objectContaining({
+        request: expect.objectContaining({
+          consumerId: expect.stringMatching(
+            /^connected-app-egress:[0-9a-f-]{36}$/u,
+          ),
+        }),
+      }),
+    );
     expect(executeFetch).toHaveBeenCalledTimes(2);
     expect(requests.map((request) => ({
       body: request.body,
@@ -882,14 +938,91 @@ describe("connected-app service", () => {
     ]);
   });
 
+  it("allows only one concurrent egress for one approved generation", async () => {
+    installPrismaHarness();
+    approvalMocks.requestHostedActionApproval.mockResolvedValue(
+      approvedConnectedAppApproval(),
+    );
+    let consumeAttempt = 0;
+    approvalMocks.consumeHostedActionApproval.mockImplementation(async () => {
+      consumeAttempt += 1;
+      return consumeAttempt === 1
+        ? approvedConnectedAppApproval()
+        : { approvalId: TEST_APPROVAL_ID, status: "expired" as const };
+    });
+
+    let directExecutions = 0;
+    const executeFetch = vi.fn(async (
+      url: string | URL | Request,
+    ): Promise<Response> => {
+      const parsed = new URL(String(url));
+      if (parsed.pathname === "/api/v3.1/connected_accounts") {
+        return jsonResponse({
+          items: [
+            {
+              alias: "calendar",
+              id: "ca_calendar",
+              is_disabled: false,
+              status: "ACTIVE",
+              toolkit: { name: "Google Calendar", slug: "googlecalendar" },
+              word_id: "quiet-calendar",
+            },
+          ],
+        });
+      }
+      if (parsed.pathname === "/api/v3.1/tools/execute/GOOGLECALENDAR_CREATE_EVENT") {
+        directExecutions += 1;
+        return jsonResponse({
+          data: { eventId: "evt_once" },
+          successful: true,
+        });
+      }
+      throw new Error(`Unexpected Composio request ${String(url)}`);
+    });
+    const request = {
+      fetchImpl: executeFetch,
+      memberId: "hbm_member",
+      request: {
+        input: {
+          account: "calendar",
+          arguments: {
+            event_duration_hour: 0,
+            event_duration_minutes: 30,
+            start_datetime: "2026-07-01T10:00:00-04:00",
+            summary: "Annual physical",
+            timezone: "America/New_York",
+          },
+          toolSlug: "GOOGLECALENDAR_CREATE_EVENT",
+        },
+        operation: "execute" as const,
+      },
+    };
+
+    const results = await Promise.all([
+      executeHostedConnectedAppsRequest(request),
+      executeHostedConnectedAppsRequest(request),
+    ]);
+
+    expect(results).toEqual(expect.arrayContaining([
+      { eventId: "evt_once" },
+      expect.objectContaining({ status: "expired" }),
+    ]));
+    expect(directExecutions).toBe(1);
+    const consumerIds = approvalMocks.consumeHostedActionApproval.mock.calls.map(
+      ([call]) => call.request.consumerId as string,
+    );
+    expect(consumerIds).toHaveLength(2);
+    expect(new Set(consumerIds).size).toBe(2);
+  });
+
   it("does not mark failed or ambiguous direct calendar creation retryable", async () => {
     installPrismaHarness();
+    approveConnectedAppMutation();
     const buildRequest = () => ({
       memberId: "hbm_member",
       request: {
         input: {
           account: "calendar",
-          agentApproved: true as const,
           arguments: {
             event_duration_hour: 0,
             event_duration_minutes: 30,
@@ -1005,6 +1138,104 @@ describe("connected-app service", () => {
     );
   });
 
+  it("requires exact approval before rename and disconnect mutations", async () => {
+    installPrismaHarness();
+    const mutations: Array<{ body: unknown; method: string; pathname: string }> = [];
+    const fetchImpl = vi.fn(async (
+      url: string | URL | Request,
+      init?: RequestInit,
+    ): Promise<Response> => {
+      const parsed = new URL(String(url));
+      if (parsed.pathname === "/api/v3.1/connected_accounts") {
+        return jsonResponse({
+          items: [
+            {
+              alias: "work",
+              id: "ca_gmail",
+              is_disabled: false,
+              status: "ACTIVE",
+              toolkit: { name: "Gmail", slug: "gmail" },
+              word_id: "bright-river",
+            },
+          ],
+        });
+      }
+      if (
+        parsed.pathname === "/api/v3.1/connected_accounts/ca_gmail"
+        || parsed.pathname === "/api/v3.1/connected_accounts/ca_gmail/revoke"
+      ) {
+        mutations.push({
+          body: init?.body ? readJsonBody(init) : null,
+          method: init?.method ?? "GET",
+          pathname: parsed.pathname,
+        });
+        return jsonResponse({});
+      }
+      throw new Error(`Unexpected Composio request ${String(url)}`);
+    });
+    const renameRequest = {
+      fetchImpl,
+      memberId: "hbm_member",
+      request: {
+        input: {
+          account: "ca_gmail",
+          action: "rename" as const,
+          alias: "clinic",
+        },
+        operation: "manage" as const,
+      },
+    };
+    const disconnectRequest = {
+      fetchImpl,
+      memberId: "hbm_member",
+      request: {
+        input: {
+          account: "ca_gmail",
+          action: "disconnect" as const,
+        },
+        operation: "manage" as const,
+      },
+    };
+
+    await expect(executeHostedConnectedAppsRequest(renameRequest)).resolves.toMatchObject({
+      status: "pending",
+    });
+    await expect(executeHostedConnectedAppsRequest(disconnectRequest)).resolves.toMatchObject({
+      status: "pending",
+    });
+    expect(mutations).toEqual([]);
+
+    approveConnectedAppMutation();
+    await expect(executeHostedConnectedAppsRequest(renameRequest)).resolves.toMatchObject({
+      account: { alias: "clinic", id: "ca_gmail" },
+      status: "renamed",
+    });
+    await expect(executeHostedConnectedAppsRequest(disconnectRequest)).resolves.toMatchObject({
+      account: { id: "ca_gmail" },
+      status: "disconnected",
+    });
+    expect(mutations).toEqual([
+      {
+        body: { alias: "clinic" },
+        method: "PATCH",
+        pathname: "/api/v3.1/connected_accounts/ca_gmail",
+      },
+      {
+        body: null,
+        method: "POST",
+        pathname: "/api/v3.1/connected_accounts/ca_gmail/revoke",
+      },
+    ]);
+    expect(approvalMocks.requestHostedActionApproval.mock.calls.map(
+      ([call]) => call.request.actionKind,
+    )).toEqual([
+      "connected-app.account-rename.v1",
+      "connected-app.account-disconnect.v1",
+      "connected-app.account-rename.v1",
+      "connected-app.account-disconnect.v1",
+    ]);
+  });
+
   it("keeps removed-toolkit grants manageable without making them executable", async () => {
     vi.stubEnv("COMPOSIO_CONNECTED_APP_TOOLKITS", "googlecalendar");
     installPrismaHarness();
@@ -1059,6 +1290,7 @@ describe("connected-app service", () => {
       ],
     });
 
+    approveConnectedAppMutation();
     await expect(executeHostedConnectedAppsRequest({
       fetchImpl,
       memberId: "hbm_member",
@@ -1287,6 +1519,35 @@ describe("connected-app service", () => {
     });
   });
 });
+
+const TEST_APPROVAL_ID = `haa_${"A".repeat(32)}`;
+const TEST_APPROVAL_GENERATION = "b".repeat(64);
+
+function pendingConnectedAppApproval() {
+  return {
+    approvalId: TEST_APPROVAL_ID,
+    approvalUrl: "https://hosted.example.test/approve/test",
+    expiresAt: "2026-07-01T14:15:00.000Z",
+    status: "pending" as const,
+  };
+}
+
+function approvedConnectedAppApproval() {
+  return {
+    approvalGeneration: TEST_APPROVAL_GENERATION,
+    approvalId: TEST_APPROVAL_ID,
+    status: "approved" as const,
+  };
+}
+
+function approveConnectedAppMutation(): void {
+  approvalMocks.requestHostedActionApproval.mockResolvedValue(
+    approvedConnectedAppApproval(),
+  );
+  approvalMocks.consumeHostedActionApproval.mockResolvedValue(
+    approvedConnectedAppApproval(),
+  );
+}
 
 function installPrismaHarness(): ConnectedAppsPrismaHarness {
   const harness = new ConnectedAppsPrismaHarness();

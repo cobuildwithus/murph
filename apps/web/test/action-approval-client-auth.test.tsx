@@ -133,6 +133,7 @@ test("recovers a first-click hydration race into the sign-in action", async () =
 function pendingApproval() {
   return {
     approvalId: "approval-test",
+    continuation: "automatic" as const,
     expiresAt: "2099-01-01T00:00:00.000Z",
     presentation: {
       body: "Allow the requested action.",

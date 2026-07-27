@@ -10,7 +10,10 @@ import { redirect } from "next/navigation";
 
 import { ActionApprovalAuthRequiredState } from "@/src/components/sensitive-actions/action-approval-auth-required";
 import { ActionApprovalCard } from "@/src/components/sensitive-actions/action-approval-card";
-import { ActionApprovalScreen } from "@/src/components/sensitive-actions/action-approval-screen";
+import {
+  ActionApprovalDecisionMessage,
+  ActionApprovalScreen,
+} from "@/src/components/sensitive-actions/action-approval-screen";
 import { HostedPrivyBoundary } from "@/src/components/hosted-onboarding/hosted-privy-boundary";
 import { resolveHostedMurphContactOptions } from "@/src/components/murph/hosted-murph-contact-action";
 import { MurphContactLink } from "@/src/components/murph/murph-contact-link";
@@ -80,7 +83,7 @@ async function ActionApprovalTerminalState({
 }: {
   approval: TerminalActionApprovalView;
 }) {
-  const content = terminalContent(approval.status);
+  const content = terminalContent(approval);
   const replyBody = approval.returnContactKind === null
     ? null
     : terminalReplyBody(approval.status);
@@ -130,6 +133,14 @@ async function ActionApprovalTerminalState({
               {replyBody}
             </p>
           </div>
+        ) : approval.status === "approved"
+          && approval.continuation === "return-to-conversation" ? (
+          <ActionApprovalDecisionMessage
+            continuation={approval.continuation}
+            redirectTo={null}
+            showOutcome={false}
+            status="approved"
+          />
         ) : (
           <p className="text-sm text-muted-foreground">
             Return to the Murph conversation where this request started.
@@ -171,14 +182,14 @@ interface TerminalContent {
   title: string;
 }
 
-function terminalContent(
-  status: Exclude<HostedActionApprovalStatus, "pending">,
-): TerminalContent {
-  switch (status) {
+function terminalContent(approval: TerminalActionApprovalView): TerminalContent {
+  switch (approval.status) {
     case "approved":
       return {
         actionLabel: "Return to Murph",
-        description: "You approved this action. Head back to Murph to continue.",
+        description: approval.continuation === "return-to-conversation"
+          ? "You approved this action."
+          : "You approved this action. Head back to Murph to continue.",
         icon: CheckCircle2,
         title: "Approved",
       };

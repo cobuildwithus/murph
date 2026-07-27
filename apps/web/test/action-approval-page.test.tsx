@@ -51,6 +51,7 @@ describe("action approval page", () => {
     });
     mocks.readHostedActionApproval.mockResolvedValue({
       approvalId: "haa_test",
+      continuation: "automatic",
       expiresAt: "2026-07-09T16:00:00.000Z",
       presentation: {
         body: "Share the requested file.",
@@ -134,6 +135,7 @@ describe("action approval page", () => {
   it("does not ask a group member to confirm an automatically resumed approval", async () => {
     mocks.readHostedActionApproval.mockResolvedValueOnce({
       approvalId: "haa_test",
+      continuation: "automatic",
       expiresAt: "2026-07-09T16:00:00.000Z",
       presentation: {
         body: "Share the requested file.",
@@ -163,6 +165,7 @@ describe("action approval page", () => {
   it("redirects an approved revisit through the bare conversation link", async () => {
     mocks.readHostedActionApproval.mockResolvedValueOnce({
       approvalId: "haa_test",
+      continuation: "automatic",
       expiresAt: "2026-07-09T16:00:00.000Z",
       presentation: {
         body: "Share the requested file.",
@@ -194,6 +197,7 @@ describe("action approval page", () => {
   it("shows bare return guidance when approved contact resolution is unavailable", async () => {
     mocks.readHostedActionApproval.mockResolvedValueOnce({
       approvalId: "haa_test",
+      continuation: "automatic",
       expiresAt: "2026-07-09T16:00:00.000Z",
       presentation: {
         body: "Share the requested file.",
@@ -225,6 +229,7 @@ describe("action approval page", () => {
   it("does not request a confirmation when contact resolution fails", async () => {
     mocks.readHostedActionApproval.mockResolvedValueOnce({
       approvalId: "haa_test",
+      continuation: "automatic",
       expiresAt: "2026-07-09T16:00:00.000Z",
       presentation: {
         body: "Share the requested file.",
@@ -250,6 +255,35 @@ describe("action approval page", () => {
     );
     assert.equal(markup.includes("I denied the request."), false);
     assert.equal(markup.includes("and send:"), false);
+  });
+
+  it("tells a connected-app member how to continue after approval", async () => {
+    mocks.readHostedActionApproval.mockResolvedValueOnce({
+      approvalId: "haa_test",
+      continuation: "return-to-conversation",
+      expiresAt: "2026-07-09T16:00:00.000Z",
+      presentation: {
+        body: "Create the requested calendar event.",
+        title: "Create this calendar event?",
+      },
+      returnContactKind: null,
+      status: "approved",
+    });
+
+    const view = await actionApprovalPage.default({
+      params: Promise.resolve({ approvalId: "haa_test" }),
+    });
+    const stream = await renderToReadableStream(view);
+    await stream.allReady;
+    const markup = await new Response(stream).text();
+
+    expect(mocks.resolveHostedMurphContactOptions).not.toHaveBeenCalled();
+    expect(mocks.redirect).not.toHaveBeenCalled();
+    assert.match(
+      markup,
+      /Return to the Murph conversation where you requested this action, then ask Murph to continue\./,
+    );
+    assert.equal(markup.includes("requested this file"), false);
   });
 
 });
