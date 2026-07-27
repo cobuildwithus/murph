@@ -349,6 +349,12 @@ export interface CommitPublicDeviceSyncSdkConnectionStartInput {
   state: string;
 }
 
+export interface PublicDeviceSyncSdkConnectionStartReference {
+  ownerId: string;
+  provider: string;
+  state: string;
+}
+
 export interface DeviceSyncWebhookTraceRecord {
   provider: string;
   traceId: string;
@@ -418,13 +424,27 @@ export interface DeviceSyncPublicIngressStore {
     input: CommitPublicDeviceSyncConnectionStartInput,
   ): void | Promise<void>;
   /**
-   * Atomically persists an SDK-created connection and consumes only that
+   * Atomically persists an SDK-created connection while retaining that
    * request's staged marker under the same active-member lifecycle fence.
+   * Token delivery owns the later marker removal.
    */
   commitSdkConnectionStart?(
     input: CommitPublicDeviceSyncSdkConnectionStartInput,
   ): UpsertPublicDeviceSyncConnectionResult
     | Promise<UpsertPublicDeviceSyncConnectionResult>;
+  /**
+   * Revalidates the exact SDK marker and active member after provider token
+   * minting, before the token can be returned.
+   */
+  assertSdkConnectionStartActive?(
+    input: PublicDeviceSyncSdkConnectionStartReference,
+  ): void | Promise<void>;
+  /**
+   * Removes the exact SDK marker after the token response finishes.
+   */
+  completeSdkConnectionStart?(
+    input: PublicDeviceSyncSdkConnectionStartReference,
+  ): void | Promise<void>;
   upsertConnectionWithPrevious?(
     input: UpsertPublicDeviceSyncConnectionInput,
   ): UpsertPublicDeviceSyncConnectionResult | Promise<UpsertPublicDeviceSyncConnectionResult>;
@@ -929,6 +949,11 @@ export interface CompleteConnectionResult {
 
 export interface SdkSignInSessionResult {
   account: PublicDeviceSyncAccount;
+  /**
+   * Opaque hosted lifecycle reference. Route handlers must complete it only
+   * after the token response finishes and must never serialize it.
+   */
+  connectionStart: PublicDeviceSyncSdkConnectionStartReference | null;
   /** Short-lived provider SDK sign-in token. Never log or persist it. */
   signInToken: string;
   environment: DeviceSdkSignInToken["environment"];

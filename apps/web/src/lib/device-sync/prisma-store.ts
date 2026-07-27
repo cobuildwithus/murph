@@ -12,6 +12,7 @@ import type {
   MarkPublicDeviceSyncConnectionSetupFailedInput,
   MarkPublicDeviceSyncConnectionSetupFailedResult,
   OAuthStateRecord,
+  PublicDeviceSyncSdkConnectionStartReference,
   PublicDeviceSyncAccount,
   UpsertPublicDeviceSyncConnectionInput,
   UpsertPublicDeviceSyncConnectionResult,
@@ -254,20 +255,41 @@ export class PrismaDeviceSyncControlPlaneStore
         tx,
         { ...input.connectionSeed, ownerId },
       );
-      const consumed = await this.oauthSessions.consumeStagedConnectionStart({
+      const staged = await this.oauthSessions.hasStagedConnectionStart({
         ownerId,
         provider: input.connectionSeed.provider,
         state: input.state,
       }, tx);
-      if (!consumed) {
-        throw deviceSyncError({
-          code: "CONNECTION_START_STATE_MISSING",
-          message: "The staged device-sync connection start is unavailable.",
-          retryable: true,
-          httpStatus: 409,
-        });
-      }
+      assertHostedSdkConnectionStartStaged(staged);
       return persisted;
+    });
+  }
+
+  async assertSdkConnectionStartActive(
+    input: PublicDeviceSyncSdkConnectionStartReference,
+  ): Promise<void> {
+    const ownerId = requireHostedConnectionStartOwnerId(input.ownerId);
+    await this.prisma.$transaction(async (tx) => {
+      await lockActiveHostedConnectionStartOwnerTx(tx, ownerId);
+      const staged = await this.oauthSessions.hasStagedConnectionStart({
+        ...input,
+        ownerId,
+      }, tx);
+      assertHostedSdkConnectionStartStaged(staged);
+    });
+  }
+
+  async completeSdkConnectionStart(
+    input: PublicDeviceSyncSdkConnectionStartReference,
+  ): Promise<void> {
+    const ownerId = requireHostedConnectionStartOwnerId(input.ownerId);
+    await this.prisma.$transaction(async (tx) => {
+      await lockActiveHostedConnectionStartOwnerTx(tx, ownerId);
+      const consumed = await this.oauthSessions.consumeStagedConnectionStart({
+        ...input,
+        ownerId,
+      }, tx);
+      assertHostedSdkConnectionStartStaged(consumed);
     });
   }
 
@@ -596,6 +618,17 @@ function requireHostedConnectionStartOwnerId(ownerId: string | null | undefined)
   }
 
   return normalizedOwnerId;
+}
+
+function assertHostedSdkConnectionStartStaged(staged: boolean): asserts staged {
+  if (!staged) {
+    throw deviceSyncError({
+      code: "CONNECTION_START_STATE_MISSING",
+      message: "The staged device-sync connection start is unavailable.",
+      retryable: true,
+      httpStatus: 409,
+    });
+  }
 }
 
 async function lockActiveHostedConnectionStartOwnerTx(

@@ -16,7 +16,9 @@ const HRV_ROUTE_NOW = "2026-07-10T13:46:00.000Z";
 
 const mocks = vi.hoisted(() => ({
   acceptCompanionHrvRmssdObservation: vi.fn(),
+  after: vi.fn(),
   assertHostedHistoricalLaunchConsentGranted: vi.fn(),
+  completeSdkSignInSession: vi.fn(),
   createHostedDeviceSyncControlPlane: vi.fn(),
   createHostedDeviceSyncPublicIngressService: vi.fn(),
   createSdkSignInSession: vi.fn(),
@@ -40,6 +42,11 @@ const mocks = vi.hoisted(() => ({
     telegramWebhookSecret: null as string | null,
   },
   verifyIdentityToken: vi.fn(),
+}));
+
+vi.mock("next/server", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("next/server")>()),
+  after: mocks.after,
 }));
 
 vi.mock("@privy-io/node", () => ({
@@ -224,6 +231,7 @@ describe("device sync companion routes", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-07-09T12:00:00.000Z"));
     vi.clearAllMocks();
+    mocks.completeSdkSignInSession.mockResolvedValue(undefined);
     mocks.getPrisma.mockReturnValue(mocks.prismaClient);
     mocks.assertHostedHistoricalLaunchConsentGranted.mockResolvedValue(undefined);
     mocks.createSdkSignInSession.mockResolvedValue({
@@ -233,6 +241,7 @@ describe("device sync companion routes", () => {
         provider: "junction",
         status: "active",
       },
+      connectionStart: null,
       environment: "sandbox",
       signInToken: SIGN_IN_TOKEN,
     });
@@ -249,6 +258,7 @@ describe("device sync companion routes", () => {
     });
     mocks.createHostedDeviceSyncPublicIngressService.mockReturnValue({
       acceptCompanionHrvRmssdObservation: mocks.acceptCompanionHrvRmssdObservation,
+      completeSdkSignInSession: mocks.completeSdkSignInSession,
       createSdkSignInSession: mocks.createSdkSignInSession,
     });
   });
@@ -787,6 +797,47 @@ describe("device sync companion routes", () => {
         memberId: "member_1",
         prisma: mocks.prismaClient,
       });
+    });
+
+    it("keeps the exact SDK lifecycle marker until the token response finishes", async () => {
+      mockVerifiedPrivyUser();
+      const connectionStart = {
+        ownerId: "member_1",
+        provider: "junction",
+        state: "sdk-start-state",
+      };
+      mocks.createSdkSignInSession.mockResolvedValueOnce({
+        account: {
+          externalAccountId: "junction-user-1",
+          id: "dsc_1",
+          provider: "junction",
+          status: "active",
+        },
+        connectionStart,
+        environment: "sandbox",
+        signInToken: SIGN_IN_TOKEN,
+      });
+
+      const response = await signInTokenRoute.POST(signInTokenRequest({
+        connectionIntent: "connect",
+        platform: "ios",
+      }));
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({
+        environment: "sandbox",
+        signInToken: SIGN_IN_TOKEN,
+      });
+      expect(mocks.after).toHaveBeenCalledTimes(1);
+      expect(mocks.completeSdkSignInSession).not.toHaveBeenCalled();
+
+      const completeAfterResponse = mocks.after.mock.calls[0]?.[0] as
+        | (() => Promise<void>)
+        | undefined;
+      expect(completeAfterResponse).toBeTypeOf("function");
+      await completeAfterResponse?.();
+
+      expect(mocks.completeSdkSignInSession).toHaveBeenCalledWith(connectionStart);
     });
 
     it("forwards passive session repair as resume intent", async () => {

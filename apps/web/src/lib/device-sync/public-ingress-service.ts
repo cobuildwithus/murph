@@ -15,6 +15,7 @@ import {
   type HandleWebhookResult,
   type DeviceSyncWebhookPreflightResponse,
   type PublicDeviceSyncAccount,
+  type PublicDeviceSyncSdkConnectionStartReference,
   type PublicProviderDescriptor,
   type SdkSignInSessionResult,
   type DeviceSyncRegistry,
@@ -191,6 +192,12 @@ export class HostedDeviceSyncPublicIngressService {
       retryable: false,
       httpStatus: 409,
     });
+  }
+
+  async completeSdkSignInSession(
+    connectionStart: PublicDeviceSyncSdkConnectionStartReference,
+  ): Promise<void> {
+    await this.ingress.completeSdkSignInSession(connectionStart);
   }
 
   async acceptCompanionHrvRmssdObservation(input: {

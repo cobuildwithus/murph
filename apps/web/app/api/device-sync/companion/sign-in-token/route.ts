@@ -8,6 +8,7 @@ import { readOptionalJsonObject } from "@/src/lib/http";
 import { requireActivePrivyMemberAuthFromBearerToken } from "@/src/lib/hosted-onboarding/request-auth";
 import { assertHostedHistoricalLaunchConsentGranted } from "@/src/lib/legal/consent";
 import { getPrisma } from "@/src/lib/prisma";
+import { after } from "next/server";
 
 // Companion (iOS) sign-in token exchange. Auth is a bearer Privy identity token
 // verified through the existing server-side
@@ -35,6 +36,12 @@ export const POST = withJsonError(async (request: Request) => {
     COMPANION_DEVICE_SYNC_PROVIDER,
     connectionIntent,
   );
+  const connectionStart = session.connectionStart;
+  if (connectionStart) {
+    after(async () => {
+      await publicIngress.completeSdkSignInSession(connectionStart);
+    });
+  }
 
   return jsonOk({
     signInToken: session.signInToken,

@@ -660,12 +660,12 @@ export async function deleteHostedAccountData(input: {
   ]);
 
   const deletionStartedAt = new Date();
-  await markHostedMembersSuspendedForAccountDeletion({
+  await resolvePendingDeviceConnectionStartsForAccountDeletion({
     memberIds: deletionMemberIds,
     now: deletionStartedAt,
     prisma: input.prisma,
   });
-  await resolvePendingDeviceConnectionStartsForAccountDeletion({
+  await markHostedMembersSuspendedForAccountDeletion({
     memberIds: deletionMemberIds,
     now: deletionStartedAt,
     prisma: input.prisma,
@@ -877,14 +877,24 @@ async function resolvePendingDeviceConnectionStartsForAccountDeletion(input: {
 
     try {
       registry ??= createHostedDeviceSyncRegistry(process.env);
-      const deleteOwnerAccount =
-        registry.get(pendingStart.provider)?.connectionHandler?.deleteOwnerAccount;
-      if (!deleteOwnerAccount) {
-        throw new TypeError("Provider owner cleanup is unavailable.");
+      const provider = registry.get(pendingStart.provider);
+      if (!provider) {
+        throw new TypeError("Pending connection provider is unavailable.");
       }
-      const result = await deleteOwnerAccount({ ownerId });
-      if (result !== "absent" && result !== "deleted") {
-        throw new TypeError("Provider owner cleanup returned an unsupported result.");
+      const connectionKind = provider.descriptor.connection?.kind
+        ?? (provider.descriptor.oauth ? "oauth2" : "none");
+      // Direct OAuth starts use the shared URL builder and therefore have no
+      // upstream owner to clean before the provider callback. Link and SDK
+      // starts may already have created one, so those remain fail-closed.
+      if (connectionKind !== "oauth2") {
+        const deleteOwnerAccount = provider.connectionHandler?.deleteOwnerAccount;
+        if (!deleteOwnerAccount) {
+          throw new TypeError("Provider owner cleanup is unavailable.");
+        }
+        const result = await deleteOwnerAccount({ ownerId });
+        if (result !== "absent" && result !== "deleted") {
+          throw new TypeError("Provider owner cleanup returned an unsupported result.");
+        }
       }
     } catch (error) {
       throw hostedOnboardingError({
@@ -1069,6 +1079,10 @@ async function markHostedMembersSuspendedForAccountDeletion(input: {
         prisma: tx,
       });
     }
+    await assertNoPendingDeviceConnectionStartsForAccountDeletionTx({
+      memberIds: input.memberIds,
+      prisma: tx,
+    });
     await tx.hostedMember.updateMany({
       data: {
         suspendedAt: input.now,
@@ -1079,6 +1093,29 @@ async function markHostedMembersSuspendedForAccountDeletion(input: {
       },
     });
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+}
+
+async function assertNoPendingDeviceConnectionStartsForAccountDeletionTx(input: {
+  memberIds: readonly string[];
+  prisma: Prisma.TransactionClient;
+}): Promise<void> {
+  const pendingStartCount = await input.prisma.deviceOauthSession.count({
+    where: {
+      metadataJson: {
+        path: [DEVICE_SYNC_CONNECTION_START_PENDING_STATE_METADATA_KEY],
+        equals: true,
+      },
+      userId: { in: [...input.memberIds] },
+    },
+  });
+  if (pendingStartCount > 0) {
+    throw hostedOnboardingError({
+      code: "ACCOUNT_DELETION_DEVICE_CONNECTION_START_IN_PROGRESS",
+      httpStatus: 409,
+      message: "A wearable connection is still finishing. Retry account deletion in a moment.",
+      retryable: true,
+    });
+  }
 }
 
 async function refreshHostedMembersAccountDeletionFenceTx(input: {

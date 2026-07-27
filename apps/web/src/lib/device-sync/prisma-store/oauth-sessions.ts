@@ -110,6 +110,28 @@ export class PrismaHostedOAuthSessionStore {
     return result.count === 1;
   }
 
+  async hasStagedConnectionStart(
+    input: {
+      ownerId: string;
+      provider: string;
+      state: string;
+    },
+    prisma: Prisma.TransactionClient,
+  ): Promise<boolean> {
+    const count = await prisma.deviceOauthSession.count({
+      where: {
+        metadataJson: {
+          path: [DEVICE_SYNC_CONNECTION_START_PENDING_STATE_METADATA_KEY],
+          equals: true,
+        },
+        provider: input.provider,
+        state: input.state,
+        userId: input.ownerId,
+      },
+    });
+    return count === 1;
+  }
+
   async consumeOAuthState(
     state: string,
     now: string,

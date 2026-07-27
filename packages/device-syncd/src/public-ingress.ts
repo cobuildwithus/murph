@@ -53,6 +53,7 @@ import type {
   ProviderConnectionResult,
   ProviderBeginConnectionResult,
   PublicDeviceSyncAccount,
+  PublicDeviceSyncSdkConnectionStartReference,
   PublicProviderDescriptor,
   SdkSignInSessionResult,
   StartConnectionInput,
@@ -752,6 +753,10 @@ export class DeviceSyncPublicIngress {
       throw sdkSignInReconnectRequired();
     }
 
+    const connectionStart = await this.stageSdkConnectionStart({
+      ownerId,
+      provider: provider.provider,
+    });
     const token = await handler.createSignInToken({
       externalAccountId: account.externalAccountId,
     });
@@ -768,9 +773,11 @@ export class DeviceSyncPublicIngress {
     ) {
       throw sdkSignInReconnectRequired();
     }
+    await this.assertSdkConnectionStartActive(connectionStart);
 
     return {
       account: currentAccount,
+      connectionStart,
       signInToken: token.signInToken,
       environment: token.environment,
     };
@@ -798,9 +805,11 @@ export class DeviceSyncPublicIngress {
     ) {
       throw sdkSignInReconnectRequired();
     }
+    await this.assertSdkConnectionStartActive(ensured.connectionStart);
 
     return {
       account: currentAccount,
+      connectionStart: ensured.connectionStart,
       signInToken: token.signInToken,
       environment: token.environment,
     };
@@ -816,6 +825,7 @@ export class DeviceSyncPublicIngress {
     account: PublicDeviceSyncAccount;
     connection: ProviderConnectionResult;
     handler: NonNullable<DeviceSyncProvider["sdkConnectionHandler"]>;
+    connectionStart: PublicDeviceSyncSdkConnectionStartReference | null;
     ownerId: string;
   }> {
     const handler = provider.sdkConnectionHandler;
@@ -840,28 +850,22 @@ export class DeviceSyncPublicIngress {
     }
 
     const now = toIsoTimestamp(new Date());
-    const state = generateStateCode();
-    const expiresAt = addMilliseconds(now, this.sessionTtlMs);
-    const stageConnectionStart = this.store.stageConnectionStart;
     const commitSdkConnectionStart = this.store.commitSdkConnectionStart;
-    const usesHostedLifecycleFence = Boolean(
-      stageConnectionStart && commitSdkConnectionStart,
-    );
-
-    await this.store.deleteExpiredOAuthStates(now);
-    if (usesHostedLifecycleFence && stageConnectionStart) {
-      await stageConnectionStart.call(this.store, {
-        state,
-        provider: provider.provider,
-        returnTo: null,
-        ownerId,
-        createdAt: now,
-        expiresAt,
-        metadata: {
-          [DEVICE_SYNC_CONNECTION_START_PENDING_STATE_METADATA_KEY]: true,
-        },
-      });
+    if (
+      (
+        this.store.stageConnectionStart
+        || this.store.assertSdkConnectionStartActive
+        || this.store.completeSdkConnectionStart
+      )
+      && !commitSdkConnectionStart
+    ) {
+      throw new TypeError("Hosted SDK lifecycle fencing requires connection commit support.");
     }
+    const connectionStart = await this.stageSdkConnectionStart({
+      now,
+      ownerId,
+      provider: provider.provider,
+    });
 
     const descriptor = this.describeProvider(provider);
     const connection = await handler.ensureConnection({ ownerId, now });
@@ -890,10 +894,10 @@ export class DeviceSyncPublicIngress {
       connectedAt: now,
       nextReconcileAt: connection.nextReconcileAt ?? null,
     };
-    const persisted = usesHostedLifecycleFence && commitSdkConnectionStart
+    const persisted = connectionStart && commitSdkConnectionStart
       ? await commitSdkConnectionStart.call(this.store, {
           connectionSeed,
-          state,
+          state: connectionStart.state,
         })
       : await this.upsertConnectionWithPrevious(connectionSeed);
     const { account, previousAccount } = persisted;
@@ -913,9 +917,76 @@ export class DeviceSyncPublicIngress {
     return {
       account,
       connection,
+      connectionStart,
       handler,
       ownerId,
     };
+  }
+
+  private async stageSdkConnectionStart(input: {
+    now?: string;
+    ownerId: string;
+    provider: string;
+  }): Promise<PublicDeviceSyncSdkConnectionStartReference | null> {
+    const stageConnectionStart = this.store.stageConnectionStart;
+    const assertSdkConnectionStartActive = this.store.assertSdkConnectionStartActive;
+    const completeSdkConnectionStart = this.store.completeSdkConnectionStart;
+    const lifecycleMethods = [
+      stageConnectionStart,
+      assertSdkConnectionStartActive,
+      completeSdkConnectionStart,
+    ];
+    if (lifecycleMethods.every((method) => !method)) {
+      return null;
+    }
+    if (
+      !stageConnectionStart
+      || !assertSdkConnectionStartActive
+      || !completeSdkConnectionStart
+    ) {
+      throw new TypeError("Hosted SDK lifecycle fencing must be configured as one complete capability.");
+    }
+
+    const now = input.now ?? toIsoTimestamp(new Date());
+    const connectionStart = {
+      ownerId: input.ownerId,
+      provider: input.provider,
+      state: generateStateCode(),
+    };
+    await this.store.deleteExpiredOAuthStates(now);
+    await stageConnectionStart.call(this.store, {
+      ...connectionStart,
+      returnTo: null,
+      createdAt: now,
+      expiresAt: addMilliseconds(now, this.sessionTtlMs),
+      metadata: {
+        [DEVICE_SYNC_CONNECTION_START_PENDING_STATE_METADATA_KEY]: true,
+      },
+    });
+    return connectionStart;
+  }
+
+  private async assertSdkConnectionStartActive(
+    connectionStart: PublicDeviceSyncSdkConnectionStartReference | null,
+  ): Promise<void> {
+    if (!connectionStart) {
+      return;
+    }
+    const assertSdkConnectionStartActive = this.store.assertSdkConnectionStartActive;
+    if (!assertSdkConnectionStartActive) {
+      throw new TypeError("Hosted SDK lifecycle fencing is missing active-member validation.");
+    }
+    await assertSdkConnectionStartActive.call(this.store, connectionStart);
+  }
+
+  async completeSdkSignInSession(
+    connectionStart: PublicDeviceSyncSdkConnectionStartReference,
+  ): Promise<void> {
+    const completeSdkConnectionStart = this.store.completeSdkConnectionStart;
+    if (!completeSdkConnectionStart) {
+      throw new TypeError("Hosted SDK lifecycle fencing is missing response completion.");
+    }
+    await completeSdkConnectionStart.call(this.store, connectionStart);
   }
 
   private async upsertConnectionWithPrevious(

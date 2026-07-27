@@ -4503,6 +4503,10 @@ test("public ingress fences SDK provider creation and withholds the token when s
         httpStatus: 403,
       });
     }
+
+    assertSdkConnectionStartActive(): void {}
+
+    completeSdkConnectionStart(): void {}
   }
 
   const store = new SuspendedOwnerStore();

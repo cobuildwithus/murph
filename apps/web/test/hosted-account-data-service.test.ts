@@ -1,4 +1,10 @@
+import { randomUUID } from "node:crypto";
+
+import type { PrismaClient } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  DEVICE_SYNC_CONNECTION_START_PENDING_STATE_METADATA_KEY,
+} from "@murphai/device-syncd/types";
 
 const serviceMocks = vi.hoisted(() => ({
   connectedAppsClient: {
@@ -87,6 +93,15 @@ import {
   HOSTED_ACCOUNT_DATA_STORE_COVERAGE,
   parseHostedAccountDeletionRequest,
 } from "@/src/lib/hosted-privacy/account-data-service";
+import { PrismaDeviceSyncControlPlaneStore } from "@/src/lib/device-sync/prisma-store";
+import { createPrismaClient } from "@/src/lib/prisma";
+
+const databaseUrl = process.env.DATABASE_URL?.trim() ?? "";
+const runPostgresConcurrencyProof = process.env.MURPH_TEST_POSTGRES_CONCURRENCY === "1";
+
+if (runPostgresConcurrencyProof && (!databaseUrl || !isClearlyLocalPostgresUrl(databaseUrl))) {
+  throw new Error("The hosted account-deletion device-start proof requires a local DATABASE_URL.");
+}
 
 const REQUIRED_STORE_SLUGS = [
   "prisma.hosted_member",
@@ -1606,16 +1621,23 @@ describe("deleteHostedAccountData", () => {
   it("blocks deletion without provider cleanup while an unexpired start may still be running", async () => {
     const deleteOwnerAccount = vi.fn(async () => "absent" as const);
     const deleteCalls: HostedAccountDeletionPrismaDeleteCall[] = [];
+    const operationOrder: string[] = [];
     serviceMocks.createHostedDeviceSyncRegistry.mockReturnValue({
       get: vi.fn(() => ({
         connectionHandler: {
           deleteOwnerAccount,
+        },
+        descriptor: {
+          connection: {
+            kind: "external_link",
+          },
         },
       })),
     });
     const prisma = createHostedAccountDeletionPrismaForTest({
       deleteCalls,
       onTransaction: () => undefined,
+      operationOrder,
       pendingDeviceConnectionStarts: [
         {
           createdAt: new Date("2026-07-26T12:00:00.000Z"),
@@ -1641,6 +1663,7 @@ describe("deleteHostedAccountData", () => {
     expect(deleteCalls).not.toContainEqual(expect.objectContaining({
       model: "deviceOauthSession",
     }));
+    expect(operationOrder).not.toContain("update:hostedMember");
   });
 
   it("retains pending start ownership until retried provider cleanup succeeds", async () => {
@@ -1652,6 +1675,11 @@ describe("deleteHostedAccountData", () => {
       get: vi.fn(() => ({
         connectionHandler: {
           deleteOwnerAccount,
+        },
+        descriptor: {
+          connection: {
+            kind: "external_link",
+          },
         },
       })),
     });
@@ -1704,6 +1732,11 @@ describe("deleteHostedAccountData", () => {
       name: "owner cleanup handler",
       registryValue: {
         connectionHandler: {},
+        descriptor: {
+          connection: {
+            kind: "external_link",
+          },
+        },
       },
     },
   ])("fails closed when an expired start has no $name", async ({ registryValue }) => {
@@ -1747,6 +1780,11 @@ describe("deleteHostedAccountData", () => {
         connectionHandler: {
           deleteOwnerAccount,
         },
+        descriptor: {
+          connection: {
+            kind: "external_link",
+          },
+        },
       })),
     });
     const prisma = createHostedAccountDeletionPrismaForTest({
@@ -1775,6 +1813,46 @@ describe("deleteHostedAccountData", () => {
       model: "deviceOauthSession",
     }));
   });
+
+  it.each(["oura", "strava", "whoop"])(
+    "clears an expired URL-only %s OAuth start without requiring provider owner cleanup",
+    async (provider) => {
+      const deleteCalls: HostedAccountDeletionPrismaDeleteCall[] = [];
+      serviceMocks.createHostedDeviceSyncRegistry.mockReturnValue({
+        get: vi.fn(() => ({
+          descriptor: {
+            connection: {
+              kind: "oauth2",
+            },
+          },
+        })),
+      });
+      const prisma = createHostedAccountDeletionPrismaForTest({
+        deleteCalls,
+        onTransaction: () => undefined,
+        pendingDeviceConnectionStarts: [
+          {
+            createdAt: new Date("2026-07-26T12:00:00.000Z"),
+            expiresAt: new Date("2020-07-26T12:30:00.000Z"),
+            provider,
+            state: `pending-${provider}-start`,
+            userId: "member_123",
+          },
+        ],
+      });
+
+      await expect(deleteHostedAccountData({
+        memberId: "member_123",
+        prisma,
+        request: new Request("https://join.example.test/settings"),
+      })).resolves.toMatchObject({
+        memberId: "member_123",
+      });
+      expect(deleteCalls).toContainEqual(expect.objectContaining({
+        model: "deviceOauthSession",
+      }));
+    },
+  );
 
   it("reports provider registry failures through the account-deletion revocation policy", async () => {
     const order: string[] = [];
@@ -2226,6 +2304,161 @@ describe("deleteHostedAccountData", () => {
   });
 });
 
+describe.skipIf(!runPostgresConcurrencyProof)(
+  "hosted account-deletion device-start PostgreSQL lifecycle",
+  () => {
+    it("rejects a live pending start before persisting account suspension", async () => {
+      const fixture = await createPostgresAccountDeletionFixture();
+
+      try {
+        await fixture.store.stageConnectionStart({
+          createdAt: new Date().toISOString(),
+          expiresAt: new Date(Date.now() + 60_000).toISOString(),
+          metadata: {
+            [DEVICE_SYNC_CONNECTION_START_PENDING_STATE_METADATA_KEY]: true,
+          },
+          ownerId: fixture.memberId,
+          provider: "junction",
+          returnTo: null,
+          state: fixture.state,
+        });
+
+        await expect(deleteHostedAccountData({
+          memberId: fixture.memberId,
+          prisma: fixture.prisma,
+          request: new Request("https://join.example.test/settings"),
+        })).rejects.toMatchObject({
+          code: "ACCOUNT_DELETION_DEVICE_CONNECTION_START_IN_PROGRESS",
+          httpStatus: 409,
+          retryable: true,
+        });
+        await expect(fixture.prisma.hostedMember.findUnique({
+          select: { suspendedAt: true },
+          where: { id: fixture.memberId },
+        })).resolves.toEqual({ suspendedAt: null });
+      } finally {
+        await cleanupPostgresAccountDeletionFixture(fixture);
+      }
+    });
+
+    it.each(["oura", "strava", "whoop"])(
+      "deletes an account after an abandoned URL-only %s start expires",
+      async (provider) => {
+        const fixture = await createPostgresAccountDeletionFixture();
+        const createdAt = new Date().toISOString();
+        const expiresAt = new Date(Date.now() + 60_000).toISOString();
+        serviceMocks.createHostedDeviceSyncRegistry.mockReturnValue({
+          get: vi.fn(() => ({
+            descriptor: {
+              connection: {
+                kind: "oauth2",
+              },
+            },
+          })),
+        });
+
+        try {
+          await fixture.store.stageConnectionStart({
+            createdAt,
+            expiresAt,
+            metadata: {
+              [DEVICE_SYNC_CONNECTION_START_PENDING_STATE_METADATA_KEY]: true,
+            },
+            ownerId: fixture.memberId,
+            provider,
+            returnTo: null,
+            state: fixture.state,
+          });
+          await fixture.prisma.hostedMember.update({
+            data: { suspendedAt: new Date() },
+            where: { id: fixture.memberId },
+          });
+          await expect(fixture.store.commitConnectionStart({
+            connectionSeed: null,
+            oauthState: {
+              createdAt,
+              expiresAt,
+              ownerId: fixture.memberId,
+              provider,
+              returnTo: null,
+              state: fixture.state,
+            },
+          })).rejects.toMatchObject({
+            code: "CONNECTION_OWNER_UNAVAILABLE",
+            httpStatus: 403,
+          });
+          await fixture.prisma.deviceOauthSession.update({
+            data: { expiresAt: new Date(Date.now() - 1) },
+            where: { state: fixture.state },
+          });
+
+          await expect(deleteHostedAccountData({
+            memberId: fixture.memberId,
+            prisma: fixture.prisma,
+            request: new Request("https://join.example.test/settings"),
+          })).resolves.toMatchObject({
+            memberId: fixture.memberId,
+          });
+          await expect(fixture.prisma.hostedMember.findUnique({
+            where: { id: fixture.memberId },
+          })).resolves.toBeNull();
+          await expect(fixture.prisma.deviceOauthSession.findUnique({
+            where: { state: fixture.state },
+          })).resolves.toBeNull();
+        } finally {
+          await cleanupPostgresAccountDeletionFixture(fixture);
+        }
+      },
+    );
+  },
+);
+
+type PostgresAccountDeletionFixture = {
+  memberId: string;
+  prisma: PrismaClient;
+  state: string;
+  store: PrismaDeviceSyncControlPlaneStore;
+};
+
+async function createPostgresAccountDeletionFixture(): Promise<PostgresAccountDeletionFixture> {
+  if (!databaseUrl) {
+    throw new Error("DATABASE_URL is required for the PostgreSQL account-deletion proof.");
+  }
+  const id = randomUUID();
+  const prisma = createPrismaClient({ databaseUrl, poolMax: 2 });
+  const memberId = `member_account_delete_start_${id}`;
+  await prisma.hostedMember.create({ data: { id: memberId } });
+  return {
+    memberId,
+    prisma,
+    state: `account-delete-start-${id}`,
+    store: new PrismaDeviceSyncControlPlaneStore({
+      codec: {
+        keyVersion: "test:v1",
+        decrypt: (value: string) => value.replace(/^encrypted:/u, ""),
+        encrypt: (value: string) => `encrypted:${value}`,
+      },
+      prisma,
+      providerAccountBlindIndexKey: Buffer.alloc(32, 19),
+    }),
+  };
+}
+
+async function cleanupPostgresAccountDeletionFixture(
+  fixture: PostgresAccountDeletionFixture,
+): Promise<void> {
+  await fixture.prisma.deviceOauthSession.deleteMany({
+    where: { userId: fixture.memberId },
+  });
+  await fixture.prisma.deviceConnection.deleteMany({
+    where: { userId: fixture.memberId },
+  });
+  await fixture.prisma.hostedMember.deleteMany({
+    where: { id: fixture.memberId },
+  });
+  await fixture.prisma.$disconnect();
+}
+
 
 function createHostedAccountDeletionPrismaForTest(input: {
   billingRefRecord?: Record<string, unknown> | null;
@@ -2261,6 +2494,7 @@ function createHostedAccountDeletionPrismaForTest(input: {
     sources?: { sourceProviderSlug: string; status: string }[];
   }>;
 }): Parameters<typeof deleteHostedAccountData>[0]["prisma"] {
+  let pendingDeviceConnectionStarts = [...(input.pendingDeviceConnectionStarts ?? [])];
   const makeDeleteDelegate = (model: string): HostedAccountDeletionPrismaDeleteDelegate => ({
     count: async () => {
       input.operationOrder?.push(`count:${model}`);
@@ -2292,6 +2526,19 @@ function createHostedAccountDeletionPrismaForTest(input: {
       findMany: async () => {
         input.operationOrder?.push("find:deviceConnection");
         return input.transactionDeviceConnections ?? input.deviceConnections ?? [];
+      },
+    },
+    deviceOauthSession: {
+      count: async () => pendingDeviceConnectionStarts.length,
+      deleteMany: async (args) => {
+        input.operationOrder?.push("delete:deviceOauthSession");
+        input.deleteCalls?.push({ model: "deviceOauthSession", where: args.where });
+        const where = args.where as { state?: string; userId?: string };
+        const previousCount = pendingDeviceConnectionStarts.length;
+        pendingDeviceConnectionStarts = pendingDeviceConnectionStarts.filter((record) =>
+          record.state !== where.state || record.userId !== where.userId
+        );
+        return { count: previousCount - pendingDeviceConnectionStarts.length };
       },
     },
     hostedComputerRun: {
@@ -2334,8 +2581,18 @@ function createHostedAccountDeletionPrismaForTest(input: {
       findMany: async () => input.deviceConnections ?? [],
     },
     deviceOauthSession: {
-      ...makeDeleteDelegate("deviceOauthSession"),
-      findMany: async () => input.pendingDeviceConnectionStarts ?? [],
+      count: async () => pendingDeviceConnectionStarts.length,
+      deleteMany: async (args: { where: unknown }) => {
+        input.operationOrder?.push("delete:deviceOauthSession");
+        input.deleteCalls?.push({ model: "deviceOauthSession", where: args.where });
+        const where = args.where as { state?: string; userId?: string };
+        const previousCount = pendingDeviceConnectionStarts.length;
+        pendingDeviceConnectionStarts = pendingDeviceConnectionStarts.filter((record) =>
+          record.state !== where.state || record.userId !== where.userId
+        );
+        return { count: previousCount - pendingDeviceConnectionStarts.length };
+      },
+      findMany: async () => pendingDeviceConnectionStarts,
     },
     hostedAccountGroup: {
       findMany: async () => input.familyGroups ?? [],
@@ -2507,6 +2764,7 @@ type HostedAccountDeletionPrismaTransactionFake = {
       sources?: { sourceProviderSlug: string; status: string }[];
     }>>;
   };
+  deviceOauthSession: HostedAccountDeletionPrismaDeleteDelegate;
   hostedComputerRun: HostedAccountDeletionPrismaDeleteDelegate & {
     findMany: () => Promise<unknown[]>;
   };
@@ -2533,4 +2791,23 @@ function makeCloudflareDeletionResult() {
     r2UserScopedSkipReason: null,
     runnerStateDeleted: true,
   };
+}
+
+function isClearlyLocalPostgresUrl(value: string): boolean {
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    return false;
+  }
+  if (!["postgres:", "postgresql:"].includes(parsed.protocol)) {
+    return false;
+  }
+  const hostOverrides = parsed.searchParams.getAll("host");
+  if (hostOverrides.length > 1) {
+    return false;
+  }
+  const effectiveHost = (hostOverrides[0] || parsed.hostname).toLowerCase();
+  return ["127.0.0.1", "::1", "[::1]", "localhost"].includes(effectiveHost)
+    || effectiveHost.startsWith("/");
 }
