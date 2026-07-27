@@ -549,9 +549,13 @@ export function parseHostedExecutionConversationMessagePayload(
         record.routeAuthority,
         "Hosted execution conversation.message wake payload routeAuthority",
       );
+      const senderMemberId = parseOptionalHostedExecutionGroupSenderMemberId(
+        record.senderMemberId,
+      );
       return {
         channel,
         ...(routeAuthority === undefined ? {} : { routeAuthority }),
+        ...(senderMemberId === undefined ? {} : { senderMemberId }),
         telegramMessage: parseHostedExecutionTelegramMessage(record.telegramMessage),
       };
     }
@@ -680,6 +684,9 @@ function parseHostedExecutionLinqConversationMessagePayload(
     record.routeAuthority,
     "Hosted execution conversation.message wake payload routeAuthority",
   );
+  const senderMemberId = parseOptionalHostedExecutionGroupSenderMemberId(
+    record.senderMemberId,
+  );
   let groupParticipantAdded: true | undefined;
   if (record.groupParticipantAdded !== undefined) {
     if (record.groupParticipantAdded !== true) {
@@ -740,6 +747,7 @@ function parseHostedExecutionLinqConversationMessagePayload(
             ),
           }),
       ...(routeAuthority === undefined ? {} : { routeAuthority }),
+      ...(senderMemberId === undefined ? {} : { senderMemberId }),
     };
   }
 
@@ -764,7 +772,26 @@ function parseHostedExecutionLinqConversationMessagePayload(
     linqMessage,
     phoneLookupKey,
     ...(routeAuthority === undefined ? {} : { routeAuthority }),
+    ...(senderMemberId === undefined ? {} : { senderMemberId }),
   };
+}
+
+function parseOptionalHostedExecutionGroupSenderMemberId(
+  value: unknown,
+): string | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  const senderMemberId = requireString(
+    value,
+    "Hosted execution conversation.message wake payload senderMemberId",
+  );
+  if (senderMemberId.trim().length === 0 || senderMemberId.trim() !== senderMemberId) {
+    throw new TypeError(
+      "Hosted execution conversation.message wake payload senderMemberId must be a non-empty normalized string.",
+    );
+  }
+  return senderMemberId;
 }
 
 function parseOptionalHostedExecutionExternalThreadRouteAuthority(

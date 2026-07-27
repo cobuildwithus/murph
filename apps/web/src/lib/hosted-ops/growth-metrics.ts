@@ -1,6 +1,7 @@
 import "server-only";
 
 import {
+  isHostedEmailConversationMessageWake,
   isHostedLinqConversationMessageWake,
   isHostedTelegramConversationMessageWake,
   readHostedLinqConversationMessageContact,
@@ -615,12 +616,15 @@ interface HostedGrowthLinqSenderEvidence {
   identityKey: string;
   kind: "linq";
   registrationLookupKeys: string[];
+  senderMemberId?: string;
 }
 
 interface HostedGrowthTelegramSenderEvidence {
+  fallbackIdentity: string;
   identityKey: string;
   kind: "telegram";
   registrationLookupKeys: string[];
+  senderMemberId?: string;
 }
 
 type HostedGrowthGroupSenderEvidence =
@@ -699,8 +703,8 @@ async function decodeHostedGrowthGroupMessages(
   rows: readonly HostedGrowthGroupMailboxRow[],
   prisma: HostedGrowthPrisma,
 ): Promise<HostedGrowthAttributedGroupMessage[]> {
-  return runWithHostedDomainRootUnwrapCache(async () =>
-    Promise.all(rows.map(async (row) => {
+  return runWithHostedDomainRootUnwrapCache(async () => {
+    const messages = await Promise.all(rows.map(async (row) => {
       if (row.payloadRef && !row.payload) {
         throw new Error("Hosted growth group message sidecar payload is unavailable.");
       }
@@ -724,13 +728,19 @@ async function decodeHostedGrowthGroupMessages(
       if (wake.kind !== INBOUND_MESSAGE_MAILBOX_KIND || wake.userId !== row.userId) {
         throw new Error("Hosted growth group message does not match its mailbox item.");
       }
+      if (isHostedEmailConversationMessageWake(wake)) {
+        return null;
+      }
 
       return {
         evidence: readHostedGrowthGroupSenderEvidence(wake),
         occurredAt: row.occurredAt,
       };
-    })),
-  );
+    }));
+    return messages.filter(
+      (message): message is HostedGrowthAttributedGroupMessage => message !== null,
+    );
+  });
 }
 
 function readHostedGrowthGroupSenderEvidence(
@@ -756,16 +766,22 @@ function readHostedGrowthGroupSenderEvidence(
     if (!registrationLookupKeys.includes(storedContact.lookupKey)) {
       throw new Error("Hosted growth Linq group sender contact does not match its blind index.");
     }
-    const identityKey = hostedGrowthLinqEvidenceKey(
+    const fallbackIdentity = hostedGrowthLinqEvidenceKey(
       currentContact.kind,
       currentContact.lookupKey,
     );
+    const identityKey = wake.message.senderMemberId
+      ? hostedGrowthMemberIdentity(wake.message.senderMemberId)
+      : fallbackIdentity;
     return {
       contactKind: currentContact.kind,
-      fallbackIdentity: identityKey,
+      fallbackIdentity,
       identityKey,
       kind: "linq",
       registrationLookupKeys,
+      ...(wake.message.senderMemberId
+        ? { senderMemberId: wake.message.senderMemberId }
+        : {}),
     };
   }
 
@@ -779,10 +795,18 @@ function readHostedGrowthGroupSenderEvidence(
     if (registrationLookupKeys.length === 0) {
       throw new Error("Hosted growth Telegram group sender identity is invalid.");
     }
+    const fallbackIdentity = `telegram:${registrationLookupKeys[0]}`;
+    const identityKey = wake.message.senderMemberId
+      ? hostedGrowthMemberIdentity(wake.message.senderMemberId)
+      : fallbackIdentity;
     return {
-      identityKey: `telegram:${registrationLookupKeys[0]}`,
+      fallbackIdentity,
+      identityKey,
       kind: "telegram",
       registrationLookupKeys,
+      ...(wake.message.senderMemberId
+        ? { senderMemberId: wake.message.senderMemberId }
+        : {}),
     };
   }
 
@@ -797,46 +821,54 @@ async function resolveHostedGrowthGroupSenderIdentities(
   const emailLookupKeys = collectHostedGrowthLinqLookupKeys(evidenceRows, "email");
   const telegramLookupKeys = new Set(
     evidenceRows.flatMap((evidence) =>
-      evidence.kind === "telegram" ? evidence.registrationLookupKeys : []
+      evidence.kind === "telegram" && !evidence.senderMemberId
+        ? evidence.registrationLookupKeys
+        : []
     ),
   );
   const [phoneMembers, emailMembers, telegramMembers] = await Promise.all([
-    prisma.hostedMemberIdentity.findMany({
-      select: {
-        memberId: true,
-        phoneLookupKey: true,
-      },
-      where: {
-        phoneLookupKey: {
-          in: [...phoneLookupKeys],
-        },
-      },
-    }),
-    prisma.hostedMemberEmailAuthorization.findMany({
-      select: {
-        memberId: true,
-        verifiedEmailLookupKey: true,
-      },
-      where: {
-        verifiedEmailLookupKey: {
-          in: [...emailLookupKeys],
-        },
-        verifiedEmailVerifiedAt: {
-          not: null,
-        },
-      },
-    }),
-    prisma.hostedMemberRouting.findMany({
-      select: {
-        memberId: true,
-        telegramUserLookupKey: true,
-      },
-      where: {
-        telegramUserLookupKey: {
-          in: [...telegramLookupKeys],
-        },
-      },
-    }),
+    phoneLookupKeys.size === 0
+      ? []
+      : prisma.hostedMemberIdentity.findMany({
+          select: {
+            memberId: true,
+            phoneLookupKey: true,
+          },
+          where: {
+            phoneLookupKey: {
+              in: [...phoneLookupKeys],
+            },
+          },
+        }),
+    emailLookupKeys.size === 0
+      ? []
+      : prisma.hostedMemberEmailAuthorization.findMany({
+          select: {
+            memberId: true,
+            verifiedEmailLookupKey: true,
+          },
+          where: {
+            verifiedEmailLookupKey: {
+              in: [...emailLookupKeys],
+            },
+            verifiedEmailVerifiedAt: {
+              not: null,
+            },
+          },
+        }),
+    telegramLookupKeys.size === 0
+      ? []
+      : prisma.hostedMemberRouting.findMany({
+          select: {
+            memberId: true,
+            telegramUserLookupKey: true,
+          },
+          where: {
+            telegramUserLookupKey: {
+              in: [...telegramLookupKeys],
+            },
+          },
+        }),
   ]);
   const memberIdsByLookupKey = new Map<string, Set<string>>();
   for (const row of phoneMembers) {
@@ -862,6 +894,13 @@ async function resolveHostedGrowthGroupSenderIdentities(
     if (identities.has(evidence.identityKey)) {
       continue;
     }
+    if (evidence.senderMemberId) {
+      identities.set(
+        evidence.identityKey,
+        hostedGrowthMemberIdentity(evidence.senderMemberId),
+      );
+      continue;
+    }
     const matchingMemberIds = new Set(
       evidence.registrationLookupKeys.flatMap((lookupKey) =>
         [...(memberIdsByLookupKey.get(lookupKey) ?? [])]
@@ -875,11 +914,7 @@ async function resolveHostedGrowthGroupSenderIdentities(
       identities.set(evidence.identityKey, hostedGrowthMemberIdentity(memberId));
       continue;
     }
-    if (evidence.kind === "linq") {
-      identities.set(evidence.identityKey, evidence.fallbackIdentity);
-      continue;
-    }
-    throw new Error("Hosted growth Telegram group sender is not linked to a member.");
+    identities.set(evidence.identityKey, evidence.fallbackIdentity);
   }
   return identities;
 }
@@ -889,7 +924,9 @@ function collectHostedGrowthLinqLookupKeys(
   kind: HostedLinqParticipantContactKind,
 ): Set<string> {
   return new Set(evidenceRows.flatMap((evidence) =>
-    evidence.kind === "linq" && evidence.contactKind === kind
+    evidence.kind === "linq"
+    && evidence.contactKind === kind
+    && !evidence.senderMemberId
       ? evidence.registrationLookupKeys
       : []
   ));

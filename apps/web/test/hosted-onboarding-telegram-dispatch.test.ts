@@ -503,6 +503,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
               containerMemberId: "member_telegram_group_container",
               threadId: "-100123",
             },
+            senderMemberId: "member_telegram_owner",
             telegramMessage: expect.objectContaining({
               // Group inbound carries the webhook-authenticated sender so the
               // assistant can tell participants apart. The display-only
