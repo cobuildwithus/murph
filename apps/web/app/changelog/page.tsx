@@ -1,14 +1,13 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import type { ReactNode } from "react";
-import { ChevronLeft, ChevronRight, Link2 } from "lucide-react";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 
 import { SiteFooter } from "@/src/components/homepage/site-footer";
 import { resolveHostedMurphContactOptions } from "@/src/components/murph/hosted-murph-contact-action";
 import {
   buildAbsoluteChangelogUrl,
   buildChangelogCardPath,
-  buildChangelogItemPath,
   buildChangelogPagePath,
   CHANGELOG_PREVIEW_CARD_ITEMS,
   type ChangelogItem,
@@ -17,12 +16,14 @@ import {
 } from "@/src/lib/changelog";
 import { getMurphGithubStarCount } from "@/src/lib/github-stars";
 import { getHostedPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
-import type { MurphContactOption } from "@/src/lib/murph-contact-routing";
 import { createMurphPageMetadata } from "@/src/lib/site-metadata";
 
+import {
+  ChangelogEditionSection,
+  type ResolvedChangelogTryIt,
+} from "./changelog-edition-section";
 import { PhoneMock } from "./phone-mock";
 import { StickyNav } from "../sticky-nav";
-import { TryItButton } from "./try-it-button";
 import {
   AppGrid,
   AppIconCard,
@@ -50,6 +51,58 @@ import {
 } from "./visuals";
 
 const VISUALS: Record<string, ReactNode> = {
+  "overnight-imessage-reminders": (
+    <CalendarMock
+      label="Scheduled reminders"
+      entries={[{ day: "Tue", time: "2:00 AM", what: "Check the oven" }]}
+    />
+  ),
+  "iphone-consent-recovery": (
+    <ChecklistMock
+      label="Stay in the Murph app"
+      items={[
+        { label: "Review the current documents", done: true },
+        { label: "Accept missing launch consent", done: true },
+        { label: "Resume setup or sync", done: true },
+        { label: "Continue without opening a browser", done: true },
+      ]}
+    />
+  ),
+  "group-room-memory": (
+    <PhoneMock
+      channel="Group chat"
+      messages={[
+        {
+          from: "user",
+          body: "House rule: an easy lap means nobody brings a stopwatch.",
+        },
+        { from: "user", body: "what should we do saturday?" },
+        {
+          from: "murph",
+          body: "Easy lap. No stopwatch, per house rules.",
+        },
+      ]}
+    />
+  ),
+  "contact-card-after-invite-signup": (
+    <ContactCardMock
+      name="Murph"
+      subtitle="Verified line after setup"
+      fields={[{ label: "Mobile", value: "(415) 555-0142" }]}
+      action="Add to Contacts"
+    />
+  ),
+  "group-funding-speaks-in-messages": (
+    <PreferenceCard
+      label="Keep Murph going"
+      meta="One-time"
+      entries={[
+        { label: "About 100 messages", value: "$5" },
+        { label: "About 200 messages", value: "$10" },
+        { label: "About 500 messages", value: "$25" },
+      ]}
+    />
+  ),
   "group-replies-stay-short": (
     <PhoneMock
       channel="Group chat"
@@ -2440,13 +2493,6 @@ export async function generateMetadata({
   });
 }
 
-type ResolvedTryIt = {
-  authenticated: boolean;
-  label: string;
-  options: MurphContactOption[];
-  prompt?: string | null;
-};
-
 export default async function ChangelogPage({
   searchParams,
 }: ChangelogPageProps) {
@@ -2488,60 +2534,16 @@ export default async function ChangelogPage({
           </div>
         </section>
 
-        <div className="mx-auto max-w-[1080px] px-6 py-16 sm:px-10 sm:py-20 lg:px-0 lg:py-24">
-          {editions.map((edition, editionIndex) => {
-            const features = edition.items.filter((item) => item.kind === "feature");
-            const improvements = edition.items.filter(
-              (item) => item.kind === "improvement",
-            );
-
-            return (
-              <section
-                key={edition.id}
-                aria-labelledby={`edition-${edition.id}`}
-                className={editionIndex === 0 ? "" : "mt-20 border-t border-[#c4a882]/35 pt-20"}
-              >
-                <div className="grid items-start gap-10 lg:grid-cols-[240px_1fr] lg:gap-16">
-                  <div className="min-w-0 lg:sticky lg:top-24 lg:self-start">
-                    <time
-                      className="font-mono text-[10px] font-medium text-[#736a58] uppercase tracking-[0.18em]"
-                      dateTime={edition.publishedOn}
-                    >
-                      {formatEditionDate(edition.publishedOn)}
-                    </time>
-                    <h2
-                      id={`edition-${edition.id}`}
-                      className="mt-3 font-serif text-[1.75rem] font-semibold leading-[1.15] tracking-tight text-balance"
-                    >
-                      {edition.title}
-                    </h2>
-                    <p className="mt-3 max-w-[36ch] text-[14.5px] leading-[1.6] text-pretty text-[#5f584b]">
-                      {edition.summary}
-                    </p>
-                  </div>
-
-                  <div className="min-w-0">
-                    {features.length > 0 ? (
-                      <ItemGroup
-                        label="New features"
-                        items={features}
-                        tryItByItemId={tryItByItemId}
-                      />
-                    ) : null}
-                    {improvements.length > 0 ? (
-                      <div className={features.length > 0 ? "mt-10" : ""}>
-                        <ItemGroup
-                          label="Improvements"
-                          items={improvements}
-                          tryItByItemId={tryItByItemId}
-                        />
-                      </div>
-                    ) : null}
-                  </div>
-                </div>
-              </section>
-            );
-          })}
+        <div className="mx-auto max-w-[1080px] px-6 py-16 sm:px-10 sm:py-20 lg:py-24 xl:px-0">
+          {editions.map((edition, editionIndex) => (
+            <ChangelogEditionSection
+              key={edition.id}
+              edition={edition}
+              isFirst={editionIndex === 0}
+              tryItByItemId={tryItByItemId}
+              visuals={VISUALS}
+            />
+          ))}
           <ChangelogPagination
             currentPage={page.currentPage}
             totalPages={page.totalPages}
@@ -2671,109 +2673,13 @@ async function resolveRequestedChangelogPage(
   return page;
 }
 
-function ItemGroup({
-  label,
-  items,
-  tryItByItemId,
-}: {
-  items: readonly ChangelogItem[];
-  label: string;
-  tryItByItemId: Map<string, ResolvedTryIt>;
-}) {
-  return (
-    <div>
-      <p className="font-mono text-[10px] font-medium text-[#3a4a1e] uppercase tracking-[0.18em]">
-        {label}
-      </p>
-      <div className="mt-4 grid gap-4">
-        {items.map((item) => {
-          const resolved = tryItByItemId.get(item.id);
-          return (
-            <article
-              key={item.id}
-              id={item.id}
-              className="group/card relative min-w-0 scroll-mt-28 rounded-2xl border border-[#c4a882]/35 bg-[#fffcf6]/85 p-6 transition-colors duration-200 ease-out hover:border-[#c4a882]/55 sm:p-7"
-            >
-              <div className="flex items-start justify-between gap-4">
-                <div className="min-w-0">
-                  <p className="font-mono text-[10px] font-medium text-[#736a58] uppercase tracking-[0.18em]">
-                    {item.kind === "feature" ? "Feature" : "Improvement"}
-                  </p>
-                  <h3 className="mt-2 font-serif text-[1.5rem] font-semibold leading-[1.15] tracking-tight text-balance sm:text-[1.6rem]">
-                    {item.title}
-                  </h3>
-                </div>
-                <a
-                  aria-label={`Permalink to ${item.title}`}
-                  className="-mr-2 inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-[#736a58] opacity-0 transition-[background-color,color,opacity] hover:bg-[#c4a882]/15 hover:text-[#3a4a1e] focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#5a6e32]/40 group-hover/card:opacity-100"
-                  href={buildChangelogItemPath(item.id)}
-                >
-                  <Link2 aria-hidden="true" className="h-4 w-4" />
-                </a>
-              </div>
-              <p className="mt-4 max-w-[66ch] text-[15.5px] leading-[1.65] text-pretty text-[#4d453b]">
-                {item.summary}
-              </p>
-              {item.details ? (
-                <p className="mt-2.5 max-w-[66ch] text-[14.5px] leading-[1.6] text-pretty text-[#736a58]">
-                  {item.details}
-                </p>
-              ) : null}
-              {VISUALS[item.id] ?? null}
-              {item.tryIt && resolved ? (
-                <TryIt item={item} resolved={resolved} />
-              ) : null}
-            </article>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-function TryIt({
-  item,
-  resolved,
-}: {
-  item: ChangelogItem;
-  resolved: ResolvedTryIt;
-}) {
-  const tryIt = item.tryIt;
-  if (!tryIt) {
-    return null;
-  }
-
-  return (
-    <div className="mt-5 flex justify-end border-t border-[#c4a882]/30 pt-5">
-      <div>
-        {tryIt.href ? (
-          <a
-            href={tryIt.href}
-            className="group/try inline-flex items-center gap-1.5 rounded-full border border-[#3a4a1e]/15 bg-[#3a4a1e] px-3 py-1.5 text-[13px] font-medium text-[#f5f0e8] outline-none transition-[background-color,color] duration-150 ease-out hover:bg-[#2d3a16] focus-visible:ring-2 focus-visible:ring-[#5a6e32]/45 focus-visible:ring-offset-2 focus-visible:ring-offset-[#fffcf6] active:scale-[0.97]"
-          >
-            {tryIt.label}
-            <span aria-hidden="true" className="text-xs leading-none transition-transform duration-150 ease-out group-hover/try:translate-x-0.5">→</span>
-          </a>
-        ) : (
-          <TryItButton
-            authenticated={resolved.authenticated}
-            label={resolved.label}
-            options={resolved.options}
-            prompt={resolved.prompt}
-          />
-        )}
-      </div>
-    </div>
-  );
-}
-
 async function resolveTryItByItemId({
   authenticated,
   editions,
 }: {
   authenticated: boolean;
   editions: readonly { items: readonly ChangelogItem[] }[];
-}): Promise<Map<string, ResolvedTryIt>> {
+}): Promise<Map<string, ResolvedChangelogTryIt>> {
   const itemsWithPrompt = editions
     .flatMap((edition) => edition.items)
     .filter((item) => item.tryIt?.prompt && !item.tryIt.href);
@@ -2794,19 +2700,10 @@ async function resolveTryItByItemId({
           label: item.tryIt!.label,
           options,
           prompt,
-        } satisfies ResolvedTryIt,
+        } satisfies ResolvedChangelogTryIt,
       ] as const;
     }),
   );
 
   return new Map(entries);
-}
-
-function formatEditionDate(value: string): string {
-  return new Intl.DateTimeFormat("en-US", {
-    day: "numeric",
-    month: "long",
-    timeZone: "UTC",
-    year: "numeric",
-  }).format(new Date(`${value}T12:00:00.000Z`));
 }

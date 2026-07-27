@@ -22,13 +22,38 @@ describe("changelog registry", () => {
     expect(ids.length).toBeGreaterThan(0);
   });
 
-  it("publishes the complete July 20 through July 25 shipment set", () => {
+  it("publishes the complete July 20 through July 27 shipment set", () => {
     expect(
-      listChangelogEditions().slice(0, 6).map((edition) => ({
+      listChangelogEditions().slice(0, 8).map((edition) => ({
         id: edition.id,
         itemIds: edition.items.map((item) => item.id),
       })),
     ).toEqual([
+      {
+        id: "2026-07-27",
+        itemIds: [
+          "overnight-imessage-reminders",
+          "iphone-consent-recovery",
+          "group-compaction-stays-quiet",
+        ],
+      },
+      {
+        id: "2026-07-26",
+        itemIds: [
+          "group-room-memory",
+          "contact-card-after-invite-signup",
+          "secondary-onboarding-outcomes-visible",
+          "recognized-members-always-get-an-answer",
+          "group-funding-speaks-in-messages",
+          "included-usage-follows-plan",
+          "pulse-return-survives-sign-out",
+          "meal-enrollment-survives-stale-consent",
+          "grok-long-answers-explain-the-cutoff",
+          "account-deletion-cleanup-retries",
+          "destructive-requests-check-targets",
+          "homepage-cards-fit-small-iphones",
+        ],
+      },
       {
         id: "2026-07-25",
         itemIds: [
@@ -228,8 +253,8 @@ describe("changelog registry", () => {
   it("keeps the default archive window to seven calendar days", () => {
     const firstPage = resolveChangelogPage(1);
     expect(firstPage?.editions).toHaveLength(7);
-    expect(firstPage?.editions[0]?.publishedOn).toBe("2026-07-25");
-    expect(firstPage?.editions.at(-1)?.publishedOn).toBe("2026-07-19");
+    expect(firstPage?.editions[0]?.publishedOn).toBe("2026-07-27");
+    expect(firstPage?.editions.at(-1)?.publishedOn).toBe("2026-07-21");
   });
 
   it("resolves only known canonical edition cursors", () => {
