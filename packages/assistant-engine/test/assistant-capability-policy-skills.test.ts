@@ -84,12 +84,10 @@ describe('assistant capability policy skills', () => {
     expect(normalized).toContain('`billingActive: true`')
     expect(normalized).toContain('matches exactly one member row')
     expect(normalized).toContain(
-      'Provide the exact absolute Family Settings URL named by the `murph.family_plan` tool description',
+      'Provide `https://www.withmurph.ai/settings#family` only when all three conditions hold',
     )
     expect(skill).not.toMatch(/Provide `?\/settings#family/iu)
-    expect(MURPH_FAMILY_PLAN_TOOL.description).toContain(
-      'https://www.withmurph.ai/settings#family',
-    )
+    expect(MURPH_FAMILY_PLAN_TOOL.description).not.toContain('https://')
     expect(normalized).toContain(
       'A hosted group cannot own a Family plan, begin checkout, inspect account status, or create invites.',
     )
@@ -98,21 +96,15 @@ describe('assistant capability policy skills', () => {
     )
   })
 
-  it('makes each capability tool route to its policy owner', () => {
+  it('keeps target capability policy out of terse tool call contracts', () => {
     for (const tool of MURPH_CONNECTED_APPS_DYNAMIC_TOOLS) {
-      expect(tool.description).toContain(
-        '$MURPH_ASSISTANT_SKILLS_ROOT/connected-apps/SKILL.md',
-      )
+      expect(tool.description).not.toContain('SKILL.md')
     }
     expect(MURPH_CREATE_PHONE_CALL_TOOL.description).toContain(
       '$MURPH_ASSISTANT_SKILLS_ROOT/phone-calls/SKILL.md',
     )
-    expect(MURPH_FAMILY_PLAN_TOOL.description).toContain(
-      '$MURPH_ASSISTANT_SKILLS_ROOT/murph-family/SKILL.md',
-    )
-    expect(MURPH_COMPUTER_OPEN_TOOL.description).toContain(
-      '$MURPH_ASSISTANT_SKILLS_ROOT/computer-use/SKILL.md',
-    )
+    expect(MURPH_FAMILY_PLAN_TOOL.description).not.toContain('SKILL.md')
+    expect(MURPH_COMPUTER_OPEN_TOOL.description).not.toContain('SKILL.md')
   })
 })
 
