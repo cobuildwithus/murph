@@ -269,6 +269,40 @@ describe("hosted runtime latency alert monitor", () => {
     expect(sendLinqMessage).not.toHaveBeenCalled();
   });
 
+  it("keeps a healthy disabled monitor absent when no state exists", async () => {
+    const fixture = createMonitorPrismaFixture([]);
+    const sendLinqMessage = vi.fn(async (input: LinqSendInput) => {
+      void input;
+      return {
+        chatId: null,
+        messageId: null,
+      };
+    });
+
+    const result = await runHostedRuntimeLatencyAlertMonitor({
+      env: {},
+      now,
+      prisma: fixture.prisma,
+      sendLinqMessage,
+    });
+
+    expect(result).toMatchObject({
+      configured: false,
+      health: {
+        anomalous: false,
+      },
+      outcome: "disabled",
+    });
+    expect(fixture.alertFindUnique).toHaveBeenCalledWith({
+      where: {
+        id: "hosted-runtime-latency-monitor:v1",
+      },
+    });
+    expect(fixture.alertUpsert).not.toHaveBeenCalled();
+    expect(fixture.readState()).toBeNull();
+    expect(sendLinqMessage).not.toHaveBeenCalled();
+  });
+
   it("clears a healthy incident while disabled so a later recurrence alerts", async () => {
     const fixture = createMonitorPrismaFixture([
       latencyRow({
@@ -333,6 +367,113 @@ describe("hosted runtime latency alert monitor", () => {
     expect(sendLinqMessage.mock.calls[1]?.[0].idempotencyKey).not.toBe(
       sendLinqMessage.mock.calls[0]?.[0].idempotencyKey,
     );
+  });
+
+  it("preserves an active incident while disabled health remains anomalous", async () => {
+    const fixture = createMonitorPrismaFixture([
+      latencyRow({
+        acceptedAt: "2026-07-26T15:58:00.000Z",
+      }),
+    ]);
+    const sendLinqMessage = vi.fn(async (input: LinqSendInput) => {
+      void input;
+      return {
+        chatId: "opaque-alert-chat",
+        messageId: "provider-message",
+      };
+    });
+
+    await runHostedRuntimeLatencyAlertMonitor({
+      env: alertEnv,
+      now,
+      prisma: fixture.prisma,
+      sendLinqMessage,
+    });
+    const activeState = fixture.readState();
+    if (!activeState) {
+      throw new Error("Expected an active latency incident.");
+    }
+
+    const result = await runHostedRuntimeLatencyAlertMonitor({
+      env: {},
+      now: instant("2026-07-26T16:01:00.000Z"),
+      prisma: fixture.prisma,
+      sendLinqMessage,
+    });
+
+    expect(result).toMatchObject({
+      configured: false,
+      health: {
+        anomalous: true,
+      },
+      outcome: "disabled",
+    });
+    expect(fixture.readState()).toEqual(activeState);
+    expect(sendLinqMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    {
+      kind: "hosted_runtime_latency_monitor",
+      label: "an in-flight send",
+      status: "latency_alert_sending",
+    },
+    {
+      kind: "hosted_runtime_latency_monitor",
+      label: "a retryable failed send",
+      status: "latency_alert_failed",
+    },
+    {
+      kind: "other_monitor_kind",
+      label: "an invalid-kind row",
+      status: "latency_alerting",
+    },
+  ])("preserves $label during a healthy disabled scan", async ({
+    kind,
+    status,
+  }) => {
+    const fixture = createMonitorPrismaFixture([
+      latencyRow({
+        acceptedAt: "2026-07-26T15:58:00.000Z",
+      }),
+    ]);
+    const sendLinqMessage = vi.fn(async (input: LinqSendInput) => {
+      void input;
+      return {
+        chatId: "opaque-alert-chat",
+        messageId: "provider-message",
+      };
+    });
+
+    await runHostedRuntimeLatencyAlertMonitor({
+      env: alertEnv,
+      now,
+      prisma: fixture.prisma,
+      sendLinqMessage,
+    });
+    fixture.setRows([]);
+    fixture.replaceState({ kind, status });
+    const expectedState = fixture.readState();
+    if (!expectedState) {
+      throw new Error("Expected a latency monitor state.");
+    }
+
+    const result = await runHostedRuntimeLatencyAlertMonitor({
+      env: {},
+      now: instant("2026-07-26T16:05:00.000Z"),
+      prisma: fixture.prisma,
+      sendLinqMessage,
+    });
+
+    expect(result).toMatchObject({
+      configured: false,
+      health: {
+        anomalous: false,
+      },
+      outcome: "disabled",
+    });
+    expect(fixture.readState()).toEqual(expectedState);
+    expect(sendLinqMessage).toHaveBeenCalledTimes(1);
   });
 
   it("does not clear an incident that changed after the disabled state read", async () => {
@@ -507,7 +648,9 @@ function createMonitorPrismaFixture(
     }
     return result;
   });
-  const alertFindUnique = vi.fn(async () => state ? { ...state } : null);
+  const alertFindUnique = vi.fn(async (args: AlertFindUniqueArgs) => (
+    state?.id === args.where.id ? { ...state } : null
+  ));
   const alertUpsert = vi.fn(async (args: AlertUpsertArgs) => {
     if (!state) {
       state = {
@@ -547,6 +690,7 @@ function createMonitorPrismaFixture(
   });
 
   return {
+    alertFindUnique,
     alertUpsert,
     prisma: {
       hostedIngressLatencyTrace: {
@@ -559,12 +703,27 @@ function createMonitorPrismaFixture(
       },
     } as never,
     readState: () => state,
+    replaceState(next: Pick<HostedLinqAlert, "kind" | "status">) {
+      if (!state) {
+        throw new Error("Expected a latency monitor state.");
+      }
+      state = {
+        ...state,
+        ...next,
+      };
+    },
     replaceStateAfterNextHealthRead(updatedAt: Date) {
       stateReplacementAfterNextHealthRead = updatedAt;
     },
     setRows(nextRows: readonly HostedRuntimeLatencyHealthRow[]) {
       rows = [...nextRows];
     },
+  };
+}
+
+interface AlertFindUniqueArgs {
+  where: {
+    id: string;
   };
 }
 
