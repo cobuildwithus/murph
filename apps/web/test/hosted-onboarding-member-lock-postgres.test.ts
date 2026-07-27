@@ -1,6 +1,12 @@
 import { randomUUID } from "node:crypto";
 
-import { HostedBillingStatus, type Prisma, type PrismaClient } from "@prisma/client";
+import {
+  HostedBillingStatus,
+  HostedStripeEventStatus,
+  type Prisma,
+  type PrismaClient,
+} from "@prisma/client";
+import type Stripe from "stripe";
 import { describe, expect, it, vi } from "vitest";
 
 import { setHostedSecureBoxStringTestCodecForTests } from "@/src/lib/hosted-crypto/secure-box";
@@ -16,6 +22,10 @@ import {
   writeHostedMemberStripeBillingTx,
 } from "@/src/lib/hosted-onboarding/stripe-billing-policy";
 import { assertHostedMemberNotSuspended } from "@/src/lib/hosted-onboarding/entitlement";
+import {
+  reconcileHostedStripeEventById,
+  recordHostedStripeEvent,
+} from "@/src/lib/hosted-onboarding/stripe-event-reconciliation";
 import { runHostedAccountDeletionCleanup } from "@/src/lib/hosted-privacy/account-deletion-cleanup";
 import { deleteHostedAccountData } from "@/src/lib/hosted-privacy/account-data-service";
 import { createPrismaClient } from "@/src/lib/prisma";
@@ -48,6 +58,12 @@ const accountDeletionBoundaries = vi.hoisted(() => ({
     }]),
   },
   connectedAppsRevocationFails: true,
+}));
+
+const stripeProvider = vi.hoisted(() => ({
+  chargesRetrieve: vi.fn(),
+  eventsRetrieve: vi.fn(),
+  subscriptionsRetrieve: vi.fn(),
 }));
 
 vi.mock("@/src/lib/connected-apps/composio", async (importOriginal) => ({
@@ -132,6 +148,37 @@ vi.mock("@/src/lib/hosted-onboarding/privy", async (importOriginal) => {
     ...actual,
     deleteHostedPrivyUser: privyProvider.deleteUser,
     readHostedPrivyUserById: privyProvider.readUser,
+  };
+});
+
+vi.mock("@/src/lib/hosted-onboarding/runtime", async () => {
+  const actual = await vi.importActual<
+    typeof import("@/src/lib/hosted-onboarding/runtime")
+  >("@/src/lib/hosted-onboarding/runtime");
+  const stripe = {
+    charges: {
+      retrieve: stripeProvider.chargesRetrieve,
+    },
+    events: {
+      retrieve: stripeProvider.eventsRetrieve,
+    },
+    subscriptions: {
+      retrieve: stripeProvider.subscriptionsRetrieve,
+    },
+  };
+
+  return {
+    ...actual,
+    requireHostedStripeApi: () => stripe,
+    requireHostedStripeApiMode: () => ({
+      stripe,
+      stripeLiveMode: false,
+    }),
+    requireHostedStripeBillingPlanConfig: () => ({
+      billingPlanCode: "launch_monthly",
+      priceId: "price_restore_reconciliation",
+      stripe,
+    }),
   };
 });
 
@@ -440,7 +487,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
       }
     });
 
-    it("carries billing-owned suspension through ordinary progress until a fresh restore", async () => {
+    it("keeps ordinary progress from superseding a pending billing restoration", async () => {
       const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
       const writer = createPrismaClient({ databaseUrl, poolMax: 1 });
       const memberId = `hbm_billing_progress_${randomUUID()}`;
@@ -482,10 +529,10 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           where: { id: memberId },
         })).resolves.toMatchObject({
           billingRef: {
-            lastStripeEventCreatedAt: invoicePaidAt,
+            lastStripeEventCreatedAt: reversalAt,
           },
           billingStatus: HostedBillingStatus.unpaid,
-          suspendedAt: invoicePaidAt,
+          suspendedAt: reversalAt,
         });
 
         await applyBillingRestore({
@@ -511,6 +558,213 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           where: { id: memberId },
         });
         await disconnectClients([observer, writer]);
+      }
+    });
+
+    it.each([
+      {
+        label: "restoration completes before ordinary progress",
+        restoreCompletesLast: false,
+      },
+      {
+        label: "ordinary progress completes before a delayed restoration",
+        restoreCompletesLast: true,
+      },
+    ])("reconciles $label without stranding the member", async ({
+      restoreCompletesLast,
+    }) => {
+      const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const restoreClient = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const ordinaryClient = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const memberId = `hbm_restore_reconciliation_${randomUUID()}`;
+      const customerId = `cus_${randomUUID()}`;
+      const subscriptionId = `sub_${randomUUID()}`;
+      const chargeId = `ch_${randomUUID()}`;
+      const initialBillingAt = new Date("2026-07-26T18:00:00.000Z");
+      const reversalAt = new Date("2026-07-26T18:00:01.000Z");
+      const restoreAt = new Date("2026-07-26T18:00:02.000Z");
+      const ordinaryAt = new Date("2026-07-26T18:00:03.000Z");
+      const subscription = makeActiveStripeSubscription({
+        customerId,
+        memberId,
+        subscriptionId,
+      });
+      const restoreEvent = makeStripeEvent({
+        createdAt: restoreAt,
+        eventId: `evt_restore_${randomUUID()}`,
+        object: {
+          charge: chargeId,
+          payment_intent: null,
+          status: "won",
+        } as Stripe.Dispute,
+        type: "charge.dispute.funds_reinstated",
+      });
+      const ordinaryEvent = makeStripeEvent({
+        createdAt: ordinaryAt,
+        eventId: `evt_subscription_${randomUUID()}`,
+        object: subscription,
+        type: "customer.subscription.updated",
+      });
+      const eventsById = new Map([
+        [restoreEvent.id, restoreEvent],
+        [ordinaryEvent.id, ordinaryEvent],
+      ]);
+      const restoreChargeReadStarted = createDeferred();
+      const releaseRestoreChargeRead = createDeferred<Stripe.Charge>();
+
+      await observer.hostedMember.create({
+        data: {
+          billingStatus: HostedBillingStatus.active,
+          id: memberId,
+        },
+      });
+      setHostedSecureBoxStringTestCodecForTests({
+        decrypt(input) {
+          return input.value;
+        },
+        encrypt() {
+          return "hsb-test:restore-reconciliation";
+        },
+      });
+      stripeProvider.eventsRetrieve.mockImplementation(async (eventId: string) => {
+        const event = eventsById.get(eventId);
+        if (!event) {
+          throw new Error("Unexpected Stripe event receipt.");
+        }
+        return event;
+      });
+      stripeProvider.subscriptionsRetrieve.mockResolvedValue(subscription);
+      stripeProvider.chargesRetrieve.mockImplementation(async () => {
+        if (restoreCompletesLast) {
+          restoreChargeReadStarted.resolve();
+          return releaseRestoreChargeRead.promise;
+        }
+        return makeStripeCharge({ chargeId, customerId });
+      });
+
+      try {
+        const initialMember = await requireBillingSnapshot(observer, memberId);
+        await ordinaryClient.$transaction((tx) =>
+          writeHostedMemberStripeBillingTx({
+            billingStatus: HostedBillingStatus.active,
+            canonicalBillingStatus: HostedBillingStatus.active,
+            dispatchContext: {
+              eventCreatedAt: initialBillingAt,
+              occurredAt: initialBillingAt.toISOString(),
+              sourceEventId: `evt_binding_${memberId}`,
+              sourceType: "stripe.customer.subscription.updated",
+            },
+            member: initialMember,
+            stripeCustomerId: customerId,
+            stripeSubscriptionId: subscriptionId,
+            tx,
+          }), { timeout: transactionTimeoutMs });
+        await applyBillingReversal({
+          client: ordinaryClient,
+          eventCreatedAt: reversalAt,
+          member: await requireBillingSnapshot(observer, memberId),
+          sourceEventId: `evt_reversal_${memberId}`,
+        });
+        await recordHostedStripeEvent({
+          event: restoreEvent,
+          prisma: observer,
+        });
+        await recordHostedStripeEvent({
+          event: ordinaryEvent,
+          prisma: observer,
+        });
+
+        if (restoreCompletesLast) {
+          const restoreReconciliation = reconcileHostedStripeEventById({
+            eventId: restoreEvent.id,
+            prisma: restoreClient,
+          });
+          await expect(Promise.race([
+            restoreChargeReadStarted.promise,
+            restoreReconciliation.then(() => {
+              throw new Error(
+                "Restoration reconciliation completed before its provider read was held.",
+              );
+            }),
+          ])).resolves.toBeUndefined();
+          await expect(reconcileHostedStripeEventById({
+            eventId: ordinaryEvent.id,
+            prisma: ordinaryClient,
+          })).resolves.toMatchObject({
+            eventId: ordinaryEvent.id,
+            status: "completed",
+          });
+          releaseRestoreChargeRead.resolve(
+            makeStripeCharge({ chargeId, customerId }),
+          );
+          await expect(restoreReconciliation).resolves.toMatchObject({
+            eventId: restoreEvent.id,
+            status: "completed",
+          });
+        } else {
+          await expect(reconcileHostedStripeEventById({
+            eventId: restoreEvent.id,
+            prisma: restoreClient,
+          })).resolves.toMatchObject({
+            eventId: restoreEvent.id,
+            status: "completed",
+          });
+          await expect(reconcileHostedStripeEventById({
+            eventId: ordinaryEvent.id,
+            prisma: ordinaryClient,
+          })).resolves.toMatchObject({
+            eventId: ordinaryEvent.id,
+            status: "completed",
+          });
+        }
+
+        await expect(observer.hostedMember.findUnique({
+          include: { billingRef: true },
+          where: { id: memberId },
+        })).resolves.toMatchObject({
+          billingRef: {
+            lastStripeEventCreatedAt: restoreCompletesLast
+              ? restoreAt
+              : ordinaryAt,
+          },
+          billingStatus: HostedBillingStatus.active,
+          suspendedAt: null,
+        });
+        await expect(observer.hostedStripeEvent.findMany({
+          where: {
+            eventId: {
+              in: [restoreEvent.id, ordinaryEvent.id],
+            },
+          },
+        })).resolves.toEqual(expect.arrayContaining([
+          expect.objectContaining({
+            eventId: restoreEvent.id,
+            status: HostedStripeEventStatus.completed,
+          }),
+          expect.objectContaining({
+            eventId: ordinaryEvent.id,
+            status: HostedStripeEventStatus.completed,
+          }),
+        ]));
+      } finally {
+        releaseRestoreChargeRead.resolve(
+          makeStripeCharge({ chargeId, customerId }),
+        );
+        setHostedSecureBoxStringTestCodecForTests(null);
+        stripeProvider.chargesRetrieve.mockReset();
+        stripeProvider.eventsRetrieve.mockReset();
+        stripeProvider.subscriptionsRetrieve.mockReset();
+        await observer.hostedStripeEvent.deleteMany({
+          where: {
+            eventId: {
+              in: [restoreEvent.id, ordinaryEvent.id],
+            },
+          },
+        });
+        await observer.hostedMember.deleteMany({
+          where: { id: memberId },
+        });
+        await disconnectClients([observer, restoreClient, ordinaryClient]);
       }
     });
 
@@ -1037,6 +1291,59 @@ function encodeCleanupPayload(value: {
   stripeCustomerIds: string[];
 }): string {
   return Buffer.from(JSON.stringify(value), "utf8").toString("base64");
+}
+
+function makeActiveStripeSubscription(input: {
+  customerId: string;
+  memberId: string;
+  subscriptionId: string;
+}): Stripe.Subscription {
+  // @ts-expect-error - the reconciliation fixture uses only the Stripe fields
+  // read by production billing lookup and status policy.
+  return {
+    customer: input.customerId,
+    id: input.subscriptionId,
+    metadata: {
+      memberId: input.memberId,
+    },
+    object: "subscription",
+    status: "active",
+  } as Stripe.Subscription;
+}
+
+function makeStripeCharge(input: {
+  chargeId: string;
+  customerId: string;
+}): Stripe.Charge {
+  return {
+    customer: input.customerId,
+    id: input.chargeId,
+    object: "charge",
+  } as Stripe.Charge;
+}
+
+function makeStripeEvent(input: {
+  createdAt: Date;
+  eventId: string;
+  object: Stripe.Event.Data.Object;
+  type: Stripe.Event.Type;
+}): Stripe.Event {
+  return {
+    api_version: "2025-02-24.acacia",
+    created: Math.floor(input.createdAt.getTime() / 1_000),
+    data: {
+      object: input.object,
+    },
+    id: input.eventId,
+    livemode: false,
+    object: "event",
+    pending_webhooks: 0,
+    request: {
+      id: null,
+      idempotency_key: null,
+    },
+    type: input.type,
+  } as Stripe.Event;
 }
 
 async function disconnectClients(clients: PrismaClient[]): Promise<void> {

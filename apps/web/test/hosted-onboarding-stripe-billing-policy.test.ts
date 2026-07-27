@@ -239,9 +239,7 @@ describe("hosted onboarding stripe billing policy", () => {
         suspendedAt: eventCreatedAt,
       },
     });
-    mocks.readHostedMemberBillingSnapshot
-      .mockResolvedValueOnce(suspendedMember)
-      .mockResolvedValueOnce(suspendedMember);
+    mocks.readHostedMemberBillingSnapshot.mockResolvedValue(suspendedMember);
 
     await suspendHostedMemberForBillingReversalTx({
       canonicalBillingStatus: HostedBillingStatus.active,
@@ -271,7 +269,7 @@ describe("hosted onboarding stripe billing policy", () => {
     });
   });
 
-  it("keeps billing-owned suspension authoritative across ordinary billing progress", async () => {
+  it("leaves billing-owned suspension untouched across ordinary billing progress", async () => {
     const reversalCreatedAt = new Date("2026-04-25T00:00:00.000Z");
     const invoicePaidCreatedAt = new Date("2026-04-25T00:05:00.000Z");
     const suspendedMember = makeMemberSnapshot({
@@ -286,11 +284,9 @@ describe("hosted onboarding stripe billing policy", () => {
         suspendedAt: reversalCreatedAt,
       },
     });
-    mocks.readHostedMemberBillingSnapshot
-      .mockResolvedValueOnce(suspendedMember)
-      .mockResolvedValueOnce(suspendedMember);
+    mocks.readHostedMemberBillingSnapshot.mockResolvedValue(suspendedMember);
 
-    await writeHostedMemberStripeBillingTx({
+    await expect(writeHostedMemberStripeBillingTx({
       billingStatus: HostedBillingStatus.active,
       canonicalBillingStatus: HostedBillingStatus.active,
       dispatchContext: {
@@ -301,35 +297,10 @@ describe("hosted onboarding stripe billing policy", () => {
       },
       member: suspendedMember,
       tx: {} as never,
-    });
+    })).resolves.toBe(suspendedMember);
 
-    expect(mocks.updateHostedMemberCoreState).toHaveBeenNthCalledWith(1, {
-      billingStatus: HostedBillingStatus.unpaid,
-      memberId: "member_123",
-      prisma: {},
-      suspendedAt: null,
-    });
-    expect(mocks.writeHostedMemberStripeBillingRef).toHaveBeenCalledWith({
-      memberId: "member_123",
-      stripeEventCreatedAt: invoicePaidCreatedAt,
-      tx: {},
-    });
-    expect(mocks.updateHostedMemberCoreState).toHaveBeenNthCalledWith(2, {
-      billingStatus: HostedBillingStatus.unpaid,
-      memberId: "member_123",
-      prisma: {},
-      suspendedAt: invoicePaidCreatedAt,
-    });
-    expect(
-      mocks.updateHostedMemberCoreState.mock.invocationCallOrder[0],
-    ).toBeLessThan(
-      mocks.writeHostedMemberStripeBillingRef.mock.invocationCallOrder[0] ?? 0,
-    );
-    expect(
-      mocks.writeHostedMemberStripeBillingRef.mock.invocationCallOrder[0],
-    ).toBeLessThan(
-      mocks.updateHostedMemberCoreState.mock.invocationCallOrder[1] ?? 0,
-    );
+    expect(mocks.updateHostedMemberCoreState).not.toHaveBeenCalled();
+    expect(mocks.writeHostedMemberStripeBillingRef).not.toHaveBeenCalled();
   });
 
   it("does not mistake the account-deletion fence for a billing-owned suspension", async () => {

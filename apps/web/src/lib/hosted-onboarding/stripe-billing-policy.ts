@@ -194,6 +194,9 @@ export async function writeHostedMemberStripeBillingTx(input: {
   ) {
     assertHostedMemberNotSuspended(currentMember.core);
   }
+  if (intentionalSuspension === undefined && billingOwnsCurrentSuspension) {
+    return currentMember;
+  }
 
   if (intentionalSuspension !== undefined && intentionalSuspension !== null) {
     if (currentMember.core.suspendedAt) {
@@ -210,20 +213,6 @@ export async function writeHostedMemberStripeBillingTx(input: {
       memberId: currentMember.core.id,
       prisma: input.tx,
       suspendedAt: intentionalSuspension,
-    });
-  } else if (intentionalSuspension === undefined && billingOwnsCurrentSuspension) {
-    await updateHostedMemberCoreState({
-      billingStatus: HostedBillingStatus.unpaid,
-      memberId: currentMember.core.id,
-      prisma: input.tx,
-      suspendedAt: null,
-    });
-    await writeBillingRef();
-    await updateHostedMemberCoreState({
-      billingStatus: HostedBillingStatus.unpaid,
-      memberId: currentMember.core.id,
-      prisma: input.tx,
-      suspendedAt: nextStripeEventCreatedAt,
     });
   } else {
     await updateHostedMemberCoreState({
