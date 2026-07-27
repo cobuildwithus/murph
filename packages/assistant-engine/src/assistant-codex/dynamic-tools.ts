@@ -315,7 +315,7 @@ export const MURPH_GENERATE_IMAGE_TOOL = {
   namespace: 'murph',
   name: 'generate_image',
   description:
-    `Generate one image with GPT Image 2 only when the user requests an image, a known preference supports visual help, or a loaded skill or product flow explicitly marks images welcome and privacy-safe. Optionally use ordered reference images from vault media or ${MURPH_CHARACTER_SHEET_REFERENCE_IMAGE_REF}. Attach ${MURPH_CHARACTER_SHEET_REFERENCE_IMAGE_REF}, Murph's canonical character sheet, whenever Murph itself appears in a generated image. When referenceImageRefs is provided, describe in the prompt how image 1, image 2, etc. should be used. When a vault is available, generated images are saved as canonical capture media under raw/captures/** for later reuse. Hosted runs also attach the generated image to the final response; local runs also save it under CODEX_HOME/generated_images.`,
+    `Generate one image with GPT Image 2 only when the user requests an image, a known preference supports visual help, or a loaded skill or product flow explicitly marks images welcome and privacy-safe. Optionally use ordered reference images from vault media or ${MURPH_CHARACTER_SHEET_REFERENCE_IMAGE_REF}. Attach ${MURPH_CHARACTER_SHEET_REFERENCE_IMAGE_REF}, Murph's canonical character sheet, whenever Murph itself appears in a generated image. When referenceImageRefs is provided, describe in the prompt how image 1, image 2, etc. should be used. When a vault is available, generated images are saved as canonical capture media under raw/captures/** for later reuse. Hosted runs start generation in the background and return immediately; if generation and upload finish while the invocation remains live, uploaded media is provided in a later trusted system input. Local runs remain synchronous and also save the image under CODEX_HOME/generated_images.`,
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -3051,8 +3051,8 @@ export async function executeMurphDynamicToolRequest(input: {
         return toolTextResult(
           true,
           launch === 'already-started'
-            ? 'image generation is already running; its result will arrive as a new system input'
-            : 'image generation started; continue without waiting because its uploaded result will arrive as a new system input',
+            ? 'image generation was already started for this operation'
+            : 'image generation started in the background; continue without waiting; if generation and upload finish while this invocation remains live, uploaded media will be provided in a later trusted system input',
         )
       }
 

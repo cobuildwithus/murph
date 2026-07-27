@@ -26,6 +26,12 @@ describe('murph.generate_image dynamic tool schema', () => {
     expect(MURPH_GENERATE_IMAGE_TOOL.description).toContain(
       'explicitly marks images welcome and privacy-safe',
     )
+    expect(MURPH_GENERATE_IMAGE_TOOL.description).not.toContain(
+      'attach the generated image to the final response',
+    )
+    expect(MURPH_GENERATE_IMAGE_TOOL.description).toContain(
+      'if generation and upload finish while the invocation remains live',
+    )
     expect(MURPH_GENERATE_VOICE_MEMO_TOOL.description).toContain(
       'a known preference supports voice',
     )
@@ -58,6 +64,7 @@ describe('murph.generate_image dynamic tool schema', () => {
       })
     })
     let generation: Promise<unknown> | null = null
+    const launchedOperations = new Set<string>()
     const hostedToolContext = {
       computerToolsAvailable: false,
       currentAssistantInputId: () => 'input_image_origin',
@@ -65,6 +72,10 @@ describe('murph.generate_image dynamic tool schema', () => {
       currentHostedMailboxItemIds: () => [],
       imageGenerationLauncher: {
         launch(input) {
+          if (launchedOperations.has(input.operationId)) {
+            return 'already-started' as const
+          }
+          launchedOperations.add(input.operationId)
           generation = input.run(new AbortController().signal)
           return 'started' as const
         },
@@ -113,6 +124,34 @@ describe('murph.generate_image dynamic tool schema', () => {
     })
     expect(fetchImpl).toHaveBeenCalledOnce()
     expect(uploader.uploadGeneratedImage).not.toHaveBeenCalled()
+
+    const duplicate = await executeMurphDynamicToolRequest({
+      env: { OPENAI_API_KEY: 'test-key' },
+      fetchImpl,
+      hostedGeneratedImageUploader: uploader,
+      hostedToolContext,
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request: {
+        args: {
+          alt: null,
+          outputFormat: 'webp',
+          prompt: 'Draw a calm sunrise.',
+          quality: 'medium',
+          referenceImageRefs: [],
+          size: '1024x1024',
+        },
+        kind: 'generate-image',
+      },
+      requireHostedGeneratedImageUploader: true,
+    })
+    expect(duplicate.rpcResult).toMatchObject({
+      success: true,
+      contentItems: [{
+        text: 'image generation was already started for this operation',
+      }],
+    })
+    expect(fetchImpl).toHaveBeenCalledOnce()
 
     releaseProvider()
     await expect(generation).resolves.toMatchObject({
