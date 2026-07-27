@@ -6572,6 +6572,91 @@ describe('assistant cron runtime orchestration', () => {
     },
   )
 
+  it('reuses the admitted static member route and rejects a live-route change before provider work', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-12T18:10:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-member-owner-live-route-change-',
+    )
+    getVaultAutomationStore(vaultRoot).push({
+      automationId: MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
+      continuityPolicy: 'fresh',
+      createdAt: '2026-04-12T16:00:00.000Z',
+      instructions: 'Send product notes.',
+      route: {
+        channel: 'linq',
+        deliverySource: null,
+        deliveryTarget: 'saved-member-chat',
+        identityId: null,
+        participantId: null,
+        threadId: null,
+        threadIsDirect: true,
+      },
+      schedule: { at: '2026-04-12T18:00:00.000Z', kind: 'at' },
+      slug: 'weekly-product-updates',
+      status: 'active',
+      summary: null,
+      tags: ['assistant', 'scheduled', 'murph-managed'],
+      title: 'Murph product notes',
+      updatedAt: '2026-04-12T16:00:00.000Z',
+    })
+    const resolveScheduledLinqRoute = vi.fn()
+      .mockResolvedValueOnce({
+        target: 'admitted-member-chat',
+        threadIsDirect: true,
+      })
+      .mockResolvedValueOnce({
+        target: 'replacement-member-chat',
+        threadIsDirect: true,
+      })
+    const createScheduledGroupTools = vi.fn()
+    let providerInputsAccepted = false
+    cronMocks.sendAssistantMessageLocal.mockImplementationOnce(async (input: {
+      beforeProviderAcceptedInputs?: () => Promise<void>
+      bindingDeliveryTarget?: string
+      deliveryTarget?: string | null
+      threadIsDirect?: boolean | null
+    }) => {
+      expect(input).toMatchObject({
+        bindingDeliveryTarget: 'admitted-member-chat',
+        deliveryTarget: 'admitted-member-chat',
+        threadIsDirect: true,
+      })
+      await input.beforeProviderAcceptedInputs?.()
+      providerInputsAccepted = true
+      return {
+        response: 'Completed scheduled check-in.',
+        session: { sessionId: 'session-default' },
+      }
+    })
+    const { claimed, paths } = await claimFirstCanonicalCronJob(vaultRoot)
+
+    const result = await executeClaimedAssistantCronJob({
+      executionContext: {
+        hosted: {
+          createScheduledGroupTools,
+          memberId: 'member-owner-live-route-change',
+          resolveScheduledLinqRoute,
+          userEnvKeys: [],
+        },
+      },
+      job: claimed,
+      paths,
+      trigger: 'scheduled',
+      vault: vaultRoot,
+    })
+
+    expect(result.run).toMatchObject({
+      outcome: 'skipped_gate',
+      reason: 'managed_owner_scope_mismatch',
+      status: 'skipped',
+    })
+    expect(resolveScheduledLinqRoute).toHaveBeenCalledTimes(2)
+    expect(createScheduledGroupTools).not.toHaveBeenCalled()
+    expect(providerInputsAccepted).toBe(false)
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledOnce()
+  })
+
   it('skips a static group managed automation on a direct route before lifecycle or model work', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-12T18:10:00.000Z'))
