@@ -1,0 +1,240 @@
+     } finally {
+       setIsSwitching(false);
+       props.onPendingChange?.(false);
+diff --git a/apps/web/src/components/settings/hosted-plan-upgrade-button.tsx b/apps/web/src/components/settings/hosted-plan-upgrade-button.tsx
+index 909559b..f6dc75f 100644
+--- a/apps/web/src/components/settings/hosted-plan-upgrade-button.tsx
++++ b/apps/web/src/components/settings/hosted-plan-upgrade-button.tsx
+@@ -31,19 +31,37 @@ import {
+   type HostedBillingErrorAction,
+ } from "./hosted-settings-sync-helpers";
+ 
+-const edgePlan = getHostedBillingPlanDefinition("launch_edge_monthly");
+-const edgePriceLabel = formatHostedBillingPlanMonthlyPrice(edgePlan.recurringAmountUsdCents);
++type HostedImmediateUpgradeTarget =
++  | "launch_monthly"
++  | "launch_edge_monthly";
+ 
+-const EDGE_FEATURES = [
+-  "Everything in Pulse",
+-  "More usage on latest AI models",
+-  "Murph remembers more of your history",
+-  "Deeper research and analysis",
+-];
++const UPGRADE_PRESENTATION = {
++  launch_monthly: {
++    description: "For more regular one-on-one Murph use.",
++    features: [
++      "Everything in Group",
++      "More private Murph usage",
++      "Run more experiments and deeper analysis",
++      "Wearable syncing and group activity stay on",
++    ],
++  },
++  launch_edge_monthly: {
++    description: "For when you want the full picture.",
++    features: [
++      "Everything in Pulse",
++      "More usage on latest AI models",
++      "Murph remembers more of your history",
++      "Deeper research and analysis",
++    ],
++  },
++} as const satisfies Record<
++  HostedImmediateUpgradeTarget,
++  { description: string; features: readonly string[] }
++>;
+ 
+-type EdgeUpgradeRecovery = HostedBillingErrorAction | null;
++type PlanUpgradeRecovery = HostedBillingErrorAction | null;
+ 
+-const EDGE_UPGRADE_BILLING_RECOVERY_CODES = new Set([
++const PLAN_UPGRADE_BILLING_RECOVERY_CODES = new Set([
+   "HOSTED_BILLING_PLAN_UPGRADE_APPLIED_INVOICE_VOIDED",
+   "HOSTED_BILLING_PLAN_UPGRADE_COLLECTION_TIMED_OUT",
+   "HOSTED_BILLING_PLAN_UPGRADE_FINANCIAL_STATE_BLOCKED",
+@@ -92,7 +110,7 @@ function HostedPlanUpgradeButton(props: HostedPlanUpgradeButtonProps) {
+   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+   const [isUpgrading, setIsUpgrading] = useState(false);
+   const [processing, setProcessing] = useState(false);
+-  const [recovery, setRecovery] = useState<EdgeUpgradeRecovery>(null);
++  const [recovery, setRecovery] = useState<PlanUpgradeRecovery>(null);
+   const [confirmationOpen, setConfirmationOpen] = useState(false);
+ 
+   async function handleUpgrade() {
+@@ -133,8 +151,13 @@ function HostedPlanUpgradeButton(props: HostedPlanUpgradeButtonProps) {
+       setConfirmationOpen(false);
+       router.refresh();
+     } catch (error) {
+-      setErrorMessage(toErrorMessage(error, "Could not upgrade your plan right now."));
+-      setRecovery(resolveEdgeUpgradeRecovery(error));
++      setErrorMessage(
++        toErrorMessage(
++          error,
++          `Could not upgrade to ${targetPlan.displayName} right now.`,
++        ),
++      );
++      setRecovery(resolvePlanUpgradeRecovery(error));
+     } finally {
+       if (!redirecting) {
+         setIsUpgrading(false);
+@@ -152,7 +175,9 @@ function HostedPlanUpgradeButton(props: HostedPlanUpgradeButtonProps) {
+     }
+   }
+ 
+-  const label = isUpgrading ? "Upgrading..." : props.children ?? "Upgrade to Edge";
++  const label = isUpgrading
++    ? "Upgrading..."
++    : props.children ?? `Upgrade to ${targetPlan.displayName}`;
+   const disabled = props.disabled === true || isUpgrading;
+ 
+   if (presentation === "banner") {
+@@ -169,7 +194,7 @@ function HostedPlanUpgradeButton(props: HostedPlanUpgradeButtonProps) {
+           {label}
+           <ArrowRight className="size-4" aria-hidden="true" />
+         </Button>
+-        <EdgeUpgradeConfirmationDialog
++        <PlanUpgradeConfirmationDialog
+           errorMessage={errorMessage}
+           isUpgrading={isUpgrading}
+           processing={processing}
+@@ -177,6 +202,7 @@ function HostedPlanUpgradeButton(props: HostedPlanUpgradeButtonProps) {
+           onConfirm={() => void handleUpgrade()}
+           onOpenChange={setConfirmationOpenState}
+           open={confirmationOpen}
++          targetPlanCode={props.targetPlanCode}
+         />
+       </div>
+     );
+@@ -193,7 +219,7 @@ function HostedPlanUpgradeButton(props: HostedPlanUpgradeButtonProps) {
+       >
+         {label}
+       </Button>
+-      <EdgeUpgradeConfirmationDialog
++      <PlanUpgradeConfirmationDialog
+         errorMessage={errorMessage}
+         isUpgrading={isUpgrading}
+         processing={processing}
+@@ -201,30 +227,33 @@ function HostedPlanUpgradeButton(props: HostedPlanUpgradeButtonProps) {
+         onConfirm={() => void handleUpgrade()}
+         onOpenChange={setConfirmationOpenState}
+         open={confirmationOpen}
++        targetPlanCode={props.targetPlanCode}
+       />
+     </div>
+   );
+ }
+ 
+-function EdgeUpgradeConfirmationDialog(props: {
++function PlanUpgradeConfirmationDialog(props: {
+   errorMessage: string | null;
+   isUpgrading: boolean;
+   processing: boolean;
+-  recovery: EdgeUpgradeRecovery;
++  recovery: PlanUpgradeRecovery;
+   onConfirm: () => void;
+   onOpenChange: (open: boolean) => void;
+   open: boolean;
++  targetPlanCode: HostedImmediateUpgradeTarget;
+ }) {
+   return (
+     <Dialog open={props.open} onOpenChange={props.onOpenChange}>
+       <DialogContent className="max-w-md gap-6 rounded-2xl border border-[#c4a882]/25 bg-[#fffcf6] p-6 text-[#2d3436] ring-[#c4a882]/25 md:p-7">
+-        <EdgeUpgradeConfirmationContent
++        <PlanUpgradeConfirmationContent
+           errorMessage={props.errorMessage}
+           isUpgrading={props.isUpgrading}
+           processing={props.processing}
+           recovery={props.recovery}
+           onCancel={() => props.onOpenChange(false)}
+           onConfirm={props.onConfirm}
++          targetPlanCode={props.targetPlanCode}
+         />
+       </DialogContent>
+     </Dialog>
+@@ -261,18 +290,19 @@ function PlanUpgradeConfirmationContent(props: {
+   const priceLabel = formatHostedBillingPrice(
+     targetPlan.recurringAmountUsdCents,
+   );
++
+   return (
+     <>
+       <DialogHeader className="pr-10">
+         <DialogTitle className="font-serif text-2xl/7 font-semibold tracking-normal text-[#2d3436]">
+-          Upgrade to Edge
++          Upgrade to {targetPlan.displayName}
+         </DialogTitle>
+         <DialogDescription className="text-sm leading-6 text-[#736a58]">
+-          For when you want the full picture.
++          {presentation.description}
+         </DialogDescription>
+       </DialogHeader>
+ 
+-      <PlanFeatureCard price={edgePriceLabel} features={EDGE_FEATURES} />
++      <PlanFeatureCard price={priceLabel} features={presentation.features} />
+ 
+       {props.errorMessage ? (
+         <p
+@@ -320,7 +350,7 @@ function PlanUpgradeConfirmationContent(props: {
+                 ? "Check status"
+                 : props.recovery === "retry"
+                   ? "Try again"
+-                  : "Upgrade to Edge"}
++                  : `Upgrade to ${targetPlan.displayName}`}
+           </Button>
+         ) : null}
+         <Button
+diff --git a/apps/web/src/lib/hosted-execution/usage-status.ts b/apps/web/src/lib/hosted-execution/usage-status.ts
+index b2b360c..9f8c32a 100644
+--- a/apps/web/src/lib/hosted-execution/usage-status.ts
++++ b/apps/web/src/lib/hosted-execution/usage-status.ts
+@@ -163,9 +163,11 @@ export async function projectHostedPersonalAiUsageStatus(input: {
+     ? "Family"
+     : accessKind === "trial"
+       ? "Pulse Trial"
+-    : decision.billingPlanCode === "launch_edge_monthly"
+-      ? "Edge"
+-      : "Pulse";
++      : decision.billingPlanCode === "launch_edge_monthly"
++        ? "Edge"
++        : decision.billingPlanCode === "launch_group_monthly"
++          ? "Group"
++          : "Pulse";
+   const shouldRecommendAction = exhausted
+     || forecast !== null
+     || usedPercent >= USAGE_ACTION_THRESHOLD_PERCENT;
+@@ -173,11 +175,19 @@ export async function projectHostedPersonalAiUsageStatus(input: {
+     includeSubscriptionActionQuote
+     || (
+       shouldRecommendAction
+-      && accessKind === "trial"
++      && (
++        accessKind === "trial"
++        || (
++          accessKind === "paid"
++          && decision.billingPlanCode === "launch_group_monthly"
++        )
++      )
+       && actionUrl !== null
+     );
+   const shouldResolvePersonalUsageCreditOffers =
+-    shouldRecommendAction && accessKind === "paid";
++    shouldRecommendAction
++    && accessKind === "paid"
++    && decision.billingPlanCode !== "launch_group_monthly";
+   const [availableSubscriptionAction, personalUsageCreditOfferCodes] =
+     await Promise.all([
+       shouldResolveSubscriptionAction
+diff --git a/apps/web/src/lib/hosted-onboarding/billing-plan-change-service.ts b/apps/web/src/lib/hosted-onboarding/billing-plan-change-service.ts
+index c233964..0ec9bf4 100644
+--- a/apps/web/src/lib/hosted-onboarding/billing-plan-change-service.ts
++++ b/apps/web/src/lib/hosted-onboarding/billing-plan-change-service.ts
+@@ -513,19 +513,10 @@ async function finalizeAppliedHostedBillingPlanUpgrade(input: {
+   stripeCustomerId: string;
+   stripeSubscriptionId: string;
+   subscription: Stripe.Subscription;
+-  targetPlanCode: "launch_edge_monthly";
++  targetPlanCode: HostedBillingPlanCode;
+   targetPriceId: string;
+   tx: Prisma.TransactionClient;
+-}): Promise<
