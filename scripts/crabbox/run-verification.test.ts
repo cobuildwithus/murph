@@ -1,4 +1,4 @@
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import {
   chmodSync,
   existsSync,
@@ -199,6 +199,83 @@ describe("Crabbox verification environment", () => {
     );
   });
 
+  it("retains SSH entrypoint ownership until its verifier group exits on SIGHUP", async () => {
+    const tempRoot = makeTempRoot();
+    const binDir = path.join(tempRoot, "bin");
+    const childReadyPath = path.join(tempRoot, "child-ready");
+    const childHupPath = path.join(tempRoot, "child-hup");
+    const childPidPath = path.join(tempRoot, "child-pid");
+    const descendantHupPath = path.join(tempRoot, "descendant-hup");
+    const descendantPidPath = path.join(tempRoot, "descendant-pid");
+    writeExecutable(
+      path.join(binDir, "slow-verifier-child"),
+      [
+        "#!/bin/sh",
+        `printf "%s\\n" "$$" > ${shellQuote(descendantPidPath)}`,
+        `trap ': > ${shellQuote(descendantHupPath)}; sleep 0.25; exit 129' HUP`,
+        `: > ${shellQuote(childReadyPath)}`,
+        "while :; do sleep 0.05; done",
+      ].join("\n"),
+    );
+    writeExecutable(
+      path.join(binDir, "corepack"),
+      [
+        "#!/bin/sh",
+        `printf "%s\\n" "$$" > ${shellQuote(childPidPath)}`,
+        `trap ': > ${shellQuote(childHupPath)}; exit 129' HUP`,
+        "slow-verifier-child &",
+        "wait",
+      ].join("\n"),
+    );
+    writeExecutable(path.join(binDir, "bash"), "#!/bin/sh\nexit 0");
+
+    const runner = spawn(
+      process.execPath,
+      [sshRunnerPath, "verify:acceptance"],
+      {
+        cwd: repoRoot,
+        env: {
+          HOME: path.join(tempRoot, "home"),
+          PATH: `${binDir}${path.delimiter}/usr/bin:/bin`,
+        },
+        stdio: "ignore",
+      },
+    );
+    try {
+      await waitForFile(childReadyPath);
+      const childPid = Number.parseInt(
+        readFileSync(childPidPath, "utf8").trim(),
+        10,
+      );
+      const descendantPid = Number.parseInt(
+        readFileSync(descendantPidPath, "utf8").trim(),
+        10,
+      );
+      expect(Number.isInteger(childPid)).toBe(true);
+      expect(Number.isInteger(descendantPid)).toBe(true);
+      runner.kill("SIGHUP");
+
+      await waitForFile(childHupPath);
+      expect(runner.exitCode).toBeNull();
+      expect(await waitForChild(runner)).toEqual({ code: 129, signal: null });
+      await waitForCondition(
+        () => !isProcessRunning(childPid),
+        "the SSH verifier child to exit",
+      );
+      await waitForCondition(
+        () => !isProcessRunning(descendantPid),
+        "the SSH verifier descendant to exit",
+      );
+      expect(existsSync(childHupPath)).toBe(true);
+      expect(existsSync(descendantHupPath)).toBe(true);
+    } finally {
+      if (runner.exitCode === null && runner.signalCode === null) {
+        runner.kill("SIGHUP");
+      }
+      await Promise.allSettled([waitForChild(runner)]);
+    }
+  });
+
   it("rejects direct candidate execution outside the trusted Testbox entrypoint", () => {
     expect(callModuleFailure(
       "assertTrustedEntrypoint",
@@ -260,6 +337,58 @@ function writeExecutable(filePath: string, content: string): void {
 
 function shellQuote(value: string): string {
   return `'${value.replaceAll("'", `'\\''`)}'`;
+}
+
+async function waitForFile(filePath: string, timeoutMs = 5_000): Promise<void> {
+  await waitForCondition(
+    () => existsSync(filePath),
+    `file ${path.basename(filePath)}`,
+    timeoutMs,
+  );
+}
+
+async function waitForCondition(
+  predicate: () => boolean,
+  description: string,
+  timeoutMs = 5_000,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (predicate()) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  throw new Error(`Timed out waiting for ${description}.`);
+}
+
+function waitForChild(
+  child: ReturnType<typeof spawn>,
+): Promise<{ code: number | null; signal: NodeJS.Signals | null }> {
+  if (child.exitCode !== null || child.signalCode !== null) {
+    return Promise.resolve({
+      code: child.exitCode,
+      signal: child.signalCode,
+    });
+  }
+  return new Promise((resolve, reject) => {
+    child.once("error", reject);
+    child.once("exit", (code, signal) => resolve({ code, signal }));
+  });
+}
+
+function isProcessRunning(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return !(
+      error &&
+      typeof error === "object" &&
+      "code" in error &&
+      error.code === "ESRCH"
+    );
+  }
 }
 
 function callModule<T>(exportName: string, argument: unknown): T {

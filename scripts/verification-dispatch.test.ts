@@ -165,6 +165,29 @@ describe("verification dispatcher", () => {
     const expectedSanitizedProbeEnvironment = "unset\n".repeat(10);
     const fakeCrabboxPath = path.join(binDir, "crabbox");
     const fakeBlacksmithPath = path.join(binDir, "blacksmith");
+    const testRepoDir = path.join(tempRoot, "repo");
+    const testScriptsDir = path.join(testRepoDir, "scripts");
+    mkdirSync(testScriptsDir, { recursive: true });
+    writeFileSync(
+      path.join(testScriptsDir, "verification-dispatch.mjs"),
+      readFileSync(dispatcherPath, "utf8"),
+      "utf8",
+    );
+    runGit(testRepoDir, ["init", "--quiet"]);
+    runGit(testRepoDir, ["add", "scripts"]);
+    runGit(testRepoDir, [
+      "-c",
+      "user.name=Crabbox Test",
+      "-c",
+      "user.email=crabbox-test@users.noreply.github.com",
+      "commit",
+      "--quiet",
+      "-m",
+      "initial",
+    ]);
+    const dispatcherUnderTest = realpathSync(
+      path.join(testScriptsDir, "verification-dispatch.mjs"),
+    );
     writeExecutable(
       fakeCrabboxPath,
       [
@@ -187,13 +210,11 @@ describe("verification dispatcher", () => {
         "exit 0",
       ].join("\n"),
     );
-    writeExecutable(path.join(binDir, "git"), "#!/bin/sh\nexit 0");
-
     const result = spawnSync(
       process.execPath,
-      [dispatcherPath, "test:diff", "packages/assistant-engine"],
+      [dispatcherUnderTest, "test:diff", "packages/assistant-engine"],
       {
-        cwd: repoRoot,
+        cwd: testRepoDir,
         encoding: "utf8",
         env: {
           ...withoutVerificationRoutingEnvironment(process.env),
@@ -256,9 +277,9 @@ describe("verification dispatcher", () => {
 
     const leaseResult = spawnSync(
       process.execPath,
-      [dispatcherPath, "verify:acceptance"],
+      [dispatcherUnderTest, "verify:acceptance"],
       {
-        cwd: repoRoot,
+        cwd: testRepoDir,
         encoding: "utf8",
         env: {
           ...withoutVerificationRoutingEnvironment(process.env),
@@ -288,6 +309,29 @@ describe("verification dispatcher", () => {
     const binDir = path.join(tempRoot, "bin");
     const capturePath = path.join(tempRoot, "args.txt");
     const environmentPath = path.join(tempRoot, "environment.txt");
+    const testRepoDir = path.join(tempRoot, "repo");
+    const testScriptsDir = path.join(testRepoDir, "scripts");
+    mkdirSync(testScriptsDir, { recursive: true });
+    writeFileSync(
+      path.join(testScriptsDir, "verification-dispatch.mjs"),
+      readFileSync(dispatcherPath, "utf8"),
+      "utf8",
+    );
+    runGit(testRepoDir, ["init", "--quiet"]);
+    runGit(testRepoDir, ["add", "scripts"]);
+    runGit(testRepoDir, [
+      "-c",
+      "user.name=Crabbox Test",
+      "-c",
+      "user.email=crabbox-test@users.noreply.github.com",
+      "commit",
+      "--quiet",
+      "-m",
+      "initial",
+    ]);
+    const dispatcherUnderTest = realpathSync(
+      path.join(testScriptsDir, "verification-dispatch.mjs"),
+    );
     writeExecutable(
       path.join(binDir, "crabbox"),
       [
@@ -297,22 +341,11 @@ describe("verification dispatcher", () => {
         `printf "CRABBOX_STATIC_ID=%s\\nMURPH_WORKSPACE_ARTIFACT_LOCK_HELD=%s\\nMURPH_VERIFY_SSH_HOST=%s\\nOPENAI_API_KEY=%s\\nNODE_OPTIONS=%s\\n" "\${CRABBOX_STATIC_ID-unset}" "\${MURPH_WORKSPACE_ARTIFACT_LOCK_HELD-unset}" "\${MURPH_VERIFY_SSH_HOST-unset}" "\${OPENAI_API_KEY-unset}" "\${NODE_OPTIONS-unset}" > ${shellQuote(environmentPath)}`,
       ].join("\n"),
     );
-    writeExecutable(
-      path.join(binDir, "git"),
-      [
-        "#!/bin/sh",
-        "case \"${1:-}\" in",
-        "  status) exit 0 ;;",
-        "  ls-files) printf '%b' 'scripts/verification-dispatch.mjs\\000' ;;",
-        "esac",
-      ].join("\n"),
-    );
-
     const result = spawnSync(
       process.execPath,
-      [dispatcherPath, "test:diff", "packages/assistant-engine"],
+      [dispatcherUnderTest, "test:diff", "packages/assistant-engine"],
       {
-        cwd: repoRoot,
+        cwd: testRepoDir,
         encoding: "utf8",
         env: {
           ...withoutVerificationRoutingEnvironment(process.env),
@@ -513,6 +546,275 @@ describe("verification dispatcher", () => {
         waitForChild(lockHolder),
         waitForChild(dispatcher),
       ]);
+    }
+  });
+
+  it("syncs one immutable candidate after admission instead of rereading the checkout", async () => {
+    const tempRoot = makeTempRoot();
+    const repoDir = path.join(tempRoot, "repo");
+    const scriptsDir = path.join(repoDir, "scripts");
+    const binDir = path.join(tempRoot, "bin");
+    const providerReadyPath = path.join(tempRoot, "provider-ready");
+    const providerReleasePath = path.join(tempRoot, "provider-release");
+    const providerCapturePath = path.join(tempRoot, "provider-capture.txt");
+    const providerCwdPath = path.join(tempRoot, "provider-cwd.txt");
+    mkdirSync(scriptsDir, { recursive: true });
+    writeFileSync(
+      path.join(scriptsDir, "verification-dispatch.mjs"),
+      readFileSync(dispatcherPath, "utf8"),
+      "utf8",
+    );
+    writeFileSync(path.join(repoDir, "tracked.txt"), "before\n", "utf8");
+    writeFileSync(path.join(repoDir, "rename-old.txt"), "rename\n", "utf8");
+    writeFileSync(path.join(repoDir, "delete.txt"), "delete\n", "utf8");
+    writeExecutable(
+      path.join(binDir, "crabbox"),
+      [
+        "#!/bin/sh",
+        'if [ "${1:-}" = "--version" ]; then exit 0; fi',
+        `pwd > ${shellQuote(providerCwdPath)}`,
+        `: > ${shellQuote(providerReadyPath)}`,
+        `while [ ! -f ${shellQuote(providerReleasePath)} ]; do sleep 0.05; done`,
+        "{",
+        '  printf "tracked=%s\\n" "$(cat tracked.txt)"',
+        '  printf "staged=%s\\n" "$(cat staged-new.txt)"',
+        '  printf "renamed=%s\\n" "$(cat rename-new.txt)"',
+        '  if [ -e rename-old.txt ]; then printf "old=present\\n"; else printf "old=absent\\n"; fi',
+        '  if [ -e delete.txt ]; then printf "deleted=present\\n"; else printf "deleted=absent\\n"; fi',
+        '  if [ -e late.txt ]; then printf "late=present\\n"; else printf "late=absent\\n"; fi',
+        `} > ${shellQuote(providerCapturePath)}`,
+      ].join("\n"),
+    );
+    runGit(repoDir, ["init", "--quiet"]);
+    runGit(repoDir, ["add", "scripts", "tracked.txt", "rename-old.txt", "delete.txt"]);
+    runGit(repoDir, [
+      "-c",
+      "user.name=Crabbox Test",
+      "-c",
+      "user.email=crabbox-test@users.noreply.github.com",
+      "commit",
+      "--quiet",
+      "-m",
+      "initial",
+    ]);
+
+    writeFileSync(path.join(repoDir, "tracked.txt"), "admitted\n", "utf8");
+    writeFileSync(path.join(repoDir, "staged-new.txt"), "staged\n", "utf8");
+    runGit(repoDir, ["add", "staged-new.txt"]);
+    runGit(repoDir, ["mv", "rename-old.txt", "rename-new.txt"]);
+    writeFileSync(path.join(repoDir, "rename-new.txt"), "renamed-and-modified\n", "utf8");
+    rmSync(path.join(repoDir, "delete.txt"));
+
+    const dispatcher = spawn(
+      process.execPath,
+      [
+        realpathSync(path.join(scriptsDir, "verification-dispatch.mjs")),
+        "test:diff",
+        "tracked.txt",
+      ],
+      {
+        cwd: repoDir,
+        env: {
+          ...insideWorkspaceArtifactLockEnvironment(process.env),
+          HOME: path.join(tempRoot, "home"),
+          MURPH_VERIFY_EXECUTOR: "ssh",
+          MURPH_VERIFY_SSH_HOST: "worker-mac",
+          PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ""}`,
+        },
+        stdio: ["ignore", "ignore", "pipe"],
+      },
+    );
+    const stderrChunks: Buffer[] = [];
+    dispatcher.stderr.on("data", (chunk: Buffer) => stderrChunks.push(chunk));
+    try {
+      await waitForFile(providerReadyPath, 15_000);
+      writeFileSync(path.join(repoDir, "tracked.txt"), "after-admission\n", "utf8");
+      writeFileSync(path.join(repoDir, "late.txt"), "late\n", "utf8");
+      writeFileSync(providerReleasePath, "release\n", "utf8");
+
+      expect(await waitForChild(dispatcher)).toEqual({ code: 0, signal: null });
+      expect(readFileSync(providerCapturePath, "utf8")).toBe(
+        [
+          "tracked=admitted",
+          "staged=staged",
+          "renamed=renamed-and-modified",
+          "old=absent",
+          "deleted=absent",
+          "late=absent",
+          "",
+        ].join("\n"),
+      );
+      expect(Buffer.concat(stderrChunks).toString("utf8")).toMatch(
+        /\[verification-dispatch\] candidate-tree=[a-f0-9]{40}\n/u,
+      );
+      expect(existsSync(readFileSync(providerCwdPath, "utf8").trim())).toBe(false);
+    } finally {
+      if (!existsSync(providerReleasePath)) {
+        writeFileSync(providerReleasePath, "release\n", "utf8");
+      }
+      if (dispatcher.exitCode === null && dispatcher.signalCode === null) {
+        dispatcher.kill("SIGHUP");
+      }
+      await Promise.allSettled([waitForChild(dispatcher)]);
+    }
+  });
+
+  it("keeps lock ownership through SIGHUP cleanup before the same worker can retry", async () => {
+    const tempRoot = makeTempRoot();
+    const repoDir = path.join(tempRoot, "repo");
+    const scriptsDir = path.join(repoDir, "scripts");
+    const binDir = path.join(tempRoot, "bin");
+    const providerReadyPath = path.join(tempRoot, "provider-ready");
+    const providerHupPath = path.join(tempRoot, "provider-hup");
+    const providerPidPath = path.join(tempRoot, "provider-pid");
+    const providerCwdPath = path.join(tempRoot, "provider-cwd");
+    const descendantHupPath = path.join(tempRoot, "descendant-hup");
+    const descendantPidPath = path.join(tempRoot, "descendant-pid");
+    const retryPath = path.join(tempRoot, "retry-complete");
+    mkdirSync(scriptsDir, { recursive: true });
+    for (const scriptName of [
+      "verification-dispatch.mjs",
+      "run-with-workspace-artifact-lock.mjs",
+    ]) {
+      writeFileSync(
+        path.join(scriptsDir, scriptName),
+        readFileSync(path.join(repoRoot, "scripts", scriptName), "utf8"),
+        "utf8",
+      );
+    }
+    writeExecutable(
+      path.join(binDir, "slow-provider-child"),
+      [
+        "#!/bin/sh",
+        `printf "%s\\n" "$$" > ${shellQuote(descendantPidPath)}`,
+        `trap ': > ${shellQuote(descendantHupPath)}; sleep 0.25; exit 129' HUP`,
+        `: > ${shellQuote(providerReadyPath)}`,
+        "while :; do sleep 0.05; done",
+      ].join("\n"),
+    );
+    writeExecutable(
+      path.join(binDir, "crabbox"),
+      [
+        "#!/bin/sh",
+        'if [ "${1:-}" = "--version" ]; then exit 0; fi',
+        `if [ -f ${shellQuote(providerHupPath)} ]; then`,
+        `  : > ${shellQuote(retryPath)}`,
+        "  exit 0",
+        "fi",
+        `printf "%s\\n" "$$" > ${shellQuote(providerPidPath)}`,
+        `pwd > ${shellQuote(providerCwdPath)}`,
+        `trap ': > ${shellQuote(providerHupPath)}; exit 129' HUP`,
+        "slow-provider-child &",
+        "wait",
+      ].join("\n"),
+    );
+    runGit(repoDir, ["init", "--quiet"]);
+    runGit(repoDir, ["add", "scripts"]);
+    runGit(repoDir, [
+      "-c",
+      "user.name=Crabbox Test",
+      "-c",
+      "user.email=crabbox-test@users.noreply.github.com",
+      "commit",
+      "--quiet",
+      "-m",
+      "initial",
+    ]);
+
+    const baseEnvironment = {
+      ...withoutVerificationRoutingEnvironment(process.env),
+      HOME: path.join(tempRoot, "home"),
+      MURPH_VERIFY_EXECUTOR: "ssh",
+      MURPH_VERIFY_SSH_HOST: "worker-mac",
+      PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ""}`,
+    };
+    const lockWrapperPath = path.join(
+      scriptsDir,
+      "run-with-workspace-artifact-lock.mjs",
+    );
+    const dispatcherPathInRepo = realpathSync(
+      path.join(scriptsDir, "verification-dispatch.mjs"),
+    );
+    const firstRun = spawn(
+      process.execPath,
+      [
+        lockWrapperPath,
+        "remote test:diff",
+        "--",
+        process.execPath,
+        dispatcherPathInRepo,
+        "test:diff",
+        "scripts/verification-dispatch.mjs",
+      ],
+      {
+        cwd: repoDir,
+        env: baseEnvironment,
+        stdio: "ignore",
+      },
+    );
+    const lockPath = path.join(
+      repoDir,
+      ".git",
+      "murph-locks",
+      "workspace-artifacts.lock",
+    );
+    try {
+      await waitForFile(providerReadyPath, 15_000);
+      const providerPid = Number.parseInt(
+        readFileSync(providerPidPath, "utf8").trim(),
+        10,
+      );
+      const descendantPid = Number.parseInt(
+        readFileSync(descendantPidPath, "utf8").trim(),
+        10,
+      );
+      expect(Number.isInteger(providerPid)).toBe(true);
+      expect(Number.isInteger(descendantPid)).toBe(true);
+      expect(existsSync(lockPath)).toBe(true);
+      firstRun.kill("SIGHUP");
+
+      await waitForFile(providerHupPath);
+      expect(firstRun.exitCode).toBeNull();
+      expect(existsSync(lockPath)).toBe(true);
+      expect(await waitForChild(firstRun)).toEqual({ code: 143, signal: null });
+      await waitForCondition(
+        () => !isProcessRunning(providerPid),
+        "the SIGHUP-owned provider process to exit",
+      );
+      await waitForCondition(
+        () => !isProcessRunning(descendantPid),
+        "the SIGHUP-owned provider descendant to exit",
+      );
+      expect(existsSync(providerHupPath)).toBe(true);
+      expect(existsSync(descendantHupPath)).toBe(true);
+      expect(existsSync(lockPath)).toBe(false);
+      expect(existsSync(readFileSync(providerCwdPath, "utf8").trim())).toBe(false);
+
+      const retry = spawn(
+        process.execPath,
+        [
+          lockWrapperPath,
+          "remote test:diff retry",
+          "--",
+          process.execPath,
+          dispatcherPathInRepo,
+          "test:diff",
+          "scripts/verification-dispatch.mjs",
+        ],
+        {
+          cwd: repoDir,
+          env: baseEnvironment,
+          stdio: "ignore",
+        },
+      );
+      expect(await waitForChild(retry)).toEqual({ code: 0, signal: null });
+      expect(existsSync(retryPath)).toBe(true);
+      expect(existsSync(lockPath)).toBe(false);
+    } finally {
+      if (firstRun.exitCode === null && firstRun.signalCode === null) {
+        firstRun.kill("SIGHUP");
+      }
+      await Promise.allSettled([waitForChild(firstRun)]);
     }
   });
 
@@ -1112,4 +1414,18 @@ function waitForChild(
     child.once("error", reject);
     child.once("exit", (code, signal) => resolve({ code, signal }));
   });
+}
+
+function isProcessRunning(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return !(
+      error &&
+      typeof error === "object" &&
+      "code" in error &&
+      error.code === "ESRCH"
+    );
+  }
 }

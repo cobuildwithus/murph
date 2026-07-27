@@ -51,13 +51,19 @@ entrypoint.
   and hydration job before the Testbox is created and hydrated. Do not warm a
   lease separately or replace those arguments with mutable local profile or
   config routing.
-- Both remote providers can sync Git-tracked and untracked non-ignored paths. The dispatcher
-  admits only modified tracked files, tracked renames/deletions, ignored files,
-  and new files whose current contents are fully staged. Ordinary untracked,
-  intent-to-add, staged-then-changed additions, unmerged, and unsupported Git
-  states fail before delegation. It then rejects known credential, vault,
-  runtime-state, private-document, and local-artifact paths from the
-  cached/tracked set. Matching local paths are also ignored in `.gitignore`.
+- Both remote providers can sync Git-tracked and untracked non-ignored paths.
+  The dispatcher admits only modified tracked files, tracked
+  renames/deletions, ignored files, and new files whose current contents are
+  fully staged. Ordinary untracked, intent-to-add, staged-then-changed
+  additions, unmerged, and unsupported Git states fail before delegation. It
+  then rejects known credential, vault, runtime-state, private-document, and
+  local-artifact paths from the cached/tracked set. Matching local paths are
+  also ignored in `.gitignore`.
+- After admission, the dispatcher materializes one process-owned, immutable
+  Git candidate, verifies its tree, logs that tree id, and runs Crabbox from
+  the candidate rather than the editable checkout. Later checkout writes and
+  late untracked files cannot enter the run. Exact cleanup removes the
+  candidate when the provider exits.
 - Fully staged new source and modified tracked content leave the host so the
   Testbox verifies the exact candidate change. Never stage private data to bypass
   the Git-state refusal.
@@ -77,9 +83,12 @@ entrypoint.
 - Static SSH uses only a safe alias from `MURPH_VERIFY_SSH_HOST`, a dedicated
   standard macOS account with no personal or product credentials, a
   per-worktree opaque workspace below `/Users/Shared/murph-crabbox`, full
-  resync, and the existing local artifact lock. It never forwards an SSH agent
-  or environment allowlist. Follow the one-time host setup and doctor command in
-  the verification guide.
+  resync, and the existing local artifact lock. The lock serializes cooperating
+  artifact producers and reuse of that workspace; it is not an editor lock.
+  The dispatcher and remote verifier retain ownership through `SIGHUP`, reap
+  their exact child process groups, and only then release the lock and
+  candidate. Static SSH never forwards an SSH agent or environment allowlist.
+  Follow the one-time host setup and doctor command in the verification guide.
 
 ## Controls
 

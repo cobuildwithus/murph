@@ -82,12 +82,16 @@ crabbox doctor \
 
 Each local worktree derives a deterministic opaque static lease id and its own
 subdirectory below `/Users/Shared/murph-crabbox`; the local path itself is never
-sent, only its truncated cryptographic digest. Every run uses full resync and
-holds the existing local
-per-worktree artifact lock across admission and sync, preventing same-worktree
-edits from racing the upload while separate worktrees remain isolated. The
-remote account may retain only machine-level package-manager caches outside
-those workspaces.
+sent, only its truncated cryptographic digest. The existing per-worktree
+artifact lock serializes cooperating artifact producers and reuse of that
+remote workspace while separate worktrees remain isolated; it does not try to
+lock editors or the filesystem. After admission, the dispatcher creates one
+process-owned Git snapshot, verifies and logs its tree id, and invokes Crabbox
+from that immutable candidate with full resync. Later checkout writes and late
+untracked files therefore cannot change the running candidate. The dispatcher
+removes the exact snapshot after the provider process tree exits. The remote
+account may retain only machine-level package-manager caches outside those
+workspaces.
 
 The SSH path forwards no environment allowlist. Candidate code starts through
 `scripts/crabbox/run-ssh-verification.mjs`, which rebuilds the same synthetic
@@ -96,6 +100,10 @@ trust boundary: candidate code can execute arbitrary repository commands on
 that account, so never reuse a personal or credential-bearing account. Static
 SSH is host-managed and has no provider TTL or automatic machine shutdown; stop
 offering the Mac by disabling Remote Login or removing its authorized key.
+On `SIGHUP`, the lock wrapper, dispatcher, and remote verifier retain ownership
+while forwarding the signal through their exact child process groups. A retry
+can acquire the workspace only after those descendants exit and the local lock
+and snapshot are removed.
 
 ### Ten-minute local admission fallback
 

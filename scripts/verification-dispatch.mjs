@@ -2,6 +2,8 @@
 
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
+import { mkdtempSync, rmSync } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -18,6 +20,7 @@ const SSH_PROVIDER = "ssh";
 const SSH_TARGET = "macos";
 const SSH_WORK_ROOT = "/Users/Shared/murph-crabbox";
 const SSH_VERIFICATION_ENTRYPOINT = "scripts/crabbox/run-ssh-verification.mjs";
+const SNAPSHOT_ORIGIN = "https://github.com/cobuildwithus/murph.git";
 const WORKSPACE_ARTIFACT_LOCK = "scripts/run-with-workspace-artifact-lock.mjs";
 const SAFE_CRABBOX_CLI_ENVIRONMENT_NAMES = [
   "HOME",
@@ -259,10 +262,23 @@ export async function runVerification(argv, env = process.env) {
         ...(remoteInvocation.environment ?? {}),
       }
     : env;
-  if (remoteInvocation) {
-    assertSafeRemoteSync(repoRoot, childEnvironment);
+  if (!remoteInvocation) {
+    return await runChild(invocation, childEnvironment);
   }
-  return await runChild(invocation, childEnvironment);
+
+  assertSafeRemoteSync(repoRoot, childEnvironment);
+  const candidate = createRemoteCandidateSnapshot(repoRoot, childEnvironment);
+  process.stderr.write(
+    `[verification-dispatch] candidate-tree=${candidate.tree}\n`,
+  );
+  try {
+    return await runChild(
+      { ...invocation, cwd: candidate.root },
+      childEnvironment,
+    );
+  } finally {
+    candidate.dispose();
+  }
 }
 
 export function buildCrabboxCliEnvironment(env) {
@@ -285,6 +301,121 @@ export function buildCrabboxCliEnvironment(env) {
 
 export function findSensitiveRemoteSyncPaths(paths) {
   return paths.filter(isSensitiveRemoteSyncPath);
+}
+
+export function createRemoteCandidateSnapshot(
+  repoRoot,
+  environment = process.env,
+) {
+  const snapshotRoot = mkdtempSync(
+    path.join(os.tmpdir(), "murph-remote-candidate-"),
+  );
+  try {
+    const candidateCommit = createCandidateCommit(repoRoot, environment);
+    const candidateTree = readGitValue(
+      repoRoot,
+      ["rev-parse", `${candidateCommit}^{tree}`],
+      environment,
+      "candidate tree",
+    );
+    const sensitivePaths = findSensitiveRemoteSyncPaths(
+      listGitPaths(
+        repoRoot,
+        ["ls-tree", "-r", "-z", "--name-only", candidateCommit],
+        environment,
+      ),
+    );
+    if (sensitivePaths.length > 0) {
+      throw new Error(renderSensitiveRemoteSyncError(sensitivePaths));
+    }
+
+    const archivePath = path.join(snapshotRoot, "candidate.tar");
+    runCheckedCommand(
+      "git",
+      [
+        "archive",
+        "--format=tar",
+        `--output=${archivePath}`,
+        candidateCommit,
+      ],
+      { cwd: repoRoot, env: environment },
+      "materialize the remote verification candidate archive",
+    );
+    runCheckedCommand(
+      "tar",
+      ["-xf", archivePath, "-C", snapshotRoot],
+      { cwd: snapshotRoot, env: environment },
+      "extract the remote verification candidate",
+    );
+    rmSync(archivePath);
+
+    runCheckedCommand(
+      "git",
+      ["init", "--quiet", "--initial-branch=snapshot"],
+      { cwd: snapshotRoot, env: environment },
+      "initialize the remote verification candidate",
+    );
+    runCheckedCommand(
+      "git",
+      ["add", "--all", "--force"],
+      { cwd: snapshotRoot, env: environment },
+      "index the remote verification candidate",
+    );
+    const materializedTree = readGitValue(
+      snapshotRoot,
+      ["write-tree"],
+      environment,
+      "materialized candidate tree",
+    );
+    if (materializedTree !== candidateTree) {
+      throw new Error(
+        "Remote verification candidate materialization changed the admitted Git tree.",
+      );
+    }
+    runCheckedCommand(
+      "git",
+      [
+        "-c",
+        "core.hooksPath=/dev/null",
+        "-c",
+        "user.name=Crabbox Snapshot",
+        "-c",
+        "user.email=crabbox-snapshot@users.noreply.github.com",
+        "-c",
+        "commit.gpgSign=false",
+        "commit",
+        "--quiet",
+        "--no-gpg-sign",
+        "--no-verify",
+        "-m",
+        "verification candidate",
+      ],
+      { cwd: snapshotRoot, env: environment },
+      "commit the remote verification candidate",
+    );
+    runCheckedCommand(
+      "git",
+      ["remote", "add", "origin", SNAPSHOT_ORIGIN],
+      { cwd: snapshotRoot, env: environment },
+      "bind the remote verification candidate repository",
+    );
+
+    let disposed = false;
+    return {
+      dispose() {
+        if (disposed) {
+          return;
+        }
+        disposed = true;
+        rmSync(snapshotRoot, { force: true, recursive: true });
+      },
+      root: snapshotRoot,
+      tree: candidateTree,
+    };
+  } catch (error) {
+    rmSync(snapshotRoot, { force: true, recursive: true });
+    throw error;
+  }
 }
 
 export function assertSafeRemoteSync(repoRoot, environment = process.env) {
@@ -311,16 +442,7 @@ export function assertSafeRemoteSync(repoRoot, environment = process.env) {
   );
   const sensitivePaths = findSensitiveRemoteSyncPaths(cachedPaths);
   if (sensitivePaths.length > 0) {
-    const renderedPaths = sensitivePaths
-      .slice(0, 10)
-      .map((filePath) => JSON.stringify(filePath))
-      .join(", ");
-    const remainder = sensitivePaths.length > 10
-      ? ` and ${sensitivePaths.length - 10} more`
-      : "";
-    throw new Error(
-      `Remote verification sync refused sensitive managed paths: ${renderedPaths}${remainder}. Ignore or remove them before remote verification.`,
-    );
+    throw new Error(renderSensitiveRemoteSyncError(sensitivePaths));
   }
 }
 
@@ -410,6 +532,68 @@ function listGitPaths(repoRoot, args, environment) {
     throw new Error("Unable to inspect the remote verification sync set with git ls-files.");
   }
   return result.stdout.split("\0").filter(Boolean);
+}
+
+function createCandidateCommit(repoRoot, environment) {
+  const result = spawnSync(
+    "git",
+    ["stash", "create", "murph remote verification candidate"],
+    {
+      cwd: repoRoot,
+      encoding: "utf8",
+      env: environment,
+      maxBuffer: 16 * 1024 * 1024,
+    },
+  );
+  if (result.status !== 0) {
+    throw new Error("Unable to create the remote verification candidate.");
+  }
+  const candidateCommit = result.stdout.trim();
+  return candidateCommit || readGitValue(
+    repoRoot,
+    ["rev-parse", "HEAD"],
+    environment,
+    "clean candidate commit",
+  );
+}
+
+function readGitValue(repoRoot, args, environment, description) {
+  const result = spawnSync("git", args, {
+    cwd: repoRoot,
+    encoding: "utf8",
+    env: environment,
+    maxBuffer: 16 * 1024 * 1024,
+  });
+  if (result.status !== 0) {
+    throw new Error(`Unable to inspect the remote verification ${description}.`);
+  }
+  const value = result.stdout.trim();
+  if (!value) {
+    throw new Error(`Remote verification ${description} was empty.`);
+  }
+  return value;
+}
+
+function runCheckedCommand(command, args, options, description) {
+  const result = spawnSync(command, args, {
+    ...options,
+    encoding: "utf8",
+    maxBuffer: 16 * 1024 * 1024,
+  });
+  if (result.status !== 0) {
+    throw new Error(`Unable to ${description}.`);
+  }
+}
+
+function renderSensitiveRemoteSyncError(sensitivePaths) {
+  const renderedPaths = sensitivePaths
+    .slice(0, 10)
+    .map((filePath) => JSON.stringify(filePath))
+    .join(", ");
+  const remainder = sensitivePaths.length > 10
+    ? ` and ${sensitivePaths.length - 10} more`
+    : "";
+  return `Remote verification sync refused sensitive managed paths: ${renderedPaths}${remainder}. Ignore or remove them before remote verification.`;
 }
 
 function isSensitiveRemoteSyncPath(filePath) {
@@ -509,6 +693,7 @@ function runChild(invocation, env) {
   return new Promise((resolve, reject) => {
     const useDetachedProcessGroup = process.platform !== "win32";
     const child = spawn(invocation.command, invocation.args, {
+      cwd: invocation.cwd,
       detached: useDetachedProcessGroup,
       env,
       stdio: "inherit",
@@ -520,12 +705,17 @@ function runChild(invocation, env) {
     const onSigterm = () => {
       signalChild(child, useDetachedProcessGroup, "SIGTERM");
     };
+    const onSighup = () => {
+      signalChild(child, useDetachedProcessGroup, "SIGHUP");
+    };
     process.once("SIGINT", onSigint);
     process.once("SIGTERM", onSigterm);
+    process.once("SIGHUP", onSighup);
 
     const cleanup = () => {
       process.off("SIGINT", onSigint);
       process.off("SIGTERM", onSigterm);
+      process.off("SIGHUP", onSighup);
     };
 
     child.once("error", (error) => {
@@ -533,18 +723,54 @@ function runChild(invocation, env) {
       reject(error);
     });
     child.once("exit", (code, signal) => {
-      cleanup();
-      if (signal === "SIGINT") {
-        resolve(130);
-        return;
-      }
-      if (signal) {
-        resolve(143);
-        return;
-      }
-      resolve(code ?? 1);
+      void waitForProcessGroupExit(child.pid, useDetachedProcessGroup).then(
+        () => {
+          cleanup();
+          if (signal === "SIGINT") {
+            resolve(130);
+            return;
+          }
+          if (signal === "SIGHUP") {
+            resolve(129);
+            return;
+          }
+          if (signal) {
+            resolve(143);
+            return;
+          }
+          resolve(code ?? 1);
+        },
+        (error) => {
+          cleanup();
+          reject(error);
+        },
+      );
     });
   });
+}
+
+async function waitForProcessGroupExit(processGroupId, enabled) {
+  if (!enabled || !processGroupId) {
+    return;
+  }
+  while (isProcessGroupRunning(processGroupId)) {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+}
+
+function isProcessGroupRunning(processGroupId) {
+  try {
+    process.kill(-processGroupId, 0);
+    return true;
+  } catch (error) {
+    if (error && typeof error === "object" && error.code === "ESRCH") {
+      return false;
+    }
+    if (error && typeof error === "object" && error.code === "EPERM") {
+      return true;
+    }
+    throw error;
+  }
 }
 
 function signalChild(child, useDetachedProcessGroup, signal) {

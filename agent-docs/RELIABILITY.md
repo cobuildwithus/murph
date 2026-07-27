@@ -11,6 +11,11 @@ Last verified: 2026-07-27
 - Explicit remote verification is fail-closed. The dispatcher never retries on
   another executor or runs local and remote copies together; an operator may
   retry the same head only after recording a concrete infrastructure failure.
+  Each admitted run uses one logged immutable Git candidate, so later checkout
+  writes cannot change the work in flight. On `SIGHUP`, each foreground owner
+  forwards the signal to its exact child process group and keeps the local
+  artifact lock and candidate until those descendants exit; only then may the
+  same worktree retry.
   Static SSH is host-managed, so availability, sleep, and shutdown stay outside
   Murph rather than introducing a daemon or lease-recovery owner.
 - Use the concrete runtime contracts first: hosted runner wake/checkpoint behavior lives in `agent-docs/references/hosted-runtime-protocol.md` plus `apps/cloudflare/README.md`; deploy recovery and smoke expectations live in `apps/cloudflare/DEPLOY.md`; local device-sync and assistant daemon retry/control-plane behavior live in their package READMEs and tests.

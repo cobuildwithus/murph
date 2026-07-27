@@ -289,9 +289,13 @@ Last verified: 2026-07-27
   Static SSH must use only a validated local SSH-config alias, a dedicated
   standard macOS account with no personal, product, cloud, Keychain, `.env*`,
   or Full Disk Access authority, an isolated opaque workspace per initiating
-  worktree, full resync, and the existing local artifact lock. Candidate code
-  has arbitrary execution authority within that account, so a personal or
-  credential-bearing account is never an acceptable worker.
+  worktree, full resync, and the existing local artifact lock. After admission,
+  the dispatcher must materialize and verify one immutable Git candidate, log
+  its tree id, and sync from that candidate rather than rereading the editable
+  checkout. The lock serializes cooperating artifact producers and remote
+  workspace reuse; it is not an editor lock. Candidate code has arbitrary
+  execution authority within that account, so a personal or credential-bearing
+  account is never an acceptable worker.
   The Blacksmith workflow must retain read-only repository contents permission,
   no GitHub Environment, no OIDC permission, no Actions-secret references, and
   pinned actions. The dispatcher must pin the Blacksmith organization,

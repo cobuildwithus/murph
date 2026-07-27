@@ -171,12 +171,17 @@ function runChild(command, args, options) {
     const onSigterm = () => {
       signalChild(child, useDetachedProcessGroup, "SIGTERM");
     };
+    const onSighup = () => {
+      signalChild(child, useDetachedProcessGroup, "SIGHUP");
+    };
     process.once("SIGINT", onSigint);
     process.once("SIGTERM", onSigterm);
+    process.once("SIGHUP", onSighup);
 
     const cleanup = () => {
       process.off("SIGINT", onSigint);
       process.off("SIGTERM", onSigterm);
+      process.off("SIGHUP", onSighup);
     };
 
     child.once("error", (error) => {
@@ -184,18 +189,54 @@ function runChild(command, args, options) {
       reject(error);
     });
     child.once("exit", (code, signal) => {
-      cleanup();
-      if (signal === "SIGINT") {
-        resolve(130);
-        return;
-      }
-      if (signal) {
-        resolve(143);
-        return;
-      }
-      resolve(code ?? 1);
+      void waitForProcessGroupExit(child.pid, useDetachedProcessGroup).then(
+        () => {
+          cleanup();
+          if (signal === "SIGINT") {
+            resolve(130);
+            return;
+          }
+          if (signal === "SIGHUP") {
+            resolve(129);
+            return;
+          }
+          if (signal) {
+            resolve(143);
+            return;
+          }
+          resolve(code ?? 1);
+        },
+        (error) => {
+          cleanup();
+          reject(error);
+        },
+      );
     });
   });
+}
+
+async function waitForProcessGroupExit(processGroupId, enabled) {
+  if (!enabled || !processGroupId) {
+    return;
+  }
+  while (isProcessGroupRunning(processGroupId)) {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+}
+
+function isProcessGroupRunning(processGroupId) {
+  try {
+    process.kill(-processGroupId, 0);
+    return true;
+  } catch (error) {
+    if (error && typeof error === "object" && error.code === "ESRCH") {
+      return false;
+    }
+    if (error && typeof error === "object" && error.code === "EPERM") {
+      return true;
+    }
+    throw error;
+  }
 }
 
 function signalChild(child, useDetachedProcessGroup, signal) {
