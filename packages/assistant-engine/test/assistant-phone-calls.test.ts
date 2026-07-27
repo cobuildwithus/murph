@@ -311,7 +311,11 @@ describe("assistant phone calls", () => {
     };
     const expectedRequestKey = createPhoneCallRequestKey({
       brief: effectiveBrief,
-      scope: phoneCallScope,
+      scope: {
+        ...phoneCallScope,
+        acceptedInputIds: [GROUP_REQUEST_INPUT_ID],
+        inboundMailboxItemIds: [],
+      },
     });
     const groupRequester = {
       assistantInputId: GROUP_REQUEST_INPUT_ID,
@@ -364,6 +368,71 @@ describe("assistant phone calls", () => {
     }, {
       signal: null,
     });
+  });
+
+  it("keeps a group call retry keyed to the exact requester after live steering", async () => {
+    const effectiveBrief = {
+      ...BASE_BRIEF,
+      allowTransferToUser: false,
+    };
+    let phoneCallScope = {
+      ...BASE_SCOPE,
+      acceptedInputIds: [GROUP_REQUEST_INPUT_ID],
+      conversationScope: "group" as const,
+      inboundMailboxItemIds: ["mailbox_request"],
+      originSessionId: "session_group_phone_call",
+    };
+    const groupRequester = {
+      assistantInputId: GROUP_REQUEST_INPUT_ID,
+      senderHandle: "+15551110003",
+      source: "linq" as const,
+    };
+    const request = readMurphDynamicToolRequest(dynamicToolCall({
+      argumentsValue: {
+        ...BASE_BRIEF,
+        message_ref: GROUP_REQUEST_INPUT_ID,
+      },
+      tool: MURPH_CREATE_PHONE_CALL_TOOL.name,
+    }));
+    if (!request || request.kind !== "create-phone-call") {
+      throw new Error("Expected create phone call request.");
+    }
+    const requestKeys: string[] = [];
+    const execute = () => executeMurphDynamicToolRequest({
+      authorizeAcceptedMessageTarget: async () => ({
+        participant: groupRequester,
+        targetInputId: GROUP_REQUEST_INPUT_ID,
+      }),
+      deliveryContextOrdinal: 0,
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createHostedToolContext({
+        currentUserActionScope: () => phoneCallScope,
+        phoneCalls: {
+          start: vi.fn(async (input) => {
+            requestKeys.push(input.requestKey);
+            return {
+              phoneCallId: "hpc_group",
+              status: "starting" as const,
+            };
+          }),
+        },
+      }),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request,
+    });
+
+    await execute();
+    phoneCallScope = {
+      ...phoneCallScope,
+      acceptedInputIds: [GROUP_REQUEST_INPUT_ID, OTHER_GROUP_INPUT_ID],
+      inboundMailboxItemIds: ["mailbox_request", "mailbox_live_steer"],
+    };
+    await execute();
+
+    expect(requestKeys).toHaveLength(2);
+    expect(new Set(requestKeys).size).toBe(1);
   });
 
   it.each([

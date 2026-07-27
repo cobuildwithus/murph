@@ -2862,13 +2862,20 @@ export async function executeMurphDynamicToolRequest(input: {
             'group phone calling requires the exact accepted Message ref from the participant who requested or approved the call',
           )
         }
+        const phoneCallRequestKeyScope = groupRequester
+          ? {
+              ...requestKeyScope,
+              acceptedInputIds: [groupRequester.assistantInputId],
+              inboundMailboxItemIds: [],
+            }
+          : requestKeyScope
         const result = await phoneCalls.start({
           brief,
           ...(groupRequester ? { groupRequester } : {}),
           originSessionId: requestKeyScope.originSessionId,
           requestKey: createPhoneCallRequestKey({
             brief,
-            scope: requestKeyScope,
+            scope: phoneCallRequestKeyScope,
           }),
         }, {
           signal: input.abortSignal ?? null,

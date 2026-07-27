@@ -3928,7 +3928,7 @@ async function runCodexAppServerTurnOnProcess(
           hostedToolContext,
           materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts ?? null,
           currentResponseMedia: responseMedia,
-          deliveryContextOrdinal: dynamicToolDeliveryContextOrdinal,
+          deliveryContextOrdinal: dynamicToolRequestDeliveryContextOrdinal,
           nextUsageOrdinal: () => nextDynamicToolUsageOrdinal++,
           productFeedbackRecorder: input.productFeedbackRecorder ?? null,
           progressDelivery:
