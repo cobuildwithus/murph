@@ -1,6 +1,6 @@
 # Publish the July 26–27 changelog
 
-Status: active
+Status: completed
 Created: 2026-07-27
 Updated: 2026-07-27
 
@@ -94,3 +94,22 @@ Updated: 2026-07-27
   study
 - product-experience review, Claude UI double-check, preliminary frontend and
   coverage ReviewGPT lenses, and parent final review
+
+## Completion evidence
+
+- Focused changelog and design-catalog coverage passed: 32 tests.
+- Canonical `pnpm test:diff ...` passed after specialist remediation and the
+  merge with current `main`: 552 web test files, 6,867 tests, lint with zero
+  errors, dev smoke, typecheck, and production build.
+- Repo-wide acceptance passed every changed and web owner. One untouched
+  Cloudflare cancellation test timed out only under the composed run; its full
+  file passed alone, 13/13 in 3.86 seconds. An earlier untouched setup-wizard
+  failure also cleared on the acceptance rerun.
+- Desktop, tablet, and phone browser proof passed for `/changelog`; desktop and
+  phone catalog proof render the real production section with synthetic data.
+- Product-experience review passed with no findings after remediation. The
+  preliminary specialist finding about a live registry import was accepted and
+  resolved by making the permalink builder explicit.
+- The Claude UI double-check was attempted and stopped on explicit usage-credit
+  exhaustion.
+Completed: 2026-07-27
