@@ -37,7 +37,21 @@ jobs:
         run: |
           set -euo pipefail
           cat .github/agent-group-plan/patch-* > /tmp/murph-group-plan.patch
-          git apply --check --whitespace=error-all /tmp/murph-group-plan.patch
+          set +e
+          git apply --check --whitespace=error-all /tmp/murph-group-plan.patch > /tmp/group-plan-apply.log 2>&1
+          apply_status=$?
+          set -e
+          if [ "$apply_status" -ne 0 ]; then
+            cp /tmp/group-plan-apply.log .github/agent-group-plan/FAILURE.log
+            git config user.name "Codex"
+            git config user.email "codex@users.noreply.github.com"
+            git add .github/agent-group-plan/FAILURE.log
+            git commit -m "chore(agent): record Group patch apply failure"
+            git push origin HEAD:agent/murph-group-plan
+            cat /tmp/group-plan-apply.log
+            exit "$apply_status"
+          fi
+          rm -f .github/agent-group-plan/FAILURE.log
           git apply --whitespace=fix /tmp/murph-group-plan.patch
           git diff --check
 
