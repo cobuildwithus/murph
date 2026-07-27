@@ -332,16 +332,11 @@ export interface AssistantHostedGeneratedImageUploader {
   ): Promise<AssistantResponseMedia>
 }
 
-export interface AssistantHostedImageGenerationCompletion {
-  media: readonly AssistantResponseMedia[]
-  success: boolean
-}
-
 export interface AssistantHostedImageGenerationLauncher {
   launch(input: {
     operationId: string
     originAssistantInputId: string
-    run(signal: AbortSignal): Promise<AssistantHostedImageGenerationCompletion>
+    run(signal: AbortSignal): Promise<AssistantResponseMedia | null>
   }): 'already-started' | 'started'
 }
 

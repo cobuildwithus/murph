@@ -155,10 +155,7 @@ describe('murph.generate_image dynamic tool schema', () => {
 
     releaseProvider()
     await expect(generation).resolves.toMatchObject({
-      media: [{
-        url: 'https://imagedelivery.net/account/generated/public',
-      }],
-      success: true,
+      url: 'https://imagedelivery.net/account/generated/public',
     })
   })
 

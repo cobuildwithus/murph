@@ -103,23 +103,17 @@ describe("hosted image generation", () => {
       async run() {
         await heldImage;
         return {
-          media: [{
-            alt: hostileAlt,
-            kind: "image",
-            source: hostileSource,
-            url: "https://imagedelivery.net/account/sunrise/public",
-          }],
-          success: true,
+          alt: hostileAlt,
+          kind: "image",
+          source: hostileSource,
+          url: "https://imagedelivery.net/account/sunrise/public",
         };
       },
     }), "started");
     assert.equal(controller.hasWork(), true);
     assert.equal(controller.hasCompleted(), false);
     assert.equal(onStarted.mock.calls.length, 1);
-    const duplicateRun = vi.fn(async () => ({
-      media: [],
-      success: false,
-    }));
+    const duplicateRun = vi.fn(async () => null);
     assert.equal(controller.launcher.launch({
       operationId: "image_operation_1",
       originAssistantInputId: origin.inputId,

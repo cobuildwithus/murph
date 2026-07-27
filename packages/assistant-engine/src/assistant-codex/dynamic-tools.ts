@@ -3042,10 +3042,9 @@ export async function executeMurphDynamicToolRequest(input: {
               requireHostedGeneratedImageUploader: true,
               vaultRoot: input.vaultRoot ?? null,
             })
-            return {
-              media: result.responseMedia ?? [],
-              success: result.rpcSuccess,
-            }
+            return result.rpcSuccess
+              ? result.responseMedia?.[0] ?? null
+              : null
           },
         })
         return toolTextResult(
