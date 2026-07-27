@@ -35,8 +35,6 @@ export const HOSTED_RUNTIME_ASSISTANT_CONFIGURATION_TOOL_PATH =
 
 export const HOSTED_RUNTIME_GROUP_TOOL_PATH =
   "/api/internal/hosted-execution/groups/tool";
-export const HOSTED_RUNTIME_MANAGED_GROUP_ACTIVITY_DECISION_PATH =
-  "/api/internal/hosted-execution/groups/managed-activity-decision";
 export const HOSTED_RUNTIME_ASSISTANT_ASK_CONTROL_PATH =
   "/api/internal/hosted-execution/assistant-asks/runtime";
 export const HOSTED_RUNTIME_ASSISTANT_ASK_CONTROL_BODY_MAX_BYTES = 32 * 1_024;

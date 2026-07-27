@@ -175,8 +175,6 @@ export {
   parseHostedRuntimeAssistantAskControlResponse,
   parseHostedRuntimeGroupToolRequest,
   parseHostedRuntimeGroupToolResponse,
-  parseHostedRuntimeManagedGroupActivityDecisionRequest,
-  parseHostedRuntimeManagedGroupActivityDecisionResponse,
   parseHostedRuntimeNewsletterToolRequest,
   parseHostedRuntimeNewsletterToolResponse,
   parseHostedRuntimeFamilyPlanToolRequest,

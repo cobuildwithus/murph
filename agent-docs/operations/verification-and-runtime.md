@@ -1,6 +1,6 @@
 # Verification And Runtime
 
-Last verified: 2026-07-22
+Last verified: 2026-07-26
 
 ## Verification Execution Location
 
@@ -10,26 +10,28 @@ root commands `pnpm test:diff <path ...>` and `pnpm verify:acceptance` pass
 through `scripts/verification-dispatch.mjs`:
 
 - CI and already-remote runs execute `scripts/workspace-verify.sh` directly.
-- A local Codex parent in `auto` mode uses Crabbox's direct
-  `blacksmith-testbox` provider only when both CLIs are available and
-  `MURPH_CRABBOX_BLACKSMITH=1` is set.
-- Other callers and unconfigured or unavailable CLIs retain local shared-host
-  admission. Canonical acceptance intentionally selects its bounded composed
+- `auto` mode always uses local shared-host admission. Canonical acceptance
+  intentionally selects its bounded composed
   profile there when at least 12 logical CPUs are available; ordinary commands
   and smaller hosts keep their conservative shared-host worker budgets.
-  Blacksmith capacity or auth failure after an explicitly configured remote
-  attempt fails that attempt instead of silently duplicating it locally.
 - `MURPH_VERIFY_EXECUTOR=local|crabbox` explicitly selects an executor; forcing
   Crabbox requests a fresh one-shot Testbox and fails closed when either CLI is
-  unavailable. The `:local` package aliases exist for executor diagnosis, not as
-  a normal way to skip remote proof.
+  unavailable. Blacksmith capacity or auth failure fails that explicit attempt
+  instead of silently duplicating it locally. The `:local` package aliases
+  exist only for executor diagnosis because canonical automatic execution is
+  already local.
 - The Testbox hydration workflow must exist on the repository default branch
   before GitHub accepts a delegated `workflow_dispatch`. The change that first
-  introduces `.github/workflows/crabbox.yml` therefore uses local verification
-  and PR gates; after that bootstrap lands, canonical commands can create fresh
-  one-shot Testboxes from feature branches normally. Canonical verification
-  rejects reusable lease IDs because current provider metadata does not prove
-  the Blacksmith organization that installed the root-owned entrypoint.
+  introduces or moves `.github/workflows/crabbox-bounded.yml` therefore uses
+  local verification and PR gates; after that bootstrap lands, explicitly
+  forced canonical commands can create fresh one-shot Testboxes from feature
+  branches. Canonical verification rejects reusable lease IDs because current
+  provider metadata does not prove the Blacksmith organization that installed
+  the root-owned entrypoint.
+- The retired `.github/workflows/crabbox.yml` path must remain absent. It is the
+  capability hard cut for pre-cost-control dispatchers: a stale worktree fails
+  workflow lookup before a Blacksmith job can start. Do not restore that path as
+  a compatibility shim.
 
 Remote execution preserves the exact underlying `workspace-verify.sh` command,
 including diff scope, reverse dependents, coverage thresholds, app verification,
@@ -50,14 +52,32 @@ MURPH_VERIFY_EXECUTOR=crabbox pnpm verify:acceptance
 ```
 
 The forced executor creates a fresh one-shot Testbox through the fully pinned
-route. Do not leave the local waiter running concurrently, forward local
-environment values, bypass the canonical command, warm a lease separately, or
-return automatically to another unbounded local wait.
+route. Its invocation always requests cleanup, a 10-minute idle timeout, and a
+45-minute maximum lease lifetime; the hydration workflow has a 50-minute
+last-resort ceiling. Do not leave the local waiter running concurrently, forward
+local environment values, bypass the canonical command, warm a lease separately,
+or return automatically to another unbounded local wait.
 Before delegation, satisfy the Git-state admission boundary, including fully
 staging any new non-ignored source or documentation file. If Crabbox cannot run
 because its CLIs, authentication, or capacity are unavailable, fail closed and
 report that concrete blocker with the completed local evidence. Preserve the
 Testbox ID, timing summary, and linked Actions run when delegation starts.
+
+Do not run both remote `test:diff` and remote acceptance on the same exact head.
+When acceptance is required, keep the preceding diff checks local and reserve
+the one remote check for acceptance; otherwise use the remote diff lane. Retry
+an unchanged head only after a concrete infrastructure failure and record that
+reason in the completion evidence.
+
+### Required post-landing trust-root proof
+
+One case does not require a ten-minute local admission wait: after a change to
+`.github/workflows/crabbox-bounded.yml` or the trusted entrypoint lands on the
+default branch, run exactly one explicitly forced canonical remote check to
+prove that new trust root. This is required boundary validation, not ordinary
+capacity fallback; do not manufacture a local wait first. Use acceptance when
+the landed change requires acceptance coverage, otherwise use `test:diff`, and
+retain the same lifecycle bounds and evidence.
 
 ### Environment and Vercel boundary
 
@@ -316,7 +336,7 @@ the advisory budget.
 - `pnpm verify:acceptance`: the canonical repo acceptance gate. It runs through the root workspace verifier so one lock covers the whole acceptance pass: first the full `typecheck` surface, then the coverage-heavy acceptance lane with already-proven repo guards skipped, `apps/cloudflare` app-local typecheck skipped, and the contracts artifact verification reusing the `packages/contracts` build from typecheck. On non-CI hosts with at least 12 logical CPUs, including a locally forced Codex/shared-host execution, its startup log reports the composed resource profile. Independent doc gardening and prepared-runtime setup overlap before coverage begins. Web tests/lint/dev smoke then start immediately while the protected CLI phase uses four CLI workers plus one two-worker package peer. CLI terminal success or failure publishes one invocation-scoped readiness marker: that releases Cloudflare's serial app tests and the hosted-web Next build without hiding the CLI result, lets package fanout refill to at most five two-worker processes, and is removed by the root owner at completion. The sanitized Crabbox bootstrap does not set an app-step policy; the root verifier alone assigns Web-parallel and Cloudflare-serial behavior. This profile applies equally to a capable local host and the 16-vCPU Blacksmith Testbox. Standalone `pnpm test:coverage`, smaller hosts, and CI retain their self-contained or conservative defaults unless explicitly overridden.
 - `pnpm zip:src` and `scripts/package-audit-context.sh`: shell through `pnpm no-js`, which first prunes untracked generated JS/declaration sidecars that sit next to tracked TypeScript source files and then runs the tracked-artifact hygiene guard, before building the source/review bundle from git-visible files while scanning `config/**` alongside app/package code and filtering blocked local residue such as `.env` / `.env.*`, `dist/`, `.next/`, `.next-dev/`, `.next-smoke/`, `.test-dist/`, `*.tsbuildinfo`, and `packages/health-commons/generated/**` paths out of the manifest. This keeps ignored local artifacts out of the upload bundle without requiring a clean development worktree, while raw clone archives remain unsafe.
 - `pnpm test:scenario-integrity`: the root command for fixture/scenario-manifest integrity verification. It is not executable end-to-end smoke.
-- Automatic meal-photo capture spans `apps/web`, `packages/{cloudflare-hosted-control,hosted-execution,assistant-runtime,runtime-state,assistant-engine,core,vault-usecases,cli}`, and `apps/cloudflare`, so its final local proof must use `pnpm verify:acceptance` in addition to focused route, current verified-email recipient authority, accepted-capture member-wide engagement, system-only cron/cleanup, foreground fairness, contract, storage, canonical-import, managed-automation, oldest-first closeout-work, and photo-retirement tests. That automated proof does not replace a physical-device opt-in/upload check because routine CI has neither iOS Photos authority nor production R2 access.
+- Automatic meal-photo capture spans `apps/web`, `packages/{cloudflare-hosted-control,hosted-execution,assistant-runtime,runtime-state,assistant-engine,core,vault-usecases,cli}`, and `apps/cloudflare`, so its final local proof must use `pnpm verify:acceptance` in addition to focused route, companion bearer-consent recovery, current verified-email recipient authority, accepted-capture member-wide engagement, system-only cron/cleanup, foreground fairness, contract, storage, canonical-import, managed-automation, oldest-first closeout-work, and photo-retirement tests. That automated proof does not replace a physical-device opt-in/upload check because routine CI has neither iOS Photos authority nor production R2 access.
 - `pnpm release:check`: assumes dependencies are already installed, syntax-checks the release helpers, validates the fixed-version monorepo release manifest plus publish metadata, then runs `pnpm build:workspace:clean` and `pnpm verify:acceptance`. The tag-driven release workflow performs the one required install up front, opts the verify lanes into CI parallel execution through `MURPH_TEST_LANES_PARALLEL=1`, `MURPH_APP_VERIFY_PARALLEL=1`, and `MURPH_VERIFY_STEP_PARALLEL=1`, and leaves the actual tarball packing to the later dedicated pack step instead of repacking inside `release:check`. Treat it as the release-specific extension of `pnpm verify:acceptance`, with the extra clean-build proof layered on top.
 
 ## Incur-Backed CLI Guardrails
