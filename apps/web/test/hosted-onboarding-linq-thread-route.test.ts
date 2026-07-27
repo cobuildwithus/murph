@@ -919,6 +919,9 @@ function createStatefulThreadRoutePrisma() {
         : null;
     }),
   };
+  const hostedMemberEmailAuthorization = {
+    findMany: vi.fn().mockResolvedValue([]),
+  };
   // Unified access read (readActiveHostedMemberAccess). Members are active by
   // default; thread-container members derive access from their (active) owner.
   // Tests for inactive members override this mock.
@@ -953,6 +956,7 @@ function createStatefulThreadRoutePrisma() {
     $transaction: vi.fn(async (callback: (tx: unknown) => Promise<unknown>) => callback(prisma)),
     hostedLinqLine,
     hostedMember,
+    hostedMemberEmailAuthorization,
     hostedMemberRouting,
     hostedThreadContainer,
     hostedThreadContainerParticipant,
@@ -3259,6 +3263,137 @@ describe("Linq group chat auto-provision", () => {
     mockAllowedThreadUsage();
   }
 
+  it("logs a privacy-safe reason when a group sender email has no verified authorization", async () => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    const prisma = createStatefulThreadRoutePrisma();
+    const senderEmail = "incident-sender@example.com";
+    const recipientPhone = "+15550000000";
+    const chatId = "chat_private_incident_123";
+    const messageId = "message_private_incident_123";
+    const messageText = "Private incident message with secret-token-value";
+
+    try {
+      const plan = await planHostedOnboardingLinqWebhook({
+        event: buildLinqMessageReceivedEvent({
+          chatId,
+          messageId,
+          recipient: recipientPhone,
+          sender: senderEmail,
+          text: messageText,
+        }),
+        prisma: prisma as never,
+      });
+
+      expect(plan.response).toMatchObject({
+        ignored: true,
+        ok: true,
+        reason: "group-chat",
+      });
+      expect(prisma.hostedMemberEmailAuthorization.findMany).toHaveBeenCalledTimes(1);
+      expect(
+        memberIdentityStore.lookupHostedMemberIdentityByPhoneNumber,
+      ).not.toHaveBeenCalled();
+
+      const plannerDetails = info.mock.calls.find(
+        ([message]) => message === "Hosted Linq webhook planner decision.",
+      )?.[1];
+      expect(plannerDetails).toMatchObject({
+        existingMemberMatch: "none",
+        ignored: true,
+        linqChatPresent: true,
+        linqContactKind: "email",
+        linqRecipientPhonePresent: true,
+        ok: true,
+        reason: "sender-identity-unresolved",
+        responseReason: "group-chat",
+        routeStage: "new-group-admission-ignored",
+      });
+
+      const serializedDetails = JSON.stringify(plannerDetails);
+      for (const privateValue of [
+        senderEmail,
+        recipientPhone,
+        chatId,
+        messageId,
+        messageText,
+        "secret-token-value",
+      ]) {
+        expect(serializedDetails).not.toContain(privateValue);
+      }
+    } finally {
+      info.mockRestore();
+    }
+  });
+
+  it.each([
+    {
+      description: "echoed own messages",
+      eventInput: { isFromMe: true },
+      linqContactKind: "phone",
+      linqRecipientPhonePresent: true,
+      reason: "own-message",
+    },
+    {
+      description: "messages without parts",
+      eventInput: { text: "" },
+      linqContactKind: "phone",
+      linqRecipientPhonePresent: true,
+      reason: "empty-message-parts",
+    },
+    {
+      description: "messages without a resolvable sender contact",
+      eventInput: { sender: "not-a-contact" },
+      linqContactKind: "none",
+      linqRecipientPhonePresent: true,
+      reason: "sender-contact-unresolved",
+    },
+    {
+      description: "messages without recipient line authority",
+      eventInput: { recipient: "not-a-phone" },
+      linqContactKind: "phone",
+      linqRecipientPhonePresent: false,
+      reason: "recipient-line-authority-unresolved",
+    },
+  ] as const)("logs the new-group admission guard for $description", async ({
+    eventInput,
+    linqContactKind,
+    linqRecipientPhonePresent,
+    reason,
+  }) => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    const prisma = createStatefulThreadRoutePrisma();
+
+    try {
+      const plan = await planHostedOnboardingLinqWebhook({
+        event: buildLinqMessageReceivedEvent(eventInput),
+        prisma: prisma as never,
+      });
+
+      expect(plan.response).toMatchObject({
+        ignored: true,
+        ok: true,
+        reason: "group-chat",
+      });
+      expect(
+        memberIdentityStore.lookupHostedMemberIdentityByPhoneNumber,
+      ).not.toHaveBeenCalled();
+
+      const plannerDetails = info.mock.calls.find(
+        ([message]) => message === "Hosted Linq webhook planner decision.",
+      )?.[1];
+      expect(plannerDetails).toMatchObject({
+        existingMemberMatch: "none",
+        linqContactKind,
+        linqRecipientPhonePresent,
+        reason,
+        responseReason: "group-chat",
+        routeStage: "new-group-admission-ignored",
+      });
+    } finally {
+      info.mockRestore();
+    }
+  });
+
   it.each([
     {
       description: "reported direct",
@@ -3977,26 +4112,40 @@ describe("Linq group chat auto-provision", () => {
   });
 
   it("ignores group messages received on an unknown unmanaged recipient", async () => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
     const prisma = createStatefulThreadRoutePrisma();
     prisma.seedActiveManagedLinqLine("+15550000000");
     mockSenderLookup(senderCore);
 
-    const plan = await planHostedOnboardingLinqWebhook({
-      event: buildLinqMessageReceivedEvent({
-        recipient: "+15558889999",
-      }),
-      prisma: prisma as never,
-    });
+    try {
+      const plan = await planHostedOnboardingLinqWebhook({
+        event: buildLinqMessageReceivedEvent({
+          recipient: "+15558889999",
+        }),
+        prisma: prisma as never,
+      });
 
-    expect(plan.response).toMatchObject({
-      ignored: true,
-      ok: true,
-      reason: "group-chat",
-    });
-    expectManagedLineAuthorityLookup(prisma, "+15558889999");
-    expect(memberRoutingStore.readHostedMemberRoutingState).not.toHaveBeenCalled();
-    expect(prisma.hostedThreadContainer.create).not.toHaveBeenCalled();
-    expect(mailboxStore.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+      expect(plan.response).toMatchObject({
+        ignored: true,
+        ok: true,
+        reason: "group-chat",
+      });
+      expectManagedLineAuthorityLookup(prisma, "+15558889999");
+      expect(prisma.hostedThreadContainer.create).not.toHaveBeenCalled();
+      expect(mailboxStore.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+
+      const plannerDetails = info.mock.calls.find(
+        ([message]) => message === "Hosted Linq webhook planner decision.",
+      )?.[1];
+      expect(plannerDetails).toMatchObject({
+        existingMemberMatch: "phone-identity",
+        reason: "recipient-line-unmanaged",
+        responseReason: "group-chat",
+        routeStage: "new-group-admission-ignored",
+      });
+    } finally {
+      info.mockRestore();
+    }
   });
 
   it("ignores echoed own messages in unbound group threads without provisioning", async () => {

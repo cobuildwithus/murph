@@ -9,7 +9,8 @@ Updated: 2026-07-27
 - Integrate the returned Pro patch so Linq group-chat auto-provisioning accepts
   an active member only when the inbound recipient belongs to the existing
   configured, enabled, operational Murph-managed Linq line pool rather than the
-  member's committed home line.
+  member's committed home line, and make every ignored admission branch
+  diagnosable without logging message or identity data.
 
 ## Success criteria
 
@@ -18,13 +19,16 @@ Updated: 2026-07-27
   line-pool eligibility.
 - Unknown, unmanaged, inactive, paused, or suspended paths fail before
   provisioning.
+- Ignored new-group admission logs one typed, privacy-safe reason while
+  preserving the stable webhook response.
 - Focused tests cover the returned behavior.
 - Repo-required verification and final diff review are complete.
 
 ## Scope
 
-- In scope: `apps/web` Linq group-chat admission, focused hosted Linq tests, and
-  the hosted-runtime protocol note returned by Pro.
+- In scope: `apps/web` Linq group-chat admission, its structured decision log,
+  focused hosted Linq tests, and the hosted-runtime protocol note returned by
+  Pro.
 - Out of scope: schema changes, home-line assignment capacity, proactive
   conversation counters, delivery behavior, billing behavior, provider
   integrations, and broader group provisioning redesign.
@@ -53,14 +57,18 @@ Updated: 2026-07-27
 1. Apply and inspect the returned Pro patch.
 2. Adjust for current `origin/main` if needed while preserving the intended
    ownership boundary.
-3. Run focused and canonical verification for the touched owner.
-4. Perform parent final review, close the plan, and create the scoped commit.
+3. Integrate the returned typed admission diagnostics without changing the
+   stable external ignore response.
+4. Run focused and canonical verification for the touched owner.
+5. Perform parent final review, close the plan, and create the scoped commit.
 
 ## Decisions
 
 - Use the active managed-line predicate already shared by assignable home-line
   readiness instead of introducing a new route-authority table or capacity
   counter.
+- Keep the diagnostic reason internal to the existing structured planner log;
+  callers continue to receive the generic `group-chat` ignore reason.
 
 ## Verification
 

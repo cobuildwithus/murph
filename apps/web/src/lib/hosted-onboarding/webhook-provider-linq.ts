@@ -1738,6 +1738,17 @@ const HOSTED_LINQ_GROUP_PROVISION_UNAVAILABLE_ERROR_CODES = new Set([
   "HOSTED_THREAD_ROUTE_ALREADY_BOUND",
 ]);
 
+type HostedLinqNewGroupAdmissionIgnoreReason =
+  | "empty-message-parts"
+  | "local-inbound-not-allowlisted"
+  | "own-message"
+  | "provision-unavailable"
+  | "recipient-line-authority-unresolved"
+  | "recipient-line-unmanaged"
+  | "sender-contact-unresolved"
+  | "sender-identity-unresolved"
+  | "sender-inactive";
+
 /**
  * Group chats with no explicit thread route stay ignored unless the sender is
  * an active member and the recipient resolves to an active managed Murph Linq
@@ -1760,31 +1771,44 @@ async function planHostedLinqGroupChatWebhook(input: {
     summary,
   } = input.context;
 
-  const ignored = (routeStage: string) =>
+  const ignored = (
+    reason: HostedLinqNewGroupAdmissionIgnoreReason,
+    existingMemberMatch: HostedLinqExistingMemberMatch = "none",
+  ) =>
     logHostedLinqWebhookPlannerDecisionAndReturn(
       buildIgnoredLinqWebhookPlan("group-chat"),
       buildHostedLinqWebhookPlannerDetails(input.event, input.context, {
-        existingMemberMatch: "none",
-        reason: "group-chat",
-        routeStage,
+        existingMemberMatch,
+        reason,
+        routeStage: "new-group-admission-ignored",
       }),
     );
 
+  if (summary.isFromMe) {
+    return ignored("own-message");
+  }
+
+  if (messageEvent.data.message.parts.length === 0) {
+    return ignored("empty-message-parts");
+  }
+
+  if (!participantContact) {
+    return ignored("sender-contact-unresolved");
+  }
+
   if (
-    summary.isFromMe
-    || messageEvent.data.message.parts.length === 0
-    || !participantContact
-    || shouldIgnoreHostedLinqForLocalInboundGuard({
+    shouldIgnoreHostedLinqForLocalInboundGuard({
       isFromMe: summary.isFromMe,
       participantContact,
     })
   ) {
-    return ignored("ignored-group-chat");
+    return ignored("local-inbound-not-allowlisted");
   }
 
-  const accountLookupKey = createHostedPhoneLookupKey(recipientPhoneNumber);
-  if (!accountLookupKey) {
-    return ignored("ignored-group-chat");
+  const incomingRecipientPhone = normalizePhoneNumber(recipientPhoneNumber);
+  const accountLookupKey = createHostedPhoneLookupKey(incomingRecipientPhone);
+  if (!incomingRecipientPhone || !accountLookupKey) {
+    return ignored("recipient-line-authority-unresolved");
   }
 
   const senderLookup = participantContact.kind === "phone"
@@ -1798,8 +1822,10 @@ async function planHostedLinqGroupChatWebhook(input: {
       });
   const sender = senderLookup?.core ?? null;
   if (!sender) {
-    return ignored("ignored-group-chat");
+    return ignored("sender-identity-unresolved");
   }
+  const senderIdentityMatch: HostedLinqExistingMemberMatch =
+    participantContact.kind === "phone" ? "phone-identity" : "verified-email";
   if (
     isHostedMemberSuspended(sender.suspendedAt)
     || !(await readActiveHostedMemberAccess({
@@ -1807,14 +1833,14 @@ async function planHostedLinqGroupChatWebhook(input: {
       prisma: input.prisma,
     }))
   ) {
-    return ignored("group-chat-sender-inactive");
+    return ignored("sender-inactive", senderIdentityMatch);
   }
 
   if (!(await hasActiveHostedLinqManagedLine({
     phoneNumberLookupKeys: input.threadRouteAccountLookupKeys,
     prisma: input.prisma,
   }))) {
-    return ignored("group-chat-unmanaged-line");
+    return ignored("recipient-line-unmanaged", senderIdentityMatch);
   }
 
   let createdContainerMemberId: string | null = null;
@@ -1853,7 +1879,7 @@ async function planHostedLinqGroupChatWebhook(input: {
     threadId: summary.chatId,
   });
   if (!route) {
-    return ignored("group-chat-provision-unavailable");
+    return ignored("provision-unavailable", senderIdentityMatch);
   }
 
   const plan = await planHostedLinqExplicitThreadRouteWebhook({
