@@ -182,6 +182,7 @@ const mocks = vi.hoisted(() => {
     acceptHostedFamilyInviteFromPhoneTx: vi.fn(),
     buildHostedFamilyInviteAcceptedReplyText: vi.fn(() => "Welcome to Murph Family."),
     resolveHostedFamilyInviteTokenForInbound: vi.fn(),
+    resolveHostedLinqMailboxPayloadRootPrewarmMemberId: vi.fn(async () => null),
   };
 
   return state;
@@ -212,6 +213,17 @@ vi.mock("@/src/lib/hosted-mailbox/store", async () => {
     appendHostedMailboxEnvelopeTx: mocks.appendHostedMailboxEnvelopeTx,
     readHostedMailboxItemByDedupeKey: mocks.readHostedMailboxItemByDedupeKey,
     readHostedMailboxItemOwnerById: mocks.readHostedMailboxItemOwnerById,
+  };
+});
+
+vi.mock("@/src/lib/hosted-onboarding/webhook-provider-linq", async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import("@/src/lib/hosted-onboarding/webhook-provider-linq")
+  >();
+  return {
+    ...actual,
+    resolveHostedLinqMailboxPayloadRootPrewarmMemberId:
+      mocks.resolveHostedLinqMailboxPayloadRootPrewarmMemberId,
   };
 });
 
@@ -2386,6 +2398,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       },
       hostedThreadContainerParticipant: {
         findFirst: vi.fn().mockResolvedValue(null),
+        updateMany: vi.fn().mockResolvedValue({ count: 0 }),
       },
       hostedWebhookReceipt: {
         create: vi.fn().mockResolvedValue({}),

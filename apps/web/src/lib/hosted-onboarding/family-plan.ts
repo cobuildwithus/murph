@@ -311,6 +311,11 @@ export type HostedFamilyStripeSubscriptionResult = {
   groupId: string | null;
 };
 
+export type PreparedHostedFamilyCryptoDomainRoots = ReadonlyMap<
+  string,
+  PreparedHostedCryptoDomainRootCandidates
+>;
+
 export interface HostedAccountGroupInvitePrivateSnapshot
   extends Omit<HostedAccountGroupInviteSnapshot,
     | "planCode"
@@ -1196,6 +1201,22 @@ export async function writeHostedAccountGroupStripeBillingTx(input: {
   }
 
   await lockHostedMemberRow(input.tx, group.ownerMemberId);
+  const currentGroup = await input.tx.hostedAccountGroup.findUnique({
+    select: {
+      owner: {
+        select: { suspendedAt: true },
+      },
+      suspendedAt: true,
+    },
+    where: { id: input.groupId },
+  });
+  if (
+    !currentGroup
+    || isHostedMemberSuspended(currentGroup.owner.suspendedAt)
+    || isHostedMemberSuspended(currentGroup.suspendedAt)
+  ) {
+    return null;
+  }
 
   const currentBillingRef = await input.tx.hostedAccountGroupBillingRef.findUnique({
     select: hostedAccountGroupBillingRefSelect,
@@ -1340,6 +1361,81 @@ export async function findHostedAccountGroupForStripeSubscription(input: {
   return match?.group ?? null;
 }
 
+/**
+ * Read-only phase for active Family Stripe reconciliation. The membership
+ * snapshot is only a bounded preparation hint: the owner transaction repeats
+ * group, membership, direct-paid, capacity, and billing checks before it may
+ * consume any candidate.
+ */
+export async function prepareHostedFamilyStripeActivationCryptoDomainRoots(input: {
+  prisma: PrismaClient;
+  subscription: Stripe.Subscription;
+}): Promise<PreparedHostedFamilyCryptoDomainRoots> {
+  if (
+    !isHostedFamilyStripeSubscriptionMetadata(input.subscription)
+    || mapStripeSubscriptionStatusToHostedBillingStatus(input.subscription.status)
+      !== HostedBillingStatus.active
+    || !readHostedFamilyStripePlanState({
+      priceIdsByPlan: readHostedOnboardingEnvironment().stripeFamilyPriceIdsByPlan,
+      subscription: input.subscription,
+    })
+  ) {
+    return new Map();
+  }
+
+  const group = await findHostedAccountGroupForStripeSubscription(input);
+  if (!group) {
+    return new Map();
+  }
+
+  const memberships = await input.prisma.hostedAccountGroupMembership.findMany({
+    orderBy: {
+      memberId: "asc",
+    },
+    select: {
+      memberId: true,
+    },
+    take: HOSTED_FAMILY_MAX_SEATS + 1,
+    where: {
+      groupId: group.id,
+      status: "active",
+    },
+  });
+  if (memberships.length > HOSTED_FAMILY_MAX_SEATS) {
+    // The authoritative transaction will fail the group billing projection
+    // closed. Do not perform provider work for an already-invalid snapshot.
+    return new Map();
+  }
+
+  const preparedByMember = new Map<
+    string,
+    PreparedHostedCryptoDomainRootCandidates
+  >();
+  for (const membership of memberships) {
+    // A reused direct subscription still resolves to the owner until the
+    // authoritative Family transaction clears that same billing reference.
+    // Prepare the owner unconditionally so that handoff cannot retry forever.
+    if (
+      membership.memberId !== group.ownerMemberId
+      && await hasHostedFamilyMemberDirectPaid({
+        memberId: membership.memberId,
+        prisma: input.prisma,
+      })
+    ) {
+      continue;
+    }
+    preparedByMember.set(
+      membership.memberId,
+      await prepareHostedCryptoDomainRootCandidates({
+        prisma: input.prisma,
+        userId: membership.memberId,
+      }),
+    );
+  }
+
+  return preparedByMember;
+}
+
 export async function prepareHostedLegacySyntheticFamilyCleanupTx(input: {
   event: Stripe.Event;
   tx: Prisma.TransactionClient;
@@ -1427,6 +1523,7 @@ export async function applyHostedFamilyStripeCheckoutCompletedTx(input: {
 
 export async function applyHostedFamilyStripeSubscriptionUpdatedTx(input: {
   dispatchContext: { eventCreatedAt?: Date | null };
+  preparedCryptoDomainRootsByMember?: PreparedHostedFamilyCryptoDomainRoots;
   subscription: Stripe.Subscription;
   tx: Prisma.TransactionClient;
 }): Promise<HostedFamilyStripeSubscriptionResult> {
@@ -1624,6 +1721,8 @@ export async function applyHostedFamilyStripeSubscriptionUpdatedTx(input: {
     const activations = await activateHostedFamilyGroupMembersForActiveBillingTx({
       groupId: group.id,
       occurredAt: input.dispatchContext.eventCreatedAt ?? new Date(),
+      preparedCryptoDomainRootsByMember:
+        input.preparedCryptoDomainRootsByMember ?? new Map(),
       sourceEventId: `family-subscription:${input.subscription.id}`,
       tx: input.tx,
     });
@@ -3056,12 +3155,14 @@ export async function acceptHostedFamilyInvite(input: {
   requireWebBinding?: boolean;
 }): Promise<HostedAccountGroupMembershipAccessSnapshot> {
   const prisma = input.prisma ?? getPrisma();
+  const preflightNow = input.now ?? new Date();
   const activationHolder: { value: HostedMemberActivationResult | null } = {
     value: null,
   };
   const inviteBinding = await prisma.hostedAccountGroupInvite.findUnique({
     select: {
       acceptedByMemberId: true,
+      expiresAt: true,
       status: true,
       targetEmailLookupKey: true,
       targetPhoneLookupKey: true,
@@ -3071,13 +3172,17 @@ export async function acceptHostedFamilyInvite(input: {
       inviteCode: input.inviteCode,
     },
   });
-  if (
-    inviteBinding &&
-    !(
-      inviteBinding.status === "accepted" &&
-      inviteBinding.acceptedByMemberId === input.acceptedMemberId
-    )
-  ) {
+  if (!inviteBinding) {
+    throw hostedOnboardingError({
+      code: "HOSTED_FAMILY_INVITE_NOT_FOUND",
+      httpStatus: 404,
+      message: "That family invite is no longer valid.",
+    });
+  }
+  const acceptedReplay =
+    inviteBinding.status === "accepted"
+    && inviteBinding.acceptedByMemberId === input.acceptedMemberId;
+  if (!acceptedReplay) {
     assertHostedFamilyInviteIdentityBinding({
       email: input.email,
       invite: inviteBinding,
@@ -3086,11 +3191,25 @@ export async function acceptHostedFamilyInvite(input: {
       telegramUsernameWasPresented: false,
     });
   }
-  const preparedCryptoDomainRoots =
-    await prepareHostedCryptoDomainRootCandidates({
-      prisma,
-      userId: input.acceptedMemberId,
+  if (
+    !acceptedReplay
+    && (
+      inviteBinding.status !== "pending"
+      || inviteBinding.expiresAt <= preflightNow
+    )
+  ) {
+    throw hostedOnboardingError({
+      code: "HOSTED_FAMILY_INVITE_NOT_ACTIVE",
+      httpStatus: 410,
+      message: "That family invite has expired or was already used.",
     });
+  }
+  const preparedCryptoDomainRoots = acceptedReplay
+    ? new Map()
+    : await prepareHostedCryptoDomainRootCandidates({
+        prisma,
+        userId: input.acceptedMemberId,
+      });
 
   const membership = await prisma.$transaction((tx) => acceptHostedFamilyInviteTx({
     ...input,
@@ -4647,7 +4766,10 @@ async function assertHostedFamilyMemberNotDirectPaidTx(input: {
   if (input.allowDirectPaidOwner) {
     return;
   }
-  if (await hasHostedFamilyMemberDirectPaidTx(input)) {
+  if (await hasHostedFamilyMemberDirectPaid({
+    memberId: input.memberId,
+    prisma: input.tx,
+  })) {
     throw hostedOnboardingError({
       code: "HOSTED_FAMILY_DIRECT_PAID_TRANSFER_REQUIRED",
       httpStatus: 409,
@@ -4656,11 +4778,11 @@ async function assertHostedFamilyMemberNotDirectPaidTx(input: {
   }
 }
 
-async function hasHostedFamilyMemberDirectPaidTx(input: {
+async function hasHostedFamilyMemberDirectPaid(input: {
   memberId: string;
-  tx: Prisma.TransactionClient;
+  prisma: HostedOnboardingReadClient;
 }): Promise<boolean> {
-  const member = await input.tx.hostedMember.findUnique({
+  const member = await input.prisma.hostedMember.findUnique({
     select: {
       billingRef: {
         select: {
@@ -4683,10 +4805,14 @@ async function hasHostedFamilyMemberDirectPaidTx(input: {
 async function activateHostedFamilyGroupMembersForActiveBillingTx(input: {
   groupId: string;
   occurredAt: Date;
+  preparedCryptoDomainRootsByMember: PreparedHostedFamilyCryptoDomainRoots;
   sourceEventId: string;
   tx: Prisma.TransactionClient;
 }): Promise<HostedMemberActivationResult[]> {
   const memberships = await input.tx.hostedAccountGroupMembership.findMany({
+    orderBy: {
+      memberId: "asc",
+    },
     select: {
       memberId: true,
     },
@@ -4703,9 +4829,9 @@ async function activateHostedFamilyGroupMembersForActiveBillingTx(input: {
       memberId: membership.memberId,
       tx: input.tx,
     });
-    if (await hasHostedFamilyMemberDirectPaidTx({
+    if (await hasHostedFamilyMemberDirectPaid({
       memberId: membership.memberId,
-      tx: input.tx,
+      prisma: input.tx,
     })) {
       continue;
     }
@@ -4717,6 +4843,9 @@ async function activateHostedFamilyGroupMembersForActiveBillingTx(input: {
     activations.push(await activateHostedMemberForFamilySponsorshipTx({
       memberId: membership.memberId,
       occurredAt: input.occurredAt,
+      preparedCryptoDomainRoots:
+        input.preparedCryptoDomainRootsByMember.get(membership.memberId)
+        ?? new Map(),
       prisma: input.tx,
       sourceEventId: input.sourceEventId,
     }));

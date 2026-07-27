@@ -607,14 +607,18 @@ describe("hosted onboarding stripe billing events", () => {
       groupId: "hbag_family",
     });
     const tx = {};
+    const preparedFamilyCryptoDomainRoots = new Map([
+      ["member_owner", new Map()],
+    ]);
+    const subscription = makeStripeSubscription({
+      metadata: {
+        accountGroupId: "hbag_family",
+        kind: "hosted_family_plan",
+      },
+    });
 
     await applyStripeSubscriptionUpdated(
-      makeStripeSubscription({
-        metadata: {
-          accountGroupId: "hbag_family",
-          kind: "hosted_family_plan",
-        },
-      }),
+      subscription,
       {
         eventCreatedAt: new Date("2026-04-23T00:00:00.000Z"),
         occurredAt: "2026-04-23T00:00:00.000Z",
@@ -622,8 +626,16 @@ describe("hosted onboarding stripe billing events", () => {
         sourceType: "stripe.customer.subscription.updated",
       },
       tx as never,
+      preparedFamilyCryptoDomainRoots,
     );
 
+    expect(mocks.applyHostedFamilyStripeSubscriptionUpdatedTx).toHaveBeenCalledWith(
+      expect.objectContaining({
+        preparedCryptoDomainRootsByMember: preparedFamilyCryptoDomainRoots,
+        subscription,
+        tx,
+      }),
+    );
     expect(mocks.reconcileHostedAiUsageGateForBillingModeChangeTx).toHaveBeenCalledWith({
       memberId: "member_owner",
       now: new Date("2026-04-23T00:00:00.000Z"),
@@ -641,6 +653,9 @@ describe("hosted onboarding stripe billing events", () => {
       groupId: "hbag_family",
     });
     const tx = {};
+    const preparedFamilyCryptoDomainRoots = new Map([
+      ["member_owner", new Map()],
+    ]);
     const subscription = makeStripeSubscription({
       id: "sub_family",
       metadata: {
@@ -660,8 +675,17 @@ describe("hosted onboarding stripe billing events", () => {
       tx as never,
       HostedBillingStatus.active,
       subscription,
+      undefined,
+      preparedFamilyCryptoDomainRoots,
     );
 
+    expect(mocks.applyHostedFamilyStripeSubscriptionUpdatedTx).toHaveBeenCalledWith(
+      expect.objectContaining({
+        preparedCryptoDomainRootsByMember: preparedFamilyCryptoDomainRoots,
+        subscription,
+        tx,
+      }),
+    );
     expect(mocks.reconcileHostedAiUsageGateForBillingModeChangeTx).toHaveBeenCalledWith({
       memberId: "member_owner",
       now: new Date("2026-04-23T00:00:00.000Z"),
@@ -678,6 +702,9 @@ describe("hosted onboarding stripe billing events", () => {
       groupId: "hbag_family",
     });
     const tx = {};
+    const preparedFamilyCryptoDomainRoots = new Map([
+      ["member_owner", new Map()],
+    ]);
     const subscription = makeStripeSubscription({
       id: "sub_family",
       metadata: {
@@ -697,8 +724,16 @@ describe("hosted onboarding stripe billing events", () => {
       tx as never,
       HostedBillingStatus.active,
       subscription,
+      preparedFamilyCryptoDomainRoots,
     );
 
+    expect(mocks.applyHostedFamilyStripeSubscriptionUpdatedTx).toHaveBeenCalledWith(
+      expect.objectContaining({
+        preparedCryptoDomainRootsByMember: preparedFamilyCryptoDomainRoots,
+        subscription,
+        tx,
+      }),
+    );
     expect(mocks.reconcileHostedAiUsageGateForBillingModeChangeTx).toHaveBeenCalledWith({
       memberId: "member_owner",
       now: new Date("2026-04-23T00:00:00.000Z"),
@@ -1554,6 +1589,31 @@ describe("hosted onboarding stripe billing events", () => {
       stripeSubscriptionId: "sub_123",
       suspendedAtOverride: null,
     }));
+  });
+
+  it("keeps restoration pending when the member has no subscription identity", async () => {
+    mocks.findMemberForStripeReversal.mockResolvedValueOnce(makeMemberSnapshot({
+      billingStatus: HostedBillingStatus.unpaid,
+      billingRef: {
+        memberId: "member_123",
+        stripeCustomerId: "cus_123",
+        stripeSubscriptionId: null,
+      },
+    }));
+
+    await expect(applyStripeDisputeUpdated(
+      makeStripeDispute({ status: "won" }),
+      {
+        eventCreatedAt: new Date("2026-04-26T00:00:00.000Z"),
+        sourceEventId: "evt_dispute_funds_reinstated_without_subscription",
+        sourceType: "stripe.charge.dispute.funds_reinstated",
+      },
+      {} as never,
+      "cus_123",
+    )).resolves.toBe("subscription_identity_pending");
+
+    expect(mocks.requireHostedStripeApi).not.toHaveBeenCalled();
+    expect(mocks.writeHostedMemberStripeBillingTx).not.toHaveBeenCalled();
   });
 
   it("does not clear dispute suspension when the canonical subscription is not active", async () => {

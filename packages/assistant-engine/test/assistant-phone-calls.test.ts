@@ -54,13 +54,10 @@ describe("assistant phone calls", () => {
       phoneCallsAvailable: false,
     })).not.toContain(MURPH_CREATE_PHONE_CALL_TOOL);
     expect(MURPH_CREATE_PHONE_CALL_TOOL.description).toContain(
-      "Set allowTransferToUser=true for calls likely to require live user identity verification",
+      "$MURPH_ASSISTANT_SKILLS_ROOT/phone-calls/SKILL.md",
     );
     expect(MURPH_CREATE_PHONE_CALL_TOOL.description).toContain(
-      "Set allowTransferToUser=false for info-only calls",
-    );
-    expect(MURPH_CREATE_PHONE_CALL_TOOL.description).toContain(
-      "Set callerName to the user-approved first name",
+      "only when the user asked Murph to call or clearly approved this specific call",
     );
     expect(MURPH_CREATE_PHONE_CALL_TOOL.description).toContain(
       "$MURPH_ASSISTANT_SKILLS_ROOT/appointment-scheduling/SKILL.md",

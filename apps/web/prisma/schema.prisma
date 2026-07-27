@@ -550,6 +550,7 @@ model HostedMember {
   hostedCryptoAudits             HostedUserCryptoAudit[]
   webSessions                    HostedWebSession[]
   mealPhotoCaptureEnrollments    HostedMealPhotoCaptureEnrollment[]
+  addressBookProjection          HostedAddressBookProjection?
   connectedAppsSession           HostedConnectedAppsSession?
   connectedAppConnectIntents     HostedConnectedAppConnectIntent[]
   clinicalRecordConnectIntents       ClinicalRecordConnectIntent[]
@@ -641,6 +642,34 @@ model HostedMealPhotoCaptureEnrollment {
   @@index([memberId, revokedAt, expiresAt])
   @@index([expiresAt])
   @@map("hosted_meal_photo_capture_enrollment")
+}
+
+model HostedAddressBookProjection {
+  memberId              String                     @id @map("member_id")
+  enabled               Boolean
+  revision              Int
+  lastMutationId        String                     @map("last_mutation_id")
+  lastMutationOperation String                     @map("last_mutation_operation")
+  lastReplacedAt        DateTime?                   @map("last_replaced_at")
+  disabledAt            DateTime?                   @map("disabled_at")
+  createdAt             DateTime                   @default(now()) @map("created_at")
+  updatedAt             DateTime                   @updatedAt @map("updated_at")
+  member                HostedMember               @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  contacts              HostedAddressBookContact[]
+
+  @@map("hosted_address_book_projection")
+}
+
+model HostedAddressBookContact {
+  memberId              String                      @map("member_id")
+  phoneTokenVersion     Int                         @map("phone_token_version")
+  phoneToken            String                      @map("phone_token")
+  advisoryNameEncrypted String                      @map("advisory_name_encrypted")
+  projection            HostedAddressBookProjection @relation(fields: [memberId], references: [memberId], onDelete: Cascade)
+
+  @@id([memberId, phoneTokenVersion, phoneToken])
+  @@index([phoneTokenVersion])
+  @@map("hosted_address_book_contact")
 }
 
 model HostedSensitiveActionChallenge {
@@ -1286,6 +1315,31 @@ model HostedAccountExitReason {
 
   @@index([createdAt])
   @@map("hosted_account_exit_reason")
+}
+
+/// FK-free retry ownership for external cleanup after canonical account rows
+/// are gone. The payload contains only KMS-encrypted provider/runtime ids.
+model HostedAccountDeletionCleanup {
+  id                    String    @id
+  payloadCiphertext     String    @map("payload_ciphertext")
+  kmsKeyName            String    @map("kms_key_name")
+  environment           String
+  privyUserLookupKey    String?   @map("privy_user_lookup_key")
+  cloudflareCompletedAt DateTime? @map("cloudflare_completed_at")
+  stripeCompletedAt     DateTime? @map("stripe_completed_at")
+  privyCompletedAt      DateTime? @map("privy_completed_at")
+  attemptCount          Int       @default(0) @map("attempt_count")
+  nextAttemptAt         DateTime  @map("next_attempt_at")
+  lastAttemptedAt       DateTime? @map("last_attempted_at")
+  lastErrorCode         String?   @map("last_error_code")
+  leaseToken            String?   @map("lease_token")
+  leaseExpiresAt        DateTime? @map("lease_expires_at")
+  createdAt             DateTime  @default(now()) @map("created_at")
+  updatedAt             DateTime  @updatedAt @map("updated_at")
+
+  @@index([nextAttemptAt, leaseExpiresAt])
+  @@index([privyUserLookupKey, privyCompletedAt])
+  @@map("hosted_account_deletion_cleanup")
 }
 
 enum HostedAccountExitReasonCode {

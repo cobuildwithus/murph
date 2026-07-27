@@ -72,6 +72,7 @@ import {
 import {
   applyHostedFamilyStripeCheckoutCompletedTx,
   applyHostedFamilyStripeSubscriptionUpdatedTx,
+  type PreparedHostedFamilyCryptoDomainRoots,
   type HostedFamilyStripeSubscriptionResult,
 } from "./family-plan";
 import { normalizeNullableString } from "./shared";
@@ -489,9 +490,12 @@ export async function applyStripeSubscriptionUpdated(
   subscription: Stripe.Subscription,
   dispatchContext: HostedStripeDispatchContext,
   prisma: Prisma.TransactionClient,
+  preparedFamilyCryptoDomainRoots?: PreparedHostedFamilyCryptoDomainRoots,
 ): Promise<HostedStripeSubscriptionUpdateOutcome> {
   const familySubscription = await applyHostedFamilyStripeSubscriptionUpdatedWithUsageTx({
     dispatchContext,
+    preparedCryptoDomainRootsByMember:
+      preparedFamilyCryptoDomainRoots ?? new Map(),
     subscription,
     tx: prisma,
   });
@@ -600,10 +604,13 @@ export async function applyStripeInvoicePaid(
   canonicalBillingStatus?: HostedBillingStatus | null,
   canonicalSubscription?: Stripe.Subscription | null,
   preparedCryptoDomainRoots?: PreparedHostedCryptoDomainRootCandidates,
+  preparedFamilyCryptoDomainRoots?: PreparedHostedFamilyCryptoDomainRoots,
 ): Promise<HostedStripeActivationOutcome> {
   if (canonicalSubscription) {
     const familySubscription = await applyHostedFamilyStripeSubscriptionUpdatedWithUsageTx({
       dispatchContext,
+      preparedCryptoDomainRootsByMember:
+        preparedFamilyCryptoDomainRoots ?? new Map(),
       subscription: canonicalSubscription,
       tx: prisma,
     });
@@ -748,10 +755,13 @@ export async function applyStripeInvoicePaymentFailed(
   prisma: Prisma.TransactionClient,
   canonicalBillingStatus?: HostedBillingStatus | null,
   canonicalSubscription?: Stripe.Subscription | null,
+  preparedFamilyCryptoDomainRoots?: PreparedHostedFamilyCryptoDomainRoots,
 ): Promise<void> {
   if (canonicalSubscription) {
     const familySubscription = await applyHostedFamilyStripeSubscriptionUpdatedWithUsageTx({
       dispatchContext,
+      preparedCryptoDomainRootsByMember:
+        preparedFamilyCryptoDomainRoots ?? new Map(),
       subscription: canonicalSubscription,
       tx: prisma,
     });
@@ -822,6 +832,7 @@ function buildHostedStripeActivationOutcomeFromFamilySubscription(
 
 async function applyHostedFamilyStripeSubscriptionUpdatedWithUsageTx(input: {
   dispatchContext: HostedStripeDispatchContext;
+  preparedCryptoDomainRootsByMember: PreparedHostedFamilyCryptoDomainRoots;
   subscription: Stripe.Subscription;
   tx: Prisma.TransactionClient;
 }): Promise<HostedFamilyStripeSubscriptionResult> {
@@ -1497,10 +1508,10 @@ export async function applyStripeDisputeUpdated(
   dispatchContext: Pick<HostedStripeDispatchContext, "eventCreatedAt" | "sourceEventId" | "sourceType">,
   prisma: Prisma.TransactionClient,
   customerId?: string | null,
-): Promise<void> {
+): Promise<"applied" | "subscription_identity_pending"> {
   const outcome = classifyHostedStripeDisputeOutcome(dispute, dispatchContext.sourceType);
   if (outcome === "ignore") {
-    return;
+    return "applied";
   }
 
   const member = await findMemberForStripeReversal({
@@ -1512,7 +1523,7 @@ export async function applyStripeDisputeUpdated(
   });
 
   if (!member) {
-    return;
+    return "applied";
   }
 
   const billingDispatchContext = {
@@ -1525,12 +1536,12 @@ export async function applyStripeDisputeUpdated(
   if (outcome === "restore") {
     const subscription = await readHostedMemberStripeSubscription(member);
     if (!subscription) {
-      return;
+      return "subscription_identity_pending";
     }
 
     const canonicalBillingStatus = mapStripeSubscriptionStatusToHostedBillingStatus(subscription.status);
     if (canonicalBillingStatus !== HostedBillingStatus.active) {
-      return;
+      return "applied";
     }
 
     const { canonicalBillingStatus: resolvedCanonicalBillingStatus, member: preparedMember } =
@@ -1556,7 +1567,7 @@ export async function applyStripeDisputeUpdated(
       suspendedAtOverride: null,
       tx: prisma,
     });
-    return;
+    return "applied";
   }
 
   const { canonicalBillingStatus, member: preparedMember } = await prepareHostedMemberStripeBillingWrite({
@@ -1571,6 +1582,7 @@ export async function applyStripeDisputeUpdated(
     stripeCustomerId: customerId ?? undefined,
     tx: prisma,
   });
+  return "applied";
 }
 
 type HostedStripeDisputeOutcome = "ignore" | "restore" | "suspend";
