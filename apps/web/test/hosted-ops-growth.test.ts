@@ -829,7 +829,7 @@ describe("hosted ops growth metrics", () => {
     expect(mocks.decodeHostedMailboxStoredPayload).toHaveBeenCalledTimes(6);
   });
 
-  it("keeps admission-time group members stable across identity deletion and reassignment", async () => {
+  it("keeps admission-time group members stable when provider identity is missing or reassigned", async () => {
     const now = new Date("2026-07-06T12:00:00.000Z");
     const registeredPhone = requireLinqContact("phone", "+15550000001");
     queueCurrentMetricMocks();
@@ -856,6 +856,11 @@ describe("hosted ops growth metrics", () => {
         senderMemberId: "member_later",
         senderUserId: "telegram-user-reassigned",
       }),
+      buildTelegramGroupMailboxRow({
+        containerMemberId: "thread_container_three",
+        occurredAt: new Date("2026-07-02T12:00:00.000Z"),
+        senderMemberId: "member_without_provider_identity",
+      }),
     ]);
     mocks.hostedGrowthAggregate.findUniqueOrThrow.mockResolvedValueOnce({
       trackedFulfilledUsageTopUps: 0,
@@ -870,8 +875,8 @@ describe("hosted ops growth metrics", () => {
     const dashboard = await readHostedGrowthDashboard(now);
 
     expect(dashboard.activeUsers).toEqual({
-      trailing30Days: 2,
-      trailing7Days: 2,
+      trailing30Days: 3,
+      trailing7Days: 3,
       wowPercent: null,
     });
     expect(mocks.hostedMemberIdentity.findMany).not.toHaveBeenCalled();
