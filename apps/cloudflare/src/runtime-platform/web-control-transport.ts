@@ -49,6 +49,25 @@ export type HostedWebControlTransport =
   | {
     mode: "proxy";
   };
+
+export interface HostedWebControlPlaneJsonRequest {
+  acceptedStatuses?: readonly number[];
+  body?: unknown;
+  boundUserId: string;
+  description: string;
+  fetchImpl: typeof fetch;
+  headers?: Headers;
+  method?: "GET" | "POST";
+  path: string;
+  replayOnceOnRetryableFailure?: boolean;
+  sensitiveResponseBody?: {
+    maxBytes: number;
+  };
+  signal?: AbortSignal | null;
+  timeoutMs: number;
+  transport: HostedWebControlTransport;
+}
+
 export class HostedWebControlPlaneResponseError extends Error {
   readonly code: string | undefined;
   readonly context: {
@@ -162,22 +181,37 @@ function assertReplaySafeHostedWebControlRetryPath(path: string): void {
   }
 }
 
-export async function fetchHostedWebControlPlaneJson(input: {
-  acceptedStatuses?: readonly number[];
-  body?: unknown;
-  boundUserId: string;
-  description: string;
-  fetchImpl: typeof fetch;
-  headers?: Headers;
-  method?: "GET" | "POST";
-  path: string;
-  sensitiveResponseBody?: {
-    maxBytes: number;
-  };
-  signal?: AbortSignal | null;
-  timeoutMs: number;
-  transport: HostedWebControlTransport;
-}): Promise<unknown> {
+export async function fetchHostedWebControlPlaneJson(
+  input: HostedWebControlPlaneJsonRequest,
+): Promise<unknown> {
+  const deadlineMs = Date.now() + input.timeoutMs;
+  const maxAttempts = input.replayOnceOnRetryableFailure === true ? 2 : 1;
+  let attempt = 0;
+
+  while (attempt < maxAttempts) {
+    try {
+      return await fetchHostedWebControlPlaneJsonAttempt({
+        ...input,
+        timeoutMs: Math.max(0, deadlineMs - Date.now()),
+      });
+    } catch (error) {
+      attempt += 1;
+      if (
+        attempt >= maxAttempts
+        || !isRetryableHostedWebControlExactReplayError(error)
+        || Date.now() >= deadlineMs
+      ) {
+        throw error;
+      }
+    }
+  }
+
+  throw new Error(`${input.description} request failed.`);
+}
+
+async function fetchHostedWebControlPlaneJsonAttempt(
+  input: HostedWebControlPlaneJsonRequest,
+): Promise<unknown> {
   if (
     input.sensitiveResponseBody
     && (
@@ -196,6 +230,7 @@ export async function fetchHostedWebControlPlaneJson(input: {
   });
   const body = input.body === undefined ? undefined : JSON.stringify(input.body);
   const requestStartedAt = Date.now();
+  const requestDeadlineMs = requestStartedAt + input.timeoutMs;
   const requestLogDetails = buildHostedWebControlRequestLogDetails({
     body,
     description: input.description,
@@ -323,7 +358,7 @@ export async function fetchHostedWebControlPlaneJson(input: {
     maxBytes: input.sensitiveResponseBody?.maxBytes,
     response,
     signal: input.signal ?? null,
-    timeoutMs: input.timeoutMs,
+    timeoutMs: Math.max(0, requestDeadlineMs - Date.now()),
   });
   const acceptedStatus = input.acceptedStatuses?.includes(response.status) ?? false;
   if (!response.ok && !acceptedStatus) {
@@ -396,35 +431,35 @@ async function readHostedWebControlPlaneResponseText(input: {
   timeoutMs: number;
 }): Promise<string> {
   const maxBytes = input.maxBytes;
-  if (maxBytes === undefined) {
-    return await input.response.text();
-  }
-
-  const contentLengthText = input.response.headers.get("content-length")?.trim() ?? "";
-  const contentLength = /^\d+$/u.test(contentLengthText)
-    ? Number(contentLengthText)
-    : null;
-  if (
-    contentLength !== null
-    && Number.isSafeInteger(contentLength)
-    && contentLength > maxBytes
-  ) {
-    try {
-      await input.response.body?.cancel();
-    } catch {
-      // The fixed-size rejection below is the authoritative failure.
+  if (maxBytes !== undefined) {
+    const contentLengthText =
+      input.response.headers.get("content-length")?.trim() ?? "";
+    const contentLength = /^\d+$/u.test(contentLengthText)
+      ? Number(contentLengthText)
+      : null;
+    if (
+      contentLength !== null
+      && Number.isSafeInteger(contentLength)
+      && contentLength > maxBytes
+    ) {
+      try {
+        await input.response.body?.cancel();
+      } catch {
+        // The fixed-size rejection below is the authoritative failure.
+      }
+      throw createHostedWebControlPlaneResponseTooLargeError({
+        description: input.description,
+        maxBytes,
+      });
     }
-    throw createHostedWebControlPlaneResponseTooLargeError({
-      description: input.description,
-      maxBytes,
-    });
   }
 
   if (!input.response.body) {
     return "";
   }
 
-  const chunks: Uint8Array[] = [];
+  const decoder = new TextDecoder();
+  let text = "";
   let totalBytes = 0;
   for await (const chunk of readHostedRuntimeResponseBodyChunks({
     body: input.response.body,
@@ -433,22 +468,23 @@ async function readHostedWebControlPlaneResponseText(input: {
     timeoutMs: input.timeoutMs,
   })) {
     totalBytes += chunk.byteLength;
-    if (totalBytes > maxBytes) {
+    if (maxBytes !== undefined && totalBytes > maxBytes) {
       throw createHostedWebControlPlaneResponseTooLargeError({
         description: input.description,
         maxBytes,
       });
     }
-    chunks.push(chunk);
+    text += decoder.decode(chunk, { stream: true });
   }
+  text += decoder.decode();
+  return text;
+}
 
-  const bytes = new Uint8Array(totalBytes);
-  let offset = 0;
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset);
-    offset += chunk.byteLength;
+function isRetryableHostedWebControlExactReplayError(error: unknown): boolean {
+  if (error instanceof HostedWebControlPlaneResponseError) {
+    return error.status >= 500 && error.status <= 599;
   }
-  return new TextDecoder().decode(bytes);
+  return isRetryableHostedWebControlReadError(error);
 }
 
 function createHostedWebControlPlaneResponseTooLargeError(input: {

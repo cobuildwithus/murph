@@ -1,6 +1,6 @@
 # PR 1010 response-body retry retrospective
 
-Status: active
+Status: completed
 Created: 2026-07-27
 Updated: 2026-07-27
 
@@ -73,4 +73,12 @@ Updated: 2026-07-27
 - The first full Cloudflare Node run proved that the shared reader must preserve
   caller abort and timeout reasons. The normalization now wraps only body
   failures that occur before either bound signal aborts; all 160 directly
-  affected tests and the full 110-file / 1,995-test Cloudflare Node lane pass.
+  affected tests pass.
+- Canonical local diff verification passes for every changed source and test:
+  the Cloudflare Node lane reports 110 files / 1,996 tests and the Workers lane
+  reports 2 files / 2 tests.
+- Full local acceptance passes on rerun, including package coverage plus both
+  Cloudflare and Web app verification/builds. The first acceptance attempt hit
+  the unchanged setup-wizard Venice completion timing test; its exact focused
+  rerun passed before the complete green acceptance rerun.
+Completed: 2026-07-27

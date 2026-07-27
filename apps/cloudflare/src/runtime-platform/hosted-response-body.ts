@@ -1,7 +1,6 @@
 import {
   HostedRuntimeControlPlaneFetchError,
   combineAbortSignalsWithCleanup,
-  isRetryableHostedRuntimeReplaySafeReadTransportError,
   shouldPreserveHostedRuntimeFetchError,
 } from "./control-plane-fetch.ts";
 
@@ -44,11 +43,11 @@ export async function* readHostedRuntimeResponseBodyChunks(input: {
       },
     });
 
-    if (isRetryableHostedRuntimeReplaySafeReadTransportError(wrappedError)) {
-      throw wrappedError;
+    if (readSignal.signal.aborted) {
+      throw error;
     }
 
-    throw error;
+    throw wrappedError;
   } finally {
     if (!streamDone) {
       await reader.cancel().catch(() => undefined);

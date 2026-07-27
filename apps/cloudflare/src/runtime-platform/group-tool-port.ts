@@ -12,12 +12,8 @@ import {
 
 import {
   fetchHostedWebControlPlaneJson,
-  HostedWebControlPlaneResponseError,
   type HostedWebControlTransport,
 } from "./web-control-transport.ts";
-import {
-  isRetryableHostedWebControlReadError,
-} from "./control-plane-fetch.ts";
 
 const HOSTED_VAULT_SHARE_SUPPORTED_PROJECTION_SCOPE_PARAM = "supportedProjectionScope";
 
@@ -29,29 +25,16 @@ export function createHostedRuntimeGroupToolPort(input: {
 }): NonNullable<HostedRuntimePlatform["groupToolPort"]> {
   return {
     async request(request) {
-      const deadlineMs = Date.now() + input.timeoutMs;
-      const fetchRequest = () => fetchHostedWebControlPlaneJson({
-          body: request,
-          boundUserId: input.boundUserId,
-          description: "Hosted group tool",
-          fetchImpl: input.fetchImpl,
-          path: buildHostedRuntimeGroupToolPath(),
-          timeoutMs: Math.max(1, deadlineMs - Date.now()),
-          transport: input.transport,
-        });
-      let payload: unknown;
-      try {
-        payload = await fetchRequest();
-      } catch (error) {
-        if (
-          !isHostedAssistantAskGroupToolRequest(request)
-          || !isRetryableHostedAssistantAskRequestError(error)
-          || deadlineMs <= Date.now()
-        ) {
-          throw error;
-        }
-        payload = await fetchRequest();
-      }
+      const payload = await fetchHostedWebControlPlaneJson({
+        body: request,
+        boundUserId: input.boundUserId,
+        description: "Hosted group tool",
+        fetchImpl: input.fetchImpl,
+        path: buildHostedRuntimeGroupToolPath(),
+        replayOnceOnRetryableFailure: isHostedAssistantAskGroupToolRequest(request),
+        timeoutMs: input.timeoutMs,
+        transport: input.transport,
+      });
 
       try {
         return parseHostedRuntimeGroupToolResponse(payload);
@@ -68,13 +51,6 @@ function isHostedAssistantAskGroupToolRequest(
   >[0],
 ): boolean {
   return request.action === "ask" || request.action === "ask_member";
-}
-
-function isRetryableHostedAssistantAskRequestError(error: unknown): boolean {
-  if (error instanceof HostedWebControlPlaneResponseError) {
-    return error.status >= 500 && error.status <= 599;
-  }
-  return isRetryableHostedWebControlReadError(error);
 }
 
 function buildHostedRuntimeGroupToolPath(): string {
