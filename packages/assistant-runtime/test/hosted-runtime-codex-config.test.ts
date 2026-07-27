@@ -69,7 +69,7 @@ const HOSTED_CODEX_AUTOCOMPACTION_E2E_TOKEN_LIMIT = 12_000;
 const HOSTED_CODEX_AUTOCOMPACTION_SUMMARY_SENTINEL =
   "HOSTED_CODEX_AUTOCOMPACTION_SUMMARY_SENTINEL";
 const EXPECTED_MULTI_AGENT_USAGE_HINT = [
-  "Use hosted children only for bounded background parsing or import work and optional enrichment or research whose result is not needed in the current reply.",
+  "Proactively spawn a hosted child for bounded background parsing or import work and optional enrichment or research whose result is not needed in the current reply, and reply without waiting.",
   "Follow the active route or skill contract for child design and completion proof.",
 ].join(" ");
 const EXPECTED_MULTI_AGENT_MODE_HINT =

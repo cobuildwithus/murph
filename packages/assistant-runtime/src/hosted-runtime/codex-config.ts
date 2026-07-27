@@ -58,7 +58,7 @@ const DEFAULT_HOSTED_CODEX_REASONING_EFFORT = "low";
 const DEFAULT_HOSTED_CODEX_APPROVAL_POLICY = "never";
 const DEFAULT_HOSTED_CODEX_SANDBOX = "danger-full-access";
 const HOSTED_CODEX_MULTI_AGENT_USAGE_HINT_TEXT = [
-  "Use hosted children only for bounded background parsing or import work and optional enrichment or research whose result is not needed in the current reply.",
+  "Proactively spawn a hosted child for bounded background parsing or import work and optional enrichment or research whose result is not needed in the current reply, and reply without waiting.",
   "Follow the active route or skill contract for child design and completion proof.",
 ].join(" ");
 const HOSTED_CODEX_MULTI_AGENT_MODE_HINT_TEXT =
