@@ -1,6 +1,6 @@
 # Async Image Completion Wake
 
-Status: active
+Status: completed
 Updated: 2026-07-26
 
 ## Why
@@ -58,3 +58,4 @@ as it is ready.
 - Open a replacement PR with a source/test/docs/config line breakdown and retire
   the closed PR's worktree once its detached local processes are explicitly
   authorized for termination.
+Completed: 2026-07-26
