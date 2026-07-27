@@ -1,6 +1,6 @@
 # Hosted Mailbox Runtime Protocol
 
-Last verified: 2026-07-25
+Last verified: 2026-07-26
 
 ## Decision
 
@@ -115,16 +115,18 @@ owned App Server before it releases the job slot for another invocation. A stop
 failure poisons the container rather than allowing a replacement invocation to
 reuse ambiguous process state.
 
-Ordinary hosted root threads select the native `murph-hosted-root` permission
-profile. It preserves the current root filesystem write and tool-network
-authority but exact-denies model-invoked child tools the managed
-`CODEX_HOME/auth.json` file. The resident App Server remains outside the child
-sandbox and retains the file-backed login/refresh path. The root profile and
-current workspace roots are supplied and attested on both `thread/start` and
-`thread/resume`; a mismatch is stale execution context and must be rejected
-before `turn/start`. The narrower group-read and room-model profiles remain
-fresh, ephemeral one-shot boundaries, and local, group-email, and output-only
-turn policy is unchanged.
+Every supported ordinary hosted sandbox selects a native Murph permission
+profile. The read-only and workspace profiles extend Codex's matching built-in
+authority, while the root profile preserves root filesystem write and
+tool-network authority. All three deny model-invoked child tools the entire
+managed `CODEX_HOME`, including `auth.json` and executable `config.toml`. The
+resident App Server remains outside the child sandbox and retains the
+host-owned login, refresh, and config path. The selected profile, its built-in
+parent, and current workspace roots are supplied and attested on both
+`thread/start` and `thread/resume`; a mismatch is stale execution context and
+must be rejected before `turn/start`. The narrower group-read and room-model
+profiles remain fresh, ephemeral one-shot boundaries, and local, group-email,
+and output-only turn policy is unchanged.
 
 Detached MultiAgent V2 work does not become a process-memory queue. Before the
 root reply, Murph retains a durable accepted input, canonical fact, or raw
@@ -1221,10 +1223,10 @@ normal traffic.
 Hosted Codex auth is system-mailbox runtime-control work. The short-lived
 account-operation App Server owns connect/disconnect, and the resident App
 Server owns provider refresh and warm continuity; both remain outside the
-model-invoked child-tool sandbox. Ordinary hosted root child tools receive an
-exact deny on managed `auth.json`. A failed connect prunes the local credential
-best effort before recording failure. Disconnect remains
-local-revocation-first for cleanup: remote app-server logout is best effort,
+model-invoked child-tool sandbox. Every ordinary hosted child profile denies the
+managed Codex home, including `auth.json` and `config.toml`. A failed connect
+prunes the local credential best effort before recording failure. Disconnect
+remains local-revocation-first for cleanup: remote app-server logout is best effort,
 local `auth.json` deletion is required, and a local deletion failure keeps the
 system-mailbox item retryable instead of consuming a revocation request.
 

@@ -3,28 +3,62 @@ import { describe, expect, it } from "vitest";
 import {
   buildMurphGroupReadPermissionProfileTomlLines,
   buildMurphGroupRoomModelMaintenancePermissionProfileTomlLines,
-  buildMurphHostedRootPermissionProfileTomlLines,
+  buildMurphHostedPermissionProfileTomlLines,
+  MURPH_HOSTED_PERMISSION_PROFILES,
+  readMurphHostedPermissionProfile,
+  resolveMurphHostedPermissionProfile,
 } from "../src/assistant-permissions.ts";
 
-describe("ordinary hosted root Codex permissions", () => {
-  it("preserves root and network authority while denying the managed auth file", () => {
+describe("ordinary hosted Codex permissions", () => {
+  it("preserves each sandbox authority while denying the managed Codex home", () => {
     expect(
-      buildMurphHostedRootPermissionProfileTomlLines({
-        managedCodexAuthPath: "/var/lib/murph/.codex-hosted/auth.json",
+      buildMurphHostedPermissionProfileTomlLines({
+        managedCodexHome: "/var/lib/murph/.codex-hosted",
       }),
     ).toEqual([
-      "# Ordinary hosted root turns retain current filesystem and network authority while child tools cannot read the managed Codex credential file.",
+      "# Ordinary hosted turns retain their selected authority while child tools cannot access the managed Codex home.",
+      "[permissions.murph-hosted-read-only]",
+      'extends = ":read-only"',
+      "",
+      "[permissions.murph-hosted-read-only.filesystem]",
+      '"/var/lib/murph/.codex-hosted" = "deny"',
+      "",
+      "[permissions.murph-hosted-workspace]",
+      'extends = ":workspace"',
+      "",
+      "[permissions.murph-hosted-workspace.filesystem]",
+      '"/var/lib/murph/.codex-hosted" = "deny"',
+      "",
       "[permissions.murph-hosted-root.filesystem]",
       '":root" = "write"',
       '"/.git" = "write"',
       '"/.agents" = "write"',
       '"/.codex" = "write"',
-      '"/var/lib/murph/.codex-hosted/auth.json" = "deny"',
+      '"/var/lib/murph/.codex-hosted" = "deny"',
       "",
       "[permissions.murph-hosted-root.network]",
       "enabled = true",
       "",
     ]);
+  });
+
+  it("resolves every supported hosted sandbox and rejects unrelated profiles", () => {
+    for (const [sandbox, expected] of Object.entries(
+      MURPH_HOSTED_PERMISSION_PROFILES,
+    )) {
+      expect(
+        resolveMurphHostedPermissionProfile(
+          sandbox as keyof typeof MURPH_HOSTED_PERMISSION_PROFILES,
+        ),
+      ).toBe(expected);
+      expect(readMurphHostedPermissionProfile(expected.id)).toBe(expected);
+    }
+
+    expect(resolveMurphHostedPermissionProfile(null)).toBe(
+      MURPH_HOSTED_PERMISSION_PROFILES["danger-full-access"],
+    );
+    expect(readMurphHostedPermissionProfile("murph-group-read")).toBeNull();
+    expect(readMurphHostedPermissionProfile(null)).toBeNull();
   });
 });
 

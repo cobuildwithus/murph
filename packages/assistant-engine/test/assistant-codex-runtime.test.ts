@@ -16,7 +16,11 @@ import {
   type HostedAssistantProductModel,
   type HostedAssistantReasoningEffort,
 } from '@murphai/hosted-execution/assistant-model'
-import { MURPH_HOSTED_ROOT_PERMISSION_PROFILE } from '@murphai/hosted-execution/assistant-permissions'
+import {
+  MURPH_HOSTED_READ_ONLY_PERMISSION_PROFILE,
+  MURPH_HOSTED_ROOT_PERMISSION_PROFILE,
+  MURPH_HOSTED_WORKSPACE_PERMISSION_PROFILE,
+} from '@murphai/hosted-execution/assistant-permissions'
 import {
   initializeVault,
   withHostedCanonicalWritePort,
@@ -4681,10 +4685,26 @@ describe('assistant codex runtime', () => {
     })
   })
 
-  it('requests and attests the ordinary hosted root profile across warm start and resume', async () => {
+  it.each([
+    {
+      parentProfile: ':read-only',
+      permissionProfile: MURPH_HOSTED_READ_ONLY_PERMISSION_PROFILE,
+    },
+    {
+      parentProfile: ':workspace',
+      permissionProfile: MURPH_HOSTED_WORKSPACE_PERMISSION_PROFILE,
+    },
+    {
+      parentProfile: null,
+      permissionProfile: MURPH_HOSTED_ROOT_PERMISSION_PROFILE,
+    },
+  ] as const)(
+    'requests and attests ordinary hosted profile $permissionProfile across warm start and resume',
+    async ({ parentProfile, permissionProfile }) => {
     const workingDirectory = await createTempDir('assistant-codex-hosted-root-work-')
     const codexHome = await createTempDir('assistant-codex-hosted-root-home-')
     const children: MockChildProcess[] = []
+    const threadId = `thread-${permissionProfile}`
 
     codexMocks.spawn.mockImplementation(() => {
       const child = new MockChildProcess()
@@ -4700,16 +4720,17 @@ describe('assistant codex runtime', () => {
             id: threadStart.id,
             result: {
               activePermissionProfile: {
-                id: MURPH_HOSTED_ROOT_PERMISSION_PROFILE,
+                id: permissionProfile,
+                ...(parentProfile ? { extends: parentProfile } : {}),
               },
               approvalPolicy: 'never',
               cwd: workingDirectory,
-              // Ordinary root turns retain normal project instruction loading.
+              // Ordinary hosted turns retain normal project instruction loading.
               instructionSources: [{ source: 'workspace' }],
               modelProvider: 'openai',
               runtimeWorkspaceRoots: [workingDirectory],
               thread: {
-                id: 'thread-hosted-root',
+                id: threadId,
               },
             },
           }))
@@ -4737,14 +4758,15 @@ describe('assistant codex runtime', () => {
             id: threadResume.id,
             result: {
               activePermissionProfile: {
-                id: MURPH_HOSTED_ROOT_PERMISSION_PROFILE,
+                id: permissionProfile,
+                ...(parentProfile ? { extends: parentProfile } : {}),
               },
               approvalPolicy: 'never',
               cwd: workingDirectory,
               modelProvider: 'openai',
               runtimeWorkspaceRoots: [workingDirectory],
               thread: {
-                id: 'thread-hosted-root',
+                id: threadId,
               },
             },
           }))
@@ -4777,7 +4799,7 @@ describe('assistant codex runtime', () => {
       codexHome,
       env: { PATH: '/custom/bin' },
       modelProvider: 'openai',
-      permissions: MURPH_HOSTED_ROOT_PERMISSION_PROFILE,
+      permissions: permissionProfile,
       runtimeWorkspaceRoots: [workingDirectory],
       workingDirectory,
     } as const
@@ -4786,15 +4808,15 @@ describe('assistant codex runtime', () => {
       ...commonInput,
       prompt: 'first hosted root turn',
     })).resolves.toMatchObject({
-      sessionId: 'thread-hosted-root',
+      sessionId: threadId,
       turnId: 'turn-hosted-root-1',
     })
     await expect(executeCodexAppServerTurn({
       ...commonInput,
       prompt: 'resumed hosted root turn',
-      resumeSessionId: 'thread-hosted-root',
+      resumeSessionId: threadId,
     })).resolves.toMatchObject({
-      sessionId: 'thread-hosted-root',
+      sessionId: threadId,
       turnId: 'turn-hosted-root-2',
     })
 
@@ -4802,20 +4824,21 @@ describe('assistant codex runtime', () => {
     const child = requireMockChildProcess(children[0] ?? null)
     expect(asRecord((await waitForRpcMethod(child, 'thread/start')).params)).toMatchObject({
       cwd: workingDirectory,
-      permissions: MURPH_HOSTED_ROOT_PERMISSION_PROFILE,
+      permissions: permissionProfile,
       runtimeWorkspaceRoots: [workingDirectory],
     })
     expect(asRecord((await waitForRpcMethod(child, 'thread/resume')).params)).toMatchObject({
       cwd: workingDirectory,
-      permissions: MURPH_HOSTED_ROOT_PERMISSION_PROFILE,
+      permissions: permissionProfile,
       runtimeWorkspaceRoots: [workingDirectory],
-      threadId: 'thread-hosted-root',
+      threadId,
     })
     expect(asRecord((await waitForRpcMethod(child, 'thread/start')).params).sandbox)
       .toBeUndefined()
     expect(asRecord((await waitForRpcMethod(child, 'thread/resume')).params).sandbox)
       .toBeUndefined()
-  })
+    },
+  )
 
   it.each([
     {
@@ -4905,6 +4928,71 @@ describe('assistant codex runtime', () => {
       expect(process.kill).toHaveBeenCalledWith(-27_600, 'SIGTERM')
     },
   )
+
+  it('fails closed before turn start when a hosted profile attests the wrong parent authority', async () => {
+    const workingDirectory = await createTempDir(
+      'assistant-codex-hosted-parent-work-',
+    )
+    const children: MockChildProcess[] = []
+    mockProcessGroupSignalsForChildren(children)
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+      child.pid = 27_601
+      children.push(child)
+
+      queueMicrotask(() => {
+        void (async () => {
+          const initialize = await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+
+          const threadStart = await waitForRpcMethod(child, 'thread/start')
+          child.stdout.write(jsonLine({
+            id: threadStart.id,
+            result: {
+              activePermissionProfile: {
+                extends: ':read-only',
+                id: MURPH_HOSTED_WORKSPACE_PERMISSION_PROFILE,
+              },
+              approvalPolicy: 'never',
+              cwd: workingDirectory,
+              instructionSources: [{ source: 'workspace' }],
+              modelProvider: 'openai',
+              runtimeWorkspaceRoots: [workingDirectory],
+              thread: {
+                id: 'thread-hosted-wrong-parent',
+              },
+            },
+          }))
+        })()
+      })
+
+      return child
+    })
+
+    await expect(executeCodexAppServerTurn({
+      approvalPolicy: 'never',
+      modelProvider: 'openai',
+      permissions: MURPH_HOSTED_WORKSPACE_PERMISSION_PROFILE,
+      prompt: 'must not start with the wrong hosted parent authority',
+      runtimeWorkspaceRoots: [workingDirectory],
+      workingDirectory,
+    })).rejects.toMatchObject({
+      code: 'ASSISTANT_CODEX_APP_SERVER_PERMISSION_ATTESTATION_FAILED',
+      context: {
+        mismatchedFields: ['activePermissionProfile'],
+        retryable: false,
+      },
+    })
+
+    const child = requireMockChildProcess(children[0] ?? null)
+    expect(
+      readWrittenRpcMessages(child).some(
+        (message) => message.method === 'turn/start',
+      ),
+    ).toBe(false)
+    expect(process.kill).toHaveBeenCalledWith(-27_601, 'SIGTERM')
+  })
 
   it('keeps narrower named profiles fresh, ephemeral, and one-shot', async () => {
     const workingDirectory = await createTempDir('assistant-codex-narrow-profile-work-')

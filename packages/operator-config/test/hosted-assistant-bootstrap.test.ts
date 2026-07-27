@@ -192,43 +192,51 @@ test('hosted assistant config parsing and readiness helpers normalize Codex host
   assert.throws(() => parseHostedAssistantConfig(null), /required/u)
 })
 
-test('hosted assistant bootstrap maps OpenAI env to Codex model provider config', async () => {
-  const hostedConfigModule = await loadHostedAssistantModule({
-    readOperatorConfigResult: null,
-  })
+test.each([
+  'read-only',
+  'workspace-write',
+  'danger-full-access',
+] as const)(
+  'hosted assistant bootstrap persists the $sandbox OpenAI Codex sandbox',
+  async (sandbox) => {
+    const hostedConfigModule = await loadHostedAssistantModule({
+      readOperatorConfigResult: null,
+    })
 
-  vi.stubEnv('HOSTED_ASSISTANT_PROVIDER', 'openai')
-  vi.stubEnv('HOSTED_ASSISTANT_REASONING_EFFORT', 'medium')
-  vi.stubEnv('HOSTED_ASSISTANT_APPROVAL_POLICY', 'never')
-  vi.stubEnv('HOSTED_ASSISTANT_SANDBOX', 'danger-full-access')
+    vi.stubEnv('HOSTED_ASSISTANT_PROVIDER', 'openai')
+    vi.stubEnv('HOSTED_ASSISTANT_REASONING_EFFORT', 'medium')
+    vi.stubEnv('HOSTED_ASSISTANT_APPROVAL_POLICY', 'never')
+    vi.stubEnv('HOSTED_ASSISTANT_SANDBOX', sandbox)
 
-  const seeded = await hostedConfigModule.ensureHostedAssistantOperatorDefaults({
-    allowMissing: false,
-    homeDirectory: '/tmp/operator-home',
-  })
+    const seeded = await hostedConfigModule.ensureHostedAssistantOperatorDefaults({
+      allowMissing: false,
+      homeDirectory: '/tmp/operator-home',
+    })
 
-  assert.deepEqual(seeded, {
-    configured: true,
-    provider: 'codex-cli',
-    seeded: true,
-    source: 'hosted-env',
-  })
-  assert.equal(hostedConfigModule.saveHostedAssistantConfig.mock.calls.length, 1)
-  assert.equal(
-    hostedConfigModule.saveHostedAssistantConfig.mock.calls[0]?.[1],
-    '/tmp/operator-home',
-  )
+    assert.deepEqual(seeded, {
+      configured: true,
+      provider: 'codex-cli',
+      seeded: true,
+      source: 'hosted-env',
+    })
+    assert.equal(hostedConfigModule.saveHostedAssistantConfig.mock.calls.length, 1)
+    assert.equal(
+      hostedConfigModule.saveHostedAssistantConfig.mock.calls[0]?.[1],
+      '/tmp/operator-home',
+    )
 
-  const savedProfile = hostedConfigModule.saveHostedAssistantConfig.mock.calls[0]?.[0]
-    ?.profiles?.[0]
-  assertCodexOpenAiProfile(savedProfile, {
-    reasoningEffort: 'medium',
-  })
-  assert.equal(
-    OPENAI_CODEX_MODEL_PROVIDER_CONFIG.envKey,
-    'OPENAI_API_KEY',
-  )
-})
+    const savedProfile = hostedConfigModule.saveHostedAssistantConfig.mock.calls[0]?.[0]
+      ?.profiles?.[0]
+    assertCodexOpenAiProfile(savedProfile, {
+      reasoningEffort: 'medium',
+      sandbox,
+    })
+    assert.equal(
+      OPENAI_CODEX_MODEL_PROVIDER_CONFIG.envKey,
+      'OPENAI_API_KEY',
+    )
+  },
+)
 
 test('hosted assistant bootstrap rejects removed local Codex bridge env', async () => {
   const hostedConfigModule = await loadHostedAssistantModule({

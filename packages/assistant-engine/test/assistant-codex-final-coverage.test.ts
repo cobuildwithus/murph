@@ -8,7 +8,9 @@ import {
 } from '@murphai/hosted-execution/env'
 import {
   MURPH_GROUP_ROOM_MODEL_MAINTENANCE_PERMISSION_PROFILE,
+  MURPH_HOSTED_READ_ONLY_PERMISSION_PROFILE,
   MURPH_HOSTED_ROOT_PERMISSION_PROFILE,
+  MURPH_HOSTED_WORKSPACE_PERMISSION_PROFILE,
 } from '@murphai/hosted-execution/assistant-permissions'
 
 const providerMocks = vi.hoisted(() => ({
@@ -907,14 +909,29 @@ describe('Codex model catalog', () => {
     })
   })
 
-  it('drops unsupported rich user parts and keeps flex for supported hosted OpenAI routes', async () => {
+  it.each([
+    {
+      expectedPermissionProfile: MURPH_HOSTED_READ_ONLY_PERMISSION_PROFILE,
+      sandbox: 'read-only',
+    },
+    {
+      expectedPermissionProfile: MURPH_HOSTED_WORKSPACE_PERMISSION_PROFILE,
+      sandbox: 'workspace-write',
+    },
+    {
+      expectedPermissionProfile: MURPH_HOSTED_ROOT_PERMISSION_PROFILE,
+      sandbox: 'danger-full-access',
+    },
+  ] as const)(
+    'drops unsupported rich user parts and maps hosted $sandbox to its guarded native profile',
+    async ({ expectedPermissionProfile, sandbox }) => {
     const providerScopeEvents: string[] = []
     const flexCatalog = await createHostedCodexFlexCatalog({ model: 'gpt-5.6-terra' })
     const route = createRoute({
       providerOptions: {
         model: 'gpt-5.6-terra',
         modelProvider: 'hosted-openai',
-        sandbox: 'danger-full-access',
+        sandbox,
       },
     })
     const session = createAssistantSession({
@@ -1032,7 +1049,7 @@ describe('Codex model catalog', () => {
       providerMocks.executeCodexAssistantTurnAttemptFromInput.mock.calls[0]?.[0]
     expect(providerInput?.serviceTier).toBe('flex')
     expect(providerInput).toMatchObject({
-      permissions: MURPH_HOSTED_ROOT_PERMISSION_PROFILE,
+      permissions: expectedPermissionProfile,
       runtimeWorkspaceRoots: ['/work'],
     })
     expect(timeoutSpy).toHaveBeenCalledWith(600_000)
@@ -1049,7 +1066,8 @@ describe('Codex model catalog', () => {
         type: 'image',
       },
     ])
-  })
+    },
+  )
 
   it('forwards voice memo delivery availability for deliverable Linq and Telegram replies', async () => {
     const route = createRoute()

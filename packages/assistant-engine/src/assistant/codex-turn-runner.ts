@@ -6,7 +6,7 @@ import {
 } from '@murphai/hosted-execution/assistant-usage'
 import {
   MURPH_GROUP_ROOM_MODEL_MAINTENANCE_PERMISSION_PROFILE,
-  MURPH_HOSTED_ROOT_PERMISSION_PROFILE,
+  resolveMurphHostedPermissionProfile,
 } from '@murphai/hosted-execution/assistant-permissions'
 import {
   resolveHostedAiUsageTokenPricingBasis,
@@ -464,12 +464,15 @@ async function executeAssistantCodexAttempt(input: {
     const groupEmailTurn =
       audience.threadIsDirect === false &&
       normalizeNullableString(audience.channel)?.toLowerCase() === 'email'
-    const ordinaryHostedRootPermissionTurn =
+    const ordinaryHostedPermissionProfile =
       executionPlan.executionContext?.hosted != null &&
-      attemptPlan.route.providerOptions.sandbox === 'danger-full-access' &&
       !outputOnlyTurn &&
       !groupEmailTurn &&
       !groupRoomModelMaintenanceTurn
+        ? resolveMurphHostedPermissionProfile(
+            attemptPlan.route.providerOptions.sandbox,
+          )
+        : null
     const attemptResult = await executeCodexAssistantTurnAttemptFromInput({
       providerConfig: {
         approvalPolicy: outputOnlyTurn
@@ -561,8 +564,8 @@ async function executeAssistantCodexAttempt(input: {
           : executionPlan.progressDelivery ?? null,
         permissions: groupRoomModelMaintenanceTurn
           ? MURPH_GROUP_ROOM_MODEL_MAINTENANCE_PERMISSION_PROFILE
-          : ordinaryHostedRootPermissionTurn
-            ? MURPH_HOSTED_ROOT_PERMISSION_PROFILE
+          : ordinaryHostedPermissionProfile
+            ? ordinaryHostedPermissionProfile.id
             : null,
         ...(systemNotificationTurn || groupRoomModelMaintenanceTurn
           ? { processLifetime: 'one-shot' as const }
@@ -575,7 +578,7 @@ async function executeAssistantCodexAttempt(input: {
           ? null
           : executionPlan.executionContext?.hosted?.publicInternetFetch ?? null,
         runtimeWorkspaceRoots:
-          groupRoomModelMaintenanceTurn || ordinaryHostedRootPermissionTurn
+          groupRoomModelMaintenanceTurn || ordinaryHostedPermissionProfile
             ? [attemptPlan.routePlan.workingDirectory]
             : null,
         requireGeneratedImageUploader: outputOnlyTurn

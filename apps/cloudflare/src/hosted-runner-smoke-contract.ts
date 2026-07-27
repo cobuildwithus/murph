@@ -24,7 +24,7 @@ export interface HostedRunnerSmokeResult {
   codexGroupReadRuntimeReadDenied: boolean;
   codexGroupReadSecretEnvironmentDenied: boolean;
   codexGroupReadSiblingRootReadDenied: boolean;
-  codexHostedRootPermissionBoundaryProven: boolean;
+  codexHostedOrdinaryPermissionBoundaryProven: boolean;
   codexHostedCliSurfaceContractBytes: number;
   codexHostedCliSurfaceHotPathProofCount: number;
   codexHostedConfigShellEnvironmentPolicyAllowlisted: boolean;
@@ -69,7 +69,7 @@ const HOSTED_RUNNER_SMOKE_RESULT_KEYS = new Set([
   "codexGroupReadRuntimeReadDenied",
   "codexGroupReadSecretEnvironmentDenied",
   "codexGroupReadSiblingRootReadDenied",
-  "codexHostedRootPermissionBoundaryProven",
+  "codexHostedOrdinaryPermissionBoundaryProven",
   "codexHostedCliSurfaceContractBytes",
   "codexHostedCliSurfaceHotPathProofCount",
   "codexHostedConfigShellEnvironmentPolicyAllowlisted",
@@ -182,9 +182,9 @@ export function parseHostedRunnerSmokeResult(value: unknown): HostedRunnerSmokeR
       record.codexGroupReadSiblingRootReadDenied,
       "Hosted runner smoke result.codexGroupReadSiblingRootReadDenied",
     ),
-    codexHostedRootPermissionBoundaryProven: readTrue(
-      record.codexHostedRootPermissionBoundaryProven,
-      "Hosted runner smoke result.codexHostedRootPermissionBoundaryProven",
+    codexHostedOrdinaryPermissionBoundaryProven: readTrue(
+      record.codexHostedOrdinaryPermissionBoundaryProven,
+      "Hosted runner smoke result.codexHostedOrdinaryPermissionBoundaryProven",
     ),
     codexHostedCliSurfaceContractBytes: readPositiveFiniteNumber(
       record.codexHostedCliSurfaceContractBytes,

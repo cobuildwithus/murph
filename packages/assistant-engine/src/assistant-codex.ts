@@ -7,7 +7,9 @@ import path from 'node:path'
 import type {
   HostedCodexAuthAction,
 } from '@murphai/hosted-execution/contracts'
-import { MURPH_HOSTED_ROOT_PERMISSION_PROFILE } from '@murphai/hosted-execution/assistant-permissions'
+import {
+  readMurphHostedPermissionProfile,
+} from '@murphai/hosted-execution/assistant-permissions'
 import { normalizeNullableString } from '@murphai/operator-config/text/shared'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
@@ -715,22 +717,22 @@ function assertCodexAppServerPermissionRequest(
     return
   }
 
-  const ordinaryHostedRootProfile =
-    permissions === MURPH_HOSTED_ROOT_PERMISSION_PROFILE
+  const ordinaryHostedProfile =
+    readMurphHostedPermissionProfile(permissions) !== null
   const invalidFields = [
     ...(input.sandbox ? ['sandbox'] : []),
-    ...(ordinaryHostedRootProfile || !normalizeNullableString(input.resumeSessionId)
+    ...(ordinaryHostedProfile || !normalizeNullableString(input.resumeSessionId)
       ? []
       : ['resumeSessionId']),
-    ...(ordinaryHostedRootProfile || input.ephemeral === true ? [] : ['ephemeral']),
-    ...(ordinaryHostedRootProfile || input.processLifetime === 'one-shot'
+    ...(ordinaryHostedProfile || input.ephemeral === true ? [] : ['ephemeral']),
+    ...(ordinaryHostedProfile || input.processLifetime === 'one-shot'
       ? []
       : ['processLifetime']),
   ]
   if (invalidFields.length > 0) {
     throw new VaultCliError(
       'ASSISTANT_CODEX_APP_SERVER_REQUEST_INVALID',
-      ordinaryHostedRootProfile
+      ordinaryHostedProfile
         ? 'The ordinary hosted Codex permission profile cannot be combined with a legacy sandbox.'
         : 'Named Codex permissions require a fresh ephemeral thread in a one-shot process without a legacy sandbox.',
       {
@@ -4933,8 +4935,9 @@ function assertCodexThreadStartPermissionAttestation(input: {
     mismatchedFields.push('cwd')
   }
   if (
-    normalizeNullableString(input.input.permissions) !==
-      MURPH_HOSTED_ROOT_PERMISSION_PROFILE &&
+    readMurphHostedPermissionProfile(
+      normalizeNullableString(input.input.permissions),
+    ) === null &&
     (instructionSources === null || instructionSources.length !== 0)
   ) {
     mismatchedFields.push('instructionSources')
@@ -4968,12 +4971,16 @@ function readCodexPermissionAttestationMismatches(input: {
   )
   const actualRoots = asCodexStringArray(input.result?.runtimeWorkspaceRoots)
   const expectedRoots = input.input.runtimeWorkspaceRoots ?? []
+  const expectedHostedProfile = readMurphHostedPermissionProfile(
+    normalizeNullableString(input.input.permissions),
+  )
   const mismatchedFields: string[] = []
 
   if (
     normalizeNullableString(asCodexString(activePermissionProfile?.id)) !==
       normalizeNullableString(input.input.permissions) ||
-    normalizeNullableString(asCodexString(activePermissionProfile?.extends)) !== null
+    normalizeNullableString(asCodexString(activePermissionProfile?.extends)) !==
+      (expectedHostedProfile?.extends ?? null)
   ) {
     mismatchedFields.push('activePermissionProfile')
   }

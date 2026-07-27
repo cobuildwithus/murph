@@ -8,7 +8,7 @@ import {
 import {
   buildMurphGroupReadPermissionProfileTomlLines,
   buildMurphGroupRoomModelMaintenancePermissionProfileTomlLines,
-  buildMurphHostedRootPermissionProfileTomlLines,
+  buildMurphHostedPermissionProfileTomlLines,
 } from "@murphai/hosted-execution/assistant-permissions";
 import {
   HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV,
@@ -250,7 +250,7 @@ export async function prepareHostedCodexRuntimeEnvironment(
     codexConfigPath,
     buildHostedCodexConfigToml({
       chatGptAuth,
-      managedCodexAuthPath: codexAuthPath,
+      managedCodexHome: codexHome,
       model: normalizeHostedCodexEnvString(runtimeEnv.HOSTED_ASSISTANT_MODEL),
       provider: providerConfig,
       reasoningEffort: runtimeEnv.HOSTED_ASSISTANT_REASONING_EFFORT,
@@ -525,7 +525,7 @@ function normalizeHostedCodexUrlHostname(hostname: string): string {
 
 export function buildHostedCodexConfigToml(input: {
   chatGptAuth?: boolean;
-  managedCodexAuthPath: string;
+  managedCodexHome: string;
   model: string | null;
   provider: AssistantCodexModelProviderConfig;
   reasoningEffort: string;
@@ -570,8 +570,8 @@ export function buildHostedCodexConfigToml(input: {
     "allow_login_shell = false",
     "",
     ...providerConfigLines,
-    ...buildMurphHostedRootPermissionProfileTomlLines({
-      managedCodexAuthPath: input.managedCodexAuthPath,
+    ...buildMurphHostedPermissionProfileTomlLines({
+      managedCodexHome: input.managedCodexHome,
     }),
     ...buildMurphGroupReadPermissionProfileTomlLines(),
     ...buildMurphGroupRoomModelMaintenancePermissionProfileTomlLines(),

@@ -20,18 +20,21 @@ route or device grants are request facts. They do not enter launch identity or
 the App Server child env, so an ordinary later turn cannot replace the process.
 
 Per-thread settings such as model, model provider, approval policy, sandbox,
-and cwd are sent through thread RPC. Ordinary hosted root turns select the
-native `murph-hosted-root` permission profile instead of the legacy sandbox
-field. That profile preserves the existing root filesystem write and network
-authority while denying model-invoked child tools the exact managed
-`CODEX_HOME/auth.json` file. The resident App Server remains outside the child
-tool sandbox so provider login, refresh, and warm continuity keep using the
-file-backed credential. Murph sends the profile and current workspace roots on
-both `thread/start` and `thread/resume` and attests the returned effective
-profile and roots before `turn/start`. Native resume validates the rest of
-Codex's returned thread context at the same boundary; if the resume path is
-stale, the provider starts a fresh thread for the same user turn instead of
-failing to reply. Local turns and the narrower one-shot group-read,
+and cwd are sent through thread RPC. Every ordinary hosted sandbox selects a
+native Murph permission profile instead of the legacy sandbox field:
+`murph-hosted-read-only` extends Codex's read-only profile,
+`murph-hosted-workspace` extends its workspace profile, and
+`murph-hosted-root` preserves root filesystem write and network authority.
+Each profile denies model-invoked child tools the entire managed `CODEX_HOME`,
+including credentials and executable config. The resident App Server remains
+outside the child-tool sandbox so provider login, refresh, and warm continuity
+keep using that host-owned state, while a warm replacement cannot load config
+that a prior child changed. Murph sends the profile and current workspace roots
+on both `thread/start` and `thread/resume` and attests the returned effective
+profile, built-in parent, and roots before `turn/start`. Native resume validates
+the rest of Codex's returned thread context at the same boundary; if the resume
+path is stale, the provider starts a fresh thread for the same user turn instead
+of failing to reply. Local turns and the narrower one-shot group-read,
 room-maintenance, and output-only paths keep their existing execution policy.
 Provider-table authority should be passed as explicit `--config` process args
 by the provider path; those args are already part of launch identity.

@@ -445,6 +445,11 @@ Hosted assistant config:
 - `HOSTED_ASSISTANT_REASONING_EFFORT`
 - `HOSTED_ASSISTANT_SANDBOX`
 
+Each accepted hosted sandbox value maps to a native child-tool profile that
+preserves the selected read/write/network authority while denying the managed
+Codex home. Changing this setting or the managed profile config requires an
+immediate container rollout so no warm runner keeps the prior permission set.
+
 When changing hosted assistant model pricing or allowance enforcement, deploy the
 Cloudflare Worker/runner model config before or atomically with the hosted web
 allowance logic so runtime usage callbacks keep using an allowance-priced model.
