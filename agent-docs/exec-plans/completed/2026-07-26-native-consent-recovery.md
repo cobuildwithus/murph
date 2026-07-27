@@ -1,8 +1,8 @@
 # Native consent recovery
 
-Status: active
+Status: completed
 Created: 2026-07-26
-Updated: 2026-07-26
+Updated: 2026-07-27
 
 ## Goal
 
@@ -72,3 +72,4 @@ Updated: 2026-07-26
   available before the new iOS build reaches users.
 - The existing iOS build remains compatible with the new endpoint; the new iOS
   build must not be released before the endpoint is live.
+Completed: 2026-07-27
