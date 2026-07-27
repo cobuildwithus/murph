@@ -129,6 +129,22 @@ Updated: 2026-07-26
 - Fresh migrated worktree PostgreSQL proof: 94 tests passed, including
   deletion attempts after callback state consumption before token exchange and
   after token exchange before durable connection commitment.
+- After merging current `main`, the focused device-sync ingress suite passed
+  all 70 tests, the hosted focused lane passed 91 tests with 18 opt-in cases
+  skipped, both affected typechecks passed, agent-doc drift and diff checks
+  passed, and the fresh PostgreSQL ordering lane again passed all 94 tests.
+- The merged-head local `pnpm test:diff` exposed a stale worktree install:
+  source and lockfile required `@cobuild/review-gpt` 0.5.117 while the shared
+  install still contained 0.5.114. A frozen-lockfile install corrected it and
+  the previously failing CLI audit assertion then passed.
+- The corrected local `pnpm test:diff` passed the directly changed
+  device-sync package and the preceding reverse-dependent suites, then stopped
+  only in the unchanged hosted-local harness because its documented
+  `@murphai/assistant-runtime/dist` prerequisite was absent. The prerequisite
+  package build waited ten minutes behind an independently owned active
+  acceptance run; the idle task-owned waiter was stopped without signaling the
+  active run. Neither the harness nor assistant-runtime differs from
+  `origin/main`.
 - Crabbox `pnpm verify:acceptance`: passed in Testbox
   `tbx_01kyh1eb3ngg14qv7dde0vhds0`
   ([Actions run](https://github.com/cobuildwithus/murph/actions/runs/30240432723)).
