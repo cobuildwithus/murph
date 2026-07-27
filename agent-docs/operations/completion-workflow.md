@@ -212,13 +212,15 @@ Required:
   settings from the invoking checkout and then the Git-discovered primary
   checkout, without copying or printing the credential. Embed each returned
   public `https://imagedelivery.net/...` variant URL in the PR body, and confirm
-  the URL renders (the command also performs a bounded render check before
-  printing it). Retain the local capture only until required review packaging is
-  complete, then delete it. Never print, commit, persist in repository files,
-  or pass the credential to ReviewGPT or another external reviewer; if the
-  local credential is unavailable, report the blocker instead of committing
-  proof images. Proof screenshots must not contain private member data. PRs
-  without a user-facing frontend UI diff may write `Not applicable`.
+  the URL renders. Before printing it, the command performs a bounded HTTP
+  delivery check for a successful `image/*` response; this does not replace the
+  visual confirmation in the PR body. Retain the local capture only until
+  required review packaging is complete, then delete it. Never print, commit,
+  persist in repository files, or pass the credential to ReviewGPT or another
+  external reviewer; if the local credential is unavailable, report the
+  blocker instead of committing proof images. Proof screenshots must not
+  contain private member data. PRs without a user-facing frontend UI diff may
+  write `Not applicable`.
 
 Optional when relevant: the rollout plan or follow-up PR that flips the gate, and any deliberately deferred work.
 
