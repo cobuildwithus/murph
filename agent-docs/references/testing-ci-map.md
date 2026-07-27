@@ -299,8 +299,8 @@ not enter evidence; and attachment-only input fails closed before provider work.
   applicable messaging or no-delivery destination.
 
 - Clinical Records has focused hosted-web proof for the committed Epic
-  directory v2 and acquisition policy (including exact source hashing,
-  deterministic import, v1 compatibility, all-24 query activation, unique SMART
+  directory v2 and acquisition policy (including v2-only schema admission, exact
+  source hashing, deterministic import, all-24 query activation, unique SMART
   permission aggregation, frozen bounded-window parameters,
   Atlanta/Piedmont search, and public-endpoint rejection),
   SMART scope negotiation and bounded streams, callback redaction, runtime
