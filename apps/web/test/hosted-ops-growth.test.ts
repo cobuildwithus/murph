@@ -879,7 +879,7 @@ describe("hosted ops growth metrics", () => {
     expect(mocks.hostedMemberRouting.findMany).not.toHaveBeenCalled();
   });
 
-  it("omits valid thread-container email and keeps unmatched legacy Telegram countable", async () => {
+  it("omits unattributable group messages and keeps unmatched legacy Telegram countable", async () => {
     const now = new Date("2026-07-06T12:00:00.000Z");
     queueCurrentMetricMocks();
     mocks.hostedMailboxItem.groupBy
@@ -892,8 +892,12 @@ describe("hosted ops growth metrics", () => {
         occurredAt: new Date("2026-07-05T12:00:00.000Z"),
       }),
       buildTelegramGroupMailboxRow({
-        containerMemberId: "thread_container_telegram",
+        containerMemberId: "thread_container_unattributed",
         occurredAt: new Date("2026-07-04T12:00:00.000Z"),
+      }),
+      buildTelegramGroupMailboxRow({
+        containerMemberId: "thread_container_telegram",
+        occurredAt: new Date("2026-07-03T12:00:00.000Z"),
         senderUserId: "legacy-unlinked-telegram-user",
       }),
     ]);
@@ -915,7 +919,7 @@ describe("hosted ops growth metrics", () => {
       wowPercent: null,
     });
     expect(mocks.hostedMemberRouting.findMany).toHaveBeenCalledTimes(1);
-    expect(mocks.decodeHostedMailboxStoredPayload).toHaveBeenCalledTimes(2);
+    expect(mocks.decodeHostedMailboxStoredPayload).toHaveBeenCalledTimes(3);
   });
 
   it("still rejects an unknown thread-container conversation channel", async () => {
@@ -1499,13 +1503,13 @@ function buildTelegramGroupMailboxRow(input: {
   containerMemberId: string;
   occurredAt: Date;
   senderMemberId?: string;
-  senderUserId: string;
+  senderUserId?: string;
 }) {
   const eventId = [
     "telegram",
     input.containerMemberId,
     input.occurredAt.getTime(),
-    input.senderUserId,
+    input.senderUserId ?? "unattributed",
   ].join("_");
   const threadId = `thread_${input.containerMemberId}`;
   const wake = buildHostedExecutionTelegramConversationMessageWake({
@@ -1520,7 +1524,7 @@ function buildTelegramGroupMailboxRow(input: {
       ? { senderMemberId: input.senderMemberId }
       : {}),
     telegramMessage: {
-      from: input.senderUserId,
+      ...(input.senderUserId ? { from: input.senderUserId } : {}),
       messageId: eventId,
       schema: HOSTED_EXECUTION_TELEGRAM_MESSAGE_SCHEMA,
       text: "hello",

@@ -30,6 +30,7 @@ function createRequiredWorkerDeployEnv(overrides: Record<string, string | undefi
     HOSTED_CRYPTO_ENV: "production",
     HOSTED_EXECUTION_DEPLOY_CONTEXT: "production",
     HOSTED_EXECUTION_CONTAINER_ROLLOUT: "immediate",
+    HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT: "production",
     HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME: "murph-web",
     HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG: "murph-team",
     HOSTED_R2_PRESIGN_ACCESS_KEY_ID: "r2-access-fixture",
@@ -51,6 +52,24 @@ function createRequiredWorkerDeployEnv(overrides: Record<string, string | undefi
   };
 }
 
+function createRequiredPreviewWorkerDeployEnv(
+  overrides: Record<string, string | undefined> = {},
+): EnvSource {
+  return createRequiredWorkerDeployEnv({
+    CF_BUNDLES_BUCKET: "hosted-bundles-staging",
+    CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-staging",
+    CF_PUBLIC_BASE_URL: "https://hosted-runner-staging.example.test",
+    CF_WORKER_NAME: "hosted-runner-staging",
+    HOSTED_CRYPTO_ENV: "preview",
+    HOSTED_EXECUTION_DEPLOY_CONTEXT: "preview",
+    HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT: "preview",
+    HOSTED_R2_PRESIGN_BUCKET_NAME: "hosted-bundles-staging",
+    HOSTED_WEB_BASE_URL: "https://web-staging.example.test",
+    HOSTED_WEB_PRODUCTION_BASE_URL: "https://app.example.test",
+    ...overrides,
+  });
+}
+
 describe("deploy preflight helpers", () => {
   it("requires the base deploy environment regardless of deploy mode", () => {
     expect(listMissingHostedDeployEnvironment({}, { deployWorker: false })).toEqual([
@@ -60,7 +79,7 @@ describe("deploy preflight helpers", () => {
     ]);
   });
 
-  it("requires the worker public URL plus hosted web OIDC validation env when deploy_worker is enabled", () => {
+  it("requires the worker public URL plus hosted web validation env when deploy_worker is enabled", () => {
     expect(listMissingHostedDeployEnvironment({
       CF_BUNDLES_BUCKET: "bundles",
       CF_BUNDLES_PREVIEW_BUCKET: "bundles-preview",
@@ -133,10 +152,160 @@ describe("deploy preflight helpers", () => {
     )).not.toThrow();
   });
 
+  it("preserves the source-controlled production OIDC default for direct deploys", () => {
+    const source = createRequiredWorkerDeployEnv({
+      HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT: undefined,
+    });
+
+    expect(
+      listMissingHostedDeployEnvironment(source, { deployWorker: true }),
+    ).not.toContain("HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT");
+    expect(() => assertHostedDeployEnvironment(
+      source,
+      { deployWorker: true },
+    )).not.toThrow();
+  });
+
+  it.each([
+    "development",
+    "preview",
+  ] as const)("requires an explicit OIDC environment for %s deploys", (deployContext) => {
+    const source = createRequiredWorkerDeployEnv({
+      HOSTED_EXECUTION_DEPLOY_CONTEXT: deployContext,
+      HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT: undefined,
+    });
+
+    expect(
+      listMissingHostedDeployEnvironment(source, { deployWorker: true }),
+    ).toContain("HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT");
+  });
+
   it("requires an explicit production web origin for production worker deploys", () => {
     expect(listMissingHostedDeployEnvironment(createRequiredWorkerDeployEnv({
       HOSTED_WEB_PRODUCTION_BASE_URL: undefined,
     }), { deployWorker: true })).toContain("HOSTED_WEB_PRODUCTION_BASE_URL");
+  });
+
+  it("requires an explicit production web origin for preview worker deploys", () => {
+    expect(listMissingHostedDeployEnvironment(createRequiredPreviewWorkerDeployEnv({
+      HOSTED_WEB_PRODUCTION_BASE_URL: undefined,
+    }), { deployWorker: true })).toContain("HOSTED_WEB_PRODUCTION_BASE_URL");
+  });
+
+  it("allows a preview deploy only through visibly scoped isolated resources", () => {
+    expect(() => assertHostedDeployEnvironment(
+      createRequiredPreviewWorkerDeployEnv(),
+      { deployWorker: true },
+    )).not.toThrow();
+  });
+
+  it("allows the R2 binding and preview binding to share one staging ENAM bucket", () => {
+    expect(
+      listHostedDeployEnvironmentInvariantErrors(
+        createRequiredPreviewWorkerDeployEnv(),
+        { deployWorker: true },
+      ),
+    ).toEqual([]);
+  });
+
+  it("rejects preview deploys that retain production crypto or OIDC context", () => {
+    expect(listHostedDeployEnvironmentInvariantErrors(
+      createRequiredPreviewWorkerDeployEnv({
+        HOSTED_CRYPTO_ENV: "production",
+        HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT: "production",
+      }),
+      { deployWorker: true },
+    )).toEqual(expect.arrayContaining([
+      "preview deploys must set HOSTED_CRYPTO_ENV=preview.",
+      "preview deploys must set HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT=preview.",
+    ]));
+  });
+
+  it("rejects preview deploys with unscoped Worker or R2 resource names", () => {
+    expect(listHostedDeployEnvironmentInvariantErrors(
+      createRequiredPreviewWorkerDeployEnv({
+        CF_BUNDLES_BUCKET: "hosted-bundles",
+        CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles",
+        CF_WORKER_NAME: "hosted-runner",
+        HOSTED_R2_PRESIGN_BUCKET_NAME: "hosted-bundles",
+      }),
+      { deployWorker: true },
+    )).toEqual(expect.arrayContaining([
+      "CF_WORKER_NAME must contain a preview or staging name segment for preview deploys.",
+      "CF_BUNDLES_BUCKET must contain a preview or staging name segment for preview deploys.",
+      "CF_BUNDLES_PREVIEW_BUCKET must contain a preview or staging name segment for preview deploys.",
+    ]));
+  });
+
+  it("rejects preview deploys with an unscoped or production hosted Web origin", () => {
+    expect(listHostedDeployEnvironmentInvariantErrors(
+      createRequiredPreviewWorkerDeployEnv({
+        HOSTED_WEB_BASE_URL: "https://app.example.test",
+      }),
+      { deployWorker: true },
+    )).toEqual(expect.arrayContaining([
+      "HOSTED_WEB_BASE_URL must use a preview or staging origin in preview deploys.",
+      "preview deploys must not set HOSTED_WEB_BASE_URL to HOSTED_WEB_PRODUCTION_BASE_URL.",
+    ]));
+  });
+
+  it("rejects preview deploys with an unscoped Worker origin", () => {
+    expect(listHostedDeployEnvironmentInvariantErrors(
+      createRequiredPreviewWorkerDeployEnv({
+        CF_PUBLIC_BASE_URL: "https://hosted-runner.example.test",
+      }),
+      { deployWorker: true },
+    )).toContain(
+      "CF_PUBLIC_BASE_URL must use a preview or staging origin in preview deploys.",
+    );
+  });
+
+  it("rejects a preview Worker that routes its Web control calls back to itself", () => {
+    expect(listHostedDeployEnvironmentInvariantErrors(
+      createRequiredPreviewWorkerDeployEnv({
+        HOSTED_WEB_BASE_URL: "https://hosted-runner-staging.example.test",
+      }),
+      { deployWorker: true },
+    )).toContain(
+      "preview deploys must keep CF_PUBLIC_BASE_URL distinct from HOSTED_WEB_BASE_URL.",
+    );
+  });
+
+  it("rejects a preview device callback on the production Web origin", () => {
+    expect(listHostedDeployEnvironmentInvariantErrors(
+      createRequiredPreviewWorkerDeployEnv({
+        DEVICE_SYNC_PUBLIC_BASE_URL: "https://app.example.test/api/device-sync",
+      }),
+      { deployWorker: true },
+    )).toContain(
+      "DEVICE_SYNC_PUBLIC_BASE_URL must not use the HOSTED_WEB_PRODUCTION_BASE_URL origin in preview deploys.",
+    );
+  });
+
+  it("requires a configured preview device callback to use a staging HTTPS URL", () => {
+    expect(listHostedDeployEnvironmentInvariantErrors(
+      createRequiredPreviewWorkerDeployEnv({
+        DEVICE_SYNC_PUBLIC_BASE_URL:
+          "http://device-sync-staging.example.test/api/device-sync",
+      }),
+      { deployWorker: true },
+    )).toContain(
+      "DEVICE_SYNC_PUBLIC_BASE_URL must be a valid preview HTTPS URL.",
+    );
+  });
+
+  it.each([
+    "CF_PUBLIC_BASE_URL",
+    "HOSTED_WEB_BASE_URL",
+  ] as const)("requires preview %s to use HTTPS", (label) => {
+    expect(listHostedDeployEnvironmentInvariantErrors(
+      createRequiredPreviewWorkerDeployEnv({
+        [label]: label === "CF_PUBLIC_BASE_URL"
+          ? "http://hosted-runner-staging.example.test"
+          : "http://web-staging.example.test",
+      }),
+      { deployWorker: true },
+    )).toContain(`${label} must be a valid preview HTTPS URL.`);
   });
 
   it("requires the direct-R2 presign bucket to match the Worker R2 binding bucket", () => {
@@ -488,6 +657,7 @@ describe("deploy preflight helpers", () => {
           HOSTED_CRYPTO_ENV: "development",
           HOSTED_EXECUTION_CONTAINER_ROLLOUT: "gradual",
           HOSTED_EXECUTION_DEPLOY_CONTEXT: "development",
+          HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT: "development",
           HOSTED_WEB_BASE_URL: "http://127.0.0.1:3000",
           HOSTED_WEB_PRODUCTION_BASE_URL: undefined,
         }),
@@ -550,6 +720,7 @@ describe("deploy preflight helpers", () => {
       CF_PUBLIC_BASE_URL: "http://localhost:8787",
       HOSTED_CRYPTO_ENV: "development",
       HOSTED_EXECUTION_DEPLOY_CONTEXT: "development",
+      HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT: "development",
       HOSTED_WEB_BASE_URL: "http://127.0.0.1:3000",
       HOSTED_WEB_PRODUCTION_BASE_URL: undefined,
     }), { deployWorker: true })).not.toThrow();
@@ -590,6 +761,46 @@ describe("deploy preflight helpers", () => {
       "HOSTED_WEB_BASE_URL must not resolve to private-network addresses in production deploys.",
     );
   });
+
+  it("allows preview deploy hostnames and a path-capable callback when all resolve publicly", async () => {
+    await expect(assertHostedDeployEnvironmentAsync(
+      createRequiredPreviewWorkerDeployEnv({
+        DEVICE_SYNC_PUBLIC_BASE_URL:
+          "https://device-sync-staging.example.test/api/device-sync",
+      }),
+      { deployWorker: true },
+      {
+        resolveHostnameAddresses: async () => ["8.8.8.8", "2001:4860:4860::8888"],
+      },
+    )).resolves.toBeUndefined();
+  });
+
+  it.each([
+    ["CF_PUBLIC_BASE_URL", "hosted-runner-staging.example.test"],
+    ["HOSTED_WEB_BASE_URL", "web-staging.example.test"],
+    ["DEVICE_SYNC_PUBLIC_BASE_URL", "device-sync-staging.example.test"],
+  ] as const)(
+    "rejects preview %s when it resolves to a private-network address",
+    async (label, privateHostname) => {
+      await expect(listHostedDeployEnvironmentInvariantErrorsAsync(
+        createRequiredPreviewWorkerDeployEnv(
+          label === "DEVICE_SYNC_PUBLIC_BASE_URL"
+            ? {
+                DEVICE_SYNC_PUBLIC_BASE_URL:
+                  "https://device-sync-staging.example.test/api/device-sync",
+              }
+            : {},
+        ),
+        { deployWorker: true },
+        {
+          resolveHostnameAddresses: async (hostname) =>
+            hostname === privateHostname ? ["10.1.2.3"] : ["8.8.8.8"],
+        },
+      )).resolves.toContain(
+        `${label} must not resolve to private-network addresses in preview deploys.`,
+      );
+    },
+  );
 
   it("parses truthy deploy-worker flag values", () => {
     expect(parseDeployWorkerFlag("true")).toBe(true);
