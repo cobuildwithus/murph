@@ -756,8 +756,7 @@ export async function executeClaimedAssistantCronJob(
                 externalThreadRouteAuthority: null,
                 route: resolveAssistantCronNotificationDeliveryRoute(claimedJob.target),
               }
-            : managedOwnerAuthorization.kind === 'authorized' &&
-                managedOwnerAuthorization.ownerScope === 'authenticated-group'
+            : managedOwnerAuthorization.kind === 'authorized'
               ? managedOwnerAuthorization.authorizedDelivery
               : await resolveAssistantCronAuthorizedNotificationDeliveryRoute({
                   executionContext: input.executionContext ?? null,
@@ -2266,16 +2265,18 @@ async function resolveAssistantCronManagedOwnerAuthorization(input: {
     return { kind: 'mismatch' }
   }
 
-  const authorizedDelivery = ownerScope === 'authenticated-group'
-    ? await resolveAssistantCronAuthorizedNotificationDeliveryRoute({
-        executionContext: input.executionContext,
-        signal: input.signal,
-        target: input.target,
-      })
-    : {
-        externalThreadRouteAuthority: null,
-        route: declaredRoute,
-      }
+  const authorizedDelivery =
+    ownerScope === 'authenticated-group' ||
+      !assistantCronJobIsPreemptibleBackgroundMaintenance(input.job)
+      ? await resolveAssistantCronAuthorizedNotificationDeliveryRoute({
+          executionContext: input.executionContext,
+          signal: input.signal,
+          target: input.target,
+        })
+      : {
+          externalThreadRouteAuthority: null,
+          route: declaredRoute,
+        }
   const route = authorizedDelivery.route
   const channel = normalizeNullableString(input.target.channel)?.toLowerCase() ?? null
   const target = normalizeNullableString(
