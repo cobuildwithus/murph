@@ -3062,6 +3062,14 @@ describe("Linq group chat auto-provision", () => {
       },
     });
     expect(prisma.hostedThreadContainerParticipant.upsert).not.toHaveBeenCalled();
+    expect(mailboxStore.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
+      envelope: expect.objectContaining({
+        message: expect.objectContaining({
+          senderMemberId: "member_owner_123",
+        }),
+      }),
+      tx: prisma,
+    });
   });
 
   it("fails closed as group when the pre-read route disappears before planning", async () => {

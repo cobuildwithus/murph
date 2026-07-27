@@ -332,6 +332,7 @@ export async function planHostedOnboardingTelegramWebhook(input: {
               containerMemberId: runtimeMemberId,
               threadId: telegramMessage.threadId,
             },
+            senderMemberId: existingMember.id,
           }
         : {}),
       telegramMessage: groupTelegramMessage,

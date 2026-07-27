@@ -11,6 +11,7 @@ import {
   type CodexAppServerTurnInput,
 } from '../src/assistant-codex.ts'
 import {
+  MURPH_AUTOMATION_TOOL,
   MURPH_COMPUTER_OPEN_TOOL,
   MURPH_FAMILY_PLAN_TOOL,
 } from '../src/assistant-codex/dynamic-tools.ts'
@@ -27,6 +28,9 @@ import {
 import {
   MURPH_CODEX_BASE_INSTRUCTIONS,
 } from '../src/assistant/codex-base-instructions.ts'
+import type {
+  AssistantHostedAutomationToolRequest,
+} from '../src/assistant/execution-context.ts'
 import {
   buildAssistantSystemPrompt,
 } from '../src/assistant/system-prompt.ts'
@@ -193,6 +197,100 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
       }
     },
     720_000,
+  )
+
+  it(
+    'saves an explicit midnight Linq reminder without off-hours confirmation',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-midnight-linq-reminder-e2e-'),
+      )
+      const automationRequests: AssistantHostedAutomationToolRequest[] = []
+
+      try {
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions:
+            buildMidnightLinqReminderDeveloperInstructions(),
+          dynamicTools: [MURPH_AUTOMATION_TOOL],
+          env: config.env,
+          excludeResumeTurns: true,
+          hostedToolContext: {
+            automationTool: {
+              request: async (request) => {
+                automationRequests.push(request)
+                return {
+                  action: 'save',
+                  automationId: 'automation-midnight-watch',
+                  created: true,
+                  lookupId: 'midnight-watch-reminder',
+                  routeBinding: 'current_conversation',
+                  status: 'active',
+                }
+              },
+            },
+            computerToolsAvailable: false,
+            currentHostedDeliveryContext: () => null,
+            currentHostedMailboxItemIds: () => [],
+            sendVaultFile: async () => {
+              throw new Error('Vault file sends are unavailable in this test.')
+            },
+            vaultFileSendAvailable: false,
+          },
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt: [
+            'Remind me here every day at midnight through July 31, 2026',
+            'to plug in my watch. Save it now.',
+          ].join(' '),
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write',
+          workingDirectory,
+        })
+        const automationCall = readCapabilityRoutingActions(
+          result.jsonEvents,
+        ).find((action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_AUTOMATION_TOOL.name
+        )
+
+        expect(automationCall).toBeDefined()
+        if (automationCall?.kind !== 'dynamic') {
+          throw new Error('Expected a real murph.automation tool call.')
+        }
+        expect(automationRequests).toHaveLength(1)
+        expect(automationRequests[0]).toMatchObject({
+          action: 'save',
+          activeUntil: expect.any(String),
+          continuityPolicy: 'preserve',
+          instructions: expect.stringMatching(
+            /plug in.*watch|watch.*plug in/iu,
+          ),
+          schedule: {
+            kind: 'dailyLocal',
+            localTime: '00:00',
+          },
+        })
+        expect(result.finalMessage).toMatch(
+          /midnight|00:00|12(?::00)?\s*a\.?m\.?/iu,
+        )
+        expect(result.finalMessage).not.toMatch(
+          /off[- ]hours|spam(?:my)?|safer (?:nearby )?time|waking[- ]time/iu,
+        )
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    360_000,
   )
 
   it(
@@ -729,6 +827,29 @@ async function materializeCapabilitySkill(input: {
     ),
     'utf8',
   )
+}
+
+function buildMidnightLinqReminderDeveloperInstructions(): string {
+  return buildAssistantSystemPrompt({
+    assistantCliContract: null,
+    assistantContextSnapshotPrompt: null,
+    assistantHostedAutomationAvailable: true,
+    assistantHostedDeviceConnectAvailable: false,
+    assistantHostedDeviceConnectProviders: [],
+    assistantKnowledgeToolsAvailable: false,
+    channel: 'linq',
+    cliAccess: {
+      rawCommand: 'vault-cli',
+      setupCommand: 'murph',
+    },
+    conversationScope: 'direct',
+    currentLocalDate: '2026-07-27',
+    currentTimeZone: 'America/New_York',
+    hostedRuntime: true,
+    modelBehaviorProfile: 'gpt5-agentic',
+    onboardingGuidance: false,
+    turnTrigger: null,
+  })
 }
 
 function buildCapabilityRoutingDeveloperInstructions(): string {

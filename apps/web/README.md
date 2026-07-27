@@ -616,14 +616,28 @@ Hosted onboarding extras:
 - `STRIPE_WEBHOOK_SECRET`
 - `LINQ_API_TOKEN`
 - `LINQ_API_BASE_URL`
-- `HOSTED_RUNTIME_LATENCY_ALERT_LINQ_CHAT_ID` optionally enables the
-  five-minute production reply-latency monitor. Configure one opaque existing
-  Linq chat ID for a dedicated operator thread; do not put a phone number in
-  this value. The participant should reply once before relying on the thread
-  for alerts. The monitor uses the fixed 30-second product boundary, sends one
-  alert per incident, silently clears its claim after a healthy scan so a later
-  incident can alert again, and stores only aggregate count/timing evidence in
-  the existing operational-alert row.
+- `HOSTED_RUNTIME_LATENCY_ALERT_LINQ_CHAT_ID` and
+  `HOSTED_RUNTIME_LATENCY_ALERT_TIME_ZONE` together enable the five-minute
+  production reply-latency monitor. Configure one opaque existing Linq chat ID
+  for a dedicated operator thread and one valid IANA time zone; do not put a
+  phone number in either value. The participant should reply once before
+  relying on the thread for alerts. The monitor uses the fixed 30-second
+  product boundary, sends one alert per continuous incident, suppresses sends
+  from 11 PM through 7 AM operator-local time, and adds up to ten minutes of
+  stable wake/retry jitter. Provider attempts therefore stay at least ten
+  minutes apart and spread across more than one five-minute cron tick. A
+  fresh health and operator-time recheck before provider admission makes no
+  attempt-state change when latency recovered or quiet hours began. Only the
+  exact row-version compare-and-swap immediately before Linq advances the
+  provider-attempt boundary; a stale evaluation cannot win after another
+  incident cycles the singleton back to the same visible status. A known-unsent
+  first deferral therefore builds fresh evidence in the morning, while a blocked
+  ambiguous retry retains its prior exact body, key, and real attempt time.
+  Once a provider call is admitted, healthy scans coalesce for the bounded
+  four-minute send lease instead of claiming recovery while the outcome is
+  unknown; the first healthy scan after the call settles, fails, or the lease
+  expires clears the incident. Persisted evidence remains aggregate
+  counts/timings in the existing operational-alert row.
 - `HOSTED_EXECUTION_CONTROL_URL`
 - `HOSTED_EXECUTION_CONTROL_TIMEOUT_MS`
 
@@ -895,8 +909,11 @@ alias proofs, elapsed drain, and post-drain verification as rollout evidence.
 - Set `CRON_SECRET` for the hosted cron routes under `/api/internal/**/cron`.
 - To receive reply-latency texts, set
   `HOSTED_RUNTIME_LATENCY_ALERT_LINQ_CHAT_ID` to a pre-established dedicated
-  operator chat and verify that line can exchange a normal reply before
-  treating the alert path as live.
+  operator chat, set `HOSTED_RUNTIME_LATENCY_ALERT_TIME_ZONE` to the operator's
+  IANA time zone, and verify that line can exchange a normal reply before
+  treating the alert path as live. With both values absent the channel stays
+  disabled; exactly one value or an invalid non-empty time zone fails the cron
+  visibly.
 - Configure the hosted public-origin envs and `HOSTED_WEB_CALLBACK_SIGNING_*`
   values exactly as described above.
 - Set `HOSTED_ONBOARDING_LINQ_CONVERSATION_PHONE_NUMBERS` and, if needed,
