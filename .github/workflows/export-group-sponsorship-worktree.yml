@@ -1,6 +1,13 @@
 name: Export group sponsorship worktree
 
 on:
+  pull_request:
+    branches:
+      - agent/reuse-saved-card-for-group-funding-v2
+    types:
+      - opened
+      - reopened
+      - synchronize
   push:
     branches:
       - agent/group-sponsorship-moments
@@ -17,6 +24,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: Create source archive
         run: |
