@@ -1,6 +1,6 @@
 # PR 932 Round 20 Provider Budget
 
-Status: active
+Status: completed
 
 ## Goal
 
@@ -53,5 +53,40 @@ the shared daily marker and exact outreach consequence.
 - Static tracing confirms buffered terminal failure releases the daily marker
   in `markHostedLinqDeliveryAcceptedBestEffort`, followed by the unconditional
   post-send marker write in `drainHostedLinqSideEffectDirect`.
+- Text create/send now consume and parse the response inside the ten-second
+  Linq timeout. The fenced transaction applies a 1.5-second lock timeout and
+  refuses provider entry unless twelve seconds remain for the provider,
+  correlation, and commit. Account-deletion suspension uses a separate
+  twenty-second transaction budget.
+- The accepted milestone is now the sole daily-marker and exact-outreach writer
+  for fenced group-aware signup effects; generic effects retain the legacy
+  post-send marker behavior.
+- Focused Web typecheck and targeted lint passed. The Linq HTTP, transport, and
+  account-data suites passed 142 tests, including a stalled response-body
+  timeout and pre-provider budget refusal.
+- The isolated worktree PostgreSQL suite passed all eight receipt/deletion
+  cases, including a real stalled HTTP body while deletion waits, real drain
+  contention that refuses provider entry, and buffered failure followed by a
+  successful generic retry.
+- The branch reconciled with `origin/main` at `62fe02fb07b2`; the only merge
+  conflict preserved both current documentation entries.
+- The explicit remote acceptance attempt failed before Testbox creation or
+  candidate execution because the landed dispatcher supplies
+  `--stop-after always` while the installed direct provider rejects that flag.
+  Final canonical proof therefore uses the documented local fallback.
+- After the base merge, the first local acceptance attempt exposed a stale
+  worktree install: the new committed Cloudflare `undici` dependency was not
+  linked locally. `pnpm install --frozen-lockfile` hydrated that dependency
+  without changing repository files.
+- The hydrated local `pnpm verify:acceptance` passed workspace guards and
+  typechecks, all package coverage and package-boundary lanes, 6,968 Web tests,
+  Web lint with zero errors, dev smoke, and the production build. It exited
+  nonzero only when the unrelated Cloudflare clinical-records cancellation
+  test hit its sixty-second timeout under composed load; the exact test then
+  passed alone in 133 ms.
+- Final local `pnpm test:diff apps/web` passed all guards, Web typecheck, 545
+  test files with 6,968 passing tests and 196 skipped tests, lint with zero
+  errors, dev smoke, and the production build.
 
 Updated: 2026-07-27
+Completed: 2026-07-27
