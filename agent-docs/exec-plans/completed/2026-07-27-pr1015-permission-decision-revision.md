@@ -1,6 +1,6 @@
 # PR 1015 permission-decision revision
 
-Status: active
+Status: completed
 Created: 2026-07-27
 Updated: 2026-07-27
 
@@ -85,6 +85,16 @@ Updated: 2026-07-27
   supersession with the share still revoked.
 - Hosted Web typechecking and agent-doc drift checks pass.
 - The disposable local proof database was removed after verification.
+- Canonical local diff verification passes for every changed schema, source,
+  test, migration, and durable-doc path, including the full hosted Web lane and
+  production build.
+- Full local acceptance passes on rerun across package coverage and both app
+  verification/build lanes. The first attempt exposed two unchanged timing
+  failures: the setup-wizard Venice completion case and the 1 ms hosted
+  preference handoff timeout case. The Venice case passed its exact focused
+  rerun; the handoff test and implementation are unchanged from the base and
+  the complete Web lane had already passed twice before the green acceptance
+  rerun.
 
 ## Deployment
 
@@ -92,3 +102,4 @@ Updated: 2026-07-27
   versioned pending claim.
 - The versioned state keeps old and new application instances fail-closed
   during rollout.
+Completed: 2026-07-27

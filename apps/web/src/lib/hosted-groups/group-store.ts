@@ -62,8 +62,7 @@ import {
   generateHostedGroupJoinCode,
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
 } from "../hosted-onboarding/shared";
-import { toHostedOnboardingLogIdSuffix } from "../hosted-onboarding/logging";
-import { normalizeNullableString, sha256Hex } from "../primitives";
+import { normalizeNullableString } from "../primitives";
 import { getPrisma } from "../prisma";
 import {
   grantHostedVaultShareTx,
@@ -1443,7 +1442,6 @@ export async function prepareHostedLinqGroupJoinApplicationClaimTx(input: {
       messageLookupKey: { in: messageLookupKeyReadCandidates },
     },
     select: {
-      projectionKindsJson: true,
       revokedAt: true,
       group: {
         select: {
@@ -1476,15 +1474,10 @@ export async function prepareHostedLinqGroupJoinApplicationClaimTx(input: {
     return null;
   }
 
-  const selectedVaultShareProjectionScopes = normalizeHostedVaultShareProjectionScopes(
-    offer.projectionKindsJson,
-  );
-
   return readHostedLinqGroupJoinApplicationClaimTx({
     groupId: group.id,
     groupRuntimeMemberId: group.runtimeMemberId,
     memberId: input.memberId,
-    selectedVaultShareProjectionScopes,
     tx: input.tx,
   });
 }
@@ -1681,7 +1674,6 @@ export async function acceptHostedGroupJoinOfferTx(input: {
           groupId: group.id,
           groupRuntimeMemberId: group.runtimeMemberId,
           memberId: input.memberId,
-          selectedVaultShareProjectionScopes,
           tx: input.tx,
         })
       : null;
@@ -1761,7 +1753,6 @@ async function readHostedLinqGroupJoinApplicationClaimTx(input: {
   groupId: string;
   groupRuntimeMemberId: string;
   memberId: string;
-  selectedVaultShareProjectionScopes: readonly HostedVaultShareProjectionScope[];
   tx: Prisma.TransactionClient;
 }): Promise<HostedLinqGroupJoinApplicationClaim | null> {
   await lockHostedMemberRow(input.tx, input.memberId);
@@ -1780,78 +1771,22 @@ async function readHostedLinqGroupJoinApplicationClaimTx(input: {
         memberId: input.memberId,
       },
     },
-    select: { id: true },
+    select: {
+      id: true,
+      sharingDecisionRevision: true,
+    },
   });
-  const projectionScopeKeys = normalizeHostedVaultShareProjectionScopes(
-    input.selectedVaultShareProjectionScopes,
-  ).map(buildHostedVaultShareProjectionScopeKey);
-  const shareRows = projectionScopeKeys.length > 0
-    ? await input.tx.hostedVaultShare.findMany({
-        where: {
-          destinationMemberId: input.groupRuntimeMemberId,
-          grantorMemberId: input.memberId,
-          projectionScopeKey: { in: projectionScopeKeys },
-        },
-        select: {
-          grantedAt: true,
-          id: true,
-          projectionScopeKey: true,
-          revokedAt: true,
-          status: true,
-        },
-      })
-    : [];
 
   return {
     groupId: input.groupId,
     groupRuntimeMemberId: input.groupRuntimeMemberId,
     memberId: input.memberId,
     membershipId: membership?.id ?? null,
+    membershipSharingDecisionRevision: membership
+      ? membership.sharingDecisionRevision ?? 0
+      : null,
     schema: HOSTED_LINQ_GROUP_JOIN_APPLICATION_CLAIM_SCHEMA,
-    selectedShareAuthorityHash:
-      createHostedLinqGroupJoinSelectedShareAuthorityHash({
-        destinationMemberId: input.groupRuntimeMemberId,
-        projectionScopeKeys,
-        shares: shareRows,
-      }),
   };
-}
-
-function createHostedLinqGroupJoinSelectedShareAuthorityHash(input: {
-  destinationMemberId: string;
-  projectionScopeKeys: readonly string[];
-  shares: readonly {
-    grantedAt: Date;
-    id: string;
-    projectionScopeKey: string;
-    revokedAt: Date | null;
-    status: string;
-  }[];
-}): string {
-  const shareByProjectionScopeKey = new Map(
-    input.shares.map((share) => [share.projectionScopeKey, share]),
-  );
-  const selectedShareAuthorities = [...new Set(input.projectionScopeKeys)]
-    .sort()
-    .map((projectionScopeKey) => {
-      const share = shareByProjectionScopeKey.get(projectionScopeKey);
-      return {
-        projectionScopeKey,
-        share: share
-          ? {
-              grantedAt: share.grantedAt.toISOString(),
-              id: share.id,
-              revokedAt: share.revokedAt?.toISOString() ?? null,
-              status: share.status,
-            }
-          : null,
-      };
-    });
-
-  return sha256Hex(JSON.stringify({
-    destinationMemberId: input.destinationMemberId,
-    selectedShareAuthorities,
-  }));
 }
 
 function buildHostedGroupJoinOfferNoMutationResult(input: {
@@ -1947,7 +1882,10 @@ async function acceptHostedGroupJoinTx(input: {
 
   const existingMembership = await input.tx.hostedGroupMember.findUnique({
     where: { groupId_memberId: { groupId: group.id, memberId: input.memberId } },
-    select: { id: true },
+    select: {
+      id: true,
+      sharingDecisionRevision: true,
+    },
   });
   if (
     input.expectedMembershipId !== undefined
@@ -2006,6 +1944,9 @@ async function acceptHostedGroupJoinTx(input: {
 
   let membershipId: string;
   let alreadyMember = false;
+  // This row is the canonical order token for group sharing decisions. Null is
+  // the expansion-era baseline zero; every committed acceptance advances it,
+  // even when the requested permission set changes no share row.
   if (!existingMembership) {
     const created = await input.tx.hostedGroupMember.create({
       data: {
@@ -2016,6 +1957,7 @@ async function acceptHostedGroupJoinTx(input: {
         joinedAt: input.now,
         memberId: input.memberId,
         role: "member",
+        sharingDecisionRevision: 1,
       },
       select: { id: true },
     });
@@ -2023,6 +1965,13 @@ async function acceptHostedGroupJoinTx(input: {
   } else {
     alreadyMember = true;
     membershipId = existingMembership.id;
+    await input.tx.hostedGroupMember.update({
+      data: {
+        sharingDecisionRevision:
+          (existingMembership.sharingDecisionRevision ?? 0) + 1,
+      },
+      where: { id: membershipId },
+    });
   }
 
   const grantedVaultShareProjectionKinds: HostedVaultShareProjectionKind[] = [];
@@ -2133,7 +2082,10 @@ export async function revokeHostedGroupMemberEmailShareTx(input: {
         memberId: input.memberId,
       },
     },
-    select: { id: true },
+    select: {
+      id: true,
+      sharingDecisionRevision: true,
+    },
   });
   if (!membership) {
     return {
@@ -2142,6 +2094,13 @@ export async function revokeHostedGroupMemberEmailShareTx(input: {
     };
   }
 
+  await input.tx.hostedGroupMember.update({
+    data: {
+      sharingDecisionRevision:
+        (membership.sharingDecisionRevision ?? 0) + 1,
+    },
+    where: { id: membership.id },
+  });
   const revokedCount = await revokeHostedVaultSharesTx({
     destinationMemberId: group.runtimeMemberId,
     grantorMemberId: input.memberId,

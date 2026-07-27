@@ -531,8 +531,8 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
       groupRuntimeMemberId: "member_group_runtime",
       memberId: "member_joiner",
       membershipId: null,
-      schema: "murph.hosted-linq.group-join-application-claim.v1",
-      selectedShareAuthorityHash: "a".repeat(64),
+      membershipSharingDecisionRevision: null,
+      schema: "murph.hosted-linq.group-join-application-claim.v2",
     });
 
     await expect(
@@ -565,9 +565,9 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
           groupJoinApplicationClaimJson: expect.objectContaining({
             groupId: "group_1",
             memberId: "member_joiner",
-            selectedShareAuthorityHash: "a".repeat(64),
+            membershipSharingDecisionRevision: null,
           }),
-          groupJoinApplicationState: "pending:v1",
+          groupJoinApplicationState: "pending:v2",
         }),
         skipDuplicates: true,
       }),

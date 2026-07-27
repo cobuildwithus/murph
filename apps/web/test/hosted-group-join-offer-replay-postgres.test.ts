@@ -378,6 +378,20 @@ async function readMembership(fixture: JoinReplayFixture) {
   });
 }
 
+async function readMembershipSharingDecisionRevision(
+  fixture: JoinReplayFixture,
+): Promise<number | null | undefined> {
+  return (await fixture.observer.hostedGroupMember.findUnique({
+    where: {
+      groupId_memberId: {
+        groupId: fixture.groupId,
+        memberId: fixture.joinerMemberId,
+      },
+    },
+    select: { sharingDecisionRevision: true },
+  }))?.sharingDecisionRevision;
+}
+
 async function readShares(fixture: JoinReplayFixture) {
   return fixture.observer.hostedVaultShare.findMany({
     orderBy: { projectionKind: "asc" },
@@ -508,7 +522,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
             eventId: createHostedLinqProviderEventLookupKey(e1.eventId),
           },
           select: { groupJoinApplicationState: true },
-        })).resolves.toEqual({ groupJoinApplicationState: "pending:v1" });
+        })).resolves.toEqual({ groupJoinApplicationState: "pending:v2" });
 
         const deferredPostCommit: Array<() => Promise<void>> = [];
         await expect(acceptReaction({
@@ -680,7 +694,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
             eventId: createHostedLinqProviderEventLookupKey(e1.eventId),
           },
           select: { groupJoinApplicationState: true },
-        })).resolves.toEqual({ groupJoinApplicationState: "pending:v1" });
+        })).resolves.toEqual({ groupJoinApplicationState: "pending:v2" });
         await expect(readMembership(fixture)).resolves.toBeNull();
         await expect(readShares(fixture)).resolves.toEqual([]);
 
@@ -798,6 +812,69 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           .resolves.toBe("superseded:v1");
         await expect(readMembership(fixture)).resolves.toEqual(membership);
         await expect(readShares(fixture)).resolves.toEqual(sharesAfterRevocation);
+      } finally {
+        await cleanupJoinReplayFixture(fixture);
+      }
+    });
+
+    it("supersedes pending E1 after a newer no-op permission denial", async () => {
+      const fixture = await createJoinReplayFixture();
+      try {
+        const seed = buildReactionEvent({
+          eventId: `evt_join_replay_noop_denial_seed_${randomUUID()}`,
+          fixture,
+          reactedAt: "2026-07-26T12:48:00.000Z",
+        });
+        await ingestReaction({ event: seed, fixture, prisma: fixture.actionClient });
+        await acceptReaction({ event: seed, fixture, prisma: fixture.actionClient });
+        const membership = await readMembership(fixture);
+        if (!membership) {
+          throw new Error("Expected the seed event to create membership.");
+        }
+
+        await revokeSelectedSleepShare({
+          fixture,
+          membershipId: membership.id,
+          now: new Date("2026-07-26T12:49:00.000Z"),
+        });
+        await expect(readMembershipSharingDecisionRevision(fixture))
+          .resolves.toBe(2);
+        const e1 = buildReactionEvent({
+          eventId: `evt_join_replay_noop_denial_e1_${randomUUID()}`,
+          fixture,
+          reactedAt: "2026-07-26T12:50:00.000Z",
+        });
+        await ingestReaction({ event: e1, fixture, prisma: fixture.actionClient });
+        await rollBackReactionAcceptance({ event: e1, fixture });
+
+        // The selected scope is already revoked, but this authenticated Web
+        // submission is a newer explicit denial and must supersede E1.
+        await revokeSelectedSleepShare({
+          fixture,
+          membershipId: membership.id,
+          now: new Date("2026-07-26T12:51:00.000Z"),
+        });
+        await expect(readMembershipSharingDecisionRevision(fixture))
+          .resolves.toBe(3);
+        const sharesAfterDenial = await readShares(fixture);
+        expect(sharesAfterDenial.find(
+          (share) => share.projectionKind === "sleep-times.v0",
+        )?.status).toBe("revoked");
+
+        await expect(fixture.actionClient.$transaction((tx) => acceptReactionTx({
+          event: e1,
+          fixture,
+          tx,
+        }), transactionOptions)).resolves.toMatchObject({
+          grantedVaultShareProjectionKinds: [],
+          membershipId: null,
+          revokedVaultShareProjectionKinds: [],
+        });
+
+        await expect(readApplicationState(fixture, e1.eventId))
+          .resolves.toBe("superseded:v1");
+        await expect(readMembership(fixture)).resolves.toEqual(membership);
+        await expect(readShares(fixture)).resolves.toEqual(sharesAfterDenial);
       } finally {
         await cleanupJoinReplayFixture(fixture);
       }

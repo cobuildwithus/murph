@@ -112,16 +112,19 @@ does not require immediate container rollout because both old and new runners
 accept the current Web response, but post-deploy proof must exercise one private
 `list_memberships` read and check for group-tool response parse failures.
 
-For the Linq replay fence, apply both nullable expansions,
+For the Linq replay fence, apply both nullable provider-event expansions,
 `hosted_linq_provider_event.group_join_application_state` and
-`hosted_linq_provider_event.group_join_application_claim_json`, before deploying
-Web code that writes or reads the versioned claim. Neither column has a default
-or backfill. Current Web writes only `pending:v1` with a claim in the same
-receipt transaction; older Web recognizes only exact legacy `pending`, so it
-fails closed on current rows. Current Web leaves legacy null rows unavailable
-and terminally supersedes legacy bare-pending rows, so neither version can bind
-an unqualified receipt to retry-time authority. No Cloudflare runtime or wire
-change is involved.
+`hosted_linq_provider_event.group_join_application_claim_json`, plus the nullable
+`hosted_group_member.sharing_decision_revision`, before deploying Web code that
+writes or reads the versioned claim. The provider-event columns have no default
+or backfill, and a null membership revision is the legacy baseline zero until
+the next explicit decision writes one. Current Web writes only `pending:v2`
+with membership identity and decision revision captured in the same receipt
+transaction. Older Web recognizes at most exact `pending` or `pending:v1`, so
+it fails closed on current rows. Current Web leaves legacy null provider-event
+rows unavailable and terminally supersedes both legacy pending states, so
+neither version can bind an unqualified receipt to retry-time authority. No
+Cloudflare runtime or wire change is involved.
 
 ## Direct proof
 

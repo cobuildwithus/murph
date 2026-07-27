@@ -119,8 +119,8 @@ describe("handleHostedGroupJoinOfferReaction", () => {
       groupRuntimeMemberId: "member_group_runtime",
       memberId: "member_reactor",
       membershipId: null,
-      schema: "murph.hosted-linq.group-join-application-claim.v1",
-      selectedShareAuthorityHash: "a".repeat(64),
+      membershipSharingDecisionRevision: null,
+      schema: "murph.hosted-linq.group-join-application-claim.v2",
     });
   });
 

@@ -25,19 +25,20 @@ import { sha256Hex } from "../primitives";
 type HostedLinqProviderEventClient = PrismaClient | Prisma.TransactionClient;
 
 const HOSTED_LINQ_GROUP_JOIN_APPLICATION_LEGACY_PENDING = "pending";
-const HOSTED_LINQ_GROUP_JOIN_APPLICATION_PENDING = "pending:v1";
+const HOSTED_LINQ_GROUP_JOIN_APPLICATION_LEGACY_PENDING_V1 = "pending:v1";
+const HOSTED_LINQ_GROUP_JOIN_APPLICATION_PENDING = "pending:v2";
 const HOSTED_LINQ_GROUP_JOIN_APPLICATION_SUPERSEDED = "superseded:v1";
 const HOSTED_LINQ_GROUP_JOIN_APPLICATION_APPLIED_PREFIX = "applied:";
 export const HOSTED_LINQ_GROUP_JOIN_APPLICATION_CLAIM_SCHEMA =
-  "murph.hosted-linq.group-join-application-claim.v1";
+  "murph.hosted-linq.group-join-application-claim.v2";
 
 export interface HostedLinqGroupJoinApplicationClaim {
   groupId: string;
   groupRuntimeMemberId: string;
   memberId: string;
   membershipId: string | null;
+  membershipSharingDecisionRevision: number | null;
   schema: typeof HOSTED_LINQ_GROUP_JOIN_APPLICATION_CLAIM_SCHEMA;
-  selectedShareAuthorityHash: string;
 }
 
 export type HostedLinqGroupJoinApplicationTxResult =
@@ -267,12 +268,13 @@ export async function lockHostedLinqGroupJoinApplicationTx(input: {
     };
   }
   if (
-    event.groupJoinApplicationState
-    === HOSTED_LINQ_GROUP_JOIN_APPLICATION_LEGACY_PENDING
+    event.groupJoinApplicationState === HOSTED_LINQ_GROUP_JOIN_APPLICATION_LEGACY_PENDING
+    || event.groupJoinApplicationState
+      === HOSTED_LINQ_GROUP_JOIN_APPLICATION_LEGACY_PENDING_V1
   ) {
     await transitionHostedLinqGroupJoinApplicationStateTx({
       eventLookupKey,
-      fromState: HOSTED_LINQ_GROUP_JOIN_APPLICATION_LEGACY_PENDING,
+      fromState: event.groupJoinApplicationState,
       toState: HOSTED_LINQ_GROUP_JOIN_APPLICATION_SUPERSEDED,
       tx: input.tx,
     });
@@ -370,7 +372,8 @@ export function hostedLinqGroupJoinApplicationClaimsEqual(
     && left.groupRuntimeMemberId === right.groupRuntimeMemberId
     && left.memberId === right.memberId
     && left.membershipId === right.membershipId
-    && left.selectedShareAuthorityHash === right.selectedShareAuthorityHash;
+    && left.membershipSharingDecisionRevision
+      === right.membershipSharingDecisionRevision;
 }
 
 function isHostedLinqGroupJoinApplicationCandidate(
@@ -404,14 +407,21 @@ function readHostedLinqGroupJoinApplicationClaim(
   const membershipId = value.membershipId === null
     ? null
     : readNonEmptyString(value.membershipId);
-  const selectedShareAuthorityHash = readSha256Hex(value.selectedShareAuthorityHash);
+  const membershipSharingDecisionRevision =
+    value.membershipSharingDecisionRevision === null
+      ? null
+      : readNonNegativeInteger(value.membershipSharingDecisionRevision);
   if (
     value.schema !== HOSTED_LINQ_GROUP_JOIN_APPLICATION_CLAIM_SCHEMA
     || !groupId
     || !groupRuntimeMemberId
     || !memberId
     || (value.membershipId !== null && !membershipId)
-    || !selectedShareAuthorityHash
+    || (
+      value.membershipSharingDecisionRevision !== null
+      && membershipSharingDecisionRevision === null
+    )
+    || (membershipId === null) !== (membershipSharingDecisionRevision === null)
   ) {
     return null;
   }
@@ -421,8 +431,8 @@ function readHostedLinqGroupJoinApplicationClaim(
     groupRuntimeMemberId,
     memberId,
     membershipId,
+    membershipSharingDecisionRevision,
     schema: HOSTED_LINQ_GROUP_JOIN_APPLICATION_CLAIM_SCHEMA,
-    selectedShareAuthorityHash,
   };
 }
 
@@ -436,8 +446,10 @@ function readNonEmptyString(value: unknown): string | null {
     : null;
 }
 
-function readSha256Hex(value: unknown): string | null {
-  return typeof value === "string" && /^[a-f0-9]{64}$/u.test(value)
+function readNonNegativeInteger(value: unknown): number | null {
+  return typeof value === "number"
+    && Number.isSafeInteger(value)
+    && value >= 0
     ? value
     : null;
 }

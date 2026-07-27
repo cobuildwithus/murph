@@ -165,24 +165,26 @@ Last verified: 2026-07-26
 - Observability writes (logs, latency traces, diagnostics, metrics) must never block user-facing latency: queue or fire-and-forget them off the reply hot path and flush at invocation end, per the `Foreground Reply Critical Path` invariants in `docs/contracts/00-invariants.md`. Only warn/error crash-tail writes may block, bounded by the process exit backstop.
 - Linq join-offer reactions are delivered at least once, but
   `HostedLinqProviderEvent` is also their sole durable application owner. A new
-  reaction becomes `pending:v1` only when its receipt transaction, while holding
+  reaction becomes `pending:v2` only when its receipt transaction, while holding
   the existing group/member serialization locks, stores a versioned claim for
-  the exact group runtime, member, membership generation, and a canonical hash
-  of the offer's selected-share authority. Nullable legacy rows and the old bare
-  `pending` state never acquire a claim from a duplicate; they fail closed, with
-  bare pending terminally marked `superseded:v1`. Join acceptance locks the group
-  and exact provider-event row, then the member, verifies the persisted message,
-  chat, and payload binding, and recomputes the same claim. A changed member,
-  membership generation, leave, or selected-share authority marks the event
+  the exact group runtime, member, membership generation, and that membership's
+  sharing-decision revision. The revision advances in the same transaction as
+  every explicit group acceptance or permission submission, including a denial
+  that changes no share row. Nullable legacy rows and the old bare `pending` or
+  `pending:v1` states never acquire a current claim from a duplicate; they fail
+  closed and are terminally marked `superseded:v1`. Join acceptance locks the
+  group and exact provider-event row, then the member, verifies the persisted
+  message, chat, and payload binding, and recomputes the same claim. A changed
+  member, membership generation, leave, or newer sharing decision marks the event
   `superseded:v1` in that transaction and performs no membership, grant,
   confirmation, maintenance, or newsletter effect. A matching claim changes
-  `pending:v1` to `applied:<membershipId>` in the same transaction as membership
+  `pending:v2` to `applied:<membershipId>` in the same transaction as membership
   and share grants. An applied redelivery remains an accepted no-op and may retry
   durable join-confirmation materialization only while that exact membership
   still exists. A genuinely new reaction has its own claim and can express a
   later intent to rejoin. Never use the provider receipt's `duplicate` result as
   this gate: a receipt committed before a failed acceptance remains retryable
   only while its recorded authority is still current. The versioned state is
-  the rollout fence: older Web recognizes only exact legacy `pending`, so it
-  treats `pending:v1` and `superseded:v1` as unavailable, while current Web
-  terminally supersedes legacy bare-pending rows instead of rebinding them.
+  the rollout fence: older Web recognizes at most exact `pending` or
+  `pending:v1`, so it treats `pending:v2` as unavailable, while current Web
+  terminally supersedes both legacy pending states instead of rebinding them.

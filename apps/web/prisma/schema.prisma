@@ -1500,6 +1500,7 @@ model HostedGroupMember {
   groupId   String       @map("group_id")
   memberId  String       @map("member_id")
   role      String       @default("member")
+  sharingDecisionRevision Int?         @map("sharing_decision_revision")
   joinedAt  DateTime?    @map("joined_at")
   joinConfirmationEligibleAt DateTime? @map("join_confirmation_eligible_at")
   joinConfirmationOrigin String?       @map("join_confirmation_origin")

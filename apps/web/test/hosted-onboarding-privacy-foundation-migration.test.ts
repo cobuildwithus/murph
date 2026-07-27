@@ -821,6 +821,13 @@ describe("hosted Prisma baseline migration", () => {
         .filter((line) => !line.trimStart().startsWith("--"))
         .join("\n")
         .trim();
+    const hostedGroupSharingDecisionRevisionMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260727030000_hosted_group_sharing_decision_revision/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     expect(migrationEntries).toEqual([
       "2026040600_init",
       "20260425000000_drop_legacy_linq_control_plane",
@@ -952,6 +959,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260726180000_hosted_thread_container_usage_default",
       "20260727010000_hosted_linq_group_join_application_state",
       "20260727020000_hosted_linq_group_join_application_claim",
+      "20260727030000_hosted_group_sharing_decision_revision",
       "migration_lock.toml",
     ]);
     expect(hostedUserCryptoEnvelopeMigrationSql).toContain(
@@ -992,6 +1000,18 @@ describe("hosted Prisma baseline migration", () => {
       ].join("\n"),
     );
     expect(hostedLinqGroupJoinApplicationClaimMigrationStatements).not.toMatch(
+      /\b(?:DEFAULT|UPDATE|INSERT|DELETE)\b|NOT\s+NULL/iu,
+    );
+    expect(schema).toMatch(
+      /model HostedGroupMember \{[\s\S]*sharingDecisionRevision\s+Int\?\s+@map\("sharing_decision_revision"\)/u,
+    );
+    expect(hostedGroupSharingDecisionRevisionMigrationSql.trim()).toBe(
+      [
+        'ALTER TABLE "hosted_group_member"',
+        'ADD COLUMN "sharing_decision_revision" INTEGER;',
+      ].join("\n"),
+    );
+    expect(hostedGroupSharingDecisionRevisionMigrationSql).not.toMatch(
       /\b(?:DEFAULT|UPDATE|INSERT|DELETE)\b|NOT\s+NULL/iu,
     );
     expect(hostedMailboxSubscriptionActionClaimMigrationSql).toContain(

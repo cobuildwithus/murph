@@ -8,7 +8,6 @@ import {
 } from "@murphai/hosted-execution/vault-share";
 
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
-import { sha256Hex } from "@/src/lib/primitives";
 import { createPrismaClient } from "@/src/lib/prisma";
 import {
   createHostedExternalThreadIdentityLookupKey,
@@ -99,42 +98,6 @@ afterEach(() => {
   restoreKeyring = null;
 });
 
-
-function createTestHostedLinqGroupJoinSelectedShareAuthorityHash(input: {
-  destinationMemberId: string;
-  projectionScopeKeys: readonly string[];
-  shares: readonly {
-    grantedAt: Date;
-    id: string;
-    projectionScopeKey: string;
-    revokedAt: Date | null;
-    status: string;
-  }[];
-}): string {
-  const shareByProjectionScopeKey = new Map(
-    input.shares.map((share) => [share.projectionScopeKey, share]),
-  );
-  return sha256Hex(JSON.stringify({
-    destinationMemberId: input.destinationMemberId,
-    selectedShareAuthorities: [...new Set(input.projectionScopeKeys)]
-      .sort()
-      .map((projectionScopeKey) => {
-        const share = shareByProjectionScopeKey.get(projectionScopeKey);
-        return {
-          projectionScopeKey,
-          share: share
-            ? {
-                grantedAt: share.grantedAt.toISOString(),
-                id: share.id,
-                revokedAt: share.revokedAt?.toISOString() ?? null,
-                status: share.status,
-              }
-            : null,
-        };
-      }),
-  }));
-}
-
 function createPrismaStub<T extends Record<string, unknown>>(delegates: T): PrismaClient & T {
   const prisma = createPrismaClient({
     databaseUrl: "postgresql://test:test@127.0.0.1:1/test",
@@ -156,6 +119,7 @@ function buildTx(input?: {
   membershipState?: {
     membershipId: string | null;
     nextMembershipId?: string;
+    sharingDecisionRevision?: number;
   };
   linqApplicationState?: string | null;
   linqApplicationClaim?: unknown | null;
@@ -168,15 +132,6 @@ function buildTx(input?: {
   requestedProjectionKinds?: string[];
   revokedOfferAt?: Date | null;
   runtimeMemberId?: string | null;
-  selectedShareState?: {
-    rows: Array<{
-      grantedAt: Date;
-      id: string;
-      projectionScopeKey: string;
-      revokedAt: Date | null;
-      status: string;
-    }>;
-  };
   threadIdentityLookupKey?: string;
 }): PrismaClient & {
   hostedGroup: {
@@ -206,18 +161,15 @@ function buildTx(input?: {
     value: string | null;
   } = {
     value: input?.linqApplicationState === undefined
-      ? "pending:v1"
+      ? "pending:v2"
       : input.linqApplicationState,
   };
   const initialMembershipId = input?.membershipState
     ? input.membershipState.membershipId
     : input?.existingMembershipId ?? null;
-  const selectedProjectionScopeKeys = (input?.offerProjectionKinds ?? ["sleep-times.v0"])
-    .map((kind) => buildHostedVaultShareProjectionScopeKey(
-      hostedVaultShareProjectionKindToScope(kind as HostedVaultShareFixedProjectionKind),
-    ))
-    .sort();
-  const initialShareRows = input?.selectedShareState?.rows ?? [];
+  const initialSharingDecisionRevision = initialMembershipId
+    ? input?.membershipState?.sharingDecisionRevision ?? 0
+    : null;
   const defaultLinqApplicationClaim = {
     groupId: "group_1",
     groupRuntimeMemberId: input?.runtimeMemberId === undefined
@@ -225,15 +177,8 @@ function buildTx(input?: {
       : input.runtimeMemberId,
     memberId: input?.linqApplicationMemberId ?? "member_grantor",
     membershipId: initialMembershipId,
+    membershipSharingDecisionRevision: initialSharingDecisionRevision,
     schema: HOSTED_LINQ_GROUP_JOIN_APPLICATION_CLAIM_SCHEMA,
-    selectedShareAuthorityHash:
-      createTestHostedLinqGroupJoinSelectedShareAuthorityHash({
-        destinationMemberId: input?.runtimeMemberId === undefined
-          ? "member_group_runtime"
-          : input.runtimeMemberId ?? "missing_runtime",
-        projectionScopeKeys: selectedProjectionScopeKeys,
-        shares: initialShareRows,
-      }),
   };
   return createPrismaStub({
     $queryRaw: vi.fn(async () => []),
@@ -316,10 +261,14 @@ function buildTx(input?: {
       updateMany: vi.fn(async () => ({ count: 0 })),
     },
     hostedGroupMember: {
-      create: vi.fn(async () => {
+      create: vi.fn(async (args?: {
+        data?: { sharingDecisionRevision?: number };
+      }) => {
         const membershipId = input?.membershipState?.nextMembershipId ?? "membership_created";
         if (input?.membershipState) {
           input.membershipState.membershipId = membershipId;
+          input.membershipState.sharingDecisionRevision =
+            args?.data?.sharingDecisionRevision ?? 0;
         }
         return { id: membershipId };
       }),
@@ -346,9 +295,28 @@ function buildTx(input?: {
             ? { groupId: "group_1", memberId: "member_joiner" }
             : null;
         }
-        return { id: membershipId };
+        return {
+          id: membershipId,
+          sharingDecisionRevision:
+            input?.membershipState?.sharingDecisionRevision ?? 0,
+        };
       }),
-      update: vi.fn(async () => ({})),
+      update: vi.fn(async (args?: {
+        data?: {
+          sharingDecisionRevision?: number;
+        };
+        where?: { id?: string };
+      }) => {
+        const revision = args?.data?.sharingDecisionRevision;
+        if (
+          input?.membershipState
+          && args?.where?.id === input.membershipState.membershipId
+          && typeof revision === "number"
+        ) {
+          input.membershipState.sharingDecisionRevision = revision;
+        }
+        return {};
+      }),
     },
     hostedLinqProviderEvent: {
       findUnique: vi.fn(async () => ({
@@ -407,13 +375,7 @@ function buildTx(input?: {
         return input?.activeGroupGrantCount
           ?? HOSTED_GROUP_VAULT_SHARE_GRANT_LIMIT_PER_GRANTOR_PROJECTION;
       }),
-      findMany: vi.fn(async (args: {
-        where: { projectionScopeKey?: { in?: string[] } };
-      }) => {
-        const requested = args.where.projectionScopeKey?.in ?? [];
-        return (input?.selectedShareState?.rows ?? [])
-          .filter((row) => requested.includes(row.projectionScopeKey));
-      }),
+      findMany: vi.fn(async () => []),
       findUnique: vi.fn(async () => {
         return input?.activeShareAlreadyExists ? { status: "granted" } : null;
       }),
@@ -663,7 +625,10 @@ describe("acceptHostedGroupJoinCodeTx", () => {
 
     expect(mocks.appendHostedGroupJoinConfirmationTx).not.toHaveBeenCalled();
     expect(tx.hostedGroupMember.create).not.toHaveBeenCalled();
-    expect(tx.hostedGroupMember.update).not.toHaveBeenCalled();
+    expect(tx.hostedGroupMember.update).toHaveBeenCalledWith({
+      data: { sharingDecisionRevision: 1 },
+      where: { id: "membership_existing" },
+    });
   });
 
   it.each([
@@ -1269,7 +1234,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
       data: { groupJoinApplicationState: "applied:membership_existing" },
       where: {
         eventId: expect.stringMatching(/^hbid:linq\.provider-event:/u),
-        groupJoinApplicationState: "pending:v1",
+        groupJoinApplicationState: "pending:v2",
       },
     });
   });
@@ -1328,7 +1293,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
       data: { groupJoinApplicationState: "superseded:v1" },
       where: {
         eventId: expect.stringMatching(/^hbid:linq\.provider-event:/u),
-        groupJoinApplicationState: "pending:v1",
+        groupJoinApplicationState: "pending:v2",
       },
     });
     expect(tx.hostedGroupMember.create).not.toHaveBeenCalled();
@@ -1336,27 +1301,13 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     expect(mocks.appendHostedGroupJoinConfirmationTx).not.toHaveBeenCalled();
   });
 
-  it("terminally supersedes a pending Linq event after a selected share is revoked", async () => {
-    const projectionScopeKey = buildHostedVaultShareProjectionScopeKey(SLEEP_SCOPE);
-    const grantedAt = new Date("2026-07-01T00:00:00.000Z");
-    const selectedShareState = {
-      rows: [{
-        grantedAt,
-        id: "share_sleep_1",
-        projectionScopeKey,
-        revokedAt: null as Date | null,
-        status: "granted",
-      }],
+  it("terminally supersedes a pending Linq event after a newer sharing decision", async () => {
+    const membershipState = {
+      membershipId: "membership_existing" as string | null,
+      sharingDecisionRevision: 4,
     };
-    const tx = buildTx({
-      existingMembershipId: "membership_existing",
-      selectedShareState,
-    });
-    selectedShareState.rows[0] = {
-      ...selectedShareState.rows[0],
-      revokedAt: new Date("2026-07-01T00:00:01.000Z"),
-      status: "revoked",
-    };
+    const tx = buildTx({ membershipState });
+    membershipState.sharingDecisionRevision += 1;
 
     await expect(acceptHostedGroupJoinOfferTx({
       channel: "linq",
@@ -1379,25 +1330,12 @@ describe("acceptHostedGroupJoinCodeTx", () => {
   });
 
   it("terminally supersedes a pending Linq event after leave while a new event may rejoin", async () => {
-    const projectionScopeKey = buildHostedVaultShareProjectionScopeKey(SLEEP_SCOPE);
-    const grantedAt = new Date("2026-07-01T00:00:00.000Z");
-    const membershipState = { membershipId: "membership_existing" as string | null };
-    const selectedShareState = {
-      rows: [{
-        grantedAt,
-        id: "share_sleep_1",
-        projectionScopeKey,
-        revokedAt: null as Date | null,
-        status: "granted",
-      }],
+    const membershipState = {
+      membershipId: "membership_existing" as string | null,
+      sharingDecisionRevision: 4,
     };
-    const tx = buildTx({ membershipState, selectedShareState });
+    const tx = buildTx({ membershipState });
     membershipState.membershipId = null;
-    selectedShareState.rows[0] = {
-      ...selectedShareState.rows[0],
-      revokedAt: new Date("2026-07-01T00:00:01.000Z"),
-      status: "revoked",
-    };
 
     await expect(acceptHostedGroupJoinOfferTx({
       channel: "linq",
@@ -1423,7 +1361,6 @@ describe("acceptHostedGroupJoinCodeTx", () => {
       activeGroupGrantCount: 0,
       linqEventPayloadHash: "payload_hash_2",
       membershipState,
-      selectedShareState,
     });
     await expect(acceptHostedGroupJoinOfferTx({
       channel: "linq",
@@ -1489,6 +1426,35 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     expect(tx.hostedLinqProviderEvent.updateMany).toHaveBeenCalledWith(expect.objectContaining({
       data: { groupJoinApplicationState: "superseded:v1" },
     }));
+    expect(tx.hostedGroupMember.create).not.toHaveBeenCalled();
+    expect(mocks.grantHostedVaultShareTx).not.toHaveBeenCalled();
+  });
+
+  it("terminally supersedes a version-one pending Linq event instead of rebinding it", async () => {
+    const tx = buildTx({
+      linqApplicationState: "pending:v1",
+    });
+
+    await expect(acceptHostedGroupJoinOfferTx({
+      channel: "linq",
+      linqAffirmation: LINQ_AFFIRMATION,
+      memberId: "member_grantor",
+      messageLookupKeyReadCandidates: ["hbidx:linq-message:v1:offer"],
+      now: new Date("2026-07-01T00:00:02.000Z"),
+      threadIdentityLookupKeyReadCandidates: ["hbidx:external-thread-identity:v1:thread"],
+      tx,
+    })).resolves.toMatchObject({
+      grantedVaultShareProjectionKinds: [],
+      membershipId: null,
+    });
+
+    expect(tx.hostedLinqProviderEvent.updateMany).toHaveBeenCalledWith({
+      data: { groupJoinApplicationState: "superseded:v1" },
+      where: {
+        eventId: expect.stringMatching(/^hbid:linq\.provider-event:/u),
+        groupJoinApplicationState: "pending:v1",
+      },
+    });
     expect(tx.hostedGroupMember.create).not.toHaveBeenCalled();
     expect(mocks.grantHostedVaultShareTx).not.toHaveBeenCalled();
   });
@@ -2703,7 +2669,7 @@ function buildStatefulJoinOfferTx(): PrismaClient & {
     projectionKindsJson: Prisma.InputJsonValue;
     revokedAt: Date | null;
   }> = [];
-  let linqApplicationState = "pending:v1";
+  let linqApplicationState = "pending:v2";
 
   return createPrismaStub({
     $queryRaw: vi.fn(async () => []),
@@ -2776,17 +2742,6 @@ function buildStatefulJoinOfferTx(): PrismaClient & {
     },
     hostedLinqProviderEvent: {
       findUnique: vi.fn(async () => {
-        const selectedProjectionScopeKeys = Array.isArray(offers[0]?.projectionKindsJson)
-          ? offers[0].projectionKindsJson.map((entry) =>
-              buildHostedVaultShareProjectionScopeKey(
-                hostedVaultShareProjectionKindToScope(
-                  typeof entry === "string"
-                    ? entry as HostedVaultShareFixedProjectionKind
-                    : (entry as { projectionKind: HostedVaultShareFixedProjectionKind })
-                      .projectionKind,
-                ),
-              ))
-          : [];
         return {
           eventType: "reaction.added",
           groupJoinApplicationClaimJson: {
@@ -2794,13 +2749,8 @@ function buildStatefulJoinOfferTx(): PrismaClient & {
             groupRuntimeMemberId: group.runtimeMemberId,
             memberId: "member_grantor",
             membershipId: null,
+            membershipSharingDecisionRevision: null,
             schema: HOSTED_LINQ_GROUP_JOIN_APPLICATION_CLAIM_SCHEMA,
-            selectedShareAuthorityHash:
-              createTestHostedLinqGroupJoinSelectedShareAuthorityHash({
-                destinationMemberId: group.runtimeMemberId,
-                projectionScopeKeys: selectedProjectionScopeKeys,
-                shares: [],
-              }),
           },
           groupJoinApplicationState: linqApplicationState,
           linqChatLookupKey: LINQ_AFFIRMATION.linqChatLookupKeyReadCandidates[0],
