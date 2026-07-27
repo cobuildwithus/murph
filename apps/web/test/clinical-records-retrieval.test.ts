@@ -374,6 +374,143 @@ describe("Clinical Records retrieval control plane", () => {
     })).rejects.toThrow("Transient secure-box failure.");
   });
 
+  it("refunds repeated access-token decrypt failures before provider egress", async () => {
+    const harness = createHarness(["Patient", "Observation"]);
+    const fetchImpl = vi.fn();
+    mocks.openClinicalConnectionSecret.mockImplementation(
+      async (input: { field: string }) => {
+        if (input.field === "patientId") return "patient-1";
+        if (input.field === "accessToken") {
+          throw new Error("Transient access-token secure-box failure.");
+        }
+        return null;
+      },
+    );
+
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      await expect(fetchClinicalRetrievalPage({
+        fetchImpl,
+        memberId: MEMBER_ID,
+        request: pageRequest({
+          requestId: "request_transient_access_token",
+          resourceType: "Observation",
+        }),
+      })).rejects.toThrow("Transient access-token secure-box failure.");
+    }
+
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(harness.state.run.egressBytes).toBe(0);
+    expect(harness.state.run.providerRequestCount).toBe(0);
+    expect([...harness.state.requests.values()]).toEqual([
+      expect.objectContaining({
+        completedAt: null,
+        reservedBytes: 0,
+      }),
+    ]);
+  });
+
+  it("keeps an ambiguous provider fetch failure charged", async () => {
+    const harness = createHarness(["Patient", "Observation"]);
+    const fetchImpl = vi.fn().mockRejectedValue(new Error("Socket reset during provider fetch."));
+
+    await expect(fetchClinicalRetrievalPage({
+      fetchImpl,
+      memberId: MEMBER_ID,
+      request: pageRequest({
+        requestId: "request_ambiguous_provider_fetch",
+        resourceType: "Observation",
+      }),
+    })).resolves.toEqual({
+      errorCode: "provider-temporarily-unavailable",
+      retryable: true,
+      status: "unavailable",
+    });
+
+    expect(fetchImpl).toHaveBeenCalledOnce();
+    expect(harness.state.run.providerRequestCount).toBe(1);
+    expect(harness.state.run.egressBytes).toBeGreaterThan(0);
+    expect([...harness.state.requests.values()]).toEqual([
+      expect.objectContaining({
+        completedAt: null,
+        reservedBytes: 0,
+      }),
+    ]);
+  });
+
+  it("uses release claim-version CAS so a stale decrypt failure cannot refund the active claimant", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-10T16:00:00.000Z"));
+    const harness = createHarness(["Patient", "Observation"]);
+    const firstDecryptStarted = deferred<void>();
+    const releaseFirstDecrypt = deferred<void>();
+    const secondDecryptStarted = deferred<void>();
+    const releaseSecondDecrypt = deferred<void>();
+    let accessTokenAttempt = 0;
+    mocks.openClinicalConnectionSecret.mockImplementation(
+      async (input: { field: string }) => {
+        if (input.field === "patientId") return "patient-1";
+        if (input.field !== "accessToken") return null;
+        accessTokenAttempt += 1;
+        if (accessTokenAttempt === 1) {
+          firstDecryptStarted.resolve();
+          await releaseFirstDecrypt.promise;
+        } else {
+          secondDecryptStarted.resolve();
+          await releaseSecondDecrypt.promise;
+        }
+        throw new Error("Transient access-token secure-box failure.");
+      },
+    );
+    const fetchImpl = vi.fn();
+    const request = pageRequest({
+      requestId: "request_stale_access_token_release",
+      resourceType: "Observation",
+    });
+
+    const staleAttempt = fetchClinicalRetrievalPage({
+      fetchImpl,
+      memberId: MEMBER_ID,
+      request,
+    });
+    await firstDecryptStarted.promise;
+    const singleReservationBytes = harness.state.run.egressBytes;
+    expect(singleReservationBytes).toBeGreaterThan(0);
+
+    vi.setSystemTime(new Date("2026-07-10T16:00:31.000Z"));
+    const activeAttempt = fetchClinicalRetrievalPage({
+      fetchImpl,
+      memberId: MEMBER_ID,
+      request,
+    });
+    await secondDecryptStarted.promise;
+    const activeRequest = [...harness.state.requests.values()][0];
+    if (!activeRequest) throw new Error("Expected an active retrieval-page claim.");
+    const activeClaimVersion = activeRequest.claimVersion;
+    const activeReservedBytes = activeRequest.reservedBytes;
+    expect(harness.state.run.providerRequestCount).toBe(2);
+    expect(harness.state.run.egressBytes).toBe(singleReservationBytes * 2);
+    expect(activeReservedBytes).toBeGreaterThan(0);
+
+    releaseFirstDecrypt.resolve();
+    await expect(staleAttempt).rejects.toThrow("Transient access-token secure-box failure.");
+    expect(harness.state.run.providerRequestCount).toBe(2);
+    expect(harness.state.run.egressBytes).toBe(singleReservationBytes * 2);
+    expect([...harness.state.requests.values()][0]).toMatchObject({
+      claimVersion: activeClaimVersion,
+      reservedBytes: activeReservedBytes,
+    });
+
+    releaseSecondDecrypt.resolve();
+    await expect(activeAttempt).rejects.toThrow("Transient access-token secure-box failure.");
+    expect(harness.state.run.providerRequestCount).toBe(1);
+    expect(harness.state.run.egressBytes).toBe(singleReservationBytes);
+    expect([...harness.state.requests.values()][0]).toMatchObject({
+      claimVersion: activeClaimVersion,
+      reservedBytes: 0,
+    });
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
   it("lets transient cursor decryption failures remain retryable", async () => {
     createHarness(["Patient", "Observation"]);
     mocks.openClinicalPageCursor.mockRejectedValueOnce(
