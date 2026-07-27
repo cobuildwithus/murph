@@ -1,8 +1,8 @@
 # Group-specific idle compaction
 
-Status: active
+Status: completed
 Created: 2026-07-26
-Updated: 2026-07-26
+Updated: 2026-07-27
 
 ## Goal
 
@@ -65,3 +65,4 @@ Updated: 2026-07-26
 - Direct scripted Codex event scenarios proving personal sends and group
   suppresses the synthetic compaction progress update while both return the
   final reply.
+Completed: 2026-07-27
