@@ -610,10 +610,16 @@ Hosted onboarding extras:
   from 11 PM through 7 AM operator-local time, and adds up to ten minutes of
   stable wake/retry jitter. Provider attempts therefore stay at least ten
   minutes apart and spread across more than one five-minute cron tick. A
-  healthy scan silently clears any open, sending, or failed incident so stale
-  evidence cannot page later; the prior attempt time remains the pacing floor
-  for a genuinely new recurrence. Persisted evidence remains aggregate
-  counts/timings in the existing operational-alert row.
+  fresh health and operator-time recheck before provider admission cancels a
+  recovered claim or durably defers one when quiet hours have begun. Once a
+  provider call is admitted, healthy scans coalesce for the bounded four-minute
+  send lease instead of claiming recovery while the outcome is unknown; the
+  first healthy scan after the call settles, fails, or the lease expires clears
+  the incident. A known-unsent quiet-hours deferral keeps its incident identity
+  but rebuilds the eventual alert from current evidence and time; only ambiguous
+  provider retries preserve the exact body. The prior attempt time remains the
+  pacing floor for a genuinely new recurrence. Persisted evidence remains
+  aggregate counts/timings in the existing operational-alert row.
 - `HOSTED_EXECUTION_CONTROL_URL`
 - `HOSTED_EXECUTION_CONTROL_TIMEOUT_MS`
 

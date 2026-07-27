@@ -27,10 +27,12 @@ const HOSTED_RUNTIME_LATENCY_COMPLETED_WINDOW_MS = 10 * 60_000;
 const HOSTED_RUNTIME_LATENCY_UNRESOLVED_WINDOW_MS = 24 * 60 * 60_000;
 const HOSTED_RUNTIME_LATENCY_READ_LIMIT = 20_000;
 const HOSTED_RUNTIME_LATENCY_ALERT_JITTER_WINDOW_MS = 10 * 60_000;
+const HOSTED_RUNTIME_LATENCY_SEND_LEASE_MS = 4 * 60_000;
 const HOSTED_RUNTIME_LATENCY_QUIET_HOURS_END_HOUR = 7;
 const HOSTED_RUNTIME_LATENCY_QUIET_HOURS_START_HOUR = 23;
 
 const MONITOR_STATUS = {
+  alertDeferred: "latency_alert_deferred",
   alertFailed: "latency_alert_failed",
   alertSending: "latency_alert_sending",
   alerting: "latency_alerting",
@@ -132,6 +134,20 @@ export async function runHostedRuntimeLatencyAlertMonitor(input: {
     };
   }
 
+  const admission = await admitHostedRuntimeLatencyAlertSend({
+    action: claim.action,
+    now: input.now,
+    prisma,
+    timeZone: alertConfig.timeZone,
+  });
+  if (!admission.admitted) {
+    return {
+      configured: true,
+      health: admission.health,
+      outcome: admission.outcome,
+    };
+  }
+
   const sendLinqMessage = input.sendLinqMessage ?? sendHostedLinqChatMessage;
   try {
     const sent = await sendLinqMessage({
@@ -165,7 +181,7 @@ export async function runHostedRuntimeLatencyAlertMonitor(input: {
 
   return {
     configured: true,
-    health,
+    health: admission.health,
     outcome: "alert_sent",
   };
 }
@@ -361,6 +377,12 @@ async function claimHostedRuntimeLatencyAlertTransition(input: {
   if (input.state.status === MONITOR_STATUS.healthy) {
     return { action: null, outcome: "healthy" };
   }
+  if (
+    input.state.status === MONITOR_STATUS.alertSending
+    && !isHostedRuntimeLatencySendLeaseExpired(input.state, input.now)
+  ) {
+    return { action: null, outcome: "coalesced" };
+  }
 
   const cleared = await input.prisma.hostedLinqAlert.updateMany({
     where: buildHostedRuntimeLatencyStateCompare(input.state),
@@ -378,6 +400,84 @@ async function claimHostedRuntimeLatencyAlertTransition(input: {
     action: null,
     outcome: cleared.count === 1 ? "healthy" : "coalesced",
   };
+}
+
+async function admitHostedRuntimeLatencyAlertSend(input: {
+  action: HostedRuntimeLatencyClaimedAction;
+  now?: Date;
+  prisma: HostedRuntimeLatencyPrismaClient;
+  timeZone: string;
+}): Promise<
+  | {
+      admitted: true;
+      health: HostedRuntimeLatencyHealth;
+      outcome: null;
+    }
+  | {
+      admitted: false;
+      health: HostedRuntimeLatencyHealth;
+      outcome: "coalesced" | "deferred_quiet_hours" | "healthy";
+    }
+> {
+  const healthCheckedAt = input.now ?? new Date();
+  const health = await readHostedRuntimeLatencyHealth({
+    now: healthCheckedAt,
+    prisma: input.prisma,
+  });
+  const exactClaim = {
+    id: HOSTED_RUNTIME_LATENCY_MONITOR_ID,
+    lastAttemptedAt: input.action.attemptedAt,
+    status: MONITOR_STATUS.alertSending,
+  };
+
+  if (!health.anomalous) {
+    const recoveryCheckedAt = input.now ?? new Date();
+    const cleared = await input.prisma.hostedLinqAlert.updateMany({
+      where: exactClaim,
+      data: {
+        detailsJson: buildHostedRuntimeLatencyAlertDetails({
+          health,
+          incidentId: null,
+          now: recoveryCheckedAt,
+          phase: "healthy",
+        }),
+        status: MONITOR_STATUS.healthy,
+      },
+    });
+    return {
+      admitted: false,
+      health,
+      outcome: cleared.count === 1 ? "healthy" : "coalesced",
+    };
+  }
+
+  const claimed = await input.prisma.hostedLinqAlert.count({
+    where: exactClaim,
+  });
+  if (claimed !== 1) {
+    return { admitted: false, health, outcome: "coalesced" };
+  }
+
+  const admissionCheckedAt = input.now ?? new Date();
+  if (
+    isHostedRuntimeLatencyQuietTime(admissionCheckedAt, input.timeZone)
+  ) {
+    const deferred = await input.prisma.hostedLinqAlert.updateMany({
+      where: exactClaim,
+      data: {
+        status: MONITOR_STATUS.alertDeferred,
+      },
+    });
+    return {
+      admitted: false,
+      health,
+      outcome: deferred.count === 1
+        ? "deferred_quiet_hours"
+        : "coalesced",
+    };
+  }
+
+  return { admitted: true, health, outcome: null };
 }
 
 interface HostedRuntimeLatencyClaimedAction {
@@ -618,6 +718,15 @@ function readHostedRuntimeLatencyAlertErrorCode(error: unknown): string {
       ? error.name
       : "UNKNOWN_LATENCY_ALERT_ERROR";
   return value.slice(0, 128);
+}
+
+function isHostedRuntimeLatencySendLeaseExpired(
+  state: HostedLinqAlert,
+  now: Date,
+): boolean {
+  return state.lastAttemptedAt === null
+    || state.lastAttemptedAt.getTime()
+      <= now.getTime() - HOSTED_RUNTIME_LATENCY_SEND_LEASE_MS;
 }
 
 function readHostedRuntimeLatencyAlertDeferral(input: {

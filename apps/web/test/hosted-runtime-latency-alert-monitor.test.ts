@@ -331,7 +331,33 @@ describe("hosted runtime latency alert monitor", () => {
     expect(fixture.readState()?.status).toBe("latency_healthy");
   });
 
-  it("keeps a healthy recovery authoritative over a late in-flight completion", async () => {
+  it("cancels a claimed alert when latency recovers before provider admission", async () => {
+    const anomalousRows = [
+      latencyRow({
+        acceptedAt: "2026-07-26T15:58:00.000Z",
+      }),
+    ];
+    const fixture = createMonitorPrismaFixture(anomalousRows);
+    fixture.queueRowsForReads(anomalousRows, []);
+    const sendLinqMessage = vi.fn(async (input: LinqSendInput) => ({
+      chatId: input.chatId,
+      messageId: "provider-message",
+    }));
+
+    const recovered = await runHostedRuntimeLatencyAlertMonitor({
+      env: alertEnv,
+      now,
+      prisma: fixture.prisma,
+      sendLinqMessage,
+    });
+
+    expect(recovered.outcome).toBe("healthy");
+    expect(recovered.health.anomalous).toBe(false);
+    expect(sendLinqMessage).not.toHaveBeenCalled();
+    expect(fixture.readState()?.status).toBe("latency_healthy");
+  });
+
+  it("coalesces healthy recovery until an admitted provider effect settles", async () => {
     const fixture = createMonitorPrismaFixture([
       latencyRow({
         acceptedAt: "2026-07-26T15:58:00.000Z",
@@ -366,8 +392,8 @@ describe("hosted runtime latency alert monitor", () => {
       prisma: fixture.prisma,
       sendLinqMessage,
     });
-    expect(recovered.outcome).toBe("healthy");
-    expect(fixture.readState()?.status).toBe("latency_healthy");
+    expect(recovered.outcome).toBe("coalesced");
+    expect(fixture.readState()?.status).toBe("latency_alert_sending");
 
     releaseSend();
     await expect(sending).resolves.toMatchObject({
@@ -375,7 +401,7 @@ describe("hosted runtime latency alert monitor", () => {
     });
     const stayedHealthy = await runHostedRuntimeLatencyAlertMonitor({
       env: alertEnv,
-      now: instant("2026-07-26T16:20:00.000Z"),
+      now: instant("2026-07-26T16:02:00.000Z"),
       prisma: fixture.prisma,
       sendLinqMessage,
     });
@@ -559,6 +585,63 @@ describe("hosted runtime latency alert monitor", () => {
     expect(sendLinqMessage).toHaveBeenCalledTimes(1);
   });
 
+  it("defers when quiet hours begin before provider admission", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(instant("2026-07-27T05:59:00.000Z"));
+      const rows = [
+        latencyRow({
+          acceptedAt: "2026-07-27T05:57:00.000Z",
+        }),
+      ];
+      const fixture = createMonitorPrismaFixture(rows);
+      fixture.queueTraceReadEffects(
+        () => {},
+        () => {
+          vi.setSystemTime(instant("2026-07-27T06:00:00.000Z"));
+        },
+      );
+      const sendLinqMessage = vi.fn(async (input: LinqSendInput) => ({
+        chatId: input.chatId,
+        messageId: "provider-message",
+      }));
+
+      const deferred = await runHostedRuntimeLatencyAlertMonitor({
+        env: alertEnv,
+        prisma: fixture.prisma,
+        sendLinqMessage,
+      });
+
+      expect(deferred.outcome).toBe("deferred_quiet_hours");
+      expect(deferred.health.anomalous).toBe(true);
+      expect(sendLinqMessage).not.toHaveBeenCalled();
+      expect(fixture.readState()?.status).toBe("latency_alert_deferred");
+
+      vi.setSystemTime(instant("2026-07-27T14:10:00.000Z"));
+      fixture.setRows([
+        latencyRow({
+          acceptedAt: "2026-07-27T14:08:00.000Z",
+        }),
+      ]);
+      const resumed = await runHostedRuntimeLatencyAlertMonitor({
+        env: alertEnv,
+        prisma: fixture.prisma,
+        sendLinqMessage,
+      });
+
+      expect(resumed.outcome).toBe("alert_sent");
+      expect(sendLinqMessage).toHaveBeenCalledTimes(1);
+      expect(sendLinqMessage.mock.calls[0]?.[0].message).toContain(
+        "Checked 2026-07-27T14:10:00Z",
+      );
+      expect(sendLinqMessage.mock.calls[0]?.[0].message).not.toContain(
+        "Checked 2026-07-27T05:59:00Z",
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("keeps stable wake-up jitter across more than one cron bucket", async () => {
     const fixture = createMonitorPrismaFixture([
       latencyRow({
@@ -718,18 +801,24 @@ function createMonitorPrismaFixture(
   options: { rejectNextClaim?: boolean } = {},
 ) {
   let rows = [...initialRows];
+  const queuedRows: HostedRuntimeLatencyHealthRow[][] = [];
+  const traceReadEffects: Array<() => void> = [];
   let state: HostedLinqAlert | null = null;
   let rejectNextClaim = options.rejectNextClaim === true;
 
-  const traceFindMany = vi.fn(async () => rows.map((row) => ({
-    acceptedAt: row.acceptedAt,
-    linqDelivery: row.deliveryAcceptedAt
+  const traceFindMany = vi.fn(async () => {
+    const selectedRows = queuedRows.shift() ?? rows;
+    traceReadEffects.shift()?.();
+    return selectedRows.map((row) => ({
+      acceptedAt: row.acceptedAt,
+      linqDelivery: row.deliveryAcceptedAt
       ? { acceptedAt: row.deliveryAcceptedAt }
       : null,
-    mailboxItem: {
-      consumedAt: row.consumedAt,
-    },
-  })));
+      mailboxItem: {
+        consumedAt: row.consumedAt,
+      },
+    }));
+  });
   const alertUpsert = vi.fn(async (args: AlertUpsertArgs) => {
     if (!state) {
       state = {
@@ -775,11 +864,22 @@ function createMonitorPrismaFixture(
         findMany: traceFindMany,
       },
       hostedLinqAlert: {
+        count: vi.fn(async (args: AlertCountArgs) => (
+          state && matchesAlertWhere(state, args.where) ? 1 : 0
+        )),
         updateMany: alertUpdateMany,
         upsert: alertUpsert,
       },
     } as never,
     readState: () => state,
+    queueRowsForReads(
+      ...nextRows: readonly HostedRuntimeLatencyHealthRow[][]
+    ) {
+      queuedRows.push(...nextRows.map((readRows) => [...readRows]));
+    },
+    queueTraceReadEffects(...effects: Array<() => void>) {
+      traceReadEffects.push(...effects);
+    },
     setRows(nextRows: readonly HostedRuntimeLatencyHealthRow[]) {
       rows = [...nextRows];
     },
@@ -821,6 +921,10 @@ interface AlertUpdateManyArgs {
     lastAttemptedAt?: Date | null;
     status?: string;
   };
+}
+
+interface AlertCountArgs {
+  where: AlertUpdateManyArgs["where"];
 }
 
 function matchesAlertWhere(

@@ -194,7 +194,9 @@ not enter evidence; and attachment-only input fails closed before provider work.
   cron auth, incident claim coalescing, operator-time quiet hours, stable
   wake-up jitter, the ten-minute-plus-jitter retry/recurrence floor,
   provider-idempotent retry, naturally distinct later-incident copy, PII-free
-  evidence, and fail-safe scan truncation.
+  evidence, fail-safe scan truncation, pre-provider recovery cancellation,
+  provider-boundary quiet-hour deferral with fresh wake-time evidence, and
+  post-provider recovery coalescing until the admitted effect settles.
   `apps/web/vercel.json` registers that read-only monitor at a five-minute
   cadence. The hosted-local foreground-priority leg additionally uses real
   PostgreSQL, authenticated cron HTTP, and the Linq stub boundary to prove one
