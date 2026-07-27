@@ -1,8 +1,8 @@
 # pr1002-reviewgpt-correction-4
 
-Status: active
+Status: completed
 Created: 2026-07-26
-Updated: 2026-07-26
+Updated: 2026-07-27
 
 ## Goal
 
@@ -169,7 +169,12 @@ Updated: 2026-07-26
   no container-reachable worker host can be resolved). The complete final
   reproduction used Testbox `tbx_01kyh0vv4pd6a3q9bzg4vstxnw`
   ([Actions run](https://github.com/cobuildwithus/murph/actions/runs/30239956291)).
-- Post-fix PR CI: pending.
+- Post-fix PR CI passed on exact pushed head
+  `326cb43a2ee3973dfbc3f6bdab7f29df46cbdccd`: all 27 reported checks
+  passed or were intentionally skipped. The sole first-attempt failure was an
+  unrelated hosted-local Linq shard whose web server and Temporal metrics
+  process were assigned the same ephemeral localhost port; rerunning only the
+  failed jobs passed.
 - Exact-head ReviewGPT correction round 5 returned one accepted high-severity
   finding: an ambiguous seedless provider exchange failure cleared its marker
   without cleanup proof. The focused regressions failed on the reviewed head
@@ -185,3 +190,4 @@ Updated: 2026-07-26
   round will run; final confidence comes from the preliminary specialist pass,
   parent review, focused and PostgreSQL proof, PR CI, and the existing
   acceptance evidence.
+Completed: 2026-07-27
