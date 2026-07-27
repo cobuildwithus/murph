@@ -26,12 +26,8 @@ import {
 import {
   acquireHostedLinqChatOwnershipLockTx,
 } from "../hosted-routing/linq-chat-ownership-lock";
-import {
-  hasUnresolvedHostedLinqProviderDispatchForChatTx,
-} from "./linq-delivery-store";
 
 export async function demoteHostedMemberLinqGroupChatBindingsTx(input: {
-  enforceProviderDispatchFence?: boolean;
   linqChatId: string;
   mailboxDedupeKey?: string | null;
   prisma: Prisma.TransactionClient;
@@ -41,21 +37,6 @@ export async function demoteHostedMemberLinqGroupChatBindingsTx(input: {
   );
   if (linqChatLookupKeys.length === 0) {
     throw new TypeError("Hosted Linq group routing requires a non-empty chat id.");
-  }
-
-  if (
-    input.enforceProviderDispatchFence === true
-    && await hasUnresolvedHostedLinqProviderDispatchForChatTx({
-      linqChatId: input.linqChatId,
-      prisma: input.prisma,
-    })
-  ) {
-    throw hostedOnboardingError({
-      code: "HOSTED_LINQ_GROUP_PROVIDER_DISPATCH_IN_FLIGHT",
-      httpStatus: 409,
-      message: "Linq provider dispatch is still active during group isolation.",
-      retryable: true,
-    });
   }
 
   const readBindings = () => input.prisma.hostedMemberRouting.findMany({
@@ -92,21 +73,6 @@ export async function demoteHostedMemberLinqGroupChatBindingsTx(input: {
     namespace: "chat",
     tx: input.prisma,
   });
-
-  if (
-    input.enforceProviderDispatchFence === true
-    && await hasUnresolvedHostedLinqProviderDispatchForChatTx({
-      linqChatId: input.linqChatId,
-      prisma: input.prisma,
-    })
-  ) {
-    throw hostedOnboardingError({
-      code: "HOSTED_LINQ_GROUP_PROVIDER_DISPATCH_IN_FLIGHT",
-      httpStatus: 409,
-      message: "Linq provider dispatch is still active during group isolation.",
-      retryable: true,
-    });
-  }
 
   const bindings = await readBindings();
   const memberIds = [...new Set(bindings.map((binding) => binding.memberId))];

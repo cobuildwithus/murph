@@ -433,12 +433,11 @@ export async function ensureHostedThreadContainerRouteTx(input: {
     };
   }
 
-  // The route owner is the durable group boundary. For a new Linq route, the
-  // chat lock and unresolved provider-start fence serialize the ownership
-  // transition against the old personal runtime's exact provider boundary.
+  // The route owner is the durable group boundary. Linq claim and demotion use
+  // the same chat lock, so whichever transaction commits first owns the
+  // transition without waiting on a later provider outcome.
   const demotion = input.channel === "linq"
     ? await demoteHostedMemberLinqGroupChatBindingsTx({
-        enforceProviderDispatchFence: true,
         linqChatId: String(input.threadId),
         ...(input.mailboxDedupeKey
           ? { mailboxDedupeKey: input.mailboxDedupeKey }

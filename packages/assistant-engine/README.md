@@ -59,14 +59,18 @@ existing Web transaction that owns the durable provider-dispatch claim:
 runtime completes asynchronous preparation, performs one local liveness/yield
 check immediately before the claim, and passes the immutable deadline. Web
 rejects an expired new claim without writing the fence; an existing unresolved
-claim remains already-started. A successful claim is irreversible provider
-entry, so the corresponding raw request has no later local expiry or yield
-veto. Pre-claim rejection remains proven not sent; only post-claim uncertainty
-is ambiguous. It still receives
-no CLI, hosted context, shell, connected apps, arbitrary network, progress,
-image, or group-mutation capability. Both profiles use the existing one-shot App Server
-path so their restrictive launch configuration cannot replace the resident
-ordinary-turn process or interrupt detached enrichment.
+claim remains already-started. The claim commit is the terminal at-most-once
+dispatch decision and shares the chat advisory lock with group-route demotion;
+provider outcomes do not hold route authority. A confirmed claim reaches the
+raw request without a later local expiry or yield veto. After a lost claim
+acknowledgement, replay-safe text rechecks route authority and reuses the claim
+plus provider idempotency, while non-idempotent voice or reaction delivery
+remains confirmation-pending. Pre-claim rejection remains proven not sent. It
+still receives no CLI, hosted context, shell, connected apps, arbitrary
+network, progress, image, or group-mutation capability. Both profiles use the
+existing one-shot App Server path so their restrictive launch configuration
+cannot replace the resident ordinary-turn process or interrupt detached
+enrichment.
 
 Hosted invocation-scoped automation and device authority enters only the
 current root turn through narrow typed dynamic tools backed by existing domain

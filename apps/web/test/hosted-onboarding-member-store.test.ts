@@ -1734,7 +1734,7 @@ describe("hosted-member-store", () => {
     expect(queryRaw).toHaveBeenCalledTimes(2);
   });
 
-  it("demotes home and pending Linq bindings for canonical groups without clearing the assigned line", async () => {
+  it("demotes canonical group bindings after a provider claim without waiting on its outcome", async () => {
     setHostedContactPrivacyKeyring({
       currentVersion: "v2",
       keysByVersion: {
@@ -1751,6 +1751,9 @@ describe("hosted-member-store", () => {
     const deleteMany = vi.fn().mockResolvedValue({ count: 1 });
     const consumedAt = new Date("2026-07-12T12:00:00.000Z");
     const findFirstMailboxItem = vi.fn().mockResolvedValue({ consumedAt });
+    const findFirstDelivery = vi.fn().mockResolvedValue({
+      id: "delivery_claim_committed",
+    });
     const findMany = vi.fn().mockResolvedValue([
       { memberId: "member_home" },
       { memberId: "member_pending" },
@@ -1759,7 +1762,7 @@ describe("hosted-member-store", () => {
       $executeRaw: executeRaw,
       $queryRaw: queryRaw,
       hostedLinqDelivery: {
-        findFirst: vi.fn().mockResolvedValue(null),
+        findFirst: findFirstDelivery,
       },
       hostedMailboxItem: {
         deleteMany,
@@ -1784,6 +1787,7 @@ describe("hosted-member-store", () => {
     expect(queryRaw).toHaveBeenNthCalledWith(2, expect.anything(), "member_pending");
     expect(executeRaw).toHaveBeenCalledTimes(1);
     expect(findMany).toHaveBeenCalledTimes(2);
+    expect(findFirstDelivery).not.toHaveBeenCalled();
     expect(deleteMany).toHaveBeenCalledWith({
       where: {
         dedupeKey: "evt_group",
@@ -1839,34 +1843,6 @@ describe("hosted-member-store", () => {
         pendingLinqRecipientPhoneLookupKey: null,
       },
     });
-  });
-
-  it("keeps canonical group bindings while a provider dispatch is in flight", async () => {
-    const findMany = vi.fn();
-    const updateMany = vi.fn();
-    const prisma = {
-      $executeRaw: vi.fn().mockResolvedValue(0),
-      $queryRaw: createMemberRowLockQueryRaw(),
-      hostedLinqDelivery: {
-        findFirst: vi.fn().mockResolvedValue({ id: "delivery_in_flight" }),
-      },
-      hostedMemberRouting: {
-        findMany,
-        updateMany,
-      },
-    } as never;
-
-    await expect(demoteHostedMemberLinqGroupChatBindingsTx({
-      enforceProviderDispatchFence: true,
-      linqChatId: "chat_group",
-      prisma,
-    })).rejects.toMatchObject({
-      code: "HOSTED_LINQ_GROUP_PROVIDER_DISPATCH_IN_FLIGHT",
-      retryable: true,
-    });
-
-    expect(findMany).not.toHaveBeenCalled();
-    expect(updateMany).not.toHaveBeenCalled();
   });
 
   it("retries group demotion when another member route appears after owner locking", async () => {

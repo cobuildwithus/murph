@@ -301,12 +301,15 @@ transaction that owns its durable provider-dispatch claim. Runtime finishes
 asynchronous preparation, performs its local liveness/yield check immediately
 before requesting the claim, and passes the immutable deadline. Web rejects an
 expired new claim without writing the fence; an existing unresolved claim
-remains already-started. Once a claim succeeds, it is the irreversible
-provider-entry boundary, so no later local expiry or yield veto may strand it
-before the raw request. Pre-claim rejection retains explicit not-sent proof;
-post-claim uncertainty is ambiguous. Ambiguous non-idempotent work keeps
-its existing fail-closed reconciliation and cannot re-enter the provider. No
-import, generation, or delivery retry recomputes or extends that deadline.
+remains already-started. The claim commit is the terminal at-most-once
+dispatch decision and shares the chat advisory lock with group-route demotion,
+so provider-outcome bookkeeping never blocks route isolation. A confirmed
+claim proceeds to the raw request without a later local expiry or yield veto.
+After a lost claim acknowledgement, replay-safe text rechecks route authority
+and reuses the claim plus provider idempotency; non-idempotent voice or
+reaction delivery remains confirmation-pending and cannot re-enter the
+provider. Pre-claim rejection retains explicit not-sent proof. No import,
+generation, or delivery retry recomputes or extends that deadline.
 
 ## Ownership And Data Flow
 

@@ -2972,6 +2972,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
                   providerDispatchEntered = true;
                 },
                 operation: "Hosted assistant Linq reaction delivery",
+                providerDispatchRetrySafe: false,
                 providerFetch: input.providerFetch,
               }),
               ...(input.signal ? { signal: input.signal } : {}),
@@ -3312,8 +3313,10 @@ function createHostedProviderFetchBoundary(input: {
   onTelegramVoiceMemoDispatchEntered?: () => void;
   operation: string;
   prepareProviderDispatch?: () => Promise<void> | void;
+  providerDispatchRetrySafe?: boolean;
   providerFetch: typeof fetch | null;
 }): typeof fetch {
+  let providerCommitAttempted = false;
   let providerCommitPromise: Promise<void> | null = null;
   let providerDispatchCommitted = false;
   let providerPreparationPromise: Promise<void> | null = null;
@@ -3321,6 +3324,7 @@ function createHostedProviderFetchBoundary(input: {
     if (!input.commitProviderDispatch) {
       return;
     }
+    providerCommitAttempted = true;
     providerCommitPromise ??= Promise.resolve().then(
       input.commitProviderDispatch,
     );
@@ -3358,7 +3362,11 @@ function createHostedProviderFetchBoundary(input: {
       }
       input.onProviderDispatchEntered?.();
     } catch (error) {
-      throw providerDispatchCommitted
+      const nonIdempotentCommitMayHaveSucceeded =
+        providerCommitAttempted
+        && input.providerDispatchRetrySafe === false
+        && !hostedProviderDispatchCommitRejectionIsDefinitive(error);
+      throw providerDispatchCommitted || nonIdempotentCommitMayHaveSucceeded
         ? markHostedDeliveryMayHaveSucceeded(error)
         : markAssistantDeliveryProviderNotInvoked(error);
     }
@@ -3366,6 +3374,31 @@ function createHostedProviderFetchBoundary(input: {
     await input.assertLive?.();
     return response;
   }) as typeof fetch;
+}
+
+function hostedProviderDispatchCommitRejectionIsDefinitive(
+  error: unknown,
+): boolean {
+  if (hostedDeliveryErrorProvesProviderWasSkipped(error)) {
+    return true;
+  }
+  if (
+    error
+    && typeof error === "object"
+    && "code" in error
+    && error.code === "ASSISTANT_LINQ_ENGAGEMENT_ASSERT_UNAVAILABLE"
+  ) {
+    return true;
+  }
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+  const status = "status" in error
+    ? error.status
+    : "statusCode" in error
+      ? error.statusCode
+      : null;
+  return typeof status === "number" && status >= 400 && status < 500;
 }
 
 function isTelegramSendVoiceProviderFetchRequest(
@@ -3585,6 +3618,7 @@ function createHostedAssistantLinqSendDependency(input: {
             : undefined;
         },
         operation: "Hosted assistant Linq delivery",
+        providerDispatchRetrySafe: true,
         providerFetch: input.providerFetch,
       }),
       ...(signal ? { signal } : {}),
@@ -3959,6 +3993,7 @@ function createHostedAssistantLinqVoiceMemoSendDependency(input: {
           input.onProviderDispatchEntered?.();
         },
         operation: "Hosted assistant Linq voice memo delivery",
+        providerDispatchRetrySafe: false,
         providerFetch: input.providerFetch,
       }),
       ...(signal ? { signal } : {}),

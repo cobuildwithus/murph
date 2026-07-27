@@ -3107,7 +3107,6 @@ describe("Linq group chat auto-provision", () => {
       expect(
         memberRoutingStore.demoteHostedMemberLinqGroupChatBindingsTx,
       ).toHaveBeenCalledWith({
-        enforceProviderDispatchFence: true,
         linqChatId: "chat_group_123",
         mailboxDedupeKey: "evt_group_123",
         prisma,

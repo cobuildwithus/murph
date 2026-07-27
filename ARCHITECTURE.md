@@ -729,11 +729,16 @@ provider-dispatch claim: runtime finishes asynchronous preparation, performs
 its local liveness/yield check immediately before requesting the claim, and
 passes the immutable deadline. Web rejects an expired new claim without
 writing the fence; an existing unresolved claim remains already-started.
-A successful claim is the irreversible provider-entry boundary, so no later
-local expiry or yield check may veto the corresponding raw Linq request.
-Pre-claim rejection remains proven not sent; uncertainty after the claim is
-ambiguous. It carries no contributor label, and the assistant owner
-enforces one audio attempt while treating successful generation as
+The claim commit is the terminal at-most-once dispatch decision and uses the
+same chat advisory lock as group-route demotion, so claim and route ownership
+have one transaction order. Provider outcomes refine observability only and
+never hold route authority. A confirmed claim proceeds to the raw request
+without a later local expiry or yield veto. If the claim acknowledgement is
+lost, replay-safe text rechecks route authority and reuses the claim plus
+provider idempotency; non-idempotent voice or reaction delivery remains
+confirmation-pending and cannot re-enter the provider. Pre-claim rejection
+remains proven not sent. It carries no contributor label, and the assistant
+owner enforces one audio attempt while treating successful generation as
 non-replayable. It adds no event family, queue, scheduler, migration, or second
 delivery owner. Family funding authorizes the
 owner, active group billing, and selected active unsuspended direct member at

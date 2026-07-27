@@ -9204,7 +9204,158 @@ describe("hosted runtime callbacks", () => {
     },
   );
 
-  it("blocks Linq reactions when egress authority is rejected", async () => {
+  it.each(["reaction", "voice"] as const)(
+    "treats a lost Linq %s claim acknowledgement as possibly delivered without replaying the delivery",
+    async (kind) => {
+      const effect = createEffect({
+        bindingDeliveryKind: "thread",
+        bindingDeliveryTarget: "linq_chat_123",
+        channel: "linq",
+        message: kind === "reaction" ? "" : "voice reply",
+        replyToMessageId: "linq_message_1",
+        transportIdempotent: false,
+      });
+      const lostClaimAcknowledgement = new Error(
+        "Linq claim response was lost after commit.",
+      );
+      const assertRecentInbound = vi.fn(async () => {
+        throw lostClaimAcknowledgement;
+      });
+      mocks.useActualLinqReaction = kind === "reaction";
+      mocks.useActualLinqVoiceMemoMessage = kind === "voice";
+      mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+        if (kind === "reaction") {
+          await dependencies.setLinqMessageReaction({
+            reaction: "heart",
+            target: "linq_chat_123",
+            targetMessageId: "linq_message_1",
+          });
+        } else {
+          await dependencies.sendLinqVoiceMemo({
+            attachmentId: "attachment_voice_1",
+            target: "linq_chat_123",
+          });
+        }
+        throw new Error("unreachable after a lost claim acknowledgement");
+      });
+      const providerFetch = vi.fn<typeof fetch>();
+
+      await expect(drainHostedPreparedAssistantDeliveries({
+        assistantDeliveryEffects: [effect],
+        effectsPort: createHostedRuntimeEffectsPortStub({
+          assertLinqRecentInboundEngagement: assertRecentInbound,
+        }),
+        forwardedEnv: { LINQ_API_TOKEN: "linq-token" },
+        platformEnv: {},
+        providerFetch,
+        vaultRoot: HOSTED_WAKE.vaultRoot,
+        wake: HOSTED_WAKE.wake,
+      })).rejects.toMatchObject({
+        deliveryMayHaveSucceeded: true,
+        message: "Linq claim response was lost after commit.",
+      });
+
+      expect(assertRecentInbound).toHaveBeenCalledTimes(1);
+      expect(
+        providerFetch.mock.calls
+          .map(([request]) => String(request))
+          .some((url) => url.includes("/voicememo") || url.includes("/reactions")),
+      ).toBe(false);
+      expect(mocks.setLinqMessageReaction).not.toHaveBeenCalled();
+      expect(mocks.sendLinqVoiceMemoMessage).not.toHaveBeenCalled();
+    },
+  );
+
+  it("retries replay-safe Linq text after a lost claim acknowledgement", async () => {
+    const effect = createEffect({
+      bindingDeliveryKind: "thread",
+      bindingDeliveryTarget: "linq_chat_123",
+      channel: "linq",
+      message: "A short group thank-you.",
+      transportIdempotent: true,
+    });
+    const lostClaimAcknowledgement = new Error(
+      "Linq claim response was lost after commit.",
+    );
+    let providerClaimAttempt = 0;
+    const assertRecentInbound = vi.fn(async (request: {
+      authorityCheckOnly: boolean;
+    }) => {
+      if (request.authorityCheckOnly) {
+        return {};
+      }
+      providerClaimAttempt += 1;
+      if (providerClaimAttempt === 1) {
+        throw lostClaimAcknowledgement;
+      }
+      return await assertLinqEngagementWithExistingProviderClaim(request);
+    });
+    mocks.useActualLinqMessage = true;
+    let firstAttemptError: unknown = null;
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+      try {
+        await dependencies.sendLinq({
+          idempotencyKey: "assistant-outbox:intent_123",
+          message: "A short group thank-you.",
+          replyToMessageId: null,
+          target: "linq_chat_123",
+          targetKind: "thread",
+        });
+      } catch (error) {
+        firstAttemptError = error;
+      }
+      const delivery = await dependencies.sendLinq({
+        idempotencyKey: "assistant-outbox:intent_123",
+        message: "A short group thank-you.",
+        replyToMessageId: null,
+        target: "linq_chat_123",
+        targetKind: "thread",
+      });
+      return createDispatchResult({
+        delivery: createDelivery({
+          channel: "linq",
+          providerMessageId: delivery.providerMessageId,
+          target: delivery.target,
+          targetKind: "thread",
+        }),
+        status: "sent",
+      });
+    });
+    const providerFetch = vi.fn<typeof fetch>(async () =>
+      Response.json({
+        message: {
+          id: "linq-message-after-lost-claim-ack",
+        },
+      })
+    );
+
+    const outcomes = await drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        assertLinqRecentInboundEngagement: assertRecentInbound,
+      }),
+      forwardedEnv: { LINQ_API_TOKEN: "linq-token" },
+      platformEnv: {},
+      providerFetch,
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    });
+
+    expect(firstAttemptError).toBe(lostClaimAcknowledgement);
+    expect(firstAttemptError).toMatchObject({
+      deliveryMayHaveSucceeded: false,
+    });
+    expect(assertRecentInbound).toHaveBeenCalledTimes(2);
+    expect(providerFetch).toHaveBeenCalledTimes(1);
+    expect(mocks.sendLinqMessage).not.toHaveBeenCalled();
+    expect(outcomes).toEqual([
+      expect.objectContaining({
+        deliveryStatus: "sent",
+      }),
+    ]);
+  });
+
+  it("blocks Linq reactions when Web definitively rejects egress authority", async () => {
     const effect = createEffect({
       channel: "linq",
       bindingDeliveryTarget: "linq_chat_123",
@@ -9212,8 +9363,12 @@ describe("hosted runtime callbacks", () => {
       replyToMessageId: "linq_message_1",
       transportIdempotent: false,
     });
+    const authorityRejection = Object.assign(
+      new Error("recent inbound required"),
+      { status: 403 },
+    );
     const assertRecentInbound = vi.fn(async () => {
-      throw new Error("recent inbound required");
+      throw authorityRejection;
     });
     mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
       await dependencies.setLinqMessageReaction({
@@ -9239,6 +9394,9 @@ describe("hosted runtime callbacks", () => {
       wake: HOSTED_WAKE.wake,
     })).rejects.toThrow("recent inbound required");
 
+    expect(authorityRejection).toMatchObject({
+      deliveryMayHaveSucceeded: false,
+    });
     expect(assertRecentInbound).toHaveBeenCalledWith(
       expect.objectContaining({
         idempotencyKey: "assistant-outbox:intent_123",

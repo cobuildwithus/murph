@@ -438,36 +438,6 @@ export async function recordHostedLinqRuntimeProviderDispatchFenceTx(input: {
   });
 }
 
-export async function hasUnresolvedHostedLinqProviderDispatchForChatTx(input: {
-  linqChatId: string;
-  prisma: HostedLinqDeliveryClient;
-}): Promise<boolean> {
-  const linqChatLookupKeys = createHostedLinqChatLookupKeyReadCandidates(
-    input.linqChatId,
-  );
-  if (linqChatLookupKeys.length === 0) {
-    return false;
-  }
-
-  const delivery = await input.prisma.hostedLinqDelivery.findFirst({
-    select: { id: true },
-    where: {
-      acceptedAt: null,
-      deliveredAt: null,
-      lastReceiptAt: null,
-      linqChatLookupKey: {
-        in: linqChatLookupKeys,
-      },
-      messageLookupKey: null,
-      skippedAt: null,
-      failedAt: null,
-      status: HOSTED_LINQ_DELIVERY_PROVIDER_DISPATCH_STARTED_STATUS,
-    },
-  });
-
-  return delivery !== null;
-}
-
 export async function startHostedAiUsageLimitNoticeDispatchTx(input: {
   assertDispatchAuthority?: (
     prisma: Prisma.TransactionClient,

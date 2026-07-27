@@ -10,7 +10,6 @@ import {
   buildHostedAiUsageGateNoticeIdempotencyKey,
   startHostedAiUsageLimitNoticeDispatchTx,
   claimHostedLinqDeliveryProviderDispatchTx,
-  hasUnresolvedHostedLinqProviderDispatchForChatTx,
   markHostedAiUsageLimitNoticeDeliveryRetryableTx,
   markHostedLinqDeliveryAcceptedTx,
   markHostedLinqDeliverySendFailedTx,
@@ -1342,28 +1341,6 @@ describe("hosted Linq observability stores", () => {
     expect(outcome).toMatchObject({
       deliveryId: fence.id,
       recorded: true,
-    });
-  });
-
-  it("detects an unresolved dispatch for a transitioning chat without expiry", async () => {
-    const fixture = createObservabilityPrismaFixture();
-    fixture.hostedLinqDeliveryFindFirst.mockResolvedValueOnce({
-      id: "hld_in_flight",
-    });
-    await expect(hasUnresolvedHostedLinqProviderDispatchForChatTx({
-      linqChatId: "chat_123",
-      prisma: fixture.prisma as never,
-    })).resolves.toBe(true);
-
-    expect(fixture.hostedLinqDeliveryFindFirst).toHaveBeenCalledWith({
-      select: { id: true },
-      where: expect.objectContaining({
-        linqChatLookupKey: {
-          in: createHostedLinqChatLookupKeyReadCandidates("chat_123"),
-        },
-        failedAt: null,
-        status: "provider_dispatch_started",
-      }),
     });
   });
 

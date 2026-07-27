@@ -61,7 +61,10 @@ member's sharing edit does not create another confirmation.
 - Canonical group demotion locks every affected member row in stable order
   before the chat lock, re-reads the owners, and clears the home participant
   authority together with the home chat. A newly appearing owner makes the
-  demotion retry rather than mutating a route it did not lock.
+  demotion retry rather than mutating a route it did not lock. The final
+  provider-dispatch claim uses that same chat lock, so commit order alone
+  decides whether personal dispatch or group ownership wins. A committed claim
+  never makes route isolation wait for a later provider outcome.
 - A final home-route egress check takes the member row before the chat
   lock and records the provider-dispatch fence in that same transaction. A
   concurrent rehome therefore cannot revoke the checked chat between the
