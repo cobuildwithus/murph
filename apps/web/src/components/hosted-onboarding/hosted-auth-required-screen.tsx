@@ -14,13 +14,7 @@ interface HostedAuthRequiredScreenProps {
   title: string;
 }
 
-export function HostedAuthRequiredScreen({
-  description,
-  eyebrow,
-  eyebrowIcon: EyebrowIcon,
-  footer,
-  title,
-}: HostedAuthRequiredScreenProps) {
+export function HostedAuthRequiredScreen(props: HostedAuthRequiredScreenProps) {
   const { authenticated, openAuthDialog } = useAuth();
 
   useEffect(() => {
@@ -29,6 +23,21 @@ export function HostedAuthRequiredScreen({
     }
   }, [authenticated, openAuthDialog]);
 
+  return <HostedAuthRequiredScreenView {...props} onLogin={openAuthDialog} />;
+}
+
+/**
+ * Presentation only. The design catalog renders this rather than the screen
+ * above, whose effect would open the app-wide auth dialog over the catalog.
+ */
+export function HostedAuthRequiredScreenView({
+  description,
+  eyebrow,
+  eyebrowIcon: EyebrowIcon,
+  footer,
+  onLogin,
+  title,
+}: HostedAuthRequiredScreenProps & { onLogin?: () => void }) {
   return (
     <main className="min-h-dvh bg-background px-4 py-8 text-foreground sm:px-6">
       <section className="mx-auto flex min-h-[78vh] max-w-xl flex-col items-center justify-center text-center">
@@ -47,7 +56,7 @@ export function HostedAuthRequiredScreen({
         </p>
 
         <div className="mt-8 flex flex-col items-center gap-3">
-          <Button type="button" size="lg" onClick={openAuthDialog}>
+          <Button type="button" size="lg" onClick={onLogin}>
             Log in or sign up
           </Button>
           {footer ? (

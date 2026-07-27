@@ -93,6 +93,8 @@ const REQUIRED_STORE_SLUGS = [
   "prisma.hosted_web_session",
   "prisma.hosted_sensitive_action_challenge",
   "prisma.hosted_member_identity",
+  "prisma.hosted_address_book_projection",
+  "prisma.hosted_address_book_contact",
   "prisma.hosted_member_routing",
   "prisma.hosted_member_email_authorization",
   "prisma.hosted_member_billing_ref",

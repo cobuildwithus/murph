@@ -63,7 +63,21 @@ vi.mock("@/src/lib/hosted-onboarding/linq-first-contact-admission", async (impor
   >();
   return {
     ...actual,
+    claimHostedLinqFirstContactAdmissionBudget: vi.fn(async () => ({
+      attemptCount: 1,
+      kind: "claimed" as const,
+    })),
+    classifyHostedLinqFirstContactAdmission: vi.fn(async () => ({
+      confidence: 1,
+      kind: "allow" as const,
+      source: "model" as const,
+    })),
+    readRecordedHostedLinqFirstContactAdmissionDecision: vi.fn(async () => null),
     readHostedLinqFirstContactAdmissionMode: vi.fn(() => "off" as const),
+    recordHostedLinqFirstContactAdmissionDecision: vi.fn(
+      async ({ decision }: { decision: unknown }) => decision,
+    ),
+    tryHostedLinqFirstContactAdmissionDeterministicDecision: vi.fn(() => null),
   };
 });
 
@@ -80,6 +94,11 @@ vi.mock("@/src/lib/hosted-onboarding/webhook-provider-linq", async (importOrigin
         response: { ok: true as const, reason: "prewarm-owner-boundary-plan" },
       };
     }),
+    resolveHostedLinqMailboxPayloadRootPrewarmMemberId: vi.fn(
+      async ({ threadRoute }: {
+        threadRoute: { containerMemberId: string } | null;
+      }) => threadRoute?.containerMemberId ?? "member_direct_prewarm",
+    ),
   };
 });
 
@@ -108,6 +127,7 @@ const diagnosticDetails: Array<{ details: unknown; name: string }> = [];
 
 /** Bytes of the warmed key copy observed at the instant `BEGIN` is issued. */
 let rootKeyAtTransactionOpen: number[] | null = null;
+const rootKeysAtTransactionOpen: Array<number[] | null> = [];
 
 function buildLinqMessageWebhookBody(input: { chatIsGroup?: boolean } = {}): string {
   return JSON.stringify({
@@ -146,6 +166,7 @@ function buildPrewarmPrisma() {
     $transaction: vi.fn(async (callback: (tx: unknown) => Promise<unknown>) => {
       calls.push("begin");
       rootKeyAtTransactionOpen = issuedRootKeys[0] ? [...issuedRootKeys[0]] : null;
+      rootKeysAtTransactionOpen.push(rootKeyAtTransactionOpen);
       const result = await callback({});
       calls.push("commit");
       return result;
@@ -164,6 +185,7 @@ describe("hosted Linq mailbox payload root prewarm", () => {
     diagnostics.length = 0;
     diagnosticDetails.length = 0;
     rootKeyAtTransactionOpen = null;
+    rootKeysAtTransactionOpen.length = 0;
     vi.clearAllMocks();
     vi.resetModules();
   });
@@ -286,6 +308,7 @@ describe("hosted Linq mailbox payload root prewarm", () => {
     const prisma = {} as never;
 
     await warmHostedLinqMailboxPayloadRoot({
+      event: JSON.parse(buildLinqMessageWebhookBody()),
       prisma,
       threadRoute: { containerMemberId: "member_prewarm_1" } as never,
     });
@@ -302,20 +325,27 @@ describe("hosted Linq mailbox payload root prewarm", () => {
     expect([...(issuedRootKeys[0] ?? [])]).toEqual([0, 0, 0, 0]);
   });
 
-  it("does not unwrap when no route is established", async () => {
+  it("unwraps the resolver's direct member when no route is established", async () => {
     const { warmHostedLinqMailboxPayloadRoot } = await import(
       "@/src/lib/hosted-onboarding/webhook-service"
     );
     const { unwrapHostedDomainRootForWeb } = await import(
       "@/src/lib/hosted-crypto/domain-root-store"
     );
+    const prisma = {} as never;
 
     await warmHostedLinqMailboxPayloadRoot({
-      prisma: {} as never,
+      event: JSON.parse(buildLinqMessageWebhookBody()),
+      prisma,
       threadRoute: null,
     });
 
-    expect(unwrapHostedDomainRootForWeb).not.toHaveBeenCalled();
+    expect(unwrapHostedDomainRootForWeb).toHaveBeenCalledExactlyOnceWith({
+      domain: "ingress",
+      prisma,
+      retainFailureInScopedCache: true,
+      userId: "member_direct_prewarm",
+    });
   });
 
   // The helper-level tests above pin each piece. These drive the real webhook
@@ -354,7 +384,7 @@ describe("hosted Linq mailbox payload root prewarm", () => {
       expect(diagnostics).not.toContain("hosted-onboarding.webhook.warm-failed");
     });
 
-    it("does not warm when webhook metadata already says the chat is a group", async () => {
+    it("warms an established route when webhook metadata says the chat is a group", async () => {
       const { handleHostedOnboardingLinqWebhook } = await import(
         "@/src/lib/hosted-onboarding/webhook-service"
       );
@@ -373,12 +403,191 @@ describe("hosted Linq mailbox payload root prewarm", () => {
         timestamp: null,
       });
 
-      // Pinning the known gap so it cannot close or widen silently: the
-      // resolver returns before reading a route, so there is nothing to warm
-      // and this branch still takes its first unwrap inside the transaction.
-      expect(readHostedThreadRouteByThreadIdentity).not.toHaveBeenCalled();
-      expect(unwrapHostedDomainRootForWeb).not.toHaveBeenCalled();
-      expect(calls).toEqual(["begin", "plan", "commit"]);
+      expect(readHostedThreadRouteByThreadIdentity).toHaveBeenCalledTimes(1);
+      expect(unwrapHostedDomainRootForWeb).toHaveBeenCalledExactlyOnceWith({
+        domain: "ingress",
+        prisma,
+        retainFailureInScopedCache: true,
+        userId: "member_prewarm_1",
+      });
+      expect(calls).toEqual(["read-route", "unwrap", "begin", "plan", "commit"]);
+    });
+
+    it("warms before the classifier-allow replan transaction", async () => {
+      const { handleHostedOnboardingLinqWebhook } = await import(
+        "@/src/lib/hosted-onboarding/webhook-service"
+      );
+      const {
+        claimHostedLinqFirstContactAdmissionBudget,
+        classifyHostedLinqFirstContactAdmission,
+        readHostedLinqFirstContactAdmissionMode,
+        recordHostedLinqFirstContactAdmissionDecision,
+      } = await import("@/src/lib/hosted-onboarding/linq-first-contact-admission");
+      const {
+        planHostedOnboardingLinqWebhook,
+        resolveHostedLinqMailboxPayloadRootPrewarmMemberId,
+      } = await import("@/src/lib/hosted-onboarding/webhook-provider-linq");
+      const prisma = buildPrewarmPrisma();
+
+      vi.mocked(readHostedLinqFirstContactAdmissionMode).mockReturnValue("enforce");
+      vi.mocked(resolveHostedLinqMailboxPayloadRootPrewarmMemberId)
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce("member_replan");
+      vi.mocked(planHostedOnboardingLinqWebhook)
+        .mockImplementationOnce(async () => {
+          calls.push("plan");
+          return {
+            desiredSideEffects: [],
+            firstContactAdmissionParticipantContact: {
+              kind: "phone",
+              lookupKey: "phone_lookup_replan",
+              value: "+15555550123",
+            },
+            firstContactAdmissionRequest: {
+              eventId: "evt_prewarm_1",
+              participantContactKind: "phone",
+              partTypes: ["text"],
+              service: "sms",
+              text: "hello",
+            },
+            response: {
+              ignored: true,
+              ok: true,
+              reason: "first-contact-admission-required",
+            },
+          };
+        })
+        .mockImplementationOnce(async () => {
+          calls.push("plan");
+          return {
+            desiredSideEffects: [],
+            response: {
+              ok: true,
+              reason: "classifier-allow-replan",
+            },
+          };
+        });
+
+      const response = await handleHostedOnboardingLinqWebhook({
+        prisma: prisma as never,
+        rawBody: buildLinqMessageWebhookBody(),
+        signature: null,
+        timestamp: null,
+      });
+
+      expect(response).toMatchObject({ ok: true, reason: "classifier-allow-replan" });
+      expect(claimHostedLinqFirstContactAdmissionBudget).toHaveBeenCalledTimes(1);
+      expect(classifyHostedLinqFirstContactAdmission).toHaveBeenCalledTimes(1);
+      expect(recordHostedLinqFirstContactAdmissionDecision).toHaveBeenCalledTimes(1);
+      expect(calls).toEqual([
+        "read-route",
+        "begin",
+        "plan",
+        "commit",
+        "begin",
+        "commit",
+        "unwrap",
+        "begin",
+        "plan",
+        "commit",
+      ]);
+      expect(rootKeysAtTransactionOpen).toEqual([null, null, [0, 0, 0, 0]]);
+    });
+
+    it("warms before a deterministic decision loses to a recorded allow replan", async () => {
+      const { handleHostedOnboardingLinqWebhook } = await import(
+        "@/src/lib/hosted-onboarding/webhook-service"
+      );
+      const {
+        classifyHostedLinqFirstContactAdmission,
+        readHostedLinqFirstContactAdmissionMode,
+        recordHostedLinqFirstContactAdmissionDecision,
+        tryHostedLinqFirstContactAdmissionDeterministicDecision,
+      } = await import("@/src/lib/hosted-onboarding/linq-first-contact-admission");
+      const {
+        planHostedOnboardingLinqWebhook,
+        resolveHostedLinqMailboxPayloadRootPrewarmMemberId,
+      } = await import("@/src/lib/hosted-onboarding/webhook-provider-linq");
+      const prisma = buildPrewarmPrisma();
+
+      vi.mocked(readHostedLinqFirstContactAdmissionMode).mockReturnValue("enforce");
+      vi.mocked(tryHostedLinqFirstContactAdmissionDeterministicDecision).mockReturnValue({
+        confidence: 1,
+        kind: "block",
+        source: "deterministic",
+      });
+      vi.mocked(recordHostedLinqFirstContactAdmissionDecision).mockResolvedValue({
+        confidence: 1,
+        kind: "allow",
+        source: "model",
+      });
+      vi.mocked(resolveHostedLinqMailboxPayloadRootPrewarmMemberId)
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce("member_replan");
+      vi.mocked(planHostedOnboardingLinqWebhook)
+        .mockImplementationOnce(async () => {
+          calls.push("plan");
+          return {
+            desiredSideEffects: [],
+            firstContactAdmissionParticipantContact: {
+              kind: "phone",
+              lookupKey: "phone_lookup_replan",
+              value: "+15555550123",
+            },
+            firstContactAdmissionRequest: {
+              eventId: "evt_prewarm_1",
+              participantContactKind: "phone",
+              partTypes: [],
+              service: "sms",
+              text: null,
+            },
+            response: {
+              ignored: true,
+              ok: true,
+              reason: "first-contact-admission-required",
+            },
+          };
+        })
+        .mockImplementationOnce(async () => {
+          calls.push("plan");
+          return {
+            desiredSideEffects: [],
+            response: {
+              ok: true,
+              reason: "recorded-allow-replan",
+            },
+          };
+        });
+
+      const response = await handleHostedOnboardingLinqWebhook({
+        prisma: prisma as never,
+        rawBody: buildLinqMessageWebhookBody(),
+        signature: null,
+        timestamp: null,
+      });
+
+      expect(response).toMatchObject({ ok: true, reason: "recorded-allow-replan" });
+      expect(recordHostedLinqFirstContactAdmissionDecision).toHaveBeenCalledWith({
+        decision: {
+          confidence: 1,
+          kind: "block",
+          source: "deterministic",
+        },
+        eventId: "evt_prewarm_1",
+        prisma,
+      });
+      expect(classifyHostedLinqFirstContactAdmission).not.toHaveBeenCalled();
+      expect(calls).toEqual([
+        "read-route",
+        "begin",
+        "plan",
+        "commit",
+        "unwrap",
+        "begin",
+        "plan",
+        "commit",
+      ]);
+      expect(rootKeysAtTransactionOpen).toEqual([null, [0, 0, 0, 0]]);
     });
   });
 });

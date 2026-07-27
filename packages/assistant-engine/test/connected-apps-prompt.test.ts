@@ -1,46 +1,58 @@
+import { readFile } from 'node:fs/promises'
+import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 
+import {
+  resolveAssistantSkillsRoot,
+} from '../src/assistant-skill-assets.js'
 import {
   buildAssistantSystemPrompt,
   type AssistantSystemPromptInput,
 } from '../src/assistant/system-prompt.js'
 
-describe('connected-apps system-prompt coverage', () => {
-  it('names the newer service and toolkit use cases in the stable prompt', () => {
-    const prompt = buildAssistantSystemPrompt(createPromptInput())
+describe('connected-apps skill and system-prompt coverage', () => {
+  it('owns the approved service and toolkit use cases in the skill', async () => {
+    const skill = await readConnectedAppsSkill()
 
-    expect(prompt).toContain('Google Maps')
-    expect(prompt).toContain('NPPES')
-    expect(prompt).toContain('NPI')
-    expect(prompt).toContain('Amazon')
-    expect(prompt).toContain('Walmart')
-    expect(prompt).toContain('Instacart')
-    expect(prompt).toContain('Google Drive')
-    expect(prompt).toContain('OneDrive')
-    expect(prompt).toContain('Dropbox')
-    expect(prompt).toContain('Google Tasks')
-    expect(prompt).toContain('Todoist')
-    expect(prompt).toContain('Notion')
+    for (const expected of [
+      'Google Maps',
+      'NPPES',
+      'NPI',
+      'Amazon',
+      'Walmart',
+      'Instacart',
+      'Google Drive',
+      'OneDrive',
+      'Dropbox',
+      'Google Tasks',
+      'Todoist',
+      'Notion',
+      'Microsoft Outlook',
+      'Zoho Mail',
+    ]) {
+      expect(skill).toContain(expected)
+    }
   })
 
-  it('warns about OpenWeather location handling and unsupported claims', () => {
-    const prompt = buildAssistantSystemPrompt(createPromptInput())
+  it('owns OpenWeather location handling and unsupported-claim limits', async () => {
+    const skill = await readConnectedAppsSkill()
 
-    expect(prompt).toContain('not an exact address')
-    expect(prompt).toContain(
+    expect(skill).toContain('never an unnecessary exact address')
+    expect(skill).toContain(
       'Do not claim unsupported UV, air-quality, or official-alert data.',
     )
   })
 
-  it('keeps Mapbox as the geocoding/routing layer when Google Maps is named', () => {
-    const prompt = buildAssistantSystemPrompt(createPromptInput())
+  it('keeps Mapbox as the geocoding and routing layer', async () => {
+    const skill = await readConnectedAppsSkill()
 
-    expect(prompt).toContain(
-      "keep Mapbox as Murph's geocoding, distance, and routing layer",
+    expect(skill).toContain(
+      "Keep Mapbox\n  as Murph's geocoding, distance, and routing layer",
     )
   })
 
-  it('keeps the calendar-create contract direct-only', () => {
+  it('lazy-loads the detailed direct contract while preserving group floors', async () => {
+    const skill = await readConnectedAppsSkill()
     const directPrompt = buildAssistantSystemPrompt(createPromptInput({
       conversationScope: 'direct',
     }))
@@ -48,20 +60,37 @@ describe('connected-apps system-prompt coverage', () => {
       conversationScope: 'group',
     }))
 
-    for (const requiredDirectContract of [
+    for (const requiredContract of [
       'GOOGLECALENDAR_CREATE_EVENT',
       'OUTLOOK_CALENDAR_CREATE_EVENT',
       'agentApproved: true',
       'event_duration_hour',
       'event_duration_minutes',
       'end_datetime',
-      'do not retry the create call',
+      'do not retry',
     ]) {
-      expect(directPrompt).toContain(requiredDirectContract)
-      expect(groupPrompt).not.toContain(requiredDirectContract)
+      expect(skill).toContain(requiredContract)
+      expect(directPrompt).not.toContain(requiredContract)
+      expect(groupPrompt).not.toContain(requiredContract)
     }
+
+    expect(directPrompt).toContain(
+      '$MURPH_ASSISTANT_SKILLS_ROOT/connected-apps/SKILL.md',
+    )
+    expect(directPrompt).toContain('private untrusted evidence')
+    expect(groupPrompt).toContain('Use only accountless built-in service tools')
+    expect(groupPrompt).toContain(
+      'Never list, connect, rename, disconnect, search, read, write, or select',
+    )
   })
 })
+
+async function readConnectedAppsSkill(): Promise<string> {
+  return readFile(
+    path.join(resolveAssistantSkillsRoot(), 'connected-apps', 'SKILL.md'),
+    'utf8',
+  )
+}
 
 function createPromptInput(
   overrides: Partial<AssistantSystemPromptInput> = {},
