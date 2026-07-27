@@ -1,7 +1,8 @@
 import { type HostedBillingStatus, Prisma, type PrismaClient } from "@prisma/client";
 
-import { sanitizeHostedRuntimeErrorCode } from "@murphai/device-syncd/hosted-runtime";
+import { resolveConfiguredDeviceSyncProviderManifest } from "@murphai/device-syncd/config";
 import { isDeviceSyncError } from "@murphai/device-syncd/errors";
+import { sanitizeHostedRuntimeErrorCode } from "@murphai/device-syncd/hosted-runtime";
 import { DEVICE_SYNC_CONNECTION_START_PENDING_STATE_METADATA_KEY } from "@murphai/device-syncd/types";
 
 import { createHostedDeviceSyncControlPlane } from "../device-sync/control-plane";
@@ -660,12 +661,17 @@ export async function deleteHostedAccountData(input: {
   ]);
 
   const deletionStartedAt = new Date();
-  await resolvePendingDeviceConnectionStartsForAccountDeletion({
+  await assertNoLivePendingDeviceConnectionStartsForAccountDeletion({
     memberIds: deletionMemberIds,
     now: deletionStartedAt,
     prisma: input.prisma,
   });
   await markHostedMembersSuspendedForAccountDeletion({
+    memberIds: deletionMemberIds,
+    now: deletionStartedAt,
+    prisma: input.prisma,
+  });
+  await resolveExpiredPendingDeviceConnectionStartsForAccountDeletion({
     memberIds: deletionMemberIds,
     now: deletionStartedAt,
     prisma: input.prisma,
@@ -834,7 +840,25 @@ export async function deleteHostedAccountData(input: {
   };
 }
 
-async function resolvePendingDeviceConnectionStartsForAccountDeletion(input: {
+async function assertNoLivePendingDeviceConnectionStartsForAccountDeletion(input: {
+  memberIds: readonly string[];
+  now: Date;
+  prisma: PrismaClient;
+}): Promise<void> {
+  const pendingStartCount = await input.prisma.deviceOauthSession.count({
+    where: buildLivePendingDeviceConnectionStartsWhere(input),
+  });
+  if (pendingStartCount > 0) {
+    throw hostedOnboardingError({
+      code: "ACCOUNT_DELETION_DEVICE_CONNECTION_START_IN_PROGRESS",
+      httpStatus: 409,
+      message: "A wearable connection is still finishing. Retry account deletion in a moment.",
+      retryable: true,
+    });
+  }
+}
+
+async function resolveExpiredPendingDeviceConnectionStartsForAccountDeletion(input: {
   memberIds: readonly string[];
   now: Date;
   prisma: PrismaClient;
@@ -852,6 +876,7 @@ async function resolvePendingDeviceConnectionStartsForAccountDeletion(input: {
         path: [DEVICE_SYNC_CONNECTION_START_PENDING_STATE_METADATA_KEY],
         equals: true,
       },
+      expiresAt: { lte: input.now },
       userId: { in: [...input.memberIds] },
     },
   });
@@ -866,27 +891,22 @@ async function resolvePendingDeviceConnectionStartsForAccountDeletion(input: {
       continue;
     }
 
-    if (pendingStart.expiresAt > input.now) {
-      throw hostedOnboardingError({
-        code: "ACCOUNT_DELETION_DEVICE_CONNECTION_START_IN_PROGRESS",
-        httpStatus: 409,
-        message: "A wearable connection is still finishing. Retry account deletion in a moment.",
-        retryable: true,
-      });
-    }
-
     try {
-      registry ??= createHostedDeviceSyncRegistry(process.env);
-      const provider = registry.get(pendingStart.provider);
-      if (!provider) {
+      const manifest = resolveConfiguredDeviceSyncProviderManifest(pendingStart.provider);
+      if (!manifest) {
         throw new TypeError("Pending connection provider is unavailable.");
       }
-      const connectionKind = provider.descriptor.connection?.kind
-        ?? (provider.descriptor.oauth ? "oauth2" : "none");
+      const connectionKind = manifest.descriptor.connection?.kind
+        ?? (manifest.descriptor.oauth ? "oauth2" : "none");
       // Direct OAuth starts use the shared URL builder and therefore have no
       // upstream owner to clean before the provider callback. Link and SDK
       // starts may already have created one, so those remain fail-closed.
       if (connectionKind !== "oauth2") {
+        registry ??= createHostedDeviceSyncRegistry(process.env);
+        const provider = registry.get(pendingStart.provider);
+        if (!provider) {
+          throw new TypeError("Pending connection provider is unavailable.");
+        }
         const deleteOwnerAccount = provider.connectionHandler?.deleteOwnerAccount;
         if (!deleteOwnerAccount) {
           throw new TypeError("Provider owner cleanup is unavailable.");
@@ -1079,8 +1099,9 @@ async function markHostedMembersSuspendedForAccountDeletion(input: {
         prisma: tx,
       });
     }
-    await assertNoPendingDeviceConnectionStartsForAccountDeletionTx({
+    await assertNoLivePendingDeviceConnectionStartsForAccountDeletionTx({
       memberIds: input.memberIds,
+      now: input.now,
       prisma: tx,
     });
     await tx.hostedMember.updateMany({
@@ -1095,18 +1116,13 @@ async function markHostedMembersSuspendedForAccountDeletion(input: {
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
 }
 
-async function assertNoPendingDeviceConnectionStartsForAccountDeletionTx(input: {
+async function assertNoLivePendingDeviceConnectionStartsForAccountDeletionTx(input: {
   memberIds: readonly string[];
+  now: Date;
   prisma: Prisma.TransactionClient;
 }): Promise<void> {
   const pendingStartCount = await input.prisma.deviceOauthSession.count({
-    where: {
-      metadataJson: {
-        path: [DEVICE_SYNC_CONNECTION_START_PENDING_STATE_METADATA_KEY],
-        equals: true,
-      },
-      userId: { in: [...input.memberIds] },
-    },
+    where: buildLivePendingDeviceConnectionStartsWhere(input),
   });
   if (pendingStartCount > 0) {
     throw hostedOnboardingError({
@@ -1116,6 +1132,20 @@ async function assertNoPendingDeviceConnectionStartsForAccountDeletionTx(input: 
       retryable: true,
     });
   }
+}
+
+function buildLivePendingDeviceConnectionStartsWhere(input: {
+  memberIds: readonly string[];
+  now: Date;
+}): Prisma.DeviceOauthSessionWhereInput {
+  return {
+    expiresAt: { gt: input.now },
+    metadataJson: {
+      path: [DEVICE_SYNC_CONNECTION_START_PENDING_STATE_METADATA_KEY],
+      equals: true,
+    },
+    userId: { in: [...input.memberIds] },
+  };
 }
 
 async function refreshHostedMembersAccountDeletionFenceTx(input: {

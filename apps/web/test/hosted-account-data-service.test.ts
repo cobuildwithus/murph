@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 
-import type { PrismaClient } from "@prisma/client";
+import type { Prisma, PrismaClient } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   DEVICE_SYNC_CONNECTION_START_PENDING_STATE_METADATA_KEY,
@@ -98,6 +98,19 @@ import { createPrismaClient } from "@/src/lib/prisma";
 
 const databaseUrl = process.env.DATABASE_URL?.trim() ?? "";
 const runPostgresConcurrencyProof = process.env.MURPH_TEST_POSTGRES_CONCURRENCY === "1";
+
+type Deferred<T> = {
+  promise: Promise<T>;
+  resolve: (value: T) => void;
+};
+
+function deferred<T = void>(): Deferred<T> {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+}
 
 if (runPostgresConcurrencyProof && (!databaseUrl || !isClearlyLocalPostgresUrl(databaseUrl))) {
   throw new Error("The hosted account-deletion device-start proof requires a local DATABASE_URL.");
@@ -1666,10 +1679,68 @@ describe("deleteHostedAccountData", () => {
     expect(operationOrder).not.toContain("update:hostedMember");
   });
 
+  it("rejects a live sibling before cleaning an older expired owner-creating start", async () => {
+    const deleteOwnerAccount = vi.fn(async () => "deleted" as const);
+    const deleteCalls: HostedAccountDeletionPrismaDeleteCall[] = [];
+    const operationOrder: string[] = [];
+    serviceMocks.createHostedDeviceSyncRegistry.mockReturnValue({
+      get: vi.fn(() => ({
+        connectionHandler: {
+          deleteOwnerAccount,
+        },
+      })),
+    });
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      deleteCalls,
+      onTransaction: () => undefined,
+      operationOrder,
+      pendingDeviceConnectionStarts: [
+        {
+          createdAt: new Date("2026-07-26T11:00:00.000Z"),
+          expiresAt: new Date("2020-07-26T11:30:00.000Z"),
+          provider: "junction",
+          state: "expired-junction-start",
+          userId: "member_123",
+        },
+        {
+          createdAt: new Date("2026-07-26T12:00:00.000Z"),
+          expiresAt: new Date("2099-07-26T12:30:00.000Z"),
+          provider: "junction",
+          state: "live-junction-start",
+          userId: "member_123",
+        },
+      ],
+    });
+
+    await expect(deleteHostedAccountData({
+      memberId: "member_123",
+      prisma,
+      request: new Request("https://join.example.test/settings"),
+    })).rejects.toMatchObject({
+      code: "ACCOUNT_DELETION_DEVICE_CONNECTION_START_IN_PROGRESS",
+      httpStatus: 409,
+      retryable: true,
+    });
+
+    expect(serviceMocks.createHostedDeviceSyncRegistry).not.toHaveBeenCalled();
+    expect(deleteOwnerAccount).not.toHaveBeenCalled();
+    expect(deleteCalls).not.toContainEqual(expect.objectContaining({
+      model: "deviceOauthSession",
+    }));
+    expect(operationOrder).not.toContain("update:hostedMember");
+  });
+
   it("retains pending start ownership until retried provider cleanup succeeds", async () => {
-    const deleteOwnerAccount = vi.fn()
-      .mockRejectedValueOnce(new Error("temporary Junction cleanup failure"))
-      .mockResolvedValue("deleted");
+    const operationOrder: string[] = [];
+    let cleanupAttempt = 0;
+    const deleteOwnerAccount = vi.fn(async () => {
+      operationOrder.push("delete:providerOwner");
+      cleanupAttempt += 1;
+      if (cleanupAttempt === 1) {
+        throw new Error("temporary Junction cleanup failure");
+      }
+      return "deleted" as const;
+    });
     const deleteCalls: HostedAccountDeletionPrismaDeleteCall[] = [];
     serviceMocks.createHostedDeviceSyncRegistry.mockReturnValue({
       get: vi.fn(() => ({
@@ -1686,6 +1757,7 @@ describe("deleteHostedAccountData", () => {
     const prisma = createHostedAccountDeletionPrismaForTest({
       deleteCalls,
       onTransaction: () => undefined,
+      operationOrder,
       pendingDeviceConnectionStarts: [
         {
           createdAt: new Date("2026-07-26T12:00:00.000Z"),
@@ -1709,6 +1781,9 @@ describe("deleteHostedAccountData", () => {
     expect(deleteCalls).not.toContainEqual(expect.objectContaining({
       model: "deviceOauthSession",
     }));
+    expect(operationOrder.indexOf("update:hostedMember")).toBeLessThan(
+      operationOrder.indexOf("delete:providerOwner"),
+    );
 
     await expect(deleteHostedAccountData({
       memberId: "member_123",
@@ -1772,6 +1847,40 @@ describe("deleteHostedAccountData", () => {
     }));
   });
 
+  it("fails closed for an expired start from an unknown provider", async () => {
+    const deleteCalls: HostedAccountDeletionPrismaDeleteCall[] = [];
+    serviceMocks.createHostedDeviceSyncRegistry.mockImplementation(() => {
+      throw new Error("Unknown providers must fail before configured registry lookup.");
+    });
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      deleteCalls,
+      onTransaction: () => undefined,
+      pendingDeviceConnectionStarts: [
+        {
+          createdAt: new Date("2026-07-26T12:00:00.000Z"),
+          expiresAt: new Date("2020-07-26T12:30:00.000Z"),
+          provider: "unknown-provider",
+          state: "pending-unknown-start",
+          userId: "member_123",
+        },
+      ],
+    });
+
+    await expect(deleteHostedAccountData({
+      memberId: "member_123",
+      prisma,
+      request: new Request("https://join.example.test/settings"),
+    })).rejects.toMatchObject({
+      code: "ACCOUNT_DELETION_PROVIDER_REVOKE_FAILED",
+      httpStatus: 503,
+      retryable: true,
+    });
+    expect(serviceMocks.createHostedDeviceSyncRegistry).not.toHaveBeenCalled();
+    expect(deleteCalls).not.toContainEqual(expect.objectContaining({
+      model: "deviceOauthSession",
+    }));
+  });
+
   it("clears an expired start after the provider proves the owner is absent", async () => {
     const deleteOwnerAccount = vi.fn(async () => "absent" as const);
     const deleteCalls: HostedAccountDeletionPrismaDeleteCall[] = [];
@@ -1815,17 +1924,11 @@ describe("deleteHostedAccountData", () => {
   });
 
   it.each(["oura", "strava", "whoop"])(
-    "clears an expired URL-only %s OAuth start without requiring provider owner cleanup",
+    "clears an expired URL-only %s OAuth start without current provider configuration",
     async (provider) => {
       const deleteCalls: HostedAccountDeletionPrismaDeleteCall[] = [];
-      serviceMocks.createHostedDeviceSyncRegistry.mockReturnValue({
-        get: vi.fn(() => ({
-          descriptor: {
-            connection: {
-              kind: "oauth2",
-            },
-          },
-        })),
+      serviceMocks.createHostedDeviceSyncRegistry.mockImplementation(() => {
+        throw new Error("URL-only OAuth expiry must not read configured providers.");
       });
       const prisma = createHostedAccountDeletionPrismaForTest({
         deleteCalls,
@@ -1851,6 +1954,7 @@ describe("deleteHostedAccountData", () => {
       expect(deleteCalls).toContainEqual(expect.objectContaining({
         model: "deviceOauthSession",
       }));
+      expect(serviceMocks.createHostedDeviceSyncRegistry).not.toHaveBeenCalled();
     },
   );
 
@@ -2341,20 +2445,182 @@ describe.skipIf(!runPostgresConcurrencyProof)(
       }
     });
 
+    it("rejects an expired Junction marker plus live sibling before provider cleanup", async () => {
+      const fixture = await createPostgresAccountDeletionFixture();
+      const expiredState = `${fixture.state}-expired`;
+      const liveState = `${fixture.state}-live`;
+      const deleteOwnerAccount = vi.fn(async () => "deleted" as const);
+      serviceMocks.createHostedDeviceSyncRegistry.mockReturnValue({
+        get: vi.fn(() => ({
+          connectionHandler: {
+            deleteOwnerAccount,
+          },
+        })),
+      });
+
+      try {
+        for (const state of [expiredState, liveState]) {
+          await fixture.store.stageConnectionStart({
+            createdAt: new Date().toISOString(),
+            expiresAt: new Date(Date.now() + 60_000).toISOString(),
+            metadata: {
+              [DEVICE_SYNC_CONNECTION_START_PENDING_STATE_METADATA_KEY]: true,
+            },
+            ownerId: fixture.memberId,
+            provider: "junction",
+            returnTo: null,
+            state,
+          });
+        }
+        await fixture.prisma.deviceOauthSession.update({
+          data: { expiresAt: new Date(Date.now() - 1) },
+          where: { state: expiredState },
+        });
+
+        await expect(deleteHostedAccountData({
+          memberId: fixture.memberId,
+          prisma: fixture.prisma,
+          request: new Request("https://join.example.test/settings"),
+        })).rejects.toMatchObject({
+          code: "ACCOUNT_DELETION_DEVICE_CONNECTION_START_IN_PROGRESS",
+          httpStatus: 409,
+          retryable: true,
+        });
+
+        expect(serviceMocks.createHostedDeviceSyncRegistry).not.toHaveBeenCalled();
+        expect(deleteOwnerAccount).not.toHaveBeenCalled();
+        await expect(fixture.prisma.hostedMember.findUnique({
+          select: { suspendedAt: true },
+          where: { id: fixture.memberId },
+        })).resolves.toEqual({ suspendedAt: null });
+        await expect(fixture.prisma.deviceOauthSession.findMany({
+          orderBy: { state: "asc" },
+          select: { state: true },
+          where: { userId: fixture.memberId },
+        })).resolves.toEqual([
+          { state: expiredState },
+          { state: liveState },
+        ]);
+      } finally {
+        await cleanupPostgresAccountDeletionFixture(fixture);
+      }
+    });
+
+    it("rechecks a live marker staged after the read-only preflight", async () => {
+      const fixture = await createPostgresAccountDeletionFixture();
+      const preflightRead = deferred();
+      const releasePreflight = deferred();
+      const deletionPrisma = pauseFirstPendingStartCount({
+        allow: releasePreflight,
+        entered: preflightRead,
+        prisma: fixture.prisma,
+      });
+      const deletion = deleteHostedAccountData({
+        memberId: fixture.memberId,
+        prisma: deletionPrisma,
+        request: new Request("https://join.example.test/settings"),
+      });
+
+      try {
+        await preflightRead.promise;
+        await fixture.store.stageConnectionStart({
+          createdAt: new Date().toISOString(),
+          expiresAt: new Date(Date.now() + 60_000).toISOString(),
+          metadata: {
+            [DEVICE_SYNC_CONNECTION_START_PENDING_STATE_METADATA_KEY]: true,
+          },
+          ownerId: fixture.memberId,
+          provider: "junction",
+          returnTo: null,
+          state: fixture.state,
+        });
+        releasePreflight.resolve();
+
+        await expect(deletion).rejects.toMatchObject({
+          code: "ACCOUNT_DELETION_DEVICE_CONNECTION_START_IN_PROGRESS",
+          httpStatus: 409,
+          retryable: true,
+        });
+        expect(serviceMocks.createHostedDeviceSyncRegistry).not.toHaveBeenCalled();
+        await expect(fixture.prisma.hostedMember.findUnique({
+          select: { suspendedAt: true },
+          where: { id: fixture.memberId },
+        })).resolves.toEqual({ suspendedAt: null });
+        await expect(fixture.prisma.deviceOauthSession.findUnique({
+          select: { state: true },
+          where: { state: fixture.state },
+        })).resolves.toEqual({ state: fixture.state });
+      } finally {
+        releasePreflight.resolve();
+        await Promise.allSettled([deletion]);
+        await cleanupPostgresAccountDeletionFixture(fixture);
+      }
+    });
+
+    it("commits suspension before cleaning an expired Junction owner", async () => {
+      const fixture = await createPostgresAccountDeletionFixture();
+      const cleanupEntered = deferred();
+      const releaseCleanup = deferred<"absent">();
+      const deleteOwnerAccount = vi.fn(async () => {
+        cleanupEntered.resolve();
+        return releaseCleanup.promise;
+      });
+      serviceMocks.createHostedDeviceSyncRegistry.mockReturnValue({
+        get: vi.fn(() => ({
+          connectionHandler: {
+            deleteOwnerAccount,
+          },
+        })),
+      });
+
+      await fixture.store.stageConnectionStart({
+        createdAt: new Date().toISOString(),
+        expiresAt: new Date(Date.now() + 60_000).toISOString(),
+        metadata: {
+          [DEVICE_SYNC_CONNECTION_START_PENDING_STATE_METADATA_KEY]: true,
+        },
+        ownerId: fixture.memberId,
+        provider: "junction",
+        returnTo: null,
+        state: fixture.state,
+      });
+      await fixture.prisma.deviceOauthSession.update({
+        data: { expiresAt: new Date(Date.now() - 1) },
+        where: { state: fixture.state },
+      });
+      const deletion = deleteHostedAccountData({
+        memberId: fixture.memberId,
+        prisma: fixture.prisma,
+        request: new Request("https://join.example.test/settings"),
+      });
+
+      try {
+        await cleanupEntered.promise;
+        await expect(fixture.prisma.hostedMember.findUnique({
+          select: { suspendedAt: true },
+          where: { id: fixture.memberId },
+        })).resolves.toEqual({
+          suspendedAt: expect.any(Date),
+        });
+        releaseCleanup.resolve("absent");
+        await expect(deletion).resolves.toMatchObject({
+          memberId: fixture.memberId,
+        });
+      } finally {
+        releaseCleanup.resolve("absent");
+        await Promise.allSettled([deletion]);
+        await cleanupPostgresAccountDeletionFixture(fixture);
+      }
+    });
+
     it.each(["oura", "strava", "whoop"])(
-      "deletes an account after an abandoned URL-only %s start expires",
+      "deletes an account after an abandoned URL-only %s start expires without current config",
       async (provider) => {
         const fixture = await createPostgresAccountDeletionFixture();
         const createdAt = new Date().toISOString();
         const expiresAt = new Date(Date.now() + 60_000).toISOString();
-        serviceMocks.createHostedDeviceSyncRegistry.mockReturnValue({
-          get: vi.fn(() => ({
-            descriptor: {
-              connection: {
-                kind: "oauth2",
-              },
-            },
-          })),
+        serviceMocks.createHostedDeviceSyncRegistry.mockImplementation(() => {
+          throw new Error("URL-only OAuth expiry must not read configured providers.");
         });
 
         try {
@@ -2405,6 +2671,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           await expect(fixture.prisma.deviceOauthSession.findUnique({
             where: { state: fixture.state },
           })).resolves.toBeNull();
+          expect(serviceMocks.createHostedDeviceSyncRegistry).not.toHaveBeenCalled();
         } finally {
           await cleanupPostgresAccountDeletionFixture(fixture);
         }
@@ -2412,6 +2679,40 @@ describe.skipIf(!runPostgresConcurrencyProof)(
     );
   },
 );
+
+function pauseFirstPendingStartCount(input: {
+  allow: Deferred<void>;
+  entered: Deferred<void>;
+  prisma: PrismaClient;
+}): PrismaClient {
+  let paused = false;
+  const deviceOauthSession = new Proxy(input.prisma.deviceOauthSession, {
+    get(target, property) {
+      if (property === "count") {
+        return async (args: Prisma.DeviceOauthSessionCountArgs) => {
+          const count = await target.count(args);
+          if (!paused) {
+            paused = true;
+            input.entered.resolve();
+            await input.allow.promise;
+          }
+          return count;
+        };
+      }
+      const value = Reflect.get(target, property, target);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+  return new Proxy(input.prisma, {
+    get(target, property) {
+      if (property === "deviceOauthSession") {
+        return deviceOauthSession;
+      }
+      const value = Reflect.get(target, property, target);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+}
 
 type PostgresAccountDeletionFixture = {
   memberId: string;
@@ -2529,7 +2830,10 @@ function createHostedAccountDeletionPrismaForTest(input: {
       },
     },
     deviceOauthSession: {
-      count: async () => pendingDeviceConnectionStarts.length,
+      count: async (args) =>
+        pendingDeviceConnectionStarts.filter((record) =>
+          matchesPendingDeviceConnectionStartWhere(record, args.where)
+        ).length,
       deleteMany: async (args) => {
         input.operationOrder?.push("delete:deviceOauthSession");
         input.deleteCalls?.push({ model: "deviceOauthSession", where: args.where });
@@ -2581,7 +2885,12 @@ function createHostedAccountDeletionPrismaForTest(input: {
       findMany: async () => input.deviceConnections ?? [],
     },
     deviceOauthSession: {
-      count: async () => pendingDeviceConnectionStarts.length,
+      count: async (args: { where: unknown }) => {
+        input.operationOrder?.push("count:deviceOauthSession");
+        return pendingDeviceConnectionStarts.filter((record) =>
+          matchesPendingDeviceConnectionStartWhere(record, args.where)
+        ).length;
+      },
       deleteMany: async (args: { where: unknown }) => {
         input.operationOrder?.push("delete:deviceOauthSession");
         input.deleteCalls?.push({ model: "deviceOauthSession", where: args.where });
@@ -2592,7 +2901,10 @@ function createHostedAccountDeletionPrismaForTest(input: {
         );
         return { count: previousCount - pendingDeviceConnectionStarts.length };
       },
-      findMany: async () => pendingDeviceConnectionStarts,
+      findMany: async (args: { where: unknown }) =>
+        pendingDeviceConnectionStarts.filter((record) =>
+          matchesPendingDeviceConnectionStartWhere(record, args.where)
+        ),
     },
     hostedAccountGroup: {
       findMany: async () => input.familyGroups ?? [],
@@ -2635,6 +2947,39 @@ function createHostedAccountDeletionPrismaForTest(input: {
     },
   };
   return fakePrisma as Parameters<typeof deleteHostedAccountData>[0]["prisma"];
+}
+
+function matchesPendingDeviceConnectionStartWhere(
+  record: {
+    expiresAt: Date;
+    userId: string | null;
+  },
+  where: unknown,
+): boolean {
+  if (typeof where !== "object" || where === null) {
+    return true;
+  }
+
+  const expiresAt = Reflect.get(where, "expiresAt");
+  if (typeof expiresAt === "object" && expiresAt !== null) {
+    const gt = Reflect.get(expiresAt, "gt");
+    if (gt instanceof Date && record.expiresAt <= gt) {
+      return false;
+    }
+    const lte = Reflect.get(expiresAt, "lte");
+    if (lte instanceof Date && record.expiresAt > lte) {
+      return false;
+    }
+  }
+
+  const userId = Reflect.get(where, "userId");
+  if (typeof userId === "object" && userId !== null) {
+    const includedIds = Reflect.get(userId, "in");
+    if (Array.isArray(includedIds) && !includedIds.includes(record.userId)) {
+      return false;
+    }
+  }
+  return true;
 }
 
 function makeHostedComputerRunRowForDeletionTest(

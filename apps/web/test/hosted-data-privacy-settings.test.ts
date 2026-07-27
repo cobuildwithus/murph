@@ -581,15 +581,16 @@ describe("HostedDataPrivacySettings", () => {
     expect(mocks.reloadCurrentHostedAuthDocument).toHaveBeenCalledTimes(1);
   });
 
-  test("revalidates current authority when deletion receives an explicit HTTP rejection", async () => {
+  test("reloads after post-suspension provider cleanup rejects deletion", async () => {
     mockHostedDataPrivacyDeleteFlowState();
     const { HostedOnboardingApiError } = await import(
       "@/src/components/hosted-onboarding/client-api"
     );
     mocks.requestHostedOnboardingJson.mockRejectedValueOnce(
       new HostedOnboardingApiError({
-        code: "ACCOUNT_DELETE_REJECTED",
-        message: "Deletion was rejected.",
+        code: "ACCOUNT_DELETION_PROVIDER_REVOKE_FAILED",
+        message: "Provider cleanup did not finish.",
+        retryable: true,
       }),
     );
 
