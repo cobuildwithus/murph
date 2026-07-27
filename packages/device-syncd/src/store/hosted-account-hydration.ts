@@ -16,6 +16,7 @@ import type {
   ProviderAuthTokens,
   StoredDeviceSyncAccount,
 } from "../types.ts";
+import type { DeviceSyncCredentialIndependentImportJobClassifier } from "../hosted-runtime.ts";
 import {
   consolidateLegacyHostedAccount,
   getAccountByExternalAccount,
@@ -37,6 +38,7 @@ type HostedAccountCredentialInput = DeviceAccountCredential & {
 
 export interface HostedAccountHydrationInput {
   advanceHostedObservedConnectionRevision?: boolean;
+  classifyProviderJob?: DeviceSyncCredentialIndependentImportJobClassifier;
   clearTokens?: boolean;
   connection: {
     connectedAt: string;
@@ -872,6 +874,7 @@ export function hydrateHostedAccount(
       if (connectionEpochReplaced) {
         markCredentialScopedPendingDeviceSyncJobsDeadForAccount(database, {
           accountId: existing.id,
+          classifyProviderJob: input.classifyProviderJob,
           code: "HOSTED_CONNECTION_EPOCH_REPLACED",
           message: "Device-sync work belonged to a replaced hosted connection epoch.",
           now: rowUpdatedAt,

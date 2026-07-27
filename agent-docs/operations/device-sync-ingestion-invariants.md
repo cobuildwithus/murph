@@ -218,8 +218,13 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
    Oura/WHOOP/Strava tombstones, companion HRV and health metadata, and Junction
    summary payloads whose inline source provenance is sufficient for direct
    import. Inline-looking Junction jobs that must fall back to a provider fetch
-   remain connection-epoch scoped. Recovery does not use an automatic export
-   endpoint, operator action, or vendor support.
+   remain connection-epoch scoped. Junction owns that exact inline predicate
+   beside its importer-backed executor. Web dynamically invokes the same public
+   predicate during reconnect cleanup; hosted runtime hydration loads it per
+   turn and passes it into the existing SQLite credential-replacement
+   transaction. Both paths keep provider/importer modules out of their static
+   boot closures. Recovery does not use an automatic export endpoint, operator
+   action, or vendor support.
    Hosted runtime account hydration keys by the control plane's opaque hosted
    connection id before mutable provider identity. A terminal privacy scrub
    therefore updates the same local account instead of leaving the old account

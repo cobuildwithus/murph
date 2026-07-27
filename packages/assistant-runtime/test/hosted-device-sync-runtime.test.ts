@@ -5402,6 +5402,122 @@ describe("hosted device-sync runtime", () => {
     }
   });
 
+  test("preserves a Junction inline carrier across hydration without loading importers at boot", async () => {
+    const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
+      "hosted-device-sync-runtime-junction-inline-reconnect-",
+    );
+    await initializeVault({
+      createdAt: "2026-07-27T03:00:00.000Z",
+      timezone: "UTC",
+      vaultRoot,
+    });
+    const [junctionProvider] = createConfiguredDeviceSyncProvidersFromConfigs({
+      junction: {
+        apiKey: "sk_us_test_inline_authority",
+        clientUserIdSecret: "junction-inline-authority-secret",
+        environment: "sandbox",
+        fetchImpl: async () => {
+          throw new Error("Junction network access is not expected during hydration.");
+        },
+        region: "us",
+        summaryResources: ["sleep"],
+        timeseriesResources: [],
+      },
+    });
+    assert.ok(junctionProvider);
+    const service = createDeviceSyncServiceForVault(vaultRoot, [junctionProvider]);
+
+    try {
+      const connectionId = "hosted_conn_junction_inline_reconnect";
+      const externalAccountId = "junction-inline-reconnect";
+      let snapshot = buildRuntimeSnapshot({
+        connectedAt: "2026-07-27T03:00:00.000Z",
+        connectionId,
+        credential: {
+          credentialMetadata: {},
+          kind: "provider_config",
+          providerConfigKey: "junction",
+        },
+        externalAccountId,
+        provider: "junction",
+      });
+      const deviceSyncPort: HostedRuntimeDeviceSyncPort = {
+        ...createNoDirtyStateDeviceSyncPortMethods(),
+        async applyUpdates() {
+          throw new Error("applyUpdates should not be called during hydration.");
+        },
+        async createConnectLink() {
+          throw new Error("createConnectLink should not be called during hydration.");
+        },
+        async fetchSnapshot() {
+          return snapshot;
+        },
+      };
+      const epochAState = await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort,
+        wake: buildCronWake("2026-07-27T03:01:00.000Z"),
+        secret: DEVICE_SYNC_SECRET,
+        service,
+      });
+      const localAccountId = epochAState.hostedToLocalAccountIds.get(connectionId);
+      assert.ok(localAccountId);
+      const inlineCarrier = getStore(service).enqueueJob({
+        accountId: localAccountId,
+        availableAt: "2026-07-27T03:01:00.000Z",
+        kind: "resource",
+        payload: {
+          resource: "meal",
+          resourceCategory: "summary",
+          sourceProviderSlug: "garmin",
+          webhookDataJson: JSON.stringify({
+            calories: 640,
+            id: "meal-inline-hydration",
+            sourceProviderSlug: "garmin",
+          }),
+        },
+        provider: "junction",
+      });
+      const credentialScoped = getStore(service).enqueueJob({
+        accountId: localAccountId,
+        availableAt: "2026-07-27T03:01:00.000Z",
+        kind: "resource",
+        payload: {
+          resource: "meal",
+          resourceCategory: "summary",
+        },
+        provider: "junction",
+      });
+
+      snapshot = buildRuntimeSnapshot({
+        connectedAt: "2026-07-27T04:00:00.000Z",
+        connectionId,
+        credential: {
+          credentialMetadata: {},
+          kind: "provider_config",
+          providerConfigKey: "junction",
+        },
+        externalAccountId,
+        hostedUpdatedAt: "2026-07-27T04:01:00.000Z",
+        provider: "junction",
+      });
+      await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort,
+        wake: buildCronWake("2026-07-27T04:02:00.000Z"),
+        secret: DEVICE_SYNC_SECRET,
+        service,
+      });
+
+      assert.equal(getStore(service).getJobById(inlineCarrier.id)?.status, "queued");
+      assert.equal(
+        getStore(service).getJobById(credentialScoped.id)?.lastErrorCode,
+        "HOSTED_CONNECTION_EPOCH_REPLACED",
+      );
+    } finally {
+      closeHostedRuntimeDeviceSyncService(service);
+      await cleanup();
+    }
+  });
+
   test("executes an accepted Oura tombstone exactly once across a same-account reconnect", async () => {
     const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
       "hosted-device-sync-runtime-tombstone-reconnect-",

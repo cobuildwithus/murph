@@ -15,7 +15,6 @@ import {
   type MealNutrition,
   type WorkoutSession,
 } from "@murphai/contracts";
-import { deterministicContractId } from "@murphai/core/ids";
 import { z } from "zod";
 
 import { stripUndefined } from "../shared.ts";
@@ -738,6 +737,8 @@ const JUNCTION_SLEEP_COVERAGE_END_TIMESTAMP_PATHS = [
   "session_end",
 ] as const;
 const SLEEP_STAGE_COVERAGE_TOLERANCE_MS = 1000;
+const JUNCTION_CONTRACT_ID_CROCKFORD_BASE32_ALPHABET =
+  "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 const JUNCTION_SLEEP_STAGES: readonly JunctionSleepStage[] = ["awake", "light", "deep", "rem"];
 const APPLE_HEALTH_KIT_SOURCE_PROVIDER_SLUG = "apple-health-kit";
 const HRV_SDNN_METRIC = "hrv-sdnn";
@@ -3880,7 +3881,33 @@ function buildJunctionMealId(
       ]
     : buildJunctionMealFallbackIdentityParts(resourceContext, entry, timestamp);
 
-  return deterministicContractId(ID_PREFIXES.meal, JSON.stringify(identity));
+  return buildJunctionDeterministicContractId(
+    ID_PREFIXES.meal,
+    JSON.stringify(identity),
+  );
+}
+
+function buildJunctionDeterministicContractId(prefix: string, seed: string): string {
+  const bytes = createHash("sha256").update(seed).digest();
+  let output = "";
+  let buffer = 0;
+  let bits = 0;
+
+  for (const byte of bytes) {
+    buffer = (buffer << 8) | byte;
+    bits += 8;
+
+    while (bits >= 5 && output.length < 26) {
+      bits -= 5;
+      output += JUNCTION_CONTRACT_ID_CROCKFORD_BASE32_ALPHABET[(buffer >> bits) & 31];
+    }
+  }
+
+  if (bits > 0 && output.length < 26) {
+    output += JUNCTION_CONTRACT_ID_CROCKFORD_BASE32_ALPHABET[(buffer << (5 - bits)) & 31];
+  }
+
+  return `${prefix}_${output.padEnd(26, "0").slice(0, 26)}`;
 }
 
 function buildJunctionMealFallbackIdentityParts(

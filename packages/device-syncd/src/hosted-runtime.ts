@@ -1,10 +1,4 @@
 import { COMPANION_HRV_RMSSD_RESOURCE } from "@murphai/contracts";
-import { canNormalizeJunctionSleepCycleRecordToCompactStages } from "@murphai/importers/device-providers/junction";
-import { resolveJunctionOrigin } from "@murphai/importers/device-providers/junction-origin";
-import {
-  JUNCTION_ALLOWED_SUMMARY_RESOURCES,
-  normalizeJunctionResourceName,
-} from "@murphai/importers/device-providers/junction-resources";
 
 import { sanitizeStoredDeviceSyncMetadata } from "./metadata.ts";
 import {
@@ -439,15 +433,11 @@ const CREDENTIAL_INDEPENDENT_DELETE_PROVIDERS = new Set([
   "strava",
   "whoop",
 ]);
-const JUNCTION_CREDENTIAL_INDEPENDENT_INLINE_SUMMARY_RESOURCES = new Set<string>(
-  JUNCTION_ALLOWED_SUMMARY_RESOURCES,
-);
-const JUNCTION_INLINE_NESTED_RECORD_KEYS = Object.freeze([
-  "data",
-  "results",
-  "items",
-  "records",
-] as const);
+
+export type DeviceSyncCredentialIndependentImportJobClassifier = (input: {
+  kind?: string | null;
+  payload?: Record<string, unknown> | null;
+}) => boolean;
 
 /**
  * Returns true only when the provider executor can reach a canonical import
@@ -457,7 +447,7 @@ export function isDeviceSyncCredentialIndependentImportJob(input: {
   kind?: string | null;
   payload?: Record<string, unknown> | null;
   provider?: string | null;
-}): boolean {
+}, classifyProviderJob?: DeviceSyncCredentialIndependentImportJobClassifier): boolean {
   if (
     input.kind === "delete"
     && typeof input.provider === "string"
@@ -478,114 +468,10 @@ export function isDeviceSyncCredentialIndependentImportJob(input: {
     return true;
   }
 
-  return isJunctionCredentialIndependentInlineImport(input.payload ?? null);
-}
-
-function isJunctionCredentialIndependentInlineImport(
-  payload: Record<string, unknown> | null,
-): boolean {
-  if (payload?.resourceCategory !== "summary") {
-    return false;
-  }
-  const resource = normalizeJunctionResourceName(payload.resource);
-  if (
-    !resource
-    || !JUNCTION_CREDENTIAL_INDEPENDENT_INLINE_SUMMARY_RESOURCES.has(resource)
-    || typeof payload.webhookDataJson !== "string"
-    || payload.webhookDataJson.trim().length === 0
-  ) {
-    return false;
-  }
-
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(payload.webhookDataJson);
-  } catch {
-    return false;
-  }
-  const record = readHostedJunctionInlineRecord(parsed);
-  if (!record) {
-    return false;
-  }
-  const sourceProviderSlug = resolveDeviceSyncJunctionInlineSourceProviderSlug(record);
-  if (!sourceProviderSlug) {
-    return false;
-  }
-
-  return resource !== "sleep_cycle"
-    || canNormalizeJunctionSleepCycleRecordToCompactStages(record, sourceProviderSlug);
-}
-
-export function resolveDeviceSyncJunctionInlineSourceProviderSlug(
-  record: Record<string, unknown>,
-): string | null {
-  const slugs = new Set<string>();
-  const addRecordSlug = (entry: Record<string, unknown>): void => {
-    const slug = normalizeHostedJunctionProviderSlug(
-      resolveJunctionOrigin(entry).sourceProviderSlug,
-    );
-    if (slug) {
-      slugs.add(slug);
-    }
-  };
-
-  addRecordSlug(record);
-  for (const entry of readHostedJunctionInlineNestedRecords(record)) {
-    addRecordSlug(entry);
-  }
-
-  const groups = readHostedJunctionInlineRecord(record.groups);
-  if (groups) {
-    for (const [sourceSlug, rawGroups] of Object.entries(groups)) {
-      const normalizedGroupSlug = normalizeHostedJunctionProviderSlug(sourceSlug);
-      if (normalizedGroupSlug) {
-        slugs.add(normalizedGroupSlug);
-      }
-      for (const rawGroup of Array.isArray(rawGroups) ? rawGroups : []) {
-        const group = readHostedJunctionInlineRecord(rawGroup);
-        if (!group) {
-          continue;
-        }
-        addRecordSlug(group);
-        for (const entry of readHostedJunctionInlineNestedRecords(group)) {
-          addRecordSlug(entry);
-        }
-      }
-    }
-  }
-
-  return slugs.size === 1 ? [...slugs][0] ?? null : null;
-}
-
-function readHostedJunctionInlineNestedRecords(
-  record: Record<string, unknown>,
-): Record<string, unknown>[] {
-  return JUNCTION_INLINE_NESTED_RECORD_KEYS.flatMap((key) => {
-    const direct = readHostedJunctionInlineRecord(record[key]);
-    if (direct) {
-      return [direct];
-    }
-    return (Array.isArray(record[key]) ? record[key] : []).flatMap((entry) => {
-      const nested = readHostedJunctionInlineRecord(entry);
-      return nested ? [nested] : [];
-    });
-  });
-}
-
-function readHostedJunctionInlineRecord(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : null;
-}
-
-function normalizeHostedJunctionProviderSlug(value: unknown): string | null {
-  if (typeof value !== "string") {
-    return null;
-  }
-  const normalized = value.trim().toLowerCase()
-    .replace(/[^a-z0-9_]+/gu, "_")
-    .replace(/^_+|_+$/gu, "");
-  return normalized || null;
+  return classifyProviderJob?.({
+    kind: input.kind,
+    payload: input.payload,
+  }) === true;
 }
 
 export function serializeHostedExecutionDeviceSyncDirtyPayloadIdentity(

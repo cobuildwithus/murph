@@ -11,6 +11,7 @@ import { deviceSyncError } from "@murphai/device-syncd/errors";
 import {
   isDeviceSyncCredentialIndependentImportJob,
   serializeHostedExecutionDeviceSyncDirtyPayloadIdentity,
+  type DeviceSyncCredentialIndependentImportJobClassifier,
   type HostedExecutionDeviceSyncStagedDirtyAck,
 } from "@murphai/device-syncd/hosted-runtime";
 
@@ -127,17 +128,25 @@ export async function supersedeHostedCredentialScopedDirtyStateForConnectionTx(i
   });
   const supersededPayloadIds: string[] = [];
   let retainedCredentialIndependentPayloadCount = 0;
+  let classifyJunctionProviderJob: DeviceSyncCredentialIndependentImportJobClassifier | undefined;
   for (const row of payloadRows) {
     const resource = await readDirtyPayloadResourceJson({
       row,
       tx: input.tx,
       userId: input.userId,
     });
+    if (resource && row.provider === "junction" && !classifyJunctionProviderJob) {
+      ({
+        isJunctionCredentialIndependentInlineImportJob: classifyJunctionProviderJob,
+      } = await import("@murphai/device-syncd/junction-inline-authority"));
+    }
     if (resource && isDeviceSyncCredentialIndependentImportJob({
       kind: resource.jobKind,
       payload: resource.payload,
       provider: row.provider,
-    })) {
+    }, row.provider === "junction"
+      ? classifyJunctionProviderJob
+      : undefined)) {
       retainedCredentialIndependentPayloadCount += 1;
     } else {
       supersededPayloadIds.push(row.id);

@@ -29,11 +29,13 @@ import { JUNCTION_DEVICE_PROVIDER_DESCRIPTOR } from "@murphai/importers/device-p
 
 import { deviceSyncError, isDeviceSyncError, type DeviceSyncError } from "../errors.ts";
 import {
-  isDeviceSyncCredentialIndependentImportJob,
   isHostedRuntimeIdShapedDiagnosticToken,
-  resolveDeviceSyncJunctionInlineSourceProviderSlug,
   sanitizeHostedRuntimeDiagnosticText,
 } from "../hosted-runtime.ts";
+import {
+  isJunctionCredentialIndependentInlineImportJob,
+  resolveDeviceSyncJunctionInlineSourceProviderSlug,
+} from "../junction-inline-authority.ts";
 import {
   addJunctionHistoricalBackfillEvidence,
   canCurrentRuntimeMutateJunctionHistoricalBackfillProgress,
@@ -1089,10 +1091,9 @@ export function createJunctionDeviceSyncProvider(
     if (!webhookDataJson) {
       return null;
     }
-    if (!isDeviceSyncCredentialIndependentImportJob({
+    if (!isJunctionCredentialIndependentInlineImportJob({
       kind: job.kind,
       payload: job.payload,
-      provider: "junction",
     })) {
       return null;
     }
@@ -1548,6 +1549,49 @@ export function createJunctionDeviceSyncProvider(
     const summaries: Record<string, unknown[]> = {};
 
     if (resource) {
+      const directInput = readJunctionDirectResourceJobInput(job, window);
+      if (directInput) {
+        // This lookup uses the stable provider-config authority, not the
+        // replaceable per-connection credential epoch. It resolves source
+        // provenance only; the accepted inline payload remains the data
+        // carrier and the floor remains the sole projection owner.
+        const sourceProviders = shouldLoadJunctionDirectResourceSourceProviders(directInput)
+          ? await loadSourceProviders()
+          : [];
+        const connectHistoricalWindow = buildConnectHistoricalBackfillWindow(
+          context.account,
+          summaryBackfillDays,
+        );
+        const importResult = await importJunctionDirectResourceSnapshot(
+          context,
+          sourceProviders,
+          directInput.windowStart,
+          directInput.windowEnd,
+          directInput.resource,
+          [directInput.record],
+          connectHistoricalWindow,
+        );
+        const directHistoricalWindow = readJunctionDirectHistoricalEvidenceWindow(
+          directInput,
+          connectHistoricalWindow,
+          importResult.normalizationEvidence,
+          providerFilter,
+        );
+        return withJunctionHistoricalCoverageVerification(
+          context,
+          job,
+          directHistoricalWindow,
+          withJunctionDirectHistoricalBackfillEvidence(
+            context,
+            job,
+            directInput,
+            directHistoricalWindow,
+            importResult,
+            { nextReconcileAt: clampWebhookJobNextReconcileAt(context) },
+          ),
+        );
+      }
+
       let effectiveResource = resource;
       let inferredCategory = inferJunctionResourceJobCategory(resourceCategory, resource);
       if (!isConfiguredJunctionResource(inferredCategory, resource)) {
@@ -1601,49 +1645,6 @@ export function createJunctionDeviceSyncProvider(
         });
         effectiveResource = fallback.name;
         inferredCategory = fallback.category;
-      }
-
-      const directInput = readJunctionDirectResourceJobInput(job, window);
-      if (directInput) {
-        // This lookup uses the stable provider-config authority, not the
-        // replaceable per-connection credential epoch. It resolves source
-        // provenance only; the accepted inline payload remains the data
-        // carrier and the floor remains the sole projection owner.
-        const sourceProviders = shouldLoadJunctionDirectResourceSourceProviders(directInput)
-          ? await loadSourceProviders()
-          : [];
-        const connectHistoricalWindow = buildConnectHistoricalBackfillWindow(
-          context.account,
-          summaryBackfillDays,
-        );
-        const importResult = await importJunctionDirectResourceSnapshot(
-          context,
-          sourceProviders,
-          directInput.windowStart,
-          directInput.windowEnd,
-          directInput.resource,
-          [directInput.record],
-          connectHistoricalWindow,
-        );
-        const directHistoricalWindow = readJunctionDirectHistoricalEvidenceWindow(
-          directInput,
-          connectHistoricalWindow,
-          importResult.normalizationEvidence,
-          providerFilter,
-        );
-        return withJunctionHistoricalCoverageVerification(
-          context,
-          job,
-          directHistoricalWindow,
-          withJunctionDirectHistoricalBackfillEvidence(
-            context,
-            job,
-            directInput,
-            directHistoricalWindow,
-            importResult,
-            { nextReconcileAt: clampWebhookJobNextReconcileAt(context) },
-          ),
-        );
       }
 
       if (inferredCategory === "timeseries") {

@@ -14,8 +14,10 @@ import {
   stringifyJson,
   toIsoTimestamp,
 } from "../shared.ts";
-import { isDeviceSyncCredentialIndependentImportJob } from "../hosted-runtime.ts";
-
+import {
+  isDeviceSyncCredentialIndependentImportJob,
+  type DeviceSyncCredentialIndependentImportJobClassifier,
+} from "../hosted-runtime.ts";
 import type { DeviceSyncJobInput, DeviceSyncJobRecord } from "../types.ts";
 
 export interface DeviceSyncEnqueueJobInput extends DeviceSyncJobInput {
@@ -672,6 +674,7 @@ export function markCredentialScopedPendingDeviceSyncJobsDeadForAccount(
   database: DatabaseSync,
   input: {
     accountId: string;
+    classifyProviderJob?: DeviceSyncCredentialIndependentImportJobClassifier;
     code: string;
     message: string;
     now: string;
@@ -708,7 +711,7 @@ export function markCredentialScopedPendingDeviceSyncJobsDeadForAccount(
       kind: job.kind,
       payload: maybeParseJsonObject(job.payload_json),
       provider: job.provider,
-    })) {
+    }, input.classifyProviderJob)) {
       continue;
     }
 

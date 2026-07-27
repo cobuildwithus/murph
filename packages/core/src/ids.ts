@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 
-import { generateUlid } from "@murphai/runtime-state/node/ulid";
+import { generateUlid } from "@murphai/runtime-state";
 
 import { ID_PREFIXES } from "./constants.ts";
 

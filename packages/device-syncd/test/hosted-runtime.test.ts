@@ -8,7 +8,7 @@ import {
 import { DEVICE_SYNC_METADATA_MAX_STRING_LENGTH } from "../src/metadata.ts";
 import {
   buildHostedExecutionDeviceSyncConnectLinkPath,
-  isDeviceSyncCredentialIndependentImportJob,
+  isDeviceSyncCredentialIndependentImportJob as classifyCredentialIndependentImportJob,
   isHostedRuntimeIdShapedDiagnosticToken,
   mergeGuardedJunctionHistoricalBackfillMetadata,
   mergeHostedDeviceSyncConnectionMetadata,
@@ -28,9 +28,33 @@ import {
   sanitizeHostedRuntimeErrorText,
   serializeHostedExecutionDeviceSyncDirtyPayloadIdentity,
 } from "../src/hosted-runtime.ts";
+import { isJunctionCredentialIndependentInlineImportJob } from "../src/junction-inline-authority.ts";
+
+function isDeviceSyncCredentialIndependentImportJob(input: {
+  kind?: string | null;
+  payload?: Record<string, unknown> | null;
+  provider?: string | null;
+}): boolean {
+  return classifyCredentialIndependentImportJob(
+    input,
+    input.provider === "junction"
+      ? isJunctionCredentialIndependentInlineImportJob
+      : undefined,
+  );
+}
 
 describe("isDeviceSyncCredentialIndependentImportJob", () => {
   it("preserves only executor-owned inline imports", () => {
+    expect(classifyCredentialIndependentImportJob({
+      kind: "resource",
+      payload: {
+        resource: "sleep",
+        resourceCategory: "summary",
+        webhookDataJson: JSON.stringify({ sourceProviderSlug: "garmin" }),
+      },
+      provider: "junction",
+    })).toBe(false);
+
     for (const provider of ["oura", "strava", "whoop"]) {
       expect(isDeviceSyncCredentialIndependentImportJob({
         kind: "delete",

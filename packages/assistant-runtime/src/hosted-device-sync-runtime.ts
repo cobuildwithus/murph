@@ -140,6 +140,7 @@ export async function syncHostedDeviceSyncControlPlaneState(input: {
     ...snapshot.connections.filter((entry) => isTerminalHostedPrivacyScrub(entry.connection)),
     ...snapshot.connections.filter((entry) => !isTerminalHostedPrivacyScrub(entry.connection)),
   ];
+  let classifyJunctionProviderJob: HostedAccountHydrationInput["classifyProviderJob"];
   for (const entry of orderedConnections) {
     const existingByHostedConnection = store.getAccountByHostedConnectionId(
       entry.connection.id,
@@ -156,8 +157,21 @@ export async function syncHostedDeviceSyncControlPlaneState(input: {
             entry.connection.connectedAt,
           )
         : null);
+    if (
+      entry.connection.provider === "junction"
+      && existing
+      && existing.connectedAt !== entry.connection.connectedAt
+      && !classifyJunctionProviderJob
+    ) {
+      ({
+        isJunctionCredentialIndependentInlineImportJob: classifyJunctionProviderJob,
+      } = await import("@murphai/device-syncd/junction-inline-authority"));
+    }
     const stored = store.hydrateHostedAccount(
       buildHostedAccountHydrationInput({
+        classifyProviderJob: entry.connection.provider === "junction"
+          ? classifyJunctionProviderJob
+          : undefined,
         codec,
         entry,
         existing,
@@ -1456,6 +1470,7 @@ function shouldUseRawHostedMetadataBaseline(input: {
 }
 
 function buildHostedAccountHydrationInput(input: {
+  classifyProviderJob?: HostedAccountHydrationInput["classifyProviderJob"];
   codec: ReturnType<typeof createSecretCodec>;
   entry: HostedDeviceSyncRuntimeConnectionSnapshot;
   existing: StoredDeviceSyncAccount | null;
@@ -1562,6 +1577,9 @@ function buildHostedAccountHydrationInput(input: {
   return {
     clearTokens: shouldClearTokens,
     advanceHostedObservedConnectionRevision: !preserveUnpublishedLocalProviderProgress,
+    ...(input.classifyProviderJob
+      ? { classifyProviderJob: input.classifyProviderJob }
+      : {}),
     ...(credential ? { credential } : {}),
     hostedConnectionId: hostedConnection.id,
     hostedObservedTokenVersion: nextHostedObservedTokenVersion,
