@@ -885,6 +885,7 @@ describe('Codex model catalog', () => {
       'features.multi_agent_v2=false',
       'features.tool_suggest=false',
     ])
+    expect(providerInput?.groupConversation).toBe(true)
   })
 
   it('drops unsupported rich user parts and keeps flex for supported hosted OpenAI routes', async () => {
