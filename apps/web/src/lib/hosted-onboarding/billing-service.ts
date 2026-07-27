@@ -12,6 +12,8 @@ import { buildStripeCancelUrl, buildStripeSuccessUrl } from "./billing";
 import {
   HOSTED_PULSE_TRIAL_DAYS,
   HOSTED_PULSE_TRIAL_OFFER,
+  HOSTED_PULSE_TRIAL_POLICY_VERSION,
+  HOSTED_PULSE_TRIAL_USAGE_LIMIT_USD_MICROS,
   HOSTED_STANDARD_CHECKOUT_OFFER,
   getHostedDefaultBillingPlanCode,
   isHostedPulseTrialCheckoutEnabled,
@@ -642,11 +644,44 @@ function buildHostedBillingCheckoutIntentHash(input: {
       ?? null,
     lineItems: buildHostedBillingCheckoutLineItems(input.priceId),
     memberId: input.memberId,
+    offerBindingKey: deriveHostedBillingCheckoutOfferBindingKey({
+      checkoutOffer: input.checkoutOffer,
+    }),
     successUrl: buildStripeSuccessUrl(
       input.publicBaseUrl,
       input.inviteCode,
     ),
   })).slice(0, 32);
+}
+
+export function deriveHostedBillingCheckoutOfferBindingKey(input: {
+  checkoutOffer: HostedBillingCheckoutOffer;
+  trialDurationDays?: number | null;
+  trialPolicyVersion?: string | null;
+  trialUsageLimitUsdMicros?: bigint | null;
+}): string {
+  const binding = {
+    checkoutOffer: input.checkoutOffer,
+    trialDurationDays: input.trialDurationDays ?? (
+      input.checkoutOffer === HOSTED_PULSE_TRIAL_OFFER
+        ? HOSTED_PULSE_TRIAL_DAYS
+        : null
+    ),
+    trialPolicyVersion: input.trialPolicyVersion ?? (
+      input.checkoutOffer === HOSTED_PULSE_TRIAL_OFFER
+        ? HOSTED_PULSE_TRIAL_POLICY_VERSION
+        : null
+    ),
+    trialUsageLimitUsdMicros: (
+      input.trialUsageLimitUsdMicros ?? (
+        input.checkoutOffer === HOSTED_PULSE_TRIAL_OFFER
+          ? HOSTED_PULSE_TRIAL_USAGE_LIMIT_USD_MICROS
+          : null
+      )
+    )?.toString() ?? null,
+  };
+
+  return `offer:${sha256Hex(JSON.stringify(binding)).slice(0, 12)}`;
 }
 
 function buildHostedFamilyBillingClaimCheckoutError(

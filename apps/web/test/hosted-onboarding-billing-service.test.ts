@@ -759,6 +759,234 @@ describe("createHostedBillingCheckout", () => {
     expect(mocks.stripe.checkout.sessions.create).toHaveBeenCalledTimes(1);
   });
 
+  it("rejects a different verified email while an earlier checkout is open", async () => {
+    mocks.requireHostedInviteForBillingCheckout.mockResolvedValue(makeInvite());
+    const prisma = makePrisma();
+
+    await createHostedBillingCheckout({
+      inviteCode: "invite-code",
+      linkedAccounts: [{
+        address: "first@example.test",
+        type: "email",
+        verified_at: 1_710_000_000,
+      }],
+      member: makeAuthenticatedMember(),
+      now: new Date("2026-03-27T12:00:00.000Z"),
+      prisma: prisma as never,
+    });
+
+    await expect(createHostedBillingCheckout({
+      inviteCode: "invite-code",
+      linkedAccounts: [{
+        address: "second@example.test",
+        type: "email",
+        verified_at: 1_710_000_000,
+      }],
+      member: makeAuthenticatedMember(),
+      now: new Date("2026-03-27T12:00:05.000Z"),
+      prisma: prisma as never,
+    })).rejects.toMatchObject({
+      code: "HOSTED_BILLING_CHECKOUT_ALREADY_OPEN",
+      httpStatus: 409,
+    });
+
+    expect(mocks.stripe.checkout.sessions.create).toHaveBeenCalledOnce();
+    expect(mocks.stripe.checkout.sessions.retrieve).not.toHaveBeenCalled();
+  });
+
+  it("rejects a different checkout offer while an earlier checkout is open", async () => {
+    process.env.HOSTED_PULSE_TRIAL_CHECKOUT_ENABLED = "1";
+    mocks.requireHostedInviteForBillingCheckout.mockResolvedValue(makeInvite());
+    const prisma = makePrisma({
+      billingRef: {
+        memberId: "member_123",
+        ...(await buildHostedMemberBillingPrivateColumns({
+          memberId: "member_123",
+          stripeCustomerId: "cus_existing",
+          stripeSubscriptionId: null,
+        })),
+        stripeCustomerLookupKey: "hbidx:stripe-customer:v1:existing",
+        stripeSubscriptionLookupKey: null,
+      },
+    });
+
+    await createHostedBillingCheckout({
+      inviteCode: "invite-code",
+      member: makeAuthenticatedMember(),
+      now: new Date("2026-03-27T12:00:00.000Z"),
+      prisma: prisma as never,
+    });
+
+    await expect(createHostedBillingCheckout({
+      checkoutOffer: "pulse_trial_7d",
+      inviteCode: "invite-code",
+      member: makeAuthenticatedMember(),
+      now: new Date("2026-03-27T12:00:05.000Z"),
+      prisma: prisma as never,
+    })).rejects.toMatchObject({
+      code: "HOSTED_BILLING_CHECKOUT_ALREADY_OPEN",
+      httpStatus: 409,
+    });
+
+    expect(mocks.stripe.customers.create).not.toHaveBeenCalled();
+    expect(mocks.stripe.checkout.sessions.create).toHaveBeenCalledOnce();
+    expect(mocks.stripe.checkout.sessions.retrieve).not.toHaveBeenCalled();
+  });
+
+  it("rejects a newly bound Stripe customer while an earlier checkout is open", async () => {
+    mocks.requireHostedInviteForBillingCheckout.mockResolvedValue(makeInvite());
+    const prisma = makePrisma();
+
+    await createHostedBillingCheckout({
+      inviteCode: "invite-code",
+      member: makeAuthenticatedMember(),
+      now: new Date("2026-03-27T12:00:00.000Z"),
+      prisma: prisma as never,
+    });
+
+    const { stripeCustomerIdEncrypted } =
+      await buildHostedMemberBillingPrivateColumns({
+        memberId: "member_123",
+        stripeCustomerId: "cus_late",
+        stripeSubscriptionId: null,
+      });
+    prisma.setBillingRefState({
+      stripeCustomerIdEncrypted,
+      stripeCustomerLookupKey: "hbidx:stripe-customer:v1:late",
+    });
+
+    await expect(createHostedBillingCheckout({
+      inviteCode: "invite-code",
+      member: makeAuthenticatedMember(),
+      now: new Date("2026-03-27T12:00:05.000Z"),
+      prisma: prisma as never,
+    })).rejects.toMatchObject({
+      code: "HOSTED_BILLING_CHECKOUT_ALREADY_OPEN",
+      httpStatus: 409,
+    });
+
+    expect(mocks.stripe.checkout.sessions.create).toHaveBeenCalledOnce();
+    expect(mocks.stripe.checkout.sessions.retrieve).not.toHaveBeenCalled();
+  });
+
+  it("clears the direct attempt when Family billing claims the member before Stripe creation", async () => {
+    mocks.requireHostedInviteForBillingCheckout.mockResolvedValue(makeInvite());
+    mocks.readHostedMemberFamilyBillingClaim
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({
+        checkoutAttemptId: "family_attempt_123",
+        groupId: "hbag_family",
+        kind: "checkout_attempt",
+        ownerMemberId: "member_owner",
+      });
+    const prisma = makePrisma();
+
+    await expect(createHostedBillingCheckout({
+      inviteCode: "invite-code",
+      member: makeAuthenticatedMember(),
+      now: new Date("2026-03-27T12:00:00.000Z"),
+      prisma: prisma as never,
+    })).rejects.toMatchObject({
+      code: "HOSTED_FAMILY_BILLING_IN_PROGRESS",
+      httpStatus: 409,
+    });
+
+    expect(mocks.stripe.checkout.sessions.create).not.toHaveBeenCalled();
+    expect(prisma.hostedMemberBillingRef.updateMany).toHaveBeenCalledWith({
+      data: {
+        checkoutAttemptId: null,
+        checkoutCreatedAt: null,
+        checkoutIntentHash: null,
+        stripeCheckoutSessionIdEncrypted: null,
+        stripeCheckoutSessionLookupKey: null,
+      },
+      where: expect.objectContaining({
+        checkoutAttemptId: expect.any(String),
+        checkoutIntentHash: expect.any(String),
+        memberId: "member_123",
+        stripeCheckoutSessionLookupKey: null,
+      }),
+    });
+  });
+
+  it("keeps a completed bound session in syncing state instead of creating another checkout", async () => {
+    mocks.requireHostedInviteForBillingCheckout.mockResolvedValue(makeInvite());
+    const prisma = makePrisma();
+
+    await createHostedBillingCheckout({
+      inviteCode: "invite-code",
+      member: makeAuthenticatedMember(),
+      now: new Date("2026-03-27T12:00:00.000Z"),
+      prisma: prisma as never,
+    });
+    const firstRequest = mocks.stripe.checkout.sessions.create.mock.calls[0]?.[0];
+    mocks.stripe.checkout.sessions.retrieve.mockResolvedValueOnce({
+      client_reference_id: "member_123",
+      id: "cs_123",
+      metadata: firstRequest?.metadata,
+      mode: "subscription",
+      status: "complete",
+      url: null,
+    });
+
+    await expect(createHostedBillingCheckout({
+      inviteCode: "invite-code",
+      member: makeAuthenticatedMember(),
+      now: new Date("2026-03-27T12:00:05.000Z"),
+      prisma: prisma as never,
+    })).rejects.toMatchObject({
+      code: "HOSTED_BILLING_CHECKOUT_SYNCING",
+      httpStatus: 409,
+      retryable: true,
+    });
+
+    expect(mocks.stripe.checkout.sessions.create).toHaveBeenCalledOnce();
+  });
+
+  it("clears an expired bound session and creates one replacement attempt", async () => {
+    mocks.requireHostedInviteForBillingCheckout.mockResolvedValue(makeInvite());
+    const prisma = makePrisma();
+
+    await createHostedBillingCheckout({
+      inviteCode: "invite-code",
+      member: makeAuthenticatedMember(),
+      now: new Date("2026-03-27T12:00:00.000Z"),
+      prisma: prisma as never,
+    });
+    const firstRequest = mocks.stripe.checkout.sessions.create.mock.calls[0]?.[0];
+    mocks.stripe.checkout.sessions.retrieve.mockResolvedValueOnce({
+      client_reference_id: "member_123",
+      id: "cs_123",
+      metadata: firstRequest?.metadata,
+      mode: "subscription",
+      status: "expired",
+      url: null,
+    });
+    mocks.stripe.checkout.sessions.create.mockImplementationOnce(async (params) => ({
+      client_reference_id: params.client_reference_id,
+      id: "cs_restarted",
+      metadata: params.metadata,
+      mode: params.mode,
+      status: "open",
+      url: "https://billing.example.test/session_restarted",
+    }));
+
+    await expect(createHostedBillingCheckout({
+      inviteCode: "invite-code",
+      member: makeAuthenticatedMember(),
+      now: new Date("2026-03-27T12:00:05.000Z"),
+      prisma: prisma as never,
+    })).resolves.toEqual({
+      alreadyActive: false,
+      url: "https://billing.example.test/session_restarted",
+    });
+
+    expect(mocks.stripe.checkout.sessions.create).toHaveBeenCalledTimes(2);
+    expect(mocks.stripe.checkout.sessions.retrieve).toHaveBeenCalledWith(
+      "cs_123",
+    );
+  });
+
   it("reuses the durable attempt and idempotency key after an ambiguous Stripe failure", async () => {
     mocks.requireHostedInviteForBillingCheckout.mockResolvedValue(makeInvite());
     const prisma = makePrisma();
@@ -1077,6 +1305,15 @@ function makePrisma(input: {
     },
     hostedMemberSubscriptionCheckout:
       prismaTx.hostedMemberSubscriptionCheckout,
+    setBillingRefState(data: Partial<BillingRefFixture>) {
+      if (!state) {
+        throw new Error("Expected a hosted member billing ref fixture.");
+      }
+      state = {
+        ...state,
+        ...data,
+      };
+    },
   } as const;
 }
 

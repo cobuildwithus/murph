@@ -112,6 +112,7 @@ import {
   writeHostedAccountGroupStripeBillingTx,
   parseHostedFamilyInviteStartToken,
   readHostedFamilyAccessForMember,
+  readHostedMemberFamilyBillingClaim,
   resolveHostedFamilyUsageCreditCheckoutTargetTx,
   resolveHostedFamilyInviteTokenForInbound,
   removeHostedFamilyMemberTx,
@@ -309,6 +310,116 @@ describe("hosted Family plan", () => {
       previousHostedOnboardingPublicBaseUrl,
     );
     clearHostedOnboardingEnvCache();
+  });
+
+  it.each([
+    {
+      expected: {
+        groupId: "hbag_active",
+        kind: "active_sponsorship",
+        ownerMemberId: "member_owner",
+      },
+      group: {
+        billingRef: null,
+        billingStatus: HostedBillingStatus.active,
+        id: "hbag_active",
+        ownerMemberId: "member_owner",
+        suspendedAt: null,
+      },
+      label: "an active sponsorship",
+    },
+    {
+      expected: {
+        groupId: "hbag_subscription",
+        kind: "bound_subscription",
+        ownerMemberId: "member_owner",
+      },
+      group: {
+        billingRef: {
+          checkoutAttemptId: null,
+          stripeSubscriptionIdEncrypted: "encrypted:sub_family",
+        },
+        billingStatus: HostedBillingStatus.not_started,
+        id: "hbag_subscription",
+        ownerMemberId: "member_owner",
+        suspendedAt: null,
+      },
+      label: "a bound Family subscription",
+    },
+    {
+      expected: {
+        checkoutAttemptId: "family_attempt_123",
+        groupId: "hbag_attempt",
+        kind: "checkout_attempt",
+        ownerMemberId: "member_owner",
+      },
+      group: {
+        billingRef: {
+          checkoutAttemptId: "family_attempt_123",
+          stripeSubscriptionIdEncrypted: null,
+        },
+        billingStatus: HostedBillingStatus.not_started,
+        id: "hbag_attempt",
+        ownerMemberId: "member_owner",
+        suspendedAt: null,
+      },
+      label: "a persisted Family checkout attempt",
+    },
+  ])("reports $label as the member's Family billing claim", async ({
+    expected,
+    group,
+  }) => {
+    const tx = createTxMock();
+    tx.hostedAccountGroupMembership.findMany.mockResolvedValueOnce([{ group }]);
+
+    await expect(readHostedMemberFamilyBillingClaim({
+      memberId: "member_mom",
+      prisma: tx,
+    })).resolves.toEqual(expected);
+
+    expect(tx.hostedAccountGroupMembership.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          memberId: "member_mom",
+          status: "active",
+        },
+      }),
+    );
+  });
+
+  it("fails closed when more than one Family billing owner claims the member", async () => {
+    const tx = createTxMock();
+    tx.hostedAccountGroupMembership.findMany.mockResolvedValueOnce([
+      {
+        group: {
+          billingRef: null,
+          billingStatus: HostedBillingStatus.active,
+          id: "hbag_first",
+          ownerMemberId: "member_first",
+          suspendedAt: null,
+        },
+      },
+      {
+        group: {
+          billingRef: {
+            checkoutAttemptId: "family_attempt_second",
+            stripeSubscriptionIdEncrypted: null,
+          },
+          billingStatus: HostedBillingStatus.not_started,
+          id: "hbag_second",
+          ownerMemberId: "member_second",
+          suspendedAt: null,
+        },
+      },
+    ]);
+
+    await expect(readHostedMemberFamilyBillingClaim({
+      memberId: "member_mom",
+      prisma: tx,
+    })).rejects.toMatchObject({
+      code: "HOSTED_FAMILY_BILLING_CLAIM_AMBIGUOUS",
+      httpStatus: 500,
+    });
   });
 
   it("authorizes an active unsuspended Family beneficiary against group billing", async () => {

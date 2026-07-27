@@ -136,6 +136,7 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", async () => {
 
 import {
   applyStripeCheckoutCompleted,
+  applyStripeCheckoutExpired,
   applyStripeDisputeUpdated,
   applyStripeInvoicePaid,
   applyStripeInvoicePaymentFailed,
@@ -239,6 +240,28 @@ describe("hosted onboarding stripe billing events", () => {
       collectedAt: new Date("2024-05-03T01:46:40.000Z"),
       memberId: "member_123",
       prisma: {},
+    });
+  });
+
+  it("clears the durable member attempt when its Checkout Session expires", async () => {
+    const session = {
+      id: "cs_expired_123",
+    } as unknown as Stripe.Checkout.Session;
+
+    await expect(
+      applyStripeCheckoutExpired(session, {} as never),
+    ).resolves.toBeUndefined();
+
+    expect(mocks.findMemberForStripeCheckoutSession).toHaveBeenCalledWith({
+      prisma: {},
+      session,
+    });
+    expect(
+      mocks.clearHostedMemberStripeCheckoutAttemptForSessionTx,
+    ).toHaveBeenCalledWith({
+      memberId: "member_123",
+      sessionId: "cs_expired_123",
+      tx: {},
     });
   });
 

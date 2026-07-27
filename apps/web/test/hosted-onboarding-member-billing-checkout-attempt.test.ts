@@ -52,6 +52,58 @@ describe("hosted member Checkout completion ownership", () => {
     }));
   });
 
+  it("accepts an in-flight legacy Checkout that has no persisted attempt metadata", async () => {
+    const harness = await createBillingRefHarness({ openAttempt: false });
+
+    await expect(acceptHostedMemberStripeCheckoutCompletionTx({
+      checkoutAttemptId: null,
+      checkoutIntentHash: null,
+      checkoutSessionId: "cs_legacy",
+      currentCheckoutOffer: "standard",
+      eventCreatedAt: new Date("2026-07-27T12:01:00.000Z"),
+      memberId: "member_123",
+      stripeCustomerId: "cus_legacy",
+      stripeSubscriptionId: "sub_legacy",
+      tx: harness.tx as never,
+    })).resolves.toMatchObject({
+      billingRef: {
+        stripeCustomerId: "cus_legacy",
+        stripeSubscriptionId: "sub_legacy",
+      },
+      kind: "accepted",
+    });
+  });
+
+  it("treats a repeated completion for the accepted subscription as idempotent", async () => {
+    const harness = await createBillingRefHarness();
+    const completion = {
+      checkoutAttemptId: "attempt_123",
+      checkoutIntentHash: "intent_123",
+      checkoutSessionId: "cs_winner",
+      currentCheckoutOffer: "standard",
+      eventCreatedAt: new Date("2026-07-27T12:01:00.000Z"),
+      memberId: "member_123",
+      stripeCustomerId: "cus_winner",
+      stripeSubscriptionId: "sub_winner",
+      tx: harness.tx as never,
+    };
+
+    await expect(acceptHostedMemberStripeCheckoutCompletionTx(completion))
+      .resolves.toMatchObject({ kind: "accepted" });
+    await expect(acceptHostedMemberStripeCheckoutCompletionTx({
+      ...completion,
+      eventCreatedAt: new Date("2026-07-27T12:02:00.000Z"),
+    })).resolves.toMatchObject({
+      billingRef: {
+        stripeCustomerId: "cus_winner",
+        stripeSubscriptionId: "sub_winner",
+      },
+      kind: "already_accepted",
+    });
+
+    expect(harness.update).toHaveBeenCalledTimes(2);
+  });
+
   it("keeps the first subscription when a different Checkout completes later", async () => {
     const harness = await createBillingRefHarness();
     await acceptHostedMemberStripeCheckoutCompletionTx({
@@ -84,7 +136,10 @@ describe("hosted member Checkout completion ownership", () => {
   });
 });
 
-async function createBillingRefHarness() {
+async function createBillingRefHarness(input: {
+  openAttempt?: boolean;
+} = {}) {
+  const openAttempt = input.openAttempt ?? true;
   const privateColumns = await buildHostedMemberBillingPrivateColumns({
     memberId: "member_123",
     stripeCustomerId: null,
@@ -93,12 +148,14 @@ async function createBillingRefHarness() {
   const checkoutPrivateColumn =
     await buildHostedMemberBillingCheckoutSessionPrivateColumn({
       memberId: "member_123",
-      stripeCheckoutSessionId: "cs_winner",
+      stripeCheckoutSessionId: openAttempt ? "cs_winner" : null,
     });
   let state = {
-    checkoutAttemptId: "attempt_123",
-    checkoutCreatedAt: new Date("2026-07-27T12:00:00.000Z"),
-    checkoutIntentHash: "intent_123",
+    checkoutAttemptId: openAttempt ? "attempt_123" : null,
+    checkoutCreatedAt: openAttempt
+      ? new Date("2026-07-27T12:00:00.000Z")
+      : null,
+    checkoutIntentHash: openAttempt ? "intent_123" : null,
     currentBillingPhase: null,
     currentBillingPlanCode: null,
     currentCheckoutOffer: null,
@@ -112,8 +169,9 @@ async function createBillingRefHarness() {
     pulseTrialRedeemedAt: null,
     scheduledBillingEffectiveAt: null,
     scheduledBillingPlanCode: null,
-    stripeCheckoutSessionLookupKey:
-      createHostedStripeCheckoutSessionLookupKey("cs_winner"),
+    stripeCheckoutSessionLookupKey: openAttempt
+      ? createHostedStripeCheckoutSessionLookupKey("cs_winner")
+      : null,
     stripeCustomerLookupKey: null,
     stripeSubscriptionLookupKey: null,
     stripeSubscriptionScheduleLookupKey: null,

@@ -88,6 +88,79 @@ describe("cleanupHostedStandardCheckoutLoser", () => {
     ).toBeLessThan(refundsCreate.mock.invocationCallOrder[0] ?? 0);
   });
 
+  it("does not issue another refund when an earlier cleanup already refunded the exact payment", async () => {
+    subscriptionRetrieve.mockResolvedValue(
+      makeSubscription(makePaidInvoice()),
+    );
+    invoicePaymentsList.mockResolvedValue({
+      data: [{
+        amount_paid: 2_000,
+        amount_requested: 2_000,
+        payment: {
+          payment_intent: {
+            amount_received: 2_000,
+            id: "pi_loser",
+            status: "succeeded",
+          },
+          type: "payment_intent",
+        },
+      }],
+      has_more: false,
+    });
+    refundsList.mockResolvedValue({
+      data: [{
+        amount: 2_000,
+        status: "succeeded",
+      }],
+    });
+
+    await expect(cleanupHostedStandardCheckoutLoser({
+      stripe,
+      stripeSubscriptionId: "sub_loser",
+    })).resolves.toBeUndefined();
+
+    expect(subscriptionCancel).toHaveBeenCalledOnce();
+    expect(refundsCreate).not.toHaveBeenCalled();
+  });
+
+  it("requires support instead of guessing the remainder after a partial refund", async () => {
+    subscriptionRetrieve.mockResolvedValue(
+      makeSubscription(makePaidInvoice()),
+    );
+    invoicePaymentsList.mockResolvedValue({
+      data: [{
+        amount_paid: 2_000,
+        amount_requested: 2_000,
+        payment: {
+          payment_intent: {
+            amount_received: 2_000,
+            id: "pi_loser",
+            status: "succeeded",
+          },
+          type: "payment_intent",
+        },
+      }],
+      has_more: false,
+    });
+    refundsList.mockResolvedValue({
+      data: [{
+        amount: 500,
+        status: "succeeded",
+      }],
+    });
+
+    await expect(cleanupHostedStandardCheckoutLoser({
+      stripe,
+      stripeSubscriptionId: "sub_loser",
+    })).rejects.toMatchObject({
+      code: "HOSTED_BILLING_CHECKOUT_CLEANUP_REQUIRES_SUPPORT",
+      httpStatus: 409,
+    });
+
+    expect(subscriptionCancel).toHaveBeenCalledOnce();
+    expect(refundsCreate).not.toHaveBeenCalled();
+  });
+
   it("cancels but requires support when account balance affected the invoice", async () => {
     subscriptionRetrieve.mockResolvedValue(
       makeSubscription(makePaidInvoice({
