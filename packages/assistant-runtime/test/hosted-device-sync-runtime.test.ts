@@ -5402,6 +5402,158 @@ describe("hosted device-sync runtime", () => {
     }
   });
 
+  test("executes an accepted Oura tombstone exactly once across a same-account reconnect", async () => {
+    const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
+      "hosted-device-sync-runtime-tombstone-reconnect-",
+    );
+    await initializeVault({
+      createdAt: "2026-07-27T04:00:00.000Z",
+      timezone: "UTC",
+      vaultRoot,
+    });
+    const baseProvider = createFakeProvider();
+    const importedJobIds: string[] = [];
+    const ouraProvider: DeviceSyncProvider = {
+      ...baseProvider,
+      provider: "oura",
+      descriptor: {
+        ...baseProvider.descriptor,
+        displayName: "Oura",
+        provider: "oura",
+      },
+      jobExecutor: {
+        async executeJob(context, job) {
+          assert.equal(job.kind, "delete");
+          assert.equal(context.account.provider, "oura");
+          importedJobIds.push(job.id);
+          return {};
+        },
+      },
+    };
+    const service = createDeviceSyncServiceForVault(vaultRoot, [ouraProvider]);
+
+    try {
+      const begin = await service.startConnection({ provider: "oura" });
+      const connected = await service.handleOAuthCallback({
+        code: "tombstone-reconnect",
+        provider: "oura",
+        state: begin.state,
+      });
+      const connectionId = "hosted_conn_tombstone_reconnect";
+      const dirtyPayloadId = "dsp_tombstone_reconnect";
+      const dirtyState = buildDirtyState({
+        connectionId,
+        dirtyRevision: "11",
+        dirtyResources: [{
+          count: 1,
+          dirtyPayloadId,
+          jobKind: "delete",
+          payload: {
+            dataType: "session",
+            objectId: "deleted-session",
+            occurredAt: "2026-07-27T04:01:00.000Z",
+            sourceEventType: "session.deleted",
+          },
+          resource: null,
+          resourceCategory: "session",
+          sourceProviderSlug: null,
+          windowEnd: null,
+          windowStart: null,
+        }],
+        provider: "oura",
+      });
+      let snapshot = buildRuntimeSnapshot({
+        connectedAt: connected.account.connectedAt,
+        connectionId,
+        externalAccountId: connected.account.externalAccountId,
+        provider: "oura",
+      });
+      const deviceSyncPort: HostedRuntimeDeviceSyncPort = {
+        ...createNoDirtyStateDeviceSyncPortMethods(),
+        async applyUpdates() {
+          throw new Error("applyUpdates should not be called during tombstone replay.");
+        },
+        async createConnectLink() {
+          throw new Error("createConnectLink should not be called during tombstone replay.");
+        },
+        async fetchDirtyStates() {
+          return {
+            hasMore: false,
+            items: [dirtyState],
+            nextWakeAt: null,
+            userId: "member_123",
+          };
+        },
+        async fetchSnapshot() {
+          return snapshot;
+        },
+      };
+
+      const epochAState = await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort,
+        wake: buildCronWake("2026-07-27T04:02:00.000Z"),
+        secret: DEVICE_SYNC_SECRET,
+        service,
+      });
+      const localAccountId = epochAState.hostedToLocalAccountIds.get(connectionId);
+      assert.ok(localAccountId);
+      const [epochADelete] = readJobsForAccount(service, localAccountId);
+      assert.ok(epochADelete);
+      const epochACredentialJob = getStore(service).enqueueJob({
+        accountId: localAccountId,
+        availableAt: "2026-07-27T04:02:00.000Z",
+        kind: "resource",
+        payload: { objectId: "credential-scoped-resource" },
+        provider: "oura",
+      });
+
+      snapshot = buildRuntimeSnapshot({
+        connectedAt: "2026-07-27T05:00:00.000Z",
+        connectionId,
+        externalAccountId: connected.account.externalAccountId,
+        hostedUpdatedAt: "2026-07-27T05:01:00.000Z",
+        provider: "oura",
+        tokenBundle: {
+          accessToken: "epoch-b-access-token",
+          accessTokenExpiresAt: "2026-07-28T05:00:00.000Z",
+          refreshToken: "epoch-b-refresh-token",
+          tokenVersion: 2,
+        },
+      });
+      const epochBState = await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort,
+        wake: buildCronWake("2026-07-27T05:02:00.000Z"),
+        secret: DEVICE_SYNC_SECRET,
+        service,
+      });
+
+      assert.equal(getStore(service).getJobById(epochADelete.id)?.status, "queued");
+      assert.equal(
+        getStore(service).getJobById(epochACredentialJob.id)?.lastErrorCode,
+        "HOSTED_CONNECTION_EPOCH_REPLACED",
+      );
+      assert.equal(readJobsForAccount(service, localAccountId).filter((job) =>
+        job.kind === "delete"
+      ).length, 1);
+
+      assert.equal(await service.drainWorker(2), 1);
+      promoteHostedCompletedDirtyPayloadAcks({
+        service,
+        state: epochBState,
+      });
+      assert.deepEqual(importedJobIds, [epochADelete.id]);
+      assert.deepEqual(epochBState.pendingDirtyAcks, [{
+        connectionId,
+        nextWakeAt: null,
+        processedDirtyPayloadIds: [dirtyPayloadId],
+        processedRevision: "11",
+      }]);
+    } finally {
+      closeHostedRuntimeDeviceSyncService(service);
+      await cleanup();
+    }
+  });
+
   test("supersedes an old disconnect wake and all credential-scoped work after hydrating a replacement connection epoch", async () => {
     const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
       "hosted-device-sync-runtime-",

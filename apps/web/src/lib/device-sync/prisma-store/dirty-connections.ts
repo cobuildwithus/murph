@@ -9,6 +9,7 @@ import {
 } from "@murphai/contracts";
 import { deviceSyncError } from "@murphai/device-syncd/errors";
 import {
+  isDeviceSyncCredentialIndependentImportJob,
   serializeHostedExecutionDeviceSyncDirtyPayloadIdentity,
   type HostedExecutionDeviceSyncStagedDirtyAck,
 } from "@murphai/device-syncd/hosted-runtime";
@@ -89,7 +90,7 @@ export async function supersedeHostedCredentialScopedDirtyStateForConnectionTx(i
   tx: HostedPrismaTransactionClient;
   userId: string;
 }): Promise<{
-  retainedCompanionPayloadCount: number;
+  retainedCredentialIndependentPayloadCount: number;
   supersededPayloadCount: number;
 }> {
   await input.tx.$queryRaw<Array<{ connectionId: string }>>(Prisma.sql`
@@ -106,7 +107,7 @@ export async function supersedeHostedCredentialScopedDirtyStateForConnectionTx(i
   });
   if (!existing) {
     return {
-      retainedCompanionPayloadCount: 0,
+      retainedCredentialIndependentPayloadCount: 0,
       supersededPayloadCount: 0,
     };
   }
@@ -125,19 +126,19 @@ export async function supersedeHostedCredentialScopedDirtyStateForConnectionTx(i
     },
   });
   const supersededPayloadIds: string[] = [];
-  let retainedCompanionPayloadCount = 0;
+  let retainedCredentialIndependentPayloadCount = 0;
   for (const row of payloadRows) {
     const resource = await readDirtyPayloadResourceJson({
       row,
       tx: input.tx,
       userId: input.userId,
     });
-    if (
-      row.provider === "junction"
-      && resource?.jobKind === "resource"
-      && resource.payload?.resource === COMPANION_HRV_RMSSD_RESOURCE
-    ) {
-      retainedCompanionPayloadCount += 1;
+    if (resource && isDeviceSyncCredentialIndependentImportJob({
+      kind: resource.jobKind,
+      payload: resource.payload,
+      provider: row.provider,
+    })) {
+      retainedCredentialIndependentPayloadCount += 1;
     } else {
       supersededPayloadIds.push(row.id);
     }
@@ -177,7 +178,7 @@ export async function supersedeHostedCredentialScopedDirtyStateForConnectionTx(i
   }
 
   return {
-    retainedCompanionPayloadCount,
+    retainedCredentialIndependentPayloadCount,
     supersededPayloadCount: supersededPayloadIds.length,
   };
 }

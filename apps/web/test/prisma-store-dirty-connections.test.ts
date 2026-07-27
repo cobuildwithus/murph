@@ -17,7 +17,7 @@ import { sealHostedDeviceSyncDirtyPayloadJson } from "@/src/lib/device-sync/pris
 import { setHostedSecureBoxStringTestCodecForTests } from "@/src/lib/hosted-crypto/secure-box";
 
 describe("PrismaHostedDirtyConnectionStore dirty pending state", () => {
-  it("supersedes reconnect-bound dirty work while retaining companion HRV payloads", async () => {
+  it("supersedes reconnect-bound dirty work while retaining credential-independent imports", async () => {
     installHostedSecureBoxStringTestCodec();
     const connectionId = "dsc_epoch_replacement";
     const userId = "member_epoch_replacement";
@@ -54,6 +54,41 @@ describe("PrismaHostedDirtyConnectionStore dirty pending state", () => {
           resource: COMPANION_HRV_RMSSD_RESOURCE,
         },
       });
+      const companionMetadataPayload = await sealHostedDeviceSyncDirtyPayloadJson({
+        connectionId,
+        dirtyRevision,
+        payloadId: "dsp_companion_metadata",
+        provider: "junction",
+        userId,
+        value: {
+          count: 1,
+          jobKind: "resource",
+          payload: {
+            resource: "companion_health_metadata",
+          },
+          resource: "companion_health_metadata",
+        },
+      });
+      const inlinePayload = await sealHostedDeviceSyncDirtyPayloadJson({
+        connectionId,
+        dirtyRevision,
+        payloadId: "dsp_inline",
+        provider: "junction",
+        userId,
+        value: {
+          count: 1,
+          jobKind: "resource",
+          payload: {
+            resource: "sleep",
+            resourceCategory: "summary",
+            sourceProviderSlug: "garmin",
+            webhookDataJson: JSON.stringify({
+              sourceProviderSlug: "garmin",
+            }),
+          },
+          resource: "sleep",
+        },
+      });
       const updateMany = vi.fn(async () => ({ count: 1 }));
       const deleteMany = vi.fn(async () => ({ count: 1 }));
       const tx = {
@@ -88,6 +123,20 @@ describe("PrismaHostedDirtyConnectionStore dirty pending state", () => {
               provider: "junction",
               resourceEncrypted: companionPayload,
             },
+            {
+              connectionId,
+              dirtyRevision,
+              id: "dsp_companion_metadata",
+              provider: "junction",
+              resourceEncrypted: companionMetadataPayload,
+            },
+            {
+              connectionId,
+              dirtyRevision,
+              id: "dsp_inline",
+              provider: "junction",
+              resourceEncrypted: inlinePayload,
+            },
           ]),
         },
       };
@@ -99,7 +148,7 @@ describe("PrismaHostedDirtyConnectionStore dirty pending state", () => {
           userId,
         }),
       ).resolves.toEqual({
-        retainedCompanionPayloadCount: 1,
+        retainedCredentialIndependentPayloadCount: 3,
         supersededPayloadCount: 1,
       });
       expect(tx.$queryRaw).toHaveBeenCalledOnce();

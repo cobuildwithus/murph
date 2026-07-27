@@ -7,6 +7,7 @@ import { COMPANION_HRV_RMSSD_RESOURCE } from "@murphai/contracts";
 import { openSqliteRuntimeDatabase } from "@murphai/runtime-state/node";
 
 import { SqliteDeviceSyncStore } from "../src/store.ts";
+import { markCredentialScopedPendingDeviceSyncJobsDeadForAccount } from "../src/store/jobs.ts";
 import { DEVICE_SYNC_STORE_SQLITE_SCHEMA_VERSION } from "../src/store/schema.ts";
 import { makeTempDirectory } from "./helpers.ts";
 import {
@@ -63,6 +64,99 @@ function assertStoredCredentialKind(
   assert.ok(account);
   assert.equal(account.credential.kind, kind);
 }
+
+test("connection epoch cleanup preserves credential-independent queued and running imports", async () => {
+  const tempDir = await makeTempDirectory("murph-device-syncd-epoch-authority");
+  const store = new SqliteDeviceSyncStore(path.join(tempDir, "state.sqlite"));
+
+  try {
+    const oura = store.upsertAccount({
+      connectedAt: "2026-07-27T04:00:00.000Z",
+      displayName: "Oura",
+      externalAccountId: "oura-epoch-authority",
+      provider: "oura",
+      scopes: [],
+      status: "active",
+      tokens: {
+        accessToken: "oura-access-token",
+        accessTokenEncrypted: "enc:oura-access-token",
+      },
+    });
+    const runningDelete = store.enqueueJob({
+      accountId: oura.id,
+      availableAt: "2026-07-27T04:00:00.000Z",
+      kind: "delete",
+      payload: {
+        dataType: "sleep",
+        objectId: "deleted-sleep-running",
+      },
+      priority: 100,
+      provider: "oura",
+    });
+    const queuedDelete = store.enqueueJob({
+      accountId: oura.id,
+      availableAt: "2026-07-27T04:00:00.000Z",
+      kind: "delete",
+      payload: {
+        dataType: "sleep",
+        objectId: "deleted-sleep-queued",
+      },
+      priority: 90,
+      provider: "oura",
+    });
+    const credentialScoped = ["resource", "reconcile", "deauthorize"].map((kind, index) =>
+      store.enqueueJob({
+        accountId: oura.id,
+        availableAt: "2026-07-27T04:00:00.000Z",
+        kind,
+        payload: { objectId: `credential-scoped-${kind}` },
+        priority: 80 - index,
+        provider: "oura",
+      })
+    );
+    assert.equal(
+      store.claimDueJob("epoch-worker", "2026-07-27T04:01:00.000Z", 60_000)?.id,
+      runningDelete.id,
+    );
+
+    const database = openSqliteRuntimeDatabase(store.databasePath);
+    try {
+      assert.equal(markCredentialScopedPendingDeviceSyncJobsDeadForAccount(database, {
+        accountId: oura.id,
+        code: "HOSTED_CONNECTION_EPOCH_REPLACED",
+        message: "Connection epoch changed.",
+        now: "2026-07-27T04:02:00.000Z",
+      }), credentialScoped.length);
+    } finally {
+      database.close();
+    }
+
+    assert.equal(store.getJobById(runningDelete.id)?.status, "running");
+    assert.equal(store.getJobById(queuedDelete.id)?.status, "queued");
+    for (const job of credentialScoped) {
+      assert.equal(store.getJobById(job.id)?.status, "dead");
+      assert.equal(
+        store.getJobById(job.id)?.lastErrorCode,
+        "HOSTED_CONNECTION_EPOCH_REPLACED",
+      );
+    }
+
+    const epochBJob = store.enqueueJob({
+      accountId: oura.id,
+      availableAt: "2026-07-27T04:03:00.000Z",
+      kind: "resource",
+      payload: { objectId: "epoch-b-resource" },
+      provider: "oura",
+    });
+    assert.equal(store.getJobById(epochBJob.id)?.status, "queued");
+  } finally {
+    store.close();
+    await rm(tempDir, {
+      force: true,
+      recursive: true,
+    });
+  }
+});
 
 test("device sync store minimizes webhook trace payload retention without changing claim or completion state", async () => {
   const tempDir = await makeTempDirectory("murph-device-syncd-store");

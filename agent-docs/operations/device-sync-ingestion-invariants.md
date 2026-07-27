@@ -209,13 +209,17 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
    one-time state and recheck it inside the existing upsert transaction, so an
    old callback cannot adopt, replace, or fail a newer reconnect. Stale work
    therefore cannot clear a newer local connection or token. A replacement
-   `connectedAt` epoch also supersedes every credential-scoped durable effect:
-   Web revalidates webhook admission and clears old dirty work under the
-   connection lock and dirty-marker row lock, while runtime hydration retires
-   old queued, retryable, and leased jobs inside the credential-replacement
-   transaction. The established companion-HRV resource path remains pending
-   because its accepted payload is authorization-independent. Recovery does not
-   use an automatic export endpoint, operator action, or vendor support.
+   `connectedAt` epoch also supersedes every connection-epoch-scoped durable
+   effect: Web revalidates webhook admission and clears old fetch/control dirty
+   work under the connection lock and dirty-marker row lock, while runtime
+   hydration retires matching queued, retryable, and leased jobs inside the
+   credential-replacement transaction. Already accepted import carriers that
+   do not consume the replaced connection credentials remain pending:
+   Oura/WHOOP/Strava tombstones, companion HRV and health metadata, and Junction
+   summary payloads whose inline source provenance is sufficient for direct
+   import. Inline-looking Junction jobs that must fall back to a provider fetch
+   remain connection-epoch scoped. Recovery does not use an automatic export
+   endpoint, operator action, or vendor support.
    Hosted runtime account hydration keys by the control plane's opaque hosted
    connection id before mutable provider identity. A terminal privacy scrub
    therefore updates the same local account instead of leaving the old account

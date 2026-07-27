@@ -15,7 +15,7 @@ import {
   type MealNutrition,
   type WorkoutSession,
 } from "@murphai/contracts";
-import { deterministicContractId } from "@murphai/core";
+import { deterministicContractId } from "@murphai/core/ids";
 import { z } from "zod";
 
 import { stripUndefined } from "../shared.ts";

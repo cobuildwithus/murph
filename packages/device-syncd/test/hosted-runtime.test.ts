@@ -8,6 +8,7 @@ import {
 import { DEVICE_SYNC_METADATA_MAX_STRING_LENGTH } from "../src/metadata.ts";
 import {
   buildHostedExecutionDeviceSyncConnectLinkPath,
+  isDeviceSyncCredentialIndependentImportJob,
   isHostedRuntimeIdShapedDiagnosticToken,
   mergeGuardedJunctionHistoricalBackfillMetadata,
   mergeHostedDeviceSyncConnectionMetadata,
@@ -27,6 +28,92 @@ import {
   sanitizeHostedRuntimeErrorText,
   serializeHostedExecutionDeviceSyncDirtyPayloadIdentity,
 } from "../src/hosted-runtime.ts";
+
+describe("isDeviceSyncCredentialIndependentImportJob", () => {
+  it("preserves only executor-owned inline imports", () => {
+    for (const provider of ["oura", "strava", "whoop"]) {
+      expect(isDeviceSyncCredentialIndependentImportJob({
+        kind: "delete",
+        payload: { resourceId: "deleted-resource" },
+        provider,
+      })).toBe(true);
+    }
+
+    expect(isDeviceSyncCredentialIndependentImportJob({
+      kind: "resource",
+      payload: {
+        resource: "sleep",
+        resourceCategory: "summary",
+        sourceProviderSlug: "garmin",
+        webhookDataJson: JSON.stringify({ sourceProviderSlug: "garmin" }),
+      },
+      provider: "junction",
+    })).toBe(true);
+    expect(isDeviceSyncCredentialIndependentImportJob({
+      kind: "resource",
+      payload: { resource: "companion_health_metadata" },
+      provider: "junction",
+    })).toBe(true);
+    expect(isDeviceSyncCredentialIndependentImportJob({
+      kind: "resource",
+      payload: { resource: "companion_hrv_rmssd" },
+      provider: "junction",
+    })).toBe(true);
+
+    for (const input of [
+      { kind: "delete", payload: {}, provider: "junction" },
+      { kind: "deauthorize", payload: {}, provider: "strava" },
+      { kind: "reconcile", payload: {}, provider: "oura" },
+      {
+        kind: "resource",
+        payload: {
+          resource: "sleep",
+          resourceCategory: "summary",
+          sourceProviderSlug: "garmin",
+        },
+        provider: "junction",
+      },
+      {
+        kind: "resource",
+        payload: {
+          resource: "activity",
+          resourceCategory: "summary",
+          sourceProviderSlug: "garmin",
+          webhookDataJson: JSON.stringify({
+            records: [{ sourceProviderSlug: "fitbit" }],
+            sourceProviderSlug: "garmin",
+          }),
+        },
+        provider: "junction",
+      },
+      {
+        kind: "resource",
+        payload: {
+          resource: "sleep_cycle",
+          resourceCategory: "summary",
+          sourceProviderSlug: "garmin",
+          webhookDataJson: JSON.stringify({
+            id: "sleep-cycle-without-stage-coverage",
+            sourceProviderSlug: "garmin",
+          }),
+        },
+        provider: "junction",
+      },
+      {
+        kind: "resource",
+        payload: {
+          resource: "steps",
+          resourceCategory: "timeseries",
+          sourceProviderSlug: "garmin",
+          webhookDataJson: "{}",
+        },
+        provider: "junction",
+      },
+    ]) {
+      expect(isDeviceSyncCredentialIndependentImportJob(input)).toBe(false);
+    }
+  });
+});
 
 describe("hosted device-sync reconcile contract", () => {
   it("accepts only the bounded request and queued response shapes", () => {

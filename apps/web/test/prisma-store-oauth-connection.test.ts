@@ -4,7 +4,7 @@ import { DEVICE_SYNC_DISCONNECT_IN_PROGRESS_ERROR_CODE } from "@murphai/device-s
 const { randomBytesMock, supersedeDirtyStateMock } = vi.hoisted(() => ({
   randomBytesMock: vi.fn((length: number) => Buffer.from(Array.from({ length }, (_, index) => index))),
   supersedeDirtyStateMock: vi.fn(async () => ({
-    retainedCompanionPayloadCount: 0,
+    retainedCredentialIndependentPayloadCount: 0,
     supersededPayloadCount: 0,
   })),
 }));
