@@ -318,7 +318,7 @@ test("announces a private preview failure and recovers through retry", async () 
   }
 });
 
-test("shows recovery when native file sharing fails for a non-dismissal error", async () => {
+test("reuses the prepared PNG for download when native file sharing fails", async () => {
   const { ShareResultsCard } = await import(
     "@/src/components/experiments/experiment-detail/share-results-card"
   );
@@ -326,6 +326,15 @@ test("shows recovery when native file sharing fails for a non-dismissal error", 
     createElement(ShareResultsCard, { cardData }),
   );
   const nativeShare = vi.fn().mockRejectedValue(new Error("share transport failed"));
+  const createObjectUrl = vi.spyOn(URL, "createObjectURL")
+    .mockReturnValueOnce("blob:private-preview")
+    .mockReturnValueOnce("blob:private-download");
+  const revokeObjectUrl = vi.spyOn(URL, "revokeObjectURL");
+  const anchorClick = vi.spyOn(
+    rendered.window.HTMLAnchorElement.prototype,
+    "click",
+  ).mockImplementation(() => {});
+  const appendToBody = vi.spyOn(rendered.window.document.body, "append");
   installNativeFileShare({
     canShare: vi.fn(() => true),
     navigator: rendered.window.navigator,
@@ -360,8 +369,35 @@ test("shows recovery when native file sharing fails for a non-dismissal error", 
       /Sharing couldn't open/u,
     );
     expect(dialog.textContent).toMatch(/download the image/u);
+
+    const downloadButton = Array.from(dialog.querySelectorAll("button")).find(
+      (button) => button.textContent?.trim() === "Download image",
+    );
+    assert.ok(downloadButton);
+    await act(async () => {
+      downloadButton.dispatchEvent(
+        new rendered.window.Event("click", { bubbles: true }),
+      );
+      await Promise.resolve();
+    });
+
+    expect(mocks.fetch).toHaveBeenCalledOnce();
+    expect(createObjectUrl).toHaveBeenCalledTimes(2);
+    expect(anchorClick).toHaveBeenCalledOnce();
+    const appendedAnchor = appendToBody.mock.calls.at(-1)?.[0];
+    assert.ok(
+      appendedAnchor instanceof rendered.window.HTMLAnchorElement,
+    );
+    expect(appendedAnchor.download).toBe("sleep-test-results.png");
+    expect(appendedAnchor.href).toBe("blob:private-download");
+    expect(appendedAnchor.isConnected).toBe(false);
+    expect(revokeObjectUrl).toHaveBeenCalledWith("blob:private-download");
   } finally {
     await rendered.cleanup();
+    appendToBody.mockRestore();
+    anchorClick.mockRestore();
+    revokeObjectUrl.mockRestore();
+    createObjectUrl.mockRestore();
   }
 });
 

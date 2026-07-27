@@ -228,6 +228,9 @@ describe('assistant group-chat comedy skill', () => {
     expect(normalized).toContain(
       'never ask for, expose, repeat, or retain that delivery URL',
     )
+    expect(normalized).toContain(
+      'Only attempt this mutation in a fresh interactive connected-group turn, never from a scheduled automation occurrence',
+    )
     expect(comedy).not.toContain('preflight_set_chat_avatar')
   })
 

@@ -222,6 +222,8 @@ reuse an exact user-sent image ref. The tool keeps the bytes in the vault and
 uses a short-lived signed URL only at Linq's URL-only provider boundary; never
 ask for, expose, repeat, or retain that delivery URL. A visual joke still has
 to clear the same protected-member and health-data rules as any other roast.
+Only attempt this mutation in a fresh interactive connected-group turn, never
+from a scheduled automation occurrence.
 
 ## Voice memos (audio register)
 
