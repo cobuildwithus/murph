@@ -1,6 +1,6 @@
 import "server-only";
 
-import type { PrismaClient } from "@prisma/client";
+import type { Prisma, PrismaClient } from "@prisma/client";
 
 import { lookupHostedMemberIdentityByPhoneNumber } from "../hosted-onboarding/hosted-member-identity-store";
 import { lookupHostedMemberByVerifiedEmailAddress } from "../hosted-onboarding/hosted-member-store";
@@ -19,6 +19,12 @@ import {
   type HostedGroupOfferAffirmationKind,
   type HostedGroupOfferAffirmationSkipReason,
 } from "./group-offer-affirmation";
+import {
+  prepareHostedLinqGroupJoinApplicationClaimTx,
+} from "./group-store";
+import type {
+  HostedLinqGroupJoinApplicationClaim,
+} from "../hosted-onboarding/linq-provider-event-store";
 
 type HostedGroupJoinOfferReactionSkipReason =
   | HostedGroupOfferAffirmationSkipReason
@@ -30,6 +36,59 @@ type HostedGroupJoinOfferReactionSkipReason =
 export type HostedGroupJoinOfferReactionResult =
   | { status: "accepted"; reason: "accepted" }
   | { status: "ignored"; reason: HostedGroupJoinOfferReactionSkipReason };
+
+/**
+ * Binds the durable provider receipt to the exact authority visible when the
+ * event is first accepted. Returning null records the provider event without a
+ * retryable join application.
+ */
+export async function prepareHostedGroupJoinOfferReactionApplicationClaimTx(input: {
+  event: ParsedHostedLinqProviderEvent;
+  tx: Prisma.TransactionClient;
+}): Promise<HostedLinqGroupJoinApplicationClaim | null> {
+  if (
+    input.event.eventType !== "reaction.added"
+    || input.event.reactionIsFromMe === true
+    || !isHostedLinqAffirmativeReaction({
+      customEmoji: input.event.reactionCustomEmoji,
+      eventType: input.event.eventType,
+      reactionType: input.event.reactionType,
+    })
+    || !input.event.linqChatId
+    || !input.event.messageLookupKey
+    || !input.event.payloadHash
+    || !input.event.reactionFromHandle
+  ) {
+    return null;
+  }
+
+  const member = await resolveHostedGroupJoinOfferReactionMember({
+    handle: input.event.reactionFromHandle,
+    prisma: input.tx,
+  });
+  if (
+    !member
+    || member.suspendedAt
+    || !(await readActiveHostedMemberAccess({ memberId: member.id, prisma: input.tx }))
+  ) {
+    return null;
+  }
+
+  return prepareHostedLinqGroupJoinApplicationClaimTx({
+    memberId: member.id,
+    messageLookupKeyReadCandidates: normalizeLookupKeyCandidates(
+      input.event.messageLookupKeyReadCandidates.length > 0
+        ? input.event.messageLookupKeyReadCandidates
+        : [input.event.messageLookupKey],
+    ),
+    threadIdentityLookupKeyReadCandidates:
+      createHostedExternalThreadIdentityLookupKeyReadCandidates({
+        channel: "linq",
+        threadId: input.event.linqChatId,
+      }),
+    tx: input.tx,
+  });
+}
 
 export async function handleHostedGroupJoinOfferReaction(input: {
   event: ParsedHostedLinqProviderEvent;
@@ -140,7 +199,7 @@ function normalizeLookupKeyCandidates(values: readonly (string | null | undefine
 
 async function resolveHostedGroupJoinOfferReactionMember(input: {
   handle: string;
-  prisma: PrismaClient;
+  prisma: PrismaClient | Prisma.TransactionClient;
 }): Promise<{ id: string; suspendedAt: Date | null } | null> {
   const emailAddress = input.handle.includes("@") ? input.handle : null;
   const lookup = emailAddress

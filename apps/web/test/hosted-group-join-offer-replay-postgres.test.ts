@@ -14,8 +14,10 @@ import {
   acceptHostedGroupOfferAffirmation,
 } from "@/src/lib/hosted-groups/group-offer-affirmation";
 import {
+  acceptHostedGroupJoinCodeTx,
   acceptHostedGroupJoinOfferTx,
   leaveHostedGroupMemberTx,
+  prepareHostedLinqGroupJoinApplicationClaimTx,
 } from "@/src/lib/hosted-groups/group-store";
 import {
   createHostedExternalThreadIdentityLookupKey,
@@ -37,6 +39,9 @@ import {
 import {
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
 } from "@/src/lib/hosted-onboarding/shared";
+import {
+  buildCurrentHostedConsentDocumentVersions,
+} from "@/src/lib/legal/consent";
 import {
   revokeHostedVaultSharesTx,
 } from "@/src/lib/hosted-vault-share/share-grant-store";
@@ -65,8 +70,10 @@ type Deferred<T> = {
 
 type JoinReplayFixture = {
   actionClient: PrismaClient;
+  alternateMemberId: string;
   chatId: string;
   groupId: string;
+  joinCode: string;
   joinerMemberId: string;
   leaveClient: PrismaClient;
   messageId: string;
@@ -90,7 +97,9 @@ async function createJoinReplayFixture(): Promise<JoinReplayFixture> {
   const ownerMemberId = `member_join_replay_owner_${fixtureId}`;
   const runtimeMemberId = `member_join_replay_runtime_${fixtureId}`;
   const joinerMemberId = `member_join_replay_joiner_${fixtureId}`;
+  const alternateMemberId = `member_join_replay_alternate_${fixtureId}`;
   const groupId = `group_join_replay_${fixtureId}`;
+  const joinCode = `join_${fixtureId}`;
   const chatId = `chat_join_replay_${fixtureId}`;
   const messageId = `message_join_replay_${fixtureId}`;
   const messageLookupKey = createHostedLinqMessageLookupKey(messageId);
@@ -112,6 +121,7 @@ async function createJoinReplayFixture(): Promise<JoinReplayFixture> {
       { billingStatus: HostedBillingStatus.active, id: ownerMemberId },
       { id: runtimeMemberId },
       { billingStatus: HostedBillingStatus.active, id: joinerMemberId },
+      { billingStatus: HostedBillingStatus.active, id: alternateMemberId },
     ],
   });
   await observer.hostedThreadContainer.create({
@@ -124,7 +134,7 @@ async function createJoinReplayFixture(): Promise<JoinReplayFixture> {
     data: {
       displayName: "Replay proof group",
       id: groupId,
-      joinCode: `join_${fixtureId}`,
+      joinCode,
       joinCodeCreatedAt: new Date("2026-07-26T12:00:00.000Z"),
       joinPolicyJson: {
         requestedVaultShareProjectionScopes: [
@@ -157,7 +167,8 @@ async function createJoinReplayFixture(): Promise<JoinReplayFixture> {
   await observer.hostedConsentGrant.createMany({
     data: [
       {
-        documentVersionsJson: {},
+        documentVersionsJson:
+          buildCurrentHostedConsentDocumentVersions("launch.legal"),
         grantedAt: new Date("2026-07-26T11:00:00.000Z"),
         memberId: joinerMemberId,
         scope: "launch.legal",
@@ -165,7 +176,8 @@ async function createJoinReplayFixture(): Promise<JoinReplayFixture> {
         status: "granted",
       },
       {
-        documentVersionsJson: {},
+        documentVersionsJson:
+          buildCurrentHostedConsentDocumentVersions("launch.health-data"),
         grantedAt: new Date("2026-07-26T11:00:00.000Z"),
         memberId: joinerMemberId,
         scope: "launch.health-data",
@@ -177,8 +189,10 @@ async function createJoinReplayFixture(): Promise<JoinReplayFixture> {
 
   return {
     actionClient,
+    alternateMemberId,
     chatId,
     groupId,
+    joinCode,
     joinerMemberId,
     leaveClient,
     messageId,
@@ -211,6 +225,7 @@ async function cleanupJoinReplayFixture(fixture: JoinReplayFixture): Promise<voi
       id: {
         in: [
           fixture.joinerMemberId,
+          fixture.alternateMemberId,
           fixture.runtimeMemberId,
           fixture.ownerMemberId,
         ],
@@ -260,19 +275,41 @@ function buildReactionEvent(input: {
 
 async function ingestReaction(input: {
   event: ParsedHostedLinqProviderEvent;
+  fixture: JoinReplayFixture;
   prisma: PrismaClient;
 }): Promise<{ duplicate: boolean }> {
-  return input.prisma.$transaction((tx) => ingestHostedLinqProviderEventTx({
-    event: input.event,
-    prisma: tx,
-    receivedAt: new Date("2026-07-26T12:02:00.000Z"),
-  }), HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+  if (!input.event.linqChatId) {
+    throw new Error("Expected complete Linq application context.");
+  }
+  return input.prisma.$transaction(async (tx) => {
+    const groupJoinApplicationClaim =
+      await prepareHostedLinqGroupJoinApplicationClaimTx({
+        memberId: input.fixture.joinerMemberId,
+        messageLookupKeyReadCandidates: input.event.messageLookupKeyReadCandidates,
+        threadIdentityLookupKeyReadCandidates:
+          createHostedExternalThreadIdentityLookupKeyReadCandidates({
+            channel: "linq",
+            threadId: input.event.linqChatId,
+          }),
+        tx,
+      });
+    if (!groupJoinApplicationClaim) {
+      throw new Error("Expected the reaction receipt to bind join authority.");
+    }
+    return ingestHostedLinqProviderEventTx({
+      event: input.event,
+      groupJoinApplicationClaim,
+      prisma: tx,
+      receivedAt: new Date("2026-07-26T12:02:00.000Z"),
+    });
+  }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
 }
 
 async function acceptReaction(input: {
   deferPostCommit?: (run: () => Promise<void>) => void;
   event: ParsedHostedLinqProviderEvent;
   fixture: JoinReplayFixture;
+  memberId?: string;
   prisma: PrismaClient;
 }) {
   if (!input.event.linqChatId || !input.event.payloadHash) {
@@ -288,7 +325,7 @@ async function acceptReaction(input: {
         createHostedLinqChatLookupKeyReadCandidates(input.event.linqChatId),
       payloadHash: input.event.payloadHash,
     },
-    memberId: input.fixture.joinerMemberId,
+    memberId: input.memberId ?? input.fixture.joinerMemberId,
     messageLookupKeyReadCandidates: input.event.messageLookupKeyReadCandidates,
     now: input.event.providerCreatedAt,
     prisma: input.prisma,
@@ -303,6 +340,7 @@ async function acceptReaction(input: {
 async function acceptReactionTx(input: {
   event: ParsedHostedLinqProviderEvent;
   fixture: JoinReplayFixture;
+  memberId?: string;
   tx: Prisma.TransactionClient;
 }) {
   if (!input.event.linqChatId || !input.event.payloadHash) {
@@ -316,7 +354,7 @@ async function acceptReactionTx(input: {
         createHostedLinqChatLookupKeyReadCandidates(input.event.linqChatId),
       payloadHash: input.event.payloadHash,
     },
-    memberId: input.fixture.joinerMemberId,
+    memberId: input.memberId ?? input.fixture.joinerMemberId,
     messageLookupKeyReadCandidates: input.event.messageLookupKeyReadCandidates,
     now: input.event.providerCreatedAt,
     threadIdentityLookupKeyReadCandidates:
@@ -345,7 +383,9 @@ async function readShares(fixture: JoinReplayFixture) {
     orderBy: { projectionKind: "asc" },
     select: {
       id: true,
+      grantedAt: true,
       projectionKind: true,
+      revokedAt: true,
       status: true,
     },
     where: {
@@ -353,6 +393,41 @@ async function readShares(fixture: JoinReplayFixture) {
       grantorMemberId: fixture.joinerMemberId,
     },
   });
+}
+
+async function readApplicationState(
+  fixture: JoinReplayFixture,
+  eventId: string,
+): Promise<string | null | undefined> {
+  return (await fixture.observer.hostedLinqProviderEvent.findUnique({
+    where: { eventId: createHostedLinqProviderEventLookupKey(eventId) },
+    select: { groupJoinApplicationState: true },
+  }))?.groupJoinApplicationState;
+}
+
+async function rollBackReactionAcceptance(input: {
+  event: ParsedHostedLinqProviderEvent;
+  fixture: JoinReplayFixture;
+}): Promise<void> {
+  await expect(input.fixture.actionClient.$transaction(async (tx) => {
+    await acceptReactionTx({ event: input.event, fixture: input.fixture, tx });
+    throw new Error("injected acceptance rollback");
+  }, transactionOptions)).rejects.toThrow("injected acceptance rollback");
+}
+
+async function revokeSelectedSleepShare(input: {
+  fixture: JoinReplayFixture;
+  membershipId: string;
+  now: Date;
+}): Promise<void> {
+  await input.fixture.actionClient.$transaction((tx) => acceptHostedGroupJoinCodeTx({
+    expectedMembershipId: input.membershipId,
+    joinCode: input.fixture.joinCode,
+    memberId: input.fixture.joinerMemberId,
+    now: input.now,
+    selectedVaultShareProjectionScopes: [],
+    tx,
+  }), transactionOptions);
 }
 
 async function readBackendPid(tx: Prisma.TransactionClient): Promise<number> {
@@ -424,16 +499,16 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           fixture,
           reactedAt: "2026-07-26T12:03:00.000Z",
         });
-        await expect(ingestReaction({ event: e1, prisma: fixture.actionClient }))
+        await expect(ingestReaction({ event: e1, fixture, prisma: fixture.actionClient }))
           .resolves.toMatchObject({ duplicate: false });
-        await expect(ingestReaction({ event: e1, prisma: fixture.actionClient }))
+        await expect(ingestReaction({ event: e1, fixture, prisma: fixture.actionClient }))
           .resolves.toMatchObject({ duplicate: true });
         await expect(fixture.observer.hostedLinqProviderEvent.findUnique({
           where: {
             eventId: createHostedLinqProviderEventLookupKey(e1.eventId),
           },
           select: { groupJoinApplicationState: true },
-        })).resolves.toEqual({ groupJoinApplicationState: "pending" });
+        })).resolves.toEqual({ groupJoinApplicationState: "pending:v1" });
 
         const deferredPostCommit: Array<() => Promise<void>> = [];
         await expect(acceptReaction({
@@ -513,7 +588,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           fixture,
           reactedAt: "2026-07-26T12:06:00.000Z",
         });
-        await ingestReaction({ event: e2, prisma: fixture.actionClient });
+        await ingestReaction({ event: e2, fixture, prisma: fixture.actionClient });
         await expect(acceptReaction({
           event: e2,
           fixture,
@@ -591,7 +666,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           fixture,
           reactedAt: "2026-07-26T12:30:00.000Z",
         });
-        await expect(ingestReaction({ event: e1, prisma: fixture.actionClient }))
+        await expect(ingestReaction({ event: e1, fixture, prisma: fixture.actionClient }))
           .resolves.toMatchObject({ duplicate: false });
 
         await expect(fixture.actionClient.$transaction(async (tx) => {
@@ -605,11 +680,11 @@ describe.skipIf(!runPostgresConcurrencyProof)(
             eventId: createHostedLinqProviderEventLookupKey(e1.eventId),
           },
           select: { groupJoinApplicationState: true },
-        })).resolves.toEqual({ groupJoinApplicationState: "pending" });
+        })).resolves.toEqual({ groupJoinApplicationState: "pending:v1" });
         await expect(readMembership(fixture)).resolves.toBeNull();
         await expect(readShares(fixture)).resolves.toEqual([]);
 
-        await expect(ingestReaction({ event: e1, prisma: fixture.actionClient }))
+        await expect(ingestReaction({ event: e1, fixture, prisma: fixture.actionClient }))
           .resolves.toMatchObject({ duplicate: true });
         await expect(acceptReaction({
           event: e1,
@@ -633,6 +708,247 @@ describe.skipIf(!runPostgresConcurrencyProof)(
       }
     });
 
+    it("supersedes pending E1 instead of attaching it to E2's membership", async () => {
+      const fixture = await createJoinReplayFixture();
+      try {
+        const e1 = buildReactionEvent({
+          eventId: `evt_join_replay_pending_e1_${randomUUID()}`,
+          fixture,
+          reactedAt: "2026-07-26T12:40:00.000Z",
+        });
+        await ingestReaction({ event: e1, fixture, prisma: fixture.actionClient });
+        await rollBackReactionAcceptance({ event: e1, fixture });
+
+        const e2 = buildReactionEvent({
+          eventId: `evt_join_replay_pending_e2_${randomUUID()}`,
+          fixture,
+          reactedAt: "2026-07-26T12:41:00.000Z",
+        });
+        await ingestReaction({ event: e2, fixture, prisma: fixture.actionClient });
+        await acceptReaction({ event: e2, fixture, prisma: fixture.actionClient });
+        const e2Membership = await readMembership(fixture);
+        if (!e2Membership) {
+          throw new Error("Expected E2 to create the current membership.");
+        }
+        const sharesBeforeRetry = await readShares(fixture);
+
+        await expect(fixture.actionClient.$transaction((tx) => acceptReactionTx({
+          event: e1,
+          fixture,
+          tx,
+        }), transactionOptions)).resolves.toMatchObject({
+          alreadyMember: false,
+          grantedVaultShareProjectionKinds: [],
+          membershipId: null,
+          revokedVaultShareProjectionKinds: [],
+        });
+
+        await expect(readApplicationState(fixture, e1.eventId))
+          .resolves.toBe("superseded:v1");
+        await expect(readMembership(fixture)).resolves.toEqual(e2Membership);
+        await expect(readShares(fixture)).resolves.toEqual(sharesBeforeRetry);
+      } finally {
+        await cleanupJoinReplayFixture(fixture);
+      }
+    });
+
+    it("supersedes pending E1 after the selected share is revoked", async () => {
+      const fixture = await createJoinReplayFixture();
+      try {
+        const seed = buildReactionEvent({
+          eventId: `evt_join_replay_share_seed_${randomUUID()}`,
+          fixture,
+          reactedAt: "2026-07-26T12:45:00.000Z",
+        });
+        await ingestReaction({ event: seed, fixture, prisma: fixture.actionClient });
+        await acceptReaction({ event: seed, fixture, prisma: fixture.actionClient });
+        const membership = await readMembership(fixture);
+        if (!membership) {
+          throw new Error("Expected the seed event to create membership.");
+        }
+
+        const e1 = buildReactionEvent({
+          eventId: `evt_join_replay_share_e1_${randomUUID()}`,
+          fixture,
+          reactedAt: "2026-07-26T12:46:00.000Z",
+        });
+        await ingestReaction({ event: e1, fixture, prisma: fixture.actionClient });
+        await rollBackReactionAcceptance({ event: e1, fixture });
+        await revokeSelectedSleepShare({
+          fixture,
+          membershipId: membership.id,
+          now: new Date("2026-07-26T12:47:00.000Z"),
+        });
+        const sharesAfterRevocation = await readShares(fixture);
+        expect(sharesAfterRevocation.find(
+          (share) => share.projectionKind === "sleep-times.v0",
+        )?.status).toBe("revoked");
+
+        await expect(fixture.actionClient.$transaction((tx) => acceptReactionTx({
+          event: e1,
+          fixture,
+          tx,
+        }), transactionOptions)).resolves.toMatchObject({
+          grantedVaultShareProjectionKinds: [],
+          membershipId: null,
+          revokedVaultShareProjectionKinds: [],
+        });
+
+        await expect(readApplicationState(fixture, e1.eventId))
+          .resolves.toBe("superseded:v1");
+        await expect(readMembership(fixture)).resolves.toEqual(membership);
+        await expect(readShares(fixture)).resolves.toEqual(sharesAfterRevocation);
+      } finally {
+        await cleanupJoinReplayFixture(fixture);
+      }
+    });
+
+    it("supersedes pending E1 after leave while a genuinely new event may rejoin", async () => {
+      const fixture = await createJoinReplayFixture();
+      try {
+        const seed = buildReactionEvent({
+          eventId: `evt_join_replay_leave_seed_${randomUUID()}`,
+          fixture,
+          reactedAt: "2026-07-26T12:50:00.000Z",
+        });
+        await ingestReaction({ event: seed, fixture, prisma: fixture.actionClient });
+        await acceptReaction({ event: seed, fixture, prisma: fixture.actionClient });
+        const firstMembership = await readMembership(fixture);
+        if (!firstMembership) {
+          throw new Error("Expected the seed event to create membership.");
+        }
+
+        const e1 = buildReactionEvent({
+          eventId: `evt_join_replay_leave_e1_${randomUUID()}`,
+          fixture,
+          reactedAt: "2026-07-26T12:51:00.000Z",
+        });
+        await ingestReaction({ event: e1, fixture, prisma: fixture.actionClient });
+        await rollBackReactionAcceptance({ event: e1, fixture });
+        await fixture.actionClient.$transaction((tx) => leaveHostedGroupMemberTx({
+          memberId: fixture.joinerMemberId,
+          membershipId: firstMembership.id,
+          now: new Date("2026-07-26T12:52:00.000Z"),
+          tx,
+        }), transactionOptions);
+        const sharesAfterLeave = await readShares(fixture);
+        expect(sharesAfterLeave.every((share) => share.status === "revoked")).toBe(true);
+
+        await expect(fixture.actionClient.$transaction((tx) => acceptReactionTx({
+          event: e1,
+          fixture,
+          tx,
+        }), transactionOptions)).resolves.toMatchObject({
+          grantedVaultShareProjectionKinds: [],
+          membershipId: null,
+          revokedVaultShareProjectionKinds: [],
+        });
+        await expect(readApplicationState(fixture, e1.eventId))
+          .resolves.toBe("superseded:v1");
+        await expect(readMembership(fixture)).resolves.toBeNull();
+        await expect(readShares(fixture)).resolves.toEqual(sharesAfterLeave);
+
+        const e2 = buildReactionEvent({
+          eventId: `evt_join_replay_leave_e2_${randomUUID()}`,
+          fixture,
+          reactedAt: "2026-07-26T12:53:00.000Z",
+        });
+        await ingestReaction({ event: e2, fixture, prisma: fixture.actionClient });
+        await acceptReaction({ event: e2, fixture, prisma: fixture.actionClient });
+        const secondMembership = await readMembership(fixture);
+        expect(secondMembership?.id).not.toBe(firstMembership.id);
+        expect((await readShares(fixture)).every((share) => share.status === "granted"))
+          .toBe(true);
+      } finally {
+        await cleanupJoinReplayFixture(fixture);
+      }
+    });
+
+    it("supersedes pending E1 when retry resolves to a different member", async () => {
+      const fixture = await createJoinReplayFixture();
+      try {
+        const e1 = buildReactionEvent({
+          eventId: `evt_join_replay_member_e1_${randomUUID()}`,
+          fixture,
+          reactedAt: "2026-07-26T12:55:00.000Z",
+        });
+        await ingestReaction({ event: e1, fixture, prisma: fixture.actionClient });
+        await rollBackReactionAcceptance({ event: e1, fixture });
+
+        await expect(fixture.actionClient.$transaction((tx) => acceptReactionTx({
+          event: e1,
+          fixture,
+          memberId: fixture.alternateMemberId,
+          tx,
+        }), transactionOptions)).resolves.toMatchObject({
+          grantedVaultShareProjectionKinds: [],
+          membershipId: null,
+          revokedVaultShareProjectionKinds: [],
+        });
+
+        await expect(readApplicationState(fixture, e1.eventId))
+          .resolves.toBe("superseded:v1");
+        await expect(readMembership(fixture)).resolves.toBeNull();
+        await expect(fixture.observer.hostedGroupMember.findUnique({
+          where: {
+            groupId_memberId: {
+              groupId: fixture.groupId,
+              memberId: fixture.alternateMemberId,
+            },
+          },
+          select: { id: true },
+        })).resolves.toBeNull();
+        await expect(readShares(fixture)).resolves.toEqual([]);
+      } finally {
+        await cleanupJoinReplayFixture(fixture);
+      }
+    });
+
+    it("does not let a duplicate bind an old bare-pending receipt", async () => {
+      const fixture = await createJoinReplayFixture();
+      try {
+        const e1 = buildReactionEvent({
+          eventId: `evt_join_replay_legacy_pending_${randomUUID()}`,
+          fixture,
+          reactedAt: "2026-07-26T12:58:00.000Z",
+        });
+        await fixture.observer.hostedLinqProviderEvent.create({
+          data: {
+            eventId: createHostedLinqProviderEventLookupKey(e1.eventId),
+            eventType: "reaction.added",
+            groupJoinApplicationState: "pending",
+            linqChatLookupKey: e1.linqChatLookupKey,
+            messageLookupKey: e1.messageLookupKey,
+            payloadHash: e1.payloadHash,
+            providerCreatedAt: e1.providerCreatedAt,
+            receivedAt: new Date("2026-07-26T12:58:01.000Z"),
+          },
+        });
+
+        await expect(ingestReaction({
+          event: e1,
+          fixture,
+          prisma: fixture.actionClient,
+        })).resolves.toMatchObject({ duplicate: true });
+        await expect(fixture.actionClient.$transaction((tx) => acceptReactionTx({
+          event: e1,
+          fixture,
+          tx,
+        }), transactionOptions)).resolves.toMatchObject({
+          grantedVaultShareProjectionKinds: [],
+          membershipId: null,
+          revokedVaultShareProjectionKinds: [],
+        });
+
+        await expect(readApplicationState(fixture, e1.eventId))
+          .resolves.toBe("superseded:v1");
+        await expect(readMembership(fixture)).resolves.toBeNull();
+        await expect(readShares(fixture)).resolves.toEqual([]);
+      } finally {
+        await cleanupJoinReplayFixture(fixture);
+      }
+    });
+
     it("keeps an applied E1 replay that waits behind leave left and revoked", async () => {
       const fixture = await createJoinReplayFixture();
       let leave: Promise<unknown> | null = null;
@@ -644,7 +960,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           fixture,
           reactedAt: "2026-07-26T13:00:00.000Z",
         });
-        await ingestReaction({ event: e1, prisma: fixture.actionClient });
+        await ingestReaction({ event: e1, fixture, prisma: fixture.actionClient });
         await acceptReaction({ event: e1, fixture, prisma: fixture.actionClient });
         const membership = await readMembership(fixture);
         if (!membership) {

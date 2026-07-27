@@ -1666,6 +1666,7 @@ model HostedLinqProviderEvent {
   payloadSanitizedJson Json?    @map("payload_sanitized_json")
   payloadHash          String?  @map("payload_hash")
   groupJoinApplicationState String?  @map("group_join_application_state")
+  groupJoinApplicationClaimJson Json? @map("group_join_application_claim_json")
   createdAt            DateTime @default(now()) @map("created_at")
   line                 HostedLinqLine? @relation(fields: [phoneNumberLookupKey], references: [phoneNumberLookupKey], onDelete: SetNull)
   alerts               HostedLinqAlert[]

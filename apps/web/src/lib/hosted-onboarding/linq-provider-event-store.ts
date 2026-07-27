@@ -24,23 +24,42 @@ import { sha256Hex } from "../primitives";
 
 type HostedLinqProviderEventClient = PrismaClient | Prisma.TransactionClient;
 
-const HOSTED_LINQ_GROUP_JOIN_APPLICATION_PENDING = "pending";
+const HOSTED_LINQ_GROUP_JOIN_APPLICATION_LEGACY_PENDING = "pending";
+const HOSTED_LINQ_GROUP_JOIN_APPLICATION_PENDING = "pending:v1";
+const HOSTED_LINQ_GROUP_JOIN_APPLICATION_SUPERSEDED = "superseded:v1";
 const HOSTED_LINQ_GROUP_JOIN_APPLICATION_APPLIED_PREFIX = "applied:";
+export const HOSTED_LINQ_GROUP_JOIN_APPLICATION_CLAIM_SCHEMA =
+  "murph.hosted-linq.group-join-application-claim.v1";
+
+export interface HostedLinqGroupJoinApplicationClaim {
+  groupId: string;
+  groupRuntimeMemberId: string;
+  memberId: string;
+  membershipId: string | null;
+  schema: typeof HOSTED_LINQ_GROUP_JOIN_APPLICATION_CLAIM_SCHEMA;
+  selectedShareAuthorityHash: string;
+}
 
 export type HostedLinqGroupJoinApplicationTxResult =
   | {
       eventLookupKey: string;
-      kind: typeof HOSTED_LINQ_GROUP_JOIN_APPLICATION_PENDING;
+      kind: "pending";
+      claim: HostedLinqGroupJoinApplicationClaim;
     }
   | {
       eventLookupKey: string;
       kind: "applied";
       membershipId: string;
     }
+  | {
+      eventLookupKey: string;
+      kind: "superseded";
+    }
   | { kind: "unavailable" };
 
 export async function ingestHostedLinqProviderEventTx(input: {
   event: ParsedHostedLinqProviderEvent;
+  groupJoinApplicationClaim?: HostedLinqGroupJoinApplicationClaim | null;
   prisma: HostedLinqProviderEventClient;
   receivedAt?: Date;
 }): Promise<{
@@ -52,6 +71,11 @@ export async function ingestHostedLinqProviderEventTx(input: {
 }> {
   const receivedAt = input.receivedAt ?? new Date();
   const eventLookupKey = createHostedLinqProviderEventLookupKey(input.event.eventId);
+  const groupJoinApplicationClaim =
+    isHostedLinqGroupJoinApplicationCandidate(input.event)
+    && input.groupJoinApplicationClaim
+      ? input.groupJoinApplicationClaim
+      : null;
   const lineLookupKey = await ensureHostedLinqLineForProviderEventTx({
     event: input.event,
     prisma: input.prisma,
@@ -67,20 +91,20 @@ export async function ingestHostedLinqProviderEventTx(input: {
       extractionVersion: 1,
       failureCode: input.event.failureCode,
       failureReason: input.event.failureReason,
-      // No default/backfill is intentional. Only new reaction rows with the
-      // complete immutable context required by the join transaction are
-      // pending. Rows written by an older deployment stay null and therefore
-      // cannot be mistaken for unconsumed affirmations during rollout.
-      groupJoinApplicationState: isHostedLinqAffirmativeReaction({
-        customEmoji: input.event.reactionCustomEmoji,
-        eventType: input.event.eventType,
-        reactionType: input.event.reactionType,
-      })
-        && input.event.linqChatLookupKey
-        && input.event.messageLookupKey
-        && input.event.payloadHash
-        ? HOSTED_LINQ_GROUP_JOIN_APPLICATION_PENDING
-        : null,
+      // No default/backfill is intentional. A reaction becomes pending only
+      // when its exact member, membership generation, and selected-share
+      // authority were captured in this same receipt transaction. Rows written
+      // by an older deployment stay null (or use the legacy bare-pending
+      // state) and therefore fail closed during rollout instead of binding on
+      // retry. The versioned state also makes older Web instances fail closed
+      // on receipts written by this code: they recognize only exact "pending".
+      ...(groupJoinApplicationClaim
+        ? {
+            groupJoinApplicationClaimJson:
+              toHostedLinqGroupJoinApplicationClaimJson(groupJoinApplicationClaim),
+            groupJoinApplicationState: HOSTED_LINQ_GROUP_JOIN_APPLICATION_PENDING,
+          }
+        : { groupJoinApplicationState: null }),
       linqChatLookupKey: input.event.linqChatLookupKey,
       messageIdSuffix: input.event.messageIdSuffix,
       messageLookupKey: input.event.messageLookupKey,
@@ -167,9 +191,9 @@ export async function ingestHostedLinqProviderEventTx(input: {
 
 /**
  * Locks and validates the one durable owner for applying a Linq join
- * affirmation. A null application state is intentionally not pending: it
- * identifies provider-event rows written before this owner existed (or by an
- * older deployment during rollout), and therefore fails closed.
+ * affirmation. A null application state or legacy bare "pending" is
+ * intentionally not retryable: it identifies a provider-event row that never
+ * bound the event to exact authority, and therefore fails closed.
  */
 export async function lockHostedLinqGroupJoinApplicationTx(input: {
   eventId: string;
@@ -204,6 +228,7 @@ export async function lockHostedLinqGroupJoinApplicationTx(input: {
     where: { eventId: eventLookupKey },
     select: {
       eventType: true,
+      groupJoinApplicationClaimJson: true,
       groupJoinApplicationState: true,
       linqChatLookupKey: true,
       messageLookupKey: true,
@@ -222,9 +247,44 @@ export async function lockHostedLinqGroupJoinApplicationTx(input: {
     return { kind: "unavailable" };
   }
   if (event.groupJoinApplicationState === HOSTED_LINQ_GROUP_JOIN_APPLICATION_PENDING) {
+    const claim = readHostedLinqGroupJoinApplicationClaim(
+      event.groupJoinApplicationClaimJson,
+    );
+    if (!claim) {
+      await markHostedLinqGroupJoinApplicationSupersededTx({
+        eventLookupKey,
+        tx: input.tx,
+      });
+      return {
+        eventLookupKey,
+        kind: "superseded",
+      };
+    }
+    return {
+      claim,
+      eventLookupKey,
+      kind: "pending",
+    };
+  }
+  if (
+    event.groupJoinApplicationState
+    === HOSTED_LINQ_GROUP_JOIN_APPLICATION_LEGACY_PENDING
+  ) {
+    await transitionHostedLinqGroupJoinApplicationStateTx({
+      eventLookupKey,
+      fromState: HOSTED_LINQ_GROUP_JOIN_APPLICATION_LEGACY_PENDING,
+      toState: HOSTED_LINQ_GROUP_JOIN_APPLICATION_SUPERSEDED,
+      tx: input.tx,
+    });
     return {
       eventLookupKey,
-      kind: HOSTED_LINQ_GROUP_JOIN_APPLICATION_PENDING,
+      kind: "superseded",
+    };
+  }
+  if (event.groupJoinApplicationState === HOSTED_LINQ_GROUP_JOIN_APPLICATION_SUPERSEDED) {
+    return {
+      eventLookupKey,
+      kind: "superseded",
     };
   }
   const appliedMembershipId = readHostedLinqGroupJoinAppliedMembershipId(
@@ -240,6 +300,18 @@ export async function lockHostedLinqGroupJoinApplicationTx(input: {
   return { kind: "unavailable" };
 }
 
+export async function markHostedLinqGroupJoinApplicationSupersededTx(input: {
+  eventLookupKey: string;
+  tx: Prisma.TransactionClient;
+}): Promise<void> {
+  await transitionHostedLinqGroupJoinApplicationStateTx({
+    eventLookupKey: input.eventLookupKey,
+    fromState: HOSTED_LINQ_GROUP_JOIN_APPLICATION_PENDING,
+    toState: HOSTED_LINQ_GROUP_JOIN_APPLICATION_SUPERSEDED,
+    tx: input.tx,
+  });
+}
+
 export async function markHostedLinqGroupJoinApplicationAppliedTx(input: {
   eventLookupKey: string;
   membershipId: string;
@@ -249,14 +321,27 @@ export async function markHostedLinqGroupJoinApplicationAppliedTx(input: {
   if (!membershipId) {
     throw new Error("Hosted Linq group join application requires a membership id.");
   }
+  await transitionHostedLinqGroupJoinApplicationStateTx({
+    eventLookupKey: input.eventLookupKey,
+    fromState: HOSTED_LINQ_GROUP_JOIN_APPLICATION_PENDING,
+    toState: `${HOSTED_LINQ_GROUP_JOIN_APPLICATION_APPLIED_PREFIX}${membershipId}`,
+    tx: input.tx,
+  });
+}
+
+async function transitionHostedLinqGroupJoinApplicationStateTx(input: {
+  eventLookupKey: string;
+  fromState: string;
+  toState: string;
+  tx: Prisma.TransactionClient;
+}): Promise<void> {
   const updated = await input.tx.hostedLinqProviderEvent.updateMany({
     where: {
       eventId: input.eventLookupKey,
-      groupJoinApplicationState: HOSTED_LINQ_GROUP_JOIN_APPLICATION_PENDING,
+      groupJoinApplicationState: input.fromState,
     },
     data: {
-      groupJoinApplicationState:
-        `${HOSTED_LINQ_GROUP_JOIN_APPLICATION_APPLIED_PREFIX}${membershipId}`,
+      groupJoinApplicationState: input.toState,
     },
   });
   if (updated.count !== 1) {
@@ -274,6 +359,87 @@ function readHostedLinqGroupJoinAppliedMembershipId(
     HOSTED_LINQ_GROUP_JOIN_APPLICATION_APPLIED_PREFIX.length,
   );
   return membershipId.length > 0 ? membershipId : null;
+}
+
+export function hostedLinqGroupJoinApplicationClaimsEqual(
+  left: HostedLinqGroupJoinApplicationClaim,
+  right: HostedLinqGroupJoinApplicationClaim,
+): boolean {
+  return left.schema === right.schema
+    && left.groupId === right.groupId
+    && left.groupRuntimeMemberId === right.groupRuntimeMemberId
+    && left.memberId === right.memberId
+    && left.membershipId === right.membershipId
+    && left.selectedShareAuthorityHash === right.selectedShareAuthorityHash;
+}
+
+function isHostedLinqGroupJoinApplicationCandidate(
+  event: ParsedHostedLinqProviderEvent,
+): boolean {
+  return isHostedLinqAffirmativeReaction({
+    customEmoji: event.reactionCustomEmoji,
+    eventType: event.eventType,
+    reactionType: event.reactionType,
+  })
+    && Boolean(event.linqChatLookupKey)
+    && Boolean(event.messageLookupKey)
+    && Boolean(event.payloadHash);
+}
+
+function toHostedLinqGroupJoinApplicationClaimJson(
+  claim: HostedLinqGroupJoinApplicationClaim,
+): Prisma.InputJsonValue {
+  return JSON.parse(JSON.stringify(claim)) as Prisma.InputJsonValue;
+}
+
+function readHostedLinqGroupJoinApplicationClaim(
+  value: Prisma.JsonValue | null,
+): HostedLinqGroupJoinApplicationClaim | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  const groupId = readNonEmptyString(value.groupId);
+  const groupRuntimeMemberId = readNonEmptyString(value.groupRuntimeMemberId);
+  const memberId = readNonEmptyString(value.memberId);
+  const membershipId = value.membershipId === null
+    ? null
+    : readNonEmptyString(value.membershipId);
+  const selectedShareAuthorityHash = readSha256Hex(value.selectedShareAuthorityHash);
+  if (
+    value.schema !== HOSTED_LINQ_GROUP_JOIN_APPLICATION_CLAIM_SCHEMA
+    || !groupId
+    || !groupRuntimeMemberId
+    || !memberId
+    || (value.membershipId !== null && !membershipId)
+    || !selectedShareAuthorityHash
+  ) {
+    return null;
+  }
+
+  return {
+    groupId,
+    groupRuntimeMemberId,
+    memberId,
+    membershipId,
+    schema: HOSTED_LINQ_GROUP_JOIN_APPLICATION_CLAIM_SCHEMA,
+    selectedShareAuthorityHash,
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function readNonEmptyString(value: unknown): string | null {
+  return typeof value === "string" && value.length > 0 && value.trim() === value
+    ? value
+    : null;
+}
+
+function readSha256Hex(value: unknown): string | null {
+  return typeof value === "string" && /^[a-f0-9]{64}$/u.test(value)
+    ? value
+    : null;
 }
 
 function normalizeHostedLinqLookupKeyCandidates(

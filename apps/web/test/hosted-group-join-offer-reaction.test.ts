@@ -19,6 +19,7 @@ const mocks = vi.hoisted(() => ({
   enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort: vi.fn(),
   lookupHostedMemberIdentityByPhoneNumber: vi.fn(),
   materializePendingHostedGroupJoinConfirmationsBestEffort: vi.fn(),
+  prepareHostedLinqGroupJoinApplicationClaimTx: vi.fn(),
   readActiveHostedMemberAccess: vi.fn(),
   resolveHostedPublicBaseUrl: vi.fn(),
   signalHostedGroupJoinConfirmationRuntimeBestEffort: vi.fn(),
@@ -32,6 +33,8 @@ vi.mock("@/src/lib/hosted-groups/group-newsletter", () => ({
 
 vi.mock("@/src/lib/hosted-groups/group-store", () => ({
   acceptHostedGroupJoinOfferTx: mocks.acceptHostedGroupJoinOfferTx,
+  prepareHostedLinqGroupJoinApplicationClaimTx:
+    mocks.prepareHostedLinqGroupJoinApplicationClaimTx,
 }));
 
 vi.mock("@/src/lib/hosted-groups/group-disclosure-store", () => ({
@@ -64,6 +67,7 @@ vi.mock("@/src/lib/hosted-web/public-url", () => ({
 
 import {
   handleHostedGroupJoinOfferReaction,
+  prepareHostedGroupJoinOfferReactionApplicationClaimTx,
 } from "@/src/lib/hosted-groups/join-offer-reaction";
 import {
   parseHostedLinqProviderEvent,
@@ -110,11 +114,57 @@ describe("handleHostedGroupJoinOfferReaction", () => {
     mocks.signalHostedGroupJoinConfirmationRuntimeBestEffort.mockResolvedValue(undefined);
     mocks.signalHostedRuntimeMaintenanceRuntime.mockResolvedValue(undefined);
     mocks.materializePendingHostedGroupJoinConfirmationsBestEffort.mockResolvedValue(undefined);
+    mocks.prepareHostedLinqGroupJoinApplicationClaimTx.mockResolvedValue({
+      groupId: "group_1",
+      groupRuntimeMemberId: "member_group_runtime",
+      memberId: "member_reactor",
+      membershipId: null,
+      schema: "murph.hosted-linq.group-join-application-claim.v1",
+      selectedShareAuthorityHash: "a".repeat(64),
+    });
   });
 
   afterEach(() => {
     restoreKeyring?.();
     restoreKeyring = null;
+  });
+
+  it("binds the receipt claim to the resolved member before application", async () => {
+    const event = parseReactionEvent({ reactionType: "love" });
+    const tx = createPrismaStub();
+
+    await expect(prepareHostedGroupJoinOfferReactionApplicationClaimTx({
+      event,
+      tx,
+    })).resolves.toMatchObject({
+      memberId: "member_reactor",
+      membershipId: null,
+    });
+
+    expect(mocks.prepareHostedLinqGroupJoinApplicationClaimTx).toHaveBeenCalledWith({
+      memberId: "member_reactor",
+      messageLookupKeyReadCandidates: createHostedLinqMessageLookupKeyReadCandidates(
+        "msg_offer_123",
+      ),
+      threadIdentityLookupKeyReadCandidates:
+        createHostedExternalThreadIdentityLookupKeyReadCandidates({
+          channel: "linq",
+          threadId: "chat_group_1",
+        }),
+      tx,
+    });
+  });
+
+  it("does not create a retryable claim for an unsupported reaction", async () => {
+    const tx = createPrismaStub();
+
+    await expect(prepareHostedGroupJoinOfferReactionApplicationClaimTx({
+      event: parseReactionEvent({ customEmoji: "😂", reactionType: "custom" }),
+      tx,
+    })).resolves.toBeNull();
+
+    expect(mocks.lookupHostedMemberIdentityByPhoneNumber).not.toHaveBeenCalled();
+    expect(mocks.prepareHostedLinqGroupJoinApplicationClaimTx).not.toHaveBeenCalled();
   });
 
   it("accepts a live liked offer and wakes its private join confirmation", async () => {
@@ -214,7 +264,9 @@ describe("handleHostedGroupJoinOfferReaction", () => {
       .not.toHaveBeenCalled();
   });
 
-  it("does not broaden confirmation recovery after the applied membership is gone", async () => {
+  it("runs no post-commit effects for a superseded event or missing applied membership", async () => {
+    // Both terminal supersession and an applied replay after leave return this
+    // no-mutation result shape from the durable provider-event owner.
     mocks.acceptHostedGroupJoinOfferTx.mockResolvedValueOnce({
       alreadyMember: false,
       grantedVaultShareProjectionKinds: [],

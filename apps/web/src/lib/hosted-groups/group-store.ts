@@ -48,8 +48,12 @@ import { assertHostedMemberNotSuspended } from "../hosted-onboarding/entitlement
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import { activeHostedMemberAccessWhere } from "../hosted-onboarding/member-access";
 import {
+  hostedLinqGroupJoinApplicationClaimsEqual,
+  HOSTED_LINQ_GROUP_JOIN_APPLICATION_CLAIM_SCHEMA,
   lockHostedLinqGroupJoinApplicationTx,
   markHostedLinqGroupJoinApplicationAppliedTx,
+  markHostedLinqGroupJoinApplicationSupersededTx,
+  type HostedLinqGroupJoinApplicationClaim,
 } from "../hosted-onboarding/linq-provider-event-store";
 import {
   generateHostedGroupId,
@@ -59,7 +63,7 @@ import {
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
 } from "../hosted-onboarding/shared";
 import { toHostedOnboardingLogIdSuffix } from "../hosted-onboarding/logging";
-import { normalizeNullableString } from "../primitives";
+import { normalizeNullableString, sha256Hex } from "../primitives";
 import { getPrisma } from "../prisma";
 import {
   grantHostedVaultShareTx,
@@ -1398,6 +1402,93 @@ export async function prepareHostedGroupJoinOfferPostTx(input: {
   };
 }
 
+/**
+ * Captures the exact authority an affirmative Linq event may apply. The caller
+ * persists this claim on the provider-event receipt in the same transaction,
+ * so a committed pending receipt never acquires a member, membership
+ * generation, or grant authority from a later retry.
+ */
+export async function prepareHostedLinqGroupJoinApplicationClaimTx(input: {
+  memberId: string;
+  messageLookupKeyReadCandidates: readonly string[];
+  threadIdentityLookupKeyReadCandidates: readonly string[];
+  tx: Prisma.TransactionClient;
+}): Promise<HostedLinqGroupJoinApplicationClaim | null> {
+  const messageLookupKeyReadCandidates = normalizeHostedGroupLookupKeyCandidates(
+    input.messageLookupKeyReadCandidates,
+  );
+  const threadIdentityLookupKeyReadCandidates = normalizeHostedGroupLookupKeyCandidates(
+    input.threadIdentityLookupKeyReadCandidates,
+  );
+  if (
+    messageLookupKeyReadCandidates.length === 0
+    || threadIdentityLookupKeyReadCandidates.length === 0
+  ) {
+    return null;
+  }
+
+  const offerLookup = await input.tx.hostedGroupJoinOffer.findFirst({
+    where: {
+      messageLookupKey: { in: messageLookupKeyReadCandidates },
+    },
+    select: { groupId: true },
+  });
+  if (!offerLookup) {
+    return null;
+  }
+
+  await lockHostedGroupRow(input.tx, offerLookup.groupId);
+  const offer = await input.tx.hostedGroupJoinOffer.findFirst({
+    where: {
+      messageLookupKey: { in: messageLookupKeyReadCandidates },
+    },
+    select: {
+      projectionKindsJson: true,
+      revokedAt: true,
+      group: {
+        select: {
+          id: true,
+          joinCode: true,
+          runtimeMemberId: true,
+        },
+      },
+    },
+  });
+  const group = offer?.group ?? null;
+  if (
+    !offer
+    || offer.revokedAt
+    || !group?.joinCode
+    || !group.runtimeMemberId
+  ) {
+    return null;
+  }
+
+  const route = await input.tx.hostedThreadRoute.findFirst({
+    where: {
+      channel: "linq",
+      containerMemberId: group.runtimeMemberId,
+      threadIdentityLookupKey: { in: threadIdentityLookupKeyReadCandidates },
+    },
+    select: { containerMemberId: true },
+  });
+  if (!route) {
+    return null;
+  }
+
+  const selectedVaultShareProjectionScopes = normalizeHostedVaultShareProjectionScopes(
+    offer.projectionKindsJson,
+  );
+
+  return readHostedLinqGroupJoinApplicationClaimTx({
+    groupId: group.id,
+    groupRuntimeMemberId: group.runtimeMemberId,
+    memberId: input.memberId,
+    selectedVaultShareProjectionScopes,
+    tx: input.tx,
+  });
+}
+
 export async function acceptHostedGroupJoinOfferTx(input: {
   channel: HostedGroupOfferChannel;
   confirmationPublicBaseUrl?: string | null;
@@ -1483,6 +1574,7 @@ export async function acceptHostedGroupJoinOfferTx(input: {
       retryable: false,
     });
   }
+  const joinCode = group.joinCode;
   let linqApplication: Awaited<
     ReturnType<typeof lockHostedLinqGroupJoinApplicationTx>
   > | null = null;
@@ -1513,6 +1605,20 @@ export async function acceptHostedGroupJoinOfferTx(input: {
   const selectedVaultShareProjectionKinds = [
     ...new Set(selectedVaultShareProjectionScopes.map((scope) => scope.projectionKind)),
   ];
+  const noMutationResult = (state: {
+    alreadyMember: boolean;
+    membershipId: string | null;
+  }): HostedGroupJoinOfferAcceptanceTxResult =>
+    buildHostedGroupJoinOfferNoMutationResult({
+      alreadyMember: state.alreadyMember,
+      groupId: group.id,
+      joinCode,
+      membershipId: state.membershipId,
+      messageLookupKey: offer.messageLookupKey,
+      selectedVaultShareProjectionKinds,
+      selectedVaultShareProjectionScopes,
+    });
+
   if (linqApplication?.kind === "applied") {
     // The event already committed this join. Serialize with leave, then recover
     // only the exact membership identity that event accepted for post-commit
@@ -1532,20 +1638,15 @@ export async function acceptHostedGroupJoinOfferTx(input: {
     const appliedMembership = existingMembership?.id === linqApplication.membershipId
       ? existingMembership
       : null;
-    return {
+    return noMutationResult({
       alreadyMember: appliedMembership !== null,
-      grantedVaultShareProjectionKinds: [],
-      grantedVaultShareProjectionScopes: [],
-      groupId: group.id,
-      joinCode: group.joinCode,
-      messageLookupKey: offer.messageLookupKey,
       membershipId: appliedMembership?.id ?? null,
-      revokedVaultShareProjectionKinds: [],
-      revokedVaultShareProjectionScopes: [],
-      selectedVaultShareProjectionKinds,
-      selectedVaultShareProjectionScopes,
-    };
+    });
   }
+  if (linqApplication?.kind === "superseded") {
+    return noMutationResult({ alreadyMember: false, membershipId: null });
+  }
+
   if (offer.revokedAt) {
     throw hostedOnboardingError({
       code: "HOSTED_GROUP_JOIN_OFFER_REVOKED",
@@ -1554,6 +1655,51 @@ export async function acceptHostedGroupJoinOfferTx(input: {
       retryable: false,
     });
   }
+
+  if (linqApplication?.kind === "pending") {
+    const route = group.runtimeMemberId
+      ? await input.tx.hostedThreadRoute.findFirst({
+          where: {
+            channel: input.channel,
+            containerMemberId: group.runtimeMemberId,
+            threadIdentityLookupKey: {
+              in: threadIdentityLookupKeyReadCandidates,
+            },
+          },
+          select: { containerMemberId: true },
+        })
+      : null;
+    const claimStillMatchesStaticAuthority =
+      !offer.revokedAt
+      && group.runtimeMemberId !== null
+      && route !== null
+      && linqApplication.claim.groupId === group.id
+      && linqApplication.claim.groupRuntimeMemberId === group.runtimeMemberId
+      && linqApplication.claim.memberId === input.memberId;
+    const currentClaim = claimStillMatchesStaticAuthority && group.runtimeMemberId
+      ? await readHostedLinqGroupJoinApplicationClaimTx({
+          groupId: group.id,
+          groupRuntimeMemberId: group.runtimeMemberId,
+          memberId: input.memberId,
+          selectedVaultShareProjectionScopes,
+          tx: input.tx,
+        })
+      : null;
+    if (
+      !currentClaim
+      || !hostedLinqGroupJoinApplicationClaimsEqual(
+        linqApplication.claim,
+        currentClaim,
+      )
+    ) {
+      await markHostedLinqGroupJoinApplicationSupersededTx({
+        eventLookupKey: linqApplication.eventLookupKey,
+        tx: input.tx,
+      });
+      return noMutationResult({ alreadyMember: false, membershipId: null });
+    }
+  }
+
   if (!group.runtimeMemberId) {
     throw hostedOnboardingError({
       code: "HOSTED_GROUP_NOT_ACTIVE",
@@ -1583,6 +1729,9 @@ export async function acceptHostedGroupJoinOfferTx(input: {
   const accepted = await acceptHostedGroupJoinTx({
     additiveOnly: true,
     confirmationPublicBaseUrl: input.confirmationPublicBaseUrl ?? null,
+    ...(linqApplication?.kind === "pending"
+      ? { expectedMembershipId: linqApplication.claim.membershipId }
+      : {}),
     groupId: group.id,
     joinOrigin: "group_chat_reaction",
     memberId: input.memberId,
@@ -1605,6 +1754,127 @@ export async function acceptHostedGroupJoinOfferTx(input: {
     messageLookupKey: offer.messageLookupKey,
     selectedVaultShareProjectionKinds,
     selectedVaultShareProjectionScopes,
+  };
+}
+
+async function readHostedLinqGroupJoinApplicationClaimTx(input: {
+  groupId: string;
+  groupRuntimeMemberId: string;
+  memberId: string;
+  selectedVaultShareProjectionScopes: readonly HostedVaultShareProjectionScope[];
+  tx: Prisma.TransactionClient;
+}): Promise<HostedLinqGroupJoinApplicationClaim | null> {
+  await lockHostedMemberRow(input.tx, input.memberId);
+  const member = await input.tx.hostedMember.findUnique({
+    where: { id: input.memberId },
+    select: { id: true },
+  });
+  if (!member) {
+    return null;
+  }
+
+  const membership = await input.tx.hostedGroupMember.findUnique({
+    where: {
+      groupId_memberId: {
+        groupId: input.groupId,
+        memberId: input.memberId,
+      },
+    },
+    select: { id: true },
+  });
+  const projectionScopeKeys = normalizeHostedVaultShareProjectionScopes(
+    input.selectedVaultShareProjectionScopes,
+  ).map(buildHostedVaultShareProjectionScopeKey);
+  const shareRows = projectionScopeKeys.length > 0
+    ? await input.tx.hostedVaultShare.findMany({
+        where: {
+          destinationMemberId: input.groupRuntimeMemberId,
+          grantorMemberId: input.memberId,
+          projectionScopeKey: { in: projectionScopeKeys },
+        },
+        select: {
+          grantedAt: true,
+          id: true,
+          projectionScopeKey: true,
+          revokedAt: true,
+          status: true,
+        },
+      })
+    : [];
+
+  return {
+    groupId: input.groupId,
+    groupRuntimeMemberId: input.groupRuntimeMemberId,
+    memberId: input.memberId,
+    membershipId: membership?.id ?? null,
+    schema: HOSTED_LINQ_GROUP_JOIN_APPLICATION_CLAIM_SCHEMA,
+    selectedShareAuthorityHash:
+      createHostedLinqGroupJoinSelectedShareAuthorityHash({
+        destinationMemberId: input.groupRuntimeMemberId,
+        projectionScopeKeys,
+        shares: shareRows,
+      }),
+  };
+}
+
+function createHostedLinqGroupJoinSelectedShareAuthorityHash(input: {
+  destinationMemberId: string;
+  projectionScopeKeys: readonly string[];
+  shares: readonly {
+    grantedAt: Date;
+    id: string;
+    projectionScopeKey: string;
+    revokedAt: Date | null;
+    status: string;
+  }[];
+}): string {
+  const shareByProjectionScopeKey = new Map(
+    input.shares.map((share) => [share.projectionScopeKey, share]),
+  );
+  const selectedShareAuthorities = [...new Set(input.projectionScopeKeys)]
+    .sort()
+    .map((projectionScopeKey) => {
+      const share = shareByProjectionScopeKey.get(projectionScopeKey);
+      return {
+        projectionScopeKey,
+        share: share
+          ? {
+              grantedAt: share.grantedAt.toISOString(),
+              id: share.id,
+              revokedAt: share.revokedAt?.toISOString() ?? null,
+              status: share.status,
+            }
+          : null,
+      };
+    });
+
+  return sha256Hex(JSON.stringify({
+    destinationMemberId: input.destinationMemberId,
+    selectedShareAuthorities,
+  }));
+}
+
+function buildHostedGroupJoinOfferNoMutationResult(input: {
+  alreadyMember: boolean;
+  groupId: string;
+  joinCode: string;
+  membershipId: string | null;
+  messageLookupKey: string;
+  selectedVaultShareProjectionKinds: HostedVaultShareProjectionKind[];
+  selectedVaultShareProjectionScopes: HostedVaultShareProjectionScope[];
+}): HostedGroupJoinOfferAcceptanceTxResult {
+  return {
+    alreadyMember: input.alreadyMember,
+    grantedVaultShareProjectionKinds: [],
+    grantedVaultShareProjectionScopes: [],
+    groupId: input.groupId,
+    joinCode: input.joinCode,
+    membershipId: input.membershipId,
+    messageLookupKey: input.messageLookupKey,
+    revokedVaultShareProjectionKinds: [],
+    revokedVaultShareProjectionScopes: [],
+    selectedVaultShareProjectionKinds: input.selectedVaultShareProjectionKinds,
+    selectedVaultShareProjectionScopes: input.selectedVaultShareProjectionScopes,
   };
 }
 

@@ -2,7 +2,7 @@
 
 Status: completed
 Created: 2026-07-26
-Updated: 2026-07-26
+Updated: 2026-07-27
 
 ## Goal
 
@@ -40,19 +40,23 @@ Updated: 2026-07-26
 
 ## Approach
 
-1. Add one nullable closed-state field to the existing Linq provider-event row:
-   old/null is legacy ambiguous, new reactions ingest as pending, and successful
-   join acceptance moves pending to `applied:<membershipId>` in the same
-   transaction.
-2. Thread the Linq affirmation identity into join acceptance and bind it to the
-   stored event type/message context.
-3. For applied replay, return an accepted canonical no-op only while the exact
+1. Keep the existing nullable application-state field and add one nullable
+   JSON claim field to the same Linq provider-event owner. Versioned pending
+   state binds the receipt to the resolved member, exact current membership id,
+   group runtime member, and a hash of the selected-share authority visible in
+   the receipt transaction.
+2. Capture that claim before inserting the provider event, under the existing
+   group/member lock order. Exact duplicate insertion never creates or replaces
+   a claim on an older row.
+3. On pending retry, recompute the same authority under lock. A mismatch moves
+   the receipt to terminal `superseded:v1`; an exact match is the only path that
+   may join and transition to `applied:<membershipId>`.
+4. For applied replay, return an accepted canonical no-op only while the exact
    recorded membership exists; otherwise stop without membership/share
-   mutation. Legacy replay fails closed.
-4. Add focused store, webhook, migration, and real-PostgreSQL sequential/race
-   coverage, keeping Telegram and disclosure behavior unchanged.
-5. Update only current reliability/security/schema-owner documentation needed
-   for the persisted-state and rollout contract.
+   mutation. Null, malformed, and legacy bare-pending rows fail closed.
+5. Add focused store, webhook, migration, and real-PostgreSQL sequential/race
+   coverage, keeping Telegram and disclosure behavior unchanged, and update
+   only the current schema-owner and reliability documentation.
 
 ## Verification
 
@@ -109,6 +113,39 @@ Updated: 2026-07-26
 - The final `pnpm verify:acceptance` passed in Blacksmith Testbox
   `tbx_01kygrx92q3c0z5y5xc8fchzxt`, including the full package and application
   acceptance surface.
+- Final ReviewGPT round 1 on immutable head
+  `4f60f134456642d332146f148f02dbc7799a56bb` found one remaining authority
+  gap: a receipt whose acceptance transaction rolled back retained an
+  unqualified `pending` marker, so a later retry could bind to newer membership
+  or share authority.
+- Remediation will bind pending state on the existing provider-event owner to
+  the resolved member, exact membership generation, and receipt-time share
+  authority. Superseded retries will terminally no-op under the existing
+  group/member locks.
+- The same-thread ReviewGPT remediation response was model-verified and supplied
+  patch SHA-256
+  `3072bca857292c89d822ef84b0399f770b870a648e9745c839d6dd517022c535`.
+  All 2,263 lines were inspected before its hunks were deliberately applied
+  with the repository edit tool.
+- In the tests-only state, the new receipt-binding, supersession, migration,
+  and confirmation-suppression cases failed as expected. That exploratory
+  runner was stopped after producing the failure evidence because it did not
+  exit; the exact six-suite post-fix run completed with 218 passing tests.
+- Parent inspection preserved the pre-existing 410 result for a currently
+  revoked offer and normalized the expansion migration to the repository's
+  canonical statement shape. No additional owner, table, queue, or lifecycle
+  state was introduced.
+- Hosted Web typechecking passes after preserving the narrowed join-code value
+  across the no-mutation result helper.
+- A fresh isolated loopback PostgreSQL database applied the full migration
+  history including the claim expansion. The real receipt/rollback,
+  membership-generation, share-authority, leave/rejoin, and concurrency proof
+  passes all 8 tests; the disposable database was removed afterward.
+- Canonical local `pnpm test:diff <all changed paths>` passes with the new claim
+  migration and active plan explicitly included, covering the full Hosted Web
+  test, typecheck, lint, build, and repository guard surface.
+- Canonical local `pnpm verify:acceptance` passes across the full package and
+  application acceptance surface.
 
 ## Deployment
 
@@ -117,4 +154,4 @@ Updated: 2026-07-26
 - Null legacy rows are intentionally ambiguous and fail closed; current
   memberships may still run idempotent post-commit confirmation recovery.
 - No Cloudflare Worker or runner protocol changes are expected.
-Completed: 2026-07-26
+Completed: 2026-07-27

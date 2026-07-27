@@ -86,12 +86,16 @@ This does not remove the person from the iMessage chat or erase historical
 messages, provider copies, backups, or copies already shared outside Murph. A
 provider output already accepted before departure can still arrive once.
 Membership remains row-presence truth, while the durable Linq provider-event
-row separately fences exact join-reaction replay. New affirmative reactions are
-explicitly pending and record the accepted membership id in the same
-transaction as the join. Replaying that event after a later leave or share
-revocation is an accepted no-op, and it cannot attach confirmation recovery to
-a membership created by a newer reaction. Legacy provider-event rows without
-application state fail closed.
+row separately fences exact join-reaction replay. A new affirmative reaction is
+retryable only when its receipt atomically records the exact member, current
+membership generation, and selected-share authority observed under the existing
+group/member locks. Acceptance rechecks that claim under the same locks. A later
+member binding, membership generation, leave, or selected-share revocation
+terminally supersedes the event without membership, grants, confirmation,
+maintenance, or newsletter work. A still-current event applies once, and its
+already-applied replay may recover confirmation only for the exact membership it
+created. A genuinely new reaction may rejoin. Nullable legacy rows and old bare
+pending receipts fail closed and are never rebound by a duplicate.
 
 ## Deployment compatibility
 
@@ -108,12 +112,16 @@ does not require immediate container rollout because both old and new runners
 accept the current Web response, but post-deploy proof must exercise one private
 `list_memberships` read and check for group-tool response parse failures.
 
-For the Linq replay fence, apply the nullable
-`hosted_linq_provider_event.group_join_application_state` expansion before
-deploying Web code that writes or reads it. The column has no default or
-backfill: rows written before the expansion, including deploy-skew writes from
-an older Web binary, stay distinguishable and fail closed. No Cloudflare
-runtime or wire change is involved.
+For the Linq replay fence, apply both nullable expansions,
+`hosted_linq_provider_event.group_join_application_state` and
+`hosted_linq_provider_event.group_join_application_claim_json`, before deploying
+Web code that writes or reads the versioned claim. Neither column has a default
+or backfill. Current Web writes only `pending:v1` with a claim in the same
+receipt transaction; older Web recognizes only exact legacy `pending`, so it
+fails closed on current rows. Current Web leaves legacy null rows unavailable
+and terminally supersedes legacy bare-pending rows, so neither version can bind
+an unqualified receipt to retry-time authority. No Cloudflare runtime or wire
+change is involved.
 
 ## Direct proof
 
@@ -132,3 +140,11 @@ At minimum, verify these cases:
 8. If leave commits before an older existing-member sharing save, the save
    conflicts without recreating membership or grants. If the save commits first,
    the later leave still ends left; a reloaded nonmember can explicitly rejoin.
+9. A Linq receipt whose acceptance rolls back completes once when its recorded
+   member, membership generation, and selected-share authority remain current.
+10. A newer membership, changed member, leave, or selected-share revocation
+    terminally supersedes the pending event without membership, grant,
+    confirmation, maintenance, or newsletter effects; a new event may rejoin.
+11. An applied exact replay can recover only its original surviving
+    confirmation, while legacy null and bare-pending rows cannot acquire current
+    authority from a duplicate delivery.

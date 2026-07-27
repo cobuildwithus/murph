@@ -25,7 +25,10 @@ import {
   buildHostedLinqInviteSignupEffectIdMemberPrefix,
   parseHostedLinqInviteSignupEffectId,
 } from "@/src/lib/hosted-onboarding/linq-invite-signup-effect-id";
-import { ingestHostedLinqProviderEventTx } from "@/src/lib/hosted-onboarding/linq-provider-event-store";
+import {
+  HOSTED_LINQ_GROUP_JOIN_APPLICATION_CLAIM_SCHEMA,
+  ingestHostedLinqProviderEventTx,
+} from "@/src/lib/hosted-onboarding/linq-provider-event-store";
 import {
   createHostedLinqDeliveryIdempotencyLookupKey,
   createHostedLinqDeliverySourceRefLookupKey,
@@ -171,6 +174,14 @@ describe("hosted Linq observability stores", () => {
 
     await ingestHostedLinqProviderEventTx({
       event,
+      groupJoinApplicationClaim: {
+        groupId: "group_123",
+        groupRuntimeMemberId: "member_group_runtime",
+        memberId: "member_joiner",
+        membershipId: null,
+        schema: HOSTED_LINQ_GROUP_JOIN_APPLICATION_CLAIM_SCHEMA,
+        selectedShareAuthorityHash: "a".repeat(64),
+      },
       prisma: fixture.prisma as never,
     });
 
@@ -178,13 +189,83 @@ describe("hosted Linq observability stores", () => {
       expect.objectContaining({
         data: expect.objectContaining({
           eventType: "reaction.added",
-          groupJoinApplicationState: "pending",
+          groupJoinApplicationClaimJson: {
+            groupId: "group_123",
+            groupRuntimeMemberId: "member_group_runtime",
+            memberId: "member_joiner",
+            membershipId: null,
+            schema: HOSTED_LINQ_GROUP_JOIN_APPLICATION_CLAIM_SCHEMA,
+            selectedShareAuthorityHash: "a".repeat(64),
+          },
+          groupJoinApplicationState: "pending:v1",
           linqChatLookupKey: event.linqChatLookupKey,
           messageLookupKey: event.messageLookupKey,
           payloadHash: event.payloadHash,
         }),
       }),
     );
+  });
+
+  it("never creates an unqualified pending join application", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    const event = requireParsedProviderEvent(buildProviderEvent({
+      data: {
+        chat_id: "chat_group_123",
+        from_handle: { handle: "+15551234567", service: "iMessage" },
+        line: { phone_number: "+15550000000" },
+        message_id: "msg_offer_123",
+        reacted_at: "2026-03-26T12:01:00.000Z",
+        reaction_type: "love",
+      },
+      eventId: "evt_reaction_without_claim",
+      eventType: "reaction.added",
+    }));
+
+    await ingestHostedLinqProviderEventTx({
+      event,
+      prisma: fixture.prisma as never,
+    });
+
+    const data = fixture.hostedLinqProviderEventCreateMany.mock.calls[0]?.[0]?.data;
+    expect(data).toEqual(expect.objectContaining({
+      eventType: "reaction.added",
+      groupJoinApplicationState: null,
+    }));
+    expect(data).not.toHaveProperty("groupJoinApplicationClaimJson");
+  });
+
+  it("does not bind a duplicate receipt to newly supplied authority", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    fixture.hostedLinqProviderEventCreateMany.mockResolvedValueOnce({ count: 0 });
+    const event = requireParsedProviderEvent(buildProviderEvent({
+      data: {
+        chat_id: "chat_group_123",
+        from_handle: { handle: "+15551234567", service: "iMessage" },
+        line: { phone_number: "+15550000000" },
+        message_id: "msg_offer_123",
+        reacted_at: "2026-03-26T12:01:00.000Z",
+        reaction_type: "love",
+      },
+      eventId: "evt_reaction_duplicate",
+      eventType: "reaction.added",
+    }));
+
+    await expect(ingestHostedLinqProviderEventTx({
+      event,
+      groupJoinApplicationClaim: {
+        groupId: "group_123",
+        groupRuntimeMemberId: "member_group_runtime",
+        memberId: "member_joiner",
+        membershipId: "membership_newer",
+        schema: HOSTED_LINQ_GROUP_JOIN_APPLICATION_CLAIM_SCHEMA,
+        selectedShareAuthorityHash: "b".repeat(64),
+      },
+      prisma: fixture.prisma as never,
+    })).resolves.toEqual({ alertIds: [], duplicate: true });
+
+    expect(fixture.hostedLinqProviderEventCreateMany).toHaveBeenCalledTimes(1);
+    expect(fixture.hostedLinqProviderEventFindFirst).not.toHaveBeenCalled();
+    expect(fixture.hostedLinqProviderEventFindMany).not.toHaveBeenCalled();
   });
 
   it("persists message.sent correlation without advancing delivery or line health", async () => {

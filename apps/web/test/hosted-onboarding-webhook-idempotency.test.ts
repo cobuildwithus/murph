@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   getHostedLinqChatSummary: vi.fn(),
   getPrisma: vi.fn(),
   handleHostedGroupJoinOfferReaction: vi.fn(),
+  prepareHostedGroupJoinOfferReactionApplicationClaimTx: vi.fn(),
   incrementHostedLinqInboundDailyState: vi.fn(),
   incrementHostedLinqOutboundDailyState: vi.fn(),
   issueHostedInviteTx: vi.fn(),
@@ -169,6 +170,8 @@ vi.mock("@/src/lib/hosted-onboarding/linq-delivery-store", async () => {
 
 vi.mock("@/src/lib/hosted-groups/join-offer-reaction", () => ({
   handleHostedGroupJoinOfferReaction: mocks.handleHostedGroupJoinOfferReaction,
+  prepareHostedGroupJoinOfferReactionApplicationClaimTx:
+    mocks.prepareHostedGroupJoinOfferReactionApplicationClaimTx,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/webhook-provider-linq-reaction-context", () => ({
@@ -217,6 +220,7 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
       reason: "accepted",
       status: "accepted",
     });
+    mocks.prepareHostedGroupJoinOfferReactionApplicationClaimTx.mockResolvedValue(null);
     mocks.buildHostedLinqAffirmativeReactionMessageEvent.mockResolvedValue(null);
     mocks.stageHostedLinqGroupReactionContext.mockResolvedValue(false);
     mocks.markHostedLinqOnboardingLinkNoticeSent.mockResolvedValue(true);
@@ -522,6 +526,14 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
   it("dispatches Linq reaction.added events to the hosted group join-offer handler", async () => {
     const prisma = createPrismaStub();
     mocks.getPrisma.mockReturnValue(prisma);
+    mocks.prepareHostedGroupJoinOfferReactionApplicationClaimTx.mockResolvedValue({
+      groupId: "group_1",
+      groupRuntimeMemberId: "member_group_runtime",
+      memberId: "member_joiner",
+      membershipId: null,
+      schema: "murph.hosted-linq.group-join-application-claim.v1",
+      selectedShareAuthorityHash: "a".repeat(64),
+    });
 
     await expect(
       handleHostedOnboardingLinqWebhook({
@@ -550,11 +562,20 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
         data: expect.objectContaining({
           eventId: createHostedLinqProviderEventLookupKey("evt_reaction_123"),
           eventType: "reaction.added",
-          groupJoinApplicationState: "pending",
+          groupJoinApplicationClaimJson: expect.objectContaining({
+            groupId: "group_1",
+            memberId: "member_joiner",
+            selectedShareAuthorityHash: "a".repeat(64),
+          }),
+          groupJoinApplicationState: "pending:v1",
         }),
         skipDuplicates: true,
       }),
     );
+    expect(mocks.prepareHostedGroupJoinOfferReactionApplicationClaimTx)
+      .toHaveBeenCalledWith(expect.objectContaining({
+        event: expect.objectContaining({ eventId: "evt_reaction_123" }),
+      }));
     expect(mocks.handleHostedGroupJoinOfferReaction).toHaveBeenCalledWith(
       expect.objectContaining({
         event: expect.objectContaining({

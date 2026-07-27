@@ -156,17 +156,25 @@ Last verified: 2026-07-26
 - Assistant observability and recovery surfaces should stay persisted and replay-safe: diagnostics/status snapshots must tolerate missing files, and fault-injection coverage should exercise retryable provider/delivery/automation failure paths before those recovery hooks are trusted.
 - Observability writes (logs, latency traces, diagnostics, metrics) must never block user-facing latency: queue or fire-and-forget them off the reply hot path and flush at invocation end, per the `Foreground Reply Critical Path` invariants in `docs/contracts/00-invariants.md`. Only warn/error crash-tail writes may block, bounded by the process exit backstop.
 - Linq join-offer reactions are delivered at least once, but
-  `HostedLinqProviderEvent` is also their durable application owner. A newly
-  received reaction with complete event/message/chat context is explicitly
-  `pending`; rows written before this state existed (or by an older deployment
-  during rollout) remain `NULL` and fail closed. Join acceptance locks the group
-  and exact provider-event row, verifies the persisted message, chat, and payload
-  binding, and changes `pending` to an applied state carrying the accepted
-  membership id in the same transaction as the membership and share grants. An
-  applied redelivery is an accepted no-op: it may retry durable join-confirmation
-  materialization only while that exact membership still exists, but it cannot
-  attach itself to a later rejoin, regrant a later-revoked share, or recreate a
-  member after leave. A genuinely new reaction has its own `pending` row and can
-  express a later intent to rejoin. Never use the provider receipt's `duplicate`
-  result as this gate: a receipt committed before a failed acceptance must remain
-  retryable.
+  `HostedLinqProviderEvent` is also their sole durable application owner. A new
+  reaction becomes `pending:v1` only when its receipt transaction, while holding
+  the existing group/member serialization locks, stores a versioned claim for
+  the exact group runtime, member, membership generation, and a canonical hash
+  of the offer's selected-share authority. Nullable legacy rows and the old bare
+  `pending` state never acquire a claim from a duplicate; they fail closed, with
+  bare pending terminally marked `superseded:v1`. Join acceptance locks the group
+  and exact provider-event row, then the member, verifies the persisted message,
+  chat, and payload binding, and recomputes the same claim. A changed member,
+  membership generation, leave, or selected-share authority marks the event
+  `superseded:v1` in that transaction and performs no membership, grant,
+  confirmation, maintenance, or newsletter effect. A matching claim changes
+  `pending:v1` to `applied:<membershipId>` in the same transaction as membership
+  and share grants. An applied redelivery remains an accepted no-op and may retry
+  durable join-confirmation materialization only while that exact membership
+  still exists. A genuinely new reaction has its own claim and can express a
+  later intent to rejoin. Never use the provider receipt's `duplicate` result as
+  this gate: a receipt committed before a failed acceptance remains retryable
+  only while its recorded authority is still current. The versioned state is
+  the rollout fence: older Web recognizes only exact legacy `pending`, so it
+  treats `pending:v1` and `superseded:v1` as unavailable, while current Web
+  terminally supersedes legacy bare-pending rows instead of rebinding them.

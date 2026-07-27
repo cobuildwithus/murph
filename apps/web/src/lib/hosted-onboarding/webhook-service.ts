@@ -91,6 +91,7 @@ import {
 } from "../hosted-groups/group-tool";
 import {
   handleHostedGroupJoinOfferReaction,
+  prepareHostedGroupJoinOfferReactionApplicationClaimTx,
 } from "../hosted-groups/join-offer-reaction";
 import {
   buildHostedLinqAffirmativeReactionMessageEvent,
@@ -838,10 +839,18 @@ async function ingestHostedLinqProviderEventDirect(input: {
 }): Promise<Awaited<ReturnType<typeof ingestHostedLinqProviderEventTx>>> {
   const providerResult = await runHostedOnboardingWebhookTransaction(
     input.prisma,
-    (transaction) => ingestHostedLinqProviderEventTx({
-      event: input.event,
-      prisma: transaction,
-    }),
+    async (transaction) => {
+      const groupJoinApplicationClaim =
+        await prepareHostedGroupJoinOfferReactionApplicationClaimTx({
+          event: input.event,
+          tx: transaction,
+        });
+      return ingestHostedLinqProviderEventTx({
+        event: input.event,
+        groupJoinApplicationClaim,
+        prisma: transaction,
+      });
+    },
   );
   if (providerResult.restoreOnboardingLink) {
     void queueHostedLinqContactCardShareAfterDeliveredInviteSignup({
