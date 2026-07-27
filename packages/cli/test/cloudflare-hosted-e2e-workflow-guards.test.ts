@@ -118,6 +118,20 @@ describe('cloudflare hosted e2e workflow guards', () => {
       'sudo dockerd --validate --config-file "${docker_config_path}"',
     )
     expect(nestedCodexSandboxScript).toContain('sudo systemctl restart docker')
+    expect(nestedCodexSandboxScript).toContain(
+      "'profile docker-default flags=(unconfined) {'",
+    )
+    expect(nestedCodexSandboxScript).toContain("'  userns,'")
+    expect(nestedCodexSandboxScript).toContain(
+      'sudo apparmor_parser -Q "${apparmor_profile_path}"',
+    )
+    expect(nestedCodexSandboxScript).toContain(
+      'sudo apparmor_parser -r "${apparmor_profile_path}"',
+    )
+    expect(nestedCodexSandboxScript).toContain(
+      "sudo grep -Fx 'docker-default (unconfined)'",
+    )
+    expect(nestedCodexSandboxScript).not.toContain('flags=(complain)')
     expect(workflow.match(/scripts\/prepare-ci-nested-codex-sandbox\.sh/g))
       .toHaveLength(1)
     expect(deployWorkflow.match(/scripts\/prepare-ci-nested-codex-sandbox\.sh/g))
