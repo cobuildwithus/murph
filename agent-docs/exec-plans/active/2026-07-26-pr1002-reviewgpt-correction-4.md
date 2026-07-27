@@ -71,4 +71,22 @@ Updated: 2026-07-26
 
 ## Verification
 
-- Pending.
+- Focused hosted unit/UI suites: 105 tests passed; 17 opt-in tests skipped in
+  the ordinary lane.
+- Real PostgreSQL device-start/account-deletion suites: 92 tests passed,
+  including expired-plus-live sibling rejection, staging between preflight and
+  the locked recheck, suspension before blocked owner cleanup, and URL-only
+  OAuth expiry without current provider credentials.
+- Hosted-web typecheck and affected ESLint passed after regenerating the local
+  Prisma client for `main`'s newly merged cleanup-receipt model.
+- The ordinary merge of current `main` preserved its durable external-cleanup
+  receipt and terminal cleanup-status UI while retaining the retryable
+  wearable-start confirmation state.
+- Crabbox `pnpm test:diff`: passed in Testbox
+  `tbx_01kygvvykasey43kpqapr64639`
+  ([Actions run](https://github.com/cobuildwithus/murph/actions/runs/30236069810));
+  539 files and 6,881 tests passed with 14 files and 205 tests skipped.
+- Crabbox `pnpm verify:acceptance`: passed in Testbox
+  `tbx_01kygvw3sj8baxj8b8npny0z1b`
+  ([Actions run](https://github.com/cobuildwithus/murph/actions/runs/30236073583)).
+- Exact-head ReviewGPT correction and PR CI: pending.
