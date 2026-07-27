@@ -1,6 +1,6 @@
 # Linq group-offer replay fence
 
-Status: active
+Status: completed
 Created: 2026-07-26
 Updated: 2026-07-26
 
@@ -100,6 +100,15 @@ Updated: 2026-07-26
   `git apply --check --whitespace=error-all`, and its test-only hunks were
   applied deliberately.
 - The four focused remediation suites pass all 126 tests.
+- Parent final review found no remaining correctness, architecture, rollout,
+  or coverage gap after the specialist remediation.
+- After rebasing onto current `main`, the final canonical `pnpm test:diff ...`
+  passed in Blacksmith Testbox `tbx_01kygrddd9aw745aakx6j55jxq`, including
+  all 536 Web test files, 6,838 tests, typecheck, lint, production build, and
+  repository policy/architecture guards.
+- The final `pnpm verify:acceptance` passed in Blacksmith Testbox
+  `tbx_01kygrx92q3c0z5y5xc8fchzxt`, including the full package and application
+  acceptance surface.
 
 ## Deployment
 
@@ -108,3 +117,4 @@ Updated: 2026-07-26
 - Null legacy rows are intentionally ambiguous and fail closed; current
   memberships may still run idempotent post-commit confirmation recovery.
 - No Cloudflare Worker or runner protocol changes are expected.
+Completed: 2026-07-26
