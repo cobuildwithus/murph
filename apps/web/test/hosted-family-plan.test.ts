@@ -4287,6 +4287,11 @@ describe("hosted Family plan", () => {
   });
 
   it("converts an active direct paid owner subscription into Family billing without creating a second checkout", async () => {
+    const historicalPersonalCheckoutSession = {
+      customer: "cus_direct",
+      status: "complete",
+      subscription: "sub_direct",
+    } as const;
     const group = {
       billingStatus: HostedBillingStatus.not_started,
       id: "hbag_family",
@@ -4335,13 +4340,19 @@ describe("hosted Family plan", () => {
     });
     const subscriptionRetrieve = vi.fn().mockResolvedValue(directSubscription);
     const subscriptionUpdate = vi.fn().mockResolvedValue(updatedSubscription);
+    const subscriptionCancel = vi.fn();
+    const customerDelete = vi.fn();
     runtimeMocks.requireHostedStripeApi.mockReturnValue({
       checkout: {
         sessions: {
           create: checkoutCreate,
         },
       },
+      customers: {
+        del: customerDelete,
+      },
       subscriptions: {
+        cancel: subscriptionCancel,
         retrieve: subscriptionRetrieve,
         update: subscriptionUpdate,
       },
@@ -4412,7 +4423,10 @@ describe("hosted Family plan", () => {
         currentPeriodEnd: FAMILY_STRIPE_PERIOD_END,
         currentPeriodStart: FAMILY_STRIPE_PERIOD_START,
         lastStripeEventCreatedAt: eventCreatedAt,
+        stripeCustomerIdEncrypted: `encrypted:${historicalPersonalCheckoutSession.customer}`,
         stripeSubscriptionLookupKey: expect.stringMatching(/^hbidx:stripe-subscription:v1:/u),
+        stripeSubscriptionIdEncrypted:
+          `encrypted:${historicalPersonalCheckoutSession.subscription}`,
       }),
     }));
     expect(webhookTx.hostedMember.update).toHaveBeenCalledWith({
@@ -4434,6 +4448,9 @@ describe("hosted Family plan", () => {
         memberId: "member_owner",
       },
     }));
+    expect(historicalPersonalCheckoutSession.status).toBe("complete");
+    expect(subscriptionCancel).not.toHaveBeenCalled();
+    expect(customerDelete).not.toHaveBeenCalled();
   });
 
   it("keeps unsupported direct paid subscription items as a non-retryable owner transfer error", async () => {

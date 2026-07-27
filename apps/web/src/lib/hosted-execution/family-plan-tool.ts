@@ -36,10 +36,6 @@ export async function handleHostedRuntimeFamilyPlanTool(input: {
   memberId: string;
   request: HostedRuntimeFamilyPlanToolRequest;
 }): Promise<HostedRuntimeFamilyPlanToolResponse> {
-  if (input.request.action === "start_checkout") {
-    assertHostedSubscriptionCheckoutAvailable();
-  }
-
   if (await isHostedThreadContainerMember({ memberId: input.memberId })) {
     throw hostedOnboardingError({
       code: "HOSTED_FAMILY_PERSONAL_MEMBER_REQUIRED",
@@ -177,6 +173,7 @@ async function startHostedRuntimeFamilyPlanCheckout(
     };
   }
 
+  assertHostedSubscriptionCheckoutAvailable();
   const group = await prisma.$transaction(async (tx) => {
     return await ensureHostedAccountGroupForOwnerTx({
       ownerMemberId: memberId,

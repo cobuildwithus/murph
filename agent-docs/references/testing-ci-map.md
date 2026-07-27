@@ -97,8 +97,11 @@ Session is bound before its URL is returned and expired when deletion wins the
 post-provider member lock; both also prove the shared deletion-maintenance flag
 rejects subscription Checkout before a transaction or Stripe call begins.
 Personal and Family route tests plus the Family runtime-tool test prove the
-same flag rejects each production entry point before authentication, member
-state, or group-creation work.
+same flag rejects HTTP Checkout before authentication and rejects an inactive
+runtime-tool owner before group creation, while active Family status/invite
+work remains available. The direct-paid-to-Family conversion fixture proves
+the exact historical personal Customer/Subscription pair moves to the
+account-group reference without cancellation or Customer deletion.
 `hosted-account-deletion-cleanup.test.ts` proves receipt-bound encryption,
 independent per-target progress, unconfigured-target pending state, lease-loss
 handling, retry convergence, and batch isolation. Cloudflare runner tests prove

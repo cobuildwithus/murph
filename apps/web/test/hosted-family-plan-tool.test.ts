@@ -73,7 +73,11 @@ describe("hosted runtime Family plan tool", () => {
     vi.unstubAllEnvs();
   });
 
-  it("rejects checkout maintenance before reading member or group state", async () => {
+  it("rejects checkout maintenance before creating a group for an inactive owner", async () => {
+    const prisma = {
+      $transaction: vi.fn((callback) => callback({ label: "tx" })),
+    };
+    mocks.getPrisma.mockReturnValue(prisma);
     vi.stubEnv("HOSTED_ACCOUNT_DELETION_MAINTENANCE", "1");
 
     await expect(handleHostedRuntimeFamilyPlanTool({
@@ -87,8 +91,19 @@ describe("hosted runtime Family plan tool", () => {
       retryable: true,
     });
 
-    expect(mocks.isHostedThreadContainerMember).not.toHaveBeenCalled();
-    expect(mocks.getPrisma).not.toHaveBeenCalled();
+    expect(mocks.isHostedThreadContainerMember).toHaveBeenCalledWith({
+      memberId: "member_owner",
+    });
+    expect(mocks.getPrisma).toHaveBeenCalledOnce();
+    expect(mocks.readHostedFamilyOwnerSnapshotForMember).toHaveBeenCalledWith({
+      memberId: "member_owner",
+      prisma,
+    });
+    expect(mocks.readHostedFamilyAccessForMember).toHaveBeenCalledWith({
+      memberId: "member_owner",
+      prisma,
+    });
+    expect(prisma.$transaction).not.toHaveBeenCalled();
     expect(mocks.ensureHostedAccountGroupForOwnerTx).not.toHaveBeenCalled();
     expect(mocks.createHostedFamilyBillingCheckout).not.toHaveBeenCalled();
   });
@@ -282,6 +297,7 @@ describe("hosted runtime Family plan tool", () => {
   });
 
   it("creates an invite from start_checkout when Family billing is already active", async () => {
+    vi.stubEnv("HOSTED_ACCOUNT_DELETION_MAINTENANCE", "1");
     mocks.readHostedFamilyOwnerSnapshotForMember
       .mockResolvedValueOnce({
         billingActive: true,

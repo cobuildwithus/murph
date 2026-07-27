@@ -38,7 +38,7 @@ The current named purposes are:
 
 | Purpose | Opens before | Closes only after |
 | --- | --- | --- |
-| `checkout-session-deletion-fence` | the additive schema migration and first bind-before-return writer | every personal Session created on or before the second admission-closing instant has an outcome-specific proof: expired/missing, or completed with its Customer and Subscription owned locally or cleaned up at Stripe; the fence writer is live everywhere |
+| `checkout-session-deletion-fence` | the additive schema migration and first bind-before-return writer | after predecessor retirement, complete no-cutoff pagination finds every Murph personal Session and each has an outcome-specific proof: expired/missing, or completed with its Customer and Subscription owned canonically or cleaned up at Stripe; the fence writer is live everywhere |
 | `r2-bundles-enam` | destination creation | OC retirement or mechanically proven pre-commit abandonment, as defined by `apps/cloudflare/R2_BUNDLES_ENAM_MIGRATION.md` |
 
 Clearing is authorized only when every active purpose has supplied its exit
@@ -97,32 +97,38 @@ deletion flag but does not yet reject subscription Checkout:
    reject both deletion and subscription Checkout.
 4. Advance the threshold again, this time to the bind-before-return
    maintenance deployment. Run the full pinned-predecessor proof above and wait
-   the absolute Function maximum. Record this second admission-closing instant
-   as an inclusive Stripe `created` cutoff. Only this closure makes the
-   pre-fence Session set finite.
-5. Without a `status` filter, automatically paginate every Checkout Session
-   created on or before that cutoff. Select every `mode=subscription` Session
+   the absolute Function maximum. Only the completed wait makes the pre-fence
+   Session set finite: a predecessor admitted before the threshold can create
+   its Stripe Session after the threshold.
+5. After that wait, omit both `status` and `created` filters and automatically
+   paginate every Checkout Session. Select every `mode=subscription` Session
    whose existing `client_reference_id`, `memberId`, `billingPlanCode`, and
    `checkoutOffer` metadata identify Murph personal billing. Reject malformed,
    incomplete, or conflicting metadata rather than silently excluding it. The
-   complete paginated result, not only its open subset, is the rollout set. Do
-   not persist or publish raw provider or member identifiers.
+   complete paginated result across Stripe's retained history, not a
+   clock-bounded or open-only subset, is the rollout set. Do not persist or
+   publish raw provider or member identifiers.
 6. Prove one outcome for every Session in that immutable set:
    - expire `open`, then retrieve it and require `expired`;
    - accept `expired` or provider-proven missing;
-   - for `complete`, require nonempty Customer and Subscription ids, then either
-     replay/reconcile the completion and prove the exact pair belongs to the
-     surviving canonical member billing reference, or, when no local owner
-     survives, cancel the exact Subscription and delete the Customer if no
-     surviving billing reference owns it;
+   - for `complete`, require nonempty Customer and Subscription ids. Accept the
+     exact pair when either the canonical member billing reference or canonical
+     account-group billing reference owns both. Account-group ownership is
+     accepted without replaying the personal completion and without
+     cancellation because direct-paid Family conversion intentionally moves the
+     pair there. If neither owner survives, cancel the exact Subscription and
+     delete the Customer only when no surviving canonical reference owns it;
    - treat any other status, owner conflict, failed replay, failed cancellation
      or deletion, pagination uncertainty, or ambiguous provider response as an
      open purpose that keeps maintenance active.
 7. Repeat the full all-status pagination, not an open-only query. The set is
-   closed only when every row at or before the fixed cutoff has the required
-   outcome proof and no row was skipped. Prove new personal and Family
-   Checkouts stay bound, and prove deletion captures an open Session and a
-   concurrently completed Session.
+   closed only when every matching row has the required outcome proof and no row
+   was skipped. Prove new personal and Family Checkouts stay bound, and prove
+   deletion captures an open Session and a concurrently completed Session.
+   In the rollout rehearsal, hold a predecessor personal Checkout request
+   across threshold advancement, let it create its test-mode Stripe Session
+   afterwards, complete the absolute wait, and prove the no-cutoff scan includes
+   and terminalizes that late Session before maintenance can lift.
 8. Mark `checkout-session-deletion-fence` closed. Clear maintenance only if the
    shared active-purpose record is otherwise empty, then deploy and smoke
    deletion plus personal and Family Checkout.
@@ -131,7 +137,7 @@ The first converged bind-before-return deployment is the Web rollback floor.
 An emergency rollback below it keeps maintenance active; deletion must not
 resume until a fence-capable deployment is restored, the threshold and
 absolute wait are repeated, and the full all-status Session proof succeeds
-again against the new second-closure cutoff.
+again without a creation cutoff.
 
 ## Release or remove the control
 

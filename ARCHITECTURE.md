@@ -459,15 +459,17 @@ authority is
 deployment rejects deletion and subscription Checkout, advances Vercel's Skew
 Protection Threshold, waits the absolute Function maximum, and proves a
 predecessor-pinned authenticated browser reaches neither effect. Only then is
-the all-status pre-fence personal Session set finite. Every open Session must be
-expired; every completed Session must have its Customer and Subscription owned
-by a surviving canonical billing reference or cleaned up at Stripe; ambiguity
-keeps maintenance active. Maintenance lifts only after the complete paginated
-set has that outcome proof, the bind-before-return writer is live everywhere,
-and no other named purpose remains active. The first converged fence-capable
-Web deployment is the account-deletion rollback floor; an emergency rollback
-below it keeps maintenance active until the fence writer, skew closure, and
-full all-status Session proof are restored.
+the all-status pre-fence personal Session set finite. The post-wait proof has no
+creation cutoff because an already-running predecessor can create its Session
+after threshold advancement. Every open Session must be expired; every
+completed Session must have its exact Customer and Subscription owned by the
+canonical member or account-group billing reference, or cleaned up at Stripe;
+ambiguity keeps maintenance active. Maintenance lifts only after complete
+no-cutoff pagination has that outcome proof, the bind-before-return writer is
+live everywhere, and no other named purpose remains active. The first
+converged fence-capable Web deployment is the account-deletion rollback floor;
+an emergency rollback below it keeps maintenance active until the fence writer,
+skew closure, and full no-cutoff Session proof are restored.
 
 Immediate provider attempts share one five-second abortable deadline. Retention
 attempts share one fifteen-second abortable deadline, use bounded four-receipt
