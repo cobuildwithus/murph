@@ -1,6 +1,5 @@
 import { requireHostedAppSessionFromRequest } from "@/src/lib/hosted-onboarding/app-session";
 import {
-  buildHostedPulseTrialContinuationClearCookie,
   buildHostedPulseTrialContinuationCookie,
 } from "@/src/lib/hosted-onboarding/billing-pulse-trial-continuation";
 import { startHostedPulseTrialPaidPlan } from "@/src/lib/hosted-onboarding/billing-start-paid-pulse-service";
@@ -33,17 +32,19 @@ export const POST = withJsonError(async (request: Request) => {
       }
       : result,
   );
-  response.headers.append(
-    "Set-Cookie",
+  if (
     result.status === "payment_required"
-      && result.resumeStartAfterPaymentMethodSetup === true
-      ? buildHostedPulseTrialContinuationCookie({
+    && result.resumeStartAfterPaymentMethodSetup === true
+  ) {
+    response.headers.append(
+      "Set-Cookie",
+      buildHostedPulseTrialContinuationCookie({
         action: "start_pulse_now",
         memberId: auth.member.id,
         sessionId: auth.sessionId,
-      })
-      : buildHostedPulseTrialContinuationClearCookie(),
-  );
+      }),
+    );
+  }
   return response;
 });
 

@@ -974,13 +974,13 @@ describe('monorepo release flow coverage audit', () => {
     expect(existsSync(path.join(repoRoot, 'scripts', 'chatgpt-managed-browser.test.mjs'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt.sh'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt-cli.sh'))).toBe(false)
-    expect(rootPackageJson.devDependencies?.['@cobuild/review-gpt']).toBe('^0.5.114')
+    expect(rootPackageJson.devDependencies?.['@cobuild/review-gpt']).toBe('^0.5.117')
     expect(
       pnpmWorkspace
         .match(/^minimumReleaseAgeExclude:\n((?:  - .+\n)+)/mu)?.[1]
         ?.split('\n')
         .filter((line) => line.includes('@cobuild/review-gpt')),
-    ).toEqual(["  - '@cobuild/review-gpt@0.5.114'"])
+    ).toEqual(["  - '@cobuild/review-gpt@0.5.117'"])
     expect(
       pnpmWorkspace
         .match(/^patchedDependencies:\n((?:  .+\n)+)/mu)?.[1]
@@ -1216,7 +1216,11 @@ describe('monorepo release flow coverage audit', () => {
       [
         '  if (!shouldSend) {',
         '    if (shouldAttachFiles) {',
-        "      cleanupConfirmedDraftAttachments('the upload');",
+        '      // A staged draft has not been sent, and the composer tile appears while',
+        '      // the browser is still reading the file off disk. Removing it here',
+        '      // cancels the upload and leaves a draft with no attachment, so',
+        '      // draft-only runs retain the generated artifacts.',
+        "      console.log('Retained generated local attachment artifact(s) for the unsent draft.');",
         '    }',
         "    ownedTargetId = '';",
       ].join('\n'),
