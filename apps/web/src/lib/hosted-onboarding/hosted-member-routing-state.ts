@@ -186,9 +186,7 @@ export async function projectHostedMemberRoutingLookup(
       hasTelegramUserBinding: Boolean(routing.telegramUserLookupKey),
       linqChatId: routingState.linqChatId,
       memberId: routingState.memberId,
-      murphIMessagePhoneNumber:
-        routingState.linqRecipientPhone
-        ?? routingState.pendingLinqRecipientPhone,
+      murphIMessagePhoneNumber: routingState.linqRecipientPhone,
     },
   };
 }

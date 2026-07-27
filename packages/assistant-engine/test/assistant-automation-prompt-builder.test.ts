@@ -1266,7 +1266,7 @@ describe('buildAssistantAutoReplyPrompt', () => {
     const result = buildAssistantAutoReplyPrompt([
       createPromptInput({
         captureOverrides: {
-          text: 'a jaki numer ma murph',
+          text: 'What is Murph\'s phone number?',
         },
         sourceMetadata: {
           kind: 'telegram',
@@ -1285,7 +1285,7 @@ describe('buildAssistantAutoReplyPrompt', () => {
       'Murph iMessage contact: +15550100001.',
       'Use this trusted contact when the user asks how to message Murph or add Murph to an iMessage group.',
     ].join(' '))
-    expect(result.prompt).toContain('Message text:\na jaki numer ma murph')
+    expect(result.prompt).toContain('Message text:\nWhat is Murph\'s phone number?')
   })
 
   it('keeps telegram media-group context when the first grouped capture lacks metadata but later captures agree', () => {

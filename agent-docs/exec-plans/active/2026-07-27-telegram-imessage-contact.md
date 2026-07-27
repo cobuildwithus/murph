@@ -87,3 +87,7 @@ Updated: 2026-07-27
   harness passed (410 tests, 1 skipped).
 - Product-experience review returned `NO FINDINGS`. No rendered UI evidence is
   applicable.
+- Follow-up review narrowed the source to the member's existing
+  `linqRecipientPhone` only. A pending pre-activation line is deliberately
+  omitted, and the Telegram read path never queries or claims the assignable
+  Linq line pool.
