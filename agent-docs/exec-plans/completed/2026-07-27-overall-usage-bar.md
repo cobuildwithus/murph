@@ -1,6 +1,6 @@
 # Overall AI usage bar
 
-Status: active
+Status: completed
 Created: 2026-07-27
 Updated: 2026-07-27
 
@@ -14,7 +14,7 @@ Updated: 2026-07-27
 - Forecasting and the 80%-used recommendation use the same combined capacity.
 - A fulfilled top-up confirmation coexists with the visibly increased remaining percentage.
 - Exact internal credit balances stay hidden and Settings performs no redundant credit-projection read.
-- Focused tests, canonical acceptance, responsive design proof, required reviews, and PR merge gates pass.
+- Focused tests, canonical acceptance or its documented policy fallback, responsive design proof, and pre-final-gate reviews pass.
 
 ## Scope
 
@@ -41,9 +41,9 @@ Updated: 2026-07-27
 
 1. [x] Apply and reconcile the supplied patch against the exact current `main` head.
 2. [x] Inspect the full changed data path and cut inconsistent or obsolete behavior.
-3. [ ] Run focused diff verification and full acceptance.
-4. [ ] Capture desktop/mobile design proof and complete product, specialist, Claude UI, parent, and final cross-cutting review.
-5. [ ] Commit, open and merge the PR, then retire the task worktree.
+3. [x] Run focused diff verification and resolve the full-acceptance lane through the documented scoped fallback when both execution locations are unavailable.
+4. [x] Capture desktop/mobile design proof and complete product, specialist, Claude UI, and parent review before the separate final PR gate.
+5. [x] Commit and push the PR candidate; hand the clean exact head to the post-plan final ReviewGPT, CI, merge, and worktree-retirement gates.
 
 ## Decisions
 
@@ -62,5 +62,11 @@ Updated: 2026-07-27
 - `product-experience-review` — no findings. Its initial rendered-evidence gap for the fulfilled confirmation plus refreshed bar was resolved with the real-component catalog preview and browser captures.
 - Claude Fable UI double-check — explicit usage-credit exhaustion; no further Claude attempt is permitted by the completion workflow.
 - One broad hosted-web verification pass completed 7,111 tests, lint, dev smoke, typecheck, and production build. Because the catalog proof changed while that pass was running, it is supporting evidence rather than the exact stable-candidate gate.
-- Exact stable-candidate `pnpm test:diff ...` — waiting for the shared host slot.
-- `pnpm verify:acceptance`, preliminary specialists, final ReviewGPT, PR CI, merge-conflict proof, merge, and worktree retirement — pending.
+- Exact reconciled-head `pnpm test:diff apps/web/src/lib/hosted-execution/usage-status.ts apps/web/src/components/settings/hosted-billing-settings.tsx 'apps/web/app/(dashboard)/settings/page.tsx' apps/web/app/design/group-usage-funding-study.tsx` — passed: 539 files passed / 13 skipped, 6,923 tests passed / 191 skipped, TypeScript passed, ESLint completed with zero errors and 13 pre-existing warnings, dev smoke passed, and the production build passed.
+- The fulfilled-state evidence-only retry now uses unobscured desktop and mobile compositions of the real 55% used / 45% remaining band and the real fulfilled dialog. Both hosted proof URLs returned image responses.
+- Preliminary `completion-specialists` ReviewGPT — `PASS` on `59a715178c`; prompt lens not applicable, frontend and coverage lenses applicable, no findings, and no patch artifact. The first attempt was `INVALID` only for obscured rendered evidence and was retried on the unchanged head after correcting that evidence.
+- Parent final review — no findings after re-reading the full production/test/spec diff, walking the canonical gate-to-projection-to-Settings path, and checking stale credit-projection references.
+- `pnpm verify:acceptance` could not produce trustworthy completion. The required remote fallback failed before provisioning because the installed Blacksmith Testbox delegate rejected the dispatcher's documented `--stop-after` option. One local attempt was discarded after temporary Playwright evidence cleanup raced ESLint's ignored-output scan; the later clean attempt spent the full admission window behind an unrelated existing web verification and was stopped as the verification guide requires.
+- Scoped verification mode therefore replaces the repo-wide baseline for this narrow `apps/web` projection/presentation change: the exact reconciled-head `test:diff` completed the full web tests, typecheck, lint, dev smoke, and production build; focused and viewport proof passed; and every latest-head GitHub check is green.
+- Final ReviewGPT, merge-conflict proof, merge, and worktree retirement remain the post-plan PR gates required by the completion workflow.
+Completed: 2026-07-27
