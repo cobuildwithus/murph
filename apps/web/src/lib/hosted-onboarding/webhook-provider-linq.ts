@@ -93,7 +93,10 @@ import {
   reserveHostedLinqHomeLineFromPoolTx,
   startOfUtcDay,
 } from "./linq-home-routing";
-import { claimHostedLinqProactiveConversationCapacityTx } from "./linq-line-store";
+import {
+  claimHostedLinqProactiveConversationCapacityTx,
+  hasActiveHostedLinqManagedLine,
+} from "./linq-line-store";
 import { resolveHostedLinqSignupWelcomeDailyLimit } from "./linq-routing-policy";
 import {
   createHostedEmailLookupKeyReadCandidates,
@@ -1737,11 +1740,10 @@ const HOSTED_LINQ_GROUP_PROVISION_UNAVAILABLE_ERROR_CODES = new Set([
 
 /**
  * Group chats with no explicit thread route stay ignored unless the sender is
- * an active member texting their own home Murph line; only then is the
- * dedicated thread-container runtime provisioned and the triggering message
- * routed into it. This keeps provisioning member-initiated (Murph never sends
- * the first message) and keeps strangers who know a line's number from minting
- * containers billed against its home member.
+ * an active member and the recipient resolves to an active managed Murph Linq
+ * line; only then is the dedicated thread-container runtime provisioned and
+ * the triggering message routed into it. The webhook recipient alone is never
+ * line authority. Existing routes are handled before this admission path.
  */
 async function planHostedLinqGroupChatWebhook(input: {
   affirmativeReaction?: boolean;
@@ -1808,27 +1810,11 @@ async function planHostedLinqGroupChatWebhook(input: {
     return ignored("group-chat-sender-inactive");
   }
 
-  const homeLineAuthority = readHostedLinqHomeLineAuthority(
-    await readHostedMemberRoutingState({
-      memberId: sender.id,
-      prisma: input.prisma,
-    }),
-  );
-  // Group threads auto-provision only from a COMMITTED home line (bound home
-  // chat or bare assigned line). A pending route is provisional (ops
-  // re-invite in flight), so it fails closed here and provisioning happens on
-  // the next group message once the route promotes.
-  const homeRecipientPhone =
-    homeLineAuthority.kind === "home" || homeLineAuthority.kind === "bare"
-      ? homeLineAuthority.recipientPhone
-      : null;
-  const incomingRecipientPhone = normalizePhoneNumber(recipientPhoneNumber);
-  if (
-    !homeRecipientPhone
-    || !incomingRecipientPhone
-    || homeRecipientPhone !== incomingRecipientPhone
-  ) {
-    return ignored("group-chat-not-home-line");
+  if (!(await hasActiveHostedLinqManagedLine({
+    phoneNumberLookupKeys: input.threadRouteAccountLookupKeys,
+    prisma: input.prisma,
+  }))) {
+    return ignored("group-chat-unmanaged-line");
   }
 
   let createdContainerMemberId: string | null = null;

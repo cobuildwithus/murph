@@ -666,6 +666,7 @@ function createPrisma(input: {
 }
 
 function createStatefulThreadRoutePrisma() {
+  const activeManagedLineLookupKeys = new Set<string>();
   const ownerState = {
     accountGroupMemberships: [] as Array<{
       group: { billingStatus: HostedBillingStatus; suspendedAt: Date | null };
@@ -903,6 +904,21 @@ function createStatefulThreadRoutePrisma() {
     upsert: vi.fn(),
     updateMany: vi.fn(),
   };
+  const hostedLinqLine = {
+    findFirst: vi.fn().mockImplementation(async ({ where }: {
+      where: {
+        phoneNumberLookupKey?: { in?: string[] };
+      };
+    }) => {
+      const lookupKeys = where.phoneNumberLookupKey?.in ?? [];
+      const matchedLookupKey = lookupKeys.find((lookupKey) =>
+        activeManagedLineLookupKeys.has(lookupKey),
+      );
+      return matchedLookupKey
+        ? { phoneNumberLookupKey: matchedLookupKey }
+        : null;
+    }),
+  };
   // Unified access read (readActiveHostedMemberAccess). Members are active by
   // default; thread-container members derive access from their (active) owner.
   // Tests for inactive members override this mock.
@@ -935,12 +951,20 @@ function createStatefulThreadRoutePrisma() {
     $executeRaw: executeRaw,
     $queryRaw: vi.fn().mockResolvedValue([]),
     $transaction: vi.fn(async (callback: (tx: unknown) => Promise<unknown>) => callback(prisma)),
+    hostedLinqLine,
     hostedMember,
     hostedMemberRouting,
     hostedThreadContainer,
     hostedThreadContainerParticipant,
     hostedThreadRoute,
     hostedWorkspace,
+    seedActiveManagedLinqLine(phoneNumber: string) {
+      const lookupKey = createHostedPhoneLookupKey(phoneNumber);
+      if (!lookupKey) {
+        throw new Error("Expected a managed Linq line lookup key.");
+      }
+      activeManagedLineLookupKeys.add(lookupKey);
+    },
     seedThreadRoute(input: {
       channel: string;
       containerMemberId: string;
@@ -3134,6 +3158,24 @@ describe("Linq group chat auto-provision", () => {
     );
   }
 
+  function expectManagedLineAuthorityLookup(
+    prisma: ReturnType<typeof createStatefulThreadRoutePrisma>,
+    phoneNumber: string,
+  ): void {
+    expect(prisma.hostedLinqLine.findFirst).toHaveBeenCalledWith({
+      select: { phoneNumberLookupKey: true },
+      where: {
+        configuredAt: { not: null },
+        egressPolicy: "enabled",
+        healthStatus: { in: ["healthy", "unknown"] },
+        phoneNumberEncrypted: { not: null },
+        phoneNumberLookupKey: {
+          in: createHostedPhoneLookupKeyReadCandidates(phoneNumber),
+        },
+      },
+    });
+  }
+
   function mockAllowedThreadUsage(): void {
     vi.mocked(usageAllowance.checkHostedAiUsageGate).mockResolvedValue({
       allowed: true,
@@ -3179,13 +3221,13 @@ describe("Linq group chat auto-provision", () => {
     prisma: ReturnType<typeof createStatefulThreadRoutePrisma>;
     senderCore: typeof senderCore;
   }): void {
+    input.prisma.seedActiveManagedLinqLine("+15550000000");
     input.prisma.hostedMember.findUnique.mockImplementation(async () => ({
       accountGroupMemberships: [],
       billingStatus: HostedBillingStatus.active,
       suspendedAt: null,
       threadContainer: null,
     }));
-    mockHomeLinqRoute("+15550000000");
     vi.mocked(hostedMemberStore.readHostedMemberCoreState).mockResolvedValue(input.senderCore);
     vi.mocked(hostedMemberStore.createHostedMember).mockImplementation(async (createInput) => ({
       ...input.senderCore,
@@ -3271,6 +3313,7 @@ describe("Linq group chat auto-provision", () => {
           }),
           tx: prisma,
         });
+        expect(prisma.hostedLinqLine.findFirst).not.toHaveBeenCalled();
         expect(prisma.hostedThreadContainer.create).not.toHaveBeenCalled();
         expect(memberIdentityStore.lookupHostedMemberIdentityByPhoneNumber).toHaveBeenCalledWith({
           phoneNumber: "+15551112222",
@@ -3547,15 +3590,16 @@ describe("Linq group chat auto-provision", () => {
         billingStatus: HostedBillingStatus.not_started,
       },
     },
-  ])("provisions a thread container and routes the first group message from the home-line $kind member", async ({ senderAccess }) => {
+  ])("provisions a thread container on a managed non-home line for the $kind member", async ({ senderAccess }) => {
     const prisma = createStatefulThreadRoutePrisma();
+    prisma.seedActiveManagedLinqLine("+15550000000");
     mockSenderLookup(senderCore);
     prisma.hostedMember.findUnique.mockImplementation(async () => ({
       ...senderAccess,
       suspendedAt: null,
       threadContainer: null,
     }));
-    mockHomeLinqRoute("+15550000000");
+    mockHomeLinqRoute("+15559999999");
     vi.mocked(hostedMemberStore.readHostedMemberCoreState).mockResolvedValue(senderCore);
     vi.mocked(hostedMemberStore.createHostedMember).mockImplementation(async (input) => ({
       ...senderCore,
@@ -3608,6 +3652,8 @@ describe("Linq group chat auto-provision", () => {
       ok: true,
       reason: "wake-appended-thread-route",
     });
+    expect(memberRoutingStore.readHostedMemberRoutingState).not.toHaveBeenCalled();
+    expectManagedLineAuthorityLookup(prisma, "+15550000000");
     expect(prisma.hostedThreadContainer.create).toHaveBeenCalledTimes(1);
     const containerCreate =
       prisma.hostedThreadContainer.create.mock.calls[0]![0] as {
@@ -3821,32 +3867,37 @@ describe("Linq group chat auto-provision", () => {
     }
   });
 
-  it("does not auto-provision group threads from a pending (uncommitted) route", async () => {
+  it("dedupes a replay after managed-line provisioning without re-provisioning", async () => {
     const prisma = createStatefulThreadRoutePrisma();
     mockSenderLookup(senderCore);
-    // Ops re-invite in flight: pending chat on the group's line, no committed
-    // home route. Group auto-provisioning must fail closed until promotion.
-    vi.mocked(memberRoutingStore.readHostedMemberRoutingState).mockResolvedValue({
-      linqChatId: null,
-      linqRecipientPhone: null,
-      pendingLinqChatId: "chat_pending_123",
-      pendingLinqRecipientPhone: "+15550000000",
-    } as Awaited<ReturnType<typeof memberRoutingStore.readHostedMemberRoutingState>>);
+    mockSuccessfulGroupProvision({ prisma, senderCore });
 
-    const plan = await planHostedOnboardingLinqWebhook({
+    const firstPlan = await planHostedOnboardingLinqWebhook({
+      event: buildLinqMessageReceivedEvent({}),
+      prisma: prisma as never,
+    });
+    vi.mocked(mailboxStore.readHostedMailboxItemByDedupeKey).mockResolvedValue(
+      buildHostedMailboxItem({
+        id: "mailbox_group_123",
+        userId: readSingleWakeHandoff(firstPlan).userId,
+      }),
+    );
+
+    const replayPlan = await planHostedOnboardingLinqWebhook({
       event: buildLinqMessageReceivedEvent({}),
       prisma: prisma as never,
     });
 
-    expect(plan.response).toMatchObject({
+    expect(replayPlan.response).toMatchObject({
+      duplicate: true,
       ignored: true,
       ok: true,
-      reason: "group-chat",
+      reason: "duplicate-webhook-event",
     });
-    // The authority gate ran (not an earlier bail) and failed closed.
-    expect(memberRoutingStore.readHostedMemberRoutingState).toHaveBeenCalledTimes(1);
-    expect(prisma.hostedThreadContainer.create).not.toHaveBeenCalled();
-    expect(mailboxStore.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+    expect(prisma.hostedThreadContainer.create).toHaveBeenCalledTimes(1);
+    expect(prisma.hostedThreadRoute.create).toHaveBeenCalledTimes(1);
+    expect(prisma.hostedLinqLine.findFirst).toHaveBeenCalledTimes(1);
+    expect(mailboxStore.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(2);
   });
 
   it("ignores group messages from senders without hosted member identity", async () => {
@@ -3872,6 +3923,7 @@ describe("Linq group chat auto-provision", () => {
 
   it("ignores group messages from members without active access", async () => {
     const prisma = createStatefulThreadRoutePrisma();
+    prisma.seedActiveManagedLinqLine("+15550000000");
     mockSenderLookup({
       ...senderCore,
       billingStatus: HostedBillingStatus.paused,
@@ -3896,12 +3948,14 @@ describe("Linq group chat auto-provision", () => {
       reason: "group-chat",
     });
     expect(memberRoutingStore.readHostedMemberRoutingState).not.toHaveBeenCalled();
+    expect(prisma.hostedLinqLine.findFirst).not.toHaveBeenCalled();
     expect(prisma.hostedThreadContainer.create).not.toHaveBeenCalled();
     expect(mailboxStore.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
   });
 
   it("ignores group messages from suspended members", async () => {
     const prisma = createStatefulThreadRoutePrisma();
+    prisma.seedActiveManagedLinqLine("+15550000000");
     mockSenderLookup({
       ...senderCore,
       suspendedAt: new Date("2026-06-24T00:00:00.000Z"),
@@ -3917,17 +3971,20 @@ describe("Linq group chat auto-provision", () => {
       ok: true,
       reason: "group-chat",
     });
+    expect(prisma.hostedLinqLine.findFirst).not.toHaveBeenCalled();
     expect(prisma.hostedThreadContainer.create).not.toHaveBeenCalled();
     expect(mailboxStore.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
   });
 
-  it("ignores group messages when the recipient line is not the sender's home line", async () => {
+  it("ignores group messages received on an unknown unmanaged recipient", async () => {
     const prisma = createStatefulThreadRoutePrisma();
+    prisma.seedActiveManagedLinqLine("+15550000000");
     mockSenderLookup(senderCore);
-    mockHomeLinqRoute("+15559999999");
 
     const plan = await planHostedOnboardingLinqWebhook({
-      event: buildLinqMessageReceivedEvent({}),
+      event: buildLinqMessageReceivedEvent({
+        recipient: "+15558889999",
+      }),
       prisma: prisma as never,
     });
 
@@ -3936,25 +3993,8 @@ describe("Linq group chat auto-provision", () => {
       ok: true,
       reason: "group-chat",
     });
-    expect(prisma.hostedThreadContainer.create).not.toHaveBeenCalled();
-    expect(mailboxStore.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
-  });
-
-  it("ignores group messages when the sender has no home Linq route yet", async () => {
-    const prisma = createStatefulThreadRoutePrisma();
-    mockSenderLookup(senderCore);
-    mockHomeLinqRoute(null);
-
-    const plan = await planHostedOnboardingLinqWebhook({
-      event: buildLinqMessageReceivedEvent({}),
-      prisma: prisma as never,
-    });
-
-    expect(plan.response).toMatchObject({
-      ignored: true,
-      ok: true,
-      reason: "group-chat",
-    });
+    expectManagedLineAuthorityLookup(prisma, "+15558889999");
+    expect(memberRoutingStore.readHostedMemberRoutingState).not.toHaveBeenCalled();
     expect(prisma.hostedThreadContainer.create).not.toHaveBeenCalled();
     expect(mailboxStore.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
   });
@@ -3981,6 +4021,7 @@ describe("Linq group chat auto-provision", () => {
 describe("Linq group chat concurrent provisioning race", () => {
   it("routes a concurrent-loser first group message into the winner's container", async () => {
     const prisma = createStatefulThreadRoutePrisma();
+    prisma.seedActiveManagedLinqLine("+15550000000");
     const senderCore = {
       billingStatus: HostedBillingStatus.active,
       createdAt: new Date("2026-06-24T00:00:00.000Z"),
@@ -4026,10 +4067,6 @@ describe("Linq group chat concurrent provisioning race", () => {
       identity: {},
       matchedBy: "phoneNumber",
     } as Awaited<ReturnType<typeof memberIdentityStore.lookupHostedMemberIdentityByPhoneNumber>>);
-    vi.mocked(memberRoutingStore.readHostedMemberRoutingState).mockResolvedValue({
-      linqChatId: "chat_home_123",
-      linqRecipientPhone: "+15550000000",
-    } as Awaited<ReturnType<typeof memberRoutingStore.readHostedMemberRoutingState>>);
     vi.mocked(hostedMemberStore.readHostedMemberCoreState).mockResolvedValue(senderCore);
     vi.mocked(mailboxStore.readHostedMailboxItemByDedupeKey).mockResolvedValue(null);
     vi.mocked(mailboxStore.appendHostedMailboxEnvelopeTx).mockResolvedValueOnce({
