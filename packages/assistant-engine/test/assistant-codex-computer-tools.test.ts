@@ -82,42 +82,41 @@ describe("murph computer dynamic tools", () => {
     expect(JSON.stringify(pauseTool?.inputSchema)).not.toContain("awaitingMessage");
   });
 
-  it("instructs the model toward computer_open and macro-step computer_act calls", () => {
-    // The 2026-06-24 rollout analysis showed the assistant burning ~$1+ per
-    // turn by running 20-30 single-action computer_act calls plus an observe
-    // before/after each one. The tool description and mandatory computer-use
-    // skill must both teach Codex to batch actions into coherent macro-steps.
-    // If this copy drifts back toward "one click per call" wording the
-    // fingerprint gate alone won't save us — pin the open + macro-step wording
-    // here and force the team to think about it on any future rewrite.
+  it("keeps Computer descriptions to authorization and retry-safe call contracts", () => {
     const actTool = MURPH_DYNAMIC_TOOLS.find((tool) => tool.name === "computer_act");
     const openTool = MURPH_DYNAMIC_TOOLS.find((tool) => tool.name === "computer_open");
     const osControlTool = MURPH_DYNAMIC_TOOLS.find((tool) => tool.name === "computer_os_control");
+    const pauseTool = MURPH_DYNAMIC_TOOLS.find(
+      (tool) => tool.name === "computer_pause_for_user",
+    );
     const actDescription = actTool?.description ?? "";
     const openDescription = openTool?.description ?? "";
     const osControlDescription = osControlTool?.description ?? "";
+    const pauseDescription = pauseTool?.description ?? "";
 
-    // computer_act must teach the macro-step contract.
+    expect(actDescription.length).toBeLessThanOrEqual(320);
     expect(actDescription).toMatch(/macro-step/iu);
-    expect(actDescription).toMatch(/combine.*verification/iu);
-    expect(actDescription).toMatch(/locator\.waitFor|waitForURL|waitForLoadState/u);
-    expect(actDescription).toMatch(/return\s+compact/iu);
-    // The pre-2026-06-24 wording is now an anti-pattern; it taught the model
-    // to split every action with redundant state reads.
-    expect(actDescription).not.toMatch(/computer_open.*before.*after/iu);
+    expect(actDescription).toContain("current authorized run");
+    expect(actDescription).toContain("no missing or sensitive user input or final confirmation");
+    expect(actDescription).toContain("unknown outcome");
+    expect(actDescription).toContain("call computer_open before retrying or acting again");
 
-    expect(openDescription).toMatch(/creates, reuses, resumes, or reclaims/iu);
-    expect(openDescription).toMatch(/visible page text/iu);
-    expect(openDescription).toMatch(/user handoff/iu);
+    expect(openDescription.length).toBeLessThanOrEqual(250);
+    expect(openDescription).toContain("current authorized Kernel browser run");
+    expect(openDescription).toContain("return runId, URL, title, and visible text");
+    expect(openDescription).toContain("after user handoff or any unknown browser outcome");
+    expect(openDescription).toContain("does not prove a prior effect failed");
 
-    // computer_os_control must use the same open primitive for unknown outcomes.
-    expect(osControlDescription).toMatch(/visible enabled control/iu);
-    expect(osControlDescription).toMatch(/fresh bounding box/iu);
-    expect(osControlDescription).toMatch(/set numClicks to 1 for every fallback click/iu);
-    expect(osControlDescription).toMatch(/blind second click/iu);
-    expect(osControlDescription).toMatch(/effect remains ambiguous/iu);
-    expect(osControlDescription).toMatch(/computer_open/iu);
-    expect(osControlDescription).not.toMatch(/computer_open.*before.*after/iu);
+    expect(osControlDescription.length).toBeLessThanOrEqual(310);
+    expect(osControlDescription).toContain("only when Playwright cannot operate");
+    expect(osControlDescription).toContain("Never enter sensitive data");
+    expect(osControlDescription).toContain("outcome may be unknown");
+    expect(osControlDescription).toContain("call computer_open before any retry or next action");
+
+    expect(pauseDescription.length).toBeLessThanOrEqual(300);
+    expect(pauseDescription).toContain("current authorized run");
+    expect(pauseDescription).toContain("This does not message the user");
+    expect(pauseDescription).toContain("does not prove handoff completion");
   });
 
   it("advertises computer tools only when execution transport is available", () => {
