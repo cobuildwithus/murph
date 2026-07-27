@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { spawn, spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -12,8 +13,12 @@ const BLACKSMITH_WORKFLOW = ".github/workflows/crabbox-bounded.yml";
 const BLACKSMITH_JOB = "hydrate";
 const DEFAULT_CRABBOX_PROFILE = "murph-verification";
 const CRABBOX_IDLE_TIMEOUT = "10m";
-const CRABBOX_TTL = "45m";
 const TRUSTED_CRABBOX_ENTRYPOINT = "/usr/local/bin/murph-crabbox-verify";
+const SSH_PROVIDER = "ssh";
+const SSH_TARGET = "macos";
+const SSH_WORK_ROOT = "/Users/Shared/murph-crabbox";
+const SSH_VERIFICATION_ENTRYPOINT = "scripts/crabbox/run-ssh-verification.mjs";
+const WORKSPACE_ARTIFACT_LOCK = "scripts/run-with-workspace-artifact-lock.mjs";
 const SAFE_CRABBOX_CLI_ENVIRONMENT_NAMES = [
   "HOME",
   "LANG",
@@ -27,7 +32,7 @@ const SAFE_CRABBOX_CLI_ENVIRONMENT_NAMES = [
   "XDG_CACHE_HOME",
   "XDG_CONFIG_HOME",
 ];
-const VALID_EXECUTORS = new Set(["auto", "local", "crabbox"]);
+const VALID_EXECUTORS = new Set(["auto", "local", "ssh", "crabbox"]);
 const SUPPORTED_VERIFICATION_COMMANDS = new Set([
   "test:diff",
   "verify:acceptance",
@@ -69,11 +74,11 @@ function assertSafeBlacksmithRoutingInputs(env) {
 
 export function resolveVerificationExecutor({
   env = process.env,
-  isCrabboxAvailable = detectCrabboxStack,
+  isExecutorAvailable = detectExecutorStack,
 } = {}) {
   const requestedExecutor = (env.MURPH_VERIFY_EXECUTOR ?? "auto").trim();
   if (!VALID_EXECUTORS.has(requestedExecutor)) {
-    throw new Error("MURPH_VERIFY_EXECUTOR must be auto, local, or crabbox.");
+    throw new Error("MURPH_VERIFY_EXECUTOR must be auto, local, ssh, or crabbox.");
   }
 
   const requiresVercelDevelopmentEnvironment = readBooleanFlag(
@@ -86,9 +91,9 @@ export function resolveVerificationExecutor({
   }
 
   if (requiresVercelDevelopmentEnvironment) {
-    if (requestedExecutor === "crabbox") {
+    if (requestedExecutor === "crabbox" || requestedExecutor === "ssh") {
       throw new Error(
-        "MURPH_VERIFY_REQUIRES_VERCEL_ENV=1 cannot be combined with MURPH_VERIFY_EXECUTOR=crabbox; the default Crabbox verification lane never forwards Vercel development credentials.",
+        `MURPH_VERIFY_REQUIRES_VERCEL_ENV=1 cannot be combined with MURPH_VERIFY_EXECUTOR=${requestedExecutor}; remote verification never forwards Vercel development credentials.`,
       );
     }
     return { executor: "local", reason: "vercel-development-env" };
@@ -102,14 +107,21 @@ export function resolveVerificationExecutor({
     return { executor: "local", reason: "auto" };
   }
 
-  assertSafeBlacksmithRoutingInputs(env);
-  if (!isCrabboxAvailable()) {
+  if (requestedExecutor === "crabbox") {
+    assertSafeBlacksmithRoutingInputs(env);
+  } else {
+    readSshHostAlias(env);
+  }
+  if (!isExecutorAvailable(requestedExecutor)) {
+    const requiredStack = requestedExecutor === "crabbox"
+      ? "Crabbox and Blacksmith CLIs are"
+      : "Crabbox CLI is";
     throw new Error(
-      "MURPH_VERIFY_EXECUTOR=crabbox was requested, but the Crabbox and Blacksmith CLIs are unavailable.",
+      `MURPH_VERIFY_EXECUTOR=${requestedExecutor} was requested, but the ${requiredStack} unavailable.`,
     );
   }
 
-  return { executor: "crabbox", reason: "explicit" };
+  return { executor: requestedExecutor, reason: "explicit" };
 }
 
 export function buildLocalInvocation(request) {
@@ -140,10 +152,6 @@ export function buildCrabboxInvocation(request) {
     BLACKSMITH_JOB,
     "--idle-timeout",
     CRABBOX_IDLE_TIMEOUT,
-    "--ttl",
-    CRABBOX_TTL,
-    "--stop-after",
-    "always",
     "--label",
     `murph ${request.verificationCommand}`,
     "--timing-json",
@@ -159,25 +167,99 @@ export function buildCrabboxInvocation(request) {
   return { args, command: "crabbox" };
 }
 
+export function buildSshInvocation(request, hostAlias, repoRoot) {
+  const identity = buildSshWorktreeIdentity(repoRoot);
+  return {
+    args: [
+      "run",
+      "--provider",
+      SSH_PROVIDER,
+      "--target",
+      SSH_TARGET,
+      "--static-host",
+      hostAlias,
+      "--static-work-root",
+      identity.workRoot,
+      "--full-resync",
+      "--preflight",
+      "--preflight-tools",
+      "git,rsync,node,corepack",
+      "--label",
+      `murph ${request.verificationCommand}`,
+      "--timing-json",
+      "--",
+      "node",
+      SSH_VERIFICATION_ENTRYPOINT,
+      request.verificationCommand,
+      ...request.commandArgs,
+    ],
+    command: "crabbox",
+    environment: {
+      CRABBOX_STATIC_ID: identity.staticId,
+    },
+  };
+}
+
+export function buildSshWorktreeIdentity(repoRoot) {
+  const digest = createHash("sha256")
+    .update(path.resolve(repoRoot))
+    .digest("hex")
+    .slice(0, 16);
+  return {
+    staticId: `static_murph_${digest}`,
+    workRoot: `${SSH_WORK_ROOT}/${digest}`,
+  };
+}
+
+export function protectRemoteInvocation({
+  environment,
+  invocation,
+  request,
+}) {
+  if (environment.MURPH_WORKSPACE_ARTIFACT_LOCK_HELD === "1") {
+    return invocation;
+  }
+  return {
+    args: [
+      WORKSPACE_ARTIFACT_LOCK,
+      `remote ${request.verificationCommand}`,
+      "--",
+      invocation.command,
+      ...invocation.args,
+    ],
+    command: "node",
+  };
+}
+
 export async function runVerification(argv, env = process.env) {
   const request = parseVerificationRequest(argv);
   const resolution = resolveVerificationExecutor({ env });
-  const invocation = resolution.executor === "crabbox"
+  const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+  const remoteInvocation = resolution.executor === "crabbox"
     ? buildCrabboxInvocation(request)
+    : resolution.executor === "ssh"
+      ? buildSshInvocation(request, readSshHostAlias(env), repoRoot)
+      : null;
+  const invocation = remoteInvocation
+    ? protectRemoteInvocation({
+        environment: env,
+        invocation: remoteInvocation,
+        request,
+      })
     : buildLocalInvocation(request);
 
   process.stderr.write(
     `[verification-dispatch] command=${request.verificationCommand} executor=${resolution.executor} reason=${resolution.reason}\n`,
   );
 
-  const childEnvironment = resolution.executor === "crabbox"
-    ? buildCrabboxCliEnvironment(env)
+  const childEnvironment = remoteInvocation
+    ? {
+        ...buildCrabboxCliEnvironment(env),
+        ...(remoteInvocation.environment ?? {}),
+      }
     : env;
-  if (resolution.executor === "crabbox") {
-    assertSafeBlacksmithSync(
-      path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."),
-      childEnvironment,
-    );
+  if (remoteInvocation) {
+    assertSafeRemoteSync(repoRoot, childEnvironment);
   }
   return await runChild(invocation, childEnvironment);
 }
@@ -200,12 +282,12 @@ export function buildCrabboxCliEnvironment(env) {
   return childEnvironment;
 }
 
-export function findSensitiveBlacksmithSyncPaths(paths) {
-  return paths.filter(isSensitiveBlacksmithSyncPath);
+export function findSensitiveRemoteSyncPaths(paths) {
+  return paths.filter(isSensitiveRemoteSyncPath);
 }
 
-export function assertSafeBlacksmithSync(repoRoot, environment = process.env) {
-  const unsafeStates = findUnsafeBlacksmithWorktreeStates(
+export function assertSafeRemoteSync(repoRoot, environment = process.env) {
+  const unsafeStates = findUnsafeRemoteWorktreeStates(
     readGitWorktreeStates(repoRoot, environment),
   );
   if (unsafeStates.length > 0) {
@@ -217,7 +299,7 @@ export function assertSafeBlacksmithSync(repoRoot, environment = process.env) {
       .map(([reason, count]) => `${reason}=${count}`)
       .join(", ");
     throw new Error(
-      `Blacksmith Testbox sync refused ${unsafeStates.length} unauthorized Git state${unsafeStates.length === 1 ? "" : "s"} (${summary}). Fully stage intentional new source or resolve the working-tree state before remote verification.`,
+      `Remote verification sync refused ${unsafeStates.length} unauthorized Git state${unsafeStates.length === 1 ? "" : "s"} (${summary}). Fully stage intentional new source or resolve the working-tree state before remote verification.`,
     );
   }
 
@@ -226,7 +308,7 @@ export function assertSafeBlacksmithSync(repoRoot, environment = process.env) {
     ["ls-files", "--cached", "-z"],
     environment,
   );
-  const sensitivePaths = findSensitiveBlacksmithSyncPaths(cachedPaths);
+  const sensitivePaths = findSensitiveRemoteSyncPaths(cachedPaths);
   if (sensitivePaths.length > 0) {
     const renderedPaths = sensitivePaths
       .slice(0, 10)
@@ -236,12 +318,12 @@ export function assertSafeBlacksmithSync(repoRoot, environment = process.env) {
       ? ` and ${sensitivePaths.length - 10} more`
       : "";
     throw new Error(
-      `Blacksmith Testbox sync refused sensitive managed paths: ${renderedPaths}${remainder}. Ignore or remove them before remote verification.`,
+      `Remote verification sync refused sensitive managed paths: ${renderedPaths}${remainder}. Ignore or remove them before remote verification.`,
     );
   }
 }
 
-export function findUnsafeBlacksmithWorktreeStates(entries) {
+export function findUnsafeRemoteWorktreeStates(entries) {
   const unmergedStates = new Set(["DD", "AU", "UD", "UA", "DU", "AA", "UU"]);
   const validIndexStatuses = new Set([" ", "M", "A", "D", "R", "C", "T"]);
   const validWorktreeStatuses = new Set([" ", "M", "D", "T"]);
@@ -278,19 +360,19 @@ export function parseGitStatusPorcelainV1Z(output) {
   let offset = 0;
   while (offset < output.length) {
     if (offset + 3 > output.length || output[offset + 2] !== " ") {
-      throw new Error("Unable to parse the Blacksmith Testbox Git status boundary.");
+      throw new Error("Unable to parse the remote verification Git status boundary.");
     }
     const indexStatus = output[offset];
     const worktreeStatus = output[offset + 1];
     const pathEnd = output.indexOf("\0", offset + 3);
     if (pathEnd === -1) {
-      throw new Error("Unable to parse the Blacksmith Testbox Git status boundary.");
+      throw new Error("Unable to parse the remote verification Git status boundary.");
     }
     offset = pathEnd + 1;
     if (indexStatus === "R" || indexStatus === "C") {
       const originalPathEnd = output.indexOf("\0", offset);
       if (originalPathEnd === -1) {
-        throw new Error("Unable to parse the Blacksmith Testbox Git status boundary.");
+        throw new Error("Unable to parse the remote verification Git status boundary.");
       }
       offset = originalPathEnd + 1;
     }
@@ -311,7 +393,7 @@ function readGitWorktreeStates(repoRoot, environment) {
     },
   );
   if (result.status !== 0) {
-    throw new Error("Unable to inspect the Blacksmith Testbox sync set with git status.");
+    throw new Error("Unable to inspect the remote verification sync set with git status.");
   }
   return parseGitStatusPorcelainV1Z(result.stdout);
 }
@@ -324,12 +406,12 @@ function listGitPaths(repoRoot, args, environment) {
     maxBuffer: 16 * 1024 * 1024,
   });
   if (result.status !== 0) {
-    throw new Error("Unable to inspect the Blacksmith Testbox sync set with git ls-files.");
+    throw new Error("Unable to inspect the remote verification sync set with git ls-files.");
   }
   return result.stdout.split("\0").filter(Boolean);
 }
 
-function isSensitiveBlacksmithSyncPath(filePath) {
+function isSensitiveRemoteSyncPath(filePath) {
   const normalized = filePath.replaceAll("\\", "/");
   const segments = normalized.split("/");
   const basename = segments.at(-1) ?? "";
@@ -367,10 +449,12 @@ function isSensitiveBlacksmithSyncPath(filePath) {
     normalized.startsWith("source-artifacts/");
 }
 
-function detectCrabboxStack() {
+function detectExecutorStack(executor) {
   const environment = buildCrabboxCliEnvironment(process.env);
-  return isCommandAvailable("crabbox", environment) &&
-    isCommandAvailable("blacksmith", environment);
+  if (!isCommandAvailable("crabbox", environment)) {
+    return false;
+  }
+  return executor !== "crabbox" || isCommandAvailable("blacksmith", environment);
 }
 
 function isCommandAvailable(command, environment) {
@@ -390,6 +474,24 @@ function readOptionalValue(value, name) {
     throw new Error(`${name} must not contain control characters.`);
   }
   return normalized;
+}
+
+export function readSshHostAlias(environment) {
+  const hostAlias = readOptionalValue(
+    environment.MURPH_VERIFY_SSH_HOST,
+    "MURPH_VERIFY_SSH_HOST",
+  );
+  if (!hostAlias) {
+    throw new Error(
+      "MURPH_VERIFY_EXECUTOR=ssh requires MURPH_VERIFY_SSH_HOST to name a dedicated host in the local SSH config.",
+    );
+  }
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,252}$/u.test(hostAlias)) {
+    throw new Error(
+      "MURPH_VERIFY_SSH_HOST must be a safe SSH host alias containing only letters, digits, dots, underscores, and hyphens.",
+    );
+  }
+  return hostAlias;
 }
 
 function readBooleanFlag(value, name) {

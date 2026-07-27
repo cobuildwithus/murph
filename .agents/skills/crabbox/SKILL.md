@@ -1,6 +1,6 @@
 ---
 name: crabbox
-description: Use Murph's Crabbox dispatcher with the direct Blacksmith Testbox provider for finite, CPU-heavy completion checks while keeping edits, audits, commits, and environment-bound development local.
+description: Use Murph's Crabbox dispatcher with a dedicated static macOS SSH worker or the direct Blacksmith Testbox provider for finite, CPU-heavy completion checks while keeping edits, audits, commits, and environment-bound development local.
 license: Apache-2.0
 ---
 
@@ -14,14 +14,15 @@ pnpm test:diff <changed-path ...>
 pnpm verify:acceptance
 ```
 
-Those commands stay local by default. Use
-`MURPH_VERIFY_EXECUTOR=crabbox` only under the decision rule in
+Those commands stay local by default. A configured, dedicated, secret-free Mac
+may be selected intentionally with `MURPH_VERIFY_EXECUTOR=ssh`; use
+`MURPH_VERIFY_EXECUTOR=crabbox` only under the paid-executor decision rule in
 `agent-docs/operations/verification-and-runtime.md`: ordinary escalation follows
 a 10-minute local admission wait, while a workflow or trusted-entrypoint change
 requires one post-landing trust-root proof without that wait. Within the local
 path, canonical acceptance intentionally selects the bounded composed profile
 on hosts with at least 12 logical CPUs; ordinary commands and smaller hosts keep
-their conservative shared-host caps. Every explicit remote check creates a
+their conservative shared-host caps. Every explicit Blacksmith check creates a
 fresh one-shot Testbox whose hydration route is pinned by the dispatcher.
 Reusable lease IDs are rejected because the available lease metadata does not
 prove the Blacksmith organization that installed the root-owned trust
@@ -48,7 +49,7 @@ entrypoint.
   and hydration job before the Testbox is created and hydrated. Do not warm a
   lease separately or replace those arguments with mutable local profile or
   config routing.
-- Blacksmith can sync Git-tracked and untracked non-ignored paths. The dispatcher
+- Both remote providers can sync Git-tracked and untracked non-ignored paths. The dispatcher
   admits only modified tracked files, tracked renames/deletions, ignored files,
   and new files whose current contents are fully staged. Ordinary untracked,
   intent-to-add, staged-then-changed additions, unmerged, and unsupported Git
@@ -71,6 +72,12 @@ entrypoint.
 - Canonical completion verification does not need Vercel development variables.
   When a separate direct scenario truly requires Vercel development state, set
   `MURPH_VERIFY_REQUIRES_VERCEL_ENV=1` and keep that command local.
+- Static SSH uses only a safe alias from `MURPH_VERIFY_SSH_HOST`, a dedicated
+  standard macOS account with no personal or product credentials, a
+  per-worktree opaque workspace below `/Users/Shared/murph-crabbox`, full
+  resync, and the existing local artifact lock. It never forwards an SSH agent
+  or environment allowlist. Follow the one-time host setup and doctor command in
+  the verification guide.
 
 ## Controls
 
@@ -81,21 +88,30 @@ pnpm test:diff <paths>
 # Explicit local execution; capable acceptance still uses its bounded composition.
 MURPH_VERIFY_EXECUTOR=local pnpm verify:acceptance
 
+# Use the configured free static macOS worker and fail rather than falling back.
+MURPH_VERIFY_EXECUTOR=ssh \
+MURPH_VERIFY_SSH_HOST=murph-worker \
+pnpm verify:acceptance
+
 # Force a fresh one-shot Blacksmith Testbox and fail rather than falling back.
 MURPH_VERIFY_EXECUTOR=crabbox pnpm verify:acceptance
 ```
 
-Explicit remote runs request `--stop-after always`, a 10-minute idle timeout,
-and a 45-minute maximum lease lifetime. The hydration workflow has a 50-minute
-last-resort ceiling. Do not run both remote `test:diff` and remote acceptance on
-the same exact head: reserve the one remote check for acceptance when acceptance
-is required, otherwise use the diff lane. Retry an unchanged head only for a
-concrete infrastructure failure and record why.
+Blacksmith one-shot runs automatically stop every newly acquired Testbox when
+the command exits because the dispatcher never requests either keep mode. The
+provider receives a 10-minute idle timeout, and the hydration workflow has a
+50-minute last-resort ceiling. Static SSH is host-managed and has no provider
+TTL. Do not run both remote `test:diff` and remote acceptance on the same exact
+head: reserve the one remote check for acceptance when acceptance is required,
+otherwise use the diff lane. Retry an unchanged head only for a concrete
+infrastructure failure and record why.
 
 Blacksmith owns machine provisioning, workflow hydration, Git-managed sync,
 command transport, and idle expiry. Crabbox owns provider selection, the local
-claim, command invocation, timing, and cleanup. Preserve the printed Testbox ID,
-Crabbox timing summary, and linked Actions run in verification evidence.
+claim, command invocation, timing, and one-shot cleanup. Preserve the printed
+Testbox ID, Crabbox timing summary, and linked Actions run in Blacksmith
+verification evidence. For static SSH, preserve the command, host alias, result,
+and timing without recording account or local-path identifiers.
 On the standard 16-vCPU Testbox, `verify:acceptance` automatically selects the
 same bounded composed-parallel profile as a capable local host; confirm the
 printed `resources` line rather than adding provider-specific worker overrides.

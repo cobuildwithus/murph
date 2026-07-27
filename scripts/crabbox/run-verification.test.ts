@@ -16,6 +16,12 @@ import { afterEach, describe, expect, it } from "vitest";
 
 const repoRoot = path.resolve(import.meta.dirname, "../..");
 const runnerPath = path.join(repoRoot, "scripts", "crabbox", "run-verification.mjs");
+const sshRunnerPath = path.join(
+  repoRoot,
+  "scripts",
+  "crabbox",
+  "run-ssh-verification.mjs",
+);
 const tempRoots: string[] = [];
 
 afterEach(() => {
@@ -157,6 +163,40 @@ describe("Crabbox verification environment", () => {
       "parseRemoteVerificationRequest",
       ["release:patch"],
     )).toContain("supports only");
+  });
+
+  it("lets the dedicated SSH account enter only the sanitized verification core", () => {
+    const tempRoot = makeTempRoot();
+    const binDir = path.join(tempRoot, "bin");
+    const environmentPath = path.join(tempRoot, "environment.txt");
+
+    writeExecutable(path.join(binDir, "corepack"), "#!/bin/sh\nexit 0");
+    writeExecutable(
+      path.join(binDir, "bash"),
+      [
+        "#!/bin/sh",
+        `printf "CI=%s\\nMURPH_CRABBOX_REMOTE=%s\\nMURPH_VERIFY_EXECUTOR=%s\\nOPENAI_API_KEY=%s\\n" "\${CI-unset}" "\${MURPH_CRABBOX_REMOTE-unset}" "\${MURPH_VERIFY_EXECUTOR-unset}" "\${OPENAI_API_KEY-unset}" > ${shellQuote(environmentPath)}`,
+      ].join("\n"),
+    );
+
+    const result = spawnSync(
+      process.execPath,
+      [sshRunnerPath, "verify:acceptance"],
+      {
+        cwd: repoRoot,
+        encoding: "utf8",
+        env: {
+          HOME: path.join(tempRoot, "home"),
+          OPENAI_API_KEY: "must-not-reach-verification",
+          PATH: `${binDir}${path.delimiter}/usr/bin:/bin`,
+        },
+      },
+    );
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(readFileSync(environmentPath, "utf8")).toBe(
+      "CI=unset\nMURPH_CRABBOX_REMOTE=1\nMURPH_VERIFY_EXECUTOR=local\nOPENAI_API_KEY=unset\n",
+    );
   });
 
   it("rejects direct candidate execution outside the trusted Testbox entrypoint", () => {

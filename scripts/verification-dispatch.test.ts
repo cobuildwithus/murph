@@ -68,9 +68,14 @@ describe("verification dispatcher", () => {
       MURPH_VERIFY_REQUIRES_VERCEL_ENV: "1",
     }, true);
     expect(result).toContain("never forwards Vercel development credentials");
+
+    expect(resolveExecutorFailure({
+      MURPH_VERIFY_EXECUTOR: "ssh",
+      MURPH_VERIFY_REQUIRES_VERCEL_ENV: "1",
+    }, true)).toContain("never forwards Vercel development credentials");
   });
 
-  it("rejects coordinator pools and fails closed when the direct CLI stack is unavailable", () => {
+  it("rejects coordinator pools and fails closed when an explicit remote stack is unavailable", () => {
     expect(resolveExecutorFailure({
       MURPH_CRABBOX_POOL: "pool",
       MURPH_VERIFY_EXECUTOR: "crabbox",
@@ -86,6 +91,38 @@ describe("verification dispatcher", () => {
     expect(resolveExecutorFailure({
       MURPH_VERIFY_EXECUTOR: "crabbox",
     }, false)).toContain("Crabbox and Blacksmith CLIs are unavailable");
+
+    expect(resolveExecutorFailure({
+      MURPH_VERIFY_EXECUTOR: "ssh",
+      MURPH_VERIFY_SSH_HOST: "worker-mac",
+    }, false)).toContain("Crabbox CLI is unavailable");
+  });
+
+  it("requires a safe SSH-config host alias", () => {
+    expect(resolveExecutorFailure({
+      MURPH_VERIFY_EXECUTOR: "ssh",
+    }, true)).toContain("requires MURPH_VERIFY_SSH_HOST");
+
+    for (const hostAlias of [
+      "-worker",
+      "worker@example.test",
+      "worker.example.test:22",
+      "worker example",
+    ]) {
+      expect(resolveExecutorFailure({
+        MURPH_VERIFY_EXECUTOR: "ssh",
+        MURPH_VERIFY_SSH_HOST: hostAlias,
+      }, true)).toContain("must be a safe SSH host alias");
+    }
+    expect(resolveExecutorFailure({
+      MURPH_VERIFY_EXECUTOR: "ssh",
+      MURPH_VERIFY_SSH_HOST: "worker\nexample",
+    }, true)).toContain("must not contain control characters");
+
+    expect(resolveExecutor({
+      MURPH_VERIFY_EXECUTOR: "ssh",
+      MURPH_VERIFY_SSH_HOST: "worker-mac.local",
+    }, true)).toMatchObject({ executor: "ssh", reason: "explicit" });
   });
 
   it("rebuilds the local Crabbox CLI environment from non-secret host paths", () => {
@@ -168,6 +205,7 @@ describe("verification dispatcher", () => {
           MURPH_CRABBOX_NO_FORWARD: "must-not-reach-crabbox",
           MURPH_CRABBOX_PROFILE: "attacker-controlled-profile",
           MURPH_VERIFY_EXECUTOR: "crabbox",
+          MURPH_WORKSPACE_ARTIFACT_LOCK_HELD: "1",
           NODE_OPTIONS: "--trace-warnings",
           OPENAI_API_KEY: "must-not-reach-crabbox",
           PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ""}`,
@@ -200,8 +238,10 @@ describe("verification dispatcher", () => {
     );
     expect(flagValue(args, "--blacksmith-job")).toBe("hydrate");
     expect(flagValue(args, "--idle-timeout")).toBe("10m");
-    expect(flagValue(args, "--ttl")).toBe("45m");
-    expect(flagValue(args, "--stop-after")).toBe("always");
+    expect(args).not.toContain("--ttl");
+    expect(args).not.toContain("--stop-after");
+    expect(args).not.toContain("--keep");
+    expect(args).not.toContain("--keep-on-failure");
     expect(args).not.toContain("--id");
     expect(args).not.toContain("--pool");
     expect(args).not.toContain("--pool-return");
@@ -242,9 +282,132 @@ describe("verification dispatcher", () => {
     );
   });
 
-  it("identifies sensitive files before Blacksmith delegates its Git-managed sync", () => {
+  it("uses one isolated, secret-free static macOS workspace per local worktree", () => {
+    const tempRoot = makeTempRoot();
+    const binDir = path.join(tempRoot, "bin");
+    const capturePath = path.join(tempRoot, "args.txt");
+    const environmentPath = path.join(tempRoot, "environment.txt");
+    writeExecutable(
+      path.join(binDir, "crabbox"),
+      [
+        "#!/bin/sh",
+        'if [ "${1:-}" = "--version" ]; then exit 0; fi',
+        `printf "%s\\n" "$@" > ${shellQuote(capturePath)}`,
+        `printf "CRABBOX_STATIC_ID=%s\\nMURPH_WORKSPACE_ARTIFACT_LOCK_HELD=%s\\nMURPH_VERIFY_SSH_HOST=%s\\nOPENAI_API_KEY=%s\\nNODE_OPTIONS=%s\\n" "\${CRABBOX_STATIC_ID-unset}" "\${MURPH_WORKSPACE_ARTIFACT_LOCK_HELD-unset}" "\${MURPH_VERIFY_SSH_HOST-unset}" "\${OPENAI_API_KEY-unset}" "\${NODE_OPTIONS-unset}" > ${shellQuote(environmentPath)}`,
+      ].join("\n"),
+    );
+    writeExecutable(
+      path.join(binDir, "git"),
+      [
+        "#!/bin/sh",
+        "case \"${1:-}\" in",
+        "  status) exit 0 ;;",
+        "  ls-files) printf '%b' 'scripts/verification-dispatch.mjs\\000' ;;",
+        "esac",
+      ].join("\n"),
+    );
+
+    const result = spawnSync(
+      process.execPath,
+      [dispatcherPath, "test:diff", "packages/assistant-engine"],
+      {
+        cwd: repoRoot,
+        encoding: "utf8",
+        env: {
+          ...withoutVerificationRoutingEnvironment(process.env),
+          MURPH_VERIFY_EXECUTOR: "ssh",
+          MURPH_VERIFY_SSH_HOST: "worker-mac.local",
+          MURPH_WORKSPACE_ARTIFACT_LOCK_HELD: "1",
+          NODE_OPTIONS: "--trace-warnings",
+          OPENAI_API_KEY: "must-not-reach-crabbox",
+          PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ""}`,
+        },
+      },
+    );
+
+    expect(result.status, result.stderr).toBe(0);
+    const args = readFileSync(capturePath, "utf8").trim().split("\n");
+    expect(flagValue(args, "--provider")).toBe("ssh");
+    expect(flagValue(args, "--target")).toBe("macos");
+    expect(flagValue(args, "--static-host")).toBe("worker-mac.local");
+    expect(flagValue(args, "--static-work-root")).toMatch(
+      /^\/Users\/Shared\/murph-crabbox\/[a-f0-9]{16}$/u,
+    );
+    expect(args).toContain("--full-resync");
+    expect(args).toContain("--preflight");
+    expect(flagValue(args, "--preflight-tools")).toBe("git,rsync,node,corepack");
+    expect(args).not.toContain("--allow-env");
+    expect(args).not.toContain("--env-from-profile");
+    expect(args).not.toContain("--keep");
+    expect(args).not.toContain("--ttl");
+    expect(args.slice(-4)).toEqual([
+      "node",
+      "scripts/crabbox/run-ssh-verification.mjs",
+      "test:diff",
+      "packages/assistant-engine",
+    ]);
+    expect(readFileSync(environmentPath, "utf8")).toMatch(
+      /^CRABBOX_STATIC_ID=static_murph_[a-f0-9]{16}\nMURPH_WORKSPACE_ARTIFACT_LOCK_HELD=unset\nMURPH_VERIFY_SSH_HOST=unset\nOPENAI_API_KEY=unset\nNODE_OPTIONS=unset\n$/u,
+    );
+
+    const firstIdentity = callDispatcherExport<Record<string, string>>(
+      "buildSshWorktreeIdentity",
+      "/workspace/one",
+    );
+    const repeatedIdentity = callDispatcherExport<Record<string, string>>(
+      "buildSshWorktreeIdentity",
+      "/workspace/one",
+    );
+    const secondIdentity = callDispatcherExport<Record<string, string>>(
+      "buildSshWorktreeIdentity",
+      "/workspace/two",
+    );
+    expect(repeatedIdentity).toEqual(firstIdentity);
+    expect(secondIdentity).not.toEqual(firstIdentity);
+    expect(Object.values(firstIdentity).join(" ")).not.toContain("/workspace/one");
+
+    const directInvocation = {
+      args: ["run", "--provider", "ssh"],
+      command: "crabbox",
+    };
+    expect(callDispatcherExport(
+      "protectRemoteInvocation",
+      {
+        environment: { MURPH_WORKSPACE_ARTIFACT_LOCK_HELD: "1" },
+        invocation: directInvocation,
+        request: {
+          commandArgs: [],
+          verificationCommand: "verify:acceptance",
+        },
+      },
+    )).toEqual(directInvocation);
+    expect(callDispatcherExport<Record<string, unknown>>(
+      "protectRemoteInvocation",
+      {
+        environment: {},
+        invocation: directInvocation,
+        request: {
+          commandArgs: [],
+          verificationCommand: "verify:acceptance",
+        },
+      },
+    )).toMatchObject({
+      command: "node",
+      args: [
+        "scripts/run-with-workspace-artifact-lock.mjs",
+        "remote verify:acceptance",
+        "--",
+        "crabbox",
+        "run",
+        "--provider",
+        "ssh",
+      ],
+    });
+  });
+
+  it("identifies sensitive files before remote Git-managed sync", () => {
     expect(callDispatcherExport<string[]>(
-      "findSensitiveBlacksmithSyncPaths",
+      "findSensitiveRemoteSyncPaths",
       [
         ".env.example",
         ".env.local",
@@ -282,7 +445,7 @@ describe("verification dispatcher", () => {
 
   it("treats copied additions like additions while preserving tracked renames", () => {
     expect(callDispatcherExport(
-      "findUnsafeBlacksmithWorktreeStates",
+      "findUnsafeRemoteWorktreeStates",
       [
         { indexStatus: "C", worktreeStatus: " " },
         { indexStatus: "R", worktreeStatus: "M" },
@@ -290,7 +453,7 @@ describe("verification dispatcher", () => {
       ],
     )).toEqual([]);
     expect(callDispatcherExport(
-      "findUnsafeBlacksmithWorktreeStates",
+      "findUnsafeRemoteWorktreeStates",
       [
         { indexStatus: "C", worktreeStatus: "M" },
         { indexStatus: "C", worktreeStatus: "D" },
@@ -393,7 +556,7 @@ describe("verification dispatcher", () => {
     );
     expect(malformedRenameResult.status).toBe(1);
     expect(malformedRenameResult.stderr).toContain(
-      "Unable to parse the Blacksmith Testbox Git status boundary",
+      "Unable to parse the remote verification Git status boundary",
     );
     expect(existsSync(delegationMarkerPath)).toBe(false);
   });
@@ -474,7 +637,7 @@ describe("verification dispatcher", () => {
 
     for (const fileName of ["notes.txt", "credentials.json", ".netrc", "private.key"]) {
       writeFileSync(path.join(repoDir, fileName), "private\n", "utf8");
-      expect(callDispatcherExportFailure("assertSafeBlacksmithSync", repoDir))
+      expect(callDispatcherExportFailure("assertSafeRemoteSync", repoDir))
         .toContain("unauthorized Git state (untracked=1)");
       rmSync(path.join(repoDir, fileName));
     }
@@ -483,10 +646,10 @@ describe("verification dispatcher", () => {
     writeFileSync(path.join(repoDir, "tracked.ts"), "export const value = 2;\n", "utf8");
     writeFileSync(path.join(repoDir, "staged.ts"), "export const staged = true;\n", "utf8");
     runGit(repoDir, ["add", "staged.ts"]);
-    expect(callDispatcherVoidExport("assertSafeBlacksmithSync", repoDir)).toBe("ok");
+    expect(callDispatcherVoidExport("assertSafeRemoteSync", repoDir)).toBe("ok");
 
     writeFileSync(path.join(repoDir, "staged.ts"), "export const staged = 'changed';\n", "utf8");
-    expect(callDispatcherExportFailure("assertSafeBlacksmithSync", repoDir))
+    expect(callDispatcherExportFailure("assertSafeRemoteSync", repoDir))
       .toContain("staged-addition-changed=1");
     runGit(repoDir, ["add", "staged.ts"]);
 
@@ -497,13 +660,13 @@ describe("verification dispatcher", () => {
     );
     runGit(repoDir, ["add", "staged-then-deleted.ts"]);
     rmSync(path.join(repoDir, "staged-then-deleted.ts"));
-    expect(callDispatcherExportFailure("assertSafeBlacksmithSync", repoDir))
+    expect(callDispatcherExportFailure("assertSafeRemoteSync", repoDir))
       .toContain("staged-addition-changed=1");
     runGit(repoDir, ["reset", "--quiet", "--", "staged-then-deleted.ts"]);
 
     writeFileSync(path.join(repoDir, "intent.ts"), "export const intent = true;\n", "utf8");
     runGit(repoDir, ["add", "--intent-to-add", "intent.ts"]);
-    expect(callDispatcherExportFailure("assertSafeBlacksmithSync", repoDir))
+    expect(callDispatcherExportFailure("assertSafeRemoteSync", repoDir))
       .toContain("intent-to-add=1");
     runGit(repoDir, ["add", "intent.ts"]);
 
@@ -511,11 +674,11 @@ describe("verification dispatcher", () => {
     writeFileSync(path.join(repoDir, "renamed.ts"), "export const renamed = 2;\n", "utf8");
     rmSync(path.join(repoDir, "delete-me.ts"));
     runGit(repoDir, ["rm", "--quiet", "staged-delete.ts"]);
-    expect(callDispatcherVoidExport("assertSafeBlacksmithSync", repoDir)).toBe("ok");
+    expect(callDispatcherVoidExport("assertSafeRemoteSync", repoDir)).toBe("ok");
 
     writeFileSync(path.join(repoDir, ".env.production"), "synthetic-test-value\n", "utf8");
     runGit(repoDir, ["add", "--force", ".env.production"]);
-    expect(callDispatcherExportFailure("assertSafeBlacksmithSync", repoDir))
+    expect(callDispatcherExportFailure("assertSafeRemoteSync", repoDir))
       .toContain("sync refused sensitive managed paths");
   });
 
@@ -580,16 +743,16 @@ describe("verification dispatcher", () => {
     writeFileSync(path.join(repoDir, "source.ts"), "export const value = 2;\n", "utf8");
     runGit(repoDir, ["add", "source.ts", "copied.ts"]);
     expect(readGitStatus(repoDir)).toContain("C  copied.ts\0source.ts\0");
-    expect(callDispatcherVoidExport("assertSafeBlacksmithSync", repoDir)).toBe("ok");
+    expect(callDispatcherVoidExport("assertSafeRemoteSync", repoDir)).toBe("ok");
 
     writeFileSync(path.join(repoDir, "copied.ts"), "export const value = 3;\n", "utf8");
     expect(readGitStatus(repoDir)).toContain("CM copied.ts\0source.ts\0");
-    expect(callDispatcherExportFailure("assertSafeBlacksmithSync", repoDir))
+    expect(callDispatcherExportFailure("assertSafeRemoteSync", repoDir))
       .toContain("staged-addition-changed=1");
 
     rmSync(path.join(repoDir, "copied.ts"));
     expect(readGitStatus(repoDir)).toContain("CD copied.ts\0source.ts\0");
-    expect(callDispatcherExportFailure("assertSafeBlacksmithSync", repoDir))
+    expect(callDispatcherExportFailure("assertSafeRemoteSync", repoDir))
       .toContain("staged-addition-changed=1");
   });
 });
@@ -686,7 +849,7 @@ function runResolver(
     try {
       const result = module.resolveVerificationExecutor({
         env: JSON.parse(process.env.MURPH_TEST_ENV_JSON),
-        isCrabboxAvailable: () => process.env.MURPH_TEST_CRABBOX_AVAILABLE === "1",
+        isExecutorAvailable: () => process.env.MURPH_TEST_CRABBOX_AVAILABLE === "1",
       });
       process.stdout.write(JSON.stringify(result));
     } catch (error) {
@@ -733,6 +896,8 @@ function withoutVerificationRoutingEnvironment(
   delete sanitized.MURPH_CRABBOX_REMOTE;
   delete sanitized.MURPH_VERIFY_EXECUTOR;
   delete sanitized.MURPH_VERIFY_REQUIRES_VERCEL_ENV;
+  delete sanitized.MURPH_VERIFY_SSH_HOST;
+  delete sanitized.MURPH_WORKSPACE_ARTIFACT_LOCK_HELD;
   return sanitized;
 }
 
@@ -759,7 +924,7 @@ function runSyncGuardWithParentEnvironment(
     try {
       const parentEnvironment = JSON.parse(process.env.MURPH_TEST_PARENT_ENV_JSON);
       const childEnvironment = module.buildCrabboxCliEnvironment(parentEnvironment);
-      module.assertSafeBlacksmithSync(
+      module.assertSafeRemoteSync(
         process.env.MURPH_TEST_REPO_DIR,
         childEnvironment,
       );

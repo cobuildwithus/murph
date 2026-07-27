@@ -102,6 +102,13 @@ export function assertNoSensitiveEnvironment(environment) {
 
 export async function runRemoteVerification(argv, sourceEnvironment = process.env) {
   assertTrustedEntrypoint(sourceEnvironment);
+  return await runSanitizedVerification(argv, sourceEnvironment);
+}
+
+export async function runSanitizedVerification(
+  argv,
+  sourceEnvironment = process.env,
+) {
   const request = parseRemoteVerificationRequest(argv);
   const environment = buildSanitizedVerificationEnvironment(sourceEnvironment);
   const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");

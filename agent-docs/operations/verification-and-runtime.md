@@ -1,6 +1,6 @@
 # Verification And Runtime
 
-Last verified: 2026-07-26
+Last verified: 2026-07-27
 
 ## Verification Execution Location
 
@@ -14,12 +14,13 @@ through `scripts/verification-dispatch.mjs`:
   intentionally selects its bounded composed
   profile there when at least 12 logical CPUs are available; ordinary commands
   and smaller hosts keep their conservative shared-host worker budgets.
-- `MURPH_VERIFY_EXECUTOR=local|crabbox` explicitly selects an executor; forcing
-  Crabbox requests a fresh one-shot Testbox and fails closed when either CLI is
-  unavailable. Blacksmith capacity or auth failure fails that explicit attempt
-  instead of silently duplicating it locally. The `:local` package aliases
-  exist only for executor diagnosis because canonical automatic execution is
-  already local.
+- `MURPH_VERIFY_EXECUTOR=local|ssh|crabbox` explicitly selects an executor.
+  `ssh` uses a configured, dedicated static macOS worker through Crabbox and
+  fails closed when its safe host alias or the Crabbox CLI is unavailable.
+  `crabbox` requests a fresh one-shot Blacksmith Testbox and fails closed when
+  either CLI is unavailable. No remote failure silently duplicates work
+  locally. The `:local` package aliases exist only for executor diagnosis
+  because canonical automatic execution is already local.
 - The Testbox hydration workflow must exist on the repository default branch
   before GitHub accepts a delegated `workflow_dispatch`. The change that first
   introduces or moves `.github/workflows/crabbox-bounded.yml` therefore uses
@@ -38,6 +39,62 @@ including diff scope, reverse dependents, coverage thresholds, app verification,
 and acceptance semantics. The remote bootstrap reconciles the synced lockfile
 with `pnpm install --frozen-lockfile --prefer-offline` before verification.
 
+### Dedicated static macOS worker
+
+A spare Mac is the preferred free offload lane for finite, CPU-heavy canonical
+checks once it is configured. Select it intentionally; `auto` remains local:
+
+```bash
+MURPH_VERIFY_EXECUTOR=ssh \
+MURPH_VERIFY_SSH_HOST=murph-worker \
+pnpm test:diff <path ...>
+```
+
+`MURPH_VERIFY_SSH_HOST` must be a plain host alias from the initiating Mac's SSH
+config. The dispatcher does not accept inline users, ports, paths, or shell
+syntax. Crabbox's first-party static SSH provider owns transport and sync; Murph
+adds no daemon, queue, scheduler, shared checkout, or fallback selector.
+
+Prepare the worker once:
+
+1. Create a dedicated standard macOS account used only for verification. Keep
+   it out of iCloud, Keychain, password managers, developer cloud CLIs, product
+   credentials, repository `.env*` files, and Full Disk Access.
+2. Enable Remote Login and restrict SSH access to that account. Put its
+   key-based connection behind a neutral local SSH alias such as
+   `murph-worker`; use `IdentityFile` and `IdentitiesOnly yes` in the local SSH
+   config instead of forwarding an agent.
+3. Give only that account access to `/Users/Shared/murph-crabbox`. Install
+   `git`, `rsync`, `tar`, `sh`, Node `>=24.14.1`, and Corepack; the repository
+   pins pnpm `10.33.0`.
+4. Keep the Mac awake while it is offered as a worker, then prove reachability:
+
+```bash
+crabbox doctor \
+  --provider ssh \
+  --target macos \
+  --static-host murph-worker \
+  --static-work-root /Users/Shared/murph-crabbox/doctor \
+  --doctor-probe-ssh
+```
+
+Each local worktree derives a deterministic opaque static lease id and its own
+subdirectory below `/Users/Shared/murph-crabbox`; the local path itself is never
+sent, only its truncated cryptographic digest. Every run uses full resync and
+holds the existing local
+per-worktree artifact lock across admission and sync, preventing same-worktree
+edits from racing the upload while separate worktrees remain isolated. The
+remote account may retain only machine-level package-manager caches outside
+those workspaces.
+
+The SSH path forwards no environment allowlist. Candidate code starts through
+`scripts/crabbox/run-ssh-verification.mjs`, which rebuilds the same synthetic
+test-only environment as the Blacksmith path. The dedicated account is the
+trust boundary: candidate code can execute arbitrary repository commands on
+that account, so never reuse a personal or credential-bearing account. Static
+SSH is host-managed and has no provider TTL or automatic machine shutdown; stop
+offering the Mac by disabling Remote Login or removing its authorized key.
+
 ### Ten-minute local admission fallback
 
 Measure time spent waiting for the exclusive local shared-host slot separately
@@ -51,12 +108,16 @@ MURPH_VERIFY_EXECUTOR=crabbox pnpm test:diff <path ...>
 MURPH_VERIFY_EXECUTOR=crabbox pnpm verify:acceptance
 ```
 
-The forced executor creates a fresh one-shot Testbox through the fully pinned
-route. Its invocation always requests cleanup, a 10-minute idle timeout, and a
-45-minute maximum lease lifetime; the hydration workflow has a 50-minute
-last-resort ceiling. Do not leave the local waiter running concurrently, forward
-local environment values, bypass the canonical command, warm a lease separately,
-or return automatically to another unbounded local wait.
+If the dedicated SSH worker is configured and idle, it may run that same
+canonical command without creating spend. Otherwise the paid forced executor
+creates a fresh one-shot Testbox through the fully pinned route. Crabbox stops
+every newly acquired delegated Testbox when the one-shot command exits unless
+`--keep` is passed; the dispatcher never passes `--keep` or
+`--keep-on-failure`. The provider receives its supported 10-minute idle timeout,
+and the hydration workflow supplies the 50-minute last-resort ceiling. Do not
+leave the local waiter running concurrently, forward local environment values,
+bypass the canonical command, warm a lease separately, or return automatically
+to another unbounded local wait.
 Before delegation, satisfy the Git-state admission boundary, including fully
 staging any new non-ignored source or documentation file. If Crabbox cannot run
 because its CLIs, authentication, or capacity are unavailable, fail closed and
@@ -81,7 +142,7 @@ retain the same lifecycle bounds and evidence.
 
 ### Environment and Vercel boundary
 
-The default Crabbox/Blacksmith lane is synthetic and secret-free:
+Both canonical remote lanes are synthetic and secret-free:
 
 - Blacksmith Testbox rejects Crabbox environment forwarding. Before invoking
   either the Crabbox or Blacksmith CLI, the dispatcher replaces its inherited
@@ -90,8 +151,8 @@ The default Crabbox/Blacksmith lane is synthetic and secret-free:
   and application credentials never enter the Crabbox CLI process, so neither
   user-level allowlists nor command flags have a credential value to forward. Do not add
   `--allow-env`, `--env-from-profile`, or credential variables to this lane.
-- Blacksmith owns sync and can transfer Git-tracked plus untracked non-ignored
-  paths. Before delegation, the dispatcher derives authorization from one
+- Crabbox sync can transfer Git-tracked plus untracked non-ignored paths.
+  Before either remote delegation, the dispatcher derives authorization from one
   `git status --porcelain=v1 -z --untracked-files=all` boundary. It permits
   modified tracked files, tracked renames/deletions, ignored files, and new files
   whose current contents are fully staged. It refuses ordinary untracked files,
@@ -119,11 +180,14 @@ The default Crabbox/Blacksmith lane is synthetic and secret-free:
   Local `CRABBOX_CONFIG`, profile, ref, workflow, job, or arbitrary existing
   lease IDs are not trusted routing inputs.
 - `scripts/crabbox/run-verification.mjs` fails closed without that marker, then
-  independently rebuilds the process environment with deterministic CI-style
-  placeholder values required by hosted-web build and smoke checks. Candidate
-  changes can still be verified, but they never receive the Testbox orchestration
-  environment first. Blacksmith authentication remains in the local Blacksmith
-  CLI and never enters the test process.
+  calls the shared sanitized verification core.
+  `scripts/crabbox/run-ssh-verification.mjs` enters that core directly on the
+  dedicated secret-free static account. The core independently rebuilds the
+  process environment with deterministic CI-style placeholder values required
+  by hosted-web build and smoke checks. Candidate changes can still be verified,
+  but they never receive the Testbox orchestration environment first.
+  Blacksmith authentication remains in the local Blacksmith CLI and never
+  enters either test process.
 - The lane never runs `vercel env pull`, `vercel env run`, or copies `.env*`,
   `.vercel`, provider, model, billing, messaging, or production credentials.
 - Canonical completion tests are expected to pass under this synthetic contract.
@@ -145,8 +209,8 @@ commands to carry secret values. GitHub production secrets must live only in a
 protected-branch environment, never as repository-scoped duplicates that an
 alternate workflow ref could request.
 
-When Crabbox runs, record the command, result, Testbox ID, timing summary, and
-linked GitHub Actions run in the completion evidence.
+When Crabbox runs, record the command, result, executor, and timing summary.
+For Blacksmith, also retain the Testbox ID and linked GitHub Actions run.
 
 ## Verification Matrix
 

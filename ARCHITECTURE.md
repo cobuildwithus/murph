@@ -1205,4 +1205,22 @@ subagent prompt record is `agent-docs/exec-plans/completed/TEMPORAL.md`.
 
 ## Current Verification Posture
 
-The repository uses the current verification commands described in `agent-docs/operations/verification-and-runtime.md`, with ordinary Vitest output contained beneath one marked process-owned temp root that is removed at teardown and recovered conservatively after an abrupt stop. It also has a cross-platform repo-local host setup path (`pnpm onboard` / `scripts/setup-host.sh`) for macOS and Linux, a fixed-version release manifest that publishes five public packages while bundling private workspace owners into the relevant tarballs, a local device-sync runtime with service/http tests, and inbox/parser package tests that exercise runtime rebuild, audio/video parser workers, parser-toolchain discovery, and parsed-pipeline flows inside the local TypeScript workspace.
+The repository uses the current verification commands described in
+`agent-docs/operations/verification-and-runtime.md`. Their dispatcher is local
+by default and exposes two explicit, fail-closed, secret-free remote executors:
+Crabbox's first-party static SSH provider for a dedicated macOS worker account,
+and its direct Blacksmith Testbox provider for the bounded paid fallback. The
+static lane derives one opaque workspace per initiating worktree, performs a
+full sync under the existing local artifact lock, and reuses the same synthetic
+verification core; it adds no daemon, coordinator, queue, scheduler, shared
+checkout, or product state.
+
+Ordinary Vitest output is contained beneath one marked process-owned temp root
+that is removed at teardown and recovered conservatively after an abrupt stop.
+The repository also has a cross-platform repo-local host setup path
+(`pnpm onboard` / `scripts/setup-host.sh`) for macOS and Linux, a fixed-version
+release manifest that publishes five public packages while bundling private
+workspace owners into the relevant tarballs, a local device-sync runtime with
+service/http tests, and inbox/parser package tests that exercise runtime rebuild,
+audio/video parser workers, parser-toolchain discovery, and parsed-pipeline
+flows inside the local TypeScript workspace.

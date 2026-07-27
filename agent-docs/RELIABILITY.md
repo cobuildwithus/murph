@@ -1,6 +1,6 @@
 # Reliability
 
-Last verified: 2026-07-26
+Last verified: 2026-07-27
 
 ## Current Guardrails
 
@@ -8,6 +8,11 @@ Last verified: 2026-07-26
 - Prefer explicit failure paths and actionable errors over silent fallback behavior.
 - Update architecture and verification docs in the same change that introduces new runtime entrypoints.
 - Avoid hidden coupling between scripts, docs, and runtime code; document new dependencies in `ARCHITECTURE.md` and `agent-docs/references/testing-ci-map.md`.
+- Explicit remote verification is fail-closed. The dispatcher never retries on
+  another executor or runs local and remote copies together; an operator may
+  retry the same head only after recording a concrete infrastructure failure.
+  Static SSH is host-managed, so availability, sleep, and shutdown stay outside
+  Murph rather than introducing a daemon or lease-recovery owner.
 - Use the concrete runtime contracts first: hosted runner wake/checkpoint behavior lives in `agent-docs/references/hosted-runtime-protocol.md` plus `apps/cloudflare/README.md`; deploy recovery and smoke expectations live in `apps/cloudflare/DEPLOY.md`; local device-sync and assistant daemon retry/control-plane behavior live in their package READMEs and tests.
 
 ## Runtime Expectations
