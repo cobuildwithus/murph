@@ -1,6 +1,6 @@
 # Show owner advisory contact labels for registered group participants
 
-Status: active
+Status: completed
 Created: 2026-07-27
 Updated: 2026-07-27
 
@@ -110,3 +110,11 @@ Updated: 2026-07-27
     Remaining evidence gap: no deployed end-to-end group turn proves a
     registered participant's label reaches the final natural-language reply in
     the correct group audience.
+  - Preliminary `completion-specialists` ReviewGPT: coverage lens passed with
+    no findings and no patch artifact; prompt and frontend lenses were correctly
+    not applicable.
+  - Parent final diff and affected-call-path review: no findings. The projection
+    still filters canonical phones before its 16-handle cap, the assistant
+    boundary still renames the label as unverified, and no old
+    registered-participant-only exclusion remains in current owner docs or code.
+Completed: 2026-07-27
