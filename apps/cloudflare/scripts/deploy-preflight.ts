@@ -50,11 +50,14 @@ const REQUIRED_DEPLOY_ENV_NAMES = [
 const REQUIRED_DEPLOY_WORKER_ENV_NAMES = [
   "CF_PUBLIC_BASE_URL",
   "HOSTED_EXECUTION_DEPLOY_CONTEXT",
-  "HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT",
   "HOSTED_WEB_BASE_URL",
   "HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG",
   "HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME",
   ...HOSTED_WORKER_REQUIRED_VAR_NAMES,
+] as const;
+
+const REQUIRED_NON_PRODUCTION_DEPLOY_WORKER_ENV_NAMES = [
+  "HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT",
 ] as const;
 
 const REQUIRED_PREVIEW_DEPLOY_WORKER_ENV_NAMES = [
@@ -118,6 +121,9 @@ export function listMissingHostedDeployEnvironment(
     ...(input.deployWorker
       ? [
           ...REQUIRED_DEPLOY_WORKER_ENV_NAMES,
+          ...(deployContext && deployContext !== "production"
+            ? REQUIRED_NON_PRODUCTION_DEPLOY_WORKER_ENV_NAMES
+            : []),
           ...(deployContext === "preview" ? REQUIRED_PREVIEW_DEPLOY_WORKER_ENV_NAMES : []),
           ...(deployContext === "production" ? REQUIRED_PRODUCTION_DEPLOY_WORKER_ENV_NAMES : []),
           ...HOSTED_WORKER_REQUIRED_SECRET_NAMES,
@@ -537,7 +543,10 @@ function appendPreviewDeployInvariantErrors(
     ProductionDeployUrlValidation
   >();
   for (const label of PREVIEW_DEPLOY_URL_INVARIANT_LABELS) {
-    const result = readPreviewDeployUrl(source, label, errors);
+    const result = readPreviewDeployUrl(source, label, {
+      requireOriginOnly: true,
+      errors,
+    });
     if (result) {
       previewUrls.set(label, result);
     }
@@ -547,7 +556,17 @@ function appendPreviewDeployInvariantErrors(
     requireOriginOnly: true,
     errors,
   });
+  const previewWorkerUrl = previewUrls.get("CF_PUBLIC_BASE_URL");
   const previewWebUrl = previewUrls.get("HOSTED_WEB_BASE_URL");
+  if (
+    previewWorkerUrl
+    && previewWebUrl
+    && previewWorkerUrl.normalized === previewWebUrl.normalized
+  ) {
+    errors.push(
+      "preview deploys must keep CF_PUBLIC_BASE_URL distinct from HOSTED_WEB_BASE_URL.",
+    );
+  }
   if (
     previewWebUrl
     && productionWebUrl
@@ -557,16 +576,38 @@ function appendPreviewDeployInvariantErrors(
       "preview deploys must not set HOSTED_WEB_BASE_URL to HOSTED_WEB_PRODUCTION_BASE_URL.",
     );
   }
+
+  for (const label of PRODUCTION_DEPLOY_OPTIONAL_CALLBACK_URL_LABELS) {
+    if (!normalizeOptionalString(source[label])) {
+      continue;
+    }
+    const callbackUrl = readPreviewDeployUrl(source, label, {
+      requireOriginOnly: false,
+      errors,
+    });
+    if (
+      callbackUrl
+      && productionWebUrl
+      && new URL(callbackUrl.normalized).origin === productionWebUrl.normalized
+    ) {
+      errors.push(
+        `${label} must not use the HOSTED_WEB_PRODUCTION_BASE_URL origin in preview deploys.`,
+      );
+    }
+  }
 }
 
 function readPreviewDeployUrl(
   source: EnvSource,
-  label: (typeof PREVIEW_DEPLOY_URL_INVARIANT_LABELS)[number],
-  errors: string[],
+  label: ProductionDeployUrlLabel,
+  input: {
+    requireOriginOnly: boolean;
+    errors: string[];
+  },
 ): ProductionDeployUrlValidation | null {
   try {
     const normalized = normalizeHostedExecutionBaseUrl(source[label], {
-      requireOriginOnly: true,
+      requireOriginOnly: input.requireOriginOnly,
     });
     if (!normalized) {
       return null;
@@ -575,10 +616,10 @@ function readPreviewDeployUrl(
     const url = new URL(normalized);
     const unsafeHostReason = readUnsafeProductionDeployHostnameReason(url.hostname);
     if (unsafeHostReason) {
-      errors.push(`${label} must not use ${unsafeHostReason} in preview deploys.`);
+      input.errors.push(`${label} must not use ${unsafeHostReason} in preview deploys.`);
     }
     if (!hasPreviewDeployMarker(url.hostname)) {
-      errors.push(`${label} must use a preview or staging origin in preview deploys.`);
+      input.errors.push(`${label} must use a preview or staging origin in preview deploys.`);
     }
 
     return {
@@ -586,7 +627,7 @@ function readPreviewDeployUrl(
       normalized,
     };
   } catch (error) {
-    errors.push(`${label} must be a valid preview HTTPS URL.`);
+    input.errors.push(`${label} must be a valid preview HTTPS URL.`);
     return null;
   }
 }
@@ -598,7 +639,29 @@ async function listPreviewDeployDnsInvariantErrors(
   const errors: string[] = [];
 
   for (const label of PREVIEW_DEPLOY_URL_INVARIANT_LABELS) {
-    const parsed = readPreviewDeployUrl(source, label, []);
+    const parsed = readPreviewDeployUrl(source, label, {
+      requireOriginOnly: true,
+      errors: [],
+    });
+    if (parsed) {
+      await appendDeployDnsErrors(
+        label,
+        parsed.hostname,
+        "preview",
+        resolveHostnameAddresses,
+        errors,
+      );
+    }
+  }
+
+  for (const label of PRODUCTION_DEPLOY_OPTIONAL_CALLBACK_URL_LABELS) {
+    if (!normalizeOptionalString(source[label])) {
+      continue;
+    }
+    const parsed = readPreviewDeployUrl(source, label, {
+      requireOriginOnly: false,
+      errors: [],
+    });
     if (parsed) {
       await appendDeployDnsErrors(
         label,

@@ -673,7 +673,9 @@ Before the first preview Worker deploy:
    or `staging` segment. `HOSTED_CRYPTO_ENV` must be `preview`.
    `HOSTED_WEB_BASE_URL` must be the isolated preview origin and
    `HOSTED_WEB_PRODUCTION_BASE_URL` must be the production origin used only for
-   the inequality guard.
+   the inequality guard. The Worker and Web origins must be distinct. If device
+   sync is enabled, `DEVICE_SYNC_PUBLIC_BASE_URL` must be a public staging HTTPS
+   URL; its callback path is allowed, but its origin must not be production Web.
 3. Create only the staging R2 bucket or buckets, with the required location,
    and issue the direct-R2 key against those buckets only. Apply the checked-in
    lifecycle rules before stateful use.
@@ -694,9 +696,10 @@ The workflow derives
 Preflight runs before artifact rendering, secret sync, lifecycle changes, or
 Worker deployment and rejects a mismatched crypto/OIDC context, unscoped
 Worker or R2 name, non-staging Worker/Web origin, production Web alias, local
-or private-network origin, or private-network DNS resolution. Preview deploys
-never run the paid live-model deploy smoke; endpoint, managed-container,
-runner-bundle, assistant CLI, and immediate direct-R2 smoke still run.
+or private-network origin, private-network DNS resolution, Worker/Web
+self-routing, or a non-staging device-sync callback. Preview deploys never run
+the paid live-model deploy smoke; endpoint, managed-container, runner-bundle,
+assistant CLI, and immediate direct-R2 smoke still run.
 
 If the isolated Vercel preview boundary is incomplete, stop before dispatch.
 Pointing the preview Worker at production Web or copying production stateful

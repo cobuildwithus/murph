@@ -315,10 +315,11 @@ exact admitted group thread.
   by deploy-automation and preflight tests rather than a routine live deploy.
   The tests lock the single workflow/config owner, selected-context Vercel OIDC
   derivation, production-only paid live-model smoke, preview crypto/OIDC
-  matching, staging-scoped Worker/R2 names, distinct staging Web origin, and
-  public HTTPS/DNS rejection before mutation. The live preview deployment still
-  depends on an isolated Vercel preview data/crypto/control plane plus
-  environment-scoped Cloudflare credentials and R2 resources.
+  matching, staging-scoped Worker/R2 names, distinct staging Worker/Web origins,
+  and staging device-callback HTTPS/DNS rejection before mutation. The live
+  preview deployment still depends on an isolated Vercel preview
+  data/crypto/control plane plus environment-scoped Cloudflare credentials and
+  R2 resources.
 - The tag-driven release workflow is present, uses npm trusted publishing for package publication, runs a slimmer `release:check` guard path that now validates release metadata plus `pnpm build:workspace:clean` and `pnpm verify:acceptance` without re-installing/re-building/re-packing inside the script, and is only exercised on real `v*.*.*` tag pushes rather than during ordinary repo verification. npm trust is package-level rather than repo-level, so this monorepo also ships `pnpm release:trust:github` for the one-time bootstrap that binds every publishable `@murphai/*` package to `cobuildwithus/murph` and `.github/workflows/release.yml`; if a package already has the wrong trusted publisher entry, that npm-side state still needs manual revoke-and-recreate repair, which local repo checks cannot fully prove.
 
 ## Update Rule
