@@ -4965,6 +4965,95 @@ describe('assistant codex runtime', () => {
     expect(spawnedChildren).toHaveLength(2)
   })
 
+  it('keeps personal threads on the personal threshold when a group minimum is configured', async () => {
+    const workingDirectory = await createTempDir('assistant-codex-personal-compact-threshold-work-')
+    const codexHome = await createTempDir('assistant-codex-personal-compact-threshold-home-')
+    const threadId = 'thread-personal-compact-threshold'
+    const turnId = 'turn-personal-compact-threshold'
+    const spawnedChildren: MockChildProcess[] = []
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+      spawnedChildren.push(child)
+
+      queueMicrotask(() => {
+        void (async () => {
+          await initializeWarmTurn(child, threadId, turnId)
+          child.stdout.write(jsonLine({
+            method: 'thread/tokenUsage/updated',
+            params: {
+              threadId,
+              turnId,
+              tokenUsage: {
+                last: {
+                  cachedInputTokens: 25_000,
+                  inputTokens: 75_000,
+                  outputTokens: 12,
+                  totalTokens: 75_012,
+                },
+                total: {
+                  cachedInputTokens: 25_000,
+                  inputTokens: 75_000,
+                  outputTokens: 12,
+                  totalTokens: 75_012,
+                },
+                modelContextWindow: 128_000,
+              },
+            },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'item/completed',
+            params: {
+              item: {
+                id: 'assistant-personal-compact-threshold',
+                message: 'Seeded personal thread below its threshold',
+                type: 'assistant_message',
+              },
+            },
+          }))
+          writeCompletedTurn(child, threadId, turnId)
+        })()
+      })
+
+      return child
+    })
+
+    await expect(
+      executeCodexAppServerTurn({
+        approvalPolicy: 'never',
+        codexHome,
+        env: {
+          PATH: '/custom/bin',
+        },
+        groupConversation: false,
+        prompt: 'seed personal compact threshold',
+        sandbox: 'workspace-write',
+        workingDirectory,
+      }),
+    ).resolves.toMatchObject({
+      finalMessage: 'Seeded personal thread below its threshold',
+      sessionId: threadId,
+      turnId,
+    })
+
+    await expect(
+      compactWarmCodexThread({
+        groupMinThreadTokens: 60_000,
+        minThreadTokens: 100_000,
+        timeoutMs: 5_000,
+      }),
+    ).resolves.toEqual({
+      kind: 'skipped',
+      reason: 'below_threshold',
+      threadContextTokensBefore: 75_000,
+    })
+    expect(
+      readWrittenRpcMessages(
+        requireMockChildProcess(spawnedChildren[0] ?? null),
+      ).some((message) => message.method === 'thread/compact/start'),
+    ).toBe(false)
+  })
+
   it('uses the lower group threshold and preserves pre-compaction usage attribution', async () => {
     const workingDirectory = await createTempDir('assistant-codex-compact-provider-usage-work-')
     const codexHome = await createTempDir('assistant-codex-compact-provider-usage-home-')
@@ -13499,6 +13588,7 @@ describe('assistant codex runtime', () => {
           child,
           finalMessage: 'Group answer after compaction.',
           itemId: 'group-context-compact-1',
+          progressText: 'Checking the group thread now.',
           threadId: 'thread-group-context-compact',
           turnId: 'turn-group-context-compact',
         })
@@ -13518,7 +13608,15 @@ describe('assistant codex runtime', () => {
       sessionId: 'thread-group-context-compact',
       turnId: 'turn-group-context-compact',
     })
-    expect(progressDelivery.send).not.toHaveBeenCalled()
+    expect(progressDelivery.send).toHaveBeenCalledTimes(1)
+    expect(progressDelivery.send).toHaveBeenCalledWith(
+      'Checking the group thread now.',
+      { source: 'model' },
+    )
+    expect(progressDelivery.send).not.toHaveBeenCalledWith(
+      expect.any(String),
+      { required: true, source: 'system' },
+    )
   })
 
   it('rejects unsupported dynamic tools while keeping the Codex turn alive', async () => {
@@ -19382,6 +19480,7 @@ async function writeSuccessfulContextCompactionTurn(input: {
   child: MockChildProcess
   finalMessage: string
   itemId: string
+  progressText?: string
   threadId: string
   turnId: string
 }): Promise<void> {
@@ -19432,6 +19531,31 @@ async function writeSuccessfulContextCompactionTurn(input: {
       },
     },
   }))
+  if (input.progressText) {
+    input.child.stdout.write(jsonLine({
+      id: 99,
+      method: 'item/tool/call',
+      params: {
+        namespace: 'murph',
+        tool: 'send_progress_update',
+        arguments: {
+          text: input.progressText,
+        },
+      },
+    }))
+    await expect(waitForRpcResponse(input.child, 99)).resolves.toEqual({
+      id: 99,
+      result: {
+        success: true,
+        contentItems: [
+          {
+            type: 'inputText',
+            text: 'progress update sent',
+          },
+        ],
+      },
+    })
+  }
   input.child.stdout.write(jsonLine({
     method: 'item/completed',
     params: {

@@ -681,6 +681,7 @@ describe('Codex model catalog', () => {
     )
     expect(providerInput).toMatchObject({
       dynamicTools: [],
+      groupConversation: false,
       environments: [],
       generatedImageUploader: null,
       hostedToolContext: null,
