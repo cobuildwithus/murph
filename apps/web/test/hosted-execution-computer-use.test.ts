@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import { Prisma } from "@prisma/client";
+import type {
+  HostedComputerActRequest,
+} from "@murphai/hosted-execution/computer-use";
 
 import type {
   ComputerUseCrypto,
@@ -929,9 +932,10 @@ describe("ComputerUseService", () => {
       code: "HOSTED_COMPUTER_MEMBER_SUSPENDED",
     });
     await expect(service.act({
-      code: "await page.getByRole('button', { name: 'Add to cart' }).click();",
+      action: "click",
       memberId: "member_123",
       runId: "hcr_run123",
+      target: createComputerRoleTarget("Add to cart"),
       timeoutMs: 1_000,
     })).rejects.toMatchObject({
       code: "HOSTED_COMPUTER_MEMBER_SUSPENDED",
@@ -957,7 +961,7 @@ describe("ComputerUseService", () => {
     expect(store.handoff).toBeNull();
   });
 
-  it("passes arbitrary start URLs to Kernel navigation", async () => {
+  it("preserves non-public HTTP navigation for authenticated browser work", async () => {
     const now = new Date("2026-06-17T12:00:00.000Z");
     const startKernel = createFakeKernel();
     const startService = new ComputerUseService({
@@ -976,14 +980,14 @@ describe("ComputerUseService", () => {
     });
     await expect(startService.startRun({
       memberId: "member_123",
-      startUrl: "data:text/html,<h1>owned</h1>",
+      startUrl: "http://127.0.0.1:3000/private-portal",
     })).resolves.toMatchObject({
       reused: false,
       status: "running",
     });
     expect(startKernel.createdSessionIds).toEqual(["kernel-session-2"]);
     expect(startKernel.executePlaywrightInputs[0]?.code ?? "").toContain(
-      "data:text/html,<h1>owned</h1>",
+      "http://127.0.0.1:3000/private-portal",
     );
   });
 
@@ -3869,7 +3873,7 @@ describe("ComputerUseService", () => {
     });
   });
 
-  it("returns a completed browser action when the state cache update fails", async () => {
+  it("returns a completed structured browser action when the state cache update fails", async () => {
     const now = new Date("2026-06-17T12:00:00.000Z");
     const store = new FakeComputerUseStore({
       failNextUpdateRunBrowserState: true,
@@ -3880,11 +3884,13 @@ describe("ComputerUseService", () => {
       }),
     });
     const kernel = createFakeKernel({
-      executeResult: {
-        result: { clicked: true },
+      executeResult: createComputerActExecutionResult({
+        action: "click",
+        target: createComputerActTargetState({ text: "Place order" }),
         title: "Order placed",
         url: "https://shop.example.test/order/confirmed?token=secret",
-      },
+        visibleText: "Order confirmed",
+      }),
     });
     const service = new ComputerUseService({
       kernel,
@@ -3893,21 +3899,27 @@ describe("ComputerUseService", () => {
     });
 
     await expect(service.act({
-      code: "await page.getByRole('button', { name: 'Place order', exact: true }).click(); return { clicked: true };",
+      action: "click",
       memberId: "member_123",
       runId: "hcr_run123",
+      target: createComputerRoleTarget("Place order"),
       timeoutMs: 15000,
     })).resolves.toEqual({
-      result: { clicked: true },
+      action: "click",
+      target: createComputerActTargetState({ text: "Place order" }),
       title: "Order placed",
       url: "https://shop.example.test/order/confirmed?token=secret",
+      visibleText: "Order confirmed",
     });
 
     expect(kernel.executePlaywrightCalls).toBe(1);
     const code = kernel.executePlaywrightInputs[0]?.code ?? "";
-    expect(code).not.toContain("route(\"**/*\"");
-    expect(code).toContain("getByRole('button', { name: 'Place order', exact: true })");
-    expect(code).toContain("__murphUserResult");
+    expect(code).toContain(
+      'page.getByRole("button", { name: "Place order", exact: true })',
+    );
+    expect(code).toContain("await __murphTarget.click({ timeout: 15000 });");
+    expect(code).toContain("return await __murphFinish();");
+    expect(code).not.toContain("__murphUserResult");
     expect(store.run).toMatchObject({
       lastTitle: "Old title",
       lastUrl: "https://old.example.test",
@@ -3915,7 +3927,7 @@ describe("ComputerUseService", () => {
     });
   });
 
-  it("adds action context to Kernel browser evaluation failures", async () => {
+  it("adds structured action context to Kernel browser evaluation failures", async () => {
     const now = new Date("2026-06-17T12:00:00.000Z");
     const store = new FakeComputerUseStore({
       run: createRunRecord({
@@ -3947,14 +3959,15 @@ describe("ComputerUseService", () => {
     });
 
     await expect(service.act({
-      code: "await page.getByRole('button', { name: 'Place your order', exact: true }).click();",
+      action: "click",
       memberId: "member_123",
       runId: "hcr_run123",
+      target: createComputerRoleTarget("Place your order"),
       timeoutMs: 20000,
     })).rejects.toMatchObject({
       code: "HOSTED_COMPUTER_EVAL_FAILED",
       details: {
-        codeHash: expect.any(String),
+        computerActKind: "click",
         kernelError: "Error: strict mode violation: button matched multiple elements",
         kernelErrorPresent: true,
         kernelStderrPresent: true,
@@ -3972,13 +3985,202 @@ describe("ComputerUseService", () => {
     });
   });
 
-  it("passes raw Playwright source through the wrapper", async () => {
+  it("compiles finite structured operations without model-authored browser authority", async () => {
+    const now = new Date("2026-06-17T12:00:00.000Z");
+    const actions: Array<{
+      expectedCode: string;
+      request: HostedComputerActRequest;
+    }> = [
+      {
+        request: {
+          action: "navigate" as const,
+          url: "https://shop.example.test/cart",
+          timeoutMs: 15000,
+        },
+        expectedCode: 'await page.goto("https://shop.example.test/cart"',
+      },
+      {
+        request: {
+          action: "inspect" as const,
+          target: createComputerRoleTarget("Cart"),
+          timeoutMs: 15000,
+        },
+        expectedCode: 'page.getByRole("button", { name: "Cart", exact: true })',
+      },
+      {
+        request: {
+          action: "selectOption" as const,
+          target: createComputerLabelTarget("Quantity"),
+          timeoutMs: 15000,
+          values: ["2"],
+        },
+        expectedCode: 'await __murphTarget.selectOption(["2"]',
+      },
+      {
+        request: {
+          action: "setChecked" as const,
+          checked: true,
+          target: createComputerLabelTarget("Accept terms"),
+          timeoutMs: 15000,
+        },
+        expectedCode: "await __murphTarget.check({ timeout: 15000 });",
+      },
+      {
+        request: {
+          action: "press" as const,
+          key: "Enter" as const,
+          target: createComputerRoleTarget("Search"),
+          timeoutMs: 15000,
+        },
+        expectedCode: 'await __murphTarget.press("Enter"',
+      },
+      {
+        request: {
+          action: "waitFor" as const,
+          state: "visible" as const,
+          target: createComputerRoleTarget("Confirmation"),
+          timeoutMs: 15000,
+        },
+        expectedCode: 'await __murphTarget.waitFor({ state: "visible"',
+      },
+      {
+        request: {
+          action: "wait" as const,
+          durationMs: 250,
+          timeoutMs: 15000,
+        },
+        expectedCode: "await page.waitForTimeout(250);",
+      },
+    ];
+    const kernel = createFakeKernel({
+      executeResults: actions.map(({ request }) => createComputerActExecutionResult({
+        action: request.action,
+        target: "target" in request ? createComputerActTargetState() : null,
+        url: "https://shop.example.test/cart",
+      })),
+    });
+    const service = new ComputerUseService({
+      kernel,
+      now: () => now,
+      store: new FakeComputerUseStore({
+        run: createRunRecord({ updatedAt: now }),
+      }),
+    });
+
+    for (const { expectedCode, request } of actions) {
+      await expect(service.act({
+        ...request,
+        memberId: "member_123",
+        runId: "hcr_run123",
+      })).resolves.toMatchObject({ action: request.action });
+      const code = kernel.executePlaywrightInputs.at(-1)?.code ?? "";
+      expect(code).toContain(expectedCode);
+      expect(code).not.toContain("__murphUserResult");
+      expect(code).not.toContain("context.cookies(");
+      expect(code).not.toContain("context.storageState(");
+      expect(code).not.toContain("browser.contexts(");
+      expect(code).not.toContain("page.evaluate(");
+      expect(code).not.toContain("page.request");
+      expect(code).not.toContain("page.route(");
+    }
+  });
+
+  it("encodes visible locator data without exposing hidden selector authority", async () => {
+    const now = new Date("2026-06-17T12:00:00.000Z");
+    const label = 'Email"); page.__injected(); page.locator("body';
+    const kernel = createFakeKernel({
+      executeResult: createComputerActExecutionResult({
+        action: "inspect",
+        target: createComputerActTargetState({ text: "Safe target" }),
+      }),
+    });
+    const service = new ComputerUseService({
+      kernel,
+      now: () => now,
+      store: new FakeComputerUseStore({
+        run: createRunRecord({ updatedAt: now }),
+      }),
+    });
+
+    await service.act({
+      action: "inspect",
+      memberId: "member_123",
+      runId: "hcr_run123",
+      target: createComputerLabelTarget(label),
+      timeoutMs: 15000,
+    });
+
+    const code = kernel.executePlaywrightInputs[0]?.code ?? "";
+    expect(code).toContain(
+      `page.getByLabel(${JSON.stringify(label)}, { exact: true })`
+        + ".filter({ visible: true })",
+    );
+    expect(code).not.toContain("css=");
+    expect(code).not.toContain("[value^=");
+
+    let injected = false;
+    const target = {
+      async boundingBox() {
+        return { height: 20, width: 100, x: 10, y: 20 };
+      },
+      async count() {
+        return 1;
+      },
+      filter() {
+        return this;
+      },
+      async innerText() {
+        return "Safe target";
+      },
+      async isChecked() {
+        return false;
+      },
+      async isEnabled() {
+        return true;
+      },
+      async isVisible() {
+        return true;
+      },
+    };
+    const body = {
+      async innerText() {
+        return "Page text";
+      },
+    };
+    const fakePage = {
+      __injected() {
+        injected = true;
+      },
+      getByLabel() {
+        return target;
+      },
+      locator(value: string) {
+        return value === "body" ? body : target;
+      },
+      async title() {
+        return "Page";
+      },
+      url() {
+        return "https://example.test";
+      },
+    };
+    const execute = new Function(
+      "page",
+      `return (async () => {\n${code}\n})();`,
+    ) as (page: typeof fakePage) => Promise<unknown>;
+
+    await expect(execute(fakePage)).resolves.toMatchObject({
+      action: "inspect",
+    });
+    expect(injected).toBe(false);
+  });
+
+  it("fails closed before filling a sensitive browser field", async () => {
     const now = new Date("2026-06-17T12:00:00.000Z");
     const kernel = createFakeKernel({
       executeResult: {
-        result: { waited: true },
-        title: "Checkout",
-        url: "https://shop.example.test/cart",
+        reason: "password_type",
+        sensitive: true,
       },
     });
     const service = new ComputerUseService({
@@ -3990,21 +4192,102 @@ describe("ComputerUseService", () => {
     });
 
     await expect(service.act({
-      code: "await page.waitForTimeout(0); return { waited: true };",
+      action: "fill",
       memberId: "member_123",
       runId: "hcr_run123",
+      target: {
+        exact: true,
+        kind: "label",
+        label: "Password",
+        pick: { kind: "only" },
+      },
+      text: "not-sent-to-the-field",
       timeoutMs: 15000,
-    })).resolves.toMatchObject({
-      title: "Checkout",
-      url: "https://shop.example.test/cart",
+    })).rejects.toMatchObject({
+      code: "HOSTED_COMPUTER_SENSITIVE_INPUT_REQUIRES_HANDOFF",
+      httpStatus: 400,
     });
 
     expect(kernel.executePlaywrightCalls).toBe(1);
-    expect(kernel.executePlaywrightInputs[0]?.timeoutMs).toBe(18000);
     const code = kernel.executePlaywrightInputs[0]?.code ?? "";
-    expect(code).toContain("await page.waitForTimeout(0); return { waited: true };");
-    expect(code).not.toContain("route(\"**/*\"");
-    expect(code).not.toContain("isMurphPublicNavigationUrl");
+    expect(code).toContain("__murphClassifySensitiveInput(__murphTarget)");
+    expect(code).not.toContain("not-sent-to-the-field");
+    expect(code).not.toContain("__murphTarget.fill(");
+
+    let fillCalls = 0;
+    class FakeHTMLElement {
+      readonly isContentEditable = false;
+      readonly tagName = "INPUT";
+
+      getAttribute(name: string): string | null {
+        return name === "type" ? "password" : null;
+      }
+    }
+    const target = {
+      async boundingBox() {
+        return { height: 20, width: 100, x: 10, y: 20 };
+      },
+      async count() {
+        return 1;
+      },
+      filter() {
+        return this;
+      },
+      async evaluate(
+        callback: (element: FakeHTMLElement) => unknown,
+      ) {
+        return callback(new FakeHTMLElement());
+      },
+      async fill() {
+        fillCalls += 1;
+      },
+      async innerText() {
+        return "";
+      },
+      async isChecked() {
+        return false;
+      },
+      async isEnabled() {
+        return true;
+      },
+      async isVisible() {
+        return true;
+      },
+      async waitFor() {},
+    };
+    const body = {
+      async innerText() {
+        return "Password form";
+      },
+    };
+    const fakePage = {
+      getByLabel() {
+        return target;
+      },
+      locator(value: string) {
+        return value === "body" ? body : target;
+      },
+      async title() {
+        return "Sign in";
+      },
+      url() {
+        return "https://example.test/sign-in";
+      },
+    };
+    const execute = new Function(
+      "page",
+      "HTMLElement",
+      `return (async () => {\n${code}\n})();`,
+    ) as (
+      page: typeof fakePage,
+      htmlElement: typeof FakeHTMLElement,
+    ) => Promise<unknown>;
+
+    await expect(execute(fakePage, FakeHTMLElement)).resolves.toMatchObject({
+      reason: "password_type",
+      sensitive: true,
+    });
+    expect(fillCalls).toBe(0);
   });
 
   it("rejects malformed browser action state results as unknown outcomes", async () => {
@@ -4016,9 +4299,7 @@ describe("ComputerUseService", () => {
         updatedAt: now,
       }),
     });
-    const kernel = createFakeKernel({
-      executeResult: {},
-    });
+    const kernel = createFakeKernel({ executeResult: {} });
     const service = new ComputerUseService({
       kernel,
       now: () => now,
@@ -4026,9 +4307,10 @@ describe("ComputerUseService", () => {
     });
 
     await expect(service.act({
-      code: "await page.getByRole('button', { name: 'Place order' }).click();",
+      action: "click",
       memberId: "member_123",
       runId: "hcr_run123",
+      target: createComputerRoleTarget("Place order"),
       timeoutMs: 15000,
     })).rejects.toMatchObject({
       code: "HOSTED_COMPUTER_ACTION_STATE_INVALID",
@@ -4051,10 +4333,11 @@ describe("ComputerUseService", () => {
       }),
     });
     const kernel = createFakeKernel({
-      executeResult: {
-        title: "Checkout",
+      executeResult: createComputerActExecutionResult({
+        action: "click",
+        target: createComputerActTargetState(),
         url: "not a url",
-      },
+      }),
     });
     const service = new ComputerUseService({
       kernel,
@@ -4063,14 +4346,14 @@ describe("ComputerUseService", () => {
     });
 
     await expect(service.act({
-      code: "await page.getByRole('button', { name: 'Place order' }).click();",
+      action: "click",
       memberId: "member_123",
       runId: "hcr_run123",
+      target: createComputerRoleTarget("Place order"),
       timeoutMs: 15000,
     })).rejects.toMatchObject({
       code: "HOSTED_COMPUTER_ACTION_STATE_INVALID",
     });
-    expect(kernel.executePlaywrightCalls).toBe(1);
     expect(store.run).toMatchObject({
       lastTitle: "Old title",
       lastUrl: "https://old.example.test",
@@ -4078,57 +4361,18 @@ describe("ComputerUseService", () => {
     });
   });
 
-  it("accepts browser action state results with non-public final URLs", async () => {
-    const now = new Date("2026-06-17T12:00:00.000Z");
-    const store = new FakeComputerUseStore({
-      run: createRunRecord({
-        lastTitle: "Old title",
-        lastUrl: "https://old.example.test",
-        updatedAt: now,
-      }),
-    });
-    const kernel = createFakeKernel({
-      executeResult: {
-        result: { inspected: true },
-        title: "Internal",
-        url: "http://127.0.0.1/latest/meta-data",
-      },
-    });
-    const service = new ComputerUseService({
-      kernel,
-      now: () => now,
-      store,
-    });
-
-    await expect(service.act({
-      code: "return { inspected: true };",
-      memberId: "member_123",
-      runId: "hcr_run123",
-      timeoutMs: 15000,
-    })).resolves.toMatchObject({
-      result: { inspected: true },
-      title: "Internal",
-      url: "http://127.0.0.1/latest/meta-data",
-    });
-    expect(kernel.executePlaywrightCalls).toBe(1);
-    expect(store.run).toMatchObject({
-      lastTitle: "Internal",
-      lastUrl: "http://127.0.0.1/latest/meta-data",
-      status: "running",
-    });
-  });
-
-  it("runs raw browser actions without injecting a route guard", async () => {
+  it("preserves current navigation semantics while projecting a sanitized display URL", async () => {
     const now = new Date("2026-06-17T12:00:00.000Z");
     const store = new FakeComputerUseStore({
       run: createRunRecord({ updatedAt: now }),
     });
     const kernel = createFakeKernel({
-      executeResult: {
-        result: { navigated: true },
-        title: "Public page",
-        url: "https://example.com/checkout?token=secret#step",
-      },
+      executeResult: createComputerActExecutionResult({
+        action: "navigate",
+        target: null,
+        title: "Internal",
+        url: "http://127.0.0.1/latest/meta-data?token=secret#section",
+      }),
     });
     const service = new ComputerUseService({
       kernel,
@@ -4137,26 +4381,154 @@ describe("ComputerUseService", () => {
     });
 
     await expect(service.act({
-      code: "await page.goto('https://example.com/checkout', { waitUntil: 'domcontentloaded' }); return { navigated: true };",
+      action: "navigate",
       memberId: "member_123",
       runId: "hcr_run123",
       timeoutMs: 15000,
+      url: "http://127.0.0.1/latest/meta-data",
     })).resolves.toMatchObject({
-      result: { navigated: true },
-      title: "Public page",
-      url: "https://example.com/checkout?token=secret#step",
+      action: "navigate",
+      target: null,
+      title: "Internal",
+      url: "http://127.0.0.1/latest/meta-data?token=secret#section",
     });
 
     const code = kernel.executePlaywrightInputs[0]?.code ?? "";
-    expect(code).toContain("await page.goto('https://example.com/checkout'");
+    expect(code).toContain(
+      'await page.goto("http://127.0.0.1/latest/meta-data"',
+    );
     expect(code).not.toContain("node:dns/promises");
-    expect(code).not.toContain("unroute(\"**/*\"");
-    expect(code).not.toContain("route(\"**/*\"");
-    expect(code).not.toContain("route.abort(\"blockedbyclient\")");
-    expect(code).toContain("__murphUserResult");
+    expect(code).not.toContain("page.route(");
     expect(store.run).toMatchObject({
-      lastTitle: "Public page",
-      lastUrl: "https://example.com/checkout",
+      lastTitle: "Internal",
+      lastUrl: "http://127.0.0.1/latest/meta-data",
+    });
+  });
+
+  it("keeps the authenticated primary browser journey on one run with explicit verification", async () => {
+    const now = new Date("2026-06-17T12:00:00.000Z");
+    const target = createComputerActTargetState({ text: "Dentist search" });
+    const kernel = createFakeKernel({
+      executeResults: [
+        createComputerActExecutionResult({
+          action: "navigate",
+          target: null,
+          title: "Appointments",
+          url: "https://appointments.example.test",
+          visibleText: "Find a dentist",
+        }),
+        createComputerActExecutionResult({
+          action: "inspect",
+          target,
+          title: "Appointments",
+          url: "https://appointments.example.test",
+        }),
+        {
+          sensitive: false,
+        },
+        createComputerActExecutionResult({
+          action: "fill",
+          target,
+          title: "Appointments",
+          url: "https://appointments.example.test",
+        }),
+        createComputerActExecutionResult({
+          action: "click",
+          target,
+          title: "Appointments",
+          url: "https://appointments.example.test/results",
+        }),
+        createComputerActExecutionResult({
+          action: "waitFor",
+          target: createComputerActTargetState({ text: "Results" }),
+          title: "Dentists",
+          url: "https://appointments.example.test/results",
+          visibleText: "Results",
+        }),
+      ],
+    });
+    const store = new FakeComputerUseStore({
+      run: createRunRecord({
+        kernelProfileName: "murph-test-member",
+        kernelSessionId: "kernel-session-1",
+        updatedAt: now,
+      }),
+    });
+    const service = new ComputerUseService({
+      kernel,
+      now: () => now,
+      store,
+    });
+
+    await service.act({
+      action: "navigate",
+      memberId: "member_123",
+      runId: "hcr_run123",
+      timeoutMs: 15000,
+      url: "https://appointments.example.test",
+    });
+    await service.act({
+      action: "inspect",
+      memberId: "member_123",
+      runId: "hcr_run123",
+      target: {
+        exact: true,
+        kind: "label",
+        label: "Search",
+        pick: { kind: "only" },
+      },
+      timeoutMs: 15000,
+    });
+    await service.act({
+      action: "fill",
+      memberId: "member_123",
+      runId: "hcr_run123",
+      target: {
+        exact: true,
+        kind: "label",
+        label: "Search",
+        pick: { kind: "only" },
+      },
+      text: "dentist near me",
+      timeoutMs: 15000,
+    });
+    await service.act({
+      action: "click",
+      memberId: "member_123",
+      runId: "hcr_run123",
+      target: createComputerRoleTarget("Search"),
+      timeoutMs: 15000,
+    });
+    await expect(service.act({
+      action: "waitFor",
+      memberId: "member_123",
+      runId: "hcr_run123",
+      state: "visible",
+      target: createComputerRoleTarget("Results"),
+      timeoutMs: 15000,
+    })).resolves.toMatchObject({
+      action: "waitFor",
+      title: "Dentists",
+      visibleText: "Results",
+    });
+
+    expect(kernel.executePlaywrightCalls).toBe(6);
+    expect(kernel.executePlaywrightInputs[2]?.code).toContain(
+      "__murphClassifySensitiveInput(__murphTarget)",
+    );
+    expect(kernel.executePlaywrightInputs[2]?.code).not.toContain("dentist near me");
+    expect(kernel.executePlaywrightInputs[3]?.code).toContain(
+      'await __murphTarget.fill("dentist near me"',
+    );
+    expect(kernel.executePlaywrightInputs.every((entry) =>
+      entry.sessionId === "kernel-session-1"
+    )).toBe(true);
+    expect(store.run).toMatchObject({
+      kernelProfileName: "murph-test-member",
+      kernelSessionId: "kernel-session-1",
+      lastTitle: "Dentists",
+      lastUrl: "https://appointments.example.test/results",
+      status: "running",
     });
   });
 
@@ -9587,6 +9959,56 @@ class FakeComputerUseStore implements ComputerUseStore {
 }
 
 const fakeKernel = createFakeKernel();
+
+function createComputerRoleTarget(name: string) {
+  return {
+    exact: true as const,
+    kind: "role" as const,
+    name,
+    pick: { kind: "only" as const },
+    role: "button",
+  };
+}
+
+function createComputerLabelTarget(label: string) {
+  return {
+    exact: true as const,
+    kind: "label" as const,
+    label,
+    pick: { kind: "only" as const },
+  };
+}
+
+function createComputerActTargetState(input: {
+  text?: string | null;
+} = {}) {
+  return {
+    box: { height: 30, width: 120, x: 40, y: 50 },
+    checked: null,
+    enabled: true,
+    matchCount: 1,
+    text: input.text ?? null,
+    visible: true,
+  };
+}
+
+function createComputerActExecutionResult(input: {
+  action: string;
+  target?: ReturnType<typeof createComputerActTargetState> | null;
+  title?: string | null;
+  url?: string;
+  visibleText?: string;
+}) {
+  return {
+    action: input.action,
+    target: input.target === undefined
+      ? createComputerActTargetState()
+      : input.target,
+    title: input.title ?? "Page",
+    url: input.url ?? "https://example.test",
+    visibleText: input.visibleText ?? "Page text",
+  };
+}
 
 function createFakeKernel(input: {
   createBrowserResults?: Array<"fail" | "ok">;

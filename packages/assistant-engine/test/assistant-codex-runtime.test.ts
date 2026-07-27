@@ -2285,9 +2285,11 @@ describe('assistant codex runtime', () => {
         await releaseAct.promise
         fetchOrder.push('act:end')
         return new Response(JSON.stringify({
-          result: null,
+          action: 'navigate',
+          target: null,
           title: 'Checkout',
           url: 'https://shop.example.test/checkout',
+          visibleText: 'Checkout',
         }), {
           headers: { 'content-type': 'application/json' },
           status: 200,
@@ -2350,9 +2352,10 @@ describe('assistant codex runtime', () => {
                 namespace: 'murph',
                 tool: 'computer_act',
                 arguments: {
-                  code: "await page.goto('https://shop.example.test/checkout');",
+                  action: 'navigate',
                   runId: 'run_123',
                   timeoutMs: 25000,
+                  url: 'https://shop.example.test/checkout',
                 },
               },
             }),
@@ -2711,8 +2714,15 @@ describe('assistant codex runtime', () => {
                 namespace: 'murph',
                 tool: 'computer_act',
                 arguments: {
-                  code: "await page.getByRole('button', { name: 'Place your order' }).click();",
+                  action: 'click',
                   runId: 'run_123',
+                  target: {
+                    exact: true,
+                    kind: 'role',
+                    name: 'Place your order',
+                    pick: { kind: 'only' },
+                    role: 'button',
+                  },
                   timeoutMs: 25000,
                 },
               },

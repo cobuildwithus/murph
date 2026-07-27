@@ -36,8 +36,10 @@ import {
 } from "../src/bundles.ts";
 import {
   buildHostedComputerRunOperationPath,
-  HOSTED_COMPUTER_ACT_CODE_MAX_LENGTH,
+  HOSTED_COMPUTER_ACT_INPUT_TEXT_MAX_LENGTH,
+  HOSTED_COMPUTER_ACT_LOCATOR_TEXT_MAX_LENGTH,
   HOSTED_COMPUTER_ACT_TIMEOUT_MAX_MS,
+  HOSTED_COMPUTER_ACT_WAIT_MAX_MS,
   HOSTED_COMPUTER_RUNS_PATH,
   isHostedComputerWebControlRequest,
   parseHostedComputerActRequest,
@@ -848,17 +850,58 @@ describe("hosted execution coverage gaps", () => {
     });
 
     expect(parseHostedComputerActRequest({
-      code: "await page.getByRole('button', { name: 'Add to cart' }).click();",
+      action: "navigate",
+      url: "https://shop.example.test/cart",
     })).toEqual({
-      code: "await page.getByRole('button', { name: 'Add to cart' }).click();",
+      action: "navigate",
+      timeoutMs: 15000,
+      url: "https://shop.example.test/cart",
+    });
+    expect(parseHostedComputerActRequest({
+      action: "click",
+      target: {
+        kind: "role",
+        name: "Add to cart",
+        role: "button",
+      },
+      timeoutMs: HOSTED_COMPUTER_ACT_TIMEOUT_MAX_MS,
+    })).toEqual({
+      action: "click",
+      target: {
+        exact: true,
+        kind: "role",
+        name: "Add to cart",
+        pick: { kind: "only" },
+        role: "button",
+      },
+      timeoutMs: HOSTED_COMPUTER_ACT_TIMEOUT_MAX_MS,
+    });
+    expect(parseHostedComputerActRequest({
+      action: "fill",
+      target: {
+        kind: "label",
+        label: "Email",
+        pick: { kind: "first" },
+      },
+      text: "member@example.test",
+    })).toEqual({
+      action: "fill",
+      target: {
+        exact: true,
+        kind: "label",
+        label: "Email",
+        pick: { kind: "first" },
+      },
+      text: "member@example.test",
       timeoutMs: 15000,
     });
     expect(parseHostedComputerActRequest({
-      code: "const buttons = page.locator('[data-testid=\"SPC_selectPlaceOrder\"]'); await buttons.last().click(); return { count: await buttons.count() };",
-      timeoutMs: HOSTED_COMPUTER_ACT_TIMEOUT_MAX_MS,
+      action: "wait",
+      durationMs: HOSTED_COMPUTER_ACT_WAIT_MAX_MS,
     })).toEqual({
-      code: "const buttons = page.locator('[data-testid=\"SPC_selectPlaceOrder\"]'); await buttons.last().click(); return { count: await buttons.count() };",
-      timeoutMs: HOSTED_COMPUTER_ACT_TIMEOUT_MAX_MS,
+      action: "wait",
+      durationMs: HOSTED_COMPUTER_ACT_WAIT_MAX_MS,
+      timeoutMs: 15000,
     });
     expect(parseHostedComputerOpenRunRequest({
       startUrl: "about:blank",
@@ -874,19 +917,69 @@ describe("hosted execution coverage gaps", () => {
       resumeDeliveryContext: null,
       startUrl: "http://127.0.0.1:3000",
     });
+    for (const startUrl of [
+      "javascript:document.body.textContent = document.cookie",
+      "data:text/html,<script>document.body.textContent='owned'</script>",
+      "file:///etc/passwd",
+    ]) {
+      expect(() => parseHostedComputerOpenRunRequest({ startUrl })).toThrow(
+        /Hosted computer open-run request is invalid/u,
+      );
+      expect(() => parseHostedComputerActRequest({
+        action: "navigate",
+        url: startUrl,
+      })).toThrow(/Hosted computer act request is invalid/u);
+    }
+    expect(() => parseHostedComputerActRequest({
+      code: "return await context.cookies();",
+      timeoutMs: 15000,
+    })).toThrow(/Hosted computer act request is invalid/u);
     expect(() => parseHostedComputerActRequest({
       action: "click",
-      selector: "button[type=submit]",
+      browser: true,
+      target: {
+        kind: "role",
+        role: "button",
+      },
     })).toThrow(/Hosted computer act request is invalid/u);
     expect(() => parseHostedComputerActRequest({
-      code: "",
+      action: "inspect",
+      target: {
+        kind: "label",
+        label: "x".repeat(HOSTED_COMPUTER_ACT_LOCATOR_TEXT_MAX_LENGTH + 1),
+      },
     })).toThrow(/Hosted computer act request is invalid/u);
     expect(() => parseHostedComputerActRequest({
-      code: "x".repeat(HOSTED_COMPUTER_ACT_CODE_MAX_LENGTH + 1),
+      action: "inspect",
+      target: {
+        kind: "css",
+        selector: 'input[type="hidden"][value^="a"]',
+      },
     })).toThrow(/Hosted computer act request is invalid/u);
     expect(() => parseHostedComputerActRequest({
-      code: "return true;",
+      action: "fill",
+      target: {
+        kind: "label",
+        label: "Email",
+      },
+      text: "x".repeat(HOSTED_COMPUTER_ACT_INPUT_TEXT_MAX_LENGTH + 1),
+    })).toThrow(/Hosted computer act request is invalid/u);
+    expect(() => parseHostedComputerActRequest({
+      action: "press",
+      key: "F12",
+      target: {
+        kind: "role",
+        role: "button",
+      },
+    })).toThrow(/Hosted computer act request is invalid/u);
+    expect(() => parseHostedComputerActRequest({
+      action: "wait",
+      durationMs: HOSTED_COMPUTER_ACT_WAIT_MAX_MS + 1,
+    })).toThrow(/Hosted computer act request is invalid/u);
+    expect(() => parseHostedComputerActRequest({
+      action: "navigate",
       timeoutMs: HOSTED_COMPUTER_ACT_TIMEOUT_MAX_MS + 1,
+      url: "https://example.test",
     })).toThrow(/Hosted computer act request is invalid/u);
 
     expect(parseHostedComputerPauseForUserRequest({

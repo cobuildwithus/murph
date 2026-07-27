@@ -137,7 +137,10 @@ first.
 1. `murph.computer_open` opens the member's persistent browser profile. It
    creates, reuses, resumes, or reclaims the active run and returns the current
    URL, title, and visible text. `startUrl` is only a first-page convenience.
-2. `murph.computer_act` runs bounded Playwright code against the current page.
+2. `murph.computer_act` performs exactly one server-owned browser operation:
+   navigate, inspect, click, fill ordinary non-sensitive text, select an option,
+   set a checkbox, press a supported key, wait for a locator state, or wait for a
+   short bounded duration.
 3. `murph.computer_os_control` is a fallback for one OS-level mouse or keyboard
    action when `computer_act` cannot reliably operate the page surface.
 4. `murph.computer_pause_for_user` creates a durable pause for confirmation,
@@ -145,113 +148,132 @@ first.
 5. `murph.computer_finish_run` closes the run when the task is complete, failed,
    or canceled.
 
-## Act primitive
+## Structured act primitive
 
-`computer_act` is the browser execution primitive. Pass Playwright
-TypeScript/JavaScript in `code`; `page`, `context`, and `browser` are available
-in scope. Make each call one decision-bounded macro-step: combine every
-deterministic operation, bounded wait, and final verification until the next
-operation requires new model judgment. Split only at ambiguous intent, missing
-data, sensitive input or handoff, an irreversible confirmation, an unknown
-transition, or a timeout. Return concise JSON-serializable
-state from the completed macro-step.
+`computer_act` accepts data, not JavaScript. It never exposes raw `page`,
+`context`, or `browser` objects. Choose one operation and, when required, one
+locator target:
+
+- `role` with an optional accessible `name`
+- `label`
+- visible `text`
+- `placeholder`
+- `testId`
+
+`navigate` and `computer_open.startUrl` accept HTTP(S) URLs or `about:blank`;
+they do not accept script, data, file, or other executable URL schemes.
+
+Use `pick.kind="only"` by default. Choose `first`, `last`, or `nth` only after
+current page evidence establishes which duplicate is intended. Every response
+has a fixed projection: action, sanitized current URL, title, visible page text,
+and—when the operation has a target—match count, visibility, enabled/checked
+state, concise target text, and a fresh bounding box. It never includes cookies,
+storage state, hidden browser credentials, raw browser handles, or arbitrary
+model-selected return values.
+
+Inspect a control before acting when identity, state, or duplication is unclear:
 
 ```json
 {
   "runId": "hcr_...",
-  "timeoutMs": 15000,
-  "code": "await page.getByRole('button', { name: 'Add to cart', exact: true }).click(); const cart = page.getByRole('link', { name: /cart/i }); await cart.waitFor({ state: 'visible' }); return { cart: await cart.innerText() };"
+  "action": "inspect",
+  "target": {
+    "kind": "role",
+    "role": "button",
+    "name": "Add to cart"
+  }
 }
 ```
 
-Use normal Playwright when the page has duplicate controls or custom widgets.
-For the checkout case with two identical submit buttons, choose explicitly:
+Perform one bounded effect in the next call:
 
 ```json
 {
   "runId": "hcr_...",
-  "timeoutMs": 25000,
-  "code": "const submit = page.locator('[data-testid=\"SPC_selectPlaceOrder\"]'); if (await submit.count() < 1) throw new Error('Place order button not found'); await submit.last().click(); const confirmation = page.getByText(/order (confirmed|placed)/i); await confirmation.waitFor({ state: 'visible' }); return { confirmation: await confirmation.innerText(), submitButtons: await submit.count() };"
+  "action": "click",
+  "target": {
+    "kind": "role",
+    "role": "button",
+    "name": "Add to cart"
+  }
 }
 ```
 
-Use `computer_os_control` as a bounded fallback when Playwright cannot reliably
-operate the page surface. This includes a canvas, native picker, focus trap, or
-a visible, enabled ordinary control that remains unresponsive after one safe
-Playwright locator or keyboard alternative and a specific current-state check.
-For coordinate actions, use `computer_act` to read the control's fresh bounding
-box immediately before the OS action; do not reuse coordinates after scrolling
-or navigation. For every fallback click, set `numClicks: 1`; a double- or
-triple-click can repeat a side effect inside one tool call. OS control can also
-move, drag, scroll, type text, or press keys. Do not use it for passwords,
-payment details, one-time codes, raw tokens, or other sensitive private input;
-pause for handoff instead.
+Use `fill` only for ordinary non-sensitive text. The server inspects the target
+and rejects password, payment, one-time-code, token, and similar fields before
+entry. Pause for secure handoff when sensitive input is required. Use
+`waitFor` or a fresh `inspect` call to verify the specific state caused by an
+effect; a click response alone is not completion.
 
-Never use OS-control as a blind second click when the Playwright attempt may
-already have caused a side effect. Inspect the current page first and proceed
+Use `computer_os_control` as a bounded fallback when structured browser
+operations cannot reliably operate the page surface. This includes a canvas,
+native picker, focus trap, or a visible, enabled ordinary control that remains
+unresponsive after one safe locator or keyboard alternative and a specific
+current-state check. For coordinate actions, use `computer_act` with `inspect`
+to obtain the control's fresh bounding box immediately before the OS action; do
+not reuse coordinates after scrolling or navigation. For every fallback click,
+set `numClicks: 1`; a double- or triple-click can repeat a side effect inside one
+tool call. OS control can also move, drag, scroll, type ordinary text, or press
+keys. Do not use it for passwords, payment details, one-time codes, raw tokens,
+or other sensitive private input; pause for handoff instead.
+
+Never use OS-control as a blind second click when the structured browser attempt
+may already have caused a side effect. Inspect current state first and proceed
 only when it clearly shows that the effect did not happen. Amazon's flaky
-"Place your order" control is one example: default to the Playwright selector
-above, use one coordinate click only after proving the order was not submitted,
-then call `computer_open` to verify confirmation before any further action. If
-the purchase outcome remains ambiguous, stop and hand off instead of clicking
-again.
-
-The service returns the current URL, title, and your returned `result`.
-Do not query or return cookies, local storage, storage state, hidden browser
-credentials, passwords, card numbers, one-time codes, raw tokens, or other
-secrets. Do not disable the host-installed route guard, create alternate
-browser contexts for egress, or use Node/network APIs to bypass browser
-navigation policy. Pause for handoff when sensitive user input is needed.
+"Place your order" control is one example: use a unique role, label, or test-id
+target first; use one coordinate click only after proving the order was not
+submitted, then call `computer_open` to verify confirmation before any further
+action. If the purchase outcome remains ambiguous, stop and hand off instead of
+clicking again.
 
 ## Browser control loop
 
-Open or reuse the run, and inspect current state — domain, page purpose, login
-state, selected account, cart or appointment state — before acting. Then execute
-one decision-bounded macro-step at a time: keep deterministic actions, waits,
-and verification in the same call, and return the resulting state. Re-read or
-start another macro-step only when that state changes the next choice. Verify
-the requested result on the site; a click is not completion. Finish the run
-with the correct outcome.
+Open or reuse the run and inspect current state—domain, page purpose, login
+state, selected account, cart, or appointment state—before acting. Execute one
+structured operation at a time. After an effect, use the returned fixed state
+and then `inspect` or `waitFor` when a specific confirmation is needed. Verify
+the requested result on the site; a click is not completion. Finish the run with
+the correct outcome.
 
 Be sparing with progress messages during a browser run: at most one when the
 browser work starts, and one more only if the run is dragging on. Individual
 page checks, acts, navigations, and clicks do not each need an update.
 
 Treat browser capability as something to test, not guess. For an authorized
-task, try the normal Playwright interaction and one safe locator or keyboard
-alternative before declaring an ordinary control or expected, user-requested
-document retrieval impossible. For reversible, same-shape retrievals, continue
-only across the bounded requested set and verify each result; use OS-control only
-under its fallback rule. This does not authorize bypassing a CAPTCHA, access
-control, rate limit, route guard, private-input boundary, or unexpected download.
+task, try the normal structured locator interaction and one safe locator or
+keyboard alternative before declaring an ordinary control or expected,
+user-requested document retrieval impossible. For reversible, same-shape
+retrievals, continue only across the bounded requested set and verify each
+result; use OS-control only under its fallback rule. This does not authorize
+bypassing a CAPTCHA, access control, rate limit, private-input boundary, or
+unexpected download.
 
 Do not repeat a click because a page seems slow. Wait for a specific state or
-inspect current page state first. For side-effecting clicks such as add-to-cart, booking, checkout,
-or final submit buttons, prefer one click followed by a specific confirmation,
-cart count, appointment state, or order state check. If a transport or browser
-error leaves the outcome unknown, call `computer_open` before retrying so Murph does not
-double-book, double-submit, or add duplicate cart items.
+inspect current page state first. For side-effecting clicks such as add-to-cart,
+booking, checkout, or final submit buttons, use one click followed by a specific
+confirmation, cart count, appointment state, or order state check. If a
+transport or browser error leaves the outcome unknown, call `computer_open`
+before retrying so Murph does not double-book, double-submit, or add duplicate
+cart items.
 
-If a control remains unresponsive after a specific wait/current-state check and one safe
-alternate locator or keyboard path, or the site appears wedged, refresh the
-current page as a last resort. Do this only when no booking, purchase,
-submission, or other side effect is in an unknown state. Refresh and re-check
-cart, form, account, appointment, or confirmation state within the same
-`computer_act` call when possible. If the refresh or transport leaves the
-outcome genuinely unknown, call `computer_open` before retrying. If refreshing
-would risk duplicate submission or losing important user-entered data, pause
-for user takeover or finish failed with the blocker instead.
+If a control remains unresponsive after a specific wait/current-state check and
+one safe alternate locator or keyboard path, or the site appears wedged, refresh
+the current page as a last resort with `navigate`, then inspect it in a new call.
+Do this only when no booking, purchase, submission, or other side effect is in
+an unknown state. If the refresh or transport leaves the outcome genuinely
+unknown, call `computer_open` before retrying. If refreshing would risk duplicate
+submission or losing important user-entered data, pause for user takeover or
+finish failed with the blocker instead.
 
-## Playwright control tactics
+## Structured browser control tactics
 
-- Prefer `page.getByRole(..., { name, exact: true })` when it is unique, labels
-  for form fields, and placeholder, visible text, test id, or CSS selectors as
-  fallbacks. Use `locator(...).nth(index)`, `.first()`, or `.last()`
-  deliberately when the page has duplicate valid controls.
-- Use keyboard input for masked, autocomplete, calendar, or reactive widgets
-  that ignore `.fill()`, and check the selected value afterward. Prefer
-  `locator.waitFor()` on a meaningful confirmation or changed state over a
-  blind delay.
+- Prefer a unique `role` plus accessible name, then labels for form fields, and
+  placeholder, visible text, or test id as fallbacks. Choose `nth`, `first`, or
+  `last` deliberately only when current evidence identifies a duplicate.
+- Use `press` for masked, autocomplete, calendar, or reactive widgets that do not
+  accept an ordinary `fill`, and inspect the resulting field or page state
+  afterward. Prefer `waitFor` on a meaningful confirmation or changed state over
+  a blind delay.
 - Dismiss obstructing cookie or newsletter prompts conservatively. Reject
   optional tracking or marketing when practical; do not opt the user into email,
   SMS, loyalty, or data-sharing programs without authorization.
@@ -545,10 +567,11 @@ skill or reference update, not in one user's memory.
 
 ## Verify and stop
 
-After actions that might have navigated, submitted, or changed state, return the
-resulting state from the same `computer_act` call. Use `computer_open` for an
-initial or resumed run, after OS-control, or when an act or transport leaves the
-outcome genuinely unknown. Completion evidence should match the task:
+Every `computer_act` returns a fixed current-page projection. After an action
+that might have submitted or changed state, use `inspect` or `waitFor` to verify
+the specific result. Use `computer_open` for an initial or resumed run, after
+OS-control, or when an act or transport leaves the outcome genuinely unknown.
+Completion evidence should match the task:
 
 - appointment: provider/service, date/time/timezone, location, and confirmed
   status

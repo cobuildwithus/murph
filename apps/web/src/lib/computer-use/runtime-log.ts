@@ -13,7 +13,6 @@ import type {
 
 import { isHostedOnboardingError } from "../hosted-onboarding/errors";
 import { recordHostedRuntimeLog } from "../hosted-workspace/store";
-import { shortHash } from "./ids";
 
 type HostedComputerToolOperation =
   | "act"
@@ -197,11 +196,11 @@ function readHostedComputerToolActionDetail(input: {
   if (!input.action) {
     return {};
   }
-  if (input.operation === "os-control" && "action" in input.action) {
+  if (input.operation === "os-control") {
     return { computerOsControlKind: input.action.action };
   }
-  if ("code" in input.action) {
-    return { playwrightCodeHash: shortHash(input.action.code) };
+  if (input.operation === "act") {
+    return { computerActKind: input.action.action };
   }
   return {};
 }

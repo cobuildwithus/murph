@@ -2293,7 +2293,7 @@ describe("hosted runtime control contracts", () => {
         kernelErrorPresent: true,
         kernelStderrPresent: false,
         kernelStdoutPresent: false,
-        playwrightCodeHash: "abc123",
+        computerActKind: "click",
         safeErrorMessage: "Hosted computer tool failed.",
         timeoutMs: 20000,
         unknownOutcome: true,

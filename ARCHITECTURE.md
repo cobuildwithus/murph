@@ -404,6 +404,17 @@ provider owner. That owner stops the browser to save the profile, creates and
 durably publishes its replacement, and atomically consumes the claim while
 returning browser control to the assistant. An ambiguous failure retains the
 claim for bounded stale-owner recovery; overlapping resumes cannot call Kernel.
+Persistent-profile browser actions reuse the same signed callback, member/run
+ownership, profile, and lifecycle owners. The model-facing `computer_act`
+contract accepts one finite operation plus bounded locator/value data; `apps/web`
+compiles fixed Playwright snippets and returns only fixed page and target state.
+Raw model-authored JavaScript, arbitrary result projection, and direct
+`page`/`context`/`browser` authority are absent from the persistent-profile
+boundary. Locator matching is limited to visible elements and exposes no raw
+CSS selector oracle over hidden DOM attributes. Ordinary text entry performs a
+text-free server-owned
+sensitive-field probe before the value is sent to Kernel and routes blocked
+input to the existing durable handoff.
 
 ## Hosted Phone Calls
 

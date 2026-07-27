@@ -319,9 +319,14 @@ is active.
   user reply before the agent can resume control. `apps/web` verifies newer
   hosted `conversation.message` mailbox items and delivery context when reply
   proof is required; model-supplied run ids or confirmation text are not proof.
-  `computer_act` runs bounded raw Playwright code against the current Kernel
-  page, and `computer_os_control` is a bounded mouse/keyboard fallback for page
-  surfaces that cannot be operated through Playwright. The agent explicitly
+  `computer_act` sends one validated structured browser operation to `apps/web`,
+  which compiles fixed Playwright code and returns a fixed page/target projection;
+  raw model-authored JavaScript, raw CSS selectors, hidden locator matches, and
+  browser-context authority are not accepted.
+  Structured text entry first runs a text-free sensitive-field probe and sends
+  the value to Kernel only after that probe passes. `computer_os_control`
+  remains a bounded mouse/keyboard fallback for page surfaces that cannot be
+  operated through the structured browser contract. The agent explicitly
   selects `managed_login` for Kernel Hosted UI plus a durable profile/domain
   connection, or `login` for the existing Live View takeover; CAPTCHA,
   payment, missing-detail, and direct takeover handoffs remain Live View. Murph

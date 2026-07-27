@@ -10,7 +10,9 @@ export const HOSTED_COMPUTER_RUN_OPERATION_PATH_PATTERN =
   /^\/api\/internal\/computer\/runs\/(?<runId>[^/]+)\/(?<operation>act|os-control|pause-for-user|finish)$/u;
 
 export const HOSTED_COMPUTER_ACT_TIMEOUT_MAX_MS = 25_000;
-export const HOSTED_COMPUTER_ACT_CODE_MAX_LENGTH = 12_000;
+export const HOSTED_COMPUTER_ACT_LOCATOR_TEXT_MAX_LENGTH = 1_000;
+export const HOSTED_COMPUTER_ACT_INPUT_TEXT_MAX_LENGTH = 4_000;
+export const HOSTED_COMPUTER_ACT_WAIT_MAX_MS = 5_000;
 export const HOSTED_COMPUTER_OS_CONTROL_TEXT_MAX_LENGTH = 500;
 export const HOSTED_COMPUTER_OS_CONTROL_COORDINATE_MAX = 10_000;
 
@@ -109,11 +111,14 @@ export const HOSTED_COMPUTER_FINISH_OUTCOMES = [
 export type HostedComputerFinishOutcome =
   (typeof HOSTED_COMPUTER_FINISH_OUTCOMES)[number];
 
-const hostedComputerStartUrlSchema = z
+export const hostedComputerNavigationUrlSchema = z
   .string()
   .trim()
   .min(1)
-  .max(4_000);
+  .max(4_000)
+  .refine(isHostedComputerNavigationUrl, {
+    message: "Computer navigation URL must use http, https, or about:blank.",
+  });
 
 export const hostedComputerDeliveryContextSchema = z
   .object({
@@ -129,7 +134,7 @@ export const hostedComputerOpenRunRequestSchema = z
     goal: z.string().trim().min(1).max(2_000).optional(),
     resumeAfterMailboxItemId: z.string().trim().min(1).max(200).nullable().default(null),
     resumeDeliveryContext: hostedComputerDeliveryContextSchema.nullable().default(null),
-    startUrl: hostedComputerStartUrlSchema.nullable().default(null),
+    startUrl: hostedComputerNavigationUrlSchema.nullable().default(null),
   })
   .strict()
   .transform(({ goal: _goal, ...request }) => request);
@@ -141,16 +146,200 @@ const hostedComputerActTimeoutSchema = z
   .max(HOSTED_COMPUTER_ACT_TIMEOUT_MAX_MS)
   .default(15_000);
 
-export const hostedComputerActRequestSchema = z
-  .object({
-    code: z
-      .string()
-      .trim()
-      .min(1)
-      .max(HOSTED_COMPUTER_ACT_CODE_MAX_LENGTH),
-    timeoutMs: hostedComputerActTimeoutSchema,
-  })
-  .strict();
+const hostedComputerActLocatorTextSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(HOSTED_COMPUTER_ACT_LOCATOR_TEXT_MAX_LENGTH);
+
+const hostedComputerActOptionValueSchema = z
+  .string()
+  .max(HOSTED_COMPUTER_ACT_LOCATOR_TEXT_MAX_LENGTH);
+
+const hostedComputerActLocatorPickSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("only") }).strict(),
+  z.object({ kind: z.literal("first") }).strict(),
+  z.object({ kind: z.literal("last") }).strict(),
+  z
+    .object({
+      index: z.number().int().min(0).max(100),
+      kind: z.literal("nth"),
+    })
+    .strict(),
+]).default({ kind: "only" });
+
+const hostedComputerActTargetSchema = z.discriminatedUnion("kind", [
+  z
+    .object({
+      exact: z.boolean().default(true),
+      kind: z.literal("role"),
+      name: hostedComputerActLocatorTextSchema.nullable().default(null),
+      pick: hostedComputerActLocatorPickSchema,
+      role: z.string().trim().min(1).max(100),
+    })
+    .strict(),
+  z
+    .object({
+      exact: z.boolean().default(true),
+      kind: z.literal("label"),
+      label: hostedComputerActLocatorTextSchema,
+      pick: hostedComputerActLocatorPickSchema,
+    })
+    .strict(),
+  z
+    .object({
+      exact: z.boolean().default(true),
+      kind: z.literal("text"),
+      pick: hostedComputerActLocatorPickSchema,
+      text: hostedComputerActLocatorTextSchema,
+    })
+    .strict(),
+  z
+    .object({
+      exact: z.boolean().default(true),
+      kind: z.literal("placeholder"),
+      pick: hostedComputerActLocatorPickSchema,
+      placeholder: hostedComputerActLocatorTextSchema,
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("testId"),
+      pick: hostedComputerActLocatorPickSchema,
+      testId: hostedComputerActLocatorTextSchema,
+    })
+    .strict(),
+]);
+
+export const HOSTED_COMPUTER_ACT_ACTIONS = [
+  "navigate",
+  "inspect",
+  "click",
+  "fill",
+  "selectOption",
+  "setChecked",
+  "press",
+  "waitFor",
+  "wait",
+] as const;
+export type HostedComputerActAction =
+  (typeof HOSTED_COMPUTER_ACT_ACTIONS)[number];
+
+export const HOSTED_COMPUTER_ACT_KEYS = [
+  "Enter",
+  "Tab",
+  "Shift+Tab",
+  "Escape",
+  "ArrowUp",
+  "ArrowDown",
+  "ArrowLeft",
+  "ArrowRight",
+  "Backspace",
+  "Delete",
+  "Home",
+  "End",
+  "PageUp",
+  "PageDown",
+  "Space",
+] as const;
+export type HostedComputerActKey = (typeof HOSTED_COMPUTER_ACT_KEYS)[number];
+
+const hostedComputerActBaseShape = {
+  timeoutMs: hostedComputerActTimeoutSchema,
+};
+
+export const hostedComputerActRequestSchema = z.discriminatedUnion("action", [
+  z
+    .object({
+      action: z.literal("navigate"),
+      ...hostedComputerActBaseShape,
+      url: hostedComputerNavigationUrlSchema,
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal("inspect"),
+      target: hostedComputerActTargetSchema,
+      ...hostedComputerActBaseShape,
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal("click"),
+      target: hostedComputerActTargetSchema,
+      ...hostedComputerActBaseShape,
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal("fill"),
+      target: hostedComputerActTargetSchema,
+      text: z.string().max(HOSTED_COMPUTER_ACT_INPUT_TEXT_MAX_LENGTH),
+      ...hostedComputerActBaseShape,
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal("selectOption"),
+      target: hostedComputerActTargetSchema,
+      values: z
+        .array(hostedComputerActOptionValueSchema)
+        .min(1)
+        .max(10),
+      ...hostedComputerActBaseShape,
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal("setChecked"),
+      checked: z.boolean(),
+      target: hostedComputerActTargetSchema,
+      ...hostedComputerActBaseShape,
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal("press"),
+      key: z.enum(HOSTED_COMPUTER_ACT_KEYS),
+      target: hostedComputerActTargetSchema,
+      ...hostedComputerActBaseShape,
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal("waitFor"),
+      state: z.enum(["attached", "detached", "visible", "hidden"]),
+      target: hostedComputerActTargetSchema,
+      ...hostedComputerActBaseShape,
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal("wait"),
+      durationMs: z.number().int().min(50).max(HOSTED_COMPUTER_ACT_WAIT_MAX_MS),
+      ...hostedComputerActBaseShape,
+    })
+    .strict(),
+]);
+
+function isHostedComputerNavigationUrl(value: string): boolean {
+  if (value === "about:blank") {
+    return true;
+  }
+  if (!/^https?:\/\//iu.test(value)) {
+    return false;
+  }
+
+  try {
+    const parsed = new URL(value);
+    return (
+      (parsed.protocol === "http:" || parsed.protocol === "https:") &&
+      parsed.hostname.length > 0
+    );
+  } catch {
+    return false;
+  }
+}
 
 const hostedComputerOsControlCoordinateSchema = z
   .number()

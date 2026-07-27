@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
-  HOSTED_COMPUTER_ACT_CODE_MAX_LENGTH,
+  HOSTED_COMPUTER_ACT_INPUT_TEXT_MAX_LENGTH,
+  HOSTED_COMPUTER_ACT_LOCATOR_TEXT_MAX_LENGTH,
   HOSTED_COMPUTER_ACT_TIMEOUT_MAX_MS,
 } from "@murphai/hosted-execution/computer-use";
 import {
@@ -20,7 +21,7 @@ import type {
 } from "../src/assistant/turn-progress.ts";
 
 describe("murph computer dynamic tools", () => {
-  it("advertises raw Playwright act and generic pause primitives", () => {
+  it("advertises structured browser actions and generic pause primitives", () => {
     const computerTools = MURPH_DYNAMIC_TOOLS.filter((tool) =>
       tool.name.startsWith("computer_")
     );
@@ -44,14 +45,33 @@ describe("murph computer dynamic tools", () => {
       tool.name === "computer_act"
     );
     const actToolSchema = JSON.stringify(actTool?.inputSchema);
-    expect(actToolSchema).toContain("\"code\"");
-    expect(actToolSchema).not.toContain("steps");
-    expect(actToolSchema).not.toContain("\"action\"");
-    expect(actToolSchema).not.toContain('"const":"goto"');
-    expect(actToolSchema).not.toContain('"const":"css"');
-    expect(actToolSchema).not.toContain('"locator"');
+    expect(actToolSchema).not.toContain('"code"');
+    expect(actToolSchema).not.toContain('"context"');
+    expect(actToolSchema).not.toContain('"browser"');
+    expect(actToolSchema).not.toContain('"evaluate"');
+    for (const action of [
+      "navigate",
+      "inspect",
+      "click",
+      "fill",
+      "selectOption",
+      "setChecked",
+      "press",
+      "waitFor",
+      "wait",
+    ]) {
+      expect(actToolSchema).toContain(`"const":"${action}"`);
+    }
+    for (const locatorKind of ["role", "label", "text", "placeholder", "testId"]) {
+      expect(actToolSchema).toContain(`"const":"${locatorKind}"`);
+    }
     expect(actToolSchema).not.toContain('"selector"');
-    expect(actToolSchema).toContain(`"maxLength":${HOSTED_COMPUTER_ACT_CODE_MAX_LENGTH}`);
+    expect(actToolSchema).toContain(
+      `"maxLength":${HOSTED_COMPUTER_ACT_LOCATOR_TEXT_MAX_LENGTH}`,
+    );
+    expect(actToolSchema).toContain(
+      `"maxLength":${HOSTED_COMPUTER_ACT_INPUT_TEXT_MAX_LENGTH}`,
+    );
     expect(actToolSchema).toContain('"type":"integer"');
     expect(actToolSchema).toContain('"minimum":1000');
     expect(actToolSchema).toContain(
@@ -95,11 +115,11 @@ describe("murph computer dynamic tools", () => {
     const pauseDescription = pauseTool?.description ?? "";
 
     expect(actDescription.length).toBeLessThanOrEqual(320);
-    expect(actDescription).toMatch(/macro-step/iu);
+    expect(actDescription).toContain("bounded server-owned browser operation");
     expect(actDescription).toContain("current authorized run");
-    expect(actDescription).toContain("no missing or sensitive user input or final confirmation");
+    expect(actDescription).toContain("no sensitive input or final confirmation");
     expect(actDescription).toContain("unknown outcome");
-    expect(actDescription).toContain("call computer_open before retrying or acting again");
+    expect(actDescription).toContain("call computer_open before retrying");
 
     expect(openDescription.length).toBeLessThanOrEqual(250);
     expect(openDescription).toContain("current authorized Kernel browser run");
@@ -176,6 +196,14 @@ describe("murph computer dynamic tools", () => {
     expect(request.args).toEqual({
       startUrl: null,
     });
+
+    const scriptNavigation = readMurphDynamicToolRequest(dynamicToolCall({
+      argumentsValue: {
+        startUrl: "javascript:document.body.textContent = document.cookie",
+      },
+      tool: "computer_open",
+    }));
+    expect(scriptNavigation?.kind).toBe("invalid-computer-arguments");
 
     const result = await executeMurphDynamicToolRequest({
       env: {},
@@ -449,7 +477,18 @@ describe("murph computer dynamic tools", () => {
     );
   });
 
-  it("runs raw Playwright and returns the current action URL", async () => {
+  it("runs a structured browser action and returns only fixed result fields", async () => {
+    const action = {
+      action: "click" as const,
+      target: {
+        exact: true,
+        kind: "role" as const,
+        name: "Add to cart",
+        pick: { kind: "only" as const },
+        role: "button",
+      },
+      timeoutMs: 1000,
+    };
     const fetchImpl = vi.fn(async (
       url: string | URL | Request,
       init?: RequestInit,
@@ -457,16 +496,23 @@ describe("murph computer dynamic tools", () => {
       expect(String(url)).toBe(
         "http://web-control.worker/api/internal/computer/runs/run_123/act",
       );
-      expect(JSON.parse(String(init?.body))).toEqual({
-        code: "await page.getByRole('button', { name: 'Add to cart' }).click(); return { clicked: true };",
-        timeoutMs: 1000,
-      });
+      expect(JSON.parse(String(init?.body))).toEqual(action);
 
       return jsonResponse({
-        result: { clicked: true },
+        action: "click",
+        cookies: [{ name: "session", value: "must-not-return" }],
+        result: { clicked: true, storageState: "must-not-return" },
+        target: {
+          box: { height: 30, width: 120, x: 40, y: 50 },
+          checked: null,
+          enabled: true,
+          matchCount: 1,
+          text: "Add to cart",
+          visible: true,
+        },
         title: "Checkout",
-        url: "https://shop.example.test/order?secret=raw",
-        visibleText: "Cart updated https://shop.example.test/order?session_id=opaque#step",
+        url: "https://shop.example.test/order?secret=raw#step",
+        visibleText: "Cart updated",
       });
     });
 
@@ -478,9 +524,8 @@ describe("murph computer dynamic tools", () => {
       progressDelivery: createProgressDelivery(),
       request: {
         args: {
-          code: "await page.getByRole('button', { name: 'Add to cart' }).click(); return { clicked: true };",
+          ...action,
           runId: "run_123",
-          timeoutMs: 1000,
         },
         kind: "computer-act",
       },
@@ -489,12 +534,21 @@ describe("murph computer dynamic tools", () => {
     expect(result.rpcResult.success).toBe(true);
     const payload = JSON.parse(result.rpcResult.contentItems[0]!.text);
     expect(payload).toEqual({
-      result: { clicked: true },
+      action: "click",
+      target: {
+        box: { height: 30, width: 120, x: 40, y: 50 },
+        checked: null,
+        enabled: true,
+        matchCount: 1,
+        text: "Add to cart",
+        visible: true,
+      },
       title: "Checkout",
       url: "https://shop.example.test/order",
+      visibleText: "Cart updated",
     });
+    expect(result.rpcResult.contentItems[0]!.text).not.toContain("must-not-return");
     expect(result.rpcResult.contentItems[0]!.text).not.toContain("secret=raw");
-    expect(result.rpcResult.contentItems[0]!.text).not.toContain("session_id");
     expect(result.rpcResult.contentItems[0]!.text).not.toContain("#step");
   });
 
@@ -542,7 +596,7 @@ describe("murph computer dynamic tools", () => {
     expect(fetchImpl).toHaveBeenCalledOnce();
   });
 
-  it("does not parse old structured click actions", () => {
+  it("rejects legacy selector-only click actions", () => {
     const request = readMurphDynamicToolRequest(dynamicToolCall({
       argumentsValue: {
         action: "click",
@@ -563,9 +617,10 @@ describe("murph computer dynamic tools", () => {
     for (const timeoutMs of [999, 1000.5]) {
       const request = readMurphDynamicToolRequest(dynamicToolCall({
         argumentsValue: {
-          code: "await page.getByRole('button', { name: 'Add to cart' }).click();",
+          action: "navigate",
           runId: "run_123",
           timeoutMs,
+          url: "https://shop.example.test/checkout",
         },
         tool: "computer_act",
       }));
@@ -577,27 +632,47 @@ describe("murph computer dynamic tools", () => {
     }
   });
 
-  it("parses raw Playwright actions", () => {
+  it("parses structured browser actions and rejects raw code", () => {
     const request = readMurphDynamicToolRequest(dynamicToolCall({
       argumentsValue: {
-        code: "await page.goto('https://shop.example.test/checkout'); return { ok: true };",
+        action: "navigate",
+        runId: "run_123",
+        timeoutMs: 1000,
+        url: "https://shop.example.test/checkout",
+      },
+      tool: "computer_act",
+    }));
+
+    expect(request).toEqual({
+      args: {
+        action: "navigate",
+        runId: "run_123",
+        timeoutMs: 1000,
+        url: "https://shop.example.test/checkout",
+      },
+      kind: "computer-act",
+    });
+
+    const rawCode = readMurphDynamicToolRequest(dynamicToolCall({
+      argumentsValue: {
+        code: "return await context.cookies();",
         runId: "run_123",
         timeoutMs: 1000,
       },
       tool: "computer_act",
     }));
+    expect(rawCode?.kind).toBe("invalid-computer-arguments");
 
-    if (!request) {
-      throw new Error("Expected a parsed dynamic tool request.");
-    }
-    expect(request).toEqual({
-      args: {
-        code: "await page.goto('https://shop.example.test/checkout'); return { ok: true };",
+    const scriptNavigation = readMurphDynamicToolRequest(dynamicToolCall({
+      argumentsValue: {
+        action: "navigate",
         runId: "run_123",
         timeoutMs: 1000,
+        url: "javascript:document.body.textContent = document.cookie",
       },
-      kind: "computer-act",
-    });
+      tool: "computer_act",
+    }));
+    expect(scriptNavigation?.kind).toBe("invalid-computer-arguments");
   });
 
   it("does not parse the removed eval tool", () => {
@@ -630,9 +705,10 @@ describe("murph computer dynamic tools", () => {
       progressDelivery: createProgressDelivery(),
       request: {
         args: {
-          code: "await page.goto('https://shop.example.test/checkout');",
+          action: "navigate",
           runId: "run_123",
           timeoutMs: 1000,
+          url: "https://shop.example.test/checkout",
         },
         kind: "computer-act",
       },
@@ -640,7 +716,7 @@ describe("murph computer dynamic tools", () => {
 
     expect(result.rpcResult.success).toBe(false);
     expect(result.rpcResult.contentItems[0]!.text).toBe(
-      "computer API outcome is unknown after a transport or browser execution failure; call computer_open before retrying Playwright code or taking another step",
+      "computer API outcome is unknown after a transport or browser execution failure; call computer_open before retrying a structured browser action or taking another step",
     );
   });
 
@@ -665,9 +741,10 @@ describe("murph computer dynamic tools", () => {
       progressDelivery: createProgressDelivery(),
       request: {
         args: {
-          code: "await page.goto('https://shop.example.test/checkout');",
+          action: "navigate",
           runId: "run_123",
           timeoutMs: 1000,
+          url: "https://shop.example.test/checkout",
         },
         kind: "computer-act",
       },
@@ -675,7 +752,7 @@ describe("murph computer dynamic tools", () => {
 
     expect(result.rpcResult.success).toBe(false);
     expect(result.rpcResult.contentItems[0]!.text).toBe(
-      `computer API outcome is unknown after a transport or browser execution failure; call computer_open before retrying Playwright code or taking another step; backend error: ${code}: Computer browser evaluation failed.`,
+      `computer API outcome is unknown after a transport or browser execution failure; call computer_open before retrying a structured browser action or taking another step; backend error: ${code}: Computer browser evaluation failed.`,
     );
   });
 
@@ -685,7 +762,7 @@ describe("murph computer dynamic tools", () => {
         error: {
           code: "HOSTED_COMPUTER_EVAL_FAILED",
           details: {
-            codeHash: "abc123",
+            computerActKind: "click",
             kernelError: [
               "Error: strict mode violation: getByRole('button', { name: 'Place your order' }) resolved to 2 elements",
               "    at locator.click (<REDACTED_PATH>:10:5)",
@@ -709,8 +786,15 @@ describe("murph computer dynamic tools", () => {
       progressDelivery: createProgressDelivery(),
       request: {
         args: {
-          code: "await page.getByRole('button', { name: 'Place your order', exact: true }).click();",
+          action: "click",
           runId: "run_123",
+          target: {
+            exact: true,
+            kind: "role",
+            name: "Place your order",
+            pick: { kind: "only" },
+            role: "button",
+          },
           timeoutMs: 20000,
         },
         kind: "computer-act",
@@ -720,9 +804,9 @@ describe("murph computer dynamic tools", () => {
     expect(result.rpcResult.success).toBe(false);
     expect(result.rpcResult.contentItems[0]!.text).toBe(
       [
-        "computer API outcome is unknown after a transport or browser execution failure; call computer_open before retrying Playwright code or taking another step; backend error: HOSTED_COMPUTER_EVAL_FAILED: Computer browser evaluation failed.",
+        "computer API outcome is unknown after a transport or browser execution failure; call computer_open before retrying a structured browser action or taking another step; backend error: HOSTED_COMPUTER_EVAL_FAILED: Computer browser evaluation failed.",
         "backend details:",
-        "codeHash: abc123",
+        "computerActKind: click",
         "timeoutMs: 20000",
         "playwrightError:",
         "Error: strict mode violation: getByRole('button', { name: 'Place your order' }) resolved to 2 elements",
@@ -956,7 +1040,7 @@ describe("murph computer dynamic tools", () => {
 
     expect(result.rpcResult.success).toBe(false);
     expect(result.rpcResult.contentItems[0]!.text).toBe(
-      "computer API outcome is unknown after a transport or browser execution failure; call computer_open before retrying Playwright code or taking another step",
+      "computer API outcome is unknown after a transport or browser execution failure; call computer_open before retrying a structured browser action or taking another step",
     );
     expect(fetchImpl).toHaveBeenCalledTimes(1);
   });

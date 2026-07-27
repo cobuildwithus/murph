@@ -61,10 +61,11 @@ import {
 } from '@murphai/hosted-execution/vault-share'
 import {
   buildHostedComputerRunOperationPath,
-  HOSTED_COMPUTER_ACT_CODE_MAX_LENGTH,
+  HOSTED_COMPUTER_ACT_ACTIONS,
   HOSTED_COMPUTER_ACT_TIMEOUT_MAX_MS,
   HOSTED_COMPUTER_FINISH_OUTCOMES,
   HOSTED_COMPUTER_RUNS_PATH,
+  hostedComputerNavigationUrlSchema,
   hostedComputerActRequestSchema,
   hostedComputerOsControlRequestSchema,
   hostedComputerPauseForUserRequestSchema,
@@ -232,7 +233,9 @@ const GROUP_GENERATED_AVATAR_REFERENCE_IMAGE_REFS_DESCRIPTION =
   `Optional ordered JPG, PNG, or WebP image refs to use as visual references when action="set_chat_avatar" and avatarSource="generate". Refs may be user-sent media under raw/inbox/**, captured media under raw/captures/**, or ${MURPH_CHARACTER_SHEET_REFERENCE_IMAGE_REF}, Murph's canonical character sheet. Attach ${MURPH_CHARACTER_SHEET_REFERENCE_IMAGE_REF} whenever Murph itself appears in a generated avatar.`
 
 const HOSTED_COMPUTER_UNKNOWN_OUTCOME_TEXT =
-  'computer API outcome is unknown after a transport or browser execution failure; call computer_open before retrying Playwright code or taking another step'
+  'computer API outcome is unknown after a transport or browser execution failure; call computer_open before retrying a structured browser action or taking another step'
+const HOSTED_COMPUTER_VISIBLE_TEXT_RESULT_MAX_LENGTH = 12_000
+const HOSTED_COMPUTER_TARGET_TEXT_RESULT_MAX_LENGTH = 2_000
 
 export const MURPH_SEND_PROGRESS_UPDATE_TOOL = {
   namespace: 'murph',
@@ -998,7 +1001,11 @@ export const MURPH_COMPUTER_OPEN_TOOL = {
     additionalProperties: false,
     properties: {
       startUrl: {
-        anyOf: [{ type: 'string' }, { type: 'null' }],
+        anyOf: [{
+          type: 'string',
+          maxLength: 4_000,
+          description: 'Optional HTTP(S) URL or about:blank.',
+        }, { type: 'null' }],
         default: null,
       },
     },
@@ -1013,29 +1020,31 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 
 type JsonSchemaObject = Record<string, unknown>
 
-const MURPH_COMPUTER_ACT_INPUT_SCHEMA = {
-  type: 'object',
-  additionalProperties: false,
-  properties: {
-    runId: { type: 'string', minLength: 1 },
-    code: {
-      type: 'string',
-      minLength: 1,
-      maxLength: HOSTED_COMPUTER_ACT_CODE_MAX_LENGTH,
-      description:
-        'One complete Playwright macro-step using the in-scope page, context, and browser objects. Return only compact JSON-serializable state needed for the next decision.',
-    },
-    timeoutMs: {
-      type: 'integer',
-      minimum: 1000,
-      maximum: HOSTED_COMPUTER_ACT_TIMEOUT_MAX_MS,
-      default: 15000,
-    },
-  },
-  required: ['runId', 'code'],
-} as const
+const MURPH_COMPUTER_ACT_INPUT_SCHEMA = buildComputerRunScopedInputSchema(
+  hostedComputerActRequestSchema,
+)
 
 const MURPH_COMPUTER_OS_CONTROL_INPUT_SCHEMA = buildComputerOsControlInputSchema()
+
+function buildComputerRunScopedInputSchema(schema: z.ZodType): JsonSchemaObject {
+  const generated = z.toJSONSchema(schema, { io: 'input' }) as JsonSchemaObject
+  const actionSchemas = Array.isArray(generated.oneOf)
+    ? generated.oneOf
+    : Array.isArray(generated.anyOf)
+      ? generated.anyOf
+      : []
+  const {
+    anyOf: _anyOf,
+    oneOf: _oneOf,
+    ...rootSchema
+  } = generated
+
+  return {
+    ...rootSchema,
+    oneOf: actionSchemas.map(addRunIdToActionSchema),
+    type: 'object',
+  }
+}
 
 function buildComputerOsControlInputSchema(): JsonSchemaObject {
   const generated = z.toJSONSchema(hostedComputerOsControlRequestSchema, { io: 'input' }) as JsonSchemaObject
@@ -1068,7 +1077,7 @@ export const MURPH_COMPUTER_ACT_TOOL = {
   namespace: 'murph',
   name: 'computer_act',
   description:
-    'Execute one bounded Playwright macro-step in the current authorized run. Call only while no missing or sensitive user input or final confirmation is required. Return compact state. A transport or browser failure may have an unknown outcome; call computer_open before retrying or acting again.',
+    'Execute one bounded server-owned browser operation in the current authorized run. Use navigation, inspection, locator interaction, form entry, or waits only while no sensitive input or final confirmation is required. Failures may have an unknown outcome; call computer_open before retrying.',
   inputSchema: MURPH_COMPUTER_ACT_INPUT_SCHEMA,
 } as const
 
@@ -1650,15 +1659,9 @@ const COMPUTER_OPEN_ARGUMENT_ROOT_KEYS = [
   'startUrl',
 ] as const
 
-const computerNavigationUrlSchema = z
-  .string()
-  .trim()
-  .min(1)
-  .max(4_000)
-
 const computerOpenArgumentsSchema = z
   .object({
-    startUrl: computerNavigationUrlSchema.nullable().default(null),
+    startUrl: hostedComputerNavigationUrlSchema.nullable().default(null),
   })
   .strict()
 
@@ -2422,7 +2425,6 @@ export function readMurphDynamicToolRequest(
         argumentsValue: request.arguments,
         schema: computerActArgumentsSchema,
         schemaName: 'murph.computer_act.input',
-        schemaRootKeys: ['runId', 'code', 'timeoutMs'],
         toolName: 'murph.computer_act',
       })
       return parsed.ok
@@ -4699,7 +4701,7 @@ function readHostedComputerApiErrorDetails(value: unknown): string | null {
   }
 
   const lines = [
-    readHostedComputerApiErrorDetailLine('codeHash', record.codeHash),
+    readHostedComputerApiErrorDetailLine('computerActKind', record.computerActKind),
     readHostedComputerApiErrorDetailLine('computerOsControl', record.computerOsControl),
     readHostedComputerApiErrorDetailLine('timeoutMs', record.timeoutMs),
     readHostedComputerApiErrorDiagnosticBlock('playwrightError', record.kernelError),
@@ -4817,11 +4819,7 @@ function sanitizeHostedComputerPayload(
         visibleText: typeof record.visibleText === 'string' ? record.visibleText : '',
       }
     case 'act':
-      return {
-        result: record.result ?? null,
-        ...readStringField(record, 'title'),
-        ...readSanitizedComputerUrlField(record, 'url'),
-      }
+      return sanitizeHostedComputerActPayload(record)
     case 'os-control':
       return {
         ...readStringField(record, 'action'),
@@ -4836,6 +4834,108 @@ function sanitizeHostedComputerPayload(
         ...readStringField(record, 'status'),
       }
   }
+}
+
+function sanitizeHostedComputerActPayload(
+  record: Record<string, unknown>,
+): Record<string, unknown> {
+  const action = typeof record.action === 'string'
+    && HOSTED_COMPUTER_ACT_ACTIONS.includes(
+      record.action as (typeof HOSTED_COMPUTER_ACT_ACTIONS)[number],
+    )
+    ? record.action
+    : null
+  const target = readSanitizedComputerActTarget(record.target)
+
+  return {
+    ...(action ? { action } : {}),
+    ...readStringOrNullField(record, 'title'),
+    ...readSanitizedComputerUrlField(record, 'url'),
+    target,
+    visibleText: typeof record.visibleText === 'string'
+      ? record.visibleText.slice(0, HOSTED_COMPUTER_VISIBLE_TEXT_RESULT_MAX_LENGTH)
+      : '',
+  }
+}
+
+function readSanitizedComputerActTarget(
+  value: unknown,
+): Record<string, unknown> | null {
+  const record = asRecord(value)
+  if (!record) {
+    return null
+  }
+
+  const matchCount = typeof record.matchCount === 'number'
+    && Number.isInteger(record.matchCount)
+    && record.matchCount >= 0
+    ? record.matchCount
+    : null
+  if (matchCount === null) {
+    return null
+  }
+
+  return {
+    matchCount,
+    ...readBooleanOrNullField(record, 'visible'),
+    ...readBooleanOrNullField(record, 'enabled'),
+    ...readBooleanOrNullField(record, 'checked'),
+    ...readStringOrNullFieldWithLimit(
+      record,
+      'text',
+      HOSTED_COMPUTER_TARGET_TEXT_RESULT_MAX_LENGTH,
+    ),
+    ...readSanitizedComputerActBox(record.box),
+  }
+}
+
+function readSanitizedComputerActBox(
+  value: unknown,
+): Record<string, unknown> {
+  if (value === null) {
+    return { box: null }
+  }
+  const record = asRecord(value)
+  if (!record) {
+    return {}
+  }
+  const x = readFiniteNumber(record.x)
+  const y = readFiniteNumber(record.y)
+  const width = readFiniteNumber(record.width)
+  const height = readFiniteNumber(record.height)
+  if (x === null || y === null || width === null || height === null) {
+    return {}
+  }
+  return { box: { height, width, x, y } }
+}
+
+function readFiniteNumber(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null
+}
+
+function readBooleanOrNullField(
+  record: Record<string, unknown>,
+  field: string,
+): Record<string, boolean | null> {
+  const value = record[field]
+  if (value === null) {
+    return { [field]: null }
+  }
+  return typeof value === 'boolean' ? { [field]: value } : {}
+}
+
+function readStringOrNullFieldWithLimit(
+  record: Record<string, unknown>,
+  field: string,
+  maxLength: number,
+): Record<string, string | null> {
+  const value = record[field]
+  if (value === null) {
+    return { [field]: null }
+  }
+  return typeof value === 'string'
+    ? { [field]: value.slice(0, maxLength) }
+    : {}
 }
 
 function readStringField(

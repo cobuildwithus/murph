@@ -34,7 +34,7 @@ describe("hosted computer runtime logs", () => {
     mocks.recordHostedRuntimeLog.mockResolvedValue({});
   });
 
-  it("records diagnostic runtime logs for computer action failures without raw action code", async () => {
+  it("records diagnostic runtime logs for structured computer action failures without target data", async () => {
     const error = computerUseError({
       code: "HOSTED_COMPUTER_EVAL_FAILED",
       details: {
@@ -53,7 +53,14 @@ describe("hosted computer runtime logs", () => {
 
     await expect(runtimeLogModule.withHostedComputerToolFailureRuntimeLog({
       action: {
-        code: "await page.getByRole('button', { name: 'Place your order', exact: true }).click();",
+        action: "click",
+        target: {
+          exact: true,
+          kind: "role",
+          name: "Place your order",
+          pick: { kind: "only" },
+          role: "button",
+        },
         timeoutMs: 20000,
       },
       memberId: "member_123",
@@ -69,13 +76,13 @@ describe("hosted computer runtime logs", () => {
       level: "warn",
       phase: "error",
       redacted: {
+        computerActKind: "click",
         computerFailureCategory: "strict_mode_violation",
         computerOperationKind: "act",
         httpStatus: 502,
         kernelErrorPresent: true,
         kernelStderrPresent: true,
         kernelStdoutPresent: false,
-        playwrightCodeHash: expect.any(String),
         retryable: true,
         safeErrorMessage: "Computer browser evaluation failed.",
         timeoutMs: 20000,
