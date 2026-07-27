@@ -5,6 +5,7 @@ import { Prisma, type PrismaClient } from "@prisma/client";
 import {
   HOSTED_RUNTIME_GROUP_MEMBERSHIPS_MAX,
   HOSTED_RUNTIME_GROUP_SHARED_READ_MAX_MEMBERS,
+  type HostedRuntimeGroupParticipantDisplayNamesResult,
   type HostedRuntimeGroupSharedReadResult,
   type HostedRuntimeGroupSharedRecord,
 } from "@murphai/hosted-execution/runtime-control";
@@ -386,7 +387,7 @@ interface HostedGroupSharedMemberSource {
       phoneLookupKey: string | null;
       phoneNumberVerifiedAt: Date | null;
     } | null;
-    routing: {
+    routing?: {
       telegramUserLookupKey: string | null;
     } | null;
   };
@@ -406,6 +407,209 @@ type HostedGroupSharedReadCapture =
     }
   | { status: "none" }
   | { status: "unavailable"; unavailableReason: string };
+
+type HostedGroupParticipantDisplayNamesCapture =
+  | {
+      matchedMembers: Array<{
+        memberId: string;
+        senderHandles: string[];
+      }>;
+      shares: HostedVaultShareProjectionSnapshotEntry[];
+      status: "ok";
+    }
+  | { status: "unavailable"; unavailableReason: string };
+
+/**
+ * Resolves exact current-turn Linq handles to current, unsuspended group
+ * members and decrypts only their membership-implied profile-name snapshots.
+ * It intentionally does not traverse selectable health grants or device state.
+ */
+export async function readHostedGroupParticipantDisplayNamesByRuntimeMemberId(
+  input: {
+    linqSenderHandles: readonly string[];
+    prisma?: PrismaClient;
+    runtimeMemberId: string;
+  },
+): Promise<HostedRuntimeGroupParticipantDisplayNamesResult> {
+  const prisma = input.prisma ?? getPrisma();
+  const capture =
+    await prisma.$transaction<HostedGroupParticipantDisplayNamesCapture>(
+      async (tx) => {
+        const group = await tx.hostedGroup.findUnique({
+          where: { runtimeMemberId: input.runtimeMemberId },
+          select: {
+            members: {
+              where: {
+                joinedAt: { not: null },
+                member: { is: { suspendedAt: null } },
+              },
+              orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+              take: HOSTED_RUNTIME_GROUP_SHARED_READ_MAX_MEMBERS + 1,
+              select: {
+                id: true,
+                member: {
+                  select: {
+                    emailAuthorization: {
+                      select: {
+                        verifiedEmailLookupKey: true,
+                        verifiedEmailVerifiedAt: true,
+                      },
+                    },
+                    identity: {
+                      select: {
+                        phoneLookupKey: true,
+                        phoneNumberVerifiedAt: true,
+                      },
+                    },
+                  },
+                },
+                memberId: true,
+              },
+            },
+          },
+        });
+        if (!group) {
+          return {
+            status: "unavailable",
+            unavailableReason: "group_unavailable",
+          };
+        }
+        if (
+          !await hasHostedRuntimeActiveAccess(input.runtimeMemberId, {
+            prisma: tx,
+          })
+        ) {
+          return {
+            status: "unavailable",
+            unavailableReason: "runtime_inactive",
+          };
+        }
+        if (
+          group.members.length > HOSTED_RUNTIME_GROUP_SHARED_READ_MAX_MEMBERS
+        ) {
+          return {
+            status: "unavailable",
+            unavailableReason: "participant_names_snapshot_too_large",
+          };
+        }
+
+        const handlesByParticipantId =
+          matchHostedGroupCurrentTurnSenderHandles(group.members, {
+            linqSenderHandles: input.linqSenderHandles,
+            telegramSenderHandles: [],
+          });
+        const matchedMembers = group.members.flatMap((member) => {
+          const senderHandles = handlesByParticipantId.get(member.id);
+          return senderHandles
+            ? [{ memberId: member.memberId, senderHandles }]
+            : [];
+        });
+        const memberIds = matchedMembers.map((member) => member.memberId);
+        const rows = memberIds.length === 0
+          ? []
+          : await tx.hostedVaultShare.findMany({
+              orderBy: [{ grantorMemberId: "asc" }, { id: "asc" }],
+              select: {
+                destinationMemberId: true,
+                grantorMemberId: true,
+                id: true,
+                projectionKind: true,
+                projectionScopeJson: true,
+                projectionScopeKey: true,
+                projectionSnapshotCiphertext: true,
+              },
+              take: memberIds.length + 1,
+              where: {
+                destinationMemberId: input.runtimeMemberId,
+                grantorMemberId: { in: memberIds },
+                projectionScopeKey:
+                  HOSTED_GROUP_SHARED_READ_PROFILE_NAME_SCOPE_KEY,
+                status: "granted",
+              },
+            });
+        if (rows.length > memberIds.length) {
+          return {
+            status: "unavailable",
+            unavailableReason: "participant_names_authority_invalid",
+          };
+        }
+
+        const matchedMemberIds = new Set(memberIds);
+        const shareMemberIds = new Set<string>();
+        const shares: HostedVaultShareProjectionSnapshotEntry[] = [];
+        for (const row of rows) {
+          const projectionScope = parseHostedVaultShareRowProjectionScope(row);
+          if (
+            !projectionScope
+            || row.destinationMemberId !== input.runtimeMemberId
+            || !matchedMemberIds.has(row.grantorMemberId)
+            || row.projectionScopeKey
+              !== HOSTED_GROUP_SHARED_READ_PROFILE_NAME_SCOPE_KEY
+            || projectionScope.projectionKind !== "profile-name.v0"
+            || shareMemberIds.has(row.grantorMemberId)
+          ) {
+            return {
+              status: "unavailable",
+              unavailableReason: "participant_names_authority_invalid",
+            };
+          }
+          shareMemberIds.add(row.grantorMemberId);
+          shares.push({
+            ciphertext: row.projectionSnapshotCiphertext,
+            destinationMemberId: row.destinationMemberId,
+            grantorMemberId: row.grantorMemberId,
+            id: row.id,
+            projectionKind: row.projectionKind,
+            projectionScope,
+            projectionScopeKey: row.projectionScopeKey,
+          });
+        }
+        return { matchedMembers, shares, status: "ok" };
+      },
+      {
+        ...HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
+        isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead,
+      },
+    );
+  if (capture.status === "unavailable") {
+    return capture;
+  }
+
+  try {
+    const snapshots = await decryptHostedVaultShareProjectionSnapshots({
+      entries: capture.shares,
+      prisma,
+    });
+    const displayNamesByMemberId = new Map<string, string>();
+    for (const [index, share] of capture.shares.entries()) {
+      const records = snapshots[index];
+      if (records === undefined) {
+        throw new Error("Hosted group participant name snapshot is missing.");
+      }
+      const displayName = readHostedGroupSharedProfileName(records);
+      if (displayName) {
+        displayNamesByMemberId.set(share.grantorMemberId, displayName);
+      }
+    }
+    return {
+      participants: capture.matchedMembers.flatMap((member) => {
+        const displayName = displayNamesByMemberId.get(member.memberId);
+        return displayName
+          ? member.senderHandles.map((senderHandle) => ({
+              displayName,
+              senderHandle,
+            }))
+          : [];
+      }),
+      status: "ok",
+    };
+  } catch {
+    return {
+      status: "unavailable",
+      unavailableReason: "participant_names_unavailable",
+    };
+  }
+}
 
 /**
  * Captures current group membership, active grants, encrypted snapshots, and only the

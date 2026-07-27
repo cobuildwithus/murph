@@ -207,6 +207,35 @@ test('active-turn controller only steers exact conversations while open', async 
   }
 })
 
+test('active-turn controller closes admission at the first completed assistant response boundary', async () => {
+  const {
+    createAssistantActiveTurnInputController,
+    steerAssistantActiveTurnInput,
+  } = await import('../src/assistant/active-turn-input-controller.ts')
+  const controller = createAssistantActiveTurnInputController({
+    conversationKeys: ['channel:telegram|identity:identity-1|audience:indeterminate|thread:thread-1'],
+    sessionId: 'session-test',
+    turnId: 'turn-active',
+    vault: '/vaults/test',
+  })
+
+  controller.closeInputAdmission()
+
+  expect(steerAssistantActiveTurnInput({
+    conversation: {
+      channel: 'telegram',
+      identityId: 'identity-1',
+      threadId: 'thread-1',
+    },
+    expectedActiveTurnId: 'turn-active',
+    prompt: 'Arrived after the first completed response',
+    vault: '/vaults/test',
+  })).toBeNull()
+  await expect(controller.notifyInputAvailable({
+    inputIds: ['ain_after_first_response'],
+  })).resolves.toBeUndefined()
+})
+
 test('active-turn controller drains queued manual input before probed hook input', async () => {
   const {
     createAssistantActiveTurnInputController,

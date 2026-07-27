@@ -1785,6 +1785,7 @@ describe("hosted mailbox conversation import adapter", () => {
           from: "1234567890",
           messageId: "tg_group_identity",
           schema: "murph.hosted-telegram-message.v1",
+          senderDisplayName: "Alice Example",
           senderUsername: "alice_example",
           text: "hello group",
           threadId: "chat_group_telegram",
@@ -1834,6 +1835,12 @@ describe("hosted mailbox conversation import adapter", () => {
         ? event.sourceMetadata.senderHandle
         : null,
       "1234567890",
+    );
+    assert.equal(
+      event.sourceMetadata?.kind === "telegram"
+        ? event.sourceMetadata.senderDisplayName
+        : null,
+      "Alice Example",
     );
     assert.equal(
       event.sourceMetadata?.kind === "telegram"
@@ -1888,6 +1895,10 @@ describe("hosted mailbox conversation import adapter", () => {
     assert.equal(event.conversation?.threadIsDirect, true);
     assert.equal(
       Object.hasOwn(event.sourceMetadata ?? {}, "senderHandle"),
+      false,
+    );
+    assert.equal(
+      Object.hasOwn(event.sourceMetadata ?? {}, "senderDisplayName"),
       false,
     );
     assert.equal(

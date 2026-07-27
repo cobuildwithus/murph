@@ -1610,6 +1610,7 @@ function createHostedConversationAssistantInputSourceMetadata(
   // authoritative sender so direct threads and unattributable group inbound
   // keep the exact record shape an older runner can still read.
   const senderHandle = readHostedTelegramGroupSenderHandle(wake);
+  const senderDisplayName = readHostedTelegramGroupSenderDisplayName(wake);
 
   return {
     ...(externalThreadRouteAuthorityPresent
@@ -1620,11 +1621,36 @@ function createHostedConversationAssistantInputSourceMetadata(
     replyContext,
     ...(senderHandle
       ? {
+          ...(senderDisplayName ? { senderDisplayName } : {}),
           senderHandle,
           senderUsername: readHostedTelegramGroupSenderUsername(wake),
         }
       : {}),
   };
+}
+
+/**
+ * Display-only Telegram name. Bound to the same route-authorized group gate as
+ * the sender handle and never used for matching or participant authority.
+ */
+function readHostedTelegramGroupSenderDisplayName(
+  wake: HostedExecutionConversationMessageWake,
+): string | null {
+  if (
+    !isHostedTelegramConversationMessageWake(wake)
+    || !readHostedTelegramGroupSenderHandle(wake)
+  ) {
+    return null;
+  }
+  const normalized = normalizeHostedAssistantInputMetadataText(
+    wake.message.telegramMessage.senderDisplayName ?? "",
+  )
+    ?.replace(/[\u0000-\u001f\u007f-\u009f]+/gu, " ")
+    .replace(/\s+/gu, " ")
+    .trim();
+  return normalized
+    ? Array.from(normalized).slice(0, 120).join("")
+    : null;
 }
 
 /**

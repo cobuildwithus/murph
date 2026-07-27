@@ -623,6 +623,7 @@ export function createAssistantActiveTurnInputController(input: {
   }): Promise<AssistantActiveTurnInputAdmissionResult | undefined>
   admitLiveSteered(): Promise<AssistantActiveTurnInputAdmissionResult | undefined>
   close(): void
+  closeInputAdmission(): void
   complete(result: AssistantAskResult): void
   fail(error: unknown): void
   notifyInputAvailable(input?: {
@@ -657,13 +658,16 @@ export function createAssistantActiveTurnInputController(input: {
     }
   }
 
+  const closeInputAdmission = () => {
+    controller.close()
+    dispose()
+  }
+
   return {
     admitAvailable: (input) => controller.admitAvailable(input),
     admitLiveSteered: () => controller.admitLiveSteered(),
-    close() {
-      controller.close()
-      dispose()
-    },
+    close: closeInputAdmission,
+    closeInputAdmission,
     complete: (result) => controller.complete(result),
     fail(error) {
       controller.fail(error)

@@ -165,6 +165,7 @@ async function createHostedPhoneCallWithinDeadline(input: Parameters<
     signal: input.signal,
   });
   input.signal.throwIfAborted();
+  let reassertGroupRequesterAuthority: (() => Promise<void>) | null = null;
   if (isHostedThreadContainerNotificationDestination(notificationDestination)) {
     const routeAuthority = notificationDestination.externalThreadRouteAuthority;
     if (!routeAuthority) {
@@ -175,12 +176,16 @@ async function createHostedPhoneCallWithinDeadline(input: Parameters<
     const assertGroupRequesterActivation =
       input.groupRequesterActivationAsserter
       ?? assertHostedGroupPhoneCallRequesterHasOwnMurph;
-    await assertGroupRequesterActivation({
+    const authorityInput = {
       groupRequester: input.groupRequester ?? null,
       inboundMailboxItemIds: input.inboundMailboxItemIds ?? [],
       routeAuthority,
       signal: input.signal,
-    });
+    };
+    await assertGroupRequesterActivation(authorityInput);
+    reassertGroupRequesterAuthority = async () => {
+      await assertGroupRequesterActivation(authorityInput);
+    };
     input.signal.throwIfAborted();
   }
   const brief = normalizeHostedPhoneCallBriefForConversation({
@@ -313,6 +318,8 @@ async function createHostedPhoneCallWithinDeadline(input: Parameters<
   let started: Awaited<ReturnType<PhoneCallRuntime["start"]>>;
   try {
     try {
+      input.signal.throwIfAborted();
+      await reassertGroupRequesterAuthority?.();
       input.signal.throwIfAborted();
     } catch (error) {
       throw markPhoneCallRuntimeNoActiveEffect(error);

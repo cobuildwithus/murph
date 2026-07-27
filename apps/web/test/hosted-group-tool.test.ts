@@ -30,6 +30,7 @@ const mocks = vi.hoisted(() => ({
   readHostedGroupByRuntimeMemberId: vi.fn(),
   readHostedGroupIdByRuntimeMemberId: vi.fn(),
   readHostedGroupMembershipsForMember: vi.fn(),
+  readHostedGroupParticipantDisplayNamesByRuntimeMemberId: vi.fn(),
   readHostedGroupUsageStatus: vi.fn(),
   readHostedGroupSharedDataByRuntimeMemberId: vi.fn(),
   readHostedOwnerAddressBookAdvisoryNames: vi.fn(),
@@ -124,6 +125,8 @@ vi.mock("@/src/lib/hosted-groups/group-store", () => ({
   readHostedGroupByRuntimeMemberId: mocks.readHostedGroupByRuntimeMemberId,
   readHostedGroupIdByRuntimeMemberId: mocks.readHostedGroupIdByRuntimeMemberId,
   readHostedGroupMembershipsForMember: mocks.readHostedGroupMembershipsForMember,
+  readHostedGroupParticipantDisplayNamesByRuntimeMemberId:
+    mocks.readHostedGroupParticipantDisplayNamesByRuntimeMemberId,
   readHostedGroupSharedDataByRuntimeMemberId:
     mocks.readHostedGroupSharedDataByRuntimeMemberId,
   recordHostedGroupJoinOfferTx: mocks.recordHostedGroupJoinOfferTx,
@@ -307,6 +310,10 @@ describe("handleHostedRuntimeGroupTool", () => {
       requestedProjectionScopeKeys: ["steps-days.v0"],
       status: "ok",
     });
+    mocks.readHostedGroupParticipantDisplayNamesByRuntimeMemberId.mockResolvedValue({
+      participants: [],
+      status: "ok",
+    });
     mocks.readHostedOwnerAddressBookAdvisoryNames.mockResolvedValue(new Map());
     mocks.readHostedGroupMembershipsForMember.mockResolvedValue({
       memberships: [{
@@ -400,6 +407,7 @@ describe("handleHostedRuntimeGroupTool", () => {
       preflight_set_chat_avatar: "owner_active",
       read_chat_participants: "participant_aware",
       read_current: "participant_aware",
+      read_participant_display_names: "participant_aware",
       revoke_disclosure_grant: "personal_active",
       read_usage: "participant_aware",
       read_shared: "participant_aware",
@@ -769,6 +777,41 @@ describe("handleHostedRuntimeGroupTool", () => {
       runtimeMemberId: "member_group_runtime",
       telegramSenderHandles: [],
     });
+  });
+
+  it("reads only current participant display names through the narrow store boundary", async () => {
+    mocks.readHostedGroupParticipantDisplayNamesByRuntimeMemberId.mockResolvedValue({
+      participants: [{
+        displayName: "Alice Example",
+        senderHandle: "+15551110001",
+      }],
+      status: "ok",
+    });
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_group_runtime",
+      request: {
+        action: "read_participant_display_names",
+        linqSenderHandles: ["+15551110001"],
+      },
+    })).resolves.toEqual({
+      action: "read_participant_display_names",
+      result: {
+        participants: [{
+          displayName: "Alice Example",
+          senderHandle: "+15551110001",
+        }],
+        status: "ok",
+      },
+    });
+
+    expect(
+      mocks.readHostedGroupParticipantDisplayNamesByRuntimeMemberId,
+    ).toHaveBeenCalledWith({
+      linqSenderHandles: ["+15551110001"],
+      runtimeMemberId: "member_group_runtime",
+    });
+    expect(mocks.readHostedGroupSharedDataByRuntimeMemberId).not.toHaveBeenCalled();
   });
 
   it("does not read group state when runtime access is inactive", async () => {
@@ -1261,7 +1304,7 @@ describe("handleHostedRuntimeGroupTool", () => {
     );
   });
 
-  it("fails closed when the resolved exact sender no longer has active access", async () => {
+  it("lets the exact unsuspended sender revoke after personal paid access expires", async () => {
     mocks.lookupHostedMemberIdentityByPhoneNumber.mockResolvedValue({
       core: { id: "member_sender", suspendedAt: null },
     });
@@ -1280,12 +1323,17 @@ describe("handleHostedRuntimeGroupTool", () => {
     })).resolves.toEqual({
       action: "revoke_own_email_share",
       result: {
-        status: "unavailable",
-        unavailableReason: "member_unavailable",
+        revokedCount: 1,
+        status: "revoked",
       },
     });
 
-    expect(mocks.revokeHostedGroupMemberEmailShareTx).not.toHaveBeenCalled();
+    expect(mocks.revokeHostedGroupMemberEmailShareTx).toHaveBeenCalledWith(
+      expect.objectContaining({
+        groupRuntimeMemberId: "member_group_runtime",
+        memberId: "member_sender",
+      }),
+    );
   });
 
   it("reports already_removed when the exact sender had no active email share", async () => {

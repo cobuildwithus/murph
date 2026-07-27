@@ -3,7 +3,10 @@ import type {
 } from "@murphai/hosted-execution/runtime-control";
 import { describe, expect, it, vi } from "vitest";
 
-import { createHostedGroupSharedReader } from "../src/hosted-runtime/group-shared-reader.ts";
+import {
+  createHostedGroupParticipantDisplayNameReader,
+  createHostedGroupSharedReader,
+} from "../src/hosted-runtime/group-shared-reader.ts";
 import type { HostedRuntimeGroupToolPort } from "../src/hosted-runtime/platform.ts";
 
 const SLEEP_SCOPE = { projectionKind: "sleep-times.v0" } as const;
@@ -116,5 +119,69 @@ describe("createHostedGroupSharedReader", () => {
         status: "unavailable",
         unavailableReason: "group_shared_result_invalid",
       });
+  });
+});
+
+describe("createHostedGroupParticipantDisplayNameReader", () => {
+  it("returns only exact unique current Linq membership names", async () => {
+    const request = vi.fn(async () => ({
+      action: "read_participant_display_names" as const,
+      result: {
+        participants: [
+          {
+            displayName: " Alice Example ",
+            senderHandle: "+15551110000",
+          },
+          {
+            displayName: "Ambiguous One",
+            senderHandle: "+15552220000",
+          },
+          {
+            displayName: "Ambiguous Two",
+            senderHandle: "+15552220000",
+          },
+        ],
+        status: "ok" as const,
+      },
+    }));
+    const reader = createHostedGroupParticipantDisplayNameReader({
+      groupToolPort: { request } as HostedRuntimeGroupToolPort,
+    });
+
+    await expect(reader.read({
+      channel: "linq",
+      senderHandles: [" +15551110000 ", "+15552220000"],
+    })).resolves.toEqual([
+      {
+        displayName: "Alice Example",
+        senderHandle: "+15551110000",
+      },
+    ]);
+    expect(request).toHaveBeenCalledWith({
+      action: "read_participant_display_names",
+      linqSenderHandles: ["+15551110000", "+15552220000"],
+    });
+  });
+
+  it("fails soft when presentation lookup is unavailable", async () => {
+    const absent = createHostedGroupParticipantDisplayNameReader({
+      groupToolPort: null,
+    });
+    await expect(absent.read({
+      channel: "linq",
+      senderHandles: ["+15551110000"],
+    })).resolves.toEqual([]);
+
+    const failed = createHostedGroupParticipantDisplayNameReader({
+      groupToolPort: {
+        async request(): Promise<HostedRuntimeGroupToolResponse> {
+          throw new Error("control plane unavailable");
+        },
+      },
+    });
+    await expect(failed.read({
+      channel: "linq",
+      senderHandles: ["+15551110000"],
+    })).resolves.toEqual([]);
   });
 });

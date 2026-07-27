@@ -362,6 +362,11 @@ const assistantInputTelegramSourceMetadataSchema = z
     replyContext: safeNullableAssistantInputMetadataTextSchema(
       'sourceMetadata.replyContext',
     ),
+    // Presentation-only speaker label from trusted ingress or a current
+    // server-owned membership lookup. It never supplies participant authority.
+    senderDisplayName: safeAssistantInputMetadataTextSchema(
+      'sourceMetadata.senderDisplayName',
+    ).nullable().optional(),
     // Group (thread-container) inbound only: the sending participant's handle,
     // so the assistant can attribute messages and detect being addressed.
     senderHandle: privateAssistantInputRouteScalarSchema(
@@ -389,6 +394,11 @@ const assistantInputLinqSourceMetadataSchema = z
     replyToMessageId: safeNullableAssistantInputTokenSchema(
       'sourceMetadata.replyToMessageId',
     ),
+    // Presentation-only speaker label resolved from exact current membership.
+    // It never supplies participant authority.
+    senderDisplayName: safeAssistantInputMetadataTextSchema(
+      'sourceMetadata.senderDisplayName',
+    ).nullable().optional(),
     // Group (thread-container) inbound only: the sending participant's handle,
     // so the assistant can attribute messages and detect being addressed.
     senderHandle: privateAssistantInputRouteScalarSchema(

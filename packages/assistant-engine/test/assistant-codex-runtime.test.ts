@@ -18288,6 +18288,8 @@ describe('steered final segments', () => {
       authorizeAcceptedMessageTarget?:
         CodexAppServerTurnInput['authorizeAcceptedMessageTarget']
       hostedToolContext?: CodexAppServerTurnInput['hostedToolContext']
+      onFirstAssistantResponseCompleted?:
+        CodexAppServerTurnInput['onFirstAssistantResponseCompleted']
       onProgress?: CodexAppServerTurnInput['onProgress']
       onTraceEvent?: CodexAppServerTurnInput['onTraceEvent']
       progressDelivery?: CodexAppServerTurnInput['progressDelivery']
@@ -18521,6 +18523,8 @@ describe('steered final segments', () => {
       codexCommand: 'codex',
       codexHome,
       hostedToolContext: input.hostedToolContext,
+      onFirstAssistantResponseCompleted:
+        input.onFirstAssistantResponseCompleted,
       onProgress: input.onProgress,
       onTraceEvent: input.onTraceEvent,
       progressDelivery: input.progressDelivery,
@@ -19030,6 +19034,70 @@ describe('steered final segments', () => {
         kind: 'image',
       },
     ])
+  })
+
+  it('closes admission and preserves a media-only response before a steer boundary', async () => {
+    const firstMedia = {
+      url: 'https://cdn.example.test/assistant/media-only.png',
+      alt: 'Media-only first response',
+      source: 'media-only-first-response',
+    }
+    const callbackOrder: string[] = []
+    const onFirstAssistantResponseCompleted = vi.fn(() => {
+      callbackOrder.push('response-completed')
+    })
+    const result = await runScriptedSteeredFinalSegmentsTurn([
+      {
+        kind: 'attach-response-media',
+        id: 43,
+        expectedText: '1 response image attached',
+        media: [firstMedia],
+      },
+      completedItemEvent({
+        id: 'assistant-media-only',
+        type: 'assistant_message',
+        message: '   ',
+      }),
+      completedItemEvent({
+        id: 'user-after-media',
+        type: 'user_message',
+        message: 'This must wait for the next ordinary turn',
+      }),
+      completedItemEvent({
+        id: 'assistant-after-media',
+        type: 'assistant_message',
+        message: 'Later response.',
+      }),
+    ], {
+      onFirstAssistantResponseCompleted,
+      onTraceEvent(event) {
+        if (
+          JSON.stringify(event.rawEvent).includes('"id":"user-after-media"')
+        ) {
+          callbackOrder.push('later-user-item')
+        }
+      },
+    })
+
+    expect(onFirstAssistantResponseCompleted).toHaveBeenCalledTimes(1)
+    expect(callbackOrder).toEqual([
+      'response-completed',
+      'later-user-item',
+    ])
+    expect(result.precedingAgentMessageSegments).toEqual([
+      {
+        deliveryContextOrdinal: 0,
+        response: '',
+        media: [
+          {
+            ...firstMedia,
+            kind: 'image',
+          },
+        ],
+      },
+    ])
+    expect(result.finalMessage).toBe('Later response.')
+    expect(result.responseMedia).toEqual([])
   })
 
   it('keeps last-wins behavior for multiple finals without a steer boundary', async () => {

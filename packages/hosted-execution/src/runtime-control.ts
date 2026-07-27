@@ -1107,6 +1107,21 @@ export type HostedRuntimeGroupSharedReadResult =
       unavailableReason: string;
     };
 
+export interface HostedRuntimeGroupParticipantDisplayName {
+  displayName: string;
+  senderHandle: string;
+}
+
+export type HostedRuntimeGroupParticipantDisplayNamesResult =
+  | {
+      participants: readonly HostedRuntimeGroupParticipantDisplayName[];
+      status: "ok";
+    }
+  | {
+      status: "unavailable";
+      unavailableReason: string;
+    };
+
 export type HostedRuntimeGroupToolRequest =
   | {
       action: "ask";
@@ -1130,6 +1145,15 @@ export type HostedRuntimeGroupToolRequest =
   | { action: "revoke_disclosure_grant"; grantId: string }
   | { action: "read_current" }
   | { action: "read_usage" }
+  | {
+      action: "read_participant_display_names";
+      /**
+       * Exact current-turn Linq sender evidence supplied by the hosted
+       * runtime. Web resolves it against current membership and returns only
+       * presentation labels, never participant or member identifiers.
+       */
+      linqSenderHandles: readonly string[];
+    }
   | ({
       action: "read_shared";
       /**
@@ -1214,6 +1238,10 @@ export type HostedRuntimeGroupToolResponse =
       result:
         | { status: "ok"; usage: HostedRuntimeGroupUsageStatus }
         | { status: "unavailable"; unavailableReason: string; usage: null };
+    }
+  | {
+      action: "read_participant_display_names";
+      result: HostedRuntimeGroupParticipantDisplayNamesResult;
     }
   | {
       action: "read_shared";

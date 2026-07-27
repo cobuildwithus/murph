@@ -21,7 +21,9 @@ vi.mock("@/src/lib/hosted-mailbox/runtime-access", () => ({
 import {
   setHostedSecureBoxStringTestCodecForTests,
 } from "@/src/lib/hosted-crypto/secure-box";
+import { createHostedPhoneLookupKey } from "@/src/lib/hosted-onboarding/contact-privacy";
 import {
+  readHostedGroupParticipantDisplayNamesByRuntimeMemberId,
   readHostedGroupSharedDataByRuntimeMemberId,
 } from "@/src/lib/hosted-groups/group-store";
 import {
@@ -127,7 +129,23 @@ function createPrismaClientTestDouble(value: object): PrismaClient {
 
 function createPrisma(input: {
   connections?: unknown[];
-  group?: { members: Array<{ id: string; memberId: string }> } | null;
+  group?: {
+    members: Array<{
+      id: string;
+      member?: {
+        emailAuthorization: {
+          verifiedEmailLookupKey: string | null;
+          verifiedEmailVerifiedAt: Date | null;
+        } | null;
+        identity: {
+          phoneLookupKey: string | null;
+          phoneNumberVerifiedAt: Date | null;
+        } | null;
+        routing: { telegramUserLookupKey: string | null } | null;
+      };
+      memberId: string;
+    }>;
+  } | null;
   shares?: unknown[];
 }) {
   const hostedGroupFindUnique = vi.fn().mockResolvedValue(
@@ -153,11 +171,127 @@ function createPrisma(input: {
   ) => callback(tx));
   return {
     deviceConnectionFindMany,
+    hostedGroupFindUnique,
     hostedVaultShareFindMany,
     prisma: createPrismaClientTestDouble({ $transaction: transaction }),
     transaction,
   };
 }
+
+describe("readHostedGroupParticipantDisplayNamesByRuntimeMemberId", () => {
+  it("decrypts only exact current-member profile names and omits ambiguous handles", async () => {
+    const uniqueHandle = "+15551110001";
+    const ambiguousHandle = "+15552220002";
+    const verifiedAt = new Date("2026-07-27T12:00:00.000Z");
+    const profileA = snapshot({
+      id: "share_profile_a",
+      memberId: "member_a",
+      projectionScope: PROFILE_SCOPE,
+      records: [{
+        data: { displayName: "Alice Example" },
+        occurredAt: verifiedAt.toISOString(),
+        recordKey: "profile-name",
+      }],
+    });
+    installCiphertexts({ profileA });
+    const member = (
+      id: string,
+      memberId: string,
+      phoneNumber: string,
+    ) => ({
+      id,
+      member: {
+        emailAuthorization: null,
+        identity: {
+          phoneLookupKey: createHostedPhoneLookupKey(phoneNumber),
+          phoneNumberVerifiedAt: verifiedAt,
+        },
+        routing: null,
+      },
+      memberId,
+    });
+    const {
+      deviceConnectionFindMany,
+      hostedGroupFindUnique,
+      hostedVaultShareFindMany,
+      prisma,
+    } = createPrisma({
+      group: {
+        members: [
+          member("participant_a", "member_a", uniqueHandle),
+          member("participant_b", "member_b", ambiguousHandle),
+          member("participant_c", "member_c", ambiguousHandle),
+        ],
+      },
+      shares: [
+        shareRow({
+          ciphertext: "profileA",
+          id: "share_profile_a",
+          memberId: "member_a",
+          projectionScope: PROFILE_SCOPE,
+        }),
+      ],
+    });
+
+    await expect(
+      readHostedGroupParticipantDisplayNamesByRuntimeMemberId({
+        linqSenderHandles: [uniqueHandle, ambiguousHandle],
+        prisma,
+        runtimeMemberId: RUNTIME_MEMBER_ID,
+      }),
+    ).resolves.toEqual({
+      participants: [{
+        displayName: "Alice Example",
+        senderHandle: uniqueHandle,
+      }],
+      status: "ok",
+    });
+
+    expect(hostedGroupFindUnique).toHaveBeenCalledWith(expect.objectContaining({
+      select: {
+        members: expect.objectContaining({
+          select: {
+            id: true,
+            member: {
+              select: {
+                emailAuthorization: {
+                  select: {
+                    verifiedEmailLookupKey: true,
+                    verifiedEmailVerifiedAt: true,
+                  },
+                },
+                identity: {
+                  select: {
+                    phoneLookupKey: true,
+                    phoneNumberVerifiedAt: true,
+                  },
+                },
+              },
+            },
+            memberId: true,
+          },
+          where: {
+            joinedAt: { not: null },
+            member: { is: { suspendedAt: null } },
+          },
+        }),
+      },
+      where: { runtimeMemberId: RUNTIME_MEMBER_ID },
+    }));
+    expect(hostedVaultShareFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          destinationMemberId: RUNTIME_MEMBER_ID,
+          grantorMemberId: { in: ["member_a"] },
+          projectionScopeKey:
+            buildHostedVaultShareProjectionScopeKey(PROFILE_SCOPE),
+          status: "granted",
+        },
+      }),
+    );
+    expect(deviceConnectionFindMany).not.toHaveBeenCalled();
+  });
+});
 
 describe("workouts.v0 snapshot bounds", () => {
   it("keeps the maximum parser-valid seven-day workout snapshot within its byte limit", () => {

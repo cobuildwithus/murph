@@ -660,7 +660,7 @@ describe('buildAssistantAutoReplyPrompt', () => {
     }
     const senderAttribution = /^Sender: (\d+)$/mu.exec(result.prompt)
     expect(senderAttribution?.[0]).toBe('Sender: 456')
-    expect(result.prompt).toContain('Sender name: @alice_example')
+    expect(result.prompt).toContain('Speaker name: \"@alice_example\"')
     const senderId = senderAttribution?.[1]
     if (!senderId) {
       throw new Error('Expected a numeric Telegram sender attribution.')
@@ -1242,6 +1242,98 @@ describe('buildAssistantAutoReplyPrompt', () => {
     expect(result.prompt).not.toContain('Actor:')
     expect(result.prompt).not.toContain('hashed-actor-a')
     expect(result.prompt).not.toContain('hashed-actor-b')
+  })
+
+  it('renders bounded quoted speaker names only beside authoritative group handles', () => {
+    const linqInputId = `ain_${'7'.repeat(32)}`
+    const telegramInputId = `ain_${'8'.repeat(32)}`
+    const missingHandleInputId = `ain_${'9'.repeat(32)}`
+    const result = buildAssistantAutoReplyPrompt([
+      createPromptInput({
+        captureOverrides: {
+          actorId: 'hashed-linq-actor',
+          eventId: 'linq-event',
+          source: 'linq',
+          text: 'hello from linq',
+          threadIsDirect: false,
+        },
+        inputId: linqInputId,
+        replyTarget: {
+          channel: 'linq',
+          messageId: 'linq-message-1',
+          threadId: 'thread-1',
+        },
+        sourceMetadata: {
+          externalThreadRouteAuthorityPresent: true,
+          kind: 'linq',
+          partCount: 1,
+          reactionEligible: true,
+          replyToMessageId: null,
+          senderDisplayName: '  Alice\n\"A\"  ',
+          senderHandle: '+15551110000',
+          service: 'iMessage',
+        },
+      }),
+      createPromptInput({
+        captureOverrides: {
+          actorId: 'hashed-telegram-actor',
+          eventId: 'telegram-event',
+          source: 'telegram',
+          text: 'hello from telegram',
+          threadIsDirect: false,
+        },
+        inputId: telegramInputId,
+        replyTarget: {
+          channel: 'telegram',
+          messageId: '101',
+          threadId: 'thread-1',
+        },
+        sourceMetadata: {
+          externalThreadRouteAuthorityPresent: true,
+          kind: 'telegram',
+          mediaGroupId: null,
+          replyContext: null,
+          senderDisplayName: 'Bob Example',
+          senderHandle: '1234567890',
+          senderUsername: 'bob_example',
+        },
+      }),
+      createPromptInput({
+        captureOverrides: {
+          actorId: 'hashed-missing-actor',
+          eventId: 'missing-event',
+          source: 'telegram',
+          text: 'no authoritative handle',
+          threadIsDirect: false,
+        },
+        inputId: missingHandleInputId,
+        replyTarget: {
+          channel: 'telegram',
+          messageId: '102',
+          threadId: 'thread-1',
+        },
+        sourceMetadata: {
+          externalThreadRouteAuthorityPresent: true,
+          kind: 'telegram',
+          mediaGroupId: null,
+          replyContext: null,
+          senderDisplayName: 'Must Not Render',
+        },
+      }),
+    ])
+
+    expect(result.kind).toBe('ready')
+    if (result.kind !== 'ready') {
+      throw new Error('Expected a ready prompt result.')
+    }
+    expect(result.prompt).toContain(
+      `Message ref: ${linqInputId}\n\nSender: +15551110000\n\nSpeaker name: \"Alice \\\"A\\\"\"`,
+    )
+    expect(result.prompt).toContain(
+      `Message ref: ${telegramInputId}\n\nSender: 1234567890\n\nSpeaker name: \"Bob Example\"`,
+    )
+    expect(result.prompt).toContain(`Message ref: ${missingHandleInputId}`)
+    expect(result.prompt).not.toContain('Must Not Render')
   })
 
   it('builds grouped prompt text with reply context and attachment excerpts', () => {

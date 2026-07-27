@@ -90,6 +90,7 @@ import {
   type AssistantAutoReplyFailureSnapshot,
 } from './failure-observability.js'
 import {
+  ASSISTANT_AUTO_REPLY_COMPOUND_INPUT_MAX,
   collectAssistantAutoReplyGroup,
   loadAssistantAutoReplyGroupItems,
   shouldGroupAdjacentConversationInput,
@@ -102,8 +103,6 @@ import {
 import {
   prepareAssistantAutoReplyInput,
   readTelegramAutoReplyMetadataFromAssistantInput,
-  renderAssistantInputAttachmentDescriptorPromptSection,
-  renderAssistantInputGroupContextPrompt,
   type AssistantAutoReplyPromptInput,
 } from './prompt-builder.js'
 import {
@@ -1627,6 +1626,10 @@ async function prepareAssistantAutoReplyInputWithContext(input: {
   onEvent?: ((event: AssistantRunEvent) => void) | null
   vault: string
 }): Promise<Awaited<ReturnType<typeof prepareAssistantAutoReplyInput>>> {
+  const promptInputs = await enrichAssistantAutoReplyLinqSpeakerNames({
+    executionContext: input.executionContext,
+    inputs: input.inputs,
+  })
   const materializeWorkspaceArtifacts =
     input.executionContext?.hosted?.materializeWorkspaceArtifacts ?? null
   const options = {
@@ -1634,8 +1637,77 @@ async function prepareAssistantAutoReplyInputWithContext(input: {
     ...(input.onEvent ? { onEvent: input.onEvent } : {}),
   }
   return Object.keys(options).length > 0
-    ? await prepareAssistantAutoReplyInput(input.inputs, input.vault, options)
-    : await prepareAssistantAutoReplyInput(input.inputs, input.vault)
+    ? await prepareAssistantAutoReplyInput(promptInputs, input.vault, options)
+    : await prepareAssistantAutoReplyInput(promptInputs, input.vault)
+}
+
+async function enrichAssistantAutoReplyLinqSpeakerNames(input: {
+  executionContext?: AssistantExecutionContext | null
+  inputs: readonly AssistantAutoReplyPromptInput[]
+}): Promise<readonly AssistantAutoReplyPromptInput[]> {
+  const reader =
+    input.executionContext?.hosted?.groupParticipantDisplayNameReader ?? null
+  if (!reader) {
+    return input.inputs
+  }
+  const senderHandles = [...new Set(input.inputs.flatMap((promptInput) => {
+    const metadata = promptInput.sourceMetadata
+    return promptInput.conversation.threadIsDirect === false &&
+        metadata?.kind === 'linq' &&
+        metadata.externalThreadRouteAuthorityPresent === true
+      ? [normalizeNullableString(metadata.senderHandle)].filter(
+          (value): value is string => value !== null,
+        )
+      : []
+  }))]
+  if (senderHandles.length === 0) {
+    return input.inputs
+  }
+
+  let resolved: readonly { displayName: string; senderHandle: string }[]
+  try {
+    resolved = await reader.read({ channel: 'linq', senderHandles })
+  } catch {
+    return input.inputs
+  }
+  const displayNameByHandle = new Map<string, string>()
+  const ambiguousHandles = new Set<string>()
+  for (const entry of resolved) {
+    const senderHandle = normalizeNullableString(entry.senderHandle)
+    const displayName = normalizeNullableString(entry.displayName)
+    if (!senderHandle || !displayName || ambiguousHandles.has(senderHandle)) {
+      continue
+    }
+    if (displayNameByHandle.has(senderHandle)) {
+      displayNameByHandle.delete(senderHandle)
+      ambiguousHandles.add(senderHandle)
+      continue
+    }
+    displayNameByHandle.set(senderHandle, displayName)
+  }
+  if (displayNameByHandle.size === 0) {
+    return input.inputs
+  }
+
+  return input.inputs.map((promptInput) => {
+    const metadata = promptInput.sourceMetadata
+    if (metadata?.kind !== 'linq') {
+      return promptInput
+    }
+    const senderHandle = normalizeNullableString(metadata.senderHandle)
+    const senderDisplayName = senderHandle
+      ? displayNameByHandle.get(senderHandle) ?? null
+      : null
+    return senderDisplayName
+      ? {
+          ...promptInput,
+          sourceMetadata: {
+            ...metadata,
+            senderDisplayName,
+          },
+        }
+      : promptInput
+  })
 }
 
 async function executeAssistantAutoReply(input: {
@@ -1884,7 +1956,14 @@ function createAssistantAutoReplyActiveTurnInputHooks(input: {
           lastInputCursor:
             pendingAcceptances.at(-1)?.lastInputCursor ?? context.lastInputCursor,
         })
-    const lateInputs = await listAutoReplyActiveTurnInputs({
+    if (selectionContext.inputCount >= ASSISTANT_AUTO_REPLY_COMPOUND_INPUT_MAX) {
+      return {
+        kind: 'no-new-input',
+      }
+    }
+    const remainingInputCapacity =
+      ASSISTANT_AUTO_REPLY_COMPOUND_INPUT_MAX - selectionContext.inputCount
+    const availableLateInputs = await listAutoReplyActiveTurnInputs({
       afterCursor:
         pendingAcceptances.at(-1)?.lastInputCursor ?? context.lastInputCursor,
       conversation: readAutoReplyConversationRef(selectionContext),
@@ -1895,6 +1974,16 @@ function createAssistantAutoReplyActiveTurnInputHooks(input: {
       knownInputIds,
       signal: admissionInput.signal,
     })
+    const boundedLateInputCandidates = availableLateInputs.inputs.slice(
+      0,
+      remainingInputCapacity,
+    )
+    const lateInputs: AssistantInputCandidateBatch = {
+      inputs: boundedLateInputCandidates,
+      nextCursor:
+        boundedLateInputCandidates.at(-1)?.event.cursor
+        ?? availableLateInputs.nextCursor,
+    }
     if (lateInputs.inputs.length === 0) {
       return {
         kind: 'no-new-input',
@@ -1968,6 +2057,7 @@ function createAssistantAutoReplyActiveTurnInputHooks(input: {
         onEvent: input.onEvent,
         pendingAcceptances,
         replyContexts: lateReplyContexts,
+        vault: input.vault,
       })
     }
 
@@ -1997,25 +2087,9 @@ function createAssistantAutoReplyActiveTurnInputHooks(input: {
       }
     }
 
-    const acceptedInputContext = await createAssistantAutoReplyContextForInputSummaries({
-      inputSummaries: lateInputSummaries,
-      inputCandidatesByInputId: lateInputCandidatesByInputId,
-      vault: input.vault,
-    })
-    if (!acceptedInputContext) {
-      throw new AssistantActiveTurnInputBudgetExceededError(
-        'new same-conversation input could not be materialized into the active turn; will retry later.',
-      )
-    }
-    const shownAcceptedInput = await loadAssistantAutoReplyPromptInputs({
-      group: acceptedInputContext,
-    })
     const preparedInput = await prepareAssistantAutoReplyInputWithContext({
       executionContext: input.executionContext,
-      inputs: shownAcceptedInput.map((promptInput) => ({
-        ...promptInput,
-        replyContext: lateReplyContexts.get(promptInput.inputId) ?? null,
-      })),
+      inputs: contextualizedLatePromptInputs,
       onEvent: input.onEvent,
       vault: input.vault,
     })
@@ -2127,11 +2201,7 @@ function createAssistantAutoReplyActiveTurnInputHooks(input: {
         ? { deliveryReplyToMessageId: acceptedInputReplyToMessageId }
         : {}),
       kind: 'accepted',
-      prompt: appendCapturelessAssistantInputPrompt({
-        basePrompt: preparedInput.prompt,
-        capturelessInputs: lateCapturelessCandidates,
-        replyContexts: lateReplyContexts,
-      }),
+      prompt: preparedInput.prompt,
       receiptMetadata: {
         [AUTO_REPLY_RECEIPT_INPUT_ID_KEY]: nextContext.firstInputId,
         [AUTO_REPLY_RECEIPT_INPUT_IDS_KEY]: buildAutoReplyReceiptInputIds({
@@ -2444,7 +2514,7 @@ function assistantAutoReplyGroupItemFromInputCandidate(
   }
 }
 
-function admitCapturelessAssistantInputs(input: {
+async function admitCapturelessAssistantInputs(input: {
   deliveryTarget: string | null
   executionContext?: AssistantExecutionContext | null
   getContext(): AssistantAutoReplyGroupContext
@@ -2454,15 +2524,23 @@ function admitCapturelessAssistantInputs(input: {
   onEvent?: (event: AssistantRunEvent) => void
   pendingAcceptances: AssistantAutoReplyActiveTurnPendingAcceptance[]
   replyContexts: ReadonlyMap<string, string | null>
-}): AssistantActiveTurnInputAdmissionResult {
+  vault: string
+}): Promise<AssistantActiveTurnInputAdmissionResult> {
   const queuedContext = input.getContext()
-  const prompt = buildCapturelessAssistantInputPrompt(
-    input.lateInputs,
-    input.replyContexts,
-  )
-  if (!prompt) {
+  const preparedInput = await prepareAssistantAutoReplyInputWithContext({
+    executionContext: input.executionContext,
+    inputs: input.lateInputs.map((candidate) => ({
+      ...createAssistantAutoReplyPromptInputFromEvent(
+        assistantAutoReplyGroupItemFromInputCandidate(candidate),
+      ),
+      replyContext: input.replyContexts.get(candidate.event.inputId) ?? null,
+    })),
+    onEvent: input.onEvent,
+    vault: input.vault,
+  })
+  if (preparedInput.kind !== 'ready') {
     throw new AssistantActiveTurnInputBudgetExceededError(
-      'new same-conversation input had no prompt-ready text; will retry later.',
+      preparedInput.reason,
     )
   }
   const acceptedInputs = buildCapturelessAcceptedTurnInputItems(input.lateInputs)
@@ -2544,7 +2622,7 @@ function admitCapturelessAssistantInputs(input: {
         : { deliveryMessageReactionsAvailable }
     })(),
     kind: 'accepted',
-    prompt,
+    prompt: preparedInput.prompt,
     receiptMetadata: {
       [AUTO_REPLY_RECEIPT_INPUT_ID_KEY]: queuedContext.firstInputId,
       [AUTO_REPLY_RECEIPT_INPUT_IDS_KEY]: buildAutoReplyReceiptInputIds({
@@ -2553,8 +2631,11 @@ function admitCapturelessAssistantInputs(input: {
       }).join(','),
     },
     transcriptText: transcriptText || null,
-    userMessageContent: input.lateInputs.flatMap(
-      (candidate) => candidate.event.userMessageContent ?? [],
+    userMessageContent: mergeAssistantUserMessageContent(
+      preparedInput.userMessageContent,
+      input.lateInputs.flatMap(
+        (candidate) => candidate.event.userMessageContent ?? [],
+      ),
     ),
   }
 }
@@ -2570,81 +2651,6 @@ function buildCapturelessAcceptedTurnInputItems(
       candidate.acceptedInput.promptFallbackText ??
       buildAssistantInputCandidateTranscriptText(candidate),
   }))
-}
-
-function buildCapturelessAssistantInputPrompt(
-  candidates: readonly AssistantInputCandidate[],
-  replyContexts: ReadonlyMap<string, string | null> = new Map(),
-): string | null {
-  const sections = candidates
-    .map((candidate, index) => {
-      const transcript = buildAssistantInputCandidateTranscriptText(candidate)
-      const attachmentContext = renderAssistantInputAttachmentDescriptorPromptSection({
-        attachments: candidate.event.attachmentEvidence.attachments,
-        descriptors: candidate.event.attachmentDescriptors,
-        evidenceReasonCode: candidate.event.attachmentEvidence.reasonCode,
-        evidenceStatus: candidate.event.attachmentEvidence.status,
-        projectionReasonCode: candidate.projection.reasonCode,
-        projectionStatus: candidate.projection.status,
-      })
-      const groupContext = renderAssistantInputGroupContextPrompt(candidate.event)
-      const sections = [
-        `Source: ${candidate.event.source}
-Occurred at: ${candidate.event.occurredAt}`,
-        groupContext,
-        replyContexts.get(candidate.event.inputId)
-          ? `Reply context:\n${replyContexts.get(candidate.event.inputId)}`
-          : null,
-        transcript
-          ? `Message text:
-${transcript}`
-          : null,
-        attachmentContext
-          ? `Attachment context:
-${attachmentContext}`
-          : null,
-      ].filter((section): section is string => section !== null)
-      if (sections.length <= 1) {
-        return null
-      }
-      const sourceMetadata = candidate.event.sourceMetadata
-      const senderHandle =
-        candidate.event.conversation?.threadIsDirect === false &&
-        (sourceMetadata?.kind === 'linq' || sourceMetadata?.kind === 'telegram') &&
-        sourceMetadata.externalThreadRouteAuthorityPresent === true
-          ? normalizeNullableString(sourceMetadata.senderHandle) ?? 'unavailable'
-          : null
-      const messageRef = readAssistantInputMessageRef({
-        conversation: candidate.event.conversation,
-        inputId: candidate.event.inputId,
-        replyTarget: candidate.event.replyTarget,
-        source: candidate.event.source,
-        sourceMetadata,
-      })
-      const prefix = candidates.length > 1 ? `Input ${index + 1}:\n` : ''
-      return `${prefix}${[
-        ...(senderHandle ? [`Sender: ${senderHandle}`] : []),
-        ...(messageRef ? [`Message ref: ${messageRef}`] : []),
-        ...sections,
-      ].join('\n\n')}`
-    })
-    .filter((section): section is string => section !== null)
-
-  return sections.length > 0 ? sections.join('\n\n') : null
-}
-
-function appendCapturelessAssistantInputPrompt(input: {
-  basePrompt: string
-  capturelessInputs: readonly AssistantInputCandidate[]
-  replyContexts: ReadonlyMap<string, string | null>
-}): string {
-  const capturelessPrompt = buildCapturelessAssistantInputPrompt(
-    input.capturelessInputs,
-    input.replyContexts,
-  )
-  return capturelessPrompt
-    ? `${input.basePrompt}\n\nAdditional same-conversation input:\n${capturelessPrompt}`
-    : input.basePrompt
 }
 
 function mergeAssistantUserMessageContent(

@@ -1087,6 +1087,24 @@ export function parseHostedRuntimeGroupToolRequest(
       ),
     };
   }
+  if (action === "read_participant_display_names") {
+    assertAllowedObjectKeys(
+      record,
+      new Set(["action", "linqSenderHandles"]),
+      "Hosted runtime group tool read_participant_display_names request",
+    );
+    return {
+      action,
+      linqSenderHandles: parseHostedRuntimeGroupBoundedHandles(
+        record.linqSenderHandles,
+        {
+          allowEmpty: false,
+          label:
+            "Hosted runtime group tool read_participant_display_names request linqSenderHandles",
+        },
+      ),
+    };
+  }
   if (action === "read_shared") {
     assertAllowedObjectKeys(
       record,
@@ -1594,6 +1612,70 @@ function parseHostedRuntimeGroupDisplayName(
     throw new TypeError(`${label} is too long.`);
   }
   return displayName;
+}
+
+function parseHostedRuntimeGroupParticipantDisplayNamesResult(
+  value: unknown,
+): Extract<
+  HostedRuntimeGroupToolResponse,
+  { action: "read_participant_display_names" }
+>["result"] {
+  const label =
+    "Hosted runtime group tool read_participant_display_names response result";
+  const result = requireObject(value, label);
+  const status = requireString(result.status, `${label} status`);
+  if (status === "unavailable") {
+    assertAllowedObjectKeys(
+      result,
+      new Set(["status", "unavailableReason"]),
+      `${label} unavailable`,
+    );
+    return {
+      status,
+      unavailableReason: requireString(
+        result.unavailableReason,
+        `${label} unavailableReason`,
+      ),
+    };
+  }
+  if (status !== "ok") {
+    throw new TypeError(`${label} status is invalid.`);
+  }
+  assertAllowedObjectKeys(result, new Set(["participants", "status"]), label);
+  const entries = requireArray(result.participants, `${label} participants`);
+  if (entries.length > HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX) {
+    throw new TypeError(
+      `${label} participants must contain at most ${HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX} entries.`,
+    );
+  }
+  const senderHandles = new Set<string>();
+  const participants = entries.map((entry, index) => {
+    const participantLabel = `${label} participants[${index}]`;
+    const participant = requireObject(entry, participantLabel);
+    assertAllowedObjectKeys(
+      participant,
+      new Set(["displayName", "senderHandle"]),
+      participantLabel,
+    );
+    const displayName = parseHostedRuntimeGroupDisplayName(
+      participant.displayName,
+      `${participantLabel} displayName`,
+    );
+    if (displayName === null) {
+      throw new TypeError(`${participantLabel} displayName must not be null.`);
+    }
+    const senderHandle = parseHostedRuntimeGroupAskBoundedText({
+      label: `${participantLabel} senderHandle`,
+      maxCodePoints: HOSTED_RUNTIME_GROUP_SENDER_HANDLE_MAX_CODE_POINTS,
+      value: participant.senderHandle,
+    });
+    if (senderHandles.has(senderHandle)) {
+      throw new TypeError(`${label} senderHandles must be unique.`);
+    }
+    senderHandles.add(senderHandle);
+    return { displayName, senderHandle };
+  });
+  return { participants, status };
 }
 
 function readHostedRuntimeGroupKind(value: unknown): HostedRuntimeGroupKind | null {
@@ -2271,6 +2353,15 @@ export function parseHostedRuntimeGroupToolResponse(
         },
       };
     }
+  }
+
+  if (action === "read_participant_display_names") {
+    return {
+      action,
+      result: parseHostedRuntimeGroupParticipantDisplayNamesResult(
+        record.result,
+      ),
+    };
   }
 
   if (action === "read_shared") {

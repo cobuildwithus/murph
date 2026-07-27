@@ -1,7 +1,13 @@
 import {
   ASSISTANT_HOSTED_GROUP_SHARED_READ_MAX_PROJECTION_SCOPES,
+  type AssistantHostedGroupParticipantDisplayNameReader,
   type AssistantHostedGroupSharedReader,
 } from "@murphai/assistant-engine";
+import {
+  HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX,
+  HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH,
+  HOSTED_RUNTIME_GROUP_SENDER_HANDLE_MAX_CODE_POINTS,
+} from "@murphai/hosted-execution/runtime-control";
 import {
   buildHostedVaultShareProjectionScopeKey,
   HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES,
@@ -88,4 +94,97 @@ export function normalizeHostedGroupSharedProjectionScopes(
 
 function unavailable(unavailableReason: string) {
   return { status: "unavailable" as const, unavailableReason };
+}
+
+/**
+ * Presentation-only current-turn name lookup. Web remains the membership and
+ * profile authority; this adapter supplies exact Linq handles and discards all
+ * shared projection data. Failure leaves the transcript safely unnamed.
+ */
+export function createHostedGroupParticipantDisplayNameReader(input: {
+  groupToolPort: HostedRuntimeGroupToolPort | null;
+}): AssistantHostedGroupParticipantDisplayNameReader {
+  return {
+    async read(request) {
+      if (request.channel !== "linq" || !input.groupToolPort) {
+        return [];
+      }
+      const senderHandles = normalizeHostedGroupParticipantDisplayNameHandles(
+        request.senderHandles,
+      );
+      if (senderHandles.length === 0) {
+        return [];
+      }
+
+      try {
+        const response = await input.groupToolPort.request({
+          action: "read_participant_display_names",
+          linqSenderHandles: senderHandles,
+        });
+        if (response.action !== "read_participant_display_names") {
+          return [];
+        }
+        const result = response.result;
+        if (result.status !== "ok") {
+          return [];
+        }
+
+        return senderHandles.flatMap((senderHandle) => {
+          const participants = result.participants.filter((participant) =>
+            participant.senderHandle === senderHandle
+          );
+          if (participants.length !== 1) {
+            return [];
+          }
+          const displayName = normalizeHostedGroupParticipantDisplayName(
+            participants[0]?.displayName,
+          );
+          return displayName
+            ? [{ displayName, senderHandle }]
+            : [];
+        });
+      } catch {
+        return [];
+      }
+    },
+  };
+}
+
+function normalizeHostedGroupParticipantDisplayNameHandles(
+  values: readonly string[],
+): string[] {
+  const seen = new Set<string>();
+  const normalized: string[] = [];
+  for (const value of values) {
+    const senderHandle = value.trim();
+    if (
+      !senderHandle
+      || seen.has(senderHandle)
+      || [...senderHandle].length
+        > HOSTED_RUNTIME_GROUP_SENDER_HANDLE_MAX_CODE_POINTS
+    ) {
+      continue;
+    }
+    seen.add(senderHandle);
+    normalized.push(senderHandle);
+    if (normalized.length >= HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX) {
+      break;
+    }
+  }
+  return normalized;
+}
+
+function normalizeHostedGroupParticipantDisplayName(
+  value: string | null | undefined,
+): string | null {
+  const normalized = value
+    ?.replace(/[\u0000-\u001f\u007f-\u009f]+/gu, " ")
+    .replace(/\s+/gu, " ")
+    .trim();
+  if (!normalized) {
+    return null;
+  }
+  return Array.from(normalized)
+    .slice(0, HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH)
+    .join("");
 }

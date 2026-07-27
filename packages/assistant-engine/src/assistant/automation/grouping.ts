@@ -9,6 +9,8 @@ import {
   type AssistantAutomationInputSummary,
 } from './input-summary.js'
 
+export const ASSISTANT_AUTO_REPLY_COMPOUND_INPUT_MAX = 50
+
 export interface AssistantAutoReplyGroupItem {
   inputCandidate?: AssistantInputCandidate | null
   summary: AssistantAutomationInputSummary
@@ -43,6 +45,9 @@ export async function collectAssistantAutoReplyGroup(input: {
     index < input.inputSummaries.length;
     index += 1
   ) {
+    if (items.length >= ASSISTANT_AUTO_REPLY_COMPOUND_INPUT_MAX) {
+      break
+    }
     const candidate = input.inputSummaries[index]
     if (!candidate || !shouldGroupAdjacentConversationInput(first, candidate)) {
       break

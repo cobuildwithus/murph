@@ -1521,9 +1521,6 @@ export async function sendAssistantMessageLocal(
           turnId: currentUserTurn.turnId,
         })
 
-        const conversationScope = resolveAssistantConversationScope(
-          sharedPlan.conversationPolicy.audience,
-        )
         const resolvedFinalReplyDeliveryContext =
           resolveAssistantReplyDeliveryContextForSegment({
             contexts: replyDeliveryContexts,
@@ -1551,13 +1548,12 @@ export async function sendAssistantMessageLocal(
           admissionState: 'commit-started',
           turnId: currentUserTurn.turnId,
         })
-        const retainPrecedingResponses = conversationScope !== 'group'
-        // Direct conversations retain completed answers from before a steer.
-        // In group scope, only the latest completed answer can survive.
+        // Every completed provider response is part of the ordinary turn,
+        // regardless of audience. A later steer may add another response, but
+        // it never erases text or media the provider already completed.
         const precedingResponseSegments: AssistantPrecedingReplySegment[] = []
-        if (retainPrecedingResponses) {
-          for (const [segmentOrdinal, segment] of
-            (providerResult.precedingResponseSegments ?? []).entries()) {
+        for (const [segmentOrdinal, segment] of
+          (providerResult.precedingResponseSegments ?? []).entries()) {
             const resolvedDeliveryContext =
               resolveAssistantReplyDeliveryContextForSegment({
                 contexts: replyDeliveryContexts,
@@ -1596,7 +1592,6 @@ export async function sendAssistantMessageLocal(
                   }
                 : {}),
             })
-          }
         }
         const precedingResponses = precedingResponseSegments.map((segment) =>
           resolveAssistantPersistedReplyText({
@@ -1679,59 +1674,57 @@ export async function sendAssistantMessageLocal(
         let precedingDeliveryOutcomes: Awaited<
           ReturnType<typeof deliverAssistantPrecedingReplies>
         > = []
-        if (retainPrecedingResponses) {
-          try {
-            precedingDeliveryOutcomes = await deliverAssistantPrecedingReplies({
-              input: currentInput,
-              resolveSegmentDeliveryInput: async (segmentInput) => {
-                const targetInputId = segmentInput.segment.targetInputId
-                const deliveryContextOrdinal =
-                  segmentInput.segment.deliveryContextOrdinal
-                if (!targetInputId || deliveryContextOrdinal === undefined) {
-                  return segmentInput.input
-                }
-                return await applyAssistantAcceptedMessageTargetToDeliveryInput({
-                  acceptedInputIdsByDeliveryContextOrdinal,
-                  action: 'native-reply',
-                  deliveryContextOrdinal,
-                  input: segmentInput.input,
-                  session: segmentInput.session,
-                  sharedPlan,
-                  targetInputId,
-                })
+        try {
+          precedingDeliveryOutcomes = await deliverAssistantPrecedingReplies({
+            input: currentInput,
+            resolveSegmentDeliveryInput: async (segmentInput) => {
+              const targetInputId = segmentInput.segment.targetInputId
+              const deliveryContextOrdinal =
+                segmentInput.segment.deliveryContextOrdinal
+              if (!targetInputId || deliveryContextOrdinal === undefined) {
+                return segmentInput.input
+              }
+              return await applyAssistantAcceptedMessageTargetToDeliveryInput({
+                acceptedInputIdsByDeliveryContextOrdinal,
+                action: 'native-reply',
+                deliveryContextOrdinal,
+                input: segmentInput.input,
+                session: segmentInput.session,
+                sharedPlan,
+                targetInputId,
+              })
+            },
+            segments: precedingResponseSegments,
+            session,
+            sharedPlan,
+            turnId: currentUserTurn.turnId,
+          })
+        } catch (precedingError) {
+          const normalizedPrecedingError =
+            normalizeAssistantDeliveryError(precedingError)
+          if (finalResponseText === null) {
+            precedingDeliveryOutcomes = [
+              {
+                kind: 'failed',
+                error: normalizedPrecedingError,
+                intentId: null,
+                media: [],
+                session,
               },
-              segments: precedingResponseSegments,
-              session,
-              sharedPlan,
-              turnId: currentUserTurn.turnId,
-            })
-          } catch (precedingError) {
-            const normalizedPrecedingError =
-              normalizeAssistantDeliveryError(precedingError)
-            if (finalResponseText === null) {
-              precedingDeliveryOutcomes = [
-                {
-                  kind: 'failed',
-                  error: normalizedPrecedingError,
-                  intentId: null,
-                  media: [],
-                  session,
-                },
-              ]
-            } else {
-              await runAssistantTurnBestEffort(() =>
-                recordAssistantDiagnosticEvent({
-                  vault: input.vault,
-                  component: 'assistant',
-                  kind: 'delivery.preceding-reply.failed',
-                  level: 'error',
-                  message: normalizedPrecedingError.message,
-                  code: normalizedPrecedingError.code,
-                  sessionId: session.sessionId,
-                  turnId: currentUserTurn.turnId,
-                }),
-              )
-            }
+            ]
+          } else {
+            await runAssistantTurnBestEffort(() =>
+              recordAssistantDiagnosticEvent({
+                vault: input.vault,
+                component: 'assistant',
+                kind: 'delivery.preceding-reply.failed',
+                level: 'error',
+                message: normalizedPrecedingError.message,
+                code: normalizedPrecedingError.code,
+                sessionId: session.sessionId,
+                turnId: currentUserTurn.turnId,
+              }),
+            )
           }
         }
         for (const [precedingOutcomeIndex, precedingOutcome] of

@@ -124,6 +124,7 @@ import {
   type HostedDeviceSyncStatusPromptReconnectTarget,
 } from "./device-sync-status-prompt.ts";
 import {
+  createHostedGroupParticipantDisplayNameReader,
   createHostedGroupSharedReader,
   normalizeHostedGroupSharedProjectionScopes,
 } from "./group-shared-reader.ts";
@@ -407,6 +408,11 @@ function buildHostedGroupEmailRestrictedActionUnavailable(
       return {
         action: request.action,
         result: { participants: null, status: "unavailable", unavailableReason },
+      };
+    case "read_participant_display_names":
+      return {
+        action: request.action,
+        result: { status: "unavailable", unavailableReason },
       };
     case "preflight_set_chat_avatar":
     case "set_chat_avatar":
@@ -730,13 +736,22 @@ function scopeHostedGroupToolToAssistantOperation(input: {
     groupSharedReadAvailable: input.groupSharedReadAvailable,
     groupToolPort: scopedGroupToolPort,
   });
-  if (!sharedScopedExecutionContext.hosted || !scopedGroupToolPort) {
+  if (!sharedScopedExecutionContext.hosted) {
     return sharedScopedExecutionContext;
   }
+  const groupParticipantDisplayNameReader =
+    input.groupSharedReadAvailable && input.groupToolPort
+      ? createHostedGroupParticipantDisplayNameReader({
+          groupToolPort: input.groupToolPort,
+        })
+      : null;
   return {
     hosted: {
       ...sharedScopedExecutionContext.hosted,
-      groupTool: scopedGroupToolPort,
+      ...(groupParticipantDisplayNameReader
+        ? { groupParticipantDisplayNameReader }
+        : {}),
+      ...(scopedGroupToolPort ? { groupTool: scopedGroupToolPort } : {}),
     },
   };
 }

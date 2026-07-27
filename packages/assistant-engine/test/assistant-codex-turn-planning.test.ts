@@ -983,9 +983,6 @@ describe('assistant Codex turn planning', () => {
     )
     for (const privateStyleText of [
       'Assistant style settings:',
-      'Humor',
-      'Push',
-      'Detail',
       '/settings?voice=true',
       'vault-cli assistant style',
       'murph.assistant_style',

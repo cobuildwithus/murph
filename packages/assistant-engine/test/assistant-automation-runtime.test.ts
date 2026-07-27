@@ -1197,11 +1197,21 @@ beforeEach(() => {
       const normalized = value.trim()
       return normalized.length > 0 ? normalized : null
     })
-  replyMocks.prepareAssistantAutoReplyInput.mockReset().mockResolvedValue({
-    kind: 'ready',
-    prompt: 'reply prompt',
-    userMessageContent: null,
-  })
+  replyMocks.prepareAssistantAutoReplyInput
+    .mockReset()
+    .mockImplementation(async (
+      inputs: readonly { text?: string | null }[],
+    ) => {
+      const inputText = inputs
+        .map((input) => input.text)
+        .filter((text): text is string => typeof text === 'string' && text.length > 0)
+        .join('\n\n')
+      return {
+        kind: 'ready' as const,
+        prompt: inputText ? `reply prompt\n\n${inputText}` : 'reply prompt',
+        userMessageContent: null,
+      }
+    })
   replyMocks.resolveAssistantSession.mockReset().mockRejectedValue(
     Object.assign(new Error('not found'), {
       code: 'ASSISTANT_SESSION_NOT_FOUND',
@@ -5589,6 +5599,12 @@ describe('assistant auto-reply runtime', () => {
   })
 
   it('derives Linq reaction availability from the same mixed late input as the reply target', async () => {
+    const promptBuilder = await vi.importActual<
+      typeof import('../src/assistant/automation/prompt-builder.ts')
+    >('../src/assistant/automation/prompt-builder.ts')
+    replyMocks.prepareAssistantAutoReplyInput.mockImplementation(
+      promptBuilder.prepareAssistantAutoReplyInput,
+    )
     const inboxServices = createInboxServices({
       show: vi.fn().mockImplementation(async ({ captureId }: { captureId: string }) =>
         createShowResult(
@@ -5781,6 +5797,12 @@ describe('assistant auto-reply runtime', () => {
   })
 
   it('merges multiple pending captureless active-turn admissions before one checkpoint', async () => {
+    const promptBuilder = await vi.importActual<
+      typeof import('../src/assistant/automation/prompt-builder.ts')
+    >('../src/assistant/automation/prompt-builder.ts')
+    replyMocks.prepareAssistantAutoReplyInput.mockImplementation(
+      promptBuilder.prepareAssistantAutoReplyInput,
+    )
     const initialInput = createCapturelessAssistantInputCandidate({
       conversationThreadId: 'hid_thread_rapid',
       inputId: 'ain_cccccccccccccccccccccccccccccccc',
@@ -8719,6 +8741,12 @@ describe('assistant auto-reply runtime', () => {
   })
 
   it('admits authenticated mixed group actors into one turn and checkpoints every input', async () => {
+    const promptBuilder = await vi.importActual<
+      typeof import('../src/assistant/automation/prompt-builder.ts')
+    >('../src/assistant/automation/prompt-builder.ts')
+    replyMocks.prepareAssistantAutoReplyInput.mockImplementation(
+      promptBuilder.prepareAssistantAutoReplyInput,
+    )
     const initialCapture = createCaptureSummary({
       accountId: 'safe_acct_group_a',
       actorId: 'safe_actor_a',
@@ -8797,6 +8825,7 @@ describe('assistant auto-reply runtime', () => {
         partCount: 1,
         reactionEligible: true,
         replyToMessageId: 'assistant_anchor_b',
+        senderDisplayName: 'Actor B',
         senderHandle: '+15552220000',
         service: 'iMessage',
       },
@@ -8822,6 +8851,7 @@ describe('assistant auto-reply runtime', () => {
         partCount: 1,
         reactionEligible: true,
         replyToMessageId: 'assistant_anchor_a2',
+        senderDisplayName: 'Actor A',
         senderHandle: '+15551110000',
         service: 'iMessage',
       },
@@ -8901,7 +8931,9 @@ describe('assistant auto-reply runtime', () => {
         kind: 'accepted',
       })
       expect(acceptedB).toMatchObject({
-        prompt: expect.stringContaining('Sender: +15552220000'),
+        prompt: expect.stringContaining(
+          'Sender: +15552220000\n\nSpeaker name: \"Actor B\"',
+        ),
       })
       expect(acceptedB).toMatchObject({
         prompt: expect.stringContaining(`Message ref: ${actorB.event.inputId}`),
@@ -8920,7 +8952,9 @@ describe('assistant auto-reply runtime', () => {
         kind: 'accepted',
       })
       expect(acceptedA).toMatchObject({
-        prompt: expect.stringContaining('Sender: +15551110000'),
+        prompt: expect.stringContaining(
+          'Sender: +15551110000\n\nSpeaker name: \"Actor A\"',
+        ),
       })
       expect(acceptedA).toMatchObject({
         prompt: expect.stringContaining(
@@ -9000,6 +9034,162 @@ describe('assistant auto-reply runtime', () => {
           laterActorA.event.inputId,
         ],
       }))
+  })
+
+  it('caps cumulative initial and live group input at 50 and leaves overflow pending', async () => {
+    const createGroupCandidate = (index: number) => {
+      const inputId = `ain_${index.toString(16).padStart(32, '0')}`
+      const occurredAt = new Date(
+        Date.UTC(2026, 3, 8, 0, 0, index),
+      ).toISOString()
+      return createCapturelessAssistantInputCandidate({
+        accountId: 'safe_acct_group_cap',
+        actorId: `safe_actor_${index % 2}`,
+        conversationThreadId: 'hidden_group_cap_thread',
+        inputId,
+        occurredAt,
+        receivedAt: occurredAt,
+        replyTarget: {
+          channel: 'linq',
+          messageId: `group_cap_message_${index}`,
+          threadId: 'real_group_cap_thread',
+        },
+        source: 'linq',
+        sourceMetadata: {
+          externalThreadRouteAuthorityPresent: true,
+          kind: 'linq',
+          partCount: 1,
+          reactionEligible: true,
+          replyToMessageId: null,
+          senderHandle: `+1555000${index.toString().padStart(4, '0')}`,
+          service: 'iMessage',
+        },
+        text: `group cap message ${index}`,
+        threadIsDirect: false,
+      })
+    }
+    const initialInputs = Array.from({ length: 49 }, (_, index) =>
+      createGroupCandidate(index + 1),
+    )
+    const admittedAtLimit = createGroupCandidate(50)
+    const overflow = createGroupCandidate(51)
+    const listInputCandidatesByIds = vi.fn(async (input: {
+      afterCursor?: AssistantInputCandidate['event']['cursor'] | null
+      inputIds: readonly string[]
+    }) => {
+      const candidate = input.inputIds.includes(admittedAtLimit.event.inputId)
+        ? admittedAtLimit
+        : input.inputIds.includes(overflow.event.inputId)
+          ? overflow
+          : null
+      return {
+        inputs: candidate ? [candidate] : [],
+        nextCursor: candidate?.event.cursor
+          ?? input.afterCursor
+          ?? initialInputs.at(-1)!.event.cursor,
+      }
+    })
+    const checkpointAcceptedInput = vi.fn(async () => undefined)
+    const inputSource = {
+      checkpointAcceptedInput,
+      listInputCandidatesByIds,
+      listNewConversationInputs: vi.fn(async () => ({
+        inputs: [],
+        nextCursor: initialInputs.at(-1)!.event.cursor,
+      })),
+      refresh: vi.fn(async () => ({
+        progressed: false,
+        reason: 'no_new_input' as const,
+      })),
+    }
+    replyMocks.sendAssistantMessage.mockImplementation(async (input: {
+      activeTurnCheckpoint?: (
+        checkpoint: AssistantActiveTurnInputCheckpointInput,
+      ) => Promise<void>
+      activeTurnInput?: (admission: {
+        availableInputIds?: readonly string[]
+        sessionId: string
+        turnId: string
+        vault: string
+      }) => Promise<unknown>
+    }) => {
+      await expect(input.activeTurnInput?.({
+        availableInputIds: [admittedAtLimit.event.inputId],
+        sessionId: 'session-group-cap',
+        turnId: 'turn-group-cap',
+        vault: '/tmp/assistant-automation-vault',
+      })).resolves.toMatchObject({
+        acceptedInputs: [
+          expect.objectContaining({ id: admittedAtLimit.event.inputId }),
+        ],
+        kind: 'accepted',
+      })
+      await expect(input.activeTurnInput?.({
+        availableInputIds: [overflow.event.inputId],
+        sessionId: 'session-group-cap',
+        turnId: 'turn-group-cap',
+        vault: '/tmp/assistant-automation-vault',
+      })).resolves.toEqual({ kind: 'no-new-input' })
+
+      await input.activeTurnCheckpoint?.({
+        acceptedInputIds: [
+          ...initialInputs.map((candidate) => candidate.event.inputId),
+          admittedAtLimit.event.inputId,
+        ],
+        providerRequestOrdinal: 0,
+        sessionId: 'session-group-cap',
+        turnId: 'turn-group-cap',
+        vault: '/tmp/assistant-automation-vault',
+      })
+      return {
+        delivery: {
+          channel: 'linq',
+          target: 'real_group_cap_thread',
+          sentAt: '2026-04-08T00:10:00.000Z',
+        },
+        deliveryDeferred: false,
+        deliveryError: null,
+        deliveryIntentId: 'intent-group-cap',
+        response: 'bounded response',
+        session: { sessionId: 'session-group-cap' },
+      }
+    })
+    const reply = await vi.importActual<
+      typeof import('../src/assistant/automation/reply.ts')
+    >('../src/assistant/automation/reply.ts')
+    const context = reply.createAssistantAutoReplyGroupContext(
+      initialInputs.map(createCapturelessReplyGroupItem),
+    )
+    if (!context) {
+      throw new Error('expected bounded group context')
+    }
+
+    const result = await reply.processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context,
+      enabledChannels: ['linq'],
+      inboxServices: createInboxServices({ show: vi.fn() }),
+      inputSource,
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(result.replied).toBe(1)
+    expect(listInputCandidatesByIds).toHaveBeenCalledTimes(1)
+    expect(checkpointAcceptedInput).toHaveBeenCalledWith(
+      expect.objectContaining({
+        acceptedInputIds: [
+          ...initialInputs.map((candidate) => candidate.event.inputId),
+          admittedAtLimit.event.inputId,
+        ],
+      }),
+    )
+    expect(checkpointAcceptedInput).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        acceptedInputIds: expect.arrayContaining([overflow.event.inputId]),
+      }),
+    )
   })
 
   it('does not admit delivery-route late input across an audience boundary', async () => {
@@ -10290,7 +10480,7 @@ describe('assistant auto-reply runtime', () => {
     expect(replyMocks.sendAssistantMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         assistantStyleSettingsAuthorized: false,
-        prompt: 'reply prompt',
+        prompt: expect.stringContaining('Received an email message.'),
       }),
     )
     expect(evidenceMocks.writeAssistantAutoReplySuppressionEvidence)

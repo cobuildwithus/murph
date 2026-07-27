@@ -87,6 +87,7 @@ import {
   readHostedGroupByRuntimeMemberId,
   readHostedGroupIdByRuntimeMemberId,
   readHostedGroupMembershipsForMember,
+  readHostedGroupParticipantDisplayNamesByRuntimeMemberId,
   readHostedGroupSharedDataByRuntimeMemberId,
   recordHostedGroupJoinOfferTx,
   revokeHostedGroupMemberEmailShareTx,
@@ -150,6 +151,7 @@ export const HOSTED_RUNTIME_GROUP_TOOL_ACCESS_CLASSIFICATION = {
   preflight_set_chat_avatar: "owner_active",
   read_chat_participants: "participant_aware",
   read_current: "participant_aware",
+  read_participant_display_names: "participant_aware",
   revoke_disclosure_grant: "personal_active",
   read_usage: "participant_aware",
   read_shared: "participant_aware",
@@ -282,6 +284,27 @@ export async function handleHostedRuntimeGroupTool(input: {
       participant: input.request.participant ?? null,
       selfOptOut: input.request.selfOptOut ?? null,
     });
+  }
+
+  if (input.request.action === "read_participant_display_names") {
+    try {
+      return {
+        action: "read_participant_display_names",
+        result:
+          await readHostedGroupParticipantDisplayNamesByRuntimeMemberId({
+            linqSenderHandles: input.request.linqSenderHandles,
+            runtimeMemberId: input.memberId,
+          }),
+      };
+    } catch {
+      return {
+        action: "read_participant_display_names",
+        result: {
+          status: "unavailable",
+          unavailableReason: "participant_names_unavailable",
+        },
+      };
+    }
   }
 
   if (input.request.action === "read_shared") {
@@ -687,13 +710,6 @@ async function handleHostedRuntimeGroupRevokeOwnEmailShare(input: {
   } catch {
     return unavailable("member_unavailable");
   }
-  if (!await readActiveHostedMemberAccess({
-    memberId: participant.core.id,
-    prisma,
-  })) {
-    return unavailable("member_unavailable");
-  }
-
   const now = new Date();
   const revoked = await prisma.$transaction(async (tx) => revokeHostedGroupMemberEmailShareTx({
     groupRuntimeMemberId: input.memberId,

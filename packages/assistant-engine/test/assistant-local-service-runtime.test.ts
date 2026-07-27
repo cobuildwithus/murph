@@ -643,7 +643,7 @@ test('sendAssistantMessageLocal clears rejected resume state after a terminal fa
   expect(mocks.saveAssistantSession).not.toHaveBeenCalled()
 })
 
-test('sendAssistantMessageLocal drops superseded pre-steer finals from group delivery and transcripts', async () => {
+test('sendAssistantMessageLocal retains every completed group response and media segment', async () => {
   const { mocks, sendAssistantMessageLocal, session } = await loadLocalServiceModule()
 
   mocks.executeCodexTurnWithRecovery.mockImplementationOnce(async () => ({
@@ -683,14 +683,31 @@ test('sendAssistantMessageLocal drops superseded pre-steer finals from group del
     vault: '/vaults/test',
   })
 
-  expect(mocks.deliverAssistantPrecedingReplies).not.toHaveBeenCalled()
+  expect(mocks.deliverAssistantPrecedingReplies.mock.calls[0]?.[0]?.segments)
+    .toEqual([
+      expect.objectContaining({
+        media: [
+          {
+            kind: 'image',
+            url: 'https://cdn.example.test/assistant/answer-one.png',
+            alt: 'Answer one image',
+            source: null,
+          },
+        ],
+        response: 'Answer one.',
+      }),
+      expect.objectContaining({
+        media: [],
+        response: 'Answer two.',
+      }),
+    ])
   expect(mocks.dispatchAssistantReply).toHaveBeenCalledTimes(1)
   expect(mocks.dispatchAssistantReply.mock.calls[0]?.[0]?.response)
     .toBe('Answer three.')
   expect(mocks.finalizeAssistantTurnArtifacts.mock.calls[0]?.[0])
     .toMatchObject({
       assistantTranscriptText: 'Answer three.',
-      precedingAssistantTranscriptTexts: [],
+      precedingAssistantTranscriptTexts: ['Answer one.', 'Answer two.'],
     })
 })
 
@@ -913,7 +930,7 @@ test('sendAssistantMessageLocal preserves real same-text preceding answers', asy
     ])
 })
 
-test('sendAssistantMessageLocal drops group preceding replies and resolves the retained final delivery context', async () => {
+test('sendAssistantMessageLocal retains valid group preceding replies and resolves each delivery context', async () => {
   const session = createAssistantSession({
     binding: {
       actorId: null,
@@ -1086,13 +1103,24 @@ test('sendAssistantMessageLocal drops group preceding replies and resolves the r
   expect(initialResult.response).toBe('Retained answer.')
   expect(steeredResult.response).toBe('Retained answer.')
   expect(secondSteeredResult.response).toBe('Retained answer.')
-  expect(mocks.deliverAssistantPrecedingReplies).not.toHaveBeenCalled()
+  expect(mocks.deliverAssistantPrecedingReplies.mock.calls[0]?.[0]?.segments)
+    .toEqual([
+      expect.objectContaining({
+        deliveryContext: expect.objectContaining({
+          deliveryIdempotencyKey: 'delivery-one',
+          deliveryReplyToMessageId: 'message-one',
+          deliveryTarget: 'thread-one',
+        }),
+        media: [],
+        response: 'Answer one.',
+      }),
+    ])
   expect(
     mocks.finalizeAssistantTurnArtifacts.mock.calls[0]?.[0]
       ?.precedingAssistantTranscriptTexts,
-  ).toEqual([])
+  ).toEqual(['Answer one.'])
   expect(mocks.recordAssistantDiagnosticEvent.mock.calls.map((call) => call[0]))
-    .not.toContainEqual(
+    .toContainEqual(
       expect.objectContaining({
         kind: 'delivery.preceding-reply.delivery-context-ordinal-invalid',
       }),

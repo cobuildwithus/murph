@@ -26,6 +26,7 @@ import { readAssistantInputMessageRef } from '../message-target-selection.js'
 import { normalizeNullableString } from '../shared.js'
 
 const MAX_INLINE_ATTACHMENT_TEXT_CHARS = 2000
+const ASSISTANT_INPUT_SPEAKER_NAME_MAX_CODE_POINTS = 120
 const MAX_ATTACHMENT_TEXT_EXCERPT_CHARS = 600
 const ATTACHMENT_CONTENT_UNAVAILABLE_INSTRUCTION = [
   'Attachment contents are unavailable in this turn.',
@@ -343,11 +344,37 @@ function readAssistantInputSenderLabel(input: {
 function readAssistantInputGroupSenderName(
   metadata: AssistantInputSourceMetadata | null,
 ): string | null {
-  if (metadata?.kind !== 'telegram' || !readAssistantInputGroupSenderHandle(metadata)) {
+  if (!readAssistantInputGroupSenderHandle(metadata)) {
     return null
   }
-  const username = normalizeNullableString(metadata.senderUsername)
+  const displayName = normalizeAssistantInputSpeakerName(
+    metadata?.kind === 'linq' || metadata?.kind === 'telegram'
+      ? metadata.senderDisplayName
+      : null,
+  )
+  if (displayName) {
+    return displayName
+  }
+  if (metadata?.kind !== 'telegram') {
+    return null
+  }
+  const username = normalizeAssistantInputSpeakerName(metadata.senderUsername)
   return username ? `@${username}` : null
+}
+
+function normalizeAssistantInputSpeakerName(
+  value: string | null | undefined,
+): string | null {
+  const normalized = normalizeNullableString(value)
+    ?.replace(/[\u0000-\u001f\u007f-\u009f]+/gu, ' ')
+    .replace(/\s+/gu, ' ')
+    .trim()
+  if (!normalized) {
+    return null
+  }
+  return Array.from(normalized)
+    .slice(0, ASSISTANT_INPUT_SPEAKER_NAME_MAX_CODE_POINTS)
+    .join('')
 }
 
 export function renderAssistantInputGroupParticipantAddedPrompt(input: {
@@ -415,7 +442,7 @@ function renderAssistantAutoReplyInputSection(input: {
     sections.push(`Sender: ${input.senderHandle}`)
   }
   if (input.senderHandle && input.senderName) {
-    sections.push(`Sender name: ${input.senderName}`)
+    sections.push(`Speaker name: ${JSON.stringify(input.senderName)}`)
   }
   if (input.groupContext) {
     sections.push(input.groupContext)

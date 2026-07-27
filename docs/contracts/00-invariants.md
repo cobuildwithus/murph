@@ -273,13 +273,16 @@ it has been explicitly elevated to a cross-cutting invariant.
   anchor or one authenticated non-direct provider room with stable route,
   account, audience, projection-readiness, and reaction boundaries. Preserve
   every admitted group message's sender, opaque message reference, content,
-  attachments, and native reply context separately. An initially empty
-  pre-provider selection may acquire that whole sequence during its required
-  refresh; selection freezes when it first becomes nonempty and always before
-  provider start. A gap, legacy or missing causal identifier, changed direct
-  anchor or actor, changed room boundary, overflow, or post-freeze arrival
-  starts a later turn; terminal evidence covers every admitted input so restart
-  repair cannot resend the reply.
+  attachments, and native reply context separately. Initial selection freezes
+  before provider start. Exact successors may then join through the existing
+  live-steering path only until the first completed assistant response; initial
+  plus live input is capped at 50 messages, and overflow or later input remains
+  pending for the next ordinary turn. Every completed assistant text or media
+  segment remains part of the turn and is delivered; no audience-specific
+  last-response-wins rule may discard it. A gap, legacy or missing causal
+  identifier, changed direct anchor or actor, or changed room boundary starts a
+  later turn; terminal evidence covers every admitted input so restart repair
+  cannot resend the reply.
 - Accepted-turn membership remains authoritative during restart recovery. If
   terminal evidence proves only an oldest contiguous handled prefix while a
   post-freeze successor is also pending, repair and retire exactly that prefix,

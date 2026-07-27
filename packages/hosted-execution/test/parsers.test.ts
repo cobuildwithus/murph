@@ -784,6 +784,7 @@ describe("parseHostedExecutionEvent", () => {
           from: "1234567890",
           messageId: "message-1",
           schema: "murph.hosted-telegram-message.v1",
+          senderDisplayName: "Alice Example",
           senderUsername: "alice_example",
           text: "hello group",
           threadId: "chat_group",
@@ -803,7 +804,18 @@ describe("parseHostedExecutionEvent", () => {
       throw new Error("Expected a telegram conversation message wake.");
     }
     expect(parsed.message.telegramMessage.from).toBe("1234567890");
+    expect(parsed.message.telegramMessage.senderDisplayName).toBe("Alice Example");
     expect(parsed.message.telegramMessage.senderUsername).toBe("alice_example");
+    expect(() => parseHostedExecutionWake({
+      ...wake,
+      message: {
+        ...wake.message,
+        telegramMessage: {
+          ...wake.message.telegramMessage,
+          senderDisplayName: "x".repeat(121),
+        },
+      },
+    })).toThrow(/senderDisplayName is too long/u);
   });
 
   it("rejects legacy provider message event kinds", () => {
@@ -1704,6 +1716,77 @@ describe("parseHostedRuntimeGroupTool", () => {
         },
       })
     ).toThrow(/not allowed/u);
+  });
+
+  it("parses a bounded participant display-name request and response", () => {
+    expect(parseHostedRuntimeGroupToolRequest({
+      action: "read_participant_display_names",
+      linqSenderHandles: [" +15551110001 ", " member@example.test "],
+    })).toEqual({
+      action: "read_participant_display_names",
+      linqSenderHandles: ["+15551110001", "member@example.test"],
+    });
+    for (const linqSenderHandles of [
+      [],
+      ["+15551110001", "+15551110001"],
+      [" "],
+      ["a".repeat(513)],
+    ]) {
+      expect(() => parseHostedRuntimeGroupToolRequest({
+        action: "read_participant_display_names",
+        linqSenderHandles,
+      })).toThrow();
+    }
+    expect(() => parseHostedRuntimeGroupToolRequest({
+      action: "read_participant_display_names",
+      linqSenderHandles: ["+15551110001"],
+      projectionScopes: [{ projectionKind: "steps-days.v0" }],
+    })).toThrow(/not allowed/u);
+
+    const response = {
+      action: "read_participant_display_names",
+      result: {
+        participants: [{
+          displayName: "Alice Example",
+          senderHandle: "+15551110001",
+        }],
+        status: "ok",
+      },
+    };
+    expect(parseHostedRuntimeGroupToolResponse(response)).toEqual(response);
+    expect(parseHostedRuntimeGroupToolResponse({
+      action: "read_participant_display_names",
+      result: {
+        status: "unavailable",
+        unavailableReason: "runtime_inactive",
+      },
+    })).toEqual({
+      action: "read_participant_display_names",
+      result: {
+        status: "unavailable",
+        unavailableReason: "runtime_inactive",
+      },
+    });
+    expect(() => parseHostedRuntimeGroupToolResponse({
+      ...response,
+      result: {
+        ...response.result,
+        participants: [
+          response.result.participants[0],
+          response.result.participants[0],
+        ],
+      },
+    })).toThrow(/senderHandles must be unique/u);
+    expect(() => parseHostedRuntimeGroupToolResponse({
+      ...response,
+      result: {
+        ...response.result,
+        participants: [{
+          displayName: null,
+          senderHandle: "+15551110001",
+        }],
+      },
+    })).toThrow(/must not be null/u);
   });
 
   it("parses bounded read_shared requests in requested order", () => {

@@ -1444,6 +1444,16 @@ rebuildable best-effort state rather than a reason to take another workspace
 checkpoint or create a durable retry queue. Successful attachment projection
 may make raw paths, image evidence, or audio/video transcript evidence
 available to the same assistant turn.
+Authenticated group transcript rendering keeps the opaque assistant input
+reference and server-derived sender handle authoritative. Telegram may carry a
+bounded display name from trusted ingress. Linq may resolve a bounded profile
+name only after durable import through the Web-owned
+`read_participant_display_names` boundary. That boundary matches the current
+handle to exactly one current joined, unsuspended membership and decrypts only
+its membership-implied `profile-name.v0` snapshot; it never traverses selectable
+health grants or device state. Ambiguity or failure returns no name. These names
+are safely quoted presentation data and never participate in identity, routing,
+membership, or participant-scoped effect authorization.
 Assistant prompt preparation reads derived attachment evidence sequentially
 under one 32 MiB budget for the current turn and a 16 MiB per-file limit. Hosted
 artifact materialization rejects an external artifact whose declared size is
@@ -1483,11 +1493,14 @@ maintenance or the idle checkpoint.
 The assistant engine admits the frozen same-wake compound batch before provider
 start without broad hosted mailbox rediscovery. While a Codex turn is live,
 later mailbox input may still be imported and staged. Its exact staged input ID
-may join through the generic live-steering path only when the stored event is
-the next positive causal-sequence successor and preserves the direct actor and
-native reply anchor, or for an authenticated non-direct group preserves the
-room, delivery route, account/audience, projection readiness, and reaction
-boundary. A
+may join through the generic live-steering path only before the first completed
+assistant response, only while the turn remains below the cumulative 50-message
+initial-plus-live bound, and only when the stored event is the next positive
+causal-sequence successor and preserves the direct actor and native reply
+anchor, or for an authenticated non-direct group preserves the room, delivery
+route, account/audience, projection readiness, and reaction boundary. Every
+completed provider text or media segment remains deliverable; the group audience
+does not create a latest-response replacement rule. A
 projection-pending input is a causal barrier until the existing
 projection-completion notification retries it; terminal projection failure is
 still replyable through the normal fallback. Duplicate staging and
@@ -1495,8 +1508,8 @@ projection-completion notifications at or behind the newest queued or committed
 frontier are ignored before exact-successor proof. After the provider
 acknowledges `turn/steer`, Murph journals and checkpoints the accepted input
 before any hosted tool effect or final delivery may proceed. Missing input, a
-causal gap, a boundary change, or a missed live window remains pending for a normal later
-assistant turn. Strict active-turn-targeted input still fails closed instead of
+causal gap, a boundary change, capacity overflow, or input arriving after the
+first completed response remains pending for a normal later assistant turn. Strict active-turn-targeted input still fails closed instead of
 falling through, and the assistant engine does not synthesize another provider
 request inside the same assistant turn. Final-delivery and hosted-tool effect
 keys use the newest accepted causal input as the stable replay anchor while the

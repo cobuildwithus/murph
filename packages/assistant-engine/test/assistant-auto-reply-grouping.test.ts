@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { shouldGroupAdjacentConversationInput } from '../src/assistant/automation/grouping.ts'
+import {
+  ASSISTANT_AUTO_REPLY_COMPOUND_INPUT_MAX,
+  collectAssistantAutoReplyGroup,
+  shouldGroupAdjacentConversationInput,
+} from '../src/assistant/automation/grouping.ts'
 import type { AssistantAutomationInputSummary } from '../src/assistant/automation/input-summary.ts'
 
 function createInputSummary(
@@ -199,4 +203,27 @@ describe('shouldGroupAdjacentConversationInput', () => {
 
     expect(shouldGroupAdjacentConversationInput(first, second)).toBe(false)
   })
+
+  it('caps one initial compound turn at 50 and leaves overflow for the next turn', async () => {
+    const summaries = Array.from(
+      { length: ASSISTANT_AUTO_REPLY_COMPOUND_INPUT_MAX + 1 },
+      (_, index) => createAuthenticatedGroupSummary({
+        inputId: `ain_group_${index}`,
+        occurredAt: new Date(Date.UTC(2026, 3, 22, 10, index)).toISOString(),
+        optionalInboxCaptureId: `cap_group_${index}`,
+        text: `message ${index}`,
+      }),
+    )
+
+    const grouped = await collectAssistantAutoReplyGroup({
+      inputSummaries: summaries,
+      startIndex: 0,
+      vault: '/vaults/test',
+    })
+
+    expect(grouped.items).toHaveLength(ASSISTANT_AUTO_REPLY_COMPOUND_INPUT_MAX)
+    expect(grouped.endIndex).toBe(ASSISTANT_AUTO_REPLY_COMPOUND_INPUT_MAX - 1)
+    expect(summaries[grouped.endIndex + 1]?.inputId).toBe('ain_group_50')
+  })
+
 })
