@@ -7,11 +7,8 @@ import {
   EPIC_ACQUISITION_POLICY_ID,
   EPIC_BETA_REQUESTED_BASE_SCOPES,
   EPIC_BETA_RESOURCE_TYPES,
-  EPIC_LEGACY_BETA_RESOURCE_TYPES,
 } from "./epic-policy";
 
-export const CLINICAL_PROVIDER_DIRECTORY_SCHEMA_V1 =
-  "murph.clinical-provider-directory.v1" as const;
 export const CLINICAL_PROVIDER_DIRECTORY_SCHEMA =
   "murph.clinical-provider-directory.v2" as const;
 
@@ -51,10 +48,8 @@ export interface ClinicalProviderDirectoryEntry {
 export interface ClinicalProviderDirectory {
   entries: readonly ClinicalProviderDirectoryEntry[];
   generatedAt: string;
-  schema:
-    | typeof CLINICAL_PROVIDER_DIRECTORY_SCHEMA
-    | typeof CLINICAL_PROVIDER_DIRECTORY_SCHEMA_V1;
-  sourceBundleSha256: string | null;
+  schema: typeof CLINICAL_PROVIDER_DIRECTORY_SCHEMA;
+  sourceBundleSha256: string;
   version: string;
 }
 
@@ -132,21 +127,15 @@ function rankFacilities(input: {
 
 export function parseClinicalProviderDirectory(value: unknown): ClinicalProviderDirectory {
   const record = requireRecord(value, "Clinical provider directory");
-  if (
-    record.schema !== CLINICAL_PROVIDER_DIRECTORY_SCHEMA
-    && record.schema !== CLINICAL_PROVIDER_DIRECTORY_SCHEMA_V1
-  ) {
+  if (record.schema !== CLINICAL_PROVIDER_DIRECTORY_SCHEMA) {
     throw new TypeError("Clinical provider directory schema is unsupported.");
   }
-  const isV2 = record.schema === CLINICAL_PROVIDER_DIRECTORY_SCHEMA;
-  if (isV2) assertExactOwnedDirectoryPolicy(record.policies);
+  assertExactOwnedDirectoryPolicy(record.policies);
   const rawEntries = requireArray(record.entries, "Clinical provider directory entries");
   if (rawEntries.length === 0 || rawEntries.length > MAX_DIRECTORY_ENTRIES) {
     throw new RangeError("Clinical provider directory entry count is out of bounds.");
   }
-  const entries = rawEntries.map((entry, index) =>
-    parseDirectoryEntry(entry, index, isV2)
-  );
+  const entries = rawEntries.map(parseDirectoryEntry);
   const locationCount = entries.reduce((sum, entry) => sum + entry.facilities.length, 0);
   if (locationCount > MAX_DIRECTORY_LOCATIONS_TOTAL) {
     throw new RangeError("Clinical provider directory location count is out of bounds.");
@@ -155,17 +144,16 @@ export function parseClinicalProviderDirectory(value: unknown): ClinicalProvider
   if (entryIds.size !== entries.length) {
     throw new TypeError("Clinical provider directory contains duplicate entry ids.");
   }
-  if (isV2) {
-    assertStrictlySorted(entries.map((entry) => entry.id), "Clinical provider directory entries");
-  }
+  assertStrictlySorted(entries.map((entry) => entry.id), "Clinical provider directory entries");
 
   return {
     entries,
     generatedAt: requireIsoTimestamp(record.generatedAt, "Clinical provider directory generatedAt"),
-    schema: record.schema,
-    sourceBundleSha256: isV2
-      ? requireSha256(record.sourceBundleSha256, "Clinical provider directory source bundle hash")
-      : null,
+    schema: CLINICAL_PROVIDER_DIRECTORY_SCHEMA,
+    sourceBundleSha256: requireSha256(
+      record.sourceBundleSha256,
+      "Clinical provider directory source bundle hash",
+    ),
     version: requireBoundedString(record.version, "Clinical provider directory version", 80),
   };
 }
@@ -183,7 +171,6 @@ function assertExactOwnedDirectoryPolicy(value: unknown): void {
 function parseDirectoryEntry(
   value: unknown,
   index: number,
-  isV2: boolean,
 ): ClinicalProviderDirectoryEntry {
   const record = requireRecord(value, `Clinical provider directory entry ${index}`);
   const fhirBaseUrl = requireCanonicalPublicHttpsUrl(
@@ -198,9 +185,6 @@ function parseDirectoryEntry(
     throw new RangeError(`Clinical provider directory entry ${index} has too many locations.`);
   }
 
-  if (!isV2 && record.sourceSystem !== "epic-fhir") {
-    throw new TypeError(`Clinical provider directory entry ${index} source system is unsupported.`);
-  }
   if (
     record.clientIdEnvironmentKey !== "EPIC_SMART_CLIENT_ID"
     && record.clientIdEnvironmentKey !== "EPIC_SMART_NON_PRODUCTION_CLIENT_ID"
@@ -208,29 +192,18 @@ function parseDirectoryEntry(
     throw new TypeError(`Clinical provider directory entry ${index} client-id configuration is unsupported.`);
   }
 
-  const policyId = isV2
-    ? requireIdentifier(record.policyId, `Clinical provider directory entry ${index} policy id`)
-    : EPIC_ACQUISITION_POLICY_ID;
+  const policyId = requireIdentifier(
+    record.policyId,
+    `Clinical provider directory entry ${index} policy id`,
+  );
   if (policyId !== EPIC_ACQUISITION_POLICY_ID) {
     throw new TypeError(`Clinical provider directory entry ${index} references an unknown policy.`);
   }
-  const requestedBaseScopes = isV2
-    ? EPIC_BETA_REQUESTED_BASE_SCOPES
-    : parseRequestedBaseScopes(record.requestedBaseScopes, index);
-  const resourceTypes = isV2
-    ? EPIC_BETA_RESOURCE_TYPES
-    : parseResourceTypes(
-        record.resourceTypes,
-        index,
-        EPIC_LEGACY_BETA_RESOURCE_TYPES,
-      );
 
   return {
     aliases: parseUniqueStrings(record.aliases, `Clinical provider directory entry ${index} aliases`, 20, 120),
     brandName: requireBoundedString(record.brandName, `Clinical provider directory entry ${index} brand`, 160),
-    capabilityOverrides: isV2
-      ? parseCapabilityOverrides(record.capabilityOverrides, index)
-      : [],
+    capabilityOverrides: parseCapabilityOverrides(record.capabilityOverrides, index),
     clientIdEnvironmentKey: record.clientIdEnvironmentKey,
     facilities: locations.map((location, locationIndex) =>
       parseLocationTuple(location, index, locationIndex)
@@ -238,8 +211,8 @@ function parseDirectoryEntry(
     fhirBaseUrl,
     id: requireIdentifier(record.id, `Clinical provider directory entry ${index} id`),
     policyId,
-    requestedBaseScopes,
-    resourceTypes,
+    requestedBaseScopes: EPIC_BETA_REQUESTED_BASE_SCOPES,
+    resourceTypes: EPIC_BETA_RESOURCE_TYPES,
     sourceSystem: EPIC_ACQUISITION_POLICY.sourceSystem,
   };
 }
@@ -313,45 +286,6 @@ function parseLocationTuple(
     state: optionalBoundedString(value[2], 80),
     postalCode: optionalBoundedString(value[3], 24),
   };
-}
-
-function parseRequestedBaseScopes(value: unknown, index: number): readonly string[] {
-  const scopes = parseUniqueStrings(
-    value,
-    `Clinical provider directory entry ${index} requested base scopes`,
-    32,
-    120,
-  );
-  const requiredScopes = ["openid", "fhirUser", "launch/patient"];
-  if (!requiredScopes.every((scope) => scopes.includes(scope))) {
-    throw new TypeError(`Clinical provider directory entry ${index} is missing required SMART scopes.`);
-  }
-  if (scopes.some((scope) => !/^[A-Za-z0-9/*._:-]+$/u.test(scope))) {
-    throw new TypeError(`Clinical provider directory entry ${index} has an invalid SMART scope.`);
-  }
-  return scopes;
-}
-
-function parseResourceTypes(
-  value: unknown,
-  index: number,
-  expectedResourceTypes: readonly string[],
-): readonly string[] {
-  const resources = parseUniqueStrings(
-    value,
-    `Clinical provider directory entry ${index} resource types`,
-    32,
-    80,
-  );
-  if (
-    resources.length !== expectedResourceTypes.length
-    || resources.some((resource, resourceIndex) =>
-      resource !== expectedResourceTypes[resourceIndex]
-    )
-  ) {
-    throw new TypeError(`Clinical provider directory entry ${index} does not match the Epic beta FHIR policy.`);
-  }
-  return resources;
 }
 
 function requireSha256(value: unknown, label: string): string {

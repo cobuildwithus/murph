@@ -8,9 +8,11 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 const BLACKSMITH_PROVIDER = "blacksmith-testbox";
 const BLACKSMITH_ORG = "cobuildwithus";
 const BLACKSMITH_REF = "main";
-const BLACKSMITH_WORKFLOW = ".github/workflows/crabbox.yml";
+const BLACKSMITH_WORKFLOW = ".github/workflows/crabbox-bounded.yml";
 const BLACKSMITH_JOB = "hydrate";
 const DEFAULT_CRABBOX_PROFILE = "murph-verification";
+const CRABBOX_IDLE_TIMEOUT = "10m";
+const CRABBOX_TTL = "45m";
 const TRUSTED_CRABBOX_ENTRYPOINT = "/usr/local/bin/murph-crabbox-verify";
 const SAFE_CRABBOX_CLI_ENVIRONMENT_NAMES = [
   "HOME",
@@ -54,7 +56,7 @@ function assertSafeBlacksmithRoutingInputs(env) {
 
   if (legacyPool) {
     throw new Error(
-      "Blacksmith Testbox does not use Crabbox pools; set MURPH_CRABBOX_BLACKSMITH=1 for a fresh pinned Testbox.",
+      "Blacksmith Testbox does not use Crabbox pools; set MURPH_VERIFY_EXECUTOR=crabbox for a fresh pinned Testbox.",
     );
   }
 
@@ -96,35 +98,18 @@ export function resolveVerificationExecutor({
     return { executor: "local", reason: "explicit" };
   }
 
-  const codexThreadId = env.CODEX_THREAD_ID?.trim();
-  if (requestedExecutor === "auto" && !codexThreadId) {
-    return { executor: "local", reason: "non-codex" };
+  if (requestedExecutor === "auto") {
+    return { executor: "local", reason: "auto" };
   }
 
   assertSafeBlacksmithRoutingInputs(env);
-  const blacksmithEnabled = readBooleanFlag(
-    env.MURPH_CRABBOX_BLACKSMITH,
-    "MURPH_CRABBOX_BLACKSMITH",
-  );
-  if (
-    requestedExecutor === "auto" &&
-    !blacksmithEnabled
-  ) {
-    return { executor: "local", reason: "no-blacksmith-config" };
-  }
   if (!isCrabboxAvailable()) {
-    if (requestedExecutor === "crabbox") {
-      throw new Error(
-        "MURPH_VERIFY_EXECUTOR=crabbox was requested, but the Crabbox and Blacksmith CLIs are unavailable.",
-      );
-    }
-    return { executor: "local", reason: "crabbox-unavailable" };
+    throw new Error(
+      "MURPH_VERIFY_EXECUTOR=crabbox was requested, but the Crabbox and Blacksmith CLIs are unavailable.",
+    );
   }
 
-  return {
-    executor: "crabbox",
-    reason: requestedExecutor === "crabbox" ? "explicit" : "codex-auto",
-  };
+  return { executor: "crabbox", reason: "explicit" };
 }
 
 export function buildLocalInvocation(request) {
@@ -153,6 +138,12 @@ export function buildCrabboxInvocation(request) {
     BLACKSMITH_WORKFLOW,
     "--blacksmith-job",
     BLACKSMITH_JOB,
+    "--idle-timeout",
+    CRABBOX_IDLE_TIMEOUT,
+    "--ttl",
+    CRABBOX_TTL,
+    "--stop-after",
+    "always",
     "--label",
     `murph ${request.verificationCommand}`,
     "--timing-json",
