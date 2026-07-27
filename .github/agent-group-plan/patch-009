@@ -1,0 +1,307 @@
+-    `Apply exactly one private hosted subscription choice that the current user made in the current turn. Use only when the user explicitly and unambiguously chose continue_pulse, start_pulse_now, or upgrade_edge. Before start_pulse_now or upgrade_edge, require a current murph.plan_usage subscriptionActionQuote whose action exactly matches, state its label and terms, then receive an explicit current-turn confirmation of that exact action. A quote is not a recommendation or consent. Never use post-action response facts as the first disclosure. A bare “yes” is not consent when the preceding message offered multiple choices; ask which option they mean instead. Use continue_pulse only when the current murph.plan_usage result confirms an active trial; it keeps that trial scheduled to become Pulse at trial end without charging now. If plan usage reports trial_conversion_pending or an ended trial, do not use continue_pulse: treat recovery as start-now, state the current terms, and get explicit confirmation, normally for start_pulse_now. start_pulse_now ends an eligible active trial or recovers an ended trial and begins Pulse immediately; upgrade_edge upgrades an eligible paid Pulse subscription to Edge. Never infer consent from usage pressure, an earlier turn, an automated event, or your own recommendation. ${MURPH_CONVERSATIONAL_COMMERCIAL_MENTION_POLICY} ${MURPH_USAGE_SAVING_MODEL_COPY_POLICY} Do not hardcode or guess prices; use current server-returned terms before an action and the returned plan facts only to acknowledge its result. Send the returned paymentUrl only when status is payment_required. For no_action_required, stay silent unless answering the member's explicit request; when directly acknowledging continue_pulse, keep it brief and include no explanation or link. Never call a payment method verified or guarantee a future charge. completed and pending do not carry a payment link.`,
++    `Apply exactly one private hosted subscription choice that the current user made in the current turn. Use only when the user explicitly and unambiguously chose continue_pulse, start_pulse_now, upgrade_pulse, or upgrade_edge. Before start_pulse_now, upgrade_pulse, or upgrade_edge, require a current murph.plan_usage subscriptionActionQuote whose action exactly matches, state its label and terms, then receive an explicit current-turn confirmation of that exact action. A quote is not a recommendation or consent. Never use post-action response facts as the first disclosure. A bare “yes” is not consent when the preceding message offered multiple choices; ask which option they mean instead. Use continue_pulse only when the current murph.plan_usage result confirms an active trial; it keeps that trial scheduled to become Pulse at trial end without charging now. If plan usage reports trial_conversion_pending or an ended trial, do not use continue_pulse: treat recovery as start-now, state the current terms, and get explicit confirmation, normally for start_pulse_now. start_pulse_now ends an eligible active trial or recovers an ended trial and begins Pulse immediately; upgrade_pulse upgrades an eligible paid Group subscription to Pulse; upgrade_edge upgrades an eligible paid Group or Pulse subscription to Edge. Never infer consent from usage pressure, an earlier turn, an automated event, or your own recommendation. ${MURPH_CONVERSATIONAL_COMMERCIAL_MENTION_POLICY} ${MURPH_USAGE_SAVING_MODEL_COPY_POLICY} Do not hardcode or guess prices; use current server-returned terms before an action and the returned plan facts only to acknowledge its result. Send the returned paymentUrl only when status is payment_required. For no_action_required, stay silent unless answering the member's explicit request; when directly acknowledging continue_pulse, keep it brief and include no explanation or link. Never call a payment method verified or guarantee a future charge. completed and pending do not carry a payment link.`,
+@@ -497,4 +497,4 @@ export const MURPH_SUBSCRIPTION_TOOL = {
+       action: {
+         type: 'string',
+-        enum: ['continue_pulse', 'start_pulse_now', 'upgrade_edge'],
++        enum: ['continue_pulse', 'start_pulse_now', 'upgrade_pulse', 'upgrade_edge'],
+       },
+diff --git a/packages/assistant-engine/test/assistant-subscription-tool.test.ts b/packages/assistant-engine/test/assistant-subscription-tool.test.ts
+--- a/packages/assistant-engine/test/assistant-subscription-tool.test.ts
++++ b/packages/assistant-engine/test/assistant-subscription-tool.test.ts
+@@ -25,5 +25,6 @@ describe("assistant subscription tool", () => {
+   it.each([
+     "continue_pulse",
+     "start_pulse_now",
++    "upgrade_pulse",
+     "upgrade_edge",
+   ] as const)("accepts the closed %s action", (action) => {
+@@ -217,4 +218,8 @@ describe("assistant subscription tool", () => {
+ 
+ function readSubscriptionRequest(
+-  action: "continue_pulse" | "start_pulse_now" | "upgrade_edge",
++  action:
++    | "continue_pulse"
++    | "start_pulse_now"
++    | "upgrade_pulse"
++    | "upgrade_edge",
+ ) {
+diff --git a/apps/web/test/hosted-onboarding-env.test.ts b/apps/web/test/hosted-onboarding-env.test.ts
+--- a/apps/web/test/hosted-onboarding-env.test.ts
++++ b/apps/web/test/hosted-onboarding-env.test.ts
+@@ -10,4 +10,6 @@ describe("readHostedOnboardingEnvironment", () => {
+     const environment = readHostedOnboardingEnvironment(createProcessEnv({
+       HOSTED_ONBOARDING_PUBLIC_BASE_URL: "https://join.example.test",
+       HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_EDGE_MONTHLY: "price_edge_monthly_123",
++      HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_GROUP_MONTHLY:
++        "price_group_monthly_123",
+       HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY: "price_monthly_123",
+@@ -34,5 +36,6 @@ describe("readHostedOnboardingEnvironment", () => {
+     expect(environment.linqFirstContactAdmissionOpenAiApiKey).toBeNull();
+     expect(environment.stripePriceIdsByPlan).toEqual({
+       launch_edge_monthly: "price_edge_monthly_123",
++      launch_group_monthly: "price_group_monthly_123",
+       launch_monthly: "price_monthly_123",
+     });
+diff --git a/apps/web/test/user-facing-messages.test.ts b/apps/web/test/user-facing-messages.test.ts
+--- a/apps/web/test/user-facing-messages.test.ts
++++ b/apps/web/test/user-facing-messages.test.ts
+@@ -31,3 +31,4 @@ const TEST_TEMPLATE_KEYS = [
+   "linq.ai_usage.edge_limit_reached",
+   "linq.ai_usage.family_limit_reached",
++  "linq.ai_usage.group_upgrade_pulse",
+   "linq.ai_usage.pulse_upgrade_edge",
+@@ -61,4 +62,7 @@ const TEST_CONTEXT_BY_KEY = {
+   "linq.ai_usage.family_limit_reached": {
+     homeUrl: "https://withmurph.ai/home",
+   },
++  "linq.ai_usage.group_upgrade_pulse": {
++    homeUrl: "https://withmurph.ai/home",
++  },
+   "linq.ai_usage.billing_inactive": {
+@@ -124,2 +128,6 @@ describe("user-facing message variants", () => {
+     expectEveryVariantContains("linq.ai_usage.trial_limit_reached", "https://withmurph.ai/home");
+     expectEveryVariantContains("linq.ai_usage.family_limit_reached", "https://withmurph.ai/home");
++    expectEveryVariantContains(
++      "linq.ai_usage.group_upgrade_pulse",
++      "https://withmurph.ai/home",
++    );
+@@ -201,3 +209,10 @@ describe("user-facing message variants", () => {
+       expect(text).not.toMatch(/add usage|top[ -]?up/iu);
+     }
+ 
++    for (const text of collectRenderedTexts("linq.ai_usage.group_upgrade_pulse")) {
++      expect(text).toMatch(/sync|wearable|health data/iu);
++      expect(text).toMatch(/group/iu);
++      expect(text).toMatch(/Pulse|reset/iu);
++      expect(text).not.toMatch(/top[ -]?up/iu);
++    }
++
+@@ -211,3 +227,4 @@ describe("user-facing message variants", () => {
+       "linq.ai_usage.edge_limit_reached",
+       "linq.ai_usage.family_limit_reached",
++      "linq.ai_usage.group_upgrade_pulse",
+       "linq.ai_usage.pulse_upgrade_edge",
+@@ -237,3 +254,4 @@ describe("user-facing message variants", () => {
+       "linq.ai_usage.edge_limit_reached",
+       "linq.ai_usage.family_limit_reached",
++      "linq.ai_usage.group_upgrade_pulse",
+       "linq.ai_usage.pulse_upgrade_edge",
+diff --git a/apps/web/test/hosted-subscription-tool-route.test.ts b/apps/web/test/hosted-subscription-tool-route.test.ts
+--- a/apps/web/test/hosted-subscription-tool-route.test.ts
++++ b/apps/web/test/hosted-subscription-tool-route.test.ts
+@@ -77,5 +77,6 @@ describe("hosted subscription tool route", () => {
+     for (const action of [
+       "continue_pulse",
+       "start_pulse_now",
++      "upgrade_pulse",
+       "upgrade_edge",
+     ] as const) {
+diff --git a/apps/web/test/hosted-usage-status.test.ts b/apps/web/test/hosted-usage-status.test.ts
+--- a/apps/web/test/hosted-usage-status.test.ts
++++ b/apps/web/test/hosted-usage-status.test.ts
+@@ -140,4 +140,46 @@ describe("readHostedPersonalAiUsageStatus", () => {
+     });
+   });
+ 
++  it("recommends Pulse instead of top-ups when Group AI usage is exhausted", async () => {
++    mocks.readHostedMemberBillingEligibilityState.mockResolvedValue({
++      currentBillingPhase: "paid",
++      currentBillingPlanCode: "launch_group_monthly",
++      currentCheckoutOffer: "standard",
++      hasStripeCustomerId: true,
++      hasStripeSubscriptionId: true,
++    });
++    mocks.readHostedAiUsageGate.mockResolvedValue(buildDecision({
++      allowed: false,
++      allowanceSource: "direct_paid_member_plan",
++      billingPlanCode: "launch_group_monthly",
++      limitUsdMicros: 2_800_000n,
++      reason: "ai_usage_limit_exceeded",
++      remainingUsdMicros: 0n,
++      spentUsdMicros: 2_800_000n,
++    }));
++
++    const result = await readHostedPersonalAiUsageStatus({
++      memberId: "member_group_exhausted",
++      now: NOW,
++      prisma: buildPrisma(null) as never,
++      publicBaseUrl: "https://example.test",
++    });
++
++    expect(result).toMatchObject({
++      accessKind: "paid",
++      planCode: "launch_group_monthly",
++      planName: "Group",
++      recommendedAction: {
++        kind: "upgrade_pulse",
++        label: "Upgrade to Pulse ($8/month)",
++        url: "https://example.test/settings#subscription",
++      },
++      remainingPercent: 0,
++      status: "exhausted",
++      usedPercent: 100,
++    });
++    expect(result).not.toHaveProperty("subscriptionActionQuote");
++    expect(mocks.readHostedPersonalUsageCreditOfferCodes).not.toHaveBeenCalled();
++  });
++
+   it("does not recommend adding usage when no canonical offer is configured", async () => {
+@@ -758,4 +801,7 @@ function buildDecision(input: {
+     | "direct_trial"
+     | "family_sponsored_plan"
+     | "thread_container";
+-  billingPlanCode?: "launch_edge_monthly" | "launch_monthly";
++  billingPlanCode?:
++    | "launch_group_monthly"
++    | "launch_edge_monthly"
++    | "launch_monthly";
+@@ -796,4 +843,6 @@ function buildDecision(input: {
+           ? "trial_usage_limit_reached"
+           : common.billingPlanCode === "launch_edge_monthly"
+             ? "edge_usage_limit_reached"
++            : common.billingPlanCode === "launch_group_monthly"
++              ? "group_upgrade_pulse"
+             : "pulse_upgrade_edge",
+diff --git a/apps/web/test/hosted-billing-settings.test.tsx b/apps/web/test/hosted-billing-settings.test.tsx
+--- a/apps/web/test/hosted-billing-settings.test.tsx
++++ b/apps/web/test/hosted-billing-settings.test.tsx
+@@ -157,4 +157,78 @@ describe("HostedBillingSettings", () => {
+     assert.match(markup, /Manage billing/);
+   });
+ 
++  test("shows the $3.50 Group plan only from the server-authorized catalog", async () => {
++    const { HostedBillingSettings } = await import(
++      "@/src/components/settings/hosted-billing-settings"
++    );
++
++    const hiddenMarkup = renderToStaticMarkup(createElement(
++      HostedBillingSettings,
++      {
++        authenticated: true,
++        currentBillingPlanCode: "launch_monthly",
++      },
++    ));
++    const visibleMarkup = renderToStaticMarkup(createElement(
++      HostedBillingSettings,
++      {
++        authenticated: true,
++        canSwitchToGroup: true,
++        currentBillingPlanCode: "launch_monthly",
++        currentPeriodEnd: new Date("2026-08-01T00:00:00.000Z"),
++        showGroupPlan: true,
++      },
++    ));
++
++    assert.doesNotMatch(hiddenMarkup, />Group</);
++    assert.match(visibleMarkup, />Group</);
++    assert.match(visibleMarkup, /\$3\.50/);
++    assert.match(visibleMarkup, /Choose Group/);
++  });
++
++  test("keeps Group members on the ordinary upgrade path to Pulse and Edge", async () => {
++    const { HostedBillingSettings } = await import(
++      "@/src/components/settings/hosted-billing-settings"
++    );
++
++    const markup = renderToStaticMarkup(createElement(
++      HostedBillingSettings,
++      {
++        authenticated: true,
++        canUpgradeToEdge: true,
++        canUpgradeToPulse: true,
++        currentBillingPhase: "paid",
++        currentBillingPlanCode: "launch_group_monthly",
++        showGroupPlan: true,
++      },
++    ));
++
++    assert.match(markup, />Group</);
++    assert.match(markup, /Current plan/);
++    assert.match(markup, /Choose Pulse/);
++    assert.match(markup, /Choose Edge/);
++  });
++
++  test("says syncing continues when Group AI usage is exhausted", async () => {
++    const { HostedBillingSettings } = await import(
++      "@/src/components/settings/hosted-billing-settings"
++    );
++    const markup = renderToStaticMarkup(createElement(
++      HostedBillingSettings,
++      {
++        authenticated: true,
++        usageStatus: buildUsageStatus({
++          planCode: "launch_group_monthly",
++          planName: "Group",
++          remainingPercent: 0,
++          status: "exhausted",
++          usedPercent: 100,
++        }),
++      },
++    ));
++
++    assert.match(markup, /wearable keeps syncing/);
++    assert.match(markup, /group activity stays current/);
++  });
++
+   test("shows trial usage, timing, and a conservative forecast before the plan cards", async () => {
+@@ -828,4 +828,59 @@ describe("HostedBillingSettings", () => {
+     await rendered.cleanup();
+   });
+ 
++  test("posts a server-authorized Group switch through the generic route", async () => {
++    mocks.requestHostedOnboardingJson.mockResolvedValueOnce({
++      effectiveAt: "2026-05-06T12:00:00.000Z",
++      scheduledBillingPlanCode: "launch_group_monthly",
++      status: "scheduled",
++    });
++    const { SwitchToGroupButton } = await import(
++      "@/src/components/settings/hosted-plan-switch-to-pulse-button"
++    );
++    const rendered = await renderClientComponent(createElement(
++      SwitchToGroupButton,
++      {
++        currentPeriodEnd: "2026-05-06T12:00:00.000Z",
++        currentPlanCode: "launch_monthly",
++      },
++    ));
++
++    await act(async () => {
++      rendered.button.dispatchEvent(
++        new rendered.window.Event("click", { bubbles: true }),
++      );
++    });
++    assert.equal(mocks.requestHostedOnboardingJson.mock.calls.length, 0);
++    assert.match(
++      rendered.window.document.body.textContent ?? "",
++      /You keep Pulse through May 6, 2026, then Group at \$3\.50\/mo\./,
++    );
++    assert.match(
++      rendered.window.document.body.textContent ?? "",
++      /Wearable syncing stays on/,
++    );
++
++    const confirmButton = findButtonByText(
++      rendered.window.document,
++      "Confirm switch",
++      rendered.window,
++    );
++    await act(async () => {
++      confirmButton.dispatchEvent(
++        new rendered.window.Event("click", { bubbles: true }),
++      );
++    });
++
++    assert.deepEqual(mocks.requestHostedOnboardingJson.mock.calls[0]?.[0], {
++      method: "POST",
++      payload: {
++        targetPlanCode: "launch_group_monthly",
++      },
++      url: "/api/settings/billing/switch-plan",
++    });
++    assert.equal(mocks.routerRefresh.mock.calls.length, 1);
++
++    await rendered.cleanup();
++  });
++
+   test("posts the Start Pulse request without a body and refreshes on success", async () => {
