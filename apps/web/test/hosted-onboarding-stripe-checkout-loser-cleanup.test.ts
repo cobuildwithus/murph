@@ -26,7 +26,7 @@ describe("cleanupHostedStandardCheckoutLoser", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    refundsList.mockResolvedValue({ data: [] });
+    refundsList.mockResolvedValue({ data: [], has_more: false });
     refundsCreate.mockResolvedValue({
       amount: 2_000,
       status: "succeeded",
@@ -112,6 +112,7 @@ describe("cleanupHostedStandardCheckoutLoser", () => {
         amount: 2_000,
         status: "succeeded",
       }],
+      has_more: false,
     });
 
     await expect(cleanupHostedStandardCheckoutLoser({
@@ -147,6 +148,43 @@ describe("cleanupHostedStandardCheckoutLoser", () => {
         amount: 500,
         status: "succeeded",
       }],
+      has_more: false,
+    });
+
+    await expect(cleanupHostedStandardCheckoutLoser({
+      stripe,
+      stripeSubscriptionId: "sub_loser",
+    })).rejects.toMatchObject({
+      code: "HOSTED_BILLING_CHECKOUT_CLEANUP_REQUIRES_SUPPORT",
+      httpStatus: 409,
+    });
+
+    expect(subscriptionCancel).toHaveBeenCalledOnce();
+    expect(refundsCreate).not.toHaveBeenCalled();
+  });
+
+  it("requires support when the refund history is paginated", async () => {
+    subscriptionRetrieve.mockResolvedValue(
+      makeSubscription(makePaidInvoice()),
+    );
+    invoicePaymentsList.mockResolvedValue({
+      data: [{
+        amount_paid: 2_000,
+        amount_requested: 2_000,
+        payment: {
+          payment_intent: {
+            amount_received: 2_000,
+            id: "pi_loser",
+            status: "succeeded",
+          },
+          type: "payment_intent",
+        },
+      }],
+      has_more: false,
+    });
+    refundsList.mockResolvedValue({
+      data: [],
+      has_more: true,
     });
 
     await expect(cleanupHostedStandardCheckoutLoser({

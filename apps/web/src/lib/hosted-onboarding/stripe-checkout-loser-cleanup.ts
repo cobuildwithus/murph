@@ -89,6 +89,9 @@ export async function cleanupHostedStandardCheckoutLoser(input: {
         : total + refund.amount,
     0,
   );
+  if (existingRefunds.has_more) {
+    throw buildCheckoutLoserCleanupSupportError();
+  }
   if (activeRefundAmount === paidAmount) {
     return;
   }

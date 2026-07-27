@@ -1,6 +1,6 @@
 # Stripe Billing 80/20 Replacement
 
-Status: active
+Status: completed
 Created: 2026-07-27
 Updated: 2026-07-27
 
@@ -102,11 +102,17 @@ Updated: 2026-07-27
   ordinary Family capacity changes immediately invoice-visible.
 - [x] Added focused concurrency, ambiguity, winner/loser, Family, migration, and
   reconciliation tests.
-- [x] Proved all 129 migrations on a fresh temporary PostgreSQL database and
+- [x] Proved all 131 migrations on a fresh temporary PostgreSQL database and
   verified all five additive columns before removing the database.
-- [x] Passed the exact-state Web diff check: 6,891 tests passed, TypeScript and
+- [x] Passed the exact-state Web diff check: 6,949 tests passed, TypeScript and
   lint passed, dev smoke passed, and the production build passed.
-- [ ] Complete the preliminary specialist review and resolve actionable
-  findings without rerunning that specialist pass.
-- [ ] Run final parent review, acceptance verification, exact-head final
-  ReviewGPT, CI, and merge-conflict proof.
+- [x] Completed the one-shot preliminary specialist review; bound the intent
+  hash to the complete Pulse Trial policy and added its accepted focused
+  coverage without rerunning the pass.
+- [x] Rebased onto current `origin/main` and preserved the newly landed
+  subscription-Checkout cleanup inventory, including registration inside the
+  member-locked durable attempt transaction.
+- [x] Completed the parent final review and repository-wide acceptance
+  verification. Exact-head final ReviewGPT, CI, and merge-conflict proof follow
+  plan closure in the PR lane.
+Completed: 2026-07-27
