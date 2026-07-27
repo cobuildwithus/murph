@@ -46,6 +46,30 @@ describe('assistant group-chat comedy skill', () => {
     )
   })
 
+  it('brings an independent comic point of view instead of echoing the setup', async () => {
+    const comedy = await readSkill('groupchat-comedy')
+    const normalized = comedy.replace(/\s+/gu, ' ')
+
+    expect(normalized).toContain(
+      "Bring a point of view; remix, don't repeat.",
+    )
+    expect(normalized).toContain(
+      'The setup is material, not a conclusion to endorse.',
+    )
+    expect(normalized).toContain(
+      'Agreement, contradiction, inversion, reframing, nomination, side-taking, role assignment, and consequence are all available',
+    )
+    expect(normalized).toContain(
+      'Start with the new move, not agreement plus paraphrase.',
+    )
+    expect(normalized).toContain(
+      'If covering the setup leaves no independent comic idea, use a straight answer, reaction, or silence.',
+    )
+    expect(normalized).toContain(
+      'unexpected at first and obvious after it lands, never random',
+    )
+  })
+
   it('uses canon for recognition without freezing a member into a character', async () => {
     const comedy = await readSkill('groupchat-comedy')
     const normalized = comedy.replace(/\s+/gu, ' ')

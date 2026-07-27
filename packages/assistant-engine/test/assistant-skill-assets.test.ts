@@ -246,6 +246,26 @@ describe('assistant skill assets', () => {
     expect(shared).toContain('current-local-day value as provisional: say "so far"')
   })
 
+  it('routes playful social positioning without loading comedy for every casual turn', () => {
+    const comedy = ASSISTANT_SKILLS.find(
+      (skill) => skill.slug === 'groupchat-comedy',
+    )
+    expect(comedy).toBeTruthy()
+    if (!comedy) {
+      return
+    }
+
+    expect(comedy.triggerHint).toContain('playful social position')
+    expect(comedy.triggerHint).toContain('low-stakes nominations, rulings, teases')
+    expect(comedy.triggerHint).toContain(
+      'neutral literal answer would flatten an obvious bit',
+    )
+    expect(comedy.triggerHint).toContain(
+      'do not load it merely because a turn is casual',
+    )
+    expect(comedy.triggerHint).toContain('independent comic moves')
+  })
+
   it('routes bedtime transition, external disruption, and sleep-breathing concerns before skill loading', () => {
     const sleepSkill = ASSISTANT_SKILLS.find(
       (skill) => skill.slug === 'sleep-improvement',

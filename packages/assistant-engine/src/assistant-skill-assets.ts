@@ -263,7 +263,7 @@ export const ASSISTANT_SKILLS = [
     slug: 'groupchat-comedy',
     name: 'groupchat-comedy',
     triggerHint:
-      'Read alongside group-chat before composing humor in a challenge or banter context: kickoffs, daily dispatches, score updates, spontaneous open-room cameos, replies to trash talk, rulings, verdicts, comics, songs, or voice memos. Shapes a turn whose floor group-chat permits; it never overrides a human-owned exchange. Governs the referee comedy engine, roast hierarchy, register flips between group humor and private care, canon and callback management, dispatch format rotation, and the hard safety limits that outrank every joke.',
+      'Read alongside group-chat before composing humor or taking a playful social position in a challenge, banter, or another clearly playful context: low-stakes nominations, rulings, teases, surprising continuations, kickoffs, daily dispatches, score updates, spontaneous open-room cameos, trash talk, verdicts, comics, songs, or voice memos. Use it when a neutral literal answer would flatten an obvious bit; do not load it merely because a turn is casual. Shapes only a turn whose floor group-chat permits; it never overrides a human-owned exchange. Governs independent comic moves, roast hierarchy, register flips between group humor and private care, canon and callback management, format rotation, and the hard safety limits that outrank every joke.',
   },
   {
     slug: 'group-challenge',
