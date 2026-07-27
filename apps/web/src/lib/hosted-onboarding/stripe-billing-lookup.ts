@@ -555,6 +555,7 @@ export type HostedStripeRecurringFinancialState = {
 };
 
 const HOSTED_STRIPE_RECURRING_FINANCIAL_MAX_CURRENT_INVOICES = 100;
+const HOSTED_STRIPE_RECURRING_FINANCIAL_MAX_BALANCE_TRANSACTIONS = 100;
 const HOSTED_STRIPE_RECURRING_FINANCIAL_MAX_PAYMENT_ALLOCATIONS = 100;
 const HOSTED_STRIPE_RECURRING_FINANCIAL_INVOICE_LOOKBACK_SECONDS =
   7 * 24 * 60 * 60;
@@ -863,34 +864,60 @@ async function readHostedStripePaidInvoicesFinancialState(
   });
   const baseInvoiceId = [...input.snapshots]
     .sort(compareHostedStripeBaseEntitlementInvoice)[0]?.invoice.id ?? null;
-  const requiredInvoiceIds =
-    await listHostedStripeRequiredEntitlementInvoiceIds({
+  const entitlementFunding =
+    await readHostedStripeEntitlementInvoiceFunding({
       snapshots: input.snapshots,
       stripe: input.stripe,
       subscription: input.subscription,
     });
+  const requiredInvoiceIds = entitlementFunding.requiredInvoiceIds;
   if (baseInvoiceId) {
     requiredInvoiceIds.add(baseInvoiceId);
   }
+  const fullyRefundedInvoiceIds = new Set(
+    input.snapshots
+      .map((snapshot) => snapshot.invoice.id)
+      .filter((invoiceId) =>
+        isHostedStripeInvoiceFullyRefunded({
+          allocations,
+          invoiceId,
+          refunds,
+        })
+      ),
+  );
+  const directlyRefunded = [...requiredInvoiceIds].some((invoiceId) =>
+    fullyRefundedInvoiceIds.has(invoiceId)
+  );
+  const balanceFundedByRefundedInvoice = directlyRefunded
+    ? false
+    : await hasHostedStripeRequiredRefundedBalanceFunding({
+        creditSourceInvoiceIdsByInvoiceId:
+          entitlementFunding.creditSourceInvoiceIdsByInvoiceId,
+        currentPeriodStart:
+          readHostedStripeCurrentFinancialPeriod({
+            subscription: input.subscription,
+          }).start,
+        fullyRefundedInvoiceIds,
+        requiredInvoiceIds,
+        stripe: input.stripe,
+        subscription: input.subscription,
+      });
   return {
-    fullyRefunded: [...requiredInvoiceIds].some((invoiceId) =>
-      isHostedStripeInvoiceFullyRefunded({
-        allocations,
-        invoiceId,
-        refunds,
-      })
-    ),
+    fullyRefunded: directlyRefunded || balanceFundedByRefundedInvoice,
     outstandingDispute: disputes.some(hasStripeDisputeFundsOutstanding),
   };
 }
 
-async function listHostedStripeRequiredEntitlementInvoiceIds(input: {
+async function readHostedStripeEntitlementInvoiceFunding(input: {
   snapshots: readonly Awaited<
     ReturnType<typeof retrieveHostedStripeInvoiceCollectionSnapshot>
   >[];
   stripe: Stripe;
   subscription: Stripe.Subscription;
-}): Promise<Set<string>> {
+}): Promise<{
+  creditSourceInvoiceIdsByInvoiceId: Map<string, ReadonlySet<string>>;
+  requiredInvoiceIds: Set<string>;
+}> {
   // Stripe may consolidate same-price items without proration, so item IDs
   // cannot own economic provenance. Build full paid-history quantities per
   // price, then replay those aggregate transitions backward from the current
@@ -949,22 +976,39 @@ async function listHostedStripeRequiredEntitlementInvoiceIds(input: {
           "Stripe update invoice contained an invalid creation time.",
         );
       }
+      const lines = await readStripeInvoiceLines({
+        invoice: snapshot.invoice,
+        stripe: input.stripe,
+      });
       return {
+        creditSourceInvoiceIds:
+          readHostedStripeEntitlementCreditSourceInvoiceIds({
+            lines,
+            subscriptionId: input.subscription.id,
+          }),
         created,
         invoiceId: snapshot.invoice.id,
         quantityDeltaByPrice:
           readHostedStripeEntitlementInvoiceQuantityDelta({
-            lines: await readStripeInvoiceLines({
-              invoice: snapshot.invoice,
-              stripe: input.stripe,
-            }),
+            lines,
             subscriptionId: input.subscription.id,
           }),
       };
     },
   );
+  const creditSourceInvoiceIdsByInvoiceId = new Map(
+    updateLines
+      .filter((update) => update.creditSourceInvoiceIds.size > 0)
+      .map((update) => [
+        update.invoiceId,
+        update.creditSourceInvoiceIds,
+      ]),
+  );
   if (updateLines.length === 0) {
-    return new Set();
+    return {
+      creditSourceInvoiceIdsByInvoiceId,
+      requiredInvoiceIds: new Set(),
+    };
   }
 
   const baseSnapshot = [...input.snapshots]
@@ -976,7 +1020,11 @@ async function listHostedStripeRequiredEntitlementInvoiceIds(input: {
   if (!baseSnapshot) {
     // Without the paid period-start quantities, Stripe has not supplied enough
     // causal evidence to discard any paid update from the required set.
-    return new Set(updateLines.map((update) => update.invoiceId));
+    return {
+      creditSourceInvoiceIdsByInvoiceId,
+      requiredInvoiceIds:
+        new Set(updateLines.map((update) => update.invoiceId)),
+    };
   }
 
   const entitlementPriceIds = new Set(currentFundingStates.keys());
@@ -1016,12 +1064,16 @@ async function listHostedStripeRequiredEntitlementInvoiceIds(input: {
       }
     }
   }
-  return requiredInvoiceIds;
+  return {
+    creditSourceInvoiceIdsByInvoiceId,
+    requiredInvoiceIds,
+  };
 }
 
 type HostedStripeEntitlementQuantityMap = Map<string, number>;
 
 interface HostedStripeEntitlementInvoiceDelta {
+  creditSourceInvoiceIds: ReadonlySet<string>;
   created: number;
   invoiceId: string;
   quantityDeltaByPrice: HostedStripeEntitlementQuantityMap;
@@ -1041,6 +1093,41 @@ interface HostedStripeEntitlementTransitionState {
 interface HostedStripeEntitlementItemTransition {
   after: HostedStripeEntitlementTransitionState | null;
   before: HostedStripeEntitlementTransitionState | null;
+}
+
+function readHostedStripeEntitlementCreditSourceInvoiceIds(input: {
+  lines: readonly Stripe.InvoiceLineItem[];
+  subscriptionId: string;
+}): Set<string> {
+  const invoiceIds = new Set<string>();
+  for (const line of input.lines) {
+    const details = line.parent?.subscription_item_details;
+    if (
+      line.amount >= 0 ||
+      !details?.proration ||
+      coerceStripeObjectId(details.subscription) !== input.subscriptionId
+    ) {
+      continue;
+    }
+    const creditedItems = details.proration_details?.credited_items;
+    if (!creditedItems) {
+      continue;
+    }
+    const invoiceId = normalizeNullableString(creditedItems.invoice);
+    if (
+      !invoiceId ||
+      creditedItems.invoice_line_items.length === 0 ||
+      creditedItems.invoice_line_items.some((lineId) =>
+        !normalizeNullableString(lineId)
+      )
+    ) {
+      throw new Error(
+        "Stripe credit proration contained an invalid credited invoice.",
+      );
+    }
+    invoiceIds.add(invoiceId);
+  }
+  return invoiceIds;
 }
 
 function readHostedStripeEntitlementInvoiceQuantityDelta(input: {
@@ -1401,6 +1488,227 @@ function isHostedStripeInvoiceFullyRefunded(input: {
         .reduce((sum, refund) => sum + refund.amount, 0);
       return allocatedAmount > 0 && refundedAmount >= allocatedAmount;
     });
+}
+
+async function hasHostedStripeRequiredRefundedBalanceFunding(input: {
+  creditSourceInvoiceIdsByInvoiceId: ReadonlyMap<
+    string,
+    ReadonlySet<string>
+  >;
+  currentPeriodStart: number;
+  fullyRefundedInvoiceIds: ReadonlySet<string>;
+  requiredInvoiceIds: ReadonlySet<string>;
+  stripe: Stripe;
+  subscription: Stripe.Subscription;
+}): Promise<boolean> {
+  const invalidCreditInvoiceIds = new Set(
+    [...input.creditSourceInvoiceIdsByInvoiceId]
+      .filter(([, sourceInvoiceIds]) =>
+        [...sourceInvoiceIds].some((invoiceId) =>
+          input.fullyRefundedInvoiceIds.has(invoiceId)
+        )
+      )
+      .map(([invoiceId]) => invoiceId),
+  );
+  if (invalidCreditInvoiceIds.size === 0) {
+    return false;
+  }
+  const customerId = coerceStripeObjectId(input.subscription.customer);
+  if (!customerId) {
+    throw new Error(
+      "Stripe recurring subscription did not expose its Customer.",
+    );
+  }
+  const page = await withHostedStripeFailureLog(
+    "customers.listBalanceTransactions.recurring-financial-state",
+    () => input.stripe.customers.listBalanceTransactions(customerId, {
+      created: {
+        gte: input.currentPeriodStart,
+      },
+      limit: HOSTED_STRIPE_RECURRING_FINANCIAL_MAX_BALANCE_TRANSACTIONS,
+    }, HOSTED_STRIPE_RECURRING_FINANCIAL_REQUEST_OPTIONS),
+  );
+  if (
+    page.has_more ||
+    page.data.length >
+      HOSTED_STRIPE_RECURRING_FINANCIAL_MAX_BALANCE_TRANSACTIONS
+  ) {
+    throw new Error(
+      "Stripe exceeded the bounded current-period Customer balance shape.",
+    );
+  }
+  for (const transaction of page.data) {
+    assertHostedStripeRecurringBalanceTransaction({
+      currentPeriodStart: input.currentPeriodStart,
+      customerId,
+      transaction,
+    });
+  }
+  const transactions = [...page.data].sort((left, right) =>
+    left.created - right.created
+  );
+  // Stripe's Customer balance is fungible and does not assign source-credit
+  // buckets to later applications. Consume invalid Family credit first,
+  // including within a same-second group, so ambiguous value cannot preserve
+  // entitlement after its source payment was returned.
+  const taintedApplicationsByInvoiceId = new Map<string, number>();
+  let taintedCredit = 0;
+  for (let index = 0; index < transactions.length;) {
+    const created = readStripeUnixSeconds(transactions[index]?.created);
+    if (created === null) {
+      throw new Error(
+        "Stripe Customer balance transaction contained an invalid creation time.",
+      );
+    }
+    const sameCreated: Stripe.CustomerBalanceTransaction[] = [];
+    while (
+      index < transactions.length &&
+      transactions[index]?.created === created
+    ) {
+      sameCreated.push(transactions[index]!);
+      index += 1;
+    }
+    for (const transaction of sameCreated.filter((candidate) =>
+      candidate.amount < 0
+    )) {
+      const invoiceId = coerceStripeObjectId(transaction.invoice);
+      if (transaction.type === "unapplied_from_invoice") {
+        if (!invoiceId) {
+          throw new Error(
+            "Stripe reversed Customer balance without an invoice owner.",
+          );
+        }
+        const priorApplication =
+          taintedApplicationsByInvoiceId.get(invoiceId) ?? 0;
+        const restored = Math.min(-transaction.amount, priorApplication);
+        taintedCredit = addHostedStripeRecurringBalanceAmount(
+          taintedCredit,
+          restored,
+        );
+        const remainingApplication = priorApplication - restored;
+        if (remainingApplication === 0) {
+          taintedApplicationsByInvoiceId.delete(invoiceId);
+        } else {
+          taintedApplicationsByInvoiceId.set(
+            invoiceId,
+            remainingApplication,
+          );
+        }
+        continue;
+      }
+      if (
+        invoiceId &&
+        invalidCreditInvoiceIds.has(invoiceId) &&
+        isHostedStripeInvoiceBalanceApplication(transaction)
+      ) {
+        taintedCredit = addHostedStripeRecurringBalanceAmount(
+          taintedCredit,
+          -transaction.amount,
+        );
+      }
+    }
+    const positiveTransactions = sameCreated.filter((candidate) =>
+      candidate.amount > 0
+    ).sort((left, right) =>
+      Number(
+        !isHostedStripeRequiredBalanceApplication({
+          requiredInvoiceIds: input.requiredInvoiceIds,
+          transaction: left,
+        }),
+      ) -
+      Number(
+        !isHostedStripeRequiredBalanceApplication({
+          requiredInvoiceIds: input.requiredInvoiceIds,
+          transaction: right,
+        }),
+      )
+    );
+    for (const transaction of positiveTransactions) {
+      const consumedTaintedCredit = Math.min(
+        transaction.amount,
+        taintedCredit,
+      );
+      taintedCredit -= consumedTaintedCredit;
+      if (
+        consumedTaintedCredit === 0 ||
+        !isHostedStripeInvoiceBalanceApplication(transaction)
+      ) {
+        continue;
+      }
+      const invoiceId = coerceStripeObjectId(transaction.invoice);
+      if (!invoiceId) {
+        throw new Error(
+          "Stripe applied Customer balance without an invoice owner.",
+        );
+      }
+      taintedApplicationsByInvoiceId.set(
+        invoiceId,
+        addHostedStripeRecurringBalanceAmount(
+          taintedApplicationsByInvoiceId.get(invoiceId) ?? 0,
+          consumedTaintedCredit,
+        ),
+      );
+    }
+  }
+  return [...taintedApplicationsByInvoiceId].some(
+    ([invoiceId, amount]) =>
+      amount > 0 && input.requiredInvoiceIds.has(invoiceId),
+  );
+}
+
+function assertHostedStripeRecurringBalanceTransaction(input: {
+  currentPeriodStart: number;
+  customerId: string;
+  transaction: Stripe.CustomerBalanceTransaction;
+}): void {
+  if (
+    coerceStripeObjectId(input.transaction.customer) !== input.customerId ||
+    !Number.isSafeInteger(input.transaction.amount) ||
+    input.transaction.amount === 0 ||
+    !Number.isSafeInteger(input.transaction.ending_balance) ||
+    readStripeUnixSeconds(input.transaction.created) === null ||
+    input.transaction.created < input.currentPeriodStart
+  ) {
+    throw new Error(
+      "Stripe returned an invalid recurring Customer balance transaction.",
+    );
+  }
+}
+
+function isHostedStripeInvoiceBalanceApplication(
+  transaction: Stripe.CustomerBalanceTransaction,
+): boolean {
+  return transaction.type === "applied_to_invoice" ||
+    transaction.type === "checkout_session_subscription_payment";
+}
+
+function isHostedStripeRequiredBalanceApplication(input: {
+  requiredInvoiceIds: ReadonlySet<string>;
+  transaction: Stripe.CustomerBalanceTransaction;
+}): boolean {
+  const invoiceId = coerceStripeObjectId(input.transaction.invoice);
+  return isHostedStripeInvoiceBalanceApplication(input.transaction) &&
+    invoiceId !== null &&
+    input.requiredInvoiceIds.has(invoiceId);
+}
+
+function addHostedStripeRecurringBalanceAmount(
+  left: number,
+  right: number,
+): number {
+  const total = left + right;
+  if (
+    !Number.isSafeInteger(left) ||
+    !Number.isSafeInteger(right) ||
+    !Number.isSafeInteger(total) ||
+    left < 0 ||
+    right < 0
+  ) {
+    throw new Error(
+      "Stripe recurring Customer balance exceeded the safe integer shape.",
+    );
+  }
+  return total;
 }
 
 function compareHostedStripeBaseEntitlementInvoice(

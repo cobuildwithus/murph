@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   readHostedMemberBillingSnapshot: vi.fn(),
   readHostedMemberCoreState: vi.fn(),
   stripeChargesRetrieve: vi.fn(),
+  stripeCustomerBalanceTransactionsList: vi.fn(),
   stripeDisputesList: vi.fn(),
   stripeInvoicePaymentsList: vi.fn(),
   stripeInvoiceLineItemsList: vi.fn(),
@@ -69,6 +70,9 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", async () => {
       charges: {
         retrieve: mocks.stripeChargesRetrieve,
       },
+      customers: {
+        listBalanceTransactions: mocks.stripeCustomerBalanceTransactionsList,
+      },
       disputes: {
         list: mocks.stripeDisputesList,
       },
@@ -125,6 +129,10 @@ describe("hosted onboarding stripe billing lookup", () => {
     mocks.stripeChargesRetrieve.mockResolvedValue(
       makeStripeCharge(),
     );
+    mocks.stripeCustomerBalanceTransactionsList.mockResolvedValue({
+      data: [],
+      has_more: false,
+    });
     mocks.stripePaymentIntentsRetrieve.mockResolvedValue(
       makeStripePaymentIntent(),
     );
@@ -2535,7 +2543,19 @@ describe("hosted onboarding stripe billing lookup", () => {
     });
   });
 
-  it("projects a paid seat after an invoiced reduction without replaying seven seats", async () => {
+  it.each([
+    ["partially refunded", 2_000, 0, false, false],
+    ["fully refunded", 4_000, 0, false, true],
+    ["fully refunded after the balance application is reversed", 4_000, 1_000, true, false],
+  ] as const)(
+    "treats a reduction-credit source that is %s as refund-safe",
+    async (
+      _description,
+      sourceRefundAmount,
+      latestPaymentAmount,
+      reverseBalanceApplication,
+      fullyRefunded,
+    ) => {
     const renewalInvoice = makeStripeFinancialInvoice({
       created: 1_775_000_000,
       id: "in_invoiced_reduction_renewal",
@@ -2552,6 +2572,7 @@ describe("hosted onboarding stripe billing lookup", () => {
       ],
     });
     const growthInvoice = makeStripeFinancialInvoice({
+      amountPaid: 4_000,
       billingReason: "subscription_update",
       created: 1_776_000_000,
       id: "in_invoiced_reduction_growth",
@@ -2588,6 +2609,7 @@ describe("hosted onboarding stripe billing lookup", () => {
       lines: [
         makeStripeInvoiceLine({
           amount: -6_000,
+          creditedInvoiceId: "in_invoiced_reduction_growth",
           invoiceId: "in_invoiced_reduction_credit",
           periodEnd: 1_778_000_000,
           periodStart: 1_776_500_000,
@@ -2611,6 +2633,7 @@ describe("hosted onboarding stripe billing lookup", () => {
       ],
     });
     const latestSeatInvoice = makeStripeFinancialInvoice({
+      amountPaid: latestPaymentAmount,
       billingReason: "subscription_update",
       created: 1_777_000_000,
       id: "in_invoiced_reduction_latest",
@@ -2639,14 +2662,99 @@ describe("hosted onboarding stripe billing lookup", () => {
         }),
       ],
     });
-    mockPaidHostedStripeInvoiceHistory({
-      invoices: [
-        latestSeatInvoice,
-        reductionInvoice,
-        growthInvoice,
-        renewalInvoice,
+    const invoices = [
+      latestSeatInvoice,
+      reductionInvoice,
+      growthInvoice,
+      renewalInvoice,
+    ];
+    for (const invoice of invoices) {
+      mocks.stripeInvoicesRetrieve.mockResolvedValueOnce(invoice);
+    }
+    mocks.stripeInvoicesList.mockResolvedValueOnce({
+      data: invoices,
+      has_more: false,
+    });
+    mocks.stripeInvoicePaymentsList
+      .mockResolvedValueOnce({
+        data: [makeStripeInvoicePayment({
+          amountPaid: latestPaymentAmount,
+          invoice: latestSeatInvoice,
+        })],
+        has_more: false,
+      })
+      .mockResolvedValueOnce({
+        data: [makeStripeInvoicePayment({
+          amountPaid: 0,
+          invoice: reductionInvoice,
+        })],
+        has_more: false,
+      })
+      .mockResolvedValueOnce({
+        data: [makeStripeInvoicePayment({
+          amountPaid: 4_000,
+          chargeId: `ch_${growthInvoice.id}`,
+          invoice: growthInvoice,
+          paymentIntentId: `pi_${growthInvoice.id}`,
+        })],
+        has_more: false,
+      })
+      .mockResolvedValueOnce({
+        data: [makeStripeInvoicePayment({
+          chargeId: `ch_${renewalInvoice.id}`,
+          invoice: renewalInvoice,
+          paymentIntentId: `pi_${renewalInvoice.id}`,
+        })],
+        has_more: false,
+      });
+    mocks.stripeRefundsList.mockImplementation(async (params: {
+      charge?: string;
+    }) => ({
+      data: params.charge === `ch_${growthInvoice.id}`
+        ? [
+            makeStripeRefund({
+              amount: sourceRefundAmount,
+              chargeId: `ch_${growthInvoice.id}`,
+              id: `re_${growthInvoice.id}`,
+              paymentIntentId: `pi_${growthInvoice.id}`,
+              status: "succeeded",
+            }),
+          ]
+        : [],
+      has_more: false,
+    }));
+    mocks.stripeCustomerBalanceTransactionsList.mockResolvedValueOnce({
+      data: [
+        ...(reverseBalanceApplication
+          ? [
+              makeStripeCustomerBalanceTransaction({
+                amount: -1_000,
+                created: 1_777_500_000,
+                endingBalance: -4_000,
+                id: "cbtxn_reestablished_seat_reversed",
+                invoiceId: latestSeatInvoice.id,
+                type: "unapplied_from_invoice",
+              }),
+            ]
+          : []),
+        makeStripeCustomerBalanceTransaction({
+          amount: 1_000,
+          created: 1_777_000_000,
+          endingBalance: -3_000,
+          id: "cbtxn_reestablished_seat",
+          invoiceId: latestSeatInvoice.id,
+          type: "applied_to_invoice",
+        }),
+        makeStripeCustomerBalanceTransaction({
+          amount: -4_000,
+          created: 1_776_500_000,
+          endingBalance: -4_000,
+          id: "cbtxn_reduction_credit",
+          invoiceId: reductionInvoice.id,
+          type: "applied_to_invoice",
+        }),
       ],
-      refundedInvoiceId: growthInvoice.id,
+      has_more: false,
     });
 
     await expect(
@@ -2664,8 +2772,24 @@ describe("hosted onboarding stripe billing lookup", () => {
       ),
     ).resolves.toMatchObject({
       collectionState: { kind: "paid" },
-      fullyRefunded: false,
+      fullyRefunded,
     });
+    if (sourceRefundAmount === 4_000) {
+      expect(
+        mocks.stripeCustomerBalanceTransactionsList,
+      ).toHaveBeenCalledWith(
+        "cus_123",
+        expect.objectContaining({
+          created: { gte: 1_775_000_000 },
+          limit: 100,
+        }),
+        HOSTED_STRIPE_RECURRING_FINANCIAL_REQUEST_OPTIONS,
+      );
+    } else {
+      expect(
+        mocks.stripeCustomerBalanceTransactionsList,
+      ).not.toHaveBeenCalled();
+    }
   });
 
   it.each([
@@ -3212,6 +3336,7 @@ function makeStripeFinancialInvoice(overrides?: {
 
 function makeStripeInvoiceLine(input: {
   amount?: number;
+  creditedInvoiceId?: string;
   invoiceId: string;
   periodEnd: number;
   periodStart: number;
@@ -3231,7 +3356,14 @@ function makeStripeInvoiceLine(input: {
       subscription_item_details: {
         invoice_item: null,
         proration: input.proration ?? false,
-        proration_details: null,
+        proration_details: input.creditedInvoiceId
+          ? {
+              credited_items: {
+                invoice: input.creditedInvoiceId,
+                invoice_line_items: [`il_${input.creditedInvoiceId}`],
+              },
+            }
+          : null,
         subscription: input.subscriptionId,
         subscription_item: input.subscriptionItemId ?? "si_123",
       },
@@ -3292,6 +3424,34 @@ function makeStripeQuantityTransitionLines(input: {
         ]
       : []),
   ];
+}
+
+function makeStripeCustomerBalanceTransaction(input: {
+  amount: number;
+  created: number;
+  endingBalance: number;
+  id: string;
+  invoiceId: string;
+  type: Stripe.CustomerBalanceTransaction.Type;
+}): Stripe.CustomerBalanceTransaction {
+  const transaction: Partial<Stripe.CustomerBalanceTransaction> = {
+    amount: input.amount,
+    checkout_session: null,
+    created: input.created,
+    credit_note: null,
+    currency: "usd",
+    customer: "cus_123",
+    customer_account: null,
+    description: null,
+    ending_balance: input.endingBalance,
+    id: input.id,
+    invoice: input.invoiceId,
+    livemode: false,
+    metadata: {},
+    object: "customer_balance_transaction",
+    type: input.type,
+  };
+  return transaction as Stripe.CustomerBalanceTransaction;
 }
 
 function makeStripeInvoicePayment(overrides?: {

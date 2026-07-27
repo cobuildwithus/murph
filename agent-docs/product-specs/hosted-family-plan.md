@@ -133,6 +133,20 @@ aggregate contribution from the group remains represented, and releases the
 entire group once its contribution is fully unwound. A full refund of any
 still-required invoice blocks the resulting entitlement.
 
+An immediate Family reduction can carry its negative proration onto Stripe's
+Customer invoice balance, and that value remains valid authority for a later
+current-period increase while the payment credited by the reduction remains
+valid. Reconciliation follows the reduction line's canonical
+`proration_details.credited_items` source invoice and the immutable
+CustomerBalanceTransaction entries that create, apply, or reverse invoice
+balance. If the credited source invoice is fully refunded, its carried value is
+invalid. Because Stripe's Customer balance is aggregate and does not assign
+source buckets to later invoice applications, Murph consumes invalid Family
+credit first; any required entitlement invoice that still holds such an
+application blocks the Family. An `unapplied_from_invoice` reversal restores
+that invalid value to the balance instead of leaving the former invoice
+blocked.
+
 When auto-adding a seat for an invite returns payment-required, Settings keeps
 the exact invite intent and Stripe-hosted recovery URL in a short-lived
 encrypted HttpOnly cookie. The claim is bound to the authenticated member,
