@@ -22,6 +22,23 @@ describe("changelog registry", () => {
     expect(ids.length).toBeGreaterThan(0);
   });
 
+  it("bounds direct-chat access recovery to shared billing states", () => {
+    const item = listPublishedChangelogItems().find(
+      (candidate) => candidate.id === "recognized-members-always-get-an-answer",
+    );
+
+    expect(item).toMatchObject({
+      details:
+        "This shared recovery covers billing-access states across eligible iMessage and Telegram direct chats. Suspended accounts keep their existing channel-specific handling.",
+      summary:
+        "When a paused or lapsed member texts Murph from a recognized direct chat, Murph now answers with the existing access or subscription recovery path.",
+      title: "Paused and lapsed members get a recovery reply",
+    });
+    expect(`${item?.title} ${item?.summary} ${item?.details}`).not.toContain(
+      "otherwise blocked",
+    );
+  });
+
   it("publishes the complete July 20 through July 27 shipment set", () => {
     expect(
       listChangelogEditions().slice(0, 8).map((edition) => ({
