@@ -376,10 +376,6 @@ export const EPIC_BETA_RESOURCE_TYPES = Object.freeze(
   ] as const,
 );
 
-export const EPIC_LEGACY_BETA_RESOURCE_TYPES = Object.freeze(
-  ["Patient", "Observation", "DiagnosticReport"] as const,
-);
-
 export type EpicBetaResourceType = (typeof EPIC_BETA_RESOURCE_TYPES)[number];
 const EPIC_BETA_RESOURCE_TYPE_SET: ReadonlySet<string> = new Set(EPIC_BETA_RESOURCE_TYPES);
 type SmartPermissionVersion = "v1" | "v2";

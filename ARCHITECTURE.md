@@ -118,29 +118,14 @@ acquire this authority. Dynamically generated experiment-lifecycle seeds stay
 on their existing separately owned path until that owner exposes an exact
 identity resolver.
 
-The hosted-only `group-sunday-superlatives` seed is an ordinary scheduled group
-notification. Before composition evidence or model work, a private signed
-Cloudflare-to-Web control read asks only the closed
-`group-sunday-superlatives-v1` policy and receives only `eligible`,
-`ineligible`, or `unavailable`. Web proves at least 100 admitted, deduplicated,
-committed inbound human message envelopes on the exact live group route during
-the occurrence-anchored seven-local-calendar-day window; it excludes assistant
-output, reaction-only input, direct or inexact routes, malformed rows, and rows
-committed or occurring at or after the occurrence. The bounded scan stops at
-proof and never returns content, identifiers, handles, or a count. Only an
-eligible occurrence may read a separate bounded exact-route projection from the
-existing structured accepted input-event owner. Composition admits only
-route-authorized, non-self, text-only conversation events in the occurrence
-window; it excludes attachment-bearing or multimodal inputs and never parses
-rendered provider prompts or assistant transcripts for authority. Human text is
-one JSON-quoted untrusted field, and transient senders become non-outputtable
-per-run aliases. Missing, malformed, over-cap, empty, or attachment-only
-structured evidence skips before lifecycle/model/outbox work. An admitted
-occurrence may produce zero or one recap through the ordinary group outbox.
-This adds no counter table, scheduler, queue, parser protocol, migration,
-cursor, or durable state owner. The future one-person weekly check-in remains
-specification-only until both supported providers expose privacy-safe current-
-participant authority.
+No built-in member-facing group social automation currently ships. The removed
+Sunday superlatives ID remains only as a permanent retirement tombstone:
+reconciliation archives an old persisted record with that exact ID, and a
+claimed occurrence fails closed before lifecycle or model work. This guard
+cannot install or configure an automation. Future group features can use the
+existing explicit `authenticated-group` owner scope; any feature-specific
+activity, evidence, identity, or participant policy must be designed with that
+feature rather than embedded in the generic ownership boundary.
 
 Web then captures the current roster and exact active grants, decrypts the
 bounded encrypted snapshots owned by those share rows, and returns every member

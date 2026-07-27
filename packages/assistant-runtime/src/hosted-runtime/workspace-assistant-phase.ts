@@ -1482,12 +1482,6 @@ export async function runHostedWorkspaceAssistantPhase(
         ...(input.runtime.platform.familyPlanToolPort
           ? { familyPlanTool: input.runtime.platform.familyPlanToolPort }
           : {}),
-        ...(input.runtime.platform.managedGroupActivityDecisionPort
-          ? {
-              managedGroupActivityDecisionReader:
-                input.runtime.platform.managedGroupActivityDecisionPort,
-            }
-          : {}),
         ...(input.runtime.platform.labsToolPort
           ? { labsTool: input.runtime.platform.labsToolPort }
           : {}),
