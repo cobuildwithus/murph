@@ -731,9 +731,13 @@ async function decodeHostedGrowthGroupMessages(
       if (isHostedEmailConversationMessageWake(wake)) {
         return null;
       }
+      const evidence = readHostedGrowthGroupSenderEvidence(wake);
+      if (!evidence) {
+        return null;
+      }
 
       return {
-        evidence: readHostedGrowthGroupSenderEvidence(wake),
+        evidence,
         occurredAt: row.occurredAt,
       };
     }));
@@ -745,7 +749,7 @@ async function decodeHostedGrowthGroupMessages(
 
 function readHostedGrowthGroupSenderEvidence(
   wake: HostedExecutionConversationMessageWake,
-): HostedGrowthGroupSenderEvidence {
+): HostedGrowthGroupSenderEvidence | null {
   if (isHostedLinqConversationMessageWake(wake)) {
     if (wake.message.linqMessage.threadIsDirect !== false) {
       throw new Error("Hosted growth thread-container Linq message must be non-direct.");
@@ -789,24 +793,28 @@ function readHostedGrowthGroupSenderEvidence(
     if (wake.message.telegramMessage.threadIsDirect !== false) {
       throw new Error("Hosted growth thread-container Telegram message must be non-direct.");
     }
+    if (wake.message.senderMemberId) {
+      const identityKey = hostedGrowthMemberIdentity(wake.message.senderMemberId);
+      return {
+        fallbackIdentity: identityKey,
+        identityKey,
+        kind: "telegram",
+        registrationLookupKeys: [],
+        senderMemberId: wake.message.senderMemberId,
+      };
+    }
     const senderUserId = wake.message.telegramMessage.from?.trim() ?? "";
     const registrationLookupKeys =
       createHostedTelegramUserLookupKeyReadCandidates(senderUserId);
     if (registrationLookupKeys.length === 0) {
-      throw new Error("Hosted growth Telegram group sender identity is invalid.");
+      return null;
     }
     const fallbackIdentity = `telegram:${registrationLookupKeys[0]}`;
-    const identityKey = wake.message.senderMemberId
-      ? hostedGrowthMemberIdentity(wake.message.senderMemberId)
-      : fallbackIdentity;
     return {
       fallbackIdentity,
-      identityKey,
+      identityKey: fallbackIdentity,
       kind: "telegram",
       registrationLookupKeys,
-      ...(wake.message.senderMemberId
-        ? { senderMemberId: wake.message.senderMemberId }
-        : {}),
     };
   }
 
