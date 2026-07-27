@@ -1,6 +1,6 @@
 # Verification And Runtime
 
-Last verified: 2026-07-22
+Last verified: 2026-07-26
 
 ## Verification Execution Location
 
@@ -10,26 +10,28 @@ root commands `pnpm test:diff <path ...>` and `pnpm verify:acceptance` pass
 through `scripts/verification-dispatch.mjs`:
 
 - CI and already-remote runs execute `scripts/workspace-verify.sh` directly.
-- A local Codex parent in `auto` mode uses Crabbox's direct
-  `blacksmith-testbox` provider only when both CLIs are available and
-  `MURPH_CRABBOX_BLACKSMITH=1` is set.
-- Other callers and unconfigured or unavailable CLIs retain local shared-host
-  admission. Canonical acceptance intentionally selects its bounded composed
+- `auto` mode always uses local shared-host admission. Canonical acceptance
+  intentionally selects its bounded composed
   profile there when at least 12 logical CPUs are available; ordinary commands
   and smaller hosts keep their conservative shared-host worker budgets.
-  Blacksmith capacity or auth failure after an explicitly configured remote
-  attempt fails that attempt instead of silently duplicating it locally.
 - `MURPH_VERIFY_EXECUTOR=local|crabbox` explicitly selects an executor; forcing
   Crabbox requests a fresh one-shot Testbox and fails closed when either CLI is
-  unavailable. The `:local` package aliases exist for executor diagnosis, not as
-  a normal way to skip remote proof.
+  unavailable. Blacksmith capacity or auth failure fails that explicit attempt
+  instead of silently duplicating it locally. The `:local` package aliases
+  exist only for executor diagnosis because canonical automatic execution is
+  already local.
 - The Testbox hydration workflow must exist on the repository default branch
   before GitHub accepts a delegated `workflow_dispatch`. The change that first
-  introduces `.github/workflows/crabbox.yml` therefore uses local verification
-  and PR gates; after that bootstrap lands, canonical commands can create fresh
-  one-shot Testboxes from feature branches normally. Canonical verification
-  rejects reusable lease IDs because current provider metadata does not prove
-  the Blacksmith organization that installed the root-owned entrypoint.
+  introduces or moves `.github/workflows/crabbox-bounded.yml` therefore uses
+  local verification and PR gates; after that bootstrap lands, explicitly
+  forced canonical commands can create fresh one-shot Testboxes from feature
+  branches. Canonical verification rejects reusable lease IDs because current
+  provider metadata does not prove the Blacksmith organization that installed
+  the root-owned entrypoint.
+- The retired `.github/workflows/crabbox.yml` path must remain absent. It is the
+  capability hard cut for pre-cost-control dispatchers: a stale worktree fails
+  workflow lookup before a Blacksmith job can start. Do not restore that path as
+  a compatibility shim.
 
 Remote execution preserves the exact underlying `workspace-verify.sh` command,
 including diff scope, reverse dependents, coverage thresholds, app verification,
@@ -50,14 +52,32 @@ MURPH_VERIFY_EXECUTOR=crabbox pnpm verify:acceptance
 ```
 
 The forced executor creates a fresh one-shot Testbox through the fully pinned
-route. Do not leave the local waiter running concurrently, forward local
-environment values, bypass the canonical command, warm a lease separately, or
-return automatically to another unbounded local wait.
+route. Its invocation always requests cleanup, a 10-minute idle timeout, and a
+45-minute maximum lease lifetime; the hydration workflow has a 50-minute
+last-resort ceiling. Do not leave the local waiter running concurrently, forward
+local environment values, bypass the canonical command, warm a lease separately,
+or return automatically to another unbounded local wait.
 Before delegation, satisfy the Git-state admission boundary, including fully
 staging any new non-ignored source or documentation file. If Crabbox cannot run
 because its CLIs, authentication, or capacity are unavailable, fail closed and
 report that concrete blocker with the completed local evidence. Preserve the
 Testbox ID, timing summary, and linked Actions run when delegation starts.
+
+Do not run both remote `test:diff` and remote acceptance on the same exact head.
+When acceptance is required, keep the preceding diff checks local and reserve
+the one remote check for acceptance; otherwise use the remote diff lane. Retry
+an unchanged head only after a concrete infrastructure failure and record that
+reason in the completion evidence.
+
+### Required post-landing trust-root proof
+
+One case does not require a ten-minute local admission wait: after a change to
+`.github/workflows/crabbox-bounded.yml` or the trusted entrypoint lands on the
+default branch, run exactly one explicitly forced canonical remote check to
+prove that new trust root. This is required boundary validation, not ordinary
+capacity fallback; do not manufacture a local wait first. Use acceptance when
+the landed change requires acceptance coverage, otherwise use `test:diff`, and
+retain the same lifecycle bounds and evidence.
 
 ### Environment and Vercel boundary
 
