@@ -2261,7 +2261,11 @@ describe("parseHostedRuntimeGroupTool", () => {
       result: {
         participants: [
           { handle: "+15550000001", hasOwnMurph: true },
-          { handle: "person@example.com", hasOwnMurph: false },
+          {
+            handle: "person@example.com",
+            hasOwnMurph: false,
+            ownerAdvisoryName: "Alex R.",
+          },
         ],
         status: "ok",
       },
@@ -2270,7 +2274,11 @@ describe("parseHostedRuntimeGroupTool", () => {
       result: {
         participants: [
           { handle: "+15550000001", hasOwnMurph: true },
-          { handle: "person@example.com", hasOwnMurph: false },
+          {
+            handle: "person@example.com",
+            hasOwnMurph: false,
+            ownerAdvisoryName: "Alex R.",
+          },
         ],
         status: "ok",
       },
@@ -2312,6 +2320,19 @@ describe("parseHostedRuntimeGroupTool", () => {
         },
       })
     ).toThrow(/not allowed/u);
+    expect(() =>
+      parseHostedRuntimeGroupToolResponse({
+        action: "read_chat_participants",
+        result: {
+          participants: [{
+            handle: "+15550000001",
+            hasOwnMurph: false,
+            ownerAdvisoryName: "x".repeat(49),
+          }],
+          status: "ok",
+        },
+      })
+    ).toThrow(/between 1 and 48 Unicode code points/u);
   });
 
   it("parses quantified group usage responses without accepting accounting fields", () => {
