@@ -126,6 +126,24 @@ rows unavailable and terminally supersedes both legacy pending states, so
 neither version can bind an unqualified receipt to retry-time authority. No
 Cloudflare runtime or wire change is involved.
 
+Warm prior-bundle functions are a separate rollout boundary because they do not
+know the decision revision. The first production cutover must promote this exact
+bundle with `HOSTED_GROUP_SHARING_AUTHORITY_MAINTENANCE=1`, which makes
+matched Linq join-reaction admission roll back before a current `pending:v2`
+receipt commits and authenticated join-page permission saves, reaction
+application, membership leave, and explicit email revocation return retryable
+503 before mutation. The prior bundle remains the sole production owner during
+the additive migration and first build; after promotion, the current bundle is
+gated before it can admit a `pending:v2` receipt or a competing membership or
+sharing decision. Prior invocations may finish in that interval without
+overlapping a current decision. Wait the repository's full 600-second
+prior-function drain, verify no affected old invocation remains, and redeploy
+the same reviewed head without the flag. A failed gated deployment leaves the
+old bundle active; a failed ungated deployment leaves current Web safely
+paused. Do not use an ordinary one-step promotion, and do not remove the
+temporary gate until the first revision-aware deployment has completed this
+sequence.
+
 ## Direct proof
 
 At minimum, verify these cases:

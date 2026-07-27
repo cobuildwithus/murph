@@ -62,7 +62,12 @@ import {
   readHostedGroupSharedDataByRuntimeMemberId,
   readHostedGroupMembershipsForMember,
   recordHostedGroupJoinOfferTx,
+  revokeHostedGroupMemberEmailShareTx,
 } from "@/src/lib/hosted-groups/group-store";
+import {
+  HOSTED_GROUP_SHARING_AUTHORITY_MAINTENANCE_CODE,
+  HOSTED_GROUP_SHARING_AUTHORITY_MAINTENANCE_ENV,
+} from "@/src/lib/hosted-groups/sharing-authority-maintenance";
 import {
   HOSTED_LINQ_GROUP_JOIN_APPLICATION_CLAIM_SCHEMA,
 } from "@/src/lib/hosted-onboarding/linq-provider-event-store";
@@ -96,6 +101,64 @@ let restoreKeyring: (() => void) | null = null;
 afterEach(() => {
   restoreKeyring?.();
   restoreKeyring = null;
+  vi.unstubAllEnvs();
+});
+
+describe("hosted group sharing-authority rollout maintenance", () => {
+  it("rejects reaction, join-page, leave, and email-share mutations before database access", async () => {
+    vi.stubEnv(HOSTED_GROUP_SHARING_AUTHORITY_MAINTENANCE_ENV, "1");
+    const tx = {} as Prisma.TransactionClient;
+
+    await expect(acceptHostedGroupJoinOfferTx({
+      channel: "linq",
+      memberId: "member_grantor",
+      messageLookupKeyReadCandidates: ["hbidx:linq-message:v1:offer"],
+      now: new Date("2026-07-27T12:00:00.000Z"),
+      threadIdentityLookupKeyReadCandidates: [
+        "hbidx:external-thread-identity:v1:thread",
+      ],
+      tx,
+    })).rejects.toMatchObject({
+      code: HOSTED_GROUP_SHARING_AUTHORITY_MAINTENANCE_CODE,
+      httpStatus: 503,
+      retryable: true,
+    });
+
+    await expect(acceptHostedGroupJoinCodeTx({
+      expectedMembershipId: null,
+      joinCode: "join_code",
+      memberId: "member_grantor",
+      now: new Date("2026-07-27T12:00:00.000Z"),
+      selectedVaultShareProjectionScopes: [],
+      tx,
+    })).rejects.toMatchObject({
+      code: HOSTED_GROUP_SHARING_AUTHORITY_MAINTENANCE_CODE,
+      httpStatus: 503,
+      retryable: true,
+    });
+
+    await expect(revokeHostedGroupMemberEmailShareTx({
+      groupRuntimeMemberId: "member_group_runtime",
+      memberId: "member_grantor",
+      now: new Date("2026-07-27T12:00:00.000Z"),
+      tx,
+    })).rejects.toMatchObject({
+      code: HOSTED_GROUP_SHARING_AUTHORITY_MAINTENANCE_CODE,
+      httpStatus: 503,
+      retryable: true,
+    });
+
+    await expect(leaveHostedGroupMemberTx({
+      memberId: "member_grantor",
+      membershipId: "membership_1",
+      now: new Date("2026-07-27T12:00:00.000Z"),
+      tx,
+    })).rejects.toMatchObject({
+      code: HOSTED_GROUP_SHARING_AUTHORITY_MAINTENANCE_CODE,
+      httpStatus: 503,
+      retryable: true,
+    });
+  });
 });
 
 function createPrismaStub<T extends Record<string, unknown>>(delegates: T): PrismaClient & T {

@@ -64,6 +64,7 @@ import {
 } from "../hosted-onboarding/shared";
 import { normalizeNullableString } from "../primitives";
 import { getPrisma } from "../prisma";
+import { assertHostedGroupSharingAuthorityAvailable } from "./sharing-authority-maintenance";
 import {
   grantHostedVaultShareTx,
   readActiveHostedVaultShareProjectionScopes,
@@ -1233,6 +1234,7 @@ export async function acceptHostedGroupJoinCodeTx(input: {
   selectedVaultShareProjectionScopes?: readonly HostedVaultShareProjectionScope[] | null;
   selectedVaultShareProjectionKinds?: readonly HostedVaultShareProjectionKind[] | null;
 }): Promise<HostedGroupJoinAcceptanceTxResult> {
+  assertHostedGroupSharingAuthorityAvailable();
   const groupLookup = await input.tx.hostedGroup.findUnique({
     where: { joinCode: input.joinCode },
     select: { id: true },
@@ -1496,6 +1498,7 @@ export async function acceptHostedGroupJoinOfferTx(input: {
   threadIdentityLookupKeyReadCandidates: readonly string[];
   tx: Prisma.TransactionClient;
 }): Promise<HostedGroupJoinOfferAcceptanceTxResult> {
+  assertHostedGroupSharingAuthorityAvailable();
   const messageLookupKeyReadCandidates = normalizeHostedGroupLookupKeyCandidates(
     input.messageLookupKeyReadCandidates,
   );
@@ -2063,6 +2066,7 @@ export async function revokeHostedGroupMemberEmailShareTx(input: {
   now: Date;
   tx: Prisma.TransactionClient;
 }): Promise<HostedGroupMemberEmailShareRevocationTxResult> {
+  assertHostedGroupSharingAuthorityAvailable();
   const group = await input.tx.hostedGroup.findUnique({
     where: { runtimeMemberId: input.groupRuntimeMemberId },
     select: { id: true, runtimeMemberId: true },
@@ -2123,6 +2127,7 @@ export async function leaveHostedGroupMemberTx(
     tx: Prisma.TransactionClient;
   } & HostedGroupMemberLeaveSelector,
 ): Promise<HostedGroupMemberLeaveTxResult> {
+  assertHostedGroupSharingAuthorityAvailable();
   let groupLookup: { id: string } | null;
   if (input.membershipId !== undefined) {
     const selectedMembership = await input.tx.hostedGroupMember.findUnique({

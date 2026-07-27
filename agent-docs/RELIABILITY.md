@@ -184,7 +184,25 @@ Last verified: 2026-07-26
   still exists. A genuinely new reaction has its own claim and can express a
   later intent to rejoin. Never use the provider receipt's `duplicate` result as
   this gate: a receipt committed before a failed acceptance remains retryable
-  only while its recorded authority is still current. The versioned state is
-  the rollout fence: older Web recognizes at most exact `pending` or
-  `pending:v1`, so it treats `pending:v2` as unavailable, while current Web
-  terminally supersedes both legacy pending states instead of rebinding them.
+  only while its recorded authority is still current. The versioned state
+  fences stored cross-version receipts: older Web recognizes at most exact
+  `pending` or `pending:v1`, so it treats `pending:v2` as unavailable, while
+  current Web terminally supersedes both legacy pending states instead of
+  rebinding them.
+- The first sharing-decision-revision rollout is a two-deployment Web cutover,
+  not an ordinary promotion. Promote the exact reviewed bundle first with
+  `HOSTED_GROUP_SHARING_AUTHORITY_MAINTENANCE=1`; matched Linq join reactions
+  then roll back before a current `pending:v2` receipt can commit, while
+  group-offer application, authenticated join-page permission saves, and
+  membership leave or explicit group-email revocation fail retryably with 503
+  before mutation. During that first deployment's additive migration and build,
+  the prior bundle remains the production owner, so no current receipt or
+  revision-aware decision exists to race it. Once the gated bundle owns the
+  production alias, prior invocations may finish but the current bundle cannot
+  admit a competing receipt or decision. Wait 600 seconds for those invocations
+  to drain, then redeploy the same reviewed head without the flag only after
+  logs show no surviving affected invocation. Keep the gate enabled if either
+  deployment or exact-head smoke fails. This temporary flag is not authority or
+  durable state; remove the module, call sites, environment configuration, and
+  this rollout rule after the revision-aware bundle has been the sole writer
+  for the full drain.

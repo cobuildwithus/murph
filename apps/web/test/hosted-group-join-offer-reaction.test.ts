@@ -72,6 +72,10 @@ import {
 import {
   parseHostedLinqProviderEvent,
 } from "@/src/lib/hosted-onboarding/linq-provider-events";
+import {
+  HOSTED_GROUP_SHARING_AUTHORITY_MAINTENANCE_CODE,
+  HOSTED_GROUP_SHARING_AUTHORITY_MAINTENANCE_ENV,
+} from "@/src/lib/hosted-groups/sharing-authority-maintenance";
 
 const TEST_KEYRING_ENTRIES = {
   v1: "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=",
@@ -127,6 +131,7 @@ describe("handleHostedGroupJoinOfferReaction", () => {
   afterEach(() => {
     restoreKeyring?.();
     restoreKeyring = null;
+    vi.unstubAllEnvs();
   });
 
   it("binds the receipt claim to the resolved member before application", async () => {
@@ -153,6 +158,23 @@ describe("handleHostedGroupJoinOfferReaction", () => {
         }),
       tx,
     });
+  });
+
+  it("rejects a matched join reaction before its pending receipt can commit during maintenance", async () => {
+    vi.stubEnv(HOSTED_GROUP_SHARING_AUTHORITY_MAINTENANCE_ENV, "1");
+    const event = parseReactionEvent({ reactionType: "love" });
+    const tx = createPrismaStub();
+
+    await expect(prepareHostedGroupJoinOfferReactionApplicationClaimTx({
+      event,
+      tx,
+    })).rejects.toMatchObject({
+      code: HOSTED_GROUP_SHARING_AUTHORITY_MAINTENANCE_CODE,
+      httpStatus: 503,
+      retryable: true,
+    });
+
+    expect(mocks.prepareHostedLinqGroupJoinApplicationClaimTx).toHaveBeenCalledOnce();
   });
 
   it("does not create a retryable claim for an unsupported reaction", async () => {

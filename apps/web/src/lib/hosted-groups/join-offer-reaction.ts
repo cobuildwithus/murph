@@ -22,6 +22,7 @@ import {
 import {
   prepareHostedLinqGroupJoinApplicationClaimTx,
 } from "./group-store";
+import { assertHostedGroupSharingAuthorityAvailable } from "./sharing-authority-maintenance";
 import type {
   HostedLinqGroupJoinApplicationClaim,
 } from "../hosted-onboarding/linq-provider-event-store";
@@ -74,7 +75,7 @@ export async function prepareHostedGroupJoinOfferReactionApplicationClaimTx(inpu
     return null;
   }
 
-  return prepareHostedLinqGroupJoinApplicationClaimTx({
+  const claim = await prepareHostedLinqGroupJoinApplicationClaimTx({
     memberId: member.id,
     messageLookupKeyReadCandidates: normalizeLookupKeyCandidates(
       input.event.messageLookupKeyReadCandidates.length > 0
@@ -85,9 +86,16 @@ export async function prepareHostedGroupJoinOfferReactionApplicationClaimTx(inpu
       createHostedExternalThreadIdentityLookupKeyReadCandidates({
         channel: "linq",
         threadId: input.event.linqChatId,
-      }),
+    }),
     tx: input.tx,
   });
+  if (claim) {
+    // This hook runs inside provider-event persistence. Throwing here rolls
+    // back the pending:v2 receipt, so no current-bundle retry authority can be
+    // admitted while a prior-bundle permission writer is still draining.
+    assertHostedGroupSharingAuthorityAvailable();
+  }
+  return claim;
 }
 
 export async function handleHostedGroupJoinOfferReaction(input: {
