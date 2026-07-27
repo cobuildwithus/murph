@@ -87,11 +87,37 @@ Last verified: 2026-07-26
   payable URL or retry permission only for an exact server-approved target.
   Former Family beneficiaries are always status/cancel-only; historical labels
   and contact hints are display data, not payment authority.
+- Saved-card group funding may select only one canonical card already attached
+  to the authenticated payer's verified Stripe Customer: one consistent
+  Customer or nonterminal Subscription default, or the sole attached card.
+  The browser cannot supply a PaymentMethod. Conflicting defaults or ambiguous
+  attached cards must use Checkout. The server creates the PaymentIntent
+  unconfirmed, stores its encrypted exact reference on the frozen purchase,
+  then confirms it off session. The payer-row lock rechecks that the payer is
+  active and the purchase is still `created`; a deletion or terminal-state
+  race cancels the unbound intent and never confirms it. An ambiguous
+  confirmation remains bound and
+  retryable; only verified `canceled` state may clear that binding and permit
+  Checkout fallback. While that payment is nonterminal, recovery remains bound
+  to its frozen offer and original client request; a different submitted amount
+  fails closed and the browser does not expose amount changes. Choosing an amount has no payment effect, and each
+  explicit **Add messages** click authorizes only the selected one-time charge.
+  No raw card data enters Murph.
+- Direct-purchase cancellation requires only authenticated payer ownership of
+  the opaque purchase ID. Beneficiary, group-locator, or current target
+  authority may gate retry but must not gate cancellation. Payer deletion may
+  detach a fulfilled sessionless purchase only after clearing payer-encrypted
+  references and retaining its non-secret PaymentIntent/Charge lookup proof for
+  later refund or dispute reconciliation. PostgreSQL enforces that proof
+  directly: a detached fulfilled row must remain paid, terminal, reconciled,
+  and carry both lookup keys, while the separate ciphertext constraint rejects
+  any retained payer-encrypted Stripe value.
 - Stripe proves payment; it does not own Murph usage capacity. A browser return
-  or client-reported Session state must never grant credit. The verified Stripe
-  receipt owner must re-fetch and bind the live one-time Session, line item,
-  PaymentIntent, Charge, Customer, currency, amount, mode, and fixed-purpose
-  metadata to the immutable purchase before appending one grant. Stripe
+  or client-reported Session or PaymentIntent state must never grant credit.
+  The verified Stripe receipt owner must re-fetch and bind the live one-time
+  Session when present, PaymentIntent, Charge, Customer, currency, amount, mode,
+  and fixed-purpose metadata to the immutable purchase before appending one
+  grant. Checkout additionally requires the exact line item. Stripe
   metadata contains only opaque purchase and fixed purpose/version values.
   Provider references use the existing keyed-lookup plus encrypted-value
   pattern and must not enter URLs, logs, prompts, assistant state, fixtures, or

@@ -154,11 +154,11 @@ const RAW_CHANGELOG_EDITIONS = [
         id: "recognized-members-always-get-an-answer",
         kind: "improvement",
         priority: 5,
-        title: "Recognized members are no longer silently dropped",
+        title: "Paused and lapsed members get a recovery reply",
         summary:
-          "When a paused, lapsed, or otherwise blocked member texts Murph from a recognized direct chat, Murph now answers with the existing access or subscription recovery path.",
+          "When a paused or lapsed member texts Murph from a recognized direct chat, Murph now answers with the existing access or subscription recovery path.",
         details:
-          "The reply is bound to the current inbound identity and remains replay-safe across iMessage and Telegram.",
+          "This shared recovery covers billing-access states across eligible iMessage and Telegram direct chats. Suspended accounts keep their existing channel-specific handling.",
         relevanceTags: ["messaging", "billing", "access", "reliability"],
         sourcePullRequests: [954],
       },
