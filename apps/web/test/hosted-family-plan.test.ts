@@ -4553,6 +4553,53 @@ describe("hosted Family plan", () => {
     });
   });
 
+  it("keeps a delivered Family Checkout owned when duplicate provider replay fails", async () => {
+    const group = {
+      billingStatus: HostedBillingStatus.not_started,
+      id: "hbag_family",
+      ownerMemberId: "member_owner",
+      suspendedAt: null,
+    };
+    const tx = createTxMock({
+      billedSeatCount: null,
+      group,
+    });
+    tx.hostedAccountGroupBillingRef.findUnique.mockResolvedValueOnce({
+      ...createBillingRefMock({
+        checkoutAttemptId: "hbfca_existing",
+        checkoutSeatCount: 2,
+        stripeCheckoutSessionIdEncrypted: "encrypted:cs_test_delivered123",
+        stripeSubscriptionIdEncrypted: null,
+      }),
+      group,
+    });
+    const prisma = tx as FamilyPlanTxMock & {
+      $transaction: ReturnType<typeof vi.fn>;
+    };
+    prisma.$transaction = vi.fn((callback) => callback(tx));
+    const replayError = new Error("Stripe replay result unavailable");
+    const checkoutCreate = vi.fn().mockRejectedValue(replayError);
+    runtimeMocks.requireHostedStripeApi.mockReturnValueOnce({
+      checkout: {
+        sessions: {
+          create: checkoutCreate,
+        },
+      },
+    });
+
+    await expect(createHostedFamilyBillingCheckout({
+      groupId: "hbag_family",
+      ownerMemberId: "member_owner",
+      prisma: prisma as never,
+      seatCount: 2,
+    })).rejects.toBe(replayError);
+
+    expect(checkoutCreate.mock.calls[0]?.[1]).toEqual({
+      idempotencyKey: expect.stringContaining(":hbfca_existing:"),
+    });
+    expect(tx.hostedAccountGroupBillingRef.upsert).not.toHaveBeenCalled();
+  });
+
   it("does not start a second pending Family checkout for a different seat count", async () => {
     const group = {
       billingStatus: HostedBillingStatus.not_started,

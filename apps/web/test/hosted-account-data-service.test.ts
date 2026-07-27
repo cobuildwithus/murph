@@ -994,7 +994,7 @@ describe("deleteHostedAccountData", () => {
     });
   });
 
-  it("expires every open direct subscription Checkout before canonical deletion", async () => {
+  it("expires every open direct and Family subscription Checkout before canonical deletion", async () => {
     const stripe = {
       checkout: {
         sessions: {
@@ -1033,8 +1033,17 @@ describe("deleteHostedAccountData", () => {
       memberId: "member_123",
       stripeCheckoutSessionIdEncrypted: secondSessionIdEncrypted,
     });
+    const familyBillingRefRecord = await makeFamilyBillingRefRowForTest({
+      groupId: "family_group_123",
+      ownerMemberId: "member_123",
+      stripeCheckoutSessionId: "cs_family_delete_789",
+      stripeCustomerId: null,
+      stripeSubscriptionId: null,
+    });
     const prisma = createHostedAccountDeletionPrismaForTest({
       ...vendorRows,
+      familyBillingRefRecords: [familyBillingRefRecord],
+      familyGroups: [{ id: "family_group_123" }],
       onTransaction: () => undefined,
     });
 
@@ -1046,6 +1055,9 @@ describe("deleteHostedAccountData", () => {
 
     expect(stripe.checkout.sessions.expire).toHaveBeenCalledWith("cs_delete_123");
     expect(stripe.checkout.sessions.expire).toHaveBeenCalledWith("cs_delete_456");
+    expect(stripe.checkout.sessions.expire).toHaveBeenCalledWith(
+      "cs_family_delete_789",
+    );
     expect(serviceMocks.prepareHostedAccountDeletionCleanup).toHaveBeenCalledWith(
       expect.objectContaining({
         stripeCustomerIds: ["cus_delete_123"],
@@ -1053,16 +1065,22 @@ describe("deleteHostedAccountData", () => {
     );
   });
 
-  it("captures and cancels a subscription that completes while deletion fences Checkout", async () => {
+  it("captures and cancels direct and Family subscriptions that complete while deletion fences Checkout", async () => {
     const stripe = {
       checkout: {
         sessions: {
           expire: vi.fn(),
-          retrieve: vi.fn(async () => ({
-            customer: "cus_checkout_123",
-            status: "complete",
-            subscription: "sub_checkout_123",
-          })),
+          retrieve: vi.fn(async (sessionId: string) => sessionId === "cs_family_checkout_456"
+            ? {
+                customer: "cus_family_checkout_456",
+                status: "complete",
+                subscription: "sub_family_checkout_456",
+              }
+            : {
+                customer: "cus_checkout_123",
+                status: "complete",
+                subscription: "sub_checkout_123",
+              }),
         },
       },
       customers: { del: vi.fn() },
@@ -1076,8 +1094,17 @@ describe("deleteHostedAccountData", () => {
       stripeCheckoutSessionId: "cs_delete_123",
       stripeSubscriptionId: null,
     });
+    const familyBillingRefRecord = await makeFamilyBillingRefRowForTest({
+      groupId: "family_group_123",
+      ownerMemberId: "member_123",
+      stripeCheckoutSessionId: "cs_family_checkout_456",
+      stripeCustomerId: null,
+      stripeSubscriptionId: null,
+    });
     const prisma = createHostedAccountDeletionPrismaForTest({
       ...vendorRows,
+      familyBillingRefRecords: [familyBillingRefRecord],
+      familyGroups: [{ id: "family_group_123" }],
       onTransaction: () => undefined,
     });
 
@@ -1089,10 +1116,20 @@ describe("deleteHostedAccountData", () => {
 
     expect(stripe.checkout.sessions.expire).not.toHaveBeenCalled();
     expect(stripe.subscriptions.cancel).toHaveBeenCalledWith("sub_checkout_123");
+    expect(stripe.subscriptions.cancel).toHaveBeenCalledWith(
+      "sub_family_checkout_456",
+    );
     expect(serviceMocks.prepareHostedAccountDeletionCleanup).toHaveBeenCalledWith(
       expect.objectContaining({
-        stripeCustomerIds: ["cus_delete_123", "cus_checkout_123"],
-        stripeSubscriptionIds: ["sub_checkout_123"],
+        stripeCustomerIds: [
+          "cus_delete_123",
+          "cus_checkout_123",
+          "cus_family_checkout_456",
+        ],
+        stripeSubscriptionIds: [
+          "sub_checkout_123",
+          "sub_family_checkout_456",
+        ],
       }),
     );
   });

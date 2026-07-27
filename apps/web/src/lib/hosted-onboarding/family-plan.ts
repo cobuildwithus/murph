@@ -1819,12 +1819,14 @@ export async function createHostedFamilyBillingCheckout(input: {
     const priceId = requireHostedFamilyStripePriceId();
     const publicBaseUrl = requireHostedOnboardingPublicBaseUrl();
     stripeApi = requireHostedStripeApi();
-    await writeHostedFamilyCheckoutAttemptTx({
-      attemptId: checkoutAttemptId,
-      group,
-      seatCount,
-      tx,
-    });
+    if (!currentBillingRef?.checkoutAttemptId) {
+      await writeHostedFamilyCheckoutAttemptTx({
+        attemptId: checkoutAttemptId,
+        group,
+        seatCount,
+        tx,
+      });
+    }
 
     return {
       alreadyActive: false,
