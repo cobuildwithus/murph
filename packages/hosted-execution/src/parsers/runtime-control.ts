@@ -4,6 +4,9 @@ import {
   parseHostedExecutionDeviceSyncWakeHint,
 } from "@murphai/device-syncd/hosted-runtime";
 import {
+  parseHostedExecutionDeviceSyncExpectedConnectedAt,
+} from "./device-sync.ts";
+import {
   parseAssistantUsageRecord,
 } from "../assistant-usage.ts";
 import {
@@ -674,6 +677,14 @@ export function parseHostedRuntimeDeviceSyncBridgeEnvelope(
           ? {}
           : {
               hint: parseHostedExecutionDeviceSyncWakeHint(record.hint),
+            }),
+        ...(record.expectedConnectedAt === undefined
+          ? {}
+          : {
+              expectedConnectedAt: parseHostedExecutionDeviceSyncExpectedConnectedAt(
+                record.expectedConnectedAt,
+                "Hosted runtime device-sync bridge expectedConnectedAt",
+              ),
             }),
         kind,
         ...(record.provider === undefined

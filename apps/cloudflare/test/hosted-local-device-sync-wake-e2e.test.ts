@@ -96,7 +96,14 @@ function buildDeviceSyncWake() {
   const occurredAt = new Date().toISOString();
   return buildHostedExecutionDeviceSyncWake({
     connectionId,
-    eventId: `device-sync:reconcile-due:${userId}:${connectionId}:${runId}`,
+    eventId: [
+      "device-sync:reconcile-due",
+      userId,
+      connectionId,
+      occurredAt,
+      runId,
+    ].join(":"),
+    expectedConnectedAt: occurredAt,
     hint: {
       jobs: [
         {

@@ -66,6 +66,8 @@ export interface HostedDeviceSyncRuntimeSyncState {
   pendingDirtyAcks: HostedDeviceSyncRuntimeDirtyAck[];
   pendingDirtyPayloadJobs: HostedDeviceSyncRuntimeDirtyPayloadJob[];
   snapshot: HostedDeviceSyncRuntimeSnapshotResponse | null;
+  /** True when a connection-scoped wake lacks authority for the hydrated epoch. */
+  wakeSuperseded?: boolean;
 }
 
 export interface HostedDeviceSyncRuntimeDirtyAck {
@@ -138,6 +140,7 @@ export async function syncHostedDeviceSyncControlPlaneState(input: {
     ...snapshot.connections.filter((entry) => isTerminalHostedPrivacyScrub(entry.connection)),
     ...snapshot.connections.filter((entry) => !isTerminalHostedPrivacyScrub(entry.connection)),
   ];
+  let classifyJunctionProviderJob: HostedAccountHydrationInput["classifyProviderJob"];
   for (const entry of orderedConnections) {
     const existingByHostedConnection = store.getAccountByHostedConnectionId(
       entry.connection.id,
@@ -154,8 +157,21 @@ export async function syncHostedDeviceSyncControlPlaneState(input: {
             entry.connection.connectedAt,
           )
         : null);
+    if (
+      entry.connection.provider === "junction"
+      && existing
+      && existing.connectedAt !== entry.connection.connectedAt
+      && !classifyJunctionProviderJob
+    ) {
+      ({
+        isJunctionCredentialIndependentInlineImportJob: classifyJunctionProviderJob,
+      } = await import("@murphai/device-syncd/junction-inline-authority"));
+    }
     const stored = store.hydrateHostedAccount(
       buildHostedAccountHydrationInput({
+        classifyProviderJob: entry.connection.provider === "junction"
+          ? classifyJunctionProviderJob
+          : undefined,
         codec,
         entry,
         existing,
@@ -242,11 +258,15 @@ export async function syncHostedDeviceSyncControlPlaneState(input: {
   }
 
   if (input.wake.kind === "device-sync.wake") {
-    await applyHostedDeviceSyncWakeHint({
+    const superseded = await applyHostedDeviceSyncWakeHint({
       wake: input.wake,
       hostedToLocalAccountIds: state.hostedToLocalAccountIds,
       service: input.service,
     });
+    if (superseded) {
+      state.wakeSuperseded = true;
+      return state;
+    }
   }
   if (input.skipDirtyPendingFetch !== true) {
     const dirtyState = await applyHostedPendingDirtyDeviceSyncState({
@@ -463,9 +483,9 @@ async function applyHostedDeviceSyncWakeHint(input: {
   wake: HostedRuntimeEvent;
   hostedToLocalAccountIds: Map<string, string>;
   service: DeviceSyncService;
-}): Promise<void> {
+}): Promise<boolean> {
   if (input.wake.kind !== "device-sync.wake") {
-    return;
+    return false;
   }
 
   const wake = resolveHostedDeviceSyncWakeContext(input.wake);
@@ -473,13 +493,21 @@ async function applyHostedDeviceSyncWakeHint(input: {
   const store = requireHostedRuntimeDeviceSyncStore(input.service);
 
   if (!localAccountId) {
-    return;
+    return false;
   }
 
   const account = store.getAccountById(localAccountId);
 
   if (!account) {
-    return;
+    return false;
+  }
+
+  // Missing epochs remain readable during deploy skew, but have no authority.
+  if (
+    wake.expectedConnectedAt === null
+    || wake.expectedConnectedAt !== account.connectedAt
+  ) {
+    return true;
   }
 
   const terminalStatus = readHostedTerminalDeviceSyncStatus(account);
@@ -490,7 +518,7 @@ async function applyHostedDeviceSyncWakeHint(input: {
       status: terminalStatus,
       store,
     });
-    return;
+    return false;
   }
 
   if (input.wake.reason === "disconnected") {
@@ -501,7 +529,7 @@ async function applyHostedDeviceSyncWakeHint(input: {
       "HOSTED_DEVICE_SYNC_DISCONNECTED",
       "Hosted device-sync wake marked the connection as disconnected.",
     );
-    return;
+    return false;
   }
 
   if (input.wake.reason === "reauthorization_required") {
@@ -515,7 +543,7 @@ async function applyHostedDeviceSyncWakeHint(input: {
       "HOSTED_DEVICE_SYNC_REAUTHORIZATION_REQUIRED",
       "Hosted device-sync wake marked the connection as requiring reconnection.",
     );
-    return;
+    return false;
   }
 
   if (
@@ -523,7 +551,7 @@ async function applyHostedDeviceSyncWakeHint(input: {
     && wake.hint?.reason === "manual_reconcile"
   ) {
     input.service.queueManualReconcile(localAccountId);
-    return;
+    return false;
   }
 
   const jobHints = normalizeHostedDeviceSyncJobHints(wake.hint);
@@ -546,6 +574,8 @@ async function applyHostedDeviceSyncWakeHint(input: {
   if (wakePatch) {
     store.patchAccount(localAccountId, wakePatch);
   }
+
+  return false;
 }
 
 async function applyHostedPendingDirtyDeviceSyncState(input: {
@@ -998,6 +1028,7 @@ function buildHostedDeviceSyncRuntimeConnectionUpdate(input: {
     : null;
   const update: HostedDeviceSyncRuntimeConnectionUpdate = {
     connectionId: input.hostedConnectionId,
+    observedConnectedAt: baselineConnection?.connectedAt ?? null,
     observedUpdatedAt: baselineConnection?.updatedAt ?? null,
   };
   const sources = input.sourceApplyEnabled && input.account.status !== "disconnected"
@@ -1439,6 +1470,7 @@ function shouldUseRawHostedMetadataBaseline(input: {
 }
 
 function buildHostedAccountHydrationInput(input: {
+  classifyProviderJob?: HostedAccountHydrationInput["classifyProviderJob"];
   codec: ReturnType<typeof createSecretCodec>;
   entry: HostedDeviceSyncRuntimeConnectionSnapshot;
   existing: StoredDeviceSyncAccount | null;
@@ -1545,6 +1577,9 @@ function buildHostedAccountHydrationInput(input: {
   return {
     clearTokens: shouldClearTokens,
     advanceHostedObservedConnectionRevision: !preserveUnpublishedLocalProviderProgress,
+    ...(input.classifyProviderJob
+      ? { classifyProviderJob: input.classifyProviderJob }
+      : {}),
     ...(credential ? { credential } : {}),
     hostedConnectionId: hostedConnection.id,
     hostedObservedTokenVersion: nextHostedObservedTokenVersion,

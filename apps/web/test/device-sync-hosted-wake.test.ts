@@ -30,7 +30,7 @@ const mocks = vi.hoisted(() => {
     registryGet: vi.fn(),
     registryList: vi.fn(),
     resumeSdkSignInSession: vi.fn(),
-    sha256Hex: vi.fn(() => "a".repeat(64)),
+    sha256Hex: vi.fn<(value: string) => string>(() => "a".repeat(64)),
     syncDurableConnectionState: vi.fn(),
     getDirtyConnection: vi.fn(),
     upsertDirtyConnection: vi.fn(),
@@ -362,8 +362,10 @@ import { PrismaDeviceSyncControlPlaneStore } from "@/src/lib/device-sync/prisma-
 import { getPrisma } from "@/src/lib/prisma";
 import {
   appendHostedDeviceSyncScheduledReconcileWake,
+  handleHostedDeviceSyncConnectionEstablished,
   persistHostedDeviceSyncCompanionMetadata,
 } from "@/src/lib/device-sync/wake-service";
+import { buildHostedDeviceSyncWakeEventId } from "@/src/lib/device-sync/wake";
 import { createHostedBrowserConnectionId } from "@/src/lib/device-sync/public-connection";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import {
@@ -377,6 +379,7 @@ function buildPublicConnectionId(connectionId: string): string {
 describe("hosted device-sync wakes", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.getConnectionForUser.mockReset();
     mocks.readHostedDeviceSyncEnvironment.mockImplementation(() => createHostedEnv());
     mocks.ensureWebhookSubscriptions.mockResolvedValue(undefined);
     mocks.prisma.$transaction.mockImplementation(async (callback: (tx: typeof mocks.prismaTx) => Promise<unknown>) =>
@@ -442,6 +445,7 @@ describe("hosted device-sync wakes", () => {
       handleWebhook: vi.fn(async () => {
         await input.hooks?.onWebhookAccepted?.({
           account: {
+            connectedAt: "2026-03-26T12:00:00.000Z",
             id: "dsc_123",
             provider: "oura",
             scopes: ["heartrate"],
@@ -536,6 +540,31 @@ describe("hosted device-sync wakes", () => {
       _connectionId: string,
       callback: (tx: typeof mocks.prismaTx) => Promise<unknown>,
     ) => callback(mocks.prismaTx));
+  });
+
+  it("binds default wake identity to the connection epoch", () => {
+    const base = {
+      connectionId: "dsc_123",
+      occurredAt: "2026-03-26T12:01:00.000Z",
+      provider: "oura",
+      source: "disconnect" as const,
+      traceId: null,
+      userId: "user-123",
+    };
+
+    const epochAWakeId = buildHostedDeviceSyncWakeEventId({
+      ...base,
+      expectedConnectedAt: "2026-03-26T12:00:00.000Z",
+    });
+    const epochBWakeId = buildHostedDeviceSyncWakeEventId({
+      ...base,
+      expectedConnectedAt: "2026-03-26T12:02:00.000Z",
+    });
+
+    expect(epochAWakeId).toBe(
+      "device-sync:disconnect:user-123:oura:dsc_123:2026-03-26T12:00:00.000Z:2026-03-26T12:01:00.000Z",
+    );
+    expect(epochBWakeId).not.toBe(epochAWakeId);
   });
 
   it("requires an explicit hosted public base URL in production instead of trusting the request host", () => {
@@ -718,6 +747,7 @@ describe("hosted device-sync wakes", () => {
       connectionId: "dsc_123",
       createdAt: "2026-03-26T12:01:00.000Z",
       eventId: "device-sync:scheduled-reconcile:abc123",
+      expectedConnectedAt: "2026-03-26T12:00:00.000Z",
       nextReconcileAt: "2026-03-26T12:00:00.000Z",
       provider: "oura",
       userId: "user-123",
@@ -741,6 +771,7 @@ describe("hosted device-sync wakes", () => {
       expect.objectContaining({
         envelope: expect.objectContaining({
           eventId: "device-sync:scheduled-reconcile:abc123",
+          expectedConnectedAt: "2026-03-26T12:00:00.000Z",
           reason: "reconcile_due",
         }),
         tx: mocks.prismaTx,
@@ -817,6 +848,7 @@ describe("hosted device-sync wakes", () => {
       connectionId: "dsc_123",
       createdAt: "2026-03-26T12:01:00.000Z",
       eventId: "device-sync:scheduled-reconcile:abc123",
+      expectedConnectedAt: "2026-03-26T12:00:00.000Z",
       nextReconcileAt: "2026-03-26T12:00:00.000Z",
       provider: "oura",
       userId: "user-123",
@@ -861,6 +893,7 @@ describe("hosted device-sync wakes", () => {
       connectionId: "dsc_123",
       createdAt: "2026-03-26T12:01:00.000Z",
       eventId: "device-sync:scheduled-reconcile:abc123",
+      expectedConnectedAt: "2026-03-26T12:00:00.000Z",
       nextReconcileAt: "2026-03-26T12:00:00.000Z",
       provider: "oura",
       userId: "user-123",
@@ -901,7 +934,8 @@ describe("hosted device-sync wakes", () => {
       expect.objectContaining({
         envelope: expect.objectContaining({
           connectionId: "dsc_123",
-          eventId: "device-sync:dirty:v1:user-123:oura:dsc_123:1",
+          eventId: "device-sync:dirty:v1:user-123:oura:dsc_123:2026-03-26T12:00:00.000Z:1",
+          expectedConnectedAt: "2026-03-26T12:00:00.000Z",
           hint: expect.objectContaining({
             eventType: "sleep.updated",
             occurredAt: "2026-03-26T11:59:00.000Z",
@@ -998,7 +1032,8 @@ describe("hosted device-sync wakes", () => {
     }));
     const wakeEnvelope = mocks.appendHostedMailboxEnvelope.mock.calls[0]?.[0]?.envelope;
     expect(wakeEnvelope).toMatchObject({
-      eventId: `device-sync:dirty:v1:user-123:junction:${connection.id}:1`,
+      eventId: `device-sync:dirty:v1:user-123:junction:${connection.id}:${connection.connectedAt}:1`,
+      expectedConnectedAt: connection.connectedAt,
       hint: {
         eventType: "companion.health_metadata.v1",
         occurredAt: "2026-07-09T12:00:00.000Z",
@@ -1197,6 +1232,7 @@ describe("hosted device-sync wakes", () => {
         connectionId: "dsc_123",
         createdAt: "2026-03-26T12:01:00.000Z",
         eventId: "device-sync:scheduled-reconcile:abc123",
+        expectedConnectedAt: "2026-03-26T12:00:00.000Z",
         nextReconcileAt: "2026-03-26T12:00:00.000Z",
         provider: "oura",
         userId: "user-123",
@@ -1288,7 +1324,8 @@ describe("hosted device-sync wakes", () => {
     expect(mocks.appendHostedMailboxEnvelope).toHaveBeenCalledWith(
       expect.objectContaining({
         envelope: expect.objectContaining({
-          eventId: "device-sync:disconnect:user-123:oura:dsc_123:2026-03-26T12:00:00.000Z",
+          eventId: "device-sync:disconnect:user-123:oura:dsc_123:2026-03-26T12:00:00.000Z:2026-03-26T12:00:00.000Z",
+          expectedConnectedAt: "2026-03-26T12:00:00.000Z",
         }),
         tx: mocks.prismaTx,
       }),
@@ -2197,7 +2234,8 @@ describe("hosted device-sync wakes", () => {
             occurredAt: "2026-03-26T12:00:00.000Z",
             scopes: ["heartrate"],
           },
-          eventId: "device-sync:connection-established:user-123:oura:dsc_123:2026-03-26T12:00:00.000Z",
+          eventId: "device-sync:connection-established:user-123:oura:dsc_123:2026-03-26T12:00:00.000Z:2026-03-26T12:00:00.000Z",
+          expectedConnectedAt: "2026-03-26T12:00:00.000Z",
           kind: "device-sync.wake",
           occurredAt: "2026-03-26T12:00:00.000Z",
           provider: "oura",
@@ -2213,6 +2251,75 @@ describe("hosted device-sync wakes", () => {
     expect(mocks.ensureWebhookSubscriptions).toHaveBeenCalledWith({
       publicBaseUrl: "https://control.example.test/api/device-sync",
     });
+  });
+
+  it("namespaces provider initial-job dedupe keys by connection epoch", async () => {
+    const firstConnectedAt = "2026-03-26T12:00:00.000Z";
+    const secondConnectedAt = "2026-03-26T12:01:00.000Z";
+    mocks.sha256Hex.mockImplementation((value: string) => {
+      if (value.includes(firstConnectedAt)) {
+        return "a".repeat(64);
+      }
+      if (value.includes(secondConnectedAt)) {
+        return "b".repeat(64);
+      }
+      return "c".repeat(64);
+    });
+    mocks.getConnectionForUser
+      .mockResolvedValueOnce(buildHostedConnection({
+        connectedAt: firstConnectedAt,
+        id: "dsc_junction",
+        provider: "junction",
+        scopes: [],
+      }))
+      .mockResolvedValueOnce(buildHostedConnection({
+        connectedAt: secondConnectedAt,
+        id: "dsc_junction",
+        provider: "junction",
+        scopes: [],
+      }));
+    const store = new PrismaDeviceSyncControlPlaneStore({
+      prisma: getPrisma(),
+    });
+    const connection = {
+      initialJobs: [{
+        dedupeKey: "junction:initial-reconcile",
+        kind: "reconcile" as const,
+        payload: {
+          windowEnd: "2026-03-26T12:00:00.000Z",
+          windowStart: "2026-03-19T12:00:00.000Z",
+        },
+      }],
+      nextReconcileAt: null,
+    };
+
+    try {
+      for (const connectedAt of [firstConnectedAt, secondConnectedAt]) {
+        await handleHostedDeviceSyncConnectionEstablished({
+          account: {
+            connectedAt,
+            id: "dsc_junction",
+            provider: "junction",
+            scopes: [],
+            status: "active",
+          },
+          connection,
+          now: connectedAt,
+          store,
+        });
+      }
+
+      const dedupeKeys = mocks.appendHostedMailboxEnvelope.mock.calls.map(
+        ([input]) => input.envelope.hint.jobs[0]?.dedupeKey,
+      );
+      expect(dedupeKeys).toEqual([
+        `hosted-device-sync:${"a".repeat(64)}`,
+        `hosted-device-sync:${"b".repeat(64)}`,
+      ]);
+      expect(new Set(dedupeKeys)).toHaveLength(2);
+    } finally {
+      mocks.sha256Hex.mockImplementation(() => "a".repeat(64));
+    }
   });
 
   it.each([
@@ -2578,7 +2685,8 @@ describe("hosted device-sync wakes", () => {
     expect(mocks.appendHostedMailboxEnvelope).toHaveBeenCalledWith(
       expect.objectContaining({
         envelope: expect.objectContaining({
-          eventId: "device-sync:dirty:v1:user-123:oura:dsc_123:1",
+          eventId: "device-sync:dirty:v1:user-123:oura:dsc_123:2026-03-26T12:00:00.000Z:1",
+          expectedConnectedAt: "2026-03-26T12:00:00.000Z",
           kind: "device-sync.wake",
           reason: "webhook_hint",
           userId: "user-123",
@@ -2590,6 +2698,47 @@ describe("hosted device-sync wakes", () => {
       mailboxItemId: "mailbox_123",
     });
     expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
+  });
+
+  it("terminally supersedes webhook work when reconnect replaces its observed epoch before dirty-state commit", async () => {
+    mocks.getConnectionForUser.mockResolvedValueOnce(buildHostedConnection({
+      connectedAt: "2026-03-26T12:05:00.000Z",
+    }));
+    const controlPlane = createHostedDeviceSyncPublicIngressService(
+      new Request("https://control.example.test/api/device-sync/webhooks/oura", {
+        body: JSON.stringify({
+          event: "sleep.updated",
+        }),
+        headers: {
+          "content-type": "application/json",
+        },
+        method: "POST",
+      }),
+    );
+
+    await expect(controlPlane.handleWebhook("oura")).resolves.toMatchObject({
+      accepted: true,
+    });
+
+    expect(mocks.withConnectionMutationLock).toHaveBeenCalledWith(
+      "dsc_123",
+      expect.any(Function),
+    );
+    expect(mocks.getConnectionForUser).toHaveBeenCalledWith(
+      "user-123",
+      "dsc_123",
+      mocks.prismaTx,
+    );
+    expect(mocks.completeWebhookTrace).toHaveBeenCalledWith(
+      "oura",
+      "trace_123",
+      "claim-token",
+      mocks.prismaTx,
+    );
+    expect(mocks.upsertDirtyConnection).not.toHaveBeenCalled();
+    expect(mocks.createSignal).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
+    expect(mocks.signalHostedDeviceSyncMailboxRuntime).not.toHaveBeenCalled();
   });
 
   it("resolves the companion lane, stages a compact RMSSD job, and wakes the runtime", async () => {
@@ -2922,7 +3071,8 @@ describe("hosted device-sync wakes", () => {
     expect(mocks.appendHostedMailboxEnvelope).toHaveBeenCalledWith(
       expect.objectContaining({
         envelope: expect.objectContaining({
-          eventId: "device-sync:dirty:v1:user-123:oura:dsc_123:1",
+          eventId: "device-sync:dirty:v1:user-123:oura:dsc_123:2026-03-26T12:00:00.000Z:1",
+          expectedConnectedAt: "2026-03-26T12:00:00.000Z",
           kind: "device-sync.wake",
         }),
         tx: mocks.prismaTx,
@@ -3189,6 +3339,7 @@ describe("hosted device-sync wakes", () => {
         traceIndex += 1;
         const acceptedInput = {
           account: {
+            connectedAt: "2026-03-26T12:00:00.000Z",
             id: "dsc_123",
             provider: "oura",
             scopes: ["heartrate"],
@@ -3276,6 +3427,7 @@ describe("hosted device-sync wakes", () => {
         traceIndex += 1;
         await input.hooks?.onWebhookAccepted?.({
           account: {
+            connectedAt: "2026-03-26T12:00:00.000Z",
             id: "dsc_123",
             provider: "oura",
           },
@@ -3434,6 +3586,7 @@ describe("hosted device-sync wakes", () => {
       handleWebhook: vi.fn(async () => {
         await input.hooks?.onWebhookAccepted?.({
           account: {
+            connectedAt: "2026-03-26T12:00:00.000Z",
             id: "dsc_123",
             provider: "oura",
             scopes: ["heartrate"],
@@ -3535,7 +3688,8 @@ describe("hosted device-sync wakes", () => {
     expect(mocks.appendHostedMailboxEnvelope).toHaveBeenCalledTimes(1);
     expect(mocks.appendHostedMailboxEnvelope).toHaveBeenCalledWith(expect.objectContaining({
       envelope: expect.objectContaining({
-        eventId: "device-sync:dirty:v1:user-123:oura:dsc_123:1",
+        eventId: "device-sync:dirty:v1:user-123:oura:dsc_123:2026-03-26T12:00:00.000Z:1",
+        expectedConnectedAt: "2026-03-26T12:00:00.000Z",
         kind: "device-sync.wake",
       }),
     }));
@@ -3576,6 +3730,7 @@ describe("hosted device-sync wakes", () => {
       handleWebhook: vi.fn(async () => {
         await input.hooks?.onWebhookAccepted?.({
           account: {
+            connectedAt: "2026-03-26T12:00:00.000Z",
             id: "dsc_123",
             provider: "junction",
             scopes: [],
@@ -3659,7 +3814,7 @@ describe("hosted device-sync wakes", () => {
     expect(mocks.signalHostedDeviceSyncMailboxRuntime).not.toHaveBeenCalled();
   });
 
-  it("accepts durable Junction payload webhooks without a connection acceptance lock", async () => {
+  it("accepts durable Junction payload webhooks under the connection acceptance lock", async () => {
     const webhookDataJson = JSON.stringify({
       data: [
         {
@@ -3681,6 +3836,7 @@ describe("hosted device-sync wakes", () => {
       handleWebhook: vi.fn(async () => {
         await input.hooks?.onWebhookAccepted?.({
           account: {
+            connectedAt: "2026-03-26T12:00:00.000Z",
             id: "dsc_123",
             provider: "junction",
             scopes: [],
@@ -3746,6 +3902,10 @@ describe("hosted device-sync wakes", () => {
       "claim-token",
       mocks.prismaTx,
     );
+    expect(mocks.withConnectionMutationLock).toHaveBeenCalledWith(
+      "dsc_123",
+      expect.any(Function),
+    );
   });
 
   it("preserves split Junction daily data webhook payload chunks across the hosted dirty handoff", async () => {
@@ -3774,6 +3934,7 @@ describe("hosted device-sync wakes", () => {
       handleWebhook: vi.fn(async () => {
         await input.hooks?.onWebhookAccepted?.({
           account: {
+            connectedAt: "2026-03-26T12:00:00.000Z",
             id: "dsc_123",
             provider: "junction",
             scopes: [],
@@ -3854,6 +4015,7 @@ describe("hosted device-sync wakes", () => {
       handleWebhook: vi.fn(async () => {
         await input.hooks?.onWebhookAccepted?.({
           account: {
+            connectedAt: "2026-03-26T12:00:00.000Z",
             id: "dsc_123",
             provider: "whoop",
             scopes: ["offline"],
@@ -3898,6 +4060,9 @@ describe("hosted device-sync wakes", () => {
         };
       }),
       startConnection: vi.fn(),
+    }));
+    mocks.getConnectionForUser.mockResolvedValueOnce(buildHostedConnection({
+      provider: "whoop",
     }));
     const controlPlane = createHostedDeviceSyncPublicIngressService(
       new Request("https://control.example.test/api/device-sync/webhooks/whoop", {
@@ -4043,6 +4208,7 @@ describe("hosted device-sync wakes", () => {
       handleWebhook: vi.fn(async () => {
         await input.hooks?.onWebhookAccepted?.({
           account: {
+            connectedAt: "2026-03-26T12:00:00.000Z",
             id: "dsc_123",
             provider: "oura",
           },

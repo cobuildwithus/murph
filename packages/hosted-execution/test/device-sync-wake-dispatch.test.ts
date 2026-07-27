@@ -8,6 +8,7 @@ describe("device-sync wake", () => {
     const wake = buildHostedExecutionDeviceSyncWake({
       connectionId: "conn_123",
       eventId: "evt_123",
+      expectedConnectedAt: "2026-04-07T00:00:00.000Z",
       occurredAt: "2026-04-07T00:05:30.000Z",
       provider: "oura",
       reason: "connected",
