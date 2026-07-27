@@ -202,6 +202,7 @@ import {
   MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_PRIVATE_SUMMARY,
   MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
 } from '../src/assistant/managed-automations.ts'
+import { upsertAssistantInputEvent } from '../src/assistant/input-store.ts'
 import { resolveAssistantStatePaths } from '../src/assistant/store/paths.ts'
 import {
   dispatchAssistantOutboxIntent,
@@ -6622,6 +6623,47 @@ describe('assistant cron runtime orchestration', () => {
     expect(cronMocks.sendAssistantMessageLocal).not.toHaveBeenCalled()
   })
 
+  it('skips eligible Sunday superlatives before lifecycle or model work when structured recap evidence is unavailable', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-12T18:10:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-superlatives-evidence-unavailable-',
+    )
+    addSundaySuperlativesAutomation({ vaultRoot })
+    const resolveScheduledExternalThreadRoute = vi.fn(async () => ({
+      channel: 'telegram' as const,
+      containerMemberId: 'managed-group-runtime',
+      threadId: 'sunday-group-room',
+    }))
+    const activityReader = {
+      read: vi.fn(async () => ({ status: 'eligible' as const })),
+    }
+    const { claimed, paths } = await claimFirstCanonicalCronJob(vaultRoot)
+
+    const result = await executeClaimedAssistantCronJob({
+      executionContext: {
+        hosted: {
+          managedGroupActivityDecisionReader: activityReader,
+          memberId: 'managed-group-runtime',
+          resolveScheduledExternalThreadRoute,
+          userEnvKeys: [],
+        },
+      },
+      job: claimed,
+      paths,
+      trigger: 'scheduled',
+      vault: vaultRoot,
+    })
+
+    expect(result.run).toMatchObject({
+      outcome: 'skipped_gate',
+      reason: 'managed_group_evidence_unavailable',
+      status: 'skipped',
+    })
+    expect(cronMocks.runExperimentLifecycleOutcomePrecondition).not.toHaveBeenCalled()
+    expect(cronMocks.sendAssistantMessageLocal).not.toHaveBeenCalled()
+  })
+
   it('delivers eligible Sunday superlatives through the ordinary group notification path', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-12T18:10:00.000Z'))
@@ -6629,6 +6671,7 @@ describe('assistant cron runtime orchestration', () => {
       'assistant-cron-runtime-superlatives-eligible-',
     )
     addSundaySuperlativesAutomation({ vaultRoot })
+    await addSundaySuperlativesRecapTextInput({ vaultRoot })
     const resolveScheduledExternalThreadRoute = vi.fn(async () => ({
       channel: 'telegram' as const,
       containerMemberId: 'managed-group-runtime',
@@ -6720,6 +6763,11 @@ describe('assistant cron runtime orchestration', () => {
         threadId: 'sunday-linq-group',
         threadIsDirect: false,
       },
+      vaultRoot,
+    })
+    await addSundaySuperlativesRecapTextInput({
+      channel: 'linq',
+      target: 'sunday-linq-group',
       vaultRoot,
     })
     const resolveScheduledLinqRoute = vi.fn()
@@ -9904,6 +9952,69 @@ function addSundaySuperlativesAutomation(input: {
     ],
     title: 'Sunday group superlatives',
     updatedAt: '2026-04-12T16:00:00.000Z',
+  })
+}
+
+async function addSundaySuperlativesRecapTextInput(input: {
+  channel?: 'linq' | 'telegram'
+  target?: string
+  vaultRoot: string
+}): Promise<void> {
+  const channel = input.channel ?? 'telegram'
+  const target = input.target ?? 'sunday-group-room'
+  await upsertAssistantInputEvent({
+    event: {
+      content: {
+        text: 'the group plant saga became a running bit',
+      },
+      conversation: {
+        accountId: 'group-account',
+        actorId: 'group-participant',
+        actorIsSelf: false,
+        source: channel,
+        threadId: target,
+        threadIsDirect: false,
+      },
+      occurredAt: '2026-04-10T18:00:00.000Z',
+      receivedAt: '2026-04-10T18:00:00.000Z',
+      replyTarget: {
+        channel,
+        messageId: 'group-message',
+        threadId: target,
+      },
+      sourceMetadata: channel === 'linq'
+        ? {
+            externalThreadRouteAuthorityPresent: true,
+            kind: 'linq',
+            partCount: 1,
+            reactionEligible: true,
+            replyToMessageId: null,
+            senderHandle: 'group-participant',
+            service: 'iMessage',
+          }
+        : {
+            externalThreadRouteAuthorityPresent: true,
+            kind: 'telegram',
+            mediaGroupId: null,
+            replyContext: null,
+            senderHandle: 'group-participant',
+            senderUsername: null,
+          },
+      sourceRef: {
+        dedupeKey: 'sunday_superlatives_input_dedupe',
+        eventId: 'sunday_superlatives_input',
+        itemId: 'sunday_superlatives_input_item',
+        kind: 'hosted-mailbox',
+        lane: 'conversation',
+        laneSeq: '1',
+        payloadSchema: 'murph.hosted-payload.v1',
+        payloadSource: 'sidecar',
+        source: 'hosted-mailbox',
+        wakeSchema: 'murph.hosted-wake.v1',
+      },
+    },
+    now: new Date('2026-04-10T18:00:00.000Z'),
+    vault: input.vaultRoot,
   })
 }
 

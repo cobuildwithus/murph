@@ -92,19 +92,33 @@ or a count.
 ### Composition evidence
 
 Only after Web returns `eligible`, the engine reads a separate bounded,
-occurrence-anchored transcript tail for the exact route. This evidence is for
-composition, not eligibility. Each committed user prompt is fail-closed
-projected to only its authoritative sender and corresponding message text;
-assistant turns plus source, route, actor, reaction, reply, message-reference,
-attachment, path, and lifecycle context are omitted. Transient sender handles
-are replaced with per-run aliases such as `Participant 1`, including inside
-selected message text; names and handles are not persisted, and the immutable
-seed forbids outputting the aliases. Transcript data is quoted and untrusted.
-The room model may provide ordinary advisory social context but is never
-activity, identity, membership, or participant authority.
+occurrence-anchored projection from the existing structured assistant
+input-event owner. This evidence is for composition, not eligibility. It admits
+only conversation-lane, non-self, route-authorized Linq/iMessage or Telegram
+group input whose reply target exactly matches the live group route and whose
+`occurredAt` is inside the same occurrence window. The projection reads the
+event's original text field directly; rendered provider prompts and assistant
+transcripts are never parsed for authority.
 
-No counter table, scheduler, queue, cursor, migration, dependency, or new
-durable state owner is introduced.
+Composition is deliberately text-only in this release. Any event with an
+attachment descriptor, parsed attachment evidence, or multimodal message
+content is excluded rather than attempting to recover message boundaries from
+mixed presentation text. Attachment filenames, stored paths, extracted text,
+parser state, source metadata, route and actor identifiers, reactions, replies,
+and message references never enter recap evidence. Delimiter-like human text
+remains one JSON-quoted untrusted message and cannot create another sender or
+record.
+
+Transient authoritative senders are replaced with per-run aliases such as
+`Participant 1`, including inside selected message text; names and handles are
+not persisted, and the immutable seed forbids outputting the aliases. Missing,
+unreadable, over-cap, empty, or attachment-only structured evidence consumes
+the occurrence as a silent gate skip before lifecycle hooks, provider/model
+work, or outbox creation. The room model may provide ordinary advisory social
+context but is never activity, identity, membership, or participant authority.
+
+No counter table, scheduler, queue, cursor, parser protocol, migration,
+dependency, or new durable state owner is introduced.
 
 ## Future weekly one-person check-in
 

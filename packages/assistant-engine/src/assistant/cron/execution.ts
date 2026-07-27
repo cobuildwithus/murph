@@ -142,6 +142,8 @@ const ASSISTANT_CRON_MANAGED_GROUP_ACTIVITY_INELIGIBLE_ERROR =
   'Managed group automation did not meet its private activity eligibility policy.'
 const ASSISTANT_CRON_MANAGED_GROUP_ACTIVITY_UNAVAILABLE_ERROR =
   'Managed group automation activity eligibility could not be proven.'
+const ASSISTANT_CRON_MANAGED_GROUP_EVIDENCE_UNAVAILABLE_ERROR =
+  'Managed group automation composition evidence could not be proven.'
 const ASSISTANT_CRON_FOREGROUND_YIELDED_ERROR =
   'Assistant cron yielded to fresh foreground input.'
 const ASSISTANT_CRON_NEWSLETTER_DELIVERY_FAILED_ERROR =
@@ -530,6 +532,7 @@ export async function executeClaimedAssistantCronJob(
   }
   let managedOwnerSkipReason: string | null = null
   let managedActivitySkipReason: string | null = null
+  let managedGroupRecapEvidence: string | null = null
   let managedGroupActivityTimeZone: string | null = null
   // Preemptible background maintenance has exactly one yield owner: the
   // maintenance cancellation below. Wiring the generic foreground poller too
@@ -631,7 +634,26 @@ export async function executeClaimedAssistantCronJob(
         signal: yieldCancellation.signal,
         timeZone: managedGroupActivityTimeZone,
       })
-      if (status !== 'eligible') {
+      if (
+        status === 'eligible' &&
+        (managedOwnerAuthorization.channel === 'linq' ||
+          managedOwnerAuthorization.channel === 'telegram') &&
+        managedOwnerAuthorization.target &&
+        managedGroupActivityTimeZone
+      ) {
+        managedGroupRecapEvidence =
+          await buildAssistantManagedGroupRecapEvidence({
+            channel: managedOwnerAuthorization.channel,
+            occurrenceAt,
+            target: managedOwnerAuthorization.target,
+            timeZone: managedGroupActivityTimeZone,
+            vault: input.vault,
+          })
+        if (managedGroupRecapEvidence === null) {
+          managedActivitySkipReason =
+            ASSISTANT_CRON_MANAGED_GROUP_EVIDENCE_UNAVAILABLE_ERROR
+        }
+      } else if (status !== 'eligible') {
         managedActivitySkipReason = status === 'ineligible'
           ? ASSISTANT_CRON_MANAGED_GROUP_ACTIVITY_INELIGIBLE_ERROR
           : ASSISTANT_CRON_MANAGED_GROUP_ACTIVITY_UNAVAILABLE_ERROR
@@ -689,7 +711,10 @@ export async function executeClaimedAssistantCronJob(
       reason = managedActivitySkipReason ===
           ASSISTANT_CRON_MANAGED_GROUP_ACTIVITY_INELIGIBLE_ERROR
         ? 'managed_group_activity_ineligible'
-        : 'managed_group_activity_unavailable'
+        : managedActivitySkipReason ===
+            ASSISTANT_CRON_MANAGED_GROUP_EVIDENCE_UNAVAILABLE_ERROR
+          ? 'managed_group_evidence_unavailable'
+          : 'managed_group_activity_unavailable'
       errorText = managedActivitySkipReason
     } else if (staleError) {
       outcome = 'expired'
@@ -884,16 +909,15 @@ export async function executeClaimedAssistantCronJob(
             ) {
               throw new AssistantCronManagedOwnerInvalidatedError()
             }
-            const recapEvidence = await buildAssistantManagedGroupRecapEvidence({
-              channel: managedOwnerAuthorization.channel,
-              occurrenceAt,
-              target: managedOwnerAuthorization.target,
-              timeZone: managedGroupActivityTimeZone,
-              vault: input.vault,
-            })
+            if (managedGroupRecapEvidence === null) {
+              throw new VaultCliError(
+                'ASSISTANT_CRON_MANAGED_GROUP_EVIDENCE_UNAVAILABLE',
+                ASSISTANT_CRON_MANAGED_GROUP_EVIDENCE_UNAVAILABLE_ERROR,
+              )
+            }
             executionInstructions = [
               executionInstructions,
-              recapEvidence,
+              managedGroupRecapEvidence,
             ].join('\n\n')
           }
           const notificationInput: Parameters<

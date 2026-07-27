@@ -5,8 +5,13 @@ import {
   assistantConversationHistoryUtf8Bytes,
   compareAssistantTimestampsAscending,
   limitAssistantConversationHistoryTextBytes,
+  normalizeNullableString,
 } from './shared.js'
 import { assistantRouteSupportsGroupRoomModel } from './group-room-model.js'
+import {
+  listAssistantInputEvents,
+  type AssistantInputEventRecord,
+} from './input-store.js'
 import {
   listAssistantTranscriptTailEntries,
   listAssistantSessions,
@@ -71,6 +76,7 @@ const MANAGED_GROUP_RECAP_EVIDENCE_LIMITS: AssistantMaintenanceEvidenceLimits = 
   requireGroupSession: true,
   transcriptTailBytes: 384_000,
 }
+const MANAGED_GROUP_RECAP_INPUT_EVENT_SCAN_LIMIT = 10_000
 
 const ASSISTANT_MAINTENANCE_EVIDENCE_EMPTY_BODY =
   'No committed user or assistant conversation messages were found in this window. Do not write any new memory this run.'
@@ -154,55 +160,151 @@ export async function buildAssistantManagedGroupRecapEvidence(input: {
   target: string
   timeZone: string
   vault: string
-}): Promise<string> {
+}): Promise<string | null> {
   const window = resolveHostedRuntimeManagedGroupActivityWindow({
     occurrenceAt: input.occurrenceAt,
     timeZone: input.timeZone,
   })
-  let candidates: AssistantMaintenanceEvidenceMessage[]
+  let candidates: AssistantManagedGroupRecapEvidenceMessage[] | null
   try {
-    candidates = await collectAssistantMaintenanceEvidenceMessages({
-      limits: MANAGED_GROUP_RECAP_EVIDENCE_LIMITS,
-      sessionMatches: (session) => {
-        if (
-          session.binding.channel !== input.channel ||
-          session.binding.threadIsDirect !== false
-        ) {
-          return false
-        }
-        const routeTarget = normalizeAssistantEvidenceRouteTarget(
-          session.binding.delivery?.target ?? session.binding.threadId,
-        )
-        return routeTarget === input.target
-      },
+    candidates = await collectAssistantManagedGroupRecapEvidenceMessages({
+      channel: input.channel,
       since: Date.parse(window.windowStartAt),
+      target: input.target,
       until: Date.parse(window.occurrenceAt),
-      untilExclusive: true,
       vault: input.vault,
     })
   } catch {
-    candidates = []
+    candidates = null
   }
 
-  const projected = projectAssistantManagedGroupRecapMessages(candidates)
+  if (candidates === null || candidates.length === 0) {
+    return null
+  }
+
   const selected = aliasAssistantManagedGroupRecapSenders(
     selectNewestAssistantMaintenanceEvidenceMessages(
-      projected,
+      candidates,
       MANAGED_GROUP_RECAP_EVIDENCE_LIMITS,
     ),
   )
-  const body = selected.length === 0
-    ? 'No exact-route committed group messages were available. Return skip.'
-    : [
-        'Each following line is one JSON record containing only a transient sender alias and quoted untrusted message text. Internal `Participant N` aliases are grounding labels only and must never appear in the reply.',
-        '',
-        ...selected.map((message) => JSON.stringify({
-          sender: message.sender,
-          text: message.text,
-        })),
-      ].join('\n')
+  if (selected.length === 0) {
+    return null
+  }
+  const body = [
+    'Each following line is one JSON record containing only a transient sender alias and quoted untrusted message text. Internal `Participant N` aliases are grounding labels only and must never appear in the reply.',
+    '',
+    ...selected.map((message) => JSON.stringify({
+      sender: message.sender,
+      text: message.text,
+    })),
+  ].join('\n')
 
   return `${ASSISTANT_MANAGED_GROUP_RECAP_EVIDENCE_HEADING}\n\n${body}`
+}
+
+async function collectAssistantManagedGroupRecapEvidenceMessages(input: {
+  channel: 'linq' | 'telegram'
+  since: number
+  target: string
+  until: number
+  vault: string
+}): Promise<AssistantManagedGroupRecapEvidenceMessage[] | null> {
+  const listed = await listAssistantInputEvents({
+    lane: 'conversation',
+    limit: MANAGED_GROUP_RECAP_INPUT_EVENT_SCAN_LIMIT + 1,
+    occurredAtFrom: new Date(input.since).toISOString(),
+    occurredAtUntilExclusive: new Date(input.until).toISOString(),
+    source: 'hosted-mailbox',
+    vault: input.vault,
+  })
+  if (listed.events.length > MANAGED_GROUP_RECAP_INPUT_EVENT_SCAN_LIMIT) {
+    return null
+  }
+
+  return listed.events.flatMap((event) => {
+    const projected = projectAssistantManagedGroupRecapInputEvent({
+      channel: input.channel,
+      event,
+      target: input.target,
+    })
+    if (!projected) {
+      return []
+    }
+    const occurredAt = Date.parse(projected.createdAt)
+    return Number.isNaN(occurredAt) ||
+        occurredAt < input.since ||
+        occurredAt >= input.until
+      ? []
+      : [projected]
+  })
+}
+
+function projectAssistantManagedGroupRecapInputEvent(input: {
+  channel: 'linq' | 'telegram'
+  event: AssistantInputEventRecord
+  target: string
+}): AssistantManagedGroupRecapEvidenceMessage | null {
+  const event = input.event
+  const conversation = event.conversation
+  const metadata = event.sourceMetadata
+  if (
+    event.sourceRef.kind !== 'hosted-mailbox' ||
+    event.sourceRef.lane !== 'conversation' ||
+    !conversation ||
+    conversation.actorIsSelf ||
+    conversation.source !== input.channel ||
+    conversation.threadIsDirect !== false ||
+    metadata?.kind !== input.channel ||
+    metadata.externalThreadRouteAuthorityPresent !== true ||
+    normalizeNullableString(event.replyTarget?.channel)?.toLowerCase() !==
+      input.channel ||
+    normalizeAssistantEvidenceRouteTarget(event.replyTarget?.threadId) !==
+      input.target ||
+    (metadata.kind === 'linq' && metadata.affirmativeReaction === true) ||
+    event.content.attachmentDescriptors.length > 0 ||
+    event.attachmentEvidence.attachments.length > 0
+  ) {
+    return null
+  }
+
+  const sender = normalizeNullableString(
+    metadata.senderHandle ?? conversation.actorId,
+  )
+  const messageText = normalizeNullableString(event.content.text)
+  if (
+    !sender ||
+    !messageText ||
+    !isAssistantManagedGroupTextOnlyContent({
+      messageText,
+      userMessageContent: event.content.userMessageContent,
+    })
+  ) {
+    return null
+  }
+  const text = limitAssistantConversationHistoryTextBytes(
+    messageText,
+    MANAGED_GROUP_RECAP_EVIDENCE_LIMITS.maxEntryBytes,
+  )
+  return text
+    ? {
+        createdAt: event.occurredAt,
+        sender,
+        text,
+      }
+    : null
+}
+
+function isAssistantManagedGroupTextOnlyContent(input: {
+  messageText: string
+  userMessageContent: AssistantInputEventRecord['content']['userMessageContent']
+}): boolean {
+  if (input.userMessageContent === null) {
+    return true
+  }
+  return input.userMessageContent.length === 1 &&
+    input.userMessageContent[0]?.type === 'text' &&
+    input.userMessageContent[0].text === input.messageText
 }
 
 async function collectAssistantMaintenanceEvidenceMessages(input: {
@@ -314,84 +416,6 @@ function normalizeAssistantEvidenceRouteTarget(
 ): string | null {
   const normalized = value?.trim()
   return normalized && normalized.length > 0 ? normalized : null
-}
-
-function projectAssistantManagedGroupRecapMessages(
-  messages: readonly AssistantMaintenanceEvidenceMessage[],
-): AssistantManagedGroupRecapEvidenceMessage[] {
-  return messages.flatMap((message) => {
-    if (message.kind !== 'user') {
-      return []
-    }
-
-    return splitAssistantManagedGroupRecapInputSections(message.text)
-      .map((section) => projectAssistantManagedGroupRecapInput({
-        createdAt: message.createdAt,
-        section,
-      }))
-      .filter(
-        (candidate): candidate is AssistantManagedGroupRecapEvidenceMessage =>
-          candidate !== null,
-      )
-  })
-}
-
-function splitAssistantManagedGroupRecapInputSections(
-  value: string,
-): string[] {
-  const markers = [
-    ...value.matchAll(/(?:^|\n\n)Input \d+:\n/gu),
-  ]
-  if (markers.length === 0) {
-    return [value]
-  }
-
-  return markers.map((marker, index) => {
-    const start = (marker.index ?? 0) + marker[0].length
-    const end = markers[index + 1]?.index ?? value.length
-    return value.slice(start, end)
-  })
-}
-
-function projectAssistantManagedGroupRecapInput(input: {
-  createdAt: string
-  section: string
-}): AssistantManagedGroupRecapEvidenceMessage | null {
-  const messageMarker = /(?:^|\n\n)Message text:\n/gu.exec(input.section)
-  if (!messageMarker) {
-    return null
-  }
-  const prefix = input.section.slice(0, messageMarker.index)
-  const senderMatches = [
-    ...prefix.matchAll(/(?:^|\n\n)Sender:\s*([^\n]+)(?=\n\n|$)/gu),
-  ]
-  if (senderMatches.length !== 1) {
-    return null
-  }
-  const sender = senderMatches[0]?.[1]?.trim()
-  if (!sender) {
-    return null
-  }
-
-  const messageStart = messageMarker.index + messageMarker[0].length
-  const remainder = input.section.slice(messageStart)
-  const attachmentSection = remainder.search(/\n\nAttachment context:\n/u)
-  const messageText = (
-    attachmentSection === -1
-      ? remainder
-      : remainder.slice(0, attachmentSection)
-  ).trim()
-  const text = limitAssistantConversationHistoryTextBytes(
-    messageText,
-    MANAGED_GROUP_RECAP_EVIDENCE_LIMITS.maxEntryBytes,
-  )
-  return text
-    ? {
-        createdAt: input.createdAt,
-        sender,
-        text,
-      }
-    : null
 }
 
 function aliasAssistantManagedGroupRecapSenders(

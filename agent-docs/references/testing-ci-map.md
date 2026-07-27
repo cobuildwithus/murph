@@ -111,9 +111,12 @@ mailbox semantics, occurrence and commit boundaries, Linq assistant/reaction
 exclusions, Telegram inclusion, exact runtime/route binding, bounded scanning,
 and malformed fail-closed behavior without logging private evidence.
 Cloudflare tests lock the signed status-only port and exact POST allowlist.
-Maintenance-evidence tests prove the eligible recap tail is exact-route,
-occurrence-anchored, bounded, and sender-redacted before the ordinary group
-outbox path.
+Maintenance-evidence tests prove recap composition is projected from exact-
+route structured input events, occurrence-anchored, bounded, and sender-redacted
+before the ordinary group outbox path. Delimiter-bearing human text stays one
+quoted message; rendered transcript structure is ignored; attachment
+descriptors, extracted text, filenames, stored paths, and lifecycle metadata do
+not enter evidence; and attachment-only input fails closed before provider work.
 
 ## Current CI Workflows
 
