@@ -17,8 +17,9 @@ export interface HostedUsageCreditSettlementResult
 
 interface LockedHostedUsageCreditGrant {
   entryId: string;
-  purchaseId: string;
-  remainingCreditUsdMicros: bigint;
+  purchaseId: string | null;
+  referralId: string | null;
+  remainingUsdMicros: bigint;
 }
 
 const USAGE_DEBIT_SEMANTIC_SOURCE_VERSION = "v1";
@@ -106,33 +107,51 @@ export async function settleHostedUsageCreditForUsageTx(input: {
       break;
     }
     if (
-      grant.remainingCreditUsdMicros <= 0n
+      grant.remainingUsdMicros <= 0n
+      || (grant.purchaseId === null) === (grant.referralId === null)
     ) {
       throw new TypeError("Hosted usage-credit eligible grant invariant failed.");
     }
 
     const allocationUsdMicros = minHostedUsageCreditBigInt(
       remainingDebitUsdMicros,
-      grant.remainingCreditUsdMicros,
+      grant.remainingUsdMicros,
       projection.balanceUsdMicros,
     );
     if (allocationUsdMicros <= 0n) {
       continue;
     }
 
-    const purchaseUpdated = await input.tx.hostedUsageCreditPurchase.updateMany({
+    const nextRemainingUsdMicros =
+      grant.remainingUsdMicros - allocationUsdMicros;
+    const grantUpdated = await input.tx.hostedUsageCreditGrant.updateMany({
       where: {
-        beneficiaryMemberId: input.beneficiaryMemberId,
-        id: grant.purchaseId,
-        remainingCreditUsdMicros: grant.remainingCreditUsdMicros,
+        entryId: grant.entryId,
+        remainingUsdMicros: grant.remainingUsdMicros,
       },
       data: {
-        remainingCreditUsdMicros:
-          grant.remainingCreditUsdMicros - allocationUsdMicros,
+        remainingUsdMicros: nextRemainingUsdMicros,
       },
     });
-    if (purchaseUpdated.count !== 1) {
-      throw new TypeError("Hosted usage-credit debit lost its locked purchase.");
+    if (grantUpdated.count !== 1) {
+      throw new TypeError("Hosted usage-credit debit lost its locked grant.");
+    }
+
+    if (grant.purchaseId) {
+      const purchaseUpdated =
+        await input.tx.hostedUsageCreditPurchase.updateMany({
+          where: {
+            beneficiaryMemberId: input.beneficiaryMemberId,
+            id: grant.purchaseId,
+            remainingCreditUsdMicros: grant.remainingUsdMicros,
+          },
+          data: {
+            remainingCreditUsdMicros: nextRemainingUsdMicros,
+          },
+        });
+      if (purchaseUpdated.count !== 1) {
+        throw new TypeError("Hosted usage-credit debit lost its purchase projection.");
+      }
     }
 
     projection = await applyHostedUsageCreditProjectionDeltaTx({
@@ -149,7 +168,11 @@ export async function settleHostedUsageCreditForUsageTx(input: {
         id: generateHostedRandomPrefixedId("huce"),
         kind: "usage_debit",
         parentGrantEntryId: grant.entryId,
-        purchaseId: grant.purchaseId,
+        ...(grant.purchaseId !== null
+          ? { purchaseId: grant.purchaseId }
+          : grant.referralId !== null
+            ? { referralId: grant.referralId }
+            : {}),
         semanticSourceKey: buildHostedUsageCreditUsageDebitSemanticSourceKey({
           grantEntryId: grant.entryId,
           sourceUsageId: input.sourceUsageId,
@@ -177,16 +200,17 @@ async function lockHostedUsageCreditAvailableGrantsTx(input: {
   return input.tx.$queryRaw<LockedHostedUsageCreditGrant[]>`
     SELECT
       entry."id" AS "entryId",
-      purchase."id" AS "purchaseId",
-      purchase."remaining_credit_usd_micros" AS "remainingCreditUsdMicros"
+      entry."purchase_id" AS "purchaseId",
+      entry."referral_id" AS "referralId",
+      grant_projection."remaining_usd_micros" AS "remainingUsdMicros"
     FROM "hosted_usage_credit_entry" AS entry
-    INNER JOIN "hosted_usage_credit_purchase" AS purchase
-      ON purchase."id" = entry."purchase_id"
+    INNER JOIN "hosted_usage_credit_grant" AS grant_projection
+      ON grant_projection."entry_id" = entry."id"
     WHERE entry."beneficiary_member_id" = ${input.beneficiaryMemberId}
-      AND entry."kind" = 'purchase_grant'
-      AND purchase."remaining_credit_usd_micros" > 0
+      AND entry."kind" IN ('purchase_grant', 'referral_grant')
+      AND grant_projection."remaining_usd_micros" > 0
     ORDER BY entry."beneficiary_sequence" ASC
-    FOR UPDATE OF entry, purchase
+    FOR UPDATE OF entry, grant_projection
   `;
 }
 

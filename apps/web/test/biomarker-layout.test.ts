@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 
-import { createElement } from "react";
+import {
+  createElement,
+  type HTMLAttributes,
+  type ReactNode,
+} from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, expect, test, vi } from "vitest";
 
@@ -18,6 +22,42 @@ vi.mock("next/navigation", () => ({
     refresh: vi.fn(),
   }),
 }));
+
+vi.mock("@/src/components/ui/dialog", async () => {
+  const React = await vi.importActual<typeof import("react")>("react");
+
+  return {
+    Dialog: ({
+      children,
+      open,
+    }: {
+      children?: ReactNode;
+      open?: boolean;
+    }) =>
+      open ? React.createElement(React.Fragment, null, children) : null,
+    DialogContent: ({
+      children,
+      showCloseButton,
+      ...props
+    }: HTMLAttributes<HTMLDivElement> & { showCloseButton?: boolean }) =>
+      React.createElement(
+        "div",
+        {
+          ...props,
+          "data-show-close-button": String(showCloseButton),
+          "data-slot": "dialog-content",
+          role: "dialog",
+        },
+        children,
+      ),
+    DialogDescription: (props: HTMLAttributes<HTMLParagraphElement>) =>
+      React.createElement("p", props),
+    DialogHeader: (props: HTMLAttributes<HTMLDivElement>) =>
+      React.createElement("div", props),
+    DialogTitle: (props: HTMLAttributes<HTMLHeadingElement>) =>
+      React.createElement("h2", props),
+  };
+});
 
 vi.mock("@/src/lib/hosted-onboarding/page-auth", () => ({
   getHostedDashboardLayoutAuthSnapshot:
@@ -166,8 +206,9 @@ test("dashboard layout keeps pages usable while showing stale legal acceptance",
   );
 
   assert.match(markup, /data-dashboard-legal-consent-gate="true"/);
+  assert.match(markup, /data-slot="dialog-content"/);
+  assert.match(markup, /data-show-close-button="false"/);
   assert.match(markup, /Review what changed/u);
-  assert.match(markup, /Current documents/u);
   assert.match(markup, /data-dashboard-child="true"/);
   expect(mocks.hostedConsentGrantFindMany).toHaveBeenCalledWith({
     orderBy: [{ scope: "asc" }],
@@ -216,8 +257,9 @@ test.each([
   );
 
   assert.match(markup, /data-dashboard-legal-consent-gate="true"/);
+  assert.match(markup, /data-slot="dialog-content"/);
+  assert.match(markup, /data-show-close-button="false"/);
   assert.match(markup, /Finish your consent/u);
-  assert.match(markup, /Required documents/u);
   assert.doesNotMatch(markup, /Review what changed/u);
   assert.match(markup, /data-dashboard-child="true"/);
 });

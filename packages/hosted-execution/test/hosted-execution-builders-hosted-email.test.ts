@@ -691,8 +691,9 @@ describe("hosted execution wake builders", () => {
 
     expect(
       buildHostedExecutionDeviceSyncWake({
-        connectionId: null,
+        connectionId: "conn_device_sync_1",
         eventId: "device-sync-1",
+        expectedConnectedAt: "2026-04-25T00:00:00.000Z",
         hint: null,
         occurredAt,
         provider: null,
@@ -700,8 +701,9 @@ describe("hosted execution wake builders", () => {
         userId: "user_123",
       }),
     ).toEqual({
-      connectionId: null,
+      connectionId: "conn_device_sync_1",
       eventId: "device-sync-1",
+      expectedConnectedAt: "2026-04-25T00:00:00.000Z",
       hint: null,
       kind: "device-sync.wake",
       occurredAt,
