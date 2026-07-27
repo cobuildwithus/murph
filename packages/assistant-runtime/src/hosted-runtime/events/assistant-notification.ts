@@ -131,6 +131,7 @@ export async function executeHostedAssistantNotificationWake(input: {
   ];
   let seededOnboardingFollowupWakeAt: string | null = null;
   let notificationDecisionKind: string | null = null;
+  let deliveryIntentIds: string[] = [];
 
   try {
     const notificationResult = await sendAssistantNotification(
@@ -147,6 +148,12 @@ export async function executeHostedAssistantNotificationWake(input: {
       ),
     );
     notificationDecisionKind = notificationResult?.decision.kind ?? null;
+    const deliveryOutcome = notificationResult?.deliveryOutcome ?? null;
+    const deliveryIntentId =
+      deliveryOutcome && "intentId" in deliveryOutcome
+        ? deliveryOutcome.intentId
+        : null;
+    deliveryIntentIds = deliveryIntentId ? [deliveryIntentId] : [];
     if (isHostedSignupWelcomeNotification(input.wake)) {
       seededOnboardingFollowupWakeAt = await maybeSeedOnboardingFollowupAutomation({
         logDetails: buildHostedAssistantNotificationLogDetails(input.wake),
@@ -190,6 +197,7 @@ export async function executeHostedAssistantNotificationWake(input: {
 
   return createNoopMailboxEffect({
     conversationMetrics: null,
+    deliveryIntentIds,
     mailboxLane: "assistant-notification",
     nextWakeAt: seededOnboardingFollowupWakeAt,
     nextWakeReason: seededOnboardingFollowupWakeAt ? HOSTED_ASSISTANT_WAKE_REASON : null,

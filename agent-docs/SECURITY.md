@@ -52,6 +52,32 @@ Last verified: 2026-07-26
   wakes may use current unique blind-index resolution only as bounded
   compatibility; an unmatched legacy sender falls back to the existing keyed
   opaque identity, while ambiguous or malformed evidence still fails closed.
+- Hosted usage-referral authority is web-owned and current-sender-bound. The
+  model may choose only a versioned policy code after one exact current sender
+  explicitly accepts; it cannot supply a referrer, beneficiary, amount, source,
+  target, route, provider id, counter, or qualification fact. Personal calls
+  bind the callback member and persist only the runtime-injected source channel,
+  blinded exact-thread locator, and directness fact. Celebration queueing
+  re-resolves the frozen channel and requires the same direct thread.
+  A personal Linq wake freezes that resolved source as an explicit delivery
+  target so provider entry cannot replace it with a newer home route; source
+  revocation fails closed. Group celebrations carry live external-thread
+  authority. Celebration instructions never persist a detached profile name.
+  Group calls require
+  exactly one runtime-injected
+  provider-scoped sender handle that resolves to an active personal member;
+  mixed-channel, missing, or ambiguous sender evidence fails closed.
+  Provider adapters store only domain-separated lookup keys and bounded
+  counters. Unlinked Telegram group messages may contribute evidence only for
+  an already-bound target and must remain outside the assistant mailbox,
+  visible setup-reply path, and authorization path. Referral cap commitments
+  include bound rows through the server-owned 25-hour late-evidence grace and
+  rewards mutate only through the beneficiary lock and server policy catalog;
+  browser state and model output never reserve or grant credit. The
+  Web owner fails arming, binding, and observation closed unless
+  `HOSTED_USAGE_REFERRALS_ENABLED=1`; operators must not enable it until the
+  post-drain ledger contract migration has widened and validated the credit
+  entry constraints.
 - Linq participant-derived thread-container access is a bounded seven-day lease, not a permanent capability. Every canonical access consumer must use the same `lastSeenAt` and `removedAt` predicate. An authenticated group inbound may renew only an existing nonremoved relationship after server-side sender resolution; it may not upsert authority, reverse removal, regress the observation, or accept a future provider time. Provider display labels and raw contact text are never entitlement authority.
 - Account deletion must establish durable external-cleanup ownership before canonical member removal. The foreign-key-free retry receipt stores only KMS-encrypted runtime/vendor identifiers with receipt- and environment-bound authenticated data, remains pending for missing configuration, provider timeout, partial failure, or a legacy Cloudflare response without explicit `deleteAllCompleted` evidence, and is deleted only after Cloudflare, Stripe-customer, and Privy cleanup converge. Privy new-member resolution must first resolve any existing identity, then reject a pending deletion receipt, then require a bounded live-provider read; after binding, app-session issuance must lock and re-check the member so a missing or suspended deletion target cannot receive a session. Immediate and retention attempts have explicit target deadlines; the retention batch uses bounded concurrency so a stuck provider cannot become an unbounded response-path or sweep owner. Logs and the deleted member row are not retry owners.
 - A scheduled non-direct Telegram target is routing data, not authority. Before group tools, shared-data reads, or model work, the runner must ask the signed Web route owner to bind the exact Telegram thread to the callback-authenticated synthetic container member. Persist that exact typed authority on the ordinary outbox, then reassert it immediately before Telegram text, image, reaction, or voice provider entry. A missing owner/effect is retryable, a changed or mismatched owner fails closed, and neither a stored automation target nor a runner-injected provider credential may substitute for the live route assertion. Ordinary current-inbound group replies remain authorized by their admitted route and do not require manufactured scheduled authority.

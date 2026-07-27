@@ -13,8 +13,8 @@ import {
   withJsonError,
 } from "@/src/lib/hosted-onboarding/http";
 import {
-  assertHostedThreadRouteEgressAuthority,
-} from "@/src/lib/hosted-routing/thread-route-store";
+  assertHostedAssistantNotificationRouteAuthority,
+} from "@/src/lib/hosted-routing/assistant-notification-destination";
 import { readOptionalJsonObject } from "@/src/lib/http";
 import { getPrisma } from "@/src/lib/prisma";
 
@@ -36,7 +36,7 @@ export const POST = withJsonError(async (request: Request) => {
     });
   }
 
-  await assertHostedThreadRouteEgressAuthority({
+  await assertHostedAssistantNotificationRouteAuthority({
     authority,
     prisma: getPrisma(),
   });

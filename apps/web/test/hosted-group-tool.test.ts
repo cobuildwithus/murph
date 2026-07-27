@@ -385,6 +385,8 @@ describe("handleHostedRuntimeGroupTool", () => {
     expect(HOSTED_RUNTIME_GROUP_TOOL_ACCESS_CLASSIFICATION).toEqual({
       ask: "personal_active",
       ask_member: "participant_aware",
+      arm_usage_referral: "participant_aware",
+      cancel_usage_referral: "participant_aware",
       create_join_link: "owner_active",
       leave_membership: "participant_aware",
       list_memberships: "personal_active",
@@ -395,6 +397,7 @@ describe("handleHostedRuntimeGroupTool", () => {
       read_current: "participant_aware",
       revoke_disclosure_grant: "personal_active",
       read_usage: "participant_aware",
+      read_usage_referral: "participant_aware",
       read_shared: "participant_aware",
       revoke_own_email_share: "participant_aware",
       set_chat_avatar: "owner_active",
