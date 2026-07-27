@@ -164,7 +164,7 @@ export async function handleHostedRuntimeGroupTool(input: {
   scheduleMailboxWake?: (input: {
     expectedUserId: string;
     mailboxItemId: string;
-  }) => void;
+  }) => Promise<void>;
 }): Promise<HostedRuntimeGroupToolResponse> {
   if (input.request.action === "ask") {
     const admission = await requestHostedGroupAssistantAsk({
@@ -175,7 +175,7 @@ export async function handleHostedRuntimeGroupTool(input: {
       question: input.request.question,
     });
     if (admission.mailboxWake) {
-      input.scheduleMailboxWake?.(admission.mailboxWake);
+      await input.scheduleMailboxWake?.(admission.mailboxWake);
     }
     return { action: "ask", result: admission.result };
   }
@@ -188,7 +188,7 @@ export async function handleHostedRuntimeGroupTool(input: {
       question: input.request.question,
     });
     if (admission.mailboxWake) {
-      input.scheduleMailboxWake?.(admission.mailboxWake);
+      await input.scheduleMailboxWake?.(admission.mailboxWake);
     }
     return { action: "ask_member", result: admission.result };
   }

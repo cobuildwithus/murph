@@ -22,15 +22,12 @@ vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
 }));
 
 import {
-  scheduleHostedMailboxWakeAfterResponse,
+  handoffHostedMailboxWake,
 } from "@/src/lib/hosted-orchestration/mailbox-wake";
 
-describe("hosted mailbox direct wake scheduler", () => {
+describe("hosted mailbox wake handoff", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.after.mockImplementation((task: () => Promise<void>) => {
-      void task();
-    });
     mocks.startHostedDirectRuntimeWakeBestEffort.mockResolvedValue(undefined);
   });
 
@@ -49,21 +46,21 @@ describe("hosted mailbox direct wake scheduler", () => {
       },
     );
 
-    scheduleHostedMailboxWakeAfterResponse({
+    const handoff = handoffHostedMailboxWake({
       directWakeSource: "assistant-ask-completion",
       expectedUserId: "member-private",
       mailboxItemId: "aask_done_one",
     });
 
-    expect(mocks.after).toHaveBeenCalledTimes(1);
+    expect(mocks.after).not.toHaveBeenCalled();
     expect(mocks.startHostedDirectRuntimeWakeBestEffort).not.toHaveBeenCalled();
     acceptTemporal();
-    await vi.waitFor(() => {
-      expect(mocks.startHostedDirectRuntimeWakeBestEffort).toHaveBeenCalledWith({
-        source: "assistant-ask-completion",
-        userId: "member-private",
-      });
+    await handoff;
+    expect(mocks.startHostedDirectRuntimeWakeBestEffort).toHaveBeenCalledWith({
+      source: "assistant-ask-completion",
+      userId: "member-private",
     });
+    expect(mocks.after).toHaveBeenCalledWith(expect.any(Function));
     expect(order).toEqual(["temporal", "direct"]);
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
       expectedUserId: "member-private",
@@ -71,20 +68,38 @@ describe("hosted mailbox direct wake scheduler", () => {
     });
   });
 
-  it("never bypasses a rejected Temporal signal", async () => {
+  it("rejects the handoff and never schedules a direct wake when Temporal rejects", async () => {
     mocks.signalHostedMailboxAppendRuntime.mockRejectedValueOnce(
       new Error("Temporal unavailable"),
     );
 
-    scheduleHostedMailboxWakeAfterResponse({
+    await expect(handoffHostedMailboxWake({
       directWakeSource: "assistant-ask-request",
       expectedUserId: "member-group-runtime",
       mailboxItemId: "aask_req_one",
-    });
+    })).rejects.toThrow("Temporal unavailable");
 
-    await vi.waitFor(() => {
-      expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledTimes(1);
-    });
+    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledTimes(1);
+    expect(mocks.after).not.toHaveBeenCalled();
     expect(mocks.startHostedDirectRuntimeWakeBestEffort).not.toHaveBeenCalled();
+  });
+
+  it("does not wait for the best-effort direct wake before completing handoff", async () => {
+    mocks.signalHostedMailboxAppendRuntime.mockResolvedValueOnce({
+      signalAccepted: true,
+      workflowId: "hosted-user-runtime:member-private",
+    });
+    mocks.startHostedDirectRuntimeWakeBestEffort.mockReturnValueOnce(
+      new Promise<void>(() => {}),
+    );
+
+    await expect(handoffHostedMailboxWake({
+      directWakeSource: "assistant-ask-completion",
+      expectedUserId: "member-private",
+      mailboxItemId: "aask_done_one",
+    })).resolves.toBeUndefined();
+
+    expect(mocks.startHostedDirectRuntimeWakeBestEffort).toHaveBeenCalledTimes(1);
+    expect(mocks.after).toHaveBeenCalledWith(expect.any(Function));
   });
 });

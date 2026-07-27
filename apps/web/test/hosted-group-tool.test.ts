@@ -463,6 +463,30 @@ describe("handleHostedRuntimeGroupTool", () => {
     });
   });
 
+  it("does not acknowledge a personal ask when its durable mailbox handoff rejects", async () => {
+    const signalError = new Error("Temporal unavailable");
+    const scheduleMailboxWake = vi.fn().mockRejectedValue(signalError);
+    mocks.requestHostedGroupAssistantAsk.mockResolvedValue({
+      mailboxWake: {
+        expectedUserId: "member_group_runtime",
+        mailboxItemId: "aask_req_one",
+      },
+      result: { status: "accepted", targetLabel: "100 Club" },
+    });
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_self",
+      request: {
+        action: "ask",
+        groupLabel: "100 Club",
+        originAssistantInputId: `ain_${"a".repeat(32)}`,
+        originSessionId: "session_private",
+        question: "What is today's workout?",
+      },
+      scheduleMailboxWake,
+    })).rejects.toBe(signalError);
+  });
+
   it("dispatches a grant-bound group ask and schedules only its committed private wake", async () => {
     const scheduleMailboxWake = vi.fn();
     mocks.requestHostedGroupMemberAssistantAsk.mockResolvedValue({

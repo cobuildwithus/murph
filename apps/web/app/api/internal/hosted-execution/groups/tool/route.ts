@@ -21,7 +21,7 @@ import {
 } from "@/src/lib/hosted-execution/cloudflare-callback-auth";
 import { jsonError, jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
 import {
-  scheduleHostedMailboxWakeAfterResponse,
+  handoffHostedMailboxWake,
 } from "@/src/lib/hosted-orchestration/mailbox-wake";
 import {
   readHostedVaultShareSupportedProjectionScopeKeysFromRequest,
@@ -42,12 +42,11 @@ export const POST = withJsonError(async (request: Request) => {
     await handleHostedRuntimeGroupTool({
       memberId,
       request: body,
-      scheduleMailboxWake: (wake) => {
-        scheduleHostedMailboxWakeAfterResponse({
+      scheduleMailboxWake: (wake) =>
+        handoffHostedMailboxWake({
           ...wake,
           directWakeSource: "assistant-ask-request",
-        });
-      },
+        }),
     }),
     supportedProjectionScopeKeys,
   );
