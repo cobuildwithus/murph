@@ -1244,12 +1244,29 @@ export class DeviceSyncPublicIngress {
         });
       }
 
-      const callbackError = normalizeString(callbackQuery.get("error"));
-      if (callbackError && resolveDeviceProviderConnectionDescriptor(provider.descriptor).kind === "oauth2") {
-        this.logger.warn?.("OAuth callback was rejected by the provider.", {
-          provider: provider.provider,
-          callbackError,
-        });
+      if (descriptor.connectionKind === "oauth2") {
+        const callbackError = normalizeString(callbackQuery.get("error"));
+        if (callbackError) {
+          this.logger.warn?.("OAuth callback was rejected by the provider.", {
+            provider: provider.provider,
+            callbackError,
+          });
+          throw deviceSyncError({
+            code: "OAUTH_CALLBACK_REJECTED",
+            message: "OAuth authorization was denied or canceled.",
+            retryable: false,
+            httpStatus: 400,
+          });
+        }
+
+        if (!normalizeString(callbackQuery.get("code"))) {
+          throw deviceSyncError({
+            code: "OAUTH_CODE_MISSING",
+            message: "OAuth callback is missing the authorization code.",
+            retryable: false,
+            httpStatus: 400,
+          });
+        }
       }
 
       const grantedScopes = splitScopeList(input.scope ?? callbackQuery.get("scope"));
@@ -1399,7 +1416,7 @@ export class DeviceSyncPublicIngress {
         } catch (cleanupError) {
           throw attachOAuthCallbackContext(cleanupError, callbackContext);
         }
-      } else {
+      } else if (!providerConnectionAttempted) {
         callbackCleanupConfirmed = true;
       }
 

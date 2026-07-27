@@ -377,6 +377,36 @@ class InMemoryPublicIngressStore implements DeviceSyncPublicIngressStore {
   }
 }
 
+class FencedOAuthTestStore extends InMemoryPublicIngressStore {
+  readonly completedCallbacks: PublicDeviceSyncOAuthConnectionCallbackReference[] = [];
+
+  stageConnectionStart(input: OAuthStateRecord): void {
+    this.createOAuthState(input);
+  }
+
+  commitConnectionStart(input: CommitPublicDeviceSyncConnectionStartInput): void {
+    this.createOAuthState({
+      ...input.oauthState,
+      metadata: {
+        ...(input.oauthState.metadata ?? {}),
+        [DEVICE_SYNC_CONNECTION_START_PENDING_STATE_METADATA_KEY]: true,
+      },
+    });
+  }
+
+  commitOAuthConnectionCallback(
+    input: CommitPublicDeviceSyncOAuthConnectionCallbackInput,
+  ): PublicDeviceSyncAccount {
+    return super.upsertConnection(input.connection);
+  }
+
+  completeOAuthConnectionCallback(
+    input: PublicDeviceSyncOAuthConnectionCallbackReference,
+  ): void {
+    this.completedCallbacks.push(input);
+  }
+}
+
 function readOAuthCredentialTokens(input: UpsertPublicDeviceSyncConnectionInput): ProviderAuthTokens | null {
   if (input.credential) {
     return input.credential.kind === "oauth_tokens" ? input.credential.tokens : null;
@@ -2232,6 +2262,112 @@ test("public ingress retains a hosted OAuth marker through token exchange, conne
   assert.equal(
     providerStateMetadata?.[DEVICE_SYNC_CONNECTION_START_PENDING_STATE_METADATA_KEY],
     undefined,
+  );
+});
+
+test("public ingress retains a hosted OAuth marker when provider exchange rejects before returning a connection", async () => {
+  const exchangeError = new Error("provider accepted the code but its token response was lost");
+  let exchangeStarted = false;
+
+  const store = new FencedOAuthTestStore();
+  const ingress = createDeviceSyncPublicIngress({
+    publicBaseUrl: "https://sync.example.test/device-sync",
+    registry: createDeviceSyncRegistry([
+      createFakeProvider({
+        async completeConnection() {
+          exchangeStarted = true;
+          throw exchangeError;
+        },
+      }),
+    ]),
+    store,
+  });
+  const started = await ingress.startConnection({
+    ownerId: "member-active",
+    provider: "demo",
+  });
+
+  await assert.rejects(
+    () =>
+      ingress.handleOAuthCallback({
+        code: "callback-code",
+        expectedOwnerId: "member-active",
+        provider: "demo",
+        state: started.state,
+      }),
+    (error: unknown) => error === exchangeError,
+  );
+
+  assert.equal(exchangeStarted, true);
+  assert.deepEqual(store.completedCallbacks, []);
+});
+
+test("public ingress completes hosted OAuth markers for callbacks rejected before provider exchange", async () => {
+  let providerCallbackCalls = 0;
+
+  const store = new FencedOAuthTestStore();
+  const provider = createFakeProvider({
+    async completeConnection(input) {
+      providerCallbackCalls += 1;
+      if (input.query.get("error")) {
+        throw deviceSyncError({
+          code: "OAUTH_CALLBACK_REJECTED",
+          message: "OAuth authorization was denied or canceled.",
+          retryable: false,
+          httpStatus: 400,
+        });
+      }
+      throw deviceSyncError({
+        code: "OAUTH_CODE_MISSING",
+        message: "OAuth callback is missing the authorization code.",
+        retryable: false,
+        httpStatus: 400,
+      });
+    },
+  });
+  const ingress = createDeviceSyncPublicIngress({
+    publicBaseUrl: "https://sync.example.test/device-sync",
+    registry: createDeviceSyncRegistry([provider]),
+    store,
+  });
+
+  const denied = await ingress.startConnection({
+    ownerId: "member-active",
+    provider: "demo",
+  });
+  await assert.rejects(
+    () =>
+      ingress.handleOAuthCallback({
+        error: "access_denied",
+        expectedOwnerId: "member-active",
+        provider: "demo",
+        state: denied.state,
+      }),
+    (error: unknown) =>
+      error instanceof DeviceSyncError
+      && error.code === "OAUTH_CALLBACK_REJECTED",
+  );
+
+  const missingCode = await ingress.startConnection({
+    ownerId: "member-active",
+    provider: "demo",
+  });
+  await assert.rejects(
+    () =>
+      ingress.handleOAuthCallback({
+        expectedOwnerId: "member-active",
+        provider: "demo",
+        state: missingCode.state,
+      }),
+    (error: unknown) =>
+      error instanceof DeviceSyncError
+      && error.code === "OAUTH_CODE_MISSING",
+  );
+
+  assert.equal(providerCallbackCalls, 0);
+  assert.deepEqual(
+    store.completedCallbacks.map((callback) => callback.state),
+    [denied.state, missingCode.state],
   );
 });
 

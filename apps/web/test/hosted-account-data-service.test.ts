@@ -2886,6 +2886,105 @@ describe.skipIf(!runPostgresConcurrencyProof)(
       }
     });
 
+    it("keeps an expired consumed OAuth marker live after an ambiguous provider exchange failure", async () => {
+      const fixture = await createPostgresAccountDeletionFixture();
+      const exchangeError = new Error("provider accepted the code but its token response was lost");
+      let exchangeStarted = false;
+      const provider = {
+        connectionHandler: {
+          beginConnection: async () => ({
+            authorizationUrl: "https://oura.example.test/oauth",
+          }),
+          completeConnection: async () => {
+            exchangeStarted = true;
+            throw exchangeError;
+          },
+        },
+        descriptor: {
+          connection: {
+            callbackPath: "/connect/oura/callback",
+            kind: "oauth2",
+          },
+          displayName: "Oura",
+          normalization: {
+            metricFamilies: ["sleep"],
+            snapshotParser: "schema",
+          },
+          provider: "oura",
+          sourcePriorityHints: {
+            defaultPriority: 90,
+            metricFamilies: {
+              sleep: 90,
+            },
+          },
+          transportModes: ["oauth_callback", "scheduled_poll"],
+        },
+        provider: "oura",
+      } satisfies DeviceSyncProvider;
+      const registry = {
+        get: (providerName: string) => providerName === provider.provider
+          ? provider
+          : undefined,
+        list: () => [provider],
+        register: () => {
+          throw new TypeError("The fixed test registry does not accept registrations.");
+        },
+      } satisfies DeviceSyncRegistry;
+      const ingress = createDeviceSyncPublicIngress({
+        publicBaseUrl: "https://sync.example.test/device-sync",
+        registry,
+        store: fixture.store,
+      });
+
+      try {
+        const started = await ingress.startConnection({
+          ownerId: fixture.memberId,
+          provider: provider.provider,
+        });
+
+        await expect(ingress.handleOAuthCallback({
+          code: "callback-code",
+          expectedOwnerId: fixture.memberId,
+          provider: provider.provider,
+          state: started.state,
+        })).rejects.toBe(exchangeError);
+        expect(exchangeStarted).toBe(true);
+
+        await fixture.prisma.deviceOauthSession.update({
+          data: { expiresAt: new Date("2020-07-26T12:30:00.000Z") },
+          where: { state: started.state },
+        });
+        await expect(fixture.prisma.deviceOauthSession.findUnique({
+          select: { consumedAt: true, metadataJson: true },
+          where: { state: started.state },
+        })).resolves.toEqual({
+          consumedAt: expect.any(Date),
+          metadataJson: expect.objectContaining({
+            [DEVICE_SYNC_CONNECTION_START_PENDING_STATE_METADATA_KEY]: true,
+          }),
+        });
+
+        await expect(deleteHostedAccountData({
+          memberId: fixture.memberId,
+          prisma: fixture.prisma,
+          request: new Request("https://join.example.test/settings"),
+        })).rejects.toMatchObject({
+          code: "ACCOUNT_DELETION_DEVICE_CONNECTION_START_IN_PROGRESS",
+          httpStatus: 409,
+          retryable: true,
+        });
+        await expect(fixture.prisma.hostedMember.findUnique({
+          select: { suspendedAt: true },
+          where: { id: fixture.memberId },
+        })).resolves.toEqual({ suspendedAt: null });
+        await expect(fixture.prisma.deviceConnection.count({
+          where: { userId: fixture.memberId },
+        })).resolves.toBe(0);
+      } finally {
+        await cleanupPostgresAccountDeletionFixture(fixture);
+      }
+    });
+
     it("rejects an expired Junction marker plus live sibling before provider cleanup", async () => {
       const fixture = await createPostgresAccountDeletionFixture();
       const expiredState = `${fixture.state}-expired`;

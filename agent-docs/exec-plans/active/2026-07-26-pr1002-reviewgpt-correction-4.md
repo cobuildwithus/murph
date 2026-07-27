@@ -23,6 +23,9 @@ Updated: 2026-07-26
   callback still owns its pending marker.
 - Callback success is returned only after the durable connection is committed
   under the active-member fence and the exact marker is completed.
+- Provider denial and missing-code callbacks complete their marker before any
+  provider exchange, while a seedless failure after exchange may have begun
+  retains its consumed marker without positive cleanup proof.
 - Focused unit and real-PostgreSQL ordering tests pass.
 - The draft PR is reconciled with current `main`, CI passes, and the exact
   PR-specific patch receives a passing ReviewGPT correction.
@@ -64,6 +67,11 @@ Updated: 2026-07-26
    Mitigation: consumed pending markers remain fail-closed even after their
    authorization expiry; only the exact successful callback completion clears
    the pending flag.
+6. Risk: provider exchange accepts a one-time code but fails before returning a
+   connection that Murph can persist or revoke.
+   Mitigation: classify denial and missing code before provider exchange; once
+   provider completion is attempted, retain a seedless consumed marker unless
+   cleanup is positively confirmed.
 
 ## Tasks
 
@@ -82,6 +90,9 @@ Updated: 2026-07-26
    exchange, and callback commitment holding deletion after token exchange.
 7. Run scoped and canonical verification, update the draft PR, and complete the
    exact-head review/CI gate.
+8. Resolve ReviewGPT round 5's ambiguous seedless exchange finding with focused
+   ingress and real-PostgreSQL fail-closed proof; do not start a sixth
+   substantive ReviewGPT round after the repository hard cap.
 
 ## Decisions
 
@@ -98,6 +109,9 @@ Updated: 2026-07-26
   side effects. A consumed pending marker remains live past its authorization
   expiry so account deletion fails closed instead of deleting the only cleanup
   owner.
+- OAuth provider denial and missing code are ingress-owned pre-exchange
+  outcomes. Any seedless exception after provider completion is invoked remains
+  ambiguous unless a connection is returned or provider cleanup succeeds.
 
 ## Verification
 
@@ -155,4 +169,19 @@ Updated: 2026-07-26
   no container-reachable worker host can be resolved). The complete final
   reproduction used Testbox `tbx_01kyh0vv4pd6a3q9bzg4vstxnw`
   ([Actions run](https://github.com/cobuildwithus/murph/actions/runs/30239956291)).
-- Exact-head ReviewGPT correction and PR CI: pending.
+- Post-fix PR CI: pending.
+- Exact-head ReviewGPT correction round 5 returned one accepted high-severity
+  finding: an ambiguous seedless provider exchange failure cleared its marker
+  without cleanup proof. The focused regressions failed on the reviewed head
+  for that exact reason, then passed after ingress moved denial/missing-code
+  validation before provider invocation and retained every attempted seedless
+  failure without positive cleanup proof.
+- Post-fix focused verification: all 72 public-ingress tests passed; both
+  affected typechecks and affected hosted lint passed; the hosted focused lane
+  passed 91 tests with 19 opt-in cases skipped; and the fresh PostgreSQL
+  lifecycle lane passed all 95 tests, including forced expiry after an
+  ambiguous provider exchange with the member still unsuspended.
+- ReviewGPT reached the repository's five-round hard cap. No sixth substantive
+  round will run; final confidence comes from the preliminary specialist pass,
+  parent review, focused and PostgreSQL proof, PR CI, and the existing
+  acceptance evidence.
