@@ -67,10 +67,15 @@ function hasErrorCode(error: unknown, code: string): boolean {
 }
 
 function runGit(cwd: string, args: string[]): string {
+  const gitEnvironment = { ...process.env };
+  for (const key of CONFIG_KEYS) {
+    delete gitEnvironment[key];
+  }
   try {
     return execFileSync("git", args, {
       cwd,
       encoding: "utf8",
+      env: gitEnvironment,
       maxBuffer: 64 * 1024,
       stdio: ["ignore", "pipe", "ignore"],
       timeout: 5_000,
@@ -190,26 +195,27 @@ export async function loadCloudflareImagesConfig({
   const values = Object.fromEntries(
     CONFIG_KEYS.map((key) => [key, readNonempty(env[key])]),
   ) as Record<(typeof CONFIG_KEYS)[number], string | null>;
-  const roots = repoRoots ?? discoverRepoRoots(cwd);
+  if (!CONFIG_KEYS.every((key) => values[key])) {
+    const roots = repoRoots ?? discoverRepoRoots(cwd);
+    for (const envPath of resolveEnvFilePaths(roots)) {
+      if (CONFIG_KEYS.every((key) => values[key])) break;
 
-  for (const envPath of resolveEnvFilePaths(roots)) {
-    if (CONFIG_KEYS.every((key) => values[key])) break;
+      const contents = await readRegularFileNoFollow(envPath, {
+        label: "a local environment file",
+        maxBytes: MAX_ENV_FILE_BYTES,
+        optional: true,
+      });
+      if (!contents) continue;
 
-    const contents = await readRegularFileNoFollow(envPath, {
-      label: "a local environment file",
-      maxBytes: MAX_ENV_FILE_BYTES,
-      optional: true,
-    });
-    if (!contents) continue;
-
-    let parsed;
-    try {
-      parsed = parseEnv(contents.toString("utf8"));
-    } catch {
-      throw fail("Could not parse a local environment file.");
-    }
-    for (const key of CONFIG_KEYS) {
-      values[key] ??= readNonempty(parsed[key]);
+      let parsed;
+      try {
+        parsed = parseEnv(contents.toString("utf8"));
+      } catch {
+        throw fail("Could not parse a local environment file.");
+      }
+      for (const key of CONFIG_KEYS) {
+        values[key] ??= readNonempty(parsed[key]);
+      }
     }
   }
 
