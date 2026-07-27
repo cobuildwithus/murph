@@ -585,10 +585,7 @@ export async function readAssistantInputEvent(input: {
 export async function listAssistantInputEvents(input: {
   afterCursor?: AssistantInputCursor | null
   conversation?: AssistantInputConversationRef | null
-  lane?: 'conversation' | 'system'
   limit?: number
-  occurredAtFrom?: string
-  occurredAtUntilExclusive?: string
   onInvalidRecord?: ((failure: AssistantInputEventRecordParseFailure) => void) | null
   paths?: AssistantStatePaths
   signal?: AbortSignal | null
@@ -602,14 +599,6 @@ export async function listAssistantInputEvents(input: {
   input.signal?.throwIfAborted()
   const { paths } = resolveAssistantInputContext(input)
   const limit = normalizeAssistantInputEventListLimit(input.limit)
-  const occurredAtFrom = normalizeAssistantInputEventOccurredAtBound(
-    input.occurredAtFrom,
-    'occurredAtFrom',
-  )
-  const occurredAtUntilExclusive = normalizeAssistantInputEventOccurredAtBound(
-    input.occurredAtUntilExclusive,
-    'occurredAtUntilExclusive',
-  )
   const onInvalidRecord = input.onInvalidRecord ?? null
   const skipInvalidRecords = input.skipInvalidRecords ?? false
   const directory = resolveAssistantInputEventsDirectory(paths)
@@ -655,20 +644,6 @@ export async function listAssistantInputEvents(input: {
       .filter((record) =>
         input.source ? record.sourceRef.source === input.source : true,
       )
-      .filter((record) =>
-        input.lane
-          ? record.sourceRef.kind === 'hosted-mailbox' &&
-            record.sourceRef.lane === input.lane
-          : true,
-      )
-      .filter((record) => {
-        const occurredAt = Date.parse(record.occurredAt)
-        return (
-          (occurredAtFrom === null || occurredAt >= occurredAtFrom) &&
-          (occurredAtUntilExclusive === null ||
-            occurredAt < occurredAtUntilExclusive)
-        )
-      })
       .filter((record) =>
         input.conversation
           ? record.conversation
@@ -1139,20 +1114,6 @@ function normalizeAssistantInputEventListLimit(limit?: number): number {
     return 100
   }
   return Math.max(1, Math.trunc(limit))
-}
-
-function normalizeAssistantInputEventOccurredAtBound(
-  value: string | undefined,
-  field: string,
-): number | null {
-  if (value === undefined) {
-    return null
-  }
-  const parsed = Date.parse(value)
-  if (Number.isNaN(parsed)) {
-    throw new TypeError(`${field} must be an ISO timestamp.`)
-  }
-  return parsed
 }
 
 function assistantInputSourceRefIdentity(
