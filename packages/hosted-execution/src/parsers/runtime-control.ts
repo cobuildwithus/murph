@@ -125,6 +125,7 @@ import {
   HOSTED_RUNTIME_GROUP_KINDS,
   HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX,
   HOSTED_RUNTIME_GROUP_SENDER_HANDLE_MAX_CODE_POINTS,
+  HOSTED_RUNTIME_GROUP_OWNER_ADVISORY_NAME_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_MEMBERSHIPS_MAX,
   HOSTED_RUNTIME_GROUP_SHARED_READ_DISPLAY_NAME_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_SHARED_READ_MAX_MEMBERS,
@@ -2836,10 +2837,24 @@ function parseHostedRuntimeGroupChatParticipants(
   }
   return entries.map((entry) => {
     const record = requireObject(entry, `${label} entry`);
-    assertAllowedObjectKeys(record, new Set(["handle", "hasOwnMurph"]), `${label} entry`);
+    assertAllowedObjectKeys(
+      record,
+      new Set(["handle", "hasOwnMurph", "ownerAdvisoryName"]),
+      `${label} entry`,
+    );
     return {
       handle: requireString(record.handle, `${label} entry handle`),
       hasOwnMurph: requireBoolean(record.hasOwnMurph, `${label} entry hasOwnMurph`),
+      ...(record.ownerAdvisoryName === undefined
+        ? {}
+        : {
+            ownerAdvisoryName: parseHostedRuntimeGroupAskBoundedText({
+              label: `${label} entry ownerAdvisoryName`,
+              maxCodePoints:
+                HOSTED_RUNTIME_GROUP_OWNER_ADVISORY_NAME_MAX_CODE_POINTS,
+              value: record.ownerAdvisoryName,
+            }),
+          }),
     };
   });
 }

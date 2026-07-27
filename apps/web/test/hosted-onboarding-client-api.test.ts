@@ -267,7 +267,9 @@ describe("hosted onboarding client api", () => {
     }));
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(requestHostedPulseTrialContinuation()).resolves.toEqual({
+    await expect(requestHostedPulseTrialContinuation({
+      action: "continue_pulse",
+    })).resolves.toEqual({
       status: "continuing",
     });
     expect(fetchMock).toHaveBeenCalledWith(
@@ -276,7 +278,9 @@ describe("hosted onboarding client api", () => {
         body: undefined,
         cache: "no-store",
         credentials: "same-origin",
-        headers: {},
+        headers: {
+          "x-murph-pulse-continuation-action": "continue_pulse",
+        },
         keepalive: false,
         method: "POST",
       },
@@ -301,12 +305,15 @@ describe("hosted onboarding client api", () => {
       },
     });
 
-    await expect(requestHostedPulseTrialContinuation()).resolves.toEqual({
+    await expect(requestHostedPulseTrialContinuation({
+      action: "continue_pulse",
+    })).resolves.toEqual({
       status: "payment_required",
     });
     expect(assign).not.toHaveBeenCalled();
 
     await expect(requestHostedPulseTrialContinuation({
+      action: "continue_pulse",
       redirectIfPaymentRequired: true,
     })).resolves.toEqual({
       status: "redirecting",

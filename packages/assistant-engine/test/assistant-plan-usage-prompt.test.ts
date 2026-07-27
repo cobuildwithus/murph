@@ -103,16 +103,11 @@ describe("assistant plan usage guidance", () => {
     const guidance = MURPH_FAMILY_PLAN_TOOL.description;
 
     expect(guidance).toContain(
-      "The only supported actions are read_status, start_checkout, and create_invite",
+      "$MURPH_ASSISTANT_SKILLS_ROOT/murph-family/SKILL.md",
     );
-    expect(guidance).toContain(
-      "For invite cancellation, member removal, member-tier changes, or Family seat/capacity changes",
-    );
-    expect(guidance).toContain("do not invent an action or claim a change");
-    expect(guidance).toContain("murph.plan_usage's explicit private management handoff");
+    expect(guidance).toContain("Unsupported account changes use the private management handoff");
     expect(guidance).toContain(`${MURPH_PRODUCT_ORIGIN}/settings#family`);
-    expect(guidance).toContain("owner=true, billingActive=true");
-    expect(guidance).toContain("matches exactly one members row with status=active");
+    expect(guidance).toContain("exact owner, billing, and active-member gate");
     expect(guidance).toContain("navigation only");
     expect(MURPH_PLAN_USAGE_TOOL.description).toContain(
       "For Family member usage management, do not use this tool or the personal subscription link",

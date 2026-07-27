@@ -554,6 +554,32 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
 - `packages/openclaw-plugin`: published OpenClaw-compatible bundle package in the default Claude bundle layout (`skills/**`) that teaches OpenClaw to use Murph's existing `vault-cli` surface against the operator's configured vault via OpenClaw's built-in `exec` tool, keeping the integration skill-first, vault-first, and free of any second Murph assistant runtime inside OpenClaw
 - `fixtures/` and `e2e/`: deterministic fixture corpus and end-to-end smoke flows
 
+### iOS address-book advisory names
+
+The iOS companion owns the optional system Contacts prompt and produces one
+bounded, replace-all projection of explicit international phone numbers to
+safe first names plus optional last initials. Contact values are request-local
+on the device. Web converts each phone through a dedicated non-exportable GCP
+KMS MAC key into a member-scoped token and stores only that token/version plus
+the encrypted label. Postgres and the ordinary hosted content-encryption keys
+therefore do not contain the authority needed to enumerate phone numbers.
+This is not zero knowledge: the live Web principal with MAC authority can test
+candidates, and provider/runtime processing may pair a live roster handle
+with a label.
+
+One CAS projection row owns revision, replay, and enabled state; child rows own
+the tokens and encrypted labels. Full replacement, explicit deletion,
+permission-loss deletion after the companion next reconciles in the foreground,
+and account deletion use that one lifecycle. An enabled projection remains
+active until one of those deletion paths runs. The only consumer is the existing
+route-authorized group participant read. It consults the human group owner's
+projection for at most 16 unregistered phone handles and exposes a match only
+as current-turn `unverifiedOwnerContactLabel` presentation text. It is never
+identity, membership, consent, routing, profile, invite, or signup authority.
+Failures omit the optional overlay without changing the truthful live roster.
+The full boundary and rollout contract is
+`agent-docs/product-specs/ios-address-book-advisory-names.md`.
+
 ### Automatic meal-photo capture
 
 The iOS companion is the only owner of photo-library observation and on-device meal classification. A member explicitly enables the feature, and the companion considers only photos created after that opt-in; the hosted system never receives or scans the rest of the library. Foreground enrollment uses the member's Privy identity token, while background uploads use a dedicated renewable bearer that grants only meal-photo upload and self-revocation. `apps/web` stores only hashes of that bearer and installation UUID plus an encrypted idempotency secret, validates a bounded metadata-free JPEG, and stages the bytes through the internal Cloudflare control client. Each upload attempt owns a distinct staged object. Before the metadata-only mailbox append commits, web locks the hosted member and any active sponsorship membership/group rows, then rechecks the same enrollment, active member access, and launch consent. The first accepted mailbox item chooses the canonical object for exact duplicate attempts; losing or failed attempts delete only their own unclaimed object, while ambiguous commit cleanup first reconciles against the mailbox. Postgres, Temporal, and the hosted mailbox receive metadata only.
@@ -722,6 +748,16 @@ durably bound to the purchase, re-fetches its amount, Customer, environment,
 purpose/version metadata, status, and Charge, and then calls the same grant,
 refund, and dispute owners. Browser state and synchronous PaymentIntent
 responses never grant credit.
+
+Established Linq direct messages and established external-thread group messages
+resolve only a narrow blind-index/member-id preflight target and unwrap the
+mailbox-payload ingress root before the planner transaction opens. The direct
+preflight requires current active access and a complete active domain-root set;
+the group preflight uses the already established route. Neither result grants
+authority: the planner repeats route, identity, activation, access, and
+participant checks in its transaction. New thread containers and members whose
+roots or active access are not yet established remain on the transaction-owned
+provisioning path.
 
 For usage-credit Checkout, one `created` purchase row persists before Stripe
 I/O and, together with the single purchase-status lifecycle and stable

@@ -654,6 +654,55 @@ describe('real codex app-server with scripted provider', () => {
     },
   )
 
+  it('passes an advisory participant label through the real app-server tool loop only', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    const groupRequests: unknown[] = []
+    scenario.stub.queue(
+      {
+        functionCall: {
+          arguments: { action: 'read_chat_participants' },
+          name: 'group',
+          namespace: 'murph',
+        },
+      },
+      { text: 'GROUP_ROSTER_OK' },
+    )
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      dynamicTools: resolveMurphDynamicTools({
+        groupAvailable: true,
+        progressUpdatesAvailable: false,
+      }),
+      hostedToolContext: createScriptedGroupToolContext(async (request) => {
+        groupRequests.push(request)
+        return {
+          action: 'read_chat_participants',
+          result: {
+            participants: [{
+              handle: '+15550100200',
+              hasOwnMurph: false,
+              ownerAdvisoryName: 'Alex R.',
+            }],
+            status: 'ok',
+          },
+        }
+      }),
+      prompt: 'Read the current chat participants, then reply exactly GROUP_ROSTER_OK.',
+    })
+
+    expect(result.finalMessage).toBe('GROUP_ROSTER_OK')
+    expect(groupRequests).toEqual([{ action: 'read_chat_participants' }])
+    const functionCallOutputs = scenario.stub.requestSummariesSinceBaseline()
+      .flatMap((summary) => summary.functionCallOutputs ?? [])
+    expect(functionCallOutputs).toEqual(expect.arrayContaining([
+      expect.stringContaining('"unverifiedOwnerContactLabel":"Alex R."'),
+    ]))
+    expect(functionCallOutputs.join('\n')).not.toContain('ownerAdvisoryName')
+  })
+
   it('captures scripted reaction tool calls from the real app-server protocol', {
     timeout: TURN_TIMEOUT_MS,
   }, async () => {

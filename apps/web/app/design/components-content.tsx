@@ -92,6 +92,7 @@ import type { HostedConsentStatus } from "@/src/lib/legal/consent";
 import { buildWhoopAppleHealthSetupGuide } from "@/src/lib/device-sync/whoop-apple-health-setup-guide";
 import { MurphAssistantStylePicker } from "@/src/components/murph/murph-assistant-style-picker";
 import { HostedFamilyManager } from "@/src/components/settings/hosted-family-settings-actions";
+import { PulseTrialBillingContinuationView } from "@/src/components/settings/hosted-start-paid-pulse-button";
 import { MurphPersonalitySettingsDialog } from "@/src/components/settings/murph-personality-settings-dialog";
 import { MURPH_TELEGRAM_URL } from "@/src/lib/murph-contact-routing";
 import { DESIGN_USAGE_OFFERS } from "./group-usage-funding-study";
@@ -327,6 +328,20 @@ export function ComponentsContent() {
           <h1 className="font-serif text-4xl font-semibold tracking-tight text-foreground">Components</h1>
           <p className="mt-2 text-sm text-muted-foreground">Shadcn base UI + custom Murph components. Colors and typography live in the Brand tab.</p>
         </div>
+
+        <Separator />
+
+        <Section title="Pulse billing return confirmation">
+          <div inert>
+            <PulseTrialBillingContinuationView
+              action="start_pulse_now"
+              errorMessage={null}
+              onConfirm={() => {}}
+              onDismiss={() => {}}
+              status="confirming"
+            />
+          </div>
+        </Section>
 
         <Separator />
 
