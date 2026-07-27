@@ -57,4 +57,7 @@ Updated: 2026-07-26
 - `pnpm --dir packages/health-commons verify` — passed (19 files, 91 tests, typecheck, and deterministic generation check).
 - Focused Clinical Records Vitest selection — passed (4 files, 19 tests).
 - `git diff --check` and stale-reference/content searches — passed; all 35 authored protocols declare an explicit status, and the only retained v1 schema literal is the fail-closed rejection fixture.
-- Canonical `pnpm test:diff ...` reached green owner and dependent-package typechecks/tests but exposed 60-second CLI subprocess hangs on the older branch base. The same focused CLI test passes on newer `main`; rebase onto current `origin/main` and canonical rerun are pending.
+- Canonical `pnpm test:diff ...` passed all owner/dependent package typechecks and tests plus full web verification (530 files, 6,742 tests, lint, smoke, and production build). Its final Cloudflare step initially found an incomplete post-rebase install; after `pnpm install --frozen-lockfile`, direct `pnpm --dir apps/cloudflare verify` passed (109 files, 1,934 tests and typecheck).
+- Preliminary completion-specialist review accepted one coverage finding. The inspected test-only patch added a full statusless-protocol/biomarker route-bundle regression and family-graph allowlist assertion.
+- Specialist remediation verification: focused Health Commons tests passed (2 files, 12 tests), and `pnpm --dir packages/health-commons verify` passed (19 files, 92 tests, typecheck, and deterministic generation check).
+- Parent final review, current-base rebase/CI, plan closure, and final ReviewGPT gate remain pending.

@@ -361,6 +361,70 @@ describe("@murphai/health-commons build determinism", () => {
     ]);
   });
 
+  it("does not let a statusless protocol publish or enter a biomarker route bundle", () => {
+    const statuslessProtocolKey = "protocol_variant:family/statusless";
+    const biomarker = {
+      ...createBiomarkerEntity({
+        key: "biomarker:test-signal",
+        slug: "biomarkers/test-signal",
+        title: "Test Signal",
+      }),
+      biomarker: {
+        explainerCards: [
+          { title: "Why people care", body: "Test context." },
+          { title: "How to measure it", body: "Test measurement." },
+          { title: "What moves it", body: "Test confounders." },
+        ],
+        measurement: {
+          bestContext: "Use a consistent test context.",
+          howToMeasure: ["Measure consistently."],
+        },
+      },
+      communityOutcomeSummary: {
+        placeholder: "Community outcomes are not yet available.",
+        state: "coming_soon",
+      },
+      relations: [{
+        target: statuslessProtocolKey,
+        type: "related_protocol",
+      }],
+    } satisfies HealthCommonsCatalogEntity;
+    const statuslessProtocol = createProtocolEntity({
+      expectedSignalDescriptions: [{
+        biomarkerKey: biomarker.key,
+        description: "Test signal.",
+        protocolProminence: "focus",
+      }],
+      key: statuslessProtocolKey,
+      relations: [{
+        target: biomarker.key,
+        type: "primary_biomarker",
+      }],
+      slug: "protocols/family/statusless",
+      title: "Statusless Protocol",
+    });
+    const webArtifacts = buildHealthCommonsWebGeneratedArtifacts({
+      ...createCatalog("sha256:first"),
+      entities: [biomarker, statuslessProtocol],
+    });
+    const biomarkerBundle = webArtifacts.routeBundles.get(
+      "bundles/biomarker/test-signal.json",
+    );
+
+    expect(webArtifacts.biomarkerIndex.biomarkers).toEqual([
+      expect.objectContaining({
+        key: biomarker.key,
+        published: false,
+      }),
+    ]);
+    expect(webArtifacts.routeIndex.routes[0]).not.toHaveProperty("projections");
+    expect([...webArtifacts.projectionArtifacts.keys()]).toEqual([]);
+    expect(Object.keys(biomarkerBundle?.entitiesByKey ?? {})).toEqual([
+      biomarker.key,
+    ]);
+    expect(biomarkerBundle?.reverseEdges).toEqual([]);
+  });
+
   it("excludes statusless protocols from biomarker rankings", () => {
     const biomarker = createBiomarkerEntity({
       key: "biomarker:test-signal",

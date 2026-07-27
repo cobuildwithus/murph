@@ -149,6 +149,9 @@ describe("buildHealthCommonsProtocolGeneratedArtifacts", () => {
     expect(artifacts.runSpecs.protocols.map((protocol) => protocol.key).sort()).toEqual(
       expectedPublicKeys,
     );
+    expect(artifacts.familyGraph.protocols.map((protocol) => protocol.key).sort()).toEqual(
+      expectedPublicKeys,
+    );
   });
 
   it("keeps parent-owned child family edges and protocol parent family edges", () => {
