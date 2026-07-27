@@ -248,6 +248,7 @@ describe("hosted member access (single resolver)", () => {
   });
 
   it("grants non-suspended container access through any active participant", async () => {
+    const now = new Date("2026-07-26T12:00:00.000Z");
     const prisma = {
       hostedThreadContainerParticipant: {
         findFirst: vi.fn(async () => ({ participantMemberId: "member_participant" })),
@@ -257,6 +258,7 @@ describe("hosted member access (single resolver)", () => {
     await expect(hasActiveHostedThreadContainerAccessWithParticipants({
       container: { suspendedAt: null },
       containerMemberId: "member_container",
+      now,
       owner: person({ billingStatus: HostedBillingStatus.paused }),
       prisma: prisma as never,
     })).resolves.toBe(true);
@@ -267,12 +269,14 @@ describe("hosted member access (single resolver)", () => {
       },
       where: expect.objectContaining({
         containerMemberId: "member_container",
+        lastSeenAt: { gte: new Date("2026-07-19T12:00:00.000Z") },
         removedAt: null,
       }),
     });
   });
 
   it("makes readActiveHostedMemberAccess the participant-aware thread-container gate", async () => {
+    const now = new Date("2026-07-26T12:00:00.000Z");
     const prisma = {
       hostedMember: {
         findUnique: vi.fn(async () => ({
@@ -289,6 +293,7 @@ describe("hosted member access (single resolver)", () => {
 
     await expect(readActiveHostedMemberAccess({
       memberId: "member_container",
+      now,
       prisma: prisma as never,
     })).resolves.toBe(true);
 
@@ -302,6 +307,7 @@ describe("hosted member access (single resolver)", () => {
       },
       where: expect.objectContaining({
         containerMemberId: "member_container",
+        lastSeenAt: { gte: new Date("2026-07-19T12:00:00.000Z") },
         removedAt: null,
       }),
     });

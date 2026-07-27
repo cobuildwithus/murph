@@ -947,6 +947,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260725120000_hosted_thread_delivery_route",
       "20260725230000_hosted_paid_usage_legacy_period_cutover",
       "20260726120000_hosted_growth_aggregate",
+      "20260726180000_hosted_account_deletion_cleanup",
       "20260726180000_hosted_address_book_projection",
       "20260726180000_hosted_thread_container_usage_default",
       "20260727010000_hosted_linq_group_join_application_state",

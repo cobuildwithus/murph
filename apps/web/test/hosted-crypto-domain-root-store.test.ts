@@ -40,6 +40,9 @@ const WEB_WRAP_KEY_NAME = "projects/test/locations/global/keyRings/ring/cryptoKe
 const gcpKmsMock = vi.hoisted(() => ({
   client: null as HostedGcpKmsClient | null,
 }));
+const privyUserMock = vi.hoisted(() => ({
+  readHostedPrivyUserById: vi.fn(async (userId: string) => ({ id: userId })),
+}));
 
 vi.mock("../src/lib/hosted-crypto/gcp-kms", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../src/lib/hosted-crypto/gcp-kms")>();
@@ -54,8 +57,17 @@ vi.mock("../src/lib/hosted-crypto/gcp-kms", async (importOriginal) => {
   };
 });
 
+vi.mock("../src/lib/hosted-onboarding/privy", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/lib/hosted-onboarding/privy")>();
+  return {
+    ...actual,
+    readHostedPrivyUserById: privyUserMock.readHostedPrivyUserById,
+  };
+});
+
 afterEach(() => {
   gcpKmsMock.client = null;
+  privyUserMock.readHostedPrivyUserById.mockClear();
   restoreHostedSecureBoxTestCodec();
   vi.unstubAllEnvs();
 });
@@ -1301,6 +1313,13 @@ test("hosted Privy member creation provisions the control root before private id
   assert.equal(tx.persistedEnvelopes[0]?.userId, member.id);
   assert.equal(encryptCalls.length, 1);
   assert.equal(signCalls.length, 1);
+  expect(privyUserMock.readHostedPrivyUserById).toHaveBeenCalledWith(
+    "did:privy:user_test_control_root",
+    {
+      maxRetries: 0,
+      timeout: 5_000,
+    },
+  );
 });
 
 async function createHostedWebCryptoTransactionFixture(
@@ -1611,6 +1630,9 @@ function createHostedMemberIdentityTransaction(): HostedCryptoTestTransaction {
   return {
     ...tx,
     prisma: Object.assign(tx.prisma, {
+      hostedAccountDeletionCleanup: {
+        findFirst: async () => null,
+      },
       hostedMemberIdentity,
     }),
   };

@@ -118,29 +118,14 @@ acquire this authority. Dynamically generated experiment-lifecycle seeds stay
 on their existing separately owned path until that owner exposes an exact
 identity resolver.
 
-The hosted-only `group-sunday-superlatives` seed is an ordinary scheduled group
-notification. Before composition evidence or model work, a private signed
-Cloudflare-to-Web control read asks only the closed
-`group-sunday-superlatives-v1` policy and receives only `eligible`,
-`ineligible`, or `unavailable`. Web proves at least 100 admitted, deduplicated,
-committed inbound human message envelopes on the exact live group route during
-the occurrence-anchored seven-local-calendar-day window; it excludes assistant
-output, reaction-only input, direct or inexact routes, malformed rows, and rows
-committed or occurring at or after the occurrence. The bounded scan stops at
-proof and never returns content, identifiers, handles, or a count. Only an
-eligible occurrence may read a separate bounded exact-route projection from the
-existing structured accepted input-event owner. Composition admits only
-route-authorized, non-self, text-only conversation events in the occurrence
-window; it excludes attachment-bearing or multimodal inputs and never parses
-rendered provider prompts or assistant transcripts for authority. Human text is
-one JSON-quoted untrusted field, and transient senders become non-outputtable
-per-run aliases. Missing, malformed, over-cap, empty, or attachment-only
-structured evidence skips before lifecycle/model/outbox work. An admitted
-occurrence may produce zero or one recap through the ordinary group outbox.
-This adds no counter table, scheduler, queue, parser protocol, migration,
-cursor, or durable state owner. The future one-person weekly check-in remains
-specification-only until both supported providers expose privacy-safe current-
-participant authority.
+No built-in member-facing group social automation currently ships. The removed
+Sunday superlatives ID remains only as a permanent retirement tombstone:
+reconciliation archives an old persisted record with that exact ID, and a
+claimed occurrence fails closed before lifecycle or model work. This guard
+cannot install or configure an automation. Future group features can use the
+existing explicit `authenticated-group` owner scope; any feature-specific
+activity, evidence, identity, or participant policy must be designed with that
+feature rather than embedded in the generic ownership boundary.
 
 Web then captures the current roster and exact active grants, decrypts the
 bounded encrypted snapshots owned by those share rows, and returns every member
@@ -432,6 +417,34 @@ and exist solely for the bounded migration scrub. Retell reaches `apps/web` only
 function/webhook routes for `ask_murph`, `call_ended`, and `call_analyzed`;
 Murph does not persist raw Retell transcripts, request bodies, recordings, or
 call audio.
+
+## Hosted Account Deletion
+
+Before canonical member removal, `apps/web` inserts one foreign-key-free,
+KMS-encrypted external-cleanup receipt in the same transaction. The receipt is
+the sole post-delete owner of the minimal Cloudflare runtime, Stripe customer,
+and Privy identifiers; target completion is independent, retries use the
+existing retention sweep, and terminal convergence deletes the receipt.
+Account deletion first locks and suspends the owner plus every owned thread
+container, and every relationship writer that can add a runtime, Stripe, Family,
+or Privy target shares that member lock and rejects suspended owners. The final
+deletion transaction locks the same owner first and rejects any target-set
+change before persisting the receipt or deleting local rows. A searchable,
+non-reversible Privy lookup key on an incomplete receipt blocks identity
+re-creation and lets retries prove that a newly bound identity cannot be
+deleted.
+
+Immediate provider attempts share one five-second abortable deadline. Retention
+attempts share one fifteen-second abortable deadline, use bounded four-receipt
+concurrency, and delete Cloudflare runtime targets through a four-worker pool.
+Cloudflare authorization acquisition and provider fetches are inside the
+deadline; queued targets are left for the next retry after it expires.
+
+Cloudflare completion requires an explicit `deleteAllCompleted` result in
+addition to alarm, SQL-state, and R2 completion. A legacy Worker response
+without that capability remains pending. Deploy Cloudflare before web and keep
+the capability-bearing Worker as the rollback floor once web can create these
+receipts; the database migration must precede the web deploy.
 
 ## Hosted Assistant Personalization
 
@@ -971,6 +984,16 @@ impact: accepted Linq reply delivery stamps the exact mailbox item with
 mailbox dedupe, and idempotent continuation delivery. The Durable Object write
 fence coalesces runners that overlap in the same invocation. There is no other
 Web-to-Cloudflare prewarm or nudge path.
+
+Participant-derived thread-container authority is a seven-day lease over an
+authoritative provider observation, reused by ordinary access, AI admission,
+usage allowance, and newsletter projection. A non-direct Linq inbound may
+advance only the already-existing, nonremoved relationship for the
+server-resolved sender; it cannot create participant authority, clear a newer
+removal, move `lastSeenAt` backward, or use a provider timestamp later than
+server time. Owner-derived authority remains independent. Partial oversized
+rosters therefore cannot turn an omitted or departed participant into an
+unbounded subscription capability.
 
 Hosted Linq participant-change webhooks are privacy-minimized provider-ledger
 facts, not runtime work. A unique participant addition may set one nullable
