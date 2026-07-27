@@ -450,6 +450,7 @@ describe("deleteHostedRunnerUserDataBestEffort", () => {
       deletedAt: "2026-04-29T00:00:00.000Z",
       durableObject: {
         alarmCleared: true,
+        deleteAllCompleted: true,
         stateDeleted: true,
       },
       ok: true,
@@ -476,6 +477,7 @@ describe("deleteHostedRunnerUserDataBestEffort", () => {
     })).resolves.toEqual({
       alarmCleared: true,
       configured: true,
+      deleteAllCompleted: true,
       deleted: false,
       errorCode: null,
       r2DeletedObjectCount: 1,
@@ -486,6 +488,39 @@ describe("deleteHostedRunnerUserDataBestEffort", () => {
     });
 
     expect(deleteUserData).toHaveBeenCalledWith("user-123");
+  });
+
+  it("keeps a legacy Worker response pending without deleteAll completion evidence", async () => {
+    vi.mocked(readHostedExecutionControlClientIfConfigured).mockReturnValue({
+      createBrowserVaultSession: vi.fn(),
+      deleteMealPhoto: vi.fn(),
+      deleteUserData: vi.fn().mockResolvedValue({
+        deletedAt: "2026-04-29T00:00:00.000Z",
+        durableObject: {
+          alarmCleared: true,
+          stateDeleted: true,
+        },
+        ok: true,
+        r2: {
+          deletedObjectCount: 0,
+          skippedUserScopedPrefixes: false,
+          supported: true,
+          userScopedSkipReason: null,
+        },
+        userId: "user-123",
+      }),
+      ensureRuntimeProcessing: vi.fn(),
+      getRunnerStatus: vi.fn(),
+      sendTelegramUsageLimitNotice: vi.fn(),
+      stageMealPhoto: vi.fn(),
+    } as ReturnType<typeof readHostedExecutionControlClientIfConfigured>);
+
+    await expect(deleteHostedRunnerUserDataBestEffort({
+      userId: "user-123",
+    })).resolves.toMatchObject({
+      deleteAllCompleted: false,
+      deleted: false,
+    });
   });
 
   it("logs runner deletion failures with a stable code and redacted message payload", async () => {

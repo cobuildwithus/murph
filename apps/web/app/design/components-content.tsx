@@ -97,6 +97,7 @@ import { MurphPersonalitySettingsDialog } from "@/src/components/settings/murph-
 import { MURPH_TELEGRAM_URL } from "@/src/lib/murph-contact-routing";
 import { DESIGN_USAGE_OFFERS } from "./group-usage-funding-study";
 import { HostedUsageTopUpDialog } from "@/src/components/settings/hosted-usage-top-up-dialog";
+import { HostedAccountDeletionStatus } from "@/src/components/settings/hosted-data-privacy-settings";
 import { GarminHistoricalDataDialog } from "../(dashboard)/connect/connect-page-dialogs";
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
@@ -697,6 +698,15 @@ export function ComponentsContent() {
           <div className="flex flex-col gap-4">
             <Alert><AlertTitle>Experiment in progress</AlertTitle><AlertDescription>Day 15 of 28. Next session scheduled for this evening.</AlertDescription></Alert>
             <Alert variant="destructive"><AlertTitle>Oura disconnected</AlertTitle><AlertDescription>Reconnect your ring to continue tracking metrics.</AlertDescription></Alert>
+          </div>
+        </Section>
+
+        <Separator />
+
+        <Section title="Account Deletion Status">
+          <div className="grid gap-4 lg:grid-cols-2">
+            <HostedAccountDeletionStatus cleanupPending={false} />
+            <HostedAccountDeletionStatus cleanupPending />
           </div>
         </Section>
 

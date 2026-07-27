@@ -2892,6 +2892,7 @@ describe("cloudflare worker routes", () => {
         deletedAt: "2026-04-29T00:00:00.000Z",
         durableObject: {
           alarmCleared: true,
+          deleteAllCompleted: true,
           stateDeleted: true,
         },
         ok: true,
@@ -2921,6 +2922,7 @@ describe("cloudflare worker routes", () => {
     await expect(response.json()).resolves.toMatchObject({
       durableObject: {
         alarmCleared: true,
+        deleteAllCompleted: true,
         stateDeleted: true,
       },
       ok: true,
@@ -3790,6 +3792,7 @@ function createUserRunnerStub(overrides: Record<string, unknown> = {}) {
       deletedAt: "2026-04-29T00:00:00.000Z",
       durableObject: {
         alarmCleared: true,
+        deleteAllCompleted: true,
         stateDeleted: true,
       },
       ok: true as const,
