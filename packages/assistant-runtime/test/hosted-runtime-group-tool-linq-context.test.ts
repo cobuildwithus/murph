@@ -425,7 +425,16 @@ describe("createHostedGroupToolWithCurrentTurnContext", () => {
     });
 
     await groupTool.request({ action: "share_contact_card" });
-    expect(request).toHaveBeenLastCalledWith({ action: "share_contact_card" });
+    expect(request.mock.calls).toEqual([
+      [{
+        action: "read_chat_participants",
+        linqThread: {
+          authority: smsRouteAuthority,
+          chatId: "chat_sms_group",
+        },
+      }],
+      [{ action: "share_contact_card" }],
+    ]);
   });
 
   it("fails participant reads closed for ambiguous, direct, or unsupported-service contexts", async () => {
