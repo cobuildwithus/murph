@@ -175,6 +175,7 @@ const HOSTED_MEMBER_RELATION_TYPES = new Set([
   "ClinicalRecordRetrievalRequest",
   "ClinicalRecordRetrievalRun",
   "HostedAiUsage",
+  "HostedAddressBookProjection",
   "HostedAccountGroup",
   "HostedAccountGroupBillingRef",
   "HostedAccountGroupInvite",
@@ -913,6 +914,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260725120000_hosted_thread_delivery_route",
       "20260725230000_hosted_paid_usage_legacy_period_cutover",
       "20260726120000_hosted_growth_aggregate",
+      "20260726180000_hosted_address_book_projection",
       "20260726180000_hosted_thread_container_usage_default",
       "migration_lock.toml",
     ]);

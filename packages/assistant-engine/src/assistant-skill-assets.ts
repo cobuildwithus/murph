@@ -188,10 +188,28 @@ export const ASSISTANT_SKILLS = [
       'Use for booking, rescheduling, canceling, or joining a waitlist for medical, dental, vision, therapy, lab, imaging, vaccination, or rehabilitation care by phone, browser, portal, or structured integration. Owns intake completeness, availability and fallback bounds, canonical-memory reuse, durable scheduling-preference persistence, and the ready-to-act gate; transport skills own execution.',
   },
   {
+    slug: 'connected-apps',
+    name: 'connected-apps',
+    triggerHint:
+      'Use when Murph needs connected email, calendar, documents, storage, notes, or tasks; an approved accountless service such as weather, places, provider registry, product search, or Instacart; account connection or removal; or connected-app context for another action. Owns account selection, narrow discovery and reads, limited calendar writes, privacy, and untrusted provider content.',
+  },
+  {
     slug: 'computer-use',
     name: 'computer-use',
     triggerHint:
       'Use when Murph needs to operate a live website for a health-relevant task, including booking, rescheduling, or canceling care; ordering contacts, supplements, OTC products, health equipment, groceries, or meals; using provider, insurer, pharmacy, optical, retailer, or meal-service portals; checkout, forms, refill requests, bills, authenticated websites, browser inspection, or other Playwright-driven external browser actions.',
+  },
+  {
+    slug: 'phone-calls',
+    name: 'phone-calls',
+    triggerHint:
+      'Use when Murph may place an outbound health-related phone call to a clinic, dentist, pharmacy, lab, insurer, provider office, or similar destination. Owns call choice, explicit consent, appointment readiness handoff, minimal disclosure, transfer policy, and truthful interpretation of call lifecycle results.',
+  },
+  {
+    slug: 'murph-family',
+    name: 'murph-family',
+    triggerHint:
+      'Use only for Murph Family product questions or account actions involving plans, sponsored seats, owner status, checkout, member invites, member usage handoffs, billing, or access. Do not use for ordinary family medical history, genetics, family symptoms, household health context, or caregiving unless Murph Family account access is also in scope.',
   },
   {
     slug: 'pdf',
