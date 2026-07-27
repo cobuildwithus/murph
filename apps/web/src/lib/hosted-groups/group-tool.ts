@@ -33,22 +33,12 @@ import { readActiveHostedMemberAccess } from "../hosted-onboarding/member-access
 import {
   getHostedLinqChatHandles,
   type HostedLinqChatHandleSummary,
-  isHostedLinqAttachmentSendPrepareFailure,
-  sendHostedLinqAttachmentMessage,
   sendHostedLinqChatMessage,
   updateHostedLinqChatAvatar,
   updateHostedLinqChatDisplayName,
 } from "../hosted-onboarding/linq-client";
 import {
-  buildMurphHostedLinqContactCardVcf,
-  fetchMurphHostedLinqContactCardVcfPhoto,
-  MURPH_CONTACT_CARD_VCF_CONTENT_TYPE,
-  MURPH_CONTACT_CARD_VCF_FILE_NAME,
-  resolveMurphHostedLinqContactCardBackupPhoneNumber,
-} from "../hosted-onboarding/linq-contact-card";
-import {
-  releaseHostedLinqContactCardShareAttempt,
-  reserveHostedLinqContactCardShareAttempt,
+  shareMurphHostedLinqContactCardVcfToChat,
 } from "../hosted-onboarding/linq-contact-card-share";
 import { createHostedLinqParticipantContactLookupKey } from "../hosted-onboarding/linq-participant-contact";
 import {
@@ -61,6 +51,10 @@ import {
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
   type HostedOnboardingReadClient,
 } from "../hosted-onboarding/shared";
+import {
+  HOSTED_ADDRESS_BOOK_LOOKUP_TIMEOUT_MS,
+  readHostedOwnerAddressBookAdvisoryNames,
+} from "../hosted-address-book/projection";
 import { signalHostedRuntimeMaintenanceRuntime } from "../hosted-orchestration/signal-runtime";
 import { assertHostedLinqRouteEgressAuthority } from "../hosted-routing/thread-route-store";
 import { resolveHostedPublicBaseUrl } from "../hosted-web/public-url";
@@ -1393,10 +1387,60 @@ async function handleHostedRuntimeGroupReadChatParticipants(input: {
     resolvedParticipants,
   });
 
+  try {
+    const ownerAdvisoryNames =
+      await readHostedOwnerAddressBookAdvisoryNamesWithinDeadline({
+        containerMemberId: input.memberId,
+        phoneHandles: participants.flatMap((participant) =>
+          participant.hasOwnMurph ? [] : [participant.handle]
+        ),
+        prisma,
+      });
+    for (const participant of participants) {
+      const ownerAdvisoryName = participant.hasOwnMurph
+        ? undefined
+        : ownerAdvisoryNames.get(participant.handle);
+      if (ownerAdvisoryName) {
+        participant.ownerAdvisoryName = ownerAdvisoryName;
+      }
+    }
+  } catch {
+    // Address-book labels are optional presentation hints. Any KMS, storage,
+    // consent, or decryption failure omits the entire overlay without changing
+    // the truthful live roster or its activation proof.
+  }
+
   return {
     action: "read_chat_participants",
     result: { participants, status: "ok" },
   };
+}
+
+async function readHostedOwnerAddressBookAdvisoryNamesWithinDeadline(
+  input: Parameters<typeof readHostedOwnerAddressBookAdvisoryNames>[0],
+): Promise<ReadonlyMap<string, string>> {
+  const lookup = readHostedOwnerAddressBookAdvisoryNames(input);
+  // Prisma operations do not consume AbortSignal. Bound the entire optional
+  // overlay at its caller so a stuck read can never delay the truthful roster.
+  // The underlying lookup still receives its own KMS abort signal, and this
+  // handler makes a rejection after the deadline explicitly harmless.
+  void lookup.catch(() => undefined);
+
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<ReadonlyMap<string, string>>((resolve) => {
+    timeout = setTimeout(
+      () => resolve(new Map()),
+      HOSTED_ADDRESS_BOOK_LOOKUP_TIMEOUT_MS,
+    );
+  });
+
+  try {
+    return await Promise.race([lookup, deadline]);
+  } finally {
+    if (timeout !== undefined) {
+      clearTimeout(timeout);
+    }
+  }
 }
 
 export type HostedThreadContainerResolvedParticipant = {
@@ -1630,78 +1674,20 @@ async function handleHostedRuntimeGroupShareContactCard(input: {
     return unavailable(ownerAccess.unavailableReason);
   }
 
-  let linePhoneNumber: string | null = null;
-  let rosterPresent = false;
-  try {
-    const handles = await getHostedLinqChatHandles({ chatId: authorized.chatId });
-    rosterPresent = handles.length > 0;
-    linePhoneNumber = normalizePhoneNumber(
-      handles.find((handle) => handle.isMe)?.handle ?? null,
-    );
-  } catch {
-    return unavailable("provider_unavailable");
-  }
-  if (!rosterPresent) {
-    return unavailable("provider_unavailable");
-  }
-  if (!linePhoneNumber) {
-    return unavailable("line_unresolved");
-  }
-
-  const reservation = await reserveHostedLinqContactCardShareAttempt({
+  const outcome = await shareMurphHostedLinqContactCardVcfToChat({
     chatId: authorized.chatId,
+    idempotencyKeyPrefix: "group-contact-card",
     memberId: input.memberId,
     prisma,
   });
-  if (reservation.action !== "share") {
-    if (reservation.reason === "recent_attempt") {
-      return {
-        action: "share_contact_card",
-        result: { status: "already_shared" },
-      };
-    }
-    return unavailable(reservation.reason);
+  if (outcome.status === "already_shared") {
+    return {
+      action: "share_contact_card",
+      result: { status: "already_shared" },
+    };
   }
-
-  const [photo, backupPhoneNumber] = await Promise.all([
-    fetchMurphHostedLinqContactCardVcfPhoto(),
-    resolveMurphHostedLinqContactCardBackupPhoneNumber({
-      excludePhoneNumber: linePhoneNumber,
-      prisma: getPrisma(),
-    }),
-  ]);
-  const vcf = buildMurphHostedLinqContactCardVcf({
-    backupPhoneNumber,
-    phoneNumber: linePhoneNumber,
-    photo,
-  });
-  try {
-    await sendHostedLinqAttachmentMessage({
-      bytes: new Uint8Array(Buffer.from(vcf, "utf8")),
-      chatId: authorized.chatId,
-      contentType: MURPH_CONTACT_CARD_VCF_CONTENT_TYPE,
-      fileName: MURPH_CONTACT_CARD_VCF_FILE_NAME,
-      // Chat id + reservation instant: retries of this reservation dedupe at
-      // the provider while a later requested re-share stays a distinct send.
-      // The chat id is Linq's own identifier, so no new exposure.
-      idempotencyKey: `group-contact-card:${authorized.chatId}:${reservation.attemptedAt.getTime()}`,
-    });
-  } catch (error) {
-    if (isHostedLinqAttachmentSendPrepareFailure(error)) {
-      // Nothing reached the chat; free the throttle reservation so a later
-      // retry is not locked out. Ambiguous message-send failures keep it.
-      try {
-        await releaseHostedLinqContactCardShareAttempt({
-          attemptedAt: reservation.attemptedAt,
-          chatId: authorized.chatId,
-          memberId: input.memberId,
-          prisma,
-        });
-      } catch {
-        // Best effort: a stuck reservation only delays the next attempt.
-      }
-    }
-    return unavailable("send_failed");
+  if (outcome.status !== "sent") {
+    return unavailable(outcome.reason);
   }
 
   return {

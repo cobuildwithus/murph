@@ -201,6 +201,87 @@ describe("hosted assistant ask completion", () => {
     }
   });
 
+  it("queues the fixed cannot-answer response without another model continuation", async () => {
+    const vault = await mkdtemp(
+      path.join(os.tmpdir(), "hosted-assistant-ask-cannot-answer-"),
+    );
+
+    try {
+      const { origin, session } = await createCompletionOriginSession({
+        suffix: "cannot-answer",
+        threadIsDirect: true,
+        vault,
+      });
+      const eventId = "aask_done_fixed_cannot_answer";
+      const wake = buildHostedExecutionAssistantAskCompletedWake({
+        ask: {
+          expiresAt: "2099-07-15T12:10:00.000Z",
+          originAssistantInputId: origin.inputId,
+          originSessionId: session.sessionId,
+          question: "What is today's workout?",
+          requestId: "aask_req_fixed_cannot_answer",
+          result: {
+            answer: "The request likely expired or failed.",
+            outcome: "cannot_answer",
+          },
+          targetLabel: "100 Club",
+        },
+        eventId,
+        memberId: "member-private",
+        occurredAt: "2026-07-15T12:05:00.000Z",
+      });
+      completionMocks.readAssistantInputEvent.mockResolvedValue(origin);
+      completionMocks.readAssistantAskOriginSession.mockResolvedValue(session);
+      completionMocks.sendAssistantNotification.mockImplementation(async (input) => {
+        await input.beforeCommit?.({
+          decision: {
+            kind: "send_message",
+            privateSummary: "Sent fixed insufficient-context response.",
+            text: HOSTED_ASSISTANT_ASK_CANNOT_ANSWER_RESPONSE,
+          },
+          deliveryOutcome: null,
+          response: HOSTED_ASSISTANT_ASK_CANNOT_ANSWER_RESPONSE,
+        });
+      });
+
+      await executeHostedAssistantAskCompletedWake({
+        executionContext: { hosted: null },
+        sourceMailboxItemId: eventId,
+        vaultRoot: vault,
+        wake,
+      });
+
+      expect(completionMocks.sendAssistantAskContinuation).not.toHaveBeenCalled();
+      expect(completionMocks.sendAssistantNotification).toHaveBeenCalledTimes(1);
+      const notificationInput =
+        completionMocks.sendAssistantNotification.mock.calls[0]?.[0];
+      expect(notificationInput).toMatchObject({
+        beforeCommit: expect.any(Function),
+        deferCommitUntilDeliveryAccepted: true,
+        deliveryDedupeToken: buildHostedAssistantAskCompletionDeliveryKey({
+          eventId,
+        }),
+        deliveryDispatchMode: "queue-only",
+        deliveryIdempotencyKey: buildHostedAssistantAskCompletionDeliveryKey({
+          eventId,
+        }),
+        responsePolicy: {
+          kind: "require_send_exact_text",
+          text: HOSTED_ASSISTANT_ASK_CANNOT_ANSWER_RESPONSE,
+        },
+        sessionId: session.sessionId,
+        threadId: "conversation-cannot-answer",
+        threadIsDirect: true,
+      });
+      expect(notificationInput).not.toHaveProperty("answeredMailboxItemIds");
+      expect(notificationInput).not.toHaveProperty(
+        "reviewedAssistantAskCompletionExpiresAt",
+      );
+    } finally {
+      await rm(vault, { force: true, recursive: true });
+    }
+  });
+
   it("ignores a late scheduled completion without starting another turn", async () => {
     const vault = await mkdtemp(
       path.join(os.tmpdir(), "hosted-assistant-ask-internal-"),

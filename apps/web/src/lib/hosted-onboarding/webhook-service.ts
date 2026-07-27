@@ -12,10 +12,14 @@ import {
 import {
   getHostedLinqChatSummary,
 } from "./linq-client";
-import { hostedOnboardingError } from "./errors";
+import { hostedOnboardingError, isHostedOnboardingError } from "./errors";
+import {
+  planHostedLinqPermanentHomeRouteRecovery,
+} from "./linq-home-route-recovery";
 import { assertHostedTelegramWebhookSecret, parseHostedTelegramWebhookUpdate } from "./telegram";
 import {
   planHostedOnboardingLinqWebhook,
+  resolveHostedLinqMailboxPayloadRootPrewarmMemberId,
   type HostedOnboardingLinqWebhookResponse,
 } from "./webhook-provider-linq";
 import {
@@ -55,6 +59,7 @@ import {
 } from "./webhook-db-timing";
 import {
   drainHostedLinqSideEffectsDirect,
+  queueHostedLinqContactCardShareAfterDeliveredInviteSignup,
 } from "./webhook-transport";
 import {
   buildHostedLinqFirstContactAdmissionClassifierUnavailableDecision,
@@ -185,6 +190,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
       const providerResult = await ingestHostedLinqProviderEventDirect({
         event: providerEvent,
         prisma,
+        scheduleAfterResponse: input.scheduleAfterResponse,
       });
       const reactionResult = await handleHostedGroupJoinOfferReaction({
         event: providerEvent,
@@ -253,6 +259,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
         : await ingestHostedLinqProviderEventDirect({
             event: providerEvent,
             prisma,
+            scheduleAfterResponse: input.scheduleAfterResponse,
           });
       await scheduleHostedLinqProviderAlertEmails({
         alertIds: providerResult.alertIds,
@@ -286,6 +293,12 @@ export async function handleHostedOnboardingLinqWebhook(input: {
       signal: input.signal,
     });
     const planningEvent = planningResolution.event;
+    const warmPlanningMailboxPayloadRoot = () =>
+      warmHostedLinqMailboxPayloadRoot({
+        event: planningEvent,
+        prisma,
+        threadRoute: planningResolution.threadRoute,
+      });
 
     const currentInboundReply: HostedLinqCurrentInboundReplyProof | null =
       event.event_type === "message.received" && !affirmativeReaction
@@ -324,10 +337,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
               requireFirstContactAdmission,
               prisma: transaction,
             }),
-          () => warmHostedLinqMailboxPayloadRoot({
-            prisma,
-            threadRoute: planningResolution.threadRoute,
-          }),
+          warmPlanningMailboxPayloadRoot,
         );
       }
 
@@ -357,6 +367,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
                   requireFirstContactAdmission,
                   prisma: transaction,
                 }),
+              warmPlanningMailboxPayloadRoot,
             );
         } else {
           const firstContactAdmissionParticipantContact = plan.firstContactAdmissionParticipantContact;
@@ -411,6 +422,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
                     requireFirstContactAdmission,
                     prisma: transaction,
                   }),
+                warmPlanningMailboxPayloadRoot,
               );
             }
           }
@@ -421,10 +433,21 @@ export async function handleHostedOnboardingLinqWebhook(input: {
         throw new Error("Hosted Linq first-contact admission remained unresolved after classification.");
       }
     } catch (error) {
-      finishHostedOnboardingTiming(planTiming, "failed", {
-        errorName: deriveHostedOnboardingTimingErrorName(error),
-      });
-      throw error;
+      // A recognized home-route owner whose permanent route no longer matches
+      // the fallback binding would otherwise retry this rollback forever and
+      // never hear anything back. Answer them on the chat they used instead.
+      const recoveredPlan =
+        isHostedOnboardingError(error)
+        && error.code === "HOSTED_LINQ_HOME_ROUTE_CHANGED"
+          ? await planHostedLinqPermanentHomeRouteRecovery({ event, prisma })
+          : null;
+      if (!recoveredPlan) {
+        finishHostedOnboardingTiming(planTiming, "failed", {
+          errorName: deriveHostedOnboardingTimingErrorName(error),
+        });
+        throw error;
+      }
+      plan = recoveredPlan;
     }
     finishHostedOnboardingTiming(planTiming, plan.response.reason ?? "completed", {
       desiredSideEffectCount: plan.desiredSideEffects.length,
@@ -533,7 +556,16 @@ async function resolveHostedLinqPlanningEvent(input: {
   const webhookIsGroup = messageEvent.data.chat?.is_group;
   if (webhookIsGroup === true) {
     logHostedLinqChatClassification("webhook-group");
-    return { event: messageEvent, threadRoute: null };
+    return {
+      event: messageEvent,
+      threadRoute: messageEvent.data.is_from_me
+        ? null
+        : await readHostedThreadRouteByThreadIdentity({
+            channel: "linq",
+            prisma: input.prisma,
+            threadId: messageEvent.data.chat_id,
+          }),
+    };
   }
 
   if (messageEvent.data.is_from_me) {
@@ -802,14 +834,25 @@ function buildHostedLinqCurrentInboundReplyProof(
 async function ingestHostedLinqProviderEventDirect(input: {
   event: Parameters<typeof ingestHostedLinqProviderEventTx>[0]["event"];
   prisma: PrismaClient;
+  scheduleAfterResponse?: HostedWebhookPostResponseScheduler;
 }): Promise<Awaited<ReturnType<typeof ingestHostedLinqProviderEventTx>>> {
-  return runHostedOnboardingWebhookTransaction(
+  const providerResult = await runHostedOnboardingWebhookTransaction(
     input.prisma,
     (transaction) => ingestHostedLinqProviderEventTx({
       event: input.event,
       prisma: transaction,
     }),
   );
+  if (providerResult.restoreOnboardingLink) {
+    void queueHostedLinqContactCardShareAfterDeliveredInviteSignup({
+      chatId: providerResult.restoreOnboardingLink.linqChatId,
+      memberId: providerResult.restoreOnboardingLink.memberId,
+      prisma: input.prisma,
+      scheduleAfterResponse: input.scheduleAfterResponse,
+      service: providerResult.restoreOnboardingLink.service,
+    });
+  }
+  return providerResult;
 }
 
 async function ingestHostedLinqParticipantEventDirect(input: {
@@ -993,18 +1036,24 @@ export async function handleHostedOnboardingTelegramWebhook(input: {
  * scoped around this transaction, so unwrapping beforehand leaves the
  * in-transaction encrypt as local AES work against the cached root.
  *
- * The route is the one the planning-event resolver already read, so warming
- * costs no additional query. `laneSeq` is authenticated metadata allocated
- * inside the transaction, so only the root is warmed; the payload is still
- * encrypted in place.
+ * An established group reuses the planning-event route. A direct message uses
+ * a narrow blind-index/member-id preflight that mirrors planner precedence
+ * without decrypting private identity or routing fields. Both remain hints:
+ * the planner repeats every authority check inside the transaction.
+ * `laneSeq` is authenticated metadata allocated inside the transaction, so
+ * only the root is warmed; the payload is still encrypted in place.
  */
 export async function warmHostedLinqMailboxPayloadRoot(input: {
+  event: Parameters<typeof requireHostedLinqMessageReceivedEvent>[0];
   prisma: PrismaClient | Prisma.TransactionClient;
   threadRoute: Pick<HostedThreadRouteSnapshot, "containerMemberId"> | null;
 }): Promise<void> {
-  if (!input.threadRoute) {
-    // No established route yet, so there is no known member whose root could be
-    // warmed; the planner unwraps as before.
+  const memberId = await resolveHostedLinqMailboxPayloadRootPrewarmMemberId({
+    event: input.event,
+    prisma: input.prisma,
+    threadRoute: input.threadRoute,
+  });
+  if (!memberId) {
     return;
   }
 
@@ -1012,7 +1061,7 @@ export async function warmHostedLinqMailboxPayloadRoot(input: {
     domain: getHostedCryptoDomainForLane("mailbox-payload"),
     prisma: input.prisma,
     retainFailureInScopedCache: true,
-    userId: input.threadRoute.containerMemberId,
+    userId: memberId,
   });
   // The scoped cache hands every caller its own copy and expects that copy to
   // be wiped; the cached master is zeroized separately when the scope closes.

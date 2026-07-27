@@ -7,6 +7,10 @@ import {
 import type Stripe from "stripe";
 
 import {
+  prepareHostedCryptoDomainRootCandidates,
+  type PreparedHostedCryptoDomainRootCandidates,
+} from "../hosted-crypto/domain-root-store";
+import {
   clearHostedBillingPlanSwitchToPulsePendingFieldsForScheduleTx,
   refreshHostedBillingPlanSwitchToPulsePendingFieldsFromScheduleTx,
 } from "./billing-plan-switch-to-pulse-service";
@@ -25,7 +29,9 @@ import {
 } from "./stripe-billing-events";
 import {
   HOSTED_FAMILY_STRIPE_METADATA_KIND,
+  prepareHostedFamilyStripeActivationCryptoDomainRoots,
   prepareHostedLegacySyntheticFamilyCleanupTx,
+  type PreparedHostedFamilyCryptoDomainRoots,
 } from "./family-plan";
 import {
   findMemberForStripeInvoice,
@@ -326,10 +332,19 @@ async function processHostedStripeEventRecord(
   switch (event.type) {
     case "checkout.session.completed":
       return mapHostedStripeActivationOutcome(
-        await applyStripeCheckoutCompleted(
-          payload as Stripe.Checkout.Session,
-          prisma,
-          dispatchContext,
+        await (
+          processingContext.preparedCryptoDomainRoots.size > 0
+            ? applyStripeCheckoutCompleted(
+              payload as Stripe.Checkout.Session,
+              prisma,
+              dispatchContext,
+              processingContext.preparedCryptoDomainRoots,
+            )
+            : applyStripeCheckoutCompleted(
+              payload as Stripe.Checkout.Session,
+              prisma,
+              dispatchContext,
+            )
         ),
       );
     case "checkout.session.expired":
@@ -345,6 +360,7 @@ async function processHostedStripeEventRecord(
           requireHostedStripeCanonicalSubscription(processingContext, event.type),
           dispatchContext,
           prisma,
+          processingContext.preparedFamilyCryptoDomainRoots,
         ),
       );
     case "customer.subscription.trial_will_end":
@@ -369,12 +385,26 @@ async function processHostedStripeEventRecord(
       return buildEmptyHostedStripeEventProcessingResult();
     case "invoice.paid":
       return mapHostedStripeActivationOutcome(
-        await applyStripeInvoicePaid(
-          payload as Stripe.Invoice,
-          dispatchContext,
-          prisma,
-          processingContext.canonicalBillingStatus,
-          processingContext.canonicalSubscription,
+        await (
+          processingContext.preparedCryptoDomainRoots.size > 0
+            ? applyStripeInvoicePaid(
+              payload as Stripe.Invoice,
+              dispatchContext,
+              prisma,
+              processingContext.canonicalBillingStatus,
+              processingContext.canonicalSubscription,
+              processingContext.preparedCryptoDomainRoots,
+              processingContext.preparedFamilyCryptoDomainRoots,
+            )
+            : applyStripeInvoicePaid(
+              payload as Stripe.Invoice,
+              dispatchContext,
+              prisma,
+              processingContext.canonicalBillingStatus,
+              processingContext.canonicalSubscription,
+              undefined,
+              processingContext.preparedFamilyCryptoDomainRoots,
+            )
         ),
       );
     case "invoice.payment_failed":
@@ -384,6 +414,7 @@ async function processHostedStripeEventRecord(
         prisma,
         processingContext.canonicalBillingStatus,
         processingContext.canonicalSubscription,
+        processingContext.preparedFamilyCryptoDomainRoots,
       );
       return buildEmptyHostedStripeEventProcessingResult();
     case "refund.created":
@@ -418,6 +449,8 @@ type HostedStripeEventProcessingContext = {
   canonicalBillingStatus: HostedBillingStatus | null;
   canonicalSubscription: Stripe.Subscription | null;
   customerId: string | null;
+  preparedCryptoDomainRoots: PreparedHostedCryptoDomainRootCandidates;
+  preparedFamilyCryptoDomainRoots: PreparedHostedFamilyCryptoDomainRoots;
 };
 
 async function prepareHostedStripeEventProcessingContext(
@@ -433,6 +466,8 @@ async function prepareHostedStripeEventProcessingContext(
       canonicalBillingStatus,
       canonicalSubscription,
       customerId: null,
+      preparedCryptoDomainRoots: new Map(),
+      preparedFamilyCryptoDomainRoots: new Map(),
     };
   }
 
@@ -446,12 +481,15 @@ async function prepareHostedStripeEventProcessingContext(
     canonicalBillingStatus,
     canonicalSubscription,
     customerId: customerContext.customerId,
+    preparedCryptoDomainRoots: new Map(),
+    preparedFamilyCryptoDomainRoots: new Map(),
   };
 }
 
 async function resolveHostedStripeEventDirectBillingMemberId(
   event: Stripe.Event,
   prisma: PrismaClient,
+  preflightProcessingContext?: HostedStripeEventProcessingContext,
 ): Promise<string | null> {
   if (event.type === "checkout.session.completed") {
     const session = event.data.object as Stripe.Checkout.Session;
@@ -470,7 +508,9 @@ async function resolveHostedStripeEventDirectBillingMemberId(
   }
 
   if (isHostedStripeSubscriptionBillingEvent(event.type)) {
-    const subscription = event.data.object as Stripe.Subscription;
+    const subscription =
+      preflightProcessingContext?.canonicalSubscription
+      ?? (event.data.object as Stripe.Subscription);
     const member = await findMemberForStripeSubscription({
       prisma,
       subscription,
@@ -488,11 +528,14 @@ async function resolveHostedStripeEventDirectBillingMemberId(
   const member = await findMemberForStripeInvoice({
     invoice: event.data.object as Stripe.Invoice,
     prisma,
+    subscription: preflightProcessingContext?.canonicalSubscription,
   });
   if (member) {
     return member.core.id;
   }
-  const canonicalSubscription = await resolveHostedStripeEventCanonicalSubscription(event);
+  const canonicalSubscription =
+    preflightProcessingContext?.canonicalSubscription
+    ?? await resolveHostedStripeEventCanonicalSubscription(event);
   return canonicalSubscription
     ? resolveFamilySponsoredDirectSubscriptionMemberId({
         prisma,
@@ -721,11 +764,17 @@ async function processClaimedHostedStripeEvent(
       prisma,
     });
     usageCreditEventHandled = usageCreditReconciliation.handled;
+    const preflightProcessingContext =
+      !usageCreditReconciliation.handled
+      && hostedStripeEventNeedsFamilyPreparationContext(stripeEvent)
+        ? await prepareHostedStripeEventProcessingContext(stripeEvent)
+        : undefined;
     const directBillingMemberId = usageCreditReconciliation.handled
       ? null
       : await resolveHostedStripeEventDirectBillingMemberId(
           stripeEvent,
           prisma,
+          preflightProcessingContext,
         );
     const legacyFamilySubscriptionId = usageCreditReconciliation.handled ||
         directBillingMemberId
@@ -744,12 +793,14 @@ async function processClaimedHostedStripeEvent(
       : directBillingMemberId
       ? await processHostedStripeEventWithVerifiedMemberLock({
           memberId: directBillingMemberId,
+          preflightProcessingContext,
           prisma,
           stripeEvent,
         })
       : await processHostedStripeEventWithDiscoveredMemberLock(
           stripeEvent,
           prisma,
+          preflightProcessingContext,
         );
     const { memberId: processingMemberId, result } = processing;
     if (
@@ -919,11 +970,13 @@ async function processClaimedHostedStripeEvent(
 async function processHostedStripeEventWithDiscoveredMemberLock(
   stripeEvent: Stripe.Event,
   prisma: PrismaClient,
+  preflightProcessingContext?: HostedStripeEventProcessingContext,
 ): Promise<{
   memberId: string | null;
   result: Awaited<ReturnType<typeof processHostedStripeEventRecord>>;
 }> {
-  const processingContext = await prepareHostedStripeEventProcessingContext(stripeEvent);
+  const processingContext = preflightProcessingContext
+    ?? await prepareHostedStripeEventProcessingContext(stripeEvent);
   const discoveredMemberId = await resolveHostedStripeEventProcessingMemberId(
     stripeEvent,
     processingContext,
@@ -932,6 +985,7 @@ async function processHostedStripeEventWithDiscoveredMemberLock(
   if (discoveredMemberId) {
     return processHostedStripeEventWithVerifiedMemberLock({
       memberId: discoveredMemberId,
+      preflightProcessingContext: processingContext,
       prisma,
       stripeEvent,
     });
@@ -958,12 +1012,21 @@ async function processHostedStripeEventWithDiscoveredMemberLock(
     throw new Error("Canonical Stripe billing owner was unavailable for locked processing.");
   }
 
+  const preparedFamilyCryptoDomainRoots = processingContext.canonicalSubscription
+    ? await prepareHostedFamilyStripeActivationCryptoDomainRoots({
+        prisma,
+        subscription: processingContext.canonicalSubscription,
+      })
+    : new Map();
   return {
     memberId: null,
     result: await prisma.$transaction(
       (transaction) => processHostedStripeEventRecord(
         stripeEvent,
-        processingContext,
+        {
+          ...processingContext,
+          preparedFamilyCryptoDomainRoots,
+        },
         transaction,
       ),
       HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
@@ -973,19 +1036,37 @@ async function processHostedStripeEventWithDiscoveredMemberLock(
 
 async function processHostedStripeEventWithVerifiedMemberLock(input: {
   memberId: string;
+  preflightProcessingContext?: HostedStripeEventProcessingContext;
   prisma: PrismaClient;
   stripeEvent: Stripe.Event;
 }): Promise<{
   memberId: string;
   result: Awaited<ReturnType<typeof processHostedStripeEventRecord>>;
 }> {
+  const preflightProcessingContext = input.preflightProcessingContext;
+  const preparedFamilyCryptoDomainRoots =
+    preflightProcessingContext?.canonicalSubscription
+      ? await prepareHostedFamilyStripeActivationCryptoDomainRoots({
+          prisma: input.prisma,
+          subscription: preflightProcessingContext.canonicalSubscription,
+        })
+      : new Map();
+  const preparedCryptoDomainRoots =
+    await prepareHostedStripeEventCryptoDomainRoots({
+      canonicalSubscription: preflightProcessingContext?.canonicalSubscription ?? null,
+      memberId: input.memberId,
+      prisma: input.prisma,
+      stripeEvent: input.stripeEvent,
+    });
   const result = await withHostedMemberStripeMutationLock({
     memberId: input.memberId,
     prisma: input.prisma,
     run: async (transaction) => {
-      const processingContext = await prepareHostedStripeEventProcessingContext(
-        input.stripeEvent,
-      );
+      const processingContext = {
+        ...await prepareHostedStripeEventProcessingContext(input.stripeEvent),
+        preparedCryptoDomainRoots,
+        preparedFamilyCryptoDomainRoots,
+      };
       const processingMemberId = await resolveHostedStripeEventProcessingMemberId(
         input.stripeEvent,
         processingContext,
@@ -1005,6 +1086,48 @@ async function processHostedStripeEventWithVerifiedMemberLock(input: {
     memberId: input.memberId,
     result,
   };
+}
+
+function hostedStripeEventMayActivateDirectMember(
+  stripeEvent: Stripe.Event,
+): boolean {
+  if (stripeEvent.type === "invoice.paid") {
+    return true;
+  }
+  if (stripeEvent.type !== "checkout.session.completed") {
+    return false;
+  }
+  const session = stripeEvent.data.object as Stripe.Checkout.Session;
+  return parseHostedBillingCheckoutOffer(session.metadata?.checkoutOffer)
+    === HOSTED_PULSE_TRIAL_OFFER;
+}
+
+function hostedStripeEventNeedsFamilyPreparationContext(
+  stripeEvent: Stripe.Event,
+): boolean {
+  return (
+    isHostedStripeSubscriptionBillingEvent(stripeEvent.type)
+    || stripeEvent.type === "invoice.paid"
+    || stripeEvent.type === "invoice.payment_failed"
+  );
+}
+
+async function prepareHostedStripeEventCryptoDomainRoots(input: {
+  canonicalSubscription: Stripe.Subscription | null;
+  memberId: string;
+  prisma: PrismaClient;
+  stripeEvent: Stripe.Event;
+}): Promise<PreparedHostedCryptoDomainRootCandidates> {
+  if (
+    input.canonicalSubscription?.metadata.kind === HOSTED_FAMILY_STRIPE_METADATA_KIND
+    || !hostedStripeEventMayActivateDirectMember(input.stripeEvent)
+  ) {
+    return new Map();
+  }
+  return prepareHostedCryptoDomainRootCandidates({
+    prisma: input.prisma,
+    userId: input.memberId,
+  });
 }
 
 async function markHostedStripeSubscriptionCancellationEmailSent(input: {

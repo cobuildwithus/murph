@@ -116,6 +116,7 @@ interface HostedLinqWorkspaceIsolationForTestPrismaClient {
   };
   hostedWorkspace: {
     findUnique(args: unknown): Promise<{ version: bigint } | null>;
+    updateMany(args: unknown): Promise<{ count: number }>;
   };
 }
 
@@ -794,6 +795,28 @@ export async function seedHostedWorkspaceCheckpointForTest(input: {
       status: checkpoint.status,
       version: checkpoint.workspace?.version ?? workspace.version,
     };
+  });
+}
+
+export async function seedHostedWorkspaceInboxMediaRetentionWakeForTest(input: {
+  environment?: NodeJS.ProcessEnv;
+  userId: string;
+  wakeAt: Date | string;
+}): Promise<void> {
+  return withHostedWebTestkitDeps(input.environment, async (deps) => {
+    const result = await deps.prisma.hostedWorkspace.updateMany({
+      data: {
+        inboxMediaRetentionWakeAt: new Date(input.wakeAt),
+      },
+      where: {
+        userId: input.userId,
+      },
+    });
+    if (result.count !== 1) {
+      throw new Error(
+        "Hosted-local retention wake seed requires exactly one existing workspace.",
+      );
+    }
   });
 }
 

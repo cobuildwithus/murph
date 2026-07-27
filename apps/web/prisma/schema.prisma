@@ -550,6 +550,7 @@ model HostedMember {
   hostedCryptoAudits             HostedUserCryptoAudit[]
   webSessions                    HostedWebSession[]
   mealPhotoCaptureEnrollments    HostedMealPhotoCaptureEnrollment[]
+  addressBookProjection          HostedAddressBookProjection?
   connectedAppsSession           HostedConnectedAppsSession?
   connectedAppConnectIntents     HostedConnectedAppConnectIntent[]
   clinicalRecordConnectIntents       ClinicalRecordConnectIntent[]
@@ -641,6 +642,34 @@ model HostedMealPhotoCaptureEnrollment {
   @@index([memberId, revokedAt, expiresAt])
   @@index([expiresAt])
   @@map("hosted_meal_photo_capture_enrollment")
+}
+
+model HostedAddressBookProjection {
+  memberId              String                     @id @map("member_id")
+  enabled               Boolean
+  revision              Int
+  lastMutationId        String                     @map("last_mutation_id")
+  lastMutationOperation String                     @map("last_mutation_operation")
+  lastReplacedAt        DateTime?                   @map("last_replaced_at")
+  disabledAt            DateTime?                   @map("disabled_at")
+  createdAt             DateTime                   @default(now()) @map("created_at")
+  updatedAt             DateTime                   @updatedAt @map("updated_at")
+  member                HostedMember               @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  contacts              HostedAddressBookContact[]
+
+  @@map("hosted_address_book_projection")
+}
+
+model HostedAddressBookContact {
+  memberId              String                      @map("member_id")
+  phoneTokenVersion     Int                         @map("phone_token_version")
+  phoneToken            String                      @map("phone_token")
+  advisoryNameEncrypted String                      @map("advisory_name_encrypted")
+  projection            HostedAddressBookProjection @relation(fields: [memberId], references: [memberId], onDelete: Cascade)
+
+  @@id([memberId, phoneTokenVersion, phoneToken])
+  @@index([phoneTokenVersion])
+  @@map("hosted_address_book_contact")
 }
 
 model HostedSensitiveActionChallenge {
@@ -1537,7 +1566,7 @@ model HostedVaultShare {
 model HostedThreadContainer {
   memberId                   String              @id @map("member_id")
   ownerMemberId              String              @map("owner_member_id")
-  monthlyUsageLimitUsdMicros BigInt              @default(4500000) @map("monthly_usage_limit_usd_micros")
+  monthlyUsageLimitUsdMicros BigInt              @default(7500000) @map("monthly_usage_limit_usd_micros")
   createdAt                  DateTime            @default(now()) @map("created_at")
   member                     HostedMember        @relation("HostedThreadContainerMember", fields: [memberId], references: [id], onDelete: Cascade)
   owner                      HostedMember        @relation("HostedThreadContainerOwner", fields: [ownerMemberId], references: [id], onDelete: Restrict)

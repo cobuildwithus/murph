@@ -54,7 +54,7 @@ import type {
 } from "./thread-route-store";
 
 export const HOSTED_THREAD_CONTAINER_DEFAULT_MONTHLY_USAGE_LIMIT_USD_MICROS =
-  4_500_000n;
+  7_500_000n;
 
 export interface HostedThreadContainerRouteEnsureResult {
   activationEventId: string | null;

@@ -28,10 +28,10 @@ import {
 import {
   HOSTED_PULSE_TRIAL_OFFER,
   HOSTED_PULSE_TRIAL_USAGE_LIMIT_USD_MICROS,
-  getHostedAiUsageMonthlyAllowanceForPlan,
   getHostedAiUsageMonthlyAllowanceUsdMicros,
   getHostedBillingPlanCodeForPlan,
   getHostedDefaultBillingPlanCode,
+  getHostedFamilyAiUsageMonthlyAllowanceForPlan,
   parseHostedBillingPlanCode,
   parseHostedBillingPhase,
   parseHostedPlanCode,
@@ -377,7 +377,8 @@ async function readHostedFamilySponsoredBillingRefForMember(input: {
     currentTrialStartedAt: null,
     pulseTrialPolicyVersion: null,
     pulseTrialRedeemedAt: null,
-    usageLimitUsdMicrosOverride: getHostedAiUsageMonthlyAllowanceForPlan(planCode),
+    usageLimitUsdMicrosOverride:
+      getHostedFamilyAiUsageMonthlyAllowanceForPlan(planCode),
   };
 }
 
@@ -1066,6 +1067,31 @@ export async function resolveHostedAiUsageGate(input: {
   now?: Date | string;
   prisma?: HostedAiUsageAllowanceClient;
 }): Promise<HostedAiUsageGateDecisionWithSource> {
+  return resolveHostedAiUsageGateWithPolicy({
+    ...input,
+    preserveExistingLegacyPaidPeriodLimit: true,
+  });
+}
+
+export async function reconcileHostedAiUsageGateForBillingModeChangeTx(input: {
+  memberId: string;
+  now: Date;
+  tx: Prisma.TransactionClient;
+}): Promise<void> {
+  await resolveHostedAiUsageGateWithPolicy({
+    memberId: input.memberId,
+    now: input.now,
+    preserveExistingLegacyPaidPeriodLimit: false,
+    prisma: input.tx,
+  });
+}
+
+async function resolveHostedAiUsageGateWithPolicy(input: {
+  memberId: string;
+  now?: Date | string;
+  preserveExistingLegacyPaidPeriodLimit: boolean;
+  prisma?: HostedAiUsageAllowanceClient;
+}): Promise<HostedAiUsageGateDecisionWithSource> {
   const prisma = input.prisma ?? getPrisma();
   const now = normalizeHostedAiUsageAllowanceDate(input.now ?? new Date());
 
@@ -1162,6 +1188,8 @@ export async function resolveHostedAiUsageGate(input: {
       billingRef: allowanceBillingRef,
       memberId: input.memberId,
       now,
+      preserveExistingLegacyPaidPeriodLimit:
+        input.preserveExistingLegacyPaidPeriodLimit,
       threadContainer: memberState.threadContainer,
       threadContainerAccessActive,
       tx,
@@ -1572,6 +1600,7 @@ async function ensureHostedAiUsageAllowancePeriodTx(input: {
   billingRef: HostedAiUsageAllowanceBillingRef | null;
   memberId: string;
   now: Date;
+  preserveExistingLegacyPaidPeriodLimit?: boolean;
   threadContainer?: HostedAiUsageAllowanceThreadContainerRef | null;
   threadContainerAccessActive?: boolean | null;
   tx: Prisma.TransactionClient;
@@ -1637,10 +1666,21 @@ async function ensureHostedAiUsageAllowancePeriodTx(input: {
 
   const currentBillingPlanCode = parseHostedBillingPlanCode(current.billingPlanCode)
     ?? resolved.billingPlanCode;
-  const periodMatches =
+  const periodIdentityMatches =
     currentBillingPlanCode === resolved.billingPlanCode &&
-    current.limitUsdMicros === resolved.limitUsdMicros &&
     current.periodEnd.getTime() === resolved.periodEnd.getTime();
+  const periodMatches =
+    periodIdentityMatches &&
+    (
+      current.limitUsdMicros === resolved.limitUsdMicros ||
+      (
+        input.preserveExistingLegacyPaidPeriodLimit !== false &&
+        shouldPreserveExistingPaidPeriodLimit({
+          currentLimitUsdMicros: current.limitUsdMicros,
+          resolved,
+        })
+      )
+    );
 
   if (periodMatches) {
     const blockedAt = resolveHostedAiUsageAllowanceBlockedAt({
@@ -1778,10 +1818,18 @@ async function readHostedAiUsageAllowancePeriodTx(input: {
   if (current) {
     const currentBillingPlanCode = parseHostedBillingPlanCode(current.billingPlanCode)
       ?? resolved.billingPlanCode;
-    const periodMatches =
+    const periodIdentityMatches =
       currentBillingPlanCode === resolved.billingPlanCode &&
-      current.limitUsdMicros === resolved.limitUsdMicros &&
       current.periodEnd.getTime() === resolved.periodEnd.getTime();
+    const periodMatches =
+      periodIdentityMatches &&
+      (
+        current.limitUsdMicros === resolved.limitUsdMicros ||
+        shouldPreserveExistingPaidPeriodLimit({
+          currentLimitUsdMicros: current.limitUsdMicros,
+          resolved,
+        })
+      );
     const limitUsdMicros = periodMatches ? current.limitUsdMicros : resolved.limitUsdMicros;
 
     return {
@@ -1810,6 +1858,23 @@ async function readHostedAiUsageAllowancePeriodTx(input: {
     usageCreditBalanceUsdMicros: input.usageCreditBalanceUsdMicros,
     usageCreditLedgerVersion: input.usageCreditLedgerVersion,
   };
+}
+
+function shouldPreserveExistingPaidPeriodLimit(input: {
+  currentLimitUsdMicros: bigint;
+  resolved: Extract<HostedAiUsageAllowancePeriodResolution, { kind: "period" }>;
+}): boolean {
+  return (
+    (
+      input.resolved.allowanceSource === "direct_paid_member_plan" ||
+      input.resolved.allowanceSource === "family_sponsored_plan"
+    ) &&
+    (
+      input.currentLimitUsdMicros === 10_000_000n ||
+      input.currentLimitUsdMicros === 25_000_000n
+    ) &&
+    input.currentLimitUsdMicros > input.resolved.limitUsdMicros
+  );
 }
 
 async function accountHostedAiUsageAllowancePeriodSpendTx(input: {

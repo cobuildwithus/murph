@@ -215,6 +215,17 @@ async function importHostedWorkspaceBridgeMailboxItem(input: {
   }
 
   if (
+    input.context?.assistantAskCompletionKind === "joined_group"
+    && wake.kind === "assistant.ask.completed"
+    && "origin" in wake.ask
+  ) {
+    return {
+      reasonCode: "assistant_ask.completion_not_admitted",
+      status: "deferred",
+    };
+  }
+
+  if (
     input.item.route.action === "import-vault-share-delivery"
     || wake.kind === "vault-share.delivery"
   ) {

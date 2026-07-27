@@ -25,6 +25,7 @@ import {
 } from "@murphai/runtime-state/node";
 import {
   buildMurphGroupReadPermissionProfileTomlLines,
+  buildMurphGroupRoomModelMaintenancePermissionProfileTomlLines,
   MURPH_GROUP_READ_PERMISSION_PROFILE,
 } from "@murphai/hosted-execution/assistant-permissions";
 import {
@@ -714,6 +715,7 @@ function buildHostedRunnerSmokeCodexConfigToml(): string {
     "allow_login_shell = false",
     "",
     ...buildMurphGroupReadPermissionProfileTomlLines(),
+    ...buildMurphGroupRoomModelMaintenancePermissionProfileTomlLines(),
     "[skills]",
     "include_instructions = false",
     "",

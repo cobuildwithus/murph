@@ -10,8 +10,10 @@ const mocks = vi.hoisted(() => ({
   getHostedPrivySession: vi.fn(),
   getPrisma: vi.fn(),
   readHostedPulseTrialContinuationCookie: vi.fn(),
-  PulseTrialBillingContinuation: vi.fn(() =>
-    React.createElement("div", null, "Finishing Pulse automatically")),
+  PulseTrialBillingContinuation: vi.fn((props: {
+    action: "continue_pulse" | "start_pulse_now";
+  }) =>
+    React.createElement("div", null, `Confirm Pulse ${props.action}`)),
   CustomizeMurphSettings: vi.fn((props: {
     assistant?: unknown;
     murphPhoneNumber?: string | null;
@@ -380,6 +382,72 @@ test("SettingsPage redirects signed-out visitors before reading member settings"
   expect(mocks.getHostedPrivySession).not.toHaveBeenCalled();
 });
 
+test("SettingsPage keeps a signed-out Stripe payment return recoverable", async () => {
+  mocks.getHostedPageAuthSnapshot.mockResolvedValue({
+    authenticated: false,
+    authenticatedMember: null,
+    session: null,
+  });
+
+  const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
+
+  const markup = renderToStaticMarkup(await SettingsPage({
+    searchParams: Promise.resolve({
+      action: "start_pulse_now",
+      expires: "4102444800000",
+      signature: "signed",
+    }),
+  }));
+
+  // Nothing is verified before sign-in: the signature is bound to a member id
+  // absent from the URL, so anyone could craft these parameters. Murph must not
+  // vouch for a payment it has not checked.
+  assert.match(markup, /One more step/);
+  assert.match(markup, /Sign in to verify and finish your Pulse update\./);
+  assert.doesNotMatch(markup, /card is saved/i);
+  expect(mocks.getPrisma).not.toHaveBeenCalled();
+});
+
+test("SettingsPage hands a signed-in Stripe payment return back to the continuation route", async () => {
+  mocks.getHostedPageAuthSnapshot.mockResolvedValue({
+    authenticated: true,
+    authenticatedMember: {
+      billingStatus: HostedBillingStatus.active,
+      id: "member_123",
+      suspendedAt: null,
+    },
+    session: { privyUserId: "did:privy:1", sessionId: "hws_session_123" },
+  });
+
+  const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
+
+  // Only that route can verify the member-bound signature and set the
+  // session-scoped cookie the completion POST requires.
+  await expect(SettingsPage({
+    searchParams: Promise.resolve({
+      action: "start_pulse_now",
+      expires: "4102444800000",
+      signature: "signed",
+    }),
+  })).rejects.toThrow(
+    "NEXT_REDIRECT:/api/settings/billing/pulse-trial-continuation?action=start_pulse_now&expires=4102444800000&signature=signed",
+  );
+});
+
+test("SettingsPage ignores a partial payment return instead of looping back to the route", async () => {
+  mocks.getHostedPageAuthSnapshot.mockResolvedValue({
+    authenticated: false,
+    authenticatedMember: null,
+    session: null,
+  });
+
+  const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
+
+  await expect(SettingsPage({
+    searchParams: Promise.resolve({ action: "start_pulse_now" }),
+  })).rejects.toThrow("NEXT_REDIRECT:/");
+});
+
 test("SettingsPage resumes the Pulse action only for a marked return with a bound claim", async () => {
   mocks.getPrisma.mockReturnValue(mocks.prisma);
   mocks.getHostedPrivySession.mockResolvedValue(null);
@@ -410,10 +478,13 @@ test("SettingsPage resumes the Pulse action only for a marked return with a boun
     sessionId: "hws_session_123",
   });
   expect(mocks.PulseTrialBillingContinuation).toHaveBeenCalledTimes(1);
+  expect(mocks.PulseTrialBillingContinuation).toHaveBeenCalledWith({
+    action: "continue_pulse",
+  }, undefined);
   expect(mocks.HostedBillingSettings).toHaveBeenCalledWith(expect.objectContaining({
     pulseTrialBillingContinuationPending: true,
   }), undefined);
-  assert.match(markup, /Finishing Pulse automatically/);
+  assert.match(markup, /Confirm Pulse continue_pulse/);
 });
 
 test("SettingsPage treats the return marker as inert without its bound claim", async () => {
@@ -441,7 +512,7 @@ test("SettingsPage treats the return marker as inert without its bound claim", a
   }));
 
   expect(mocks.PulseTrialBillingContinuation).not.toHaveBeenCalled();
-  assert.doesNotMatch(markup, /Finishing Pulse automatically/);
+  assert.doesNotMatch(markup, /Confirm Pulse/);
 });
 
 test("SettingsPage treats a surviving claim as inert without the marked return", async () => {
@@ -467,7 +538,7 @@ test("SettingsPage treats a surviving claim as inert without the marked return",
 
   expect(mocks.readHostedPulseTrialContinuationCookie).not.toHaveBeenCalled();
   expect(mocks.PulseTrialBillingContinuation).not.toHaveBeenCalled();
-  assert.doesNotMatch(markup, /Finishing Pulse automatically/);
+  assert.doesNotMatch(markup, /Confirm Pulse/);
 });
 
 test("SettingsPage reads the app session and persisted account settings into the settings tree", async () => {
@@ -619,14 +690,17 @@ test("SettingsPage reads the app session and persisted account settings into the
       usageTopUpOffers: [
         {
           amountLabel: "$5",
+          estimatedMessages: 100,
           offerCode: "usage_5_usd",
         },
         {
           amountLabel: "$10",
+          estimatedMessages: 200,
           offerCode: "usage_10_usd",
         },
         {
           amountLabel: "$25",
+          estimatedMessages: 500,
           offerCode: "usage_25_usd",
         },
       ],

@@ -1,6 +1,6 @@
 # Reliability
 
-Last verified: 2026-07-22
+Last verified: 2026-07-25
 
 ## Current Guardrails
 
@@ -18,6 +18,7 @@ Last verified: 2026-07-22
 - Foreground inbox/parser-backed daemon runs should favor restartable connectors with bounded backoff over permanently dead watch loops, while still keeping low-level restart behavior opt-in and always bounded by the owning abort signal.
 - Networked assistant/provider/channel calls should set explicit timeouts, propagate caller abort signals, and only auto-retry request shapes that are replay-safe or rate-limit directed.
 - Hosted managed-automation reconciliation persists retry generation in the existing workspace checkpoint owner. Only eligible, explicitly retryable failures receive the bounded 30-second, 2-minute, and 10-minute backoff sequence; unclassified or permanent failures are logged without manufacturing another wake, and a later successful pass clears the retry generation.
+- Managed automation ownership is route-authority-based: member seeds run only on direct/member routes and the group room-model seed runs only on authenticated non-direct Linq/iMessage or Telegram routes. Group email is excluded because its sender is spoofable. Existing managed records bound to the wrong owner are archived in place; caller-supplied unscoped seeds retain their prior route behavior. Only the immutable built-in personal-memory and group-room-model automation ids select silent maintenance policy, so an editable tag, slug, title, or instruction cannot acquire no-delivery, reserved-page tool, or replay-barrier behavior. Both policies reuse the existing isolated exact-skip turn, foreground preemption, and provider-admission replay barrier. Group room-model maintenance additionally uses a fresh one-shot provider thread with workspace and network access denied; its sole state surface is the dedicated host-owned tool. The group policy scans at most 192 recent sessions, selects at most 24 route-eligible sessions after filtering, and uses their seven-day overlapping admitted-group transcripts with one full-rewrite page instead of a cursor or work queue; a missed or preempted run is recovered by overlap, while a run admitted to the provider is consumed after a successful replace or delete because that mutation may already have committed. Scheduled and explicit writes share one digest-bound fixed-page owner: it compares the shown state under lock, rejects stale mutations, validates the normalized body and complete 6 KiB advisory envelope, and never truncates an accepted page. Missing state can be recreated, while malformed, unreadable, wrong-type, identifying, or oversized state fails closed.
 - Closed integration-ingest months compact only in the abortable hosted idle-shutdown lane. Core publishes a verified deterministic gzip before deleting raw bytes, normal readers and amendments stream bounded gzip output, and startup repairs only an independently valid, newline-terminated, byte-identical raw/gzip pair. A wake preserves foreground priority; a 30-second pass budget or ordinary compaction failure leaves any unfinished source intact and does not block checkpointing. Remaining raw months are the next pass's durable worklist, while a non-identical representation pair fails closed without a repair queue or marker.
 - The single group newsletter automation reuses canonical cron occurrence state for both delivery modes. Current-chat editions finish through the ordinary conversation outbox and its route retry policy. A scheduled non-direct Telegram occurrence resolves its exact Web-owned route before group tools or model work, persists that authority with the outbox intent, and rechecks it before provider entry. Missing route authority remains retryable; a locally mismatched target fails stale, while live ownership revocation fails permanently without sending. Email editions alone use the existing newsletter parent/recipient outbox lifecycle. The runtime appends the current execution contract on every occurrence so legacy saved instructions cannot retain a retired workflow; no migration queue, repair state, or second scheduler exists.
 - A usage-credit purchase persists one reconstructible `created` purchase before
@@ -84,6 +85,18 @@ Last verified: 2026-07-22
   pinned to the original target and membership generation; expiry is the
   existing ten-minute mailbox deadline, with no second lease, timer, status
   row, or delivery ledger.
+- Assistant Ask request and completion appends first signal the existing Temporal
+  workflow, then may issue the shared payloadless, no-retry direct
+  `ensure-processing` latency hint. Temporal acceptance failure starts no direct
+  wake. A dirty runtime admits only the exact joined-group request and legacy
+  completion shapes through the pre-checkpoint-safe system prefix; consented or
+  reviewed shapes remain checkpoint-gated. Completion ordering uses the
+  existing pending-input occurrence proof, and incomplete or invalid index
+  evidence rejects the shortcut without repairing state.
+- A legacy joined-group `cannot_answer` queues the fixed
+  unavailable-evidence response exactly. It must not start a private provider
+  continuation that can invent an expiry, provider failure, or execution
+  failure.
 - Scheduled group Assistant Ask stays inside the ordinary scheduled Codex turn:
   start the selected requests, then use ordinary shell waits and exact replay to
   poll every accepted request until it returns completed or unavailable. The

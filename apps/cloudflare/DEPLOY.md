@@ -27,6 +27,23 @@ Runner bundle assembly esbuild-bundles two boot-critical surfaces with byte budg
 The device-sync package boundary suite also walks the static source graph from the runner's runtime-config entrypoint and rejects provider runtime modules, importer modules, and the Junction SDK. This focused gate catches boot-closure ownership regressions before the packed-bundle guard validates the final esbuild metafile.
 Hosted assistant delivery recovery now relies on committed side-effect state inside the encrypted workspace and the web-owned hosted workspace checkpoint.
 
+## Group Room-Model Rollout
+
+Deploy the first group room-model release as a Cloudflare Worker and runner
+bundle update with `container_rollout=immediate`; no Web deployment is required.
+Require managed-container smoke to report the exact new runner-bundle
+fingerprint before admitting group turns. Existing per-invocation fingerprint
+admission prevents a stale warm container from processing a workspace under the
+new Worker contract.
+
+Before a new runner persists the immutable group room-model automation id, the
+prior runner remains a safe rollback. After the first such write, the new bundle
+is a hard rollback floor for that workspace: an older runner does not recognize
+the id's silent maintenance policy and could treat its next due occurrence as
+an ordinary deliverable automation. Forward-fix on this bundle or newer rather
+than restoring an older runner. After rollout, verify the expected bundle
+fingerprint and confirm a due room-model occurrence records no group delivery.
+
 ## Conversation Consumed-Watermark Rollout
 
 The exact conversation acknowledgement release changes the durable hosted
@@ -653,7 +670,7 @@ That command:
 - prepares the stable native runner base image with Docker's local cache; production deploy paths force that build from source, while hosted-local E2E lanes may reuse the GHCR-published runner base image when the source fingerprint matches the current checkout
 - deploys the Worker directly with Wrangler; production deploys currently default to immediate container rollout for the vault-share selector-scope migration, while non-production deploys default to gradual and build only the small app image layer from the prepared runner bundle
 
-The gradual container rollout keeps `rollout_active_grace_period` at 300 seconds and rolls runner instances through `10`, `25`, `50`, then `100` percent. The manual workflow exposes a `container_rollout` input; its production default is currently `immediate` because selector-scoped vault-share deliveries are unsafe under gradual runner rollout. Selecting `immediate` passes Wrangler's `--containers-rollout=immediate` flag and can interrupt active runner containers.
+The gradual container rollout keeps the production `RunnerContainer` `rollout_active_grace_period` at 300 seconds and rolls runner instances through `10`, `25`, `50`, then `100` percent. The isolated `DeploySmokeRunnerContainer` uses zero active grace and a single 100 percent step: it carries no user work, and smoke probes must not defer the image replacement they are trying to verify. The manual workflow exposes a `container_rollout` input; its production default is currently `immediate` because selector-scoped vault-share deliveries are unsafe under gradual runner rollout. Selecting `immediate` passes Wrangler's `--containers-rollout=immediate` flag and can interrupt active runner containers.
 During gradual rollout, Worker code and runner container state may disagree for the rollout window. A newly deployed Worker version can handle provider egress or internal-host traffic from an already-running warm runner process whose bundle, process env, or provider-credential shape was created before the deploy. Treat this as expected rollout behavior, not proof that traffic is reaching an old Worker version. Any PR that changes a Worker/container contract, runner env shape, hosted provider credential, internal host route, parser/toolchain path, or bundle-owned runtime assumption must document the compatibility window in its PR description and final `DEPLOYMENT CONCERNS:` handoff: whether old containers can safely talk to new Worker code, whether new containers can safely talk to old web/control-plane code, whether `container_rollout=immediate` is required, and which deploy-smoke or Workers Observability checks prove the fleet has converged.
 
 The scheduled Linq authority release has a Web-first hard gate. Deploy and
@@ -757,7 +774,7 @@ Optional smoke env:
 - `HOSTED_EXECUTION_SMOKE_LIVE_MODEL_TURN=true` to extend the managed-container smoke with one real `gpt-5.6-terra` turn; requires `HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER=true`
 - `HOSTED_EXECUTION_SMOKE_VERSION_ID` to pin smoke requests to a version in the active deployment; the deploy workflow passes the freshly deployed version
 - `HOSTED_EXECUTION_SMOKE_RUNNER_MAX_ATTEMPTS` and `HOSTED_EXECUTION_SMOKE_RUNNER_RETRY_DELAY_MS` to override the managed-container rollout wait
-- `HOSTED_EXECUTION_SMOKE_RUNNER_MAX_WAIT_MS` to bound that wait by wall clock (default 20 minutes). Keep it under the deploy job timeout: the attempt ceiling alone can outlast the job, which makes a non-converging rollout surface as a cancelled job with no reason instead of a named smoke failure. Each attempt addresses its own smoke Durable Object, so retries get a fresh container instead of re-reading one pre-rollout container for the whole run.
+- `HOSTED_EXECUTION_SMOKE_RUNNER_MAX_WAIT_MS` to bound that wait by wall clock (default 20 minutes). The Node smoke client disables its dispatcher's implicit response-header and response-body timers for this long-running request and applies this wall-clock budget as the explicit abort deadline. Keep it under the deploy job timeout: the attempt ceiling alone can outlast the job, which makes a non-converging rollout surface as a cancelled job with no reason instead of a named smoke failure. Each attempt addresses its own smoke Durable Object, so retries get a fresh container instead of re-reading one pre-rollout container for the whole run.
 
 If neither managed-container smoke nor `HOSTED_EXECUTION_SMOKE_USER_ID` is configured, smoke stops after the public banner and health checks.
 
