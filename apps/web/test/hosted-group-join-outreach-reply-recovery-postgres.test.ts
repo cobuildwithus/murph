@@ -22,6 +22,7 @@ const accountDeletionMocks = vi.hoisted(() => ({
   deleteHostedRunnerUserDataBestEffort: vi.fn().mockResolvedValue({
     alarmCleared: true,
     configured: true,
+    deleteAllCompleted: true,
     deleted: true,
     errorCode: null,
     r2DeletedObjectCount: 0,
@@ -35,6 +36,48 @@ const accountDeletionMocks = vi.hoisted(() => ({
     errorCode: null,
     notFound: false,
     terminated: true,
+  }),
+  pendingHostedAccountDeletionCleanupResult: vi.fn(),
+  persistHostedAccountDeletionCleanupTx: vi.fn().mockResolvedValue(undefined),
+  prepareHostedAccountDeletionCleanup: vi.fn().mockImplementation(
+    async (input: {
+      now: Date;
+      runtimeMemberIds: readonly string[];
+      stripeCustomerIds: readonly string[];
+      stripeSubscriptionIds?: readonly string[];
+    }) => ({
+      cloudflareCompletedAt: null,
+      environment: "test",
+      id: `cleanup_group_reply_${randomUUID()}`,
+      kmsKeyName: "test-key",
+      nextAttemptAt: input.now,
+      payloadCiphertext: "encrypted",
+      privyCompletedAt: input.now,
+      privyUserLookupKey: null,
+      runtimeMemberIds: [...input.runtimeMemberIds],
+      stripeCustomerIds: [...input.stripeCustomerIds],
+      stripeCompletedAt: input.now,
+      stripeSubscriptionIds: [...(input.stripeSubscriptionIds ?? [])],
+    }),
+  ),
+  runHostedAccountDeletionCleanup: vi.fn().mockResolvedValue({
+    cleanupPending: false,
+    cloudflare: {
+      alarmCleared: true,
+      configured: true,
+      deleteAllCompleted: true,
+      deleted: true,
+      errorCode: null,
+      r2DeletedObjectCount: 0,
+      r2SkippedUserScopedPrefixes: false,
+      r2Supported: true,
+      r2UserScopedSkipReason: null,
+      runnerStateDeleted: true,
+    },
+    vendorAccounts: {
+      privyUser: { errorCode: null, status: "skipped_no_record" },
+      stripeCustomer: { errorCode: null, status: "skipped_no_record" },
+    },
   }),
 }));
 
@@ -90,6 +133,18 @@ vi.mock("@/src/lib/hosted-execution/user-data-delete", async () => {
   };
 });
 
+vi.mock("@/src/lib/hosted-privacy/account-deletion-cleanup", () => ({
+  HOSTED_ACCOUNT_DELETION_IMMEDIATE_ATTEMPT_TIMEOUT_MS: 5_000,
+  pendingHostedAccountDeletionCleanupResult:
+    accountDeletionMocks.pendingHostedAccountDeletionCleanupResult,
+  persistHostedAccountDeletionCleanupTx:
+    accountDeletionMocks.persistHostedAccountDeletionCleanupTx,
+  prepareHostedAccountDeletionCleanup:
+    accountDeletionMocks.prepareHostedAccountDeletionCleanup,
+  runHostedAccountDeletionCleanup:
+    accountDeletionMocks.runHostedAccountDeletionCleanup,
+}));
+
 vi.mock("@/src/lib/hosted-orchestration/workflow-termination", async () => {
   const actual = await vi.importActual<
     typeof import("@/src/lib/hosted-orchestration/workflow-termination")
@@ -115,7 +170,6 @@ vi.mock("@/src/lib/phone-calls/account-deletion", async () => {
 });
 
 import {
-  acquireHostedGroupJoinOutreachDrainLockTx,
   enqueueHostedGroupJoinOutreachTx,
   readHostedGroupJoinOutreachReplyContextTx,
 } from "@/src/lib/hosted-groups/group-join-outreach-store";
@@ -142,7 +196,6 @@ import { parseHostedLinqProviderEvent } from "@/src/lib/hosted-onboarding/linq-p
 import {
   buildHostedMemberIdentityPrivateColumns,
 } from "@/src/lib/hosted-onboarding/member-private-codecs";
-import { lockHostedMemberRow } from "@/src/lib/hosted-onboarding/shared";
 import {
   createHostedLinqDeliveryIdempotencyLookupKey,
   createHostedLinqProviderEventLookupKey,
@@ -586,11 +639,16 @@ describe.skipIf(!runPostgresProof)(
           }),
         );
 
+        // Group-aware delivery correlation is part of the provider fence and
+        // is durable before the drain-owning send returns. Unrelated generic
+        // post-response work may still remain scheduled.
         expect(scheduledTasks.length).toBeGreaterThan(0);
         await expect(prisma.hostedGroupJoinOutreach.findUnique({
           select: { repliedAt: true },
           where: { id: outreachId },
-        })).resolves.toEqual({ repliedAt: null });
+        })).resolves.toEqual({
+          repliedAt: new Date("2026-07-24T20:01:00.000Z"),
+        });
 
         for (const task of scheduledTasks.splice(0)) {
           await task();
@@ -993,55 +1051,74 @@ describe.skipIf(!runPostgresProof)(
         "https://join.example.test",
       );
       const fixture = await createDeletionReplyRaceFixture();
-      let releaseReply = () => {};
-      const replyMayContinue = new Promise<void>((resolve) => {
-        releaseReply = resolve;
+      let releaseProvider = () => {};
+      const providerMayContinue = new Promise<void>((resolve) => {
+        releaseProvider = resolve;
       });
-      let reportReplyDrain = () => {};
-      const replyOwnsDrain = new Promise<void>((resolve) => {
-        reportReplyDrain = resolve;
+      let reportProviderStarted = () => {};
+      const providerStarted = new Promise<void>((resolve) => {
+        reportProviderStarted = resolve;
+      });
+      let reportDeletionCrossedFence = () => {};
+      const deletionCrossedFence = new Promise<void>((resolve) => {
+        reportDeletionCrossedFence = resolve;
       });
       let cleanupCalls = 0;
-      accountDeletionMocks.deleteHostedPhoneCallsForAccountDeletion
+      accountDeletionMocks.prepareHostedAccountDeletionCleanup
+        .mockReset()
+        .mockImplementation(async (input) => {
+          reportDeletionCrossedFence();
+          return makePreparedDeletionCleanup(input);
+        });
+      accountDeletionMocks.runHostedAccountDeletionCleanup
         .mockReset()
         .mockImplementation(async () => {
           cleanupCalls += 1;
+          return makeDeletionCleanupRunResult();
         });
       providerMocks.sendHostedLinqChatMessage
         .mockReset()
-        .mockResolvedValue({
-          chatId: fixture.chatId,
-          messageId: `linq-delete-fence-${randomUUID()}`,
+        .mockImplementation(async () => {
+          reportProviderStarted();
+          await providerMayContinue;
+          return {
+            chatId: fixture.chatId,
+            messageId: `linq-delete-fence-${randomUUID()}`,
+          };
         });
+      let deletionPromise: ReturnType<typeof deleteHostedAccountData> | null =
+        null;
+      let replyPromise: ReturnType<typeof drainDeletionReplyEffect> | null =
+        null;
 
       try {
-        const reply = fixture.replyPrisma.$transaction(async (tx) => {
-          await lockHostedMemberRow(tx, fixture.participantMemberId);
-          await acquireHostedGroupJoinOutreachDrainLockTx(tx);
-          reportReplyDrain();
-          await replyMayContinue;
-          return drainDeletionReplyEffect({
-            effect: fixture.effect,
-            prisma: tx,
-          });
+        replyPromise = drainDeletionReplyEffect({
+          effect: fixture.effect,
+          prisma: fixture.replyPrisma,
         });
-        await replyOwnsDrain;
+        await providerStarted;
 
         let deletionSettled = false;
-        const deletion = deleteHostedAccountData({
+        deletionPromise = deleteHostedAccountData({
           memberId: fixture.ownerMemberId,
           prisma: fixture.deletionPrisma,
           request: new Request("https://join.example.test/settings"),
         }).finally(() => {
           deletionSettled = true;
         });
-        await new Promise((resolve) => setTimeout(resolve, 50));
+        const crossedFenceBeforeProviderCompleted = await Promise.race([
+          deletionCrossedFence.then(() => true),
+          new Promise<false>((resolve) => {
+            setTimeout(() => resolve(false), 1_000);
+          }),
+        ]);
+        expect(crossedFenceBeforeProviderCompleted).toBe(false);
         expect(cleanupCalls).toBe(0);
         expect(deletionSettled).toBe(false);
-        releaseReply();
+        releaseProvider();
 
         const [replyResult] = await withTimeout(
-          Promise.all([reply, deletion]),
+          Promise.all([replyPromise, deletionPromise]),
           10_000,
         );
         expect(replyResult).toMatchObject({ sentCount: 1, skipped: [] });
@@ -1049,11 +1126,20 @@ describe.skipIf(!runPostgresProof)(
         expect(providerMocks.sendHostedLinqChatMessage).toHaveBeenCalledTimes(1);
         await expectDeletionReplyRaceConverged(fixture);
       } finally {
-        releaseReply();
+        releaseProvider();
+        await Promise.allSettled([
+          ...(replyPromise ? [replyPromise] : []),
+          ...(deletionPromise ? [deletionPromise] : []),
+        ]);
         await cleanupDeletionReplyRaceFixture(fixture);
-        accountDeletionMocks.deleteHostedPhoneCallsForAccountDeletion
+        accountDeletionMocks.prepareHostedAccountDeletionCleanup
           .mockReset()
-          .mockResolvedValue(undefined);
+          .mockImplementation(async (input) =>
+            makePreparedDeletionCleanup(input)
+          );
+        accountDeletionMocks.runHostedAccountDeletionCleanup
+          .mockReset()
+          .mockResolvedValue(makeDeletionCleanupRunResult());
         providerMocks.sendHostedLinqChatMessage.mockReset();
         vi.unstubAllEnvs();
       }
@@ -1077,9 +1163,14 @@ describe.skipIf(!runPostgresProof)(
       accountDeletionMocks.deleteHostedPhoneCallsForAccountDeletion
         .mockReset()
         .mockImplementation(async () => {
-          cleanupCalls += 1;
           reportSuspensionFence();
           await deletionMayContinue;
+        });
+      accountDeletionMocks.runHostedAccountDeletionCleanup
+        .mockReset()
+        .mockImplementation(async () => {
+          cleanupCalls += 1;
+          return makeDeletionCleanupRunResult();
         });
       providerMocks.sendHostedLinqChatMessage.mockReset();
 
@@ -1121,6 +1212,9 @@ describe.skipIf(!runPostgresProof)(
         accountDeletionMocks.deleteHostedPhoneCallsForAccountDeletion
           .mockReset()
           .mockResolvedValue(undefined);
+        accountDeletionMocks.runHostedAccountDeletionCleanup
+          .mockReset()
+          .mockResolvedValue(makeDeletionCleanupRunResult());
         providerMocks.sendHostedLinqChatMessage.mockReset();
         vi.unstubAllEnvs();
       }
@@ -1143,6 +1237,50 @@ type DeletionReplyRaceFixture = {
   replyPrisma: PrismaClient;
   runtimeMemberId: string;
 };
+
+function makePreparedDeletionCleanup(input: {
+  now: Date;
+  runtimeMemberIds: readonly string[];
+  stripeCustomerIds: readonly string[];
+  stripeSubscriptionIds?: readonly string[];
+}) {
+  return {
+    cloudflareCompletedAt: null,
+    environment: "test",
+    id: `cleanup_group_reply_${randomUUID()}`,
+    kmsKeyName: "test-key",
+    nextAttemptAt: input.now,
+    payloadCiphertext: "encrypted",
+    privyCompletedAt: input.now,
+    privyUserLookupKey: null,
+    runtimeMemberIds: [...input.runtimeMemberIds],
+    stripeCustomerIds: [...input.stripeCustomerIds],
+    stripeCompletedAt: input.now,
+    stripeSubscriptionIds: [...(input.stripeSubscriptionIds ?? [])],
+  };
+}
+
+function makeDeletionCleanupRunResult() {
+  return {
+    cleanupPending: false,
+    cloudflare: {
+      alarmCleared: true,
+      configured: true,
+      deleteAllCompleted: true,
+      deleted: true,
+      errorCode: null,
+      r2DeletedObjectCount: 0,
+      r2SkippedUserScopedPrefixes: false,
+      r2Supported: true,
+      r2UserScopedSkipReason: null,
+      runnerStateDeleted: true,
+    },
+    vendorAccounts: {
+      privyUser: { errorCode: null, status: "skipped_no_record" },
+      stripeCustomer: { errorCode: null, status: "skipped_no_record" },
+    },
+  };
+}
 
 async function createDeletionReplyRaceFixture():
   Promise<DeletionReplyRaceFixture> {

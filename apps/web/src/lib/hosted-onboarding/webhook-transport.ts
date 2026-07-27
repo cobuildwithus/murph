@@ -380,6 +380,18 @@ type HostedLinqSideEffectSendSkip = {
   retryAt?: Date;
 };
 
+type HostedLinqProviderFenceState = {
+  providerRequestCompleted: boolean;
+};
+
+const HOSTED_GROUP_JOIN_PROVIDER_FENCE_TRANSACTION_OPTIONS = {
+  maxWait: 5_000,
+  // Linq's provider request has a ten-second timeout. Keep the transaction
+  // alive long enough to commit the correlated result without widening the
+  // ordinary signup or non-signup transport path.
+  timeout: 15_000,
+} as const;
+
 export type HostedLinqSideEffectDrainResult = {
   sentCount: number;
   skipped: readonly {
@@ -397,56 +409,162 @@ export async function drainHostedLinqSideEffectsDirect(
   const skipped: HostedLinqSideEffectDrainResult["skipped"][number][] = [];
 
   for (const plannedEffect of input.sideEffects) {
-    const effect = await resolveHostedLinqDispatchSideEffect(plannedEffect, input.prisma);
-    if (!effect) {
-      skipped.push({
-        effectId: plannedEffect.effectId,
-        reason: "effect_unresolved",
-        template: plannedEffect.payload.template,
-      });
-      continue;
-    }
-    const noticeClaimed = await claimHostedLinqNoticeForSideEffect(effect, input.prisma);
-    if (!noticeClaimed) {
-      skipped.push({
-        effectId: effect.effectId,
-        reason: "notice_already_claimed",
-        template: effect.payload.template,
-      });
-      continue;
-    }
-    let sendSkip: HostedLinqSideEffectSendSkip | null;
-    try {
-      sendSkip = await sendHostedLinqSideEffect(effect, {
-        prisma: input.prisma,
-        scheduleAfterResponse: input.scheduleAfterResponse,
-        signal: input.signal,
-      });
-    } catch (error) {
-      await releaseHostedLinqNoticeClaimForSideEffect(effect, input.prisma);
-      throw error;
-    }
-    if (sendSkip) {
-      skipped.push({
-        effectId: effect.effectId,
-        reason: sendSkip.reason,
-        ...(sendSkip.retryAt ? { retryAt: sendSkip.retryAt } : {}),
-        template: effect.payload.template,
-      });
-      continue;
-    }
-
-    if (isHostedInviteLinqMessagePayload(effect.payload)) {
-      await markHostedLinqNoticeSentForSideEffect(effect, input.prisma);
-      await markHostedInviteSentBestEffort(effect.payload.inviteId, input.prisma);
-    }
-    sentCount += 1;
+    const result = await drainHostedLinqSideEffectWithProviderFence(
+      plannedEffect,
+      input,
+    );
+    sentCount += result.sentCount;
+    skipped.push(...result.skipped);
   }
 
   return {
     sentCount,
     skipped,
   };
+}
+
+async function drainHostedLinqSideEffectWithProviderFence(
+  plannedEffect: HostedLinqMessageSideEffect,
+  input: HostedLinqSideEffectDrainInput,
+): Promise<HostedLinqSideEffectDrainResult> {
+  const effect = await resolveHostedLinqDispatchSideEffect(
+    plannedEffect,
+    input.prisma,
+  );
+  if (!effect) {
+    return {
+      sentCount: 0,
+      skipped: [{
+        effectId: plannedEffect.effectId,
+        reason: "effect_unresolved",
+        template: plannedEffect.payload.template,
+      }],
+    };
+  }
+  const requiresProviderFence =
+    await requiresHostedGroupJoinProviderFence(effect, input.prisma);
+  if (!requiresProviderFence) {
+    return drainHostedLinqSideEffectDirect(effect, {
+      ...input,
+      completeProviderOutcomeBeforeReturn: false,
+    });
+  }
+
+  const run = async (
+    prisma: Prisma.TransactionClient,
+  ): Promise<
+    | { result: HostedLinqSideEffectDrainResult; status: "completed" }
+    | { error: unknown; status: "failed" }
+  > => {
+    const providerFenceState: HostedLinqProviderFenceState = {
+      providerRequestCompleted: false,
+    };
+    try {
+      return {
+        result: await drainHostedLinqSideEffectDirect(effect, {
+          ...input,
+          completeProviderOutcomeBeforeReturn: true,
+          prisma,
+          providerFenceState,
+        }),
+        status: "completed",
+      };
+    } catch (error) {
+      if (providerFenceState.providerRequestCompleted) {
+        throw error;
+      }
+      // Commit the attempted/failed delivery consequence and reopened exact
+      // outreach before surfacing the provider failure to webhook retry.
+      return { error, status: "failed" };
+    }
+  };
+
+  const outcome = isHostedLinqTransportRootClient(input.prisma)
+    ? await input.prisma.$transaction(
+        run,
+        HOSTED_GROUP_JOIN_PROVIDER_FENCE_TRANSACTION_OPTIONS,
+      )
+    : await run(input.prisma);
+  if (outcome.status === "failed") {
+    throw outcome.error;
+  }
+  return outcome.result;
+}
+
+async function drainHostedLinqSideEffectDirect(
+  effect: HostedLinqMessageSideEffect,
+  input: HostedLinqSideEffectDrainInput & {
+    completeProviderOutcomeBeforeReturn: boolean;
+    providerFenceState?: HostedLinqProviderFenceState;
+  },
+): Promise<HostedLinqSideEffectDrainResult> {
+  const noticeClaimed = await claimHostedLinqNoticeForSideEffect(
+    effect,
+    input.prisma,
+  );
+  if (!noticeClaimed) {
+    return {
+      sentCount: 0,
+      skipped: [{
+        effectId: effect.effectId,
+        reason: "notice_already_claimed",
+        template: effect.payload.template,
+      }],
+    };
+  }
+  let sendSkip: HostedLinqSideEffectSendSkip | null;
+  try {
+    sendSkip = await sendHostedLinqSideEffect(effect, {
+      completeProviderOutcomeBeforeReturn:
+        input.completeProviderOutcomeBeforeReturn,
+      prisma: input.prisma,
+      providerFenceState: input.providerFenceState,
+      scheduleAfterResponse: input.scheduleAfterResponse,
+      signal: input.signal,
+    });
+  } catch (error) {
+    await releaseHostedLinqNoticeClaimForSideEffect(effect, input.prisma);
+    throw error;
+  }
+  if (sendSkip) {
+    return {
+      sentCount: 0,
+      skipped: [{
+        effectId: effect.effectId,
+        reason: sendSkip.reason,
+        ...(sendSkip.retryAt ? { retryAt: sendSkip.retryAt } : {}),
+        template: effect.payload.template,
+      }],
+    };
+  }
+
+  if (isHostedInviteLinqMessagePayload(effect.payload)) {
+    await markHostedLinqNoticeSentForSideEffect(effect, input.prisma);
+    await markHostedInviteSentBestEffort(effect.payload.inviteId, input.prisma);
+  }
+  return { sentCount: 1, skipped: [] };
+}
+
+async function requiresHostedGroupJoinProviderFence(
+  effect: HostedLinqMessageSideEffect,
+  prisma: HostedLinqTransportPersistenceClient,
+): Promise<boolean> {
+  if (!isHostedLinqSignupMessageSideEffect(effect)) {
+    return false;
+  }
+  if (effect.payload.groupJoinOutreachId?.trim()) {
+    return true;
+  }
+  const persistedIntent =
+    await readHostedLinqDeliveryProviderDispatchIntentTx({
+      idempotencyKey: effect.effectId,
+      prisma,
+    });
+  return Boolean(
+    parseHostedLinqInviteSignupDeliverySourceRef(
+      persistedIntent?.sourceRef ?? null,
+    )?.groupJoinReplyContext,
+  );
 }
 
 /**
@@ -513,7 +631,9 @@ async function sendHostedLinqSideEffect(
     payload: HostedLinqMessagePayload;
   },
   options: {
+    completeProviderOutcomeBeforeReturn: boolean;
     prisma: HostedLinqTransportPersistenceClient;
+    providerFenceState?: HostedLinqProviderFenceState;
     scheduleAfterResponse?: HostedLinqTransportPostResponseScheduler;
     signal?: AbortSignal;
   },
@@ -563,17 +683,27 @@ async function sendHostedLinqSideEffect(
         signal: options.signal,
         to: [deliveryEffect.payload.memberPhone],
       });
+      if (options.providerFenceState) {
+        options.providerFenceState.providerRequestCompleted = true;
+      }
 
-      scheduleHostedLinqDeliveryMilestoneAfterAttempt({
-        attemptTask: deliveryAttemptTask,
-        milestoneTask: () => markHostedLinqDeliveryAcceptedBestEffort({
-          chatId: result.chatId,
-          effect: deliveryEffect,
-          messageId: result.messageId,
-          prisma: options.prisma,
-        }),
-        scheduleAfterResponse: options.scheduleAfterResponse,
+      const acceptedMilestone = () => markHostedLinqDeliveryAcceptedBestEffort({
+        chatId: result.chatId,
+        effect: deliveryEffect,
+        messageId: result.messageId,
+        prisma: options.prisma,
+        throwOnError: options.completeProviderOutcomeBeforeReturn,
       });
+      if (options.completeProviderOutcomeBeforeReturn) {
+        await deliveryAttemptTask;
+        await acceptedMilestone();
+      } else {
+        scheduleHostedLinqDeliveryMilestoneAfterAttempt({
+          attemptTask: deliveryAttemptTask,
+          milestoneTask: acceptedMilestone,
+          scheduleAfterResponse: options.scheduleAfterResponse,
+        });
+      }
       return null;
     }
 
@@ -639,14 +769,22 @@ async function sendHostedLinqSideEffect(
       replyToMessageId: deliveryEffect.payload.replyToMessageId,
       signal: options.signal,
     });
+    if (options.providerFenceState) {
+      options.providerFenceState.providerRequestCompleted = true;
+    }
     const acceptedMilestone = () => markHostedLinqDeliveryAcceptedBestEffort({
       chatId: result.chatId ?? deliveryChatId,
       effect: deliveryEffect,
       messageId: result.messageId,
       prisma: options.prisma,
-      throwOnError: deliveryEffect.payload.template === "ai_usage_quota",
+      throwOnError:
+        deliveryEffect.payload.template === "ai_usage_quota"
+        || options.completeProviderOutcomeBeforeReturn,
     });
-    if (deliveryEffect.payload.template === "ai_usage_quota") {
+    if (
+      deliveryEffect.payload.template === "ai_usage_quota"
+      || options.completeProviderOutcomeBeforeReturn
+    ) {
       await deliveryAttemptTask;
       await acceptedMilestone();
     } else {
@@ -662,11 +800,13 @@ async function sendHostedLinqSideEffect(
       || effect.payload.template === "invite_signup_fallback"
     ) {
       await deliveryAttemptTask;
-      await markHostedLinqDeliveryFailedBestEffort({
-        effect: deliveryEffect,
-        error,
-        prisma: options.prisma,
-      });
+      if (!options.providerFenceState?.providerRequestCompleted) {
+        await markHostedLinqDeliveryFailedBestEffort({
+          effect: deliveryEffect,
+          error,
+          prisma: options.prisma,
+        });
+      }
     } else if (
       effect.payload.template === "ai_usage_quota"
       && usageLimitPayload

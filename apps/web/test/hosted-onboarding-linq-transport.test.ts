@@ -287,7 +287,7 @@ describe("hosted Linq webhook transport", () => {
     ).not.toHaveBeenCalled();
   });
 
-  it("consumes group reply context only after invite delivery is accepted", async () => {
+  it("commits accepted group reply context before the provider fence returns", async () => {
     const effect = createHostedWebhookLinqMessageSideEffect({
       chatId: "chat-1",
       groupJoinCode: "join-group",
@@ -314,16 +314,18 @@ describe("hosted Linq webhook transport", () => {
       }),
     ).resolves.toBeDefined();
 
-    expect(scheduledTasks).toHaveLength(1);
+    expect(scheduledTasks).toHaveLength(0);
     expect(markHostedLinqOnboardingLinkNoticeSent).toHaveBeenCalledWith({
       memberId: "member-1",
       occurredAt: "2026-03-26T12:00:00.000Z",
-      prisma,
+      prisma: expect.objectContaining({
+        $queryRaw: expect.any(Function),
+      }),
     });
-    expect(prisma.hostedGroupJoinOutreach.updateMany).not.toHaveBeenCalled();
-
-    await scheduledTasks[0]?.();
-
+    expect(prisma.$transaction).toHaveBeenCalledWith(
+      expect.any(Function),
+      { maxWait: 5_000, timeout: 15_000 },
+    );
     expect(markHostedLinqDeliveryAcceptedTx).toHaveBeenCalled();
     const claimInput = vi.mocked(claimHostedLinqDeliveryProviderDispatchTx)
       .mock.calls[0]?.[0];
@@ -348,6 +350,97 @@ describe("hosted Linq webhook transport", () => {
         skippedAt: null,
       },
     });
+  });
+
+  it("commits a failed group provider attempt before surfacing the error", async () => {
+    vi.mocked(sendHostedLinqChatMessage).mockRejectedValueOnce(
+      new Error("send failed"),
+    );
+    vi.mocked(markHostedLinqDeliverySendFailedTx).mockResolvedValueOnce();
+    const effect = createHostedWebhookLinqMessageSideEffect({
+      chatId: "chat-1",
+      groupJoinCode: "join-group",
+      groupJoinOutreachId: "hgrpjoa-provider-failed",
+      inviteId: "invite-1",
+      memberId: "member-1",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      replyToMessageId: "message-1",
+      service: "sms",
+      sourceEventId: "event-group-provider-failed",
+      threadIsDirect: true,
+      template: "invite_signup",
+    });
+    const prisma = createInviteSignupPrismaFixture();
+    const scheduleAfterResponse = vi.fn();
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    try {
+      await expect(
+        drainHostedLinqSideEffectsDirect({
+          prisma: prisma as never,
+          scheduleAfterResponse,
+          sideEffects: [effect],
+        }),
+      ).rejects.toThrow("send failed");
+    } finally {
+      errorSpy.mockRestore();
+    }
+
+    expect(prisma.$transaction).toHaveBeenCalledWith(
+      expect.any(Function),
+      { maxWait: 5_000, timeout: 15_000 },
+    );
+    expect(markHostedLinqDeliverySendFailedTx).toHaveBeenCalledWith(
+      expect.objectContaining({
+        failureReason: "send failed",
+        idempotencyKey: effect.effectId,
+        prisma: expect.objectContaining({
+          $queryRaw: expect.any(Function),
+        }),
+      }),
+    );
+    expect(markHostedLinqDeliveryAcceptedTx).not.toHaveBeenCalled();
+    expect(prisma.hostedGroupJoinOutreach.updateMany).not.toHaveBeenCalled();
+    expect(scheduleAfterResponse).not.toHaveBeenCalled();
+  });
+
+  it("rolls back the group provider fence when accepted correlation fails", async () => {
+    vi.mocked(markHostedLinqDeliveryAcceptedTx).mockRejectedValueOnce(
+      new Error("correlation failed"),
+    );
+    const effect = createHostedWebhookLinqMessageSideEffect({
+      chatId: "chat-1",
+      groupJoinCode: "join-group",
+      groupJoinOutreachId: "hgrpjoa-correlation-failed",
+      inviteId: "invite-1",
+      memberId: "member-1",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      replyToMessageId: "message-1",
+      service: "sms",
+      sourceEventId: "event-group-correlation-failed",
+      threadIsDirect: true,
+      template: "invite_signup",
+    });
+    const prisma = createInviteSignupPrismaFixture();
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    try {
+      await expect(
+        drainHostedLinqSideEffectsDirect({
+          prisma: prisma as never,
+          sideEffects: [effect],
+        }),
+      ).rejects.toThrow("correlation failed");
+    } finally {
+      errorSpy.mockRestore();
+      warnSpy.mockRestore();
+    }
+
+    expect(sendHostedLinqChatMessage).toHaveBeenCalledTimes(1);
+    expect(markHostedLinqDeliverySendFailedTx).not.toHaveBeenCalled();
+    expect(markHostedLinqOnboardingLinkNoticeSent).not.toHaveBeenCalled();
+    expect(prisma.hostedGroupJoinOutreach.updateMany).not.toHaveBeenCalled();
   });
 
   it("returns the exact retry deadline while a signup delivery is still in flight", async () => {
@@ -614,17 +707,15 @@ describe("hosted Linq webhook transport", () => {
       template: "invite_signup",
     });
     const prisma = createInviteSignupPrismaFixture();
-    const scheduledTasks: Array<() => Promise<void>> = [];
+    const scheduleAfterResponse = vi.fn();
 
     await drainHostedLinqSideEffectsDirect({
       prisma: prisma as never,
-      scheduleAfterResponse: (task) => {
-        scheduledTasks.push(task);
-      },
+      scheduleAfterResponse,
       sideEffects: [effect],
     });
-    await scheduledTasks[0]?.();
 
+    expect(scheduleAfterResponse).not.toHaveBeenCalled();
     expect(markHostedLinqOnboardingLinkNoticeSent).toHaveBeenCalledTimes(1);
     expect(releaseHostedLinqOnboardingLinkNoticeClaim).toHaveBeenCalledWith({
       memberId: "member-1",

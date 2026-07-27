@@ -1315,14 +1315,11 @@ async function deleteHostedGroupJoinOutreachRowsForMembers(
     snapshot.deliveries,
   );
 
-  // Deletion preempts any pending dispatch rather than waiting for one. The
-  // existing egress authority already owns that boundary: it refuses the send
-  // when the outreach row is absent, unclaimed, or already terminal, so removing
-  // the row is what stops a later provider call. Blocking here instead would be
-  // strictly worse -- `dispatchStartedAt` is never cleared when a retryable
-  // provider failure defers a row, so a retry-pending outreach would look live
-  // indefinitely and strand this deletion after it has already suspended the
-  // member, revoked providers, and cancelled billing.
+  // The earlier suspension transaction crossed this same drain before commit.
+  // A provider effect admitted first therefore committed its correlation and
+  // projection before suspension, while every later preparation observes the
+  // suspended group runtime and stops before provider dispatch. No group-aware
+  // provider effect can still be in flight when these rows are removed.
   const deliveries = await prisma.hostedLinqDelivery.deleteMany({
     where: snapshot.deliveryWhere,
   });
