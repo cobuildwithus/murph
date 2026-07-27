@@ -151,32 +151,98 @@ describe("hosted group newsletter participants", () => {
   });
 
   it("keeps participant-backed thread-container members eligible in the batched access read", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-26T12:00:00.000Z"));
     const prisma = createPrismaMock({
       newsletterParticipantBackedMemberIds: ["member_active_with_email"],
     });
     mocks.getPrisma.mockReturnValue(prisma);
 
-    const participants = await prepareHostedGroupNewsletterParticipants({
-      runtimeMemberId: "group_runtime_member",
-    });
+    try {
+      const participants = await prepareHostedGroupNewsletterParticipants({
+        runtimeMemberId: "group_runtime_member",
+      });
 
-    if (participants.status !== "ok") {
-      throw new Error("Expected newsletter preparation.");
+      if (participants.status !== "ok") {
+        throw new Error("Expected newsletter preparation.");
+      }
+      expect(participants.participants).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          hasEmail: true,
+          memberId: "member_active_with_email",
+        }),
+      ]));
+      expect(mocks.readHostedMemberVerifiedEmailSnapshots).toHaveBeenCalledWith({
+        memberIds: [
+          "member_active_with_email",
+          "member_active_missing_email",
+        ],
+        prisma,
+      });
+      expect(prisma.hostedMember.findMany).toHaveBeenCalledTimes(2);
+      for (const [args] of prisma.hostedMember.findMany.mock.calls) {
+        expect(args).toMatchObject({
+          select: {
+            threadContainer: {
+              select: {
+                participants: {
+                  where: {
+                    lastSeenAt: { gte: new Date("2026-07-19T12:00:00.000Z") },
+                    removedAt: null,
+                  },
+                },
+              },
+            },
+          },
+        });
+      }
+      const canonicalGroupReads = prisma.hostedGroup.findFirst.mock.calls.filter(
+        ([args]) => args?.select?.runtimeMember,
+      );
+      expect(canonicalGroupReads).toHaveLength(2);
+      for (const [args] of canonicalGroupReads) {
+        expect(args).toMatchObject({
+          select: {
+            members: {
+              select: {
+                member: {
+                  select: {
+                    threadContainer: {
+                      select: {
+                        participants: {
+                          where: {
+                            lastSeenAt: {
+                              gte: new Date("2026-07-19T12:00:00.000Z"),
+                            },
+                            removedAt: null,
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+            runtimeMember: {
+              select: {
+                threadContainer: {
+                  select: {
+                    participants: {
+                      where: {
+                        lastSeenAt: { gte: new Date("2026-07-19T12:00:00.000Z") },
+                        removedAt: null,
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        });
+      }
+    } finally {
+      vi.useRealTimers();
     }
-    expect(participants.participants).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        hasEmail: true,
-        memberId: "member_active_with_email",
-      }),
-    ]));
-    expect(mocks.readHostedMemberVerifiedEmailSnapshots).toHaveBeenCalledWith({
-      memberIds: [
-        "member_active_with_email",
-        "member_active_missing_email",
-      ],
-      prisma,
-    });
-    expect(prisma.hostedMember.findMany).toHaveBeenCalledTimes(2);
   });
 
   it("returns current address-free data grant ids only for email-authorized active members", async () => {
@@ -883,7 +949,10 @@ function createPrismaMock(input?: {
       }),
     },
     hostedMember: {
-      findMany: vi.fn(async () => {
+      findMany: vi.fn(async (_args: {
+        select?: unknown;
+        where?: unknown;
+      }) => {
         const suspendedMemberIds = new Set(
           input?.newsletterSuspendedMemberIds ?? ["member_suspended"],
         );

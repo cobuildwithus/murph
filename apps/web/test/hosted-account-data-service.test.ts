@@ -536,6 +536,84 @@ describe("deleteHostedAccountData", () => {
     expect(serviceMocks.persistHostedAccountDeletionCleanupTx).not.toHaveBeenCalled();
   });
 
+  it("fails before canonical deletion when the owned runtime set changes", async () => {
+    const operationOrder: string[] = [];
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      onTransaction: () => undefined,
+      operationOrder,
+      ownedThreadContainerMemberIds: [],
+      transactionOwnedThreadContainerMemberIds: ["member_container"],
+    });
+
+    await expect(deleteHostedAccountData({
+      memberId: "member_123",
+      prisma,
+      request: new Request("https://join.example.test/settings"),
+    })).rejects.toMatchObject({
+      code: "ACCOUNT_DELETION_RUNTIME_SET_CHANGED",
+      httpStatus: 503,
+      retryable: true,
+    });
+
+    expect(operationOrder).not.toContain("delete:hostedMember");
+    expect(serviceMocks.persistHostedAccountDeletionCleanupTx).not.toHaveBeenCalled();
+  });
+
+  it("fails before canonical deletion when durable cleanup ownership cannot be persisted", async () => {
+    const operationOrder: string[] = [];
+    serviceMocks.persistHostedAccountDeletionCleanupTx.mockRejectedValueOnce(
+      Object.assign(new Error("database write failed"), { code: "DATABASE_UNAVAILABLE" }),
+    );
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      onTransaction: () => undefined,
+      operationOrder,
+    });
+
+    await expect(deleteHostedAccountData({
+      memberId: "member_123",
+      prisma,
+      request: new Request("https://join.example.test/settings"),
+    })).rejects.toMatchObject({
+      code: "DATABASE_UNAVAILABLE",
+    });
+
+    expect(serviceMocks.persistHostedAccountDeletionCleanupTx).toHaveBeenCalledOnce();
+    expect(operationOrder).not.toContain("delete:hostedMember");
+  });
+
+  it("reports pending cleanup when immediate cleanup fails after canonical deletion", async () => {
+    const operationOrder: string[] = [];
+    serviceMocks.runHostedAccountDeletionCleanup.mockRejectedValueOnce(
+      Object.assign(new Error("control plane timed out"), {
+        code: "CONTROL_PLANE_TIMEOUT",
+      }),
+    );
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      onTransaction: () => undefined,
+      operationOrder,
+    });
+
+    try {
+      const result = await deleteHostedAccountData({
+        memberId: "member_123",
+        prisma,
+        request: new Request("https://join.example.test/settings"),
+      });
+
+      expect(operationOrder).toContain("delete:hostedMember");
+      expect(result.cleanupPending).toBe(true);
+      expect(result.cloudflare).toMatchObject({
+        deleted: false,
+        errorCode: "Error",
+      });
+      expect(serviceMocks.pendingHostedAccountDeletionCleanupResult)
+        .toHaveBeenCalledWith("Error");
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
+
   it("deletes every Clinical Records control-plane row before its connection owner", async () => {
     const operationOrder: string[] = [];
     const prisma = createHostedAccountDeletionPrismaForTest({
@@ -2230,6 +2308,7 @@ function createHostedAccountDeletionPrismaForTest(input: {
   familyBillingRefRecords?: Record<string, unknown>[];
   familyGroups?: Array<{ id: string }>;
   ownedThreadContainerMemberIds?: string[];
+  transactionOwnedThreadContainerMemberIds?: string[];
   identityRecord?: Record<string, unknown> | null;
   onTransaction: () => void;
   operationOrder?: string[];
@@ -2287,9 +2366,12 @@ function createHostedAccountDeletionPrismaForTest(input: {
     },
     hostedThreadContainer: {
       ...makeDeleteDelegate("hostedThreadContainer"),
-      findMany: async () => (input.ownedThreadContainerMemberIds ?? []).map((memberId) => ({
-        memberId,
-      })),
+      findMany: async () =>
+        (
+          input.transactionOwnedThreadContainerMemberIds
+          ?? input.ownedThreadContainerMemberIds
+          ?? []
+        ).map((memberId) => ({ memberId })),
     },
     hostedMember: {
       ...makeDeleteDelegate("hostedMember"),

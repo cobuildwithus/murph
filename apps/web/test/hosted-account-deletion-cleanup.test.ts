@@ -27,6 +27,7 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
 }));
 
 import {
+  drainHostedAccountDeletionCleanupBatch,
   persistHostedAccountDeletionCleanupTx,
   prepareHostedAccountDeletionCleanup,
   runHostedAccountDeletionCleanup,
@@ -278,6 +279,119 @@ describe("hosted account deletion cleanup", () => {
       nextAttemptAt: new Date("2026-07-25T19:00:00.000Z"),
     });
   });
+
+  it("drains due receipts in bounded order and isolates per-receipt failures", async () => {
+    const now = new Date("2026-07-25T18:00:00.000Z");
+    const rows = new Map<string, CleanupRow>();
+    for (const [id, runtimeMemberId] of [
+      ["cleanup_complete", "member_complete"],
+      ["cleanup_failed", "member_failed"],
+      ["cleanup_pending", "member_pending"],
+    ] as const) {
+      rows.set(id, makeCleanupRow({
+        id,
+        now,
+        payloadCiphertext: Buffer.from(JSON.stringify({
+          privyUserId: null,
+          runtimeMemberIds: [runtimeMemberId],
+          schema: "murph.hosted-account-deletion-cleanup.v1",
+          stripeCustomerIds: [],
+        })).toString("base64"),
+      }));
+    }
+    const hostedAccountDeletionCleanup = {
+      deleteMany: vi.fn(async ({ where }: { where: { id: string } }) => {
+        const deleted = rows.delete(where.id);
+        return { count: deleted ? 1 : 0 };
+      }),
+      findMany: vi.fn(async () => [
+        { id: "cleanup_complete" },
+        { id: "cleanup_failed" },
+        { id: "cleanup_pending" },
+      ]),
+      findUnique: vi.fn(async ({ where }: { where: { id: string } }) =>
+        rows.get(where.id) ?? null
+      ),
+      updateMany: vi.fn(async ({
+        data,
+        where,
+      }: {
+        data: Partial<CleanupRow>;
+        where: { id: string };
+      }) => {
+        const row = rows.get(where.id);
+        if (!row) {
+          return { count: 0 };
+        }
+        rows.set(where.id, { ...row, ...data, updatedAt: now });
+        return { count: 1 };
+      }),
+    };
+    const prisma = { hostedAccountDeletionCleanup };
+    mocks.kmsDecrypt.mockImplementation(async (input: {
+      ciphertext: string;
+    }) => {
+      const plaintext = new Uint8Array(Buffer.from(input.ciphertext, "base64"));
+      const payload = JSON.parse(new TextDecoder().decode(plaintext)) as {
+        runtimeMemberIds?: unknown;
+      };
+      if (
+        Array.isArray(payload.runtimeMemberIds)
+        && payload.runtimeMemberIds.includes("member_failed")
+      ) {
+        throw Object.assign(new Error("KMS unavailable"), { code: "KMS_UNAVAILABLE" });
+      }
+      return { plaintext };
+    });
+    mocks.deleteHostedRunnerUserDataBestEffort.mockImplementation(
+      async ({ userId }: { userId: string }) =>
+        userId === "member_pending"
+          ? makeCloudflareDeletionResult({ configured: false, deleted: false })
+          : makeCloudflareDeletionResult({ deleted: true }),
+    );
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    try {
+      await expect(drainHostedAccountDeletionCleanupBatch({
+        now,
+        prisma: prisma as never,
+      })).resolves.toEqual({
+        completed: 1,
+        failed: 1,
+        pending: 1,
+        selected: 3,
+      });
+    } finally {
+      consoleError.mockRestore();
+    }
+
+    expect(hostedAccountDeletionCleanup.findMany).toHaveBeenCalledWith({
+      orderBy: [
+        { nextAttemptAt: "asc" },
+        { createdAt: "asc" },
+      ],
+      select: { id: true },
+      take: 25,
+      where: {
+        nextAttemptAt: { lte: now },
+      },
+    });
+    expect(rows.has("cleanup_complete")).toBe(false);
+    expect(rows.get("cleanup_failed")).toMatchObject({
+      lastAttemptedAt: now,
+      lastErrorCode: "KMS_UNAVAILABLE",
+      nextAttemptAt: new Date("2026-07-25T19:00:00.000Z"),
+    });
+    expect(rows.get("cleanup_pending")).toMatchObject({
+      lastAttemptedAt: now,
+      lastErrorCode: "CLOUDFLARE_NOT_CONFIGURED",
+      nextAttemptAt: new Date("2026-07-25T19:00:00.000Z"),
+    });
+    expect(mocks.deleteHostedRunnerUserDataBestEffort).toHaveBeenCalledWith({
+      context: "account-deletion-cleanup",
+      userId: "member_pending",
+    });
+  });
 });
 
 interface CleanupRow {
@@ -293,6 +407,27 @@ interface CleanupRow {
   privyCompletedAt: Date | null;
   stripeCompletedAt: Date | null;
   updatedAt: Date;
+}
+
+function makeCleanupRow(input: {
+  id: string;
+  now: Date;
+  payloadCiphertext: string;
+}): CleanupRow {
+  return {
+    cloudflareCompletedAt: null,
+    createdAt: input.now,
+    environment: "test",
+    id: input.id,
+    kmsKeyName: KMS_KEY_NAME,
+    lastAttemptedAt: null,
+    lastErrorCode: null,
+    nextAttemptAt: input.now,
+    payloadCiphertext: input.payloadCiphertext,
+    privyCompletedAt: input.now,
+    stripeCompletedAt: input.now,
+    updatedAt: input.now,
+  };
 }
 
 class CleanupStore {

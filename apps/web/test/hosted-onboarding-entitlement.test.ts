@@ -554,6 +554,19 @@ describe("hosted runtime AI access decision", () => {
       now,
       prisma: prisma as never,
     })).resolves.toEqual({ allowed: true });
+
+    expect(prisma.hostedThreadContainerParticipant.findMany).toHaveBeenCalledWith({
+      select: {
+        participant: {
+          select: expect.any(Object),
+        },
+      },
+      where: {
+        containerMemberId: "member_container",
+        lastSeenAt: { gte: new Date("2026-07-05T12:00:00.000Z") },
+        removedAt: null,
+      },
+    });
   });
 
   it("does not let an expired-trial participant authorize a thread container", async () => {

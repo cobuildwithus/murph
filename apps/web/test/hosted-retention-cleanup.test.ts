@@ -131,6 +131,14 @@ describe("hosted retention cleanup", () => {
       staleWebSessionsDeleted: 9,
     });
 
+    expect(mocks.drainHostedAccountDeletionCleanupBatch).toHaveBeenCalledWith({
+      now,
+      prisma,
+    });
+    expect(
+      mocks.drainHostedAccountDeletionCleanupBatch.mock.invocationCallOrder[0],
+    ).toBeLessThan(executeRaw.mock.invocationCallOrder[0]!);
+
     // One statement per category: every short batch stops that category's loop.
     expect(executeRaw).toHaveBeenCalledTimes(9);
 

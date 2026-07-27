@@ -2721,6 +2721,76 @@ describe("Linq explicit external-thread routing", () => {
     }
   });
 
+  it("fails closed when authoritative roster recovery is unavailable", async () => {
+    const prisma = createPrisma({
+      routeContainerMemberId: "member_thread_container_123",
+      routeOwnerActive: false,
+      routeParticipantAccessRequiresRosterRefresh: true,
+      routeParticipantActive: true,
+    });
+    vi.mocked(memberIdentityStore.lookupHostedMemberIdentityByPhoneNumber)
+      .mockResolvedValue(null);
+    vi.mocked(linqClient.getHostedLinqChatHandles)
+      .mockRejectedValue(new Error("provider unavailable"));
+
+    const plan = await planHostedOnboardingLinqWebhook({
+      event: buildLinqMessageReceivedEvent({}),
+      prisma: prisma as never,
+    });
+
+    expect(plan.response).toMatchObject({
+      ignored: true,
+      ok: true,
+      reason: "thread-container-inactive",
+    });
+    expect(prisma.hostedThreadContainerParticipant.updateMany).not.toHaveBeenCalled();
+    expect(mailboxStore.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+  });
+
+  it("does not renew a roster handle that now belongs to a different member", async () => {
+    const prisma = createPrisma({
+      routeContainerMemberId: "member_thread_container_123",
+      routeOwnerActive: false,
+      routeParticipantAccessRequiresRosterRefresh: true,
+      routeParticipantActive: true,
+    });
+    vi.mocked(linqClient.getHostedLinqChatHandles).mockResolvedValue([
+      { handle: "+15550000000", isMe: true, status: "active" },
+      { handle: "+15552223333", isMe: false, status: "active" },
+    ]);
+    vi.mocked(memberIdentityStore.lookupHostedMemberIdentityByPhoneNumber)
+      .mockImplementation(async ({ phoneNumber }) =>
+        phoneNumber === "+15552223333"
+          ? {
+              core: {
+                billingStatus: HostedBillingStatus.active,
+                createdAt: new Date("2026-06-24T00:00:00.000Z"),
+                id: "member_different_participant_123",
+                suspendedAt: null,
+                updatedAt: new Date("2026-06-24T00:00:00.000Z"),
+              },
+              identity: {},
+              matchedBy: "phoneNumber",
+            } as Awaited<
+              ReturnType<typeof memberIdentityStore.lookupHostedMemberIdentityByPhoneNumber>
+            >
+          : null
+      );
+
+    const plan = await planHostedOnboardingLinqWebhook({
+      event: buildLinqMessageReceivedEvent({}),
+      prisma: prisma as never,
+    });
+
+    expect(plan.response).toMatchObject({
+      ignored: true,
+      ok: true,
+      reason: "thread-container-inactive",
+    });
+    expect(prisma.hostedThreadContainerParticipant.updateMany).not.toHaveBeenCalled();
+    expect(mailboxStore.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+  });
+
   it("fails closed for an inactive routed direct thread instead of normal Linq routing", async () => {
     const prisma = createPrisma({
       routeContainerMemberId: "member_thread_container_123",
