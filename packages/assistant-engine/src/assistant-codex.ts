@@ -264,6 +264,7 @@ type CodexAppServerActiveTurnBinding = {
 // final provider request's usage, so `lastInputTokens` approximates the
 // current thread context size without any extra RPC or model call.
 export interface CodexWarmThreadTokenUsage {
+  groupConversation: boolean
   lastInputTokens: number
   model: string | null
   serviceTier: AssistantProviderServiceTier | null
@@ -459,6 +460,7 @@ export interface CodexAppServerTurnInput {
   onProviderRequestStarted?: ((event: AssistantProviderRequestStartedEvent) => Promise<void> | void) | null
   onTraceEvent?: (event: AssistantProviderTraceEvent) => void
   hostedGeneratedImageUploader?: AssistantHostedGeneratedImageUploader | null
+  groupConversation?: boolean | null
   groupRoomModelMaintenanceAuthorized?: boolean | null
   materializeWorkspaceArtifacts?: AssistantWorkspaceArtifactMaterializer | null
   productFeedbackRecorder?: AssistantTurnProductFeedbackRecorder | null
@@ -842,6 +844,7 @@ class CodexAppServerProcess {
   readonly startedAt = Date.now()
 
   private activeTurn: CodexAppServerActiveTurnBinding | null = null
+  private boundThreadGroupConversation = false
   private boundThreadId: string | null = null
   private boundThreadModel: string | null = null
   private boundThreadServiceTier: AssistantProviderServiceTier | null = null
@@ -1436,6 +1439,13 @@ class CodexAppServerProcess {
     return this.lastThreadTokenUsage
   }
 
+  get hasUncheckpointedDetachedWork(): boolean {
+    return (
+      this.detachedChildThreadIds.size > 0 ||
+      this.detachedChildViolation !== null
+    )
+  }
+
   private observeThreadTokenUsage(message: CodexRpcMessage): void {
     // Any compaction (in-turn auto-compact included) invalidates the retained
     // thread size: the compact request's own tokenUsage reports the large
@@ -1467,6 +1477,7 @@ class CodexAppServerProcess {
     }
 
     this.lastThreadTokenUsage = {
+      groupConversation: this.boundThreadGroupConversation,
       lastInputTokens,
       model: this.boundThreadModel,
       serviceTier: this.boundThreadServiceTier,
@@ -1485,6 +1496,10 @@ class CodexAppServerProcess {
 
   noteBoundThreadServiceTier(serviceTier: AssistantProviderServiceTier | null): void {
     this.boundThreadServiceTier = serviceTier
+  }
+
+  noteBoundThreadGroupConversation(groupConversation: boolean): void {
+    this.boundThreadGroupConversation = groupConversation
   }
 
   noteBoundThreadModel(model: string | null): void {
@@ -2302,6 +2317,7 @@ export type CodexWarmThreadCompactionOutcome =
   | {
       kind: 'skipped'
       reason:
+        | 'background_work_pending'
         | 'below_threshold'
         | 'model_not_accountable'
         | 'no_thread_vitals'
@@ -2313,14 +2329,16 @@ export type CodexWarmThreadCompactionOutcome =
 
 // Non-turn compaction of the warm Codex thread, for idle-time maintenance.
 // Modeled on the other warm-slot lifecycle exports above. Failure handling is
-// deliberately blunt: any non-success poisons (kills) the warm process, which
-// is always safe because rollouts only contain completed entries — an aborted
-// compact leaves the thread uncompacted and the next turn spawns a fresh
-// process and resumes natively. Teardown is awaited on every failure path
-// because the idle checkpoint that follows snapshots the Codex home,
+// deliberately blunt: any non-success poisons (kills) the warm process. A
+// process retaining detached-child evidence is therefore ineligible until the
+// workspace boundary has waited for and scanned that work. Once eligible, an
+// aborted compact leaves the thread uncompacted and the next turn spawns a
+// fresh process and resumes natively. Teardown is awaited on every failure
+// path because the idle checkpoint that follows snapshots the Codex home,
 // including rollout files, and must never capture a rollout mid-teardown.
 export async function compactWarmCodexThread(input: {
   canAccountForModel?: ((model: string | null) => boolean) | null
+  groupMinThreadTokens?: number
   minThreadTokens: number
   signal?: AbortSignal | null
   timeoutMs: number
@@ -2345,10 +2363,20 @@ export async function compactWarmCodexThread(input: {
         threadContextTokensBefore: vitals.lastInputTokens,
       } as const
     }
-    if (vitals.lastInputTokens < input.minThreadTokens) {
+    const minThreadTokens = vitals.groupConversation
+      ? input.groupMinThreadTokens ?? input.minThreadTokens
+      : input.minThreadTokens
+    if (vitals.lastInputTokens < minThreadTokens) {
       return {
         kind: 'skipped',
         reason: 'below_threshold',
+        threadContextTokensBefore: vitals.lastInputTokens,
+      } as const
+    }
+    if (processInstance.hasUncheckpointedDetachedWork) {
+      return {
+        kind: 'skipped',
+        reason: 'background_work_pending',
         threadContextTokensBefore: vitals.lastInputTokens,
       } as const
     }
@@ -4196,6 +4224,7 @@ async function runCodexAppServerTurnOnProcess(
       extractCodexContextCompactionProgressTextFromNormalized(normalizedEvent)
     if (
       contextCompactionProgressText &&
+      input.groupConversation !== true &&
       !suppressDeliveryContext
     ) {
       notifyContextCompactionProgress(
@@ -4684,6 +4713,9 @@ async function runCodexAppServerTurnOnProcess(
     }
 
     lifecycleStage = 'turn_start'
+    codexProcess.noteBoundThreadGroupConversation(
+      input.groupConversation === true,
+    )
     codexProcess.noteBoundThreadModel(input.model ?? null)
     codexProcess.noteBoundThreadServiceTier(input.serviceTier ?? null)
     const turnStartRequest = sendRequest(

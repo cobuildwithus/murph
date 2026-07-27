@@ -20,8 +20,6 @@ vi.mock("#hosted-web-testing", () => ({
   readHostedJunctionDeviceSyncReplayDrainStatus: vi.fn(async () => ({})),
   seedHostedActiveLinqMember: vi.fn(async () => {}),
   seedHostedActiveMember: vi.fn(async () => {}),
-  seedHostedGroupForThreadContainerForTest: vi.fn(async () => "group_test"),
-  seedHostedHistoricalConversationWakesForTest: vi.fn(async () => 0),
   seedHostedJunctionDeviceSyncConnection: vi.fn(async () => ({})),
   seedHostedJunctionDeviceSyncReplay: vi.fn(async () => ({})),
 }));

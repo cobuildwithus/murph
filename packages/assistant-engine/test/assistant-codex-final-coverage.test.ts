@@ -688,6 +688,7 @@ describe('Codex model catalog', () => {
     )
     expect(providerInput).toMatchObject({
       dynamicTools: [],
+      groupConversation: false,
       environments: [],
       generatedImageUploader: null,
       hostedToolContext: null,
@@ -907,6 +908,7 @@ describe('Codex model catalog', () => {
       permissions: null,
       runtimeWorkspaceRoots: null,
     })
+    expect(providerInput?.groupConversation).toBe(true)
   })
 
   it.each([

@@ -88,6 +88,9 @@ import {
   buildCodexTurnExecutionPlan,
   buildCodexTurnAttemptPlan,
 } from './codex-turn/planning.js'
+import {
+  resolveAssistantConversationScope,
+} from './conversation-policy.js'
 import type {
   AssistantCodexAttemptPlan,
   AssistantRoutePlanningDiagnostics,
@@ -461,6 +464,8 @@ async function executeAssistantCodexAttempt(input: {
       executionPlan.input.scheduledInvocationAuthority?.automationId ===
         MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_AUTOMATION_ID
     const audience = executionPlan.sharedPlan.conversationPolicy.audience
+    const groupConversation =
+      resolveAssistantConversationScope(audience) === 'group'
     const groupEmailTurn =
       audience.threadIsDirect === false &&
       normalizeNullableString(audience.channel)?.toLowerCase() === 'email'
@@ -521,6 +526,7 @@ async function executeAssistantCodexAttempt(input: {
         generatedImageUploader: outputOnlyTurn
           ? null
           : executionPlan.executionContext?.hosted?.generatedImageUploader ?? null,
+        groupConversation,
         groupRoomModelMaintenanceAuthorized: groupRoomModelMaintenanceTurn,
         hostedToolContext: outputOnlyTurn
           ? null
