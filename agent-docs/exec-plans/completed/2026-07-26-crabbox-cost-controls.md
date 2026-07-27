@@ -1,8 +1,8 @@
 # Bound local Crabbox verification spend
 
-Status: active
+Status: completed
 Created: 2026-07-26
-Updated: 2026-07-26
+Updated: 2026-07-27
 
 ## Goal
 
@@ -68,8 +68,22 @@ Updated: 2026-07-26
 
 ## Verification
 
-- Commands to run: focused dispatcher/config tests, `git diff --check`, and
-  `MURPH_VERIFY_EXECUTOR=local pnpm test:diff` for every touched path.
-- Expected outcomes: automatic mode resolves locally; explicit remote mode
-  contains cleanup and lifetime flags; profile/workflow bounds match; all
-  selected checks pass without provisioning a Testbox.
+- Direct dispatcher contract: passed; automatic mode stayed local and explicit
+  remote arguments contained always-stop, 10-minute idle, and 45-minute
+  lifetime controls.
+- Focused dispatcher/trusted-entrypoint suites: 2 files and 21 tests passed.
+- Canonical local repo-tool diff lane: 29 files and 421 tests passed after two
+  unrelated load-sensitive tests passed in isolation.
+- Preliminary ReviewGPT specialist pass: one medium prompt-policy conflict
+  accepted and fixed; no patch artifact returned.
+- Focused release-policy contract after remediation: 40 tests passed and 1
+  intentional skip.
+- The remediation-scoped canonical lane passed all guards, workspace
+  boundaries, and CLI typecheck before unrelated existing 60-second
+  `assistant-cli.test.ts` subprocess timeouts and follow-on experiment CLI
+  failures; the owned failed verifier was stopped after that boundary was
+  established.
+- YAML parsing, Node syntax, diff hygiene, and the parent final review passed.
+- No verification step provisioned a Blacksmith Testbox. The workflow change
+  requires one explicit post-landing remote proof after merge.
+Completed: 2026-07-27
