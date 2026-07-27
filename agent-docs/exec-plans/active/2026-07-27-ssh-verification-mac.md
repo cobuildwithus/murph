@@ -115,9 +115,9 @@ Updated: 2026-07-27
 
 ## Verification
 
-- Focused dispatcher and remote-entrypoint suites: 29 tests passed.
+- Focused dispatcher and remote-entrypoint suites: 30 tests passed.
 - Canonical forced-local `test:diff` for the complete touched surface: 30 files
-  and 439 repo-tool tests passed.
+  and 440 repo-tool tests passed.
 - The required corrected post-landing Blacksmith `test:diff` proof passed on
   Testbox `tbx_01kyh3ksz0y7ja5sjcs1ssf99c` in 56 seconds; Crabbox stopped the
   one-shot Testbox after success. The first pre-correction attempt failed before
@@ -125,7 +125,29 @@ Updated: 2026-07-27
 - Automatic/local, SSH, and Blacksmith paths select deterministically in focused
   coverage. SSH construction proves per-worktree isolation, full resync,
   source-side locking, safe host validation, and secret-free process
-  environments. A real static-host smoke remains operator setup work because no
-  SSH alias or dedicated worker account was supplied to this task.
-- Required completion-specialists and final ReviewGPT gates remain before
+  environments. A real lock-contention regression proves remote admission runs
+  after lock acquisition and refuses candidate changes made while waiting. A
+  real static-host smoke remains operator setup work because no SSH alias or
+  dedicated worker account was supplied to this task.
+
+## Preliminary specialist review
+
+- Coverage finding (high): accepted. Admission previously ran before the
+  artifact lock, so a worktree change could race the snapshot. The dispatcher
+  now re-enters itself under the lock before admission, and the real
+  lock-contention regression proves the provider is not called when a late
+  untracked file appears.
+- Coverage finding (medium): confirmed as an external validation gap. A
+  production-faithful static-host smoke requires the dedicated account and SSH
+  alias that this task intentionally does not invent or provision. The
+  configuration, transport construction, trust boundary, and lock ordering are
+  covered locally; the first live smoke remains an operator setup step.
+- Prompt finding (low): accepted. The Crabbox skill now states separately that
+  only Blacksmith requires Blacksmith authentication; static SSH uses its
+  configured alias.
+- Parent review: passed after inspecting the full patch, checking the static SSH
+  and doctor flags against Crabbox v0.40.0, and clarifying that prerequisites
+  must be visible to non-interactive SSH. No additional architecture or state
+  owner was needed.
+- Final canonical verification and the final ReviewGPT/CI gate remain before
   completion.

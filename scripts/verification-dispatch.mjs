@@ -211,21 +211,15 @@ export function buildSshWorktreeIdentity(repoRoot) {
   };
 }
 
-export function protectRemoteInvocation({
-  environment,
-  invocation,
-  request,
-}) {
-  if (environment.MURPH_WORKSPACE_ARTIFACT_LOCK_HELD === "1") {
-    return invocation;
-  }
+export function buildLockedRemoteDispatcherInvocation({ request, argv }) {
   return {
     args: [
       WORKSPACE_ARTIFACT_LOCK,
       `remote ${request.verificationCommand}`,
       "--",
-      invocation.command,
-      ...invocation.args,
+      "node",
+      "scripts/verification-dispatch.mjs",
+      ...argv,
     ],
     command: "node",
   };
@@ -234,19 +228,26 @@ export function protectRemoteInvocation({
 export async function runVerification(argv, env = process.env) {
   const request = parseVerificationRequest(argv);
   const resolution = resolveVerificationExecutor({ env });
+  const isRemote = resolution.executor === "crabbox" ||
+    resolution.executor === "ssh";
+
+  if (isRemote && env.MURPH_WORKSPACE_ARTIFACT_LOCK_HELD !== "1") {
+    process.stderr.write(
+      `[verification-dispatch] command=${request.verificationCommand} executor=${resolution.executor} reason=${resolution.reason} state=waiting-for-workspace-lock\n`,
+    );
+    return await runChild(
+      buildLockedRemoteDispatcherInvocation({ request, argv }),
+      env,
+    );
+  }
+
   const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
   const remoteInvocation = resolution.executor === "crabbox"
     ? buildCrabboxInvocation(request)
     : resolution.executor === "ssh"
       ? buildSshInvocation(request, readSshHostAlias(env), repoRoot)
       : null;
-  const invocation = remoteInvocation
-    ? protectRemoteInvocation({
-        environment: env,
-        invocation: remoteInvocation,
-        request,
-      })
-    : buildLocalInvocation(request);
+  const invocation = remoteInvocation ?? buildLocalInvocation(request);
 
   process.stderr.write(
     `[verification-dispatch] command=${request.verificationCommand} executor=${resolution.executor} reason=${resolution.reason}\n`,

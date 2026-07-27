@@ -66,7 +66,9 @@ Prepare the worker once:
    config instead of forwarding an agent.
 3. Give only that account access to `/Users/Shared/murph-crabbox`. Install
    `git`, `rsync`, `tar`, `sh`, Node `>=24.14.1`, and Corepack; the repository
-   pins pnpm `10.33.0`.
+   pins pnpm `10.33.0`. Make those tools visible in the account's
+   non-interactive SSH `PATH`; the doctor probe must see the same command
+   surface that a run will use.
 4. Keep the Mac awake while it is offered as a worker, then prove reachability:
 
 ```bash

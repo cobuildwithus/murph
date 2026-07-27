@@ -30,8 +30,10 @@ entrypoint.
 
 ## Environment and sync boundary
 
-- Authenticate once with `blacksmith auth login`. This direct provider does not
-  use a Crabbox coordinator, `crabbox login`, or a coordinator token.
+- Blacksmith runs require one-time `blacksmith auth login`; static SSH runs use
+  the configured SSH alias and require no Blacksmith authentication. Neither
+  direct provider uses a Crabbox coordinator, `crabbox login`, or a coordinator
+  token.
 - GitHub can dispatch the hydration workflow only after its configured path
   exists on the default branch. A PR that adds or moves
   `.github/workflows/crabbox-bounded.yml` must finish on local verification;

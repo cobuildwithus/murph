@@ -1,10 +1,11 @@
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import {
   chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -366,30 +367,14 @@ describe("verification dispatcher", () => {
     expect(secondIdentity).not.toEqual(firstIdentity);
     expect(Object.values(firstIdentity).join(" ")).not.toContain("/workspace/one");
 
-    const directInvocation = {
-      args: ["run", "--provider", "ssh"],
-      command: "crabbox",
-    };
-    expect(callDispatcherExport(
-      "protectRemoteInvocation",
-      {
-        environment: { MURPH_WORKSPACE_ARTIFACT_LOCK_HELD: "1" },
-        invocation: directInvocation,
-        request: {
-          commandArgs: [],
-          verificationCommand: "verify:acceptance",
-        },
-      },
-    )).toEqual(directInvocation);
     expect(callDispatcherExport<Record<string, unknown>>(
-      "protectRemoteInvocation",
+      "buildLockedRemoteDispatcherInvocation",
       {
-        environment: {},
-        invocation: directInvocation,
         request: {
           commandArgs: [],
           verificationCommand: "verify:acceptance",
         },
+        argv: ["verify:acceptance"],
       },
     )).toMatchObject({
       command: "node",
@@ -397,12 +382,138 @@ describe("verification dispatcher", () => {
         "scripts/run-with-workspace-artifact-lock.mjs",
         "remote verify:acceptance",
         "--",
-        "crabbox",
-        "run",
-        "--provider",
-        "ssh",
+        "node",
+        "scripts/verification-dispatch.mjs",
+        "verify:acceptance",
       ],
     });
+  });
+
+  it("checks the remote sync candidate only after acquiring the workspace lock", async () => {
+    const tempRoot = makeTempRoot();
+    const repoDir = path.join(tempRoot, "repo");
+    const scriptsDir = path.join(repoDir, "scripts");
+    const binDir = path.join(tempRoot, "bin");
+    const lockReadyPath = path.join(tempRoot, "lock-ready");
+    const lockReleasePath = path.join(tempRoot, "lock-release");
+    const providerMarkerPath = path.join(tempRoot, "provider-called");
+    mkdirSync(scriptsDir, { recursive: true });
+    writeFileSync(
+      path.join(scriptsDir, "verification-dispatch.mjs"),
+      readFileSync(dispatcherPath, "utf8"),
+      "utf8",
+    );
+    writeFileSync(
+      path.join(scriptsDir, "run-with-workspace-artifact-lock.mjs"),
+      readFileSync(
+        path.join(repoRoot, "scripts", "run-with-workspace-artifact-lock.mjs"),
+        "utf8",
+      ),
+      "utf8",
+    );
+    writeExecutable(
+      path.join(scriptsDir, "hold-lock.sh"),
+      [
+        "#!/bin/sh",
+        `: > ${shellQuote(lockReadyPath)}`,
+        `while [ ! -f ${shellQuote(lockReleasePath)} ]; do sleep 0.05; done`,
+      ].join("\n"),
+    );
+    writeExecutable(
+      path.join(binDir, "crabbox"),
+      [
+        "#!/bin/sh",
+        'if [ "${1:-}" = "--version" ]; then exit 0; fi',
+        `: > ${shellQuote(providerMarkerPath)}`,
+      ].join("\n"),
+    );
+    runGit(repoDir, ["init", "--quiet"]);
+    runGit(repoDir, ["add", "scripts"]);
+    runGit(repoDir, [
+      "-c",
+      "user.name=Crabbox Test",
+      "-c",
+      "user.email=crabbox-test@users.noreply.github.com",
+      "commit",
+      "--quiet",
+      "-m",
+      "initial",
+    ]);
+
+    const baseEnvironment: NodeJS.ProcessEnv = {
+      ...withoutVerificationRoutingEnvironment(process.env),
+      HOME: path.join(tempRoot, "home"),
+      PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ""}`,
+    };
+    const lockHolder = spawn(
+      process.execPath,
+      [
+        path.join(scriptsDir, "run-with-workspace-artifact-lock.mjs"),
+        "test lock holder",
+        "--",
+        path.join(scriptsDir, "hold-lock.sh"),
+      ],
+      {
+        cwd: repoDir,
+        env: baseEnvironment,
+        stdio: "ignore",
+      },
+    );
+    await waitForFile(lockReadyPath);
+
+    const dispatcher = spawn(
+      process.execPath,
+      [
+        realpathSync(path.join(scriptsDir, "verification-dispatch.mjs")),
+        "test:diff",
+        "scripts/verification-dispatch.mjs",
+      ],
+      {
+        cwd: repoDir,
+        env: {
+          ...baseEnvironment,
+          MURPH_VERIFY_EXECUTOR: "ssh",
+          MURPH_VERIFY_SSH_HOST: "worker-mac",
+        },
+        stdio: ["ignore", "ignore", "pipe"],
+      },
+    );
+    const stderrChunks: Buffer[] = [];
+    dispatcher.stderr.on("data", (chunk: Buffer) => stderrChunks.push(chunk));
+    try {
+      await waitForCondition(
+        () => Buffer.concat(stderrChunks).toString("utf8").includes(
+          "state=waiting-for-workspace-lock",
+        ) || dispatcher.exitCode !== null,
+        "dispatcher to enter or reject the workspace lock",
+      );
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(
+        Buffer.concat(stderrChunks).toString("utf8"),
+        `dispatcher exited with code ${dispatcher.exitCode} before waiting for the workspace lock`,
+      ).toContain("state=waiting-for-workspace-lock");
+      writeFileSync(path.join(repoDir, "raced.txt"), "changed while waiting\n", "utf8");
+      writeFileSync(lockReleasePath, "release\n", "utf8");
+
+      const [lockResult, dispatcherResult] = await Promise.all([
+        waitForChild(lockHolder),
+        waitForChild(dispatcher),
+      ]);
+      expect(lockResult).toEqual({ code: 0, signal: null });
+      expect(dispatcherResult).toEqual({ code: 1, signal: null });
+      expect(Buffer.concat(stderrChunks).toString("utf8")).toContain(
+        "unauthorized Git state (untracked=1)",
+      );
+      expect(existsSync(providerMarkerPath)).toBe(false);
+    } finally {
+      if (!existsSync(lockReleasePath)) {
+        writeFileSync(lockReleasePath, "release\n", "utf8");
+      }
+      await Promise.allSettled([
+        waitForChild(lockHolder),
+        waitForChild(dispatcher),
+      ]);
+    }
   });
 
   it("identifies sensitive files before remote Git-managed sync", () => {
@@ -517,7 +628,7 @@ describe("verification dispatcher", () => {
           cwd: repoRoot,
           encoding: "utf8",
           env: {
-            ...withoutVerificationRoutingEnvironment(process.env),
+            ...insideWorkspaceArtifactLockEnvironment(process.env),
             MURPH_VERIFY_EXECUTOR: "crabbox",
             PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ""}`,
           },
@@ -548,7 +659,7 @@ describe("verification dispatcher", () => {
         cwd: repoRoot,
         encoding: "utf8",
         env: {
-          ...withoutVerificationRoutingEnvironment(process.env),
+          ...insideWorkspaceArtifactLockEnvironment(process.env),
           MURPH_VERIFY_EXECUTOR: "crabbox",
           PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ""}`,
         },
@@ -593,7 +704,7 @@ describe("verification dispatcher", () => {
         cwd: repoRoot,
         encoding: "utf8",
         env: {
-          ...withoutVerificationRoutingEnvironment(process.env),
+          ...insideWorkspaceArtifactLockEnvironment(process.env),
           MURPH_VERIFY_EXECUTOR: "crabbox",
           PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ""}`,
         },
@@ -901,6 +1012,15 @@ function withoutVerificationRoutingEnvironment(
   return sanitized;
 }
 
+function insideWorkspaceArtifactLockEnvironment(
+  environment: NodeJS.ProcessEnv,
+): NodeJS.ProcessEnv {
+  return {
+    ...withoutVerificationRoutingEnvironment(environment),
+    MURPH_WORKSPACE_ARTIFACT_LOCK_HELD: "1",
+  };
+}
+
 function runGit(
   repoDir: string,
   args: string[],
@@ -954,4 +1074,42 @@ function readGitStatus(repoDir: string): string {
   );
   expect(result.status, result.stderr).toBe(0);
   return result.stdout;
+}
+
+async function waitForFile(filePath: string, timeoutMs = 5_000): Promise<void> {
+  await waitForCondition(
+    () => existsSync(filePath),
+    `file ${path.basename(filePath)}`,
+    timeoutMs,
+  );
+}
+
+async function waitForCondition(
+  predicate: () => boolean,
+  description: string,
+  timeoutMs = 5_000,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (predicate()) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  throw new Error(`Timed out waiting for ${description}.`);
+}
+
+function waitForChild(
+  child: ReturnType<typeof spawn>,
+): Promise<{ code: number | null; signal: NodeJS.Signals | null }> {
+  if (child.exitCode !== null || child.signalCode !== null) {
+    return Promise.resolve({
+      code: child.exitCode,
+      signal: child.signalCode,
+    });
+  }
+  return new Promise((resolve, reject) => {
+    child.once("error", reject);
+    child.once("exit", (code, signal) => resolve({ code, signal }));
+  });
 }
