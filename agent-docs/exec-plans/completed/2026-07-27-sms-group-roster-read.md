@@ -1,6 +1,6 @@
 # SMS group roster read
 
-Status: active
+Status: completed
 Created: 2026-07-27
 Updated: 2026-07-27
 
@@ -70,3 +70,10 @@ Updated: 2026-07-27
   - the Cloudflare reverse-dependent step waited ten minutes for the shared-host slot and was stopped through the exact task-owned process.
   - the required Crabbox fallback failed before Testbox creation because the installed Blacksmith Testbox provider rejected the canonical dispatcher's required `--stop-after` lifecycle option.
   - the unchanged production source had already completed the full local canonical lane before the test-only remediation, including Cloudflare verification (2,012 Node tests and 2 Workers tests).
+- The branch merged current `origin/main`; the only manual conflict was the coordination ledger, where a completed unrelated row stayed deleted and this task row was retained. Runtime source merged automatically.
+- Final merged-head proof:
+  - focused service-boundary Vitest passed (17 tests).
+  - canonical `pnpm test:diff` passed repository guards, assistant-runtime typecheck, assistant-runtime tests (1,901 passed, 2 skipped), Cloudflare typecheck and Node tests (2,012 passed), and Cloudflare Workers tests (2 passed).
+  - parent final review found no remaining correctness, scope, privacy, or proof gap.
+- The separate final ReviewGPT gate runs against the closed-plan pushed head per the PR completion loop.
+Completed: 2026-07-27
