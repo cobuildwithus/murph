@@ -328,6 +328,7 @@ describe("cloudflare worker routes", () => {
 
   it("reassembles the Worker route tables in the stable route order", () => {
     expect(workerPublicRoutes.map(({ name }) => name)).toEqual([
+      "private-media-delivery",
       "service-banner",
     ]);
     expect(workerInternalRoutes.map(({ name }) => name)).toEqual([
