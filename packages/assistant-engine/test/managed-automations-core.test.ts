@@ -17,7 +17,6 @@ import { afterEach, describe, expect, it } from 'vitest'
 import {
   MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID,
   MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_AUTOMATION_ID,
-  MURPH_GROUP_SUNDAY_SUPERLATIVES_AUTOMATION_ID,
   MURPH_MANAGED_AUTOMATIONS,
   MURPH_ONBOARDING_FOLLOWUP_AUTOMATION,
   MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
@@ -802,7 +801,7 @@ describe('applyMurphManagedAutomations core integration', () => {
     })
   })
 
-  it('creates group managed automations for a hosted group route', async () => {
+  it('creates only group room-model maintenance for a hosted group route', async () => {
     const vaultRoot = await createVaultRoot()
     const groupRoute = {
       ...defaultRoute,
@@ -820,7 +819,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       },
       vaultRoot,
     })).resolves.toEqual({
-      created: 2,
+      created: 1,
       skipped: 0,
       updated: 0,
     })
@@ -839,21 +838,52 @@ describe('applyMurphManagedAutomations core integration', () => {
       status: 'active',
     })
     await expect(showAutomation({
-      automationId: MURPH_GROUP_SUNDAY_SUPERLATIVES_AUTOMATION_ID,
-      vaultRoot,
-    })).resolves.toMatchObject({
-      automationId: MURPH_GROUP_SUNDAY_SUPERLATIVES_AUTOMATION_ID,
-      route: groupRoute,
-      schedule: {
-        kind: 'cron',
-      },
-      slug: 'group-sunday-superlatives',
-      status: 'active',
-    })
-    await expect(showAutomation({
       automationId: MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
       vaultRoot,
     })).resolves.toBeNull()
+  })
+
+  it('archives a persisted Sunday superlatives record during normal reconciliation', async () => {
+    const vaultRoot = await createVaultRoot()
+    const retiredAutomationId = 'automation_01K55N7S9X4Q2M6P8R3T0V1WYZ'
+    const groupRoute = {
+      ...defaultRoute,
+      deliveryTarget: 'telegram-group-thread',
+      threadId: 'telegram-group-thread',
+      threadIsDirect: false,
+    }
+    await upsertAutomation({
+      automationId: retiredAutomationId,
+      continuityPolicy: 'fresh',
+      instructions: 'Legacy group recap instructions.',
+      route: groupRoute,
+      schedule: { kind: 'cron', expression: '0 18 * * 0' },
+      slug: 'group-sunday-superlatives',
+      status: 'paused',
+      tags: ['assistant', 'scheduled', 'murph-managed'],
+      title: 'Sunday group superlatives',
+      vaultRoot,
+    })
+
+    await expect(applyMurphManagedAutomations({
+      defaultRoute: groupRoute,
+      now: new Date('2026-07-26T14:00:00.000Z'),
+      runtimeEnv: {
+        [HOSTED_RUNTIME_PROCESS_ENV]: '1',
+      },
+      vaultRoot,
+    })).resolves.toMatchObject({
+      created: 1,
+      updated: 1,
+    })
+
+    await expect(showAutomation({
+      automationId: retiredAutomationId,
+      vaultRoot,
+    })).resolves.toMatchObject({
+      automationId: retiredAutomationId,
+      status: 'archived',
+    })
   })
 
   it('creates hosted overnight memory consolidation through the canonical automation registry', async () => {
