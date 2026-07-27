@@ -359,6 +359,11 @@ const assistantInputTelegramSourceMetadataSchema = z
     mediaGroupId: safeNullableAssistantInputTokenSchema(
       'sourceMetadata.mediaGroupId',
     ),
+    murphIMessagePhoneNumber: z
+      .string()
+      .regex(/^\+[1-9][0-9]{7,14}$/u)
+      .nullable()
+      .optional(),
     replyContext: safeNullableAssistantInputMetadataTextSchema(
       'sourceMetadata.replyContext',
     ),

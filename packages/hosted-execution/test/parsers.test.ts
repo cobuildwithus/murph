@@ -775,6 +775,7 @@ describe("parseHostedExecutionEvent", () => {
       kind: "conversation.message",
       message: {
         channel: "telegram",
+        murphIMessagePhoneNumber: "+15550100001",
         routeAuthority: {
           channel: "telegram",
           containerMemberId: "member_container",
@@ -804,6 +805,7 @@ describe("parseHostedExecutionEvent", () => {
     }
     expect(parsed.message.telegramMessage.from).toBe("1234567890");
     expect(parsed.message.telegramMessage.senderUsername).toBe("alice_example");
+    expect(parsed.message.murphIMessagePhoneNumber).toBe("+15550100001");
   });
 
   it("rejects legacy provider message event kinds", () => {

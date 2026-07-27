@@ -552,6 +552,14 @@ export function parseHostedExecutionConversationMessagePayload(
       );
       return {
         channel,
+        ...(record.murphIMessagePhoneNumber === undefined
+          ? {}
+          : {
+              murphIMessagePhoneNumber: readOptionalNullableString(
+                record.murphIMessagePhoneNumber,
+                "Hosted execution conversation.message wake payload murphIMessagePhoneNumber",
+              ),
+            }),
         ...(routeAuthority === undefined ? {} : { routeAuthority }),
         ...(senderMemberId === undefined ? {} : { senderMemberId }),
         telegramMessage: parseHostedExecutionTelegramMessage(record.telegramMessage),

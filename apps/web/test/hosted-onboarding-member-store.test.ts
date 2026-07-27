@@ -681,6 +681,7 @@ describe("hosted-member-store", () => {
         hasTelegramUserBinding: true,
         linqChatId: "chat_123",
         memberId: "member_123",
+        murphIMessagePhoneNumber: null,
       },
     });
   });
@@ -722,6 +723,7 @@ describe("hosted-member-store", () => {
         hasTelegramUserBinding: true,
         linqChatId: null,
         memberId: "member_123",
+        murphIMessagePhoneNumber: null,
       },
     });
 

@@ -325,6 +325,7 @@ function assertHostedExecutionLinqConversationMessageWorkspaceTarget(input: {
 
 export function buildHostedExecutionTelegramConversationMessageWake(input: {
   eventId: string;
+  murphIMessagePhoneNumber?: string | null;
   occurredAt: string;
   routeAuthority?: HostedExecutionTelegramExternalThreadRouteAuthority | null;
   senderMemberId?: string;
@@ -344,6 +345,9 @@ export function buildHostedExecutionTelegramConversationMessageWake(input: {
     kind: "conversation.message",
     message: {
       channel: "telegram",
+      ...(input.murphIMessagePhoneNumber === undefined
+        ? {}
+        : { murphIMessagePhoneNumber: input.murphIMessagePhoneNumber }),
       ...(input.routeAuthority === undefined
         ? {}
         : {
