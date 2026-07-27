@@ -48,6 +48,35 @@ Updated: 2026-07-26
 - Preliminary `completion-specialists`, parent final review, then final
   `pr-review` rounds concurrent with CI.
 
+## Review evidence
+
+- The pre-fix focused regression failed in the helper, group-tool handler, and
+  completion route because the handoff returned `void` and rejection was
+  swallowed after the response.
+- The first canonical `pnpm test:diff ...` passed, including 530 Web test files,
+  6,746 tests, typecheck, lint with no errors, dev smoke, production build, and
+  architecture/policy guards.
+- The preliminary `completion-specialists` pass returned one coverage finding:
+  the distinct grant-bound `ask_member` rejection branch lacked handler and
+  route proof. Its tests-only patch was downloaded from the owned review
+  thread, inspected in full, passed `git apply --check
+  --whitespace=error-all`, and was applied deliberately without production
+  changes.
+- The focused specialist remediation passed 92 tests across the group-tool
+  handler and route files.
+- The post-remediation canonical `pnpm test:diff ...` passed, including 530 Web
+  test files, 6,748 tests, typecheck, lint with no errors, dev smoke,
+  production build, and repository policy/architecture guards.
+- Parent final review found no remaining correctness, architecture, or coverage
+  gap in the request/completion call paths or the applied specialist tests.
+- All GitHub checks passed on the pushed remediation head.
+- The first root `pnpm verify:acceptance` attempt reached broad package/app
+  coverage but could not pass on the older branch base: the root ReviewGPT
+  dependency was `^0.5.117` while its CLI audit still expected `^0.5.114`, a
+  drift already corrected on current `main`; an unrelated interactive
+  setup-wizard test also failed during that doomed run. Rebase and a fresh
+  acceptance run on current `main` remain required.
+
 ## Deployment
 
 - Web-only control-flow correction. No Cloudflare/runtime API or schema change.
