@@ -75,6 +75,10 @@ Updated: 2026-07-26
 - Route explicit hosted plan, usage, billing, Family-member usage, and group
   funding requests to the existing hosted-low-usage skill so removed policy has
   one resident owner.
+- Accepted preliminary specialist finding: the original shrink left the private
+  Settings eligibility matrix and `continue_pulse` effect without a complete
+  resident owner. Added one compact billing-truth rule to the stable low-usage
+  router and assembled-prompt coverage; tool descriptions remain terse.
 
 ## Verification
 
@@ -100,3 +104,7 @@ Updated: 2026-07-26
     the failure was established, the exact session-owned process group was
     terminated and verified absent rather than leaving it to drain hours of
     additional timeout windows.
+  - Preliminary ReviewGPT prompt/coverage pass returned one accepted medium
+    finding for missing resident billing truth and no coverage artifact. The
+    correction is the compact router rule and assembled-prompt regression proof
+    described above; the preliminary pass is not rerun for this correction.
