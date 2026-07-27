@@ -133,6 +133,8 @@ const ASSISTANT_CRON_BACKGROUND_MAINTENANCE_NON_REPLAYABLE_WORK_ERROR =
   'Assistant background maintenance stopped after provider work; occurrence consumed to avoid replay.'
 const ASSISTANT_CRON_MANAGED_OWNER_SCOPE_MISMATCH_ERROR =
   'Managed automation owner no longer matches the live delivery route.'
+const HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH =
+  'HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH'
 const ASSISTANT_CRON_MANAGED_AUTOMATION_RETIRED_ERROR =
   'Managed automation has been retired.'
 const ASSISTANT_CRON_FOREGROUND_YIELDED_ERROR =
@@ -2265,18 +2267,37 @@ async function resolveAssistantCronManagedOwnerAuthorization(input: {
     return { kind: 'mismatch' }
   }
 
-  const authorizedDelivery =
-    ownerScope === 'authenticated-group' ||
-      !assistantCronJobIsPreemptibleBackgroundMaintenance(input.job)
-      ? await resolveAssistantCronAuthorizedNotificationDeliveryRoute({
+  let authorizedDelivery: Awaited<
+    ReturnType<typeof resolveAssistantCronAuthorizedNotificationDeliveryRoute>
+  >
+  if (
+    ownerScope === 'authenticated-group'
+    || !assistantCronJobIsPreemptibleBackgroundMaintenance(input.job)
+  ) {
+    try {
+      authorizedDelivery =
+        await resolveAssistantCronAuthorizedNotificationDeliveryRoute({
           executionContext: input.executionContext,
           signal: input.signal,
           target: input.target,
         })
-      : {
-          externalThreadRouteAuthority: null,
-          route: declaredRoute,
-        }
+    } catch (error) {
+      if (
+        ownerScope === 'member'
+        && input.target.channel === 'linq'
+        && readAssistantCronErrorCode(error)
+          === HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH
+      ) {
+        return { kind: 'mismatch' }
+      }
+      throw error
+    }
+  } else {
+    authorizedDelivery = {
+      externalThreadRouteAuthority: null,
+      route: declaredRoute,
+    }
+  }
   const route = authorizedDelivery.route
   const channel = normalizeNullableString(input.target.channel)?.toLowerCase() ?? null
   const target = normalizeNullableString(

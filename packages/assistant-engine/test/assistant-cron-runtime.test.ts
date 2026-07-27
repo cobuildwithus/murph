@@ -6481,12 +6481,12 @@ describe('assistant cron runtime orchestration', () => {
   })
 
   it.each([
-    ['group from an unspecified route', undefined, false],
-    ['group from a direct route', true, false],
-    ['direct chat from an unspecified route', undefined, true],
+    ['group from an unspecified route', undefined, 'mismatch'],
+    ['group from a direct route', true, 'mismatch'],
+    ['direct chat from an unspecified route', undefined, 'direct'],
   ] as const)(
     'enforces a static member managed automation when live Linq authority resolves a %s',
-    async (_label, savedThreadIsDirect, liveThreadIsDirect) => {
+    async (_label, savedThreadIsDirect, liveAuthority) => {
       vi.useFakeTimers()
       vi.setSystemTime(new Date('2026-04-12T18:10:00.000Z'))
       const { vaultRoot } = await createRuntimeContext(
@@ -6516,10 +6516,16 @@ describe('assistant cron runtime orchestration', () => {
         title: 'Murph product notes',
         updatedAt: '2026-04-12T16:00:00.000Z',
       })
-      const resolveScheduledLinqRoute = vi.fn().mockResolvedValue({
-        target: liveThreadIsDirect ? 'live-member-chat' : 'live-group-chat',
-        threadIsDirect: liveThreadIsDirect,
-      })
+      const resolveScheduledLinqRoute = liveAuthority === 'mismatch'
+        ? vi.fn().mockRejectedValue(new VaultCliError(
+            'HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH',
+            'Linq egress target does not match the runtime user route.',
+            { retryable: false },
+          ))
+        : vi.fn().mockResolvedValue({
+            target: 'live-member-chat',
+            threadIsDirect: true,
+          })
       const createScheduledGroupTools = vi.fn()
       const { claimed, paths } = await claimFirstCanonicalCronJob(vaultRoot)
 
@@ -6546,7 +6552,7 @@ describe('assistant cron runtime orchestration', () => {
         }),
       )
       expect(createScheduledGroupTools).not.toHaveBeenCalled()
-      if (liveThreadIsDirect) {
+      if (liveAuthority === 'direct') {
         expect(result.run).toMatchObject({
           outcome: 'no_op',
           reason: 'no_delivery',
@@ -6568,6 +6574,13 @@ describe('assistant cron runtime orchestration', () => {
         })
         expect(cronMocks.runExperimentLifecycleOutcomePrecondition).not.toHaveBeenCalled()
         expect(cronMocks.sendAssistantMessageLocal).not.toHaveBeenCalled()
+        const runtimeStore = await readAssistantCronCanonicalRuntimeStore(paths)
+        const runtimeRecord = runtimeStore.jobs.find(
+          (record) =>
+            record.jobId === MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
+        )
+        expect(runtimeRecord?.state.pendingOccurrenceAt ?? null).toBeNull()
+        expect(runtimeRecord?.state.retryAfterAt ?? null).toBeNull()
       }
     },
   )
@@ -6605,10 +6618,11 @@ describe('assistant cron runtime orchestration', () => {
         target: 'admitted-member-chat',
         threadIsDirect: true,
       })
-      .mockResolvedValueOnce({
-        target: 'replacement-member-chat',
-        threadIsDirect: true,
-      })
+      .mockRejectedValueOnce(new VaultCliError(
+        'HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH',
+        'Linq egress target does not match the runtime user route.',
+        { retryable: false },
+      ))
     const createScheduledGroupTools = vi.fn()
     let providerInputsAccepted = false
     cronMocks.sendAssistantMessageLocal.mockImplementationOnce(async (input: {
@@ -6655,6 +6669,13 @@ describe('assistant cron runtime orchestration', () => {
     expect(createScheduledGroupTools).not.toHaveBeenCalled()
     expect(providerInputsAccepted).toBe(false)
     expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledOnce()
+    const runtimeStore = await readAssistantCronCanonicalRuntimeStore(paths)
+    const runtimeRecord = runtimeStore.jobs.find(
+      (record) =>
+        record.jobId === MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
+    )
+    expect(runtimeRecord?.state.pendingOccurrenceAt ?? null).toBeNull()
+    expect(runtimeRecord?.state.retryAfterAt ?? null).toBeNull()
   })
 
   it('skips a static group managed automation on a direct route before lifecycle or model work', async () => {
