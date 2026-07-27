@@ -406,7 +406,7 @@ export const MURPH_FAMILY_PLAN_TOOL = {
   namespace: 'murph',
   name: 'family_plan',
   description:
-    `Read Family status, start Family checkout, or create an invite. The only supported actions are read_status, start_checkout, and create_invite. For an explicit request to add usage for a Family member, first read_status. Provide ${MURPH_PRODUCT_ORIGIN}/settings#family only when owner=true, billingActive=true, and the intended person matches exactly one members row with status=active. The link is navigation only: do not choose an amount, start Checkout, or claim payment or usage completed. For invite cancellation, member removal, member-tier changes, or Family seat/capacity changes, do not invent an action or claim a change; use murph.plan_usage's explicit private management handoff. Do not use for family medical history.`,
+    `Before use, read $MURPH_ASSISTANT_SKILLS_ROOT/murph-family/SKILL.md. Read Family status, start Family checkout, or create an invite. For Family-member usage, read status first and provide ${MURPH_PRODUCT_ORIGIN}/settings#family only under the skill's exact owner, billing, and active-member gate. The link is navigation only; never claim payment or usage completed. Unsupported account changes use the private management handoff. Do not use for family medical history.`,
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -1002,7 +1002,7 @@ export const MURPH_COMPUTER_OPEN_TOOL = {
   namespace: 'murph',
   name: 'computer_open',
   description:
-    'Open the current Kernel-backed browser for website tasks. Creates, reuses, resumes, or reclaims the active browser run as needed, then returns the current URL, title, and visible page text. Use this before browser work and whenever browser control may have returned from a user handoff.',
+    'Before non-trivial browser work, read $MURPH_ASSISTANT_SKILLS_ROOT/computer-use/SKILL.md. Open the current Kernel-backed browser for website tasks. Creates, reuses, resumes, or reclaims the active browser run as needed, then returns the current URL, title, and visible page text. Use this before browser work and whenever browser control may have returned from a user handoff.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
