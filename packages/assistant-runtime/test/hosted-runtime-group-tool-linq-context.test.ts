@@ -358,10 +358,10 @@ describe("createHostedGroupToolWithCurrentTurnContext", () => {
     });
   });
 
-  it("dedupes repeated contexts for the same thread and skips non-iMessage or direct contexts", async () => {
+  it("dedupes repeated contexts and keeps effectful actions iMessage-only", async () => {
     const request = vi.fn().mockResolvedValue({
-      action: "read_chat_participants",
-      result: { participants: [], status: "ok" },
+      action: "share_contact_card",
+      result: { status: "sent" },
     });
     const groupTool = createHostedGroupToolWithCurrentTurnContext({
       groupToolPort: { request },
@@ -385,14 +385,87 @@ describe("createHostedGroupToolWithCurrentTurnContext", () => {
       ],
     });
 
-    await groupTool.request({ action: "read_chat_participants" });
+    await groupTool.request({ action: "share_contact_card" });
     expect(request).toHaveBeenLastCalledWith({
-      action: "read_chat_participants",
+      action: "share_contact_card",
       linqThread: {
         authority: ROUTE_AUTHORITY,
         chatId: "chat_group_1",
       },
     });
+  });
+
+  it("injects a route-authorized SMS thread only for participant reads", async () => {
+    const request = vi.fn().mockResolvedValue({
+      action: "read_chat_participants",
+      result: { participants: [], status: "ok" },
+    });
+    const smsRouteAuthority = {
+      ...ROUTE_AUTHORITY,
+      threadId: "chat_sms_group",
+    };
+    const groupTool = createHostedGroupToolWithCurrentTurnContext({
+      groupToolPort: { request },
+      linqDeliveryContexts: [
+        buildLinqDeliveryContext({
+          routeAuthority: smsRouteAuthority,
+          service: "sms",
+          target: "chat_sms_group",
+        }),
+      ],
+    });
+
+    await groupTool.request({ action: "read_chat_participants" });
+    expect(request).toHaveBeenLastCalledWith({
+      action: "read_chat_participants",
+      linqThread: {
+        authority: smsRouteAuthority,
+        chatId: "chat_sms_group",
+      },
+    });
+
+    await groupTool.request({ action: "share_contact_card" });
+    expect(request).toHaveBeenLastCalledWith({ action: "share_contact_card" });
+  });
+
+  it("fails participant reads closed for ambiguous or direct SMS contexts", async () => {
+    const request = vi.fn().mockResolvedValue({
+      action: "read_chat_participants",
+      result: {
+        participants: null,
+        status: "unavailable",
+        unavailableReason: "linq_thread_unavailable",
+      },
+    });
+    const ambiguousGroupTool = createHostedGroupToolWithCurrentTurnContext({
+      groupToolPort: { request },
+      linqDeliveryContexts: [
+        buildLinqDeliveryContext({ routeAuthority: ROUTE_AUTHORITY }),
+        buildLinqDeliveryContext({
+          routeAuthority: { ...ROUTE_AUTHORITY, threadId: "chat_sms_group" },
+          service: "sms",
+          target: "chat_sms_group",
+        }),
+      ],
+    });
+
+    await ambiguousGroupTool.request({ action: "read_chat_participants" });
+    expect(request).toHaveBeenLastCalledWith({ action: "read_chat_participants" });
+
+    const directGroupTool = createHostedGroupToolWithCurrentTurnContext({
+      groupToolPort: { request },
+      linqDeliveryContexts: [
+        buildLinqDeliveryContext({
+          routeAuthority: { ...ROUTE_AUTHORITY, threadId: "chat_sms_direct" },
+          service: "sms",
+          target: "chat_sms_direct",
+          threadIsDirect: true,
+        }),
+      ],
+    });
+
+    await directGroupTool.request({ action: "read_chat_participants" });
+    expect(request).toHaveBeenLastCalledWith({ action: "read_chat_participants" });
   });
 
   it("forwards chat-scoped actions without a linq thread when no route-authorized context exists", async () => {

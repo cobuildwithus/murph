@@ -1,6 +1,6 @@
 # iOS address-book advisory names
 
-Last verified: 2026-07-26
+Last verified: 2026-07-27
 
 ## Product boundary
 
@@ -99,7 +99,7 @@ described otherwise.
 The only consumer is the existing route-authorized
 `read_chat_participants` operation:
 
-1. Read and reconcile the truthful live Linq/iMessage roster.
+1. Read and reconcile the truthful live Linq iMessage or SMS group roster.
 2. Select at most 16 canonical phone handles whose durable activation check
    says they do not yet use Murph.
 3. Resolve only the human group owner's active projection.
@@ -111,6 +111,10 @@ The only consumer is the existing route-authorized
 The model sees the label only for the current tool result and is explicitly
 told that it is untrusted presentation text with no identity, membership,
 consent, routing, instruction, or persistence authority.
+
+SMS admission is limited to this read-only operation. Contact-card sharing,
+display-name and avatar changes, join offers, disclosure requests, and every
+other chat effect remain iMessage-only.
 
 The lookup does not write a canonical profile, mailbox item, runtime log,
 workspace record, or separate advisory-name state. Once the model includes a
