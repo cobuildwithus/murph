@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   HOSTED_RUNTIME_LATENCY_ALERT_MINIMUM_INTERVAL_MS,
   HOSTED_RUNTIME_REPLY_LATENCY_ALERT_THRESHOLD_MS,
+  HOSTED_RUNTIME_TERMINAL_NON_REPLY_CHECKPOINT_GRACE_MS,
   runHostedRuntimeLatencyAlertMonitor,
   summarizeHostedRuntimeLatencyRows,
   type HostedRuntimeLatencyHealthRow,
@@ -75,6 +76,45 @@ describe("hosted runtime latency health", () => {
         latencyRow({
           acceptedAt: "2026-07-26T15:58:00.000Z",
           terminalNonReplyCommittedAt: "2026-07-26T15:58:12.000Z",
+        }),
+      ],
+    });
+
+    expect(health).toMatchObject({
+      anomalous: false,
+      invalidChronologyCount: 0,
+      unresolvedReplyCount: 0,
+    });
+  });
+
+  it("reopens an unconsumed terminal non-reply after checkpoint grace expires", () => {
+    const health = summarizeHostedRuntimeLatencyRows({
+      now,
+      rows: [
+        latencyRow({
+          acceptedAt: "2026-07-26T15:54:00.000Z",
+          terminalNonReplyCommittedAt: "2026-07-26T15:55:00.000Z",
+        }),
+      ],
+    });
+
+    expect(HOSTED_RUNTIME_TERMINAL_NON_REPLY_CHECKPOINT_GRACE_MS).toBe(5 * 60_000);
+    expect(health).toMatchObject({
+      anomalous: true,
+      invalidChronologyCount: 0,
+      oldestUnresolvedAgeMs: 6 * 60_000,
+      unresolvedReplyCount: 1,
+    });
+  });
+
+  it("keeps checkpointed terminal non-replies resolved after grace expires", () => {
+    const health = summarizeHostedRuntimeLatencyRows({
+      now,
+      rows: [
+        latencyRow({
+          acceptedAt: "2026-07-26T15:54:00.000Z",
+          consumedAt: "2026-07-26T15:57:30.000Z",
+          terminalNonReplyCommittedAt: "2026-07-26T15:55:00.000Z",
         }),
       ],
     });

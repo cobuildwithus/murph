@@ -1969,11 +1969,16 @@ the existing `HostedIngressLatencyTrace`, accepted `HostedLinqDelivery`, and
 conversation `consumed_at` facts. The fixed product boundary is 30 seconds. A
 recent accepted delivery at or above that boundary is anomalous; a trace at or
 above the boundary is unresolved only when it has no accepted delivery, no
-valid `terminal_non_reply_committed` projection, and no durable consumed
-evidence. The terminal marker resolves intentional silence without pretending a
-reply was delivered or consuming the mailbox item early. Invalid marker
-chronology cannot hide still-unconsumed work. Durable consumption remains the
-rolling-deploy and best-effort-link fallback after handling is otherwise known.
+valid recent `terminal_non_reply_committed` projection, and no durable consumed
+evidence. The terminal marker grants only five minutes of checkpoint grace:
+intentional silence stops paging immediately, but a trace becomes unresolved
+again if `consumed_at` does not confirm the normal three-minute idle checkpoint
+before that grace expires. This prevents a marker emitted before a runner crash
+from becoming de facto disposition authority after recovery restores an older
+snapshot. The marker never pretends a reply was delivered or consumes the
+mailbox item early. Invalid marker chronology cannot hide still-unconsumed work.
+Durable consumption remains the long-term terminal proof and the rolling-deploy
+or best-effort-link fallback after handling is otherwise known.
 Accepted grouped Linq replies keep the complete answered mailbox-item set on the
 existing outbox intent: replay of the same still-active effect retains the
 existing set and adds newly observed items instead of replacing it. The accepted

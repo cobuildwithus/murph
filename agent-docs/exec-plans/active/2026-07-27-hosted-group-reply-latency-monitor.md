@@ -12,8 +12,9 @@ Updated: 2026-07-27
 
 ## Success criteria
 
-- Durable terminal non-reply evidence resolves a latency trace without
-  pretending that a delivery occurred or advancing mailbox consumption early.
+- Durable terminal non-reply evidence grants bounded checkpoint grace without
+  pretending that a delivery occurred or advancing mailbox consumption early;
+  `consumed_at` must take over before grace expires.
 - Grouped/rebatched replies retain every answered mailbox item needed for
   accepted-delivery trace linkage.
 - Invalid chronology, failed projection, and genuinely unprocessed work remain
@@ -43,9 +44,11 @@ Updated: 2026-07-27
 
 ## Risks and mitigations
 
-1. Risk: marking a still-pending message as terminal silence.
-   Mitigation: project only committed terminal suppression evidence and reject
-   impossible timestamp chronology.
+1. Risk: a marker reaches Web before its local evidence survives a runner
+   crash.
+   Mitigation: project only committed local suppression evidence, reject
+   impossible timestamp chronology, and reopen the trace unless durable
+   consumption arrives within the normal checkpoint horizon plus buffer.
 2. Risk: grouped reply rebatching drops earlier answered items.
    Mitigation: monotonically union coverage only while the outbox intent is
    active and keep terminal intents immutable.

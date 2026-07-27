@@ -18,6 +18,7 @@ import { getPrisma } from "../prisma";
 
 export const HOSTED_RUNTIME_REPLY_LATENCY_ALERT_THRESHOLD_MS = 30_000;
 export const HOSTED_RUNTIME_LATENCY_ALERT_MINIMUM_INTERVAL_MS = 10 * 60_000;
+export const HOSTED_RUNTIME_TERMINAL_NON_REPLY_CHECKPOINT_GRACE_MS = 5 * 60_000;
 
 const HOSTED_RUNTIME_LATENCY_MONITOR_ID = "hosted-runtime-latency-monitor:v1";
 const HOSTED_RUNTIME_LATENCY_MONITOR_KIND = "hosted_runtime_latency_monitor";
@@ -288,7 +289,13 @@ export function summarizeHostedRuntimeLatencyRows(input: {
         || terminalNonReplyCommittedAtMs > nowMs
       ) {
         invalidChronologyCount += 1;
-      } else {
+      } else if (
+        nowMs - terminalNonReplyCommittedAtMs
+        < HOSTED_RUNTIME_TERMINAL_NON_REPLY_CHECKPOINT_GRACE_MS
+      ) {
+        // Suppression evidence is local until the idle-shutdown checkpoint
+        // stamps consumedAt. Treat its projection only as bounded grace so a
+        // crash before snapshot publication cannot hide restored pending work.
         continue;
       }
     }
