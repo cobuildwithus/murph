@@ -12,6 +12,7 @@ import {
 import {
   createAssistantHostedToolContext,
 } from '../src/assistant/hosted-tool-context.ts'
+import { resolveAssistantExecutionPlan } from '../src/assistant/execution-plan.ts'
 import {
   resolveAssistantHostedReturnContactKind,
 } from '../src/assistant/return-contact-kind.ts'
@@ -134,6 +135,64 @@ describe('assistant return contact kind', () => {
 
     await expect(first).resolves.toEqual(await second)
     expect(createConnectLink).toHaveBeenCalledOnce()
+  })
+
+  it('routes detached image usage through the existing recorder without waiting', () => {
+    const session = createAssistantSession()
+    const recordUsage = vi.fn(async () => undefined)
+    const hostedToolContext = createAssistantHostedToolContext({
+      executionContext: {
+        memberId: 'member-detached-usage',
+        usageRecorder: { recordUsage },
+        userEnvKeys: [],
+      },
+      messageInput: createMessageInput({
+        channel: 'linq',
+        hostedDeliveryIdempotency: null,
+      }),
+      route: resolveAssistantExecutionPlan({
+        defaults: null,
+        sessionTarget: session.target,
+      }).codexRoute,
+      session,
+    })
+
+    hostedToolContext.recordDetachedUsage?.({
+      effectiveEnv: { OPENAI_API_KEY: 'platform-key' },
+      operationId: 'image-operation-1',
+      originAssistantInputId: 'assistant_input_1',
+      usageDraft: {
+        provider: 'openai-images',
+        providerRequestOrdinal: 2,
+        providerRequestOutcome: 'succeeded',
+        usage: {
+          apiKeyEnv: 'OPENAI_API_KEY',
+          baseUrl: 'https://api.openai.com/v1',
+          cacheWriteTokens: null,
+          cachedInputTokens: null,
+          inputTokens: 12,
+          outputTokens: 34,
+          providerMetadataJson: null,
+          providerName: 'OpenAI Images',
+          providerRequestId: null,
+          rawUsageJson: null,
+          reasoningTokens: null,
+          requestedModel: 'gpt-image-2',
+          servedModel: 'gpt-image-2',
+          totalTokens: 46,
+        },
+      },
+    })
+
+    expect(recordUsage).toHaveBeenCalledOnce()
+    expect(recordUsage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: 'openai-images',
+        providerRequestOrdinal: 2,
+        turnId: 'image-operation-1',
+      }),
+      ['assistant_input_1'],
+    )
   })
 })
 
