@@ -1,8 +1,8 @@
 # Growth dashboard identity review remediation
 
-Status: active
+Status: completed
 Created: 2026-07-26
-Updated: 2026-07-26
+Updated: 2026-07-27
 
 ## Goal
 
@@ -84,4 +84,35 @@ Updated: 2026-07-26
 
 ## Verification
 
-- Pending.
+- Focused hosted growth suite passed with 27 tests, including stable
+  admission-time member attribution, valid group-email omission, unmatched
+  legacy Telegram fallback, and ambiguous legacy identity rejection.
+- Focused Linq and Telegram ingress suites passed with 112 tests across the
+  three touched Web test files.
+- Hosted execution builder/parser coverage passed with 27 focused tests and
+  the full package suite passed with 421 tests across 37 files.
+- Assistant runtime privacy regression passed and proved that the internal
+  sender member id is not projected into assistant input.
+- Typechecks passed for hosted execution, assistant runtime, and Web.
+- `pnpm test:scenario-integrity` passed with 204 scenarios, 11 sample inputs,
+  and 28 golden directories.
+- Canonical local `pnpm test:diff` passed all affected repository guards,
+  typechecks, Assistant Engine (2,749 passed, 6 skipped), Assistant CLI (128
+  passed), Assistant Runtime (1,896 passed, 2 skipped), and Assistantd (40
+  passed) before an unchanged CLI integration test timed out. Isolated
+  reproduction proved the timeout was a self-deadlock behind the verifier's
+  shared artifact lock rather than a failure in the current diff.
+- Canonical exact-head acceptance could not be admitted locally because another
+  worktree held the exclusive shared-host slot for more than two hours. The
+  bounded Crabbox attempt was blocked before provisioning because the installed
+  Blacksmith delegate rejects the repository-required `--stop-after` flag; no
+  remote run or billable Testbox was created, and the guarded command was not
+  bypassed.
+- Exact-head PR CI passed all 27 checks, including release build and typecheck,
+  Web verification, package coverage, hosted and device-sync E2E gates,
+  frontend design proof, Vercel preview, and horizontal-overflow proof.
+- `git diff --check` and the task privacy scan passed.
+- Parent final review found no additional correctness, privacy, compatibility,
+  or product-flow issue. The additive optional encrypted wake field remains
+  safe for split deployment because older readers ignore unknown fields.
+Completed: 2026-07-27
