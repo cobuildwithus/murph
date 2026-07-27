@@ -124,8 +124,21 @@ export const MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_AUTOMATION_ID =
   'automation_01K4Z8RMM6F7G8H9J0K1P2M3N4'
 export const MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_PRIVATE_SUMMARY =
   'Group room model consolidation maintenance wake completed.'
+const MURPH_RETIRED_GROUP_SUNDAY_SUPERLATIVES_AUTOMATION_ID =
+  'automation_01K55N7S9X4Q2M6P8R3T0V1WYZ'
 export const MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID =
   'automation_01KZZM3A9C7P4R6T8V2W5X0YQZ'
+
+const MURPH_RETIRED_MANAGED_AUTOMATION_IDS = new Set<string>([
+  MURPH_RETIRED_GROUP_SUNDAY_SUPERLATIVES_AUTOMATION_ID,
+])
+
+export function isRetiredMurphManagedAutomationId(
+  automationId: string | null | undefined,
+): boolean {
+  return typeof automationId === 'string' &&
+    MURPH_RETIRED_MANAGED_AUTOMATION_IDS.has(automationId)
+}
 
 export function resolveMurphManagedMaintenancePolicy(
   automationId: string | null | undefined,
@@ -650,6 +663,23 @@ export const MURPH_MANAGED_AUTOMATIONS = [
   },
 ] satisfies readonly MurphManagedAutomationSeed[]
 
+const MURPH_STATIC_MANAGED_AUTOMATIONS = [
+  MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION,
+  ...MURPH_MANAGED_AUTOMATIONS,
+] satisfies readonly MurphManagedAutomationSeed[]
+
+export function resolveMurphManagedAutomationSeed(
+  automationId: string | null | undefined,
+): MurphManagedAutomationSeed | null {
+  if (!automationId) {
+    return null
+  }
+
+  return MURPH_STATIC_MANAGED_AUTOMATIONS.find(
+    (seed) => seed.automationId === automationId,
+  ) ?? null
+}
+
 export async function applyMurphManagedAutomations(
   input: ApplyMurphManagedAutomationsInput,
 ): Promise<ApplyMurphManagedAutomationsResult> {
@@ -661,6 +691,16 @@ export async function applyMurphManagedAutomations(
   }
   if (input.shouldYield?.() === true) {
     return { ...result, yielded: true }
+  }
+  if (input.seeds === undefined) {
+    result.updated += await archiveRetiredMurphManagedAutomations({
+      now,
+      shouldYield: input.shouldYield ?? null,
+      vaultRoot: input.vaultRoot,
+    })
+    if (input.shouldYield?.() === true) {
+      return { ...result, yielded: true }
+    }
   }
   // Deterministic closeout and user-facing seed composition share one
   // authoritative experiment scan and still run before route resolution.
@@ -751,7 +791,7 @@ export async function applyMurphManagedAutomations(
       existing &&
       !murphManagedAutomationMatchesRoute(rawSeed, existing.route)
     ) {
-      if (existing.status !== 'active') {
+      if (existing.status === 'archived') {
         result.skipped += 1
         continue
       }
@@ -1006,6 +1046,37 @@ export async function applyMurphManagedAutomations(
   }
 
   return result
+}
+
+async function archiveRetiredMurphManagedAutomations(input: {
+  now: Date
+  shouldYield: (() => boolean) | null
+  vaultRoot: string
+}): Promise<number> {
+  let archived = 0
+  for (const automationId of MURPH_RETIRED_MANAGED_AUTOMATION_IDS) {
+    if (input.shouldYield?.() === true) {
+      return archived
+    }
+    const existing = await showAutomation({
+      automationId,
+      vaultRoot: input.vaultRoot,
+    })
+    if (!existing || existing.status === 'archived') {
+      continue
+    }
+    if (input.shouldYield?.() === true) {
+      return archived
+    }
+    await patchAutomation({
+      lookup: existing.automationId,
+      now: input.now,
+      status: 'archived',
+      vaultRoot: input.vaultRoot,
+    })
+    archived += 1
+  }
+  return archived
 }
 
 export async function ensureAutomaticMealCloseoutAutomation(

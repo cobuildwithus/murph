@@ -1,6 +1,6 @@
 # iOS address-book advisory names
 
-Last verified: 2026-07-26
+Last verified: 2026-07-27
 
 ## Product boundary
 
@@ -22,7 +22,7 @@ policy that this member-scoped design intentionally avoids.
 - iOS reads Contacts only after an explicit Share action and supports both
   limited and full system access.
 - It inspects at most 5,000 person contacts, 20,000 phone values, and eight
-  phone values per contact, then deterministically emits at most 512 rows.
+  phone values per contact, then deterministically emits at most 1,000 rows.
 - Each row contains an explicit international phone number and one safe
   first-name token plus an optional last initial. National-only numbers,
   sentence-shaped labels, ambiguous duplicate
@@ -40,7 +40,7 @@ policy that this member-scoped design intentionally avoids.
 
 `apps/web` authenticates the companion with its ordinary Privy identity
 bearer, requires active member access and current launch consent for
-replacement, and accepts a closed schema with a 96 KiB body and 512-row cap.
+replacement, and accepts a closed schema with a 192 KiB body and 1,000-row cap.
 
 For every readable token-key version, Web asks a dedicated non-exportable GCP
 KMS HMAC-SHA256 key to derive a member-specific seed, then locally HMACs each
@@ -99,7 +99,7 @@ described otherwise.
 The only consumer is the existing route-authorized
 `read_chat_participants` operation:
 
-1. Read and reconcile the truthful live Linq/iMessage roster.
+1. Read and reconcile the truthful live Linq iMessage or SMS group roster.
 2. Select at most 16 canonical phone handles whose durable activation check
    says they do not yet use Murph.
 3. Resolve only the human group owner's active projection.
@@ -112,14 +112,33 @@ The model sees the label only for the current tool result and is explicitly
 told that it is untrusted presentation text with no identity, membership,
 consent, routing, instruction, or persistence authority.
 
-The lookup does not write a canonical profile, mailbox item, runtime log,
-workspace record, or separate advisory-name state. Once the model includes a
-label in generated content, however, that content can exist in the App Server
-provider thread, Murph session/workspace artifacts, the delivered provider
-message, recipient devices, and backups under those surfaces' normal retention
-rules. Stop, permission-loss cleanup, and account deletion prevent future
-lookups and delete the live projection; they cannot recall content already
-emitted to those surfaces.
+SMS admission is limited to `read_chat_participants`. Its model-facing result is
+a roster read, but its Web owner also runs the existing best-effort Linq
+participant reconciliation. That reconciliation renews or creates bounded
+participant-derived access rows for resolved active participants and marks
+absent projected participants removed. The rows are seven-day runtime-access
+leases for the synthetic group container. This is the same container-liveness
+projection used by iMessage groups and by Linq group provisioning and inbound
+renewal; it grants no identity, consent, invite, delivery, or sharing authority.
+
+The group skill may call this operation automatically on Murph's first ordinary
+reply in a room. If it then requests contact-card sharing, the runtime withholds
+the SMS thread context. Web returns `linq_thread_unavailable` before any
+contact-card provider call, and the assistant continues the same reply without
+claiming that a card was shared. Display-name and avatar changes, join offers,
+disclosure requests, contact-card sharing, and every other chat effect remain
+iMessage-only.
+
+The advisory-name lookup itself does not write a canonical profile, mailbox
+item, runtime log, workspace record, participant authority, or separate
+advisory-name state. The roster operation's existing participant reconciliation
+is independent of the optional label overlay. Once the model includes a label
+in generated content, that content can exist in the App Server provider thread,
+Murph session/workspace artifacts, the delivered provider message, recipient
+devices, and backups under those surfaces' normal retention rules. Stop,
+permission-loss cleanup, and account deletion prevent future lookups and delete
+the live projection; they cannot recall content already emitted to those
+surfaces.
 
 ## Lifecycle
 
@@ -145,7 +164,7 @@ retention.
    roster smoke.
 3. Deploy Web with both gates off.
 4. Configure the dedicated KMS MAC keyring and exact
-   `roles/cloudkms.macSignerVerifier` key-level grant.
+   `roles/cloudkms.signerVerifier` key-level grant.
 5. Deploy iOS and enable `HOSTED_ADDRESS_BOOK_REPLACEMENT_ENABLED=1`.
 6. Verify replacement, deletion, permission-loss cleanup, persistence across
    time, and account deletion.
@@ -153,6 +172,12 @@ retention.
    session/workspace artifacts, provider delivery, recipients, and backups.
 8. Enable `HOSTED_ADDRESS_BOOK_ADVISORY_NAMES_ENABLED=1` and exercise one
    labeled `read_chat_participants` result end to end.
+
+Rolling back SMS roster admission stops new SMS-triggered roster refreshes but
+does not erase participant-access rows already reconciled by that operation.
+Those rows remain subject to the existing removal and seven-day lease rules;
+group provisioning and authenticated participant inbound can still maintain
+them through their canonical Linq paths.
 
 The strict Web-to-runner response contract has this compatibility matrix:
 

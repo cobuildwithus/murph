@@ -134,6 +134,7 @@ import {
   MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
   applyMurphManagedAutomations,
   ensureAutomaticMealCloseoutAutomation,
+  resolveMurphManagedAutomationSeed,
   resolveMurphManagedMaintenancePolicy,
   type MurphManagedAutomationSeed,
 } from '../src/assistant/managed-automations.ts'
@@ -442,7 +443,11 @@ describe('applyMurphManagedAutomations', () => {
       updated: 0,
       yielded: true,
     })
-    expect(managedAutomationMocks.showAutomation).not.toHaveBeenCalled()
+    expect(managedAutomationMocks.showAutomation).toHaveBeenCalledOnce()
+    expect(managedAutomationMocks.showAutomation).toHaveBeenCalledWith({
+      automationId: 'automation_01K55N7S9X4Q2M6P8R3T0V1WYZ',
+      vaultRoot,
+    })
     expect(managedAutomationMocks.upsertAutomation).not.toHaveBeenCalled()
   })
 
@@ -1070,6 +1075,27 @@ describe('applyMurphManagedAutomations', () => {
     ).toBeNull()
   })
 
+  it('resolves the immutable group-owned seed by id', () => {
+    const seed = MURPH_MANAGED_AUTOMATIONS.find(
+      (entry) =>
+        entry.automationId === MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_AUTOMATION_ID,
+    )
+    if (!seed || seed.schedule.kind !== 'cron') {
+      throw new Error('Expected the group room-model cron seed.')
+    }
+
+    expect(seed).toMatchObject({
+      automationId: MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_AUTOMATION_ID,
+      continuityPolicy: 'fresh',
+      hostedRuntimeOnly: true,
+      ownerScope: 'authenticated-group',
+      schedule: { kind: 'cron', expression: '0 4 * * 2,5' },
+      slug: 'group-room-model-consolidation',
+    })
+    expect(resolveMurphManagedAutomationSeed(seed.automationId)).toBe(seed)
+    expect(resolveMurphManagedAutomationSeed('automation_custom')).toBeNull()
+  })
+
   it('installs the automatic meal closeout idempotently at 9pm local time', async () => {
     const onDiagnosticStage = vi.fn()
     const onboardingFollowup: StoredAutomationRecord = {
@@ -1615,6 +1641,11 @@ describe('applyMurphManagedAutomations', () => {
       schedule: { kind: 'cron', expression: '0 4 * * 2,5' },
       status: 'active',
     })
+    expect(
+      [...managedAutomationMocks.records.values()].some((record) =>
+        record.route.threadIsDirect !== false
+      ),
+    ).toBe(false)
   })
 
   it('classifies Telegram groups by audience rather than by channel name', async () => {
@@ -1652,7 +1683,7 @@ describe('applyMurphManagedAutomations', () => {
     })
   })
 
-  it('does not install room-model maintenance on spoofable group-email routes', async () => {
+  it('does not install group managed automations on spoofable group-email routes', async () => {
     const result = await applyMurphManagedAutomations({
       defaultRoute: {
         ...groupChatRoute,
@@ -1750,6 +1781,107 @@ describe('applyMurphManagedAutomations', () => {
     expect(
       managedAutomationMocks.records.get(MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID)?.status,
     ).toBe('archived')
+  })
+
+  it('archives paused personal built-ins that are persisted on a group route', async () => {
+    const seed = MURPH_MANAGED_AUTOMATIONS.find(
+      (entry) => entry.automationId === MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
+    )
+    if (!seed) {
+      throw new Error('Expected the managed product updates seed.')
+    }
+    managedAutomationMocks.records.set(seed.automationId, {
+      automationId: seed.automationId,
+      continuityPolicy: 'fresh',
+      instructions: seed.instructions,
+      route: groupChatRoute,
+      schedule: seed.schedule,
+      slug: seed.slug,
+      status: 'paused',
+      summary: seed.summary ?? null,
+      tags: ['assistant', 'scheduled', 'murph-managed'],
+      title: seed.title,
+    })
+
+    await expect(applyMurphManagedAutomations({
+      now: new Date('2026-07-09T14:00:00.000Z'),
+      runtimeEnv: {
+        [HOSTED_RUNTIME_PROCESS_ENV]: '1',
+      },
+      seeds: [seed],
+      vaultRoot,
+    })).resolves.toEqual({
+      created: 0,
+      skipped: 0,
+      updated: 1,
+    })
+    expect(managedAutomationMocks.records.get(seed.automationId)?.status)
+      .toBe('archived')
+  })
+
+  it('archives paused group built-ins that are persisted on a direct route', async () => {
+    const seed = MURPH_MANAGED_AUTOMATIONS.find(
+      (entry) =>
+        entry.automationId === MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_AUTOMATION_ID,
+    )
+    if (!seed) {
+      throw new Error('Expected the group room-model seed.')
+    }
+    managedAutomationMocks.records.set(seed.automationId, {
+      automationId: seed.automationId,
+      continuityPolicy: 'fresh',
+      instructions: seed.instructions,
+      route: { ...defaultRoute, threadIsDirect: true },
+      schedule: seed.schedule,
+      slug: seed.slug,
+      status: 'paused',
+      summary: seed.summary ?? null,
+      tags: ['assistant', 'scheduled', 'murph-managed'],
+      title: seed.title,
+    })
+
+    await expect(applyMurphManagedAutomations({
+      now: new Date('2026-07-09T14:00:00.000Z'),
+      runtimeEnv: {
+        [HOSTED_RUNTIME_PROCESS_ENV]: '1',
+      },
+      seeds: [seed],
+      vaultRoot,
+    })).resolves.toEqual({
+      created: 0,
+      skipped: 0,
+      updated: 1,
+    })
+    expect(managedAutomationMocks.records.get(seed.automationId)?.status)
+      .toBe('archived')
+  })
+
+  it('archives a persisted Sunday superlatives record after its seed is removed', async () => {
+    const retiredAutomationId = 'automation_01K55N7S9X4Q2M6P8R3T0V1WYZ'
+    managedAutomationMocks.records.set(retiredAutomationId, {
+      automationId: retiredAutomationId,
+      continuityPolicy: 'fresh',
+      instructions: 'Legacy group recap instructions.',
+      route: groupChatRoute,
+      schedule: { kind: 'cron', expression: '0 18 * * 0' },
+      slug: 'group-sunday-superlatives',
+      status: 'paused',
+      summary: null,
+      tags: ['assistant', 'scheduled', 'murph-managed'],
+      title: 'Sunday group superlatives',
+    })
+
+    await applyMurphManagedAutomations({
+      defaultRoute: groupChatRoute,
+      now: new Date('2026-07-26T14:00:00.000Z'),
+      runtimeEnv: {
+        [HOSTED_RUNTIME_PROCESS_ENV]: '1',
+      },
+      vaultRoot,
+    })
+
+    expect(managedAutomationMocks.records.get(retiredAutomationId)?.status)
+      .toBe('archived')
   })
 
   it('updates existing research-oriented automations without rewriting their cadence', async () => {

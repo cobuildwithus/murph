@@ -56,6 +56,14 @@ const REQUIRED_DEPLOY_WORKER_ENV_NAMES = [
   ...HOSTED_WORKER_REQUIRED_VAR_NAMES,
 ] as const;
 
+const REQUIRED_NON_PRODUCTION_DEPLOY_WORKER_ENV_NAMES = [
+  "HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT",
+] as const;
+
+const REQUIRED_PREVIEW_DEPLOY_WORKER_ENV_NAMES = [
+  "HOSTED_WEB_PRODUCTION_BASE_URL",
+] as const;
+
 const REQUIRED_PRODUCTION_DEPLOY_WORKER_ENV_NAMES = [
   "HOSTED_WEB_PRODUCTION_BASE_URL",
 ] as const;
@@ -75,6 +83,17 @@ const PRODUCTION_DEPLOY_URL_INVARIANT_LABELS = [
 
 const PRODUCTION_DEPLOY_OPTIONAL_CALLBACK_URL_LABELS = [
   "DEVICE_SYNC_PUBLIC_BASE_URL",
+] as const;
+
+const PREVIEW_DEPLOY_URL_INVARIANT_LABELS = [
+  "CF_PUBLIC_BASE_URL",
+  "HOSTED_WEB_BASE_URL",
+] as const;
+
+const PREVIEW_DEPLOY_RESOURCE_LABELS = [
+  "CF_WORKER_NAME",
+  "CF_BUNDLES_BUCKET",
+  "CF_BUNDLES_PREVIEW_BUCKET",
 ] as const;
 
 const LOOPBACK_OR_PRIVATE_HOSTS = new Set([
@@ -102,6 +121,10 @@ export function listMissingHostedDeployEnvironment(
     ...(input.deployWorker
       ? [
           ...REQUIRED_DEPLOY_WORKER_ENV_NAMES,
+          ...(deployContext && deployContext !== "production"
+            ? REQUIRED_NON_PRODUCTION_DEPLOY_WORKER_ENV_NAMES
+            : []),
+          ...(deployContext === "preview" ? REQUIRED_PREVIEW_DEPLOY_WORKER_ENV_NAMES : []),
           ...(deployContext === "production" ? REQUIRED_PRODUCTION_DEPLOY_WORKER_ENV_NAMES : []),
           ...HOSTED_WORKER_REQUIRED_SECRET_NAMES,
         ]
@@ -260,6 +283,9 @@ export function listHostedDeployEnvironmentInvariantErrors(
   ) {
     errors.push("HOSTED_CRYPTO_ENV must be one of development, preview, or production.");
   }
+  if (hostedCryptoEnv && hostedCryptoEnv !== deployContext) {
+    errors.push(`${deployContext} deploys must set HOSTED_CRYPTO_ENV=${deployContext}.`);
+  }
 
   const oidcEnvironment = normalizeHostedOidcEnvironment(
     source.HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT,
@@ -270,6 +296,11 @@ export function listHostedDeployEnvironmentInvariantErrors(
   ) {
     errors.push(
       "HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT must be one of development, preview, or production.",
+    );
+  }
+  if (oidcEnvironment && oidcEnvironment !== deployContext) {
+    errors.push(
+      `${deployContext} deploys must set HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT=${deployContext}.`,
     );
   }
 
@@ -284,6 +315,11 @@ export function listHostedDeployEnvironmentInvariantErrors(
     errors.push(
       `Junction runtime env must set ${JUNCTION_RUNTIME_REQUIRED_ENV_NAMES.join(", ")} together.`,
     );
+  }
+
+  if (deployContext === "preview") {
+    appendPreviewDeployInvariantErrors(source, errors);
+    return errors;
   }
 
   if (deployContext !== "production") {
@@ -302,16 +338,6 @@ export function listHostedDeployEnvironmentInvariantErrors(
   if (hostedExecutionContainerRollout !== STATE_ISOLATION_CONTAINER_ROLLOUT) {
     errors.push(
       `production state-isolation deploys must use HOSTED_EXECUTION_CONTAINER_ROLLOUT=${STATE_ISOLATION_CONTAINER_ROLLOUT}; rollback floor is the audience-key and selector-scope runner bundle.`,
-    );
-  }
-
-  if (hostedCryptoEnv && hostedCryptoEnv !== "production") {
-    errors.push("production deploys must set HOSTED_CRYPTO_ENV=production.");
-  }
-
-  if (oidcEnvironment && oidcEnvironment !== "production") {
-    errors.push(
-      "production deploys must set HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT=production.",
     );
   }
 
@@ -396,6 +422,14 @@ export async function listHostedDeployEnvironmentInvariantErrorsAsync(
   }
 
   const deployContext = normalizeHostedDeployContext(source.HOSTED_EXECUTION_DEPLOY_CONTEXT);
+  if (deployContext === "preview") {
+    const dnsErrors = await listPreviewDeployDnsInvariantErrors(
+      source,
+      dependencies.resolveHostnameAddresses ?? resolveHostnameAddresses,
+    );
+    return [...errors, ...dnsErrors];
+  }
+
   if (deployContext !== "production") {
     return errors;
   }
@@ -493,6 +527,155 @@ function readProductionDeployUrl(
   }
 }
 
+function appendPreviewDeployInvariantErrors(
+  source: EnvSource,
+  errors: string[],
+): void {
+  for (const label of PREVIEW_DEPLOY_RESOURCE_LABELS) {
+    const value = normalizeOptionalString(source[label]);
+    if (value && !hasPreviewDeployMarker(value)) {
+      errors.push(`${label} must contain a preview or staging name segment for preview deploys.`);
+    }
+  }
+
+  const previewUrls = new Map<
+    (typeof PREVIEW_DEPLOY_URL_INVARIANT_LABELS)[number],
+    ProductionDeployUrlValidation
+  >();
+  for (const label of PREVIEW_DEPLOY_URL_INVARIANT_LABELS) {
+    const result = readPreviewDeployUrl(source, label, {
+      requireOriginOnly: true,
+      errors,
+    });
+    if (result) {
+      previewUrls.set(label, result);
+    }
+  }
+
+  const productionWebUrl = readProductionDeployUrl(source, "HOSTED_WEB_PRODUCTION_BASE_URL", {
+    requireOriginOnly: true,
+    errors,
+  });
+  const previewWorkerUrl = previewUrls.get("CF_PUBLIC_BASE_URL");
+  const previewWebUrl = previewUrls.get("HOSTED_WEB_BASE_URL");
+  if (
+    previewWorkerUrl
+    && previewWebUrl
+    && previewWorkerUrl.normalized === previewWebUrl.normalized
+  ) {
+    errors.push(
+      "preview deploys must keep CF_PUBLIC_BASE_URL distinct from HOSTED_WEB_BASE_URL.",
+    );
+  }
+  if (
+    previewWebUrl
+    && productionWebUrl
+    && previewWebUrl.normalized === productionWebUrl.normalized
+  ) {
+    errors.push(
+      "preview deploys must not set HOSTED_WEB_BASE_URL to HOSTED_WEB_PRODUCTION_BASE_URL.",
+    );
+  }
+
+  for (const label of PRODUCTION_DEPLOY_OPTIONAL_CALLBACK_URL_LABELS) {
+    if (!normalizeOptionalString(source[label])) {
+      continue;
+    }
+    const callbackUrl = readPreviewDeployUrl(source, label, {
+      requireOriginOnly: false,
+      errors,
+    });
+    if (
+      callbackUrl
+      && productionWebUrl
+      && new URL(callbackUrl.normalized).origin === productionWebUrl.normalized
+    ) {
+      errors.push(
+        `${label} must not use the HOSTED_WEB_PRODUCTION_BASE_URL origin in preview deploys.`,
+      );
+    }
+  }
+}
+
+function readPreviewDeployUrl(
+  source: EnvSource,
+  label: ProductionDeployUrlLabel,
+  input: {
+    requireOriginOnly: boolean;
+    errors: string[];
+  },
+): ProductionDeployUrlValidation | null {
+  try {
+    const normalized = normalizeHostedExecutionBaseUrl(source[label], {
+      requireOriginOnly: input.requireOriginOnly,
+    });
+    if (!normalized) {
+      return null;
+    }
+
+    const url = new URL(normalized);
+    const unsafeHostReason = readUnsafeProductionDeployHostnameReason(url.hostname);
+    if (unsafeHostReason) {
+      input.errors.push(`${label} must not use ${unsafeHostReason} in preview deploys.`);
+    }
+    if (!hasPreviewDeployMarker(url.hostname)) {
+      input.errors.push(`${label} must use a preview or staging origin in preview deploys.`);
+    }
+
+    return {
+      hostname: url.hostname,
+      normalized,
+    };
+  } catch (error) {
+    input.errors.push(`${label} must be a valid preview HTTPS URL.`);
+    return null;
+  }
+}
+
+async function listPreviewDeployDnsInvariantErrors(
+  source: EnvSource,
+  resolveHostnameAddresses: HostnameAddressResolver,
+): Promise<string[]> {
+  const errors: string[] = [];
+
+  for (const label of PREVIEW_DEPLOY_URL_INVARIANT_LABELS) {
+    const parsed = readPreviewDeployUrl(source, label, {
+      requireOriginOnly: true,
+      errors: [],
+    });
+    if (parsed) {
+      await appendDeployDnsErrors(
+        label,
+        parsed.hostname,
+        "preview",
+        resolveHostnameAddresses,
+        errors,
+      );
+    }
+  }
+
+  for (const label of PRODUCTION_DEPLOY_OPTIONAL_CALLBACK_URL_LABELS) {
+    if (!normalizeOptionalString(source[label])) {
+      continue;
+    }
+    const parsed = readPreviewDeployUrl(source, label, {
+      requireOriginOnly: false,
+      errors: [],
+    });
+    if (parsed) {
+      await appendDeployDnsErrors(
+        label,
+        parsed.hostname,
+        "preview",
+        resolveHostnameAddresses,
+        errors,
+      );
+    }
+  }
+
+  return errors;
+}
+
 async function listProductionDeployDnsInvariantErrors(
   source: EnvSource,
   resolveHostnameAddresses: HostnameAddressResolver,
@@ -505,7 +688,13 @@ async function listProductionDeployDnsInvariantErrors(
       errors: [],
     });
     if (parsed) {
-      await appendProductionDnsErrors(label, parsed.hostname, resolveHostnameAddresses, errors);
+      await appendDeployDnsErrors(
+        label,
+        parsed.hostname,
+        "production",
+        resolveHostnameAddresses,
+        errors,
+      );
     }
   }
 
@@ -519,16 +708,23 @@ async function listProductionDeployDnsInvariantErrors(
       errors: [],
     });
     if (parsed) {
-      await appendProductionDnsErrors(label, parsed.hostname, resolveHostnameAddresses, errors);
+      await appendDeployDnsErrors(
+        label,
+        parsed.hostname,
+        "production",
+        resolveHostnameAddresses,
+        errors,
+      );
     }
   }
 
   return errors;
 }
 
-async function appendProductionDnsErrors(
+async function appendDeployDnsErrors(
   label: ProductionDeployUrlLabel,
   hostname: string,
+  deployContext: "preview" | "production",
   resolveHostnameAddresses: HostnameAddressResolver,
   errors: string[],
 ): Promise<void> {
@@ -541,17 +737,19 @@ async function appendProductionDnsErrors(
   try {
     addresses = await resolveHostnameAddresses(normalized);
   } catch (error) {
-    errors.push(`${label} must resolve to public DNS addresses in production deploys.`);
+    errors.push(`${label} must resolve to public DNS addresses in ${deployContext} deploys.`);
     return;
   }
 
   if (addresses.length === 0) {
-    errors.push(`${label} must resolve to public DNS addresses in production deploys.`);
+    errors.push(`${label} must resolve to public DNS addresses in ${deployContext} deploys.`);
     return;
   }
 
   if (addresses.some((address) => readUnsafeProductionDeployHostnameReason(address))) {
-    errors.push(`${label} must not resolve to private-network addresses in production deploys.`);
+    errors.push(
+      `${label} must not resolve to private-network addresses in ${deployContext} deploys.`,
+    );
   }
 }
 
@@ -668,4 +866,12 @@ function isPreviewOrDevelopmentDeployHostname(hostname: string): boolean {
     || label.endsWith("-dev")
     || label.includes("-git-")
   );
+}
+
+function hasPreviewDeployMarker(value: string): boolean {
+  return value
+    .trim()
+    .toLowerCase()
+    .split(/[-_.]/u)
+    .some((segment) => segment === "preview" || segment === "staging");
 }

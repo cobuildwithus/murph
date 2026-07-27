@@ -1,4 +1,13 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const accountDeletionCleanupMocks = vi.hoisted(() => ({
+  drainHostedAccountDeletionCleanupBatch: vi.fn(),
+}));
+
+vi.mock("@/src/lib/hosted-privacy/account-deletion-cleanup", () => ({
+  drainHostedAccountDeletionCleanupBatch:
+    accountDeletionCleanupMocks.drainHostedAccountDeletionCleanupBatch,
+}));
 
 import {
   HOSTED_DEVICE_WEBHOOK_TRACE_RETENTION_MS,
@@ -14,6 +23,16 @@ import {
   HOSTED_WEB_SESSION_RETENTION_MS,
   runHostedRetentionCleanup,
 } from "@/src/lib/hosted-retention/cleanup";
+
+beforeEach(() => {
+  accountDeletionCleanupMocks.drainHostedAccountDeletionCleanupBatch.mockReset();
+  accountDeletionCleanupMocks.drainHostedAccountDeletionCleanupBatch.mockResolvedValue({
+    completed: 0,
+    failed: 0,
+    pending: 0,
+    selected: 0,
+  });
+});
 
 function sqlOf(call: readonly unknown[]): string {
   return (call[0] as TemplateStringsArray).join("?");
@@ -94,6 +113,12 @@ describe("hosted retention cleanup", () => {
       prisma: prisma as never,
       signalRuntimeRecheck,
     })).resolves.toEqual({
+      accountDeletionCleanup: {
+        completed: 0,
+        failed: 0,
+        pending: 0,
+        selected: 0,
+      },
       compactedLinqProviderEventDiagnostics: 5,
       expiredAssistantRuntimeIssuesDeleted: 2,
       expiredComputerRunsCleanedUp: 0,
@@ -105,6 +130,13 @@ describe("hosted retention cleanup", () => {
       oldRuntimeLogsDeleted: 8,
       staleWebSessionsDeleted: 9,
     });
+    expect(
+      accountDeletionCleanupMocks.drainHostedAccountDeletionCleanupBatch,
+    ).toHaveBeenCalledWith({ now, prisma });
+    expect(
+      accountDeletionCleanupMocks.drainHostedAccountDeletionCleanupBatch
+        .mock.invocationCallOrder[0],
+    ).toBeLessThan(executeRaw.mock.invocationCallOrder[0]!);
 
     // One statement per category: every short batch stops that category's loop.
     expect(executeRaw).toHaveBeenCalledTimes(9);
@@ -353,6 +385,12 @@ describe("hosted retention cleanup", () => {
       expect(queryRaw).toHaveBeenCalledTimes(1);
       await vi.advanceTimersByTimeAsync(HOSTED_INBOX_MEDIA_RETENTION_SIGNAL_TIMEOUT_MS);
       await expect(cleanup).resolves.toEqual({
+        accountDeletionCleanup: {
+          completed: 0,
+          failed: 0,
+          pending: 0,
+          selected: 0,
+        },
         compactedLinqProviderEventDiagnostics: 1,
         expiredAssistantRuntimeIssuesDeleted: 1,
         expiredComputerRunsCleanedUp: 0,

@@ -395,8 +395,9 @@ function buildStableRouteCapabilityPrompt(
 function buildAssistantLowUsageGuidanceText(): string {
   return [
     "Low hosted usage:",
-    "- Only when trusted turn context says this conversation's Murph usage is running low, complete the user's current request first, then read `$MURPH_ASSISTANT_SKILLS_ROOT/hosted-low-usage/SKILL.md` before replying.",
-    "- Follow that skill's single final usage-segment contract, using the `---` delimiter only when the channel reply-style guidance supports bubbles. Do not send a separate warning or repeat one already visible in the recent conversation.",
+    "- Read `$MURPH_ASSISTANT_SKILLS_ROOT/hosted-low-usage/SKILL.md` before answering an explicit hosted plan, included-usage, billing, Family-member usage, or group-funding request, or acting on trusted low-usage context. On a trusted low-usage turn, complete the user's current request first.",
+    "- Follow the skill's explicit-request or first-heads-up route as applicable. Use its single final usage-segment contract only for an assistant-initiated heads-up, with the `---` delimiter only when the channel reply-style guidance supports bubbles. Do not send a separate warning or repeat one already visible in the recent conversation.",
+    `- Billing truth: \`murph.plan_usage\` is read-only and changes neither billing, Family state, nor usage credit. For explicit personal billing or unsupported Family administration, provide \`${MURPH_PRODUCT_ORIGIN}/settings#subscription\` only after \`status\` is \`active\` or \`exhausted\`, or \`reason\` is \`trial_conversion_pending\`; never provide it for \`group_not_supported\` or \`hosted_access_inactive\`. \`continue_pulse\` is eligible only for a current active trial and keeps it scheduled to become Pulse at trial end without charging now; conversion-pending or ended trials require the quoted \`start_pulse_now\` path and exact confirmation.`,
   ].join("\n");
 }
 
@@ -1520,10 +1521,6 @@ When creating automations, choose continuity deliberately. Use ${code(
   )} for simple reminders, check-ins, and lightweight support where recent prior automation context can help. Use ${code(
     hostedRuntime ? "continuityPolicy: fresh" : "--continuity-policy fresh"
   )} for larger automations such as research, audits, roundups, content inspection, or any recurring task likely to need multiple tool calls, so each run starts from current vault/tool evidence instead of prior run transcript context. ${routePreference}
-
-Linq/iMessage off-hours reminder guard: before creating or updating a user-facing reminder/check-in automation that will deliver through Linq/iMessage (${code(
-    "channel=linq"
-  )}, or an inherited current route whose channel is Linq/iMessage), avoid scheduling sends from 23:00 through 04:59 in the recipient's local timezone. If recipient-local timezone is unknown, use the vault/user timezone as the best available local-time proxy and say so if asking the user. Off-hours iMessage sends can add spam-risk signal and compound with other delivery-risk factors, so prefer the nearest reasonable waking-time alternative by default. If the user explicitly asks for an off-hours Linq/iMessage reminder, or the reminder's health/safety/logistical purpose genuinely requires overnight delivery, do not silently block it. Before saving the automation, briefly warn that 11pm-5am recipient-local iMessage reminders are more likely to look spammy to Apple/Linq delivery, suggest a safer nearby time, and ask for confirmation. A clear user confirmation for that exact off-hours time is enough to proceed. Do not add this extra confirmation for non-Linq channels.
 
 Outdoor-conditions reminder guard: before saving a reminder, check-in, or plan-support automation that asks someone to go outside, such as morning sunlight, a walk, run, ride, or outdoor workout, reuse a city or region already known from this conversation, saved context, or the plan. When none is known, offer once, as an option, to take one; ask for city or region, never an exact address, and let a decline save the automation unchanged without raising it again. With a location, store it in the instructions along with the run-time instruction to read weather for it before composing the message: call ${code(
     "murph.connected_apps_execute"

@@ -199,6 +199,7 @@ import {
   MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_PRIVATE_SUMMARY,
   MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
   MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_PRIVATE_SUMMARY,
+  MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
 } from '../src/assistant/managed-automations.ts'
 import { resolveAssistantStatePaths } from '../src/assistant/store/paths.ts'
 import {
@@ -2457,6 +2458,11 @@ describe('assistant cron runtime orchestration', () => {
       executionContext: {
         hosted: {
           memberId: 'member-group-runtime',
+          resolveScheduledExternalThreadRoute: vi.fn(async () => ({
+            channel: 'telegram' as const,
+            containerMemberId: 'member-group-runtime',
+            threadId: 'retained-group-room',
+          })),
           userEnvKeys: [],
         },
       },
@@ -6423,6 +6429,148 @@ describe('assistant cron runtime orchestration', () => {
         threadIsDirect: false,
       }),
     )
+  })
+
+  it('skips a static member managed automation on a group route before lifecycle or model work', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-12T18:10:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-member-owner-group-rejection-',
+    )
+    getVaultAutomationStore(vaultRoot).push({
+      automationId: MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
+      continuityPolicy: 'fresh',
+      createdAt: '2026-04-12T16:00:00.000Z',
+      instructions: 'Send product notes.',
+      route: {
+        channel: 'telegram',
+        deliverySource: null,
+        deliveryTarget: 'wrong-member-group-room',
+        identityId: null,
+        participantId: null,
+        threadId: 'wrong-member-group-room',
+        threadIsDirect: false,
+      },
+      schedule: { at: '2026-04-12T18:00:00.000Z', kind: 'at' },
+      slug: 'weekly-product-updates',
+      status: 'active',
+      summary: null,
+      tags: ['assistant', 'scheduled', 'murph-managed'],
+      title: 'Murph product notes',
+      updatedAt: '2026-04-12T16:00:00.000Z',
+    })
+    const { claimed, paths } = await claimFirstCanonicalCronJob(vaultRoot)
+
+    const result = await executeClaimedAssistantCronJob({
+      executionContext: {
+        hosted: { memberId: 'member-owner-group-rejection', userEnvKeys: [] },
+      },
+      job: claimed,
+      paths,
+      trigger: 'scheduled',
+      vault: vaultRoot,
+    })
+
+    expect(result.run).toMatchObject({
+      outcome: 'skipped_gate',
+      reason: 'managed_owner_scope_mismatch',
+      status: 'skipped',
+    })
+    expect(cronMocks.runExperimentLifecycleOutcomePrecondition).not.toHaveBeenCalled()
+    expect(cronMocks.sendAssistantMessageLocal).not.toHaveBeenCalled()
+  })
+
+  it('skips a static group managed automation on a direct route before lifecycle or model work', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-12T18:10:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-group-owner-direct-rejection-',
+    )
+    addGroupRoomModelConsolidationAutomation(vaultRoot)
+    const automation = getVaultAutomationStore(vaultRoot)[0]
+    if (!automation) {
+      throw new Error('Expected the group room-model automation.')
+    }
+    automation.route = {
+      channel: 'telegram',
+      deliverySource: null,
+      deliveryTarget: 'direct-room',
+      identityId: null,
+      participantId: null,
+      threadId: 'direct-room',
+      threadIsDirect: true,
+    }
+    const { claimed, paths } = await claimFirstCanonicalCronJob(vaultRoot)
+
+    const result = await executeClaimedAssistantCronJob({
+      executionContext: {
+        hosted: {
+          memberId: 'group-owner-direct-rejection',
+          userEnvKeys: [],
+        },
+      },
+      job: claimed,
+      paths,
+      trigger: 'scheduled',
+      vault: vaultRoot,
+    })
+
+    expect(result.run).toMatchObject({
+      outcome: 'skipped_gate',
+      reason: 'managed_owner_scope_mismatch',
+      status: 'skipped',
+    })
+    expect(cronMocks.runExperimentLifecycleOutcomePrecondition).not.toHaveBeenCalled()
+    expect(cronMocks.sendAssistantMessageLocal).not.toHaveBeenCalled()
+  })
+
+  it('skips a persisted Sunday superlatives occurrence after the seed is retired', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-12T18:10:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-retired-sunday-superlatives-',
+    )
+    getVaultAutomationStore(vaultRoot).push({
+      automationId: 'automation_01K55N7S9X4Q2M6P8R3T0V1WYZ',
+      continuityPolicy: 'fresh',
+      createdAt: '2026-04-12T16:00:00.000Z',
+      instructions: 'Legacy Sunday group recap.',
+      route: {
+        channel: 'telegram',
+        deliverySource: null,
+        deliveryTarget: 'legacy-group-room',
+        identityId: null,
+        participantId: null,
+        threadId: 'legacy-group-room',
+        threadIsDirect: false,
+      },
+      schedule: { at: '2026-04-12T18:00:00.000Z', kind: 'at' },
+      slug: 'group-sunday-superlatives',
+      status: 'active',
+      summary: null,
+      tags: ['assistant', 'scheduled', 'murph-managed'],
+      title: 'Sunday group superlatives',
+      updatedAt: '2026-04-12T16:00:00.000Z',
+    })
+    const { claimed, paths } = await claimFirstCanonicalCronJob(vaultRoot)
+
+    const result = await executeClaimedAssistantCronJob({
+      executionContext: {
+        hosted: { memberId: 'retired-group-runtime', userEnvKeys: [] },
+      },
+      job: claimed,
+      paths,
+      trigger: 'scheduled',
+      vault: vaultRoot,
+    })
+
+    expect(result.run).toMatchObject({
+      outcome: 'skipped_gate',
+      reason: 'managed_automation_retired',
+      status: 'skipped',
+    })
+    expect(cronMocks.runExperimentLifecycleOutcomePrecondition).not.toHaveBeenCalled()
+    expect(cronMocks.sendAssistantMessageLocal).not.toHaveBeenCalled()
   })
 
   it.each([

@@ -1,6 +1,6 @@
 # Verification And Runtime
 
-Last verified: 2026-07-22
+Last verified: 2026-07-26
 
 ## Verification Execution Location
 
@@ -10,26 +10,28 @@ root commands `pnpm test:diff <path ...>` and `pnpm verify:acceptance` pass
 through `scripts/verification-dispatch.mjs`:
 
 - CI and already-remote runs execute `scripts/workspace-verify.sh` directly.
-- A local Codex parent in `auto` mode uses Crabbox's direct
-  `blacksmith-testbox` provider only when both CLIs are available and
-  `MURPH_CRABBOX_BLACKSMITH=1` is set.
-- Other callers and unconfigured or unavailable CLIs retain local shared-host
-  admission. Canonical acceptance intentionally selects its bounded composed
+- `auto` mode always uses local shared-host admission. Canonical acceptance
+  intentionally selects its bounded composed
   profile there when at least 12 logical CPUs are available; ordinary commands
   and smaller hosts keep their conservative shared-host worker budgets.
-  Blacksmith capacity or auth failure after an explicitly configured remote
-  attempt fails that attempt instead of silently duplicating it locally.
 - `MURPH_VERIFY_EXECUTOR=local|crabbox` explicitly selects an executor; forcing
   Crabbox requests a fresh one-shot Testbox and fails closed when either CLI is
-  unavailable. The `:local` package aliases exist for executor diagnosis, not as
-  a normal way to skip remote proof.
+  unavailable. Blacksmith capacity or auth failure fails that explicit attempt
+  instead of silently duplicating it locally. The `:local` package aliases
+  exist only for executor diagnosis because canonical automatic execution is
+  already local.
 - The Testbox hydration workflow must exist on the repository default branch
   before GitHub accepts a delegated `workflow_dispatch`. The change that first
-  introduces `.github/workflows/crabbox.yml` therefore uses local verification
-  and PR gates; after that bootstrap lands, canonical commands can create fresh
-  one-shot Testboxes from feature branches normally. Canonical verification
-  rejects reusable lease IDs because current provider metadata does not prove
-  the Blacksmith organization that installed the root-owned entrypoint.
+  introduces or moves `.github/workflows/crabbox-bounded.yml` therefore uses
+  local verification and PR gates; after that bootstrap lands, explicitly
+  forced canonical commands can create fresh one-shot Testboxes from feature
+  branches. Canonical verification rejects reusable lease IDs because current
+  provider metadata does not prove the Blacksmith organization that installed
+  the root-owned entrypoint.
+- The retired `.github/workflows/crabbox.yml` path must remain absent. It is the
+  capability hard cut for pre-cost-control dispatchers: a stale worktree fails
+  workflow lookup before a Blacksmith job can start. Do not restore that path as
+  a compatibility shim.
 
 Remote execution preserves the exact underlying `workspace-verify.sh` command,
 including diff scope, reverse dependents, coverage thresholds, app verification,
@@ -50,14 +52,32 @@ MURPH_VERIFY_EXECUTOR=crabbox pnpm verify:acceptance
 ```
 
 The forced executor creates a fresh one-shot Testbox through the fully pinned
-route. Do not leave the local waiter running concurrently, forward local
-environment values, bypass the canonical command, warm a lease separately, or
-return automatically to another unbounded local wait.
+route. Its invocation always requests cleanup, a 10-minute idle timeout, and a
+45-minute maximum lease lifetime; the hydration workflow has a 50-minute
+last-resort ceiling. Do not leave the local waiter running concurrently, forward
+local environment values, bypass the canonical command, warm a lease separately,
+or return automatically to another unbounded local wait.
 Before delegation, satisfy the Git-state admission boundary, including fully
 staging any new non-ignored source or documentation file. If Crabbox cannot run
 because its CLIs, authentication, or capacity are unavailable, fail closed and
 report that concrete blocker with the completed local evidence. Preserve the
 Testbox ID, timing summary, and linked Actions run when delegation starts.
+
+Do not run both remote `test:diff` and remote acceptance on the same exact head.
+When acceptance is required, keep the preceding diff checks local and reserve
+the one remote check for acceptance; otherwise use the remote diff lane. Retry
+an unchanged head only after a concrete infrastructure failure and record that
+reason in the completion evidence.
+
+### Required post-landing trust-root proof
+
+One case does not require a ten-minute local admission wait: after a change to
+`.github/workflows/crabbox-bounded.yml` or the trusted entrypoint lands on the
+default branch, run exactly one explicitly forced canonical remote check to
+prove that new trust root. This is required boundary validation, not ordinary
+capacity fallback; do not manufacture a local wait first. Use acceptance when
+the landed change requires acceptance coverage, otherwise use `test:diff`, and
+retain the same lifecycle bounds and evidence.
 
 ### Environment and Vercel boundary
 
@@ -328,7 +348,7 @@ the advisory budget.
 - `pnpm verify:acceptance`: the canonical repo acceptance gate. It runs through the root workspace verifier so one lock covers the whole acceptance pass: first the full `typecheck` surface, then the coverage-heavy acceptance lane with already-proven repo guards skipped, `apps/cloudflare` app-local typecheck skipped, and the contracts artifact verification reusing the `packages/contracts` build from typecheck. On non-CI hosts with at least 12 logical CPUs, including a locally forced Codex/shared-host execution, its startup log reports the composed resource profile. Independent doc gardening and prepared-runtime setup overlap before coverage begins. Web tests/lint/dev smoke then start immediately while the protected CLI phase uses four CLI workers plus one two-worker package peer. CLI terminal success or failure publishes one invocation-scoped readiness marker: that releases Cloudflare's serial app tests and the hosted-web Next build without hiding the CLI result, lets package fanout refill to at most five two-worker processes, and is removed by the root owner at completion. The sanitized Crabbox bootstrap does not set an app-step policy; the root verifier alone assigns Web-parallel and Cloudflare-serial behavior. This profile applies equally to a capable local host and the 16-vCPU Blacksmith Testbox. Standalone `pnpm test:coverage`, smaller hosts, and CI retain their self-contained or conservative defaults unless explicitly overridden.
 - `pnpm zip:src` and `scripts/package-audit-context.sh`: shell through `pnpm no-js`, which first prunes untracked generated JS/declaration sidecars that sit next to tracked TypeScript source files and then runs the tracked-artifact hygiene guard, before building the source/review bundle from git-visible files while scanning `config/**` alongside app/package code and filtering blocked local residue such as `.env` / `.env.*`, `dist/`, `.next/`, `.next-dev/`, `.next-smoke/`, `.test-dist/`, `*.tsbuildinfo`, and `packages/health-commons/generated/**` paths out of the manifest. This keeps ignored local artifacts out of the upload bundle without requiring a clean development worktree, while raw clone archives remain unsafe.
 - `pnpm test:scenario-integrity`: the root command for fixture/scenario-manifest integrity verification. It is not executable end-to-end smoke.
-- Automatic meal-photo capture spans `apps/web`, `packages/{cloudflare-hosted-control,hosted-execution,assistant-runtime,runtime-state,assistant-engine,core,vault-usecases,cli}`, and `apps/cloudflare`, so its final local proof must use `pnpm verify:acceptance` in addition to focused route, current verified-email recipient authority, accepted-capture member-wide engagement, system-only cron/cleanup, foreground fairness, contract, storage, canonical-import, managed-automation, oldest-first closeout-work, and photo-retirement tests. That automated proof does not replace a physical-device opt-in/upload check because routine CI has neither iOS Photos authority nor production R2 access.
+- Automatic meal-photo capture spans `apps/web`, `packages/{cloudflare-hosted-control,hosted-execution,assistant-runtime,runtime-state,assistant-engine,core,vault-usecases,cli}`, and `apps/cloudflare`, so its final local proof must use `pnpm verify:acceptance` in addition to focused route, companion bearer-consent recovery, current verified-email recipient authority, accepted-capture member-wide engagement, system-only cron/cleanup, foreground fairness, contract, storage, canonical-import, managed-automation, oldest-first closeout-work, and photo-retirement tests. That automated proof does not replace a physical-device opt-in/upload check because routine CI has neither iOS Photos authority nor production R2 access.
 - `pnpm release:check`: assumes dependencies are already installed, syntax-checks the release helpers, validates the fixed-version monorepo release manifest plus publish metadata, then runs `pnpm build:workspace:clean` and `pnpm verify:acceptance`. The tag-driven release workflow performs the one required install up front, opts the verify lanes into CI parallel execution through `MURPH_TEST_LANES_PARALLEL=1`, `MURPH_APP_VERIFY_PARALLEL=1`, and `MURPH_VERIFY_STEP_PARALLEL=1`, and leaves the actual tarball packing to the later dedicated pack step instead of repacking inside `release:check`. Treat it as the release-specific extension of `pnpm verify:acceptance`, with the extra clean-build proof layered on top.
 
 ## Incur-Backed CLI Guardrails
@@ -409,6 +429,16 @@ the advisory budget.
   reusable V8 contexts, and the root Render Blueprint pins two worker instances
   to the 2 GB Standard plan.
 - `apps/cloudflare/wrangler.jsonc` remains the checked-in worker scaffold, but the generated deploy config from `apps/cloudflare/scripts/**` is authoritative for environment-specific bindings and required Worker secrets. The generated Worker secret list currently requires `HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK`, `HOSTED_LOG_FINGERPRINT_SECRET`, `HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET`, `HOSTED_R2_PRESIGN_ACCESS_KEY_ID`, `HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY`, `HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK`, and `OPENAI_API_KEY`; optional provider secrets include `ELEVENLABS_API_KEY` for generated voice memos. The checked-in scaffold keeps only a tight local placeholder list. The deploy vars require the direct-R2 presign account and bucket names, with an optional account-scoped R2 HTTPS endpoint override; hosted-local dev, worker-only, and E2E profiles use a Docker MinIO sidecar plus local-only presign endpoint flags instead of relying on `wrangler dev` to emulate the R2 S3 API. The repo also ships the checked-in `apps/cloudflare/r2-bundles-lifecycle.json` transient-cleanup config plus `pnpm --dir apps/cloudflare r2:lifecycle:apply`, and the manual GitHub Actions workflow `.github/workflows/deploy-cloudflare-hosted.yml` for environment-driven config rendering, cached native runner base preparation, direct `wrangler deploy` execution, explicit `instance_type` pinning, and smoke checks that poll operator status until the Durable Object runner reaches idle and status exposes the latest workspace checkpoint ref. The deploy flow requires `CF_PUBLIC_BASE_URL` for normal deploy-and-smoke workflow runs, expects operators to apply the checked-in transient R2 lifecycle rules to the real bundles buckets as part of deploy setup, treats `CF_PLATFORM_ENVELOPE_KEY_ID` as single-key metadata for the active platform envelope key, and uses `wrangler deploy` as the direct-cut default deploy path. The deploy helper validates generated config, secrets, and runner bundle artifacts, runs direct Wrangler deploy, then reads `wrangler deployments status --json` for the smoke version and final traffic summary. That deploy flow prepares `apps/cloudflare/.deploy/runner-bundle/` ahead of time as a runtime leaf artifact and prepares a stable local base image from `Dockerfile.cloudflare-hosted-runner-base`; hosted-local E2E lanes may reuse the matching GHCR fingerprinted base image, but production-capable deploy paths force a local base build from the protected checkout before Wrangler's final image build copies the prepared bundle. The bounded direct hosted workspace invocation core still lives in `packages/assistant-runtime`. Protected-main Cloudflare deploy workflow jobs run on Blacksmith: normal predeploy E2E gates, runner smoke, the hosted Codex auth guard, and the production deploy job. The `cf:deploy:immediate` path skips the slower E2E and runner smoke gates, while the production deploy job still builds the runner bundle and native base image directly from its verified protected-main checkout before rendering secrets, dry-running/deploying through Wrangler, and smoking deployed endpoints.
+- The same protected-main deploy workflow also exposes one reusable `preview`
+  target through the existing GitHub `Preview` Environment. It keeps the
+  generated deploy path as the single owner, derives the Vercel OIDC
+  environment from the selected target, and skips paid live-model deploy smoke.
+  Preview preflight runs before provider mutation and requires matching
+  preview crypto/OIDC context, visibly staging-scoped Worker and R2 names, a
+  distinct staging Web origin, public HTTPS/DNS, and a declared production
+  origin used only as an inequality guard. An isolated Vercel preview
+  database/crypto/control-plane boundary is a prerequisite; production Web or
+  production stateful secrets are never a preview bootstrap fallback.
 - `Dockerfile.cloudflare-hosted-runner-base` is the checked-in scaffold for the stable native Cloudflare container base image. It installs the common Linux parser dependencies, creates the non-login runner user, and sets the default parser/runtime environment; hosted transcription has no in-image model and routes through the Worker-owned Workers AI binding. `Dockerfile.cloudflare-hosted-runner` is the small app-layer scaffold that starts from that base image, patches the native bundled Codex model catalog so `gpt-5.5`, `gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna` support the OpenAI flex service tier, validates those entries, and copies the prebuilt `apps/cloudflare/.deploy/runner-bundle/` artifact into `/app`; the production deploy smoke uses the same catalog for one real `gpt-5.6-terra` turn. The image starts the private `apps/cloudflare/src/container-entrypoint.ts` bridge inside the container, serves `GET /health` plus `POST /internal/workspace-invocation` on that internal bridge only, and delegates bounded hosted workspace invocation directly to `packages/assistant-runtime`. The default execution path runs one hosted job at a time in-process, builds runtime config from explicit supervisor env plus worker-supplied runtime fields, and uses per-user warm workspace roots plus invocation-local writable cache/temp roots. The present expectation is Node `>=24.14.1`, the preassembled runner bundle plus its materialized production dependencies, writable temp storage for restore/snapshot work, `PORT`, optional `HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS`, and shared worker/container allowlist extension vars for encrypted per-user env overrides when additional key names must be permitted.
 - The local assistant daemon entrypoint lives under `packages/assistantd`; `murph-assistantd` binds to one vault, rejects non-loopback hosts, requires a bearer token on every route, sets `MURPH_ASSISTANTD_DISABLE_CLIENT=1` in its own process so daemon-local calls do not recurse back through HTTP, and now fronts the steady-state assistant session/message/options flows plus session/status/outbox/cron inspection and serializable automation control whenever the CLI invocation does not need local-only hooks such as live provider events, foreground inbox events, abort propagation, or local session/transcript snapshots.
 - The current runner scaffold now ships as a preassembled deploy bundle copied into the native image rather than rebuilding the workspace from repo source inside Docker. `apps/cloudflare/DEPLOY.md` is the durable guide for the current staged manual deploy path.

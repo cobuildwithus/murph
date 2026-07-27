@@ -49,6 +49,8 @@ import {
   normalizeNullableString,
 } from "./shared";
 import { createHostedPulseTrialStripeCustomer } from "./pulse-trial-customer";
+import { closeUnboundHostedSubscriptionCheckout } from "./subscription-checkout-lifecycle";
+import { bindHostedMemberSubscriptionCheckoutTx } from "./subscription-checkout-store";
 
 export interface HostedBillingCheckoutInput {
   billingPlanCode?: HostedBillingPlanCode;
@@ -223,6 +225,27 @@ export async function createHostedBillingCheckout(
       }),
     );
 
+    const checkoutOwned = await prisma.$transaction(
+      (tx) => bindHostedMemberSubscriptionCheckoutTx({
+        memberId: invite.member.id,
+        stripeCheckoutSessionId: checkoutSession.id,
+        tx,
+      }),
+      HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
+    );
+    if (!checkoutOwned) {
+      await closeUnboundHostedSubscriptionCheckout({
+        deleteSessionCustomer: customerId === null,
+        sessionId: checkoutSession.id,
+        stripe,
+      });
+      throw hostedOnboardingError({
+        code: "HOSTED_MEMBER_SUSPENDED",
+        httpStatus: 403,
+        message: "This hosted account is suspended. Contact support to restore access.",
+      });
+    }
+
     if (!checkoutSession.url) {
       throw hostedOnboardingError({
         code: "CHECKOUT_URL_MISSING",
@@ -252,16 +275,21 @@ async function reserveHostedPulseTrialCheckoutCustomer(input: {
   prisma: PrismaClient;
   stripe: ReturnType<typeof requireHostedStripeCheckoutConfig>["stripe"];
 }): Promise<string> {
-  const candidateStripeCustomerId = await createHostedPulseTrialStripeCustomer({
-    memberId: input.memberId,
-    stripe: input.stripe,
-  });
   return input.prisma.$transaction(async (tx) => {
     await lockHostedMemberRow(tx, input.memberId);
     const currentBillingRef = await readHostedMemberStripeBillingRef({
       memberId: input.memberId,
       prisma: tx,
     });
+    const candidateStripeCustomerId = currentBillingRef?.stripeCustomerId
+      ?? await createHostedPulseTrialStripeCustomer({
+        memberId: input.memberId,
+        requestOptions: {
+          maxNetworkRetries: 0,
+          timeout: 5_000,
+        },
+        stripe: input.stripe,
+      });
     const billingRef = currentBillingRef?.stripeCustomerId
       ? currentBillingRef
       : await bindHostedMemberStripeCustomerIdIfMissingTx({

@@ -528,6 +528,7 @@ interface HostedExecutionLinqConversationMessagePayloadBase {
   groupReactionContext?: string;
   linqMessage: HostedExecutionLinqConversationMessage;
   routeAuthority?: HostedExecutionLinqExternalThreadRouteAuthority | null;
+  senderMemberId?: string;
 }
 
 export type HostedExecutionLinqConversationMessagePayload =
@@ -582,6 +583,7 @@ export function readHostedLinqConversationMessageAccountLookupKey(
 export interface HostedExecutionTelegramConversationMessagePayload {
   channel: "telegram";
   routeAuthority?: HostedExecutionTelegramExternalThreadRouteAuthority | null;
+  senderMemberId?: string;
   telegramMessage: HostedExecutionTelegramMessage;
 }
 

@@ -9,7 +9,7 @@ vi.mock("server-only", () => ({}));
 const mocks = vi.hoisted(() => ({
   appendHostedMealPhotoMailboxEnvelopeTx: vi.fn(),
   assertCurrentMealPhotoCaptureEnrollmentTx: vi.fn(),
-  assertHostedLaunchRequiredConsentGranted: vi.fn(),
+  assertHostedHistoricalLaunchConsentGranted: vi.fn(),
   assertMealPhotoCaptureRequestHasNoBody: vi.fn(),
   buildHostedExecutionMealPhotoCapturedWake: vi.fn(),
   deleteMealPhoto: vi.fn(),
@@ -66,7 +66,8 @@ vi.mock("@/src/lib/hosted-routing/member-direct-route", () => ({
 }));
 
 vi.mock("@/src/lib/legal/consent", () => ({
-  assertHostedLaunchRequiredConsentGranted: mocks.assertHostedLaunchRequiredConsentGranted,
+  assertHostedHistoricalLaunchConsentGranted:
+    mocks.assertHostedHistoricalLaunchConsentGranted,
 }));
 
 vi.mock("@/src/lib/hosted-execution/control", () => ({
@@ -131,7 +132,7 @@ describe("meal photo companion routes", () => {
     mocks.requirePrivyMemberAuthFromBearerToken.mockResolvedValue({
       member: { id: MEMBER_ID },
     });
-    mocks.assertHostedLaunchRequiredConsentGranted.mockResolvedValue(undefined);
+    mocks.assertHostedHistoricalLaunchConsentGranted.mockResolvedValue(undefined);
     mocks.readCurrentHostedMemberDirectRoute.mockResolvedValue({
       channel: "linq",
       threadId: "linq-thread-1",
@@ -203,7 +204,7 @@ describe("meal photo companion routes", () => {
     };
   }
 
-  it("enrolls only after active Privy auth and launch consent", async () => {
+  it("enrolls after active Privy auth and historical launch consent", async () => {
     const request = jsonRequest("https://app.example.test/enrollment", ENROLLMENT_REQUEST);
     const response = await enrollmentRoute.POST(request);
 
@@ -217,7 +218,7 @@ describe("meal photo companion routes", () => {
       request,
       expect.anything(),
     );
-    expect(mocks.assertHostedLaunchRequiredConsentGranted).toHaveBeenCalledWith({
+    expect(mocks.assertHostedHistoricalLaunchConsentGranted).toHaveBeenCalledWith({
       memberId: MEMBER_ID,
       prisma: expect.anything(),
     });
@@ -230,6 +231,29 @@ describe("meal photo companion routes", () => {
       prisma: expect.anything(),
       request: ENROLLMENT_REQUEST,
     });
+  });
+
+  it("rejects enrollment when historical launch consent is missing", async () => {
+    mocks.assertHostedHistoricalLaunchConsentGranted.mockRejectedValueOnce(
+      hostedOnboardingError({
+        code: "HOSTED_CONSENT_REQUIRED",
+        httpStatus: 403,
+        message: "Accept the Murph legal consent before continuing.",
+      }),
+    );
+
+    const response = await enrollmentRoute.POST(
+      jsonRequest("https://app.example.test/enrollment", ENROLLMENT_REQUEST),
+    );
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({
+      error: {
+        code: "HOSTED_CONSENT_REQUIRED",
+      },
+    });
+    expect(mocks.readCurrentHostedMemberDirectRoute).not.toHaveBeenCalled();
+    expect(mocks.issueMealPhotoCaptureEnrollment).not.toHaveBeenCalled();
   });
 
   it("requires an existing private Murph delivery route before enrollment", async () => {

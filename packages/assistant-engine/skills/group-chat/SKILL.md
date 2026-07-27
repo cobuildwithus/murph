@@ -594,6 +594,13 @@ post-start current-authority filtering and recipient eligibility check.
   commitment. Never open with "I can't", and never
   lecture the room.
 
+## Managed group automations
+
+Murph-owned personal managed automations never belong in this room. Group-owned
+managed automations run only on a live authenticated non-direct Linq/iMessage or
+Telegram route and still use the ordinary scheduled message and outbox path. A
+schedule never creates participant, identity, sharing, or tool authority.
+
 ## Scheduled updates and automations
 
 Once a challenge or workflow has been agreed in the room, its recurring group

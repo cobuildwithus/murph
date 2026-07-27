@@ -7,10 +7,13 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
+  ageHostedRuntimeLatencyAlertForTest,
   appendHostedExecutionWakeForTest,
+  normalizeHostedLinqLatencyTracesForTest,
   readHostedMailboxItemForTest,
   seedHostedWorkspaceCheckpointForTest,
   seedHostedWorkspaceInboxMediaRetentionWakeForTest,
+  setLatestHostedLinqReplyLatencyForTest,
 } from "#hosted-web-testing";
 import {
   buildHostedExecutionAssistantAskCompletedWake,
@@ -75,9 +78,12 @@ import {
 
 const runId = randomUUID().replaceAll("-", "").slice(0, 12);
 const linqWebhookSecret = "linq-local-foreground-reply-priority-secret";
+const latencyAlertChatId = `chat_local_priority_operator_${runId}`;
+const latencyAlertCronSecret = "hosted-local-priority-latency-cron-secret";
+const latencyAlertTimeZone = buildDaytimeTestTimeZone(new Date());
 const productionLikeAssistantModel = "gpt-5.6-terra";
 const productionIdleCheckpointDelayMs = 180_000;
-const promptReplyDeadlineMs = 45_000;
+const promptReplyDeadlineMs = 30_000;
 const duplicateReplyObservationMs = 3_000;
 const activeTurnDuplicateReplyObservationMs = 22_000;
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
@@ -112,6 +118,9 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
       additionalEnv: {
         HOSTED_ASSISTANT_MODEL: productionLikeAssistantModel,
         HOSTED_ASSISTANT_PROVIDER: "openai",
+        HOSTED_RUNTIME_LATENCY_ALERT_LINQ_CHAT_ID: latencyAlertChatId,
+        HOSTED_RUNTIME_LATENCY_ALERT_TIME_ZONE: latencyAlertTimeZone,
+        CRON_SECRET: latencyAlertCronSecret,
         HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS:
           String(productionIdleCheckpointDelayMs),
         HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "300000",
@@ -371,7 +380,149 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
 
     writeLatencyProof("active_default", latencyMs);
   }, 180_000);
+
+  it("pages one operator incident through the real cron, database, and Linq boundary", async () => {
+    const anomalousTrace = await setLatestHostedLinqReplyLatencyForTest({
+      environment: requireScenario().runtimeEnv,
+      latencyMs: 31_000,
+      userId: retentionProbe.userId,
+    });
+
+    const alertPath = `/chats/${encodeURIComponent(latencyAlertChatId)}/messages`;
+    const alertMatcher = matchLinqMessagePrefix("Murph reply latency alert.");
+    requireLinqStub().armNextPostAcceptLostAcknowledgment({
+      expectedPath: alertPath,
+      matchRequest: alertMatcher,
+      responseCount: 1,
+    });
+
+    const failed = await requestLatencyAlertCron();
+    expect(failed.status).toBe(502);
+    await expect(failed.json()).resolves.toMatchObject({
+      error: {
+        code: "HOSTED_RUNTIME_LATENCY_ALERT_SEND_FAILED",
+      },
+    });
+    expect(requireLinqStub().countAcceptedSends(alertPath, alertMatcher)).toBe(1);
+
+    const failedAttempts = observedLinqRequests(alertPath, alertMatcher);
+    expect(failedAttempts).toHaveLength(1);
+    const incidentBody = failedAttempts[0]?.body;
+    const incidentIdempotencyKey =
+      readObservedLinqIdempotencyKey(failedAttempts[0]);
+    expect(incidentBody).toBeTruthy();
+    expect(incidentIdempotencyKey).toMatch(
+      /^murph\/runtime-latency\/[0-9a-f-]+\/alert$/u,
+    );
+    const privateAlertFragments = [
+      anomalousTrace.traceId,
+      latencyAlertChatId,
+      runId,
+      ...allProbeIdentities.flatMap((identity) => [
+        identity.chatId,
+        identity.homePhone,
+        identity.memberPhone,
+        identity.userId,
+      ]),
+      `evt_priority_inbox_media_retention_${runId}`,
+      `msg_priority_inbox_media_retention_${runId}`,
+      "Reply while retention-only work is active.",
+      "Foreground reply won over retention-only work.",
+    ];
+    for (const privateFragment of privateAlertFragments) {
+      expect(incidentBody).not.toContain(privateFragment);
+    }
+    expect(failedAttempts.every((request) => request.body === incidentBody)).toBe(true);
+
+    const paced = await requestLatencyAlertCron();
+    expect(paced.status).toBe(200);
+    await expect(paced.json()).resolves.toMatchObject({
+      runtimeLatencyAlert: {
+        outcome: "deferred_rate_limit",
+      },
+    });
+    expect(observedLinqRequests(alertPath, alertMatcher)).toHaveLength(1);
+
+    await expect(ageHostedRuntimeLatencyAlertForTest({
+      ageMs: 21 * 60_000,
+      environment: requireScenario().runtimeEnv,
+    })).resolves.toEqual({ updated: true });
+    const retried = await requestLatencyAlertCron();
+    expect(retried.status).toBe(200);
+    await expect(retried.json()).resolves.toMatchObject({
+      runtimeLatencyAlert: {
+        outcome: "alert_sent",
+      },
+    });
+    const retriedAttempts = observedLinqRequests(alertPath, alertMatcher);
+    expect(retriedAttempts).toHaveLength(2);
+    expect(retriedAttempts[1]?.body).toBe(incidentBody);
+    expect(readObservedLinqIdempotencyKey(retriedAttempts[1])).toBe(
+      incidentIdempotencyKey,
+    );
+    expect(requireLinqStub().countAcceptedSends(alertPath, alertMatcher)).toBe(1);
+
+    const coalesced = await requestLatencyAlertCron();
+    expect(coalesced.status).toBe(200);
+    await expect(coalesced.json()).resolves.toMatchObject({
+      runtimeLatencyAlert: {
+        outcome: "incident_active",
+      },
+    });
+    expect(observedLinqRequests(alertPath, alertMatcher)).toHaveLength(2);
+
+    const normalized = await normalizeHostedLinqLatencyTracesForTest({
+      environment: requireScenario().runtimeEnv,
+      userIds: allProbeIdentities.map((identity) => identity.userId),
+    });
+    expect(normalized.updatedCount).toBeGreaterThanOrEqual(
+      allProbeIdentities.length,
+    );
+    const cleared = await requestLatencyAlertCron();
+    expect(cleared.status).toBe(200);
+    await expect(cleared.json()).resolves.toMatchObject({
+      runtimeLatencyAlert: {
+        outcome: "healthy",
+      },
+    });
+    expect(requireLinqStub().countAcceptedSends(alertPath, alertMatcher)).toBe(1);
+
+    await setLatestHostedLinqReplyLatencyForTest({
+      environment: requireScenario().runtimeEnv,
+      latencyMs: 31_000,
+      userId: retentionProbe.userId,
+    });
+    await expect(ageHostedRuntimeLatencyAlertForTest({
+      ageMs: 21 * 60_000,
+      environment: requireScenario().runtimeEnv,
+    })).resolves.toEqual({ updated: true });
+    const recurred = await requestLatencyAlertCron();
+    expect(recurred.status).toBe(200);
+    await expect(recurred.json()).resolves.toMatchObject({
+      runtimeLatencyAlert: {
+        outcome: "alert_sent",
+      },
+    });
+    expect(requireLinqStub().countAcceptedSends(alertPath, alertMatcher)).toBe(2);
+    const recurrence = observedLinqRequests(alertPath, alertMatcher).at(-1);
+    expect(readObservedLinqIdempotencyKey(recurrence)).not.toBe(
+      incidentIdempotencyKey,
+    );
+  }, 120_000);
 });
+
+function buildDaytimeTestTimeZone(now: Date): string {
+  const unwrappedOffsetHours = 12 - now.getUTCHours();
+  const offsetHours = unwrappedOffsetHours > 11
+    ? unwrappedOffsetHours - 24
+    : unwrappedOffsetHours;
+  if (offsetHours === 0) {
+    return "UTC";
+  }
+  return offsetHours > 0
+    ? `Etc/GMT-${offsetHours}`
+    : `Etc/GMT+${Math.abs(offsetHours)}`;
+}
 
 async function seedProbe(identity: ProbeIdentity): Promise<void> {
   await requireScenario().seedActiveHostedLinqMember({
@@ -1105,6 +1256,49 @@ function replyPathFor(identity: ProbeIdentity): string {
 
 function matchLinqMessageText(expectedText: string): ObservedLinqRequestMatcher {
   return (request) => requireLinqStub().readObservedMessageText(request) === expectedText;
+}
+
+function matchLinqMessagePrefix(expectedPrefix: string): ObservedLinqRequestMatcher {
+  return (request) =>
+    requireLinqStub().readObservedMessageText(request)?.startsWith(expectedPrefix) === true;
+}
+
+function observedLinqRequests(
+  expectedPath: string,
+  matcher: ObservedLinqRequestMatcher,
+): ObservedLinqRequest[] {
+  return requireLinqStub().observedRequests.filter((request) =>
+    request.method === "POST"
+    && request.url === expectedPath
+    && matcher(request)
+  );
+}
+
+function readObservedLinqIdempotencyKey(
+  request: ObservedLinqRequest | undefined,
+): string | null {
+  if (!request) {
+    return null;
+  }
+  const body = JSON.parse(request.body) as Record<string, unknown>;
+  const message = body.message;
+  if (!message || typeof message !== "object" || Array.isArray(message)) {
+    return null;
+  }
+  const value = (message as Record<string, unknown>).idempotency_key;
+  return typeof value === "string" ? value : null;
+}
+
+async function requestLatencyAlertCron(): Promise<Response> {
+  return await fetch(
+    `${requireScenario().harness.webBaseUrl}`
+      + "/api/internal/hosted-runtime/latency-alert/cron",
+    {
+      headers: {
+        authorization: `Bearer ${latencyAlertCronSecret}`,
+      },
+    },
+  );
 }
 
 async function postSignedLinqWebhook(event: Record<string, unknown>): Promise<Response> {

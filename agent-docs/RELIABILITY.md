@@ -1,6 +1,6 @@
 # Reliability
 
-Last verified: 2026-07-25
+Last verified: 2026-07-26
 
 ## Current Guardrails
 
@@ -15,10 +15,62 @@ Last verified: 2026-07-25
 - Define startup requirements, health checks, and critical invariants.
 - Document retry/idempotency expectations for writes or background work.
 - Add tests for failure modes before relying on production-side recovery logic.
+- Account deletion must not discard its only external-cleanup owner. The
+  canonical account transaction persists the KMS-encrypted, foreign-key-free
+  receipt before deleting the member. The existing hourly retention sweep
+  retries Cloudflare, Stripe-customer, and Privy-user targets independently;
+  confirmed absence is idempotent success, completed targets are skipped, and
+  unconfigured, timed-out, or ambiguous targets remain pending. The deletion
+  request returns `cleanupPending` immediately after the canonical transaction
+  instead of waiting on those providers. Each retention attempt has a bounded
+  target deadline, and the bounded batch runs receipts concurrently so one
+  stalled vendor does not block unrelated retention work. Because every
+  provider delete is idempotent and progress is monotonic, concurrent attempts
+  may duplicate a provider request but cannot erase completed progress or
+  report convergence before the receipt itself is deleted.
+- Every direct subscription Checkout attempt is an encrypted member-owned row;
+  Family retains its single encrypted session in the existing billing attempt
+  owner. After Stripe creates a session, Checkout creation re-locks the owner
+  and returns the URL only after binding that reference; if suspension or
+  deletion won, it expires the session instead. Account deletion suspends
+  first, re-reads all direct attempts and Family billing owners, expires every
+  open session, absorbs an expiry/completion race by canceling the resulting
+  subscription, and only then prepares the final customer-cleanup receipt.
+- Participant-derived hosted-group access is bounded by the shared seven-day
+  observation lease. Provider rosters larger than the reconciliation cap cannot
+  leave a participant authoritative forever: stale relationships age out.
+  Authenticated Linq inbound can renew only an existing non-removed relationship
+  for the currently resolved identity, and future provider timestamps are
+  clamped to server time. Before denying a quiet route, Web makes one bounded
+  provider read and scans the full returned roster. It may create or reinstate
+  exactly the authenticated current sender after the roster handle re-resolves
+  to the same active hosted identity; otherwise it may renew only an existing
+  active participant whose current identity still matches the stored
+  relationship. Provider order and the assistant participant projection cap do
+  not decide access.
 - Foreground inbox/parser-backed daemon runs should favor restartable connectors with bounded backoff over permanently dead watch loops, while still keeping low-level restart behavior opt-in and always bounded by the owning abort signal.
 - Networked assistant/provider/channel calls should set explicit timeouts, propagate caller abort signals, and only auto-retry request shapes that are replay-safe or rate-limit directed.
+- The hosted reply-latency operator alert remains one singleton incident owner.
+  Outbound paging requires both an opaque dedicated chat and a valid IANA
+  operator timezone, suppresses sends from 11 PM through 7 AM local time, and
+  applies stable bounded jitter after quiet hours and after every provider
+  attempt. No retry or post-healthy recurrence may call the provider less than
+  ten minutes after the prior attempt or accepted-send boundary. A retry that
+  may already have succeeded preserves the exact body and idempotency key;
+  distinct incidents vary through current aggregate evidence and checked-at
+  time, never random padding or synonym churn. Fresh health and operator-time
+  rechecks precede the one exact row-version compare-and-swap that admits
+  provider entry, increments attempt count, and advances the provider-attempt
+  timestamp. The same version fence makes a stale recovery coalesce rather than
+  report healthy after a concurrent incident cycles back to the same status.
+  Recovery or quiet hours before admission leave attempt state untouched: a
+  known-unsent first alert later builds current evidence, while an ambiguous
+  prior attempt retains its exact body, key, and pacing boundary. After provider
+  entry, healthy scans coalesce against the bounded four-minute send lease until
+  the attempt settles or expires; only then may the persisted incident become
+  healthy.
 - Hosted managed-automation reconciliation persists retry generation in the existing workspace checkpoint owner. Only eligible, explicitly retryable failures receive the bounded 30-second, 2-minute, and 10-minute backoff sequence; unclassified or permanent failures are logged without manufacturing another wake, and a later successful pass clears the retry generation.
-- Managed automation ownership is route-authority-based: member seeds run only on direct/member routes and the group room-model seed runs only on authenticated non-direct Linq/iMessage or Telegram routes. Group email is excluded because its sender is spoofable. Existing managed records bound to the wrong owner are archived in place; caller-supplied unscoped seeds retain their prior route behavior. Only the immutable built-in personal-memory and group-room-model automation ids select silent maintenance policy, so an editable tag, slug, title, or instruction cannot acquire no-delivery, reserved-page tool, or replay-barrier behavior. Both policies reuse the existing isolated exact-skip turn, foreground preemption, and provider-admission replay barrier. Group room-model maintenance additionally uses a fresh one-shot provider thread with workspace and network access denied; its sole state surface is the dedicated host-owned tool. The group policy scans at most 192 recent sessions, selects at most 24 route-eligible sessions after filtering, and uses their seven-day overlapping admitted-group transcripts with one full-rewrite page instead of a cursor or work queue; a missed or preempted run is recovered by overlap, while a run admitted to the provider is consumed after a successful replace or delete because that mutation may already have committed. Scheduled and explicit writes share one digest-bound fixed-page owner: it compares the shown state under lock, rejects stale mutations, validates the normalized body and complete 6 KiB advisory envelope, and never truncates an accepted page. Missing state can be recreated, while malformed, unreadable, wrong-type, identifying, or oversized state fails closed.
+- Managed automation ownership is exact-seed and route-authority based. Built-in seeds without an explicit scope default to `member`; member seeds run only on personal/direct routes, while `authenticated-group` seeds run only on live non-direct Linq/iMessage or Telegram routes. Group email is excluded. Reconciliation archives every nonterminal wrong-owner built-in record, including paused records, while already archived records and caller-supplied unscoped custom seeds retain their prior behavior. Claimed static built-ins resolve the current immutable seed by automation id before lifecycle hooks and revalidate the same owner and live route before evidence, provider admission, tools, delivery, and commit; editable tags, slugs, titles, and instructions cannot acquire authority. Permanently retired built-in IDs are not seeds: reconciliation archives matching persisted records and claimed occurrences fail closed before lifecycle or model work. Dynamically generated experiment-lifecycle seeds remain on their existing path until their separately coordinated owner exposes an exact resolver. Immutable personal-memory and group-room-model IDs still exclusively select silent maintenance policy and its provider-admission replay barrier.
 - Closed integration-ingest months compact only in the abortable hosted idle-shutdown lane. Core publishes a verified deterministic gzip before deleting raw bytes, normal readers and amendments stream bounded gzip output, and startup repairs only an independently valid, newline-terminated, byte-identical raw/gzip pair. A wake preserves foreground priority; a 30-second pass budget or ordinary compaction failure leaves any unfinished source intact and does not block checkpointing. Remaining raw months are the next pass's durable worklist, while a non-identical representation pair fails closed without a repair queue or marker.
 - The single group newsletter automation reuses canonical cron occurrence state for both delivery modes. Current-chat editions finish through the ordinary conversation outbox and its route retry policy. A scheduled non-direct Telegram occurrence resolves its exact Web-owned route before group tools or model work, persists that authority with the outbox intent, and rechecks it before provider entry. Missing route authority remains retryable; a locally mismatched target fails stale, while live ownership revocation fails permanently without sending. Email editions alone use the existing newsletter parent/recipient outbox lifecycle. The runtime appends the current execution contract on every occurrence so legacy saved instructions cannot retain a retired workflow; no migration queue, repair state, or second scheduler exists.
 - A usage-credit purchase persists one reconstructible `created` purchase before
@@ -97,6 +149,14 @@ Last verified: 2026-07-25
   entries revoke unused credit and positive entries restore only credit that
   was previously revoked. A failure keeps the Stripe receipt retryable; it does
   not silently complete the event.
+- Subscription refund and dispute reversals keep event freshness, the billing
+  cursor, unpaid status, and suspension in the same locked billing owner.
+  Exact replay may repeat that atomic transition, but an already-suspended
+  snapshot cannot substitute for event freshness: a distinct newer reversal
+  must advance the cursor so an older restore cannot reactivate the member.
+  Only a suspension whose unpaid state and cursor timestamp still match may be
+  advanced or restored; any other suspension remains the account-deletion
+  fence.
 - Read-only Labs discovery has no automatic provider retry, background refresh, or stale cache fallback. Web applies explicit time, response-byte, result-count, and location-fanout bounds and propagates caller cancellation. A Junction timeout, rate limit, or server failure is `temporarily_unavailable`; it must not be collapsed into an empty catalog or `not_served`. Only a clean provider response that reports no ZIP coverage is `not_served`.
 - Labs capability rollout is additive and fail-closed. Deploy Web's signed callback and provider configuration before Cloudflare/runtime registration; a missing or incompatible route surfaces as unavailable rather than falling back to a copied catalog. Roll back the runtime capability before removing the Web route. Because the feature has no DB, cache, queue, or retry owner, recovery is a later member-initiated live request.
 - Definite assistant outbox delivery failures may run at most 48 persisted dispatch attempts. A definite failure on attempt 48 terminalizes as `ASSISTANT_DELIVERY_RETRY_EXHAUSTED`, and no 49th provider call begins; newsletter parent and recipient replay must preserve that logical terminal state instead of resetting the budget with a new token. A delivery that may already have succeeded is not exhausted as an ordinary failure: hosted non-idempotent confirmation remains parked without an automatic wake, while replay-safe delivery checks persisted or provider reconciliation evidence before terminalization.
