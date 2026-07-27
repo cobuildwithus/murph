@@ -1,8 +1,8 @@
 # PR 1004 final integration
 
-Status: active
+Status: completed
 Created: 2026-07-26
-Updated: 2026-07-26
+Updated: 2026-07-27
 
 ## Goal
 
@@ -45,4 +45,14 @@ Updated: 2026-07-26
 
 ## Verification
 
-- Pending.
+- Prisma schema validation and generation passed.
+- Web TypeScript checking passed.
+- Web lint passed with zero errors and 14 unrelated existing warnings.
+- Focused privacy, billing, Linq, participant-access, retention, and migration
+  suites passed: 359 tests.
+- Canonical `MURPH_VERIFY_EXECUTOR=crabbox pnpm test:diff apps/web
+  apps/cloudflare` passed in Testbox `tbx_01kygvkcyk67j1kjd92mywbb1s`.
+- Canonical `MURPH_VERIFY_EXECUTOR=crabbox pnpm verify:acceptance` passed in
+  Testbox `tbx_01kygvqzghyhynw11kmfadyhr7`.
+- Required after push: exact-head CI and ReviewGPT round 3.
+Completed: 2026-07-27
