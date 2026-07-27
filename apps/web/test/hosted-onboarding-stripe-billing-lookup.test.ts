@@ -1954,11 +1954,33 @@ describe("hosted onboarding stripe billing lookup", () => {
   );
 
   it.each([
-    ["first increase", "in_z_equal_first"],
-    ["second increase", "in_a_equal_second"],
+    [
+      "first increase while the group remains partially represented",
+      "in_z_equal_first",
+      3,
+      true,
+    ],
+    [
+      "second increase while the group remains partially represented",
+      "in_a_equal_second",
+      3,
+      true,
+    ],
+    [
+      "first increase after the group is fully unwound",
+      "in_z_equal_first",
+      2,
+      false,
+    ],
+    [
+      "second increase after the group is fully unwound",
+      "in_a_equal_second",
+      2,
+      false,
+    ],
   ] as const)(
-    "keeps an equal-created cumulative %s in the required funding set",
-    async (_description, refundedInvoiceId) => {
+    "classifies an equal-created cumulative %s",
+    async (_description, refundedInvoiceId, currentQuantity, fullyRefunded) => {
       const renewalInvoice = makeStripeFinancialInvoice({
         created: 1_775_000_000,
         id: "in_equal_renewal",
@@ -1968,7 +1990,7 @@ describe("hosted onboarding stripe billing lookup", () => {
             periodEnd: 1_778_000_000,
             periodStart: 1_775_000_000,
             priceId: "price_family_pulse",
-            quantity: 1,
+            quantity: 2,
             subscriptionId: "sub_123",
             subscriptionItemId: "si_family_pulse",
           }),
@@ -1980,24 +2002,24 @@ describe("hosted onboarding stripe billing lookup", () => {
         id: "in_z_equal_first",
         lines: [
           makeStripeInvoiceLine({
-            amount: -1_000,
-            invoiceId: "in_z_equal_first",
-            periodEnd: 1_778_000_000,
-            periodStart: 1_776_000_000,
-            priceId: "price_family_pulse",
-            proration: true,
-            quantity: 1,
-            subscriptionId: "sub_123",
-            subscriptionItemId: "si_family_pulse",
-          }),
-          makeStripeInvoiceLine({
-            amount: 2_000,
+            amount: -2_000,
             invoiceId: "in_z_equal_first",
             periodEnd: 1_778_000_000,
             periodStart: 1_776_000_000,
             priceId: "price_family_pulse",
             proration: true,
             quantity: 2,
+            subscriptionId: "sub_123",
+            subscriptionItemId: "si_family_pulse",
+          }),
+          makeStripeInvoiceLine({
+            amount: 3_000,
+            invoiceId: "in_z_equal_first",
+            periodEnd: 1_778_000_000,
+            periodStart: 1_776_000_000,
+            priceId: "price_family_pulse",
+            proration: true,
+            quantity: 3,
             subscriptionId: "sub_123",
             subscriptionItemId: "si_family_pulse",
           }),
@@ -2009,24 +2031,24 @@ describe("hosted onboarding stripe billing lookup", () => {
         id: "in_a_equal_second",
         lines: [
           makeStripeInvoiceLine({
-            amount: -2_000,
-            invoiceId: "in_a_equal_second",
-            periodEnd: 1_778_000_000,
-            periodStart: 1_776_000_000,
-            priceId: "price_family_pulse",
-            proration: true,
-            quantity: 2,
-            subscriptionId: "sub_123",
-            subscriptionItemId: "si_family_pulse",
-          }),
-          makeStripeInvoiceLine({
-            amount: 3_000,
+            amount: -3_000,
             invoiceId: "in_a_equal_second",
             periodEnd: 1_778_000_000,
             periodStart: 1_776_000_000,
             priceId: "price_family_pulse",
             proration: true,
             quantity: 3,
+            subscriptionId: "sub_123",
+            subscriptionItemId: "si_family_pulse",
+          }),
+          makeStripeInvoiceLine({
+            amount: 4_000,
+            invoiceId: "in_a_equal_second",
+            periodEnd: 1_778_000_000,
+            periodStart: 1_776_000_000,
+            priceId: "price_family_pulse",
+            proration: true,
+            quantity: 4,
             subscriptionId: "sub_123",
             subscriptionItemId: "si_family_pulse",
           }),
@@ -2048,14 +2070,14 @@ describe("hosted onboarding stripe billing lookup", () => {
               makeStripeSubscriptionItem({
                 id: "si_family_pulse",
                 priceId: "price_family_pulse",
-                quantity: 3,
+                quantity: currentQuantity,
               }),
             ],
             latestInvoice: secondIncreaseInvoice.id,
           }),
         ),
       ).resolves.toMatchObject({
-        fullyRefunded: true,
+        fullyRefunded,
       });
     },
   );

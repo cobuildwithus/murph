@@ -2099,7 +2099,7 @@ describe("hosted onboarding stripe billing events", () => {
     expect(mocks.writeHostedMemberStripeBillingTx).not.toHaveBeenCalled();
   });
 
-  it("keeps the exact Family owner active when a refunded update is no longer required", async () => {
+  it("keeps the exact Family owner active after same-created increases are fully unwound", async () => {
     const owner = makeFamilyBillingOwner();
     const subscription = makeStripeSubscription({ status: "active" });
     const tx = { id: "family-refund-recovery-tx" };
@@ -2132,6 +2132,9 @@ describe("hosted onboarding stripe billing events", () => {
       tx,
       verifiedOwnerMemberId: owner.lockMemberId,
     });
+    expect(mocks.readHostedStripeRecurringFinancialState).toHaveBeenCalledWith(
+      subscription,
+    );
     expect(mocks.writeHostedMemberStripeBillingTx).not.toHaveBeenCalled();
   });
 

@@ -125,8 +125,10 @@ same-price items changes identity, not funding provenance, so replay uses
 bounded aggregate licensed quantities per price rather than subscription item
 IDs. Paid updates with the same Stripe creation second have no authoritative
 causal order; reconciliation conservatively retains every invoice in that
-ambiguous group. A full refund of any still-required invoice blocks the
-resulting entitlement.
+ambiguous group while any aggregate contribution from the group remains
+represented, and releases the entire group once its contribution is fully
+unwound. A full refund of any still-required invoice blocks the resulting
+entitlement.
 
 When auto-adding a seat for an invite returns payment-required, Settings keeps
 the exact invite intent and Stripe-hosted recovery URL in a short-lived

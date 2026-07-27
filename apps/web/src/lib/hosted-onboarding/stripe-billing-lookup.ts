@@ -1006,13 +1006,11 @@ async function listHostedStripeRequiredEntitlementInvoiceIds(input: {
       transition,
     });
     currentFundingStates = replay.beforeFundingStates;
-    if (
-      replay.required ||
-      transition.invoiceIds.length > 1
-    ) {
+    if (replay.required) {
       // Stripe timestamps have second precision. Multiple paid updates in one
-      // second lack a provider-backed causal order, so keep every invoice in
-      // the group rather than ordering by an opaque invoice ID.
+      // second lack a provider-backed causal order, so while any contribution
+      // remains, keep every invoice in the group rather than ordering by an
+      // opaque invoice ID.
       for (const invoiceId of transition.invoiceIds) {
         requiredInvoiceIds.add(invoiceId);
       }
