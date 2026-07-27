@@ -48,6 +48,7 @@ import {
   buildHostedTelegramAccessNoticeIdempotencyKey,
   sendHostedTelegramAccessNotice,
 } from "@/src/lib/hosted-execution/telegram-access-notice";
+import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 
 describe("Telegram access notice delivery", () => {
   const tx = {};
@@ -229,6 +230,37 @@ describe("Telegram access notice delivery", () => {
     expect(mocks.markHostedLinqDeliverySendFailedTx).toHaveBeenCalledWith(
       expect.objectContaining({
         failureCode: "Error",
+        idempotencyKey: expect.stringMatching(/^telegram-access-notice:/u),
+        prisma,
+      }),
+    );
+    expect(mocks.markHostedLinqDeliveryAcceptedTx).not.toHaveBeenCalled();
+  });
+
+  it("reports a provider-confirmed private rejection for neutral group fallback", async () => {
+    mocks.sendHostedTelegramTextMessage.mockRejectedValue(
+      hostedOnboardingError({
+        code: "HOSTED_TELEGRAM_API_REQUEST_FAILED",
+        httpStatus: 502,
+        message: "Telegram sendMessage failed with HTTP 403.",
+        retryable: false,
+      }),
+    );
+
+    await expect(sendHostedTelegramAccessNotice({
+      authorizedTelegramUserId: "456",
+      memberId: "member_123",
+      message: "Finish setup, then try the group again.",
+      noticeCode: "signup_required",
+      prisma: prisma as never,
+      replyToMessageId: null,
+      sourceEventId: "telegram:update:325",
+      target: "456",
+    })).resolves.toEqual({ status: "definite_failure" });
+
+    expect(mocks.markHostedLinqDeliverySendFailedTx).toHaveBeenCalledWith(
+      expect.objectContaining({
+        failureCode: "HOSTED_TELEGRAM_API_REQUEST_FAILED",
         idempotencyKey: expect.stringMatching(/^telegram-access-notice:/u),
         prisma,
       }),

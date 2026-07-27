@@ -1430,11 +1430,11 @@ async function planHostedLinqExplicitThreadRouteWebhook(input: {
       });
   }
 
-  let containerAccessActive = await readActiveHostedMemberAccess({
+  let containerAccessActive = (await readHostedRuntimeAiAccessDecision({
     memberId: input.route.containerMemberId,
     now: participantAccessNow,
     prisma: input.prisma,
-  });
+  })).allowed;
   if (!containerAccessActive && !summary.isFromMe) {
     await renewHostedThreadContainerParticipantAccessFromRosterTx({
       chatId: summary.chatId,
@@ -1443,11 +1443,11 @@ async function planHostedLinqExplicitThreadRouteWebhook(input: {
       prisma: input.prisma,
       verifiedInboundParticipant,
     });
-    containerAccessActive = await readActiveHostedMemberAccess({
+    containerAccessActive = (await readHostedRuntimeAiAccessDecision({
       memberId: input.route.containerMemberId,
       now: participantAccessNow,
       prisma: input.prisma,
-    });
+    })).allowed;
   }
 
   if (!containerAccessActive) {
@@ -1829,10 +1829,10 @@ async function planHostedLinqGroupChatWebhook(input: {
   }
   if (
     isHostedMemberSuspended(sender.suspendedAt)
-    || !(await readActiveHostedMemberAccess({
+    || !(await readHostedRuntimeAiAccessDecision({
       memberId: sender.id,
       prisma: input.prisma,
-    }))
+    })).allowed
   ) {
     return ignored("group-chat-sender-inactive");
   }

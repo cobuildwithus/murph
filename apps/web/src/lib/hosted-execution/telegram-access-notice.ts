@@ -32,6 +32,7 @@ const HOSTED_TELEGRAM_ACCESS_NOTICE_TEMPLATE = "access_notice";
 
 export type HostedTelegramAccessNoticeDeliveryResult =
   | { status: "already_notified" }
+  | { status: "definite_failure" }
   | { retryAt: Date; status: "in_flight" }
   | { status: "not_applicable" }
   | { status: "sent" };
@@ -253,6 +254,21 @@ async function sendHostedTelegramUnanchoredAccessNotice(input: {
         idempotencyKey: input.idempotencyKey,
         prisma: input.input.prisma,
       });
+    }
+
+    if (isHostedOnboardingError(error) && !error.retryable) {
+      // Telegram returned a non-retryable rejection, so the private message
+      // definitely did not land. Preserve the terminal provider-effect record
+      // and let the webhook adapter use its account-neutral room fallback.
+      await markHostedLinqDeliverySendFailedTx({
+        expectedAttemptedAt: claim.attemptedAt,
+        failedAt: claim.attemptedAt,
+        failureCode: error.code,
+        failureReason: error.message,
+        idempotencyKey: input.idempotencyKey,
+        prisma: input.input.prisma,
+      });
+      return { status: "definite_failure" };
     }
 
     // A direct Bot API request that throws after dispatch may already have

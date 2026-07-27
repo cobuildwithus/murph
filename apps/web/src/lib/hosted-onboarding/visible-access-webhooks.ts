@@ -95,6 +95,16 @@ export async function handleHostedOnboardingTelegramWebhookWithVisibleAccess(
       reason: access.responseReason,
     };
   }
+  if (delivery.status === "definite_failure" && !summary.isDirect) {
+    // The private Telegram send was provider-confirmed as unsent. Hand the
+    // authenticated group event back to the outer account-neutral response
+    // adapter rather than losing the accepted inbound message.
+    return {
+      ignored: true,
+      ok: true,
+      reason: "group-chat-provision-unavailable",
+    };
+  }
 
   throw hostedOnboardingError({
     code: delivery.status === "in_flight"

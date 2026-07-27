@@ -212,4 +212,48 @@ describe("visible access webhook recovery", () => {
       target: "456",
     });
   });
+
+  it("hands a definitely rejected private group recovery to the neutral room fallback", async () => {
+    mocks.handleHostedOnboardingTelegramWebhook.mockResolvedValue({
+      ignored: true,
+      ok: true,
+      reason: "inactive-member",
+    });
+    const update = { update_id: 324 };
+    mocks.parseHostedTelegramWebhookUpdate.mockReturnValue(update);
+    mocks.summarizeHostedTelegramWebhook.mockResolvedValue({
+      isDirect: false,
+      occurredAt: "2026-07-25T12:00:00.000Z",
+      senderTelegramUserId: "456",
+    });
+    mocks.buildHostedTelegramMessagePayload.mockReturnValue({
+      messageId: "10",
+      threadId: "group:456",
+    });
+    mocks.resolveHostedMemberRoutingByTelegramUserId.mockResolvedValue({
+      lookup: {
+        core: { id: "member_telegram", suspendedAt: null },
+      },
+      status: "found",
+    });
+    mocks.resolveHostedRecognizedInboundAccess.mockResolvedValue({
+      kind: "access_notice",
+      message: "Billing needs attention.",
+      noticeCode: "billing_inactive",
+      responseReason: "sent-billing-inactive-notice",
+    });
+    mocks.sendHostedTelegramAccessNotice.mockResolvedValue({
+      status: "definite_failure",
+    });
+
+    await expect(handleHostedOnboardingTelegramWebhookWithVisibleAccess({
+      prisma,
+      rawBody: "{}",
+      secretToken: null,
+    })).resolves.toEqual({
+      ignored: true,
+      ok: true,
+      reason: "group-chat-provision-unavailable",
+    });
+  });
 });

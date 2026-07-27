@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   requireHostedLinqMessageReceivedEvent,
 } from "@/src/lib/hosted-onboarding/linq";
+import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import {
   type HostedOnboardingLinqWebhookHandler,
   type HostedVisibleSecondaryLinqDependencies,
@@ -25,8 +26,14 @@ describe("Linq group-chat visible access recovery", () => {
       messageId: "msg_private_recovery",
     }));
     const readHostedMemberRoutingState = vi.fn()
-      .mockResolvedValueOnce({ linqChatId: "chat_private_member" })
-      .mockResolvedValueOnce({ linqChatId: "chat_private_member" });
+      .mockResolvedValueOnce({
+        linqChatId: "chat_private_member",
+        linqRecipientPhone: "+15550000000",
+      })
+      .mockResolvedValueOnce({
+        linqChatId: "chat_private_member",
+        linqRecipientPhone: "+15550000000",
+      });
     const resolveHostedRecognizedInboundAccess = vi.fn(async () => ({
       kind: "access_notice" as const,
       message: TRIAL_CONVERSION_MESSAGE,
@@ -96,6 +103,7 @@ describe("Linq group-chat visible access recovery", () => {
       })),
       readHostedMemberRoutingState: vi.fn(async () => ({
         linqChatId: "chat_private_member",
+        linqRecipientPhone: "+15550000000",
       }) as never),
       resolveHostedRecognizedInboundAccess: vi.fn(async () => ({
         inviteCode: "invite-123",
@@ -143,6 +151,7 @@ describe("Linq group-chat visible access recovery", () => {
       })),
       readHostedMemberRoutingState: vi.fn(async () => ({
         linqChatId: "chat_private_member",
+        linqRecipientPhone: "+15550000000",
       }) as never),
       resolveHostedRecognizedInboundAccess,
       sendHostedLinqChatMessage,
@@ -167,7 +176,7 @@ describe("Linq group-chat visible access recovery", () => {
     expect(sendHostedLinqChatMessage).toHaveBeenCalledWith(expect.objectContaining({
       chatId: "chat_group_visible",
       idempotencyKey: "visible-secondary:evt_active_trial",
-      message: expect.stringContaining("active Murph member"),
+      message: expect.stringContaining("same Murph number"),
       replyToMessageId: "msg_evt_active_trial",
     }));
   });
@@ -201,7 +210,7 @@ describe("Linq group-chat visible access recovery", () => {
     expect(sendHostedLinqChatMessage).toHaveBeenCalledTimes(1);
     expect(sendHostedLinqChatMessage).toHaveBeenCalledWith(expect.objectContaining({
       chatId: "chat_group_visible",
-      message: expect.stringContaining("active Murph member"),
+      message: expect.stringContaining("same Murph number"),
       replyToMessageId: "msg_evt_no_private_route",
     }));
   });
@@ -221,6 +230,7 @@ describe("Linq group-chat visible access recovery", () => {
       })),
       readHostedMemberRoutingState: vi.fn(async () => ({
         linqChatId: "chat_legacy_group",
+        linqRecipientPhone: "+15550000000",
       }) as never),
       resolveHostedRecognizedInboundAccess,
       sendHostedLinqChatMessage,
@@ -251,8 +261,14 @@ describe("Linq group-chat visible access recovery", () => {
       messageId: "msg_group_fallback",
     }));
     const readHostedMemberRoutingState = vi.fn()
-      .mockResolvedValueOnce({ linqChatId: "chat_private_member" })
-      .mockResolvedValueOnce({ linqChatId: "chat_new_private_member" });
+      .mockResolvedValueOnce({
+        linqChatId: "chat_private_member",
+        linqRecipientPhone: "+15550000000",
+      })
+      .mockResolvedValueOnce({
+        linqChatId: "chat_new_private_member",
+        linqRecipientPhone: "+15550000000",
+      });
     const dependencies = buildLinqDependencies({
       event,
       getHostedLinqChatSummary: vi.fn(async () => ({
@@ -287,6 +303,56 @@ describe("Linq group-chat visible access recovery", () => {
     }));
   });
 
+  it("falls back to the room when the private provider route becomes a group before send", async () => {
+    const event = buildGroupLinqEvent("evt_private_became_group");
+    const sendHostedLinqChatMessage = vi.fn(async () => ({
+      chatId: "chat_group_visible",
+      messageId: "msg_group_fallback",
+    }));
+    const getHostedLinqChatSummary = vi.fn()
+      .mockResolvedValueOnce({
+        handles: [],
+        isGroup: false,
+      })
+      .mockResolvedValueOnce({
+        handles: [],
+        isGroup: true,
+      });
+    const dependencies = buildLinqDependencies({
+      event,
+      getHostedLinqChatSummary,
+      readHostedMemberRoutingState: vi.fn(async () => ({
+        linqChatId: "chat_private_member",
+        linqRecipientPhone: "+15550000000",
+      }) as never),
+      resolveHostedRecognizedInboundAccess: vi.fn(async () => ({
+        kind: "access_notice" as const,
+        message: TRIAL_CONVERSION_MESSAGE,
+        noticeCode: "trial_conversion_pending" as const,
+        responseReason: "sent-trial-conversion-notice",
+      })),
+      sendHostedLinqChatMessage,
+    });
+    const handler: HostedOnboardingLinqWebhookHandler = vi.fn(async () => ({
+      ignored: true,
+      ok: true as const,
+      reason: "group-chat",
+    }));
+
+    await withHostedVisibleSecondaryLinqOutcomes(handler, dependencies)({
+      rawBody: JSON.stringify(event),
+      signature: "signature",
+      timestamp: "timestamp",
+    });
+
+    expect(getHostedLinqChatSummary).toHaveBeenCalledTimes(2);
+    expect(sendHostedLinqChatMessage).toHaveBeenCalledOnce();
+    expect(sendHostedLinqChatMessage).toHaveBeenCalledWith(expect.objectContaining({
+      chatId: "chat_group_visible",
+      idempotencyKey: "visible-secondary:evt_private_became_group",
+    }));
+  });
+
   it("keeps an unknown group sender silent", async () => {
     const event = buildGroupLinqEvent("evt_unknown_sender");
     const sendHostedLinqChatMessage = vi.fn();
@@ -314,6 +380,160 @@ describe("Linq group-chat visible access recovery", () => {
     });
 
     expect(sendHostedLinqChatMessage).not.toHaveBeenCalled();
+  });
+
+  it("uses an attested pending private route while setup is still incomplete", async () => {
+    const event = buildGroupLinqEvent("evt_pending_private_route");
+    const sendHostedLinqChatMessage = vi.fn(async () => ({
+      chatId: "chat_pending_member",
+      messageId: "msg_private_setup",
+    }));
+    const readHostedMemberRoutingState = vi.fn()
+      .mockResolvedValueOnce({
+        linqChatId: null,
+        linqRecipientPhone: null,
+        pendingLinqChatId: "chat_pending_member",
+        pendingLinqRecipientPhone: "+15550000000",
+      })
+      .mockResolvedValueOnce({
+        linqChatId: null,
+        linqRecipientPhone: null,
+        pendingLinqChatId: "chat_pending_member",
+        pendingLinqRecipientPhone: "+15550000000",
+      });
+    const dependencies = buildLinqDependencies({
+      event,
+      getHostedLinqChatSummary: vi.fn(async () => ({
+        handles: [],
+        isGroup: false,
+      })),
+      readHostedMemberRoutingState,
+      resolveHostedRecognizedInboundAccess: vi.fn(async () => ({
+        inviteCode: "invite-123",
+        inviteId: "invite_123",
+        joinUrl: "https://withmurph.ai/join/invite-123",
+        kind: "signup" as const,
+        message: SIGNUP_MESSAGE,
+        responseReason: "sent-signup-link" as const,
+      })),
+      sendHostedLinqChatMessage,
+    });
+    const handler: HostedOnboardingLinqWebhookHandler = vi.fn(async () => ({
+      ignored: true,
+      ok: true as const,
+      reason: "group-chat",
+    }));
+
+    await withHostedVisibleSecondaryLinqOutcomes(handler, dependencies)({
+      rawBody: JSON.stringify(event),
+      signature: "signature",
+      timestamp: "timestamp",
+    });
+
+    expect(sendHostedLinqChatMessage).toHaveBeenCalledOnce();
+    expect(sendHostedLinqChatMessage).toHaveBeenCalledWith(expect.objectContaining({
+      chatId: "chat_pending_member",
+      message: expect.stringContaining("Finish setup here"),
+      replyToMessageId: null,
+    }));
+  });
+
+  it("does not promise recovery when the group contains another member's Murph line", async () => {
+    const event = buildGroupLinqEvent("evt_wrong_murph_line");
+    const sendHostedLinqChatMessage = vi.fn(async () => ({
+      chatId: "chat_group_visible",
+      messageId: "msg_group_fallback",
+    }));
+    const resolveHostedRecognizedInboundAccess = vi.fn();
+    const dependencies = buildLinqDependencies({
+      event,
+      readHostedMemberRoutingState: vi.fn(async () => ({
+        linqChatId: "chat_private_member",
+        linqRecipientPhone: "+15559999999",
+      }) as never),
+      resolveHostedRecognizedInboundAccess,
+      sendHostedLinqChatMessage,
+    });
+    const handler: HostedOnboardingLinqWebhookHandler = vi.fn(async () => ({
+      ignored: true,
+      ok: true as const,
+      reason: "group-chat",
+    }));
+
+    await withHostedVisibleSecondaryLinqOutcomes(handler, dependencies)({
+      rawBody: JSON.stringify(event),
+      signature: "signature",
+      timestamp: "timestamp",
+    });
+
+    expect(resolveHostedRecognizedInboundAccess).not.toHaveBeenCalled();
+    expect(sendHostedLinqChatMessage).toHaveBeenCalledOnce();
+    expect(sendHostedLinqChatMessage).toHaveBeenCalledWith(expect.objectContaining({
+      chatId: "chat_group_visible",
+      message: expect.stringContaining("same Murph number"),
+      replyToMessageId: "msg_evt_wrong_murph_line",
+    }));
+    expect(sendHostedLinqChatMessage).toHaveBeenCalledWith(expect.objectContaining({
+      chatId: "chat_group_visible",
+      idempotencyKey: "visible-secondary:evt_wrong_murph_line",
+    }));
+  });
+
+  it("falls back to the neutral group reply after a definite private-route rejection", async () => {
+    const event = buildGroupLinqEvent("evt_stale_private_route");
+    const sendHostedLinqChatMessage = vi.fn()
+      .mockRejectedValueOnce(hostedOnboardingError({
+        code: "LINQ_SEND_FAILED",
+        httpStatus: 502,
+        message: "Linq outbound reply failed with HTTP 404.",
+        retryable: false,
+      }))
+      .mockResolvedValueOnce({
+        chatId: "chat_group_visible",
+        messageId: "msg_group_fallback",
+      });
+    const readHostedMemberRoutingState = vi.fn()
+      .mockResolvedValueOnce({
+        linqChatId: "chat_private_member",
+        linqRecipientPhone: "+15550000000",
+      })
+      .mockResolvedValueOnce({
+        linqChatId: "chat_private_member",
+        linqRecipientPhone: "+15550000000",
+      });
+    const dependencies = buildLinqDependencies({
+      event,
+      getHostedLinqChatSummary: vi.fn(async () => ({
+        handles: [],
+        isGroup: false,
+      })),
+      readHostedMemberRoutingState,
+      resolveHostedRecognizedInboundAccess: vi.fn(async () => ({
+        kind: "access_notice" as const,
+        message: TRIAL_CONVERSION_MESSAGE,
+        noticeCode: "trial_conversion_pending" as const,
+        responseReason: "sent-trial-conversion-notice",
+      })),
+      sendHostedLinqChatMessage,
+    });
+    const handler: HostedOnboardingLinqWebhookHandler = vi.fn(async () => ({
+      ignored: true,
+      ok: true as const,
+      reason: "group-chat",
+    }));
+
+    await withHostedVisibleSecondaryLinqOutcomes(handler, dependencies)({
+      rawBody: JSON.stringify(event),
+      signature: "signature",
+      timestamp: "timestamp",
+    });
+
+    expect(sendHostedLinqChatMessage).toHaveBeenCalledTimes(2);
+    expect(sendHostedLinqChatMessage).toHaveBeenLastCalledWith(expect.objectContaining({
+      chatId: "chat_group_visible",
+      idempotencyKey: "visible-secondary:evt_stale_private_route",
+      replyToMessageId: "msg_evt_stale_private_route",
+    }));
   });
 });
 

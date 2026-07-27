@@ -274,6 +274,9 @@ type TelegramWebhookPrismaHarness = {
   hostedMember?: {
     findUnique?: ReturnType<typeof vi.fn>;
   };
+  hostedThreadContainerParticipant?: {
+    findMany?: ReturnType<typeof vi.fn>;
+  };
   hostedMemberRouting?: {
     findMany?: (...args: unknown[]) => Promise<unknown>;
     findFirst?: (...args: unknown[]) => Promise<unknown>;
@@ -712,6 +715,149 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
         }),
       }),
     );
+  });
+
+  it("does not append an active sender's message to a canonically inactive existing Telegram container", async () => {
+    mocks.runtimeEnv.telegramWebhookSecret = "telegram-secret";
+    mocks.readHostedThreadRouteByThreadIdentity.mockResolvedValue({
+      channel: "telegram",
+      containerMemberId: "member_existing_group_container",
+      owner: { id: "member_expired_owner" },
+    });
+    const prisma = withPrismaTransaction({
+      hostedMember: {
+        findUnique: vi.fn(async (query: {
+          where: { id: string };
+        }) => query.where.id === "member_existing_group_container"
+          ? {
+              accountGroupMemberships: [],
+              billingStatus: HostedBillingStatus.not_started,
+              suspendedAt: null,
+              threadContainer: {
+                owner: {
+                  accountGroupMemberships: [],
+                  billingRef: {
+                    currentBillingPhase: "trial",
+                    currentBillingPlanCode: "launch_monthly",
+                    currentCheckoutOffer: "pulse_trial_7d",
+                    currentTrialEndsAt: new Date("2026-03-27T12:00:00.000Z"),
+                    currentTrialStartedAt: new Date("2026-03-20T12:00:00.000Z"),
+                    pulseTrialPolicyVersion: "pulse-trial-2026-06-30-v2",
+                    pulseTrialRedeemedAt: new Date("2026-03-20T12:00:00.000Z"),
+                    stripeSubscriptionLookupKey: "subscription_lookup_expired_owner",
+                  },
+                  billingStatus: HostedBillingStatus.active,
+                  suspendedAt: null,
+                },
+              },
+            }
+          : {
+              accountGroupMemberships: [],
+              billingRef: null,
+              billingStatus: HostedBillingStatus.active,
+              suspendedAt: null,
+              threadContainer: null,
+            }),
+      },
+      hostedMemberRouting: {
+        findUnique: vi.fn().mockResolvedValue({
+          member: {
+            billingStatus: HostedBillingStatus.active,
+            id: "member_second_group_sender",
+            suspendedAt: null,
+          },
+          memberId: "member_second_group_sender",
+        }),
+      },
+      hostedThreadContainerParticipant: {
+        findMany: vi.fn().mockResolvedValue([]),
+      },
+    });
+
+    await expect(handleHostedOnboardingTelegramWebhook({
+      prisma,
+      rawBody: JSON.stringify({
+        message: {
+          chat: { id: -100123, title: "Trial chat", type: "group" },
+          date: 1_774_522_601,
+          from: { first_name: "Casey", id: 789 },
+          message_id: 3,
+          text: "thanks murph",
+        },
+        update_id: 324,
+      }),
+      secretToken: "telegram-secret",
+    })).resolves.toEqual({
+      ignored: true,
+      ok: true,
+      reason: "group-chat-provision-unavailable",
+    });
+
+    expect(mocks.ensureHostedThreadContainerRouteTx).not.toHaveBeenCalled();
+    expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
+  });
+
+  it("does not provision a delayed Telegram group message sent during a trial that has expired by processing time", async () => {
+    mocks.runtimeEnv.telegramWebhookSecret = "telegram-secret";
+    const prisma = withPrismaTransaction({
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue({
+          accountGroupMemberships: [],
+          billingRef: {
+            currentBillingPhase: "trial",
+            currentBillingPlanCode: "launch_monthly",
+            currentCheckoutOffer: "pulse_trial_7d",
+            currentTrialEndsAt: new Date("2026-03-27T12:00:00.000Z"),
+            currentTrialStartedAt: new Date("2026-03-20T12:00:00.000Z"),
+            pulseTrialPolicyVersion: "pulse-trial-2026-06-30-v2",
+            pulseTrialRedeemedAt: new Date("2026-03-20T12:00:00.000Z"),
+            stripeSubscriptionLookupKey: "subscription_lookup_expired_trial",
+          },
+          billingStatus: HostedBillingStatus.active,
+          suspendedAt: null,
+          threadContainer: null,
+        }),
+      },
+      hostedMemberRouting: {
+        findUnique: vi.fn().mockResolvedValue({
+          member: {
+            billingStatus: HostedBillingStatus.active,
+            id: "member_telegram_owner",
+            suspendedAt: null,
+          },
+          memberId: "member_telegram_owner",
+        }),
+      },
+    });
+
+    await expect(handleHostedOnboardingTelegramWebhook({
+      prisma,
+      rawBody: JSON.stringify({
+        message: {
+          chat: {
+            id: -100124,
+            title: "Trial chat",
+            type: "group",
+          },
+          date: 1_774_522_600,
+          from: {
+            first_name: "Alice",
+            id: 456,
+          },
+          message_id: 3,
+          text: "Murph?",
+        },
+        update_id: 325,
+      }),
+      secretToken: "telegram-secret",
+    })).resolves.toEqual({
+      ignored: true,
+      ok: true,
+      reason: "inactive-member",
+    });
+
+    expect(mocks.ensureHostedThreadContainerRouteTx).not.toHaveBeenCalled();
+    expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
   });
 
   it("repairs non-empty corrupt Telegram delivery material on owner ingress", async () => {

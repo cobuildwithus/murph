@@ -7,6 +7,7 @@ import {
 import type { HostedMember, PrismaClient } from "@prisma/client";
 
 import { getPrisma } from "../prisma";
+import { isHostedOnboardingError } from "./errors";
 import { lookupHostedMemberIdentityByPhoneNumber } from "./hosted-member-identity-store";
 import { readHostedMemberRoutingState } from "./hosted-member-routing-store";
 import { lookupHostedMemberByVerifiedEmailAddress } from "./hosted-member-store";
@@ -15,6 +16,7 @@ import {
   sendHostedLinqChatMessage,
 } from "./linq";
 import { getHostedLinqChatSummary } from "./linq-client";
+import { normalizePhoneNumber } from "./phone";
 import {
   buildHostedGroupChatAccessRecoveryMessage,
   resolveHostedRecognizedInboundAccess,
@@ -73,8 +75,8 @@ const defaultTelegramDependencies: HostedVisibleSecondaryTelegramDependencies = 
 
 const HOSTED_FAMILY_INVITE_UNAVAILABLE_REPLY =
   "That Family invite isn't usable anymore. Ask the person who invited you for a fresh link.";
-const HOSTED_GROUP_CHAT_UNAVAILABLE_REPLY =
-  "I couldn't connect this group chat to Murph. An active Murph member should message me from their usual account, then try again.";
+const HOSTED_LINQ_GROUP_CHAT_UNAVAILABLE_REPLY =
+  "I couldn't connect this group chat to Murph. Message me privately first, then make sure this group includes that same Murph number and try again.";
 const HOSTED_LINQ_CHAT_UNAVAILABLE_REPLY =
   "I couldn't connect this chat to Murph right now. Try again shortly. If it keeps happening, open Murph Settings.";
 const HOSTED_LINQ_CHAT_UNVERIFIED_REPLY =
@@ -85,6 +87,8 @@ const HOSTED_TELEGRAM_BINDING_REPAIR_REPLY =
   "This Telegram account isn't linked cleanly. Reconnect Telegram in Murph Settings or contact support.";
 const HOSTED_TELEGRAM_PRIVATE_SETUP_REPLY =
   "I can't finish that account setup in a group. Message me privately and I'll help you connect Murph.";
+const HOSTED_TELEGRAM_GROUP_CHAT_UNAVAILABLE_REPLY =
+  "I couldn't connect this group chat to Murph. Message me privately, then try again here.";
 
 const HOSTED_LINQ_VISIBLE_SECONDARY_REASONS = new Set([
   "family-invite-not-accepted",
@@ -165,22 +169,33 @@ export function withHostedVisibleSecondaryLinqOutcomes(
         ? await resolveHostedLinqPrivateGroupRecovery({
             currentChatId: context.summary.chatId,
             eventId: event.event_id,
+            incomingRecipientPhone: context.recipientPhoneNumber,
             prisma,
+            reason,
             sender: recognizedSender,
             dependencies,
             ...(input.signal ? { signal: input.signal } : {}),
           })
         : null;
     if (privateRecovery) {
-      await dependencies.sendHostedLinqChatMessage({
-        chatId: privateRecovery.chatId,
-        idempotencyKey: `visible-secondary-private:${event.event_id}`,
-        message: privateRecovery.message,
-        replyToMessageId: null,
-        ...(input.signal ? { signal: input.signal } : {}),
-      });
+      try {
+        await dependencies.sendHostedLinqChatMessage({
+          chatId: privateRecovery.chatId,
+          idempotencyKey: `visible-secondary-private:${event.event_id}`,
+          message: privateRecovery.message,
+          replyToMessageId: null,
+          ...(input.signal ? { signal: input.signal } : {}),
+        });
 
-      return buildVisibleSecondaryResponse(response, reason);
+        return buildVisibleSecondaryResponse(response, reason);
+      } catch (error) {
+        if (!isHostedOnboardingError(error) || error.retryable) {
+          throw error;
+        }
+        // A provider-confirmed permanent rejection means the private message
+        // did not land. Continue to the neutral room response instead of
+        // retrying a stale private route forever.
+      }
     }
 
     const message = resolveHostedLinqVisibleSecondaryReply({
@@ -262,9 +277,11 @@ export function resolveHostedLinqVisibleSecondaryReply(input: {
     case "unknown-home-line":
       return input.recognizedSender ? HOSTED_LINQ_CHAT_UNVERIFIED_REPLY : null;
     case "thread-container-inactive":
-      return HOSTED_GROUP_CHAT_UNAVAILABLE_REPLY;
+      return HOSTED_LINQ_GROUP_CHAT_UNAVAILABLE_REPLY;
     case "group-chat":
-      return input.recognizedSender ? HOSTED_GROUP_CHAT_UNAVAILABLE_REPLY : null;
+      return input.recognizedSender
+        ? HOSTED_LINQ_GROUP_CHAT_UNAVAILABLE_REPLY
+        : null;
     default:
       return null;
   }
@@ -291,7 +308,9 @@ export function resolveHostedTelegramVisibleSecondaryReply(input: {
         ? HOSTED_TELEGRAM_BINDING_REPAIR_REPLY
         : HOSTED_TELEGRAM_PRIVATE_SETUP_REPLY;
     case "group-chat-provision-unavailable":
-      return input.isDirect ? null : HOSTED_GROUP_CHAT_UNAVAILABLE_REPLY;
+      return input.isDirect
+        ? null
+        : HOSTED_TELEGRAM_GROUP_CHAT_UNAVAILABLE_REPLY;
     default:
       return null;
   }
@@ -332,7 +351,9 @@ async function resolveHostedLinqPrivateGroupRecovery(input: {
   currentChatId: string;
   dependencies: HostedVisibleSecondaryLinqDependencies;
   eventId: string;
+  incomingRecipientPhone: string | null;
   prisma: PrismaClient;
+  reason: string;
   sender: HostedVisibleSecondaryLinqSender;
   signal?: AbortSignal;
 }): Promise<HostedVisibleSecondaryLinqPrivateRecovery | null> {
@@ -343,23 +364,20 @@ async function resolveHostedLinqPrivateGroupRecovery(input: {
     memberId: input.sender.id,
     prisma: input.prisma,
   });
-  const privateChatId = initialRouting?.linqChatId?.trim() ?? "";
+  const privateChatId = resolveHostedLinqPrivateGroupRecoveryChatId({
+    incomingRecipientPhone: input.incomingRecipientPhone,
+    reason: input.reason,
+    routing: initialRouting,
+  });
   if (!privateChatId || privateChatId === input.currentChatId.trim()) {
     return null;
   }
 
-  const readChatSummary =
-    input.dependencies.getHostedLinqChatSummary
-    ?? getHostedLinqChatSummary;
-  try {
-    const privateChat = await readChatSummary({
-      chatId: privateChatId,
-      ...(input.signal ? { signal: input.signal } : {}),
-    });
-    if (privateChat.isGroup !== false) {
-      return null;
-    }
-  } catch {
+  if (!await isHostedLinqPrivateRecoveryChatAttested({
+    chatId: privateChatId,
+    dependencies: input.dependencies,
+    ...(input.signal ? { signal: input.signal } : {}),
+  })) {
     // Never disclose account state to a route whose direct audience cannot be
     // re-attested. The ordinary privacy-safe group response remains available.
     return null;
@@ -383,7 +401,20 @@ async function resolveHostedLinqPrivateGroupRecovery(input: {
     memberId: input.sender.id,
     prisma: input.prisma,
   });
-  if (currentRouting?.linqChatId?.trim() !== privateChatId) {
+  if (
+    resolveHostedLinqPrivateGroupRecoveryChatId({
+      incomingRecipientPhone: input.incomingRecipientPhone,
+      reason: input.reason,
+      routing: currentRouting,
+    }) !== privateChatId
+  ) {
+    return null;
+  }
+  if (!await isHostedLinqPrivateRecoveryChatAttested({
+    chatId: privateChatId,
+    dependencies: input.dependencies,
+    ...(input.signal ? { signal: input.signal } : {}),
+  })) {
     return null;
   }
 
@@ -391,6 +422,69 @@ async function resolveHostedLinqPrivateGroupRecovery(input: {
     chatId: privateChatId,
     message: buildHostedGroupChatAccessRecoveryMessage(access.message),
   };
+}
+
+function resolveHostedLinqPrivateGroupRecoveryChatId(input: {
+  incomingRecipientPhone: string | null;
+  reason: string;
+  routing: Awaited<ReturnType<typeof readHostedMemberRoutingState>>;
+}): string | null {
+  const routing = input.routing;
+  if (!routing) {
+    return null;
+  }
+
+  const route = routing.linqChatId?.trim()
+    ? {
+        chatId: routing.linqChatId.trim(),
+        recipientPhone: routing.linqRecipientPhone,
+      }
+    : routing.pendingLinqChatId?.trim()
+      ? {
+          chatId: routing.pendingLinqChatId.trim(),
+          recipientPhone: routing.pendingLinqRecipientPhone,
+        }
+      : null;
+  if (!route) {
+    return null;
+  }
+
+  if (input.reason === "group-chat") {
+    const incomingRecipientPhone = normalizePhoneNumber(
+      input.incomingRecipientPhone,
+    );
+    const privateRouteRecipientPhone = normalizePhoneNumber(
+      route.recipientPhone,
+    );
+    if (
+      !incomingRecipientPhone
+      || !privateRouteRecipientPhone
+      || incomingRecipientPhone !== privateRouteRecipientPhone
+    ) {
+      return null;
+    }
+  }
+
+  return route.chatId;
+}
+
+async function isHostedLinqPrivateRecoveryChatAttested(input: {
+  chatId: string;
+  dependencies: HostedVisibleSecondaryLinqDependencies;
+  signal?: AbortSignal;
+}): Promise<boolean> {
+  const readChatSummary =
+    input.dependencies.getHostedLinqChatSummary
+    ?? getHostedLinqChatSummary;
+  try {
+    const privateChat = await readChatSummary({
+      chatId: input.chatId,
+      ...(input.signal ? { signal: input.signal } : {}),
+    });
+    return privateChat.isGroup === false;
+  } catch {
+    return false;
+  }
 }
 
 function buildHostedSignupUrl(publicBaseUrl: string): string {

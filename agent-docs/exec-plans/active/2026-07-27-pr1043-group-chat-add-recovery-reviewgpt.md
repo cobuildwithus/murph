@@ -74,17 +74,38 @@ exact final PR head is merge-ready.
 
 ## Tasks
 
-1. Inspect the full PR diff, adjacent admission/runtime call paths, prior review
-   evidence, current CI failure, and latest `main`.
-2. Reproduce and correct only proven edge cases; run focused proof and the
-   canonical coverage-bearing verification.
-3. Run the required local product-experience review and the one preliminary
+1. [x] Inspect the full PR diff, adjacent admission/runtime call paths, prior
+   review evidence, current CI failure, and latest `main`.
+2. [ ] Reproduce and correct only proven edge cases; run focused proof and the
+   canonical coverage-bearing verification. Focused proof is green; canonical
+   verification remains.
+3. [ ] Run the required local product-experience review and the one preliminary
    `completion-specialists` ReviewGPT pass; triage and resolve every finding.
-4. Run the parent final review, close this plan with the scoped commit path, and
-   push the exact candidate.
-5. Run the final ReviewGPT loop concurrently with CI until
+   Product-experience review passed; preliminary ReviewGPT remains.
+4. [ ] Run the parent final review, close this plan with the scoped commit path,
+   and push the exact candidate.
+5. [ ] Run the final ReviewGPT loop concurrently with CI until
    `ROUND_OUTCOME: PASS`, zero accepted findings, green required checks, and
    clean mergeability.
+
+## Evidence
+
+- Parent audit reproduced a weaker group-ingress access check admitting expired
+  active-status trials that the runtime then rejected. Linq, Telegram, and the
+  shared thread-container provisioning boundary now use the canonical
+  current-time runtime AI-access decision.
+- Existing Telegram routes now recheck the exact container before append.
+  Provider-confirmed private Telegram rejection and nonretryable Linq private
+  rejection fall back to account-neutral room guidance; ambiguous outcomes keep
+  their existing replay-safe or at-most-once treatment.
+- Linq private recovery accepts committed or pending private authority, requires
+  the sender's own Murph line for new groups, rechecks the stored route, and
+  re-attests directness immediately before send.
+- Focused Web proof passed across Linq admission, Telegram admission, visible
+  access, visible-secondary fallback, route wiring, and Telegram delivery.
+  Web typecheck and scoped lint passed.
+- The required local product-experience review returned `PASS` after the Linq
+  wrong-number fallback was made actionable and channel-specific.
 
 ## Verification plan
 
@@ -99,4 +120,3 @@ exact final PR head is merge-ready.
   PR; otherwise document the unrelated failure proof and rely on rerun CI.
 - Preliminary specialist and final PR ReviewGPT packets on clean exact pushed
   heads, plus final required GitHub CI and mergeability checks.
-

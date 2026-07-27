@@ -48,6 +48,14 @@ Last verified: 2026-07-27
   active participant whose current identity still matches the stored
   relationship. Provider order and the assistant participant projection cap do
   not decide access.
+- Linq and Telegram group ingress must use the same canonical current runtime
+  AI-access decision as model execution before provisioning a group or
+  admitting work for an existing thread container. Evaluate that decision at
+  webhook processing time rather than the provider message timestamp, so a
+  delayed event cannot cross a trial-expiry boundary. A recognized inactive
+  sender may receive recovery only on a re-attested private route they own;
+  otherwise the group receives only account-neutral guidance, and unknown or
+  suspended senders disclose no account state.
 - Foreground inbox/parser-backed daemon runs should favor restartable connectors with bounded backoff over permanently dead watch loops, while still keeping low-level restart behavior opt-in and always bounded by the owning abort signal.
 - Networked assistant/provider/channel calls should set explicit timeouts, propagate caller abort signals, and only auto-retry request shapes that are replay-safe or rate-limit directed.
 - The hosted reply-latency operator alert remains one singleton incident owner.
