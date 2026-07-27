@@ -4,7 +4,7 @@ import {
 } from "../(dashboard)/ops/growth/growth-scorecard";
 
 const STUDY_INPUT = {
-  activeConversations: {
+  activeUsers: {
     trailing30Days: 143,
     trailing7Days: 87,
     wowPercent: 8.8,
@@ -32,7 +32,7 @@ const STUDY_INPUT = {
 
 const NO_SUPPORTING_BASELINES_INPUT = {
   ...STUDY_INPUT,
-  activeConversations: {
+  activeUsers: {
     trailing30Days: 0,
     trailing7Days: 0,
     wowPercent: null,

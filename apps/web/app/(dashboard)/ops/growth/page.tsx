@@ -62,7 +62,7 @@ export default async function HostedOpsGrowthPage() {
       </header>
 
       <GrowthScorecard
-        activeConversations={dashboard.activeConversations}
+        activeUsers={dashboard.activeUsers}
         conversion={dashboard.conversion}
         mrrUsdCents={dashboard.current.mrrUsdCents}
         mrrWowPercent={dashboard.mrrWowPercent}

@@ -1,5 +1,5 @@
 interface GrowthScorecardProps {
-  activeConversations: {
+  activeUsers: {
     trailing30Days: number;
     trailing7Days: number;
     wowPercent: number | null;
@@ -83,12 +83,12 @@ export function GrowthScorecard(input: GrowthScorecardProps) {
             />
             <GrowthSignal
               className="border-t border-border/60 sm:border-l sm:border-t-0 lg:border-l-0 lg:border-t"
-              detail={`${formatInteger(input.activeConversations.trailing30Days)} MAU across personal + group chats`}
-              helper={formatActiveConversationChange(
-                input.activeConversations.wowPercent,
+              detail={`${formatInteger(input.activeUsers.trailing30Days)} MAU across personal + group chats`}
+              helper={formatActiveUserChange(
+                input.activeUsers.wowPercent,
               )}
-              label="Weekly active conversations"
-              value={`${formatInteger(input.activeConversations.trailing7Days)} WAU`}
+              label="Weekly active users"
+              value={`${formatInteger(input.activeUsers.trailing7Days)} WAU`}
             />
           </div>
         </div>
@@ -263,8 +263,9 @@ function formatWindowChange(value: number | null): string {
   return `${formatGrowthRate(value)} versus the prior seven days`;
 }
 
-function formatActiveConversationChange(value: number | null): string {
-  const activityDefinition = "At least one inbound message per rolling window";
+function formatActiveUserChange(value: number | null): string {
+  const activityDefinition =
+    "Each distinct sender counts once across personal + group chats";
 
   if (value === null) {
     return `No prior-week WAU baseline · ${activityDefinition}`;
