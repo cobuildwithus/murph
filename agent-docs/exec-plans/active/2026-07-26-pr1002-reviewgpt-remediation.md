@@ -75,13 +75,21 @@ Updated: 2026-07-26
 
 ## Verification
 
-- `pnpm --dir packages/device-syncd test`
-- `pnpm --dir packages/device-syncd typecheck`
-- `pnpm --dir apps/web typecheck`
-- Focused hosted-web Vitest suites for store, deletion service, settings, and
-  design behavior
-- Opt-in real-PostgreSQL device-start/account-deletion concurrency suite
-- Affected hosted-web lint and frontend design proof
-- `pnpm test:diff ...`
-- `pnpm verify:acceptance`
-- Exact-head ReviewGPT correction round and GitHub CI inspection
+- `pnpm --dir packages/device-syncd test`: 44 files and 871 tests passed.
+- Device-syncd and hosted-web typechecks passed.
+- Focused hosted store, deletion-service, and settings suites passed 92 tests.
+- The opt-in real-PostgreSQL ordering suite passed seven tests, including
+  sibling-marker retention, SDK atomic commit, and the cross-owner unique race.
+- Affected hosted-web lint passed with zero errors.
+- Desktop and mobile `/design?tab=sections` captures render the production retry
+  component at 1440px and 390px; both public proof URLs returned `image/png`.
+- The Claude Code UI double-check stopped at explicit Fable credit exhaustion,
+  which is the documented non-blocking review gap.
+- Crabbox `test:diff` Testbox `tbx_01kygjpd0jcv31h79m3zee6410` passed the
+  affected package/app typechecks, then stopped outside this patch in
+  `packages/vault-usecases` because a generated Health Commons Web artifact was
+  absent in that lane.
+- Crabbox `verify:acceptance` passed in Testbox
+  `tbx_01kygjpd0n86qngdgtn0e93yag`.
+- The exact-head ReviewGPT correction round and GitHub CI inspection follow the
+  final plan-closing push.
