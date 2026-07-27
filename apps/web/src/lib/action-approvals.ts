@@ -32,6 +32,7 @@ import {
 
 import type {
   HostedActionApprovalContinuation,
+  HostedActionApprovalPresentationKind,
   HostedActionApprovalStatus,
   HostedActionApprovalView,
 } from "./action-approvals-shared";
@@ -408,6 +409,9 @@ export async function decideHostedActionApprovalTx(input: {
     continuation: resolveHostedActionApprovalContinuation(input.approval.actionId),
     expiresAt: expiresAt.toISOString(),
     presentation: input.approval.presentation,
+    presentationKind: resolveHostedActionApprovalPresentationKind(
+      input.approval.actionId,
+    ),
     returnContactKind: input.approval.returnContactKind,
     status: input.decision,
   };
@@ -726,6 +730,9 @@ function buildHostedActionApprovalView(
     continuation: resolveHostedActionApprovalContinuation(identity.actionId),
     expiresAt: identity.expiresAt.toISOString(),
     presentation: identity.presentation,
+    presentationKind: resolveHostedActionApprovalPresentationKind(
+      identity.actionId,
+    ),
     returnContactKind: identity.returnContactKind,
     status: readHostedActionApprovalPresentationStatus(approval, now),
   };
@@ -737,6 +744,14 @@ export function resolveHostedActionApprovalContinuation(
   return actionId.startsWith(HOSTED_CONNECTED_APPS_ACTION_ID_PREFIX)
     ? "return-to-conversation"
     : "automatic";
+}
+
+export function resolveHostedActionApprovalPresentationKind(
+  actionId: string,
+): HostedActionApprovalPresentationKind {
+  return actionId.startsWith(HOSTED_CONNECTED_APPS_ACTION_ID_PREFIX)
+    ? "fact-rows"
+    : "prose";
 }
 
 function requireHostedActionApprovalIdentity(

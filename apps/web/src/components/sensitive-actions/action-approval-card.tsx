@@ -1,12 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useId, useState } from "react";
 
 import { requestHostedOnboardingJson } from "@/src/components/hosted-onboarding/client-api";
 import {
-  ActionApprovalDecisionMessage,
   ActionApprovalPresentationBody,
   ActionApprovalRequestScreen,
+  ActionApprovalTerminalDecisionScreen,
 } from "@/src/components/sensitive-actions/action-approval-screen";
 import { AuthButton } from "@/src/components/ui/auth-button";
 import { Button } from "@/src/components/ui/button";
@@ -32,7 +32,14 @@ export function ActionApprovalCard({
     useState<TerminalDecision | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [redirectTo, setRedirectTo] = useState<string | null>(null);
+  const terminalTitleId = useId();
   const endpointBase = `/api/action-approvals/${encodeURIComponent(approval.approvalId)}`;
+
+  useEffect(() => {
+    if (terminalDecision !== null) {
+      document.getElementById(terminalTitleId)?.focus();
+    }
+  }, [terminalDecision, terminalTitleId]);
 
   async function approve() {
     setError(null);
@@ -89,7 +96,7 @@ export function ActionApprovalCard({
     }
   }
 
-  const busy = submission !== null || terminalDecision !== null;
+  const busy = submission !== null;
   const clientAuthenticationRequired =
     authorization.setup.ready && !authorization.setup.clientAuthenticated;
   const primaryLabel = clientAuthenticationRequired
@@ -105,9 +112,32 @@ export function ActionApprovalCard({
     });
   const surfacedError = error ?? authorization.setup.error;
 
+  if (terminalDecision !== null) {
+    const announcement = readBusyStatus({
+      continuation: approval.continuation,
+      redirectTo,
+      submission,
+      terminalDecision,
+    });
+    return (
+      <ActionApprovalTerminalDecisionScreen
+        {...(announcement ? { announcement } : {})}
+        continuation={approval.continuation}
+        redirectTo={redirectTo}
+        status={terminalDecision}
+        titleId={terminalTitleId}
+      />
+    );
+  }
+
   return (
     <ActionApprovalRequestScreen
-      body={<ActionApprovalPresentationBody body={approval.presentation.body} />}
+      body={(
+        <ActionApprovalPresentationBody
+          body={approval.presentation.body}
+          kind={approval.presentationKind}
+        />
+      )}
       title={approval.presentation.title}
     >
       {surfacedError ? (
@@ -150,16 +180,6 @@ export function ActionApprovalCard({
           <p aria-live="polite" className="sr-only" role="status">
             {busyStatus}
           </p>
-        ) : null}
-
-        {terminalDecision !== null ? (
-          <div className="mt-5">
-            <ActionApprovalDecisionMessage
-              continuation={approval.continuation}
-              redirectTo={redirectTo}
-              status={terminalDecision}
-            />
-          </div>
         ) : null}
       </div>
     </ActionApprovalRequestScreen>

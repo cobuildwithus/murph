@@ -1,8 +1,14 @@
-import { ShieldCheck, type LucideIcon } from "lucide-react";
+import {
+  CheckCircle2,
+  ShieldCheck,
+  XCircle,
+  type LucideIcon,
+} from "lucide-react";
 import type { ReactNode } from "react";
 
 import type {
   HostedActionApprovalContinuation,
+  HostedActionApprovalPresentationKind,
 } from "@/src/lib/action-approvals-shared";
 import { cn } from "@/src/lib/utils";
 
@@ -15,6 +21,8 @@ interface ActionApprovalScreenProps {
   caveat?: ReactNode;
   children?: ReactNode;
   title: string;
+  titleId?: string;
+  titleTabIndex?: -1;
 }
 
 export const ACTION_APPROVAL_RETURN_TO_CONTINUE =
@@ -23,10 +31,19 @@ export const ACTION_APPROVAL_RETURN_TO_CONTINUE =
 const ACTION_APPROVAL_CAVEAT =
   "If any approved detail changes, Murph will ask again.";
 
-export function ActionApprovalPresentationBody({ body }: { body: string }) {
-  const segments = body.split(" · ");
+export function ActionApprovalPresentationBody({
+  body,
+  kind,
+}: {
+  body: string;
+  kind: HostedActionApprovalPresentationKind;
+}) {
+  const segments = kind === "fact-rows" ? body.split(" · ") : [body];
   return (
-    <div className="space-y-2 break-words">
+    <div
+      className={cn("break-words", kind === "fact-rows" && "space-y-2")}
+      data-action-approval-presentation={kind}
+    >
       {segments.map((segment, index) => (
         <p key={`${index}:${segment}`}>{segment}</p>
       ))}
@@ -94,6 +111,50 @@ export function ActionApprovalDecisionMessage({
   );
 }
 
+export function ActionApprovalTerminalDecisionScreen({
+  announcement,
+  continuation,
+  redirectTo,
+  status,
+  titleId,
+}: {
+  announcement?: string;
+  continuation: HostedActionApprovalContinuation;
+  redirectTo: string | null;
+  status: "approved" | "denied";
+  titleId?: string;
+}) {
+  const approved = status === "approved";
+  const showDecisionMessage = approved || redirectTo !== null;
+  return (
+    <ActionApprovalScreen
+      badgeIcon={approved ? CheckCircle2 : XCircle}
+      badgeTone={approved ? "primary" : "muted"}
+      body={approved
+        ? "You approved this action."
+        : "Murph will not continue with this action."}
+      title={approved ? "Approved" : "Denied"}
+      {...(titleId ? { titleId, titleTabIndex: -1 } : {})}
+    >
+      {showDecisionMessage ? (
+        <div className="mt-7 border-t border-[#c4a882]/25 pt-6">
+          <ActionApprovalDecisionMessage
+            continuation={continuation}
+            redirectTo={redirectTo}
+            showOutcome={false}
+            status={status}
+          />
+        </div>
+      ) : null}
+      {announcement ? (
+        <p aria-live="polite" className="sr-only" role="status">
+          {announcement}
+        </p>
+      ) : null}
+    </ActionApprovalScreen>
+  );
+}
+
 export function ActionApprovalScreen({
   badgeIcon: BadgeIcon,
   badgeTone = "primary",
@@ -101,6 +162,8 @@ export function ActionApprovalScreen({
   caveat,
   children,
   title,
+  titleId,
+  titleTabIndex,
 }: ActionApprovalScreenProps) {
   return (
     <main className="min-h-dvh bg-background px-4 py-10 text-foreground sm:px-6 sm:py-14">
@@ -128,7 +191,11 @@ export function ActionApprovalScreen({
             </p>
           </header>
 
-          <h1 className="mt-7 font-serif text-[2.125rem] leading-[1.05] tracking-[-0.02em] text-foreground text-balance sm:text-[2.5rem]">
+          <h1
+            className="mt-7 font-serif text-[2.125rem] leading-[1.05] tracking-[-0.02em] text-foreground text-balance sm:text-[2.5rem]"
+            id={titleId}
+            tabIndex={titleTabIndex}
+          >
             {title}
           </h1>
 

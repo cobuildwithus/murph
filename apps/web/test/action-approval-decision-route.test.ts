@@ -118,6 +118,7 @@ describe("hosted action approval decision route", () => {
           ? "2026-07-10T18:15:00.000Z"
           : PENDING_APPROVAL.expiresAt.toISOString(),
         presentation: PENDING_APPROVAL.presentation,
+        presentationKind: "prose",
         returnContactKind: "text",
         status: input.decision,
       },
@@ -152,6 +153,7 @@ describe("hosted action approval decision route", () => {
       continuation: "automatic",
       expiresAt: "2026-07-10T18:15:00.000Z",
       presentation: PENDING_APPROVAL.presentation,
+      presentationKind: "prose",
       redirectTo: "sms:+15550000000",
       returnContactKind: "text",
       status: "approved",

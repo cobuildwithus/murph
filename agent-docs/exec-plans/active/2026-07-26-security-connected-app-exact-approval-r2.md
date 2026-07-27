@@ -123,7 +123,29 @@ Updated: 2026-07-26
   fresh product verdict returned no findings, with coherent pending and
   approved-return studies at desktop and mobile widths and zero scoped
   overflow.
+- The preliminary completion-specialists pass found four accepted gaps:
+  production kept the pending request shell after a terminal decision, the
+  generic delimiter renderer changed legacy prose approvals,
+  bidirectional-format controls remained in untrusted preview values, and the
+  exact identity tests covered only account id and arguments. The correction
+  replaces the live card with one shared terminal component, derives an
+  explicit prose/fact-row presentation kind from the trusted action namespace,
+  strips directional formatting controls, and exercises every bound identity
+  dimension.
 - The final focused Web pass is green across the connected-app request builder,
   service, route, shared approval card, decision route, terminal page, and auth
   interaction coverage. The latest UI remediation is additionally green in 16
   directly affected tests and the Web typecheck.
+- A later fresh product-experience review found rename and disconnect were
+  classified as fact rows but still joined into prose. Those presentations now
+  use the same protocol-owned delimiter as calendar consent, and a rendered
+  regression proves each operation exposes three distinct rows while hostile
+  alias delimiters remain inside the trusted New name row. The focused
+  post-correction re-review returned no findings and confirmed that no approval,
+  denial, terminal-replacement, or continuation behavior changed.
+- Product review retains one evidence gap rather than a code finding: no single
+  production-faithful scenario composes conversation handoff, browser decision,
+  a fresh conversation invocation, and the provider result. Current focused
+  proof covers the assistant prompt contract, Web decision boundary, atomic
+  consume, terminal UI, and exact provider call separately; this patch adds no
+  new replay or handoff mechanism to justify a second stateful E2E owner.

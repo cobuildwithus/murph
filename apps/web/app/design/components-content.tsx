@@ -11,10 +11,9 @@ import {
 import { ComputerHandoffFloatingIsland } from "@/src/components/computer-use/computer-handoff-floating-island";
 import { GroupUsageFundingCard } from "@/src/components/hosted-groups/group-usage-funding-card";
 import {
-  ActionApprovalDecisionMessage,
   ActionApprovalPresentationBody,
   ActionApprovalRequestScreen,
-  ActionApprovalScreen,
+  ActionApprovalTerminalDecisionScreen,
 } from "@/src/components/sensitive-actions/action-approval-screen";
 import { MetricCard } from "@/src/components/ui/metric-card";
 import { TimelineEntry } from "@/src/components/ui/timeline-entry";
@@ -352,6 +351,7 @@ export function ComponentsContent() {
                     "Location: Main Street clinic",
                     "This approval binds the complete account ID and exact provider arguments, including server-set calendar and meeting options.",
                   ].join(" · ")}
+                  kind="fact-rows"
                 />
               )}
               title="Create this calendar event?"
@@ -374,22 +374,12 @@ export function ComponentsContent() {
           </div>
 
           <div data-design-action-approval-state="continue" inert>
-            <ActionApprovalScreen
-              badgeIcon={CheckCircle2}
-              body="You approved this action."
-              title="Approved"
-            >
-              <div className="mt-7 border-t border-[#c4a882]/25 pt-6">
-                <ActionApprovalDecisionMessage
-                  continuation="return-to-conversation"
-                  redirectTo={null}
-                  showOutcome={false}
-                  status="approved"
-                />
-              </div>
-            </ActionApprovalScreen>
+            <ActionApprovalTerminalDecisionScreen
+              continuation="return-to-conversation"
+              redirectTo={null}
+              status="approved"
+            />
           </div>
-
         </Section>
 
         <Separator />

@@ -57,6 +57,7 @@ describe("action approval page", () => {
         body: "Share the requested file.",
         title: "Share this file?",
       },
+      presentationKind: "prose",
       returnContactKind: "text",
       status: "expired",
     });
@@ -141,6 +142,7 @@ describe("action approval page", () => {
         body: "Share the requested file.",
         title: "Share this file?",
       },
+      presentationKind: "prose",
       returnContactKind: null,
       status: "approved",
     });
@@ -171,6 +173,7 @@ describe("action approval page", () => {
         body: "Share the requested file.",
         title: "Share this file?",
       },
+      presentationKind: "prose",
       returnContactKind: "text",
       status: "approved",
     });
@@ -203,6 +206,7 @@ describe("action approval page", () => {
         body: "Share the requested file.",
         title: "Share this file?",
       },
+      presentationKind: "prose",
       returnContactKind: "text",
       status: "approved",
     });
@@ -235,6 +239,7 @@ describe("action approval page", () => {
         body: "Share the requested file.",
         title: "Share this file?",
       },
+      presentationKind: "prose",
       returnContactKind: "text",
       status: "denied",
     });
@@ -266,6 +271,7 @@ describe("action approval page", () => {
         body: "Create the requested calendar event.",
         title: "Create this calendar event?",
       },
+      presentationKind: "fact-rows",
       returnContactKind: null,
       status: "approved",
     });
@@ -286,4 +292,32 @@ describe("action approval page", () => {
     assert.equal(markup.includes("requested this file"), false);
   });
 
+  it("shows a connected-app denial as the sole terminal state", async () => {
+    mocks.readHostedActionApproval.mockResolvedValueOnce({
+      approvalId: "haa_test",
+      continuation: "return-to-conversation",
+      expiresAt: "2026-07-09T16:00:00.000Z",
+      presentation: {
+        body: "Create the requested calendar event.",
+        title: "Create this calendar event?",
+      },
+      presentationKind: "fact-rows",
+      returnContactKind: null,
+      status: "denied",
+    });
+
+    const view = await actionApprovalPage.default({
+      params: Promise.resolve({ approvalId: "haa_test" }),
+    });
+    const stream = await renderToReadableStream(view);
+    await stream.allReady;
+    const markup = await new Response(stream).text();
+
+    expect(mocks.resolveHostedMurphContactOptions).not.toHaveBeenCalled();
+    expect(mocks.redirect).not.toHaveBeenCalled();
+    assert.match(markup, />Denied</);
+    assert.match(markup, /Murph will not continue with this action\./);
+    assert.equal(markup.includes("Create this calendar event?"), false);
+    assert.equal(markup.includes("ask Murph to continue"), false);
+  });
 });

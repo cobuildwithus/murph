@@ -13,6 +13,7 @@ import { ActionApprovalCard } from "@/src/components/sensitive-actions/action-ap
 import {
   ActionApprovalDecisionMessage,
   ActionApprovalScreen,
+  ActionApprovalTerminalDecisionScreen,
 } from "@/src/components/sensitive-actions/action-approval-screen";
 import { HostedPrivyBoundary } from "@/src/components/hosted-onboarding/hosted-privy-boundary";
 import { resolveHostedMurphContactOptions } from "@/src/components/murph/hosted-murph-contact-action";
@@ -83,6 +84,20 @@ async function ActionApprovalTerminalState({
 }: {
   approval: TerminalActionApprovalView;
 }) {
+  if (
+    approval.returnContactKind === null
+    && approval.continuation === "return-to-conversation"
+    && (approval.status === "approved" || approval.status === "denied")
+  ) {
+    return (
+      <ActionApprovalTerminalDecisionScreen
+        continuation={approval.continuation}
+        redirectTo={null}
+        status={approval.status}
+      />
+    );
+  }
+
   const content = terminalContent(approval);
   const replyBody = approval.returnContactKind === null
     ? null

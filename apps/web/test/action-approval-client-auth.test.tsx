@@ -139,6 +139,7 @@ function pendingApproval() {
       body: "Allow the requested action.",
       title: "Approve action",
     },
+    presentationKind: "prose" as const,
     returnContactKind: null,
     status: "pending" as const,
   };

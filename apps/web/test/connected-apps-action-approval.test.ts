@@ -19,13 +19,23 @@ const GOOGLE_ACCOUNT = {
 function calendarApproval(overrides: {
   accountAlias?: string;
   accountId?: string;
+  accountToolkit?: string;
+  accountWordId?: string;
   arguments?: Record<string, unknown>;
+  memberId?: string;
+  providerVersion?: string;
+  toolSlug?: string;
 } = {}) {
   return buildHostedConnectedAppsMutationApprovalRequest({
     account: {
       ...GOOGLE_ACCOUNT,
       alias: overrides.accountAlias ?? GOOGLE_ACCOUNT.alias,
       id: overrides.accountId ?? GOOGLE_ACCOUNT.id,
+      toolkit: {
+        ...GOOGLE_ACCOUNT.toolkit,
+        slug: overrides.accountToolkit ?? GOOGLE_ACCOUNT.toolkit.slug,
+      },
+      wordId: overrides.accountWordId ?? GOOGLE_ACCOUNT.wordId,
     },
     arguments: overrides.arguments ?? {
       calendar_id: "primary",
@@ -36,10 +46,35 @@ function calendarApproval(overrides: {
       summary: "Annual physical",
       timezone: "America/New_York",
     },
-    memberId: "hbm_member",
+    memberId: overrides.memberId ?? "hbm_member",
     operation: "calendar-create",
-    providerVersion: "20260429_00",
-    toolSlug: "GOOGLECALENDAR_CREATE_EVENT",
+    providerVersion: overrides.providerVersion ?? "20260429_00",
+    toolSlug: overrides.toolSlug ?? "GOOGLECALENDAR_CREATE_EVENT",
+  });
+}
+
+function renameApproval(overrides: {
+  accountAlias?: string;
+  accountId?: string;
+  accountToolkit?: string;
+  accountWordId?: string;
+  alias?: string;
+  memberId?: string;
+} = {}) {
+  return buildHostedConnectedAppsMutationApprovalRequest({
+    account: {
+      ...GOOGLE_ACCOUNT,
+      alias: overrides.accountAlias ?? GOOGLE_ACCOUNT.alias,
+      id: overrides.accountId ?? GOOGLE_ACCOUNT.id,
+      toolkit: {
+        ...GOOGLE_ACCOUNT.toolkit,
+        slug: overrides.accountToolkit ?? GOOGLE_ACCOUNT.toolkit.slug,
+      },
+      wordId: overrides.accountWordId ?? GOOGLE_ACCOUNT.wordId,
+    },
+    alias: overrides.alias ?? "clinic",
+    memberId: overrides.memberId ?? "hbm_member",
+    operation: "rename",
   });
 }
 
@@ -74,25 +109,53 @@ describe("connected-app action approval identity", () => {
     expect(first.presentation.body).toContain("Time zone: America/New_York");
   });
 
-  it("changes action identity and fingerprint with account or arguments", () => {
+  it("binds every calendar authority field into identity and fingerprint", () => {
     const exact = calendarApproval();
-    const changedArgument = calendarApproval({
-      arguments: {
-        calendar_id: "primary",
-        create_meeting_room: false,
-        event_duration_hour: 0,
-        event_duration_minutes: 30,
-        start_datetime: "2026-07-01T10:00:00-04:00",
-        summary: "Follow-up visit",
-        timezone: "America/New_York",
-      },
-    });
-    const changedAccount = calendarApproval({ accountId: "ca_other" });
+    const changedRequests = [
+      ["account alias", calendarApproval({ accountAlias: "personal" })],
+      ["account id", calendarApproval({ accountId: "ca_other" })],
+      ["account toolkit", calendarApproval({ accountToolkit: "outlook" })],
+      ["account word id", calendarApproval({ accountWordId: "other-calendar" })],
+      ["member", calendarApproval({ memberId: "hbm_other" })],
+      ["provider version", calendarApproval({ providerVersion: "20260430_00" })],
+      ["tool slug", calendarApproval({ toolSlug: "OTHER_CALENDAR_CREATE_EVENT" })],
+      [
+        "arguments",
+        calendarApproval({
+          arguments: {
+            calendar_id: "primary",
+            create_meeting_room: false,
+            event_duration_hour: 0,
+            event_duration_minutes: 30,
+            start_datetime: "2026-07-01T10:00:00-04:00",
+            summary: "Follow-up visit",
+            timezone: "America/New_York",
+          },
+        }),
+      ],
+    ] as const;
 
-    expect(changedArgument.actionId).not.toBe(exact.actionId);
-    expect(changedArgument.actionFingerprint).not.toBe(exact.actionFingerprint);
-    expect(changedAccount.actionId).not.toBe(exact.actionId);
-    expect(changedAccount.actionFingerprint).not.toBe(exact.actionFingerprint);
+    for (const [field, changed] of changedRequests) {
+      expect(changed.actionId, field).not.toBe(exact.actionId);
+      expect(changed.actionFingerprint, field).not.toBe(
+        exact.actionFingerprint,
+      );
+    }
+  });
+
+  it("binds rename target and operation into identity and fingerprint", () => {
+    const rename = renameApproval();
+    const changedAlias = renameApproval({ alias: "home" });
+    const disconnect = buildHostedConnectedAppsMutationApprovalRequest({
+      account: GOOGLE_ACCOUNT,
+      memberId: "hbm_member",
+      operation: "disconnect",
+    });
+
+    expect(changedAlias.actionId).not.toBe(rename.actionId);
+    expect(changedAlias.actionFingerprint).not.toBe(rename.actionFingerprint);
+    expect(disconnect.actionId).not.toBe(rename.actionId);
+    expect(disconnect.actionFingerprint).not.toBe(rename.actionFingerprint);
   });
 
   it("keeps core Google event details visible when optional values are long", () => {
@@ -174,6 +237,28 @@ describe("connected-app action approval identity", () => {
     ).toBe(false);
     expect(request.presentation.body).toContain("Event: Annual physical");
     expect(request.presentation.body).toContain("Details: Line one Line two hidden");
+  });
+
+  it("removes directional formatting controls from untrusted preview values", () => {
+    const request = calendarApproval({
+      accountAlias: "cal\u202Eendar\u2066",
+      arguments: {
+        description: "Routine \u202Dnote\u2069",
+        event_duration_minutes: 30,
+        start_datetime: "2026-07-01T10:00:00-04:00",
+        summary: "Annual \u202Ephysical\u2067",
+        timezone: "America/\u200ENew_York",
+      },
+    });
+
+    expect(parseHostedActionApprovalRequest(request)).toEqual(request);
+    expect(request.presentation.body).not.toMatch(
+      /[\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069]/u,
+    );
+    expect(request.presentation.body).toContain("calendar");
+    expect(request.presentation.body).toContain("Event: Annual physical");
+    expect(request.presentation.body).toContain("Details: Routine note");
+    expect(request.presentation.body).toContain("Time zone: America/New_York");
   });
 
   it("keeps untrusted values inside their trusted presentation rows", () => {

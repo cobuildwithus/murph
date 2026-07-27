@@ -162,7 +162,7 @@ function presentation(
           `Account: ${account}`,
           `New name: ${cleanText(input.alias, 180)}`,
           "Only the complete account ID and complete new name are approved.",
-        ].join(" "),
+        ].join(" · "),
         title: "Rename this connected app?",
       };
     case "disconnect":
@@ -171,7 +171,7 @@ function presentation(
           `Account: ${account}`,
           "Murph will revoke its access. The provider account and its data will not be deleted.",
           "Only the complete account ID disconnect is approved.",
-        ].join(" "),
+        ].join(" · "),
         title: "Disconnect this connected app?",
       };
   }
@@ -290,6 +290,7 @@ function canonicalizeJsonValue(value: unknown): CanonicalJsonValue {
 function cleanText(value: string, maxLength: number): string {
   const clean = value
     .replace(/[\u0000-\u001F\u007F]/gu, " ")
+    .replace(/[\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069]/gu, "")
     .replace(/\s+/gu, " ")
     .replaceAll(" · ", " — ")
     .trim();

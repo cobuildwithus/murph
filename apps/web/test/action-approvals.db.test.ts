@@ -314,6 +314,7 @@ describe("hosted action approvals", () => {
     })).resolves.toMatchObject({
       approvalId: requested.approvalId,
       continuation: "automatic",
+      presentationKind: "prose",
       status: "approved",
     });
     await expect(readHostedActionApprovalObservation({
