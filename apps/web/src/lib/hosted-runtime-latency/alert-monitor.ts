@@ -86,17 +86,25 @@ export async function runHostedRuntimeLatencyAlertMonitor(input: {
 } = {}): Promise<HostedRuntimeLatencyAlertMonitorResult> {
   const now = input.now ?? new Date();
   const prisma = input.prisma ?? getPrisma();
+  const chatId = readHostedRuntimeLatencyAlertChatId(input.env ?? process.env);
+  const disabledState = chatId
+    ? null
+    : await prisma.hostedLinqAlert.findUnique({
+        where: {
+          id: HOSTED_RUNTIME_LATENCY_MONITOR_ID,
+        },
+      });
   const health = await readHostedRuntimeLatencyHealth({
     now,
     prisma,
   });
-  const chatId = readHostedRuntimeLatencyAlertChatId(input.env ?? process.env);
 
   if (!chatId) {
     await clearHostedRuntimeLatencyAlertWhileDisabled({
       health,
       now,
       prisma,
+      state: disabledState,
     });
     return {
       configured: false,
@@ -166,8 +174,13 @@ async function clearHostedRuntimeLatencyAlertWhileDisabled(input: {
   health: HostedRuntimeLatencyHealth;
   now: Date;
   prisma: HostedRuntimeLatencyPrismaClient;
+  state: HostedLinqAlert | null;
 }): Promise<void> {
-  if (input.health.anomalous) {
+  if (
+    input.health.anomalous
+    || input.state?.kind !== HOSTED_RUNTIME_LATENCY_MONITOR_KIND
+    || input.state.status !== MONITOR_STATUS.alerting
+  ) {
     return;
   }
 
@@ -176,6 +189,7 @@ async function clearHostedRuntimeLatencyAlertWhileDisabled(input: {
       id: HOSTED_RUNTIME_LATENCY_MONITOR_ID,
       kind: HOSTED_RUNTIME_LATENCY_MONITOR_KIND,
       status: MONITOR_STATUS.alerting,
+      updatedAt: input.state.updatedAt,
     },
     data: {
       detailsJson: buildHostedRuntimeLatencyAlertDetails({

@@ -335,6 +335,45 @@ describe("hosted runtime latency alert monitor", () => {
     );
   });
 
+  it("does not clear an incident that changed after the disabled state read", async () => {
+    const fixture = createMonitorPrismaFixture([
+      latencyRow({
+        acceptedAt: "2026-07-26T15:58:00.000Z",
+      }),
+    ]);
+    const sendLinqMessage = vi.fn(async (input: LinqSendInput) => {
+      void input;
+      return {
+        chatId: "opaque-alert-chat",
+        messageId: "provider-message",
+      };
+    });
+
+    await runHostedRuntimeLatencyAlertMonitor({
+      env: alertEnv,
+      now,
+      prisma: fixture.prisma,
+      sendLinqMessage,
+    });
+    fixture.setRows([]);
+    const concurrentUpdatedAt = instant("2026-07-26T16:05:00.000Z");
+    fixture.replaceStateAfterNextHealthRead(concurrentUpdatedAt);
+
+    const result = await runHostedRuntimeLatencyAlertMonitor({
+      env: {},
+      now: concurrentUpdatedAt,
+      prisma: fixture.prisma,
+      sendLinqMessage,
+    });
+
+    expect(result.outcome).toBe("disabled");
+    expect(fixture.readState()).toMatchObject({
+      status: "latency_alerting",
+      updatedAt: concurrentUpdatedAt,
+    });
+    expect(sendLinqMessage).toHaveBeenCalledTimes(1);
+  });
+
   it("does not send when a concurrent cron already won the incident claim", async () => {
     const fixture = createMonitorPrismaFixture(
       [
@@ -445,17 +484,30 @@ function createMonitorPrismaFixture(
 ) {
   let rows = [...initialRows];
   let state: HostedLinqAlert | null = null;
+  let stateReplacementAfterNextHealthRead: Date | null = null;
   let rejectNextClaim = options.rejectNextClaim === true;
 
-  const traceFindMany = vi.fn(async () => rows.map((row) => ({
-    acceptedAt: row.acceptedAt,
-    linqDelivery: row.deliveryAcceptedAt
-      ? { acceptedAt: row.deliveryAcceptedAt }
-      : null,
-    mailboxItem: {
-      consumedAt: row.consumedAt,
-    },
-  })));
+  const traceFindMany = vi.fn(async () => {
+    const result = rows.map((row) => ({
+      acceptedAt: row.acceptedAt,
+      linqDelivery: row.deliveryAcceptedAt
+        ? { acceptedAt: row.deliveryAcceptedAt }
+        : null,
+      mailboxItem: {
+        consumedAt: row.consumedAt,
+      },
+    }));
+    if (state && stateReplacementAfterNextHealthRead) {
+      state = {
+        ...state,
+        claimedAt: stateReplacementAfterNextHealthRead,
+        updatedAt: stateReplacementAfterNextHealthRead,
+      };
+      stateReplacementAfterNextHealthRead = null;
+    }
+    return result;
+  });
+  const alertFindUnique = vi.fn(async () => state ? { ...state } : null);
   const alertUpsert = vi.fn(async (args: AlertUpsertArgs) => {
     if (!state) {
       state = {
@@ -501,11 +553,15 @@ function createMonitorPrismaFixture(
         findMany: traceFindMany,
       },
       hostedLinqAlert: {
+        findUnique: alertFindUnique,
         updateMany: alertUpdateMany,
         upsert: alertUpsert,
       },
     } as never,
     readState: () => state,
+    replaceStateAfterNextHealthRead(updatedAt: Date) {
+      stateReplacementAfterNextHealthRead = updatedAt;
+    },
     setRows(nextRows: readonly HostedRuntimeLatencyHealthRow[]) {
       rows = [...nextRows];
     },
@@ -547,6 +603,7 @@ interface AlertUpdateManyArgs {
     kind?: string;
     lastAttemptedAt?: Date | null;
     status?: string;
+    updatedAt?: Date;
   };
 }
 
@@ -558,6 +615,10 @@ function matchesAlertWhere(
     state.id !== where.id
     || (where.kind && state.kind !== where.kind)
     || (where.status && state.status !== where.status)
+    || (
+      where.updatedAt
+      && state.updatedAt.getTime() !== where.updatedAt.getTime()
+    )
   ) {
     return false;
   }
