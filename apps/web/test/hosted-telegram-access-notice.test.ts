@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   readCloudflareHostedControlHttpError: vi.fn(),
   readHostedExecutionControlClientIfConfigured: vi.fn(),
   readHostedMemberRoutingState: vi.fn(),
+  sendHostedTelegramTextMessage: vi.fn(),
   sendTelegramUsageLimitNotice: vi.fn(),
 }));
 
@@ -32,6 +33,10 @@ vi.mock("@/src/lib/hosted-onboarding/linq-delivery-store", () => ({
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", () => ({
   lockHostedMemberRoutingStateTx: mocks.lockHostedMemberRoutingStateTx,
   readHostedMemberRoutingState: mocks.readHostedMemberRoutingState,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/telegram-client", () => ({
+  sendHostedTelegramTextMessage: mocks.sendHostedTelegramTextMessage,
 }));
 
 vi.mock("@/src/lib/hosted-execution/control", () => ({
@@ -69,6 +74,7 @@ describe("Telegram access notice delivery", () => {
       restoreOnboardingLink: null,
     });
     mocks.markHostedLinqDeliverySendFailedTx.mockResolvedValue(undefined);
+    mocks.sendHostedTelegramTextMessage.mockResolvedValue(undefined);
     mocks.sendTelegramUsageLimitNotice.mockImplementation(async (input: {
       onRequestAttempted?: () => Promise<void>;
     }) => {
@@ -167,6 +173,67 @@ describe("Telegram access notice delivery", () => {
 
     expect(mocks.claimHostedLinqDeliveryProviderDispatchTx).toHaveBeenCalledOnce();
     expect(mocks.markHostedLinqDeliveryAcceptedTx).toHaveBeenCalledOnce();
+  });
+
+  it("sends an unanchored private notice through the same durable event claim", async () => {
+    const sentAt = new Date("2026-07-25T12:00:00.000Z");
+
+    await expect(sendHostedTelegramAccessNotice({
+      authorizedTelegramUserId: "456",
+      memberId: "member_123",
+      message: "Finish setup, then try the group again.",
+      noticeCode: "signup_required",
+      prisma: prisma as never,
+      replyToMessageId: null,
+      sentAt,
+      sourceEventId: "telegram:update:323",
+      target: "456",
+    })).resolves.toEqual({ status: "sent" });
+
+    expect(mocks.sendHostedTelegramTextMessage).toHaveBeenCalledWith({
+      message: "Finish setup, then try the group again.",
+      replyToMessageId: null,
+      target: { chatId: "456" },
+    });
+    expect(mocks.sendTelegramUsageLimitNotice).not.toHaveBeenCalled();
+    expect(mocks.claimHostedLinqDeliveryProviderDispatchTx).toHaveBeenCalledWith(
+      expect.objectContaining({
+        attemptedAt: sentAt,
+        sourceRef: "telegram:update:323",
+      }),
+    );
+    expect(mocks.markHostedLinqDeliveryAcceptedTx).toHaveBeenCalledWith(
+      expect.objectContaining({
+        acceptedAt: sentAt,
+        prisma,
+      }),
+    );
+  });
+
+  it("terminalizes an ambiguous unanchored send instead of duplicating it on replay", async () => {
+    mocks.sendHostedTelegramTextMessage.mockRejectedValue(
+      new Error("Telegram request outcome was unknown."),
+    );
+
+    await expect(sendHostedTelegramAccessNotice({
+      authorizedTelegramUserId: "456",
+      memberId: "member_123",
+      message: "Finish setup, then try the group again.",
+      noticeCode: "signup_required",
+      prisma: prisma as never,
+      replyToMessageId: null,
+      sourceEventId: "telegram:update:324",
+      target: "456",
+    })).resolves.toEqual({ status: "already_notified" });
+
+    expect(mocks.markHostedLinqDeliverySendFailedTx).toHaveBeenCalledWith(
+      expect.objectContaining({
+        failureCode: "Error",
+        idempotencyKey: expect.stringMatching(/^telegram-access-notice:/u),
+        prisma,
+      }),
+    );
+    expect(mocks.markHostedLinqDeliveryAcceptedTx).not.toHaveBeenCalled();
   });
 
   it("rejects a stale Telegram target under the routing lock before provider dispatch", async () => {
