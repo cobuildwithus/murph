@@ -1783,25 +1783,15 @@ export async function createHostedFamilyBillingCheckout(input: {
     }),
   );
 
-  let checkoutOwned = false;
-  try {
-    checkoutOwned = await prisma.$transaction(
-      (tx) => bindHostedFamilyCheckoutSessionTx({
-        attemptId: checkoutInput.checkoutAttemptId,
-        group: checkoutInput.group,
-        sessionId: checkoutSession.id,
-        tx,
-      }),
-      HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
-    );
-  } catch (error) {
-    await closeUnboundHostedSubscriptionCheckout({
-      deleteSessionCustomer: checkoutInput.stripeCustomerId === null,
+  const checkoutOwned = await prisma.$transaction(
+    (tx) => bindHostedFamilyCheckoutSessionTx({
+      attemptId: checkoutInput.checkoutAttemptId,
+      group: checkoutInput.group,
       sessionId: checkoutSession.id,
-      stripe,
-    });
-    throw error;
-  }
+      tx,
+    }),
+    HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
+  );
   if (!checkoutOwned) {
     await closeUnboundHostedSubscriptionCheckout({
       deleteSessionCustomer: checkoutInput.stripeCustomerId === null,

@@ -225,24 +225,14 @@ export async function createHostedBillingCheckout(
       }),
     );
 
-    let checkoutOwned = false;
-    try {
-      checkoutOwned = await prisma.$transaction(
-        (tx) => bindHostedMemberSubscriptionCheckoutTx({
-          memberId: invite.member.id,
-          stripeCheckoutSessionId: checkoutSession.id,
-          tx,
-        }),
-        HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
-      );
-    } catch (error) {
-      await closeUnboundHostedSubscriptionCheckout({
-        deleteSessionCustomer: customerId === null,
-        sessionId: checkoutSession.id,
-        stripe,
-      });
-      throw error;
-    }
+    const checkoutOwned = await prisma.$transaction(
+      (tx) => bindHostedMemberSubscriptionCheckoutTx({
+        memberId: invite.member.id,
+        stripeCheckoutSessionId: checkoutSession.id,
+        tx,
+      }),
+      HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
+    );
     if (!checkoutOwned) {
       await closeUnboundHostedSubscriptionCheckout({
         deleteSessionCustomer: customerId === null,

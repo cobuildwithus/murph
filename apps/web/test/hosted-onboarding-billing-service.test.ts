@@ -788,6 +788,40 @@ describe("createHostedBillingCheckout", () => {
     });
   });
 
+  it("preserves an idempotent Stripe session when binding fails indeterminately", async () => {
+    mocks.requireHostedInviteForBillingCheckout.mockResolvedValue(makeInvite());
+    const prisma = makePrisma();
+    const bindError = new Error("binding result unavailable");
+    prisma.$transaction.mockRejectedValueOnce(bindError);
+
+    await expect(createHostedBillingCheckout({
+      inviteCode: "invite-code",
+      member: makeAuthenticatedMember(),
+      now: new Date("2026-03-27T12:00:00.000Z"),
+      prisma: prisma as never,
+    })).rejects.toBe(bindError);
+
+    expect(mocks.stripe.checkout.sessions.retrieve).not.toHaveBeenCalled();
+    expect(mocks.stripe.checkout.sessions.expire).not.toHaveBeenCalled();
+    expect(mocks.stripe.subscriptions.cancel).not.toHaveBeenCalled();
+    expect(mocks.stripe.customers.del).not.toHaveBeenCalled();
+
+    await expect(createHostedBillingCheckout({
+      inviteCode: "invite-code",
+      member: makeAuthenticatedMember(),
+      now: new Date("2026-03-27T12:00:05.000Z"),
+      prisma: prisma as never,
+    })).resolves.toEqual({
+      alreadyActive: false,
+      url: "https://billing.example.test/session_123",
+    });
+
+    const firstCall = mocks.stripe.checkout.sessions.create.mock.calls[0];
+    const secondCall = mocks.stripe.checkout.sessions.create.mock.calls[1];
+    expect(firstCall?.[1]).toEqual(secondCall?.[1]);
+    expect(mocks.stripe.checkout.sessions.expire).not.toHaveBeenCalled();
+  });
+
   it("expires the Stripe session instead of returning it when account deletion wins", async () => {
     mocks.requireHostedInviteForBillingCheckout.mockResolvedValue(makeInvite());
     const prisma = makePrisma({ member: null });
