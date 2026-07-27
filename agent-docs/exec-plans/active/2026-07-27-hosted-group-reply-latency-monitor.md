@@ -54,7 +54,8 @@ Updated: 2026-07-27
    repairs more than one suppression partition.
 2. Risk: grouped reply rebatching drops earlier answered items.
    Mitigation: monotonically union coverage only while the outbox intent is
-   active and keep terminal intents immutable.
+   pending or retryable, then freeze it when provider dispatch starts so later
+   inputs remain honest follow-up work.
 3. Risk: runtime/web deploy skew rejects the additive diagnostic marker.
    Mitigation: keep the projection best effort and document the safe deployment
    order and post-deploy proof.

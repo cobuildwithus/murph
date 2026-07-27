@@ -557,6 +557,120 @@ describe('assistant outbox runtime', () => {
       }),
       undefined,
     )
+
+    const terminalReplay = await deliverAssistantOutboxMessage({
+      ...deliveryInput,
+      answeredMailboxItemIds: [
+        'mailbox_item_newest',
+        'mailbox_item_older',
+        'mailbox_item_after_send',
+      ],
+      turnId: 'turn-grouped-answered-terminal-replay',
+    })
+
+    expect(terminalReplay.kind).toBe('sent')
+    expect(terminalReplay.intent.intentId).toBe(first.intent.intentId)
+    expect(terminalReplay.intent.answeredMailboxItemIds).toEqual([
+      'mailbox_item_newest',
+      'mailbox_item_older',
+    ])
+    await expect(readAssistantOutboxIntent(vaultRoot, first.intent.intentId))
+      .resolves.toMatchObject({
+        answeredMailboxItemIds: [
+          'mailbox_item_newest',
+          'mailbox_item_older',
+        ],
+        status: 'sent',
+      })
+    expect(mockedDeliverAssistantMessageOverBinding).toHaveBeenCalledTimes(1)
+  })
+
+  it('freezes grouped answered mailbox ids when provider dispatch starts', async () => {
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-outbox-grouped-answered-dispatch-fence-',
+    )
+    const deliveryInput = {
+      answeredMailboxItemIds: ['mailbox_item_before_dispatch'],
+      channel: 'linq',
+      dedupeToken: 'grouped-reply-dispatch-fence',
+      deliveryIdempotencyKey: 'grouped-reply-dispatch-fence',
+      dispatchMode: 'queue-only' as const,
+      message: 'one reply for the frozen grouped burst',
+      sessionId: 'session-grouped-dispatch-fence',
+      threadId: 'linq-thread-grouped-dispatch-fence',
+      threadIsDirect: false,
+      turnId: 'turn-grouped-dispatch-fence',
+      turnTrigger: 'automation-auto-reply' as const,
+      vault: vaultRoot,
+    }
+    const queued = await deliverAssistantOutboxMessage(deliveryInput)
+
+    let markProviderEntered: (() => void) | undefined
+    const providerEntered = new Promise<void>((resolve) => {
+      markProviderEntered = resolve
+    })
+    let releaseProvider: (() => void) | undefined
+    const providerReleased = new Promise<void>((resolve) => {
+      releaseProvider = resolve
+    })
+    mockedDeliverAssistantMessageOverBinding.mockImplementationOnce(
+      async () => {
+        markProviderEntered?.()
+        await providerReleased
+        return {
+          delivery: createDelivery({
+            channel: 'linq',
+            idempotencyKey: queued.intent.deliveryIdempotencyKey,
+            providerMessageId: 'provider-grouped-dispatch-fence',
+            providerThreadId: deliveryInput.threadId,
+            sentAt: '2026-04-08T03:03:00.000Z',
+            target: deliveryInput.threadId,
+            targetKind: 'thread',
+          }),
+          deliveryDeduplicated: false,
+          deliveryTransportIdempotent: true,
+          outboxIntentId: null,
+          session: undefined,
+        }
+      },
+    )
+
+    const dispatch = dispatchAssistantOutboxIntent({
+      intentId: queued.intent.intentId,
+      vault: vaultRoot,
+    })
+    await providerEntered
+
+    const lateRebatch = await deliverAssistantOutboxMessage({
+      ...deliveryInput,
+      answeredMailboxItemIds: [
+        'mailbox_item_before_dispatch',
+        'mailbox_item_after_dispatch',
+      ],
+      turnId: 'turn-grouped-dispatch-fence-late',
+    })
+    releaseProvider?.()
+    const dispatched = await dispatch
+
+    expect(lateRebatch.intent.status).toBe('sending')
+    expect(lateRebatch.intent.answeredMailboxItemIds).toEqual([
+      'mailbox_item_before_dispatch',
+    ])
+    expect(dispatched.intent.status).toBe('sent')
+    expect(dispatched.intent.answeredMailboxItemIds).toEqual([
+      'mailbox_item_before_dispatch',
+    ])
+    expect(mockedDeliverAssistantMessageOverBinding).toHaveBeenCalledWith(
+      expect.objectContaining({
+        answeredMailboxItemIds: ['mailbox_item_before_dispatch'],
+      }),
+      undefined,
+    )
+    await expect(readAssistantOutboxIntent(vaultRoot, queued.intent.intentId))
+      .resolves.toMatchObject({
+        answeredMailboxItemIds: ['mailbox_item_before_dispatch'],
+        status: 'sent',
+      })
   })
 
   it('persists auto-reply intent provenance when receipt repair has no receipt', async () => {

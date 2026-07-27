@@ -4652,15 +4652,18 @@ describe('assistant auto-reply runtime', () => {
       throw new Error('expected reply context')
     }
 
+    const onTerminalNonReplyCommitted = vi.fn()
     await expect(reply.processAssistantAutoReplyGroup({
       allowSelfAuthored: false,
       context,
       enabledChannels: ['telegram'],
       inboxServices,
+      onTerminalNonReplyCommitted,
       requestId: null,
       sessionMaxAgeMs: null,
       vault: '/tmp/assistant-automation-vault',
     })).rejects.toThrow('evidence write failed')
+    expect(onTerminalNonReplyCommitted).not.toHaveBeenCalled()
     expect(replyMocks.writeAssistantChatErrorArtifacts).not.toHaveBeenCalled()
   })
 

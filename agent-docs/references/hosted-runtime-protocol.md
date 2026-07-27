@@ -1986,10 +1986,12 @@ trace. Every other latency leaf remains assign-once.
 Durable consumption remains the long-term terminal proof and the rolling-deploy
 or best-effort-link fallback after handling is otherwise known.
 Accepted grouped Linq replies keep the complete answered mailbox-item set on the
-existing outbox intent: replay of the same still-active effect retains the
-existing set and adds newly observed items instead of replacing it. The accepted
-delivery links every mailbox item carried by its dispatch; a terminal outbox
-intent is never widened retroactively.
+existing outbox intent: replay of the same pending or retryable effect retains
+the existing set and adds newly observed items instead of replacing it. The
+transition to `sending` freezes that set for the provider dispatch, and later
+items remain separate follow-up work. The accepted delivery links every mailbox
+item carried by its dispatch; a sending or terminal outbox intent is never
+widened retroactively.
 One fixed-kind `HostedLinqAlert` row provides the incident claim, provider
 idempotency identity, last provider-attempt boundary, and active state. A
 healthy scan silently clears the claim so a later incident receives a new

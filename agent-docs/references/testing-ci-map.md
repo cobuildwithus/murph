@@ -216,9 +216,10 @@ not enter evidence; and attachment-only input fails closed before provider work.
   proves suppression is projected only after terminal evidence succeeds, is
   re-derived from completed evidence on replay, and a rebatched still-active
   grouped reply retains every answered mailbox item for the existing
-  accepted-delivery linkage. The latency-store test keeps ordinary milestones
-  attempt-scoped while allowing only that terminal evidence projection to
-  converge by assistant input.
+  accepted-delivery linkage. It also proves provider dispatch freezes the
+  answered-item set and that sending or sent replay cannot claim a later item.
+  The latency-store test keeps ordinary milestones attempt-scoped while allowing
+  only that terminal evidence projection to converge by assistant input.
   `packages/assistant-runtime/test/hosted-runtime-maintenance.test.ts` proves
   that projection uses the existing nonblocking assistant-milestone port.
   The latency-store proof also shows a newer post-recovery suppression timestamp
