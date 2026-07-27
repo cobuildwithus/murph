@@ -1,0 +1,309 @@
+-  const recurringAmount = `$${billingPlan.recurringAmountUsdCents / 100}`;
++  const recurringAmount =
++    `$${billingPlan.recurringAmountUsdCents / 100}`;
+   return {
+     action,
+     label: action === "start_pulse_now"
+       ? `Start Pulse now (${recurringAmount}/month)`
+-      : `Upgrade to Edge (${recurringAmount}/month)`,
++      : action === "upgrade_pulse"
++        ? `Upgrade to Pulse (${recurringAmount}/month)`
++        : `Upgrade to Edge (${recurringAmount}/month)`,
+   };
+ }
+@@ -405,8 +425,10 @@ function buildRecommendedAction(input: {
+   }
+   return {
+     kind: input.action.action === "start_pulse_now"
+       ? "start_pulse"
+-      : "upgrade_edge",
++      : input.action.action === "upgrade_pulse"
++        ? "upgrade_pulse"
++        : "upgrade_edge",
+     label: input.action.label,
+     url: input.actionUrl,
+   };
+diff --git a/apps/web/src/lib/hosted-execution/usage-allowance.ts b/apps/web/src/lib/hosted-execution/usage-allowance.ts
+--- a/apps/web/src/lib/hosted-execution/usage-allowance.ts
++++ b/apps/web/src/lib/hosted-execution/usage-allowance.ts
+@@ -73,4 +73,5 @@ export type HostedAiUsageGateDeniedReason =
+ export type HostedAiUsageGateNoticeCode =
+   | "edge_usage_limit_reached"
+   | "family_usage_limit_reached"
++  | "group_upgrade_pulse"
+   | "pulse_upgrade_edge"
+@@ -268,4 +269,16 @@ function buildHostedAiUsageGateLimitNotice(input: {
+     };
+   }
+ 
++  if (input.billingPlanCode === "launch_group_monthly") {
++    return {
++      code: "group_upgrade_pulse",
++      message: renderHostedAiUsageGateLimitNoticeMessage({
++        key: "linq.ai_usage.group_upgrade_pulse",
++        memberId: input.memberId,
++        noticeCode: "group_upgrade_pulse",
++        periodStart: input.periodStart,
++      }),
++    };
++  }
++
+   if (input.billingPlanCode === "launch_edge_monthly") {
+@@ -293,4 +306,5 @@ function renderHostedAiUsageGateLimitNoticeMessage(input: {
+   key:
+     | "linq.ai_usage.edge_limit_reached"
+     | "linq.ai_usage.family_limit_reached"
++    | "linq.ai_usage.group_upgrade_pulse"
+     | "linq.ai_usage.pulse_upgrade_edge"
+diff --git a/apps/web/src/lib/hosted-messages/user-facing-messages.ts b/apps/web/src/lib/hosted-messages/user-facing-messages.ts
+--- a/apps/web/src/lib/hosted-messages/user-facing-messages.ts
++++ b/apps/web/src/lib/hosted-messages/user-facing-messages.ts
+@@ -10,3 +10,4 @@ const USAGE_LIMIT_PERCENTAGE_TEMPLATE_KEYS = new Set<string>([
+   "linq.ai_usage.edge_limit_reached",
+   "linq.ai_usage.family_limit_reached",
++  "linq.ai_usage.group_upgrade_pulse",
+   "linq.ai_usage.pulse_upgrade_edge",
+@@ -25,3 +26,4 @@ const USER_FACING_MESSAGE_TEMPLATE_KEYS = [
+   "linq.ai_usage.edge_limit_reached",
+   "linq.ai_usage.family_limit_reached",
++  "linq.ai_usage.group_upgrade_pulse",
+   "linq.ai_usage.pulse_upgrade_edge",
+@@ -60,4 +62,7 @@ export interface UserFacingMessageContextByKey {
+   "linq.ai_usage.family_limit_reached": {
+     homeUrl: string
+   }
++  "linq.ai_usage.group_upgrade_pulse": {
++    homeUrl: string
++  }
+   "linq.ai_usage.pulse_upgrade_edge": {
+@@ -153,3 +158,25 @@ const USER_FACING_MESSAGE_TEMPLATES = {
+     `You've used the allowance included with your Family seat for this month. Other members keep their own separate allowances. AI usage is paused until your allowance resets. Account details: {homeUrl}`,
+   ],
++  "linq.ai_usage.group_upgrade_pulse": [
++    `You've used this month's included Group AI usage. New Murph replies are paused, but your wearable keeps syncing and your group activity stays current. Upgrade to Pulse or wait for the reset: {homeUrl}`,
++    `Your Group AI allowance is used for this month. Wearable syncing and group activity keep running. Upgrade to Pulse for more replies, or wait for the reset: {homeUrl}`,
++    `Group's included AI usage is at its monthly limit. I pause new replies until reset, while your wearable and group data keep updating. Pulse has more included usage: {homeUrl}`,
++    `You've reached the Group plan's monthly AI allowance. Syncing stays on and your group activity remains current. Upgrade to Pulse or wait for next period: {homeUrl}`,
++    `This month's Group AI usage is used. New AI work pauses, not your wearable connection or group updates. Pulse includes more usage: {homeUrl}`,
++    `Your included Group replies are used for this period. Health data keeps syncing and group activity keeps updating. Upgrade to Pulse or wait for the reset: {homeUrl}`,
++    `You've hit the Group plan's AI limit for the month. Wearable syncing continues and your group stays current. Pulse is the next step for more Murph usage: {homeUrl}`,
++    `Group AI usage is at its included monthly amount. I pause new replies until reset, but syncing and group data continue. Upgrade to Pulse here: {homeUrl}`,
++    `The Group allowance for new AI work is used. Your wearable remains connected and group activity stays current. Choose Pulse for more usage or wait: {homeUrl}`,
++    `You've used the AI included with Group this month. Only new Murph work pauses; wearable and group updates continue. Pulse offers more included usage: {homeUrl}`,
++    `Your Group plan has reached this month's AI allowance. Syncing keeps running in the background and your group data stays current. Upgrade to Pulse or wait: {homeUrl}`,
++    `That's the included Group AI usage for this period. I pause replies until reset, while your wearable and group activity continue updating. Pulse details: {homeUrl}`,
++    `You've reached Group's monthly AI amount. Your health data still syncs and your group participation remains current. Upgrade to Pulse for more replies: {homeUrl}`,
++    `The Group plan's included AI is used for now. Wearable syncing does not stop, and group activity keeps updating. Pulse or the next reset will reopen replies: {homeUrl}`,
++    `Your monthly Group AI allowance is spent. New replies pause, but your wearable connection and group updates stay active. Upgrade to Pulse here: {homeUrl}`,
++    `You've used this period's Group AI allowance. Syncing and group activity continue normally. Pulse includes more private Murph usage: {homeUrl}`,
++    `Group's monthly AI capacity is used. I pause new AI work until reset, not wearable syncing or group updates. Upgrade to Pulse if you want to keep chatting: {homeUrl}`,
++    `You've reached the included usage on Group. Your wearable keeps syncing and your group data keeps moving. More Murph replies come with Pulse or the next reset: {homeUrl}`,
++    `This month's Group AI allowance is complete. Background health syncing and group activity continue. Upgrade to Pulse for more included replies: {homeUrl}`,
++    `Your included Group AI usage has run out for this period. New Murph replies pause, while wearables and group data stay current. Pulse is available here: {homeUrl}`,
++  ],
+   "linq.ai_usage.pulse_upgrade_edge": [
+diff --git a/apps/web/src/components/home/usage-limit-banner.tsx b/apps/web/src/components/home/usage-limit-banner.tsx
+--- a/apps/web/src/components/home/usage-limit-banner.tsx
++++ b/apps/web/src/components/home/usage-limit-banner.tsx
+@@ -16,4 +16,5 @@ const resettableMonthlyNoticeCodes = new Set<HostedAiUsageGateNoticeCode>([
+   "edge_usage_limit_reached",
+   "family_usage_limit_reached",
++  "group_upgrade_pulse",
+   "pulse_upgrade_edge",
+ ]);
+@@ -36,4 +37,8 @@ const usageLimitBannerCopy: Record<
+     body: "New replies and other AI work are blocked until your included usage resets. Other Family members have separate allowances.",
+     title: "You've used 100% of your included usage this month",
+   },
++  group_upgrade_pulse: {
++    body: "New replies and other AI work are blocked until your included usage resets. Your wearable keeps syncing and your group activity stays current.",
++    title: "You've used 100% of this month's included Group usage",
++  },
+   pulse_upgrade_edge: {
+@@ -67,3 +72,5 @@ export function UsageLimitBanner({
+   const actionBody = recommendedAction?.kind === "start_pulse"
+     ? " Start Pulse to continue."
++    : recommendedAction?.kind === "upgrade_pulse"
++      ? " Pulse includes more private Murph usage."
+     : recommendedAction?.kind === "upgrade_edge"
+diff --git a/apps/web/src/components/settings/hosted-billing-settings.tsx b/apps/web/src/components/settings/hosted-billing-settings.tsx
+--- a/apps/web/src/components/settings/hosted-billing-settings.tsx
++++ b/apps/web/src/components/settings/hosted-billing-settings.tsx
+@@ -8,4 +8,5 @@ import { Progress } from "@/src/components/ui/progress";
+ import {
+   HOSTED_FAMILY_PLAN_DISPLAY,
+   HOSTED_PULSE_TRIAL_OFFER,
++  formatHostedBillingPrice,
+   getHostedBillingPlanDefinition,
+@@ -21,5 +22,11 @@ import { BillingPortalButton } from "./billing-portal-button";
+ import { HostedFamilyStartButton } from "./hosted-family-settings-actions";
+ import { HostedSettingsSessionState } from "./hosted-settings-session-state";
+ import { StartPaidPulseButton } from "./hosted-start-paid-pulse-button";
+-import { SwitchToPulseButton } from "./hosted-plan-switch-to-pulse-button";
+-import { UpgradeToEdgeButton } from "./hosted-plan-upgrade-button";
++import {
++  SwitchToGroupButton,
++  SwitchToPulseButton,
++} from "./hosted-plan-switch-to-pulse-button";
++import {
++  UpgradeToEdgeButton,
++  UpgradeToPulseButton,
++} from "./hosted-plan-upgrade-button";
+@@ -31,3 +36,10 @@ import {
+ } from "./hosted-usage-top-up-dialog";
+ 
++const GROUP_FEATURES = [
++  "Stay connected to Murph groups",
++  "Sync your health data",
++  "Keep group activity current",
++  "Lighter private Murph usage",
++];
++
+ const PULSE_FEATURES = [
+@@ -68,5 +80,8 @@ export function HostedBillingSettings(props: {
+   billingStatus?: unknown;
+   canStartFamily?: boolean;
+   canStartPaidPulse?: boolean;
++  canSwitchToGroup?: boolean;
+   canSwitchToPulse?: boolean;
++  canUpgradeToPulse?: boolean;
+   canUpgradeToEdge?: boolean;
++  showGroupPlan?: boolean;
+@@ -106,5 +121,7 @@ export function HostedBillingSettings(props: {
+   const familyCurrent = familyState === "owner" || familyState === "sponsored";
+   const familyOwner = familyState === "owner";
++  const groupCurrent =
++    !familyCurrent && currentPlanCode === "launch_group_monthly";
+   const pulseCurrent = !familyCurrent && currentPlanCode === "launch_monthly";
+   const edgeCurrent = !familyCurrent && currentPlanCode === "launch_edge_monthly";
+   const usageTopUpOffers = props.usageTopUpOffers ?? [];
+@@ -114,30 +192,90 @@ export function HostedBillingSettings(props: {
+   const pulseTrialBillingContinuationPending =
+     props.pulseTrialBillingContinuationPending === true;
++  const hasPendingGroupSwitch =
++    scheduledPlanCode === "launch_group_monthly" &&
++    scheduledBillingEffectiveAt !== null;
+   const hasPendingPulseSwitch =
+-    edgeCurrent && scheduledPlanCode === "launch_monthly" && scheduledBillingEffectiveAt !== null;
++    scheduledPlanCode === "launch_monthly" &&
++    scheduledBillingEffectiveAt !== null;
++  const pendingGroupSwitchDate = hasPendingGroupSwitch
++    ? formatHostedBillingDate(scheduledBillingEffectiveAt)
++    : null;
+   const pendingPulseSwitchDate = hasPendingPulseSwitch
+     ? formatHostedBillingDate(scheduledBillingEffectiveAt)
+     : null;
+ 
+-  const cards: PlanCardModel[] = [
++  const cards: PlanCardModel[] = [
++    ...(props.showGroupPlan === true && !familyCurrent
++      ? [{
++          action: groupCurrent
++            ? <CurrentPlanButton />
++            : hasPendingGroupSwitch
++              ? null
++              : props.canSwitchToGroup === true &&
++                  (pulseCurrent || edgeCurrent)
++                ? (
++                    <SwitchToGroupButton
++                      block
++                      currentPeriodEnd={currentPeriodEndIso}
++                      currentPlanCode={
++                        edgeCurrent
++                          ? "launch_edge_monthly"
++                          : "launch_monthly"
++                      }
++                    >
++                      Choose Group
++                    </SwitchToGroupButton>
++                  )
++                : null,
++          current: groupCurrent,
++          currentLabel: "Current plan",
++          features: GROUP_FEATURES,
++          key: "launch_group_monthly",
++          name: "Group",
++          note: hasPendingGroupSwitch && pendingGroupSwitchDate
++            ? `Scheduled to start ${pendingGroupSwitchDate}`
++            : null,
++          price: formatHostedBillingPrice(
++            getHostedBillingPlanDefinition(
++              "launch_group_monthly",
++            ).recurringAmountUsdCents,
++          ),
++        } satisfies PlanCardModel]
++      : []),
+     {
+       action: familyOwner
+         ? <FamilyBillingChangeButton block targetPlanName="Pulse" />
++        : groupCurrent && props.canUpgradeToPulse === true
++          ? <UpgradeToPulseButton block>Choose Pulse</UpgradeToPulseButton>
+         : pulseCurrent
+-        ? isPulseTrial
+-          && props.canStartPaidPulse === true
+-          && !pulseTrialBillingContinuationPending
+-          ? <StartPaidPulseButton block>Start Pulse plan</StartPaidPulseButton>
+-          : <CurrentPlanButton />
+-        : hasPendingPulseSwitch
+-          ? null
+-          : props.canSwitchToPulse === true
+-            ? (
+-                <SwitchToPulseButton block currentPeriodEnd={currentPeriodEndIso}>
+-                  Choose Pulse
+-                </SwitchToPulseButton>
+-              )
+-            : <BillingPortalButton block variant="secondary" label="Choose Pulse" />,
++          ? isPulseTrial &&
++              props.canStartPaidPulse === true &&
++              !pulseTrialBillingContinuationPending
++            ? (
++                <StartPaidPulseButton block>
++                  Start Pulse plan
++                </StartPaidPulseButton>
++              )
++            : <CurrentPlanButton />
++          : hasPendingPulseSwitch
++            ? null
++            : edgeCurrent && props.canSwitchToPulse === true
++              ? (
++                  <SwitchToPulseButton
++                    block
++                    currentPeriodEnd={currentPeriodEndIso}
++                    currentPlanCode="launch_edge_monthly"
++                  >
++                    Choose Pulse
++                  </SwitchToPulseButton>
++                )
++              : (
++                  <BillingPortalButton
++                    block
++                    variant="secondary"
++                    label="Choose Pulse"
++                  />
++                ),
+       current: pulseCurrent,
+       currentLabel: isPulseTrial ? "Free trial" : "Current plan",
+       features: PULSE_FEATURES,
+@@ -147,6 +278,9 @@ export function HostedBillingSettings(props: {
+         ? "If you switch away from Family, your family members lose their included access when the Family plan ends."
+         : !pulseCurrent && hasPendingPulseSwitch && pendingPulseSwitchDate
+-        ? `Scheduled to start ${pendingPulseSwitchDate}`
+-        : null,
+-      price: formatMonthlyPrice(getHostedBillingPlanDefinition("launch_monthly").recurringAmountUsdCents),
++          ? `Scheduled to start ${pendingPulseSwitchDate}`
++          : null,
++      price: formatHostedBillingPrice(
++        getHostedBillingPlanDefinition("launch_monthly")
++          .recurringAmountUsdCents,
++      ),
+     },
+@@ -169,5 +302,10 @@ export function HostedBillingSettings(props: {
+         ? "End or change the Family plan first, then switch to an individual plan."
+         : edgeCurrent && hasPendingPulseSwitch && pendingPulseSwitchDate
+-        ? `Switching to Pulse on ${pendingPulseSwitchDate}. Want to keep Edge? Contact support.`
+-        : null,
+-      price: formatMonthlyPrice(getHostedBillingPlanDefinition("launch_edge_monthly").recurringAmountUsdCents),
++          ? `Switching to Pulse on ${pendingPulseSwitchDate}. Want to keep Edge? Contact support.`
++          : edgeCurrent && hasPendingGroupSwitch && pendingGroupSwitchDate
++            ? `Switching to Group on ${pendingGroupSwitchDate}. Want to keep Edge? Contact support.`
++            : null,
