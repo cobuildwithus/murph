@@ -1,5 +1,6 @@
 interface GrowthScorecardProps {
-  activeMembers: {
+  activeUsers: {
+    trailing30Days: number;
     trailing7Days: number;
     wowPercent: number | null;
   };
@@ -82,10 +83,12 @@ export function GrowthScorecard(input: GrowthScorecardProps) {
             />
             <GrowthSignal
               className="border-t border-border/60 sm:border-l sm:border-t-0 lg:border-l-0 lg:border-t"
-              detail={`${formatInteger(input.activeMembers.trailing7Days)} direct members messaged`}
-              helper="Usage pulse, not a retention cohort"
-              label="Weekly active member growth"
-              value={formatGrowthRate(input.activeMembers.wowPercent)}
+              detail={`${formatInteger(input.activeUsers.trailing30Days)} MAU across personal + group chats`}
+              helper={formatActiveUserChange(
+                input.activeUsers.wowPercent,
+              )}
+              label="Weekly active users"
+              value={`${formatInteger(input.activeUsers.trailing7Days)} WAU`}
             />
           </div>
         </div>
@@ -258,6 +261,17 @@ function formatWindowChange(value: number | null): string {
   }
 
   return `${formatGrowthRate(value)} versus the prior seven days`;
+}
+
+function formatActiveUserChange(value: number | null): string {
+  const activityDefinition =
+    "Each distinct sender counts once across personal + group chats";
+
+  if (value === null) {
+    return `No prior-week WAU baseline · ${activityDefinition}`;
+  }
+
+  return `${formatGrowthRate(value)} WAU versus the prior seven days · ${activityDefinition}`;
 }
 
 function formatInteger(value: number): string {
