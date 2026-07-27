@@ -1275,6 +1275,9 @@ export async function applyStripeRecurringFinancialState(input: {
       member.billingRef?.stripeCustomerId ??
       null,
     stripeSubscriptionId: input.subscription.id,
+    suspendedAtOverride: blocked
+      ? input.dispatchContext.eventCreatedAt
+      : null,
     tx: input.tx,
   });
 

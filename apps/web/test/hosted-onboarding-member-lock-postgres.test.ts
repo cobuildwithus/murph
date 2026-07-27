@@ -62,7 +62,12 @@ const accountDeletionBoundaries = vi.hoisted(() => ({
 
 const stripeProvider = vi.hoisted(() => ({
   chargesRetrieve: vi.fn(),
+  disputesList: vi.fn(),
   eventsRetrieve: vi.fn(),
+  invoicePaymentsList: vi.fn(),
+  invoicesList: vi.fn(),
+  invoicesRetrieve: vi.fn(),
+  refundsList: vi.fn(),
   subscriptionsRetrieve: vi.fn(),
 }));
 
@@ -159,8 +164,21 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", async () => {
     charges: {
       retrieve: stripeProvider.chargesRetrieve,
     },
+    disputes: {
+      list: stripeProvider.disputesList,
+    },
     events: {
       retrieve: stripeProvider.eventsRetrieve,
+    },
+    invoicePayments: {
+      list: stripeProvider.invoicePaymentsList,
+    },
+    invoices: {
+      list: stripeProvider.invoicesList,
+      retrieve: stripeProvider.invoicesRetrieve,
+    },
+    refunds: {
+      list: stripeProvider.refundsList,
     },
     subscriptions: {
       retrieve: stripeProvider.subscriptionsRetrieve,
@@ -619,8 +637,14 @@ describe.skipIf(!runPostgresConcurrencyProof)(
       const ordinaryAt = ordinaryCreatedBeforeReversal
         ? new Date("2026-07-26T18:00:00.500Z")
         : new Date("2026-07-26T18:00:03.000Z");
+      const paidInvoice = makePaidStripeInvoiceForCharge({
+        chargeId,
+        customerId,
+        subscriptionId,
+      });
       const subscription = makeActiveStripeSubscription({
         customerId,
+        latestInvoiceId: paidInvoice.invoice.id,
         memberId,
         subscriptionId,
       });
@@ -675,6 +699,23 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           return releaseRestoreChargeRead.promise;
         }
         return makeStripeCharge({ chargeId, customerId });
+      });
+      stripeProvider.disputesList.mockResolvedValue({
+        data: [],
+        has_more: false,
+      });
+      stripeProvider.invoicePaymentsList.mockResolvedValue({
+        data: [paidInvoice.invoicePayment],
+        has_more: false,
+      });
+      stripeProvider.invoicesList.mockResolvedValue({
+        data: [paidInvoice.invoice],
+        has_more: false,
+      });
+      stripeProvider.invoicesRetrieve.mockResolvedValue(paidInvoice.invoice);
+      stripeProvider.refundsList.mockResolvedValue({
+        data: [],
+        has_more: false,
       });
 
       try {
@@ -843,7 +884,12 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         );
         setHostedSecureBoxStringTestCodecForTests(null);
         stripeProvider.chargesRetrieve.mockReset();
+        stripeProvider.disputesList.mockReset();
         stripeProvider.eventsRetrieve.mockReset();
+        stripeProvider.invoicePaymentsList.mockReset();
+        stripeProvider.invoicesList.mockReset();
+        stripeProvider.invoicesRetrieve.mockReset();
+        stripeProvider.refundsList.mockReset();
         stripeProvider.subscriptionsRetrieve.mockReset();
         await observer.hostedStripeEvent.deleteMany({
           where: {
@@ -1386,14 +1432,35 @@ function encodeCleanupPayload(value: {
 
 function makeActiveStripeSubscription(input: {
   customerId: string;
+  latestInvoiceId: string;
   memberId: string;
   subscriptionId: string;
 }): Stripe.Subscription {
+  const periodStart = 1_775_000_000;
+  const periodEnd = 1_778_000_000;
   // @ts-expect-error - the reconciliation fixture uses only the Stripe fields
   // read by production billing lookup and status policy.
   return {
     customer: input.customerId,
     id: input.subscriptionId,
+    items: {
+      data: [{
+        current_period_end: periodEnd,
+        current_period_start: periodStart,
+        id: `si_${input.subscriptionId}`,
+        object: "subscription_item",
+        price: {
+          id: "price_restore_reconciliation",
+          object: "price",
+        },
+        quantity: 1,
+        subscription: input.subscriptionId,
+      }],
+      has_more: false,
+      object: "list",
+      url: `/v1/subscription_items?subscription=${input.subscriptionId}`,
+    },
+    latest_invoice: input.latestInvoiceId,
     metadata: {
       memberId: input.memberId,
     },
@@ -1411,6 +1478,92 @@ function makeStripeCharge(input: {
     id: input.chargeId,
     object: "charge",
   } as Stripe.Charge;
+}
+
+function makePaidStripeInvoiceForCharge(input: {
+  chargeId: string;
+  customerId: string;
+  subscriptionId: string;
+}): {
+  invoice: Stripe.Invoice;
+  invoicePayment: Stripe.InvoicePayment;
+} {
+  const invoiceId = `in_${input.chargeId}`;
+  const periodStart = 1_775_000_000;
+  const periodEnd = 1_778_000_000;
+  const invoicePayment = {
+    amount_paid: 1_000,
+    id: `ipay_${input.chargeId}`,
+    invoice: invoiceId,
+    is_default: true,
+    object: "invoice_payment",
+    payment: {
+      charge: input.chargeId,
+      type: "charge",
+    },
+    status: "paid",
+  } as Stripe.InvoicePayment;
+
+  const invoiceLine: Partial<Stripe.InvoiceLineItem> = {
+    amount: 1_000,
+    id: `il_${input.chargeId}`,
+    invoice: invoiceId,
+    object: "line_item",
+    parent: {
+      invoice_item_details: null,
+      subscription_item_details: {
+        invoice_item: null,
+        proration: false,
+        proration_details: null,
+        subscription: input.subscriptionId,
+        subscription_item: `si_${input.subscriptionId}`,
+      },
+      type: "subscription_item_details",
+    },
+    period: {
+      end: periodEnd,
+      start: periodStart,
+    },
+    pricing: {
+      price_details: {
+        price: "price_restore_reconciliation",
+        product: "prod_restore_reconciliation",
+      },
+      type: "price_details",
+      unit_amount_decimal: null,
+    },
+    quantity: 1,
+    subscription: input.subscriptionId,
+  };
+  const invoice: Partial<Stripe.Invoice> & { subscription: string } = {
+    amount_paid: 1_000,
+    amount_remaining: 0,
+    attempted: true,
+    billing_reason: "subscription_cycle",
+    created: periodStart,
+    customer: input.customerId,
+    id: invoiceId,
+    lines: {
+      data: [invoiceLine as Stripe.InvoiceLineItem],
+      has_more: false,
+      object: "list",
+      url: `/v1/invoices/${invoiceId}/lines`,
+    },
+    object: "invoice",
+    payments: {
+      data: [invoicePayment],
+      has_more: false,
+      object: "list",
+      url: `/v1/invoices/${invoiceId}/payments`,
+    },
+    status: "paid",
+    subscription: input.subscriptionId,
+  };
+
+  return {
+    invoice: invoice as Stripe.Invoice,
+    invoicePayment,
+  };
 }
 
 function makeStripeEvent(input: {

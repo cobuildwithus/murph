@@ -1929,11 +1929,10 @@ describe("hosted onboarding stripe billing events", () => {
         freshnessPolicy: "canonical-financial-state",
         stripeCustomerId: "cus_123",
         stripeSubscriptionId: "sub_123",
+        suspendedAtOverride: new Date("2026-04-25T00:00:00.000Z"),
         tx,
       }),
     );
-    const billingWrite = mocks.writeHostedMemberStripeBillingTx.mock.calls.at(-1)?.[0];
-    expect(billingWrite).not.toHaveProperty("suspendedAtOverride");
   });
 
   it("restores the exact member owner only from a paid blocker-free canonical state", async () => {
@@ -1969,10 +1968,9 @@ describe("hosted onboarding stripe billing events", () => {
         member,
         stripeCustomerId: "cus_123",
         stripeSubscriptionId: "sub_123",
+        suspendedAtOverride: null,
       }),
     );
-    const billingWrite = mocks.writeHostedMemberStripeBillingTx.mock.calls.at(-1)?.[0];
-    expect(billingWrite).not.toHaveProperty("suspendedAtOverride");
   });
 
   it("does not restore a healthy owner when the trigger only guards a positive projection", async () => {
