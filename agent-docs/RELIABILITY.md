@@ -15,6 +15,39 @@ Last verified: 2026-07-26
 - Define startup requirements, health checks, and critical invariants.
 - Document retry/idempotency expectations for writes or background work.
 - Add tests for failure modes before relying on production-side recovery logic.
+- Account deletion must not discard its only external-cleanup owner. The
+  canonical account transaction persists the KMS-encrypted, foreign-key-free
+  receipt before deleting the member. The existing hourly retention sweep
+  retries Cloudflare, Stripe-customer, and Privy-user targets independently;
+  confirmed absence is idempotent success, completed targets are skipped, and
+  unconfigured, timed-out, or ambiguous targets remain pending. The deletion
+  request returns `cleanupPending` immediately after the canonical transaction
+  instead of waiting on those providers. Each retention attempt has a bounded
+  target deadline, and the bounded batch runs receipts concurrently so one
+  stalled vendor does not block unrelated retention work. Because every
+  provider delete is idempotent and progress is monotonic, concurrent attempts
+  may duplicate a provider request but cannot erase completed progress or
+  report convergence before the receipt itself is deleted.
+- Every direct subscription Checkout attempt is an encrypted member-owned row;
+  Family retains its single encrypted session in the existing billing attempt
+  owner. After Stripe creates a session, Checkout creation re-locks the owner
+  and returns the URL only after binding that reference; if suspension or
+  deletion won, it expires the session instead. Account deletion suspends
+  first, re-reads all direct attempts and Family billing owners, expires every
+  open session, absorbs an expiry/completion race by canceling the resulting
+  subscription, and only then prepares the final customer-cleanup receipt.
+- Participant-derived hosted-group access is bounded by the shared seven-day
+  observation lease. Provider rosters larger than the reconciliation cap cannot
+  leave a participant authoritative forever: stale relationships age out.
+  Authenticated Linq inbound can renew only an existing non-removed relationship
+  for the currently resolved identity, and future provider timestamps are
+  clamped to server time. Before denying a quiet route, Web makes one bounded
+  provider read and scans the full returned roster. It may create or reinstate
+  exactly the authenticated current sender after the roster handle re-resolves
+  to the same active hosted identity; otherwise it may renew only an existing
+  active participant whose current identity still matches the stored
+  relationship. Provider order and the assistant participant projection cap do
+  not decide access.
 - Foreground inbox/parser-backed daemon runs should favor restartable connectors with bounded backoff over permanently dead watch loops, while still keeping low-level restart behavior opt-in and always bounded by the owning abort signal.
 - Networked assistant/provider/channel calls should set explicit timeouts, propagate caller abort signals, and only auto-retry request shapes that are replay-safe or rate-limit directed.
 - The hosted reply-latency operator alert remains one singleton incident owner.
