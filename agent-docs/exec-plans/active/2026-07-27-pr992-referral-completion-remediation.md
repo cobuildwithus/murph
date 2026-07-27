@@ -45,7 +45,12 @@ Updated: 2026-07-27
   checkpoint-gated (3/3).
 - Focused Web referral policy, tool, and recovery suites: 16/16.
 - Hosted Web prepared typecheck: passed.
-- Hosted low-usage prompt regression suite: 4/4.
+- Hosted low-usage prompt regression suite: 5/5. The first focused invocation
+  exhausted its local Node heap under shared-host contention; the exact-file,
+  one-worker rerun passed.
+- Isolated PostgreSQL owner proof: 10/10 usage-credit serialization tests,
+  including personal Linq reconcile, fixed-source route composition,
+  model/style resolution, durable mailbox payload, and idempotent replay.
 - Direct production-function scenario: group Sol resolved to `about 50 more
   messages on the model this room is using now`; the stable referral event id,
   style band, and no-transcript instruction were present.
@@ -61,3 +66,12 @@ Updated: 2026-07-27
   across restrained and rowdy style bands; component ordering, recovery
   selection, prompt policy, and the production notification builder are
   directly proven.
+- Preliminary completion-specialists ReviewGPT: verified Pro response after
+  about eighteen minutes, `SPECIALIST_OUTCOME: FINDINGS`. Both findings were
+  accepted and resolved: the public mission deadline is now distinct from
+  private qualification/grace thresholds, and the personal celebration
+  composition path has PostgreSQL-backed owner proof. No patch artifact was
+  returned.
+- Remediation-specific canonical `pnpm test:diff` passed: repository guards,
+  Web typecheck, 6,885 runnable Web tests (192 skipped), lint with only
+  pre-existing warnings, dev smoke, and the production Next build.

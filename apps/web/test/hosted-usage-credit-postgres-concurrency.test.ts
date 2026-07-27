@@ -14,6 +14,12 @@ import {
   settleHostedUsageCreditForUsageTx,
 } from "@/src/lib/hosted-execution/usage-credits";
 import {
+  decodeHostedMailboxStoredPayload,
+} from "@/src/lib/hosted-mailbox/store";
+import {
+  setHostedSecureBoxStringTestCodecForTests,
+} from "@/src/lib/hosted-crypto/secure-box";
+import {
   handleHostedUsageReferralGroupTool,
   HOSTED_USAGE_REFERRAL_BENEFICIARY_30D_CAP_USD_MICROS,
   HOSTED_USAGE_REFERRAL_GROUP_REWARD_USD_MICROS,
@@ -26,12 +32,18 @@ import {
   createHostedExternalThreadLookupKey,
   createHostedPhoneLookupKey,
 } from "@/src/lib/hosted-onboarding/contact-privacy";
+import {
+  upsertHostedMemberHomeLinqBindingTx,
+} from "@/src/lib/hosted-onboarding/hosted-member-routing-store";
 import { assertHostedUsageCreditPurchasesReadyForAccountDeletionTx } from "@/src/lib/hosted-onboarding/usage-credit-purchase-account-deletion";
 import { bindHostedUsageCreditStripeReferencesTx } from "@/src/lib/hosted-onboarding/usage-credit-stripe-reconciliation-context";
 import {
   buildHostedThreadDeliveryRoute,
   sealHostedThreadDeliveryRoute,
 } from "@/src/lib/hosted-routing/thread-delivery-route";
+import {
+  resolveHostedAssistantNotificationDestination,
+} from "@/src/lib/hosted-routing/assistant-notification-destination";
 import { createPrismaClient } from "@/src/lib/prisma";
 
 const databaseUrl = process.env.DATABASE_URL?.trim() ?? "";
@@ -1133,6 +1145,282 @@ describe.skipIf(!runPostgresConcurrencyProof)(
               ],
             },
           },
+        });
+        await observer.$disconnect();
+      }
+    });
+
+    it("composes a personal referral celebration from the frozen source exactly once", async () => {
+      const fixtureId = randomUUID();
+      const memberId = `member_usage_referral_personal_${fixtureId}`;
+      const targetContainerMemberId =
+        `member_usage_referral_personal_target_${fixtureId}`;
+      const referralId = `hur_usage_referral_personal_${fixtureId}`;
+      const sourceThreadId = `linq-personal-thread-${fixtureId}`;
+      const sourceContactLookupKey = createHostedPhoneLookupKey(
+        "+15550100001",
+      );
+      if (!sourceContactLookupKey) {
+        throw new Error("Expected a blinded source contact lookup key.");
+      }
+      const celebrationDedupeKey =
+        `assistant.notification.requested:usage-referral-reward:${referralId}`;
+      const observer = createPrismaClient({ databaseUrl, poolMax: 2 });
+      const now = new Date();
+
+      setHostedSecureBoxStringTestCodecForTests({
+        decrypt(input) {
+          return input.value;
+        },
+        encrypt(input) {
+          return input.value;
+        },
+      });
+      try {
+        await observer.hostedMember.createMany({
+          data: [
+            {
+              assistantHumor: 8,
+              assistantTone: "formal",
+              assistantUnhinged: 4,
+              billingStatus: "active",
+              id: memberId,
+            },
+            {
+              billingStatus: "not_started",
+              id: targetContainerMemberId,
+            },
+          ],
+        });
+        await observer.hostedMemberIdentity.create({
+          data: {
+            memberId,
+            phoneLookupKey: sourceContactLookupKey,
+          },
+        });
+        await observer.hostedThreadContainer.create({
+          data: {
+            memberId: targetContainerMemberId,
+            ownerMemberId: memberId,
+          },
+        });
+        await observer.$transaction((tx) =>
+          upsertHostedMemberHomeLinqBindingTx({
+            homeLineAssignedAt: now,
+            linqChatId: sourceThreadId,
+            memberId,
+            participantContact: {
+              kind: "phone",
+              lookupKey: sourceContactLookupKey,
+            },
+            prisma: tx,
+            recipientPhone: null,
+          }), transactionOptions);
+        const sourceDestination =
+          await resolveHostedAssistantNotificationDestination({
+            directChannel: "linq",
+            memberId,
+            prisma: observer,
+          });
+        expect(sourceDestination).toMatchObject({
+          conversationShape: "direct-member",
+          route: {
+            channel: "linq",
+            delivery: {
+              kind: "thread",
+              target: sourceThreadId,
+            },
+            threadIsDirect: true,
+          },
+        });
+        if (
+          sourceDestination?.conversationShape !== "direct-member"
+          || sourceDestination.route.channel !== "linq"
+          || sourceDestination.route.delivery.kind !== "thread"
+          || !sourceDestination.route.threadId
+        ) {
+          throw new Error(
+            "Expected the personal member's direct Linq notification route.",
+          );
+        }
+        const sourceThreadLookupKey = sourceDestination.route.threadId;
+        await observer.hostedUsageReferral.create({
+          data: {
+            armedAt: new Date(now.getTime() - 30 * 60_000),
+            beneficiaryMemberId: memberId,
+            expiresAt: new Date(now.getTime() + 24 * 60 * 60_000),
+            firstHumanMessageAt: new Date(now.getTime() - 15 * 60_000),
+            humanMessageCount: 15,
+            id: referralId,
+            lastHumanMessageAt: new Date(now.getTime() - 5 * 60_000),
+            nonReferrerMessageCount: 8,
+            observedEventKeysJson: ["event_1"],
+            observedSpeakerKeysJson: ["speaker_1", "speaker_2"],
+            policyCode: "active_group_v1",
+            policyVersion: HOSTED_USAGE_REFERRAL_POLICY_VERSION,
+            qualifiedAt: new Date(now.getTime() - 5 * 60_000),
+            referrerMemberId: memberId,
+            referrerSubjectKey: "authenticated-member",
+            rewardUsdMicros: HOSTED_USAGE_REFERRAL_GROUP_REWARD_USD_MICROS,
+            sourceConversationJson: {
+              channel: "linq",
+              threadId: sourceThreadLookupKey,
+              threadIsDirect: true,
+            },
+            status: "target_bound",
+            targetBoundAt: new Date(now.getTime() - 20 * 60_000),
+            targetContainerMemberId,
+          },
+        });
+
+        const first = await reconcileHostedUsageReferralRewardAfterCommit({
+          prisma: observer,
+          referralId,
+        });
+        await expect(reconcileHostedUsageReferralRewardAfterCommit({
+          prisma: observer,
+          referralId,
+        })).resolves.toBeNull();
+        expect(first).toMatchObject({
+          eventId: celebrationDedupeKey,
+          linqChatId: sourceThreadId,
+          mailboxItemId: expect.any(String),
+          source: "linq",
+          userId: memberId,
+        });
+
+        const mailboxItem = await observer.hostedMailboxItem.findUniqueOrThrow({
+          include: { payload: true },
+          where: {
+            userId_dedupeKey: {
+              dedupeKey: celebrationDedupeKey,
+              userId: memberId,
+            },
+          },
+        });
+        const persistedPayload = await decodeHostedMailboxStoredPayload({
+          dedupeKey: mailboxItem.dedupeKey,
+          kind: mailboxItem.kind,
+          lane: mailboxItem.lane,
+          laneSeq: mailboxItem.laneSeq,
+          mailboxItemId: mailboxItem.id,
+          occurredAt: mailboxItem.occurredAt.toISOString(),
+          payloadCiphertext: mailboxItem.payload?.payloadCiphertext,
+          payloadInlineCiphertext: mailboxItem.payloadInlineCiphertext,
+          payloadSchema: mailboxItem.payloadSchema,
+          prisma: observer,
+          userId: memberId,
+        });
+        expect(persistedPayload).toMatchObject({
+          eventId: celebrationDedupeKey,
+          kind: "assistant.notification.requested",
+          notification: {
+            deliveryDedupeToken:
+              `usage-referral-reward:${referralId}`,
+            deliveryDispatchMode: "queue-only",
+            instructions: expect.stringContaining(
+              "about 140 more messages on the model your Murph is using now",
+            ),
+            responsePolicy: { kind: "require_send" },
+            route: {
+              channel: "linq",
+              delivery: {
+                kind: "explicit",
+                target: sourceThreadId,
+              },
+              threadId: sourceThreadLookupKey,
+              threadIsDirect: true,
+            },
+          },
+          userId: memberId,
+        });
+        expect(persistedPayload).toMatchObject({
+          notification: {
+            instructions: expect.stringContaining(
+              "tone=formal; Humor=8/10; Unhinged=4/10",
+            ),
+          },
+        });
+        expect(persistedPayload).toMatchObject({
+          notification: {
+            instructions: expect.stringContaining(
+              "This isolated completion has no transcript or room callback",
+            ),
+          },
+        });
+        const serializedPayload = JSON.stringify(persistedPayload);
+        expect(serializedPayload).not.toContain(
+          '"externalThreadRouteAuthority"',
+        );
+        expect(serializedPayload).not.toContain('"conversationHistory"');
+        expect(serializedPayload).not.toContain('"messages"');
+        expect(serializedPayload).not.toContain('"referrer"');
+
+        await expect(Promise.all([
+          observer.hostedUsageReferral.findUniqueOrThrow({
+            select: {
+              celebrationQueuedAt: true,
+              sourceConversationJson: true,
+              status: true,
+            },
+            where: { id: referralId },
+          }),
+          observer.hostedUsageCreditEntry.count({
+            where: { kind: "referral_grant", referralId },
+          }),
+          observer.hostedUsageCreditGrant.count({
+            where: { entry: { referralId } },
+          }),
+          observer.hostedMailboxItem.count({
+            where: {
+              dedupeKey: celebrationDedupeKey,
+              userId: memberId,
+            },
+          }),
+        ])).resolves.toEqual([
+          {
+            celebrationQueuedAt: expect.any(Date),
+            sourceConversationJson: null,
+            status: "rewarded",
+          },
+          1,
+          1,
+          1,
+        ]);
+      } finally {
+        setHostedSecureBoxStringTestCodecForTests(null);
+        await observer.hostedMailboxPayload.deleteMany({
+          where: { userId: memberId },
+        });
+        await observer.hostedMailboxItem.deleteMany({
+          where: { userId: memberId },
+        });
+        await observer.hostedMailboxLaneCounter.deleteMany({
+          where: { userId: memberId },
+        });
+        await observer.hostedWorkspace.deleteMany({
+          where: { userId: memberId },
+        });
+        await observer.hostedUsageCreditGrant.deleteMany({
+          where: { entry: { referralId } },
+        });
+        await observer.hostedUsageCreditEntry.deleteMany({
+          where: { referralId },
+        });
+        await observer.hostedUsageReferral.deleteMany({
+          where: { id: referralId },
+        });
+        await observer.hostedThreadContainer.deleteMany({
+          where: { memberId: targetContainerMemberId },
+        });
+        await observer.hostedMemberRouting.deleteMany({
+          where: { memberId },
+        });
+        await observer.hostedMemberIdentity.deleteMany({
+          where: { memberId },
+        });
+        await observer.hostedMember.deleteMany({
+          where: { id: { in: [memberId, targetContainerMemberId] } },
         });
         await observer.$disconnect();
       }

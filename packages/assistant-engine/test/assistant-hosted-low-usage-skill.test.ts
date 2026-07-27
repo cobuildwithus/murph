@@ -96,6 +96,15 @@ describe('assistant hosted low-usage skill', () => {
     expect(normalizedSkill).toContain('Treat returned message counts as approximate')
     expect(normalizedSkill).toContain('Never reveal qualification counters')
     expect(normalizedSkill).toContain(
+      'state the returned `expiresAt` as the mission\'s public occurrence deadline',
+    )
+    expect(normalizedSkill).toContain(
+      'private anti-gaming thresholds, or late-arrival grace rules',
+    )
+    expect(normalizedSkill).not.toContain(
+      'Never restate qualification counters, time windows',
+    )
+    expect(normalizedSkill).toContain(
       'Start a fresh group and make it genuinely active, with multiple people actually talking.',
     )
     expect(normalizedSkill).toContain(
@@ -116,5 +125,44 @@ describe('assistant hosted low-usage skill', () => {
     expect(skill).toContain('never claim usage was added when it was not')
     expect(skill).toContain('standing objective')
     expect(skill).toContain('deferral rules below still outrank this objective')
+  })
+
+  it('keeps the public arm deadline in the tool-result context without private thresholds', async () => {
+    const skill = await readLowUsageSkill()
+    const armedToolResult = {
+      action: 'arm_usage_referral',
+      result: {
+        outcome: 'armed',
+        referral: {
+          active: {
+            destinationKind: 'personal',
+            expiresAt: '2026-08-03T18:00:00.000Z',
+            policyCode: 'active_group_v1',
+            rewardLabel:
+              'about 140 more messages on the model your Murph is using now',
+            state: 'armed',
+          },
+        },
+        status: 'ok',
+      },
+    }
+    const assembledContext = [
+      skill,
+      '<tool_result>',
+      JSON.stringify(armedToolResult),
+      '</tool_result>',
+    ].join('\n')
+
+    expect(assembledContext).toContain('2026-08-03T18:00:00.000Z')
+    expect(assembledContext).toContain(
+      'about 140 more messages on the model your Murph is using now',
+    )
+    expect(JSON.stringify(armedToolResult)).not.toContain('humanMessageCount')
+    expect(JSON.stringify(armedToolResult)).not.toContain(
+      'nonReferrerMessageCount',
+    )
+    expect(JSON.stringify(armedToolResult)).not.toContain(
+      'minimumActivitySpan',
+    )
   })
 })

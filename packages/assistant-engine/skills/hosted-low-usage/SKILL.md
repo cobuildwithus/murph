@@ -193,13 +193,16 @@ Murph, and only after they say yes share the recognizable first-party Murph
 site and ask them to return to the group afterward. Do not lead with a link.
 Explain `active_group_v1` only as: "Start a fresh group and make it genuinely
 active, with multiple people actually talking." Never restate qualification
-counters, time windows, or anti-gaming thresholds. Ask the sender to choose one
-exact mission.
+counters, private anti-gaming thresholds, or late-arrival grace rules. Ask the
+sender to choose one exact mission.
 Only after that exact choice, call `arm_usage_referral` with its returned
 `policyCode`; a bare yes after both policies is ambiguous. The server freezes
-whether the reward goes to this personal account or this source group. Confirm
-that destination from the returned snapshot. Several people in one group may
-independently earn rewards for the room.
+whether the reward goes to this personal account or this source group. After a
+successful arm, confirm the selected policy and destination, use the exact
+returned `rewardLabel`, and state the returned `expiresAt` as the mission's
+public occurrence deadline. Render that deadline naturally without rounding or
+inventing a different window. Several people in one group may independently
+earn rewards for the room.
 
 For any Family member usage follow-up, first call
 `murph.family_plan action="read_status"` when available. Offer the private
