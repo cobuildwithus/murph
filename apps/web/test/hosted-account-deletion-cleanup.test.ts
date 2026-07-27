@@ -37,6 +37,7 @@ const KMS_KEY_NAME =
   "projects/test/locations/global/keyRings/test/cryptoKeys/account-cleanup";
 
 beforeEach(() => {
+  vi.useRealTimers();
   vi.clearAllMocks();
   mocks.kmsEncrypt.mockImplementation(async (input: {
     plaintext: Uint8Array;
@@ -69,9 +70,8 @@ beforeEach(() => {
 });
 
 describe("hosted account deletion cleanup", () => {
-  it("encrypts the minimal cleanup payload with receipt-bound AAD", async () => {
-    const now = new Date("2026-07-25T18:00:00.000Z");
-
+  it("encrypts only the identifiers needed for cleanup with receipt-bound AAD", async () => {
+    const now = new Date("2026-07-26T18:00:00.000Z");
     const cleanup = await prepareHostedAccountDeletionCleanup({
       now,
       privyUserId: "privy_user_1",
@@ -80,7 +80,9 @@ describe("hosted account deletion cleanup", () => {
     });
 
     expect(cleanup.runtimeMemberIds).toEqual(["member_1", "member_group_1"]);
+    expect(cleanup.privyUserLookupKey).toMatch(/^hbidx:privy-user:/u);
     const encryptInput = mocks.kmsEncrypt.mock.calls[0]?.[0];
+    expect(encryptInput?.keyName).toBe(KMS_KEY_NAME);
     expect(JSON.parse(String(encryptInput?.additionalAuthenticatedData))).toEqual({
       environment: "test",
       id: cleanup.id,
@@ -95,12 +97,12 @@ describe("hosted account deletion cleanup", () => {
     expect(cleanup.payloadCiphertext).not.toContain("privy_user_1");
   });
 
-  it("persists independent target progress and skips completed targets on retry", async () => {
+  it("persists target progress and retries only unfinished targets", async () => {
     const store = new CleanupStore();
-    const now = new Date("2026-07-25T18:00:00.000Z");
-    const stripeCustomerDelete = vi.fn(async () => ({ deleted: true }));
+    const now = new Date("2026-07-26T18:00:00.000Z");
+    const deleteStripeCustomer = vi.fn(async () => ({ deleted: true }));
     mocks.getHostedOnboardingStripe.mockReturnValue({
-      customers: { del: stripeCustomerDelete },
+      customers: { del: deleteStripeCustomer },
     });
     mocks.deleteHostedRunnerUserDataBestEffort
       .mockResolvedValueOnce(makeCloudflareDeletionResult({
@@ -108,16 +110,9 @@ describe("hosted account deletion cleanup", () => {
         deleted: false,
       }))
       .mockResolvedValueOnce(makeCloudflareDeletionResult({ deleted: true }));
-
-    const prepared = await prepareHostedAccountDeletionCleanup({
-      now,
+    const prepared = await createCleanup(store, now, {
       privyUserId: "privy_user_1",
-      runtimeMemberIds: ["member_1"],
       stripeCustomerIds: ["cus_1"],
-    });
-    await persistHostedAccountDeletionCleanupTx({
-      cleanup: prepared,
-      prisma: store.prisma as never,
     });
 
     await expect(runHostedAccountDeletionCleanup({
@@ -134,70 +129,39 @@ describe("hosted account deletion cleanup", () => {
     });
     expect(store.row).toMatchObject({
       cloudflareCompletedAt: null,
-      nextAttemptAt: new Date("2026-07-25T19:00:00.000Z"),
       privyCompletedAt: now,
       stripeCompletedAt: now,
     });
+    expect(
+      JSON.parse(String(mocks.kmsDecrypt.mock.calls[0]?.[0].additionalAuthenticatedData)),
+    ).toEqual({
+      environment: "test",
+      id: prepared.id,
+      schema: "murph.hosted-account-deletion-cleanup.v1",
+    });
 
+    const retryAt = store.row?.nextAttemptAt;
+    expect(retryAt).toBeInstanceOf(Date);
     await expect(runHostedAccountDeletionCleanup({
       cleanupId: prepared.id,
-      now: new Date("2026-07-25T19:00:00.000Z"),
+      now: retryAt,
       prisma: store.prisma as never,
-    })).resolves.toMatchObject({
-      cleanupPending: false,
-      cloudflare: { deleted: true },
-    });
+    })).resolves.toMatchObject({ cleanupPending: false });
 
     expect(store.row).toBeNull();
     expect(mocks.deleteHostedRunnerUserDataBestEffort).toHaveBeenCalledTimes(2);
-    expect(stripeCustomerDelete).toHaveBeenCalledTimes(1);
+    expect(deleteStripeCustomer).toHaveBeenCalledTimes(1);
     expect(mocks.deleteHostedPrivyUser).toHaveBeenCalledTimes(1);
   });
 
-  it("does not report convergence while the durable receipt still exists", async () => {
+  it("keeps unconfigured required targets pending", async () => {
     const store = new CleanupStore();
-    const now = new Date("2026-07-25T18:00:00.000Z");
-    store.blockReceiptDelete = true;
-    const prepared = await prepareHostedAccountDeletionCleanup({
-      now,
-      privyUserId: null,
-      runtimeMemberIds: ["member_1"],
-      stripeCustomerIds: [],
-    });
-    await persistHostedAccountDeletionCleanupTx({
-      cleanup: prepared,
-      prisma: store.prisma as never,
-    });
-
-    await expect(runHostedAccountDeletionCleanup({
-      cleanupId: prepared.id,
-      now,
-      prisma: store.prisma as never,
-    })).resolves.toMatchObject({
-      cleanupPending: true,
-      cloudflare: { deleted: true },
-    });
-    expect(store.row).toMatchObject({
-      cloudflareCompletedAt: now,
-      privyCompletedAt: now,
-      stripeCompletedAt: now,
-    });
-  });
-
-  it("keeps required vendor cleanup pending while clients are unconfigured", async () => {
-    const store = new CleanupStore();
-    const now = new Date("2026-07-25T18:00:00.000Z");
+    const now = new Date("2026-07-26T18:00:00.000Z");
     mocks.getHostedOnboardingStripe.mockReturnValue(null);
     mocks.deleteHostedPrivyUser.mockResolvedValue(false);
-    const prepared = await prepareHostedAccountDeletionCleanup({
-      now,
+    const prepared = await createCleanup(store, now, {
       privyUserId: "privy_user_1",
-      runtimeMemberIds: ["member_1"],
       stripeCustomerIds: ["cus_1"],
-    });
-    await persistHostedAccountDeletionCleanupTx({
-      cleanup: prepared,
-      prisma: store.prisma as never,
     });
 
     await expect(runHostedAccountDeletionCleanup({
@@ -214,68 +178,20 @@ describe("hosted account deletion cleanup", () => {
     expect(store.row).not.toBeNull();
   });
 
-  it("bounds a stalled target and keeps its durable receipt pending", async () => {
-    vi.useFakeTimers();
-    try {
-      const store = new CleanupStore();
-      const now = new Date("2026-07-25T18:00:00.000Z");
-      mocks.deleteHostedRunnerUserDataBestEffort.mockReturnValueOnce(
-        new Promise(() => undefined),
-      );
-      const prepared = await prepareHostedAccountDeletionCleanup({
-        now,
-        privyUserId: null,
-        runtimeMemberIds: ["member_1"],
-        stripeCustomerIds: [],
-      });
-      await persistHostedAccountDeletionCleanupTx({
-        cleanup: prepared,
-        prisma: store.prisma as never,
-      });
-
-      const run = runHostedAccountDeletionCleanup({
-        cleanupId: prepared.id,
-        now,
-        prisma: store.prisma as never,
-      });
-      await vi.advanceTimersByTimeAsync(5_000);
-
-      await expect(run).resolves.toMatchObject({
-        cleanupPending: true,
-        cloudflare: {
-          deleted: false,
-          errorCode: "ACCOUNT_DELETION_CLEANUP_TIMEOUT",
-        },
-      });
-      expect(store.row).toMatchObject({
-        lastErrorCode: "ACCOUNT_DELETION_CLEANUP_TIMEOUT",
-        nextAttemptAt: new Date("2026-07-25T19:00:00.000Z"),
-      });
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it("treats confirmed vendor absence as idempotent success", async () => {
+  it("treats already-absent vendor records as completed", async () => {
     const store = new CleanupStore();
-    const now = new Date("2026-07-25T18:00:00.000Z");
+    const now = new Date("2026-07-26T18:00:00.000Z");
+    const deleteStripeCustomer = vi.fn().mockRejectedValue({
+      code: "resource_missing",
+      type: "StripeInvalidRequestError",
+    });
     mocks.getHostedOnboardingStripe.mockReturnValue({
-      customers: {
-        del: vi.fn(async () => {
-          throw { code: "resource_missing", type: "StripeInvalidRequestError" };
-        }),
-      },
+      customers: { del: deleteStripeCustomer },
     });
     mocks.deleteHostedPrivyUser.mockRejectedValue({ status: 404 });
-    const prepared = await prepareHostedAccountDeletionCleanup({
-      now,
-      privyUserId: "privy_missing",
-      runtimeMemberIds: ["member_1"],
-      stripeCustomerIds: ["cus_missing"],
-    });
-    await persistHostedAccountDeletionCleanupTx({
-      cleanup: prepared,
-      prisma: store.prisma as never,
+    const prepared = await createCleanup(store, now, {
+      privyUserId: "privy_user_1",
+      stripeCustomerIds: ["cus_1"],
     });
 
     await expect(runHostedAccountDeletionCleanup({
@@ -285,158 +201,283 @@ describe("hosted account deletion cleanup", () => {
     })).resolves.toMatchObject({
       cleanupPending: false,
       vendorAccounts: {
-        privyUser: { status: "completed" },
-        stripeCustomer: { status: "completed" },
+        privyUser: { errorCode: null, status: "completed" },
+        stripeCustomer: { errorCode: null, status: "completed" },
       },
     });
+
     expect(store.row).toBeNull();
+    expect(deleteStripeCustomer).toHaveBeenCalledTimes(1);
+    expect(mocks.deleteHostedPrivyUser).toHaveBeenCalledTimes(1);
   });
 
-  it("backs off a receipt when decrypting its retry payload fails", async () => {
+  it("keeps Privy cleanup pending when the identity is bound to a live member", async () => {
     const store = new CleanupStore();
-    const now = new Date("2026-07-25T18:00:00.000Z");
+    const now = new Date("2026-07-26T18:00:00.000Z");
+    store.livePrivyMemberId = "member_recreated";
+    const prepared = await createCleanup(store, now, {
+      privyUserId: "privy_user_1",
+    });
+
+    await expect(runHostedAccountDeletionCleanup({
+      cleanupId: prepared.id,
+      now,
+      prisma: store.prisma as never,
+    })).resolves.toMatchObject({
+      cleanupPending: true,
+      vendorAccounts: {
+        privyUser: {
+          errorCode: "ACCOUNT_DELETION_PRIVY_IDENTITY_REBOUND",
+          status: "failed",
+        },
+      },
+    });
+
+    expect(mocks.deleteHostedPrivyUser).not.toHaveBeenCalled();
+    expect(store.row?.privyCompletedAt).toBeNull();
+  });
+
+  it("bounds Cloudflare deletion work with a fixed worker pool", async () => {
+    const store = new CleanupStore();
+    const now = new Date("2026-07-26T18:00:00.000Z");
+    let active = 0;
+    let maxActive = 0;
+    mocks.deleteHostedRunnerUserDataBestEffort.mockImplementation(async () => {
+      active += 1;
+      maxActive = Math.max(maxActive, active);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      active -= 1;
+      return makeCloudflareDeletionResult({ deleted: true });
+    });
     const prepared = await prepareHostedAccountDeletionCleanup({
       now,
       privyUserId: null,
-      runtimeMemberIds: ["member_1"],
+      runtimeMemberIds: Array.from({ length: 12 }, (_, index) => `member_${index}`),
       stripeCustomerIds: [],
     });
     await persistHostedAccountDeletionCleanupTx({
       cleanup: prepared,
       prisma: store.prisma as never,
     });
-    mocks.kmsDecrypt.mockRejectedValueOnce(
-      Object.assign(new Error("KMS unavailable"), { code: "KMS_UNAVAILABLE" }),
-    );
 
     await expect(runHostedAccountDeletionCleanup({
       cleanupId: prepared.id,
       now,
       prisma: store.prisma as never,
-    })).rejects.toMatchObject({ code: "KMS_UNAVAILABLE" });
+    })).resolves.toMatchObject({ cleanupPending: false });
 
+    expect(mocks.deleteHostedRunnerUserDataBestEffort).toHaveBeenCalledTimes(12);
+    expect(maxActive).toBe(4);
+  });
+
+  it("does not report completion after losing the receipt lease", async () => {
+    const store = new CleanupStore();
+    const now = new Date("2026-07-26T18:00:00.000Z");
+    store.blockReceiptDelete = true;
+    const prepared = await createCleanup(store, now);
+
+    await expect(runHostedAccountDeletionCleanup({
+      cleanupId: prepared.id,
+      now,
+      prisma: store.prisma as never,
+    })).resolves.toMatchObject({
+      cleanupPending: true,
+      cloudflare: { deleted: true },
+    });
+    expect(store.row).not.toBeNull();
+  });
+
+  it("isolates one broken receipt while draining the retry batch", async () => {
+    const store = new CleanupStore();
+    const now = new Date("2026-07-26T18:00:00.000Z");
+    const prepared = await createCleanup(store, now);
+    mocks.kmsDecrypt.mockRejectedValueOnce(new Error("kms unavailable"));
+
+    await expect(drainHostedAccountDeletionCleanupBatch({
+      now,
+      prisma: store.prisma as never,
+    })).resolves.toEqual({
+      completed: 0,
+      failed: 1,
+      pending: 0,
+      selected: 1,
+    });
     expect(store.row).toMatchObject({
-      lastAttemptedAt: now,
-      lastErrorCode: "KMS_UNAVAILABLE",
-      nextAttemptAt: new Date("2026-07-25T19:00:00.000Z"),
+      attemptCount: 1,
+      leaseToken: null,
+    });
+    expect(store.row?.nextAttemptAt.getTime()).toBeGreaterThan(now.getTime());
+    expect(prepared.id).toBe(store.row?.id);
+  });
+
+  it("returns a pending receipt when external targets exceed the attempt budget", async () => {
+    vi.useFakeTimers();
+    const store = new CleanupStore();
+    const now = new Date("2026-07-26T18:00:00.000Z");
+    mocks.deleteHostedRunnerUserDataBestEffort.mockImplementation(
+      ({ signal }: { signal: AbortSignal }) => new Promise((resolve) => {
+        signal.addEventListener("abort", () => resolve(makeCloudflareDeletionResult({
+          deleted: false,
+          errorCode: "AbortError",
+        })), { once: true });
+      }),
+    );
+    mocks.deleteHostedPrivyUser.mockImplementation(
+      (_userId: string, options: { signal: AbortSignal }) =>
+        new Promise((_resolve, reject) => {
+          options.signal.addEventListener("abort", () => reject(options.signal.reason), {
+            once: true,
+          });
+        }),
+    );
+    mocks.getHostedOnboardingStripe.mockReturnValue({
+      customers: {
+        del: vi.fn((
+          _customerId: string,
+          _params: unknown,
+          options: { timeout: number },
+        ) => new Promise((_resolve, reject) => {
+          setTimeout(() => reject(new Error("Stripe request timed out")), options.timeout);
+        })),
+      },
+    });
+    const prepared = await createCleanup(store, now, {
+      privyUserId: "privy_user_1",
+      stripeCustomerIds: ["cus_1"],
+    });
+
+    const run = runHostedAccountDeletionCleanup({
+      attemptTimeoutMs: 50,
+      cleanupId: prepared.id,
+      now,
+      prisma: store.prisma as never,
+    });
+    await vi.advanceTimersByTimeAsync(50);
+
+    await expect(run).resolves.toMatchObject({
+      cleanupPending: true,
+      cloudflare: {
+        deleted: false,
+        errorCode: "ACCOUNT_DELETION_CLEANUP_TARGET_TIMEOUT",
+      },
+      vendorAccounts: {
+        privyUser: {
+          errorCode: "ACCOUNT_DELETION_CLEANUP_TARGET_TIMEOUT",
+          status: "failed",
+        },
+        stripeCustomer: {
+          errorCode: "ACCOUNT_DELETION_CLEANUP_TARGET_TIMEOUT",
+          status: "failed",
+        },
+      },
+    });
+    expect(store.row).toMatchObject({
+      attemptCount: 1,
+      leaseToken: null,
     });
   });
 
-  it("drains due receipts in bounded order and isolates per-receipt failures", async () => {
-    const now = new Date("2026-07-25T18:00:00.000Z");
-    const rows = new Map<string, CleanupRow>();
-    for (const [id, runtimeMemberId] of [
-      ["cleanup_complete", "member_complete"],
-      ["cleanup_failed", "member_failed"],
-      ["cleanup_pending", "member_pending"],
-    ] as const) {
-      rows.set(id, makeCleanupRow({
-        id,
-        now,
-        payloadCiphertext: Buffer.from(JSON.stringify({
-          privyUserId: null,
-          runtimeMemberIds: [runtimeMemberId],
-          schema: "murph.hosted-account-deletion-cleanup.v1",
-          stripeCustomerIds: [],
-        })).toString("base64"),
-      }));
-    }
-    const hostedAccountDeletionCleanup = {
-      deleteMany: vi.fn(async ({ where }: { where: { id: string } }) => {
-        const deleted = rows.delete(where.id);
-        return { count: deleted ? 1 : 0 };
-      }),
-      findMany: vi.fn(async () => [
-        { id: "cleanup_complete" },
-        { id: "cleanup_failed" },
-        { id: "cleanup_pending" },
-      ]),
-      findUnique: vi.fn(async ({ where }: { where: { id: string } }) =>
-        rows.get(where.id) ?? null
-      ),
-      updateMany: vi.fn(async ({
-        data,
-        where,
-      }: {
-        data: Partial<CleanupRow>;
-        where: { id: string };
-      }) => {
-        const row = rows.get(where.id);
-        if (!row) {
-          return { count: 0 };
-        }
-        rows.set(where.id, { ...row, ...data, updatedAt: now });
-        return { count: 1 };
-      }),
-    };
-    const prisma = { hostedAccountDeletionCleanup };
-    mocks.kmsDecrypt.mockImplementation(async (input: {
-      ciphertext: string;
-    }) => {
-      const plaintext = new Uint8Array(Buffer.from(input.ciphertext, "base64"));
-      const payload = JSON.parse(new TextDecoder().decode(plaintext)) as {
-        runtimeMemberIds?: unknown;
-      };
-      if (
-        Array.isArray(payload.runtimeMemberIds)
-        && payload.runtimeMemberIds.includes("member_failed")
-      ) {
-        throw Object.assign(new Error("KMS unavailable"), { code: "KMS_UNAVAILABLE" });
-      }
-      return { plaintext };
+  it("starts the shared attempt deadline before decrypting the cleanup payload", async () => {
+    vi.useFakeTimers();
+    const store = new CleanupStore();
+    const now = new Date("2026-07-26T18:00:00.000Z");
+    const prepared = await createCleanup(store, now, {
+      privyUserId: "privy_user_1",
+      stripeCustomerIds: ["cus_1"],
     });
-    mocks.deleteHostedRunnerUserDataBestEffort.mockImplementation(
-      async ({ userId }: { userId: string }) =>
-        userId === "member_pending"
-          ? makeCloudflareDeletionResult({ configured: false, deleted: false })
-          : makeCloudflareDeletionResult({ deleted: true }),
+    mocks.kmsDecrypt.mockImplementation(
+      ({ signal }: { signal: AbortSignal }) =>
+        new Promise((_resolve, reject) => {
+          signal.addEventListener("abort", () => reject(signal.reason), {
+            once: true,
+          });
+        }),
     );
-    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
 
-    try {
-      await expect(drainHostedAccountDeletionCleanupBatch({
-        now,
-        prisma: prisma as never,
-      })).resolves.toEqual({
-        completed: 1,
-        failed: 1,
-        pending: 1,
-        selected: 3,
-      });
-    } finally {
-      consoleError.mockRestore();
-    }
+    const run = runHostedAccountDeletionCleanup({
+      attemptTimeoutMs: 50,
+      cleanupId: prepared.id,
+      now,
+      prisma: store.prisma as never,
+    });
+    await vi.advanceTimersByTimeAsync(50);
 
-    expect(hostedAccountDeletionCleanup.findMany).toHaveBeenCalledWith({
-      orderBy: [
-        { nextAttemptAt: "asc" },
-        { createdAt: "asc" },
-      ],
-      select: { id: true },
-      take: 5,
-      where: {
-        nextAttemptAt: { lte: now },
+    await expect(run).rejects.toMatchObject({ name: "TimeoutError" });
+    expect(mocks.kmsDecrypt).toHaveBeenCalledWith(expect.objectContaining({
+      signal: expect.any(AbortSignal),
+    }));
+    expect(mocks.deleteHostedRunnerUserDataBestEffort).not.toHaveBeenCalled();
+    expect(mocks.deleteHostedPrivyUser).not.toHaveBeenCalled();
+    expect(store.row).toMatchObject({
+      attemptCount: 1,
+      leaseToken: null,
+    });
+  });
+
+  it("does not launch queued runtime deletions after the deadline", async () => {
+    vi.useFakeTimers();
+    const store = new CleanupStore();
+    const now = new Date("2026-07-26T18:00:00.000Z");
+    mocks.deleteHostedRunnerUserDataBestEffort.mockImplementation(
+      ({ signal }: { signal: AbortSignal }) => new Promise((resolve) => {
+        signal.addEventListener("abort", () => resolve(makeCloudflareDeletionResult({
+          deleted: false,
+          errorCode: "AbortError",
+        })), { once: true });
+      }),
+    );
+    const prepared = await prepareHostedAccountDeletionCleanup({
+      now,
+      privyUserId: null,
+      runtimeMemberIds: Array.from({ length: 12 }, (_, index) => `member_${index}`),
+      stripeCustomerIds: [],
+    });
+    await persistHostedAccountDeletionCleanupTx({
+      cleanup: prepared,
+      prisma: store.prisma as never,
+    });
+
+    const run = runHostedAccountDeletionCleanup({
+      attemptTimeoutMs: 50,
+      cleanupId: prepared.id,
+      now,
+      prisma: store.prisma as never,
+    });
+    await vi.advanceTimersByTimeAsync(50);
+
+    await expect(run).resolves.toMatchObject({
+      cleanupPending: true,
+      cloudflare: {
+        errorCode: "ACCOUNT_DELETION_CLEANUP_TARGET_TIMEOUT",
       },
     });
-    expect(rows.has("cleanup_complete")).toBe(false);
-    expect(rows.get("cleanup_failed")).toMatchObject({
-      lastAttemptedAt: now,
-      lastErrorCode: "KMS_UNAVAILABLE",
-      nextAttemptAt: new Date("2026-07-25T19:00:00.000Z"),
-    });
-    expect(rows.get("cleanup_pending")).toMatchObject({
-      lastAttemptedAt: now,
-      lastErrorCode: "CLOUDFLARE_NOT_CONFIGURED",
-      nextAttemptAt: new Date("2026-07-25T19:00:00.000Z"),
-    });
-    expect(mocks.deleteHostedRunnerUserDataBestEffort).toHaveBeenCalledWith({
-      context: "account-deletion-cleanup",
-      userId: "member_pending",
-    });
+    expect(mocks.deleteHostedRunnerUserDataBestEffort).toHaveBeenCalledTimes(4);
   });
 });
 
+async function createCleanup(
+  store: CleanupStore,
+  now: Date,
+  input: {
+    privyUserId?: string | null;
+    stripeCustomerIds?: string[];
+  } = {},
+) {
+  const prepared = await prepareHostedAccountDeletionCleanup({
+    now,
+    privyUserId: input.privyUserId ?? null,
+    runtimeMemberIds: ["member_1"],
+    stripeCustomerIds: input.stripeCustomerIds ?? [],
+  });
+  await persistHostedAccountDeletionCleanupTx({
+    cleanup: prepared,
+    prisma: store.prisma as never,
+  });
+  return prepared;
+}
+
 interface CleanupRow {
+  attemptCount: number;
   cloudflareCompletedAt: Date | null;
   createdAt: Date;
   environment: string;
@@ -444,51 +485,61 @@ interface CleanupRow {
   kmsKeyName: string;
   lastAttemptedAt: Date | null;
   lastErrorCode: string | null;
+  leaseExpiresAt: Date | null;
+  leaseToken: string | null;
   nextAttemptAt: Date;
   payloadCiphertext: string;
   privyCompletedAt: Date | null;
+  privyUserLookupKey: string | null;
   stripeCompletedAt: Date | null;
   updatedAt: Date;
 }
 
-function makeCleanupRow(input: {
-  id: string;
-  now: Date;
-  payloadCiphertext: string;
-}): CleanupRow {
-  return {
-    cloudflareCompletedAt: null,
-    createdAt: input.now,
-    environment: "test",
-    id: input.id,
-    kmsKeyName: KMS_KEY_NAME,
-    lastAttemptedAt: null,
-    lastErrorCode: null,
-    nextAttemptAt: input.now,
-    payloadCiphertext: input.payloadCiphertext,
-    privyCompletedAt: input.now,
-    stripeCompletedAt: input.now,
-    updatedAt: input.now,
-  };
-}
+type CleanupWhere = {
+  id?: string;
+  leaseExpiresAt?: null | { lt: Date };
+  leaseToken?: string;
+  nextAttemptAt?: { lte: Date };
+  OR?: CleanupWhere[];
+};
+
+type CleanupUpdate = Partial<Omit<CleanupRow, "attemptCount">> & {
+  attemptCount?: { increment: number };
+};
 
 class CleanupStore {
   blockReceiptDelete = false;
+  livePrivyMemberId: string | null = null;
   row: CleanupRow | null = null;
 
   readonly prisma = {
+    hostedMemberIdentity: {
+      findFirst: async () => this.livePrivyMemberId
+        ? { memberId: this.livePrivyMemberId }
+        : null,
+    },
     hostedAccountDeletionCleanup: {
-      create: async ({ data }: { data: Omit<
-        CleanupRow,
-        "createdAt" | "lastAttemptedAt" | "lastErrorCode" | "updatedAt"
-      > }) => {
-        const now = new Date();
+      create: async ({ data }: {
+        data: Omit<CleanupRow,
+          | "attemptCount"
+          | "createdAt"
+          | "lastAttemptedAt"
+          | "lastErrorCode"
+          | "leaseExpiresAt"
+          | "leaseToken"
+          | "updatedAt"
+        >;
+      }) => {
+        const createdAt = new Date();
         this.row = {
           ...data,
-          createdAt: now,
+          attemptCount: 0,
+          createdAt,
           lastAttemptedAt: null,
           lastErrorCode: null,
-          updatedAt: now,
+          leaseExpiresAt: null,
+          leaseToken: null,
+          updatedAt: createdAt,
         };
         return this.row;
       },
@@ -499,23 +550,32 @@ class CleanupStore {
         this.row = null;
         return { count: 1 };
       },
+      findFirst: async ({ where }: { where: CleanupWhere }) =>
+        this.matches(where) ? this.row : null,
+      findMany: async () => this.row ? [{ id: this.row.id }] : [],
       findUnique: async ({ where }: { where: CleanupWhere }) =>
         this.matches(where) ? this.row : null,
       updateMany: async ({
         data,
         where,
       }: {
-        data: Partial<CleanupRow>;
+        data: CleanupUpdate;
         where: CleanupWhere;
       }) => {
         if (!this.matches(where) || !this.row) {
           return { count: 0 };
         }
+        const increment = typeof data.attemptCount === "object"
+          ? data.attemptCount.increment
+          : null;
         this.row = {
           ...this.row,
           ...data,
+          attemptCount: increment === null
+            ? this.row.attemptCount
+            : this.row.attemptCount + increment,
           updatedAt: new Date(),
-        };
+        } as CleanupRow;
         return { count: 1 };
       },
     },
@@ -529,35 +589,40 @@ class CleanupStore {
     if (where.id !== undefined && where.id !== row.id) {
       return false;
     }
-    for (const [field, filter] of [
-      ["cloudflareCompletedAt", where.cloudflareCompletedAt],
-      ["privyCompletedAt", where.privyCompletedAt],
-      ["stripeCompletedAt", where.stripeCompletedAt],
-    ] as const) {
-      if (filter?.not === null && row[field] === null) {
-        return false;
-      }
+    if (where.leaseToken !== undefined && where.leaseToken !== row.leaseToken) {
+      return false;
+    }
+    if (where.nextAttemptAt?.lte && row.nextAttemptAt > where.nextAttemptAt.lte) {
+      return false;
+    }
+    if (where.OR && !where.OR.some((candidate) => this.matches(candidate))) {
+      return false;
+    }
+    if (where.leaseExpiresAt === null && row.leaseExpiresAt !== null) {
+      return false;
+    }
+    if (
+      typeof where.leaseExpiresAt === "object"
+      && where.leaseExpiresAt?.lt
+      && (!row.leaseExpiresAt || row.leaseExpiresAt >= where.leaseExpiresAt.lt)
+    ) {
+      return false;
     }
     return true;
   }
 }
 
-type CleanupWhere = {
-  cloudflareCompletedAt?: { not: null };
-  id?: string;
-  privyCompletedAt?: { not: null };
-  stripeCompletedAt?: { not: null };
-};
-
 function makeCloudflareDeletionResult(input: {
   configured?: boolean;
   deleted: boolean;
+  errorCode?: string | null;
 }) {
   return {
     alarmCleared: input.deleted,
     configured: input.configured ?? true,
+    deleteAllCompleted: input.deleted,
     deleted: input.deleted,
-    errorCode: null,
+    errorCode: input.errorCode ?? null,
     r2DeletedObjectCount: input.deleted ? 0 : null,
     r2SkippedUserScopedPrefixes: input.deleted ? false : null,
     r2Supported: input.deleted ? true : null,

@@ -25,10 +25,10 @@ Account deletion is intentionally stricter than normal settings reads. Vault exp
 7. All challenge and action routes enforce browser mutation-origin protection and bounded JSON request bodies.
 8. A signature is bound to one member, one app session, one action, and one challenge. Replays, cross-action use, and cross-session use fail closed.
 9. Provider revocation and Retell call-object deletion run before local database deletion while local retry identifiers and token references are still readable. Retell cleanup fails closed on ambiguous provider or local-write outcomes.
-10. Before the hosted member row is removed, the same Prisma transaction persists a foreign-key-free cleanup receipt containing only the encrypted Cloudflare runtime, Stripe customer, and Privy user identifiers required after the local wipe. Receipt creation is fail-closed.
+10. Prisma deletion happens in a single hosted onboarding transaction and explicitly deletes child tables before the hosted member row. That same transaction first inserts a foreign-key-free cleanup receipt whose minimal vendor/runtime identifier payload is KMS-encrypted with receipt- and environment-bound authenticated data.
 11. Account deletion revokes the current hosted app session and clears its browser cookie after the local delete succeeds.
-12. The per-user Temporal runtime workflow is terminated best-effort before deletion starts and twice after the Prisma transaction commits, so live runtime writers are stopped before local rows are removed and stale wake state is neutralized without delaying the deletion response on external cleanup.
-13. Every direct Checkout attempt is an encrypted member-owned row, while Family keeps its single encrypted session in the existing billing attempt owner. Deletion suspends first, expires every known open session, absorbs a completion race into the fail-closed subscription cancellation set, and then snapshots the final Stripe customers for the receipt. Subscription cancellation still fails closed before the Prisma transaction.
+12. The per-user Temporal runtime workflow is terminated best-effort before deletion starts, again after the Prisma transaction commits, and again after Cloudflare runner/R2 cleanup, so live runtime writers are stopped before local rows are removed and stale wake state is neutralized after cleanup.
+13. The Stripe subscription is canceled before the Prisma transaction and fails closed: if the cancel call fails, deletion aborts with a retryable error so a deleted account can never keep an active subscription billing it. Stripe customer, Privy user, Cloudflare runner-state, and R2 deletion run immediately after the local wipe and remain owned by the encrypted cleanup receipt until every target confirms completion.
 
 ## Export contract
 
@@ -65,12 +65,12 @@ The Settings vault export does not include:
 4. Revoke wearable/device provider access with the existing device-sync provider `revokeAccess` hook before local device rows are deleted. Junction-routed Garmin and other Junction sources are deregistered through Junction when configured; providers without a revocation hook remain local-reference deletion only.
 5. Cancel the Stripe subscription fail-closed: a cancel failure or a missing Stripe client while a subscription reference exists aborts deletion with a structured error. An already-canceled or missing subscription counts as done.
 6. Cancel any Family plan Stripe subscriptions owned by the member before local Family group rows are removed. A family cancel failure also aborts deletion fail-closed.
-7. Delete Kernel browser sessions, every Managed Auth connection for the member's profile, and the profile before deleting Prisma-hosted account rows in a transaction. Inside that transaction, persist the encrypted external-cleanup receipt before deleting usage-credit ledger entries, their purchase rows, and the hosted member row. If receipt creation or persistence fails, the transaction aborts before canonical account deletion.
-8. Best-effort terminate the per-user hosted Temporal runtime workflow twice after the Prisma transaction commits.
-9. Return schema `murph.hosted-account-data-deletion-result.v2` immediately with deletion counts, provider revocation outcomes, pending vendor/Cloudflare cleanup status, an explicit `cleanupPending` flag, and retention notes. No post-commit provider call can turn a completed canonical deletion into a request timeout or false failure.
-10. The existing hosted retention sweep selects a bounded receipt batch and attempts receipts concurrently. Within each receipt, Cloudflare Durable Object/R2, Stripe customer, and Privy user deletion run independently with explicit deadlines and record completion only after confirmed deletion or confirmed absence.
-11. If a target is unavailable, unconfigured, times out, or partially fails, retain the receipt with an hourly retry time and skip targets already marked complete. Idempotent provider deletes make overlapping attempts safe without a second lease or scheduler.
-12. Delete the receipt only after all three targets converge. Settings reports deletion as pending while the receipt still owns unfinished work.
+7. Prepare an encrypted, foreign-key-free external-cleanup receipt before suspension. Delete Kernel browser sessions, every Managed Auth connection for the member's profile, and the profile before deleting Prisma-hosted account rows. Inside the canonical deletion transaction, recheck the complete runtime-member set, insert that receipt, then delete usage-credit ledger entries before their purchase rows and delete both before the hosted member row. If receipt preparation, runtime-set proof, or insertion fails, canonical account deletion does not commit.
+8. Best-effort terminate the per-user hosted Temporal runtime workflow again after the Prisma transaction commits.
+9. Immediately attempt the receipt-owned Cloudflare Durable Object/R2, Stripe-customer, and Privy-user cleanup. Persist completion independently per target. Each target has a five-second response-path budget plus a small receipt-settlement margin. Unconfigured, partial, timed-out, and failed targets remain pending.
+10. Best-effort terminate the per-user hosted Temporal runtime workflow again after Cloudflare cleanup, so any sleeping workflow state that survived a concurrent wake attempt is neutralized.
+11. The existing hourly retention sweep claims due receipts with a bounded lease and retries unfinished targets with capped exponential backoff, a fifteen-second target budget, and bounded four-receipt concurrency. A confirmed missing vendor object or absent Durable Object state is idempotent success. Completed targets are not retried, and the receipt is erased only after all targets converge.
+12. Return schema `murph.hosted-account-data-deletion-result.v2` with deletion counts, provider revocation outcomes, vendor account deletion outcomes, Cloudflare cleanup status, `cleanupPending`, and retention notes. Settings shows a pending-cleanup state until that field is false.
 
 ## Store coverage
 
@@ -80,10 +80,12 @@ The Settings vault export does not include:
 | `prisma.hosted_web_session` | Live delete | Metadata/counts | Deletes active and revoked claim-bound app-session authenticators. Export reports counts only and omits session authenticators. |
 | `prisma.hosted_sensitive_action_challenge` | Live delete | Not exported secret | Deletes hashed authorization challenges and durable Assistant approval decisions stored in the same member-scoped table. Raw tokens, signatures, action hashes, and wallet authorization material are never exported. |
 | `prisma.hosted_member_identity` | Live delete | Confirmed data export | Deletes Privy identity and encrypted contact hints. Confirmed export includes decrypted user-facing phone, Privy, and wallet fields while omitting lookup keys and active phone-code attempt IDs. |
+| `prisma.hosted_address_book_projection` | Live delete | Metadata/counts | Deletes the member's opt-in projection revision and enabled state before the member row. Export reports metadata/counts only. |
+| `prisma.hosted_address_book_contact` | Live delete | Not exported secret | Deletes member-scoped phone tokens and encrypted advisory labels before the projection, preventing subsequent advisory lookup. Export never includes tokens, ciphertext, projected names, or third-party phone values. Labels already emitted into model/provider content cannot be recalled. |
 | `prisma.hosted_member_routing` | Live delete | Confirmed data export | Deletes encrypted Linq, Telegram, and reply-alias routing bindings. Confirmed export includes decrypted user-facing routing IDs while omitting lookup keys. |
 | `prisma.hosted_member_email_authorization` | Live delete | Confirmed data export | Deletes verified-email and direct-public-sender authorization records. Confirmed export includes addresses when available while omitting lookup keys. |
 | `prisma.hosted_member_billing_ref` | Local reference delete | Confirmed data export | Deletes local encrypted Stripe references. Confirmed export includes local Stripe customer/subscription references. The Stripe subscription and customer themselves are canceled/deleted by the vendor-account deletion step. |
-| `prisma.hosted_account_deletion_cleanup` | Durable retry owner, then live delete | Not exported secret | Persists a foreign-key-free KMS-encrypted receipt in the canonical deletion transaction. The payload contains only the runtime and vendor identifiers needed for retry, authenticated to the receipt id and environment; per-target completion is monotonic and the receipt is deleted after convergence. |
+| `prisma.hosted_account_deletion_cleanup` | Receipt delete after external convergence | Not exported secret | Foreign-key-free retry owner created atomically before canonical member deletion. Stores only a KMS-encrypted minimal identifier payload, per-target completion, bounded lease, and retry metadata; the hourly retention sweep deletes it after Cloudflare, Stripe-customer, and Privy cleanup all converge. |
 | `prisma.hosted_account_group` | Live delete | Metadata/counts | Deletes Family plan groups owned by the member. Export reports counts only and never exposes other members' private account data. |
 | `prisma.hosted_account_group_membership` | Live delete | Metadata/counts | Deletes the member's Family memberships and memberships in groups they own. Export reports counts only. |
 | `prisma.hosted_account_group_invite` | Live delete | Metadata/counts | Deletes Family invitations sent, accepted, or owned through the member's Family group. Export omits invite codes and private target contact values. |
@@ -122,12 +124,12 @@ The Settings vault export does not include:
 | `prisma.hosted_web_internal_request_nonce` | Live delete | Metadata/counts | Deletes per-user anti-replay nonces. |
 | `prisma.device_webhook_trace` | Live delete | Documented only | Deletes webhook traces for provider accounts linked to the member's device connections when linkage is available. User export omits trace rows and trace counts until the minimized webhook trace model has a safe user linkage. |
 | `kernel.managed_auth_connections` | Live delete | Not exported secret | Deletes durable domain connections, saved credentials, and active login workflows before the member profile. Murph does not persist connection ids or credential values locally. |
-| `cloudflare.runner_durable_object` | Durable retry until confirmed delete or absence | Documented only | Hosted execution control clears user runner SQL state and alarms when configured. |
-| `cloudflare.r2_user_artifacts` | Durable retry until confirmed delete or absence | Documented only | Hosted execution control deletes opaque user bundle, artifact, browser vault replica, runner-secret, and raw-email objects when web-hosted domain root context is available. Root envelopes are canonical in web Postgres. |
+| `cloudflare.runner_durable_object` | Best-effort delete | Documented only | Hosted execution control clears user runner SQL state and alarms when configured. |
+| `cloudflare.r2_user_artifacts` | Best-effort delete | Documented only | Hosted execution control deletes opaque user bundle, artifact, browser vault replica, runner-secret, and raw-email objects when web-hosted domain root context is available. Root envelopes are canonical in web Postgres. |
 | `temporal.per_user_runtime_workflow` | Best-effort delete | Documented only | Account deletion terminates the per-user hosted Temporal runtime workflow before local deletion starts, after the Prisma deletion commits, and after Cloudflare cleanup, stopping live writers before row deletion and neutralizing sleeping wake flags and runtime-result wake state. |
 | `providers.oura_whoop_strava` | Best-effort delete | Metadata/counts | Existing provider revocation hooks run before local token deletion. Provider-side retention remains provider-controlled. |
 | `providers.linq_telegram_email_messages` | Local reference delete | Metadata/counts | Deletes Murph-hosted mailbox and routing records; external carrier, Telegram, Linq, and email-provider copies are outside this endpoint. |
-| `providers.stripe_privy` | Fail-closed subscription cancel; durable customer/user retry | Documented only | Cancels the Stripe subscription before local deletion, then retries Stripe customer and Privy user deletion from the encrypted receipt until confirmed deleted or absent. |
+| `providers.stripe_privy` | Best-effort delete | Documented only | Cancels the Stripe subscription before local deletion (fail-closed), then deletes the Stripe customer and Privy user best-effort after the local wipe. Outcomes are reported in the deletion result. |
 | `backups` | Documented retention | Documented only | Live data is deleted immediately. Backup copies age out under infrastructure retention and must not be restored except under documented recovery controls. |
 
 ## Cloudflare runner and R2 cleanup
@@ -141,11 +143,17 @@ The Durable Object deletion method:
 - reads web-hosted runtime and ingress root context so opaque per-user prefixes can be derived;
 - attempts deletion for user-scoped bundle, artifact, browser vault replica, runner-secret, and raw-email R2 keys when the R2 binding supports deletion/listing;
 - leaves hosted domain root envelopes in web-owned Postgres for the web deletion transaction;
-- treats an already-absent user binding as idempotent success, deletes runner SQL state for that user only, and rejects deletion if the Durable Object is bound to a different user;
-- clears the Durable Object alarm.
+- deletes runner SQL state for that user only and rejects deletion if the Durable Object is bound to a different user;
+- clears the Durable Object alarm and then calls Durable Object storage `deleteAll()` so non-SQL keys cannot survive; already-absent state is retry-safe, and the response must explicitly confirm `deleteAllCompleted`;
 - best-effort destroys the warm runner container for the deleted user so live container state does not linger until normal container expiry.
 
 Container workspace artifacts are covered to the extent they are persisted through the existing R2/runner-state contract. Ephemeral live container filesystem state is not separately addressable by this MVP because the existing worker/container contract does not expose a per-user container filesystem wipe primitive.
+
+A legacy Worker response without `deleteAllCompleted` is intentionally
+nonterminal even when its older alarm and SQL-state booleans are true. Deploy
+the capability-bearing Worker before the receipt-producing web build and keep
+it as the Cloudflare rollback floor. Apply the receipt-table migration before
+deploying web.
 
 ## Temporal workflow cleanup
 
@@ -158,9 +166,24 @@ The hosted runtime reconciliation-facts endpoint also fails closed for stale wor
 Deletion cannot guarantee immediate erasure in systems Murph does not control. The deletion/export result therefore always carries retention notes for:
 
 - Linq, Telegram, carrier, and email-provider copies of messages or routing events already delivered to those external systems;
+- App Server provider threads, Murph session/workspace artifacts, provider
+  messages, recipient devices, and backups that already contain an emitted
+  address-book advisory label; deleting the live projection prevents future
+  lookups but cannot recall that generated content;
 - infrastructure backups and restore media that age out under documented retention.
 
-Stripe and Privy vendor accounts are actively deleted by the deletion workflow itself: the subscription is canceled fail-closed before the local wipe, and the customer and Privy user remain durably owned by the encrypted cleanup receipt afterward until deletion or absence is confirmed. Local usage-credit purchase rows and their encrypted Stripe references are deleted with the account. Stripe retains records it is legally required to keep (for example invoices and payment records) under its own documented processes after the customer object is deleted.
+Stripe and Privy vendor accounts are actively deleted by the deletion workflow itself: the subscription is canceled fail-closed before the local wipe, and the encrypted deletion receipt retains retry ownership for the customer and Privy user afterward. Local usage-credit purchase rows and their encrypted Stripe references are deleted with the account. Stripe retains records it is legally required to keep (for example invoices and payment records) under its own documented processes after the customer object is deleted.
+
+The owner and owned thread-container members are locked and suspended before
+the external-target snapshot is prepared. Runtime, direct and Family Stripe,
+and Privy relationship writers serialize on that lifecycle fence and reject a
+suspended owner; the destructive transaction re-reads the complete target set
+under the same owner-first lock and aborts if it changed. Incomplete cleanup
+receipts keep a searchable non-reversible Privy lookup key so a deleted identity
+cannot be recreated while a delayed retry still owns deletion authority.
+Provider work shares one abortable attempt deadline, with Cloudflare bearer
+acquisition and request execution inside that deadline and runtime deletions
+limited to a fixed worker pool.
 
 Retell call objects are actively deleted before the local wipe. The local phone-call row remains available for retry until Retell confirms deletion or confirms that the object is already absent; account deletion does not report success while a Retell provider id remains.
 
@@ -172,13 +195,11 @@ Retell call objects are actively deleted before the local wipe. The local phone-
 - rejection of lowercase, whitespace-mutated, or missing confirmation payloads;
 - uniqueness and completeness of the store-coverage matrix for every high-value store listed above;
 - non-empty notes plus valid deletion/export modes for each store.
-- deletion ordering that stops the Temporal runtime before local deletion, keeps Cloudflare cleanup after Prisma commit, and skips Cloudflare cleanup when the transaction fails.
+- deletion ordering that stops the Temporal runtime before local deletion, atomically persists cleanup ownership before member removal, keeps external cleanup after Prisma commit, and skips external cleanup when the transaction fails.
 - Temporal workflow termination ordering before deletion, after Prisma commit, and after Cloudflare cleanup, plus hosted reconciliation-facts blocking for deleted, inactive, or unconfigured users.
-- vendor account deletion: Stripe subscription cancel before the local wipe (and abort on failure), Stripe customer and Privy user deletion after it, already-canceled/missing-record skips, not-configured skips, and best-effort failure reporting.
+- durable external cleanup: receipt-bound KMS encryption, atomic receipt ownership, independent target progress, idempotent retry, searchable Privy deletion authority, lifecycle-fenced target snapshots, unconfigured-target and legacy-Worker pending state, abortable provider-attempt deadlines, lease-loss handling, fixed Cloudflare worker concurrency, and bounded batch isolation.
 - Family account cleanup: owned Family subscriptions cancel fail-closed, Family memberships/invites/billing refs are deleted with account rows, and Family Stripe customer references are deduped with direct billing customer cleanup.
 - Retell cleanup: terminal and active provider objects are deleted, active calls stop first, confirmed absence is retry-safe, ambiguous failures retain local provider ids, bounded extra batches require retry, and the final transaction rejects any remaining provider id or active reservation.
 - usage-credit cleanup: store coverage includes purchase and ledger rows, deletion counts both stores, and ledger entries are deleted before purchases and hosted member rows.
-- durable cleanup ownership: receipt creation precedes member deletion, receipt payloads are KMS-encrypted with receipt-bound authenticated data, the route never waits on post-commit providers, per-target attempts are deadline-bounded, partial progress is monotonic, completed targets are skipped on retry, unconfigured targets remain pending, and a receipt cannot report convergence if its final delete fails.
-- subscription Checkout fencing: every direct attempt has an encrypted member-owned reference and Family retains its single encrypted billing-attempt reference; creation re-locks before returning a URL, deletion expires all open sessions before its final billing snapshot, and a completion race contributes its subscription/customer to fail-closed cancellation and durable cleanup.
 
 Any future account data store should update `HOSTED_ACCOUNT_DATA_STORE_COVERAGE`, the deletion/export implementation, this document, and the coverage test in the same change.

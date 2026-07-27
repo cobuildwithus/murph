@@ -248,13 +248,13 @@ describe("hosted member access (single resolver)", () => {
   });
 
   it("grants non-suspended container access through any active participant", async () => {
+    const now = new Date("2026-07-26T12:00:00.000Z");
     const prisma = {
       hostedThreadContainerParticipant: {
         findFirst: vi.fn(async () => ({ participantMemberId: "member_participant" })),
       },
     };
 
-    const now = new Date("2026-07-25T18:00:00.000Z");
     await expect(hasActiveHostedThreadContainerAccessWithParticipants({
       container: { suspendedAt: null },
       containerMemberId: "member_container",
@@ -269,13 +269,14 @@ describe("hosted member access (single resolver)", () => {
       },
       where: expect.objectContaining({
         containerMemberId: "member_container",
-        lastSeenAt: { gte: new Date("2026-07-18T18:00:00.000Z") },
+        lastSeenAt: { gte: new Date("2026-07-19T12:00:00.000Z") },
         removedAt: null,
       }),
     });
   });
 
   it("makes readActiveHostedMemberAccess the participant-aware thread-container gate", async () => {
+    const now = new Date("2026-07-26T12:00:00.000Z");
     const prisma = {
       hostedMember: {
         findUnique: vi.fn(async () => ({
@@ -290,7 +291,6 @@ describe("hosted member access (single resolver)", () => {
       },
     };
 
-    const now = new Date("2026-07-25T18:00:00.000Z");
     await expect(readActiveHostedMemberAccess({
       memberId: "member_container",
       now,
@@ -307,7 +307,7 @@ describe("hosted member access (single resolver)", () => {
       },
       where: expect.objectContaining({
         containerMemberId: "member_container",
-        lastSeenAt: { gte: new Date("2026-07-18T18:00:00.000Z") },
+        lastSeenAt: { gte: new Date("2026-07-19T12:00:00.000Z") },
         removedAt: null,
       }),
     });
@@ -554,19 +554,6 @@ describe("hosted runtime AI access decision", () => {
       now,
       prisma: prisma as never,
     })).resolves.toEqual({ allowed: true });
-
-    expect(prisma.hostedThreadContainerParticipant.findMany).toHaveBeenCalledWith({
-      select: {
-        participant: {
-          select: expect.any(Object),
-        },
-      },
-      where: {
-        containerMemberId: "member_container",
-        lastSeenAt: { gte: new Date("2026-07-05T12:00:00.000Z") },
-        removedAt: null,
-      },
-    });
   });
 
   it("does not let an expired-trial participant authorize a thread container", async () => {

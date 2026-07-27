@@ -20,13 +20,13 @@ import {
 import {
   readCurrentHostedMemberDirectRoute,
 } from "@/src/lib/hosted-routing/member-direct-route";
-import { assertHostedLaunchRequiredConsentGranted } from "@/src/lib/legal/consent";
+import { assertHostedHistoricalLaunchConsentGranted } from "@/src/lib/legal/consent";
 import { getPrisma } from "@/src/lib/prisma";
 
 export const POST = withJsonError(async (request: Request) => {
   const prisma = getPrisma();
   const auth = await requireActivePrivyMemberAuthFromBearerToken(request, prisma);
-  await assertHostedLaunchRequiredConsentGranted({
+  await assertHostedHistoricalLaunchConsentGranted({
     memberId: auth.member.id,
     prisma,
   });

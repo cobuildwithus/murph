@@ -21,9 +21,6 @@ import {
   WebmailIcon,
 } from "@/src/components/settings/hosted-email-murph-contact-dialog";
 import {
-  HostedAccountDeletionStatusAlert,
-} from "@/src/components/settings/hosted-data-privacy-settings";
-import {
   ASSISTANT_MODEL_CHOICE_CARD_CLASSES,
   AssistantModelArtwork,
 } from "@/src/components/settings/assistant-model-artwork";
@@ -95,23 +92,17 @@ import type { HostedConsentStatus } from "@/src/lib/legal/consent";
 import { buildWhoopAppleHealthSetupGuide } from "@/src/lib/device-sync/whoop-apple-health-setup-guide";
 import { MurphAssistantStylePicker } from "@/src/components/murph/murph-assistant-style-picker";
 import { HostedFamilyManager } from "@/src/components/settings/hosted-family-settings-actions";
+import { PulseTrialBillingContinuationView } from "@/src/components/settings/hosted-start-paid-pulse-button";
 import { MurphPersonalitySettingsDialog } from "@/src/components/settings/murph-personality-settings-dialog";
 import { MURPH_TELEGRAM_URL } from "@/src/lib/murph-contact-routing";
 import { DESIGN_USAGE_OFFERS } from "./group-usage-funding-study";
 import { HostedUsageTopUpDialog } from "@/src/components/settings/hosted-usage-top-up-dialog";
+import { HostedAccountDeletionStatus } from "@/src/components/settings/hosted-data-privacy-settings";
 import { GarminHistoricalDataDialog } from "../(dashboard)/connect/connect-page-dialogs";
 
-function Section({
-  children,
-  id,
-  title,
-}: {
-  children: React.ReactNode;
-  id?: string;
-  title: string;
-}) {
+function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div id={id} className="flex scroll-mt-24 flex-col gap-6">
+    <div className="flex flex-col gap-6">
       <h2 className="font-mono text-xs uppercase tracking-[0.12em] text-muted-foreground">{title}</h2>
       {children}
     </div>
@@ -338,6 +329,20 @@ export function ComponentsContent() {
           <h1 className="font-serif text-4xl font-semibold tracking-tight text-foreground">Components</h1>
           <p className="mt-2 text-sm text-muted-foreground">Shadcn base UI + custom Murph components. Colors and typography live in the Brand tab.</p>
         </div>
+
+        <Separator />
+
+        <Section title="Pulse billing return confirmation">
+          <div inert>
+            <PulseTrialBillingContinuationView
+              action="start_pulse_now"
+              errorMessage={null}
+              onConfirm={() => {}}
+              onDismiss={() => {}}
+              status="confirming"
+            />
+          </div>
+        </Section>
 
         <Separator />
 
@@ -698,14 +703,10 @@ export function ComponentsContent() {
 
         <Separator />
 
-        <Section id="account-deletion-status" title="Account deletion status">
-          <div
-            data-design-component="account-deletion-status"
-            className="grid gap-4 md:grid-cols-2"
-            inert
-          >
-            <HostedAccountDeletionStatusAlert cleanupPending={false} />
-            <HostedAccountDeletionStatusAlert cleanupPending />
+        <Section title="Account Deletion Status">
+          <div className="grid gap-4 lg:grid-cols-2">
+            <HostedAccountDeletionStatus cleanupPending={false} />
+            <HostedAccountDeletionStatus cleanupPending />
           </div>
         </Section>
 

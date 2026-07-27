@@ -237,6 +237,7 @@ beforeEach(() => {
 
 function buildLinqMessageReceivedEvent(input: {
   chatId?: string;
+  createdAt?: string;
   eventId?: string;
   isFromMe?: boolean;
   isGroup?: boolean | null;
@@ -250,7 +251,7 @@ function buildLinqMessageReceivedEvent(input: {
   const service = input.service ?? "iMessage";
   return {
     api_version: "2026-01-01",
-    created_at: "2026-06-24T12:00:00.000Z",
+    created_at: input.createdAt ?? "2026-06-24T12:00:00.000Z",
     data: {
       chat: {
         id: input.chatId ?? "chat_group_123",
@@ -279,7 +280,7 @@ function buildLinqMessageReceivedEvent(input: {
       },
       preferred_service: service,
       recipient_phone: recipient,
-      received_at: "2026-06-24T12:00:00.000Z",
+      received_at: input.createdAt ?? "2026-06-24T12:00:00.000Z",
       sender_handle: {
         handle: input.sender ?? "+15551112222",
         id: "sender_handle_123",
@@ -1131,6 +1132,35 @@ function restoreEnvValue(key: string, value: string | undefined): void {
 }
 
 describe("Linq explicit external-thread routing", () => {
+  it("locks and rejects a suspended owner before creating a thread container", async () => {
+    const prisma = createStatefulThreadRoutePrisma();
+    vi.mocked(hostedMemberStore.readHostedMemberCoreState).mockResolvedValue({
+      billingStatus: HostedBillingStatus.active,
+      createdAt: new Date("2026-06-24T00:00:00.000Z"),
+      id: "member_owner_123",
+      suspendedAt: new Date("2026-06-24T00:01:00.000Z"),
+      updatedAt: new Date("2026-06-24T00:01:00.000Z"),
+    });
+
+    await expect(
+      ensureHostedThreadContainerRouteTx({
+        accountLookupKey: createHostedPhoneLookupKey("+15550000000"),
+        channel: "linq",
+        occurredAt: new Date("2026-06-24T00:02:00.000Z"),
+        ownerMemberId: "member_owner_123",
+        prisma: prisma as unknown as Prisma.TransactionClient,
+        threadId: "chat_suspended_123",
+      }),
+    ).rejects.toMatchObject({
+      code: "HOSTED_MEMBER_SUSPENDED",
+    });
+
+    expect(prisma.$queryRaw).toHaveBeenCalledOnce();
+    expect(hostedMemberStore.createHostedMember).not.toHaveBeenCalled();
+    expect(prisma.hostedThreadContainer.create).not.toHaveBeenCalled();
+    expect(prisma.hostedThreadRoute.create).not.toHaveBeenCalled();
+  });
+
   it("rejects thread containers as owners of nested thread containers", async () => {
     const prisma = createStatefulThreadRoutePrisma();
     prisma.seedThreadContainer({
@@ -2660,7 +2690,7 @@ describe("Linq explicit external-thread routing", () => {
     });
   });
 
-  it("refreshes a quiet active participant from the authoritative roster before denying traffic", async () => {
+  it("does not let another quiet participant authorize an unverified sender", async () => {
     const restoreKeyring = configureHostedContactPrivacyKeyringForTest({
       currentVersion: "v2",
       entries: TEST_KEYRING_ENTRIES,
@@ -2713,35 +2743,14 @@ describe("Linq explicit external-thread routing", () => {
       });
 
       expect(plan.response).toMatchObject({
-        ignored: false,
+        ignored: true,
         ok: true,
-        reason: "wake-appended-thread-route",
+        reason: "thread-container-inactive",
       });
-      expect(linqClient.getHostedLinqChatHandles).toHaveBeenCalledWith({
-        chatId: "chat_group_123",
-        timeoutMs: 1_500,
-      });
-      expect(prisma.hostedThreadContainerParticipant.findMany).toHaveBeenCalledWith({
-        orderBy: { lastSeenAt: "desc" },
-        select: {
-          handleLookupKey: true,
-          participantMemberId: true,
-        },
-        where: expect.objectContaining({
-          containerMemberId: "member_thread_container_123",
-          participant: expect.any(Object),
-          removedAt: null,
-        }),
-      });
-      expect(prisma.hostedThreadContainerParticipant.updateMany).toHaveBeenCalledWith({
-        data: { lastSeenAt: expect.any(Date) },
-        where: {
-          containerMemberId: "member_thread_container_123",
-          lastSeenAt: { lt: expect.any(Date) },
-          participantMemberId: "member_active_participant_123",
-          removedAt: null,
-        },
-      });
+      expect(linqClient.getHostedLinqChatHandles).not.toHaveBeenCalled();
+      expect(prisma.hostedThreadContainerParticipant.findMany).not.toHaveBeenCalled();
+      expect(prisma.hostedThreadContainerParticipant.updateMany).not.toHaveBeenCalled();
+      expect(prisma.hostedThreadContainerParticipant.upsert).not.toHaveBeenCalled();
     } finally {
       restoreKeyring();
     }
@@ -3280,6 +3289,42 @@ describe("Linq group chat auto-provision", () => {
       }
     },
   );
+
+  it("renews only the authenticated sender's existing roster lease on routed inbound", async () => {
+    const prisma = createStatefulThreadRoutePrisma();
+    seedExistingGroupRoute(prisma);
+    mockSenderLookup(senderCore);
+    mockAllowedThreadUsage();
+    vi.mocked(prismaModule.getPrisma).mockReturnValue(prisma as never);
+    vi.mocked(linqModule.verifyAndParseHostedLinqWebhookRequest).mockReturnValue(
+      buildLinqMessageReceivedEvent({
+        createdAt: "2026-07-25T12:00:00.000Z",
+        isGroup: true,
+      }) as never,
+    );
+    vi.mocked(linqClient.getHostedLinqChatHandles).mockResolvedValue([]);
+
+    await expect(handleHostedOnboardingLinqWebhook({
+      rawBody: "{}",
+      signature: null,
+      timestamp: null,
+    })).resolves.toMatchObject({
+      ignored: false,
+      ok: true,
+      reason: "wake-appended-thread-route",
+    });
+
+    expect(prisma.hostedThreadContainerParticipant.updateMany).toHaveBeenCalledWith({
+      data: { lastSeenAt: new Date("2026-07-25T12:00:00.000Z") },
+      where: {
+        containerMemberId: "member_thread_container_123",
+        lastSeenAt: { lt: new Date("2026-07-25T12:00:00.000Z") },
+        participantMemberId: "member_owner_123",
+        removedAt: null,
+      },
+    });
+    expect(prisma.hostedThreadContainerParticipant.upsert).not.toHaveBeenCalled();
+  });
 
   it("fails closed as group when the pre-read route disappears before planning", async () => {
     const prisma = createStatefulThreadRoutePrisma();

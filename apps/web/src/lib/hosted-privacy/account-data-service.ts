@@ -18,6 +18,7 @@ import {
 } from "../connected-apps/config";
 import { resolveHostedDeviceSyncBrowserProviderLabel } from "../device-sync/provider-label";
 import { acquireHostedWebhookTraceOwnerLockTx } from "../device-sync/webhook-trace-owner-lock";
+import { createHostedPrivyUserLookupKey } from "../hosted-onboarding/contact-privacy";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import { readHostedMemberStripeBillingRef } from "../hosted-onboarding/hosted-member-billing-store";
 import { readHostedMemberIdentity } from "../hosted-onboarding/hosted-member-identity-store";
@@ -102,6 +103,18 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
     note: "Confirmed export includes decrypted user-facing phone, Privy, and wallet identity fields while omitting lookup keys and active phone-code attempt IDs.",
   },
   {
+    slug: "prisma.hosted_address_book_projection",
+    label: "Optional address-book projection state",
+    deletion: "live-delete",
+    note: "Deletes sharing status, mutation history, revision, and retention timestamps. Export reports status and counts only, never mutation identifiers.",
+  },
+  {
+    slug: "prisma.hosted_address_book_contact",
+    label: "Encrypted address-book advisory names and member-scoped phone tokens",
+    deletion: "live-delete",
+    note: "Deletes every encrypted advisory name and keyed phone token before the projection owner. Export omits names, ciphertext, tokens, and token versions.",
+  },
+  {
     slug: "prisma.hosted_member_routing",
     label: "Linq, Telegram, reply-alias routing bindings",
     deletion: "live-delete",
@@ -183,7 +196,7 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
     slug: "prisma.hosted_account_deletion_cleanup",
     label: "Encrypted account-deletion cleanup receipt",
     deletion: "documented-retention",
-    note: "Creates a minimal encrypted retry receipt atomically with account deletion, retries external cleanup through the existing retention sweep, and removes the receipt after Cloudflare, Stripe, and Privy converge.",
+    note: "Creates a minimal encrypted retry receipt atomically with account deletion and removes it after Cloudflare, Stripe, and Privy cleanup converges.",
   },
   {
     slug: "prisma.hosted_mailbox_item",
@@ -629,37 +642,40 @@ export async function deleteHostedAccountData(input: {
     });
   }
 
-  const identity = await readHostedMemberIdentity({
-    memberId: input.memberId,
-    prisma: input.prisma,
-  });
-  const privyUserId = identity?.privyUserId ?? null;
-  const ownedThreadContainerMemberIds = await listOwnedHostedThreadContainerMemberIds({
+  const deletionStartedAt = new Date();
+  const deletionMemberIds = await markHostedMembersSuspendedForAccountDeletion({
+    now: deletionStartedAt,
     ownerMemberId: input.memberId,
     prisma: input.prisma,
   });
-  const deletionMemberIds = uniqueStrings([
-    input.memberId,
-    ...ownedThreadContainerMemberIds,
-  ]);
-
-  const deletionStartedAt = new Date();
-  await markHostedMembersSuspendedForAccountDeletion({
-    memberIds: deletionMemberIds,
-    now: deletionStartedAt,
-    prisma: input.prisma,
-  });
-  const billing = await closeHostedSubscriptionCheckoutsForAccountDeletion({
+  // The suspension fence is committed before provider identifiers are
+  // decrypted so relationship writers cannot add ownership outside this
+  // durable cleanup snapshot.
+  const deletionTargets = await readHostedAccountDeletionExternalTargets({
     memberId: input.memberId,
     prisma: input.prisma,
   });
+  const terminalCheckoutTargets = await closeHostedSubscriptionCheckoutsForAccountDeletion({
+    memberId: input.memberId,
+    sessionIds: deletionTargets.stripeCheckoutSessionIds,
+  });
+  const stripeCustomerIds = dedupeNullableStrings([
+    ...deletionTargets.stripeCustomerIds,
+    ...terminalCheckoutTargets.stripeCustomerIds,
+  ]);
+  const stripeSubscriptionIds = dedupeNullableStrings([
+    ...deletionTargets.stripeSubscriptionIds,
+    ...terminalCheckoutTargets.stripeSubscriptionIds,
+  ]);
+
   let preparedCleanup: PreparedHostedAccountDeletionCleanup;
   try {
     preparedCleanup = await prepareHostedAccountDeletionCleanup({
       now: deletionStartedAt,
-      privyUserId,
+      privyUserId: deletionTargets.privyUserId,
       runtimeMemberIds: deletionMemberIds,
-      stripeCustomerIds: billing.stripeCustomerIds,
+      stripeCustomerIds,
+      stripeSubscriptionIds,
     });
   } catch (error) {
     throw hostedOnboardingError({
@@ -704,7 +720,7 @@ export async function deleteHostedAccountData(input: {
   // a deleted account must never keep an active Stripe subscription billing it.
   const stripeSubscription = await cancelHostedStripeSubscriptionsForAccountDeletion({
     memberId: input.memberId,
-    stripeSubscriptionIds: billing.stripeSubscriptionIds,
+    stripeSubscriptionIds,
   });
   await closeHostedUsageCreditPurchasesForAccountDeletion({
     memberIds: deletionMemberIds,
@@ -718,6 +734,10 @@ export async function deleteHostedAccountData(input: {
     });
   }
   const databaseDeletion: HostedAccountDeletionDatabaseResult = await input.prisma.$transaction(async (tx) => {
+    await lockHostedMemberForAccountDeletionTx({
+      memberId: input.memberId,
+      prisma: tx,
+    });
     const transactionDeletionMemberIds = uniqueStrings([
       input.memberId,
       ...await listOwnedHostedThreadContainerMemberIds({
@@ -726,7 +746,7 @@ export async function deleteHostedAccountData(input: {
       }),
     ]);
 
-    for (const memberId of transactionDeletionMemberIds) {
+    for (const memberId of transactionDeletionMemberIds.slice(1)) {
       await lockHostedMemberForAccountDeletionTx({
         memberId,
         prisma: tx,
@@ -735,6 +755,10 @@ export async function deleteHostedAccountData(input: {
     await refreshHostedMembersAccountDeletionFenceTx({
       memberIds: transactionDeletionMemberIds,
       now: deletionStartedAt,
+      prisma: tx,
+    });
+    const transactionDeletionTargets = await readHostedAccountDeletionExternalTargets({
+      memberId: input.memberId,
       prisma: tx,
     });
     await assertHostedUsageCreditPurchasesReadyForAccountDeletionTx({
@@ -765,14 +789,14 @@ export async function deleteHostedAccountData(input: {
       connectionIdentities: deviceConnectionIdentities,
       prisma: tx,
     });
-    if (!haveSameStrings(transactionDeletionMemberIds, preparedCleanup.runtimeMemberIds)) {
-      throw hostedOnboardingError({
-        code: "ACCOUNT_DELETION_RUNTIME_SET_CHANGED",
-        httpStatus: 503,
-        message: "Your account changed during deletion. Retry so all hosted runtimes are included.",
-        retryable: true,
-      });
-    }
+    assertHostedAccountDeletionTargetsUnchanged({
+      current: {
+        ...transactionDeletionTargets,
+        runtimeMemberIds: transactionDeletionMemberIds,
+      },
+      expected: deletionTargets,
+      prepared: preparedCleanup,
+    });
     await persistHostedAccountDeletionCleanupTx({
       cleanup: preparedCleanup,
       prisma: tx,
@@ -913,13 +937,79 @@ async function listOwnedHostedThreadContainerMemberIds(input: {
   return rows.map((row) => row.memberId);
 }
 
+interface HostedAccountDeletionExternalTargets {
+  directStripeSubscriptionId: string | null;
+  familyStripeSubscriptionIds: string[];
+  privyUserId: string | null;
+  stripeCheckoutSessionIds: string[];
+  stripeCustomerIds: string[];
+  stripeSubscriptionIds: string[];
+}
+
+async function readHostedAccountDeletionExternalTargets(input: {
+  memberId: string;
+  prisma: HostedAccountDataPrisma;
+}): Promise<HostedAccountDeletionExternalTargets> {
+  const [billingRef, directCheckoutSessionIds, identity, familyBillingRefs] = await Promise.all([
+    readHostedMemberStripeBillingRef({
+      memberId: input.memberId,
+      prisma: input.prisma,
+    }),
+    listHostedMemberSubscriptionCheckoutSessionIds({
+      memberId: input.memberId,
+      prisma: input.prisma,
+    }),
+    readHostedMemberIdentity({
+      memberId: input.memberId,
+      prisma: input.prisma,
+    }),
+    listHostedFamilyBillingRefsOwnedByMember({
+      memberId: input.memberId,
+      prisma: input.prisma,
+    }),
+  ]);
+  const directStripeSubscriptionId = billingRef?.stripeSubscriptionId ?? null;
+  const familyStripeSubscriptionIds = dedupeNullableStrings(
+    familyBillingRefs.map((billing) => billing.stripeSubscriptionId),
+  );
+
+  return {
+    directStripeSubscriptionId,
+    familyStripeSubscriptionIds,
+    privyUserId: identity?.privyUserId ?? null,
+    stripeCheckoutSessionIds: dedupeNullableStrings([
+      ...directCheckoutSessionIds,
+      ...familyBillingRefs.map((billing) => billing.stripeCheckoutSessionId),
+    ]),
+    stripeCustomerIds: dedupeNullableStrings([
+      billingRef?.stripeCustomerId ?? null,
+      ...familyBillingRefs.map((billing) => billing.stripeCustomerId),
+    ]),
+    stripeSubscriptionIds: dedupeNullableStrings([
+      directStripeSubscriptionId,
+      ...familyStripeSubscriptionIds,
+    ]),
+  };
+}
+
 async function markHostedMembersSuspendedForAccountDeletion(input: {
-  memberIds: readonly string[];
   now: Date;
+  ownerMemberId: string;
   prisma: PrismaClient;
-}): Promise<void> {
-  await input.prisma.$transaction(async (tx) => {
-    for (const memberId of input.memberIds) {
+}): Promise<string[]> {
+  return input.prisma.$transaction(async (tx) => {
+    await lockHostedMemberForAccountDeletionTx({
+      memberId: input.ownerMemberId,
+      prisma: tx,
+    });
+    const memberIds = uniqueStrings([
+      input.ownerMemberId,
+      ...await listOwnedHostedThreadContainerMemberIds({
+        ownerMemberId: input.ownerMemberId,
+        prisma: tx,
+      }),
+    ]);
+    for (const memberId of memberIds.slice(1)) {
       await lockHostedMemberForAccountDeletionTx({
         memberId,
         prisma: tx,
@@ -930,10 +1020,10 @@ async function markHostedMembersSuspendedForAccountDeletion(input: {
         suspendedAt: input.now,
       },
       where: {
-        id: buildStringInFilter(input.memberIds),
-        suspendedAt: null,
+        id: buildStringInFilter(memberIds),
       },
     });
+    return memberIds;
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
 }
 
@@ -959,6 +1049,42 @@ function uniqueStrings(values: readonly string[]): string[] {
 function haveSameStrings(left: readonly string[], right: readonly string[]): boolean {
   const rightSet = new Set(right);
   return left.length === rightSet.size && left.every((value) => rightSet.has(value));
+}
+
+function assertHostedAccountDeletionTargetsUnchanged(input: {
+  current: HostedAccountDeletionExternalTargets & {
+    runtimeMemberIds: readonly string[];
+  };
+  expected: HostedAccountDeletionExternalTargets;
+  prepared: PreparedHostedAccountDeletionCleanup;
+}): void {
+  if (!haveSameStrings(input.current.runtimeMemberIds, input.prepared.runtimeMemberIds)) {
+    throw hostedOnboardingError({
+      code: "ACCOUNT_DELETION_RUNTIME_SET_CHANGED",
+      httpStatus: 503,
+      message: "Your account changed during deletion. Retry so every hosted runtime is included.",
+      retryable: true,
+    });
+  }
+  const currentPrivyUserLookupKey = createHostedPrivyUserLookupKey(
+    input.current.privyUserId,
+  );
+  if (
+    currentPrivyUserLookupKey !== input.prepared.privyUserLookupKey
+    || !haveSameStrings(input.current.stripeCheckoutSessionIds, input.expected.stripeCheckoutSessionIds)
+    || !haveSameStrings(input.current.stripeCustomerIds, input.expected.stripeCustomerIds)
+    || !haveSameStrings(
+      input.current.stripeSubscriptionIds,
+      input.expected.stripeSubscriptionIds,
+    )
+  ) {
+    throw hostedOnboardingError({
+      code: "ACCOUNT_DELETION_EXTERNAL_TARGET_SET_CHANGED",
+      httpStatus: 503,
+      message: "Your account changed during deletion. Retry so every provider record is included.",
+      retryable: true,
+    });
+  }
 }
 
 function buildStringInFilter(values: readonly string[]): string | { in: string[] } {
@@ -1029,72 +1155,60 @@ async function assertNoConnectedAppWritesAfterProviderCleanupTx(input: {
 
 async function closeHostedSubscriptionCheckoutsForAccountDeletion(input: {
   memberId: string;
-  prisma: HostedAccountDataPrisma;
+  sessionIds: readonly string[];
 }): Promise<{
   stripeCustomerIds: string[];
   stripeSubscriptionIds: string[];
 }> {
-  const directBillingRef = await readHostedMemberStripeBillingRef({
-    memberId: input.memberId,
-    prisma: input.prisma,
-  });
-  const directCheckoutSessionIds =
-    await listHostedMemberSubscriptionCheckoutSessionIds({
-      memberId: input.memberId,
-      prisma: input.prisma,
+  if (input.sessionIds.length === 0) {
+    return {
+      stripeCustomerIds: [],
+      stripeSubscriptionIds: [],
+    };
+  }
+
+  const stripe = getHostedOnboardingStripe();
+  if (!stripe) {
+    throw hostedOnboardingError({
+      code: "ACCOUNT_DELETION_STRIPE_NOT_CONFIGURED",
+      httpStatus: 500,
+      message: "Billing is not configured, so your Checkout could not be closed. Contact support to delete your account.",
     });
-  const familyBillingRefs = await listHostedFamilyBillingRefsOwnedByMember(input);
-  const checkoutSessionIds = dedupeNullableStrings([
-    ...directCheckoutSessionIds,
-    ...familyBillingRefs.map((billingRef) => billingRef.stripeCheckoutSessionId),
-  ]);
+  }
+
   const terminalCheckouts: Array<
     Awaited<ReturnType<typeof retrieveAndExpireHostedSubscriptionCheckout>>
   > = [];
-  if (checkoutSessionIds.length > 0) {
-    const stripe = getHostedOnboardingStripe();
-    if (!stripe) {
-      throw hostedOnboardingError({
-        code: "ACCOUNT_DELETION_STRIPE_NOT_CONFIGURED",
-        httpStatus: 500,
-        message: "Billing is not configured, so your Checkout could not be closed. Contact support to delete your account.",
+  for (const sessionId of input.sessionIds) {
+    try {
+      const terminal = await retrieveAndExpireHostedSubscriptionCheckout({
+        sessionId,
+        stripe,
       });
-    }
-    for (const sessionId of checkoutSessionIds) {
-      try {
-        const terminal = await retrieveAndExpireHostedSubscriptionCheckout({
-          sessionId,
-          stripe,
-        });
-        if (terminal.status === "complete" && !terminal.subscriptionId) {
-          throw new TypeError(
-            "Completed Stripe subscription Checkout is missing its subscription.",
-          );
-        }
-        terminalCheckouts.push(terminal);
-      } catch (error) {
-        throw hostedOnboardingError({
-          code: "ACCOUNT_DELETION_STRIPE_CHECKOUT_CLOSE_FAILED",
-          details: { cause: safeErrorCode(error) },
-          httpStatus: 502,
-          message: "We could not close your active billing Checkout. Retry account deletion, or contact support if it keeps failing.",
-          retryable: true,
-        });
+      if (terminal.status === "complete" && !terminal.subscriptionId) {
+        throw new TypeError(
+          "Completed Stripe subscription Checkout is missing its subscription.",
+        );
       }
+      terminalCheckouts.push(terminal);
+    } catch (error) {
+      throw hostedOnboardingError({
+        code: "ACCOUNT_DELETION_STRIPE_CHECKOUT_CLOSE_FAILED",
+        details: { cause: safeErrorCode(error) },
+        httpStatus: 502,
+        message: "We could not close your active billing Checkout. Retry account deletion, or contact support if it keeps failing.",
+        retryable: true,
+      });
     }
   }
 
   return {
-    stripeCustomerIds: dedupeNullableStrings([
-      directBillingRef?.stripeCustomerId ?? null,
-      ...familyBillingRefs.map((billingRef) => billingRef.stripeCustomerId),
-      ...terminalCheckouts.map((checkout) => checkout.customerId),
-    ]),
-    stripeSubscriptionIds: dedupeNullableStrings([
-      directBillingRef?.stripeSubscriptionId ?? null,
-      ...familyBillingRefs.map((billingRef) => billingRef.stripeSubscriptionId),
-      ...terminalCheckouts.map((checkout) => checkout.subscriptionId),
-    ]),
+    stripeCustomerIds: dedupeNullableStrings(
+      terminalCheckouts.map((checkout) => checkout.customerId),
+    ),
+    stripeSubscriptionIds: dedupeNullableStrings(
+      terminalCheckouts.map((checkout) => checkout.subscriptionId),
+    ),
   };
 }
 
@@ -1262,6 +1376,8 @@ async function deleteHostedAccountPrismaRows(input: {
   record("prisma.hosted_invite", await input.prisma.hostedInvite.deleteMany({ where: { memberId: memberIdFilter } }));
   record("prisma.hosted_consent_event", await input.prisma.hostedConsentEvent.deleteMany({ where: { memberId: memberIdFilter } }));
   record("prisma.hosted_consent_grant", await input.prisma.hostedConsentGrant.deleteMany({ where: { memberId: memberIdFilter } }));
+  record("prisma.hosted_address_book_contact", await input.prisma.hostedAddressBookContact.deleteMany({ where: { memberId: memberIdFilter } }));
+  record("prisma.hosted_address_book_projection", await input.prisma.hostedAddressBookProjection.deleteMany({ where: { memberId: memberIdFilter } }));
   record("prisma.hosted_workspace", await input.prisma.hostedWorkspace.deleteMany({ where: { userId: memberIdFilter } }));
   record("prisma.hosted_computer_handoff", await input.prisma.hostedComputerHandoff.deleteMany({ where: { memberId: memberIdFilter } }));
   record("prisma.hosted_computer_run", await input.prisma.hostedComputerRun.deleteMany({ where: { memberId: memberIdFilter } }));

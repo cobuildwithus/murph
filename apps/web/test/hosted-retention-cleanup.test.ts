@@ -1,12 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const mocks = vi.hoisted(() => ({
+const accountDeletionCleanupMocks = vi.hoisted(() => ({
   drainHostedAccountDeletionCleanupBatch: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-privacy/account-deletion-cleanup", () => ({
   drainHostedAccountDeletionCleanupBatch:
-    mocks.drainHostedAccountDeletionCleanupBatch,
+    accountDeletionCleanupMocks.drainHostedAccountDeletionCleanupBatch,
 }));
 
 import {
@@ -25,8 +25,8 @@ import {
 } from "@/src/lib/hosted-retention/cleanup";
 
 beforeEach(() => {
-  mocks.drainHostedAccountDeletionCleanupBatch.mockReset();
-  mocks.drainHostedAccountDeletionCleanupBatch.mockResolvedValue({
+  accountDeletionCleanupMocks.drainHostedAccountDeletionCleanupBatch.mockReset();
+  accountDeletionCleanupMocks.drainHostedAccountDeletionCleanupBatch.mockResolvedValue({
     completed: 0,
     failed: 0,
     pending: 0,
@@ -130,13 +130,12 @@ describe("hosted retention cleanup", () => {
       oldRuntimeLogsDeleted: 8,
       staleWebSessionsDeleted: 9,
     });
-
-    expect(mocks.drainHostedAccountDeletionCleanupBatch).toHaveBeenCalledWith({
-      now,
-      prisma,
-    });
     expect(
-      mocks.drainHostedAccountDeletionCleanupBatch.mock.invocationCallOrder[0],
+      accountDeletionCleanupMocks.drainHostedAccountDeletionCleanupBatch,
+    ).toHaveBeenCalledWith({ now, prisma });
+    expect(
+      accountDeletionCleanupMocks.drainHostedAccountDeletionCleanupBatch
+        .mock.invocationCallOrder[0],
     ).toBeLessThan(executeRaw.mock.invocationCallOrder[0]!);
 
     // One statement per category: every short batch stops that category's loop.

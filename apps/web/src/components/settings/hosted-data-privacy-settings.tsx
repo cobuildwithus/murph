@@ -202,7 +202,7 @@ function HostedDataPrivacySettingsAuthorized(props: { authenticated: boolean }) 
         },
         url: "/api/settings/privacy/delete",
       });
-      setCleanupPending(hasIncompleteCleanup(response.result));
+      setCleanupPending(hasIncompleteHostedAccountDeletionCleanup(response.result));
       setDeleted(true);
       setDialogOpen(false);
       setConfirmationPhrase("");
@@ -276,7 +276,7 @@ function HostedDataPrivacySettingsAuthorized(props: { authenticated: boolean }) 
   if (deleted) {
     return (
       <>
-        <HostedAccountDeletionStatusAlert
+        <HostedAccountDeletionStatus
           cleanupPending={cleanupPending}
           ref={deletedAlertRef}
         />
@@ -425,29 +425,6 @@ function HostedDataPrivacySettingsAuthorized(props: { authenticated: boolean }) 
   );
 }
 
-export const HostedAccountDeletionStatusAlert = forwardRef<
-  HTMLDivElement,
-  {
-  cleanupPending: boolean;
-  }
->(function HostedAccountDeletionStatusAlert(props, ref) {
-  return (
-    <Alert
-      ref={ref}
-      role="status"
-      aria-live="polite"
-      tabIndex={-1}
-    >
-      <AlertTitle>Account deleted</AlertTitle>
-      <AlertDescription>
-        {props.cleanupPending
-          ? "Your account was deleted. We're finishing some cleanup on our side, no action needed. Redirecting to the home page."
-          : "Your Murph account and active Murph data have been deleted. Provider and backup copies follow their retention policies. Redirecting to the home page."}
-      </AlertDescription>
-    </Alert>
-  );
-});
-
 function HostedDataPrivacyUnavailable(props: { authenticated: boolean }) {
   if (!props.authenticated) {
     return (
@@ -482,7 +459,27 @@ function HostedDataPrivacyUnavailable(props: { authenticated: boolean }) {
   );
 }
 
-export function hasIncompleteCleanup(
+export const HostedAccountDeletionStatus = forwardRef<HTMLDivElement, {
+  cleanupPending: boolean;
+}>(function HostedAccountDeletionStatus(props, ref) {
+  return (
+    <Alert
+      ref={ref}
+      role="status"
+      aria-live="polite"
+      tabIndex={-1}
+    >
+      <AlertTitle>Account deleted</AlertTitle>
+      <AlertDescription>
+        {props.cleanupPending
+          ? "Your account was deleted. We're finishing some cleanup on our side, no action needed. Redirecting to the home page."
+          : "Your account and live Murph data have been deleted. Redirecting to the home page."}
+      </AlertDescription>
+    </Alert>
+  );
+});
+
+export function hasIncompleteHostedAccountDeletionCleanup(
   result: HostedAccountDeleteResponse["result"],
 ): boolean {
   if (typeof result.cleanupPending === "boolean") {

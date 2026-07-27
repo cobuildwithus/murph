@@ -13,6 +13,8 @@ const LOCAL_KMS_KEY_NAME =
   "projects/murph-local/locations/global/keyRings/hosted-local/cryptoKeys/web-wrap";
 const LOCAL_SIGN_KEY_VERSION =
   "projects/murph-local/locations/global/keyRings/hosted-local/cryptoKeys/authority-sign/cryptoKeyVersions/1";
+const LOCAL_MAC_KEY_VERSION =
+  "projects/murph-local/locations/global/keyRings/hosted-local/cryptoKeys/address-book-mac/cryptoKeyVersions/1";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -383,6 +385,63 @@ describe("hosted crypto GCP Workload Identity Federation", () => {
   });
 });
 
+describe("hosted crypto JSON KMS MAC signing", () => {
+  it("calls the exact MAC key version and rejects malformed KMS responses", async () => {
+    const expectedMac = Buffer.alloc(32, 7);
+    const fetchMock = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(jsonResponse({
+        mac: expectedMac.toString("base64"),
+        name: LOCAL_MAC_KEY_VERSION,
+      }))
+      .mockResolvedValueOnce(jsonResponse({
+        mac: expectedMac.toString("base64"),
+        name:
+          "projects/example/locations/global/keyRings/ring/cryptoKeys/other/cryptoKeyVersions/1",
+      }))
+      .mockResolvedValueOnce(jsonResponse({
+        mac: Buffer.alloc(31, 7).toString("base64"),
+        name: LOCAL_MAC_KEY_VERSION,
+      }));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = createHostedGcpKmsClientFromEnv({
+      HOSTED_CRYPTO_ALLOW_STATIC_GCP_ACCESS_TOKEN_FOR_DEV: "1",
+      HOSTED_CRYPTO_ENV: "dev",
+      HOSTED_CRYPTO_GCP_ACCESS_TOKEN: "ya29.static-token",
+      HOSTED_CRYPTO_GCP_KMS_API_ROOT: "https://kms.example.test/v1",
+      NODE_ENV: "test",
+    });
+    const data = new Uint8Array([1, 2, 3, 4]);
+
+    await expect(client.macSign({
+      data,
+      keyVersionName: LOCAL_MAC_KEY_VERSION,
+    })).resolves.toEqual({
+      keyVersionName: LOCAL_MAC_KEY_VERSION,
+      mac: new Uint8Array(expectedMac),
+    });
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      `https://kms.example.test/v1/${LOCAL_MAC_KEY_VERSION}:macSign`,
+      expect.objectContaining({
+        body: JSON.stringify({ data: Buffer.from(data).toString("base64") }),
+        method: "POST",
+      }),
+    );
+    const firstHeaders = new Headers(fetchMock.mock.calls[0]?.[1]?.headers);
+    expect(firstHeaders.get("authorization")).toBe("Bearer ya29.static-token");
+    expect(firstHeaders.get("content-type")).toBe("application/json");
+
+    await expect(client.macSign({
+      data,
+      keyVersionName: LOCAL_MAC_KEY_VERSION,
+    })).rejects.toThrow(/response key version did not match/u);
+    await expect(client.macSign({
+      data,
+      keyVersionName: LOCAL_MAC_KEY_VERSION,
+    })).rejects.toThrow(/exactly 32 bytes/u);
+  });
+});
+
 describe("hosted crypto local KMS", () => {
   it("encrypts, decrypts, and signs without GCP credentials", async () => {
     const signingKey = await createLocalSigningKey();
@@ -441,6 +500,35 @@ describe("hosted crypto local KMS", () => {
       ciphertext: encrypted.ciphertext,
       keyName: LOCAL_KMS_KEY_NAME,
     })).rejects.toThrow();
+  });
+
+  it("derives stable, key-version-bound 256-bit MACs without exposing the key", async () => {
+    const signingKey = await createLocalSigningKey();
+    const client = createHostedGcpKmsClientFromEnv({
+      HOSTED_CRYPTO_GCP_KMS_API_ROOT: LOCAL_KMS_API_ROOT,
+      HOSTED_CRYPTO_LOCAL_AUTHORITY_SIGN_PRIVATE_JWK: signingKey.privateJwkJson,
+      HOSTED_CRYPTO_LOCAL_KMS_WRAP_KEY: Buffer.alloc(32, 9).toString("base64"),
+      NODE_ENV: "test",
+    });
+    const data = new TextEncoder().encode("member-scoped seed");
+
+    const first = await client.macSign({
+      data,
+      keyVersionName: LOCAL_MAC_KEY_VERSION,
+    });
+    const replay = await client.macSign({
+      data,
+      keyVersionName: LOCAL_MAC_KEY_VERSION,
+    });
+    const changed = await client.macSign({
+      data: new TextEncoder().encode("different seed"),
+      keyVersionName: LOCAL_MAC_KEY_VERSION,
+    });
+
+    expect(first.keyVersionName).toBe(LOCAL_MAC_KEY_VERSION);
+    expect(first.mac).toHaveLength(32);
+    expect(first.mac).toEqual(replay.mac);
+    expect(first.mac).not.toEqual(changed.mac);
   });
 
   it("rejects the local KMS shim in production", async () => {

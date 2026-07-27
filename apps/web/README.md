@@ -290,6 +290,17 @@ The hosted Prisma schema keeps ownership sharp and nested:
   still proves every active or cleanup-pending provider call stopped before
   deleting local call authority or user crypto material.
 
+  Canonical account deletion also inserts one foreign-key-free, KMS-encrypted
+  external-cleanup receipt in the same transaction before removing member
+  rows. The immediate attempt and existing hourly retention sweep share that
+  idempotent owner for Cloudflare runner/R2, Stripe-customer, and Privy cleanup;
+  unconfigured or partial targets stay pending, completed targets are skipped,
+  and the receipt is removed only after convergence. Immediate target calls are
+  bounded to five seconds plus a small receipt-settlement margin; hourly retries
+  use fifteen-second target bounds and four-receipt concurrency. Cloudflare is
+  terminal only when the capability-bearing Worker explicitly confirms
+  `deleteAllCompleted`, so a legacy response cannot erase retry ownership.
+
 The 40-second web-owned phone-call start deadline requires the Cloudflare
 caller's 45-second protocol floor. Roll out or restore the 45-second Cloudflare
 caller and prove runner convergence before deploying a web build that uses the
@@ -589,6 +600,14 @@ Hosted onboarding extras:
 - `STRIPE_WEBHOOK_SECRET`
 - `LINQ_API_TOKEN`
 - `LINQ_API_BASE_URL`
+- `HOSTED_RUNTIME_LATENCY_ALERT_LINQ_CHAT_ID` optionally enables the
+  five-minute production reply-latency monitor. Configure one opaque existing
+  Linq chat ID for a dedicated operator thread; do not put a phone number in
+  this value. The participant should reply once before relying on the thread
+  for alerts. The monitor uses the fixed 30-second product boundary, sends one
+  alert per incident, silently clears its claim after a healthy scan so a later
+  incident can alert again, and stores only aggregate count/timing evidence in
+  the existing operational-alert row.
 - `HOSTED_EXECUTION_CONTROL_URL`
 - `HOSTED_EXECUTION_CONTROL_TIMEOUT_MS`
 
@@ -838,6 +857,10 @@ alias proofs, elapsed drain, and post-drain verification as rollout evidence.
 - Enable Vercel OIDC so the app-local hosted-execution auth adapter can present
   workload identity to Cloudflare on dispatch and status requests.
 - Set `CRON_SECRET` for the hosted cron routes under `/api/internal/**/cron`.
+- To receive reply-latency texts, set
+  `HOSTED_RUNTIME_LATENCY_ALERT_LINQ_CHAT_ID` to a pre-established dedicated
+  operator chat and verify that line can exchange a normal reply before
+  treating the alert path as live.
 - Configure the hosted public-origin envs and `HOSTED_WEB_CALLBACK_SIGNING_*`
   values exactly as described above.
 - Set `HOSTED_ONBOARDING_LINQ_CONVERSATION_PHONE_NUMBERS` and, if needed,
@@ -1203,6 +1226,9 @@ Notes:
   generated local artifacts that must stay out of commits and raw source bundles.
 - Hosted internal cron paths accept only Vercel cron bearer auth via
   `CRON_SECRET`.
+- `/api/internal/hosted-runtime/latency-alert/cron` scans existing Web-owned
+  latency facts every five minutes. It does not signal Temporal, wake
+  Cloudflare, or participate in message processing.
 - Hosted Stripe reconciliation now commits local billing facts plus inline
   `member.activated` hosted mailbox input first, then performs activation-path
   managed-user crypto provisioning. Later successful invoices for an already
@@ -1278,6 +1304,7 @@ Internal hosted maintenance and Cloudflare callback routes:
 - `POST /api/internal/computer/runs/:runId/pause-for-user`
 - `POST /api/internal/computer/runs/:runId/finish`
 - `GET /api/internal/hosted-onboarding/stripe/cron`
+- `GET /api/internal/hosted-runtime/latency-alert/cron`
 
 The old staged-payload and deleted import completion/release callback routes
 are gone. Cloudflare no longer round-trips through broad mirror CRUD routes,

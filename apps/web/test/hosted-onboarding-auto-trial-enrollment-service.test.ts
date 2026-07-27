@@ -304,6 +304,8 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
       },
     }, {
       idempotencyKey: buildHostedAutoPulseTrialCustomerIdempotencyKey("member_123"),
+      maxNetworkRetries: 0,
+      timeout: 5_000,
     });
     expect(mocks.stripe.subscriptions.create).toHaveBeenCalledWith({
       customer: "cus_auto_trial_123",
@@ -601,7 +603,7 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
         timeoutMs: 2_000,
       },
     );
-    expect(mocks.stripe.customers.create).toHaveBeenCalledOnce();
+    expect(mocks.stripe.customers.create).not.toHaveBeenCalled();
     expect(mocks.stripe.subscriptions.list).not.toHaveBeenCalled();
     expect(mocks.stripe.subscriptions.create).not.toHaveBeenCalled();
     expect(mocks.stripe.subscriptions.retrieve).not.toHaveBeenCalled();

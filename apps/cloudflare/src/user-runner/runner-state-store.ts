@@ -158,8 +158,8 @@ export class RunnerStateStore {
 
     if (!meta) {
       this.userId = null;
-      // Deletion is retried from a durable web-side receipt. Absence is the
-      // desired end state, so replay after a successful delete stays complete.
+      // Absence is the desired state. Account deletion is retried from a
+      // durable web-owned receipt, so a replay after success must converge.
       return { deleted: true };
     }
 
