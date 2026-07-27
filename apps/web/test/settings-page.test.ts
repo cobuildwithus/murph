@@ -67,12 +67,14 @@ const mocks = vi.hoisted(() => ({
     authenticated: boolean;
     canStartFamily?: boolean;
     canStartPaidPulse?: boolean;
+    canSwitchToGroup?: boolean;
     canUpgradeToEdge?: boolean;
     currentBillingPhase?: unknown;
     currentCheckoutOffer?: unknown;
     currentBillingPlanCode?: unknown;
     familyState?: "none" | "owner" | "sponsored";
     pulseTrialBillingContinuationPending?: boolean;
+    showGroupPlan?: boolean;
     usageCreditBalanceUsdMicros?: string | null;
     usageStatus?: unknown;
     usageTopUpInitialOpen?: boolean;
@@ -82,7 +84,7 @@ const mocks = vi.hoisted(() => ({
     React.createElement(
       "div",
       null,
-      `Hosted billing settings ${String(props.authenticated)} ${String(props.canUpgradeToEdge ?? false)} ${String(props.currentBillingPlanCode ?? "")}`,
+      `Hosted billing settings ${String(props.authenticated)} ${String(props.canUpgradeToEdge ?? false)} ${String(props.currentBillingPlanCode ?? "")} group-visible=${String(props.showGroupPlan ?? false)} group-selectable=${String(props.canSwitchToGroup ?? false)}`,
     )),
   HostedDataPrivacySettings: vi.fn((props: { authenticated: boolean }) =>
     React.createElement("div", null, `Hosted data privacy settings ${String(props.authenticated)}`)),
@@ -103,6 +105,9 @@ const mocks = vi.hoisted(() => ({
     $transaction: vi.fn(),
     hostedCodexAuthConnection: {
       findUnique: vi.fn(async () => null),
+    },
+    hostedGroupMember: {
+      findFirst: vi.fn(async (): Promise<{ id: string } | null> => null),
     },
   },
   readHostedAccountSettingsPageSnapshot: vi.fn(),
@@ -174,6 +179,14 @@ vi.mock("@/src/lib/hosted-onboarding/account-settings-snapshot", () => ({
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-session", () => ({
   getHostedPrivySession: mocks.getHostedPrivySession,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
+  getHostedOnboardingEnvironment: () => ({
+    stripePriceIdsByPlan: {
+      launch_group_monthly: "price_group_test",
+    },
+  }),
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/personal-usage-credit-eligibility", () => ({
@@ -301,6 +314,7 @@ beforeEach(() => {
   mocks.readHostedSecureApprovalStatus.mockResolvedValue({ status: "unavailable" });
   mocks.readHostedFamilyInviteContinuationCookie.mockResolvedValue(null);
   mocks.readHostedPulseTrialContinuationCookie.mockResolvedValue(null);
+  mocks.prisma.hostedGroupMember.findFirst.mockResolvedValue(null);
 });
 
 test("SettingsPage metadata uses the shared preview image", async () => {
@@ -547,6 +561,157 @@ test("SettingsPage treats a surviving claim as inert without the marked return",
   expect(mocks.PulseTrialBillingContinuation).not.toHaveBeenCalled();
   assert.doesNotMatch(markup, /Confirm Pulse/);
 });
+
+test("SettingsPage makes Group visible and selectable for an eligible Pulse Trial", async () => {
+  mocks.getPrisma.mockReturnValue(mocks.prisma);
+  mocks.getHostedPrivySession.mockResolvedValue(null);
+  mocks.getHostedPageAuthSnapshot.mockResolvedValue({
+    authenticated: true,
+    authenticatedMember: {
+      billingStatus: "active",
+      id: "member_123",
+      suspendedAt: null,
+    },
+    linkedAccounts: [],
+    session: {
+      privyUserId: "did:privy:user_123",
+    },
+  });
+  mocks.prisma.hostedGroupMember.findFirst.mockResolvedValueOnce({
+    id: "hosted_group_membership_123",
+  });
+  mockSettingsPageSnapshot({
+    billingRef: {
+      currentBillingPhase: "trial",
+      currentBillingPlanCode: "launch_monthly",
+      currentCheckoutOffer: "pulse_trial_7d",
+      memberId: "member_123",
+      stripeCustomerId: "cus_123",
+      stripeSubscriptionId: "sub_123",
+    },
+  });
+
+  const { default: SettingsPage } =
+    await import("../app/(dashboard)/settings/page");
+  renderToStaticMarkup(await SettingsPage());
+
+  expect(mocks.prisma.hostedGroupMember.findFirst).toHaveBeenCalledWith({
+    select: { id: true },
+    where: {
+      memberId: "member_123",
+      OR: [
+        { role: "owner" },
+        { joinedAt: { not: null } },
+      ],
+    },
+  });
+  expect(mocks.HostedBillingSettings).toHaveBeenCalledWith(
+    expect.objectContaining({
+      canSwitchToGroup: true,
+      currentBillingPhase: "trial",
+      currentBillingPlanCode: "launch_monthly",
+      showGroupPlan: true,
+    }),
+    undefined,
+  );
+});
+
+test("SettingsPage omits Group for an ineligible ordinary Pulse member", async () => {
+  mocks.getPrisma.mockReturnValue(mocks.prisma);
+  mocks.getHostedPrivySession.mockResolvedValue(null);
+  mocks.getHostedPageAuthSnapshot.mockResolvedValue({
+    authenticated: true,
+    authenticatedMember: {
+      billingStatus: "active",
+      id: "member_123",
+      suspendedAt: null,
+    },
+    linkedAccounts: [],
+    session: {
+      privyUserId: "did:privy:user_123",
+    },
+  });
+  mockSettingsPageSnapshot({
+    billingRef: {
+      currentBillingPhase: "paid",
+      currentBillingPlanCode: "launch_monthly",
+      currentCheckoutOffer: "standard",
+      memberId: "member_123",
+      stripeCustomerId: "cus_123",
+      stripeSubscriptionId: "sub_123",
+    },
+  });
+
+  const { default: SettingsPage } =
+    await import("../app/(dashboard)/settings/page");
+  renderToStaticMarkup(await SettingsPage());
+
+  expect(mocks.HostedBillingSettings).toHaveBeenCalledWith(
+    expect.objectContaining({
+      canSwitchToGroup: false,
+      showGroupPlan: false,
+    }),
+    undefined,
+  );
+});
+
+test.each([
+  {
+    billingRef: {
+      currentBillingPhase: "paid",
+      currentBillingPlanCode: "launch_group_monthly",
+      currentCheckoutOffer: "standard",
+      memberId: "member_123",
+      stripeCustomerId: "cus_123",
+      stripeSubscriptionId: "sub_123",
+    },
+    label: "current",
+  },
+  {
+    billingRef: {
+      currentBillingPhase: "paid",
+      currentBillingPlanCode: "launch_monthly",
+      currentCheckoutOffer: "standard",
+      memberId: "member_123",
+      scheduledBillingEffectiveAt: new Date("2026-08-02T04:00:00.000Z"),
+      scheduledBillingPlanCode: "launch_group_monthly",
+      stripeCustomerId: "cus_123",
+      stripeSubscriptionId: "sub_123",
+    },
+    label: "scheduled",
+  },
+])(
+  "SettingsPage keeps a $label Group plan visible without restoring eligibility",
+  async ({ billingRef }) => {
+    mocks.getPrisma.mockReturnValue(mocks.prisma);
+    mocks.getHostedPrivySession.mockResolvedValue(null);
+    mocks.getHostedPageAuthSnapshot.mockResolvedValue({
+      authenticated: true,
+      authenticatedMember: {
+        billingStatus: "active",
+        id: "member_123",
+        suspendedAt: null,
+      },
+      linkedAccounts: [],
+      session: {
+        privyUserId: "did:privy:user_123",
+      },
+    });
+    mockSettingsPageSnapshot({ billingRef });
+
+    const { default: SettingsPage } =
+      await import("../app/(dashboard)/settings/page");
+    renderToStaticMarkup(await SettingsPage());
+
+    expect(mocks.HostedBillingSettings).toHaveBeenCalledWith(
+      expect.objectContaining({
+        canSwitchToGroup: false,
+        showGroupPlan: true,
+      }),
+      undefined,
+    );
+  },
+);
 
 test("SettingsPage reads the app session and persisted account settings into the settings tree", async () => {
   const originalPrivyAppId = process.env.NEXT_PUBLIC_PRIVY_APP_ID;
