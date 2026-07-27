@@ -110,7 +110,12 @@ import {
 import { describe, expect, test, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  actualEnqueueHostedPendingAssistantInputId: null as null | ((input: {
+    inputId: string;
+    vaultRoot: string;
+  }) => Promise<string[]>),
   createHostedWorkspaceSnapshotCheckpointRequestBuilder: vi.fn(),
+  enqueueHostedPendingAssistantInputId: vi.fn(),
   executeReadOnlyAssistantAsk: vi.fn(),
   prepareHostedCodexRuntimeEnvironment: vi.fn(),
   refreshHostedBrowserVaultReplicaFromRuntime: vi.fn(),
@@ -119,6 +124,22 @@ const mocks = vi.hoisted(() => ({
   summarizeWearableSleepRuntime: vi.fn(),
   snapshotHostedPortableWorkspaceDelta: vi.fn(),
 }));
+
+vi.mock("../src/hosted-runtime/pending-input-index.ts", async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import("../src/hosted-runtime/pending-input-index.ts")
+  >();
+  mocks.actualEnqueueHostedPendingAssistantInputId =
+    actual.enqueueHostedPendingAssistantInputId;
+
+  return {
+    ...actual,
+    enqueueHostedPendingAssistantInputId:
+      mocks.enqueueHostedPendingAssistantInputId.mockImplementation(
+        actual.enqueueHostedPendingAssistantInputId,
+      ),
+  };
+});
 
 vi.mock("@murphai/assistant-engine/assistant-ask", async (importOriginal) => {
   const actual = await importOriginal<
@@ -16516,6 +16537,206 @@ describe("hosted workspace runtime entrypoint", () => {
       );
       await resultPromise?.catch(() => undefined);
       vi.useRealTimers();
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("retries a transient image completion index failure inside the live runtime", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-image-index-retry-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const mailboxItem = createMailboxItem({
+      id: "mailbox_item_image_index_retry",
+      laneSeq: "1",
+    });
+    let assistantPhaseCalls = 0;
+    let completionInputId: string | null = null;
+    let completionReplyCount = 0;
+    let imageIndexFailureInjected = false;
+    const shutdownController = new AbortController();
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      mocks.enqueueHostedPendingAssistantInputId.mockClear();
+      const actualEnqueue = mocks.actualEnqueueHostedPendingAssistantInputId;
+      assert.ok(actualEnqueue);
+      mocks.enqueueHostedPendingAssistantInputId.mockImplementation(
+        async (request) => {
+          const event = await readAssistantInputEvent({
+            inputId: request.inputId,
+            vault: request.vaultRoot,
+          });
+          if (
+            !imageIndexFailureInjected
+            && event?.sourceRef.kind === "hosted-mailbox"
+            && event?.sourceRef.payloadSchema
+              === "murph.hosted-image-completion.v1"
+          ) {
+            imageIndexFailureInjected = true;
+            throw new Error("Synthetic first image pending-index failure.");
+          }
+          return await actualEnqueue(request);
+        },
+      );
+
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_image_index_retry",
+            budget: { maxMailboxItems: 10 },
+            idleCheckpointDelayMs: 180_000,
+            leaseGeneration: "7",
+            userId: TEST_USER_ID,
+            workspaceVersion: "0",
+          },
+        }),
+        {
+          async createCheckpointSnapshot() {
+            return {
+              snapshotRef: createBundleRef({
+                hash: "4".repeat(64),
+                key: "users/bundles/member-synthetic/image-index-retry.bundle.json",
+                size: 512,
+              }),
+            };
+          },
+          async importItem(item) {
+            const assistantInputId =
+              await stagePendingLinqAssistantInputForMailboxItem({
+                item: item.item,
+                threadId: "thread_image_index_retry",
+                vaultRoot,
+              });
+            return {
+              assistantInputId,
+              status: "imported",
+            };
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({
+              events,
+              items: [mailboxItem],
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({ version: "0" }),
+            }),
+          }),
+          async runAssistantPhase(phaseInput) {
+            const initialBatchInputIds =
+              phaseInput.initialAssistantInputBatch?.assistantInputIds ?? [];
+            let assistantInputIds: readonly string[] =
+              initialBatchInputIds.length > 0
+              ? initialBatchInputIds
+              : phaseInput.initialMailboxImport.importResult.assistantInputIds
+                ?? [];
+            if (assistantInputIds.length === 0) {
+              assistantInputIds = (await selectHostedAssistantInputIds({
+                mode: "background",
+                vaultRoot,
+              })).inputIds;
+            }
+            if (assistantInputIds.length === 0) {
+              return { progressed: false };
+            }
+            assistantPhaseCalls += 1;
+            assert.equal(assistantInputIds.length, 1);
+            const assistantInputId = assistantInputIds[0]!;
+
+            if (assistantPhaseCalls === 1) {
+              assert.equal(
+                phaseInput.imageGenerationLauncher?.launch({
+                  operationId: "image_operation_index_retry",
+                  originAssistantInputId: assistantInputId,
+                  async run() {
+                    return {
+                      media: {
+                        alt: "Generated sunrise",
+                        kind: "image",
+                        source: "gpt-image-2",
+                        url: "https://imagedelivery.net/account/retry/public",
+                      },
+                      runtimeIssue: null,
+                      savedImageRef: null,
+                    };
+                  },
+                }),
+                "started",
+              );
+            } else {
+              completionInputId = assistantInputId;
+              completionReplyCount += 1;
+            }
+
+            await writeSyntheticAssistantAutoReplyTerminalEvidence({
+              inputId: assistantInputId,
+              vaultRoot,
+            });
+            if (assistantPhaseCalls === 2) {
+              shutdownController.abort(
+                new DOMException(
+                  "Synthetic shutdown after image completion reply.",
+                  "AbortError",
+                ),
+              );
+            }
+            return {
+              checkpointReason: "assistant_runtime_commit" as const,
+              foregroundReplyFailed: 0,
+              nextWakeAt: null,
+              progressed: true,
+            };
+          },
+          shutdownSignal: shutdownController.signal,
+          vaultRoot,
+        },
+      );
+
+      assert.equal(result.status, "idle");
+      assert.equal(imageIndexFailureInjected, true);
+      const pendingAtEnd = await compactHostedPendingAssistantInputIds({
+        vaultRoot,
+      });
+      assert.equal(
+        assistantPhaseCalls,
+        2,
+        JSON.stringify({
+          enqueueInputIds:
+            mocks.enqueueHostedPendingAssistantInputId.mock.calls
+              .map(([request]) => request.inputId),
+          nextWakeAt: result.nextWakeAt,
+          nextWakeReason: result.nextWakeReason,
+          pendingAtEnd,
+        }),
+      );
+      assert.equal(completionReplyCount, 1);
+      assert.ok(completionInputId);
+      const completion = await readAssistantInputEvent({
+        inputId: completionInputId,
+        vault: vaultRoot,
+      });
+      assert.equal(
+        completion?.sourceRef.kind === "hosted-mailbox"
+          ? completion.sourceRef.payloadSchema
+          : null,
+        "murph.hosted-image-completion.v1",
+      );
+      assert.deepEqual(pendingAtEnd, []);
+      const completionEnqueueCalls =
+        mocks.enqueueHostedPendingAssistantInputId.mock.calls
+          .filter(([request]) => request.inputId === completionInputId);
+      assert.equal(completionEnqueueCalls.length, 2);
+    } finally {
+      shutdownController.abort(
+        new DOMException("Synthetic test cleanup.", "AbortError"),
+      );
+      const actualEnqueue = mocks.actualEnqueueHostedPendingAssistantInputId;
+      if (actualEnqueue) {
+        mocks.enqueueHostedPendingAssistantInputId.mockImplementation(
+          actualEnqueue,
+        );
+      }
       await removeTempRoot(vaultRoot);
     }
   });

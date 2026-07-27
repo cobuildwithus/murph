@@ -587,7 +587,6 @@ describe("hosted execution coverage gaps", () => {
       "./hosted-email",
       "./labs",
       "./legacy-dashboard-replica",
-      "./managed-group-activity",
       "./orchestration-control",
       "./parsers",
       "./phone-calls",
@@ -719,7 +718,6 @@ describe("hosted execution coverage gaps", () => {
       "HOSTED_RUNTIME_LOG_PATH",
       "HOSTED_RUNTIME_MAILBOX_FETCH_PATH",
       "HOSTED_RUNTIME_MAILBOX_PAYLOAD_FETCH_PATH",
-      "HOSTED_RUNTIME_MANAGED_GROUP_ACTIVITY_DECISION_PATH",
       "HOSTED_RUNTIME_NEWSLETTER_TOOL_PATH",
       "HOSTED_RUNTIME_OWNER_RELEASED_PATH",
       "HOSTED_RUNTIME_OWNER_RELEASE_IMMEDIATE_RECHECK_QUERY",
@@ -745,9 +743,6 @@ describe("hosted execution coverage gaps", () => {
     );
     expect(routeModule.HOSTED_RUNTIME_NEWSLETTER_TOOL_PATH).toBe(
       "/api/internal/hosted-execution/groups/newsletter-tool",
-    );
-    expect(routeModule.HOSTED_RUNTIME_MANAGED_GROUP_ACTIVITY_DECISION_PATH).toBe(
-      "/api/internal/hosted-execution/groups/managed-activity-decision",
     );
     expect(routeModule.HOSTED_RUNTIME_ASSISTANT_CONFIGURATION_TOOL_PATH).toBe(
       "/api/internal/hosted-execution/assistant-configuration/tool",

@@ -7,6 +7,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
+  ageHostedRuntimeLatencyAlertForTest,
   appendHostedExecutionWakeForTest,
   normalizeHostedLinqLatencyTracesForTest,
   readHostedMailboxItemForTest,
@@ -79,6 +80,7 @@ const runId = randomUUID().replaceAll("-", "").slice(0, 12);
 const linqWebhookSecret = "linq-local-foreground-reply-priority-secret";
 const latencyAlertChatId = `chat_local_priority_operator_${runId}`;
 const latencyAlertCronSecret = "hosted-local-priority-latency-cron-secret";
+const latencyAlertTimeZone = buildDaytimeTestTimeZone(new Date());
 const productionLikeAssistantModel = "gpt-5.6-terra";
 const productionIdleCheckpointDelayMs = 180_000;
 const promptReplyDeadlineMs = 30_000;
@@ -117,6 +119,7 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
         HOSTED_ASSISTANT_MODEL: productionLikeAssistantModel,
         HOSTED_ASSISTANT_PROVIDER: "openai",
         HOSTED_RUNTIME_LATENCY_ALERT_LINQ_CHAT_ID: latencyAlertChatId,
+        HOSTED_RUNTIME_LATENCY_ALERT_TIME_ZONE: latencyAlertTimeZone,
         CRON_SECRET: latencyAlertCronSecret,
         HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS:
           String(productionIdleCheckpointDelayMs),
@@ -431,6 +434,19 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
     }
     expect(failedAttempts.every((request) => request.body === incidentBody)).toBe(true);
 
+    const paced = await requestLatencyAlertCron();
+    expect(paced.status).toBe(200);
+    await expect(paced.json()).resolves.toMatchObject({
+      runtimeLatencyAlert: {
+        outcome: "deferred_rate_limit",
+      },
+    });
+    expect(observedLinqRequests(alertPath, alertMatcher)).toHaveLength(1);
+
+    await expect(ageHostedRuntimeLatencyAlertForTest({
+      ageMs: 21 * 60_000,
+      environment: requireScenario().runtimeEnv,
+    })).resolves.toEqual({ updated: true });
     const retried = await requestLatencyAlertCron();
     expect(retried.status).toBe(200);
     await expect(retried.json()).resolves.toMatchObject({
@@ -476,6 +492,10 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
       latencyMs: 31_000,
       userId: retentionProbe.userId,
     });
+    await expect(ageHostedRuntimeLatencyAlertForTest({
+      ageMs: 21 * 60_000,
+      environment: requireScenario().runtimeEnv,
+    })).resolves.toEqual({ updated: true });
     const recurred = await requestLatencyAlertCron();
     expect(recurred.status).toBe(200);
     await expect(recurred.json()).resolves.toMatchObject({
@@ -490,6 +510,19 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
     );
   }, 120_000);
 });
+
+function buildDaytimeTestTimeZone(now: Date): string {
+  const unwrappedOffsetHours = 12 - now.getUTCHours();
+  const offsetHours = unwrappedOffsetHours > 11
+    ? unwrappedOffsetHours - 24
+    : unwrappedOffsetHours;
+  if (offsetHours === 0) {
+    return "UTC";
+  }
+  return offsetHours > 0
+    ? `Etc/GMT-${offsetHours}`
+    : `Etc/GMT+${Math.abs(offsetHours)}`;
+}
 
 async function seedProbe(identity: ProbeIdentity): Promise<void> {
   await requireScenario().seedActiveHostedLinqMember({
