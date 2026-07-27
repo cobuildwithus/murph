@@ -298,6 +298,17 @@ The hosted Prisma schema keeps ownership sharp and nested:
   still proves every active or cleanup-pending provider call stopped before
   deleting local call authority or user crypto material.
 
+  Canonical account deletion also inserts one foreign-key-free, KMS-encrypted
+  external-cleanup receipt in the same transaction before removing member
+  rows. The immediate attempt and existing hourly retention sweep share that
+  idempotent owner for Cloudflare runner/R2, Stripe-customer, and Privy cleanup;
+  unconfigured or partial targets stay pending, completed targets are skipped,
+  and the receipt is removed only after convergence. Immediate target calls are
+  bounded to five seconds plus a small receipt-settlement margin; hourly retries
+  use fifteen-second target bounds and four-receipt concurrency. Cloudflare is
+  terminal only when the capability-bearing Worker explicitly confirms
+  `deleteAllCompleted`, so a legacy response cannot erase retry ownership.
+
 The 40-second web-owned phone-call start deadline requires the Cloudflare
 caller's 45-second protocol floor. Roll out or restore the 45-second Cloudflare
 caller and prove runner convergence before deploying a web build that uses the

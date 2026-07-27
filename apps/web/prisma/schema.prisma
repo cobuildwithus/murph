@@ -1336,6 +1336,31 @@ model HostedAccountExitReason {
   @@map("hosted_account_exit_reason")
 }
 
+/// FK-free retry ownership for external cleanup after canonical account rows
+/// are gone. The payload contains only KMS-encrypted provider/runtime ids.
+model HostedAccountDeletionCleanup {
+  id                    String    @id
+  payloadCiphertext     String    @map("payload_ciphertext")
+  kmsKeyName            String    @map("kms_key_name")
+  environment           String
+  privyUserLookupKey    String?   @map("privy_user_lookup_key")
+  cloudflareCompletedAt DateTime? @map("cloudflare_completed_at")
+  stripeCompletedAt     DateTime? @map("stripe_completed_at")
+  privyCompletedAt      DateTime? @map("privy_completed_at")
+  attemptCount          Int       @default(0) @map("attempt_count")
+  nextAttemptAt         DateTime  @map("next_attempt_at")
+  lastAttemptedAt       DateTime? @map("last_attempted_at")
+  lastErrorCode         String?   @map("last_error_code")
+  leaseToken            String?   @map("lease_token")
+  leaseExpiresAt        DateTime? @map("lease_expires_at")
+  createdAt             DateTime  @default(now()) @map("created_at")
+  updatedAt             DateTime  @updatedAt @map("updated_at")
+
+  @@index([nextAttemptAt, leaseExpiresAt])
+  @@index([privyUserLookupKey, privyCompletedAt])
+  @@map("hosted_account_deletion_cleanup")
+}
+
 enum HostedAccountExitReasonCode {
   too_expensive
   not_useful_enough

@@ -948,6 +948,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260726120000_hosted_growth_aggregate",
       "20260726120000_hosted_usage_referral_rewards",
       "20260726124000_hosted_usage_referral_source_conversation",
+      "20260726180000_hosted_account_deletion_cleanup",
       "20260726180000_hosted_address_book_projection",
       "20260726180000_hosted_thread_container_usage_default",
       "migration_lock.toml",

@@ -1591,6 +1591,31 @@ describe("hosted onboarding stripe billing events", () => {
     }));
   });
 
+  it("keeps restoration pending when the member has no subscription identity", async () => {
+    mocks.findMemberForStripeReversal.mockResolvedValueOnce(makeMemberSnapshot({
+      billingStatus: HostedBillingStatus.unpaid,
+      billingRef: {
+        memberId: "member_123",
+        stripeCustomerId: "cus_123",
+        stripeSubscriptionId: null,
+      },
+    }));
+
+    await expect(applyStripeDisputeUpdated(
+      makeStripeDispute({ status: "won" }),
+      {
+        eventCreatedAt: new Date("2026-04-26T00:00:00.000Z"),
+        sourceEventId: "evt_dispute_funds_reinstated_without_subscription",
+        sourceType: "stripe.charge.dispute.funds_reinstated",
+      },
+      {} as never,
+      "cus_123",
+    )).resolves.toBe("subscription_identity_pending");
+
+    expect(mocks.requireHostedStripeApi).not.toHaveBeenCalled();
+    expect(mocks.writeHostedMemberStripeBillingTx).not.toHaveBeenCalled();
+  });
+
   it("does not clear dispute suspension when the canonical subscription is not active", async () => {
     mocks.findMemberForStripeReversal.mockResolvedValueOnce(makeMemberSnapshot({
       billingStatus: HostedBillingStatus.unpaid,

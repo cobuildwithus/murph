@@ -158,7 +158,9 @@ export class RunnerStateStore {
 
     if (!meta) {
       this.userId = null;
-      return { deleted: false };
+      // Absence is the desired state. Account deletion is retried from a
+      // durable web-owned receipt, so a replay after success must converge.
+      return { deleted: true };
     }
 
     this.sql.exec("DELETE FROM runner_meta WHERE singleton = 1");

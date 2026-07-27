@@ -65,6 +65,7 @@ export interface CloudflareHostedControlBrowserVaultReplicaAad {
 export interface CloudflareHostedControlUserDataDeletionResult {
   durableObject: {
     alarmCleared: boolean;
+    deleteAllCompleted: boolean;
     stateDeleted: boolean;
   };
   deletedAt: string;
@@ -107,7 +108,10 @@ export interface CloudflareHostedControlClient {
     replicaRef: HostedBrowserVaultReplicaRef;
     userId: string;
   }): Promise<CloudflareHostedControlBrowserVaultSession>;
-  deleteUserData(userId: string): Promise<CloudflareHostedControlUserDataDeletionResult>;
+  deleteUserData(
+    userId: string,
+    options?: { signal?: AbortSignal },
+  ): Promise<CloudflareHostedControlUserDataDeletionResult>;
   deleteMealPhoto(input: {
     mealPhotoKey: string;
     userId: string;
@@ -236,7 +240,7 @@ export function createCloudflareHostedControlClient(
       });
     },
 
-    deleteUserData(userId) {
+    deleteUserData(userId, requestOptions) {
       const expectedUserId = requireCloudflareHostedControlUserId(userId);
 
       return requestHostedExecutionAuthorizedJson({
@@ -254,6 +258,7 @@ export function createCloudflareHostedControlClient(
           },
           method: "POST",
         },
+        signal: requestOptions?.signal,
         timeoutMs: options.timeoutMs,
       });
     },
@@ -668,6 +673,10 @@ function parseCloudflareHostedControlUserDataDeletionResult(
         durableObject.alarmCleared,
         "Cloudflare user-data deletion result durableObject.alarmCleared",
       ),
+      deleteAllCompleted: requireBoolean(
+        durableObject.deleteAllCompleted,
+        "Cloudflare user-data deletion result durableObject.deleteAllCompleted",
+      ),
       stateDeleted: requireBoolean(
         durableObject.stateDeleted,
         "Cloudflare user-data deletion result durableObject.stateDeleted",
@@ -968,6 +977,7 @@ async function requestHostedExecutionAuthorizedJson<TResponse>(input: {
     method: "DELETE" | "GET" | "POST";
     search?: string | null;
   };
+  signal?: AbortSignal;
   timeoutMs: number | undefined;
 }): Promise<TResponse> {
   const url = new URL(input.path.replace(/^\/+/, ""), `${input.baseUrl}/`);
@@ -980,7 +990,13 @@ async function requestHostedExecutionAuthorizedJson<TResponse>(input: {
   const tokenAcquireStartedAtEpochMs = input.onRuntimeEnsureProcessingTiming
     ? Date.now()
     : null;
-  headers.set("authorization", await input.getAuthorizationHeader());
+  headers.set(
+    "authorization",
+    await waitForHostedExecutionRequest(
+      input.getAuthorizationHeader(),
+      input.signal,
+    ),
+  );
   const tokenAcquiredAtEpochMs = tokenAcquireStartedAtEpochMs === null
     ? null
     : Date.now();
@@ -1016,12 +1032,16 @@ async function requestHostedExecutionAuthorizedJson<TResponse>(input: {
 
   await input.onRequestAttempted?.();
 
+  const requestSignal = createHostedExecutionRequestSignal({
+    signal: input.signal,
+    timeoutMs: input.timeoutMs,
+  });
   const response = await input.fetchImpl(url.toString(), {
     ...(input.request.body === undefined ? {} : { body: input.request.body }),
     headers,
     method: input.request.method,
     redirect: "error",
-    signal: typeof input.timeoutMs === "number" ? AbortSignal.timeout(input.timeoutMs) : undefined,
+    signal: requestSignal,
   });
   const directEnsureResponseReceivedAtEpochMs = directEnsureRequestStartedAtEpochMs === null
     ? null
@@ -1053,6 +1073,50 @@ async function requestHostedExecutionAuthorizedJson<TResponse>(input: {
   }
 
   return input.parse(await response.json());
+}
+
+function createHostedExecutionRequestSignal(input: {
+  signal?: AbortSignal;
+  timeoutMs?: number;
+}): AbortSignal | undefined {
+  const signals = [
+    input.signal,
+    typeof input.timeoutMs === "number"
+      ? AbortSignal.timeout(input.timeoutMs)
+      : undefined,
+  ].filter((signal): signal is AbortSignal => signal !== undefined);
+
+  if (signals.length === 0) {
+    return undefined;
+  }
+  return signals.length === 1 ? signals[0] : AbortSignal.any(signals);
+}
+
+async function waitForHostedExecutionRequest<T>(
+  operation: Promise<T>,
+  signal: AbortSignal | undefined,
+): Promise<T> {
+  if (!signal) {
+    return operation;
+  }
+  if (signal.aborted) {
+    throw signal.reason;
+  }
+
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(signal.reason);
+    signal.addEventListener("abort", onAbort, { once: true });
+    operation.then(
+      (value) => {
+        signal.removeEventListener("abort", onAbort);
+        resolve(value);
+      },
+      (error: unknown) => {
+        signal.removeEventListener("abort", onAbort);
+        reject(error);
+      },
+    );
+  });
 }
 
 async function readHostedExecutionStructuredErrorCode(response: Response): Promise<string | undefined> {

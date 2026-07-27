@@ -95,6 +95,14 @@ Last verified: 2026-07-26
   entries revoke unused credit and positive entries restore only credit that
   was previously revoked. A failure keeps the Stripe receipt retryable; it does
   not silently complete the event.
+- Subscription refund and dispute reversals keep event freshness, the billing
+  cursor, unpaid status, and suspension in the same locked billing owner.
+  Exact replay may repeat that atomic transition, but an already-suspended
+  snapshot cannot substitute for event freshness: a distinct newer reversal
+  must advance the cursor so an older restore cannot reactivate the member.
+  Only a suspension whose unpaid state and cursor timestamp still match may be
+  advanced or restored; any other suspension remains the account-deletion
+  fence.
 - Read-only Labs discovery has no automatic provider retry, background refresh, or stale cache fallback. Web applies explicit time, response-byte, result-count, and location-fanout bounds and propagates caller cancellation. A Junction timeout, rate limit, or server failure is `temporarily_unavailable`; it must not be collapsed into an empty catalog or `not_served`. Only a clean provider response that reports no ZIP coverage is `not_served`.
 - Labs capability rollout is additive and fail-closed. Deploy Web's signed callback and provider configuration before Cloudflare/runtime registration; a missing or incompatible route surfaces as unavailable rather than falling back to a copied catalog. Roll back the runtime capability before removing the Web route. Because the feature has no DB, cache, queue, or retry owner, recovery is a later member-initiated live request.
 - Definite assistant outbox delivery failures may run at most 48 persisted dispatch attempts. A definite failure on attempt 48 terminalizes as `ASSISTANT_DELIVERY_RETRY_EXHAUSTED`, and no 49th provider call begins; newsletter parent and recipient replay must preserve that logical terminal state instead of resetting the budget with a new token. A delivery that may already have succeeded is not exhausted as an ordinary failure: hosted non-idempotent confirmation remains parked without an automatic wake, while replay-safe delivery checks persisted or provider reconciliation evidence before terminalization.
