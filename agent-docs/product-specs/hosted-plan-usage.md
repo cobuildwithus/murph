@@ -1,6 +1,6 @@
 # Hosted Plan Usage And Subscription Actions
 
-Last verified: 2026-07-26
+Last verified: 2026-07-27
 Status: Implemented current-state contract
 
 ## Goal
@@ -68,7 +68,8 @@ The available projection keeps these access states distinct:
 
 | Access | Display plan | Period | Thresholded recommendation |
 | --- | --- | --- | --- |
-| Direct trial | Pulse Trial | Trial | Start Pulse |
+| Direct trial | Pulse Trial | Trial | Start an available continuation plan |
+| Direct paid Group | Group | Monthly | Change to Pulse |
 | Direct paid Pulse | Pulse | Monthly | Add usage when configured and eligible |
 | Direct paid Edge | Edge | Monthly | Add usage when configured and eligible |
 | Sponsored member | Family | Monthly | None |
@@ -102,7 +103,8 @@ usage-bearing work blocks and accepted conversation input remains pending.
 
 For paid access, the included monthly usage value is exactly 80% of the
 server-owned recurring amount for that member's billing mode and tier. Direct
-Pulse and Edge therefore include $6.40 and $16.00 from their $8 and $20 prices.
+Group, Pulse, and Edge therefore include $2.80, $6.40, and $16.00 from their
+$3.50, $8, and $20 prices.
 Family-sponsored Pulse and Edge members separately receive $5.60 and $15.20
 from their $7 and $19 seat prices. Discounts, taxes, prorations, trials, and
 purchased usage credit do not redefine this catalog-owned allowance.
@@ -125,17 +127,19 @@ the projection omits it.
 
 `apps/web` may return `recommendedAction` only when included usage is
 exhausted, the forecast projects exhaustion, or at least 80% of included usage
-is used. Trial access may recommend **Start Pulse now** with the
-current monthly price. An eligible direct paid Pulse or Edge member may receive
-**Add usage**, which opens the authenticated fixed-pack Settings dialog. Pulse's
-Edge upgrade remains on the plan card. Family and group contexts do not receive
-a top-up recommendation.
+is used. Trial access may recommend starting a server-authorized continuation
+plan now with the exact monthly price. Exhausted Group recommends Pulse and
+never receives a personal top-up. An eligible direct paid Pulse or Edge member
+may receive **Add usage**, which opens the authenticated fixed-pack Settings
+dialog. Family-sponsored and synthetic group contexts do not receive a
+personal top-up recommendation.
 
 An opted-in `subscriptionActionQuote` answers a different question: what are
-the current terms for the exact start-now or upgrade choice the member asked
-about? Web resolves that quote even below the usage threshold and without a
-Settings URL. The quote contains the bounded action and current catalog label,
-not a URL. It may be null when the action is ineligible. It is neither a
+the current terms for the exact plan choice the member asked about? Web
+resolves that quote even below the usage threshold and without a Settings URL.
+The signed quote binds the member, current local billing state, target plan,
+exact monthly price, immediate/start-now/period-end timing, and ten-minute
+expiry. It may be null when the action is ineligible. It is neither a
 recommendation nor consent, and it does not weaken the explicit-confirmation
 rule.
 
@@ -166,11 +170,12 @@ Family change happened. It must not provide the private management handoff for
 
 ### Private Conversation Actions
 
-`murph.subscription` is a narrow mutation surface for three choices:
+`murph.subscription` is a narrow mutation surface for direct-plan choices:
 
 - keep an active Pulse trial scheduled to continue at its natural end;
-- end the trial and start Pulse now; or
-- upgrade an active paid Pulse plan to Edge.
+- end the trial and start an available Group or Pulse plan now;
+- apply a higher-ranked direct plan immediately; or
+- schedule a lower-ranked direct plan for period end.
 
 These are member-directed actions, not extensions of the read projection's
 `recommendedAction`. A recommendation is never consent. Before an immediate
@@ -228,10 +233,12 @@ cookie untouched so an older in-flight response cannot clear a newer return
 from another tab. The public marker removal keeps completed or dismissed
 returns inert, and the existing short expiry bounds any surviving claim.
 
-Starting Pulse now uses the existing start-paid-Pulse service. Upgrading to
-Edge uses the existing plan-change service. Pulse activation keeps its existing
+Starting Group or Pulse now uses the generic trial-paid-plan core behind the
+existing start-paid-Pulse compatibility service. Immediate changes use the
+plan-upgrade service, and period-end changes use the schedule service. Paid
+activation keeps its existing
 Stripe-hosted invoice or Customer Portal handoff when payment is required. A
-pending Edge change returns the existing Customer Portal handoff and does not
+pending immediate change returns the existing Customer Portal handoff and does not
 retrieve or validate a separate invoice URL. The assistant sends a returned
 Stripe URL only after the member's explicit choice and only when the
 authoritative result says payment is required. Completed, pending, and
@@ -337,7 +344,7 @@ table row fails closed and must be refreshed before retrying.
 Every proactive billing action in Settings, Home, or `murph.plan_usage` comes
 only from the projection's thresholded `recommendedAction`. A notice code, plan
 label, incomplete billing row, or legacy state must not independently imply
-**Start Pulse**, **Upgrade to Edge**, or **Add usage**. A requested
+**Change plan** or **Add usage**. A requested
 `subscriptionActionQuote` may disclose current terms below that threshold, but
 it must not be presented as a recommendation. The explicit Settings handoff
 above remains navigation rather than an action and must not be presented as a
@@ -360,8 +367,11 @@ The low-usage skill may use the trusted bit for one manual private
 `murph.plan_usage` check. It follows the current Web-owned state rather than
 inventing a billing menu:
 
-- a direct Pulse Trial may offer help starting Pulse now only from the current
-  thresholded recommendation, with the existing quote and confirmation rules;
+- a direct Pulse Trial may mention only plans in the current trusted
+  `availablePlans` projection and may offer start-now help only with the
+  matching quote and confirmation;
+- an exhausted direct Group plan recommends Pulse, never a top-up, and states
+  that wearable syncing and authorized group activity continue;
 - a direct paid Pulse or Edge plan may offer the authorized one-time Add usage
   handoff, while Edge is discussed as a recurring Pulse alternative only after
   the member asks and a current quote exists;
@@ -416,12 +426,14 @@ add a separate scheduler or money-prompt lifecycle.
 
 ## Non-Goals
 
-The subscription-action surface adds one nullable action claim to the existing
+The subscription-action surface uses the nullable action claim on the existing
 mailbox row. The composed usage system adds no second admission gate, persisted
-forecast, billing queue, cron, trial-ending webhook, automatic nudge, group
+forecast, billing queue, cron, reminder scheduler, group
 wallet or usage account, automatic model switch, custom card form, App Clip,
-or mini app. It does not add a general Stripe API tool: the subscription action contract
-exposes only the three current web-owned operations above, and personal and
+or mini app. The existing Stripe `trial_will_end` webhook may append one
+deduplicated private mailbox notification; it is not a new notification
+system. The feature does not add a general Stripe API tool: the subscription
+action contract exposes only the current web-owned direct-plan operations, and personal and
 Family-member usage top-ups remain authenticated Stripe-hosted Settings
 handoffs. Group funding
 uses the existing join code and synthetic member through an authenticated
@@ -429,15 +441,13 @@ fixed-pack page; anonymous funding remains unimplemented.
 
 ## Deployment
 
-Apply the additive mailbox-claim migration, then deploy Web, then deploy the
-Cloudflare runtime. An old runtime continues to send the empty plan-usage
-request, and new Web omits `subscriptionActionQuote`, preserving the old strict
-response shape. The new runtime opts into the quote field only after Web can
-parse that request and serve the durable action claim. A new runtime against
-old Web is unsupported because old Web rejects the opt-in request and does not
-provide the durable claim. Roll back Cloudflare before Web; the nullable column
-may remain. This order also preserves the originating-notice-target
-compatibility contract described in `hosted-plan-downgrades.md`.
+Deploy Web and the Cloudflare/assistant runtime together. The Group plan name,
+available-plan projection, and generic target-plan quote/action are a strict
+transport revision; an older runtime does not understand them, and a newer
+runtime cannot obtain a target-plan quote from older Web. Roll back the runtime
+and Web together. The existing nullable mailbox claim column remains
+compatible. This also preserves the originating-notice-target compatibility
+contract described in `hosted-plan-downgrades.md`.
 
 Existing billing mechanics remain in:
 

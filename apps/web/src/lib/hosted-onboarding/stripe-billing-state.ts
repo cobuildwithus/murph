@@ -170,7 +170,10 @@ export function isHostedStripeLegacyCheckoutCompletionAllowed(input: {
 }
 
 export function readHostedStripeSubscriptionTender(
-  subscription: Stripe.Subscription,
+  subscription: Pick<
+    Stripe.Subscription,
+    "customer" | "default_payment_method" | "default_source"
+  >,
 ): HostedStripeTender | null {
   const subscriptionPaymentMethodId = coerceStripeObjectId(
     subscription.default_payment_method,

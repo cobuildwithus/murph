@@ -1,6 +1,6 @@
 # Pulse Trial Checkout Offer Implementation Plan
 
-Last verified: 2026-07-25
+Last verified: 2026-07-27
 
 Status: Implemented locally
 
@@ -11,7 +11,10 @@ This plan specifies the 14-day Pulse Trial built on the current hosted Murph bil
 The durable decision is:
 
 ```ts
-HostedBillingPlanCode = "launch_monthly" | "launch_edge_monthly";
+HostedBillingPlanCode =
+  | "launch_group_monthly"
+  | "launch_monthly"
+  | "launch_edge_monthly";
 
 HostedBillingCheckoutOffer =
   | "standard"
@@ -23,11 +26,14 @@ trial policy is 14 days as of `pulse-trial-2026-07-15-v3`. The previous
 seven-day and ten-day policies remain readable for historical rows and
 in-flight Stripe events.
 
-Pulse Trial is a checkout offer for Pulse. It is not a third hosted plan, not a free plan, and not a separate usage-budget system.
+Pulse Trial is a checkout offer for Pulse. It is not a Group trial, a free
+plan, or a separate usage-budget system. The authenticated continuation
+contract for the Group billing SKU lives in `group-member-plan.md`.
 
 Success means:
 
-- The hosted plan registry still has only Pulse and Edge.
+- The public checkout catalog still presents Pulse and Edge; the personalized
+  authenticated catalog may additionally present Group.
 - The join page no longer presents self-hosted Murph as a hosted "Free" plan.
 - The Pulse Trial CTA creates a Stripe Checkout subscription for the existing Pulse price with a 14-day trial.
 - Trial activation is metadata-gated and idempotent.
@@ -42,7 +48,8 @@ Success means:
 
 Keep the implementation in three layers:
 
-1. Product plan: Pulse and Edge only. This controls Stripe prices and normal monthly hosted AI allowance.
+1. Direct billing plan: Group, Pulse, or Edge. Group and Pulse share the Pulse
+   runtime capabilities while keeping distinct Stripe prices and allowances.
 2. Checkout offer: `standard` or `pulse_trial_7d`. This controls Checkout Session construction and Stripe metadata.
 3. Billing phase: `trial` or `paid`. This is persisted on the current billing ref and is the only phase signal the allowance resolver trusts.
 
@@ -74,7 +81,8 @@ Stress testing produced four final hardening decisions that are part of the targ
 
 The current local checkout now has the Pulse Trial shape implemented on that foundation:
 
-- `apps/web/src/lib/hosted-onboarding/billing-plans.ts` defines only `launch_monthly` and `launch_edge_monthly`.
+- `apps/web/src/lib/hosted-onboarding/billing-plans.ts` defines Group, Pulse,
+  and Edge while its public plan parser accepts only Pulse and Edge.
 - `billing-plans.ts` stores included hosted AI usage allowances by plan: Pulse is 10.00 USD micros and Edge is 25.00 USD micros.
 - `apps/web/src/lib/hosted-onboarding/billing-service.ts` reserves one durable
   Checkout attempt on the locked member billing owner before creating a Stripe

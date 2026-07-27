@@ -7,6 +7,7 @@ import { Progress } from "@/src/components/ui/progress";
 import {
   HOSTED_FAMILY_PLAN_DISPLAY,
   HOSTED_PULSE_TRIAL_OFFER,
+  formatHostedBillingPrice,
   getHostedBillingPlanDefinition,
   parseHostedBillingCheckoutOffer,
   parseHostedBillingPhase,
@@ -19,14 +20,28 @@ import { BillingPortalButton } from "./billing-portal-button";
 import { HostedFamilyStartButton } from "./hosted-family-settings-actions";
 import { HostedSettingsSessionState } from "./hosted-settings-session-state";
 import { StartPaidPulseButton } from "./hosted-start-paid-pulse-button";
-import { SwitchToPulseButton } from "./hosted-plan-switch-to-pulse-button";
-import { UpgradeToEdgeButton } from "./hosted-plan-upgrade-button";
+import {
+  SwitchToGroupButton,
+  SwitchToPulseButton,
+} from "./hosted-plan-switch-to-pulse-button";
+import {
+  UpgradeToEdgeButton,
+  UpgradeToPulseButton,
+} from "./hosted-plan-upgrade-button";
 import {
   HostedUsageTopUpDialog,
   type HostedUsageTopUpActivePurchase,
   type HostedUsageTopUpOffer,
   type HostedUsageTopUpReturn,
 } from "./hosted-usage-top-up-dialog";
+
+const GROUP_FEATURES = [
+  "Same Murph tools and private chat",
+  "Stay connected to Murph groups",
+  "Sync your health data",
+  "Keep group activity current",
+  "Lighter included AI usage",
+];
 
 const PULSE_FEATURES = [
   "Run experiments, see what changed",
@@ -59,6 +74,7 @@ interface PlanCardModel {
   name: string;
   note: string | null;
   price: string;
+  recommended: boolean;
 }
 
 export function HostedBillingSettings(props: {
@@ -66,8 +82,11 @@ export function HostedBillingSettings(props: {
   billingStatus?: unknown;
   canStartFamily?: boolean;
   canStartPaidPulse?: boolean;
+  canSwitchToGroup?: boolean;
   canSwitchToPulse?: boolean;
+  canUpgradeToPulse?: boolean;
   canUpgradeToEdge?: boolean;
+  showGroupPlan?: boolean;
   currentBillingPhase?: unknown;
   currentBillingPlanCode?: unknown;
   currentCheckoutOffer?: unknown;
@@ -104,6 +123,8 @@ export function HostedBillingSettings(props: {
   const familyState = props.familyState ?? "none";
   const familyCurrent = familyState === "owner" || familyState === "sponsored";
   const familyOwner = familyState === "owner";
+  const groupCurrent =
+    !familyCurrent && currentPlanCode === "launch_group_monthly";
   const pulseCurrent = !familyCurrent && currentPlanCode === "launch_monthly";
   const edgeCurrent = !familyCurrent && currentPlanCode === "launch_edge_monthly";
   const usageTopUpOffers = props.usageTopUpOffers ?? [];
@@ -112,31 +133,93 @@ export function HostedBillingSettings(props: {
     pulseCurrent && currentPhase !== "paid" && currentOffer === HOSTED_PULSE_TRIAL_OFFER;
   const pulseTrialBillingContinuationPending =
     props.pulseTrialBillingContinuationPending === true;
+  const hasPendingGroupSwitch =
+    scheduledPlanCode === "launch_group_monthly" &&
+    scheduledBillingEffectiveAt !== null;
   const hasPendingPulseSwitch =
-    edgeCurrent && scheduledPlanCode === "launch_monthly" && scheduledBillingEffectiveAt !== null;
+    scheduledPlanCode === "launch_monthly" &&
+    scheduledBillingEffectiveAt !== null;
+  const pendingGroupSwitchDate = hasPendingGroupSwitch
+    ? formatHostedBillingDate(scheduledBillingEffectiveAt)
+    : null;
   const pendingPulseSwitchDate = hasPendingPulseSwitch
     ? formatHostedBillingDate(scheduledBillingEffectiveAt)
     : null;
 
   const cards: PlanCardModel[] = [
+    ...(props.showGroupPlan === true && !familyCurrent
+      ? [{
+          action: groupCurrent
+            ? <CurrentPlanButton />
+            : hasPendingGroupSwitch
+              ? null
+              : props.canSwitchToGroup === true &&
+                  (pulseCurrent || edgeCurrent)
+                ? (
+                    <SwitchToGroupButton
+                      block
+                      currentPeriodEnd={currentPeriodEndIso}
+                      currentPlanCode={
+                        edgeCurrent
+                          ? "launch_edge_monthly"
+                          : "launch_monthly"
+                      }
+                    >
+                      Choose Group
+                    </SwitchToGroupButton>
+                  )
+                : null,
+          current: groupCurrent,
+          currentLabel: "Current plan",
+          features: GROUP_FEATURES,
+          key: "launch_group_monthly",
+          name: "Group",
+          note: hasPendingGroupSwitch && pendingGroupSwitchDate
+            ? `Scheduled to start ${pendingGroupSwitchDate}`
+            : null,
+          price: formatHostedBillingPrice(
+            getHostedBillingPlanDefinition(
+              "launch_group_monthly",
+            ).recurringAmountUsdCents,
+          ),
+          recommended:
+            isPulseTrial && props.canSwitchToGroup === true,
+        } satisfies PlanCardModel]
+      : []),
     {
       action: familyOwner
         ? <FamilyBillingChangeButton block targetPlanName="Pulse" />
+        : groupCurrent && props.canUpgradeToPulse === true
+          ? <UpgradeToPulseButton block>Choose Pulse</UpgradeToPulseButton>
         : pulseCurrent
-        ? isPulseTrial
-          && props.canStartPaidPulse === true
-          && !pulseTrialBillingContinuationPending
-          ? <StartPaidPulseButton block>Start Pulse plan</StartPaidPulseButton>
-          : <CurrentPlanButton />
-        : hasPendingPulseSwitch
-          ? null
-          : props.canSwitchToPulse === true
+          ? isPulseTrial &&
+              props.canStartPaidPulse === true &&
+              !pulseTrialBillingContinuationPending
             ? (
-                <SwitchToPulseButton block currentPeriodEnd={currentPeriodEndIso}>
-                  Choose Pulse
-                </SwitchToPulseButton>
+                <StartPaidPulseButton block timing="at_trial_end">
+                  Keep Pulse
+                </StartPaidPulseButton>
               )
-            : <BillingPortalButton block variant="secondary" label="Choose Pulse" />,
+            : <CurrentPlanButton />
+          : hasPendingPulseSwitch
+            ? null
+            : edgeCurrent && props.canSwitchToPulse === true
+              ? (
+                  <SwitchToPulseButton
+                    block
+                    currentPeriodEnd={currentPeriodEndIso}
+                    currentPlanCode="launch_edge_monthly"
+                  >
+                    Choose Pulse
+                  </SwitchToPulseButton>
+                )
+              : (
+                  <BillingPortalButton
+                    block
+                    variant="secondary"
+                    label="Choose Pulse"
+                  />
+                ),
       current: pulseCurrent,
       currentLabel: isPulseTrial ? "Free trial" : "Current plan",
       features: PULSE_FEATURES,
@@ -145,9 +228,13 @@ export function HostedBillingSettings(props: {
       note: familyOwner
         ? "If you switch away from Family, your family members lose their included access when the Family plan ends."
         : !pulseCurrent && hasPendingPulseSwitch && pendingPulseSwitchDate
-        ? `Scheduled to start ${pendingPulseSwitchDate}`
-        : null,
-      price: formatMonthlyPrice(getHostedBillingPlanDefinition("launch_monthly").recurringAmountUsdCents),
+          ? `Scheduled to start ${pendingPulseSwitchDate}`
+          : null,
+      price: formatHostedBillingPrice(
+        getHostedBillingPlanDefinition("launch_monthly")
+          .recurringAmountUsdCents,
+      ),
+      recommended: false,
     },
     {
       action: familyOwner
@@ -165,9 +252,15 @@ export function HostedBillingSettings(props: {
       note: familyOwner
         ? "End or change the Family plan first, then switch to an individual plan."
         : edgeCurrent && hasPendingPulseSwitch && pendingPulseSwitchDate
-        ? `Switching to Pulse on ${pendingPulseSwitchDate}. Want to keep Edge? Contact support.`
-        : null,
-      price: formatMonthlyPrice(getHostedBillingPlanDefinition("launch_edge_monthly").recurringAmountUsdCents),
+          ? `Switching to Pulse on ${pendingPulseSwitchDate}. Want to keep Edge? Contact support.`
+          : edgeCurrent && hasPendingGroupSwitch && pendingGroupSwitchDate
+            ? `Switching to Group on ${pendingGroupSwitchDate}. Want to keep Edge? Contact support.`
+            : null,
+      price: formatHostedBillingPrice(
+        getHostedBillingPlanDefinition("launch_edge_monthly")
+          .recurringAmountUsdCents,
+      ),
+      recommended: false,
     },
     {
       action: familyCurrent
@@ -181,11 +274,15 @@ export function HostedBillingSettings(props: {
       key: "family",
       name: "Family",
       note: familyState === "sponsored" ? "Paid by your family plan owner." : null,
-      price: `From ${formatMonthlyPrice(HOSTED_FAMILY_PLAN_DISPLAY.recurringAmountUsdCentsPerSeat)}/person`,
+      price: `From ${formatHostedBillingPrice(
+        HOSTED_FAMILY_PLAN_DISPLAY.recurringAmountUsdCentsPerSeat,
+      )}/person`,
+      recommended: false,
     },
   ];
 
-  const planResolved = pulseCurrent || edgeCurrent || familyCurrent;
+  const planResolved =
+    groupCurrent || pulseCurrent || edgeCurrent || familyCurrent;
   const noPlanText =
     props.billingStatus === "active"
       ? "Your subscription is active."
@@ -197,6 +294,12 @@ export function HostedBillingSettings(props: {
         <p className="text-sm text-pretty text-muted-foreground">{noPlanText}</p>
       ) : null}
       <PlanUsageBand
+        canStartGroupNow={
+          isPulseTrial &&
+          props.canStartPaidPulse === true &&
+          props.showGroupPlan === true &&
+          !pulseTrialBillingContinuationPending
+        }
         pulseTrialBillingContinuationPending={pulseTrialBillingContinuationPending}
         status={props.usageStatus}
         usageCreditBalanceUsdMicros={props.usageCreditBalanceUsdMicros}
@@ -206,7 +309,14 @@ export function HostedBillingSettings(props: {
         usageTopUpOffers={usageTopUpOffers}
         usageTopUpPurchaseReturn={props.usageTopUpPurchaseReturn}
       />
-      <div className="grid items-stretch gap-3 sm:grid-cols-3">
+      <div
+        className={cn(
+          "grid items-stretch gap-3",
+          props.showGroupPlan === true && !familyCurrent
+            ? "sm:grid-cols-2 lg:grid-cols-4"
+            : "sm:grid-cols-3",
+        )}
+      >
         {cards.map((card) => (
           <PlanCard key={card.key} card={card} />
         ))}
@@ -229,6 +339,7 @@ export function HostedBillingSettings(props: {
 }
 
 function PlanUsageBand(props: {
+  canStartGroupNow: boolean;
   pulseTrialBillingContinuationPending: boolean;
   status?: HostedPlanUsageStatus | null;
   usageCreditBalanceUsdMicros?: string | null;
@@ -287,7 +398,16 @@ function PlanUsageBand(props: {
             </p>
           </div>
           {canShowStartAction ? (
-            <StartPaidPulseButton>{action.label}</StartPaidPulseButton>
+            <div className="flex flex-wrap gap-2">
+              {props.canStartGroupNow ? (
+                <StartPaidPulseButton
+                  targetPlanCode="launch_group_monthly"
+                >
+                  Start Group — $3.50/month
+                </StartPaidPulseButton>
+              ) : null}
+              <StartPaidPulseButton>{action.label}</StartPaidPulseButton>
+            </div>
           ) : null}
         </div>
         {inactiveTopUpDialog}
@@ -315,6 +435,16 @@ function PlanUsageBand(props: {
       initialOpen={props.usageTopUpInitialOpen}
       offers={props.usageTopUpOffers}
       purchaseReturn={props.usageTopUpPurchaseReturn}
+    />
+  );
+  const planAction = (
+    <UsagePlanAction
+      action={action}
+      canStartGroupNow={props.canStartGroupNow === true}
+      pulseTrialBillingContinuationPending={
+        props.pulseTrialBillingContinuationPending === true
+      }
+      status={status}
     />
   );
 
@@ -355,9 +485,11 @@ function PlanUsageBand(props: {
             </p>
           ) : status.status === "exhausted" ? (
             <p className="text-sm text-pretty text-muted-foreground">
-              {props.usageTopUpOffers.length > 0
+              {status.planCode === "launch_group_monthly"
+                ? "You've used this period's included AI usage. Your wearable keeps syncing and your group activity stays current."
+                : props.usageTopUpOffers.length > 0
                 ? "You've used this period's included usage and any usage credit. Add usage to continue."
-                : "You've used this period's available usage. Murph pauses new usage until more capacity is available."}
+                : "You've used this period's included AI usage. New Murph replies pause until more capacity is available; your wearable keeps syncing."}
             </p>
           ) : forecast ? (
             <p className="text-sm text-pretty text-muted-foreground">{forecast}</p>
@@ -366,12 +498,7 @@ function PlanUsageBand(props: {
 
         {props.usageTopUpOffers.length > 0 || props.usageTopUpActivePurchase
           ? usageTopUpDialog
-          : action?.kind === "start_pulse"
-            && !props.pulseTrialBillingContinuationPending ? (
-          <StartPaidPulseButton>{action.label}</StartPaidPulseButton>
-        ) : action?.kind === "upgrade_edge" ? (
-          <UpgradeToEdgeButton>{action.label}</UpgradeToEdgeButton>
-        ) : null}
+          : planAction}
       </div>
       {props.usageTopUpOffers.length === 0 &&
       !props.usageTopUpActivePurchase &&
@@ -380,6 +507,69 @@ function PlanUsageBand(props: {
         : null}
     </div>
   );
+}
+
+function UsagePlanAction(props: {
+  action: Extract<
+    HostedPlanUsageStatus,
+    { accessKind: string }
+  >["recommendedAction"];
+  canStartGroupNow: boolean;
+  pulseTrialBillingContinuationPending: boolean;
+  status: Extract<HostedPlanUsageStatus, { accessKind: string }>;
+}) {
+  const action = props.action;
+  if (!action) {
+    return null;
+  }
+
+  if (action.kind === "change_plan") {
+    if (action.targetPlanCode === "launch_group_monthly") {
+      return props.canStartGroupNow ? (
+        <StartPaidPulseButton
+          targetPlanCode="launch_group_monthly"
+          timing={props.status.status === "exhausted" ? "now" : "at_trial_end"}
+        >
+          {action.label}
+        </StartPaidPulseButton>
+      ) : null;
+    }
+    if (action.targetPlanCode === "launch_monthly") {
+      return props.status.accessKind === "trial" ? (
+        <StartPaidPulseButton
+          timing={props.status.status === "exhausted" ? "now" : "at_trial_end"}
+        >
+          {action.label}
+        </StartPaidPulseButton>
+      ) : (
+        <UpgradeToPulseButton>{action.label}</UpgradeToPulseButton>
+      );
+    }
+    return <UpgradeToEdgeButton>{action.label}</UpgradeToEdgeButton>;
+  }
+
+  if (
+    action.kind === "start_pulse"
+    && !props.pulseTrialBillingContinuationPending
+  ) {
+    return (
+      <div className="flex flex-wrap gap-2">
+        {props.canStartGroupNow ? (
+          <StartPaidPulseButton targetPlanCode="launch_group_monthly">
+            Start Group — $3.50/month
+          </StartPaidPulseButton>
+        ) : null}
+        <StartPaidPulseButton>{action.label}</StartPaidPulseButton>
+      </div>
+    );
+  }
+  if (action.kind === "upgrade_pulse") {
+    return <UpgradeToPulseButton>{action.label}</UpgradeToPulseButton>;
+  }
+  if (action.kind === "upgrade_edge") {
+    return <UpgradeToEdgeButton>{action.label}</UpgradeToEdgeButton>;
+  }
+  return null;
 }
 
 function FamilyBillingChangeButton(props: {
@@ -407,12 +597,14 @@ function PlanCard({ card }: { card: PlanCardModel }) {
     <div
       className={cn(
         "flex flex-col overflow-hidden rounded-xl border",
-        card.current ? "border-primary ring-1 ring-primary/40" : "border-border",
+        card.current || card.recommended
+          ? "border-primary ring-1 ring-primary/40"
+          : "border-border",
       )}
     >
-      {card.current ? (
+      {card.current || card.recommended ? (
         <div className="bg-primary px-4 py-1.5 font-mono text-[10px] uppercase tracking-[0.12em] text-primary-foreground">
-          {card.currentLabel}
+          {card.current ? card.currentLabel : "Recommended"}
         </div>
       ) : null}
       <div className="flex flex-1 flex-col gap-3 p-4">
@@ -450,10 +642,6 @@ function CurrentPlanButton() {
       Current plan
     </Button>
   );
-}
-
-function formatMonthlyPrice(amountUsdCents: number): string {
-  return `$${Math.round(amountUsdCents / 100)}`;
 }
 
 function formatHostedBillingDate(value: Date): string {

@@ -43,6 +43,10 @@ import {
   HOSTED_ASSISTANT_SOL_MODEL,
 } from '@murphai/hosted-execution/assistant-model'
 import {
+  HOSTED_PLAN_USAGE_DIRECT_BILLING_PLAN_CODES,
+  type HostedPlanUsageToolRequest,
+} from '@murphai/hosted-execution/plan-usage'
+import {
   hostedRuntimeSubscriptionToolRequestSchema,
   type HostedRuntimeSubscriptionToolRequest,
 } from '@murphai/hosted-execution/subscription'
@@ -468,11 +472,18 @@ export const MURPH_PLAN_USAGE_TOOL = {
   namespace: 'murph',
   name: 'plan_usage',
   description:
-    'Read the current private hosted plan, included-usage projection, recommendation, and optional subscription quote. Call only for an explicit plan, usage, or billing request, or trusted low-usage context. This is read-only: percentages and forecasts are approximate, and a recommendation or quote is not consent or a completed billing or usage-credit action.',
+    'Read the current private hosted plan, usage, plans, recommendation, and quote. Call only for an explicit plan, usage, or billing request, or trusted low-usage context. Omit targetPlanCode for the recommendation; use latest availablePlans for another choice. This is read-only: estimates are approximate, and a recommendation or quote is not consent or a completed action.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
-    properties: {},
+    properties: {
+      targetPlanCode: {
+        type: 'string',
+        enum: [...HOSTED_PLAN_USAGE_DIRECT_BILLING_PLAN_CODES],
+        description:
+          'Optional plan from the latest availablePlans result to quote instead of the server recommendation.',
+      },
+    },
   },
 } as const
 
@@ -480,17 +491,50 @@ export const MURPH_SUBSCRIPTION_TOOL = {
   namespace: 'murph',
   name: 'subscription',
   description:
-    'Apply exactly one private hosted subscription action explicitly confirmed by the current user in this turn. start_pulse_now and upgrade_edge require a current matching plan_usage quote; continue_pulse requires a current eligible active-trial result. Exact replay of the same input and action is idempotent; a different action requires new eligible user input. Only payment_required includes paymentUrl; completed, pending, and no_action_required do not prove a payment method or future charge.',
+    'Apply exactly one private hosted subscription action explicitly confirmed by the current user in this turn. Quoted actions require a current matching plan_usage quote; copy its targetPlanCode and quoteId. Exact replay of the same input and action is idempotent; a different action requires new eligible user input. Only payment_required includes paymentUrl; completed, pending, and no_action_required do not prove a payment method or future charge.',
   inputSchema: {
-    type: 'object',
-    additionalProperties: false,
-    properties: {
-      action: {
-        type: 'string',
-        enum: ['continue_pulse', 'start_pulse_now', 'upgrade_edge'],
+    oneOf: [
+      {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          action: {
+            type: 'string',
+            enum: ['change_plan'],
+          },
+          targetPlanCode: {
+            type: 'string',
+            enum: [
+              'launch_group_monthly',
+              'launch_monthly',
+              'launch_edge_monthly',
+            ],
+          },
+          quoteId: {
+            type: 'string',
+            minLength: 1,
+            maxLength: 1024,
+          },
+        },
+        required: ['action', 'targetPlanCode', 'quoteId'],
       },
-    },
-    required: ['action'],
+      {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          action: {
+            type: 'string',
+            enum: [
+              'continue_pulse',
+              'start_pulse_now',
+              'upgrade_pulse',
+              'upgrade_edge',
+            ],
+          },
+        },
+        required: ['action'],
+      },
+    ],
   },
 } as const
 
@@ -1569,7 +1613,11 @@ const sendVaultFileArgumentsSchema = z
   .strict()
 
 const finishWithoutReplyArgumentsSchema = z.object({}).strict()
-const planUsageArgumentsSchema = z.object({}).strict()
+const planUsageArgumentsSchema = z
+  .object({
+    targetPlanCode: z.enum(HOSTED_PLAN_USAGE_DIRECT_BILLING_PLAN_CODES).optional(),
+  })
+  .strict()
 
 const submitProductFeedbackArgumentsSchema = z
   .object({
@@ -2030,6 +2078,7 @@ export type MurphDynamicToolRequest =
     }
   | {
       kind: 'plan-usage'
+      request: HostedPlanUsageToolRequest
     }
   | {
       kind: 'subscription'
@@ -2295,6 +2344,7 @@ export function readMurphDynamicToolRequest(
       }
       return {
         kind: 'plan-usage',
+        request: parsed.request,
       }
     }
     case MURPH_SUBSCRIPTION_TOOL.name: {
@@ -2923,6 +2973,7 @@ export async function executeMurphDynamicToolRequest(input: {
     case 'plan-usage':
       return await executePlanUsageTool({
         hostedToolContext: input.hostedToolContext ?? null,
+        request: input.request.request,
       })
     case 'subscription':
       return await executeSubscriptionTool({
@@ -3208,6 +3259,7 @@ async function executeFamilyPlanTool(input: {
 
 async function executePlanUsageTool(input: {
   hostedToolContext: AssistantHostedToolContext | null
+  request: HostedPlanUsageToolRequest
 }): Promise<MurphDynamicToolExecutionResult> {
   const planUsageTool = input.hostedToolContext?.planUsageTool ?? null
   if (!planUsageTool) {
@@ -3215,7 +3267,10 @@ async function executePlanUsageTool(input: {
   }
 
   try {
-    return toolTextResult(true, safeToolPayloadText(await planUsageTool.read()))
+    return toolTextResult(
+      true,
+      safeToolPayloadText(await planUsageTool.read(input.request)),
+    )
   } catch {
     return toolTextResult(false, 'plan usage could not be read')
   }
@@ -3237,10 +3292,19 @@ async function executeSubscriptionTool(input: {
   }
 
   try {
-    const result = await subscriptionTool.request({
-      action: input.request.action,
-      assistantInputId,
-    })
+    const result = await subscriptionTool.request(
+      input.request.action === 'change_plan'
+        ? {
+            action: input.request.action,
+            assistantInputId,
+            quoteId: input.request.quoteId,
+            targetPlanCode: input.request.targetPlanCode,
+          }
+        : {
+            action: input.request.action,
+            assistantInputId,
+          },
+    )
     return toolTextResult(true, safeToolPayloadText(result))
   } catch {
     return toolTextResult(false, 'subscription action could not be completed')
@@ -5138,7 +5202,7 @@ function parseFamilyPlanArguments(
 function parsePlanUsageArguments(
   value: unknown,
 ):
-  | { ok: true }
+  | { ok: true; request: HostedPlanUsageToolRequest }
   | { ok: false; validationDigest: SafeToolCallValidationDigest } {
   const parsed = planUsageArgumentsSchema.safeParse(value)
   if (!parsed.success) {
@@ -5148,12 +5212,23 @@ function parsePlanUsageArguments(
         error: parsed.error,
         rawInput: value,
         schemaName: 'murph.plan_usage.input',
-        schemaRootKeys: [],
+        schemaRootKeys: ['targetPlanCode'],
         toolName: 'murph.plan_usage',
       }),
     }
   }
-  return { ok: true }
+  return {
+    ok: true,
+    request: {
+      includeSubscriptionActionQuote: true,
+      ...(parsed.data.targetPlanCode
+        ? {
+            subscriptionActionTargetPlanCode:
+              parsed.data.targetPlanCode,
+          }
+        : {}),
+    },
+  }
 }
 
 function parseSubscriptionArguments(

@@ -76,6 +76,7 @@ describe("hosted subscription tool route", () => {
     for (const action of [
       "continue_pulse",
       "start_pulse_now",
+      "upgrade_pulse",
       "upgrade_edge",
     ] as const) {
       const request = {
@@ -97,6 +98,27 @@ describe("hosted subscription tool route", () => {
         request,
       });
     }
+
+    const planChangeRequest = {
+      action: "change_plan" as const,
+      assistantInputId: ASSISTANT_INPUT_ID,
+      quoteId: "signed-quote",
+      targetPlanCode: "launch_group_monthly" as const,
+    };
+    const response = await route.POST(new Request(
+      "https://join.example.test/api/internal/hosted-execution/subscription/tool",
+      {
+        body: JSON.stringify(planChangeRequest),
+        headers: { "content-type": "application/json" },
+        method: "POST",
+      },
+    ));
+
+    expect(response.status).toBe(200);
+    expect(mocks.handleTool).toHaveBeenLastCalledWith({
+      memberId: "member_bound",
+      request: planChangeRequest,
+    });
   });
 
   it("rejects model-supplied billing authority fields after callback authentication", async () => {

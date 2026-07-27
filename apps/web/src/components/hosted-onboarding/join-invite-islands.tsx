@@ -8,9 +8,10 @@ import { ArrowRightIcon } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
 import { Button } from "@/src/components/ui/button";
 import { PaymentButton } from "@/src/components/ui/payment-button";
-import type {
-  HostedBillingPlanCode,
-  HostedPublicBillingCheckoutOffer,
+import {
+  parseHostedPublicBillingPlanCode,
+  type HostedBillingPlanCode,
+  type HostedPublicBillingCheckoutOffer,
 } from "@/src/lib/hosted-onboarding/billing-plans";
 import { isHostedOnboardingPendingStage } from "@/src/lib/hosted-onboarding/stage";
 import type {
@@ -306,8 +307,13 @@ export function JoinInviteCheckoutPlanButtonIsland({
       throw new Error("This plan is not available yet.");
     }
 
+    const publicPlanCode = parseHostedPublicBillingPlanCode(planCode);
+    if (!publicPlanCode) {
+      throw new Error("This signup plan is not available.");
+    }
+
     const payload = await requestHostedBillingCheckout({
-      billingPlanCode: planCode,
+      billingPlanCode: publicPlanCode,
       ...(checkoutOffer ? { checkoutOffer } : {}),
       inviteCode,
     });

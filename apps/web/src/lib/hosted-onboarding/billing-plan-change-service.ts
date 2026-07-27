@@ -10,8 +10,9 @@ import {
   coerceStripeObjectId,
 } from "./billing";
 import {
-  canUpgradeHostedBillingPlanToEdge,
+  canUpgradeHostedBillingPlan,
   HOSTED_STANDARD_CHECKOUT_OFFER,
+  isHostedBillingPlanImmediateUpgrade,
   isHostedPulseTrialBillingState,
   parseHostedBillingPlanCode,
   type HostedBillingPlanCode,
@@ -56,27 +57,27 @@ import { createHostedStripePortalSession } from "./stripe-portal";
 
 export type HostedBillingPlanUpgradeResult =
   | {
-    billingPlanCode: "launch_edge_monthly";
+    billingPlanCode: HostedBillingPlanCode;
     status: "already_on_plan";
   }
   | {
-    billingPlanCode: "launch_edge_monthly";
+    billingPlanCode: HostedBillingPlanCode;
     status: "upgraded";
   }
   | {
-    billingPlanCode: "launch_monthly";
+    billingPlanCode: HostedBillingPlanCode;
     paymentUrl: string;
     status: "payment_required";
   }
   | {
-    billingPlanCode: "launch_monthly";
+    billingPlanCode: HostedBillingPlanCode;
     status: "processing";
   };
 
 type HostedBillingPlanUpgradeLockedResult =
   | HostedBillingPlanUpgradeResult
   | {
-      billingPlanCode: "launch_monthly";
+      billingPlanCode: HostedBillingPlanCode;
       status: "financially_blocked";
     };
 
@@ -104,14 +105,6 @@ export async function upgradeHostedBillingPlan(input: {
   assertHostedMemberOwnActiveBillingAllowed(member);
 
   const targetPlanCode = input.targetPlanCode;
-  if (targetPlanCode !== "launch_edge_monthly") {
-    throw hostedOnboardingError({
-      code: "HOSTED_BILLING_PLAN_UPGRADE_UNSUPPORTED",
-      httpStatus: 400,
-      message: "This plan change is not supported.",
-    });
-  }
-
   const billingRef = await readHostedMemberStripeBillingRef({
     memberId: input.memberId,
     prisma,
@@ -142,6 +135,7 @@ export async function upgradeHostedBillingPlan(input: {
   assertHostedBillingPlanUpgradeAllowed(transition);
   assertHostedBillingPlanUpgradeSourceState({
     billingRef,
+    targetPlanCode,
   });
 
   const stripeCustomerId = billingRef?.stripeCustomerId ?? null;
@@ -196,7 +190,7 @@ export async function upgradeHostedBillingPlan(input: {
 async function resolveHostedBillingPlanUpgradeAlreadyAppliedWithLockedOwner(input: {
   expectedBillingRef: HostedMemberStripeBillingRefSnapshot;
   memberId: string;
-  targetPlanCode: "launch_edge_monthly";
+  targetPlanCode: HostedBillingPlanCode;
   tx: Prisma.TransactionClient;
 }): Promise<HostedBillingPlanUpgradeResult> {
   const billingRef = await readHostedBillingPlanUpgradeLockedSource({
@@ -223,7 +217,7 @@ async function upgradeHostedBillingPlanWithLockedOwner(input: {
   memberId: string;
   now: Date;
   targetConfig: ReturnType<typeof requireHostedStripeBillingPlanConfig>;
-  targetPlanCode: "launch_edge_monthly";
+  targetPlanCode: HostedBillingPlanCode;
   tx: Prisma.TransactionClient;
 }): Promise<HostedBillingPlanUpgradeLockedResult> {
   const billingRef = await readHostedBillingPlanUpgradeLockedSource({
@@ -241,6 +235,7 @@ async function upgradeHostedBillingPlanWithLockedOwner(input: {
   assertHostedBillingPlanUpgradeAllowed(transition);
   assertHostedBillingPlanUpgradeSourceState({
     billingRef,
+    targetPlanCode: input.targetPlanCode,
   });
 
   const stripeCustomerId = billingRef.stripeCustomerId;
@@ -294,6 +289,7 @@ async function upgradeHostedBillingPlanWithLockedOwner(input: {
       return collectionResult;
     }
     return await finalizeAppliedHostedBillingPlanUpgrade({
+      currentPlanCode: transition.currentPlanCode,
       memberId: input.memberId,
       now: input.now,
       tx: input.tx,
@@ -467,6 +463,7 @@ async function upgradeHostedBillingPlanWithLockedOwner(input: {
   }
 
   return await finalizeAppliedHostedBillingPlanUpgrade({
+    currentPlanCode: transition.currentPlanCode,
     memberId: input.memberId,
     now: input.now,
     tx: input.tx,
@@ -509,25 +506,17 @@ async function readHostedBillingPlanUpgradeLockedSource(input: {
 }
 
 async function finalizeAppliedHostedBillingPlanUpgrade(input: {
+  currentPlanCode: HostedBillingPlanCode;
   memberId: string;
   now: Date;
   stripe: Stripe;
   stripeCustomerId: string;
   stripeSubscriptionId: string;
   subscription: Stripe.Subscription;
-  targetPlanCode: "launch_edge_monthly";
+  targetPlanCode: HostedBillingPlanCode;
   targetPriceId: string;
   tx: Prisma.TransactionClient;
-}): Promise<
-  | {
-      billingPlanCode: "launch_edge_monthly";
-      status: "upgraded";
-    }
-  | {
-      billingPlanCode: "launch_monthly";
-      status: "financially_blocked";
-    }
-> {
+}): Promise<HostedBillingPlanUpgradeLockedResult> {
   const cleanedSubscription = await cleanupAppliedHostedBillingPlanUpgradeSubscriptionItems({
     memberId: input.memberId,
     stripe: input.stripe,
@@ -556,7 +545,7 @@ async function finalizeAppliedHostedBillingPlanUpgrade(input: {
   });
   if (!projected) {
     return {
-      billingPlanCode: "launch_monthly",
+      billingPlanCode: input.currentPlanCode,
       status: "financially_blocked",
     };
   }
@@ -571,12 +560,15 @@ function assertHostedBillingPlanUpgradeAllowed(input: {
   currentPlanCode: HostedBillingPlanCode | null;
   targetPlanCode: HostedBillingPlanCode;
 }): asserts input is {
-  currentPlanCode: "launch_monthly";
-  targetPlanCode: "launch_edge_monthly";
+  currentPlanCode: HostedBillingPlanCode;
+  targetPlanCode: HostedBillingPlanCode;
 } {
   if (
-    input.targetPlanCode === "launch_edge_monthly" &&
-    input.currentPlanCode === "launch_monthly"
+    input.currentPlanCode !== null &&
+    isHostedBillingPlanImmediateUpgrade({
+      currentPlanCode: input.currentPlanCode,
+      targetPlanCode: input.targetPlanCode,
+    })
   ) {
     return;
   }
@@ -590,11 +582,13 @@ function assertHostedBillingPlanUpgradeAllowed(input: {
 
 function assertHostedBillingPlanUpgradeSourceState(input: {
   billingRef: HostedMemberStripeBillingRefSnapshot | null;
+  targetPlanCode: HostedBillingPlanCode;
 }): void {
-  if (canUpgradeHostedBillingPlanToEdge({
+  if (canUpgradeHostedBillingPlan({
     currentBillingPhase: input.billingRef?.currentBillingPhase,
     currentBillingPlanCode: input.billingRef?.currentBillingPlanCode,
     currentCheckoutOffer: input.billingRef?.currentCheckoutOffer,
+    targetPlanCode: input.targetPlanCode,
   })) {
     return;
   }
@@ -606,7 +600,7 @@ function assertHostedBillingPlanUpgradeSourceState(input: {
     throw hostedOnboardingError({
       code: "HOSTED_BILLING_PLAN_UPGRADE_TRIAL_UNSUPPORTED",
       httpStatus: 409,
-      message: "Finish trial billing before upgrading to Edge.",
+      message: "Finish trial billing before changing plans.",
     });
   }
 
@@ -703,7 +697,7 @@ async function cleanupAppliedHostedBillingPlanUpgradeSubscriptionItems(input: {
   stripe: Stripe;
   stripeSubscriptionId: string;
   subscription: Stripe.Subscription;
-  targetPlanCode: "launch_edge_monthly";
+  targetPlanCode: HostedBillingPlanCode;
   targetPriceId: string;
 }): Promise<Stripe.Subscription> {
   const cleanupItems = buildHostedBillingPlanUpgradeAppliedSubscriptionCleanupItems({
@@ -786,7 +780,7 @@ function buildHostedBillingSubscriptionItemsUnsupportedError(): Error {
 
 function buildHostedBillingPlanUpgradeSubscriptionMetadata(input: {
   memberId: string;
-  targetPlanCode: "launch_edge_monthly";
+  targetPlanCode: HostedBillingPlanCode;
 }): Stripe.MetadataParam {
   return {
     billingPlanCode: input.targetPlanCode,
@@ -810,7 +804,7 @@ async function normalizeAppliedHostedBillingPlanUpgradeSubscription(input: {
   stripe: Stripe;
   stripeSubscriptionId: string;
   subscription: Stripe.Subscription;
-  targetPlanCode: "launch_edge_monthly";
+  targetPlanCode: HostedBillingPlanCode;
   targetPriceId: string;
 }): Promise<Stripe.Subscription> {
   if (isHostedBillingPlanUpgradeSubscriptionMetadataNormalized(input)) {
@@ -849,7 +843,7 @@ async function normalizeAppliedHostedBillingPlanUpgradeSubscription(input: {
 function isHostedBillingPlanUpgradeSubscriptionMetadataNormalized(input: {
   memberId: string;
   subscription: Stripe.Subscription;
-  targetPlanCode: "launch_edge_monthly";
+  targetPlanCode: HostedBillingPlanCode;
 }): boolean {
   const metadata = input.subscription.metadata ?? {};
 
@@ -991,7 +985,7 @@ async function reconcileAppliedHostedBillingPlanUpgrade(input: {
   stripeCustomerId: string;
   stripeSubscriptionId: string;
   subscription: Stripe.Subscription;
-  targetPlanCode: "launch_edge_monthly";
+  targetPlanCode: HostedBillingPlanCode;
   tx: Prisma.TransactionClient;
 }): Promise<boolean> {
   const dispatchContext = buildHostedBillingPlanUpgradeDispatchContext({
@@ -1080,7 +1074,7 @@ async function retrieveHostedBillingPlanUpgradeInvoiceSnapshotById(input: {
 }
 
 async function resolveHostedBillingPlanUpgradeFinancialPreflight(input: {
-  currentPlanCode: "launch_monthly";
+  currentPlanCode: HostedBillingPlanCode;
   now: Date;
   stripe: Stripe;
   stripeCustomerId: string;
@@ -1129,7 +1123,7 @@ async function resolveHostedBillingPlanUpgradeFinancialPreflight(input: {
 }
 
 async function maybeResolveHostedBillingPlanUpgradeExistingCollection(input: {
-  currentPlanCode: "launch_monthly";
+  currentPlanCode: HostedBillingPlanCode;
   invoiceSnapshot: HostedStripeInvoiceCollectionSnapshot | null;
   now: Date;
   stripe: Stripe;
@@ -1180,7 +1174,7 @@ async function maybeResolveHostedBillingPlanUpgradeExistingCollection(input: {
 }
 
 async function resolveHostedBillingPlanUpgradeAppliedCollection(input: {
-  currentPlanCode: "launch_monthly";
+  currentPlanCode: HostedBillingPlanCode;
   invoiceSnapshot: HostedStripeInvoiceCollectionSnapshot | null;
   now: Date;
   stripe: Stripe;
@@ -1248,7 +1242,7 @@ async function resolveHostedBillingPlanUpgradeAppliedCollection(input: {
 }
 
 function resolveHostedBillingPlanUpgradeProcessingResult(input: {
-  currentPlanCode: "launch_monthly";
+  currentPlanCode: HostedBillingPlanCode;
 }): HostedBillingPlanUpgradeResult {
   return {
     billingPlanCode: input.currentPlanCode,
@@ -1257,7 +1251,7 @@ function resolveHostedBillingPlanUpgradeProcessingResult(input: {
 }
 
 async function resolveHostedBillingPlanUpgradePaymentRequiredResult(input: {
-  currentPlanCode: "launch_monthly";
+  currentPlanCode: HostedBillingPlanCode;
   invoiceSnapshot: HostedStripeInvoiceCollectionSnapshot | null;
   stripe: Stripe;
   stripeCustomerId: string;
@@ -1303,7 +1297,7 @@ function readHostedBillingPlanUpgradeStripeUrl(input: {
 }
 
 async function resolveHostedBillingPlanUpgradePendingResult(input: {
-  currentPlanCode: "launch_monthly";
+  currentPlanCode: HostedBillingPlanCode;
   invoiceSnapshot: HostedStripeInvoiceCollectionSnapshot | null;
   now: Date;
   pendingUpdateExpiresAt: number;

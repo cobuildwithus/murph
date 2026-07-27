@@ -68,6 +68,7 @@ export interface HostedMemberBillingEligibilityState {
   currentCheckoutOffer: string | null;
   hasStripeCustomerId: boolean;
   hasStripeSubscriptionId: boolean;
+  scheduledBillingPlanCode: string | null;
 }
 
 export type HostedMemberStripeBillingLookupMatch =
@@ -836,6 +837,7 @@ export async function readHostedMemberBillingEligibilityState(input: {
       currentBillingPhase: true,
       currentBillingPlanCode: true,
       currentCheckoutOffer: true,
+      scheduledBillingPlanCode: true,
       stripeCustomerLookupKey: true,
       stripeSubscriptionLookupKey: true,
     },
@@ -851,6 +853,7 @@ export async function readHostedMemberBillingEligibilityState(input: {
     currentCheckoutOffer: billingRef.currentCheckoutOffer,
     hasStripeCustomerId: Boolean(billingRef.stripeCustomerLookupKey),
     hasStripeSubscriptionId: Boolean(billingRef.stripeSubscriptionLookupKey),
+    scheduledBillingPlanCode: billingRef.scheduledBillingPlanCode,
   };
 }
 

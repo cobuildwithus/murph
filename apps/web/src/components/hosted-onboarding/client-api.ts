@@ -1,6 +1,7 @@
 import type { HostedInviteStatusPayload } from "@/src/lib/hosted-onboarding/types";
 import type {
   HostedBillingPlanCode,
+  HostedPublicBillingPlanCode,
   HostedPublicBillingCheckoutOffer,
 } from "@/src/lib/hosted-onboarding/billing-plans";
 import {
@@ -48,10 +49,20 @@ export interface HostedAutoPulseTrialEnrollmentResponse {
 }
 
 export interface HostedPulseTrialStartPaidResponse {
-  billingPlanCode: "launch_monthly";
+  billingPlanCode?: HostedTrialPaidPlanCode;
   paymentUrl?: string;
-  status: "billing_pending" | "payment_required" | "started";
+  status:
+    | "billing_pending"
+    | "continuing"
+    | "payment_required"
+    | "scheduled"
+    | "started";
 }
+
+export type HostedTrialPaidPlanCode = Extract<
+  HostedBillingPlanCode,
+  "launch_group_monthly" | "launch_monthly"
+>;
 
 export type HostedPulseTrialStartPaidClientResult =
   | {
@@ -62,6 +73,12 @@ export type HostedPulseTrialStartPaidClientResult =
   }
   | {
     status: "started";
+  }
+  | {
+    status: "continuing";
+  }
+  | {
+    status: "scheduled";
   };
 
 export type HostedPulseTrialContinuationClientResult =
@@ -138,7 +155,7 @@ export async function requestHostedOnboardingJson<T>(input: {
 }
 
 export async function requestHostedBillingCheckout(input: {
-  billingPlanCode?: HostedBillingPlanCode | null;
+  billingPlanCode?: HostedPublicBillingPlanCode | null;
   checkoutOffer?: HostedPublicBillingCheckoutOffer | null;
   inviteCode: string;
 }): Promise<HostedBillingCheckoutResponse> {
@@ -164,11 +181,33 @@ export async function requestHostedAutoPulseTrialEnrollment(input: {
 }
 
 export async function requestHostedPulseTrialStartPaid(): Promise<HostedPulseTrialStartPaidClientResult> {
-  const response = await requestHostedOnboardingJson<HostedPulseTrialStartPaidResponse>({
-    method: "POST",
-    url: "/api/settings/billing/start-paid-pulse",
-  });
+  return parseHostedTrialPlanStartPaidResponse(
+    await requestHostedOnboardingJson<HostedPulseTrialStartPaidResponse>({
+      method: "POST",
+      url: "/api/settings/billing/start-paid-pulse",
+    }),
+  );
+}
 
+export async function requestHostedTrialPlanStartPaid(input: {
+  targetPlanCode: HostedTrialPaidPlanCode;
+  timing: "at_trial_end" | "now";
+}): Promise<HostedPulseTrialStartPaidClientResult> {
+  return parseHostedTrialPlanStartPaidResponse(
+    await requestHostedOnboardingJson<HostedPulseTrialStartPaidResponse>({
+      method: "POST",
+      payload: {
+        targetPlanCode: input.targetPlanCode,
+        timing: input.timing,
+      },
+      url: "/api/settings/billing/start-paid-pulse",
+    }),
+  );
+}
+
+function parseHostedTrialPlanStartPaidResponse(
+  response: HostedPulseTrialStartPaidResponse,
+): HostedPulseTrialStartPaidClientResult {
   if (response.status === "payment_required") {
     if (typeof response.paymentUrl !== "string" || response.paymentUrl.length === 0) {
       throw new HostedOnboardingApiError({
@@ -183,7 +222,12 @@ export async function requestHostedPulseTrialStartPaid(): Promise<HostedPulseTri
     };
   }
 
-  if (response.status === "billing_pending" || response.status === "started") {
+  if (
+    response.status === "billing_pending"
+    || response.status === "continuing"
+    || response.status === "scheduled"
+    || response.status === "started"
+  ) {
     return {
       status: response.status,
     };

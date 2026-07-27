@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "@/src/lib/hosted-onboarding/shared";
 
 const mocks = vi.hoisted(() => ({
+  appendHostedTrialEndingNotificationTx: vi.fn(),
   applyStripeCheckoutCompleted: vi.fn(),
   applyStripeCheckoutExpired: vi.fn(),
   applyStripeInvoiceCollectionStateChanged: vi.fn(),
@@ -35,6 +36,7 @@ const mocks = vi.hoisted(() => ({
   sendHostedSignupWelcomeEmailForMember: vi.fn(),
   sendHostedSubscriptionCancellationEmailForMember: vi.fn(),
   signalHostedRuntimeRecheckRuntime: vi.fn(),
+  signalHostedMailboxAppendRuntime: vi.fn(),
   executeHostedCheckoutSubscriptionCleanup: vi.fn(),
   stripe: {
     events: {
@@ -131,6 +133,11 @@ vi.mock("@/src/lib/hosted-onboarding/billing-plan-switch-to-pulse-service", () =
     mocks.clearHostedBillingPlanSwitchToPulsePendingFieldsForScheduleTx,
   refreshHostedBillingPlanSwitchToPulsePendingFieldsFromScheduleTx:
     mocks.refreshHostedBillingPlanSwitchToPulsePendingFieldsFromScheduleTx,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/billing-trial-ending-notification", () => ({
+  appendHostedTrialEndingNotificationTx:
+    mocks.appendHostedTrialEndingNotificationTx,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/stripe-billing-events", () => ({
@@ -249,6 +256,7 @@ vi.mock(
 );
 
 vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
+  signalHostedMailboxAppendRuntime: mocks.signalHostedMailboxAppendRuntime,
   signalHostedRuntimeRecheckRuntime: mocks.signalHostedRuntimeRecheckRuntime,
 }));
 
@@ -337,6 +345,7 @@ describe("hosted Stripe event reconciliation", () => {
       hostedExecutionEventId: null,
       welcomeEmailMemberId: null,
     });
+    mocks.appendHostedTrialEndingNotificationTx.mockResolvedValue(null);
     mocks.cancelHostedPulseTrialCheckoutLoserSubscription.mockResolvedValue(undefined);
     mocks.clearHostedBillingPlanSwitchToPulsePendingFieldsForScheduleTx.mockResolvedValue(undefined);
     mocks.convergeHostedFamilyDirectPaidOwnershipTx.mockResolvedValue(null);
@@ -387,6 +396,10 @@ describe("hosted Stripe event reconciliation", () => {
       status: "sent",
     });
     mocks.signalHostedRuntimeRecheckRuntime.mockResolvedValue({
+      signalAccepted: true,
+      workflowId: "hosted-user-runtime:member_123",
+    });
+    mocks.signalHostedMailboxAppendRuntime.mockResolvedValue({
       signalAccepted: true,
       workflowId: "hosted-user-runtime:member_123",
     });
@@ -3351,10 +3364,19 @@ describe("hosted Stripe event reconciliation", () => {
     errorSpy.mockRestore();
   });
 
-  it("accepts subscription trial_will_end without mutating entitlement state", async () => {
+  it("appends and wakes one private trial-ending notification without mutating entitlement state", async () => {
     const prisma = createStripeEventPrismaHarness();
     const event = makeSubscriptionEvent("customer.subscription.trial_will_end");
+    const canonicalSubscription = makeCanonicalSubscription({
+      status: "trialing",
+      trialEnd: 1_774_921_600,
+    });
     mocks.stripe.events.retrieve.mockResolvedValue(event);
+    mocks.stripe.subscriptions.retrieve.mockResolvedValue(canonicalSubscription);
+    mocks.appendHostedTrialEndingNotificationTx.mockResolvedValue({
+      mailboxItemId: "mailbox_trial_ending",
+      memberId: "member_123",
+    });
 
     await recordHostedStripeEvent({
       event,
@@ -3363,8 +3385,20 @@ describe("hosted Stripe event reconciliation", () => {
 
     await expect(reconcileHostedStripeEventById({ eventId: event.id, prisma: prisma.client }))
       .resolves.toMatchObject({ eventId: event.id, status: "completed" });
-    expect(mocks.stripe.subscriptions.retrieve).not.toHaveBeenCalled();
+    expect(mocks.appendHostedTrialEndingNotificationTx).toHaveBeenCalledWith({
+      memberId: "member_123",
+      occurredAt: expect.any(Date),
+      subscription: canonicalSubscription,
+      tx: prisma.client,
+    });
+    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      abortSignal: expect.any(AbortSignal),
+      expectedUserId: "member_123",
+      mailboxItemId: "mailbox_trial_ending",
+      prisma: prisma.client,
+    });
     expect(mocks.applyStripeSubscriptionUpdated).not.toHaveBeenCalled();
+    expect(mocks.applyStripeRecurringFinancialState).not.toHaveBeenCalled();
   });
 
   it("resolves refund customer context from the live Stripe event", async () => {
@@ -4480,12 +4514,14 @@ function makeCanonicalSubscription(overrides?: Partial<{
   id: string;
   metadata: Record<string, string>;
   status: Stripe.Subscription.Status;
+  trialEnd: number;
 }>): Stripe.Subscription {
   return {
     customer: overrides?.customer ?? "cus_123",
     id: overrides?.id ?? "sub_123",
     metadata: overrides?.metadata ?? {},
     status: overrides?.status ?? "active",
+    trial_end: overrides?.trialEnd ?? null,
   } as Stripe.Subscription;
 }
 

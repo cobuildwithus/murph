@@ -29,6 +29,7 @@ const TEST_TEMPLATE_KEYS = [
   "linq.ai_usage.trial_limit_reached",
   "linq.ai_usage.edge_limit_reached",
   "linq.ai_usage.family_limit_reached",
+  "linq.ai_usage.group_upgrade_pulse",
   "linq.ai_usage.pulse_upgrade_edge",
   "linq.ai_usage.thread_limit_reached",
   "linq.ai_usage.thread_limit_funding",
@@ -56,6 +57,9 @@ const TEST_CONTEXT_BY_KEY = {
     homeUrl: "https://withmurph.ai/home",
   },
   "linq.ai_usage.family_limit_reached": {
+    homeUrl: "https://withmurph.ai/home",
+  },
+  "linq.ai_usage.group_upgrade_pulse": {
     homeUrl: "https://withmurph.ai/home",
   },
   "linq.ai_usage.billing_inactive": {
@@ -122,6 +126,10 @@ describe("user-facing message variants", () => {
     expectEveryVariantContains("linq.ai_usage.trial_conversion_pending", "https://withmurph.ai/home");
     expectEveryVariantContains("linq.ai_usage.trial_limit_reached", "https://withmurph.ai/home");
     expectEveryVariantContains("linq.ai_usage.family_limit_reached", "https://withmurph.ai/home");
+    expectEveryVariantContains(
+      "linq.ai_usage.group_upgrade_pulse",
+      "https://withmurph.ai/home",
+    );
     expectEveryVariantContains(
       "linq.ai_usage.thread_limit_funding",
       "https://www.withmurph.ai/groups/fund/test-code",
@@ -196,6 +204,13 @@ describe("user-facing message variants", () => {
       expect(text).not.toMatch(/add usage|top[ -]?up/iu);
     }
 
+    for (const text of collectRenderedTexts("linq.ai_usage.group_upgrade_pulse")) {
+      expect(text).toMatch(/sync|wearable|health data/iu);
+      expect(text).toMatch(/group/iu);
+      expect(text).toMatch(/Pulse|reset/iu);
+      expect(text).not.toMatch(/top[ -]?up/iu);
+    }
+
     for (const text of collectRenderedTexts("linq.ai_usage.thread_limit_reached")) {
       expect(text).toMatch(THREAD_PAUSE_STATED);
       expect(text).toMatch(/(?:until|when)\b.*resets/iu);
@@ -208,6 +223,7 @@ describe("user-facing message variants", () => {
       "linq.ai_usage.trial_limit_reached",
       "linq.ai_usage.edge_limit_reached",
       "linq.ai_usage.family_limit_reached",
+      "linq.ai_usage.group_upgrade_pulse",
       "linq.ai_usage.pulse_upgrade_edge",
       "linq.ai_usage.thread_limit_reached",
     ] as const) {
@@ -235,6 +251,7 @@ describe("user-facing message variants", () => {
       "linq.ai_usage.trial_limit_reached",
       "linq.ai_usage.edge_limit_reached",
       "linq.ai_usage.family_limit_reached",
+      "linq.ai_usage.group_upgrade_pulse",
       "linq.ai_usage.pulse_upgrade_edge",
     ] as const) {
       for (const text of collectRenderedTexts(key)) {

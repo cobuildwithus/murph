@@ -23,5 +23,11 @@ export const POST = withJsonError(async (request: Request) => {
       ? { includeSubscriptionActionQuote: true }
       : {}),
     memberId,
+    ...(toolRequest.subscriptionActionTargetPlanCode
+      ? {
+          subscriptionActionTargetPlanCode:
+            toolRequest.subscriptionActionTargetPlanCode,
+        }
+      : {}),
   }));
 });

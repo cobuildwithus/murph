@@ -28,8 +28,13 @@ describe("hosted plan usage tool port", () => {
       planName: "Pulse",
       recommendedAction: null,
       subscriptionActionQuote: {
-        action: "upgrade_edge",
+        action: "change_plan",
+        expiresAt: "2026-07-03T12:10:00.000Z",
         label: "Upgrade to Edge ($20/month)",
+        monthlyPriceUsdCents: 2_000,
+        quoteId: "signed-quote",
+        targetPlanCode: "launch_edge_monthly",
+        timing: "immediate",
       },
       remainingPercent: 50,
       status: "active",
@@ -43,7 +48,9 @@ describe("hosted plan usage tool port", () => {
       transport: { mode: "proxy" },
     });
 
-    await expect(port.read()).resolves.toMatchObject({
+    await expect(port.read({
+      includeSubscriptionActionQuote: true,
+    })).resolves.toMatchObject({
       planName: "Pulse",
       usedPercent: 50,
     });
@@ -70,7 +77,9 @@ describe("hosted plan usage tool port", () => {
       transport: { mode: "proxy" },
     });
 
-    await expect(port.read()).rejects.toThrow(
+    await expect(port.read({
+      includeSubscriptionActionQuote: true,
+    })).rejects.toThrow(
       "Hosted plan usage tool returned invalid JSON.",
     );
   });

@@ -1,27 +1,30 @@
 # Pulse Trial Start Paid Pulse
 
-Last verified: 2026-07-25
+Last verified: 2026-07-27
 
 Status: Implemented
 
 ## Goal
 
 When a Pulse Trial user runs out of included trial AI usage before the trial
-calendar ends, give them a clear way to start the paid Pulse plan immediately.
+calendar ends, give them a clear way to start an authorized paid continuation
+plan immediately. Pulse remains available to everyone; confirmed group members
+may also start Group. The legacy file and compatibility service retain their
+Pulse-specific names, while the target-plan core is generic.
 
 The product behavior is:
 
 - Trial usage runs out.
-- The Home banner shows a plain billing CTA: `Start Pulse`.
-- The user confirms that their trial ends now and Pulse starts at `$8 / month`
-  once billing is confirmed.
+- The Home banner shows only server-authorized target plans.
+- The user confirms that their trial ends now and the selected plan starts at
+  its exact monthly price once billing is confirmed.
 - Stripe ends the existing Pulse trial immediately and invoices the first paid
   Pulse month.
 - Murph grants the normal paid Pulse allowance only after Stripe reconciliation
   observes the paid invoice state.
 
-This is not an Edge upgrade path. It is an early conversion from Pulse Trial to
-paid Pulse.
+This is not an Edge upgrade path. It is an early conversion from Pulse Trial
+to paid Pulse or, for a currently eligible member, paid Group.
 
 ## Current State
 
@@ -43,7 +46,8 @@ The exhausted-trial path is implemented:
 - Settings can also start the same flow.
 - The route enforces hosted mutation-origin checks, requires the Murph hosted
   app session, rejects suspended or ineligible members, and delegates to
-  `startHostedPulseTrialPaidPlan`.
+  `startHostedTrialPaidPlan`. Group eligibility is rechecked under the billing
+  lock.
 - Murph grants the normal paid Pulse allowance only after Stripe reconciliation
   observes the paid invoice state.
 

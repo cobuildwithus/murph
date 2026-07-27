@@ -1,6 +1,6 @@
 import { createHostedBillingCheckout } from "@/src/lib/hosted-onboarding/billing-service";
 import {
-  parseHostedBillingPlanCode,
+  parseHostedPublicBillingPlanCode,
   parseHostedPublicBillingCheckoutOffer,
 } from "@/src/lib/hosted-onboarding/billing-plans";
 import { assertHostedOnboardingMutationOrigin } from "@/src/lib/hosted-onboarding/csrf";
@@ -24,14 +24,14 @@ export const POST = withJsonError(async (request: Request) => {
     const prisma = getPrisma();
     const auth = await requireHostedAppSessionFromRequest(request);
     const { body, inviteCode } = await requireHostedInviteCodeFromRequest(request);
-    const billingPlanCode = parseHostedBillingPlanCode(body.billingPlanCode);
+    const billingPlanCode = parseHostedPublicBillingPlanCode(body.billingPlanCode);
     const checkoutOffer = parseHostedPublicBillingCheckoutOffer(body.checkoutOffer);
 
     if (body.billingPlanCode !== undefined && !billingPlanCode) {
       throw hostedOnboardingError({
         code: "HOSTED_BILLING_PLAN_INVALID",
         httpStatus: 400,
-        message: "billingPlanCode must be one of the configured Murph billing plans.",
+        message: "billingPlanCode must be a public Murph signup plan.",
       });
     }
 

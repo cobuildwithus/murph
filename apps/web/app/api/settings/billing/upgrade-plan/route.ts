@@ -18,11 +18,11 @@ export const POST = withJsonError(async (request: Request) => {
   });
   const targetPlanCode = parseHostedBillingPlanCode(body.targetPlanCode);
 
-  if (targetPlanCode !== "launch_edge_monthly") {
+  if (!targetPlanCode) {
     throw hostedOnboardingError({
       code: "HOSTED_BILLING_PLAN_UPGRADE_TARGET_INVALID",
       httpStatus: 400,
-      message: "targetPlanCode must be launch_edge_monthly.",
+      message: "targetPlanCode must be a configured Murph billing plan.",
     });
   }
 
