@@ -10,6 +10,7 @@ import { scopeWebhookTraceId, sha256Text } from "../src/shared.ts";
 import type {
   ClaimDeviceSyncWebhookTraceInput,
   CommitPublicDeviceSyncConnectionStartInput,
+  CommitPublicDeviceSyncOAuthConnectionCallbackInput,
   CommitPublicDeviceSyncSdkConnectionStartInput,
   ConsumeOAuthStateResult,
   DeviceConnectionHandler,
@@ -27,6 +28,7 @@ import type {
   ProviderAuthTokens,
   ProviderConnectionResult,
   PublicDeviceSyncAccount,
+  PublicDeviceSyncOAuthConnectionCallbackReference,
   UpsertPublicDeviceSyncConnectionInput,
 } from "../src/types.ts";
 import {
@@ -2139,6 +2141,98 @@ test("public ingress applies the owner lifecycle fence to seedless OAuth starts"
   assert.equal(store.commitCalls[0]?.connectionSeed, null);
   assert.equal(store.commitCalls[0]?.oauthState.ownerId, "member-suspended");
   assert.equal(store.createOAuthStateCalls, 0);
+});
+
+test("public ingress retains a hosted OAuth marker through token exchange, connection commit, and established hooks", async () => {
+  const order: string[] = [];
+  let providerStateMetadata: Record<string, unknown> | null = null;
+  class FencedOAuthStore extends InMemoryPublicIngressStore {
+    stageConnectionStart(input: OAuthStateRecord): void {
+      order.push("local-stage");
+      this.createOAuthState(input);
+    }
+
+    commitConnectionStart(input: CommitPublicDeviceSyncConnectionStartInput): void {
+      order.push("authorization-state-commit");
+      this.createOAuthState({
+        ...input.oauthState,
+        metadata: {
+          ...(input.oauthState.metadata ?? {}),
+          [DEVICE_SYNC_CONNECTION_START_PENDING_STATE_METADATA_KEY]: true,
+        },
+      });
+    }
+
+    commitOAuthConnectionCallback(
+      input: CommitPublicDeviceSyncOAuthConnectionCallbackInput,
+    ): PublicDeviceSyncAccount {
+      order.push("callback-connection-commit");
+      return super.upsertConnection(input.connection);
+    }
+
+    completeOAuthConnectionCallback(
+      _input: PublicDeviceSyncOAuthConnectionCallbackReference,
+    ): void {
+      order.push("callback-marker-complete");
+    }
+  }
+
+  const store = new FencedOAuthStore();
+  const provider = createFakeProvider({
+    async beginConnection() {
+      order.push("provider-begin");
+      return {
+        authorizationUrl: "https://example.test/oauth",
+      };
+    },
+    async completeConnection(input) {
+      order.push("provider-token-exchange");
+      providerStateMetadata = input.stateMetadata ?? null;
+      return {
+        externalAccountId: "oauth-account-1",
+        tokens: {
+          accessToken: "<REDACTED_ACCESS_TOKEN>",
+          refreshToken: "<REDACTED_REFRESH_TOKEN>",
+        },
+      };
+    },
+  });
+  const ingress = createDeviceSyncPublicIngress({
+    hooks: {
+      onConnectionEstablished: async () => {
+        order.push("connection-established-hook");
+      },
+    },
+    publicBaseUrl: "https://sync.example.test/device-sync",
+    registry: createDeviceSyncRegistry([provider]),
+    store,
+  });
+
+  const started = await ingress.startConnection({
+    ownerId: "member-active",
+    provider: "demo",
+  });
+  const completed = await ingress.handleOAuthCallback({
+    code: "callback-code",
+    expectedOwnerId: "member-active",
+    provider: "demo",
+    state: started.state,
+  });
+
+  assert.equal(completed.account.externalAccountId, "oauth-account-1");
+  assert.deepEqual(order, [
+    "local-stage",
+    "provider-begin",
+    "authorization-state-commit",
+    "provider-token-exchange",
+    "callback-connection-commit",
+    "connection-established-hook",
+    "callback-marker-complete",
+  ]);
+  assert.equal(
+    providerStateMetadata?.[DEVICE_SYNC_CONNECTION_START_PENDING_STATE_METADATA_KEY],
+    undefined,
+  );
 });
 
 test("configured provider manifests own credential policy over provider instances", async () => {

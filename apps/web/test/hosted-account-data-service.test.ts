@@ -2,8 +2,12 @@ import { randomUUID } from "node:crypto";
 
 import type { Prisma, PrismaClient } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { createDeviceSyncPublicIngress } from "@murphai/device-syncd/public-ingress";
 import {
   DEVICE_SYNC_CONNECTION_START_PENDING_STATE_METADATA_KEY,
+  type CommitPublicDeviceSyncOAuthConnectionCallbackInput,
+  type DeviceSyncProvider,
+  type DeviceSyncRegistry,
 } from "@murphai/device-syncd/types";
 
 const serviceMocks = vi.hoisted(() => ({
@@ -1936,6 +1940,42 @@ describe("deleteHostedAccountData", () => {
     expect(operationOrder).not.toContain("update:hostedMember");
   });
 
+  it("keeps an expired consumed OAuth callback live until its exact completion", async () => {
+    const deleteCalls: HostedAccountDeletionPrismaDeleteCall[] = [];
+    const operationOrder: string[] = [];
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      deleteCalls,
+      onTransaction: () => undefined,
+      operationOrder,
+      pendingDeviceConnectionStarts: [
+        {
+          consumedAt: new Date("2026-07-26T12:01:00.000Z"),
+          createdAt: new Date("2026-07-26T12:00:00.000Z"),
+          expiresAt: new Date("2020-07-26T12:30:00.000Z"),
+          provider: "oura",
+          state: "consumed-oura-callback",
+          userId: "member_123",
+        },
+      ],
+    });
+
+    await expect(deleteHostedAccountData({
+      memberId: "member_123",
+      prisma,
+      request: new Request("https://join.example.test/settings"),
+    })).rejects.toMatchObject({
+      code: "ACCOUNT_DELETION_DEVICE_CONNECTION_START_IN_PROGRESS",
+      httpStatus: 409,
+      retryable: true,
+    });
+
+    expect(serviceMocks.createHostedDeviceSyncRegistry).not.toHaveBeenCalled();
+    expect(deleteCalls).not.toContainEqual(expect.objectContaining({
+      model: "deviceOauthSession",
+    }));
+    expect(operationOrder).not.toContain("update:hostedMember");
+  });
+
   it("rejects a live sibling before cleaning an older expired owner-creating start", async () => {
     const deleteOwnerAccount = vi.fn(async () => "deleted" as const);
     const deleteCalls: HostedAccountDeletionPrismaDeleteCall[] = [];
@@ -2702,6 +2742,150 @@ describe.skipIf(!runPostgresConcurrencyProof)(
       }
     });
 
+    it("rejects deletion at both direct-OAuth callback barriers before durable commitment", async () => {
+      const fixture = await createPostgresAccountDeletionFixture();
+      const exchangeEntered = deferred();
+      const releaseExchange = deferred();
+      const commitEntered = deferred();
+      const releaseCommit = deferred();
+      let callback: ReturnType<ReturnType<typeof createDeviceSyncPublicIngress>["handleOAuthCallback"]>
+        | null = null;
+      const callbackStore = new Proxy(fixture.store, {
+        get(target, property) {
+          if (property === "commitOAuthConnectionCallback") {
+            return async (input: CommitPublicDeviceSyncOAuthConnectionCallbackInput) => {
+              commitEntered.resolve();
+              await releaseCommit.promise;
+              return target.commitOAuthConnectionCallback(input);
+            };
+          }
+          const value = Reflect.get(target, property, target);
+          return typeof value === "function" ? value.bind(target) : value;
+        },
+      });
+      const provider = {
+        connectionHandler: {
+          beginConnection: async () => ({
+            authorizationUrl: "https://oura.example.test/oauth",
+          }),
+          completeConnection: async () => {
+            exchangeEntered.resolve();
+            await releaseExchange.promise;
+            return {
+              externalAccountId: `oura-callback-${randomUUID()}`,
+              tokens: {
+                accessToken: "<REDACTED_ACCESS_TOKEN>",
+                refreshToken: "<REDACTED_REFRESH_TOKEN>",
+              },
+            };
+          },
+        },
+        descriptor: {
+          connection: {
+            callbackPath: "/connect/oura/callback",
+            kind: "oauth2",
+          },
+          displayName: "Oura",
+          normalization: {
+            metricFamilies: ["sleep"],
+            snapshotParser: "schema",
+          },
+          provider: "oura",
+          sourcePriorityHints: {
+            defaultPriority: 90,
+            metricFamilies: {
+              sleep: 90,
+            },
+          },
+          transportModes: ["oauth_callback", "scheduled_poll"],
+        },
+        provider: "oura",
+      } satisfies DeviceSyncProvider;
+      const registry = {
+        get: (providerName: string) => providerName === provider.provider
+          ? provider
+          : undefined,
+        list: () => [provider],
+        register: () => {
+          throw new TypeError("The fixed test registry does not accept registrations.");
+        },
+      } satisfies DeviceSyncRegistry;
+      const ingress = createDeviceSyncPublicIngress({
+        publicBaseUrl: "https://sync.example.test/device-sync",
+        registry,
+        store: callbackStore,
+      });
+
+      try {
+        const started = await ingress.startConnection({
+          ownerId: fixture.memberId,
+          provider: provider.provider,
+        });
+        callback = ingress.handleOAuthCallback({
+          code: "callback-code",
+          expectedOwnerId: fixture.memberId,
+          provider: provider.provider,
+          state: started.state,
+        });
+
+        await exchangeEntered.promise;
+        await expect(deleteHostedAccountData({
+          memberId: fixture.memberId,
+          prisma: fixture.prisma,
+          request: new Request("https://join.example.test/settings"),
+        })).rejects.toMatchObject({
+          code: "ACCOUNT_DELETION_DEVICE_CONNECTION_START_IN_PROGRESS",
+          httpStatus: 409,
+          retryable: true,
+        });
+        await expect(fixture.prisma.deviceOauthSession.findUnique({
+          select: { consumedAt: true },
+          where: { state: started.state },
+        })).resolves.toEqual({
+          consumedAt: expect.any(Date),
+        });
+
+        releaseExchange.resolve();
+        await commitEntered.promise;
+        await expect(deleteHostedAccountData({
+          memberId: fixture.memberId,
+          prisma: fixture.prisma,
+          request: new Request("https://join.example.test/settings"),
+        })).rejects.toMatchObject({
+          code: "ACCOUNT_DELETION_DEVICE_CONNECTION_START_IN_PROGRESS",
+          httpStatus: 409,
+          retryable: true,
+        });
+        await expect(fixture.prisma.deviceConnection.count({
+          where: { userId: fixture.memberId },
+        })).resolves.toBe(0);
+
+        releaseCommit.resolve();
+        await expect(callback).resolves.toMatchObject({
+          account: {
+            provider: provider.provider,
+          },
+        });
+        await expect(fixture.prisma.deviceConnection.count({
+          where: { userId: fixture.memberId },
+        })).resolves.toBe(1);
+        await expect(fixture.prisma.deviceOauthSession.findUnique({
+          select: { consumedAt: true, metadataJson: true },
+          where: { state: started.state },
+        })).resolves.toEqual({
+          consumedAt: expect.any(Date),
+          metadataJson: expect.not.objectContaining({
+            [DEVICE_SYNC_CONNECTION_START_PENDING_STATE_METADATA_KEY]: true,
+          }),
+        });
+      } finally {
+        releaseExchange.resolve();
+        releaseCommit.resolve();
+        await Promise.allSettled(callback ? [callback] : []);
+        await cleanupPostgresAccountDeletionFixture(fixture);
+      }
+    });
+
     it("rejects an expired Junction marker plus live sibling before provider cleanup", async () => {
       const fixture = await createPostgresAccountDeletionFixture();
       const expiredState = `${fixture.state}-expired`;
@@ -3039,6 +3223,7 @@ function createHostedAccountDeletionPrismaForTest(input: {
   onTransaction: () => void;
   operationOrder?: string[];
   pendingDeviceConnectionStarts?: Array<{
+    consumedAt?: Date | null;
     createdAt: Date;
     expiresAt: Date;
     provider: string;
@@ -3245,6 +3430,7 @@ function createHostedAccountDeletionPrismaForTest(input: {
 
 function matchesPendingDeviceConnectionStartWhere(
   record: {
+    consumedAt?: Date | null;
     expiresAt: Date;
     userId: string | null;
   },
@@ -3252,6 +3438,27 @@ function matchesPendingDeviceConnectionStartWhere(
 ): boolean {
   if (typeof where !== "object" || where === null) {
     return true;
+  }
+
+  const or = Reflect.get(where, "OR");
+  if (
+    Array.isArray(or)
+    && !or.some((clause) => matchesPendingDeviceConnectionStartWhere(record, clause))
+  ) {
+    return false;
+  }
+
+  const consumedAt = Reflect.get(where, "consumedAt");
+  if (consumedAt === null && record.consumedAt != null) {
+    return false;
+  }
+  if (
+    typeof consumedAt === "object"
+    && consumedAt !== null
+    && Reflect.get(consumedAt, "not") === null
+    && record.consumedAt == null
+  ) {
+    return false;
   }
 
   const expiresAt = Reflect.get(where, "expiresAt");

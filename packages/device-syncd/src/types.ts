@@ -349,6 +349,17 @@ export interface CommitPublicDeviceSyncSdkConnectionStartInput {
   state: string;
 }
 
+export interface PublicDeviceSyncOAuthConnectionCallbackReference {
+  ownerId: string;
+  provider: string;
+  state: string;
+}
+
+export interface CommitPublicDeviceSyncOAuthConnectionCallbackInput
+  extends PublicDeviceSyncOAuthConnectionCallbackReference {
+  connection: UpsertPublicDeviceSyncConnectionInput;
+}
+
 export interface PublicDeviceSyncSdkConnectionStartReference {
   ownerId: string;
   provider: string;
@@ -422,6 +433,20 @@ export interface DeviceSyncPublicIngressStore {
    */
   commitConnectionStart?(
     input: CommitPublicDeviceSyncConnectionStartInput,
+  ): void | Promise<void>;
+  /**
+   * Atomically persists a callback connection while retaining its consumed
+   * pending marker under the active-member lifecycle fence.
+   */
+  commitOAuthConnectionCallback?(
+    input: CommitPublicDeviceSyncOAuthConnectionCallbackInput,
+  ): PublicDeviceSyncAccount | Promise<PublicDeviceSyncAccount>;
+  /**
+   * Completes only the exact consumed callback marker after connection hooks
+   * finish and immediately before callback success can be returned.
+   */
+  completeOAuthConnectionCallback?(
+    input: PublicDeviceSyncOAuthConnectionCallbackReference,
   ): void | Promise<void>;
   /**
    * Atomically persists an SDK-created connection while retaining that

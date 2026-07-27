@@ -5,6 +5,7 @@ import { buildCommittedConnectionStartOAuthState } from "@murphai/device-syncd/t
 import type {
   ClaimDeviceSyncWebhookTraceInput,
   CommitPublicDeviceSyncConnectionStartInput,
+  CommitPublicDeviceSyncOAuthConnectionCallbackInput,
   CommitPublicDeviceSyncSdkConnectionStartInput,
   ConsumeOAuthStateResult,
   DeviceSyncPublicIngressStore,
@@ -12,6 +13,7 @@ import type {
   MarkPublicDeviceSyncConnectionSetupFailedInput,
   MarkPublicDeviceSyncConnectionSetupFailedResult,
   OAuthStateRecord,
+  PublicDeviceSyncOAuthConnectionCallbackReference,
   PublicDeviceSyncSdkConnectionStartReference,
   PublicDeviceSyncAccount,
   UpsertPublicDeviceSyncConnectionInput,
@@ -154,7 +156,22 @@ export class PrismaDeviceSyncControlPlaneStore
     expectedProvider?: string,
     expectedOwnerId?: string,
   ): Promise<ConsumeOAuthStateResult> {
-    return this.oauthSessions.consumeOAuthState(state, now, expectedProvider, expectedOwnerId);
+    return this.prisma.$transaction(async (tx) => {
+      const stagedOwnerId = await this.oauthSessions.findStagedConnectionStartOwner(
+        state,
+        tx,
+      );
+      if (stagedOwnerId) {
+        await lockActiveHostedConnectionStartOwnerTx(tx, stagedOwnerId);
+      }
+      return this.oauthSessions.consumeOAuthStateTx(
+        state,
+        now,
+        expectedProvider,
+        expectedOwnerId,
+        tx,
+      );
+    });
   }
 
   async upsertConnection(input: UpsertPublicDeviceSyncConnectionInput): Promise<PublicDeviceSyncAccount> {
@@ -227,6 +244,65 @@ export class PrismaDeviceSyncControlPlaneStore
           httpStatus: 409,
         });
       }
+    });
+  }
+
+  async commitOAuthConnectionCallback(
+    input: CommitPublicDeviceSyncOAuthConnectionCallbackInput,
+  ): Promise<PublicDeviceSyncAccount> {
+    try {
+      return await this.commitOAuthConnectionCallbackOnce(input);
+    } catch (error) {
+      if (!isUniqueViolation(error)) {
+        throw error;
+      }
+
+      return this.commitOAuthConnectionCallbackOnce(input);
+    }
+  }
+
+  private async commitOAuthConnectionCallbackOnce(
+    input: CommitPublicDeviceSyncOAuthConnectionCallbackInput,
+  ): Promise<PublicDeviceSyncAccount> {
+    const ownerId = requireHostedConnectionStartOwnerId(input.ownerId);
+    if (
+      normalizeNullableString(input.connection.ownerId) !== ownerId
+      || input.connection.provider !== input.provider
+    ) {
+      throw deviceSyncError({
+        code: "CONNECTION_OWNER_MISMATCH",
+        message: "Device-sync callback connection and lifecycle marker must match.",
+        retryable: false,
+        httpStatus: 400,
+      });
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      await lockActiveHostedConnectionStartOwnerTx(tx, ownerId);
+      const staged = await this.oauthSessions.hasConsumedStagedConnectionStart({
+        ownerId,
+        provider: input.provider,
+        state: input.state,
+      }, tx);
+      assertHostedSdkConnectionStartStaged(staged);
+      return this.connections.upsertConnectionTx(tx, {
+        ...input.connection,
+        ownerId,
+      });
+    });
+  }
+
+  async completeOAuthConnectionCallback(
+    input: PublicDeviceSyncOAuthConnectionCallbackReference,
+  ): Promise<void> {
+    const ownerId = requireHostedConnectionStartOwnerId(input.ownerId);
+    await this.prisma.$transaction(async (tx) => {
+      await lockActiveHostedConnectionStartOwnerTx(tx, ownerId);
+      const completed = await this.oauthSessions.completeStagedOAuthConnectionCallback({
+        ...input,
+        ownerId,
+      }, tx);
+      assertHostedSdkConnectionStartStaged(completed);
     });
   }
 

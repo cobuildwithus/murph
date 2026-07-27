@@ -265,6 +265,7 @@ jobs:
           pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage
           apps/web/test/device-sync-dirty-account-deletion-concurrency.test.ts
           apps/web/test/device-sync-start-account-deletion-concurrency.test.ts
+          apps/web/test/hosted-account-data-service.test.ts
           apps/web/test/hosted-accepted-attempt-recheck-postgres-concurrency.test.ts
           apps/web/test/hosted-assistant-ask-retention-postgres.test.ts
           apps/web/test/hosted-execution-usage-postgres-concurrency.test.ts

@@ -6,8 +6,9 @@ Updated: 2026-07-26
 
 ## Goal
 
-- Close PR 1002's remaining exact-head ReviewGPT findings without weakening the
-  account-deletion commitment boundary or adding lifecycle state.
+- Close PR 1002's remaining exact-head ReviewGPT findings by extending the
+  existing direct-OAuth lifecycle marker through callback token exchange and
+  durable connection commitment, without adding lifecycle state.
 
 ## Success criteria
 
@@ -16,6 +17,12 @@ Updated: 2026-07-26
 - URL-only OAuth expiry is classified without current provider credentials.
 - Unknown and owner-creating providers without cleanup support remain
   fail-closed.
+- Direct-OAuth callbacks cannot exchange provider tokens or commit a connection
+  after account deletion wins the hosted-member fence.
+- Account deletion cannot suspend a member while a consumed direct-OAuth
+  callback still owns its pending marker.
+- Callback success is returned only after the durable connection is committed
+  under the active-member fence and the exact marker is completed.
 - Focused unit and real-PostgreSQL ordering tests pass.
 - The draft PR is reconciled with current `main`, CI passes, and the exact
   PR-specific patch receives a passing ReviewGPT correction.
@@ -23,15 +30,15 @@ Updated: 2026-07-26
 ## Scope
 
 - In scope: hosted account-deletion ordering, configuration-independent provider
-  classification, focused lifecycle tests, design-evidence packaging, and PR
-  evidence.
+  classification, direct-OAuth callback fencing, focused lifecycle tests,
+  design-evidence packaging, and PR evidence.
 - Out of scope: new persistence, background cleanup, provider onboarding
   redesign, merging the draft PR, or unrelated device-sync changes.
 
 ## Constraints
 
-- Reuse the existing pending marker, deletion cutoff, hosted-member lock,
-  provider manifest, and provider cleanup interface.
+- Reuse the existing pending marker, its existing consumed timestamp, deletion
+  cutoff, hosted-member lock, provider manifest, and provider cleanup interface.
 - Keep provider I/O outside database transactions.
 - Preserve truthful pre-start Cancel behavior and the ambiguous/reload recovery
   path after suspension commits.
@@ -47,6 +54,16 @@ Updated: 2026-07-26
 3. Risk: a new live marker stages between preflight and suspension.
    Mitigation: recheck the same live-at-cutoff predicate inside the suspension
    transaction before writing `suspendedAt`.
+4. Risk: deletion suspends after callback state consumption but before provider
+   token exchange or durable connection commitment.
+   Mitigation: consume the pending callback state and commit its connection only
+   under the active hosted-member lock; retain a consumed pending marker as live
+   until callback completion.
+5. Risk: an interrupted callback leaves an upstream grant without a durable
+   cleanup owner.
+   Mitigation: consumed pending markers remain fail-closed even after their
+   authorization expiry; only the exact successful callback completion clears
+   the pending flag.
 
 ## Tasks
 
@@ -57,8 +74,14 @@ Updated: 2026-07-26
 3. Add mixed expired/live, staging-barrier, cleanup-order, missing-config, and
    fail-closed tests.
 4. Package the rendered retry-state evidence claimed by the PR body.
-5. Run scoped and canonical verification, reconcile `main`, update the draft PR,
-   and complete the exact-head review/CI gate.
+5. Preserve the pending marker when finalizing a direct-OAuth authorization URL,
+   consume callback state under the active-member fence, atomically commit the
+   callback connection under that fence, and complete only the exact consumed
+   marker after established hooks finish.
+6. Add both callback/deletion race barriers: deletion winning before token
+   exchange, and callback commitment holding deletion after token exchange.
+7. Run scoped and canonical verification, update the draft PR, and complete the
+   exact-head review/CI gate.
 
 ## Decisions
 
@@ -68,6 +91,13 @@ Updated: 2026-07-26
   initial preflight and locked recheck.
 - Provider capability configuration and provider lifecycle classification are
   separate concerns; URL-only OAuth classification must not require credentials.
+- For direct OAuth, authorization-URL return is not terminal. The lifecycle
+  remains pending through callback state consumption, provider token exchange,
+  connection persistence, and established-hook completion.
+- `device_oauth_session.consumed_at` identifies a callback that owns provider
+  side effects. A consumed pending marker remains live past its authorization
+  expiry so account deletion fails closed instead of deleting the only cleanup
+  owner.
 
 ## Verification
 
@@ -89,4 +119,24 @@ Updated: 2026-07-26
 - Crabbox `pnpm verify:acceptance`: passed in Testbox
   `tbx_01kygvw3sj8baxj8b8npny0z1b`
   ([Actions run](https://github.com/cobuildwithus/murph/actions/runs/30236073583)).
+- Exact-head ReviewGPT correction round 4 found the direct-OAuth callback gap
+  after confirming the earlier deletion-order and provider-classification
+  corrections.
+- Direct-OAuth callback remediation focused tests: 70 package tests passed;
+  125 hosted-web tests passed with 18 opt-in cases skipped in the ordinary
+  lane. Device-sync and hosted-web typechecks plus affected hosted-web ESLint
+  passed.
+- Fresh migrated worktree PostgreSQL proof: 94 tests passed, including
+  deletion attempts after callback state consumption before token exchange and
+  after token exchange before durable connection commitment.
+- Crabbox `pnpm verify:acceptance`: passed in Testbox
+  `tbx_01kyh1eb3ngg14qv7dde0vhds0`
+  ([Actions run](https://github.com/cobuildwithus/murph/actions/runs/30240432723)).
+- Crabbox `pnpm test:diff`: the generated Health Commons artifact was supplied
+  after the first fresh-box artifact miss, after which two identical
+  Testboxes reached only an unrelated `packages/hosted-local-harness` Linux
+  Docker-host resolution failure (65 tests fail before their assertions because
+  no container-reachable worker host can be resolved). The complete final
+  reproduction used Testbox `tbx_01kyh0vv4pd6a3q9bzg4vstxnw`
+  ([Actions run](https://github.com/cobuildwithus/murph/actions/runs/30239956291)).
 - Exact-head ReviewGPT correction and PR CI: pending.

@@ -412,7 +412,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
       }
     });
 
-    it("a successful start consumes only its own marker while a sibling provider request remains live", async () => {
+    it("authorization finalization retains its exact callback marker alongside a live sibling", async () => {
       const fixture = await createFixture();
       const store = createStore(fixture.starter);
       const firstInput = buildStartInput(fixture, { stateSuffix: "-first" });
@@ -436,8 +436,11 @@ describe.skipIf(!runPostgresConcurrencyProof)(
             state: firstInput.oauthState.state,
           },
           {
-            metadataJson: expect.not.objectContaining({
+            metadataJson: expect.objectContaining({
               [DEVICE_SYNC_CONNECTION_START_PENDING_STATE_METADATA_KEY]: true,
+              __murphSeededConnectionAccountId: expect.any(String),
+              __murphSeededConnectionSetupExpiresAt: setupExpiresAt,
+              connectTarget: "garmin",
             }),
             state: secondInput.oauthState.state,
           },

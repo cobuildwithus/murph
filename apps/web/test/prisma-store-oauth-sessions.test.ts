@@ -89,6 +89,48 @@ describe("PrismaHostedOAuthSessionStore.deleteExpiredOAuthStates", () => {
   });
 });
 
+describe("PrismaHostedOAuthSessionStore.replaceStagedConnectionStartOAuthState", () => {
+  it("retains the pending marker when authorization state replaces the staged record", async () => {
+    const tx = createTransaction({});
+    const store = {
+      replaceStagedConnectionStartOAuthState:
+        PrismaHostedOAuthSessionStore.prototype.replaceStagedConnectionStartOAuthState,
+    };
+
+    await expect(store.replaceStagedConnectionStartOAuthState({
+      createdAt: "2026-04-13T12:00:00.000Z",
+      expiresAt: "2026-04-13T12:15:00.000Z",
+      metadata: {
+        callbackMetadata: "safe",
+      },
+      ownerId: "user_123",
+      provider: "whoop",
+      returnTo: "https://murph.test/settings",
+      state: "state_123",
+    }, tx as never)).resolves.toBe(true);
+    expect(tx.deviceOauthSession.updateMany).toHaveBeenCalledWith({
+      data: {
+        createdAt: new Date("2026-04-13T12:00:00.000Z"),
+        expiresAt: new Date("2026-04-13T12:15:00.000Z"),
+        metadataJson: {
+          callbackMetadata: "safe",
+          [DEVICE_SYNC_CONNECTION_START_PENDING_STATE_METADATA_KEY]: true,
+        },
+        provider: "whoop",
+        returnTo: "https://murph.test/settings",
+      },
+      where: {
+        metadataJson: {
+          path: [DEVICE_SYNC_CONNECTION_START_PENDING_STATE_METADATA_KEY],
+          equals: true,
+        },
+        state: "state_123",
+        userId: "user_123",
+      },
+    });
+  });
+});
+
 describe("PrismaHostedOAuthSessionStore.consumeStagedConnectionStart", () => {
   it("consumes only the exact request marker and leaves sibling starts outside the predicate", async () => {
     const tx = createTransaction({});
@@ -116,8 +158,48 @@ describe("PrismaHostedOAuthSessionStore.consumeStagedConnectionStart", () => {
   });
 });
 
+describe("PrismaHostedOAuthSessionStore.completeStagedOAuthConnectionCallback", () => {
+  it("clears only the exact consumed pending marker and preserves callback replay state", async () => {
+    const record = buildOAuthSessionRow({
+      consumedAt: new Date("2026-04-13T12:01:00.000Z"),
+      metadataJson: {
+        callbackMetadata: "safe",
+        [DEVICE_SYNC_CONNECTION_START_PENDING_STATE_METADATA_KEY]: true,
+      },
+    });
+    const tx = createTransaction({ record });
+    const store = {
+      completeStagedOAuthConnectionCallback:
+        PrismaHostedOAuthSessionStore.prototype.completeStagedOAuthConnectionCallback,
+    };
+
+    await expect(store.completeStagedOAuthConnectionCallback({
+      ownerId: record.userId!,
+      provider: record.provider,
+      state: record.state,
+    }, tx as never)).resolves.toBe(true);
+    expect(tx.deviceOauthSession.updateMany).toHaveBeenCalledWith({
+      data: {
+        metadataJson: {
+          callbackMetadata: "safe",
+        },
+      },
+      where: {
+        consumedAt: { not: null },
+        metadataJson: {
+          path: [DEVICE_SYNC_CONNECTION_START_PENDING_STATE_METADATA_KEY],
+          equals: true,
+        },
+        provider: record.provider,
+        state: record.state,
+        userId: record.userId,
+      },
+    });
+  });
+});
+
 describe("PrismaHostedOAuthSessionStore.consumeOAuthState", () => {
-  it("never exposes a pre-provider lifecycle marker as callback state", async () => {
+  it("consumes a pending callback marker without removing its lifecycle metadata", async () => {
     const record = buildOAuthSessionRow({
       metadataJson: {
         [DEVICE_SYNC_CONNECTION_START_PENDING_STATE_METADATA_KEY]: true,
@@ -128,11 +210,86 @@ describe("PrismaHostedOAuthSessionStore.consumeOAuthState", () => {
 
     await expect(
       store.consumeOAuthState(record.state, record.createdAt.toISOString(), record.provider),
+    ).resolves.toMatchObject({
+      status: "consumed",
+      record: {
+        metadata: {
+          [DEVICE_SYNC_CONNECTION_START_PENDING_STATE_METADATA_KEY]: true,
+        },
+      },
+    });
+    expect(tx.deviceOauthSession.updateMany).toHaveBeenCalledWith({
+      data: {
+        consumedAt: record.createdAt,
+      },
+      where: {
+        state: record.state,
+        consumedAt: null,
+      },
+    });
+    expect(tx.deviceOauthSession.deleteMany).not.toHaveBeenCalled();
+  });
+
+  it("preserves an expired pending marker for account-deletion lifecycle resolution", async () => {
+    const record = buildOAuthSessionRow({
+      metadataJson: {
+        [DEVICE_SYNC_CONNECTION_START_PENDING_STATE_METADATA_KEY]: true,
+      },
+    });
+    const tx = createTransaction({ record });
+    const store = createStore(tx);
+
+    await expect(
+      store.consumeOAuthState(record.state, "2026-04-13T12:30:00.000Z", record.provider),
     ).resolves.toEqual({
       status: "missing",
     });
     expect(tx.deviceOauthSession.updateMany).not.toHaveBeenCalled();
     expect(tx.deviceOauthSession.deleteMany).not.toHaveBeenCalled();
+  });
+
+  it("keeps an expired consumed pending marker as a replay and cleanup owner", async () => {
+    const record = buildOAuthSessionRow({
+      consumedAt: new Date("2026-04-13T12:01:00.000Z"),
+      metadataJson: {
+        [DEVICE_SYNC_CONNECTION_START_PENDING_STATE_METADATA_KEY]: true,
+      },
+    });
+    const tx = createTransaction({ record });
+    const store = createStore(tx);
+
+    await expect(
+      store.consumeOAuthState(record.state, "2026-04-13T12:30:00.000Z", record.provider),
+    ).resolves.toMatchObject({
+      status: "replayed",
+      record: {
+        metadata: {
+          [DEVICE_SYNC_CONNECTION_START_PENDING_STATE_METADATA_KEY]: true,
+        },
+      },
+    });
+    expect(tx.deviceOauthSession.updateMany).not.toHaveBeenCalled();
+    expect(tx.deviceOauthSession.deleteMany).not.toHaveBeenCalled();
+  });
+
+  it("deletes an expired consumed ordinary state instead of extending its replay window", async () => {
+    const record = buildOAuthSessionRow({
+      consumedAt: new Date("2026-04-13T12:01:00.000Z"),
+    });
+    const tx = createTransaction({ record });
+    const store = createStore(tx);
+
+    await expect(
+      store.consumeOAuthState(record.state, "2026-04-13T12:30:00.000Z", record.provider),
+    ).resolves.toEqual({
+      status: "missing",
+    });
+    expect(tx.deviceOauthSession.updateMany).not.toHaveBeenCalled();
+    expect(tx.deviceOauthSession.deleteMany).toHaveBeenCalledWith({
+      where: {
+        state: record.state,
+      },
+    });
   });
 
   it("reports an already-consumed unexpired state as a replay with its stored record", async () => {
@@ -295,5 +452,6 @@ function createStore(tx: ReturnType<typeof createTransaction>) {
       $transaction: async <TResult>(callback: (transaction: typeof tx) => Promise<TResult>) => callback(tx),
     },
     consumeOAuthState: PrismaHostedOAuthSessionStore.prototype.consumeOAuthState,
+    consumeOAuthStateTx: PrismaHostedOAuthSessionStore.prototype.consumeOAuthStateTx,
   };
 }

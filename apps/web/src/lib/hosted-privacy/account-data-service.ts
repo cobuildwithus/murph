@@ -901,6 +901,7 @@ async function resolveExpiredPendingDeviceConnectionStartsForAccountDeletion(inp
       userId: true,
     },
     where: {
+      consumedAt: null,
       metadataJson: {
         path: [DEVICE_SYNC_CONNECTION_START_PENDING_STATE_METADATA_KEY],
         equals: true,
@@ -957,6 +958,7 @@ async function resolveExpiredPendingDeviceConnectionStartsForAccountDeletion(inp
 
     await input.prisma.deviceOauthSession.deleteMany({
       where: {
+        consumedAt: null,
         metadataJson: {
           path: [DEVICE_SYNC_CONNECTION_START_PENDING_STATE_METADATA_KEY],
           equals: true,
@@ -1158,7 +1160,10 @@ function buildLivePendingDeviceConnectionStartsWhere(input: {
   now: Date;
 }): Prisma.DeviceOauthSessionWhereInput {
   return {
-    expiresAt: { gt: input.now },
+    OR: [
+      { expiresAt: { gt: input.now } },
+      { consumedAt: { not: null } },
+    ],
     metadataJson: {
       path: [DEVICE_SYNC_CONNECTION_START_PENDING_STATE_METADATA_KEY],
       equals: true,
