@@ -8,7 +8,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 const BLACKSMITH_PROVIDER = "blacksmith-testbox";
 const BLACKSMITH_ORG = "cobuildwithus";
 const BLACKSMITH_REF = "main";
-const BLACKSMITH_WORKFLOW = ".github/workflows/crabbox.yml";
+const BLACKSMITH_WORKFLOW = ".github/workflows/crabbox-bounded.yml";
 const BLACKSMITH_JOB = "hydrate";
 const DEFAULT_CRABBOX_PROFILE = "murph-verification";
 const CRABBOX_IDLE_TIMEOUT = "10m";

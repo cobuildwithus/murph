@@ -196,7 +196,7 @@ describe("verification dispatcher", () => {
     expect(flagValue(args, "--blacksmith-org")).toBe("cobuildwithus");
     expect(flagValue(args, "--blacksmith-ref")).toBe("main");
     expect(flagValue(args, "--blacksmith-workflow")).toBe(
-      ".github/workflows/crabbox.yml",
+      ".github/workflows/crabbox-bounded.yml",
     );
     expect(flagValue(args, "--blacksmith-job")).toBe("hydrate");
     expect(flagValue(args, "--idle-timeout")).toBe("10m");

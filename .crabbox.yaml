@@ -3,7 +3,7 @@ provider: blacksmith-testbox
 
 blacksmith:
   org: cobuildwithus
-  workflow: .github/workflows/crabbox.yml
+  workflow: .github/workflows/crabbox-bounded.yml
   job: hydrate
   ref: main
   idleTimeout: 10m

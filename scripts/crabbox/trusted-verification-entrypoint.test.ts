@@ -180,13 +180,23 @@ describe("trusted Crabbox verification entrypoint", () => {
   });
 
   it("locks hydration to the root-owned shell boundary and pinned actions", () => {
-    const workflow = readFileSync(
-      path.join(repoRoot, ".github", "workflows", "crabbox.yml"),
-      "utf8",
+    const workflowPath = path.join(
+      repoRoot,
+      ".github",
+      "workflows",
+      "crabbox-bounded.yml",
     );
+    const legacyWorkflowPath = path.join(
+      repoRoot,
+      ".github",
+      "workflows",
+      "crabbox.yml",
+    );
+    const workflow = readFileSync(workflowPath, "utf8");
     const config = readFileSync(path.join(repoRoot, ".crabbox.yaml"), "utf8");
     const entrypoint = readFileSync(trustedEntrypointPath, "utf8");
 
+    expect(existsSync(legacyWorkflowPath)).toBe(false);
     expect(workflow).toContain("permissions:\n  contents: read");
     expect(workflow).not.toContain("${{ secrets.");
     expect(workflow).not.toMatch(/^\s*environment:/mu);
@@ -209,6 +219,9 @@ describe("trusted Crabbox verification entrypoint", () => {
     expect(workflow.indexOf("Install the secret-free delegated verification entrypoint"))
       .toBeLessThan(workflow.indexOf("useblacksmith/run-testbox@"));
     expect(config).toContain("provider: blacksmith-testbox");
+    expect(config).toContain(
+      "workflow: .github/workflows/crabbox-bounded.yml",
+    );
     expect(config).toContain("ref: main");
     expect(config).toContain("idleTimeout: 10m");
     const actionRefs = [...workflow.matchAll(/^\s*uses:\s*[^@\s]+@([^\s#]+)/gmu)];

@@ -1,4 +1,4 @@
-name: Crabbox Blacksmith Testbox
+name: Crabbox bounded Blacksmith Testbox
 
 on:
   workflow_dispatch:

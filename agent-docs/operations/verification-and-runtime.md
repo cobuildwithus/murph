@@ -22,12 +22,16 @@ through `scripts/verification-dispatch.mjs`:
   already local.
 - The Testbox hydration workflow must exist on the repository default branch
   before GitHub accepts a delegated `workflow_dispatch`. The change that first
-  introduces `.github/workflows/crabbox.yml` therefore uses local verification
-  and PR gates; after that bootstrap lands, explicitly forced canonical commands
-  can create fresh one-shot Testboxes from feature branches. Canonical
-  verification rejects reusable lease IDs because current provider metadata
-  does not prove the Blacksmith organization that installed the root-owned
-  entrypoint.
+  introduces or moves `.github/workflows/crabbox-bounded.yml` therefore uses
+  local verification and PR gates; after that bootstrap lands, explicitly
+  forced canonical commands can create fresh one-shot Testboxes from feature
+  branches. Canonical verification rejects reusable lease IDs because current
+  provider metadata does not prove the Blacksmith organization that installed
+  the root-owned entrypoint.
+- The retired `.github/workflows/crabbox.yml` path must remain absent. It is the
+  capability hard cut for pre-cost-control dispatchers: a stale worktree fails
+  workflow lookup before a Blacksmith job can start. Do not restore that path as
+  a compatibility shim.
 
 Remote execution preserves the exact underlying `workspace-verify.sh` command,
 including diff scope, reverse dependents, coverage thresholds, app verification,
@@ -68,12 +72,12 @@ reason in the completion evidence.
 ### Required post-landing trust-root proof
 
 One case does not require a ten-minute local admission wait: after a change to
-`.github/workflows/crabbox.yml` or the trusted entrypoint lands on the default
-branch, run exactly one explicitly forced canonical remote check to prove that
-new trust root. This is required boundary validation, not ordinary capacity
-fallback; do not manufacture a local wait first. Use acceptance when the landed
-change requires acceptance coverage, otherwise use `test:diff`, and retain the
-same lifecycle bounds and evidence.
+`.github/workflows/crabbox-bounded.yml` or the trusted entrypoint lands on the
+default branch, run exactly one explicitly forced canonical remote check to
+prove that new trust root. This is required boundary validation, not ordinary
+capacity fallback; do not manufacture a local wait first. Use acceptance when
+the landed change requires acceptance coverage, otherwise use `test:diff`, and
+retain the same lifecycle bounds and evidence.
 
 ### Environment and Vercel boundary
 

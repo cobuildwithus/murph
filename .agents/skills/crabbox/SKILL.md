@@ -31,9 +31,13 @@ entrypoint.
 
 - Authenticate once with `blacksmith auth login`. This direct provider does not
   use a Crabbox coordinator, `crabbox login`, or a coordinator token.
-- GitHub can dispatch the hydration workflow only after it exists on the default
-  branch. The PR that first adds `.github/workflows/crabbox.yml` must finish on
-  local verification; after it lands, feature branches can use the remote lane.
+- GitHub can dispatch the hydration workflow only after its configured path
+  exists on the default branch. A PR that adds or moves
+  `.github/workflows/crabbox-bounded.yml` must finish on local verification;
+  after it lands, feature branches can use the remote lane.
+- Keep the retired `.github/workflows/crabbox.yml` path absent. That hard cut
+  makes pre-cost-control worktrees fail before a paid Blacksmith job can start;
+  do not add a compatibility workflow at the old path.
 - Never add `--allow-env`, `--env-from-profile`, broad env globs, `.env` files,
   Vercel tokens, provider tokens, model keys, or product credentials. Blacksmith
   Testbox deliberately rejects Crabbox environment forwarding.
@@ -60,10 +64,10 @@ entrypoint.
   starts; the candidate bootstrap then independently reconstructs deterministic
   test-only values for pnpm and the verifier and fails closed without the
   trusted-entry marker.
-- Changes to `.github/workflows/crabbox.yml` or the trusted entrypoint use local
-  verification until the exact trust root lands on the default branch. Run a
-  post-landing remote proof afterward; do not claim the pre-landing Testbox
-  exercised the new boundary.
+- Changes to `.github/workflows/crabbox-bounded.yml` or the trusted entrypoint
+  use local verification until the exact trust root lands on the default branch.
+  Run a post-landing remote proof afterward; do not claim the pre-landing
+  Testbox exercised the new boundary.
 - Canonical completion verification does not need Vercel development variables.
   When a separate direct scenario truly requires Vercel development state, set
   `MURPH_VERIFY_REQUIRES_VERCEL_ENV=1` and keep that command local.
