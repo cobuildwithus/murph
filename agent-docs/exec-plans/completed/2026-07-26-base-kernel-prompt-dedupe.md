@@ -1,6 +1,6 @@
 # Delete prompt duplication covered by the Codex base kernel
 
-Status: active
+Status: completed
 Created: 2026-07-26
 Updated: 2026-07-26
 
@@ -109,3 +109,22 @@ Updated: 2026-07-26
     failed suite was stopped at its still-idle final worker
   - acceptance verification is queued on the repository's exclusive shared-host
     slot
+  - preliminary prompt-specialist ReviewGPT completed on candidate
+    `928e05b8686e`; its one temporary-file-lifecycle finding was rejected because
+    this change adds no write path, the hosted file-count contract assigns
+    scratch cleanup to excluded runtime-path owners, and the requested layer is
+    explicitly limited to progress and browser behavior
+  - the specialist returned no coverage patch
+  - `pnpm verify:acceptance` passed repository guards and typechecks, full
+    Assistant Engine coverage (2,713 passed, 5 skipped), full Assistant Runtime
+    coverage (1,896 passed, 2 skipped), web tests/build/lint, and the remaining
+    completed owner suites; it failed only in the pre-existing stale
+    ReviewGPT-version audit, an unrelated setup-wizard selection test, and two
+    unrelated 60-second Core timeouts under host load
+  - PR CI passed assistant coverage, both CLI host matrices, build/typecheck,
+    app/platform coverage, hosted runner build and completed E2Es; CLI coverage
+    failed because the base branch declares ReviewGPT `0.5.117` while its
+    unchanged release audit still expects `0.5.114`
+  - parent final review found no unresolved issue; `git diff --check` and the
+    identifier privacy scan passed
+Completed: 2026-07-26
