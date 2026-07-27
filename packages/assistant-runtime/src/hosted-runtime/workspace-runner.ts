@@ -240,7 +240,7 @@ export interface HostedWorkspaceRunnerAssistantPhaseInput {
   recordDeferredUsage?: ((
     record: AssistantUsageRecord,
     providerRequestAcceptedInputIds?: readonly string[],
-  ) => Promise<void> | void) | null;
+  ) => void) | null;
   shouldYieldBackgroundMaintenance?: (() => boolean) | null;
   workspace: HostedWorkspaceState | null;
 }
@@ -860,10 +860,10 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
   };
   const startDeferredUsageRecords = (
     records: readonly HostedDeferredAssistantUsageRecord[],
-  ): Promise<void> => {
+  ): void => {
     if (records.length === 0) {
       maybeResolveDeferredUsageCompletion();
-      return Promise.resolve();
+      return;
     }
 
     const completion = deferredUsageWriteTail.then(async () => {
@@ -878,7 +878,6 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
       pendingDeferredUsageWrites.delete(completion);
       maybeResolveDeferredUsageCompletion();
     });
-    return completion;
   };
   const startDeferredUsageCaptureOnce = (): Promise<void> => {
     if (deferredUsageCaptureStarted) {
@@ -1047,7 +1046,7 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
     recordDeferredUsage(
       record: AssistantUsageRecord,
       providerRequestAcceptedInputIds?: readonly string[],
-    ): Promise<void> {
+    ): void {
       const deferredRecord = {
         ...(providerRequestAcceptedInputIds === undefined
           ? {}
@@ -1055,11 +1054,11 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
         record,
       };
       if (deferredUsageCaptureStarted) {
-        return startDeferredUsageRecords([deferredRecord]);
+        startDeferredUsageRecords([deferredRecord]);
+        return;
       }
 
       deferredUsageRecords.push(deferredRecord);
-      return Promise.resolve();
     },
     shouldYieldBackgroundMaintenance,
     workspace: input.workspace,

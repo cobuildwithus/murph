@@ -161,10 +161,7 @@ describe("hosted image generation", () => {
       assert.equal(notifyReadyOnce.mock.calls.length, 2);
     });
     assert.equal(controller.hasCompleted(), true);
-    await assert.rejects(
-      controller.stageCompleted(),
-      /Synthetic pending-index write failure/u,
-    );
+    assert.equal(await controller.stageCompleted(), 0);
     assert.equal(controller.hasCompleted(), true);
     assert.equal(await controller.stageCompleted(), 1);
     assert.equal(enqueueAttempt, 2);

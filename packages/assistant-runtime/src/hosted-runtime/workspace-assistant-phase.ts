@@ -1356,10 +1356,11 @@ export async function runHostedWorkspaceAssistantPhase(
     record: AssistantUsageRecord,
     providerRequestAcceptedInputIds?: readonly string[],
   ): Promise<void> => {
-    return Promise.resolve(input.recordDeferredUsage?.(
+    input.recordDeferredUsage?.(
       record,
       providerRequestAcceptedInputIds,
-    ));
+    );
+    return Promise.resolve();
   };
   if (shouldWriteHostedDeviceConnectContextLog({ deviceConnectProviders, input })) {
     void writeHostedDeviceConnectRuntimeLog({

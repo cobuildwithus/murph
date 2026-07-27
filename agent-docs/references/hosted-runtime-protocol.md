@@ -1137,10 +1137,10 @@ uses the existing receipt checkpoint against the latest workspace. After upload,
 the runtime upserts one trusted system input on the original route, registers it
 with the ordinary pending assistant-input index, and notifies the existing wake
 signal. Normal foreground selection therefore keeps fresh conversation ahead of
-the completion and owns completion retry and terminal evidence. Existing generic
-usage and issue recorders retain their facts. This adds no durable image job,
-mailbox kind, scheduler, reservation, allowance implementation, or image-specific
-usage lifecycle. Runner loss may drop unfinished provider work.
+the completion and owns completion retry and terminal evidence. Completion never
+waits for optional accounting or diagnostic writes. This adds no durable image
+job, mailbox kind, scheduler, reservation, allowance implementation, or
+image-specific usage lifecycle. Runner loss may drop unfinished provider work.
 
 Detached `assistant.notification.requested` work remains output-only and cannot
 mutate resident conversation history or native provider resume state. A completed phone

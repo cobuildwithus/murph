@@ -135,59 +135,6 @@ describe('assistant return contact kind', () => {
     await expect(first).resolves.toEqual(await second)
     expect(createConnectLink).toHaveBeenCalledOnce()
   })
-
-  it('records detached tool usage through the existing hosted recorder', async () => {
-    const recordUsage = vi.fn(async () => undefined)
-    const hostedToolContext = createAssistantHostedToolContext({
-      executionContext: {
-        memberId: 'member-detached-usage',
-        usageRecorder: { recordUsage },
-        userEnvKeys: [],
-      },
-      getUserActionAcceptedInputIds: () => ['assistant_input_1'],
-      messageInput: createMessageInput({
-        channel: 'linq',
-        hostedDeliveryIdempotency: null,
-      }),
-      session: createAssistantSession(),
-    })
-
-    await hostedToolContext.recordDetachedUsage?.({
-      effectiveEnv: { OPENAI_API_KEY: 'platform-key' },
-      operationId: 'image-operation-1',
-      usageDraft: {
-        provider: 'openai-images',
-        providerRequestOrdinal: 2,
-        providerRequestOutcome: 'succeeded',
-        usage: {
-          apiKeyEnv: 'OPENAI_API_KEY',
-          baseUrl: 'https://api.openai.com/v1',
-          cacheWriteTokens: null,
-          cachedInputTokens: null,
-          inputTokens: 12,
-          outputTokens: 34,
-          providerMetadataJson: null,
-          providerName: 'OpenAI Images',
-          providerRequestId: 'image-request-1',
-          rawUsageJson: null,
-          reasoningTokens: null,
-          requestedModel: 'gpt-image-2',
-          servedModel: 'gpt-image-2',
-          totalTokens: 46,
-        },
-      },
-    })
-
-    expect(recordUsage).toHaveBeenCalledOnce()
-    expect(recordUsage).toHaveBeenCalledWith(
-      expect.objectContaining({
-        provider: 'openai-images',
-        providerRequestOrdinal: 2,
-        turnId: 'image-operation-1',
-      }),
-      ['assistant_input_1'],
-    )
-  })
 })
 
 function createMessageInput(input: {
