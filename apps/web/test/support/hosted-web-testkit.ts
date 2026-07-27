@@ -72,6 +72,7 @@ type HostedTestPrismaClient =
   & HostedUsageLimitForTestPrismaClient
   & HostedUsageCreditForTestPrismaClient
   & HostedComputerUseForTestPrismaClient
+  & HostedIngressLatencyForTestPrismaClient
   & HostedLinqWorkspaceIsolationForTestPrismaClient
   & HostedWorkspaceSeedForTestPrismaClient
   & HostedUsageDiagnosticsForTestPrismaClient;
@@ -117,6 +118,27 @@ interface HostedLinqWorkspaceIsolationForTestPrismaClient {
   hostedWorkspace: {
     findUnique(args: unknown): Promise<{ version: bigint } | null>;
     updateMany(args: unknown): Promise<{ count: number }>;
+  };
+}
+
+interface HostedIngressLatencyForTestPrismaClient {
+  hostedIngressLatencyTrace: {
+    findMany(args: unknown): Promise<Array<{
+      id: string;
+      linqDelivery: {
+        acceptedAt: Date;
+      } | null;
+    }>>;
+    findFirst(args: unknown): Promise<{
+      id: string;
+      linqDelivery: {
+        acceptedAt: Date;
+      } | null;
+    } | null>;
+    update(args: unknown): Promise<{
+      acceptedAt: Date;
+      id: string;
+    }>;
   };
 }
 
@@ -646,6 +668,131 @@ export async function readHostedMailboxItemForTest(input: {
       kind: item.kind,
       lane: item.lane,
       laneSeq: item.laneSeq.toString(),
+    };
+  });
+}
+
+export async function setLatestHostedLinqReplyLatencyForTest(input: {
+  environment?: NodeJS.ProcessEnv;
+  latencyMs: number;
+  userId: string;
+}): Promise<{
+  acceptedAt: string;
+  deliveryAcceptedAt: string;
+  traceId: string;
+}> {
+  if (!Number.isSafeInteger(input.latencyMs) || input.latencyMs < 0) {
+    throw new RangeError("Hosted Linq reply-latency test control requires a non-negative integer.");
+  }
+
+  return withHostedWebTestkitDeps(input.environment, async (deps) => {
+    const deadlineAt = Date.now() + 30_000;
+    let trace: Awaited<
+      ReturnType<
+        HostedIngressLatencyForTestPrismaClient["hostedIngressLatencyTrace"]["findFirst"]
+      >
+    > = null;
+    while (Date.now() < deadlineAt) {
+      trace = await deps.prisma.hostedIngressLatencyTrace.findFirst({
+        orderBy: {
+          acceptedAt: "desc",
+        },
+        select: {
+          id: true,
+          linqDelivery: {
+            select: {
+              acceptedAt: true,
+            },
+          },
+        },
+        where: {
+          linqDelivery: {
+            isNot: null,
+          },
+          source: "linq",
+          userId: input.userId,
+        },
+      });
+      if (trace?.linqDelivery) {
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+    if (!trace?.linqDelivery) {
+      throw new Error(
+        "Timed out waiting for an accepted Hosted Linq delivery trace.",
+      );
+    }
+
+    const deliveryAcceptedAt = trace.linqDelivery.acceptedAt;
+    const acceptedAt = new Date(deliveryAcceptedAt.getTime() - input.latencyMs);
+    await deps.prisma.hostedIngressLatencyTrace.update({
+      data: {
+        acceptedAt,
+      },
+      select: {
+        acceptedAt: true,
+        id: true,
+      },
+      where: {
+        id: trace.id,
+      },
+    });
+    return {
+      acceptedAt: acceptedAt.toISOString(),
+      deliveryAcceptedAt: deliveryAcceptedAt.toISOString(),
+      traceId: trace.id,
+    };
+  });
+}
+
+export async function normalizeHostedLinqLatencyTracesForTest(input: {
+  environment?: NodeJS.ProcessEnv;
+  userIds: readonly string[];
+}): Promise<{ updatedCount: number }> {
+  if (input.userIds.length === 0 || input.userIds.some((userId) => !userId.trim())) {
+    throw new TypeError(
+      "Hosted Linq latency normalization requires non-empty user ids.",
+    );
+  }
+
+  return withHostedWebTestkitDeps(input.environment, async (deps) => {
+    const traces = await deps.prisma.hostedIngressLatencyTrace.findMany({
+      select: {
+        id: true,
+        linqDelivery: {
+          select: {
+            acceptedAt: true,
+          },
+        },
+      },
+      where: {
+        source: "linq",
+        userId: {
+          in: [...new Set(input.userIds)],
+        },
+      },
+    });
+    const unresolvedAcceptedAt = new Date();
+    for (const trace of traces) {
+      await deps.prisma.hostedIngressLatencyTrace.update({
+        data: {
+          acceptedAt: trace.linqDelivery
+            ? new Date(trace.linqDelivery.acceptedAt.getTime() - 1_000)
+            : unresolvedAcceptedAt,
+        },
+        select: {
+          acceptedAt: true,
+          id: true,
+        },
+        where: {
+          id: trace.id,
+        },
+      });
+    }
+
+    return {
+      updatedCount: traces.length,
     };
   });
 }
