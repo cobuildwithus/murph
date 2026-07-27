@@ -180,7 +180,7 @@ export async function runHostedWorkspaceInvocation(
       boundUserId,
       commitTimeoutMs: job.runtime?.commitTimeoutMs ?? null,
       privateMediaDeliveryOrigin:
-        options.supervisorEnv.CF_PUBLIC_BASE_URL ?? null,
+        job.runtime?.platformEnv?.CF_PUBLIC_BASE_URL ?? null,
       preparedSnapshotRestore: job.preparedSnapshotRestore ?? null,
       providerFetchBaseUrlSource,
       providerFetchBaseUrls,
