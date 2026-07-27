@@ -1131,15 +1131,16 @@ vault data and receives no deletion or path-specific packaging authority.
 Existing global file-type exclusions still apply regardless of directory.
 
 Hosted dynamic image generation is invocation-local background work. The tool
-returns after launch so the current assistant turn can continue. After provider
-generation, canonical capture save, and hosted upload finish, the runtime stages
-one trusted system input on the original accepted conversation route and
-notifies the existing runtime wake signal. The foreground pass loop folds a
-completion that arrives during active work into the next assistant-input batch;
-otherwise the wake interrupts the dirty idle window before its routine
-checkpoint. This adds no durable image job, mailbox kind, scheduler, retry
-owner, reservation, allowance, or image-specific usage lifecycle. Runner loss
-may drop unfinished invocation-local work.
+returns after launch so the current assistant turn can continue. Provider work
+stays detached; the canonical capture save waits for an invocation boundary and
+uses the existing receipt checkpoint against the latest workspace. After upload,
+the runtime upserts one trusted system input on the original route, registers it
+with the ordinary pending assistant-input index, and notifies the existing wake
+signal. Normal foreground selection therefore keeps fresh conversation ahead of
+the completion and owns completion retry and terminal evidence. Existing generic
+usage and issue recorders retain their facts. This adds no durable image job,
+mailbox kind, scheduler, reservation, allowance implementation, or image-specific
+usage lifecycle. Runner loss may drop unfinished provider work.
 
 Detached `assistant.notification.requested` work remains output-only and cannot
 mutate resident conversation history or native provider resume state. A completed phone

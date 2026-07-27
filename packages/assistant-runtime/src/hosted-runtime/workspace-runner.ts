@@ -240,7 +240,7 @@ export interface HostedWorkspaceRunnerAssistantPhaseInput {
   recordDeferredUsage?: ((
     record: AssistantUsageRecord,
     providerRequestAcceptedInputIds?: readonly string[],
-  ) => void) | null;
+  ) => Promise<void> | void) | null;
   shouldYieldBackgroundMaintenance?: (() => boolean) | null;
   workspace: HostedWorkspaceState | null;
 }
@@ -860,10 +860,10 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
   };
   const startDeferredUsageRecords = (
     records: readonly HostedDeferredAssistantUsageRecord[],
-  ): void => {
+  ): Promise<void> => {
     if (records.length === 0) {
       maybeResolveDeferredUsageCompletion();
-      return;
+      return Promise.resolve();
     }
 
     const completion = deferredUsageWriteTail.then(async () => {
@@ -878,6 +878,7 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
       pendingDeferredUsageWrites.delete(completion);
       maybeResolveDeferredUsageCompletion();
     });
+    return completion;
   };
   const startDeferredUsageCaptureOnce = (): Promise<void> => {
     if (deferredUsageCaptureStarted) {
@@ -1046,7 +1047,7 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
     recordDeferredUsage(
       record: AssistantUsageRecord,
       providerRequestAcceptedInputIds?: readonly string[],
-    ): void {
+    ): Promise<void> {
       const deferredRecord = {
         ...(providerRequestAcceptedInputIds === undefined
           ? {}
@@ -1054,11 +1055,11 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
         record,
       };
       if (deferredUsageCaptureStarted) {
-        startDeferredUsageRecords([deferredRecord]);
-        return;
+        return startDeferredUsageRecords([deferredRecord]);
       }
 
       deferredUsageRecords.push(deferredRecord);
+      return Promise.resolve();
     },
     shouldYieldBackgroundMaintenance,
     workspace: input.workspace,
@@ -1236,6 +1237,46 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
     mailboxRetryAt: checkpointRequestSession.mailboxRetryAt(),
     runtimeRedactedStatus,
     runtimeStateDirty: checkpointRequestSession.hasRuntimeStateDirty(),
+  };
+}
+
+export async function runHostedWorkspaceCanonicalWriteAtBoundary(input: {
+  previousRedactedStatus: HostedRuntimeRedactedJson | null;
+  runnerInput: HostedWorkspaceRunnerInput;
+  write(): Promise<void>;
+}): Promise<{
+  redactedStatus: HostedRuntimeRedactedJson | null;
+  workspace: HostedWorkspaceState | null;
+}> {
+  const checkpointRequestSession = createHostedWorkspaceCheckpointRequestSession(
+    input.runnerInput.checkpointRequestBuilder,
+    {
+      assistantInputBatchLimit: input.runnerInput.limitPerLane,
+    },
+  );
+  let writeStatus: HostedRuntimeRedactedJson | null = null;
+  const readCurrentStatus = (): HostedRuntimeRedactedJson | null =>
+    mergeHostedRuntimeRedactedStatusValues(
+      mergeHostedRuntimeRedactedStatusValues(
+        input.previousRedactedStatus,
+        checkpointRequestSession.latestWorkspace()?.redactedStatus ?? null,
+      ),
+      writeStatus,
+    );
+  const port = createHostedWorkspaceCanonicalWritePort({
+    checkpointRequestBuilder: checkpointRequestSession,
+    input: input.runnerInput,
+    readPreviousRedactedStatus: readCurrentStatus,
+    recordRedactedStatus(status) {
+      writeStatus = mergeHostedRuntimeRedactedStatusValues(writeStatus, status);
+    },
+  });
+
+  await withHostedCanonicalWritePort(port, input.write);
+  return {
+    redactedStatus: readCurrentStatus(),
+    workspace:
+      checkpointRequestSession.latestWorkspace() ?? input.runnerInput.workspace,
   };
 }
 

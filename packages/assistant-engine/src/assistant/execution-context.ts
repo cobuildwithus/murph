@@ -28,6 +28,7 @@ import type {
   HostedActionApprovalRequest,
   HostedActionApprovalResult,
 } from '@murphai/hosted-execution/action-approval'
+import type { AssistantRuntimeIssueInput } from './issue-reporting.js'
 import type {
   HostedRuntimeProductFeedbackRecord,
   HostedRuntimeProductFeedbackRecordResponse,
@@ -332,11 +333,20 @@ export interface AssistantHostedGeneratedImageUploader {
   ): Promise<AssistantResponseMedia>
 }
 
+export interface AssistantHostedImageGenerationResult {
+  media: AssistantResponseMedia | null
+  runtimeIssue: AssistantRuntimeIssueInput | null
+  savedImageRef: string | null
+}
+
 export interface AssistantHostedImageGenerationLauncher {
   launch(input: {
     operationId: string
     originAssistantInputId: string
-    run(signal: AbortSignal): Promise<AssistantResponseMedia | null>
+    run(
+      signal: AbortSignal,
+      persistCanonicalWrite: <T>(write: () => Promise<T>) => Promise<T>,
+    ): Promise<AssistantHostedImageGenerationResult>
   }): 'already-started' | 'started'
 }
 

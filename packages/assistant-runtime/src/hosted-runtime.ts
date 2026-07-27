@@ -45,6 +45,8 @@ import {
   flushPendingAssistantRuntimeIssueWrites,
   findAssistantSessionIdByCodexThreadId,
   getAssistantCronStatus,
+  recordAssistantRuntimeIssueInputsBestEffort,
+  resolveAssistantDiagnosticsPolicy,
 } from "@murphai/assistant-engine";
 import {
   createHostedAssistantTurnEnvironment,
@@ -122,6 +124,7 @@ import {
   createHostedWorkspaceSnapshotCheckpointRequestBuilder,
   finishHostedMailboxImportPostCheckpointEffects,
   HostedWorkspaceRunnerUserMismatchError,
+  runHostedWorkspaceCanonicalWriteAtBoundary,
   runHostedWorkspaceUntilIdleOrBudget,
   type HostedWorkspaceDurableCheckpointEffect,
   type HostedWorkspaceDurableCheckpointEffectResult,
@@ -2031,8 +2034,25 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         runtimeStateDirty = true;
         markIdleCheckpointTimerAfterDirtyWork();
       },
+      recordRuntimeIssue(issue) {
+        recordAssistantRuntimeIssueInputsBestEffort({
+          issues: [issue],
+          policy: resolveAssistantDiagnosticsPolicy({
+            channel: null,
+            env: baseRuntimeEnv,
+            executionContext: {
+              hosted: {
+                memberId: input.request.userId,
+                userEnvKeys: Object.keys(runtime.userEnv),
+              },
+            },
+          }),
+          vault: restored.vaultRoot,
+        });
+      },
       signal: imageGenerationSignal,
       vaultRoot: restored.vaultRoot,
+      withCanonicalWritePersistence,
     });
     detachedAssistantAskController = createHostedDetachedAssistantAskController({
       assistantAskPort: runtime.platform.assistantAskPort ?? null,
@@ -2492,6 +2512,43 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           }),
         };
       };
+      let imageAssistantWakePending = false;
+      const flushImageGenerationWork = async (): Promise<void> => {
+        const controller = imageGenerationController;
+        if (!controller) {
+          return;
+        }
+        const canonicalWriteCount = await controller.flushCanonicalWrites(
+          async (write) => {
+            const workspace = overlayPendingWakeOnCommittedWorkspace(
+              runtimeStateDirty,
+              null,
+            );
+            const persisted = await runHostedWorkspaceCanonicalWriteAtBoundary({
+              previousRedactedStatus: workspace?.redactedStatus ?? redactedStatus,
+              runnerInput: {
+                ...baseRunnerInput,
+                workspace,
+              },
+              write,
+            });
+            if (persisted.workspace) {
+              rebaseCommittedWorkspace(persisted.workspace);
+            } else {
+              redactedStatus = mergeHostedWorkspaceInvocationRedactedStatus(
+                redactedStatus,
+                persisted.redactedStatus ?? {},
+              );
+            }
+          },
+        );
+        const stagedInputCount = await controller.stageCompleted();
+        if (canonicalWriteCount > 0 || stagedInputCount > 0) {
+          runtimeStateDirty = true;
+          markIdleCheckpointTimerAfterDirtyWork();
+        }
+        imageAssistantWakePending ||= stagedInputCount > 0;
+      };
       const absorbForegroundPassResult = (
         passResult: HostedWorkspaceRunnerResult,
         passWorkspace: HostedWorkspaceState | null,
@@ -2623,9 +2680,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         requestIdKind: "checkpoint-interrupt" | "checkpoint-wake" | "idle-wake";
         signal?: AbortSignal;
       }): Promise<HostedWorkspaceRunnerResult> => {
-        const drainImageGenerationBatch =
-          async (): Promise<HostedWorkspaceRunnerAssistantInputBatch | null> =>
-            await imageGenerationController?.drain() ?? null;
         const resolveForegroundRerunAssistantInputBatch = (
           passResult: HostedWorkspaceRunnerResult,
         ): HostedWorkspaceRunnerAssistantInputBatch | null =>
@@ -2684,16 +2738,10 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           return result;
         };
 
-        let passResult = await runSingleForegroundPass({
-          ...wakeInput,
-          initialAssistantInputBatch:
-            wakeInput.initialAssistantInputBatch
-            ?? await drainImageGenerationBatch(),
-        });
+        let passResult = await runSingleForegroundPass(wakeInput);
         // irreducible: "late foreground input during system work runs before idle checkpointing" fails without this.
         let rerunAssistantInputBatch =
-          resolveForegroundRerunAssistantInputBatch(passResult)
-          ?? await drainImageGenerationBatch();
+          resolveForegroundRerunAssistantInputBatch(passResult);
         let continueForegroundCausalPass =
           shouldContinueForegroundCausalPass(passResult);
         while (rerunAssistantInputBatch || continueForegroundCausalPass) {
@@ -2730,8 +2778,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             signal: wakeInput.signal,
           });
           rerunAssistantInputBatch =
-            resolveForegroundRerunAssistantInputBatch(passResult)
-            ?? await drainImageGenerationBatch();
+            resolveForegroundRerunAssistantInputBatch(passResult);
           continueForegroundCausalPass =
             shouldContinueForegroundCausalPass(passResult);
         }
@@ -2970,12 +3017,13 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           shouldContinue?: () => boolean;
           signal?: AbortSignal;
         } = {},
-      ): Promise<boolean> =>
-        await runForegroundMailboxWakeIfWork({
+      ): Promise<boolean> => {
+        await flushImageGenerationWork();
+        const ran = await runForegroundMailboxWakeIfWork({
           latencySeed,
           requestIdKind: "checkpoint-interrupt",
           runAssistantWithoutMailboxWork:
-            imageGenerationController?.hasCompleted() === true
+            imageAssistantWakePending
             || (
               pendingWake.nextWakeAt !== null
               && hostedRuntimeWakeReasonIsAssistant(pendingWake.nextWakeReason)
@@ -2991,6 +3039,11 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           signal: options.signal,
           systemMailboxAdmission: "pre_checkpoint_safe",
         });
+        if (ran) {
+          imageAssistantWakePending = false;
+        }
+        return ran;
+      };
       const runPostCheckpointMailboxWake = async (input: {
         latencySeed: HostedRuntimeWakeLatencySeed | null;
         shouldContinue: () => boolean;
@@ -3102,6 +3155,13 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         if (idleCheckpointStartByMs === null) {
           throw new Error("Dirty hosted runtime is missing an idle checkpoint timer.");
         }
+        await flushImageGenerationWork();
+        if (
+          imageAssistantWakePending
+          && await runPreCheckpointConversationWake(null)
+        ) {
+          continue;
+        }
         const queuedWakeLatencySeed = consumePendingHostedRuntimeWake(
           options.runtimeWakeSignal ?? null,
           options.shutdownSignal ?? null,
@@ -3152,10 +3212,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           options.shutdownSignal?.aborted !== true
           && imageGenerationController?.hasCompleted()
         ) {
-          await runForegroundPass({
-            latencySeed: null,
-            requestIdKind: "idle-wake",
-          });
           continue;
         }
         if (

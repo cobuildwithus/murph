@@ -34,9 +34,15 @@ export type {
   AssistantHostedGroupSharedReadResponse,
   AssistantHostedGroupSharedRecord,
   AssistantHostedImageGenerationLauncher,
+  AssistantHostedImageGenerationResult,
 } from './assistant/execution-context.js'
 export {
   flushPendingAssistantRuntimeIssueWrites,
+  recordAssistantRuntimeIssueInputsBestEffort,
+  resolveAssistantDiagnosticsPolicy,
+} from './assistant/issue-reporting.js'
+export type {
+  AssistantRuntimeIssueInput,
 } from './assistant/issue-reporting.js'
 export * from './assistant/device-activity-automations.js'
 export * from './assistant/managed-automations.js'

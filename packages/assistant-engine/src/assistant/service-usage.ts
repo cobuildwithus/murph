@@ -26,19 +26,21 @@ export interface AssistantUsageProviderResult {
   attemptCount: number
   provider: string
   providerOptions: AssistantProviderSessionOptions
-  route: CodexThreadIdentity
+  route: Pick<CodexThreadIdentity, 'routeFingerprint' | 'routeId'>
   session: AssistantSession
   usage?: AssistantProviderUsage | null
   usageAttribution?: AssistantUsageAttribution | null
 }
 
 export async function recordAssistantUsageEvent(input: {
+  effectiveEnv?: Readonly<Record<string, string | undefined>>
   executionContext: AssistantExecutionContext
   providerRequestAcceptedInputIds?: readonly string[]
   providerRequestOutcome?: AssistantProviderRequestOutcome
   providerRequestOrdinal?: number
   providerResult: AssistantUsageProviderResult
   turnId: string
+  waitForRecorder?: boolean
 }): Promise<void> {
   const usage = input.providerResult.usage
   const hostedMemberId = normalizeNullableString(input.executionContext.hosted?.memberId)
@@ -74,6 +76,7 @@ export async function recordAssistantUsageEvent(input: {
       apiKeyEnv,
       credentialSource: usageAttribution?.credentialSource ?? resolveAssistantUsageCredentialSource({
         apiKeyEnv,
+        effectiveEnv: input.effectiveEnv,
         headers: input.providerResult.providerOptions.headers ?? null,
         provider: input.providerResult.provider,
         userEnvKeys: [...(input.executionContext.hosted?.userEnvKeys ?? [])],
@@ -102,9 +105,15 @@ export async function recordAssistantUsageEvent(input: {
     const recording = input.providerRequestAcceptedInputIds === undefined
       ? usageRecorder.recordUsage(record)
       : usageRecorder.recordUsage(record, input.providerRequestAcceptedInputIds)
-    void recording.catch((error: unknown) => {
-      warnAssistantUsageRecordingFailure(error)
-    })
+    if (input.waitForRecorder === true) {
+      await recording.catch((error: unknown) => {
+        warnAssistantUsageRecordingFailure(error)
+      })
+    } else {
+      void recording.catch((error: unknown) => {
+        warnAssistantUsageRecordingFailure(error)
+      })
+    }
   } catch (error) {
     warnAssistantUsageRecordingFailure(error)
   }

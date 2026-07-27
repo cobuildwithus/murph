@@ -11,6 +11,7 @@ import type {
 import type {
   AssistantSession,
 } from '@murphai/operator-config/assistant-cli-contracts'
+import type { AssistantProviderUsageDraft } from './providers/types.js'
 
 import type {
   AssistantMessageInput,
@@ -42,6 +43,7 @@ import {
 } from './return-contact-kind.js'
 import { createAssistantNewsletterOutboxTool } from './newsletter-outbox.js'
 import type { AssistantConversationScope } from './conversation-policy.js'
+import { recordAssistantUsageEvent } from './service-usage.js'
 
 export interface AssistantHostedDeliveryContext {
   conversationId: string | null
@@ -115,6 +117,11 @@ export interface AssistantHostedToolContext {
   recordNewsletterSendResult?(
     result: Extract<HostedRuntimeNewsletterToolResponse, { action: 'send' }>,
   ): void
+  recordDetachedUsage?(input: {
+    effectiveEnv: Readonly<Record<string, string | undefined>>
+    operationId: string
+    usageDraft: AssistantProviderUsageDraft
+  }): Promise<void>
   currentUserActionScope?(): AssistantHostedUserActionScope | null
   currentProductFeedbackAcceptedInputIds?(): readonly string[]
   readonly computerToolsAvailable: boolean
@@ -241,6 +248,37 @@ export function createAssistantHostedToolContext(input: {
     planUsageTool: executionContext?.planUsageTool ?? null,
     subscriptionTool: executionContext?.subscriptionTool ?? null,
     phoneCalls: executionContext?.phoneCalls ?? null,
+    ...(executionContext?.usageRecorder
+      ? {
+          async recordDetachedUsage(usageInput) {
+            const deliveryContext = readDeliveryContext()
+            const acceptedInputIds =
+              input.getUserActionAcceptedInputIds?.() ?? []
+            await recordAssistantUsageEvent({
+              effectiveEnv: usageInput.effectiveEnv,
+              executionContext: { hosted: executionContext },
+              providerRequestAcceptedInputIds: acceptedInputIds,
+              providerRequestOrdinal:
+                usageInput.usageDraft.providerRequestOrdinal,
+              providerRequestOutcome:
+                usageInput.usageDraft.providerRequestOutcome,
+              providerResult: {
+                attemptCount: 1,
+                provider: usageInput.usageDraft.provider,
+                providerOptions: deliveryContext.session.providerOptions,
+                route: {
+                  routeId:
+                    `detached:${deliveryContext.session.sessionId}`,
+                },
+                session: deliveryContext.session,
+                usage: usageInput.usageDraft.usage,
+              },
+              turnId: usageInput.operationId,
+              waitForRecorder: true,
+            })
+          },
+        }
+      : {}),
     ...(input.beforeToolExecution
       ? { beforeToolExecution: input.beforeToolExecution }
       : {}),

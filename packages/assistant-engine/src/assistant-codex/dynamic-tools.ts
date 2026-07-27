@@ -3028,7 +3028,7 @@ export async function executeMurphDynamicToolRequest(input: {
         const launch = imageGenerationLauncher.launch({
           operationId,
           originAssistantInputId,
-          run: async (signal) => {
+          run: async (signal, persistCanonicalWrite) => {
             const result = await executeGenerateImageTool({
               abortSignal: signal,
               args: generateImageArgs,
@@ -3038,13 +3038,25 @@ export async function executeMurphDynamicToolRequest(input: {
               fetchImpl: input.fetchImpl,
               hostedGeneratedImageUploader: input.hostedGeneratedImageUploader ?? null,
               materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts ?? null,
+              persistGeneratedImageCapture: persistCanonicalWrite,
               providerRequestOrdinal,
               requireHostedGeneratedImageUploader: true,
               vaultRoot: input.vaultRoot ?? null,
             })
-            return result.rpcSuccess
-              ? result.responseMedia?.[0] ?? null
-              : null
+            if (result.usageDraft) {
+              await input.hostedToolContext?.recordDetachedUsage?.({
+                effectiveEnv: input.env,
+                operationId,
+                usageDraft: result.usageDraft,
+              })
+            }
+            return {
+              media: result.rpcSuccess
+                ? result.responseMedia?.[0] ?? null
+                : null,
+              runtimeIssue: result.runtimeIssue ?? null,
+              savedImageRef: result.savedImageRef ?? null,
+            }
           },
         })
         return toolTextResult(
