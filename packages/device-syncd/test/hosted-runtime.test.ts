@@ -1224,6 +1224,7 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
             lastErrorMessage: "Refresh token expired",
             lastSyncErrorAt: "2026-04-07T00:00:00.000Z",
           },
+          observedConnectedAt: "2026-04-06T20:00:00-04:00",
           observedUpdatedAt: null,
         },
       ],
@@ -1239,6 +1240,7 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
             lastErrorMessage: "Refresh token expired",
             lastSyncErrorAt: "2026-04-07T00:00:00.000Z",
           },
+          observedConnectedAt: "2026-04-07T00:00:00.000Z",
           observedUpdatedAt: null,
         },
       ],
@@ -2392,6 +2394,7 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
 
     expect(context).toEqual({
       connectionId: null,
+      expectedConnectedAt: null,
       hint,
       provider: null,
     });

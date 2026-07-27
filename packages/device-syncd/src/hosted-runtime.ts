@@ -387,6 +387,7 @@ export interface HostedExecutionDeviceSyncRuntimeConnectionUpdate {
   credential?: HostedExecutionDeviceSyncRuntimeCredentialUpdate;
   failureDiagnostic?: HostedExecutionDeviceSyncRuntimeFailureDiagnostic;
   localState?: HostedExecutionDeviceSyncRuntimeLocalStateUpdate;
+  observedConnectedAt?: string | null;
   observedUpdatedAt?: string | null;
   observedTokenVersion?: number | null;
   seed?: HostedExecutionDeviceSyncRuntimeConnectionSeed;
@@ -539,6 +540,7 @@ export interface HostedExecutionDeviceSyncWakeHint {
 
 export interface HostedExecutionDeviceSyncWakeEventLike {
   connectionId?: string | null;
+  expectedConnectedAt?: string;
   hint?: HostedExecutionDeviceSyncWakeHint | null;
   provider?: string | null;
 }
@@ -999,11 +1001,13 @@ export function resolveHostedDeviceSyncWakeContext(
   event: HostedExecutionDeviceSyncWakeEventLike,
 ): {
   connectionId: string | null;
+  expectedConnectedAt: string | null;
   hint: HostedExecutionDeviceSyncWakeEventLike["hint"];
   provider: string | null;
 } {
   return {
     connectionId: event.connectionId ?? null,
+    expectedConnectedAt: event.expectedConnectedAt ?? null,
     hint: event.hint ?? null,
     provider: event.provider ?? null,
   };
@@ -1509,6 +1513,7 @@ function parseHostedExecutionDeviceSyncRuntimeConnectionUpdate(
     "credential",
     "failureDiagnostic",
     "localState",
+    "observedConnectedAt",
     "observedTokenVersion",
     "observedUpdatedAt",
     "seed",
@@ -1531,6 +1536,12 @@ function parseHostedExecutionDeviceSyncRuntimeConnectionUpdate(
     : readNullableIsoTimestamp(
         record.observedUpdatedAt,
         `Hosted device-sync runtime apply request updates[${index}].observedUpdatedAt`,
+      );
+  const observedConnectedAt = record.observedConnectedAt === undefined
+    ? undefined
+    : readNullableIsoTimestamp(
+        record.observedConnectedAt,
+        `Hosted device-sync runtime apply request updates[${index}].observedConnectedAt`,
       );
   const observedTokenVersion = record.observedTokenVersion === undefined
     ? undefined
@@ -1578,6 +1589,7 @@ function parseHostedExecutionDeviceSyncRuntimeConnectionUpdate(
     ...(credential === undefined ? {} : { credential }),
     ...(failureDiagnostic === undefined ? {} : { failureDiagnostic }),
     ...(localState === undefined ? {} : { localState }),
+    ...(observedConnectedAt === undefined ? {} : { observedConnectedAt }),
     ...(observedUpdatedAt === undefined ? {} : { observedUpdatedAt }),
     ...(observedTokenVersion === undefined ? {} : { observedTokenVersion }),
     ...(seed === undefined ? {} : { seed }),

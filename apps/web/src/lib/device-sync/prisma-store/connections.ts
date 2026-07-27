@@ -833,12 +833,14 @@ export class PrismaHostedConnectionStore {
   }): Promise<HostedDeviceSyncDueReconcileConnectionRecord[]> {
     const limit = Math.max(1, Math.min(input.limit, 251));
     const rows = await this.prisma.$queryRaw<Array<{
+      connected_at: Date;
       id: string;
       next_reconcile_at: Date;
       provider: string;
       user_id: string;
     }>>(Prisma.sql`
       select
+        "connection"."connected_at",
         "connection"."id",
         "connection"."next_reconcile_at",
         "connection"."provider",
@@ -884,6 +886,7 @@ export class PrismaHostedConnectionStore {
 
     return rows.map((row) => ({
       connectionId: row.id,
+      connectedAt: toIsoTimestamp(row.connected_at),
       nextReconcileAt: toIsoTimestamp(row.next_reconcile_at),
       provider: row.provider,
       userId: row.user_id,

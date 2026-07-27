@@ -592,6 +592,7 @@ describe("parseHostedExecutionEvent", () => {
     expect(
       parseHostedExecutionEvent({
         connectionId: "connection-1",
+        expectedConnectedAt: "2026-04-09T00:00:00.000Z",
         hint: {
           eventType: "sleep.updated",
           jobs: [
@@ -624,6 +625,7 @@ describe("parseHostedExecutionEvent", () => {
       }),
     ).toEqual({
       connectionId: "connection-1",
+      expectedConnectedAt: "2026-04-09T00:00:00.000Z",
       hint: {
         eventType: "sleep.updated",
         jobs: [
@@ -722,6 +724,7 @@ describe("parseHostedExecutionEvent", () => {
     expect(
       parseHostedExecutionEvent({
         connectionId: "connection-1",
+        expectedConnectedAt: "2026-04-09T00:00:00.000Z",
         hint: {
           nextReconcileAt: "2026-04-09T01:00:00Z",
           occurredAt: "2026-04-09T00:00:00Z",
@@ -734,6 +737,7 @@ describe("parseHostedExecutionEvent", () => {
       }),
     ).toEqual({
       connectionId: "connection-1",
+      expectedConnectedAt: "2026-04-09T00:00:00.000Z",
       hint: {
         nextReconcileAt: "2026-04-09T01:00:00.000Z",
         occurredAt: "2026-04-09T00:00:00.000Z",

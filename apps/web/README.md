@@ -115,6 +115,29 @@ Routes and pages that only need connect-target metadata should use the narrower
 `@murphai/device-syncd/connect-config` entrypoint so builds do not pull provider
 runtime factories into static analysis.
 
+## Device-sync wake epoch rollout
+
+Connection-scoped `device-sync.wake` items carry the connection row's
+`connectedAt` epoch. The runtime consumes a missing or mismatched epoch as
+superseded after snapshot hydration and before running the hint or jobs. It also
+echoes the hydrated epoch as `observedConnectedAt` on control-plane applies, so
+Web rejects connection, credential, local-state, and source writes after OAuth
+replacement changes the epoch.
+
+For the first production rollout, deploy Cloudflare and the runner with
+`container_rollout=immediate`, prove the exact new runner fingerprint, and then
+deploy Web. The short runner-first window fails closed for legacy
+connection-scoped hints while still hydrating the current snapshot; later
+scheduled, manual, or provider wakes emitted by the new Web producer carry the
+epoch and resume normal work. Never deploy Web first because an old runner does
+not enforce the new authority field.
+
+Once Web has emitted an epoch-bearing wake, do not independently roll the runner
+below the epoch-aware bundle while that wake or in-flight work may remain.
+Prefer a forward fix. A temporary Web-only rollback with the new runner retained
+is safety preserving but degrades legacy connection-scoped work and may fail
+old-Web apply parsing, so restore the compatible Web release promptly.
+
 Hosted E2E orchestration helpers live under `apps/web/test/support`, not
 `apps/web/src`. Application source should expose production runtime seams such
 as client factories and dependency-bearing functions; the testkit owns smoke-env

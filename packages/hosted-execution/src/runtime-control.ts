@@ -755,6 +755,7 @@ export type HostedRuntimeDeviceSyncBridgeKind =
 
 export interface HostedRuntimeDeviceSyncWakeBridgeEnvelope {
   connectionId?: string | null;
+  expectedConnectedAt?: string;
   hint?: HostedExecutionDeviceSyncWakeHint | null;
   kind: "device-sync.wake";
   provider?: string | null;
