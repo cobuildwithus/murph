@@ -21,8 +21,10 @@ import {
   assertHostedStripeLookupMatches,
   assertHostedUsageCreditChargeContext,
   assertHostedUsageCreditFinancialEventLinks,
+  buildHostedUsageCreditDirectPaymentAuthorization,
+  readHostedUsageCreditSavedCardPurchaseId,
   type HostedUsageCreditChargeContext,
-  type HostedUsageCreditPaidCheckoutAuthorization,
+  type HostedUsageCreditPaymentAuthorization,
   type HostedUsageCreditPreparedPaidCheckout,
   validateHostedUsageCreditPreparedPaidCheckout,
 } from "./usage-credit-stripe-payment-proof";
@@ -56,8 +58,18 @@ export type HostedUsageCreditFinancialSnapshot = {
   refund: HostedUsageCreditRefundExposure | null;
 };
 
+type HostedUsageCreditPreparedFinancialPayment =
+  | {
+      kind: "checkout";
+      paidCheckout: HostedUsageCreditPreparedPaidCheckout;
+    }
+  | {
+      kind: "saved_card";
+      paymentIntent: Stripe.PaymentIntent;
+    };
+
 export type HostedUsageCreditPreparedFinancialEvent = {
-  paidCheckout: HostedUsageCreditPreparedPaidCheckout;
+  payment: HostedUsageCreditPreparedFinancialPayment;
   privateReferences: HostedUsageCreditStripePrivateReferences;
   snapshot: HostedUsageCreditFinancialSnapshot;
 };
@@ -180,7 +192,7 @@ export async function prepareHostedUsageCreditFinancialEvent(input: {
     }
   }
 
-  const paidCheckout = await prepareHostedUsageCreditFinancialSnapshotCheckout({
+  const payment = await prepareHostedUsageCreditFinancialSnapshotPayment({
     context: input.context,
     eventLiveMode: input.event.livemode,
     paymentIntent: snapshot.context.paymentIntent,
@@ -193,9 +205,11 @@ export async function prepareHostedUsageCreditFinancialEvent(input: {
     paymentIntentId: snapshot.context.paymentIntent.id,
     prisma: input.prisma,
     purchase: input.purchase,
-    sessionId: paidCheckout.session.id,
+    sessionId: payment.kind === "checkout"
+      ? payment.paidCheckout.session.id
+      : null,
   });
-  return { paidCheckout, privateReferences, snapshot };
+  return { payment, privateReferences, snapshot };
 }
 
 export async function reconcileHostedUsageCreditFinancialEventTx(input: {
@@ -212,12 +226,18 @@ export async function reconcileHostedUsageCreditFinancialEventTx(input: {
     prepared: input.prepared,
     purchase: input.purchase,
   });
+  const paymentAuthorization = input.prepared.payment.kind === "checkout"
+    ? validateHostedUsageCreditPreparedPaidCheckout({
+        eventLiveMode: input.event.livemode,
+        paidCheckout: input.prepared.payment.paidCheckout,
+        purchase: input.purchase,
+      })
+    : buildHostedUsageCreditDirectPaymentAuthorization({
+        paymentIntent: input.prepared.payment.paymentIntent,
+        purchase: input.purchase,
+      });
   return reconcileAndBindHostedUsageCreditFinancialSnapshotTx({
-    checkoutAuthorization: validateHostedUsageCreditPreparedPaidCheckout({
-      eventLiveMode: input.event.livemode,
-      paidCheckout: input.prepared.paidCheckout,
-      purchase: input.purchase,
-    }),
+    paymentAuthorization,
     event: input.event,
     expectedReconciliationVersion: input.expectedReconciliationVersion,
     privateReferences: input.prepared.privateReferences,
@@ -305,13 +325,32 @@ export async function retrieveHostedUsageCreditFinancialSnapshot(input: {
   };
 }
 
-async function prepareHostedUsageCreditFinancialSnapshotCheckout(input: {
+async function prepareHostedUsageCreditFinancialSnapshotPayment(input: {
   context: HostedUsageCreditStripePreparationContext;
   eventLiveMode: boolean;
   paymentIntent: Stripe.PaymentIntent;
   prisma: HostedUsageCreditPurchaseReadClient;
   purchase: HostedUsageCreditPurchaseForReconciliation;
-}): Promise<HostedUsageCreditPreparedPaidCheckout> {
+}): Promise<HostedUsageCreditPreparedFinancialPayment> {
+  const savedCardPurchaseId = readHostedUsageCreditSavedCardPurchaseId(
+    input.paymentIntent.metadata,
+  );
+  if (savedCardPurchaseId) {
+    if (savedCardPurchaseId !== input.purchase.id) {
+      throw new Error(
+        "Saved-card usage-credit payment referenced a different purchase.",
+      );
+    }
+    buildHostedUsageCreditDirectPaymentAuthorization({
+      paymentIntent: input.paymentIntent,
+      purchase: input.purchase,
+    });
+    return {
+      kind: "saved_card",
+      paymentIntent: input.paymentIntent,
+    };
+  }
+
   let sessionId: string | null = null;
   if (input.purchase.stripeCheckoutSessionIdEncrypted) {
     const payerMemberId = requireHostedUsageCreditPurchasePayerMemberId(
@@ -392,7 +431,10 @@ async function prepareHostedUsageCreditFinancialSnapshotCheckout(input: {
     paidCheckout,
     purchase: input.purchase,
   });
-  return paidCheckout;
+  return {
+    kind: "checkout",
+    paidCheckout,
+  };
 }
 
 function assertHostedUsageCreditPreparedFinancialEvent(input: {
@@ -656,7 +698,7 @@ function buildHostedUsageCreditDisputeExposures(input: {
 }
 
 async function reconcileAndBindHostedUsageCreditFinancialSnapshotTx(input: {
-  checkoutAuthorization: HostedUsageCreditPaidCheckoutAuthorization;
+  paymentAuthorization: HostedUsageCreditPaymentAuthorization;
   event: Stripe.Event;
   expectedReconciliationVersion: bigint;
   privateReferences: HostedUsageCreditStripePrivateReferences;
@@ -665,7 +707,7 @@ async function reconcileAndBindHostedUsageCreditFinancialSnapshotTx(input: {
   tx: Prisma.TransactionClient;
 }): Promise<{ granted: boolean; wakeRequired: boolean }> {
   const reconciliation = await reconcileHostedUsageCreditFinancialSnapshotTx({
-    checkoutAuthorization: input.checkoutAuthorization,
+    paymentAuthorization: input.paymentAuthorization,
     effectiveAt: deriveHostedUsageCreditFinancialEffectiveAt({
       event: input.event,
       snapshot: input.snapshot,
@@ -685,19 +727,19 @@ async function reconcileAndBindHostedUsageCreditFinancialSnapshotTx(input: {
 }
 
 export async function reconcileHostedUsageCreditFinancialSnapshotTx(input: {
-  checkoutAuthorization: HostedUsageCreditPaidCheckoutAuthorization;
+  paymentAuthorization: HostedUsageCreditPaymentAuthorization;
   effectiveAt: Date;
   purchase: HostedUsageCreditPurchaseForReconciliation;
   snapshot: HostedUsageCreditFinancialSnapshot;
   tx: Prisma.TransactionClient;
 }): Promise<{ granted: boolean; wakeRequired: boolean }> {
   if (
-    input.checkoutAuthorization.purchaseId !== input.purchase.id ||
-    input.checkoutAuthorization.paymentIntentId !==
+    input.paymentAuthorization.purchaseId !== input.purchase.id ||
+    input.paymentAuthorization.paymentIntentId !==
       input.snapshot.context.paymentIntent.id
   ) {
     throw new Error(
-      "Usage-credit financial snapshot lacked Checkout authorization.",
+      "Usage-credit financial snapshot lacked payment authorization.",
     );
   }
   const paidAt = deriveHostedUsageCreditChargePaidAt(

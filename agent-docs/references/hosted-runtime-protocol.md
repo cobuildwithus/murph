@@ -1129,6 +1129,21 @@ checkpoint can contain it. Portable support bundles omit all `.runtime/**`; the
 generic `exports/assistant-deliveries/**` path remains ordinary checkpointed
 vault data and receives no deletion or path-specific packaging authority.
 Existing global file-type exclusions still apply regardless of directory.
+
+Hosted dynamic image generation is invocation-local background work. The tool
+returns after launch so the current assistant turn can continue. Provider work
+stays detached; the canonical capture save waits for an invocation boundary and
+uses the existing receipt checkpoint against the latest workspace. After upload,
+the runtime upserts one trusted system input on the original route, registers it
+with the ordinary pending assistant-input index, and notifies the existing wake
+signal. Normal foreground selection therefore keeps fresh conversation ahead of
+the completion and owns completion retry and terminal evidence. Provider
+completion starts the existing generic usage recorder without awaiting it, and
+image delivery never waits for accounting or diagnostic writes. This adds no
+durable image job, mailbox kind, scheduler, reservation, allowance
+implementation, or image-specific usage lifecycle. Runner loss may drop
+unfinished provider work.
+
 Detached `assistant.notification.requested` work remains output-only and cannot
 mutate resident conversation history or native provider resume state. A completed phone
 call is delivered as an ordinary `assistant.notification.requested` system-mailbox

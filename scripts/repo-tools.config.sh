@@ -46,7 +46,6 @@ required_files=(
   "agent-docs/generated/README.md"
   "agent-docs/generated/doc-gardening-report.md"
   "agent-docs/exec-plans/active/README.md"
-  "agent-docs/exec-plans/active/COORDINATION_LEDGER.md"
   "agent-docs/exec-plans/completed/README.md"
   "agent-docs/exec-plans/tech-debt-tracker.md"
 )
@@ -126,7 +125,6 @@ repo_tools_join_lines COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS \
   "agent-docs/operations/completion-workflow.md" \
   "agent-docs/operations/imessage-deliverability.md" \
   "agent-docs/operations/pr-reviewgpt-loop.md" \
-  "agent-docs/exec-plans/active/COORDINATION_LEDGER.md" \
   "package.json" \
   "pnpm-workspace.yaml" \
   "tsconfig.test-runtime.json" \
