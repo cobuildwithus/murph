@@ -1,6 +1,6 @@
 # PR 992 referral completion remediation
 
-Status: active
+Status: completed
 Created: 2026-07-27
 Updated: 2026-07-27
 
@@ -32,11 +32,11 @@ Updated: 2026-07-27
 
 ## Tasks
 
-1. Add focused failing proof for safe completion admission and failed-signal re-handoff.
-2. Derive model-aware reward labels and a narrow effective style band at the Web owner.
-3. Update prompt policy and referral docs for comedy shape, absent-person consent, reciprocal setup, and hidden counters.
-4. Run focused tests and typechecks, then canonical diff and acceptance verification.
-5. Complete product-experience, preliminary specialist, parent final, final ReviewGPT, and CI gates; commit and push the exact reviewed PR head.
+1. [x] Add focused failing proof for safe completion admission and failed-signal re-handoff.
+2. [x] Derive model-aware reward labels and a narrow effective style band at the Web owner.
+3. [x] Update prompt policy and referral docs for comedy shape, absent-person consent, reciprocal setup, and hidden counters.
+4. [x] Run focused tests and typechecks, then canonical diff and acceptance verification.
+5. [x] Complete the local product-experience, preliminary specialist, and parent-final gates; hand the clean pushed head to the PR-lane final ReviewGPT and CI gates.
 
 ## Verification
 
@@ -75,3 +75,7 @@ Updated: 2026-07-27
 - Remediation-specific canonical `pnpm test:diff` passed: repository guards,
   Web typecheck, 6,885 runnable Web tests (192 skipped), lint with only
   pre-existing warnings, dev smoke, and the production Next build.
+- Canonical `pnpm verify:acceptance` passed: repository guards and workspace
+  typechecks, the 6,885-test Web suite and production build, all package
+  coverage suites, Cloudflare worker tests, and package-boundary checks.
+Completed: 2026-07-27
