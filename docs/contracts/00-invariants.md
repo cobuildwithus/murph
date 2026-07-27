@@ -395,10 +395,13 @@ it has been explicitly elevated to a cross-cutting invariant.
   referral state and all referral state whose beneficiary is deleted are
   removed.
 - Hosted referral rolling caps reserve armed and bound commitments under the
-  same beneficiary serialization boundary as grants. A qualification timestamp
-  committed inside the provider-ingress transaction freezes a pre-expiry
-  success; delayed reconciliation may revalidate its stored evidence but must
-  not revoke it because wall-clock expiry or later commitments moved.
+  same beneficiary serialization boundary as grants. Armed rows reserve through
+  their seven-day occurrence window; bound rows remain reserved through the
+  product-owned 25-hour late-evidence grace, after which
+  referrer-serialized expiry is authoritative finality. A qualification
+  timestamp committed inside the provider-ingress transaction freezes a
+  pre-expiry success; delayed reconciliation may revalidate its stored evidence
+  but must not revoke it because wall-clock expiry or later commitments moved.
 - The company-wide tracked fulfilled usage-top-up total seeds from retained
   fulfilled rows at an atomic tracker cutover and does not claim complete
   pre-cutover lifetime history. It then increments from the first successful

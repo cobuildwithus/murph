@@ -36,7 +36,10 @@ the blinded locators to still identify the same direct conversation. A group
 mission uses its synthetic source-container route and live external-thread
 authority. Celebration copy never carries a detached profile name, so a
 durable mailbox item cannot outlive name-sharing permission or account
-deletion.
+deletion. A queued personal Linq celebration uses the existing explicit-target
+delivery shape for that resolved source. Provider entry rechecks the fixed
+target and records terminal delivery failure if authority moved or was revoked;
+it never replaces the source with a newer home conversation.
 
 The referrer's latest unbound mission supersedes their older unbound mission.
 An already-bound target continues qualifying. Earned rewards are final.
@@ -98,11 +101,16 @@ count. The portable active-group rule deliberately measures observed
 participation rather than a provider roster: Telegram does not expose the same
 authoritative full-room roster as Linq.
 
-Provider occurrence time, not delivery order, decides admission. Evidence at
-or after expiry is ignored without terminating the bound row, so a decisive
-pre-expiry event delivered later can still qualify. Referrer-serialized
-maintenance expires an unqualified row once no earlier evidence remains to be
-processed.
+Provider occurrence time, not delivery order, decides admission inside a
+bounded delivery policy. Evidence at or after expiry is ignored. A bound row
+and its cap commitment remain eligible for delayed pre-expiry evidence through
+25 hours after that occurrence window closes. The first referrer-serialized
+expiry boundary after that grace terminally clears an unqualified row; evidence
+delivered later is outside policy. This single derived cutoff covers Linq's
+documented roughly 25-minute automatic webhook retry window and Telegram's
+documented maximum 24-hour pending-update retention with one hour of processing
+margin. Neither provider exposes a durable producer watermark, so the feature
+does not claim unlimited late admission or create another finality owner.
 
 An unlinked Telegram participant in an already-bound group may contribute only
 bounded referral evidence. Their message remains excluded from the assistant
@@ -131,9 +139,10 @@ positive grants, debits, adjustments, the bounded balance/version projection,
 current-period unblock reconciliation, and referral-cap commitments. Arming
 locks the frozen beneficiary, plus the old beneficiary when replacing an
 unbound mission in another conversation, in stable member-id order. It admits
-the mission only when recent rewards plus nonexpired armed and bound
-commitments fit both caps. Referral observation never acquires that lock. It
-records evidence and `qualifiedAt` atomically in the ingress transaction.
+the mission only when recent rewards, nonexpired armed commitments, and bound
+commitments still inside their late-evidence grace fit both caps. Referral
+observation never acquires that lock. It records evidence and `qualifiedAt`
+atomically in the ingress transaction.
 Once that pre-expiry qualification fence commits, later wall-clock expiry or
 newly armed commitments cannot disqualify it. Post-commit reconciliation locks
 the referrer and beneficiary, revalidates the frozen evidence, and issues
@@ -155,8 +164,16 @@ best-effort runtime wake is already owned by durable mailbox reconciliation.
 Missing route authority or notification failure cannot delay, reverse, or
 duplicate the reward. Group notifications carry the same external-thread
 authority as their route. Personal notifications fail closed when the frozen
-source channel is no longer routed to the same blinded conversation. The
-source locator is cleared once the celebration is durably queued.
+source channel is no longer routed to the same blinded conversation. Linq
+personal notifications encode the resolved source as an explicit target so
+generic current-home fallback cannot move delivery after queueing. The source
+locator is cleared once the celebration is durably queued; later authority loss
+records ordinary terminal outbox failure without moving or revoking the reward.
+
+Provider timing references:
+
+- [Linq webhook delivery guarantees](https://docs.linqapp.com/guides/webhooks/)
+- [Telegram incoming-update retention](https://core.telegram.org/bots/api#making-requests-when-getting-updates)
 
 ## Abuse bounds
 

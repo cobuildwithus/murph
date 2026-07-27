@@ -53,6 +53,8 @@ export const HOSTED_USAGE_REFERRALS_ENABLED_ENV =
   "HOSTED_USAGE_REFERRALS_ENABLED";
 export const HOSTED_USAGE_REFERRAL_INTENT_TTL_MS =
   7 * 24 * 60 * 60 * 1_000;
+export const HOSTED_USAGE_REFERRAL_LATE_EVIDENCE_GRACE_MS =
+  25 * 60 * 60 * 1_000;
 export const HOSTED_USAGE_REFERRAL_PERSON_REWARD_USD_MICROS = 2_000_000n;
 export const HOSTED_USAGE_REFERRAL_GROUP_REWARD_USD_MICROS = 3_500_000n;
 export const HOSTED_USAGE_REFERRAL_GROUP_REQUIRED_MESSAGES = 15;
@@ -112,10 +114,17 @@ interface HostedUsageReferralActor {
 function outstandingHostedUsageReferralCommitmentWhere(
   now: Date,
 ): Prisma.HostedUsageReferralWhereInput[] {
+  const lateEvidenceCutoff = new Date(
+    now.getTime() - HOSTED_USAGE_REFERRAL_LATE_EVIDENCE_GRACE_MS,
+  );
   return [
     {
       expiresAt: { gt: now },
-      status: { in: [...ACTIVE_REFERRAL_STATUSES] },
+      status: "armed",
+    },
+    {
+      expiresAt: { gt: lateEvidenceCutoff },
+      status: "target_bound",
     },
     {
       qualifiedAt: { not: null },
@@ -985,6 +994,18 @@ export function buildHostedUsageReferralCelebrationWake(input: {
           }
         : null
     );
+  const route =
+    input.destination.conversationShape === "direct-member"
+    && input.destination.route.channel === "linq"
+    && input.destination.route.delivery.kind === "thread"
+      ? {
+          ...input.destination.route,
+          delivery: {
+            ...input.destination.route.delivery,
+            kind: "explicit" as const,
+          },
+        }
+      : input.destination.route;
   return buildHostedExecutionAssistantNotificationRequestedWake({
     eventId: `assistant.notification.requested:${input.notificationKey}`,
     memberId: input.beneficiaryMemberId,
@@ -1006,7 +1027,7 @@ export function buildHostedUsageReferralCelebrationWake(input: {
         "Do not mention internal accounting, qualification checks, or the other conversation.",
       ].join(" "),
       responsePolicy: { kind: "require_send" },
-      route: input.destination.route,
+      route,
     },
     occurredAt: input.rewardedAt.toISOString(),
   });
@@ -1020,6 +1041,7 @@ export function hostedUsageReferralDestinationMatchesSourceConversation(input: {
   if (
     destination.conversationShape !== "direct-member"
     || destination.externalThreadRouteAuthority !== null
+    || destination.route.delivery.kind !== "thread"
     || destination.route.channel !== sourceConversation.channel
     || destination.route.threadIsDirect !== true
     || sourceConversation.threadIsDirect !== true
@@ -1531,12 +1553,23 @@ async function expireHostedUsageReferralsForReferrerTx(input: {
   referrerMemberId: string;
   tx: Prisma.TransactionClient;
 }): Promise<void> {
+  const lateEvidenceCutoff = new Date(
+    input.now.getTime() - HOSTED_USAGE_REFERRAL_LATE_EVIDENCE_GRACE_MS,
+  );
   await input.tx.hostedUsageReferral.updateMany({
     where: {
-      expiresAt: { lte: input.now },
       qualifiedAt: null,
       referrerMemberId: input.referrerMemberId,
-      status: { in: [...ACTIVE_REFERRAL_STATUSES] },
+      OR: [
+        {
+          expiresAt: { lte: input.now },
+          status: "armed",
+        },
+        {
+          expiresAt: { lte: lateEvidenceCutoff },
+          status: "target_bound",
+        },
+      ],
     },
     data: {
       ...CLEARED_REFERRAL_EVIDENCE,

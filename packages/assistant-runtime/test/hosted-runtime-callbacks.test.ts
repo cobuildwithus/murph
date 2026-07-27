@@ -9415,6 +9415,78 @@ describe("hosted runtime callbacks", () => {
     );
   });
 
+  it("fails a fixed-source Linq notification instead of moving it to the current home route", async () => {
+    const effect = createEffect({
+      bindingDeliveryKind: null,
+      bindingDeliveryTarget: null,
+      channel: "linq",
+      explicitTarget: "linq_source_chat_a",
+      idempotencyKey: "usage-referral-reward:referral_1",
+      threadIsDirect: true,
+      transportIdempotent: true,
+    });
+    const authorityError = new VaultCliError(
+      "HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH",
+      "The fixed source conversation is no longer authorized.",
+      { retryable: false },
+    );
+    const assertRecentInbound = vi.fn(async () => {
+      throw authorityError;
+    });
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+      try {
+        await dependencies.sendLinq({
+          answeredMailboxItemIds: [],
+          homeRouteFallbackAllowed: false,
+          idempotencyKey: "usage-referral-reward:referral_1",
+          message: "Mission complete.",
+          replyToMessageId: null,
+          target: "linq_source_chat_a",
+          targetKind: "explicit",
+        });
+      } catch (error) {
+        return createDispatchResult({
+          delivery: null,
+          status: "failed",
+        }, {
+          code: error instanceof VaultCliError ? error.code : null,
+          message: error instanceof Error ? error.message : String(error),
+        });
+      }
+      throw new Error("Expected fixed-source authority to fail.");
+    });
+
+    const outcomes = await drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        assertLinqRecentInboundEngagement: assertRecentInbound,
+      }),
+      providerFetch: vi.fn<typeof fetch>(),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    });
+
+    expect(assertRecentInbound).toHaveBeenCalledWith(
+      expect.objectContaining({
+        authorityCheckOnly: false,
+        homeRouteFallbackAllowed: false,
+        target: "linq_source_chat_a",
+        targetKind: "explicit",
+      }),
+      { signal: null },
+    );
+    expect(mocks.sendLinqMessage).not.toHaveBeenCalled();
+    expect(JSON.stringify(assertRecentInbound.mock.calls))
+      .not.toContain("linq_current_home_b");
+    expect(outcomes).toEqual([
+      expect.objectContaining({
+        deliveryErrorCode: "HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH",
+        deliveryStatus: "failed",
+        retryable: false,
+      }),
+    ]);
+  });
+
   it("keeps Linq sends successful when delivery outcome recording fails", async () => {
     const effect = createEffect({
       bindingDeliveryTarget: "linq_chat_123",

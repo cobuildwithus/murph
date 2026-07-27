@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   HOSTED_USAGE_REFERRAL_GROUP_MINIMUM_ACTIVITY_SPAN_MS,
+  HOSTED_USAGE_REFERRAL_LATE_EVIDENCE_GRACE_MS,
   bindArmedHostedUsageReferralToNewContainerTx,
   buildHostedUsageReferralCelebrationWake,
   hostedUsageReferralDestinationMatchesSourceConversation,
@@ -92,6 +93,19 @@ describe("hosted usage referral policy", () => {
       },
       sourceConversation,
     })).toBe(false);
+    expect(hostedUsageReferralDestinationMatchesSourceConversation({
+      destination: {
+        ...destination,
+        route: {
+          ...destination.route,
+          delivery: {
+            kind: "participant",
+            target: "provider-direct-participant",
+          },
+        },
+      },
+      sourceConversation,
+    })).toBe(false);
 
     const wake = buildHostedUsageReferralCelebrationWake({
       beneficiaryMemberId: "member_personal",
@@ -104,6 +118,32 @@ describe("hosted usage referral policy", () => {
       channel: "telegram",
       containerMemberId: "member_personal",
       threadId: "provider-direct-thread",
+    });
+
+    const linqWake = buildHostedUsageReferralCelebrationWake({
+      beneficiaryMemberId: "member_personal",
+      destination: {
+        conversationShape: "direct-member",
+        externalThreadRouteAuthority: null,
+        route: {
+          actorId: `hid_${"5".repeat(32)}`,
+          channel: "linq",
+          delivery: {
+            kind: "thread",
+            target: "provider-linq-source-thread",
+          },
+          identityId: `hid_${"6".repeat(32)}`,
+          threadId: `hid_${"7".repeat(32)}`,
+          threadIsDirect: true,
+        },
+      },
+      notificationKey: "usage-referral-reward:referral_personal_linq",
+      rewardLabel: "$2 of Murph usage",
+      rewardedAt: new Date("2026-07-26T12:00:00.000Z"),
+    });
+    expect(linqWake.notification.route.delivery).toEqual({
+      kind: "explicit",
+      target: "provider-linq-source-thread",
     });
   });
 
@@ -345,7 +385,7 @@ describe("hosted usage referral policy", () => {
     expect(update).not.toHaveBeenCalled();
   });
 
-  it("preserves a bound referral when post-expiry evidence arrives before valid evidence", async () => {
+  it("preserves delayed pre-expiry evidence across an interposed later bind", async () => {
     const expiresAt = new Date("2026-07-26T12:10:00.000Z");
     const referral = {
       armedAt: new Date("2026-07-26T11:55:00.000Z"),
@@ -374,11 +414,35 @@ describe("hosted usage referral policy", () => {
       Object.assign(referral, input.data);
       return { ...referral };
     });
+    const updateMany = vi.fn().mockImplementation(async (input: {
+      data: Partial<typeof referral>;
+      where: {
+        OR?: Array<{
+          expiresAt: { lte: Date };
+          status: string;
+        }>;
+        qualifiedAt?: null;
+      };
+    }) => {
+      if (
+        input.where.OR?.some((condition) =>
+          referral.status === condition.status
+          && referral.expiresAt <= condition.expiresAt.lte
+        )
+        && referral.qualifiedAt === null
+      ) {
+        Object.assign(referral, input.data);
+        return { count: 1 };
+      }
+      return { count: 0 };
+    });
     const tx = {
       $executeRaw: vi.fn().mockResolvedValue(1),
       hostedUsageReferral: {
+        findFirst: vi.fn().mockResolvedValue(null),
         findUnique: vi.fn().mockImplementation(async () => ({ ...referral })),
         update,
+        updateMany,
       },
     };
 
@@ -396,6 +460,15 @@ describe("hosted usage referral policy", () => {
     });
     expect(update).not.toHaveBeenCalled();
 
+    await expect(bindArmedHostedUsageReferralToNewContainerTx({
+      enabled: true,
+      occurredAt: new Date(expiresAt.getTime() + 1),
+      ownerMemberId: "member_referrer",
+      targetContainerMemberId: "member_later_container",
+      tx: tx as never,
+    })).resolves.toEqual({ referralId: null });
+    expect(referral.status).toBe("target_bound");
+
     await expect(observeHostedUsageReferralInboundTx({
       containerMemberId: "member_target_container",
       enabled: true,
@@ -411,6 +484,19 @@ describe("hosted usage referral policy", () => {
     expect(update).toHaveBeenCalledOnce();
     expect(referral.humanMessageCount).toBe(1);
     expect(referral.observedEventKeysJson).toEqual(["event_before_expiry"]);
+
+    await expect(bindArmedHostedUsageReferralToNewContainerTx({
+      enabled: true,
+      occurredAt: new Date(
+        expiresAt.getTime()
+        + HOSTED_USAGE_REFERRAL_LATE_EVIDENCE_GRACE_MS
+        + 1,
+      ),
+      ownerMemberId: "member_referrer",
+      targetContainerMemberId: "member_after_grace_container",
+      tx: tx as never,
+    })).resolves.toEqual({ referralId: null });
+    expect(referral.status).toBe("expired");
   });
 
   it("resolves a newly activated Linq participant from blind subject evidence", async () => {

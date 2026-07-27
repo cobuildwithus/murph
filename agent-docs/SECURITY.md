@@ -48,9 +48,12 @@ Last verified: 2026-07-26
   target, route, provider id, counter, or qualification fact. Personal calls
   bind the callback member and persist only runtime-injected blinded locators
   for the exact source conversation. Celebration queueing re-resolves the
-  frozen channel and requires those locators to match the current direct route;
-  group celebrations carry live external-thread authority. Celebration
-  instructions never persist a detached profile name. Group calls require
+  frozen channel and requires those locators to match the current direct route.
+  A personal Linq wake freezes that resolved source as an explicit delivery
+  target so provider entry cannot replace it with a newer home route; source
+  revocation fails closed. Group celebrations carry live external-thread
+  authority. Celebration instructions never persist a detached profile name.
+  Group calls require
   exactly one runtime-injected
   provider-scoped sender handle that resolves to an active personal member;
   mixed-channel, missing, or ambiguous sender evidence fails closed.
@@ -58,8 +61,9 @@ Last verified: 2026-07-26
   counters. Unlinked Telegram group messages may contribute evidence only for
   an already-bound target and must remain outside the assistant mailbox,
   visible setup-reply path, and authorization path. Referral cap commitments
-  and rewards mutate only through the beneficiary lock and server policy
-  catalog; browser state and model output never reserve or grant credit. The
+  include bound rows through the server-owned 25-hour late-evidence grace and
+  rewards mutate only through the beneficiary lock and server policy catalog;
+  browser state and model output never reserve or grant credit. The
   Web owner fails arming, binding, and observation closed unless
   `HOSTED_USAGE_REFERRALS_ENABLED=1`; operators must not enable it until the
   post-drain ledger contract migration has widened and validated the credit

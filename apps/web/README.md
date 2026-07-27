@@ -248,10 +248,10 @@ The hosted Prisma schema keeps ownership sharp and nested:
   bounded balance/version projection.
 - `HostedUsageReferral` owns one explicitly armed personal referrer, frozen
   personal-or-group beneficiary, versioned policy, next-new-group binding,
-  bounded provider-neutral qualification evidence, and terminal reward
-  receipt. Provider adapters normalize Linq and Telegram evidence into this
-  Web-owned state; the assistant and browser never own attribution or grant
-  authority.
+  bounded provider-neutral qualification evidence, a derived 25-hour
+  late-evidence cutoff for bound rows, and terminal reward receipt. Provider
+  adapters normalize Linq and Telegram evidence into this Web-owned state; the
+  assistant and browser never own attribution or grant authority.
 - `HostedProductFeedback` owns assistant-captured structured product feedback
   with only a bounded product-only summary, kind, and optional changelog ids,
   without storing raw conversation text, health details, tags, topics, or provider payloads
@@ -658,11 +658,14 @@ Hosted AI usage metering:
 - Conversational usage referrals reserve their fixed server-catalog reward
   against referrer and beneficiary caps when armed, bind only the exact
   referrer's next new group, and freeze pre-expiry qualification in the
-  provider-ingress transaction. Immediate post-commit reconciliation and the
-  bounded minute recovery cron converge on one final referral grant and one
-  atomic source-mailbox celebration fence. Personal arming freezes only blinded
-  source-conversation locators; celebration re-resolves and revalidates that
-  exact direct channel, while group celebration carries live thread authority.
+  provider-ingress transaction. Bound commitments remain reserved for a
+  25-hour late-evidence grace before referrer-serialized expiry becomes final.
+  Immediate post-commit reconciliation and the bounded minute recovery cron
+  converge on one final referral grant and one atomic source-mailbox
+  celebration fence. Personal arming freezes only blinded source-conversation
+  locators; celebration re-resolves and revalidates that exact direct channel,
+  and personal Linq delivery uses an explicit source target that cannot fall
+  back to a newer home route. Group celebration carries live thread authority.
   Durable celebration copy is unnamed. Unlinked Telegram group evidence stays
   silent and outside assistant access; direct setup behavior is unchanged.
 - Web owns the separate `murph.subscription` callback for an explicit private member choice to continue Pulse at trial end, start Pulse now, or upgrade Pulse to Edge. It binds the runtime-supplied accepted input id to the callback member, atomically claims the first action on that existing mailbox row, re-derives current eligibility, and delegates to the existing billing services. An exact retry is allowed and a conflicting action fails closed. Pulse activation keeps its existing Stripe-hosted invoice or Customer Portal handoff when payment is required; a pending Edge change returns Customer Portal without a separate invoice lookup. No custom checkout or second billing owner is introduced.
