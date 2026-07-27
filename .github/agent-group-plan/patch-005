@@ -1,0 +1,420 @@
+-export function SwitchToPulseButton(props: {
++interface SwitchPlanButtonProps {
+   block?: boolean;
+   children?: ReactNode;
++  currentPlanCode?: HostedBillingPlanCode;
+   currentPeriodEnd?: string | null;
+   disabled?: boolean;
+   onPendingChange?: (pending: boolean) => void;
+-}) {
++  targetPlanCode: HostedScheduledPlanTarget;
++}
++
++export function SwitchToPulseButton(
++  props: Omit<SwitchPlanButtonProps, "targetPlanCode">,
++) {
++  return <SwitchPlanButton {...props} targetPlanCode="launch_monthly" />;
++}
++
++export function SwitchToGroupButton(
++  props: Omit<SwitchPlanButtonProps, "targetPlanCode">,
++) {
++  return <SwitchPlanButton {...props} targetPlanCode="launch_group_monthly" />;
++}
++
++function SwitchPlanButton(props: SwitchPlanButtonProps) {
++  const targetPlan = getHostedBillingPlanDefinition(props.targetPlanCode);
+   const router = useRouter();
+@@ -42,7 +67,9 @@ export function SwitchToPulseButton(props: {
+   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+   const [confirmationOpen, setConfirmationOpen] = useState(false);
+   const [isSwitching, setIsSwitching] = useState(false);
+-  const label = isSwitching ? "Scheduling..." : props.children ?? "Switch to Pulse";
++  const label = isSwitching
++    ? "Scheduling..."
++    : props.children ?? `Switch to ${targetPlan.displayName}`;
+   const disabled = props.disabled === true || isSwitching;
+ 
+-  async function handleSwitchToPulse() {
++  async function handleSwitchPlan() {
+@@ -51,7 +78,18 @@ export function SwitchToPulseButton(props: {
+     props.onPendingChange?.(true);
+ 
+     try {
+-      await requestHostedOnboardingJson<HostedBillingPlanSwitchToPulseResponse>({
+-        method: "POST",
+-        url: "/api/settings/billing/switch-to-pulse",
+-      });
++      const request = props.targetPlanCode === "launch_monthly"
++        ? {
++            method: "POST" as const,
++            url: "/api/settings/billing/switch-to-pulse",
++          }
++        : {
++            method: "POST" as const,
++            payload: {
++              targetPlanCode: props.targetPlanCode,
++            },
++            url: "/api/settings/billing/switch-plan",
++          };
++      await requestHostedOnboardingJson<HostedBillingPlanSwitchResponse>(
++        request,
++      );
+@@ -59,4 +89,9 @@ export function SwitchToPulseButton(props: {
+       setConfirmationOpen(false);
+       router.refresh();
+     } catch (error) {
+-      setErrorMessage(toErrorMessage(error, "Could not schedule your plan switch right now."));
++      setErrorMessage(
++        toErrorMessage(
++          error,
++          `Could not schedule ${targetPlan.displayName} right now.`,
++        ),
++      );
+@@ -86,10 +121,12 @@ export function SwitchToPulseButton(props: {
+         </p>
+       ) : null}
+-      <PulseSwitchConfirmationDialog
++      <PlanSwitchConfirmationDialog
++        currentPlanCode={props.currentPlanCode ?? "launch_edge_monthly"}
+         currentPeriodEnd={props.currentPeriodEnd}
+         errorMessage={errorMessage}
+         isSwitching={isSwitching}
+-        onConfirm={() => void handleSwitchToPulse()}
++        onConfirm={() => void handleSwitchPlan()}
+         onOpenChange={setConfirmationOpen}
+         open={confirmationOpen}
++        targetPlanCode={props.targetPlanCode}
+       />
+@@ -98,13 +135,20 @@ export function SwitchToPulseButton(props: {
+   );
+ }
+ 
+-const EDGE_ONLY_FEATURES = [
++const PULSE_DOWNGRADE_CHANGES = [
+   "More usage on latest AI models",
+   "Murph remembers more of your history",
+   "Deeper research and analysis",
+ ];
+ 
+-function PulseSwitchConfirmationDialog(props: {
++const GROUP_PLAN_CONTINUITIES = [
++  "Wearable syncing stays on",
++  "Group activity stays current",
++  "Private Murph continues with a lighter monthly allowance",
++];
++
++function PlanSwitchConfirmationDialog(props: {
++  currentPlanCode: HostedBillingPlanCode;
+   currentPeriodEnd?: string | null;
+   errorMessage: string | null;
+   isSwitching: boolean;
+@@ -112,6 +158,13 @@ function PulseSwitchConfirmationDialog(props: {
+   onOpenChange: (open: boolean) => void;
+   open: boolean;
++  targetPlanCode: HostedScheduledPlanTarget;
+ }) {
+   const renewalDate = formatHostedBillingDate(props.currentPeriodEnd);
++  const currentPlan = getHostedBillingPlanDefinition(props.currentPlanCode);
++  const targetPlan = getHostedBillingPlanDefinition(props.targetPlanCode);
++  const targetPriceLabel = props.targetPlanCode === "launch_group_monthly"
++    ? groupPriceLabel
++    : pulsePriceLabel;
++  const targetIsGroup = props.targetPlanCode === "launch_group_monthly";
+ 
+   return (
+@@ -119,26 +185,46 @@ function PulseSwitchConfirmationDialog(props: {
+         <DialogHeader className="pr-10">
+           <DialogTitle className="font-serif text-2xl/7 font-semibold tracking-normal text-[#2d3436]">
+-            Switch to Pulse
++            Switch to {targetPlan.displayName}
+           </DialogTitle>
+           <DialogDescription className="text-sm leading-6 text-[#736a58]">
+-            You keep Edge through {renewalDate}, then Pulse at {pulsePriceLabel}/mo.
++            You keep {currentPlan.displayName} through {renewalDate}, then{" "}
++            {targetPlan.displayName} at {targetPriceLabel}/mo.
+           </DialogDescription>
+         </DialogHeader>
+ 
+         <div className="rounded-lg border border-[#c4a882]/25 px-5 py-4">
+           <div className="flex items-baseline gap-1">
+             <span className="font-serif text-3xl font-semibold tracking-tight text-[#2d3436]">
+-              {pulsePriceLabel}
++              {targetPriceLabel}
+             </span>
+             <span className="text-sm text-[#736a58]">/ month</span>
+           </div>
+           <p className="mt-1 text-xs text-[#736a58]">
+-            Down from {edgePriceLabel}/mo
++            Down from{" "}
++            {props.currentPlanCode === "launch_edge_monthly"
++              ? edgePriceLabel
++              : pulsePriceLabel}
++            /mo
+           </p>
+           <ul className="mt-4 flex flex-col gap-2.5">
+-            {EDGE_ONLY_FEATURES.map((feature) => (
++            {(targetIsGroup
++              ? GROUP_PLAN_CONTINUITIES
++              : PULSE_DOWNGRADE_CHANGES
++            ).map((feature) => (
+               <li key={feature} className="flex items-start gap-2.5 text-sm text-[#736a58]">
+-                <span aria-hidden className="mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full bg-destructive/10">
+-                  <MinusIcon className="size-3 text-destructive/70" strokeWidth={2.5} />
++                <span
++                  aria-hidden
++                  className={cn(
++                    "mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full",
++                    targetIsGroup
++                      ? "bg-primary/10"
++                      : "bg-destructive/10",
++                  )}
++                >
++                  {targetIsGroup ? (
++                    <CheckIcon className="size-3 text-primary" strokeWidth={2.5} />
++                  ) : (
++                    <MinusIcon className="size-3 text-destructive/70" strokeWidth={2.5} />
++                  )}
+                 </span>
+                 {feature}
+@@ -183,8 +262,4 @@ function PulseSwitchConfirmationDialog(props: {
+   );
+ }
+ 
+-function formatHostedBillingPlanMonthlyPrice(amountUsdCents: number): string {
+-  return `$${amountUsdCents / 100}`;
+-}
+-
+ function formatHostedBillingDate(value: string | null | undefined): string {
+diff --git a/packages/hosted-execution/src/plan-usage.ts b/packages/hosted-execution/src/plan-usage.ts
+--- a/packages/hosted-execution/src/plan-usage.ts
++++ b/packages/hosted-execution/src/plan-usage.ts
+@@ -10,6 +10,7 @@ export const HOSTED_PLAN_USAGE_ACCESS_KINDS = [
+ 
+ export const HOSTED_PLAN_USAGE_PLAN_NAMES = [
+   "Edge",
++  "Group",
+   "Family",
+   "Pulse",
+   "Pulse Trial",
+@@ -31,6 +32,6 @@ const hostedPlanUsageActionLabelSchema = z.string().trim().min(1).max(80);
+ const hostedPlanUsageRecommendedActionSchema = z.discriminatedUnion("kind", [
+   z
+     .object({
+-      kind: z.enum(["start_pulse", "upgrade_edge"]),
++      kind: z.enum(["start_pulse", "upgrade_pulse", "upgrade_edge"]),
+       label: hostedPlanUsageActionLabelSchema,
+       url: z.string().url(),
+@@ -47,5 +48,5 @@ const hostedPlanUsageRecommendedActionSchema = z.discriminatedUnion("kind", [
+ const hostedPlanUsageSubscriptionActionQuoteSchema = z
+   .object({
+-    action: z.enum(["start_pulse_now", "upgrade_edge"]),
++    action: z.enum(["start_pulse_now", "upgrade_pulse", "upgrade_edge"]),
+     label: z.string().trim().min(1).max(80),
+   })
+@@ -67,4 +68,8 @@ const hostedPlanUsageAvailableSchema = z
+     periodEnd: z.string().datetime({ offset: true }),
+     periodKind: z.enum(["monthly", "trial"]),
+     periodStart: z.string().datetime({ offset: true }),
+-    planCode: z.enum(["launch_edge_monthly", "launch_monthly"]),
++    planCode: z.enum([
++      "launch_group_monthly",
++      "launch_edge_monthly",
++      "launch_monthly",
++    ]),
+diff --git a/packages/hosted-execution/src/subscription.ts b/packages/hosted-execution/src/subscription.ts
+--- a/packages/hosted-execution/src/subscription.ts
++++ b/packages/hosted-execution/src/subscription.ts
+@@ -5,4 +5,5 @@ export const HOSTED_RUNTIME_SUBSCRIPTION_ACTIONS = [
+   "continue_pulse",
+   "start_pulse_now",
++  "upgrade_pulse",
+   "upgrade_edge",
+ ] as const;
+@@ -97,4 +107,15 @@ export const hostedRuntimeSubscriptionToolResponseSchema = z.union([
+     paymentUrl: hostedRuntimeHttpsUrlSchema,
+     status: z.literal("payment_required"),
+   }).strict(),
++  z.object({
++    action: z.literal("upgrade_pulse"),
++    plan: hostedRuntimePulsePlanTermsSchema,
++    status: hostedRuntimeNonPaymentResponseStatusSchema,
++  }).strict(),
++  z.object({
++    action: z.literal("upgrade_pulse"),
++    paymentUrl: hostedRuntimeHttpsUrlSchema,
++    plan: hostedRuntimePulsePlanTermsSchema,
++    status: z.literal("payment_required"),
++  }).strict(),
+ ]);
+diff --git a/apps/web/src/lib/hosted-execution/subscription-tool.ts b/apps/web/src/lib/hosted-execution/subscription-tool.ts
+--- a/apps/web/src/lib/hosted-execution/subscription-tool.ts
++++ b/apps/web/src/lib/hosted-execution/subscription-tool.ts
+@@ -76,5 +76,15 @@ export async function handleHostedSubscriptionTool(input: {
+           prisma,
+         }),
+       });
++    case "upgrade_pulse":
++      return projectPulseUpgradeResult({
++        action: input.request.action,
++        planCode: "launch_monthly",
++        result: await upgradeHostedBillingPlan({
++          memberId: input.memberId,
++          prisma,
++          targetPlanCode: "launch_monthly",
++        }),
++      });
+     case "upgrade_edge":
+       return projectEdgeUpgradeResult({
+@@ -125,6 +135,42 @@ function projectPulseResult(input: {
+   }
+ }
+ 
++function projectPulseUpgradeResult(input: {
++  action: Extract<HostedRuntimeSubscriptionAction, "upgrade_pulse">;
++  planCode: "launch_monthly";
++  result: HostedBillingPlanUpgradeResult;
++}): HostedRuntimeSubscriptionToolResponse {
++  const plan = projectHostedSubscriptionPlan(input.planCode);
++
++  switch (input.result.status) {
++    case "already_on_plan":
++      return {
++        action: input.action,
++        plan,
++        status: "no_action_required",
++      };
++    case "upgraded":
++      return {
++        action: input.action,
++        plan,
++        status: "completed",
++      };
++    case "processing":
++      return {
++        action: input.action,
++        plan,
++        status: "pending",
++      };
++    case "payment_required":
++      return {
++        action: input.action,
++        paymentUrl: input.result.paymentUrl,
++        plan,
++        status: "payment_required",
++      };
++  }
++}
++
+ function projectEdgeUpgradeResult(input: {
+   action: Extract<HostedRuntimeSubscriptionAction, "upgrade_edge">;
+   planCode: "launch_edge_monthly";
+diff --git a/apps/web/src/lib/hosted-execution/usage-status.ts b/apps/web/src/lib/hosted-execution/usage-status.ts
+--- a/apps/web/src/lib/hosted-execution/usage-status.ts
++++ b/apps/web/src/lib/hosted-execution/usage-status.ts
+@@ -12,5 +12,5 @@ import { resolveHostedPublicBaseUrl } from "../hosted-web/public-url";
+ import {
+   canStartHostedPulseTrialPaidPlan,
+-  canUpgradeHostedBillingPlanToEdge,
++  canUpgradeHostedBillingPlan,
+   getHostedBillingPlanDefinition,
+ } from "../hosted-onboarding/billing-plans";
+@@ -164,7 +164,9 @@ export async function projectHostedPersonalAiUsageStatus(input: {
+   const planName = accessKind === "family_sponsored"
+     ? "Family"
+     : accessKind === "trial"
+       ? "Pulse Trial"
+-    : decision.billingPlanCode === "launch_edge_monthly"
+-      ? "Edge"
+-      : "Pulse";
++      : decision.billingPlanCode === "launch_edge_monthly"
++        ? "Edge"
++        : decision.billingPlanCode === "launch_group_monthly"
++          ? "Group"
++          : "Pulse";
+@@ -175,9 +177,17 @@ export async function projectHostedPersonalAiUsageStatus(input: {
+   const shouldResolveSubscriptionAction =
+     includeSubscriptionActionQuote
+     || (
+       shouldRecommendAction
+-      && accessKind === "trial"
++      && (
++        accessKind === "trial"
++        || (
++          accessKind === "paid"
++          && decision.billingPlanCode === "launch_group_monthly"
++        )
++      )
+       && actionUrl !== null
+     );
+   const shouldResolvePersonalUsageCreditOffers =
+-    shouldRecommendAction && accessKind === "paid";
++    shouldRecommendAction
++    && accessKind === "paid"
++    && decision.billingPlanCode !== "launch_group_monthly";
+@@ -219,12 +226,17 @@ export async function projectHostedPersonalAiUsageStatus(input: {
+     planCode: decision.billingPlanCode,
+     planName,
+     recommendedAction: shouldRecommendAction
+-      ? accessKind === "paid"
+-        ? personalUsageCreditOfferCodes.length > 0
+-          ? buildAddUsageRecommendedAction()
+-          : null
+-        : buildRecommendedAction({
++      ? accessKind === "trial"
++        ? buildRecommendedAction({
+             action: availableSubscriptionAction,
+             actionUrl,
+           })
++        : decision.billingPlanCode === "launch_group_monthly"
++          ? buildRecommendedAction({
++              action: availableSubscriptionAction,
++              actionUrl,
++            })
++          : personalUsageCreditOfferCodes.length > 0
++            ? buildAddUsageRecommendedAction()
++            : null
+       : null,
+@@ -357,18 +371,28 @@ async function resolveAvailableSubscriptionAction(input: {
+       : null;
+   }
+ 
+-  const hasOwnActiveBilling = hasHostedMemberOwnActiveBilling(member);
+-  const canUpgradeToEdge = input.planCode === "launch_monthly"
++  const hasOwnActiveBilling = hasHostedMemberOwnActiveBilling(member);
++  const targetPlanCode = input.planCode === "launch_group_monthly"
++    ? "launch_monthly"
++    : input.planCode === "launch_monthly"
++      ? "launch_edge_monthly"
++      : null;
++  const canUpgrade = targetPlanCode !== null
+     && hasOwnActiveBilling
+     && billingState.hasStripeCustomerId
+     && billingState.hasStripeSubscriptionId
+-    && canUpgradeHostedBillingPlanToEdge({
++    && canUpgradeHostedBillingPlan({
+       currentBillingPhase: billingState.currentBillingPhase,
+       currentBillingPlanCode: billingState.currentBillingPlanCode,
+       currentCheckoutOffer: billingState.currentCheckoutOffer,
++      targetPlanCode,
+     });
+ 
+-  return canUpgradeToEdge
+-    ? buildSubscriptionActionQuote("upgrade_edge")
++  return canUpgrade && targetPlanCode
++    ? buildSubscriptionActionQuote(
++        targetPlanCode === "launch_monthly"
++          ? "upgrade_pulse"
++          : "upgrade_edge",
++      )
+     : null;
+ }
+@@ -388,13 +402,18 @@ function buildSubscriptionActionQuote(
+   action: HostedPlanUsageSubscriptionActionQuote["action"],
+ ): HostedPlanUsageSubscriptionActionQuote {
+   const billingPlan = getHostedBillingPlanDefinition(
+-    action === "start_pulse_now" ? "launch_monthly" : "launch_edge_monthly",
++    action === "upgrade_edge"
++      ? "launch_edge_monthly"
++      : "launch_monthly",
+   );
