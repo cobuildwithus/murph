@@ -3043,6 +3043,14 @@ export async function executeMurphDynamicToolRequest(input: {
               requireHostedGeneratedImageUploader: true,
               vaultRoot: input.vaultRoot ?? null,
             })
+            if (result.usageDraft) {
+              input.hostedToolContext?.recordDetachedUsage?.({
+                effectiveEnv: input.env,
+                operationId,
+                originAssistantInputId,
+                usageDraft: result.usageDraft,
+              })
+            }
             return {
               media: result.rpcSuccess
                 ? result.responseMedia?.[0] ?? null

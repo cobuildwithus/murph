@@ -5,6 +5,9 @@ import {
   buildHostedExecutionMemberActivatedWake,
 } from "@murphai/hosted-execution";
 import {
+  listHostedAiUsageForTest,
+} from "#hosted-web-testing";
+import {
   buildAssistantProviderMurphToolCall,
   expectAdvertisedMurphDynamicTools,
   type HostedLocalAssistantProviderScriptedResponse,
@@ -257,6 +260,13 @@ describe("hosted local Codex image media delivery e2e", () => {
     expect(readLatestSavedGeneratedImageRef()).toMatch(
       /^raw\/captures\/.+\.webp$/u,
     );
+    expectPriceableImageUsage(
+      await listHostedAiUsageForTest({
+        environment: requireScenario().runtimeEnv,
+        memberId: userId,
+      }),
+      1,
+    );
   }, 360_000);
 
   it("degrades to text when generated-image upload throws", async () => {
@@ -317,8 +327,33 @@ describe("hosted local Codex image media delivery e2e", () => {
 
     const finalStatus = await requireScenario().waitForHostedCompletion(userId);
     expect(finalStatus.lastErrorCode ?? null).toBeNull();
+    expectPriceableImageUsage(
+      await listHostedAiUsageForTest({
+        environment: requireScenario().runtimeEnv,
+        memberId: userId,
+      }),
+      2,
+    );
   }, 360_000);
 });
+
+function expectPriceableImageUsage(
+  usage: Awaited<ReturnType<typeof listHostedAiUsageForTest>>,
+  expectedCount: number,
+): void {
+  const imageUsage = usage.filter((row) => row.providerName === "OpenAI Images");
+  expect(imageUsage).toHaveLength(expectedCount);
+  expect(imageUsage).toEqual(
+    Array.from({ length: expectedCount }, () =>
+      expect.objectContaining({
+        allowanceCostUsdMicros: "1080",
+        allowanceCounted: true,
+        requestedModel: "gpt-image-2",
+        totalTokens: 46,
+      })
+    ),
+  );
+}
 
 function readLatestSavedGeneratedImageRef(): string {
   const requests = requireScenario().assistantProviderRequests

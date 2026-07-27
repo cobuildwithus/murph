@@ -12,6 +12,9 @@ import type {
   AssistantSession,
 } from '@murphai/operator-config/assistant-cli-contracts'
 
+import type { CodexThreadIdentity } from './codex-thread-route.js'
+import type { AssistantProviderUsageDraft } from './providers/types.js'
+import { recordAssistantUsageEvent } from './service-usage.js'
 import type {
   AssistantMessageInput,
 } from './service-contracts.js'
@@ -115,6 +118,12 @@ export interface AssistantHostedToolContext {
   recordNewsletterSendResult?(
     result: Extract<HostedRuntimeNewsletterToolResponse, { action: 'send' }>,
   ): void
+  recordDetachedUsage?(input: {
+    effectiveEnv: Readonly<Record<string, string | undefined>>
+    operationId: string
+    originAssistantInputId: string
+    usageDraft: AssistantProviderUsageDraft
+  }): void
   currentUserActionScope?(): AssistantHostedUserActionScope | null
   currentProductFeedbackAcceptedInputIds?(): readonly string[]
   readonly computerToolsAvailable: boolean
@@ -143,6 +152,7 @@ export function createAssistantHostedToolContext(input: {
     turnId: string
     vault: string
   } | null
+  route?: CodexThreadIdentity | null
   recordNewsletterSendResult?: (
     result: Extract<HostedRuntimeNewsletterToolResponse, { action: 'send' }>,
   ) => void
@@ -153,6 +163,7 @@ export function createAssistantHostedToolContext(input: {
   session: AssistantSession
 }): AssistantHostedToolContext {
   const executionContext = input.executionContext ?? null
+  const route = input.route ?? null
   const clinicalRecordsConnectLinkTool =
     executionContext?.clinicalRecordsConnectLinkTool ?? null
   const newsletterPort = input.messageInput.scheduledAutomationAuthority
@@ -241,6 +252,33 @@ export function createAssistantHostedToolContext(input: {
     planUsageTool: executionContext?.planUsageTool ?? null,
     subscriptionTool: executionContext?.subscriptionTool ?? null,
     phoneCalls: executionContext?.phoneCalls ?? null,
+    ...(executionContext?.usageRecorder && route
+      ? {
+          recordDetachedUsage(usageInput) {
+            const deliveryContext = readDeliveryContext()
+            void recordAssistantUsageEvent({
+              effectiveEnv: usageInput.effectiveEnv,
+              executionContext: { hosted: executionContext },
+              providerRequestAcceptedInputIds: [
+                usageInput.originAssistantInputId,
+              ],
+              providerRequestOrdinal:
+                usageInput.usageDraft.providerRequestOrdinal,
+              providerRequestOutcome:
+                usageInput.usageDraft.providerRequestOutcome,
+              providerResult: {
+                attemptCount: 1,
+                provider: usageInput.usageDraft.provider,
+                providerOptions: route.providerOptions,
+                route,
+                session: deliveryContext.session,
+                usage: usageInput.usageDraft.usage,
+              },
+              turnId: usageInput.operationId,
+            })
+          },
+        }
+      : {}),
     ...(input.beforeToolExecution
       ? { beforeToolExecution: input.beforeToolExecution }
       : {}),

@@ -144,17 +144,22 @@ export function createHostedImageGenerationController(input: {
       let staged = 0;
       while (completed.length > 0) {
         const completion = completed[0]!;
-        try {
-          const inputId = await stageImageGenerationCompletion({
-            completion,
-            vaultRoot: input.vaultRoot,
-          });
-          await enqueuePendingInputId({
-            inputId,
-            vaultRoot: input.vaultRoot,
-          });
-        } catch {
-          return staged;
+        for (let attempt = 0; attempt < 2; attempt += 1) {
+          try {
+            const inputId = await stageImageGenerationCompletion({
+              completion,
+              vaultRoot: input.vaultRoot,
+            });
+            await enqueuePendingInputId({
+              inputId,
+              vaultRoot: input.vaultRoot,
+            });
+            break;
+          } catch {
+            if (attempt === 1) {
+              return staged;
+            }
+          }
         }
         if (completion.result.runtimeIssue) {
           input.recordRuntimeIssue?.(completion.result.runtimeIssue);

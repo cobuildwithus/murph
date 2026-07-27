@@ -16553,6 +16553,7 @@ describe("hosted workspace runtime entrypoint", () => {
     let completionInputId: string | null = null;
     let completionReplyCount = 0;
     let imageIndexFailureInjected = false;
+    const shutdownController = new AbortController();
 
     try {
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
@@ -16583,7 +16584,7 @@ describe("hosted workspace runtime entrypoint", () => {
           request: {
             attemptId: "attempt_image_index_retry",
             budget: { maxMailboxItems: 10 },
-            idleCheckpointDelayMs: 1,
+            idleCheckpointDelayMs: 180_000,
             leaseGeneration: "7",
             userId: TEST_USER_ID,
             workspaceVersion: "0",
@@ -16672,6 +16673,14 @@ describe("hosted workspace runtime entrypoint", () => {
               inputId: assistantInputId,
               vaultRoot,
             });
+            if (assistantPhaseCalls === 2) {
+              shutdownController.abort(
+                new DOMException(
+                  "Synthetic shutdown after image completion reply.",
+                  "AbortError",
+                ),
+              );
+            }
             return {
               checkpointReason: "assistant_runtime_commit" as const,
               foregroundReplyFailed: 0,
@@ -16679,6 +16688,7 @@ describe("hosted workspace runtime entrypoint", () => {
               progressed: true,
             };
           },
+          shutdownSignal: shutdownController.signal,
           vaultRoot,
         },
       );
@@ -16718,6 +16728,9 @@ describe("hosted workspace runtime entrypoint", () => {
           .filter(([request]) => request.inputId === completionInputId);
       assert.equal(completionEnqueueCalls.length, 2);
     } finally {
+      shutdownController.abort(
+        new DOMException("Synthetic test cleanup.", "AbortError"),
+      );
       const actualEnqueue = mocks.actualEnqueueHostedPendingAssistantInputId;
       if (actualEnqueue) {
         mocks.enqueueHostedPendingAssistantInputId.mockImplementation(

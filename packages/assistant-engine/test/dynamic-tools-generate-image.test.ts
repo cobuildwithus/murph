@@ -65,6 +65,13 @@ describe('murph.generate_image dynamic tool schema', () => {
     })
     let generation: Promise<unknown> | null = null
     const launchedOperations = new Set<string>()
+    let releaseUsage = (): void => undefined
+    const usageHeld = new Promise<void>((resolve) => {
+      releaseUsage = resolve
+    })
+    const recordDetachedUsage = vi.fn(async () => {
+      await usageHeld
+    })
     const hostedToolContext = {
       computerToolsAvailable: false,
       currentAssistantInputId: () => 'input_image_origin',
@@ -83,6 +90,7 @@ describe('murph.generate_image dynamic tool schema', () => {
           return 'started' as const
         },
       },
+      recordDetachedUsage,
       sendVaultFile: async () => ({
         filename: 'unused',
         status: 'denied' as const,
@@ -162,6 +170,15 @@ describe('murph.generate_image dynamic tool schema', () => {
         url: 'https://imagedelivery.net/account/generated/public',
       },
     })
+    expect(recordDetachedUsage).toHaveBeenCalledOnce()
+    expect(recordDetachedUsage).toHaveBeenCalledWith(expect.objectContaining({
+      operationId: expect.stringContaining('murph.dynamic-tool.generate-image'),
+      originAssistantInputId: 'input_image_origin',
+      usageDraft: expect.objectContaining({
+        provider: 'openai-images',
+      }),
+    }))
+    releaseUsage()
   })
 
   it('keeps the minimal legacy prompt-only call valid', () => {
