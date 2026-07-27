@@ -1,0 +1,83 @@
+name: Agent Murph Group Plan Bootstrap
+
+on:
+  push:
+    branches:
+      - agent/murph-group-plan
+    paths:
+      - .github/agent-group-plan/READY
+
+permissions:
+  contents: write
+
+concurrency:
+  group: agent-murph-group-plan-bootstrap
+  cancel-in-progress: true
+
+jobs:
+  apply-and-verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: agent/murph-group-plan
+
+      - name: Assemble and apply patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat .github/agent-group-plan/patch-* > /tmp/murph-group-plan.patch
+          git apply --check --whitespace=error-all /tmp/murph-group-plan.patch
+          git apply --whitespace=fix /tmp/murph-group-plan.patch
+          git diff --check
+
+      - name: Enable pnpm
+        shell: bash
+        run: corepack enable
+
+      - name: Install dependencies
+        shell: bash
+        run: pnpm install --frozen-lockfile
+
+      - name: Run focused Group plan tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm --dir apps/web exec vitest run \
+            --config vitest.workspace.ts \
+            --no-coverage \
+            test/hosted-group-plan-policy.test.ts \
+            test/hosted-onboarding-billing-plans.test.ts \
+            test/hosted-onboarding-env.test.ts \
+            test/hosted-billing-settings.test.tsx \
+            test/hosted-usage-status.test.ts \
+            test/hosted-subscription-tool.test.ts \
+            test/hosted-subscription-tool-route.test.ts \
+            test/user-facing-messages.test.ts
+          pnpm --dir packages/hosted-execution exec vitest run \
+            test/plan-usage.test.ts \
+            test/subscription.test.ts
+          pnpm --dir packages/assistant-engine exec vitest run \
+            test/assistant-subscription-tool.test.ts
+          pnpm --dir packages/hosted-local-harness exec vitest run \
+            test/dev-hosted-local/stripe.test.ts
+
+      - name: Run prepared typecheck
+        shell: bash
+        run: pnpm typecheck:prepared
+
+      - name: Commit verified implementation
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf .github/agent-group-plan
+          rm -f .github/workflows/agent-murph-group-plan-bootstrap.yml
+          git diff --check
+          git config user.name "Codex"
+          git config user.email "codex@users.noreply.github.com"
+          git add -A
+          git commit -m "Add eligible Murph Group plan"
+          git push origin HEAD:agent/murph-group-plan
