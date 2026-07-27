@@ -48,6 +48,7 @@ import {
   type AssistantExecutionContext,
   type AssistantHostedGroupPermissionOfferTool,
   type AssistantHostedGroupSharedReader,
+  type AssistantHostedImageGenerationLauncher,
   type AssistantInputEventRecord,
   type MurphManagedAutomationDiagnosticStage,
   type AssistantTurnEnvironment,
@@ -295,6 +296,7 @@ export interface HostedWorkspaceRuntimeAssistantPhaseInput
   runtimeEnv: Readonly<Record<string, string>>;
   beforeProviderAcceptedInputs?: AssistantBeforeProviderAcceptedInputsHook | null;
   currentAssistantInputId?: () => string | null;
+  imageGenerationLauncher?: AssistantHostedImageGenerationLauncher | null;
   stagedDirtyAcks?: readonly HostedDeviceSyncDirtyProcessedPostCheckpointRecord[] | null;
   suppressDirtyPendingFetch?: boolean;
   signal?: AbortSignal | null;
@@ -376,6 +378,9 @@ export function createHostedGroupToolWithCurrentTurnContext(input: {
       }
       const linqThread = resolveHostedGroupToolLinqThreadContext(
         input.linqDeliveryContexts,
+        request.action === "read_chat_participants"
+          ? "imessage_or_sms"
+          : "imessage_only",
       );
       return await input.groupToolPort.request(
         linqThread ? { ...request, linqThread } : request,
@@ -523,14 +528,19 @@ function resolveHostedGroupToolLinqSenderHandles(
 
 function resolveHostedGroupToolLinqThreadContext(
   contexts: readonly HostedAssistantLinqDeliveryContext[],
+  serviceScope: "imessage_only" | "imessage_or_sms" = "imessage_only",
 ): HostedRuntimeGroupToolLinqThreadContext | null {
   const eligible = new Map<string, HostedRuntimeGroupToolLinqThreadContext>();
   for (const context of contexts) {
     const authority = context.routeAuthority;
+    const service = context.service?.trim().toLowerCase();
     if (
       !authority
       || authority.threadId.trim().length === 0
-      || context.service?.trim().toLowerCase() !== "imessage"
+      || (
+        service !== "imessage"
+        && (serviceScope !== "imessage_or_sms" || service !== "sms")
+      )
       || context.threadIsDirect !== false
     ) {
       continue;
@@ -1439,6 +1449,9 @@ export async function runHostedWorkspaceAssistantPhase(
           : {}),
         generatedImageUploader: input.runtime.platform.generatedImageUploader ?? null,
         generatedImageUploaderRequired: true,
+        ...(input.imageGenerationLauncher
+          ? { imageGenerationLauncher: input.imageGenerationLauncher }
+          : {}),
         ...(input.runtime.platform.productFeedbackPort
           ? { productFeedbackRecorder: input.runtime.platform.productFeedbackPort }
           : {}),

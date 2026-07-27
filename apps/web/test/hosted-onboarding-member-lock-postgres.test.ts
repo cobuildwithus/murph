@@ -12,15 +12,16 @@ import { describe, expect, it, vi } from "vitest";
 import { setHostedSecureBoxStringTestCodecForTests } from "@/src/lib/hosted-crypto/secure-box";
 import { createHostedPrivyUserLookupKey } from "@/src/lib/hosted-onboarding/contact-privacy";
 import {
-  bindHostedMemberStripeCheckoutSessionTx,
   HostedMemberStripeMutationLockBusyError,
   withHostedMemberStripeMutationLockForOps,
 } from "@/src/lib/hosted-onboarding/hosted-member-billing-store";
+import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import {
   bindHostedFamilyCheckoutSessionTx,
   clearExpiredHostedFamilyCheckoutAttemptForSessionTx,
 } from "@/src/lib/hosted-onboarding/family-plan";
 import { readHostedMemberBillingSnapshot } from "@/src/lib/hosted-onboarding/hosted-member-store";
+import { bindHostedMemberSubscriptionCheckoutTx } from "@/src/lib/hosted-onboarding/subscription-checkout-store";
 import { ensureHostedMemberForPrivyIdentityResolutionTx } from "@/src/lib/hosted-onboarding/member-identity-service";
 import {
   suspendHostedMemberForBillingReversalTx,
@@ -518,9 +519,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           allowSuspensionCommit.resolve();
           await suspensionCommitted.promise;
           await expect(binding).rejects.toMatchObject({
-            code: kind === "personal"
-              ? "HOSTED_MEMBER_SUSPENDED"
-              : "HOSTED_FAMILY_CHECKOUT_ATTEMPT_STALE",
+            code: "HOSTED_MEMBER_SUSPENDED",
           });
           allowDeletionContinue.resolve();
           await expect(deletion).resolves.toMatchObject({
@@ -1553,7 +1552,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           prisma: writer,
           request: new Request("https://app.example.test/settings"),
         })).resolves.toMatchObject({
-          cleanupPending: false,
+          cleanupPending: true,
           memberId,
         });
         await expect(observer.hostedMember.findUnique({
@@ -1564,7 +1563,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         });
         expect(
           cleanupIdsAfter.filter((cleanup) => !cleanupIdsBefore.has(cleanup.id)),
-        ).toEqual([]);
+        ).toHaveLength(1);
       } finally {
         accountDeletionBoundaries.connectedAppsRevocationFails = true;
         setHostedSecureBoxStringTestCodecForTests(null);
@@ -1773,15 +1772,22 @@ async function bindCheckoutSessionForConcurrencyTest(input: {
   tx: Prisma.TransactionClient;
 }): Promise<void> {
   if (input.kind === "personal") {
-    await bindHostedMemberStripeCheckoutSessionTx({
+    const checkoutOwned = await bindHostedMemberSubscriptionCheckoutTx({
       memberId: input.memberId,
       stripeCheckoutSessionId: input.sessionId,
       tx: input.tx,
     });
+    if (!checkoutOwned) {
+      throw hostedOnboardingError({
+        code: "HOSTED_MEMBER_SUSPENDED",
+        httpStatus: 403,
+        message: "This hosted account is suspended.",
+      });
+    }
     return;
   }
 
-  await bindHostedFamilyCheckoutSessionTx({
+  const checkoutOwned = await bindHostedFamilyCheckoutSessionTx({
     attemptId: input.attemptId,
     group: {
       id: input.groupId,
@@ -1790,6 +1796,13 @@ async function bindCheckoutSessionForConcurrencyTest(input: {
     sessionId: input.sessionId,
     tx: input.tx,
   });
+  if (!checkoutOwned) {
+    throw hostedOnboardingError({
+      code: "HOSTED_MEMBER_SUSPENDED",
+      httpStatus: 403,
+      message: "This hosted account is suspended.",
+    });
+  }
 }
 
 function pauseAccountDeletionAfterSuspension(input: {

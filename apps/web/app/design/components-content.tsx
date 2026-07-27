@@ -805,10 +805,11 @@ export function ComponentsContent() {
 
         <Section title="Usage credit">
           <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
-            Group funding uses one shared card and the standard usage-credit
-            amount dialog. Family owners reuse that dialog with an exact member
-            label and status-only recovery when another target owns the active
-            checkout. Credit is added only after payment is complete.
+            Group funding uses a saved card when available and sends card entry
+            or verification to Stripe only when needed. Family owners reuse the
+            standard amount dialog with an exact member label and status-only
+            recovery when another target owns the active checkout. Credit is
+            added only after Stripe confirms payment.
           </p>
           <div className="grid gap-6 xl:grid-cols-2">
             <div

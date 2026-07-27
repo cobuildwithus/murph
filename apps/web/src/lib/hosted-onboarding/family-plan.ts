@@ -140,6 +140,7 @@ import {
   withHostedStripeFailureLog,
 } from "./stripe-error-log";
 import { expireHostedStripeCheckoutSessionBestEffort } from "./stripe-checkout-session-lifecycle";
+import { closeUnboundHostedSubscriptionCheckout } from "./subscription-checkout-lifecycle";
 
 export { HOSTED_FAMILY_MAX_SEATS, HOSTED_FAMILY_MIN_SEATS } from "./billing-plans";
 
@@ -1823,12 +1824,14 @@ export async function createHostedFamilyBillingCheckout(input: {
     const priceId = requireHostedFamilyStripePriceId();
     const publicBaseUrl = requireHostedOnboardingPublicBaseUrl();
     stripeApi = requireHostedStripeApi();
-    await writeHostedFamilyCheckoutAttemptTx({
-      attemptId: checkoutAttemptId,
-      group,
-      seatCount,
-      tx,
-    });
+    if (!currentBillingRef?.checkoutAttemptId) {
+      await writeHostedFamilyCheckoutAttemptTx({
+        attemptId: checkoutAttemptId,
+        group,
+        seatCount,
+        tx,
+      });
+    }
 
     return {
       alreadyActive: false,
@@ -1886,6 +1889,39 @@ export async function createHostedFamilyBillingCheckout(input: {
     }),
   );
 
+  let checkoutOwned: boolean;
+  try {
+    checkoutOwned = await prisma.$transaction(
+      (tx) => bindHostedFamilyCheckoutSessionTx({
+        attemptId: checkoutInput.checkoutAttemptId,
+        group: checkoutInput.group,
+        sessionId: checkoutSession.id,
+        tx,
+      }),
+      HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
+    );
+  } catch (error) {
+    if (shouldExpireHostedFamilyCheckoutAfterBindFailure(error)) {
+      await closeUnboundHostedSubscriptionCheckout({
+        deleteSessionCustomer: checkoutInput.stripeCustomerId === null,
+        sessionId: checkoutSession.id,
+        stripe,
+      });
+    }
+    throw error;
+  }
+  if (!checkoutOwned) {
+    await closeUnboundHostedSubscriptionCheckout({
+      deleteSessionCustomer: checkoutInput.stripeCustomerId === null,
+      sessionId: checkoutSession.id,
+      stripe,
+    });
+    throw hostedOnboardingError({
+      code: "HOSTED_MEMBER_SUSPENDED",
+      httpStatus: 403,
+      message: "This hosted account is suspended. Contact support to restore access.",
+    });
+  }
   if (!checkoutSession.url) {
     await expireHostedStripeCheckoutSessionBestEffort({
       operationName: "checkout.sessions.expire.family-missing-url",
@@ -1898,26 +1934,6 @@ export async function createHostedFamilyBillingCheckout(input: {
       message: "Stripe Checkout did not return a redirect URL.",
     });
   }
-  try {
-    await prisma.$transaction(async (tx) => {
-      await bindHostedFamilyCheckoutSessionTx({
-        attemptId: checkoutInput.checkoutAttemptId,
-        group: checkoutInput.group,
-        sessionId: checkoutSession.id,
-        tx,
-      });
-    }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
-  } catch (error) {
-    if (shouldExpireHostedFamilyCheckoutAfterBindFailure(error)) {
-      await expireHostedStripeCheckoutSessionBestEffort({
-        operationName: "checkout.sessions.expire.family-bind-rejected",
-        sessionId: checkoutSession.id,
-        stripe,
-      });
-    }
-    throw error;
-  }
-
   return {
     alreadyActive: false,
     url: buildHostedFamilyCheckoutRedirectUrl({ checkoutUrl: checkoutSession.url }) ??
@@ -2602,7 +2618,7 @@ export async function bindHostedFamilyCheckoutSessionTx(input: {
   group: Pick<HostedAccountGroupAccessSnapshot, "id" | "ownerMemberId">;
   sessionId: string;
   tx: Prisma.TransactionClient;
-}): Promise<void> {
+}): Promise<boolean> {
   await lockHostedMemberRow(input.tx, input.group.ownerMemberId);
   const [currentGroup, currentOwner] = await Promise.all([
     input.tx.hostedAccountGroup.findUnique({
@@ -2615,11 +2631,15 @@ export async function bindHostedFamilyCheckoutSessionTx(input: {
     }),
   ]);
   if (
+    !currentOwner
+    || isHostedMemberSuspended(currentOwner.suspendedAt)
+  ) {
+    return false;
+  }
+  if (
     !currentGroup
     || currentGroup.ownerMemberId !== input.group.ownerMemberId
     || isHostedMemberSuspended(currentGroup.suspendedAt)
-    || !currentOwner
-    || isHostedMemberSuspended(currentOwner.suspendedAt)
   ) {
     throw hostedOnboardingError({
       code: "HOSTED_FAMILY_CHECKOUT_ATTEMPT_STALE",
@@ -2684,6 +2704,7 @@ export async function bindHostedFamilyCheckoutSessionTx(input: {
       message: "Family checkout changed before Stripe returned a session. Start Family checkout again.",
     });
   }
+  return true;
 }
 
 export function readHostedFamilyCheckoutSessionIdFromUrl(

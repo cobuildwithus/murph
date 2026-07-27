@@ -77,6 +77,7 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
     "sensitiveActionChallenges HostedSensitiveActionChallenge[]",
     'signupNotificationEmailAttemptedAt DateTime? @map("signup_notification_email_attempted_at")',
     'signupWelcomeEmailAttemptedAt DateTime? @map("signup_welcome_email_attempted_at")',
+    "subscriptionCheckouts HostedMemberSubscriptionCheckout[]",
     'suspendedAt DateTime? @map("suspended_at")',
     'threadContainerParticipations HostedThreadContainerParticipant[] @relation("HostedThreadContainerParticipantMember")',
     'usageCreditBalanceUsdMicros BigInt? @default(0) @map("usage_credit_balance_usd_micros")',
@@ -138,8 +139,6 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
     'stripeSubscriptionIdEncrypted String? @map("stripe_subscription_id_encrypted")',
     'stripeSubscriptionScheduleLookupKey String? @unique @map("stripe_subscription_schedule_lookup_key")',
     'stripeSubscriptionScheduleIdEncrypted String? @map("stripe_subscription_schedule_id_encrypted")',
-    'stripeCheckoutSessionLookupKey String? @unique @map("stripe_checkout_session_lookup_key")',
-    'stripeCheckoutSessionIdEncrypted String? @map("stripe_checkout_session_id_encrypted")',
     'lastStripeEventCreatedAt DateTime? @map("last_stripe_event_created_at")',
     'currentBillingPhase String? @map("current_billing_phase")',
     'currentBillingPlanCode String? @map("current_billing_plan_code")',
@@ -154,6 +153,12 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
     'currentTrialEndsAt DateTime? @map("current_trial_ends_at")',
     'createdAt DateTime @default(now()) @map("created_at")',
     'updatedAt DateTime @updatedAt @map("updated_at")',
+  ],
+  HostedMemberSubscriptionCheckout: [
+    'stripeCheckoutSessionLookupKey String @id @map("stripe_checkout_session_lookup_key")',
+    'stripeCheckoutSessionIdEncrypted String @map("stripe_checkout_session_id_encrypted")',
+    'memberId String @map("member_id")',
+    'createdAt DateTime @default(now()) @map("created_at")',
   ],
   HostedMemberEmailAuthorization: [
     'memberId String @unique @map("member_id")',
@@ -926,7 +931,8 @@ describe("hosted Prisma baseline migration", () => {
       "20260726180000_hosted_account_deletion_cleanup",
       "20260726180000_hosted_address_book_projection",
       "20260726180000_hosted_thread_container_usage_default",
-      "20260727090000_hosted_member_subscription_checkout_fence",
+      "20260727040000_relax_hosted_usage_credit_detached_direct_proof",
+      "20260727120000_hosted_member_checkout_session",
       "migration_lock.toml",
     ]);
     expect(hostedUserCryptoEnvelopeMigrationSql).toContain(

@@ -33,6 +33,7 @@ import { buildHostedLinqInviteSignupEffectIdMemberPrefix } from "../hosted-onboa
 import { getHostedOnboardingStripe } from "../hosted-onboarding/runtime";
 import { isHostedStripeResourceMissingError } from "../hosted-onboarding/stripe-checkout-session-lifecycle";
 import { logHostedStripeFailure } from "../hosted-onboarding/stripe-error-log";
+import { listHostedMemberSubscriptionCheckoutSessionIds } from "../hosted-onboarding/subscription-checkout-store";
 import {
   generateHostedAccountExitReasonId,
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
@@ -61,8 +62,6 @@ import {
   pendingHostedAccountDeletionCleanupResult,
   persistHostedAccountDeletionCleanupTx,
   prepareHostedAccountDeletionCleanup,
-  runHostedAccountDeletionCleanup,
-  type HostedAccountDeletionCleanupRunResult,
   type HostedAccountVendorDeletionResult,
   type PreparedHostedAccountDeletionCleanup,
 } from "./account-deletion-cleanup";
@@ -139,6 +138,12 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
     label: "Local Stripe billing references",
     deletion: "local-reference-delete",
     note: "Confirmed export includes local Stripe customer/subscription references but omits the encrypted Checkout Session reference. Open subscription Checkout is expired before local removal; the Stripe subscription and customer themselves are canceled/deleted by the vendor-account deletion step.",
+  },
+  {
+    slug: "prisma.hosted_member_subscription_checkout",
+    label: "Open Stripe subscription Checkout references",
+    deletion: "local-reference-delete",
+    note: "Keeps every direct subscription Checkout session encrypted until account deletion has made it terminal. Export reports counts only and omits session capabilities.",
   },
   {
     slug: "prisma.hosted_account_group",
@@ -847,20 +852,9 @@ export async function deleteHostedAccountData(input: {
       userId: memberId,
     }),
   ));
-  let cleanup: HostedAccountDeletionCleanupRunResult;
-  try {
-    cleanup = await runHostedAccountDeletionCleanup({
-      attemptTimeoutMs: HOSTED_ACCOUNT_DELETION_IMMEDIATE_ATTEMPT_TIMEOUT_MS,
-      cleanupId: preparedCleanup.id,
-      prisma: input.prisma,
-    });
-  } catch (error) {
-    console.error("Hosted account deletion committed with cleanup pending.", {
-      cleanupIdSuffix: preparedCleanup.id.slice(-8),
-      errorCode: safeErrorCode(error),
-    });
-    cleanup = pendingHostedAccountDeletionCleanupResult(safeErrorCode(error));
-  }
+  // Canonical deletion is complete and the encrypted receipt now owns every
+  // external retry. Never hold the acknowledgement open on a provider call.
+  const cleanup = pendingHostedAccountDeletionCleanupResult();
   await Promise.all(deletedRuntimeMemberIds.map((memberId) =>
     terminateHostedUserRuntimeWorkflowBestEffort({
       reason: "account-deleted",
@@ -975,8 +969,12 @@ async function readHostedAccountDeletionExternalTargets(input: {
   memberId: string;
   prisma: HostedAccountDataPrisma;
 }): Promise<HostedAccountDeletionExternalTargets> {
-  const [billingRef, identity, familyBillingRefs] = await Promise.all([
+  const [billingRef, directCheckoutSessionIds, identity, familyBillingRefs] = await Promise.all([
     readHostedMemberStripeBillingRef({
+      memberId: input.memberId,
+      prisma: input.prisma,
+    }),
+    listHostedMemberSubscriptionCheckoutSessionIds({
       memberId: input.memberId,
       prisma: input.prisma,
     }),
@@ -992,7 +990,7 @@ async function readHostedAccountDeletionExternalTargets(input: {
   return {
     privyUserId: identity?.privyUserId ?? null,
     stripeCheckoutSessionIds: dedupeNullableStrings([
-      billingRef?.stripeCheckoutSessionId ?? null,
+      ...directCheckoutSessionIds,
       ...familyBillingRefs.map((billing) => billing.stripeCheckoutSessionId),
     ]),
     stripeCustomerIds: dedupeNullableStrings([
@@ -1456,6 +1454,7 @@ async function deleteHostedAccountPrismaRows(input: {
   record("prisma.hosted_computer_run", await input.prisma.hostedComputerRun.deleteMany({ where: { memberId: memberIdFilter } }));
   record("prisma.hosted_phone_call", await input.prisma.hostedPhoneCall.deleteMany({ where: { memberId: memberIdFilter } }));
   record("prisma.hosted_member_email_authorization", await input.prisma.hostedMemberEmailAuthorization.deleteMany({ where: { memberId: memberIdFilter } }));
+  record("prisma.hosted_member_subscription_checkout", await input.prisma.hostedMemberSubscriptionCheckout.deleteMany({ where: { memberId: memberIdFilter } }));
   record("prisma.hosted_member_billing_ref", await input.prisma.hostedMemberBillingRef.deleteMany({ where: { memberId: memberIdFilter } }));
   record("prisma.hosted_account_group_invite", await input.prisma.hostedAccountGroupInvite.deleteMany({
     where: {

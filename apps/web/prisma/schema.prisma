@@ -529,6 +529,7 @@ model HostedMember {
   identity                       HostedMemberIdentity?
   routing                        HostedMemberRouting?
   billingRef                     HostedMemberBillingRef?
+  subscriptionCheckouts          HostedMemberSubscriptionCheckout[]
   emailAuthorization             HostedMemberEmailAuthorization?
   hostedMailboxItems             HostedMailboxItem[]
   hostedMailboxPayloads          HostedMailboxPayload[]
@@ -873,8 +874,6 @@ model HostedMemberBillingRef {
   stripeSubscriptionIdEncrypted String?      @map("stripe_subscription_id_encrypted")
   stripeSubscriptionScheduleLookupKey   String?      @unique @map("stripe_subscription_schedule_lookup_key")
   stripeSubscriptionScheduleIdEncrypted String?      @map("stripe_subscription_schedule_id_encrypted")
-  stripeCheckoutSessionLookupKey    String?      @unique @map("stripe_checkout_session_lookup_key")
-  stripeCheckoutSessionIdEncrypted  String?      @map("stripe_checkout_session_id_encrypted")
   currentBillingPlanCode        String?      @map("current_billing_plan_code")
   currentBillingPhase           String?      @map("current_billing_phase")
   currentCheckoutOffer          String?      @map("current_checkout_offer")
@@ -892,6 +891,17 @@ model HostedMemberBillingRef {
   member                        HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
 
   @@map("hosted_member_billing_ref")
+}
+
+model HostedMemberSubscriptionCheckout {
+  stripeCheckoutSessionLookupKey String       @id @map("stripe_checkout_session_lookup_key")
+  stripeCheckoutSessionIdEncrypted String     @map("stripe_checkout_session_id_encrypted")
+  memberId                       String       @map("member_id")
+  createdAt                      DateTime     @default(now()) @map("created_at")
+  member                         HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@index([memberId])
+  @@map("hosted_member_subscription_checkout")
 }
 
 model HostedMemberEmailAuthorization {
