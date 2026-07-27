@@ -2593,7 +2593,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     });
   });
 
-  it("classifies chat participants by durable Murph activation and skips the line and departed handles", async () => {
+  it("reconciles the SMS-admitted participant read before denying its effectful follow-up", async () => {
     await expect(handleHostedRuntimeGroupTool({
       memberId: "member_container",
       request: { action: "read_chat_participants", linqThread: LINQ_THREAD },
@@ -2649,6 +2649,20 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
         removedAt: null,
       },
     });
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_container",
+      request: { action: "share_contact_card" },
+    })).resolves.toEqual({
+      action: "share_contact_card",
+      result: {
+        status: "unavailable",
+        unavailableReason: "linq_thread_unavailable",
+      },
+    });
+
+    expect(mocks.getHostedLinqChatHandles).toHaveBeenCalledTimes(1);
+    expect(mocks.shareMurphHostedLinqContactCardVcfToChat).not.toHaveBeenCalled();
   });
 
   it("adds owner-only advisory names only to unregistered phone participants", async () => {
