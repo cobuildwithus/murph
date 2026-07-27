@@ -1,6 +1,6 @@
 # Worktree-safe Cloudflare Images design-proof uploader
 
-Status: active
+Status: completed
 Created: 2026-07-26
 Updated: 2026-07-26
 
@@ -71,6 +71,13 @@ Updated: 2026-07-26
 - Use the current clean checkout on a task branch because the ratcheted
   worktree guard refused checkout 101; do not bypass that guard or retire
   unrelated worktrees.
+- Accept all four preliminary specialist findings. Strip both Images settings
+  from every Git discovery subprocess and skip Git discovery when exported
+  settings are complete. Apply the reviewed test-only coverage patch after full
+  inspection and `git apply --check`, then add the missing production-faithful
+  subprocess proof locally. The resulting tests lock checkout/env-file
+  precedence, sequential partial success, JPEG/WebP metadata, and the input
+  size boundary.
 
 ## Verification
 
@@ -79,3 +86,15 @@ Updated: 2026-07-26
 - Expected outcomes: all checks pass without a live Cloudflare credential in
   routine tests; an operator smoke may use the local credential without logging
   it.
+- Passed before the specialist pass: focused uploader Vitest (9 tests), full
+  repo-tool Vitest (30 files / 430 tests), canonical `pnpm test:diff`, command
+  help smoke, real primary-checkout setting discovery without value output, and
+  diff/privacy scans.
+- Preliminary `completion-specialists` outcome: findings, exact candidate
+  `9bfea637b65dc3a523a280b66a29271385964293`, verified Pro model, all four
+  findings accepted and resolved; the artifact touched tests only.
+- Passed after remediation: focused uploader Vitest (15 tests) and final
+  canonical `pnpm test:diff` (30 repo-tool files / 436 tests, TypeScript,
+  architecture/privacy guards, and dependency policy). Final ReviewGPT remains
+  pending.
+Completed: 2026-07-26

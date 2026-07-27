@@ -1,5 +1,3 @@
-#!/usr/bin/env node
-
 import { execFileSync } from "node:child_process";
 import { constants as fsConstants } from "node:fs";
 import { open } from "node:fs/promises";
