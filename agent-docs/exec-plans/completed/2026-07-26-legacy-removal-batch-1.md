@@ -1,6 +1,6 @@
 # Legacy removal batch 1
 
-Status: active
+Status: completed
 Created: 2026-07-26
 Updated: 2026-07-26
 
@@ -60,4 +60,6 @@ Updated: 2026-07-26
 - Canonical `pnpm test:diff ...` passed all owner/dependent package typechecks and tests plus full web verification (530 files, 6,742 tests, lint, smoke, and production build). Its final Cloudflare step initially found an incomplete post-rebase install; after `pnpm install --frozen-lockfile`, direct `pnpm --dir apps/cloudflare verify` passed (109 files, 1,934 tests and typecheck).
 - Preliminary completion-specialist review accepted one coverage finding. The inspected test-only patch added a full statusless-protocol/biomarker route-bundle regression and family-graph allowlist assertion.
 - Specialist remediation verification: focused Health Commons tests passed (2 files, 12 tests), and `pnpm --dir packages/health-commons verify` passed (19 files, 92 tests, typecheck, and deterministic generation check).
-- Parent final review, current-base rebase/CI, plan closure, and final ReviewGPT gate remain pending.
+- Rebased onto current `origin/main`; the exact release audit that had failed under base skew now passes with the matched ReviewGPT dependency/test version.
+- Parent final review completed with no additional findings. Plan closure and the final exact-head ReviewGPT/CI gate follow.
+Completed: 2026-07-26
