@@ -5,14 +5,18 @@ import {
   requireHostedAppSessionFromRequest,
 } from "@/src/lib/hosted-onboarding/app-session";
 import {
-  buildHostedPulseTrialContinuationClearCookie,
   buildHostedPulseTrialContinuationCookie,
   readHostedPulseTrialContinuationRequest,
   readHostedPulseTrialPaymentReturnAction,
 } from "@/src/lib/hosted-onboarding/billing-pulse-trial-continuation";
 import {
+  HOSTED_PULSE_TRIAL_CONTINUATION_ACTION_HEADER,
+  HOSTED_PULSE_TRIAL_CONTINUATION_ACTION_PARAM,
+  HOSTED_PULSE_TRIAL_CONTINUATION_EXPIRES_PARAM,
+  HOSTED_PULSE_TRIAL_CONTINUATION_SIGNATURE_PARAM,
   HOSTED_START_PAID_PULSE_RETURN_PARAM,
   HOSTED_START_PAID_PULSE_RETURN_VALUE,
+  type HostedPulseTrialContinuationAction,
 } from "@/src/lib/hosted-onboarding/billing-pulse-trial-continuation-contract";
 import {
   continueHostedPulseTrialPaidPlan,
@@ -29,13 +33,18 @@ export async function GET(request: Request): Promise<Response> {
   const settingsUrl = buildSettingsReturnUrl(request.url, false);
   const auth = await getHostedAppSessionFromRequest(request);
   if (!auth) {
-    return NextResponse.redirect(settingsUrl);
+    // The signature is bound to a member id that is not in the URL, so it can
+    // only be verified once a session exists. Carry the signed params to
+    // settings, which prompts for sign-in and then sends them back here.
+    return NextResponse.redirect(buildSignedInReturnUrl(request.url));
   }
 
   const action = readHostedPulseTrialPaymentReturnAction({
     memberId: auth.member.id,
     request,
   });
+  // Drop the params on a failed verification so settings stops handing the
+  // request back here and the visitor cannot be bounced in a loop.
   if (action === null) {
     return NextResponse.redirect(settingsUrl);
   }
@@ -70,6 +79,15 @@ export const POST = withJsonError(async (request: Request) => {
       message: "Your Pulse confirmation expired. Try again.",
     });
   }
+  const renderedAction = readRenderedContinuationAction(request);
+  if (renderedAction !== action) {
+    throw hostedOnboardingError({
+      code: "HOSTED_PULSE_TRIAL_CONTINUATION_CHANGED",
+      httpStatus: 409,
+      message:
+        "This Pulse choice changed in another tab. Continue from the latest return.",
+    });
+  }
 
   const result = action === "start_pulse_now"
     ? await startHostedPulseTrialPaidPlan({
@@ -82,7 +100,7 @@ export const POST = withJsonError(async (request: Request) => {
         paymentMethodContinuation: "conversation",
         prisma,
       });
-  const response = jsonOk(
+  return jsonOk(
     result.status === "payment_required"
       ? {
         billingPlanCode: result.billingPlanCode,
@@ -91,14 +109,26 @@ export const POST = withJsonError(async (request: Request) => {
       }
       : result,
   );
-  if (result.status !== "payment_required") {
-    response.headers.append(
-      "Set-Cookie",
-      buildHostedPulseTrialContinuationClearCookie(),
-    );
-  }
-  return response;
 });
+
+function buildSignedInReturnUrl(requestUrl: string): URL {
+  const requested = new URL(requestUrl);
+  const settingsUrl = new URL("/settings", requestUrl);
+
+  for (const param of [
+    HOSTED_PULSE_TRIAL_CONTINUATION_ACTION_PARAM,
+    HOSTED_PULSE_TRIAL_CONTINUATION_EXPIRES_PARAM,
+    HOSTED_PULSE_TRIAL_CONTINUATION_SIGNATURE_PARAM,
+  ]) {
+    const values = requested.searchParams.getAll(param);
+    if (values.length === 1) {
+      settingsUrl.searchParams.set(param, values[0]);
+    }
+  }
+
+  settingsUrl.hash = "subscription";
+  return settingsUrl;
+}
 
 function buildSettingsReturnUrl(requestUrl: string, completed: boolean): URL {
   const settingsUrl = new URL("/settings", requestUrl);
@@ -125,4 +155,15 @@ async function assertNoRequestBody(request: Request): Promise<void> {
     httpStatus: 400,
     message: "This route does not accept a request body.",
   });
+}
+
+function readRenderedContinuationAction(
+  request: Request,
+): HostedPulseTrialContinuationAction | null {
+  const value = request.headers.get(
+    HOSTED_PULSE_TRIAL_CONTINUATION_ACTION_HEADER,
+  );
+  return value === "continue_pulse" || value === "start_pulse_now"
+    ? value
+    : null;
 }

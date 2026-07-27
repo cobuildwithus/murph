@@ -62,6 +62,9 @@ import {
   readHostedMailboxItemByDedupeKey,
 } from "../hosted-mailbox/store";
 import {
+  renewHostedThreadContainerParticipantAccessTx,
+} from "../hosted-groups/thread-container-participant-access";
+import {
   bindHostedMemberHomeLinqChat,
   bindHostedMemberPendingLinqChatAndTrackInbound,
   buildActiveMemberDirectPlan,
@@ -1388,8 +1391,28 @@ async function planHostedLinqExplicitThreadRouteWebhook(input: {
     summary,
   } = input.context;
 
+  const participantAccessNow = new Date();
+  if (
+    !summary.isFromMe
+    && messageEvent.data.message.parts.length > 0
+    && participantContact
+    && !shouldIgnoreHostedLinqForLocalInboundGuard({
+      isFromMe: summary.isFromMe,
+      participantContact,
+    })
+  ) {
+    await renewHostedThreadContainerParticipantAccessFromInboundTx({
+      containerMemberId: input.route.containerMemberId,
+      now: participantAccessNow,
+      occurredAt,
+      participantContact,
+      prisma: input.prisma,
+    });
+  }
+
   const containerAccessActive = await readActiveHostedMemberAccess({
     memberId: input.route.containerMemberId,
+    now: participantAccessNow,
     prisma: input.prisma,
   });
 
@@ -2369,6 +2392,36 @@ function serializedHostedLinqWakeBytes(
   wake: ReturnType<typeof buildHostedExecutionLinqConversationMessageWake>,
 ): number {
   return new TextEncoder().encode(JSON.stringify(wake)).byteLength;
+}
+
+async function renewHostedThreadContainerParticipantAccessFromInboundTx(input: {
+  containerMemberId: string;
+  now: Date;
+  occurredAt: string;
+  participantContact: HostedLinqParticipantContact;
+  prisma: Prisma.TransactionClient;
+}): Promise<void> {
+  const lookup = input.participantContact.kind === "phone"
+    ? await lookupHostedMemberIdentityByPhoneNumberForLinqWebhook({
+        phoneNumber: input.participantContact.value,
+        prisma: input.prisma,
+      })
+    : await lookupHostedMemberByVerifiedEmailAddress({
+        address: input.participantContact.value,
+        prisma: input.prisma,
+      });
+  const participantMemberId = lookup?.core.id ?? null;
+  if (!participantMemberId) {
+    return;
+  }
+
+  await renewHostedThreadContainerParticipantAccessTx({
+    containerMemberId: input.containerMemberId,
+    now: input.now,
+    observedAt: new Date(input.occurredAt),
+    participantMemberId,
+    prisma: input.prisma,
+  });
 }
 
 async function lookupHostedMemberIdentityByPhoneNumberForLinqWebhook(input: {

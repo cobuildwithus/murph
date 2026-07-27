@@ -26,7 +26,7 @@ Last verified: 2026-07-25
 | `DATABASE_URL="$LOCAL_POSTGRES_URL" MURPH_TEST_POSTGRES_CONCURRENCY=1 pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/hosted-execution-usage-postgres-concurrency.test.ts` | Opt-in real-PostgreSQL proof for deterministic hosted usage replay. The suite rejects non-loopback database URLs and runs in the hosted E2E PostgreSQL job after migrations. | A first writer holds an uncommitted deterministic usage row while an exact concurrent replay waits; both transactions complete after release and the ledger retains one immutable row |
 | `DATABASE_URL="$LOCAL_POSTGRES_URL" MURPH_TEST_POSTGRES_CONCURRENCY=1 pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/hosted-accepted-attempt-recheck-postgres-concurrency.test.ts` | Opt-in real-PostgreSQL proof that the accepted-attempt recheck cooldown elects one owner. The claim replaced a runtime-log-row election, so exactly-one-winner is now PostgreSQL conditional-update semantics rather than application logic. Runs in the hosted E2E PostgreSQL job after migrations. | Two concurrent claims at the same logical time yield exactly one winner; a claim at the cooldown boundary is denied; a claim past the boundary succeeds |
 | `DATABASE_URL="$LOCAL_POSTGRES_URL" MURPH_TEST_POSTGRES_CONCURRENCY=1 pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/hosted-onboarding-linq-home-routing-postgres.test.ts` | Opt-in real-PostgreSQL proof for hosted Linq proactive-capacity and member-route concurrency. The suite rejects non-loopback database URLs and runs in the hosted E2E PostgreSQL job after migrations. | The final daily slot admits exactly one claim; activation, first-contact, reclassification, and participant routing serialize on the member owner; and real Telegram/Linq planners complete in both routing orders for already-active members and for an inbound reclassified after an uncommitted activation, while retaining both bindings and exactly one mailbox item per event |
-| `DATABASE_URL="$LOCAL_POSTGRES_URL" MURPH_TEST_POSTGRES_CONCURRENCY=1 pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/hosted-onboarding-member-lock-postgres.test.ts` | Opt-in real-PostgreSQL proof for bounded hosted-member Stripe mutation lock acquisition. The suite rejects non-loopback database URLs and runs in the hosted E2E PostgreSQL job after migrations. | One transaction holds the production member row, an independent same-member contender fails with the typed busy error before its callback can run, and a foreground retry succeeds after the owner commits |
+| `DATABASE_URL="$LOCAL_POSTGRES_URL" MURPH_TEST_POSTGRES_CONCURRENCY=1 pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/hosted-onboarding-member-lock-postgres.test.ts` | Opt-in real-PostgreSQL proof for bounded hosted-member Stripe mutation lock acquisition, reversal freshness/suspension ownership, and the Privy deletion/authentication handoff. The suite rejects non-loopback database URLs and runs in the hosted E2E PostgreSQL job after migrations. | One transaction holds the production member row, an independent same-member contender fails with the typed busy error before its callback can run, and a foreground retry succeeds after the owner commits; full-refund and withdrawn-dispute progress commits and exact replay stays idempotent; two distinct reversals defeat an older restore in sequential and concurrent schedules; terminal Privy cleanup deletes the provider principal and receipt before stale authentication resumes, after which live-provider authority rejects replacement member, identity, and session state |
 | `DATABASE_URL="$LOCAL_POSTGRES_URL" MURPH_TEST_POSTGRES_CONCURRENCY=1 pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/hosted-onboarding-telegram-routing-postgres.test.ts` | Opt-in real-PostgreSQL proof for concurrent hosted Telegram routing writes. The suite rejects non-loopback database URLs and runs in the hosted E2E PostgreSQL job after migrations. | In both writer orders, hosted-member serialization makes identity-only sync and the production webhook planner converge on the exact inbound thread. A completed relink also rejects the stale account before any mailbox write. |
 | `DATABASE_URL="$LOCAL_POSTGRES_URL" MURPH_TEST_POSTGRES_CONCURRENCY=1 pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/hosted-usage-credit-postgres-concurrency.test.ts` | Opt-in real-PostgreSQL proof for the usage-credit beneficiary lock, replay, and deletion boundaries. The suite rejects non-loopback database URLs and runs in the hosted E2E PostgreSQL job after migrations. | Concurrent grant replay converges on one immutable grant, grant/debit ordering preserves the projection, the member-before-purchase lock order is observable under contention, and deletion-first ordering cannot append an orphaned grant |
 | `DATABASE_URL="$LOCAL_POSTGRES_URL" MURPH_TEST_POSTGRES_CONCURRENCY=1 pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/hosted-assistant-ask-retention-postgres.test.ts` | Opt-in real-PostgreSQL proof for the reviewed Assistant Ask mailbox-retention boundary. The suite rejects non-loopback database URLs and runs in the hosted E2E PostgreSQL job after migrations. | Production retention SQL physically deletes the expired request and completion rows while the outbox-carried completion id, delivery key, and expiry still authorize only the fixed terminal copy |
@@ -87,6 +87,21 @@ grant/debit serialization, and deletion-first cleanup. Stripe remains mocked,
 and component tests do not replace a deployed browser flow, so launch still
 needs the documented test-mode Checkout, webhook, and browser smoke.
 
+Account-deletion cleanup coverage is split at the ownership boundary.
+`hosted-account-data-service.test.ts` proves the encrypted receipt is prepared
+before suspension and inserted in the canonical transaction before member
+removal. `hosted-account-deletion-cleanup.test.ts` proves receipt-bound
+encryption, independent per-target progress, unconfigured-target pending
+state, lease-loss handling, retry convergence, and batch isolation. Cloudflare
+runner tests prove already-absent state is idempotent and full Durable Object
+storage is erased only after R2/container cleanup. The shared control-client
+suite rejects legacy responses without explicit `deleteAllCompleted` evidence,
+and cleanup tests prove never-resolving provider targets return pending at the
+attempt deadline. Participant-lease unit,
+entitlement, allowance, newsletter, and routed-Linq suites prove one seven-day
+predicate and that current inbound can advance only an existing nonremoved
+relationship.
+
 Scheduled Telegram group route-authority coverage is owner-split. Hosted Web
 tests bind the signed callback member to the exact current thread-container
 route and reject a foreign container. Cloudflare tests lock the new signed
@@ -109,6 +124,25 @@ legacy upload route to `410 Gone`. The hosted-local Codex image-media scenario
 generates through the real app-server tool relay, persists the vault capture,
 delivers a Linq attachment id, and reuses the same capture on retry without a
 public image URL.
+
+Managed group automation coverage is likewise owner-split. Assistant-engine
+reconciliation tests prove default member ownership, explicit group ownership,
+custom unscoped compatibility, and paused wrong-owner archival. Claimed-cron
+tests prove static built-in owner checks run before experiment lifecycle hooks,
+activity evidence, provider/model work, and outbox creation; live route changes
+are rejected again at provider, tool, delivery, and commit boundaries.
+Hosted-execution tests lock the closed activity policy, status-only response,
+and 167/169-hour DST windows. Hosted Web tests prove exact 99/100 canonical
+mailbox semantics, occurrence and commit boundaries, Linq assistant/reaction
+exclusions, Telegram inclusion, exact runtime/route binding, bounded scanning,
+and malformed fail-closed behavior without logging private evidence.
+Cloudflare tests lock the signed status-only port and exact POST allowlist.
+Maintenance-evidence tests prove recap composition is projected from exact-
+route structured input events, occurrence-anchored, bounded, and sender-redacted
+before the ordinary group outbox path. Delimiter-bearing human text stays one
+quoted message; rendered transcript structure is ignored; attachment
+descriptors, extracted text, filenames, stored paths, and lifecycle metadata do
+not enter evidence; and attachment-only input fails closed before provider work.
 
 ## Current CI Workflows
 
@@ -162,9 +196,19 @@ public image URL.
   production 180-second idle floor, seeds every registered system wake kind,
   and separately stages system-mailbox, retention-only, stale-owner, and active
   foreground contention. Each real signed Linq inbound must produce exactly one
-  accepted outbound Linq request within 45 seconds while any staged background
+  accepted outbound Linq request within 30 seconds while any staged background
   checkpoint remains held. Its separately named workflow leg makes this latency
   invariant visible without replacing the two aggregate required checks.
+- `apps/web/test/hosted-runtime-latency-alert-{monitor,cron}.test.ts` locks the
+  same exact 30-second boundary for completed and still-unresolved Linq traces,
+  excludes consumed traces with best-effort missing delivery links, and proves
+  cron auth, incident claim coalescing, provider-idempotent retry, later
+  recurrence, PII-free copy, and fail-safe scan truncation.
+  `apps/web/vercel.json` registers that read-only monitor at a five-minute
+  cadence. The hosted-local foreground-priority leg additionally uses real
+  PostgreSQL, authenticated cron HTTP, and the Linq stub boundary to prove one
+  accepted operator alert through a lost-ack retry, active-incident coalescing,
+  silent healthy reset, and a new alert for recurrence.
 - After hosted scenarios initialize the schema, the Linq route-authority matrix leg runs the focused real-PostgreSQL proofs for deterministic hosted usage replay, both participant-addition route-row orderings, the canonical chat-ownership-before-route-row order shared by usage-limit dispatch and route-key convergence, and device-sync exact-payload plus companion-receipt lock order against concurrent account deletion.
 - `.github/workflows/release.yml` uses GitHub-hosted `ubuntu-24.04`, installs once, runs `pnpm release:check` with `MURPH_TEST_LANES_PARALLEL=1`, `MURPH_APP_VERIFY_PARALLEL=1`, and `MURPH_VERIFY_STEP_PARALLEL=1` so the release verification lane uses the parallel package/smoke branches and parallel app substeps without enabling full app/package overlap unless `MURPH_ACCEPTANCE_APP_VERIFY_WITH_COVERAGE=1` is set explicitly, while the same deterministic hosted-web build placeholders keep `apps/web verify` on its truthful build path without injecting production DB or production hosted device secrets, then packs the publishable tarballs once for upload/publication.
 - Vercel deploys of `apps/web` use the checked-in Vercel build command

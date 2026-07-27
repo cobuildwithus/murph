@@ -33,6 +33,9 @@ import {
   resolveHostedMemberDirectRoute,
 } from "../hosted-routing/member-direct-route";
 import { getPrisma } from "../prisma";
+import {
+  activeHostedThreadContainerParticipantWhere,
+} from "./thread-container-participant-access";
 
 export interface HostedGroupNewsletterParticipant {
   authorizedShares: HostedGroupNewsletterAuthorizedShare[];
@@ -70,8 +73,8 @@ export type HostedGroupNewsletterPreparationResult =
 
 type ReadClient = PrismaClient;
 
-const hostedGroupNewsletterMemberAccessSelect =
-  Prisma.validator<Prisma.HostedMemberSelect>()({
+function buildHostedGroupNewsletterMemberAccessSelect(now: Date) {
+  return Prisma.validator<Prisma.HostedMemberSelect>()({
     ...hostedMemberAccessSelect,
     id: true,
     threadContainer: {
@@ -83,16 +86,17 @@ const hostedGroupNewsletterMemberAccessSelect =
           select: { participantMemberId: true },
           take: 1,
           where: {
+            ...activeHostedThreadContainerParticipantWhere({ now }),
             participant: activeHostedMemberAccessWhere(),
-            removedAt: null,
           },
         },
       },
     },
   });
+}
 
 type HostedGroupNewsletterMemberAccess = Prisma.HostedMemberGetPayload<{
-  select: typeof hostedGroupNewsletterMemberAccessSelect;
+  select: ReturnType<typeof buildHostedGroupNewsletterMemberAccessSelect>;
 }>;
 
 export async function enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort(input: {
@@ -309,6 +313,8 @@ async function readHostedGroupNewsletterParticipantEmailFacts(input: {
     }
 > {
   const prisma = input.prisma ?? getPrisma();
+  const now = new Date();
+  const memberAccessSelect = buildHostedGroupNewsletterMemberAccessSelect(now);
   if (!await hasHostedRuntimeActiveAccess(input.runtimeMemberId, { prisma })) {
     return { status: "unavailable", unavailableReason: "runtime_inactive" };
   }
@@ -338,7 +344,7 @@ async function readHostedGroupNewsletterParticipantEmailFacts(input: {
         in: memberIds,
       },
     },
-    select: hostedGroupNewsletterMemberAccessSelect,
+    select: memberAccessSelect,
   });
   const activeMemberIdSet = new Set(
     accessRecords
@@ -390,7 +396,7 @@ async function readHostedGroupNewsletterParticipantEmailFacts(input: {
           select: {
             member: {
               select: {
-                ...hostedGroupNewsletterMemberAccessSelect,
+                ...memberAccessSelect,
                 emailAuthorization: {
                   select: {
                     verifiedEmailLookupKey: true,
@@ -414,7 +420,7 @@ async function readHostedGroupNewsletterParticipantEmailFacts(input: {
           },
         },
         runtimeMember: {
-          select: hostedGroupNewsletterMemberAccessSelect,
+          select: memberAccessSelect,
         },
       },
     }), {

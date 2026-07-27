@@ -42,6 +42,8 @@ import type {
   HostedRuntimeGroupSharedRecord,
   HostedRuntimeGroupToolRequest,
   HostedRuntimeGroupToolResponse,
+  HostedRuntimeManagedGroupActivityDecisionRequest,
+  HostedRuntimeManagedGroupActivityDecisionResponse,
   HostedRuntimeNewsletterToolRequest,
   HostedRuntimeNewsletterToolResponse,
 } from '@murphai/hosted-execution/runtime-control'
@@ -88,6 +90,13 @@ export interface AssistantHostedDeviceConnectLink {
 export interface AssistantHostedDeviceConnectProvider {
   label: string
   provider: string
+}
+
+export interface AssistantHostedManagedGroupActivityDecisionReader {
+  read(
+    request: HostedRuntimeManagedGroupActivityDecisionRequest,
+    context?: { signal?: AbortSignal | null },
+  ): Promise<HostedRuntimeManagedGroupActivityDecisionResponse>
 }
 
 export type AssistantHostedDeviceToolRequest =
@@ -373,6 +382,8 @@ export interface AssistantHostedExecutionContext {
   groupPermissionOfferTool?: AssistantHostedGroupPermissionOfferTool | null
   groupSharedReader?: AssistantHostedGroupSharedReader | null
   groupTool?: AssistantHostedGroupTool | null
+  managedGroupActivityDecisionReader?:
+    AssistantHostedManagedGroupActivityDecisionReader | null
   labsTool?: AssistantHostedLabsTool | null
   newsletterTool?: AssistantHostedNewsletterTool | null
   planUsageTool?: AssistantHostedPlanUsageTool | null
@@ -489,6 +500,13 @@ export function normalizeAssistantExecutionContext(
       ...(groupPermissionOfferTool ? { groupPermissionOfferTool } : {}),
       ...(groupSharedReader ? { groupSharedReader } : {}),
       ...(groupTool ? { groupTool } : {}),
+      ...(hosted?.managedGroupActivityDecisionReader
+        && typeof hosted.managedGroupActivityDecisionReader.read === 'function'
+        ? {
+            managedGroupActivityDecisionReader:
+              hosted.managedGroupActivityDecisionReader,
+          }
+        : {}),
       ...(labsTool ? { labsTool } : {}),
       ...(newsletterTool ? { newsletterTool } : {}),
       ...(planUsageTool ? { planUsageTool } : {}),
