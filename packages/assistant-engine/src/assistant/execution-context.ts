@@ -320,9 +320,6 @@ export type AssistantPrivateImageContentType =
 export interface AssistantHostedPrivateImageUrlPublishInput {
   bytes: Uint8Array
   contentType: AssistantPrivateImageContentType
-  filename: string
-  metadata: Readonly<Record<string, string>>
-  source: string
 }
 
 export interface AssistantHostedPrivateImageUrlPublisher {

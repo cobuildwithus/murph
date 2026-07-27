@@ -2376,13 +2376,10 @@ describe("murph.group dynamic tool", () => {
       );
       expect(result.responseMediaPatch).toBeUndefined();
       expect(privateImageUrlPublish).toHaveBeenCalledOnce();
-      expect(privateImageUrlPublish).toHaveBeenCalledWith(
-        expect.objectContaining({
-          contentType: "image/png",
-          filename: "group-avatar.png",
-          source: "murph.group-avatar.reused",
-        }),
-      );
+      expect(privateImageUrlPublish.mock.calls[0]?.[0]).toEqual({
+        bytes: expect.any(Uint8Array),
+        contentType: "image/png",
+      });
       expect(groupRequest).toHaveBeenNthCalledWith(
         2,
         { action: "set_chat_avatar", groupChatIconUrl: SIGNED_PRIVATE_IMAGE_URL },
@@ -2466,12 +2463,10 @@ describe("murph.group dynamic tool", () => {
       expect(JSON.stringify(readGroupToolPayload(result))).not.toContain(
         "murph-hosted.cobuildwithus.workers.dev",
       );
-      expect(privateImageUrlPublish).toHaveBeenCalledWith(
-        expect.objectContaining({
-          contentType: "image/webp",
-          source: "murph.group-avatar.generated",
-        }),
-      );
+      expect(privateImageUrlPublish.mock.calls[0]?.[0]).toEqual({
+        bytes: expect.any(Uint8Array),
+        contentType: "image/webp",
+      });
       expect(groupRequest).toHaveBeenNthCalledWith(
         2,
         { action: "set_chat_avatar", groupChatIconUrl: SIGNED_PRIVATE_IMAGE_URL },

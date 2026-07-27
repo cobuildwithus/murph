@@ -39,9 +39,6 @@ export interface HostedRunnerProviderEffectErrorResponse {
 export interface HostedRunnerPrivateImageUrlPublishRequest {
   bytesBase64: string;
   contentType: "image/jpeg" | "image/png" | "image/webp";
-  filename: string;
-  metadata: Record<string, string>;
-  source: string;
 }
 
 export interface HostedRunnerPrivateImageUrlPublishResponse {
@@ -110,9 +107,6 @@ export function parseHostedRunnerPrivateImageUrlPublishRequest(
   return {
     bytesBase64: readRequiredString(record.bytesBase64, "bytesBase64"),
     contentType,
-    filename: readRequiredString(record.filename, "filename"),
-    metadata: readRequiredStringRecord(record.metadata, "metadata"),
-    source: readRequiredString(record.source, "source"),
   };
 }
 

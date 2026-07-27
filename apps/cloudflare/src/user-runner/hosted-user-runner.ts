@@ -20,7 +20,14 @@ import {
 } from "@murphai/hosted-execution/routes";
 import type { R2BucketLike } from "../bundle-store.js";
 import type { HostedExecutionEnvironment } from "../env.js";
+import {
+  readHostedPrivateMediaCapabilitySecret,
+  stageHostedPrivateMedia,
+  type HostedPrivateMediaPublishInput,
+  type HostedPrivateMediaPublishResult,
+} from "../private-media.ts";
 import type { HostedExecutionContainerNamespaceLike } from "../runner-container.js";
+import { withSerializedLock } from "../serialized-lock.js";
 import type {
   WorkerProviderEgressCredentialValidationResult,
   WorkerProviderEgressTokenValidationResult,
@@ -69,6 +76,9 @@ export class HostedUserRunner {
   private readonly userDataDeletionInput: HostedRunnerUserDataDeletionServiceInput;
   private readonly workspaceSnapshotSessions: WorkspaceSnapshotSessionService;
   private readonly runnerStoreCache: RunnerStoreCache;
+  private readonly privateMediaBucket: R2BucketLike;
+  private readonly privateMediaCapabilitySecret: string | null;
+  private privateMediaMutationLock: Promise<void> | null = null;
 
   constructor(
     state: DurableObjectStateLike,
@@ -82,6 +92,9 @@ export class HostedUserRunner {
     ).runnerContainerNamespace ?? null,
   ) {
     this.stateStore = new RunnerStateStore(state);
+    this.privateMediaBucket = bucket;
+    this.privateMediaCapabilitySecret =
+      readHostedPrivateMediaCapabilitySecret(runnerRuntimeEnvSource);
     this.runnerStoreCache = new RunnerStoreCache({
       bucket,
       env,
@@ -169,10 +182,51 @@ export class HostedUserRunner {
   }
 
   async deleteHostedUserData(userId: string): Promise<HostedRunnerUserDataDeletionResult> {
-    this.runnerStoreCache.clearIfUser(userId);
-    return await deleteHostedRunnerUserData({
-      ...this.userDataDeletionInput,
-      userId,
+    return this.withPrivateMediaMutationLock(async () => {
+      this.runnerStoreCache.clearIfUser(userId);
+      return await deleteHostedRunnerUserData({
+        ...this.userDataDeletionInput,
+        userId,
+      });
+    });
+  }
+
+  async publishHostedPrivateMedia(
+    input: HostedPrivateMediaPublishInput,
+  ): Promise<HostedPrivateMediaPublishResult> {
+    return this.withPrivateMediaMutationLock(async () => {
+      const ownsWriteFence = await this.validateRuntimeWriteFence(input);
+      if (!ownsWriteFence) {
+        return {
+          ok: false,
+          reason: "write-fence-rejected",
+        };
+      }
+      if (!this.privateMediaCapabilitySecret) {
+        return {
+          ok: false,
+          reason: "not-configured",
+        };
+      }
+      try {
+        const staged = await stageHostedPrivateMedia({
+          bucket: this.privateMediaBucket,
+          bytes: input.bytes,
+          capabilitySecret: this.privateMediaCapabilitySecret,
+          contentType: input.contentType,
+          userId: input.userId,
+        });
+        return {
+          expiresAt: staged.expiresAt,
+          ok: true,
+          url: staged.url,
+        };
+      } catch {
+        return {
+          ok: false,
+          reason: "stage-failed",
+        };
+      }
     });
   }
 
@@ -204,6 +258,20 @@ export class HostedUserRunner {
       });
     }
     return validation.owns;
+  }
+
+  private async withPrivateMediaMutationLock<T>(
+    run: () => Promise<T>,
+  ): Promise<T> {
+    return withSerializedLock(
+      {
+        get: () => this.privateMediaMutationLock,
+        set: (value) => {
+          this.privateMediaMutationLock = value;
+        },
+      },
+      run,
+    );
   }
 
   async validateRuntimeProviderEgressToken(input: {

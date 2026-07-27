@@ -3,24 +3,20 @@ import {
   parseHostedRunnerPrivateImageUrlPublishRequest,
 } from "../runner-effects-contract.ts";
 import {
-  readHostedPrivateMediaCapabilitySecret,
-  stageHostedPrivateMedia,
-} from "../private-media.ts";
-import {
-  requireRunnerRuntimeWriteFenceWrite,
+  requireRunnerRuntimeWriteFenceHeaders,
   RunnerRuntimeWriteFenceError,
 } from "./write-fence.ts";
-import type {
-  RunnerOutboundEnvironmentSource,
+import {
+  requireRunnerOutboundUserStubMethod,
+  resolveRunnerOutboundUserRunnerStub,
+  type RunnerOutboundEnvironmentSource,
 } from "./shared.ts";
 
 const PRIVATE_IMAGE_PUBLISH_BODY_LIMIT_BYTES = 14 * 1024 * 1024;
 const PRIVATE_IMAGE_FILE_LIMIT_BYTES = 10 * 1024 * 1024;
-const PRIVATE_IMAGE_METADATA_LIMIT_BYTES = 1024;
 
 export async function handleRunnerPrivateImageUrlPublishRequest(input: {
   env: RunnerOutboundEnvironmentSource;
-  nowMs?: number;
   request: Request;
   userId: string;
 }): Promise<Response> {
@@ -28,12 +24,9 @@ export async function handleRunnerPrivateImageUrlPublishRequest(input: {
     return methodNotAllowed();
   }
 
+  let writeFence;
   try {
-    await requireRunnerRuntimeWriteFenceWrite({
-      env: input.env,
-      request: input.request,
-      userId: input.userId,
-    });
+    writeFence = requireRunnerRuntimeWriteFenceHeaders(input.request);
   } catch (error) {
     if (error instanceof RunnerRuntimeWriteFenceError) {
       return unauthorized();
@@ -59,24 +52,13 @@ export async function handleRunnerPrivateImageUrlPublishRequest(input: {
     throw error;
   }
 
-  const capabilitySecret = readHostedPrivateMediaCapabilitySecret(input.env);
-  if (!capabilitySecret) {
-    return jsonError("Private image URL publishing is not configured.", 503);
-  }
-
   let bytes: Uint8Array;
-  let metadata: Record<string, string>;
   try {
     bytes = decodeBase64Image(request.bytesBase64);
     assertPrivateImageBytes({
       bytes,
       contentType: request.contentType,
     });
-    metadata = {
-      ...request.metadata,
-      source: request.source,
-    };
-    assertPrivateImageMetadata(metadata);
   } catch (error) {
     if (error instanceof TypeError || error instanceof RangeError) {
       return jsonError("Malformed private image URL publish request.", 400);
@@ -85,14 +67,34 @@ export async function handleRunnerPrivateImageUrlPublishRequest(input: {
   }
 
   try {
-    const staged = await stageHostedPrivateMedia({
-      bucket: input.env.BUNDLES,
+    const stub = await resolveRunnerOutboundUserRunnerStub(
+      input.env,
+      input.userId,
+    );
+    const publishHostedPrivateMedia = requireRunnerOutboundUserStubMethod(
+      stub,
+      "publishHostedPrivateMedia",
+    );
+    const staged = await publishHostedPrivateMedia({
+      attemptId: writeFence.attemptId,
       bytes,
-      capabilitySecret,
       contentType: request.contentType,
-      nowMs: input.nowMs,
+      generation: writeFence.generation,
       userId: input.userId,
     });
+    if (!staged.ok) {
+      switch (staged.reason) {
+        case "write-fence-rejected":
+          return unauthorized();
+        case "not-configured":
+          return jsonError(
+            "Private image URL publishing is not configured.",
+            503,
+          );
+        case "stage-failed":
+          return jsonError("Private image URL publishing failed.", 502);
+      }
+    }
     return json({
       expiresAt: staged.expiresAt,
       url: staged.url,
@@ -154,14 +156,5 @@ function privateImageBytesMatchContentType(
         && bytes[2] === 0x46 && bytes[3] === 0x46
         && bytes[8] === 0x57 && bytes[9] === 0x45
         && bytes[10] === 0x42 && bytes[11] === 0x50;
-  }
-}
-
-function assertPrivateImageMetadata(metadata: Record<string, string>): void {
-  if (
-    new TextEncoder().encode(JSON.stringify(metadata)).byteLength
-    > PRIVATE_IMAGE_METADATA_LIMIT_BYTES
-  ) {
-    throw new RangeError("Private image metadata is too large.");
   }
 }

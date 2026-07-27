@@ -973,15 +973,20 @@ requires a fetchable URL. After the group tool preflights current chat
 authority, the runtime resolves canonical vault bytes and calls the
 write-fenced `results.worker/private-image-urls` effect. The Worker stores one
 deterministic application-encrypted object under the member's opaque
-private-media R2 prefix and returns a one-day AES-GCM capability on Murph's
-fixed Worker origin for the immediate Linq mutation. The public GET route
+private-media R2 prefix through the existing per-user `UserRunner`, where the
+write-fence check and staging serialize with account deletion under one
+mutation lock, and returns a one-day AES-GCM capability on Murph's fixed Worker
+origin for the immediate Linq mutation. Deletion that owns the lock first
+clears the fence so queued staging fails; staging that owns it first completes
+before deletion sweeps the object and reports completion. The public GET route
 decrypts and hash/size/signature-verifies the object, responds with
 `private, no-store`, and reveals no member id, object key, storage namespace, or
 image hash in the URL. Retry reuses the same object without refreshing its R2
-age. The 24-hour R2 lifecycle and account deletion own cleanup without treating
-provider acceptance as fetch proof. That URL is ephemeral provider input,
-never the internal media representation, model output, outbox state, or log
-payload.
+age. Account deletion synchronously sweeps the member prefix; the R2 lifecycle
+makes any remaining object eligible for asynchronous deletion after 24 hours
+and is not a physical-deletion deadline. Neither cleanup path treats provider
+acceptance as fetch proof. That URL is ephemeral provider input, never the
+internal media representation, model output, outbox state, or log payload.
 
 Hosted Exa egress is narrower than the path allowlist alone: before injecting
 the Worker-owned key, `apps/cloudflare` must validate the exact bounded

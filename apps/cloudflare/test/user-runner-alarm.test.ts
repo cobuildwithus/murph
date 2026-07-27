@@ -4353,6 +4353,97 @@ describe("HostedUserRunner execution coordination", () => {
     ).toArray()).toEqual([{ active_attempt_id: null, user_id: TEST_USER_ID }]);
   });
 
+  it("lets deletion sweep private media whose staging already owns the user mutation lock", async () => {
+    const bucket = new PausedPutListableMemoryEncryptedR2Bucket();
+    const destroyInstance = vi.fn(async () => {});
+    const { runner, sql } = createRunnerHarness({
+      bucket,
+      destroyInstance,
+      runnerRuntimeEnvSource: {
+        ...TEST_RUNNER_RUNTIME_ENV_SOURCE,
+        HOSTED_PRIVATE_MEDIA_CAPABILITY_SECRET:
+          "private-media-capability-secret-fixture",
+      },
+    });
+    await runner.bindUser(TEST_USER_ID);
+    const token = writeRuntimeFenceForTest(sql);
+
+    const publish = runner.publishHostedPrivateMedia({
+      attemptId: token.attemptId,
+      bytes: new Uint8Array([
+        0x89, 0x50, 0x4e, 0x47,
+        0x0d, 0x0a, 0x1a, 0x0a,
+      ]),
+      contentType: "image/png",
+      generation: String(token.generation),
+      userId: TEST_USER_ID,
+    });
+    await bucket.putStarted.promise;
+
+    let deletionSettled = false;
+    const deletion = runner.deleteHostedUserData(TEST_USER_ID).finally(() => {
+      deletionSettled = true;
+    });
+    await Promise.resolve();
+    expect(deletionSettled).toBe(false);
+    expect(destroyInstance).not.toHaveBeenCalled();
+
+    bucket.releasePut.resolve(undefined);
+    await expect(publish).resolves.toMatchObject({ ok: true });
+    await expect(deletion).resolves.toMatchObject({ ok: true });
+
+    expect(destroyInstance).toHaveBeenCalledOnce();
+    expect(bucket.objects.size).toBe(0);
+  });
+
+  it("rejects private media staging queued behind completed user deletion", async () => {
+    const bucket = new ListableMemoryEncryptedR2Bucket();
+    const destroyStarted = createDeferred<void>();
+    const releaseDestroy = createDeferred<void>();
+    const destroyInstance = vi.fn(async () => {
+      destroyStarted.resolve(undefined);
+      await releaseDestroy.promise;
+    });
+    const { runner, sql } = createRunnerHarness({
+      bucket,
+      destroyInstance,
+      runnerRuntimeEnvSource: {
+        ...TEST_RUNNER_RUNTIME_ENV_SOURCE,
+        HOSTED_PRIVATE_MEDIA_CAPABILITY_SECRET:
+          "private-media-capability-secret-fixture",
+      },
+    });
+    await runner.bindUser(TEST_USER_ID);
+    const token = writeRuntimeFenceForTest(sql);
+
+    const deletion = runner.deleteHostedUserData(TEST_USER_ID);
+    await destroyStarted.promise;
+    let publishSettled = false;
+    const publish = runner.publishHostedPrivateMedia({
+      attemptId: token.attemptId,
+      bytes: new Uint8Array([
+        0x89, 0x50, 0x4e, 0x47,
+        0x0d, 0x0a, 0x1a, 0x0a,
+      ]),
+      contentType: "image/png",
+      generation: String(token.generation),
+      userId: TEST_USER_ID,
+    }).finally(() => {
+      publishSettled = true;
+    });
+    await Promise.resolve();
+    expect(publishSettled).toBe(false);
+
+    releaseDestroy.resolve(undefined);
+    await expect(deletion).resolves.toMatchObject({ ok: true });
+    await expect(publish).resolves.toEqual({
+      ok: false,
+      reason: "write-fence-rejected",
+    });
+
+    expect(bucket.objects.size).toBe(0);
+  });
+
   it("replaces an active owner's upload session after its workspace version advances", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
@@ -5242,6 +5333,22 @@ class ListableMemoryEncryptedR2Bucket extends MemoryEncryptedR2Bucket {
       objects: pageKeys.map((key) => ({ key })),
       truncated,
     };
+  }
+}
+
+class PausedPutListableMemoryEncryptedR2Bucket
+  extends ListableMemoryEncryptedR2Bucket {
+  readonly putStarted = createDeferred<void>();
+  readonly releasePut = createDeferred<void>();
+  private pauseNextPut = true;
+
+  override async put(key: string, value: string): Promise<void> {
+    if (this.pauseNextPut) {
+      this.pauseNextPut = false;
+      this.putStarted.resolve(undefined);
+      await this.releasePut.promise;
+    }
+    await super.put(key, value);
   }
 }
 

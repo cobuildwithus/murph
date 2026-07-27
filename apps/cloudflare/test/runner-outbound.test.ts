@@ -127,6 +127,9 @@ import {
 import {
   handleRunnerPrivateImageUrlPublishRequest,
 } from "../src/runner-outbound/private-image-urls.ts";
+import type {
+  HostedPrivateMediaPublishResult,
+} from "../src/private-media.ts";
 import {
   HOSTED_RUNTIME_MAILBOX_PAYLOAD_DECODE_PATH,
 } from "../src/runtime-mailbox-payload-decode-contract.ts";
@@ -187,6 +190,9 @@ const RUNNER_PROXY_TOKEN = "proxy-token";
 const RUNNER_PROXY_TOKEN_HEADER = "x-hosted-execution-runner-proxy-token";
 const MISSING_ARTIFACT_URL = `http://artifacts.worker/objects/${"a".repeat(64)}`;
 const HEARTBEAT_URL = "http://runner-control.worker/internal/active-invocation/heartbeat";
+const PRIVATE_MEDIA_PUBLISH_EXPIRES_AT = "2033-05-18T03:33:20.000Z";
+const PRIVATE_MEDIA_PUBLISH_URL =
+  `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}?exp=2000000000`;
 const ALLOWLISTED_WEB_CONTROL_CASES = [
   {
     body: {
@@ -3078,36 +3084,23 @@ describe("handleRunnerOutboundRequest", () => {
     });
   });
 
-  it("publishes one encrypted write-fenced R2 object behind an opaque capability", async () => {
+  it("sends the minimal image payload through the serialized UserRunner publisher", async () => {
     const runner = createWorkspaceVersionAwareUserRunner();
     const pngBytes = new Uint8Array([
       0x89, 0x50, 0x4e, 0x47,
       0x0d, 0x0a, 0x1a, 0x0a,
     ]);
-    const bucket = createPrivateMediaTestBucket();
-    const nowMs = Date.parse("2026-07-26T12:00:00.000Z");
-    const expiresAtUnixSeconds = Math.floor(nowMs / 1_000) + 86_400;
 
     const response = await handleRunnerPrivateImageUrlPublishRequest({
       env: createRunnerOutboundEnv({
-        BUNDLES: bucket.api,
-        HOSTED_PRIVATE_MEDIA_CAPABILITY_SECRET:
-          "private-media-capability-secret-fixture",
         USER_RUNNER: { getByName: runner.getByName },
       }),
-      nowMs,
       request: new Request(
         `http://results.worker${HOSTED_EXECUTION_RUNNER_PRIVATE_IMAGE_URL_PUBLISH_PATH}`,
         {
           body: JSON.stringify({
             bytesBase64: Buffer.from(pngBytes).toString("base64"),
             contentType: "image/png",
-            filename: "group-avatar.png",
-            metadata: {
-              imageSha256: "hash_123",
-              schema: "murph.group-avatar.v2",
-            },
-            source: "murph.group-avatar.reused",
           }),
           headers: createMailboxPayloadDecodeHeaders(),
           method: "POST",
@@ -3118,30 +3111,26 @@ describe("handleRunnerOutboundRequest", () => {
 
     expect(response.status).toBe(200);
     expect(runner.ownsActiveInvocationLease).toHaveBeenCalledOnce();
-    expect(bucket.put).toHaveBeenCalledOnce();
-    expect(bucket.objects).toHaveLength(1);
-    expect(new TextDecoder().decode(bucket.objects[0]?.[1])).not.toContain(
-      Buffer.from(pngBytes).toString("base64"),
-    );
+    expect(runner.publishHostedPrivateMedia).toHaveBeenCalledWith({
+      attemptId: "attempt_1",
+      bytes: pngBytes,
+      contentType: "image/png",
+      generation: "9",
+      userId: "member_123",
+    });
     const payload = await response.json() as {
       expiresAt: string;
       url: string;
     };
-    expect(payload.expiresAt).toBe(
-      new Date(expiresAtUnixSeconds * 1_000).toISOString(),
-    );
+    expect(payload.expiresAt).toBe(PRIVATE_MEDIA_PUBLISH_EXPIRES_AT);
     expect(isHostedRuntimePrivateImageDeliveryUrl(new URL(payload.url))).toBe(
       true,
     );
   });
 
-  it("reuses the same encrypted R2 object after a lost publish response", async () => {
+  it("retries a lost publish response with the same minimal image payload", async () => {
     const runner = createWorkspaceVersionAwareUserRunner();
-    const bucket = createPrivateMediaTestBucket();
     const env = createRunnerOutboundEnv({
-      BUNDLES: bucket.api,
-      HOSTED_PRIVATE_MEDIA_CAPABILITY_SECRET:
-        "private-media-capability-secret-fixture",
       USER_RUNNER: { getByName: runner.getByName },
     });
     const createRequest = () =>
@@ -3154,9 +3143,6 @@ describe("handleRunnerOutboundRequest", () => {
               0x0d, 0x0a, 0x1a, 0x0a,
             ])).toString("base64"),
             contentType: "image/png",
-            filename: "../avatar.png",
-            metadata: { schema: "murph.group-avatar.v2" },
-            source: "murph.group-avatar.reused",
           }),
           headers: createMailboxPayloadDecodeHeaders(),
           method: "POST",
@@ -3176,8 +3162,10 @@ describe("handleRunnerOutboundRequest", () => {
 
     expect(first.status).toBe(200);
     expect(retry.status).toBe(200);
-    expect(bucket.put).toHaveBeenCalledOnce();
-    expect(bucket.objects).toHaveLength(1);
+    expect(runner.publishHostedPrivateMedia).toHaveBeenCalledTimes(2);
+    expect(runner.publishHostedPrivateMedia.mock.calls[0]?.[0]).toEqual(
+      runner.publishHostedPrivateMedia.mock.calls[1]?.[0],
+    );
   });
 
   it("rejects email sends when the live invocation lease is stale", async () => {
@@ -9955,35 +9943,6 @@ function createWorkspaceSnapshotBundleTestBucket(input: {
   };
 }
 
-function createPrivateMediaTestBucket() {
-  const values = new Map<string, Uint8Array>();
-  const put = vi.fn(async (key: string, value: R2PutValueLike) => {
-    values.set(key, await readTestR2PutValue(value));
-  });
-  const api: RunnerOutboundEnvironmentSource["BUNDLES"] = {
-    async get(key: string) {
-      const value = values.get(key);
-      return value
-        ? {
-            async arrayBuffer() {
-              return toArrayBuffer(value);
-            },
-            key,
-            size: value.byteLength,
-          }
-        : null;
-    },
-    put,
-  };
-  return {
-    api,
-    get objects() {
-      return [...values.entries()];
-    },
-    put,
-  };
-}
-
 function createArtifactOnlyWorkspaceBundleForTest(
   sha256: string,
   byteSize: number,
@@ -10085,6 +10044,7 @@ function createBrowserVaultReplicaRef(sourceBundleHash: string) {
 function createWorkspaceVersionAwareUserRunner(input: {
   attemptId?: string;
   leaseGeneration?: string;
+  privateMediaPublishResult?: HostedPrivateMediaPublishResult;
   userId?: string;
 } = {}) {
   let attemptId = input.attemptId ?? "attempt_1";
@@ -10183,6 +10143,26 @@ function createWorkspaceVersionAwareUserRunner(input: {
     });
     return owns;
   });
+  const publishHostedPrivateMedia = vi.fn(async (request: {
+    attemptId: string;
+    bytes: Uint8Array;
+    contentType: "image/jpeg" | "image/png" | "image/webp";
+    generation: string;
+    userId: string;
+  }): Promise<HostedPrivateMediaPublishResult> => {
+    const owns = await validateRuntimeWriteFence(request);
+    if (!owns) {
+      return {
+        ok: false,
+        reason: "write-fence-rejected",
+      };
+    }
+    return input.privateMediaPublishResult ?? {
+      expiresAt: PRIVATE_MEDIA_PUBLISH_EXPIRES_AT,
+      ok: true,
+      url: PRIVATE_MEDIA_PUBLISH_URL,
+    };
+  });
 
   return {
     bindUser,
@@ -10195,12 +10175,14 @@ function createWorkspaceVersionAwareUserRunner(input: {
         deleteHostedWorkspaceSnapshotUploadSession,
         rememberHostedWorkspaceSnapshotReplacedRef,
         ownsActiveInvocationLease,
+        publishHostedPrivateMedia,
         readHostedWorkspaceSnapshotUploadSession,
         recordHostedWorkspaceSnapshotOrphanCandidate,
         validateRuntimeWriteFence,
       };
     },
     ownsActiveInvocationLease,
+    publishHostedPrivateMedia,
     readHostedWorkspaceSnapshotUploadSession,
     recordHostedWorkspaceSnapshotOrphanCandidate,
     rememberHostedWorkspaceSnapshotReplacedRef,

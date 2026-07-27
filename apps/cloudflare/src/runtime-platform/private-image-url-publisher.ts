@@ -26,9 +26,6 @@ export function createCloudflarePrivateImageUrlPublisher(input: {
         body: {
           bytesBase64: encodeBase64(publishInput.bytes),
           contentType: publishInput.contentType,
-          filename: publishInput.filename,
-          metadata: publishInput.metadata,
-          source: publishInput.source,
         },
         description: "Hosted private image URL publish",
         fetchImpl: input.fetchImpl,

@@ -92,7 +92,6 @@ import {
   type AssistantHostedGroupSharedReadResponse,
   type AssistantHostedGroupSharedReader,
   type AssistantHostedGroupSharedRecord,
-  type AssistantPrivateImageContentType,
   type AssistantWorkspaceArtifactMaterializer,
 } from '../assistant/execution-context.js'
 import {
@@ -4073,7 +4072,6 @@ async function prepareGroupAvatarRuntimeRequest(input: {
       hostedToolContext: input.hostedToolContext,
       imageRef: media.ref,
       materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts,
-      source: 'murph.group-avatar.generated',
       vaultRoot: input.vaultRoot,
     })
     if (!published.rpcSuccess) {
@@ -4098,7 +4096,6 @@ async function prepareGroupAvatarRuntimeRequest(input: {
     hostedToolContext: input.hostedToolContext,
     imageRef: avatar.imageRef,
     materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts,
-    source: 'murph.group-avatar.reused',
     vaultRoot: input.vaultRoot,
   })
   if (!published.rpcSuccess) {
@@ -4117,7 +4114,6 @@ async function publishGroupAvatarImageReference(input: {
   hostedToolContext: AssistantHostedToolContext | null
   imageRef: string
   materializeWorkspaceArtifacts: AssistantWorkspaceArtifactMaterializer | null
-  source: string
   vaultRoot: string | null
 }): Promise<
   | { rpcSuccess: true; url: string }
@@ -4165,14 +4161,7 @@ async function publishGroupAvatarImageReference(input: {
   try {
     const published = await publisher.publishPrivateImageUrl({
       bytes: reference.bytes,
-      contentType: groupAvatarReferenceContentType(reference.mediaType),
-      filename: groupAvatarReferenceFilename(reference.mediaType),
-      metadata: {
-        imageSha256: reference.sha256,
-        schema: 'murph.group-avatar.v2',
-        sourceRefSha256: reference.sourceRefSha256,
-      },
-      source: input.source,
+      contentType: reference.mediaType,
     })
     return { rpcSuccess: true, url: published.url }
   } catch {
@@ -4180,25 +4169,6 @@ async function publishGroupAvatarImageReference(input: {
       rpcSuccess: false,
       rpcText: 'private group avatar delivery could not be prepared',
     }
-  }
-}
-
-function groupAvatarReferenceContentType(
-  mediaType: ResolvedGenerateImageReference['mediaType'],
-): AssistantPrivateImageContentType {
-  return mediaType
-}
-
-function groupAvatarReferenceFilename(
-  mediaType: ResolvedGenerateImageReference['mediaType'],
-): string {
-  switch (mediaType) {
-    case 'image/jpeg':
-      return 'group-avatar.jpg'
-    case 'image/png':
-      return 'group-avatar.png'
-    case 'image/webp':
-      return 'group-avatar.webp'
   }
 }
 

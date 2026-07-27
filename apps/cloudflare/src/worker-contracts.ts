@@ -1,4 +1,8 @@
 import type { R2BucketLike } from "./bundle-store.ts";
+import type {
+  HostedPrivateMediaPublishInput,
+  HostedPrivateMediaPublishResult,
+} from "./private-media.ts";
 import { toStringEnvSource, type StringEnvSource } from "./string-env.ts";
 import type {
   HostedWorkspaceSnapshotOrphanCandidate,
@@ -99,6 +103,9 @@ export interface WorkerRunnerContainerNamespaceLike<
 export interface WorkerUserRunnerStubLike {
   bindUser?(userId: string): Promise<{ userId: string }>;
   deleteHostedUserData?(userId: string): Promise<unknown>;
+  publishHostedPrivateMedia?(
+    input: HostedPrivateMediaPublishInput,
+  ): Promise<HostedPrivateMediaPublishResult>;
   createHostedWorkspaceSnapshotUploadSession?(
     input: HostedWorkspaceSnapshotUploadSession,
   ): Promise<HostedWorkspaceSnapshotUploadSession | null>;

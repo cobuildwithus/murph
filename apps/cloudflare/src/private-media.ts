@@ -45,6 +45,28 @@ export type HostedPrivateMediaContentType =
   | "image/png"
   | "image/webp";
 
+export interface HostedPrivateMediaPublishInput {
+  attemptId: string;
+  bytes: Uint8Array;
+  contentType: HostedPrivateMediaContentType;
+  generation: string;
+  userId: string;
+}
+
+export type HostedPrivateMediaPublishResult =
+  | {
+      expiresAt: string;
+      ok: true;
+      url: string;
+    }
+  | {
+      ok: false;
+      reason:
+        | "not-configured"
+        | "stage-failed"
+        | "write-fence-rejected";
+    };
+
 interface HostedPrivateMediaCapabilityPayload {
   contentType: HostedPrivateMediaContentType;
   expiresAtUnixSeconds: number;

@@ -3810,6 +3810,10 @@ function createUserRunnerStub(overrides: Record<string, unknown> = {}) {
       recommendedRecheckAt: "2026-04-27T00:00:10.000Z",
       runtimeAttemptId: "runtime-attempt-test",
     })),
+    publishHostedPrivateMedia: vi.fn(async () => ({
+      ok: false as const,
+      reason: "not-configured" as const,
+    })),
     readActiveRuntimeFenceForTest: vi.fn(async () => null),
     runUntilIdleForTest: vi.fn(async () => ({
       nextWakeAt: null,
