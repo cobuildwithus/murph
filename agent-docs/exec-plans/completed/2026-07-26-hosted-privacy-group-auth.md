@@ -1,6 +1,6 @@
 # Fix durable account deletion and group identity authorization
 
-Status: active
+Status: completed
 Created: 2026-07-26
 Updated: 2026-07-26
 
@@ -95,9 +95,20 @@ Updated: 2026-07-26
   design-proof tests, full migration deployment against disposable PostgreSQL,
   canonical `pnpm test:diff apps/web apps/cloudflare`, and
   `pnpm verify:acceptance`.
-- Still required: exact-head preliminary specialists, parent final review,
-  final canonical verification after remediation, final ReviewGPT, and GitHub
-  CI.
+- The required product review ended with zero findings after correcting deletion
+  copy and adding quiet-group roster recovery with contact-key rotation support.
+- The preliminary specialist review returned four coverage findings and no
+  product, prompt, frontend, or implementation correction. Added direct proof
+  for deletion-transaction failure seams, post-commit cleanup fallback, Linq
+  roster failure and identity mismatch, exact participant-lease predicates in
+  AI/newsletter reads, and retry-batch ordering and isolation.
+- Parent final review completed after those tests passed. Following a clean
+  rebase onto current `main`, canonical
+  `MURPH_VERIFY_EXECUTOR=crabbox pnpm test:diff apps/web apps/cloudflare` and
+  `MURPH_VERIFY_EXECUTOR=crabbox pnpm verify:acceptance` both passed.
+- Still required after the final task commit is pushed: exact-head final
+  ReviewGPT and GitHub PR CI.
 - Expected outcomes: every selected check passes or has a credibly unrelated
   pre-existing failure documented with next-best proof; no privacy-sensitive
   identifier or local path appears in committed or published artifacts.
+Completed: 2026-07-26
