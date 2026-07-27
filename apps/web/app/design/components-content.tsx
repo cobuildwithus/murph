@@ -30,9 +30,9 @@ import { ActiveExperimentBanner } from "@/src/components/overview/active-experim
 import { TrialBillingBanner } from "@/src/components/home/trial-billing-banner";
 import { ProfileStats } from "@/src/components/overview/profile-stats";
 import { HostedAuthFinishingNotice } from "@/src/components/hosted-onboarding/hosted-auth-shared";
-import { DashboardLegalConsentGate } from "@/src/components/legal/dashboard-legal-consent-gate";
-import type {
-  HostedLegalConsentAcceptanceInput,
+import {
+  HostedLegalConsentCard,
+  type HostedLegalConsentAcceptanceInput,
 } from "@/src/components/legal/hosted-legal-consent-card";
 import { HOSTED_PHONE_COUNTRY_OPTIONS } from "@/src/components/hosted-onboarding/hosted-phone-country-options";
 import { ContactSupportAction } from "@/src/components/support/contact-support-action";
@@ -352,15 +352,20 @@ export function ComponentsContent() {
 
         <Section title="Dashboard legal update">
           <div
-            className="rounded-2xl border border-border bg-background px-5 py-4 sm:px-8"
+            className="rounded-2xl border border-border bg-background px-5 py-6 sm:px-8"
             data-design-dashboard-legal-composition="true"
           >
-            <DashboardLegalConsentGate
+            <HostedLegalConsentCard
+              acceptedPendingLabel="Refreshing your dashboard"
               acceptScope={acceptDesignDashboardConsentScope}
               initialStatus={DESIGN_DASHBOARD_CONSENT_STATUS}
+              launchDescription="We updated Murph's legal documents. Accept the current versions to get your full dashboard back."
+              launchTitle="Review what changed"
+              mode="compact"
               onAccepted={completeDesignDashboardConsentPreview}
+              source="dashboard-legal-update"
             />
-            <div className="border-t border-border py-8">
+            <div className="mt-8 border-t border-border py-8">
               <p className="font-mono text-[10px] font-medium uppercase tracking-[0.11em] text-muted-foreground">
                 Requested dashboard content remains available
               </p>

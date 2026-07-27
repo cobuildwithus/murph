@@ -1751,6 +1751,7 @@ describe("executeHostedMailboxEvent", () => {
     expect(result).toEqual({
       bootstrapResult,
       conversationMetrics: null,
+      deliveryIntentIds: ["intent_notification"],
       mailboxLane: "assistant-notification",
       nextWakeAt: seededNextWakeAt,
       nextWakeReason: "assistant",

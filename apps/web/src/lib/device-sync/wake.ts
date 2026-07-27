@@ -13,6 +13,7 @@ export type HostedDeviceSyncWakeSource =
 export function buildHostedDeviceSyncWake(input: {
   connectionId: string;
   eventId?: string | null;
+  expectedConnectedAt: string;
   hint?: HostedExecutionDeviceSyncWakeEvent["hint"] | null;
   occurredAt: string;
   provider: string;
@@ -23,6 +24,7 @@ export function buildHostedDeviceSyncWake(input: {
   return buildCanonicalHostedExecutionDeviceSyncWake({
     connectionId: input.connectionId,
     eventId: input.eventId ?? buildHostedDeviceSyncWakeEventId(input),
+    expectedConnectedAt: input.expectedConnectedAt,
     hint: input.hint,
     occurredAt: input.occurredAt,
     provider: input.provider,
@@ -33,6 +35,7 @@ export function buildHostedDeviceSyncWake(input: {
 
 export function buildHostedDeviceSyncWakeEventId(input: {
   connectionId: string;
+  expectedConnectedAt: string;
   occurredAt: string;
   provider: string;
   source: HostedDeviceSyncWakeSource;
@@ -45,6 +48,7 @@ export function buildHostedDeviceSyncWakeEventId(input: {
     input.userId,
     input.provider,
     input.connectionId,
+    input.expectedConnectedAt,
     input.traceId ?? input.occurredAt,
   ].join(":");
 }

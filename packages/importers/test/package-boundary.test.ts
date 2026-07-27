@@ -75,6 +75,11 @@ test("package manifest exposes only focused importer subpaths", async () => {
     import: "./dist/clinical-records/index.js",
     default: "./dist/clinical-records/index.js",
   });
+  assert.deepEqual(packageManifest.exports?.["./device-providers/junction"], {
+    types: "./dist/device-providers/junction.d.ts",
+    import: "./dist/device-providers/junction.js",
+    default: "./dist/device-providers/junction.js",
+  });
   assert.doesNotMatch(readFileSync(path.join(packageDir, "src", "index.ts"), "utf8"), /clinical-records/u);
 });
 
