@@ -1025,13 +1025,31 @@ export const HOSTED_RUNTIME_PRIVATE_MEDIA_DELIVERY_PATH_PREFIX =
 const HOSTED_RUNTIME_PRIVATE_MEDIA_DELIVERY_PATH_PATTERN =
   /^\/private-media\/v1\/v1\.[A-Za-z0-9_-]{16}\.[A-Za-z0-9_-]{32,1024}$/u;
 
-export function isHostedRuntimePrivateImageDeliveryUrl(url: URL): boolean {
+export function isHostedRuntimePrivateImageDeliveryUrl(
+  url: URL,
+  expectedOrigin = HOSTED_RUNTIME_PRIVATE_MEDIA_DELIVERY_ORIGIN,
+): boolean {
   if (isLegacyHostedRuntimePrivateImageDeliveryUrl(url)) {
     return true;
   }
+  let normalizedExpectedOrigin: string;
+  try {
+    const parsedExpectedOrigin = new URL(expectedOrigin);
+    if (
+      parsedExpectedOrigin.username
+      || parsedExpectedOrigin.password
+      || parsedExpectedOrigin.pathname !== "/"
+      || parsedExpectedOrigin.search
+      || parsedExpectedOrigin.hash
+    ) {
+      return false;
+    }
+    normalizedExpectedOrigin = parsedExpectedOrigin.origin;
+  } catch {
+    return false;
+  }
   if (
-    url.origin !== HOSTED_RUNTIME_PRIVATE_MEDIA_DELIVERY_ORIGIN
-    || url.port
+    url.origin !== normalizedExpectedOrigin
     || url.username
     || url.password
     || url.hash

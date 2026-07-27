@@ -160,6 +160,7 @@ export interface WorkerEnvironmentContract<
     tag?: string;
     timestamp?: string;
   };
+  CF_PUBLIC_BASE_URL?: string;
   HOSTED_PRIVATE_MEDIA_CAPABILITY_SECRET?: string;
   HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS?: string;
   HOSTED_AI_USAGE_REPORTING_SECRET?: string;

@@ -616,6 +616,7 @@ describe("shareHostedLinqContactCard", () => {
 
 describe("updateHostedLinqChatAvatar", () => {
   afterEach(() => {
+    vi.unstubAllEnvs();
     if (originalFetch) {
       vi.stubGlobal("fetch", originalFetch);
       return;
@@ -649,6 +650,39 @@ describe("updateHostedLinqChatAvatar", () => {
     expect(readJsonRequestBody(init)).toEqual({
       group_chat_icon:
         `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}?exp=2000000000`,
+    });
+  });
+
+  it("accepts only the current preview Worker origin", async () => {
+    const previewOrigin = "https://hosted-runner-staging.example.test";
+    const previewUrl =
+      `${previewOrigin}/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}?exp=2000000000`;
+    const productionUrl =
+      `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}?exp=2000000000`;
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL, _init?: RequestInit) => {
+        void _input;
+        void _init;
+        return createJsonResponse({ status: "pending" }, 200);
+      },
+    );
+    vi.stubEnv("HOSTED_EXECUTION_CONTROL_URL", previewOrigin);
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(updateHostedLinqChatAvatar({
+      chatId: "chat_preview",
+      groupChatIconUrl: previewUrl,
+    })).resolves.toBeUndefined();
+    await expect(updateHostedLinqChatAvatar({
+      chatId: "chat_preview",
+      groupChatIconUrl: productionUrl,
+    })).rejects.toThrow(/hosted private media URL/u);
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(readJsonRequestBody(
+      expectRequestInit(fetchMock.mock.calls[0]?.[1]),
+    )).toEqual({
+      group_chat_icon: previewUrl,
     });
   });
 

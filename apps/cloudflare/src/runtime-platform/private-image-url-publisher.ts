@@ -17,6 +17,7 @@ import { fetchHostedJson } from "./hosted-http.ts";
 
 export function createCloudflarePrivateImageUrlPublisher(input: {
   fetchImpl: typeof fetch;
+  privateMediaDeliveryOrigin?: string | null;
   timeoutMs: number;
   workspaceCheckpointBridge: HostedWorkspaceCheckpointBridgeAuthority;
 }): NonNullable<HostedRuntimePlatform["privateImageUrlPublisher"]> {
@@ -43,7 +44,10 @@ export function createCloudflarePrivateImageUrlPublisher(input: {
         ),
       });
 
-      return parseHostedRunnerPrivateImageUrlPublishResponse(payload);
+      return parseHostedRunnerPrivateImageUrlPublishResponse(
+        payload,
+        input.privateMediaDeliveryOrigin,
+      );
     },
   };
 }

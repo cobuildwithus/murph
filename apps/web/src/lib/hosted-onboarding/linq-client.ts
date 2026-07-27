@@ -16,6 +16,9 @@ import type {
 } from "@linqapp/sdk/resources/chats";
 
 import { fetchLinqApi, fetchLinqApiJson, LinqApiTimeoutError } from "../linq/api";
+import {
+  readHostedExecutionControlOrigin,
+} from "../hosted-execution/environment";
 import { hostedOnboardingError, isHostedOnboardingError } from "./errors";
 import { requireHostedOnboardingLinqConfig } from "./runtime";
 import { normalizeNullableString } from "./shared";
@@ -649,7 +652,10 @@ function normalizeHostedLinqGroupChatIconUrl(value: unknown): string {
     throw new TypeError("group chat icon url must be a hosted private media URL.");
   }
   const parsed = new URL(normalized);
-  if (!isHostedRuntimePrivateImageDeliveryUrl(parsed)) {
+  if (!isHostedRuntimePrivateImageDeliveryUrl(
+    parsed,
+    readHostedExecutionControlOrigin() ?? undefined,
+  )) {
     throw new TypeError("group chat icon url must be a hosted private media URL.");
   }
   return normalized;

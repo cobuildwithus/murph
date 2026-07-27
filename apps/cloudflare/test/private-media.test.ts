@@ -17,6 +17,9 @@ import {
   privateMediaRoutes,
 } from "../src/worker/route-handlers/private-media.ts";
 import {
+  parseHostedRunnerPrivateImageUrlPublishResponse,
+} from "../src/runner-effects-contract.ts";
+import {
   redactWorkerRoutePathname,
 } from "../src/worker/route-utils/log-details.ts";
 import {
@@ -24,6 +27,7 @@ import {
 } from "../src/worker/routes.ts";
 
 const CAPABILITY_SECRET = "private-media-capability-secret-fixture";
+const PREVIEW_DELIVERY_ORIGIN = "https://hosted-runner-staging.example.test";
 const USER_ID = "member_private_media_fixture";
 const PNG_BYTES = new Uint8Array([
   0x89, 0x50, 0x4e, 0x47,
@@ -39,6 +43,7 @@ describe("hosted private media", () => {
       bytes: PNG_BYTES,
       capabilitySecret: CAPABILITY_SECRET,
       contentType: "image/png",
+      deliveryOrigin: HOSTED_PRIVATE_MEDIA_DELIVERY_ORIGIN,
       nowMs,
       userId: USER_ID,
     });
@@ -77,6 +82,7 @@ describe("hosted private media", () => {
       bytes: PNG_BYTES,
       capabilitySecret: CAPABILITY_SECRET,
       contentType: "image/png" as const,
+      deliveryOrigin: HOSTED_PRIVATE_MEDIA_DELIVERY_ORIGIN,
       nowMs: Date.parse("2026-07-27T12:00:00.000Z"),
       userId: USER_ID,
     };
@@ -99,6 +105,7 @@ describe("hosted private media", () => {
       bytes: PNG_BYTES,
       capabilitySecret: CAPABILITY_SECRET,
       contentType: "image/png",
+      deliveryOrigin: HOSTED_PRIVATE_MEDIA_DELIVERY_ORIGIN,
       userId: "m".repeat(512),
     });
 
@@ -110,6 +117,57 @@ describe("hosted private media", () => {
     );
   });
 
+  it("keeps preview and production capability origins isolated", async () => {
+    const bucket = createPrivateMediaBucket();
+    const preview = await stageHostedPrivateMedia({
+      bucket: bucket.api,
+      bytes: PNG_BYTES,
+      capabilitySecret: CAPABILITY_SECRET,
+      contentType: "image/png",
+      deliveryOrigin: PREVIEW_DELIVERY_ORIGIN,
+      userId: USER_ID,
+    });
+    const previewUrl = new URL(preview.url);
+
+    expect(previewUrl.origin).toBe(PREVIEW_DELIVERY_ORIGIN);
+    expect(
+      isHostedRuntimePrivateImageDeliveryUrl(
+        previewUrl,
+        PREVIEW_DELIVERY_ORIGIN,
+      ),
+    ).toBe(true);
+    expect(isHostedRuntimePrivateImageDeliveryUrl(previewUrl)).toBe(false);
+    expect(parseHostedRunnerPrivateImageUrlPublishResponse(
+      {
+        expiresAt: preview.expiresAt,
+        url: preview.url,
+      },
+      PREVIEW_DELIVERY_ORIGIN,
+    )).toEqual({
+      expiresAt: preview.expiresAt,
+      url: preview.url,
+    });
+    expect(() => parseHostedRunnerPrivateImageUrlPublishResponse({
+      expiresAt: preview.expiresAt,
+      url: preview.url,
+    })).toThrow(/publish response is invalid/u);
+
+    const request = new Request(preview.url);
+    const response = await handleDeclarativeRoute(privateMediaRoutes, {
+      env: {
+        BUNDLES: bucket.api,
+        HOSTED_PRIVATE_MEDIA_CAPABILITY_SECRET: CAPABILITY_SECRET,
+      },
+      request,
+      url: previewUrl,
+    });
+    expect(response?.status).toBe(200);
+    if (!response) {
+      throw new Error("Expected preview private media response.");
+    }
+    expect(new Uint8Array(await response.arrayBuffer())).toEqual(PNG_BYTES);
+  });
+
   it("fails closed for expired, tampered, or wrong-secret capabilities", async () => {
     const bucket = createPrivateMediaBucket();
     const nowMs = Date.parse("2026-07-27T12:00:00.000Z");
@@ -118,6 +176,7 @@ describe("hosted private media", () => {
       bytes: PNG_BYTES,
       capabilitySecret: CAPABILITY_SECRET,
       contentType: "image/png",
+      deliveryOrigin: HOSTED_PRIVATE_MEDIA_DELIVERY_ORIGIN,
       nowMs,
       userId: USER_ID,
     });
@@ -155,6 +214,7 @@ describe("hosted private media", () => {
       bytes: PNG_BYTES,
       capabilitySecret: CAPABILITY_SECRET,
       contentType: "image/png",
+      deliveryOrigin: HOSTED_PRIVATE_MEDIA_DELIVERY_ORIGIN,
       userId: USER_ID,
     });
     const env = {
@@ -213,6 +273,7 @@ describe("hosted private media", () => {
       bytes: PNG_BYTES,
       capabilitySecret: CAPABILITY_SECRET,
       contentType: "image/png",
+      deliveryOrigin: HOSTED_PRIVATE_MEDIA_DELIVERY_ORIGIN,
       userId: USER_ID,
     })).rejects.toThrow("fixture write failure");
     expect(bucket.objects).toHaveLength(0);
@@ -228,6 +289,7 @@ describe("hosted private media", () => {
         bytes: PNG_BYTES,
         capabilitySecret: CAPABILITY_SECRET,
         contentType: "image/png",
+        deliveryOrigin: HOSTED_PRIVATE_MEDIA_DELIVERY_ORIGIN,
         userId: USER_ID,
       })).rejects.toThrow("fixture capability seal failure");
     } finally {

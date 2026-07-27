@@ -1018,6 +1018,22 @@ describe("parseHostedRuntimeGroupTool", () => {
       groupChatIconUrl:
         `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}?exp=2000000000`,
     });
+    const previewOrigin = "https://hosted-runner-staging.example.test";
+    const previewIconUrl =
+      `${previewOrigin}/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}?exp=2000000000`;
+    expect(parseHostedRuntimeGroupToolRequest({
+      action: "set_chat_avatar",
+      groupChatIconUrl: previewIconUrl,
+    }, {
+      privateMediaDeliveryOrigin: previewOrigin,
+    })).toEqual({
+      action: "set_chat_avatar",
+      groupChatIconUrl: previewIconUrl,
+    });
+    expect(() => parseHostedRuntimeGroupToolRequest({
+      action: "set_chat_avatar",
+      groupChatIconUrl: previewIconUrl,
+    })).toThrow(/groupChatIconUrl is invalid/u);
     expect(parseHostedRuntimeGroupToolRequest({
       action: "set_chat_avatar",
       groupChatIconUrl:

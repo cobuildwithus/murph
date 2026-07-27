@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   admitHostedGroupDisclosurePermissionAppendTx: vi.fn(),
@@ -47,6 +47,10 @@ const mocks = vi.hoisted(() => ({
   updateHostedLinqChatAvatar: vi.fn(),
   updateHostedLinqChatDisplayName: vi.fn(),
 }));
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
 
 vi.mock("@/src/lib/hosted-mailbox/runtime-access", () => ({
   hasHostedRuntimeActiveAccess: mocks.hasHostedRuntimeActiveAccess,
@@ -1732,6 +1736,30 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       chatId: "chat_group_1",
       groupChatIconUrl:
         `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}?exp=2000000000`,
+    });
+  });
+
+  it("updates a preview group avatar only through the preview Worker origin", async () => {
+    const previewOrigin = "https://hosted-runner-staging.example.test";
+    const previewIconUrl =
+      `${previewOrigin}/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}?exp=2000000000`;
+    vi.stubEnv("HOSTED_EXECUTION_CONTROL_URL", previewOrigin);
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_container",
+      request: {
+        action: "set_chat_avatar",
+        groupChatIconUrl: previewIconUrl,
+        linqThread: LINQ_THREAD,
+      },
+    })).resolves.toEqual({
+      action: "set_chat_avatar",
+      result: { status: "requested" },
+    });
+
+    expect(mocks.updateHostedLinqChatAvatar).toHaveBeenCalledWith({
+      chatId: "chat_group_1",
+      groupChatIconUrl: previewIconUrl,
     });
   });
 

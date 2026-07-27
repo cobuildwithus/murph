@@ -22,6 +22,7 @@ import type { R2BucketLike } from "../bundle-store.js";
 import type { HostedExecutionEnvironment } from "../env.js";
 import {
   readHostedPrivateMediaCapabilitySecret,
+  readHostedPrivateMediaDeliveryOrigin,
   stageHostedPrivateMedia,
   type HostedPrivateMediaPublishInput,
   type HostedPrivateMediaPublishResult,
@@ -78,6 +79,7 @@ export class HostedUserRunner {
   private readonly runnerStoreCache: RunnerStoreCache;
   private readonly privateMediaBucket: R2BucketLike;
   private readonly privateMediaCapabilitySecret: string | null;
+  private readonly privateMediaDeliveryOrigin: string;
   private privateMediaMutationLock: Promise<void> | null = null;
 
   constructor(
@@ -95,6 +97,8 @@ export class HostedUserRunner {
     this.privateMediaBucket = bucket;
     this.privateMediaCapabilitySecret =
       readHostedPrivateMediaCapabilitySecret(runnerRuntimeEnvSource);
+    this.privateMediaDeliveryOrigin =
+      readHostedPrivateMediaDeliveryOrigin(runnerRuntimeEnvSource);
     this.runnerStoreCache = new RunnerStoreCache({
       bucket,
       env,
@@ -214,6 +218,7 @@ export class HostedUserRunner {
           bytes: input.bytes,
           capabilitySecret: this.privateMediaCapabilitySecret,
           contentType: input.contentType,
+          deliveryOrigin: this.privateMediaDeliveryOrigin,
           userId: input.userId,
         });
         return {

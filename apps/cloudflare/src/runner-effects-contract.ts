@@ -112,6 +112,7 @@ export function parseHostedRunnerPrivateImageUrlPublishRequest(
 
 export function parseHostedRunnerPrivateImageUrlPublishResponse(
   value: unknown,
+  privateMediaDeliveryOrigin?: string | null,
 ): HostedRunnerPrivateImageUrlPublishResponse {
   const record = requireRecord(value, "Hosted private image URL publish response");
   const expiresAt = readRequiredString(record.expiresAt, "expiresAt");
@@ -125,7 +126,10 @@ export function parseHostedRunnerPrivateImageUrlPublishResponse(
   }
   if (
     !Number.isFinite(expiresAtMs)
-    || !isHostedRuntimePrivateImageDeliveryUrl(url)
+    || !isHostedRuntimePrivateImageDeliveryUrl(
+      url,
+      privateMediaDeliveryOrigin ?? undefined,
+    )
     || Number(url.searchParams.get("exp")) * 1_000 !== expiresAtMs
   ) {
     throw new TypeError(

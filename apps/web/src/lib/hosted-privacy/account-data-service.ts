@@ -52,9 +52,12 @@ import {
   isHostedAccountExitReasonCode,
 } from "./account-data-shared";
 import {
+  HOSTED_ACCOUNT_DELETION_IMMEDIATE_ATTEMPT_TIMEOUT_MS,
   pendingHostedAccountDeletionCleanupResult,
   persistHostedAccountDeletionCleanupTx,
   prepareHostedAccountDeletionCleanup,
+  runHostedAccountDeletionCleanup,
+  type HostedAccountDeletionCleanupRunResult,
   type HostedAccountVendorDeletionResult,
   type PreparedHostedAccountDeletionCleanup,
 } from "./account-deletion-cleanup";
@@ -831,9 +834,20 @@ export async function deleteHostedAccountData(input: {
       userId: memberId,
     }),
   ));
-  // Canonical deletion is complete and the encrypted receipt now owns every
-  // external retry. Never hold the acknowledgement open on a provider call.
-  const cleanup = pendingHostedAccountDeletionCleanupResult();
+  let cleanup: HostedAccountDeletionCleanupRunResult;
+  try {
+    cleanup = await runHostedAccountDeletionCleanup({
+      attemptTimeoutMs: HOSTED_ACCOUNT_DELETION_IMMEDIATE_ATTEMPT_TIMEOUT_MS,
+      cleanupId: preparedCleanup.id,
+      prisma: input.prisma,
+    });
+  } catch (error) {
+    console.error("Hosted account deletion committed with cleanup pending.", {
+      cleanupIdSuffix: preparedCleanup.id.slice(-8),
+      errorCode: safeErrorCode(error),
+    });
+    cleanup = pendingHostedAccountDeletionCleanupResult(safeErrorCode(error));
+  }
   await Promise.all(deletedRuntimeMemberIds.map((memberId) =>
     terminateHostedUserRuntimeWorkflowBestEffort({
       reason: "account-deleted",

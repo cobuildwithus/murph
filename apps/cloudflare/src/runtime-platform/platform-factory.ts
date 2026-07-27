@@ -50,6 +50,7 @@ export function buildHostedExecutionRuntimePlatform(input: {
   boundUserId: string;
   commitTimeoutMs?: number | null;
   fetchImpl?: typeof fetch;
+  privateMediaDeliveryOrigin?: string | null;
   preparedSnapshotRestore?: HostedWorkspaceSnapshotPreparedRestore | null;
   providerFetchBaseUrlSource?: Readonly<Record<string, unknown>> | null;
   providerFetchBaseUrls?: readonly string[] | null;
@@ -108,6 +109,7 @@ export function buildHostedExecutionRuntimePlatform(input: {
       ? {
           privateImageUrlPublisher: createCloudflarePrivateImageUrlPublisher({
             fetchImpl: trustedInternalFetchImpl,
+            privateMediaDeliveryOrigin: input.privateMediaDeliveryOrigin,
             timeoutMs,
             workspaceCheckpointBridge: input.workspaceCheckpointBridge,
           }),

@@ -2,6 +2,9 @@ import {
   HOSTED_RUNTIME_PRIVATE_MEDIA_DELIVERY_ORIGIN,
   HOSTED_RUNTIME_PRIVATE_MEDIA_DELIVERY_PATH_PREFIX,
 } from "@murphai/hosted-execution/runtime-control";
+import {
+  normalizeHostedExecutionBaseUrl,
+} from "@murphai/hosted-execution/env";
 
 import type {
   R2BucketLike,
@@ -24,6 +27,7 @@ export {
 
 export const HOSTED_PRIVATE_MEDIA_CAPABILITY_SECRET_ENV =
   "HOSTED_PRIVATE_MEDIA_CAPABILITY_SECRET";
+export const HOSTED_PRIVATE_MEDIA_DELIVERY_ORIGIN_ENV = "CF_PUBLIC_BASE_URL";
 export const HOSTED_PRIVATE_MEDIA_LIFETIME_SECONDS = 24 * 60 * 60;
 
 const HOSTED_PRIVATE_MEDIA_CAPABILITY_CONTEXT =
@@ -81,6 +85,7 @@ export async function stageHostedPrivateMedia(input: {
   bytes: Uint8Array;
   capabilitySecret: string;
   contentType: HostedPrivateMediaContentType;
+  deliveryOrigin: string;
   nowMs?: number;
   userId: string;
 }): Promise<{
@@ -93,6 +98,9 @@ export async function stageHostedPrivateMedia(input: {
     input.capabilitySecret,
   );
   const bytes = requireHostedPrivateMediaBytes(input.bytes);
+  const deliveryOrigin = requireHostedPrivateMediaDeliveryOrigin(
+    input.deliveryOrigin,
+  );
   if (!privateImageBytesMatchContentType(bytes, input.contentType)) {
     throw new TypeError("Hosted private media content type is invalid.");
   }
@@ -153,7 +161,7 @@ export async function stageHostedPrivateMedia(input: {
 
   const url = new URL(
     `${HOSTED_RUNTIME_PRIVATE_MEDIA_DELIVERY_PATH_PREFIX}${capability}`,
-    HOSTED_RUNTIME_PRIVATE_MEDIA_DELIVERY_ORIGIN,
+    deliveryOrigin,
   );
   url.searchParams.set("exp", String(expiresAtUnixSeconds));
 
@@ -162,6 +170,27 @@ export async function stageHostedPrivateMedia(input: {
     objectKey,
     url: url.toString(),
   };
+}
+
+export function readHostedPrivateMediaDeliveryOrigin(
+  source: Readonly<Record<string, unknown>>,
+): string {
+  return requireHostedPrivateMediaDeliveryOrigin(
+    typeof source[HOSTED_PRIVATE_MEDIA_DELIVERY_ORIGIN_ENV] === "string"
+      ? source[HOSTED_PRIVATE_MEDIA_DELIVERY_ORIGIN_ENV]
+      : HOSTED_RUNTIME_PRIVATE_MEDIA_DELIVERY_ORIGIN,
+  );
+}
+
+function requireHostedPrivateMediaDeliveryOrigin(value: string): string {
+  const origin = normalizeHostedExecutionBaseUrl(value, {
+    allowHttpLocalhost: true,
+    requireOriginOnly: true,
+  });
+  if (!origin) {
+    throw new TypeError("Hosted private media delivery origin is required.");
+  }
+  return origin;
 }
 
 export async function readHostedPrivateMedia(input: {

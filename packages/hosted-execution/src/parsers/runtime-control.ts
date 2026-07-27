@@ -986,6 +986,9 @@ export function parseHostedRuntimeAssistantAskControlResponse(
 
 export function parseHostedRuntimeGroupToolRequest(
   value: unknown,
+  options: {
+    privateMediaDeliveryOrigin?: string | null;
+  } = {},
 ): HostedRuntimeGroupToolRequest {
   const record = requireObject(value, "Hosted runtime group tool request");
   const action = requireString(record.action, "Hosted runtime group tool request action");
@@ -1201,7 +1204,10 @@ export function parseHostedRuntimeGroupToolRequest(
     );
     return {
       action,
-      groupChatIconUrl: parseHostedRuntimeGroupChatIconUrl(record.groupChatIconUrl),
+      groupChatIconUrl: parseHostedRuntimeGroupChatIconUrl(
+        record.groupChatIconUrl,
+        options.privateMediaDeliveryOrigin,
+      ),
       ...(record.linqThread === undefined || record.linqThread === null
         ? {}
         : {
@@ -1291,7 +1297,10 @@ function parseHostedRuntimeGroupUpdateDisplayNameRequest(
   return { displayName };
 }
 
-function parseHostedRuntimeGroupChatIconUrl(value: unknown): string {
+function parseHostedRuntimeGroupChatIconUrl(
+  value: unknown,
+  privateMediaDeliveryOrigin?: string | null,
+): string {
   const iconUrl = requireString(
     value,
     "Hosted runtime group tool set_chat_avatar groupChatIconUrl",
@@ -1311,7 +1320,10 @@ function parseHostedRuntimeGroupChatIconUrl(value: unknown): string {
   if (parsed.protocol !== "https:" || parsed.username || parsed.password) {
     throw new TypeError("Hosted runtime group tool set_chat_avatar groupChatIconUrl must be HTTPS.");
   }
-  if (!isHostedRuntimePrivateImageDeliveryUrl(parsed)) {
+  if (!isHostedRuntimePrivateImageDeliveryUrl(
+    parsed,
+    privateMediaDeliveryOrigin ?? undefined,
+  )) {
     throw new TypeError("Hosted runtime group tool set_chat_avatar groupChatIconUrl is invalid.");
   }
   return parsed.toString();

@@ -34,6 +34,13 @@ export function readHostedExecutionControlBaseUrl(
   return readHostedExecutionControlEnvironment(source).controlBaseUrl;
 }
 
+export function readHostedExecutionControlOrigin(
+  source: EnvSource = process.env,
+): string | null {
+  const controlBaseUrl = readHostedExecutionControlBaseUrl(source);
+  return controlBaseUrl ? new URL(controlBaseUrl).origin : null;
+}
+
 function parsePositiveInteger(value: string | null, fallback: number, label: string): number {
   if (!value) {
     return fallback;

@@ -25,6 +25,9 @@ import {
   getHostedVaultShareDailyMetricProjectionSpec,
 } from "@murphai/hosted-execution/vault-share";
 
+import {
+  readHostedExecutionControlOrigin,
+} from "../hosted-execution/environment";
 import { hasHostedRuntimeActiveAccess } from "../hosted-mailbox/runtime-access";
 import {
   assertHostedMemberNotSuspended,
@@ -1227,7 +1230,10 @@ function normalizeHostedGroupChatIconUrl(value: string): string | null {
   if (parsed.protocol !== "https:" || parsed.username || parsed.password) {
     return null;
   }
-  if (!isHostedRuntimePrivateImageDeliveryUrl(parsed)) {
+  if (!isHostedRuntimePrivateImageDeliveryUrl(
+    parsed,
+    readHostedExecutionControlOrigin() ?? undefined,
+  )) {
     return null;
   }
   return parsed.toString();
