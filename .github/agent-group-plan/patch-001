@@ -1,0 +1,457 @@
+diff --git a/apps/web/src/lib/hosted-onboarding/billing-plans.ts b/apps/web/src/lib/hosted-onboarding/billing-plans.ts
+--- a/apps/web/src/lib/hosted-onboarding/billing-plans.ts
++++ b/apps/web/src/lib/hosted-onboarding/billing-plans.ts
+@@ -8,10 +8,19 @@ export {
+ 
+ export const HOSTED_BILLING_PLAN_CODES = [
+   "launch_monthly",
+   "launch_edge_monthly",
++  "launch_group_monthly",
+ ] as const;
+ 
+ export type HostedBillingPlanCode = (typeof HOSTED_BILLING_PLAN_CODES)[number];
++
++export const HOSTED_PUBLIC_BILLING_PLAN_CODES = [
++  "launch_monthly",
++  "launch_edge_monthly",
++] as const satisfies readonly HostedBillingPlanCode[];
++
++export type HostedPublicBillingPlanCode =
++  (typeof HOSTED_PUBLIC_BILLING_PLAN_CODES)[number];
+ export type HostedBillingPlanInterval = "month";
+ 
+ export const HOSTED_PUBLIC_BILLING_CHECKOUT_OFFERS = [
+@@ -97,6 +105,16 @@ export interface HostedBillingPlanPresentation {
+ }
+ 
+ const HOSTED_BILLING_PLAN_DEFINITIONS = {
++  launch_group_monthly: {
++    badge: null,
++    code: "launch_group_monthly",
++    displayName: "Group",
++    interval: "month",
++    planCode: "pulse",
++    priceIdEnvKey:
++      "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_GROUP_MONTHLY",
++    recurringAmountUsdCents: 350,
++  },
+   launch_monthly: {
+     badge: null,
+     code: "launch_monthly",
+@@ -117,6 +135,17 @@ const HOSTED_BILLING_PLAN_DEFINITIONS = {
+   },
+ } as const satisfies Record<HostedBillingPlanCode, HostedBillingPlanDefinition>;
+ 
++const HOSTED_DEFAULT_BILLING_PLAN_CODE_BY_PLAN = {
++  edge: "launch_edge_monthly",
++  pulse: "launch_monthly",
++} as const satisfies Record<HostedPlanCode, HostedBillingPlanCode>;
++
++const HOSTED_DIRECT_BILLING_PLAN_RANK = {
++  launch_group_monthly: 0,
++  launch_monthly: 1,
++  launch_edge_monthly: 2,
++} as const satisfies Record<HostedBillingPlanCode, number>;
++
+ export interface HostedPlanDefinition {
+   readonly code: HostedPlanCode;
+   readonly displayName: string;
+@@ -194,17 +226,17 @@ export function getHostedPlanCodeForBillingPlan(
+ }
+ 
+ export function getHostedBillingPlanCodeForPlan(
+-  planCode: HostedPlanCode,
++  planCode: HostedPlanCode
+ ): HostedBillingPlanCode {
+-  const billingPlanCode = HOSTED_BILLING_PLAN_CODES.find(
+-    (code) => HOSTED_BILLING_PLAN_DEFINITIONS[code].planCode === planCode,
+-  );
+-  if (!billingPlanCode) {
+-    throw new TypeError(`No direct billing plan is configured for ${planCode}.`);
+-  }
+-  return billingPlanCode;
++  return HOSTED_DEFAULT_BILLING_PLAN_CODE_BY_PLAN[planCode];
+ }
+ 
++export function getHostedDirectBillingPlanRank(
++  code: HostedBillingPlanCode,
++): number {
++  return HOSTED_DIRECT_BILLING_PLAN_RANK[code];
++}
++
+ export function parseHostedPlanCode(value: unknown): HostedPlanCode | null {
+   return typeof value === "string" &&
+     HOSTED_PLAN_CODES.includes(value as HostedPlanCode)
+@@ -253,6 +282,43 @@ function calculateHostedPaidAiUsageAllowanceUsdMicros(
+   ) / HOSTED_PAID_AI_USAGE_ALLOWANCE_DENOMINATOR;
+ }
+ 
++export function isHostedBillingPlanImmediateUpgrade(input: {
++  currentPlanCode: HostedBillingPlanCode;
++  targetPlanCode: HostedBillingPlanCode;
++}): boolean {
++  return getHostedDirectBillingPlanRank(input.targetPlanCode) >
++    getHostedDirectBillingPlanRank(input.currentPlanCode);
++}
++
++export function isHostedBillingPlanScheduledDowngrade(input: {
++  currentPlanCode: HostedBillingPlanCode;
++  targetPlanCode: HostedBillingPlanCode;
++}): boolean {
++  return getHostedDirectBillingPlanRank(input.targetPlanCode) <
++    getHostedDirectBillingPlanRank(input.currentPlanCode);
++}
++
++export function canUpgradeHostedBillingPlan(input: {
++  currentBillingPhase?: unknown;
++  currentBillingPlanCode?: unknown;
++  currentCheckoutOffer?: unknown;
++  targetPlanCode?: unknown;
++}): boolean {
++  const currentPlanCode = parseHostedBillingPlanCode(
++    input.currentBillingPlanCode,
++  );
++  const targetPlanCode = parseHostedBillingPlanCode(input.targetPlanCode);
++
++  return currentPlanCode !== null &&
++    targetPlanCode !== null &&
++    parseHostedBillingPhase(input.currentBillingPhase) === "paid" &&
++    !isHostedPulseTrialBillingState(input) &&
++    isHostedBillingPlanImmediateUpgrade({
++      currentPlanCode,
++      targetPlanCode,
++    });
++}
++
+ export function isHostedPulseTrialCheckoutEnabled(
+   source: Record<string, string | undefined> = process.env,
+ ): boolean {
+@@ -286,6 +286,17 @@ export function parseHostedBillingPlanCode(
+     : null;
+ }
+ 
++export function parseHostedPublicBillingPlanCode(
++  value: unknown,
++): HostedPublicBillingPlanCode | null {
++  return typeof value === "string" &&
++      HOSTED_PUBLIC_BILLING_PLAN_CODES.includes(
++        value as HostedPublicBillingPlanCode,
++      )
++    ? value as HostedPublicBillingPlanCode
++    : null;
++}
++
+ export function parseHostedPublicBillingCheckoutOffer(
+   value: unknown,
+ ): HostedPublicBillingCheckoutOffer | null {
+@@ -311,16 +386,57 @@ export function isHostedPulseTrialBillingState(input: {
+     (offer === HOSTED_PULSE_TRIAL_OFFER && phase !== "paid");
+ }
+ 
+ export function canUpgradeHostedBillingPlanToEdge(input: {
+   currentBillingPhase?: unknown;
+   currentBillingPlanCode?: unknown;
+   currentCheckoutOffer?: unknown;
+ }): boolean {
+-  const phase = parseHostedBillingPhase(input.currentBillingPhase);
+-
+-  return parseHostedBillingPlanCode(input.currentBillingPlanCode) === "launch_monthly" &&
+-    phase === "paid" &&
+-    !isHostedPulseTrialBillingState(input);
++  return canUpgradeHostedBillingPlan({
++    ...input,
++    targetPlanCode: "launch_edge_monthly",
++  });
++}
++
++export function canScheduleHostedBillingPlanChange(input: {
++  billingStatus?: unknown;
++  currentBillingPhase?: unknown;
++  currentBillingPlanCode?: unknown;
++  currentCheckoutOffer?: unknown;
++  stripeCustomerId?: unknown;
++  stripeSubscriptionId?: unknown;
++  suspendedAt?: unknown;
++  targetPlanCode?: unknown;
++}): boolean {
++  const currentPlanCode = parseHostedBillingPlanCode(
++    input.currentBillingPlanCode,
++  );
++  const targetPlanCode = parseHostedBillingPlanCode(input.targetPlanCode);
++  if (
++    !currentPlanCode ||
++    !targetPlanCode ||
++    input.billingStatus !== "active" ||
++    input.suspendedAt instanceof Date ||
++    typeof input.stripeCustomerId !== "string" ||
++    input.stripeCustomerId.length === 0 ||
++    typeof input.stripeSubscriptionId !== "string" ||
++    input.stripeSubscriptionId.length === 0
++  ) {
++    return false;
++  }
++
++  if (
++    parseHostedBillingPhase(input.currentBillingPhase) === "paid" &&
++    isHostedBillingPlanScheduledDowngrade({
++      currentPlanCode,
++      targetPlanCode,
++    })
++  ) {
++    return true;
++  }
++
++  return currentPlanCode === "launch_monthly" &&
++    targetPlanCode === "launch_group_monthly" &&
++    isHostedPulseTrialBillingState(input);
+ }
+ 
+ export function canSwitchHostedBillingPlanToPulse(input: {
+@@ -333,14 +449,10 @@ export function canSwitchHostedBillingPlanToPulse(input: {
+   stripeSubscriptionId?: unknown;
+   suspendedAt?: unknown;
+ }): boolean {
+-  return parseHostedBillingPlanCode(input.currentBillingPlanCode) === "launch_edge_monthly" &&
+-    parseHostedBillingPhase(input.currentBillingPhase) === "paid" &&
+-    input.billingStatus === "active" &&
+-    !(input.suspendedAt instanceof Date) &&
+-    typeof input.stripeCustomerId === "string" &&
+-    input.stripeCustomerId.length > 0 &&
+-    typeof input.stripeSubscriptionId === "string" &&
+-    input.stripeSubscriptionId.length > 0;
++  return canScheduleHostedBillingPlanChange({
++    ...input,
++    targetPlanCode: "launch_monthly",
++  });
+ }
+ 
+ export function canStartHostedPulseTrialPaidPlan(input: {
+@@ -420,7 +530,7 @@ export function listHostedBillingPlanPresentations(
+   const configuredPlanCodes = input.configuredPlanCodes
+     ? new Set(input.configuredPlanCodes)
+     : null;
+-  return HOSTED_BILLING_PLAN_CODES
++  return HOSTED_PUBLIC_BILLING_PLAN_CODES
+     .filter((code) => configuredPlanCodes === null || configuredPlanCodes.has(code))
+     .map((code) => {
+       const definition = getHostedBillingPlanDefinition(code);
+@@ -438,7 +548,8 @@ export function listHostedBillingPlanPresentations(
+ }
+ 
+ export function resolveConfiguredHostedBillingPlanCodes(input: {
+-  stripePriceIdsByPlan: Readonly<Record<HostedBillingPlanCode, string | null>>;
++  stripePriceIdsByPlan:
++    Readonly<Partial<Record<HostedBillingPlanCode, string | null>>>;
+ }): HostedBillingPlanCode[] {
+   return HOSTED_BILLING_PLAN_CODES.filter(
+     (code) => Boolean(input.stripePriceIdsByPlan[code]),
+@@ -449,18 +560,32 @@ export function resolveConfiguredHostedBillingPlanCodes(input: {
+ 
+ export function resolveHostedBillingReady(input: {
+-  stripePriceIdsByPlan: Readonly<Record<HostedBillingPlanCode, string | null>>;
++  stripePriceIdsByPlan:
++    Readonly<Partial<Record<HostedBillingPlanCode, string | null>>>;
+   stripeSecretKey: string | null;
+ }): boolean {
+-  return Boolean(
+-    input.stripeSecretKey &&
+-      resolveConfiguredHostedBillingPlanCodes(input).length > 0,
++  const configuredPlanCodes = new Set(
++    resolveConfiguredHostedBillingPlanCodes(input),
+   );
++  return Boolean(
++    input.stripeSecretKey &&
++      HOSTED_PUBLIC_BILLING_PLAN_CODES.some((code) =>
++        configuredPlanCodes.has(code)
++      ),
++  );
++}
++
++export function formatHostedBillingPrice(amountUsdCents: number): string {
++  const wholeDollars = Math.floor(amountUsdCents / 100);
++  const cents = amountUsdCents % 100;
++  return cents === 0
++    ? `$${wholeDollars}`
++    : `$${wholeDollars}.${String(cents).padStart(2, "0")}`;
+ }
+ 
+ function formatUsdCompact(amountUsdCents: number): string {
+-  return `$${(amountUsdCents / 100).toFixed(0)}`;
++  return formatHostedBillingPrice(amountUsdCents);
+ }
+ 
+ function formatUsdLong(amountUsdCents: number): string {
+-  return `$${(amountUsdCents / 100).toFixed(0)}`;
++  return formatHostedBillingPrice(amountUsdCents);
+ }
+diff --git a/apps/web/src/lib/hosted-onboarding/env.ts b/apps/web/src/lib/hosted-onboarding/env.ts
+--- a/apps/web/src/lib/hosted-onboarding/env.ts
++++ b/apps/web/src/lib/hosted-onboarding/env.ts
+@@ -52,6 +52,7 @@ export interface HostedOnboardingEnvironment {
+   privyVerificationKey: string | null;
+   publicBaseUrl: string | null;
+-  stripePriceIdsByPlan: Readonly<Record<HostedBillingPlanCode, string | null>>;
++  stripePriceIdsByPlan:
++    Readonly<Partial<Record<HostedBillingPlanCode, string | null>>>;
+   stripeFamilyPriceIdsByPlan: Readonly<Record<HostedPlanCode, string | null>>;
+   stripeUsageCreditPriceIdsByOffer: Readonly<
+     Record<HostedUsageCreditOfferCode, string | null>
+diff --git a/apps/web/.env.example b/apps/web/.env.example
+--- a/apps/web/.env.example
++++ b/apps/web/.env.example
+@@ -109,5 +109,6 @@ HOSTED_PULSE_TRIAL_CHECKOUT_ENABLED="0"
+ # `.tmp/.env.hosted-local-stripe` so they override Vercel Development env
+ # without being committed.
++HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_GROUP_MONTHLY="price_replace_me"
+ HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY="price_replace_me"
+ HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_EDGE_MONTHLY="price_replace_me"
+ HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_SEAT_MONTHLY="price_replace_me"
+diff --git a/packages/hosted-local-harness/src/dev-hosted-local/stripe.ts b/packages/hosted-local-harness/src/dev-hosted-local/stripe.ts
+--- a/packages/hosted-local-harness/src/dev-hosted-local/stripe.ts
++++ b/packages/hosted-local-harness/src/dev-hosted-local/stripe.ts
+@@ -1,4 +1,5 @@
+ export const HOSTED_LOCAL_STRIPE_BILLING_PRICE_ENV_KEYS = [
++  "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_GROUP_MONTHLY",
+   "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY",
+   "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_EDGE_MONTHLY",
+   "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_SEAT_MONTHLY",
+@@ -10,6 +11,12 @@ export const HOSTED_LOCAL_STRIPE_BILLING_PRICE_ENV_KEYS = [
+ ] as const;
+ 
+ const FLAT_PRICE_PLAN_KEYS = [
++  {
++    code: "launch_group_monthly",
++    label: "group",
++    priceKey:
++      "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_GROUP_MONTHLY",
++  },
+   {
+     code: "launch_monthly",
+     label: "monthly",
+diff --git a/apps/web/src/lib/hosted-onboarding/billing-plan-eligibility.ts b/apps/web/src/lib/hosted-onboarding/billing-plan-eligibility.ts
+new file mode 100644
+--- /dev/null
++++ b/apps/web/src/lib/hosted-onboarding/billing-plan-eligibility.ts
+@@ -0,0 +1,110 @@
++import "server-only";
++
++import type { Prisma, PrismaClient } from "@prisma/client";
++
++import { getPrisma } from "../prisma";
++import {
++  type HostedBillingPlanCode,
++} from "./billing-plans";
++import { hostedOnboardingError } from "./errors";
++
++type HostedBillingPlanEligibilityClient =
++  | PrismaClient
++  | Prisma.TransactionClient;
++
++export async function hasConfirmedHostedGroupMembership(input: {
++  memberId: string;
++  prisma?: HostedBillingPlanEligibilityClient;
++}): Promise<boolean> {
++  const prisma = input.prisma ?? getPrisma();
++  const membership = await prisma.hostedGroupMember.findFirst({
++    select: { id: true },
++    where: {
++      memberId: input.memberId,
++      OR: [
++        { role: "owner" },
++        { joinedAt: { not: null } },
++      ],
++    },
++  });
++
++  return membership !== null;
++}
++
++export function resolveVisibleHostedBillingPlanCodes(input: {
++  currentPlanCode: HostedBillingPlanCode | null;
++  groupPlanConfigured: boolean;
++  hasConfirmedGroupMembership: boolean;
++  scheduledPlanCode: HostedBillingPlanCode | null;
++}): HostedBillingPlanCode[] {
++  const showGroup =
++    input.currentPlanCode === "launch_group_monthly" ||
++    input.scheduledPlanCode === "launch_group_monthly" ||
++    (
++      input.groupPlanConfigured &&
++      input.hasConfirmedGroupMembership
++    );
++
++  return [
++    ...(showGroup ? ["launch_group_monthly" as const] : []),
++    "launch_monthly",
++    "launch_edge_monthly",
++  ];
++}
++
++export interface HostedTrialContinuationOffer {
++  availablePlanCodes: Array<
++    "launch_group_monthly" | "launch_monthly"
++  >;
++  recommendedPlanCode:
++    | "launch_group_monthly"
++    | "launch_monthly";
++}
++
++export function resolveHostedTrialContinuationOffer(input: {
++  groupPlanConfigured: boolean;
++  hasConfirmedGroupMembership: boolean;
++}): HostedTrialContinuationOffer {
++  if (
++    input.groupPlanConfigured &&
++    input.hasConfirmedGroupMembership
++  ) {
++    return {
++      availablePlanCodes: [
++        "launch_group_monthly",
++        "launch_monthly",
++      ],
++      recommendedPlanCode: "launch_group_monthly",
++    };
++  }
++
++  return {
++    availablePlanCodes: ["launch_monthly"],
++    recommendedPlanCode: "launch_monthly",
++  };
++}
++
++/**
++ * Visibility is advisory. Every mutation that would start or schedule Group
++ * rechecks the canonical membership row under its existing billing lock.
++ */
++export async function assertHostedBillingPlanSelectable(input: {
++  memberId: string;
++  prisma?: HostedBillingPlanEligibilityClient;
++  targetPlanCode: HostedBillingPlanCode;
++}): Promise<void> {
++  if (input.targetPlanCode !== "launch_group_monthly") {
++    return;
++  }
++
++  if (await hasConfirmedHostedGroupMembership(input)) {
++    return;
++  }
++
++  throw hostedOnboardingError({
++    code: "HOSTED_GROUP_PLAN_NOT_ELIGIBLE",
++    httpStatus: 409,
++    message:
++      "The Group plan is available while you're part of a Murph group.",
++  });
++}
+diff --git a/apps/web/app/api/hosted-onboarding/billing/checkout/route.ts b/apps/web/app/api/hosted-onboarding/billing/checkout/route.ts
+--- a/apps/web/app/api/hosted-onboarding/billing/checkout/route.ts
++++ b/apps/web/app/api/hosted-onboarding/billing/checkout/route.ts
+@@ -2,4 +2,4 @@ import { createHostedBillingCheckout } from "@/src/lib/hosted-onboarding/billin
+ import {
+-  parseHostedBillingPlanCode,
++  parseHostedPublicBillingPlanCode,
+   parseHostedPublicBillingCheckoutOffer,
+ } from "@/src/lib/hosted-onboarding/billing-plans";
+@@ -26,5 +26,5 @@ export const POST = withJsonError(async (request: Request) => {
+     const prisma = getPrisma();
+     const auth = await requireHostedAppSessionFromRequest(request);
