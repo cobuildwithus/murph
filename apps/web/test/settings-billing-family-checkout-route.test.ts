@@ -1,4 +1,4 @@
-import { beforeEach, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import { hostedOnboardingError } from "../src/lib/hosted-onboarding/errors";
 
@@ -34,6 +34,7 @@ let billingFamilyCheckoutRoute: BillingFamilyCheckoutRouteModule;
 
 beforeEach(async () => {
   vi.clearAllMocks();
+  vi.stubEnv("HOSTED_ACCOUNT_DELETION_MAINTENANCE", "");
   mocks.assertHostedOnboardingMutationOrigin.mockImplementation(() => {});
   mocks.getPrisma.mockReturnValue({
     $transaction: vi.fn((callback) => callback({ label: "tx" })),
@@ -55,6 +56,35 @@ beforeEach(async () => {
   });
 
   billingFamilyCheckoutRoute = await import("../app/api/settings/billing/family/checkout/route");
+});
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
+
+test("rejects maintenance before reading the authenticated session or creating a group", async () => {
+  vi.stubEnv("HOSTED_ACCOUNT_DELETION_MAINTENANCE", "1");
+
+  const response = await billingFamilyCheckoutRoute.POST(
+    new Request("https://join.example.test/api/settings/billing/family/checkout", {
+      headers: {
+        origin: "https://join.example.test",
+      },
+      method: "POST",
+    }),
+  );
+
+  expect(response.status).toBe(503);
+  await expect(response.json()).resolves.toMatchObject({
+    error: {
+      code: "subscription_checkout_maintenance",
+      retryable: true,
+    },
+  });
+  expect(mocks.requireHostedAppSessionFromRequest).not.toHaveBeenCalled();
+  expect(mocks.getPrisma).not.toHaveBeenCalled();
+  expect(mocks.ensureHostedAccountGroupForOwnerTx).not.toHaveBeenCalled();
+  expect(mocks.createHostedFamilyBillingCheckout).not.toHaveBeenCalled();
 });
 
 test("starts Family checkout for the authenticated hosted owner", async () => {

@@ -15,12 +15,16 @@ import { requireHostedInviteCodeFromRequest } from "@/src/lib/hosted-onboarding/
 import { requireHostedAppSessionFromRequest } from "@/src/lib/hosted-onboarding/app-session";
 import { assertHostedLaunchRequiredConsentGranted } from "@/src/lib/legal/consent";
 import { getPrisma } from "@/src/lib/prisma";
+import {
+  assertHostedSubscriptionCheckoutAvailable,
+} from "@/src/lib/hosted-privacy/account-deletion-maintenance";
 
 export const POST = withJsonError(async (request: Request) => {
   const timing = startHostedOnboardingTiming("hosted-onboarding.route.billing-checkout");
 
   try {
     assertHostedOnboardingMutationOrigin(request);
+    assertHostedSubscriptionCheckoutAvailable();
     const prisma = getPrisma();
     const auth = await requireHostedAppSessionFromRequest(request);
     const { body, inviteCode } = await requireHostedInviteCodeFromRequest(request);

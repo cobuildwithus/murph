@@ -38,7 +38,7 @@ The current named purposes are:
 
 | Purpose | Opens before | Closes only after |
 | --- | --- | --- |
-| `checkout-session-deletion-fence` | the additive schema migration and first bind-before-return writer | every pre-fence personal Session is terminal or its completed Customer/Subscription is reconciled; the fence writer is live everywhere |
+| `checkout-session-deletion-fence` | the additive schema migration and first bind-before-return writer | every personal Session created on or before the second admission-closing instant has an outcome-specific proof: expired/missing, or completed with its Customer and Subscription owned locally or cleaned up at Stripe; the fence writer is live everywhere |
 | `r2-bundles-enam` | destination creation | OC retirement or mechanically proven pre-commit abandonment, as defined by `apps/cloudflare/R2_BUNDLES_ENAM_MIGRATION.md` |
 
 Clearing is authorized only when every active purpose has supplied its exit
@@ -97,24 +97,41 @@ deletion flag but does not yet reject subscription Checkout:
    reject both deletion and subscription Checkout.
 4. Advance the threshold again, this time to the bind-before-return
    maintenance deployment. Run the full pinned-predecessor proof above and wait
-   the absolute Function maximum. Only this second closure makes the
+   the absolute Function maximum. Record this second admission-closing instant
+   as an inclusive Stripe `created` cutoff. Only this closure makes the
    pre-fence Session set finite.
-5. Enumerate every still-open personal subscription Checkout Session issued
-   before the second closure from Stripe's Murph-owned metadata. Expire each
-   Session. If completion wins the expiry race, reconcile or cancel its
-   Customer and Subscription through the existing deletion cleanup ownership.
-   Do not persist or publish raw provider identifiers.
-6. Re-run the enumeration until no open pre-fence Session remains. Prove new
-   personal and Family Checkouts stay bound, and prove deletion captures an
-   open Session and a concurrently completed Session.
-7. Mark `checkout-session-deletion-fence` closed. Clear maintenance only if the
+5. Without a `status` filter, automatically paginate every Checkout Session
+   created on or before that cutoff. Select every `mode=subscription` Session
+   whose existing `client_reference_id`, `memberId`, `billingPlanCode`, and
+   `checkoutOffer` metadata identify Murph personal billing. Reject malformed,
+   incomplete, or conflicting metadata rather than silently excluding it. The
+   complete paginated result, not only its open subset, is the rollout set. Do
+   not persist or publish raw provider or member identifiers.
+6. Prove one outcome for every Session in that immutable set:
+   - expire `open`, then retrieve it and require `expired`;
+   - accept `expired` or provider-proven missing;
+   - for `complete`, require nonempty Customer and Subscription ids, then either
+     replay/reconcile the completion and prove the exact pair belongs to the
+     surviving canonical member billing reference, or, when no local owner
+     survives, cancel the exact Subscription and delete the Customer if no
+     surviving billing reference owns it;
+   - treat any other status, owner conflict, failed replay, failed cancellation
+     or deletion, pagination uncertainty, or ambiguous provider response as an
+     open purpose that keeps maintenance active.
+7. Repeat the full all-status pagination, not an open-only query. The set is
+   closed only when every row at or before the fixed cutoff has the required
+   outcome proof and no row was skipped. Prove new personal and Family
+   Checkouts stay bound, and prove deletion captures an open Session and a
+   concurrently completed Session.
+8. Mark `checkout-session-deletion-fence` closed. Clear maintenance only if the
    shared active-purpose record is otherwise empty, then deploy and smoke
    deletion plus personal and Family Checkout.
 
 The first converged bind-before-return deployment is the Web rollback floor.
 An emergency rollback below it keeps maintenance active; deletion must not
 resume until a fence-capable deployment is restored, the threshold and
-absolute wait are repeated, and the pre-fence Session sweep is empty again.
+absolute wait are repeated, and the full all-status Session proof succeeds
+again against the new second-closure cutoff.
 
 ## Release or remove the control
 

@@ -1,4 +1,4 @@
-import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { hostedOnboardingError } from "../src/lib/hosted-onboarding/errors";
 
@@ -46,6 +46,7 @@ describe("hosted onboarding billing checkout route", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.stubEnv("HOSTED_ACCOUNT_DELETION_MAINTENANCE", "");
     vi.spyOn(console, "info").mockImplementation(() => {});
     mocks.assertHostedOnboardingMutationOrigin.mockReturnValue(undefined);
     mocks.assertHostedLaunchRequiredConsentGranted.mockResolvedValue(undefined);
@@ -64,6 +65,34 @@ describe("hosted onboarding billing checkout route", () => {
         suspendedAt: null,
       },
     });
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("rejects maintenance before reading the authenticated session", async () => {
+    vi.stubEnv("HOSTED_ACCOUNT_DELETION_MAINTENANCE", "1");
+
+    const response = await billingCheckoutRoute.POST(
+      new Request("https://join.example.test/api/hosted-onboarding/billing/checkout", {
+        headers: {
+          origin: "https://join.example.test",
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toMatchObject({
+      error: {
+        code: "subscription_checkout_maintenance",
+        retryable: true,
+      },
+    });
+    expect(mocks.requireHostedAppSessionFromRequest).not.toHaveBeenCalled();
+    expect(mocks.getPrisma).not.toHaveBeenCalled();
+    expect(mocks.createHostedBillingCheckout).not.toHaveBeenCalled();
   });
 
   it("returns the checkout session", async () => {

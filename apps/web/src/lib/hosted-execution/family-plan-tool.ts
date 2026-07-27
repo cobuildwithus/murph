@@ -27,12 +27,19 @@ import {
 } from "@/src/lib/hosted-onboarding/shared";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { isHostedThreadContainerMember } from "@/src/lib/hosted-onboarding/member-access";
+import {
+  assertHostedSubscriptionCheckoutAvailable,
+} from "@/src/lib/hosted-privacy/account-deletion-maintenance";
 import { getPrisma } from "@/src/lib/prisma";
 
 export async function handleHostedRuntimeFamilyPlanTool(input: {
   memberId: string;
   request: HostedRuntimeFamilyPlanToolRequest;
 }): Promise<HostedRuntimeFamilyPlanToolResponse> {
+  if (input.request.action === "start_checkout") {
+    assertHostedSubscriptionCheckoutAvailable();
+  }
+
   if (await isHostedThreadContainerMember({ memberId: input.memberId })) {
     throw hostedOnboardingError({
       code: "HOSTED_FAMILY_PERSONAL_MEMBER_REQUIRED",

@@ -9,10 +9,14 @@ import { requireHostedAppSessionFromRequest } from "@/src/lib/hosted-onboarding/
 import {
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
 } from "@/src/lib/hosted-onboarding/shared";
+import {
+  assertHostedSubscriptionCheckoutAvailable,
+} from "@/src/lib/hosted-privacy/account-deletion-maintenance";
 import { getPrisma } from "@/src/lib/prisma";
 
 export const POST = withJsonError(async (request: Request) => {
   assertHostedOnboardingMutationOrigin(request);
+  assertHostedSubscriptionCheckoutAvailable();
   const prisma = getPrisma();
   const auth = await requireHostedAppSessionFromRequest(request);
   assertHostedMemberNotSuspended(auth.member);

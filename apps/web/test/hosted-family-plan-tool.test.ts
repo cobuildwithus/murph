@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   createHostedFamilyBillingCheckout: vi.fn(),
@@ -37,6 +37,7 @@ import {
 describe("hosted runtime Family plan tool", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.stubEnv("HOSTED_ACCOUNT_DELETION_MAINTENANCE", "");
     mocks.getPrisma.mockReturnValue({
       $transaction: vi.fn((callback) => callback({ label: "tx" })),
     });
@@ -66,6 +67,30 @@ describe("hosted runtime Family plan tool", () => {
     });
     mocks.readHostedFamilyOwnerSnapshotForMember.mockResolvedValue(null);
     mocks.isHostedThreadContainerMember.mockResolvedValue(false);
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("rejects checkout maintenance before reading member or group state", async () => {
+    vi.stubEnv("HOSTED_ACCOUNT_DELETION_MAINTENANCE", "1");
+
+    await expect(handleHostedRuntimeFamilyPlanTool({
+      memberId: "member_owner",
+      request: {
+        action: "start_checkout",
+      },
+    })).rejects.toMatchObject({
+      code: "subscription_checkout_maintenance",
+      httpStatus: 503,
+      retryable: true,
+    });
+
+    expect(mocks.isHostedThreadContainerMember).not.toHaveBeenCalled();
+    expect(mocks.getPrisma).not.toHaveBeenCalled();
+    expect(mocks.ensureHostedAccountGroupForOwnerTx).not.toHaveBeenCalled();
+    expect(mocks.createHostedFamilyBillingCheckout).not.toHaveBeenCalled();
   });
 
   it("rejects Family account operations for a synthetic group container", async () => {
