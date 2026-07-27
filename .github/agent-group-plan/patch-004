@@ -1,0 +1,419 @@
++      stripeSubscriptionId: context.stripeSubscriptionId,
++      targetPlanCode: LEGACY_EDGE_TO_PULSE_TARGET_PLAN,
++    }))}`;
++  }
++
+-  return `hosted-billing-switch-to-pulse:create:${sha256Hex(JSON.stringify({
++  return `hosted-billing-switch:create:v1:${sha256Hex(JSON.stringify({
+     currentPeriodEnd: context.currentPeriodEndUnix,
+     memberId: context.memberId,
++    sourcePlanCode: context.sourcePlanCode,
+     stripeSubscriptionId: context.stripeSubscriptionId,
+-    targetPlanCode: SWITCH_TO_PULSE_TARGET_PLAN,
++    targetPlanCode: context.targetPlanCode,
+   }))}`;
+ }
+@@ -1271,11 +1346,38 @@ function buildHostedBillingPlanSwitchToPulseUpdateIdempotencyKey(
+   context: HostedSwitchScheduleContext,
+ ): string {
++  if (isLegacyEdgeToPulseSwitch(context)) {
++    return `hosted-billing-switch-to-pulse:${SWITCH_TO_PULSE_UPDATE_OPERATION_VERSION}:update:${sha256Hex(JSON.stringify({
++      currentPeriodEnd: context.currentPeriodEndUnix,
++      memberId: context.memberId,
++      edgePriceId: context.sourceConfig.priceId,
++      pulsePriceId: context.targetConfig.priceId,
++      stripeSubscriptionId: context.stripeSubscriptionId,
++      targetPlanCode: LEGACY_EDGE_TO_PULSE_TARGET_PLAN,
++    }))}`;
++  }
++
+-  return `hosted-billing-switch-to-pulse:${SWITCH_TO_PULSE_UPDATE_OPERATION_VERSION}:update:${sha256Hex(JSON.stringify({
++  return `hosted-billing-switch:v1:update:${sha256Hex(JSON.stringify({
+     currentPeriodEnd: context.currentPeriodEndUnix,
+     memberId: context.memberId,
+-    edgePriceId: context.edgeConfig.priceId,
+-    pulsePriceId: context.pulseConfig.priceId,
++    sourcePlanCode: context.sourcePlanCode,
++    sourcePriceId: context.sourceConfig.priceId,
+     stripeSubscriptionId: context.stripeSubscriptionId,
+-    targetPlanCode: SWITCH_TO_PULSE_TARGET_PLAN,
++    targetPlanCode: context.targetPlanCode,
++    targetPriceId: context.targetConfig.priceId,
+   }))}`;
+ }
++
++function isLegacyEdgeToPulseSwitch(
++  context: HostedSwitchScheduleContext,
++): boolean {
++  return context.sourcePlanCode === LEGACY_EDGE_TO_PULSE_SOURCE_PLAN &&
++    context.targetPlanCode === LEGACY_EDGE_TO_PULSE_TARGET_PLAN;
++}
++
++function resolveHostedBillingPlanSwitchMarker(
++  context: HostedSwitchScheduleContext,
++): string {
++  return isLegacyEdgeToPulseSwitch(context)
++    ? LEGACY_EDGE_TO_PULSE_MARKER
++    : DIRECT_PLAN_SWITCH_MARKER;
++}
+diff --git a/apps/web/app/api/settings/billing/switch-plan/route.ts b/apps/web/app/api/settings/billing/switch-plan/route.ts
+new file mode 100644
+--- /dev/null
++++ b/apps/web/app/api/settings/billing/switch-plan/route.ts
+@@ -0,0 +1,49 @@
++import {
++  parseHostedBillingPlanCode,
++} from "@/src/lib/hosted-onboarding/billing-plans";
++import {
++  scheduleHostedBillingPlanSwitch,
++} from "@/src/lib/hosted-onboarding/billing-plan-switch-to-pulse-service";
++import {
++  requireHostedAppSessionFromRequest,
++} from "@/src/lib/hosted-onboarding/app-session";
++import {
++  assertHostedOnboardingMutationOrigin,
++} from "@/src/lib/hosted-onboarding/csrf";
++import { assertHostedMemberNotSuspended } from "@/src/lib/hosted-onboarding/entitlement";
++import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
++import {
++  readOptionalJsonObject,
++  jsonOk,
++  withJsonError,
++} from "@/src/lib/hosted-onboarding/http";
++import { getPrisma } from "@/src/lib/prisma";
++
++export const POST = withJsonError(async (request: Request) => {
++  assertHostedOnboardingMutationOrigin(request);
++  const auth = await requireHostedAppSessionFromRequest(request);
++  assertHostedMemberNotSuspended(auth.member);
++  const body = await readOptionalJsonObject(request, {
++    limitBytes: 2_048,
++  });
++  const targetPlanCode = parseHostedBillingPlanCode(
++    body.targetPlanCode,
++  );
++
++  if (!targetPlanCode) {
++    throw hostedOnboardingError({
++      code: "HOSTED_BILLING_PLAN_SWITCH_INVALID",
++      httpStatus: 400,
++      message:
++        "targetPlanCode must be a configured Murph billing plan.",
++    });
++  }
++
++  const result = await scheduleHostedBillingPlanSwitch({
++    memberId: auth.member.id,
++    prisma: getPrisma(),
++    targetPlanCode,
++  });
++
++  return jsonOk(result);
++});
+diff --git a/apps/web/src/components/settings/hosted-plan-upgrade-button.tsx b/apps/web/src/components/settings/hosted-plan-upgrade-button.tsx
+--- a/apps/web/src/components/settings/hosted-plan-upgrade-button.tsx
++++ b/apps/web/src/components/settings/hosted-plan-upgrade-button.tsx
+@@ -19,5 +19,8 @@ import {
+   DialogHeader,
+   DialogTitle,
+ } from "@/src/components/ui/dialog";
+-import { getHostedBillingPlanDefinition } from "@/src/lib/hosted-onboarding/billing-plans";
++import {
++  formatHostedBillingPrice,
++  getHostedBillingPlanDefinition,
++} from "@/src/lib/hosted-onboarding/billing-plans";
+ import type { HostedBillingPlanUpgradeResult } from "@/src/lib/hosted-onboarding/billing-plan-change-service";
+@@ -30,16 +34,34 @@ import {
+   type HostedBillingErrorAction,
+ } from "./hosted-settings-sync-helpers";
+ 
+-const edgePlan = getHostedBillingPlanDefinition("launch_edge_monthly");
+-const edgePriceLabel = formatHostedBillingPlanMonthlyPrice(edgePlan.recurringAmountUsdCents);
++type HostedImmediateUpgradeTarget =
++  | "launch_monthly"
++  | "launch_edge_monthly";
+ 
+-const EDGE_FEATURES = [
+-  "Everything in Pulse",
+-  "More usage on latest AI models",
+-  "Murph remembers more of your history",
+-  "Deeper research and analysis",
+-];
++const UPGRADE_PRESENTATION = {
++  launch_monthly: {
++    description: "For more regular one-on-one Murph use.",
++    features: [
++      "Everything in Group",
++      "More private Murph usage",
++      "Run more experiments and deeper analysis",
++      "Wearable syncing and group activity stay on",
++    ],
++  },
++  launch_edge_monthly: {
++    description: "For when you want the full picture.",
++    features: [
++      "Everything in Pulse",
++      "More usage on latest AI models",
++      "Murph remembers more of your history",
++      "Deeper research and analysis",
++    ],
++  },
++} as const satisfies Record<
++  HostedImmediateUpgradeTarget,
++  { description: string; features: readonly string[] }
++>;
+ 
+-type EdgeUpgradeRecovery = HostedBillingErrorAction | null;
++type PlanUpgradeRecovery = HostedBillingErrorAction | null;
+ 
+-const EDGE_UPGRADE_BILLING_RECOVERY_CODES = new Set([
++const PLAN_UPGRADE_BILLING_RECOVERY_CODES = new Set([
+@@ -50,14 +70,40 @@ const EDGE_UPGRADE_BILLING_RECOVERY_CODES = new Set([
+   "HOSTED_BILLING_PLAN_UPGRADE_INVOICE_UNCOLLECTIBLE",
+ ]);
+-const EDGE_UPGRADE_SUPPORT_RECOVERY_CODES = new Set([
++const PLAN_UPGRADE_SUPPORT_RECOVERY_CODES = new Set([
+   "HOSTED_BILLING_STRIPE_PLAN_CHANGE_PROVIDER_REJECTED",
+ ]);
+ 
+-export function UpgradeToEdgeButton(props: {
++export function UpgradeToPulseButton(
++  props: Omit<HostedPlanUpgradeButtonProps, "targetPlanCode">,
++) {
++  return (
++    <HostedPlanUpgradeButton
++      {...props}
++      targetPlanCode="launch_monthly"
++    />
++  );
++}
++
++export function UpgradeToEdgeButton(
++  props: Omit<HostedPlanUpgradeButtonProps, "targetPlanCode">,
++) {
++  return (
++    <HostedPlanUpgradeButton
++      {...props}
++      targetPlanCode="launch_edge_monthly"
++    />
++  );
++}
++
++interface HostedPlanUpgradeButtonProps {
+   block?: boolean;
+   children?: ReactNode;
+   disabled?: boolean;
+   onPendingChange?: (pending: boolean) => void;
+   presentation?: "banner" | "settings";
+-}) {
++  targetPlanCode: HostedImmediateUpgradeTarget;
++}
++
++function HostedPlanUpgradeButton(props: HostedPlanUpgradeButtonProps) {
++  const targetPlan = getHostedBillingPlanDefinition(props.targetPlanCode);
+   const presentation = props.presentation ?? "settings";
+@@ -65,4 +107,4 @@ export function UpgradeToEdgeButton(props: {
+   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+   const [isUpgrading, setIsUpgrading] = useState(false);
+   const [processing, setProcessing] = useState(false);
+-  const [recovery, setRecovery] = useState<EdgeUpgradeRecovery>(null);
++  const [recovery, setRecovery] = useState<PlanUpgradeRecovery>(null);
+@@ -80,5 +122,5 @@ export function UpgradeToEdgeButton(props: {
+       const response = await requestHostedOnboardingJson<HostedBillingPlanUpgradeResult>({
+         method: "POST",
+         payload: {
+-          targetPlanCode: "launch_edge_monthly",
++          targetPlanCode: props.targetPlanCode,
+         },
+@@ -107,4 +149,9 @@ export function UpgradeToEdgeButton(props: {
+       router.refresh();
+     } catch (error) {
+-      setErrorMessage(toErrorMessage(error, "Could not upgrade your plan right now."));
+-      setRecovery(resolveEdgeUpgradeRecovery(error));
++      setErrorMessage(
++        toErrorMessage(
++          error,
++          `Could not upgrade to ${targetPlan.displayName} right now.`,
++        ),
++      );
++      setRecovery(resolvePlanUpgradeRecovery(error));
+@@ -125,4 +170,6 @@ export function UpgradeToEdgeButton(props: {
+     }
+   }
+ 
+-  const label = isUpgrading ? "Upgrading..." : props.children ?? "Upgrade to Edge";
++  const label = isUpgrading
++    ? "Upgrading..."
++    : props.children ?? `Upgrade to ${targetPlan.displayName}`;
+@@ -142,5 +189,6 @@ export function UpgradeToEdgeButton(props: {
+           {label}
+           <ArrowRight className="size-4" aria-hidden="true" />
+         </Button>
+-        <EdgeUpgradeConfirmationDialog
++        <PlanUpgradeConfirmationDialog
+           errorMessage={errorMessage}
++          targetPlanCode={props.targetPlanCode}
+@@ -166,5 +214,6 @@ export function UpgradeToEdgeButton(props: {
+       >
+         {label}
+       </Button>
+-      <EdgeUpgradeConfirmationDialog
++      <PlanUpgradeConfirmationDialog
+         errorMessage={errorMessage}
++        targetPlanCode={props.targetPlanCode}
+@@ -179,8 +228,9 @@ export function UpgradeToEdgeButton(props: {
+   );
+ }
+ 
+-function EdgeUpgradeConfirmationDialog(props: {
++function PlanUpgradeConfirmationDialog(props: {
+   errorMessage: string | null;
+   isUpgrading: boolean;
+   processing: boolean;
+-  recovery: EdgeUpgradeRecovery;
++  recovery: PlanUpgradeRecovery;
++  targetPlanCode: HostedImmediateUpgradeTarget;
+@@ -191,8 +241,9 @@ function EdgeUpgradeConfirmationDialog(props: {
+   return (
+     <Dialog open={props.open} onOpenChange={props.onOpenChange}>
+       <DialogContent className="max-w-md gap-6 rounded-2xl border border-[#c4a882]/25 bg-[#fffcf6] p-6 text-[#2d3436] ring-[#c4a882]/25 md:p-7">
+-        <EdgeUpgradeConfirmationContent
++        <PlanUpgradeConfirmationContent
+           errorMessage={props.errorMessage}
+           isUpgrading={props.isUpgrading}
+           processing={props.processing}
+           recovery={props.recovery}
++          targetPlanCode={props.targetPlanCode}
+@@ -207,11 +258,33 @@ function EdgeUpgradeConfirmationDialog(props: {
+ }
+ 
+ export function EdgeUpgradeConfirmationContent(props: {
+   errorMessage: string | null;
+   isUpgrading: boolean;
+   processing: boolean;
+-  recovery: EdgeUpgradeRecovery;
++  recovery: PlanUpgradeRecovery;
+   onCancel: () => void;
+   onConfirm: () => void;
+ }) {
++  return (
++    <PlanUpgradeConfirmationContent
++      {...props}
++      targetPlanCode="launch_edge_monthly"
++    />
++  );
++}
++
++function PlanUpgradeConfirmationContent(props: {
++  errorMessage: string | null;
++  isUpgrading: boolean;
++  processing: boolean;
++  recovery: PlanUpgradeRecovery;
++  onCancel: () => void;
++  onConfirm: () => void;
++  targetPlanCode: HostedImmediateUpgradeTarget;
++}) {
++  const targetPlan = getHostedBillingPlanDefinition(props.targetPlanCode);
++  const presentation = UPGRADE_PRESENTATION[props.targetPlanCode];
++  const priceLabel = formatHostedBillingPrice(
++    targetPlan.recurringAmountUsdCents,
++  );
+   return (
+@@ -218,10 +288,10 @@ export function EdgeUpgradeConfirmationContent(props: {
+       <DialogHeader className="pr-10">
+         <DialogTitle className="font-serif text-2xl/7 font-semibold tracking-normal text-[#2d3436]">
+-          Upgrade to Edge
++          Upgrade to {targetPlan.displayName}
+         </DialogTitle>
+         <DialogDescription className="text-sm leading-6 text-[#736a58]">
+-          For when you want the full picture.
++          {presentation.description}
+         </DialogDescription>
+       </DialogHeader>
+ 
+-      <PlanFeatureCard price={edgePriceLabel} features={EDGE_FEATURES} />
++      <PlanFeatureCard price={priceLabel} features={presentation.features} />
+@@ -253,6 +323,6 @@ export function EdgeUpgradeConfirmationContent(props: {
+         ) : props.errorMessage && props.recovery === "support" ? (
+           <ContactSupportAction
+-            body={"Hi Murph support,\n\nI need help finishing an Edge billing change."}
++            body={`Hi Murph support,\n\nI need help finishing a ${targetPlan.displayName} billing change.`}
+             className="w-full"
+-            subject="Murph Edge billing support"
++            subject={`Murph ${targetPlan.displayName} billing support`}
+           />
+@@ -269,6 +340,6 @@ export function EdgeUpgradeConfirmationContent(props: {
+               ? "Upgrading..."
+               : props.processing
+                 ? "Check status"
+                 : props.recovery === "retry"
+                   ? "Try again"
+-                  : "Upgrade to Edge"}
++                  : `Upgrade to ${targetPlan.displayName}`}
+@@ -289,14 +360,10 @@ export function EdgeUpgradeConfirmationContent(props: {
+   );
+ }
+ 
+-function formatHostedBillingPlanMonthlyPrice(amountUsdCents: number): string {
+-  return `$${amountUsdCents / 100}`;
+-}
+-
+-function resolveEdgeUpgradeRecovery(error: unknown): EdgeUpgradeRecovery {
++function resolvePlanUpgradeRecovery(error: unknown): PlanUpgradeRecovery {
+   return resolveHostedBillingErrorAction({
+-    billingRecoveryCodes: EDGE_UPGRADE_BILLING_RECOVERY_CODES,
++    billingRecoveryCodes: PLAN_UPGRADE_BILLING_RECOVERY_CODES,
+     error,
+-    supportRecoveryCodes: EDGE_UPGRADE_SUPPORT_RECOVERY_CODES,
++    supportRecoveryCodes: PLAN_UPGRADE_SUPPORT_RECOVERY_CODES,
+   });
+ }
+diff --git a/apps/web/src/components/settings/hosted-plan-switch-to-pulse-button.tsx b/apps/web/src/components/settings/hosted-plan-switch-to-pulse-button.tsx
+--- a/apps/web/src/components/settings/hosted-plan-switch-to-pulse-button.tsx
++++ b/apps/web/src/components/settings/hosted-plan-switch-to-pulse-button.tsx
+@@ -2,4 +2,4 @@
+ 
+-import { MinusIcon } from "lucide-react";
++import { CheckIcon, MinusIcon } from "lucide-react";
+ import { useRouter } from "next/navigation";
+ import { useState, type ReactNode } from "react";
+@@ -15,5 +15,9 @@ import {
+   DialogHeader,
+   DialogTitle,
+ } from "@/src/components/ui/dialog";
+-import { getHostedBillingPlanDefinition } from "@/src/lib/hosted-onboarding/billing-plans";
++import {
++  formatHostedBillingPrice,
++  getHostedBillingPlanDefinition,
++  type HostedBillingPlanCode,
++} from "@/src/lib/hosted-onboarding/billing-plans";
+ import { cn } from "@/src/lib/utils";
+@@ -20,20 +29,49 @@ import { toErrorMessage } from "./hosted-settings-sync-helpers";
+ 
+-interface HostedBillingPlanSwitchToPulseResponse {
++interface HostedBillingPlanSwitchResponse {
+   effectiveAt: string;
+-  scheduledBillingPlanCode: "launch_monthly";
++  scheduledBillingPlanCode: HostedBillingPlanCode;
+   status: "already_scheduled" | "scheduled";
+ }
+ 
++type HostedScheduledPlanTarget =
++  | "launch_group_monthly"
++  | "launch_monthly";
++
++const groupPlan = getHostedBillingPlanDefinition("launch_group_monthly");
+ const pulsePlan = getHostedBillingPlanDefinition("launch_monthly");
+ const edgePlan = getHostedBillingPlanDefinition("launch_edge_monthly");
+-const pulsePriceLabel = formatHostedBillingPlanMonthlyPrice(pulsePlan.recurringAmountUsdCents);
+-const edgePriceLabel = formatHostedBillingPlanMonthlyPrice(edgePlan.recurringAmountUsdCents);
++const groupPriceLabel = formatHostedBillingPrice(
++  groupPlan.recurringAmountUsdCents,
++);
++const pulsePriceLabel = formatHostedBillingPrice(
++  pulsePlan.recurringAmountUsdCents,
++);
++const edgePriceLabel = formatHostedBillingPrice(
++  edgePlan.recurringAmountUsdCents,
++);
+ 
