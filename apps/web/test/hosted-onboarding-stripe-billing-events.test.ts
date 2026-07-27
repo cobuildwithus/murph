@@ -2138,6 +2138,42 @@ describe("hosted onboarding stripe billing events", () => {
     expect(mocks.writeHostedMemberStripeBillingTx).not.toHaveBeenCalled();
   });
 
+  it("blocks the exact Family owner when a refunded same-created contribution remains", async () => {
+    const owner = makeFamilyBillingOwner();
+    const subscription = makeStripeSubscription({ status: "active" });
+    const tx = { id: "family-retained-refund-tx" };
+    mocks.readHostedStripeRecurringFinancialState.mockResolvedValueOnce(
+      makeRecurringFinancialState({
+        fullyRefunded: true,
+        outstandingDispute: false,
+      }),
+    );
+
+    await expect(applyStripeRecurringFinancialState({
+      dispatchContext: {
+        eventCreatedAt: new Date("2026-04-25T00:00:00.000Z"),
+        sourceEventId: "evt_family_retained_refund",
+        sourceType: "stripe.refund.updated",
+      },
+      owner,
+      restoreWhenHealthy: true,
+      subscription,
+      tx: tx as never,
+    })).resolves.toEqual({
+      blockActiveProjection: true,
+      state: "blocked",
+    });
+
+    expect(mocks.setHostedFamilyStripeBillingReversalStateTx).toHaveBeenCalledWith({
+      billingStatus: HostedBillingStatus.unpaid,
+      groupId: owner.groupId,
+      subscription,
+      tx,
+      verifiedOwnerMemberId: owner.lockMemberId,
+    });
+    expect(mocks.writeHostedMemberStripeBillingTx).not.toHaveBeenCalled();
+  });
+
   it("fails closed when the exact Family owner changes before projection", async () => {
     mocks.readHostedStripeRecurringFinancialState.mockResolvedValueOnce(
       makeRecurringFinancialState({

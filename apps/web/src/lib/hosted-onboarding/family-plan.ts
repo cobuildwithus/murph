@@ -4198,14 +4198,12 @@ async function updateHostedFamilyStripeCapacitiesUnderOwnerLock(input: {
               ...(paymentGatedMemberTransition
                 ? { payment_behavior: "pending_if_incomplete" as const }
                 : {}),
-              proration_behavior: paymentGatedMemberTransition
-                ? "always_invoice" as const
-                : "create_prorations" as const,
+              proration_behavior: "always_invoice" as const,
               proration_date: memberTransition.prorationDate,
             }
           : {
               ...(increase ? { payment_behavior: "pending_if_incomplete" as const } : {}),
-              proration_behavior: increase ? "always_invoice" as const : "none" as const,
+              proration_behavior: "always_invoice" as const,
             }),
       },
       {

@@ -1792,11 +1792,16 @@ function listStripeInvoicePaymentAllocations(
       if (invoicePayment.status !== "paid") {
         continue;
       }
-      const amountPaid = readStripePositiveInteger(invoicePayment.amount_paid);
+      const amountPaid = readStripeNonnegativeInteger(
+        invoicePayment.amount_paid,
+      );
       if (amountPaid === null) {
         throw new Error(
-          "Stripe paid InvoicePayment did not expose a positive allocation.",
+          "Stripe paid InvoicePayment did not expose a non-negative allocation.",
         );
+      }
+      if (amountPaid === 0) {
+        continue;
       }
       const allocation = {
         amountPaid,
@@ -2077,6 +2082,12 @@ function hasStripeDisputeFundsOutstanding(dispute: Stripe.Dispute): boolean {
 function readStripePositiveInteger(value: unknown): number | null {
   return Number.isSafeInteger(value) && (value as number) > 0
     ? value as number
+    : null;
+}
+
+function readStripeNonnegativeInteger(value: unknown): number | null {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0
+    ? value
     : null;
 }
 

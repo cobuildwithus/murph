@@ -120,15 +120,18 @@ Recurring financial reconciliation treats the current-period base invoice and
 every paid update whose economic contribution remains in the canonical
 subscription as required funding. Cumulative quantity increases remain
 independently required; a later update supersedes an earlier contribution only
-after a real unwind and paid re-establishment. Non-prorating consolidation of
-same-price items changes identity, not funding provenance, so replay uses
-bounded aggregate licensed quantities per price rather than subscription item
-IDs. Paid updates with the same Stripe creation second have no authoritative
-causal order; reconciliation conservatively retains every invoice in that
-ambiguous group while any aggregate contribution from the group remains
-represented, and releases the entire group once its contribution is fully
-unwound. A full refund of any still-required invoice blocks the resulting
-entitlement.
+after an invoiced unwind and paid re-establishment. Every Family mutation that
+changes aggregate licensed quantities by tier uses `always_invoice`, including
+tier downgrades and explicit capacity reductions, so Stripe owns the complete
+current-period economic chronology. Non-prorating consolidation of same-price
+items changes identity but not aggregate licensed quantities or funding
+provenance. Reconciliation therefore replays bounded aggregate quantities per
+price rather than subscription item IDs. Paid updates with the same Stripe
+creation second have no authoritative causal order; reconciliation
+conservatively retains every invoice in that ambiguous group while any
+aggregate contribution from the group remains represented, and releases the
+entire group once its contribution is fully unwound. A full refund of any
+still-required invoice blocks the resulting entitlement.
 
 When auto-adding a seat for an invite returns payment-required, Settings keeps
 the exact invite intent and Stripe-hosted recovery URL in a short-lived
@@ -166,9 +169,9 @@ While that intent exists, Settings labels the member as updating and disables
 further plan or removal actions until the webhook clears it.
 
 Price-increasing member swaps collect the prorated difference immediately.
-Downgrades remain non-payment-gated and add the corresponding credit through
-Stripe's ordinary proration behavior. The owner sees the target per-person
-monthly price before confirming.
+Downgrades remain non-payment-gated and immediately create Stripe's proration
+invoice; its credit remains available for the next invoice. The owner sees the
+target per-person monthly price before confirming.
 
 Core invariant:
 

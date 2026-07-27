@@ -3083,7 +3083,7 @@ describe("hosted Family plan", () => {
           { id: "si_family", quantity: 6 },
           { deleted: true, id: "si_family_edge" },
         ],
-        proration_behavior: "create_prorations",
+        proration_behavior: "always_invoice",
       }),
       expect.any(Object),
     );
@@ -7610,6 +7610,54 @@ describe("hosted Family plan", () => {
     expect(tx.hostedAccountGroupPlanCapacity.createMany).not.toHaveBeenCalled();
     expect(tx.hostedAccountGroupPlanCapacity.deleteMany).not.toHaveBeenCalled();
     expect(tx.hostedAccountGroupBillingRef.update).not.toHaveBeenCalled();
+  });
+
+  it("immediately invoices an explicit Family capacity reduction", async () => {
+    const tx = createTxMock({
+      activeMembershipCount: 2,
+      billedSeatCount: 6,
+      pendingInviteCount: 0,
+    });
+    tx.hostedAccountGroupMembership.findMany.mockResolvedValue([
+      { memberId: "member_owner", planCode: "pulse" },
+      { memberId: "member_mom", planCode: "pulse" },
+    ]);
+    const prisma = tx as FamilyPlanTxMock & {
+      $transaction: ReturnType<typeof vi.fn>;
+    };
+    prisma.$transaction = vi.fn((callback) => callback(tx));
+    const stripeSubscriptionUpdate = vi.fn().mockResolvedValue(
+      makeFamilyStripeSubscription({ itemQuantity: 2 }),
+    );
+    runtimeMocks.requireHostedStripeApi.mockReturnValue({
+      subscriptions: {
+        retrieve: vi.fn().mockResolvedValue(
+          makeFamilyStripeSubscription({ itemQuantity: 6 }),
+        ),
+        update: stripeSubscriptionUpdate,
+      },
+    });
+
+    await expect(updateHostedFamilyPlanCapacities({
+      groupId: "hbag_family",
+      ownerMemberId: "member_owner",
+      prisma: prisma as never,
+      targetCapacities: { edge: 0, pulse: 2 },
+    })).resolves.toMatchObject({
+      groupId: "hbag_family",
+    });
+
+    expect(stripeSubscriptionUpdate).toHaveBeenCalledWith(
+      "sub_family",
+      expect.objectContaining({
+        items: [{ id: "si_family", quantity: 2 }],
+        proration_behavior: "always_invoice",
+      }),
+      expect.any(Object),
+    );
+    expect(stripeSubscriptionUpdate.mock.calls[0]?.[1]).not.toHaveProperty(
+      "payment_behavior",
+    );
   });
 
   it("blocks even an already-applied Family capacity when current-period funding was fully refunded", async () => {

@@ -1810,6 +1810,277 @@ describe("hosted onboarding stripe billing lookup", () => {
     });
   });
 
+  it("keeps a refunded paid seat required after an invoiced cross-tier downgrade", async () => {
+    const renewalInvoice = makeStripeFinancialInvoice({
+      created: 1_775_000_000,
+      id: "in_invoiced_downgrade_renewal",
+      lines: [
+        makeStripeInvoiceLine({
+          invoiceId: "in_invoiced_downgrade_renewal",
+          periodEnd: 1_778_000_000,
+          periodStart: 1_775_000_000,
+          priceId: "price_pulse",
+          quantity: 1,
+          subscriptionId: "sub_123",
+          subscriptionItemId: "si_pulse",
+        }),
+        makeStripeInvoiceLine({
+          invoiceId: "in_invoiced_downgrade_renewal",
+          periodEnd: 1_778_000_000,
+          periodStart: 1_775_000_000,
+          priceId: "price_edge",
+          quantity: 1,
+          subscriptionId: "sub_123",
+          subscriptionItemId: "si_edge",
+        }),
+      ],
+    });
+    const paidSeatInvoice = makeStripeFinancialInvoice({
+      billingReason: "subscription_update",
+      created: 1_776_000_000,
+      id: "in_invoiced_downgrade_seat",
+      lines: [
+        makeStripeInvoiceLine({
+          amount: -2_000,
+          invoiceId: "in_invoiced_downgrade_seat",
+          periodEnd: 1_778_000_000,
+          periodStart: 1_776_000_000,
+          priceId: "price_edge",
+          proration: true,
+          quantity: 1,
+          subscriptionId: "sub_123",
+          subscriptionItemId: "si_edge",
+        }),
+        makeStripeInvoiceLine({
+          amount: 4_000,
+          invoiceId: "in_invoiced_downgrade_seat",
+          periodEnd: 1_778_000_000,
+          periodStart: 1_776_000_000,
+          priceId: "price_edge",
+          proration: true,
+          quantity: 2,
+          subscriptionId: "sub_123",
+          subscriptionItemId: "si_edge",
+        }),
+      ],
+    });
+    const downgradeInvoice = makeStripeFinancialInvoice({
+      amountPaid: 0,
+      billingReason: "subscription_update",
+      created: 1_777_000_000,
+      id: "in_invoiced_downgrade_credit",
+      lines: [
+        makeStripeInvoiceLine({
+          amount: -4_000,
+          invoiceId: "in_invoiced_downgrade_credit",
+          periodEnd: 1_778_000_000,
+          periodStart: 1_777_000_000,
+          priceId: "price_edge",
+          proration: true,
+          quantity: 2,
+          subscriptionId: "sub_123",
+          subscriptionItemId: "si_edge",
+        }),
+        makeStripeInvoiceLine({
+          amount: 2_000,
+          invoiceId: "in_invoiced_downgrade_credit",
+          periodEnd: 1_778_000_000,
+          periodStart: 1_777_000_000,
+          priceId: "price_edge",
+          proration: true,
+          quantity: 1,
+          subscriptionId: "sub_123",
+          subscriptionItemId: "si_edge",
+        }),
+        makeStripeInvoiceLine({
+          amount: -1_000,
+          invoiceId: "in_invoiced_downgrade_credit",
+          periodEnd: 1_778_000_000,
+          periodStart: 1_777_000_000,
+          priceId: "price_pulse",
+          proration: true,
+          quantity: 1,
+          subscriptionId: "sub_123",
+          subscriptionItemId: "si_pulse",
+        }),
+        makeStripeInvoiceLine({
+          amount: 2_000,
+          invoiceId: "in_invoiced_downgrade_credit",
+          periodEnd: 1_778_000_000,
+          periodStart: 1_777_000_000,
+          priceId: "price_pulse",
+          proration: true,
+          quantity: 2,
+          subscriptionId: "sub_123",
+          subscriptionItemId: "si_pulse",
+        }),
+      ],
+    });
+    mockPaidHostedStripeInvoiceHistory({
+      invoices: [downgradeInvoice, paidSeatInvoice, renewalInvoice],
+      refundedInvoiceId: paidSeatInvoice.id,
+    });
+
+    await expect(
+      readHostedStripeRecurringFinancialState(
+        makeStripeSubscription({
+          items: [
+            makeStripeSubscriptionItem({
+              id: "si_pulse",
+              priceId: "price_pulse",
+              quantity: 2,
+            }),
+            makeStripeSubscriptionItem({
+              id: "si_edge",
+              priceId: "price_edge",
+              quantity: 1,
+            }),
+          ],
+          latestInvoice: downgradeInvoice.id,
+        }),
+      ),
+    ).resolves.toMatchObject({
+      collectionState: { kind: "paid" },
+      fullyRefunded: true,
+    });
+  });
+
+  it.each([
+    ["conversion refund while the group seat remains", "in_mixed_conversion", 3, true],
+    ["seat refund while the group seat remains", "in_mixed_seat", 3, true],
+    ["conversion refund after the group is unwound", "in_mixed_conversion", 2, false],
+    ["seat refund after the group is unwound", "in_mixed_seat", 2, false],
+  ] as const)(
+    "classifies a same-created mixed %s",
+    async (_description, refundedInvoiceId, currentPulseQuantity, fullyRefunded) => {
+      const renewalInvoice = makeStripeFinancialInvoice({
+        created: 1_775_000_000,
+        id: "in_mixed_renewal",
+        lines: [
+          makeStripeInvoiceLine({
+            invoiceId: "in_mixed_renewal",
+            periodEnd: 1_778_000_000,
+            periodStart: 1_775_000_000,
+            priceId: "price_pulse",
+            quantity: 2,
+            subscriptionId: "sub_123",
+            subscriptionItemId: "si_pulse",
+          }),
+        ],
+      });
+      const conversionInvoice = makeStripeFinancialInvoice({
+        billingReason: "subscription_update",
+        created: 1_776_000_000,
+        id: "in_mixed_conversion",
+        lines: [
+          ...makeStripeQuantityTransitionLines({
+            afterQuantity: 1,
+            beforeQuantity: 2,
+            invoiceId: "in_mixed_conversion",
+            periodStart: 1_776_000_000,
+            priceId: "price_pulse",
+            subscriptionItemId: "si_pulse",
+          }),
+          ...makeStripeQuantityTransitionLines({
+            afterQuantity: 1,
+            beforeQuantity: 0,
+            invoiceId: "in_mixed_conversion",
+            periodStart: 1_776_000_000,
+            priceId: "price_edge",
+            subscriptionItemId: "si_edge",
+          }),
+        ],
+      });
+      const seatInvoice = makeStripeFinancialInvoice({
+        billingReason: "subscription_update",
+        created: 1_776_000_000,
+        id: "in_mixed_seat",
+        lines: makeStripeQuantityTransitionLines({
+          afterQuantity: 2,
+          beforeQuantity: 1,
+          invoiceId: "in_mixed_seat",
+          periodStart: 1_776_000_000,
+          priceId: "price_pulse",
+          subscriptionItemId: "si_pulse",
+        }),
+      });
+      const downgradeInvoice = makeStripeFinancialInvoice({
+        amountPaid: 0,
+        billingReason: "subscription_update",
+        created: 1_777_000_000,
+        id: "in_mixed_downgrade",
+        lines: [
+          ...makeStripeQuantityTransitionLines({
+            afterQuantity: 3,
+            beforeQuantity: 2,
+            invoiceId: "in_mixed_downgrade",
+            periodStart: 1_777_000_000,
+            priceId: "price_pulse",
+            subscriptionItemId: "si_pulse",
+          }),
+          ...makeStripeQuantityTransitionLines({
+            afterQuantity: 0,
+            beforeQuantity: 1,
+            invoiceId: "in_mixed_downgrade",
+            periodStart: 1_777_000_000,
+            priceId: "price_edge",
+            subscriptionItemId: "si_edge",
+          }),
+        ],
+      });
+      const reductionInvoice = makeStripeFinancialInvoice({
+        amountPaid: 0,
+        billingReason: "subscription_update",
+        created: 1_777_500_000,
+        id: "in_mixed_reduction",
+        lines: makeStripeQuantityTransitionLines({
+          afterQuantity: 2,
+          beforeQuantity: 3,
+          invoiceId: "in_mixed_reduction",
+          periodStart: 1_777_500_000,
+          priceId: "price_pulse",
+          subscriptionItemId: "si_pulse",
+        }),
+      });
+      const invoices = currentPulseQuantity === 3
+        ? [
+            downgradeInvoice,
+            seatInvoice,
+            conversionInvoice,
+            renewalInvoice,
+          ]
+        : [
+            reductionInvoice,
+            downgradeInvoice,
+            seatInvoice,
+            conversionInvoice,
+            renewalInvoice,
+          ];
+      mockPaidHostedStripeInvoiceHistory({
+        invoices,
+        refundedInvoiceId,
+      });
+
+      await expect(
+        readHostedStripeRecurringFinancialState(
+          makeStripeSubscription({
+            items: [
+              makeStripeSubscriptionItem({
+                id: "si_pulse",
+                priceId: "price_pulse",
+                quantity: currentPulseQuantity,
+              }),
+            ],
+            latestInvoice: invoices[0]!.id,
+          }),
+        ),
+      ).resolves.toMatchObject({
+        collectionState: { kind: "paid" },
+        fullyRefunded,
+      });
+    },
+  );
+
   it.each([
     ["later conversion", "in_tier_second", false],
     ["still-represented earlier conversion", "in_tier_first", true],
@@ -2260,6 +2531,139 @@ describe("hosted onboarding stripe billing lookup", () => {
         }),
       ),
     ).resolves.toMatchObject({
+      fullyRefunded: false,
+    });
+  });
+
+  it("projects a paid seat after an invoiced reduction without replaying seven seats", async () => {
+    const renewalInvoice = makeStripeFinancialInvoice({
+      created: 1_775_000_000,
+      id: "in_invoiced_reduction_renewal",
+      lines: [
+        makeStripeInvoiceLine({
+          invoiceId: "in_invoiced_reduction_renewal",
+          periodEnd: 1_778_000_000,
+          periodStart: 1_775_000_000,
+          priceId: "price_family_pulse",
+          quantity: 2,
+          subscriptionId: "sub_123",
+          subscriptionItemId: "si_family_pulse",
+        }),
+      ],
+    });
+    const growthInvoice = makeStripeFinancialInvoice({
+      billingReason: "subscription_update",
+      created: 1_776_000_000,
+      id: "in_invoiced_reduction_growth",
+      lines: [
+        makeStripeInvoiceLine({
+          amount: -2_000,
+          invoiceId: "in_invoiced_reduction_growth",
+          periodEnd: 1_778_000_000,
+          periodStart: 1_776_000_000,
+          priceId: "price_family_pulse",
+          proration: true,
+          quantity: 2,
+          subscriptionId: "sub_123",
+          subscriptionItemId: "si_family_pulse",
+        }),
+        makeStripeInvoiceLine({
+          amount: 6_000,
+          invoiceId: "in_invoiced_reduction_growth",
+          periodEnd: 1_778_000_000,
+          periodStart: 1_776_000_000,
+          priceId: "price_family_pulse",
+          proration: true,
+          quantity: 6,
+          subscriptionId: "sub_123",
+          subscriptionItemId: "si_family_pulse",
+        }),
+      ],
+    });
+    const reductionInvoice = makeStripeFinancialInvoice({
+      amountPaid: 0,
+      billingReason: "subscription_update",
+      created: 1_776_500_000,
+      id: "in_invoiced_reduction_credit",
+      lines: [
+        makeStripeInvoiceLine({
+          amount: -6_000,
+          invoiceId: "in_invoiced_reduction_credit",
+          periodEnd: 1_778_000_000,
+          periodStart: 1_776_500_000,
+          priceId: "price_family_pulse",
+          proration: true,
+          quantity: 6,
+          subscriptionId: "sub_123",
+          subscriptionItemId: "si_family_pulse",
+        }),
+        makeStripeInvoiceLine({
+          amount: 2_000,
+          invoiceId: "in_invoiced_reduction_credit",
+          periodEnd: 1_778_000_000,
+          periodStart: 1_776_500_000,
+          priceId: "price_family_pulse",
+          proration: true,
+          quantity: 2,
+          subscriptionId: "sub_123",
+          subscriptionItemId: "si_family_pulse",
+        }),
+      ],
+    });
+    const latestSeatInvoice = makeStripeFinancialInvoice({
+      billingReason: "subscription_update",
+      created: 1_777_000_000,
+      id: "in_invoiced_reduction_latest",
+      lines: [
+        makeStripeInvoiceLine({
+          amount: -2_000,
+          invoiceId: "in_invoiced_reduction_latest",
+          periodEnd: 1_778_000_000,
+          periodStart: 1_777_000_000,
+          priceId: "price_family_pulse",
+          proration: true,
+          quantity: 2,
+          subscriptionId: "sub_123",
+          subscriptionItemId: "si_family_pulse",
+        }),
+        makeStripeInvoiceLine({
+          amount: 3_000,
+          invoiceId: "in_invoiced_reduction_latest",
+          periodEnd: 1_778_000_000,
+          periodStart: 1_777_000_000,
+          priceId: "price_family_pulse",
+          proration: true,
+          quantity: 3,
+          subscriptionId: "sub_123",
+          subscriptionItemId: "si_family_pulse",
+        }),
+      ],
+    });
+    mockPaidHostedStripeInvoiceHistory({
+      invoices: [
+        latestSeatInvoice,
+        reductionInvoice,
+        growthInvoice,
+        renewalInvoice,
+      ],
+      refundedInvoiceId: growthInvoice.id,
+    });
+
+    await expect(
+      readHostedStripeRecurringFinancialState(
+        makeStripeSubscription({
+          items: [
+            makeStripeSubscriptionItem({
+              id: "si_family_pulse",
+              priceId: "price_family_pulse",
+              quantity: 3,
+            }),
+          ],
+          latestInvoice: latestSeatInvoice.id,
+        }),
+      ),
+    ).resolves.toMatchObject({
+      collectionState: { kind: "paid" },
       fullyRefunded: false,
     });
   });
@@ -2849,6 +3253,45 @@ function makeStripeInvoiceLine(input: {
     subscription: input.subscriptionId,
   };
   return line as Stripe.InvoiceLineItem;
+}
+
+function makeStripeQuantityTransitionLines(input: {
+  afterQuantity: number;
+  beforeQuantity: number;
+  invoiceId: string;
+  periodStart: number;
+  priceId: string;
+  subscriptionItemId: string;
+}): Stripe.InvoiceLineItem[] {
+  const shared = {
+    invoiceId: input.invoiceId,
+    periodEnd: 1_778_000_000,
+    periodStart: input.periodStart,
+    priceId: input.priceId,
+    proration: true,
+    subscriptionId: "sub_123",
+    subscriptionItemId: input.subscriptionItemId,
+  };
+  return [
+    ...(input.beforeQuantity > 0
+      ? [
+          makeStripeInvoiceLine({
+            ...shared,
+            amount: -input.beforeQuantity * 1_000,
+            quantity: input.beforeQuantity,
+          }),
+        ]
+      : []),
+    ...(input.afterQuantity > 0
+      ? [
+          makeStripeInvoiceLine({
+            ...shared,
+            amount: input.afterQuantity * 1_000,
+            quantity: input.afterQuantity,
+          }),
+        ]
+      : []),
+  ];
 }
 
 function makeStripeInvoicePayment(overrides?: {
