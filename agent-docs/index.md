@@ -109,8 +109,7 @@ It intentionally lists live architecture, product, verification, and package-bou
 | `agent-docs/PLANS.md` | Execution-plan lifecycle and storage rules. | Plan workflow | Medium | 2026-03-31 |
 | `agent-docs/exec-plans/completed/README.md` | Marks completed plans as immutable, non-operative historical snapshots and routes current implementation, deployment, rollback, and incident guidance to live owner docs. | Completed-plan archive interpretation | Medium | 2026-07-22 |
 | `agent-docs/generated/README.md` | Meaning and expectations for generated doc artifacts. | Generated-doc conventions | Low | 2026-04-02 |
-| `agent-docs/exec-plans/active/` | In-flight execution plans and their coordination ledger for current work. | Active work coordination | Medium | 2026-07-14 |
-| `agent-docs/exec-plans/active/COORDINATION_LEDGER.md` | Active-work ledger for concurrent repo tasks. | Concurrency coordination | High | 2026-05-05 |
+| `agent-docs/exec-plans/active/` | Task-owned in-flight execution plans. | Active plan lifecycle | Medium | 2026-07-27 |
 | `agent-docs/exec-plans/tech-debt-tracker.md` | Current debt register with owner/priority/status. | Rolling debt tracker | Medium | 2026-03-12 |
 | `agent-docs/prompts/` | Reusable completion-review lenses and local audit prompts, including the preliminary ReviewGPT prompt/frontend/coverage references and local `product-experience-review`. | Workflow prompt library | Low | 2026-07-22 |
 | `agent-docs/prompts/seam-audits/` | One-pass bespoke seam prompts governed by a shared review-only, evidence, correction, and zero-finding contract. | Seam-audit prompt library | Low | 2026-07-13 |
