@@ -12,7 +12,7 @@ import {
   resolveMurphVitestMaxWorkers,
 } from "../../config/vitest-parallelism.js";
 import { murphVitestTempGlobalSetup } from "../../config/vitest-temp-lifecycle.js";
-import { murphVitestNoTimeouts } from "../../config/vitest-timeouts.js";
+import { murphVitestStandardTimeouts } from "../../config/vitest-timeouts.js";
 import { createVitestAliasesFromTsconfigPaths } from "../../config/workspace-source-resolution.js";
 import {
   resolveVitestBucketFiles,
@@ -68,7 +68,7 @@ export function createCliVitestProject(name: string, fileNames: readonly string[
       alias: cliVitestTsconfigAliases,
     },
     test: {
-      ...murphVitestNoTimeouts,
+      ...murphVitestStandardTimeouts,
       name,
       environment: "node",
       globalSetup: [murphVitestTempGlobalSetup],
@@ -171,7 +171,7 @@ export const cliVitestProjects = cliVitestProjectSpecs.map(({ name, fileNames })
 
 export default defineConfig({
   test: {
-    ...murphVitestNoTimeouts,
+    ...murphVitestStandardTimeouts,
     maxWorkers: cliVitestMaxWorkers,
     coverage: cliVitestCoverage,
     projects: cliVitestProjects,

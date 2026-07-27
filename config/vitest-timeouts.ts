@@ -20,7 +20,3 @@ export const murphVitestLongRunningTimeouts = {
   teardownTimeout: MAX_NODE_TIMER_MS,
   setupFiles: murphVitestSetupFiles,
 } as const;
-
-// Keep the historical helper name wired to the bounded shared policy so the
-// repo-wide default changes without a noisy config-only rename sweep.
-export const murphVitestNoTimeouts = murphVitestStandardTimeouts;
