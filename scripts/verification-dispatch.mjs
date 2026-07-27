@@ -335,12 +335,6 @@ export function createRemoteCandidateSnapshot(
           environment,
           "clean candidate base commit",
         );
-    const sourceBranch = readGitValue(
-      repoRoot,
-      ["symbolic-ref", "--short", "HEAD"],
-      environment,
-      "source branch",
-    );
     const candidateTree = readGitValue(
       repoRoot,
       ["rev-parse", `${candidateCommit ?? baseCommit}^{tree}`],
@@ -373,19 +367,29 @@ export function createRemoteCandidateSnapshot(
 
     runCheckedCommand(
       "git",
-      [
-        "clone",
-        "--quiet",
-        "--no-checkout",
-        "--depth=1",
-        "--single-branch",
-        "--branch",
-        sourceBranch,
-        pathToFileURL(repoRoot).href,
-        snapshotRoot,
-      ],
+      ["init", "--quiet", snapshotRoot],
       { cwd: repoRoot, env: environment },
       "initialize the remote verification candidate repository",
+    );
+    runCheckedCommand(
+      "git",
+      [
+        "-C",
+        snapshotRoot,
+        "fetch",
+        "--quiet",
+        "--depth=1",
+        pathToFileURL(repoRoot).href,
+        baseCommit,
+      ],
+      { cwd: repoRoot, env: environment },
+      "fetch the remote verification candidate base commit",
+    );
+    runCheckedCommand(
+      "git",
+      ["checkout", "--quiet", "--detach", "FETCH_HEAD"],
+      { cwd: snapshotRoot, env: environment },
+      "check out the remote verification candidate base commit",
     );
     const materializedBase = readGitValue(
       snapshotRoot,
@@ -395,9 +399,15 @@ export function createRemoteCandidateSnapshot(
     );
     if (materializedBase !== baseCommit) {
       throw new Error(
-        "Remote verification candidate clone did not preserve the initiating HEAD.",
+        "Remote verification candidate materialization did not preserve the captured base.",
       );
     }
+    runCheckedCommand(
+      "git",
+      ["rm", "--quiet", "-r", "--force", "--ignore-unmatch", "."],
+      { cwd: snapshotRoot, env: environment },
+      "clear the candidate worktree before materializing its frozen tree",
+    );
 
     const candidateIndexPath = path.join(
       snapshotRoot,
@@ -447,7 +457,7 @@ export function createRemoteCandidateSnapshot(
     assertSafeRemoteSync(snapshotRoot, environment);
     runCheckedCommand(
       "git",
-      ["remote", "set-url", "origin", SNAPSHOT_ORIGIN],
+      ["remote", "add", "origin", SNAPSHOT_ORIGIN],
       { cwd: snapshotRoot, env: environment },
       "bind the remote verification candidate to its public origin",
     );

@@ -92,12 +92,12 @@ Before freezing, the dispatcher performs a fail-fast check of the mutable
 checkout. It then captures one Git candidate and derives its base commit,
 captured index, remote admission, and sensitive-path checks from that immutable
 object. New paths must match the captured index. The local candidate keeps the
-captured base commit as `HEAD` and stages the frozen tree in its index and
-worktree, so both explicit paths and implicit no-argument `test:diff` retain
-their scope. The dispatcher verifies and logs the tree, invokes Crabbox from
-that candidate with full resync, and removes the local snapshot when the
-provider exits. Later checkout writes and late untracked files cannot enter the
-run.
+captured base commit as detached `HEAD` and stages the frozen tree in its index
+and worktree, so branch-attached and detached source checkouts both preserve
+explicit paths and implicit no-argument `test:diff` scope. The dispatcher
+verifies and logs the tree, invokes Crabbox from that candidate with full
+resync, and removes the local snapshot when the provider exits. Later checkout
+writes and late untracked files cannot enter the run.
 
 On the worker, `/Users/Shared/murph-crabbox/verification.lock` is the single
 static-worker capacity boundary. Native `lockf -t 0` acquires it on a file

@@ -60,11 +60,11 @@ entrypoint.
 - The dispatcher then freezes one Git candidate and derives its base commit,
   captured index, sensitive-path check, and executed tree from that immutable
   object. New paths must match the captured index. It materializes the original
-  base `HEAD` with the frozen candidate staged in its index and worktree,
-  preserving implicit no-argument `test:diff` scope. It verifies and logs that
-  tree before running Crabbox. Later checkout writes and late untracked files
-  cannot enter the run. Exact cleanup removes the local candidate when the
-  provider exits.
+  base as a detached `HEAD` with the frozen candidate staged in its index and
+  worktree, preserving implicit no-argument `test:diff` scope without requiring
+  a source branch. It verifies and logs that tree before running Crabbox. Later
+  checkout writes and late untracked files cannot enter the run. Exact cleanup
+  removes the local candidate when the provider exits.
 - Fully staged new source and modified tracked content leave the host so the
   Testbox verifies the exact candidate change. Never stage private data to bypass
   the Git-state refusal.

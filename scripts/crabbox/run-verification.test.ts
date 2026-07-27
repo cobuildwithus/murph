@@ -237,6 +237,71 @@ describe("Crabbox verification environment", () => {
     )).toContain("one opaque run directory");
   });
 
+  it.runIf(process.platform === "darwin")(
+    "preserves verifier failure through the production lock wrapper and exact cleanup",
+    () => {
+      const tempRoot = makeTempRoot();
+      const workerRoot = path.join(tempRoot, "worker");
+      const workspaceRoot = path.join(
+        workerRoot,
+        "runs",
+        "0123456789abcdef-fedcba9876543210",
+      );
+      const workspaceScriptDir = path.join(
+        workspaceRoot,
+        "scripts",
+        "crabbox",
+      );
+      const binDir = path.join(tempRoot, "bin");
+      mkdirSync(workspaceScriptDir, { recursive: true });
+      for (const scriptName of [
+        "run-ssh-locked-verification.sh",
+        "run-ssh-verification.mjs",
+        "run-verification.mjs",
+      ]) {
+        writeFileSync(
+          path.join(workspaceScriptDir, scriptName),
+          readFileSync(
+            path.join(repoRoot, "scripts", "crabbox", scriptName),
+            "utf8",
+          ),
+          "utf8",
+        );
+      }
+      writeExecutable(path.join(binDir, "corepack"), "#!/bin/sh\nexit 37");
+
+      const result = spawnSync(
+        "/bin/sh",
+        [
+          "scripts/crabbox/run-ssh-locked-verification.sh",
+          "test:diff",
+        ],
+        {
+          cwd: workspaceRoot,
+          encoding: "utf8",
+          env: {
+            ...process.env,
+            HOME: path.join(tempRoot, "home"),
+            PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ""}`,
+          },
+        },
+      );
+
+      expect(result.status, result.stderr).toBe(37);
+      expect(existsSync(workspaceRoot)).toBe(false);
+      const releasedLock = spawnSync(
+        "/usr/bin/lockf",
+        [
+          "-t",
+          "0",
+          path.join(workerRoot, "verification.lock"),
+          "/usr/bin/true",
+        ],
+      );
+      expect(releasedLock.status).toBe(0);
+    },
+  );
+
   it("retains SSH entrypoint ownership until its verifier group exits on SIGHUP", async () => {
     const tempRoot = makeTempRoot();
     const binDir = path.join(tempRoot, "bin");

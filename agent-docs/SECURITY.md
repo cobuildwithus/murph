@@ -292,14 +292,14 @@ Last verified: 2026-07-27
   and full resync. A mutable-checkout preflight may fail fast, but remote
   admission, sensitive-path checks, logged tree proof, and executed bytes must
   derive from one frozen Git candidate. Materialization must preserve the
-  initiating base `HEAD` with that candidate staged so implicit diff selection
-  remains intact. The local artifact lock protects cooperating local producers
-  and candidate capture only. A native macOS `lockf` descriptor inherited by
-  the remote verifier is the sole static-worker capacity authority; the
-  verifier must retain it through exact child-group cleanup and delete only
-  its exact run directory. Candidate code has arbitrary execution authority
-  within that account, so a personal or credential-bearing account is never
-  an acceptable worker.
+  captured base as detached `HEAD` with that candidate staged so implicit diff
+  selection remains intact without depending on a local branch. The local
+  artifact lock protects cooperating local producers and candidate capture
+  only. A native macOS `lockf` descriptor inherited by the remote verifier is
+  the sole static-worker capacity authority; the verifier must retain it
+  through exact child-group cleanup and delete only its exact run directory.
+  Candidate code has arbitrary execution authority within that account, so a
+  personal or credential-bearing account is never an acceptable worker.
   The Blacksmith workflow must retain read-only repository contents permission,
   no GitHub Environment, no OIDC permission, no Actions-secret references, and
   pinned actions. The dispatcher must pin the Blacksmith organization,

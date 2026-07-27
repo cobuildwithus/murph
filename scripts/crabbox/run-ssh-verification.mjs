@@ -9,7 +9,6 @@ import { runSanitizedVerification } from "./run-verification.mjs";
 
 const CLEANUP_FLAG = "--cleanup-static-workspace";
 const CLEANUP_ONLY_FLAG = "--cleanup-static-workspace-only";
-const SSH_RUN_ROOT = "/Users/Shared/murph-crabbox/runs";
 
 export function parseSshVerificationRequest(argv) {
   if (argv[0] === CLEANUP_ONLY_FLAG && argv.length === 1) {
@@ -34,10 +33,12 @@ export function parseSshVerificationRequest(argv) {
 }
 
 export function assertSafeStaticWorkspace(
-  { workspaceRoot, runRoot = SSH_RUN_ROOT },
+  { workspaceRoot, runRoot },
 ) {
-  const resolvedRunRoot = path.resolve(runRoot);
   const resolvedWorkspace = path.resolve(workspaceRoot);
+  const resolvedRunRoot = path.resolve(
+    runRoot ?? path.dirname(resolvedWorkspace),
+  );
   const relativeWorkspace = path.relative(resolvedRunRoot, resolvedWorkspace);
   if (
     relativeWorkspace.includes(path.sep) ||
@@ -51,7 +52,7 @@ export function assertSafeStaticWorkspace(
 }
 
 export function cleanupStaticWorkspace(
-  { workspaceRoot, runRoot = SSH_RUN_ROOT },
+  { workspaceRoot, runRoot },
 ) {
   rmSync(assertSafeStaticWorkspace({ workspaceRoot, runRoot }), {
     force: true,

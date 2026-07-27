@@ -64,6 +64,9 @@ without adding a daemon, scheduler, retry owner, or persisted product state:
   correction ReviewGPT remain the completion gates.
 - After the round-2 redesign, shell and Node syntax checks passed and the
   complete repo-tool suite passed: 30 files and 445 tests.
+- After round-3 remediation, the canonical forced-local diff verifier passed
+  shell and Node syntax, hosted guards, repo-tool typecheck, dependency policy,
+  and the complete repo-tool suite: 30 files and 447 tests.
 
 ## Round 2 retrospective decision
 
@@ -92,3 +95,18 @@ Continue by redesigning in place:
 4. Delete synthetic recommit/origin reconstruction and duplicate local
    process-group polling. Add no daemon, queue, scheduler, reconciliation, or
    persisted product state.
+
+## Round 3 dispositions
+
+- Accepted material UX finding: candidate materialization unnecessarily
+  required a symbolic source branch. It now initializes from the captured base
+  object as detached `HEAD`; clean and comprehensive dirty detached-checkout
+  regressions cover the shared remote path and implicit diff scope.
+- Rejected the high finding's factual premise that native macOS `lockf` has no
+  file-descriptor form. The platform manual explicitly defines
+  `lockf [-s] [-t seconds] fd`, and a live kernel probe showed a path-based
+  contender remained blocked after the short `lockf` child exited and the
+  descriptor owner execed its command. Accepted the underlying coverage gap:
+  the transport-loss regression now invokes the production wrapper instead of
+  duplicating its shell fragment, and a second production-wrapper regression
+  proves nonzero verifier status and exact run-directory cleanup.

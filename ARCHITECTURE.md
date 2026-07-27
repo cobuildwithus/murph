@@ -1213,9 +1213,10 @@ and its direct Blacksmith Testbox provider for the bounded paid fallback. The
 static lane derives one opaque lease id per initiating worktree and creates a
 unique remote directory for every invocation. After admission, the dispatcher
 materializes one process-owned immutable Git candidate over its original base
-`HEAD`, verifies and logs its tree id, and performs a full sync from that
-candidate. Later checkout writes cannot change the run, while the dirty
-candidate preserves implicit diff scope. A native macOS `lockf` descriptor
+as detached `HEAD`, verifies and logs its tree id, and performs a full sync
+from that candidate without requiring a source branch. Later checkout writes
+cannot change the run, while the dirty candidate preserves implicit diff
+scope. A native macOS `lockf` descriptor
 inherited by the verifier is the single remote-capacity owner until its exact
 child groups exit, after which the verifier removes only that run directory.
 The local artifact lock protects cooperating local producers and candidate
