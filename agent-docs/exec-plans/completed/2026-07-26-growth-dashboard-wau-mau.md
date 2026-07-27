@@ -1,6 +1,6 @@
 # Growth dashboard WAU and MAU
 
-Status: active
+Status: completed
 Created: 2026-07-26
 Updated: 2026-07-26
 
@@ -54,7 +54,11 @@ Updated: 2026-07-26
 - Focused growth suite: 23 tests passed.
 - Hosted-web typecheck and scoped ESLint passed.
 - Canonical `pnpm test:diff` passed in one-shot Blacksmith Testbox `tbx_01kygpnd4awnd2grg8xvm19tbw`, including the hosted-web build, lint, typecheck, development smoke, and test suite.
-- Playwright rendered the real design study at 1440x1200 and 390x844. DOM checks confirmed the document and study had no horizontal overflow and both WAU/MAU values were present.
+- Playwright rendered the real design study at 1440x1200 and 390x844. DOM checks confirmed the document and study had no horizontal overflow and both ordinary and no-prior-baseline WAU/MAU states were present.
 - Product-experience review returned `NO FINDINGS`.
 - The Claude Fable UI double-check was attempted and stopped at explicit usage-credit exhaustion.
+- The preliminary specialist pass first returned `INVALID` because the ordinary captures cropped out the separate no-prior-baseline state. Dedicated desktop/mobile captures and direct overflow/text proof closed that evidence gap; the unchanged-head retry returned `SPECIALIST_OUTCOME: PASS` with no findings and no patch artifact.
+- Parent final review found no remaining correctness, scope, or proof gaps.
+- Canonical `pnpm verify:acceptance` passed in one-shot Blacksmith Testbox `tbx_01kygrc0ykggzv0ntm6mj5zr1z`.
 - Reviewer-readable Cloudflare Images hosting is blocked because the required least-privilege upload variables are unavailable. Redacted captures remain in the ignored review-evidence path for exact-head specialist packaging.
+Completed: 2026-07-26
