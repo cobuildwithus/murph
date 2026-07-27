@@ -2335,8 +2335,14 @@ async function resolveHostedDirectEmailRecipientAtProviderEntry(input: {
     normalizeHostedAssistantDeliveryChannel(payload.channel)?.toLowerCase()
       !== "email"
     || payload.threadIsDirect !== true
-    || input.targetKind !== "explicit"
   ) {
+    return input.target;
+  }
+
+  const hostedEmailThreadTarget = input.targetKind === "thread"
+    ? parseHostedEmailThreadTarget(input.target)
+    : null;
+  if (hostedEmailThreadTarget?.targetKind === "group") {
     return input.target;
   }
 
@@ -2349,15 +2355,27 @@ async function resolveHostedDirectEmailRecipientAtProviderEntry(input: {
       { retryable: true },
     ));
   }
-  const target = (await resolveRecipient({ signal: input.signal }))?.trim() ?? "";
-  if (!target) {
+  const recipient =
+    (await resolveRecipient({ signal: input.signal }))?.trim() ?? "";
+  if (!recipient) {
     throw markHostedDeliveryPreProviderRetryable(new VaultCliError(
       "ASSISTANT_EMAIL_AUDIENCE_AUTHORITY_UNAVAILABLE",
       "Hosted direct email delivery requires current verified-email authority before provider work.",
       { retryable: true },
     ));
   }
-  return target;
+  if (input.targetKind === "explicit") {
+    return recipient;
+  }
+  if (!hostedEmailThreadTarget) {
+    return input.target;
+  }
+
+  return serializeHostedEmailThreadTarget({
+    ...hostedEmailThreadTarget,
+    cc: [],
+    to: [recipient],
+  });
 }
 
 function isHostedAssistantReactionOnlyEffect(
