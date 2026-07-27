@@ -69,7 +69,13 @@ included-first settlement, carryover balance, and crossing-operation behavior;
 credit-ledger suites exercise beneficiary-lock call ordering, unique
 grants/debits, and projection updates; route and purchase-service suites
 exercise app-session/CSRF binding, fixed offers, eligibility, and Checkout
-request idempotency. Family coverage additionally proves owner/group/member
+request idempotency. Group purchase-service coverage additionally proves
+canonical saved-card selection, durable PaymentIntent binding before
+confirmation, exact-intent recovery after an ambiguous confirmation, verified
+cancellation before Checkout fallback, account-deletion-before-bind
+cancellation, sessionless payer-owned cancel resolution, and group-only card
+saving. Family
+coverage additionally proves owner/group/member
 authorization, use of the Family billing Customer, distinct owner-self target
 identity, exact frozen replay after membership changes, per-member Settings
 routing, all ordered cross-target conflict directions, and server-withheld
@@ -78,10 +84,13 @@ authority during deferred Stripe creation, exact-key replay, and ambiguous
 provider retry recovery to prove that URL and retry capability remain withheld;
 page and dialog suites prove payer-wide
 offer suppression and status/cancel-only cross-target recovery. Reconciliation
-suites exercise live Stripe re-fetch,
-one-time/subscription dispatch separation, replay-safe grants, refund/dispute
-signed adjustments in both directions; component suites exercise the Settings
-dialog selection, redirect, return polling, and error states. A guarded
+suites exercise live Stripe re-fetch, Checkout-free direct PaymentIntent
+success and processing, late terminal direct events after safe fallback,
+retryable unbound success events, one-time/subscription dispatch separation,
+replay-safe grants, and refund/dispute signed adjustments in both directions
+after direct payer detachment; component suites
+exercise the Settings dialog selection, redirect, return polling, and error
+states. A guarded
 real-PostgreSQL suite proves grant replay, beneficiary-first lock ordering,
 grant/debit serialization, and deletion-first cleanup. Stripe remains mocked,
 and component tests do not replace a deployed browser flow, so launch still
@@ -206,6 +215,11 @@ not enter evidence; and attachment-only input fails closed before provider work.
   accepted operator alert through a paced lost-ack retry, active-incident
   coalescing, silent healthy reset, and a paced new alert for recurrence.
 - After hosted scenarios initialize the schema, the Linq route-authority matrix leg runs the focused real-PostgreSQL proofs for deterministic hosted usage replay, both participant-addition route-row orderings, the canonical chat-ownership-before-route-row order shared by usage-limit dispatch and route-key convergence, and device-sync exact-payload plus companion-receipt lock order against concurrent account deletion.
+- That matrix starts from the hosted-local harness's intentional `prisma db
+  push` schema. The usage-credit PostgreSQL suite therefore applies the exact
+  checked-in detached direct-payment migration before creating fixtures, so
+  its positive detachment and missing-proof rejections exercise migration-only
+  constraints instead of silently testing the unconstrained Prisma schema.
 - `.github/workflows/release.yml` uses GitHub-hosted `ubuntu-24.04`, installs once, runs `pnpm release:check` with `MURPH_TEST_LANES_PARALLEL=1`, `MURPH_APP_VERIFY_PARALLEL=1`, and `MURPH_VERIFY_STEP_PARALLEL=1` so the release verification lane uses the parallel package/smoke branches and parallel app substeps without enabling full app/package overlap unless `MURPH_ACCEPTANCE_APP_VERIFY_WITH_COVERAGE=1` is set explicitly, while the same deterministic hosted-web build placeholders keep `apps/web verify` on its truthful build path without injecting production DB or production hosted device secrets, then packs the publishable tarballs once for upload/publication.
 - Vercel deploys of `apps/web` use the checked-in Vercel build command
   `pnpm release:production:migrate && pnpm build`, so the guarded migration
@@ -227,7 +241,12 @@ not enter evidence; and attachment-only input fails closed before provider work.
   successful predeploy migration can outlive a later build failure. Required
   columns, renames, `SET NOT NULL`, and incompatible type changes require
   expand/backfill/switch/final-cleanup sequencing; only final cleanup belongs in
-  `apps/web/prisma/contract-migrations`. Destructive hosted web contract cleanup
+  `apps/web/prisma/contract-migrations`. The exact detached direct-payment proof
+  migration is a tested backward-compatible exception: migration-guard tests
+  restrict it to its constraint replacement, static migration tests pin the
+  required shape, and the opt-in real-PostgreSQL suite proves sessionless
+  fulfilled detachment succeeds while missing PaymentIntent or Charge lookup
+  proof is rejected. Destructive hosted web contract cleanup
   is applied by `.github/workflows/hosted-web-contract-migrations.yml` after a
   successful Vercel-originated completed production deployment status; that
   workflow checks out the deployed SHA, verifies it is reachable from
