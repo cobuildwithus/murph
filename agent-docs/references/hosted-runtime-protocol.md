@@ -1977,6 +1977,10 @@ before that grace expires. This prevents a marker emitted before a runner crash
 from becoming de facto disposition authority after recovery restores an older
 snapshot. The marker never pretends a reply was delivered or consumes the
 mailbox item early. Invalid marker chronology cannot hide still-unconsumed work.
+The terminal leaf alone uses max-timestamp merge semantics: replay carries the
+original evidence time and cannot extend grace, while a genuinely new
+post-recovery suppression commit advances the marker and receives a fresh
+bounded checkpoint window. Every other latency leaf remains assign-once.
 Durable consumption remains the long-term terminal proof and the rolling-deploy
 or best-effort-link fallback after handling is otherwise known.
 Accepted grouped Linq replies keep the complete answered mailbox-item set on the

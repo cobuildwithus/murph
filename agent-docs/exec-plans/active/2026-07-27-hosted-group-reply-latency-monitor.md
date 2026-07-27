@@ -48,7 +48,9 @@ Updated: 2026-07-27
    crash.
    Mitigation: project only committed local suppression evidence, reject
    impossible timestamp chronology, and reopen the trace unless durable
-   consumption arrives within the normal checkpoint horizon plus buffer.
+   consumption arrives within the normal checkpoint horizon plus buffer. Let a
+   genuinely newer post-recovery commit refresh grace while stale replay keeps
+   its original timestamp.
 2. Risk: grouped reply rebatching drops earlier answered items.
    Mitigation: monotonically union coverage only while the outbox intent is
    active and keep terminal intents immutable.
@@ -75,5 +77,6 @@ Updated: 2026-07-27
   hosted maintenance, and runtime-control parsing.
 - Canonical `pnpm test:diff` over every changed source, test, and durable-doc
   path.
-- Direct scenario proof that committed silence resolves before delayed mailbox
-  checkpointing while invalid or absent terminal evidence remains unresolved.
+- Direct scenario proof that committed silence receives bounded grace before
+  delayed checkpointing, expired-unconsumed or invalid evidence reopens, durable
+  consumption stays healthy, and stale replay cannot extend grace.

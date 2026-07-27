@@ -1063,7 +1063,33 @@ describe("hosted runtime latency dashboard store", () => {
     });
     await expect(recordHostedIngressAssistantMilestone({
       assistantInputIds: ["input_assistant_milestone_1"],
+      at: instant("2026-06-02T19:12:21.750Z"),
+      authenticatedUserId: "member_latency_1",
+      milestone: "terminal_non_reply_committed",
+      prisma,
+      runtimeAttemptId: "attempt_terminal_recovery_3",
+      source: "linq",
+    })).resolves.toEqual({
+      matchedCount: 1,
+      recorded: true,
+      unmatchedCount: 0,
+    });
+    await expect(recordHostedIngressAssistantMilestone({
+      assistantInputIds: ["input_assistant_milestone_1"],
       at: instant("2026-06-02T19:12:21.500Z"),
+      authenticatedUserId: "member_latency_1",
+      milestone: "terminal_non_reply_committed",
+      prisma,
+      runtimeAttemptId: "attempt_terminal_stale_replay_4",
+      source: "linq",
+    })).resolves.toEqual({
+      matchedCount: 1,
+      recorded: true,
+      unmatchedCount: 0,
+    });
+    await expect(recordHostedIngressAssistantMilestone({
+      assistantInputIds: ["input_assistant_milestone_1"],
+      at: instant("2026-06-02T19:12:22.000Z"),
       authenticatedUserId: "member_latency_1",
       milestone: "first_codex_output_observed",
       prisma,
@@ -1079,7 +1105,7 @@ describe("hosted runtime latency dashboard store", () => {
       assistant: {
         linqTypingAcceptedAtEpochMs: Date.parse("2026-06-02T19:12:21.250Z"),
         terminalNonReplyCommittedAtEpochMs:
-          Date.parse("2026-06-02T19:12:21.375Z"),
+          Date.parse("2026-06-02T19:12:21.750Z"),
       },
       schemaVersion: 1,
     });

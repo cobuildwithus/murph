@@ -431,7 +431,7 @@ export async function recordHostedIngressAssistantMilestone(input: {
     rowMatches.push({
       assistantInputId: row.assistantInputId,
       matched: await updateHostedIngressAssistantMilestoneLocked(prisma, {
-        allowRuntimeAttemptMismatch:
+        terminalNonReplyProjection:
           input.milestone === "terminal_non_reply_committed",
         phaseBreakdown,
         runtimeAttemptId,
@@ -1689,9 +1689,9 @@ async function updateHostedIngressProviderStartedLocked(
 async function updateHostedIngressAssistantMilestoneLocked(
   prisma: HostedIngressLatencyPrismaClient,
   input: {
-    allowRuntimeAttemptMismatch: boolean;
     phaseBreakdown: HostedRuntimeLatencyPhaseBreakdown;
     runtimeAttemptId: string;
+    terminalNonReplyProjection: boolean;
     traceId: string;
   },
 ): Promise<boolean> {
@@ -1700,18 +1700,23 @@ async function updateHostedIngressAssistantMilestoneLocked(
     if (
       !trace
       || (
-        !input.allowRuntimeAttemptMismatch
+        !input.terminalNonReplyProjection
         && trace.runtimeAttemptId !== input.runtimeAttemptId
       )
     ) {
       return false;
     }
 
-    const phaseBreakdownUpdate = readPhaseBreakdownMergeUpdate(
-      trace.phaseBreakdownJson,
-      input.phaseBreakdown,
-      ["assistant"],
-    );
+    const phaseBreakdownUpdate = input.terminalNonReplyProjection
+      ? readTerminalNonReplyPhaseBreakdownMergeUpdate(
+          trace.phaseBreakdownJson,
+          input.phaseBreakdown,
+        )
+      : readPhaseBreakdownMergeUpdate(
+          trace.phaseBreakdownJson,
+          input.phaseBreakdown,
+          ["assistant"],
+        );
     if (Object.keys(phaseBreakdownUpdate).length === 0) {
       return true;
     }
@@ -1812,6 +1817,41 @@ function readPhaseBreakdownMergeUpdate(
     return {};
   }
   return { phaseBreakdownJson: merged.value };
+}
+
+// Terminal suppression may be recomputed after crash recovery. A replay carries
+// the original evidence timestamp, while a genuinely new commit carries a later
+// one, so max timestamp preserves bounded grace without letting stale replay
+// extend it. All other diagnostic leaves retain assign-once semantics.
+function readTerminalNonReplyPhaseBreakdownMergeUpdate(
+  existingValue: unknown,
+  incoming: HostedRuntimeLatencyPhaseBreakdown,
+): { phaseBreakdownJson?: Prisma.InputJsonValue } {
+  const merged = mergeHostedRuntimeLatencyPhaseBreakdownJson({
+    existing: existingValue,
+    incoming,
+    phases: ["assistant"],
+  });
+  const incomingAt =
+    incoming.assistant?.terminalNonReplyCommittedAtEpochMs;
+  const storedAt =
+    merged.value.assistant?.terminalNonReplyCommittedAtEpochMs;
+  if (
+    incomingAt !== undefined
+    && typeof storedAt === "number"
+    && incomingAt > storedAt
+  ) {
+    return {
+      phaseBreakdownJson: {
+        ...merged.value,
+        assistant: {
+          ...merged.value.assistant,
+          terminalNonReplyCommittedAtEpochMs: incomingAt,
+        },
+      },
+    };
+  }
+  return merged.changed ? { phaseBreakdownJson: merged.value } : {};
 }
 
 function normalizeNullableLatencyIdentifier(value: string | null | undefined): string | null {

@@ -221,6 +221,9 @@ not enter evidence; and attachment-only input fails closed before provider work.
   converge by assistant input.
   `packages/assistant-runtime/test/hosted-runtime-maintenance.test.ts` proves
   that projection uses the existing nonblocking assistant-milestone port.
+  The latency-store proof also shows a newer post-recovery suppression timestamp
+  advances checkpoint grace while stale evidence replay cannot roll it back or
+  extend it.
   `apps/web/vercel.json` registers that read-only monitor at a five-minute
   cadence. The hosted-local foreground-priority leg additionally uses real
   PostgreSQL, authenticated cron HTTP, and the Linq stub boundary to prove one
