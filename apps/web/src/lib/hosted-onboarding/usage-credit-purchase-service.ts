@@ -33,7 +33,9 @@ import {
 } from "./shared";
 import {
   getHostedUsageCreditOfferDefinition,
+  hostedUsageCreditPolicySupportsSavedCardTarget,
   HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_VERSION,
+  parseHostedUsageCreditCheckoutRequestPolicyVersion,
   parseHostedUsageCreditOfferCode,
   type HostedUsageCreditOfferCode,
 } from "./usage-credit-offers";
@@ -594,12 +596,23 @@ async function continueHostedUsageCreditCheckout(input: {
     purchase,
   });
   const target = projectHostedUsageCreditPurchaseTarget(purchase);
+  const policyVersion = parseHostedUsageCreditCheckoutRequestPolicyVersion(
+    purchase.checkoutRequestPolicyVersion,
+  );
+  if (!policyVersion) {
+    throw buildHostedUsageCreditInvariantError("checkout_policy_mismatch");
+  }
   const canRetryCheckoutCreate = canRetryHostedUsageCreditCheckoutCreate({
     now: input.now,
     purchase,
   });
+  const canStartSavedCardPayment =
+    canRetryCheckoutCreate &&
+    hostedUsageCreditPolicySupportsSavedCardTarget({
+      policyVersion,
+      targetKind: target.kind,
+    });
   const canRetrySavedCardPayment =
-    target.kind === "group" &&
     canRetryHostedUsageCreditSavedCardPayment(purchase);
   if (
     !canRetryCheckoutCreate &&
@@ -627,7 +640,7 @@ async function continueHostedUsageCreditCheckout(input: {
     stripe,
   });
   let checkoutPurchase = purchase;
-  if (target.kind === "group") {
+  if (canStartSavedCardPayment || canRetrySavedCardPayment) {
     const directPaymentPurchase = await tryChargeHostedUsageCreditSavedCard({
       checkoutRequest,
       now: input.now,
