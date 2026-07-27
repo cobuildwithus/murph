@@ -526,6 +526,7 @@ function createTerminalEvidence(input: {
   captureId?: string
   groupCaptureIds?: string[]
   groupInputIds?: string[]
+  recordedAt?: string
   terminal?: {
     deliveryIntentId: string | null
     kind: 'deferred' | 'replied' | 'reply_intent_committed'
@@ -556,7 +557,7 @@ function createTerminalEvidence(input: {
       linqMessageIds: [],
       queuedAt: null,
     },
-    recordedAt: '2026-04-08T00:10:00.000Z',
+    recordedAt: input.recordedAt ?? '2026-04-08T00:10:00.000Z',
     schema: 'murph.assistant-auto-reply-terminal-evidence.v1',
     terminal: input.terminal ?? {
       deliveryIntentId: null,
@@ -2870,6 +2871,107 @@ describe('assistant auto-reply runtime', () => {
       terminalKind: 'replied',
       vault: '/tmp/assistant-automation-vault',
     })
+  })
+
+  it('preserves each suppressed repair partition timestamp when projecting terminal non-replies', async () => {
+    const olderInputId = 'ain_split_suppressed_older_0123456789012'
+    const newerInputId = 'ain_split_suppressed_newer_0123456789012'
+    const olderRecordedAt = '2026-04-08T00:10:00.000Z'
+    const newerRecordedAt = '2026-04-08T00:11:00.000Z'
+    const older = createCapturelessAssistantInputCandidate({
+      inputId: olderInputId,
+      occurredAt: '2026-04-08T00:01:00.000Z',
+      receivedAt: '2026-04-08T00:01:01.000Z',
+      text: 'older suppressed repair partition',
+    })
+    const newer = createCapturelessAssistantInputCandidate({
+      inputId: newerInputId,
+      occurredAt: '2026-04-08T00:02:00.000Z',
+      receivedAt: '2026-04-08T00:02:01.000Z',
+      text: 'newer suppressed repair partition',
+    })
+    const evidenceByInputId = new Map([
+      [
+        olderInputId,
+        createTerminalEvidence({
+          captureId: olderInputId,
+          groupCaptureIds: [],
+          groupInputIds: [olderInputId],
+          recordedAt: olderRecordedAt,
+          terminal: {
+            kind: 'suppressed',
+            reason: 'older group social policy',
+          },
+        }),
+      ],
+      [
+        newerInputId,
+        createTerminalEvidence({
+          captureId: newerInputId,
+          groupCaptureIds: [],
+          groupInputIds: [newerInputId],
+          recordedAt: newerRecordedAt,
+          terminal: {
+            kind: 'suppressed',
+            reason: 'newer group social policy',
+          },
+        }),
+      ],
+    ])
+    evidenceMocks.readAssistantAutoReplyTerminalEvidenceByEvidenceId
+      .mockImplementation(async (_vault: string, evidenceId: string) =>
+        evidenceByInputId.get(evidenceId) ?? null
+      )
+    const reply = await vi.importActual<typeof import('../src/assistant/automation/reply.ts')>(
+      '../src/assistant/automation/reply.ts',
+    )
+    const context = reply.createAssistantAutoReplyGroupContext([
+      createCapturelessReplyGroupItem(older),
+      createCapturelessReplyGroupItem(newer),
+    ])
+
+    if (!context) {
+      throw new Error('expected reply context')
+    }
+
+    const onTerminalNonReplyCommitted = vi.fn()
+    const result = await reply.processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context,
+      deliveryDispatchMode: 'queue-only',
+      enabledChannels: ['linq'],
+      executionContext: {
+        hosted: {
+          memberId: 'member-test',
+          userEnvKeys: [],
+        },
+      },
+      inboxServices: createInboxServices(),
+      onTerminalNonReplyCommitted,
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(result).toMatchObject({
+      advanceCursor: true,
+      failed: 0,
+      replied: 0,
+      skipped: 2,
+      stopScanning: false,
+    })
+    expect(onTerminalNonReplyCommitted).toHaveBeenCalledTimes(2)
+    expect(onTerminalNonReplyCommitted).toHaveBeenNthCalledWith(1, {
+      inputIds: [olderInputId],
+      recordedAt: olderRecordedAt,
+      source: 'linq',
+    })
+    expect(onTerminalNonReplyCommitted).toHaveBeenNthCalledWith(2, {
+      inputIds: [newerInputId],
+      recordedAt: newerRecordedAt,
+      source: 'linq',
+    })
+    expect(replyMocks.sendAssistantMessage).not.toHaveBeenCalled()
   })
 
   it('persists split terminal evidence repair and treats the restarted group as handled', async () => {

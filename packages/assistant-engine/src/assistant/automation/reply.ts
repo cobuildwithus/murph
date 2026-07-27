@@ -328,22 +328,32 @@ function mergeAssistantAutoReplyCommittedTerminalNonReplies(
   lists: ReadonlyArray<
     readonly AssistantAutoReplyCommittedTerminalNonReply[] | null | undefined
   >,
-): AssistantAutoReplyCommittedTerminalNonReply | null {
-  const inputIds = new Set<string>()
-  let recordedAt: string | null = null
+): AssistantAutoReplyCommittedTerminalNonReply[] {
+  const recordedAtByInputId = new Map<string, string>()
   for (const list of lists) {
     for (const terminalNonReply of list ?? []) {
       for (const inputId of terminalNonReply.inputIds) {
-        inputIds.add(inputId)
-      }
-      if (!recordedAt || terminalNonReply.recordedAt > recordedAt) {
-        recordedAt = terminalNonReply.recordedAt
+        const existingRecordedAt = recordedAtByInputId.get(inputId)
+        if (
+          !existingRecordedAt
+          || terminalNonReply.recordedAt > existingRecordedAt
+        ) {
+          recordedAtByInputId.set(inputId, terminalNonReply.recordedAt)
+        }
       }
     }
   }
-  return inputIds.size > 0 && recordedAt
-    ? { inputIds: [...inputIds], recordedAt }
-    : null
+
+  const inputIdsByRecordedAt = new Map<string, string[]>()
+  for (const [inputId, recordedAt] of recordedAtByInputId) {
+    const inputIds = inputIdsByRecordedAt.get(recordedAt) ?? []
+    inputIds.push(inputId)
+    inputIdsByRecordedAt.set(recordedAt, inputIds)
+  }
+  return [...inputIdsByRecordedAt].map(([recordedAt, inputIds]) => ({
+    inputIds,
+    recordedAt,
+  }))
 }
 
 export function applyAssistantAutoReplyProcessResult(input: {
@@ -819,12 +829,12 @@ async function commitAssistantAutoReplyGroupOutcome(input: {
     artifactResult.terminalLinqCleanup,
     deferredSuppression.terminalLinqCleanup,
   ])
-  const terminalNonReply = mergeAssistantAutoReplyCommittedTerminalNonReplies([
+  const terminalNonReplies = mergeAssistantAutoReplyCommittedTerminalNonReplies([
     input.outcome.terminalNonReplies,
     artifactResult.terminalNonReplies,
     deferredSuppression.terminalNonReplies,
   ])
-  if (terminalNonReply) {
+  for (const terminalNonReply of terminalNonReplies) {
     emitAssistantAutoReplyTerminalNonReplyBestEffort({
       event: {
         inputIds: [...terminalNonReply.inputIds],
