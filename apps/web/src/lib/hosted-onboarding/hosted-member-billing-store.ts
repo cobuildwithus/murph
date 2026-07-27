@@ -27,6 +27,7 @@ import {
   buildHostedMemberBillingPrivateColumns,
   readHostedMemberBillingPrivateState,
 } from "./member-private-codecs";
+import { assertHostedMemberNotSuspended } from "./entitlement";
 import {
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
   lockHostedMemberRow,
@@ -894,6 +895,19 @@ export async function readHostedMemberOwnsExactStripeSubscriptionTx(input: {
 export async function writeHostedMemberStripeBillingRefTx(
   input: HostedMemberStripeBillingRefWriteInput,
 ): Promise<HostedMemberStripeBillingRefSnapshot> {
+  await lockHostedMemberRow(input.tx, input.memberId);
+  const member = await input.tx.hostedMember.findUnique({
+    select: { suspendedAt: true },
+    where: { id: input.memberId },
+  });
+  if (!member) {
+    throw hostedOnboardingError({
+      code: "HOSTED_MEMBER_NOT_FOUND",
+      httpStatus: 404,
+      message: "Hosted member record was not found.",
+    });
+  }
+  assertHostedMemberNotSuspended(member);
   await assertHostedMemberStripeBillingIdentifiersAvailableTx(input);
 
   let billingRef;
@@ -930,14 +944,15 @@ export async function bindHostedMemberStripeCustomerIdIfMissingTx(input: {
     return null;
   }
 
-  const billingPrivateColumns = await buildHostedMemberBillingPrivateColumns({
-    memberId: input.memberId,
-    prisma: input.tx,
-    stripeCustomerId: input.stripeCustomerId,
-    stripeSubscriptionId: null,
-  });
-
   await lockHostedMemberRow(input.tx, input.memberId);
+  const member = await input.tx.hostedMember.findUnique({
+    select: { suspendedAt: true },
+    where: { id: input.memberId },
+  });
+  if (!member) {
+    return null;
+  }
+  assertHostedMemberNotSuspended(member);
   await assertHostedMemberStripeBillingIdentifiersAvailableTx({
     memberId: input.memberId,
     stripeCustomerId: input.stripeCustomerId,
@@ -954,6 +969,12 @@ export async function bindHostedMemberStripeCustomerIdIfMissingTx(input: {
     return projectHostedMemberStripeBillingRefSnapshot(currentBillingRef, input.tx);
   }
 
+  const billingPrivateColumns = await buildHostedMemberBillingPrivateColumns({
+    memberId: input.memberId,
+    prisma: input.tx,
+    stripeCustomerId: input.stripeCustomerId,
+    stripeSubscriptionId: null,
+  });
   let billingRef;
 
   try {

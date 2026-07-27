@@ -12,6 +12,7 @@ import type {
   HostedUsageTopUpReturn,
 } from "@/src/components/settings/hosted-usage-top-up-dialog";
 import { HostedDataPrivacySettings } from "@/src/components/settings/hosted-data-privacy-settings";
+import { SettingsAuthRequired } from "./settings-auth-required";
 import { HostedFamilySettings } from "@/src/components/settings/hosted-family-settings";
 import { HostedPasskeySettings } from "@/src/components/settings/hosted-passkey-settings";
 import { PulseTrialBillingContinuation } from "@/src/components/settings/hosted-start-paid-pulse-button";
@@ -30,6 +31,10 @@ import {
 import { readHostedPulseTrialContinuationCookie } from "@/src/lib/hosted-onboarding/billing-pulse-trial-continuation";
 import { readHostedFamilyInviteContinuationCookie } from "@/src/lib/hosted-onboarding/family-invite-continuation";
 import {
+  HOSTED_PULSE_TRIAL_CONTINUATION_ACTION_PARAM,
+  HOSTED_PULSE_TRIAL_CONTINUATION_EXPIRES_PARAM,
+  HOSTED_PULSE_TRIAL_CONTINUATION_PATH,
+  HOSTED_PULSE_TRIAL_CONTINUATION_SIGNATURE_PARAM,
   HOSTED_START_PAID_PULSE_RETURN_PARAM,
   HOSTED_START_PAID_PULSE_RETURN_VALUE,
 } from "@/src/lib/hosted-onboarding/billing-pulse-trial-continuation-contract";
@@ -67,8 +72,11 @@ export const metadata: Metadata = createMurphPageMetadata({
 });
 
 type SettingsSearchParams = {
+  action?: string | string[] | undefined;
   addEmail?: string | string[] | undefined;
   addUsage?: string | string[] | undefined;
+  expires?: string | string[] | undefined;
+  signature?: string | string[] | undefined;
   startPulse?: string | string[] | undefined;
   usageCheckout?: string | string[] | undefined;
   usageFamily?: string | string[] | undefined;
@@ -96,21 +104,38 @@ export default async function SettingsPage({
   );
   const { authenticated, authenticatedMember, session } =
     await getHostedDashboardPageAuthSnapshot();
+  // Stripe sends the payment-method return here unsigned-in when the member
+  // opened Murph's payment link outside a browser that holds their session.
+  // Keep the signed continuation params so signing in can resume the switch
+  // instead of dropping it on the floor.
+  const pulseTrialPaymentReturn = readPulseTrialPaymentReturn(resolvedSearchParams);
 
   if (!authenticated) {
-    redirect("/");
+    if (pulseTrialPaymentReturn === null) {
+      redirect("/");
+    }
+    return <SettingsAuthRequired />;
   }
 
-  const pulseTrialBillingContinuationPending =
+  // Only the continuation route can verify the signature and set the
+  // session-bound cookie, so hand the now-authenticated visitor back to it.
+  if (pulseTrialPaymentReturn) {
+    redirect(pulseTrialPaymentReturn);
+  }
+
+  const pulseTrialBillingContinuationAction =
     readFirstSearchParamValue(
       resolvedSearchParams[HOSTED_START_PAID_PULSE_RETURN_PARAM],
     ) === HOSTED_START_PAID_PULSE_RETURN_VALUE
     && authenticatedMember !== null
     && session !== null
-    && await readHostedPulseTrialContinuationCookie({
-      memberId: authenticatedMember.id,
-      sessionId: session.sessionId,
-    }) !== null;
+      ? await readHostedPulseTrialContinuationCookie({
+          memberId: authenticatedMember.id,
+          sessionId: session.sessionId,
+        })
+      : null;
+  const pulseTrialBillingContinuationPending =
+    pulseTrialBillingContinuationAction !== null;
 
   const prisma = getPrisma();
   const settingsData = authenticatedMember
@@ -271,7 +296,11 @@ export default async function SettingsPage({
         <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
           Subscription
         </div>
-        {pulseTrialBillingContinuationPending ? <PulseTrialBillingContinuation /> : null}
+        {pulseTrialBillingContinuationAction ? (
+          <PulseTrialBillingContinuation
+            action={pulseTrialBillingContinuationAction}
+          />
+        ) : null}
         <HostedBillingSettings
           authenticated={authenticated}
           billingStatus={authenticatedMember?.billingStatus}
@@ -522,6 +551,31 @@ function readOnlySearchParamValue(
   }
 
   return value.length === 1 ? value[0] : undefined;
+}
+
+// Rebuilds the continuation route's own URL from the params Stripe sent, so the
+// redirect target is fixed by us and never taken from user-controlled input.
+function readPulseTrialPaymentReturn(
+  searchParams: SettingsSearchParams,
+): string | null {
+  const action = readOnlySearchParamValue(searchParams.action);
+  const expires = readOnlySearchParamValue(searchParams.expires);
+  const signature = readOnlySearchParamValue(searchParams.signature);
+
+  if (
+    typeof action !== "string" ||
+    typeof expires !== "string" ||
+    typeof signature !== "string"
+  ) {
+    return null;
+  }
+
+  const params = new URLSearchParams();
+  params.set(HOSTED_PULSE_TRIAL_CONTINUATION_ACTION_PARAM, action);
+  params.set(HOSTED_PULSE_TRIAL_CONTINUATION_EXPIRES_PARAM, expires);
+  params.set(HOSTED_PULSE_TRIAL_CONTINUATION_SIGNATURE_PARAM, signature);
+
+  return `${HOSTED_PULSE_TRIAL_CONTINUATION_PATH}?${params.toString()}`;
 }
 
 function readUsageTopUpPurchaseReturn(

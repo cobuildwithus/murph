@@ -5,6 +5,9 @@ import {
   Prisma,
 } from "@prisma/client";
 
+import {
+  activeHostedThreadContainerParticipantWhere,
+} from "../hosted-groups/thread-container-participant-access";
 import { getPrisma } from "../prisma";
 import { renderUserFacingMessage } from "../hosted-messages/user-facing-messages";
 import {
@@ -210,6 +213,7 @@ export function hasActiveHostedThreadContainerAccess(input: {
 export async function hasActiveHostedThreadContainerAccessWithParticipants(input: {
   container: Pick<HostedMemberPersonAccessState, "suspendedAt">;
   containerMemberId: string;
+  now?: Date;
   owner: HostedMemberPersonAccessState;
   prisma?: HostedOnboardingReadClient;
 }): Promise<boolean> {
@@ -226,6 +230,7 @@ export async function hasActiveHostedThreadContainerAccessWithParticipants(input
 
   return await hasAnyActiveHostedThreadContainerParticipant({
     containerMemberId: input.containerMemberId,
+    now: input.now,
     prisma: input.prisma,
   });
 }
@@ -275,6 +280,7 @@ export function activeHostedMemberAccessWhere(): Prisma.HostedMemberWhereInput {
 
 export async function readActiveHostedMemberAccess(input: {
   memberId: string;
+  now?: Date;
   prisma?: HostedOnboardingReadClient;
 }): Promise<boolean> {
   const prisma = input.prisma ?? getPrisma();
@@ -293,6 +299,7 @@ export async function readActiveHostedMemberAccess(input: {
     return await hasActiveHostedThreadContainerAccessWithParticipants({
       container: member,
       containerMemberId: input.memberId,
+      now: input.now,
       owner: member.threadContainer.owner,
       prisma,
     });
@@ -547,8 +554,8 @@ async function hasAnyHostedRuntimeAiAccessThreadContainerParticipant(input: {
       },
     },
     where: {
+      ...activeHostedThreadContainerParticipantWhere({ now: input.now }),
       containerMemberId: input.containerMemberId,
-      removedAt: null,
     },
   });
 
@@ -583,20 +590,20 @@ export async function isHostedThreadContainerMember(input: {
 
 export async function hasAnyActiveHostedThreadContainerParticipant(input: {
   containerMemberId: string;
+  now?: Date;
   prisma?: HostedOnboardingReadClient;
 }): Promise<boolean> {
   const prisma = input.prisma ?? getPrisma();
-  // Participant rows are a provider-roster projection. A departed member can
-  // remain active until the next successful complete roster reconcile; that
-  // stale-open window is accepted because false removal would drop live groups.
   const participant = await prisma.hostedThreadContainerParticipant.findFirst({
     select: {
       participantMemberId: true,
     },
     where: {
+      ...activeHostedThreadContainerParticipantWhere({
+        now: input.now ?? new Date(),
+      }),
       containerMemberId: input.containerMemberId,
       participant: activeHostedMemberAccessWhere(),
-      removedAt: null,
     },
   });
 

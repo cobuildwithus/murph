@@ -4,7 +4,9 @@ import type {
   HostedPublicBillingCheckoutOffer,
 } from "@/src/lib/hosted-onboarding/billing-plans";
 import {
+  HOSTED_PULSE_TRIAL_CONTINUATION_ACTION_HEADER,
   HOSTED_PULSE_TRIAL_CONTINUATION_PATH,
+  type HostedPulseTrialContinuationAction,
 } from "@/src/lib/hosted-onboarding/billing-pulse-trial-continuation-contract";
 
 interface ApiErrorPayload {
@@ -194,8 +196,9 @@ export async function requestHostedPulseTrialStartPaid(): Promise<HostedPulseTri
 }
 
 export async function requestHostedPulseTrialContinuation(input: {
+  action: HostedPulseTrialContinuationAction;
   redirectIfPaymentRequired?: boolean;
-} = {}): Promise<
+}): Promise<
   HostedPulseTrialContinuationClientResult
 > {
   const response = await requestHostedOnboardingJson<
@@ -205,6 +208,9 @@ export async function requestHostedPulseTrialContinuation(input: {
       status: "continuing";
     }
   >({
+    headers: {
+      [HOSTED_PULSE_TRIAL_CONTINUATION_ACTION_HEADER]: input.action,
+    },
     method: "POST",
     url: HOSTED_PULSE_TRIAL_CONTINUATION_PATH,
   });

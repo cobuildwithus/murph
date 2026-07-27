@@ -171,45 +171,16 @@ describe("assistant subscription tool", () => {
     expect(readToolText(result)).not.toContain(sensitiveDetail);
   });
 
-  it("states the conversational consent, copy, silence, and payment-link policy", () => {
-    const guidance = MURPH_SUBSCRIPTION_TOOL.description;
+  it("states current-turn authority and retry-safe result semantics", () => {
+    const contract = MURPH_SUBSCRIPTION_TOOL.description;
 
-    expect(guidance).toContain("current user made in the current turn");
-    expect(guidance).toContain("explicitly and unambiguously chose");
-    expect(guidance).toContain(
-      "require a current murph.plan_usage subscriptionActionQuote whose action exactly matches",
-    );
-    expect(guidance).toContain("A quote is not a recommendation or consent");
-    expect(guidance).toContain("Never use post-action response facts as the first disclosure");
-    expect(guidance).toContain("bare “yes” is not consent");
-    expect(guidance).toContain(
-      "Use continue_pulse only when the current murph.plan_usage result confirms an active trial",
-    );
-    expect(guidance).toContain(
-      "trial_conversion_pending or an ended trial, do not use continue_pulse",
-    );
-    expect(guidance).toContain("one short reply-oriented question and include no URL");
-    expect(guidance).toContain("should we part ways?");
-    expect(guidance).toContain("say nothing");
-    expect(guidance).toContain(
-      "a less capable model that uses less of your included usage",
-    );
-    expect(guidance).toContain("Do not assume the member knows Luna, Terra, or Sol");
-    expect(guidance).toContain("Never switch models automatically");
-    expect(guidance).toContain(
-      "returned plan facts only to acknowledge its result",
-    );
-    expect(guidance).toContain(
-      "Send the returned paymentUrl only when status is payment_required",
-    );
-    expect(guidance).toContain(
-      "For no_action_required, stay silent unless answering the member's explicit request",
-    );
-    expect(guidance).toContain(
-      "when directly acknowledging continue_pulse, keep it brief and include no explanation or link",
-    );
-    expect(guidance).toContain(
-      "Never call a payment method verified or guarantee a future charge",
+    expect(contract.length).toBeLessThanOrEqual(520);
+    expect(contract).toContain("explicitly confirmed by the current user in this turn");
+    expect(contract).toContain("Exact replay of the same input and action is idempotent");
+    expect(contract).toContain("a different action requires new eligible user input");
+    expect(contract).toContain("Only payment_required includes paymentUrl");
+    expect(contract).toContain(
+      "completed, pending, and no_action_required do not prove a payment method or future charge",
     );
   });
 });

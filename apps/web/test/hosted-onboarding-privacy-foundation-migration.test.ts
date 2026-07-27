@@ -182,6 +182,7 @@ const HOSTED_MEMBER_RELATION_TYPES = new Set([
   "ClinicalRecordRetrievalRequest",
   "ClinicalRecordRetrievalRun",
   "HostedAiUsage",
+  "HostedAddressBookProjection",
   "HostedAccountGroup",
   "HostedAccountGroupBillingRef",
   "HostedAccountGroupInvite",
@@ -251,6 +252,13 @@ describe("hosted Prisma baseline migration", () => {
     const hostedRuntimeHardCutMigrationSql = readFileSync(
       new URL(
         "../prisma/migrations/2026042700_hosted_runtime_hard_cut/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    const hostedUserCryptoEnvelopeMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260501000000_hosted_user_crypto_envelopes/migration.sql",
         import.meta.url,
       ),
       "utf8",
@@ -936,6 +944,8 @@ describe("hosted Prisma baseline migration", () => {
       "20260725230000_hosted_paid_usage_legacy_period_cutover",
       "20260726020000_hosted_member_stripe_customer_reservation",
       "20260726120000_hosted_growth_aggregate",
+      "20260726180000_hosted_account_deletion_cleanup",
+      "20260726180000_hosted_address_book_projection",
       "20260726180000_hosted_thread_container_usage_default",
       "migration_lock.toml",
     ]);
@@ -956,6 +966,12 @@ describe("hosted Prisma baseline migration", () => {
     );
     expect(hostedMemberStripeCustomerReservationMigrationSql).toContain(
       'CREATE UNIQUE INDEX "hosted_member_billing_ref_stripe_customer_reservation_id_key"',
+    );
+    expect(hostedUserCryptoEnvelopeMigrationSql).toContain(
+      "CREATE UNIQUE INDEX hosted_user_crypto_envelope_one_active_per_domain_idx",
+    );
+    expect(hostedUserCryptoEnvelopeMigrationSql).toMatch(
+      /ON hosted_user_crypto_envelope\(user_id, domain\)\s+WHERE status = 'active'/u,
     );
     expect(schema).toContain(
       'monthlyUsageLimitUsdMicros BigInt              @default(7500000) @map("monthly_usage_limit_usd_micros")',

@@ -93,6 +93,7 @@ import {
   lookupHostedAccountGroupStripeBillingRefByStripeSubscriptionId,
   readHostedMemberFamilyBillingClaim,
   setHostedFamilyStripeBillingReversalStateTx,
+  type PreparedHostedFamilyCryptoDomainRoots,
   type HostedFamilyStripeSubscriptionResult,
 } from "./family-plan";
 import { normalizeNullableString } from "./shared";
@@ -831,9 +832,12 @@ export async function applyStripeSubscriptionUpdated(
   subscription: Stripe.Subscription,
   dispatchContext: HostedStripeDispatchContext,
   prisma: Prisma.TransactionClient,
+  preparedFamilyCryptoDomainRoots?: PreparedHostedFamilyCryptoDomainRoots,
 ): Promise<HostedStripeSubscriptionUpdateOutcome> {
   const familySubscription = await applyHostedFamilyStripeSubscriptionUpdatedWithUsageTx({
     dispatchContext,
+    preparedCryptoDomainRootsByMember:
+      preparedFamilyCryptoDomainRoots ?? new Map(),
     subscription,
     tx: prisma,
   });
@@ -949,10 +953,13 @@ export async function applyStripeInvoicePaid(
   canonicalBillingStatus?: HostedBillingStatus | null,
   canonicalSubscription?: Stripe.Subscription | null,
   preparedCryptoDomainRoots?: PreparedHostedCryptoDomainRootCandidates,
+  preparedFamilyCryptoDomainRoots?: PreparedHostedFamilyCryptoDomainRoots,
 ): Promise<HostedStripeActivationOutcome> {
   if (canonicalSubscription) {
     const familySubscription = await applyHostedFamilyStripeSubscriptionUpdatedWithUsageTx({
       dispatchContext,
+      preparedCryptoDomainRootsByMember:
+        preparedFamilyCryptoDomainRoots ?? new Map(),
       subscription: canonicalSubscription,
       tx: prisma,
     });
@@ -1134,6 +1141,7 @@ function buildHostedStripeActivationOutcomeFromFamilySubscription(
 
 async function applyHostedFamilyStripeSubscriptionUpdatedWithUsageTx(input: {
   dispatchContext: HostedStripeDispatchContext;
+  preparedCryptoDomainRootsByMember: PreparedHostedFamilyCryptoDomainRoots;
   subscription: Stripe.Subscription;
   tx: Prisma.TransactionClient;
 }): Promise<HostedFamilyStripeSubscriptionResult> {

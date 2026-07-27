@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowRight } from "lucide-react";
+import { ArrowRight, CreditCard } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 
@@ -21,6 +21,7 @@ import {
   DialogTitle,
 } from "@/src/components/ui/dialog";
 import { getHostedBillingPlanDefinition } from "@/src/lib/hosted-onboarding/billing-plans";
+import type { HostedPulseTrialContinuationAction } from "@/src/lib/hosted-onboarding/billing-pulse-trial-continuation-contract";
 import { cn } from "@/src/lib/utils";
 
 import { PlanFeatureCard } from "./plan-feature-card";
@@ -33,8 +34,15 @@ import {
 type StartPaidPulseStatus = "billing_pending" | "idle" | "submitting";
 type StartPaidPulseErrorAction = HostedBillingErrorAction | null;
 type PulseTrialBillingContinuationStatus =
+  | "active"
   | "billing_pending"
+  | "checking"
+  | "choice_changed"
+  | "confirming"
+  | "continuing"
+  | "dismissed"
   | "error"
+  | "start_required"
   | "starting";
 
 const pulsePlan = getHostedBillingPlanDefinition("launch_monthly");
@@ -173,18 +181,29 @@ function resolveStartPaidPulseErrorAction(
   });
 }
 
-export function PulseTrialBillingContinuation() {
+export function PulseTrialBillingContinuation(props: {
+  action: HostedPulseTrialContinuationAction;
+}) {
   const router = useRouter();
-  const started = useRef(false);
-  const [status, setStatus] = useState<PulseTrialBillingContinuationStatus>("starting");
+  const submitting = useRef(false);
+  const checkedContinueAction = useRef(false);
+  const [status, setStatus] =
+    useState<PulseTrialBillingContinuationStatus>(
+      props.action === "continue_pulse" ? "checking" : "confirming",
+    );
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const runContinuation = useCallback(async (redirectIfPaymentRequired: boolean) => {
-    setStatus("starting");
+    if (submitting.current) {
+      return;
+    }
+    submitting.current = true;
+    setStatus(props.action === "continue_pulse" ? "checking" : "starting");
     setErrorMessage(null);
 
     try {
       const result = await requestHostedPulseTrialContinuation({
+        action: props.action,
         redirectIfPaymentRequired,
       });
       if (result.status === "redirecting") {
@@ -202,25 +221,55 @@ export function PulseTrialBillingContinuation() {
         return;
       }
 
+      if (result.status === "continuing") {
+        setStatus("continuing");
+        return;
+      }
+
+      if (result.status === "started" && props.action === "continue_pulse") {
+        setStatus("active");
+        return;
+      }
+
+      setStatus("dismissed");
       router.replace("/settings#subscription");
     } catch (error) {
+      if (
+        error instanceof HostedOnboardingApiError
+        && error.code === "HOSTED_PULSE_TRIAL_CONTINUATION_CHANGED"
+      ) {
+        setStatus("choice_changed");
+        return;
+      }
+      if (
+        error instanceof HostedOnboardingApiError
+        && error.code === "HOSTED_PULSE_TRIAL_CONTINUE_REQUIRES_START"
+      ) {
+        setStatus("start_required");
+        return;
+      }
       if (error instanceof HostedOnboardingApiError && !error.retryable) {
+        setStatus("dismissed");
         router.replace("/settings#subscription");
         return;
       }
       setStatus("error");
-      setErrorMessage(toErrorMessage(error, "Could not finish your Pulse update automatically."));
+      setErrorMessage(toErrorMessage(error, "Could not finish your Pulse update."));
+    } finally {
+      submitting.current = false;
     }
-  }, [router]);
+  }, [props.action, router]);
 
   useEffect(() => {
-    if (started.current) {
+    if (
+      props.action !== "continue_pulse"
+      || checkedContinueAction.current
+    ) {
       return;
     }
-    started.current = true;
-
+    checkedContinueAction.current = true;
     void runContinuation(false);
-  }, [runContinuation]);
+  }, [props.action, runContinuation]);
 
   useEffect(() => {
     if (status !== "billing_pending") {
@@ -234,37 +283,228 @@ export function PulseTrialBillingContinuation() {
     return () => window.clearTimeout(refreshTimeout);
   }, [router, status]);
 
-  if (status === "error") {
-    return (
-      <div
-        role="alert"
-        className="flex flex-col items-start gap-3 rounded-lg border border-destructive/20 bg-destructive/5 p-3 text-sm text-destructive sm:flex-row sm:items-center sm:justify-between"
-      >
-        <p>{errorMessage}</p>
-        <Button
-          type="button"
-          size="sm"
-          variant="secondary"
-          onClick={() => void runContinuation(true)}
-        >
-          Try again
-        </Button>
-      </div>
-    );
+  function dismissContinuation() {
+    if (submitting.current) {
+      return;
+    }
+    setStatus("dismissed");
+    router.replace("/settings#subscription");
+  }
+
+  if (status === "dismissed") {
+    return null;
   }
 
   return (
-    <p
-      role="status"
-      aria-live="polite"
-      aria-busy="true"
-      className="flex items-center gap-2 rounded-lg border border-[#c4a882]/25 bg-[#fffcf6] p-3 text-sm text-[#736a58]"
+    <PulseTrialBillingContinuationView
+      action={props.action}
+      errorMessage={errorMessage}
+      onConfirm={() => void runContinuation(status === "error")}
+      onDismiss={dismissContinuation}
+      status={status}
+    />
+  );
+}
+
+export function PulseTrialBillingContinuationView(props: {
+  action: HostedPulseTrialContinuationAction;
+  errorMessage: string | null;
+  onConfirm: () => void;
+  onDismiss: () => void;
+  status: Exclude<PulseTrialBillingContinuationStatus, "dismissed">;
+}) {
+  if (props.status === "active") {
+    return (
+      <ContinuationNotice
+        actionLabel="Done"
+        description={
+          `Your trial has ended and paid Pulse is active at ${pulsePriceLabel}/month.`
+        }
+        eyebrow="Pulse active"
+        onAction={props.onDismiss}
+        title="Your Pulse plan is active"
+      />
+    );
+  }
+
+  if (props.status === "continuing") {
+    return (
+      <ContinuationNotice
+        actionLabel="Done"
+        description={
+          `Your current trial continues as scheduled. Paid Pulse remains set to begin at ${pulsePriceLabel}/month when the trial ends.`
+        }
+        eyebrow="Payment method saved"
+        onAction={props.onDismiss}
+        title="Your Pulse trial is set"
+      />
+    );
+  }
+
+  if (props.status === "start_required") {
+    return (
+      <ContinuationNotice
+        actionLabel="Got it"
+        description="Paid Pulse was not started from this return. Review the Pulse plan below and choose Start Pulse if you want billing to begin now."
+        eyebrow="Trial update"
+        onAction={props.onDismiss}
+        title="Your trial has ended"
+      />
+    );
+  }
+
+  if (props.status === "choice_changed") {
+    return (
+      <ContinuationNotice
+        actionLabel="Got it"
+        description="This Pulse choice changed in another tab. Continue from the latest return."
+        eyebrow="Pulse update"
+        onAction={props.onDismiss}
+        title="Your Pulse choice changed"
+      />
+    );
+  }
+
+  if (
+    props.status === "checking"
+    || props.status === "starting"
+    || props.status === "billing_pending"
+  ) {
+    return (
+      <p
+        role="status"
+        aria-live="polite"
+        aria-busy="true"
+        className="flex items-center gap-2 rounded-xl bg-[#fffcf6] p-4 text-sm text-[#736a58] shadow-[0_0_0_1px_rgba(196,168,130,0.25),0_1px_2px_-1px_rgba(45,52,54,0.08),0_2px_4px_rgba(45,52,54,0.04)]"
+      >
+        <Spinner aria-hidden="true" />
+        {props.status === "billing_pending"
+          ? "Finishing your Pulse update. Checking billing status…"
+          : props.status === "checking"
+            ? "Checking your Pulse trial…"
+            : "Finishing your Pulse update…"}
+      </p>
+    );
+  }
+
+  const isContinueRetry =
+    props.action === "continue_pulse" && props.status === "error";
+  const copy = isContinueRetry
+    ? {
+        confirmLabel: "Check again",
+        description:
+          "Stripe has not made the saved payment method available yet. Check again before we confirm the existing trial schedule.",
+        dismissLabel: "Close",
+        title: "Payment method still updating",
+      }
+    : {
+        ...startNowContinuationConfirmationCopy(),
+        dismissLabel: "Not now",
+      };
+
+  return (
+    <section
+      aria-label="Confirm Pulse billing choice"
+      className="rounded-2xl bg-[#fffcf6] p-5 text-[#2d3436] shadow-[0_0_0_1px_rgba(196,168,130,0.28),0_1px_2px_-1px_rgba(45,52,54,0.08),0_4px_12px_rgba(45,52,54,0.05)] sm:p-6"
     >
-      <Spinner aria-hidden="true" />
-      {status === "billing_pending"
-        ? "Finishing your Pulse update. Checking billing status…"
-        : "Payment method saved. Finishing your Pulse update…"}
-    </p>
+      <div className="flex items-start gap-3">
+        <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-[#eef1e8] text-[#5a6e32]">
+          <CreditCard className="size-5" aria-hidden="true" />
+        </div>
+        <div className="min-w-0">
+          <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-[#7a725f]">
+            Review your Pulse choice
+          </p>
+          <h2 className="mt-1 text-balance font-serif text-xl font-semibold tracking-tight text-[#2d3436] sm:text-2xl">
+            {copy.title}
+          </h2>
+          <p className="mt-2 max-w-2xl text-pretty text-sm leading-6 text-[#736a58]">
+            {copy.description}
+          </p>
+        </div>
+      </div>
+
+      {props.errorMessage ? (
+        <p
+          role="alert"
+          className="mt-4 rounded-xl bg-destructive/5 p-3 text-pretty text-sm text-destructive shadow-[0_0_0_1px_rgba(220,38,38,0.18)]"
+        >
+          {props.errorMessage}
+        </p>
+      ) : null}
+
+      <div className="mt-5 flex flex-col gap-2 sm:flex-row sm:items-center">
+        <Button
+          type="button"
+          onClick={props.onConfirm}
+          className="min-h-11 transition-transform duration-150 ease-out active:scale-[0.96]"
+        >
+          {props.status === "error" && !isContinueRetry
+            ? "Try again"
+            : copy.confirmLabel}
+        </Button>
+        <Button
+          type="button"
+          variant="ghost"
+          onClick={props.onDismiss}
+          className="min-h-11 transition-transform duration-150 ease-out active:scale-[0.96]"
+        >
+          {copy.dismissLabel}
+        </Button>
+      </div>
+    </section>
+  );
+}
+
+function startNowContinuationConfirmationCopy(): {
+  confirmLabel: string;
+  description: string;
+  title: string;
+} {
+  return {
+    confirmLabel: "End trial and start Pulse",
+    description:
+      `Your trial will end and paid Pulse billing will begin now at ${pulsePriceLabel}/month.`,
+    title: "Start paid Pulse now?",
+  };
+}
+
+function ContinuationNotice(props: {
+  actionLabel: string;
+  description: string;
+  eyebrow: string;
+  onAction: () => void;
+  title: string;
+}) {
+  return (
+    <section
+      aria-label="Pulse billing update"
+      className="rounded-2xl bg-[#fffcf6] p-5 text-[#2d3436] shadow-[0_0_0_1px_rgba(196,168,130,0.28),0_1px_2px_-1px_rgba(45,52,54,0.08),0_4px_12px_rgba(45,52,54,0.05)] sm:p-6"
+    >
+      <div className="flex items-start gap-3">
+        <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-[#eef1e8] text-[#5a6e32]">
+          <CreditCard className="size-5" aria-hidden="true" />
+        </div>
+        <div className="min-w-0">
+          <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-[#7a725f]">
+            {props.eyebrow}
+          </p>
+          <h2 className="mt-1 text-balance font-serif text-xl font-semibold tracking-tight text-[#2d3436] sm:text-2xl">
+            {props.title}
+          </h2>
+          <p className="mt-2 max-w-2xl text-pretty text-sm leading-6 text-[#736a58]">
+            {props.description}
+          </p>
+        </div>
+      </div>
+      <Button
+        type="button"
+        onClick={props.onAction}
+        className="mt-5 min-h-11 transition-transform duration-150 ease-out active:scale-[0.96]"
+      >
+        {props.actionLabel}
+      </Button>
+    </section>
   );
 }
 

@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
   buildHostedExecutionMemberActivatedWake,
+  buildHostedExecutionTelegramConversationMessageWake,
 } from "@murphai/hosted-execution";
 
 import {
@@ -36,9 +37,13 @@ const setupReplyText = "Done - I will remind you here in a few minutes.";
 const setupRequestText = "Remind me here in a few minutes to go to sleep.";
 const groupSetupRequestText = "Set up our weekly health newsletter in this chat.";
 const groupSetupReplyText = "Got it - this Telegram group route is ready.";
+const groupRecapTimingRequestText = "Prepare the managed Sunday recap timing proof.";
+const groupRecapTimingReplyText = "The managed Sunday recap timing proof is ready.";
 const groupNewsletterName = "Hosted local family health newsletter";
-const groupNewsletterText = "This week, the family kept showing up for each other.";
+const groupSundaySuperlativesText =
+  "Best recurring bit: every small plan somehow became a full team operation.";
 const groupNewsletterTimeZone = "America/New_York";
+const groupActivityMessageThreshold = 100;
 const scheduledReminderInstructions =
   "Send the user the hosted-local sleep reminder: go to sleep.";
 const scheduledReminderLeadMs = 360_000;
@@ -53,9 +58,6 @@ const localDatabaseUrl = process.env.DATABASE_URL?.trim() || undefined;
 
 let scenario: HostedLocalFullStackScenario | null = null;
 let telegramStub: HostedLocalTelegramStub | null = null;
-let groupContainerMemberId: string | null = null;
-let groupNewsletterDueAtIso: string | null = null;
-let groupNewsletterSendBaselineCount = 0;
 
 describe("hosted local Telegram scheduled reminder e2e", () => {
   beforeAll(async () => {
@@ -76,10 +78,12 @@ describe("hosted local Telegram scheduled reminder e2e", () => {
       telegramThreadId: buildTelegramThreadId(groupOwnerUserId),
       telegramUserId: buildTelegramSenderUserId(groupOwnerUserId),
     });
-    const scheduledNewsletterTimes = resolveScheduledReminderTimes();
+    const scheduledGroupTimes = resolveScheduledReminderTimes();
     requireScenario().queueAssistantResponses(
       buildHostedAssistantNewsletterSaveResponses({
-        dueAtIso: scheduledNewsletterTimes.dueAtIso,
+        dueAtIso: new Date(
+          Date.parse(scheduledGroupTimes.dueAtIso) + 2 * 60 * 60 * 1_000,
+        ).toISOString(),
         text: groupSetupReplyText,
       }),
       { matchInputContains: groupSetupRequestText },
@@ -123,31 +127,123 @@ describe("hosted local Telegram scheduled reminder e2e", () => {
       route.containerMemberId,
     );
     expect(completed.lastErrorCode ?? null).toBeNull();
-    groupContainerMemberId = route.containerMemberId;
-    groupNewsletterDueAtIso = scheduledNewsletterTimes.dueAtIso;
-    groupNewsletterSendBaselineCount = countScheduledTelegramSendsWithoutNudge({
-      expectedPath: expectedSendPath,
-      expectedText: groupNewsletterText,
-      targetThreadId: telegramGroupThreadId,
+
+    await expect(requireScenario().seedHostedGroupForThreadContainer({
+      containerMemberId: route.containerMemberId,
+    })).resolves.toEqual(expect.any(String));
+    await seedManagedGroupActivityMessages({
+      count: groupActivityMessageThreshold,
+      runtimeUserId: route.containerMemberId,
     });
     requireScenario().queueAssistantResponses([
-      buildAssistantProviderMurphToolCall("group", {
-        action: "read_shared",
-        projectionScopes: [{ projectionKind: "steps-days.v0" }],
+      buildAssistantProviderMurphToolCall("automation", {
+        action: "patch",
+        lookup: "group-sunday-superlatives",
+        schedule: {
+          at: scheduledGroupTimes.dueAtIso,
+          kind: "at",
+        },
       }),
-      buildHostedAssistantNotificationDecisionResponse({
-        privateSummary: "deliver the group health newsletter",
-        text: groupNewsletterText,
-      }),
+      groupRecapTimingReplyText,
     ], {
-      matchInputContains: groupNewsletterName,
+      matchInputContains: groupRecapTimingRequestText,
     });
-    await waitForHostedWorkspaceWakeNotLaterThan({
-      latestAllowedWakeAt: scheduledNewsletterTimes.dueAtIso,
+    const recapTimingReplyMatcher = (request: ObservedTelegramRequest) => {
+      const body = requireTelegramStub().parseObservedJson(request.body);
+      return body?.chat_id === telegramGroupThreadId
+        && body.text === groupRecapTimingReplyText;
+    };
+    const recapTimingReplyBaselineCount = requireTelegramStub().countObservedRequests(
+      expectedSendPath,
+      recapTimingReplyMatcher,
+    );
+    const recapTimingWebhookResponse = await postTelegramWebhook(
+      buildInboundTelegramGroupUpdate(groupOwnerUserId, {
+        offset: groupActivityMessageThreshold + 1,
+        text: groupRecapTimingRequestText,
+      }),
+    );
+    expect(recapTimingWebhookResponse.status).toBe(202);
+    await expect(recapTimingWebhookResponse.json()).resolves.toMatchObject({
+      ok: true,
+      reason: "wake-appended-active-group",
+    });
+    await requireTelegramStub().waitForRequestCount({
+      expectedCount: recapTimingReplyBaselineCount + 1,
+      expectedPath: expectedSendPath,
+      matchRequest: recapTimingReplyMatcher,
+      scenario: requireScenario(),
       userId: route.containerMemberId,
     });
-    assertScheduledReminderRunway(scheduledNewsletterTimes.dueAtIso);
-  }, 180_000);
+    const recapTimingCompleted = await requireScenario().waitForHostedCompletion(
+      route.containerMemberId,
+    );
+    expect(recapTimingCompleted.lastErrorCode ?? null).toBeNull();
+    await expect(requireScenario().readHostedManagedGroupActivityDecision({
+      request: {
+        occurrenceAt: scheduledGroupTimes.dueAtIso,
+        policy: "group-sunday-superlatives-v1",
+        route: {
+          channel: "telegram",
+          target: telegramGroupThreadId,
+        },
+        timeZone: "UTC",
+      },
+      userId: route.containerMemberId,
+    })).resolves.toEqual({ status: "eligible" });
+
+    const groupSundaySuperlativesSendBaselineCount =
+      countScheduledTelegramSendsWithoutNudge({
+        expectedPath: expectedSendPath,
+        expectedText: groupSundaySuperlativesText,
+        targetThreadId: telegramGroupThreadId,
+      });
+    const groupSundaySuperlativesProviderRequestBaselineCount =
+      requireScenario().assistantProviderRequests.length;
+    requireScenario().queueAssistantResponses([
+      buildHostedAssistantNotificationDecisionResponse({
+        privateSummary: "deliver the Sunday group recap",
+        text: groupSundaySuperlativesText,
+      }),
+    ], {
+      matchInputContains:
+        "Create at most one compact Sunday group-chat post celebrating",
+    });
+    await waitForHostedWorkspaceWakeNotLaterThan({
+      latestAllowedWakeAt: scheduledGroupTimes.dueAtIso,
+      userId: route.containerMemberId,
+    });
+    assertScheduledReminderRunway(scheduledGroupTimes.dueAtIso);
+    await sleepUntil(scheduledGroupTimes.dueAtIso);
+    const scheduledSundaySuperlativesSend =
+      await waitForScheduledTelegramSendWithoutNudge({
+        baselineCount: groupSundaySuperlativesSendBaselineCount,
+        expectedPath: expectedSendPath,
+        expectedText: groupSundaySuperlativesText,
+        runtimeUserId: route.containerMemberId,
+        targetThreadId: telegramGroupThreadId,
+        timeoutMs: scheduledReminderSendWaitMs,
+      });
+    expect(requireTelegramStub().parseObservedJson(
+      scheduledSundaySuperlativesSend.body,
+    )).toMatchObject({
+      chat_id: telegramGroupThreadId,
+      text: groupSundaySuperlativesText,
+    });
+    expect(countScheduledTelegramSendsWithoutNudge({
+      expectedPath: expectedSendPath,
+      expectedText: groupSundaySuperlativesText,
+      targetThreadId: telegramGroupThreadId,
+    })).toBe(groupSundaySuperlativesSendBaselineCount + 1);
+    const scheduledGroupStatus = await requireScenario().waitForHostedCompletion(
+      route.containerMemberId,
+    );
+    expect(scheduledGroupStatus.lastErrorCode ?? null).toBeNull();
+    await assertSundaySuperlativesProviderRequestIsRedacted({
+      baselineCount: groupSundaySuperlativesProviderRequestBaselineCount,
+      userId: route.containerMemberId,
+    });
+  }, 720_000);
 
   it("creates a thread-only Telegram reminder, wakes from the scheduled alarm, and sends it", async () => {
     await requireScenario().seedActiveHostedMember({ memberId: userId });
@@ -261,25 +357,6 @@ describe("hosted local Telegram scheduled reminder e2e", () => {
       expectedText: reminderText,
       targetThreadId: buildTelegramThreadId(userId),
     })).toBe(reminderSendBaselineCount + 1);
-
-    const scheduledGroupRuntimeUserId = requireGroupContainerMemberId();
-    const scheduledGroupSend = await waitForScheduledTelegramSendWithoutNudge({
-      baselineCount: groupNewsletterSendBaselineCount,
-      expectedPath: expectedSendPath,
-      expectedText: groupNewsletterText,
-      runtimeUserId: scheduledGroupRuntimeUserId,
-      targetThreadId: telegramGroupThreadId,
-      timeoutMs: scheduledReminderSendWaitMs,
-    });
-    expect(requireTelegramStub().parseObservedJson(scheduledGroupSend.body)).toMatchObject({
-      chat_id: telegramGroupThreadId,
-      text: groupNewsletterText,
-    });
-    expect(Date.parse(requireGroupNewsletterDueAtIso())).toBeLessThanOrEqual(Date.now());
-    const completedGroupNewsletterStatus = await requireScenario().waitForHostedCompletion(
-      scheduledGroupRuntimeUserId,
-    );
-    expect(completedGroupNewsletterStatus.lastErrorCode ?? null).toBeNull();
   }, 720_000);
 });
 
@@ -511,6 +588,45 @@ async function assertScheduledReminderCronProviderRequestUsedFlex(input: {
   }
 }
 
+async function assertSundaySuperlativesProviderRequestIsRedacted(input: {
+  baselineCount: number;
+  userId: string;
+}): Promise<void> {
+  const providerRequestTexts = requireScenario().assistantProviderRequests
+    .slice(input.baselineCount)
+    .filter((request) =>
+      request.method === "POST" && request.url === "/v1/responses"
+    )
+    .map(readAssistantProviderRequestText)
+    .filter((text) =>
+      text.includes(
+        "Create at most one compact Sunday group-chat post celebrating",
+      )
+    );
+  if (providerRequestTexts.length !== 1) {
+    throw new Error(await requireScenario().buildFailureMessage(input.userId, [
+      "Expected exactly one Sunday superlatives provider request.",
+      `matching provider request count: ${providerRequestTexts.length}`,
+    ]));
+  }
+
+  const requestText = providerRequestTexts[0]!;
+  const evidenceHeading =
+    "## Sunday recap evidence (engine-supplied, bounded, exact route and occurrence window)";
+  const evidenceStart = requestText.lastIndexOf(evidenceHeading);
+  expect(evidenceStart).toBeGreaterThanOrEqual(0);
+  const evidence = requestText.slice(evidenceStart);
+  expect(evidence).toContain("Participant 1");
+  expect(evidence).not.toContain(groupOwnerUserId);
+  expect(evidence).not.toContain(buildTelegramSenderUserId(groupOwnerUserId));
+  expect(evidence).not.toContain(telegramGroupThreadId);
+  expect(evidence).not.toContain("Sender name:");
+  expect(evidence).not.toContain("Message ref:");
+  expect(evidence).not.toContain("eligibleMessages");
+  expect(evidence).not.toContain("selected entries:");
+  expect(evidence).not.toMatch(/\b100\b/u);
+}
+
 function summarizeAssistantProviderRequest(
   request: HostedLocalAssistantProviderStubRequest,
 ): {
@@ -544,6 +660,25 @@ function parseJsonObject(value: unknown): Record<string, unknown> | null {
   } catch {
     return null;
   }
+}
+
+function readAssistantProviderRequestText(
+  request: HostedLocalAssistantProviderStubRequest,
+): string {
+  return collectJsonStrings(parseJsonObject(request.body)?.input).join("\n\n");
+}
+
+function collectJsonStrings(value: unknown): string[] {
+  if (typeof value === "string") {
+    return [value];
+  }
+  if (Array.isArray(value)) {
+    return value.flatMap(collectJsonStrings);
+  }
+  if (value && typeof value === "object") {
+    return Object.values(value).flatMap(collectJsonStrings);
+  }
+  return [];
 }
 
 function readObservedTelegramText(request: ObservedTelegramRequest): string | null {
@@ -618,7 +753,14 @@ function buildInboundTelegramUpdate(memberId: string): Record<string, unknown> {
   };
 }
 
-function buildInboundTelegramGroupUpdate(memberId: string): Record<string, unknown> {
+function buildInboundTelegramGroupUpdate(
+  memberId: string,
+  overrides: {
+    offset?: number;
+    text?: string;
+  } = {},
+): Record<string, unknown> {
+  const offset = overrides.offset ?? 1;
   return {
     message: {
       chat: {
@@ -632,11 +774,48 @@ function buildInboundTelegramGroupUpdate(memberId: string): Record<string, unkno
         id: Number.parseInt(buildTelegramSenderUserId(memberId), 10),
         is_bot: false,
       },
-      message_id: Number.parseInt(buildTelegramMessageId(memberId), 10) + 1,
-      text: groupSetupRequestText,
+      message_id: Number.parseInt(buildTelegramMessageId(memberId), 10) + offset,
+      text: overrides.text ?? groupSetupRequestText,
     },
-    update_id: Number.parseInt(buildTelegramMessageId(memberId), 10) + 1,
+    update_id: Number.parseInt(buildTelegramMessageId(memberId), 10) + offset,
   };
+}
+
+async function seedManagedGroupActivityMessages(input: {
+  count: number;
+  runtimeUserId: string;
+}): Promise<void> {
+  const occurredAt = new Date().toISOString();
+  const sender = buildTelegramSenderUserId(groupOwnerUserId);
+  const wakes = Array.from({ length: input.count }, (_, index) => {
+    const ordinal = index + 1;
+    return buildHostedExecutionTelegramConversationMessageWake({
+      eventId:
+        `telegram.message.received:local:group-activity:${ordinal}`,
+      occurredAt,
+      routeAuthority: {
+        channel: "telegram",
+        containerMemberId: input.runtimeUserId,
+        threadId: telegramGroupThreadId,
+      },
+      telegramMessage: {
+        from: sender,
+        messageId: `group-activity-${ordinal}`,
+        schema: "murph.hosted-telegram-message.v1",
+        senderUsername: "hosted_member",
+        text: ordinal % 2 === 0
+          ? "The grocery list became a full team operation again."
+          : "Someone rescued the weekend plan with a perfectly timed checklist.",
+        threadId: telegramGroupThreadId,
+        threadIsDirect: false,
+      },
+      userId: input.runtimeUserId,
+    });
+  });
+  await expect(requireScenario().seedHostedHistoricalConversationWakes({
+    userId: input.runtimeUserId,
+    wakes,
+  })).resolves.toBe(input.count);
 }
 
 async function postTelegramWebhook(update: Record<string, unknown>): Promise<Response> {
@@ -697,18 +876,4 @@ function requireTelegramStub(): HostedLocalTelegramStub {
   }
 
   return telegramStub;
-}
-
-function requireGroupContainerMemberId(): string {
-  if (!groupContainerMemberId) {
-    throw new Error("Expected the Telegram group runtime to be initialized.");
-  }
-  return groupContainerMemberId;
-}
-
-function requireGroupNewsletterDueAtIso(): string {
-  if (!groupNewsletterDueAtIso) {
-    throw new Error("Expected the scheduled Telegram group newsletter due time.");
-  }
-  return groupNewsletterDueAtIso;
 }

@@ -13,7 +13,11 @@ const serviceMocks = vi.hoisted(() => ({
   deleteHostedPrivyUser: vi.fn(),
   deleteHostedRunnerUserDataBestEffort: vi.fn(),
   getHostedOnboardingStripe: vi.fn(),
+  pendingHostedAccountDeletionCleanupResult: vi.fn(),
+  persistHostedAccountDeletionCleanupTx: vi.fn(),
+  prepareHostedAccountDeletionCleanup: vi.fn(),
   readHostedConnectedAppsConfig: vi.fn(),
+  runHostedAccountDeletionCleanup: vi.fn(),
   assertHostedUsageCreditPurchasesReadyForAccountDeletionTx: vi.fn(),
   closeHostedUsageCreditPurchasesForAccountDeletion: vi.fn(),
   assertHostedPhoneCallsReadyForAccountDeletionTx: vi.fn(),
@@ -74,6 +78,18 @@ vi.mock("@/src/lib/hosted-onboarding/usage-credit-purchase-service", () => ({
     serviceMocks.closeHostedUsageCreditPurchasesForAccountDeletion,
 }));
 
+vi.mock("@/src/lib/hosted-privacy/account-deletion-cleanup", () => ({
+  HOSTED_ACCOUNT_DELETION_IMMEDIATE_ATTEMPT_TIMEOUT_MS: 5_000,
+  pendingHostedAccountDeletionCleanupResult:
+    serviceMocks.pendingHostedAccountDeletionCleanupResult,
+  persistHostedAccountDeletionCleanupTx:
+    serviceMocks.persistHostedAccountDeletionCleanupTx,
+  prepareHostedAccountDeletionCleanup:
+    serviceMocks.prepareHostedAccountDeletionCleanup,
+  runHostedAccountDeletionCleanup:
+    serviceMocks.runHostedAccountDeletionCleanup,
+}));
+
 vi.mock("@/src/lib/hosted-execution/user-data-delete", () => ({
   deleteHostedRunnerUserDataBestEffort: serviceMocks.deleteHostedRunnerUserDataBestEffort,
 }));
@@ -91,6 +107,7 @@ vi.mock("@/src/lib/phone-calls/account-deletion", () => ({
 }));
 
 import { HostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
+import { createHostedPrivyUserLookupKey } from "@/src/lib/hosted-onboarding/contact-privacy";
 import { ComposioConnectedAppsRequestError } from "@/src/lib/connected-apps/composio";
 import {
   HOSTED_ACCOUNT_DELETION_CONFIRMATION_PHRASE,
@@ -112,9 +129,12 @@ const REQUIRED_STORE_SLUGS = [
   "prisma.hosted_web_session",
   "prisma.hosted_sensitive_action_challenge",
   "prisma.hosted_member_identity",
+  "prisma.hosted_address_book_projection",
+  "prisma.hosted_address_book_contact",
   "prisma.hosted_member_routing",
   "prisma.hosted_member_email_authorization",
   "prisma.hosted_member_billing_ref",
+  "prisma.hosted_account_deletion_cleanup",
   "prisma.hosted_connected_app_connect_intent",
   "prisma.hosted_connected_apps_session",
   "prisma.clinical_record_connect_intent",
@@ -206,6 +226,38 @@ beforeEach(() => {
   serviceMocks.deleteHostedRunnerUserDataBestEffort.mockResolvedValue(makeCloudflareDeletionResult());
   serviceMocks.getHostedOnboardingStripe.mockReset();
   serviceMocks.getHostedOnboardingStripe.mockReturnValue(null);
+  serviceMocks.pendingHostedAccountDeletionCleanupResult.mockReset();
+  serviceMocks.pendingHostedAccountDeletionCleanupResult.mockImplementation(
+    (errorCode: string) => makeCleanupRunResult({
+      cleanupPending: true,
+      cloudflare: {
+        ...makeCloudflareDeletionResult(),
+        deleted: false,
+        errorCode,
+      },
+      privyUser: { errorCode, status: "failed" },
+      stripeCustomer: { errorCode, status: "failed" },
+    }),
+  );
+  serviceMocks.persistHostedAccountDeletionCleanupTx.mockReset();
+  serviceMocks.persistHostedAccountDeletionCleanupTx.mockResolvedValue(undefined);
+  serviceMocks.prepareHostedAccountDeletionCleanup.mockReset();
+  serviceMocks.prepareHostedAccountDeletionCleanup.mockImplementation(async (input) => ({
+    cloudflareCompletedAt: null,
+    environment: "test",
+    id: "cleanup_123",
+    kmsKeyName: "test-key",
+    nextAttemptAt: input.now,
+    payloadCiphertext: "encrypted",
+    privyCompletedAt: null,
+    privyUserLookupKey: createHostedPrivyUserLookupKey(input.privyUserId),
+    runtimeMemberIds: [...input.runtimeMemberIds],
+    stripeCustomerIds: [...input.stripeCustomerIds],
+    stripeCompletedAt: null,
+    stripeSubscriptionIds: [...(input.stripeSubscriptionIds ?? [])],
+  }));
+  serviceMocks.runHostedAccountDeletionCleanup.mockReset();
+  serviceMocks.runHostedAccountDeletionCleanup.mockResolvedValue(makeCleanupRunResult());
   serviceMocks.readHostedConnectedAppsConfig.mockReset();
   serviceMocks.readHostedConnectedAppsConfig.mockReturnValue({
     apiKey: "secret-test-key",
@@ -380,6 +432,60 @@ describe("HOSTED_ACCOUNT_DATA_STORE_COVERAGE", () => {
 
 
 describe("deleteHostedAccountData", () => {
+  it("keeps the deletion fence when durable cleanup ownership cannot be prepared", async () => {
+    const onTransaction = vi.fn();
+    const hostedMemberUpdateCalls: unknown[] = [];
+    serviceMocks.prepareHostedAccountDeletionCleanup.mockRejectedValue(
+      new Error("kms unavailable"),
+    );
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      hostedMemberUpdateCalls,
+      onTransaction,
+    });
+
+    await expect(deleteHostedAccountData({
+      memberId: "member_123",
+      prisma,
+      request: new Request("https://join.example.test/settings"),
+    })).rejects.toMatchObject({
+      code: "ACCOUNT_DELETION_CLEANUP_OWNER_CREATE_FAILED",
+      retryable: true,
+    });
+
+    expect(onTransaction).toHaveBeenCalledTimes(1);
+    expect(hostedMemberUpdateCalls).toEqual([{
+      data: {
+        suspendedAt: expect.any(Date),
+      },
+      where: {
+        id: "member_123",
+      },
+    }]);
+    expect(serviceMocks.terminateHostedUserRuntimeWorkflowBestEffort).not.toHaveBeenCalled();
+  });
+
+  it("persists cleanup ownership in the canonical deletion transaction before member removal", async () => {
+    const order: string[] = [];
+    serviceMocks.persistHostedAccountDeletionCleanupTx.mockImplementation(async () => {
+      order.push("persist:cleanup");
+    });
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      onTransaction: () => undefined,
+      operationOrder: order,
+    });
+
+    await deleteHostedAccountData({
+      memberId: "member_123",
+      prisma,
+      request: new Request("https://join.example.test/settings"),
+    });
+
+    expect(order.indexOf("persist:cleanup")).toBeGreaterThanOrEqual(0);
+    expect(order.indexOf("persist:cleanup")).toBeLessThan(
+      order.indexOf("delete:hostedMember"),
+    );
+  });
+
   it("suspends before Temporal cleanup and terminates around local and Cloudflare cleanup", async () => {
     const order: string[] = [];
     serviceMocks.terminateHostedUserRuntimeWorkflowBestEffort.mockImplementation(async () => {
@@ -391,9 +497,9 @@ describe("deleteHostedAccountData", () => {
         terminated: true,
       };
     });
-    serviceMocks.deleteHostedRunnerUserDataBestEffort.mockImplementation(async () => {
+    serviceMocks.runHostedAccountDeletionCleanup.mockImplementation(async () => {
       order.push("cloudflare");
-      return makeCloudflareDeletionResult();
+      return makeCleanupRunResult();
     });
     const prisma = createHostedAccountDeletionPrismaForTest({
       onTransaction: () => order.push("prisma"),
@@ -414,9 +520,10 @@ describe("deleteHostedAccountData", () => {
         userId: "member_123",
       },
     );
-    expect(serviceMocks.deleteHostedRunnerUserDataBestEffort).toHaveBeenCalledWith({
-      context: "settings.account-data.delete",
-      userId: "member_123",
+    expect(serviceMocks.runHostedAccountDeletionCleanup).toHaveBeenCalledWith({
+      attemptTimeoutMs: 5_000,
+      cleanupId: "cleanup_123",
+      prisma,
     });
     expect(serviceMocks.terminateHostedUserRuntimeWorkflowBestEffort).toHaveBeenNthCalledWith(
       2,
@@ -661,13 +768,12 @@ describe("deleteHostedAccountData", () => {
     });
 
     expect(result.cloudflare.deleted).toBe(true);
-    expect(serviceMocks.deleteHostedRunnerUserDataBestEffort).toHaveBeenCalledWith({
-      context: "settings.account-data.delete",
-      userId: "member_123",
-    });
-    expect(serviceMocks.deleteHostedRunnerUserDataBestEffort).toHaveBeenCalledWith({
-      context: "settings.account-data.delete",
-      userId: "member_thread_container_123",
+    expect(serviceMocks.prepareHostedAccountDeletionCleanup).toHaveBeenCalledWith({
+      now: expect.any(Date),
+      privyUserId: null,
+      runtimeMemberIds: ["member_123", "member_thread_container_123"],
+      stripeCustomerIds: [],
+      stripeSubscriptionIds: [],
     });
     expect(serviceMocks.terminateHostedUserRuntimeWorkflowBestEffort).toHaveBeenCalledWith({
       reason: "account-deleted",
@@ -740,6 +846,76 @@ describe("deleteHostedAccountData", () => {
       },
     ]));
     expect(result.deletedCounts["prisma.hosted_linq_invite_delivery"]).toBe(1);
+  });
+
+  it("aborts before the receipt when a thread container appears after the deletion fence", async () => {
+    const deleteCalls: HostedAccountDeletionPrismaDeleteCall[] = [];
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      deleteCalls,
+      onTransaction: () => undefined,
+      transactionOwnedThreadContainerMemberIds: ["member_thread_container_late"],
+    });
+
+    await expect(deleteHostedAccountData({
+      memberId: "member_123",
+      prisma,
+      request: new Request("https://join.example.test/settings"),
+    })).rejects.toMatchObject({
+      code: "ACCOUNT_DELETION_RUNTIME_SET_CHANGED",
+      retryable: true,
+    });
+
+    expect(serviceMocks.persistHostedAccountDeletionCleanupTx).not.toHaveBeenCalled();
+    expect(deleteCalls).not.toContainEqual(expect.objectContaining({
+      model: "hostedMember",
+    }));
+  });
+
+  it("aborts before the receipt when provider ownership changes after preparation", async () => {
+    serviceMocks.getHostedOnboardingStripe.mockReturnValue({
+      subscriptions: {
+        cancel: vi.fn(),
+        retrieve: vi.fn().mockResolvedValue({ status: "canceled" }),
+      },
+    });
+    const initialVendorRows = await makeVendorAccountRowsForTest("member_123");
+    const changedVendorRows = await makeVendorAccountRowsForTest("member_123", {
+      privyUserId: "privy-user-late",
+      stripeCustomerId: "cus_late",
+      stripeSubscriptionId: "sub_late",
+    });
+    const initialFamilyBillingRef = await makeFamilyBillingRefRowForTest({
+      groupId: "family_group_123",
+      ownerMemberId: "member_123",
+      stripeCustomerId: "cus_family_initial",
+      stripeSubscriptionId: "sub_family_initial",
+    });
+    const changedFamilyBillingRef = await makeFamilyBillingRefRowForTest({
+      groupId: "family_group_123",
+      ownerMemberId: "member_123",
+      stripeCustomerId: "cus_family_late",
+      stripeSubscriptionId: "sub_family_late",
+    });
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      ...initialVendorRows,
+      familyBillingRefRecords: [initialFamilyBillingRef],
+      familyGroups: [{ id: "family_group_123" }],
+      onTransaction: () => undefined,
+      transactionBillingRefRecord: changedVendorRows.billingRefRecord,
+      transactionFamilyBillingRefRecords: [changedFamilyBillingRef],
+      transactionIdentityRecord: changedVendorRows.identityRecord,
+    });
+
+    await expect(deleteHostedAccountData({
+      memberId: "member_123",
+      prisma,
+      request: new Request("https://join.example.test/settings"),
+    })).rejects.toMatchObject({
+      code: "ACCOUNT_DELETION_EXTERNAL_TARGET_SET_CHANGED",
+      retryable: true,
+    });
+
+    expect(serviceMocks.persistHostedAccountDeletionCleanupTx).not.toHaveBeenCalled();
   });
 
   it("deletes delivery-time consume stamps with hosted mailbox item rows", async () => {
@@ -1140,14 +1316,12 @@ describe("deleteHostedAccountData", () => {
         prisma,
         stripe,
       });
-    expect(stripe.customers.del).toHaveBeenCalledWith(
-      "cus_delete_complete",
-      {},
-      {
-        maxNetworkRetries: 0,
-        timeout: 5_000,
-      },
+    expect(serviceMocks.prepareHostedAccountDeletionCleanup).toHaveBeenCalledWith(
+      expect.objectContaining({
+        stripeCustomerIds: ["cus_delete_complete"],
+      }),
     );
+    expect(stripe.customers.del).not.toHaveBeenCalled();
     expect(operationOrder.indexOf("stripe-checkout:cancel-refund")).toBeLessThan(
       operationOrder.indexOf("delete:hostedMember"),
     );
@@ -1323,22 +1497,15 @@ describe("deleteHostedAccountData", () => {
         prisma,
         stripe,
       });
-    expect(stripe.customers.del).toHaveBeenCalledWith(
-      "cus_delete_authoritative",
-      {},
-      {
-        maxNetworkRetries: 0,
-        timeout: 5_000,
-      },
+    expect(serviceMocks.prepareHostedAccountDeletionCleanup).toHaveBeenCalledWith(
+      expect.objectContaining({
+        stripeCustomerIds: expect.arrayContaining([
+          "cus_delete_authoritative",
+          "cus_delete_loser",
+        ]),
+      }),
     );
-    expect(stripe.customers.del).toHaveBeenCalledWith(
-      "cus_delete_loser",
-      {},
-      {
-        maxNetworkRetries: 0,
-        timeout: 5_000,
-      },
-    );
+    expect(stripe.customers.del).not.toHaveBeenCalled();
     expect(operationOrder.indexOf("stripe-checkout:loser-cleanup")).toBeLessThan(
       operationOrder.indexOf("stripe:authoritative-subscription-cancel"),
     );
@@ -1452,22 +1619,15 @@ describe("deleteHostedAccountData", () => {
         timeout: 5_000,
       },
     );
-    expect(stripe.customers.del).toHaveBeenCalledWith(
-      "cus_recovered_reservation",
-      {},
-      {
-        maxNetworkRetries: 0,
-        timeout: 5_000,
-      },
+    expect(serviceMocks.prepareHostedAccountDeletionCleanup).toHaveBeenCalledWith(
+      expect.objectContaining({
+        stripeCustomerIds: expect.arrayContaining([
+          "cus_recovered_reservation",
+          "cus_family_123",
+        ]),
+      }),
     );
-    expect(stripe.customers.del).toHaveBeenCalledWith(
-      "cus_family_123",
-      {},
-      {
-        maxNetworkRetries: 0,
-        timeout: 5_000,
-      },
-    );
+    expect(stripe.customers.del).not.toHaveBeenCalled();
     expect(result.vendorAccounts.stripeCustomer).toEqual({
       errorCode: null,
       status: "completed",
@@ -1737,7 +1897,7 @@ describe("deleteHostedAccountData", () => {
       prisma,
       request: new Request("https://join.example.test/settings"),
     })).rejects.toMatchObject({
-      code: "ACCOUNT_DELETION_STRIPE_BILLING_OWNERSHIP_CHANGED",
+      code: "ACCOUNT_DELETION_EXTERNAL_TARGET_SET_CHANGED",
       retryable: true,
     });
 
@@ -1814,14 +1974,12 @@ describe("deleteHostedAccountData", () => {
       .toHaveBeenCalled();
     expect(serviceMocks.executeHostedCheckoutSubscriptionCleanup).not
       .toHaveBeenCalled();
-    expect(stripe.customers.del).toHaveBeenCalledWith(
-      "cus_family_delete_open",
-      {},
-      {
-        maxNetworkRetries: 0,
-        timeout: 5_000,
-      },
+    expect(serviceMocks.prepareHostedAccountDeletionCleanup).toHaveBeenCalledWith(
+      expect.objectContaining({
+        stripeCustomerIds: ["cus_family_delete_open"],
+      }),
     );
+    expect(stripe.customers.del).not.toHaveBeenCalled();
   });
 
   it("recovers a Family Checkout that completes while expiration races, then refunds before group deletion", async () => {
@@ -1944,14 +2102,12 @@ describe("deleteHostedAccountData", () => {
     expect(operationOrder.indexOf("family-checkout:cancel-refund"))
       .toBeLessThan(operationOrder.indexOf("delete:hostedAccountGroup"));
     expect(stripe.subscriptions.cancel).not.toHaveBeenCalled();
-    expect(stripe.customers.del).toHaveBeenCalledWith(
-      "cus_family_delete_race",
-      {},
-      {
-        maxNetworkRetries: 0,
-        timeout: 5_000,
-      },
+    expect(serviceMocks.prepareHostedAccountDeletionCleanup).toHaveBeenCalledWith(
+      expect.objectContaining({
+        stripeCustomerIds: ["cus_family_delete_race"],
+      }),
     );
+    expect(stripe.customers.del).not.toHaveBeenCalled();
   });
 
   it("clears an exact unbound owned Family Checkout after the deletion fence", async () => {
@@ -1982,19 +2138,10 @@ describe("deleteHostedAccountData", () => {
     expect(serviceMocks.getHostedOnboardingStripe).not.toHaveBeenCalled();
   });
 
-  it("cancels the Stripe subscription before local deletion and deletes vendor accounts after it", async () => {
+  it("cancels subscriptions before local deletion and persists cleanup ownership before member deletion", async () => {
     const order: string[] = [];
     const stripe = {
-      customers: {
-        del: vi.fn(async () => {
-          order.push("stripe:customer-delete");
-          return { deleted: true, id: "cus_delete_123" };
-        }),
-        retrieve: vi.fn(async (customerId: string) => {
-          order.push("stripe:customer-balance-read");
-          return makeZeroBalanceStripeCustomerForAccountDeletionTest(customerId);
-        }),
-      },
+      customers: { del: vi.fn() },
       subscriptions: {
         cancel: vi.fn(async () => {
           order.push("stripe:subscription-cancel");
@@ -2010,9 +2157,12 @@ describe("deleteHostedAccountData", () => {
         order.push("usage-credit:close");
       },
     );
-    serviceMocks.deleteHostedPrivyUser.mockImplementation(async () => {
-      order.push("privy:user-delete");
-      return true;
+    serviceMocks.persistHostedAccountDeletionCleanupTx.mockImplementation(async () => {
+      order.push("receipt:persist");
+    });
+    serviceMocks.runHostedAccountDeletionCleanup.mockImplementation(async () => {
+      order.push("external-cleanup");
+      return makeCleanupRunResult();
     });
     const vendorRows = await makeVendorAccountRowsForTest("member_123");
     const prisma = createHostedAccountDeletionPrismaForTest({
@@ -2031,20 +2181,18 @@ describe("deleteHostedAccountData", () => {
       "stripe:subscription-cancel",
       "usage-credit:close",
       "prisma",
-      "stripe:customer-delete",
-      "privy:user-delete",
+      "receipt:persist",
+      "external-cleanup",
     ]);
     expect(stripe.subscriptions.cancel).toHaveBeenCalledWith("sub_delete_123");
-    expect(stripe.customers.retrieve).not.toHaveBeenCalled();
-    expect(stripe.customers.del).toHaveBeenCalledWith(
-      "cus_delete_123",
-      {},
-      {
-        maxNetworkRetries: 0,
-        timeout: 5_000,
-      },
-    );
-    expect(serviceMocks.deleteHostedPrivyUser).toHaveBeenCalledWith("privy-user-delete-123");
+    expect(serviceMocks.prepareHostedAccountDeletionCleanup).toHaveBeenCalledWith({
+      now: expect.any(Date),
+      privyUserId: "privy-user-delete-123",
+      runtimeMemberIds: ["member_123"],
+      stripeCustomerIds: ["cus_delete_123"],
+      stripeSubscriptionIds: ["sub_delete_123"],
+    });
+    expect(stripe.customers.del).not.toHaveBeenCalled();
     expect(result.vendorAccounts).toEqual({
       privyUser: { errorCode: null, status: "completed" },
       stripeCustomer: { errorCode: null, status: "completed" },
@@ -2101,14 +2249,12 @@ describe("deleteHostedAccountData", () => {
     expect(deleteCalls.length).toBeGreaterThan(0);
     expect(stripe.customers.retrieve).not.toHaveBeenCalled();
     expect(subscriptionsList).not.toHaveBeenCalled();
-    expect(stripe.customers.del).toHaveBeenCalledWith(
-      "cus_delete_123",
-      {},
-      {
-        maxNetworkRetries: 0,
-        timeout: 5_000,
-      },
+    expect(serviceMocks.prepareHostedAccountDeletionCleanup).toHaveBeenCalledWith(
+      expect.objectContaining({
+        stripeCustomerIds: ["cus_delete_123"],
+      }),
     );
+    expect(stripe.customers.del).not.toHaveBeenCalled();
     expect(result.vendorAccounts.stripeCustomer).toEqual({
       errorCode: null,
       status: "completed",
@@ -2220,7 +2366,7 @@ describe("deleteHostedAccountData", () => {
     expect(stripe.customers.del).not.toHaveBeenCalled();
   });
 
-  it("deletes direct and owned Family Stripe customers during account deletion", async () => {
+  it("captures direct and owned Family customer IDs in one cleanup receipt", async () => {
     const stripe = {
       customers: {
         del: vi.fn(async (customerId: string) => ({
@@ -2260,23 +2406,14 @@ describe("deleteHostedAccountData", () => {
 
     expect(stripe.subscriptions.cancel).toHaveBeenCalledWith("sub_delete_123");
     expect(stripe.subscriptions.cancel).toHaveBeenCalledWith("sub_family_123");
-    expect(stripe.customers.retrieve).not.toHaveBeenCalled();
-    expect(stripe.customers.del).toHaveBeenCalledWith(
-      "cus_delete_123",
-      {},
-      {
-        maxNetworkRetries: 0,
-        timeout: 5_000,
-      },
-    );
-    expect(stripe.customers.del).toHaveBeenCalledWith(
-      "cus_family_123",
-      {},
-      {
-        maxNetworkRetries: 0,
-        timeout: 5_000,
-      },
-    );
+    expect(serviceMocks.prepareHostedAccountDeletionCleanup).toHaveBeenCalledWith({
+      now: expect.any(Date),
+      privyUserId: "privy-user-delete-123",
+      runtimeMemberIds: ["member_123"],
+      stripeCustomerIds: ["cus_delete_123", "cus_family_123"],
+      stripeSubscriptionIds: ["sub_delete_123", "sub_family_123"],
+    });
+    expect(stripe.customers.del).not.toHaveBeenCalled();
     expect(result.vendorAccounts.stripeCustomer).toEqual({
       errorCode: null,
       status: "completed",
@@ -2354,6 +2491,12 @@ describe("deleteHostedAccountData", () => {
   });
 
   it("reports skipped vendor deletions when no vendor records exist", async () => {
+    serviceMocks.runHostedAccountDeletionCleanup.mockResolvedValue(
+      makeCleanupRunResult({
+        privyUser: { errorCode: null, status: "skipped_no_record" },
+        stripeCustomer: { errorCode: null, status: "skipped_no_record" },
+      }),
+    );
     const prisma = createHostedAccountDeletionPrismaForTest({
       onTransaction: () => undefined,
     });
@@ -2372,7 +2515,7 @@ describe("deleteHostedAccountData", () => {
     expect(serviceMocks.deleteHostedPrivyUser).not.toHaveBeenCalled();
   });
 
-  it("reports failed best-effort vendor deletions without failing the request", async () => {
+  it("reports durable vendor cleanup as pending without failing committed deletion", async () => {
     const stripe = {
       customers: {
         del: vi.fn(async () => {
@@ -2388,7 +2531,13 @@ describe("deleteHostedAccountData", () => {
     };
     installHostedAccountDeletionCustomerGateTestDouble(stripe);
     serviceMocks.getHostedOnboardingStripe.mockReturnValue(stripe);
-    serviceMocks.deleteHostedPrivyUser.mockRejectedValue(new Error("privy unavailable"));
+    serviceMocks.runHostedAccountDeletionCleanup.mockResolvedValue(
+      makeCleanupRunResult({
+        cleanupPending: true,
+        privyUser: { errorCode: "PRIVY_UNAVAILABLE", status: "failed" },
+        stripeCustomer: { errorCode: "STRIPE_UNAVAILABLE", status: "failed" },
+      }),
+    );
     const vendorRows = await makeVendorAccountRowsForTest("member_123");
     const prisma = createHostedAccountDeletionPrismaForTest({
       ...vendorRows,
@@ -2404,11 +2553,59 @@ describe("deleteHostedAccountData", () => {
     expect(result.vendorAccounts.stripeSubscription).toEqual({ errorCode: null, status: "completed" });
     expect(result.vendorAccounts.stripeCustomer.status).toBe("failed");
     expect(result.vendorAccounts.privyUser.status).toBe("failed");
+    expect(result.cleanupPending).toBe(true);
+  });
+
+  it("degrades an immediate cleanup exception to durable pending after local deletion commits", async () => {
+    const operationOrder: string[] = [];
+    const cleanupError = Object.assign(new Error("kms unavailable"), {
+      name: "KmsUnavailableError",
+    });
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    serviceMocks.runHostedAccountDeletionCleanup.mockImplementation(async () => {
+      operationOrder.push("cleanup");
+      throw cleanupError;
+    });
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      onTransaction: () => operationOrder.push("transaction"),
+      operationOrder,
+    });
+
+    try {
+      const result = await deleteHostedAccountData({
+        memberId: "member_123",
+        prisma,
+        request: new Request("https://join.example.test/settings"),
+      });
+
+      expect(operationOrder).toContain("delete:hostedMember");
+      expect(operationOrder).toContain("cleanup");
+      expect(operationOrder.indexOf("delete:hostedMember")).toBeLessThan(
+        operationOrder.indexOf("cleanup"),
+      );
+      expect(serviceMocks.persistHostedAccountDeletionCleanupTx).toHaveBeenCalledTimes(1);
+      expect(serviceMocks.pendingHostedAccountDeletionCleanupResult).toHaveBeenCalledWith(
+        "KmsUnavailableError",
+      );
+      expect(result.cleanupPending).toBe(true);
+      expect(result.vendorAccounts).toMatchObject({
+        privyUser: { errorCode: "KmsUnavailableError", status: "failed" },
+        stripeCustomer: { errorCode: "KmsUnavailableError", status: "failed" },
+      });
+    } finally {
+      consoleError.mockRestore();
+    }
   });
 
   it("keeps known Customer deletion best effort when Stripe is not configured", async () => {
     serviceMocks.getHostedOnboardingStripe.mockReturnValue(null);
-    serviceMocks.deleteHostedPrivyUser.mockResolvedValue(false);
+    serviceMocks.runHostedAccountDeletionCleanup.mockResolvedValue(
+      makeCleanupRunResult({
+        cleanupPending: true,
+        privyUser: { errorCode: null, status: "skipped_not_configured" },
+        stripeCustomer: { errorCode: null, status: "skipped_not_configured" },
+      }),
+    );
     const vendorRows = await makeVendorAccountRowsForTest("member_123", {
       stripeSubscriptionId: null,
     });
@@ -2430,7 +2627,13 @@ describe("deleteHostedAccountData", () => {
       errorCode: null,
       status: "skipped_not_configured",
     });
-    expect(serviceMocks.deleteHostedPrivyUser).toHaveBeenCalled();
+    expect(serviceMocks.prepareHostedAccountDeletionCleanup).toHaveBeenCalledWith(
+      expect.objectContaining({
+        privyUserId: "privy-user-delete-123",
+        stripeCustomerIds: ["cus_delete_123"],
+      }),
+    );
+    expect(serviceMocks.deleteHostedPrivyUser).not.toHaveBeenCalled();
   });
 
   it("fails closed when a subscription reference exists but Stripe is not configured", async () => {
@@ -2810,12 +3013,17 @@ describe("deleteHostedAccountData", () => {
 
   it("reports incomplete configured Cloudflare cleanup after Prisma deletion commits", async () => {
     const order: string[] = [];
-    serviceMocks.deleteHostedRunnerUserDataBestEffort.mockResolvedValue({
-      ...makeCloudflareDeletionResult(),
-      deleted: false,
-      r2SkippedUserScopedPrefixes: true,
-      r2UserScopedSkipReason: "HostedUserCryptoRepairNeededError",
-    });
+    serviceMocks.runHostedAccountDeletionCleanup.mockResolvedValue(
+      makeCleanupRunResult({
+        cleanupPending: true,
+        cloudflare: {
+          ...makeCloudflareDeletionResult(),
+          deleted: false,
+          r2SkippedUserScopedPrefixes: true,
+          r2UserScopedSkipReason: "HostedUserCryptoRepairNeededError",
+        },
+      }),
+    );
     const prisma = createHostedAccountDeletionPrismaForTest({
       onTransaction: () => order.push("prisma"),
     });
@@ -2829,20 +3037,27 @@ describe("deleteHostedAccountData", () => {
     expect(order).toEqual(["prisma", "prisma"]);
     expect(result.cloudflare.deleted).toBe(false);
     expect(result.cloudflare.r2SkippedUserScopedPrefixes).toBe(true);
+    expect(result.cleanupPending).toBe(true);
   });
 
   it("reports unconfigured Cloudflare cleanup after Prisma deletion commits", async () => {
     const order: string[] = [];
-    serviceMocks.deleteHostedRunnerUserDataBestEffort.mockResolvedValue({
-      ...makeCloudflareDeletionResult(),
-      alarmCleared: null,
-      configured: false,
-      deleted: false,
-      r2DeletedObjectCount: null,
-      r2SkippedUserScopedPrefixes: null,
-      r2Supported: null,
-      runnerStateDeleted: null,
-    });
+    serviceMocks.runHostedAccountDeletionCleanup.mockResolvedValue(
+      makeCleanupRunResult({
+        cleanupPending: true,
+        cloudflare: {
+          ...makeCloudflareDeletionResult(),
+          alarmCleared: null,
+          configured: false,
+          deleteAllCompleted: null,
+          deleted: false,
+          r2DeletedObjectCount: null,
+          r2SkippedUserScopedPrefixes: null,
+          r2Supported: null,
+          runnerStateDeleted: null,
+        },
+      }),
+    );
     const prisma = createHostedAccountDeletionPrismaForTest({
       onTransaction: () => order.push("prisma"),
     });
@@ -2856,6 +3071,7 @@ describe("deleteHostedAccountData", () => {
     expect(order).toEqual(["prisma", "prisma"]);
     expect(result.cloudflare.configured).toBe(false);
     expect(result.cloudflare.deleted).toBe(false);
+    expect(result.cleanupPending).toBe(true);
   });
 
   it("skips external cleanup when the suspension transaction fails", async () => {
@@ -2872,7 +3088,7 @@ describe("deleteHostedAccountData", () => {
     })).rejects.toThrow("transaction failed");
 
     expect(serviceMocks.terminateHostedUserRuntimeWorkflowBestEffort).not.toHaveBeenCalled();
-    expect(serviceMocks.deleteHostedRunnerUserDataBestEffort).not.toHaveBeenCalled();
+    expect(serviceMocks.runHostedAccountDeletionCleanup).not.toHaveBeenCalled();
   });
 
   it("revokes provider-config device connections during hosted account deletion", async () => {
@@ -3423,6 +3639,7 @@ function createHostedAccountDeletionPrismaForTest(input: {
     sources?: { sourceProviderSlug: string; status: string }[];
   }>;
   hostedComputerRunRows?: Record<string, unknown>[];
+  hostedMemberUpdateCalls?: unknown[];
   familyBillingRefRecords?: Record<string, unknown>[];
   familyBillingRefRecordReads?: readonly (Record<string, unknown> | null)[];
   familyGroups?: Array<{ id: string }>;
@@ -3431,15 +3648,21 @@ function createHostedAccountDeletionPrismaForTest(input: {
   onTransaction: () => void;
   operationOrder?: string[];
   transactionConnectedAppConnectIntentRows?: HostedAccountDeletionConnectedAppIntentRow[];
+  transactionBillingRefRecord?: Record<string, unknown> | null;
   transactionDeviceConnections?: Array<{
     id: string;
     provider: string;
     providerAccountBlindIndex: string;
     sources?: { sourceProviderSlug: string; status: string }[];
   }>;
+  transactionFamilyBillingRefRecords?: Record<string, unknown>[];
+  transactionFamilyGroups?: Array<{ id: string }>;
+  transactionIdentityRecord?: Record<string, unknown> | null;
+  transactionOwnedThreadContainerMemberIds?: string[];
 }): Parameters<typeof deleteHostedAccountData>[0]["prisma"] {
   let billingRefReadIndex = 0;
   let familyBillingRefReadIndex = 0;
+  let transactionCallCount = 0;
   const makeDeleteDelegate = (model: string): HostedAccountDeletionPrismaDeleteDelegate => ({
     count: async () => {
       input.operationOrder?.push(`count:${model}`);
@@ -3480,11 +3703,30 @@ function createHostedAccountDeletionPrismaForTest(input: {
         return [];
       },
     },
+    hostedConnectedAppConnectIntent: {
+      ...makeDeleteDelegate("hostedConnectedAppConnectIntent"),
+      findMany: async () => input.transactionConnectedAppConnectIntentRows ?? [],
+    },
+    hostedThreadContainer: {
+      ...makeDeleteDelegate("hostedThreadContainer"),
+      findMany: async () => {
+        const memberIds = transactionCallCount >= 2
+          ? input.transactionOwnedThreadContainerMemberIds
+            ?? input.ownedThreadContainerMemberIds
+            ?? []
+          : input.ownedThreadContainerMemberIds ?? [];
+        return memberIds.map((memberId) => ({ memberId }));
+      },
+    },
+    hostedAccountGroup: {
+      ...makeDeleteDelegate("hostedAccountGroup"),
+      findMany: async () => input.transactionFamilyGroups ?? input.familyGroups ?? [],
+    },
     hostedAccountGroupBillingRef: {
       ...makeDeleteDelegate("hostedAccountGroupBillingRef"),
       findUnique: async (args: { where: { groupId: string } }) =>
-        input.familyBillingRefRecords?.find((record) =>
-          record.groupId === args.where.groupId
+        (input.transactionFamilyBillingRefRecords ?? input.familyBillingRefRecords)?.find(
+          (record) => record.groupId === args.where.groupId,
         )
         ?? input.familyBillingRefRecordReads?.at(-1)
         ?? null,
@@ -3493,35 +3735,30 @@ function createHostedAccountDeletionPrismaForTest(input: {
         return { count: 1 };
       },
     },
-    hostedAccountGroup: {
-      ...makeDeleteDelegate("hostedAccountGroup"),
-      findMany: async () => input.familyGroups ?? [],
-    },
-    hostedConnectedAppConnectIntent: {
-      ...makeDeleteDelegate("hostedConnectedAppConnectIntent"),
-      findMany: async () => input.transactionConnectedAppConnectIntentRows ?? [],
-    },
-    hostedThreadContainer: {
-      ...makeDeleteDelegate("hostedThreadContainer"),
-      findMany: async () => (input.ownedThreadContainerMemberIds ?? []).map((memberId) => ({
-        memberId,
-      })),
-    },
     hostedMember: {
       ...makeDeleteDelegate("hostedMember"),
-      updateMany: async () => {
+      updateMany: async (args: unknown) => {
         input.operationOrder?.push("update:hostedMember");
+        input.hostedMemberUpdateCalls?.push(args);
         return { count: 1 };
       },
     },
     hostedMemberBillingRef: {
       ...makeDeleteDelegate("hostedMemberBillingRef"),
-      findUnique: async () =>
-        input.billingRefRecords?.at(-1) ?? input.billingRefRecord ?? null,
+      findUnique: async () => input.transactionBillingRefRecord
+        ?? input.billingRefRecords?.at(-1)
+        ?? input.billingRefRecord
+        ?? null,
       updateMany: async () => {
         input.operationOrder?.push("update:hostedMemberBillingRef");
         return { count: 1 };
       },
+    },
+    hostedMemberIdentity: {
+      ...makeDeleteDelegate("hostedMemberIdentity"),
+      findUnique: async () => input.transactionIdentityRecord
+        ?? input.identityRecord
+        ?? null,
     },
   }, {
     get(target, property) {
@@ -3599,6 +3836,7 @@ function createHostedAccountDeletionPrismaForTest(input: {
       },
     },
     $transaction: async (callback: (prisma: typeof transactionPrisma) => Promise<unknown>) => {
+      transactionCallCount += 1;
       input.onTransaction();
       return callback(transactionPrisma);
     },
@@ -3632,6 +3870,8 @@ function makeHostedComputerRunRowForDeletionTest(
 }
 
 async function makeVendorAccountRowsForTest(memberId: string, overrides?: {
+  privyUserId?: string | null;
+  stripeCustomerId?: string | null;
   stripeSubscriptionId?: string | null;
 }): Promise<{
   billingRefRecord: Record<string, unknown>;
@@ -3639,7 +3879,9 @@ async function makeVendorAccountRowsForTest(memberId: string, overrides?: {
 }> {
   const billingPrivateColumns = await buildHostedMemberBillingPrivateColumns({
     memberId,
-    stripeCustomerId: "cus_delete_123",
+    stripeCustomerId: overrides?.stripeCustomerId === undefined
+      ? "cus_delete_123"
+      : overrides.stripeCustomerId,
     stripeSubscriptionId: overrides?.stripeSubscriptionId === undefined
       ? "sub_delete_123"
       : overrides.stripeSubscriptionId,
@@ -3647,7 +3889,9 @@ async function makeVendorAccountRowsForTest(memberId: string, overrides?: {
   const identityPrivateColumns = await buildHostedMemberIdentityPrivateColumns({
     memberId,
     phoneNumber: null,
-    privyUserId: "privy-user-delete-123",
+    privyUserId: overrides?.privyUserId === undefined
+      ? "privy-user-delete-123"
+      : overrides.privyUserId,
     signupPhoneCodeSendAttemptId: null,
     signupPhoneCodeSendAttemptStartedAt: null,
     signupPhoneCodeSentAt: null,
@@ -3895,12 +4139,27 @@ type HostedAccountDeletionPrismaTransactionFake = {
     findUnique: () => Promise<Record<string, unknown> | null>;
     updateMany: (args: unknown) => Promise<{ count: number }>;
   };
+  hostedMemberIdentity: HostedAccountDeletionPrismaDeleteDelegate & {
+    findUnique: () => Promise<unknown>;
+  };
 };
 
-function makeCloudflareDeletionResult() {
+function makeCloudflareDeletionResult(): {
+  alarmCleared: boolean | null;
+  configured: boolean;
+  deleteAllCompleted: boolean | null;
+  deleted: boolean;
+  errorCode: string | null;
+  r2DeletedObjectCount: number | null;
+  r2SkippedUserScopedPrefixes: boolean | null;
+  r2Supported: boolean | null;
+  r2UserScopedSkipReason: string | null;
+  runnerStateDeleted: boolean | null;
+} {
   return {
     alarmCleared: true,
     configured: true,
+    deleteAllCompleted: true,
     deleted: true,
     errorCode: null,
     r2DeletedObjectCount: 0,
@@ -3908,5 +4167,22 @@ function makeCloudflareDeletionResult() {
     r2Supported: true,
     r2UserScopedSkipReason: null,
     runnerStateDeleted: true,
+  };
+}
+
+function makeCleanupRunResult(input: {
+  cleanupPending?: boolean;
+  cloudflare?: ReturnType<typeof makeCloudflareDeletionResult>;
+  privyUser?: { errorCode: string | null; status: string };
+  stripeCustomer?: { errorCode: string | null; status: string };
+} = {}) {
+  return {
+    cleanupPending: input.cleanupPending ?? false,
+    cloudflare: input.cloudflare ?? makeCloudflareDeletionResult(),
+    vendorAccounts: {
+      privyUser: input.privyUser ?? { errorCode: null, status: "completed" },
+      stripeCustomer:
+        input.stripeCustomer ?? { errorCode: null, status: "completed" },
+    },
   };
 }

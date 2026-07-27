@@ -19,6 +19,7 @@ const mocks = vi.hoisted(() => {
     getPrisma: vi.fn(),
     hostedWebSession,
     prismaClient,
+    readHostedMemberCoreState: vi.fn(),
     transactionClient,
   };
 });
@@ -27,6 +28,10 @@ vi.mock("server-only", () => ({}));
 
 vi.mock("@/src/lib/prisma", () => ({
   getPrisma: mocks.getPrisma,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({
+  readHostedMemberCoreState: mocks.readHostedMemberCoreState,
 }));
 
 describe("hosted app session production cookie", () => {
@@ -41,6 +46,13 @@ describe("hosted app session production cookie", () => {
     mocks.hostedWebSession.create.mockResolvedValue({});
     mocks.hostedWebSession.deleteMany.mockResolvedValue({ count: 0 });
     mocks.hostedWebSession.findMany.mockResolvedValue([]);
+    mocks.readHostedMemberCoreState.mockResolvedValue({
+      billingStatus: "not_started",
+      createdAt: new Date("2026-05-01T00:00:00.000Z"),
+      id: "member_123",
+      suspendedAt: null,
+      updatedAt: new Date("2026-05-01T00:00:00.000Z"),
+    });
     mocks.transactionClient.$queryRaw.mockResolvedValue([{ "?column?": 1 }]);
   });
 

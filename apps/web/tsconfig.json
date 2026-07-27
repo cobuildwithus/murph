@@ -129,6 +129,9 @@
       "@murphai/hosted-execution/labs": [
         "../../packages/hosted-execution/src/labs.ts"
       ],
+      "@murphai/hosted-execution/managed-group-activity": [
+        "../../packages/hosted-execution/src/managed-group-activity.ts"
+      ],
       "@murphai/hosted-execution/subscription": [
         "../../packages/hosted-execution/src/subscription.ts"
       ],

@@ -1253,14 +1253,18 @@ describe("hosted onboarding stripe billing events", () => {
       groupId: "hbag_family",
     });
     const tx = {};
+    const preparedFamilyCryptoDomainRoots = new Map([
+      ["member_owner", new Map()],
+    ]);
+    const subscription = makeStripeSubscription({
+      metadata: {
+        accountGroupId: "hbag_family",
+        kind: "hosted_family_plan",
+      },
+    });
 
     await applyStripeSubscriptionUpdated(
-      makeStripeSubscription({
-        metadata: {
-          accountGroupId: "hbag_family",
-          kind: "hosted_family_plan",
-        },
-      }),
+      subscription,
       {
         eventCreatedAt: new Date("2026-04-23T00:00:00.000Z"),
         occurredAt: "2026-04-23T00:00:00.000Z",
@@ -1268,8 +1272,16 @@ describe("hosted onboarding stripe billing events", () => {
         sourceType: "stripe.customer.subscription.updated",
       },
       tx as never,
+      preparedFamilyCryptoDomainRoots,
     );
 
+    expect(mocks.applyHostedFamilyStripeSubscriptionUpdatedTx).toHaveBeenCalledWith(
+      expect.objectContaining({
+        preparedCryptoDomainRootsByMember: preparedFamilyCryptoDomainRoots,
+        subscription,
+        tx,
+      }),
+    );
     expect(mocks.reconcileHostedAiUsageGateForBillingModeChangeTx).toHaveBeenCalledWith({
       memberId: "member_owner",
       now: new Date("2026-04-23T00:00:00.000Z"),
@@ -1287,6 +1299,9 @@ describe("hosted onboarding stripe billing events", () => {
       groupId: "hbag_family",
     });
     const tx = {};
+    const preparedFamilyCryptoDomainRoots = new Map([
+      ["member_owner", new Map()],
+    ]);
     const subscription = makeStripeSubscription({
       id: "sub_family",
       metadata: {
@@ -1306,8 +1321,17 @@ describe("hosted onboarding stripe billing events", () => {
       tx as never,
       HostedBillingStatus.active,
       subscription,
+      undefined,
+      preparedFamilyCryptoDomainRoots,
     );
 
+    expect(mocks.applyHostedFamilyStripeSubscriptionUpdatedTx).toHaveBeenCalledWith(
+      expect.objectContaining({
+        preparedCryptoDomainRootsByMember: preparedFamilyCryptoDomainRoots,
+        subscription,
+        tx,
+      }),
+    );
     expect(mocks.reconcileHostedAiUsageGateForBillingModeChangeTx).toHaveBeenCalledWith({
       memberId: "member_owner",
       now: new Date("2026-04-23T00:00:00.000Z"),

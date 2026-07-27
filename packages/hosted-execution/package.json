@@ -82,6 +82,10 @@
       "types": "./dist/labs.d.ts",
       "default": "./dist/labs.js"
     },
+    "./managed-group-activity": {
+      "types": "./dist/managed-group-activity.d.ts",
+      "default": "./dist/managed-group-activity.js"
+    },
     "./subscription": {
       "types": "./dist/subscription.d.ts",
       "default": "./dist/subscription.js"
