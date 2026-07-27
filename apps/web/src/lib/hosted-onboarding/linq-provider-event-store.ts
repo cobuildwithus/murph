@@ -93,7 +93,11 @@ export async function ingestHostedLinqProviderEventTx(input: {
         repliedAt: new Date(groupJoinReplyContext.repliedAt),
         tx: input.prisma,
       });
-    } else {
+    }
+    if (
+      !groupJoinReplyContext
+      || deliveryReceipt.reopenOnboardingLink.releaseDailySuppression === true
+    ) {
       await releaseHostedLinqOnboardingLinkNoticeClaim({
         memberId: deliveryReceipt.reopenOnboardingLink.memberId,
         occurredAt: deliveryReceipt.reopenOnboardingLink.occurredAt,

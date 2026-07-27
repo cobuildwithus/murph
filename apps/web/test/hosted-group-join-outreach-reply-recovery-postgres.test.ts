@@ -64,6 +64,7 @@ import {
 } from "@/src/lib/hosted-onboarding/member-private-codecs";
 import {
   createHostedLinqDeliveryIdempotencyLookupKey,
+  createHostedLinqProviderEventLookupKey,
 } from "@/src/lib/hosted-onboarding/linq-observability-identifiers";
 import {
   planHostedOnboardingLinqWebhook,
@@ -125,6 +126,7 @@ describe.skipIf(!runPostgresProof)(
       const newerProviderMessageId = `linq-message-newer-${randomUUID()}`;
       const originalProviderMessageId = `linq-message-original-${randomUUID()}`;
       const genericProviderMessageId = `linq-message-generic-${randomUUID()}`;
+      const retryProviderMessageId = `linq-message-retry-${randomUUID()}`;
       const genericEffectId = buildHostedLinqInviteSignupEffectId({
         memberId: participantMemberId,
         occurredAt: "2026-07-24T19:30:00.000Z",
@@ -144,6 +146,10 @@ describe.skipIf(!runPostgresProof)(
         .mockResolvedValueOnce({
           chatId,
           messageId: originalProviderMessageId,
+        })
+        .mockResolvedValueOnce({
+          chatId,
+          messageId: retryProviderMessageId,
         });
 
       try {
@@ -602,6 +608,77 @@ describe.skipIf(!runPostgresProof)(
           reason: "signup-link-already-sent",
         });
         expect(providerMocks.sendHostedLinqChatMessage).toHaveBeenCalledTimes(2);
+
+        // Once every group-aware identity also fails, the same member-owned
+        // projection must converge to open regardless of receipt order.
+        await prisma.$transaction((tx) =>
+          ingestHostedLinqProviderEventTx({
+            event: buildParsedFailureReceipt({
+              eventId: `event-newer-group-failed-${randomUUID()}`,
+              messageId: newerProviderMessageId,
+              occurredAt: "2026-07-24T20:02:10.000Z",
+              recipientPhone,
+            }),
+            prisma: tx,
+          })
+        );
+        await expect(prisma.hostedLinqDailyState.findFirst({
+          select: { onboardingLinkSentAt: true },
+          where: {
+            dayUtc: new Date("2026-07-24T00:00:00.000Z"),
+            memberId: participantMemberId,
+          },
+        })).resolves.toEqual({
+          onboardingLinkSentAt: groupSignupAcceptedAt,
+        });
+        await prisma.$transaction((tx) =>
+          ingestHostedLinqProviderEventTx({
+            event: buildParsedFailureReceipt({
+              eventId: `event-original-group-failed-${randomUUID()}`,
+              messageId: originalProviderMessageId,
+              occurredAt: "2026-07-24T20:02:20.000Z",
+              recipientPhone,
+            }),
+            prisma: tx,
+          })
+        );
+        await expect(prisma.hostedLinqDailyState.findFirst({
+          select: { onboardingLinkSentAt: true },
+          where: {
+            dayUtc: new Date("2026-07-24T00:00:00.000Z"),
+            memberId: participantMemberId,
+          },
+        })).resolves.toEqual({
+          onboardingLinkSentAt: null,
+        });
+
+        // The exact group owner may disappear before the next inbound. That
+        // must not strand the ordinary signup retry behind the old marker.
+        await prisma.hostedGroup.deleteMany({
+          where: { id: { in: [groupId, newerGroupId] } },
+        });
+        const retryInboundEvent = buildDirectReplyEvent({
+          chatId,
+          eventId: `event-retry-${randomUUID()}`,
+          messageId: `message-retry-${randomUUID()}`,
+          occurredAt: "2026-07-24T20:02:30.000Z",
+          participantPhone,
+          recipientPhone,
+        });
+        await expect(handleHostedOnboardingLinqWebhook({
+          prisma,
+          rawBody: JSON.stringify(retryInboundEvent),
+          scheduleAfterResponse,
+          signature: null,
+          timestamp: null,
+        })).resolves.toMatchObject({
+          ok: true,
+          reason: "sent-signup-link",
+        });
+        expect(providerMocks.sendHostedLinqChatMessage).toHaveBeenCalledTimes(3);
+        for (const task of scheduledTasks.splice(0)) {
+          await task();
+        }
       } finally {
         await cleanupRecoveryProof({
           deliveryIdempotencyLookupKey,
@@ -621,6 +698,167 @@ describe.skipIf(!runPostgresProof)(
         await prisma.$disconnect();
       }
     });
+
+    it.each([
+      ["generic then group", ["generic", "group"]],
+      ["group then generic", ["group", "generic"]],
+    ] as const)(
+      "converges shared signup suppression after %s terminal receipts",
+      async (_label, receiptOrder) => {
+        const prisma = createPrismaClient({ databaseUrl, poolMax: 2 });
+        const memberId = `hbm_receipt_order_${randomUUID()}`;
+        const dayUtc = new Date("2026-07-25T00:00:00.000Z");
+        const acceptedAt = new Date("2026-07-25T12:00:00.000Z");
+        const genericMessageId = `linq-generic-order-${randomUUID()}`;
+        const groupMessageId = `linq-group-order-${randomUUID()}`;
+        const genericEffectId = buildHostedLinqInviteSignupEffectId({
+          memberId,
+          occurredAt: acceptedAt,
+        });
+        const groupEffectId = buildHostedLinqInviteSignupEffectId({
+          memberId,
+          occurredAt: acceptedAt,
+          sourceEventDigest: randomUUID().replaceAll("-", "").slice(0, 32),
+        });
+        const groupOutreachId = `hgrpjoa_deleted_${randomUUID()}`;
+        const genericLookupKey =
+          createHostedLinqDeliveryIdempotencyLookupKey(genericEffectId);
+        const groupLookupKey =
+          createHostedLinqDeliveryIdempotencyLookupKey(groupEffectId);
+        const genericMessageLookupKey =
+          createHostedLinqMessageLookupKey(genericMessageId);
+        const groupMessageLookupKey =
+          createHostedLinqMessageLookupKey(groupMessageId);
+        const recipientPhone = createUniqueTestPhone("+1303");
+        const recipientPhoneLookupKey =
+          createHostedPhoneLookupKey(recipientPhone);
+        if (
+          !genericLookupKey
+          || !groupLookupKey
+          || !genericMessageLookupKey
+          || !groupMessageLookupKey
+          || !recipientPhoneLookupKey
+        ) {
+          throw new Error("Expected receipt-order proof lookup keys.");
+        }
+        const rawEventIds: string[] = [];
+
+        try {
+          await prisma.hostedMember.create({
+            data: { id: memberId },
+          });
+          await prisma.hostedLinqDailyState.create({
+            data: {
+              dayUtc,
+              firstSeenAt: acceptedAt,
+              lastSeenAt: acceptedAt,
+              memberId,
+              onboardingLinkSentAt: acceptedAt,
+            },
+          });
+          await prisma.hostedLinqDelivery.createMany({
+            data: [
+              {
+                acceptedAt,
+                attemptedAt: acceptedAt,
+                id: `hld_generic_order_${randomUUID()}`,
+                idempotencyKey: genericLookupKey,
+                messageLookupKey: genericMessageLookupKey,
+                source: "hosted_webhook_side_effect",
+                sourceRef: genericEffectId,
+                status: "accepted",
+                targetKind: "thread",
+                template: "invite_signup",
+              },
+              {
+                acceptedAt,
+                attemptedAt: acceptedAt,
+                id: `hld_group_order_${randomUUID()}`,
+                idempotencyKey: groupLookupKey,
+                messageLookupKey: groupMessageLookupKey,
+                source: "hosted_webhook_side_effect",
+                sourceRef: buildHostedLinqInviteSignupDeliverySourceRef({
+                  effectId: groupEffectId,
+                  groupJoinOutreachId: groupOutreachId,
+                  groupJoinRepliedAt: acceptedAt.toISOString(),
+                }),
+                status: "accepted",
+                targetKind: "thread",
+                template: "invite_signup",
+              },
+            ],
+          });
+
+          for (const [index, identity] of receiptOrder.entries()) {
+            const eventId = `event-${identity}-order-${randomUUID()}`;
+            rawEventIds.push(eventId);
+            await prisma.$transaction((tx) =>
+              ingestHostedLinqProviderEventTx({
+                event: buildParsedFailureReceipt({
+                  eventId,
+                  messageId: identity === "generic"
+                    ? genericMessageId
+                    : groupMessageId,
+                  occurredAt: new Date(
+                    acceptedAt.getTime() + (index + 1) * 60_000,
+                  ).toISOString(),
+                  recipientPhone,
+                }),
+                prisma: tx,
+              })
+            );
+            await expect(prisma.hostedLinqDailyState.findUnique({
+              select: { onboardingLinkSentAt: true },
+              where: {
+                memberId_dayUtc: {
+                  dayUtc,
+                  memberId,
+                },
+              },
+            })).resolves.toEqual({
+              onboardingLinkSentAt: index === 0 ? acceptedAt : null,
+            });
+          }
+
+          await expect(prisma.hostedLinqDelivery.findMany({
+            orderBy: { id: "asc" },
+            select: { status: true },
+            where: {
+              idempotencyKey: {
+                in: [genericLookupKey, groupLookupKey],
+              },
+            },
+          })).resolves.toEqual([
+            { status: "failed" },
+            { status: "failed" },
+          ]);
+        } finally {
+          const eventLookupKeys = rawEventIds.map(
+            createHostedLinqProviderEventLookupKey,
+          );
+          await prisma.hostedLinqAlert.deleteMany({
+            where: { eventId: { in: eventLookupKeys } },
+          });
+          await prisma.hostedLinqProviderEvent.deleteMany({
+            where: { eventId: { in: eventLookupKeys } },
+          });
+          await prisma.hostedLinqDelivery.deleteMany({
+            where: {
+              idempotencyKey: {
+                in: [genericLookupKey, groupLookupKey],
+              },
+            },
+          });
+          await prisma.hostedMember.deleteMany({
+            where: { id: memberId },
+          });
+          await prisma.hostedLinqLine.deleteMany({
+            where: { phoneNumberLookupKey: recipientPhoneLookupKey },
+          });
+          await prisma.$disconnect();
+        }
+      },
+    );
   },
 );
 
@@ -665,6 +903,38 @@ function buildDirectReplyEvent(input: {
     event_type: "message.received",
     webhook_version: "2026-02-03",
   }));
+}
+
+function buildParsedFailureReceipt(input: {
+  eventId: string;
+  messageId: string;
+  occurredAt: string;
+  recipientPhone: string;
+}) {
+  const parsed = parseHostedLinqProviderEvent({
+    event: parseHostedLinqWebhookEvent(JSON.stringify({
+      api_version: "v3",
+      created_at: input.occurredAt,
+      data: {
+        error: {
+          code: "30007",
+          message: "carrier filtered",
+        },
+        message_id: input.messageId,
+        phone_number: input.recipientPhone,
+        service: "sms",
+      },
+      event_id: input.eventId,
+      event_type: "message.failed",
+      trace_id: `trace-${randomUUID()}`,
+      webhook_version: "2026-02-03",
+    })),
+    rawBody: "{}",
+  });
+  if (!parsed) {
+    throw new Error("Expected the terminal failure receipt to parse.");
+  }
+  return parsed;
 }
 
 async function cleanupRecoveryProof(input: {

@@ -586,17 +586,18 @@ describe("hosted Linq webhook transport", () => {
     expect(sendHostedLinqChatMessage).not.toHaveBeenCalled();
   });
 
-  it("does not consume group context when acceptance replays a buffered failure", async () => {
+  it("reopens group context and daily suppression when acceptance replays its lone buffered failure", async () => {
     vi.mocked(markHostedLinqDeliveryAcceptedTx).mockResolvedValueOnce({
       deliveryStatus: "failed",
       reopenOnboardingLink: {
         groupJoinReplyContext: {
           outreachId: "hgrpjoa-failed",
           repliedAt: "2026-03-26T12:00:00.000Z",
-        },
-        memberId: "member-1",
-        occurredAt: "2026-03-26T00:00:00.000Z",
       },
+      memberId: "member-1",
+      occurredAt: "2026-03-26T00:00:00.000Z",
+      releaseDailySuppression: true,
+    },
       restoreOnboardingLink: null,
     });
     const effect = createHostedWebhookLinqMessageSideEffect({
@@ -625,8 +626,20 @@ describe("hosted Linq webhook transport", () => {
     await scheduledTasks[0]?.();
 
     expect(markHostedLinqOnboardingLinkNoticeSent).toHaveBeenCalledTimes(1);
-    expect(releaseHostedLinqOnboardingLinkNoticeClaim).not.toHaveBeenCalled();
-    expect(prisma.hostedGroupJoinOutreach.updateMany).not.toHaveBeenCalled();
+    expect(releaseHostedLinqOnboardingLinkNoticeClaim).toHaveBeenCalledWith({
+      memberId: "member-1",
+      occurredAt: "2026-03-26T00:00:00.000Z",
+      prisma: expect.any(Object),
+    });
+    expect(prisma.hostedGroupJoinOutreach.updateMany).toHaveBeenCalledWith({
+      data: { repliedAt: null },
+      where: {
+        id: "hgrpjoa-failed",
+        repliedAt: new Date("2026-03-26T12:00:00.000Z"),
+        sentAt: { not: null },
+        skippedAt: null,
+      },
+    });
   });
 
   it("awaits one share when accepted-milestone replay finds an earlier delivered receipt", async () => {

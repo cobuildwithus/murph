@@ -401,9 +401,9 @@ describe("hosted Linq observability stores", () => {
       sourceRef: genericEffectId,
       template: "invite_signup",
     });
-    fixture.hostedLinqDeliveryFindMany
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([{ sourceRef: groupSourceRef }]);
+    fixture.hostedLinqDeliveryFindMany.mockResolvedValueOnce([
+      { sourceRef: groupSourceRef },
+    ]);
 
     await expect(ingestHostedLinqProviderEventTx({
       event: requireParsedProviderEvent(buildProviderEvent({
@@ -424,7 +424,7 @@ describe("hosted Linq observability stores", () => {
 
     expect(fixture.hostedLinqDailyStateUpdateMany).not.toHaveBeenCalled();
     expect(fixture.hostedGroupJoinOutreachUpdateMany).not.toHaveBeenCalled();
-    expect(fixture.hostedLinqDeliveryFindMany).toHaveBeenNthCalledWith(2, {
+    expect(fixture.hostedLinqDeliveryFindMany).toHaveBeenCalledWith({
       select: { sourceRef: true },
       where: {
         OR: [
@@ -3751,6 +3751,7 @@ describe("hosted Linq signup-link delivery attempts", () => {
         },
         memberId: "member_123",
         occurredAt: "2026-03-26T00:00:00.000Z",
+        releaseDailySuppression: true,
       },
       restoreOnboardingLink: null,
     });
@@ -3776,15 +3777,13 @@ describe("hosted Linq signup-link delivery attempts", () => {
       sourceRef: BASE_EFFECT_ID,
       template: "invite_signup",
     });
-    fixture.hostedLinqDeliveryFindMany
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([{
-        sourceRef: buildHostedLinqInviteSignupDeliverySourceRef({
-          effectId: groupEffectId,
-          groupJoinOutreachId: "hgrpjoa_group_success",
-          groupJoinRepliedAt: "2026-03-26T12:05:00.000Z",
-        }),
-      }]);
+    fixture.hostedLinqDeliveryFindMany.mockResolvedValueOnce([{
+      sourceRef: buildHostedLinqInviteSignupDeliverySourceRef({
+        effectId: groupEffectId,
+        groupJoinOutreachId: "hgrpjoa_group_success",
+        groupJoinRepliedAt: "2026-03-26T12:05:00.000Z",
+      }),
+    }]);
 
     await expect(markHostedLinqDeliveryAcceptedTx({
       idempotencyKey: BASE_EFFECT_ID,
@@ -3839,7 +3838,7 @@ describe("hosted Linq signup-link delivery attempts", () => {
     });
   });
 
-  it("reopens failed group context and restores it when delivery later wins", async () => {
+  it("reopens failed group context, releases lone suppression, and restores both when delivery later wins", async () => {
     const fixture = createObservabilityPrismaFixture();
     const repliedAt = "2026-03-26T12:01:00.000Z";
     const sourceRef = buildHostedLinqInviteSignupDeliverySourceRef({
@@ -3911,7 +3910,21 @@ describe("hosted Linq signup-link delivery attempts", () => {
           skippedAt: null,
         },
       });
-    expect(fixture.hostedLinqDailyStateUpdateMany).toHaveBeenCalledWith({
+    expect(fixture.hostedLinqDailyStateUpdateMany)
+      .toHaveBeenNthCalledWith(1, {
+        data: {
+          onboardingLinkSentAt: null,
+        },
+        where: {
+          dayUtc: new Date("2026-03-26T00:00:00.000Z"),
+          memberId: "member_123",
+          onboardingLinkSentAt: {
+            not: null,
+          },
+        },
+      });
+    expect(fixture.hostedLinqDailyStateUpdateMany)
+      .toHaveBeenNthCalledWith(2, {
       data: {
         onboardingLinkSentAt: expect.any(Date),
       },
@@ -3920,7 +3933,7 @@ describe("hosted Linq signup-link delivery attempts", () => {
         memberId: "member_123",
         onboardingLinkSentAt: null,
       },
-    });
+      });
   });
 
   it("does not reopen daily or group context for a stale failed attempt", async () => {
@@ -3940,8 +3953,11 @@ describe("hosted Linq signup-link delivery attempts", () => {
       template: "invite_signup",
     });
     fixture.hostedLinqDeliveryFindMany.mockResolvedValueOnce([{
-      id: "hld_group_newer_dispatch",
-      status: "attempted",
+      sourceRef: buildHostedLinqInviteSignupDeliverySourceRef({
+        effectId: `${BASE_EFFECT_ID}:a2`,
+        groupJoinOutreachId: "hgrpjoa_stale",
+        groupJoinRepliedAt: repliedAt,
+      }),
     }]);
 
     await ingestHostedLinqProviderEventTx({
@@ -3962,18 +3978,24 @@ describe("hosted Linq signup-link delivery attempts", () => {
     expect(fixture.hostedLinqDailyStateUpdateMany).not.toHaveBeenCalled();
     expect(fixture.hostedGroupJoinOutreachUpdateMany).not.toHaveBeenCalled();
     expect(fixture.hostedLinqDeliveryFindMany).toHaveBeenCalledWith({
-      select: { id: true },
-      take: 1,
+      select: { sourceRef: true },
       where: {
-        idempotencyKey: {
-          in: expect.arrayContaining([
-            createHostedLinqDeliveryIdempotencyLookupKey(
-              `${BASE_EFFECT_ID}:a2`,
-            ),
-          ]),
-        },
+        OR: [
+          { sourceRef: { startsWith: BASE_EFFECT_ID } },
+          {
+            sourceRef: {
+              startsWith:
+                `${buildHostedLinqInviteSignupDeliverySourceRefMemberPrefix(
+                  "member_123",
+                )}2026-03-26T00:00:00.000Z`,
+            },
+          },
+        ],
         status: {
           in: ["attempted", "provider_dispatch_started", "accepted", "delivered"],
+        },
+        template: {
+          in: ["invite_signup", "invite_signup_fallback"],
         },
       },
     });
@@ -4054,6 +4076,7 @@ describe("hosted Linq signup-link delivery attempts", () => {
 function createObservabilityPrismaFixture() {
   const transaction = vi.fn();
   const executeRaw = vi.fn().mockResolvedValue([]);
+  const queryRaw = vi.fn().mockResolvedValue([]);
   const hostedGroupJoinOutreachUpdateMany =
     vi.fn().mockResolvedValue({ count: 1 });
   const hostedLinqAlertCreateMany = vi.fn().mockResolvedValue({ count: 1 });
@@ -4084,6 +4107,7 @@ function createObservabilityPrismaFixture() {
   const prisma = {
     $transaction: transaction,
     $executeRaw: executeRaw,
+    $queryRaw: queryRaw,
     hostedLinqAlert: {
       createMany: hostedLinqAlertCreateMany,
     },

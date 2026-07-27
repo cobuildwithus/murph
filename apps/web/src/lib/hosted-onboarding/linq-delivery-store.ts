@@ -34,6 +34,7 @@ import {
 import type { ParsedHostedLinqProviderEvent } from "./linq-provider-events";
 import { toHostedOnboardingLogIdSuffix } from "./logging";
 import { normalizePhoneNumber } from "./phone";
+import { lockHostedMemberRow } from "./shared";
 import { generateHostedRandomPrefixedId, sha256Hex } from "../primitives";
 import {
   acquireHostedLinqChatOwnershipLockTx,
@@ -99,6 +100,7 @@ type HostedLinqReopenOnboardingLink = {
   groupJoinReplyContext?: HostedLinqInviteSignupGroupJoinReplyContext;
   memberId: string;
   occurredAt: string;
+  releaseDailySuppression?: true;
 };
 
 type HostedLinqAcceptedMilestoneStatus =
@@ -667,6 +669,12 @@ export async function markHostedLinqDeliveryAcceptedTx(input: {
   const messageLookupKey = createHostedLinqMessageLookupKey(input.messageId);
   const messageLookupKeyCandidates = createHostedLinqMessageLookupKeyReadCandidates(input.messageId);
   return runHostedLinqDeliveryStoreTransaction(input.prisma, async (prisma) => {
+    const signupAttempt = parseHostedLinqInviteSignupEffectId(
+      input.idempotencyKey,
+    );
+    if (signupAttempt) {
+      await lockHostedMemberRow(prisma, signupAttempt.memberId);
+    }
     const updated = await prisma.hostedLinqDelivery.updateMany({
       where: {
         deliveredAt: null,
@@ -729,7 +737,7 @@ export async function markHostedLinqDeliveryAcceptedTx(input: {
     // A receipt buffered before this milestone wrote the message lookup key
     // just resolved the delivery terminally; surface the same reopen/restore
     // signal the live receipt-ingestion path emits so the orchestration layer
-    // keeps daily state consistent (a failed link reopens the member/day).
+    // projects the same complete member/day delivery truth.
     const delivery = await prisma.hostedLinqDelivery.findUnique({
       where: { idempotencyKey },
       select: {
@@ -1338,6 +1346,16 @@ export async function applyHostedLinqDeliveryReceiptTx(input: {
       restoreOnboardingLink: null,
     };
   }
+  const deliveryOnboardingLink = resolveHostedLinqReopenOnboardingLink(
+    delivery,
+  );
+  if (deliveryOnboardingLink) {
+    // Every signup attempt for one member/day shares one suppression
+    // projection. Serialize terminal receipt consequences through the
+    // existing member owner so concurrent failures cannot each preserve a
+    // marker based on the other's not-yet-committed status.
+    await lockHostedMemberRow(input.prisma, deliveryOnboardingLink.memberId);
+  }
 
   const updated = await input.prisma.hostedLinqDelivery.updateMany({
     where: {
@@ -1365,8 +1383,7 @@ export async function applyHostedLinqDeliveryReceiptTx(input: {
       ? onboardingLink
       : null,
     // The symmetric signal: a delivered receipt that wins ordering after a
-    // reopen re-marks the member/day as sent, so daily state always tracks
-    // the latest terminal delivery truth.
+    // reopen re-marks the member/day because that delivery remains live truth.
     restoreOnboardingLink:
       advanced
       && input.event.deliveryStatus === "delivered"
@@ -2029,51 +2046,10 @@ async function resolveHostedLinqFailedDeliveryReopenTx(input: {
     return link;
   }
 
-  const newerAttemptLookupKeys = Array.from(
-    {
-      length:
-        HOSTED_LINQ_INVITE_SIGNUP_MAX_ATTEMPTS_PER_IDENTITY
-        - failedAttempt.attempt,
-    },
-    (_, index) =>
-      createHostedLinqDeliveryIdempotencyLookupKey(
-        buildHostedLinqInviteSignupEffectId({
-          attempt: failedAttempt.attempt + index + 1,
-          memberId: failedAttempt.memberId,
-          occurredAt: failedAttempt.dayUtc,
-          sourceEventDigest: failedAttempt.sourceEventDigest,
-        }),
-      ),
-  ).filter((lookupKey): lookupKey is string => lookupKey !== null);
-  const newerLiveDeliveries =
-    newerAttemptLookupKeys.length === 0
-      ? []
-      : await input.prisma.hostedLinqDelivery.findMany({
-        where: {
-          idempotencyKey: { in: newerAttemptLookupKeys },
-          status: {
-            // Signup attempts stay reclaimable until provider correlation. A
-            // newer `attempted` ordinal still owns this exact reply context, so
-            // an older delayed failure must not reopen it while restart recovery
-            // can continue that newer attempt under the same provider key.
-            in: ["attempted", "provider_dispatch_started", "accepted", "delivered"],
-          },
-        },
-        select: { id: true },
-        take: 1,
-      });
-  if (newerLiveDeliveries.length > 0) {
-    return null;
-  }
-  if (link.groupJoinReplyContext) {
-    return link;
-  }
-
-  // The daily marker is shared suppression truth across the generic
-  // member/day identity and every exact group-reply identity for that day. A
-  // delayed generic failure may clear it only when no distinct group delivery
-  // still owns that fact. Group failures remain scoped to their exact outreach
-  // above, and same-identity attempt ordering remains fenced by the query above.
+  // The daily marker is one projection of all generic and group-aware signup
+  // deliveries for the member/day. Recompute from that complete set after any
+  // failed identity. The caller holds the member row lock, so the result is
+  // independent of terminal receipt order, including concurrent failures.
   const genericSourceRefPrefix = buildHostedLinqInviteSignupEffectId({
     memberId: failedAttempt.memberId,
     occurredAt: failedAttempt.dayUtc,
@@ -2098,22 +2074,32 @@ async function resolveHostedLinqFailedDeliveryReopenTx(input: {
       },
       select: { sourceRef: true },
     });
-  const distinctLiveIdentity = otherLiveDeliveries.some((delivery) => {
+  const liveAttempts = otherLiveDeliveries.flatMap((delivery) => {
     const source = parseHostedLinqInviteSignupDeliverySourceRef(
       delivery.sourceRef,
     );
     const attempt = source
       ? parseHostedLinqInviteSignupEffectId(source.effectId)
       : null;
-    return Boolean(
-      source?.groupJoinReplyContext
-      && attempt
+    return attempt
       && attempt.memberId === failedAttempt.memberId
       && attempt.dayUtc === failedAttempt.dayUtc
-      && attempt.sourceEventDigest !== failedAttempt.sourceEventDigest,
-    );
+      ? [attempt]
+      : [];
   });
-  return distinctLiveIdentity ? null : link;
+  const sameIdentityStillLive = liveAttempts.some(
+    (attempt) =>
+      attempt.sourceEventDigest === failedAttempt.sourceEventDigest,
+  );
+  if (sameIdentityStillLive) {
+    return null;
+  }
+  if (liveAttempts.length > 0) {
+    return link.groupJoinReplyContext ? link : null;
+  }
+  return link.groupJoinReplyContext
+    ? { ...link, releaseDailySuppression: true }
+    : link;
 }
 
 function readHostedLinqAcceptedMilestoneStatus(

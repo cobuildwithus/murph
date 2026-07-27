@@ -67,6 +67,7 @@ import {
   consumeHostedGroupJoinOutreachReplyContextTx,
   isHostedGroupJoinOutreachReplyDeliveryAuthorizedTx,
   readHostedGroupJoinOutreachReplyDeliveryContextTx,
+  reopenHostedGroupJoinOutreachReplyContextTx,
 } from "../hosted-groups/group-join-outreach-store";
 import {
   sanitizeHostedOnboardingStructuredLogDetails,
@@ -1099,9 +1100,9 @@ async function markHostedLinqDeliveryAcceptedBestEffort(input: {
     // A terminal receipt can beat this milestone write (it only just learned
     // the provider message id); the milestone replays that receipt and this
     // applies the same daily-state consequence as live receipt ingestion.
-    // Milestone and consequence commit atomically. Generic failure reopens the
-    // member/day; group failure reopens only its exact outreach and preserves
-    // the monotonic fact that some signup link may already have been accepted.
+    // Milestone and consequence commit atomically. A failure reopens only its
+    // exact group context, while the shared member/day suppression clears only
+    // after the final live signup delivery fails.
     const milestone = await runHostedLinqTransportTransaction(input.prisma, async (prisma) => {
       const milestone = await markHostedLinqDeliveryAcceptedTx({
         idempotencyKey: input.effect.effectId,
@@ -1109,15 +1110,26 @@ async function markHostedLinqDeliveryAcceptedBestEffort(input: {
         messageId: input.messageId,
         prisma,
       });
-      if (
-        milestone.reopenOnboardingLink
-        && !milestone.reopenOnboardingLink.groupJoinReplyContext
-      ) {
-        await releaseHostedLinqOnboardingLinkNoticeClaim({
-          memberId: milestone.reopenOnboardingLink.memberId,
-          occurredAt: milestone.reopenOnboardingLink.occurredAt,
-          prisma,
-        });
+      if (milestone.reopenOnboardingLink) {
+        const groupJoinReplyContext =
+          milestone.reopenOnboardingLink.groupJoinReplyContext;
+        if (groupJoinReplyContext) {
+          await reopenHostedGroupJoinOutreachReplyContextTx({
+            outreachId: groupJoinReplyContext.outreachId,
+            repliedAt: new Date(groupJoinReplyContext.repliedAt),
+            tx: prisma,
+          });
+        }
+        if (
+          !groupJoinReplyContext
+          || milestone.reopenOnboardingLink.releaseDailySuppression === true
+        ) {
+          await releaseHostedLinqOnboardingLinkNoticeClaim({
+            memberId: milestone.reopenOnboardingLink.memberId,
+            occurredAt: milestone.reopenOnboardingLink.occurredAt,
+            prisma,
+          });
+        }
       }
       const payload = input.effect.payload;
       if (
