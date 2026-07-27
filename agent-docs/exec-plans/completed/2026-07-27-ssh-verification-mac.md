@@ -1,6 +1,6 @@
 # Static macOS verification worker
 
-Status: review candidate
+Status: completed
 Created: 2026-07-27
 Updated: 2026-07-27
 
@@ -149,5 +149,8 @@ Updated: 2026-07-27
   and doctor flags against Crabbox v0.40.0, and clarifying that prerequisites
   must be visible to non-interactive SSH. No additional architecture or state
   owner was needed.
-- Final canonical verification and the final ReviewGPT/CI gate remain before
-  completion.
+- Final canonical forced-local verification passed on the committed remediation
+  head: 30 files and 440 repo-tool tests.
+- Implementation and local completion work are done. The final exact-head
+  ReviewGPT/CI gate remains external PR validation.
+Completed: 2026-07-27
