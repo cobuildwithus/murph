@@ -6,7 +6,6 @@ import {
   Prisma,
   type HostedMember,
   type HostedMemberIdentity,
-  type PrismaClient,
 } from "@prisma/client";
 import {
   findHostedDomainRootWrap,
@@ -969,13 +968,18 @@ test("webhook preflight retains a failed unwrap through the following transactio
     runHostedOnboardingWebhookTransaction,
     warmHostedLinqMailboxPayloadRoot,
   } = await import("../src/lib/hosted-onboarding/webhook-service");
+  const { parseHostedLinqWebhookEvent } = await import(
+    "../src/lib/hosted-onboarding/linq"
+  );
 
-  await provisionActiveHostedDomainRootEnvelopeForUserOnly({
-    domain: "ingress",
-    prisma: tx.prisma,
-    reason: "test.provision",
-    userId: "member-test-webhook-preflight",
-  });
+  for (const domain of ["control", "device", "ingress", "runtime"] as const) {
+    await provisionActiveHostedDomainRootEnvelopeForUserOnly({
+      domain,
+      prisma: tx.prisma,
+      reason: "test.provision",
+      userId: "member-test-webhook-preflight",
+    });
+  }
 
   resetLocalKmsDecryptMetrics(decryptMetrics, { failAtCall: 1 });
   let transactionStarted = false;
@@ -989,9 +993,49 @@ test("webhook preflight retains a failed unwrap through the following transactio
       expect(decryptMetrics.calls).toHaveLength(1);
       return callback(tx.prisma);
     },
-  }) as PrismaClient;
+    hostedMember: {
+      findUnique: async () => ({
+        accountGroupMemberships: [],
+        billingStatus: HostedBillingStatus.active,
+        suspendedAt: null,
+        threadContainer: null,
+      }),
+    },
+  });
+  const event = parseHostedLinqWebhookEvent(JSON.stringify({
+    api_version: "v3",
+    created_at: "2026-07-26T12:00:00.000Z",
+    data: {
+      chat: {
+        id: "chat-webhook-preflight",
+        is_group: true,
+        owner_handle: {
+          handle: "+15550000000",
+          id: "owner-webhook-preflight",
+          is_me: true,
+          service: "sms",
+        },
+      },
+      direction: "inbound",
+      id: "message-webhook-preflight",
+      is_from_me: false,
+      parts: [{ type: "text", value: "hello" }],
+      sender_handle: {
+        handle: "+15555550123",
+        id: "sender-webhook-preflight",
+        service: "sms",
+      },
+      sent_at: "2026-07-26T12:00:00.000Z",
+      service: "sms",
+    },
+    event_id: "event-webhook-preflight",
+    event_type: "message.received",
+    webhook_version: "2026-02-03",
+  }));
 
   await expect(runHostedOnboardingWebhookTransaction(
+    // @ts-expect-error - this integration fixture implements the exact Prisma
+    // transaction and delegates exercised by the composition under test.
     prisma,
     async (transaction) => {
       await unwrapHostedDomainRootForWeb({
@@ -1002,6 +1046,7 @@ test("webhook preflight retains a failed unwrap through the following transactio
       return "unexpected";
     },
     () => warmHostedLinqMailboxPayloadRoot({
+      event,
       prisma,
       threadRoute: {
         containerMemberId: "member-test-webhook-preflight",
@@ -1015,9 +1060,12 @@ test("webhook preflight retains a failed unwrap through the following transactio
   resetLocalKmsDecryptMetrics(decryptMetrics, { failAtCall: 1 });
   transactionStarted = false;
   await expect(runHostedOnboardingWebhookTransaction(
+    // @ts-expect-error - this integration fixture implements the exact Prisma
+    // transaction and delegates exercised by the composition under test.
     prisma,
     async () => "branch-without-root",
     () => warmHostedLinqMailboxPayloadRoot({
+      event,
       prisma,
       threadRoute: {
         containerMemberId: "member-test-webhook-preflight",
