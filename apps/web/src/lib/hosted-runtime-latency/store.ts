@@ -431,6 +431,8 @@ export async function recordHostedIngressAssistantMilestone(input: {
     rowMatches.push({
       assistantInputId: row.assistantInputId,
       matched: await updateHostedIngressAssistantMilestoneLocked(prisma, {
+        allowRuntimeAttemptMismatch:
+          input.milestone === "terminal_non_reply_committed",
         phaseBreakdown,
         runtimeAttemptId,
         traceId: row.id,
@@ -1687,6 +1689,7 @@ async function updateHostedIngressProviderStartedLocked(
 async function updateHostedIngressAssistantMilestoneLocked(
   prisma: HostedIngressLatencyPrismaClient,
   input: {
+    allowRuntimeAttemptMismatch: boolean;
     phaseBreakdown: HostedRuntimeLatencyPhaseBreakdown;
     runtimeAttemptId: string;
     traceId: string;
@@ -1694,7 +1697,13 @@ async function updateHostedIngressAssistantMilestoneLocked(
 ): Promise<boolean> {
   return await prisma.$transaction(async (tx) => {
     const trace = await readHostedIngressLatencyTraceForUpdate(tx, input.traceId);
-    if (!trace || trace.runtimeAttemptId !== input.runtimeAttemptId) {
+    if (
+      !trace
+      || (
+        !input.allowRuntimeAttemptMismatch
+        && trace.runtimeAttemptId !== input.runtimeAttemptId
+      )
+    ) {
       return false;
     }
 
@@ -1731,6 +1740,8 @@ function buildHostedRuntimeAssistantMilestonePhaseBreakdown(input: {
       return { schemaVersion: 1, assistant: { firstCodexOutputObservedAtEpochMs: atEpochMs } };
     case "first_codex_text_observed":
       return { schemaVersion: 1, assistant: { firstCodexTextObservedAtEpochMs: atEpochMs } };
+    case "terminal_non_reply_committed":
+      return { schemaVersion: 1, assistant: { terminalNonReplyCommittedAtEpochMs: atEpochMs } };
   }
 }
 

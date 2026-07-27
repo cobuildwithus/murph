@@ -1236,6 +1236,25 @@ describe("hosted runtime control contracts", () => {
     });
     expect(parseHostedRuntimeLatencyTraceRequest({
       event: {
+        assistantInputIds: ["input_1", "input_2"],
+        at: "2026-04-26T00:00:01.750Z",
+        milestone: "terminal_non_reply_committed",
+        runtimeAttemptId: "attempt_1",
+        source: "linq",
+        type: "assistant_milestone",
+      },
+    })).toEqual({
+      event: {
+        assistantInputIds: ["input_1", "input_2"],
+        at: "2026-04-26T00:00:01.750Z",
+        milestone: "terminal_non_reply_committed",
+        runtimeAttemptId: "attempt_1",
+        source: "linq",
+        type: "assistant_milestone",
+      },
+    });
+    expect(parseHostedRuntimeLatencyTraceRequest({
+      event: {
         at: "2026-04-26T00:00:02.000Z",
         milestone: "mailbox_import_done",
         runtimeAttemptId: "attempt_1",
@@ -1412,6 +1431,9 @@ describe("hosted runtime control contracts", () => {
         receiptScanFilesRead: 12,
         receiptScanLockWaitMs: 3,
         receiptScanPerformed: false,
+      },
+      assistant: {
+        terminalNonReplyCommittedAtEpochMs: 1_777_000_000_125,
       },
       provider: {
         codexAppServerInitializeMs: 7,

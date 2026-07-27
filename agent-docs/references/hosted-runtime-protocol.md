@@ -840,12 +840,20 @@ be labeled row-insert or commit latency. The web-owned `provider_started` field
 means the runtime observed a local Codex `turn/start`; it is not evidence of an
 upstream OpenAI request or first token. The runtime may also emit metadata-only
 `assistant_milestone` events for Linq typing request start/acceptance and the
-first locally observed Codex output/text. Web accepts those milestones only for
-the exact staged runtime attempt and merges them into the existing phase
-document under a row lock. Emission is queued off the reply path and may retry
-only the bounded staging/trace-row race; it carries no message, prompt,
-response, reasoning, or provider payload. Post-generation delivery guards must
-never create or overwrite the local Codex start milestone.
+first locally observed Codex output/text. It projects
+`terminal_non_reply_committed` only from the assistant engine's existing durable
+`suppressed` terminal evidence for the named input set, either immediately after
+that write succeeds or when a replay reads the completed evidence. That marker
+is an observability projection of the existing terminal owner; it is not a
+second disposition record and does not advance mailbox consumption. Web keeps
+in-flight timing milestones scoped to the exact staged runtime attempt. The
+terminal marker may converge across a later attempt because authenticated user,
+source, and assistant input ID identify the durable disposition being projected.
+All milestones merge into the existing phase document under a row lock. Emission
+is queued off the reply path and may retry only the bounded staging/trace-row
+race; it carries no message, prompt, response, reasoning, or provider payload.
+Post-generation delivery guards must never create or overwrite the local Codex
+start milestone.
 
 The existing App Server `turn-completed` diagnostic additionally carries
 cumulative, assign-once local offsets from that `turn/start` write to the local
@@ -1960,9 +1968,17 @@ Web runs one Vercel-authenticated reply-latency monitor every five minutes over
 the existing `HostedIngressLatencyTrace`, accepted `HostedLinqDelivery`, and
 conversation `consumed_at` facts. The fixed product boundary is 30 seconds. A
 recent accepted delivery at or above that boundary is anomalous; a trace at or
-above the boundary is unresolved only when it has neither accepted delivery nor
-durable consumed evidence. This second condition prevents a best-effort missing
-delivery link from becoming a false page after handling is already known.
+above the boundary is unresolved only when it has no accepted delivery, no
+valid `terminal_non_reply_committed` projection, and no durable consumed
+evidence. The terminal marker resolves intentional silence without pretending a
+reply was delivered or consuming the mailbox item early. Invalid marker
+chronology cannot hide still-unconsumed work. Durable consumption remains the
+rolling-deploy and best-effort-link fallback after handling is otherwise known.
+Accepted grouped Linq replies keep the complete answered mailbox-item set on the
+existing outbox intent: replay of the same still-active effect retains the
+existing set and adds newly observed items instead of replacing it. The accepted
+delivery links every mailbox item carried by its dispatch; a terminal outbox
+intent is never widened retroactively.
 One fixed-kind `HostedLinqAlert` row provides the incident claim, provider
 idempotency identity, last provider-attempt boundary, and active state. A
 healthy scan silently clears the claim so a later incident receives a new

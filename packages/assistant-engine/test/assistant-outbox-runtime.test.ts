@@ -474,6 +474,91 @@ describe('assistant outbox runtime', () => {
     ).rejects.toThrow('answered mailbox item ids exceed the 100 item limit')
   })
 
+  it('monotonically widens answered mailbox ids when a grouped reply is rebatched', async () => {
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-outbox-grouped-answered-upgrade-',
+    )
+    const deliveryInput = {
+      channel: 'linq',
+      dedupeToken: 'grouped-reply-effect-anchor',
+      deliveryIdempotencyKey: 'grouped-reply-effect-anchor',
+      dispatchMode: 'queue-only' as const,
+      message: 'one reply for the grouped burst',
+      sessionId: 'session-grouped-answered-upgrade',
+      threadId: 'linq-thread-grouped-answered-upgrade',
+      threadIsDirect: false,
+      turnId: 'turn-grouped-answered-upgrade',
+      turnTrigger: 'automation-auto-reply' as const,
+      vault: vaultRoot,
+    }
+
+    const first = await deliverAssistantOutboxMessage({
+      ...deliveryInput,
+      answeredMailboxItemIds: ['mailbox_item_newest'],
+    })
+    const upgraded = await deliverAssistantOutboxMessage({
+      ...deliveryInput,
+      answeredMailboxItemIds: [
+        'mailbox_item_older',
+        'mailbox_item_newest',
+      ],
+      turnId: 'turn-grouped-answered-rebatch',
+    })
+    const preserved = await deliverAssistantOutboxMessage({
+      ...deliveryInput,
+      answeredMailboxItemIds: ['mailbox_item_newest'],
+      turnId: 'turn-grouped-answered-replay',
+    })
+
+    expect(first.kind).toBe('queued')
+    expect(upgraded.kind).toBe('queued')
+    expect(upgraded.intent.intentId).toBe(first.intent.intentId)
+    expect(preserved.intent.intentId).toBe(first.intent.intentId)
+    expect(preserved.intent.answeredMailboxItemIds).toEqual([
+      'mailbox_item_newest',
+      'mailbox_item_older',
+    ])
+    await expect(readAssistantOutboxIntent(vaultRoot, first.intent.intentId))
+      .resolves.toMatchObject({
+        answeredMailboxItemIds: [
+          'mailbox_item_newest',
+          'mailbox_item_older',
+        ],
+      })
+
+    mockedDeliverAssistantMessageOverBinding.mockResolvedValueOnce({
+      delivery: createDelivery({
+        channel: 'linq',
+        idempotencyKey: upgraded.intent.deliveryIdempotencyKey,
+        providerMessageId: 'provider-grouped-answered-upgrade',
+        providerThreadId: 'linq-thread-grouped-answered-upgrade',
+        sentAt: '2026-04-08T03:02:00.000Z',
+        target: 'linq-thread-grouped-answered-upgrade',
+        targetKind: 'thread',
+      }),
+      deliveryDeduplicated: false,
+      deliveryTransportIdempotent: true,
+      outboxIntentId: null,
+      session: undefined,
+    })
+
+    const dispatched = await dispatchAssistantOutboxIntent({
+      intentId: preserved.intent.intentId,
+      vault: vaultRoot,
+    })
+
+    expect(dispatched.intent.status).toBe('sent')
+    expect(mockedDeliverAssistantMessageOverBinding).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        answeredMailboxItemIds: [
+          'mailbox_item_newest',
+          'mailbox_item_older',
+        ],
+      }),
+      undefined,
+    )
+  })
+
   it('persists auto-reply intent provenance when receipt repair has no receipt', async () => {
     const { vaultRoot } = await createAssistantVault('assistant-outbox-auto-reply-provenance-')
 

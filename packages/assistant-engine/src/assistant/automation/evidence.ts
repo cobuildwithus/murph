@@ -68,6 +68,14 @@ export async function hasCompleteAssistantAutoReplyTerminalEvidence(input: {
   inputId: string
   vault: string
 }): Promise<boolean> {
+  return (await readCompleteAssistantAutoReplyTerminalEvidence(input)) !== null
+}
+
+export async function readCompleteAssistantAutoReplyTerminalEvidence(input: {
+  captureId?: string | null
+  inputId: string
+  vault: string
+}): Promise<AssistantAutoReplyTerminalEvidence | null> {
   const evidence =
     await readAssistantAutoReplyTerminalEvidenceByEvidenceId(
       input.vault,
@@ -82,13 +90,15 @@ export async function hasCompleteAssistantAutoReplyTerminalEvidence(input: {
         : null
     )
   if (!evidence) {
-    return false
+    return null
   }
 
   return await assistantAutoReplyTerminalEvidenceGroupComplete({
     evidence,
     vault: input.vault,
   })
+    ? evidence
+    : null
 }
 
 export async function readAssistantAutoReplyTerminalEvidenceByEvidenceId(

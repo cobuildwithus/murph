@@ -63,6 +63,7 @@ import {
   createEmptyInboxScanResult,
   earliestAssistantAutomationWakeAt,
   type AssistantAutomationPassResult,
+  type AssistantAutoReplyTerminalNonReplyHook,
   type AssistantRunEvent,
 } from './shared.js'
 import { scanAssistantAutomationOnce } from './scanner.js'
@@ -97,6 +98,7 @@ export interface RunAssistantAutomationInput {
   onEvent?: (event: AssistantRunEvent) => void
   onProviderEvent?: ((event: AssistantProviderProgressEvent) => void) | null
   onProviderRequestStarted?: AssistantAutoReplyProviderRequestStartHook | null
+  onTerminalNonReplyCommitted?: AssistantAutoReplyTerminalNonReplyHook | null
   onTraceEvent?: (event: AssistantProviderTraceEvent) => void
   onInboxEvent?: (event: InboxRunEvent) => void
   once?: boolean
@@ -937,6 +939,7 @@ export async function runAssistantAutomationPass(
     onEvent: input.onEvent,
     onProviderEvent: input.onProviderEvent ?? null,
     onProviderRequestStarted: input.onProviderRequestStarted ?? null,
+    onTerminalNonReplyCommitted: input.onTerminalNonReplyCommitted ?? null,
     onTraceEvent: input.onTraceEvent,
     requestId: input.requestId,
     signal: input.signal,

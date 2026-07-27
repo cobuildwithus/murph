@@ -1021,7 +1021,7 @@ describe("hosted runtime latency dashboard store", () => {
     expect(trace?.providerRequestOrdinal).toBeNull();
   });
 
-  it("stores exact assistant milestones only on the staged runtime attempt", async () => {
+  it("keeps in-flight milestones attempt-scoped while terminal evidence converges by input", async () => {
     const prisma = createLatencyWritePrisma({
       mailboxAcceptedAtEpochMs: BigInt(Date.parse("2026-06-02T19:12:20.000Z")),
     });
@@ -1050,6 +1050,19 @@ describe("hosted runtime latency dashboard store", () => {
     });
     await expect(recordHostedIngressAssistantMilestone({
       assistantInputIds: ["input_assistant_milestone_1"],
+      at: instant("2026-06-02T19:12:21.375Z"),
+      authenticatedUserId: "member_latency_1",
+      milestone: "terminal_non_reply_committed",
+      prisma,
+      runtimeAttemptId: "attempt_terminal_replay_2",
+      source: "linq",
+    })).resolves.toEqual({
+      matchedCount: 1,
+      recorded: true,
+      unmatchedCount: 0,
+    });
+    await expect(recordHostedIngressAssistantMilestone({
+      assistantInputIds: ["input_assistant_milestone_1"],
       at: instant("2026-06-02T19:12:21.500Z"),
       authenticatedUserId: "member_latency_1",
       milestone: "first_codex_output_observed",
@@ -1065,6 +1078,8 @@ describe("hosted runtime latency dashboard store", () => {
     expect(prisma.readTrace()?.phaseBreakdownJson).toEqual({
       assistant: {
         linqTypingAcceptedAtEpochMs: Date.parse("2026-06-02T19:12:21.250Z"),
+        terminalNonReplyCommittedAtEpochMs:
+          Date.parse("2026-06-02T19:12:21.375Z"),
       },
       schemaVersion: 1,
     });

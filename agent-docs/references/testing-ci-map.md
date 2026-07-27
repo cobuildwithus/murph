@@ -199,7 +199,9 @@ not enter evidence; and attachment-only input fails closed before provider work.
   invariant visible without replacing the two aggregate required checks.
 - `apps/web/test/hosted-runtime-latency-alert-{monitor,cron}.test.ts` locks the
   same exact 30-second boundary for completed and still-unresolved Linq traces,
-  excludes consumed traces with best-effort missing delivery links, and proves
+  excludes explicit committed terminal non-replies before delayed checkpoint
+  consumption, keeps impossible terminal-marker chronology alertable, excludes
+  consumed traces with best-effort missing delivery links, and proves
   cron auth, incident claim coalescing, operator-time quiet hours, stable
   wake-up jitter, the ten-minute-plus-jitter retry/recurrence floor,
   provider-idempotent retry, naturally distinct later-incident copy, PII-free
@@ -209,6 +211,15 @@ not enter evidence; and attachment-only input fails closed before provider work.
   coalescing until the admitted effect settles. Row-version race cases prove
   stale healthy candidates cannot report recovery or bypass pacing after a
   concurrent incident cycles the singleton back to healthy.
+  `packages/assistant-engine/test/assistant-{automation,outbox}-runtime.test.ts`
+  proves suppression is projected only after terminal evidence succeeds, is
+  re-derived from completed evidence on replay, and a rebatched still-active
+  grouped reply retains every answered mailbox item for the existing
+  accepted-delivery linkage. The latency-store test keeps ordinary milestones
+  attempt-scoped while allowing only that terminal evidence projection to
+  converge by assistant input.
+  `packages/assistant-runtime/test/hosted-runtime-maintenance.test.ts` proves
+  that projection uses the existing nonblocking assistant-milestone port.
   `apps/web/vercel.json` registers that read-only monitor at a five-minute
   cadence. The hosted-local foreground-priority leg additionally uses real
   PostgreSQL, authenticated cron HTTP, and the Linq stub boundary to prove one

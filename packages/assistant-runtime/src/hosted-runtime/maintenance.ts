@@ -511,6 +511,13 @@ export async function runHostedAssistantAutomation(
           runtimeAttemptId: options?.runtimeAttemptId ?? null,
         });
       },
+      onTerminalNonReplyCommitted: (event) => {
+        recordHostedAssistantTerminalNonReplyBestEffort({
+          event,
+          latencyTracePort: options?.latencyTracePort ?? null,
+          runtimeAttemptId: options?.runtimeAttemptId ?? null,
+        });
+      },
       onTraceEvent: (event) => {
         const contextEntry = emitHostedAssistantContextTraceLog({
           event,
@@ -669,6 +676,35 @@ export async function runHostedAssistantAutomation(
     attachHostedAssistantAutomationFailureLogEntries(error, redactedLogEntries);
     throw error;
   }
+}
+
+function recordHostedAssistantTerminalNonReplyBestEffort(input: {
+  event: {
+    inputIds: readonly string[];
+    recordedAt: string;
+    source: string;
+  };
+  latencyTracePort: HostedRuntimePlatform["latencyTracePort"];
+  runtimeAttemptId: string | null;
+}): void {
+  const runtimeAttemptId = input.runtimeAttemptId?.trim() ?? "";
+  const source = readHostedIngressLatencySource(input.event.source);
+  if (!runtimeAttemptId || !source) {
+    return;
+  }
+
+  recordHostedAssistantMilestonesBestEffort({
+    context: {
+      assistantInputIds: input.event.inputIds,
+      latencyTracePort: input.latencyTracePort,
+      runtimeAttemptId,
+      source,
+    },
+    milestones: [{
+      at: input.event.recordedAt,
+      milestone: "terminal_non_reply_committed",
+    }],
+  });
 }
 
 function attachHostedAssistantAutomationFailureLogEntries(

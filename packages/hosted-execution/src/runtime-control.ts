@@ -1637,6 +1637,7 @@ export const HOSTED_RUNTIME_ASSISTANT_MILESTONES = [
   "linq_typing_accepted",
   "first_codex_output_observed",
   "first_codex_text_observed",
+  "terminal_non_reply_committed",
 ] as const;
 
 export type HostedRuntimeAssistantMilestone =
@@ -1752,6 +1753,7 @@ export interface HostedRuntimeLatencyPhaseBreakdown {
     linqTypingAcceptedAtEpochMs?: number;
     firstCodexOutputObservedAtEpochMs?: number;
     firstCodexTextObservedAtEpochMs?: number;
+    terminalNonReplyCommittedAtEpochMs?: number;
   };
   provider?: {
     codexAppServerInitializeMs?: number;
@@ -1879,6 +1881,7 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS: Record<
     "linqTypingAcceptedAtEpochMs",
     "firstCodexOutputObservedAtEpochMs",
     "firstCodexTextObservedAtEpochMs",
+    "terminalNonReplyCommittedAtEpochMs",
   ],
   provider: [
     "codexAppServerInitializeMs",

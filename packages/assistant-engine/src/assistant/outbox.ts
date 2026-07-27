@@ -2241,8 +2241,7 @@ function maybeUpgradeAssistantOutboxIntentAnsweredMailboxItemIds(input: {
   intent: AssistantOutboxIntent
 }): AssistantOutboxIntent {
   if (
-    input.intent.answeredMailboxItemIds.length > 0
-    || input.answeredMailboxItemIds.length === 0
+    input.answeredMailboxItemIds.length === 0
     || (
       input.intent.status !== 'pending'
       && input.intent.status !== 'retryable'
@@ -2252,10 +2251,24 @@ function maybeUpgradeAssistantOutboxIntentAnsweredMailboxItemIds(input: {
     return input.intent
   }
 
+  const answeredMailboxItemIds = normalizeAssistantOutboxAnsweredMailboxItemIds([
+    ...input.intent.answeredMailboxItemIds,
+    ...input.answeredMailboxItemIds,
+  ])
+  if (
+    answeredMailboxItemIds.length === input.intent.answeredMailboxItemIds.length
+    && answeredMailboxItemIds.every(
+      (mailboxItemId, index) =>
+        mailboxItemId === input.intent.answeredMailboxItemIds[index],
+    )
+  ) {
+    return input.intent
+  }
+
   return assistantOutboxIntentSchema.parse(
     sanitizeAssistantOutboxIntentForPersistence({
       ...input.intent,
-      answeredMailboxItemIds: [...input.answeredMailboxItemIds],
+      answeredMailboxItemIds,
     }),
   )
 }

@@ -1,4 +1,6 @@
 export type {
+  AssistantAutoReplyTerminalNonReply,
+  AssistantAutoReplyTerminalNonReplyHook,
   AssistantAutoReplyScanResult,
   AssistantAutomationScanResult,
   AssistantInboxScanResult,
