@@ -41,7 +41,7 @@ export async function prepareHostedUsageCreditDirectPaymentEvent(input: {
   event: Stripe.Event;
   prisma: PrismaClient;
   purchase: HostedUsageCreditPurchaseForReconciliation;
-}): Promise<HostedUsageCreditPreparedDirectPaymentEvent> {
+}): Promise<HostedUsageCreditPreparedDirectPaymentEvent | null> {
   if (!isHostedUsageCreditDirectPaymentEvent(input.event.type)) {
     throw new Error("Expected a direct usage-credit payment event.");
   }
@@ -60,6 +60,16 @@ export async function prepareHostedUsageCreditDirectPaymentEvent(input: {
     throw new Error(
       "Direct usage-credit payment event referenced a different purchase.",
     );
+  }
+  if (
+    !input.purchase.stripePaymentIntentLookupKey ||
+    !hostedLookupKeyMatchesValue({
+      expectedLookupKey: input.purchase.stripePaymentIntentLookupKey,
+      kind: "stripe-billing-event",
+      normalizedValue: paymentIntentId,
+    })
+  ) {
+    return null;
   }
 
   const paymentIntent = await readHostedUsageCreditStripe({
@@ -194,24 +204,9 @@ export async function reconcileHostedUsageCreditDirectPaymentEventTx(input: {
     paymentIntent.status === "canceled" ||
     paymentIntent.status === "requires_payment_method"
   ) {
-    // A failed saved-card attempt is intentionally left unattached when the
-    // request can safely fall back to Checkout. Only a PaymentIntent that was
-    // previously bound as processing owns the purchase state and may close it.
-    if (!hostedUsageCreditPurchaseOwnsPaymentIntent({
-      paymentIntentId: paymentIntent.id,
-      purchase: input.purchase,
-    })) {
-      return { granted: false, wakeRequired: false };
-    }
-    await transitionHostedUsageCreditDirectPaymentTx({
-      expectedReconciliationVersion: input.expectedReconciliationVersion,
-      lastReconciledAt: reconciledAt,
-      privateReferences,
-      purchaseId: input.purchase.id,
-      status: HostedUsageCreditPurchaseStatus.payment_failed,
-      terminalAt: deriveStripeEventAt(input.event),
-      tx: input.tx,
-    });
+    // Producer-side recovery proves the exact intent canceled before clearing
+    // its binding and opening Checkout. The webhook must not race that safe
+    // fallback by terminalizing the shared purchase.
     return { granted: false, wakeRequired: false };
   }
 
@@ -242,11 +237,7 @@ async function transitionHostedUsageCreditDirectPaymentTx(input: {
         id: input.purchaseId,
         reconciliationVersion: input.expectedReconciliationVersion,
         status: {
-          in: [
-            HostedUsageCreditPurchaseStatus.created,
-            HostedUsageCreditPurchaseStatus.payment_pending,
-            HostedUsageCreditPurchaseStatus.payment_failed,
-          ],
+          in: [HostedUsageCreditPurchaseStatus.payment_pending],
         },
       },
     }),
@@ -258,26 +249,6 @@ async function transitionHostedUsageCreditDirectPaymentTx(input: {
       ),
     );
   }
-}
-
-function hostedUsageCreditPurchaseOwnsPaymentIntent(input: {
-  paymentIntentId: string;
-  purchase: HostedUsageCreditPurchaseForReconciliation;
-}): boolean {
-  return Boolean(
-    input.purchase.stripePaymentIntentLookupKey &&
-      hostedLookupKeyMatchesValue({
-        expectedLookupKey: input.purchase.stripePaymentIntentLookupKey,
-        kind: "stripe-billing-event",
-        normalizedValue: input.paymentIntentId,
-      }),
-  );
-}
-
-function deriveStripeEventAt(event: Stripe.Event): Date {
-  return Number.isSafeInteger(event.created) && event.created > 0
-    ? new Date(event.created * 1000)
-    : new Date();
 }
 
 export function isHostedUsageCreditDirectPaymentEvent(type: string): boolean {

@@ -153,7 +153,7 @@ function createHostedUsageTopUpState(input: {
           ? readOptionalRestartAt(input.activePurchase?.restartAt)
           : null,
       retryOfferCode:
-        status === "reconciling" &&
+        (status === "reconciling" || status === "payment_pending") &&
         input.activePurchase?.targetConflict !== true &&
         input.activePurchase?.retryAllowed
           ? input.activePurchase.offerCode

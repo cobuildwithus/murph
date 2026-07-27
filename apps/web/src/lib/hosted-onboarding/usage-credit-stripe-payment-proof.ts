@@ -8,6 +8,7 @@ import {
   HOSTED_USAGE_CREDIT_CHECKOUT_PURPOSE,
   HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_VERSION,
   HOSTED_USAGE_CREDIT_SAVED_CARD_PURPOSE,
+  parseHostedUsageCreditCheckoutRequestPolicyVersion,
 } from "./usage-credit-offers";
 import type {
   HostedUsageCreditPurchaseForReconciliation,
@@ -439,14 +440,24 @@ function assertHostedUsageCreditMetadataForPurpose(input: {
     | typeof HOSTED_USAGE_CREDIT_SAVED_CARD_PURPOSE;
 }): void {
   const metadata = readStringRecord(input.metadata);
+  const policyVersion = parseHostedUsageCreditCheckoutRequestPolicyVersion(
+    input.purchase.checkoutRequestPolicyVersion,
+  );
+  if (
+    !policyVersion ||
+    (
+      input.purpose === HOSTED_USAGE_CREDIT_SAVED_CARD_PURPOSE &&
+      policyVersion !== HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_VERSION
+    )
+  ) {
+    throw new Error("Usage-credit payment policy did not match.");
+  }
   const expected = {
-    policyVersion: HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_VERSION,
+    policyVersion,
     purchaseId: input.purchase.id,
     purpose: input.purpose,
   };
   if (
-    input.purchase.checkoutRequestPolicyVersion !==
-      HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_VERSION ||
     !metadata ||
     Object.keys(metadata).length !== Object.keys(expected).length ||
     Object.entries(expected).some(([key, value]) => metadata[key] !== value)

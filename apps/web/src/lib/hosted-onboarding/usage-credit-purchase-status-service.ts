@@ -242,10 +242,16 @@ export async function projectHostedUsageCreditCheckoutCapability(input: {
     payerAuthorized: authority.payerAuthorized,
     retryAllowed:
       mayExposePayableCapability &&
-      canRetryHostedUsageCreditCheckoutCreate({
-        now: input.now,
-        purchase: input.purchase,
-      }),
+      (
+        canRetryHostedUsageCreditCheckoutCreate({
+          now: input.now,
+          purchase: input.purchase,
+        }) ||
+        (
+          target.kind === "group" &&
+          canRetryHostedUsageCreditSavedCardPayment(input.purchase)
+        )
+      ),
     target,
     targetAuthorized:
       input.targetApprovedByCaller && authority.targetAuthorized,
@@ -457,6 +463,23 @@ export function canRetryHostedUsageCreditCheckoutCreate(input: {
     input.now.getTime() <
       input.purchase.createdAt.getTime() +
         HOSTED_USAGE_CREDIT_CHECKOUT_CREATE_RETRY_DURATION_MS;
+}
+
+export function canRetryHostedUsageCreditSavedCardPayment(
+  purchase: Pick<
+    HostedUsageCreditPurchase,
+    | "status"
+    | "stripeCheckoutSessionLookupKey"
+    | "stripePaymentIntentIdEncrypted"
+    | "stripePaymentIntentLookupKey"
+  >,
+): boolean {
+  return purchase.status === HostedUsageCreditPurchaseStatus.payment_pending &&
+    !purchase.stripeCheckoutSessionLookupKey &&
+    Boolean(
+      purchase.stripePaymentIntentIdEncrypted &&
+      purchase.stripePaymentIntentLookupKey,
+    );
 }
 
 export async function projectHostedUsageCreditCheckoutResult(input: {

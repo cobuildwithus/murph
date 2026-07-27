@@ -1,13 +1,15 @@
 # Hosted Usage Top-Ups
 
 Status: Implemented personal, Family-member, and hosted-group funding
-Last verified: 2026-07-22
+Last verified: 2026-07-26
 
 ## Decision
 
-Use Stripe-hosted Checkout to collect a one-time payment and a Murph-owned,
-append-only usage-credit ledger to decide who receives the usage and how it is
-consumed.
+Use a one-time Stripe payment and a Murph-owned, append-only usage-credit ledger
+to decide who receives the usage and how it is consumed. Personal and Family
+funding use Stripe-hosted Checkout. Group funding first reuses one canonical
+card attached to the authenticated payer's Stripe Customer and falls back to
+Checkout for card collection or authentication.
 
 The initial individual-plan offer is:
 
@@ -87,7 +89,11 @@ An authenticated member can open `/groups/fund/[joinCode]`, see only the
 group's coarse `healthy`, `low`, or `exhausted` usage state, and buy the same
 fixed packs for that group's synthetic runtime beneficiary. This does not
 require the payer to have an individual paid plan. The browser still submits
-only offer code and request key; Web resolves payer and beneficiary.
+only offer code and request key; Web resolves payer and beneficiary. Pressing
+**Add messages** authorizes exactly one charge for the selected fixed amount.
+If the payer has one canonical reusable card, Murph confirms that payment
+without a Checkout redirect. Otherwise Stripe Checkout collects or verifies
+the card and saves it for a later group contribution.
 
 An active Family owner can use the same dialog from an exact active member row
 in Settings. The fixed pack is credited only to that selected member. A
@@ -362,7 +368,10 @@ the same payer/request-key/offer and funding target continues the same purchase
 with the same purchase-derived Stripe idempotency key; using the key for a
 different offer or target conflicts. Replay must not reinterpret the purchase
 against the mutable catalog, mint a replacement attempt, or require a second
-browser authorization. Account deletion suspends new Checkout creation and
+browser authorization. While a group purchase is nonterminal, a fresh request
+key for that same target may recover it only when the submitted offer still
+matches the frozen offer; a different amount conflicts instead of continuing
+the earlier payment under new button copy. Account deletion suspends new Checkout creation and
 resolves or expires every outstanding nonterminal purchase involving the
 deleted member before removing local owner state.
 
@@ -517,11 +526,23 @@ funding route share this sequence:
     configured Stripe Price, and verify its live/test mode, active state,
     one-time per-unit shape, currency, exact amount, and absence of custom,
     transformed, or multi-currency amount semantics.
-11. Create one Stripe Checkout Session with an idempotency key derived from the
-    purchase ID. A retry during the derived 30-minute creation window repeats
-    the identical request with that same key, leaving at least 60 minutes on
-    the frozen Session expiry.
-12. Persist the returned references and redirect URL before returning it.
+11. For current-policy group purchases only, resolve one canonical reusable
+    card attached to the payer Customer. Conflicting Customer/Subscription
+    defaults or multiple cards without one canonical choice skip this path.
+12. When a canonical card exists, create one unconfirmed PaymentIntent with a
+    purchase-derived idempotency key, bind its encrypted reference to the
+    purchase, and only then confirm it off session. A retry retrieves and
+    continues that exact bound intent. A definitive authentication or card
+    failure must reach verified `canceled` state before its binding is cleared
+    and Checkout may begin. An ambiguous outcome remains `payment_pending` and
+    cannot start a second payment. The client keeps the original amount and
+    request key locked for recovery and does not offer amount changes until the
+    purchase becomes terminal.
+13. Otherwise create one Stripe Checkout Session with an idempotency key
+    derived from the purchase ID. A retry during the derived 30-minute creation
+    window repeats the identical request with that same key, leaving at least
+    60 minutes on the frozen Session expiry.
+14. Persist the returned references and redirect URL before returning it.
 
 The Stripe Session uses:
 
@@ -532,6 +553,8 @@ The Stripe Session uses:
 - Session metadata containing only purchase ID, purpose, and policy version;
 - the same opaque purchase ID in `payment_intent_data.metadata` for later
   refund/dispute correlation;
+- `setup_future_usage=off_session` only for current-policy group Checkout, so
+  the collected card can be reused for a later explicit group contribution;
 - a frozen `expires_at` 90 minutes after purchase creation;
 - Adaptive Pricing explicitly disabled so Dashboard defaults cannot change the
   frozen USD catalog contract;
@@ -557,6 +580,12 @@ closes an unattached `created` purchase and permits a new purchase. A
 matching verified webhook may still reconcile the original purchase. Stripe's
 idempotency window plus the durable request key, single purchase lifecycle, and
 unique ledger sources provide convergence.
+
+Request policy `hosted-usage-credit-checkout-v1` remains reconstructible
+without card saving so an in-flight idempotent Checkout request never changes
+shape. New purchases freeze `hosted-usage-credit-checkout-v2`; only v2 group
+Checkout adds future-use saving and only v2 group purchases may attempt the
+direct saved-card path.
 
 ## Stripe Catalog And Payment Configuration
 
@@ -601,15 +630,19 @@ Relevant events include:
 - `checkout.session.async_payment_succeeded`;
 - `checkout.session.async_payment_failed`;
 - `checkout.session.expired`;
+- `payment_intent.succeeded`;
+- `payment_intent.processing`;
+- `payment_intent.payment_failed`;
+- `payment_intent.canceled`;
 - `charge.refunded`;
 - `refund.created`, `refund.updated`, and `refund.failed`; and
 - `charge.dispute.created`, `charge.dispute.updated`,
   `charge.dispute.funds_withdrawn`, `charge.dispute.funds_reinstated`, and
   `charge.dispute.closed`.
 
-The event is a nudge, not the grant payload. Reconciliation re-fetches live
-Stripe state and, before granting, verifies all of these against the immutable
-purchase:
+The event is a nudge, not the grant payload. Checkout reconciliation re-fetches
+live Stripe state and, before granting, verifies all of these against the
+immutable purchase:
 
 - expected Session ID association and live/test mode;
 - `mode=payment` and `payment_status=paid`;
@@ -622,6 +655,13 @@ purchase:
 An unpaid `checkout.session.completed` becomes `payment_pending`.
 `checkout.session.async_payment_succeeded` can later fulfill it. A failed or
 expired Session never grants credit.
+
+Direct group-payment reconciliation requires the purchase's exact bound
+PaymentIntent, re-fetches it, and verifies its amount, received amount,
+currency, Customer, environment, metadata purpose/version, and latest Charge.
+Only `succeeded` can grant. `processing` remains pending. A canceled or
+payment-method-required event cannot terminalize the shared purchase while the
+producer is proving safe fallback to Checkout.
 
 The webhook is authoritative. Settings return handlers read durable status
 only; the cancel-return path may re-fetch and idempotently expire an open bound
@@ -678,6 +718,10 @@ expose debt in a group chat, or charge another participant.
 - Checkout creation is bounded per authenticated payer and request key; Stripe
   Radar and a reviewed operational velocity ceiling must be configured before
   production launch.
+- Saved-card group funding never accepts a browser-supplied PaymentMethod.
+  Murph selects only one canonical card attached to the authenticated payer's
+  verified Customer, persists the resulting PaymentIntent before confirmation,
+  and never stores raw card details.
 - Payment records and health-sharing permissions remain separate. Buying usage
   never grants access to another person's data.
 
@@ -707,6 +751,12 @@ beneficiary deletion therefore follow the separate lifecycle rules above.
 Checkout status remains visible only to its authenticated payer; group state
 does not expose contributors, receipts, cash value, or internal USD-micro
 accounting.
+
+Choosing an amount has no payment effect. The explicit **Add messages** click
+authorizes only that one fixed contribution. Murph uses one unambiguous
+Customer or nonterminal Subscription default card, or the sole attached card.
+If there is no canonical choice, Stripe Checkout collects a card. This is
+neither recurring billing nor auto-recharge.
 
 ## Family Member Funding
 
@@ -758,17 +808,19 @@ fail closed and leave the Stripe event retryable.
 
 V1 does not add a second queue or a separate operator reconciliation service.
 Operational checks should watch for paid purchases without grants, `created`
-purchases left unresolved past their 90-minute expiry, Stripe identity/catalog
+purchases left unresolved past their 90-minute expiry, direct group
+PaymentIntents still bound in `payment_pending`, Stripe identity/catalog
 mismatches, subscription dispatch of a one-time purchase, projection drift,
-and negative-balance attempts. Any future operator command must re-fetch
-Stripe and call the same idempotent reconciler by purchase ID.
+and negative-balance attempts. Any future operator command must re-fetch Stripe
+and call the same idempotent reconciler by purchase ID.
 
 ## Rollout And Rollback
 
 1. Configure and verify the one-time Product and three Prices, keep Stripe Tax
    disabled for this flow, confirm equal subtotal/total behavior, and verify
-   payment settings, webhook event subscriptions, Radar rules, and environment
-   mappings in Stripe test mode, then live mode.
+   payment settings, the direct PaymentIntent and Checkout webhook event
+   subscriptions above, Radar rules, and environment mappings in Stripe test
+   mode, then live mode.
 2. Apply the expand-only database migration that makes the payer and its
    payer-encrypted Price and Customer references nullable. Existing Web remains
    compatible because no old writer creates detached rows.
@@ -820,6 +872,10 @@ Current focused unit and component coverage exercises:
 - the exact fixed offers, request parsing, direct-paid eligibility, durable
   pre-Stripe purchase row, stable idempotency key within the derived creation
   window, no-I/O cutoff, and active-purchase fence through expiry;
+- group saved-card selection, create-before-confirm persistence, exact-intent
+  retry after an ambiguous confirmation response, verified cancellation before
+  Checkout fallback, cross-offer recovery refusal, locked client amount/key,
+  and first-time group card saving;
 - payer-bound status and cancel-expiry routes, CSRF rejection, and paid-state
   precedence over cancellation;
 - grant/debit replay, included-first FIFO settlement, crossing overrun, capped
@@ -828,12 +884,14 @@ Current focused unit and component coverage exercises:
   grant/debit serialization, and deletion-first cleanup against a guarded
   isolated database;
 - live-state Stripe reconciliation through mocks, including paid, delayed,
-  failed, expired, spoofed-Price, `charge.refunded` provenance, and
+  failed, expired, direct saved-card success/processing/late terminal events,
+  Checkout-free refunds, spoofed-Price, `charge.refunded` provenance, and
   one-time-versus-subscription dispatch cases;
 - composed usage blocking, carryover credit, trial and group behavior, and
   current-period block clearing; and
 - the Settings dialog's no-default selection, exact offer post, stable-key
-  retry, redirect, read-only return polling, cancel expiry, and delayed state;
+  retry, group payment-ambiguity copy and amount lock, redirect, read-only
+  return polling, cancel expiry, and delayed state;
 - group funding target resolution, active-runtime eligibility, fixed-pack
   checkout without an individual paid plan, target-aware replay/conflicts, and
   reuse of the same dialog state machine;
@@ -852,10 +910,10 @@ plus webhook smoke.
 
 ## Non-Goals
 
-The implementation does not add arbitrary amounts, auto-recharge, saved-card
-off-session charges, discounts, transfers, cash redemption, public or anonymous
-funding, a Family or group wallet, Stripe Meter reporting, or a second
-usage/accounting service.
+The implementation does not add arbitrary amounts, auto-recharge, recurring
+charges, discounts, transfers, cash redemption, public or anonymous funding, a
+Family or group wallet, Stripe Meter reporting, or a second usage/accounting
+service.
 
 ## Rejected Alternatives
 
@@ -886,6 +944,9 @@ usage/accounting service.
 ## Official Stripe References
 
 - [Checkout Sessions create API](https://docs.stripe.com/api/checkout/sessions/create)
+- [PaymentIntents create API](https://docs.stripe.com/api/payment_intents/create)
+- [PaymentIntents confirm API](https://docs.stripe.com/api/payment_intents/confirm)
+- [Save payment details during payment](https://docs.stripe.com/payments/save-during-payment)
 - [Expire a Checkout Session](https://docs.stripe.com/api/checkout/sessions/expire)
 - [Checkout fulfillment](https://docs.stripe.com/checkout/fulfillment)
 - [Checkout success-page guidance](https://docs.stripe.com/payments/checkout/custom-success-page)
@@ -908,30 +969,3 @@ usage/accounting service.
 - [Billing Credits](https://docs.stripe.com/billing/subscriptions/usage-based/billing-credits)
 - [Token billing](https://docs.stripe.com/billing/token-billing)
 - [Advanced usage-based billing comparison](https://docs.stripe.com/billing/subscriptions/usage-based/advanced/compare)
-
-## Saved-card group funding
-
-Group funding uses an explicit click-to-charge contract. Choosing an amount does
-nothing by itself; pressing **Add messages** authorizes exactly that one-time
-amount for the server-resolved group beneficiary. It never creates recurring
-billing or an automatic refill.
-
-For a signed-in payer, Murph first looks for one unambiguous reusable card: the
-Customer invoice default, a nonterminal Subscription default, or the sole card
-attached to the Customer. Conflicting defaults or multiple cards without a
-canonical default fall back to Stripe Checkout rather than guessing.
-
-The saved-card attempt is a confirmed off-session PaymentIntent with a frozen
-amount, currency, Customer, beneficiary purchase, metadata purpose, and
-purchase-scoped idempotency key. A definitive authentication requirement or
-card failure is canceled before Checkout is created. Ambiguous provider/network
-outcomes remain reconciling and must never start a second charge.
-
-Checkout remains the card-entry and authentication fallback and requests
-`setup_future_usage=off_session`, so a card entered there can be reused on a
-later group contribution. PaymentIntent, refund, and dispute events converge
-through the same encrypted purchase references and usage-credit ledger as
-Checkout. The Stripe webhook endpoint must subscribe to
-`payment_intent.succeeded`, `payment_intent.processing`,
-`payment_intent.payment_failed`, and `payment_intent.canceled` in addition to
-the existing Checkout/refund/dispute events.

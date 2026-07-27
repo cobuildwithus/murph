@@ -69,7 +69,11 @@ included-first settlement, carryover balance, and crossing-operation behavior;
 credit-ledger suites exercise beneficiary-lock call ordering, unique
 grants/debits, and projection updates; route and purchase-service suites
 exercise app-session/CSRF binding, fixed offers, eligibility, and Checkout
-request idempotency. Family coverage additionally proves owner/group/member
+request idempotency. Group purchase-service coverage additionally proves
+canonical saved-card selection, durable PaymentIntent binding before
+confirmation, exact-intent recovery after an ambiguous confirmation, verified
+cancellation before Checkout fallback, and group-only card saving. Family
+coverage additionally proves owner/group/member
 authorization, use of the Family billing Customer, distinct owner-self target
 identity, exact frozen replay after membership changes, per-member Settings
 routing, all ordered cross-target conflict directions, and server-withheld
@@ -78,10 +82,12 @@ authority during deferred Stripe creation, exact-key replay, and ambiguous
 provider retry recovery to prove that URL and retry capability remain withheld;
 page and dialog suites prove payer-wide
 offer suppression and status/cancel-only cross-target recovery. Reconciliation
-suites exercise live Stripe re-fetch,
-one-time/subscription dispatch separation, replay-safe grants, refund/dispute
-signed adjustments in both directions; component suites exercise the Settings
-dialog selection, redirect, return polling, and error states. A guarded
+suites exercise live Stripe re-fetch, Checkout-free direct PaymentIntent
+success and processing, late terminal direct events after safe fallback,
+one-time/subscription dispatch separation, replay-safe grants, and
+refund/dispute signed adjustments in both directions; component suites
+exercise the Settings dialog selection, redirect, return polling, and error
+states. A guarded
 real-PostgreSQL suite proves grant replay, beneficiary-first lock ordering,
 grant/debit serialization, and deletion-first cleanup. Stripe remains mocked,
 and component tests do not replace a deployed browser flow, so launch still

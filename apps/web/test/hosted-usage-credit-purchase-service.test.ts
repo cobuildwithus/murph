@@ -53,6 +53,7 @@ const mocks = vi.hoisted(() => ({
   stripeCheckoutRetrieve: vi.fn(),
   stripeCustomerRetrieve: vi.fn(),
   stripePaymentIntentCancel: vi.fn(),
+  stripePaymentIntentConfirm: vi.fn(),
   stripePaymentIntentCreate: vi.fn(),
   stripePaymentIntentRetrieve: vi.fn(),
   stripePaymentMethodsList: vi.fn(),
@@ -150,6 +151,8 @@ import {
   readHostedUsageCreditPurchaseTargetForPayer,
   readHostedUsageCreditPurchaseStatus,
 } from "@/src/lib/hosted-onboarding/usage-credit-purchase-service";
+import { reconstructHostedUsageCreditStripeCheckoutRequest } from
+  "@/src/lib/hosted-onboarding/usage-credit-purchase-stripe";
 
 const NOW = new Date("2026-07-16T17:00:00.000Z");
 const MEMBER_ID = "hbm_member123";
@@ -167,6 +170,7 @@ beforeEach(() => {
   mocks.stripeCheckoutRetrieve.mockReset();
   mocks.stripeCustomerRetrieve.mockReset();
   mocks.stripePaymentIntentCancel.mockReset();
+  mocks.stripePaymentIntentConfirm.mockReset();
   mocks.stripePaymentIntentCreate.mockReset();
   mocks.stripePaymentIntentRetrieve.mockReset();
   mocks.stripePaymentMethodsList.mockReset();
@@ -220,6 +224,7 @@ beforeEach(() => {
         customers: { retrieve: mocks.stripeCustomerRetrieve },
         paymentIntents: {
           cancel: mocks.stripePaymentIntentCancel,
+          confirm: mocks.stripePaymentIntentConfirm,
           create: mocks.stripePaymentIntentCreate,
           retrieve: mocks.stripePaymentIntentRetrieve,
         },
@@ -240,7 +245,16 @@ beforeEach(() => {
           retrieve: mocks.stripeCheckoutRetrieve,
         },
       },
+      customers: { retrieve: mocks.stripeCustomerRetrieve },
+      paymentIntents: {
+        cancel: mocks.stripePaymentIntentCancel,
+        confirm: mocks.stripePaymentIntentConfirm,
+        create: mocks.stripePaymentIntentCreate,
+        retrieve: mocks.stripePaymentIntentRetrieve,
+      },
+      paymentMethods: { list: mocks.stripePaymentMethodsList },
       prices: { retrieve: mocks.stripePriceRetrieve },
+      subscriptions: { list: mocks.stripeSubscriptionsList },
     },
     stripeLiveMode: false,
   });
@@ -726,37 +740,47 @@ describe("createHostedUsageCreditCheckout", () => {
 
   it("charges a canonical saved card without opening Checkout", async () => {
     const fake = createFakePrisma();
-    mocks.stripeCustomerRetrieve.mockResolvedValueOnce({
-      id: "cus_group_payer",
-      invoice_settings: { default_payment_method: "pm_saved_card_123" },
-      livemode: false,
-      object: "customer",
-    });
-    mocks.stripePaymentMethodsList.mockResolvedValueOnce({
-      data: [{
-        customer: "cus_group_payer",
-        id: "pm_saved_card_123",
-        livemode: false,
-        object: "payment_method",
-        type: "card",
-      }],
-      has_more: false,
-      object: "list",
-      url: "/v1/payment_methods",
-    });
+    mockCanonicalSavedCard();
     mocks.stripePaymentIntentCreate.mockImplementationOnce(
       async (request: Record<string, unknown>) => ({
         amount: request.amount,
-        amount_received: request.amount,
+        amount_received: 0,
         currency: request.currency,
         customer: request.customer,
         id: "pi_saved_card_123",
-        latest_charge: "ch_saved_card_123",
+        latest_charge: null,
         livemode: false,
         metadata: request.metadata,
         object: "payment_intent",
-        status: "succeeded",
+        status: "requires_confirmation",
       }),
+    );
+    mocks.stripePaymentIntentConfirm.mockImplementationOnce(
+      async (paymentIntentId: string) => {
+        const purchase = onlyPurchase(fake.purchases);
+        expect(paymentIntentId).toBe("pi_saved_card_123");
+        expect(purchase).toMatchObject({
+          status: "payment_pending",
+          stripePaymentIntentIdEncrypted: "encrypted:pi_saved_card_123",
+          stripePaymentIntentLookupKey: "billing:pi_saved_card_123",
+        });
+        return {
+          amount: 1_000,
+          amount_received: 1_000,
+          currency: "usd",
+          customer: "cus_group_payer",
+          id: paymentIntentId,
+          latest_charge: "ch_saved_card_123",
+          livemode: false,
+          metadata: {
+            policyVersion: "hosted-usage-credit-checkout-v2",
+            purchaseId: purchase.id,
+            purpose: "hosted_usage_credit_saved_card",
+          },
+          object: "payment_intent",
+          status: "succeeded",
+        };
+      },
     );
 
     const result = await createHostedGroupUsageCreditCheckout({
@@ -773,16 +797,26 @@ describe("createHostedUsageCreditCheckout", () => {
     expect(mocks.stripePaymentIntentCreate).toHaveBeenCalledWith(
       expect.objectContaining({
         amount: 1_000,
-        confirm: true,
         currency: "usd",
         customer: "cus_group_payer",
-        off_session: true,
         payment_method: "pm_saved_card_123",
         setup_future_usage: "off_session",
       }),
       {
         idempotencyKey: expect.stringMatching(
           /^hosted-usage-credit-saved-card:hucp_/,
+        ),
+      },
+    );
+    expect(mocks.stripePaymentIntentConfirm).toHaveBeenCalledWith(
+      "pi_saved_card_123",
+      {
+        expand: ["latest_charge"],
+        off_session: true,
+      },
+      {
+        idempotencyKey: expect.stringMatching(
+          /^hosted-usage-credit-saved-card:hucp_.+:confirm$/,
         ),
       },
     );
@@ -793,6 +827,199 @@ describe("createHostedUsageCreditCheckout", () => {
       stripeChargeLookupKey: "billing:ch_saved_card_123",
       stripePaymentIntentIdEncrypted: "encrypted:pi_saved_card_123",
       stripePaymentIntentLookupKey: "billing:pi_saved_card_123",
+    });
+  });
+
+  it("reconstructs a frozen v1 group Checkout without changing its payment shape", async () => {
+    const fake = createFakePrisma();
+    mocks.stripeCheckoutCreate.mockImplementationOnce(async (request) =>
+      buildStripeSession(request)
+    );
+    await createHostedGroupUsageCreditCheckout({
+      clientRequestKey: CLIENT_REQUEST_KEY,
+      joinCode: "group_join_code_1234",
+      now: NOW,
+      offerCode: "usage_10_usd",
+      payerMemberId: MEMBER_ID,
+      prisma: fake.prisma as never,
+    });
+    const purchase = onlyPurchase(fake.purchases);
+    purchase.checkoutRequestPolicyVersion =
+      "hosted-usage-credit-checkout-v1";
+
+    const request = await reconstructHostedUsageCreditStripeCheckoutRequest({
+      prisma: fake.prisma as never,
+      purchase: purchase as never,
+    });
+
+    expect(request.metadata).toEqual({
+      policyVersion: "hosted-usage-credit-checkout-v1",
+      purchaseId: purchase.id,
+      purpose: "hosted_usage_credit",
+    });
+    expect(request.payment_intent_data?.metadata).toEqual(request.metadata);
+    expect(request.payment_intent_data).not.toHaveProperty(
+      "setup_future_usage",
+    );
+  });
+
+  it("cancels an authentication-required saved-card intent before opening Checkout", async () => {
+    const fake = createFakePrisma();
+    mockCanonicalSavedCard();
+    const readUnconfirmedIntent = () => buildSavedCardPaymentIntent({
+      amountReceived: 0,
+      latestCharge: null,
+      purchaseId: String(onlyPurchase(fake.purchases).id),
+      status: "requires_confirmation",
+    });
+    mocks.stripePaymentIntentCreate.mockImplementationOnce(
+      async () => readUnconfirmedIntent(),
+    );
+    mocks.stripePaymentIntentConfirm.mockRejectedValueOnce(
+      new Error("authentication required"),
+    );
+    mocks.stripePaymentIntentRetrieve.mockImplementationOnce(async () => ({
+      ...readUnconfirmedIntent(),
+      status: "requires_action",
+    }));
+    mocks.stripePaymentIntentCancel.mockImplementationOnce(async () => ({
+      ...readUnconfirmedIntent(),
+      status: "canceled",
+    }));
+    mocks.stripeCheckoutCreate.mockImplementationOnce(async (request) =>
+      buildStripeSession(request)
+    );
+
+    const result = await createHostedGroupUsageCreditCheckout({
+      clientRequestKey: CLIENT_REQUEST_KEY,
+      joinCode: "group_join_code_1234",
+      now: NOW,
+      offerCode: "usage_10_usd",
+      payerMemberId: MEMBER_ID,
+      prisma: fake.prisma as never,
+    });
+
+    expect(result).toMatchObject({
+      status: "checkout_open",
+      url: "https://checkout.stripe.test/session",
+    });
+    expect(mocks.stripePaymentIntentCancel).toHaveBeenCalledWith(
+      "pi_saved_card_123",
+      { cancellation_reason: "abandoned" },
+      {
+        idempotencyKey: expect.stringMatching(
+          /^hosted-usage-credit-saved-card:hucp_.+:cancel$/,
+        ),
+      },
+    );
+    expect(mocks.stripePaymentIntentCancel).toHaveBeenCalledBefore(
+      mocks.stripeCheckoutCreate,
+    );
+    expect(mocks.stripeCheckoutCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        payment_intent_data: expect.objectContaining({
+          setup_future_usage: "off_session",
+        }),
+      }),
+      expect.any(Object),
+    );
+    expect(onlyPurchase(fake.purchases)).toMatchObject({
+      status: "checkout_open",
+      stripeChargeIdEncrypted: null,
+      stripeChargeLookupKey: null,
+      stripePaymentIntentIdEncrypted: null,
+      stripePaymentIntentLookupKey: null,
+    });
+  });
+
+  it("resumes the same durably bound intent after an ambiguous confirmation response", async () => {
+    const fake = createFakePrisma();
+    mockCanonicalSavedCard();
+    const readUnconfirmedIntent = () => buildSavedCardPaymentIntent({
+      amountReceived: 0,
+      latestCharge: null,
+      purchaseId: String(onlyPurchase(fake.purchases).id),
+      status: "requires_confirmation",
+    });
+    mocks.stripePaymentIntentCreate.mockImplementationOnce(
+      async () => readUnconfirmedIntent(),
+    );
+    mocks.stripePaymentIntentConfirm
+      .mockRejectedValueOnce(new Error("connection lost"))
+      .mockImplementationOnce(async () => buildSavedCardPaymentIntent({
+        amountReceived: 1_000,
+        latestCharge: "ch_saved_card_123",
+        purchaseId: String(onlyPurchase(fake.purchases).id),
+        status: "succeeded",
+      }));
+    mocks.stripePaymentIntentRetrieve
+      .mockRejectedValueOnce(new Error("connection lost"))
+      .mockImplementationOnce(async () => readUnconfirmedIntent());
+
+    await expect(createHostedGroupUsageCreditCheckout({
+      clientRequestKey: CLIENT_REQUEST_KEY,
+      joinCode: "group_join_code_1234",
+      now: NOW,
+      offerCode: "usage_10_usd",
+      payerMemberId: MEMBER_ID,
+      prisma: fake.prisma as never,
+    })).rejects.toMatchObject({
+      code: "HOSTED_USAGE_CREDIT_STRIPE_UNAVAILABLE",
+    });
+    expect(onlyPurchase(fake.purchases)).toMatchObject({
+      status: "payment_pending",
+      stripePaymentIntentIdEncrypted: "encrypted:pi_saved_card_123",
+      stripePaymentIntentLookupKey: "billing:pi_saved_card_123",
+    });
+    await expect(readHostedActiveUsageCreditPurchaseForPayer({
+      beneficiaryMemberId: "member_group_runtime",
+      now: new Date(NOW.getTime() + 500),
+      payerMemberId: MEMBER_ID,
+      prisma: fake.prisma as never,
+      serverApprovedPayableTargets: [{
+        beneficiaryMemberId: "member_group_runtime",
+        groupJoinCode: "group_join_code_1234",
+        kind: "group",
+      }],
+    })).resolves.toMatchObject({
+      retryAllowed: true,
+      status: "payment_pending",
+      target: {
+        beneficiaryMemberId: "member_group_runtime",
+        kind: "group",
+      },
+    });
+
+    await expect(createHostedGroupUsageCreditCheckout({
+      clientRequestKey: "fresh_group_key_1234",
+      joinCode: "group_join_code_1234",
+      now: new Date(NOW.getTime() + 500),
+      offerCode: "usage_5_usd",
+      payerMemberId: MEMBER_ID,
+      prisma: fake.prisma as never,
+    })).rejects.toMatchObject({
+      code: "HOSTED_USAGE_CREDIT_ACTIVE_PURCHASE_OFFER_CONFLICT",
+      httpStatus: 409,
+    });
+
+    await expect(createHostedGroupUsageCreditCheckout({
+      clientRequestKey: CLIENT_REQUEST_KEY,
+      joinCode: "group_join_code_1234",
+      now: new Date(NOW.getTime() + 1_000),
+      offerCode: "usage_10_usd",
+      payerMemberId: MEMBER_ID,
+      prisma: fake.prisma as never,
+    })).resolves.toMatchObject({
+      status: "payment_pending",
+    });
+
+    expect(mocks.stripePaymentIntentCreate).toHaveBeenCalledOnce();
+    expect(mocks.stripePaymentIntentConfirm).toHaveBeenCalledTimes(2);
+    expect(mocks.stripeCheckoutCreate).not.toHaveBeenCalled();
+    expect(onlyPurchase(fake.purchases)).toMatchObject({
+      status: "payment_pending",
+      stripeChargeIdEncrypted: "encrypted:ch_saved_card_123",
+      stripeChargeLookupKey: "billing:ch_saved_card_123",
     });
   });
 
@@ -848,10 +1075,22 @@ describe("createHostedUsageCreditCheckout", () => {
       clientRequestKey: "fresh_group_key_1234",
       joinCode: "group_join_code_1234",
       now: new Date(NOW.getTime() + 1_000),
-      offerCode: "usage_5_usd",
+      offerCode: "usage_10_usd",
       payerMemberId: MEMBER_ID,
       prisma: fake.prisma as never,
     })).resolves.toMatchObject({ recovered: true });
+
+    await expect(createHostedGroupUsageCreditCheckout({
+      clientRequestKey: "different_offer_key_1234",
+      joinCode: "group_join_code_1234",
+      now: new Date(NOW.getTime() + 1_500),
+      offerCode: "usage_5_usd",
+      payerMemberId: MEMBER_ID,
+      prisma: fake.prisma as never,
+    })).rejects.toMatchObject({
+      code: "HOSTED_USAGE_CREDIT_ACTIVE_PURCHASE_OFFER_CONFLICT",
+      httpStatus: 409,
+    });
 
     mocks.readHostedGroupUsageFundingTargetByJoinCode.mockResolvedValueOnce({
       displayName: null,
@@ -928,20 +1167,22 @@ describe("createHostedUsageCreditCheckout", () => {
         expires_at: Math.floor((NOW.getTime() + 90 * 60 * 1_000) / 1_000),
         line_items: [{ price: "price_usage_10", quantity: 1 }],
         metadata: {
-          policyVersion: "hosted-usage-credit-checkout-v1",
+          policyVersion: "hosted-usage-credit-checkout-v2",
           purchaseId: purchase.id,
           purpose: "hosted_usage_credit",
         },
         mode: "payment",
         payment_intent_data: {
           metadata: {
-            policyVersion: "hosted-usage-credit-checkout-v1",
+            policyVersion: "hosted-usage-credit-checkout-v2",
             purchaseId: purchase.id,
             purpose: "hosted_usage_credit",
           },
-          setup_future_usage: "off_session",
         },
       });
+      expect(request.payment_intent_data).not.toHaveProperty(
+        "setup_future_usage",
+      );
       expect(request).not.toHaveProperty("price_data");
       expect(request).not.toHaveProperty("payment_method_types");
       expect(options).toEqual({
@@ -966,7 +1207,7 @@ describe("createHostedUsageCreditCheckout", () => {
     expect(purchase).toMatchObject({
       cashAmountMinor: 1_000,
       cashCurrency: "usd",
-      checkoutRequestPolicyVersion: "hosted-usage-credit-checkout-v1",
+      checkoutRequestPolicyVersion: "hosted-usage-credit-checkout-v2",
       grantUsdMicros: 10_000_000n,
       offerCode: "usage_10_usd",
       payerMemberId: MEMBER_ID,
@@ -2367,6 +2608,7 @@ function clearStripeProviderMockHistory(): void {
   mocks.stripeCheckoutRetrieve.mockClear();
   mocks.stripeCustomerRetrieve.mockClear();
   mocks.stripePaymentIntentCancel.mockClear();
+  mocks.stripePaymentIntentConfirm.mockClear();
   mocks.stripePaymentIntentCreate.mockClear();
   mocks.stripePaymentIntentRetrieve.mockClear();
   mocks.stripePaymentMethodsList.mockClear();
@@ -2381,11 +2623,57 @@ function expectNoStripeProviderIo(): void {
   expect(mocks.stripeCheckoutRetrieve).not.toHaveBeenCalled();
   expect(mocks.stripeCustomerRetrieve).not.toHaveBeenCalled();
   expect(mocks.stripePaymentIntentCancel).not.toHaveBeenCalled();
+  expect(mocks.stripePaymentIntentConfirm).not.toHaveBeenCalled();
   expect(mocks.stripePaymentIntentCreate).not.toHaveBeenCalled();
   expect(mocks.stripePaymentIntentRetrieve).not.toHaveBeenCalled();
   expect(mocks.stripePaymentMethodsList).not.toHaveBeenCalled();
   expect(mocks.stripePriceRetrieve).not.toHaveBeenCalled();
   expect(mocks.stripeSubscriptionsList).not.toHaveBeenCalled();
+}
+
+function mockCanonicalSavedCard(): void {
+  mocks.stripeCustomerRetrieve.mockResolvedValueOnce({
+    id: "cus_group_payer",
+    invoice_settings: { default_payment_method: "pm_saved_card_123" },
+    livemode: false,
+    object: "customer",
+  });
+  mocks.stripePaymentMethodsList.mockResolvedValueOnce({
+    data: [{
+      customer: "cus_group_payer",
+      id: "pm_saved_card_123",
+      livemode: false,
+      object: "payment_method",
+      type: "card",
+    }],
+    has_more: false,
+    object: "list",
+    url: "/v1/payment_methods",
+  });
+}
+
+function buildSavedCardPaymentIntent(input: {
+  amountReceived: number;
+  latestCharge: string | null;
+  purchaseId: string;
+  status: string;
+}) {
+  return {
+    amount: 1_000,
+    amount_received: input.amountReceived,
+    currency: "usd",
+    customer: "cus_group_payer",
+    id: "pi_saved_card_123",
+    latest_charge: input.latestCharge,
+    livemode: false,
+    metadata: {
+      policyVersion: "hosted-usage-credit-checkout-v2",
+      purchaseId: input.purchaseId,
+      purpose: "hosted_usage_credit_saved_card",
+    },
+    object: "payment_intent",
+    status: input.status,
+  };
 }
 
 function buildStripePrice(override: Record<string, unknown> = {}) {
@@ -2428,7 +2716,7 @@ function buildStripeSessionFromPurchase(purchase: Record<string, unknown>) {
     id: "cs_test_usage_credit_123",
     livemode: false,
     metadata: {
-      policyVersion: "hosted-usage-credit-checkout-v1",
+      policyVersion: String(purchase.checkoutRequestPolicyVersion),
       purchaseId,
       purpose: "hosted_usage_credit",
     },

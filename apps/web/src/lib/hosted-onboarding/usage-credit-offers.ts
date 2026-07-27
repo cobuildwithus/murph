@@ -7,14 +7,31 @@ export const HOSTED_USAGE_CREDIT_OFFER_CODES = [
 export type HostedUsageCreditOfferCode =
   (typeof HOSTED_USAGE_CREDIT_OFFER_CODES)[number];
 
-export const HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_VERSION =
+export const HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_V1 =
   "hosted-usage-credit-checkout-v1" as const;
+export const HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_VERSION =
+  "hosted-usage-credit-checkout-v2" as const;
+export const HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_VERSIONS = [
+  HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_V1,
+  HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_VERSION,
+] as const;
+export type HostedUsageCreditCheckoutRequestPolicyVersion =
+  (typeof HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_VERSIONS)[number];
 export const HOSTED_USAGE_CREDIT_CHECKOUT_PURPOSE =
   "hosted_usage_credit" as const;
 // Keep direct saved-card PaymentIntents distinct from Checkout-only events while
 // both converge on the same purchase and usage-credit ledger.
 export const HOSTED_USAGE_CREDIT_SAVED_CARD_PURPOSE =
   "hosted_usage_credit_saved_card" as const;
+
+export function parseHostedUsageCreditCheckoutRequestPolicyVersion(
+  value: string,
+): HostedUsageCreditCheckoutRequestPolicyVersion | null {
+  return value === HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_V1 ||
+    value === HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_VERSION
+    ? value
+    : null;
+}
 
 export interface HostedUsageCreditOfferDefinition {
   readonly cashAmountMinor: number;

@@ -7,8 +7,8 @@ import { requireHostedStripeApiMode } from "./runtime";
 import { normalizeNullableString } from "./shared";
 import {
   HOSTED_USAGE_CREDIT_CHECKOUT_PURPOSE,
-  HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_VERSION,
   HOSTED_USAGE_CREDIT_SAVED_CARD_PURPOSE,
+  parseHostedUsageCreditCheckoutRequestPolicyVersion,
 } from "./usage-credit-offers";
 import {
   isHostedUsageCreditCheckoutEvent,
@@ -105,7 +105,7 @@ type HostedUsageCreditPreparedReconciliation =
       kind: "handled";
       result: Extract<
         HostedUsageCreditStripeReconcileResult,
-        { beneficiaryMemberId: null }
+        { handled: true }
       >;
     }
   | {
@@ -263,11 +263,23 @@ async function prepareHostedUsageCreditStripeReconciliation(input: {
     prisma: input.prisma,
     purchase,
   });
-  return prepared
+  if (prepared) {
+    return {
+      candidate,
+      kind: "prepared",
+      prepared,
+    };
+  }
+  return candidate.eventKind === "direct_payment"
     ? {
-        candidate,
-        kind: "prepared",
-        prepared,
+        kind: "handled",
+        result: {
+          beneficiaryMemberId: candidate.beneficiaryMemberId,
+          granted: false,
+          handled: true,
+          purchaseId: candidate.purchaseId,
+          wakeRequired: false,
+        },
       }
     : { kind: "unhandled" };
 }
@@ -317,8 +329,17 @@ async function reconcileDeletedExpiredUsageCreditCheckout(input: {
         options,
       ),
   });
+  const eventPolicyVersion =
+    parseHostedUsageCreditCheckoutRequestPolicyVersion(
+      eventSession.metadata?.policyVersion ?? "",
+    );
+  if (!eventPolicyVersion) {
+    throw new Error(
+      "Deleted usage-credit Checkout did not have a supported policy.",
+    );
+  }
   const expectedMetadata = {
-    policyVersion: HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_VERSION,
+    policyVersion: eventPolicyVersion,
     purchaseId,
     purpose: HOSTED_USAGE_CREDIT_CHECKOUT_PURPOSE,
   };
@@ -487,16 +508,18 @@ async function prepareHostedUsageCreditStripeEvent(input: {
     };
   }
   if (input.candidate.eventKind === "direct_payment") {
-    return {
-      eventKind: "direct_payment",
-      reconciliationVersion: input.purchase.reconciliationVersion,
-      value: await prepareHostedUsageCreditDirectPaymentEvent({
+    const directPayment =
+      await prepareHostedUsageCreditDirectPaymentEvent({
         context: input.context,
         event: input.event,
         prisma: input.prisma,
         purchase: input.purchase,
-      }),
-    };
+      });
+    return directPayment ? {
+      eventKind: "direct_payment",
+      reconciliationVersion: input.purchase.reconciliationVersion,
+      value: directPayment,
+    } : null;
   }
   return {
     eventKind: input.candidate.eventKind,
