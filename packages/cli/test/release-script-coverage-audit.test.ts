@@ -1531,6 +1531,11 @@ describe('monorepo release flow coverage audit', () => {
     expect(completionWorkflow).toContain('10 continuous minutes waiting only')
     expect(completionWorkflow).toContain('`MURPH_VERIFY_EXECUTOR=crabbox`')
     expect(verificationAndRuntime).toContain('### Ten-minute local admission fallback')
+    expect(verificationAndRuntime).toContain('### Required post-landing trust-root proof')
+    expect(verificationAndRuntime).toContain(
+      'does not require a ten-minute local admission wait',
+    )
+    expect(agentsGuide).toContain('required post-landing trust-root proof')
     expect(verificationAndRuntime).toContain(
       'MURPH_VERIFY_EXECUTOR=crabbox pnpm verify:acceptance',
     )
