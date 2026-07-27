@@ -22,7 +22,7 @@ policy that this member-scoped design intentionally avoids.
 - iOS reads Contacts only after an explicit Share action and supports both
   limited and full system access.
 - It inspects at most 5,000 person contacts, 20,000 phone values, and eight
-  phone values per contact, then deterministically emits at most 512 rows.
+  phone values per contact, then deterministically emits at most 1,000 rows.
 - Each row contains an explicit international phone number and one safe
   first-name token plus an optional last initial. National-only numbers,
   sentence-shaped labels, ambiguous duplicate
@@ -40,7 +40,7 @@ policy that this member-scoped design intentionally avoids.
 
 `apps/web` authenticates the companion with its ordinary Privy identity
 bearer, requires active member access and current launch consent for
-replacement, and accepts a closed schema with a 96 KiB body and 512-row cap.
+replacement, and accepts a closed schema with a 192 KiB body and 1,000-row cap.
 
 For every readable token-key version, Web asks a dedicated non-exportable GCP
 KMS HMAC-SHA256 key to derive a member-specific seed, then locally HMACs each
@@ -145,7 +145,7 @@ retention.
    roster smoke.
 3. Deploy Web with both gates off.
 4. Configure the dedicated KMS MAC keyring and exact
-   `roles/cloudkms.macSignerVerifier` key-level grant.
+   `roles/cloudkms.signerVerifier` key-level grant.
 5. Deploy iOS and enable `HOSTED_ADDRESS_BOOK_REPLACEMENT_ENABLED=1`.
 6. Verify replacement, deletion, permission-loss cleanup, persistence across
    time, and account deletion.

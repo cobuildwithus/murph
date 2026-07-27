@@ -15,6 +15,7 @@ import {
   readHostedMemberCoreState,
   type HostedMemberCoreState,
 } from "./hosted-member-store";
+import { assertHostedMemberNotSuspended } from "./entitlement";
 import {
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
   lockHostedMemberRow,
@@ -118,6 +119,18 @@ export async function issueHostedAppSession(input: {
 
   await getPrisma().$transaction(async (tx) => {
     await lockHostedMemberRow(tx, input.memberId);
+    const member = await readHostedMemberCoreState({
+      memberId: input.memberId,
+      prisma: tx,
+    });
+    if (!member) {
+      throw hostedOnboardingError({
+        code: "HOSTED_MEMBER_NOT_FOUND",
+        httpStatus: 404,
+        message: "Your hosted member record was not found.",
+      });
+    }
+    assertHostedMemberNotSuspended(member);
     await tx.hostedWebSession.create({
       data: {
         id: sessionId,

@@ -98,6 +98,7 @@ import { MurphPersonalitySettingsDialog } from "@/src/components/settings/murph-
 import { MURPH_TELEGRAM_URL } from "@/src/lib/murph-contact-routing";
 import { DESIGN_USAGE_OFFERS } from "./group-usage-funding-study";
 import { HostedUsageTopUpDialog } from "@/src/components/settings/hosted-usage-top-up-dialog";
+import { HostedAccountDeletionStatus } from "@/src/components/settings/hosted-data-privacy-settings";
 import { GarminHistoricalDataDialog } from "../(dashboard)/connect/connect-page-dialogs";
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
@@ -717,6 +718,15 @@ export function ComponentsContent() {
               pending={false}
               retryAvailable
             />
+          </div>
+        </Section>
+
+        <Separator />
+
+        <Section title="Account Deletion Status">
+          <div className="grid gap-4 lg:grid-cols-2">
+            <HostedAccountDeletionStatus cleanupPending={false} />
+            <HostedAccountDeletionStatus cleanupPending />
           </div>
         </Section>
 

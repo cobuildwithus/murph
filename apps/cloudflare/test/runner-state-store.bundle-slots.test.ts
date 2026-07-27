@@ -521,6 +521,15 @@ describe("RunnerStateStore schema guard", () => {
     expect(readRunnerMetaRowCount(db)).toBe(0);
   });
 
+  it("treats repeated account-data deletion against absent state as success", async () => {
+    const { db, store } = createRunnerStateStoreHarness();
+
+    await expect(store.deleteStateForUser("user-deleted")).resolves.toEqual({
+      deleted: true,
+    });
+    expect(readRunnerMetaRowCount(db)).toBe(0);
+  });
+
   it("fails closed without initializing state when provider credential validation reaches an unbound runner", async () => {
     const { db, store } = createRunnerStateStoreHarness();
 

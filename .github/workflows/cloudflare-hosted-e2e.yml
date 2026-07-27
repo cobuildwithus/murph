@@ -162,7 +162,7 @@ jobs:
             scenarios: device-sync-junction-wearable-direct-resource-replay
             timeoutMinutes: 35
           # This is intentionally a separately named check: it recreates the
-          # production 180-second priority inversion and fails after 45 seconds
+          # production 180-second priority inversion and fails after 30 seconds
           # if a real foreground Linq message cannot replace background ownership.
           - name: Hosted foreground reply priority E2E
             fastGate: "1"

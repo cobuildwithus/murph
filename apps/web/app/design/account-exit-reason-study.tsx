@@ -2,8 +2,9 @@
 
 import { useState } from "react";
 
-import { AccountExitReasonStep } from "@/src/components/settings/account-exit-reason-step";
 import { AccountDeletionConfirmationStep } from "@/src/components/settings/account-deletion-confirmation-step";
+import { AccountExitReasonStep } from "@/src/components/settings/account-exit-reason-step";
+import { HostedAccountDeletionStatus } from "@/src/components/settings/hosted-data-privacy-settings";
 import type { HostedAccountExitReasonCode } from "@/src/lib/hosted-privacy/account-data-shared";
 
 export function AccountExitReasonStudy() {
@@ -14,10 +15,15 @@ export function AccountExitReasonStudy() {
       id="account-exit-reason"
     >
       <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
-        The delete-account flow in <code>/settings</code>. The exit reason is
-        optional. A retryable wearable-start conflict keeps the confirmation
-        phrase in place, explains the temporary block, and offers one fresh
-        retry. The live reason step is interactive here; the previews are inert.
+        The first step of the delete-account dialog in{" "}
+        <code>/settings</code>. Answering is optional: Skip always moves straight
+        to the confirmation step, and Continue only turns on once a reason is
+        picked. The note field appears after a reason is chosen so a written note
+        always arrives attached to one. A retryable wearable-start conflict keeps
+        the confirmation phrase in place and offers one fresh retry. The
+        terminal states show the production status for completed and
+        still-converging cleanup. The live reason step is interactive; every
+        other preview is inert.
       </p>
 
       <StepFrame label="Interactive">
@@ -58,6 +64,15 @@ export function AccountExitReasonStudy() {
           retryAvailable
         />
       </StepFrame>
+
+      <div className="grid gap-6 lg:grid-cols-2">
+        <StatusFrame label="External cleanup converged" state="cleanup-complete">
+          <HostedAccountDeletionStatus cleanupPending={false} />
+        </StatusFrame>
+        <StatusFrame label="External cleanup still retrying" state="cleanup-pending">
+          <HostedAccountDeletionStatus cleanupPending />
+        </StatusFrame>
+      </div>
     </div>
   );
 }
@@ -78,6 +93,21 @@ function InteractiveExitReasonStep() {
         setNote("");
       }}
     />
+  );
+}
+
+function StatusFrame(props: {
+  children: React.ReactNode;
+  label: string;
+  state: string;
+}) {
+  return (
+    <div className="flex max-w-md flex-col gap-3" data-design-state={props.state}>
+      <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+        {props.label}
+      </p>
+      {props.children}
+    </div>
   );
 }
 
