@@ -2626,6 +2626,55 @@ describe("executeHostedMailboxEvent", () => {
     });
   });
 
+  it("does not replay a creative notification after successful media generation", async () => {
+    const wake = buildHostedExecutionAssistantNotificationRequestedWake({
+      eventId: "evt_notification_creative_media_succeeded",
+      memberId: "member_group_runtime",
+      notification: {
+        instructions: "Create one brief sponsorship thank-you.",
+        notificationToolProfile: "creative-response",
+        responsePolicy: {
+          kind: "require_send",
+        },
+        route: {
+          actorId: null,
+          channel: "linq",
+          delivery: {
+            kind: "thread",
+            target: "thread_group_sponsorship",
+          },
+          identityId: "hbidx:phone:v1:test",
+          threadId: "thread_group_sponsorship",
+          threadIsDirect: false,
+        },
+      },
+      occurredAt: "2026-04-08T00:00:00.000Z",
+    });
+    mocks.sendAssistantNotification.mockRejectedValueOnce(
+      Object.assign(new Error("delivery outcome was ambiguous"), {
+        details: {
+          assistantNotificationProviderNonReplayableWork: true,
+        },
+      }),
+    );
+
+    await expect(executeHostedMailboxEvent({
+      wake,
+      executionContext,
+      runtime: createRuntime(),
+      runtimeEnv: {},
+      vaultRoot: "/tmp/assistant-runtime-events",
+    })).resolves.toMatchObject({
+      conversationMetrics: null,
+      mailboxLane: "assistant-notification",
+    });
+    expect(mocks.sendAssistantNotification).toHaveBeenCalledWith(
+      expect.objectContaining({
+        notificationToolProfile: "creative-response",
+      }),
+    );
+  });
+
   it("still fails closed for non-first-contact required notifications", async () => {
     const wake = buildHostedExecutionAssistantNotificationRequestedWake({
       eventId: "evt_notification_required_failure",

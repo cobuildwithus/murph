@@ -539,6 +539,7 @@ model HostedMember {
   hostedAiUsagePeriods           HostedAiUsagePeriod[]
   usageCreditPurchasesPaid       HostedUsageCreditPurchase[]     @relation("HostedUsageCreditPurchasePayer")
   usageCreditPurchasesReceived   HostedUsageCreditPurchase[]     @relation("HostedUsageCreditPurchaseBeneficiary")
+  groupSponsorshipMomentsCreated HostedGroupSponsorshipMoment[]  @relation("HostedGroupSponsorshipMomentCreator")
   usageCreditEntries             HostedUsageCreditEntry[]
   consentEvents                  HostedConsentEvent[]
   consentGrants                  HostedConsentGrant[]
@@ -1399,6 +1400,7 @@ model HostedUsageCreditPurchase {
   payer                             HostedMember?                        @relation("HostedUsageCreditPurchasePayer", fields: [payerMemberId], references: [id], onDelete: Restrict)
   beneficiary                       HostedMember                         @relation("HostedUsageCreditPurchaseBeneficiary", fields: [beneficiaryMemberId], references: [id], onDelete: Restrict)
   entries                           HostedUsageCreditEntry[]
+  groupSponsorshipMoment            HostedGroupSponsorshipMoment?
 
   @@unique([payerMemberId, clientRequestKey], map: "hosted_usage_credit_purchase_payer_request_key")
   @@index([payerMemberId, status, createdAt], map: "hosted_usage_credit_purchase_payer_status_idx")
@@ -1406,6 +1408,26 @@ model HostedUsageCreditPurchase {
   @@index([stripePriceLookupKey], map: "hosted_usage_credit_purchase_price_lookup_idx")
   @@index([stripeCustomerLookupKey], map: "hosted_usage_credit_purchase_customer_lookup_idx")
   @@map("hosted_usage_credit_purchase")
+}
+
+model HostedGroupSponsorshipMoment {
+  purchaseId                 String   @id @map("purchase_id")
+  beneficiaryMemberId        String   @map("beneficiary_member_id")
+  creatorMemberId            String   @map("creator_member_id")
+  configurationDigest        String   @map("configuration_digest")
+  publicAliasEncrypted       String?  @map("public_alias_encrypted")
+  sponsorMessageEncrypted    String?  @map("sponsor_message_encrypted")
+  runningBitRequestEncrypted String?  @map("running_bit_request_encrypted")
+  activatedAt                DateTime? @map("activated_at")
+  expiresAt                  DateTime? @map("expires_at")
+  createdAt                  DateTime  @default(now()) @map("created_at")
+  updatedAt                  DateTime  @updatedAt @map("updated_at")
+  purchase                   HostedUsageCreditPurchase @relation(fields: [purchaseId], references: [id], onDelete: Cascade)
+  creator                    HostedMember @relation("HostedGroupSponsorshipMomentCreator", fields: [creatorMemberId], references: [id], onDelete: Cascade)
+
+  @@index([beneficiaryMemberId, expiresAt], map: "hosted_group_sponsorship_moment_active_idx")
+  @@index([creatorMemberId, createdAt], map: "hosted_group_sponsorship_moment_creator_idx")
+  @@map("hosted_group_sponsorship_moment")
 }
 
 model HostedUsageCreditEntry {

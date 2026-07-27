@@ -50,6 +50,14 @@ formatter uses the existing one-shot App Server path so its restrictive launch
 configuration cannot replace the resident ordinary-turn process or interrupt
 detached enrichment.
 
+The `creative-response` notification profile is a separate bounded formatter
+for verified social moments. It may read only the committed conversation
+history supplied with that event and may send text or attempt one short voice
+memo or original song. It has no ordinary dynamic tools, private context,
+network, filesystem, billing, health, group-mutation, or resumed-thread
+authority. A successful media generation is non-replayable even if later
+delivery fails.
+
 Hosted invocation-scoped automation and device authority enters only the
 current root turn through narrow typed dynamic tools backed by existing domain
 ports. The App Server and its descendant shell environments never receive that

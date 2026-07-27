@@ -192,6 +192,13 @@ export type HostedExecutionAssistantNotificationDeliveryDispatchMode =
   | "immediate"
   | "queue-only";
 
+export const HOSTED_EXECUTION_ASSISTANT_NOTIFICATION_TOOL_PROFILES = [
+  "creative-response",
+] as const;
+
+export type HostedExecutionAssistantNotificationToolProfile =
+  (typeof HOSTED_EXECUTION_ASSISTANT_NOTIFICATION_TOOL_PROFILES)[number];
+
 export type HostedExecutionAssistantNotificationResponsePolicy =
   | { kind: "allow_send_or_skip" }
   | { kind: "require_send" }
@@ -228,6 +235,7 @@ export interface HostedExecutionAssistantNotificationRequestedPayload {
   externalThreadRouteAuthority?: HostedExecutionExternalThreadRouteAuthority | null;
   firstContact?: HostedExecutionAssistantNotificationFirstContactPolicy | null;
   instructions: string;
+  notificationToolProfile?: HostedExecutionAssistantNotificationToolProfile | null;
   responsePolicy?: HostedExecutionAssistantNotificationResponsePolicy | null;
   route: HostedExecutionAssistantNotificationRoute;
 }

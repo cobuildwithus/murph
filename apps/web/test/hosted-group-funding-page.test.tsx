@@ -7,6 +7,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   getHostedPageAuthSnapshot: vi.fn(),
   getPrisma: vi.fn(() => ({ label: "test-prisma" })),
+  hasHostedGroupSponsorshipCustomizationAuthority: vi.fn(),
   HostedUsageTopUpDialog: vi.fn((props: Record<string, unknown>) =>
     React.createElement("div", null, `top-up:${String(props.scope)}`)
   ),
@@ -58,6 +59,11 @@ vi.mock("@/src/lib/hosted-groups/group-usage-funding", () => ({
   readHostedGroupUsageStatus: mocks.readHostedGroupUsageStatus,
 }));
 
+vi.mock("@/src/lib/hosted-groups/group-sponsorship-store", () => ({
+  hasHostedGroupSponsorshipCustomizationAuthority:
+    mocks.hasHostedGroupSponsorshipCustomizationAuthority,
+}));
+
 vi.mock("@/src/lib/hosted-onboarding/page-auth", () => ({
   getHostedPageAuthSnapshot: mocks.getHostedPageAuthSnapshot,
 }));
@@ -87,6 +93,9 @@ describe("hosted group funding page", () => {
     mocks.getHostedPageAuthSnapshot.mockResolvedValue({
       authenticatedMember: { id: "member_payer", suspendedAt: null },
     });
+    mocks.hasHostedGroupSponsorshipCustomizationAuthority.mockResolvedValue(
+      true,
+    );
     mocks.readHostedGroupUsageFundingTargetByJoinCode.mockResolvedValue({
       displayName: "Sunday sleep crew",
       joinCode: "group_join_code_1234",
@@ -116,7 +125,10 @@ describe("hosted group funding page", () => {
 
     assert.match(markup, /Sunday sleep crew/u);
     assert.match(markup, /<h1[^>]*>Keep Murph going<\/h1>/u);
-    assert.match(markup, /Add messages for everyone in the chat\./u);
+    assert.match(
+      markup,
+      /Sponsor messages for everyone and let Murph make the thank-you part of the entertainment\./u,
+    );
     assert.doesNotMatch(markup, /Group usage|Running low/u);
     assert.match(markup, /top-up:group/u);
     assert.match(markup, /href="\/home"[^>]*>Go home<\/a>/u);

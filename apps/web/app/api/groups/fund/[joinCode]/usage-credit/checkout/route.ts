@@ -8,12 +8,12 @@ import {
 } from "@/src/lib/hosted-onboarding/http";
 import {
   createHostedGroupUsageCreditCheckout,
-  parseHostedUsageCreditCheckoutRequest,
+  parseHostedGroupSponsorshipCheckoutRequest,
 } from "@/src/lib/hosted-onboarding/usage-credit-purchase-service";
 import { resolveDecodedRouteParam } from "@/src/lib/http";
 import { getPrisma } from "@/src/lib/prisma";
 
-const HOSTED_GROUP_USAGE_CREDIT_CHECKOUT_BODY_LIMIT_BYTES = 1_024;
+const HOSTED_GROUP_USAGE_CREDIT_CHECKOUT_BODY_LIMIT_BYTES = 4_096;
 
 export const POST = withJsonError(async (
   request: Request,
@@ -30,13 +30,15 @@ export const POST = withJsonError(async (
     }),
     resolveDecodedRouteParam(context.params, "joinCode"),
   ]);
-  const checkoutRequest = parseHostedUsageCreditCheckoutRequest(body);
+  const checkoutRequest = parseHostedGroupSponsorshipCheckoutRequest(body);
   const checkout = await createHostedGroupUsageCreditCheckout({
     clientRequestKey: checkoutRequest.clientRequestKey,
     joinCode,
     offerCode: checkoutRequest.offerCode,
     payerMemberId: auth.member.id,
     prisma: getPrisma(),
+    sponsorship: checkoutRequest.sponsorship,
+    sponsorshipProvided: checkoutRequest.sponsorshipProvided,
   });
 
   return jsonOk(checkout);

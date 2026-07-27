@@ -148,7 +148,12 @@ describe("usage-credit checkout route", () => {
   it("resolves the group and payer only on the server", async () => {
     const request = createCheckoutRequest({
       clientRequestKey: "request_key_123456",
-      offerCode: "usage_10_usd",
+      offerCode: "usage_20_usd",
+      sponsorship: {
+        publicAlias: "Jake’s Lower Back",
+        runningBitRequest: "Treat me like Murph’s exhausted CFO.",
+        sponsorMessage: "Please stop inviting Jake to basketball.",
+      },
     }, "https://join.example.test/api/groups/fund/group_join_code_1234/usage-credit/checkout");
     const response = await groupCheckoutRoute.POST(
       request,
@@ -165,9 +170,15 @@ describe("usage-credit checkout route", () => {
     expect(mocks.createHostedGroupUsageCreditCheckout).toHaveBeenCalledWith({
       clientRequestKey: "request_key_123456",
       joinCode: "group_join_code_1234",
-      offerCode: "usage_10_usd",
+      offerCode: "usage_20_usd",
       payerMemberId: "hbm_member123",
       prisma: { label: "test-prisma" },
+      sponsorship: {
+        publicAlias: "Jake’s Lower Back",
+        runningBitRequest: "Treat me like Murph’s exhausted CFO.",
+        sponsorMessage: "Please stop inviting Jake to basketball.",
+      },
+      sponsorshipProvided: true,
     });
   });
 

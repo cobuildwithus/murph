@@ -30,7 +30,8 @@ function GroupUsageFundingCard({
             </h1>
           </CardTitle>
           <CardDescription className="max-w-md text-pretty text-base leading-7">
-            Add messages for everyone in the chat.
+            Sponsor messages for everyone and let Murph make the thank-you part
+            of the entertainment.
           </CardDescription>
         </div>
       </CardHeader>

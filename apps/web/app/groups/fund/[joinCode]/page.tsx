@@ -4,8 +4,10 @@ import Link from "next/link";
 import { GroupFundingSignInButton } from "@/src/components/hosted-groups/group-funding-sign-in-button";
 import { GroupUsageFundingCard } from "@/src/components/hosted-groups/group-usage-funding-card";
 import {
-  HostedUsageTopUpDialog,
-  type HostedUsageTopUpOffer,
+  GroupSponsorshipDialog,
+  type GroupSponsorshipOffer,
+} from "@/src/components/hosted-groups/group-sponsorship-dialog";
+import {
   type HostedUsageTopUpReturn,
 } from "@/src/components/settings/hosted-usage-top-up-dialog";
 import { Button } from "@/src/components/ui/button";
@@ -19,12 +21,19 @@ import {
   readHostedGroupUsageFundingTargetByJoinCode,
   readHostedGroupUsageStatus,
 } from "@/src/lib/hosted-groups/group-usage-funding";
+import {
+  hasHostedGroupSponsorshipCustomizationAuthority,
+} from "@/src/lib/hosted-groups/group-sponsorship-store";
+import {
+  getHostedGroupSponsorshipExperiencePolicy,
+  readHostedConfiguredGroupSponsorshipOfferCodes,
+} from "@/src/lib/hosted-groups/group-sponsorship-policy";
 import { getHostedPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
 import { readHostedConfiguredUsageCreditOfferCodes } from "@/src/lib/hosted-onboarding/personal-usage-credit-eligibility";
 import {
   estimateHostedUsageCreditMessages,
   getHostedUsageCreditOfferDefinition,
-  type HostedUsageCreditOfferCode,
+  type HostedGroupSponsorshipOfferCode,
 } from "@/src/lib/hosted-onboarding/usage-credit-offers";
 import {
   readHostedActiveUsageCreditPurchaseForPayer,
@@ -47,8 +56,9 @@ type GroupFundingSearchParams = {
 
 export const metadata: Metadata = {
   ...createMurphPageMetadata({
-    title: "Add group usage · Murph",
-    description: "Add one-time usage credit to a Murph group.",
+    title: "Sponsor Murph in this chat",
+    description:
+      "Keep the group talking and make the thank-you unnecessarily entertaining.",
   }),
   robots: { follow: false, index: false },
 };
@@ -78,7 +88,12 @@ export default async function GroupFundingPage({
   const requestedPurchaseReturn = readUsageTopUpPurchaseReturn(
     resolvedSearchParams,
   );
-  const [usageStatus, activePurchase, purchaseReturnMatchesTarget] =
+  const [
+    usageStatus,
+    activePurchase,
+    purchaseReturnMatchesTarget,
+    customizationAllowed,
+  ] =
     await Promise.all([
       readHostedGroupUsageStatus({
         prisma,
@@ -103,6 +118,14 @@ export default async function GroupFundingPage({
             purchaseId: requestedPurchaseReturn.purchaseId,
           }).then(() => true).catch(() => false)
         : Promise.resolve(false),
+      member && !member.suspendedAt
+        ? hasHostedGroupSponsorshipCustomizationAuthority({
+            containerMemberId: target.runtimeMemberId,
+            now: new Date(),
+            participantMemberId: member.id,
+            prisma,
+          })
+        : Promise.resolve(false),
     ]);
   if (!usageStatus) {
     return <GroupFundingUnavailable />;
@@ -122,7 +145,11 @@ export default async function GroupFundingPage({
         }
     : null;
   const offers = member && !member.suspendedAt && !activePurchase
-    ? projectHostedUsageTopUpOffers(readHostedConfiguredUsageCreditOfferCodes())
+    ? projectHostedUsageTopUpOffers(
+        readHostedConfiguredGroupSponsorshipOfferCodes({
+          configuredOfferCodes: readHostedConfiguredUsageCreditOfferCodes(),
+        }),
+      )
     : [];
   const purchaseReturn = purchaseReturnMatchesTarget
     ? requestedPurchaseReturn
@@ -134,16 +161,16 @@ export default async function GroupFundingPage({
         action={
           member ? (
             offers.length > 0 || visibleActivePurchase ? (
-              <HostedUsageTopUpDialog
+              <GroupSponsorshipDialog
                 activePurchase={visibleActivePurchase}
                 checkoutUrl={`/api/groups/fund/${encodeURIComponent(target.joinCode)}/usage-credit/checkout`}
+                customizationAllowed={customizationAllowed}
                 offers={offers}
                 purchaseReturn={purchaseReturn}
-                scope="group"
               />
             ) : (
               <p className="py-2 text-center text-sm text-muted-foreground">
-                Usage credit isn&apos;t available from this account right now.
+                Sponsorship isn&apos;t available from this account right now.
               </p>
             )
           ) : (
@@ -203,14 +230,17 @@ function readOnlySearchParamValue(
 }
 
 function projectHostedUsageTopUpOffers(
-  offerCodes: readonly HostedUsageCreditOfferCode[],
-): HostedUsageTopUpOffer[] {
+  offerCodes: readonly HostedGroupSponsorshipOfferCode[],
+): GroupSponsorshipOffer[] {
   return offerCodes.map((offerCode) => {
     const offer = getHostedUsageCreditOfferDefinition(offerCode);
+    const experience =
+      getHostedGroupSponsorshipExperiencePolicy(offerCode);
     return {
       amountLabel: formatUsageTopUpAmount(offer.cashAmountMinor),
       estimatedMessages: estimateHostedUsageCreditMessages(offer.cashAmountMinor),
       offerCode: offer.code,
+      runningBitDurationLabel: experience.runningBitDurationLabel,
     };
   });
 }

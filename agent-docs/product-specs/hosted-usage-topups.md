@@ -1,7 +1,7 @@
 # Hosted Usage Top-Ups
 
-Status: Implemented personal, Family-member, and hosted-group funding
-Last verified: 2026-07-26
+Status: Implemented personal, Family-member, and hosted-group sponsorship
+Last verified: 2026-07-27
 
 ## Decision
 
@@ -11,13 +11,26 @@ funding use Stripe-hosted Checkout. Group funding first reuses one canonical
 card attached to the authenticated payer's Stripe Customer and falls back to
 Checkout for card collection or authentication.
 
-The initial individual-plan offer is:
+The personal and Family offer catalog is:
 
 | Offer code | Checkout subtotal | Usage credit granted |
 | --- | ---: | ---: |
 | `usage_5_usd` | $5 USD | $5 of Murph usage credit |
 | `usage_10_usd` | $10 USD | $10 of Murph usage credit |
 | `usage_25_usd` | $25 USD | $25 of Murph usage credit |
+
+The group sponsorship catalog is:
+
+| Offer code | Checkout subtotal | Group capacity shown in product copy |
+| --- | ---: | ---: |
+| `usage_5_usd` | $5 USD | Approximately 100 messages |
+| `usage_10_usd` | $10 USD | Approximately 200 messages |
+| `usage_20_usd` | $20 USD | Approximately 400 messages |
+
+Message counts are estimates over the existing cost-weighted usage ledger, not
+a second entitlement or exact-message accounting system. `usage_25_usd`
+remains parseable for historical purchases and available only to current
+personal and Family surfaces.
 
 The cash subtotal and granted usage value are separate immutable purchase
 facts even when the initial offer is one-for-one. One dollar of v1 usage credit
@@ -86,11 +99,13 @@ An eligible paid Pulse or Edge member can:
    consumed.
 
 An authenticated member can open `/groups/fund/[joinCode]`, see only the
-group's coarse `healthy`, `low`, or `exhausted` usage state, and buy the same
-fixed packs for that group's synthetic runtime beneficiary. This does not
-require the payer to have an individual paid plan. The browser still submits
-only offer code and request key; Web resolves payer and beneficiary. Pressing
-**Add messages** authorizes exactly one charge for the selected fixed amount.
+group's coarse `healthy`, `low`, or `exhausted` usage state, and sponsor one of
+the fixed group packs for that group's synthetic runtime beneficiary. This
+does not require the payer to have an individual paid plan. The browser still
+submits only an offer code, request key, and bounded optional sponsorship
+draft; Web resolves payer, beneficiary, amount, grant, and sponsorship policy.
+Pressing **Sponsor ~100 messages · $5** authorizes exactly one charge for the
+selected fixed amount.
 If the payer has one canonical reusable card, Murph confirms that payment
 without a Checkout redirect. Otherwise Stripe Checkout collects or verifies
 the card and saves it for a later group contribution.
@@ -99,6 +114,52 @@ An active Family owner can use the same dialog from an exact active member row
 in Settings. The fixed pack is credited only to that selected member. A
 sponsored member cannot buy a personal pack, and Family credit is neither
 shared nor transferable.
+
+## Group Sponsorship Moment
+
+Every new group purchase has one purchase-linked sponsorship-moment row. It is
+not a financial status or balance. The row freezes an HMAC-bound request
+configuration and, only for a current owner or active participant, may encrypt
+an optional public alias, group note, and temporary running-bit request using
+the hosted member secure-box owner.
+
+A valid funding locator remains sufficient to contribute anonymously. It is
+not sufficient to publish content into the room. Web checks current
+participant authority when the purchase is created and again after verified
+payment. Losing that authority suppresses the authored content without
+changing the grant.
+
+Verified Stripe reconciliation remains the only activation authority. After a
+fulfilled group purchase, Web idempotently:
+
+1. activates a requested bit for 24 hours on `$10` or 72 hours on `$20`;
+2. resolves the exact current non-direct group destination, with no personal
+   fallback; and
+3. appends one purchase-deduplicated creative notification to the existing
+   mailbox.
+
+The creative turn is isolated and may send text or make at most one short voice
+memo or original-song attempt. It has no shell, filesystem, network, billing,
+group-mutation, health, or scheduling authority. A successful media generation
+is non-replayable; a failed attempt may fall back to text. Serious, urgent,
+medical, sensitive, or conflict-heavy recent context forces a quiet text-only
+acknowledgment. The reconciler wakes newly paid usage work before attempting
+this optional social effect, and notification failure never rolls back an
+already committed credit grant.
+
+The running bit remains a Web-owned expiring product fact, not durable group
+memory. Mailbox fetch projects only the newest active bit to fresh,
+route-authorized, non-direct Linq or Telegram conversation input. The runtime
+rechecks expiry before prompt construction and quotes the alias and requested
+bit as untrusted participant-authored data. It is optional social color only:
+facts, health and safety guidance, privacy, permissions, routing, tools,
+challenge scoring, access, and response quality are unchanged. Failure to read
+the optional bit projects no bit and never blocks ordinary mailbox work.
+
+Private Murph may list a server-built sponsorship URL for each current group
+membership. The model cannot choose an amount, attach sponsor copy, or charge a
+card. Recurring refill, sponsor tiers, public spend rankings, exact-message
+accounting, and provider-level delivery deadlines remain out of scope.
 
 ## Individual MVP
 
@@ -605,9 +666,10 @@ direct saved-card path.
 ## Stripe Catalog And Payment Configuration
 
 Create one Stripe Product named **Murph usage credit** and reusable one-time
-Prices for $5, $10, and $25 USD. Keep Price IDs in server configuration and map
-them from internal offer codes. Archive rather than mutate an old Price when
-cash or grant semantics change, and create a new offer code and fixed Price.
+Prices for $5, $10, $20, and $25 USD. Keep Price IDs in server configuration
+and map them from internal offer codes. Archive rather than mutate an old Price
+when cash or grant semantics change, and create a new offer code and fixed
+Price.
 
 Reusable Prices are preferable to inline `price_data` for fixed packs because
 they remain governed and searchable in Stripe's catalog. Inline prices remain
@@ -746,7 +808,7 @@ An authenticated contributor opens `/groups/fund/[joinCode]`. Possession of the
 group's existing opaque join code is the public targeting capability; no second
 funding code or rotation policy exists. Web resolves the active group and its
 synthetic member, shows only `healthy`, `low`, or `exhausted`, and offers the
-same fixed $5, $10, and $25 packs. The browser never submits payer or
+fixed $5, $10, and $20 sponsorship packs. The browser never submits payer or
 beneficiary identity.
 
 A group chat that has only ever talked to Murph has no `HostedGroup` row or
@@ -767,7 +829,7 @@ Checkout status remains visible only to its authenticated payer; group state
 does not expose contributors, receipts, cash value, or internal USD-micro
 accounting.
 
-Choosing an amount has no payment effect. The explicit **Add messages** click
+Choosing an amount has no payment effect. The explicit **Sponsor ~200 messages · $10** click
 authorizes only that one fixed contribution. Murph uses one unambiguous
 Customer or nonterminal Subscription default card, or the sole attached card.
 If there is no canonical choice, Stripe Checkout collects a card. This is
@@ -831,7 +893,7 @@ and call the same idempotent reconciler by purchase ID.
 
 ## Rollout And Rollback
 
-1. Configure and verify the one-time Product and three Prices, keep Stripe Tax
+1. Configure and verify the one-time Product and four Prices, keep Stripe Tax
    disabled for this flow, confirm equal subtotal/total behavior, and verify
    payment settings, the direct PaymentIntent and Checkout webhook event
    subscriptions above, Radar rules, and environment mappings in Stripe test
@@ -844,16 +906,19 @@ and call the same idempotent reconciler by purchase ID.
    PaymentIntent, and Charge proof without requiring a Checkout Session, and
    its sibling check still clears every payer-encrypted Stripe value. Existing
    Web remains compatible because the new shape is a superset of its
-   Checkout-backed fulfilled rows.
-3. Deploy Web first. It contains the group funding route, `read_usage` consumer,
-   optional low-capacity mailbox projection, exhausted-notice projection,
-   target-aware Checkout, and detached-payer reconciliation. Older runtimes
-   ignore the optional low-capacity field and remain compatible during this
-   window.
-4. Deploy the Cloudflare/runner bundle that parses the optional low-capacity
-   field and advertises `read_usage`, then verify the exact runner fingerprint
-   converges. A new runner must not be allowed to send the action to an older
-   Web deployment. The new stable hosted developer guidance deliberately
+   Checkout-backed fulfilled rows. Apply
+   `20260727190000_hosted_group_sponsorship_moment` before enabling the
+   sponsorship producer; older Web does not read or write the additive table.
+3. Deploy the Cloudflare/runner bundle first. It parses the optional
+   low-capacity and group-running-bit mailbox fields, recognizes the isolated
+   `creative-response` notification profile, and advertises `read_usage`.
+   Verify the exact runner fingerprint converges before Web can produce either
+   new sponsorship contract. Existing Web sends neither sponsorship field
+   during this compatibility window.
+4. Deploy Web next. It contains the group sponsorship producer, target-aware
+   saved-card/Checkout flow, webhook-owned grant and moment materialization,
+   optional running-bit projection, and existing usage/exhaustion projections.
+   The new stable hosted developer guidance deliberately
    changes the assistant contract fingerprint: every existing direct or group
    session that would otherwise use native resume starts one new provider
    thread on its first post-deploy conversation turn. That turn replays the

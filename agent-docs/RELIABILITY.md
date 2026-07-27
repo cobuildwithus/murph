@@ -142,6 +142,17 @@ Last verified: 2026-07-26
   database-plus-Temporal recheck handoff are hard-bounded below the derived
   receipt lease, and receipt completion must win its exact attempt fence; a
   timed-out or reclaimed worker remains retryable and cannot report completion.
+- A fulfilled group purchase may materialize one optional social effect after
+  the grant commits. The purchase id owns mailbox deduplication, so Checkout,
+  PaymentIntent, and webhook replay converge on one creative notification.
+  Failure to activate or queue the moment keeps the Stripe receipt retryable
+  but cannot roll back or duplicate the grant. An existing mailbox item is
+  re-signaled rather than regenerated. Once a creative media tool succeeds,
+  later provider or delivery failure is terminal for that notification so a
+  jingle or voice memo is never regenerated after an ambiguous send. Running
+  bits need no timer or cleanup job: Web reads only fulfilled rows whose
+  `expiresAt` is still in the future, and the Assistant rechecks expiry before
+  prompt construction.
 - Matching usage-credit refund or dispute events must never fall through to the
   subscription suspension path. Live re-fetch plus the same beneficiary lock
   must append replay-safe, capped signed `refund_adjustment` or

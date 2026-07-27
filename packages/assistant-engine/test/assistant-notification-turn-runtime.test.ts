@@ -2882,6 +2882,220 @@ test('sendAssistantNotificationLocal releases typing after accepted delivery', a
   )
 })
 
+test('sendAssistantNotificationLocal accepts a text-only creative response', async () => {
+  const providerResult = createProviderResult({
+    response: JSON.stringify({
+      kind: 'send_message',
+      privateSummary: 'Celebrate the group contribution.',
+      text: 'A brief commercial break: fiscal leadership has arrived.',
+    }),
+  })
+  const observedProviderInputs: NotificationTurnProviderInput[] = []
+  const { deliverMessage, sendAssistantNotificationLocal } =
+    await loadNotificationTurnHarness({
+      onExecuteCodexTurnWithRecovery: async (providerInput) => {
+        observedProviderInputs.push(providerInput)
+        return {
+          kind: 'succeeded',
+          providerTurn: providerResult,
+        }
+      },
+      providerResult,
+      turnId: 'turn-group-sponsorship-text',
+    })
+
+  await expect(sendAssistantNotificationLocal({
+    instructions: 'Create a brief group sponsorship thank-you.',
+    notificationToolProfile: 'creative-response',
+    responsePolicy: { kind: 'require_send' },
+    vault: '/vaults/group-sponsorship-text',
+  })).resolves.toMatchObject({
+    deliveryOutcome: {
+      kind: 'sent',
+      media: [],
+    },
+  })
+
+  expect(observedProviderInputs[0]).toMatchObject({
+    allowFinishWithoutReply: false,
+    hostedToolContext: null,
+    profile: {
+      nativeResumePolicy: 'disabled',
+      promptProfile: 'creative-notification',
+      threadScope: 'isolated-thread',
+      toolProfile: 'creative-response-turn',
+    },
+  })
+  expect(deliverMessage).toHaveBeenCalledWith(expect.objectContaining({
+    media: [],
+  }))
+})
+
+test('sendAssistantNotificationLocal rejects more than one creative media attempt', async () => {
+  const providerResult = createProviderResult({
+    rawEvents: [
+      createCreativeMediaToolCompletedEvent({
+        success: false,
+        tool: 'generate_voice_memo',
+      }),
+      createCreativeMediaToolCompletedEvent({
+        success: false,
+        tool: 'generate_song',
+      }),
+    ],
+    response: JSON.stringify({
+      kind: 'send_message',
+      privateSummary: 'Use text after media failed.',
+      text: 'The group fuel gauge lives to fight another day.',
+    }),
+  })
+  const { deliverMessage, sendAssistantNotificationLocal } =
+    await loadNotificationTurnHarness({
+      providerResult,
+      turnId: 'turn-group-sponsorship-two-media-attempts',
+    })
+
+  await expect(sendAssistantNotificationLocal({
+    instructions: 'Create a brief group sponsorship thank-you.',
+    notificationToolProfile: 'creative-response',
+    responsePolicy: { kind: 'require_send' },
+    vault: '/vaults/group-sponsorship-two-media-attempts',
+  })).rejects.toMatchObject({
+    code: 'ASSISTANT_NOTIFICATION_CREATIVE_TOOL_COUNT_INVALID',
+  })
+  expect(deliverMessage).not.toHaveBeenCalled()
+})
+
+test('sendAssistantNotificationLocal permits text fallback after one failed media attempt', async () => {
+  const providerResult = createProviderResult({
+    rawEvents: [
+      createCreativeMediaToolCompletedEvent({
+        success: false,
+        tool: 'generate_voice_memo',
+      }),
+    ],
+    response: JSON.stringify({
+      kind: 'send_message',
+      privateSummary: 'Audio was unavailable; use text.',
+      text: 'The group fuel gauge lives to fight another day.',
+    }),
+  })
+  const { deliverMessage, sendAssistantNotificationLocal } =
+    await loadNotificationTurnHarness({
+      providerResult,
+      turnId: 'turn-group-sponsorship-media-failed',
+    })
+
+  await expect(sendAssistantNotificationLocal({
+    instructions: 'Create a brief group sponsorship thank-you.',
+    notificationToolProfile: 'creative-response',
+    responsePolicy: { kind: 'require_send' },
+    vault: '/vaults/group-sponsorship-media-failed',
+  })).resolves.toMatchObject({
+    deliveryOutcome: {
+      kind: 'sent',
+      media: [],
+    },
+  })
+  expect(deliverMessage).toHaveBeenCalledOnce()
+})
+
+test('sendAssistantNotificationLocal delivers one successful creative attachment', async () => {
+  const voiceMemo = {
+    filename: 'group-thanks.mp3',
+    kind: 'voice_memo' as const,
+    transcript: 'Thanks for keeping the group going.',
+    transport: {
+      attachmentId: 'attachment-group-thanks',
+      kind: 'linq_attachment' as const,
+    },
+  }
+  const providerResult = createProviderResult({
+    rawEvents: [
+      createCreativeMediaToolCompletedEvent({
+        success: true,
+        tool: 'generate_song',
+      }),
+    ],
+    response: JSON.stringify({
+      kind: 'send_message',
+      privateSummary: 'Celebrate the group contribution.',
+      text: 'This challenge is now fiscally solvent.',
+    }),
+    responseMedia: [voiceMemo],
+    session: createAssistantSession({
+      binding: {
+        actorId: 'actor-group-sponsorship',
+        channel: 'linq',
+        conversationKey: null,
+        delivery: {
+          kind: 'thread',
+          target: 'thread-group-sponsorship',
+        },
+        identityId: 'identity-group-sponsorship',
+        threadId: 'thread-group-sponsorship',
+        threadIsDirect: false,
+      },
+    }),
+  })
+  const { deliverMessage, sendAssistantNotificationLocal } =
+    await loadNotificationTurnHarness({
+      providerResult,
+      turnId: 'turn-group-sponsorship-media-succeeded',
+    })
+
+  await expect(sendAssistantNotificationLocal({
+    instructions: 'Create a brief group sponsorship thank-you.',
+    notificationToolProfile: 'creative-response',
+    responsePolicy: { kind: 'require_send' },
+    vault: '/vaults/group-sponsorship-media-succeeded',
+  })).resolves.toMatchObject({
+    deliveryOutcome: { kind: 'sent' },
+  })
+  expect(deliverMessage).toHaveBeenCalledWith(expect.objectContaining({
+    media: [voiceMemo],
+  }))
+})
+
+test('sendAssistantNotificationLocal marks successful creative media as non-replayable', async () => {
+  const providerResult = createProviderResult({
+    rawEvents: [
+      createCreativeMediaToolCompletedEvent({
+        success: true,
+        tool: 'generate_voice_memo',
+      }),
+    ],
+    response: 'not a notification decision',
+    responseMedia: [{
+      filename: 'group-thanks.mp3',
+      kind: 'voice_memo',
+      transcript: 'Thanks for keeping the group going.',
+      transport: {
+        attachmentId: 'attachment-group-thanks',
+        kind: 'linq_attachment',
+      },
+    }],
+  })
+  const { deliverMessage, sendAssistantNotificationLocal } =
+    await loadNotificationTurnHarness({
+      providerResult,
+      turnId: 'turn-group-sponsorship-invalid-output',
+    })
+
+  await expect(sendAssistantNotificationLocal({
+    instructions: 'Create a brief group sponsorship thank-you.',
+    notificationToolProfile: 'creative-response',
+    responsePolicy: { kind: 'require_send' },
+    vault: '/vaults/group-sponsorship-invalid-output',
+  })).rejects.toMatchObject({
+    code: 'ASSISTANT_NOTIFICATION_INVALID_RESPONSE',
+    details: expect.objectContaining({
+      assistantNotificationProviderNonReplayableWork: true,
+    }),
+  })
+  expect(deliverMessage).not.toHaveBeenCalled()
+})
+
 test('sendAssistantNotificationLocal does not checkpoint a new output-only direct session', async () => {
   const session = createAssistantSession({
     sessionId: 'session-new-output-only-notification',
@@ -4519,6 +4733,24 @@ function createCodexCommandCompletedEvent(command: string): unknown {
       type: 'command.execution',
       command,
       exit_code: 0,
+    },
+  }
+}
+
+function createCreativeMediaToolCompletedEvent(input: {
+  success: boolean
+  tool: 'generate_song' | 'generate_voice_memo'
+}): unknown {
+  return {
+    method: 'item/completed',
+    params: {
+      item: {
+        id: `creative-response-${input.tool}`,
+        namespace: 'murph',
+        success: input.success,
+        tool: input.tool,
+        type: 'dynamicToolCall',
+      },
     },
   }
 }

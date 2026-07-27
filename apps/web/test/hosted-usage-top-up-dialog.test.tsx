@@ -11,6 +11,7 @@ import {
   type MouseEvent as ReactMouseEvent,
   type ReactElement,
   type ReactNode,
+  type TextareaHTMLAttributes,
 } from "react";
 import { beforeEach, expect, test, vi } from "vitest";
 
@@ -141,14 +142,61 @@ vi.mock("@/src/components/ui/dialog", async () => {
 });
 
 vi.mock("@/src/components/ui/field", () => ({
+  Field: (props: HTMLAttributes<HTMLDivElement>) =>
+    createElement("div", props),
   FieldDescription: (props: HTMLAttributes<HTMLParagraphElement>) =>
     createElement("p", props),
   FieldError: ({ children }: { children?: ReactNode }) =>
     children ? createElement("div", { role: "alert" }, children) : null,
+  FieldGroup: (props: HTMLAttributes<HTMLDivElement>) =>
+    createElement("div", props),
+  FieldLabel: (props: HTMLAttributes<HTMLLabelElement>) =>
+    createElement("label", props),
   FieldLegend: (props: HTMLAttributes<HTMLLegendElement>) =>
     createElement("legend", props),
   FieldSet: (props: FieldsetHTMLAttributes<HTMLFieldSetElement>) =>
     createElement("fieldset", props),
+}));
+
+vi.mock("@/src/components/ui/collapsible", () => ({
+  Collapsible: (props: HTMLAttributes<HTMLDivElement>) =>
+    createElement("div", props),
+  CollapsibleContent: (props: HTMLAttributes<HTMLDivElement>) =>
+    createElement("div", props),
+  CollapsibleTrigger: ({
+    children,
+    render,
+  }: {
+    children?: ReactNode;
+    render: ReactElement;
+  }) => createElement("div", null, render, children),
+}));
+
+vi.mock("@/src/components/ui/input", () => ({
+  Input: forwardRef<HTMLInputElement, InputHTMLAttributes<HTMLInputElement>>(
+    function Input({ onChange, ...props }, ref) {
+      return createElement("input", {
+        ...props,
+        onChange,
+        onInput: onChange,
+        ref,
+      });
+    },
+  ),
+}));
+
+vi.mock("@/src/components/ui/textarea", () => ({
+  Textarea: forwardRef<
+    HTMLTextAreaElement,
+    TextareaHTMLAttributes<HTMLTextAreaElement>
+  >(function Textarea({ onChange, ...props }, ref) {
+    return createElement("textarea", {
+      ...props,
+      onChange,
+      onInput: onChange,
+      ref,
+    });
+  }),
 }));
 
 vi.mock("@/src/components/ui/radio-group", () => ({
@@ -372,17 +420,20 @@ test("reuses the dialog state machine for a server-scoped group checkout", async
   );
 
   try {
-    assert.match(rendered.container.textContent ?? "", /How many messages\?/);
+    assert.match(
+      rendered.container.textContent ?? "",
+      /How many messages do you want to sponsor\?/,
+    );
     const groupTrigger = Array.from(
       rendered.container.querySelectorAll<HTMLButtonElement>("button"),
-    ).find((button) => button.textContent?.trim() === "Add messages");
+    ).find((button) => button.textContent?.trim() === "Sponsor this chat");
     assert.ok(groupTrigger);
     assert.equal(groupTrigger.dataset.size, "xl");
     assert.equal(groupTrigger.dataset.variant, "default");
     assert.equal(groupTrigger.classList.contains("w-full"), true);
     assert.match(
       rendered.container.textContent ?? "",
-      /Shared with everyone in the chat\./,
+      /one-time contribution to keep Murph talking for everyone here\./,
     );
     assert.match(
       rendered.container.textContent ?? "",
@@ -392,16 +443,16 @@ test("reuses the dialog state machine for a server-scoped group checkout", async
     await clickButton(
       rendered.container,
       rendered.window,
-      "Add messages · $5",
+      "Sponsor ~100 messages · $5",
     );
     assert.equal(
-      buttonByText(rendered.container, "Adding messages…").getAttribute(
+      buttonByText(rendered.container, "Sponsoring chat…").getAttribute(
         "aria-busy",
       ),
       "true",
     );
     assert.equal(
-      buttonByText(rendered.container, "Adding messages…").disabled,
+      buttonByText(rendered.container, "Sponsoring chat…").disabled,
       true,
     );
     expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
@@ -426,6 +477,83 @@ test("reuses the dialog state machine for a server-scoped group checkout", async
       "https://checkout.stripe.test/group-session",
     );
   } finally {
+    await rendered.cleanup();
+  }
+});
+
+test("freezes optional sponsorship copy with the selected group offer", async () => {
+  const checkout = deferred<unknown>();
+  mocks.requestHostedOnboardingJson.mockReturnValueOnce(checkout.promise);
+  const { GroupSponsorshipDialog } = await import(
+    "@/src/components/hosted-groups/group-sponsorship-dialog"
+  );
+  const rendered = await renderClientComponent(
+    createElement(GroupSponsorshipDialog, {
+      checkoutUrl:
+        "/api/groups/fund/group_join_code_1234/usage-credit/checkout",
+      customizationAllowed: true,
+      initialOpen: true,
+      offers: groupSponsorshipOffers(),
+    }),
+    { requireButton: false },
+  );
+
+  try {
+    assert.match(rendered.container.textContent ?? "", /Make it funny/);
+    assert.ok(rendered.container.querySelector(".h-auto"));
+    await clickRadio(rendered.container, rendered.window, "usage_5_usd");
+    assert.equal(
+      rendered.container.querySelector("#group-sponsor-bit"),
+      null,
+    );
+    assert.doesNotMatch(rendered.container.textContent ?? "", /Lasts for/u);
+
+    await clickRadio(rendered.container, rendered.window, "usage_20_usd");
+    const runningBit = rendered.container.querySelector<HTMLTextAreaElement>(
+      "#group-sponsor-bit",
+    );
+    assert.ok(runningBit);
+    assert.match(rendered.container.textContent ?? "", /Lasts for 3 days\./u);
+    await setTextInput(
+      rendered.container.querySelector("#group-sponsor-alias"),
+      rendered.window,
+      "Jake’s Lower Back",
+    );
+    await setTextInput(
+      rendered.container.querySelector("#group-sponsor-message"),
+      rendered.window,
+      "Please stop inviting Jake to basketball.",
+    );
+    await setTextInput(
+      runningBit,
+      rendered.window,
+      "Treat me like Murph’s exhausted CFO.",
+    );
+    await clickButton(
+      rendered.container,
+      rendered.window,
+      "Sponsor ~400 messages · $20",
+    );
+
+    expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
+      method: "POST",
+      payload: {
+        clientRequestKey: "00000000-0000-4000-8000-000000000001",
+        offerCode: "usage_20_usd",
+        sponsorship: {
+          publicAlias: "Jake’s Lower Back",
+          runningBitRequest: "Treat me like Murph’s exhausted CFO.",
+          sponsorMessage: "Please stop inviting Jake to basketball.",
+        },
+      },
+      signal: expect.any(AbortSignal),
+      url: "/api/groups/fund/group_join_code_1234/usage-credit/checkout",
+    });
+  } finally {
+    checkout.resolve({
+      purchaseId: "hucp_group_sponsorship",
+      status: "payment_pending",
+    });
     await rendered.cleanup();
   }
 });
@@ -1099,7 +1227,11 @@ test("keeps an uncertain group payment locked to the original amount and request
     const focus = vi.spyOn(title, "focus");
 
     await clickRadio(rendered.container, rendered.window, "usage_2500");
-    await clickButton(rendered.container, rendered.window, "Add messages · $25");
+    await clickButton(
+      rendered.container,
+      rendered.window,
+      "Sponsor ~500 messages · $25",
+    );
 
     assert.equal(dialog.scrollTop, 0);
     expect(focus).toHaveBeenCalledWith({ preventScroll: true });
@@ -2798,6 +2930,54 @@ function usageCreditOffers() {
     { amountLabel: "$10", estimatedMessages: 200, offerCode: "usage_1000" },
     { amountLabel: "$25", estimatedMessages: 500, offerCode: "usage_2500" },
   ] as const;
+}
+
+function groupSponsorshipOffers() {
+  return [
+    {
+      amountLabel: "$5",
+      estimatedMessages: 100,
+      offerCode: "usage_5_usd",
+      runningBitDurationLabel: null,
+    },
+    {
+      amountLabel: "$10",
+      estimatedMessages: 200,
+      offerCode: "usage_10_usd",
+      runningBitDurationLabel: "1 day",
+    },
+    {
+      amountLabel: "$20",
+      estimatedMessages: 400,
+      offerCode: "usage_20_usd",
+      runningBitDurationLabel: "3 days",
+    },
+  ] as const;
+}
+
+async function setTextInput(
+  element: Element | null,
+  window: Window & typeof globalThis,
+  value: string,
+) {
+  assert.ok(
+    element instanceof window.HTMLInputElement ||
+      element instanceof window.HTMLTextAreaElement,
+  );
+  await act(async () => {
+    const prototype = element instanceof window.HTMLInputElement
+      ? window.HTMLInputElement.prototype
+      : window.HTMLTextAreaElement.prototype;
+    const descriptor = Object.getOwnPropertyDescriptor(prototype, "value");
+    if (descriptor?.set) {
+      descriptor.set.call(element, value);
+    } else {
+      element.value = value;
+    }
+    element.dispatchEvent(new window.Event("input", { bubbles: true }));
+    element.dispatchEvent(new window.Event("change", { bubbles: true }));
+    await Promise.resolve();
+  });
 }
 
 async function clickRadio(

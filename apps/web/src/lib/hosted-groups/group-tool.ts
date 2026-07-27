@@ -73,7 +73,11 @@ import {
   recordHostedGroupDisclosurePermissionTx,
   revokeHostedGroupDisclosureGrantForMemberTx,
 } from "./group-disclosure-store";
-import { readHostedGroupUsageStatus } from "./group-usage-funding";
+import {
+  buildHostedGroupUsageFundingLocatorForRuntimeMember,
+  buildHostedGroupUsageFundingUrl,
+  readHostedGroupUsageStatus,
+} from "./group-usage-funding";
 import {
   enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort,
 } from "./group-newsletter";
@@ -429,16 +433,42 @@ async function handleHostedRuntimeGroupListMemberships(input: {
         groupLabel,
         permissionText,
       })),
-      memberships: memberships.map(({ ownerJoinCode, ...membership }) => ({
+      memberships: memberships.map(({
+        ownerJoinCode,
+        runtimeMemberId,
+        ...membership
+      }) => ({
         ...membership,
         permissionsUrl: ownerJoinCode
           ? buildHostedGroupJoinUrl({ joinCode: ownerJoinCode, publicBaseUrl })
           : null,
+        sponsorshipUrl: buildMembershipSponsorshipUrl({
+          publicBaseUrl,
+          runtimeMemberId,
+        }),
       })),
       status: "ok",
       truncated,
     },
   };
+}
+
+function buildMembershipSponsorshipUrl(input: {
+  publicBaseUrl: string | null;
+  runtimeMemberId: string | null;
+}): string | null {
+  if (!input.runtimeMemberId) {
+    return null;
+  }
+  const locator = buildHostedGroupUsageFundingLocatorForRuntimeMember(
+    input.runtimeMemberId,
+  );
+  return locator
+    ? buildHostedGroupUsageFundingUrl({
+        joinCode: locator,
+        publicBaseUrl: input.publicBaseUrl,
+      })
+    : null;
 }
 
 async function handleHostedRuntimeGroupRevokeDisclosureGrant(input: {
