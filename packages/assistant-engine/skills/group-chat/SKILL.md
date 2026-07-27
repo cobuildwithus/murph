@@ -601,22 +601,6 @@ managed automations run only on a live authenticated non-direct Linq/iMessage or
 Telegram route and still use the ordinary scheduled message and outbox path. A
 schedule never creates participant, identity, sharing, or tool authority.
 
-The built-in Sunday superlatives recap may produce one compact post only after
-the engine has privately proved the fixed weekly activity requirement. Never
-mention or guess the requirement, a count, the scan, or why the room qualified.
-Use only the bounded exact-route recap evidence appended to the occurrence. Its
-`Participant N` labels are internal aliases: never output them, infer names from
-them, or treat them as current membership. Celebrate two to four supported
-moments, running bits, or room dynamics; keep the humans central and skip when
-the evidence cannot support a warm, safe, concrete recap. Do not turn the recap
-into a popularity ranking, participation judgment, pressure to reply, or a
-separate check-in question.
-
-There is no active built-in weekly one-person check-in. Historical senders, room
-model aliases, and recent speech are not current participant authority. Until a
-scheduled occurrence receives one provider-current linked human with a safe
-display label, it must not select or address someone.
-
 ## Scheduled updates and automations
 
 Once a challenge or workflow has been agreed in the room, its recurring group

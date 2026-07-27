@@ -1391,6 +1391,7 @@ async function planHostedLinqExplicitThreadRouteWebhook(input: {
   context: ReturnType<typeof resolveHostedOnboardingLinqMessageContext>;
   event: HostedLinqWebhookEvent;
   prisma: Prisma.TransactionClient;
+  resolvedParticipantMemberId?: string;
   route: HostedThreadRouteSnapshot;
   sourceMailboxConsumedAt?: Date | null;
 }): Promise<HostedOnboardingLinqDirectPlan> {
@@ -1414,12 +1415,13 @@ async function planHostedLinqExplicitThreadRouteWebhook(input: {
   ) {
     verifiedInboundParticipant =
       await renewHostedThreadContainerParticipantAccessFromInboundTx({
-      containerMemberId: input.route.containerMemberId,
-      now: participantAccessNow,
-      occurredAt,
-      participantContact,
-      prisma: input.prisma,
-    });
+        containerMemberId: input.route.containerMemberId,
+        now: participantAccessNow,
+        occurredAt,
+        participantContact,
+        prisma: input.prisma,
+        resolvedParticipantMemberId: input.resolvedParticipantMemberId,
+      });
   }
 
   let containerAccessActive = await readActiveHostedMemberAccess({
@@ -1553,6 +1555,9 @@ async function planHostedLinqExplicitThreadRouteWebhook(input: {
       participantContact,
       rawParts: messageEvent.data.message.parts,
       routeAuthority,
+      ...(verifiedInboundParticipant
+        ? { senderMemberId: verifiedInboundParticipant.memberId }
+        : {}),
       userId: input.route.containerMemberId,
     });
 
@@ -1870,6 +1875,7 @@ async function planHostedLinqGroupChatWebhook(input: {
     context: input.context,
     event: input.event,
     prisma: input.prisma,
+    resolvedParticipantMemberId: sender.id,
     route,
     sourceMailboxConsumedAt: demotedMailboxConsumedAt,
   });
@@ -2126,6 +2132,7 @@ function buildHostedLinqConversationWakeForMailbox(input: {
   participantContact: HostedLinqParticipantIdentity;
   rawParts: HostedLinqMessageReceivedEvent["data"]["message"]["parts"];
   routeAuthority?: HostedLinqThreadRouteEgressAuthority | null;
+  senderMemberId?: string;
   userId: string;
 }): ReturnType<typeof buildHostedExecutionLinqConversationMessageWake> {
   const fullWake = buildHostedExecutionLinqConversationMessageWake({
@@ -2148,6 +2155,7 @@ function buildHostedLinqConversationWakeForMailbox(input: {
       ? { phoneLookupKey: input.participantContact.lookupKey }
       : {}),
     ...(input.routeAuthority ? { routeAuthority: input.routeAuthority } : {}),
+    ...(input.senderMemberId ? { senderMemberId: input.senderMemberId } : {}),
     userId: input.userId,
   });
   if (serializedHostedLinqWakeBytes(fullWake) <= HOSTED_LINQ_CONVERSATION_WAKE_INLINE_TARGET_BYTES) {
@@ -2174,6 +2182,7 @@ function buildHostedLinqConversationWakeForMailbox(input: {
       ? { phoneLookupKey: input.participantContact.lookupKey }
       : {}),
     ...(input.routeAuthority ? { routeAuthority: input.routeAuthority } : {}),
+    ...(input.senderMemberId ? { senderMemberId: input.senderMemberId } : {}),
     userId: input.userId,
   });
   if (serializedHostedLinqWakeBytes(compactWake) <= HOSTED_LINQ_CONVERSATION_WAKE_INLINE_TARGET_BYTES) {
@@ -2200,6 +2209,7 @@ function buildHostedLinqConversationWakeForMailbox(input: {
       ? { phoneLookupKey: input.participantContact.lookupKey }
       : {}),
     ...(input.routeAuthority ? { routeAuthority: input.routeAuthority } : {}),
+    ...(input.senderMemberId ? { senderMemberId: input.senderMemberId } : {}),
     userId: input.userId,
   });
 }
@@ -2426,17 +2436,19 @@ async function renewHostedThreadContainerParticipantAccessFromInboundTx(input: {
   occurredAt: string;
   participantContact: HostedLinqParticipantContact;
   prisma: Prisma.TransactionClient;
+  resolvedParticipantMemberId?: string;
 }): Promise<VerifiedHostedLinqInboundParticipant | null> {
-  const lookup = input.participantContact.kind === "phone"
-    ? await lookupHostedMemberIdentityByPhoneNumberForLinqWebhook({
-        phoneNumber: input.participantContact.value,
-        prisma: input.prisma,
-      })
-    : await lookupHostedMemberByVerifiedEmailAddress({
-        address: input.participantContact.value,
-        prisma: input.prisma,
-      });
-  const participantMemberId = lookup?.core.id ?? null;
+  const participantMemberId = input.resolvedParticipantMemberId ?? (
+    input.participantContact.kind === "phone"
+      ? (await lookupHostedMemberIdentityByPhoneNumberForLinqWebhook({
+          phoneNumber: input.participantContact.value,
+          prisma: input.prisma,
+        }))?.core.id
+      : (await lookupHostedMemberByVerifiedEmailAddress({
+          address: input.participantContact.value,
+          prisma: input.prisma,
+        }))?.core.id
+  ) ?? null;
   if (!participantMemberId) {
     return null;
   }

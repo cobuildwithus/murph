@@ -33,6 +33,7 @@ export interface AssistantUsageProviderResult {
 }
 
 export async function recordAssistantUsageEvent(input: {
+  effectiveEnv?: Readonly<Record<string, string | undefined>>
   executionContext: AssistantExecutionContext
   providerRequestAcceptedInputIds?: readonly string[]
   providerRequestOutcome?: AssistantProviderRequestOutcome
@@ -74,6 +75,7 @@ export async function recordAssistantUsageEvent(input: {
       apiKeyEnv,
       credentialSource: usageAttribution?.credentialSource ?? resolveAssistantUsageCredentialSource({
         apiKeyEnv,
+        effectiveEnv: input.effectiveEnv,
         headers: input.providerResult.providerOptions.headers ?? null,
         provider: input.providerResult.provider,
         userEnvKeys: [...(input.executionContext.hosted?.userEnvKeys ?? [])],
