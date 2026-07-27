@@ -6,6 +6,13 @@ on:
       - agent/murph-group-plan
     paths:
       - .github/agent-group-plan/READY
+  pull_request:
+    branches:
+      - agent/stripe-billing-hardening
+    paths:
+      - .github/agent-group-plan/READY
+      - .github/agent-group-plan/patch-*
+      - .github/workflows/agent-murph-group-plan-bootstrap.yml
 
 permissions:
   contents: write
