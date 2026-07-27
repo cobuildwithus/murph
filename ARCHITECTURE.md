@@ -773,8 +773,12 @@ must be verified canceled before the purchase can return to `created` and open
 Checkout. The existing payer-owned cancel path also resolves a sessionless
 direct attempt, while fulfilled sessionless purchases detach by clearing
 encrypted payer references and retaining lookup evidence for later
-refund/dispute reconciliation. Checkout-entered cards are saved only for later
-explicit group contributions. The financial movements described above use only signed
+refund/dispute reconciliation. The database constraint for that detached
+fulfilled shape requires paid, terminal, reconciled, PaymentIntent, and Charge
+proof but deliberately does not require a Checkout Session; the sibling
+constraint still requires every payer-encrypted Stripe value to be cleared.
+Checkout-entered cards are saved only for later explicit group contributions.
+The financial movements described above use only signed
 `refund_adjustment` and `dispute_adjustment` ledger entries; there are no
 separate reversal or restoration kinds. Personal, hosted-group, and
 Family-member funding use the same purchase lifecycle. Group funding resolves

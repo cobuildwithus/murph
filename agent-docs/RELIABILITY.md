@@ -47,6 +47,13 @@ Last verified: 2026-07-25
   and its binding is cleared under the same reconciliation fence. Direct
   PaymentIntent events reuse the existing Stripe receipt and financial
   reconciliation owner rather than adding a retry queue.
+- The Vercel predeploy migration replaces the detached-payer checks before the
+  saved-card producer can serve traffic. That replacement is backward
+  compatible with the old application, retains the PaymentIntent/Charge and
+  ciphertext-clearing invariants, and removes only the impossible
+  Checkout-Session requirement for fulfilled direct payments. The superseded
+  postdeploy constraint installer stays out of the contract-migration run so a
+  later workflow cannot re-tighten the schema after promotion.
 - The payer-owned cancel endpoint also owns a sessionless direct
   `payment_pending` purchase. It retrieves and cancels only the exact bound
   intent, preserves succeeded or processing state for webhook settlement, and

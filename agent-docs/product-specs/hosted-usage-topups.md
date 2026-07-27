@@ -836,9 +836,15 @@ and call the same idempotent reconciler by purchase ID.
    payment settings, the direct PaymentIntent and Checkout webhook event
    subscriptions above, Radar rules, and environment mappings in Stripe test
    mode, then live mode.
-2. Apply the expand-only database migration that makes the payer and its
-   payer-encrypted Price and Customer references nullable. Existing Web remains
-   compatible because no old writer creates detached rows.
+2. During the Web predeploy, apply the expansion that makes the payer and its
+   payer-encrypted Price and Customer references nullable, then apply
+   `20260727040000_relax_hosted_usage_credit_detached_direct_proof`. The latter
+   installs or replaces the two detached-payer checks before the new producer
+   can serve traffic. Its fulfilled arm requires paid, terminal, reconciled,
+   PaymentIntent, and Charge proof without requiring a Checkout Session, and
+   its sibling check still clears every payer-encrypted Stripe value. Existing
+   Web remains compatible because the new shape is a superset of its
+   Checkout-backed fulfilled rows.
 3. Deploy Web first. It contains the group funding route, `read_usage` consumer,
    optional low-capacity mailbox projection, exhausted-notice projection,
    target-aware Checkout, and detached-payer reconciliation. Older runtimes
@@ -854,10 +860,11 @@ and call the same idempotent reconciler by purchase ID.
    committed transcript fallback, bounded to 24 messages, 4,000 bytes per
    message, and 12,000 bytes total; later turns resume the new thread. A rollback
    rotates sessions that already adopted the new fingerprint once more.
-5. After the new Web deployment is current and the prior function window has
-   drained, run the hosted Web contract migration. It installs both
-   detached-payer checks as `NOT VALID` new-write guards and then validates
-   existing rows.
+5. Do not run a second postdeploy constraint installer. The historical
+   `20260720233000_hosted_group_usage_funding_invariants` contract migration is
+   retained as immutable history but is superseded and omitted by the runner;
+   reapplying it would incorrectly require a Checkout Session for fulfilled
+   direct payments.
 6. Before widening exposure, smoke one pre-existing healthy hosted session:
    its first turn must rotate and reply without low context, and its second turn
    must resume the new provider thread. Also smoke group funding, a paid webhook

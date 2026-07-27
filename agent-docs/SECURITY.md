@@ -96,7 +96,10 @@ Last verified: 2026-07-25
   authority may gate retry but must not gate cancellation. Payer deletion may
   detach a fulfilled sessionless purchase only after clearing payer-encrypted
   references and retaining its non-secret PaymentIntent/Charge lookup proof for
-  later refund or dispute reconciliation.
+  later refund or dispute reconciliation. PostgreSQL enforces that proof
+  directly: a detached fulfilled row must remain paid, terminal, reconciled,
+  and carry both lookup keys, while the separate ciphertext constraint rejects
+  any retained payer-encrypted Stripe value.
 - Stripe proves payment; it does not own Murph usage capacity. A browser return
   or client-reported Session or PaymentIntent state must never grant credit.
   The verified Stripe receipt owner must re-fetch and bind the live one-time

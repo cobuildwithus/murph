@@ -925,6 +925,18 @@ deploy, then add validating constraints or clean up the old shape only after
 the replacement deployment is live and the prior production function window
 has drained.
 
+The exact
+`20260727040000_relax_hosted_usage_credit_detached_direct_proof` migration is a
+narrow predeploy exception to that default. It replaces only the two existing
+usage-credit detached-payer checks with a backward-compatible relaxation:
+fulfilled direct payments may retain PaymentIntent and Charge lookup proof
+without a Checkout Session, while payer-owned rows, other payerless terminal
+states, and ciphertext clearing retain their existing requirements. Running it
+before the application serves is necessary because the new application can
+create that sessionless fulfilled shape. The migration guard permits only its
+proved constraint drop/add operations and still rejects any additional
+incompatible DDL.
+
 Production `DATABASE_URL` must use PlanetScale's transaction-mode PgBouncer
 endpoint (normally port `6432`); `DIRECT_DATABASE_URL` remains the direct
 Postgres endpoint for migrations and other session-scoped administration. The
@@ -993,6 +1005,13 @@ without letting stale events replace valid pending runs. After those gates, it c
 The shared production migration URL resolver strips Prisma-style
 `sslcert=system`, `sslkey=system`, and `sslrootcert=system` markers before
 handing Postgres URLs to raw `pg` clients, while preserving real SSL file paths.
+The historical
+`20260720233000_hosted_group_usage_funding_invariants` contract migration is
+retained for audit history but omitted by the runner because the later
+`20260727040000_relax_hosted_usage_credit_detached_direct_proof` Prisma
+migration now owns both constraints on fresh and upgraded databases. It must
+not run after promotion or it would tighten fulfilled direct payments back to
+requiring a Checkout Session.
 The merged
 `20260715120000_delete_orphaned_linq_invite_deliveries` Prisma migration is an
 unchanged historical first pass because production may already have recorded

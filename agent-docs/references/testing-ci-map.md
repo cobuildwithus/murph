@@ -185,7 +185,12 @@ exact admitted group thread.
   successful predeploy migration can outlive a later build failure. Required
   columns, renames, `SET NOT NULL`, and incompatible type changes require
   expand/backfill/switch/final-cleanup sequencing; only final cleanup belongs in
-  `apps/web/prisma/contract-migrations`. Destructive hosted web contract cleanup
+  `apps/web/prisma/contract-migrations`. The exact detached direct-payment proof
+  migration is a tested backward-compatible exception: migration-guard tests
+  restrict it to its constraint replacement, static migration tests pin the
+  required shape, and the opt-in real-PostgreSQL suite proves sessionless
+  fulfilled detachment succeeds while missing PaymentIntent or Charge lookup
+  proof is rejected. Destructive hosted web contract cleanup
   is applied by `.github/workflows/hosted-web-contract-migrations.yml` after a
   successful Vercel-originated completed production deployment status; that
   workflow checks out the deployed SHA, verifies it is reachable from

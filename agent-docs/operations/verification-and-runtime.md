@@ -162,7 +162,9 @@ binding before confirmation, exact-intent recovery after ambiguous responses,
 account-deletion-before-bind cancellation, verified cancellation before
 Checkout fallback, payer-owned sessionless cancellation, direct webhook
 fulfillment, payerless refund/dispute convergence without a Checkout Session,
-and the shared dialog.
+the shared dialog, and a real migrated-PostgreSQL account-deletion proof that a
+sessionless fulfilled purchase detaches while missing PaymentIntent or Charge
+lookup proof is rejected by the database constraint.
 These provider-backed tests remain mocked; release proof still needs the
 documented Stripe test-mode and desktop/mobile browser smokes.
 
