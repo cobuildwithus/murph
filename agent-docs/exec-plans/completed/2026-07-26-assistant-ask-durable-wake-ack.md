@@ -1,6 +1,6 @@
 # Assistant Ask durable wake acknowledgment
 
-Status: active
+Status: completed
 Created: 2026-07-26
 Updated: 2026-07-26
 
@@ -74,9 +74,16 @@ Updated: 2026-07-26
   coverage but could not pass on the older branch base: the root ReviewGPT
   dependency was `^0.5.117` while its CLI audit still expected `^0.5.114`, a
   drift already corrected on current `main`; an unrelated interactive
-  setup-wizard test also failed during that doomed run. Rebase and a fresh
-  acceptance run on current `main` remain required.
+  setup-wizard test also failed during that doomed run.
+- After rebasing onto current `main`, the final canonical `pnpm test:diff ...`
+  passed in Blacksmith Testbox `tbx_01kygrdsp04g1f13y4w04e982r`, including
+  all 530 Web test files, 6,748 tests, typecheck, lint, production build, and
+  repository policy/architecture guards.
+- The final `pnpm verify:acceptance` passed in Blacksmith Testbox
+  `tbx_01kygrx928pye9p8sk8r25fvry`, including the full package and application
+  acceptance surface.
 
 ## Deployment
 
 - Web-only control-flow correction. No Cloudflare/runtime API or schema change.
+Completed: 2026-07-26
