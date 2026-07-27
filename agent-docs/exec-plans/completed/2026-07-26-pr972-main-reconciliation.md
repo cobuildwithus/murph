@@ -1,8 +1,8 @@
 # PR 972 Current-Main Reconciliation
 
-Status: complete
+Status: completed
 Created: 2026-07-26
-Updated: 2026-07-26
+Updated: 2026-07-27
 
 ## Goal
 
@@ -63,3 +63,4 @@ Updated: 2026-07-26
 - An earlier broad CLI diff attempt exposed unrelated Testbox timeouts in
   unchanged CLI suites. The exact edited release audit passed locally, and the
   later full canonical acceptance run passed the complete CLI coverage lane.
+Completed: 2026-07-27
