@@ -1,8 +1,8 @@
 # Growth dashboard sender WAU and MAU
 
-Status: active
+Status: completed
 Created: 2026-07-26
-Updated: 2026-07-26
+Updated: 2026-07-27
 
 ## Goal
 
@@ -57,4 +57,25 @@ Updated: 2026-07-26
 
 ## Verification
 
-- Pending.
+- Focused hosted growth suite: 24 tests passed, including registered email
+  deduplication and conflicting privacy-key-version rejection.
+- Canonical `pnpm test:diff` passed on a fresh Blacksmith Testbox after the
+  coverage remediation, including Web tests, typecheck, lint, build, and route
+  smoke. An unrelated preference-handoff sweeper failure from the preceding
+  local full-suite attempt passed immediately in isolation.
+- Canonical `pnpm verify:acceptance` passed on a fresh Blacksmith Testbox.
+- Responsive design-catalog proof passed at desktop and mobile widths for all
+  scorecard states, including dedicated no-supporting-baselines captures and
+  explicit horizontal-overflow checks. Four redacted synthetic screenshots were
+  uploaded through the worktree-safe design-proof command and embedded in the
+  PR.
+- Product-experience review returned no findings. The preliminary specialist
+  review found one owner-level coverage gap; the email and rotation-conflict
+  regressions above resolve it.
+- Read-only production aggregates confirmed retained attributable group traffic
+  in both Linq and Telegram over the trailing thirty days without retrieving
+  sender identifiers.
+- The Claude UI double-check was attempted and stopped at explicit usage-credit
+  exhaustion. The final cross-cutting PR review runs against the archived,
+  pushed exact head.
+Completed: 2026-07-27
