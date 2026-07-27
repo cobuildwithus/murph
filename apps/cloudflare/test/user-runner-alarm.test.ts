@@ -4212,6 +4212,7 @@ describe("HostedUserRunner execution coordination", () => {
     await expect(runner.deleteHostedUserData(TEST_USER_ID)).resolves.toMatchObject({
       durableObject: {
         alarmCleared: true,
+        deleteAllCompleted: true,
         stateDeleted: true,
       },
       ok: true,
@@ -5288,6 +5289,10 @@ function createDurableObjectState(input: {
   const values = new Map<string, unknown>();
   const storage: DurableObjectStorageLike = {
     delete: async (key) => values.delete(key),
+    deleteAll: async () => {
+      values.clear();
+      activeAlarm = null;
+    },
     deleteAlarm: async () => {
       if (input.alarmDeleteError) {
         throw input.alarmDeleteError;

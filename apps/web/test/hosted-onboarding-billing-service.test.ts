@@ -375,6 +375,8 @@ describe("createHostedBillingCheckout", () => {
       },
     }, {
       idempotencyKey: "hosted-auto-pulse-trial-customer:member_123",
+      maxNetworkRetries: 0,
+      timeout: 5_000,
     });
     expect(prisma.hostedMemberBillingRef.upsert).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -863,6 +865,11 @@ function makePrisma(input: {
   );
   const prismaTx = {
     $queryRaw: vi.fn().mockResolvedValue([]),
+    hostedMember: {
+      findUnique: vi.fn().mockResolvedValue({
+        suspendedAt: null,
+      }),
+    },
     hostedMemberBillingRef: {
       findMany: vi.fn().mockResolvedValue([]),
       findUnique,
