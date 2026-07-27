@@ -1,8 +1,8 @@
 # Device-sync wake epoch fence
 
-Status: active
+Status: completed
 Created: 2026-07-26
-Updated: 2026-07-26
+Updated: 2026-07-27
 
 ## Goal
 
@@ -71,6 +71,26 @@ Updated: 2026-07-26
   fails legacy connection-scoped hints closed after current snapshot hydration;
   Web begins emitting epoch-bearing wakes only after the exact new runner
   fingerprint is proved. This avoids inventing a mailbox-pause mechanism.
+- Preliminary `completion-specialists` reviewed exact pushed head
+  `a2e628ae5c558445a15be594bf91075e55ae2649`. Its prompt and frontend lenses
+  were not applicable. The coverage lens found that provider-supplied initial
+  job dedupe keys bypassed the new epoch boundary, allowing replacement-epoch
+  Junction jobs to alias an older epoch's queued or running work.
+- The added producer-boundary regression failed before remediation because two
+  connection-established wakes with the same explicit provider key and
+  different `connectedAt` epochs emitted the same unchanged key. The smallest
+  correction makes the existing Web normalization owner hash both explicit and
+  fallback keys with `connectionId` plus `expectedConnectedAt`; same-epoch
+  retries remain stable and replacement epochs are distinct.
+- The focused producer regression passes after remediation; the complete
+  hosted device-sync wake suite passes all 90 tests and Hosted Web typechecking
+  passes.
+- Canonical local `pnpm test:diff <all changed paths>` passes across every
+  affected package and the full Hosted Web verification surface.
+- Canonical local `pnpm verify:acceptance` passes across the complete package
+  coverage, Cloudflare, and Hosted Web acceptance surface.
+- A final focused producer regression recheck and per-file ESLint run pass
+  after removing the remediation test's two unused-parameter warnings.
 
 ## Deployment
 
@@ -78,3 +98,4 @@ Updated: 2026-07-26
   must document the compatibility window and safe Web/runner deployment order.
 - No schema migration is expected because `connectedAt` already exists in both
   control-plane and local snapshots.
+Completed: 2026-07-27

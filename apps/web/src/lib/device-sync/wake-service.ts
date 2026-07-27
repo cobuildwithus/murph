@@ -1224,9 +1224,13 @@ function normalizeHostedDeviceSyncJobHints(input: {
     const stableSeed = JSON.stringify({
       connectionId: input.connectionId,
       expectedConnectedAt: input.expectedConnectedAt,
-      index,
-      kind: job.kind,
-      payload,
+      ...(typeof job.dedupeKey === "string"
+        ? { providerDedupeKey: job.dedupeKey }
+        : {
+            index,
+            kind: job.kind,
+            payload,
+          }),
       reason: input.reason,
       traceId: input.traceId ?? null,
     });
@@ -1234,7 +1238,7 @@ function normalizeHostedDeviceSyncJobHints(input: {
     return {
       kind: job.kind,
       ...(job.availableAt ? { availableAt: job.availableAt } : {}),
-      dedupeKey: job.dedupeKey ?? `hosted-device-sync:${sha256Hex(stableSeed)}`,
+      dedupeKey: `hosted-device-sync:${sha256Hex(stableSeed)}`,
       ...(typeof job.maxAttempts === "number" ? { maxAttempts: job.maxAttempts } : {}),
       payload,
       ...(typeof job.priority === "number" ? { priority: job.priority } : {}),

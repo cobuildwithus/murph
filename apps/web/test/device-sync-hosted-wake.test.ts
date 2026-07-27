@@ -30,7 +30,7 @@ const mocks = vi.hoisted(() => {
     registryGet: vi.fn(),
     registryList: vi.fn(),
     resumeSdkSignInSession: vi.fn(),
-    sha256Hex: vi.fn(() => "a".repeat(64)),
+    sha256Hex: vi.fn<(value: string) => string>(() => "a".repeat(64)),
     syncDurableConnectionState: vi.fn(),
     getDirtyConnection: vi.fn(),
     upsertDirtyConnection: vi.fn(),
@@ -362,6 +362,7 @@ import { PrismaDeviceSyncControlPlaneStore } from "@/src/lib/device-sync/prisma-
 import { getPrisma } from "@/src/lib/prisma";
 import {
   appendHostedDeviceSyncScheduledReconcileWake,
+  handleHostedDeviceSyncConnectionEstablished,
   persistHostedDeviceSyncCompanionMetadata,
 } from "@/src/lib/device-sync/wake-service";
 import { buildHostedDeviceSyncWakeEventId } from "@/src/lib/device-sync/wake";
@@ -2249,6 +2250,75 @@ describe("hosted device-sync wakes", () => {
     expect(mocks.ensureWebhookSubscriptions).toHaveBeenCalledWith({
       publicBaseUrl: "https://control.example.test/api/device-sync",
     });
+  });
+
+  it("namespaces provider initial-job dedupe keys by connection epoch", async () => {
+    const firstConnectedAt = "2026-03-26T12:00:00.000Z";
+    const secondConnectedAt = "2026-03-26T12:01:00.000Z";
+    mocks.sha256Hex.mockImplementation((value: string) => {
+      if (value.includes(firstConnectedAt)) {
+        return "a".repeat(64);
+      }
+      if (value.includes(secondConnectedAt)) {
+        return "b".repeat(64);
+      }
+      return "c".repeat(64);
+    });
+    mocks.getConnectionForUser
+      .mockResolvedValueOnce(buildHostedConnection({
+        connectedAt: firstConnectedAt,
+        id: "dsc_junction",
+        provider: "junction",
+        scopes: [],
+      }))
+      .mockResolvedValueOnce(buildHostedConnection({
+        connectedAt: secondConnectedAt,
+        id: "dsc_junction",
+        provider: "junction",
+        scopes: [],
+      }));
+    const store = new PrismaDeviceSyncControlPlaneStore({
+      prisma: getPrisma(),
+    });
+    const connection = {
+      initialJobs: [{
+        dedupeKey: "junction:initial-reconcile",
+        kind: "reconcile" as const,
+        payload: {
+          windowEnd: "2026-03-26T12:00:00.000Z",
+          windowStart: "2026-03-19T12:00:00.000Z",
+        },
+      }],
+      nextReconcileAt: null,
+    };
+
+    try {
+      for (const connectedAt of [firstConnectedAt, secondConnectedAt]) {
+        await handleHostedDeviceSyncConnectionEstablished({
+          account: {
+            connectedAt,
+            id: "dsc_junction",
+            provider: "junction",
+            scopes: [],
+            status: "active",
+          },
+          connection,
+          now: connectedAt,
+          store,
+        });
+      }
+
+      const dedupeKeys = mocks.appendHostedMailboxEnvelope.mock.calls.map(
+        ([input]) => input.envelope.hint.jobs[0]?.dedupeKey,
+      );
+      expect(dedupeKeys).toEqual([
+        `hosted-device-sync:${"a".repeat(64)}`,
+        `hosted-device-sync:${"b".repeat(64)}`,
+      ]);
+      expect(new Set(dedupeKeys)).toHaveLength(2);
+    } finally {
+      mocks.sha256Hex.mockImplementation(() => "a".repeat(64));
+    }
   });
 
   it.each([
