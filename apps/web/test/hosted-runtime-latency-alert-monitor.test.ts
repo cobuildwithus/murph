@@ -269,6 +269,72 @@ describe("hosted runtime latency alert monitor", () => {
     expect(sendLinqMessage).not.toHaveBeenCalled();
   });
 
+  it("clears a healthy incident while disabled so a later recurrence alerts", async () => {
+    const fixture = createMonitorPrismaFixture([
+      latencyRow({
+        acceptedAt: "2026-07-26T15:58:00.000Z",
+      }),
+    ]);
+    const sendLinqMessage = vi.fn(async (input: LinqSendInput) => {
+      void input;
+      return {
+        chatId: "opaque-alert-chat",
+        messageId: "provider-message",
+      };
+    });
+
+    const opened = await runHostedRuntimeLatencyAlertMonitor({
+      env: alertEnv,
+      now,
+      prisma: fixture.prisma,
+      sendLinqMessage,
+    });
+    fixture.setRows([]);
+    const disabledHealthy = await runHostedRuntimeLatencyAlertMonitor({
+      env: {},
+      now: instant("2026-07-26T16:05:00.000Z"),
+      prisma: fixture.prisma,
+      sendLinqMessage,
+    });
+    fixture.setRows([
+      latencyRow({
+        acceptedAt: "2026-07-26T16:08:00.000Z",
+      }),
+    ]);
+    const disabledAnomaly = await runHostedRuntimeLatencyAlertMonitor({
+      env: {},
+      now: instant("2026-07-26T16:10:00.000Z"),
+      prisma: fixture.prisma,
+      sendLinqMessage,
+    });
+
+    expect(opened.outcome).toBe("alert_sent");
+    expect(disabledHealthy).toMatchObject({
+      configured: false,
+      outcome: "disabled",
+    });
+    expect(disabledAnomaly).toMatchObject({
+      configured: false,
+      outcome: "disabled",
+    });
+    expect(fixture.readState()?.status).toBe("latency_healthy");
+    expect(fixture.alertUpsert).toHaveBeenCalledTimes(1);
+    expect(sendLinqMessage).toHaveBeenCalledTimes(1);
+
+    const recurred = await runHostedRuntimeLatencyAlertMonitor({
+      env: alertEnv,
+      now: instant("2026-07-26T16:11:00.000Z"),
+      prisma: fixture.prisma,
+      sendLinqMessage,
+    });
+
+    expect(recurred.outcome).toBe("alert_sent");
+    expect(sendLinqMessage).toHaveBeenCalledTimes(2);
+    expect(sendLinqMessage.mock.calls[1]?.[0].idempotencyKey).not.toBe(
+      sendLinqMessage.mock.calls[0]?.[0].idempotencyKey,
+    );
+  });
+
   it("does not send when a concurrent cron already won the incident claim", async () => {
     const fixture = createMonitorPrismaFixture(
       [
@@ -478,6 +544,7 @@ interface AlertUpdateManyArgs {
   };
   where: {
     id: string;
+    kind?: string;
     lastAttemptedAt?: Date | null;
     status?: string;
   };
@@ -487,7 +554,11 @@ function matchesAlertWhere(
   state: HostedLinqAlert,
   where: AlertUpdateManyArgs["where"],
 ): boolean {
-  if (state.id !== where.id || (where.status && state.status !== where.status)) {
+  if (
+    state.id !== where.id
+    || (where.kind && state.kind !== where.kind)
+    || (where.status && state.status !== where.status)
+  ) {
     return false;
   }
   if (where.lastAttemptedAt === undefined) {
