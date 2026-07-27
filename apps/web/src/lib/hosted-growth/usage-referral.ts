@@ -1048,14 +1048,7 @@ export function hostedUsageReferralDestinationMatchesSourceConversation(input: {
   ) {
     return false;
   }
-  if (destination.route.threadId === sourceConversation.threadId) {
-    return true;
-  }
-  return sourceConversation.channel === "linq"
-    && sourceConversation.identityId !== null
-    && sourceConversation.participantId !== null
-    && destination.route.identityId === sourceConversation.identityId
-    && destination.route.actorId === sourceConversation.participantId;
+  return destination.route.threadId === sourceConversation.threadId;
 }
 
 function readHostedUsageReferralSourceConversation(

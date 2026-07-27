@@ -120,23 +120,50 @@ describe("hosted usage referral policy", () => {
       threadId: "provider-direct-thread",
     });
 
-    const linqWake = buildHostedUsageReferralCelebrationWake({
-      beneficiaryMemberId: "member_personal",
+    const linqSourceConversation = {
+      channel: "linq" as const,
+      identityId: `hid_${"6".repeat(32)}`,
+      participantId: `hid_${"5".repeat(32)}`,
+      threadId: `hid_${"7".repeat(32)}`,
+      threadIsDirect: true,
+    };
+    const linqDestination = {
+      conversationShape: "direct-member" as const,
+      externalThreadRouteAuthority: null,
+      route: {
+        actorId: linqSourceConversation.participantId,
+        channel: "linq" as const,
+        delivery: {
+          kind: "thread" as const,
+          target: "provider-linq-source-thread",
+        },
+        identityId: linqSourceConversation.identityId,
+        threadId: linqSourceConversation.threadId,
+        threadIsDirect: true,
+      },
+    };
+    expect(hostedUsageReferralDestinationMatchesSourceConversation({
+      destination: linqDestination,
+      sourceConversation: linqSourceConversation,
+    })).toBe(true);
+    expect(hostedUsageReferralDestinationMatchesSourceConversation({
       destination: {
-        conversationShape: "direct-member",
-        externalThreadRouteAuthority: null,
+        ...linqDestination,
         route: {
-          actorId: `hid_${"5".repeat(32)}`,
-          channel: "linq",
+          ...linqDestination.route,
           delivery: {
             kind: "thread",
-            target: "provider-linq-source-thread",
+            target: "provider-linq-current-home-b",
           },
-          identityId: `hid_${"6".repeat(32)}`,
-          threadId: `hid_${"7".repeat(32)}`,
-          threadIsDirect: true,
+          threadId: `hid_${"8".repeat(32)}`,
         },
       },
+      sourceConversation: linqSourceConversation,
+    })).toBe(false);
+
+    const linqWake = buildHostedUsageReferralCelebrationWake({
+      beneficiaryMemberId: "member_personal",
+      destination: linqDestination,
       notificationKey: "usage-referral-reward:referral_personal_linq",
       rewardLabel: "$2 of Murph usage",
       rewardedAt: new Date("2026-07-26T12:00:00.000Z"),
