@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
 import { BaseSequencer, type TestSpecification } from "vitest/node";
 
-import { murphVitestNoTimeouts } from "../../config/vitest-timeouts.js";
+import { murphVitestStandardTimeouts } from "../../config/vitest-timeouts.js";
 import { murphVitestTempGlobalSetup } from "../../config/vitest-temp-lifecycle.js";
 
 import { cloudflareVitestAliases } from "./vitest.shared.js";
@@ -65,7 +65,7 @@ export default defineConfig({
     ],
   },
   test: {
-    ...murphVitestNoTimeouts,
+    ...murphVitestStandardTimeouts,
     environment: "node",
     fileParallelism: false,
     globalSetup: [murphVitestTempGlobalSetup],

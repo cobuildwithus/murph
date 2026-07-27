@@ -8,7 +8,7 @@ import {
   resolveMurphVitestConcurrency,
 } from "../../config/vitest-parallelism.js";
 import { murphVitestTempGlobalSetup } from "../../config/vitest-temp-lifecycle.js";
-import { murphVitestNoTimeouts } from "../../config/vitest-timeouts.js";
+import { murphVitestStandardTimeouts } from "../../config/vitest-timeouts.js";
 
 import {
   createVitestWorkspaceRuntimeAliases,
@@ -38,7 +38,7 @@ function createHostedWebProject(name: string, fileNames: readonly string[]) {
       alias: hostedWebAliases,
     },
     test: {
-      ...murphVitestNoTimeouts,
+      ...murphVitestStandardTimeouts,
       name,
       environment: "node",
       globalSetup: [murphVitestTempGlobalSetup],
@@ -125,7 +125,7 @@ export const hostedWebVitestProjects = hostedWebVitestProjectSpecs.map(
 
 export default defineConfig({
   test: {
-    ...murphVitestNoTimeouts,
+    ...murphVitestStandardTimeouts,
     maxWorkers: hostedWebVitestMaxWorkers,
     projects: hostedWebVitestProjects,
   },

@@ -11,7 +11,7 @@ import {
   resolveMurphVitestConcurrency,
   resolveMurphVitestMaxWorkers,
 } from "./vitest-parallelism.js";
-import { murphVitestNoTimeouts } from "./vitest-timeouts.js";
+import { murphVitestStandardTimeouts } from "./vitest-timeouts.js";
 import { murphVitestTempGlobalSetup } from "./vitest-temp-lifecycle.js";
 import { createVitestAliasesFromTsconfigPaths } from "./workspace-source-resolution.js";
 
@@ -46,7 +46,7 @@ export function createMurphPackageVitestConfig(input: MurphPackageVitestConfigIn
       : {}),
     ...(aliases.length > 0 ? { resolve: { alias: aliases } } : {}),
     test: {
-      ...(input.useDefaultTimeouts === false ? {} : murphVitestNoTimeouts),
+      ...(input.useDefaultTimeouts === false ? {} : murphVitestStandardTimeouts),
       name: input.name,
       environment: "node",
       ...(input.useDefaultConcurrency === false ? {} : resolveMurphVitestConcurrency()),

@@ -5,7 +5,7 @@ import {
   resolveMurphAppVitestMaxWorkers,
   resolveMurphVitestConcurrency,
 } from "../../config/vitest-parallelism.js";
-import { murphVitestNoTimeouts } from "../../config/vitest-timeouts.js";
+import { murphVitestStandardTimeouts } from "../../config/vitest-timeouts.js";
 import { murphVitestTempGlobalSetup } from "../../config/vitest-temp-lifecycle.js";
 
 import { cloudflareVitestAliases } from "./vitest.shared.js";
@@ -23,7 +23,7 @@ export default defineProject({
     alias: cloudflareVitestAliases,
   },
   test: {
-    ...murphVitestNoTimeouts,
+    ...murphVitestStandardTimeouts,
     name: "cloudflare-workers",
     globalSetup: [murphVitestTempGlobalSetup],
     maxWorkers: resolveMurphAppVitestMaxWorkers(),
