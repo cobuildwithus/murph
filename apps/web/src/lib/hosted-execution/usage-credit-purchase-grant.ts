@@ -1,14 +1,12 @@
 import type { Prisma } from "@prisma/client";
 
-import { generateHostedRandomPrefixedId } from "../primitives";
 import {
-  applyHostedUsageCreditProjectionDeltaTx,
   assertHostedUsageCreditDate,
   lockHostedUsageCreditBeneficiaryTx,
   lockHostedUsageCreditPurchaseTx,
-  reconcileHostedUsageCreditCurrentPeriodBlockTx,
   type HostedUsageCreditProjection,
 } from "./usage-credit-ledger";
+import { appendHostedUsageCreditGrantTx } from "./usage-credit-grant";
 
 export interface HostedUsageCreditGrantResult
   extends HostedUsageCreditProjection {
@@ -40,7 +38,7 @@ export async function grantHostedUsageCreditForPurchaseTx(input: {
     throw new TypeError("Hosted usage-credit purchase does not exist.");
   }
 
-  let projection = await lockHostedUsageCreditBeneficiaryTx({
+  const lockedBeneficiary = await lockHostedUsageCreditBeneficiaryTx({
     beneficiaryMemberId: discoveredPurchase.beneficiaryMemberId,
     tx: input.tx,
   });
@@ -49,11 +47,17 @@ export async function grantHostedUsageCreditForPurchaseTx(input: {
     tx: input.tx,
   });
 
-  if (purchase.beneficiaryMemberId !== projection.beneficiaryMemberId) {
+  if (purchase.beneficiaryMemberId !== lockedBeneficiary.beneficiaryMemberId) {
     throw new TypeError("Hosted usage-credit purchase beneficiary changed during fulfillment.");
   }
   if (purchase.grantUsdMicros <= 0n) {
     throw new TypeError("Hosted usage-credit purchase grant must be positive.");
+  }
+  if (
+    purchase.paidAt !== null
+    && purchase.paidAt.getTime() !== input.paidAt.getTime()
+  ) {
+    throw new TypeError("Hosted usage-credit purchase paid timestamp changed.");
   }
 
   const semanticSourceKey = buildHostedUsageCreditPurchaseGrantSemanticSourceKey(
@@ -67,6 +71,10 @@ export async function grantHostedUsageCreditForPurchaseTx(input: {
     select: {
       amountUsdMicros: true,
       beneficiaryMemberId: true,
+      effectiveAt: true,
+      grant: {
+        select: { remainingUsdMicros: true },
+      },
       id: true,
       semanticSourceKey: true,
     },
@@ -74,57 +82,43 @@ export async function grantHostedUsageCreditForPurchaseTx(input: {
 
   if (existingGrant) {
     if (
-      existingGrant.amountUsdMicros !== purchase.grantUsdMicros
-      || existingGrant.beneficiaryMemberId !== purchase.beneficiaryMemberId
-      || existingGrant.semanticSourceKey !== semanticSourceKey
-      || purchase.status !== "fulfilled"
+      purchase.status !== "fulfilled"
       || purchase.paidAt === null
       || purchase.paidAt.getTime() !== input.paidAt.getTime()
+      || existingGrant.amountUsdMicros !== purchase.grantUsdMicros
+      || existingGrant.beneficiaryMemberId !== purchase.beneficiaryMemberId
+      || existingGrant.grant?.remainingUsdMicros
+        !== purchase.remainingCreditUsdMicros
+      || existingGrant.effectiveAt.getTime() !== input.paidAt.getTime()
+      || existingGrant.semanticSourceKey !== semanticSourceKey
     ) {
       throw new TypeError("Hosted usage-credit purchase grant invariant failed.");
     }
 
     return {
-      balanceUsdMicros: projection.balanceUsdMicros,
+      balanceUsdMicros: lockedBeneficiary.balanceUsdMicros,
       entryId: existingGrant.id,
       granted: false,
-      ledgerVersion: projection.ledgerVersion,
+      ledgerVersion: lockedBeneficiary.ledgerVersion,
     };
   }
 
   if (purchase.status === "fulfilled") {
-    throw new TypeError("Hosted usage-credit fulfilled purchase is missing its grant.");
+    throw new TypeError(
+      "Hosted usage-credit fulfilled purchase is missing its grant projection.",
+    );
   }
   if (purchase.remainingCreditUsdMicros !== 0n) {
     throw new TypeError("Hosted usage-credit unfulfilled purchase has remaining credit.");
   }
-  if (
-    purchase.paidAt !== null
-    && purchase.paidAt.getTime() !== input.paidAt.getTime()
-  ) {
-    throw new TypeError("Hosted usage-credit purchase paid timestamp changed.");
-  }
-
-  projection = await applyHostedUsageCreditProjectionDeltaTx({
-    deltaUsdMicros: purchase.grantUsdMicros,
-    locked: projection,
+  const grant = await appendHostedUsageCreditGrantTx({
+    effectiveAt: input.paidAt,
+    grantUsdMicros: purchase.grantUsdMicros,
+    lockedBeneficiary,
+    semanticSourceKey,
+    source: { kind: "purchase", purchaseId: purchase.id },
     tx: input.tx,
   });
-  const entryId = generateHostedRandomPrefixedId("huce");
-
-  await input.tx.hostedUsageCreditEntry.create({
-    data: {
-      amountUsdMicros: purchase.grantUsdMicros,
-      beneficiaryMemberId: purchase.beneficiaryMemberId,
-      beneficiarySequence: projection.ledgerVersion,
-      effectiveAt: input.paidAt,
-      id: entryId,
-      kind: "purchase_grant",
-      purchaseId: purchase.id,
-      semanticSourceKey,
-    },
-  });
-
   const fulfilled = await input.tx.hostedUsageCreditPurchase.updateMany({
     where: {
       beneficiaryMemberId: purchase.beneficiaryMemberId,
@@ -143,18 +137,11 @@ export async function grantHostedUsageCreditForPurchaseTx(input: {
     throw new TypeError("Hosted usage-credit purchase fulfillment lost its locked row.");
   }
 
-  await reconcileHostedUsageCreditCurrentPeriodBlockTx({
-    balanceUsdMicros: projection.balanceUsdMicros,
-    beneficiaryMemberId: purchase.beneficiaryMemberId,
-    effectiveAt: input.paidAt,
-    tx: input.tx,
-  });
-
   return {
-    balanceUsdMicros: projection.balanceUsdMicros,
-    entryId,
-    granted: true,
-    ledgerVersion: projection.ledgerVersion,
+    balanceUsdMicros: grant.balanceUsdMicros,
+    entryId: grant.entryId,
+    granted: grant.granted,
+    ledgerVersion: grant.ledgerVersion,
   };
 }
 

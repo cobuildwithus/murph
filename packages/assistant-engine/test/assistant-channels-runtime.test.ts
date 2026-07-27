@@ -2408,6 +2408,49 @@ describe('assistant channels runtime seam', () => {
     })
   })
 
+  it('keeps an explicit direct Linq target out of current-home fallback', async () => {
+    const sendLinq = vi.fn().mockResolvedValue({
+      providerMessageId: 'sent-message',
+      providerThreadId: 'source-chat-a',
+      target: 'source-chat-a',
+      targetKind: 'explicit',
+    })
+
+    await expect(
+      ASSISTANT_CHANNEL_ADAPTERS.linq.send(
+        {
+          actorId: null,
+          bindingDelivery: null,
+          explicitTarget: 'source-chat-a',
+          idempotencyKey: 'usage-referral-reward:referral-1',
+          identityId: null,
+          message: 'Mission complete.',
+          replyToMessageId: null,
+          threadIsDirect: true,
+        },
+        {
+          sendLinq,
+        },
+      ),
+    ).resolves.toMatchObject({
+      providerMessageId: 'sent-message',
+      providerThreadId: 'source-chat-a',
+      target: 'source-chat-a',
+    })
+
+    expect(sendLinq).toHaveBeenCalledWith({
+      answeredMailboxItemIds: [],
+      directRecipientPhoneNumber: null,
+      fromPhoneNumber: null,
+      homeRouteFallbackAllowed: false,
+      idempotencyKey: 'usage-referral-reward:referral-1',
+      message: 'Mission complete.',
+      replyToMessageId: null,
+      target: 'source-chat-a',
+      targetKind: 'explicit',
+    })
+  })
+
   it('does not recover unclassified Linq send 404 errors as stale chats', async () => {
     vi.stubEnv('LINQ_API_TOKEN', 'linq-token')
     const unclassifiedNotFoundError = new VaultCliError(

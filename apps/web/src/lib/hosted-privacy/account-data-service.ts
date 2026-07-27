@@ -289,7 +289,19 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
     slug: "prisma.hosted_usage_credit_entry",
     label: "Hosted usage-credit ledger entries",
     deletion: "live-delete",
-    note: "Deletes member-scoped usage-credit ledger entries before their purchase and member owners. The deletion result reports row counts; browser-vault export omits semantic source keys, usage references, and allocation history.",
+    note: "Deletes member-scoped usage-credit ledger entries before their purchase, referral, and member owners. The deletion result reports row counts; browser-vault export omits semantic source keys and usage-allocation history.",
+  },
+  {
+    slug: "prisma.hosted_usage_credit_grant",
+    label: "Hosted usage-credit grant projections",
+    deletion: "live-delete",
+    note: "Deletes member-scoped mutable remaining-credit projections before their canonical ledger entries.",
+  },
+  {
+    slug: "prisma.hosted_usage_referral",
+    label: "Hosted usage referrals",
+    deletion: "live-delete",
+    note: "Deletes unearned member-scoped referral state. A rewarded grant retained for a surviving group keeps only an anonymized accounting receipt with referrer, introduced-member, target-chat, and observation evidence removed.",
   },
   {
     slug: "prisma.hosted_usage_credit_purchase",
@@ -1126,6 +1138,19 @@ function buildHostedUsageCreditPurchaseDeletionWhere(
   return { beneficiaryMemberId: memberIdFilter };
 }
 
+function buildHostedUsageReferralInvolvementWhere(
+  memberIdFilter: string | { in: string[] },
+): Prisma.HostedUsageReferralWhereInput {
+  return {
+    OR: [
+      { beneficiaryMemberId: memberIdFilter },
+      { introducedMemberId: memberIdFilter },
+      { referrerMemberId: memberIdFilter },
+      { targetContainerMemberId: memberIdFilter },
+    ],
+  };
+}
+
 function buildHostedLinqInviteSignupDeliveryWhere(
   memberIds: readonly string[],
 ): Prisma.HostedLinqDeliveryWhereInput {
@@ -1373,9 +1398,56 @@ async function deleteHostedAccountPrismaRows(input: {
   record("prisma.hosted_runtime_log", await input.prisma.hostedRuntimeLog.deleteMany({ where: { userId: memberIdFilter } }));
   record("prisma.hosted_user_crypto_audit", await deleteHostedUserCryptoAuditRows(input.prisma, input.memberIds));
   record("prisma.hosted_user_crypto_envelope", await deleteHostedUserCryptoEnvelopeRows(input.prisma, input.memberIds));
-  record("prisma.hosted_usage_credit_entry", await input.prisma.hostedUsageCreditEntry.deleteMany({
-    where: buildHostedUsageCreditEntryDeletionWhere(memberIdFilter),
+  const usageCreditEntryDeletionWhere =
+    buildHostedUsageCreditEntryDeletionWhere(memberIdFilter);
+  record("prisma.hosted_usage_credit_grant", await input.prisma.hostedUsageCreditGrant.deleteMany({
+    where: { entry: usageCreditEntryDeletionWhere },
   }));
+  record("prisma.hosted_usage_credit_entry", await input.prisma.hostedUsageCreditEntry.deleteMany({
+    where: usageCreditEntryDeletionWhere,
+  }));
+  const referralInvolvementWhere =
+    buildHostedUsageReferralInvolvementWhere(memberIdFilter);
+  const anonymizedRewardedReferrals =
+    await input.prisma.hostedUsageReferral.updateMany({
+      data: {
+        firstHumanMessageAt: null,
+        humanMessageCount: 0,
+        introducedMemberId: null,
+        lastHumanMessageAt: null,
+        nonReferrerMessageCount: 0,
+        observedEventKeysJson: Prisma.DbNull,
+        observedSpeakerKeysJson: Prisma.DbNull,
+        referrerMemberId: null,
+        referrerSubjectKey: null,
+        sourceConversationJson: Prisma.DbNull,
+        targetContainerMemberId: null,
+      },
+      where: {
+        AND: [
+          referralInvolvementWhere,
+          { NOT: { beneficiaryMemberId: memberIdFilter } },
+        ],
+        status: "rewarded",
+      },
+    });
+  const deletedUsageReferrals = await input.prisma.hostedUsageReferral.deleteMany({
+    where: {
+      OR: [
+        { beneficiaryMemberId: memberIdFilter },
+        {
+          AND: [
+            referralInvolvementWhere,
+            { status: { not: "rewarded" } },
+          ],
+        },
+      ],
+    },
+  });
+  recordCount(
+    "prisma.hosted_usage_referral",
+    anonymizedRewardedReferrals.count + deletedUsageReferrals.count,
+  );
   record("prisma.hosted_usage_credit_purchase", await input.prisma.hostedUsageCreditPurchase.deleteMany({
     where: buildHostedUsageCreditPurchaseDeletionWhere(memberIdFilter),
   }));

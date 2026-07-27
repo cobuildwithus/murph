@@ -24,6 +24,7 @@ import {
   HOSTED_RUNTIME_NEWSLETTER_HTML_MAX_LENGTH,
   HOSTED_RUNTIME_NEWSLETTER_SUBJECT_MAX_LENGTH,
   HOSTED_RUNTIME_NEWSLETTER_TEXT_MAX_LENGTH,
+  HOSTED_USAGE_REFERRAL_POLICY_CODES,
   isHostedRuntimeAssistantAskDiagnosticCode,
   isHostedRuntimeAssistantAskRequestId,
   sanitizeHostedProductFeedbackSummary,
@@ -786,6 +787,9 @@ export const MURPH_GROUP_TOOL = {
           'read_shared',
           'read_current',
           'read_usage',
+          'read_usage_referral',
+          'arm_usage_referral',
+          'cancel_usage_referral',
           'list_memberships',
           'leave_membership',
           'update_display_name',
@@ -817,6 +821,12 @@ export const MURPH_GROUP_TOOL = {
         maxLength: HOSTED_RUNTIME_ASSISTANT_ASK_REQUEST_ID_MAX_CODE_POINTS,
         description:
           'Required for action="ask_member" or action="revoke_disclosure_grant". For ask_member, use the exact server-issued grantId from read_current. For revoke_disclosure_grant, use the exact grantId from the immediately preceding list_memberships result. Never guess it or take it from the user.',
+      },
+      policyCode: {
+        type: 'string',
+        enum: [...HOSTED_USAGE_REFERRAL_POLICY_CODES],
+        description:
+          'Required only for action="arm_usage_referral". Use the exact policyCode from the immediately preceding read_usage_referral result after one exact current sender explicitly chooses it.',
       },
       groupLabel: {
         type: 'string',
@@ -1478,6 +1488,22 @@ const groupArgumentsSchema = z.discriminatedUnion('action', [
   z
     .object({
       action: z.literal('read_usage'),
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal('read_usage_referral'),
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal('arm_usage_referral'),
+      policyCode: z.enum(HOSTED_USAGE_REFERRAL_POLICY_CODES),
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal('cancel_usage_referral'),
     })
     .strict(),
   z
@@ -3958,6 +3984,23 @@ async function executeGroupTool(input: {
           originAssistantInputId,
         }
       : input.request
+  } else if (
+    input.request.action === 'arm_usage_referral'
+    || input.request.action === 'cancel_usage_referral'
+  ) {
+    const userActionScope =
+      input.hostedToolContext?.currentUserActionScope?.() ?? null
+    const originAssistantInputId =
+      userActionScope?.acceptedInputIds[
+        userActionScope.acceptedInputIds.length - 1
+      ] ?? null
+    if (!originAssistantInputId) {
+      return toolTextResult(
+        false,
+        'usage referral changes require fresh user-sourced input for this turn',
+      )
+    }
+    request = input.request
   } else {
     request = input.request
   }
@@ -5359,6 +5402,7 @@ function parseGroupArguments(
     || parsed.data.action === 'ask_member'
     || parsed.data.action === 'post_disclosure_request'
     || parsed.data.action === 'revoke_disclosure_grant'
+    || parsed.data.action === 'arm_usage_referral'
   ) {
     return { ok: true, request: parsed.data }
   }
@@ -5498,6 +5542,8 @@ function parseGroupArguments(
   if (
     parsed.data.action === 'list_memberships'
     || parsed.data.action === 'read_usage'
+    || parsed.data.action === 'read_usage_referral'
+    || parsed.data.action === 'cancel_usage_referral'
     || parsed.data.action === 'read_chat_participants'
     || parsed.data.action === 'share_contact_card'
     || parsed.data.action === 'revoke_own_email_share'

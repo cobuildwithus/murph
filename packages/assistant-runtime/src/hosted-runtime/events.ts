@@ -126,6 +126,9 @@ export async function executeHostedMailboxEvent(input: {
   return {
     bootstrapResult,
     conversationMetrics: mailboxEffect.conversationMetrics,
+    ...(mailboxEffect.deliveryIntentIds === undefined
+      ? {}
+      : { deliveryIntentIds: mailboxEffect.deliveryIntentIds }),
     mailboxLane: mailboxEffect.mailboxLane,
     nextWakeAt: mailboxEffect.nextWakeAt,
     ...(Object.hasOwn(mailboxEffect, "nextWakeReason")
