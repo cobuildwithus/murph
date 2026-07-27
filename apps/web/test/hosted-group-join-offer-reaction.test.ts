@@ -7,6 +7,7 @@ import { createPrismaClient } from "@/src/lib/prisma";
 import {
   createHostedExternalThreadIdentityLookupKey,
   createHostedExternalThreadIdentityLookupKeyReadCandidates,
+  createHostedLinqChatLookupKey,
   createHostedLinqChatLookupKeyReadCandidates,
   createHostedLinqMessageLookupKey,
   createHostedLinqMessageLookupKeyReadCandidates,
@@ -213,6 +214,35 @@ describe("handleHostedGroupJoinOfferReaction", () => {
       .not.toHaveBeenCalled();
   });
 
+  it("does not broaden confirmation recovery after the applied membership is gone", async () => {
+    mocks.acceptHostedGroupJoinOfferTx.mockResolvedValueOnce({
+      alreadyMember: false,
+      grantedVaultShareProjectionKinds: [],
+      grantedVaultShareProjectionScopes: [],
+      groupId: "group_1",
+      joinCode: "join_1",
+      messageLookupKey: "hbidx:linq-message:v1:offer",
+      membershipId: null,
+      revokedVaultShareProjectionKinds: [],
+      revokedVaultShareProjectionScopes: [],
+      selectedVaultShareProjectionKinds: ["sleep-times.v0"],
+      selectedVaultShareProjectionScopes: [],
+    });
+    const prisma = createPrismaStub();
+
+    await expect(handleHostedGroupJoinOfferReaction({
+      event: parseReactionEvent({ reactionType: "love" }),
+      prisma,
+    })).resolves.toEqual({ reason: "accepted", status: "accepted" });
+
+    expect(mocks.materializePendingHostedGroupJoinConfirmationsBestEffort)
+      .not.toHaveBeenCalled();
+    expect(mocks.signalHostedGroupJoinConfirmationRuntimeBestEffort).not.toHaveBeenCalled();
+    expect(mocks.signalHostedRuntimeMaintenanceRuntime).not.toHaveBeenCalled();
+    expect(mocks.enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort)
+      .not.toHaveBeenCalled();
+  });
+
   it("grants only the exact permission bound to an exact Like and existing membership", async () => {
     mocks.acceptHostedGroupDisclosurePermissionReactionTx.mockResolvedValueOnce({
       kind: "accepted",
@@ -403,12 +433,17 @@ describe("handleHostedGroupJoinOfferReaction", () => {
       currentVersion: "v1",
       entries: { ...TEST_KEYRING_ENTRIES },
     });
+    const storedChatLookupKey = createHostedLinqChatLookupKey("chat_group_1");
     const storedMessageLookupKey = createHostedLinqMessageLookupKey("msg_offer_123");
     const storedThreadIdentityLookupKey = createHostedExternalThreadIdentityLookupKey({
       channel: "linq",
       threadId: "chat_group_1",
     });
-    if (!storedMessageLookupKey || !storedThreadIdentityLookupKey) {
+    if (
+      !storedChatLookupKey
+      || !storedMessageLookupKey
+      || !storedThreadIdentityLookupKey
+    ) {
       throw new Error("Expected prior-version lookup keys.");
     }
     process.env.HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION = "v2";
@@ -441,6 +476,14 @@ describe("handleHostedGroupJoinOfferReaction", () => {
 
     expect(mocks.acceptHostedGroupJoinOfferTx).toHaveBeenCalledWith(
       expect.objectContaining({
+        linqAffirmation: {
+          eventId: event.eventId,
+          linqChatLookupKeyReadCandidates: expect.arrayContaining([
+            storedChatLookupKey,
+            expect.stringMatching(/^hbidx:linq-chat:v2:/u),
+          ]),
+          payloadHash: event.payloadHash,
+        },
         messageLookupKeyReadCandidates: createHostedLinqMessageLookupKeyReadCandidates(
           "msg_offer_123",
         ),

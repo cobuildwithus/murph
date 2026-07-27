@@ -795,6 +795,19 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
+    const hostedLinqGroupJoinApplicationStateMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260727010000_hosted_linq_group_join_application_state/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    const hostedLinqGroupJoinApplicationStateMigrationStatements =
+      hostedLinqGroupJoinApplicationStateMigrationSql
+        .split("\n")
+        .filter((line) => !line.trimStart().startsWith("--"))
+        .join("\n")
+        .trim();
     expect(migrationEntries).toEqual([
       "2026040600_init",
       "20260425000000_drop_legacy_linq_control_plane",
@@ -923,6 +936,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260726120000_hosted_growth_aggregate",
       "20260726180000_hosted_address_book_projection",
       "20260726180000_hosted_thread_container_usage_default",
+      "20260727010000_hosted_linq_group_join_application_state",
       "migration_lock.toml",
     ]);
     expect(hostedUserCryptoEnvelopeMigrationSql).toContain(
@@ -941,6 +955,18 @@ describe("hosted Prisma baseline migration", () => {
       ].join("\n"),
     );
     expect(hostedThreadContainerUsageDefaultMigrationSql).not.toMatch(/\bUPDATE\b/u);
+    expect(schema).toMatch(
+      /model HostedLinqProviderEvent \{[\s\S]*groupJoinApplicationState\s+String\?\s+@map\("group_join_application_state"\)/u,
+    );
+    expect(hostedLinqGroupJoinApplicationStateMigrationStatements).toBe(
+      [
+        'ALTER TABLE "hosted_linq_provider_event"',
+        'ADD COLUMN "group_join_application_state" TEXT;',
+      ].join("\n"),
+    );
+    expect(hostedLinqGroupJoinApplicationStateMigrationStatements).not.toMatch(
+      /\b(?:DEFAULT|UPDATE|INSERT|DELETE)\b|NOT\s+NULL/iu,
+    );
     expect(hostedMailboxSubscriptionActionClaimMigrationSql).toContain(
       'ALTER TABLE "hosted_mailbox_item"',
     );

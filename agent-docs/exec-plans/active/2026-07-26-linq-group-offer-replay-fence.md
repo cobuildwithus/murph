@@ -90,6 +90,16 @@ Updated: 2026-07-26
 - The production migration guard passes all 36 focused cases, and Prisma
   validates the updated schema.
 - `pnpm docs:drift` passes after updating the durable-doc index.
+- Preliminary `completion-specialists` reviewed exact pushed head
+  `7b2584f1bc849c49174b66ec3742a3bb73cf6a85` and returned three test-only
+  coverage findings: canonical migration inventory/shape, null-membership
+  confirmation suppression, and blind-index rotation of the Linq chat binding.
+  Its owned coverage patch SHA-256 is
+  `b848edb86ed0108f9ceac34e39cb1fdcfd7b4de50370b82565315e52dd23e0c7`.
+  All 129 lines and both paths were inspected, the patch passed
+  `git apply --check --whitespace=error-all`, and its test-only hunks were
+  applied deliberately.
+- The four focused remediation suites pass all 126 tests.
 
 ## Deployment
 
