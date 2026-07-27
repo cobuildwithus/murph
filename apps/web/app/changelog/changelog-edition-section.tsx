@@ -2,11 +2,7 @@ import type { ReactNode } from "react";
 import { Link2 } from "lucide-react";
 
 import type { MurphContactOption } from "@/src/lib/murph-contact-routing";
-import {
-  buildChangelogItemPath,
-  type ChangelogEdition,
-  type ChangelogItem,
-} from "@/src/lib/changelog";
+import type { ChangelogEdition, ChangelogItem } from "@/src/lib/changelog";
 
 import { TryItButton } from "./try-it-button";
 
@@ -21,13 +17,13 @@ const EMPTY_TRY_IT_BY_ITEM_ID = new Map<string, ResolvedChangelogTryIt>();
 const EMPTY_VISUALS: Readonly<Record<string, ReactNode>> = {};
 
 export function ChangelogEditionSection({
-  buildItemHref = buildChangelogItemPath,
+  buildItemHref,
   edition,
   isFirst = false,
   tryItByItemId = EMPTY_TRY_IT_BY_ITEM_ID,
   visuals = EMPTY_VISUALS,
 }: {
-  buildItemHref?: (itemId: string) => string;
+  buildItemHref: (itemId: string) => string;
   edition: ChangelogEdition;
   isFirst?: boolean;
   tryItByItemId?: ReadonlyMap<string, ResolvedChangelogTryIt>;

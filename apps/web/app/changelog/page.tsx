@@ -8,6 +8,7 @@ import { resolveHostedMurphContactOptions } from "@/src/components/murph/hosted-
 import {
   buildAbsoluteChangelogUrl,
   buildChangelogCardPath,
+  buildChangelogItemPath,
   buildChangelogPagePath,
   CHANGELOG_PREVIEW_CARD_ITEMS,
   type ChangelogItem,
@@ -2538,6 +2539,7 @@ export default async function ChangelogPage({
           {editions.map((edition, editionIndex) => (
             <ChangelogEditionSection
               key={edition.id}
+              buildItemHref={buildChangelogItemPath}
               edition={edition}
               isFirst={editionIndex === 0}
               tryItByItemId={tryItByItemId}
