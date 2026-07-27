@@ -1428,6 +1428,13 @@ class CodexAppServerProcess {
     return this.lastThreadTokenUsage
   }
 
+  get hasUncheckpointedDetachedWork(): boolean {
+    return (
+      this.detachedChildThreadIds.size > 0 ||
+      this.detachedChildViolation !== null
+    )
+  }
+
   private observeThreadTokenUsage(message: CodexRpcMessage): void {
     // Any compaction (in-turn auto-compact included) invalidates the retained
     // thread size: the compact request's own tokenUsage reports the large
@@ -2299,6 +2306,7 @@ export type CodexWarmThreadCompactionOutcome =
   | {
       kind: 'skipped'
       reason:
+        | 'background_work_pending'
         | 'below_threshold'
         | 'model_not_accountable'
         | 'no_thread_vitals'
@@ -2310,11 +2318,12 @@ export type CodexWarmThreadCompactionOutcome =
 
 // Non-turn compaction of the warm Codex thread, for idle-time maintenance.
 // Modeled on the other warm-slot lifecycle exports above. Failure handling is
-// deliberately blunt: any non-success poisons (kills) the warm process, which
-// is always safe because rollouts only contain completed entries — an aborted
-// compact leaves the thread uncompacted and the next turn spawns a fresh
-// process and resumes natively. Teardown is awaited on every failure path
-// because the idle checkpoint that follows snapshots the Codex home,
+// deliberately blunt: any non-success poisons (kills) the warm process. A
+// process retaining detached-child evidence is therefore ineligible until the
+// workspace boundary has waited for and scanned that work. Once eligible, an
+// aborted compact leaves the thread uncompacted and the next turn spawns a
+// fresh process and resumes natively. Teardown is awaited on every failure
+// path because the idle checkpoint that follows snapshots the Codex home,
 // including rollout files, and must never capture a rollout mid-teardown.
 export async function compactWarmCodexThread(input: {
   canAccountForModel?: ((model: string | null) => boolean) | null
@@ -2350,6 +2359,13 @@ export async function compactWarmCodexThread(input: {
       return {
         kind: 'skipped',
         reason: 'below_threshold',
+        threadContextTokensBefore: vitals.lastInputTokens,
+      } as const
+    }
+    if (processInstance.hasUncheckpointedDetachedWork) {
+      return {
+        kind: 'skipped',
+        reason: 'background_work_pending',
         threadContextTokensBefore: vitals.lastInputTokens,
       } as const
     }
