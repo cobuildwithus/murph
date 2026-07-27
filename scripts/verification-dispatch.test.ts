@@ -25,43 +25,34 @@ afterEach(() => {
 });
 
 describe("verification dispatcher", () => {
-  it("routes configured Codex verification through Crabbox to Blacksmith", () => {
+  it("keeps automatic verification local when the removed opt-in flag remains set", () => {
     expect(resolveExecutor({
       CODEX_THREAD_ID: "thread-1",
       MURPH_CRABBOX_BLACKSMITH: "1",
     }, true)).toMatchObject({
-      executor: "crabbox",
-      reason: "codex-auto",
+      executor: "local",
+      reason: "auto",
     });
   });
 
   it("keeps CI and already-remote verification local", () => {
     expect(resolveExecutor({
       CI: "1",
-      MURPH_CRABBOX_BLACKSMITH: "1",
     }, true)).toMatchObject({ executor: "local", reason: "ci" });
 
     expect(resolveExecutor({
-      MURPH_CRABBOX_BLACKSMITH: "1",
       MURPH_CRABBOX_REMOTE: "1",
     }, true)).toMatchObject({ executor: "local", reason: "already-remote" });
   });
 
-  it("falls back locally when automatic Blacksmith execution is unavailable", () => {
-    expect(resolveExecutor({ MURPH_CRABBOX_BLACKSMITH: "1" }, true))
-      .toMatchObject({ executor: "local", reason: "non-codex" });
-
-    expect(resolveExecutor({ CODEX_THREAD_ID: "thread-1" }, true))
-      .toMatchObject({ executor: "local", reason: "no-blacksmith-config" });
-
+  it("does not probe Blacksmith availability in automatic mode", () => {
     expect(resolveExecutor({
       CODEX_THREAD_ID: "thread-1",
       MURPH_CRABBOX_BLACKSMITH: "1",
-    }, false)).toMatchObject({ executor: "local", reason: "crabbox-unavailable" });
+    }, false)).toMatchObject({ executor: "local", reason: "auto" });
 
     expect(resolveExecutor({
       CODEX_THREAD_ID: "thread-1",
-      MURPH_CRABBOX_BLACKSMITH: "1",
       MURPH_VERIFY_EXECUTOR: "local",
     }, true)).toMatchObject({ executor: "local", reason: "explicit" });
   });
@@ -69,12 +60,10 @@ describe("verification dispatcher", () => {
   it("forces Vercel-development-environment work to stay local", () => {
     expect(resolveExecutor({
       CODEX_THREAD_ID: "thread-1",
-      MURPH_CRABBOX_BLACKSMITH: "1",
       MURPH_VERIFY_REQUIRES_VERCEL_ENV: "1",
     }, true)).toMatchObject({ executor: "local", reason: "vercel-development-env" });
 
     const result = resolveExecutorFailure({
-      MURPH_CRABBOX_BLACKSMITH: "1",
       MURPH_VERIFY_EXECUTOR: "crabbox",
       MURPH_VERIFY_REQUIRES_VERCEL_ENV: "1",
     }, true);
@@ -176,9 +165,9 @@ describe("verification dispatcher", () => {
           CRABBOX_CONFIG: "/tmp/attacker-controlled-crabbox.yaml",
           CUSTOM_PROVIDER_TOKEN: "must-not-reach-crabbox",
           GITHUB_TOKEN: "must-not-reach-crabbox",
-          MURPH_CRABBOX_BLACKSMITH: "1",
           MURPH_CRABBOX_NO_FORWARD: "must-not-reach-crabbox",
           MURPH_CRABBOX_PROFILE: "attacker-controlled-profile",
+          MURPH_VERIFY_EXECUTOR: "crabbox",
           NODE_OPTIONS: "--trace-warnings",
           OPENAI_API_KEY: "must-not-reach-crabbox",
           PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ""}`,
@@ -210,6 +199,9 @@ describe("verification dispatcher", () => {
       ".github/workflows/crabbox.yml",
     );
     expect(flagValue(args, "--blacksmith-job")).toBe("hydrate");
+    expect(flagValue(args, "--idle-timeout")).toBe("10m");
+    expect(flagValue(args, "--ttl")).toBe("45m");
+    expect(flagValue(args, "--stop-after")).toBe("always");
     expect(args).not.toContain("--id");
     expect(args).not.toContain("--pool");
     expect(args).not.toContain("--pool-return");
@@ -235,6 +227,7 @@ describe("verification dispatcher", () => {
           GITHUB_TOKEN: "must-not-reach-crabbox",
           MURPH_CRABBOX_LEASE_ID: "lease-1",
           MURPH_CRABBOX_NO_FORWARD: "must-not-reach-crabbox",
+          MURPH_VERIFY_EXECUTOR: "crabbox",
           NODE_OPTIONS: "--trace-warnings",
           OPENAI_API_KEY: "must-not-reach-crabbox",
           PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ""}`,

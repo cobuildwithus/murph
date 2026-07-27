@@ -193,6 +193,7 @@ describe("trusted Crabbox verification entrypoint", () => {
     expect(workflow).not.toMatch(/^\s*id-token:/mu);
     expect(workflow).toMatch(/^on:\n  workflow_dispatch:/mu);
     expect(workflow).not.toMatch(/^\s*(pull_request_target|repository_dispatch):/mu);
+    expect(workflow).toContain("timeout-minutes: 50");
     expect(workflow).toContain(
       [
         "          sudo install -o root -g root -m 0555 \\",
@@ -209,6 +210,7 @@ describe("trusted Crabbox verification entrypoint", () => {
       .toBeLessThan(workflow.indexOf("useblacksmith/run-testbox@"));
     expect(config).toContain("provider: blacksmith-testbox");
     expect(config).toContain("ref: main");
+    expect(config).toContain("idleTimeout: 10m");
     const actionRefs = [...workflow.matchAll(/^\s*uses:\s*[^@\s]+@([^\s#]+)/gmu)];
     expect(actionRefs.length).toBeGreaterThan(0);
     for (const actionRef of actionRefs) {

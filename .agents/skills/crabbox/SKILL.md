@@ -14,17 +14,16 @@ pnpm test:diff <changed-path ...>
 pnpm verify:acceptance
 ```
 
-For a local Codex parent, those commands automatically use Crabbox's direct
-`blacksmith-testbox` provider when `MURPH_CRABBOX_BLACKSMITH=1` is configured
-and both CLIs are available. CI,
-non-Codex callers, and unconfigured or unavailable CLIs retain the existing
-local shared-host path. Within that path, canonical acceptance intentionally
-selects the bounded composed profile on hosts with at least 12 logical CPUs;
-ordinary commands and smaller hosts keep their conservative shared-host caps.
-Every canonical remote check creates a fresh one-shot Testbox whose hydration
-route is pinned by the dispatcher. Reusable lease IDs are rejected because the
-available lease metadata does not prove the Blacksmith organization that
-installed the root-owned trust entrypoint.
+Those commands stay local by default. Use
+`MURPH_VERIFY_EXECUTOR=crabbox` only as the documented explicit escalation when
+the local shared-host verifier cannot admit required work promptly. Within the
+local path, canonical acceptance intentionally selects the bounded composed
+profile on hosts with at least 12 logical CPUs; ordinary commands and smaller
+hosts keep their conservative shared-host caps. Every explicit remote check
+creates a fresh one-shot Testbox whose hydration route is pinned by the
+dispatcher. Reusable lease IDs are rejected because the available lease
+metadata does not prove the Blacksmith organization that installed the
+root-owned trust entrypoint.
 
 ## Environment and sync boundary
 
@@ -70,15 +69,22 @@ installed the root-owned trust entrypoint.
 ## Controls
 
 ```bash
-# Default: remote only for configured Codex; otherwise local.
-MURPH_CRABBOX_BLACKSMITH=1 pnpm test:diff <paths>
+# Default: local shared-host execution.
+pnpm test:diff <paths>
 
-# Force local execution; capable acceptance still uses its bounded composition.
+# Explicit local execution; capable acceptance still uses its bounded composition.
 MURPH_VERIFY_EXECUTOR=local pnpm verify:acceptance
 
 # Force a fresh one-shot Blacksmith Testbox and fail rather than falling back.
 MURPH_VERIFY_EXECUTOR=crabbox pnpm verify:acceptance
 ```
+
+Explicit remote runs request `--stop-after always`, a 10-minute idle timeout,
+and a 45-minute maximum lease lifetime. The hydration workflow has a 50-minute
+last-resort ceiling. Do not run both remote `test:diff` and remote acceptance on
+the same exact head: reserve the one remote check for acceptance when acceptance
+is required, otherwise use the diff lane. Retry an unchanged head only for a
+concrete infrastructure failure and record why.
 
 Blacksmith owns machine provisioning, workflow hydration, Git-managed sync,
 command transport, and idle expiry. Crabbox owns provider selection, the local

@@ -1,6 +1,6 @@
 # Testing And CI Map
 
-Last verified: 2026-07-23
+Last verified: 2026-07-26
 
 ## Current Repo Checks
 
@@ -31,12 +31,12 @@ Last verified: 2026-07-23
 | `DATABASE_URL="$LOCAL_POSTGRES_URL" MURPH_TEST_POSTGRES_CONCURRENCY=1 pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/hosted-usage-credit-postgres-concurrency.test.ts` | Opt-in real-PostgreSQL proof for the usage-credit beneficiary lock, replay, and deletion boundaries. The suite rejects non-loopback database URLs and runs in the hosted E2E PostgreSQL job after migrations. | Concurrent grant replay converges on one immutable grant, grant/debit ordering preserves the projection, the member-before-purchase lock order is observable under contention, and deletion-first ordering cannot append an orphaned grant |
 | `DATABASE_URL="$LOCAL_POSTGRES_URL" MURPH_TEST_POSTGRES_CONCURRENCY=1 pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/hosted-assistant-ask-retention-postgres.test.ts` | Opt-in real-PostgreSQL proof for the reviewed Assistant Ask mailbox-retention boundary. The suite rejects non-loopback database URLs and runs in the hosted E2E PostgreSQL job after migrations. | Production retention SQL physically deletes the expired request and completion rows while the outbox-carried completion id, delivery key, and expiry still authorize only the fixed terminal copy |
 
-For local Codex parents, the canonical root `pnpm test:diff` and
-`pnpm verify:acceptance` commands may execute this same coverage surface through
-Crabbox's direct Blacksmith Testbox provider. The command semantics in this map
-remain authoritative; only the finite executor changes. Ordinary GitHub Actions
-and already-remote invocations stay on their existing runner-local path. See
-`agent-docs/operations/verification-and-runtime.md`.
+The canonical root `pnpm test:diff` and `pnpm verify:acceptance` commands stay
+local by default. An explicitly forced Crabbox run executes the same coverage
+surface through the direct Blacksmith Testbox provider; the command semantics in
+this map remain authoritative and only the finite executor changes. Ordinary
+GitHub Actions and already-remote invocations stay on their existing
+runner-local path. See `agent-docs/operations/verification-and-runtime.md`.
 
 Ordinary package, app, and repo-tool Vitest configs share one marked
 process-owned temp root. Teardown removes the whole root after success or

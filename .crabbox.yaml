@@ -6,5 +6,5 @@ blacksmith:
   workflow: .github/workflows/crabbox.yml
   job: hydrate
   ref: main
-  idleTimeout: 90m
+  idleTimeout: 10m
   debug: false
