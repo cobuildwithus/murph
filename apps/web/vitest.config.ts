@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { defineProject } from "vitest/config";
 
 import { resolveMurphVitestConcurrency } from "../../config/vitest-parallelism.js";
-import { murphVitestNoTimeouts } from "../../config/vitest-timeouts.js";
+import { murphVitestStandardTimeouts } from "../../config/vitest-timeouts.js";
 import { murphVitestTempGlobalSetup } from "../../config/vitest-temp-lifecycle.js";
 
 import {
@@ -26,7 +26,7 @@ export default defineProject({
     ],
   },
   test: {
-    ...murphVitestNoTimeouts,
+    ...murphVitestStandardTimeouts,
     name: "hosted-web",
     environment: "node",
     globalSetup: [murphVitestTempGlobalSetup],

@@ -10,7 +10,7 @@ import {
 import { murphVitestTempGlobalSetup } from "../../config/vitest-temp-lifecycle.js";
 import {
   murphVitestLongRunningTimeouts,
-  murphVitestNoTimeouts,
+  murphVitestStandardTimeouts,
 } from "../../config/vitest-timeouts.js";
 
 import { cloudflareVitestAliases } from "./vitest.shared.js";
@@ -54,7 +54,7 @@ function createCloudflareNodeProject(name: string, fileNames: readonly string[])
     test: {
       ...(name === "cloudflare-runner"
         ? murphVitestLongRunningTimeouts
-        : murphVitestNoTimeouts),
+        : murphVitestStandardTimeouts),
       name,
       environment: "node",
       globalSetup: [murphVitestTempGlobalSetup],
@@ -116,7 +116,7 @@ export const cloudflareNodeVitestProjects = cloudflareNodeVitestProjectSpecs.map
 
 export default defineConfig({
   test: {
-    ...murphVitestNoTimeouts,
+    ...murphVitestStandardTimeouts,
     maxWorkers: cloudflareNodeVitestMaxWorkers,
     projects: cloudflareNodeVitestProjects,
   },

@@ -62,4 +62,29 @@ describe("Vitest worker budgeting", () => {
       }
     }
   });
+
+  it("uses bounded package timeouts unless default timeouts are disabled", () => {
+    expect(
+      createMurphPackageVitestConfig({
+        configUrl: packageConfigUrl,
+        name: "default-timeouts",
+      }),
+    ).toMatchObject({
+      test: {
+        testTimeout: 60_000,
+        hookTimeout: 60_000,
+        teardownTimeout: 60_000,
+      },
+    });
+
+    const configWithoutDefaultTimeouts = createMurphPackageVitestConfig({
+      configUrl: packageConfigUrl,
+      name: "default-timeouts-disabled",
+      useDefaultTimeouts: false,
+    });
+
+    expect(configWithoutDefaultTimeouts.test).not.toHaveProperty("testTimeout");
+    expect(configWithoutDefaultTimeouts.test).not.toHaveProperty("hookTimeout");
+    expect(configWithoutDefaultTimeouts.test).not.toHaveProperty("teardownTimeout");
+  });
 });
