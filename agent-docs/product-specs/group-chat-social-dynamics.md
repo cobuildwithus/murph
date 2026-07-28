@@ -94,11 +94,12 @@ provider turn; evaluate that bubble under the ordinary direct-address or open-
 request rule. A later genuinely unowned message can still reopen the floor.
 
 When the first live bubble is an unaddressed personal artifact and its audience
-is not yet clear, use the existing brief foreground watch before committing to a
-reply or reaction, then reread the beat. This protects a same-sender caption that
-arrives while the turn is active. Do not add that wait to a direct Murph ask,
-immediate safety, a clear factual or task request, or a catch-up turn whose timing
-does not show a live beat.
+is not yet clear, finish without a reply or reaction immediately. Do not add a
+foreground wait: a native reply, another participant's response, or any other
+later causal turn is evaluated when that turn arrives. A same-purpose caption
+remains human-owned, while a later clear factual or task request or direct Murph
+address is separately eligible. An artifact whose open factual or task premise
+is already explicit remains eligible under the ordinary open-request rule.
 
 This is not an addressed-only rule. An open factual or task request such as
 "does anyone know...?" remains available to Murph when no human has claimed it.
@@ -368,8 +369,8 @@ Regression coverage should represent both restraint and initiative:
 23. the same sender directly hands the artifact to Murph in a later bubble ->
     evaluate the new direct address separately and answer once;
 24. an unaddressed personal artifact lands in a live room before its audience is
-    clear -> Murph watches briefly before composing, and a same-sender collective
-    caption that arrives during that watch leaves no reply or reaction to send.
+    clear -> Murph immediately sends no reply or reaction; later causal turns are
+    evaluated separately, without delaying the artifact turn.
 
 Items 11 through 24 are judgment calls that a string assertion cannot settle;
 they belong in transcript-level model evals rather than skill-text pins.

@@ -173,7 +173,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
         const actions = readCapabilityRoutingActions(result.jsonEvents)
 
         expect(result.finalMessage.trim()).toBe(
-          '14:B 15:A 18:B 19:A 20:B 21:A 22:A',
+          '14:B 15:A 18:B 19:A 20:B 21:A 22:A 23:D 24:A',
         )
         expect(
           actions.some((action) =>
@@ -926,8 +926,9 @@ function buildGroupPointOfViewCandidateProbe(): string {
   return [
     'This is a playful group-chat candidate-choice evaluation.',
     'For each numbered transcript, choose the action Murph should take.',
-    'A candidate may be a reply or SILENT.',
-    'Reply exactly in the form `14:<A-or-B> 15:<A-or-B> 18:<A-or-B> 19:<A-or-B> 20:<A-or-B> 21:<A-or-B> 22:<A-or-B>` with no explanation.',
+    'Each candidate describes the complete action for that transcript.',
+    'For transcripts 14-22, choose A or B. For transcripts 23-24, choose A, B, C, or D.',
+    'Reply exactly in the form `14:<A-or-B> 15:<A-or-B> 18:<A-or-B> 19:<A-or-B> 20:<A-or-B> 21:<A-or-B> 22:<A-or-B> 23:<A-B-C-or-D> 24:<A-B-C-or-D>` with no explanation.',
     '',
     '14. Nate: "Correct, the lid-free society has begun."',
     'A: "Correct, the lid-free society has begun."',
@@ -963,6 +964,18 @@ function buildGroupPointOfViewCandidateProbe(): string {
     'Reed: "Murph, settle this: was fitting nine people in there legal?"',
     'A: "That depends on the local occupancy code and the lease; nine in a two-bedroom was likely over at least one limit."',
     'B: SILENT',
+    '',
+    '23. Reed posts a photo of an old apartment building with no caption or addressee.',
+    'A: Send "That building has seen things no security deposit could explain."',
+    'B: React to the photo, then finish without a text reply.',
+    'C: Run a short shell sleep to watch for a follow-up before deciding.',
+    'D: Immediately finish without a text reply or reaction.',
+    '',
+    '24. Reed posts a photo of a street-parking sign and asks the room: "Does this mean parking is allowed after 6pm?"',
+    'A: Answer the factual question briefly from the visible sign.',
+    'B: React to the photo, then finish without a text reply.',
+    'C: Run a short shell sleep to watch for a follow-up before deciding.',
+    'D: Immediately finish without a text reply or reaction.',
   ].join('\n')
 }
 

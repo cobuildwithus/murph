@@ -8572,6 +8572,270 @@ describe('assistant auto-reply runtime', () => {
     )
   })
 
+  it('keeps artifact replies in later causal turns while each turn completes once', async () => {
+    const sharedInput = {
+      accountId: 'safe_acct_artifact_turns',
+      actorId: 'safe_actor_artifact_turns',
+      conversationThreadId: 'hidden_artifact_turns',
+      source: 'linq',
+      threadIsDirect: false,
+    } as const
+    const artifact = createCapturelessAssistantInputCandidate({
+      ...sharedInput,
+      inputId: 'ain_11111111111111111111111111111111',
+      occurredAt: '2026-04-08T00:03:00.000Z',
+      receivedAt: '2026-04-08T00:03:01.000Z',
+      replyTarget: {
+        channel: 'linq',
+        messageId: 'real_artifact_message',
+        threadId: 'real_artifact_turns_thread',
+      },
+      text: 'Shared an old apartment photo.',
+    })
+    const samePurposeCaption = createCapturelessAssistantInputCandidate({
+      ...sharedInput,
+      inputId: 'ain_22222222222222222222222222222222',
+      occurredAt: '2026-04-08T00:04:00.000Z',
+      receivedAt: '2026-04-08T00:04:01.000Z',
+      replyTarget: {
+        channel: 'linq',
+        messageId: 'real_artifact_caption',
+        threadId: 'real_artifact_turns_thread',
+      },
+      sourceMetadata: {
+        kind: 'linq',
+        partCount: 1,
+        reactionEligible: true,
+        replyToMessageId: 'real_artifact_message',
+        service: 'iMessage',
+      },
+      text: "Y'all remember this place?",
+    })
+    const directQuestion = createCapturelessAssistantInputCandidate({
+      ...sharedInput,
+      inputId: 'ain_33333333333333333333333333333333',
+      occurredAt: '2026-04-08T00:05:00.000Z',
+      receivedAt: '2026-04-08T00:05:01.000Z',
+      replyTarget: {
+        channel: 'linq',
+        messageId: 'real_artifact_question',
+        threadId: 'real_artifact_turns_thread',
+      },
+      sourceMetadata: {
+        kind: 'linq',
+        partCount: 1,
+        reactionEligible: true,
+        replyToMessageId: 'real_artifact_caption',
+        service: 'iMessage',
+      },
+      text: 'Murph, what is the usual occupancy limit for a two-bedroom?',
+    })
+    const participantArtifact = createCapturelessAssistantInputCandidate({
+      ...sharedInput,
+      inputId: 'ain_44444444444444444444444444444444',
+      occurredAt: '2026-04-08T00:07:00.000Z',
+      receivedAt: '2026-04-08T00:07:01.000Z',
+      replyTarget: {
+        channel: 'linq',
+        messageId: 'real_participant_artifact',
+        threadId: 'real_artifact_turns_thread',
+      },
+      text: 'Shared another old apartment photo.',
+    })
+    const participantResponse = createCapturelessAssistantInputCandidate({
+      ...sharedInput,
+      actorId: 'safe_actor_artifact_responder',
+      inputId: 'ain_55555555555555555555555555555555',
+      occurredAt: '2026-04-08T00:08:00.000Z',
+      receivedAt: '2026-04-08T00:08:01.000Z',
+      replyTarget: {
+        channel: 'linq',
+        messageId: 'real_participant_response',
+        threadId: 'real_artifact_turns_thread',
+      },
+      text: 'I remember the broken elevator.',
+    })
+    const candidates = new Map([
+      [samePurposeCaption.event.inputId, samePurposeCaption],
+      [directQuestion.event.inputId, directQuestion],
+      [participantResponse.event.inputId, participantResponse],
+    ])
+    const listInputCandidatesByIds = vi.fn(async (input: {
+      inputIds: readonly string[]
+      sourceId?: string | null
+    }) => {
+      expect(input.sourceId).toBe('linq')
+      const inputs = input.inputIds.flatMap((inputId) => {
+        const candidate = candidates.get(inputId)
+        return candidate ? [candidate] : []
+      })
+      return {
+        inputs,
+        nextCursor: inputs.at(-1)?.event.cursor ?? artifact.event.cursor,
+      }
+    })
+    const inputSource = {
+      checkpointAcceptedInput: vi.fn(async () => undefined),
+      listInputCandidatesByIds,
+      listNewConversationInputs: vi.fn(async (
+        input: AssistantTurnConversationInputQuery,
+      ) => ({
+        inputs: [],
+        nextCursor: input.afterCursor ?? null,
+      })),
+      refresh: vi.fn(async () => ({
+        progressed: false,
+        reason: 'no_new_input' as const,
+      })),
+    }
+    replyMocks.sendAssistantMessage.mockImplementation(async (input: {
+      acceptedTurnInput: {
+        initialInputs: ReadonlyArray<{ id: string }>
+      }
+      activeTurnInput?: (admission: {
+        availableInputIds?: readonly string[]
+        sessionId: string
+        turnId: string
+        vault: string
+      }) => Promise<unknown>
+    }) => {
+      const initialInputId = input.acceptedTurnInput.initialInputs[0]?.id
+      if (initialInputId === artifact.event.inputId) {
+        await expect(input.activeTurnInput?.({
+          availableInputIds: [samePurposeCaption.event.inputId],
+          sessionId: 'session-artifact',
+          turnId: 'turn-artifact',
+          vault: '/tmp/assistant-automation-vault',
+        })).resolves.toEqual({ kind: 'no-new-input' })
+        return {
+          delivery: null,
+          deliveryDeferred: false,
+          deliveryError: null,
+          deliveryIntentId: null,
+          response: '',
+          responseDisposition: 'none' as const,
+          session: { sessionId: 'session-artifact' },
+        }
+      }
+      if (initialInputId === samePurposeCaption.event.inputId) {
+        await expect(input.activeTurnInput?.({
+          availableInputIds: [directQuestion.event.inputId],
+          sessionId: 'session-caption',
+          turnId: 'turn-caption',
+          vault: '/tmp/assistant-automation-vault',
+        })).resolves.toEqual({ kind: 'no-new-input' })
+        return {
+          delivery: null,
+          deliveryDeferred: false,
+          deliveryError: null,
+          deliveryIntentId: null,
+          response: '',
+          responseDisposition: 'none' as const,
+          session: { sessionId: 'session-caption' },
+        }
+      }
+      if (initialInputId === directQuestion.event.inputId) {
+        return {
+          delivery: {
+            channel: 'linq',
+            target: 'real_artifact_turns_thread',
+            sentAt: '2026-04-08T00:06:00.000Z',
+          },
+          deliveryDeferred: false,
+          deliveryError: null,
+          deliveryIntentId: 'intent-artifact-question',
+          response: 'It depends on local code and the lease.',
+          session: { sessionId: 'session-question' },
+        }
+      }
+      if (initialInputId === participantArtifact.event.inputId) {
+        await expect(input.activeTurnInput?.({
+          availableInputIds: [participantResponse.event.inputId],
+          sessionId: 'session-participant-artifact',
+          turnId: 'turn-participant-artifact',
+          vault: '/tmp/assistant-automation-vault',
+        })).resolves.toEqual({ kind: 'no-new-input' })
+        return {
+          delivery: null,
+          deliveryDeferred: false,
+          deliveryError: null,
+          deliveryIntentId: null,
+          response: '',
+          responseDisposition: 'none' as const,
+          session: { sessionId: 'session-participant-artifact' },
+        }
+      }
+      throw new Error(`unexpected initial input: ${initialInputId ?? 'missing'}`)
+    })
+    const reply = await vi.importActual<typeof import('../src/assistant/automation/reply.ts')>(
+      '../src/assistant/automation/reply.ts',
+    )
+    const process = async (candidate: AssistantInputCandidate) => {
+      const context = reply.createAssistantAutoReplyGroupContext([
+        createCapturelessReplyGroupItem(candidate),
+      ])
+      if (!context) {
+        throw new Error('expected artifact-turn context')
+      }
+      return reply.processAssistantAutoReplyGroup({
+        allowSelfAuthored: false,
+        context,
+        enabledChannels: ['linq'],
+        inboxServices: createInboxServices({ show: vi.fn() }),
+        inputSource,
+        requestId: null,
+        sessionMaxAgeMs: null,
+        vault: '/tmp/assistant-automation-vault',
+      })
+    }
+
+    await expect(process(artifact)).resolves.toMatchObject({
+      advanceCursor: true,
+      failed: 0,
+      replied: 0,
+      skipped: 1,
+    })
+    await expect(process(samePurposeCaption)).resolves.toMatchObject({
+      advanceCursor: true,
+      failed: 0,
+      replied: 0,
+      skipped: 1,
+    })
+    await expect(process(directQuestion)).resolves.toMatchObject({
+      advanceCursor: true,
+      failed: 0,
+      replied: 1,
+      skipped: 0,
+    })
+    await expect(process(participantArtifact)).resolves.toMatchObject({
+      advanceCursor: true,
+      failed: 0,
+      replied: 0,
+      skipped: 1,
+    })
+    expect(listInputCandidatesByIds).toHaveBeenCalledTimes(3)
+    expect(evidenceMocks.writeAssistantAutoReplySuppressionEvidence)
+      .toHaveBeenCalledWith(expect.objectContaining({
+        inputIds: [artifact.event.inputId],
+        reason: 'assistant finished without a reply',
+      }))
+    expect(evidenceMocks.writeAssistantAutoReplySuppressionEvidence)
+      .toHaveBeenCalledWith(expect.objectContaining({
+        inputIds: [samePurposeCaption.event.inputId],
+        reason: 'assistant finished without a reply',
+      }))
+    expect(evidenceMocks.writeAssistantAutoReplyReplyIntentEvidence)
+      .toHaveBeenCalledWith(expect.objectContaining({
+        inputIds: [directQuestion.event.inputId],
+        outcome: 'result',
+      }))
+    expect(evidenceMocks.writeAssistantAutoReplySuppressionEvidence)
+      .toHaveBeenCalledWith(expect.objectContaining({
+        inputIds: [participantArtifact.event.inputId],
+        reason: 'assistant finished without a reply',
+      }))
+  })
+
   it('keeps a foreign group actor and later same-actor input pending on the account route', async () => {
     const initialCapture = createCaptureSummary({
       accountId: 'safe_acct_group_a',

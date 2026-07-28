@@ -19110,36 +19110,6 @@ describe('steered final segments', () => {
     ])
   })
 
-  it('keeps a watched same-sender artifact eligible for terminal suppression before assistant output', async () => {
-    const result = await runScriptedSteeredFinalSegmentsTurn([
-      completedItemEvent({
-        id: 'user-artifact',
-        type: 'user_message',
-        message: 'Shared an old apartment photo.',
-      }),
-      completedItemEvent({
-        id: 'user-caption',
-        type: 'user_message',
-        message: "Y'all remember this place?",
-      }),
-      {
-        kind: 'finish-without-reply',
-        id: 70,
-        expectedText: 'finished without reply',
-      },
-      completedItemEvent({
-        id: 'assistant-suppressed',
-        type: 'assistant_message',
-        message: 'This response must not be delivered.',
-      }),
-    ])
-
-    expect(result.acceptedNoReplyDeliveryContextOrdinals).toEqual([1])
-    expect(result.finalMessage).toBe('')
-    expect(result.reactions).toEqual([])
-    expect(result.precedingAgentMessageSegments).toEqual([])
-  })
-
   it('scopes finish_without_reply to the selected steered message', async () => {
     const result = await runScriptedSteeredFinalSegmentsTurn([
       completedItemEvent({
