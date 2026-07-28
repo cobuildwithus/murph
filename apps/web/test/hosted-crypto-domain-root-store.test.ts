@@ -1575,7 +1575,7 @@ type HostedCryptoTestTransaction = {
 function createCapturingTransaction(): HostedCryptoTestTransaction {
   const persistedEnvelopes: HostedDomainRootKeyEnvelopeV1[] = [];
   const inactiveEnvelopeKeys = new Set<string>();
-  const tx = {
+  const rawClient = {
     $executeRaw: async (...args: Parameters<Prisma.TransactionClient["$executeRaw"]>) => {
       capturePersistedEnvelope(args, persistedEnvelopes);
       return 1;
@@ -1629,7 +1629,13 @@ function createCapturingTransaction(): HostedCryptoTestTransaction {
         }]
         : []) as T;
     },
-    hostedUserCryptoEnvelope: {
+  };
+  // Narrow test double: domain-root-store uses raw helpers for point reads and
+  // the attached model delegate for batched envelope reads.
+  const prisma = rawClient as Prisma.TransactionClient;
+  Object.defineProperty(prisma, "hostedUserCryptoEnvelope", {
+    configurable: true,
+    value: {
       findMany: async (input: {
         where?: {
           OR?: Array<{ domain: string; rootKeyId: string; userId: string }>;
@@ -1658,9 +1664,8 @@ function createCapturingTransaction(): HostedCryptoTestTransaction {
           }));
       },
     },
-  };
-  // Narrow test double: domain-root-store uses raw helpers for point reads and
-  // the model delegate for batched envelope reads.
+    writable: true,
+  });
   return {
     markEnvelopeActive(input) {
       inactiveEnvelopeKeys.delete(createEnvelopeStatusKey(input));
@@ -1669,7 +1674,7 @@ function createCapturingTransaction(): HostedCryptoTestTransaction {
       inactiveEnvelopeKeys.add(createEnvelopeStatusKey(input));
     },
     persistedEnvelopes,
-    prisma: tx as Prisma.TransactionClient,
+    prisma,
   };
 }
 
