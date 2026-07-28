@@ -405,7 +405,10 @@ export interface HostedFamilyOwnerSnapshot {
   suspendedAt: Date | null;
 }
 
-export type HostedFamilyBillingRecoveryState = "available" | "syncing";
+export type HostedFamilyBillingRecoveryState =
+  | "available"
+  | "checkout"
+  | "syncing";
 
 export interface HostedFamilyUsageCreditCheckoutTarget {
   beneficiaryMemberId: string;
@@ -857,9 +860,10 @@ export async function readHostedFamilyOwnerSnapshotForMember(input: {
 
 /**
  * A canceled Family group remains the source of truth for the owner's
- * onboarding recovery choice. A fresh Checkout attempt or newly bound
- * subscription keeps individual Checkout hidden until Stripe reconciliation
- * settles; otherwise the owner may retry Family or choose an individual plan.
+ * onboarding recovery choice. A current attempt remains resumable through the
+ * existing idempotent Checkout route, while a bound subscription waits for
+ * Stripe reconciliation. With neither claim, the owner may retry Family or
+ * choose an individual plan.
  */
 export async function readHostedFamilyBillingRecoveryForOwner(input: {
   now?: Date;
@@ -899,10 +903,10 @@ export async function readHostedFamilyBillingRecoveryForOwner(input: {
       < HOSTED_FAMILY_CHECKOUT_CLAIM_MAX_AGE_MS,
   );
 
-  return checkoutAttemptIsCurrent
-    || Boolean(group.billingRef?.stripeSubscriptionIdEncrypted)
-    ? "syncing"
-    : "available";
+  if (group.billingRef?.stripeSubscriptionIdEncrypted) {
+    return "syncing";
+  }
+  return checkoutAttemptIsCurrent ? "checkout" : "available";
 }
 
 export async function readHostedFamilyInviteAcceptanceView(input: {
@@ -1145,8 +1149,7 @@ export async function readHostedMemberFamilyBillingClaim(input: {
       continue;
     }
     if (
-      group.billingStatus !== HostedBillingStatus.canceled
-      && group.billingRef?.stripeSubscriptionIdEncrypted
+      group.billingRef?.stripeSubscriptionIdEncrypted
     ) {
       claims.push({
         groupId: group.id,
@@ -2016,6 +2019,7 @@ export async function createHostedFamilyBillingCheckout(input: {
   seatCount?: unknown;
 }): Promise<{ alreadyActive: boolean; url: string | null }> {
   const prisma = input.prisma ?? getPrisma();
+  const now = input.now ?? new Date();
   const seatCount = normalizeHostedFamilySeatCount(input.seatCount ?? HOSTED_FAMILY_MIN_SEATS);
   let stripeApi: ReturnType<typeof requireHostedStripeApi> | null = null;
 
@@ -2067,13 +2071,20 @@ export async function createHostedFamilyBillingCheckout(input: {
     if (directPaidUpgrade) {
       return directPaidUpgrade;
     }
-    const checkoutAttemptId =
+    const checkoutAttemptIsCurrent = Boolean(
       currentBillingRef?.checkoutAttemptId
+      && currentBillingRef.checkoutCreatedAt
+      && now.getTime() - currentBillingRef.checkoutCreatedAt.getTime()
+        < HOSTED_FAMILY_CHECKOUT_CLAIM_MAX_AGE_MS,
+    );
+    const checkoutAttemptId =
+      checkoutAttemptIsCurrent && currentBillingRef?.checkoutAttemptId
         ? currentBillingRef.checkoutAttemptId
         : generateHostedFamilyCheckoutAttemptId();
     if (
-      currentBillingRef?.checkoutAttemptId &&
-      currentBillingRef.checkoutSeatCount !== seatCount
+      checkoutAttemptIsCurrent
+      && currentBillingRef?.checkoutAttemptId
+      && currentBillingRef.checkoutSeatCount !== seatCount
     ) {
       throw hostedOnboardingError({
         code: "HOSTED_FAMILY_CHECKOUT_IN_PROGRESS",
@@ -2084,10 +2095,11 @@ export async function createHostedFamilyBillingCheckout(input: {
     const priceId = requireHostedFamilyStripePriceId();
     const publicBaseUrl = requireHostedOnboardingPublicBaseUrl();
     stripeApi = requireHostedStripeApi();
-    if (!currentBillingRef?.checkoutAttemptId) {
+    if (!checkoutAttemptIsCurrent) {
       await writeHostedFamilyCheckoutAttemptTx({
         attemptId: checkoutAttemptId,
         group,
+        now,
         seatCount,
         tx,
       });
@@ -2137,7 +2149,7 @@ export async function createHostedFamilyBillingCheckout(input: {
       subscription_data: {
         metadata,
       },
-      success_url: `${checkoutInput.publicBaseUrl}/settings?family_checkout=success&session_id={CHECKOUT_SESSION_ID}`,
+      success_url: `${checkoutInput.publicBaseUrl}/join?family_checkout=success&session_id={CHECKOUT_SESSION_ID}`,
     }, {
       idempotencyKey: buildHostedFamilyCheckoutIdempotencyKey({
         attemptId: checkoutInput.checkoutAttemptId,
@@ -2829,21 +2841,21 @@ export async function waitForHostedFamilyPlanCapacities(input: {
 async function writeHostedFamilyCheckoutAttemptTx(input: {
   attemptId: string;
   group: Pick<HostedAccountGroupAccessSnapshot, "id">;
+  now: Date;
   seatCount: number;
   tx: Prisma.TransactionClient;
 }): Promise<void> {
-  const now = new Date();
   await input.tx.hostedAccountGroupBillingRef.upsert({
     create: {
       checkoutAttemptId: input.attemptId,
-      checkoutCreatedAt: now,
+      checkoutCreatedAt: input.now,
       checkoutSeatCount: input.seatCount,
       currentBillingPlanCode: HOSTED_FAMILY_BILLING_PLAN_CODE,
       groupId: input.group.id,
     },
     update: {
       checkoutAttemptId: input.attemptId,
-      checkoutCreatedAt: now,
+      checkoutCreatedAt: input.now,
       checkoutSeatCount: input.seatCount,
       currentBillingPlanCode: HOSTED_FAMILY_BILLING_PLAN_CODE,
       stripeCheckoutSessionIdEncrypted: null,

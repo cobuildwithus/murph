@@ -424,7 +424,7 @@ test("JoinInvitePage gates checkout on server-read launch consent", async () => 
   assert.match(markup, /data-consent-status="required"/);
 });
 
-test.each(["available", "syncing"] as const)(
+test.each(["available", "checkout", "syncing"] as const)(
   "JoinInvitePage derives %s Family recovery from the authenticated owner group",
   async (familyBillingRecovery) => {
     const { default: JoinInvitePage } = await import("../app/join/[inviteCode]/page");

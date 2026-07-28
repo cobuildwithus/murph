@@ -55,6 +55,7 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", async () => {
 import {
   findMemberForStripeInvoice,
   findMemberForStripeSubscription,
+  listHostedStripeCheckoutSessionMemberIds,
 } from "@/src/lib/hosted-onboarding/stripe-billing-lookup";
 
 describe("hosted onboarding stripe billing lookup", () => {
@@ -102,6 +103,26 @@ describe("hosted onboarding stripe billing lookup", () => {
     expect(mocks.readHostedMemberBillingSnapshot).toHaveBeenCalledWith({
       memberId: "member_123",
       prisma: {},
+    });
+  });
+
+  it("resolves a Family Checkout Session to its owner before webhook binding", async () => {
+    const findMany = vi.fn().mockResolvedValue([{ id: "member_owner" }]);
+
+    await expect(listHostedStripeCheckoutSessionMemberIds({
+      prisma: {
+        hostedMember: { findMany },
+      } as never,
+      session: makeStripeCheckoutSession(),
+    })).resolves.toEqual(["member_owner"]);
+
+    expect(findMany).toHaveBeenCalledWith({
+      select: { id: true },
+      where: {
+        id: {
+          in: ["member_owner", "hbag_family"],
+        },
+      },
     });
   });
 
@@ -452,6 +473,20 @@ function makeStripeInvoice(
     id: overrides?.id ?? "in_123",
     subscription: overrides?.subscription ?? "sub_123",
   } as Stripe.Invoice;
+}
+
+function makeStripeCheckoutSession(): Stripe.Checkout.Session {
+  // @ts-expect-error - the synthetic fixture is intentionally narrower than Stripe.Checkout.Session.
+  return {
+    client_reference_id: "hbag_family",
+    customer: null,
+    metadata: {
+      accountGroupId: "hbag_family",
+      kind: "hosted_family_plan",
+      ownerMemberId: "member_owner",
+    },
+    subscription: null,
+  } as Stripe.Checkout.Session;
 }
 
 function makeStripeSubscription(

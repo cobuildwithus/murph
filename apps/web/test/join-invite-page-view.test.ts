@@ -299,7 +299,49 @@ test("JoinInvitePageView offers direct checkout and Family retry after terminal 
   assert.match(markup, /2 to 6 people, one bill/);
   assert.doesNotMatch(markup, /data-auto-trial-island="true"/);
   expect(mocks.statusRefreshProps).toMatchObject({
-    current: buildJoinInviteStatusRefreshSnapshot(model.status),
+    current: buildJoinInviteStatusRefreshSnapshot(
+      model.status,
+      model.familyBillingRecovery,
+    ),
+    inviteCode: "invite-code",
+    legalGateActive: false,
+  });
+});
+
+test("JoinInvitePageView keeps a reusable Family checkout actionable after cancellation", () => {
+  const model = createModel({
+    familyBillingRecovery: "checkout",
+    launchConsent: {
+      gateActive: false,
+      initialStatus: createConsentStatus({ launchGranted: true }),
+      status: "granted",
+    },
+    status: createStatus({
+      session: {
+        authenticated: true,
+        expiresAt: null,
+        matchesInvite: true,
+      },
+      stage: "checkout",
+    }),
+  });
+  const markup = renderToStaticMarkup(
+    createElement(JoinInvitePageView, { model }),
+  );
+
+  assert.match(markup, /Continue Family checkout/);
+  assert.match(markup, /Your existing Stripe checkout is ready to resume\./);
+  assert.match(markup, /Your Family checkout is still open/);
+  assert.match(markup, /same secure checkout/);
+  assert.doesNotMatch(markup, /Restart Family/);
+  assert.doesNotMatch(markup, /Get Pulse/);
+  assert.doesNotMatch(markup, /Get Edge/);
+  assert.doesNotMatch(markup, /data-auto-trial-island="true"/);
+  expect(mocks.statusRefreshProps).toMatchObject({
+    current: buildJoinInviteStatusRefreshSnapshot(
+      model.status,
+      model.familyBillingRecovery,
+    ),
     inviteCode: "invite-code",
     legalGateActive: false,
   });
@@ -334,7 +376,10 @@ test("JoinInvitePageView persists Family syncing and withholds individual checko
   assert.doesNotMatch(markup, /Get Edge/);
   assert.doesNotMatch(markup, /data-auto-trial-island="true"/);
   expect(mocks.statusRefreshProps).toMatchObject({
-    current: buildJoinInviteStatusRefreshSnapshot(model.status),
+    current: buildJoinInviteStatusRefreshSnapshot(
+      model.status,
+      model.familyBillingRecovery,
+    ),
     inviteCode: "invite-code",
     legalGateActive: false,
   });

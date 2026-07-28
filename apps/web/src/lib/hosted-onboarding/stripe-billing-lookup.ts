@@ -114,9 +114,11 @@ export async function findMemberForStripeObject(input: {
 export function listHostedStripeDirectMemberIds(input: {
   clientReferenceId: string | null;
   memberId: string | null;
+  ownerMemberId: string | null;
 }): string[] {
   return listHostedStripeUniqueMemberIds([
     input.memberId,
+    input.ownerMemberId,
     input.clientReferenceId,
   ]);
 }
@@ -129,6 +131,9 @@ export async function listHostedStripeCheckoutSessionMemberIds(input: {
     memberIds: listHostedStripeDirectMemberIds({
       clientReferenceId: normalizeNullableString(input.session.client_reference_id),
       memberId: normalizeNullableString(input.session.metadata?.memberId),
+      ownerMemberId: normalizeNullableString(
+        input.session.metadata?.ownerMemberId,
+      ),
     }),
     prisma: input.prisma,
   });
@@ -204,6 +209,9 @@ export async function listHostedStripeCheckoutSessionDirectMemberIds(input: {
     memberIds: listHostedStripeDirectMemberIds({
       clientReferenceId: normalizeNullableString(input.session.client_reference_id),
       memberId: normalizeNullableString(input.session.metadata?.memberId),
+      ownerMemberId: normalizeNullableString(
+        input.session.metadata?.ownerMemberId,
+      ),
     }),
     prisma: input.prisma,
   });

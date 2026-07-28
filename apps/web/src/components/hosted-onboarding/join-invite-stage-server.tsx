@@ -128,6 +128,12 @@ export function JoinInviteStageServer({ model }: { model: JoinInvitePageModel })
 
       {!model.launchConsent.gateActive
       && status.stage === "checkout"
+      && model.familyBillingRecovery === "checkout" ? (
+        <JoinInviteFamilyCheckoutContinuationPanel />
+      ) : null}
+
+      {!model.launchConsent.gateActive
+      && status.stage === "checkout"
       && model.familyBillingRecovery === "syncing" ? (
         <JoinInviteFamilyBillingSyncPanel />
       ) : null}
@@ -138,6 +144,7 @@ export function JoinInviteStageServer({ model }: { model: JoinInvitePageModel })
 
       {!model.launchConsent.gateActive
       && status.stage === "checkout"
+      && model.familyBillingRecovery !== "checkout"
       && model.familyBillingRecovery !== "syncing"
       && !autoPulseTrialReady
       && status.messagingSetupRequired ? (
@@ -149,6 +156,7 @@ export function JoinInviteStageServer({ model }: { model: JoinInvitePageModel })
 
       {!model.launchConsent.gateActive
       && status.stage === "checkout"
+      && model.familyBillingRecovery !== "checkout"
       && model.familyBillingRecovery !== "syncing"
       && !autoPulseTrialReady
       && !status.messagingSetupRequired ? (
@@ -460,6 +468,34 @@ export function JoinInviteFamilyBillingSyncPanel() {
             Stripe is confirming the plan. This page checks automatically and
             will continue when Family access is ready.
           </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export function JoinInviteFamilyCheckoutContinuationPanel() {
+  return (
+    <div className="rounded-xl border border-border bg-card px-6 py-7 sm:px-8">
+      <div className="flex items-start gap-4">
+        <PlanVisual tier="pulse" />
+        <div className="min-w-0 flex-1">
+          <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+            Family checkout
+          </p>
+          <h3 className="mt-2 font-serif text-2xl font-semibold tracking-tight text-foreground">
+            Your Family checkout is still open
+          </h3>
+          <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+            Continue to Stripe using the same secure checkout. Individual plans
+            stay unavailable while this Family checkout is open.
+          </p>
+          <div className="mt-5">
+            <HostedFamilyStartButton
+              block
+              label="Continue Family checkout"
+            />
+          </div>
         </div>
       </div>
     </div>

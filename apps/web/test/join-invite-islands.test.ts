@@ -501,6 +501,34 @@ test("JoinInviteStatusRefreshIsland refreshes when a pending server state change
   await cleanup();
 });
 
+test("JoinInviteStatusRefreshIsland rereads a pending Family server projection", async () => {
+  const status = createStatus({
+    session: {
+      authenticated: true,
+      expiresAt: null,
+      matchesInvite: true,
+    },
+    stage: "checkout",
+  });
+  const { cleanup } = await renderClientComponent(
+    createElement(JoinInviteStatusRefreshIsland, {
+      current: buildJoinInviteStatusRefreshSnapshot(status, "checkout"),
+      inviteCode: "invite-code",
+      legalGateActive: false,
+    }),
+    { requireButton: false },
+  );
+
+  const refreshOptions = mocks.useHostedInviteStatusRefresh.mock.calls[0]?.[0];
+
+  act(() => {
+    refreshOptions.onStatus(status);
+  });
+
+  expect(mocks.refresh).toHaveBeenCalledTimes(1);
+  await cleanup();
+});
+
 test("JoinInviteStatusRefreshIsland surfaces refresh failures with a retry action", async () => {
   const currentStatus = createStatus({
     session: {

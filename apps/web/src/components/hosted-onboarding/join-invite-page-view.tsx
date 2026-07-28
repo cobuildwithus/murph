@@ -29,28 +29,28 @@ export function JoinInvitePageView({ model }: { model: JoinInvitePageModel }) {
     && model.status.stage === "checkout"
     && !messagingSetupCheckout
     && model.familyBillingRecovery !== null;
+  const familyBillingRecoveryHeader =
+    familyBillingRecoveryVisible && model.familyBillingRecovery !== null
+      ? resolveFamilyBillingRecoveryHeader(model.familyBillingRecovery)
+      : null;
+  const focusedFamilyBillingRecovery =
+    model.familyBillingRecovery === "checkout"
+    || model.familyBillingRecovery === "syncing";
   const useCenteredShell = model.launchConsent.gateActive
     || model.status.stage === "verify"
     || autoPulseTrialStarting
-    || messagingSetupCheckout;
+    || messagingSetupCheckout
+    || focusedFamilyBillingRecovery;
   const Shell = useCenteredShell ? JoinInviteCenteredShell : JoinInviteShell;
   const eyebrow = model.launchConsent.gateActive
     ? { label: "Murph", tone: "default" as const }
     : resolveJoinInviteEyebrow(model.status.stage);
   const title = model.launchConsent.gateActive
     ? "One quick step"
-    : familyBillingRecoveryVisible
-      ? model.familyBillingRecovery === "syncing"
-        ? "Family billing is in progress"
-        : "Choose how to continue"
-    : resolveJoinInviteTitle(model.status);
+    : familyBillingRecoveryHeader?.title ?? resolveJoinInviteTitle(model.status);
   const subtitle = model.launchConsent.gateActive
     ? "Review and accept the legal agreements below to get started."
-    : familyBillingRecoveryVisible
-      ? model.familyBillingRecovery === "syncing"
-        ? "Stripe is confirming your Family plan."
-        : "Restart Family or choose an individual plan."
-    : resolveJoinInviteSubtitle(model.status);
+    : familyBillingRecoveryHeader?.subtitle ?? resolveJoinInviteSubtitle(model.status);
 
   return (
     <Shell>
@@ -78,13 +78,38 @@ export function JoinInvitePageView({ model }: { model: JoinInvitePageModel }) {
       </div>
 
       <JoinInviteStatusRefreshIsland
-        current={buildJoinInviteStatusRefreshSnapshot(model.status)}
+        current={buildJoinInviteStatusRefreshSnapshot(
+          model.status,
+          model.familyBillingRecovery,
+        )}
         disabled={model.preview}
         inviteCode={model.inviteCode}
         legalGateActive={model.launchConsent.gateActive}
       />
     </Shell>
   );
+}
+
+function resolveFamilyBillingRecoveryHeader(
+  state: NonNullable<JoinInvitePageModel["familyBillingRecovery"]>,
+): { subtitle: string; title: string } {
+  switch (state) {
+    case "available":
+      return {
+        subtitle: "Restart Family or choose an individual plan.",
+        title: "Choose how to continue",
+      };
+    case "checkout":
+      return {
+        subtitle: "Your existing Stripe checkout is ready to resume.",
+        title: "Continue Family checkout",
+      };
+    case "syncing":
+      return {
+        subtitle: "Stripe is confirming your Family plan.",
+        title: "Family billing is in progress",
+      };
+  }
 }
 
 function resolveJoinInviteEyebrow(

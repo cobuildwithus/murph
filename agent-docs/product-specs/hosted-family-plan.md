@@ -289,17 +289,35 @@ to `not_started`, so dashboard authentication intentionally redirects Settings
 returns to `/join`. The matched authenticated invite flow must distinguish this
 existing canceled Family group from ordinary first-time onboarding. With no
 current Family Checkout claim, `/join` offers the existing Family Checkout
-action beside the individual plans. With a fresh Family attempt or bound
-subscription, it shows persistent syncing feedback and withholds individual
-Checkout actions until the webhook closes the claim. Ordinary members without a
-canceled owner group retain the existing Pulse and Edge onboarding journey.
+action beside the individual plans. With a current Family attempt, it offers one
+Family continuation action through the existing idempotent Checkout route and
+withholds individual Checkout actions. A bound Family subscription shows
+persistent syncing feedback until reconciliation closes the claim. Existing
+invite-status polling also refreshes these server-derived states, so an expired
+attempt returns to plan choice and a reconciled subscription advances the
+journey. Ordinary members without a canceled owner group retain the existing
+Pulse and Edge onboarding journey.
+
+Starting Family again after the 24-hour cutoff rotates the expired attempt under
+the existing owner lock before provider I/O. A delayed expiry event remains
+scoped to the old attempt and Session key. Once Checkout binds a subscription,
+that binding continues to claim the member even while the canceled group awaits
+subscription reconciliation; authoritative terminal reconciliation clears the
+binding and releases the claim.
+
+Cancel returns through Settings and dashboard auth to the resumable `/join`
+state. Success instead carries the bounded Stripe Session ID through `/join` to
+the existing invite success surface, which verifies Session ownership and
+reconciles it while the owner is present rather than showing the continuation
+action while webhook processing is delayed.
 
 Regression coverage follows the production boundaries: terminal-before-active
 Stripe reconciliation releases the exact direct binding, dashboard auth returns
 the owner to `/join`, the server model derives recovery from the owner group,
-the rendered surface posts Family retry to the existing Settings billing route,
-and refreshes keep pending Family state visible while invite-status polling
-waits for activation.
+the rendered surface posts Family continuation to the existing Settings billing
+route, the provider request keeps its idempotency key and Settings cancel return,
+and invite-status polling rereads the server projection while Checkout or
+reconciliation remains pending.
 
 ## Invite Issuance
 
