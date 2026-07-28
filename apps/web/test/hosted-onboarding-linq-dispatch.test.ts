@@ -4778,6 +4778,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     mocks.hostedOnboardingEnvironment.linqInstantStartPhonePrefixes = ["+1"];
     const incomingLinePhone = "+15550000000";
     const fallbackLinePhone = "+15550100001";
+    const createdInviteCode = "code_instant_start_cross_line";
     let createdMemberId: string | null = null;
     let createdInvite: {
       channel: string;
@@ -4820,6 +4821,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     }) => {
       createdInvite = {
         ...data,
+        inviteCode: createdInviteCode,
         sentAt: null,
         status: "pending",
       };
@@ -4877,13 +4879,12 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       signature: null,
       timestamp: null,
     })).resolves.toMatchObject({
-      inviteCode: expect.any(String),
+      inviteCode: createdInviteCode,
       ok: true,
       reason: "sent-signup-link",
     });
 
     expect(createdMemberId).toEqual(expect.any(String));
-    expect(createdInvite?.inviteCode).toEqual(expect.any(String));
     expect(mocks.classifyHostedLinqFirstContactAdmission).toHaveBeenCalledOnce();
     expect(mocks.ensureHostedLinqInstantStartPulseTrialEnrollment)
       .not.toHaveBeenCalled();
@@ -4901,7 +4902,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(mocks.createHostedLinqChat).toHaveBeenCalledWith({
       from: fallbackLinePhone,
       idempotencyKey: expect.stringContaining(String(createdMemberId)),
-      message: expect.stringContaining(String(createdInvite?.inviteCode)),
+      message: expect.stringContaining(createdInviteCode),
       signal: undefined,
       to: ["+15551234567"],
     });
