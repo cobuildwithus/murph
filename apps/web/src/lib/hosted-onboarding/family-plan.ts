@@ -604,6 +604,14 @@ type HostedFamilyBillingCheckoutInput =
       alreadyActive: false;
       checkoutAttemptId: string;
       group: HostedAccountGroupAccessSnapshot;
+      mode: "existingCheckout";
+      sessionId: string;
+    }
+  | {
+      alreadyActive: false;
+      checkoutAttemptId: string;
+      group: HostedAccountGroupAccessSnapshot;
+      mode: "newCheckout";
       priceId: string;
       publicBaseUrl: string;
       seatCount: number;
@@ -621,6 +629,11 @@ type HostedFamilyDirectPaidUpgradeInput = {
   stripeSubscriptionId: string;
   targetPriceId: string;
 };
+
+type HostedFamilyExistingBillingCheckoutInput = Extract<
+  HostedFamilyBillingCheckoutInput,
+  { mode: "existingCheckout" }
+>;
 
 export function hasHostedAccountGroupAccess(input: {
   billingStatus: HostedBillingStatus;
@@ -860,13 +873,13 @@ export async function readHostedFamilyOwnerSnapshotForMember(input: {
 
 /**
  * A canceled Family group remains the source of truth for the owner's
- * onboarding recovery choice. A current attempt remains resumable through the
- * existing idempotent Checkout route, while a bound subscription waits for
- * Stripe reconciliation. With neither claim, the owner may retry Family or
- * choose an individual plan.
+ * onboarding recovery choice. A persisted attempt retains authority until
+ * Stripe proves its exact Session expired; the existing Checkout route resumes
+ * a bound open Session or safely retries an unbound current attempt. A bound
+ * subscription waits for Stripe reconciliation. With neither claim, the owner
+ * may retry Family or choose an individual plan.
  */
 export async function readHostedFamilyBillingRecoveryForOwner(input: {
-  now?: Date;
   ownerMemberId: string;
   prisma?: HostedOnboardingReadClient;
 }): Promise<HostedFamilyBillingRecoveryState | null> {
@@ -876,7 +889,6 @@ export async function readHostedFamilyBillingRecoveryForOwner(input: {
       billingRef: {
         select: {
           checkoutAttemptId: true,
-          checkoutCreatedAt: true,
           stripeSubscriptionIdEncrypted: true,
         },
       },
@@ -895,18 +907,10 @@ export async function readHostedFamilyBillingRecoveryForOwner(input: {
     return null;
   }
 
-  const nowMs = (input.now ?? new Date()).getTime();
-  const checkoutAttemptIsCurrent = Boolean(
-    group.billingRef?.checkoutAttemptId
-    && group.billingRef.checkoutCreatedAt
-    && nowMs - group.billingRef.checkoutCreatedAt.getTime()
-      < HOSTED_FAMILY_CHECKOUT_CLAIM_MAX_AGE_MS,
-  );
-
   if (group.billingRef?.stripeSubscriptionIdEncrypted) {
     return "syncing";
   }
-  return checkoutAttemptIsCurrent ? "checkout" : "available";
+  return group.billingRef?.checkoutAttemptId ? "checkout" : "available";
 }
 
 export async function readHostedFamilyInviteAcceptanceView(input: {
@@ -1098,7 +1102,6 @@ export async function readHostedAccountGroupStripeBillingRef(input: {
  */
 export async function readHostedMemberFamilyBillingClaim(input: {
   memberId: string;
-  now?: Date;
   prisma: HostedOnboardingReadClient;
 }): Promise<HostedMemberFamilyBillingClaim | null> {
   const memberships = await input.prisma.hostedAccountGroupMembership.findMany({
@@ -1109,7 +1112,6 @@ export async function readHostedMemberFamilyBillingClaim(input: {
           billingRef: {
             select: {
               checkoutAttemptId: true,
-              checkoutCreatedAt: true,
               stripeSubscriptionIdEncrypted: true,
             },
           },
@@ -1134,7 +1136,6 @@ export async function readHostedMemberFamilyBillingClaim(input: {
   ) {
     return null;
   }
-  const nowMs = (input.now ?? new Date()).getTime();
   const claims: HostedMemberFamilyBillingClaim[] = [];
   for (const { group } of memberships) {
     if (
@@ -1160,9 +1161,6 @@ export async function readHostedMemberFamilyBillingClaim(input: {
     }
     if (
       group.billingRef?.checkoutAttemptId
-      && group.billingRef.checkoutCreatedAt
-      && nowMs - group.billingRef.checkoutCreatedAt.getTime()
-        < HOSTED_FAMILY_CHECKOUT_CLAIM_MAX_AGE_MS
     ) {
       claims.push({
         checkoutAttemptId: group.billingRef.checkoutAttemptId,
@@ -2018,11 +2016,22 @@ export async function createHostedFamilyBillingCheckout(input: {
   prisma?: PrismaClient;
   seatCount?: unknown;
 }): Promise<{ alreadyActive: boolean; url: string | null }> {
+  return createOrResumeHostedFamilyBillingCheckout(input, true);
+}
+
+async function createOrResumeHostedFamilyBillingCheckout(
+  input: {
+    groupId: string;
+    now?: Date;
+    ownerMemberId: string;
+    prisma?: PrismaClient;
+    seatCount?: unknown;
+  },
+  restartAllowed: boolean,
+): Promise<{ alreadyActive: boolean; url: string | null }> {
   const prisma = input.prisma ?? getPrisma();
   const now = input.now ?? new Date();
   const seatCount = normalizeHostedFamilySeatCount(input.seatCount ?? HOSTED_FAMILY_MIN_SEATS);
-  let stripeApi: ReturnType<typeof requireHostedStripeApi> | null = null;
-
   const checkoutInput: HostedFamilyBillingCheckoutInput = await prisma.$transaction(async (tx) => {
     const group = await tx.hostedAccountGroup.findUnique({
       select: hostedAccountGroupAccessSelect,
@@ -2042,7 +2051,6 @@ export async function createHostedFamilyBillingCheckout(input: {
     if (hasHostedAccountGroupAccess(group)) {
       return {
         alreadyActive: true,
-        url: null,
       };
     }
     await assertHostedFamilyOwnerCanStartBillingTx({
@@ -2071,31 +2079,49 @@ export async function createHostedFamilyBillingCheckout(input: {
     if (directPaidUpgrade) {
       return directPaidUpgrade;
     }
-    const checkoutAttemptIsCurrent = Boolean(
-      currentBillingRef?.checkoutAttemptId
-      && currentBillingRef.checkoutCreatedAt
-      && now.getTime() - currentBillingRef.checkoutCreatedAt.getTime()
-        < HOSTED_FAMILY_CHECKOUT_CLAIM_MAX_AGE_MS,
-    );
-    const checkoutAttemptId =
-      checkoutAttemptIsCurrent && currentBillingRef?.checkoutAttemptId
-        ? currentBillingRef.checkoutAttemptId
-        : generateHostedFamilyCheckoutAttemptId();
+
+    const currentAttemptId = currentBillingRef?.checkoutAttemptId ?? null;
+    if (currentBillingRef?.stripeCheckoutSessionId && !currentAttemptId) {
+      throw buildHostedFamilyCheckoutRecoveryRequiredError();
+    }
     if (
-      checkoutAttemptIsCurrent
-      && currentBillingRef?.checkoutAttemptId
-      && currentBillingRef.checkoutSeatCount !== seatCount
+      currentAttemptId
+      && currentBillingRef?.checkoutSeatCount !== seatCount
     ) {
       throw hostedOnboardingError({
         code: "HOSTED_FAMILY_CHECKOUT_IN_PROGRESS",
         httpStatus: 409,
-        message: "Family checkout is already in progress. Finish or restart checkout before changing seats.",
+        message:
+          "Family checkout is already in progress. Finish or expire it before changing seats.",
       });
     }
+    if (currentAttemptId && currentBillingRef?.stripeCheckoutSessionId) {
+      return {
+        alreadyActive: false,
+        checkoutAttemptId: currentAttemptId,
+        group,
+        mode: "existingCheckout",
+        sessionId: currentBillingRef.stripeCheckoutSessionId,
+      };
+    }
+
     const priceId = requireHostedFamilyStripePriceId();
     const publicBaseUrl = requireHostedOnboardingPublicBaseUrl();
-    stripeApi = requireHostedStripeApi();
-    if (!checkoutAttemptIsCurrent) {
+    const checkoutAttemptId =
+      currentAttemptId ?? generateHostedFamilyCheckoutAttemptId();
+    if (currentAttemptId) {
+      const checkoutCreatedAt = currentBillingRef?.checkoutCreatedAt;
+      const attemptAgeMs = checkoutCreatedAt
+        ? now.getTime() - checkoutCreatedAt.getTime()
+        : Number.NaN;
+      if (
+        !Number.isFinite(attemptAgeMs)
+        || attemptAgeMs < 0
+        || attemptAgeMs >= HOSTED_FAMILY_CHECKOUT_CLAIM_MAX_AGE_MS
+      ) {
+        throw buildHostedFamilyCheckoutRecoveryRequiredError();
+      }
+    } else {
       await writeHostedFamilyCheckoutAttemptTx({
         attemptId: checkoutAttemptId,
         group,
@@ -2109,6 +2135,7 @@ export async function createHostedFamilyBillingCheckout(input: {
       alreadyActive: false,
       checkoutAttemptId,
       group,
+      mode: "newCheckout",
       priceId,
       publicBaseUrl,
       seatCount,
@@ -2126,7 +2153,27 @@ export async function createHostedFamilyBillingCheckout(input: {
     return upgradeHostedFamilyDirectPaidSubscription(checkoutInput);
   }
 
-  const stripe = stripeApi ?? requireHostedStripeApi();
+  const stripe = requireHostedStripeApi();
+  if (checkoutInput.mode === "existingCheckout") {
+    const existingCheckout = await resumeHostedFamilyBillingCheckout({
+      checkoutInput,
+      prisma,
+      stripe,
+    });
+    if (existingCheckout === "restart") {
+      if (!restartAllowed) {
+        throw hostedOnboardingError({
+          code: "HOSTED_FAMILY_CHECKOUT_ATTEMPT_STALE",
+          httpStatus: 409,
+          message: "Family checkout changed while restarting. Try again.",
+          retryable: true,
+        });
+      }
+      return createOrResumeHostedFamilyBillingCheckout(input, false);
+    }
+    return existingCheckout;
+  }
+
   const metadata = {
     ...buildHostedFamilyStripeMetadata(checkoutInput.group),
     checkoutAttemptId: checkoutInput.checkoutAttemptId,
@@ -2195,6 +2242,113 @@ export async function createHostedFamilyBillingCheckout(input: {
     url: buildHostedFamilyCheckoutRedirectUrl({ checkoutUrl: checkoutSession.url }) ??
       checkoutSession.url,
   };
+}
+
+async function resumeHostedFamilyBillingCheckout(input: {
+  checkoutInput: HostedFamilyExistingBillingCheckoutInput;
+  prisma: PrismaClient;
+  stripe: ReturnType<typeof requireHostedStripeApi>;
+}): Promise<
+  | { alreadyActive: false; url: string | null }
+  | "restart"
+> {
+  const session = await withHostedStripeFailureLog(
+    "checkout.sessions.retrieve.family",
+    () => input.stripe.checkout.sessions.retrieve(
+      input.checkoutInput.sessionId,
+    ),
+  );
+  const matchedGroup = await findHostedAccountGroupForStripeCheckoutSession({
+    prisma: input.prisma,
+    session,
+  });
+  if (
+    matchedGroup?.id !== input.checkoutInput.group.id
+    || matchedGroup.ownerMemberId !== input.checkoutInput.group.ownerMemberId
+  ) {
+    throw hostedOnboardingError({
+      code: "HOSTED_FAMILY_CHECKOUT_ATTEMPT_STALE",
+      httpStatus: 409,
+      message: "Family checkout changed before Stripe returned its status. Try again.",
+      retryable: true,
+    });
+  }
+
+  if (session.status === "open") {
+    if (!session.url) {
+      throw hostedOnboardingError({
+        code: "HOSTED_FAMILY_CHECKOUT_SESSION_UNAVAILABLE",
+        httpStatus: 409,
+        message:
+          "Family checkout is open but Stripe did not return its URL. Try again or contact support.",
+        retryable: true,
+      });
+    }
+    return {
+      alreadyActive: false,
+      url: buildHostedFamilyCheckoutRedirectUrl({ checkoutUrl: session.url }) ??
+        session.url,
+    };
+  }
+
+  if (session.status === "expired") {
+    await input.prisma.$transaction(
+      (tx) => applyHostedFamilyStripeCheckoutExpiredTx({
+        session,
+        tx,
+      }),
+      HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
+    );
+    return "restart";
+  }
+
+  if (session.status === "complete") {
+    if (!coerceStripeSubscriptionId(session.subscription)) {
+      throw hostedOnboardingError({
+        code: "HOSTED_FAMILY_BILLING_SYNCING",
+        httpStatus: 409,
+        message: "Family checkout is complete and still syncing. Try again shortly.",
+        retryable: true,
+      });
+    }
+    const completed = await input.prisma.$transaction(
+      (tx) => applyHostedFamilyStripeCheckoutCompletedTx({
+        dispatchContext: { eventCreatedAt: null },
+        session,
+        tx,
+      }),
+      HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
+    );
+    if (completed.groupId !== input.checkoutInput.group.id) {
+      throw hostedOnboardingError({
+        code: "HOSTED_FAMILY_CHECKOUT_ATTEMPT_STALE",
+        httpStatus: 409,
+        message: "Family checkout changed before completion could be applied. Try again.",
+        retryable: true,
+      });
+    }
+    return {
+      alreadyActive: false,
+      url: null,
+    };
+  }
+
+  throw hostedOnboardingError({
+    code: "HOSTED_FAMILY_BILLING_SYNCING",
+    httpStatus: 409,
+    message: "Family checkout is unavailable and still syncing. Try again shortly.",
+    retryable: true,
+  });
+}
+
+function buildHostedFamilyCheckoutRecoveryRequiredError() {
+  return hostedOnboardingError({
+    code: "HOSTED_FAMILY_CHECKOUT_RECOVERY_REQUIRED",
+    httpStatus: 409,
+    message:
+      "This Family checkout is too old to retry safely. Contact support before starting another checkout.",
+    retryable: false,
+  });
 }
 
 function isHostedFamilyDirectPaidUpgradeInput(

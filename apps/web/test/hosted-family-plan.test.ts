@@ -397,7 +397,6 @@ describe("hosted Family plan", () => {
 
     await expect(readHostedMemberFamilyBillingClaim({
       memberId: "member_mom",
-      now: new Date("2026-07-27T12:00:00.000Z"),
       prisma: tx,
     })).resolves.toEqual(expected);
 
@@ -411,7 +410,7 @@ describe("hosted Family plan", () => {
     );
   });
 
-  it("does not report a stale Family Checkout attempt as live billing ownership", async () => {
+  it("retains a stale unbound Family attempt as ambiguous billing ownership", async () => {
     const tx = createTxMock();
     tx.hostedAccountGroupMembership.findMany.mockResolvedValueOnce([{
       group: {
@@ -429,9 +428,13 @@ describe("hosted Family plan", () => {
 
     await expect(readHostedMemberFamilyBillingClaim({
       memberId: "member_mom",
-      now: new Date("2026-07-27T12:00:00.000Z"),
       prisma: tx,
-    })).resolves.toBeNull();
+    })).resolves.toEqual({
+      checkoutAttemptId: "family_attempt_stale",
+      groupId: "hbag_family",
+      kind: "checkout_attempt",
+      ownerMemberId: "member_owner",
+    });
   });
 
   it("does not claim a directly paid beneficiary whom Family activation skips", async () => {
@@ -459,7 +462,6 @@ describe("hosted Family plan", () => {
 
     await expect(readHostedMemberFamilyBillingClaim({
       memberId: "member_mom",
-      now: new Date("2026-07-27T12:00:00.000Z"),
       prisma: tx,
     })).resolves.toBeNull();
   });
@@ -522,7 +524,6 @@ describe("hosted Family plan", () => {
 
     await expect(readHostedMemberFamilyBillingClaim({
       memberId: "member_mom",
-      now: new Date("2026-07-27T12:00:00.000Z"),
       prisma: tx,
     })).rejects.toMatchObject({
       code: "HOSTED_FAMILY_BILLING_CLAIM_AMBIGUOUS",
@@ -4087,7 +4088,6 @@ describe("hosted Family plan", () => {
       owner: { suspendedAt: null },
     }));
     await expect(readHostedFamilyBillingRecoveryForOwner({
-      now: new Date("2026-06-18T12:31:00.000Z"),
       ownerMemberId: group.ownerMemberId,
       prisma: tx,
     })).resolves.toBe("available");
@@ -4108,7 +4108,6 @@ describe("hosted Family plan", () => {
     }]);
     await expect(readHostedMemberFamilyBillingClaim({
       memberId: "member_owner",
-      now: new Date("2026-06-18T12:31:00.000Z"),
       prisma: tx,
     })).resolves.toBeNull();
 
@@ -4172,24 +4171,15 @@ describe("hosted Family plan", () => {
     });
     expect(checkoutCreate).toHaveBeenCalledOnce();
     await expect(readHostedFamilyBillingRecoveryForOwner({
-      now: new Date("2026-06-18T12:32:00.000Z"),
       ownerMemberId: group.ownerMemberId,
       prisma: tx,
     })).resolves.toBe("checkout");
-    const checkoutCreatedAt = currentBillingRef.checkoutCreatedAt;
-    if (!(checkoutCreatedAt instanceof Date)) {
-      throw new TypeError("Expected Family checkout creation time");
-    }
     await expect(readHostedFamilyBillingRecoveryForOwner({
-      now: new Date(
-        checkoutCreatedAt.getTime() + (24 * 60 * 60 * 1_000) + 1,
-      ),
       ownerMemberId: group.ownerMemberId,
       prisma: tx,
-    })).resolves.toBe("available");
+    })).resolves.toBe("checkout");
     currentBillingRef.stripeSubscriptionIdEncrypted = "encrypted:sub_family";
     await expect(readHostedFamilyBillingRecoveryForOwner({
-      now: new Date("2026-06-18T12:33:00.000Z"),
       ownerMemberId: group.ownerMemberId,
       prisma: tx,
     })).resolves.toBe("syncing");
@@ -5075,7 +5065,7 @@ describe("hosted Family plan", () => {
     });
   });
 
-  it("rotates an expired Family attempt before restarting Checkout", async () => {
+  it("retains a freshly bound Family Session past the attempt cutoff", async () => {
     const group = {
       billingStatus: HostedBillingStatus.canceled,
       id: "hbag_family",
@@ -5086,12 +5076,12 @@ describe("hosted Family plan", () => {
       billedSeatCount: null,
       group,
     });
-    tx.hostedAccountGroupBillingRef.findUnique.mockResolvedValueOnce({
+    tx.hostedAccountGroupBillingRef.findUnique.mockResolvedValue({
       ...createBillingRefMock({
-        checkoutAttemptId: "hbfca_expired",
-        checkoutCreatedAt: new Date("2026-07-27T11:59:59.999Z"),
+        checkoutAttemptId: "hbfca_existing",
+        checkoutCreatedAt: new Date("2026-07-27T12:00:00.000Z"),
         checkoutSeatCount: 2,
-        stripeCheckoutSessionIdEncrypted: "encrypted:cs_test_familyExpired123",
+        stripeCheckoutSessionIdEncrypted: "encrypted:cs_test_familyLate123",
         stripeSubscriptionIdEncrypted: null,
       }),
       group,
@@ -5104,10 +5094,174 @@ describe("hosted Family plan", () => {
       id: "cs_test_familyRestart123",
       url: "https://checkout.stripe.com/c/pay/cs_test_familyRestart123",
     });
+    const checkoutRetrieve = vi.fn().mockResolvedValue({
+      ...makeFamilyStripeCheckoutSession({
+        checkoutAttemptId: "hbfca_existing",
+        sessionId: "cs_test_familyLate123",
+        subscriptionId: null,
+        url: "https://checkout.stripe.com/c/pay/cs_test_familyLate123",
+      }),
+      status: "open",
+    });
     runtimeMocks.requireHostedStripeApi.mockReturnValueOnce({
       checkout: {
         sessions: {
           create: checkoutCreate,
+          retrieve: checkoutRetrieve,
+        },
+      },
+    });
+
+    await expect(createHostedFamilyBillingCheckout({
+      groupId: group.id,
+      now: new Date("2026-07-28T12:00:00.000Z"),
+      ownerMemberId: group.ownerMemberId,
+      prisma: prisma as never,
+      seatCount: 2,
+    })).resolves.toEqual({
+      alreadyActive: false,
+      url: "https://local.withmurph.ai:3443/checkout/family/cs_test_familyLate123",
+    });
+
+    expect(checkoutRetrieve).toHaveBeenCalledWith("cs_test_familyLate123");
+    expect(checkoutCreate).not.toHaveBeenCalled();
+    expect(tx.hostedAccountGroupBillingRef.upsert).not.toHaveBeenCalled();
+    expect(tx.hostedAccountGroupBillingRef.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("applies a completed bound Family Session instead of replacing it", async () => {
+    const group = {
+      billingStatus: HostedBillingStatus.canceled,
+      id: "hbag_family",
+      ownerMemberId: "member_owner",
+      suspendedAt: null,
+    };
+    const billingRef = {
+      ...createBillingRefMock({
+        billedSeatCount: null,
+        checkoutAttemptId: "hbfca_existing",
+        checkoutCreatedAt: new Date("2026-07-27T12:00:00.000Z"),
+        checkoutSeatCount: 2,
+        group,
+        stripeCheckoutSessionIdEncrypted: "encrypted:cs_test_familyComplete123",
+        stripeSubscriptionIdEncrypted: null,
+      }),
+      group,
+    };
+    const tx = createTxMock({
+      billedSeatCount: null,
+      group,
+    });
+    tx.hostedAccountGroupBillingRef.findUnique.mockResolvedValue(billingRef);
+    const prisma = tx as FamilyPlanTxMock & {
+      $transaction: ReturnType<typeof vi.fn>;
+    };
+    prisma.$transaction = vi.fn((callback) => callback(tx));
+    const checkoutCreate = vi.fn();
+    const checkoutRetrieve = vi.fn().mockResolvedValue(
+      makeFamilyStripeCheckoutSession({
+        checkoutAttemptId: "hbfca_existing",
+        sessionId: "cs_test_familyComplete123",
+        status: "complete",
+        subscriptionId: "sub_family_complete",
+        url: null,
+      }),
+    );
+    runtimeMocks.requireHostedStripeApi.mockReturnValue({
+      checkout: {
+        sessions: {
+          create: checkoutCreate,
+          retrieve: checkoutRetrieve,
+        },
+      },
+    });
+
+    await expect(createHostedFamilyBillingCheckout({
+      groupId: group.id,
+      now: new Date("2026-07-28T12:00:00.000Z"),
+      ownerMemberId: group.ownerMemberId,
+      prisma: prisma as never,
+      seatCount: 2,
+    })).resolves.toEqual({
+      alreadyActive: false,
+      url: null,
+    });
+
+    expect(checkoutRetrieve).toHaveBeenCalledWith("cs_test_familyComplete123");
+    expect(checkoutCreate).not.toHaveBeenCalled();
+    expect(tx.hostedAccountGroupBillingRef.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        update: expect.objectContaining({
+          checkoutAttemptId: null,
+          stripeCheckoutSessionIdEncrypted: null,
+          stripeSubscriptionIdEncrypted: "encrypted:sub_family_complete",
+        }),
+      }),
+    );
+  });
+
+  it("restarts only after Stripe proves the exact Family Session expired", async () => {
+    const group = {
+      billingStatus: HostedBillingStatus.canceled,
+      id: "hbag_family",
+      ownerMemberId: "member_owner",
+      suspendedAt: null,
+    };
+    let billingRef = {
+      ...createBillingRefMock({
+        billedSeatCount: null,
+        checkoutAttemptId: "hbfca_expired",
+        checkoutCreatedAt: new Date("2026-07-27T12:00:00.000Z"),
+        checkoutSeatCount: 2,
+        group,
+        stripeCheckoutSessionIdEncrypted: "encrypted:cs_test_familyExpired123",
+        stripeSubscriptionIdEncrypted: null,
+      }),
+      group,
+    };
+    const tx = createTxMock({
+      billedSeatCount: null,
+      group,
+    });
+    tx.hostedAccountGroupBillingRef.findUnique.mockImplementation(
+      async () => billingRef,
+    );
+    tx.hostedAccountGroupBillingRef.updateMany.mockImplementation(
+      async ({ data }) => {
+        if (data.checkoutAttemptId === null) {
+          billingRef = {
+            ...billingRef,
+            checkoutAttemptId: null,
+            checkoutCreatedAt: null,
+            checkoutSeatCount: null,
+            stripeCheckoutSessionIdEncrypted: null,
+          };
+        }
+        return { count: 1 };
+      },
+    );
+    const prisma = tx as FamilyPlanTxMock & {
+      $transaction: ReturnType<typeof vi.fn>;
+    };
+    prisma.$transaction = vi.fn((callback) => callback(tx));
+    const checkoutCreate = vi.fn().mockResolvedValue({
+      id: "cs_test_familyRestart123",
+      url: "https://checkout.stripe.com/c/pay/cs_test_familyRestart123",
+    });
+    const checkoutRetrieve = vi.fn().mockResolvedValue(
+      makeFamilyStripeCheckoutSession({
+        checkoutAttemptId: "hbfca_expired",
+        sessionId: "cs_test_familyExpired123",
+        status: "expired",
+        subscriptionId: null,
+        url: null,
+      }),
+    );
+    runtimeMocks.requireHostedStripeApi.mockReturnValue({
+      checkout: {
+        sessions: {
+          create: checkoutCreate,
+          retrieve: checkoutRetrieve,
         },
       },
     });
@@ -5123,35 +5277,11 @@ describe("hosted Family plan", () => {
       url: "https://local.withmurph.ai:3443/checkout/family/cs_test_familyRestart123",
     });
 
-    const replacementAttemptId =
-      tx.hostedAccountGroupBillingRef.upsert.mock.calls[0]?.[0].update
-        .checkoutAttemptId;
-    expect(replacementAttemptId).toMatch(/^hbfca_/u);
-    expect(replacementAttemptId).not.toBe("hbfca_expired");
-    expect(tx.hostedAccountGroupBillingRef.upsert).toHaveBeenCalledWith(
-      expect.objectContaining({
-        update: expect.objectContaining({
-          checkoutAttemptId: replacementAttemptId,
-          checkoutCreatedAt: new Date("2026-07-28T12:00:00.000Z"),
-          stripeCheckoutSessionIdEncrypted: null,
-          stripeCheckoutSessionLookupKey: null,
-        }),
-      }),
-    );
+    expect(checkoutRetrieve).toHaveBeenCalledWith("cs_test_familyExpired123");
+    expect(checkoutCreate).toHaveBeenCalledOnce();
     expect(checkoutCreate.mock.calls[0]?.[1]).toEqual({
-      idempotencyKey: expect.stringContaining(`:${replacementAttemptId}:`),
+      idempotencyKey: expect.not.stringContaining(":hbfca_expired:"),
     });
-
-    tx.hostedAccountGroupBillingRef.updateMany.mockClear();
-    tx.hostedAccountGroupBillingRef.updateMany.mockResolvedValueOnce({ count: 0 });
-    await expect(applyHostedFamilyStripeCheckoutExpiredTx({
-      session: makeFamilyStripeCheckoutSession({
-        checkoutAttemptId: "hbfca_expired",
-        sessionId: "cs_test_familyExpired123",
-        subscriptionId: null,
-      }),
-      tx,
-    })).resolves.toBe(true);
     expect(tx.hostedAccountGroupBillingRef.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
@@ -5160,9 +5290,55 @@ describe("hosted Family plan", () => {
         }),
       }),
     );
+    expect(tx.hostedAccountGroupBillingRef.upsert).toHaveBeenCalledOnce();
   });
 
-  it("keeps a delivered Family Checkout owned when duplicate provider replay fails", async () => {
+  it("fails closed for a stale unbound Family attempt", async () => {
+    const group = {
+      billingStatus: HostedBillingStatus.canceled,
+      id: "hbag_family",
+      ownerMemberId: "member_owner",
+      suspendedAt: null,
+    };
+    const tx = createTxMock({
+      billedSeatCount: null,
+      group,
+    });
+    tx.hostedAccountGroupBillingRef.findUnique.mockResolvedValue({
+      ...createBillingRefMock({
+        billedSeatCount: null,
+        checkoutAttemptId: "hbfca_ambiguous",
+        checkoutCreatedAt: new Date("2026-07-27T11:59:59.999Z"),
+        checkoutSeatCount: 2,
+        group,
+        stripeCheckoutSessionIdEncrypted: null,
+        stripeSubscriptionIdEncrypted: null,
+      }),
+      group,
+    });
+    const prisma = tx as FamilyPlanTxMock & {
+      $transaction: ReturnType<typeof vi.fn>;
+    };
+    prisma.$transaction = vi.fn((callback) => callback(tx));
+
+    await expect(createHostedFamilyBillingCheckout({
+      groupId: group.id,
+      now: new Date("2026-07-28T12:00:00.000Z"),
+      ownerMemberId: group.ownerMemberId,
+      prisma: prisma as never,
+      seatCount: 2,
+    })).rejects.toMatchObject({
+      code: "HOSTED_FAMILY_CHECKOUT_RECOVERY_REQUIRED",
+      httpStatus: 409,
+      retryable: false,
+    });
+
+    expect(runtimeMocks.requireHostedStripeApi).not.toHaveBeenCalled();
+    expect(tx.hostedAccountGroupBillingRef.upsert).not.toHaveBeenCalled();
+    expect(tx.hostedAccountGroupBillingRef.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("keeps a delivered Family Checkout owned when Session retrieval fails", async () => {
     const group = {
       billingStatus: HostedBillingStatus.not_started,
       id: "hbag_family",
@@ -5173,7 +5349,7 @@ describe("hosted Family plan", () => {
       billedSeatCount: null,
       group,
     });
-    tx.hostedAccountGroupBillingRef.findUnique.mockResolvedValueOnce({
+    tx.hostedAccountGroupBillingRef.findUnique.mockResolvedValue({
       ...createBillingRefMock({
         checkoutAttemptId: "hbfca_existing",
         checkoutCreatedAt: new Date("2026-07-28T11:00:00.000Z"),
@@ -5187,12 +5363,14 @@ describe("hosted Family plan", () => {
       $transaction: ReturnType<typeof vi.fn>;
     };
     prisma.$transaction = vi.fn((callback) => callback(tx));
-    const replayError = new Error("Stripe replay result unavailable");
-    const checkoutCreate = vi.fn().mockRejectedValue(replayError);
+    const retrievalError = new Error("Stripe Session retrieval unavailable");
+    const checkoutCreate = vi.fn();
+    const checkoutRetrieve = vi.fn().mockRejectedValue(retrievalError);
     runtimeMocks.requireHostedStripeApi.mockReturnValueOnce({
       checkout: {
         sessions: {
           create: checkoutCreate,
+          retrieve: checkoutRetrieve,
         },
       },
     });
@@ -5203,12 +5381,12 @@ describe("hosted Family plan", () => {
       ownerMemberId: "member_owner",
       prisma: prisma as never,
       seatCount: 2,
-    })).rejects.toBe(replayError);
+    })).rejects.toBe(retrievalError);
 
-    expect(checkoutCreate.mock.calls[0]?.[1]).toEqual({
-      idempotencyKey: expect.stringContaining(":hbfca_existing:"),
-    });
+    expect(checkoutRetrieve).toHaveBeenCalledWith("cs_test_delivered123");
+    expect(checkoutCreate).not.toHaveBeenCalled();
     expect(tx.hostedAccountGroupBillingRef.upsert).not.toHaveBeenCalled();
+    expect(tx.hostedAccountGroupBillingRef.updateMany).not.toHaveBeenCalled();
   });
 
   it("does not start a second pending Family checkout for a different seat count", async () => {
@@ -6188,6 +6366,7 @@ function createTxMock(input: {
 function makeFamilyStripeCheckoutSession(input: {
   checkoutAttemptId?: string | null;
   sessionId?: string;
+  status?: Stripe.Checkout.Session["status"];
   subscriptionId?: string | null;
   url?: string | null;
 } = {}): Stripe.Checkout.Session {
@@ -6205,6 +6384,7 @@ function makeFamilyStripeCheckoutSession(input: {
     },
     mode: "subscription",
     object: "checkout.session",
+    status: input.status ?? "complete",
     subscription: input.subscriptionId === undefined ? "sub_family" : input.subscriptionId,
     url: input.url === undefined
       ? "https://checkout.stripe.com/c/pay/cs_test_family123"

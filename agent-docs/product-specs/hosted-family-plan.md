@@ -253,16 +253,17 @@ only the 42 candidate-generation calls now run before the transaction. The
 per-domain advisory locks are transaction-scoped, so post-commit prewarm work
 inside the same transaction also extends their lifetime.
 
-A live Family owner—an active sponsorship, a nonterminal bound subscription,
-or a checkout attempt created within the prior 24 hours—prevents a member from
-starting a separate direct checkout. An exact expired-Session event clears only
-the matching Family attempt. Family reconciliation projects Stripe `canceled`
+A live Family owner—an active sponsorship, a bound subscription, or any
+persisted checkout attempt—prevents a member from starting a separate direct
+checkout. An exact expired-Session event clears only the matching Family
+attempt. Family reconciliation projects Stripe `canceled`
 and `incomplete_expired` subscriptions into the existing terminal canceled
 group status, clears the current Family subscription/item binding, and keeps the
 customer plus event freshness watermark so both direct and Family checkout can
-recover without allowing an older event to reclaim billing. Older abandoned
-attempts do not become permanent claims. A directly paid beneficiary is not
-claimed because active Family reconciliation deliberately skips that member.
+recover without allowing an older event to reclaim billing. An older unbound
+attempt remains an ambiguous claim and requires support rather than permitting
+a blind second provider start. A directly paid beneficiary is not claimed
+because active Family reconciliation deliberately skips that member.
 
 If a direct checkout opened before Family billing claimed the member and
 completes afterward, reconciliation leaves it unbound and cancels that
@@ -293,17 +294,22 @@ action beside the individual plans. With a current Family attempt, it offers one
 Family continuation action through the existing idempotent Checkout route and
 withholds individual Checkout actions. A bound Family subscription shows
 persistent syncing feedback until reconciliation closes the claim. Existing
-invite-status polling also refreshes these server-derived states, so an expired
-attempt returns to plan choice and a reconciled subscription advances the
-journey. Ordinary members without a canceled owner group retain the existing
-Pulse and Edge onboarding journey.
+invite-status polling also refreshes these server-derived states, so an
+authoritatively expired Session returns to plan choice and a reconciled
+subscription advances the journey. Ordinary members without a canceled owner
+group retain the existing Pulse and Edge onboarding journey.
 
-Starting Family again after the 24-hour cutoff rotates the expired attempt under
-the existing owner lock before provider I/O. A delayed expiry event remains
-scoped to the old attempt and Session key. Once Checkout binds a subscription,
-that binding continues to claim the member even while the canceled group awaits
-subscription reconciliation; authoritative terminal reconciliation clears the
-binding and releases the claim.
+A persisted attempt remains a billing claim until Stripe proves its exact bound
+Session expired. The existing Family action retrieves a bound Session: it
+resumes an open Session, synchronously applies a completed Session through the
+existing reconciliation owner, and clears then restarts only an exact expired
+Session. A delayed expiry event remains scoped to the old attempt and Session
+key. An unbound attempt may reuse its original idempotency key only within the
+existing 24-hour safe-replay window; after that window it fails closed to
+support because a previous provider start is ambiguous. Once Checkout binds a
+subscription, that binding continues to claim the member even while the
+canceled group awaits subscription reconciliation; authoritative terminal
+reconciliation clears the binding and releases the claim.
 
 Cancel returns through Settings and dashboard auth to the resumable `/join`
 state. Success instead carries the bounded Stripe Session ID through `/join` to
@@ -316,6 +322,7 @@ Stripe reconciliation releases the exact direct binding, dashboard auth returns
 the owner to `/join`, the server model derives recovery from the owner group,
 the rendered surface posts Family continuation to the existing Settings billing
 route, the provider request keeps its idempotency key and Settings cancel return,
+bound Session status is authoritative for resume/reconcile/restart,
 and invite-status polling rereads the server projection while Checkout or
 reconciliation remains pending.
 
