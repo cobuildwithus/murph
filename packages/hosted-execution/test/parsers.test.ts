@@ -1047,6 +1047,30 @@ describe("parseHostedRuntimeGroupTool", () => {
       groupChatIconUrl:
         `https://imagedelivery.net/account/avatar/private?exp=2000000000&sig=${"a".repeat(64)}`,
     });
+    const querylessLegacyIconUrl =
+      "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/889a5f43-1d35-4eae-a98e-7ae69e96a800/public";
+    expect(parseHostedRuntimeGroupToolRequest({
+      action: "set_chat_avatar",
+      groupChatIconUrl: querylessLegacyIconUrl,
+    })).toEqual({
+      action: "set_chat_avatar",
+      groupChatIconUrl: querylessLegacyIconUrl,
+    });
+    for (const invalidLegacyIconUrl of [
+      "https://imagedelivery.net/account/avatar/private",
+      "https://imagedelivery.net/account/avatar/public/extra",
+      "https://imagedelivery.net/account/avatar/public/",
+      "https://imagedelivery.net/account//avatar/public",
+      "https://imagedelivery.net/account/avatar/public?tracking=1",
+      "https://imagedelivery.net/account/avatar/public?",
+      "https://imagedelivery.net/account/avatar/public#",
+      "https://imagedelivery.net/account/avatar%2Fother/public",
+    ]) {
+      expect(() => parseHostedRuntimeGroupToolRequest({
+        action: "set_chat_avatar",
+        groupChatIconUrl: invalidLegacyIconUrl,
+      })).toThrow(/groupChatIconUrl is invalid/u);
+    }
     expect(parseHostedRuntimeGroupToolRequest({
       action: "preflight_set_chat_avatar",
     })).toEqual({

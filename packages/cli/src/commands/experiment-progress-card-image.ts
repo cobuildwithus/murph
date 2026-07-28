@@ -22,11 +22,34 @@ import type {
 } from "@murphai/operator-config/assistant-cli-contracts";
 import sharp from "sharp";
 
+import { MURPH_LOGO_SVG } from "./murph-logo-svg.js";
+
 const CARD_WIDTH = 1200;
-const CARD_HEIGHT = 630;
+const CARD_HEIGHT = 780;
 const CARD_CONTENT_TYPE = "image/png";
 const CARD_SOURCE = "murph.experiment-progress-card";
 const CARD_LOOKUP_ROLE = "media_1";
+const CONTENT_LEFT = 64;
+const CONTENT_RIGHT = CARD_WIDTH - CONTENT_LEFT;
+const CONTENT_WIDTH = CONTENT_RIGHT - CONTENT_LEFT;
+const SERIF_FONT = "Fraunces, Georgia, serif";
+const SANS_FONT = "DM Sans, Arial, sans-serif";
+const LOGO_HEIGHT = 52;
+const LOGO_WIDTH = Math.round((LOGO_HEIGHT * 197) / 44);
+const LOGO_DATA_URI = `data:image/svg+xml;base64,${Buffer.from(
+  MURPH_LOGO_SVG,
+).toString("base64")}`;
+
+const COLOR = {
+  background: "#F4EEE1",
+  panel: "#FFFCF6",
+  border: "#787056",
+  foreground: "#2D3436",
+  muted: "#827C6C",
+  primary: "#5A6E32",
+  positive: "#506B2C",
+  negative: "#B0651F",
+};
 
 interface RenderedProgressCard {
   bytes: Uint8Array;
@@ -67,13 +90,13 @@ async function renderExperimentProgressCard(
   card: ExperimentProgressCardData,
 ): Promise<RenderedProgressCard> {
   const cardIdentity = createHash("sha256")
-    .update("murph.experiment-progress-card.render.v1")
+    .update("murph.experiment-progress-card.render.v2")
     .update("\0")
     .update(JSON.stringify(card))
     .digest("hex");
   const filename = `experiment-progress-${cardIdentity.slice(0, 20)}.png`;
   const bytes = new Uint8Array(
-    await sharp(Buffer.from(buildProgressCardSvg(card)))
+    await sharp(Buffer.from(buildExperimentProgressCardSvg(card)))
       .png({ compressionLevel: 9 })
       .toBuffer(),
   );
@@ -183,7 +206,9 @@ async function assertSavedProgressCardMatches(input: {
   }
 }
 
-function buildProgressCardSvg(card: ExperimentProgressCardData): string {
+export function buildExperimentProgressCardSvg(
+  card: ExperimentProgressCardData,
+): string {
   const movers = card.movers.slice(0, 2);
   const status = card.phase.totalDays === null
     ? `Day ${card.phase.day}`
@@ -194,25 +219,52 @@ function buildProgressCardSvg(card: ExperimentProgressCardData): string {
   const assumed = (card.sessions.assumed ?? 0) > 0
     ? ` · ${card.sessions.assumed} assumed`
     : "";
+  const accessibleTitle = `${card.title}. ${status}. ${sessions}${assumed}.`;
+  const title = layoutCardTitle(card.title);
+  const statusText = `${status} · ${sessions}${assumed}`;
+  const statusY = title.lines.length === 1 ? 181 : 201;
+  const moverTop = title.lines.length === 1 ? 220 : 230;
+  const statusScale = fittedTextScale({
+    fontSize: 24,
+    maxWidth: CONTENT_WIDTH - 2,
+    text: statusText,
+  });
 
   return [
-    `<svg xmlns="http://www.w3.org/2000/svg" width="${CARD_WIDTH}" height="${CARD_HEIGHT}" viewBox="0 0 ${CARD_WIDTH} ${CARD_HEIGHT}">`,
-    '<rect width="1200" height="630" fill="#F4EEE1"/>',
-    '<circle cx="72" cy="64" r="6" fill="#5A6E32"/>',
-    '<text x="92" y="71" fill="#7B756A" font-family="Arial, sans-serif" font-size="20" letter-spacing="4">YOUR EXPERIMENT</text>',
-    `<text x="64" y="132" fill="#2C322F" font-family="Georgia, serif" font-size="${titleFontSize(card.title)}" font-weight="700">${escapeSvg(card.title)}</text>`,
-    `<text x="66" y="170" fill="#7B756A" font-family="Arial, sans-serif" font-size="22">${escapeSvg(`${status} · ${sessions}${assumed}`)}</text>`,
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${CARD_WIDTH}" height="${CARD_HEIGHT}" viewBox="0 0 ${CARD_WIDTH} ${CARD_HEIGHT}" role="img" aria-label="${escapeSvg(accessibleTitle)}">`,
+    `<rect width="${CARD_WIDTH}" height="${CARD_HEIGHT}" fill="${COLOR.background}"/>`,
+    `<circle cx="72" cy="62" r="5" fill="${COLOR.primary}"/>`,
+    `<text x="92" y="70" fill="${COLOR.muted}" font-family="${SANS_FONT}" font-size="21" letter-spacing="4.6">YOUR EXPERIMENT</text>`,
+    ...title.lines.map((line, index) => {
+      const y = title.lines.length === 1 ? 139 : 126 + index * 40;
+      const scale = fittedTextScale({
+        fontSize: title.fontSize,
+        letterSpacing: -1.5,
+        maxWidth: CONTENT_WIDTH,
+        text: line,
+      });
+      return `<g data-role="title-line" transform="translate(${CONTENT_LEFT} ${y}) scale(${scale} 1)"><text x="0" y="0" fill="${COLOR.foreground}" font-family="${SERIF_FONT}" font-size="${title.fontSize}" font-weight="600" letter-spacing="-1.5">${escapeSvg(line)}</text></g>`;
+    }),
+    `<g transform="translate(66 ${statusY}) scale(${statusScale} 1)"><text x="0" y="0" fill="${COLOR.muted}" font-family="${SANS_FONT}" font-size="24">${escapeSvg(statusText)}</text></g>`,
     movers.length === 0
-      ? '<rect x="64" y="210" width="1072" height="250" rx="20" fill="#FFFCF6" fill-opacity=".7" stroke="#B7AE98" stroke-opacity=".35"/>' +
-        '<text x="600" y="345" text-anchor="middle" fill="#7B756A" font-family="Georgia, serif" font-size="30">Markers are still settling — keep logging.</text>'
+      ? renderEmptyMoverPanel(moverTop)
       : movers.map((mover, index) =>
-          renderMoverPanel(mover, index, movers.length)
+          renderMoverPanel(mover, index, movers.length, moverTop)
         ).join(""),
     renderTimeline(card),
     renderConfounders(card),
-    '<text x="64" y="610" fill="#5A6E32" font-family="Georgia, serif" font-size="24" font-weight="700">murph</text>',
-    `<text x="1136" y="610" text-anchor="end" fill="#7B756A" font-family="Arial, sans-serif" font-size="18">${escapeSvg(card.asOf)}</text>`,
+    `<line x1="${CONTENT_LEFT}" y1="700" x2="${CONTENT_RIGHT}" y2="700" stroke="${COLOR.border}" stroke-opacity=".2"/>`,
+    `<image id="murph-wordmark" href="${LOGO_DATA_URI}" x="${CONTENT_LEFT}" y="708" width="${LOGO_WIDTH}" height="${LOGO_HEIGHT}" aria-label="murph"/>`,
+    `<text x="${CONTENT_RIGHT}" y="727" text-anchor="end" fill="${COLOR.foreground}" fill-opacity=".42" font-family="${SANS_FONT}" font-size="22">Health experiments with friends.</text>`,
+    `<text x="${CONTENT_RIGHT}" y="756" text-anchor="end" fill="${COLOR.primary}" font-family="${SANS_FONT}" font-size="19">withmurph.ai · as of ${escapeSvg(card.asOf)}</text>`,
     "</svg>",
+  ].join("");
+}
+
+function renderEmptyMoverPanel(top: number): string {
+  return [
+    `<rect x="${CONTENT_LEFT}" y="${top}" width="${CONTENT_WIDTH}" height="232" rx="24" fill="${COLOR.panel}" fill-opacity=".72" stroke="${COLOR.border}" stroke-opacity=".2"/>`,
+    `<text x="${CARD_WIDTH / 2}" y="${top + 123}" text-anchor="middle" fill="${COLOR.muted}" font-family="${SERIF_FONT}" font-size="30">Markers are still settling — keep logging.</text>`,
   ].join("");
 }
 
@@ -220,30 +272,77 @@ function renderMoverPanel(
   mover: ExperimentProgressCardMover,
   index: number,
   moverCount: number,
+  top: number,
 ): string {
-  const x = index === 0 ? 64 : 610;
-  const width = moverCount === 1 ? 1072 : 526;
-  const color = mover.sentiment === "positive"
-    ? "#4F6B2C"
-    : mover.sentiment === "negative"
-      ? "#A6692F"
-      : "#7B756A";
-  const arrow = mover.direction === "up" ? "↑" : mover.direction === "down" ? "↓" : "—";
-  const value = mover.unit ? `${mover.value} ${mover.unit}` : mover.value;
+  const x = index === 0 ? CONTENT_LEFT : 610;
+  const width = moverCount === 1 ? CONTENT_WIDTH : 526;
+  const sentiment = resolveMoverSentiment(mover.sentiment);
+  const arrow = mover.direction === "up"
+    ? "↑"
+    : mover.direction === "down"
+      ? "↓"
+      : "—";
+  const deltaText = `${arrow} ${mover.changePct} · ${mover.delta}`;
+  const label = mover.label.toUpperCase();
+  const labelScale = fittedTextScale({
+    fontSize: 17,
+    letterSpacing: 2.2,
+    maxWidth: width - 60,
+    text: label,
+  });
+  const valueFontSize = moverValueFontSize(mover.value, mover.unit);
+  const valueWidth = estimatedTextWidth(mover.value, valueFontSize)
+    + (mover.unit
+      ? 10 + estimatedTextWidth(mover.unit, 23)
+      : 0);
+  const valueScale = roundSvgNumber(
+    Math.min(1, (width - 72) / Math.max(1, valueWidth)),
+  );
+  const deltaScale = fittedTextScale({
+    fontSize: 21,
+    maxWidth: width - 96,
+    text: deltaText,
+  });
+  const deltaWidth = estimatedTextWidth(deltaText, 21) * deltaScale;
+  const chipWidth = Math.min(
+    width - 60,
+    Math.max(190, 36 + deltaWidth),
+  );
+
   return [
-    `<rect x="${x}" y="210" width="${width}" height="250" rx="20" fill="#FFFCF6" fill-opacity=".7" stroke="#B7AE98" stroke-opacity=".35"/>`,
-    `<text x="${x + 34}" y="252" fill="#7B756A" font-family="Arial, sans-serif" font-size="17" letter-spacing="2">${escapeSvg(mover.label.toUpperCase())}</text>`,
-    `<text x="${x + 34}" y="354" fill="${color}" font-family="Georgia, serif" font-size="78" font-weight="700">${arrow} ${escapeSvg(mover.changePct)}</text>`,
-    `<text x="${x + 36}" y="420" fill="#2C322F" font-family="Arial, sans-serif" font-size="28">${escapeSvg(value)}</text>`,
-    `<text x="${x + width - 34}" y="420" text-anchor="end" fill="${color}" font-family="Arial, sans-serif" font-size="24">${escapeSvg(mover.delta)}</text>`,
+    `<rect x="${x}" y="${top}" width="${width}" height="232" rx="24" fill="${COLOR.panel}" fill-opacity=".72" stroke="${COLOR.border}" stroke-opacity=".2"/>`,
+    `<g transform="translate(${x + 30} ${top + 43}) scale(${labelScale} 1)"><text x="0" y="0" fill="${COLOR.foreground}" fill-opacity=".5" font-family="${SANS_FONT}" font-size="17" letter-spacing="2.2">${escapeSvg(label)}</text></g>`,
+    `<g transform="translate(${x + 30} ${top + 124}) scale(${valueScale} 1)"><text x="0" y="0" fill="${COLOR.foreground}" font-family="${SERIF_FONT}" font-size="${valueFontSize}" font-weight="600"><tspan>${escapeSvg(mover.value)}</tspan>${mover.unit ? `<tspan dx="10" fill="${COLOR.muted}" font-family="${SANS_FONT}" font-size="23" font-weight="400">${escapeSvg(mover.unit)}</tspan>` : ""}</text></g>`,
+    `<rect x="${x + 30}" y="${top + 155}" width="${chipWidth}" height="44" rx="22" fill="${sentiment.color}" fill-opacity="${sentiment.chipOpacity}"/>`,
+    `<g transform="translate(${x + 48} ${top + 184}) scale(${deltaScale} 1)"><text x="0" y="0" fill="${sentiment.color}" font-family="${SANS_FONT}" font-size="21">${escapeSvg(deltaText)}</text></g>`,
   ].join("");
+}
+
+function resolveMoverSentiment(
+  sentiment: ExperimentProgressCardMover["sentiment"],
+): { chipOpacity: string; color: string } {
+  if (sentiment === "positive") {
+    return { chipOpacity: ".14", color: COLOR.positive };
+  }
+  if (sentiment === "negative") {
+    return { chipOpacity: ".15", color: COLOR.negative };
+  }
+  return { chipOpacity: ".14", color: COLOR.muted };
+}
+
+function moverValueFontSize(value: string, unit: string | null): number {
+  const length = value.length + (unit?.length ?? 0);
+  if (length > 20) return 38;
+  if (length > 14) return 44;
+  if (length > 10) return 50;
+  return 58;
 }
 
 function renderTimeline(card: ExperimentProgressCardData): string {
   const cells = card.weeks.flatMap((week) => [...week.cells]);
   const gap = 4;
-  const timelineStartX = 206;
-  const timelineWidth = 930;
+  const timelineStartX = 254;
+  const timelineWidth = 852;
   const cellWidth = Math.max(
     10,
     Math.min(
@@ -265,26 +364,41 @@ function renderTimeline(card: ExperimentProgressCardData): string {
     const x = startX + index * (cellWidth + gap);
     const isToday = dates[index] === card.asOf;
     const marker = confounderDates.has(dates[index] ?? "")
-      ? `<circle cx="${x + cellWidth / 2}" cy="493" r="3" fill="#A6692F"/>`
+      ? `<circle cx="${x + cellWidth / 2}" cy="526" r="3" fill="${COLOR.negative}"/>`
       : "";
-    return `${marker}<rect x="${x}" y="508" width="${cellWidth}" height="18" rx="4" fill="${style.fill}" stroke="${isToday ? "#2C322F" : style.stroke}" stroke-width="${isToday ? 2 : 1}"${style.dashed ? ' stroke-dasharray="3 2"' : ""}/>`;
+    return `${marker}<rect x="${x}" y="542" width="${cellWidth}" height="20" rx="5" fill="${style.fill}" stroke="${isToday ? COLOR.foreground : style.stroke}" stroke-width="${isToday ? 2 : 1}"${style.dashed ? ' stroke-dasharray="3 2"' : ""}/>`;
   }).join("");
+
   return [
-    '<text x="64" y="523" fill="#7B756A" font-family="Arial, sans-serif" font-size="16" letter-spacing="2">SESSIONS</text>',
+    `<rect x="${CONTENT_LEFT}" y="480" width="${CONTENT_WIDTH}" height="112" rx="20" fill="${COLOR.panel}" fill-opacity=".5" stroke="${COLOR.border}" stroke-opacity=".16"/>`,
+    `<text x="94" y="550" fill="${COLOR.foreground}" fill-opacity=".5" font-family="${SANS_FONT}" font-size="17" letter-spacing="2.2">SESSIONS</text>`,
     rects,
   ].join("");
 }
 
 function renderConfounders(card: ExperimentProgressCardData): string {
-  return card.confounders.map((entry, index) => {
-    const x = index % 2 === 0 ? 64 : 610;
-    const y = index < 2 ? 556 : 580;
-    const text = `${entry.date} · ${entry.label}`;
-    return [
-      `<circle cx="${x + 4}" cy="${y - 5}" r="4" fill="#A6692F"/>`,
-      `<text x="${x + 16}" y="${y}" fill="#7B756A" font-family="Arial, sans-serif" font-size="${confounderFontSize(text)}">${escapeSvg(text)}</text>`,
-    ].join("");
-  }).join("");
+  if (card.confounders.length === 0) {
+    return "";
+  }
+
+  return [
+    `<text x="${CONTENT_LEFT}" y="628" fill="${COLOR.foreground}" fill-opacity=".5" font-family="${SANS_FONT}" font-size="16" letter-spacing="2.1">CONFOUNDERS</text>`,
+    ...card.confounders.map((entry, index) => {
+      const x = index % 2 === 0 ? CONTENT_LEFT : 610;
+      const y = index < 2 ? 658 : 685;
+      const text = `${entry.date} · ${entry.label}`;
+      const fontSize = confounderFontSize(text);
+      const scale = fittedTextScale({
+        fontSize,
+        maxWidth: 510,
+        text,
+      });
+      return [
+        `<circle cx="${x + 4}" cy="${y - 6}" r="4" fill="${COLOR.negative}"/>`,
+        `<g transform="translate(${x + 16} ${y}) scale(${scale} 1)"><text x="0" y="0" fill="${COLOR.muted}" font-family="${SANS_FONT}" font-size="${fontSize}">${escapeSvg(text)}</text></g>`,
+      ].join("");
+    }),
+  ].join("");
 }
 
 function timelineCellStyle(code: string): {
@@ -300,7 +414,7 @@ function timelineCellStyle(code: string): {
     case EXPERIMENT_PROGRESS_CARD_DAY_CODES.partial:
       return { fill: "#A8B28A", stroke: "#A8B28A" };
     case EXPERIMENT_PROGRESS_CARD_DAY_CODES.baseline:
-      return { fill: "#D7D0C2", stroke: "#D7D0C2" };
+      return { fill: "#B6A582", stroke: "#B6A582" };
     case EXPERIMENT_PROGRESS_CARD_DAY_CODES.scheduled:
       return { dashed: true, fill: "transparent", stroke: "#B7AE98" };
     case EXPERIMENT_PROGRESS_CARD_DAY_CODES.outOfWindow:
@@ -316,10 +430,120 @@ function addDays(date: string, days: number): string {
   return stamp.toISOString().slice(0, 10);
 }
 
+function layoutCardTitle(title: string): {
+  fontSize: number;
+  lines: string[];
+} {
+  const fontSize = titleFontSize(title);
+  const oneLineScale = fittedTextScale({
+    fontSize,
+    letterSpacing: -1.5,
+    maxWidth: CONTENT_WIDTH,
+    text: title,
+  });
+  if (oneLineScale >= 0.82) {
+    return { fontSize, lines: [title] };
+  }
+  return {
+    fontSize: Math.min(44, Math.max(36, fontSize)),
+    lines: splitTitleIntoTwoLines(title),
+  };
+}
+
+function splitTitleIntoTwoLines(title: string): [string, string] {
+  const characters = [...title];
+  const targetWeight = estimatedTextUnits(title) / 2;
+  let cumulativeWeight = 0;
+  let bestAnyIndex = 1;
+  let bestAnyDistance = Number.POSITIVE_INFINITY;
+  let bestWhitespaceIndex: number | null = null;
+  let bestWhitespaceDistance = Number.POSITIVE_INFINITY;
+
+  for (let index = 1; index < characters.length; index += 1) {
+    cumulativeWeight += estimatedCharacterUnits(characters[index - 1] ?? "");
+    const distance = Math.abs(cumulativeWeight - targetWeight);
+    if (distance < bestAnyDistance) {
+      bestAnyDistance = distance;
+      bestAnyIndex = index;
+    }
+    if (
+      /\s/u.test(characters[index - 1] ?? "")
+      && distance < bestWhitespaceDistance
+    ) {
+      bestWhitespaceDistance = distance;
+      bestWhitespaceIndex = index;
+    }
+  }
+
+  const splitIndex = bestWhitespaceIndex ?? bestAnyIndex;
+  const first = characters.slice(0, splitIndex).join("").trimEnd();
+  const second = characters.slice(splitIndex).join("").trimStart();
+  if (!first || !second) {
+    const fallbackIndex = Math.max(1, Math.floor(characters.length / 2));
+    return [
+      characters.slice(0, fallbackIndex).join(""),
+      characters.slice(fallbackIndex).join(""),
+    ];
+  }
+  return [first, second];
+}
+
+function fittedTextScale(input: {
+  fontSize: number;
+  letterSpacing?: number;
+  maxWidth: number;
+  text: string;
+}): number {
+  const width = estimatedTextWidth(
+    input.text,
+    input.fontSize,
+    input.letterSpacing ?? 0,
+  );
+  const safeMaxWidth = Math.max(1, input.maxWidth - 12);
+  return roundSvgNumber(
+    Math.min(1, safeMaxWidth / Math.max(1, width)),
+  );
+}
+
+function estimatedTextWidth(
+  text: string,
+  fontSize: number,
+  letterSpacing = 0,
+): number {
+  const characters = [...text];
+  return estimatedTextUnits(text) * fontSize
+    + Math.max(0, characters.length - 1) * letterSpacing;
+}
+
+function estimatedTextUnits(text: string): number {
+  return [...text].reduce(
+    (total, character) => total + estimatedCharacterUnits(character),
+    0,
+  );
+}
+
+function estimatedCharacterUnits(character: string): number {
+  if (/\s/u.test(character)) return 0.34;
+  if (/[MW@#%&]/u.test(character)) return 1.2;
+  if (/[A-Z]/u.test(character)) return 0.78;
+  if (/[0-9]/u.test(character)) return 0.63;
+  if (/[ilIjtfr1.,:;!'|]/u.test(character)) return 0.36;
+  if (/[-_+()\[\]{}\/\\]/u.test(character)) return 0.5;
+  if (character.codePointAt(0)! > 0x2ff) return 1.05;
+  return 0.58;
+}
+
+function roundSvgNumber(value: number): number {
+  return Math.round(value * 10_000) / 10_000;
+}
+
 function titleFontSize(title: string): number {
-  if (title.length > 54) return 38;
-  if (title.length > 38) return 44;
-  return 52;
+  if (title.length > 54) return 40;
+  if (title.length > 38) return 46;
+  if (title.length > 30) return 52;
+  if (title.length > 22) return 62;
+  if (title.length > 15) return 72;
+  return 76;
 }
 
 function confounderFontSize(text: string): number {

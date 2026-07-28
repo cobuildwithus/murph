@@ -1121,6 +1121,7 @@ export function isHostedRuntimePrivateImageDeliveryUrl(
 }
 
 function isLegacyHostedRuntimePrivateImageDeliveryUrl(url: URL): boolean {
+  const pathSegments = url.pathname.split("/").filter(Boolean);
   if (
     url.protocol !== "https:"
     || url.hostname !== "imagedelivery.net"
@@ -1128,11 +1129,16 @@ function isLegacyHostedRuntimePrivateImageDeliveryUrl(url: URL): boolean {
     || url.username
     || url.password
     || url.hash
-    || url.pathname.split("/").filter(Boolean).length < 3
+    || pathSegments.length < 3
   ) {
     return false;
   }
   const entries = [...url.searchParams.entries()];
+  if (entries.length === 0) {
+    const pathAndSuffix = url.href.slice(url.origin.length);
+    return /^\/[A-Za-z0-9_-]{1,256}\/[A-Za-z0-9_-]{1,256}\/public$/u
+      .test(pathAndSuffix);
+  }
   if (
     entries.length !== 2
     || entries.filter(([key]) => key === "exp").length !== 1

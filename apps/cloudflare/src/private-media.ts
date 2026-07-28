@@ -106,20 +106,9 @@ export async function stageHostedPrivateMedia(input: {
   }
   const sha256 = await sha256Hex(bytes);
   const objectKey = await hostedPrivateMediaObjectKey({ sha256, userId });
-  const expiresAtUnixSeconds =
-    Math.floor((input.nowMs ?? Date.now()) / 1_000)
-    + HOSTED_PRIVATE_MEDIA_LIFETIME_SECONDS;
-  const capability = await sealHostedPrivateMediaCapability({
-    capabilitySecret,
-    payload: {
-      contentType: input.contentType,
-      expiresAtUnixSeconds,
-      sha256,
-      sizeBytes: bytes.byteLength,
-      userId,
-      version: 1,
-    },
-  });
+  const nowUnixSeconds = Math.floor((input.nowMs ?? Date.now()) / 1_000);
+  let expiresAtUnixSeconds =
+    nowUnixSeconds + HOSTED_PRIVATE_MEDIA_LIFETIME_SECONDS;
   const storageKey = await deriveHostedPrivateMediaStorageKey({
     capabilitySecret,
     userId,
@@ -140,6 +129,7 @@ export async function stageHostedPrivateMedia(input: {
     key: objectKey,
     scope: "private-media",
   });
+  let refreshExistingObject = false;
   if (existing) {
     if (
       existing.byteLength !== bytes.byteLength
@@ -147,7 +137,43 @@ export async function stageHostedPrivateMedia(input: {
     ) {
       throw new Error("Hosted private media retry identity is inconsistent.");
     }
-  } else {
+
+    const object = input.bucket.head
+      ? await input.bucket.head(objectKey)
+      : null;
+    const uploadedAtUnixSeconds = object?.uploaded instanceof Date
+      && Number.isFinite(object.uploaded.getTime())
+      ? Math.floor(object.uploaded.getTime() / 1_000)
+      : null;
+    const lifecycleExpiresAtUnixSeconds = uploadedAtUnixSeconds === null
+      ? null
+      : uploadedAtUnixSeconds + HOSTED_PRIVATE_MEDIA_LIFETIME_SECONDS;
+    if (
+      lifecycleExpiresAtUnixSeconds === null
+      || lifecycleExpiresAtUnixSeconds <= nowUnixSeconds
+    ) {
+      refreshExistingObject = true;
+    } else {
+      expiresAtUnixSeconds = Math.min(
+        expiresAtUnixSeconds,
+        lifecycleExpiresAtUnixSeconds,
+      );
+    }
+  }
+
+  const capability = await sealHostedPrivateMediaCapability({
+    capabilitySecret,
+    payload: {
+      contentType: input.contentType,
+      expiresAtUnixSeconds,
+      sha256,
+      sizeBytes: bytes.byteLength,
+      userId,
+      version: 1,
+    },
+  });
+
+  if (!existing || refreshExistingObject) {
     await writeEncryptedR2Payload({
       aad,
       bucket: input.bucket,

@@ -1742,6 +1742,31 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     });
   });
 
+  it("keeps queryless public Images avatars compatible during the Web-first rollout", async () => {
+    const legacyIconUrl =
+      "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/889a5f43-1d35-4eae-a98e-7ae69e96a800/public";
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_container",
+      request: {
+        action: "set_chat_avatar",
+        groupChatIconUrl: legacyIconUrl,
+        linqThread: LINQ_THREAD,
+      },
+    })).resolves.toEqual({
+      action: "set_chat_avatar",
+      result: { status: "requested" },
+    });
+
+    expect(mocks.assertHostedLinqRouteEgressAuthority).toHaveBeenCalledWith(
+      expect.objectContaining({ authority: LINQ_THREAD.authority }),
+    );
+    expect(mocks.updateHostedLinqChatAvatar).toHaveBeenCalledWith({
+      chatId: "chat_group_1",
+      groupChatIconUrl: legacyIconUrl,
+    });
+  });
+
   it("updates a preview group avatar only through the preview Worker origin", async () => {
     const previewOrigin = "https://hosted-runner-staging.example.test";
     const previewIconUrl =

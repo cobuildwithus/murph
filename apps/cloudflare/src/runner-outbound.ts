@@ -1910,11 +1910,11 @@ async function rememberReplacedWorkspaceSnapshotCleanupInUploadSession(input: {
   userId: string;
 }): Promise<boolean> {
   const stub = await resolveRunnerOutboundUserRunnerStub(input.env, input.userId);
-  const rememberReplacedSnapshotRef = requireRunnerOutboundUserStubMethod(
+  requireRunnerOutboundUserStubMethod(
     stub,
     "rememberHostedWorkspaceSnapshotReplacedRef",
   );
-  return await rememberReplacedSnapshotRef({
+  return await stub.rememberHostedWorkspaceSnapshotReplacedRef({
     expectedSession: input.session,
     replacedSnapshotRef: input.replacedSnapshotRef,
   });
@@ -2451,11 +2451,11 @@ async function createWorkspaceSnapshotUploadSession(input: {
   userId: string;
 }): Promise<HostedWorkspaceSnapshotUploadSession | null> {
   const stub = await resolveRunnerOutboundUserRunnerStub(input.env, input.userId);
-  const createSession = requireRunnerOutboundUserStubMethod(
+  requireRunnerOutboundUserStubMethod(
     stub,
     "createHostedWorkspaceSnapshotUploadSession",
   );
-  return await createSession(input.session);
+  return await stub.createHostedWorkspaceSnapshotUploadSession(input.session);
 }
 
 async function readWorkspaceSnapshotUploadSession(input: {
@@ -2464,11 +2464,11 @@ async function readWorkspaceSnapshotUploadSession(input: {
   userId: string;
 }): Promise<HostedWorkspaceSnapshotUploadSession | null> {
   const stub = await resolveRunnerOutboundUserRunnerStub(input.env, input.userId);
-  const readSession = requireRunnerOutboundUserStubMethod(
+  requireRunnerOutboundUserStubMethod(
     stub,
     "readHostedWorkspaceSnapshotUploadSession",
   );
-  return await readSession({
+  return await stub.readHostedWorkspaceSnapshotUploadSession({
     snapshotId: input.snapshotId,
     userId: input.userId,
   });
@@ -2480,11 +2480,11 @@ async function deleteWorkspaceSnapshotUploadSession(input: {
   userId: string;
 }): Promise<void> {
   const stub = await resolveRunnerOutboundUserRunnerStub(input.env, input.userId);
-  const deleteSession = requireRunnerOutboundUserStubMethod(
+  requireRunnerOutboundUserStubMethod(
     stub,
     "deleteHostedWorkspaceSnapshotUploadSession",
   );
-  await deleteSession({
+  await stub.deleteHostedWorkspaceSnapshotUploadSession({
     snapshotId: input.snapshotId,
     userId: input.userId,
   });

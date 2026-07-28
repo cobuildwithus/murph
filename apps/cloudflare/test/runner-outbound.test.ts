@@ -162,6 +162,7 @@ import {
 } from "../src/web-callback-auth.ts";
 import type {
   WorkerBindUserRunnerStubLike,
+  WorkerUserRunnerStubLike,
   WorkerUserRunnerNamespaceLike,
 } from "../src/worker-contracts.ts";
 import {
@@ -523,7 +524,7 @@ describe("handleRunnerOutboundRequest", () => {
     const stub: ReceiverSensitiveStub = {
       marker: "runner-outbound-stub",
       bindUser: vi.fn(async function (
-        this: ReceiverSensitiveStub,
+        this: WorkerUserRunnerStubLike,
         userId: string,
       ) {
         expect(this.marker).toBe("runner-outbound-stub");
@@ -3126,6 +3127,51 @@ describe("handleRunnerOutboundRequest", () => {
     expect(isHostedRuntimePrivateImageDeliveryUrl(new URL(payload.url))).toBe(
       true,
     );
+  });
+
+  it("invokes the private image publisher directly on its Durable Object stub", async () => {
+    let stub: WorkerUserRunnerStubLike;
+    const publishHostedPrivateMedia = vi.fn(async function (
+      this: WorkerUserRunnerStubLike,
+    ): Promise<HostedPrivateMediaPublishResult> {
+      if (this !== stub) {
+        throw new Error("Durable Object RPC receiver was detached.");
+      }
+      return {
+        expiresAt: PRIVATE_MEDIA_PUBLISH_EXPIRES_AT,
+        ok: true,
+        url: PRIVATE_MEDIA_PUBLISH_URL,
+      };
+    });
+    stub = { publishHostedPrivateMedia };
+
+    const response = await handleRunnerPrivateImageUrlPublishRequest({
+      env: createDirectRunnerOutboundEnv({
+        USER_RUNNER: {
+          getByName() {
+            return stub;
+          },
+        },
+      }),
+      request: new Request(
+        `http://results.worker${HOSTED_EXECUTION_RUNNER_PRIVATE_IMAGE_URL_PUBLISH_PATH}`,
+        {
+          body: JSON.stringify({
+            bytesBase64: Buffer.from(new Uint8Array([
+              0x89, 0x50, 0x4e, 0x47,
+              0x0d, 0x0a, 0x1a, 0x0a,
+            ])).toString("base64"),
+            contentType: "image/png",
+          }),
+          headers: createMailboxPayloadDecodeHeaders(),
+          method: "POST",
+        },
+      ),
+      userId: "member_123",
+    });
+
+    expect(response.status).toBe(200);
+    expect(publishHostedPrivateMedia).toHaveBeenCalledOnce();
   });
 
   it("retries a lost publish response with the same minimal image payload", async () => {

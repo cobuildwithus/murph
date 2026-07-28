@@ -710,6 +710,30 @@ describe("updateHostedLinqChatAvatar", () => {
     });
   });
 
+  it("accepts the prior queryless public Images shape while old runners drain", async () => {
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL, _init?: RequestInit) => {
+        void _input;
+        void _init;
+        return createJsonResponse({ status: "pending" }, 200);
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const legacyUrl =
+      "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/889a5f43-1d35-4eae-a98e-7ae69e96a800/public";
+
+    await expect(updateHostedLinqChatAvatar({
+      chatId: "chat_123",
+      groupChatIconUrl: legacyUrl,
+    })).resolves.toBeUndefined();
+
+    expect(readJsonRequestBody(
+      expectRequestInit(fetchMock.mock.calls[0]?.[1]),
+    )).toEqual({
+      group_chat_icon: legacyUrl,
+    });
+  });
+
   it("rejects non-HTTPS icon URLs before calling Linq", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);

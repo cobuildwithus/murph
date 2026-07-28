@@ -71,11 +71,11 @@ export async function handleRunnerPrivateImageUrlPublishRequest(input: {
       input.env,
       input.userId,
     );
-    const publishHostedPrivateMedia = requireRunnerOutboundUserStubMethod(
+    requireRunnerOutboundUserStubMethod(
       stub,
       "publishHostedPrivateMedia",
     );
-    const staged = await publishHostedPrivateMedia({
+    const staged = await stub.publishHostedPrivateMedia({
       attemptId: writeFence.attemptId,
       bytes,
       contentType: request.contentType,

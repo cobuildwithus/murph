@@ -36,8 +36,8 @@ const PNG_BYTES = new Uint8Array([
 
 describe("hosted private media", () => {
   it("stores application-encrypted bytes and serves them through the opaque capability", async () => {
-    const bucket = createPrivateMediaBucket();
     const nowMs = Date.parse("2026-07-27T12:00:00.000Z");
+    const bucket = createPrivateMediaBucket({ nowMs });
     const staged = await stageHostedPrivateMedia({
       bucket: bucket.api,
       bytes: PNG_BYTES,
@@ -75,28 +75,90 @@ describe("hosted private media", () => {
     });
   });
 
-  it("keeps retry cardinality at one object without extending its upload age", async () => {
-    const bucket = createPrivateMediaBucket();
+  it("caps a late retry at the existing object's R2 lifecycle boundary", async () => {
+    const nowMs = Date.parse("2026-07-27T12:00:00.000Z");
+    const lateRetryMs = nowMs
+      + (HOSTED_PRIVATE_MEDIA_LIFETIME_SECONDS - 60 * 60) * 1_000;
+    const bucket = createPrivateMediaBucket({ nowMs });
     const input = {
       bucket: bucket.api,
       bytes: PNG_BYTES,
       capabilitySecret: CAPABILITY_SECRET,
       contentType: "image/png" as const,
       deliveryOrigin: HOSTED_PRIVATE_MEDIA_DELIVERY_ORIGIN,
-      nowMs: Date.parse("2026-07-27T12:00:00.000Z"),
+      nowMs,
       userId: USER_ID,
     };
 
     const first = await stageHostedPrivateMedia(input);
     const retry = await stageHostedPrivateMedia({
       ...input,
-      nowMs: input.nowMs + 30_000,
+      nowMs: lateRetryMs,
     });
 
     expect(first.objectKey).toBe(retry.objectKey);
     expect(first.url).not.toBe(retry.url);
+    expect(retry.expiresAt).toBe(first.expiresAt);
+    expect(new URL(retry.url).searchParams.get("exp")).toBe(
+      new URL(first.url).searchParams.get("exp"),
+    );
     expect(bucket.put).toHaveBeenCalledOnce();
     expect(bucket.objects).toHaveLength(1);
+  });
+
+  it("refreshes the deterministic object only after its R2 lifecycle boundary", async () => {
+    const nowMs = Date.parse("2026-07-27T12:00:00.000Z");
+    const boundaryMs = nowMs + HOSTED_PRIVATE_MEDIA_LIFETIME_SECONDS * 1_000;
+    const bucket = createPrivateMediaBucket({ nowMs });
+    const input = {
+      bucket: bucket.api,
+      bytes: PNG_BYTES,
+      capabilitySecret: CAPABILITY_SECRET,
+      contentType: "image/png" as const,
+      deliveryOrigin: HOSTED_PRIVATE_MEDIA_DELIVERY_ORIGIN,
+      userId: USER_ID,
+    };
+
+    const first = await stageHostedPrivateMedia({ ...input, nowMs });
+    bucket.setNowMs(boundaryMs);
+    const refreshed = await stageHostedPrivateMedia({
+      ...input,
+      nowMs: boundaryMs,
+    });
+
+    expect(refreshed.objectKey).toBe(first.objectKey);
+    expect(bucket.put).toHaveBeenCalledTimes(2);
+    expect(bucket.objects).toHaveLength(1);
+    expect(bucket.uploadedAt(first.objectKey)?.toISOString()).toBe(
+      new Date(boundaryMs).toISOString(),
+    );
+    expect(new URL(refreshed.url).searchParams.get("exp")).toBe(
+      String(
+        Math.floor(boundaryMs / 1_000)
+          + HOSTED_PRIVATE_MEDIA_LIFETIME_SECONDS,
+      ),
+    );
+
+    const firstUrl = new URL(first.url);
+    await expect(readHostedPrivateMedia({
+      bucket: bucket.api,
+      capability: firstUrl.pathname.split("/").at(-1) ?? "",
+      capabilitySecret: CAPABILITY_SECRET,
+      expiresAtUnixSeconds: Number(firstUrl.searchParams.get("exp")),
+      nowMs: boundaryMs,
+    })).resolves.toBeNull();
+
+    const refreshedUrl = new URL(refreshed.url);
+    await expect(readHostedPrivateMedia({
+      bucket: bucket.api,
+      capability: refreshedUrl.pathname.split("/").at(-1) ?? "",
+      capabilitySecret: CAPABILITY_SECRET,
+      expiresAtUnixSeconds: Number(refreshedUrl.searchParams.get("exp")),
+      nowMs: boundaryMs,
+    })).resolves.toEqual({
+      bytes: PNG_BYTES,
+      contentType: "image/png",
+    });
   });
 
   it("keeps the largest accepted member id within the provider URL contract", async () => {
@@ -169,8 +231,8 @@ describe("hosted private media", () => {
   });
 
   it("fails closed for expired, tampered, or wrong-secret capabilities", async () => {
-    const bucket = createPrivateMediaBucket();
     const nowMs = Date.parse("2026-07-27T12:00:00.000Z");
+    const bucket = createPrivateMediaBucket({ nowMs });
     const staged = await stageHostedPrivateMedia({
       bucket: bucket.api,
       bytes: PNG_BYTES,
@@ -298,17 +360,52 @@ describe("hosted private media", () => {
     expect(bucket.put).not.toHaveBeenCalled();
     expect(bucket.objects).toHaveLength(0);
   });
+
+  it("does not overwrite an expired object when replacement capability sealing fails", async () => {
+    const nowMs = Date.parse("2026-07-27T12:00:00.000Z");
+    const boundaryMs = nowMs + HOSTED_PRIVATE_MEDIA_LIFETIME_SECONDS * 1_000;
+    const bucket = createPrivateMediaBucket({ nowMs });
+    const input = {
+      bucket: bucket.api,
+      bytes: PNG_BYTES,
+      capabilitySecret: CAPABILITY_SECRET,
+      contentType: "image/png" as const,
+      deliveryOrigin: HOSTED_PRIVATE_MEDIA_DELIVERY_ORIGIN,
+      userId: USER_ID,
+    };
+    const staged = await stageHostedPrivateMedia({ ...input, nowMs });
+    bucket.setNowMs(boundaryMs);
+    const encrypt = vi.spyOn(crypto.subtle, "encrypt")
+      .mockRejectedValueOnce(new Error("fixture replacement seal failure"));
+    try {
+      await expect(stageHostedPrivateMedia({
+        ...input,
+        nowMs: boundaryMs,
+      })).rejects.toThrow("fixture replacement seal failure");
+    } finally {
+      encrypt.mockRestore();
+    }
+
+    expect(bucket.put).toHaveBeenCalledOnce();
+    expect(bucket.objects).toHaveLength(1);
+    expect(bucket.objects[0]?.[0]).toBe(staged.objectKey);
+  });
 });
 
 function createPrivateMediaBucket(input: {
+  nowMs?: number;
   putError?: Error;
 } = {}) {
-  const values = new Map<string, Uint8Array>();
+  const values = new Map<string, { bytes: Uint8Array; uploaded: Date }>();
+  let nowMs = input.nowMs ?? Date.now();
   const put = vi.fn(async (key: string, value: R2PutValueLike) => {
     if (input.putError) {
       throw input.putError;
     }
-    values.set(key, await readPutValue(value));
+    values.set(key, {
+      bytes: await readPutValue(value),
+      uploaded: new Date(nowMs),
+    });
   });
   return {
     api: {
@@ -317,19 +414,38 @@ function createPrivateMediaBucket(input: {
         return value
           ? {
               async arrayBuffer() {
-                return toArrayBuffer(value);
+                return toArrayBuffer(value.bytes);
               },
               key,
-              size: value.byteLength,
+              size: value.bytes.byteLength,
+              uploaded: value.uploaded,
+            }
+          : null;
+      },
+      async head(key: string) {
+        const value = values.get(key);
+        return value
+          ? {
+              key,
+              size: value.bytes.byteLength,
+              uploaded: value.uploaded,
             }
           : null;
       },
       put,
     },
     get objects() {
-      return [...values.entries()];
+      return [...values.entries()].map(
+        ([key, value]) => [key, value.bytes] as const,
+      );
     },
     put,
+    setNowMs(value: number) {
+      nowMs = value;
+    },
+    uploadedAt(key: string): Date | null {
+      return values.get(key)?.uploaded ?? null;
+    },
   };
 }
 

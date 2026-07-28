@@ -12,6 +12,7 @@ export interface EncryptedR2ObjectBodyLike {
   customMetadata?: Record<string, string>;
   key?: string;
   size?: number;
+  uploaded?: Date;
 }
 
 export type R2PutValueLike =

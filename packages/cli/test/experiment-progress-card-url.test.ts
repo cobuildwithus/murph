@@ -6,6 +6,7 @@ import path from "node:path";
 
 import { createIntegratedVaultServices } from "@murphai/vault-usecases";
 import { Cli } from "incur";
+import sharp from "sharp";
 import { test } from "vitest";
 
 import { registerExperimentCommands } from "../src/commands/experiment.js";
@@ -108,6 +109,9 @@ test("progress-card renders stable private vault media without a URL", async () 
       createHash("sha256").update(bytes).digest("hex"),
       first.media.sha256,
     );
+    const metadata = await sharp(bytes).metadata();
+    assert.equal(metadata.width, 1200);
+    assert.equal(metadata.height, 780);
   } finally {
     await rm(vaultRoot, { force: true, recursive: true });
   }
