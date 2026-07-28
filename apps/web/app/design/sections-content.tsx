@@ -14,6 +14,7 @@ import { TogetherSection } from "@/src/components/homepage/together-section";
 import { Separator } from "@/src/components/ui/separator";
 import { AccountDeletionMaintenanceStudy } from "./account-deletion-maintenance-study";
 import { AccountExitReasonStudy } from "./account-exit-reason-study";
+import { ChangelogArchiveStudy } from "./changelog-archive-study";
 import { ConnectSourceCardStudy } from "./connect-source-card-study";
 import { FamilyInviteJoinStudy } from "./family-invite-join-study";
 import { GroupJoinStudy } from "./group-join-study";
@@ -85,6 +86,12 @@ export function SectionsContent() {
 
       <Separator />
 
+      <StudySection title="Changelog archive edition">
+        <ChangelogArchiveStudy />
+      </StudySection>
+
+      <Separator />
+
       <StudySection title="Persona onboarding">
         <PersonaOnboardingStudy />
       </StudySection>
@@ -145,13 +152,13 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Personal usage credit states">
+      <StudySection title="Overall AI usage and fulfilled top-up">
         <PersonalUsageCreditOwnerStudy />
       </StudySection>
 
       <Separator />
 
-      <StudySection title="Ops weekly growth compass">
+      <StudySection title="Ops weekly growth compass with sender WAU and MAU">
         <GrowthScorecardStudy />
       </StudySection>
 

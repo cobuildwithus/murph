@@ -15,6 +15,13 @@ const contractMigrationSql = readFileSync(
   ),
   "utf8",
 );
+const detachedDirectProofMigrationSql = readFileSync(
+  new URL(
+    "../prisma/migrations/20260727040000_relax_hosted_usage_credit_detached_direct_proof/migration.sql",
+    import.meta.url,
+  ),
+  "utf8",
+);
 
 describe("hosted group usage funding migration", () => {
   it("expands payer storage before enforcing detached-payer invariants", () => {
@@ -33,8 +40,33 @@ describe("hosted group usage funding migration", () => {
   });
 
   it("does not add a second public funding capability", () => {
-    expect(`${migrationSql}\n${contractMigrationSql}`).not.toMatch(
+    expect(
+      `${migrationSql}\n${contractMigrationSql}\n${detachedDirectProofMigrationSql}`,
+    ).not.toMatch(
       /funding_code|funding_token/iu,
+    );
+  });
+
+  it("predeploys the backward-compatible detached direct-payment proof", () => {
+    expect(detachedDirectProofMigrationSql).toContain(
+      'DROP CONSTRAINT IF EXISTS "hosted_usage_credit_purchase_active_payer_required"',
+    );
+    expect(detachedDirectProofMigrationSql).toContain(
+      'DROP CONSTRAINT IF EXISTS "hosted_usage_credit_purchase_deleted_payer_ciphertext_cleared"',
+    );
+    expect(detachedDirectProofMigrationSql.match(/NOT VALID/gu)).toHaveLength(2);
+    expect(
+      detachedDirectProofMigrationSql.match(/VALIDATE CONSTRAINT/gu),
+    ).toHaveLength(2);
+    const fulfilledArm = detachedDirectProofMigrationSql.match(
+      /"status" = 'fulfilled'[\s\S]*?"stripe_charge_lookup_key" IS NOT NULL/iu,
+    )?.[0];
+    expect(fulfilledArm).toBeDefined();
+    expect(fulfilledArm).toContain(
+      '"stripe_payment_intent_lookup_key" IS NOT NULL',
+    );
+    expect(fulfilledArm).not.toContain(
+      '"stripe_checkout_session_lookup_key" IS NOT NULL',
     );
   });
 });

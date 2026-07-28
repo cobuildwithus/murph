@@ -29,6 +29,9 @@ import {
   ASSISTANT_RAW_ATTACHMENT_ARTIFACT_PATH_PREFIXES,
   normalizeAssistantAttachmentArtifactPath,
 } from './attachment-artifact-paths.js'
+import {
+  retireHostedMailboxAssistantInputItemContentAtPaths,
+} from './hosted-mailbox-input-items.js'
 
 export const ASSISTANT_INPUT_EVENT_SCHEMA = 'murph.assistant-input-event.v1'
 export const ASSISTANT_INPUT_EVENT_SCHEMA_VERSION = 1
@@ -427,6 +430,9 @@ const assistantInputEventRecordSchema = z
     ),
     content: assistantInputContentSchema,
     conversation: assistantInputConversationRefSchema.nullable().default(null),
+    contentRetiredAt: safeNullableAssistantInputTimestampSchema(
+      'contentRetiredAt',
+    ).optional(),
     cursor: assistantInputCursorSchema,
     idempotencyKey: z
       .string()
@@ -582,13 +588,75 @@ export async function readAssistantInputEvent(input: {
   })
 }
 
+export async function retireAssistantInputEventContent(input: {
+  inputId: string
+  now?: Date
+  signal?: AbortSignal | null
+  vault: string
+}): Promise<{ retired: boolean; event: AssistantInputEventRecord | null }> {
+  return await withAssistantRuntimeWriteLock(input.vault, async (paths) => {
+    input.signal?.throwIfAborted()
+    await ensureAssistantInputEventStore(paths)
+    const existing = await readAssistantInputEventAtPaths({
+      inputId: input.inputId,
+      paths,
+    })
+    input.signal?.throwIfAborted()
+    if (!existing) {
+      return { event: existing, retired: false }
+    }
+    // The mailbox sidecar carries one optional quoted-message field that is
+    // intentionally absent from the input event. Clear it first under the same
+    // write lock. If the later event write fails, the next pass can safely
+    // retry; the inverse order could strand the quote behind contentRetiredAt.
+    await retireHostedMailboxAssistantInputItemContentAtPaths({
+      inputId: existing.inputId,
+      paths,
+      signal: input.signal,
+    })
+    if (existing.contentRetiredAt) {
+      return { event: existing, retired: false }
+    }
+
+    const retiredAt = resolveTimestamp(input.now)
+    const retired = assistantInputEventRecordSchema.parse({
+      ...existing,
+      attachmentEvidence: {
+        ...existing.attachmentEvidence,
+        attachments: existing.attachmentEvidence.attachments.map(
+          (attachment) => ({
+            ...attachment,
+            derived: null,
+            inlineFragments: [],
+            raw: null,
+          }),
+        ),
+      },
+      content: redactAssistantInputContent(existing.content),
+      contentRetiredAt: retiredAt,
+      sourceMetadata: redactAssistantInputSourceMetadata(
+        existing.sourceMetadata,
+      ),
+      updatedAt: retiredAt,
+    })
+    await writeAssistantStateVersionedJson({
+      filePath: resolveAssistantInputEventPath({
+        inputId: retired.inputId,
+        paths,
+      }),
+      schema: ASSISTANT_INPUT_EVENT_SCHEMA,
+      schemaVersion: ASSISTANT_INPUT_EVENT_SCHEMA_VERSION,
+      value: retired,
+    })
+    input.signal?.throwIfAborted()
+    return { event: retired, retired: true }
+  }, input.signal)
+}
+
 export async function listAssistantInputEvents(input: {
   afterCursor?: AssistantInputCursor | null
   conversation?: AssistantInputConversationRef | null
-  lane?: 'conversation' | 'system'
   limit?: number
-  occurredAtFrom?: string
-  occurredAtUntilExclusive?: string
   onInvalidRecord?: ((failure: AssistantInputEventRecordParseFailure) => void) | null
   paths?: AssistantStatePaths
   signal?: AbortSignal | null
@@ -602,14 +670,6 @@ export async function listAssistantInputEvents(input: {
   input.signal?.throwIfAborted()
   const { paths } = resolveAssistantInputContext(input)
   const limit = normalizeAssistantInputEventListLimit(input.limit)
-  const occurredAtFrom = normalizeAssistantInputEventOccurredAtBound(
-    input.occurredAtFrom,
-    'occurredAtFrom',
-  )
-  const occurredAtUntilExclusive = normalizeAssistantInputEventOccurredAtBound(
-    input.occurredAtUntilExclusive,
-    'occurredAtUntilExclusive',
-  )
   const onInvalidRecord = input.onInvalidRecord ?? null
   const skipInvalidRecords = input.skipInvalidRecords ?? false
   const directory = resolveAssistantInputEventsDirectory(paths)
@@ -655,20 +715,6 @@ export async function listAssistantInputEvents(input: {
       .filter((record) =>
         input.source ? record.sourceRef.source === input.source : true,
       )
-      .filter((record) =>
-        input.lane
-          ? record.sourceRef.kind === 'hosted-mailbox' &&
-            record.sourceRef.lane === input.lane
-          : true,
-      )
-      .filter((record) => {
-        const occurredAt = Date.parse(record.occurredAt)
-        return (
-          (occurredAtFrom === null || occurredAt >= occurredAtFrom) &&
-          (occurredAtUntilExclusive === null ||
-            occurredAt < occurredAtUntilExclusive)
-        )
-      })
       .filter((record) =>
         input.conversation
           ? record.conversation
@@ -992,6 +1038,21 @@ function assertAssistantInputEventReplayCompatible(input: {
   if (stableStringify(existingIdentity) === stableStringify(nextIdentity)) {
     return
   }
+  if (
+    input.existing.contentRetiredAt
+    && stableStringify(existingIdentity)
+      === stableStringify(
+        assistantInputEventImmutableIdentity({
+          ...input.next,
+          content: redactAssistantInputContent(input.next.content),
+          sourceMetadata: redactAssistantInputSourceMetadata(
+            input.next.sourceMetadata,
+          ),
+        }),
+      )
+  ) {
+    return
+  }
   const replayCompatibilityIdentity =
     assistantInputEventReplayCompatibilityIdentity({
       existing: input.existing,
@@ -1008,6 +1069,28 @@ function assertAssistantInputEventReplayCompatible(input: {
       inputId: input.existing.inputId,
     },
   )
+}
+
+function redactAssistantInputContent(
+  content: AssistantInputContent,
+): AssistantInputContent {
+  return {
+    ...content,
+    text: null,
+    transcriptText: null,
+    userMessageContent: null,
+  }
+}
+
+function redactAssistantInputSourceMetadata(
+  metadata: AssistantInputSourceMetadata,
+): AssistantInputSourceMetadata {
+  return metadata?.kind === 'telegram'
+    ? {
+        ...metadata,
+        replyContext: null,
+      }
+    : metadata
 }
 
 function assistantInputEventReplayCompatibilityIdentity(input: {
@@ -1139,20 +1222,6 @@ function normalizeAssistantInputEventListLimit(limit?: number): number {
     return 100
   }
   return Math.max(1, Math.trunc(limit))
-}
-
-function normalizeAssistantInputEventOccurredAtBound(
-  value: string | undefined,
-  field: string,
-): number | null {
-  if (value === undefined) {
-    return null
-  }
-  const parsed = Date.parse(value)
-  if (Number.isNaN(parsed)) {
-    throw new TypeError(`${field} must be an ISO timestamp.`)
-  }
-  return parsed
 }
 
 function assistantInputSourceRefIdentity(

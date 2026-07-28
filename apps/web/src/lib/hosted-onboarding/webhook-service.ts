@@ -90,6 +90,12 @@ import {
   reconcileHostedThreadContainerParticipants,
 } from "../hosted-groups/group-tool";
 import {
+  reconcileHostedUsageReferralRewardAfterCommit,
+} from "../hosted-growth/usage-referral";
+import {
+  signalHostedMailboxAppendRuntime,
+} from "../hosted-orchestration/signal-runtime";
+import {
   handleHostedGroupJoinOfferReaction,
 } from "../hosted-groups/join-offer-reaction";
 import {
@@ -485,6 +491,11 @@ export async function handleHostedOnboardingLinqWebhook(input: {
 
     await reconcileHostedLinqGroupRostersAfterCommitBestEffort({
       reconciles: plan.postCommitGroupRosterReconciles ?? [],
+      scheduleAfterResponse: input.scheduleAfterResponse,
+    });
+    await reconcileHostedUsageReferralRewardsAfterCommitBestEffort({
+      prisma,
+      referralIds: plan.postCommitUsageReferralIds ?? [],
       scheduleAfterResponse: input.scheduleAfterResponse,
     });
 
@@ -1095,8 +1106,62 @@ export async function handleHostedOnboardingTelegramWebhook(input: {
       scheduleAfterResponse: input.scheduleAfterResponse,
       signal: input.scheduleAfterResponse ? undefined : input.signal,
     });
+    await reconcileHostedUsageReferralRewardsAfterCommitBestEffort({
+      prisma,
+      referralIds: plan.postCommitUsageReferralIds ?? [],
+      scheduleAfterResponse: input.scheduleAfterResponse,
+    });
   }
   return plan.response;
+}
+
+async function reconcileHostedUsageReferralRewardsAfterCommitBestEffort(input: {
+  prisma: PrismaClient;
+  referralIds: readonly string[];
+  scheduleAfterResponse?: HostedWebhookPostResponseScheduler;
+}): Promise<void> {
+  const referralIds = [...new Set(input.referralIds)];
+  if (referralIds.length === 0) {
+    return;
+  }
+  const reconcile = async () => {
+    for (const referralId of referralIds) {
+      try {
+        const wake = await reconcileHostedUsageReferralRewardAfterCommit({
+          prisma: input.prisma,
+          referralId,
+        });
+        if (!wake) {
+          continue;
+        }
+        await signalHostedMailboxAppendRuntime({
+          expectedUserId: wake.userId,
+          ...(wake.wakeMailboxCheckpoint
+            ? {
+                knownCheckpoint: {
+                  ...wake.wakeMailboxCheckpoint,
+                  userId: wake.userId,
+                },
+              }
+            : {}),
+          mailboxItemId: wake.mailboxItemId,
+          prisma: input.prisma,
+        });
+      } catch (error) {
+        logHostedOnboardingDiagnostic(
+          "hosted-onboarding.usage-referral-reconcile-failed",
+          {
+            errorName: deriveHostedOnboardingTimingErrorName(error),
+          },
+        );
+      }
+    }
+  };
+  if (input.scheduleAfterResponse) {
+    input.scheduleAfterResponse(reconcile);
+    return;
+  }
+  await reconcile();
 }
 
 /**

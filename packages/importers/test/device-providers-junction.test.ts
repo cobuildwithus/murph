@@ -6,6 +6,7 @@ import { join } from "node:path";
 import {
   COMPANION_HRV_RMSSD_METHOD_VERSION,
   COMPANION_HRV_RMSSD_SCHEMA,
+  ID_PREFIXES,
   eventRevisionFromLifecycle,
   isDeletedEventLifecycle,
   serializeCompanionHrvRmssdObservation,
@@ -2171,8 +2172,12 @@ test("Junction meal direct nutrition totals win over sparse item totals", () => 
 });
 
 test("Junction meal ids stay stable when provider meal nutrition changes", () => {
+  const firstSnapshot = makeJunctionCronometerMealSnapshot({
+    chickenCalories: 400,
+    chickenProtein: 10,
+  });
   const firstMeal = normalizeJunctionSnapshot(
-    makeJunctionCronometerMealSnapshot({ chickenCalories: 400, chickenProtein: 10 }),
+    firstSnapshot,
   ).events?.find((event) => event.kind === "meal");
   const correctedMeal = normalizeJunctionSnapshot(
     makeJunctionCronometerMealSnapshot({ chickenCalories: 425, chickenProtein: 12 }),
@@ -2181,6 +2186,19 @@ test("Junction meal ids stay stable when provider meal nutrition changes", () =>
   assert.equal(firstMeal?.externalRef?.resourceId, correctedMeal?.externalRef?.resourceId);
   assert.equal(firstMeal?.fields?.mealId, correctedMeal?.fields?.mealId);
   assert.notDeepEqual(firstMeal?.fields?.nutrition, correctedMeal?.fields?.nutrition);
+
+  const record = firstSnapshot.summaries.meal[0];
+  const origin = resolveJunctionOrigin(record);
+  assert.equal(
+    firstMeal?.fields?.mealId,
+    coreRuntime.deterministicContractId(ID_PREFIXES.meal, JSON.stringify([
+      "junction-meal",
+      origin.sourceProviderSlug,
+      origin.sourceType ?? null,
+      origin.sourceInstanceId ?? null,
+      record.id,
+    ])),
+  );
 });
 
 test("Junction meal ids prefer Junction summary ids over provider id aliases", () => {

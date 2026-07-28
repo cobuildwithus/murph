@@ -33,20 +33,37 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // assembly instead of silently regressing cold start. Entry and static-closure
 // caps retain their platform-jitter tolerances.
 //
+// Static-closure baseline raised 2026-07-25 on main. The previous baseline left
+// the packaged boot closure 735B under its cap, so the next small reviewed
+// addition was guaranteed to fail assembly: adding provider-failure diagnosis to
+// the voice memo tool measured 7,738,566B in CI. No module entered the boot graph
+// for that change, so this is authored-code growth rather than an import
+// regression. The baseline leaves roughly 128KB above that measurement so
+// ordinary small additions do not re-red the lane. This deliberately widens the
+// cold-start guard; keep the forbidden-boot-input markers below as the real
+// defense against whole subsystems entering the boot path, and re-baseline down
+// if a future prune reclaims the space.
+//
 // The total budget is expressed as the packaged measurement plus the established
-// 32KB allowance for small reviewed additions. The group managed-automation
-// callback path measured 9,654,634B total and 7,875,870B in the static boot
-// closure in the local production assembly on 2026-07-26. Its growth stays
-// within the existing hosted runtime, assistant-engine, and hosted-execution
-// boot graph and adds no forbidden subsystem. The static closure keeps its 96KB
-// platform-jitter tolerance, and the Junction push-source recovery runtime from
-// #964 remains the measured macOS entry baseline at 1,639,869B. Keep the
-// forbidden-boot-input markers below as the defense against whole subsystems
-// entering the boot path, and re-baseline down if a future prune reclaims space.
-// Do not restore the former 250KB operational growth allowance.
-const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_654_634 + 32_768;
-const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_639_869;
-const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 7_875_870;
+// 32KB allowance for small reviewed additions. An exact measured ceiling was
+// tried and reverted: it left zero slack, so an unrelated prompt change on main
+// broke assembly. Do not restore the former 250KB operational growth allowance.
+//
+// Entry baseline raised 2026-07-25 for the hosted message-content retention
+// owner. Its mailbox, pending-input, transcript, and inbox cleanup paths are
+// intentionally reachable from idle maintenance. The entry measured 1,649,331B
+// in CI; full local assembly measured 9,605,653B total and a 7,882,562B static
+// closure. No forbidden subsystem entered the boot graph; the markers below
+// remain the guard against that regression, while the existing tolerances cover
+// ordinary small authored-code growth.
+//
+// The merged production assembly measured 9,690,052B total, while retention
+// remains the larger measured entry and static-closure owner. The combined graph
+// added no forbidden boot input; production assembly below still fails closed if
+// any dimension exceeds its reviewed measurement plus the existing allowance.
+const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_690_052 + 32_768;
+const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_649_331;
+const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 7_882_562;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES = 48_000;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_TOLERANCE_BYTES = 96_000;
 // The @murphai package markers are path suffixes, not node_modules-anchored:

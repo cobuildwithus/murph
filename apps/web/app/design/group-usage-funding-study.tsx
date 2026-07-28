@@ -67,12 +67,21 @@ const DESIGN_EXHAUSTED_USAGE_STATUS: HostedPlanUsageAvailableStatus = {
 };
 
 const DESIGN_CREDIT_BACKED_USAGE_STATUS: HostedPlanUsageAvailableStatus = {
-  ...DESIGN_EXHAUSTED_USAGE_STATUS,
-  status: "active",
+  ...DESIGN_PERSONAL_USAGE_STATUS,
+  remainingPercent: 24,
+  usedPercent: 76,
+};
+
+const DESIGN_FULFILLED_USAGE_STATUS: HostedPlanUsageAvailableStatus = {
+  ...DESIGN_PERSONAL_USAGE_STATUS,
+  remainingPercent: 45,
+  usedPercent: 55,
 };
 
 function GroupUsageFundingStudy() {
   const [groupFulfilledPreviewKey, setGroupFulfilledPreviewKey] = useState(0);
+  const [groupPaymentRecoveryPreviewKey, setGroupPaymentRecoveryPreviewKey] =
+    useState(0);
   const [fulfilledPreviewKey, setFulfilledPreviewKey] = useState(0);
   const [multiChannelPreviewKey, setMultiChannelPreviewKey] = useState(0);
 
@@ -93,6 +102,11 @@ function GroupUsageFundingStudy() {
           }
           groupName="Sunday sleep crew"
         />
+        <p className="mt-3 text-sm leading-6 text-muted-foreground">
+          The amount dialog authorizes one contribution at a time. Murph uses a
+          saved card when available; Stripe collects or verifies the card when
+          needed.
+        </p>
       </div>
       <div
         className="flex w-full max-w-xl flex-col items-start gap-3"
@@ -111,6 +125,12 @@ function GroupUsageFundingStudy() {
             onClick={() => setGroupFulfilledPreviewKey((key) => key + 1)}
           >
             Preview group usage added
+          </Button>
+          <Button
+            variant="outline"
+            onClick={() => setGroupPaymentRecoveryPreviewKey((key) => key + 1)}
+          >
+            Preview group payment recovery
           </Button>
           <Button
             variant="outline"
@@ -135,6 +155,22 @@ function GroupUsageFundingStudy() {
               status: "fulfilled",
             }}
             deferTerminalRefreshUntilClose
+            initialOpen
+            offers={[]}
+            scope="group"
+          />
+        ) : null}
+        {groupPaymentRecoveryPreviewKey > 0 ? (
+          <HostedUsageTopUpDialog
+            key={groupPaymentRecoveryPreviewKey}
+            activePurchase={{
+              cancelAllowed: true,
+              offerCode: "usage_25_usd",
+              purchaseId: "hucp_design_pending_0",
+              retryAllowed: true,
+              status: "payment_pending",
+            }}
+            checkoutUrl="/api/design/usage-credit-preview"
             initialOpen
             offers={[]}
             scope="group"
@@ -176,6 +212,8 @@ function GroupUsageFundingStudy() {
 }
 
 function PersonalUsageCreditOwnerStudy() {
+  const [fulfilledPreviewKey, setFulfilledPreviewKey] = useState(0);
+
   return (
     <div
       className="flex flex-col gap-6 rounded-3xl border border-border bg-background px-4 py-8 sm:px-8"
@@ -183,32 +221,64 @@ function PersonalUsageCreditOwnerStudy() {
       id="personal-usage-credit-owner"
     >
       <p className="text-sm text-muted-foreground">
-        Static owner-layout preview with purchased credit present. The exact
-        balance is omitted, and billing actions are disabled here.
+        Static owner-layout preview with plan allowance and purchased credit
+        combined in one usage bar. Exact balances are omitted, and billing
+        actions are disabled here.
       </p>
       <PersonalUsageCreditState
-        balanceUsdMicros="8429999"
-        label="Included usage active"
+        label="Overall usage active"
         state="active-with-credit"
         usageStatus={DESIGN_PERSONAL_USAGE_STATUS}
       />
       <PersonalUsageCreditState
-        balanceUsdMicros="8429999"
-        label="Included usage exhausted, credit remains"
+        label="Plan usage exhausted, credit remains"
         state="exhausted-with-credit"
         usageStatus={DESIGN_CREDIT_BACKED_USAGE_STATUS}
       />
       <PersonalUsageCreditState
-        label="Included usage and credit exhausted"
+        label="All available usage exhausted"
         state="exhausted-without-credit"
         usageStatus={DESIGN_EXHAUSTED_USAGE_STATUS}
       />
+      <div
+        className="flex flex-col gap-3"
+        data-design-state="fulfilled-with-overall-usage"
+      >
+        <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+          Fulfilled top-up with refreshed usage
+        </p>
+        <Button
+          className="self-start"
+          variant="outline"
+          onClick={() => setFulfilledPreviewKey((key) => key + 1)}
+        >
+          Preview fulfilled top-up
+        </Button>
+        {fulfilledPreviewKey > 0 ? (
+          <HostedBillingSettings
+            key={fulfilledPreviewKey}
+            authenticated
+            billingStatus="active"
+            currentBillingPhase="paid"
+            currentBillingPlanCode="launch_monthly"
+            usageStatus={DESIGN_FULFILLED_USAGE_STATUS}
+            usageTopUpActivePurchase={{
+              offerCode: "usage_5_usd",
+              purchaseId: "hucp_design_overall_usage_added",
+              retryAllowed: false,
+              status: "fulfilled",
+            }}
+            usageTopUpContactOptions={DESIGN_TOP_UP_CONTACT_OPTIONS}
+            usageTopUpInitialOpen
+            usageTopUpOffers={[]}
+          />
+        ) : null}
+      </div>
     </div>
   );
 }
 
 function PersonalUsageCreditState(props: {
-  balanceUsdMicros?: string;
   label: string;
   state: string;
   usageStatus: HostedPlanUsageAvailableStatus;
@@ -227,7 +297,6 @@ function PersonalUsageCreditState(props: {
           billingStatus="active"
           currentBillingPhase="paid"
           currentBillingPlanCode="launch_monthly"
-          usageCreditBalanceUsdMicros={props.balanceUsdMicros}
           usageStatus={props.usageStatus}
           usageTopUpOffers={DESIGN_USAGE_OFFERS}
         />

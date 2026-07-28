@@ -1,5 +1,3 @@
-import { randomUUID } from "node:crypto";
-
 export {
   bindHostedActiveLinqHomeChat,
   bindHostedActiveTelegramMember,
@@ -24,18 +22,11 @@ import type { HostedBrowserVaultReplicaRef } from "@murphai/hosted-execution/con
 import type { HostedExecutionSnapshotRef } from "@murphai/hosted-execution/contracts";
 import type { HostedExecutionWake } from "@murphai/hosted-execution/contracts";
 import { parseHostedExecutionWake } from "@murphai/hosted-execution/parsers";
-import {
-  HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
-} from "@murphai/hosted-execution/runtime-control";
 
 import { createHostedWebSmokeEnvironment } from "../../next-artifacts";
 import type { HostedRuntimeTemporalSignalClient } from "../../src/lib/hosted-orchestration/temporal-client";
 
 const hostedPrismaModuleSpecifier = new URL("../../src/lib/prisma.ts", import.meta.url).href;
-const hostedMailboxEncryptionModuleSpecifier = new URL(
-  "../../src/lib/hosted-mailbox/encryption.ts",
-  import.meta.url,
-).href;
 const hostedMailboxStoreModuleSpecifier = new URL(
   "../../src/lib/hosted-mailbox/store.ts",
   import.meta.url,
@@ -46,10 +37,6 @@ const hostedWorkspaceStoreModuleSpecifier = new URL(
 ).href;
 const hostedThreadRouteStoreModuleSpecifier = new URL(
   "../../src/lib/hosted-routing/thread-route-store.ts",
-  import.meta.url,
-).href;
-const hostedGroupStoreModuleSpecifier = new URL(
-  "../../src/lib/hosted-groups/group-store.ts",
   import.meta.url,
 ).href;
 const hostedTemporalClientModuleSpecifier = new URL(
@@ -86,6 +73,7 @@ type HostedTestPrismaClient =
   & HostedUsageCreditForTestPrismaClient
   & HostedComputerUseForTestPrismaClient
   & HostedIngressLatencyForTestPrismaClient
+  & HostedRuntimeLatencyAlertForTestPrismaClient
   & HostedLinqWorkspaceIsolationForTestPrismaClient
   & HostedWorkspaceSeedForTestPrismaClient
   & HostedUsageDiagnosticsForTestPrismaClient;
@@ -95,7 +83,6 @@ interface HostedTestPrismaFactoryClient {
   $transaction<T>(callback: (tx: unknown) => Promise<T>): Promise<T>;
   hostedMailboxItem: {
     count(args: unknown): Promise<number>;
-    create(args: unknown): Promise<{ id: string }>;
     findUniqueOrThrow(args: unknown): Promise<{
       consumedAt: Date | null;
       dedupeKey: string;
@@ -152,6 +139,19 @@ interface HostedIngressLatencyForTestPrismaClient {
     update(args: unknown): Promise<{
       acceptedAt: Date;
       id: string;
+    }>;
+  };
+}
+
+interface HostedRuntimeLatencyAlertForTestPrismaClient {
+  hostedLinqAlert: {
+    findUnique(args: unknown): Promise<{
+      lastAttemptedAt: Date | null;
+      sentAt: Date | null;
+    } | null>;
+    update(args: unknown): Promise<{
+      lastAttemptedAt: Date | null;
+      sentAt: Date | null;
     }>;
   };
 }
@@ -380,22 +380,6 @@ interface HostedMailboxAppendForTestStoreModule {
   }>;
 }
 
-interface HostedMailboxEncryptionForTestModule {
-  encryptHostedMailboxPayloadString(input: {
-    dedupeKey: string;
-    itemId: string;
-    kind: string;
-    lane: string;
-    laneSeq: bigint;
-    occurredAt: string;
-    payloadSchema: string;
-    payloadStorage: "inline";
-    prisma: HostedTestPrismaClient;
-    userId: string;
-    value: string;
-  }): Promise<string | null>;
-}
-
 interface HostedWorkspaceSeedForTestPrismaClient {
   $disconnect(): Promise<void>;
 }
@@ -527,15 +511,6 @@ interface HostedThreadRouteForTestModule {
       id: string;
     };
   } | null>;
-}
-
-interface HostedGroupStoreForTestModule {
-  ensureHostedGroupForThreadContainerTx(input: {
-    containerMemberId: string;
-    kind?: string | null;
-    now: Date;
-    tx: unknown;
-  }): Promise<{ id: string }>;
 }
 
 export interface HostedThreadRouteForTest {
@@ -675,94 +650,6 @@ export async function appendHostedExecutionWakeForTest(input: {
         seq: append.item.laneSeq.toString(),
       },
     };
-  });
-}
-
-export async function seedHostedHistoricalConversationWakesForTest(input: {
-  consumedAt?: Date | string;
-  environment?: NodeJS.ProcessEnv;
-  wakes: readonly (HostedExecutionWake | unknown)[];
-  userId: string;
-}): Promise<number> {
-  if (input.wakes.length === 0) {
-    return 0;
-  }
-  const consumedAt = input.consumedAt === undefined
-    ? new Date()
-    : new Date(input.consumedAt);
-  if (!Number.isFinite(consumedAt.getTime())) {
-    throw new TypeError("Hosted mailbox consumed-at test timestamp is invalid.");
-  }
-
-  return withHostedWebTestkitDeps(input.environment, async (deps) => {
-    const hostedMailboxEncryption =
-      await loadHostedMailboxEncryptionForTestModule();
-    let inserted = 0;
-    for (const [index, rawWake] of input.wakes.entries()) {
-      const wake = parseHostedExecutionWake(rawWake);
-      if (wake.kind !== "conversation.message" || wake.userId !== input.userId) {
-        throw new TypeError(
-          "Historical conversation wake must match its synthetic runtime.",
-        );
-      }
-      const itemId = randomUUID();
-      const laneSeq = -BigInt(index + 1);
-      const serialized = JSON.stringify(wake);
-      const payloadInlineCiphertext =
-        await hostedMailboxEncryption.encryptHostedMailboxPayloadString({
-          dedupeKey: wake.eventId,
-          itemId,
-          kind: wake.kind,
-          lane: "conversation",
-          laneSeq,
-          occurredAt: wake.occurredAt,
-          payloadSchema: HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
-          payloadStorage: "inline",
-          prisma: deps.prisma,
-          userId: input.userId,
-          value: serialized,
-        });
-      if (!payloadInlineCiphertext) {
-        throw new TypeError(
-          "Historical conversation wake encryption returned no ciphertext.",
-        );
-      }
-      await deps.prisma.hostedMailboxItem.create({
-        data: {
-          consumedAt,
-          dedupeKey: wake.eventId,
-          id: itemId,
-          kind: wake.kind,
-          lane: "conversation",
-          laneSeq,
-          occurredAt: new Date(wake.occurredAt),
-          payloadBytes: Buffer.byteLength(serialized, "utf8"),
-          payloadInlineCiphertext,
-          payloadSchema: HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
-          userId: input.userId,
-        },
-        select: { id: true },
-      });
-      inserted += 1;
-    }
-    return inserted;
-  });
-}
-
-export async function seedHostedGroupForThreadContainerForTest(input: {
-  containerMemberId: string;
-  environment?: NodeJS.ProcessEnv;
-}): Promise<string> {
-  return withHostedWebTestkitDeps(input.environment, async (deps) => {
-    const hostedGroupStore = await loadHostedGroupStoreForTestModule();
-    const group = await deps.prisma.$transaction(async (tx) =>
-      await hostedGroupStore.ensureHostedGroupForThreadContainerTx({
-        containerMemberId: input.containerMemberId,
-        kind: "custom",
-        now: new Date(),
-        tx,
-      }));
-    return group.id;
   });
 }
 
@@ -921,6 +808,49 @@ export async function normalizeHostedLinqLatencyTracesForTest(input: {
     return {
       updatedCount: traces.length,
     };
+  });
+}
+
+export async function ageHostedRuntimeLatencyAlertForTest(input: {
+  ageMs: number;
+  environment?: NodeJS.ProcessEnv;
+}): Promise<{ updated: boolean }> {
+  if (!Number.isSafeInteger(input.ageMs) || input.ageMs < 0) {
+    throw new RangeError(
+      "Hosted runtime latency alert test age requires a non-negative integer.",
+    );
+  }
+
+  return withHostedWebTestkitDeps(input.environment, async (deps) => {
+    const monitorId = "hosted-runtime-latency-monitor:v1";
+    const state = await deps.prisma.hostedLinqAlert.findUnique({
+      select: {
+        lastAttemptedAt: true,
+        sentAt: true,
+      },
+      where: {
+        id: monitorId,
+      },
+    });
+    if (!state) {
+      return { updated: false };
+    }
+
+    const agedAt = new Date(Date.now() - input.ageMs);
+    await deps.prisma.hostedLinqAlert.update({
+      data: {
+        lastAttemptedAt: state.lastAttemptedAt ? agedAt : null,
+        sentAt: state.sentAt ? agedAt : null,
+      },
+      select: {
+        lastAttemptedAt: true,
+        sentAt: true,
+      },
+      where: {
+        id: monitorId,
+      },
+    });
+    return { updated: true };
   });
 }
 
@@ -1657,14 +1587,6 @@ async function loadHostedWorkspaceSeedForTestModules(): Promise<HostedWorkspaceS
   };
 }
 
-async function loadHostedMailboxEncryptionForTestModule(): Promise<
-  HostedMailboxEncryptionForTestModule
-> {
-  return await import(
-    hostedMailboxEncryptionModuleSpecifier
-  ) as HostedMailboxEncryptionForTestModule;
-}
-
 async function loadHostedTemporalClientModule(): Promise<HostedTemporalClientModule> {
   return await import(hostedTemporalClientModuleSpecifier) as HostedTemporalClientModule;
 }
@@ -1700,10 +1622,6 @@ async function createHostedComputerUseServiceForTest(
 
 async function loadHostedThreadRouteForTestModule(): Promise<HostedThreadRouteForTestModule> {
   return await import(hostedThreadRouteStoreModuleSpecifier) as HostedThreadRouteForTestModule;
-}
-
-async function loadHostedGroupStoreForTestModule(): Promise<HostedGroupStoreForTestModule> {
-  return await import(hostedGroupStoreModuleSpecifier) as HostedGroupStoreForTestModule;
 }
 
 async function createHostedTestPrisma(

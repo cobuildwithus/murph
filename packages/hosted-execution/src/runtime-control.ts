@@ -755,6 +755,7 @@ export type HostedRuntimeDeviceSyncBridgeKind =
 
 export interface HostedRuntimeDeviceSyncWakeBridgeEnvelope {
   connectionId?: string | null;
+  expectedConnectedAt?: string;
   hint?: HostedExecutionDeviceSyncWakeHint | null;
   kind: "device-sync.wake";
   provider?: string | null;
@@ -907,41 +908,6 @@ export type HostedRuntimeAssistantAskControlResponse =
 
 export type HostedRuntimeGroupToolAction = HostedRuntimeGroupToolRequest["action"];
 
-export const HOSTED_RUNTIME_MANAGED_GROUP_ACTIVITY_POLICIES = [
-  "group-sunday-superlatives-v1",
-] as const;
-
-export type HostedRuntimeManagedGroupActivityPolicy =
-  (typeof HOSTED_RUNTIME_MANAGED_GROUP_ACTIVITY_POLICIES)[number];
-
-export const HOSTED_RUNTIME_MANAGED_GROUP_ACTIVITY_DECISION_STATUSES = [
-  "eligible",
-  "ineligible",
-  "unavailable",
-] as const;
-
-export type HostedRuntimeManagedGroupActivityDecisionStatus =
-  (typeof HOSTED_RUNTIME_MANAGED_GROUP_ACTIVITY_DECISION_STATUSES)[number];
-
-export const HOSTED_RUNTIME_MANAGED_GROUP_ACTIVITY_DECISION_REQUEST_MAX_BYTES =
-  1_024;
-
-export interface HostedRuntimeManagedGroupActivityRoute {
-  channel: "linq" | "telegram";
-  target: string;
-}
-
-export interface HostedRuntimeManagedGroupActivityDecisionRequest {
-  occurrenceAt: string;
-  policy: HostedRuntimeManagedGroupActivityPolicy;
-  route: HostedRuntimeManagedGroupActivityRoute;
-  timeZone: string;
-}
-
-export interface HostedRuntimeManagedGroupActivityDecisionResponse {
-  status: HostedRuntimeManagedGroupActivityDecisionStatus;
-}
-
 export const HOSTED_RUNTIME_GROUP_KINDS = [
   "couple",
   "custom",
@@ -1004,6 +970,55 @@ export interface HostedRuntimeGroupUsageStatus {
   periodEnd: string;
   // Optional until the Cloudflare-first rollout and old-Web rollback window close.
   remainingPercent?: number;
+}
+
+export const HOSTED_USAGE_REFERRAL_POLICY_CODES = [
+  "new_person_activation_v1",
+  "active_group_v1",
+] as const;
+
+export type HostedUsageReferralPolicyCode =
+  (typeof HOSTED_USAGE_REFERRAL_POLICY_CODES)[number];
+
+export interface HostedRuntimeUsageReferralSnapshot {
+  active: {
+    destinationKind: "group" | "personal";
+    expiresAt: string;
+    policyCode: HostedUsageReferralPolicyCode;
+    rewardLabel: string;
+    state: "armed" | "target_bound";
+  } | null;
+  availablePolicies: Array<{
+    code: HostedUsageReferralPolicyCode;
+    requirementsLabel: string;
+    rewardLabel: string;
+  }>;
+  trialCreditNotice: string | null;
+}
+
+export interface HostedRuntimeGroupToolSenderContext {
+  /**
+   * Trusted current-turn sender evidence injected by the hosted runtime. The
+   * model never supplies these fields, and exactly one provider namespace may
+   * be present.
+   */
+  linqSenderHandles?: readonly string[];
+  telegramSenderHandles?: readonly string[];
+}
+
+export interface HostedRuntimeUsageReferralSourceConversation {
+  channel: "linq" | "telegram";
+  threadId: string;
+  threadIsDirect: boolean;
+}
+
+export interface HostedRuntimeUsageReferralSourceContext {
+  /**
+   * Blinded current-conversation locator injected by the hosted runtime. Web
+   * persists it only for a personal reward so its celebration cannot drift to
+   * another direct channel or a newly bound provider conversation.
+   */
+  sourceConversation?: HostedRuntimeUsageReferralSourceConversation;
 }
 
 export const HOSTED_RUNTIME_GROUP_MEMBERSHIPS_MAX = 25;
@@ -1162,6 +1177,13 @@ export type HostedRuntimeGroupToolRequest =
   | { action: "revoke_disclosure_grant"; grantId: string }
   | { action: "read_current" }
   | { action: "read_usage" }
+  | ({ action: "read_usage_referral" } & HostedRuntimeGroupToolSenderContext)
+  | ({
+      action: "arm_usage_referral";
+      policyCode: HostedUsageReferralPolicyCode;
+    } & HostedRuntimeGroupToolSenderContext
+      & HostedRuntimeUsageReferralSourceContext)
+  | ({ action: "cancel_usage_referral" } & HostedRuntimeGroupToolSenderContext)
   | ({
       action: "read_shared";
       /**
@@ -1263,6 +1285,23 @@ export type HostedRuntimeGroupToolResponse =
             status: "unavailable";
             unavailableReason: string;
             memberships: null;
+          };
+    }
+  | {
+      action:
+        | "arm_usage_referral"
+        | "cancel_usage_referral"
+        | "read_usage_referral";
+      result:
+        | {
+            outcome: "armed" | "canceled" | "read";
+            referral: HostedRuntimeUsageReferralSnapshot;
+            status: "ok";
+          }
+        | {
+            referral: null;
+            status: "unavailable";
+            unavailableReason: string;
           };
     }
   | {

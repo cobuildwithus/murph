@@ -4965,7 +4965,272 @@ describe('assistant codex runtime', () => {
     expect(spawnedChildren).toHaveLength(2)
   })
 
-  it('uses estimated idle compaction usage when generic token usage arrives before zero recompute updates', async () => {
+  it('keeps personal threads on the personal threshold when a group minimum is configured', async () => {
+    const workingDirectory = await createTempDir('assistant-codex-personal-compact-threshold-work-')
+    const codexHome = await createTempDir('assistant-codex-personal-compact-threshold-home-')
+    const threadId = 'thread-personal-compact-threshold'
+    const turnId = 'turn-personal-compact-threshold'
+    const spawnedChildren: MockChildProcess[] = []
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+      spawnedChildren.push(child)
+
+      queueMicrotask(() => {
+        void (async () => {
+          await initializeWarmTurn(child, threadId, turnId)
+          child.stdout.write(jsonLine({
+            method: 'thread/tokenUsage/updated',
+            params: {
+              threadId,
+              turnId,
+              tokenUsage: {
+                last: {
+                  cachedInputTokens: 25_000,
+                  inputTokens: 75_000,
+                  outputTokens: 12,
+                  totalTokens: 75_012,
+                },
+                total: {
+                  cachedInputTokens: 25_000,
+                  inputTokens: 75_000,
+                  outputTokens: 12,
+                  totalTokens: 75_012,
+                },
+                modelContextWindow: 128_000,
+              },
+            },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'item/completed',
+            params: {
+              item: {
+                id: 'assistant-personal-compact-threshold',
+                message: 'Seeded personal thread below its threshold',
+                type: 'assistant_message',
+              },
+            },
+          }))
+          writeCompletedTurn(child, threadId, turnId)
+        })()
+      })
+
+      return child
+    })
+
+    await expect(
+      executeCodexAppServerTurn({
+        approvalPolicy: 'never',
+        codexHome,
+        env: {
+          PATH: '/custom/bin',
+        },
+        groupConversation: false,
+        prompt: 'seed personal compact threshold',
+        sandbox: 'workspace-write',
+        workingDirectory,
+      }),
+    ).resolves.toMatchObject({
+      finalMessage: 'Seeded personal thread below its threshold',
+      sessionId: threadId,
+      turnId,
+    })
+
+    await expect(
+      compactWarmCodexThread({
+        groupMinThreadTokens: 60_000,
+        minThreadTokens: 100_000,
+        timeoutMs: 5_000,
+      }),
+    ).resolves.toEqual({
+      kind: 'skipped',
+      reason: 'below_threshold',
+      threadContextTokensBefore: 75_000,
+    })
+    expect(
+      readWrittenRpcMessages(
+        requireMockChildProcess(spawnedChildren[0] ?? null),
+      ).some((message) => message.method === 'thread/compact/start'),
+    ).toBe(false)
+  })
+
+  it.each([
+    ['active', false],
+    ['completed but not yet checkpoint-scanned', true],
+  ] as const)(
+    'skips group compaction while a detached child is %s',
+    async (_childState, completeChildBeforeRoot) => {
+      const workingDirectory = await createTempDir(
+        'assistant-codex-group-compact-detached-work-',
+      )
+      const codexHome = await createTempDir(
+        'assistant-codex-group-compact-detached-home-',
+      )
+      const parentThreadId = 'thread-group-compact-detached-parent'
+      const parentTurnId = 'turn-group-compact-detached-parent'
+      const childThreadId = 'thread-group-compact-detached-child'
+      const childTurnId = 'turn-group-compact-detached-child'
+      const spawnedChildren: MockChildProcess[] = []
+
+      codexMocks.spawn.mockImplementation(() => {
+        const child = new MockChildProcess()
+        spawnedChildren.push(child)
+
+        queueMicrotask(() => {
+          void (async () => {
+            await initializeWarmTurn(child, parentThreadId, parentTurnId)
+            child.stdout.write(jsonLine({
+              method: 'thread/tokenUsage/updated',
+              params: {
+                threadId: parentThreadId,
+                turnId: parentTurnId,
+                tokenUsage: {
+                  last: {
+                    cachedInputTokens: 25_000,
+                    inputTokens: 75_000,
+                    outputTokens: 12,
+                    totalTokens: 75_012,
+                  },
+                  total: {
+                    cachedInputTokens: 25_000,
+                    inputTokens: 75_000,
+                    outputTokens: 12,
+                    totalTokens: 75_012,
+                  },
+                  modelContextWindow: 128_000,
+                },
+              },
+            }))
+            writeSubAgentActivity(
+              child,
+              parentThreadId,
+              childThreadId,
+              'started',
+              {
+                agentPath: '/root/group-owned-background-work',
+                id: 'spawn-group-compact-detached-child',
+                turnId: parentTurnId,
+              },
+            )
+            writeStartedTurn(child, childThreadId, childTurnId)
+            if (completeChildBeforeRoot) {
+              writeCompletedTurn(child, childThreadId, childTurnId)
+            }
+            child.stdout.write(jsonLine({
+              method: 'item/completed',
+              params: {
+                item: {
+                  id: 'assistant-group-compact-detached',
+                  message: 'The group reply completed before its detached work.',
+                  type: 'assistant_message',
+                },
+                threadId: parentThreadId,
+                turnId: parentTurnId,
+              },
+            }))
+            writeCompletedTurn(child, parentThreadId, parentTurnId)
+          })()
+        })
+
+        return child
+      })
+
+      await expect(
+        executeCodexAppServerTurn({
+          approvalPolicy: 'never',
+          codexHome,
+          env: { PATH: '/custom/bin' },
+          groupConversation: true,
+          prompt: 'reply while detached group work continues',
+          sandbox: 'workspace-write',
+          workingDirectory,
+        }),
+      ).resolves.toMatchObject({
+        finalMessage: 'The group reply completed before its detached work.',
+        sessionId: parentThreadId,
+        turnId: parentTurnId,
+      })
+
+      const residentChild = requireMockChildProcess(spawnedChildren[0] ?? null)
+      await expect(
+        compactWarmCodexThread({
+          groupMinThreadTokens: 60_000,
+          minThreadTokens: 100_000,
+          timeoutMs: 5_000,
+        }),
+      ).resolves.toEqual({
+        kind: 'skipped',
+        reason: 'background_work_pending',
+        threadContextTokensBefore: 75_000,
+      })
+
+      expect(
+        readWrittenRpcMessages(residentChild).some(
+          (message) =>
+            message.method === 'config/read' ||
+            message.method === 'thread/compact/start',
+        ),
+      ).toBe(false)
+      expect(residentChild.signalCode).toBeNull()
+
+      if (!completeChildBeforeRoot) {
+        writeCompletedTurn(residentChild, childThreadId, childTurnId)
+      }
+      const boundary = waitForWarmCodexBackgroundWork()
+      const scannedThreadIds: string[] = []
+      for (let requestCount = 1; requestCount <= 2; requestCount += 1) {
+        const request = await respondToBackgroundTerminals(
+          residentChild,
+          requestCount,
+        )
+        scannedThreadIds.push(String(asRecord(request.params).threadId))
+      }
+      await expect(boundary).resolves.toBeUndefined()
+      expect(scannedThreadIds).toEqual([parentThreadId, childThreadId])
+      expect(residentChild.signalCode).toBeNull()
+      expect(spawnedChildren).toHaveLength(1)
+
+      const childFreeCompaction = compactWarmCodexThread({
+        groupMinThreadTokens: 60_000,
+        minThreadTokens: 100_000,
+        timeoutMs: 5_000,
+      })
+      const barrier = await waitForRpcMethod(residentChild, 'config/read')
+      residentChild.stdout.write(jsonLine({ id: barrier.id, result: {} }))
+      const compact = await waitForRpcMethod(
+        residentChild,
+        'thread/compact/start',
+      )
+      expect(asRecord(compact.params)).toEqual({
+        threadId: parentThreadId,
+      })
+      residentChild.stdout.write(jsonLine({ id: compact.id, result: {} }))
+      writeContextCompactionStarted({
+        child: residentChild,
+        itemId: 'context-group-compact-after-detached-boundary',
+        threadId: parentThreadId,
+      })
+      residentChild.stdout.write(jsonLine({
+        method: 'item/completed',
+        params: {
+          item: {
+            id: 'context-group-compact-after-detached-boundary',
+            type: 'contextCompaction',
+          },
+          threadId: parentThreadId,
+        },
+      }))
+
+      await expect(childFreeCompaction).resolves.toMatchObject({
+        kind: 'compacted',
+        threadContextTokensBefore: 75_000,
+        threadId: parentThreadId,
+      })
+      expect(residentChild.signalCode).toBeNull()
+    },
+  )
+
+  it('uses the lower group threshold and preserves pre-compaction usage attribution', async () => {
     const workingDirectory = await createTempDir('assistant-codex-compact-provider-usage-work-')
     const codexHome = await createTempDir('assistant-codex-compact-provider-usage-home-')
     const threadId = 'thread-compact-provider-usage'
@@ -4993,15 +5258,15 @@ describe('assistant codex runtime', () => {
               tokenUsage: {
                 last: {
                   cachedInputTokens: 25_000,
-                  inputTokens: 125_000,
+                  inputTokens: 75_000,
                   outputTokens: 12,
-                  totalTokens: 125_012,
+                  totalTokens: 75_012,
                 },
                 total: {
                   cachedInputTokens: 25_000,
-                  inputTokens: 125_000,
+                  inputTokens: 75_000,
                   outputTokens: 12,
-                  totalTokens: 125_012,
+                  totalTokens: 75_012,
                 },
                 modelContextWindow: 128_000,
               },
@@ -5103,6 +5368,7 @@ describe('assistant codex runtime', () => {
         env: {
           PATH: '/custom/bin',
         },
+        groupConversation: true,
         prompt: 'seed compact provider usage',
         sandbox: 'workspace-write',
         workingDirectory,
@@ -5115,19 +5381,20 @@ describe('assistant codex runtime', () => {
 
     await expect(
       compactWarmCodexThread({
+        groupMinThreadTokens: 60_000,
         minThreadTokens: 100_000,
         timeoutMs: 5_000,
       }),
     ).resolves.toMatchObject({
       kind: 'compacted',
-      threadContextTokensBefore: 125_000,
+      threadContextTokensBefore: 75_000,
       threadId,
       usage: {
         cachedInputTokens: null,
-        inputTokens: 125_000,
+        inputTokens: 75_000,
         outputTokens: null,
         source: 'estimated',
-        totalTokens: 125_000,
+        totalTokens: 75_000,
       },
     })
   })
@@ -13431,92 +13698,15 @@ describe('assistant codex runtime', () => {
 
     codexMocks.spawn.mockImplementation(() => {
       const child = new MockChildProcess()
-
       queueMicrotask(() => {
-        void (async () => {
-          await waitForRpcMethod(child, 'initialize')
-          child.stdout.write(jsonLine({ id: 1, result: {} }))
-          await waitForRpcMethod(child, 'thread/start')
-          child.stdout.write(
-            jsonLine({
-              id: 2,
-              result: {
-                thread: {
-                  id: 'thread-context-compact',
-                },
-              },
-            }),
-          )
-          await waitForRpcMethod(child, 'turn/start')
-          child.stdout.write(
-            jsonLine({
-              id: 3,
-              result: {
-                turn: {
-                  id: 'turn-context-compact',
-                },
-              },
-            }),
-          )
-          child.stdout.write(
-            jsonLine({
-              method: 'item/started',
-              params: {
-                item: {
-                  id: 'context-compact-1',
-                  type: 'ContextCompaction',
-                },
-              },
-            }),
-          )
-          child.stdout.write(
-            jsonLine({
-              method: 'item/started',
-              params: {
-                item: {
-                  id: 'context-compact-1',
-                  type: 'context_compaction',
-                },
-              },
-            }),
-          )
-          child.stdout.write(
-            jsonLine({
-              method: 'item/completed',
-              params: {
-                item: {
-                  id: 'context-compact-1',
-                  type: 'context.compaction',
-                },
-              },
-            }),
-          )
-          child.stdout.write(
-            jsonLine({
-              method: 'item/completed',
-              params: {
-                item: {
-                  id: 'assistant-context-compact-final',
-                  type: 'assistant_message',
-                  message: 'Final answer after compaction.',
-                },
-              },
-            }),
-          )
-          child.stdout.write(
-            jsonLine({
-              method: 'turn/completed',
-              params: {
-                turn: {
-                  id: 'turn-context-compact',
-                  status: 'completed',
-                },
-              },
-            }),
-          )
-        })()
+        void writeSuccessfulContextCompactionTurn({
+          child,
+          finalMessage: 'Final answer after compaction.',
+          itemId: 'context-compact-1',
+          threadId: 'thread-context-compact',
+          turnId: 'turn-context-compact',
+        })
       })
-
       return child
     })
 
@@ -13560,6 +13750,48 @@ describe('assistant codex runtime', () => {
           }),
         }),
       ]),
+    )
+  })
+
+  it('suppresses synthetic compaction progress in groups while returning the final reply', async () => {
+    const workingDirectory = await createTempDir('assistant-codex-group-context-compact-')
+    const progressDelivery = createProgressDeliveryMock()
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+      queueMicrotask(() => {
+        void writeSuccessfulContextCompactionTurn({
+          child,
+          finalMessage: 'Group answer after compaction.',
+          itemId: 'group-context-compact-1',
+          progressText: 'Checking the group thread now.',
+          threadId: 'thread-group-context-compact',
+          turnId: 'turn-group-context-compact',
+        })
+      })
+      return child
+    })
+
+    await expect(
+      executeCodexAppServerTurn({
+        groupConversation: true,
+        prompt: 'answer the group after compacting context',
+        progressDelivery,
+        workingDirectory,
+      }),
+    ).resolves.toMatchObject({
+      finalMessage: 'Group answer after compaction.',
+      sessionId: 'thread-group-context-compact',
+      turnId: 'turn-group-context-compact',
+    })
+    expect(progressDelivery.send).toHaveBeenCalledTimes(1)
+    expect(progressDelivery.send).toHaveBeenCalledWith(
+      'Checking the group thread now.',
+      { source: 'model' },
+    )
+    expect(progressDelivery.send).not.toHaveBeenCalledWith(
+      expect.any(String),
+      { required: true, source: 'system' },
     )
   })
 
@@ -18925,6 +19157,36 @@ describe('steered final segments', () => {
     ])
   })
 
+  it('keeps a watched same-sender artifact eligible for terminal suppression before assistant output', async () => {
+    const result = await runScriptedSteeredFinalSegmentsTurn([
+      completedItemEvent({
+        id: 'user-artifact',
+        type: 'user_message',
+        message: 'Shared an old apartment photo.',
+      }),
+      completedItemEvent({
+        id: 'user-caption',
+        type: 'user_message',
+        message: "Y'all remember this place?",
+      }),
+      {
+        kind: 'finish-without-reply',
+        id: 70,
+        expectedText: 'finished without reply',
+      },
+      completedItemEvent({
+        id: 'assistant-suppressed',
+        type: 'assistant_message',
+        message: 'This response must not be delivered.',
+      }),
+    ])
+
+    expect(result.acceptedNoReplyDeliveryContextOrdinals).toEqual([1])
+    expect(result.finalMessage).toBe('')
+    expect(result.reactions).toEqual([])
+    expect(result.precedingAgentMessageSegments).toEqual([])
+  })
+
   it('scopes finish_without_reply to the selected steered message', async () => {
     const result = await runScriptedSteeredFinalSegmentsTurn([
       completedItemEvent({
@@ -19416,6 +19678,107 @@ function writeContextCompactionStarted(input: {
         type: 'contextCompaction',
       },
       threadId: input.threadId,
+    },
+  }))
+}
+
+async function writeSuccessfulContextCompactionTurn(input: {
+  child: MockChildProcess
+  finalMessage: string
+  itemId: string
+  progressText?: string
+  threadId: string
+  turnId: string
+}): Promise<void> {
+  const initialize = await waitForRpcMethod(input.child, 'initialize')
+  input.child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+  const threadStart = await waitForRpcMethod(input.child, 'thread/start')
+  input.child.stdout.write(jsonLine({
+    id: threadStart.id,
+    result: {
+      thread: {
+        id: input.threadId,
+      },
+    },
+  }))
+  const turnStart = await waitForRpcMethod(input.child, 'turn/start')
+  input.child.stdout.write(jsonLine({
+    id: turnStart.id,
+    result: {
+      turn: {
+        id: input.turnId,
+      },
+    },
+  }))
+  input.child.stdout.write(jsonLine({
+    method: 'item/started',
+    params: {
+      item: {
+        id: input.itemId,
+        type: 'contextCompaction',
+      },
+    },
+  }))
+  input.child.stdout.write(jsonLine({
+    method: 'item/started',
+    params: {
+      item: {
+        id: input.itemId,
+        type: 'context_compaction',
+      },
+    },
+  }))
+  input.child.stdout.write(jsonLine({
+    method: 'item/completed',
+    params: {
+      item: {
+        id: input.itemId,
+        type: 'context.compaction',
+      },
+    },
+  }))
+  if (input.progressText) {
+    input.child.stdout.write(jsonLine({
+      id: 99,
+      method: 'item/tool/call',
+      params: {
+        namespace: 'murph',
+        tool: 'send_progress_update',
+        arguments: {
+          text: input.progressText,
+        },
+      },
+    }))
+    await expect(waitForRpcResponse(input.child, 99)).resolves.toEqual({
+      id: 99,
+      result: {
+        success: true,
+        contentItems: [
+          {
+            type: 'inputText',
+            text: 'progress update sent',
+          },
+        ],
+      },
+    })
+  }
+  input.child.stdout.write(jsonLine({
+    method: 'item/completed',
+    params: {
+      item: {
+        id: `${input.itemId}-final`,
+        message: input.finalMessage,
+        type: 'assistant_message',
+      },
+    },
+  }))
+  input.child.stdout.write(jsonLine({
+    method: 'turn/completed',
+    params: {
+      turn: {
+        id: input.turnId,
+        status: 'completed',
+      },
     },
   }))
 }

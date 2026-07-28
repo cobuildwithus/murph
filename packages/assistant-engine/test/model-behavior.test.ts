@@ -162,13 +162,64 @@ describe('assistant execution prompt contract', () => {
       'The humans are the protagonists, and Murph is an active, low-ego participant—not a passive help desk.',
     )
     expect(groupLayers.staticCacheableCorePrompt).toContain(
-      'Create openings, join clearly open room beats, and yield when a specific human owns the exchange.',
+      'Create openings, join clearly open room beats, and yield when one or more humans own the exchange.',
     )
     expect(groupLayers.staticCacheableCorePrompt).toContain(
       'neither a funny line nor a blanket preference for silence overrides the actual conversational floor',
     )
+    expect(groupLayers.staticCacheableCorePrompt).toContain(
+      'Human ownership can be collective.',
+    )
+    expect(groupLayers.staticCacheableCorePrompt).toContain(
+      'gets first refusal even when no individual is named',
+    )
+    expect(groupLayers.staticCacheableCorePrompt).toContain(
+      'send no reply or reaction unless Murph is addressed',
+    )
+    expect(groupLayers.staticCacheableCorePrompt).toContain(
+      'Read immediate same-purpose same-sender elaborations as one beat.',
+    )
+    expect(groupLayers.staticCacheableCorePrompt).toContain(
+      'A later bubble that introduces a new factual or task request or directly addresses Murph is a new decision unit even inside the same accepted provider turn',
+    )
+    expect(groupLayers.staticCacheableCorePrompt).toContain(
+      'use the existing brief watch before composing or reacting',
+    )
+    expect(groupLayers.staticCacheableCorePrompt).toContain(
+      'This does not suppress open factual or task requests',
+    )
+    expect(groupLayers.staticCacheableCorePrompt).toContain(
+      'do not default to agreement, paraphrase, or neutral etiquette',
+    )
+    expect(groupLayers.staticCacheableCorePrompt).toContain(
+      'not a position to endorse or reject by reflex',
+    )
+    expect(groupLayers.staticCacheableCorePrompt).toContain(
+      'agreement and disagreement are both tools, never defaults',
+    )
+    expect(groupLayers.staticCacheableCorePrompt).toContain(
+      'heighten it, challenge it, invert it, reframe it, nominate someone, choose a side',
+    )
+    expect(groupLayers.staticCacheableCorePrompt).toContain(
+      'If no strong move is earned, answer plainly, react, or stay silent.',
+    )
+    expect(groupLayers.staticCacheableCorePrompt).toContain(
+      'never random weirdness or invented facts',
+    )
     expect(directLayers.staticCacheableCorePrompt).not.toContain(
       'active, low-ego participant',
+    )
+    expect(directLayers.staticCacheableCorePrompt).not.toContain(
+      'do not default to agreement, paraphrase, or neutral etiquette',
+    )
+    expect(directLayers.staticCacheableCorePrompt).not.toContain(
+      'Human ownership can be collective.',
+    )
+    expect(directLayers.staticCacheableCorePrompt).not.toContain(
+      'use the existing brief watch before composing or reacting',
+    )
+    expect(directLayers.staticCacheableCorePrompt).not.toContain(
+      'a new decision unit even inside the same accepted provider turn',
     )
   })
 
@@ -1034,21 +1085,8 @@ describe('assistant execution prompt contract', () => {
     expect(prompt).toContain(
       'so each run starts from current vault/tool evidence instead of prior run transcript context.',
     )
-  })
-
-  it('warns before creating off-hours Linq/iMessage reminder automations', () => {
-    const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
-
-    expect(prompt).toContain('Linq/iMessage off-hours reminder guard')
-    expect(prompt).toContain('23:00 through 04:59')
-    expect(prompt).toContain("recipient's local timezone")
-    expect(prompt).toContain('channel=linq')
-    expect(prompt).toContain(
-      'A clear user confirmation for that exact off-hours time is enough to proceed',
-    )
-    expect(prompt).toContain(
-      'Do not add this extra confirmation for non-Linq channels',
-    )
+    expect(prompt).not.toContain('Linq/iMessage off-hours reminder guard')
+    expect(prompt).not.toContain('23:00 through 04:59')
   })
 
   it('offers a weather check before saving outdoor reminder automations', () => {

@@ -1,6 +1,6 @@
 # Hosted Mailbox Runtime Protocol
 
-Last verified: 2026-07-25
+Last verified: 2026-07-27
 
 ## Decision
 
@@ -39,8 +39,11 @@ The live ownership split is:
   invocation and passes the single `idleCheckpointDelayMs` runtime policy knob.
   The runtime, not the host, keeps dirty state warm through the configured idle
   floor. The exact assistant wake projected directly by the current foreground
-  assistant phase may run once before that floor without checkpointing;
-  inherited or committed wakes and durability barriers remain checkpoint-first.
+  assistant phase may run once before that floor without checkpointing. The
+  exact phone-call-result and usage-referral-reward notification families may
+  also run queue-only through their causal outbox intent after fresh
+  conversation work has priority; generic notifications remain excluded.
+  Inherited or committed wakes and durability barriers remain checkpoint-first.
   At the idle floor, or on shutdown, the runtime checkpoints remaining dirty
   state before returning success. When Cloudflare reports container activity
   expiry, the shell yields to any active foreground operation; otherwise it runs
@@ -85,9 +88,10 @@ import mailbox prefix into local runtime state and stage AssistantInputEvent row
 pull pending device-sync dirty rows
 for Linq input with link parts, attachment-bearing non-email input, and direct raw email, run best-effort local inbox projection plus audio/video transcript enrichment without checkpointing it
 run local runtime work until idle or budget
-while dirty and before the idle floor, service fresh foreground input and at
-  most one exact assistant wake projected by the current foreground phase
-  without publishing a snapshot; other wakes do not shorten the floor
+while dirty and before the idle floor, service fresh foreground input, the
+  exact safe Assistant Ask shapes, and only replay-safe phone-call-result or
+  usage-referral-reward notifications without publishing a snapshot; other
+  wakes do not shorten the floor
 at the idle floor, or on shutdown, checkpoint final dirty runtime state with
   checkpoint reason idle_shutdown; commit
   the valid workspace-CAS snapshot even when web observes newer conversation input
@@ -377,6 +381,12 @@ foreground/default work arrives, the runner preempts that exact child through
 the existing container abort seam, clears the old fence by identity, and starts
 foreground work. Retention remains recoverable through the workspace's projected
 retention wake instead of becoming a second scheduler concern.
+The same wake owns all receipt-anchored inbound message-content work: pending
+input suppression and redaction, transcript redaction, media expiration, legacy
+envelope migration, capture/parser/projection redaction, and their earliest
+future deadline. An overdue pending-input pass runs before background input
+selection as well as during idle maintenance, so restored content cannot begin a
+reply after its deadline.
 If a `system_mailbox` invocation owns the active fence when foreground/default
 work arrives, the runner uses the same exact-child abort and identity-cleared
 replacement path. It must start a default-mode child rather than coalescing the
@@ -495,6 +505,16 @@ pass re-enters the existing bounded pass loop after admitting any newly arrived
 personal input first, so multiple safe items or a safe item imported during the
 preceding pass drain before checkpoint. No progress, retryable failure,
 cancellation, or mailbox-budget exhaustion stops the drain.
+
+The same bounded pass admits only
+`assistant.notification.requested:phone-call-result:*` and
+`assistant.notification.requested:usage-referral-reward:*`. Import eligibility
+does not grant dispatch authority: the foreground-causal system-mailbox selector
+must match the exact dedupe-key family again, then collect only the outbox intent
+returned by that mailbox execution. Its persisted `sending` transition precedes
+provider entry, replay observes the same intent, and an older generic
+notification or unrelated pending delivery cannot hitchhike. Fresh conversation
+input continues to preempt this pass.
 
 The group runtime returns only the request id and schema-checked bounded answer
 through the signed completion control path. Web reloads the request, rechecks
@@ -747,6 +767,36 @@ a bounded legacy admitted input unreplied, but it cannot send an unsolicited
 historical message. Exact terminal item stamps are idempotent, and repeated
 idle checkpoints safely resend them until the durable floor confirms the
 accepted transaction.
+
+Mailbox retention clears payload ciphertext in place rather than deleting an
+accepted conversation gap. At the inclusive 14-day deadline, an unconsumed
+conversation row receives `policy_non_reply.content_expired`, `consumed_at`, and
+content-retirement metadata in the same statement that deletes its payload
+sidecar and clears inline payload fields. The lane counter advances only through
+the first remaining unconsumed conversation sequence; it never jumps across a
+younger gap. Policy non-reply tombstones remain as durable terminal evidence,
+while ordinary content-free mailbox tombstones may be pruned after their
+separate structural window.
+
+Assistant transcript retention uses only the user entry's stamped
+`contentReceivedAt`. Projection `createdAt`, accepted-turn journals, and input
+events are not fallback receipt owners: normal settled-snapshot cleanup may
+delete the journal and input before a later retention wake. The rollout is
+therefore two-phase. Phase one stamps every new user entry and preserves every
+unstamped legacy entry. After immediate runner rollout is verified, operators
+record the fleet-convergence instant and apply the additive mailbox migration,
+which re-arms every persisted snapshot once and advances its workspace CAS
+version without changing checkpoint time. Any invocation holding the prior
+version must retry instead of overwriting that wake. The existing hourly cron
+signals five due snapshots per successful run; each wake scrubs receipt-backed
+captures, parser output, projections, inputs, and stamped transcripts while leaving the
+unstamped legacy pair intact. Operators must preflight aggregate queue capacity
+and may not declare phase one complete until no due snapshot remains. After 14
+complete days and phase-one drain completion, a separate phase-two migration
+may re-arm persisted snapshots again and the runtime may retire every remaining
+unstamped user entry. Until both gates pass, fail-closed legacy scrubbing is
+forbidden because it can erase recent paired conversation history
+irreversibly.
 
 Accepted Linq reply delivery carries an earlier copy of the same exact-item
 consume authority:
@@ -1129,6 +1179,21 @@ checkpoint can contain it. Portable support bundles omit all `.runtime/**`; the
 generic `exports/assistant-deliveries/**` path remains ordinary checkpointed
 vault data and receives no deletion or path-specific packaging authority.
 Existing global file-type exclusions still apply regardless of directory.
+
+Hosted dynamic image generation is invocation-local background work. The tool
+returns after launch so the current assistant turn can continue. Provider work
+stays detached; the canonical capture save waits for an invocation boundary and
+uses the existing receipt checkpoint against the latest workspace. After upload,
+the runtime upserts one trusted system input on the original route, registers it
+with the ordinary pending assistant-input index, and notifies the existing wake
+signal. Normal foreground selection therefore keeps fresh conversation ahead of
+the completion and owns completion retry and terminal evidence. Provider
+completion starts the existing generic usage recorder without awaiting it, and
+image delivery never waits for accounting or diagnostic writes. This adds no
+durable image job, mailbox kind, scheduler, reservation, allowance
+implementation, or image-specific usage lifecycle. Runner loss may drop
+unfinished provider work.
+
 Detached `assistant.notification.requested` work remains output-only and cannot
 mutate resident conversation history or native provider resume state. A completed phone
 call is delivered as an ordinary `assistant.notification.requested` system-mailbox
@@ -1338,14 +1403,19 @@ For the active-wake probe, a verifiably stopped container shell
 (`ctx.container.running === false`) is the same explicit no-active-child proof.
 Committed-progress recovery stays in the transport-failure adapter, where the
 transport outcome is the thing being reconciled. Only explicit inactive proof
-may enter accepted committed-progress recovery. A workspace version advance is
-committed prefix progress even when newer durable mailbox lag remains; recovery
-clears the exact fence and the owner-release callback asks Temporal to process
-actionable remaining lag. Mismatch may clear a transport-failure fence because it
-proves that the active child is not the fenced attempt. Active, unsupported,
-error, and timeout probe outcomes preserve the fence regardless of whether a
-status read appears to show progress. Exact successful completion clears the
-fence only by the matching attempt identity.
+may enter accepted committed-progress recovery. A newer workspace version plus
+a changed, non-null checkpoint timestamp proves committed prefix progress even
+when newer durable mailbox lag remains; recovery clears the exact fence and the
+owner-release callback asks Temporal to process actionable remaining lag.
+Version-only administrative transitions are not runtime commit proof. In
+particular, retention rollout rearm advances the workspace CAS version without
+changing checkpoint time, so a runtime that read the pre-rearm workspace cannot
+checkpoint over the due wake and an ambiguous transport failure cannot
+misclassify the migration as runtime completion. Mismatch may clear a
+transport-failure fence because it proves that the active child is not the
+fenced attempt. Active, unsupported, error, and timeout probe outcomes preserve
+the fence regardless of whether a status read appears to show progress. Exact
+successful completion clears the fence only by the matching attempt identity.
 This prevents duplicate replacement while a live child may still be running and
 leaves replacement ownership in the exact identity-aware wake path.
 When the outer RunnerContainer active-operation pointer is missing, a container
@@ -1866,8 +1936,8 @@ routing.
 - assistant sessions, transcripts, receipts, diagnostics, and outbox intents
 - same-conversation turn revision
 - provider delivery and receipt/reconciliation policy
-- runtime timers, assistant next wake projection, and inbox media retention wake
-  projection
+- runtime timers, assistant next wake projection, and the shared inbound
+  message/media retention wake projection
 - checkpoint timing
 - the invocation-local one-child Assistant Ask controller, sealed target
   context builder, consented personal candidate pass, fresh outgoing reviewer,
@@ -1927,9 +1997,9 @@ outbox truth, or per-user runner coordination.
 
 Private runtime timers live in local runtime state and surface only as redacted
 due-time projection on the workspace/status surface. Assistant work uses
-`nextWakeAt` and `nextWakeReason`; inbox media retention uses the independent
-`inboxMediaRetentionWakeAt` field. Web does not materialize timer rows, and
-Cloudflare does not persist timer work items.
+`nextWakeAt` and `nextWakeReason`; inbound message and media retention share the
+independent `inboxMediaRetentionWakeAt` field. Web does not materialize timer
+rows, and Cloudflare does not persist timer work items.
 
 If the runner needs a synthetic in-process object for logging or execution
 plumbing, it may use an internal-only `runtime.timer` wake. That object is not a
@@ -1949,10 +2019,36 @@ above the boundary is unresolved only when it has neither accepted delivery nor
 durable consumed evidence. This second condition prevents a best-effort missing
 delivery link from becoming a false page after handling is already known.
 One fixed-kind `HostedLinqAlert` row provides the incident claim, provider
-idempotency identity, retry lease, and active state. A healthy scan silently
-clears the claim so a later incident receives a new identity; the monitor does
-not send a potentially misleading recovery message from aged observability
-data. The configured destination is an opaque existing dedicated Linq chat ID.
+idempotency identity, last provider-attempt boundary, and active state. A
+healthy scan silently clears the claim so a later incident receives a new
+identity, but preserves the last attempt/success timestamps as the cross-
+incident pacing floor; the monitor does not send a potentially misleading
+recovery message from aged observability data. Every provider attempt,
+including an uncertain retry, is separated from the prior attempt or success
+by at least ten minutes plus stable bounded jitter. Uncertain retries reuse the
+exact incident body and provider idempotency key. Separate incidents carry
+fresh aggregate evidence and a fresh checked-at timestamp rather than
+artificial text variation. The configured destination is an opaque existing
+dedicated Linq chat ID, and its separately configured IANA operator timezone
+suppresses provider sends from 11 PM through 7 AM local time. A stable per-day
+delay of up to ten minutes spreads deferred alerts across more than one
+five-minute cron tick instead of resuming every alert at the same quiet-hours
+boundary. Detection and healthy-state transitions continue while sends are
+suppressed. Before provider entry, the monitor re-reads latency health and
+operator local time. Recovery or quiet hours at that boundary make no
+provider-attempt state change. The subsequent singleton compare-and-swap is
+fenced by the candidate row's `updatedAt` version and is the sole admission
+boundary: only it enters sending state, increments attempt count, and advances
+`lastAttemptedAt` immediately before Linq. The same version comparison makes a
+stale recovery coalesce if another incident changed and then restored the
+visible status. A known-unsent first alert therefore has no incident or pacing
+boundary to carry overnight and later builds current evidence; a blocked retry
+whose prior provider call may have succeeded keeps its exact incident body,
+idempotency key, and real attempt time. Once a provider call has been admitted,
+another healthy scan coalesces against the bounded four-minute send lease rather
+than reporting recovery while delivery is still unknown. After the call settles
+or fails, or after the lease expires, a healthy scan silently clears sending,
+failed, or accepted active state. An admitted request may still complete.
 Persisted and delivered evidence is aggregate counts and durations only: no
 message content, member, phone, chat, mailbox, delivery, or trace identifiers.
 The monitor is observability-only: it does not append mailbox work, signal

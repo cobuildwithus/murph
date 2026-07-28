@@ -45,7 +45,6 @@ Read and apply this guide when touching any of these surfaces:
    - Keep net-new conversations below 50 per day per line unless there is an explicit line-distribution plan and line-health monitoring.
    - Spread sends across time instead of bursting many messages in a short window.
    - Warm up new lines gradually, starting around 10-20 outbound conversations per day for the first week before increasing.
-   - Avoid sending between 11pm and 5am in the recipient's local time unless the user explicitly configured that behavior or the use case truly requires it.
 
 6. Make new lines earn trust before scaling.
    - Treat the first two weeks of any new line as a warmup period.
@@ -71,7 +70,7 @@ Before shipping any change that can send or shape an outbound message, answer th
 - What reply is this flow trying to earn in the first three outbound messages?
 - Does the first or second message ask a real question a recipient can answer easily?
 - Does the flow stop, slow down, or change behavior when the recipient does not reply?
-- Are outbound count, inbound reply count, last inbound time, last outbound time, line id, delivery state, and recipient local time available to the sender or scheduler?
+- Are outbound count, inbound reply count, last inbound time, last outbound time, line id, and delivery state available to the sender or scheduler?
 - Are net-new conversations and bursts limited per line, not just globally?
 - Are new lines treated differently from warmed lines?
 - Are cold contacts with no reply in 30+ days protected from bulk re-engagement?
@@ -175,8 +174,6 @@ Design your messaging flows to get a reply within the first 3 messages. Apple's 
 - Never send to purchased or scraped contact lists. A single spam report from a recipient can trigger an account block.
 - Do not use the same line for both automated and manual messaging without rate awareness. Automated systems can easily exceed safe thresholds.
 - Do not re-engage cold contacts who have not replied in 30 or more days with bulk messages. Apple tracks recipient engagement per chat: a thread with 50 sent and 0 replies is a red flag.
-- Do not send late at night, from 11pm to 5am recipient local time, unless your use case requires it. Off-hours sending is a minor signal, but it compounds with other factors.
-
 #### Monitoring Your Line Health
 
 - Watch delivery receipts on receipt-capable protocols. If iMessage messages show as "sent" but never "delivered," Apple may be silently dropping them. SMS/MMS do not produce delivered/read receipts, so `message.sent` is their highest positive provider signal and must not be presented as handset delivery.

@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  listHostedDeployEnvironmentInvariantErrorsAsync,
+} from "../scripts/deploy-preflight.js";
+import {
   runHostedWorkerDeployment,
   type DeploymentStatusPayload,
   type HostedWorkerDeploymentDependencies,
@@ -372,6 +375,68 @@ describe("runHostedWorkerDeployment", () => {
     expect(dependencies.deployDirect).not.toHaveBeenCalled();
   });
 
+  it.each([
+    [
+      "a self-routed Worker/Web origin",
+      {
+        HOSTED_WEB_BASE_URL: "https://hosted-runner-staging.example.test",
+      },
+      "preview deploys must keep CF_PUBLIC_BASE_URL distinct from HOSTED_WEB_BASE_URL.",
+      undefined,
+    ],
+    [
+      "a production device callback origin",
+      {
+        DEVICE_SYNC_PUBLIC_BASE_URL: "https://app.example.test/api/device-sync",
+      },
+      "DEVICE_SYNC_PUBLIC_BASE_URL must not use the HOSTED_WEB_PRODUCTION_BASE_URL origin in preview deploys.",
+      undefined,
+    ],
+    [
+      "a private device callback DNS result",
+      {
+        DEVICE_SYNC_PUBLIC_BASE_URL:
+          "https://device-sync-staging.example.test/api/device-sync",
+      },
+      "DEVICE_SYNC_PUBLIC_BASE_URL must not resolve to private-network addresses in preview deploys.",
+      "device-sync-staging.example.test",
+    ],
+  ] as const)(
+    "rejects preview %s before artifact validation, lifecycle changes, or Wrangler",
+    async (_name, overrides, expectedError, privateHostname) => {
+      const dependencies = createDependencies({
+        validateDeployEnvironment: async ({ source }) => {
+          const errors = await listHostedDeployEnvironmentInvariantErrorsAsync(
+            source,
+            { deployWorker: true },
+            {
+              resolveHostnameAddresses: async (hostname) =>
+                hostname === privateHostname ? ["10.1.2.3"] : ["8.8.8.8"],
+            },
+          );
+          if (errors.length > 0) {
+            throw new Error(
+              `Invalid GitHub environment variables for deploy workflow: ${errors.join(" ")}`,
+            );
+          }
+        },
+      });
+
+      await expect(runHostedWorkerDeployment({
+        configPath: "/tmp/wrangler.generated.jsonc",
+        dependencies,
+        env: createPreviewDeploymentEnv(overrides),
+        resultPath: "/tmp/deployment-result.json",
+        runnerBundleDir: "/tmp/runner-bundle",
+        secretsFilePath: "/tmp/worker-secrets.json",
+        workerName: "hosted-runner-staging",
+      })).rejects.toThrow(expectedError);
+
+      expect(dependencies.validatePreparedArtifacts).not.toHaveBeenCalled();
+      expect(dependencies.deployDirect).not.toHaveBeenCalled();
+    },
+  );
+
   it("rejects invalid prepared artifacts before running Wrangler", async () => {
     const dependencies = createDependencies({
       validatePreparedArtifacts: async () => {
@@ -395,6 +460,25 @@ describe("runHostedWorkerDeployment", () => {
     expect(dependencies.deployDirect).not.toHaveBeenCalled();
   });
 });
+
+function createPreviewDeploymentEnv(
+  overrides: Record<string, string | undefined> = {},
+): Readonly<Record<string, string | undefined>> {
+  return {
+    CF_BUNDLES_BUCKET: "hosted-bundles-staging",
+    CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-staging",
+    CF_PUBLIC_BASE_URL: "https://hosted-runner-staging.example.test",
+    CF_WORKER_NAME: "hosted-runner-staging",
+    HOSTED_ASSISTANT_MODEL: "gpt-5.6-terra",
+    HOSTED_ASSISTANT_PROVIDER: "openai",
+    HOSTED_CRYPTO_ENV: "preview",
+    HOSTED_EXECUTION_DEPLOY_CONTEXT: "preview",
+    HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT: "preview",
+    HOSTED_WEB_BASE_URL: "https://web-staging.example.test",
+    HOSTED_WEB_PRODUCTION_BASE_URL: "https://app.example.test",
+    ...overrides,
+  };
+}
 
 function createDependencies(
   overrides: Partial<HostedWorkerDeploymentDependencies> = {},

@@ -1,6 +1,6 @@
 # Product Specs Index
 
-Last verified: 2026-07-22
+Last verified: 2026-07-27
 
 | Path | Purpose | Status |
 | --- | --- | --- |
@@ -8,11 +8,12 @@ Last verified: 2026-07-22
 | `agent-docs/product-specs/murph-personas.md` | Persona-first onboarding, canonical persona ids, and code-owned style defaults. | Implemented |
 | `agent-docs/product-specs/pulse-trial-checkout-offer.md` | Implemented Pulse Trial checkout-offer architecture over the existing hosted billing and AI usage allowance system. | Active |
 | `agent-docs/product-specs/pulse-trial-start-paid-pulse.md` | Implemented exhausted Pulse Trial conversion to paid Pulse through Stripe trial-end billing. | Active |
-| `agent-docs/product-specs/hosted-plan-downgrades.md` | Edge-to-Pulse renewal switches, the billing-gated Edge assistant-model choice, downgrade behavior, deployment compatibility, and the enforced composed usage boundary. | Active |
-| `agent-docs/product-specs/hosted-plan-usage.md` | Web-owned included-usage projection and enforced combined-capacity blocking, including forecast, server-selected actions, group privacy boundaries, and personal or exact Family-member Settings handoffs. | Active |
+| `agent-docs/product-specs/hosted-plan-downgrades.md` | Edge-to-Pulse renewal switches, the billing-gated Edge assistant-model choice, downgrade behavior, deployment compatibility, and the enforced composed usage boundary with separate group funding. | Active |
+| `agent-docs/product-specs/hosted-plan-usage.md` | Web-owned overall available-usage projection and enforced included-plus-generic-credit blocking, including forecast, server-selected actions, group privacy boundaries, and personal or exact Family-member Settings handoffs. | Active |
 | `agent-docs/product-specs/labs-discovery.md` | Live read-only lab catalog and ZIP collection-site discovery through private Murph and the authenticated unlinked `/labs` page, with provider-neutral member-facing language. | Implemented |
 | `agent-docs/product-specs/measured-biomarker-index.md` | Curated device-first Biomarkers index over preserved private lab history, with explicit identity admission, no catch-all Other section, and closed health-area notebook disclosures. | Implemented |
-| `agent-docs/product-specs/hosted-usage-topups.md` | Implemented fixed $5/$10/$25 Stripe Checkout packs and one Murph-owned webhook-fulfilled usage-credit ledger for personal, exact Family-member, and hosted-group funding. | Active |
+| `agent-docs/product-specs/hosted-usage-topups.md` | Implemented fixed $5/$10/$25 personal and Family Checkout plus explicit saved-card-or-Checkout hosted-group funding over canonical purchase/referral credit entries and remaining projections, with purchase-only refund and dispute reversal; fulfilled top-ups immediately refresh the overall usage bar. | Active |
+| `agent-docs/product-specs/hosted-usage-referrals.md` | Conversational personal/group usage missions, portable qualification, canonical credit-entry accounting, final rewards, and source-room celebration. | Active |
 | `agent-docs/product-specs/hosted-family-plan.md` | Hosted Family plan for 2-6 sponsored people with mixed Pulse/Edge seats, exact owner-funded member usage top-ups, private member accounts, chat-first invites, and privacy boundaries. | Active |
 | `agent-docs/product-specs/health-commons.md` | Health Commons page graph, catalog, versioning, future aggregate outcome summaries, and artifact-storage product boundary. | Active |
 | `agent-docs/product-specs/murph-safe-public-product-search.md` | Public supplement and branded-food evidence search, normalized API contract, exact product-test semantics, privacy, and abuse bounds. | Active |
