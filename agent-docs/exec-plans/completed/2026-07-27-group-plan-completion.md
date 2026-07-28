@@ -1,8 +1,8 @@
 # Murph Group plan completion
 
-Status: active
+Status: completed
 Created: 2026-07-27
-Updated: 2026-07-27
+Updated: 2026-07-28
 
 ## Goal
 
@@ -99,4 +99,35 @@ Updated: 2026-07-27
 
 ## Verification
 
-- Pending.
+- Preliminary `completion-specialists` ReviewGPT returned one prompt finding
+  and one Settings-owner coverage finding. Both were accepted and remediated:
+  stale immediate-trial language and ambiguous Group scopes were removed, and
+  owner tests now cover eligible, ineligible, current-Group, and
+  scheduled-Group states.
+- Product-experience review of the rendered eligible-trial, exhausted,
+  scheduled, and immediate-start states returned no findings.
+- The final affected-path `pnpm test:diff` run passed every affected package
+  owner and the complete hosted-Web verifier: 549 Web files passed with 7,356
+  tests, alongside the assistant, CLI, hosted-execution, local-harness,
+  Temporal, setup, package-boundary, build, typecheck, lint, and smoke lanes.
+  Its last local Cloudflare app verifier waited more than ten minutes for the
+  shared-host slot. The required Crabbox fallback failed closed before
+  provisioning because this stacked base still targets the retired
+  `.github/workflows/crabbox.yml`.
+- Local `pnpm verify:acceptance` also waited ten continuous minutes without
+  admission and its required Crabbox retry failed at that same stale-base
+  workflow lookup. Exact-head GitHub release CI passed its release-check
+  aggregator, application verification, build/typecheck, fixture coverage, and
+  all package-coverage shards, providing the corresponding bounded verification
+  on the pushed tree.
+- `git diff --check` passed. The PR is mergeable against its configured stacked
+  base.
+- Redacted desktop and mobile design-catalog captures were visually inspected
+  and packaged for ReviewGPT. Public screenshot hosting remains blocked because
+  neither the local shell nor the connected Cloudflare identity has the
+  required least-privilege Images write credential; the frontend design-proof
+  check therefore remains intentionally red instead of accepting fabricated
+  evidence.
+- Final ReviewGPT runs after plan closure against the resulting immutable pushed
+  head, per the repository completion workflow.
+Completed: 2026-07-28
