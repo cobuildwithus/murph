@@ -21,7 +21,8 @@ describe("assistant plan usage call contracts", () => {
     expect(contract).toContain(
       "percentages and forecasts cover all available usage",
     );
-    expect(contract).toContain("not an included/purchased split");
+    expect(contract).toContain("expose no allowance/credit-source split");
+    expect(contract).not.toContain("included/purchased");
     expect(contract).toContain("a recommendation or quote is not consent");
     expect(contract).not.toContain("included-usage projection");
   });

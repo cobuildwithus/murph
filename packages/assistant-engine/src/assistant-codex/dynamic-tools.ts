@@ -469,7 +469,7 @@ export const MURPH_PLAN_USAGE_TOOL = {
   namespace: 'murph',
   name: 'plan_usage',
   description:
-    'Read the current private hosted plan, overall AI-usage projection, recommendation, and subscription quote. Call only for an explicit plan, usage, billing request, or trusted low-usage context. This is read-only: percentages and forecasts cover all available usage, not an included/purchased split; a recommendation or quote is not consent or a billing action.',
+    'Read the current private hosted plan, overall AI-usage projection, recommendation, and quote. Call only for an explicit plan, usage, billing request, or trusted low-usage context. This is read-only: percentages and forecasts cover all available usage and expose no allowance/credit-source split; a recommendation or quote is not consent or a billing action.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,

@@ -75,9 +75,11 @@ say that Murph only checked status or that no billing change happened.
   `recommendedAction` to choose the scenario; reserve percentages and forecast
   for an explicit numerical usage follow-up. On that follow-up, describe the
   returned percentages and forecast as overall available AI usage. The read
-  does not expose the included-versus-purchased split. If asked for that split,
-  say it is unavailable; never assign a returned percentage to included usage
-  or purchased credit. Do not infer missing facts.
+  does not expose how much comes from included allowance or any usage-credit
+  source, including purchase or referral. If asked for a source split, say it
+  is unavailable; never assign a returned percentage to included allowance,
+  purchased credit, referral credit, or another source. Do not infer missing
+  facts.
 - When that private read identifies Family-sponsored access, also call
   `murph.family_plan action="read_status"` once when available before wording
   the heads-up. Use it only to distinguish a confirmed active owner from a

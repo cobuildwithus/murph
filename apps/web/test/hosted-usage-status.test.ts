@@ -715,7 +715,7 @@ describe("readHostedPersonalAiUsageStatus", () => {
     expect(mocks.readHostedAiUsageGate).not.toHaveBeenCalled();
   });
 
-  it("folds purchased credit into the overall usage percentage", async () => {
+  it("folds generic usage credit into one source-agnostic percentage", async () => {
     mocks.readHostedAiUsageGate.mockResolvedValue(buildDecision({
       limitUsdMicros: 10_000_000n,
       remainingUsdMicros: 3_000_000n,
@@ -724,17 +724,22 @@ describe("readHostedPersonalAiUsageStatus", () => {
       usageCreditLedgerVersion: 4n,
     }));
 
-    await expect(readHostedPersonalAiUsageStatus({
+    const result = await readHostedPersonalAiUsageStatus({
       memberId: "member_credit_backed",
       now: NOW,
       prisma: buildPrisma(null) as never,
       publicBaseUrl: null,
-    })).resolves.toMatchObject({
+    });
+
+    expect(result).toMatchObject({
       recommendedAction: null,
       remainingPercent: 24,
       status: "active",
       usedPercent: 76,
     });
+    expect(JSON.stringify(result)).not.toMatch(
+      /included|purchase|referral|usageCredit/iu,
+    );
   });
 
   it("moves the overall usage bar backward immediately after a top-up", async () => {

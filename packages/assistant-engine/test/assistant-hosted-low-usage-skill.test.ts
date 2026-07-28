@@ -103,9 +103,16 @@ describe('assistant hosted low-usage skill', () => {
     expect(skill).toContain(
       'returned percentages and forecast as overall available AI usage',
     )
-    expect(skill).toContain('does not expose the included-versus-purchased split')
-    expect(skill).toContain('never assign a returned percentage to included usage')
-    expect(skill).toContain('or purchased credit')
+    expect(normalizedSkill).toContain(
+      'does not expose how much comes from included allowance or any usage-credit source, including purchase or referral',
+    )
+    expect(normalizedSkill).toContain(
+      'If asked for a source split, say it is unavailable',
+    )
+    expect(normalizedSkill).toContain(
+      'never assign a returned percentage to included allowance, purchased credit, referral credit, or another source',
+    )
+    expect(skill).not.toContain('included-versus-purchased')
     expect(skill).not.toContain('Share only its')
   })
 

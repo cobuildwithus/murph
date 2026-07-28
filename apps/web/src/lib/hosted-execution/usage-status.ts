@@ -137,7 +137,8 @@ export async function projectHostedPersonalAiUsageStatus(input: {
 
   const exhausted = usageLimitExceeded;
   // The bar follows the same effective-capacity boundary as admission: usage
-  // already spent plus every included or purchased unit still available.
+  // already spent plus every unit of included allowance or generic usage credit
+  // still available.
   const totalCapacityUsdMicros =
     decision.spentUsdMicros + decision.remainingUsdMicros;
   const usedPercent = calculateUsedPercent({

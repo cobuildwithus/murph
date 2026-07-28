@@ -6,11 +6,11 @@ Status: Implemented current-state contract
 ## Goal
 
 Give a member one honest view of all currently available AI usage, block new
-usage-bearing work when included and purchased capacity are both exhausted,
+usage-bearing work when included allowance and usage credit are both exhausted,
 and let a private Murph conversation carry out the smallest billing action the
 member clearly chooses. Settings and Murph's read-only plan-usage tool consume
 the same web-owned projection. Stripe and the existing web billing services
-remain the payment system; Murph owns allowance and purchased usage capacity.
+remain the payment system; Murph owns allowance and usage-credit capacity.
 The personal, Family-member, and group top-up implementation contract lives in
 `agent-docs/product-specs/hosted-usage-topups.md`.
 
@@ -21,14 +21,14 @@ hosted usage ledger. It also selects any billing action shown to the member.
 The projection is a read: it does not write a forecast, query Stripe, create a
 usage period, or change billing state.
 
-Purchased credit stays separate from the included-allowance period in storage
-and consumption order. The append-only credit ledger is canonical, and the
-compact member balance/version remains its bounded admission projection. The
-plan-usage read combines current-period spend with every included or purchased
-unit of capacity the gate says remains, so Settings and the assistant receive
-one overall percentage without receiving internal allowance or credit values.
-The response may recommend the authenticated Settings top-up handoff, but it
-cannot create Checkout or grant credit.
+Usage credit stays separate from the included-allowance period in storage and
+consumption order. The append-only credit ledger stores purchase and referral
+grants as the canonical source, and the compact member balance/version remains
+its bounded admission projection. The plan-usage read combines current-period
+spend with every unit of capacity the gate says remains, so Settings and the
+assistant receive one overall percentage without receiving internal allowance,
+credit, or source-split values. The response may recommend the authenticated
+Settings top-up handoff, but it cannot create Checkout or grant credit.
 
 The growth dashboard's tracked fulfilled-top-up total has a different,
 company-wide scope. One anonymous singleton count is seeded from retained
@@ -108,7 +108,7 @@ server-owned recurring amount for that member's billing mode and tier. Direct
 Pulse and Edge therefore include $6.40 and $16.00 from their $8 and $20 prices.
 Family-sponsored Pulse and Edge members separately receive $5.60 and $15.20
 from their $7 and $19 seat prices. Discounts, taxes, prorations, trials, and
-purchased usage credit do not redefine this catalog-owned allowance.
+usage credit do not redefine this catalog-owned allowance.
 An authoritative paid billing period that is already open keeps the higher
 included limit granted before this policy change. The price-derived allowance
 starts on its next paid period; an actual plan, Family tier, or
@@ -258,7 +258,7 @@ Sol; name a model only if they ask. Never switch models automatically.
 ## Runtime Access And Notices
 
 The web-owned allowance gate is the single model-work admission owner. It
-combines current included capacity with the compact purchased-credit
+combines current included capacity with the compact usage-credit
 projection. When both reach zero, subsequent assistant or eligible system work
 is denied with `ai_usage_limit_exceeded`; inactive, suspended, malformed or
 expired trial entitlement, and existing abuse controls remain separate
@@ -334,9 +334,9 @@ runtime and webhook delivery fences retain their deterministic durable IDs.
 This prevents a retained history row or provider deduplication from suppressing
 the next real limit crossing without changing unrelated delivery correlation.
 
-Reset never deletes or rewrites immutable usage rows, purchased-credit entries,
-the purchased-credit balance or version, billing state, mailbox rows, or
-delivery history. It creates no second usage ledger or message counter. A stale
+Reset never deletes or rewrites immutable usage rows, usage-credit entries, the
+usage-credit balance or version, billing state, mailbox rows, or delivery
+history. It creates no second usage ledger or message counter. A stale
 table row fails closed and must be refreshed before retrying.
 
 Every proactive billing action in Settings, Home, or `murph.plan_usage` comes

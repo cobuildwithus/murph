@@ -140,7 +140,7 @@ subscription invoice.
 Settings renders one bounded percentage from current-period spend and all
 remaining effective capacity. Buying credit can move that bar backward
 immediately. The presentation does not expose the internal dollar value of the
-plan allowance or the purchased-credit balance.
+plan allowance or the usage-credit balance.
 
 Purchased capacity must not be called cash, wallet funds, an account balance,
 or refundable dollars. Accounting stays in integer USD micros behind the
@@ -149,8 +149,8 @@ web-owned projection.
 Settings may show a quiet **Add usage** action at any utilization for an
 eligible paid member. Home and assistant surfaces should surface the action
 only when the current forecast predicts exhaustion, at least 80% of available
-usage is used, or included and purchased capacity is exhausted. Pulse's Edge
-upgrade remains available through the plan card instead of creating a
+usage is used, or included allowance and usage credit are exhausted. Pulse's
+Edge upgrade remains available through the plan card instead of creating a
 multi-action usage contract.
 
 ### Settings Dialog
@@ -478,7 +478,7 @@ For each newly canonical usage event, under that beneficiary-wide lock:
 5. Cap the debit at credit actually available in that serialized settlement.
    Any excess from the crossing operation is absorbed by Murph; it is not debt
    and is never collected from a later purchase.
-6. Recompute effective exhaustion from base remaining plus available purchased
+6. Recompute effective exhaustion from base remaining plus available usage
    credit.
 
 The current runtime does not transport an admission-bound credit cutoff. V1

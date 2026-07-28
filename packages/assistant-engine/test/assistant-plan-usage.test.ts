@@ -28,7 +28,10 @@ describe("assistant plan usage tool", () => {
       "overall AI-usage projection",
     );
     expect(MURPH_PLAN_USAGE_TOOL.description).toContain(
-      "not an included/purchased split",
+      "expose no allowance/credit-source split",
+    );
+    expect(MURPH_PLAN_USAGE_TOOL.description).not.toContain(
+      "included/purchased",
     );
   });
 
@@ -92,7 +95,9 @@ describe("assistant plan usage tool", () => {
     expect(resultText).toContain('"usedPercent":76');
     expect(resultText).toContain('"remainingPercent":24');
     expect(resultText).not.toContain('"included');
-    expect(resultText).not.toContain('"purchased');
+    expect(resultText).not.toContain('"usageCredit');
+    expect(resultText).not.toContain('"purchase');
+    expect(resultText).not.toContain('"referral');
     expect(resultText).toContain("upgrade_edge");
     expect(resultText).toContain(
       '"label":"Upgrade to Edge ($20/month)"',
