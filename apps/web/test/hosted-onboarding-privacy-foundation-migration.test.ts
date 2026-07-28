@@ -799,6 +799,13 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
+    const deviceSyncSignalSourceProviderMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260725193000_device_sync_signal_source_provider/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     const hostedUsageReferralEntryKindMigrationSql = readFileSync(
       new URL(
         "../prisma/migrations/20260726115900_hosted_usage_referral_entry_kind/migration.sql",
@@ -975,6 +982,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260725120000_hosted_observability_retention",
       "20260725120000_hosted_thread_delivery_route",
       "20260725190000_hosted_mailbox_content_retention",
+      "20260725193000_device_sync_signal_source_provider",
       "20260725230000_hosted_paid_usage_legacy_period_cutover",
       "20260726115900_hosted_usage_referral_entry_kind",
       "20260726120000_hosted_growth_aggregate",
@@ -991,6 +999,12 @@ describe("hosted Prisma baseline migration", () => {
       "20260728050000_rearm_hosted_mailbox_content_retention",
       "migration_lock.toml",
     ]);
+    expect(deviceSyncSignalSourceProviderMigrationSql).toContain(
+      'ADD COLUMN "source_provider_slug" TEXT',
+    );
+    expect(deviceSyncSignalSourceProviderMigrationSql).toContain(
+      'CREATE INDEX "device_sync_signal_user_source_idx"',
+    );
     expect(hostedUsageReferralEntryKindMigrationSql.trim()).toBe(
       [
         'ALTER TYPE "HostedUsageCreditEntryKind"',

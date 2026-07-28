@@ -159,6 +159,7 @@ model DeviceSyncSignal {
   traceId              String?           @map("trace_id")
   eventType            String?           @map("event_type")
   resourceCategory     String?           @map("resource_category")
+  sourceProviderSlug   String?           @map("source_provider_slug")
   reason               String?           @map("reason")
   nextReconcileAt      DateTime?         @map("next_reconcile_at")
   revokeWarningCode    String?           @map("revoke_warning_code")
@@ -167,6 +168,7 @@ model DeviceSyncSignal {
   connection           DeviceConnection? @relation(fields: [connectionId], references: [id], onDelete: Cascade)
 
   @@index([userId, id])
+  @@index([userId, sourceProviderSlug, id], map: "device_sync_signal_user_source_idx")
   @@index([connectionId])
   @@map("device_sync_signal")
 }
