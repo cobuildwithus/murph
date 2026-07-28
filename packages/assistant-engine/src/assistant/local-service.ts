@@ -1901,7 +1901,10 @@ export async function sendAssistantMessageLocal(
             providerResult.onboardingGuidanceInjected,
           firstContactStateDocIds: sharedPlan.firstContactStateDocIds,
           outcome: finalDeliveryOutcome,
-          response: finalResponse,
+          // Receipt provenance follows the exact persisted transcript
+          // representation. Voice-only replies and runtime-owned capabilities
+          // intentionally make it differ from the delivered response.
+          response: assistantTranscriptText ?? finalResponse,
           turnId: currentUserTurn.turnId,
           vault: input.vault,
         })

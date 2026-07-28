@@ -199,6 +199,11 @@ test('sendAssistantMessageLocal delivers an exact approval URL without persistin
       assistantTranscriptText: 'Approval is required.',
     }),
   )
+  expect(mocks.finalizeDeliveredAssistantTurn).toHaveBeenCalledWith(
+    expect.objectContaining({
+      response: 'Approval is required.',
+    }),
+  )
 })
 
 test('sendAssistantMessageLocal replies safely without starting the provider for an unverified external audience', async () => {
@@ -517,6 +522,11 @@ test('sendAssistantMessageLocal delivers media-only provider replies', async () 
     mocks.finalizeAssistantTurnArtifacts.mock.calls[0]?.[0]
       ?.assistantTranscriptText,
   ).toBe('Voice-only reply.')
+  expect(mocks.finalizeDeliveredAssistantTurn).toHaveBeenCalledWith(
+    expect.objectContaining({
+      response: 'Voice-only reply.',
+    }),
+  )
   expect(result).toMatchObject({
     deliveryDeferred: false,
     deliveryError: null,
