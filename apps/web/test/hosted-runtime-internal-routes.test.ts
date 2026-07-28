@@ -2228,6 +2228,28 @@ describe("hosted runtime internal web routes", () => {
     expect(mocks.recordHostedRuntimeLogs.mock.calls[0]?.[0]?.entries).toHaveLength(50);
   });
 
+  it("reports zero persisted logs when deletion wins the diagnostic race", async () => {
+    mocks.recordHostedRuntimeLogs.mockResolvedValue(0);
+
+    const response = await runtimeLogRoute.POST(jsonRequest(
+      "/api/internal/hosted-runtime/log",
+      {
+        entries: [{
+          at: FIXED_NOW,
+          component: "mailbox",
+          eventCode: "mailbox.imported",
+          level: "info",
+          phase: "import",
+        }],
+      },
+    ));
+
+    expect(response.status).toBe(200);
+    expect(parseHostedRuntimeLogResponse(await response.json())).toEqual({
+      loggedCount: 0,
+    });
+  });
+
   it("records bounded runtime logs and rejects forbidden log payload fields", async () => {
     mocks.recordHostedRuntimeLogs.mockResolvedValue(1);
 

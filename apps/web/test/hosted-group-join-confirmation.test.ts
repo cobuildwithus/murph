@@ -9,6 +9,7 @@ import { createPrismaClient } from "@/src/lib/prisma";
 const mocks = vi.hoisted(() => ({
   appendHostedMailboxEnvelopeTx: vi.fn(),
   hasActiveHostedCryptoDomainRootsForUserTx: vi.fn(),
+  readHostedMemberAssistantNotificationState: vi.fn(),
   readHostedMemberEmailAuthorization: vi.fn(),
   readHostedMemberIdentity: vi.fn(),
   readHostedMemberRoutingState: vi.fn(),
@@ -34,6 +35,8 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({
+  readHostedMemberAssistantNotificationState:
+    mocks.readHostedMemberAssistantNotificationState,
   readHostedMemberEmailAuthorization: mocks.readHostedMemberEmailAuthorization,
 }));
 
@@ -84,6 +87,12 @@ describe("appendHostedGroupJoinConfirmationTx", () => {
       telegramThreadId: null,
       telegramUserId: null,
     });
+    mocks.readHostedMemberAssistantNotificationState.mockImplementation(
+      async () => ({
+        identity: await mocks.readHostedMemberIdentity(),
+        routing: await mocks.readHostedMemberRoutingState(),
+      }),
+    );
     mocks.resolveHostedPublicBaseUrl.mockReturnValue("https://murph.example");
     mocks.signalHostedMailboxAppendRuntime.mockResolvedValue(undefined);
   });
