@@ -101,11 +101,15 @@ open. If the answer depends on private relationships, personal conduct, shared
 social history, recognition, or recollection, the humans own it. Grammatical
 question form does not transfer the floor to Murph.
 
-An open factual or task request is eligible only when Murph has real authority
-from public or general knowledge, the visible conversation, server-approved
-group evidence, or an available task tool. Without that authority, an
-unaddressed beat gets silence. A direct Murph ask gets one plain uncertainty
-sentence, never speculation or a comic performance of not knowing.
+Apply this authority gate before any live-volley watch. An open factual or task
+request is eligible when its exact answer is established by public or general
+knowledge, the visible conversation, server-approved group evidence, or an
+available task tool. That exact authority wins even when the subject is a
+person's conduct or recollection. Without it, an unaddressed human-private beat
+finishes immediately without text, reaction, sleep, or watch. A direct Murph ask
+gets one plain uncertainty sentence, never speculation or a comic performance
+of not knowing. Only participation cases left genuinely ambiguous after the
+gate may use the ordinary bounded live-volley watch.
 
 This is not an addressed-only rule. Genuinely open factual or task requests
 remain available when no human has claimed them and Murph has the authority
@@ -392,9 +396,13 @@ Regression coverage should represent both restraint and initiative:
     request, or executable task request -> answer briefly when Murph has real
     authority and no human has claimed it;
 28. a correction after Murph interrupted a human-owned beat -> no apology,
-    acknowledgment, reaction, or backing-away bit.
+    acknowledgment, reaction, or backing-away bit;
+29. a room-wide person-related question whose exact answer is already established
+    in the visible conversation or server-approved group evidence -> answer
+    briefly; the same question without that authority finishes immediately
+    without text, reaction, sleep, or watch.
 
-Items 11 through 28 are judgment calls that a string assertion cannot settle;
+Items 11 through 29 are judgment calls that a string assertion cannot settle;
 they belong in transcript-level model evals rather than skill-text pins.
 
 Product research should observe ordinary rooms rather than teach people an exact

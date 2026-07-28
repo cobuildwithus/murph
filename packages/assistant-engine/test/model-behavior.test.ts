@@ -186,13 +186,19 @@ describe('assistant execution prompt contract', () => {
       'Floor follows authority, not punctuation.',
     )
     expect(groupLayers.staticCacheableCorePrompt).toContain(
-      'Before treating a room-wide question as open, ask who can truthfully supply the answer.',
+      'Apply this gate before any live-volley watch',
     )
     expect(groupLayers.staticCacheableCorePrompt).toContain(
       "private relationships, personal conduct, shared social history, recognition, or recollection",
     )
     expect(groupLayers.staticCacheableCorePrompt).toContain(
-      'Murph may take an open factual or task request only when it has real authority from public or general knowledge, the visible conversation, server-approved group evidence, or an available task tool.',
+      'answer an unaddressed room-wide question briefly when its exact answer is established by public or general knowledge, the visible conversation, server-approved group evidence, or an available task tool',
+    )
+    expect(groupLayers.staticCacheableCorePrompt).toContain(
+      'finish without text or reaction immediately. Do not sleep or watch on that terminal human-private branch.',
+    )
+    expect(groupLayers.staticCacheableCorePrompt).toContain(
+      'Only participation cases that remain genuinely ambiguous after this gate may use the bounded live-volley watch.',
     )
     expect(groupLayers.staticCacheableCorePrompt).toContain(
       'Never use a joke, ruling, or mock refusal to imply knowledge of an unverified private fact about a person.',
@@ -211,6 +217,9 @@ describe('assistant execution prompt contract', () => {
     )
     expect(groupLayers.staticCacheableCorePrompt).toContain(
       'no apology, acknowledgment, or backing-away bit',
+    )
+    expect(groupLayers.staticCacheableCorePrompt).toContain(
+      'Never watch a direct ask, an open request with an exact authorized answer, or an unaddressed human-private question that must finish immediately without output.',
     )
     expect(groupLayers.staticCacheableCorePrompt).toContain(
       'do not default to agreement, paraphrase, or neutral etiquette',

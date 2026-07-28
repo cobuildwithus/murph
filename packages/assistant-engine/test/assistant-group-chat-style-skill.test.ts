@@ -102,13 +102,19 @@ describe('assistant group-chat style guidance', () => {
       'Before treating a room-wide question as open, ask who can truthfully supply the answer.',
     )
     expect(normalized).toContain(
+      'Apply this gate before any live-volley watch.',
+    )
+    expect(normalized).toContain(
       "private relationships, personal conduct, shared social history, recognition, or recollection",
     )
     expect(normalized).toContain(
       'A question mark, tag question, or room-wide "does anyone know?" does not change that owner.',
     )
     expect(normalized).toContain(
-      'Rule 4 is only for requests Murph can answer from public or general knowledge, the visible conversation, server-approved group evidence, or an available task tool.',
+      'If the exact answer is established by public or general knowledge, the visible conversation, server-approved group evidence, or an available task tool, the request can be open.',
+    )
+    expect(normalized).toContain(
+      'use `finish_without_reply` immediately: do not reply, react, sleep, or watch',
     )
     expect(normalized).toContain(
       'A comic abstention still interrupts the humans; it is not silence.',
@@ -120,7 +126,10 @@ describe('assistant group-chat style guidance', () => {
       'Question form does not reopen the floor.',
     )
     expect(normalized).toContain(
-      'Private facts about people whose truthful source is the humans do not enter this rule.',
+      'This rule is evaluated before the room-wide human-private branch in rule 2.',
+    )
+    expect(normalized).toContain(
+      'Private facts about people whose truthful source is only the humans do not enter this rule.',
     )
     expect(normalized).toContain(
       'A shared artifact is not automatically open; the collective-human first-refusal rule above wins on its initial beat, and an audience-unclear unaddressed personal artifact is not genuinely unowned.',
@@ -368,6 +377,9 @@ describe('assistant group-chat style guidance', () => {
 
     expect(normalized).toContain(
       'When people are talking to each other and nothing needs you yet, watch instead of answering: run a short shell `sleep` for a few seconds, never more than about 10, then look again and run the ladder against the room as it now stands.',
+    )
+    expect(normalized).toContain(
+      'A direct ask, an open request with an exact authorized answer, and an unaddressed human-private question are already resolved and must not watch.',
     )
     // Waiting must never become an excuse to override the ladder's silence,
     // closed-room, and not-for-you rules.
