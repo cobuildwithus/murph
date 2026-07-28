@@ -69,3 +69,9 @@ Updated: 2026-07-28
 - Required local `product-experience-review`: two material findings were
   accepted and fixed (pre-steer image responses and long-history truncation);
   targeted re-review returned `NO FINDINGS` with no material evidence gaps.
+- Preliminary `completion-specialists` ReviewGPT: one medium coverage finding
+  was accepted for the supported image-only/empty-text branch. Its attached
+  patch was downloaded from the owned review thread, inspected as test-only,
+  and applied deliberately; the focused runtime lane then passed all four image
+  and media-only cases. The substantive preliminary pass is not rerun by
+  workflow contract.

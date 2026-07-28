@@ -527,6 +527,51 @@ test('sendAssistantMessageLocal delivers media-only provider replies', async () 
   })
 })
 
+test('sendAssistantMessageLocal preserves image presence for media-only image replies', async () => {
+  const session = createAssistantSession()
+  const imageMedia: AssistantResponseMedia = {
+    alt: 'Generated image',
+    kind: 'image',
+    source: null,
+    url: 'https://cdn.example.test/assistant/media-only.png',
+  }
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    providerOutcome: {
+      kind: 'succeeded',
+      providerTurn: {
+        onboardingGuidanceInjected: false,
+        codexContinuation: { kind: 'explicit-structured-history' },
+        codexThreadId: 'provider-thread-image-media-only',
+        response: '',
+        responseDeliveryContextOrdinal: 0,
+        transcriptResponse: '',
+        responseMedia: [imageMedia],
+        route: { routeId: 'route-image-media-only' },
+        session,
+      },
+    },
+    session,
+  })
+
+  await sendAssistantMessageLocal({
+    deliverResponse: true,
+    executionContext: {
+      hosted: null,
+    },
+    prompt: 'Create an image without accompanying text',
+    vault: '/vaults/test',
+  })
+
+  expect(
+    mocks.finalizeAssistantTurnArtifacts.mock.calls[0]?.[0]
+      ?.assistantTranscriptText,
+  ).toBe('[This response included an image attachment.]')
+  expect(mocks.dispatchAssistantReply.mock.calls[0]?.[0]?.response).toBe('')
+  expect(mocks.dispatchAssistantReply.mock.calls[0]?.[0]?.media).toEqual([
+    imageMedia,
+  ])
+})
+
 test('sendAssistantMessageLocal preserves image presence beside transcript text', async () => {
   const session = createAssistantSession()
   const imageMedia: AssistantResponseMedia = {
