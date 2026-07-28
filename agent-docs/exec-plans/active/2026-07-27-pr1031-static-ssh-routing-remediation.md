@@ -77,6 +77,11 @@ Done:
   including a leader that exits before its descendant; focused coverage passed
   71 tests, and canonical local `pnpm test:diff` passed 30 repo-tool files and
   459 tests.
+- A fresh exact-head ReviewGPT correction check independently exercised
+  repeated SIGHUP, SIGINT, and SIGTERM across install and verification and
+  passed with no findings. The live worker remains reachable through
+  operator-local routing, and its non-interactive readiness probe still reports
+  `zstd` missing.
 
 Now:
 - Make `zstd` available in the dedicated account's non-interactive `PATH`, then
