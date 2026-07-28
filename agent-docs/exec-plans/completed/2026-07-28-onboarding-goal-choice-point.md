@@ -1,6 +1,6 @@
 # Onboarding goal choice point
 
-Status: active
+Status: completed
 Created: 2026-07-28
 Updated: 2026-07-28
 
@@ -142,14 +142,25 @@ Updated: 2026-07-28
   non-authoritative description. Focused planning and seed tests prove that
   ownership split. The final product follow-up returned no findings.
 - The scoped canonical `test:diff` passed all repository guards, affected
-  typechecks, 2,791 Assistant Engine tests, 128 Assistant CLI tests, 1,937
-  Assistant Runtime tests, and 40 assistantd tests. Its unrelated CLI
-  integration tail blocked waiting for a shared prepared-runtime artifact held
-  by another checkout, so the owned process was stopped after the affected
-  lanes completed. Canonical acceptance, parent final review, final ReviewGPT,
-  and fresh CI remain.
+  typechecks, 2,792 Assistant Engine tests (8 skipped), 128 Assistant CLI
+  tests, 1,937 Assistant Runtime tests (2 skipped), and 40 assistantd tests.
+  Its unrelated CLI integration tail blocked waiting for a shared
+  prepared-runtime artifact held by another checkout, so the owned process was
+  stopped after the affected lanes completed.
+- The isolated canonical `pnpm verify:acceptance` run passed on Blacksmith in
+  5m28s. It completed full workspace typechecking, repository guards, package
+  coverage, package-boundary verification, the production web build, and both
+  Cloudflare Node and Workers suites.
+- Parent final review rechecked the current implementation and contract diff
+  after the immutable-prompt correction. It found no remaining code, lifecycle,
+  privacy, reliability, or product-behavior issue; the intentionally open
+  evidence gaps remain the production-faithful hosted actual-model longest path
+  and a sampled actual-model branch-quality matrix.
+- Exact-head final ReviewGPT and fresh GitHub CI remain as the PR-lane release
+  gates.
 - Two direct standalone runtime probes could not start because their ad hoc
   harness lacked prebuilt workspace artifacts. The focused Vitest owner tests
   exercise the same vault and notification paths; the remaining evidence gaps
   are the production-faithful hosted actual-model longest path and a sampled
   actual-model branch-quality matrix.
+Completed: 2026-07-28
