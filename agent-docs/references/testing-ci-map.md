@@ -233,10 +233,11 @@ not enter evidence; and attachment-only input fails closed before provider work.
   that projection uses the existing nonblocking assistant-milestone port.
   The latency-store proof also shows that terminal evidence carries an initial
   publication expectation and later dirty-window resets advance that expectation
-  monotonically across the fenced runtime attempt. A recovery attempt that
-  converges terminal evidence takes over the trace's refresh ownership, so its
-  later reset advances the deadline while the original attempt is rejected.
-  Stale evidence or milestone replay cannot roll either timestamp back.
+  monotonically across the fenced runtime attempt. A strictly newer authenticated
+  lease generation takes over an unresolved trace's refresh ownership whether
+  its deadline or terminal callback arrives first. Equal-generation callbacks
+  merge only for that owner, while delayed prior-generation evidence and
+  milestone replay cannot reclaim the trace or roll either timestamp back.
   `apps/web/vercel.json` registers that read-only monitor at a five-minute
   cadence. The hosted-local foreground-priority leg additionally uses real
   PostgreSQL, authenticated cron HTTP, and the Linq stub boundary to prove one

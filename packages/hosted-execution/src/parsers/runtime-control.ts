@@ -4907,6 +4907,14 @@ function parseHostedRuntimeLatencyPhaseBreakdown(
       ...requireOptionalNonNegativeInteger(assistant, "firstCodexTextObservedAtEpochMs", assistantLabel),
       ...requireOptionalNonNegativeInteger(assistant, "terminalNonReplyCommittedAtEpochMs", assistantLabel),
       ...requireOptionalNonNegativeInteger(assistant, "checkpointPublicationExpectedByEpochMs", assistantLabel),
+      ...(assistant.runtimeLeaseGeneration === undefined
+        ? {}
+        : {
+            runtimeLeaseGeneration: requireCanonicalRuntimeLeaseGeneration(
+              assistant.runtimeLeaseGeneration,
+              `${assistantLabel}.runtimeLeaseGeneration`,
+            ),
+          }),
     };
   }
 
@@ -6079,6 +6087,17 @@ function requireNonNegativeBigIntString(value: unknown, label: string): string {
     throw new TypeError(`${label} must be a non-negative base-10 integer string.`);
   }
 
+  return text;
+}
+
+function requireCanonicalRuntimeLeaseGeneration(
+  value: unknown,
+  label: string,
+): string {
+  const text = requireString(value, label);
+  if (text.length > 20 || !/^(?:0|[1-9]\d*)$/u.test(text)) {
+    throw new TypeError(`${label} must be a canonical runtime lease generation.`);
+  }
   return text;
 }
 

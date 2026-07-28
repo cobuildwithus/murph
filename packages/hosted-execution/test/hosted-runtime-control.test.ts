@@ -1456,6 +1456,7 @@ describe("hosted runtime control contracts", () => {
         receiptScanPerformed: false,
       },
       assistant: {
+        runtimeLeaseGeneration: "18446744073709551615",
         terminalNonReplyCommittedAtEpochMs: 1_777_000_000_125,
       },
       provider: {
@@ -1510,6 +1511,26 @@ describe("hosted runtime control contracts", () => {
           assistantInputIds: ["input_1"],
           at: "2026-04-26T00:00:01.000Z",
           phaseBreakdown: { schemaVersion: 1, provider: unsafeProvider },
+          providerRequestOrdinal: 0,
+          source: "linq",
+          type: "provider_started",
+        },
+      });
+      expect(parsed.event.type).toBe("provider_started");
+      expect("phaseBreakdown" in parsed.event).toBe(false);
+    }
+
+    for (const unsafeAssistant of [
+      { runtimeLeaseGeneration: 1 }, // generation must stay a string
+      { runtimeLeaseGeneration: "01" }, // generation must be canonical
+      { runtimeLeaseGeneration: "1".repeat(21) }, // header-compatible bound
+      { runtimeLeaseGeneration: "1", callbackToken: 1 }, // unknown sub key
+    ]) {
+      const parsed = parseHostedRuntimeLatencyTraceRequest({
+        event: {
+          assistantInputIds: ["input_1"],
+          at: "2026-04-26T00:00:01.000Z",
+          phaseBreakdown: { schemaVersion: 1, assistant: unsafeAssistant },
           providerRequestOrdinal: 0,
           source: "linq",
           type: "provider_started",

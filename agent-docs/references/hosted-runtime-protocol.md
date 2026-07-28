@@ -899,9 +899,13 @@ second disposition record and does not advance mailbox consumption. Web keeps
 in-flight timing milestones scoped to the exact staged runtime attempt. The
 terminal marker may converge across a later attempt because authenticated user,
 source, and assistant input ID identify the durable disposition being projected.
-That terminal convergence transfers the trace's runtime-attempt ownership to
-the currently fenced recovery attempt, so its later dirty-window refreshes and
-the terminal evidence use one owner while stale attempts remain fenced out.
+Terminal convergence and deadline refreshes carry the authenticated runtime
+lease generation in the existing phase document. A strictly newer generation
+transfers the unresolved trace's runtime-attempt ownership, the same generation
+merges monotonically for that owner, and an older generation is a no-op. This
+makes a recovery terminal and its deadline converge in either callback order
+while preventing a delayed callback from the prior attempt from reclaiming the
+trace.
 The terminal projection carries the runtime's current checkpoint-publication
 expectation. Whenever later dirty work restarts the idle window, the runtime
 publishes a monotonic `checkpoint_publication_expected_by` milestone across the

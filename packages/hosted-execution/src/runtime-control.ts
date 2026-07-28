@@ -1830,6 +1830,7 @@ export interface HostedRuntimeLatencyPhaseBreakdown {
     firstCodexTextObservedAtEpochMs?: number;
     terminalNonReplyCommittedAtEpochMs?: number;
     checkpointPublicationExpectedByEpochMs?: number;
+    runtimeLeaseGeneration?: string;
   };
   provider?: {
     codexAppServerInitializeMs?: number;
@@ -1959,6 +1960,7 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS: Record<
     "firstCodexTextObservedAtEpochMs",
     "terminalNonReplyCommittedAtEpochMs",
     "checkpointPublicationExpectedByEpochMs",
+    "runtimeLeaseGeneration",
   ],
   provider: [
     "codexAppServerInitializeMs",
@@ -1989,7 +1991,7 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_BOOLEAN_LEAF_KEYS =
     "preProvider.receiptScanPerformed",
   ] as const;
 
-export type HostedRuntimeLatencyPhaseBreakdownJsonLeaf = number | boolean;
+export type HostedRuntimeLatencyPhaseBreakdownJsonLeaf = number | boolean | string;
 export type HostedRuntimeOrchestrationLatencyDiagnostics = NonNullable<
   HostedRuntimeLatencyPhaseBreakdown["orchestration"]
 >;
@@ -2217,6 +2219,11 @@ function isHostedRuntimeLatencyPhaseBreakdownLeafSafe(
   leafKey: string,
   value: unknown,
 ): value is HostedRuntimeLatencyPhaseBreakdownJsonLeaf {
+  if (phase === "assistant" && leafKey === "runtimeLeaseGeneration") {
+    return typeof value === "string"
+      && value.length <= 20
+      && /^(?:0|[1-9]\d*)$/u.test(value);
+  }
   if (HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_BOOLEAN_LEAF_KEY_SET.has(`${phase}.${leafKey}`)) {
     return typeof value === "boolean";
   }

@@ -2397,6 +2397,7 @@ describe("hosted runtime internal web routes", () => {
       authenticatedUserId: "member_routes_1",
       milestone: "first_codex_output_observed",
       runtimeAttemptId: "attempt_routes_1",
+      runtimeLeaseGeneration: "9",
       source: "linq",
     });
 
@@ -2425,6 +2426,7 @@ describe("hosted runtime internal web routes", () => {
       authenticatedUserId: "member_routes_1",
       milestone: "mailbox_import_done",
       runtimeAttemptId: "attempt_routes_1",
+      runtimeLeaseGeneration: "9",
       source: "linq",
     });
 
@@ -2444,6 +2446,25 @@ describe("hosted runtime internal web routes", () => {
     ));
 
     expect(mismatchedAttemptResponse.status).toBe(401);
+
+    const incompleteFenceResponse = await runtimeLatencyRoute.POST(jsonRequest(
+      "/api/internal/hosted-runtime/latency",
+      {
+        event: {
+          assistantInputIds: ["input_1"],
+          at: FIXED_NOW,
+          milestone: "first_codex_output_observed",
+          runtimeAttemptId: "attempt_routes_1",
+          source: "linq",
+          type: "assistant_milestone",
+        },
+      },
+      {
+        "x-hosted-runtime-attempt-id": "attempt_routes_1",
+      },
+    ));
+
+    expect(incompleteFenceResponse.status).toBe(401);
 
     const unsafeResponse = await runtimeLatencyRoute.POST(jsonRequest(
       "/api/internal/hosted-runtime/latency",
