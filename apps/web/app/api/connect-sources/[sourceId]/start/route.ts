@@ -37,7 +37,7 @@ export const POST = withJsonError(async (
   const selector = await readHostedConnectSourceTargetSelector(request);
   const target = resolveHostedConnectSourceTarget(sourceId, selector);
 
-  return jsonOk(await startHostedDeviceSyncConnection({
+  const started = await startHostedDeviceSyncConnection({
     defaultReturnTo: buildHostedDeviceConnectCompletionReturnTo({
       connectSourceId: target.connectSourceId,
       connectTarget: target.connectTarget,
@@ -45,7 +45,12 @@ export const POST = withJsonError(async (
     }),
     request,
     target,
-  }));
+  });
+  const response = jsonOk({
+    authorizationUrl: started.authorizationUrl,
+  });
+  response.headers.append("Set-Cookie", started.callbackProofCookie);
+  return response;
 });
 
 type HostedConnectSourceTargetSelector = {

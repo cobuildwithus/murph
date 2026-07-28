@@ -380,7 +380,12 @@ private-network Worker and hosted web origins, including DNS names
 that resolve to private-network addresses. When
 `DEVICE_SYNC_PUBLIC_BASE_URL` is set, it may include a callback path but its
 hostname must match `HOSTED_WEB_BASE_URL`; a separate callback host cannot
-receive the host-only hosted app-session cookie.
+receive the host-only hosted app-session and callback-proof cookies. Cloudflare
+preflight owns this explicit-override comparison only. When the override is
+unset, hosted Web build validation derives the effective callback from
+`HOSTED_ONBOARDING_PUBLIC_BASE_URL`, `HOSTED_WEB_BASE_URL`, then the Vercel
+production fallback and rejects a split host; Cloudflare does not claim to
+derive that Web-owned value.
 The single member-scoped computer-use profile change is a greenfield hard cut,
 not an old-Web/old-Worker compatibility rollout. Keep hosted computer-use
 traffic paused during the Web/Worker skew window and finish the Worker deploy
@@ -518,7 +523,10 @@ Opt-in runtime integrations:
 `DEVICE_SYNC_PUBLIC_BASE_URL` is optional. When set, it may select a stable
 provider callback/webhook path on the hosted Web hostname, but it must not use a
 separate device-sync hostname. Both production and preview preflight reject the
-split-host shape before render, secret sync, lifecycle mutation, or deploy.
+explicit split-host shape before render, secret sync, lifecycle mutation, or
+deploy. When it is unset, hosted Web build validation—not Cloudflare
+preflight—proves the derived callback hostname against every configured browser
+surface.
 Correct the callback hostname before either Web or Worker deployment, and ship
 the Web start/build guard with the Cloudflare preflight change. During a skewed
 rollout the Web start guard still fails closed before OAuth state or provider

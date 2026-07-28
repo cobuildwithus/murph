@@ -557,7 +557,7 @@ test("hosted Web rejects a device callback on a different HOSTED_WEB_BASE_URL ho
       DEVICE_SYNC_PUBLIC_BASE_URL: "https://device-sync.example.com/api/device-sync",
       HOSTED_WEB_BASE_URL: "https://app.example.com",
     })),
-    /DEVICE_SYNC_PUBLIC_BASE_URL must use the HOSTED_WEB_BASE_URL hostname for hosted browser OAuth callbacks/u,
+    /effective hosted browser device callback from DEVICE_SYNC_PUBLIC_BASE_URL must use the HOSTED_WEB_BASE_URL hostname/u,
   );
 });
 
@@ -568,7 +568,26 @@ test("hosted Web rejects a callback that cannot return to the configured onboard
       HOSTED_ONBOARDING_PUBLIC_BASE_URL: "https://join.example.com",
       HOSTED_WEB_BASE_URL: "https://app.example.com",
     })),
-    /DEVICE_SYNC_PUBLIC_BASE_URL must use the HOSTED_ONBOARDING_PUBLIC_BASE_URL hostname for hosted browser OAuth callbacks/u,
+    /effective hosted browser device callback from DEVICE_SYNC_PUBLIC_BASE_URL must use the HOSTED_ONBOARDING_PUBLIC_BASE_URL hostname/u,
+  );
+});
+
+test("hosted Web rejects an implicit callback derived from a split onboarding hostname", () => {
+  assert.throws(
+    () => assertHostedBrowserDeviceSyncCallbackHostnameConfiguration(createProcessEnv({
+      HOSTED_ONBOARDING_PUBLIC_BASE_URL: "https://join.example.com",
+      HOSTED_WEB_BASE_URL: "https://app.example.com",
+    })),
+    /effective hosted browser device callback from HOSTED_ONBOARDING_PUBLIC_BASE_URL must use the HOSTED_WEB_BASE_URL hostname/u,
+  );
+});
+
+test("hosted Web accepts an implicit callback when every browser surface shares one hostname", () => {
+  assert.doesNotThrow(
+    () => assertHostedBrowserDeviceSyncCallbackHostnameConfiguration(createProcessEnv({
+      HOSTED_ONBOARDING_PUBLIC_BASE_URL: "https://app.example.com",
+      HOSTED_WEB_BASE_URL: "https://app.example.com",
+    })),
   );
 });
 

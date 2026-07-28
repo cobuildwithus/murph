@@ -865,13 +865,21 @@ Hosted public-base constraints:
 
 Callback auth contract:
 
-- hosted browser OAuth callbacks require the active first-party app session and
-  pass that exact member as `expectedOwnerId` before shared ingress can consume
-  OAuth state or exchange a provider code
+- hosted browser start sets one 15-minute host-only callback proof bound to the
+  provider, OAuth state, member, and app-session generation
+- callback GET requires that proof and active session but only renders the
+  confirmation or safe failure surface; it never exchanges provider credentials
+- the explicit same-origin confirmation POST passes the exact member as
+  `expectedOwnerId` before shared ingress can consume state or exchange a code
+- a callback without its initiating-browser proof consumes only the OAuth state,
+  preventing later relay into the member's signed-in browser
 - the provider callback hostname must match the hostname that served the
-  authenticated browser start; the `__Host-` app-session cookie remains
-  host-only, and Murph does not add a Domain cookie, second callback cookie, or
+  authenticated browser start; the `__Host-` app-session and callback-proof
+  cookies remain host-only, and Murph does not add a Domain cookie or
   member-bound handoff to bridge separate hosts
+- Web build validation resolves the effective callback with runtime precedence,
+  including an unset `DEVICE_SYNC_PUBLIC_BASE_URL`; Cloudflare preflight can
+  verify only an explicit override because it does not own the derived Web value
 - `apps/web` verifies narrow Cloudflare-signed internal callbacks with
   `HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_JWK`
 - `HOSTED_WEB_CALLBACK_SIGNING_KEY_ID` selects the active callback key id and

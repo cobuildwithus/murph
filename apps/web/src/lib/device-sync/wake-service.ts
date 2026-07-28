@@ -21,6 +21,7 @@ import {
   DEVICE_SYNC_DISCONNECT_IN_PROGRESS_ERROR_CODE,
   DEVICE_SYNC_HISTORICAL_RESET_REVOKE_FAILED_ERROR_CODE,
   isEstablishedDeviceSyncConnection,
+  isDeviceSyncConnectionSetupPending,
   isDeviceSyncDisconnectInProgress,
   isHistoricalResetIncompleteDeviceSyncAccount,
   requiresHistoricalResetDeviceSyncSource,
@@ -1032,6 +1033,7 @@ async function persistHostedDeviceSyncWebhookAccepted(input: {
         !current
         || current.provider !== input.provider
         || current.status !== "active"
+        || isDeviceSyncConnectionSetupPending(current)
         || current.connectedAt !== input.expectedConnectedAt
       ) {
         await completeHostedWebhookTraceTx(input, tx);

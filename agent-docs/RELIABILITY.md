@@ -1,6 +1,6 @@
 # Reliability
 
-Last verified: 2026-07-27
+Last verified: 2026-07-28
 
 ## Current Guardrails
 
@@ -50,6 +50,16 @@ Last verified: 2026-07-27
   not decide access.
 - Foreground inbox/parser-backed daemon runs should favor restartable connectors with bounded backoff over permanently dead watch loops, while still keeping low-level restart behavior opt-in and always bounded by the owning abort signal.
 - Networked assistant/provider/channel calls should set explicit timeouts, propagate caller abort signals, and only auto-retry request shapes that are replay-safe or rate-limit directed.
+- Junction Link setup remains retryable but inert before browser confirmation.
+  Webhooks for an active `pending_link` or `link_returned` account release their
+  trace claim and return a retryable not-ready response; they do not persist
+  dirty state or wake work. Manual reconcile, due scheduling, ordinary queued
+  jobs, and sync-success promotion apply the same phase gate. After the
+  initiating browser explicitly confirms the callback, the existing
+  `source_confirmed` transition admits a provider retry normally. Starting a
+  replacement link first retries provider cleanup through the existing
+  disconnect owner; a cleanup warning blocks new provider state instead of
+  adopting an ambiguous earlier linkage.
 - The hosted reply-latency operator alert remains one singleton incident owner.
   Outbound paging requires both an opaque dedicated chat and a valid IANA
   operator timezone, suppresses sends from 11 PM through 7 AM local time, and

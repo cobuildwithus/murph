@@ -4125,6 +4125,49 @@ test("device sync store preserves guarded Junction historical progress across ca
   }
 });
 
+test("device sync store never promotes pending setup from ordinary sync success", async () => {
+  const tempDir = await makeTempDirectory("murph-device-syncd-store-pending-sync");
+  const store = new SqliteDeviceSyncStore(path.join(tempDir, "state.sqlite"));
+
+  try {
+    const pending = store.upsertAccount({
+      provider: "junction",
+      externalAccountId: "junction-pending-sync",
+      displayName: "Junction",
+      status: "active",
+      setupPhase: "pending_link",
+      setupExpiresAt: "2026-04-03T00:15:00.000Z",
+      scopes: [],
+      credential: {
+        kind: "provider_config",
+        providerConfigKey: "junction",
+      },
+      connectedAt: "2026-04-03T00:00:00.000Z",
+      nextReconcileAt: null,
+    });
+
+    assert.equal(
+      store.markSyncSucceeded(
+        pending.id,
+        "2026-04-03T00:05:00.000Z",
+        pending.disconnectGeneration,
+      ),
+      true,
+    );
+
+    const after = store.getAccountById(pending.id);
+    assert.equal(after?.status, "active");
+    assert.equal(after?.setupPhase, "pending_link");
+    assert.equal(after?.setupExpiresAt, "2026-04-03T00:15:00.000Z");
+  } finally {
+    store.close();
+    await rm(tempDir, {
+      force: true,
+      recursive: true,
+    });
+  }
+});
+
 test("device sync store updates existing accounts and rejects stale success writes", async () => {
   const tempDir = await makeTempDirectory("murph-device-syncd-store-update-existing");
   const store = new SqliteDeviceSyncStore(path.join(tempDir, "state.sqlite"));

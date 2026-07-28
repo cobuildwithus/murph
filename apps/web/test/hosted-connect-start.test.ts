@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   createHostedDeviceSyncPublicIngressService: vi.fn(),
   getPrisma: vi.fn(),
   isDeviceConnectSourceAvailableForConnection: vi.fn(),
+  prepareConnectionStart: vi.fn(),
   requireActiveHostedAppSessionFromRequest: vi.fn(),
   startConnection: vi.fn(),
 }));
@@ -72,15 +73,18 @@ beforeEach(() => {
   mocks.isDeviceConnectSourceAvailableForConnection.mockReturnValue(true);
   mocks.requireActiveHostedAppSessionFromRequest.mockResolvedValue({
     member: { id: "member_a" },
+    sessionId: "session_a",
   });
   mocks.getPrisma.mockReturnValue(PRISMA);
   mocks.assertHostedHistoricalLaunchConsentGranted.mockResolvedValue(undefined);
   mocks.assertHostedWhoopConnectCapacityAvailable.mockResolvedValue(undefined);
   mocks.createHostedDeviceSyncPublicIngressService.mockReturnValue({
+    prepareConnectionStart: mocks.prepareConnectionStart,
     startConnection: mocks.startConnection,
   });
   mocks.startConnection.mockResolvedValue({
     authorizationUrl: "https://provider.example.test/oauth/start",
+    state: "callback_state_1234567890",
   });
 });
 
@@ -96,8 +100,10 @@ describe("startHostedDeviceSyncConnection", () => {
       target: OURA_TARGET,
     })).resolves.toEqual({
       authorizationUrl: "https://provider.example.test/oauth/start",
+      callbackProofCookie: expect.stringContaining("murph-device-sync-oura="),
     });
 
+    expect(mocks.prepareConnectionStart).toHaveBeenCalledWith("member_a", "oura");
     expect(mocks.startConnection).toHaveBeenCalledWith(
       "member_a",
       "oura",

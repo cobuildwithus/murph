@@ -131,6 +131,40 @@ export class HostedDeviceSyncPublicIngressService {
     });
   }
 
+  async prepareConnectionStart(userId: string, provider: string): Promise<void> {
+    if (provider !== "junction") {
+      return;
+    }
+
+    const nonEstablishedConnections = (await this.context.store.listConnectionsForUser(userId))
+      .filter((connection) =>
+        connection.provider === provider
+        && !isEstablishedDeviceSyncConnection(connection)
+      );
+
+    for (const connection of nonEstablishedConnections) {
+      const disconnected = await disconnectHostedDeviceSyncConnection({
+        connectionId: connection.id,
+        registry: this.registry,
+        store: this.context.store,
+        userId,
+      });
+      if (disconnected.warning) {
+        throw deviceSyncError({
+          cause: {
+            errorObservabilityClass: "provider_cleanup",
+            errorPhase: "browser_oauth_start",
+          },
+          code: "JUNCTION_PENDING_LINK_CLEANUP_FAILED",
+          message:
+            "Murph could not clear the earlier device connection attempt. Retry before opening another connection link.",
+          retryable: true,
+          httpStatus: 503,
+        });
+      }
+    }
+  }
+
   async handleOAuthCallback(
     provider: string,
     options: { expectedOwnerId: string },
@@ -191,6 +225,20 @@ export class HostedDeviceSyncPublicIngressService {
       retryable: false,
       httpStatus: 409,
     });
+  }
+
+  async discardConnectionCallback(provider: string): Promise<void> {
+    const url = new URL(this.context.request.url);
+    const state = url.searchParams.get("murph_state") ?? url.searchParams.get("state");
+    if (!state) {
+      return;
+    }
+
+    await this.context.store.consumeOAuthState(
+      state,
+      new Date().toISOString(),
+      provider,
+    );
   }
 
   async acceptCompanionHrvRmssdObservation(input: {

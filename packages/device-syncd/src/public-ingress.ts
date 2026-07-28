@@ -1,6 +1,9 @@
 import { deviceSyncError, isDeviceSyncError } from "./errors.ts";
 import { sanitizeHostedRuntimeErrorText } from "./hosted-runtime.ts";
-import { isEstablishedDeviceSyncConnection } from "./public-account.ts";
+import {
+  isDeviceSyncConnectionSetupPending,
+  isEstablishedDeviceSyncConnection,
+} from "./public-account.ts";
 import { resolveDeviceSyncProviderCredentialPolicy } from "./provider-credential-policy.ts";
 import { resolvePublicProviderDefaultScopes } from "./public-provider-descriptor-shared.ts";
 import {
@@ -1261,7 +1264,12 @@ export class DeviceSyncPublicIngress {
 
     const account = await this.store.getConnectionByExternalAccount(provider.provider, parsed.externalAccountId);
 
-    if (account?.status === "active" && webhook.acceptanceMode === "level_dirty_hint") {
+    if (
+      account
+      && account.status === "active"
+      && !isDeviceSyncConnectionSetupPending(account)
+      && webhook.acceptanceMode === "level_dirty_hint"
+    ) {
       // Only provider-declared level hints can be satisfied by committed dirty state.
       // Exact webhook work must pass through trace claim and durable acceptance.
       const alreadySatisfied = await this.hooks.onLevelDirtyWebhookAlreadySatisfied?.({
@@ -1366,6 +1374,25 @@ export class DeviceSyncPublicIngress {
       throw deviceSyncError({
         code: "WEBHOOK_ACCOUNT_NOT_READY",
         message: "Webhook account is not connected yet. Retry later.",
+        retryable: true,
+        httpStatus: 503,
+      });
+    }
+
+    if (
+      account.status === "active"
+      && isDeviceSyncConnectionSetupPending(account)
+    ) {
+      this.logger.warn?.("Delaying webhook side effects until device sync setup is confirmed.", {
+        provider: provider.provider,
+        accountId: account.id,
+        eventType: webhook.eventType,
+        traceId,
+      });
+      await this.store.releaseWebhookTrace(provider.provider, traceId, claimToken);
+      throw deviceSyncError({
+        code: "WEBHOOK_ACCOUNT_NOT_READY",
+        message: "Device sync setup must finish before webhook side effects can be accepted.",
         retryable: true,
         httpStatus: 503,
       });

@@ -15,7 +15,10 @@ import {
   sanitizeHostedRuntimeErrorText,
 } from "./hosted-runtime.ts";
 import { createDeviceSyncPublicIngress, DeviceSyncPublicIngress } from "./public-ingress.ts";
-import { toRedactedPublicDeviceSyncAccount } from "./public-account.ts";
+import {
+  isDeviceSyncConnectionSetupPending,
+  toRedactedPublicDeviceSyncAccount,
+} from "./public-account.ts";
 import { createDeviceSyncRegistry } from "./registry.ts";
 import {
   addMilliseconds,
@@ -487,6 +490,18 @@ class DeviceSyncServiceController {
   queueManualReconcile(accountId: string): QueueManualReconcileResult {
     const account = this.requireStoredAccount(accountId);
 
+    if (
+      account.status === "active"
+      && isDeviceSyncConnectionSetupPending(account)
+    ) {
+      throw deviceSyncError({
+        code: "CONNECTION_SETUP_PENDING",
+        message: "Finish device sync setup before reconciling this account.",
+        retryable: false,
+        httpStatus: 409,
+      });
+    }
+
     if (account.status === "disconnected") {
       throw deviceSyncError({
         code: "ACCOUNT_DISCONNECTED",
@@ -614,7 +629,12 @@ class DeviceSyncServiceController {
 
       try {
         for (const account of this.store.listAccounts()) {
-          if (account.status !== "active" || !account.nextReconcileAt || Date.parse(account.nextReconcileAt) > Date.parse(now)) {
+          if (
+            account.status !== "active"
+            || isDeviceSyncConnectionSetupPending(account)
+            || !account.nextReconcileAt
+            || Date.parse(account.nextReconcileAt) > Date.parse(now)
+          ) {
             continue;
           }
 
@@ -738,6 +758,20 @@ class DeviceSyncServiceController {
     }
 
     const preservesAcceptedCompanionHrv = isJunctionCompanionHrvRmssdJob(job);
+
+    if (
+      storedAccount.status === "active"
+      && isDeviceSyncConnectionSetupPending(storedAccount)
+      && !preservesAcceptedCompanionHrv
+    ) {
+      failClaimedJob(
+        "CONNECTION_SETUP_PENDING",
+        "Device sync setup must finish before queued jobs can run.",
+        null,
+        false,
+      );
+      return finishPass();
+    }
 
     if (storedAccount.status === "disconnected" && !preservesAcceptedCompanionHrv) {
       const completed = this.store.completeJobIfOwned(job.id, this.workerId, currentNow());

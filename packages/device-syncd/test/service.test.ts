@@ -1147,6 +1147,80 @@ test("device sync service scheduler queues due active jobs and skips unsupported
   close();
 });
 
+test("device sync service keeps pending external-link setup out of manual, scheduled, and worker execution", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-pending-setup");
+  const executeJob = vi.fn(async () => ({}));
+  const createScheduledJobs = vi.fn(() => ({
+    jobs: [
+      {
+        kind: "scheduled-refresh",
+        payload: {
+          slice: "summary",
+        },
+      },
+    ],
+    nextReconcileAt: "2026-03-17T12:30:00.000Z",
+  }));
+  const { service, store, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    providers: [
+      createFakeProvider({
+        createScheduledJobs,
+        executeJob,
+      }),
+    ],
+  });
+  const pending = store.upsertAccount({
+    provider: "demo",
+    externalAccountId: "pending-external-link",
+    displayName: "Pending",
+    setupPhase: "pending_link",
+    setupExpiresAt: "2026-03-17T12:15:00.000Z",
+    scopes: ["offline"],
+    tokens: {
+      accessToken: "pending-access",
+      accessTokenEncrypted: "enc:pending-access",
+    },
+    connectedAt: "2026-03-17T10:00:00.000Z",
+    nextReconcileAt: "2026-03-17T11:00:00.000Z",
+  });
+
+  assert.throws(
+    () => service.queueManualReconcile(pending.id),
+    (error: unknown) =>
+      error instanceof DeviceSyncError
+      && error.code === "CONNECTION_SETUP_PENDING"
+      && error.httpStatus === 409,
+  );
+
+  await service.runSchedulerOnce();
+  assert.equal(createScheduledJobs.mock.calls.length, 0);
+  assert.equal(countJobsForAccountForTesting(store, pending.id), 0);
+
+  const queued = store.enqueueJob({
+    accountId: pending.id,
+    provider: "demo",
+    kind: "reconcile",
+    payload: {},
+    availableAt: "2026-03-17T11:00:00.000Z",
+  });
+  const processed = await service.runWorkerOnce();
+  const terminal = store.getJobById(queued.id);
+
+  assert.equal(processed?.id, queued.id);
+  assert.equal(terminal?.status, "dead");
+  assert.equal(terminal?.lastErrorCode, "CONNECTION_SETUP_PENDING");
+  assert.equal(executeJob.mock.calls.length, 0);
+  assert.equal(store.getAccountById(pending.id)?.setupPhase, "pending_link");
+
+  close();
+});
+
 test("device sync service scheduler logs failures once and skips reentrant ticks", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-syncd-scheduler-error");
   const schedulerErrors: Array<{ context?: Record<string, unknown>; message: string }> = [];

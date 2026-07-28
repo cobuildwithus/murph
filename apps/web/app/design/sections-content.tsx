@@ -16,6 +16,7 @@ import { AccountDeletionMaintenanceStudy } from "./account-deletion-maintenance-
 import { AccountExitReasonStudy } from "./account-exit-reason-study";
 import { ChangelogArchiveStudy } from "./changelog-archive-study";
 import { ConnectSourceCardStudy } from "./connect-source-card-study";
+import { DeviceSyncCallbackStudy } from "./device-sync-callback-study";
 import { FamilyInviteJoinStudy } from "./family-invite-join-study";
 import { GroupJoinStudy } from "./group-join-study";
 import { GrowthScorecardStudy } from "./growth-scorecard-study";
@@ -106,6 +107,12 @@ export function SectionsContent() {
 
       <StudySection title="Connect source card actions">
         <ConnectSourceCardStudy />
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Device connection callback confirmation and failure">
+        <DeviceSyncCallbackStudy />
       </StudySection>
 
       <Separator />

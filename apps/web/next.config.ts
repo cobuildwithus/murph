@@ -361,21 +361,31 @@ export function assertHostedBrowserDeviceSyncCallbackHostnameConfiguration(
 ): void {
   const configuredCallbackValue =
     environment[DEVICE_SYNC_PUBLIC_BASE_URL_ENV_KEY]?.trim() ?? "";
-  if (!configuredCallbackValue) {
+  const derivedCallbackSource = HOSTED_PUBLIC_BASE_URL_ENV_KEYS.find(
+    (label) => Boolean(environment[label]?.trim()),
+  ) ?? (
+    environment[HOSTED_PUBLIC_VERCEL_URL_ENV_KEY]?.trim()
+      ? HOSTED_PUBLIC_VERCEL_URL_ENV_KEY
+      : null
+  );
+  if (!configuredCallbackValue && !derivedCallbackSource) {
     return;
   }
 
+  const callbackSource = configuredCallbackValue
+    ? DEVICE_SYNC_PUBLIC_BASE_URL_ENV_KEY
+    : derivedCallbackSource;
   const configuredCallbackBaseUrl = normalizeConfiguredBaseUrl(
-    configuredCallbackValue,
+    configuredCallbackValue || environment[callbackSource ?? ""],
     {
       allowHttpLoopback: true,
-      requireOriginOnly: false,
+      requireOriginOnly: Boolean(!configuredCallbackValue),
     },
   );
 
   if (!configuredCallbackBaseUrl) {
     throw new TypeError(
-      "DEVICE_SYNC_PUBLIC_BASE_URL must be a valid hosted browser OAuth callback URL.",
+      `${callbackSource ?? DEVICE_SYNC_PUBLIC_BASE_URL_ENV_KEY} must resolve to a valid hosted browser OAuth callback URL.`,
     );
   }
 
@@ -406,7 +416,7 @@ export function assertHostedBrowserDeviceSyncCallbackHostnameConfiguration(
     }
 
     throw new TypeError(
-      `DEVICE_SYNC_PUBLIC_BASE_URL must use the ${appSessionBaseUrl.label} hostname for hosted browser OAuth callbacks.`,
+      `The effective hosted browser device callback from ${callbackSource ?? DEVICE_SYNC_PUBLIC_BASE_URL_ENV_KEY} must use the ${appSessionBaseUrl.label} hostname.`,
     );
   }
 }

@@ -1111,6 +1111,126 @@ test("public ingress completes seeded external-link callbacks after mutable webh
   assert.equal(Object.values(callbackStateMetadata ?? {}).includes(completed.account.id), false);
 });
 
+test("public ingress keeps pending external-link accounts inert until callback confirmation", async () => {
+  const store = new InMemoryPublicIngressStore();
+  let acceptedCalls = 0;
+  const provider = createFakeProvider({
+    provider: "junction",
+    credentialPolicy: {
+      kind: "provider_config",
+      providerConfigKey: "junction",
+    },
+    descriptor: {
+      provider: "junction",
+      displayName: "Junction",
+      transportModes: ["external_link", "scheduled_poll", "webhook_push"],
+      connection: {
+        kind: "external_link",
+        callbackPath: "/connect/junction/callback",
+      },
+      webhook: {
+        deliveryMode: "notification",
+        path: "/webhooks/junction",
+        supportsAdmin: false,
+      },
+      normalization: {
+        metricFamilies: ["activity"],
+        snapshotParser: "schema",
+      },
+      sourcePriorityHints: {
+        defaultPriority: 60,
+        metricFamilies: {
+          activity: 60,
+        },
+      },
+    },
+    async beginConnection(input) {
+      return {
+        authorizationUrl: `https://junction.example/link?murph_state=${input.state}`,
+        connectionSeed: {
+          externalAccountId: "external-account-1",
+          credential: {
+            kind: "provider_config",
+            providerConfigKey: "junction",
+          },
+        },
+      };
+    },
+    async completeConnection() {
+      return {
+        externalAccountId: "external-account-1",
+        credential: {
+          kind: "provider_config",
+          providerConfigKey: "junction",
+        },
+      };
+    },
+    async verifyAndParseWebhook() {
+      return {
+        externalAccountId: "external-account-1",
+        eventType: "daily.data.sleep.created",
+        traceId: "pending-link-trace",
+        jobs: [],
+      };
+    },
+  });
+  const ingress = createDeviceSyncPublicIngress({
+    publicBaseUrl: "https://sync.example.test/device-sync",
+    registry: createDeviceSyncRegistry([provider]),
+    store,
+    hooks: {
+      onWebhookAccepted({ account, claimToken, traceId }) {
+        acceptedCalls += 1;
+        return completeWebhookAcceptDurably(store, account, traceId, claimToken);
+      },
+    },
+  });
+  const begin = await ingress.startConnection({
+    ownerId: "<REDACTED_OWNER_ID>",
+    provider: "junction",
+  });
+  const pending = store.getConnectionByExternalAccount("junction", "external-account-1");
+
+  await assert.rejects(
+    () => ingress.handleWebhook("junction", new Headers(), Buffer.from("{}")),
+    (error: unknown) =>
+      error instanceof DeviceSyncError
+      && error.code === "WEBHOOK_ACCOUNT_NOT_READY"
+      && error.httpStatus === 503
+      && error.retryable === true,
+  );
+
+  assert.equal(pending?.setupPhase, "pending_link");
+  assert.equal(acceptedCalls, 0);
+  assert.equal(store.claimWebhookTraceCalls, 1);
+  assert.equal(store.completedWebhookTraceCalls, 0);
+  assert.equal(readRecordedWebhookTrace(store), null);
+  assert.equal(
+    store.getConnectionByExternalAccount("junction", "external-account-1")?.lastWebhookAt,
+    null,
+  );
+
+  const completed = await ingress.handleConnectionCallback({
+    expectedOwnerId: "<REDACTED_OWNER_ID>",
+    provider: "junction",
+    query: new URLSearchParams({
+      murph_state: begin.state,
+      result: "success",
+    }),
+  });
+  const retried = await ingress.handleWebhook(
+    "junction",
+    new Headers(),
+    Buffer.from("{}"),
+  );
+
+  assert.equal(completed.account.setupPhase, "source_confirmed");
+  assert.equal(retried.accepted, true);
+  assert.equal(acceptedCalls, 1);
+  assert.equal(store.claimWebhookTraceCalls, 2);
+  assert.equal(store.completedWebhookTraceCalls, 1);
+});
+
 test("public ingress rejects external-link callbacks that do not match the seeded account", async () => {
   const store = new InMemoryPublicIngressStore();
   const provider = createFakeProvider({

@@ -58,6 +58,13 @@ export function isDeviceSyncConnectionSetupConfirmed(connection: {
   return connection.setupPhase === "source_confirmed";
 }
 
+export function isDeviceSyncConnectionSetupPending(connection: {
+  setupPhase?: string | null;
+}): boolean {
+  return connection.setupPhase === "pending_link"
+    || connection.setupPhase === "link_returned";
+}
+
 // Provider/account metadata can include raw profile payloads, body measurements, or
 // other operator-supplied diagnostics that should not leak through outward-facing
 // control-plane responses. Keep the public account surface intentionally minimal.

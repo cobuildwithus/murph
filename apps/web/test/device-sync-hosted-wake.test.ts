@@ -1813,6 +1813,72 @@ describe("hosted device-sync wakes", () => {
     });
   });
 
+  it("blocks replacement Junction Link until stale pending provider state is revoked", async () => {
+    const controlPlane = createHostedDeviceSyncPublicIngressService(
+      new Request("https://control.example.test/api/connect-sources/garmin/start", {
+        method: "POST",
+      }),
+    );
+    let currentConnection = buildHostedConnection({
+      displayName: "Junction",
+      externalAccountId: "junction-user-pending",
+      provider: "junction",
+      scopes: [],
+      setupExpiresAt: "2026-03-26T12:15:00.000Z",
+      setupPhase: "pending_link",
+    });
+    const storedConnection = buildProviderConfigStoredConnection({
+      displayName: "Junction",
+      externalAccountId: "junction-user-pending",
+      provider: "junction",
+      scopes: [],
+      setupPhase: "pending_link",
+    });
+    const revokeAccess = vi.fn()
+      .mockRejectedValueOnce(new Error("provider cleanup unavailable"))
+      .mockResolvedValueOnce(undefined);
+    mocks.registryGet.mockReturnValue({
+      connectionHandler: {
+        revokeAccess,
+      },
+    });
+    mocks.listConnectionsForUser.mockImplementation(async () => [currentConnection]);
+    mocks.getConnectionForUser.mockImplementation(async () => currentConnection);
+    mocks.getStoredConnectionAccountForUser.mockResolvedValue(storedConnection);
+    mocks.syncDurableConnectionState.mockImplementation(async (connection) => {
+      currentConnection = connection;
+    });
+
+    await expect(
+      controlPlane.prepareConnectionStart("user-123", "junction"),
+    ).rejects.toMatchObject({
+      code: "JUNCTION_PENDING_LINK_CLEANUP_FAILED",
+      httpStatus: 503,
+      retryable: true,
+    });
+
+    expect(currentConnection).toEqual(expect.objectContaining({
+      setupPhase: null,
+      status: "disconnected",
+    }));
+    expect(revokeAccess).toHaveBeenCalledTimes(1);
+
+    await expect(
+      controlPlane.prepareConnectionStart("user-123", "junction"),
+    ).resolves.toBeUndefined();
+
+    expect(revokeAccess).toHaveBeenCalledTimes(2);
+    expect(mocks.clearStoredProviderConfigCredential).toHaveBeenCalledWith(
+      expect.objectContaining({
+        connectionId: currentConnection.id,
+        externalAccountId: "junction-user-pending",
+        provider: "junction",
+        providerConfigKey: "hosted-provider-config",
+        userId: "user-123",
+      }),
+    );
+  });
+
   it("fails closed when revoked provider-config credential cleanup loses its fence", async () => {
     const controlPlane = createHostedDeviceSyncPublicIngressService(
       new Request("https://control.example.test/api/settings/device-sync/connections/dsc_123/disconnect"),
@@ -2761,6 +2827,39 @@ describe("hosted device-sync wakes", () => {
       "dsc_123",
       mocks.prismaTx,
     );
+    expect(mocks.completeWebhookTrace).toHaveBeenCalledWith(
+      "oura",
+      "trace_123",
+      "claim-token",
+      mocks.prismaTx,
+    );
+    expect(mocks.upsertDirtyConnection).not.toHaveBeenCalled();
+    expect(mocks.createSignal).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
+    expect(mocks.signalHostedDeviceSyncMailboxRuntime).not.toHaveBeenCalled();
+  });
+
+  it("terminally supersedes webhook work when setup becomes pending before dirty-state commit", async () => {
+    mocks.getConnectionForUser.mockResolvedValueOnce(buildHostedConnection({
+      setupExpiresAt: "2026-03-26T12:15:00.000Z",
+      setupPhase: "pending_link",
+    }));
+    const controlPlane = createHostedDeviceSyncPublicIngressService(
+      new Request("https://control.example.test/api/device-sync/webhooks/oura", {
+        body: JSON.stringify({
+          event: "sleep.updated",
+        }),
+        headers: {
+          "content-type": "application/json",
+        },
+        method: "POST",
+      }),
+    );
+
+    await expect(controlPlane.handleWebhook("oura")).resolves.toMatchObject({
+      accepted: true,
+    });
+
     expect(mocks.completeWebhookTrace).toHaveBeenCalledWith(
       "oura",
       "trace_123",

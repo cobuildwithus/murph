@@ -985,16 +985,33 @@ order.
 Hosted app-session cookies use a strict v2 session-id plus bearer format. The existing token-hash field stores a dedicated web-key HMAC over the session id, bearer, member id, Privy identity, and expiry, so Postgres write access alone cannot mint or retarget browser authority; legacy unsigned cookies are rejected.
 
 Hosted browser wearable OAuth is a same-browser, same-member, same-host
-boundary. Every provider callback requires the active app session and passes
-that session's member as `expectedOwnerId` before shared ingress consumes OAuth
-state or exchanges a provider code. Before constructing shared ingress or
-starting provider authorization, Web rejects a `DEVICE_SYNC_PUBLIC_BASE_URL`
-whose hostname differs from the authenticated start request. Hosted Web build
-validation and Cloudflare preview and production preflight enforce the same
-deploy shape. The `__Host-` app-session cookie remains host-only; do not add a
-Domain cookie, second callback cookie or state, member-bound handoff, or another
-state owner to bridge hosts. Local and tunneled `device-syncd` callbacks remain
-explicit and unchanged.
+boundary. Start issues one short-lived, host-only callback proof bound to the
+provider, OAuth state, member, and app-session generation. The provider callback
+GET requires that proof and active session, but only renders a confirmation; it
+does not consume state, exchange a code, or persist credentials. One explicit
+same-origin POST passes the session member as `expectedOwnerId` and is the only
+browser callback path that may reach shared ingress. A callback delivered
+without its initiating-browser proof consumes only the OAuth state, so its
+transferable provider URL cannot be relayed later. This proof adds no durable
+state owner and never crosses hosts.
+
+Before constructing shared ingress or starting provider authorization, Web
+rejects a callback hostname that differs from the authenticated start request.
+Hosted Web build validation applies the runtime precedence to both explicit
+`DEVICE_SYNC_PUBLIC_BASE_URL` and its derived hosted-public-origin fallback.
+Cloudflare preview and production preflight verify explicit callback overrides;
+they do not claim to derive an unset Web-owned callback base. The `__Host-`
+app-session and callback-proof cookies remain host-only; do not add a Domain
+cookie or cross-host handoff.
+
+Junction's existing setup phase is the data-admission boundary. An active
+`pending_link` or `link_returned` account cannot accept webhook side effects,
+persist dirty work, wake or schedule the runtime, execute queued provider jobs,
+or promote itself through sync success. A replacement Link start first uses
+the existing disconnect/revoke owner to clear every non-established Junction
+attempt; ambiguous provider cleanup blocks the new link and remains retryable.
+Only callback confirmation establishes `source_confirmed`. Local and tunneled
+`device-syncd` callbacks remain explicit and unchanged.
 
 The companion Privy bearer rule above is the default, with one authenticated
 extension bridge: `POST /api/device-sync/companion/imessage-mini-app/enrollment`
