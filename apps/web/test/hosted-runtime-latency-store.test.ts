@@ -1761,7 +1761,12 @@ describe("hosted runtime latency dashboard store", () => {
       authenticatedUserId: "member_latency_1",
       phaseBreakdown: {
         schemaVersion: 1,
-        provider: { sessionResolveMs: 11, promptBuildMs: 22, admissionMs: 33 },
+        provider: {
+          sessionResolveMs: 11,
+          promptBuildMs: 22,
+          admissionMs: 33,
+          serviceTier: "flex",
+        },
       },
       prisma,
       providerRequestOrdinal: 0,
@@ -1804,7 +1809,12 @@ describe("hosted runtime latency dashboard store", () => {
         foregroundWaitResolvedAtEpochMs: 1_777_000_001_010,
         foregroundImportStartedAtEpochMs: 1_777_000_001_011,
       },
-      provider: { sessionResolveMs: 11, promptBuildMs: 22, admissionMs: 33 },
+      provider: {
+        sessionResolveMs: 11,
+        promptBuildMs: 22,
+        admissionMs: 33,
+        serviceTier: "flex",
+      },
     });
 
     // Idempotent provider re-send preserves the populated provider sub-object.
@@ -1824,6 +1834,8 @@ describe("hosted runtime latency dashboard store", () => {
     trace = prisma.readTrace();
     expect((trace?.phaseBreakdownJson as { provider: { sessionResolveMs: number } }).provider.sessionResolveMs)
       .toBe(11);
+    expect((trace?.phaseBreakdownJson as { provider: { serviceTier: string } }).provider.serviceTier)
+      .toBe("flex");
     expect((trace?.phaseBreakdownJson as { schemaVersion: number }).schemaVersion).toBe(1);
   });
 

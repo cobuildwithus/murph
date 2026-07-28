@@ -3735,6 +3735,7 @@ describe("runHostedAssistantAutomationLane", () => {
     automationPassInput.onProviderRequestStarted?.({
       assistantInputIds: ["input_2"],
       providerRequestOrdinal: 0,
+      serviceTier: null,
       source: "telegram",
       startedAt: "2026-04-08T00:00:02.000Z",
     });

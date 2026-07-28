@@ -1844,6 +1844,7 @@ describe('Codex model catalog', () => {
   })
 
   it('drops flex service tier for hosted OpenAI routes without catalog evidence', async () => {
+    const providerRequestStarted = vi.fn()
     const route = createRoute({
       providerOptions: {
         model: 'gpt-5.6-terra',
@@ -1865,8 +1866,13 @@ describe('Codex model catalog', () => {
       supportedUserMessageContentTypes: ['text', 'image'],
       supportsReasoningEffort: true,
     })
-    providerMocks.executeCodexAssistantTurnAttemptFromInput.mockResolvedValue(
-      createProviderAttemptResult(),
+    providerMocks.executeCodexAssistantTurnAttemptFromInput.mockImplementation(
+      async (providerInput) => {
+        await providerInput.onProviderRequestStarted?.({
+          startedAt: '2026-04-29T00:00:01.000Z',
+        })
+        return createProviderAttemptResult()
+      },
     )
     providerTurnRunnerMocks.buildCodexTurnExecutionPlan.mockResolvedValue({
       activeTurnSteering: null,
@@ -1922,6 +1928,7 @@ describe('Codex model catalog', () => {
 
     await executeCodexTurnWithRecovery({
       input,
+      onProviderRequestStarted: providerRequestStarted,
       plan: createSharedPlan(),
       providerRequestOrdinal: 1,
       resolvedSession: session,
@@ -1934,6 +1941,11 @@ describe('Codex model catalog', () => {
       providerMocks.executeCodexAssistantTurnAttemptFromInput.mock.calls[0]?.[0]
     expect(providerInput?.serviceTier).toBeNull()
     expect(providerInput?.abortSignal).toBe(upstreamAbort.signal)
+    expect(providerRequestStarted).toHaveBeenCalledWith({
+      providerRequestOrdinal: 1,
+      serviceTier: null,
+      startedAt: '2026-04-29T00:00:01.000Z',
+    })
   })
 
   it('drops flex service tier for hosted routes on unsupported model providers', async () => {
