@@ -1,6 +1,6 @@
 # Re-arm retention after runner convergence
 
-Status: active
+Status: completed
 
 ## Goal
 
@@ -46,3 +46,11 @@ Reuse the existing retention wake, cron capacity, and workspace CAS fence.
   convergence and some persisted snapshots checkpointed in that interval.
 - Existing hourly retention capacity can drain the bounded snapshot population
   well inside the phase-two waiting gate.
+- Static migration checks and the real-PostgreSQL recovery/CAS proof passed.
+- The preliminary specialist finding was accepted and resolved by proving both
+  an existing future wake and the exact immediate pre-rearm CAS fence.
+- Canonical diff verification and the full acceptance gate passed.
+- The extended live trace found no unresolved deployment failure; each observed
+  checkpoint or accepted-attempt failure recovered to a later checkpoint.
+Updated: 2026-07-28
+Completed: 2026-07-28
