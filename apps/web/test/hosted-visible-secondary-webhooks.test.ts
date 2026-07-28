@@ -361,6 +361,54 @@ describe("visible secondary webhook outcomes", () => {
     }));
   });
 
+  it("keeps unlinked Telegram referral evidence silent in the group", async () => {
+    const update = parseHostedTelegramWebhookUpdate(JSON.stringify({
+      message: {
+        chat: {
+          id: -100123,
+          title: "Family chat",
+          type: "group",
+        },
+        date: 1_785_000_000,
+        from: {
+          first_name: "Casey",
+          id: 42,
+          is_bot: false,
+        },
+        message_id: 7,
+        text: "hello murph",
+      },
+      update_id: 123,
+    }));
+    const sendHostedTelegramTextMessage = vi.fn(async () => {});
+    const handler: HostedOnboardingTelegramWebhookHandler = vi.fn(async () => ({
+      ignored: true,
+      ok: true as const,
+      reason: "usage-referral-evidence-only",
+    }));
+    const dependencies: HostedVisibleSecondaryTelegramDependencies = {
+      parseHostedTelegramWebhookUpdate: vi.fn(() => update),
+      requireHostedOnboardingPublicBaseUrl: vi.fn(() => "https://withmurph.ai"),
+      sendHostedTelegramTextMessage,
+      summarizeHostedTelegramWebhook,
+    };
+
+    await expect(withHostedVisibleSecondaryTelegramOutcomes(
+      handler,
+      dependencies,
+    )({
+      rawBody: JSON.stringify(update),
+      secretToken: "secret",
+    })).resolves.toEqual({
+      ignored: true,
+      ok: true,
+      reason: "usage-referral-evidence-only",
+    });
+    expect(sendHostedTelegramTextMessage).not.toHaveBeenCalled();
+    expect(dependencies.requireHostedOnboardingPublicBaseUrl)
+      .not.toHaveBeenCalled();
+  });
+
   it("leaves unrelated silent outcomes unchanged", async () => {
     const handler: HostedOnboardingLinqWebhookHandler = vi.fn(async () => ({
       ignored: true,

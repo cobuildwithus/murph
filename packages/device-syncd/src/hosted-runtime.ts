@@ -1,3 +1,5 @@
+import { COMPANION_HRV_RMSSD_RESOURCE } from "@murphai/contracts";
+
 import { sanitizeStoredDeviceSyncMetadata } from "./metadata.ts";
 import {
   canCurrentRuntimeMutateJunctionHistoricalBackfillProgress,
@@ -387,6 +389,7 @@ export interface HostedExecutionDeviceSyncRuntimeConnectionUpdate {
   credential?: HostedExecutionDeviceSyncRuntimeCredentialUpdate;
   failureDiagnostic?: HostedExecutionDeviceSyncRuntimeFailureDiagnostic;
   localState?: HostedExecutionDeviceSyncRuntimeLocalStateUpdate;
+  observedConnectedAt?: string | null;
   observedUpdatedAt?: string | null;
   observedTokenVersion?: number | null;
   seed?: HostedExecutionDeviceSyncRuntimeConnectionSeed;
@@ -423,6 +426,52 @@ export interface HostedExecutionDeviceSyncDirtyResource {
   sourceProviderSlug: string | null;
   windowEnd: string | null;
   windowStart: string | null;
+}
+
+const CREDENTIAL_INDEPENDENT_DELETE_PROVIDERS = new Set([
+  "oura",
+  "strava",
+  "whoop",
+]);
+
+export type DeviceSyncCredentialIndependentImportJobClassifier = (input: {
+  kind?: string | null;
+  payload?: Record<string, unknown> | null;
+}) => boolean;
+
+/**
+ * Returns true only when the provider executor can reach a canonical import
+ * without using the connection's replaceable provider credentials.
+ */
+export function isDeviceSyncCredentialIndependentImportJob(input: {
+  kind?: string | null;
+  payload?: Record<string, unknown> | null;
+  provider?: string | null;
+}, classifyProviderJob?: DeviceSyncCredentialIndependentImportJobClassifier): boolean {
+  if (
+    input.kind === "delete"
+    && typeof input.provider === "string"
+    && CREDENTIAL_INDEPENDENT_DELETE_PROVIDERS.has(input.provider)
+  ) {
+    return true;
+  }
+
+  if (input.provider !== "junction" || input.kind !== "resource") {
+    return false;
+  }
+
+  const resource = input.payload?.resource;
+  if (
+    resource === COMPANION_HRV_RMSSD_RESOURCE
+    || resource === JUNCTION_COMPANION_HEALTH_METADATA_RESOURCE
+  ) {
+    return true;
+  }
+
+  return classifyProviderJob?.({
+    kind: input.kind,
+    payload: input.payload,
+  }) === true;
 }
 
 export function serializeHostedExecutionDeviceSyncDirtyPayloadIdentity(
@@ -539,6 +588,7 @@ export interface HostedExecutionDeviceSyncWakeHint {
 
 export interface HostedExecutionDeviceSyncWakeEventLike {
   connectionId?: string | null;
+  expectedConnectedAt?: string;
   hint?: HostedExecutionDeviceSyncWakeHint | null;
   provider?: string | null;
 }
@@ -999,11 +1049,13 @@ export function resolveHostedDeviceSyncWakeContext(
   event: HostedExecutionDeviceSyncWakeEventLike,
 ): {
   connectionId: string | null;
+  expectedConnectedAt: string | null;
   hint: HostedExecutionDeviceSyncWakeEventLike["hint"];
   provider: string | null;
 } {
   return {
     connectionId: event.connectionId ?? null,
+    expectedConnectedAt: event.expectedConnectedAt ?? null,
     hint: event.hint ?? null,
     provider: event.provider ?? null,
   };
@@ -1509,6 +1561,7 @@ function parseHostedExecutionDeviceSyncRuntimeConnectionUpdate(
     "credential",
     "failureDiagnostic",
     "localState",
+    "observedConnectedAt",
     "observedTokenVersion",
     "observedUpdatedAt",
     "seed",
@@ -1531,6 +1584,12 @@ function parseHostedExecutionDeviceSyncRuntimeConnectionUpdate(
     : readNullableIsoTimestamp(
         record.observedUpdatedAt,
         `Hosted device-sync runtime apply request updates[${index}].observedUpdatedAt`,
+      );
+  const observedConnectedAt = record.observedConnectedAt === undefined
+    ? undefined
+    : readNullableIsoTimestamp(
+        record.observedConnectedAt,
+        `Hosted device-sync runtime apply request updates[${index}].observedConnectedAt`,
       );
   const observedTokenVersion = record.observedTokenVersion === undefined
     ? undefined
@@ -1578,6 +1637,7 @@ function parseHostedExecutionDeviceSyncRuntimeConnectionUpdate(
     ...(credential === undefined ? {} : { credential }),
     ...(failureDiagnostic === undefined ? {} : { failureDiagnostic }),
     ...(localState === undefined ? {} : { localState }),
+    ...(observedConnectedAt === undefined ? {} : { observedConnectedAt }),
     ...(observedUpdatedAt === undefined ? {} : { observedUpdatedAt }),
     ...(observedTokenVersion === undefined ? {} : { observedTokenVersion }),
     ...(seed === undefined ? {} : { seed }),

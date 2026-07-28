@@ -14,6 +14,10 @@ import {
   requiresHostedThreadDeliveryRouteRefresh,
 } from "../hosted-routing/thread-route-store";
 import {
+  bindArmedHostedUsageReferralToNewContainerTx,
+  observeHostedUsageReferralInboundTx,
+} from "../hosted-growth/usage-referral";
+import {
   isHostedMemberSuspended,
 } from "./entitlement";
 import {
@@ -37,6 +41,10 @@ import {
   resolveHostedMemberRoutingByTelegramUserId,
   upsertHostedMemberTelegramRoutingBindingTx,
 } from "./hosted-member-routing-store";
+import {
+  createHostedTelegramMessageLookupKey,
+  createHostedTelegramUserLookupKey,
+} from "./contact-privacy";
 import { lockHostedMemberRow } from "./shared";
 import {
   type HostedWebhookPlan,
@@ -163,6 +171,44 @@ export async function planHostedOnboardingTelegramWebhook(input: {
     : null;
 
   if (!existingMember) {
+    if (!summary.isDirect) {
+      const route = await readHostedThreadRouteByThreadIdentity({
+        channel: "telegram",
+        prisma: input.prisma,
+        threadId: telegramMessage.threadId,
+      });
+      const eventKey = createHostedTelegramMessageLookupKey({
+        chatId: telegramMessage.threadId,
+        messageId: telegramMessage.messageId,
+      });
+      const senderSubjectKey = createHostedTelegramUserLookupKey(
+        summary.senderTelegramUserId,
+      );
+      if (route && eventKey && senderSubjectKey) {
+        const observation = await observeHostedUsageReferralInboundTx({
+          containerMemberId: route.containerMemberId,
+          eventKey,
+          occurredAt: new Date(summary.occurredAt),
+          senderMemberId: null,
+          senderSubjectKey,
+          tx: input.prisma,
+        });
+        return {
+          ...buildIgnoredTelegramWebhookPlan(
+            observation.isBoundReferralTarget
+              ? "usage-referral-evidence-only"
+              : "unlinked-telegram",
+          ),
+          ...(observation.qualificationCandidateReferralId
+            ? {
+                postCommitUsageReferralIds: [
+                  observation.qualificationCandidateReferralId,
+                ],
+              }
+            : {}),
+        };
+      }
+    }
     return buildIgnoredTelegramWebhookPlan("unlinked-telegram");
   }
 
@@ -221,6 +267,14 @@ export async function planHostedOnboardingTelegramWebhook(input: {
           threadId: telegramMessage.threadId,
         });
         runtimeMemberId = ensured.containerMemberId;
+        if (ensured.created) {
+          await bindArmedHostedUsageReferralToNewContainerTx({
+            occurredAt: new Date(summary.occurredAt),
+            ownerMemberId: existingMember.id,
+            targetContainerMemberId: ensured.containerMemberId,
+            tx: input.prisma,
+          });
+        }
       } catch (error) {
         if (!isHostedOnboardingError(error) || error.code !== "HOSTED_THREAD_ROUTE_ALREADY_BOUND") {
           throw error;
@@ -286,9 +340,34 @@ export async function planHostedOnboardingTelegramWebhook(input: {
     }),
     tx: input.prisma,
   });
+  let qualificationCandidateReferralId: string | null = null;
+  if (!summary.isDirect) {
+    const eventKey = createHostedTelegramMessageLookupKey({
+      chatId: telegramMessage.threadId,
+      messageId: telegramMessage.messageId,
+    });
+    const senderSubjectKey = createHostedTelegramUserLookupKey(
+      summary.senderTelegramUserId,
+    );
+    if (eventKey && senderSubjectKey) {
+      qualificationCandidateReferralId = (
+        await observeHostedUsageReferralInboundTx({
+          containerMemberId: runtimeMemberId,
+          eventKey,
+          occurredAt: new Date(summary.occurredAt),
+          senderMemberId: existingMember.id,
+          senderSubjectKey,
+          tx: input.prisma,
+        })
+      ).qualificationCandidateReferralId;
+    }
+  }
 
   return {
     desiredSideEffects: [],
+    ...(qualificationCandidateReferralId
+      ? { postCommitUsageReferralIds: [qualificationCandidateReferralId] }
+      : {}),
     postCommitGroupJoinConfirmationMemberIds: [existingMember.id],
     response: {
       ok: true,

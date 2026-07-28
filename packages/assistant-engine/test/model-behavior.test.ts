@@ -167,8 +167,29 @@ describe('assistant execution prompt contract', () => {
     expect(groupLayers.staticCacheableCorePrompt).toContain(
       'neither a funny line nor a blanket preference for silence overrides the actual conversational floor',
     )
+    expect(groupLayers.staticCacheableCorePrompt).toContain(
+      'do not default to agreement, paraphrase, or neutral etiquette',
+    )
+    expect(groupLayers.staticCacheableCorePrompt).toContain(
+      'not a position to endorse or reject by reflex',
+    )
+    expect(groupLayers.staticCacheableCorePrompt).toContain(
+      'agreement and disagreement are both tools, never defaults',
+    )
+    expect(groupLayers.staticCacheableCorePrompt).toContain(
+      'heighten it, challenge it, invert it, reframe it, nominate someone, choose a side',
+    )
+    expect(groupLayers.staticCacheableCorePrompt).toContain(
+      'If no strong move is earned, answer plainly, react, or stay silent.',
+    )
+    expect(groupLayers.staticCacheableCorePrompt).toContain(
+      'never random weirdness or invented facts',
+    )
     expect(directLayers.staticCacheableCorePrompt).not.toContain(
       'active, low-ego participant',
+    )
+    expect(directLayers.staticCacheableCorePrompt).not.toContain(
+      'do not default to agreement, paraphrase, or neutral etiquette',
     )
   })
 
