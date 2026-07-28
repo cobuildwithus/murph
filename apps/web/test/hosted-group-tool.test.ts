@@ -265,6 +265,19 @@ const NEWSLETTER_DEFAULT_SCOPES = [
 ] as const;
 const DISCLOSURE_ORIGIN_ASSISTANT_INPUT_ID = `ain_${"d".repeat(32)}`;
 
+function addressBookLookupResult(
+  names: ReadonlyMap<string, string> = new Map(),
+  outcome = names.size === 0 ? "no_contact_match" : "matched",
+) {
+  return {
+    canonicalHandleCount: 2,
+    contactMatchCount: names.size,
+    names,
+    outcome,
+    requestedHandleCount: 2,
+  };
+}
+
 function groupSummaryWithOwnerEmailGrant() {
   return {
     ...GROUP_SUMMARY,
@@ -282,7 +295,9 @@ describe("handleHostedRuntimeGroupTool", () => {
     vi.clearAllMocks();
     mocks.lookupHostedMemberIdentityByPhoneNumber.mockReset();
     mocks.readHostedOwnerAddressBookAdvisoryNames.mockReset();
-    mocks.readHostedOwnerAddressBookAdvisoryNames.mockResolvedValue(new Map());
+    mocks.readHostedOwnerAddressBookAdvisoryNames.mockResolvedValue(
+      addressBookLookupResult(),
+    );
     mocks.canonicalizeHostedGroupDisclosurePermissionText.mockImplementation(
       (value: string) => value.replaceAll("\r\n", "\n").trim(),
     );
@@ -300,7 +315,9 @@ describe("handleHostedRuntimeGroupTool", () => {
       requestedProjectionScopeKeys: ["steps-days.v0"],
       status: "ok",
     });
-    mocks.readHostedOwnerAddressBookAdvisoryNames.mockResolvedValue(new Map());
+    mocks.readHostedOwnerAddressBookAdvisoryNames.mockResolvedValue(
+      addressBookLookupResult(),
+    );
     mocks.readHostedGroupMembershipsForMember.mockResolvedValue({
       memberships: [{
         displayName: "Fun-loving runners",
@@ -1644,7 +1661,9 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     vi.clearAllMocks();
     mocks.lookupHostedMemberIdentityByPhoneNumber.mockReset();
     mocks.readHostedOwnerAddressBookAdvisoryNames.mockReset();
-    mocks.readHostedOwnerAddressBookAdvisoryNames.mockResolvedValue(new Map());
+    mocks.readHostedOwnerAddressBookAdvisoryNames.mockResolvedValue(
+      addressBookLookupResult(),
+    );
     mocks.assertHostedLinqRouteEgressAuthority.mockResolvedValue({});
     mocks.canonicalizeHostedGroupDisclosurePermissionText.mockImplementation(
       (value: string) => value.replaceAll("\r\n", "\n").trim(),
@@ -2665,10 +2684,13 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
   });
 
   it("adds owner-only advisory names independently of Murph activation", async () => {
-    mocks.readHostedOwnerAddressBookAdvisoryNames.mockResolvedValue(new Map([
-      ["+15550000001", "Registered R."],
-      ["+15550000002", "Alex R."],
-    ]));
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
+    mocks.readHostedOwnerAddressBookAdvisoryNames.mockResolvedValue(
+      addressBookLookupResult(new Map([
+        ["+15550000001", "Registered R."],
+        ["+15550000002", "Alex R."],
+      ])),
+    );
     mocks.getHostedLinqChatHandles.mockResolvedValue([
       { handle: "+15557770000", isMe: true, status: "active" },
       { handle: "+15550000001", isMe: false, status: "active" },
@@ -2706,6 +2728,21 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       phoneHandles: ["+15550000001", "+15550000002"],
       prisma: expect.anything(),
     });
+    expect(info).toHaveBeenCalledExactlyOnceWith(
+      "Hosted address-book advisory lookup finished.",
+      {
+        canonicalHandleCount: 2,
+        contactMatchCount: 2,
+        labelMatchCount: 2,
+        outcome: "matched",
+        requestedHandleCount: 2,
+      },
+    );
+    const diagnostic = JSON.stringify(info.mock.calls);
+    expect(diagnostic).not.toContain("+15550000001");
+    expect(diagnostic).not.toContain("Registered R.");
+    expect(diagnostic).not.toContain("member_container");
+    info.mockRestore();
   });
 
   it("keeps the truthful roster available when advisory lookup fails", async () => {
@@ -2750,50 +2787,71 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     warn.mockRestore();
   });
 
-  it("returns the truthful roster when advisory lookup never settles", async () => {
-    const info = vi.spyOn(console, "info").mockImplementation(() => {});
-    vi.useFakeTimers();
-    try {
-      mocks.readHostedOwnerAddressBookAdvisoryNames.mockReturnValue(
-        new Promise(() => {}),
-      );
-      mocks.getHostedLinqChatHandles.mockResolvedValue([
-        { handle: "+15557770000", isMe: true, status: "active" },
-        { handle: "+15550000001", isMe: false, status: "active" },
-        { handle: "+15550000002", isMe: false, status: "active" },
-      ]);
-      mocks.lookupHostedMemberIdentityByPhoneNumber.mockImplementation(
-        async ({ phoneNumber }) => phoneNumber === "+15550000001"
-          ? { core: { id: "member_participant", suspendedAt: null } }
-          : null,
-      );
+  it.each(["success", "failure"] as const)(
+    "records the deadline once when advisory lookup settles late with %s",
+    async (lateOutcome) => {
+      const info = vi.spyOn(console, "info").mockImplementation(() => {});
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      vi.useFakeTimers();
+      try {
+        let resolveLookup:
+          ((value: ReturnType<typeof addressBookLookupResult>) => void) | undefined;
+        let rejectLookup: ((reason: Error) => void) | undefined;
+        mocks.readHostedOwnerAddressBookAdvisoryNames.mockReturnValue(
+          new Promise((resolve, reject) => {
+            resolveLookup = resolve;
+            rejectLookup = reject;
+          }),
+        );
+        mocks.getHostedLinqChatHandles.mockResolvedValue([
+          { handle: "+15557770000", isMe: true, status: "active" },
+          { handle: "+15550000001", isMe: false, status: "active" },
+          { handle: "+15550000002", isMe: false, status: "active" },
+        ]);
+        mocks.lookupHostedMemberIdentityByPhoneNumber.mockImplementation(
+          async ({ phoneNumber }) => phoneNumber === "+15550000001"
+            ? { core: { id: "member_participant", suspendedAt: null } }
+            : null,
+        );
 
-      const response = handleHostedRuntimeGroupTool({
-        memberId: "member_container",
-        request: { action: "read_chat_participants", linqThread: LINQ_THREAD },
-      });
-      await vi.advanceTimersByTimeAsync(
-        HOSTED_ADDRESS_BOOK_LOOKUP_TIMEOUT_MS,
-      );
-      await expect(response).resolves.toEqual({
-        action: "read_chat_participants",
-        result: {
-          participants: [
-            { handle: "+15550000001", hasOwnMurph: true },
-            { handle: "+15550000002", hasOwnMurph: false },
-          ],
-          status: "ok",
-        },
-      });
-      expect(info).toHaveBeenCalledExactlyOnceWith(
-        "Hosted address-book advisory lookup unavailable.",
-        { outcome: "deadline_exceeded" },
-      );
-    } finally {
-      vi.useRealTimers();
-      info.mockRestore();
-    }
-  });
+        const response = handleHostedRuntimeGroupTool({
+          memberId: "member_container",
+          request: { action: "read_chat_participants", linqThread: LINQ_THREAD },
+        });
+        await vi.advanceTimersByTimeAsync(
+          HOSTED_ADDRESS_BOOK_LOOKUP_TIMEOUT_MS,
+        );
+        await expect(response).resolves.toEqual({
+          action: "read_chat_participants",
+          result: {
+            participants: [
+              { handle: "+15550000001", hasOwnMurph: true },
+              { handle: "+15550000002", hasOwnMurph: false },
+            ],
+            status: "ok",
+          },
+        });
+        expect(info).toHaveBeenCalledExactlyOnceWith(
+          "Hosted address-book advisory lookup unavailable.",
+          { outcome: "deadline_exceeded" },
+        );
+        if (lateOutcome === "success") {
+          resolveLookup?.(addressBookLookupResult(new Map([
+            ["+15550000001", "Late R."],
+          ])));
+        } else {
+          rejectLookup?.(new Error("sensitive late provider detail"));
+        }
+        await Promise.resolve();
+        expect(info).toHaveBeenCalledTimes(1);
+        expect(warn).not.toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+        info.mockRestore();
+        warn.mockRestore();
+      }
+    },
+  );
 
   it("bounds read_chat_participants lookups and reconcile writes to the roster cap", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});

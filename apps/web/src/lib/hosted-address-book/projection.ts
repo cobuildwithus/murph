@@ -78,7 +78,7 @@ const RELATIONSHIP_OR_ROLE_WORDS = new Set([
 ]);
 
 type AddressBookMutationOperation = "delete" | "replace";
-type HostedAddressBookAdvisoryLookupOutcome =
+export type HostedAddressBookAdvisoryLookupOutcome =
   | "consent_unavailable"
   | "container_missing"
   | "disabled"
@@ -88,6 +88,14 @@ type HostedAddressBookAdvisoryLookupOutcome =
   | "no_safe_unique_label"
   | "owner_suspended"
   | "projection_disabled";
+
+export interface HostedOwnerAddressBookAdvisoryNamesResult {
+  canonicalHandleCount: number;
+  contactMatchCount: number;
+  names: ReadonlyMap<string, string>;
+  outcome: HostedAddressBookAdvisoryLookupOutcome;
+  requestedHandleCount: number;
+}
 
 export interface HostedAddressBookStatus {
   enabled: boolean;
@@ -389,7 +397,7 @@ export async function readHostedOwnerAddressBookAdvisoryNames(input: {
   phoneHandles: readonly string[];
   prisma: HostedOnboardingReadClient;
   source?: NodeJS.ProcessEnv;
-}): Promise<ReadonlyMap<string, string>> {
+}): Promise<HostedOwnerAddressBookAdvisoryNamesResult> {
   const source = input.source ?? process.env;
   const requestedHandleCount = Math.min(
     input.phoneHandles.length,
@@ -400,19 +408,16 @@ export async function readHostedOwnerAddressBookAdvisoryNames(input: {
     outcome: HostedAddressBookAdvisoryLookupOutcome,
     names: ReadonlyMap<string, string> = new Map<string, string>(),
     contactMatchCount = 0,
-  ): ReadonlyMap<string, string> => {
-    console.info("Hosted address-book advisory lookup finished.", {
-      canonicalHandleCount,
-      contactMatchCount: Math.min(
-        contactMatchCount,
-        HOSTED_ADDRESS_BOOK_LOOKUP_MAX_HANDLES,
-      ),
-      labelMatchCount: names.size,
-      outcome,
-      requestedHandleCount,
-    });
-    return names;
-  };
+  ): HostedOwnerAddressBookAdvisoryNamesResult => ({
+    canonicalHandleCount,
+    contactMatchCount: Math.min(
+      contactMatchCount,
+      HOSTED_ADDRESS_BOOK_LOOKUP_MAX_HANDLES,
+    ),
+    names,
+    outcome,
+    requestedHandleCount,
+  });
 
   if (!isFeatureEnabled(source, HOSTED_ADDRESS_BOOK_ADVISORY_GATE)) {
     return finish("disabled");

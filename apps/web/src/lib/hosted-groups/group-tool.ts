@@ -1424,31 +1424,49 @@ async function handleHostedRuntimeGroupReadChatParticipants(input: {
 async function readHostedOwnerAddressBookAdvisoryNamesWithinDeadline(
   input: Parameters<typeof readHostedOwnerAddressBookAdvisoryNames>[0],
 ): Promise<ReadonlyMap<string, string>> {
-  const lookup = readHostedOwnerAddressBookAdvisoryNames(input).catch((error) => {
-    console.warn("Hosted address-book advisory lookup unavailable.", {
-      ...sanitizeHostedOnboardingStructuredLogDetails({
-        errorName: deriveHostedOnboardingTimingErrorName(error),
-        outcome: "lookup_failed",
-      }),
-    });
-    return new Map<string, string>();
-  });
+  const lookup = readHostedOwnerAddressBookAdvisoryNames(input).then(
+    (result) => ({ kind: "completed" as const, result }),
+    (error: unknown) => ({
+      errorName: deriveHostedOnboardingTimingErrorName(error),
+      kind: "failed" as const,
+    }),
+  );
   // Prisma operations do not consume AbortSignal. Bound the entire optional
   // overlay at its caller so a stuck read can never delay the truthful roster.
   // The underlying lookup still receives its own KMS abort signal.
 
   let timeout: ReturnType<typeof setTimeout> | undefined;
-  const deadline = new Promise<ReadonlyMap<string, string>>((resolve) => {
+  const deadline = new Promise<{ kind: "deadline_exceeded" }>((resolve) => {
     timeout = setTimeout(() => {
-      console.info("Hosted address-book advisory lookup unavailable.", {
-        outcome: "deadline_exceeded",
-      });
-      resolve(new Map());
+      resolve({ kind: "deadline_exceeded" });
     }, HOSTED_ADDRESS_BOOK_LOOKUP_TIMEOUT_MS);
   });
 
   try {
-    return await Promise.race([lookup, deadline]);
+    const terminal = await Promise.race([lookup, deadline]);
+    if (terminal.kind === "completed") {
+      console.info("Hosted address-book advisory lookup finished.", {
+        canonicalHandleCount: terminal.result.canonicalHandleCount,
+        contactMatchCount: terminal.result.contactMatchCount,
+        labelMatchCount: terminal.result.names.size,
+        outcome: terminal.result.outcome,
+        requestedHandleCount: terminal.result.requestedHandleCount,
+      });
+      return terminal.result.names;
+    }
+    if (terminal.kind === "failed") {
+      console.warn("Hosted address-book advisory lookup unavailable.", {
+        ...sanitizeHostedOnboardingStructuredLogDetails({
+          errorName: terminal.errorName,
+          outcome: "lookup_failed",
+        }),
+      });
+    } else {
+      console.info("Hosted address-book advisory lookup unavailable.", {
+        outcome: "deadline_exceeded",
+      });
+    }
+    return new Map<string, string>();
   } finally {
     if (timeout !== undefined) {
       clearTimeout(timeout);
