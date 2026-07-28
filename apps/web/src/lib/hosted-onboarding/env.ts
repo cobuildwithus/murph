@@ -30,6 +30,68 @@ export interface HostedContactPrivacyKeyring {
 export type HostedLinqFirstContactAdmissionMode = "enforce" | "off";
 
 const DEFAULT_HOSTED_LINQ_FIRST_CONTACT_ADMISSION_MODEL = "gpt-5.6-terra";
+const DEFAULT_HOSTED_LINQ_INSTANT_START_PHONE_PREFIXES = [
+  // North America. This is intentionally the full NANP, not US/Canada-only.
+  "+1",
+  // Europe.
+  "+30",
+  "+31",
+  "+32",
+  "+33",
+  "+34",
+  "+351",
+  "+352",
+  "+353",
+  "+354",
+  "+356",
+  "+357",
+  "+358",
+  "+359",
+  "+36",
+  "+370",
+  "+371",
+  "+372",
+  "+376",
+  "+377",
+  "+378",
+  "+385",
+  "+386",
+  "+39",
+  "+40",
+  "+41",
+  "+420",
+  "+421",
+  "+423",
+  "+43",
+  "+44",
+  "+45",
+  "+46",
+  "+47",
+  "+48",
+  "+49",
+  // Asia-Pacific.
+  "+61",
+  "+64",
+  "+65",
+  "+673",
+  "+81",
+  "+82",
+  "+852",
+  "+853",
+  "+886",
+  // Middle East.
+  "+965",
+  "+966",
+  "+968",
+  "+971",
+  "+972",
+  "+973",
+  "+974",
+  // Latin America.
+  "+56",
+  "+598",
+] as const;
+const HOSTED_LINQ_INSTANT_START_PHONE_PREFIX_PATTERN = /^\+[1-9]\d{0,5}$/u;
 
 export interface HostedOnboardingEnvironment {
   allowedMutationOrigins?: readonly string[];
@@ -42,6 +104,7 @@ export interface HostedOnboardingEnvironment {
   linqFirstContactAdmissionMode: HostedLinqFirstContactAdmissionMode;
   linqFirstContactAdmissionModel: string;
   linqFirstContactAdmissionOpenAiApiKey: string | null;
+  linqInstantStartPhonePrefixes: readonly string[];
   linqLocalAllowedInboundPhoneNumbers?: readonly string[];
   linqMaxActiveMembersPerConversationPhone: number | null;
   linqWebhookSecret: string | null;
@@ -90,6 +153,8 @@ export function readHostedOnboardingEnvironment(
     linqFirstContactAdmissionOpenAiApiKey:
       readEnv(source, "HOSTED_ONBOARDING_LINQ_FIRST_CONTACT_ADMISSION_OPENAI_API_KEY")
       ?? readEnv(source, "OPENAI_API_KEY"),
+    linqInstantStartPhonePrefixes:
+      readHostedLinqInstantStartPhonePrefixes(source),
     linqLocalAllowedInboundPhoneNumbers:
       readHostedLinqLocalAllowedInboundPhoneNumbers(source, isProduction),
     linqMaxActiveMembersPerConversationPhone: readPositiveInteger(
@@ -398,6 +463,46 @@ function readHostedLinqFirstContactAdmissionMode(
 
   throw new TypeError(
     "HOSTED_ONBOARDING_LINQ_FIRST_CONTACT_ADMISSION_MODE must be either \"off\" or \"enforce\".",
+  );
+}
+
+export function parseHostedLinqInstantStartPhonePrefixes(
+  configured: string | null | undefined,
+): string[] {
+  const values = configured?.trim()
+    ? configured.split(/[\n,]+/u)
+    : [...DEFAULT_HOSTED_LINQ_INSTANT_START_PHONE_PREFIXES];
+  const prefixes: string[] = [];
+
+  for (const rawValue of values) {
+    const value = rawValue.trim();
+    if (!value) {
+      continue;
+    }
+    if (!HOSTED_LINQ_INSTANT_START_PHONE_PREFIX_PATTERN.test(value)) {
+      throw new TypeError(
+        "HOSTED_ONBOARDING_LINQ_INSTANT_START_PHONE_PREFIXES must contain comma-separated E.164 phone prefixes.",
+      );
+    }
+    if (!prefixes.includes(value)) {
+      prefixes.push(value);
+    }
+  }
+
+  if (prefixes.length === 0) {
+    return [...DEFAULT_HOSTED_LINQ_INSTANT_START_PHONE_PREFIXES];
+  }
+
+  return prefixes.sort((left, right) =>
+    right.length - left.length || left.localeCompare(right)
+  );
+}
+
+function readHostedLinqInstantStartPhonePrefixes(
+  source: HostedOnboardingEnvSource,
+): string[] {
+  return parseHostedLinqInstantStartPhonePrefixes(
+    readEnv(source, "HOSTED_ONBOARDING_LINQ_INSTANT_START_PHONE_PREFIXES"),
   );
 }
 

@@ -25,14 +25,18 @@ export const HOSTED_NONGROUP_USAGE_CREDIT_OFFER_CODES = [
 
 export const HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_V1 =
   "hosted-usage-credit-checkout-v1" as const;
-export const HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_VERSION =
+export const HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_V2 =
   "hosted-usage-credit-checkout-v2" as const;
+export const HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_VERSION =
+  "hosted-usage-credit-checkout-v3" as const;
 export const HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_VERSIONS = [
   HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_V1,
+  HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_V2,
   HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_VERSION,
 ] as const;
 export type HostedUsageCreditCheckoutRequestPolicyVersion =
   (typeof HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_VERSIONS)[number];
+export type HostedUsageCreditTargetKind = "family" | "group" | "personal";
 export const HOSTED_USAGE_CREDIT_CHECKOUT_PURPOSE =
   "hosted_usage_credit" as const;
 // Keep direct saved-card PaymentIntents distinct from Checkout-only events while
@@ -44,9 +48,28 @@ export function parseHostedUsageCreditCheckoutRequestPolicyVersion(
   value: string,
 ): HostedUsageCreditCheckoutRequestPolicyVersion | null {
   return value === HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_V1 ||
-    value === HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_VERSION
+      value === HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_V2 ||
+      value === HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_VERSION
     ? value
     : null;
+}
+
+export function isHostedUsageCreditSavedCardPolicyVersion(
+  value: HostedUsageCreditCheckoutRequestPolicyVersion,
+): boolean {
+  return value === HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_V2 ||
+    value === HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_VERSION;
+}
+
+export function hostedUsageCreditPolicySupportsSavedCardTarget(input: {
+  policyVersion: HostedUsageCreditCheckoutRequestPolicyVersion;
+  targetKind: HostedUsageCreditTargetKind;
+}): boolean {
+  return input.policyVersion === HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_VERSION ||
+    (
+      input.policyVersion === HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_V2 &&
+      input.targetKind === "group"
+    );
 }
 
 export interface HostedUsageCreditOfferDefinition {

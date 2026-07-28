@@ -34,7 +34,9 @@ import {
 import {
   filterHostedNonGroupUsageCreditOfferCodes,
   getHostedUsageCreditOfferDefinition,
+  hostedUsageCreditPolicySupportsSavedCardTarget,
   HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_VERSION,
+  parseHostedUsageCreditCheckoutRequestPolicyVersion,
   parseHostedGroupSponsorshipOfferCode,
   parseHostedUsageCreditOfferCode,
   type HostedGroupSponsorshipOfferCode,
@@ -77,6 +79,7 @@ import {
   assertHostedGroupSponsorshipRequestMatchesTx,
   createHostedGroupSponsorshipMomentTx,
   hasHostedGroupSponsorshipCustomizationAuthority,
+  hostedGroupSponsorshipRequestMatchesTx,
   parseHostedGroupSponsorshipDraft,
   type HostedGroupSponsorshipDraft,
 } from "../hosted-groups/group-sponsorship-store";
@@ -103,6 +106,7 @@ export type {
   HostedUsageCreditCheckoutResult,
   HostedUsageCreditPublicPurchaseStatus,
   HostedUsageCreditPurchaseStatusResult,
+  HostedUsageCreditSelectionConflict,
   HostedUsageCreditPurchaseTargetProjection,
 } from "./usage-credit-purchase-status-service";
 export {
@@ -124,14 +128,57 @@ const HOSTED_USAGE_CREDIT_NONTERMINAL_PURCHASE_STATUSES = [
   HostedUsageCreditPurchaseStatus.payment_pending,
 ] as const;
 
+function canContinueHostedUsageCreditPurchase(
+  status: HostedUsageCreditPurchaseStatus,
+): boolean {
+  return status === HostedUsageCreditPurchaseStatus.created
+    || status === HostedUsageCreditPurchaseStatus.checkout_open
+    || status === HostedUsageCreditPurchaseStatus.payment_pending;
+}
+
 export interface HostedUsageCreditCheckoutRequest {
   clientRequestKey: string;
   offerCode: HostedUsageCreditOfferCode;
+  recoveryOnly: boolean;
+}
+
+export interface HostedUsageCreditCheckoutRecoveryMiss {
+  recoveryMiss: true;
+}
+
+export type HostedUsageCreditCheckoutAttemptResult =
+  | HostedUsageCreditCheckoutRecoveryMiss
+  | HostedUsageCreditCheckoutResult;
+
+interface HostedUsageCreditCheckoutCommonInput {
+  clientRequestKey: string;
+  now?: Date;
+  offerCode: HostedUsageCreditOfferCode;
+  prisma?: PrismaClient;
+}
+
+interface HostedPersonalUsageCreditCheckoutInput
+  extends HostedUsageCreditCheckoutCommonInput {
+  memberId: string;
+}
+
+interface HostedGroupUsageCreditCheckoutInput
+  extends HostedUsageCreditCheckoutCommonInput {
+  joinCode: string;
+  payerMemberId: string;
+  sponsorship?: HostedGroupSponsorshipDraft | null;
+}
+
+interface HostedFamilyUsageCreditCheckoutInput
+  extends HostedUsageCreditCheckoutCommonInput {
+  beneficiaryMemberId: string;
+  payerMemberId: string;
 }
 
 export interface HostedGroupSponsorshipCheckoutRequest {
   clientRequestKey: string;
   offerCode: HostedGroupSponsorshipOfferCode;
+  recoveryOnly: boolean;
   sponsorship: HostedGroupSponsorshipDraft | null;
 }
 
@@ -158,10 +205,12 @@ export function parseHostedUsageCreditCheckoutRequest(
   value: Record<string, unknown>,
 ): HostedUsageCreditCheckoutRequest {
   const keys = Object.keys(value).sort();
+  const recoveryOnly = value.recoveryOnly === true;
   if (
-    keys.length !== 2 ||
+    keys.length !== (recoveryOnly ? 3 : 2) ||
     keys[0] !== "clientRequestKey" ||
-    keys[1] !== "offerCode"
+    keys[1] !== "offerCode" ||
+    (recoveryOnly && keys[2] !== "recoveryOnly")
   ) {
     throw hostedOnboardingError({
       code: "HOSTED_USAGE_CREDIT_CHECKOUT_INVALID_REQUEST",
@@ -194,6 +243,7 @@ export function parseHostedUsageCreditCheckoutRequest(
   return {
     clientRequestKey,
     offerCode,
+    recoveryOnly,
   };
 }
 
@@ -205,6 +255,7 @@ export function parseHostedGroupSponsorshipCheckoutRequest(
     keys.some((key) =>
       key !== "clientRequestKey" &&
       key !== "offerCode" &&
+      key !== "recoveryOnly" &&
       key !== "sponsorship"
     ) ||
     !keys.includes("clientRequestKey") ||
@@ -219,6 +270,9 @@ export function parseHostedGroupSponsorshipCheckoutRequest(
   const base = parseHostedUsageCreditCheckoutRequest({
     clientRequestKey: value.clientRequestKey,
     offerCode: value.offerCode,
+    ...(keys.includes("recoveryOnly")
+      ? { recoveryOnly: value.recoveryOnly }
+      : {}),
   });
   const offerCode = parseHostedGroupSponsorshipOfferCode(base.offerCode);
   if (!offerCode) {
@@ -231,22 +285,26 @@ export function parseHostedGroupSponsorshipCheckoutRequest(
   return {
     clientRequestKey: base.clientRequestKey,
     offerCode,
+    recoveryOnly: base.recoveryOnly,
     sponsorship: parseHostedGroupSponsorshipDraft(value.sponsorship),
   };
 }
 
-export async function createHostedUsageCreditCheckout(input: {
-  clientRequestKey: string;
-  memberId: string;
-  now?: Date;
-  offerCode: HostedUsageCreditOfferCode;
-  prisma?: PrismaClient;
-}): Promise<HostedUsageCreditCheckoutResult> {
+export function createHostedUsageCreditCheckout(
+  input: HostedPersonalUsageCreditCheckoutInput & { recoveryOnly: true },
+): Promise<HostedUsageCreditCheckoutAttemptResult>;
+export function createHostedUsageCreditCheckout(
+  input: HostedPersonalUsageCreditCheckoutInput,
+): Promise<HostedUsageCreditCheckoutResult>;
+export async function createHostedUsageCreditCheckout(
+  input: HostedPersonalUsageCreditCheckoutInput & { recoveryOnly?: true },
+): Promise<HostedUsageCreditCheckoutAttemptResult> {
   return createHostedUsageCreditCheckoutForTarget({
     clientRequestKey: input.clientRequestKey,
     now: input.now,
     offerCode: input.offerCode,
     prisma: input.prisma,
+    ...(input.recoveryOnly ? { recoveryOnly: true } : {}),
     target: {
       beneficiaryMemberId: input.memberId,
       kind: "personal",
@@ -255,15 +313,15 @@ export async function createHostedUsageCreditCheckout(input: {
   });
 }
 
-export async function createHostedGroupUsageCreditCheckout(input: {
-  clientRequestKey: string;
-  joinCode: string;
-  now?: Date;
-  offerCode: HostedUsageCreditOfferCode;
-  payerMemberId: string;
-  prisma?: PrismaClient;
-  sponsorship?: HostedGroupSponsorshipDraft | null;
-}): Promise<HostedUsageCreditCheckoutResult> {
+export function createHostedGroupUsageCreditCheckout(
+  input: HostedGroupUsageCreditCheckoutInput & { recoveryOnly: true },
+): Promise<HostedUsageCreditCheckoutAttemptResult>;
+export function createHostedGroupUsageCreditCheckout(
+  input: HostedGroupUsageCreditCheckoutInput,
+): Promise<HostedUsageCreditCheckoutResult>;
+export async function createHostedGroupUsageCreditCheckout(
+  input: HostedGroupUsageCreditCheckoutInput & { recoveryOnly?: true },
+): Promise<HostedUsageCreditCheckoutAttemptResult> {
   const prisma = input.prisma ?? getPrisma();
   const locator = normalizeHostedGroupUsageFundingLocator(input.joinCode);
   const fundingTarget = locator
@@ -272,18 +330,21 @@ export async function createHostedGroupUsageCreditCheckout(input: {
   if (!fundingTarget) {
     throw buildHostedUsageCreditNotEligibleError("group");
   }
-  const stripeCustomerId = await ensureHostedMemberStripeCustomer({
-    memberId: input.payerMemberId,
-    prisma,
-  });
+  const stripeCustomerId = input.recoveryOnly
+    ? null
+    : await ensureHostedMemberStripeCustomer({
+        memberId: input.payerMemberId,
+        prisma,
+      });
 
   return createHostedUsageCreditCheckoutForTarget({
     clientRequestKey: input.clientRequestKey,
+    ...(stripeCustomerId ? { groupStripeCustomerId: stripeCustomerId } : {}),
     groupSponsorship: input.sponsorship ?? null,
-    groupStripeCustomerId: stripeCustomerId,
     now: input.now,
     offerCode: input.offerCode,
     prisma,
+    ...(input.recoveryOnly ? { recoveryOnly: true } : {}),
     target: {
       beneficiaryMemberId: fundingTarget.runtimeMemberId,
       joinCode: fundingTarget.joinCode,
@@ -293,19 +354,21 @@ export async function createHostedGroupUsageCreditCheckout(input: {
   });
 }
 
-export async function createHostedFamilyMemberUsageCreditCheckout(input: {
-  beneficiaryMemberId: string;
-  clientRequestKey: string;
-  now?: Date;
-  offerCode: HostedUsageCreditOfferCode;
-  payerMemberId: string;
-  prisma?: PrismaClient;
-}): Promise<HostedUsageCreditCheckoutResult> {
+export function createHostedFamilyMemberUsageCreditCheckout(
+  input: HostedFamilyUsageCreditCheckoutInput & { recoveryOnly: true },
+): Promise<HostedUsageCreditCheckoutAttemptResult>;
+export function createHostedFamilyMemberUsageCreditCheckout(
+  input: HostedFamilyUsageCreditCheckoutInput,
+): Promise<HostedUsageCreditCheckoutResult>;
+export async function createHostedFamilyMemberUsageCreditCheckout(
+  input: HostedFamilyUsageCreditCheckoutInput & { recoveryOnly?: true },
+): Promise<HostedUsageCreditCheckoutAttemptResult> {
   return createHostedUsageCreditCheckoutForTarget({
     clientRequestKey: input.clientRequestKey,
     now: input.now,
     offerCode: input.offerCode,
     prisma: input.prisma,
+    ...(input.recoveryOnly ? { recoveryOnly: true } : {}),
     target: {
       beneficiaryMemberId: input.beneficiaryMemberId,
       groupId: null,
@@ -322,8 +385,9 @@ async function createHostedUsageCreditCheckoutForTarget(input: {
   now?: Date;
   offerCode: HostedUsageCreditOfferCode;
   prisma?: PrismaClient;
+  recoveryOnly?: true;
   target: HostedUsageCreditCheckoutTarget;
-}): Promise<HostedUsageCreditCheckoutResult> {
+}): Promise<HostedUsageCreditCheckoutAttemptResult> {
   const prisma = input.prisma ?? getPrisma();
   const now = input.now ?? new Date();
   const resolution = await prisma.$transaction(async (tx) => {
@@ -348,16 +412,14 @@ async function createHostedUsageCreditCheckoutForTarget(input: {
       },
     });
     if (racedExisting) {
-      assertHostedUsageCreditRequestMatches({
-        offerCode: input.offerCode,
+      if (!hostedUsageCreditTargetMatches({
         purchase: racedExisting,
         target: input.target,
-      });
-      if (input.target.kind === "group") {
-        await assertHostedGroupSponsorshipRequestMatchesTx({
-          draft: input.groupSponsorship ?? null,
-          purchaseId: racedExisting.id,
-          tx,
+      })) {
+        throw hostedOnboardingError({
+          code: "HOSTED_USAGE_CREDIT_REQUEST_KEY_CONFLICT",
+          httpStatus: 409,
+          message: "That usage-credit request key was already used for another request.",
         });
       }
       if (input.target.kind === "family") {
@@ -375,15 +437,76 @@ async function createHostedUsageCreditCheckoutForTarget(input: {
           currentTarget.groupId !== frozenTarget.familyGroupId
         ) {
           return {
+            kind: "purchase" as const,
             purchase: racedExisting,
             recovered: true,
+            requestKeyMatched: true,
+            selectionConflict: null,
             targetConflict: true,
           };
         }
       }
+      let recoveredPurchase = racedExisting;
+      if (
+        recoveredPurchase.status === HostedUsageCreditPurchaseStatus.created
+        && now.getTime() >= recoveredPurchase.checkoutExpiresAt.getTime()
+      ) {
+        await closeExpiredUnattachedHostedUsageCreditPurchasesTx({
+          now,
+          payerMemberId: input.target.payerMemberId,
+          purchaseId: recoveredPurchase.id,
+          tx,
+        });
+        const closedPurchase = await tx.hostedUsageCreditPurchase.findUnique({
+          where: { id: recoveredPurchase.id },
+        });
+        if (
+          !closedPurchase
+          || closedPurchase.status !== HostedUsageCreditPurchaseStatus.expired
+        ) {
+          throw buildHostedUsageCreditInvariantError(
+            "checkout_expiry_close_failed",
+          );
+        }
+        recoveredPurchase = closedPurchase;
+      }
+      if (recoveredPurchase.offerCode !== input.offerCode) {
+        return {
+          kind: "purchase" as const,
+          purchase: recoveredPurchase,
+          recovered: true,
+          requestKeyMatched: true,
+          selectionConflict: "offer" as const,
+          targetConflict: false,
+        };
+      }
+      if (input.target.kind === "group") {
+        const sponsorshipInput = {
+          draft: input.groupSponsorship ?? null,
+          purchaseId: recoveredPurchase.id,
+          tx,
+        };
+        if (canContinueHostedUsageCreditPurchase(recoveredPurchase.status)) {
+          await assertHostedGroupSponsorshipRequestMatchesTx(sponsorshipInput);
+        } else if (
+          !(await hostedGroupSponsorshipRequestMatchesTx(sponsorshipInput))
+        ) {
+          return {
+            kind: "purchase" as const,
+            purchase: recoveredPurchase,
+            recovered: true,
+            requestKeyMatched: true,
+            selectionConflict: "sponsorship" as const,
+            targetConflict: false,
+          };
+        }
+      }
       return {
-        purchase: racedExisting,
+        kind: "purchase" as const,
+        purchase: recoveredPurchase,
         recovered: false,
+        requestKeyMatched: true,
+        selectionConflict: null,
         targetConflict: false,
       };
     }
@@ -424,6 +547,16 @@ async function createHostedUsageCreditCheckoutForTarget(input: {
         purchase: existingActive,
         target,
       })) {
+        if (existingActive.offerCode !== input.offerCode) {
+          return {
+            kind: "purchase" as const,
+            purchase: existingActive,
+            recovered: true,
+            requestKeyMatched: false,
+            selectionConflict: "offer" as const,
+            targetConflict: false,
+          };
+        }
         if (target.kind === "group") {
           await assertHostedGroupSponsorshipRequestMatchesTx({
             draft: input.groupSponsorship ?? null,
@@ -431,28 +564,27 @@ async function createHostedUsageCreditCheckoutForTarget(input: {
             tx,
           });
         }
-        if (
-          target.kind === "group" &&
-          existingActive.offerCode !== input.offerCode
-        ) {
-          throw hostedOnboardingError({
-            code: "HOSTED_USAGE_CREDIT_ACTIVE_PURCHASE_OFFER_CONFLICT",
-            httpStatus: 409,
-            message:
-              "Finish the unfinished usage-credit payment before choosing another amount.",
-          });
-        }
         return {
+          kind: "purchase" as const,
           purchase: existingActive,
           recovered: true,
+          requestKeyMatched: false,
+          selectionConflict: null,
           targetConflict: false,
         };
       }
       return {
+        kind: "purchase" as const,
         purchase: existingActive,
         recovered: true,
+        requestKeyMatched: false,
+        selectionConflict: null,
         targetConflict: true,
       };
+    }
+
+    if (input.recoveryOnly) {
+      return { kind: "recovery_miss" as const };
     }
 
     let authorizedOfferCodes: HostedUsageCreditOfferCode[];
@@ -618,11 +750,18 @@ async function createHostedUsageCreditCheckoutForTarget(input: {
       });
     }
     return {
+      kind: "purchase" as const,
       purchase: created,
       recovered: false,
+      requestKeyMatched: true,
+      selectionConflict: null,
       targetConflict: false,
     };
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+
+  if (resolution.kind === "recovery_miss") {
+    return { recoveryMiss: true };
+  }
 
   if (resolution.targetConflict) {
     const projected = projectHostedUsageCreditPurchaseStatusResult(
@@ -631,9 +770,23 @@ async function createHostedUsageCreditCheckoutForTarget(input: {
     return {
       purchaseId: projected.purchaseId,
       recovered: true,
+      ...(resolution.requestKeyMatched
+        ? { requestKeyMatched: true as const }
+        : {}),
       ...(projected.restartAt ? { restartAt: projected.restartAt } : {}),
       status: projected.status,
       targetConflict: true,
+    };
+  }
+
+  if (resolution.selectionConflict) {
+    return {
+      ...projectHostedUsageCreditPurchaseStatusResult(resolution.purchase),
+      recovered: true,
+      ...(resolution.requestKeyMatched
+        ? { requestKeyMatched: true as const }
+        : {}),
+      selectionConflict: resolution.selectionConflict,
     };
   }
 
@@ -646,6 +799,9 @@ async function createHostedUsageCreditCheckoutForTarget(input: {
     return {
       ...checkout,
       ...(resolution.recovered ? { recovered: true as const } : {}),
+      ...(resolution.requestKeyMatched
+        ? { requestKeyMatched: true as const }
+        : {}),
     };
   } catch (error) {
     if (
@@ -666,6 +822,9 @@ async function createHostedUsageCreditCheckoutForTarget(input: {
       return {
         ...projection.checkout,
         recovered: true,
+        ...(resolution.requestKeyMatched
+          ? { requestKeyMatched: true as const }
+          : {}),
         ...(projection.retryAllowed
           ? { retryAllowed: true as const }
           : {}),
@@ -691,12 +850,23 @@ async function continueHostedUsageCreditCheckout(input: {
     purchase,
   });
   const target = projectHostedUsageCreditPurchaseTarget(purchase);
+  const policyVersion = parseHostedUsageCreditCheckoutRequestPolicyVersion(
+    purchase.checkoutRequestPolicyVersion,
+  );
+  if (!policyVersion) {
+    throw buildHostedUsageCreditInvariantError("checkout_policy_mismatch");
+  }
   const canRetryCheckoutCreate = canRetryHostedUsageCreditCheckoutCreate({
     now: input.now,
     purchase,
   });
+  const canStartSavedCardPayment =
+    canRetryCheckoutCreate &&
+    hostedUsageCreditPolicySupportsSavedCardTarget({
+      policyVersion,
+      targetKind: target.kind,
+    });
   const canRetrySavedCardPayment =
-    target.kind === "group" &&
     canRetryHostedUsageCreditSavedCardPayment(purchase);
   if (
     !canRetryCheckoutCreate &&
@@ -724,10 +894,11 @@ async function continueHostedUsageCreditCheckout(input: {
     stripe,
   });
   let checkoutPurchase = purchase;
-  if (target.kind === "group") {
+  if (canStartSavedCardPayment || canRetrySavedCardPayment) {
     const directPaymentPurchase = await tryChargeHostedUsageCreditSavedCard({
       checkoutRequest,
       now: input.now,
+      policyVersion,
       prisma: input.prisma,
       purchase,
       stripe,
@@ -1008,27 +1179,6 @@ function buildHostedUsageCreditCheckoutReturnUrl(input: {
   return url.toString();
 }
 
-function assertHostedUsageCreditRequestMatches(input: {
-  offerCode: HostedUsageCreditOfferCode | null;
-  purchase: Pick<
-    HostedUsageCreditPurchase,
-    | "beneficiaryMemberId"
-    | "checkoutSuccessUrl"
-    | "id"
-    | "offerCode"
-    | "payerMemberId"
-  >;
-  target: HostedUsageCreditCheckoutTarget;
-}): void {
-  if (!hostedUsageCreditRequestMatches(input)) {
-    throw hostedOnboardingError({
-      code: "HOSTED_USAGE_CREDIT_REQUEST_KEY_CONFLICT",
-      httpStatus: 409,
-      message: "That usage-credit request key was already used for another request.",
-    });
-  }
-}
-
 function hostedUsageCreditTargetMatches(input: {
   purchase: Pick<
     HostedUsageCreditPurchase,
@@ -1054,25 +1204,6 @@ function hostedUsageCreditTargetMatches(input: {
         && (input.target.groupId === null
           || frozenTarget.familyGroupId === input.target.groupId);
   }
-}
-
-function hostedUsageCreditRequestMatches(input: {
-  offerCode: HostedUsageCreditOfferCode | null;
-  purchase: Pick<
-    HostedUsageCreditPurchase,
-    | "beneficiaryMemberId"
-    | "checkoutSuccessUrl"
-    | "id"
-    | "offerCode"
-    | "payerMemberId"
-  >;
-  target: HostedUsageCreditCheckoutTarget;
-}): boolean {
-  return Boolean(
-    input.offerCode
-    && input.purchase.offerCode === input.offerCode
-    && hostedUsageCreditTargetMatches(input)
-  );
 }
 
 function buildHostedUsageCreditNotEligibleError(

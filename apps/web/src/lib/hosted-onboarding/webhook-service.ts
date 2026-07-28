@@ -13,6 +13,7 @@ import {
   getHostedLinqChatSummary,
 } from "./linq-client";
 import { hostedOnboardingError, isHostedOnboardingError } from "./errors";
+import { getHostedOnboardingEnvironment } from "./runtime";
 import {
   planHostedLinqPermanentHomeRouteRecovery,
 } from "./linq-home-route-recovery";
@@ -70,7 +71,14 @@ import {
   readRecordedHostedLinqFirstContactAdmissionDecision,
   recordHostedLinqFirstContactAdmissionDecision,
   tryHostedLinqFirstContactAdmissionDeterministicDecision,
+  type HostedLinqFirstContactAdmissionDecision,
 } from "./linq-first-contact-admission";
+import {
+  ensureHostedLinqInstantStartPulseTrialEnrollment,
+} from "./auto-trial-enrollment-service";
+import {
+  isHostedLinqInstantStartEventCandidate,
+} from "./linq-instant-start";
 import {
   maybeHandoffHostedExecutionWebhookWake,
 } from "./webhook-service-wake";
@@ -323,29 +331,48 @@ export async function handleHostedOnboardingLinqWebhook(input: {
     const requireFirstContactAdmission = firstContactAdmissionMode === "enforce";
     let firstContactAdmissionClassified = false;
     try {
-      const recordedAdmission = requireFirstContactAdmission
-        ? await readRecordedHostedLinqFirstContactAdmissionDecision({
-            eventId: event.event_id,
-            prisma,
+      const shouldReuseRecordedFirstContactAdmission =
+        planningEvent.event_type === "message.received"
+        && (
+          requireFirstContactAdmission
+          || isHostedLinqInstantStartEventCandidate({
+            event: requireHostedLinqMessageReceivedEvent(planningEvent),
+            phonePrefixes:
+              getHostedOnboardingEnvironment().linqInstantStartPhonePrefixes,
           })
-        : null;
-
-      if (recordedAdmission?.kind === "block") {
-        plan = buildBlockedHostedLinqFirstContactAdmissionPlan();
-      } else {
-        plan = await runHostedOnboardingWebhookTransaction(
+        );
+      let firstContactAdmissionDecision: HostedLinqFirstContactAdmissionDecision | null =
+        shouldReuseRecordedFirstContactAdmission
+          ? await readRecordedHostedLinqFirstContactAdmissionDecision({
+              eventId: event.event_id,
+              prisma,
+            })
+          : null;
+      const runPlan = (instantStartAllowed = true) =>
+        runHostedOnboardingWebhookTransaction(
           prisma,
           (transaction) =>
             planHostedOnboardingLinqWebhook({
               affirmativeReaction,
               event: planningEvent,
-              firstContactAdmitted: recordedAdmission?.kind === "allow",
+              firstContactAdmissionDecision,
+              instantStartAllowed,
               requireFirstContactAdmission,
               prisma: transaction,
             }),
           warmPlanningMailboxPayloadRoot,
         );
+      const planAfterBlockedAdmission = (reason?: string) =>
+        requireFirstContactAdmission
+          ? Promise.resolve(buildBlockedHostedLinqFirstContactAdmissionPlan(reason))
+          : runPlan(false);
+
+      if (firstContactAdmissionDecision?.kind === "block") {
+        plan = await planAfterBlockedAdmission();
+      } else {
+        plan = await runPlan();
       }
+
 
       if (plan.firstContactAdmissionRequest) {
         const firstContactAdmissionRequest = plan.firstContactAdmissionRequest;
@@ -356,25 +383,15 @@ export async function handleHostedOnboardingLinqWebhook(input: {
           firstContactAdmissionRequest,
         );
         if (deterministicDecision) {
-          const firstContactAdmission = await recordHostedLinqFirstContactAdmissionDecision({
-            decision: deterministicDecision,
-            eventId: event.event_id,
-            prisma,
-          });
-          plan = firstContactAdmission.kind === "block"
-            ? buildBlockedHostedLinqFirstContactAdmissionPlan()
-            : await runHostedOnboardingWebhookTransaction(
+          firstContactAdmissionDecision =
+            await recordHostedLinqFirstContactAdmissionDecision({
+              decision: deterministicDecision,
+              eventId: event.event_id,
               prisma,
-              (transaction) =>
-                planHostedOnboardingLinqWebhook({
-                  affirmativeReaction,
-                  event: planningEvent,
-                  firstContactAdmitted: true,
-                  requireFirstContactAdmission,
-                  prisma: transaction,
-                }),
-              warmPlanningMailboxPayloadRoot,
-            );
+            });
+          plan = firstContactAdmissionDecision.kind === "block"
+            ? await planAfterBlockedAdmission()
+            : await runPlan();
         } else {
           const firstContactAdmissionParticipantContact = plan.firstContactAdmissionParticipantContact;
           if (!firstContactAdmissionParticipantContact) {
@@ -392,7 +409,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
               }),
           );
           if (admissionBudget.kind === "exhausted") {
-            plan = buildBlockedHostedLinqFirstContactAdmissionPlan(
+            plan = await planAfterBlockedAdmission(
               "first-contact-admission-budget-exhausted",
             );
           } else {
@@ -410,26 +427,16 @@ export async function handleHostedOnboardingLinqWebhook(input: {
             }
             firstContactAdmissionClassified = true;
 
-            const firstContactAdmission = await recordHostedLinqFirstContactAdmissionDecision({
-              decision: classifiedAdmission,
-              eventId: event.event_id,
-              prisma,
-            });
-            if (firstContactAdmission.kind === "block") {
-              plan = buildBlockedHostedLinqFirstContactAdmissionPlan();
-            } else {
-              plan = await runHostedOnboardingWebhookTransaction(
+            firstContactAdmissionDecision =
+              await recordHostedLinqFirstContactAdmissionDecision({
+                decision: classifiedAdmission,
+                eventId: event.event_id,
                 prisma,
-                (transaction) =>
-                  planHostedOnboardingLinqWebhook({
-                    affirmativeReaction,
-                    event: planningEvent,
-                    firstContactAdmitted: true,
-                    requireFirstContactAdmission,
-                    prisma: transaction,
-                  }),
-                warmPlanningMailboxPayloadRoot,
-              );
+              });
+            if (firstContactAdmissionDecision.kind === "block") {
+              plan = await planAfterBlockedAdmission();
+            } else {
+              plan = await runPlan();
             }
           }
         }
@@ -437,6 +444,53 @@ export async function handleHostedOnboardingLinqWebhook(input: {
 
       if (plan.firstContactAdmissionRequest) {
         throw new Error("Hosted Linq first-contact admission remained unresolved after classification.");
+      }
+
+      if (plan.instantStartEnrollment) {
+        const instantStartEnrollment = plan.instantStartEnrollment;
+        let enrollmentFailed = false;
+        try {
+          await ensureHostedLinqInstantStartPulseTrialEnrollment({
+            admissionEventId: instantStartEnrollment.admissionEventId,
+            inviteCode: instantStartEnrollment.inviteCode,
+            memberId: instantStartEnrollment.memberId,
+            prisma,
+          });
+        } catch (error) {
+          if (
+            input.signal?.aborted
+            || (
+              isHostedOnboardingError(error)
+              && error.retryable
+            )
+          ) {
+            throw error;
+          }
+          enrollmentFailed = true;
+          logHostedOnboardingDiagnostic(
+            "hosted-onboarding.webhook.linq.instant-start-fallback",
+            {
+              errorName: deriveHostedOnboardingTimingErrorName(error),
+              eventIdSuffix: toHostedOnboardingLogIdSuffix(event.event_id),
+            },
+          );
+        }
+        plan = await runPlan(!enrollmentFailed);
+        if (plan.instantStartEnrollment) {
+          logHostedOnboardingDiagnostic(
+            "hosted-onboarding.webhook.linq.instant-start-not-active",
+            {
+              eventIdSuffix: toHostedOnboardingLogIdSuffix(event.event_id),
+            },
+          );
+          plan = await runPlan(false);
+        }
+      }
+
+      if (plan.instantStartEnrollment) {
+        throw new Error(
+          "Hosted Linq instant-start enrollment remained unresolved after fallback.",
+        );
       }
     } catch (error) {
       // A recognized home-route owner whose permanent route no longer matches

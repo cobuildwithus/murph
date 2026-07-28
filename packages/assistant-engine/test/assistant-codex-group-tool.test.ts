@@ -92,6 +92,7 @@ describe("murph.group dynamic tool", () => {
       .not.toContain(MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL);
     expect(MURPH_GROUP_TOOL.inputSchema.properties.action.enum).toEqual([
       "ask",
+      "ask_current_sender",
       "ask_member",
       "post_disclosure_request",
       "revoke_disclosure_grant",
@@ -333,6 +334,60 @@ describe("murph.group dynamic tool", () => {
       action: "revoke_own_email_share",
       selfOptOut: { senderHandle: "member@example.test", source: "email" },
     }))?.kind).toBe("invalid-group-arguments");
+  });
+
+  it("keeps a committed referral arm recovery result tool-successful", async () => {
+    const request = readMurphDynamicToolRequest(groupToolCall({
+      action: "arm_usage_referral",
+      policyCode: "new_person_activation_v1",
+    }));
+    if (!request || request.kind !== "group") {
+      throw new Error("Expected group request.");
+    }
+    const groupRequest = vi.fn<GroupToolRequest>(async () => ({
+      action: "arm_usage_referral",
+      result: {
+        referral: null,
+        status: "unavailable",
+        unavailableReason:
+          "usage_referral_arm_applied_snapshot_unavailable",
+      },
+    }));
+
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createGroupHostedToolContext({
+        currentUserActionScope: () => ({
+          acceptedInputIds: [FRESH_ASSISTANT_INPUT_ID],
+          conversationId: "conversation_private",
+          conversationScope: "direct",
+          inboundMailboxItemIds: ["mailbox_private"],
+          originSessionId: "session_private",
+          recipientKey: "recipient_private",
+        }),
+        groupRequest,
+      }),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request,
+      vaultRoot: null,
+    });
+
+    expect(result.rpcResult.success).toBe(true);
+    expect(readGroupToolPayload(result)).toEqual({
+      action: "arm_usage_referral",
+      result: {
+        referral: null,
+        status: "unavailable",
+        unavailableReason:
+          "usage_referral_arm_applied_snapshot_unavailable",
+      },
+    });
+    expect(groupRequest).toHaveBeenCalledWith({
+      action: "arm_usage_referral",
+      policyCode: "new_person_activation_v1",
+    });
   });
 
   it("parses set_chat_avatar arguments without accepting model-supplied URLs or targets", () => {

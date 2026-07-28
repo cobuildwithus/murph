@@ -289,11 +289,13 @@ async function runOneHostedDetachedAssistantAsk(input: {
       question: prepared.question,
       workspaceRoot: input.vaultRoot,
     };
+    const reviewedPersonalAsk =
+      claimed.wake.ask.target.kind !== "joined_group";
     let answer: ReadOnlyAssistantAskResult;
-    if (claimed.wake.ask.target.kind === "consented_member") {
+    if (claimed.wake.ask.target.kind !== "joined_group") {
       if (prepared.disclosure === undefined) {
         throw new TypeError(
-          "Consented member ask prepare omitted its disclosure context.",
+          "Reviewed personal ask prepare omitted its disclosure context.",
         );
       }
       answer = await input.executeConsentedAsk({
@@ -314,8 +316,7 @@ async function runOneHostedDetachedAssistantAsk(input: {
         requesterParticipantId: claimed.wake.ask.target.membershipId,
       });
     }
-    const result = claimed.wake.ask.target.kind === "consented_member"
-      && answer.outcome === "cannot_answer"
+    const result = reviewedPersonalAsk && answer.outcome === "cannot_answer"
       ? { answer: null, outcome: "cannot_answer" as const }
       : normalizeHostedDetachedAssistantAskResult(answer);
     const completed = await input.assistantAskPort.request(

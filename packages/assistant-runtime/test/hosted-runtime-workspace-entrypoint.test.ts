@@ -2489,6 +2489,7 @@ describe("hosted workspace runtime entrypoint", () => {
     const assistantOneObserved = createDeferred<void>();
     const assistantTwoObserved = createDeferred<void>();
     const checkpointStartedAtMs: number[] = [];
+    const latencyTraceRequests: HostedRuntimeLatencyTraceRequest[] = [];
     const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
     const durableEffect = vi.fn(async () => {
       events.push("durable-effect");
@@ -2534,6 +2535,7 @@ describe("hosted workspace runtime entrypoint", () => {
               return { status: "imported" };
             },
             platform: createPlatform({
+              latencyTraceRequests,
               mailboxPort: createMailboxPort({
                 events,
                 items: [],
@@ -2619,6 +2621,16 @@ describe("hosted workspace runtime entrypoint", () => {
         Date.parse(TEST_NOW) + idleCheckpointDelayMs,
         Date.parse(TEST_NOW) + idleCheckpointDelayMs,
         Date.parse(TEST_NOW) + idleCheckpointDelayMs * 2,
+      ]);
+      expect([...new Set(latencyTraceRequests
+        .map((request) => request.event)
+        .filter((event) =>
+          event.type === "runtime_milestone"
+          && event.milestone === "checkpoint_publication_expected_by"
+        )
+        .map((event) => event.at))]).toEqual([
+        "2026-04-27T00:27:00.000Z",
+        "2026-04-27T00:30:00.000Z",
       ]);
       assert.deepEqual(
         checkpointRequests.map((request) => [

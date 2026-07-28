@@ -176,6 +176,7 @@ export default async function GroupFundingPage({
                 customizationAllowed={customizationAllowed}
                 frozenSponsorship={frozenSponsorship}
                 offers={offers}
+                payerMemberId={member.id}
                 purchaseReturn={purchaseReturn}
               />
             ) : (

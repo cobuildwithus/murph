@@ -18,6 +18,7 @@ export function recordHostedAssistantMilestonesBestEffort(input: {
   context?: HostedAssistantMilestoneTraceContext | null;
   milestones: readonly {
     at: string;
+    checkpointPublicationExpectedBy?: string | null;
     milestone: HostedRuntimeAssistantMilestone;
   }[];
 }): void {
@@ -34,11 +35,18 @@ export function recordHostedAssistantMilestonesBestEffort(input: {
 
   const assistantInputIds = [...new Set(context.assistantInputIds)];
   queueMicrotask(() => {
-    void Promise.all(input.milestones.map(async ({ at, milestone }) => {
+    void Promise.all(input.milestones.map(async ({
+      at,
+      checkpointPublicationExpectedBy,
+      milestone,
+    }) => {
       const request = {
         event: {
           assistantInputIds,
           at,
+          ...(checkpointPublicationExpectedBy === undefined
+            ? {}
+            : { checkpointPublicationExpectedBy }),
           milestone,
           runtimeAttemptId: context.runtimeAttemptId,
           source: context.source,

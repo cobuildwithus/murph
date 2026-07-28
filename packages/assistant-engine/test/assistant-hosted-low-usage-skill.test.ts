@@ -85,8 +85,16 @@ describe('assistant hosted low-usage skill', () => {
       'a less capable model that uses less AI usage',
     )
     expect(skill).toContain('`owner: true`, `billingActive: true`')
-    expect(skill).toContain('matches exactly one `members` row')
-    expect(skill).toContain('navigation to Settings > Family')
+    expect(skill).toContain('matches')
+    expect(skill).toContain('exactly one `members` row')
+    expect(skill).toContain(
+      '`https://www.withmurph.ai/settings?addUsage=family#family`',
+    )
+    expect(skill).toContain(
+      '`https://www.withmurph.ai/settings?addUsage=true#subscription`',
+    )
+    expect(skill).toContain('Never put a member ID or')
+    expect(skill).toContain('group ID into a model-composed link')
     expect(skill).toContain('call `murph.group action="read_usage"` once before writing the')
     expect(skill).toContain('`murph.group action="read_usage_referral"` once')
     expect(skill).toContain('This only offers')
@@ -132,6 +140,19 @@ describe('assistant hosted low-usage skill', () => {
       'state the returned `expiresAt` as the mission\'s public occurrence deadline',
     )
     expect(normalizedSkill).toContain(
+      '`usage_referral_arm_applied_snapshot_unavailable`, the arm committed',
+    )
+    expect(normalizedSkill).toContain(
+      'Do not arm it again or claim that commit failed',
+    )
+    expect(normalizedSkill).toContain(
+      'that recovery read is authoritative for current state',
+    )
+    expect(normalizedSkill).toContain(
+      '`usage_referral_cancel_applied_snapshot_unavailable`, the cancellation committed',
+    )
+    expect(normalizedSkill).toContain('including a mission armed after the cancellation')
+    expect(normalizedSkill).toContain(
       'private anti-gaming thresholds, or late-arrival grace rules',
     )
     expect(normalizedSkill).not.toContain(
@@ -149,9 +170,8 @@ describe('assistant hosted low-usage skill', () => {
     expect(normalizedSkill).toContain('Do not say "sign up your mom"')
     expect(skill).toContain('require a matching current quote')
     expect(skill).toContain('A bare yes after multiple options is ambiguous')
-    expect(skill).toContain(
-      'Never choose an amount, start Checkout, or claim usage was added',
-    )
+    expect(skill).toContain('Never choose an amount, start')
+    expect(skill).toContain('Checkout, or claim usage was added')
     expect(skill).toContain(
       'never reveal who paid, amounts, or',
     )
@@ -197,5 +217,122 @@ describe('assistant hosted low-usage skill', () => {
     expect(JSON.stringify(armedToolResult)).not.toContain(
       'minimumActivitySpan',
     )
+  })
+
+  it.each([
+    {
+      label: 'an arm followed by no active mission',
+      toolResults: [
+        {
+          action: 'arm_usage_referral',
+          result: {
+            referral: null,
+            status: 'unavailable',
+            unavailableReason:
+              'usage_referral_arm_applied_snapshot_unavailable',
+          },
+        },
+        {
+          action: 'read_usage_referral',
+          result: {
+            outcome: 'read',
+            referral: {
+              active: null,
+              availablePolicies: [],
+              trialCreditNotice: null,
+            },
+            status: 'ok',
+          },
+        },
+      ],
+    },
+    {
+      label: 'an arm followed by a superseding mission',
+      toolResults: [
+        {
+          action: 'arm_usage_referral',
+          result: {
+            referral: null,
+            status: 'unavailable',
+            unavailableReason:
+              'usage_referral_arm_applied_snapshot_unavailable',
+          },
+        },
+        {
+          action: 'read_usage_referral',
+          result: {
+            outcome: 'read',
+            referral: {
+              active: {
+                destinationKind: 'personal',
+                expiresAt: '2026-08-04T18:00:00.000Z',
+                policyCode: 'active_group_v1',
+                rewardLabel:
+                  'about 140 more messages on the model your Murph is using now',
+                state: 'armed',
+              },
+              availablePolicies: [],
+              trialCreditNotice: null,
+            },
+            status: 'ok',
+          },
+        },
+      ],
+    },
+    {
+      label: 'a cancel followed by a newly armed mission',
+      toolResults: [
+        {
+          action: 'cancel_usage_referral',
+          result: {
+            referral: null,
+            status: 'unavailable',
+            unavailableReason:
+              'usage_referral_cancel_applied_snapshot_unavailable',
+          },
+        },
+        {
+          action: 'read_usage_referral',
+          result: {
+            outcome: 'read',
+            referral: {
+              active: {
+                destinationKind: 'personal',
+                expiresAt: '2026-08-05T18:00:00.000Z',
+                policyCode: 'new_person_activation_v1',
+                rewardLabel:
+                  'about 100 more messages on the model your Murph is using now',
+                state: 'armed',
+              },
+              availablePolicies: [],
+              trialCreditNotice: null,
+            },
+            status: 'ok',
+          },
+        },
+      ],
+    },
+  ])('makes the recovery read authoritative for $label', async ({
+    toolResults,
+  }) => {
+    const skill = await readLowUsageSkill()
+    const assembledContext = [
+      skill,
+      ...toolResults.flatMap((toolResult) => [
+        '<tool_result>',
+        JSON.stringify(toolResult),
+        '</tool_result>',
+      ]),
+    ].join('\n')
+    const normalizedContext = assembledContext.replace(/\s+/gu, ' ')
+    const mutationAction = toolResults[0]?.action
+
+    expect(toolResults.filter(({ action }) => action === mutationAction))
+      .toHaveLength(1)
+    expect(toolResults.at(-1)?.action).toBe('read_usage_referral')
+    expect(normalizedContext).toContain(
+      'that recovery read is authoritative for current state',
+    )
+    expect(normalizedContext).toContain('or claim that commit failed')
   })
 })

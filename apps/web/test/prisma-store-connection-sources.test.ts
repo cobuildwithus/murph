@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
+import type { PublicDeviceSyncAccount } from "@murphai/device-syncd/types";
 
+import { readCompanionDeviceSyncStatus } from "@/src/lib/device-sync/companion";
 import { PrismaDeviceSyncControlPlaneStore } from "@/src/lib/device-sync/prisma-store";
 
 type MutableConnectionSourceRecord = {
@@ -19,8 +21,27 @@ type MutableConnectionSourceRecord = {
   updatedAt: Date;
 };
 
+type MutableSignalRecord = {
+  id: number;
+  userId: string;
+  connectionId: string | null;
+  provider: string;
+  kind: string;
+  occurredAt: Date | null;
+  traceId: string | null;
+  eventType: string | null;
+  resourceCategory: string | null;
+  sourceProviderSlug: string | null;
+  reason: string | null;
+  nextReconcileAt: Date | null;
+  revokeWarningCode: string | null;
+  revokeWarningMessage: string | null;
+  createdAt: Date;
+};
+
 function createSourceStore(seed: MutableConnectionSourceRecord[] = []) {
   const records = new Map<string, MutableConnectionSourceRecord>();
+  const signals: MutableSignalRecord[] = [];
   const deviceConnectionUpdate = vi.fn(async () => {
     throw new Error("source projection writes must not mutate device connection metadata");
   });
@@ -161,6 +182,41 @@ function createSourceStore(seed: MutableConnectionSourceRecord[] = []) {
     return { count };
   });
 
+  const createSignal = vi.fn(async (input: {
+    data: Omit<MutableSignalRecord, "id">;
+  }) => {
+    const record = {
+      ...input.data,
+      id: signals.length + 1,
+    } satisfies MutableSignalRecord;
+    signals.push(record);
+    return { ...record };
+  });
+
+  const findSignals = vi.fn(async (input: {
+    take: number;
+    where: {
+      connectionId: { in: string[] };
+      kind: string;
+      sourceProviderSlug?: string;
+      userId: string;
+    };
+  }) =>
+    signals
+      .filter((signal) => signal.userId === input.where.userId)
+      .filter((signal) => signal.kind === input.where.kind)
+      .filter((signal) =>
+        signal.connectionId !== null
+        && input.where.connectionId.in.includes(signal.connectionId)
+      )
+      .filter((signal) =>
+        input.where.sourceProviderSlug === undefined
+        || signal.sourceProviderSlug === input.where.sourceProviderSlug
+      )
+      .sort((left, right) => right.id - left.id)
+      .slice(0, input.take)
+      .map((signal) => ({ ...signal })));
+
   const store = new PrismaDeviceSyncControlPlaneStore({
     prisma: {
       deviceConnection: {
@@ -171,6 +227,10 @@ function createSourceStore(seed: MutableConnectionSourceRecord[] = []) {
         updateMany,
         upsert,
       },
+      deviceSyncSignal: {
+        create: createSignal,
+        findMany: findSignals,
+      },
     } as never,
   });
 
@@ -178,6 +238,7 @@ function createSourceStore(seed: MutableConnectionSourceRecord[] = []) {
     deviceConnectionUpdate,
     findMany,
     records,
+    signals,
     store,
     updateMany,
     upsert,
@@ -515,6 +576,8 @@ describe("PrismaDeviceSyncControlPlaneStore connection source projection", () =>
 
     const afterArrival = await readBySlug();
     expect(afterArrival.get("garmin")?.lastDataAt).toBe("2026-07-05T00:00:00.000Z");
+    expect(afterArrival.get("garmin")?.lastSeenAt).toBe("2026-07-01T00:00:00.000Z");
+    expect(afterArrival.get("garmin")?.updatedAt).toBe("2026-07-05T00:00:00.000Z");
     // A live sibling on the same connection must not mask a silent source.
     expect(afterArrival.get("oura")?.lastDataAt).toBeNull();
 
@@ -539,6 +602,82 @@ describe("PrismaDeviceSyncControlPlaneStore connection source projection", () =>
     const afterReconcile = await readBySlug();
     expect(afterReconcile.get("garmin")?.lastSeenAt).toBe("2026-07-12T00:00:00.000Z");
     expect(afterReconcile.get("garmin")?.lastDataAt).toBe("2026-07-05T00:00:00.000Z");
+  });
+
+  it("keeps the same-request receipt authoritative after source-arrival bookkeeping", async () => {
+    const acceptedAt = "2026-07-25T19:00:00.000Z";
+    const { store } = createSourceStore([
+      createSourceRecord({
+        connectionId: "dsc_parent",
+        sourceInstanceKey: "src_health_connect",
+        sourceProviderSlug: "health_connect",
+        status: "disconnected",
+        lastSeenAt: new Date("2026-07-25T18:00:00.000Z"),
+        updatedAt: new Date("2026-07-25T18:00:00.000Z"),
+      }),
+    ]);
+    const connection: PublicDeviceSyncAccount = {
+      accessTokenExpiresAt: null,
+      connectedAt: "2026-07-01T00:00:00.000Z",
+      createdAt: "2026-07-01T00:00:00.000Z",
+      displayName: null,
+      externalAccountId: "junction-user",
+      id: "dsc_parent",
+      lastErrorCode: null,
+      lastErrorMessage: null,
+      lastSyncCompletedAt: null,
+      lastSyncErrorAt: null,
+      lastSyncStartedAt: null,
+      lastWebhookAt: acceptedAt,
+      metadata: {},
+      nextReconcileAt: null,
+      provider: "junction",
+      scopes: [],
+      setupExpiresAt: null,
+      setupPhase: "source_confirmed",
+      status: "active",
+      updatedAt: acceptedAt,
+    };
+    vi.spyOn(store, "listConnectionsForUser").mockResolvedValue([connection]);
+
+    // This is the production ordering after durable webhook acceptance: write
+    // the receipt at T, then best-effort stamp source data arrival at the same
+    // T without changing the lagging negative source projection.
+    await store.createSignal({
+      connectionId: connection.id,
+      createdAt: acceptedAt,
+      eventType: "daily.data.workouts.updated",
+      kind: "webhook_hint",
+      occurredAt: acceptedAt,
+      provider: "junction",
+      resourceCategory: "timeseries",
+      sourceProviderSlug: "health_connect",
+      traceId: "trace_health_connect",
+      userId: "member_1",
+    });
+    await store.markConnectionSourceDataReceived({
+      connectionId: connection.id,
+      now: acceptedAt,
+      sourceProviderSlug: "health_connect",
+    });
+
+    const [source] = await store.listConnectionSources(connection.id);
+    expect(source).toMatchObject({
+      lastDataAt: acceptedAt,
+      lastSeenAt: "2026-07-25T18:00:00.000Z",
+      status: "disconnected",
+      updatedAt: acceptedAt,
+    });
+    await expect(readCompanionDeviceSyncStatus({
+      memberId: "member_1",
+      sourceProviderSlug: "health_connect",
+      store,
+    })).resolves.toEqual({
+      lastDataReceivedAt: acceptedAt,
+      resources: {
+        workouts: { lastReceivedAt: acceptedAt },
+      },
+    });
   });
 });
 
