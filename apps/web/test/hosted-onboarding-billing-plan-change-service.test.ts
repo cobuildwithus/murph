@@ -1079,7 +1079,7 @@ describe("upgradeHostedBillingPlan", () => {
   test("rejects unsupported transitions", async () => {
     await expect(upgradeHostedBillingPlan({
       memberId: "member_123",
-      targetPlanCode: "launch_monthly",
+      targetPlanCode: "launch_group_monthly",
     })).rejects.toMatchObject({
       code: "HOSTED_BILLING_PLAN_UPGRADE_UNSUPPORTED",
       httpStatus: 400,

@@ -165,7 +165,7 @@ test("rejects unsupported target plan payloads", async () => {
   const response = await billingUpgradeRoute.POST(
     new Request("https://join.example.test/api/settings/billing/upgrade-plan", {
       body: JSON.stringify({
-        targetPlanCode: "launch_monthly",
+        targetPlanCode: "launch_family_monthly",
       }),
       headers: {
         origin: "https://join.example.test",
