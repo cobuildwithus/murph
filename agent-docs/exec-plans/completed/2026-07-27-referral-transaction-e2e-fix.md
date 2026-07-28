@@ -1,8 +1,8 @@
 # Referral transaction and scheduled E2E repair
 
-Status: active
+Status: completed
 Created: 2026-07-27
-Updated: 2026-07-27
+Updated: 2026-07-28
 
 ## Goal
 
@@ -159,3 +159,4 @@ Updated: 2026-07-27
   deterministic timing contract.
 - `pnpm test:diff` for every touched owner.
 - `pnpm verify:acceptance`.
+Completed: 2026-07-28
