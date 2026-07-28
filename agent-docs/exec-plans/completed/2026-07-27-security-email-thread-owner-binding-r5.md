@@ -1,6 +1,6 @@
 # Bind direct hosted email replies to the Murph owner's verified address
 
-Status: active
+Status: completed
 Created: 2026-07-27
 Updated: 2026-07-27
 
@@ -23,8 +23,10 @@ Updated: 2026-07-27
 - Missing or unavailable current recipient authority fails before provider
   work, with the existing retryable pre-provider error.
 - Group email fanout and non-email delivery paths keep their current behavior.
-- Focused regression proof, canonical verification, preliminary specialists,
-  final ReviewGPT, and exact-head PR CI pass.
+- Focused regression proof, canonical verification, acceptance reconciliation,
+  preliminary specialists, parent review, and implementation-head PR CI pass.
+- Immutable final ReviewGPT and fresh CI run on the plan-closing head before
+  merge.
 
 ## Scope
 
@@ -71,10 +73,12 @@ Updated: 2026-07-27
    current-recipient rotation, missing authority, and preserved group behavior.
 5. [x] Reconcile the durable email security invariant without duplicating
    architecture.
-6. Run focused proof, affected typechecks, canonical diff verification,
-   acceptance, preliminary specialists, parent review, final ReviewGPT, and
-   exact-head CI.
-7. Commit, push, and leave one separate draft PR unmerged.
+6. [x] Run focused proof, affected typechecks, canonical diff verification,
+   acceptance, preliminary specialists, parent review, and implementation-head
+   PR CI.
+7. [x] Close the implementation plan with one separate draft PR still
+   unmerged; the immutable final ReviewGPT gate and fresh CI run after this
+   plan-closing commit.
 
 ## Decisions
 
@@ -91,11 +95,28 @@ Updated: 2026-07-27
 
 ## Verification
 
-- Focused assistant-runtime callback tests for direct email provider entry.
-- Affected package typechecks.
-- `pnpm test:diff packages/assistant-runtime apps/cloudflare`
-- `pnpm verify:acceptance`
-- Preliminary completion-specialists and final exact-head ReviewGPT/CI.
-- Completed so far:
-  - focused hosted-runtime callback suite: 200 tests passed
-  - `@murphai/assistant-runtime` typecheck passed
+- Rebased focused hosted-runtime callback suite covering direct email provider
+  entry: 202 tests passed.
+- `@murphai/assistant-runtime` typecheck passed.
+- Canonical diff verification:
+  - `pnpm test:diff packages/assistant-runtime apps/cloudflare` passed.
+  - Assistant runtime: 77 files passed, 1,924 tests passed, 2 skipped.
+  - Cloudflare node: 108 files and 2,013 tests passed.
+  - Cloudflare workers: 2 files and 2 tests passed.
+- Acceptance:
+  - `pnpm verify:acceptance` completed all owners but returned nonzero only for
+    two unchanged contention-sensitive tests outside this PR's diff:
+    `apps/web/test/hosted-preference-handoff-sweeper.test.ts` and
+    `packages/assistant-runtime/test/hosted-runtime-clinical-records.test.ts`.
+  - Immediate isolated reruns passed 9/9 and 35/35 respectively, proving no
+    reproducible branch regression.
+- Completion reviews and CI:
+  - Preliminary completion-specialists returned PASS with no findings or
+    patch.
+  - The parent final review found no remaining accepted issue after re-reading
+    the full diff, provider-entry call path, live Web recipient authority,
+    Cloudflare transport recipient selection, and group-fanout bypass.
+  - PR CI on the implementation head is green.
+  - The immutable final ReviewGPT gate and fresh CI run after the plan-closing
+    commit; the PR remains draft and unmerged.
+Completed: 2026-07-27
