@@ -731,10 +731,20 @@ export interface HostedMailboxLaneConsumed {
   lane: HostedMailboxLane;
 }
 
+export interface HostedGroupRunningBitProjection {
+  expiresAt: string;
+  publicAlias: string | null;
+  requestedBit: string;
+  schema: "murph.group-sponsorship-bit.v1";
+}
+
 export interface HostedMailboxFetchResponse {
   // Optional for deploy-window compatibility. Web emits this only for an
   // allowed conversation batch whose current effective capacity is low.
   conversationUsageStatus?: "low" | null;
+  // Optional for consumer-first rollout. It is Web-owned, expiring group
+  // context and is attached only to fresh route-authorized group inputs.
+  groupRunningBit?: HostedGroupRunningBitProjection | null;
   // Optional for deploy-window compatibility: older web responses omit it and
   // the runtime treats every lane as consumed through seq 0.
   consumedSeqByLane?: HostedMailboxLaneConsumed[] | null;
@@ -1032,6 +1042,7 @@ export interface HostedRuntimeGroupMembershipSummary {
   permissionsUrl: string | null;
   requestedVaultShareProjectionScopes: HostedVaultShareProjectionScope[];
   role: string;
+  sponsorshipUrl: string | null;
 }
 
 export interface HostedRuntimeGroupCreateJoinLinkRequest {
@@ -1163,6 +1174,13 @@ export type HostedRuntimeGroupToolRequest =
       question: string;
     }
   | {
+      action: "ask_current_sender";
+      origin: Extract<
+        HostedExecutionAssistantAskOrigin,
+        { kind: "accepted_input" }
+      >;
+    }
+  | {
       action: "ask_member";
       grantId: string;
       origin: HostedExecutionAssistantAskOrigin;
@@ -1241,6 +1259,7 @@ export type HostedRuntimeGroupToolResponse =
       action: "ask";
       result: HostedRuntimeGroupAskResult;
     }
+  | { action: "ask_current_sender"; result: HostedRuntimeGroupMemberAskResult }
   | { action: "ask_member"; result: HostedRuntimeGroupMemberAskResult }
   | {
       action: "post_disclosure_request";
@@ -1704,6 +1723,7 @@ export const HOSTED_RUNTIME_LATENCY_TRACE_MILESTONES = [
   "runtime_phase_started",
   "workspace_restore_done",
   "mailbox_import_done",
+  "checkpoint_publication_expected_by",
 ] as const;
 
 export const HOSTED_RUNTIME_ASSISTANT_MILESTONES = [
@@ -1711,6 +1731,7 @@ export const HOSTED_RUNTIME_ASSISTANT_MILESTONES = [
   "linq_typing_accepted",
   "first_codex_output_observed",
   "first_codex_text_observed",
+  "terminal_non_reply_committed",
 ] as const;
 
 export type HostedRuntimeAssistantMilestone =
@@ -1826,6 +1847,9 @@ export interface HostedRuntimeLatencyPhaseBreakdown {
     linqTypingAcceptedAtEpochMs?: number;
     firstCodexOutputObservedAtEpochMs?: number;
     firstCodexTextObservedAtEpochMs?: number;
+    terminalNonReplyCommittedAtEpochMs?: number;
+    checkpointPublicationExpectedByEpochMs?: number;
+    runtimeLeaseGeneration?: string;
   };
   provider?: {
     codexAppServerInitializeMs?: number;
@@ -1953,6 +1977,9 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS: Record<
     "linqTypingAcceptedAtEpochMs",
     "firstCodexOutputObservedAtEpochMs",
     "firstCodexTextObservedAtEpochMs",
+    "terminalNonReplyCommittedAtEpochMs",
+    "checkpointPublicationExpectedByEpochMs",
+    "runtimeLeaseGeneration",
   ],
   provider: [
     "codexAppServerInitializeMs",
@@ -1983,7 +2010,7 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_BOOLEAN_LEAF_KEYS =
     "preProvider.receiptScanPerformed",
   ] as const;
 
-export type HostedRuntimeLatencyPhaseBreakdownJsonLeaf = number | boolean;
+export type HostedRuntimeLatencyPhaseBreakdownJsonLeaf = number | boolean | string;
 export type HostedRuntimeOrchestrationLatencyDiagnostics = NonNullable<
   HostedRuntimeLatencyPhaseBreakdown["orchestration"]
 >;
@@ -2211,6 +2238,11 @@ function isHostedRuntimeLatencyPhaseBreakdownLeafSafe(
   leafKey: string,
   value: unknown,
 ): value is HostedRuntimeLatencyPhaseBreakdownJsonLeaf {
+  if (phase === "assistant" && leafKey === "runtimeLeaseGeneration") {
+    return typeof value === "string"
+      && value.length <= 20
+      && /^(?:0|[1-9]\d*)$/u.test(value);
+  }
   if (HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_BOOLEAN_LEAF_KEY_SET.has(`${phase}.${leafKey}`)) {
     return typeof value === "boolean";
   }
@@ -2254,6 +2286,7 @@ export interface HostedRuntimeLatencyTraceProviderStartedEvent {
 export interface HostedRuntimeLatencyTraceAssistantMilestoneEvent {
   assistantInputIds: string[];
   at: string;
+  checkpointPublicationExpectedBy?: string | null;
   milestone: HostedRuntimeAssistantMilestone;
   runtimeAttemptId?: string | null;
   source: HostedIngressLatencySource;

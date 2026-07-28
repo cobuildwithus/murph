@@ -99,6 +99,9 @@ import {
   reconcileHostedUsageCreditStripeEvent,
 } from "./usage-credit-stripe-reconciliation";
 import { signalHostedRuntimeRecheckRuntime } from "../hosted-orchestration/signal-runtime";
+import {
+  materializeHostedGroupSponsorshipIfApplicable,
+} from "../hosted-groups/group-sponsorship-notification";
 
 // Top-up reads use no SDK retries, hard per-request/KMS bounds, an aggregate
 // read-only preparation deadline, and a request-count ceiling. Keep the receipt
@@ -820,6 +823,15 @@ async function processClaimedHostedStripeEvent(
           throw error;
         }
       }
+    }
+    if (
+      usageCreditReconciliation.handled &&
+      usageCreditReconciliation.purchaseId
+    ) {
+      await materializeHostedGroupSponsorshipIfApplicable({
+        prisma,
+        purchaseId: usageCreditReconciliation.purchaseId,
+      });
     }
     if (legacyFamilySubscriptionId) {
       await executeHostedLegacySyntheticFamilyCleanup({

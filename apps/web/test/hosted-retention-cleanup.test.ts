@@ -185,6 +185,13 @@ describe("hosted retention cleanup", () => {
     expect(mailboxDeleteSql).toContain('DELETE FROM "hosted_mailbox_payload"');
     expect(mailboxDeleteSql).toContain('"content_retired_at"');
     expect(mailboxDeleteSql).toContain("'policy_non_reply.content_expired'");
+    expect(mailboxDeleteSql).toContain("legacy_consumed_preferences");
+    expect(mailboxDeleteSql).toContain(
+      "eligible.\"lane_seq\" <= COALESCE(counter.\"consumed_seq\", 0)",
+    );
+    expect(mailboxDeleteSql).toContain(
+      "DELETE FROM \"hosted_mailbox_item\" AS item",
+    );
     expect(mailboxDeleteSql).toContain('UPDATE "hosted_mailbox_lane_counter"');
     expect(mailboxDeleteSql).toContain('"consumed_seq" = GREATEST');
     expect(mailboxDeleteSql).toContain('MIN(blocker."lane_seq") - 1');

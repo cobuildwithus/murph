@@ -274,6 +274,7 @@ type HostedLinqDeliveryProviderDispatchClaimInput = {
   phoneNumber?: string | null;
   prisma: HostedLinqDeliveryClient;
   reclaimStalePreProviderAttempt?: boolean;
+  returnExistingFailureCode?: boolean;
   source: string;
   sourceRef?: string | null;
   status?: HostedLinqDeliveryProviderDispatchData["status"];
@@ -283,7 +284,12 @@ type HostedLinqDeliveryProviderDispatchClaimInput = {
 
 export async function claimHostedLinqDeliveryProviderDispatchTx(
   input: HostedLinqDeliveryProviderDispatchClaimInput,
-): Promise<{ claimed: boolean; id: string | null; retryAt?: Date }> {
+): Promise<{
+  claimed: boolean;
+  failureCode?: string | null;
+  id: string | null;
+  retryAt?: Date;
+}> {
   return claimHostedLinqDeliveryProviderDispatchWithIdTx(
     input,
     buildHostedLinqDeliveryId,
@@ -293,7 +299,12 @@ export async function claimHostedLinqDeliveryProviderDispatchTx(
 async function claimHostedLinqDeliveryProviderDispatchWithIdTx(
   input: HostedLinqDeliveryProviderDispatchClaimInput,
   buildDeliveryId: (idempotencyKey: string) => string,
-): Promise<{ claimed: boolean; id: string | null; retryAt?: Date }> {
+): Promise<{
+  claimed: boolean;
+  failureCode?: string | null;
+  id: string | null;
+  retryAt?: Date;
+}> {
   const attemptedAt = input.attemptedAt ?? new Date();
   const idempotencyKey = createHostedLinqDeliveryIdempotencyLookupKey(
     normalizeNullable(input.idempotencyKey),
@@ -347,6 +358,7 @@ async function claimHostedLinqDeliveryProviderDispatchWithIdTx(
       delivery: existing,
       prisma: input.prisma,
       reclaimStalePreProviderAttempt: input.reclaimStalePreProviderAttempt,
+      returnExistingFailureCode: input.returnExistingFailureCode,
       source: input.source,
     });
   }
@@ -375,6 +387,7 @@ async function claimHostedLinqDeliveryProviderDispatchWithIdTx(
     delivery: concurrent,
     prisma: input.prisma,
     reclaimStalePreProviderAttempt: input.reclaimStalePreProviderAttempt,
+    returnExistingFailureCode: input.returnExistingFailureCode,
     source: input.source,
   });
 }
@@ -1694,6 +1707,7 @@ async function claimExistingHostedLinqDeliveryProviderDispatchTx(input: {
     acceptedAt: Date | null;
     attemptedAt: Date;
     deliveredAt: Date | null;
+    failureCode: string | null;
     failedAt: Date | null;
     id: string;
     lastReceiptAt: Date | null;
@@ -1705,8 +1719,14 @@ async function claimExistingHostedLinqDeliveryProviderDispatchTx(input: {
   };
   prisma: HostedLinqDeliveryClient;
   reclaimStalePreProviderAttempt?: boolean;
+  returnExistingFailureCode?: boolean;
   source: string;
-}): Promise<{ claimed: boolean; id: string | null; retryAt?: Date }> {
+}): Promise<{
+  claimed: boolean;
+  failureCode?: string | null;
+  id: string | null;
+  retryAt?: Date;
+}> {
   if (isHostedLinqDeliveryProviderCorrelated(input.delivery)) {
     return {
       claimed: false,
@@ -1783,6 +1803,9 @@ async function claimExistingHostedLinqDeliveryProviderDispatchTx(input: {
   if (reclaimPredicates.length === 0) {
     return {
       claimed: false,
+      ...(input.returnExistingFailureCode
+        ? { failureCode: input.delivery.failureCode }
+        : {}),
       id: input.delivery.id,
     };
   }
@@ -1801,6 +1824,9 @@ async function claimExistingHostedLinqDeliveryProviderDispatchTx(input: {
 
   return {
     claimed: updated.count === 1,
+    ...(updated.count === 0 && input.returnExistingFailureCode
+      ? { failureCode: input.delivery.failureCode }
+      : {}),
     id: input.delivery.id,
   };
 }

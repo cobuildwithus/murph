@@ -84,7 +84,13 @@ describe('assistant capability policy skills', () => {
     expect(normalized).toContain('`billingActive: true`')
     expect(normalized).toContain('matches exactly one member row')
     expect(normalized).toContain(
-      'Provide `https://www.withmurph.ai/settings#family` only when all three conditions hold',
+      'When that exact row has `isOwner: true`, send `https://www.withmurph.ai/settings?addUsage=family#family`',
+    )
+    expect(normalized).toContain(
+      'For another active member, send `https://www.withmurph.ai/settings#family`',
+    )
+    expect(normalized).toContain(
+      'Never place member or Family identifiers into a model-composed URL.',
     )
     expect(skill).not.toMatch(/Provide `?\/settings#family/iu)
     expect(MURPH_FAMILY_PLAN_TOOL.description).not.toContain('https://')

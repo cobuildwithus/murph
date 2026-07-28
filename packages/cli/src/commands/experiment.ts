@@ -450,7 +450,7 @@ function truncateBoundedText(
   return value.slice(0, maxLength - 3).trimEnd() + '...'
 }
 
-function buildEffectiveSnapshotFromCommonsProtocol(
+export function buildEffectiveSnapshotFromCommonsProtocol(
   entity: ProtocolVariantEntity,
 ) {
   if (!entity.protocol) {
@@ -473,6 +473,7 @@ function buildEffectiveSnapshotFromCommonsProtocol(
       effectiveSpecHash,
       doseSignature: truncateBoundedText(entity.protocol.doseSignature, 240),
       modality: truncateBoundedText(entity.protocol.target, 160),
+      activitySessionEvidence: entity.protocol.activitySessionEvidence,
       frequency: entity.protocol.frequency,
       durationMinutes: entity.protocol.durationMinutes,
       temperatureC: entity.protocol.temperatureC,
