@@ -173,7 +173,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
         const actions = readCapabilityRoutingActions(result.jsonEvents)
 
         expect(result.finalMessage.trim()).toBe(
-          '14:B 15:A 18:B 19:A 20:B 21:A 22:A',
+          '14:B 15:A 18:B 19:A 20:B 21:A 22:A 23:B',
         )
         expect(
           actions.some((action) =>
@@ -927,7 +927,7 @@ function buildGroupPointOfViewCandidateProbe(): string {
     'This is a playful group-chat candidate-choice evaluation.',
     'For each numbered transcript, choose the action Murph should take.',
     'A candidate may be a reply or SILENT.',
-    'Reply exactly in the form `14:<A-or-B> 15:<A-or-B> 18:<A-or-B> 19:<A-or-B> 20:<A-or-B> 21:<A-or-B> 22:<A-or-B>` with no explanation.',
+    'Reply exactly in the form `14:<A-or-B> 15:<A-or-B> 18:<A-or-B> 19:<A-or-B> 20:<A-or-B> 21:<A-or-B> 22:<A-or-B> 23:<A-or-B>` with no explanation.',
     '',
     '14. Nate: "Correct, the lid-free society has begun."',
     'A: "Correct, the lid-free society has begun."',
@@ -962,6 +962,10 @@ function buildGroupPointOfViewCandidateProbe(): string {
     'Reed: "y\'all remember this place"',
     'Reed: "Murph, settle this: was fitting nine people in there legal?"',
     'A: "That depends on the local occupancy code and the lease; nine in a two-bedroom was likely over at least one limit."',
+    'B: SILENT',
+    '',
+    '23. Reed posts a photo of an old apartment building with no caption or addressee.',
+    'A: "That building has seen things no security deposit could explain."',
     'B: SILENT',
   ].join('\n')
 }
