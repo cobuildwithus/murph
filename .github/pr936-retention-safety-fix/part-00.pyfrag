@@ -1,0 +1,111 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+ROOT = Path.cwd()
+
+
+def replace_once(relative: str, old: str, new: str) -> None:
+    path = ROOT / relative
+    text = path.read_text()
+    count = text.count(old)
+    if count != 1:
+        raise RuntimeError(f"{relative}: expected one replacement target, found {count}")
+    path.write_text(text.replace(old, new, 1))
+
+
+def write(relative: str, content: str) -> None:
+    path = ROOT / relative
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content)
+
+
+write(
+    "apps/web/prisma/migrations/20260725190000_hosted_mailbox_content_retention/migration.sql",
+    '''-- This predeploy migration is intentionally expand-only. It adds the
+-- mailbox retirement markers without waking persisted snapshots, so a Vercel
+-- deployment can never race ahead of the stamping-capable Cloudflare runner.
+-- Phase-one snapshot rearming is a separate explicit post-smoke operation in
+-- the Cloudflare production deploy workflow.
+ALTER TABLE "hosted_mailbox_item"
+ADD COLUMN "content_retired_at" TIMESTAMP(3),
+ADD COLUMN "retention_disposition" TEXT;
+''',
+)
+
+write(
+    "apps/web/scripts/rearm-inbound-message-content-retention.ts",
+    '''import { existsSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+import { Client, type QueryResultRow } from "pg";
+
+import {
+  assertHostedWebMigrationOwner,
+  withHostedWebMigrationOwner,
+} from "./hosted-web-migration-owner";
+import {
+  resolveHostedWebMigrationDatabaseUrl,
+  type HostedWebMigrationEnvironment,
+} from "./run-prisma-migrate-deploy";
+
+const CONFIG_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const REARM_LOCK_NAME = "hosted_inbound_message_content_retention_phase_one";
+const REARM_LOCK_TIMEOUT = "5s";
+const REARM_STATEMENT_TIMEOUT = "30s";
+
+export const INBOUND_MESSAGE_CONTENT_RETENTION_REARM_OPT_IN =
+  "MURPH_RUN_INBOUND_MESSAGE_CONTENT_RETENTION_REARM";
+export const INBOUND_MESSAGE_CONTENT_RETENTION_REARM_MAX_SNAPSHOTS =
+  "MURPH_INBOUND_MESSAGE_CONTENT_RETENTION_MAX_SNAPSHOTS";
+
+export interface HostedInboundMessageContentRetentionRearmDatabase {
+  query<Row extends QueryResultRow = QueryResultRow>(
+    text: string,
+    values?: unknown[],
+  ): Promise<{ rows: Row[] }>;
+}
+
+export interface HostedInboundMessageContentRetentionRearmClient
+  extends HostedInboundMessageContentRetentionRearmDatabase {
+  connect(): Promise<unknown>;
+  end(): Promise<void>;
+}
+
+export interface HostedInboundMessageContentRetentionRearmResult {
+  rearmedAt: string;
+  rearmedCount: number;
+  snapshotCount: number;
+}
+
+export interface HostedInboundMessageContentRetentionRearmOptions {
+  clientFactory?: (
+    connectionString: string,
+  ) => HostedInboundMessageContentRetentionRearmClient;
+}
+
+export function shouldRunHostedInboundMessageContentRetentionRearm(
+  environment: HostedWebMigrationEnvironment,
+): boolean {
+  return environment[INBOUND_MESSAGE_CONTENT_RETENTION_REARM_OPT_IN] === "1";
+}
+
+export function readHostedInboundMessageContentRetentionRearmMaxSnapshots(
+  environment: HostedWebMigrationEnvironment,
+): number {
+  const raw = environment[
+    INBOUND_MESSAGE_CONTENT_RETENTION_REARM_MAX_SNAPSHOTS
+  ]?.trim();
+  if (!raw || !/^[1-9]\\d*$/u.test(raw)) {
+    throw new Error(
+      `${INBOUND_MESSAGE_CONTENT_RETENTION_REARM_MAX_SNAPSHOTS} must be a positive integer capacity ceiling.`,
+    );
+  }
+
+  const value = Number(raw);
+  if (!Number.isSafeInteger(value)) {
+    throw new Error(
+      `${INBOUND_MESSAGE_CONTENT_RETENTION_REARM_MAX_SNAPSHOTS} exceeds the safe integer range.`,
+    );
+  }
