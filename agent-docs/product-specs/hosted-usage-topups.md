@@ -119,6 +119,12 @@ The digest describes only the content that passed customization authorization
 and can therefore be restored or published. A failed encrypted-draft read does
 not enable payment retry, while an intentionally empty draft is shown
 explicitly. Canceling the active payment is the only way to replace that draft.
+Once the purchase is terminal, an exact request-key recovery with a remounted
+or changed draft returns the frozen purchase as a nonpayable sponsorship
+selection conflict and acknowledges the durable key match. The new draft is
+not applied. A `created` purchase past its checkout deadline is first closed by
+the existing expiry owner, so a lost response cannot pin the browser in a
+request-key conflict loop.
 If the payer has one canonical reusable card, Murph confirms that payment
 without a Checkout redirect. Otherwise Stripe Checkout collects or verifies
 the card and saves it for a later group contribution.

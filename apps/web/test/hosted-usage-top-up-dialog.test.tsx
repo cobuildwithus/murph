@@ -590,6 +590,146 @@ test("freezes optional sponsorship copy with the selected group offer", async ()
   }
 });
 
+test("clears a lost group request after terminal recovery with a remounted sponsor draft", async () => {
+  const checkoutUrl =
+    "/api/groups/fund/group_join_code_1234/usage-credit/checkout";
+  const firstRequestKey = "00000000-0000-4000-8000-000000000301";
+  const secondRequestKey = "00000000-0000-4000-8000-000000000302";
+  const sessionStorage = createMemoryStorage();
+  mocks.randomUUID
+    .mockImplementationOnce(() => firstRequestKey)
+    .mockImplementationOnce(() => secondRequestKey);
+  mocks.requestHostedOnboardingJson
+    .mockRejectedValueOnce(new Error("Response was lost."))
+    .mockResolvedValueOnce({
+      purchaseId: "hucp_terminal_sponsor_recovery",
+      recovered: true,
+      requestKeyMatched: true,
+      selectionConflict: "sponsorship",
+      status: "fulfilled",
+    })
+    .mockResolvedValueOnce({
+      purchaseId: "hucp_new_sponsor_after_recovery",
+      status: "checkout_open",
+      url: "https://checkout.stripe.test/new-sponsor",
+    });
+  const { GroupSponsorshipDialog } = await import(
+    "@/src/components/hosted-groups/group-sponsorship-dialog"
+  );
+  const rendered = await renderClientComponent(
+    createElement(GroupSponsorshipDialog, {
+      checkoutUrl,
+      customizationAllowed: true,
+      initialOpen: true,
+      offers: groupSponsorshipOffers(),
+      payerMemberId: TEST_PAYER_MEMBER_ID,
+    }),
+    { requireButton: false, sessionStorage },
+  );
+
+  try {
+    await clickRadio(rendered.container, rendered.window, "usage_10_usd");
+    await setTextInput(
+      rendered.container.querySelector("#group-sponsor-alias"),
+      rendered.window,
+      "Original sponsor",
+    );
+    await clickButton(
+      rendered.container,
+      rendered.window,
+      "Sponsor ~200 messages · $10",
+    );
+    assert.equal(
+      sessionStorage.getItem(
+        usageTopUpRequestStorageKey(checkoutUrl),
+      ),
+      firstRequestKey,
+    );
+
+    await rendered.rerender(
+      createElement(GroupSponsorshipDialog, {
+        checkoutUrl,
+        customizationAllowed: true,
+        initialOpen: true,
+        key: "remounted-without-frozen-sponsorship",
+        offers: groupSponsorshipOffers(),
+        payerMemberId: TEST_PAYER_MEMBER_ID,
+      }),
+    );
+    await clickRadio(rendered.container, rendered.window, "usage_10_usd");
+    await clickButton(
+      rendered.container,
+      rendered.window,
+      "Sponsor ~200 messages · $10",
+    );
+
+    assert.match(
+      rendered.container.textContent ?? "",
+      /sponsor details you just entered were not applied/,
+    );
+    assert.equal(
+      sessionStorage.getItem(
+        usageTopUpRequestStorageKey(checkoutUrl),
+      ),
+      null,
+    );
+    expect(rendered.assign).not.toHaveBeenCalled();
+
+    await clickButton(rendered.container, rendered.window, "Close");
+    await clickButton(
+      rendered.container,
+      rendered.window,
+      "Sponsor this chat",
+    );
+    await clickRadio(rendered.container, rendered.window, "usage_10_usd");
+    await clickButton(
+      rendered.container,
+      rendered.window,
+      "Sponsor ~200 messages · $10",
+    );
+
+    const postPayloads = mocks.requestHostedOnboardingJson.mock.calls
+      .map(([request]) => request)
+      .filter((request) => request.method === "POST")
+      .map((request) => request.payload);
+    assert.deepEqual(postPayloads, [
+      {
+        clientRequestKey: firstRequestKey,
+        offerCode: "usage_10_usd",
+        sponsorship: {
+          publicAlias: "Original sponsor",
+          runningBitRequest: "",
+          sponsorMessage: "",
+        },
+      },
+      {
+        clientRequestKey: firstRequestKey,
+        offerCode: "usage_10_usd",
+        sponsorship: {
+          publicAlias: "",
+          runningBitRequest: "",
+          sponsorMessage: "",
+        },
+      },
+      {
+        clientRequestKey: secondRequestKey,
+        offerCode: "usage_10_usd",
+        sponsorship: {
+          publicAlias: "",
+          runningBitRequest: "",
+          sponsorMessage: "",
+        },
+      },
+    ]);
+    expect(mocks.randomUUID).toHaveBeenCalledTimes(2);
+    expect(rendered.assign).toHaveBeenCalledWith(
+      "https://checkout.stripe.test/new-sponsor",
+    );
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
 test(
   "keeps participant-only sponsorship fields out of an unauthorized group checkout",
   async () => {
@@ -1780,7 +1920,7 @@ test.each([
         if (request.method === "POST" && request.url === checkoutUrl) {
           return Promise.resolve({
             ...(status === "payment_pending" ? { cancelAllowed: true } : {}),
-            offerConflict: true,
+            selectionConflict: "offer",
             purchaseId,
             recovered: true,
             status,
@@ -1916,7 +2056,7 @@ test.each([
     const result = readStatusContent({
       canResumeCheckout: false,
       canRetryCheckout: false,
-      offerConflict: true,
+      selectionConflict: "offer",
       pollKind,
       returnedFromSuccessfulCheckout: false,
       status,
@@ -1926,6 +2066,24 @@ test.each([
     assert.match(result.message, /The amount you just selected was not started/);
   },
 );
+
+test("explains that remounted sponsor details were not applied to a terminal purchase", async () => {
+  const { readStatusContent } = await import(
+    "@/src/components/settings/hosted-usage-top-up-contract"
+  );
+
+  const result = readStatusContent({
+    canResumeCheckout: false,
+    canRetryCheckout: false,
+    pollKind: "dormant",
+    returnedFromSuccessfulCheckout: false,
+    selectionConflict: "sponsorship",
+    status: "fulfilled",
+  });
+
+  assert.equal(result.title, "Original sponsorship completed");
+  assert.match(result.message, /sponsor details you just entered were not applied/);
+});
 
 test("cancels a recovered open Checkout through the existing expire route", async () => {
   vi.useFakeTimers();
@@ -2599,7 +2757,7 @@ test.each(USAGE_TOP_UP_TARGET_CASES)(
       .mockRejectedValueOnce(new Error("Response was lost."))
       .mockResolvedValueOnce({ recoveryMiss: true })
       .mockResolvedValueOnce({
-        offerConflict: true,
+        selectionConflict: "offer",
         purchaseId: "hucp_delayed_original_winner",
         recovered: true,
         status: "checkout_open",

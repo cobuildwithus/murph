@@ -673,7 +673,7 @@ describe("createHostedUsageCreditCheckout", () => {
       );
 
       expect(conflict).toMatchObject({
-        offerConflict: true,
+        selectionConflict: "offer",
         recovered: true,
         status: "reconciling",
       });
@@ -790,7 +790,7 @@ describe("createHostedUsageCreditCheckout", () => {
         "usage_5_usd",
         new Date(NOW.getTime() + 1_000),
       )).resolves.toMatchObject({
-        offerConflict: true,
+        selectionConflict: "offer",
         recovered: true,
       });
 
@@ -1009,7 +1009,7 @@ describe("createHostedUsageCreditCheckout", () => {
             ? reauthorizationResult
             : originalResult;
         expect(losingResult).toMatchObject({
-          offerConflict: true,
+          selectionConflict: "offer",
           recovered: true,
           status:
             winner === "original_first" ? "checkout_open" : "fulfilled",
@@ -1854,7 +1854,7 @@ describe("createHostedUsageCreditCheckout", () => {
       payerMemberId: MEMBER_ID,
       prisma: fake.prisma as never,
     })).resolves.toMatchObject({
-      offerConflict: true,
+      selectionConflict: "offer",
       recovered: true,
       status: "payment_pending",
     });
@@ -1945,7 +1945,7 @@ describe("createHostedUsageCreditCheckout", () => {
       payerMemberId: MEMBER_ID,
       prisma: fake.prisma as never,
     })).resolves.toMatchObject({
-      offerConflict: true,
+      selectionConflict: "offer",
       recovered: true,
       status: "checkout_open",
     });
@@ -2039,10 +2039,11 @@ describe("createHostedUsageCreditCheckout", () => {
         sponsorMessage: "A changed note for another amount.",
       },
     })).resolves.toMatchObject({
-      offerConflict: true,
+      selectionConflict: "offer",
       requestKeyMatched: true,
     });
 
+    clearStripeProviderMockHistory();
     await expect(createHostedGroupUsageCreditCheckout({
       clientRequestKey: CLIENT_REQUEST_KEY,
       joinCode: "group_join_code_1234",
@@ -2057,6 +2058,7 @@ describe("createHostedUsageCreditCheckout", () => {
     })).rejects.toMatchObject({
       code: "HOSTED_USAGE_CREDIT_REQUEST_KEY_CONFLICT",
     });
+    expectNoStripeProviderIo();
 
     await expect(createHostedGroupUsageCreditCheckout({
       clientRequestKey: CLIENT_REQUEST_KEY,
@@ -2087,6 +2089,109 @@ describe("createHostedUsageCreditCheckout", () => {
       sponsorMessageEncrypted:
         "sealed:Please stop inviting Jake to basketball.",
     });
+  });
+
+  it.each([
+    "fulfilled",
+    "expired",
+    "payment_failed",
+  ] as const)(
+    "acknowledges the exact request key when a %s group purchase outlives its sponsor draft",
+    async (status) => {
+      const fake = createFakePrisma();
+      mocks.stripeCheckoutCreate.mockImplementationOnce(async (request) =>
+        buildStripeSession(request)
+      );
+      const originalSponsorship = {
+        publicAlias: "Original sponsor",
+        runningBitRequest: null,
+        sponsorMessage: "Original note",
+      };
+      await createHostedGroupUsageCreditCheckout({
+        clientRequestKey: CLIENT_REQUEST_KEY,
+        joinCode: "group_join_code_1234",
+        now: NOW,
+        offerCode: "usage_10_usd",
+        payerMemberId: MEMBER_ID,
+        prisma: fake.prisma as never,
+        sponsorship: originalSponsorship,
+      });
+      const purchase = onlyPurchase(fake.purchases);
+      purchase.status = status;
+      purchase.terminalAt = new Date(NOW.getTime() + 500);
+      clearStripeProviderMockHistory();
+
+      await expect(createHostedGroupUsageCreditCheckout({
+        clientRequestKey: CLIENT_REQUEST_KEY,
+        joinCode: "group_join_code_1234",
+        now: new Date(NOW.getTime() + 1_000),
+        offerCode: "usage_10_usd",
+        payerMemberId: MEMBER_ID,
+        prisma: fake.prisma as never,
+        sponsorship: {
+          ...originalSponsorship,
+          sponsorMessage: "A remounted draft that was not authorized",
+        },
+      })).resolves.toMatchObject({
+        purchaseId: purchase.id,
+        recovered: true,
+        requestKeyMatched: true,
+        selectionConflict: "sponsorship",
+        status,
+      });
+      expectNoStripeProviderIo();
+    },
+  );
+
+  it("closes an effectively expired exact-key group purchase before sponsor-draft recovery", async () => {
+    const fake = createFakePrisma();
+    mocks.stripeCheckoutCreate.mockRejectedValueOnce(
+      new Error("connection lost"),
+    );
+    const originalSponsorship = {
+      publicAlias: "Original sponsor",
+      runningBitRequest: null,
+      sponsorMessage: "Original note",
+    };
+    await expect(createHostedGroupUsageCreditCheckout({
+      clientRequestKey: CLIENT_REQUEST_KEY,
+      joinCode: "group_join_code_1234",
+      now: NOW,
+      offerCode: "usage_10_usd",
+      payerMemberId: MEMBER_ID,
+      prisma: fake.prisma as never,
+      sponsorship: originalSponsorship,
+    })).rejects.toMatchObject({
+      code: "HOSTED_USAGE_CREDIT_STRIPE_UNAVAILABLE",
+    });
+    const purchase = onlyPurchase(fake.purchases);
+    const recoveryAt = new Date(
+      (purchase.checkoutExpiresAt as Date).getTime() + 1,
+    );
+    clearStripeProviderMockHistory();
+
+    await expect(createHostedGroupUsageCreditCheckout({
+      clientRequestKey: CLIENT_REQUEST_KEY,
+      joinCode: "group_join_code_1234",
+      now: recoveryAt,
+      offerCode: "usage_10_usd",
+      payerMemberId: MEMBER_ID,
+      prisma: fake.prisma as never,
+      sponsorship: null,
+    })).resolves.toMatchObject({
+      purchaseId: purchase.id,
+      recovered: true,
+      requestKeyMatched: true,
+      selectionConflict: "sponsorship",
+      status: "expired",
+    });
+    expect(purchase).toMatchObject({
+      reconciliationVersion: 1n,
+      status: "expired",
+      terminalAt: recoveryAt,
+      updatedAt: recoveryAt,
+    });
+    expectNoStripeProviderIo();
   });
 
   it("lets a nonparticipant fund without publishing their custom content", async () => {
@@ -2918,7 +3023,7 @@ describe("createHostedUsageCreditCheckout", () => {
       now: NOW,
       offerCode: "usage_5_usd",
     })).resolves.toMatchObject({
-      offerConflict: true,
+      selectionConflict: "offer",
       recovered: true,
       status: "reconciling",
     });

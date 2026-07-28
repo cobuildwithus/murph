@@ -35,13 +35,13 @@ interface HostedUsageTopUpPurchaseScreen {
   checkoutError: string | null;
   checkoutUrl: string | null;
   kind: "purchase";
-  offerConflict: boolean;
   operation: "idle" | "opening_checkout" | "canceling_checkout";
   poll: HostedUsageTopUpPoll;
   purchaseId: string;
   restartAt: string | null;
   retryOfferCode: string | null;
   retryRequestKey: string | null;
+  selectionConflict: HostedUsageTopUpPurchaseResponse["selectionConflict"];
   status: HostedUsageTopUpPurchaseStatus | null;
   targetConflict: boolean;
 }
@@ -426,7 +426,7 @@ function screenFromResponse(
     ...createPurchaseScreen(response.purchaseId),
     cancelAllowed: response.cancelAllowed,
     checkoutUrl:
-      !response.offerConflict &&
+      !response.selectionConflict &&
       !response.targetConflict &&
       response.status === "checkout_open"
         ? responseUrl ?? previous?.checkoutUrl ?? null
@@ -439,14 +439,16 @@ function screenFromResponse(
           : createPoll(previousPoll.run),
     restartAt: response.status === "reconciling" ? response.restartAt : null,
     retryOfferCode:
-      response.offerConflict || response.targetConflict ? null : retryOfferCode,
+      response.selectionConflict || response.targetConflict
+        ? null
+        : retryOfferCode,
     retryRequestKey:
-      response.offerConflict || response.targetConflict || !retryOfferCode
+      response.selectionConflict || response.targetConflict || !retryOfferCode
         ? null
         : retryRequestKey,
+    selectionConflict:
+      response.selectionConflict ?? previous?.selectionConflict ?? null,
     status: response.status,
-    offerConflict:
-      response.offerConflict || previous?.offerConflict === true,
     targetConflict: response.targetConflict || previous?.targetConflict === true,
   };
 }
@@ -470,13 +472,13 @@ function createPurchaseScreen(
     checkoutError: null,
     checkoutUrl: null,
     kind: "purchase",
-    offerConflict: false,
     operation: "idle",
     poll: createPoll(),
     purchaseId,
     restartAt: null,
     retryOfferCode: null,
     retryRequestKey: null,
+    selectionConflict: null,
     status: null,
     targetConflict: false,
   };

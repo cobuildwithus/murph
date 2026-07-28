@@ -114,6 +114,13 @@ Last verified: 2026-07-27
   that proves the submitted selection key matched for that payer clears the
   stored key; mounting an active or return projection, retrying a projected
   purchase, or recovering another request cannot release it.
+  A group purchase that can still start or continue payment also requires the
+  submitted sponsorship digest to match the frozen draft. Once that exact-key
+  purchase is terminal, a remounted or changed draft cannot alter it and must
+  not turn durable recovery into a permanent 409 loop: Web returns the frozen
+  nonpayable purchase, marks the sponsorship selection conflict, and
+  acknowledges the key match. An effectively expired `created` purchase is
+  closed through the existing expiry owner before that projection.
   Unavailable storage fails closed before request entry; the winning purchase
   remains the only payable path.
   Authentication or card failure

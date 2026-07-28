@@ -79,6 +79,7 @@ import {
   assertHostedGroupSponsorshipRequestMatchesTx,
   createHostedGroupSponsorshipMomentTx,
   hasHostedGroupSponsorshipCustomizationAuthority,
+  hostedGroupSponsorshipRequestMatchesTx,
   parseHostedGroupSponsorshipDraft,
   type HostedGroupSponsorshipDraft,
 } from "../hosted-groups/group-sponsorship-store";
@@ -105,6 +106,7 @@ export type {
   HostedUsageCreditCheckoutResult,
   HostedUsageCreditPublicPurchaseStatus,
   HostedUsageCreditPurchaseStatusResult,
+  HostedUsageCreditSelectionConflict,
   HostedUsageCreditPurchaseTargetProjection,
 } from "./usage-credit-purchase-status-service";
 export {
@@ -125,6 +127,14 @@ const HOSTED_USAGE_CREDIT_NONTERMINAL_PURCHASE_STATUSES = [
   HostedUsageCreditPurchaseStatus.checkout_open,
   HostedUsageCreditPurchaseStatus.payment_pending,
 ] as const;
+
+function canContinueHostedUsageCreditPurchase(
+  status: HostedUsageCreditPurchaseStatus,
+): boolean {
+  return status === HostedUsageCreditPurchaseStatus.created
+    || status === HostedUsageCreditPurchaseStatus.checkout_open
+    || status === HostedUsageCreditPurchaseStatus.payment_pending;
+}
 
 export interface HostedUsageCreditCheckoutRequest {
   clientRequestKey: string;
@@ -427,38 +437,76 @@ async function createHostedUsageCreditCheckoutForTarget(input: {
           currentTarget.groupId !== frozenTarget.familyGroupId
         ) {
           return {
-            offerConflict: false,
             kind: "purchase" as const,
             purchase: racedExisting,
             recovered: true,
             requestKeyMatched: true,
+            selectionConflict: null,
             targetConflict: true,
           };
         }
       }
-      if (racedExisting.offerCode !== input.offerCode) {
+      let recoveredPurchase = racedExisting;
+      if (
+        recoveredPurchase.status === HostedUsageCreditPurchaseStatus.created
+        && now.getTime() >= recoveredPurchase.checkoutExpiresAt.getTime()
+      ) {
+        await closeExpiredUnattachedHostedUsageCreditPurchasesTx({
+          now,
+          payerMemberId: input.target.payerMemberId,
+          purchaseId: recoveredPurchase.id,
+          tx,
+        });
+        const closedPurchase = await tx.hostedUsageCreditPurchase.findUnique({
+          where: { id: recoveredPurchase.id },
+        });
+        if (
+          !closedPurchase
+          || closedPurchase.status !== HostedUsageCreditPurchaseStatus.expired
+        ) {
+          throw buildHostedUsageCreditInvariantError(
+            "checkout_expiry_close_failed",
+          );
+        }
+        recoveredPurchase = closedPurchase;
+      }
+      if (recoveredPurchase.offerCode !== input.offerCode) {
         return {
-          offerConflict: true,
           kind: "purchase" as const,
-          purchase: racedExisting,
+          purchase: recoveredPurchase,
           recovered: true,
           requestKeyMatched: true,
+          selectionConflict: "offer" as const,
           targetConflict: false,
         };
       }
       if (input.target.kind === "group") {
-        await assertHostedGroupSponsorshipRequestMatchesTx({
+        const sponsorshipInput = {
           draft: input.groupSponsorship ?? null,
-          purchaseId: racedExisting.id,
+          purchaseId: recoveredPurchase.id,
           tx,
-        });
+        };
+        if (canContinueHostedUsageCreditPurchase(recoveredPurchase.status)) {
+          await assertHostedGroupSponsorshipRequestMatchesTx(sponsorshipInput);
+        } else if (
+          !(await hostedGroupSponsorshipRequestMatchesTx(sponsorshipInput))
+        ) {
+          return {
+            kind: "purchase" as const,
+            purchase: recoveredPurchase,
+            recovered: true,
+            requestKeyMatched: true,
+            selectionConflict: "sponsorship" as const,
+            targetConflict: false,
+          };
+        }
       }
       return {
-        offerConflict: false,
         kind: "purchase" as const,
-        purchase: racedExisting,
+        purchase: recoveredPurchase,
         recovered: false,
         requestKeyMatched: true,
+        selectionConflict: null,
         targetConflict: false,
       };
     }
@@ -501,11 +549,11 @@ async function createHostedUsageCreditCheckoutForTarget(input: {
       })) {
         if (existingActive.offerCode !== input.offerCode) {
           return {
-            offerConflict: true,
             kind: "purchase" as const,
             purchase: existingActive,
             recovered: true,
             requestKeyMatched: false,
+            selectionConflict: "offer" as const,
             targetConflict: false,
           };
         }
@@ -517,20 +565,20 @@ async function createHostedUsageCreditCheckoutForTarget(input: {
           });
         }
         return {
-          offerConflict: false,
           kind: "purchase" as const,
           purchase: existingActive,
           recovered: true,
           requestKeyMatched: false,
+          selectionConflict: null,
           targetConflict: false,
         };
       }
       return {
-        offerConflict: false,
         kind: "purchase" as const,
         purchase: existingActive,
         recovered: true,
         requestKeyMatched: false,
+        selectionConflict: null,
         targetConflict: true,
       };
     }
@@ -702,11 +750,11 @@ async function createHostedUsageCreditCheckoutForTarget(input: {
       });
     }
     return {
-      offerConflict: false,
       kind: "purchase" as const,
       purchase: created,
       recovered: false,
       requestKeyMatched: true,
+      selectionConflict: null,
       targetConflict: false,
     };
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
@@ -731,14 +779,14 @@ async function createHostedUsageCreditCheckoutForTarget(input: {
     };
   }
 
-  if (resolution.offerConflict) {
+  if (resolution.selectionConflict) {
     return {
       ...projectHostedUsageCreditPurchaseStatusResult(resolution.purchase),
-      offerConflict: true,
       recovered: true,
       ...(resolution.requestKeyMatched
         ? { requestKeyMatched: true as const }
         : {}),
+      selectionConflict: resolution.selectionConflict,
     };
   }
 

@@ -14,6 +14,7 @@ const PURCHASE_STATUSES = [
 ] as const;
 
 type HostedUsageTopUpPurchaseStatus = (typeof PURCHASE_STATUSES)[number];
+type HostedUsageTopUpSelectionConflict = "offer" | "sponsorship";
 
 interface HostedUsageTopUpOffer {
   offerCode: string;
@@ -64,12 +65,12 @@ interface HostedUsageTopUpDialogProps {
 
 interface HostedUsageTopUpPurchaseResponse {
   cancelAllowed: boolean;
-  offerConflict: boolean;
   purchaseId: string;
   recovered: boolean;
   requestKeyMatched: boolean;
   restartAt: string | null;
   retryAllowed: boolean;
+  selectionConflict: HostedUsageTopUpSelectionConflict | null;
   status: HostedUsageTopUpPurchaseStatus;
   targetConflict: boolean;
   url: string | null;
@@ -104,7 +105,8 @@ function readPurchaseResponse(value: unknown): HostedUsageTopUpPurchaseResponse 
     value.purchaseId.length > 200 ||
     !isPurchaseStatus(value.status) ||
     (value.cancelAllowed !== undefined && value.cancelAllowed !== true) ||
-    (value.offerConflict !== undefined && value.offerConflict !== true) ||
+    (value.selectionConflict !== undefined
+      && !isSelectionConflict(value.selectionConflict)) ||
     (value.recovered !== undefined && value.recovered !== true) ||
     (value.requestKeyMatched !== undefined &&
       value.requestKeyMatched !== true) ||
@@ -116,7 +118,7 @@ function readPurchaseResponse(value: unknown): HostedUsageTopUpPurchaseResponse 
     (value.url !== undefined &&
       value.url !== null &&
       typeof value.url !== "string") ||
-    (value.offerConflict === true &&
+    (isSelectionConflict(value.selectionConflict) &&
       (value.retryAllowed === true ||
         value.targetConflict === true ||
         typeof value.url === "string"))
@@ -126,12 +128,14 @@ function readPurchaseResponse(value: unknown): HostedUsageTopUpPurchaseResponse 
 
   return {
     cancelAllowed: value.cancelAllowed === true,
-    offerConflict: value.offerConflict === true,
     purchaseId: value.purchaseId,
     recovered: value.recovered === true,
     requestKeyMatched: value.requestKeyMatched === true,
     restartAt: typeof value.restartAt === "string" ? value.restartAt : null,
     retryAllowed: value.retryAllowed === true,
+    selectionConflict: isSelectionConflict(value.selectionConflict)
+      ? value.selectionConflict
+      : null,
     status: value.status,
     targetConflict: value.targetConflict === true,
     url:
@@ -174,16 +178,17 @@ function isCanonicalIsoTimestamp(value: unknown): value is string {
 function readStatusContent(input: {
   canResumeCheckout: boolean;
   canRetryCheckout: boolean;
-  offerConflict?: boolean;
   pollKind: "dormant" | "checking" | "exhausted" | "failed";
   returnedFromSuccessfulCheckout: boolean;
   scope?: "family" | "group" | "personal";
+  selectionConflict?: HostedUsageTopUpSelectionConflict | null;
   status: HostedUsageTopUpPurchaseStatus | null;
   targetLabel?: string;
   targetConflict?: boolean;
 }): { message: string; title: string } {
-  if (input.offerConflict) {
-    return readOfferConflictStatusContent({
+  if (input.selectionConflict) {
+    return readSelectionConflictStatusContent({
+      kind: input.selectionConflict,
       pollKind: input.pollKind,
       status: input.status,
     });
@@ -308,10 +313,29 @@ function readStatusContent(input: {
   }
 }
 
-function readOfferConflictStatusContent(input: {
+function readSelectionConflictStatusContent(input: {
+  kind: HostedUsageTopUpSelectionConflict;
   pollKind: "dormant" | "checking" | "exhausted" | "failed";
   status: HostedUsageTopUpPurchaseStatus | null;
 }): { message: string; title: string } {
+  if (input.kind === "sponsorship") {
+    const message =
+      "The sponsor details you just entered were not applied. The original purchase is shown below.";
+    switch (input.status) {
+      case "fulfilled":
+        return content("Original sponsorship completed", message);
+      case "expired":
+        return content("Original sponsorship canceled", message);
+      case "payment_failed":
+        return content("Original sponsorship not completed", message);
+      case "checkout_open":
+      case "payment_pending":
+      case "reconciling":
+      case null:
+        return content("Original sponsorship found", message);
+    }
+  }
+
   if (input.pollKind === "failed") {
     return content(
       "Couldn't check the earlier amount",
@@ -360,6 +384,12 @@ function readOfferConflictStatusContent(input: {
 
 function content(title: string, message: string) {
   return { message, title };
+}
+
+function isSelectionConflict(
+  value: unknown,
+): value is HostedUsageTopUpSelectionConflict {
+  return value === "offer" || value === "sponsorship";
 }
 
 function shouldPollPurchaseStatus(

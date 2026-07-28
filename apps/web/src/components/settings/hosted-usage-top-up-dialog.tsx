@@ -143,10 +143,10 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
     ? readStatusContent({
         canResumeCheckout: canResume,
         canRetryCheckout: canRetry,
-        offerConflict: purchase.offerConflict,
         pollKind: purchase.poll.kind,
         returnedFromSuccessfulCheckout,
         scope: props.scope,
+        selectionConflict: purchase.selectionConflict,
         status: purchase.status,
         targetLabel: familyTarget ?? undefined,
         targetConflict: purchase.targetConflict,
@@ -156,7 +156,7 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
   const fulfilledConfirmation =
     purchase !== null &&
     purchase.status === "fulfilled" &&
-    !purchase.offerConflict &&
+    !purchase.selectionConflict &&
     !purchase.targetConflict;
   const showGroupMessagesAction =
     fulfilledConfirmation && props.scope === "group";
@@ -226,8 +226,10 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
             {purchase
               ? purchase.targetConflict
                 ? "Manage the unfinished checkout before starting one for this usage destination."
-                : purchase.offerConflict
-                  ? "The amount you just selected was not started. Review the earlier purchase below."
+                : purchase.selectionConflict
+                  ? purchase.selectionConflict === "sponsorship"
+                    ? "The sponsor details you just entered were not applied. Review the original purchase below."
+                    : "The amount you just selected was not started. Review the earlier purchase below."
                   : props.scope === "group"
                     ? "We’ll update this group’s credit as soon as payment is complete."
                     : familyTarget

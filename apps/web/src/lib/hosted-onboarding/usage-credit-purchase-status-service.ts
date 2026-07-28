@@ -48,15 +48,17 @@ export const HOSTED_USAGE_CREDIT_PUBLIC_PURCHASE_STATUSES = [
 export type HostedUsageCreditPublicPurchaseStatus =
   (typeof HOSTED_USAGE_CREDIT_PUBLIC_PURCHASE_STATUSES)[number];
 
+export type HostedUsageCreditSelectionConflict = "offer" | "sponsorship";
+
 export interface HostedUsageCreditCheckoutResult {
   cancelAllowed?: true;
-  offerConflict?: true;
   purchaseId: string;
   recovered?: true;
   /** The returned purchase is durably bound to the submitted request key. */
   requestKeyMatched?: true;
   restartAt?: string;
   retryAllowed?: true;
+  selectionConflict?: HostedUsageCreditSelectionConflict;
   status: HostedUsageCreditPublicPurchaseStatus;
   targetConflict?: true;
   url?: string;

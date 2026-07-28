@@ -123,7 +123,10 @@ Last verified: 2026-07-26
   encrypted through the hosted member secure-box owner, omitted from logs, and
   quoted to the Assistant only as untrusted data. Losing authority suppresses
   publication without weakening or reversing the verified usage grant. The
-  creative notification prompt profile supplies only the task and bounded
+  frozen digest remains strict while payment can start or continue. A terminal
+  exact-key replay may acknowledge a changed remounted draft only as a
+  nonpayable selection conflict; it never rewrites or activates that content.
+  The creative notification prompt profile supplies only the task and bounded
   committed group history in an isolated thread, projects only
   `generate_song`, and applies the output-only native-capability deny set:
   approval never, read-only sandbox, and no shell, browser, apps, plugins,
