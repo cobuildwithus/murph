@@ -65,14 +65,28 @@ jobs:
           fetch-depth: 0
           path: murph
 
-      - name: Apply audited rollout fix
+      - name: Merge current main and apply audited rollout fix
         shell: bash
         run: |
           set -euo pipefail
           cd murph
           expected_head="8f98e7a667567956156907663cad4d203e91b153"
+          expected_main="d9fa35dd037fb60219c2a693de6832058ef30773"
           if [[ "$(git rev-parse HEAD)" != "${expected_head}" ]]; then
             echo "PR #936 moved; refusing to apply a stale safety patch." >&2
+            exit 1
+          fi
+          git fetch origin main
+          if [[ "$(git rev-parse origin/main)" != "${expected_main}" ]]; then
+            echo "main moved; refusing to verify against a stale base." >&2
+            exit 1
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git merge --no-commit --no-ff origin/main
+          if git diff --name-only --diff-filter=U | grep -q .; then
+            echo "Unexpected conflicts while integrating current main." >&2
+            git diff --name-only --diff-filter=U >&2
             exit 1
           fi
           cat ../helper/.github/pr936-retention-safety-fix/part-*.pyfrag > "${RUNNER_TEMP}/pr936-retention-safety-fix.py"
@@ -134,7 +148,7 @@ jobs:
           set -euo pipefail
           cd murph
           expected_head="8f98e7a667567956156907663cad4d203e91b153"
-          expected_main="9ec9db90390e8dd2f7968905e9fcf97e1eeb11a2"
+          expected_main="d9fa35dd037fb60219c2a693de6832058ef30773"
           git fetch origin main message-retention-14d
           if [[ "$(git rev-parse origin/message-retention-14d)" != "${expected_head}" ]]; then
             echo "PR #936 advanced during verification; refusing to overwrite it." >&2
@@ -144,8 +158,6 @@ jobs:
             echo "main advanced during verification; refusing to push against a stale base." >&2
             exit 1
           fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add \
             .github/workflows/deploy-cloudflare-hosted.yml \
             apps/cloudflare/DEPLOY.md \
@@ -155,7 +167,15 @@ jobs:
             apps/web/test/hosted-inbound-message-content-retention-rearm-postgres.test.ts \
             apps/web/test/hosted-mailbox-content-retention-migration-postgres.test.ts
           git diff --cached --check
-          git commit -m "Make retention rollout fail closed"
+          git commit -m "Merge current main and make retention rollout fail closed"
+          if [[ "$(git rev-parse HEAD^1)" != "${expected_head}" ]]; then
+            echo "Unexpected first merge parent." >&2
+            exit 1
+          fi
+          if [[ "$(git rev-parse HEAD^2)" != "${expected_main}" ]]; then
+            echo "Unexpected second merge parent." >&2
+            exit 1
+          fi
           git push origin HEAD:message-retention-14d
 
       - name: Report verification result
