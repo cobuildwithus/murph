@@ -523,6 +523,7 @@ describe("runtime invocation transport failure fence handling", () => {
         ],
         userId,
         workspace: {
+          checkpointedAt: "2026-06-11T00:01:00.000Z",
           createdAt: FIXED_NOW,
           nextWakeAt: "2026-06-11T00:05:00.000Z",
           nextWakeReason: "scheduled_wake",
@@ -548,6 +549,41 @@ describe("runtime invocation transport failure fence handling", () => {
     expect(harness.ownerReleaseCallCount()).toBe(1);
   });
 
+  it("does not treat a version-only administrative transition as runtime progress", async () => {
+    const harness = await createTransportFailureHarness({
+      readActiveRuntimeUserFence: async () => ({
+        active: false,
+        reason: "no_active_runtime",
+      }),
+      readHostedRuntimeStatusFromWeb: async (userId) => ({
+        mailboxLag: [],
+        userId,
+        workspace: {
+          checkpointedAt: null,
+          createdAt: FIXED_NOW,
+          nextWakeAt: FIXED_NOW,
+          nextWakeReason: "inbox_media_retention",
+          redactedStatus: {},
+          snapshotRef: null,
+          updatedAt: FIXED_NOW,
+          userId,
+          version: "1",
+        },
+      }),
+    });
+
+    await expect(harness.invoke()).rejects.toThrow(
+      "container transport failed",
+    );
+    await expect(harness.stateStore.readWriteFenceToken()).resolves.toEqual(
+      expect.objectContaining({
+        attemptId: harness.token.attemptId,
+        userId: TEST_USER_ID,
+      }),
+    );
+    expect(harness.ownerReleaseCallCount()).toBe(0);
+  });
+
   it("requests one immediate recheck when recovered progress published a due default wake", async () => {
     const harness = await createTransportFailureHarness({
       readActiveRuntimeUserFence: async () => ({
@@ -558,6 +594,7 @@ describe("runtime invocation transport failure fence handling", () => {
         mailboxLag: [],
         userId,
         workspace: {
+          checkpointedAt: "2026-06-11T00:01:00.000Z",
           createdAt: FIXED_NOW,
           nextWakeAt: FIXED_NOW,
           nextWakeReason: "assistant",
@@ -597,6 +634,7 @@ describe("runtime invocation transport failure fence handling", () => {
         }],
         userId,
         workspace: {
+          checkpointedAt: "2026-06-11T00:01:00.000Z",
           createdAt: FIXED_NOW,
           nextWakeAt: futureRetryAt,
           nextWakeReason: "mailbox",
@@ -752,6 +790,7 @@ async function createTransportFailureHarness(input: {
     job: createWorkspaceInvocationJob({ token, userId: TEST_USER_ID }),
     runnerContainerName: TEST_RUNNER_CONTAINER_NAME,
     token,
+    workspaceCheckpointedAt: null,
     workspaceVersion: "0",
   };
 

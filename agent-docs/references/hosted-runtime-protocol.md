@@ -381,6 +381,12 @@ foreground/default work arrives, the runner preempts that exact child through
 the existing container abort seam, clears the old fence by identity, and starts
 foreground work. Retention remains recoverable through the workspace's projected
 retention wake instead of becoming a second scheduler concern.
+The same wake owns all receipt-anchored inbound message-content work: pending
+input suppression and redaction, transcript redaction, media expiration, legacy
+envelope migration, capture/parser/projection redaction, and their earliest
+future deadline. An overdue pending-input pass runs before background input
+selection as well as during idle maintenance, so restored content cannot begin a
+reply after its deadline.
 If a `system_mailbox` invocation owns the active fence when foreground/default
 work arrives, the runner uses the same exact-child abort and identity-cleared
 replacement path. It must start a default-mode child rather than coalescing the
@@ -761,6 +767,36 @@ a bounded legacy admitted input unreplied, but it cannot send an unsolicited
 historical message. Exact terminal item stamps are idempotent, and repeated
 idle checkpoints safely resend them until the durable floor confirms the
 accepted transaction.
+
+Mailbox retention clears payload ciphertext in place rather than deleting an
+accepted conversation gap. At the inclusive 14-day deadline, an unconsumed
+conversation row receives `policy_non_reply.content_expired`, `consumed_at`, and
+content-retirement metadata in the same statement that deletes its payload
+sidecar and clears inline payload fields. The lane counter advances only through
+the first remaining unconsumed conversation sequence; it never jumps across a
+younger gap. Policy non-reply tombstones remain as durable terminal evidence,
+while ordinary content-free mailbox tombstones may be pruned after their
+separate structural window.
+
+Assistant transcript retention uses only the user entry's stamped
+`contentReceivedAt`. Projection `createdAt`, accepted-turn journals, and input
+events are not fallback receipt owners: normal settled-snapshot cleanup may
+delete the journal and input before a later retention wake. The rollout is
+therefore two-phase. Phase one stamps every new user entry and preserves every
+unstamped legacy entry. After immediate runner rollout is verified, operators
+record the fleet-convergence instant and apply the additive mailbox migration,
+which re-arms every persisted snapshot once and advances its workspace CAS
+version without changing checkpoint time. Any invocation holding the prior
+version must retry instead of overwriting that wake. The existing hourly cron
+signals five due snapshots per successful run; each wake scrubs receipt-backed
+captures, parser output, projections, inputs, and stamped transcripts while leaving the
+unstamped legacy pair intact. Operators must preflight aggregate queue capacity
+and may not declare phase one complete until no due snapshot remains. After 14
+complete days and phase-one drain completion, a separate phase-two migration
+may re-arm persisted snapshots again and the runtime may retire every remaining
+unstamped user entry. Until both gates pass, fail-closed legacy scrubbing is
+forbidden because it can erase recent paired conversation history
+irreversibly.
 
 Accepted Linq reply delivery carries an earlier copy of the same exact-item
 consume authority:
@@ -1371,14 +1407,19 @@ For the active-wake probe, a verifiably stopped container shell
 (`ctx.container.running === false`) is the same explicit no-active-child proof.
 Committed-progress recovery stays in the transport-failure adapter, where the
 transport outcome is the thing being reconciled. Only explicit inactive proof
-may enter accepted committed-progress recovery. A workspace version advance is
-committed prefix progress even when newer durable mailbox lag remains; recovery
-clears the exact fence and the owner-release callback asks Temporal to process
-actionable remaining lag. Mismatch may clear a transport-failure fence because it
-proves that the active child is not the fenced attempt. Active, unsupported,
-error, and timeout probe outcomes preserve the fence regardless of whether a
-status read appears to show progress. Exact successful completion clears the
-fence only by the matching attempt identity.
+may enter accepted committed-progress recovery. A newer workspace version plus
+a changed, non-null checkpoint timestamp proves committed prefix progress even
+when newer durable mailbox lag remains; recovery clears the exact fence and the
+owner-release callback asks Temporal to process actionable remaining lag.
+Version-only administrative transitions are not runtime commit proof. In
+particular, retention rollout rearm advances the workspace CAS version without
+changing checkpoint time, so a runtime that read the pre-rearm workspace cannot
+checkpoint over the due wake and an ambiguous transport failure cannot
+misclassify the migration as runtime completion. Mismatch may clear a
+transport-failure fence because it proves that the active child is not the
+fenced attempt. Active, unsupported, error, and timeout probe outcomes preserve
+the fence regardless of whether a status read appears to show progress. Exact
+successful completion clears the fence only by the matching attempt identity.
 This prevents duplicate replacement while a live child may still be running and
 leaves replacement ownership in the exact identity-aware wake path.
 When the outer RunnerContainer active-operation pointer is missing, a container
@@ -1899,8 +1940,8 @@ routing.
 - assistant sessions, transcripts, receipts, diagnostics, and outbox intents
 - same-conversation turn revision
 - provider delivery and receipt/reconciliation policy
-- runtime timers, assistant next wake projection, and inbox media retention wake
-  projection
+- runtime timers, assistant next wake projection, and the shared inbound
+  message/media retention wake projection
 - checkpoint timing
 - the invocation-local one-child Assistant Ask controller, sealed target
   context builder, consented personal candidate pass, fresh outgoing reviewer,
@@ -1960,9 +2001,9 @@ outbox truth, or per-user runner coordination.
 
 Private runtime timers live in local runtime state and surface only as redacted
 due-time projection on the workspace/status surface. Assistant work uses
-`nextWakeAt` and `nextWakeReason`; inbox media retention uses the independent
-`inboxMediaRetentionWakeAt` field. Web does not materialize timer rows, and
-Cloudflare does not persist timer work items.
+`nextWakeAt` and `nextWakeReason`; inbound message and media retention share the
+independent `inboxMediaRetentionWakeAt` field. Web does not materialize timer
+rows, and Cloudflare does not persist timer work items.
 
 If the runner needs a synthetic in-process object for logging or execution
 plumbing, it may use an internal-only `runtime.timer` wake. That object is not a
