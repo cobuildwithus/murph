@@ -894,6 +894,9 @@ async function stageHostedConversationAssistantInputEvent(input: {
   const linqWake = isHostedLinqConversationMessageWake(input.wake)
     ? input.wake
     : null;
+  const telegramWake = isHostedTelegramConversationMessageWake(input.wake)
+    ? input.wake
+    : null;
   const groupContextAuthorized = linqWake
     && linqWake.message.routeAuthority !== null
     && linqWake.message.routeAuthority !== undefined
@@ -903,6 +906,12 @@ async function stageHostedConversationAssistantInputEvent(input: {
   const groupReactionContext = groupContextAuthorized
     ? linqWake?.message.groupReactionContext
     : undefined;
+  const groupRunningBitAuthorized =
+    groupContextAuthorized ||
+    Boolean(
+      telegramWake?.message.routeAuthority &&
+      telegramWake.message.telegramMessage.threadIsDirect === false,
+    );
   const event = await upsertAssistantInputEvent({
     event: createHostedConversationAssistantInputEvent({
       item: input.item,
@@ -913,6 +922,9 @@ async function stageHostedConversationAssistantInputEvent(input: {
   await recordHostedMailboxAssistantInputItem({
     ...(groupParticipantAdded ? { groupParticipantAdded } : {}),
     ...(groupReactionContext ? { groupReactionContext } : {}),
+    ...(groupRunningBitAuthorized && input.item.groupRunningBit
+      ? { groupRunningBit: input.item.groupRunningBit }
+      : {}),
     ...(input.item.usageRunningLow === true
       ? { usageRunningLow: true as const }
       : {}),

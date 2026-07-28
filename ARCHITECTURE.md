@@ -732,6 +732,21 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   acknowledges dirty-pending rows through signed callbacks. Hosted provider
   registration reuses the shared `device-syncd` provider-manifest assembly path
   rather than maintaining an app-local provider list.
+- Group sponsorship remains an extension of the existing Web-owned
+  usage-credit purchase, not a second billing or entitlement system. A group
+  purchase may own one encrypted participant-authored sponsorship moment.
+  Verified fulfillment activates its optional Web-timed running bit and
+  appends one purchase-deduplicated creative notification to the existing
+  mailbox. The isolated creative turn exposes only `generate_song`, inherits
+  the output-only native-capability deny set, retains only the bound provider
+  transport required by that application-owned tool, and makes at most one
+  provider attempt; a committed delivery intent remains ordinary outbox work. Web
+  projects only the current bit as an optional typed mailbox
+  sidecar; `packages/assistant-runtime` attaches it only to fresh,
+  route-authorized non-direct group input, and `packages/assistant-engine`
+  renders it as low-priority quoted data after rechecking expiry. The vault,
+  group-room model, Temporal, and Cloudflare own no sponsorship state,
+  financial fact, expiration scheduler, or second delivery queue.
 - `apps/cloudflare`: hosted execution plane for ensure-processing requests (callback-signed from the Temporal orchestrator, or Vercel OIDC-authenticated best-effort direct ingress wakes from `apps/web`) plus Vercel OIDC-authenticated browser-vault session, deletion, status, and web-owned Telegram usage-limit notice requests, plus the signed deploy-smoke callback used to verify the managed container image, with per-user coordination via container-enabled Durable Objects, active write-fence wake/replace behavior, encrypted hosted workspace snapshots, legacy encrypted artifact objects, encrypted runner-secret blobs, short-lived DO-local coordination metadata, derived gateway projections, and a native Cloudflare container image that runs one-shot inbox/parser/assistant/device-sync execution through `packages/assistant-runtime`; it owns execution coordination, configured env profile selection, user-secret allowlisting, image-owned native parser tool paths, Worker-owned provider credential injection through runner HTTPS egress interception, and adapter transport details such as local loopback URL rewriting, while runtime launch semantics and profile key sets come from `packages/assistant-runtime`. Web applies its hosted access-and-usage decision before exhausted runnable mailbox work reaches Temporal or the runner. Cloudflare receives no billing or credit projection, cannot grant usage, and performs no Stripe call. Web preserves hosted conversation input before admission, and allowance accounting runs after usage exists. Cloudflare/runner #587 or newer is the permanent rollback floor while Web omits the retired callback route. Cloudflare carries the signed plan-usage read as a transport-only runtime port and cannot select a member, billing action, or usage interpretation; it owns opaque runtime blobs only, not canonical hosted product facts outside the encrypted workspace snapshot, and it may verify signed ingress/runtime root envelopes and unwrap its P-256 recipient wrap without holding GCP KMS decrypt authority; foreground runtime work may defer intermediate checkpoints, the active invocation remains dirty until the runtime-owned idle-floor—or last-chance shutdown—`idle_shutdown` checkpoint succeeds, RunnerContainer never records pending checkpoint intent, and activity expiry is cleanup-only
 - Hosted deployment topology has one generated Cloudflare config/deploy owner
   and two manual protected-main targets: `production` and `preview`. The
