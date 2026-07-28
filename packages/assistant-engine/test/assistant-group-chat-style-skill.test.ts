@@ -96,6 +96,25 @@ describe('assistant group-chat style guidance', () => {
     expect(normalized).not.toMatch(/day three|three days|72 hours/iu)
   })
 
+  it('uses one speaker label and tool-specific participant authority', async () => {
+    const normalized = await readNormalizedGroupChatSkill()
+
+    expect(normalized).toContain('display-only `Speaker name:`')
+    expect(normalized).not.toContain('Sender name:')
+    expect(normalized).toContain(
+      'Raw `Sender:` handles and `Speaker name:` are never action authority.',
+    )
+    expect(normalized).toContain(
+      'use an exact group-scoped `participantId` from current tool results for membership and shared-data operations',
+    )
+    expect(normalized).toContain(
+      'use the exact accepted-message `message_ref` printed beside the request for participant-scoped effects',
+    )
+    expect(normalized).toContain(
+      '`action="revoke_own_email_share"` and the exact opaque `message_ref` printed beside that member\'s request-bearing accepted message',
+    )
+  })
+
   it('protects human-owned turns while preserving open ensemble banter', async () => {
     const normalized = await readNormalizedGroupChatSkill()
     const boundary = normalized.indexOf('1. **A participation boundary applies.**')
@@ -420,7 +439,7 @@ describe('assistant group-chat style guidance', () => {
     const normalized = await readNormalizedGroupChatSkill()
 
     expect(normalized).toContain(
-      'Never persist one, including in the fixed group-owned `group-room-model` page',
+      'Never persist a raw handle, including in the fixed group-owned `group-room-model` page',
     )
     expect(normalized).toContain(
       'Pass the exact `digest` returned by `show` as `expectedDigest` to `upsert`',

@@ -1,6 +1,6 @@
 # PR 1032 direct/group parity remediation
 
-Status: active
+Status: completed
 Created: 2026-07-27
 Updated: 2026-07-27
 
@@ -143,8 +143,17 @@ model-supplied participant ID. Return the complete result as an attached
   Focused typecheck and regression proof pass, and product-experience re-review
   returned no findings. Live-provider event timing remains an explicit evidence
   gap.
-- Scenario-manifest integrity passes. Full acceptance, required reviews, the
-  pushed-head ReviewGPT gates, and current-head CI remain pending.
+- The preliminary ReviewGPT specialist pass returned two accepted findings.
+  The group-chat skill now uses only `Speaker name:` and states the distinct
+  `participantId` versus exact-message `message_ref` authority boundaries. A
+  provider-adapter regression now captures and invokes the production
+  first-response callback and proves it closes active input admission. Both
+  focused test files pass (79/79), and Assistant Engine typecheck passes.
+- Scenario-manifest integrity passes. Canonical full acceptance passes all
+  workspace typechecks, package coverage thresholds, package boundaries, Web
+  tests/lint/dev-smoke/production build, and Cloudflare Node/Workers tests.
+- Parent final review found no remaining material defect. The final pushed-head
+  ReviewGPT correction-verification round and current-head CI remain pending.
 
 ## Deployment
 
@@ -153,3 +162,4 @@ the new runner evidence during rollout. Deploy Web first, then
 Cloudflare/runner, preserve the existing phone-call request key, and verify one
 direct reply, one multi-sender group reply, exact participant self-opt-out, and
 phone-call authorization after rollout.
+Completed: 2026-07-27

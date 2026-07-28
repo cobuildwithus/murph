@@ -2434,6 +2434,45 @@ describe('Codex assistant registry helpers', () => {
     expect(attempt.providerTurnId).toBe('turn-failed-issues')
   })
 
+  it('closes active input admission through the production provider adapter', async () => {
+    const closeInputAdmission = vi.fn()
+    codexAppServerMocks.executeCodexAppServerTurn.mockResolvedValueOnce({
+      finalMessage: 'Final answer.',
+      transcriptMessage: 'Final answer.',
+      jsonEvents: [],
+      precedingAgentMessageSegments: [],
+      providerActionCount: 0,
+      responseDeliveryContextOrdinal: 0,
+      responseMedia: [],
+      sessionId: 'provider-session-admission',
+      stderr: '',
+      stdout: '',
+      threadId: 'provider-session-admission',
+      turnId: 'turn-admission',
+    })
+
+    const attempt = await executeCodexAssistantTurnAttempt({
+      activeTurnSteering: {
+        closeInputAdmission,
+        registerLiveProviderTurn: vi.fn(() => () => {}),
+      },
+      providerConfig: normalizeAssistantProviderConfig({
+        provider: 'codex-cli',
+      }),
+      userPrompt: 'Run the turn.',
+      workingDirectory: '/tmp/provider-tests',
+    })
+
+    expect(attempt.ok).toBe(true)
+    const appServerInput =
+      codexAppServerMocks.executeCodexAppServerTurn.mock.calls[0]?.[0]
+    expect(appServerInput?.onFirstAssistantResponseCompleted).toEqual(
+      expect.any(Function),
+    )
+    appServerInput?.onFirstAssistantResponseCompleted?.()
+    expect(closeInputAdmission).toHaveBeenCalledTimes(1)
+  })
+
   it('preserves response delivery ordinals across the provider adapter', async () => {
     codexAppServerMocks.executeCodexAppServerTurn.mockResolvedValueOnce({
       finalMessage: 'Final answer.',
