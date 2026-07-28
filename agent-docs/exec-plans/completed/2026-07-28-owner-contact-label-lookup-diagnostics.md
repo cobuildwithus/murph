@@ -1,6 +1,6 @@
 # Diagnose owner contact labels in live group rosters
 
-Status: active
+Status: completed
 Created: 2026-07-28
 Updated: 2026-07-28
 
@@ -39,11 +39,14 @@ Updated: 2026-07-28
 
 ## Tasks
 
-1. Add one privacy-safe terminal outcome at the address-book read boundary.
-2. Collapse group-tool timeout and rejection handling into the existing lookup
-   wrapper.
-3. Add focused regression and privacy assertions.
-4. Verify, review, open the PR, deploy, and inspect one live retest.
+1. Added a structured, privacy-safe terminal outcome at the address-book read
+   boundary.
+2. Collapsed timeout, rejection, and diagnostic ownership into the existing
+   group-tool lookup wrapper.
+3. Added focused matched, no-match, ambiguous, gated, disabled, failed,
+   timed-out, and late-settlement regression coverage.
+4. Opened the diagnostic PR and completed the preliminary specialist review.
+   Final PR gating and the live retest follow the repository release workflow.
 
 ## Evidence
 
@@ -52,3 +55,15 @@ Updated: 2026-07-28
 - Both dynamic tool calls completed well below the lookup deadline.
 - The owner, consent, projection, contact count, and crypto-envelope state are
   present, leaving a small set of currently silent lookup exits.
+- Focused Vitest verification passed with 106 tests.
+- Scoped lint and the hosted-web prepared typecheck passed.
+- The initial candidate passed the complete diff-aware hosted-web verification
+  lane. The post-review rerun passed repository guards and then exceeded the
+  documented shared-host admission wait; its prescribed isolated fallback
+  failed before dispatch because the installed delegate rejected the wrapper's
+  lifecycle option.
+- ReviewGPT identified split terminal logging ownership and two missing exit
+  assertions. The final implementation gives the deadline wrapper sole logging
+  ownership and covers late success, late rejection, noncanonical input, and a
+  disabled projection without changing roster behavior.
+Completed: 2026-07-28
