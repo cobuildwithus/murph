@@ -1,0 +1,110 @@
+  }
+  return value;
+}
+
+export async function applyHostedInboundMessageContentRetentionRearm(
+  database: HostedInboundMessageContentRetentionRearmDatabase,
+  maxSnapshots: number,
+): Promise<HostedInboundMessageContentRetentionRearmResult> {
+  if (!Number.isSafeInteger(maxSnapshots) || maxSnapshots < 1) {
+    throw new TypeError("Inbound message-content retention maxSnapshots must be a positive integer.");
+  }
+
+  const result = await database.query<{
+    rearmedAt: string;
+    rearmedCount: string;
+    snapshotCount: string;
+  }>(
+    `
+      WITH persisted AS MATERIALIZED (
+        SELECT "user_id"
+        FROM "hosted_workspace"
+        WHERE "snapshot_ref" IS NOT NULL
+      ),
+      capacity AS (
+        SELECT COUNT(*)::BIGINT AS "snapshot_count"
+        FROM persisted
+      ),
+      rearmed AS (
+        UPDATE "hosted_workspace" AS workspace
+        SET
+          "inbox_media_retention_wake_at" = CURRENT_TIMESTAMP,
+          "inbox_media_retention_signal_attempted_at" = NULL,
+          "version" = workspace."version" + 1
+        FROM persisted
+        WHERE workspace."user_id" = persisted."user_id"
+          AND (SELECT "snapshot_count" FROM capacity) <= $1::BIGINT
+        RETURNING workspace."user_id"
+      )
+      SELECT
+        to_char(
+          (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::TIMESTAMP(3),
+          'YYYY-MM-DD"T"HH24:MI:SS.MS'
+        ) AS "rearmedAt",
+        (SELECT COUNT(*)::BIGINT FROM rearmed)::TEXT AS "rearmedCount",
+        capacity."snapshot_count"::TEXT AS "snapshotCount"
+      FROM capacity
+    `,
+    [maxSnapshots],
+  );
+  const row = result.rows[0];
+  if (!row) {
+    throw new Error("Inbound message-content retention rearm returned no result row.");
+  }
+
+  const snapshotCount = parseCount(row.snapshotCount, "snapshotCount");
+  const rearmedCount = parseCount(row.rearmedCount, "rearmedCount");
+  if (snapshotCount > maxSnapshots) {
+    throw new Error(
+      `Inbound message-content retention rearm refused ${snapshotCount} persisted snapshots because the confirmed capacity ceiling is ${maxSnapshots}.`,
+    );
+  }
+  if (rearmedCount !== snapshotCount) {
+    throw new Error(
+      `Inbound message-content retention rearm updated ${rearmedCount} of ${snapshotCount} persisted snapshots.`,
+    );
+  }
+  if (!row.rearmedAt || Number.isNaN(Date.parse(`${row.rearmedAt}Z`))) {
+    throw new Error("Inbound message-content retention rearm returned an invalid timestamp.");
+  }
+
+  return {
+    rearmedAt: `${row.rearmedAt}Z`,
+    rearmedCount,
+    snapshotCount,
+  };
+}
+
+export async function runHostedInboundMessageContentRetentionRearmIfNeeded(
+  environment: HostedWebMigrationEnvironment = process.env,
+  options: HostedInboundMessageContentRetentionRearmOptions = {},
+): Promise<HostedInboundMessageContentRetentionRearmResult | "skipped"> {
+  if (!shouldRunHostedInboundMessageContentRetentionRearm(environment)) {
+    console.log("Skipping inbound message-content retention rearm without explicit opt-in.");
+    return "skipped";
+  }
+
+  const maxSnapshots =
+    readHostedInboundMessageContentRetentionRearmMaxSnapshots(environment);
+  const migrationDatabaseUrl = resolveHostedWebMigrationDatabaseUrl({
+    ...environment,
+    MURPH_REQUIRE_DIRECT_DATABASE_URL_FOR_MIGRATIONS: "1",
+  });
+  const ownerDatabaseUrl = withHostedWebMigrationOwner(migrationDatabaseUrl.url);
+  const client = (options.clientFactory ?? createRearmClient)(ownerDatabaseUrl);
+
+  await client.connect();
+  try {
+    await assertHostedWebMigrationOwner(client);
+    await client.query("BEGIN");
+    try {
+      await client.query(`SET LOCAL lock_timeout = '${REARM_LOCK_TIMEOUT}'`);
+      await client.query(
+        `SET LOCAL statement_timeout = '${REARM_STATEMENT_TIMEOUT}'`,
+      );
+      const lock = await client.query<{ acquired: boolean }>(
+        "SELECT pg_try_advisory_xact_lock(hashtext($1)) AS acquired",
+        [REARM_LOCK_NAME],
+      );
+      if (lock.rows[0]?.acquired !== true) {
+        throw new Error(
