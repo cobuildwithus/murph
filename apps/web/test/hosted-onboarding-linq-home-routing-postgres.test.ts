@@ -5,7 +5,7 @@ import {
   type Prisma,
   type PrismaClient,
 } from "@prisma/client";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   claimHostedLinqProactiveConversationCapacityTx,
@@ -181,6 +181,201 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           });
         }
         await disconnectClients([observer, owner, contender]);
+      }
+    });
+
+    it("keeps the signup owner when it commits during the first event's classifier wait", async () => {
+      vi.stubEnv(
+        "HOSTED_ONBOARDING_PUBLIC_BASE_URL",
+        "https://join.example.test",
+      );
+      vi.stubEnv(
+        "HOSTED_ONBOARDING_LINQ_INSTANT_START_PHONE_PREFIXES",
+        "+1",
+      );
+      const prisma = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const uniqueDigits = randomUUID().replaceAll("-", "").slice(0, 7);
+      const numericSuffix = String(
+        Number.parseInt(uniqueDigits, 16) % 10_000_000,
+      ).padStart(7, "0");
+      const memberPhone = `+1555${numericSuffix}`;
+      const recipientPhone = `+1556${numericSuffix}`;
+      const memberPhoneLookupKey = createHostedPhoneLookupKey(memberPhone);
+      const recipientPhoneLookupKey =
+        createHostedPhoneLookupKey(recipientPhone);
+      const chatId = `linq-classifier-window-${randomUUID()}`;
+      const admissionEventId =
+        `linq-classifier-window-admission-${randomUUID()}`;
+      const fallbackEventId =
+        `linq-classifier-window-fallback-${randomUUID()}`;
+      const buildInboundEvent = (input: {
+        eventId: string;
+        service: "iMessage" | "sms";
+        text: string;
+      }) => parseHostedLinqWebhookEvent(JSON.stringify({
+        api_version: "v3",
+        created_at: "2026-07-28T12:00:00.000Z",
+        data: {
+          chat: {
+            id: chatId,
+            is_group: false,
+            owner_handle: {
+              handle: recipientPhone,
+              id: "owner-handle",
+              is_me: true,
+              service: input.service,
+            },
+          },
+          direction: "inbound",
+          id: `linq-message-${randomUUID()}`,
+          parts: [{ type: "text", value: input.text }],
+          sender_handle: {
+            handle: memberPhone,
+            id: "sender-handle",
+            service: input.service,
+          },
+          sent_at: "2026-07-28T12:00:00.000Z",
+          service: input.service,
+        },
+        event_id: input.eventId,
+        event_type: "message.received",
+        webhook_version: "2026-02-03",
+      }));
+      const admissionEvent = buildInboundEvent({
+        eventId: admissionEventId,
+        service: "iMessage",
+        text: "What can you help me with?",
+      });
+      const fallbackEvent = buildInboundEvent({
+        eventId: fallbackEventId,
+        service: "sms",
+        text: "Following up",
+      });
+      let lineCreated = false;
+      let memberId: string | null = null;
+
+      if (!memberPhoneLookupKey || !recipientPhoneLookupKey) {
+        throw new Error("Expected valid classifier-window phone inputs.");
+      }
+
+      try {
+        await prisma.hostedLinqLine.create({
+          data: {
+            configuredAt: new Date("2026-07-28T11:00:00.000Z"),
+            egressPolicy: "enabled",
+            healthStatus: "healthy",
+            phoneNumberEncrypted:
+              encryptHostedLinqLinePhoneNumber(recipientPhone),
+            phoneNumberHint: "*** test",
+            phoneNumberLookupKey: recipientPhoneLookupKey,
+            source: "test",
+          },
+        });
+        lineCreated = true;
+
+        const waitingPlan = await prisma.$transaction(
+          (tx) => planHostedOnboardingLinqWebhook({
+            event: admissionEvent,
+            prisma: tx,
+            requireFirstContactAdmission: true,
+          }),
+          transactionOptions,
+        );
+        expect(waitingPlan.firstContactAdmissionRequest).not.toBeNull();
+        await expect(prisma.hostedMemberIdentity.count({
+          where: { phoneLookupKey: memberPhoneLookupKey },
+        })).resolves.toBe(0);
+
+        memberId = `hbm_classifier_window_${randomUUID()}`;
+        await prisma.$transaction(async (tx) => {
+          await tx.hostedMember.create({
+            data: {
+              billingStatus: HostedBillingStatus.not_started,
+              id: requireString(memberId),
+            },
+          });
+          const identityPrivate =
+            await buildHostedMemberIdentityPrivateColumns({
+              memberId: requireString(memberId),
+              phoneNumber: memberPhone,
+              prisma: tx,
+              privyUserId: null,
+              signupPhoneCodeSendAttemptId: null,
+              signupPhoneCodeSendAttemptStartedAt: null,
+              signupPhoneCodeSentAt: null,
+              signupPhoneNumber: null,
+            });
+          await tx.hostedMemberIdentity.create({
+            data: {
+              ...identityPrivate,
+              maskedPhoneNumberHint: "*** test",
+              memberId: requireString(memberId),
+              phoneLookupKey: memberPhoneLookupKey,
+              phoneNumberVerifiedAt:
+                new Date("2026-07-28T12:00:00.000Z"),
+            },
+          });
+        }, transactionOptions);
+
+        const fallbackPlan = await prisma.$transaction(
+          (tx) => planHostedOnboardingLinqWebhook({
+            event: fallbackEvent,
+            prisma: tx,
+          }),
+          transactionOptions,
+        );
+        expect(fallbackPlan.response.reason).toBe("sent-signup-link");
+        expect(fallbackPlan.instantStartEnrollment).toBeUndefined();
+
+        const resolvedAdmissionPlan = await prisma.$transaction(
+          (tx) => planHostedOnboardingLinqWebhook({
+            event: admissionEvent,
+            firstContactAdmissionDecision: {
+              confidence: 0.99,
+              kind: "allow",
+              source: "model",
+            },
+            instantStartAllowed: true,
+            prisma: tx,
+          }),
+          transactionOptions,
+        );
+
+        expect(resolvedAdmissionPlan.response.reason).toBe("sent-signup-link");
+        expect(resolvedAdmissionPlan.instantStartEnrollment).toBeUndefined();
+        expect(resolvedAdmissionPlan.desiredSideEffects).toHaveLength(1);
+        expect(resolvedAdmissionPlan.desiredSideEffects[0]?.effectId).toBe(
+          fallbackPlan.desiredSideEffects[0]?.effectId,
+        );
+        await expect(prisma.hostedInvite.findFirst({
+          select: {
+            instantStartAdmissionEventId: true,
+            sentAt: true,
+          },
+          where: { memberId },
+        })).resolves.toEqual({
+          instantStartAdmissionEventId: null,
+          sentAt: null,
+        });
+        await expect(prisma.hostedLinqDailyState.findMany({
+          select: { inboundCount: true },
+          where: { memberId },
+        })).resolves.toEqual([{ inboundCount: 2 }]);
+      } finally {
+        if (memberId) {
+          await prisma.hostedMember.deleteMany({
+            where: { id: memberId },
+          });
+        }
+        if (lineCreated) {
+          await prisma.hostedLinqLine.deleteMany({
+            where: {
+              phoneNumberLookupKey: recipientPhoneLookupKey,
+            },
+          });
+        }
+        await disconnectClients([prisma]);
+        vi.unstubAllEnvs();
       }
     });
 

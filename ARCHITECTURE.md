@@ -1269,14 +1269,17 @@ Pulse-trial owner must start from an unbound Stripe customer so an old saved car
 cannot silently auto-convert a text-initiated trial. The first planner transaction
 creates the canonical member, verified phone identity, pending route, and invite.
 That invite carries only the event id of the persisted model-source allow and is
-the single-owner token for that exact original inbound. While the token remains
-pending, a different inbound for the inactive member exits retryably before
-counting or creating an effect; it cannot continue or cancel the admitted start.
+the single-owner token for that exact original inbound. Only the transaction
+creating a genuinely new member may mint that token; an existing inactive
+member without the exact same-event token remains on the signup path. While the
+token remains pending, a different inbound for the inactive member exits
+retryably before counting or creating an effect; it cannot continue or cancel
+the admitted start.
 The existing Stripe/activation owner locks the member, revalidates the exact
 invite and event before any Stripe mutation, then clears the token atomically
 with activation. A second ordinary planner pass counts and appends the original
 inbound exactly once after active access is visible. Ordinary signup delivery
-retains its existing exact-invite and inactive-member checks. Any block,
+retains its existing exact-invite and member-ownership checks. Any block,
 deterministic fail-open, unsupported prefix/channel, cross-line route, existing
 member or billing customer, or definitive enrollment failure keeps the existing
 signup-link or ignored behavior. Active members, explicit thread routes, own

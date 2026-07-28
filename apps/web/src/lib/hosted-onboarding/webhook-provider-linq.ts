@@ -1244,7 +1244,8 @@ export async function planHostedOnboardingLinqWebhook(input: {
       participantContact,
       phonePrefixes: instantStartPhonePrefixes,
     });
-  const instantStartAdmissionEventId = currentEventInstantStartEligible
+  const instantStartAdmissionEventId =
+    existingMember === null && currentEventInstantStartEligible
     ? input.event.event_id
     : pendingInstantStartAdmissionEventId;
   const instantStartEligible = instantStartCandidate

@@ -4538,9 +4538,46 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     mocks.hostedOnboardingEnvironment.linqInstantStartPhonePrefixes = ["+1"];
     const memberId = "member_instant_start_retry";
     const eventId = "evt_instant_start_retry";
+    const participantContact = createHostedLinqParticipantContact({
+      kind: "phone",
+      value: "+15551234567",
+    });
+    if (!participantContact) {
+      throw new Error("Expected a valid participant contact.");
+    }
+    const pendingRoutingPrivate = await buildHostedMemberRoutingPrivateColumns({
+      linqChatId: null,
+      linqRecipientPhone: null,
+      memberId,
+      pendingLinqChatId: "chat_123",
+      pendingLinqParticipantContact: participantContact.value,
+      pendingLinqRecipientPhone: "+15550000000",
+      telegramThreadId: null,
+      telegramUserId: null,
+    });
+    const hostedMemberRouting = createStatefulHostedMemberRoutingMock({
+      ...pendingRoutingPrivate,
+      linqChatLookupKey: null,
+      linqHomeLineAssignedAt: new Date("2026-03-26T12:00:00.000Z"),
+      linqParticipantContactKind: null,
+      linqParticipantContactLookupKey: null,
+      linqRecipientPhoneLookupKey: null,
+      memberId,
+      pendingLinqChatLookupKey: createHostedLinqChatLookupKey("chat_123"),
+      pendingLinqParticipantContactKind: participantContact.kind,
+      pendingLinqParticipantContactLookupKey: participantContact.lookupKey,
+      pendingLinqParticipantContactObservedAt:
+        new Date("2026-03-26T12:00:00.000Z"),
+      pendingLinqRecipientPhoneLookupKey:
+        createHostedPhoneLookupKey("+15550000000"),
+      telegramUserLookupKey: null,
+    });
     const invite = {
       channel: "linq",
+      createdAt: new Date("2026-03-26T12:00:00.000Z"),
+      expiresAt: new Date("2026-07-29T12:00:00.000Z"),
       id: "invite_instant_start_retry",
+      instantStartAdmissionEventId: eventId as string | null,
       inviteCode: "code_instant_start_retry",
       memberId,
       sentAt: null,
@@ -4565,9 +4602,10 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       hostedWebhookReceipt: buildHostedWebhookReceiptFixture(),
       hostedInvite: {
         create: vi.fn().mockResolvedValue(invite),
-        findFirst: vi.fn().mockResolvedValue(null),
+        findFirst: vi.fn(async () =>
+          invite.instantStartAdmissionEventId ? invite : null),
         findUnique: vi.fn().mockResolvedValue(invite),
-        update: vi.fn(),
+        update: vi.fn().mockResolvedValue(invite),
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
       hostedLinqFirstContactAdmissionDecision: {
@@ -4584,6 +4622,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         findUnique: hostedMemberFindUnique,
         update: vi.fn(),
       },
+      hostedMemberRouting,
     });
     mocks.readHostedMailboxItemOwnerById.mockResolvedValueOnce({
       id: "mailbox_item_123",
@@ -4592,6 +4631,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     mocks.ensureHostedLinqInstantStartPulseTrialEnrollment.mockImplementationOnce(
       async () => {
         trialActive = true;
+        invite.instantStartAdmissionEventId = null;
         return {
           redirectPath: "/home?initialVisit=true",
           status: "enrolled",
