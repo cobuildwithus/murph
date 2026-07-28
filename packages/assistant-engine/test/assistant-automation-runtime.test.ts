@@ -10761,6 +10761,62 @@ describe('assistant auto-reply runtime', () => {
     expect(evidenceMocks.writeAssistantAutoReplySuppressionEvidence).not.toHaveBeenCalled()
   })
 
+  it('keeps uncovered rebatched inputs runnable without terminal evidence', async () => {
+    replyMocks.sendAssistantMessage.mockResolvedValue({
+      delivery: null,
+      deliveryDeferred: false,
+      deliveryError: {
+        code: 'ASSISTANT_OUTBOX_ANSWERED_ITEMS_UNCOVERED',
+        diagnosticContext: {
+          retryable: true,
+        },
+        message:
+          'The existing outbound delivery does not cover every requested input; retry after the current dispatch settles.',
+      },
+      deliveryIntentId: 'intent-frozen-grouped-reply',
+      response: 'response for the late grouped input',
+      session: {
+        sessionId: 'session-frozen-grouped-reply',
+      },
+    })
+    const inboxServices = createInboxServices({
+      show: vi.fn().mockResolvedValue(createShowResult(createCaptureDetail())),
+    })
+    const reply = await vi.importActual<typeof import('../src/assistant/automation/reply.ts')>(
+      '../src/assistant/automation/reply.ts',
+    )
+    const context = reply.createAssistantAutoReplyGroupContext([
+      createReplyGroupItem(createCaptureSummary()),
+    ])
+
+    if (!context) {
+      throw new Error('expected reply context')
+    }
+
+    const result = await reply.processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context,
+      enabledChannels: ['telegram'],
+      inboxServices,
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(result).toMatchObject({
+      advanceCursor: false,
+      failed: 1,
+      nextWakeAt: expect.any(String),
+      replied: 0,
+      skipped: 0,
+      stopScanning: true,
+    })
+    expect(evidenceMocks.writeAssistantAutoReplyReplyIntentEvidence)
+      .not.toHaveBeenCalled()
+    expect(evidenceMocks.writeAssistantAutoReplySuppressionEvidence)
+      .not.toHaveBeenCalled()
+  })
+
   it('treats explicit no-reply assistant decisions as terminal skips', async () => {
     replyMocks.sendAssistantMessage.mockResolvedValue({
       delivery: null,

@@ -568,7 +568,13 @@ describe('assistant outbox runtime', () => {
       turnId: 'turn-grouped-answered-terminal-replay',
     })
 
-    expect(terminalReplay.kind).toBe('sent')
+    expect(terminalReplay.kind).toBe('failed')
+    expect(terminalReplay.deliveryError).toMatchObject({
+      code: 'ASSISTANT_OUTBOX_ANSWERED_ITEMS_UNCOVERED',
+      diagnosticContext: {
+        retryable: true,
+      },
+    })
     expect(terminalReplay.intent.intentId).toBe(first.intent.intentId)
     expect(terminalReplay.intent.answeredMailboxItemIds).toEqual([
       'mailbox_item_newest',
@@ -652,6 +658,13 @@ describe('assistant outbox runtime', () => {
     releaseProvider?.()
     const dispatched = await dispatch
 
+    expect(lateRebatch.kind).toBe('failed')
+    expect(lateRebatch.deliveryError).toMatchObject({
+      code: 'ASSISTANT_OUTBOX_ANSWERED_ITEMS_UNCOVERED',
+      diagnosticContext: {
+        retryable: true,
+      },
+    })
     expect(lateRebatch.intent.status).toBe('sending')
     expect(lateRebatch.intent.answeredMailboxItemIds).toEqual([
       'mailbox_item_before_dispatch',

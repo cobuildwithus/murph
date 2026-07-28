@@ -55,7 +55,8 @@ Updated: 2026-07-27
 2. Risk: grouped reply rebatching drops earlier answered items.
    Mitigation: monotonically union coverage only while the outbox intent is
    pending or retryable, then freeze it when provider dispatch starts so later
-   inputs remain honest follow-up work.
+   inputs receive a retryable uncovered outcome and remain honest follow-up
+   work without terminal evidence.
 3. Risk: runtime/web deploy skew rejects the additive diagnostic marker.
    Mitigation: keep the projection best effort and document the safe deployment
    order and post-deploy proof.

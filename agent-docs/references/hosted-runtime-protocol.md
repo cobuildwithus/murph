@@ -1989,9 +1989,11 @@ Accepted grouped Linq replies keep the complete answered mailbox-item set on the
 existing outbox intent: replay of the same pending or retryable effect retains
 the existing set and adds newly observed items instead of replacing it. The
 transition to `sending` freezes that set for the provider dispatch, and later
-items remain separate follow-up work. The accepted delivery links every mailbox
-item carried by its dispatch; a sending or terminal outbox intent is never
-widened retroactively.
+items receive an uncovered/retryable result rather than inheriting that intent's
+terminal evidence. They remain pending until the frozen dispatch settles and a
+new follow-up effect can own them. The accepted delivery links every mailbox item
+carried by its dispatch; a sending or terminal outbox intent is never widened
+retroactively.
 One fixed-kind `HostedLinqAlert` row provides the incident claim, provider
 idempotency identity, last provider-attempt boundary, and active state. A
 healthy scan silently clears the claim so a later incident receives a new
