@@ -1402,23 +1402,17 @@ async function handleHostedRuntimeGroupReadChatParticipants(input: {
     resolvedParticipants,
   });
 
-  try {
-    const ownerAdvisoryNames =
-      await readHostedOwnerAddressBookAdvisoryNamesWithinDeadline({
-        containerMemberId: input.memberId,
-        phoneHandles: participants.map((participant) => participant.handle),
-        prisma,
-      });
-    for (const participant of participants) {
-      const ownerAdvisoryName = ownerAdvisoryNames.get(participant.handle);
-      if (ownerAdvisoryName) {
-        participant.ownerAdvisoryName = ownerAdvisoryName;
-      }
+  const ownerAdvisoryNames =
+    await readHostedOwnerAddressBookAdvisoryNamesWithinDeadline({
+      containerMemberId: input.memberId,
+      phoneHandles: participants.map((participant) => participant.handle),
+      prisma,
+    });
+  for (const participant of participants) {
+    const ownerAdvisoryName = ownerAdvisoryNames.get(participant.handle);
+    if (ownerAdvisoryName) {
+      participant.ownerAdvisoryName = ownerAdvisoryName;
     }
-  } catch {
-    // Address-book labels are optional presentation hints. Any KMS, storage,
-    // consent, or decryption failure omits the entire overlay without changing
-    // the truthful live roster or its activation proof.
   }
 
   return {
@@ -1430,19 +1424,27 @@ async function handleHostedRuntimeGroupReadChatParticipants(input: {
 async function readHostedOwnerAddressBookAdvisoryNamesWithinDeadline(
   input: Parameters<typeof readHostedOwnerAddressBookAdvisoryNames>[0],
 ): Promise<ReadonlyMap<string, string>> {
-  const lookup = readHostedOwnerAddressBookAdvisoryNames(input);
+  const lookup = readHostedOwnerAddressBookAdvisoryNames(input).catch((error) => {
+    console.warn("Hosted address-book advisory lookup unavailable.", {
+      ...sanitizeHostedOnboardingStructuredLogDetails({
+        errorName: deriveHostedOnboardingTimingErrorName(error),
+        outcome: "lookup_failed",
+      }),
+    });
+    return new Map<string, string>();
+  });
   // Prisma operations do not consume AbortSignal. Bound the entire optional
   // overlay at its caller so a stuck read can never delay the truthful roster.
-  // The underlying lookup still receives its own KMS abort signal, and this
-  // handler makes a rejection after the deadline explicitly harmless.
-  void lookup.catch(() => undefined);
+  // The underlying lookup still receives its own KMS abort signal.
 
   let timeout: ReturnType<typeof setTimeout> | undefined;
   const deadline = new Promise<ReadonlyMap<string, string>>((resolve) => {
-    timeout = setTimeout(
-      () => resolve(new Map()),
-      HOSTED_ADDRESS_BOOK_LOOKUP_TIMEOUT_MS,
-    );
+    timeout = setTimeout(() => {
+      console.info("Hosted address-book advisory lookup unavailable.", {
+        outcome: "deadline_exceeded",
+      });
+      resolve(new Map());
+    }, HOSTED_ADDRESS_BOOK_LOOKUP_TIMEOUT_MS);
   });
 
   try {

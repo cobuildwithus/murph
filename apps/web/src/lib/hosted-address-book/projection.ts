@@ -78,6 +78,16 @@ const RELATIONSHIP_OR_ROLE_WORDS = new Set([
 ]);
 
 type AddressBookMutationOperation = "delete" | "replace";
+type HostedAddressBookAdvisoryLookupOutcome =
+  | "consent_unavailable"
+  | "container_missing"
+  | "disabled"
+  | "matched"
+  | "no_canonical_handles"
+  | "no_contact_match"
+  | "no_safe_unique_label"
+  | "owner_suspended"
+  | "projection_disabled";
 
 export interface HostedAddressBookStatus {
   enabled: boolean;
@@ -381,14 +391,38 @@ export async function readHostedOwnerAddressBookAdvisoryNames(input: {
   source?: NodeJS.ProcessEnv;
 }): Promise<ReadonlyMap<string, string>> {
   const source = input.source ?? process.env;
+  const requestedHandleCount = Math.min(
+    input.phoneHandles.length,
+    HOSTED_ADDRESS_BOOK_LOOKUP_MAX_HANDLES,
+  );
+  let canonicalHandleCount = 0;
+  const finish = (
+    outcome: HostedAddressBookAdvisoryLookupOutcome,
+    names: ReadonlyMap<string, string> = new Map<string, string>(),
+    contactMatchCount = 0,
+  ): ReadonlyMap<string, string> => {
+    console.info("Hosted address-book advisory lookup finished.", {
+      canonicalHandleCount,
+      contactMatchCount: Math.min(
+        contactMatchCount,
+        HOSTED_ADDRESS_BOOK_LOOKUP_MAX_HANDLES,
+      ),
+      labelMatchCount: names.size,
+      outcome,
+      requestedHandleCount,
+    });
+    return names;
+  };
+
   if (!isFeatureEnabled(source, HOSTED_ADDRESS_BOOK_ADVISORY_GATE)) {
-    return new Map();
+    return finish("disabled");
   }
   const phoneHandles = [...new Set(input.phoneHandles)]
     .filter((handle) => isCanonicalPhoneNumber(handle))
     .slice(0, HOSTED_ADDRESS_BOOK_LOOKUP_MAX_HANDLES);
+  canonicalHandleCount = phoneHandles.length;
   if (phoneHandles.length === 0) {
-    return new Map();
+    return finish("no_canonical_handles");
   }
 
   const signal = AbortSignal.timeout(HOSTED_ADDRESS_BOOK_LOOKUP_TIMEOUT_MS);
@@ -401,8 +435,11 @@ export async function readHostedOwnerAddressBookAdvisoryNames(input: {
     },
     where: { memberId: input.containerMemberId },
   });
-  if (!container || container.owner.suspendedAt !== null) {
-    return new Map();
+  if (!container) {
+    return finish("container_missing");
+  }
+  if (container.owner.suspendedAt !== null) {
+    return finish("owner_suspended");
   }
   try {
     await assertHostedLaunchRequiredConsentGranted({
@@ -410,7 +447,7 @@ export async function readHostedOwnerAddressBookAdvisoryNames(input: {
       prisma: input.prisma,
     });
   } catch {
-    return new Map();
+    return finish("consent_unavailable");
   }
 
   const projection = await input.prisma.hostedAddressBookProjection.findUnique({
@@ -418,7 +455,7 @@ export async function readHostedOwnerAddressBookAdvisoryNames(input: {
     where: { memberId: container.ownerMemberId },
   });
   if (!projection?.enabled) {
-    return new Map();
+    return finish("projection_disabled");
   }
 
   const crypto = input.crypto ?? readHostedAddressBookCrypto(source);
@@ -455,7 +492,7 @@ export async function readHostedOwnerAddressBookAdvisoryNames(input: {
     },
   });
   if (rows.length === 0) {
-    return new Map();
+    return finish("no_contact_match");
   }
 
   const names = await openHostedUserSecureBoxStrings({
@@ -489,8 +526,13 @@ export async function readHostedOwnerAddressBookAdvisoryNames(input: {
     phones.add(phoneNumber);
     phonesByName.set(name, phones);
   }
-  return new Map(
+  const namesByPhone = new Map(
     [...candidateNames].filter(([, name]) => phonesByName.get(name)?.size === 1),
+  );
+  return finish(
+    namesByPhone.size === 0 ? "no_safe_unique_label" : "matched",
+    namesByPhone,
+    rows.length,
   );
 }
 

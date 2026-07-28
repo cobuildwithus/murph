@@ -2709,8 +2709,9 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
   });
 
   it("keeps the truthful roster available when advisory lookup fails", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     mocks.readHostedOwnerAddressBookAdvisoryNames.mockRejectedValue(
-      new Error("advisory lookup unavailable"),
+      new Error("sensitive provider detail"),
     );
     mocks.getHostedLinqChatHandles.mockResolvedValue([
       { handle: "+15557770000", isMe: true, status: "active" },
@@ -2736,9 +2737,21 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
         status: "ok",
       },
     });
+    expect(warn).toHaveBeenCalledExactlyOnceWith(
+      "Hosted address-book advisory lookup unavailable.",
+      {
+        errorName: "Error",
+        outcome: "lookup_failed",
+      },
+    );
+    expect(JSON.stringify(warn.mock.calls)).not.toContain(
+      "sensitive provider detail",
+    );
+    warn.mockRestore();
   });
 
   it("returns the truthful roster when advisory lookup never settles", async () => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
     vi.useFakeTimers();
     try {
       mocks.readHostedOwnerAddressBookAdvisoryNames.mockReturnValue(
@@ -2772,8 +2785,13 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
           status: "ok",
         },
       });
+      expect(info).toHaveBeenCalledExactlyOnceWith(
+        "Hosted address-book advisory lookup unavailable.",
+        { outcome: "deadline_exceeded" },
+      );
     } finally {
       vi.useRealTimers();
+      info.mockRestore();
     }
   });
 

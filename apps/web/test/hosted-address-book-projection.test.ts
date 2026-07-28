@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const accessMocks = vi.hoisted(() => ({
   assertActiveHostedMemberAccessAllowed: vi.fn(),
@@ -47,6 +47,11 @@ beforeEach(() => {
   accessMocks.assertActiveHostedMemberAccessAllowed.mockResolvedValue(undefined);
   accessMocks.assertHostedLaunchRequiredConsentGranted.mockReset();
   accessMocks.assertHostedLaunchRequiredConsentGranted.mockResolvedValue(undefined);
+  vi.spyOn(console, "info").mockImplementation(() => {});
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
 });
 
 describe("hosted address-book request parsing", () => {
@@ -303,6 +308,20 @@ describe("hosted address-book projection lifecycle", () => {
       ["+12125550100", "Alex R."],
       ["+442079460958", "Sam K."],
     ]));
+    expect(console.info).toHaveBeenLastCalledWith(
+      "Hosted address-book advisory lookup finished.",
+      {
+        canonicalHandleCount: 3,
+        contactMatchCount: 2,
+        labelMatchCount: 2,
+        outcome: "matched",
+        requestedHandleCount: 3,
+      },
+    );
+    const diagnostic = JSON.stringify(vi.mocked(console.info).mock.calls);
+    expect(diagnostic).not.toContain("+12125550100");
+    expect(diagnostic).not.toContain("Alex R.");
+    expect(diagnostic).not.toContain("owner-member");
   });
 
   it("keeps an enabled projection active until an explicit lifecycle deletion", async () => {
@@ -336,11 +355,16 @@ describe("hosted address-book projection lifecycle", () => {
   });
 
   it.each([
-    ["advisory gate is disabled", "gate"],
-    ["the owner route no longer exists", "missing"],
-    ["the owner is suspended", "suspended"],
-    ["owner consent is missing", "consent"],
-  ] as const)("omits labels before token lookup when %s", async (_label, condition) => {
+    ["advisory gate is disabled", "gate", "disabled", 0],
+    ["the owner route no longer exists", "missing", "container_missing", 1],
+    ["the owner is suspended", "suspended", "owner_suspended", 1],
+    ["owner consent is missing", "consent", "consent_unavailable", 1],
+  ] as const)(`omits labels before token lookup when %s`, async (
+    _label,
+    condition,
+    outcome,
+    canonicalHandleCount,
+  ) => {
     const store = new AddressBookPrismaStub("owner-member");
     const crypto = makeAddressBookCrypto();
     await replaceHostedAddressBookProjection({
@@ -383,6 +407,56 @@ describe("hosted address-book projection lifecycle", () => {
     })).resolves.toEqual(new Map());
     expect(accessMocks.assertActiveHostedMemberAccessAllowed).not.toHaveBeenCalled();
     expect(crypto.kms.macSign).not.toHaveBeenCalled();
+    expect(console.info).toHaveBeenLastCalledWith(
+      "Hosted address-book advisory lookup finished.",
+      {
+        canonicalHandleCount,
+        contactMatchCount: 0,
+        labelMatchCount: 0,
+        outcome,
+        requestedHandleCount: 1,
+      },
+    );
+  });
+
+  it("reports a token miss without logging lookup inputs", async () => {
+    const store = new AddressBookPrismaStub("owner-member");
+    const crypto = makeAddressBookCrypto();
+    await replaceHostedAddressBookProjection({
+      crypto,
+      memberId: "owner-member",
+      prisma: store as never,
+      request: parseHostedAddressBookReplaceRequest({
+        baseRevision: 0,
+        contacts: [{ advisoryName: "Alex R.", phoneNumber: "+12125550100" }],
+        mutationId: "4f5150c8-a9bc-42d3-b975-a289481a3140",
+        schemaVersion: 1,
+      }),
+      source: SOURCE,
+    });
+
+    await expect(readHostedOwnerAddressBookAdvisoryNames({
+      containerMemberId: "thread-container",
+      crypto,
+      phoneHandles: ["+442079460958"],
+      prisma: store as never,
+      source: SOURCE,
+    })).resolves.toEqual(new Map());
+
+    expect(console.info).toHaveBeenLastCalledWith(
+      "Hosted address-book advisory lookup finished.",
+      {
+        canonicalHandleCount: 1,
+        contactMatchCount: 0,
+        labelMatchCount: 0,
+        outcome: "no_contact_match",
+        requestedHandleCount: 1,
+      },
+    );
+    const diagnostic = JSON.stringify(vi.mocked(console.info).mock.calls);
+    expect(diagnostic).not.toContain("+442079460958");
+    expect(diagnostic).not.toContain("Alex R.");
+    expect(diagnostic).not.toContain("owner-member");
   });
 
   it("uses a consented unsuspended owner projection without current billing access", async () => {
@@ -448,6 +522,16 @@ describe("hosted address-book projection lifecycle", () => {
       prisma: store as never,
       source: SOURCE,
     })).resolves.toEqual(new Map());
+    expect(console.info).toHaveBeenLastCalledWith(
+      "Hosted address-book advisory lookup finished.",
+      {
+        canonicalHandleCount: 2,
+        contactMatchCount: 2,
+        labelMatchCount: 0,
+        outcome: "no_safe_unique_label",
+        requestedHandleCount: 2,
+      },
+    );
   });
 
   it("uses CAS, exact mutation replay, deletion, and owner separation", async () => {
