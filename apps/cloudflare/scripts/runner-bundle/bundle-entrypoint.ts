@@ -57,13 +57,14 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // remain the guard against that regression, while the existing tolerances cover
 // ordinary small authored-code growth.
 //
-// The merged production assembly measured 9,690,052B total, while retention
-// remains the larger measured entry and static-closure owner. The combined graph
-// added no forbidden boot input; production assembly below still fails closed if
-// any dimension exceeds its reviewed measurement plus the existing allowance.
-const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_690_052 + 32_768;
+// On 2026-07-28, the onboarding managed-choice automation intentionally added
+// hosted maintenance, delivery-proof, and lifecycle-authority paths. The exact
+// production assembly measured 9,753,309B total and an 8,000,856B static
+// closure. No forbidden boot input entered the graph. Preserve the established
+// allowances so production assembly still fails closed on unreviewed growth.
+const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_753_309 + 32_768;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_649_331;
-const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 7_882_562;
+const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 8_000_856;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES = 48_000;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_TOLERANCE_BYTES = 96_000;
 // The @murphai package markers are path suffixes, not node_modules-anchored:
