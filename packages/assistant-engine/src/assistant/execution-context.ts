@@ -343,11 +343,13 @@ export interface AssistantHostedImageGenerationLauncher {
   launch(input: {
     operationId: string
     originAssistantInputId: string
+    scopeId?: string | null
     run(
       signal: AbortSignal,
       persistCanonicalWrite: <T>(write: () => Promise<T>) => Promise<T>,
     ): Promise<AssistantHostedImageGenerationResult>
-  }): 'already-started' | 'started'
+  }): 'already-pending' | 'already-started' | 'started'
+  readStatus?(scopeId: string): 'pending' | 'queued' | null
 }
 
 export interface AssistantWorkspaceArtifactMaterializationResult {

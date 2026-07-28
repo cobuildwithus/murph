@@ -43,6 +43,13 @@ describe("hosted mailbox workspace Prisma groundwork", () => {
       ),
       "utf8",
     );
+    const messageRetentionRecoveryMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260728050000_rearm_hosted_mailbox_content_retention/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
 
     for (const modelName of [
       "HostedMailboxItem",
@@ -138,6 +145,21 @@ describe("hosted mailbox workspace Prisma groundwork", () => {
     );
     expect(messageRetentionMigrationSql).toContain(
       'WHERE "snapshot_ref" IS DISTINCT FROM NULL',
+    );
+    expect(messageRetentionRecoveryMigrationSql).toContain(
+      '"inbox_media_retention_wake_at" = CURRENT_TIMESTAMP AT TIME ZONE \'UTC\'',
+    );
+    expect(messageRetentionRecoveryMigrationSql).toContain(
+      '"inbox_media_retention_signal_attempted_at" = NULL',
+    );
+    expect(messageRetentionRecoveryMigrationSql).toContain(
+      '"version" = "version" + 1',
+    );
+    expect(messageRetentionRecoveryMigrationSql).toContain(
+      'WHERE "snapshot_ref" IS DISTINCT FROM NULL',
+    );
+    expect(messageRetentionRecoveryMigrationSql).not.toContain(
+      '"checkpointed_at"',
     );
   });
 });

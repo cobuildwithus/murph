@@ -287,7 +287,7 @@ describe("hosted address-book projection lifecycle", () => {
     expect(JSON.stringify(store.contacts)).not.toContain("+12125550100");
     expect(JSON.stringify(store.contacts)).not.toContain("+442079460958");
 
-    const names = await readHostedOwnerAddressBookAdvisoryNames({
+    const result = await readHostedOwnerAddressBookAdvisoryNames({
       containerMemberId: "thread-container",
       crypto,
       phoneHandles: [
@@ -299,10 +299,16 @@ describe("hosted address-book projection lifecycle", () => {
       source: SOURCE,
     });
 
-    expect(names).toEqual(new Map([
+    expect(result.names).toEqual(new Map([
       ["+12125550100", "Alex R."],
       ["+442079460958", "Sam K."],
     ]));
+    expect(result).toMatchObject({
+      canonicalHandleCount: 3,
+      contactMatchCount: 2,
+      outcome: "matched",
+      requestedHandleCount: 3,
+    });
   });
 
   it("keeps an enabled projection active until an explicit lifecycle deletion", async () => {
@@ -336,11 +342,22 @@ describe("hosted address-book projection lifecycle", () => {
   });
 
   it.each([
-    ["advisory gate is disabled", "gate"],
-    ["the owner route no longer exists", "missing"],
-    ["the owner is suspended", "suspended"],
-    ["owner consent is missing", "consent"],
-  ] as const)("omits labels before token lookup when %s", async (_label, condition) => {
+    ["advisory gate is disabled", "gate", "disabled", 0],
+    [
+      "no canonical phone handles are eligible",
+      "noncanonical",
+      "no_canonical_handles",
+      0,
+    ],
+    ["the owner route no longer exists", "missing", "container_missing", 1],
+    ["the owner is suspended", "suspended", "owner_suspended", 1],
+    ["owner consent is missing", "consent", "consent_unavailable", 1],
+  ] as const)(`omits labels before token lookup when %s`, async (
+    _label,
+    condition,
+    outcome,
+    canonicalHandleCount,
+  ) => {
     const store = new AddressBookPrismaStub("owner-member");
     const crypto = makeAddressBookCrypto();
     await replaceHostedAddressBookProjection({
@@ -377,12 +394,51 @@ describe("hosted address-book projection lifecycle", () => {
     await expect(readHostedOwnerAddressBookAdvisoryNames({
       containerMemberId: "thread-container",
       crypto,
-      phoneHandles: ["+12125550100"],
+      phoneHandles: condition === "noncanonical"
+        ? ["member@example.com"]
+        : ["+12125550100"],
       prisma: store as never,
       source,
-    })).resolves.toEqual(new Map());
+    })).resolves.toMatchObject({
+      canonicalHandleCount,
+      contactMatchCount: 0,
+      names: new Map(),
+      outcome,
+      requestedHandleCount: 1,
+    });
     expect(accessMocks.assertActiveHostedMemberAccessAllowed).not.toHaveBeenCalled();
     expect(crypto.kms.macSign).not.toHaveBeenCalled();
+  });
+
+  it("reports a token miss without returning lookup inputs", async () => {
+    const store = new AddressBookPrismaStub("owner-member");
+    const crypto = makeAddressBookCrypto();
+    await replaceHostedAddressBookProjection({
+      crypto,
+      memberId: "owner-member",
+      prisma: store as never,
+      request: parseHostedAddressBookReplaceRequest({
+        baseRevision: 0,
+        contacts: [{ advisoryName: "Alex R.", phoneNumber: "+12125550100" }],
+        mutationId: "4f5150c8-a9bc-42d3-b975-a289481a3140",
+        schemaVersion: 1,
+      }),
+      source: SOURCE,
+    });
+
+    await expect(readHostedOwnerAddressBookAdvisoryNames({
+      containerMemberId: "thread-container",
+      crypto,
+      phoneHandles: ["+442079460958"],
+      prisma: store as never,
+      source: SOURCE,
+    })).resolves.toMatchObject({
+      canonicalHandleCount: 1,
+      contactMatchCount: 0,
+      names: new Map(),
+      outcome: "no_contact_match",
+      requestedHandleCount: 1,
+    });
   });
 
   it("uses a consented unsuspended owner projection without current billing access", async () => {
@@ -412,7 +468,13 @@ describe("hosted address-book projection lifecycle", () => {
       phoneHandles: ["+12125550100"],
       prisma: store as never,
       source: SOURCE,
-    })).resolves.toEqual(new Map([["+12125550100", "Alex R."]]));
+    })).resolves.toMatchObject({
+      canonicalHandleCount: 1,
+      contactMatchCount: 1,
+      names: new Map([["+12125550100", "Alex R."]]),
+      outcome: "matched",
+      requestedHandleCount: 1,
+    });
     expect(accessMocks.assertActiveHostedMemberAccessAllowed)
       .not.toHaveBeenCalled();
     expect(accessMocks.assertHostedLaunchRequiredConsentGranted)
@@ -447,7 +509,13 @@ describe("hosted address-book projection lifecycle", () => {
       phoneHandles: ["+12125550100", "+12125550101"],
       prisma: store as never,
       source: SOURCE,
-    })).resolves.toEqual(new Map());
+    })).resolves.toMatchObject({
+      canonicalHandleCount: 2,
+      contactMatchCount: 2,
+      names: new Map(),
+      outcome: "no_safe_unique_label",
+      requestedHandleCount: 2,
+    });
   });
 
   it("uses CAS, exact mutation replay, deletion, and owner separation", async () => {
@@ -556,7 +624,13 @@ describe("hosted address-book projection lifecycle", () => {
       phoneHandles: ["+12125550100"],
       prisma: ownerStore as never,
       source: SOURCE,
-    })).resolves.toEqual(new Map());
+    })).resolves.toMatchObject({
+      canonicalHandleCount: 1,
+      contactMatchCount: 0,
+      names: new Map(),
+      outcome: "projection_disabled",
+      requestedHandleCount: 1,
+    });
     expect(crypto.kms.macSign).not.toHaveBeenCalled();
     await expect(deleteHostedAddressBookProjection({
       memberId: "owner-member",
