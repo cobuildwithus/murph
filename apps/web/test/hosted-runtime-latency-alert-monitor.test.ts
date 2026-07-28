@@ -212,6 +212,79 @@ describe("hosted runtime latency alert monitor", () => {
     expect(fixture.readState()?.status).toBe("latency_alerting");
   });
 
+  it("keeps one incident identity when email configuration changes before retry", async () => {
+    const fixture = createMonitorPrismaFixture([
+      latencyRow({
+        acceptedAt: "2026-07-26T15:58:00.000Z",
+      }),
+    ]);
+    const sendAlert = vi.fn(async (_input: AlertSendInput) => {
+      void _input;
+      return {
+        providerMessageId: "resend-email-config-retry",
+      };
+    })
+      .mockRejectedValueOnce(new HostedResendPlainTextEmailError(
+        "Hosted Resend email send failed.",
+        {
+          code: "RESEND_SEND_FAILED",
+          providerStatus: 503,
+        },
+      ))
+      .mockRejectedValueOnce(new HostedResendPlainTextEmailError(
+        "Hosted Resend email send failed.",
+        {
+          code: "RESEND_SEND_FAILED",
+          providerStatus: 409,
+        },
+      ));
+
+    await expect(runHostedRuntimeLatencyAlertMonitor({
+      env: alertEnv,
+      now,
+      prisma: fixture.prisma,
+      sendAlert,
+    })).rejects.toMatchObject({
+      code: "HOSTED_RUNTIME_LATENCY_ALERT_SEND_FAILED",
+    });
+    const firstAttempt = sendAlert.mock.calls[0]?.[0];
+
+    await expect(runHostedRuntimeLatencyAlertMonitor({
+      env: {
+        ...alertEnv,
+        HOSTED_LINQ_ALERT_EMAIL_FROM:
+          "Replacement Alerts <replacement-alerts@example.test>",
+        HOSTED_LINQ_ALERT_EMAILS: "replacement-operator@example.test",
+      },
+      now: instant("2026-07-26T16:20:00.000Z"),
+      prisma: fixture.prisma,
+      sendAlert,
+    })).rejects.toMatchObject({
+      code: "HOSTED_RUNTIME_LATENCY_ALERT_SEND_FAILED",
+    });
+    const retriedAttempt = sendAlert.mock.calls[1]?.[0];
+
+    expect(sendAlert).toHaveBeenCalledTimes(2);
+    expect(firstAttempt?.config.from).toBe(
+      "Murph Alerts <alerts@example.test>",
+    );
+    expect(firstAttempt?.to).toEqual(["operator@example.test"]);
+    expect(retriedAttempt?.config.from).toBe(
+      "Replacement Alerts <replacement-alerts@example.test>",
+    );
+    expect(retriedAttempt?.to).toEqual([
+      "replacement-operator@example.test",
+    ]);
+    expect(retriedAttempt?.idempotencyKey).toBe(firstAttempt?.idempotencyKey);
+    expect(retriedAttempt?.text).toBe(firstAttempt?.text);
+    expect(fixture.readState()).toMatchObject({
+      attemptCount: 2,
+      lastErrorCode: "RESEND_SEND_FAILED",
+      lastProviderStatus: 409,
+      status: "latency_alert_failed",
+    });
+  });
+
   it("paces from whichever durable provider boundary is later", async () => {
     vi.useFakeTimers();
     try {

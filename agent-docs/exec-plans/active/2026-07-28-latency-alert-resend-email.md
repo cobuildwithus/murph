@@ -76,6 +76,10 @@ Updated: 2026-07-28
 - Keep the existing historical operational-email environment names unless a
   narrower current owner is already available; avoid a configuration migration
   solely for naming.
+- Accept the preliminary coverage finding: directly prove that rotating the
+  configured sender and recipient preserves the incident key and message, and
+  that the provider's changed-payload conflict remains sanitized. This closes a
+  proof gap without adding production state or changing the delivery design.
 
 ## Verification
 
