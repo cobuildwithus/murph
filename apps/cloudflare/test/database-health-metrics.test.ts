@@ -95,6 +95,46 @@ describe("PlanetScale database health metrics", () => {
     ]);
   });
 
+  it("evaluates server-pool saturation per pod instead of branch-wide capacity", () => {
+    const constrainedPod = buildMetricsBody({
+      branchId: BRANCH_ID,
+      serverConnections: 9,
+    }).replace(
+      `planetscale_postgres_settings_max_connections{planetscale_database_branch_id="${BRANCH_ID}",planetscale_pod="pod-primary",planetscale_role="primary"} 50`,
+      `planetscale_postgres_settings_max_connections{planetscale_database_branch_id="${BRANCH_ID}",planetscale_pod="pod-primary",planetscale_role="primary"} 10`,
+    );
+    const sparePodLabels =
+      `planetscale_database_branch_id="${BRANCH_ID}",`
+      + 'planetscale_pod="pod-spare",planetscale_role="primary"';
+    const snapshot = parsePlanetScaleDatabaseMetrics(
+      [
+        constrainedPod,
+        `planetscale_postgres_settings_max_connections{${sparePodLabels}} 100`,
+        `planetscale_pgbouncer_current_connections{${sparePodLabels},planetscale_container="pgbouncer"} 0`,
+        "",
+      ].join("\n"),
+      BRANCH_ID,
+    );
+
+    expect(snapshot).toMatchObject({
+      postgresMaxConnections: 110,
+      serverConnections: 9,
+      serverPoolCapacity: 10,
+      serverPoolSaturationRatio: 0.9,
+    });
+    expect(evaluateDatabaseMetricSnapshot(snapshot, 0)).toContainEqual({
+      connections: 9,
+      kind: "server_pool_saturation",
+      limit: 10,
+      ratio: 0.9,
+    });
+    expect(evaluateDatabaseMetricSnapshot(snapshot, 0)).not.toContainEqual(
+      expect.objectContaining({
+        kind: "postgres_connection_saturation",
+      }),
+    );
+  });
+
   it("does not turn a new or reset direct-error series into a false admission failure", () => {
     expect(calculateDirectConnectionErrorDelta(
       {

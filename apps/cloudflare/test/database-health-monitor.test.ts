@@ -7,6 +7,41 @@ import { buildMetricsBody } from "./helpers/database-health.ts";
 const BRANCH_ID = "branch_test";
 const FIVE_MINUTES_MS = 5 * 60 * 1_000;
 const THIRTY_MINUTES_MS = 30 * 60 * 1_000;
+const POSTGRES_STATE_ALERT_CASES: ReadonlyArray<{
+  condition: {
+    count: number;
+    kind:
+      | "postgres_disabled_connections"
+      | "postgres_idle_in_transaction";
+  };
+  evidence: string;
+  postgresStates: Readonly<Record<string, number>>;
+}> = [
+  {
+    condition: {
+      count: 1,
+      kind: "postgres_disabled_connections",
+    },
+    evidence: "1 disabled Postgres connection",
+    postgresStates: {
+      active: 5,
+      disabled: 1,
+      idle: 5,
+    },
+  },
+  {
+    condition: {
+      count: 5,
+      kind: "postgres_idle_in_transaction",
+    },
+    evidence: "5 idle-in-transaction connections",
+    postgresStates: {
+      active: 5,
+      idle: 5,
+      "idle in transaction": 5,
+    },
+  },
+];
 
 interface LinqRequestBody {
   message: {
@@ -43,6 +78,33 @@ describe("database health monitor", () => {
       }),
     ]);
     expect(harness.linqRequests).toEqual([]);
+  });
+
+  it("admits only one collection while the durable run lease is held", async () => {
+    const discoveryStarted = createDeferred<void>();
+    const discoveryResponse = createDeferred<Response>();
+    const harness = createMonitorHarness({
+      serviceDiscoveryResponses: [
+        () => {
+          discoveryStarted.resolve();
+          return discoveryResponse.promise;
+        },
+      ],
+    });
+
+    const firstRun = harness.runScheduledCheck(FIVE_MINUTES_MS);
+    await discoveryStarted.promise;
+
+    await expect(harness.runScheduledCheck(FIVE_MINUTES_MS)).resolves.toEqual({
+      conditions: [],
+      outcome: "run_in_progress",
+      sampleStatus: null,
+    });
+    expect(harness.planetScaleRequests).toHaveLength(1);
+
+    discoveryResponse.resolve(createServiceDiscoveryResponse());
+    await expect(firstRun).resolves.toMatchObject({ outcome: "healthy" });
+    expect(harness.monitor.readRecentSamples()).toHaveLength(1);
   });
 
   it("pages at most every 30 minutes and rotates evidence-bearing copy", async () => {
@@ -185,7 +247,56 @@ describe("database health monitor", () => {
     expect(harness.linqRequests).toEqual([]);
   });
 
-  it("reuses the exact body and idempotency key after an ambiguous Linq failure", async () => {
+  it.each([
+    {
+      chatBody: createLinqChatResponseBody({ isGroup: true }),
+      label: "a group chat",
+    },
+    {
+      chatBody: createLinqChatResponseBody({
+        recipients: ["+12025550123", "+12025550124"],
+      }),
+      label: "multiple active external recipients",
+    },
+  ])(
+    "keeps the pending alert without posting to $label",
+    async ({ chatBody }) => {
+      const harness = createMonitorHarness({
+        linqHealthResponses: [
+          () => Response.json(chatBody),
+          () => Response.json(createHealthyLinqPhoneNumbersBody()),
+        ],
+        metricsBody: buildMetricsBody({
+          branchId: BRANCH_ID,
+          clientWaitSeconds: 8,
+        }),
+      });
+
+      await expect(harness.runScheduledCheck(FIVE_MINUTES_MS)).resolves
+        .toMatchObject({ outcome: "alert_failed" });
+      const pendingAlert = harness.monitor.readAlertState();
+
+      expect(harness.linqRequests).toEqual([]);
+      expect(pendingAlert).toMatchObject({
+        incidentOpen: true,
+        pendingAlertIdempotencyKey: expect.any(String),
+        pendingAlertMessage: expect.any(String),
+      });
+
+      await expect(
+        harness.runScheduledCheck(FIVE_MINUTES_MS + THIRTY_MINUTES_MS),
+      ).resolves.toMatchObject({ outcome: "alert_sent" });
+
+      expect(harness.linqRequests).toHaveLength(1);
+      const deliveredBody = await readLinqRequestBody(harness.linqRequests[0]);
+      expect(deliveredBody.message.idempotency_key)
+        .toBe(pendingAlert.pendingAlertIdempotencyKey);
+      expect(deliveredBody.message.parts[0]?.value)
+        .toBe(pendingAlert.pendingAlertMessage);
+    },
+  );
+
+  it("reuses the exact body and idempotency key after restart and an ambiguous Linq failure", async () => {
     const harness = createMonitorHarness({
       linqResponses: [
         () => {
@@ -201,6 +312,16 @@ describe("database health monitor", () => {
 
     await expect(harness.runScheduledCheck(FIVE_MINUTES_MS)).resolves
       .toMatchObject({ outcome: "alert_failed" });
+    const pendingAlert = harness.monitor.readAlertState();
+    harness.restartMonitor();
+    expect(harness.monitor.readAlertState()).toMatchObject({
+      pendingAlertIdempotencyKey: pendingAlert.pendingAlertIdempotencyKey,
+      pendingAlertMessage: pendingAlert.pendingAlertMessage,
+    });
+    await expect(
+      harness.runScheduledCheck(FIVE_MINUTES_MS + 10 * 60 * 1_000),
+    ).resolves.toMatchObject({ outcome: "alert_deferred" });
+    expect(harness.linqRequests).toHaveLength(1);
     await expect(
       harness.runScheduledCheck(FIVE_MINUTES_MS + THIRTY_MINUTES_MS),
     ).resolves.toMatchObject({ outcome: "alert_sent" });
@@ -209,6 +330,11 @@ describe("database health monitor", () => {
     expect(await readLinqRequestBody(harness.linqRequests[1])).toEqual(
       await readLinqRequestBody(harness.linqRequests[0]),
     );
+    const retryBody = await readLinqRequestBody(harness.linqRequests[1]);
+    expect(retryBody.message.idempotency_key)
+      .toBe(pendingAlert.pendingAlertIdempotencyKey);
+    expect(retryBody.message.parts[0]?.value)
+      .toBe(pendingAlert.pendingAlertMessage);
   });
 
   it("pages only after two consecutive scrape failures and clears after recovery", async () => {
@@ -323,6 +449,28 @@ describe("database health monitor", () => {
     ).toContain("2 direct migration connection errors");
   });
 
+  it.each(POSTGRES_STATE_ALERT_CASES)(
+    "pages with evidence for $condition.kind",
+    async ({ condition, evidence, postgresStates }) => {
+      const harness = createMonitorHarness({
+        metricsBody: buildMetricsBody({
+          branchId: BRANCH_ID,
+          postgresStates,
+        }),
+      });
+
+      await expect(harness.runScheduledCheck(FIVE_MINUTES_MS)).resolves
+        .toMatchObject({
+          conditions: [condition],
+          outcome: "alert_sent",
+        });
+      expect(
+        (await readLinqRequestBody(harness.linqRequests[0]))
+          .message.parts[0]?.value,
+      ).toContain(evidence);
+    },
+  );
+
   it("keeps the service token on discovery and uses signed scrape parameters", async () => {
     const harness = createMonitorHarness();
 
@@ -421,18 +569,7 @@ function createMonitorHarness(input: {
       if (next) {
         return await next();
       }
-      return Response.json([
-        {
-          labels: {
-            __metrics_path__: "/metrics",
-            __param_exp: "2000000000",
-            __param_sig: "signed-scrape-token",
-            __scheme__: "https",
-            planetscale_database_branch_id: BRANCH_ID,
-          },
-          targets: ["metrics.planetscale.test"],
-        },
-      ]);
+      return createServiceDiscoveryResponse();
     }
     if (url.hostname === "metrics.planetscale.test") {
       planetScaleRequests.push(request);
@@ -451,36 +588,15 @@ function createMonitorHarness(input: {
           return await next();
         }
         if (url.pathname.endsWith("/phone_numbers")) {
-          return Response.json({
-            phone_numbers: [
-              {
-                phone_number: "+12025550122",
-                reputation: {
-                  status: input.linqLineReputationStatus ?? "HEALTHY",
-                },
-              },
-            ],
-          });
+          return Response.json(createHealthyLinqPhoneNumbersBody(
+            input.linqLineReputationStatus,
+          ));
         }
         return Response.json({
-          handles: [
-            {
-              handle: "+12025550122",
-              is_me: true,
-              service: "iMessage",
-              status: "active",
-            },
-            {
-              handle: "+12025550123",
-              is_me: false,
-              service: "iMessage",
-              status: "active",
-            },
-          ],
+          ...createLinqChatResponseBody(),
           health_status: {
             status: input.linqChatHealthStatus ?? "HEALTHY",
           },
-          is_group: false,
         });
       }
       linqRequests.push(request);
@@ -489,26 +605,35 @@ function createMonitorHarness(input: {
     }
     throw new Error(`Unexpected database health request host: ${url.hostname}`);
   });
-  const monitor = new DatabaseHealthMonitor(
-    sql,
-    {
-      HOSTED_DATABASE_ALERT_LINQ_CHAT_ID: "chat_test",
-      HOSTED_DATABASE_ALERT_PLANETSCALE_BRANCH_ID: BRANCH_ID,
-      HOSTED_DATABASE_ALERT_PLANETSCALE_ORGANIZATION: "org-test",
-      HOSTED_DATABASE_ALERT_PLANETSCALE_SERVICE_TOKEN: "service-token",
-      HOSTED_DATABASE_ALERT_PLANETSCALE_SERVICE_TOKEN_ID: "service-token-id",
-      LINQ_API_TOKEN: "linq-token",
-    },
-    fetchImplementation,
-    () => nowMs,
-  );
+  const environment = {
+    HOSTED_DATABASE_ALERT_LINQ_CHAT_ID: "chat_test",
+    HOSTED_DATABASE_ALERT_PLANETSCALE_BRANCH_ID: BRANCH_ID,
+    HOSTED_DATABASE_ALERT_PLANETSCALE_ORGANIZATION: "org-test",
+    HOSTED_DATABASE_ALERT_PLANETSCALE_SERVICE_TOKEN: "service-token",
+    HOSTED_DATABASE_ALERT_PLANETSCALE_SERVICE_TOKEN_ID: "service-token-id",
+    LINQ_API_TOKEN: "linq-token",
+  };
+  const createMonitor = () =>
+    new DatabaseHealthMonitor(
+      sql,
+      environment,
+      fetchImplementation,
+      () => nowMs,
+    );
+  let monitor = createMonitor();
 
   return {
     fetchImplementation,
     linqHealthRequests,
     linqRequests,
-    monitor,
+    get monitor() {
+      return monitor;
+    },
     planetScaleRequests,
+    restartMonitor() {
+      monitor = createMonitor();
+      return monitor;
+    },
     runScheduledCheck(
       scheduledAtMs: number,
       currentTimeMs: number = scheduledAtMs,
@@ -516,6 +641,76 @@ function createMonitorHarness(input: {
       nowMs = currentTimeMs;
       return monitor.runScheduledCheck(scheduledAtMs);
     },
+  };
+}
+
+function createServiceDiscoveryResponse(): Response {
+  return Response.json([
+    {
+      labels: {
+        __metrics_path__: "/metrics",
+        __param_exp: "2000000000",
+        __param_sig: "signed-scrape-token",
+        __scheme__: "https",
+        planetscale_database_branch_id: BRANCH_ID,
+      },
+      targets: ["metrics.planetscale.test"],
+    },
+  ]);
+}
+
+function createLinqChatResponseBody(input: {
+  isGroup?: boolean;
+  recipients?: string[];
+} = {}) {
+  return {
+    handles: [
+      {
+        handle: "+12025550122",
+        is_me: true,
+        service: "iMessage",
+        status: "active",
+      },
+      ...(input.recipients ?? ["+12025550123"]).map((handle) => ({
+        handle,
+        is_me: false,
+        service: "iMessage",
+        status: "active",
+      })),
+    ],
+    health_status: {
+      status: "HEALTHY",
+    },
+    is_group: input.isGroup ?? false,
+  };
+}
+
+function createHealthyLinqPhoneNumbersBody(
+  reputationStatus: "AT_RISK" | "CRITICAL" | "HEALTHY" = "HEALTHY",
+) {
+  return {
+    phone_numbers: [
+      {
+        phone_number: "+12025550122",
+        reputation: {
+          status: reputationStatus,
+        },
+      },
+    ],
+  };
+}
+
+function createDeferred<T>(): {
+  promise: Promise<T>;
+  resolve(value: T | PromiseLike<T>): void;
+} {
+  let resolvePromise: (value: T | PromiseLike<T>) => void = () => undefined;
+  const promise = new Promise<T>((resolve) => {
+    resolvePromise = resolve;
+  });
+  return {
+    promise,
+    resolve: resolvePromise,
   };
 }
 

@@ -13,6 +13,10 @@
       {
         "name": "RUNNER_CONTAINER",
         "class_name": "RunnerContainerTestDouble"
+      },
+      {
+        "name": "DATABASE_HEALTH_MONITOR",
+        "class_name": "VitestDatabaseHealthDurableObject"
       }
     ]
   },
@@ -24,6 +28,10 @@
     {
       "tag": "v2",
       "new_sqlite_classes": ["RunnerContainerTestDouble"]
+    },
+    {
+      "tag": "v3",
+      "new_sqlite_classes": ["VitestDatabaseHealthDurableObject"]
     }
   ],
   "r2_buckets": [
@@ -38,6 +46,12 @@
     "HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID": "cloudflare-automation:v1",
     "HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK": "{\"crv\":\"P-256\",\"ext\":true,\"key_ops\":[\"deriveBits\"],\"kty\":\"EC\",\"x\":\"xSelVJv6r6LPUS8GCNgj1T_7z5GXOrhgY1cCdzGb5ao\",\"y\":\"8HhciS1cAPKs_fPfgZnb1USdRtBX-4Nvp8XiBHuMcmY\",\"d\":\"HAPljluiFVW3g-UEmrJ9NVYTlclAhaC8N5LT0h7vitQ\"}",
     "HOSTED_CRYPTO_ENV": "test",
+    "HOSTED_DATABASE_ALERT_ENABLED": "1",
+    "HOSTED_DATABASE_ALERT_LINQ_CHAT_ID": "chat_worker_test",
+    "HOSTED_DATABASE_ALERT_PLANETSCALE_BRANCH_ID": "branch_worker_test",
+    "HOSTED_DATABASE_ALERT_PLANETSCALE_ORGANIZATION": "org-worker-test",
+    "HOSTED_DATABASE_ALERT_PLANETSCALE_SERVICE_TOKEN": "service-token",
+    "HOSTED_DATABASE_ALERT_PLANETSCALE_SERVICE_TOKEN_ID": "service-token-id",
     "HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS": "54000",
     "HOSTED_EXECUTION_MAX_EVENT_ATTEMPTS": "3",
     "HOSTED_EXECUTION_RETRY_DELAY_MS": "1000",
@@ -45,6 +59,7 @@
     "HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG": "murph-team",
     "HOSTED_WEB_BASE_URL": "http://127.0.0.1:8913",
     "HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK": "{\"kty\":\"EC\",\"crv\":\"P-256\",\"x\":\"xSelVJv6r6LPUS8GCNgj1T_7z5GXOrhgY1cCdzGb5ao\",\"y\":\"8HhciS1cAPKs_fPfgZnb1USdRtBX-4Nvp8XiBHuMcmY\",\"d\":\"HAPljluiFVW3g-UEmrJ9NVYTlclAhaC8N5LT0h7vitQ\",\"ext\":true,\"key_ops\":[\"sign\"]}",
+    "LINQ_API_TOKEN": "linq-token",
     "MURPH_HOSTED_EXECUTION_STDIO_LOGS": "0",
     "VITEST": "true"
   }

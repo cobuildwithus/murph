@@ -9,6 +9,15 @@ import {
 import worker from "../../src/index.ts";
 import type { R2BucketLike } from "../../src/bundle-store.js";
 import {
+  DatabaseHealthMonitor,
+  type DatabaseHealthMonitorEnvironment,
+  type DatabaseHealthMonitorResult,
+} from "../../src/database-health/monitor.ts";
+import type {
+  DatabaseHealthAlertState,
+  DatabaseHealthStoredSample,
+} from "../../src/database-health/store.ts";
+import {
   readHostedExecutionEnvironment,
   type HostedExecutionEnvironment,
 } from "../../src/env.ts";
@@ -32,6 +41,9 @@ import {
   handleRunnerGeneratedImageUploadRequest,
 } from "../../src/runner-outbound/generated-images.ts";
 import {
+  DatabaseHealthDurableObject,
+} from "../../src/worker/database-health-durable-object.ts";
+import {
   armInvalidRunnerOutputBundleFault,
   clearRunnerInvocationState,
   clearRunnerOutputBundleFault,
@@ -43,6 +55,46 @@ import type {
   HostedExecutionWake,
 } from "@murphai/hosted-execution";
 import type { HostedRunnerStatusResponse } from "@murphai/hosted-execution/runtime-control";
+import { handleDatabaseHealthEgress } from "./database-health-fetch.ts";
+
+export { DatabaseHealthDurableObject };
+
+export class VitestDatabaseHealthDurableObject
+  extends DatabaseHealthDurableObject {
+  private readonly testMonitor: DatabaseHealthMonitor;
+
+  constructor(
+    state: DurableObjectStateLike,
+    environment: DatabaseHealthMonitorEnvironment,
+  ) {
+    super(state, environment);
+    const sql = state.storage.sql;
+    if (!sql) {
+      throw new Error("Database health test Durable Object requires SQLite.");
+    }
+    this.testMonitor = new DatabaseHealthMonitor(
+      sql,
+      environment,
+      handleDatabaseHealthEgress,
+    );
+  }
+
+  override async runScheduledCheck(input?: {
+    scheduledAtMs?: number;
+  }): Promise<DatabaseHealthMonitorResult> {
+    return await this.testMonitor.runScheduledCheck(input?.scheduledAtMs);
+  }
+
+  override readRecentSamples(input?: {
+    limit?: number;
+  }): DatabaseHealthStoredSample[] {
+    return this.testMonitor.readRecentSamples(input?.limit);
+  }
+
+  readAlertState(): DatabaseHealthAlertState {
+    return this.testMonitor.readAlertState();
+  }
+}
 
 type TestWorkerEnvironment = WorkerEnvironmentSource & {
   RUNNER_CONTAINER: HostedExecutionContainerNamespaceLike;
@@ -260,6 +312,13 @@ export default {
     }
 
     return worker.fetch(request, _env);
+  },
+  scheduled(
+    controller: ScheduledController,
+    _env: WorkerEnvironmentSource,
+    ctx: ExecutionContext,
+  ): void {
+    worker.scheduled(controller, _env, ctx);
   },
 };
 
