@@ -147,6 +147,8 @@ const REQUIRED_STORE_SLUGS = [
   "prisma.hosted_ai_usage_period",
   "prisma.hosted_growth_aggregate",
   "prisma.hosted_usage_credit_entry",
+  "prisma.hosted_usage_credit_grant",
+  "prisma.hosted_usage_referral",
   "prisma.hosted_usage_credit_purchase",
   "prisma.hosted_product_feedback",
   "prisma.hosted_linq_daily_state",
@@ -590,13 +592,15 @@ describe("deleteHostedAccountData", () => {
     });
   });
 
-  it("deletes usage-credit entries before purchases and member rows", async () => {
+  it("deletes usage-credit entries and grants before source and member rows", async () => {
     const deleteCalls: HostedAccountDeletionPrismaDeleteCall[] = [];
+    const updateCalls: HostedAccountDeletionPrismaUpdateCall[] = [];
     const operationOrder: string[] = [];
     const prisma = createHostedAccountDeletionPrismaForTest({
       deleteCalls,
       onTransaction: () => operationOrder.push("transaction"),
       operationOrder,
+      updateCalls,
     });
 
     const result = await deleteHostedAccountData({
@@ -607,6 +611,8 @@ describe("deleteHostedAccountData", () => {
 
     expect(result.deletedCounts).toMatchObject({
       "prisma.hosted_usage_credit_entry": 1,
+      "prisma.hosted_usage_credit_grant": 1,
+      "prisma.hosted_usage_referral": 2,
       "prisma.hosted_usage_credit_purchase": 1,
     });
     expect(deleteCalls).toEqual(expect.arrayContaining([
@@ -620,13 +626,85 @@ describe("deleteHostedAccountData", () => {
         },
       },
       {
+        model: "hostedUsageCreditGrant",
+        where: {
+          entry: {
+            OR: [
+              { beneficiaryMemberId: "member_123" },
+              {
+                purchase: {
+                  beneficiaryMemberId: "member_123",
+                },
+              },
+            ],
+          },
+        },
+      },
+      {
+        model: "hostedUsageReferral",
+        where: {
+          OR: [
+            { beneficiaryMemberId: "member_123" },
+            {
+              AND: [
+                {
+                  OR: [
+                    { beneficiaryMemberId: "member_123" },
+                    { introducedMemberId: "member_123" },
+                    { referrerMemberId: "member_123" },
+                    { targetContainerMemberId: "member_123" },
+                  ],
+                },
+                { status: { not: "rewarded" } },
+              ],
+            },
+          ],
+        },
+      },
+      {
         model: "hostedUsageCreditPurchase",
         where: {
           beneficiaryMemberId: "member_123",
         },
       },
     ]));
+    expect(updateCalls).toContainEqual({
+      data: {
+        firstHumanMessageAt: null,
+        humanMessageCount: 0,
+        introducedMemberId: null,
+        lastHumanMessageAt: null,
+        nonReferrerMessageCount: 0,
+        observedEventKeysJson: expect.anything(),
+        observedSpeakerKeysJson: expect.anything(),
+        referrerMemberId: null,
+        referrerSubjectKey: null,
+        sourceConversationJson: expect.anything(),
+        targetContainerMemberId: null,
+      },
+      model: "hostedUsageReferral",
+      where: {
+        AND: [
+          {
+            OR: [
+              { beneficiaryMemberId: "member_123" },
+              { introducedMemberId: "member_123" },
+              { referrerMemberId: "member_123" },
+              { targetContainerMemberId: "member_123" },
+            ],
+          },
+          { NOT: { beneficiaryMemberId: "member_123" } },
+        ],
+        status: "rewarded",
+      },
+    });
+    expect(operationOrder.indexOf("delete:hostedUsageCreditGrant")).toBeLessThan(
+      operationOrder.indexOf("delete:hostedUsageCreditEntry"),
+    );
     expect(operationOrder.indexOf("delete:hostedUsageCreditEntry")).toBeLessThan(
+      operationOrder.indexOf("delete:hostedUsageReferral"),
+    );
+    expect(operationOrder.indexOf("delete:hostedUsageReferral")).toBeLessThan(
       operationOrder.indexOf("delete:hostedUsageCreditPurchase"),
     );
     expect(operationOrder.indexOf("delete:hostedUsageCreditPurchase")).toBeLessThan(
@@ -2419,6 +2497,7 @@ function createHostedAccountDeletionPrismaForTest(input: {
     providerAccountBlindIndex: string;
     sources?: { sourceProviderSlug: string; status: string }[];
   }>;
+  updateCalls?: HostedAccountDeletionPrismaUpdateCall[];
   transactionFamilyBillingRefRecords?: Record<string, unknown>[];
   transactionFamilyGroups?: Array<{ id: string }>;
   transactionIdentityRecord?: Record<string, unknown> | null;
@@ -2433,6 +2512,15 @@ function createHostedAccountDeletionPrismaForTest(input: {
     deleteMany: async (args) => {
       input.operationOrder?.push(`delete:${model}`);
       input.deleteCalls?.push({ model, where: args.where });
+      return { count: 1 };
+    },
+    updateMany: async (args) => {
+      input.operationOrder?.push(`update:${model}`);
+      input.updateCalls?.push({
+        data: args.data,
+        model,
+        where: args.where,
+      });
       return { count: 1 };
     },
   });
@@ -2720,6 +2808,12 @@ type HostedAccountDeletionPrismaDeleteCall = {
   where: unknown;
 };
 
+type HostedAccountDeletionPrismaUpdateCall = {
+  data: unknown;
+  model: string;
+  where: unknown;
+};
+
 type HostedAccountDeletionConnectedAppIntentRow = {
   alias: string | null;
   claimHash?: string;
@@ -2730,6 +2824,7 @@ type HostedAccountDeletionConnectedAppIntentRow = {
 type HostedAccountDeletionPrismaDeleteDelegate = {
   count(args: { where: unknown }): Promise<number>;
   deleteMany(args: { where: unknown }): Promise<{ count: number }>;
+  updateMany(args: { data?: unknown; where?: unknown }): Promise<{ count: number }>;
 };
 
 type HostedAccountDeletionPrismaTransactionFake = {

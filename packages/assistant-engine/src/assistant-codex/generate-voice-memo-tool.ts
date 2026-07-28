@@ -1,6 +1,10 @@
 import { randomUUID } from 'node:crypto'
 
 import {
+  resolveAssistantVoiceOption,
+  type AssistantVoiceOptionId,
+} from '@murphai/contracts'
+import {
   assistantVoiceMemoMusicModelId,
   assistantVoiceMemoMusicOutputFormat,
   assistantVoiceMemoSpeechOutputFormat,
@@ -27,6 +31,7 @@ import { normalizeNullableString } from '../assistant/shared.js'
 export interface GenerateVoiceMemoToolArgs {
   text: string
   voiceId: string | null
+  voiceOptionId?: AssistantVoiceOptionId | null
 }
 
 export interface GenerateSongToolArgs {
@@ -45,6 +50,7 @@ export type VoiceMemoDeliveryChannel = 'linq' | 'telegram'
 
 export interface VoiceMemoElevenLabsRuntimeConfig {
   apiKeyAvailable: boolean
+  defaultVoiceId?: string | null
   modelId: string | null
   voiceId: string | null
 }
@@ -93,9 +99,10 @@ export async function executeGenerateVoiceMemoTool(input: {
     return preflight
   }
 
-  const voiceId =
-    normalizeNullableString(input.args.voiceId) ??
-    runtime.elevenLabs.voiceId
+  const voiceId = resolveVoiceMemoVoiceId({
+    args: input.args,
+    runtime,
+  })
   if (!voiceId) {
     return {
       rpcSuccess: false,
@@ -123,6 +130,25 @@ export async function executeGenerateVoiceMemoTool(input: {
     runtime,
     signal: input.abortSignal ?? null,
   })
+}
+
+function resolveVoiceMemoVoiceId(input: {
+  args: GenerateVoiceMemoToolArgs
+  runtime: VoiceMemoToolRuntime
+}): string | null {
+  const voiceOptionId = input.args.voiceOptionId ?? null
+  if (voiceOptionId !== null) {
+    const voiceOption = resolveAssistantVoiceOption(voiceOptionId)
+    if (!voiceOption) {
+      return null
+    }
+
+    return normalizeNullableString(voiceOption.elevenLabsVoiceId) ??
+      normalizeNullableString(input.runtime.elevenLabs.defaultVoiceId)
+  }
+
+  return normalizeNullableString(input.args.voiceId) ??
+    input.runtime.elevenLabs.voiceId
 }
 
 export async function executeGenerateSongTool(input: {
@@ -288,14 +314,16 @@ export function createVoiceMemoToolRuntimeFromEnv(input: {
   }
 
   const apiKey = resolveElevenLabsApiKey(input.env)
+  const defaultVoiceId = resolveElevenLabsVoiceId(input.env)
   const elevenLabs: VoiceMemoElevenLabsRuntimeConfig = {
     apiKeyAvailable: apiKey !== null,
+    defaultVoiceId,
     modelId: normalizeHostedAiUsageAllowanceElevenLabsTtsModelId(
       resolveElevenLabsModelId(input.env),
     ),
     voiceId:
       normalizeNullableString(input.preferredVoiceId) ??
-      resolveElevenLabsVoiceId(input.env),
+      defaultVoiceId,
   }
 
   if (deliveryChannel === 'telegram') {

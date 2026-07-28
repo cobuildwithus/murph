@@ -208,6 +208,106 @@ describe("hosted system mailbox notification execution context", () => {
     }
   });
 
+  it("selects an exact external-completion family ahead of an older generic notification", async () => {
+    const workspace = await createHostedRuntimeWorkspace("murph-hosted-system-mailbox-");
+    const genericDedupeKey =
+      "assistant.notification.requested:generic:older-notification";
+    const referralDedupeKey =
+      "assistant.notification.requested:usage-referral-reward:referral_123";
+    const buildWake = (eventId: string, occurredAt: string) =>
+      buildHostedExecutionAssistantNotificationRequestedWake({
+        eventId,
+        memberId: "member_123",
+        notification: {
+          deliveryDedupeToken: eventId,
+          deliveryIdempotencyKey: eventId,
+          instructions: "Send the prepared completion.",
+          responsePolicy: {
+            kind: "require_send_exact_text",
+            text: "Mission complete.",
+          },
+          route: {
+            actorId: null,
+            channel: "linq",
+            delivery: {
+              kind: "thread",
+              target: "linq_source_thread",
+            },
+            identityId: "hbidx:phone:v1:test",
+            threadId: "linq_source_thread",
+            threadIsDirect: false,
+          },
+        },
+        occurredAt,
+      });
+
+    try {
+      const genericOccurredAt = "2026-04-26T23:59:00.000Z";
+      for (const entry of [
+        {
+          dedupeKey: genericDedupeKey,
+          id: "mailbox_item_generic_notification",
+          laneSeq: "1",
+          occurredAt: genericOccurredAt,
+        },
+        {
+          dedupeKey: referralDedupeKey,
+          id: "mailbox_item_referral_completion",
+          laneSeq: "2",
+          occurredAt: FIXED_NOW,
+        },
+      ]) {
+        expect((await enqueueHostedSystemMailboxItem({
+          item: createResolvedNotificationItem(entry),
+          vaultRoot: workspace.vaultRoot,
+          wake: buildWake(entry.dedupeKey, entry.occurredAt),
+        })).status).toBe("imported");
+      }
+
+      const prepared = await prepareHostedSystemMailboxItemForCheckpoint({
+        allowedMailboxDedupeKeyPrefixes: [
+          "assistant.notification.requested:phone-call-result:",
+          "assistant.notification.requested:usage-referral-reward:",
+        ],
+        allowedRouteActions: ["dispatch-assistant-notification"],
+        allowedWakeKinds: ["assistant.notification.requested"],
+        executionContext: null,
+        now: () => FIXED_NOW,
+        runtime: createRuntime({}),
+        runtimeEnv: {},
+        vaultRoot: workspace.vaultRoot,
+      });
+
+      expect(prepared).toEqual(expect.objectContaining({
+        item: expect.objectContaining({
+          itemId: "mailbox_item_referral_completion",
+          mailboxDedupeKey: referralDedupeKey,
+        }),
+        status: "processed",
+      }));
+      expect(mocks.executeHostedMailboxEvent).toHaveBeenCalledTimes(1);
+      expect(mocks.executeHostedMailboxEvent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          forceQueueOnlyAssistantNotification: true,
+          sourceMailboxItemId: "mailbox_item_referral_completion",
+          wake: expect.objectContaining({
+            eventId: referralDedupeKey,
+            kind: "assistant.notification.requested",
+          }),
+        }),
+      );
+      expect((await readHostedSystemMailboxState(workspace.vaultRoot)).pending)
+        .toEqual(expect.arrayContaining([
+          expect.objectContaining({
+            itemId: "mailbox_item_generic_notification",
+            status: "pending",
+          }),
+        ]));
+    } finally {
+      await workspace.cleanup();
+    }
+  });
+
   it("does not rescope the group tool for a late scheduled completion", async () => {
     const workspace = await createHostedRuntimeWorkspace(
       "murph-hosted-system-mailbox-",
@@ -2602,23 +2702,28 @@ function createRuntime(
 }
 
 function createResolvedNotificationItem(overrides: Partial<{
+  dedupeKey: string;
   id: string;
   laneSeq: string;
+  occurredAt: string;
 }> = {}): HostedMailboxResolvedImportItem {
+  const occurredAt = overrides.occurredAt ?? FIXED_NOW;
   const item: HostedMailboxItem = {
-    createdAt: FIXED_NOW,
-    dedupeKey: "assistant.notification.requested:gateway-billing",
+    createdAt: occurredAt,
+    dedupeKey:
+      overrides.dedupeKey
+      ?? "assistant.notification.requested:gateway-billing",
     expiresAt: null,
     id: overrides.id ?? "mailbox_item_system_notification",
     kind: "assistant.notification.requested",
     lane: "system",
     laneSeq: overrides.laneSeq ?? "1",
-    occurredAt: FIXED_NOW,
+    occurredAt,
     payloadBytes: 64,
     payloadInlineCiphertext: "ciphertext",
     payloadRef: null,
     payloadSchema: "murph.hosted-mailbox-item.v1",
-    updatedAt: FIXED_NOW,
+    updatedAt: occurredAt,
     userId: "member_123",
   };
 

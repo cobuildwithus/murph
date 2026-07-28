@@ -27,6 +27,37 @@ Runner bundle assembly esbuild-bundles two boot-critical surfaces with byte budg
 The device-sync package boundary suite also walks the static source graph from the runner's runtime-config entrypoint and rejects provider runtime modules, importer modules, and the Junction SDK. This focused gate catches boot-closure ownership regressions before the packed-bundle guard validates the final esbuild metafile.
 Hosted assistant delivery recovery now relies on committed side-effect state inside the encrypted workspace and the web-owned hosted workspace checkpoint.
 
+## Device-Sync Wake Epoch Rollout
+
+Connection-scoped `device-sync.wake` items bind their authority to the
+connection row's `connectedAt` epoch. The runner consumes a wake as superseded
+when that epoch is absent or differs from the hydrated connection, without
+running its hint or queued jobs. Runtime applies echo the hydrated epoch as
+`observedConnectedAt`; Web rejects connection, credential, local-state, and
+source writes after OAuth replacement changes that epoch.
+
+When hydration accepts a replacement epoch, the same local SQLite transaction
+retires queued, retryable, and leased credential-scoped jobs before exposing the
+replacement credentials. The existing companion-HRV resource exception remains
+runnable because that accepted payload does not depend on provider
+authorization. Web performs the matching dirty-state supersession under its
+connection mutation lock.
+
+Deploy Cloudflare and the runner bundle first with
+`container_rollout=immediate`, and require managed-container smoke to report the
+exact new bundle fingerprint. Then deploy Web so new producers append the
+epoch. During the short runner-first window, legacy connection-scoped wakes
+still hydrate the current Web snapshot but their hint and jobs fail closed;
+keep that window short so later scheduled, manual, or provider wakes from the
+new Web producer resume ordinary work. Do not deploy Web first: an old runner
+does not enforce the epoch.
+
+After Web emits an epoch-bearing wake, the first epoch-aware runner bundle is a
+hard rollback floor while such wakes or in-flight work may remain. Prefer a
+forward fix. Retaining the new runner while Web is rolled back is safety
+preserving but intentionally fail-closed for legacy connection-scoped hints and
+may reject old-Web apply parsing, so restore compatible Web promptly.
+
 ## Group Room-Model Rollout
 
 Deploy the first group room-model release as a Cloudflare Worker and runner
@@ -561,6 +592,49 @@ Opt-in execution integrations:
 - `WHOOP_CLIENT_ID`
 - `WHOOP_CLIENT_SECRET`
 The documented deploy surface is intentionally limited to the vars and secrets above for the narrowed execution plane and its opt-in runtime integrations.
+
+### Inbound message-content retention rollout
+
+This rollout has an irreversible transcript cutover and must use two phases:
+
+1. Deploy the Cloudflare Worker and stamping-capable runner bundle with
+   `container_rollout=immediate`. Drain old warm bundles, prove the deployed
+   fingerprint, and verify that newly written user transcript entries carry
+   `contentReceivedAt`. This Worker/runner version is also the rollout floor:
+   its ambiguous-completion recovery requires both a workspace-version advance
+   and a changed checkpoint timestamp before it releases a runtime fence.
+2. Before the Web migration, count persisted workspace snapshots and compare
+   the aggregate with the existing retention-cron capacity of five snapshots
+   per successful hourly run plus an explicit full-run signal-failure
+   allowance. Stop if that queue cannot drain safely in the rollout window; do
+   not add a second dispatcher as part of this release.
+3. Record the verified runner-convergence instant, then deploy Web with the
+   additive mailbox retention columns. The phase-one migration re-arms every
+   persisted workspace snapshot once, advances the workspace CAS version, and
+   leaves checkpoint time unchanged. A runtime that read the pre-rearm version
+   must conflict and retry instead of clearing the wake; the Worker must not
+   treat that migration-only version advance as runtime progress. Monitor the
+   existing cron until no due snapshot remains; each restored runtime scrubs
+   receipt-backed captures, parser output, projections, inputs, and stamped
+   transcripts while preserving every unstamped legacy transcript entry.
+   Phase one is incomplete until the queue reaches zero.
+4. Keep legacy unstamped transcript entries intact for 14 complete days after
+   the convergence instant and until phase one has drained, whichever is later.
+   Newly stamped entries and the other receipt-owned message carriers use their
+   exact inclusive 14-day deadlines after their initial snapshot drain.
+5. Only after both gates, ship a separate phase-two migration that
+   re-arms persisted snapshots again and enables retirement of every remaining
+   unstamped user transcript entry. Verify retention wake convergence,
+   checkpoint publication, policy-non-reply counts, and content-retirement
+   counts before declaring the cutover complete.
+
+Do not infer legacy receipt time from transcript creation, accepted-turn
+journals, or input events, and do not enable the phase-two legacy scrub early.
+Normal snapshot cleanup can discard those joins, so an early scrub can
+irreversibly erase recent user context while leaving the paired assistant
+reply. The phase-one rearm and drain gate are required: omitting either one
+strands other receipt-backed message carriers in dormant snapshots beyond
+their deadline.
 
 ### Retired WhatsApp configuration
 

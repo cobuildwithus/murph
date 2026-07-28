@@ -663,6 +663,18 @@ export async function assertHostedAssistantAskCompletionDeliveryAuthorityTx(
   }
 
   if (
+    supportsSafeFallback
+    && isHostedAssistantAskExpired(completionItem.expiresAt ?? null, now)
+    && completionItem.payloadInlineCiphertext === null
+    && completionItem.payloadRef === null
+  ) {
+    // Retention preserves the structurally bound row after clearing its
+    // ciphertext. The fixed completion copy remains the only safe output once
+    // the declared completion deadline has passed.
+    return { assistantAskFallbackRequired: true };
+  }
+
+  if (
     !supportsSafeFallback
     && isHostedAssistantAskExpired(completionItem.expiresAt ?? null, now)
   ) {

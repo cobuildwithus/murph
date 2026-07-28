@@ -62,12 +62,12 @@ describe("HostedPhoneSettings", () => {
     const markup = renderToStaticMarkup(
       createElement(HostedPhoneSettings, {
         authenticated: true,
-        initialPhoneNumber: "+14046257706",
+        initialPhoneNumber: "+15550100002",
         murphPhoneNumber: "+15550100001",
       }),
     );
 
-    expect(markup).toContain("•••• 7706");
+    expect(markup).toContain("•••• 0002");
     expect(markup).toContain("Text Murph");
     expect(markup).not.toContain("Message +1 555 010 0001");
     expect(markup).toContain('href="sms:+15550100001"');
@@ -84,7 +84,7 @@ describe("HostedPhoneSettings", () => {
     const markup = renderToStaticMarkup(
       createElement(HostedPhoneSettings, {
         authenticated: true,
-        initialPhoneNumber: "+14046257706",
+        initialPhoneNumber: "+15550100002",
         murphPhoneNumber: null,
       }),
     );
@@ -130,7 +130,7 @@ describe("HostedPhoneSettings", () => {
 
   it.each([
     [null, undefined],
-    ["+14046257706", "New phone number"],
+    ["+15550100002", "New phone number"],
   ] as const)(
     "opens the dialog phone form directly without a duplicate account card for %s",
     async (initialPhoneNumber, phoneFieldLabel) => {
@@ -154,7 +154,7 @@ describe("HostedPhoneSettings", () => {
       expect(container.querySelector('[data-testid="hosted-phone-auth"]')).toBeTruthy();
       expect(container.textContent).not.toContain("Not connected");
       expect(container.textContent).not.toContain("Link phone");
-      expect(container.textContent).not.toContain("•••• 7706");
+      expect(container.textContent).not.toContain("•••• 0002");
       expect(mocks.phoneAuthProps.at(-1)).toEqual({
         phoneFieldLabel,
         phoneInputAutoFocus: true,
@@ -169,7 +169,7 @@ describe("HostedPhoneSettings", () => {
         linkedAccounts: [
           {
             latest_verified_at: 1771977600,
-            phone_number: "+14046257706",
+            phone_number: "+15550100002",
             type: "phone",
           },
         ],
@@ -186,6 +186,6 @@ describe("HostedPhoneSettings", () => {
     );
 
     expect(markup).toContain("Not connected");
-    expect(markup).not.toContain("•••• 7706");
+    expect(markup).not.toContain("•••• 0002");
   });
 });

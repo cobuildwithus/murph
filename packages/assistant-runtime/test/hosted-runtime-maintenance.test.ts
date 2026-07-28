@@ -1627,6 +1627,69 @@ describe("runHostedDeviceSyncPass", () => {
     );
   });
 
+  it("stops a superseded connection wake after hydration without running device-sync work", async () => {
+    const close = vi.fn();
+    const drainWorker = vi.fn(async () => 0);
+    const runSchedulerOnce = vi.fn(async () => undefined);
+    const service = {
+      close,
+      drainWorker,
+      getNextWakeAt: () => "2026-04-08T01:00:00.000Z",
+      listJobFailureDiagnostics: vi.fn(() => []),
+      listAccounts: vi.fn(() => []),
+      runSchedulerOnce,
+    };
+    mocks.createHostedRuntimeDeviceSyncService.mockReturnValue(service);
+    mocks.syncHostedDeviceSyncControlPlaneState.mockResolvedValueOnce({
+      hostedToLocalAccountIds: new Map([["conn_replacement", "local_replacement"]]),
+      localToHostedAccountIds: new Map([["local_replacement", "conn_replacement"]]),
+      observedTokenVersions: new Map([["conn_replacement", 9]]),
+      pendingDirtyAcks: [],
+      pendingDirtyPayloadJobs: [],
+      snapshot: null,
+      wakeSuperseded: true,
+    });
+
+    const result = await runHostedDeviceSyncPass(
+      {
+        connectionId: "conn_replacement",
+        eventId: "evt_stale_disconnect",
+        expectedConnectedAt: "2026-04-08T00:00:00.000Z",
+        kind: "device-sync.wake",
+        occurredAt: "2026-04-08T00:30:00.000Z",
+        reason: "disconnected",
+        userId: "member_123",
+      },
+      FIXED_MAINTENANCE_VAULT_ROOT,
+      DEVICE_SYNC_CONFIG,
+      createMaintenanceDeviceSyncPortStub(),
+      45_000,
+      {
+        stagedDirtyAcks: [{
+          connectionId: "conn_dirty_pending",
+          processedRevision: "7",
+        }],
+      },
+    );
+
+    assert.deepEqual(result, {
+      nextWakeAt: "2026-04-08T01:00:00.000Z",
+      postCheckpointRecord: null,
+      processedJobs: 0,
+      skipped: false,
+      stagedDirtyAcks: [{
+        connectionId: "conn_dirty_pending",
+        processedRevision: "7",
+      }],
+    });
+    expect(runSchedulerOnce).not.toHaveBeenCalled();
+    expect(drainWorker).not.toHaveBeenCalled();
+    expect(mocks.promoteHostedCompletedDirtyPayloadAcks).not.toHaveBeenCalled();
+    expect(mocks.reconcileHostedDeviceSyncControlPlaneState).not.toHaveBeenCalled();
+    expect(mocks.pruneWearableDenseRawTimeseries).not.toHaveBeenCalled();
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
   it("reschedules idle device sync when its abort signal fires during control-plane sync", async () => {
     await withHostedMaintenanceNow("2026-04-08T00:00:00.000Z", async () => {
       const controller = new AbortController();

@@ -2285,7 +2285,6 @@ async function assertHostedTelegramThreadRouteAuthorityAtProviderEntry(input: {
   if (
     normalizeHostedAssistantDeliveryChannel(payload.channel)?.toLowerCase()
       !== "telegram"
-    || payload.threadIsDirect !== false
   ) {
     return null;
   }
@@ -2295,6 +2294,16 @@ async function assertHostedTelegramThreadRouteAuthorityAtProviderEntry(input: {
     ? input.intent
     : null;
   const authority = input.intent?.externalThreadRouteAuthority ?? null;
+  if (
+    !authority
+    && !reviewedCompletion
+    && (
+      payload.threadIsDirect === true
+      || !input.intent?.automationAuthority
+    )
+  ) {
+    return null;
+  }
   if (!authority) {
     if (!input.intent?.automationAuthority && !reviewedCompletion) {
       return null;
@@ -2697,7 +2706,6 @@ async function deliverHostedPreparedAssistantDelivery(input: {
       normalizeHostedAssistantDeliveryChannel(
         input.assistantDeliveryEffect.payload.channel,
       )?.toLowerCase() === "telegram"
-      && input.assistantDeliveryEffect.payload.threadIsDirect === false
       && mirrorState.intent?.externalThreadRouteAuthority?.channel === "telegram"
         ? mirrorState.intent.externalThreadRouteAuthority.threadId
         : null;

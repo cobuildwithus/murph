@@ -395,6 +395,7 @@ export interface HostedExecutionTelegramMessage {
 
 export interface HostedExecutionDeviceSyncWakeEvent extends HostedExecutionBaseEvent {
   connectionId?: string | null;
+  expectedConnectedAt?: string;
   hint?: HostedExecutionDeviceSyncWakeHint | null;
   kind: "device-sync.wake";
   provider?: string | null;
@@ -707,6 +708,7 @@ export interface HostedExecutionVaultShareRevokeWake extends HostedExecutionBase
 
 export interface HostedExecutionDeviceSyncWake extends HostedExecutionBaseWake {
   connectionId?: string | null;
+  expectedConnectedAt?: string;
   hint?: HostedExecutionDeviceSyncWakeHint | null;
   kind: "device-sync.wake";
   provider?: string | null;

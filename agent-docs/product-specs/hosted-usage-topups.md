@@ -1,7 +1,7 @@
 # Hosted Usage Top-Ups
 
 Status: Implemented personal, Family-member, and hosted-group funding
-Last verified: 2026-07-26
+Last verified: 2026-07-27
 
 ## Decision
 
@@ -44,7 +44,8 @@ second admission owner or exhaustion policy.
 1. Active subscription or sponsored entitlement remains the prerequisite for
    service. Credit never creates or extends entitlement.
 2. Current-period included allowance is used first.
-3. Purchased usage credit is used next.
+3. Generic usage credit, including purchase and earned-referral grants, is used
+   next.
 4. When neither is available, the usage-limit block remains in force. The
    restored or extended gate must keep accepted conversation input durable and
    pending rather than silently dropping it or inventing a second terminal
@@ -57,13 +58,13 @@ second admission owner or exhaustion policy.
 
 No Stripe request belongs on the model-start or reply critical path. The
 single gate reads only Murph's local durable effective-capacity
-projection: included capacity remaining plus eligible purchased credit
+projection: included capacity remaining plus eligible usage credit
 remaining.
 
 ### Implemented Boundary
 
 `apps/web` owns one composed access-and-usage decision. It blocks provider work
-when included allowance and purchased credit are both exhausted, preserves
+when included allowance and usage credit are both exhausted, preserves
 accepted input for retry, and keeps route-specific notice behavior in the
 existing allowance owner. Cloudflare, Temporal, and the assistant runtime own
 no Stripe, purchase, ledger, or credit-balance state.
@@ -72,14 +73,14 @@ no Stripe, purchase, ledger, or credit-balance state.
 
 An eligible paid Pulse or Edge member can:
 
-1. See included usage in its existing percentage presentation.
+1. See one overall percentage for all currently available usage.
 2. Open a small **Add usage** dialog over Settings.
 3. Choose $5, $10, or $25 without a preselected or promoted option.
 4. Continue to Stripe-hosted Checkout.
 5. Return to Settings with an honest pending state while webhook fulfillment
    completes.
-6. See that remaining usage credit will carry work past included-usage
-   exhaustion without exposing an exact balance.
+6. See fulfilled credit move that same usage bar immediately without exposing
+   an exact balance.
 7. If usage was blocked, have pending accepted work become runnable after the
    verified grant restores capacity.
 8. Continue using that credit after an included-usage reset until the credit is
@@ -136,21 +137,20 @@ subscription invoice.
 
 ### Presentation
 
-Included usage remains the existing bounded percentage. Buying credit must not
-make that percentage move backward or expose the internal dollar value of a
-plan's included allowance.
+Settings renders one bounded percentage from current-period spend and all
+remaining effective capacity. Buying credit can move that bar backward
+immediately. The presentation does not expose the internal dollar value of the
+plan allowance or the usage-credit balance.
 
-Settings does not render the exact purchased-credit balance. When included
-usage is exhausted and purchased credit remains, it may say that Murph will use
-the remaining **usage credit**. It must not call that capacity cash, wallet
-funds, an account balance, or refundable dollars. Accounting stays in integer
-USD micros behind the web-owned projection.
+Purchased capacity must not be called cash, wallet funds, an account balance,
+or refundable dollars. Accounting stays in integer USD micros behind the
+web-owned projection.
 
 Settings may show a quiet **Add usage** action at any utilization for an
 eligible paid member. Home and assistant surfaces should surface the action
-only when the current forecast predicts exhaustion, at least 80% of included
-usage is used, or included and purchased capacity is exhausted. Pulse's Edge
-upgrade remains available through the plan card instead of creating a
+only when the current forecast predicts exhaustion, at least 80% of available
+usage is used, or included allowance and usage credit are exhausted. Pulse's
+Edge upgrade remains available through the plan card instead of creating a
 multi-action usage contract.
 
 ### Settings Dialog
@@ -448,16 +448,23 @@ shortcut would be overwritten.
 The allowance resolver derives two independent quantities:
 
 - base included capacity for the usage event's plan and period; and
-- purchased credit still available when the canonical usage event settles.
+- generic usage credit still available when the canonical usage event settles.
 
-Every purchase grant, usage debit, refund adjustment, dispute adjustment, and
-effective-capacity recomputation must acquire the same
+Every purchase or referral grant, usage debit, refund adjustment, dispute
+adjustment, and effective-capacity recomputation must acquire the same
 beneficiary-scoped database lock before any purchase, period, or grant lock.
 Period-row locking alone is insufficient because carryover credit can be
 consumed concurrently by late prior-period and current-period usage. Use one
 fixed lock order across all paths and revalidate rows after acquiring it.
 Credit-aware admission reads the compact balance/version projection from the
 same durable owner.
+
+Purchase fulfillment and conversational referral rewards share the same
+immutable credit-entry ledger and entry-keyed remaining-capacity projection.
+Stripe refunds and disputes remain purchase-only; referral grants are final and
+have no financial reversal path. The referral product and qualification
+contract lives in
+`agent-docs/product-specs/hosted-usage-referrals.md`.
 
 For each newly canonical usage event, under that beneficiary-wide lock:
 
@@ -471,7 +478,7 @@ For each newly canonical usage event, under that beneficiary-wide lock:
 5. Cap the debit at credit actually available in that serialized settlement.
    Any excess from the crossing operation is absorbed by Murph; it is not debt
    and is never collected from a later purchase.
-6. Recompute effective exhaustion from base remaining plus available purchased
+6. Recompute effective exhaustion from base remaining plus available usage
    credit.
 
 The current runtime does not transport an admission-bound credit cutoff. V1

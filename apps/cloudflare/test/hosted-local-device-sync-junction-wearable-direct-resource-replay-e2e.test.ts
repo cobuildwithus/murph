@@ -1039,7 +1039,14 @@ function buildMemberActivatedWake(
 function buildJunctionFixtureWake(connectionId: string, occurredAt: string, memberId = userId) {
   return buildHostedExecutionDeviceSyncWake({
     connectionId,
-    eventId: `device-sync:junction-direct-replay:${memberId}:${connectionId}:${runId}`,
+    eventId: [
+      "device-sync:junction-direct-replay",
+      memberId,
+      connectionId,
+      occurredAt,
+      runId,
+    ].join(":"),
+    expectedConnectedAt: occurredAt,
     hint: {
       eventType: "junction.direct-resource-replay",
       jobs: [],

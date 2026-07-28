@@ -24,6 +24,7 @@ import {
   HOSTED_RUNTIME_NEWSLETTER_HTML_MAX_LENGTH,
   HOSTED_RUNTIME_NEWSLETTER_SUBJECT_MAX_LENGTH,
   HOSTED_RUNTIME_NEWSLETTER_TEXT_MAX_LENGTH,
+  HOSTED_USAGE_REFERRAL_POLICY_CODES,
   isHostedRuntimeAssistantAskDiagnosticCode,
   isHostedRuntimeAssistantAskRequestId,
   sanitizeHostedProductFeedbackSummary,
@@ -468,7 +469,7 @@ export const MURPH_PLAN_USAGE_TOOL = {
   namespace: 'murph',
   name: 'plan_usage',
   description:
-    'Read the current private hosted plan, included-usage projection, recommendation, and optional subscription quote. Call only for an explicit plan, usage, or billing request, or trusted low-usage context. This is read-only: percentages and forecasts are approximate, and a recommendation or quote is not consent or a completed billing or usage-credit action.',
+    'Read the current private hosted plan, overall AI-usage projection, recommendation, and quote. Call only for an explicit plan, usage, billing request, or trusted low-usage context. This is read-only: percentages and forecasts cover all available usage and expose no allowance/credit-source split; a recommendation or quote is not consent or a billing action.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -546,7 +547,7 @@ export const MURPH_ASSISTANT_CONFIGURATION_TOOL = {
   namespace: 'murph',
   name: 'assistant_configuration',
   description:
-    'Read the current hosted turn model and reasoning effort plus the models and reasoning efforts available for the next turn, or directly save an explicit user-requested change. Internally, Luna is the most usage-efficient model, Terra is the default, and Sol requires an active paid Edge plan. Do not assume the member knows those names or introduce them unless the member asks; otherwise describe the usage-saving option as “a less capable model that uses less of your included usage.” The lowest supported reasoning effort is low; these hosted models do not support none. Use action="read" whenever configuration facts are needed. Use action="update" only when the current user-sourced turn explicitly asks for the exact change. Never switch models or reasoning automatically because usage is low. Do not claim a change is saved unless the result says updated or unchanged. A saved update does not change the running turn and takes effect on the next turn.',
+    'Read the current hosted turn model and reasoning effort plus the models and reasoning efforts available for the next turn, or directly save an explicit user-requested change. Internally, Luna is the most usage-efficient model, Terra is the default, and Sol requires an active paid Edge plan. Do not assume the member knows those names or introduce them unless the member asks; otherwise describe the usage-saving option as “a less capable model that uses less AI usage.” The lowest supported reasoning effort is low; these hosted models do not support none. Use action="read" whenever configuration facts are needed. Use action="update" only when the current user-sourced turn explicitly asks for the exact change. Never switch models or reasoning automatically because usage is low. Do not claim a change is saved unless the result says updated or unchanged. A saved update does not change the running turn and takes effect on the next turn.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -747,6 +748,9 @@ export const MURPH_GROUP_TOOL = {
           'read_shared',
           'read_current',
           'read_usage',
+          'read_usage_referral',
+          'arm_usage_referral',
+          'cancel_usage_referral',
           'list_memberships',
           'leave_membership',
           'update_display_name',
@@ -784,6 +788,12 @@ export const MURPH_GROUP_TOOL = {
         maxLength: HOSTED_RUNTIME_ASSISTANT_ASK_REQUEST_ID_MAX_CODE_POINTS,
         description:
           'Required for action="ask_member" or action="revoke_disclosure_grant". For ask_member, use the exact server-issued grantId from read_current. For revoke_disclosure_grant, use the exact grantId from the immediately preceding list_memberships result. Never guess it or take it from the user.',
+      },
+      policyCode: {
+        type: 'string',
+        enum: [...HOSTED_USAGE_REFERRAL_POLICY_CODES],
+        description:
+          'Required only for action="arm_usage_referral". Use the exact policyCode from the immediately preceding read_usage_referral result after one exact current sender explicitly chooses it.',
       },
       groupLabel: {
         type: 'string',
@@ -1453,6 +1463,22 @@ const groupArgumentsSchema = z.discriminatedUnion('action', [
   z
     .object({
       action: z.literal('read_usage'),
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal('read_usage_referral'),
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal('arm_usage_referral'),
+      policyCode: z.enum(HOSTED_USAGE_REFERRAL_POLICY_CODES),
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal('cancel_usage_referral'),
     })
     .strict(),
   z
@@ -3961,6 +3987,23 @@ async function executeGroupTool(input: {
           originAssistantInputId,
         }
       : input.request
+  } else if (
+    input.request.action === 'arm_usage_referral'
+    || input.request.action === 'cancel_usage_referral'
+  ) {
+    const userActionScope =
+      input.hostedToolContext?.currentUserActionScope?.() ?? null
+    const originAssistantInputId =
+      userActionScope?.acceptedInputIds[
+        userActionScope.acceptedInputIds.length - 1
+      ] ?? null
+    if (!originAssistantInputId) {
+      return toolTextResult(
+        false,
+        'usage referral changes require fresh user-sourced input for this turn',
+      )
+    }
+    request = input.request
   } else {
     request = input.request
   }
@@ -5371,6 +5414,7 @@ function parseGroupArguments(
     || parsed.data.action === 'ask_member'
     || parsed.data.action === 'post_disclosure_request'
     || parsed.data.action === 'revoke_disclosure_grant'
+    || parsed.data.action === 'arm_usage_referral'
   ) {
     return { ok: true, request: parsed.data }
   }
@@ -5510,6 +5554,8 @@ function parseGroupArguments(
   if (
     parsed.data.action === 'list_memberships'
     || parsed.data.action === 'read_usage'
+    || parsed.data.action === 'read_usage_referral'
+    || parsed.data.action === 'cancel_usage_referral'
     || parsed.data.action === 'read_chat_participants'
     || parsed.data.action === 'share_contact_card'
     || parsed.data.action === 'revoke_own_email_share'

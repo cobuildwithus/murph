@@ -39,6 +39,7 @@ export async function requestHostedDeviceSyncReconcile(input: {
   const occurredAt = new Date().toISOString();
   const wake = await appendHostedDeviceSyncManualReconcileWake({
     connectionId: connection.id,
+    expectedConnectedAt: connection.connectedAt,
     occurredAt,
     provider: connection.provider,
     userId: input.trustedUserId,

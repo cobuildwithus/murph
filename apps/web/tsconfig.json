@@ -213,6 +213,9 @@
       "@murphai/importers/device-providers/provider-descriptors": [
         "../../packages/importers/src/device-providers/provider-descriptors.ts"
       ],
+      "@murphai/importers/device-providers/junction": [
+        "../../packages/importers/src/device-providers/junction.ts"
+      ],
       "@murphai/importers/device-providers/junction-origin": [
         "../../packages/importers/src/device-providers/junction-origin.ts"
       ],
@@ -260,6 +263,9 @@
       ],
       "@murphai/device-syncd/http": [
         "../../packages/device-syncd/src/http.ts"
+      ],
+      "@murphai/device-syncd/junction-inline-authority": [
+        "../../packages/device-syncd/src/junction-inline-authority.ts"
       ],
       "@murphai/device-syncd/junction-resources": [
         "../../packages/device-syncd/src/junction-resources.ts"

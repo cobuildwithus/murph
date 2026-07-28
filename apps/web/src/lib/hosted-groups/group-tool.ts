@@ -58,6 +58,7 @@ import {
 import { signalHostedRuntimeMaintenanceRuntime } from "../hosted-orchestration/signal-runtime";
 import { assertHostedLinqRouteEgressAuthority } from "../hosted-routing/thread-route-store";
 import { resolveHostedPublicBaseUrl } from "../hosted-web/public-url";
+import { handleHostedUsageReferralGroupTool } from "../hosted-growth/usage-referral";
 import { getPrisma } from "../prisma";
 import { buildHostedGroupJoinUrl } from "./group-links";
 import {
@@ -142,6 +143,8 @@ export const HOSTED_RUNTIME_GROUP_TOOL_ACCESS_CLASSIFICATION = {
   ask: "personal_active",
   ask_current_sender: "participant_aware",
   ask_member: "participant_aware",
+  arm_usage_referral: "participant_aware",
+  cancel_usage_referral: "participant_aware",
   create_join_link: "owner_active",
   leave_membership: "participant_aware",
   list_memberships: "personal_active",
@@ -152,6 +155,7 @@ export const HOSTED_RUNTIME_GROUP_TOOL_ACCESS_CLASSIFICATION = {
   read_current: "participant_aware",
   revoke_disclosure_grant: "personal_active",
   read_usage: "participant_aware",
+  read_usage_referral: "participant_aware",
   read_shared: "participant_aware",
   revoke_own_email_share: "participant_aware",
   set_chat_avatar: "owner_active",
@@ -330,6 +334,17 @@ export async function handleHostedRuntimeGroupTool(input: {
             usage: null,
           },
     };
+  }
+
+  if (
+    input.request.action === "arm_usage_referral"
+    || input.request.action === "cancel_usage_referral"
+    || input.request.action === "read_usage_referral"
+  ) {
+    return handleHostedUsageReferralGroupTool({
+      memberId: input.memberId,
+      request: input.request,
+    });
   }
 
   if (!await hasHostedRuntimeActiveAccess(input.memberId)) {
@@ -1406,15 +1421,11 @@ async function handleHostedRuntimeGroupReadChatParticipants(input: {
     const ownerAdvisoryNames =
       await readHostedOwnerAddressBookAdvisoryNamesWithinDeadline({
         containerMemberId: input.memberId,
-        phoneHandles: participants.flatMap((participant) =>
-          participant.hasOwnMurph ? [] : [participant.handle]
-        ),
+        phoneHandles: participants.map((participant) => participant.handle),
         prisma,
       });
     for (const participant of participants) {
-      const ownerAdvisoryName = participant.hasOwnMurph
-        ? undefined
-        : ownerAdvisoryNames.get(participant.handle);
+      const ownerAdvisoryName = ownerAdvisoryNames.get(participant.handle);
       if (ownerAdvisoryName) {
         participant.ownerAdvisoryName = ownerAdvisoryName;
       }

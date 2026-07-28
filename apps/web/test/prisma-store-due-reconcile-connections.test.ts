@@ -12,6 +12,7 @@ describe("PrismaDeviceSyncControlPlaneStore due reconcile connection sweep", () 
         queryCalls.push(query);
         return [
           {
+            connected_at: new Date("2026-05-04T12:00:00.000Z"),
             id: "dsc_due_1",
             next_reconcile_at: new Date("2026-05-05T00:00:00.000Z"),
             provider: "whoop",
@@ -33,6 +34,7 @@ describe("PrismaDeviceSyncControlPlaneStore due reconcile connection sweep", () 
     expect(result).toEqual([
       {
         connectionId: "dsc_due_1",
+        connectedAt: "2026-05-04T12:00:00.000Z",
         nextReconcileAt: "2026-05-05T00:00:00.000Z",
         provider: "whoop",
         userId: "member_due_1",
@@ -44,6 +46,7 @@ describe("PrismaDeviceSyncControlPlaneStore due reconcile connection sweep", () 
       values: unknown[];
     };
     expect(query.text).toContain('"connection"."status" = \'active\'');
+    expect(query.text).toContain('"connection"."connected_at"');
     expect(query.text).toContain('"connection"."next_reconcile_at" <= $1');
     expect(query.text).toContain('join "hosted_member" as "member"');
     expect(query.text).toContain('"member"."suspended_at" is null');
