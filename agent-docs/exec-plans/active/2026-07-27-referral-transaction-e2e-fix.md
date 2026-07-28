@@ -24,6 +24,9 @@ Updated: 2026-07-27
 - Referral arm and cancel mutations keep only required locks and writes inside
   the interactive transaction; read-only response projection does not extend
   the transaction lifetime.
+- A snapshot failure after a committed arm or cancel returns an explicit
+  applied-but-refresh-unavailable result, and a later read converges without
+  retrying the mutation or telling the user it failed.
 - No referral transaction starts parallel queries on one
   `Prisma.TransactionClient`, calls a root client from inside the transaction,
   or opens nested transactions through a directly invoked helper.
@@ -106,6 +109,11 @@ Updated: 2026-07-27
    Mitigation: use a five-second-bounded, scan-free metadata transaction with
    `NOT VALID` replacements, commit that brief lock, then validate retained
    rows under PostgreSQL's less disruptive validation lock.
+6. Risk: a response-projection failure after commit is mistaken for a mutation
+   failure and causes a contradictory retry.
+   Mitigation: acknowledge the committed action with an exact recovery reason,
+   keep the existing wire shape compatible, and direct Murph to read current
+   state instead of repeating the mutation.
 
 ## Tasks
 

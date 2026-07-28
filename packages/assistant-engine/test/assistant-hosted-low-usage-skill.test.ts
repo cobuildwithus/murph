@@ -140,6 +140,16 @@ describe('assistant hosted low-usage skill', () => {
       'state the returned `expiresAt` as the mission\'s public occurrence deadline',
     )
     expect(normalizedSkill).toContain(
+      '`usage_referral_arm_applied_snapshot_unavailable`, the arm committed',
+    )
+    expect(normalizedSkill).toContain(
+      'Do not arm it again and never describe the operation as failed or inactive',
+    )
+    expect(normalizedSkill).toContain(
+      '`usage_referral_cancel_applied_snapshot_unavailable`, the cancellation committed',
+    )
+    expect(normalizedSkill).toContain('Do not retry the cancel')
+    expect(normalizedSkill).toContain(
       'private anti-gaming thresholds, or late-arrival grace rules',
     )
     expect(normalizedSkill).not.toContain(

@@ -834,6 +834,15 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
+    const hostedUsageReferralProductSpec = readFileSync(
+      new URL(
+        "../../../agent-docs/product-specs/hosted-usage-referrals.md",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    const normalizedHostedUsageReferralProductSpec =
+      hostedUsageReferralProductSpec.replace(/\s+/gu, " ");
     const hostedThreadContainerUsageDefaultMigrationSql = readFileSync(
       new URL(
         "../prisma/migrations/20260726180000_hosted_thread_container_usage_default/migration.sql",
@@ -1060,6 +1069,24 @@ describe("hosted Prisma baseline migration", () => {
     expect(hostedUsageReferralCreditEntryContractMigrationSql).toContain(
       'ALTER TABLE "hosted_usage_credit_entry"',
     );
+    expect(hostedUsageReferralProductSpec).not.toContain(
+      "20260726123000_allow_hosted_usage_referral_credit_entries",
+    );
+    expect(normalizedHostedUsageReferralProductSpec.indexOf(
+      "20260728030000_hosted_usage_referral_credit_entry_constraints",
+    )).toBeLessThan(normalizedHostedUsageReferralProductSpec.indexOf(
+      "previous Vercel function window to drain",
+    ));
+    expect(normalizedHostedUsageReferralProductSpec.indexOf(
+      "previous Vercel function window to drain",
+    )).toBeLessThan(normalizedHostedUsageReferralProductSpec.indexOf(
+      "20260728031000_resynchronize_hosted_usage_credit_purchase_grants",
+    ));
+    expect(normalizedHostedUsageReferralProductSpec.indexOf(
+      "20260728031000_resynchronize_hosted_usage_credit_purchase_grants",
+    )).toBeLessThan(normalizedHostedUsageReferralProductSpec.indexOf(
+      "Enable `HOSTED_USAGE_REFERRALS_ENABLED=1`",
+    ));
     expect(hostedUsageReferralRewardsMigrationSql).not.toContain(
       "hosted_usage_credit_allocation",
     );

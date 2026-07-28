@@ -423,6 +423,125 @@ describe("hosted usage referral tool", () => {
       terminalReason: "referrer_canceled",
     });
   });
+
+  it("acknowledges a committed arm when its response snapshot cannot refresh", async () => {
+    const { prisma, referrals } = buildPrisma();
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    mocks.readHostedPersonalAiUsageStatus
+      .mockResolvedValueOnce(ACTIVE_PERSONAL_USAGE_STATUS)
+      .mockRejectedValueOnce(new Error("Projection unavailable"));
+
+    await expect(handleHostedUsageReferralGroupTool({
+      enabled: true,
+      memberId: "member_personal",
+      prisma: prisma as never,
+      request: {
+        action: "arm_usage_referral",
+        policyCode: "new_person_activation_v1",
+        sourceConversation: PERSONAL_SOURCE,
+      },
+    })).resolves.toEqual({
+      action: "arm_usage_referral",
+      result: {
+        referral: null,
+        status: "unavailable",
+        unavailableReason:
+          "usage_referral_arm_applied_snapshot_unavailable",
+      },
+    });
+    expect(referrals).toHaveLength(1);
+    expect(referrals[0]).toMatchObject({
+      policyCode: "new_person_activation_v1",
+      status: "armed",
+    });
+    expect(consoleError).toHaveBeenCalledWith(
+      "Hosted usage referral snapshot refresh failed after committed mutation.",
+      { action: "arm_usage_referral", errorName: "Error" },
+    );
+
+    mocks.readHostedPersonalAiUsageStatus.mockResolvedValue(
+      ACTIVE_PERSONAL_USAGE_STATUS,
+    );
+    await expect(handleHostedUsageReferralGroupTool({
+      enabled: true,
+      memberId: "member_personal",
+      prisma: prisma as never,
+      request: { action: "read_usage_referral" },
+    })).resolves.toMatchObject({
+      result: {
+        outcome: "read",
+        referral: {
+          active: {
+            policyCode: "new_person_activation_v1",
+            state: "armed",
+          },
+        },
+        status: "ok",
+      },
+    });
+
+    consoleError.mockRestore();
+  });
+
+  it("acknowledges a committed cancel when its response snapshot cannot refresh", async () => {
+    const { prisma, referrals } = buildPrisma();
+    await handleHostedUsageReferralGroupTool({
+      enabled: true,
+      memberId: "member_personal",
+      prisma: prisma as never,
+      request: {
+        action: "arm_usage_referral",
+        policyCode: "new_person_activation_v1",
+        sourceConversation: PERSONAL_SOURCE,
+      },
+    });
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    mocks.readHostedPersonalAiUsageStatus.mockRejectedValueOnce(
+      new Error("Projection unavailable"),
+    );
+
+    await expect(handleHostedUsageReferralGroupTool({
+      enabled: true,
+      memberId: "member_personal",
+      prisma: prisma as never,
+      request: { action: "cancel_usage_referral" },
+    })).resolves.toEqual({
+      action: "cancel_usage_referral",
+      result: {
+        referral: null,
+        status: "unavailable",
+        unavailableReason:
+          "usage_referral_cancel_applied_snapshot_unavailable",
+      },
+    });
+    expect(referrals).toHaveLength(1);
+    expect(referrals[0]).toMatchObject({
+      status: "canceled",
+      terminalReason: "referrer_canceled",
+    });
+    expect(consoleError).toHaveBeenCalledWith(
+      "Hosted usage referral snapshot refresh failed after committed mutation.",
+      { action: "cancel_usage_referral", errorName: "Error" },
+    );
+
+    mocks.readHostedPersonalAiUsageStatus.mockResolvedValue(
+      ACTIVE_PERSONAL_USAGE_STATUS,
+    );
+    await expect(handleHostedUsageReferralGroupTool({
+      enabled: true,
+      memberId: "member_personal",
+      prisma: prisma as never,
+      request: { action: "read_usage_referral" },
+    })).resolves.toMatchObject({
+      result: {
+        outcome: "read",
+        referral: { active: null },
+        status: "ok",
+      },
+    });
+
+    consoleError.mockRestore();
+  });
 });
 
 function buildPrisma(): {

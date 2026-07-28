@@ -341,18 +341,12 @@ export async function handleHostedUsageReferralGroupTool(input: {
           "no_unbound_usage_referral",
         );
       }
-      return {
+      return await buildCommittedUsageReferralMutationResponse({
         action: input.request.action,
-        result: {
-          outcome: "canceled",
-          referral: await readHostedUsageReferralSnapshot({
-            actor,
-            now,
-            prisma,
-          }),
-          status: "ok",
-        },
-      };
+        actor,
+        now,
+        prisma,
+      });
     }
 
     const policy = POLICIES[input.request.policyCode];
@@ -476,16 +470,12 @@ export async function handleHostedUsageReferralGroupTool(input: {
         },
       });
     }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
-    const referral = await readHostedUsageReferralSnapshot({
+    return await buildCommittedUsageReferralMutationResponse({
+      action: input.request.action,
       actor,
       now,
       prisma,
     });
-
-    return {
-      action: input.request.action,
-      result: { outcome: "armed", referral, status: "ok" },
-    };
   } catch (error) {
     if (
       error instanceof Error
@@ -497,6 +487,44 @@ export async function handleHostedUsageReferralGroupTool(input: {
       );
     }
     throw error;
+  }
+}
+
+async function buildCommittedUsageReferralMutationResponse(input: {
+  action: "arm_usage_referral" | "cancel_usage_referral";
+  actor: HostedUsageReferralActor;
+  now: Date;
+  prisma: PrismaClient;
+}): Promise<HostedRuntimeGroupToolResponse> {
+  try {
+    const referral = await readHostedUsageReferralSnapshot({
+      actor: input.actor,
+      now: input.now,
+      prisma: input.prisma,
+    });
+    return {
+      action: input.action,
+      result: {
+        outcome:
+          input.action === "arm_usage_referral" ? "armed" : "canceled",
+        referral,
+        status: "ok",
+      },
+    };
+  } catch (error) {
+    console.error(
+      "Hosted usage referral snapshot refresh failed after committed mutation.",
+      {
+        action: input.action,
+        errorName: error instanceof Error ? error.name : typeof error,
+      },
+    );
+    return unavailableToolResponse(
+      input.action,
+      input.action === "arm_usage_referral"
+        ? "usage_referral_arm_applied_snapshot_unavailable"
+        : "usage_referral_cancel_applied_snapshot_unavailable",
+    );
   }
 }
 
