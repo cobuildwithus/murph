@@ -10,6 +10,7 @@ import {
   isJunctionCompanionHrvRmssdJob,
   JUNCTION_COMPANION_HRV_OBSERVATION_INVALID_CODE,
 } from "./junction-resources.ts";
+import { buildJunctionProviderSourceInstanceKey } from "./config/junction-connect-sources.ts";
 import {
   sanitizeHostedRuntimeDiagnosticText,
   sanitizeHostedRuntimeErrorText,
@@ -316,6 +317,8 @@ class DeviceSyncServiceController {
           const account = this.store.getAccountByExternalAccount(provider, externalAccountId);
           return account ? this.toPublicAccount(account) : null;
         },
+        upsertConnectionSource: (input) => this.store.upsertConnectionSource(input),
+        listConnectionSources: (input) => this.store.listConnectionSources(input),
         claimWebhookTrace: (record) => this.store.claimWebhookTrace(record),
         completeWebhookTrace: (provider, traceId, claimToken) =>
           this.store.completeWebhookTrace(provider, traceId, claimToken),
@@ -328,7 +331,29 @@ class DeviceSyncServiceController {
       hooks: {
         runConnectionMutation: ({ provider }, operation) =>
           this.runProviderConnectionMutation(provider, operation),
-        onConnectionEstablished: async ({ account, connection, provider }) => {
+        onConnectionEstablished: async ({
+          account,
+          connection,
+          now,
+          provider,
+          sourceProviderSlug,
+        }) => {
+          const sourceInstanceKey = provider.provider === "junction" && sourceProviderSlug
+            ? buildJunctionProviderSourceInstanceKey({
+                connectionId: account.id,
+                sourceProviderSlug,
+              })
+            : null;
+          if (sourceInstanceKey && sourceProviderSlug) {
+            this.store.upsertConnectionSource({
+              connectionId: account.id,
+              sourceInstanceKey,
+              sourceProviderSlug,
+              status: "connected",
+              firstSeenAt: now,
+              lastSeenAt: now,
+            });
+          }
           this.enqueueJobs(account, connection.initialJobs ?? []);
           await this.ensureWebhookAdminUpkeepAfterConnectionEstablished(provider);
         },

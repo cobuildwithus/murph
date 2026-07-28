@@ -2,6 +2,10 @@ import {
   createDeviceSyncPublicIngress,
   resolveDeviceSyncWebhookPreflightResponse,
 } from "@murphai/device-syncd/public-ingress";
+import {
+  buildJunctionProviderSourceInstanceKey,
+  type DeviceSyncConnectTarget,
+} from "@murphai/device-syncd/connect-config";
 import { deviceSyncError } from "@murphai/device-syncd/errors";
 import {
   DEVICE_SYNC_HISTORICAL_RESET_REVOKE_FAILED_ERROR_CODE,
@@ -131,25 +135,34 @@ export class HostedDeviceSyncPublicIngressService {
     });
   }
 
-  async prepareConnectionStart(userId: string, provider: string): Promise<void> {
-    if (provider !== "junction") {
+  async prepareConnectionStart(
+    userId: string,
+    target: DeviceSyncConnectTarget,
+  ): Promise<void> {
+    if (target.provider !== "junction" || !target.sourceProviderSlug) {
       return;
     }
 
-    const nonEstablishedConnections = (await this.context.store.listConnectionsForUser(userId))
+    const connections = (await this.context.store.listConnectionsForUser(userId))
       .filter((connection) =>
-        connection.provider === provider
-        && !isEstablishedDeviceSyncConnection(connection)
+        connection.provider === target.provider
+        && connection.status !== "disconnected"
       );
 
-    for (const connection of nonEstablishedConnections) {
-      const disconnected = await disconnectHostedDeviceSyncConnection({
-        connectionId: connection.id,
-        registry: this.registry,
-        store: this.context.store,
+    for (const connection of connections) {
+      const storedAccount = await this.context.store.getStoredConnectionAccountForUser(
         userId,
-      });
-      if (disconnected.warning) {
+        connection.id,
+      );
+      const revokeSourceAccess =
+        this.registry.get(target.provider)?.connectionHandler?.revokeSourceAccess;
+
+      try {
+        if (!storedAccount || !revokeSourceAccess) {
+          throw new TypeError("Junction source cleanup authority is unavailable.");
+        }
+        await revokeSourceAccess(storedAccount, target.sourceProviderSlug);
+      } catch {
         throw deviceSyncError({
           cause: {
             errorObservabilityClass: "provider_cleanup",
@@ -160,6 +173,22 @@ export class HostedDeviceSyncPublicIngressService {
             "Murph could not clear the earlier device connection attempt. Retry before opening another connection link.",
           retryable: true,
           httpStatus: 503,
+        });
+      }
+
+      const sourceInstanceKey = buildJunctionProviderSourceInstanceKey({
+        connectionId: connection.id,
+        sourceProviderSlug: target.sourceProviderSlug,
+      });
+      if (sourceInstanceKey) {
+        const now = new Date().toISOString();
+        await this.context.store.upsertConnectionSource({
+          connectionId: connection.id,
+          sourceInstanceKey,
+          sourceProviderSlug: target.sourceProviderSlug,
+          status: "disconnected",
+          firstSeenAt: now,
+          lastSeenAt: now,
         });
       }
     }

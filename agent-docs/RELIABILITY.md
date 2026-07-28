@@ -54,12 +54,15 @@ Last verified: 2026-07-28
   Webhooks for an active `pending_link` or `link_returned` account release their
   trace claim and return a retryable not-ready response; they do not persist
   dirty state or wake work. Manual reconcile, due scheduling, ordinary queued
-  jobs, and sync-success promotion apply the same phase gate. After the
-  initiating browser explicitly confirms the callback, the existing
-  `source_confirmed` transition admits a provider retry normally. Starting a
-  replacement link first retries provider cleanup through the existing
-  disconnect owner; a cleanup warning blocks new provider state instead of
-  adopting an ambiguous earlier linkage.
+  jobs, and sync-success promotion apply the same account phase gate. After a
+  shared account is `source_confirmed`, a new target source does not move the
+  account back into a pending phase. Its `DeviceConnectionSource` remains
+  `disconnected`, and source-attributed webhooks, dirty-state commit races, and
+  provider pulls fail or exit without admitting target data until callback
+  confirmation connects that source. Established siblings continue normally.
+  Starting or retrying the source first attempts target-only provider cleanup;
+  a cleanup warning blocks the new link instead of adopting an ambiguous
+  linkage or revoking sibling sources.
 - The hosted reply-latency operator alert remains one singleton incident owner.
   Outbound paging requires both an opaque dedicated chat and a valid IANA
   operator timezone, suppresses sends from 11 PM through 7 AM local time, and

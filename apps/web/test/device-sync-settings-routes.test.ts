@@ -1270,7 +1270,14 @@ describe("device sync settings routes", () => {
 
     expect(response.status).toBe(200);
     expect(response.headers.get("set-cookie")).toContain("murph-device-sync-oura=");
-    expect(mocks.prepareConnectionStart).toHaveBeenCalledWith("member_123", "oura");
+    expect(mocks.prepareConnectionStart).toHaveBeenCalledWith(
+      "member_123",
+      expect.objectContaining({
+        connectSourceId: "oura",
+        connectTarget: "oura",
+        provider: "oura",
+      }),
+    );
     expect(mocks.startConnection).toHaveBeenCalledWith(
       "member_123",
       "oura",

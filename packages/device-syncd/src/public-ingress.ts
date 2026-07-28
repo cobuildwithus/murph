@@ -10,6 +10,7 @@ import {
   normalizeConfiguredDeviceSyncJobInput,
 } from "./provider-job-definitions.ts";
 import { resolveDeviceProviderConnectionDescriptor } from "@murphai/importers/device-providers/provider-descriptors";
+import { buildJunctionProviderSourceInstanceKey } from "./config/junction-connect-sources.ts";
 import {
   addMilliseconds,
   generateStateCode,
@@ -73,6 +74,8 @@ const SEEDED_CONNECTION_EXTERNAL_ACCOUNT_ID_STATE_METADATA_KEY =
   "__murphSeededConnectionExternalAccountId";
 const SEEDED_CONNECTION_SETUP_EXPIRES_AT_STATE_METADATA_KEY =
   "__murphSeededConnectionSetupExpiresAt";
+const SEEDED_CONNECTION_CONNECTED_AT_STATE_METADATA_KEY =
+  "__murphSeededConnectionConnectedAt";
 const LEGACY_SEEDED_CONNECTION_UPDATED_AT_STATE_METADATA_KEY =
   "__murphSeededConnectionUpdatedAt";
 const CONNECT_SOURCE_ID_STATE_METADATA_KEY =
@@ -88,9 +91,11 @@ function toIngressWebhook(parsed: {
   jobs: DeviceSyncIngressWebhook["jobs"];
   occurredAt?: string;
   resourceCategory?: string | null;
+  sourceProviderSlug?: string | null;
   dataSourceProviderSlug?: string | null;
 }): DeviceSyncIngressWebhook {
   const resourceCategory = normalizeString(parsed.resourceCategory);
+  const sourceProviderSlug = normalizeString(parsed.sourceProviderSlug);
   const dataSourceProviderSlug = normalizeString(parsed.dataSourceProviderSlug);
 
   return {
@@ -99,6 +104,7 @@ function toIngressWebhook(parsed: {
     jobs: [...parsed.jobs],
     ...(parsed.occurredAt ? { occurredAt: parsed.occurredAt } : {}),
     ...(resourceCategory ? { resourceCategory } : {}),
+    ...(sourceProviderSlug ? { sourceProviderSlug } : {}),
     ...(dataSourceProviderSlug ? { dataSourceProviderSlug } : {}),
   };
 }
@@ -313,6 +319,7 @@ function buildProviderConnectionStateMetadata(
   delete providerMetadata[SEEDED_CONNECTION_ACCOUNT_ID_STATE_METADATA_KEY];
   delete providerMetadata[SEEDED_CONNECTION_EXTERNAL_ACCOUNT_ID_STATE_METADATA_KEY];
   delete providerMetadata[SEEDED_CONNECTION_SETUP_EXPIRES_AT_STATE_METADATA_KEY];
+  delete providerMetadata[SEEDED_CONNECTION_CONNECTED_AT_STATE_METADATA_KEY];
   delete providerMetadata[LEGACY_SEEDED_CONNECTION_UPDATED_AT_STATE_METADATA_KEY];
   delete providerMetadata[CONNECT_SOURCE_ID_STATE_METADATA_KEY];
   delete providerMetadata[CONNECT_TARGET_STATE_METADATA_KEY];
@@ -327,6 +334,7 @@ function sanitizeConnectionStateMetadata(
   delete metadata[SEEDED_CONNECTION_ACCOUNT_ID_STATE_METADATA_KEY];
   delete metadata[SEEDED_CONNECTION_EXTERNAL_ACCOUNT_ID_STATE_METADATA_KEY];
   delete metadata[SEEDED_CONNECTION_SETUP_EXPIRES_AT_STATE_METADATA_KEY];
+  delete metadata[SEEDED_CONNECTION_CONNECTED_AT_STATE_METADATA_KEY];
   delete metadata[LEGACY_SEEDED_CONNECTION_UPDATED_AT_STATE_METADATA_KEY];
   delete metadata[CONNECT_SOURCE_ID_STATE_METADATA_KEY];
   delete metadata[CONNECT_TARGET_STATE_METADATA_KEY];
@@ -378,6 +386,13 @@ function readSeededConnectionSetupExpiresAt(
   return typeof value === "string" ? normalizeString(value) ?? null : null;
 }
 
+function readSeededConnectionConnectedAt(
+  metadata: Record<string, unknown> | undefined,
+): string | null {
+  const value = metadata?.[SEEDED_CONNECTION_CONNECTED_AT_STATE_METADATA_KEY];
+  return typeof value === "string" ? normalizeString(value) ?? null : null;
+}
+
 function readConnectSourceId(
   metadata: Record<string, unknown> | undefined,
 ): string | null {
@@ -404,6 +419,7 @@ function setSeededConnectionStateMetadata(
   return {
     ...metadata,
     [SEEDED_CONNECTION_ACCOUNT_ID_STATE_METADATA_KEY]: account.id,
+    [SEEDED_CONNECTION_CONNECTED_AT_STATE_METADATA_KEY]: account.connectedAt,
     ...(setupExpiresAt
       ? { [SEEDED_CONNECTION_SETUP_EXPIRES_AT_STATE_METADATA_KEY]: setupExpiresAt }
       : {}),
@@ -575,7 +591,9 @@ export class DeviceSyncPublicIngress {
       sourceProviderSlug: input.sourceProviderSlug ?? null,
     });
 
+    const sourceProviderSlug = normalizeString(input.sourceProviderSlug);
     let seededAccount: PublicDeviceSyncAccount | null = null;
+    let reusedEstablishedJunctionAccount = false;
     if (started.connectionSeed) {
       validateProviderConnectionCredential(provider, started.connectionSeed.credential);
       seededAccount = await this.store.upsertConnection({
@@ -589,9 +607,31 @@ export class DeviceSyncPublicIngress {
         scopes: started.connectionSeed.scopes ?? started.scopes ?? descriptor.defaultScopes,
         credential: started.connectionSeed.credential,
         metadata: started.connectionSeed.metadata ?? {},
+        reuseEstablishedConnection:
+          provider.provider === "junction" && sourceProviderSlug !== null,
         connectedAt: now,
         nextReconcileAt: started.connectionSeed.nextReconcileAt ?? null,
       });
+      reusedEstablishedJunctionAccount =
+        provider.provider === "junction"
+        && sourceProviderSlug !== null
+        && isEstablishedDeviceSyncConnection(seededAccount);
+      const sourceInstanceKey = provider.provider === "junction" && sourceProviderSlug
+        ? buildJunctionProviderSourceInstanceKey({
+            connectionId: seededAccount.id,
+            sourceProviderSlug,
+          })
+        : null;
+      if (sourceInstanceKey && sourceProviderSlug) {
+        await this.store.upsertConnectionSource({
+          connectionId: seededAccount.id,
+          sourceInstanceKey,
+          sourceProviderSlug,
+          status: "disconnected",
+          firstSeenAt: now,
+          lastSeenAt: now,
+        });
+      }
     }
 
     let stateMetadata = buildConnectionStateMetadata({
@@ -615,7 +655,7 @@ export class DeviceSyncPublicIngress {
         metadata: stateMetadata,
       });
     } catch (error) {
-      if (seededAccount) {
+      if (seededAccount && !reusedEstablishedJunctionAccount) {
         await this.markSeededConnectionSetupFailed(
           provider,
           seededAccount.id,
@@ -991,7 +1031,9 @@ export class DeviceSyncPublicIngress {
     const seededAccountId = readSeededConnectionAccountId(stateRecord.metadata);
     let seededExternalAccountId = readSeededConnectionExternalAccountId(stateRecord.metadata);
     const seededSetupExpiresAt = readSeededConnectionSetupExpiresAt(stateRecord.metadata);
-    const seededConnectedAt = seededAccountId ? stateRecord.createdAt : null;
+    const seededConnectedAt = seededAccountId
+      ? readSeededConnectionConnectedAt(stateRecord.metadata) ?? stateRecord.createdAt
+      : null;
     const connectSourceId = readConnectSourceId(stateRecord.metadata);
     const connectTarget = readConnectTarget(stateRecord.metadata);
     const sourceProviderSlug = readSourceProviderSlug(stateRecord.metadata);
@@ -1004,6 +1046,7 @@ export class DeviceSyncPublicIngress {
     let connection: ProviderConnectionResult | null = null;
     let account: PublicDeviceSyncAccount | null = null;
     let connectionPersisted = false;
+    let reusedEstablishedJunctionAccount = false;
 
     let seededAccount = seededAccountId ? await this.store.getConnectionById(seededAccountId) : null;
 
@@ -1056,6 +1099,11 @@ export class DeviceSyncPublicIngress {
     }
 
     seededExternalAccountId = seededAccount?.externalAccountId ?? seededExternalAccountId ?? null;
+    reusedEstablishedJunctionAccount =
+      provider.provider === "junction"
+      && sourceProviderSlug !== null
+      && seededAccount !== null
+      && isEstablishedDeviceSyncConnection(seededAccount);
 
     if (seededExternalAccountId) {
       seededAccount ??= await this.store.getConnectionByExternalAccount(
@@ -1100,6 +1148,7 @@ export class DeviceSyncPublicIngress {
         state,
         stateMetadata: buildProviderConnectionStateMetadata(stateRecord.metadata ?? {}),
         seededExternalAccountId,
+        sourceProviderSlug,
         query: callbackQuery,
         now,
         grantedScopes,
@@ -1146,6 +1195,7 @@ export class DeviceSyncPublicIngress {
             : [...descriptor.defaultScopes],
         credential: resolveAndValidateProviderConnectionCredential(provider, connection),
         metadata: connection.metadata ?? {},
+        reuseEstablishedConnection: reusedEstablishedJunctionAccount,
         existingAccountGuard: seededAccountId
           ? {
               expectedAccountId: seededAccountId,
@@ -1171,6 +1221,23 @@ export class DeviceSyncPublicIngress {
         now,
       } satisfies DeviceSyncPublicIngressConnectionEstablishedInput);
 
+      const linkedSourceInstanceKey = provider.provider === "junction" && sourceProviderSlug
+        ? buildJunctionProviderSourceInstanceKey({
+            connectionId: account.id,
+            sourceProviderSlug,
+          })
+        : null;
+      if (linkedSourceInstanceKey && sourceProviderSlug) {
+        await this.store.upsertConnectionSource({
+          connectionId: account.id,
+          sourceInstanceKey: linkedSourceInstanceKey,
+          sourceProviderSlug,
+          status: "connected",
+          firstSeenAt: now,
+          lastSeenAt: now,
+        });
+      }
+
       return {
         account,
         returnTo,
@@ -1179,7 +1246,12 @@ export class DeviceSyncPublicIngress {
         ...(sourceProviderSlug ? { sourceProviderSlug } : {}),
       };
     } catch (error) {
-      if (connection) {
+      if (reusedEstablishedJunctionAccount) {
+        // Never apply account-wide cleanup to a source-scoped Link attempt.
+        // The established hook owns target admission with its durable wake:
+        // before that commit the seeded row stays disconnected; afterward the
+        // connected source and its work are already durable.
+      } else if (connection) {
         try {
           if (connectionPersisted && account) {
             await this.cleanupPersistedOAuthConnection(provider, account, connection, now, error);
@@ -1263,6 +1335,30 @@ export class DeviceSyncPublicIngress {
     });
 
     const account = await this.store.getConnectionByExternalAccount(provider.provider, parsed.externalAccountId);
+    const webhookSourceProviderSlug = normalizeString(webhook.sourceProviderSlug);
+
+    if (
+      account
+      && account.status === "active"
+      && !isDeviceSyncConnectionSetupPending(account)
+      && webhookSourceProviderSlug
+    ) {
+      const matchingSources = await this.store.listConnectionSources({
+        connectionId: account.id,
+        sourceProviderSlug: webhookSourceProviderSlug,
+      });
+      if (
+        matchingSources.length > 0
+        && !matchingSources.some((source) => source.status === "connected")
+      ) {
+        throw deviceSyncError({
+          code: "WEBHOOK_SOURCE_NOT_READY",
+          message: "Device source setup must finish before its webhook can be accepted.",
+          retryable: true,
+          httpStatus: 503,
+        });
+      }
+    }
 
     if (
       account

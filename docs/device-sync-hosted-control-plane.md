@@ -219,13 +219,16 @@ These are internet-facing and provider-facing only. `:provider` is resolved thro
 
 These are the only browser-facing wearable connection start and completion routes. The settings start route resolves direct provider manifests and the connect-target catalog assembled by `@murphai/device-syncd/config`, so `/connect` can expose direct WHOOP/Oura/Strava targets plus Junction-backed Garmin/Fitbit-style sources when those providers are configured. The first-party `/device/connect/:claim` route is the hosted assistant confirmation path: GET renders login/confirmation state without mutating provider OAuth state, and POST starts provider OAuth only for the authenticated member that owns the claim. Every hosted browser start compares the resolved callback base with the authenticated request hostname before creating shared ingress; `DEVICE_SYNC_PUBLIC_BASE_URL` may change the path, but a split hostname is an operator error because both callback credentials are host-only. Provider callback GET renders the real `HostedDeviceSyncCallbackConfirmation` component and performs no exchange. Its form POST is same-origin, rechecks the proof and active session, passes the member as `expectedOwnerId`, and redirects only after shared ingress verifies the OAuth-state owner.
 
-Junction accounts created for Link start remain `pending_link` and inert. They
-cannot admit webhook dirty work, runtime wakes, scheduled or manual jobs,
-provider execution, import, or setup promotion. Callback confirmation is the
-only path to `source_confirmed`. A new Junction Link start first retries cleanup
-of all prior non-established Junction connections through the existing
-disconnect/revoke owner and returns a retryable error rather than issuing a new
-link when provider cleanup remains ambiguous.
+Junction accounts created for their first Link start remain `pending_link` and
+inert. They cannot admit webhook dirty work, runtime wakes, scheduled or manual
+jobs, provider execution, import, or setup promotion. Callback confirmation is
+the only path to `source_confirmed`. Adding or retrying another Junction-backed
+source on an established shared account preserves the account phase and sibling
+sources. The target `DeviceConnectionSource` remains `disconnected`; target
+webhooks and provider pulls stay inert until callback confirmation connects it.
+The start path retries provider cleanup for that target source only and returns
+a retryable error rather than issuing a new link when cleanup is ambiguous.
+Whole-account revoke remains the explicit connection-wide disconnect path.
 
 ### Hosted settings-authenticated routes
 

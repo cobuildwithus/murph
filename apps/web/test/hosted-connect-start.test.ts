@@ -103,7 +103,7 @@ describe("startHostedDeviceSyncConnection", () => {
       callbackProofCookie: expect.stringContaining("murph-device-sync-oura="),
     });
 
-    expect(mocks.prepareConnectionStart).toHaveBeenCalledWith("member_a", "oura");
+    expect(mocks.prepareConnectionStart).toHaveBeenCalledWith("member_a", OURA_TARGET);
     expect(mocks.startConnection).toHaveBeenCalledWith(
       "member_a",
       "oura",

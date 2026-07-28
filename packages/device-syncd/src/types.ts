@@ -372,6 +372,14 @@ export interface DeviceSyncPublicIngressStore {
     provider: string,
     externalAccountId: string,
   ): PublicDeviceSyncAccount | null | Promise<PublicDeviceSyncAccount | null>;
+  upsertConnectionSource(
+    input: UpsertDeviceConnectionSourceInput,
+  ): Pick<PublicDeviceConnectionSource, "connectionId" | "sourceProviderSlug" | "status">
+    | Promise<Pick<PublicDeviceConnectionSource, "connectionId" | "sourceProviderSlug" | "status">>;
+  listConnectionSources(
+    input: ListDeviceConnectionSourcesInput,
+  ): Array<Pick<PublicDeviceConnectionSource, "connectionId" | "sourceProviderSlug" | "status">>
+    | Promise<Array<Pick<PublicDeviceConnectionSource, "connectionId" | "sourceProviderSlug" | "status">>>;
   getConnectionOwnerId?(accountId: string): string | null | Promise<string | null>;
   claimWebhookTrace(input: ClaimDeviceSyncWebhookTraceInput): DeviceSyncWebhookTraceClaimResult | Promise<DeviceSyncWebhookTraceClaimResult>;
   completeWebhookTrace(provider: string, traceId: string, claimToken: string): boolean | Promise<boolean>;
@@ -427,6 +435,7 @@ export interface ProviderCompleteConnectionContext {
   state: string;
   stateMetadata?: Record<string, unknown>;
   seededExternalAccountId?: string | null;
+  sourceProviderSlug?: string | null;
   query: URLSearchParams;
   now: string;
   grantedScopes: string[];
@@ -460,6 +469,8 @@ export interface ProviderWebhookResult {
   occurredAt?: string;
   // Keep top-level parser data narrow; provider-owned jobs may carry sanitized payload hints.
   resourceCategory?: string | null;
+  /** Source this provider event is attributable to, including lifecycle events. */
+  sourceProviderSlug?: string | null;
   /**
    * The connected source whose data this payload carried, when the provider can
    * name it. Ingress uses it to record per-source data arrival, which is the
@@ -491,6 +502,8 @@ export interface DeviceSyncIngressWebhook {
   occurredAt?: string;
   // Accepted and unknown ingress hooks receive stripped summary plus provider-owned job hints.
   resourceCategory?: string | null;
+  /** See `ProviderWebhookResult.sourceProviderSlug`. */
+  sourceProviderSlug?: string | null;
   /** See `ProviderWebhookResult.dataSourceProviderSlug`. */
   dataSourceProviderSlug?: string | null;
 }
@@ -742,6 +755,7 @@ export interface DeviceConnectionHandler {
   completeConnection(input: ProviderCompleteConnectionContext): Promise<ProviderConnectionResult>;
   refreshTokens?(account: DeviceSyncAccount, options?: { signal?: AbortSignal | null }): Promise<ProviderAuthTokens>;
   revokeAccess?(account: DeviceSyncAccount): Promise<void>;
+  revokeSourceAccess?(account: DeviceSyncAccount, sourceProviderSlug: string): Promise<void>;
 }
 
 export interface DeviceSdkSignInToken {

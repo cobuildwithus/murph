@@ -15,6 +15,8 @@ const CLINICAL_RECORDS_CALLBACK_PATH = "/records";
 const CLINICAL_RECORDS_CALLBACK_QUERY_KEY = "clinicalRecords";
 const CLINICAL_RECORDS_CONNECT_PATH = "/records/connect";
 const CLINICAL_RECORDS_CONNECT_FRAGMENT_KEY = "clinicalRecordsIntent";
+const DEVICE_SYNC_CALLBACK_PATH_PATTERN =
+  /^\/api\/device-sync\/(?:connect|oauth)\/[^/]+\/callback\/?$/u;
 const URL_PARSE_BASE = "https://murph.invalid";
 
 export type VercelSpeedInsightsBeforeSendEvent = {
@@ -66,7 +68,11 @@ export function shouldSuppressVercelTelemetryForPathname(
   pathname: string | null | undefined,
 ): boolean {
   return pathname === MURPH_SAFE_PATHNAME
-    || pathname?.startsWith(`${MURPH_SAFE_PATHNAME}/`) === true;
+    || pathname?.startsWith(`${MURPH_SAFE_PATHNAME}/`) === true
+    || (
+      typeof pathname === "string"
+      && DEVICE_SYNC_CALLBACK_PATH_PATTERN.test(pathname)
+    );
 }
 
 export function shouldSuppressVercelTelemetryUrl(value: string): boolean {

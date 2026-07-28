@@ -207,6 +207,39 @@ test("VercelTelemetry drops Murph Safe events before either vendor sends", () =>
   );
 });
 
+test("VercelTelemetry suppresses device callback pages and their full URLs", () => {
+  for (const pathname of [
+    "/api/device-sync/connect/oura/callback",
+    "/api/device-sync/oauth/junction/callback",
+  ]) {
+    mocks.pathname = pathname;
+    mocks.analyticsProps.length = 0;
+    mocks.speedInsightsProps.length = 0;
+
+    renderToStaticMarkup(createElement(VercelTelemetry));
+
+    assert.equal(mocks.analyticsProps.length, 0);
+    assert.equal(mocks.speedInsightsProps.length, 0);
+  }
+
+  mocks.pathname = "/";
+  renderToStaticMarkup(createElement(VercelTelemetry));
+
+  const analyticsProps = mocks.analyticsProps[0];
+  const speedInsightsProps = mocks.speedInsightsProps[0];
+  if (!analyticsProps || !speedInsightsProps) {
+    assert.fail("Vercel telemetry components did not receive beforeSend props.");
+  }
+
+  for (const url of [
+    "https://join.example.test/api/device-sync/connect/oura/callback?code=provider-code&state=oauth-state",
+    "/api/device-sync/oauth/junction/callback?murph_state=oauth-state&code=provider-code",
+  ]) {
+    assert.equal(analyticsProps.beforeSend({ type: "pageview", url }), null);
+    assert.equal(speedInsightsProps.beforeSend({ type: "vital", url }), null);
+  }
+});
+
 test("redactPrivateAnalyticsUrl leaves unrelated routes unchanged", () => {
   mocks.pathname = "/";
   assert.equal(shouldSuppressVercelTelemetryForPathname("/searching"), false);

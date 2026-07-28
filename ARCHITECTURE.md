@@ -1004,14 +1004,18 @@ they do not claim to derive an unset Web-owned callback base. The `__Host-`
 app-session and callback-proof cookies remain host-only; do not add a Domain
 cookie or cross-host handoff.
 
-Junction's existing setup phase is the data-admission boundary. An active
-`pending_link` or `link_returned` account cannot accept webhook side effects,
+Junction's existing setup phase is the account data-admission boundary. A new
+account in `pending_link` or `link_returned` cannot accept webhook side effects,
 persist dirty work, wake or schedule the runtime, execute queued provider jobs,
-or promote itself through sync success. A replacement Link start first uses
-the existing disconnect/revoke owner to clear every non-established Junction
-attempt; ambiguous provider cleanup blocks the new link and remains retryable.
-Only callback confirmation establishes `source_confirmed`. Local and tunneled
-`device-syncd` callbacks remain explicit and unchanged.
+or promote itself through sync success. After an account reaches
+`source_confirmed`, adding or retrying another Junction-backed source preserves
+that account and its established siblings. The target `DeviceConnectionSource`
+stays `disconnected` and its webhook and pull work remain inert until callback
+confirmation marks that source connected. Retry cleanup deregisters only the
+target source; whole-account revoke remains the explicit connection-wide
+disconnect path. Ambiguous target cleanup blocks the new link and remains
+retryable. Local and tunneled `device-syncd` callbacks remain explicit and
+unchanged.
 
 The companion Privy bearer rule above is the default, with one authenticated
 extension bridge: `POST /api/device-sync/companion/imessage-mini-app/enrollment`

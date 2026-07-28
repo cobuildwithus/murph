@@ -52,7 +52,7 @@ export async function startHostedDeviceSyncConnection(input: {
     target: input.target,
   });
   const publicIngress = createHostedDeviceSyncPublicIngressService(input.request);
-  await publicIngress.prepareConnectionStart(auth.member.id, input.target.provider);
+  await publicIngress.prepareConnectionStart(auth.member.id, input.target);
   const started = await publicIngress.startConnection(
     auth.member.id,
     input.target.provider,

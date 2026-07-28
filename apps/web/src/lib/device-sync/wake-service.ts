@@ -570,6 +570,7 @@ export async function handleHostedDeviceSyncWebhookAccepted(input: {
     occurredAt: input.webhook.occurredAt ?? input.now,
     provider: input.account.provider,
     resourceCategory,
+    sourceProviderSlug: input.webhook.sourceProviderSlug ?? null,
     store: input.store,
     claimToken: input.claimToken,
     traceId,
@@ -1017,6 +1018,7 @@ async function persistHostedDeviceSyncWebhookAccepted(input: {
   occurredAt: string;
   provider: string;
   resourceCategory?: string | null;
+  sourceProviderSlug?: string | null;
   store: PrismaDeviceSyncControlPlaneStore;
   claimToken: string;
   traceId: string | null;
@@ -1033,13 +1035,38 @@ async function persistHostedDeviceSyncWebhookAccepted(input: {
         !current
         || current.provider !== input.provider
         || current.status !== "active"
-        || isDeviceSyncConnectionSetupPending(current)
         || current.connectedAt !== input.expectedConnectedAt
       ) {
         await completeHostedWebhookTraceTx(input, tx);
         return {
           wakeMailboxItemId: null,
         };
+      }
+      if (isDeviceSyncConnectionSetupPending(current)) {
+        throw deviceSyncError({
+          code: "WEBHOOK_ACCOUNT_NOT_READY",
+          message: "Device sync setup changed before webhook work could be committed.",
+          retryable: true,
+          httpStatus: 503,
+        });
+      }
+      const sourceProviderSlug = normalizeNullableString(input.sourceProviderSlug);
+      if (sourceProviderSlug) {
+        const matchingSources = await input.store.listConnectionSources({
+          connectionId: input.connectionId,
+          sourceProviderSlug,
+        }, tx);
+        if (
+          matchingSources.length > 0
+          && !matchingSources.some((source) => source.status === "connected")
+        ) {
+          throw deviceSyncError({
+            code: "WEBHOOK_SOURCE_NOT_READY",
+            message: "Device source setup changed before webhook work could be committed.",
+            retryable: true,
+            httpStatus: 503,
+          });
+        }
       }
 
       // Level webhooks may be coalesced only after committed dirty state exists.

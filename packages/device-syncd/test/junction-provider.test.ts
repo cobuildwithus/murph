@@ -5178,6 +5178,45 @@ test("Junction provider revokes remote provider slugs unless Junction already re
   ]);
 });
 
+test("Junction provider cleanup deregisters only the requested source", async () => {
+  const requests: Array<{ method: string; url: string }> = [];
+  const provider = createJunctionProvider(async (input, init) => {
+    const request = {
+      method: String(init?.method ?? "GET"),
+      url: readUrl(input),
+    };
+    requests.push(request);
+    if (request.url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        data: [
+          { slug: "garmin", status: "connected" },
+          { slug: "fitbit", status: "connected" },
+        ],
+      });
+    }
+    if (request.method === "DELETE") {
+      return createJsonResponse({ success: true });
+    }
+    throw new Error(`Unexpected request: ${request.method} ${request.url}`);
+  });
+  const revokeSourceAccess = requireValue(
+    provider.connectionHandler?.revokeSourceAccess,
+  );
+
+  await revokeSourceAccess(createAccount(), "fitbit");
+
+  assert.deepEqual(requests, [
+    {
+      method: "GET",
+      url: "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1",
+    },
+    {
+      method: "DELETE",
+      url: "https://api.sandbox.us.junction.com/v2/user/junction-user-1/fitbit",
+    },
+  ]);
+});
+
 test("Junction provider rejects non-Link routes from hosted web Link", () => {
   assert.deepEqual(normalizeJunctionProviderFilter(["oura", "withings"]), ["oura", "withings"]);
 
@@ -6436,6 +6475,28 @@ test("Junction completeConnection treats Link callback as weak and enqueues scal
   });
   const payload = connection.initialJobs?.[0]?.payload as Record<string, unknown> | undefined;
   assert.equal(Array.isArray(payload?.resources), false);
+
+  const sourceConnection = await requireJunctionConnectionHandler(provider).completeConnection({
+    callbackUrl: "https://sync.example.test/device-sync/connect/junction/callback",
+    state: "state-2",
+    seededExternalAccountId: "junction-user-1",
+    sourceProviderSlug: "fitbit",
+    query: new URLSearchParams({
+      murph_state: "state-2",
+      state: "success",
+    }),
+    now: "2026-04-03T00:00:00.000Z",
+    grantedScopes: [],
+  });
+  assert.deepEqual(sourceConnection.initialJobs?.[0]?.payload, {
+    sourceProviderSlug: "fitbit",
+    windowStart: "2026-04-01T00:00:00.000Z",
+    windowEnd: "2026-04-03T00:00:00.000Z",
+  });
+  assert.notEqual(
+    sourceConnection.initialJobs?.[0]?.dedupeKey,
+    connection.initialJobs?.[0]?.dedupeKey,
+  );
 });
 
 test("Junction scheduled polling uses stable closed-day windows", () => {
@@ -8269,6 +8330,18 @@ test("Junction polling updates source projection and imports bounded summary/tim
               activity: true,
             },
           },
+          {
+            id: "provider-connection-fitbit-1",
+            slug: "fitbit",
+            name: "Fitbit",
+            status: "connected",
+            source: {
+              provider: "fitbit",
+            },
+            resource_availability: {
+              activity: true,
+            },
+          },
         ],
       });
     }
@@ -8315,7 +8388,19 @@ test("Junction polling updates source projection and imports bounded summary/tim
   const sources: DeviceConnectionSourceRecord[] = [];
   const importedSnapshots: unknown[] = [];
   const context: ProviderJobContext = {
-    account: createAccount(),
+    account: createAccount({
+      sources: [{
+        displayName: "Fitbit",
+        firstSeenAt: "2026-04-02T00:00:00.000Z",
+        lastDataAt: null,
+        lastErrorCode: null,
+        lastErrorMessage: null,
+        lastSeenAt: "2026-04-02T00:00:00.000Z",
+        resourceCount: 0,
+        sourceProviderSlug: "fitbit",
+        status: "disconnected",
+      }],
+    }),
     now: "2026-04-03T00:00:00.000Z",
     importSnapshot: async (snapshot) => {
       importedSnapshots.push(snapshot);
@@ -8414,6 +8499,7 @@ test("Junction polling updates source projection and imports bounded summary/tim
     "sourceProviderSlug",
   ]);
   assert.equal(importedConnection?.sourceProviderSlug, "oura");
+  assert.doesNotMatch(JSON.stringify(importedSnapshots), /fitbit/u);
   assert.equal((importedConnection as { source?: unknown } | undefined)?.source, undefined);
   assert.equal((importedConnection as { provider?: unknown } | undefined)?.provider, undefined);
   assert.equal(summarySnapshot.summaries?.activity?.[0]?.account_id, undefined);

@@ -5,6 +5,7 @@ import type {
   ConsumeOAuthStateResult,
   DeviceSyncPublicIngressStore,
   DeviceSyncWebhookTraceClaimResult,
+  ListDeviceConnectionSourcesInput,
   MarkPublicDeviceSyncConnectionSetupFailedInput,
   MarkPublicDeviceSyncConnectionSetupFailedResult,
   OAuthStateRecord,
@@ -380,10 +381,26 @@ export class PrismaDeviceSyncControlPlaneStore
   }
 
   async listConnectionSources(
-    connectionId: string,
+    input: ListDeviceConnectionSourcesInput,
+    tx?: HostedPrismaTransactionClient,
+  ): Promise<HostedDeviceConnectionSource[]>;
+  async listConnectionSources(
+    input: string,
+    tx?: HostedPrismaTransactionClient,
+  ): Promise<HostedDeviceConnectionSource[]>;
+  async listConnectionSources(
+    input: string | ListDeviceConnectionSourcesInput,
     tx?: HostedPrismaTransactionClient,
   ): Promise<HostedDeviceConnectionSource[]> {
-    return this.sources.listConnectionSources(connectionId, tx);
+    const connectionId = typeof input === "string" ? input : input.connectionId;
+    const sources = await this.sources.listConnectionSources(connectionId, tx);
+    if (typeof input === "string") {
+      return sources;
+    }
+    return sources.filter((source) =>
+      (!input.sourceProviderSlug || source.sourceProviderSlug === input.sourceProviderSlug)
+      && (!input.status || source.status === input.status)
+    );
   }
 
   async listRuntimeSnapshotConnectionSources(
