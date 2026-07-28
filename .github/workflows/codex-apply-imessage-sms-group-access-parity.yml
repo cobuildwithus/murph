@@ -6,19 +6,22 @@ on:
       - codex/imessage-sms-group-access-parity
     paths:
       - .github/workflows/codex-apply-imessage-sms-group-access-parity.yml
+  pull_request:
+    types: [opened, reopened, synchronize]
 
 permissions:
   contents: write
 
 jobs:
   apply-patch:
-    if: github.actor != 'github-actions[bot]'
+    if: github.actor != 'github-actions[bot]' && (github.event_name == 'push' || github.head_ref == 'codex/imessage-sms-group-access-parity')
     runs-on: ubuntu-latest
     steps:
       - name: Check out bootstrap branch
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          ref: codex/imessage-sms-group-access-parity
 
       - name: Reconstruct and verify patch
         shell: bash
