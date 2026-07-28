@@ -1,0 +1,101 @@
+            printf -- '- Smoke user id: `%s`\\n' "${DEPLOY_SUMMARY_SMOKE_USER_ID}"
+''',
+)
+
+replace_once(
+    "apps/cloudflare/test/deploy-automation.test.ts",
+    '''      "skip_predeploy_e2e:",
+      "description: Skip predeploy hosted-local E2E gates",
+''',
+    '''      "skip_predeploy_e2e:",
+      "description: Skip predeploy hosted-local E2E gates",
+      "rearm_inbound_message_content_retention:",
+      "description: After a successful immediate production smoke, re-arm persisted snapshots for phase-one message-content retention",
+      "inbound_message_content_retention_max_snapshots:",
+      "name: Validate inbound-message content-retention rearm",
+      "name: Rearm inbound-message content retention snapshots",
+      "DIRECT_DATABASE_URL: ${{ secrets.HOSTED_WEB_DIRECT_DATABASE_URL }}",
+      'MURPH_RUN_INBOUND_MESSAGE_CONTENT_RETENTION_REARM: "1"',
+      "scripts/rearm-inbound-message-content-retention.ts",
+''',
+)
+replace_once(
+    "apps/cloudflare/test/deploy-automation.test.ts",
+    '''    expect(smokeMaxWaitMs).toBeLessThan(deployTimeoutMinutes * 60 * 1000);
+
+    expect(readWorkflowJobBlock(workflow, "codex-cache-prefix-gate")).toContain(
+''',
+    '''    expect(smokeMaxWaitMs).toBeLessThan(deployTimeoutMinutes * 60 * 1000);
+    expect(workflow.indexOf("name: Smoke test deployed endpoints")).toBeLessThan(
+      workflow.indexOf("name: Rearm inbound-message content retention snapshots"),
+    );
+
+    expect(readWorkflowJobBlock(workflow, "codex-cache-prefix-gate")).toContain(
+''',
+)
+
+replace_once(
+    "apps/cloudflare/DEPLOY.md",
+    '''1. Deploy the Cloudflare Worker and stamping-capable runner bundle with
+   `container_rollout=immediate`. Drain old warm bundles, prove the deployed
+   fingerprint, and verify that newly written user transcript entries carry
+   `contentReceivedAt`. This Worker/runner version is also the rollout floor:
+   its ambiguous-completion recovery requires both a workspace-version advance
+   and a changed checkpoint timestamp before it releases a runtime fence.
+2. Before the Web migration, count persisted workspace snapshots and compare
+   the aggregate with the existing retention-cron capacity of five snapshots
+   per successful hourly run plus an explicit full-run signal-failure
+   allowance. Stop if that queue cannot drain safely in the rollout window; do
+   not add a second dispatcher as part of this release.
+3. Record the verified runner-convergence instant, then deploy Web with the
+   additive mailbox retention columns. The phase-one migration re-arms every
+   persisted workspace snapshot once, advances the workspace CAS version, and
+   leaves checkpoint time unchanged. A runtime that read the pre-rearm version
+   must conflict and retry instead of clearing the wake; the Worker must not
+   treat that migration-only version advance as runtime progress. Monitor the
+   existing cron until no due snapshot remains; each restored runtime scrubs
+   receipt-backed captures, parser output, projections, inputs, and stamped
+   transcripts while preserving every unstamped legacy transcript entry.
+   Phase one is incomplete until the queue reaches zero.
+4. Keep legacy unstamped transcript entries intact for 14 complete days after
+''',
+    '''1. Merge and allow the normal Vercel production predeploy to add the two
+   nullable mailbox-retirement columns. That migration is expand-only and must
+   not wake or version any workspace, so it is safe while the prior runner is
+   still draining.
+2. Count persisted workspace snapshots and compare the aggregate with the
+   existing retention-cron capacity of five snapshots per successful hourly
+   run plus an explicit full-run signal-failure allowance. Choose a hard
+   capacity ceiling at or above the observed count and below the proven drain
+   budget. Stop if the queue cannot drain safely; do not add a second dispatcher
+   as part of this release.
+3. From the exact protected `main` commit, dispatch the Cloudflare production
+   workflow with `deploy_worker=true`, `container_rollout=immediate`,
+   `skip_predeploy_e2e=false`,
+   `rearm_inbound_message_content_retention=true`, and the confirmed capacity
+   ceiling. The workflow first deploys and smokes the stamping-capable runner;
+   only after that smoke succeeds does the same production job take the direct
+   database lock and re-arm persisted snapshots. A failed deploy, failed smoke,
+   missing direct database secret, or exceeded capacity leaves every workspace
+   untouched.
+4. Record the successful post-smoke rearm instant as runner convergence. The
+   rearm advances the existing workspace CAS version, clears the prior signal
+   attempt, and leaves checkpoint time unchanged. A runtime that read the
+   pre-rearm version must conflict and retry instead of clearing the wake; the
+   Worker must not treat that version-only advance as runtime progress. Monitor
+   the existing cron until no due snapshot remains; each restored runtime
+   scrubs receipt-backed captures, parser output, projections, inputs, and
+   stamped transcripts while preserving every unstamped legacy transcript
+   entry. Phase one is incomplete until the queue reaches zero.
+5. Keep legacy unstamped transcript entries intact for 14 complete days after
+''',
+)
+replace_once(
+    "apps/cloudflare/DEPLOY.md",
+    '''5. Only after both gates, ship a separate phase-two migration that
+''',
+    '''6. Only after both gates, ship a separate phase-two migration that
+''',
+)
+
+print("Applied PR #936 retention rollout safety fix.")
