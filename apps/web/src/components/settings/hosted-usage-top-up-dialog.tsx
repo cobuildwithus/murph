@@ -384,7 +384,7 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
           </div>
         ) : selection ? (
           <div className="flex flex-col gap-5">
-            <FieldSet disabled={hasAttempt}>
+            <FieldSet disabled={hasAttempt || !controller.requestIdentityReady}>
               <FieldLegend className="sr-only">Usage credit amount</FieldLegend>
               <FieldDescription className="sr-only">
                 Choose one usage credit amount.
@@ -419,6 +419,7 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
                 ))}
               </RadioGroup>
             </FieldSet>
+            <FieldError>{controller.requestIdentityError}</FieldError>
             {selectionNeedsRecovery ? (
               <div
                 className="flex gap-3 rounded-2xl border border-destructive/20 bg-destructive/5 p-4"
@@ -454,7 +455,11 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
                     type="button"
                     size="xl"
                     className="w-full"
-                    disabled={!controller.selectedOffer || controller.checkoutInFlight}
+                    disabled={
+                      !controller.requestIdentityReady ||
+                      !controller.selectedOffer ||
+                      controller.checkoutInFlight
+                    }
                     aria-busy={controller.checkoutInFlight}
                     onClick={() => void controller.startCheckout()}
                   >
@@ -504,7 +509,11 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
                 <Button
                   type="button"
                   className="w-full"
-                  disabled={!controller.selectedOffer || controller.checkoutInFlight}
+                  disabled={
+                    !controller.requestIdentityReady ||
+                    !controller.selectedOffer ||
+                    controller.checkoutInFlight
+                  }
                   size="xl"
                   aria-busy={controller.checkoutInFlight}
                   onClick={() => void controller.startCheckout()}

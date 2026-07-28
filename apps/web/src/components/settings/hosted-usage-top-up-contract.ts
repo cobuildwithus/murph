@@ -56,6 +56,7 @@ interface HostedUsageTopUpPurchaseResponse {
   offerConflict: boolean;
   purchaseId: string;
   recovered: boolean;
+  requestKeyMatched: boolean;
   restartAt: string | null;
   retryAllowed: boolean;
   status: HostedUsageTopUpPurchaseStatus;
@@ -94,6 +95,8 @@ function readPurchaseResponse(value: unknown): HostedUsageTopUpPurchaseResponse 
     (value.cancelAllowed !== undefined && value.cancelAllowed !== true) ||
     (value.offerConflict !== undefined && value.offerConflict !== true) ||
     (value.recovered !== undefined && value.recovered !== true) ||
+    (value.requestKeyMatched !== undefined &&
+      value.requestKeyMatched !== true) ||
     (value.restartAt !== undefined &&
       (value.status !== "reconciling" ||
         !isCanonicalIsoTimestamp(value.restartAt))) ||
@@ -115,6 +118,7 @@ function readPurchaseResponse(value: unknown): HostedUsageTopUpPurchaseResponse 
     offerConflict: value.offerConflict === true,
     purchaseId: value.purchaseId,
     recovered: value.recovered === true,
+    requestKeyMatched: value.requestKeyMatched === true,
     restartAt: typeof value.restartAt === "string" ? value.restartAt : null,
     retryAllowed: value.retryAllowed === true,
     status: value.status,

@@ -14,7 +14,10 @@ import {
 } from "react";
 import { beforeEach, expect, test, vi } from "vitest";
 
-import { renderClientComponent } from "./render-client-component";
+import {
+  createMemoryStorage,
+  renderClientComponent,
+} from "./render-client-component";
 
 const mocks = vi.hoisted(() => ({
   randomUUID: vi.fn(() => "00000000-0000-4000-8000-000000000001"),
@@ -1968,17 +1971,24 @@ test("retries a failed checkout with the same client request key", async () => {
 });
 
 test.each(USAGE_TOP_UP_TARGET_CASES)(
-  "reuses the unresolved $scope request identity after recovery finds no owned purchase",
-  async ({ addLabel, checkoutUrl, openLabel, scope }) => {
+  "reuses the unresolved $scope request identity after a recovery-miss remount",
+  async ({ addLabel, checkoutUrl, scope }) => {
     mocks.randomUUID
-      .mockImplementationOnce(() => "00000000-0000-4000-8000-000000000201");
+      .mockImplementationOnce(() => "00000000-0000-4000-8000-000000000201")
+      .mockImplementationOnce(() => "00000000-0000-4000-8000-000000000202");
     mocks.requestHostedOnboardingJson
       .mockRejectedValueOnce(new Error("Response was lost."))
       .mockResolvedValueOnce({ recoveryMiss: true })
       .mockResolvedValueOnce({
         purchaseId: "hucp_fresh_after_recovery",
+        requestKeyMatched: true,
         status: "checkout_open",
         url: "https://checkout.stripe.test/fresh-after-recovery",
+      })
+      .mockResolvedValueOnce({
+        purchaseId: "hucp_independent_after_durable_response",
+        status: "checkout_open",
+        url: "https://checkout.stripe.test/independent",
       });
     const { HostedUsageTopUpDialog } = await import(
       "@/src/components/settings/hosted-usage-top-up-dialog"
@@ -2012,8 +2022,15 @@ test.each(USAGE_TOP_UP_TARGET_CASES)(
         true,
       );
 
-      await clickButton(rendered.container, rendered.window, "Cancel");
-      await clickButton(rendered.container, rendered.window, openLabel);
+      await rendered.rerender(
+        createElement(HostedUsageTopUpDialog, {
+          checkoutUrl,
+          initialOpen: true,
+          key: "after-recovery-miss",
+          offers: usageCreditOffers(),
+          scope,
+        }),
+      );
       await clickRadio(rendered.container, rendered.window, "usage_500");
       await clickButton(rendered.container, rendered.window, addLabel);
 
@@ -2036,10 +2053,35 @@ test.each(USAGE_TOP_UP_TARGET_CASES)(
           offerCode: "usage_500",
         },
       ]);
-      expect(mocks.randomUUID).toHaveBeenCalledTimes(1);
       expect(rendered.assign).toHaveBeenCalledWith(
         "https://checkout.stripe.test/fresh-after-recovery",
       );
+
+      await rendered.rerender(
+        createElement(HostedUsageTopUpDialog, {
+          checkoutUrl,
+          initialOpen: true,
+          key: "after-durable-response",
+          offers: usageCreditOffers(),
+          scope,
+        }),
+      );
+      await clickRadio(rendered.container, rendered.window, "usage_1000");
+      await clickButton(
+        rendered.container,
+        rendered.window,
+        scope === "group" ? "Add messages · $10" : "Add usage · $10",
+      );
+
+      const finalPostPayloads = mocks.requestHostedOnboardingJson.mock.calls
+        .map(([request]) => request)
+        .filter((request) => request.method === "POST")
+        .map((request) => request.payload);
+      assert.deepEqual(finalPostPayloads.at(-1), {
+        clientRequestKey: "00000000-0000-4000-8000-000000000202",
+        offerCode: "usage_1000",
+      });
+      expect(mocks.randomUUID).toHaveBeenCalledTimes(2);
     } finally {
       await rendered.cleanup();
     }
@@ -2080,6 +2122,15 @@ test.each(USAGE_TOP_UP_TARGET_CASES)(
       await clickRadio(rendered.container, rendered.window, "usage_500");
       await clickButton(rendered.container, rendered.window, addLabel);
       await clickButton(rendered.container, rendered.window, "Check payment · $5");
+      await rendered.rerender(
+        createElement(HostedUsageTopUpDialog, {
+          checkoutUrl,
+          initialOpen: true,
+          key: "changed-offer-after-recovery-miss",
+          offers: usageCreditOffers(),
+          scope,
+        }),
+      );
       await clickRadio(rendered.container, rendered.window, "usage_2500");
       await clickButton(
         rendered.container,
@@ -2117,6 +2168,369 @@ test.each(USAGE_TOP_UP_TARGET_CASES)(
     }
   },
 );
+
+test.each(USAGE_TOP_UP_TARGET_CASES)(
+  "retains the unresolved $scope identity across a cross-target purchase projection",
+  async ({ addLabel, checkoutUrl, scope }) => {
+    const requestKey = "00000000-0000-4000-8000-000000000220";
+    const sessionStorage = createMemoryStorage();
+    sessionStorage.setItem(
+      usageTopUpRequestStorageKey(checkoutUrl),
+      requestKey,
+    );
+    mocks.requestHostedOnboardingJson.mockImplementation(
+      async (request: { method: string }) =>
+        request.method === "GET"
+          ? {
+              purchaseId: "hucp_other_target_projection",
+              status: "fulfilled",
+            }
+          : {
+              purchaseId: "hucp_owned_after_projection",
+              status: "checkout_open",
+              url: "https://checkout.stripe.test/owned-after-projection",
+            },
+    );
+    const { HostedUsageTopUpDialog } = await import(
+      "@/src/components/settings/hosted-usage-top-up-dialog"
+    );
+    const rendered = await renderClientComponent(
+      createElement(HostedUsageTopUpDialog, {
+        activePurchase: {
+          offerCode: "usage_10_usd",
+          purchaseId: "hucp_other_target_projection",
+          retryAllowed: false,
+          status: "checkout_open",
+          targetConflict: true,
+        },
+        checkoutUrl,
+        offers: usageCreditOffers(),
+        scope,
+      }),
+      {
+        location: { href: "https://example.test/settings" },
+        requireButton: false,
+        sessionStorage,
+      },
+    );
+
+    try {
+      await rendered.rerender(
+        createElement(HostedUsageTopUpDialog, {
+          checkoutUrl,
+          initialOpen: true,
+          key: "selection-after-cross-target-projection",
+          offers: usageCreditOffers(),
+          scope,
+        }),
+      );
+      await clickRadio(rendered.container, rendered.window, "usage_500");
+      await clickButton(rendered.container, rendered.window, addLabel);
+
+      const postPayload = mocks.requestHostedOnboardingJson.mock.calls
+        .map(([request]) => request)
+        .find((request) => request.method === "POST")?.payload;
+      assert.deepEqual(postPayload, {
+        clientRequestKey: requestKey,
+        offerCode: "usage_500",
+      });
+      expect(mocks.randomUUID).not.toHaveBeenCalled();
+    } finally {
+      await rendered.cleanup();
+    }
+  },
+);
+
+test.each(USAGE_TOP_UP_TARGET_CASES)(
+  "retains the unresolved $scope identity across a purchase-return projection",
+  async ({ addLabel, checkoutUrl, scope }) => {
+    const requestKey = "00000000-0000-4000-8000-000000000221";
+    const sessionStorage = createMemoryStorage();
+    sessionStorage.setItem(
+      usageTopUpRequestStorageKey(checkoutUrl),
+      requestKey,
+    );
+    mocks.requestHostedOnboardingJson.mockImplementation(
+      async (request: { method: string }) =>
+        request.method === "GET"
+          ? {
+              purchaseId: "hucp_return_projection",
+              status: "fulfilled",
+            }
+          : {
+              purchaseId: "hucp_owned_after_return",
+              status: "checkout_open",
+              url: "https://checkout.stripe.test/owned-after-return",
+            },
+    );
+    const { HostedUsageTopUpDialog } = await import(
+      "@/src/components/settings/hosted-usage-top-up-dialog"
+    );
+    const rendered = await renderClientComponent(
+      createElement(HostedUsageTopUpDialog, {
+        checkoutUrl,
+        offers: usageCreditOffers(),
+        purchaseReturn: {
+          kind: "success",
+          purchaseId: "hucp_return_projection",
+        },
+        scope,
+      }),
+      {
+        location: {
+          href: "https://example.test/settings?usagePurchase=hucp_return_projection&usageCheckout=success",
+        },
+        requireButton: false,
+        sessionStorage,
+      },
+    );
+
+    try {
+      await rendered.rerender(
+        createElement(HostedUsageTopUpDialog, {
+          checkoutUrl,
+          initialOpen: true,
+          key: "selection-after-return-projection",
+          offers: usageCreditOffers(),
+          scope,
+        }),
+      );
+      await clickRadio(rendered.container, rendered.window, "usage_500");
+      await clickButton(rendered.container, rendered.window, addLabel);
+
+      const postPayload = mocks.requestHostedOnboardingJson.mock.calls
+        .map(([request]) => request)
+        .find((request) => request.method === "POST")?.payload;
+      assert.deepEqual(postPayload, {
+        clientRequestKey: requestKey,
+        offerCode: "usage_500",
+      });
+      expect(mocks.randomUUID).not.toHaveBeenCalled();
+    } finally {
+      await rendered.cleanup();
+    }
+  },
+);
+
+test.each(USAGE_TOP_UP_TARGET_CASES)(
+  "retains the unresolved $scope identity when a projected purchase is retried",
+  async ({ addLabel, checkoutUrl, scope }) => {
+    const storedRequestKey = "00000000-0000-4000-8000-000000000223";
+    const retryRequestKey = "00000000-0000-4000-8000-000000000224";
+    const sessionStorage = createMemoryStorage();
+    sessionStorage.setItem(
+      usageTopUpRequestStorageKey(checkoutUrl),
+      storedRequestKey,
+    );
+    mocks.randomUUID.mockImplementationOnce(() => retryRequestKey);
+    let postCount = 0;
+    mocks.requestHostedOnboardingJson.mockImplementation(
+      async (request: { method: string }) => {
+        if (request.method === "GET") {
+          return {
+            purchaseId: "hucp_projected_retry",
+            status: "reconciling",
+          };
+        }
+        postCount += 1;
+        return postCount === 1
+          ? {
+              purchaseId: "hucp_projected_retry",
+              recovered: true,
+              status: "checkout_open",
+              url: "https://checkout.stripe.test/projected-retry",
+            }
+          : {
+              purchaseId: "hucp_owned_after_projected_retry",
+              requestKeyMatched: true,
+              status: "checkout_open",
+              url: "https://checkout.stripe.test/owned-after-projected-retry",
+            };
+      },
+    );
+    const { HostedUsageTopUpDialog } = await import(
+      "@/src/components/settings/hosted-usage-top-up-dialog"
+    );
+    const rendered = await renderClientComponent(
+      createElement(HostedUsageTopUpDialog, {
+        activePurchase: {
+          offerCode: "usage_10_usd",
+          purchaseId: "hucp_projected_retry",
+          retryAllowed: true,
+          status: "reconciling",
+        },
+        checkoutUrl,
+        initialOpen: true,
+        offers: usageCreditOffers(),
+        scope,
+      }),
+      {
+        location: { href: "https://example.test/settings" },
+        requireButton: false,
+        sessionStorage,
+      },
+    );
+
+    try {
+      await clickButton(
+        rendered.container,
+        rendered.window,
+        scope === "group" ? "Retry payment" : "Retry checkout",
+      );
+      await rendered.rerender(
+        createElement(HostedUsageTopUpDialog, {
+          checkoutUrl,
+          initialOpen: true,
+          key: "selection-after-projected-retry",
+          offers: usageCreditOffers(),
+          scope,
+        }),
+      );
+      await clickRadio(rendered.container, rendered.window, "usage_500");
+      await clickButton(rendered.container, rendered.window, addLabel);
+
+      const postPayloads = mocks.requestHostedOnboardingJson.mock.calls
+        .map(([request]) => request)
+        .filter((request) => request.method === "POST")
+        .map((request) => request.payload);
+      assert.deepEqual(postPayloads, [
+        {
+          clientRequestKey: retryRequestKey,
+          offerCode: "usage_10_usd",
+          recoveryOnly: true,
+        },
+        {
+          clientRequestKey: storedRequestKey,
+          offerCode: "usage_500",
+        },
+      ]);
+      expect(mocks.randomUUID).toHaveBeenCalledTimes(1);
+    } finally {
+      await rendered.cleanup();
+    }
+  },
+);
+
+test.each(USAGE_TOP_UP_TARGET_CASES)(
+  "retains the unresolved $scope identity when selection recovers another request",
+  async ({ addLabel, checkoutUrl, scope }) => {
+    const requestKey = "00000000-0000-4000-8000-000000000225";
+    const sessionStorage = createMemoryStorage();
+    sessionStorage.setItem(
+      usageTopUpRequestStorageKey(checkoutUrl),
+      requestKey,
+    );
+    mocks.requestHostedOnboardingJson
+      .mockResolvedValueOnce({
+        purchaseId: "hucp_other_request",
+        recovered: true,
+        status: "checkout_open",
+        url: "https://checkout.stripe.test/other-request",
+      })
+      .mockResolvedValueOnce({
+        purchaseId: "hucp_owned_after_other_request",
+        requestKeyMatched: true,
+        status: "checkout_open",
+        url: "https://checkout.stripe.test/owned-after-other-request",
+      });
+    const { HostedUsageTopUpDialog } = await import(
+      "@/src/components/settings/hosted-usage-top-up-dialog"
+    );
+    const rendered = await renderClientComponent(
+      createElement(HostedUsageTopUpDialog, {
+        checkoutUrl,
+        initialOpen: true,
+        offers: usageCreditOffers(),
+        scope,
+      }),
+      {
+        location: { href: "https://example.test/settings" },
+        requireButton: false,
+        sessionStorage,
+      },
+    );
+
+    try {
+      await clickRadio(rendered.container, rendered.window, "usage_500");
+      await clickButton(rendered.container, rendered.window, addLabel);
+      await rendered.rerender(
+        createElement(HostedUsageTopUpDialog, {
+          checkoutUrl,
+          initialOpen: true,
+          key: "selection-after-other-request-recovery",
+          offers: usageCreditOffers(),
+          scope,
+        }),
+      );
+      await clickRadio(rendered.container, rendered.window, "usage_500");
+      await clickButton(rendered.container, rendered.window, addLabel);
+
+      const postPayloads = mocks.requestHostedOnboardingJson.mock.calls
+        .map(([request]) => request)
+        .filter((request) => request.method === "POST")
+        .map((request) => request.payload);
+      assert.deepEqual(postPayloads, [
+        {
+          clientRequestKey: requestKey,
+          offerCode: "usage_500",
+        },
+        {
+          clientRequestKey: requestKey,
+          offerCode: "usage_500",
+        },
+      ]);
+      expect(mocks.randomUUID).not.toHaveBeenCalled();
+    } finally {
+      await rendered.cleanup();
+    }
+  },
+);
+
+test("fails closed when the stored ambiguous request identity cannot be verified", async () => {
+  const requestKey = "00000000-0000-4000-8000-000000000226";
+  const sessionStorage: Storage = {
+    clear() {},
+    getItem() {
+      return requestKey;
+    },
+    key() {
+      return "stored-usage-top-up-request";
+    },
+    length: 1,
+    removeItem() {},
+    setItem() {
+      throw new Error("Session storage unavailable.");
+    },
+  };
+  const { HostedUsageTopUpDialog } = await import(
+    "@/src/components/settings/hosted-usage-top-up-dialog"
+  );
+  const rendered = await renderClientComponent(
+    createElement(HostedUsageTopUpDialog, {
+      initialOpen: true,
+      offers: usageCreditOffers(),
+    }),
+    {
+      location: { href: "https://example.test/settings?addUsage=true" },
+      requireButton: false,
+      sessionStorage,
+    },
+  );
+
+  try {
+    await clickRadio(rendered.container, rendered.window, "usage_500");
+    await clickButton(rendered.container, rendered.window, "Add usage · $5");
+
+    assert.match(
+      rendered.container.textContent ?? "",
+      /browser tab can’t safely start a payment/,
+    );
+    expect(mocks.requestHostedOnboardingJson).not.toHaveBeenCalled();
+    expect(mocks.randomUUID).not.toHaveBeenCalled();
+  } finally {
+    await rendered.cleanup();
+  }
+});
 
 test("keeps the exact amount and request key after an ambiguous payment failure", async () => {
   mocks.randomUUID
@@ -3241,6 +3655,10 @@ function usageCreditOffers() {
     { amountLabel: "$10", estimatedMessages: 200, offerCode: "usage_1000" },
     { amountLabel: "$25", estimatedMessages: 500, offerCode: "usage_2500" },
   ] as const;
+}
+
+function usageTopUpRequestStorageKey(checkoutUrl: string): string {
+  return `murph:usage-top-up:unresolved:v1:${encodeURIComponent(checkoutUrl)}`;
 }
 
 async function clickRadio(

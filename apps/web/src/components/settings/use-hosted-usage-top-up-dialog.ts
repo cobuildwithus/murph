@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useReducer, useRef } from "react";
+import { useEffect, useReducer, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { requestHostedOnboardingJson } from "@/src/components/hosted-onboarding/client-api";
@@ -22,6 +22,11 @@ import {
   createHostedUsageTopUpState,
   hostedUsageTopUpReducer,
 } from "./hosted-usage-top-up-state";
+import {
+  clearHostedUsageTopUpRequestIdentity,
+  readHostedUsageTopUpRequestIdentity,
+  writeHostedUsageTopUpRequestIdentity,
+} from "./hosted-usage-top-up-request-identity";
 
 const CHECKOUT_URL = "/api/settings/billing/usage-credit/checkout";
 const CHECKOUT_REQUEST_TIMEOUT_MS = 20_000;
@@ -34,6 +39,12 @@ type CheckoutAbortReason = "dismissed" | "timeout" | null;
 interface OwnedCheckoutRequest {
   abortReason: CheckoutAbortReason;
   controller: AbortController;
+}
+
+interface HostedUsageTopUpRequestIdentitySnapshot {
+  available: boolean;
+  checkoutUrl: string | null;
+  requestKey: string | null;
 }
 
 function useHostedUsageTopUpDialog({
@@ -59,6 +70,12 @@ function useHostedUsageTopUpDialog({
   const refreshedPurchaseIdsRef = useRef(new Set<string>());
   const handledReturnKeyRef = useRef(readReturnKey(purchaseReturn));
   const cleanedQueryKeyRef = useRef<string | null>(null);
+  const [requestIdentity, setRequestIdentity] =
+    useState<HostedUsageTopUpRequestIdentitySnapshot>({
+      available: false,
+      checkoutUrl: null,
+      requestKey: null,
+    });
   const returnKey = readReturnKey(purchaseReturn);
   const cancelReturnPurchaseId =
     purchaseReturn?.kind === "cancel" ? purchaseReturn.purchaseId : null;
@@ -74,6 +91,15 @@ function useHostedUsageTopUpDialog({
         (state.screen.attempt.kind === "locked" &&
           state.screen.attempt.error === null)
       : state.screen.operation !== "idle";
+  const requestIdentityReady =
+    requestIdentity.available &&
+    requestIdentity.checkoutUrl === checkoutUrl;
+  const requestIdentityError =
+    state.screen.kind === "selection" &&
+    requestIdentity.checkoutUrl === checkoutUrl &&
+    !requestIdentity.available
+      ? "This browser tab can’t safely start a payment. Open this page in a regular tab and try again."
+      : null;
 
   function refreshPurchaseOnce(purchaseId: string) {
     // A recovery-only host has no trigger after terminal reconciliation. Keep
@@ -144,6 +170,24 @@ function useHostedUsageTopUpDialog({
     cleanedQueryKeyRef.current = cleanupKey;
     stripSettingsQueryParams(queryKeys);
   }, [initialOpen, purchaseReturn, returnKey]);
+
+  useEffect(() => {
+    let canceled = false;
+    queueMicrotask(() => {
+      if (canceled) {
+        return;
+      }
+      const storedIdentity =
+        readHostedUsageTopUpRequestIdentity(checkoutUrl);
+      setRequestIdentity({
+        ...storedIdentity,
+        checkoutUrl,
+      });
+    });
+    return () => {
+      canceled = true;
+    };
+  }, [checkoutUrl]);
 
   useEffect(() => {
     if (!purchaseReturn) {
@@ -334,6 +378,7 @@ function useHostedUsageTopUpDialog({
 
   function selectOffer(offerCode: string) {
     if (
+      requestIdentityReady &&
       state.screen.kind === "selection" &&
       state.screen.attempt.kind === "idle" &&
       offers.some((offer) => offer.offerCode === offerCode)
@@ -347,7 +392,12 @@ function useHostedUsageTopUpDialog({
   }
 
   async function startCheckout(offerCode = selectedOffer?.offerCode ?? null) {
-    if (!offerCode || checkoutInFlight || checkoutRequestRef.current) {
+    if (
+      !offerCode ||
+      checkoutInFlight ||
+      checkoutRequestRef.current ||
+      (state.screen.kind === "selection" && !requestIdentityReady)
+    ) {
       return;
     }
     const sourceScreen = state.screen;
@@ -366,12 +416,18 @@ function useHostedUsageTopUpDialog({
       sourceScreen.kind === "selection"
         ? sourceScreen.unresolvedRequestKey
         : null;
+    const storedRequestKey =
+      sourceScreen.kind === "selection" &&
+      requestIdentity.checkoutUrl === checkoutUrl
+        ? requestIdentity.requestKey
+        : null;
 
     let requestKey: string;
     try {
       requestKey =
         recoveryRequestKey ??
         unresolvedRequestKey ??
+        storedRequestKey ??
         createClientRequestKey();
     } catch {
       const message = "Try again, or choose another amount.";
@@ -390,6 +446,32 @@ function useHostedUsageTopUpDialog({
         });
       }
       return;
+    }
+
+    if (
+      sourceScreen.kind === "selection" &&
+      !writeHostedUsageTopUpRequestIdentity(checkoutUrl, requestKey)
+    ) {
+      setRequestIdentity({
+        available: false,
+        checkoutUrl,
+        requestKey: null,
+      });
+      dispatch({
+        type: "selection_checkout_failed",
+        error:
+          "This browser tab can’t safely start a payment. Open this page in a regular tab and try again.",
+        offerCode,
+        requestKey: null,
+      });
+      return;
+    }
+    if (sourceScreen.kind === "selection") {
+      setRequestIdentity({
+        available: true,
+        checkoutUrl,
+        requestKey,
+      });
     }
 
     statusControllerRef.current?.abort();
@@ -450,16 +532,33 @@ function useHostedUsageTopUpDialog({
           requestKey,
         });
       } else {
-        const { checkoutUrl, response } = outcome.value;
-        if (response.recovered || !checkoutUrl) {
+        const {
+          checkoutUrl: resolvedCheckoutUrl,
+          response,
+        } = outcome.value;
+        // Recovery may project another active purchase. Only exact server proof
+        // resolves the tab's ambiguous create-capable identity.
+        if (
+          sourceScreen.kind === "selection" &&
+          response.requestKeyMatched
+        ) {
+          const identityCleared =
+            clearHostedUsageTopUpRequestIdentity(checkoutUrl);
+          setRequestIdentity({
+            available: identityCleared,
+            checkoutUrl,
+            requestKey: null,
+          });
+        }
+        if (response.recovered || !resolvedCheckoutUrl) {
           dispatch({
             type: "checkout_response",
             offerCode,
             requestKey,
-            response: { ...response, url: checkoutUrl },
+            response: { ...response, url: resolvedCheckoutUrl },
           });
         } else {
-          window.location.assign(checkoutUrl);
+          window.location.assign(resolvedCheckoutUrl);
           if (sourceScreen.kind === "selection") {
             dispatch({
               type: "selection_checkout_redirected",
@@ -561,6 +660,8 @@ function useHostedUsageTopUpDialog({
     changeAmount,
     checkoutInFlight,
     handleOpenChange,
+    requestIdentityError,
+    requestIdentityReady,
     retryStatusCheck,
     selectedOffer,
     selectOffer,

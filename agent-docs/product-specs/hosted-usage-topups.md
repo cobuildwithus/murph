@@ -180,6 +180,9 @@ Offer descriptors come from the server projection. A normal authorization
 submits only an opaque offer code and a single-use client request key. An
 ambiguous-response check adds the literal recovery-only capability, never a
 dollar amount, grant amount, Stripe Price ID, payer ID, or beneficiary ID.
+Before request entry, the browser stores that key in session storage scoped to
+the server-owned checkout target. It is an idempotency hint, not payer, target,
+offer, or payment authority.
 
 Home or a private assistant handoff opens the same dialog through a one-shot
 Settings URL such as `/settings?addUsage=true#subscription`. An explicit
@@ -393,11 +396,17 @@ recovery-only mode. Under the payer lock, recovery-only may continue an exact
 persisted request or return the current nonterminal purchase. When neither
 exists, it returns a typed miss before offer authorization, Customer creation,
 purchase insertion, or Stripe I/O. The dialog returns to an unselected picker
-but retains that unresolved key in browser state across dismissal and reopen.
-The next explicit Add action reuses the key in normal create-capable mode, so
-the payer lock and request-key uniqueness serialize it with any delayed
-original request. If the newly selected offer differs from the winner, only
-the winner's nonpayable status/cancel projection is returned. Account deletion
+but retains that unresolved key in target-scoped browser session storage across
+dismissal, reload, remount, and tab restoration. A remounted picker hydrates the
+key before enabling selection. The next explicit Add action reuses the key in
+normal create-capable mode, so the payer lock and request-key uniqueness
+serialize it with any delayed original request. Only a durable purchase
+response with server-owned proof that the submitted selection key matched
+clears the stored key. Mounted active-purchase and return projections,
+projected-purchase retries, and different-key active-purchase recovery cannot
+release it. Unavailable or unverifiable storage fails closed before request
+entry. If the newly selected offer differs from the winner, only the winner's
+nonpayable status/cancel projection is returned. Account deletion
 suspends new payment creation. A direct intent that already won the payer-lock binding
 boundary remains `payment_pending` until the existing Stripe-event owner
 settles it; deletion does not race it with a second cancellation decision. The
@@ -559,8 +568,12 @@ funding route share this sequence:
    one payer at a time. If recovery-only finds neither an exact-key purchase nor
    a current nonterminal payer purchase, return a typed miss without resolving
    a Customer, inserting a purchase, or entering Stripe. The browser retains
-   that key for the next explicit normal authorization, which serializes with
-   any delayed original request under the same payer lock.
+   that key in target-scoped session storage for the next explicit normal
+   authorization, including after remount, which serializes with any delayed
+   original request under the same payer lock. Only a durable response carrying
+   server-owned proof that the submitted selection key matched clears it;
+   mounted active or return projections, projected-purchase retries, and
+   different-key recovery do not.
 6. For a genuinely new purchase, require a current server-owned offer. Personal
    funding also requires the direct-paid eligibility projection. Family
    funding requires the current active owner, active group and billing, and an
@@ -966,9 +979,9 @@ Current focused unit and component coverage exercises:
   one-time-versus-subscription dispatch cases;
 - composed usage blocking, carryover credit, trial and group behavior, and
   current-period block clearing; and
-- the Settings dialog's no-default selection, exact offer post, stable-key
-  retry, group payment-ambiguity copy and amount lock, redirect, read-only
-  return polling, cancel expiry, and delayed state;
+- the Settings dialog's no-default selection, exact offer post, session-stable
+  key retry across remount, group payment-ambiguity copy and amount lock,
+  redirect, read-only return polling, cancel expiry, and delayed state;
 - group funding target resolution, active-runtime eligibility, fixed-pack
   checkout without an individual paid plan, target-aware replay/conflicts, and
   reuse of the same dialog state machine;

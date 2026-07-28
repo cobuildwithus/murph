@@ -710,6 +710,7 @@ describe("createHostedUsageCreditCheckout", () => {
         status: "checkout_open",
         url: "https://checkout.stripe.test/session",
       });
+      expect(unboundRecovery).not.toHaveProperty("requestKeyMatched");
       expect(fake.purchases.size).toBe(1);
       expect(mocks.ensureHostedMemberStripeCustomer).not.toHaveBeenCalled();
       expect(mocks.stripeCheckoutCreate).toHaveBeenCalledOnce();
@@ -722,6 +723,7 @@ describe("createHostedUsageCreditCheckout", () => {
         true,
       )).resolves.toMatchObject({
         purchaseId: originalPurchase.id,
+        requestKeyMatched: true,
         status: "checkout_open",
         url: "https://checkout.stripe.test/session",
       });
@@ -928,6 +930,7 @@ describe("createHostedUsageCreditCheckout", () => {
         reauthorizationResult = await createCheckout(nextOfferCode);
       } else {
         reauthorizationResult = await createCheckout(nextOfferCode);
+        onlyPurchase(fake.purchases).status = "fulfilled";
         resolveOriginalCustomer("cus_group_payer");
         originalResult = await originalRequest;
       }
@@ -938,7 +941,8 @@ describe("createHostedUsageCreditCheckout", () => {
         clientRequestKey: CLIENT_REQUEST_KEY,
         offerCode:
           winner === "original_first" ? "usage_10_usd" : nextOfferCode,
-        status: "checkout_open",
+        status:
+          winner === "original_first" ? "checkout_open" : "fulfilled",
       });
       expect(originalResult.purchaseId).toBe(purchase.id);
       expect(reauthorizationResult.purchaseId).toBe(purchase.id);
@@ -953,9 +957,19 @@ describe("createHostedUsageCreditCheckout", () => {
         expect(losingResult).toMatchObject({
           offerConflict: true,
           recovered: true,
-          status: "checkout_open",
+          status:
+            winner === "original_first" ? "checkout_open" : "fulfilled",
         });
         expect(losingResult).not.toHaveProperty("url");
+      } else if (winner === "reauthorization_first") {
+        expect(reauthorizationResult).toMatchObject({
+          status: "checkout_open",
+          url: "https://checkout.stripe.test/session",
+        });
+        expect(originalResult).toMatchObject({
+          status: "fulfilled",
+        });
+        expect(originalResult).not.toHaveProperty("url");
       } else {
         expect(originalResult).toMatchObject({
           status: "checkout_open",
@@ -1951,6 +1965,7 @@ describe("createHostedUsageCreditCheckout", () => {
     const purchase = onlyPurchase(fake.purchases);
     expect(result).toEqual({
       purchaseId: purchase.id,
+      requestKeyMatched: true,
       status: "checkout_open",
       url: "https://checkout.stripe.test/session",
     });
@@ -2545,9 +2560,12 @@ describe("createHostedUsageCreditCheckout", () => {
     });
 
     expect(recovered).toEqual({
-      ...checkout,
+      purchaseId: checkout.purchaseId,
       recovered: true,
+      status: checkout.status,
+      url: checkout.url,
     });
+    expect(recovered).not.toHaveProperty("requestKeyMatched");
     expect(fake.purchases.size).toBe(1);
     expectNoStripeProviderIo();
     expect(mocks.readHostedMemberStripeBillingRef).toHaveBeenCalledTimes(1);

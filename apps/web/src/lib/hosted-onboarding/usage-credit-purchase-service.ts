@@ -365,6 +365,7 @@ async function createHostedUsageCreditCheckoutForTarget(input: {
             kind: "purchase" as const,
             purchase: racedExisting,
             recovered: true,
+            requestKeyMatched: true,
             targetConflict: true,
           };
         }
@@ -375,6 +376,7 @@ async function createHostedUsageCreditCheckoutForTarget(input: {
           kind: "purchase" as const,
           purchase: racedExisting,
           recovered: true,
+          requestKeyMatched: true,
           targetConflict: false,
         };
       }
@@ -383,6 +385,7 @@ async function createHostedUsageCreditCheckoutForTarget(input: {
         kind: "purchase" as const,
         purchase: racedExisting,
         recovered: false,
+        requestKeyMatched: true,
         targetConflict: false,
       };
     }
@@ -429,6 +432,7 @@ async function createHostedUsageCreditCheckoutForTarget(input: {
             kind: "purchase" as const,
             purchase: existingActive,
             recovered: true,
+            requestKeyMatched: false,
             targetConflict: false,
           };
         }
@@ -437,6 +441,7 @@ async function createHostedUsageCreditCheckoutForTarget(input: {
           kind: "purchase" as const,
           purchase: existingActive,
           recovered: true,
+          requestKeyMatched: false,
           targetConflict: false,
         };
       }
@@ -445,6 +450,7 @@ async function createHostedUsageCreditCheckoutForTarget(input: {
         kind: "purchase" as const,
         purchase: existingActive,
         recovered: true,
+        requestKeyMatched: false,
         targetConflict: true,
       };
     }
@@ -597,6 +603,7 @@ async function createHostedUsageCreditCheckoutForTarget(input: {
       kind: "purchase" as const,
       purchase: created,
       recovered: false,
+      requestKeyMatched: true,
       targetConflict: false,
     };
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
@@ -612,6 +619,9 @@ async function createHostedUsageCreditCheckoutForTarget(input: {
     return {
       purchaseId: projected.purchaseId,
       recovered: true,
+      ...(resolution.requestKeyMatched
+        ? { requestKeyMatched: true as const }
+        : {}),
       ...(projected.restartAt ? { restartAt: projected.restartAt } : {}),
       status: projected.status,
       targetConflict: true,
@@ -623,6 +633,9 @@ async function createHostedUsageCreditCheckoutForTarget(input: {
       ...projectHostedUsageCreditPurchaseStatusResult(resolution.purchase),
       offerConflict: true,
       recovered: true,
+      ...(resolution.requestKeyMatched
+        ? { requestKeyMatched: true as const }
+        : {}),
     };
   }
 
@@ -635,6 +648,9 @@ async function createHostedUsageCreditCheckoutForTarget(input: {
     return {
       ...checkout,
       ...(resolution.recovered ? { recovered: true as const } : {}),
+      ...(resolution.requestKeyMatched
+        ? { requestKeyMatched: true as const }
+        : {}),
     };
   } catch (error) {
     if (
@@ -655,6 +671,9 @@ async function createHostedUsageCreditCheckoutForTarget(input: {
       return {
         ...projection.checkout,
         recovered: true,
+        ...(resolution.requestKeyMatched
+          ? { requestKeyMatched: true as const }
+          : {}),
         ...(projection.retryAllowed
           ? { retryAllowed: true as const }
           : {}),

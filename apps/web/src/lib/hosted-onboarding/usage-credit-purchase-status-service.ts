@@ -53,6 +53,8 @@ export interface HostedUsageCreditCheckoutResult {
   offerConflict?: true;
   purchaseId: string;
   recovered?: true;
+  /** The returned purchase is durably bound to the submitted request key. */
+  requestKeyMatched?: true;
   restartAt?: string;
   retryAllowed?: true;
   status: HostedUsageCreditPublicPurchaseStatus;
