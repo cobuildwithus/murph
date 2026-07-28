@@ -10,6 +10,10 @@ Updated: 2026-07-28
   unaddressed personal artifact produces immediate silence instead of an
   ineffective foreground wait, while later causal turns remain independently
   eligible.
+- Generalize the same floor principle so question grammar cannot convert a
+  human-source interpersonal or shared-history beat into an open Murph request,
+  and a correction after an interruption receives silence rather than a
+  compliance performance.
 
 ## Success criteria
 
@@ -18,6 +22,13 @@ Updated: 2026-07-28
 - Existing causal-turn boundaries remain unchanged: same-purpose human captions
   stay silent, while later factual requests or direct Murph addresses can receive
   one answer.
+- Floor ownership is classified by truthful answer authority before punctuation:
+  unaddressed human-source social questions stay silent, answerable public or
+  authorized requests remain eligible, and direct unverified person-fact asks get
+  one plain uncertainty sentence.
+- A complaint that Murph inserted itself terminates without an apology,
+  acknowledgment, reaction, or backing-away bit unless the same message contains
+  an independent ask.
 - Focused automation and prompt tests pass, CI is green, and ReviewGPT accepts the
   exact pushed correction.
 - The follow-up PR is merged and its worktree is retired.
@@ -36,24 +47,37 @@ Updated: 2026-07-28
 - Product/process constraints: the first artifact turn must add no artificial
   delay or typing-indicator wait; later messages are evaluated in their natural
   turns.
+- Privacy constraint: use synthetic, structure-equivalent scenarios only; do not
+  copy user transcripts, participant names, or distinctive private details into
+  prompts, tests, or documentation.
 
 ## Risks and mitigations
 
 1. Risk: broad wording could suppress genuinely open factual or task requests.
-   Mitigation: scope the immediate-silence rule to unaddressed personal artifacts
-   whose human audience is unclear, and preserve explicit open-premise handling.
+   Mitigation: use a source-of-truth test — public/general knowledge, the visible
+   conversation, server-approved group evidence, or an available task tool remains
+   eligible; private relationship, conduct, or shared-history knowledge remains
+   human-owned.
 2. Risk: a unit test could bypass production automation admission.
    Mitigation: prove native-reply and different-actor deferral through the actual
    automation selection path and keep real-model probes opt-in.
+3. Risk: a direct Murph ask about an unverified person-fact could become either
+   speculation or an overlong refusal.
+   Mitigation: require one plain uncertainty sentence and explicitly forbid a
+   comic abstention, mock ruling, or hidden-record implication.
 
 ## Tasks
 
 1. Remove the artifact-specific foreground watch and specify immediate silence.
 2. Replace invalid direct-injection proof with production-path automation
    coverage and add an audience-unclear real-model candidate.
-3. Run focused verification, product review, preliminary specialists, and parent
+3. Add the floor-follows-authority rule to the group core prompt, required skill,
+   durable spec, static contracts, and synthetic real-model candidate matrix.
+4. Prove that an interruption complaint receives no compliance reply while a
+   genuinely answerable open factual request remains eligible.
+5. Run focused verification, product review, preliminary specialists, and parent
    final review.
-4. Commit, push, open the follow-up PR, run final ReviewGPT with CI, resolve any
+6. Commit, push, update the follow-up PR, run final ReviewGPT with CI, resolve any
    findings, merge, and retire the worktree.
 
 ## Decisions
@@ -61,8 +85,15 @@ Updated: 2026-07-28
 - Accept final ReviewGPT round 1's finding from PR #1060: the foreground active
   turn cannot observe native-reply or different-actor messages that belong to a
   later causal turn.
-- Use deletion as the correction: immediate terminal silence for the narrow
-  ambiguous-artifact case; no grouping or admission changes.
+- Use deletion as the artifact correction: immediate terminal silence for the
+  narrow ambiguous-artifact case; no grouping or admission changes.
+- Classify open requests by truthful answer authority rather than punctuation.
+  Question-shaped private relationship, conduct, and shared-history beats remain
+  human-owned; public/general, visible-conversation, authorized shared-data, and
+  executable task asks remain eligible.
+- Treat a joke about not knowing as an interruption, not as silence. A direct ask
+  may receive one plain uncertainty sentence; an unaddressed human-source beat may
+  not receive a comic abstention.
 - Accept preliminary ReviewGPT's coverage finding on PR #1075: the real-model
   candidate must distinguish a text reply, reaction, short watch, and immediate
   no-output completion, with an explicitly open artifact as the answerable
