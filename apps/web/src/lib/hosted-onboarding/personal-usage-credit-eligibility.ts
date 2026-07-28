@@ -15,6 +15,7 @@ import { hasHostedMemberOwnActiveBilling } from "./entitlement";
 import { getHostedOnboardingEnvironment } from "./runtime";
 import type { HostedOnboardingReadClient } from "./shared";
 import {
+  filterHostedNonGroupUsageCreditOfferCodes,
   HOSTED_USAGE_CREDIT_OFFER_CODES,
   type HostedUsageCreditOfferCode,
 } from "./usage-credit-offers";
@@ -100,7 +101,7 @@ export async function readHostedPersonalUsageCreditOfferCodes(input: {
     return [];
   }
 
-  return configuredOfferCodes;
+  return filterHostedNonGroupUsageCreditOfferCodes(configuredOfferCodes);
 }
 
 export function readHostedConfiguredUsageCreditOfferCodes(): HostedUsageCreditOfferCode[] {

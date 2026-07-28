@@ -731,10 +731,20 @@ export interface HostedMailboxLaneConsumed {
   lane: HostedMailboxLane;
 }
 
+export interface HostedGroupRunningBitProjection {
+  expiresAt: string;
+  publicAlias: string | null;
+  requestedBit: string;
+  schema: "murph.group-sponsorship-bit.v1";
+}
+
 export interface HostedMailboxFetchResponse {
   // Optional for deploy-window compatibility. Web emits this only for an
   // allowed conversation batch whose current effective capacity is low.
   conversationUsageStatus?: "low" | null;
+  // Optional for consumer-first rollout. It is Web-owned, expiring group
+  // context and is attached only to fresh route-authorized group inputs.
+  groupRunningBit?: HostedGroupRunningBitProjection | null;
   // Optional for deploy-window compatibility: older web responses omit it and
   // the runtime treats every lane as consumed through seq 0.
   consumedSeqByLane?: HostedMailboxLaneConsumed[] | null;
@@ -755,6 +765,7 @@ export type HostedRuntimeDeviceSyncBridgeKind =
 
 export interface HostedRuntimeDeviceSyncWakeBridgeEnvelope {
   connectionId?: string | null;
+  expectedConnectedAt?: string;
   hint?: HostedExecutionDeviceSyncWakeHint | null;
   kind: "device-sync.wake";
   provider?: string | null;
@@ -971,6 +982,55 @@ export interface HostedRuntimeGroupUsageStatus {
   remainingPercent?: number;
 }
 
+export const HOSTED_USAGE_REFERRAL_POLICY_CODES = [
+  "new_person_activation_v1",
+  "active_group_v1",
+] as const;
+
+export type HostedUsageReferralPolicyCode =
+  (typeof HOSTED_USAGE_REFERRAL_POLICY_CODES)[number];
+
+export interface HostedRuntimeUsageReferralSnapshot {
+  active: {
+    destinationKind: "group" | "personal";
+    expiresAt: string;
+    policyCode: HostedUsageReferralPolicyCode;
+    rewardLabel: string;
+    state: "armed" | "target_bound";
+  } | null;
+  availablePolicies: Array<{
+    code: HostedUsageReferralPolicyCode;
+    requirementsLabel: string;
+    rewardLabel: string;
+  }>;
+  trialCreditNotice: string | null;
+}
+
+export interface HostedRuntimeGroupToolSenderContext {
+  /**
+   * Trusted current-turn sender evidence injected by the hosted runtime. The
+   * model never supplies these fields, and exactly one provider namespace may
+   * be present.
+   */
+  linqSenderHandles?: readonly string[];
+  telegramSenderHandles?: readonly string[];
+}
+
+export interface HostedRuntimeUsageReferralSourceConversation {
+  channel: "linq" | "telegram";
+  threadId: string;
+  threadIsDirect: boolean;
+}
+
+export interface HostedRuntimeUsageReferralSourceContext {
+  /**
+   * Blinded current-conversation locator injected by the hosted runtime. Web
+   * persists it only for a personal reward so its celebration cannot drift to
+   * another direct channel or a newly bound provider conversation.
+   */
+  sourceConversation?: HostedRuntimeUsageReferralSourceConversation;
+}
+
 export const HOSTED_RUNTIME_GROUP_MEMBERSHIPS_MAX = 25;
 
 export interface HostedRuntimeGroupMembershipSummary {
@@ -982,6 +1042,7 @@ export interface HostedRuntimeGroupMembershipSummary {
   permissionsUrl: string | null;
   requestedVaultShareProjectionScopes: HostedVaultShareProjectionScope[];
   role: string;
+  sponsorshipUrl: string | null;
 }
 
 export interface HostedRuntimeGroupCreateJoinLinkRequest {
@@ -1050,11 +1111,17 @@ export const HOSTED_RUNTIME_GROUP_SHARED_READ_PARTICIPANT_ID_MAX_CODE_POINTS = 2
 export const HOSTED_RUNTIME_GROUP_SHARED_READ_DISPLAY_NAME_MAX_CODE_POINTS = 200;
 export const HOSTED_RUNTIME_GROUP_SHARED_READ_SCOPE_KEY_MAX_CODE_POINTS = 256;
 export const HOSTED_RUNTIME_GROUP_SHARED_READ_UNAVAILABLE_REASON_MAX_CODE_POINTS = 500;
+export const HOSTED_RUNTIME_GROUP_OWNER_ADVISORY_NAME_MAX_CODE_POINTS = 48;
 
 export interface HostedRuntimeGroupChatParticipant {
   handle: string;
   /** Durable activation proof, not current access or membership in this group. */
   hasOwnMurph: boolean;
+  /**
+   * Optional, unverified, current-turn label from the human group owner's
+   * address-book projection. It grants no identity or routing authority.
+   */
+  ownerAdvisoryName?: string;
 }
 
 export interface HostedRuntimeGroupSharedReadRequest {
@@ -1107,6 +1174,13 @@ export type HostedRuntimeGroupToolRequest =
       question: string;
     }
   | {
+      action: "ask_current_sender";
+      origin: Extract<
+        HostedExecutionAssistantAskOrigin,
+        { kind: "accepted_input" }
+      >;
+    }
+  | {
       action: "ask_member";
       grantId: string;
       origin: HostedExecutionAssistantAskOrigin;
@@ -1121,6 +1195,13 @@ export type HostedRuntimeGroupToolRequest =
   | { action: "revoke_disclosure_grant"; grantId: string }
   | { action: "read_current" }
   | { action: "read_usage" }
+  | ({ action: "read_usage_referral" } & HostedRuntimeGroupToolSenderContext)
+  | ({
+      action: "arm_usage_referral";
+      policyCode: HostedUsageReferralPolicyCode;
+    } & HostedRuntimeGroupToolSenderContext
+      & HostedRuntimeUsageReferralSourceContext)
+  | ({ action: "cancel_usage_referral" } & HostedRuntimeGroupToolSenderContext)
   | ({
       action: "read_shared";
       /**
@@ -1178,6 +1259,7 @@ export type HostedRuntimeGroupToolResponse =
       action: "ask";
       result: HostedRuntimeGroupAskResult;
     }
+  | { action: "ask_current_sender"; result: HostedRuntimeGroupMemberAskResult }
   | { action: "ask_member"; result: HostedRuntimeGroupMemberAskResult }
   | {
       action: "post_disclosure_request";
@@ -1222,6 +1304,23 @@ export type HostedRuntimeGroupToolResponse =
             status: "unavailable";
             unavailableReason: string;
             memberships: null;
+          };
+    }
+  | {
+      action:
+        | "arm_usage_referral"
+        | "cancel_usage_referral"
+        | "read_usage_referral";
+      result:
+        | {
+            outcome: "armed" | "canceled" | "read";
+            referral: HostedRuntimeUsageReferralSnapshot;
+            status: "ok";
+          }
+        | {
+            referral: null;
+            status: "unavailable";
+            unavailableReason: string;
           };
     }
   | {
@@ -1624,6 +1723,7 @@ export const HOSTED_RUNTIME_LATENCY_TRACE_MILESTONES = [
   "runtime_phase_started",
   "workspace_restore_done",
   "mailbox_import_done",
+  "checkpoint_publication_expected_by",
 ] as const;
 
 export const HOSTED_RUNTIME_ASSISTANT_MILESTONES = [
@@ -1631,6 +1731,7 @@ export const HOSTED_RUNTIME_ASSISTANT_MILESTONES = [
   "linq_typing_accepted",
   "first_codex_output_observed",
   "first_codex_text_observed",
+  "terminal_non_reply_committed",
 ] as const;
 
 export type HostedRuntimeAssistantMilestone =
@@ -1746,6 +1847,9 @@ export interface HostedRuntimeLatencyPhaseBreakdown {
     linqTypingAcceptedAtEpochMs?: number;
     firstCodexOutputObservedAtEpochMs?: number;
     firstCodexTextObservedAtEpochMs?: number;
+    terminalNonReplyCommittedAtEpochMs?: number;
+    checkpointPublicationExpectedByEpochMs?: number;
+    runtimeLeaseGeneration?: string;
   };
   provider?: {
     codexAppServerInitializeMs?: number;
@@ -1873,6 +1977,9 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS: Record<
     "linqTypingAcceptedAtEpochMs",
     "firstCodexOutputObservedAtEpochMs",
     "firstCodexTextObservedAtEpochMs",
+    "terminalNonReplyCommittedAtEpochMs",
+    "checkpointPublicationExpectedByEpochMs",
+    "runtimeLeaseGeneration",
   ],
   provider: [
     "codexAppServerInitializeMs",
@@ -1903,7 +2010,7 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_BOOLEAN_LEAF_KEYS =
     "preProvider.receiptScanPerformed",
   ] as const;
 
-export type HostedRuntimeLatencyPhaseBreakdownJsonLeaf = number | boolean;
+export type HostedRuntimeLatencyPhaseBreakdownJsonLeaf = number | boolean | string;
 export type HostedRuntimeOrchestrationLatencyDiagnostics = NonNullable<
   HostedRuntimeLatencyPhaseBreakdown["orchestration"]
 >;
@@ -2131,6 +2238,11 @@ function isHostedRuntimeLatencyPhaseBreakdownLeafSafe(
   leafKey: string,
   value: unknown,
 ): value is HostedRuntimeLatencyPhaseBreakdownJsonLeaf {
+  if (phase === "assistant" && leafKey === "runtimeLeaseGeneration") {
+    return typeof value === "string"
+      && value.length <= 20
+      && /^(?:0|[1-9]\d*)$/u.test(value);
+  }
   if (HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_BOOLEAN_LEAF_KEY_SET.has(`${phase}.${leafKey}`)) {
     return typeof value === "boolean";
   }
@@ -2174,6 +2286,7 @@ export interface HostedRuntimeLatencyTraceProviderStartedEvent {
 export interface HostedRuntimeLatencyTraceAssistantMilestoneEvent {
   assistantInputIds: string[];
   at: string;
+  checkpointPublicationExpectedBy?: string | null;
   milestone: HostedRuntimeAssistantMilestone;
   runtimeAttemptId?: string | null;
   source: HostedIngressLatencySource;

@@ -151,7 +151,7 @@ export async function requireActivePrivyMemberAuth(
 
 /**
  * Bearer-token variant of `requireActivePrivyMemberAuth` for native
- * (non-browser) clients such as the iOS companion app. The bearer token is
+ * (non-browser) Murph companion apps. The bearer token is
  * the Privy identity token and is verified through the same server-side
  * Privy verification path as cookie sessions; member resolution and the
  * active-access entitlement check are identical. There is intentionally no
@@ -173,11 +173,13 @@ export async function requireActivePrivyMemberAuthFromBearerToken(
 /**
  * Native bearer-token member auth without an entitlement check. Keep this
  * narrower variant directly for authority-reducing operations such as
- * revoking a scoped credential: a suspended or inactive member must still be
- * able to turn access off. Data reads and authority issuance must use the
- * active wrapper above by default. A caller may use this identity-only variant
- * only when it re-checks active access and any required consent inside a
- * stronger owning transaction before the protected read or write.
+ * revoking a scoped credential, and for member-owned legal/account controls
+ * such as reading or recording consent that must remain available independent
+ * of entitlement. Protected product-data reads and authority issuance must use
+ * the active wrapper above by default. Other callers may use this
+ * identity-only variant only when they re-check active access and any required
+ * consent inside a stronger owning transaction before the protected read or
+ * write.
  */
 export async function requirePrivyMemberAuthFromBearerToken(
   request: Request,

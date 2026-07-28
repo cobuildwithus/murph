@@ -23,11 +23,12 @@ import {
   normalizeHostedOpaqueInput,
 } from "../hosted-onboarding/contact-privacy";
 import {
-  readActiveHostedMemberAccess,
+  readHostedRuntimeAiAccessDecision,
 } from "../hosted-onboarding/member-access";
 import {
   hostedOnboardingError,
 } from "../hosted-onboarding/errors";
+import { assertHostedMemberNotSuspended } from "../hosted-onboarding/entitlement";
 import {
   demoteHostedMemberLinqGroupChatBindingsTx,
 } from "../hosted-onboarding/hosted-member-routing-store";
@@ -37,13 +38,23 @@ import {
 } from "../hosted-onboarding/hosted-member-store";
 import {
   generateHostedMemberId,
+  lockHostedMemberRow,
 } from "../hosted-onboarding/shared";
+import {
+  buildHostedThreadDeliveryRoute,
+  HOSTED_TELEGRAM_THREAD_ACCOUNT_LOOKUP_KEY,
+  isHostedThreadDeliveryRouteChannel,
+  openHostedThreadDeliveryRoute,
+  sealHostedThreadDeliveryRoute,
+  type HostedThreadDeliveryRouteChannel,
+  type HostedThreadDeliveryRouteV1,
+} from "./thread-delivery-route";
 import type {
-  HostedThreadRouteChannel,
+  HostedThreadRouteSnapshot,
 } from "./thread-route-store";
 
 export const HOSTED_THREAD_CONTAINER_DEFAULT_MONTHLY_USAGE_LIMIT_USD_MICROS =
-  4_500_000n;
+  7_500_000n;
 
 export interface HostedThreadContainerRouteEnsureResult {
   activationEventId: string | null;
@@ -53,10 +64,192 @@ export interface HostedThreadContainerRouteEnsureResult {
   demotedMailboxConsumedAt: Date | null;
 }
 
+export interface HostedThreadContainerDeliveryRouteRefreshResult {
+  deliveryRoute: HostedThreadDeliveryRouteV1 | null;
+  demotedMailboxConsumedAt: Date | null;
+}
+
+/**
+ * Repairs delivery material only when the current provider account proves it
+ * owns the existing account-scoped route. Owning ingress opens and validates
+ * non-empty material before deciding that no write is needed. A different
+ * delivering Linq line may still use the account-independent thread identity,
+ * but it must never rewrite the route's canonical account identity. Valid
+ * ciphertext also recovers that identity for cross-line session binding.
+ */
+export async function refreshHostedThreadContainerDeliveryRouteTx(input: {
+  accountLookupKey: string | null | undefined;
+  accountLookupKeys?: readonly (string | null | undefined)[];
+  mailboxDedupeKey?: string | null;
+  prisma: Prisma.TransactionClient;
+  route: HostedThreadRouteSnapshot;
+  threadId: string | number;
+}): Promise<HostedThreadContainerDeliveryRouteRefreshResult> {
+  const state = input.route.deliveryRouteState;
+  if (!state || !isHostedThreadDeliveryRouteChannel(input.route.channel)) {
+    throw new TypeError(
+      "Hosted thread delivery route refresh requires a canonical route snapshot.",
+    );
+  }
+
+  const threadId = normalizeHostedOpaqueInput(input.threadId);
+  const threadIdentityLookupKey = createHostedExternalThreadIdentityLookupKey({
+    channel: input.route.channel,
+    threadId,
+  });
+  const threadIdentityLookupKeys =
+    createHostedExternalThreadIdentityLookupKeyReadCandidates({
+      channel: input.route.channel,
+      threadId,
+    });
+  if (!threadId || !threadIdentityLookupKey || threadIdentityLookupKeys.length === 0) {
+    throw new TypeError(
+      "Hosted thread delivery route refresh requires a non-empty thread identity.",
+    );
+  }
+
+  await acquireHostedThreadContainerRouteWriteLockTx({
+    channel: input.route.channel,
+    prisma: input.prisma,
+    threadId,
+  });
+  const rows = await input.prisma.hostedThreadRoute.findMany({
+    orderBy: { createdAt: "asc" },
+    select: {
+      containerMemberId: true,
+      deliveryRouteEncrypted: true,
+      threadIdentityLookupKey: true,
+      threadLookupKey: true,
+    },
+    where: {
+      channel: input.route.channel,
+      threadIdentityLookupKey: {
+        in: threadIdentityLookupKeys,
+      },
+    },
+  });
+  if (rows.length !== 1) {
+    throw hostedOnboardingError({
+      code: rows.length === 0
+        ? "HOSTED_THREAD_ROUTE_REQUIRED"
+        : "HOSTED_THREAD_ROUTE_IDENTITY_LOOKUP_AMBIGUOUS",
+      details: {
+        channel: input.route.channel,
+        matchCount: rows.length,
+      },
+      httpStatus: rows.length === 0 ? 409 : 500,
+      message: rows.length === 0
+        ? "The external thread route no longer exists."
+        : "External thread identity lookup matched multiple route rows.",
+      retryable: true,
+    });
+  }
+
+  const row = rows[0]!;
+  if (row.containerMemberId !== input.route.containerMemberId) {
+    throw hostedOnboardingError({
+      code: "HOSTED_THREAD_ROUTE_ALREADY_BOUND",
+      httpStatus: 409,
+      message: "This external thread is already routed to another container.",
+      retryable: false,
+    });
+  }
+
+  const demotion = input.route.channel === "linq"
+    ? await demoteHostedMemberLinqGroupChatBindingsTx({
+        linqChatId: threadId,
+        ...(input.mailboxDedupeKey
+          ? { mailboxDedupeKey: input.mailboxDedupeKey }
+          : {}),
+        prisma: input.prisma,
+      })
+    : { mailboxConsumedAt: null };
+
+  const accountLookupKeys = normalizeHostedThreadAccountLookupKeys([
+    ...(input.accountLookupKeys ?? []),
+    input.accountLookupKey,
+  ]);
+  const currentAccountOwnsStoredRoute = accountLookupKeys.some((accountLookupKey) =>
+    createHostedExternalThreadLookupKeyReadCandidates({
+      accountLookupKey,
+      channel: input.route.channel,
+      threadId,
+    }).includes(row.threadLookupKey)
+  );
+
+  if (!currentAccountOwnsStoredRoute) {
+    const deliveryRoute = await tryOpenHostedThreadContainerDeliveryRoute({
+      channel: input.route.channel,
+      containerMemberId: input.route.containerMemberId,
+      deliveryRouteEncrypted: row.deliveryRouteEncrypted,
+      prisma: input.prisma,
+      threadId,
+      threadIdentityLookupKey: row.threadIdentityLookupKey,
+      threadLookupKey: row.threadLookupKey,
+    });
+    return {
+      deliveryRoute,
+      demotedMailboxConsumedAt: demotion.mailboxConsumedAt,
+    };
+  }
+
+  const deliveryRoute = buildHostedThreadDeliveryRoute({
+    accountLookupKey: input.accountLookupKey,
+    channel: input.route.channel,
+    threadId,
+  });
+  const threadLookupKey = createHostedExternalThreadLookupKey({
+    accountLookupKey: input.accountLookupKey,
+    channel: input.route.channel,
+    threadId,
+  });
+  if (!threadLookupKey) {
+    throw new TypeError(
+      "Hosted thread delivery route refresh requires an account lookup key.",
+    );
+  }
+
+  const authorityChanged =
+    row.threadIdentityLookupKey !== threadIdentityLookupKey
+    || row.threadLookupKey !== threadLookupKey;
+  const existingDeliveryRoute = authorityChanged
+    ? null
+    : await tryOpenHostedThreadContainerDeliveryRoute({
+        channel: input.route.channel,
+        containerMemberId: input.route.containerMemberId,
+        deliveryRouteEncrypted: row.deliveryRouteEncrypted,
+        prisma: input.prisma,
+        threadId,
+        threadIdentityLookupKey: row.threadIdentityLookupKey,
+        threadLookupKey: row.threadLookupKey,
+      });
+  if (authorityChanged || !existingDeliveryRoute) {
+    const deliveryRouteEncrypted = await sealHostedThreadDeliveryRoute({
+      containerMemberId: input.route.containerMemberId,
+      prisma: input.prisma,
+      route: deliveryRoute,
+    });
+    await updateHostedThreadRouteRowTx({
+      authorityChanged,
+      channel: input.route.channel,
+      deliveryRouteEncrypted,
+      previousThreadIdentityLookupKey: row.threadIdentityLookupKey,
+      prisma: input.prisma,
+      threadIdentityLookupKey,
+      threadLookupKey,
+    });
+  }
+
+  return {
+    deliveryRoute,
+    demotedMailboxConsumedAt: demotion.mailboxConsumedAt,
+  };
+}
+
 export async function ensureHostedThreadContainerRouteTx(input: {
   accountLookupKey: string | null | undefined;
   accountLookupKeys?: readonly (string | null | undefined)[];
-  channel: HostedThreadRouteChannel;
+  channel: HostedThreadDeliveryRouteChannel;
   containerMemberId?: string | null;
   mailboxDedupeKey?: string | null;
   monthlyUsageLimitUsdMicros?: bigint | null;
@@ -65,15 +258,25 @@ export async function ensureHostedThreadContainerRouteTx(input: {
   prisma: Prisma.TransactionClient;
   threadId: string | number;
 }): Promise<HostedThreadContainerRouteEnsureResult> {
+  await lockHostedMemberRow(input.prisma, input.ownerMemberId);
   const owner = await readHostedMemberCoreState({
     memberId: input.ownerMemberId,
     prisma: input.prisma,
   });
 
-  if (!owner || !(await readActiveHostedMemberAccess({
+  if (!owner) {
+    throw hostedOnboardingError({
+      code: "HOSTED_THREAD_CONTAINER_OWNER_ACTIVE_ACCESS_REQUIRED",
+      httpStatus: 403,
+      message: "An active hosted member is required to own a thread container.",
+      retryable: false,
+    });
+  }
+  assertHostedMemberNotSuspended(owner);
+  if (!(await readHostedRuntimeAiAccessDecision({
     memberId: input.ownerMemberId,
     prisma: input.prisma,
-  }))) {
+  })).allowed) {
     throw hostedOnboardingError({
       code: "HOSTED_THREAD_CONTAINER_OWNER_ACTIVE_ACCESS_REQUIRED",
       httpStatus: 403,
@@ -118,6 +321,11 @@ export async function ensureHostedThreadContainerRouteTx(input: {
       "Hosted thread route requires a supported channel and non-empty thread id.",
     );
   }
+  const deliveryRoute = buildHostedThreadDeliveryRoute({
+    accountLookupKey: input.accountLookupKey,
+    channel: input.channel,
+    threadId: input.threadId,
+  });
   await acquireHostedThreadContainerRouteWriteLockTx({
     channel: input.channel,
     prisma: input.prisma,
@@ -156,6 +364,7 @@ export async function ensureHostedThreadContainerRouteTx(input: {
         },
       },
       containerMemberId: true,
+      deliveryRouteEncrypted: true,
       threadIdentityLookupKey: true,
       threadLookupKey: true,
     },
@@ -207,12 +416,19 @@ export async function ensureHostedThreadContainerRouteTx(input: {
     const currentIdentityRow = existingRows.find((row) =>
       row.threadIdentityLookupKey === threadIdentityLookupKey
     ) ?? existing;
-    if (
+    const authorityChanged =
       currentIdentityRow.threadIdentityLookupKey !== threadIdentityLookupKey
-      || currentIdentityRow.threadLookupKey !== threadLookupKey
-    ) {
-      await updateHostedThreadRouteAuthorityRowTx({
+      || currentIdentityRow.threadLookupKey !== threadLookupKey;
+    if (authorityChanged || !currentIdentityRow.deliveryRouteEncrypted) {
+      const deliveryRouteEncrypted = await sealHostedThreadDeliveryRoute({
+        containerMemberId: existing.containerMemberId,
+        prisma: input.prisma,
+        route: deliveryRoute,
+      });
+      await updateHostedThreadRouteRowTx({
+        authorityChanged,
         channel: input.channel,
+        deliveryRouteEncrypted,
         prisma: input.prisma,
         previousThreadIdentityLookupKey: currentIdentityRow.threadIdentityLookupKey,
         threadIdentityLookupKey,
@@ -271,9 +487,15 @@ export async function ensureHostedThreadContainerRouteTx(input: {
     },
   });
 
+  const deliveryRouteEncrypted = await sealHostedThreadDeliveryRoute({
+    containerMemberId,
+    prisma: input.prisma,
+    route: deliveryRoute,
+  });
   await createHostedThreadRouteRowTx({
     channel: input.channel,
     containerMemberId,
+    deliveryRouteEncrypted,
     prisma: input.prisma,
     threadIdentityLookupKey,
     threadLookupKey,
@@ -303,9 +525,56 @@ export async function ensureHostedThreadContainerRouteTx(input: {
   };
 }
 
-async function createHostedThreadRouteRowTx(input: {
-  channel: HostedThreadRouteChannel;
+async function tryOpenHostedThreadContainerDeliveryRoute(input: {
+  channel: HostedThreadDeliveryRouteChannel;
   containerMemberId: string;
+  deliveryRouteEncrypted: string | null;
+  prisma: Prisma.TransactionClient;
+  threadId: string;
+  threadIdentityLookupKey: string;
+  threadLookupKey: string;
+}): Promise<HostedThreadDeliveryRouteV1 | null> {
+  if (!input.deliveryRouteEncrypted) {
+    return null;
+  }
+
+  let deliveryRoute: HostedThreadDeliveryRouteV1;
+  try {
+    deliveryRoute = await openHostedThreadDeliveryRoute({
+      channel: input.channel,
+      containerMemberId: input.containerMemberId,
+      encrypted: input.deliveryRouteEncrypted,
+      prisma: input.prisma,
+    });
+  } catch {
+    // Corrupt detached-delivery material must not take ordinary inbound reply
+    // routing down. The detached resolver still fails closed until a trusted
+    // inbound on the owning account repairs this row.
+    return null;
+  }
+
+  const accountLookupKey = deliveryRoute.channel === "linq"
+    ? deliveryRoute.accountLookupKey
+    : HOSTED_TELEGRAM_THREAD_ACCOUNT_LOOKUP_KEY;
+  const matchesStoredAuthority =
+    deliveryRoute.threadId === input.threadId
+    && createHostedExternalThreadIdentityLookupKeyReadCandidates({
+      channel: deliveryRoute.channel,
+      threadId: deliveryRoute.threadId,
+    }).includes(input.threadIdentityLookupKey)
+    && createHostedExternalThreadLookupKeyReadCandidates({
+      accountLookupKey,
+      channel: deliveryRoute.channel,
+      threadId: deliveryRoute.threadId,
+    }).includes(input.threadLookupKey);
+
+  return matchesStoredAuthority ? deliveryRoute : null;
+}
+
+async function createHostedThreadRouteRowTx(input: {
+  channel: HostedThreadDeliveryRouteChannel;
+  containerMemberId: string;
+  deliveryRouteEncrypted: string;
   prisma: Prisma.TransactionClient;
   threadIdentityLookupKey: string;
   threadLookupKey: string;
@@ -315,6 +584,7 @@ async function createHostedThreadRouteRowTx(input: {
       data: {
         channel: input.channel,
         containerMemberId: input.containerMemberId,
+        deliveryRouteEncrypted: input.deliveryRouteEncrypted,
         threadIdentityLookupKey: input.threadIdentityLookupKey,
         threadLookupKey: input.threadLookupKey,
       },
@@ -333,8 +603,10 @@ async function createHostedThreadRouteRowTx(input: {
   }
 }
 
-async function updateHostedThreadRouteAuthorityRowTx(input: {
-  channel: HostedThreadRouteChannel;
+async function updateHostedThreadRouteRowTx(input: {
+  authorityChanged: boolean;
+  channel: HostedThreadDeliveryRouteChannel;
+  deliveryRouteEncrypted: string;
   previousThreadIdentityLookupKey: string;
   prisma: Prisma.TransactionClient;
   threadIdentityLookupKey: string;
@@ -346,7 +618,10 @@ async function updateHostedThreadRouteAuthorityRowTx(input: {
         // Reaction context is optional and account-bound through the route's
         // lookup key. Drop it when that authority key rotates rather than
         // carrying ciphertext into a different AAD binding.
-        pendingGroupReactionContextEncrypted: null,
+        ...(input.authorityChanged
+          ? { pendingGroupReactionContextEncrypted: null }
+          : {}),
+        deliveryRouteEncrypted: input.deliveryRouteEncrypted,
         threadIdentityLookupKey: input.threadIdentityLookupKey,
         threadLookupKey: input.threadLookupKey,
       },
@@ -372,7 +647,7 @@ async function updateHostedThreadRouteAuthorityRowTx(input: {
 }
 
 async function acquireHostedThreadContainerRouteWriteLockTx(input: {
-  channel: HostedThreadRouteChannel;
+  channel: HostedThreadDeliveryRouteChannel;
   prisma: Prisma.TransactionClient;
   threadId: string | number;
 }): Promise<void> {
@@ -390,17 +665,17 @@ async function acquireHostedThreadContainerRouteWriteLockTx(input: {
 }
 
 function resolveHostedThreadContainerMemberChannels(
-  channel: HostedThreadRouteChannel,
+  channel: HostedThreadDeliveryRouteChannel,
 ): HostedExecutionMemberChannels {
   return {
-    email: channel === "email",
+    email: false,
     linq: channel === "linq",
     telegram: channel === "telegram",
   };
 }
 
 function buildHostedThreadContainerActivationEventId(input: {
-  channel: HostedThreadRouteChannel;
+  channel: HostedThreadDeliveryRouteChannel;
   threadLookupKey: string;
 }): string {
   return `member.activated:thread-container:${input.channel}:${input.threadLookupKey}`;

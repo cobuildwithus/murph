@@ -343,6 +343,7 @@ function readHostedLinqCanonicalChat(
 export async function getHostedLinqChatHandles(input: {
   chatId: string;
   signal?: AbortSignal;
+  timeoutMs?: number;
 }): Promise<HostedLinqChatHandleSummary[]> {
   return (await getHostedLinqChatSummary(input)).handles;
 }
@@ -501,6 +502,27 @@ function parseHostedLinqAttachmentUploadHeaders(value: unknown): Record<string, 
     }
   }
   return headers;
+}
+
+export async function shareHostedLinqContactCard(input: {
+  chatId: string;
+  signal?: AbortSignal;
+}): Promise<void> {
+  const response = await fetchHostedLinqApiOrThrow({
+    method: "POST",
+    operation: "contact-card share",
+    path: `chats/${encodeURIComponent(normalizeRequiredString(input.chatId, "chat id"))}/share_contact_card`,
+    signal: input.signal,
+    timeoutMessage: "Linq contact-card share timed out.",
+  });
+
+  if (!response.ok) {
+    throw buildHostedLinqRequestFailedError({
+      operation: "contact-card share",
+      retryable: false,
+      status: response.status,
+    });
+  }
 }
 
 async function fetchHostedLinqApiOrThrow(input: {

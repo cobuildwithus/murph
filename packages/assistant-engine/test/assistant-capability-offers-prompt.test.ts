@@ -1,4 +1,3 @@
-import { hostedPhoneCallStartResponseSchema } from '@murphai/hosted-execution'
 import { describe, expect, it } from 'vitest'
 
 import {
@@ -32,6 +31,7 @@ describe('assistant capability-offers prompt contract', () => {
     const layers = buildAssistantMaintenanceSystemPromptWithCacheMetadata({
       currentLocalDate: '2026-04-15',
       currentTimeZone: 'Asia/Kuala_Lumpur',
+      profile: 'member-memory',
     }).layers
 
     expect(layers.stableRouteCapabilityPrompt).toBe('')
@@ -48,6 +48,25 @@ describe('assistant capability-offers prompt contract', () => {
     ]) {
       expect(layers.prompt).not.toContain(externalSurface)
     }
+  })
+
+  it('keeps group room-model maintenance on the exact knowledge page boundary', () => {
+    const prompt = buildAssistantMaintenanceSystemPromptWithCacheMetadata({
+      currentLocalDate: '2026-07-25',
+      currentTimeZone: 'America/New_York',
+      profile: 'group-room-model',
+    }).prompt
+
+    expect(prompt).toContain(
+      '`murph.group_room_model`',
+    )
+    expect(prompt).toContain('exact `digest` as `expectedDigest`')
+    expect(prompt).toContain('Do not use the shell')
+    expect(prompt).toContain('rough list of fallible participation tips')
+    expect(prompt).toContain('never copy a raw handle into the page')
+    expect(prompt).not.toContain('`vault-cli memory upsert`')
+    expect(prompt).not.toContain(CAPABILITY_OFFERS_HEADER)
+    expect(prompt).not.toContain(PHONE_CALLS_HEADER)
   })
 
   it('keeps offers adjacent, available, and outcome-focused', () => {
@@ -138,7 +157,10 @@ describe('assistant capability-offers prompt contract', () => {
     expect(section).not.toContain('proactively call `action="post_join_offer"` once')
     expect(section).toContain('`action="read_shared"` as the only hosted path')
     expect(section).toContain('resolves live authority lazily after the tool call')
-    expect(section).toContain("exact handle appears in exactly one returned member's `currentTurnHandles`")
+    expect(section).toContain('Model-size `status="partial"` lists current `omittedParticipantIds`')
+    expect(section).toContain('never infer their departure, score, diagnostics, or permission')
+    expect(section).toContain('or call the standings complete')
+    expect(section).toContain("an exact `Sender:` handle must appear in exactly one returned member's `currentTurnHandles`")
     expect(section).toContain('Scheduled and detached reads have no current-turn handles')
     expect(section).not.toContain('For running-challenge standings')
     expect(section).toContain('`not_granted`, `granted` plus `missing`, and `available`')
@@ -246,6 +268,14 @@ describe('assistant capability-offers prompt contract', () => {
     expect(prompt).toContain('coarse connection status')
     expect(prompt).toContain('connection-wide sync-job times')
     expect(prompt).toContain('raw provider or account identity')
+    expect(prompt).toContain('total/deep/REM sleep minutes')
+    expect(prompt).toContain(
+      "`workouts.v0` day records listing each workout's local start time, duration, and type",
+    )
+    expect(prompt).toContain('canonical event zone (validated vault fallback)')
+    expect(prompt).toContain(
+      'it excludes absolute timestamps, routes, location, heart rate, or provider identity',
+    )
   })
 
   it('keeps the new-group contact handoff natural and reactive', () => {
@@ -298,30 +328,22 @@ describe('assistant capability-offers prompt contract', () => {
     expect(Buffer.byteLength(section, 'utf8')).toBeLessThanOrEqual(1_600)
   })
 
-  it('keeps phone-call start-status wording aligned with the hosted schema', () => {
+  it('keeps only the phone-call skill trigger and result floor resident', () => {
     const section = getPromptSection(
       buildAssistantSystemPromptLayers(createCommonCodexPromptInput())
         .stableRouteCapabilityPrompt,
       PHONE_CALLS_HEADER,
     )
-    const promptStatuses = extractStartStatusLiterals(section)
 
-    expect(promptStatuses).toEqual(['starting', 'calling', 'failed'])
-    expect(section).toContain('provider accepted or placed it')
-    expect(section).toContain('including one already ended')
-    expect(section).toContain('attempt was unsuccessful')
-    expect(section).toContain('not that no provider attempt occurred')
-    for (const status of promptStatuses) {
-      expect(
-        hostedPhoneCallStartResponseSchema.safeParse({
-          phoneCallId: 'phone-call-test',
-          status,
-        }).success,
-      ).toBe(true)
-    }
+    expect(section).toContain('$MURPH_ASSISTANT_SKILLS_ROOT/phone-calls/SKILL.md')
+    expect(section).toContain('Call only the user-authorized destination')
+    expect(section).toContain('Never call emergency services')
+    expect(section).toContain('A call tool start status is not the call outcome')
+    expect(section).not.toContain('`starting`')
+    expect(Buffer.byteLength(section, 'utf8')).toBeLessThanOrEqual(700)
   })
 
-  it('routes appointment calls through a complete preflight while preserving natural caller identity', () => {
+  it('keeps the appointment handoff resident without duplicating its preflight', () => {
     const section = getPromptSection(
       buildAssistantSystemPromptLayers(createCommonCodexPromptInput())
         .stableRouteCapabilityPrompt,
@@ -330,14 +352,8 @@ describe('assistant capability-offers prompt contract', () => {
 
     expect(section).toContain('$MURPH_ASSISTANT_SKILLS_ROOT/appointment-scheduling/SKILL.md')
     expect(section).toContain('satisfy its ready-to-act gate')
-    expect(section).toContain('context, memory, and the official site')
-    expect(section).toContain('identity alone is incomplete')
-    expect(section).toContain('Resolve missing brief fields')
-    expect(section).toContain(
-      'Information-only or test calls must stay non-mutating, remain separate, and never count as readiness',
-    )
-    expect(section).toContain('Set `callerName` to the user-approved first name')
-    expect(section).toContain('Put approved, needed facts in `shareableFacts`')
+    expect(section).not.toContain('Set `callerName`')
+    expect(section).not.toContain('`shareableFacts`')
   })
 })
 
@@ -350,19 +366,6 @@ function getPromptSection(prompt: string, heading: string): string {
   const rest = prompt.slice(sectionStart)
   const nextSectionStart = rest.indexOf('\n\n')
   return nextSectionStart < 0 ? rest : rest.slice(0, nextSectionStart)
-}
-
-function extractStartStatusLiterals(section: string): string[] {
-  const statusList = section.match(/start status \((?<statuses>[^)]*)\)/u)
-    ?.groups?.statuses
-  if (!statusList) {
-    throw new Error('Phone-call prompt does not name start statuses')
-  }
-
-  return Array.from(
-    statusList.matchAll(/`(?<status>[^`]+)`/gu),
-    (match) => match.groups?.status ?? '',
-  )
 }
 
 function createCommonCodexPromptInput(

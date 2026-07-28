@@ -12,10 +12,15 @@ import {
 import {
   getHostedLinqChatSummary,
 } from "./linq-client";
-import { hostedOnboardingError } from "./errors";
+import { hostedOnboardingError, isHostedOnboardingError } from "./errors";
+import { getHostedOnboardingEnvironment } from "./runtime";
+import {
+  planHostedLinqPermanentHomeRouteRecovery,
+} from "./linq-home-route-recovery";
 import { assertHostedTelegramWebhookSecret, parseHostedTelegramWebhookUpdate } from "./telegram";
 import {
   planHostedOnboardingLinqWebhook,
+  resolveHostedLinqMailboxPayloadRootPrewarmMemberId,
   type HostedOnboardingLinqWebhookResponse,
 } from "./webhook-provider-linq";
 import {
@@ -44,6 +49,8 @@ import {
 import {
   runWithHostedDomainRootUnwrapCache,
 } from "../hosted-crypto/domain-root-unwrap-cache";
+import { unwrapHostedDomainRootForWeb } from "../hosted-crypto/domain-root-store";
+import { getHostedCryptoDomainForLane } from "@murphai/runtime-state";
 import {
   runWithPrismaOperationTimings,
   type PrismaOperationTiming,
@@ -53,6 +60,7 @@ import {
 } from "./webhook-db-timing";
 import {
   drainHostedLinqSideEffectsDirect,
+  queueHostedLinqContactCardShareAfterDeliveredInviteSignup,
 } from "./webhook-transport";
 import {
   buildHostedLinqFirstContactAdmissionClassifierUnavailableDecision,
@@ -63,7 +71,14 @@ import {
   readRecordedHostedLinqFirstContactAdmissionDecision,
   recordHostedLinqFirstContactAdmissionDecision,
   tryHostedLinqFirstContactAdmissionDeterministicDecision,
+  type HostedLinqFirstContactAdmissionDecision,
 } from "./linq-first-contact-admission";
+import {
+  ensureHostedLinqInstantStartPulseTrialEnrollment,
+} from "./auto-trial-enrollment-service";
+import {
+  isHostedLinqInstantStartEventCandidate,
+} from "./linq-instant-start";
 import {
   maybeHandoffHostedExecutionWebhookWake,
 } from "./webhook-service-wake";
@@ -71,6 +86,7 @@ import {
   assertHostedThreadRouteEgressAuthority,
   markHostedLinqThreadRouteParticipantAdditionPendingTx,
   readHostedThreadRouteByThreadIdentity,
+  type HostedThreadRouteSnapshot,
 } from "../hosted-routing/thread-route-store";
 import {
   assertHostedLinqRouteAuthorityMatchesTarget,
@@ -81,6 +97,12 @@ import type {
 import {
   reconcileHostedThreadContainerParticipants,
 } from "../hosted-groups/group-tool";
+import {
+  reconcileHostedUsageReferralRewardAfterCommit,
+} from "../hosted-growth/usage-referral";
+import {
+  signalHostedMailboxAppendRuntime,
+} from "../hosted-orchestration/signal-runtime";
 import {
   handleHostedGroupJoinOfferReaction,
 } from "../hosted-groups/join-offer-reaction";
@@ -182,6 +204,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
       const providerResult = await ingestHostedLinqProviderEventDirect({
         event: providerEvent,
         prisma,
+        scheduleAfterResponse: input.scheduleAfterResponse,
       });
       const reactionResult = await handleHostedGroupJoinOfferReaction({
         event: providerEvent,
@@ -250,6 +273,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
         : await ingestHostedLinqProviderEventDirect({
             event: providerEvent,
             prisma,
+            scheduleAfterResponse: input.scheduleAfterResponse,
           });
       await scheduleHostedLinqProviderAlertEmails({
         alertIds: providerResult.alertIds,
@@ -277,11 +301,18 @@ export async function handleHostedOnboardingLinqWebhook(input: {
 
     input.signal?.throwIfAborted();
     const prisma = input.prisma ?? getPrisma();
-    const planningEvent = await resolveHostedLinqPlanningEvent({
+    const planningResolution = await resolveHostedLinqPlanningEvent({
       event,
       prisma,
       signal: input.signal,
     });
+    const planningEvent = planningResolution.event;
+    const warmPlanningMailboxPayloadRoot = () =>
+      warmHostedLinqMailboxPayloadRoot({
+        event: planningEvent,
+        prisma,
+        threadRoute: planningResolution.threadRoute,
+      });
 
     const currentInboundReply: HostedLinqCurrentInboundReplyProof | null =
       event.event_type === "message.received" && !affirmativeReaction
@@ -300,28 +331,48 @@ export async function handleHostedOnboardingLinqWebhook(input: {
     const requireFirstContactAdmission = firstContactAdmissionMode === "enforce";
     let firstContactAdmissionClassified = false;
     try {
-      const recordedAdmission = requireFirstContactAdmission
-        ? await readRecordedHostedLinqFirstContactAdmissionDecision({
-            eventId: event.event_id,
-            prisma,
+      const shouldReuseRecordedFirstContactAdmission =
+        planningEvent.event_type === "message.received"
+        && (
+          requireFirstContactAdmission
+          || isHostedLinqInstantStartEventCandidate({
+            event: requireHostedLinqMessageReceivedEvent(planningEvent),
+            phonePrefixes:
+              getHostedOnboardingEnvironment().linqInstantStartPhonePrefixes,
           })
-        : null;
-
-      if (recordedAdmission?.kind === "block") {
-        plan = buildBlockedHostedLinqFirstContactAdmissionPlan();
-      } else {
-        plan = await runHostedOnboardingWebhookTransaction(
+        );
+      let firstContactAdmissionDecision: HostedLinqFirstContactAdmissionDecision | null =
+        shouldReuseRecordedFirstContactAdmission
+          ? await readRecordedHostedLinqFirstContactAdmissionDecision({
+              eventId: event.event_id,
+              prisma,
+            })
+          : null;
+      const runPlan = (instantStartAllowed = true) =>
+        runHostedOnboardingWebhookTransaction(
           prisma,
           (transaction) =>
             planHostedOnboardingLinqWebhook({
               affirmativeReaction,
               event: planningEvent,
-              firstContactAdmitted: recordedAdmission?.kind === "allow",
+              firstContactAdmissionDecision,
+              instantStartAllowed,
               requireFirstContactAdmission,
               prisma: transaction,
             }),
+          warmPlanningMailboxPayloadRoot,
         );
+      const planAfterBlockedAdmission = (reason?: string) =>
+        requireFirstContactAdmission
+          ? Promise.resolve(buildBlockedHostedLinqFirstContactAdmissionPlan(reason))
+          : runPlan(false);
+
+      if (firstContactAdmissionDecision?.kind === "block") {
+        plan = await planAfterBlockedAdmission();
+      } else {
+        plan = await runPlan();
       }
+
 
       if (plan.firstContactAdmissionRequest) {
         const firstContactAdmissionRequest = plan.firstContactAdmissionRequest;
@@ -332,24 +383,15 @@ export async function handleHostedOnboardingLinqWebhook(input: {
           firstContactAdmissionRequest,
         );
         if (deterministicDecision) {
-          const firstContactAdmission = await recordHostedLinqFirstContactAdmissionDecision({
-            decision: deterministicDecision,
-            eventId: event.event_id,
-            prisma,
-          });
-          plan = firstContactAdmission.kind === "block"
-            ? buildBlockedHostedLinqFirstContactAdmissionPlan()
-            : await runHostedOnboardingWebhookTransaction(
+          firstContactAdmissionDecision =
+            await recordHostedLinqFirstContactAdmissionDecision({
+              decision: deterministicDecision,
+              eventId: event.event_id,
               prisma,
-              (transaction) =>
-                planHostedOnboardingLinqWebhook({
-                  affirmativeReaction,
-                  event: planningEvent,
-                  firstContactAdmitted: true,
-                  requireFirstContactAdmission,
-                  prisma: transaction,
-                }),
-            );
+            });
+          plan = firstContactAdmissionDecision.kind === "block"
+            ? await planAfterBlockedAdmission()
+            : await runPlan();
         } else {
           const firstContactAdmissionParticipantContact = plan.firstContactAdmissionParticipantContact;
           if (!firstContactAdmissionParticipantContact) {
@@ -367,7 +409,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
               }),
           );
           if (admissionBudget.kind === "exhausted") {
-            plan = buildBlockedHostedLinqFirstContactAdmissionPlan(
+            plan = await planAfterBlockedAdmission(
               "first-contact-admission-budget-exhausted",
             );
           } else {
@@ -385,25 +427,16 @@ export async function handleHostedOnboardingLinqWebhook(input: {
             }
             firstContactAdmissionClassified = true;
 
-            const firstContactAdmission = await recordHostedLinqFirstContactAdmissionDecision({
-              decision: classifiedAdmission,
-              eventId: event.event_id,
-              prisma,
-            });
-            if (firstContactAdmission.kind === "block") {
-              plan = buildBlockedHostedLinqFirstContactAdmissionPlan();
-            } else {
-              plan = await runHostedOnboardingWebhookTransaction(
+            firstContactAdmissionDecision =
+              await recordHostedLinqFirstContactAdmissionDecision({
+                decision: classifiedAdmission,
+                eventId: event.event_id,
                 prisma,
-                (transaction) =>
-                  planHostedOnboardingLinqWebhook({
-                    affirmativeReaction,
-                    event: planningEvent,
-                    firstContactAdmitted: true,
-                    requireFirstContactAdmission,
-                    prisma: transaction,
-                  }),
-              );
+              });
+            if (firstContactAdmissionDecision.kind === "block") {
+              plan = await planAfterBlockedAdmission();
+            } else {
+              plan = await runPlan();
             }
           }
         }
@@ -412,11 +445,69 @@ export async function handleHostedOnboardingLinqWebhook(input: {
       if (plan.firstContactAdmissionRequest) {
         throw new Error("Hosted Linq first-contact admission remained unresolved after classification.");
       }
+
+      if (plan.instantStartEnrollment) {
+        const instantStartEnrollment = plan.instantStartEnrollment;
+        let enrollmentFailed = false;
+        try {
+          await ensureHostedLinqInstantStartPulseTrialEnrollment({
+            admissionEventId: instantStartEnrollment.admissionEventId,
+            inviteCode: instantStartEnrollment.inviteCode,
+            memberId: instantStartEnrollment.memberId,
+            prisma,
+          });
+        } catch (error) {
+          if (
+            input.signal?.aborted
+            || (
+              isHostedOnboardingError(error)
+              && error.retryable
+            )
+          ) {
+            throw error;
+          }
+          enrollmentFailed = true;
+          logHostedOnboardingDiagnostic(
+            "hosted-onboarding.webhook.linq.instant-start-fallback",
+            {
+              errorName: deriveHostedOnboardingTimingErrorName(error),
+              eventIdSuffix: toHostedOnboardingLogIdSuffix(event.event_id),
+            },
+          );
+        }
+        plan = await runPlan(!enrollmentFailed);
+        if (plan.instantStartEnrollment) {
+          logHostedOnboardingDiagnostic(
+            "hosted-onboarding.webhook.linq.instant-start-not-active",
+            {
+              eventIdSuffix: toHostedOnboardingLogIdSuffix(event.event_id),
+            },
+          );
+          plan = await runPlan(false);
+        }
+      }
+
+      if (plan.instantStartEnrollment) {
+        throw new Error(
+          "Hosted Linq instant-start enrollment remained unresolved after fallback.",
+        );
+      }
     } catch (error) {
-      finishHostedOnboardingTiming(planTiming, "failed", {
-        errorName: deriveHostedOnboardingTimingErrorName(error),
-      });
-      throw error;
+      // A recognized home-route owner whose permanent route no longer matches
+      // the fallback binding would otherwise retry this rollback forever and
+      // never hear anything back. Answer them on the chat they used instead.
+      const recoveredPlan =
+        isHostedOnboardingError(error)
+        && error.code === "HOSTED_LINQ_HOME_ROUTE_CHANGED"
+          ? await planHostedLinqPermanentHomeRouteRecovery({ event, prisma })
+          : null;
+      if (!recoveredPlan) {
+        finishHostedOnboardingTiming(planTiming, "failed", {
+          errorName: deriveHostedOnboardingTimingErrorName(error),
+        });
+        throw error;
+      }
+      plan = recoveredPlan;
     }
     finishHostedOnboardingTiming(planTiming, plan.response.reason ?? "completed", {
       desiredSideEffectCount: plan.desiredSideEffects.length,
@@ -429,6 +520,11 @@ export async function handleHostedOnboardingLinqWebhook(input: {
 
     await reconcileHostedLinqGroupRostersAfterCommitBestEffort({
       reconciles: plan.postCommitGroupRosterReconciles ?? [],
+      scheduleAfterResponse: input.scheduleAfterResponse,
+    });
+    await reconcileHostedUsageReferralRewardsAfterCommitBestEffort({
+      prisma,
+      referralIds: plan.postCommitUsageReferralIds ?? [],
       scheduleAfterResponse: input.scheduleAfterResponse,
     });
 
@@ -506,27 +602,42 @@ export async function handleHostedOnboardingLinqWebhook(input: {
   }
 }
 
+interface HostedLinqPlanningEventResolution {
+  event: Parameters<typeof requireHostedLinqMessageReceivedEvent>[0];
+  /** The route the resolver already read, reused so warming costs no query. */
+  threadRoute: HostedThreadRouteSnapshot | null;
+}
+
 async function resolveHostedLinqPlanningEvent(input: {
   event: Parameters<typeof requireHostedLinqMessageReceivedEvent>[0];
   prisma: PrismaClient;
   signal?: AbortSignal;
-}): Promise<Parameters<typeof requireHostedLinqMessageReceivedEvent>[0]> {
+}): Promise<HostedLinqPlanningEventResolution> {
   if (input.event.event_type !== "message.received") {
-    return input.event;
+    return { event: input.event, threadRoute: null };
   }
 
   const messageEvent = requireHostedLinqMessageReceivedEvent(input.event);
   const webhookIsGroup = messageEvent.data.chat?.is_group;
   if (webhookIsGroup === true) {
     logHostedLinqChatClassification("webhook-group");
-    return messageEvent;
+    return {
+      event: messageEvent,
+      threadRoute: messageEvent.data.is_from_me
+        ? null
+        : await readHostedThreadRouteByThreadIdentity({
+            channel: "linq",
+            prisma: input.prisma,
+            threadId: messageEvent.data.chat_id,
+          }),
+    };
   }
 
   if (messageEvent.data.is_from_me) {
     if (webhookIsGroup === false) {
       logHostedLinqChatClassification("webhook-direct");
     }
-    return messageEvent;
+    return { event: messageEvent, threadRoute: null };
   }
 
   const threadRoute = await readHostedThreadRouteByThreadIdentity({
@@ -576,15 +687,18 @@ async function resolveHostedLinqPlanningEvent(input: {
   }
 
   return {
-    ...messageEvent,
-    data: {
-      ...messageEvent.data,
-      chat: {
-        id: messageEvent.data.chat_id,
-        ...(messageEvent.data.chat ?? {}),
-        is_group: resolvedIsGroup,
+    event: {
+      ...messageEvent,
+      data: {
+        ...messageEvent.data,
+        chat: {
+          id: messageEvent.data.chat_id,
+          ...(messageEvent.data.chat ?? {}),
+          is_group: resolvedIsGroup,
+        },
       },
     },
+    threadRoute,
   };
 }
 
@@ -785,14 +899,25 @@ function buildHostedLinqCurrentInboundReplyProof(
 async function ingestHostedLinqProviderEventDirect(input: {
   event: Parameters<typeof ingestHostedLinqProviderEventTx>[0]["event"];
   prisma: PrismaClient;
+  scheduleAfterResponse?: HostedWebhookPostResponseScheduler;
 }): Promise<Awaited<ReturnType<typeof ingestHostedLinqProviderEventTx>>> {
-  return runHostedOnboardingWebhookTransaction(
+  const providerResult = await runHostedOnboardingWebhookTransaction(
     input.prisma,
     (transaction) => ingestHostedLinqProviderEventTx({
       event: input.event,
       prisma: transaction,
     }),
   );
+  if (providerResult.restoreOnboardingLink) {
+    void queueHostedLinqContactCardShareAfterDeliveredInviteSignup({
+      chatId: providerResult.restoreOnboardingLink.linqChatId,
+      memberId: providerResult.restoreOnboardingLink.memberId,
+      prisma: input.prisma,
+      scheduleAfterResponse: input.scheduleAfterResponse,
+      service: providerResult.restoreOnboardingLink.service,
+    });
+  }
+  return providerResult;
 }
 
 async function ingestHostedLinqParticipantEventDirect(input: {
@@ -964,27 +1089,150 @@ export async function handleHostedOnboardingTelegramWebhook(input: {
       scheduleAfterResponse: input.scheduleAfterResponse,
       signal: input.scheduleAfterResponse ? undefined : input.signal,
     });
+    await reconcileHostedUsageReferralRewardsAfterCommitBestEffort({
+      prisma,
+      referralIds: plan.postCommitUsageReferralIds ?? [],
+      scheduleAfterResponse: input.scheduleAfterResponse,
+    });
   }
   return plan.response;
 }
 
-async function runHostedOnboardingWebhookTransaction<TResult>(
+async function reconcileHostedUsageReferralRewardsAfterCommitBestEffort(input: {
+  prisma: PrismaClient;
+  referralIds: readonly string[];
+  scheduleAfterResponse?: HostedWebhookPostResponseScheduler;
+}): Promise<void> {
+  const referralIds = [...new Set(input.referralIds)];
+  if (referralIds.length === 0) {
+    return;
+  }
+  const reconcile = async () => {
+    for (const referralId of referralIds) {
+      try {
+        const wake = await reconcileHostedUsageReferralRewardAfterCommit({
+          prisma: input.prisma,
+          referralId,
+        });
+        if (!wake) {
+          continue;
+        }
+        await signalHostedMailboxAppendRuntime({
+          expectedUserId: wake.userId,
+          ...(wake.wakeMailboxCheckpoint
+            ? {
+                knownCheckpoint: {
+                  ...wake.wakeMailboxCheckpoint,
+                  userId: wake.userId,
+                },
+              }
+            : {}),
+          mailboxItemId: wake.mailboxItemId,
+          prisma: input.prisma,
+        });
+      } catch (error) {
+        logHostedOnboardingDiagnostic(
+          "hosted-onboarding.usage-referral-reconcile-failed",
+          {
+            errorName: deriveHostedOnboardingTimingErrorName(error),
+          },
+        );
+      }
+    }
+  };
+  if (input.scheduleAfterResponse) {
+    input.scheduleAfterResponse(reconcile);
+    return;
+  }
+  await reconcile();
+}
+
+/**
+ * Unwrapping the ingress root reads an envelope and then calls KMS. Doing that
+ * first inside the planning transaction holds a pooled connection across a
+ * network round trip, which is what lets a slow KMS extend both connection
+ * occupancy and inbound serialization. The unwrap cache is already request
+ * scoped around this transaction, so unwrapping beforehand leaves the
+ * in-transaction encrypt as local AES work against the cached root.
+ *
+ * An established group reuses the planning-event route. A direct message uses
+ * a narrow blind-index/member-id preflight that mirrors planner precedence
+ * without decrypting private identity or routing fields. Both remain hints:
+ * the planner repeats every authority check inside the transaction.
+ * `laneSeq` is authenticated metadata allocated inside the transaction, so
+ * only the root is warmed; the payload is still encrypted in place.
+ */
+export async function warmHostedLinqMailboxPayloadRoot(input: {
+  event: Parameters<typeof requireHostedLinqMessageReceivedEvent>[0];
+  prisma: PrismaClient | Prisma.TransactionClient;
+  threadRoute: Pick<HostedThreadRouteSnapshot, "containerMemberId"> | null;
+}): Promise<void> {
+  const memberId = await resolveHostedLinqMailboxPayloadRootPrewarmMemberId({
+    event: input.event,
+    prisma: input.prisma,
+    threadRoute: input.threadRoute,
+  });
+  if (!memberId) {
+    return;
+  }
+
+  const root = await unwrapHostedDomainRootForWeb({
+    domain: getHostedCryptoDomainForLane("mailbox-payload"),
+    prisma: input.prisma,
+    retainFailureInScopedCache: true,
+    userId: memberId,
+  });
+  // The scoped cache hands every caller its own copy and expects that copy to
+  // be wiped; the cached master is zeroized separately when the scope closes.
+  // Warming needs the unwrap, not the plaintext, so wipe it immediately.
+  root.rootKey.fill(0);
+}
+
+export async function runHostedOnboardingWebhookTransaction<TResult>(
   prisma: PrismaClient,
   callback: (transaction: Prisma.TransactionClient) => Promise<TResult>,
+  /**
+   * Runs inside the unwrap cache but before the transaction opens, so a root
+   * this planner is certain to need is unwrapped without a connection held.
+   */
+  warmUnwrapCache?: () => Promise<void>,
 ): Promise<TResult> {
-  const startedAtMs = Date.now();
   const operations: PrismaOperationTiming[] = [];
+  let transactionMs = 0;
+  let warmUnwrapMs: number | undefined;
   try {
     return await runWithPrismaOperationTimings(operations, async () =>
-      runWithHostedDomainRootUnwrapCache(async () =>
-        typeof prisma.$transaction === "function"
-          ? prisma.$transaction(callback)
-          : callback(prisma as Prisma.TransactionClient),
-      ),
+      runWithHostedDomainRootUnwrapCache(async () => {
+        if (warmUnwrapCache) {
+          const warmStartedAtMs = Date.now();
+          try {
+            await warmUnwrapCache();
+          } catch (error) {
+            // A failed preflight must not suppress branches that never need
+            // this root. If the planner does request it, the scoped cache
+            // returns the retained rejection instead of repeating KMS while a
+            // connection is held.
+            logHostedOnboardingDiagnostic("hosted-onboarding.webhook.warm-failed", {
+              reason: error instanceof Error ? error.name : "unknown",
+            });
+          } finally {
+            warmUnwrapMs = Date.now() - warmStartedAtMs;
+          }
+        }
+        const transactionStartedAtMs = Date.now();
+        try {
+          return await (typeof prisma.$transaction === "function"
+            ? prisma.$transaction(callback)
+            : callback(prisma as Prisma.TransactionClient));
+        } finally {
+          transactionMs = Date.now() - transactionStartedAtMs;
+        }
+      }),
     );
   } finally {
     logHostedOnboardingDiagnostic("hosted-onboarding.webhook.plan-db", {
-      transactionMs: Date.now() - startedAtMs,
+      transactionMs,
+      ...(warmUnwrapMs === undefined ? {} : { warmUnwrapMs }),
       ...buildHostedWebhookDbTimingLogDetails(operations),
     });
   }

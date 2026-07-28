@@ -15,6 +15,7 @@ import { encryptHostedWebNullableString } from "@/src/lib/hosted-web/encryption"
 
 const privyManagementMocks = vi.hoisted(() => ({
   clientConstructor: vi.fn(),
+  getUser: vi.fn(),
   setCustomMetadata: vi.fn(),
 }));
 
@@ -27,6 +28,7 @@ vi.mock("@privy-io/node", () => ({
 
     users() {
       return {
+        _get: privyManagementMocks.getUser,
         setCustomMetadata: privyManagementMocks.setCustomMetadata,
       };
     }
@@ -226,6 +228,9 @@ function makeInvite(member: ReturnType<typeof makeMember>, overrides: Record<str
 describe("completeHostedPrivyVerification", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    privyManagementMocks.getUser.mockImplementation(async (userId: string) => ({
+      id: userId,
+    }));
     vi.spyOn(console, "info").mockImplementation(() => {});
   });
 
@@ -649,7 +654,14 @@ describe("completeHostedPrivyVerification", () => {
     expect(result.inviteCode).toBe("public-invite-code");
     expect(result.messagingSetupRequired).toBe(false);
     expect(result.stage).toBe("checkout");
-    expect(privyManagementMocks.clientConstructor).not.toHaveBeenCalled();
+    expect(privyManagementMocks.clientConstructor).toHaveBeenCalledOnce();
+    expect(privyManagementMocks.getUser).toHaveBeenCalledWith(
+      "did:privy:user_123",
+      {
+        maxRetries: 0,
+        timeout: 5_000,
+      },
+    );
     expect(privyManagementMocks.setCustomMetadata).not.toHaveBeenCalled();
   });
 
@@ -1608,6 +1620,87 @@ describe("completeHostedPrivyVerification", () => {
     expect(prisma.hostedMemberRouting.upsert).not.toHaveBeenCalled();
   });
 
+  it("blocks re-creation while Privy deletion remains pending", async () => {
+    const findPendingCleanup = vi.fn().mockResolvedValue({
+      id: "cleanup_pending",
+    });
+    const prisma = asCompleteHostedPrivyVerificationPrisma({
+      hostedAccountDeletionCleanup: {
+        findFirst: findPendingCleanup,
+      },
+      hostedInvite: {
+        create: vi.fn(),
+        findFirst: vi.fn(),
+      },
+      hostedMember: {
+        create: vi.fn(),
+        findUnique: vi.fn().mockResolvedValue(null),
+      },
+    });
+
+    await expect(completeHostedPrivyVerification({
+      identity: makeIdentity(),
+      now: NOW,
+      prisma,
+    })).rejects.toMatchObject({
+      code: "PRIVY_ACCOUNT_DELETION_IN_PROGRESS",
+      httpStatus: 409,
+      retryable: true,
+    });
+
+    expect(findPendingCleanup).toHaveBeenCalledWith({
+      select: { id: true },
+      where: {
+        privyCompletedAt: null,
+        privyUserLookupKey: {
+          in: [createHostedPrivyUserLookupKey("did:privy:user_123")],
+        },
+      },
+    });
+    expect(prisma.hostedMember.create).not.toHaveBeenCalled();
+    expect(prisma.hostedInvite.create).not.toHaveBeenCalled();
+  });
+
+  it("requires live provider authority before creating a new Privy member", async () => {
+    privyManagementMocks.getUser.mockRejectedValueOnce(new Error("missing"));
+    const findPendingCleanup = vi.fn().mockResolvedValue(null);
+    const prisma = asCompleteHostedPrivyVerificationPrisma({
+      hostedAccountDeletionCleanup: {
+        findFirst: findPendingCleanup,
+      },
+      hostedInvite: {
+        create: vi.fn(),
+        findFirst: vi.fn(),
+      },
+      hostedMember: {
+        create: vi.fn(),
+        findUnique: vi.fn().mockResolvedValue(null),
+      },
+    });
+
+    await expect(completeHostedPrivyVerification({
+      identity: makeIdentity(),
+      now: NOW,
+      prisma,
+    })).rejects.toMatchObject({
+      code: "PRIVY_USER_LOOKUP_FAILED",
+      httpStatus: 503,
+      retryable: true,
+    });
+
+    expect(findPendingCleanup).toHaveBeenCalledOnce();
+    expect(privyManagementMocks.getUser).toHaveBeenCalledWith(
+      "did:privy:user_123",
+      {
+        maxRetries: 0,
+        timeout: 5_000,
+      },
+    );
+    expect(prisma.hostedMember.create).not.toHaveBeenCalled();
+    expect(prisma.hostedMemberIdentity.upsert).not.toHaveBeenCalled();
+    expect(prisma.hostedInvite.create).not.toHaveBeenCalled();
+  });
+
   it("resolves phone auth by the asserted phone even when a linked wallet points elsewhere", async () => {
     const phoneMember = makeMember({ id: "member_phone" });
     const walletMember = makeMember({
@@ -1809,7 +1902,7 @@ describe("completeHostedPrivyVerification", () => {
     }));
   });
 
-  it("does not block phone auth when a linked Telegram route belongs to another member", async () => {
+  it("surfaces a secondary Telegram ownership conflict before issuing an invite", async () => {
     const secondaryTelegramTransactionCachePresence: boolean[] = [];
     const phoneMember = makeMember({ id: "member_phone_with_secondary_telegram" });
     const activeInvite = makeInvite(phoneMember, {
@@ -1818,7 +1911,6 @@ describe("completeHostedPrivyVerification", () => {
       inviteCode: "invite-phone-secondary-telegram",
       memberId: phoneMember.id,
     });
-    const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const prisma = asCompleteHostedPrivyVerificationPrisma({
       hostedInvite: {
         create: vi.fn().mockResolvedValue(activeInvite),
@@ -1846,38 +1938,83 @@ describe("completeHostedPrivyVerification", () => {
       },
     });
 
-    try {
-      await expect(
-        completeHostedPrivyVerification({
-          authMethod: "phone",
-          identity: makeIdentity({
-            telegram: {
-              firstName: "Alice",
-              lastName: null,
-              photoUrl: null,
-              telegramUserId: "456",
-              username: "alice",
-            },
-          }),
-          now: NOW,
-          prisma,
+    await expect(
+      completeHostedPrivyVerification({
+        authMethod: "phone",
+        identity: makeIdentity({
+          telegram: {
+            firstName: "Alice",
+            lastName: null,
+            photoUrl: null,
+            telegramUserId: "456",
+            username: "alice",
+          },
         }),
-      ).resolves.toMatchObject({
-        inviteCode: "invite-phone-secondary-telegram",
-        memberId: phoneMember.id,
-        stage: "checkout",
-      });
-      expect(consoleWarn).toHaveBeenCalledWith(
-        "Hosted Privy secondary telegram binding sync failed.",
-      );
-    } finally {
-      consoleWarn.mockRestore();
-    }
+        now: NOW,
+        prisma,
+      }),
+    ).rejects.toMatchObject({
+      code: "TELEGRAM_IDENTITY_CONFLICT",
+      httpStatus: 409,
+    });
 
     expect(prisma.hostedMember.create).not.toHaveBeenCalled();
+    expect(prisma.hostedInvite.create).not.toHaveBeenCalled();
     expect(prisma.hostedMemberRouting.upsert).not.toHaveBeenCalled();
     expect(secondaryTelegramTransactionCachePresence).toEqual([true]);
     expect(getHostedDomainRootUnwrapCache()).toBeUndefined();
+  });
+
+  it("writes a secondary Telegram binding exactly once during successful phone auth", async () => {
+    const phoneMember = makeMember({ id: "member_phone_with_secondary_telegram" });
+    const activeInvite = makeInvite(phoneMember, {
+      channel: "web",
+      id: "invite_phone_secondary_telegram",
+      inviteCode: "invite-phone-secondary-telegram",
+      memberId: phoneMember.id,
+    });
+    const telegramRoutingUpsert = vi.fn(async () => ({}));
+    const prisma = asCompleteHostedPrivyVerificationPrisma({
+      hostedInvite: {
+        create: vi.fn().mockResolvedValue(activeInvite),
+        findFirst: vi.fn().mockResolvedValue(null),
+        update: vi.fn(),
+      },
+      hostedMember: {
+        create: vi.fn(),
+        findUnique: vi.fn().mockImplementation(async ({ where }: { where: Record<string, unknown> }) => (
+          where.id === phoneMember.id || where.phoneLookupKey ? phoneMember : null
+        )),
+      },
+      hostedMemberRouting: {
+        findMany: vi.fn().mockResolvedValue([]),
+        findUnique: vi.fn().mockResolvedValue(null),
+        upsert: telegramRoutingUpsert,
+      },
+    });
+
+    await expect(
+      completeHostedPrivyVerification({
+        authMethod: "phone",
+        identity: makeIdentity({
+          telegram: {
+            firstName: "Alice",
+            lastName: null,
+            photoUrl: null,
+            telegramUserId: "456",
+            username: "alice",
+          },
+        }),
+        now: NOW,
+        prisma,
+      }),
+    ).resolves.toMatchObject({
+      inviteCode: "invite-phone-secondary-telegram",
+      memberId: phoneMember.id,
+      stage: "checkout",
+    });
+
+    expect(telegramRoutingUpsert).toHaveBeenCalledTimes(1);
   });
 
   it("does not block phone auth when a linked email belongs to another member", async () => {
@@ -2168,6 +2305,17 @@ function asCompleteHostedPrivyVerificationPrisma<T extends Record<string, unknow
   const hostedMemberRouting = readHostedMemberRoutingDelegate(prismaWithQueryRaw.hostedMemberRouting);
   const hostedMemberEmailAuthorization =
     readHostedMemberEmailAuthorizationDelegate(prismaWithQueryRaw.hostedMemberEmailAuthorization);
+  if (
+    !("hostedAccountDeletionCleanup" in prismaWithQueryRaw)
+    || !prismaWithQueryRaw.hostedAccountDeletionCleanup
+  ) {
+    Object.defineProperty(prismaWithQueryRaw, "hostedAccountDeletionCleanup", {
+      configurable: true,
+      value: {
+        findFirst: vi.fn().mockResolvedValue(null),
+      },
+    });
+  }
   if (!("hostedMember" in prismaWithQueryRaw) || !prismaWithQueryRaw.hostedMember || typeof hostedMember?.findUnique !== "function") {
     Object.defineProperty(prismaWithQueryRaw, "hostedMember", {
       configurable: true,

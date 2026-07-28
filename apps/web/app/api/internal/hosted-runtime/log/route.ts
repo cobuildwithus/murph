@@ -15,9 +15,8 @@ import {
 import { readOptionalJsonObject } from "@/src/lib/http";
 import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
 import {
-  readAcceptedRuntimeAttemptFailureSignalOwnerLogId,
+  claimHostedAcceptedAttemptFailureRecheck,
   recordHostedRuntimeLogs,
-  type HostedRuntimeLogReference,
 } from "@/src/lib/hosted-workspace/store";
 
 const ACCEPTED_RUNTIME_ATTEMPT_FAILED_EVENT_CODE = "runner.accepted_attempt_failed";
@@ -30,7 +29,18 @@ export const POST = withJsonError(async (request: Request) => {
   });
   const body = parseHostedRuntimeLogRequest(await readOptionalJsonObject(request));
 
-  const records = await recordHostedRuntimeLogs({
+  // Recovery runs before persistence, not after it: a failed diagnostic insert
+  // must not cost an accepted attempt its recheck. The signal helper swallows
+  // its own failures, so neither direction can break the other.
+  if (
+    body.entries.some((entry) =>
+      entry.eventCode === ACCEPTED_RUNTIME_ATTEMPT_FAILED_EVENT_CODE
+    )
+  ) {
+    await signalAcceptedRuntimeAttemptFailureBestEffort({ userId });
+  }
+
+  const loggedCount = await recordHostedRuntimeLogs({
     entries: body.entries.map((entry) => ({
       at: entry.at,
       component: entry.component,
@@ -51,36 +61,20 @@ export const POST = withJsonError(async (request: Request) => {
     userId,
   });
 
-  await signalAcceptedRuntimeAttemptFailureBestEffort({
-    records,
-    userId,
-  });
-
   return jsonOk(parseHostedRuntimeLogResponse({
-    loggedCount: body.entries.length,
+    loggedCount,
   }));
 });
 
 async function signalAcceptedRuntimeAttemptFailureBestEffort(input: {
-  records: readonly HostedRuntimeLogReference[];
   userId: string;
 }): Promise<void> {
-  const acceptedFailureLogIds = input.records
-    .filter((record) => record.eventCode === ACCEPTED_RUNTIME_ATTEMPT_FAILED_EVENT_CODE)
-    .map((record) => record.id);
-  if (acceptedFailureLogIds.length === 0) {
-    return;
-  }
-
   try {
-    const signalOwnerLogId = await readAcceptedRuntimeAttemptFailureSignalOwnerLogId({
-      since: new Date(Date.now() - ACCEPTED_RUNTIME_ATTEMPT_RECHECK_COOLDOWN_MS),
+    const claimed = await claimHostedAcceptedAttemptFailureRecheck({
+      cooldownMs: ACCEPTED_RUNTIME_ATTEMPT_RECHECK_COOLDOWN_MS,
       userId: input.userId,
     });
-    if (
-      signalOwnerLogId === null
-      || !acceptedFailureLogIds.includes(signalOwnerLogId)
-    ) {
+    if (!claimed) {
       return;
     }
 

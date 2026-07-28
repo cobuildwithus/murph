@@ -21,6 +21,7 @@ import type {
 } from "@murphai/hosted-execution/vault-share";
 import {
   buildHostedVaultShareProjectionScopeKey,
+  getHostedVaultShareDailyMetricProjectionSpec,
 } from "@murphai/hosted-execution/vault-share";
 
 import { hasHostedRuntimeActiveAccess } from "../hosted-mailbox/runtime-access";
@@ -29,27 +30,15 @@ import {
 } from "../hosted-onboarding/entitlement";
 import { hasHostedMemberActivationProof } from "../hosted-onboarding/member-activation";
 import { readActiveHostedMemberAccess } from "../hosted-onboarding/member-access";
-import { lookupHostedMemberIdentityByPhoneNumber } from "../hosted-onboarding/hosted-member-identity-store";
-import { lookupHostedMemberByVerifiedEmailAddress } from "../hosted-onboarding/hosted-member-store";
 import {
   getHostedLinqChatHandles,
   type HostedLinqChatHandleSummary,
-  isHostedLinqAttachmentSendPrepareFailure,
-  sendHostedLinqAttachmentMessage,
   sendHostedLinqChatMessage,
   updateHostedLinqChatAvatar,
   updateHostedLinqChatDisplayName,
 } from "../hosted-onboarding/linq-client";
 import {
-  buildMurphHostedLinqContactCardVcf,
-  fetchMurphHostedLinqContactCardVcfPhoto,
-  MURPH_CONTACT_CARD_VCF_CONTENT_TYPE,
-  MURPH_CONTACT_CARD_VCF_FILE_NAME,
-  resolveMurphHostedLinqContactCardBackupPhoneNumber,
-} from "../hosted-onboarding/linq-contact-card";
-import {
-  releaseHostedLinqContactCardShareAttempt,
-  reserveHostedLinqContactCardShareAttempt,
+  shareMurphHostedLinqContactCardVcfToChat,
 } from "../hosted-onboarding/linq-contact-card-share";
 import { createHostedLinqParticipantContactLookupKey } from "../hosted-onboarding/linq-participant-contact";
 import {
@@ -62,15 +51,23 @@ import {
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
   type HostedOnboardingReadClient,
 } from "../hosted-onboarding/shared";
+import {
+  HOSTED_ADDRESS_BOOK_LOOKUP_TIMEOUT_MS,
+  readHostedOwnerAddressBookAdvisoryNames,
+} from "../hosted-address-book/projection";
 import { signalHostedRuntimeMaintenanceRuntime } from "../hosted-orchestration/signal-runtime";
 import { assertHostedLinqRouteEgressAuthority } from "../hosted-routing/thread-route-store";
 import { resolveHostedPublicBaseUrl } from "../hosted-web/public-url";
+import { handleHostedUsageReferralGroupTool } from "../hosted-growth/usage-referral";
 import { getPrisma } from "../prisma";
 import { buildHostedGroupJoinUrl } from "./group-links";
 import {
   requestHostedGroupAssistantAsk,
   requestHostedGroupMemberAssistantAsk,
 } from "./group-assistant-ask";
+import {
+  requestHostedGroupCurrentSenderAssistantAsk,
+} from "./group-current-sender-assistant-ask";
 import {
   admitHostedGroupDisclosurePermissionAppendTx,
   canonicalizeHostedGroupDisclosurePermissionText,
@@ -80,7 +77,11 @@ import {
   recordHostedGroupDisclosurePermissionTx,
   revokeHostedGroupDisclosureGrantForMemberTx,
 } from "./group-disclosure-store";
-import { readHostedGroupUsageStatus } from "./group-usage-funding";
+import {
+  buildHostedGroupUsageFundingLocatorForRuntimeMember,
+  buildHostedGroupUsageFundingUrl,
+  readHostedGroupUsageStatus,
+} from "./group-usage-funding";
 import {
   enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort,
 } from "./group-newsletter";
@@ -102,6 +103,9 @@ import {
   projectHostedVaultShareProjectionDisplays,
 } from "./join-policy";
 import { sha256Hex } from "../primitives";
+import {
+  lookupHostedGroupParticipantMemberByHandle,
+} from "./participant-member";
 
 export const HOSTED_THREAD_CONTAINER_PARTICIPANT_RECONCILE_MAX =
   HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX;
@@ -141,7 +145,10 @@ export type HostedRuntimeGroupToolAccessClassification =
 
 export const HOSTED_RUNTIME_GROUP_TOOL_ACCESS_CLASSIFICATION = {
   ask: "personal_active",
+  ask_current_sender: "participant_aware",
   ask_member: "participant_aware",
+  arm_usage_referral: "participant_aware",
+  cancel_usage_referral: "participant_aware",
   create_join_link: "owner_active",
   leave_membership: "participant_aware",
   list_memberships: "personal_active",
@@ -152,6 +159,7 @@ export const HOSTED_RUNTIME_GROUP_TOOL_ACCESS_CLASSIFICATION = {
   read_current: "participant_aware",
   revoke_disclosure_grant: "personal_active",
   read_usage: "participant_aware",
+  read_usage_referral: "participant_aware",
   read_shared: "participant_aware",
   revoke_own_email_share: "participant_aware",
   set_chat_avatar: "owner_active",
@@ -182,6 +190,17 @@ export async function handleHostedRuntimeGroupTool(input: {
       input.scheduleMailboxWake?.(admission.mailboxWake);
     }
     return { action: "ask", result: admission.result };
+  }
+
+  if (input.request.action === "ask_current_sender") {
+    const admission = await requestHostedGroupCurrentSenderAssistantAsk({
+      groupRuntimeMemberId: input.memberId,
+      origin: input.request.origin,
+    });
+    if (admission.mailboxWake) {
+      input.scheduleMailboxWake?.(admission.mailboxWake);
+    }
+    return { action: "ask_current_sender", result: admission.result };
   }
 
   if (input.request.action === "ask_member") {
@@ -321,6 +340,17 @@ export async function handleHostedRuntimeGroupTool(input: {
     };
   }
 
+  if (
+    input.request.action === "arm_usage_referral"
+    || input.request.action === "cancel_usage_referral"
+    || input.request.action === "read_usage_referral"
+  ) {
+    return handleHostedUsageReferralGroupTool({
+      memberId: input.memberId,
+      request: input.request,
+    });
+  }
+
   if (!await hasHostedRuntimeActiveAccess(input.memberId)) {
     return {
       action: "read_current",
@@ -433,16 +463,42 @@ async function handleHostedRuntimeGroupListMemberships(input: {
         groupLabel,
         permissionText,
       })),
-      memberships: memberships.map(({ ownerJoinCode, ...membership }) => ({
+      memberships: memberships.map(({
+        ownerJoinCode,
+        runtimeMemberId,
+        ...membership
+      }) => ({
         ...membership,
         permissionsUrl: ownerJoinCode
           ? buildHostedGroupJoinUrl({ joinCode: ownerJoinCode, publicBaseUrl })
           : null,
+        sponsorshipUrl: buildMembershipSponsorshipUrl({
+          publicBaseUrl,
+          runtimeMemberId,
+        }),
       })),
       status: "ok",
       truncated,
     },
   };
+}
+
+function buildMembershipSponsorshipUrl(input: {
+  publicBaseUrl: string | null;
+  runtimeMemberId: string | null;
+}): string | null {
+  if (!input.runtimeMemberId) {
+    return null;
+  }
+  const locator = buildHostedGroupUsageFundingLocatorForRuntimeMember(
+    input.runtimeMemberId,
+  );
+  return locator
+    ? buildHostedGroupUsageFundingUrl({
+        joinCode: locator,
+        publicBaseUrl: input.publicBaseUrl,
+      })
+    : null;
 }
 
 async function handleHostedRuntimeGroupRevokeDisclosureGrant(input: {
@@ -710,7 +766,7 @@ async function lookupSelfOptOutParticipantMember(input: {
     return null;
   }
 
-  return await lookupParticipantMemberByHandle({
+  return await lookupHostedGroupParticipantMemberByHandle({
     handle: input.context.senderHandle,
     prisma: input.prisma,
   });
@@ -1259,7 +1315,22 @@ function renderHostedGroupJoinOfferScopeSentence(
 ): string {
   const labels = projectHostedVaultShareProjectionDisplays(projectionScopes)
     .map((display) => formatHostedGroupJoinOfferShareScopeLabel(display.label));
-  return `your ${formatHumanList(["Murph profile name", ...labels])}`;
+  const sentence = `your ${formatHumanList(["Murph profile name", ...labels])}`;
+  // Nutrition labels (e.g. "daily protein") read as a bare number; disclose that
+  // the totals come from the member's meals, connected-app imports included, so a
+  // like-to-consent reaction is not materially narrower than what is exported.
+  return projectionScopes.some(isHostedGroupMealNutritionProjectionScope)
+    ? `${sentence} (nutrition totals come from your meals in Murph, including meals imported from connected apps)`
+    : sentence;
+}
+
+function isHostedGroupMealNutritionProjectionScope(
+  scope: HostedVaultShareProjectionScope,
+): boolean {
+  return (
+    getHostedVaultShareDailyMetricProjectionSpec(scope.projectionKind)?.source.kind
+      === "meal-nutrition-total"
+  );
 }
 
 function formatHostedGroupJoinOfferShareScopeLabel(label: string): string {
@@ -1342,7 +1413,7 @@ async function handleHostedRuntimeGroupReadChatParticipants(input: {
   const resolvedParticipants: HostedThreadContainerResolvedParticipant[] = [];
   try {
     for (const handle of participantHandles) {
-      const lookup = await lookupParticipantMemberByHandle({
+      const lookup = await lookupHostedGroupParticipantMemberByHandle({
         handle: handle.handle,
         prisma,
       });
@@ -1376,10 +1447,76 @@ async function handleHostedRuntimeGroupReadChatParticipants(input: {
     resolvedParticipants,
   });
 
+  const ownerAdvisoryNames =
+    await readHostedOwnerAddressBookAdvisoryNamesWithinDeadline({
+      containerMemberId: input.memberId,
+      phoneHandles: participants.map((participant) => participant.handle),
+      prisma,
+    });
+  for (const participant of participants) {
+    const ownerAdvisoryName = ownerAdvisoryNames.get(participant.handle);
+    if (ownerAdvisoryName) {
+      participant.ownerAdvisoryName = ownerAdvisoryName;
+    }
+  }
+
   return {
     action: "read_chat_participants",
     result: { participants, status: "ok" },
   };
+}
+
+async function readHostedOwnerAddressBookAdvisoryNamesWithinDeadline(
+  input: Parameters<typeof readHostedOwnerAddressBookAdvisoryNames>[0],
+): Promise<ReadonlyMap<string, string>> {
+  const lookup = readHostedOwnerAddressBookAdvisoryNames(input).then(
+    (result) => ({ kind: "completed" as const, result }),
+    (error: unknown) => ({
+      errorName: deriveHostedOnboardingTimingErrorName(error),
+      kind: "failed" as const,
+    }),
+  );
+  // Prisma operations do not consume AbortSignal. Bound the entire optional
+  // overlay at its caller so a stuck read can never delay the truthful roster.
+  // The underlying lookup still receives its own KMS abort signal.
+
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<{ kind: "deadline_exceeded" }>((resolve) => {
+    timeout = setTimeout(() => {
+      resolve({ kind: "deadline_exceeded" });
+    }, HOSTED_ADDRESS_BOOK_LOOKUP_TIMEOUT_MS);
+  });
+
+  try {
+    const terminal = await Promise.race([lookup, deadline]);
+    if (terminal.kind === "completed") {
+      console.info("Hosted address-book advisory lookup finished.", {
+        canonicalHandleCount: terminal.result.canonicalHandleCount,
+        contactMatchCount: terminal.result.contactMatchCount,
+        labelMatchCount: terminal.result.names.size,
+        outcome: terminal.result.outcome,
+        requestedHandleCount: terminal.result.requestedHandleCount,
+      });
+      return terminal.result.names;
+    }
+    if (terminal.kind === "failed") {
+      console.warn("Hosted address-book advisory lookup unavailable.", {
+        ...sanitizeHostedOnboardingStructuredLogDetails({
+          errorName: terminal.errorName,
+          outcome: "lookup_failed",
+        }),
+      });
+    } else {
+      console.info("Hosted address-book advisory lookup unavailable.", {
+        outcome: "deadline_exceeded",
+      });
+    }
+    return new Map<string, string>();
+  } finally {
+    if (timeout !== undefined) {
+      clearTimeout(timeout);
+    }
+  }
 }
 
 export type HostedThreadContainerResolvedParticipant = {
@@ -1502,7 +1639,7 @@ async function resolveHostedThreadContainerParticipants(input: {
     if (!isCurrentHostedLinqParticipantHandle(handle)) {
       continue;
     }
-    const lookup = await lookupParticipantMemberByHandle({
+    const lookup = await lookupHostedGroupParticipantMemberByHandle({
       handle: handle.handle,
       prisma: input.prisma,
     });
@@ -1515,26 +1652,6 @@ async function resolveHostedThreadContainerParticipants(input: {
     }
   }
   return resolvedParticipants;
-}
-
-async function lookupParticipantMemberByHandle(input: {
-  handle: string;
-  prisma: HostedOnboardingReadClient;
-}) {
-  if (input.handle.includes("@")) {
-    return await lookupHostedMemberByVerifiedEmailAddress({
-      address: input.handle,
-      prisma: input.prisma,
-    });
-  }
-  const phoneNumber = normalizePhoneNumber(input.handle);
-  if (!phoneNumber) {
-    return null;
-  }
-  return await lookupHostedMemberIdentityByPhoneNumber({
-    phoneNumber,
-    prisma: input.prisma,
-  });
 }
 
 function isCurrentHostedLinqParticipantHandle(handle: HostedLinqChatHandleSummary): boolean {
@@ -1633,78 +1750,20 @@ async function handleHostedRuntimeGroupShareContactCard(input: {
     return unavailable(ownerAccess.unavailableReason);
   }
 
-  let linePhoneNumber: string | null = null;
-  let rosterPresent = false;
-  try {
-    const handles = await getHostedLinqChatHandles({ chatId: authorized.chatId });
-    rosterPresent = handles.length > 0;
-    linePhoneNumber = normalizePhoneNumber(
-      handles.find((handle) => handle.isMe)?.handle ?? null,
-    );
-  } catch {
-    return unavailable("provider_unavailable");
-  }
-  if (!rosterPresent) {
-    return unavailable("provider_unavailable");
-  }
-  if (!linePhoneNumber) {
-    return unavailable("line_unresolved");
-  }
-
-  const reservation = await reserveHostedLinqContactCardShareAttempt({
+  const outcome = await shareMurphHostedLinqContactCardVcfToChat({
     chatId: authorized.chatId,
+    idempotencyKeyPrefix: "group-contact-card",
     memberId: input.memberId,
     prisma,
   });
-  if (reservation.action !== "share") {
-    if (reservation.reason === "recent_attempt") {
-      return {
-        action: "share_contact_card",
-        result: { status: "already_shared" },
-      };
-    }
-    return unavailable(reservation.reason);
+  if (outcome.status === "already_shared") {
+    return {
+      action: "share_contact_card",
+      result: { status: "already_shared" },
+    };
   }
-
-  const [photo, backupPhoneNumber] = await Promise.all([
-    fetchMurphHostedLinqContactCardVcfPhoto(),
-    resolveMurphHostedLinqContactCardBackupPhoneNumber({
-      excludePhoneNumber: linePhoneNumber,
-      prisma: getPrisma(),
-    }),
-  ]);
-  const vcf = buildMurphHostedLinqContactCardVcf({
-    backupPhoneNumber,
-    phoneNumber: linePhoneNumber,
-    photo,
-  });
-  try {
-    await sendHostedLinqAttachmentMessage({
-      bytes: new Uint8Array(Buffer.from(vcf, "utf8")),
-      chatId: authorized.chatId,
-      contentType: MURPH_CONTACT_CARD_VCF_CONTENT_TYPE,
-      fileName: MURPH_CONTACT_CARD_VCF_FILE_NAME,
-      // Chat id + reservation instant: retries of this reservation dedupe at
-      // the provider while a later requested re-share stays a distinct send.
-      // The chat id is Linq's own identifier, so no new exposure.
-      idempotencyKey: `group-contact-card:${authorized.chatId}:${reservation.attemptedAt.getTime()}`,
-    });
-  } catch (error) {
-    if (isHostedLinqAttachmentSendPrepareFailure(error)) {
-      // Nothing reached the chat; free the throttle reservation so a later
-      // retry is not locked out. Ambiguous message-send failures keep it.
-      try {
-        await releaseHostedLinqContactCardShareAttempt({
-          attemptedAt: reservation.attemptedAt,
-          chatId: authorized.chatId,
-          memberId: input.memberId,
-          prisma,
-        });
-      } catch {
-        // Best effort: a stuck reservation only delays the next attempt.
-      }
-    }
-    return unavailable("send_failed");
+  if (outcome.status !== "sent") {
+    return unavailable(outcome.reason);
   }
 
   return {

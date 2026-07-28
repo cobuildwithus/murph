@@ -29,12 +29,15 @@ export default async function DashboardLayout({
   const consentStatus = auth.pageAuth.authenticatedMember
     ? await readDashboardConsentReminderStatus(auth.pageAuth.authenticatedMember.id)
     : null;
+  const browserVaultLoadEnabled = consentStatus?.launchGranted ?? true;
 
   return (
     <BrowserVaultProvider
       initialMemberId={auth.pageAuth.authenticatedMember?.id ?? null}
+      loadEnabled={browserVaultLoadEnabled}
     >
       <DashboardShell sidebarAuth={auth.sidebarAuth}>
+        {children}
         {consentStatus && !consentStatus.launchGranted ? (
           <DashboardLegalConsentGate
             initialStatus={consentStatus}
@@ -45,7 +48,6 @@ export default async function DashboardLayout({
             }
           />
         ) : null}
-        {children}
       </DashboardShell>
     </BrowserVaultProvider>
   );

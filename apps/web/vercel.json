@@ -13,8 +13,16 @@
       "schedule": "* * * * *"
     },
     {
+      "path": "/api/internal/hosted-growth/usage-referral/cron",
+      "schedule": "* * * * *"
+    },
+    {
       "path": "/api/internal/hosted-onboarding/linq/contact-card/cron",
       "schedule": "0 * * * *"
+    },
+    {
+      "path": "/api/internal/hosted-runtime/latency-alert/cron",
+      "schedule": "*/5 * * * *"
     },
     {
       "path": "/api/internal/hosted-execution/retention/cron",

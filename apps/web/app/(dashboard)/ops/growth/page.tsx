@@ -1,16 +1,14 @@
 import type { Metadata } from "next";
 
 import { GrowthCharts } from "./growth-charts";
+import { GrowthScorecard } from "./growth-scorecard";
 import {
   captureHostedGrowthDailySnapshot,
   readHostedGrowthDashboard,
   type HostedGrowthStatusCounts,
 } from "@/src/lib/hosted-ops/growth-metrics";
 import { requireHostedOpsPageAccess } from "@/src/lib/hosted-ops/access";
-import {
-  HOSTED_PULSE_TRIAL_DAYS,
-  getHostedFamilyBillingOfferDefinition,
-} from "@/src/lib/hosted-onboarding/billing-plans";
+import { HOSTED_PULSE_TRIAL_DAYS } from "@/src/lib/hosted-onboarding/billing-plans";
 import { getHostedDashboardPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
 import {
   Table,
@@ -52,87 +50,28 @@ export default async function HostedOpsGrowthPage() {
             <h1 className="mt-2 font-serif text-3xl font-semibold leading-tight tracking-tight text-foreground md:text-4xl">
               Growth
             </h1>
-            <p className="mt-3 max-w-2xl text-sm leading-6 text-muted-foreground">
-              Hosted member growth, Pulse trial starts, conversion, and daily
-              revenue snapshots from source database rows.
-            </p>
           </div>
           <div className="flex flex-wrap gap-2">
             <SummaryChip label="Captured" value={formatDateTime(dashboard.capturedAt)} />
-            <SummaryChip label="Trial maturity" value={`${HOSTED_PULSE_TRIAL_DAYS} days`} />
             <SummaryChip
-              label="Family seats"
-              value={`${formatCurrency(
-                getHostedFamilyBillingOfferDefinition("pulse").recurringAmountUsdCents,
-              )} Pulse · ${formatCurrency(
-                getHostedFamilyBillingOfferDefinition("edge").recurringAmountUsdCents,
-              )} Edge`}
+              label="Trial maturity"
+              value={`${HOSTED_PULSE_TRIAL_DAYS} days`}
             />
           </div>
         </div>
       </header>
 
-      <section aria-labelledby="growth-summary-title" className="flex flex-col gap-4">
-        <SectionHeading
-          description="Headline values use live rows. MRR week over week uses the closest snapshot from six to eight days ago. Conversion counts trials whose member is paid today."
-          id="growth-summary-title"
-          title="Current growth"
-        />
-        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
-          <Metric
-            emphasis
-            helper={formatChange(dashboard.mrrWowPercent)}
-            label="MRR"
-            value={formatCurrency(dashboard.current.mrrUsdCents)}
-          />
-          <Metric
-            helper={formatChange(dashboard.payingCustomersWowPercent)}
-            label="Paying customers"
-            value={formatInteger(dashboard.current.payingCustomers)}
-          />
-          <Metric
-            helper={`${formatInteger(dashboard.current.totalMembers)} total members`}
-            label="Covered members"
-            value={formatInteger(dashboard.current.coveredMembers)}
-          />
-          <Metric
-            helper={`${formatInteger(dashboard.current.trialsEndingSoon)} ending within 3 days`}
-            label="On trial now"
-            value={formatInteger(dashboard.current.trialingMembers)}
-          />
-          <Metric
-            helper={`${formatInteger(dashboard.conversion.converted)} of ${formatInteger(
-              dashboard.conversion.matureStarted,
-            )} mature`}
-            label="Trial conversion"
-            value={formatPercent(dashboard.conversion.percent)}
-          />
-        </div>
-      </section>
-
-      <section aria-labelledby="growth-acquisition-title" className="flex flex-col gap-4">
-        <SectionHeading
-          description="New hosted member rows include invited and pending contacts."
-          id="growth-acquisition-title"
-          title="Acquisition"
-        />
-        <div className="grid gap-3 md:grid-cols-3">
-          <Metric
-            label="New members today"
-            value={formatInteger(dashboard.newMembers.today)}
-          />
-          <Metric
-            helper={formatChange(dashboard.newMembers.wowPercent)}
-            label="New members last 7 days"
-            value={formatInteger(dashboard.newMembers.trailing7Days)}
-          />
-          <Metric
-            helper={formatChange(dashboard.trialStarts.wowPercent)}
-            label="Trial starts last 7 days"
-            value={formatInteger(dashboard.trialStarts.trailing7Days)}
-          />
-        </div>
-      </section>
+      <GrowthScorecard
+        activeUsers={dashboard.activeUsers}
+        conversion={dashboard.conversion}
+        mrrUsdCents={dashboard.current.mrrUsdCents}
+        mrrWowPercent={dashboard.mrrWowPercent}
+        newMembers={dashboard.newMembers}
+        payingCustomers={dashboard.current.payingCustomers}
+        payingCustomersWowPercent={dashboard.payingCustomersWowPercent}
+        trialStarts={dashboard.trialStarts}
+        usageTopUps={dashboard.usageTopUps}
+      />
 
       <GrowthCharts
         dailySeries={dashboard.dailySeries}
@@ -141,7 +80,7 @@ export default async function HostedOpsGrowthPage() {
 
       <section aria-labelledby="growth-revenue-title" className="flex flex-col gap-4">
         <SectionHeading
-          description="Individual plan amounts come from billing plan definitions. Family revenue uses billed paid seats."
+          description="Recurring revenue comes from active paid plan definitions. The tracked top-up total starts with retained fulfilled history at cutover, adds each new first fulfillment, and may omit purchases deleted before tracking began."
           id="growth-revenue-title"
           title="Revenue mix"
         />
@@ -183,6 +122,13 @@ export default async function HostedOpsGrowthPage() {
                 </TableCell>
               </TableRow>
               <TableRow>
+                <TableCell>Tracked fulfilled usage top-ups</TableCell>
+                <TableCell className="text-right">
+                  {formatInteger(dashboard.usageTopUps.trackedFulfilled)}
+                </TableCell>
+                <TableCell className="text-right">One-time</TableCell>
+              </TableRow>
+              <TableRow>
                 <TableCell>Unpriced paid members</TableCell>
                 <TableCell className="text-right">
                   {formatInteger(dashboard.current.unpricedPaidMembers)}
@@ -196,9 +142,9 @@ export default async function HostedOpsGrowthPage() {
 
       <section aria-labelledby="growth-weekly-title" className="flex flex-col gap-4">
         <SectionHeading
-          description="Rolling seven day UTC windows, newest first."
+          description="Rolling seven-day acquisition and trial-start volumes, newest first. These changes compare weekly volume; the company growth rate is the MRR score above."
           id="growth-weekly-title"
-          title="Weekly growth"
+          title="Weekly acquisition"
         />
         <div className="overflow-hidden rounded-xl border border-border/70 bg-card/90">
           <Table>
@@ -328,8 +274,6 @@ function SummaryChip(input: {
 }
 
 function Metric(input: {
-  emphasis?: boolean;
-  helper?: string | null;
   label: string;
   tone?: "default" | "warning";
   value: string;
@@ -337,9 +281,7 @@ function Metric(input: {
   const tone = input.tone ?? "default";
   const valueClassName = tone === "warning"
     ? "text-chart-4"
-    : input.emphasis
-      ? "text-primary"
-      : "text-foreground";
+    : "text-foreground";
 
   return (
     <div className="min-w-0 rounded-xl border border-border/70 bg-card/90 px-4 py-4">
@@ -349,11 +291,6 @@ function Metric(input: {
       <div className={`mt-2 min-w-0 break-words font-serif text-3xl font-semibold leading-none tracking-tight tabular-nums ${valueClassName}`}>
         {input.value}
       </div>
-      {input.helper ? (
-        <div className="mt-2 font-mono text-[10px] uppercase tracking-[0.1em] text-muted-foreground">
-          {input.helper}
-        </div>
-      ) : null}
     </div>
   );
 }

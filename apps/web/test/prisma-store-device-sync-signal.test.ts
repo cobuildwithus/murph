@@ -452,7 +452,11 @@ describe("PrismaDeviceSyncControlPlaneStore webhook traces", () => {
       processingExpiresAt: null,
     });
     expect(traces.get("oura:trace-expired")).toBeUndefined();
-    expect(traces.get("oura:trace-prunable")).toBeUndefined();
+    // Retention for unrelated processed traces belongs to the hourly job, not
+    // to whichever webhook happens to arrive next.
+    expect(traces.get("oura:trace-prunable")).toMatchObject({
+      status: "processed",
+    });
     expect(traces.get("oura:trace-processing")).toMatchObject({
       status: "processing",
       providerAccountBlindIndex: buildTestBlindIndex("oura", "acct-processing"),

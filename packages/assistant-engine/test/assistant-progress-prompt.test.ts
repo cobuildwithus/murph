@@ -62,103 +62,34 @@ describe('assistant progress prompt contract', () => {
     expect(prompt).not.toContain('before the first non-progress tool call')
   })
 
-  it('keeps the dynamic tool description aligned with the progress prompt rule', () => {
+  it('keeps the dynamic tool to a concise call contract', () => {
     expect(MURPH_SEND_PROGRESS_UPDATE_TOOL.name).toBe('send_progress_update')
+    expect(MURPH_SEND_PROGRESS_UPDATE_TOOL.description.length)
+      .toBeLessThanOrEqual(260)
     expect(MURPH_SEND_PROGRESS_UPDATE_TOOL.description).toContain(
-      'when reply-critical work would otherwise leave the user waiting without knowing why',
-    )
-    expect(MURPH_SEND_PROGRESS_UPDATE_TOOL.description).toContain(
-      'For work likely to finish in about a minute or less, send at most one update',
-    )
-    expect(MURPH_SEND_PROGRESS_UPDATE_TOOL.description).toContain(
-      'never a fourth',
+      'one brief user-visible progress update',
     )
     expect(MURPH_SEND_PROGRESS_UPDATE_TOOL.description).toContain(
-      'Linq/iMessage quota is not a reason to withhold a useful update',
+      'only before a real reply-critical wait',
     )
     expect(MURPH_SEND_PROGRESS_UPDATE_TOOL.description).toContain(
-      'Use it before a multi-source or cross-owner evidence pass',
+      'continue work immediately',
     )
     expect(MURPH_SEND_PROGRESS_UPDATE_TOOL.description).toContain(
-      'gets one update before the first read in that pass even when each lookup is routine',
+      'Success means this milestone update was sent; do not repeat it',
     )
     expect(MURPH_SEND_PROGRESS_UPDATE_TOOL.description).toContain(
-      'If the answer depends on a child and the wait may exceed ordinary latency, send it after spawning',
-    )
-    expect(MURPH_SEND_PROGRESS_UPDATE_TOOL.description).toContain(
-      'Optional background work does not trigger an update unless an active skill requires a receipt or start acknowledgement',
-    )
-    expect(MURPH_SEND_PROGRESS_UPDATE_TOOL.description).toContain(
-      'Do not use for individual tool loops, searches, reads, page checks, clicks, status churn',
-    )
-    expect(MURPH_SEND_PROGRESS_UPDATE_TOOL.description).toContain(
-      'PDFs, lab reports, images, screenshots, CSVs',
-    )
-    expect(MURPH_SEND_PROGRESS_UPDATE_TOOL.description).not.toContain(
-      'audio/video, large pasted text',
-    )
-    expect(MURPH_SEND_PROGRESS_UPDATE_TOOL.description).toContain(
-      'pasted text, meal/product/supplement labels',
-    )
-    expect(MURPH_SEND_PROGRESS_UPDATE_TOOL.description).toContain(
-      'workout or wearable exports, or health documents',
-    )
-    expect(MURPH_SEND_PROGRESS_UPDATE_TOOL.description).toContain(
-      'Skip automatically transcribed voice memo or audio content',
-    )
-    expect(MURPH_SEND_PROGRESS_UPDATE_TOOL.description).toContain(
-      'manual media tools or broader long-running work are needed',
-    )
-    expect(MURPH_SEND_PROGRESS_UPDATE_TOOL.description).not.toContain(
-      'reasoning over extracted content',
-    )
-    expect(MURPH_SEND_PROGRESS_UPDATE_TOOL.description).toContain(
-      'skill-file reads alone, setup checks, routine single-command vault reads',
-    )
-    expect(MURPH_SEND_PROGRESS_UPDATE_TOOL.description).toContain(
-      'one-shot logging/capture/memory saves that only need a straightforward write',
-    )
-    expect(MURPH_SEND_PROGRESS_UPDATE_TOOL.description).not.toContain(
-      'before the first non-progress tool call',
-    )
-    expect(MURPH_SEND_PROGRESS_UPDATE_TOOL.description).toContain(
-      'current conversation',
-    )
-    expect(MURPH_SEND_PROGRESS_UPDATE_TOOL.description).toContain(
-      'brief, natural user-visible progress update',
-    )
-    expect(MURPH_SEND_PROGRESS_UPDATE_TOOL.description).toContain(
-      'or final conclusions',
+      'This is not a final answer',
     )
 
     const textProperty =
       MURPH_SEND_PROGRESS_UPDATE_TOOL.inputSchema.properties.text
     expect(textProperty).not.toHaveProperty('maxLength')
+    expect(textProperty.description.length).toBeLessThanOrEqual(140)
     expect(textProperty.description).toContain(
-      'Prefer one short conversational first-person sentence about the immediate next step',
+      'One short natural sentence about verified current progress',
     )
-    expect(textProperty.description).toContain(
-      'use two only when needed to keep the quick note clear',
-    )
-    expect(textProperty.description).toContain('Use contractions when natural')
-    expect(textProperty.description).toContain(
-      'Avoid stiff plan-recitation wording like "I\'m going to..."',
-    )
-    expect(textProperty.description).toContain(
-      'a shorter "I\'ll..." or "Taking a look..." works',
-    )
-    expect(textProperty.description).toContain(
-      'Got your labs — I\'m making sure the original is kept safely now',
-    )
-    expect(textProperty.description).not.toContain(
-      'Got your labs, pulling the numbers in now',
-    )
-    expect(textProperty.description).toContain('No markdown links')
-    expect(textProperty.description).toContain('final answers')
-    expect(textProperty.description).toContain('lab interpretations')
-    expect(textProperty.description).toContain('abnormalities')
-    expect(textProperty.description).toContain('diagnoses')
-    expect(textProperty.description).toContain('treatment recommendations')
-    expect(textProperty.description).toContain('claims not yet verified')
+    expect(textProperty.description).toContain('no final conclusions')
+    expect(textProperty.description).toContain('unverified claims')
   })
 })

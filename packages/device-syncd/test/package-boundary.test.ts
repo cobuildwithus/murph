@@ -26,6 +26,8 @@ test("@murphai/device-syncd package manifest exposes narrow public subpaths", as
     "./hosted-hints",
     "./hosted-runtime",
     "./http",
+    "./junction-inline-authority",
+    "./junction-push-source-recovery",
     "./junction-resources",
     "./local-secret-codec",
     "./provider-configs",
@@ -58,6 +60,10 @@ test("@murphai/device-syncd package manifest exposes narrow public subpaths", as
   assert.deepEqual(packageManifest.exports?.["./local-secret-codec"], {
     default: "./dist/local-secret-codec.js",
     types: "./dist/local-secret-codec.d.ts",
+  });
+  assert.deepEqual(packageManifest.exports?.["./junction-inline-authority"], {
+    default: "./dist/junction-inline-authority.js",
+    types: "./dist/junction-inline-authority.d.ts",
   });
   assert.deepEqual(packageManifest.exports?.["./junction-resources"], {
     default: "./dist/junction-resources.js",

@@ -20,6 +20,7 @@ vi.mock("@murphai/hosted-execution", async () => {
 });
 
 import {
+  armCanonicalCheckpointPublicationBarrier,
   armCanonicalCheckpointLostAck,
   armSnapshotPublicationCorruption,
   armShutdownCheckpointPublicationBarrier,
@@ -224,6 +225,31 @@ async function createAuthorizedOpenAiImagesRequest(): Promise<Request> {
 }
 
 describe("hosted-local test RunnerContainer outbound composition", () => {
+  it("drops the exact operation queue used by the base container", async () => {
+    const container: HostedLocalTestRunnerContainer = Object.create(
+      HostedLocalTestRunnerContainer.prototype,
+    );
+    Object.defineProperty(container, "workspaceInvocationOperations", {
+      configurable: true,
+      value: [{ attemptId: "attempt_test" }],
+      writable: true,
+    });
+
+    await expect(container.dropActiveOperationForTest({
+      userId: "member_drop",
+    })).resolves.toEqual({ ok: true });
+
+    expect(
+      Object.getOwnPropertyDescriptor(
+        container,
+        "workspaceInvocationOperations",
+      )?.value,
+    ).toEqual([]);
+    expect(
+      Object.hasOwn(container, "workspaceInvocationActiveOperation"),
+    ).toBe(false);
+  });
+
   it("uses SIGTERM for the shutdown checkpoint control", async () => {
     const stop = vi.fn(async () => undefined);
     const destroy = vi.fn(async () => undefined);
@@ -672,7 +698,7 @@ describe("hosted-local test RunnerContainer outbound composition", () => {
       expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
         expect.objectContaining({
           details: {
-            barrierKind: "shutdown_checkpoint_publication",
+            barrierKind: "idle_shutdown_checkpoint_publication",
           },
           userId,
         }),
@@ -691,6 +717,40 @@ describe("hosted-local test RunnerContainer outbound composition", () => {
       );
       expect(realHandler).toHaveBeenCalledTimes(4);
       expect(releaseShutdownCheckpointPublicationBarrier(userId)).toBe(false);
+    } finally {
+      releaseShutdownCheckpointPublicationBarrier(userId);
+    }
+  });
+
+  it("holds one matching canonical checkpoint publication until explicit release", async () => {
+    const userId = "member_canonical_checkpoint_barrier";
+    const realHandler = vi.fn(async () => new Response("checkpoint committed", { status: 200 }));
+    const handler = wrapShutdownCheckpointPublicationBarrierForTest(realHandler);
+    armCanonicalCheckpointPublicationBarrier(userId);
+
+    try {
+      const heldPublication = handler(
+        createCanonicalCheckpointRequest(userId),
+        createOutboundEnv(),
+        { containerId: "opaque-container-id" },
+      );
+      await vi.waitFor(() => {
+        expect(readShutdownCheckpointPublicationBarrierState(userId)).toBe("entered");
+      });
+      expect(realHandler).not.toHaveBeenCalled();
+      expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+        expect.objectContaining({
+          details: {
+            barrierKind: "canonical_runtime_commit_checkpoint_publication",
+          },
+          userId,
+        }),
+      );
+
+      expect(releaseShutdownCheckpointPublicationBarrier(userId)).toBe(true);
+      await expect(heldPublication.then((response) => response.text()))
+        .resolves.toBe("checkpoint committed");
+      expect(realHandler).toHaveBeenCalledTimes(1);
     } finally {
       releaseShutdownCheckpointPublicationBarrier(userId);
     }

@@ -107,6 +107,7 @@ describe('cloudflare hosted e2e workflow guards', () => {
       'device-sync-junction-wearable-direct-resource-replay',
       'direct-r2-presigned-put',
       'family-sponsored-group-roundtrip',
+      'foreground-reply-priority',
       'idle-checkpoint-deferred-progress',
       'linq-delivery',
       'linq-group-route-drift',
@@ -133,6 +134,9 @@ describe('cloudflare hosted e2e workflow guards', () => {
     ])
     expect(workflow).not.toContain('for scenario in ${{ matrix.scenarios }}; do')
     expect(workflow).toContain('pnpm hosted-local e2e "${scenarios[@]}" --no-bundle')
+    expect(workflow).toContain(
+      'apps/web/test/hosted-production-500-regressions-postgres.test.ts',
+    )
     expect(workflow).toContain('timeoutMinutes: 35')
     // The Linq webhook media scenario depends on the shared bundle shipping
     // the E2E parser toolchain stub.

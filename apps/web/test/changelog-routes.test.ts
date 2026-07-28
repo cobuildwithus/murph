@@ -24,7 +24,7 @@ describe("changelog routes", () => {
   it("publishes every item from the two newest editions with canonical links", async () => {
     const response = await getChangelogFeed(
       new Request(
-        "https://join.example.test/api/changelog?from=2026-07-19&to=2026-07-21",
+        "https://join.example.test/api/changelog?from=2026-07-26&to=2026-07-28&featureLimit=100&improvementLimit=25",
       ),
     );
     const body = await response.json();
@@ -35,18 +35,18 @@ describe("changelog routes", () => {
     }>;
 
     expect(response.status).toBe(200);
-    expect(items).toHaveLength(13);
+    expect(items).toHaveLength(15);
     expect(items.map((item) => item.publishedOn)).toEqual([
-      ...Array.from({ length: 12 }, () => "2026-07-20"),
-      "2026-07-19",
+      ...Array.from({ length: 3 }, () => "2026-07-27"),
+      ...Array.from({ length: 12 }, () => "2026-07-26"),
     ]);
     expect(items.map((item) => item.id)).toEqual(
       expect.arrayContaining([
-        "challenge-standings-explain-missing-data",
-        "contaminant-tests-on-product-pages",
-        "pulse-finishes-after-payment-setup",
-        "strava-connections-paused",
-        "medical-records-plain-language",
+        "overnight-imessage-reminders",
+        "iphone-consent-recovery",
+        "group-room-memory",
+        "recognized-members-always-get-an-answer",
+        "contact-card-after-invite-signup",
       ]),
     );
     for (const item of items) {

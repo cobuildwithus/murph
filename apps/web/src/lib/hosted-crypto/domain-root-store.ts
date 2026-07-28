@@ -46,6 +46,18 @@ export class HostedDomainRootEnvelopeUnavailableError extends Error {
   }
 }
 
+export class HostedCryptoDomainRootCandidateRequiredError extends Error {
+  readonly domain: HostedCryptoDomain;
+
+  constructor(input: { domain: HostedCryptoDomain }) {
+    super(
+      `Prepared hosted ${input.domain} domain root candidate is required.`,
+    );
+    this.name = "HostedCryptoDomainRootCandidateRequiredError";
+    this.domain = input.domain;
+  }
+}
+
 export function isHostedDomainRootEnvelopeUnavailableError(
   error: unknown,
 ): error is HostedDomainRootEnvelopeUnavailableError {
@@ -83,9 +95,13 @@ export interface HostedDomainRootReference {
 export interface UnwrappedHostedDomainRootReference
   extends HostedDomainRootReference, UnwrappedHostedDomainRoot {}
 
+export type PreparedHostedCryptoDomainRootCandidates =
+  ReadonlyMap<HostedCryptoDomain, HostedDomainRootKeyEnvelopeV1>;
+
 async function unwrapWithScopedCache(
   cacheKey: string,
   compute: () => Promise<UnwrappedHostedDomainRoot>,
+  retainFailureInScopedCache = false,
 ): Promise<UnwrappedHostedDomainRoot> {
   const cache = getHostedDomainRootUnwrapCache();
   if (!cache) {
@@ -96,9 +112,11 @@ async function unwrapWithScopedCache(
   if (!pending) {
     pending = compute();
     cache.set(cacheKey, pending);
-    pending.catch(() => {
-      cache.delete(cacheKey);
-    });
+    if (!retainFailureInScopedCache) {
+      pending.catch(() => {
+        cache.delete(cacheKey);
+      });
+    }
   }
   const unwrapped = await pending;
   return {
@@ -109,14 +127,48 @@ async function unwrapWithScopedCache(
   };
 }
 
+/**
+ * Phase one of domain-root provisioning. Signing one envelope costs up to three
+ * GCP KMS round trips, so the candidates are built here, before any transaction
+ * or advisory lock is taken. Candidates are ephemeral: one that loses the
+ * insert race is discarded, and a root key that was never persisted decrypts
+ * nothing and is referenced by nothing.
+ */
+export async function prepareHostedCryptoDomainRootCandidates(input: {
+  domains?: readonly HostedCryptoDomain[];
+  prisma?: HostedCryptoClient;
+  userId: string;
+}): Promise<PreparedHostedCryptoDomainRootCandidates> {
+  const prisma = input.prisma ?? getPrisma();
+  const activeDomains = await readActiveHostedCryptoDomains({
+    prisma,
+    userId: input.userId,
+  });
+  const missing = (input.domains ?? ALL_DOMAINS).filter(
+    (domain) => !activeDomains.has(domain),
+  );
+  if (missing.length === 0) {
+    return new Map();
+  }
+  return new Map(await Promise.all(missing.map(async (domain) => [
+    domain,
+    await createSignedHostedDomainRootEnvelope({ domain, userId: input.userId }),
+  ] as const)));
+}
+
 export async function provisionHostedCryptoDomainRootsForUser(input: {
   prisma?: PrismaClient;
   reason?: string;
   userId: string;
 }): Promise<void> {
   const prisma = input.prisma ?? getPrisma();
+  const prepared = await prepareHostedCryptoDomainRootCandidates({
+    prisma,
+    userId: input.userId,
+  });
   await prisma.$transaction(async (tx) => {
-    await provisionHostedCryptoDomainRootsForUserTx({
+    await provisionPreparedHostedCryptoDomainRootsTx({
+      prepared,
       reason: input.reason,
       tx,
       userId: input.userId,
@@ -124,19 +176,55 @@ export async function provisionHostedCryptoDomainRootsForUser(input: {
   });
 }
 
-export async function provisionHostedCryptoDomainRootsForUserTx(input: {
+/**
+ * Transaction-only commit phase. This API has no signing fallback: callers
+ * must prepare candidates before opening their transaction. An empty map is
+ * valid when every root already exists.
+ */
+export async function provisionPreparedHostedCryptoDomainRootsTx(input: {
+  prepared: PreparedHostedCryptoDomainRootCandidates;
   reason?: string;
   tx: HostedCryptoTx;
   userId: string;
 }): Promise<void> {
   for (const domain of ALL_DOMAINS) {
     await provisionActiveHostedDomainRootEnvelopeForUserOnlyTx({
+      candidate: input.prepared.get(domain),
       domain,
       reason: input.reason ?? "hosted-crypto.provision",
       tx: input.tx,
       userId: input.userId,
     });
   }
+}
+
+/**
+ * Legacy all-domain bridge for the two owners that still discover or create a
+ * member id after `BEGIN`: thread-container creation and inbound Family member
+ * activation. Candidate signing happens before the first per-domain lock, but
+ * the caller retains its outer connection and every `pg_advisory_xact_lock`
+ * remains held until that outer transaction ends. New transaction code must
+ * use the prepared-only commit API above.
+ *
+ * Signup/Privy identity reconciliation uses the separate single-domain legacy
+ * surface below. Active Family Stripe reconciliation prepares every bounded
+ * member candidate before opening its owner transaction.
+ */
+export async function provisionHostedCryptoDomainRootsForUserTx(input: {
+  reason?: string;
+  tx: HostedCryptoTx;
+  userId: string;
+}): Promise<void> {
+  const prepared = await prepareHostedCryptoDomainRootCandidates({
+    prisma: input.tx,
+    userId: input.userId,
+  });
+  await provisionPreparedHostedCryptoDomainRootsTx({
+    prepared,
+    reason: input.reason,
+    tx: input.tx,
+    userId: input.userId,
+  });
 }
 
 export async function hasActiveHostedCryptoDomainRootsForUserTx(input: {
@@ -159,6 +247,11 @@ export async function hasActiveHostedCryptoDomainRootsForUserTx(input: {
   return (rows[0]?.domainCount ?? 0) >= ALL_DOMAINS.length;
 }
 
+/**
+ * Provider-capable single-domain legacy surface for identity owners that can
+ * create the durable member id only inside their transaction. Callers that
+ * know the member id before `BEGIN` must prepare and use the commit-only API.
+ */
 export async function provisionActiveHostedDomainRootEnvelopeForUserOnly(input: {
   domain: HostedCryptoDomain;
   prisma?: HostedCryptoClient;
@@ -166,19 +259,27 @@ export async function provisionActiveHostedDomainRootEnvelopeForUserOnly(input: 
   userId: string;
 }): Promise<HostedDomainRootKeyEnvelopeV1> {
   const prisma = input.prisma ?? getPrisma();
+  const reason = input.reason ?? "hosted-crypto.provision-domain-root";
+  const prepared = await prepareHostedCryptoDomainRootCandidates({
+    domains: [input.domain],
+    prisma,
+    userId: input.userId,
+  });
   if (hasPrismaTransactionRoot(prisma)) {
     return prisma.$transaction((tx) =>
       provisionActiveHostedDomainRootEnvelopeForUserOnlyTx({
+        candidate: prepared.get(input.domain),
         domain: input.domain,
-        reason: input.reason ?? "hosted-crypto.provision-domain-root",
+        reason,
         tx,
         userId: input.userId,
       }),
     );
   }
   return provisionActiveHostedDomainRootEnvelopeForUserOnlyTx({
+    candidate: prepared.get(input.domain),
     domain: input.domain,
-    reason: input.reason ?? "hosted-crypto.provision-domain-root",
+    reason,
     tx: prisma,
     userId: input.userId,
   });
@@ -187,6 +288,13 @@ export async function provisionActiveHostedDomainRootEnvelopeForUserOnly(input: 
 export async function unwrapHostedDomainRootForWeb(input: {
   domain: HostedCryptoDomain;
   prisma?: HostedCryptoClient;
+  /**
+   * Retains a rejected unwrap only until the current scoped cache closes.
+   * Preflight callers use this when retrying inside the immediately following
+   * transaction would repeat the same provider request while holding a
+   * connection. Ordinary callers continue to evict failures for later retry.
+   */
+  retainFailureInScopedCache?: boolean;
   signal?: AbortSignal;
   userId: string;
 }): Promise<UnwrappedHostedDomainRoot> {
@@ -205,6 +313,7 @@ export async function unwrapHostedDomainRootForWeb(input: {
       const rootKey = await unwrapEnvelopeForWeb({ envelope, signal: input.signal });
       return { envelope, rootKey };
     },
+    input.retainFailureInScopedCache,
   );
   const cache = getHostedDomainRootUnwrapCache();
   const active = cache?.get(activeCacheKey);
@@ -350,11 +459,24 @@ export async function readHostedRuntimeCryptoContextForWorker(input: {
 }
 
 async function provisionActiveHostedDomainRootEnvelopeForUserOnlyTx(input: {
+  candidate?: HostedDomainRootKeyEnvelopeV1 | undefined;
   domain: HostedCryptoDomain;
   reason: string;
   tx: HostedCryptoTx;
   userId: string;
 }): Promise<HostedDomainRootKeyEnvelopeV1> {
+  if (
+    input.candidate
+    && (input.candidate.domain !== input.domain || input.candidate.userId !== input.userId)
+  ) {
+    throw new Error("Prepared hosted domain root candidate does not match the requested user/domain.");
+  }
+
+  // The advisory lock orders contenders before the re-read, while the partial
+  // unique active-envelope index is the database backstop. Because this is a
+  // transaction-scoped lock, it remains held until the caller's outer
+  // transaction ends. A prepared candidate is inserted here or discarded
+  // here; it is never a reason to skip either boundary.
   await input.tx.$executeRaw`
     SELECT pg_advisory_xact_lock(hashtext(${input.userId}), hashtext(${input.domain}))
   `;
@@ -368,10 +490,12 @@ async function provisionActiveHostedDomainRootEnvelopeForUserOnlyTx(input: {
     return parseAssertAndVerifyEnvelope(existing, input);
   }
 
-  const created = await createSignedHostedDomainRootEnvelope({
-    domain: input.domain,
-    userId: input.userId,
-  });
+  if (!input.candidate) {
+    throw new HostedCryptoDomainRootCandidateRequiredError({
+      domain: input.domain,
+    });
+  }
+  const created = input.candidate;
   const id = crypto.randomUUID();
   await input.tx.$executeRaw`
     INSERT INTO hosted_user_crypto_envelope (
@@ -615,6 +739,19 @@ function assertExpectedGcpKmsWrap(input: {
   ) {
     throw new Error("Hosted domain root KMS encryption context mismatch.");
   }
+}
+
+async function readActiveHostedCryptoDomains(input: {
+  prisma: HostedCryptoClient;
+  userId: string;
+}): Promise<Set<HostedCryptoDomain>> {
+  const rows = await input.prisma.$queryRaw<Array<{ domain: HostedCryptoDomain }>>`
+    SELECT DISTINCT domain::text AS domain
+    FROM hosted_user_crypto_envelope
+    WHERE user_id = ${input.userId}
+      AND status = 'active'::hosted_crypto_envelope_status
+  `;
+  return new Set(rows.map((row) => row.domain));
 }
 
 async function readActiveHostedDomainRootEnvelopeRow(input: {

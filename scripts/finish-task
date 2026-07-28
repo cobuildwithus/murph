@@ -3,8 +3,8 @@ set -euo pipefail
 
 usage() {
   echo "Usage: $(basename "$0") <active-plan-path> \"commit message\" <path> [path ...]" >&2
-  echo "Closes the matching active plan, removes its exact ledger row, archives it under agent-docs/exec-plans/completed/, and creates a scoped commit." >&2
-  echo "The commit includes the closed plan, resolved task paths, and only this task's ledger-row removal when that row exists in HEAD." >&2
+  echo "Archives the active plan under agent-docs/exec-plans/completed/ and creates a scoped commit." >&2
+  echo "The commit includes the closed plan and the resolved task paths." >&2
   exit 2
 }
 
@@ -19,7 +19,6 @@ plan_path="$1"
 shift
 commit_message="$1"
 shift
-ledger_path="agent-docs/exec-plans/active/COORDINATION_LEDGER.md"
 
 case "$plan_path" in
   agent-docs/exec-plans/active/*.md) ;;
@@ -37,27 +36,6 @@ fi
 completed_plan_path="agent-docs/exec-plans/completed/$(basename "$plan_path")"
 
 resolved_commit_paths=()
-ledger_commit_candidate_path=""
-ledger_restore_path=""
-ledger_restore_pending=false
-tmp_dir=""
-
-cleanup() {
-  if [[ "$ledger_restore_pending" == true && -f "$ledger_restore_path" ]]; then
-    cp "$ledger_restore_path" "$ledger_path"
-  fi
-
-  if [[ -n "$tmp_dir" && -d "$tmp_dir" ]]; then
-    rm -rf "$tmp_dir"
-  fi
-}
-trap cleanup EXIT
-
-ensure_tmp_dir() {
-  if [[ -z "$tmp_dir" ]]; then
-    tmp_dir="$(mktemp -d)"
-  fi
-}
 
 append_unique_path() {
   local candidate="$1"
@@ -128,128 +106,6 @@ expand_commit_target() {
   exit 1
 }
 
-write_ledger_without_matching_row() {
-  local input_path="$1"
-  local output_path="$2"
-  local plan="$3"
-  local require_match="$4"
-
-  if [[ ! -f "$input_path" ]]; then
-    echo "Coordination ledger not found: $input_path" >&2
-    exit 1
-  fi
-
-  LEDGER_INPUT_PATH="$input_path" \
-    LEDGER_OUTPUT_PATH="$output_path" \
-    PLAN_PATH="$plan" \
-    REQUIRE_MATCH="$require_match" \
-    node - <<'NODE'
-const fs = require('fs');
-
-const ledgerInputPath = process.env.LEDGER_INPUT_PATH;
-const ledgerOutputPath = process.env.LEDGER_OUTPUT_PATH;
-const planPath = process.env.PLAN_PATH;
-const requireMatch = process.env.REQUIRE_MATCH === '1';
-const text = fs.readFileSync(ledgerInputPath, 'utf8');
-const lines = text.split('\n');
-const headerIndex = lines.findIndex((line) => line.startsWith('| Agent |'));
-
-if (headerIndex === -1) {
-  console.error(`Ledger header not found: ${ledgerInputPath}`);
-  process.exit(1);
-}
-
-const headerColumns = lines[headerIndex]
-  .split('|')
-  .slice(1, -1)
-  .map((part) => part.trim());
-const planColumnIndex = headerColumns.indexOf('Plan');
-
-if (planColumnIndex === -1) {
-  console.error(`Ledger Plan column not found: ${ledgerInputPath}`);
-  process.exit(1);
-}
-
-function normalizePlanCell(value) {
-  const trimmed = value.trim();
-  const inlineCodeMatch = trimmed.match(/^`([^`]+)`$/);
-
-  if (inlineCodeMatch) {
-    return inlineCodeMatch[1].trim();
-  }
-
-  return trimmed;
-}
-
-const matches = [];
-
-for (let i = headerIndex + 2; i < lines.length; i += 1) {
-  const line = lines[i];
-  if (!line.startsWith('|') || line.startsWith('| ---')) continue;
-  const columns = line
-    .split('|')
-    .slice(1, -1)
-    .map((part) => part.trim());
-  if (normalizePlanCell(columns[planColumnIndex] ?? '') === planPath) {
-    matches.push(i);
-  }
-}
-
-if (matches.length === 0) {
-  if (requireMatch) {
-    console.error(
-      `Expected exactly one coordination-ledger row with Plan '${planPath}', found none.`,
-    );
-    process.exit(1);
-  }
-  fs.writeFileSync(ledgerOutputPath, text);
-  process.exit(0);
-}
-
-if (matches.length > 1) {
-  console.error(
-    `Expected exactly one coordination-ledger row with Plan '${planPath}', found ${matches.length}.`,
-  );
-  process.exit(1);
-}
-
-lines.splice(matches[0], 1);
-fs.writeFileSync(ledgerOutputPath, lines.join('\n'));
-NODE
-}
-
-remove_matching_ledger_row() {
-  local plan="$1"
-  local next_ledger_path
-
-  ensure_tmp_dir
-  next_ledger_path="$tmp_dir/coordination-ledger-worktree.md"
-  write_ledger_without_matching_row "$ledger_path" "$next_ledger_path" "$plan" 1
-  cp "$next_ledger_path" "$ledger_path"
-}
-
-prepare_ledger_commit_candidate() {
-  local plan="$1"
-  local ledger_head_path
-  local candidate_path
-
-  if ! git cat-file -e "HEAD:$ledger_path" >/dev/null 2>&1; then
-    return
-  fi
-
-  ensure_tmp_dir
-  ledger_head_path="$tmp_dir/coordination-ledger-head.md"
-  candidate_path="$tmp_dir/coordination-ledger-commit.md"
-  git show "HEAD:$ledger_path" > "$ledger_head_path"
-  write_ledger_without_matching_row "$ledger_head_path" "$candidate_path" "$plan" 0
-
-  if cmp -s "$ledger_head_path" "$candidate_path"; then
-    return
-  fi
-
-  ledger_commit_candidate_path="$candidate_path"
-}
-
 for target in "$@"; do
   expand_commit_target "$target"
 done
@@ -259,9 +115,6 @@ if [[ "${#resolved_commit_paths[@]}" -eq 0 ]]; then
   exit 1
 fi
 
-remove_matching_ledger_row "$plan_path"
-prepare_ledger_commit_candidate "$plan_path"
-
 bash scripts/close-exec-plan.sh "$plan_path"
 
 commit_paths=("$completed_plan_path")
@@ -269,26 +122,6 @@ if git ls-files --error-unmatch -- "$plan_path" >/dev/null 2>&1; then
   commit_paths=("$plan_path" "$completed_plan_path")
 fi
 
-if [[ -n "$ledger_commit_candidate_path" ]]; then
-  ensure_tmp_dir
-  ledger_restore_path="$tmp_dir/coordination-ledger-restore.md"
-  cp "$ledger_path" "$ledger_restore_path"
-  cp "$ledger_commit_candidate_path" "$ledger_path"
-  ledger_restore_pending=true
-  commit_paths+=("$ledger_path")
-fi
-
-echo "finish-task: removed matching ledger row from $ledger_path"
-if [[ -n "$ledger_commit_candidate_path" ]]; then
-  echo "finish-task: commit includes only this task's ledger-row removal from $ledger_path"
-else
-  echo "finish-task: commit excludes $ledger_path because the matching row is not present in HEAD"
-fi
 echo "finish-task: commit includes closed plan plus ${#resolved_commit_paths[@]} resolved task path(s)"
 
 bash scripts/committer "$commit_message" "${commit_paths[@]}" "${resolved_commit_paths[@]}"
-
-if [[ "$ledger_restore_pending" == true ]]; then
-  cp "$ledger_restore_path" "$ledger_path"
-  ledger_restore_pending=false
-fi

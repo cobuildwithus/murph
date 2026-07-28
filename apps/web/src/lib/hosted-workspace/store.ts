@@ -51,6 +51,8 @@ export {
 const HOSTED_CANONICAL_WRITE_RECEIPT_REDACTED_STATUS_KEY_SET =
   new Set<string>(HOSTED_CANONICAL_WRITE_RECEIPT_REDACTED_STATUS_KEYS);
 const HOSTED_WORKSPACE_CHECKPOINT_MAILBOX_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+const HOSTED_RUNTIME_LOG_MEMBER_FOREIGN_KEY =
+  "hosted_runtime_log_user_id_fkey";
 
 export type HostedWorkspaceStoreClient = PrismaClient | Prisma.TransactionClient;
 export type HostedWorkspaceMutationTx = Prisma.TransactionClient;
@@ -161,12 +163,6 @@ export interface HostedRuntimeLogEntryInput {
   phase: HostedRuntimeLogPhase | string;
   redacted?: HostedRuntimeRedactedJson | null;
   workspaceVersion?: bigint | number | string | null;
-}
-
-/** The identity a bulk writer returns; the full row is never read back. */
-export interface HostedRuntimeLogReference {
-  eventCode: HostedRuntimeLogEventCode;
-  id: string;
 }
 
 export async function ensureHostedWorkspace(input: {
@@ -974,14 +970,14 @@ function buildHostedRuntimeLogCreateData(
  * callback accepts up to 50 entries, and one Prisma call per entry would put a
  * single request's fanout above the whole pool's capacity, making the pool
  * itself the request's concurrency limiter. `createMany` keeps one callback to
- * one statement. Returns only the references the caller needs to decide whether
- * to signal a recheck.
+ * one statement. Every entry is normalized before the insert runs, so a
+ * malformed entry rejects the batch instead of persisting part of it.
  */
 export async function recordHostedRuntimeLogs(input: {
   entries: readonly HostedRuntimeLogEntryInput[];
   prisma?: HostedWorkspaceStoreClient;
   userId: string;
-}): Promise<HostedRuntimeLogReference[]> {
+}): Promise<number> {
   const prisma = input.prisma ?? getPrisma();
   const rows = input.entries.map((entry) => buildHostedRuntimeLogCreateData({
     ...entry,
@@ -989,17 +985,56 @@ export async function recordHostedRuntimeLogs(input: {
   }));
 
   if (rows.length === 0) {
-    return [];
+    return 0;
   }
 
-  await prisma.hostedRuntimeLog.createMany({
-    data: rows,
-  });
+  try {
+    const result = await prisma.hostedRuntimeLog.createMany({
+      data: rows,
+    });
 
-  return rows.map((row) => ({
-    eventCode: row.eventCode,
-    id: row.id,
-  }));
+    return result.count;
+  } catch (error) {
+    // A runtime can finish draining a best-effort diagnostic batch after
+    // account deletion committed. The member row is authoritative; diagnostics
+    // must neither recreate it nor turn this expected race into a retrying 500.
+    if (isMissingHostedRuntimeLogMember(error)) {
+      return 0;
+    }
+    throw error;
+  }
+}
+
+function isMissingHostedRuntimeLogMember(error: unknown): boolean {
+  if (
+    !(error instanceof Prisma.PrismaClientKnownRequestError)
+    || error.code !== "P2003"
+  ) {
+    return false;
+  }
+
+  const directConstraint = error.meta?.constraint;
+  if (directConstraint === HOSTED_RUNTIME_LOG_MEMBER_FOREIGN_KEY) {
+    return true;
+  }
+
+  const driverAdapterError = error.meta?.driverAdapterError;
+  if (!isUnknownRecord(driverAdapterError)) {
+    return false;
+  }
+  const cause = driverAdapterError.cause;
+  if (!isUnknownRecord(cause)) {
+    return false;
+  }
+  const constraint = cause.constraint;
+  return (
+    isUnknownRecord(constraint)
+    && constraint.index === HOSTED_RUNTIME_LOG_MEMBER_FOREIGN_KEY
+  );
+}
+
+function isUnknownRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
 }
 
 export async function listHostedRuntimeLogs(input: {
@@ -1022,34 +1057,38 @@ export async function listHostedRuntimeLogs(input: {
   return rows.map((row) => projectHostedRuntimeLog(row));
 }
 
-export async function readAcceptedRuntimeAttemptFailureSignalOwnerLogId(input: {
+/**
+ * Claims the per-member cooldown that decides which accepted-attempt failure
+ * triggers a runtime recheck. The claim lives in workspace control state, so
+ * recovery never depends on a best-effort diagnostic row being written or read
+ * back. Concurrent callbacks serialize on the workspace row, and exactly one
+ * of them sees a claimed count.
+ */
+export async function claimHostedAcceptedAttemptFailureRecheck(input: {
+  cooldownMs: number;
+  now?: Date | string;
   prisma?: HostedWorkspaceStoreClient;
-  since: Date;
   userId: string;
-}): Promise<string | null> {
+}): Promise<boolean> {
   const prisma = input.prisma ?? getPrisma();
-  const row = await prisma.hostedRuntimeLog.findFirst({
-    orderBy: [
-      { createdAt: "asc" },
-      { id: "asc" },
-    ],
-    select: {
-      id: true,
+  const now = input.now === undefined
+    ? new Date()
+    : requireDate(input.now, "Hosted accepted-attempt recheck claim time");
+  const claimedAfter = new Date(now.getTime() - input.cooldownMs);
+  const result = await prisma.hostedWorkspace.updateMany({
+    data: {
+      acceptedAttemptFailureRecheckClaimedAt: now,
     },
     where: {
-      createdAt: {
-        gte: input.since,
-      },
-      eventCode: requireAllowedString(
-        "runner.accepted_attempt_failed",
-        HOSTED_RUNTIME_LOG_EVENT_CODES,
-        "Hosted runtime log eventCode",
-      ),
-      userId: requireNonEmptyString(input.userId, "Hosted runtime log userId"),
+      OR: [
+        { acceptedAttemptFailureRecheckClaimedAt: null },
+        { acceptedAttemptFailureRecheckClaimedAt: { lt: claimedAfter } },
+      ],
+      userId: requireNonEmptyString(input.userId, "Hosted workspace userId"),
     },
   });
 
-  return row?.id ?? null;
+  return result.count > 0;
 }
 
 export function projectHostedWorkspace(record: HostedWorkspaceRow): HostedWorkspaceRecord {

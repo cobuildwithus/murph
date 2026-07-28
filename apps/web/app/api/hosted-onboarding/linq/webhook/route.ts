@@ -3,6 +3,7 @@ import { after } from "next/server";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
 import { handleHostedOnboardingLinqWebhook } from "@/src/lib/hosted-onboarding/webhook-service";
+import { withHostedVisibleSecondaryLinqOutcomes } from "@/src/lib/hosted-onboarding/visible-secondary-webhooks";
 import { readRawBodyBuffer } from "@/src/lib/http";
 import {
   deriveHostedOnboardingTimingErrorName,
@@ -13,6 +14,8 @@ import {
 } from "@/src/lib/hosted-onboarding/logging";
 
 const HOSTED_LINQ_WEBHOOK_MAX_BODY_BYTES = 256 * 1024;
+const handleHostedOnboardingLinqWebhookWithVisibleSecondaryOutcomes =
+  withHostedVisibleSecondaryLinqOutcomes(handleHostedOnboardingLinqWebhook);
 
 export const POST = withJsonError(async (request: Request) => {
   const routeStartedAtMs = Date.now();
@@ -38,7 +41,7 @@ export const POST = withJsonError(async (request: Request) => {
       signalAbortedAfterRead: request.signal.aborted,
     });
 
-    const response = await handleHostedOnboardingLinqWebhook({
+    const response = await handleHostedOnboardingLinqWebhookWithVisibleSecondaryOutcomes({
       rawBody,
       scheduleAfterResponse: scheduleAfterResponseOrFireAndForget,
       signature,

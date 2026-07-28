@@ -11,7 +11,10 @@ Murph needs a public, living Health Commons for protocol pages, biomarker pages,
 The Health Commons is not a private user vault, not a raw research warehouse, and not a feed of raw personal results.
 
 - Public reusable health knowledge belongs in `packages/health-commons/content/**` as typed pages and small manifests.
-- Public protocol indexes, route bundles, runnable artifacts, and Start surfaces include only unhidden runnable protocols. `draft` and `deprecated` protocols are not runnable or directly startable. A statusless legacy protocol remains runnable for compatibility until its content is migrated.
+- Public protocol indexes, route bundles, runnable artifacts, biomarker rankings,
+  and Start surfaces include only unhidden protocols with an explicit
+  `field-testing`, `reviewed`, or `community` status. Missing, `draft`, and
+  `deprecated` statuses are not runnable or directly startable.
 - Generated runtime projections and catalog artifacts materialize under `packages/health-commons/generated/**` as ignored build artifacts. Generated projections may include authored or placeholder community outcome fields, but run-derived aggregate summaries from opted-in Murph runs are future work.
 - Private user runs and private outcome cards continue to live outside the Health Commons, bound to exact commons keys and revisions.
 - Explicit public contributions may inform generated cohort summaries, but raw private run records never become article prose.
@@ -34,6 +37,7 @@ The storage primitive is a typed wiki page plus generated projections. Product/d
 
 Protocol pages must include lineage, attribution, a performable protocol block, safety, and at least one test plan. Claims must cite source pages unless they are explicitly labeled as community outcomes.
 Protocol pages may also include an optional compact `experimentOnboarding` block that stores only protocol-specific onboarding deltas, such as start intent, safety-screen questions, setup slots, selected test plan, first-session guidance, adaptation policy, and tracking/support hints. Generic vault-read behavior, plan timing, adherence targets, readable logging labels, and stable session log ids come from assistant instructions plus canonical `testPlans`, `protocol.logFields`, `protocol.sessionFieldIds`, `protocol`, and `safety` fields; only stable extra confounder log ids belong in `trackingHints.confounderFields`, while prose confounder guidance stays in `trackingHints.confounders` or `notes`.
+When multiple sensed activities can satisfy one protocol session, declare them under `protocol.activitySessionEvidence`; experiment start copies that typed evidence into the immutable effective snapshot, and adherence readers interpret the snapshot instead of inferring accepted activities from protocol names or global activity categories.
 Protocol and source pages may also include an optional `media` array for small public presentation assets such as header imagery. Keep those assets lightweight and repo-local, and do not use `media` as a substitute for research artifact manifests, PDFs, or other large external files.
 
 ## Biomarker Reference Guidance

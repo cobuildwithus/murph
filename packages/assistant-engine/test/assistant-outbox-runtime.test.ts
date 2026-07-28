@@ -474,6 +474,218 @@ describe('assistant outbox runtime', () => {
     ).rejects.toThrow('answered mailbox item ids exceed the 100 item limit')
   })
 
+  it('monotonically widens answered mailbox ids when a grouped reply is rebatched', async () => {
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-outbox-grouped-answered-upgrade-',
+    )
+    const deliveryInput = {
+      channel: 'linq',
+      dedupeToken: 'grouped-reply-effect-anchor',
+      deliveryIdempotencyKey: 'grouped-reply-effect-anchor',
+      dispatchMode: 'queue-only' as const,
+      message: 'one reply for the grouped burst',
+      sessionId: 'session-grouped-answered-upgrade',
+      threadId: 'linq-thread-grouped-answered-upgrade',
+      threadIsDirect: false,
+      turnId: 'turn-grouped-answered-upgrade',
+      turnTrigger: 'automation-auto-reply' as const,
+      vault: vaultRoot,
+    }
+
+    const first = await deliverAssistantOutboxMessage({
+      ...deliveryInput,
+      answeredMailboxItemIds: ['mailbox_item_newest'],
+    })
+    const upgraded = await deliverAssistantOutboxMessage({
+      ...deliveryInput,
+      answeredMailboxItemIds: [
+        'mailbox_item_older',
+        'mailbox_item_newest',
+      ],
+      turnId: 'turn-grouped-answered-rebatch',
+    })
+    const preserved = await deliverAssistantOutboxMessage({
+      ...deliveryInput,
+      answeredMailboxItemIds: ['mailbox_item_newest'],
+      turnId: 'turn-grouped-answered-replay',
+    })
+
+    expect(first.kind).toBe('queued')
+    expect(upgraded.kind).toBe('queued')
+    expect(upgraded.intent.intentId).toBe(first.intent.intentId)
+    expect(preserved.intent.intentId).toBe(first.intent.intentId)
+    expect(preserved.intent.answeredMailboxItemIds).toEqual([
+      'mailbox_item_newest',
+      'mailbox_item_older',
+    ])
+    await expect(readAssistantOutboxIntent(vaultRoot, first.intent.intentId))
+      .resolves.toMatchObject({
+        answeredMailboxItemIds: [
+          'mailbox_item_newest',
+          'mailbox_item_older',
+        ],
+      })
+
+    mockedDeliverAssistantMessageOverBinding.mockResolvedValueOnce({
+      delivery: createDelivery({
+        channel: 'linq',
+        idempotencyKey: upgraded.intent.deliveryIdempotencyKey,
+        providerMessageId: 'provider-grouped-answered-upgrade',
+        providerThreadId: 'linq-thread-grouped-answered-upgrade',
+        sentAt: '2026-04-08T03:02:00.000Z',
+        target: 'linq-thread-grouped-answered-upgrade',
+        targetKind: 'thread',
+      }),
+      deliveryDeduplicated: false,
+      deliveryTransportIdempotent: true,
+      outboxIntentId: null,
+      session: undefined,
+    })
+
+    const dispatched = await dispatchAssistantOutboxIntent({
+      intentId: preserved.intent.intentId,
+      vault: vaultRoot,
+    })
+
+    expect(dispatched.intent.status).toBe('sent')
+    expect(mockedDeliverAssistantMessageOverBinding).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        answeredMailboxItemIds: [
+          'mailbox_item_newest',
+          'mailbox_item_older',
+        ],
+      }),
+      undefined,
+    )
+
+    const terminalReplay = await deliverAssistantOutboxMessage({
+      ...deliveryInput,
+      answeredMailboxItemIds: [
+        'mailbox_item_newest',
+        'mailbox_item_older',
+        'mailbox_item_after_send',
+      ],
+      turnId: 'turn-grouped-answered-terminal-replay',
+    })
+
+    expect(terminalReplay.kind).toBe('failed')
+    expect(terminalReplay.deliveryError).toMatchObject({
+      code: 'ASSISTANT_OUTBOX_ANSWERED_ITEMS_UNCOVERED',
+      diagnosticContext: {
+        retryable: true,
+      },
+    })
+    expect(terminalReplay.intent.intentId).toBe(first.intent.intentId)
+    expect(terminalReplay.intent.answeredMailboxItemIds).toEqual([
+      'mailbox_item_newest',
+      'mailbox_item_older',
+    ])
+    await expect(readAssistantOutboxIntent(vaultRoot, first.intent.intentId))
+      .resolves.toMatchObject({
+        answeredMailboxItemIds: [
+          'mailbox_item_newest',
+          'mailbox_item_older',
+        ],
+        status: 'sent',
+      })
+    expect(mockedDeliverAssistantMessageOverBinding).toHaveBeenCalledTimes(1)
+  })
+
+  it('freezes grouped answered mailbox ids when provider dispatch starts', async () => {
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-outbox-grouped-answered-dispatch-fence-',
+    )
+    const deliveryInput = {
+      answeredMailboxItemIds: ['mailbox_item_before_dispatch'],
+      channel: 'linq',
+      dedupeToken: 'grouped-reply-dispatch-fence',
+      deliveryIdempotencyKey: 'grouped-reply-dispatch-fence',
+      dispatchMode: 'queue-only' as const,
+      message: 'one reply for the frozen grouped burst',
+      sessionId: 'session-grouped-dispatch-fence',
+      threadId: 'linq-thread-grouped-dispatch-fence',
+      threadIsDirect: false,
+      turnId: 'turn-grouped-dispatch-fence',
+      turnTrigger: 'automation-auto-reply' as const,
+      vault: vaultRoot,
+    }
+    const queued = await deliverAssistantOutboxMessage(deliveryInput)
+
+    let markProviderEntered: (() => void) | undefined
+    const providerEntered = new Promise<void>((resolve) => {
+      markProviderEntered = resolve
+    })
+    let releaseProvider: (() => void) | undefined
+    const providerReleased = new Promise<void>((resolve) => {
+      releaseProvider = resolve
+    })
+    mockedDeliverAssistantMessageOverBinding.mockImplementationOnce(
+      async () => {
+        markProviderEntered?.()
+        await providerReleased
+        return {
+          delivery: createDelivery({
+            channel: 'linq',
+            idempotencyKey: queued.intent.deliveryIdempotencyKey,
+            providerMessageId: 'provider-grouped-dispatch-fence',
+            providerThreadId: deliveryInput.threadId,
+            sentAt: '2026-04-08T03:03:00.000Z',
+            target: deliveryInput.threadId,
+            targetKind: 'thread',
+          }),
+          deliveryDeduplicated: false,
+          deliveryTransportIdempotent: true,
+          outboxIntentId: null,
+          session: undefined,
+        }
+      },
+    )
+
+    const dispatch = dispatchAssistantOutboxIntent({
+      intentId: queued.intent.intentId,
+      vault: vaultRoot,
+    })
+    await providerEntered
+
+    const lateRebatch = await deliverAssistantOutboxMessage({
+      ...deliveryInput,
+      answeredMailboxItemIds: [
+        'mailbox_item_before_dispatch',
+        'mailbox_item_after_dispatch',
+      ],
+      turnId: 'turn-grouped-dispatch-fence-late',
+    })
+    releaseProvider?.()
+    const dispatched = await dispatch
+
+    expect(lateRebatch.kind).toBe('failed')
+    expect(lateRebatch.deliveryError).toMatchObject({
+      code: 'ASSISTANT_OUTBOX_ANSWERED_ITEMS_UNCOVERED',
+      diagnosticContext: {
+        retryable: true,
+      },
+    })
+    expect(lateRebatch.intent.status).toBe('sending')
+    expect(lateRebatch.intent.answeredMailboxItemIds).toEqual([
+      'mailbox_item_before_dispatch',
+    ])
+    expect(dispatched.intent.status).toBe('sent')
+    expect(dispatched.intent.answeredMailboxItemIds).toEqual([
+      'mailbox_item_before_dispatch',
+    ])
+    expect(mockedDeliverAssistantMessageOverBinding).toHaveBeenCalledWith(
+      expect.objectContaining({
+        answeredMailboxItemIds: ['mailbox_item_before_dispatch'],
+      }),
+      undefined,
+    )
+    await expect(readAssistantOutboxIntent(vaultRoot, queued.intent.intentId))
+      .resolves.toMatchObject({
+        answeredMailboxItemIds: ['mailbox_item_before_dispatch'],
+        status: 'sent',
+      })
+  })
+
   it('persists auto-reply intent provenance when receipt repair has no receipt', async () => {
     const { vaultRoot } = await createAssistantVault('assistant-outbox-auto-reply-provenance-')
 
@@ -2458,6 +2670,77 @@ describe('assistant outbox runtime', () => {
     expect(dispatched.intent.status).toBe('sent')
     expect(dispatched.deliveryError).toBeNull()
     expect(mockedDeliverAssistantMessageOverBinding).toHaveBeenCalledOnce()
+  })
+
+  it('fails an active revision-matching retired Sunday intent before provider entry', async () => {
+    const retiredAutomationId = 'automation_01K55N7S9X4Q2M6P8R3T0V1WYZ'
+    const { vaultRoot } = await createInitializedAssistantVault(
+      'assistant-outbox-retired-sunday-',
+    )
+    const scaffold = scaffoldAutomationPayload()
+    const automation = await upsertAutomation({
+      ...scaffold,
+      automationId: retiredAutomationId,
+      continuityPolicy: 'fresh',
+      instructions: 'Legacy Sunday group superlatives instructions.',
+      now: new Date('2026-07-26T17:59:00.000Z'),
+      route: {
+        ...scaffold.route,
+        deliveryTarget: 'telegram-group-thread',
+        threadId: 'telegram-group-thread',
+        threadIsDirect: false,
+      },
+      schedule: { kind: 'cron', expression: '0 18 * * 0' },
+      slug: 'group-sunday-superlatives',
+      status: 'active',
+      tags: ['assistant', 'scheduled', 'murph-managed'],
+      title: 'Sunday group superlatives',
+      vaultRoot,
+    })
+    const queued = await deliverAssistantOutboxMessage({
+      automationAuthority: {
+        automationId: automation.record.automationId,
+        expectedUpdatedAt: automation.record.updatedAt,
+      },
+      channel: 'telegram',
+      dispatchMode: 'queue-only',
+      explicitTarget: 'telegram-group-thread',
+      message: 'Legacy Sunday group superlatives.',
+      sessionId: 'session-outbox-retired-sunday',
+      threadId: 'telegram-group-thread',
+      threadIsDirect: false,
+      turnId: 'turn-outbox-retired-sunday',
+      vault: vaultRoot,
+    })
+
+    expect(queued.intent).toMatchObject({
+      automationAuthority: {
+        automationId: retiredAutomationId,
+        expectedUpdatedAt: automation.record.updatedAt,
+      },
+      status: 'pending',
+    })
+    await expect(showAutomation({
+      automationId: retiredAutomationId,
+      vaultRoot,
+    })).resolves.toMatchObject({
+      automationId: retiredAutomationId,
+      status: 'active',
+      updatedAt: automation.record.updatedAt,
+    })
+
+    const dispatched = await dispatchAssistantOutboxIntent({
+      force: true,
+      intentId: queued.intent.intentId,
+      now: new Date('2026-07-26T18:00:00.000Z'),
+      vault: vaultRoot,
+    })
+
+    expect(dispatched.intent.status).toBe('failed')
+    expect(dispatched.deliveryError).toMatchObject({
+      code: 'ASSISTANT_AUTOMATION_DELIVERY_AUTHORITY_STALE',
+    })
+    expect(mockedDeliverAssistantMessageOverBinding).not.toHaveBeenCalled()
   })
 
   it.each([

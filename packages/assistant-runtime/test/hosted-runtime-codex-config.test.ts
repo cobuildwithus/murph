@@ -18,6 +18,7 @@ import {
 } from "@murphai/assistant-engine/assistant-skill-assets";
 import {
   MURPH_GROUP_READ_PERMISSION_PROFILE,
+  MURPH_GROUP_ROOM_MODEL_MAINTENANCE_PERMISSION_PROFILE,
 } from "@murphai/hosted-execution/assistant-permissions";
 import {
   HostedAssistantConfigurationError,
@@ -68,19 +69,14 @@ const HOSTED_CODEX_AUTOCOMPACTION_E2E_TOKEN_LIMIT = 12_000;
 const HOSTED_CODEX_AUTOCOMPACTION_SUMMARY_SENTINEL =
   "HOSTED_CODEX_AUTOCOMPACTION_SUMMARY_SENTINEL";
 const EXPECTED_MULTI_AGENT_USAGE_HINT = [
-  "Be proactive about delegation: when part of the work would block your immediate reply and can reasonably be parsed, imported, researched, or otherwise handled in the background, spawn a sub-agent for that bounded piece and reply to the user without waiting on it.",
-  "Typical delegations: parsing or importing uploaded documents, labs, or data files, and background enrichment or research the reply does not depend on.",
-  "Do the work yourself when the user's current request depends on the result.",
-  "Keep each child a one-shot, bounded task with a concrete deliverable, and follow any active route or skill contract for child design and completion proof.",
+  "Proactively spawn a hosted child for bounded background parsing or import work and optional enrichment or research whose result is not needed in the current reply, and reply without waiting.",
+  "Follow the active route or skill contract for child design and completion proof.",
 ].join(" ");
-const EXPECTED_MULTI_AGENT_MODE_HINT = [
-  "Murph proactive delegation mode is active.",
-  "Delegate bounded background work that would otherwise block your reply; reply promptly while children run.",
-  "This mode remains active until a later multi-agent mode developer message changes it.",
-].join(" ");
+const EXPECTED_MULTI_AGENT_MODE_HINT =
+  "Murph bounded background delegation mode is active; reply-critical work stays in the root.";
 const EXPECTED_SUBAGENT_USAGE_HINT = [
-  "Complete the bounded assignment yourself and report the result to the root agent.",
-  "Do not spawn or delegate to another child; the root owns any further task split and final confirmation.",
+  "This hosted child is a one-shot leaf.",
+  "Do not spawn or delegate to another child.",
 ].join(" ");
 
 test("hosted Codex memory diagnostics expose only safe config metadata", () => {
@@ -252,6 +248,10 @@ test("hosted Codex runtime config writes OpenAI Responses config without secret 
   ].join("\n")));
   assert.doesNotMatch(config, /Non-blocking delegation:/u);
   assert.doesNotMatch(config, /root_agent_usage_hint_text/u);
+  assert.doesNotMatch(config, /Be proactive about delegation/u);
+  assert.doesNotMatch(config, /Do the work yourself when/u);
+  assert.doesNotMatch(config, /Complete the bounded assignment yourself/u);
+  assert.doesNotMatch(config, /This mode remains active until/u);
   assert.match(
     config,
     /\[memories\]\nuse_memories = true\ngenerate_memories = true\ndisable_on_external_context = false\nmin_rollout_idle_hours = 1\nmax_rollouts_per_startup = 1\nmax_rollout_age_days = 10\nmin_rate_limit_remaining_percent = 25\nmax_raw_memories_for_consolidation = 128\nmax_unused_days = 30/u,
@@ -1406,6 +1406,17 @@ test("hosted Codex config TOML omits credential values and runtime authority hea
       '"**/.env.*" = "deny"',
       "",
       `[permissions.${MURPH_GROUP_READ_PERMISSION_PROFILE}.network]`,
+      "enabled = false",
+      "",
+      "# Silent group room-model consolidation uses only its host-owned dynamic tool.",
+      `[permissions.${MURPH_GROUP_ROOM_MODEL_MAINTENANCE_PERMISSION_PROFILE}.filesystem]`,
+      '":minimal" = "read"',
+      "glob_scan_max_depth = 1",
+      "",
+      `[permissions.${MURPH_GROUP_ROOM_MODEL_MAINTENANCE_PERMISSION_PROFILE}.filesystem.":workspace_roots"]`,
+      '"." = "deny"',
+      "",
+      `[permissions.${MURPH_GROUP_ROOM_MODEL_MAINTENANCE_PERMISSION_PROFILE}.network]`,
       "enabled = false",
       "",
       "# Hosted runs should not perform Codex plugin marketplace or remote plugin",

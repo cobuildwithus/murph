@@ -9,6 +9,7 @@ on:
         default: production
         type: choice
         options:
+          - preview
           - production
       sync_worker_secrets:
         description: Include the rendered Worker secrets file during deploy
@@ -29,7 +30,7 @@ on:
           - gradual
           - immediate
       live_model_turn:
-        description: Run one real gpt-5.6-terra turn in the deployed container smoke
+        description: Run one real gpt-5.6-terra turn in production deploy smoke
         required: true
         default: true
         type: boolean
@@ -517,7 +518,7 @@ jobs:
       HOSTED_EXECUTION_RUNNER_ENV_PROFILES: ${{ vars.HOSTED_EXECUTION_RUNNER_ENV_PROFILES || 'exa,hosted-email,linq,mapbox,telegram' }}
       HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: ${{ vars.HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS }}
       HOSTED_EXECUTION_RUNNER_LIFECYCLE_REEVALUATION_MS: ${{ vars.HOSTED_EXECUTION_RUNNER_LIFECYCLE_REEVALUATION_MS }}
-      HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT: ${{ vars.HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT || 'production' }}
+      HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT: ${{ inputs.environment }}
       HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME: ${{ vars.HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME }}
       HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG: ${{ vars.HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG }}
       HOSTED_R2_PRESIGN_ACCOUNT_ID: ${{ vars.HOSTED_R2_PRESIGN_ACCOUNT_ID }}
@@ -555,6 +556,7 @@ jobs:
       JUNCTION_SUMMARY_BACKFILL_DAYS: ${{ vars.JUNCTION_SUMMARY_BACKFILL_DAYS }}
       JUNCTION_TIMESERIES_BACKFILL_DAYS: ${{ vars.JUNCTION_TIMESERIES_BACKFILL_DAYS }}
       JUNCTION_RESOURCE_OVERRIDES: ${{ vars.JUNCTION_RESOURCE_OVERRIDES }}
+      JUNCTION_PUSH_SOURCE_RECOVERY_ENABLED: ${{ vars.JUNCTION_PUSH_SOURCE_RECOVERY_ENABLED }}
       JUNCTION_RECONCILE_DAYS: ${{ vars.JUNCTION_RECONCILE_DAYS }}
       JUNCTION_RECONCILE_INTERVAL_MS: ${{ vars.JUNCTION_RECONCILE_INTERVAL_MS }}
       JUNCTION_REQUEST_TIMEOUT_MS: ${{ vars.JUNCTION_REQUEST_TIMEOUT_MS }}
@@ -599,7 +601,7 @@ jobs:
       FFMPEG_COMMAND: ${{ vars.FFMPEG_COMMAND }}
       HOSTED_EXECUTION_SMOKE_WORKER_BASE_URL: ${{ vars.CF_PUBLIC_BASE_URL }}
       HOSTED_EXECUTION_SMOKE_DIRECT_R2_PRESIGNED_PUT: ${{ inputs.container_rollout == 'immediate' && 'true' || 'false' }}
-      HOSTED_EXECUTION_SMOKE_LIVE_MODEL_TURN: ${{ inputs.live_model_turn && 'true' || 'false' }}
+      HOSTED_EXECUTION_SMOKE_LIVE_MODEL_TURN: ${{ inputs.environment == 'production' && inputs.live_model_turn && 'true' || 'false' }}
       HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER: "true"
       HOSTED_EXECUTION_SMOKE_RUNNER_MAX_ATTEMPTS: "300"
       HOSTED_EXECUTION_SMOKE_RUNNER_RETRY_DELAY_MS: "3000"
@@ -615,11 +617,11 @@ jobs:
         run: |
           set -euo pipefail
           if [[ "${GITHUB_REF}" != "refs/heads/main" ]]; then
-            echo "Production deploys must be dispatched from main." >&2
+            echo "Hosted deploys must be dispatched from main." >&2
             exit 1
           fi
           if [[ "${GITHUB_REF_PROTECTED}" != "true" ]]; then
-            echo "Production deploys require a protected main ref." >&2
+            echo "Hosted deploys require a protected main ref." >&2
             exit 1
           fi
 

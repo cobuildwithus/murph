@@ -24,6 +24,7 @@ import type {
   AutomationAssistantTargetOverride,
 } from '@murphai/contracts'
 import type { AssistantUserMessageContentPart } from './content-types.js'
+import type { AssistantMaintenanceProfile } from './maintenance-evidence.js'
 import type { AssistantCliAccessContext } from '../assistant-cli-access.js'
 import type { AssistantOutboxDispatchMode } from './outbox.js'
 import type {
@@ -147,6 +148,9 @@ export interface AssistantMessageInput extends AssistantSessionResolutionFields 
   expectedActiveTurnId?: string | null
   hostedDeliveryIdempotency?: AssistantHostedDeliveryIdempotencyContext | null
   includeEarlySessionOnboarding?: boolean
+  // Engine-owned silent-maintenance policy. It selects trusted prompt/evidence
+  // boundaries and is never supplied by a model or persisted automation.
+  maintenanceProfile?: AssistantMaintenanceProfile | null
   onFinishWithoutReplyAccepted?: AssistantFinishWithoutReplyAcceptedHook | null
   onProviderEvent?: ((event: AssistantProviderProgressEvent) => void) | null
   onProviderRequestStarted?: AssistantProviderRequestStartHook | null
@@ -196,6 +200,7 @@ export interface AssistantTurnSharedPlan {
 export interface PersistedUserTurn {
   turnCreatedAt: string
   turnId: string
+  userContentReceivedAt?: string | null
   userTranscriptRef: AssistantAcceptedTurnInputItemInput['transcriptRef'] | null
   userPersisted: boolean
 }

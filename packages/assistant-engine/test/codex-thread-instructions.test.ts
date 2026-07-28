@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto'
+
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 const codexAppServerMocks = vi.hoisted(() => ({
@@ -13,9 +15,18 @@ import { normalizeAssistantProviderConfig } from '@murphai/operator-config/assis
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 
 import {
+  MURPH_CODEX_BASE_INSTRUCTIONS,
+} from '../src/assistant/codex-base-instructions.ts'
+import {
+  buildAssistantCodexContractFingerprint,
+} from '../src/assistant/codex-contract-fingerprint.ts'
+import {
   executeCodexAssistantTurnAttempt,
 } from '../src/assistant/codex-runtime.ts'
-import { resolveMurphDynamicTools } from '../src/assistant-codex/dynamic-tools.ts'
+import {
+  MURPH_GROUP_ROOM_MODEL_TOOL,
+  resolveMurphDynamicTools,
+} from '../src/assistant-codex/dynamic-tools.ts'
 import {
   executeCodexAssistantTurnAttempt as executeCodexAssistantTurnAttemptUnchecked,
 } from '../src/assistant/providers/codex-cli.ts'
@@ -25,6 +36,54 @@ afterEach(() => {
 })
 
 describe('Codex thread instructions', () => {
+  it('keeps the Murph execution kernel compact without coding-agent baggage', () => {
+    expect(Buffer.byteLength(MURPH_CODEX_BASE_INSTRUCTIONS, 'utf8')).toBeLessThan(3_000)
+    expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
+      "Complete the user's in-scope request end to end",
+    )
+    expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain('untrusted data')
+    expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain('never fabricate tool output')
+    expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
+      'When the runtime summarizes earlier context',
+    )
+    expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
+      'Answer, explanation, review, diagnosis, plan, or content requests—including "build me a plan"—do not by themselves authorize implementation or changes to saved state or external systems',
+    )
+    expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
+      'Murph developer instructions or a selected skill may define a narrow internal canonical write as part of the requested product behavior',
+    )
+    expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
+      'subject to user opt-out or a narrower owner rule',
+    )
+    expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
+      'Otherwise mutate state only when the user explicitly asks',
+    )
+    expect(MURPH_CODEX_BASE_INSTRUCTIONS).not.toContain(
+      'not unrelated mutations',
+    )
+    expect(MURPH_CODEX_BASE_INSTRUCTIONS).not.toMatch(
+      /(?:apply_patch|rg --files|git reset|AGENTS\.md|SKILL\.md)/u,
+    )
+  })
+
+  it('includes the base instructions in the native-thread contract fingerprint', () => {
+    const fingerprintInput = {
+      developerInstructions: 'Stable Murph instructions.',
+      dynamicTools: [],
+      routeFingerprint: 'route-contract-v1',
+    }
+    const expectedFingerprint = createHash('sha256')
+      .update(JSON.stringify({
+        baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        ...fingerprintInput,
+      }))
+      .digest('hex')
+
+    expect(buildAssistantCodexContractFingerprint(fingerprintInput)).toBe(
+      expectedFingerprint,
+    )
+  })
+
   it('passes Murph system instructions at thread level and keeps turn input user-scoped', async () => {
     codexAppServerMocks.executeCodexAppServerTurn.mockResolvedValue({
       finalMessage: 'done',
@@ -60,6 +119,7 @@ describe('Codex thread instructions', () => {
     expect(codexAppServerMocks.executeCodexAppServerTurn).toHaveBeenCalledTimes(1)
     const appServerInput = codexAppServerMocks.executeCodexAppServerTurn.mock
       .calls[0]?.[0]
+    expect(appServerInput.baseInstructions).toBe(MURPH_CODEX_BASE_INSTRUCTIONS)
     expect(appServerInput.developerInstructions).toBe('Stable Murph instructions.')
     expect(appServerInput.excludeResumeTurns).toBe(true)
     expect(appServerInput.prompt).toBe(
@@ -69,6 +129,103 @@ describe('Codex thread instructions', () => {
       ].join('\n\n'),
     )
     expect(appServerInput.prompt).not.toContain('Stable Murph instructions.')
+  })
+
+  it('keeps constrained profile inputs at the app-server seam', async () => {
+    const scenarios = [
+      {
+        contract:
+          'This is an output-only turn. Return exactly one user-facing text response.',
+        maintenance: false,
+        name: 'assistant-ask-continuation',
+      },
+      {
+        contract:
+          'This is an output-only turn. The platform owns delivery.',
+        maintenance: false,
+        name: 'system-notification',
+      },
+      {
+        contract:
+          'The only state tool available is `murph.group_room_model`. Return exactly one JSON object.',
+        maintenance: true,
+        name: 'maintenance',
+      },
+    ] as const
+    const outputOnlyOverrides = [
+      'features.shell_tool=false',
+      'web_search="disabled"',
+      'features.apps=false',
+      'features.browser_use=false',
+      'features.plugins=false',
+      'features.multi_agent=false',
+    ]
+
+    for (const [index, scenario] of scenarios.entries()) {
+      codexAppServerMocks.executeCodexAppServerTurn.mockResolvedValueOnce({
+        finalMessage: 'done',
+        precedingAgentMessageSegments: [],
+        responseDeliveryContextOrdinal: 0,
+        transcriptMessage: 'done',
+        jsonEvents: [],
+        providerActionCount: 0,
+        sessionId: `restricted-thread-${index}`,
+        stderr: '',
+        stdout: '',
+        threadId: `restricted-thread-${index}`,
+        turnId: `restricted-turn-${index}`,
+      })
+
+      await executeCodexAssistantTurnAttemptUnchecked({
+        providerConfig: normalizeAssistantProviderConfig({
+          approvalPolicy: 'never',
+          provider: 'codex-cli',
+          sandbox: scenario.maintenance
+            ? 'danger-full-access'
+            : 'read-only',
+        }),
+        codexConfigOverrides: scenario.maintenance
+          ? []
+          : outputOnlyOverrides,
+        developerInstructions: scenario.contract,
+        dynamicTools: scenario.maintenance
+          ? [MURPH_GROUP_ROOM_MODEL_TOOL]
+          : [],
+        env: {},
+        groupConversation: scenario.maintenance,
+        groupRoomModelMaintenanceAuthorized: scenario.maintenance,
+        permissions: scenario.maintenance
+          ? 'murph-group-room-model-maintenance'
+          : null,
+        processLifetime: 'one-shot',
+        providerThreadEphemeral: true,
+        userPrompt: `Run the ${scenario.name} profile.`,
+        workingDirectory: '/tmp/provider-tests',
+      })
+
+      const appServerInput = codexAppServerMocks.executeCodexAppServerTurn.mock
+        .calls.at(-1)?.[0]
+      expect(appServerInput?.approvalPolicy).toBe('never')
+      expect(appServerInput?.baseInstructions).toBe(
+        MURPH_CODEX_BASE_INSTRUCTIONS,
+      )
+      expect(appServerInput?.developerInstructions).toBe(scenario.contract)
+      expect(appServerInput?.ephemeral).toBe(true)
+      expect(appServerInput?.groupConversation).toBe(scenario.maintenance)
+      expect(appServerInput?.processLifetime).toBe('one-shot')
+      if (scenario.maintenance) {
+        expect(appServerInput?.dynamicTools).toHaveLength(1)
+        expect(appServerInput?.dynamicTools?.[0]).toBe(
+          MURPH_GROUP_ROOM_MODEL_TOOL,
+        )
+        expect(appServerInput?.groupRoomModelMaintenanceAuthorized).toBe(true)
+        expect(appServerInput?.sandbox).toBeUndefined()
+      } else {
+        expect(appServerInput?.configOverrides).toEqual(outputOnlyOverrides)
+        expect(appServerInput?.dynamicTools).toEqual([])
+        expect(appServerInput?.sandbox).toBe('read-only')
+      }
+    }
   })
 
   it('can skip thread-instruction refresh when using provider-native resume', async () => {

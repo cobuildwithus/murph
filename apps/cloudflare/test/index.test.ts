@@ -245,6 +245,7 @@ describe("cloudflare worker routes", () => {
     expect(workerSource).not.toContain("MURPH_HOSTED_LOCAL_TEST_ROUTES");
     expect(workerSource).not.toContain("runUntilIdleForTest");
     expect(workerSource).not.toContain("startStuckInvocationForTest");
+    expect(workerSource).not.toContain("readActiveRuntimeFenceForTest");
     expect(workerSource).not.toContain("armCanonicalCheckpointLostAckForTest");
     expect(workerSource).not.toContain("armSnapshotPublicationCorruptionForTest");
     expect(workerSource).not.toContain("armShutdownCheckpointPublicationBarrierForTest");
@@ -344,11 +345,14 @@ describe("cloudflare worker routes", () => {
       "test-run-until-idle",
       "test-run-alarm",
       "test-canonical-checkpoint-lost-ack",
+      "test-arm-generated-image-provider-barrier",
+      "test-release-generated-image-provider-barrier",
       "test-generated-image-upload-type-error",
       "test-snapshot-publication-corruption",
       "test-shutdown-checkpoint-publication-barrier",
       "test-container-activity-expired",
       "test-container-active-operation-drop",
+      "test-read-active-runtime-fence",
       "test-start-stuck-invocation",
       "test-direct-r2-presigned-put",
       "deploy-container-smoke",
@@ -1675,6 +1679,8 @@ describe("cloudflare worker routes", () => {
     const baseRunnerContainerNamespace = createRunnerContainerNamespace();
     const armShutdownCheckpointPublicationBarrierForTest =
       vi.fn(async () => ({ ok: true as const }));
+    const armCanonicalCheckpointPublicationBarrierForTest =
+      vi.fn(async () => ({ ok: true as const }));
     const beginShutdownCheckpointGracefulStopForTest =
       vi.fn(async () => ({ ok: true as const }));
     const readShutdownCheckpointPublicationBarrierForTest =
@@ -1683,6 +1689,7 @@ describe("cloudflare worker routes", () => {
       vi.fn(async () => ({ ok: true as const, released: true }));
     const getByName = vi.fn((name: string) => ({
       ...baseRunnerContainerNamespace.getByName(name),
+      armCanonicalCheckpointPublicationBarrierForTest,
       armShutdownCheckpointPublicationBarrierForTest,
       beginShutdownCheckpointGracefulStopForTest,
       readShutdownCheckpointPublicationBarrierForTest,
@@ -1695,7 +1702,9 @@ describe("cloudflare worker routes", () => {
         getByName,
       },
     });
-    const request = async (action: "arm" | "release" | "shutdown" | "status") =>
+    const request = async (
+      action: "arm" | "arm-canonical" | "release" | "shutdown" | "status",
+    ) =>
       await hostedLocalTestWorker.fetch(
         await signControlRequest(new Request(
           "https://runner.example.test/__test/users/member_123"
@@ -1708,12 +1717,15 @@ describe("cloudflare worker routes", () => {
       );
 
     const armResponse = await request("arm");
+    const armCanonicalResponse = await request("arm-canonical");
     const statusResponse = await request("status");
     const shutdownResponse = await request("shutdown");
     const releaseResponse = await request("release");
 
     expect(armResponse.status).toBe(200);
     await expect(armResponse.json()).resolves.toEqual({ ok: true });
+    expect(armCanonicalResponse.status).toBe(200);
+    await expect(armCanonicalResponse.json()).resolves.toEqual({ ok: true });
     expect(statusResponse.status).toBe(200);
     await expect(statusResponse.json()).resolves.toEqual({ state: "entered" });
     expect(shutdownResponse.status).toBe(200);
@@ -1722,6 +1734,9 @@ describe("cloudflare worker routes", () => {
     await expect(releaseResponse.json()).resolves.toEqual({ ok: true, released: true });
     expect(getByName).toHaveBeenCalledWith(expect.stringContaining("member_123"));
     expect(armShutdownCheckpointPublicationBarrierForTest).toHaveBeenCalledWith({
+      userId: "member_123",
+    });
+    expect(armCanonicalCheckpointPublicationBarrierForTest).toHaveBeenCalledWith({
       userId: "member_123",
     });
     expect(readShutdownCheckpointPublicationBarrierForTest).toHaveBeenCalledWith({
@@ -1779,6 +1794,40 @@ describe("cloudflare worker routes", () => {
       ok: true,
     });
     expect(stub.startStuckInvocationForTest).toHaveBeenCalledWith({ userId: "member_123" });
+  });
+
+  it("reads the active hosted-local runtime fence for correctly bound callers", async () => {
+    const stub = createUserRunnerStub({
+      readActiveRuntimeFenceForTest: vi.fn(async () => ({
+        attemptId: "workspace-invocation-test",
+        processingMode: "system_mailbox" as const,
+      })),
+    });
+    const env = createWorkerEnv(stub, {
+      MURPH_HOSTED_LOCAL_TEST_ROUTES: "1",
+      NODE_ENV: "test",
+    });
+
+    const response = await hostedLocalTestWorker.fetch(
+      await signControlRequest(new Request(
+        "https://runner.example.test/__test/users/member_123/active-runtime-fence",
+        {
+          method: "POST",
+        },
+      ), {
+        boundUserId: "member_123",
+      }),
+      env,
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      attemptId: "workspace-invocation-test",
+      processingMode: "system_mailbox",
+    });
+    expect(stub.readActiveRuntimeFenceForTest).toHaveBeenCalledWith({
+      userId: "member_123",
+    });
   });
 
   it("starts a stale hosted-local stuck invocation test route for correctly bound callers", async () => {
@@ -2845,6 +2894,7 @@ describe("cloudflare worker routes", () => {
         deletedAt: "2026-04-29T00:00:00.000Z",
         durableObject: {
           alarmCleared: true,
+          deleteAllCompleted: true,
           stateDeleted: true,
         },
         ok: true,
@@ -2874,6 +2924,7 @@ describe("cloudflare worker routes", () => {
     await expect(response.json()).resolves.toMatchObject({
       durableObject: {
         alarmCleared: true,
+        deleteAllCompleted: true,
         stateDeleted: true,
       },
       ok: true,
@@ -3706,6 +3757,12 @@ async function resolveHostedUserCryptoContextForTest(
 }
 
 type WorkerTestUserRunnerStub = UserRunnerDurableObjectStubLike & {
+  readActiveRuntimeFenceForTest(input: {
+    userId: string;
+  }): Promise<{
+    attemptId: string;
+    processingMode: "default" | "inbox_media_retention" | "system_mailbox";
+  } | null>;
   runAlarmForTest(input: { userId: string }): Promise<{ ok: true }>;
   runUntilIdleForTest(input: { userId: string }): Promise<HostedWorkspaceInvocationResult>;
   startStuckInvocationForTest(input: {
@@ -3737,6 +3794,7 @@ function createUserRunnerStub(overrides: Record<string, unknown> = {}) {
       deletedAt: "2026-04-29T00:00:00.000Z",
       durableObject: {
         alarmCleared: true,
+        deleteAllCompleted: true,
         stateDeleted: true,
       },
       ok: true as const,
@@ -3754,6 +3812,7 @@ function createUserRunnerStub(overrides: Record<string, unknown> = {}) {
       recommendedRecheckAt: "2026-04-27T00:00:10.000Z",
       runtimeAttemptId: "runtime-attempt-test",
     })),
+    readActiveRuntimeFenceForTest: vi.fn(async () => null),
     runUntilIdleForTest: vi.fn(async () => ({
       nextWakeAt: null,
       status: "idle" as const,

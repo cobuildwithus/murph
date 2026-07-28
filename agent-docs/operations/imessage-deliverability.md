@@ -45,7 +45,6 @@ Read and apply this guide when touching any of these surfaces:
    - Keep net-new conversations below 50 per day per line unless there is an explicit line-distribution plan and line-health monitoring.
    - Spread sends across time instead of bursting many messages in a short window.
    - Warm up new lines gradually, starting around 10-20 outbound conversations per day for the first week before increasing.
-   - Avoid sending between 11pm and 5am in the recipient's local time unless the user explicitly configured that behavior or the use case truly requires it.
 
 6. Make new lines earn trust before scaling.
    - Treat the first two weeks of any new line as a warmup period.
@@ -71,7 +70,7 @@ Before shipping any change that can send or shape an outbound message, answer th
 - What reply is this flow trying to earn in the first three outbound messages?
 - Does the first or second message ask a real question a recipient can answer easily?
 - Does the flow stop, slow down, or change behavior when the recipient does not reply?
-- Are outbound count, inbound reply count, last inbound time, last outbound time, line id, delivery state, and recipient local time available to the sender or scheduler?
+- Are outbound count, inbound reply count, last inbound time, last outbound time, line id, and delivery state available to the sender or scheduler?
 - Are net-new conversations and bursts limited per line, not just globally?
 - Are new lines treated differently from warmed lines?
 - Are cold contacts with no reply in 30+ days protected from bulk re-engagement?
@@ -91,6 +90,7 @@ Linq egress should stay small and obvious:
 - Activation and Linq routing serialize only the member's durable row, then read and reserve proactive capacity while choosing the home line. Linq route ownership uses `FOR NO KEY UPDATE`: it still conflicts with activation and another route owner, but remains compatible with the `KEY SHARE` taken by Telegram, Linq, or another channel's mailbox foreign-key insert after updating the shared routing row. There is no separate per-member route advisory lock. Active-member targets are advisory selection inputs; the daily proactive counter is the only atomic shared-pool capacity gate. A degraded-line first-contact fallback carries the selected line snapshot into the webhook planner and claims its capacity only after the final member route and `createHostedLinqChat` sending line agree. `HostedLinqLine` owns the current UTC day and proactive-conversation count; the effective per-line limit is the lower of 50 and any configured `maxNewConversationsPerDay` warmup limit.
 - A capped preferred line falls through to another healthy assignable line. A lost atomic claim is retried once for a day-rollover race, then activation tries another eligible line inside the same request. If every healthy line is at its proactive limit, activation still assigns a home line but omits the signup welcome. This preserves the onboarding “Text Murph” path without exceeding the line cap.
 - A member-initiated first text or existing-thread reply on the incoming line does not claim proactive capacity. If that line is degraded and the response must open a participant-target chat from another line, the fallback line must atomically claim capacity; when no fallback has room, web accepts the inbound event without starting that new chat.
+- A model-admitted instant-start invite is the single-owner token for the exact original inbound, not a send target or follow-up continuation. Only a transaction whose unique phone-identity insert creates a genuinely new member may mint it; if another inbound wins that insert while classification is pending, the loser retries before invite or accounting work and the signup path remains authoritative. While the token remains attached, another inbound for the inactive member exits retryably before line counting, invite issuance, or delivery. Stripe provisioning and activation serialize on the existing member row, revalidate the exact invite and admission event before provider mutation, and clear the token atomically with activation. Ordinary signup delivery keeps its existing exact-invite and member-ownership checks.
 - An unknown phone contacting a degraded line is materialized as the inbound member identity before the final fallback claim so web can re-read any concurrently created route authority. If the claim is rejected, that identity remains durable, but web creates no home or pending route, invite, delivery, fallback chat, or line-count increment; later inbound resolves the same member and retries normal routing.
 - After Linq accepts that canonical participant welcome, its signed delivery outcome must atomically promote the returned direct chat into the Web-owned home route. Manual dashboard sends and generic provider `message.sent` events remain observability-only and must not bind or retarget a member.
 - Thread sends use same-user route authority as target context when it matches the requested thread, otherwise they fall back to the member's durable home or pending Linq route.
@@ -111,6 +111,8 @@ Preferred shape:
 - clear continuation of an existing user-requested thread
 - full recognizable URLs only when links are necessary
 - calm, non-salesy language
+
+For a provider-authenticated direct iMessage that the person initiated, answering the original question in the same thread is preferable to opening with a signup link. Instant-start eligibility must stay same-line and inbound-only; if line assignment would move the conversation, the ordinary explicit signup-link fallback remains safer than proactively opening a new thread from another number.
 
 High-risk shape:
 
@@ -171,8 +173,6 @@ Design your messaging flows to get a reply within the first 3 messages. Apple's 
 - Never send to purchased or scraped contact lists. A single spam report from a recipient can trigger an account block.
 - Do not use the same line for both automated and manual messaging without rate awareness. Automated systems can easily exceed safe thresholds.
 - Do not re-engage cold contacts who have not replied in 30 or more days with bulk messages. Apple tracks recipient engagement per chat: a thread with 50 sent and 0 replies is a red flag.
-- Do not send late at night, from 11pm to 5am recipient local time, unless your use case requires it. Off-hours sending is a minor signal, but it compounds with other factors.
-
 #### Monitoring Your Line Health
 
 - Watch delivery receipts on receipt-capable protocols. If iMessage messages show as "sent" but never "delivered," Apple may be silently dropping them. SMS/MMS do not produce delivered/read receipts, so `message.sent` is their highest positive provider signal and must not be presented as handset delivery.

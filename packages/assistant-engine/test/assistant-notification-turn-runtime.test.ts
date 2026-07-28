@@ -2229,6 +2229,7 @@ test('sendAssistantNotificationLocal isolates detached provider results without 
     serviceTier: 'flex',
     turnPolicy: {
       kind: 'maintenance-exact-skip',
+      maintenanceProfile: 'member-memory',
       privateSummary: 'No notification required.',
     },
     vault: '/vaults/skip',
@@ -2252,6 +2253,7 @@ test('sendAssistantNotificationLocal isolates detached provider results without 
           'memories.use_memories=false',
           'memories.generate_memories=false',
         ],
+        maintenanceProfile: 'member-memory',
         prompt: expect.stringContaining(
           '## Conversation evidence (engine-supplied, bounded, last 7 days)',
         ),
@@ -2301,6 +2303,40 @@ test('sendAssistantNotificationLocal isolates detached provider results without 
   )
 
   vi.clearAllMocks()
+
+  const groupMaintenanceResult = await sendAssistantNotificationLocal({
+    instructions: 'Refresh the group room model.',
+    serviceTier: 'flex',
+    turnPolicy: {
+      kind: 'maintenance-exact-skip',
+      maintenanceProfile: 'group-room-model',
+      privateSummary: 'No notification required.',
+    },
+    vault: '/vaults/skip',
+  })
+
+  expect(groupMaintenanceResult.response).toBeNull()
+  expect(mocks.executeCodexTurnWithRecovery).toHaveBeenCalledWith(
+    expect.objectContaining({
+      hostedToolContext: null,
+      input: expect.objectContaining({
+        maintenanceProfile: 'group-room-model',
+        prompt: expect.stringContaining(
+          '## Group conversation evidence (engine-supplied, bounded, last 7 days)',
+        ),
+      }),
+      profile: {
+        nativeResumePolicy: 'disabled',
+        promptProfile: 'maintenance',
+        threadScope: 'isolated-thread',
+        toolProfile: 'maintenance-turn',
+      },
+    }),
+  )
+  expect(mocks.persistAssistantTurnAndSession).not.toHaveBeenCalled()
+  expect(deliverMessage).not.toHaveBeenCalled()
+
+  vi.clearAllMocks()
   mocks.executeCodexTurnWithRecovery.mockResolvedValueOnce({
     kind: 'succeeded',
     providerTurn: {
@@ -2327,6 +2363,7 @@ test('sendAssistantNotificationLocal isolates detached provider results without 
       instructions: 'Run overnight memory maintenance.',
       turnPolicy: {
         kind: 'maintenance-exact-skip',
+        maintenanceProfile: 'member-memory',
         privateSummary: 'No notification required.',
       },
       vault: '/vaults/skip',
@@ -2338,6 +2375,68 @@ test('sendAssistantNotificationLocal isolates detached provider results without 
     code: 'ASSISTANT_NOTIFICATION_MAINTENANCE_DECISION_INVALID',
   })
   expect((invalidMaintenanceError as Error & {
+    details?: Record<string, unknown>
+  }).details).toMatchObject({
+    assistantNotificationProviderNonReplayableWork: true,
+    assistantNotificationStage: 'provider',
+  })
+  expect(mocks.persistAssistantTurnAndSession).not.toHaveBeenCalled()
+  expect(deliverMessage).not.toHaveBeenCalled()
+
+  vi.clearAllMocks()
+  mocks.executeCodexTurnWithRecovery.mockResolvedValueOnce({
+    kind: 'succeeded',
+    providerTurn: {
+      ...createProviderResult({
+        rawEvents: [
+          {
+            method: 'item/completed',
+            params: {
+              item: {
+                arguments: {
+                  action: 'upsert',
+                  body: '## Tips\n- one useful tip',
+                  expectedDigest: 'a'.repeat(64),
+                },
+                id: 'group-room-model-write',
+                namespace: 'murph',
+                success: true,
+                tool: 'group_room_model',
+                type: 'dynamicToolCall',
+              },
+            },
+          },
+        ],
+        response: JSON.stringify({
+          kind: 'send_message',
+          privateSummary: 'Should not send.',
+          text: 'Visible maintenance message.',
+        }),
+        session: providerSession,
+      }),
+      additionalUsages: [],
+    },
+  })
+
+  let invalidGroupMaintenanceError: unknown
+  try {
+    await sendAssistantNotificationLocal({
+      instructions: 'Refresh the group room model.',
+      serviceTier: 'flex',
+      turnPolicy: {
+        kind: 'maintenance-exact-skip',
+        maintenanceProfile: 'group-room-model',
+        privateSummary: 'No notification required.',
+      },
+      vault: '/vaults/skip',
+    })
+  } catch (error) {
+    invalidGroupMaintenanceError = error
+  }
+  expect(invalidGroupMaintenanceError).toMatchObject({
+    code: 'ASSISTANT_NOTIFICATION_MAINTENANCE_DECISION_INVALID',
+  })
+  expect((invalidGroupMaintenanceError as Error & {
     details?: Record<string, unknown>
   }).details).toMatchObject({
     assistantNotificationProviderNonReplayableWork: true,
@@ -2373,6 +2472,7 @@ test('sendAssistantNotificationLocal isolates detached provider results without 
       instructions: 'Run overnight memory maintenance.',
       turnPolicy: {
         kind: 'maintenance-exact-skip',
+        maintenanceProfile: 'member-memory',
         privateSummary: 'No notification required.',
       },
       vault: '/vaults/skip',
@@ -2452,6 +2552,7 @@ test('sendAssistantNotificationLocal gives hosted capabilities only to real sche
     scheduledOccurrenceAt: '2026-07-18T14:00:00.000Z',
     turnPolicy: {
       kind: 'maintenance-exact-skip',
+      maintenanceProfile: 'member-memory',
       privateSummary: 'No notification required.',
     },
     vault: '/vaults/notification-device-scope',
@@ -2779,6 +2880,167 @@ test('sendAssistantNotificationLocal releases typing after accepted delivery', a
       providerStop: false,
     },
   )
+})
+
+test('sendAssistantNotificationLocal accepts a sponsor-song response', async () => {
+  const providerResult = createProviderResult({
+    response: JSON.stringify({
+      kind: 'send_message',
+      privateSummary: 'Celebrate the group contribution.',
+      text: 'A brief commercial break: fiscal leadership has arrived.',
+    }),
+  })
+  const observedProviderInputs: NotificationTurnProviderInput[] = []
+  const { deliverMessage, sendAssistantNotificationLocal } =
+    await loadNotificationTurnHarness({
+      onExecuteCodexTurnWithRecovery: async (providerInput) => {
+        observedProviderInputs.push(providerInput)
+        return {
+          kind: 'succeeded',
+          providerTurn: providerResult,
+        }
+      },
+      providerResult,
+      turnId: 'turn-group-sponsorship-text',
+    })
+
+  await expect(sendAssistantNotificationLocal({
+    instructions: 'Create a brief group sponsorship thank-you.',
+    notificationPromptProfile: 'creative-response',
+    responsePolicy: { kind: 'require_send' },
+    vault: '/vaults/group-sponsorship-text',
+  })).resolves.toMatchObject({
+    deliveryOutcome: {
+      kind: 'sent',
+      media: [],
+    },
+  })
+
+  expect(observedProviderInputs[0]).toMatchObject({
+    allowFinishWithoutReply: false,
+    hostedToolContext: null,
+    profile: {
+      nativeResumePolicy: 'disabled',
+      promptProfile: 'creative-notification',
+      threadScope: 'isolated-thread',
+      toolProfile: 'provider-turn',
+    },
+  })
+  expect(deliverMessage).toHaveBeenCalledWith(expect.objectContaining({
+    media: [],
+  }))
+})
+
+test('sendAssistantNotificationLocal accepts a text fallback when song generation fails', async () => {
+  const providerResult = createProviderResult({
+    response: JSON.stringify({
+      kind: 'send_message',
+      privateSummary: 'Audio was unavailable; use text.',
+      text: 'The group fuel gauge lives to fight another day.',
+    }),
+  })
+  const { deliverMessage, sendAssistantNotificationLocal } =
+    await loadNotificationTurnHarness({
+      providerResult,
+      turnId: 'turn-group-sponsorship-media-failed',
+    })
+
+  await expect(sendAssistantNotificationLocal({
+    instructions: 'Create a brief group sponsorship thank-you.',
+    notificationPromptProfile: 'creative-response',
+    responsePolicy: { kind: 'require_send' },
+    vault: '/vaults/group-sponsorship-media-failed',
+  })).resolves.toMatchObject({
+    deliveryOutcome: {
+      kind: 'sent',
+      media: [],
+    },
+  })
+  expect(deliverMessage).toHaveBeenCalledOnce()
+})
+
+test('sendAssistantNotificationLocal delivers one successful sponsor song', async () => {
+  const song = {
+    filename: 'group-thanks.mp3',
+    kind: 'voice_memo' as const,
+    transcript: 'Thanks for keeping the group going.',
+    transport: {
+      attachmentId: 'attachment-group-thanks',
+      kind: 'linq_attachment' as const,
+    },
+  }
+  const providerResult = createProviderResult({
+    response: JSON.stringify({
+      kind: 'send_message',
+      privateSummary: 'Celebrate the group contribution.',
+      text: 'This challenge is now fiscally solvent.',
+    }),
+    responseMedia: [song],
+    session: createAssistantSession({
+      binding: {
+        actorId: 'actor-group-sponsorship',
+        channel: 'linq',
+        conversationKey: null,
+        delivery: {
+          kind: 'thread',
+          target: 'thread-group-sponsorship',
+        },
+        identityId: 'identity-group-sponsorship',
+        threadId: 'thread-group-sponsorship',
+        threadIsDirect: false,
+      },
+    }),
+  })
+  const { deliverMessage, sendAssistantNotificationLocal } =
+    await loadNotificationTurnHarness({
+      providerResult,
+      turnId: 'turn-group-sponsorship-media-succeeded',
+    })
+
+  await expect(sendAssistantNotificationLocal({
+    instructions: 'Create a brief group sponsorship thank-you.',
+    notificationPromptProfile: 'creative-response',
+    responsePolicy: { kind: 'require_send' },
+    vault: '/vaults/group-sponsorship-media-succeeded',
+  })).resolves.toMatchObject({
+    deliveryOutcome: { kind: 'sent' },
+  })
+  expect(deliverMessage).toHaveBeenCalledWith(expect.objectContaining({
+    media: [song],
+  }))
+})
+
+test('sendAssistantNotificationLocal keeps creative response-media failures on the normal notification error path', async () => {
+  const providerResult = createProviderResult({
+    response: 'not a notification decision',
+    responseMedia: [{
+      filename: 'group-thanks.mp3',
+      kind: 'voice_memo',
+      transcript: 'Thanks for keeping the group going.',
+      transport: {
+        attachmentId: 'attachment-group-thanks',
+        kind: 'linq_attachment',
+      },
+    }],
+  })
+  const { deliverMessage, sendAssistantNotificationLocal } =
+    await loadNotificationTurnHarness({
+      providerResult,
+      turnId: 'turn-group-sponsorship-invalid-output',
+    })
+
+  await expect(sendAssistantNotificationLocal({
+    instructions: 'Create a brief group sponsorship thank-you.',
+    notificationPromptProfile: 'creative-response',
+    responsePolicy: { kind: 'require_send' },
+    vault: '/vaults/group-sponsorship-invalid-output',
+  })).rejects.toMatchObject({
+    code: 'ASSISTANT_NOTIFICATION_INVALID_RESPONSE',
+    details: expect.objectContaining({
+      assistantNotificationProviderNonReplayableWork: false,
+    }),
+  })
+  expect(deliverMessage).not.toHaveBeenCalled()
 })
 
 test('sendAssistantNotificationLocal does not checkpoint a new output-only direct session', async () => {

@@ -4580,6 +4580,53 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       .toMatch(/^[A-Za-z0-9\-_]+$/u);
   });
 
+  it("carries reviewed Assistant Ask proof through external route authority", async () => {
+    const authority = {
+      channel: "telegram" as const,
+      containerMemberId: "member_123",
+      threadId: "telegram_group_123",
+    };
+    const assistantAskCompletion = {
+      answeredMailboxItemIds: ["aask_done_telegram_provider_entry"],
+      assistantAskCompletionExpiresAt: "2026-07-27T18:00:00.000Z",
+      assistantAskFallback: false,
+      idempotencyKey:
+        "assistant-ask-reviewed-completion:aask_done_telegram_provider_entry",
+    };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      await expect(request.json()).resolves.toEqual({
+        assistantAskCompletion,
+        authority,
+      });
+      return new Response(JSON.stringify({
+        assistantAskFallbackRequired: true,
+        authorized: true,
+      }), {
+        headers: { "content-type": "application/json; charset=utf-8" },
+        status: 200,
+      });
+    });
+    const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv({
+      HOSTED_WEB_BASE_URL: "https://web.example.test",
+    }));
+    const platform = buildTestHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      webCallbackSigning: environment.webCallbackSigning,
+      webControlBaseUrl: "https://web.example.test",
+    });
+    const assertExternalThreadRouteAuthority =
+      platform.effectsPort.assertExternalThreadRouteAuthority;
+    if (!assertExternalThreadRouteAuthority) {
+      throw new Error("Expected external thread route authority effect.");
+    }
+
+    await expect(assertExternalThreadRouteAuthority(authority, {
+      assistantAskCompletion,
+    })).resolves.toEqual({ assistantAskFallbackRequired: true });
+  });
+
   it("resolves the current verified-email recipient through direct web-control", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const request = input instanceof Request ? input : new Request(input, init);

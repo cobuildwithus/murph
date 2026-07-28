@@ -61,19 +61,39 @@ export async function decryptHostedWebNullableStrings(input: {
     value: string | null | undefined;
   }>;
 }): Promise<Array<string | null>> {
-  return openHostedUserSecureBoxStrings({
+  return decryptHostedWebNullableFields({
     entries: input.values.map(({ memberId, value }) => ({
+      field: input.field,
+      memberId,
+      value,
+    })),
+    prisma: input.prisma,
+  });
+}
+
+export async function decryptHostedWebNullableFields(input: {
+  entries: ReadonlyArray<{
+    field: string;
+    memberId: string;
+    value: string | null | undefined;
+  }>;
+  prisma?: HostedWebEncryptionPrismaClient;
+  signal?: AbortSignal;
+}): Promise<Array<string | null>> {
+  return openHostedUserSecureBoxStrings({
+    entries: input.entries.map(({ field, memberId, value }) => ({
       aad: {
-        field: input.field,
+        field,
         purpose: "hosted-member-private-field",
         rowId: memberId,
         table: "hosted_member",
       },
-      scope: `hosted-member-private-field:${input.field}`,
+      scope: `hosted-member-private-field:${field}`,
       userId: memberId,
       value,
     })),
     lane: "hosted-member-private-field",
     prisma: input.prisma,
+    signal: input.signal,
   });
 }

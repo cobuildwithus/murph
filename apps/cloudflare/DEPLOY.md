@@ -27,6 +27,54 @@ Runner bundle assembly esbuild-bundles two boot-critical surfaces with byte budg
 The device-sync package boundary suite also walks the static source graph from the runner's runtime-config entrypoint and rejects provider runtime modules, importer modules, and the Junction SDK. This focused gate catches boot-closure ownership regressions before the packed-bundle guard validates the final esbuild metafile.
 Hosted assistant delivery recovery now relies on committed side-effect state inside the encrypted workspace and the web-owned hosted workspace checkpoint.
 
+## Device-Sync Wake Epoch Rollout
+
+Connection-scoped `device-sync.wake` items bind their authority to the
+connection row's `connectedAt` epoch. The runner consumes a wake as superseded
+when that epoch is absent or differs from the hydrated connection, without
+running its hint or queued jobs. Runtime applies echo the hydrated epoch as
+`observedConnectedAt`; Web rejects connection, credential, local-state, and
+source writes after OAuth replacement changes that epoch.
+
+When hydration accepts a replacement epoch, the same local SQLite transaction
+retires queued, retryable, and leased credential-scoped jobs before exposing the
+replacement credentials. The existing companion-HRV resource exception remains
+runnable because that accepted payload does not depend on provider
+authorization. Web performs the matching dirty-state supersession under its
+connection mutation lock.
+
+Deploy Cloudflare and the runner bundle first with
+`container_rollout=immediate`, and require managed-container smoke to report the
+exact new bundle fingerprint. Then deploy Web so new producers append the
+epoch. During the short runner-first window, legacy connection-scoped wakes
+still hydrate the current Web snapshot but their hint and jobs fail closed;
+keep that window short so later scheduled, manual, or provider wakes from the
+new Web producer resume ordinary work. Do not deploy Web first: an old runner
+does not enforce the epoch.
+
+After Web emits an epoch-bearing wake, the first epoch-aware runner bundle is a
+hard rollback floor while such wakes or in-flight work may remain. Prefer a
+forward fix. Retaining the new runner while Web is rolled back is safety
+preserving but intentionally fail-closed for legacy connection-scoped hints and
+may reject old-Web apply parsing, so restore compatible Web promptly.
+
+## Group Room-Model Rollout
+
+Deploy the first group room-model release as a Cloudflare Worker and runner
+bundle update with `container_rollout=immediate`; no Web deployment is required.
+Require managed-container smoke to report the exact new runner-bundle
+fingerprint before admitting group turns. Existing per-invocation fingerprint
+admission prevents a stale warm container from processing a workspace under the
+new Worker contract.
+
+Before a new runner persists the immutable group room-model automation id, the
+prior runner remains a safe rollback. After the first such write, the new bundle
+is a hard rollback floor for that workspace: an older runner does not recognize
+the id's silent maintenance policy and could treat its next due occurrence as
+an ordinary deliverable automation. Forward-fix on this bundle or newer rather
+than restoring an older runner. After rollout, verify the expected bundle
+fingerprint and confirm a due room-model occurrence records no group delivery.
+
 ## Conversation Consumed-Watermark Rollout
 
 The exact conversation acknowledgement release changes the durable hosted
@@ -348,6 +396,7 @@ Set these in the selected GitHub environment as secrets:
 - `CLOUDFLARE_ACCOUNT_ID`
 - `HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK`
 - `HOSTED_LOG_FINGERPRINT_SECRET`
+- `HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET`
 - `HOSTED_R2_PRESIGN_ACCESS_KEY_ID`
 - `HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY`
 - `HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK`
@@ -393,7 +442,10 @@ Core execution tuning:
 - `HOSTED_EXECUTION_CONTAINER_ROLLOUT` controls the one-off Wrangler container rollout flag during deploy. While the vault-share selector-scope migration is active, production deploy helpers default to `immediate` and production preflight rejects explicit `gradual`; use `gradual` only for non-production deploys or after the selector-scope rollout guard is removed.
 - `HOSTED_EXECUTION_RUNNER_ENV_PROFILES` adds deploy-time profiles on top of the runtime's minimal `assistant` baseline; deploy automation defaults to `exa,hosted-email,linq,mapbox,telegram`. Hosted device-sync runtime config is resolved from worker env directly rather than a runtime-env profile.
 - `HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS` defaults to `300000` (production sets `1200000`) and controls the post-completion warm lease minted only by observed conversation activity. `HOSTED_EXECUTION_RUNNER_LIFECYCLE_REEVALUATION_MS` defaults to the idle TTL when absent for rollback compatibility. Leave it unset for the additive code deploy and one legacy-TTL observation window, drain old containers, then set it to `60000` for a canary before widening the rollout. Device sync, system maintenance, replay, and generic runner activity do not extend conversation warmth. RunnerContainer derives the lease directly from the resident child process's private health watermark on every expiry, re-arms the platform timeout while the lease or active work remains, yields on uncertain cleanup state, and otherwise destroys the idle shell. An inactive old child without the watermark is cleanup-eligible; active old-child work remains protected by its independent active-work count. A replacement child starts without inheriting the old process's warmth. Dirty foreground runtime state is checkpointed by the runtime-owned idle-floor—or last-chance shutdown—`idle_shutdown` path before the invocation returns; RunnerContainer never records pending checkpoint intent.
-- `HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT` defaults to `production`
+- `HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT` defaults to `production` for
+  direct/local artifact rendering. The manual deploy workflow derives it from
+  the selected `preview` or `production` target; do not configure a conflicting
+  GitHub Environment value.
 - `HOSTED_R2_PRESIGN_ENDPOINT` optionally overrides the default account-scoped
   R2 S3 endpoint for direct snapshot presign URLs. Normally leave it unset. If
   set for deploys, it must be `https://<account-id>.r2.cloudflarestorage.com`.
@@ -541,6 +593,55 @@ Opt-in execution integrations:
 - `WHOOP_CLIENT_SECRET`
 The documented deploy surface is intentionally limited to the vars and secrets above for the narrowed execution plane and its opt-in runtime integrations.
 
+### Inbound message-content retention rollout
+
+This rollout has an irreversible transcript cutover and must use two phases:
+
+1. Deploy the Cloudflare Worker and stamping-capable runner bundle with
+   `container_rollout=immediate`. Drain old warm bundles, prove the deployed
+   fingerprint, and verify that newly written user transcript entries carry
+   `contentReceivedAt`. This Worker/runner version is also the rollout floor:
+   its ambiguous-completion recovery requires both a workspace-version advance
+   and a changed checkpoint timestamp before it releases a runtime fence.
+2. Before the Web migration, count persisted workspace snapshots and compare
+   the aggregate with the existing retention-cron capacity of five snapshots
+   per successful hourly run plus an explicit full-run signal-failure
+   allowance. Stop if that queue cannot drain safely in the rollout window; do
+   not add a second dispatcher as part of this release.
+3. Record the verified runner-convergence instant, then deploy Web with the
+   additive mailbox retention columns. The phase-one migration re-arms every
+   persisted workspace snapshot once, advances the workspace CAS version, and
+   leaves checkpoint time unchanged. A runtime that read the pre-rearm version
+   must conflict and retry instead of clearing the wake; the Worker must not
+   treat that migration-only version advance as runtime progress. Monitor the
+   existing cron until no due snapshot remains; each restored runtime scrubs
+   receipt-backed captures, parser output, projections, inputs, and stamped
+   transcripts while preserving every unstamped legacy transcript entry.
+   Phase one is incomplete until the queue reaches zero.
+   If the Web migration was applied before runner convergence, first prove the
+   stamping-capable runner fingerprint across the fleet, then ship the additive
+   `20260728050000_rearm_hosted_mailbox_content_retention` recovery migration.
+   It repeats only the wake, attempt-marker reset, and CAS advance; it does not
+   alter content or checkpoint time. Start the drain window from that recovery
+   migration and keep monitoring the same due queue to zero.
+4. Keep legacy unstamped transcript entries intact for 14 complete days after
+   the convergence instant and until phase one has drained, whichever is later.
+   Newly stamped entries and the other receipt-owned message carriers use their
+   exact inclusive 14-day deadlines after their initial snapshot drain.
+5. Only after both gates, ship a separate phase-two migration that
+   re-arms persisted snapshots again and enables retirement of every remaining
+   unstamped user transcript entry. Verify retention wake convergence,
+   checkpoint publication, policy-non-reply counts, and content-retirement
+   counts before declaring the cutover complete.
+
+Do not infer legacy receipt time from transcript creation, accepted-turn
+journals, or input events, and do not enable the phase-two legacy scrub early.
+Normal snapshot cleanup can discard those joins, so an early scrub can
+irreversibly erase recent user context while leaving the paired assistant
+reply. The phase-one rearm and drain gate are required: omitting either one
+strands other receipt-backed message carriers in dormant snapshots beyond
+their deadline.
+
 ### Retired WhatsApp configuration
 
 Removing WhatsApp bindings from the deploy workflow does not delete values that
@@ -583,7 +684,9 @@ export CF_BUNDLES_BUCKET=hosted-execution-bundles-staging
 export CF_BUNDLES_PREVIEW_BUCKET=hosted-execution-bundles-staging-preview
 export CF_PUBLIC_BASE_URL=https://hosted-runner-staging.example.workers.dev
 export HOSTED_EXECUTION_DEPLOY_CONTEXT=preview
-export HOSTED_WEB_BASE_URL=https://web.example.test
+export HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT=preview
+export HOSTED_WEB_BASE_URL=https://web-staging.example.test
+export HOSTED_WEB_PRODUCTION_BASE_URL=https://web.example.test
 export HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG=your-team
 export HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME=your-project
 export HOSTED_R2_PRESIGN_ACCOUNT_ID=your-cloudflare-account-id
@@ -599,8 +702,9 @@ export HOSTED_ASSISTANT_REASONING_EFFORT=low
 # HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION,
 # HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM,
 # HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK,
-# HOSTED_LOG_FINGERPRINT_SECRET, HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK,
-# OPENAI_API_KEY.
+# HOSTED_LOG_FINGERPRINT_SECRET,
+# HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET,
+# HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK, MURPH_DATA_API_KEY, OPENAI_API_KEY.
 # Optional hosted generated-image upload support also uses
 # CLOUDFLARE_IMAGES_ACCOUNT_ID, CLOUDFLARE_IMAGES_API_KEY, and optionally
 # CLOUDFLARE_IMAGES_VARIANT.
@@ -629,6 +733,58 @@ Run `pnpm --dir apps/cloudflare test:e2e:runner-python:local` when you specifica
 After first publish, make the GHCR runner base package public so PR CI can use
 anonymous pulls without exposing package credentials to PR-controlled commands.
 
+## Preview Staging Lane
+
+The manual protected-main workflow has one non-production target: `preview`.
+It uses the same generated config, secret renderer, Wrangler deploy, lifecycle
+application, and smoke owner as production, but attaches the existing GitHub
+`Preview` Environment. Do not add a second Wrangler config or deploy workflow.
+
+Before the first preview Worker deploy:
+
+1. Make the Vercel `preview` target an isolated hosted-Web boundary. It needs
+   its own database, crypto environment and keys, callback-signing keys,
+   Temporal namespace/task queue, and any provider sandbox credentials used by
+   the rehearsal. Use a stable preview URL whose hostname contains `preview` or
+   `staging`. Keep production database, crypto, persistent computer profile,
+   messaging routes, and provider credentials out of this target.
+2. Configure the GitHub `Preview` Environment with the vars and secrets in this
+   document. Use a Worker name and both R2 bucket names containing a `preview`
+   or `staging` segment. `HOSTED_CRYPTO_ENV` must be `preview`.
+   `HOSTED_WEB_BASE_URL` must be the isolated preview origin and
+   `HOSTED_WEB_PRODUCTION_BASE_URL` must be the production origin used only for
+   the inequality guard. The Worker and Web origins must be distinct. If device
+   sync is enabled, `DEVICE_SYNC_PUBLIC_BASE_URL` must be a public staging HTTPS
+   URL; its callback path is allowed, but its origin must not be production Web.
+3. Create only the staging R2 bucket or buckets, with the required location,
+   and issue the direct-R2 key against those buckets only. Apply the checked-in
+   lifecycle rules before stateful use.
+4. Dispatch from protected `main`:
+
+   ```bash
+   gh workflow run .github/workflows/deploy-cloudflare-hosted.yml \
+     --ref main \
+     -f environment=preview \
+     -f sync_worker_secrets=true \
+     -f deploy_worker=true \
+     -f container_rollout=immediate \
+     -f live_model_turn=false
+   ```
+
+The workflow derives
+`HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT=preview` from the selected target.
+Preflight runs before artifact rendering, secret sync, lifecycle changes, or
+Worker deployment and rejects a mismatched crypto/OIDC context, unscoped
+Worker or R2 name, non-staging Worker/Web origin, production Web alias, local
+or private-network origin, private-network DNS resolution, Worker/Web
+self-routing, or a non-staging device-sync callback. Preview deploys never run
+the paid live-model deploy smoke; endpoint, managed-container, runner-bundle,
+assistant CLI, and immediate direct-R2 smoke still run.
+
+If the isolated Vercel preview boundary is incomplete, stop before dispatch.
+Pointing the preview Worker at production Web or copying production stateful
+secrets is not a bootstrap shortcut.
+
 Normal worker deploys apply the checked-in lifecycle rules before `wrangler deploy`. When you need to repair or verify the bucket lifecycle separately:
 
 ```bash
@@ -653,7 +809,7 @@ That command:
 - prepares the stable native runner base image with Docker's local cache; production deploy paths force that build from source, while hosted-local E2E lanes may reuse the GHCR-published runner base image when the source fingerprint matches the current checkout
 - deploys the Worker directly with Wrangler; production deploys currently default to immediate container rollout for the vault-share selector-scope migration, while non-production deploys default to gradual and build only the small app image layer from the prepared runner bundle
 
-The gradual container rollout keeps `rollout_active_grace_period` at 300 seconds and rolls runner instances through `10`, `25`, `50`, then `100` percent. The manual workflow exposes a `container_rollout` input; its production default is currently `immediate` because selector-scoped vault-share deliveries are unsafe under gradual runner rollout. Selecting `immediate` passes Wrangler's `--containers-rollout=immediate` flag and can interrupt active runner containers.
+The gradual container rollout keeps the production `RunnerContainer` `rollout_active_grace_period` at 300 seconds and rolls runner instances through `10`, `25`, `50`, then `100` percent. The isolated `DeploySmokeRunnerContainer` uses zero active grace and a single 100 percent step: it carries no user work, and smoke probes must not defer the image replacement they are trying to verify. The manual workflow exposes a `container_rollout` input; its production default is currently `immediate` because selector-scoped vault-share deliveries are unsafe under gradual runner rollout. Selecting `immediate` passes Wrangler's `--containers-rollout=immediate` flag and can interrupt active runner containers.
 During gradual rollout, Worker code and runner container state may disagree for the rollout window. A newly deployed Worker version can handle provider egress or internal-host traffic from an already-running warm runner process whose bundle, process env, or provider-credential shape was created before the deploy. Treat this as expected rollout behavior, not proof that traffic is reaching an old Worker version. Any PR that changes a Worker/container contract, runner env shape, hosted provider credential, internal host route, parser/toolchain path, or bundle-owned runtime assumption must document the compatibility window in its PR description and final `DEPLOYMENT CONCERNS:` handoff: whether old containers can safely talk to new Worker code, whether new containers can safely talk to old web/control-plane code, whether `container_rollout=immediate` is required, and which deploy-smoke or Workers Observability checks prove the fleet has converged.
 
 The scheduled Linq authority release has a Web-first hard gate. Deploy and
@@ -757,7 +913,7 @@ Optional smoke env:
 - `HOSTED_EXECUTION_SMOKE_LIVE_MODEL_TURN=true` to extend the managed-container smoke with one real `gpt-5.6-terra` turn; requires `HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER=true`
 - `HOSTED_EXECUTION_SMOKE_VERSION_ID` to pin smoke requests to a version in the active deployment; the deploy workflow passes the freshly deployed version
 - `HOSTED_EXECUTION_SMOKE_RUNNER_MAX_ATTEMPTS` and `HOSTED_EXECUTION_SMOKE_RUNNER_RETRY_DELAY_MS` to override the managed-container rollout wait
-- `HOSTED_EXECUTION_SMOKE_RUNNER_MAX_WAIT_MS` to bound that wait by wall clock (default 20 minutes). Keep it under the deploy job timeout: the attempt ceiling alone can outlast the job, which makes a non-converging rollout surface as a cancelled job with no reason instead of a named smoke failure. Each attempt addresses its own smoke Durable Object, so retries get a fresh container instead of re-reading one pre-rollout container for the whole run.
+- `HOSTED_EXECUTION_SMOKE_RUNNER_MAX_WAIT_MS` to bound that wait by wall clock (default 20 minutes). The Node smoke client disables its dispatcher's implicit response-header and response-body timers for this long-running request and applies this wall-clock budget as the explicit abort deadline. Keep it under the deploy job timeout: the attempt ceiling alone can outlast the job, which makes a non-converging rollout surface as a cancelled job with no reason instead of a named smoke failure. Each attempt addresses its own smoke Durable Object, so retries get a fresh container instead of re-reading one pre-rollout container for the whole run.
 
 If neither managed-container smoke nor `HOSTED_EXECUTION_SMOKE_USER_ID` is configured, smoke stops after the public banner and health checks.
 

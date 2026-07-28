@@ -27,9 +27,11 @@ interface HostedUsageTopUpSelectionScreen {
   attempt: HostedUsageTopUpSelectionAttempt;
   kind: "selection";
   selectedOfferCode: string | null;
+  unresolvedRequestKey: string | null;
 }
 
 interface HostedUsageTopUpPurchaseScreen {
+  cancelAllowed: boolean;
   checkoutError: string | null;
   checkoutUrl: string | null;
   kind: "purchase";
@@ -39,6 +41,7 @@ interface HostedUsageTopUpPurchaseScreen {
   restartAt: string | null;
   retryOfferCode: string | null;
   retryRequestKey: string | null;
+  selectionConflict: HostedUsageTopUpPurchaseResponse["selectionConflict"];
   status: HostedUsageTopUpPurchaseStatus | null;
   targetConflict: boolean;
 }
@@ -69,6 +72,11 @@ type HostedUsageTopUpAction =
     }
   | {
       type: "selection_checkout_redirected";
+      offerCode: string;
+      requestKey: string;
+    }
+  | {
+      type: "checkout_recovery_missed";
       offerCode: string;
       requestKey: string;
     }
@@ -123,7 +131,10 @@ function createHostedUsageTopUpState(input: {
   const purchaseId =
     input.purchaseReturn?.purchaseId ?? input.activePurchase?.purchaseId ?? null;
   if (!purchaseId) {
-    return { open: input.initialOpen, screen: createSelectionScreen() };
+    return {
+      open: input.initialOpen,
+      screen: createSelectionScreen(),
+    };
   }
   const status = input.purchaseReturn
     ? null
@@ -132,6 +143,7 @@ function createHostedUsageTopUpState(input: {
     open: input.purchaseReturn !== null || input.initialOpen,
     screen: {
       ...createPurchaseScreen(purchaseId),
+      cancelAllowed: input.activePurchase?.cancelAllowed === true,
       checkoutUrl:
         status === "checkout_open" &&
         input.activePurchase?.targetConflict !== true &&
@@ -143,7 +155,7 @@ function createHostedUsageTopUpState(input: {
           ? readOptionalRestartAt(input.activePurchase?.restartAt)
           : null,
       retryOfferCode:
-        status === "reconciling" &&
+        (status === "reconciling" || status === "payment_pending") &&
         input.activePurchase?.targetConflict !== true &&
         input.activePurchase?.retryAllowed
           ? input.activePurchase.offerCode
@@ -163,8 +175,11 @@ function hostedUsageTopUpReducer(
       return state.open ? { ...state, open: false } : state;
     case "open":
       return {
+        ...state,
         open: true,
-        screen: action.reset ? createSelectionScreen() : state.screen,
+        screen: action.reset
+          ? createSelectionScreen()
+          : state.screen,
       };
     case "offer_selected":
       return updateSelectionScreen(state, (screen) =>
@@ -173,7 +188,9 @@ function hostedUsageTopUpReducer(
           : screen,
       );
     case "amount_change_requested":
-      return updateSelectionScreen(state, () => createSelectionScreen());
+      return updateSelectionScreen(state, () =>
+        createSelectionScreen(),
+      );
     case "selection_checkout_started":
       return updateSelectionScreen(state, (screen) => ({
         ...screen,
@@ -203,6 +220,8 @@ function hostedUsageTopUpReducer(
           requestKey: action.requestKey,
         },
       }));
+    case "checkout_recovery_missed":
+      return applyCheckoutRecoveryMiss(state, action);
     case "purchase_checkout_started":
       return updatePurchaseScreen(state, action.purchaseId, (screen) => ({
         ...screen,
@@ -296,11 +315,18 @@ function hostedUsageTopUpReducer(
         ),
       };
     case "purchase_return":
-      return { open: true, screen: createPurchaseScreen(action.purchaseId) };
+      return {
+        ...state,
+        open: true,
+        screen: createPurchaseScreen(action.purchaseId),
+      };
     case "recovery_expired":
       return state.screen.kind === "purchase" &&
         state.screen.purchaseId === action.purchaseId
-        ? { ...state, screen: createSelectionScreen() }
+        ? {
+            ...state,
+            screen: createSelectionScreen(),
+          }
         : state;
   }
 }
@@ -363,6 +389,28 @@ function applyCheckoutResponse(
   };
 }
 
+function applyCheckoutRecoveryMiss(
+  state: HostedUsageTopUpState,
+  action: Extract<
+    HostedUsageTopUpAction,
+    { type: "checkout_recovery_missed" }
+  >,
+): HostedUsageTopUpState {
+  const selectionMatches =
+    state.screen.kind === "selection" &&
+    state.screen.attempt.kind === "opening" &&
+    state.screen.attempt.offerCode === action.offerCode &&
+    state.screen.attempt.requestKey === action.requestKey;
+  const purchaseMatches =
+    state.screen.kind === "purchase" &&
+    state.screen.operation === "opening_checkout" &&
+    state.screen.retryOfferCode === action.offerCode &&
+    state.screen.retryRequestKey === action.requestKey;
+  return selectionMatches || purchaseMatches
+    ? { ...state, screen: createSelectionScreen(action.requestKey) }
+    : state;
+}
+
 function screenFromResponse(
   previous: HostedUsageTopUpPurchaseScreen | null,
   response: HostedUsageTopUpPurchaseResponse,
@@ -376,8 +424,11 @@ function screenFromResponse(
     : null;
   return {
     ...createPurchaseScreen(response.purchaseId),
+    cancelAllowed: response.cancelAllowed,
     checkoutUrl:
-      !response.targetConflict && response.status === "checkout_open"
+      !response.selectionConflict &&
+      !response.targetConflict &&
+      response.status === "checkout_open"
         ? responseUrl ?? previous?.checkoutUrl ?? null
         : null,
     poll:
@@ -387,22 +438,37 @@ function screenFromResponse(
           ? previousPoll
           : createPoll(previousPoll.run),
     restartAt: response.status === "reconciling" ? response.restartAt : null,
-    retryOfferCode: response.targetConflict ? null : retryOfferCode,
+    retryOfferCode:
+      response.selectionConflict || response.targetConflict
+        ? null
+        : retryOfferCode,
     retryRequestKey:
-      response.targetConflict || !retryOfferCode ? null : retryRequestKey,
+      response.selectionConflict || response.targetConflict || !retryOfferCode
+        ? null
+        : retryRequestKey,
+    selectionConflict:
+      response.selectionConflict ?? previous?.selectionConflict ?? null,
     status: response.status,
     targetConflict: response.targetConflict || previous?.targetConflict === true,
   };
 }
 
-function createSelectionScreen(): HostedUsageTopUpSelectionScreen {
-  return { attempt: { kind: "idle" }, kind: "selection", selectedOfferCode: null };
+function createSelectionScreen(
+  unresolvedRequestKey: string | null = null,
+): HostedUsageTopUpSelectionScreen {
+  return {
+    attempt: { kind: "idle" },
+    kind: "selection",
+    selectedOfferCode: null,
+    unresolvedRequestKey,
+  };
 }
 
 function createPurchaseScreen(
   purchaseId: string,
 ): HostedUsageTopUpPurchaseScreen {
   return {
+    cancelAllowed: false,
     checkoutError: null,
     checkoutUrl: null,
     kind: "purchase",
@@ -412,6 +478,7 @@ function createPurchaseScreen(
     restartAt: null,
     retryOfferCode: null,
     retryRequestKey: null,
+    selectionConflict: null,
     status: null,
     targetConflict: false,
   };

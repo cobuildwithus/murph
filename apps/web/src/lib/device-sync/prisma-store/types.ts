@@ -86,6 +86,7 @@ export interface HostedDeviceSyncDirtyConnectionAckRecord {
 
 export interface HostedDeviceSyncDueReconcileConnectionRecord {
   connectionId: string;
+  connectedAt: string;
   userId: string;
   provider: string;
   nextReconcileAt: string;

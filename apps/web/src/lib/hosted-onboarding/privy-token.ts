@@ -46,7 +46,7 @@ export function readHostedPrivyIdentityTokenFromRequestCookies(request: Request)
 
 /**
  * Reads a Privy identity token from `Authorization: Bearer <token>`.
- * Used by native (non-browser) clients such as the iOS companion app.
+ * Used by native (non-browser) Murph companion apps.
  * Deliberately no cookie fallback: bearer-authenticated routes carry no
  * browser-session ambient authority, so they stay CSRF-immune.
  */

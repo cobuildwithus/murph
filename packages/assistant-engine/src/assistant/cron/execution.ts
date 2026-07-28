@@ -38,8 +38,11 @@ import {
 } from '../automation/shared.js'
 import type { AssistantExecutionContext } from '../execution-context.js'
 import {
-  MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
-  MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_PRIVATE_SUMMARY,
+  isRetiredMurphManagedAutomationId,
+  resolveMurphManagedAutomationSeed,
+  resolveMurphManagedMaintenancePolicy,
+  type MurphManagedAutomationSeed,
+  type MurphManagedMaintenancePolicy,
 } from '../managed-automations.js'
 import { readAssistantOnboardingState } from '../onboarding-state.js'
 import {
@@ -128,6 +131,12 @@ const ASSISTANT_CRON_NOTIFICATION_EXPIRED_ERROR =
 const ASSISTANT_CRON_BACKGROUND_MAINTENANCE_YIELD_POLL_MS = 250
 const ASSISTANT_CRON_BACKGROUND_MAINTENANCE_NON_REPLAYABLE_WORK_ERROR =
   'Assistant background maintenance stopped after provider work; occurrence consumed to avoid replay.'
+const ASSISTANT_CRON_MANAGED_OWNER_SCOPE_MISMATCH_ERROR =
+  'Managed automation owner no longer matches the live delivery route.'
+const HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH =
+  'HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH'
+const ASSISTANT_CRON_MANAGED_AUTOMATION_RETIRED_ERROR =
+  'Managed automation has been retired.'
 const ASSISTANT_CRON_FOREGROUND_YIELDED_ERROR =
   'Assistant cron yielded to fresh foreground input.'
 const ASSISTANT_CRON_NEWSLETTER_DELIVERY_FAILED_ERROR =
@@ -142,6 +151,8 @@ const ASSISTANT_CRON_ONBOARDING_UNREADABLE_RESEARCH_SKIP_ERROR =
   'Assistant cron research-oriented managed automation skipped because assistant onboarding state could not be read.'
 const MURPH_RESEARCH_ORIENTED_MANAGED_AUTOMATION_TAGS = new Set([
   'murph-managed:weekly-health-insight',
+  'murph-managed:monthly-improvement-coach',
+  // Legacy tag retained while existing records reconcile to the monthly seed.
   'murph-managed:weekly-improvement-coach',
   'murph-managed:weekly-health-research-scout',
 ])
@@ -479,6 +490,7 @@ export async function executeClaimedAssistantCronJob(
           },
         }),
       }
+  const managedOwnerAuthorityTarget = deviceActivityPreparedJob.job.target
   // Maintenance has no audience. Neutralize only this ephemeral claim after
   // authority preparation; the canonical automation route remains unchanged.
   const preparedJob = assistantCronJobIsPreemptibleBackgroundMaintenance(
@@ -510,6 +522,10 @@ export async function executeClaimedAssistantCronJob(
   let pendingDeliveryIntentId: string | null = null
   let canonicalSourceDisposition: AssistantCronCanonicalSourceDisposition = 'current'
   let canonicalSourceSkipReason: string | null = null
+  let managedOwnerAuthorization: AssistantCronManagedOwnerAuthorization = {
+    kind: 'unmanaged',
+  }
+  let managedOwnerSkipReason: string | null = null
   // Preemptible background maintenance has exactly one yield owner: the
   // maintenance cancellation below. Wiring the generic foreground poller too
   // (hosted passes the same predicate as both callbacks) created a race
@@ -574,6 +590,24 @@ export async function executeClaimedAssistantCronJob(
       }
     }
 
+    if (
+      deviceActivityAuthority.error === null &&
+      canonicalSourceSkipReason === null
+    ) {
+      managedOwnerAuthorization =
+        await resolveAssistantCronManagedOwnerAuthorization({
+          executionContext: input.executionContext ?? null,
+          job: input.job,
+          signal: yieldCancellation.signal,
+          target: managedOwnerAuthorityTarget,
+        })
+      if (managedOwnerAuthorization.kind === 'mismatch') {
+        managedOwnerSkipReason = ASSISTANT_CRON_MANAGED_OWNER_SCOPE_MISMATCH_ERROR
+      } else if (managedOwnerAuthorization.kind === 'retired') {
+        managedOwnerSkipReason = ASSISTANT_CRON_MANAGED_AUTOMATION_RETIRED_ERROR
+      }
+    }
+
     // Lifecycle-owned writes happen before notification expiry so a cleanup
     // failure remains retryable even when its next attempt crosses the stale
     // delivery window. Expiry may suppress the outbound, never the owner work.
@@ -581,6 +615,7 @@ export async function executeClaimedAssistantCronJob(
     if (
       deviceActivityAuthority.error === null &&
       canonicalSourceSkipReason === null &&
+      managedOwnerSkipReason === null &&
       input.job.kind === 'canonical' &&
       input.job.source.kind === 'automation'
     ) {
@@ -614,6 +649,13 @@ export async function executeClaimedAssistantCronJob(
       outcome = 'skipped_gate'
       reason = 'device_activity_authority_stale'
       errorText = deviceActivityAuthority.error
+    } else if (managedOwnerSkipReason !== null) {
+      outcome = 'skipped_gate'
+      reason = managedOwnerSkipReason ===
+          ASSISTANT_CRON_MANAGED_AUTOMATION_RETIRED_ERROR
+        ? 'managed_automation_retired'
+        : 'managed_owner_scope_mismatch'
+      errorText = managedOwnerSkipReason
     } else if (staleError) {
       outcome = 'expired'
       reason = 'late_occurrence'
@@ -718,11 +760,13 @@ export async function executeClaimedAssistantCronJob(
                 externalThreadRouteAuthority: null,
                 route: resolveAssistantCronNotificationDeliveryRoute(claimedJob.target),
               }
-            : await resolveAssistantCronAuthorizedNotificationDeliveryRoute({
-                executionContext: input.executionContext ?? null,
-                signal: yieldCancellation.signal,
-                target: claimedJob.target,
-              })
+            : managedOwnerAuthorization.kind === 'authorized'
+              ? managedOwnerAuthorization.authorizedDelivery
+              : await resolveAssistantCronAuthorizedNotificationDeliveryRoute({
+                  executionContext: input.executionContext ?? null,
+                  signal: yieldCancellation.signal,
+                  target: claimedJob.target,
+                })
           const deliveryRoute = authorizedDelivery.route
           const notificationExecutionContext =
             scopeAssistantCronScheduledGroupTools({
@@ -746,6 +790,13 @@ export async function executeClaimedAssistantCronJob(
             await assertAssistantCronLifecycleNotificationStillAuthorized({
               job: input.job,
               vault: input.vault,
+            })
+            await assertAssistantCronManagedOwnerStillAuthorized({
+              expected: managedOwnerAuthorization,
+              executionContext: input.executionContext ?? null,
+              job: input.job,
+              signal: yieldCancellation.signal,
+              target: managedOwnerAuthorityTarget,
             })
 
             if (notificationExecutionContext?.hosted?.groupTool) {
@@ -794,6 +845,7 @@ export async function executeClaimedAssistantCronJob(
                   },
                 }
               : {}),
+            beforeProviderAcceptedInputs: assertNotificationStillAuthorized,
             beforeDelivery: assertNotificationStillAuthorized,
             beforeToolExecution: assertNotificationStillAuthorized,
             beforeCommit: async (context) => {
@@ -951,6 +1003,11 @@ export async function executeClaimedAssistantCronJob(
       errorCode = error.code
       outcome = 'skipped_gate'
       reason = 'lifecycle_precondition'
+    } else if (error instanceof AssistantCronManagedOwnerInvalidatedError) {
+      errorText = error.message
+      errorCode = error.code
+      outcome = 'skipped_gate'
+      reason = 'managed_owner_scope_mismatch'
     } else {
       const yieldedError =
         error instanceof AssistantCronForegroundYieldedError ||
@@ -1467,10 +1524,12 @@ function resolveAssistantCronNotificationResponsePolicy(
 function resolveAssistantCronNotificationTurnPolicy(
   job: ResolvedAssistantCronJob,
 ): AssistantNotificationTurnPolicy | null {
-  return assistantCronJobIsPreemptibleBackgroundMaintenance(job)
+  const policy = resolveAssistantCronBackgroundMaintenancePolicy(job)
+  return policy
     ? {
         kind: 'maintenance-exact-skip',
-        privateSummary: MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_PRIVATE_SUMMARY,
+        maintenanceProfile: policy.profile,
+        privateSummary: policy.privateSummary,
       }
     : null
 }
@@ -2146,6 +2205,171 @@ function scopeAssistantCronScheduledGroupTools(input: {
   }
 }
 
+type AssistantCronAuthorizedNotificationDelivery = Awaited<
+  ReturnType<typeof resolveAssistantCronAuthorizedNotificationDeliveryRoute>
+>
+
+type AssistantCronManagedOwnerAuthorization =
+  | { kind: 'unmanaged' }
+  | { kind: 'mismatch' }
+  | { kind: 'retired' }
+  | {
+      authorizedDelivery: AssistantCronAuthorizedNotificationDelivery
+      channel: string | null
+      kind: 'authorized'
+      ownerScope: 'member' | 'authenticated-group'
+      seed: MurphManagedAutomationSeed
+      target: string | null
+      threadIsDirect: boolean | null
+    }
+
+async function resolveAssistantCronManagedOwnerAuthorization(input: {
+  executionContext: AssistantExecutionContext | null
+  job: ResolvedAssistantCronJob
+  signal: AbortSignal
+  target: AssistantCronJob['target']
+}): Promise<AssistantCronManagedOwnerAuthorization> {
+  if (
+    input.job.kind !== 'canonical' ||
+    input.job.source.kind !== 'automation'
+  ) {
+    return { kind: 'unmanaged' }
+  }
+  if (isRetiredMurphManagedAutomationId(input.job.source.automationId)) {
+    return { kind: 'retired' }
+  }
+
+  // Only immutable current built-in identities carry hidden owner policy.
+  // Dynamically generated experiment lifecycle seeds deliberately remain on
+  // their existing path until their concurrently owned source can expose an
+  // exact identity resolver; tags, slugs, and prompt text are never authority.
+  const seed = resolveMurphManagedAutomationSeed(
+    input.job.source.automationId,
+  )
+  if (!seed) {
+    return { kind: 'unmanaged' }
+  }
+  const ownerScope = seed.ownerScope ?? 'member'
+  const declaredRoute = resolveAssistantCronNotificationDeliveryRoute(
+    input.target,
+  )
+  if (
+    ownerScope === 'authenticated-group' &&
+    !assistantCronManagedRouteIsAuthenticatedGroup({
+      channel: input.target.channel,
+      threadIsDirect: declaredRoute.threadIsDirect,
+    })
+  ) {
+    return { kind: 'mismatch' }
+  }
+  if (
+    ownerScope === 'member' &&
+    declaredRoute.threadIsDirect === false
+  ) {
+    return { kind: 'mismatch' }
+  }
+
+  let authorizedDelivery: Awaited<
+    ReturnType<typeof resolveAssistantCronAuthorizedNotificationDeliveryRoute>
+  >
+  if (
+    ownerScope === 'authenticated-group'
+    || !assistantCronJobIsPreemptibleBackgroundMaintenance(input.job)
+  ) {
+    try {
+      authorizedDelivery =
+        await resolveAssistantCronAuthorizedNotificationDeliveryRoute({
+          executionContext: input.executionContext,
+          signal: input.signal,
+          target: input.target,
+        })
+    } catch (error) {
+      if (
+        ownerScope === 'member'
+        && input.target.channel === 'linq'
+        && readAssistantCronErrorCode(error)
+          === HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH
+      ) {
+        return { kind: 'mismatch' }
+      }
+      throw error
+    }
+  } else {
+    authorizedDelivery = {
+      externalThreadRouteAuthority: null,
+      route: declaredRoute,
+    }
+  }
+  const route = authorizedDelivery.route
+  const channel = normalizeNullableString(input.target.channel)?.toLowerCase() ?? null
+  const target = normalizeNullableString(
+    route.bindingDelivery?.target ?? route.deliveryTarget,
+  )
+  const ownerMatches = ownerScope === 'authenticated-group'
+    ? assistantCronManagedRouteIsAuthenticatedGroup({
+        channel,
+        threadIsDirect: route.threadIsDirect,
+      }) && target !== null
+    : route.threadIsDirect !== false
+  if (!ownerMatches) {
+    return { kind: 'mismatch' }
+  }
+
+  return {
+    authorizedDelivery,
+    channel,
+    kind: 'authorized',
+    ownerScope,
+    seed,
+    target,
+    threadIsDirect: route.threadIsDirect,
+  }
+}
+
+function assistantCronManagedRouteIsAuthenticatedGroup(input: {
+  channel: string | null | undefined
+  threadIsDirect: boolean | null | undefined
+}): boolean {
+  const channel = normalizeNullableString(input.channel)?.toLowerCase()
+  return input.threadIsDirect === false &&
+    (channel === 'linq' || channel === 'telegram')
+}
+
+async function assertAssistantCronManagedOwnerStillAuthorized(input: {
+  expected: AssistantCronManagedOwnerAuthorization
+  executionContext: AssistantExecutionContext | null
+  job: ResolvedAssistantCronJob
+  signal: AbortSignal
+  target: AssistantCronJob['target']
+}): Promise<void> {
+  if (input.expected.kind === 'unmanaged') {
+    return
+  }
+  const current = await resolveAssistantCronManagedOwnerAuthorization({
+    executionContext: input.executionContext,
+    job: input.job,
+    signal: input.signal,
+    target: input.target,
+  })
+  if (!assistantCronManagedOwnerAuthorizationMatches(input.expected, current)) {
+    throw new AssistantCronManagedOwnerInvalidatedError()
+  }
+}
+
+function assistantCronManagedOwnerAuthorizationMatches(
+  expected: AssistantCronManagedOwnerAuthorization,
+  current: AssistantCronManagedOwnerAuthorization,
+): boolean {
+  if (expected.kind !== 'authorized' || current.kind !== 'authorized') {
+    return expected.kind === current.kind && expected.kind === 'unmanaged'
+  }
+  return expected.seed.automationId === current.seed.automationId &&
+    expected.ownerScope === current.ownerScope &&
+    expected.channel === current.channel &&
+    expected.target === current.target &&
+    expected.threadIsDirect === current.threadIsDirect
+}
+
 async function resolveAssistantCronAuthorizedNotificationDeliveryRoute(input: {
   executionContext: AssistantExecutionContext | null
   signal: AbortSignal
@@ -2287,6 +2511,15 @@ class AssistantCronCanonicalSourceInvalidatedError extends VaultCliError {
 class AssistantCronLifecycleNotificationInvalidatedError extends VaultCliError {
   constructor(reason: string) {
     super('ASSISTANT_CRON_LIFECYCLE_AUTHORITY_STALE', reason)
+  }
+}
+
+class AssistantCronManagedOwnerInvalidatedError extends VaultCliError {
+  constructor() {
+    super(
+      'ASSISTANT_CRON_MANAGED_OWNER_SCOPE_STALE',
+      ASSISTANT_CRON_MANAGED_OWNER_SCOPE_MISMATCH_ERROR,
+    )
   }
 }
 
@@ -2470,7 +2703,7 @@ export function canonicalAssistantCronSourceIsBackgroundMaintenance(
   source: CanonicalAssistantCronJobRecord,
 ): boolean {
   return source.kind === 'automation' &&
-    source.automationId === MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID
+    resolveMurphManagedMaintenancePolicy(source.automationId) !== null
 }
 
 function resolveAssistantCronRuntimeScope(
@@ -2603,6 +2836,14 @@ function assistantNotificationErrorHasNonReplayableProviderWork(
   }
 
   return Reflect.get(details, 'assistantNotificationProviderNonReplayableWork') === true
+}
+
+function resolveAssistantCronBackgroundMaintenancePolicy(
+  job: ResolvedAssistantCronJob,
+): MurphManagedMaintenancePolicy | null {
+  return job.kind === 'canonical' && job.source.kind === 'automation'
+    ? resolveMurphManagedMaintenancePolicy(job.source.automationId)
+    : null
 }
 
 function assistantCronJobIsPreemptibleBackgroundMaintenance(

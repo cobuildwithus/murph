@@ -9,6 +9,7 @@ import {
 import type {
   AssistantHostedToolRequestKeyScope,
 } from '../../assistant/hosted-tool-context.js'
+import type { AssistantConversationScope } from '../../assistant/conversation-policy.js'
 import type {
   AssistantAcceptedTurnInputItemInput,
   AssistantAcceptedTurnInputSource,
@@ -34,16 +35,13 @@ export const MURPH_CREATE_PHONE_CALL_TOOL = {
   namespace: 'murph',
   name: 'create_phone_call',
   description: [
-    'Start one outbound phone call on the user\'s behalf.',
-    'Use only when the user asked Murph to call or clearly approved this call.',
+    'Before a real call, read $MURPH_ASSISTANT_SKILLS_ROOT/phone-calls/SKILL.md.',
+    'Start one outbound phone call only when the user asked Murph to call or clearly approved this specific call.',
     'Resolve relative dates and times before creating the brief.',
     'Before a real appointment booking, rescheduling, cancellation, or waitlist call, read $MURPH_ASSISTANT_SKILLS_ROOT/appointment-scheduling/SKILL.md and satisfy its ready-to-act gate with a completed, user-approved readiness brief; an information-only or connectivity-test call must stay non-mutating, remain separate, and never count as appointment readiness.',
-    'Set callerName to the user-approved first name or name Murph may use to identify who it is calling for unless the name does not make sense for this call.',
     'Put only user-approved, call-relevant, disclosable facts in shareableFacts.',
-    'Set allowTransferToUser=true for calls likely to require live user identity verification, personal consent, or in-the-moment judgment unless the user says not to transfer.',
-    'Set allowTransferToUser=false for info-only calls, simple status checks, or calls where transfer would surprise the user.',
+    'Group-chat calls never transfer to one participant; Murph forces allowTransferToUser=false for group calls.',
     'Do not put the user transfer phone number in shareableFacts; Murph resolves verified transfer numbers server-side.',
-    'Facts outside shareableFacts require Murph consultation during the call.',
   ].join(' '),
   inputSchema: z.toJSONSchema(hostedPhoneCallBriefSchema, { io: 'input' }),
 } as const
@@ -99,6 +97,20 @@ export function createPhoneCallRequestKey(input: {
     }))
     .digest('hex')
   return `phone_call_${digest}`
+}
+
+export function normalizePhoneCallBriefForConversationScope(input: {
+  brief: HostedPhoneCallBrief
+  conversationScope: AssistantConversationScope
+}): HostedPhoneCallBrief {
+  if (input.conversationScope !== 'group' || !input.brief.allowTransferToUser) {
+    return input.brief
+  }
+
+  return {
+    ...input.brief,
+    allowTransferToUser: false,
+  }
 }
 
 export function resolveAssistantUserActionAcceptedInputIds(input: {

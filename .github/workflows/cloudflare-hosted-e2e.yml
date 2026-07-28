@@ -161,6 +161,14 @@ jobs:
             slug: junction-wearable-direct-resource-replay
             scenarios: device-sync-junction-wearable-direct-resource-replay
             timeoutMinutes: 35
+          # This is intentionally a separately named check: it recreates the
+          # production 180-second priority inversion and fails after 30 seconds
+          # if a real foreground Linq message cannot replace background ownership.
+          - name: Hosted foreground reply priority E2E
+            fastGate: "1"
+            slug: foreground-reply-priority
+            scenarios: foreground-reply-priority
+            timeoutMinutes: 30
     services:
       postgres:
         image: public.ecr.aws/docker/library/postgres:17
@@ -256,6 +264,7 @@ jobs:
         run: >-
           pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage
           apps/web/test/device-sync-dirty-account-deletion-concurrency.test.ts
+          apps/web/test/hosted-accepted-attempt-recheck-postgres-concurrency.test.ts
           apps/web/test/hosted-assistant-ask-retention-postgres.test.ts
           apps/web/test/hosted-execution-usage-postgres-concurrency.test.ts
           apps/web/test/hosted-onboarding-linq-home-routing-postgres.test.ts
@@ -264,6 +273,7 @@ jobs:
           apps/web/test/hosted-onboarding-linq-participant-addition-concurrency.test.ts
           apps/web/test/prisma-database-retry-postgres.test.ts
           apps/web/test/hosted-linq-invite-deletion-contract-migration-postgres.test.ts
+          apps/web/test/hosted-production-500-regressions-postgres.test.ts
           apps/web/test/hosted-usage-credit-postgres-concurrency.test.ts
 
       - name: Upload hosted E2E logs

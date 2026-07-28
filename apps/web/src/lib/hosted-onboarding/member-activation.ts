@@ -14,6 +14,8 @@ import {
 import {
   hasActiveHostedCryptoDomainRootsForUserTx,
   provisionHostedCryptoDomainRootsForUserTx,
+  provisionPreparedHostedCryptoDomainRootsTx,
+  type PreparedHostedCryptoDomainRootCandidates,
   unwrapHostedDomainRootForWeb,
 } from "../hosted-crypto/domain-root-store";
 import { runWithHostedDomainRootUnwrapCache } from "../hosted-crypto/domain-root-unwrap-cache";
@@ -87,9 +89,11 @@ export async function activateHostedMemberForPositiveSourceTx(input: {
   dispatchContext: HostedStripeDispatchContext;
   emailLinked?: boolean;
   memberId: string;
+  preparedCryptoDomainRoots?: PreparedHostedCryptoDomainRootCandidates;
   prisma: Prisma.TransactionClient;
   skipIfBillingAlreadyActive?: boolean;
   skipIfPreviouslyActivated?: boolean;
+  suppressSignupWelcome?: boolean;
 }): Promise<HostedMemberActivationResult> {
   const timing = startHostedOnboardingTiming(
     "hosted-onboarding.member-activation.positive-source",
@@ -100,7 +104,10 @@ export async function activateHostedMemberForPositiveSourceTx(input: {
 
   try {
     const result = await runWithHostedDomainRootUnwrapCache(() =>
-      activateHostedMemberForPositiveSourceTxInner(input)
+      activateHostedMemberForPositiveSourceTxInner({
+        ...input,
+        allowLegacyCryptoPreparation: false,
+      })
     );
 
     finishHostedOnboardingTiming(timing, "completed", {
@@ -120,11 +127,13 @@ export async function activateHostedMemberForPositiveSourceTx(input: {
 export async function activateHostedMemberForFamilySponsorshipTx(input: {
   memberId: string;
   occurredAt: Date;
+  preparedCryptoDomainRoots?: PreparedHostedCryptoDomainRootCandidates;
   prisma: Prisma.TransactionClient;
   sourceEventId: string;
 }): Promise<HostedMemberActivationResult> {
   return runWithHostedDomainRootUnwrapCache(() =>
     activateHostedMemberForPositiveSourceTxInner({
+      allowLegacyCryptoPreparation: !input.preparedCryptoDomainRoots,
       dispatchContext: {
         eventCreatedAt: input.occurredAt,
         occurredAt: input.occurredAt.toISOString(),
@@ -132,6 +141,7 @@ export async function activateHostedMemberForFamilySponsorshipTx(input: {
         sourceType: "hosted.family.sponsorship",
       },
       memberId: input.memberId,
+      preparedCryptoDomainRoots: input.preparedCryptoDomainRoots,
       preserveBillingStatus: true,
       prisma: input.prisma,
       skipIfPreviouslyActivated: true,
@@ -145,13 +155,16 @@ export async function activateHostedMemberForFamilySponsorshipTx(input: {
 }
 
 async function activateHostedMemberForPositiveSourceTxInner(input: {
+  allowLegacyCryptoPreparation: boolean;
   dispatchContext: HostedStripeDispatchContext;
   emailLinked?: boolean;
   memberId: string;
+  preparedCryptoDomainRoots?: PreparedHostedCryptoDomainRootCandidates;
   preserveBillingStatus?: boolean;
   prisma: Prisma.TransactionClient;
   skipIfBillingAlreadyActive?: boolean;
   skipIfPreviouslyActivated?: boolean;
+  suppressSignupWelcome?: boolean;
   welcomeMessage?: string;
 }): Promise<HostedMemberActivationResult> {
   const currentMember = await readActivationReadyHostedMemberTx({
@@ -237,27 +250,44 @@ async function activateHostedMemberForPositiveSourceTxInner(input: {
     });
   }
 
-  await provisionHostedCryptoDomainRootsForUserTx({
-    reason: "hosted-member.activation",
-    tx: input.prisma,
-    userId: currentMember.core.id,
-  });
+  if (
+    input.preparedCryptoDomainRoots
+    || !input.allowLegacyCryptoPreparation
+  ) {
+    await provisionPreparedHostedCryptoDomainRootsTx({
+      prepared: input.preparedCryptoDomainRoots ?? new Map(),
+      reason: "hosted-member.activation",
+      tx: input.prisma,
+      userId: currentMember.core.id,
+    });
+  } else {
+    // Inbound family acceptance can create the member id inside its owning
+    // webhook transaction. Preserve that product-critical path through the
+    // explicit legacy bridge until its owner can preallocate and prepare the id.
+    await provisionHostedCryptoDomainRootsForUserTx({
+      reason: "hosted-member.activation",
+      tx: input.prisma,
+      userId: currentMember.core.id,
+    });
+  }
   await prewarmHostedMemberActivationWriteDomainRoots({
     memberId: currentMember.core.id,
     prisma: input.prisma,
   });
 
-  const linqRoute = await resolveHostedMemberActivationWelcomeLinqRoute({
-    member: currentMember,
-    prisma: input.prisma,
-  });
+  const signupWelcomeRoute = input.suppressSignupWelcome
+    ? null
+    : (await resolveHostedMemberActivationWelcomeLinqRoute({
+        member: currentMember,
+        prisma: input.prisma,
+      })).welcomeRoute;
   const activationWake = buildHostedMemberActivationWakeForMember({
     emailLinked: input.emailLinked ?? resolveHostedMemberActivationEmailLinked(currentMember),
     member: currentMember,
     occurredAt: input.dispatchContext.occurredAt,
     sourceEventId: input.dispatchContext.sourceEventId,
     sourceType: input.dispatchContext.sourceType,
-    signupWelcomeRoute: linqRoute.welcomeRoute,
+    signupWelcomeRoute,
     welcomeMessage: input.welcomeMessage,
   });
   const legacyWelcomeWake = buildHostedMemberSignupWelcomeNotificationWake({

@@ -1,6 +1,6 @@
 # Hosted Family Plan
 
-Last verified: 2026-07-22
+Last verified: 2026-07-25
 
 ## Purpose
 
@@ -12,7 +12,9 @@ data and conversations.
 Family supports 2-6 sponsored people. The owner counts as one sponsored person.
 One Family subscription can reserve an exact mix of Pulse seats at
 $7/person/month and Edge seats at $19/person/month. Each member and pending
-invite has one assigned tier and receives that tier's individual usage cap.
+invite has one assigned tier. Each active member's individual monthly usage
+allowance is 80% of that assigned seat price: $5.60 for Pulse and $15.20 for
+Edge.
 
 ## Product Contract
 
@@ -22,8 +24,14 @@ invite has one assigned tier and receives that tier's individual usage cap.
   Active members and pending invites consume capacity from their assigned tier.
 - Family members receive sponsored hosted access while the plan and their
   membership are active.
-- Every sponsored member gets their assigned tier's member-level usage
-  allowance. There is no shared Family usage pool.
+- Every sponsored member gets a member-level usage allowance equal to 80% of
+  their assigned tier's recurring seat price. There is no shared Family usage
+  pool. A member keeps any higher allowance already granted for an authoritative
+  open paid billing period until that period renews; a tier or direct-to-Family
+  billing-mode change still reconciles immediately. The rollout predeploy
+  migration materializes missing rows only for valid current paid billing
+  bounds before the new allowance code is promoted. It skips mutable calendar
+  fallbacks and never rewrites existing spend.
 - The active owner may buy one fixed $5, $10, or $25 usage-credit pack for one
   exact active Family member. The owner pays and that member alone receives the
   credit.
@@ -217,6 +225,28 @@ Sponsored access must fail closed when:
 Privacy access for export and deletion must remain available under the existing
 privacy rules even after sponsored access is revoked.
 
+Active Stripe reconciliation reads a bounded candidate set of at most six
+active members and prepares any missing domain-root candidates sequentially
+before the owning transaction. A fully rootless six-member group therefore has
+a maximum candidate-generation fanout of 42 provider calls: three encryptions
+and four signatures per member, with at most four concurrent calls inside one
+member's preparation. The transaction then revalidates billing, sponsorship,
+capacity, membership, and direct-paid authority before committing candidates
+and activating members sequentially. A member that appears after preparation
+has no matching candidate and fails with the typed required-candidate error;
+the retry prepares from the new authoritative snapshot instead of signing
+under the transaction. Preparation always includes the owner because a Family
+conversion may clear that owner's reused direct-subscription reference inside
+the transaction; other currently direct-paid members are skipped and rechecked
+transactionally.
+
+Activation still performs the separate control/ingress prewarm decrypts while
+the owning transaction is open. At six members those twelve decrypts bring the
+complete fully-rootless activation path to at least 54 provider calls, although
+only the 42 candidate-generation calls now run before the transaction. The
+per-domain advisory locks are transaction-scoped, so post-commit prewarm work
+inside the same transaction also extends their lifetime.
+
 An actively sponsored member cannot start a separate direct checkout. If a
 direct checkout opened before Family acceptance completes afterward, checkout
 and subscription reconciliation must leave it unbound and cancel that
@@ -306,7 +336,14 @@ connection, export, deletion, and other account management tasks. The family
 MVP should not require a web visit for a straightforward Telegram or
 Messages invite acceptance. For unbound invites, a signed-in hosted member may
 tap Accept on the web page, and their verified phone or email identity becomes
-the claimant.
+the claimant. For bound invites, the server rejects a mismatching verified
+identity before crypto preparation and repeats the same binding assertion
+inside the claim transaction, so provider failure cannot replace the actionable
+identity error and a concurrent retarget still fails closed. After that binding
+check, the server also rejects a missing, inactive, or expired invite before
+crypto preparation. An already-accepted replay for the same member skips
+preparation. The claim transaction remains authoritative and repeats binding,
+state, expiry, target, seat, and claim checks against concurrent change.
 
 ## Acceptance Copy
 

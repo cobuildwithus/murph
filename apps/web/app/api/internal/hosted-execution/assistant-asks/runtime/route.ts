@@ -4,8 +4,6 @@ import {
 import {
   HOSTED_RUNTIME_ASSISTANT_ASK_CONTROL_BODY_MAX_BYTES,
 } from "@murphai/hosted-execution/routes";
-import { after } from "next/server";
-
 import {
   requireHostedCloudflareCallbackRequest,
 } from "@/src/lib/hosted-execution/cloudflare-callback-auth";
@@ -15,7 +13,9 @@ import {
 } from "@/src/lib/hosted-groups/group-assistant-ask";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
-import { signalHostedMailboxAppendRuntime } from "@/src/lib/hosted-orchestration/signal-runtime";
+import {
+  scheduleHostedMailboxWakeAfterResponse,
+} from "@/src/lib/hosted-orchestration/mailbox-wake";
 import { readRawBodyBuffer } from "@/src/lib/http";
 
 export const dynamic = "force-dynamic";
@@ -46,26 +46,10 @@ export const POST = withJsonError(async (request: Request) => {
     request: requestBody,
   });
   if (result.mailboxWake) {
-    scheduleMailboxWakeAfterResponse(result.mailboxWake);
+    scheduleHostedMailboxWakeAfterResponse({
+      ...result.mailboxWake,
+      directWakeSource: "assistant-ask-completion",
+    });
   }
   return jsonOk(result.response);
 });
-
-function scheduleMailboxWakeAfterResponse(input: {
-  expectedUserId: string;
-  mailboxItemId: string;
-}): void {
-  const task = async () => {
-    try {
-      await signalHostedMailboxAppendRuntime(input);
-    } catch {
-      // The durable mailbox item remains reconciliation truth when a wake is unavailable.
-    }
-  };
-
-  try {
-    after(task);
-  } catch {
-    void task();
-  }
-}

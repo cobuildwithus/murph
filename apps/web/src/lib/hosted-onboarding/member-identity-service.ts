@@ -4,13 +4,19 @@ import {
   type PrismaClient,
 } from "@prisma/client";
 
-import { createHostedPhoneLookupKey } from "./contact-privacy";
+import {
+  createHostedPhoneLookupKey,
+  createHostedPrivyUserLookupKeyReadCandidates,
+} from "./contact-privacy";
 import { assertHostedMemberNotSuspended } from "./entitlement";
 import { getPrisma } from "../prisma";
 import {
   hostedOnboardingError,
 } from "./errors";
-import { type HostedPrivyIdentity } from "./privy";
+import {
+  readHostedPrivyUserById,
+  type HostedPrivyIdentity,
+} from "./privy";
 import { resolveHostedPrivyAuthMethodFromIdentity } from "./privy-auth-method";
 import type { HostedPrivyAuthMethod } from "./types";
 import {
@@ -60,6 +66,8 @@ export {
 };
 export type { HostedMemberPrivyIdentityLookup };
 
+const HOSTED_PRIVY_NEW_MEMBER_AUTHORITY_TIMEOUT_MS = 5_000;
+
 export async function ensureHostedMemberForPhone(input: {
   phoneNumber: string;
   prisma?: PrismaClient;
@@ -79,6 +87,18 @@ export async function ensureHostedMemberForPhoneTx(input: {
   phoneNumberVerifiedAt?: Date | null;
   prisma: Prisma.TransactionClient;
 }): Promise<HostedMemberCoreState> {
+  const resolution = await ensureHostedMemberForPhoneResolutionTx(input);
+  return resolution.member;
+}
+
+export async function ensureHostedMemberForPhoneResolutionTx(input: {
+  phoneNumber: string;
+  phoneNumberVerifiedAt?: Date | null;
+  prisma: Prisma.TransactionClient;
+}): Promise<{
+  created: boolean;
+  member: HostedMemberCoreState;
+}> {
   const phoneLookupKey = createHostedPhoneLookupKey(input.phoneNumber);
 
   if (!phoneLookupKey) {
@@ -95,13 +115,16 @@ export async function ensureHostedMemberForPhoneTx(input: {
   });
 
   if (existingIdentity) {
-    return refreshHostedMemberForPhoneTx({
-      currentIdentity: existingIdentity.identity,
-      member: existingIdentity.core,
-      phoneNumber: input.phoneNumber,
-      phoneNumberVerifiedAt: input.phoneNumberVerifiedAt,
-      prisma: input.prisma,
-    });
+    return {
+      created: false,
+      member: await refreshHostedMemberForPhoneTx({
+        currentIdentity: existingIdentity.identity,
+        member: existingIdentity.core,
+        phoneNumber: input.phoneNumber,
+        phoneNumberVerifiedAt: input.phoneNumberVerifiedAt,
+        prisma: input.prisma,
+      }),
+    };
   }
 
   const phoneIdentityFields = {
@@ -126,7 +149,10 @@ export async function ensureHostedMemberForPhoneTx(input: {
   });
 
   if (identityCreated) {
-    return createdMember;
+    return {
+      created: true,
+      member: createdMember,
+    };
   }
 
   await input.prisma.hostedMember.delete({
@@ -140,13 +166,16 @@ export async function ensureHostedMemberForPhoneTx(input: {
   });
 
   if (concurrentIdentity) {
-    return refreshHostedMemberForPhoneTx({
-      currentIdentity: concurrentIdentity.identity,
-      member: concurrentIdentity.core,
-      phoneNumber: input.phoneNumber,
-      phoneNumberVerifiedAt: input.phoneNumberVerifiedAt,
-      prisma: input.prisma,
-    });
+    return {
+      created: false,
+      member: await refreshHostedMemberForPhoneTx({
+        currentIdentity: concurrentIdentity.identity,
+        member: concurrentIdentity.core,
+        phoneNumber: input.phoneNumber,
+        phoneNumberVerifiedAt: input.phoneNumberVerifiedAt,
+        prisma: input.prisma,
+      }),
+    };
   }
 
   throw new Prisma.PrismaClientKnownRequestError(
@@ -345,6 +374,14 @@ export async function ensureHostedMemberForPrivyIdentityResolutionTx(input: {
   });
 
   if (!existingMemberLookup) {
+    await assertHostedPrivyAccountDeletionNotPendingTx({
+      prisma: input.prisma,
+      privyUserId: input.identity.userId,
+    });
+    await readHostedPrivyUserById(input.identity.userId, {
+      maxRetries: 0,
+      timeout: HOSTED_PRIVY_NEW_MEMBER_AUTHORITY_TIMEOUT_MS,
+    });
     const memberId = generateHostedMemberId();
 
     const createdMember = await createHostedMember({
@@ -400,6 +437,10 @@ export async function reconcileHostedPrivyIdentityOnMemberTx(input: {
   now: Date;
 }): Promise<HostedMemberCoreState> {
   await lockHostedMemberRow(input.prisma, input.member.id);
+  await assertHostedPrivyAccountDeletionNotPendingTx({
+    prisma: input.prisma,
+    privyUserId: input.identity.userId,
+  });
 
   const currentMember = await readHostedMemberCoreState({
     memberId: input.member.id,
@@ -464,6 +505,36 @@ export async function reconcileHostedPrivyIdentityOnMemberTx(input: {
     signupPhoneNumber: null,
   });
   return currentMember;
+}
+
+async function assertHostedPrivyAccountDeletionNotPendingTx(input: {
+  prisma: Prisma.TransactionClient;
+  privyUserId: string;
+}): Promise<void> {
+  const privyUserLookupKeys = createHostedPrivyUserLookupKeyReadCandidates(
+    input.privyUserId,
+  );
+  if (privyUserLookupKeys.length === 0) {
+    return;
+  }
+
+  const pendingCleanup = await input.prisma.hostedAccountDeletionCleanup.findFirst({
+    select: { id: true },
+    where: {
+      privyCompletedAt: null,
+      privyUserLookupKey: {
+        in: privyUserLookupKeys,
+      },
+    },
+  });
+  if (pendingCleanup) {
+    throw hostedOnboardingError({
+      code: "PRIVY_ACCOUNT_DELETION_IN_PROGRESS",
+      httpStatus: 409,
+      message: "Your previous account deletion is still finishing. Wait a moment and try again.",
+      retryable: true,
+    });
+  }
 }
 
 async function upsertHostedPrivyMemberIdentity(

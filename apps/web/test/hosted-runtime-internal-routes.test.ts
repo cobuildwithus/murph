@@ -24,12 +24,13 @@ const mocks = vi.hoisted(() => ({
   getPrisma: vi.fn(),
   listHostedRuntimeLogs: vi.fn(),
   publishLatestBrowserVaultReplicaRef: vi.fn(),
-  readAcceptedRuntimeAttemptFailureSignalOwnerLogId: vi.fn(),
+  claimHostedAcceptedAttemptFailureRecheck: vi.fn(),
   readHostedMailboxConsumedSeqByLane: vi.fn(),
   readHostedMailboxItemByDedupeKey: vi.fn(),
   readHostedMailboxMaxSeqByLane: vi.fn(),
   readHostedMemberAssistantModelPreference: vi.fn(),
   readHostedMemberCoreState: vi.fn(),
+  readHostedActiveGroupRunningBit: vi.fn(),
   readHostedRuntimeOwnerReleaseMailboxLagActionable: vi.fn(),
   readHostedWorkspace: vi.fn(),
   recordHostedIngressAssistantInputStaged: vi.fn(),
@@ -68,6 +69,10 @@ vi.mock("@/src/lib/hosted-onboarding/assistant-model-preference", () => ({
     mocks.readHostedMemberAssistantModelPreference,
 }));
 
+vi.mock("@/src/lib/hosted-groups/group-sponsorship-store", () => ({
+  readHostedActiveGroupRunningBit: mocks.readHostedActiveGroupRunningBit,
+}));
+
 vi.mock("@/src/lib/hosted-orchestration/runtime-usage-decision", async (importOriginal) => ({
   // Keep the real pure helpers (e.g. the mailbox AI-gate predicate); only the
   // gate decision itself is stubbed.
@@ -81,8 +86,8 @@ vi.mock("@/src/lib/hosted-workspace/store", () => ({
   checkpointHostedWorkspace: mocks.checkpointHostedWorkspace,
   listHostedRuntimeLogs: mocks.listHostedRuntimeLogs,
   publishLatestBrowserVaultReplicaRef: mocks.publishLatestBrowserVaultReplicaRef,
-  readAcceptedRuntimeAttemptFailureSignalOwnerLogId:
-    mocks.readAcceptedRuntimeAttemptFailureSignalOwnerLogId,
+  claimHostedAcceptedAttemptFailureRecheck:
+    mocks.claimHostedAcceptedAttemptFailureRecheck,
   readHostedWorkspace: mocks.readHostedWorkspace,
   recordHostedRuntimeLogs: mocks.recordHostedRuntimeLogs,
 }));
@@ -223,9 +228,10 @@ describe("hosted runtime internal web routes", () => {
       model: "gpt-5.6-terra",
       solAvailable: false,
     });
+    mocks.readHostedActiveGroupRunningBit.mockResolvedValue(null);
     mocks.readHostedMemberCoreState.mockResolvedValue(buildActiveHostedMemberRecord());
     mocks.readHostedRuntimeOwnerReleaseMailboxLagActionable.mockResolvedValue(true);
-    mocks.readAcceptedRuntimeAttemptFailureSignalOwnerLogId.mockResolvedValue(null);
+    mocks.claimHostedAcceptedAttemptFailureRecheck.mockResolvedValue(false);
     mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({
       status: "allowed",
     });
@@ -440,6 +446,69 @@ describe("hosted runtime internal web routes", () => {
       payloadRef: MAILBOX_ITEM_2_PAYLOAD_REF,
     });
     expect(JSON.stringify(payload)).not.toContain("payloadCiphertext");
+  });
+
+  it("returns ordinary mailbox work when the optional sponsorship bit is unavailable", async () => {
+    mocks.readHostedMailboxConsumedSeqByLane.mockResolvedValueOnce([
+      {
+        consumedSeq: "11",
+        lane: "conversation",
+      },
+    ]);
+    mocks.fetchHostedMailboxItemsAfterLaneCursors.mockResolvedValue({
+      items: [
+        {
+          createdAt: FIXED_NOW,
+          dedupeKey: "conversation-dedupe-1",
+          expiresAt: null,
+          id: "mailbox_item_1",
+          kind: "conversation.message",
+          lane: "conversation",
+          laneSeq: "12",
+          occurredAt: FIXED_NOW,
+          payloadBytes: 64,
+          payloadInlineCiphertext: "cipher_inline_1",
+          payloadRef: null,
+          payloadSchema: "murph.hosted-mailbox-item.v1",
+          updatedAt: FIXED_NOW,
+          userId: "member_routes_1",
+        },
+      ],
+    });
+    mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([
+      {
+        lane: "conversation",
+        maxSeq: "12",
+      },
+    ]);
+    mocks.readHostedActiveGroupRunningBit.mockRejectedValueOnce(
+      new Error("Optional sponsorship storage unavailable"),
+    );
+
+    const response = await mailboxFetchRoute.POST(jsonRequest(
+      "/api/internal/hosted-mailbox/fetch",
+      {
+        cursorMode: "imported_seq",
+        lanes: [
+          {
+            importedSeq: "11",
+            lane: "conversation",
+          },
+        ],
+        limitPerLane: 10,
+        requestId: "request_mailbox_fetch_without_bit",
+      },
+    ));
+    const payload = parseHostedMailboxFetchResponse(await response.json());
+
+    expect(response.status).toBe(200);
+    expect(payload.groupRunningBit).toBeUndefined();
+    expect(payload.items).toHaveLength(1);
+    expect(payload.items[0]).toMatchObject({
+      id: "mailbox_item_1",
+      lane: "conversation",
+      laneSeq: "12",
+    });
   });
 
   it("fetches after the local imported watermark while returning the consumed floor", async () => {
@@ -2135,7 +2204,7 @@ describe("hosted runtime internal web routes", () => {
     // The callback accepts 50 entries and the pool defaults to 15 clients, so
     // one Prisma call per entry would make the pool the request's concurrency
     // limiter. One callback must cost one statement.
-    mocks.recordHostedRuntimeLogs.mockResolvedValue([]);
+    mocks.recordHostedRuntimeLogs.mockResolvedValue(50);
 
     const entries = Array.from({ length: 50 }, (_, index) => ({
       at: FIXED_NOW,
@@ -2159,11 +2228,30 @@ describe("hosted runtime internal web routes", () => {
     expect(mocks.recordHostedRuntimeLogs.mock.calls[0]?.[0]?.entries).toHaveLength(50);
   });
 
+  it("reports zero persisted logs when deletion wins the diagnostic race", async () => {
+    mocks.recordHostedRuntimeLogs.mockResolvedValue(0);
+
+    const response = await runtimeLogRoute.POST(jsonRequest(
+      "/api/internal/hosted-runtime/log",
+      {
+        entries: [{
+          at: FIXED_NOW,
+          component: "mailbox",
+          eventCode: "mailbox.imported",
+          level: "info",
+          phase: "import",
+        }],
+      },
+    ));
+
+    expect(response.status).toBe(200);
+    expect(parseHostedRuntimeLogResponse(await response.json())).toEqual({
+      loggedCount: 0,
+    });
+  });
+
   it("records bounded runtime logs and rejects forbidden log payload fields", async () => {
-    mocks.recordHostedRuntimeLogs.mockResolvedValue([{
-      eventCode: "mailbox.imported",
-      id: "runtime_log_1",
-    }]);
+    mocks.recordHostedRuntimeLogs.mockResolvedValue(1);
 
     const response = await runtimeLogRoute.POST(jsonRequest(
       "/api/internal/hosted-runtime/log",
@@ -2205,7 +2293,7 @@ describe("hosted runtime internal web routes", () => {
       })],
       userId: "member_routes_1",
     }));
-    expect(mocks.readAcceptedRuntimeAttemptFailureSignalOwnerLogId).not.toHaveBeenCalled();
+    expect(mocks.claimHostedAcceptedAttemptFailureRecheck).not.toHaveBeenCalled();
     expect(mocks.signalHostedRuntimeRecheckRuntime).not.toHaveBeenCalled();
 
     const rejectedResponse = await runtimeLogRoute.POST(jsonRequest(
@@ -2400,6 +2488,7 @@ describe("hosted runtime internal web routes", () => {
       authenticatedUserId: "member_routes_1",
       milestone: "first_codex_output_observed",
       runtimeAttemptId: "attempt_routes_1",
+      runtimeLeaseGeneration: "9",
       source: "linq",
     });
 
@@ -2428,6 +2517,7 @@ describe("hosted runtime internal web routes", () => {
       authenticatedUserId: "member_routes_1",
       milestone: "mailbox_import_done",
       runtimeAttemptId: "attempt_routes_1",
+      runtimeLeaseGeneration: "9",
       source: "linq",
     });
 
@@ -2447,6 +2537,25 @@ describe("hosted runtime internal web routes", () => {
     ));
 
     expect(mismatchedAttemptResponse.status).toBe(401);
+
+    const incompleteFenceResponse = await runtimeLatencyRoute.POST(jsonRequest(
+      "/api/internal/hosted-runtime/latency",
+      {
+        event: {
+          assistantInputIds: ["input_1"],
+          at: FIXED_NOW,
+          milestone: "first_codex_output_observed",
+          runtimeAttemptId: "attempt_routes_1",
+          source: "linq",
+          type: "assistant_milestone",
+        },
+      },
+      {
+        "x-hosted-runtime-attempt-id": "attempt_routes_1",
+      },
+    ));
+
+    expect(incompleteFenceResponse.status).toBe(401);
 
     const unsafeResponse = await runtimeLatencyRoute.POST(jsonRequest(
       "/api/internal/hosted-runtime/latency",
@@ -2511,13 +2620,8 @@ describe("hosted runtime internal web routes", () => {
   });
 
   it("signals a stateless runtime recheck after an accepted runtime attempt failure log", async () => {
-    mocks.recordHostedRuntimeLogs.mockResolvedValue([{
-      eventCode: "runner.accepted_attempt_failed",
-      id: "runtime_log_failure_1",
-    }]);
-    mocks.readAcceptedRuntimeAttemptFailureSignalOwnerLogId.mockResolvedValue(
-      "runtime_log_failure_1",
-    );
+    mocks.recordHostedRuntimeLogs.mockResolvedValue(1);
+    mocks.claimHostedAcceptedAttemptFailureRecheck.mockResolvedValue(true);
 
     const response = await runtimeLogRoute.POST(jsonRequest(
       "/api/internal/hosted-runtime/log",
@@ -2543,8 +2647,10 @@ describe("hosted runtime internal web routes", () => {
     expect(parseHostedRuntimeLogResponse(await response.json())).toEqual({
       loggedCount: 1,
     });
-    expect(mocks.readAcceptedRuntimeAttemptFailureSignalOwnerLogId).toHaveBeenCalledWith({
-      since: expect.any(Date),
+    // Recovery ownership is a workspace claim, not an election among the log
+    // rows this request happened to insert.
+    expect(mocks.claimHostedAcceptedAttemptFailureRecheck).toHaveBeenCalledWith({
+      cooldownMs: 30_000,
       userId: "member_routes_1",
     });
     expect(mocks.signalHostedRuntimeRecheckRuntime).toHaveBeenCalledWith({
@@ -2552,14 +2658,44 @@ describe("hosted runtime internal web routes", () => {
     });
   });
 
-  it("cooldowns accepted runtime attempt failure recheck signals behind the owner log", async () => {
-    mocks.recordHostedRuntimeLogs.mockResolvedValue([{
-      eventCode: "runner.accepted_attempt_failed",
-      id: "runtime_log_failure_2",
-    }]);
-    mocks.readAcceptedRuntimeAttemptFailureSignalOwnerLogId.mockResolvedValue(
-      "runtime_log_prior_failure",
+  it("still claims and signals when the diagnostic batch write fails", async () => {
+    // Recovery must not be gated on the diagnostic insert: the runner's log
+    // writer is best effort and never retries a failed callback.
+    mocks.recordHostedRuntimeLogs.mockRejectedValue(
+      new Error("Synthetic runtime log insert failure."),
     );
+    mocks.claimHostedAcceptedAttemptFailureRecheck.mockResolvedValue(true);
+
+    await expect(runtimeLogRoute.POST(jsonRequest(
+      "/api/internal/hosted-runtime/log",
+      {
+        entries: [
+          {
+            at: FIXED_NOW,
+            component: "runner",
+            errorCode: "runner_child_failed",
+            eventCode: "runner.accepted_attempt_failed",
+            level: "warn",
+            phase: "error",
+            redactedJson: {
+              safeErrorMessage: "Runner child process failed.",
+            },
+            workspaceVersion: "5",
+          },
+        ],
+      },
+    ))).resolves.toBeDefined();
+
+    expect(mocks.claimHostedAcceptedAttemptFailureRecheck).toHaveBeenCalledTimes(1);
+    expect(mocks.signalHostedRuntimeRecheckRuntime).toHaveBeenCalledTimes(1);
+    expect(
+      mocks.signalHostedRuntimeRecheckRuntime.mock.invocationCallOrder[0]!,
+    ).toBeLessThan(mocks.recordHostedRuntimeLogs.mock.invocationCallOrder[0]!);
+  });
+
+  it("cooldowns accepted runtime attempt failure recheck signals behind the workspace claim", async () => {
+    mocks.recordHostedRuntimeLogs.mockResolvedValue(1);
+    mocks.claimHostedAcceptedAttemptFailureRecheck.mockResolvedValue(false);
 
     const response = await runtimeLogRoute.POST(jsonRequest(
       "/api/internal/hosted-runtime/log",
@@ -2583,19 +2719,16 @@ describe("hosted runtime internal web routes", () => {
 
     expect(response.status).toBe(200);
     expect(mocks.signalHostedRuntimeRecheckRuntime).not.toHaveBeenCalled();
+    // The diagnostics still persist; only the recovery signal is suppressed.
+    expect(mocks.recordHostedRuntimeLogs).toHaveBeenCalledTimes(1);
   });
 
   it("does not fail runtime log writes when the recheck signal is unavailable", async () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    mocks.recordHostedRuntimeLogs.mockResolvedValue([{
-      eventCode: "runner.accepted_attempt_failed",
-      id: "runtime_log_failure_3",
-    }]);
+    mocks.recordHostedRuntimeLogs.mockResolvedValue(1);
+    mocks.claimHostedAcceptedAttemptFailureRecheck.mockResolvedValue(true);
     mocks.signalHostedRuntimeRecheckRuntime.mockRejectedValueOnce(
       new Error("Temporal unavailable"),
-    );
-    mocks.readAcceptedRuntimeAttemptFailureSignalOwnerLogId.mockResolvedValue(
-      "runtime_log_failure_3",
     );
 
     try {

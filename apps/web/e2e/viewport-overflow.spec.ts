@@ -145,6 +145,81 @@ for (const route of ROUTES) {
   }
 }
 
+test("homepage dense feature findings honor their phone breakpoints", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 900 });
+  await page.route("**/*", (route) => {
+    if (isLoopbackUrl(route.request().url())) {
+      route.continue();
+    } else {
+      route.abort();
+    }
+  });
+
+  const response = await page.goto("/", { waitUntil: "load" });
+  expect(response?.status(), "homepage should respond 200").toBe(200);
+
+  const recoveryCard = page
+    .getByRole("heading", {
+      name: "I read your wearables and tell you what actually matters.",
+    })
+    .locator("xpath=ancestor::article[1]");
+  const recoveryRow = recoveryCard
+    .getByText("HRV", { exact: true })
+    .locator("xpath=..");
+  const recoveryGroup = recoveryRow.locator("xpath=..");
+  const recoveryArtifact = recoveryGroup.locator("xpath=..");
+  const bloodworkRow = page
+    .getByRole("heading", {
+      name: "I find insights in your bloodwork over time.",
+    })
+    .locator("xpath=ancestor::article[1]")
+    .getByText("LDL", { exact: true })
+    .locator("xpath=ancestor::li[1]");
+  const bloodworkArtifact = bloodworkRow.locator("xpath=../..");
+
+  await expect(recoveryGroup).toBeVisible();
+  await expect(bloodworkRow).toBeVisible();
+
+  for (const width of [390, 420] as const) {
+    await page.setViewportSize({ width, height: 900 });
+    await page.evaluate(async () => {
+      await document.fonts?.ready;
+      await new Promise((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(resolve)),
+      );
+    });
+
+    const [recoveryGroupDisplay, recoveryRowDisplay, bloodworkRowDisplay] =
+      await Promise.all([
+        recoveryGroup.evaluate((element) =>
+          window.getComputedStyle(element).display,
+        ),
+        recoveryRow.evaluate((element) =>
+          window.getComputedStyle(element).display,
+        ),
+        bloodworkRow.evaluate((element) =>
+          window.getComputedStyle(element).display,
+        ),
+      ]);
+
+    expect(recoveryGroupDisplay).toBe(width < 400 ? "block" : "grid");
+    expect(recoveryRowDisplay).toBe(width < 400 ? "grid" : "block");
+    expect(bloodworkRowDisplay).toBe(width < 420 ? "grid" : "flex");
+
+    for (const artifact of [recoveryArtifact, bloodworkArtifact]) {
+      const size = await artifact.evaluate((element) => ({
+        clientWidth: element.clientWidth,
+        scrollWidth: element.scrollWidth,
+      }));
+      expect(size.scrollWidth).toBeLessThanOrEqual(
+        size.clientWidth + OVERFLOW_TOLERANCE_PX,
+      );
+    }
+  }
+});
+
 for (const width of [768, 1280] as const) {
   test(`personal usage-credit owner stays contained @ ${width}px`, async ({
     page,
@@ -171,7 +246,7 @@ for (const width of [768, 1280] as const) {
       '[data-design-state="active-with-credit"]',
     );
     const card = activeState.locator(
-      '[aria-label="Pulse included AI usage"]',
+      '[aria-label="Pulse AI usage"]',
     );
     const trigger = card.getByRole("button", { name: "Add usage" });
     await expect(study.locator("[inert]")).toHaveCount(3);
@@ -179,7 +254,7 @@ for (const width of [768, 1280] as const) {
 
     const layout = await page.evaluate(() => {
       const owner = document.querySelector(
-        '[data-design-state="active-with-credit"] [aria-label="Pulse included AI usage"]',
+        '[data-design-state="active-with-credit"] [aria-label="Pulse AI usage"]',
       );
       const button = Array.from(owner?.querySelectorAll("button") ?? []).find(
         (candidate) => candidate.textContent?.trim() === "Add usage",

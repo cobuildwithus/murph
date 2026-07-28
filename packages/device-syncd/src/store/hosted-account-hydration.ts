@@ -16,6 +16,7 @@ import type {
   ProviderAuthTokens,
   StoredDeviceSyncAccount,
 } from "../types.ts";
+import type { DeviceSyncCredentialIndependentImportJobClassifier } from "../hosted-runtime.ts";
 import {
   consolidateLegacyHostedAccount,
   getAccountByExternalAccount,
@@ -24,6 +25,7 @@ import {
   getHostedConnectionIdForAccountId,
   listUnboundAccountsByConnectionEpoch,
 } from "./accounts.ts";
+import { markCredentialScopedPendingDeviceSyncJobsDeadForAccount } from "./jobs.ts";
 
 type EncryptedProviderAuthTokens = ProviderAuthTokens & {
   accessTokenEncrypted: string;
@@ -36,6 +38,7 @@ type HostedAccountCredentialInput = DeviceAccountCredential & {
 
 export interface HostedAccountHydrationInput {
   advanceHostedObservedConnectionRevision?: boolean;
+  classifyProviderJob?: DeviceSyncCredentialIndependentImportJobClassifier;
   clearTokens?: boolean;
   connection: {
     connectedAt: string;
@@ -784,6 +787,9 @@ export function hydrateHostedAccount(
         : 0;
 
     if (existing) {
+      const connectionEpochReplaced = status === "active"
+        && hydrationPlan.connectionAccepted
+        && existing.connectedAt !== connectedAt;
       database.prepare(`
         update device_connection
         set hosted_connection_id = coalesce(?, hosted_connection_id),
@@ -864,6 +870,16 @@ export function hydrateHostedAccount(
         rowUpdatedAt,
         existing.id,
       );
+
+      if (connectionEpochReplaced) {
+        markCredentialScopedPendingDeviceSyncJobsDeadForAccount(database, {
+          accountId: existing.id,
+          classifyProviderJob: input.classifyProviderJob,
+          code: "HOSTED_CONNECTION_EPOCH_REPLACED",
+          message: "Device-sync work belonged to a replaced hosted connection epoch.",
+          now: rowUpdatedAt,
+        });
+      }
 
       return getAccountById(database, existing.id)!;
     }

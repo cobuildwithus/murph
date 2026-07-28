@@ -15,6 +15,8 @@ const mocks = vi.hoisted(() => ({
   routerReplace: vi.fn(),
 }));
 
+const TEST_PAYER_MEMBER_ID = "hbm_billing_settings_payer";
+
 function buildUsageStatus(
   overrides: Partial<HostedPlanUsageAvailableStatus> = {},
 ): HostedPlanUsageAvailableStatus {
@@ -141,6 +143,7 @@ describe("HostedBillingSettings", () => {
     const { HostedBillingSettings } = await import("@/src/components/settings/hosted-billing-settings");
 
     const markup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
       authenticated: true,
       canUpgradeToEdge: true,
       currentBillingPlanCode: "launch_monthly",
@@ -160,6 +163,7 @@ describe("HostedBillingSettings", () => {
     const { HostedBillingSettings } = await import("@/src/components/settings/hosted-billing-settings");
 
     const markup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
       authenticated: true,
       currentBillingPhase: "trial",
       currentBillingPlanCode: "launch_monthly",
@@ -176,13 +180,13 @@ describe("HostedBillingSettings", () => {
       }),
     }));
 
-    assert.match(markup, /Included AI usage/);
-    assert.match(markup, /aria-label="Pulse Trial included AI usage"/);
+    assert.match(markup, /AI usage/);
+    assert.match(markup, /aria-label="Pulse Trial AI usage"/);
     assert.match(markup, /35% used/);
     assert.match(markup, /65% remaining/);
     assert.match(markup, /Trial ends Jul 17, 2026/);
     assert.match(markup, /may run out in about 3 days/);
-    assert.ok(markup.indexOf("Included AI usage") < markup.indexOf("Run experiments"));
+    assert.ok(markup.indexOf("AI usage") < markup.indexOf("Run experiments"));
   });
 
   test.each([
@@ -201,81 +205,68 @@ describe("HostedBillingSettings", () => {
       planCode: "launch_monthly",
       planName: "Family",
     },
-  ] as const)("shows the $planName included usage state", async ({ accessKind, planCode, planName }) => {
+  ] as const)("shows the $planName overall usage state", async ({ accessKind, planCode, planName }) => {
     const { HostedBillingSettings } = await import("@/src/components/settings/hosted-billing-settings");
 
     const markup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
       authenticated: true,
       usageStatus: buildUsageStatus({ accessKind, planCode, planName }),
     }));
 
-    assert.match(markup, new RegExp(`aria-label="${planName} included AI usage"`));
+    assert.match(markup, new RegExp(`aria-label="${planName} AI usage"`));
     assert.match(markup, /Resets Aug 1, 2026/);
   });
 
-  test.each([undefined, "0", "invalid"])(
-    "shows an exhausted state without inventing a forecast for credit value %s",
-    async (usageCreditBalanceUsdMicros) => {
-      const { HostedBillingSettings } = await import("@/src/components/settings/hosted-billing-settings");
-
-      const markup = renderToStaticMarkup(createElement(HostedBillingSettings, {
-        authenticated: true,
-        usageCreditBalanceUsdMicros,
-        usageStatus: buildUsageStatus({
-          remainingPercent: 0,
-          status: "exhausted",
-          usedPercent: 100,
-        }),
-      }));
-
-      assert.match(markup, /100% used/);
-      assert.match(markup, /0% remaining/);
-      assert.match(markup, /You&#x27;ve used this period&#x27;s available usage\. Murph pauses new usage until more capacity is available/);
-      assert.doesNotMatch(markup, /recent pace/);
-    },
-  );
-
-  test.each([
-    {
-      balanceUsdMicros: "8429999",
-      hiddenBalance: /\$8\.42/,
-    },
-    {
-      balanceUsdMicros: "9999",
-      hiddenBalance: /&lt;\$0\.01/,
-    },
-  ])("does not call all capacity exhausted while positive usage credit remains", async ({
-    balanceUsdMicros,
-    hiddenBalance,
-  }) => {
+  test("shows exhausted overall usage without inventing a forecast", async () => {
     const { HostedBillingSettings } = await import("@/src/components/settings/hosted-billing-settings");
 
     const markup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
+      authenticated: true,
+      usageStatus: buildUsageStatus({
+        remainingPercent: 0,
+        status: "exhausted",
+        usedPercent: 100,
+      }),
+    }));
+
+    assert.match(markup, /100% used/);
+    assert.match(markup, /0% remaining/);
+    assert.match(markup, /You&#x27;ve used all available usage\. Murph pauses new usage until more capacity is available/);
+    assert.doesNotMatch(markup, /recent pace/);
+  });
+
+  test("renders purchased capacity inside the overall usage bar", async () => {
+    const { HostedBillingSettings } = await import("@/src/components/settings/hosted-billing-settings");
+
+    const markup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
       authenticated: true,
       billingStatus: "active",
       currentBillingPhase: "paid",
       currentBillingPlanCode: "launch_monthly",
-      usageCreditBalanceUsdMicros: balanceUsdMicros,
       usageStatus: buildUsageStatus({
-        remainingPercent: 0,
+        remainingPercent: 24,
         status: "active",
-        usedPercent: 100,
+        usedPercent: 76,
       }),
       usageTopUpOffers: [{
         amountLabel: "$5",
+        estimatedMessages: 100,
         offerCode: "usage_5_usd",
       }],
     }));
 
-    assert.doesNotMatch(markup, hiddenBalance);
+    assert.match(markup, /76% used/);
+    assert.match(markup, /24% remaining/);
+    assert.doesNotMatch(markup, /remaining usage credit/);
     assert.doesNotMatch(markup, /usage credit remaining/);
-    assert.match(markup, /Murph will use your remaining usage credit/);
-    assert.doesNotMatch(markup, /included usage and any usage credit/);
     assert.doesNotMatch(markup, /Add usage to continue/);
     assert.doesNotMatch(markup, /pauses new usage/);
   });
 
-  test("renders credit-backed continuation from the production usage projection", async () => {
+  test("renders overall capacity from the production usage projection", async () => {
     const {
       projectHostedPersonalAiUsageStatus,
     } = await import("@/src/lib/hosted-execution/usage-status");
@@ -308,37 +299,40 @@ describe("HostedBillingSettings", () => {
     });
 
     assert.equal(usageStatus.status, "active");
-    assert.equal(usageStatus.usedPercent, 100);
-    assert.equal(usageStatus.remainingPercent, 0);
+    assert.equal(usageStatus.usedPercent, 76);
+    assert.equal(usageStatus.remainingPercent, 24);
 
     const markup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
       authenticated: true,
       billingStatus: "active",
       currentBillingPhase: "paid",
       currentBillingPlanCode: "launch_monthly",
-      usageCreditBalanceUsdMicros: "3000000",
       usageStatus,
       usageTopUpOffers: [{
         amountLabel: "$5",
+        estimatedMessages: 100,
         offerCode: "usage_5_usd",
       }],
     }));
 
-    assert.match(markup, /Murph will use your remaining usage credit/);
+    assert.match(markup, /76% used/);
+    assert.match(markup, /24% remaining/);
     assert.doesNotMatch(markup, /\$3\.00/);
+    assert.doesNotMatch(markup, /remaining usage credit/);
     assert.doesNotMatch(markup, /usage credit remaining/);
     assert.match(markup, /Add usage/);
   });
 
-  test("keeps included usage and top-up actions clear without showing an exact credit balance", async () => {
+  test("keeps overall usage and top-up actions clear without showing an exact credit balance", async () => {
     const { HostedBillingSettings } = await import("@/src/components/settings/hosted-billing-settings");
 
     const markup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
       authenticated: true,
       billingStatus: "active",
       currentBillingPhase: "paid",
       currentBillingPlanCode: "launch_monthly",
-      usageCreditBalanceUsdMicros: "8429999",
       usageStatus: buildUsageStatus({
         remainingPercent: 99,
         usedPercent: 1,
@@ -346,14 +340,17 @@ describe("HostedBillingSettings", () => {
       usageTopUpOffers: [
         {
           amountLabel: "$5",
+          estimatedMessages: 100,
           offerCode: "usage_5_usd",
         },
         {
           amountLabel: "$10",
+          estimatedMessages: 200,
           offerCode: "usage_10_usd",
         },
         {
           amountLabel: "$25",
+          estimatedMessages: 500,
           offerCode: "usage_25_usd",
         },
       ],
@@ -375,11 +372,13 @@ describe("HostedBillingSettings", () => {
     const { HostedBillingSettings } = await import("@/src/components/settings/hosted-billing-settings");
 
     const markup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
       authenticated: true,
       usageStatus: buildUsageStatus(),
       usageTopUpInitialOpen: true,
       usageTopUpOffers: [{
         amountLabel: "$10",
+        estimatedMessages: 200,
         offerCode: "usage_10_usd",
       }],
     }));
@@ -392,12 +391,14 @@ describe("HostedBillingSettings", () => {
     const { HostedBillingSettings } = await import("@/src/components/settings/hosted-billing-settings");
 
     const markup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
       authenticated: true,
       usageStatus: buildUsageStatus(),
       usageTopUpActivePurchase: null,
       usageTopUpInitialOpen: true,
       usageTopUpOffers: [{
         amountLabel: "$10",
+        estimatedMessages: 200,
         offerCode: "usage_10_usd",
       }],
     }));
@@ -419,8 +420,12 @@ describe("HostedBillingSettings", () => {
       status: "fulfilled" as const,
     };
     const markup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
       authenticated: true,
-      usageStatus: buildUsageStatus(),
+      usageStatus: buildUsageStatus({
+        remainingPercent: 45,
+        usedPercent: 55,
+      }),
       usageTopUpActivePurchase: fulfilledPurchase,
       usageTopUpContactOptions: [{
         href: "sms:+15555550100?body=Hey%20Murph%2C%20I%20just%20added%20more%20usage.",
@@ -431,6 +436,8 @@ describe("HostedBillingSettings", () => {
     }));
 
     assert.match(markup, /Usage added/);
+    assert.match(markup, /55% used/);
+    assert.match(markup, /45% remaining/);
     assert.match(markup, /Text Murph/);
     assert.match(
       markup,
@@ -440,6 +447,7 @@ describe("HostedBillingSettings", () => {
 
     const withoutContactMarkup = renderToStaticMarkup(
       createElement(HostedBillingSettings, {
+        payerMemberId: TEST_PAYER_MEMBER_ID,
         authenticated: true,
         usageStatus: buildUsageStatus(),
         usageTopUpActivePurchase: fulfilledPurchase,
@@ -455,6 +463,7 @@ describe("HostedBillingSettings", () => {
     const { HostedBillingSettings } = await import("@/src/components/settings/hosted-billing-settings");
 
     const markup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
       authenticated: true,
       billingStatus: "active",
       currentBillingPhase: "paid",
@@ -465,11 +474,12 @@ describe("HostedBillingSettings", () => {
       }),
       usageTopUpOffers: [{
         amountLabel: "$5",
+        estimatedMessages: 100,
         offerCode: "usage_5_usd",
       }],
     }));
 
-    assert.match(markup, /aria-label="Edge included AI usage"/);
+    assert.match(markup, /aria-label="Edge AI usage"/);
     assert.match(markup, /Add usage/);
   });
 
@@ -477,6 +487,7 @@ describe("HostedBillingSettings", () => {
     const { HostedBillingSettings } = await import("@/src/components/settings/hosted-billing-settings");
 
     const unavailableMarkup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
       authenticated: true,
       usageStatus: {
         generatedAt: "2026-07-10T12:00:00.000Z",
@@ -486,11 +497,12 @@ describe("HostedBillingSettings", () => {
       },
     }));
     const noForecastMarkup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
       authenticated: true,
       usageStatus: buildUsageStatus(),
     }));
 
-    assert.doesNotMatch(unavailableMarkup, /Included AI usage/);
+    assert.doesNotMatch(unavailableMarkup, /AI usage/);
     assert.doesNotMatch(noForecastMarkup, /recent pace/);
   });
 
@@ -498,6 +510,7 @@ describe("HostedBillingSettings", () => {
     const { HostedBillingSettings } = await import("@/src/components/settings/hosted-billing-settings");
 
     const conversionMarkup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
       authenticated: true,
       canStartPaidPulse: true,
       usageStatus: {
@@ -512,6 +525,7 @@ describe("HostedBillingSettings", () => {
       },
     }));
     const groupMarkup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
       authenticated: true,
       canStartPaidPulse: true,
       usageStatus: {
@@ -522,6 +536,7 @@ describe("HostedBillingSettings", () => {
       },
     }));
     const actionFreeConversionMarkup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
       authenticated: true,
       canStartPaidPulse: true,
       usageStatus: {
@@ -536,7 +551,7 @@ describe("HostedBillingSettings", () => {
     assert.match(conversionMarkup, /Start Pulse from usage/);
     assert.match(actionFreeConversionMarkup, /Trial ended/);
     assert.doesNotMatch(actionFreeConversionMarkup, /Start Pulse/);
-    assert.doesNotMatch(groupMarkup, /Included AI usage/);
+    assert.doesNotMatch(groupMarkup, /AI usage/);
   });
 
   test("shows usage actions only from the server-projected descriptor", async () => {
@@ -559,21 +574,25 @@ describe("HostedBillingSettings", () => {
     });
 
     const eligibleStartMarkup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
       authenticated: true,
       canStartPaidPulse: true,
       usageStatus: startAction,
     }));
     const ineligibleStartMarkup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
       authenticated: true,
       canStartPaidPulse: false,
       usageStatus: startAction,
     }));
     const eligibleUpgradeMarkup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
       authenticated: true,
       canUpgradeToEdge: true,
       usageStatus: upgradeAction,
     }));
     const ineligibleUpgradeMarkup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
       authenticated: true,
       canUpgradeToEdge: false,
       usageStatus: upgradeAction,
@@ -589,6 +608,7 @@ describe("HostedBillingSettings", () => {
     const { HostedBillingSettings } = await import("@/src/components/settings/hosted-billing-settings");
 
     const markup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
       authenticated: true,
       canStartPaidPulse: true,
       canUpgradeToEdge: false,
@@ -614,6 +634,7 @@ describe("HostedBillingSettings", () => {
     });
 
     const availableMarkup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
       authenticated: true,
       canStartPaidPulse: true,
       currentBillingPhase: "trial",
@@ -623,6 +644,7 @@ describe("HostedBillingSettings", () => {
       usageStatus,
     }));
     const unavailableMarkup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
       authenticated: true,
       canStartPaidPulse: true,
       pulseTrialBillingContinuationPending: true,
@@ -643,6 +665,7 @@ describe("HostedBillingSettings", () => {
     const { HostedBillingSettings } = await import("@/src/components/settings/hosted-billing-settings");
 
     const markup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
       authenticated: true,
       canStartPaidPulse: false,
       canUpgradeToEdge: false,
@@ -660,6 +683,7 @@ describe("HostedBillingSettings", () => {
     const { HostedBillingSettings } = await import("@/src/components/settings/hosted-billing-settings");
 
     const markup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
       authenticated: true,
       familyState: "owner",
       currentBillingPlanCode: "launch_monthly",
@@ -674,6 +698,7 @@ describe("HostedBillingSettings", () => {
     const { HostedBillingSettings } = await import("@/src/components/settings/hosted-billing-settings");
 
     const markup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
       authenticated: true,
       canSwitchToPulse: true,
       canUpgradeToEdge: true,
@@ -692,6 +717,7 @@ describe("HostedBillingSettings", () => {
     const { HostedBillingSettings } = await import("@/src/components/settings/hosted-billing-settings");
 
     const markup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
       authenticated: true,
       familyState: "sponsored",
       currentBillingPlanCode: "launch_monthly",
@@ -706,6 +732,7 @@ describe("HostedBillingSettings", () => {
     const { HostedBillingSettings } = await import("@/src/components/settings/hosted-billing-settings");
 
     const markup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
       authenticated: true,
       canStartFamily: true,
       familyState: "none",
@@ -721,6 +748,7 @@ describe("HostedBillingSettings", () => {
     const { HostedBillingSettings } = await import("@/src/components/settings/hosted-billing-settings");
 
     const markup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
       authenticated: true,
       canSwitchToPulse: true,
       canUpgradeToEdge: false,
@@ -739,6 +767,7 @@ describe("HostedBillingSettings", () => {
     const { HostedBillingSettings } = await import("@/src/components/settings/hosted-billing-settings");
 
     const markup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
       authenticated: true,
       canSwitchToPulse: true,
       currentBillingPhase: "paid",
@@ -891,7 +920,52 @@ describe("HostedBillingSettings", () => {
     await rendered.cleanup();
   });
 
-  test("automatically resumes the exact Pulse action after Stripe payment-method completion", async () => {
+  test("shows and confirms start-now timing without posting on render", async () => {
+    mocks.requestHostedPulseTrialContinuation.mockResolvedValueOnce({
+      status: "started",
+    });
+    const { PulseTrialBillingContinuation } = await import(
+      "@/src/components/settings/hosted-start-paid-pulse-button"
+    );
+    const rendered = await renderClientComponent(
+      createElement(PulseTrialBillingContinuation, {
+        action: "start_pulse_now",
+      }),
+      { requireButton: false },
+    );
+
+    assert.equal(mocks.requestHostedPulseTrialContinuation.mock.calls.length, 0);
+    assert.match(
+      rendered.window.document.body.textContent ?? "",
+      /Start paid Pulse now\?/,
+    );
+    assert.match(
+      rendered.window.document.body.textContent ?? "",
+      /trial will end and paid Pulse billing will begin now at \$8\/month/,
+    );
+
+    const confirmButton = findLastButtonByText(
+      rendered.window.document,
+      "End trial and start Pulse",
+      rendered.window,
+    );
+    await act(async () => {
+      confirmButton.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+      confirmButton.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+      await Promise.resolve();
+    });
+
+    assert.deepEqual(mocks.requestHostedPulseTrialContinuation.mock.calls, [[{
+      action: "start_pulse_now",
+      redirectIfPaymentRequired: false,
+    }]]);
+    assert.deepEqual(mocks.routerReplace.mock.calls, [["/settings#subscription"]]);
+    assert.equal(mocks.routerRefresh.mock.calls.length, 0);
+
+    await rendered.cleanup();
+  });
+
+  test("checks an active continue return without mutating billing and shows a receipt", async () => {
     mocks.requestHostedPulseTrialContinuation.mockResolvedValueOnce({
       status: "continuing",
     });
@@ -899,7 +973,9 @@ describe("HostedBillingSettings", () => {
       "@/src/components/settings/hosted-start-paid-pulse-button"
     );
     const rendered = await renderClientComponent(
-      createElement(PulseTrialBillingContinuation),
+      createElement(PulseTrialBillingContinuation, {
+        action: "continue_pulse",
+      }),
       { requireButton: false },
     );
 
@@ -908,31 +984,113 @@ describe("HostedBillingSettings", () => {
     });
 
     assert.deepEqual(mocks.requestHostedPulseTrialContinuation.mock.calls, [[{
+      action: "continue_pulse",
       redirectIfPaymentRequired: false,
     }]]);
-    assert.deepEqual(mocks.routerReplace.mock.calls, [["/settings#subscription"]]);
-    assert.equal(mocks.routerRefresh.mock.calls.length, 0);
     assert.match(
       rendered.window.document.body.textContent ?? "",
-      /Payment method saved\. Finishing your Pulse update/,
+      /Your Pulse trial is set/,
     );
+    assert.match(
+      rendered.window.document.body.textContent ?? "",
+      /current trial continues as scheduled/,
+    );
+    assert.doesNotMatch(
+      rendered.window.document.body.textContent ?? "",
+      /Not now/,
+    );
+    assert.equal(mocks.routerReplace.mock.calls.length, 0);
+
+    const doneButton = findLastButtonByText(
+      rendered.window.document,
+      "Done",
+      rendered.window,
+    );
+    await act(async () => {
+      doneButton.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+    });
+    assert.deepEqual(mocks.routerReplace.mock.calls, [["/settings#subscription"]]);
 
     await rendered.cleanup();
   });
 
-  test("does not redirect back to Stripe when automatic continuation still lacks payment", async () => {
+  test("shows a paid-plan receipt when the trial converted before the return", async () => {
+    mocks.requestHostedPulseTrialContinuation.mockResolvedValueOnce({
+      status: "started",
+    });
+    const { PulseTrialBillingContinuation } = await import(
+      "@/src/components/settings/hosted-start-paid-pulse-button"
+    );
+    const rendered = await renderClientComponent(
+      createElement(PulseTrialBillingContinuation, {
+        action: "continue_pulse",
+      }),
+      { requireButton: false },
+    );
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    assert.match(
+      rendered.window.document.body.textContent ?? "",
+      /Your Pulse plan is active/,
+    );
+    assert.match(
+      rendered.window.document.body.textContent ?? "",
+      /paid Pulse is active at \$8\/month/,
+    );
+    assert.doesNotMatch(
+      rendered.window.document.body.textContent ?? "",
+      /Start Pulse/,
+    );
+    assert.equal(mocks.routerReplace.mock.calls.length, 0);
+
+    await rendered.cleanup();
+  });
+
+  test("dismisses a recovered Pulse choice without invoking billing", async () => {
+    const { PulseTrialBillingContinuation } = await import(
+      "@/src/components/settings/hosted-start-paid-pulse-button"
+    );
+    const rendered = await renderClientComponent(
+      createElement(PulseTrialBillingContinuation, {
+        action: "start_pulse_now",
+      }),
+      { requireButton: false },
+    );
+
+    const dismissButton = findLastButtonByText(
+      rendered.window.document,
+      "Not now",
+      rendered.window,
+    );
+    await act(async () => {
+      dismissButton.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+    });
+
+    assert.equal(mocks.requestHostedPulseTrialContinuation.mock.calls.length, 0);
+    assert.deepEqual(mocks.routerReplace.mock.calls, [["/settings#subscription"]]);
+    assert.equal(rendered.window.document.body.textContent, "");
+
+    await rendered.cleanup();
+  });
+
+  test("does not redirect back to Stripe until the member explicitly retries", async () => {
     mocks.requestHostedPulseTrialContinuation
       .mockResolvedValueOnce({
         status: "payment_required",
       })
       .mockResolvedValueOnce({
-        status: "started",
+        status: "continuing",
       });
     const { PulseTrialBillingContinuation } = await import(
       "@/src/components/settings/hosted-start-paid-pulse-button"
     );
     const rendered = await renderClientComponent(
-      createElement(PulseTrialBillingContinuation),
+      createElement(PulseTrialBillingContinuation, {
+        action: "continue_pulse",
+      }),
       { requireButton: false },
     );
 
@@ -949,7 +1107,7 @@ describe("HostedBillingSettings", () => {
 
     const retryButton = findLastButtonByText(
       rendered.window.document,
-      "Try again",
+      "Check again",
       rendered.window,
     );
     await act(async () => {
@@ -958,9 +1116,123 @@ describe("HostedBillingSettings", () => {
     });
 
     assert.deepEqual(mocks.requestHostedPulseTrialContinuation.mock.calls, [
-      [{ redirectIfPaymentRequired: false }],
-      [{ redirectIfPaymentRequired: true }],
+      [{
+        action: "continue_pulse",
+        redirectIfPaymentRequired: false,
+      }],
+      [{
+        action: "continue_pulse",
+        redirectIfPaymentRequired: true,
+      }],
     ]);
+    assert.match(
+      rendered.window.document.body.textContent ?? "",
+      /Your Pulse trial is set/,
+    );
+    assert.equal(mocks.routerReplace.mock.calls.length, 0);
+
+    await rendered.cleanup();
+  });
+
+  test("sends an ended continue return to a fresh start-now choice", async () => {
+    const { HostedOnboardingApiError } = await import(
+      "@/src/components/hosted-onboarding/client-api"
+    );
+    mocks.requestHostedPulseTrialContinuation.mockRejectedValueOnce(
+      new HostedOnboardingApiError({
+        code: "HOSTED_PULSE_TRIAL_CONTINUE_REQUIRES_START",
+        message:
+          "Your Pulse trial has ended. Review the plan before starting paid Pulse.",
+      }),
+    );
+    const { PulseTrialBillingContinuation } = await import(
+      "@/src/components/settings/hosted-start-paid-pulse-button"
+    );
+    const rendered = await renderClientComponent(
+      createElement(PulseTrialBillingContinuation, {
+        action: "continue_pulse",
+      }),
+      { requireButton: false },
+    );
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    assert.deepEqual(mocks.requestHostedPulseTrialContinuation.mock.calls, [[{
+      action: "continue_pulse",
+      redirectIfPaymentRequired: false,
+    }]]);
+    assert.match(
+      rendered.window.document.body.textContent ?? "",
+      /Your trial has ended/,
+    );
+    assert.match(
+      rendered.window.document.body.textContent ?? "",
+      /Paid Pulse was not started from this return/,
+    );
+    assert.equal(mocks.routerReplace.mock.calls.length, 0);
+    assert.doesNotMatch(
+      rendered.window.document.body.textContent ?? "",
+      /Continue after trial/,
+    );
+
+    const gotItButton = findLastButtonByText(
+      rendered.window.document,
+      "Got it",
+      rendered.window,
+    );
+    await act(async () => {
+      gotItButton.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+    });
+    assert.deepEqual(mocks.routerReplace.mock.calls, [["/settings#subscription"]]);
+
+    await rendered.cleanup();
+  });
+
+  test("keeps a changed-choice notice visible until acknowledgment", async () => {
+    const { HostedOnboardingApiError } = await import(
+      "@/src/components/hosted-onboarding/client-api"
+    );
+    mocks.requestHostedPulseTrialContinuation.mockRejectedValueOnce(
+      new HostedOnboardingApiError({
+        code: "HOSTED_PULSE_TRIAL_CONTINUATION_CHANGED",
+        message:
+          "This Pulse choice changed in another tab. Continue from the latest return.",
+      }),
+    );
+    const { PulseTrialBillingContinuation } = await import(
+      "@/src/components/settings/hosted-start-paid-pulse-button"
+    );
+    const rendered = await renderClientComponent(
+      createElement(PulseTrialBillingContinuation, {
+        action: "continue_pulse",
+      }),
+      { requireButton: false },
+    );
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    assert.match(
+      rendered.window.document.body.textContent ?? "",
+      /Your Pulse choice changed/,
+    );
+    assert.match(
+      rendered.window.document.body.textContent ?? "",
+      /Continue from the latest return/,
+    );
+    assert.equal(mocks.routerReplace.mock.calls.length, 0);
+
+    const gotItButton = findLastButtonByText(
+      rendered.window.document,
+      "Got it",
+      rendered.window,
+    );
+    await act(async () => {
+      gotItButton.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+    });
     assert.deepEqual(mocks.routerReplace.mock.calls, [["/settings#subscription"]]);
 
     await rendered.cleanup();
@@ -980,11 +1252,19 @@ describe("HostedBillingSettings", () => {
       "@/src/components/settings/hosted-start-paid-pulse-button"
     );
     const rendered = await renderClientComponent(
-      createElement(PulseTrialBillingContinuation),
+      createElement(PulseTrialBillingContinuation, {
+        action: "start_pulse_now",
+      }),
       { requireButton: false },
     );
 
+    const confirmButton = findLastButtonByText(
+      rendered.window.document,
+      "End trial and start Pulse",
+      rendered.window,
+    );
     await act(async () => {
+      confirmButton.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
       await Promise.resolve();
     });
 
@@ -1006,11 +1286,19 @@ describe("HostedBillingSettings", () => {
       "@/src/components/settings/hosted-start-paid-pulse-button"
     );
     const rendered = await renderClientComponent(
-      createElement(PulseTrialBillingContinuation),
+      createElement(PulseTrialBillingContinuation, {
+        action: "start_pulse_now",
+      }),
       { requireButton: false },
     );
 
+    const confirmButton = findLastButtonByText(
+      rendered.window.document,
+      "End trial and start Pulse",
+      rendered.window,
+    );
     await act(async () => {
+      confirmButton.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
       await Promise.resolve();
     });
     assert.match(

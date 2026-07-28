@@ -1,7 +1,21 @@
 import "server-only";
 
-import { HostedBillingStatus, type Prisma, type PrismaClient } from "@prisma/client";
+import {
+  isHostedEmailConversationMessageWake,
+  isHostedLinqConversationMessageWake,
+  isHostedTelegramConversationMessageWake,
+  readHostedLinqConversationMessageContact,
+  type HostedExecutionConversationMessageWake,
+} from "@murphai/hosted-execution";
+import { parseHostedExecutionWake } from "@murphai/hosted-execution/parsers";
+import {
+  HostedBillingStatus,
+  type Prisma,
+  type PrismaClient,
+} from "@prisma/client";
 
+import { runWithHostedDomainRootUnwrapCache } from "@/src/lib/hosted-crypto/domain-root-unwrap-cache";
+import { decodeHostedMailboxStoredPayload } from "@/src/lib/hosted-mailbox/store";
 import {
   HOSTED_PLAN_CODES,
   HOSTED_PULSE_TRIAL_DAYS,
@@ -14,6 +28,14 @@ import {
   readHostedFamilyPlanCapacities,
   sumHostedFamilyPlanCapacities,
 } from "@/src/lib/hosted-onboarding/family-plan-capacity";
+import {
+  createHostedTelegramUserLookupKeyReadCandidates,
+} from "@/src/lib/hosted-onboarding/contact-privacy";
+import {
+  createHostedLinqParticipantContact,
+  createHostedLinqParticipantContactLookupKeyReadCandidates,
+  type HostedLinqParticipantContactKind,
+} from "@/src/lib/hosted-onboarding/linq-participant-contact";
 import { HOSTED_MESSAGE_VOLUME_BASE } from "@/src/lib/message-volume";
 import { getPrisma } from "@/src/lib/prisma";
 
@@ -57,17 +79,10 @@ function activePaidFamilyMembershipWhere(): Prisma.HostedAccountGroupMembershipW
   };
 }
 
-type HostedGrowthPrisma = Pick<
-  PrismaClient,
-  | "hostedAccountGroup"
-  | "hostedGrowthDailySnapshot"
-  | "hostedLinqDelivery"
-  | "hostedMailboxItem"
-  | "hostedMember"
-  | "hostedMemberBillingRef"
->;
+type HostedGrowthPrisma = PrismaClient;
 
 const INBOUND_MESSAGE_MAILBOX_KIND = "conversation.message";
+const HOSTED_GROWTH_AGGREGATE_ID = "global";
 const OUTBOUND_LINQ_SENT_STATUSES = [
   "accepted",
   "delivered",
@@ -196,6 +211,11 @@ export interface HostedGrowthTrialCohortRow {
 }
 
 export interface HostedGrowthDashboard {
+  activeUsers: {
+    trailing30Days: number;
+    trailing7Days: number;
+    wowPercent: number | null;
+  };
   capturedAt: string;
   conversion: {
     converted: number;
@@ -216,6 +236,9 @@ export interface HostedGrowthDashboard {
   trialStarts: {
     trailing7Days: number;
     wowPercent: number | null;
+  };
+  usageTopUps: {
+    trackedFulfilled: number;
   };
   weeklyRows: HostedGrowthWeeklyRow[];
 }
@@ -571,6 +594,376 @@ export function getTrialMaturityCutoff(now: Date): Date {
   return addUtcDays(now, -HOSTED_PULSE_TRIAL_DAYS);
 }
 
+interface HostedGrowthGroupMailboxRow {
+  dedupeKey: string;
+  id: string;
+  kind: string;
+  lane: string;
+  laneSeq: bigint;
+  occurredAt: Date;
+  payload: {
+    payloadCiphertext: string;
+  } | null;
+  payloadInlineCiphertext: string | null;
+  payloadRef: string | null;
+  payloadSchema: string;
+  userId: string;
+}
+
+interface HostedGrowthLinqSenderEvidence {
+  contactKind: HostedLinqParticipantContactKind;
+  fallbackIdentity: string;
+  identityKey: string;
+  kind: "linq";
+  registrationLookupKeys: string[];
+  senderMemberId?: string;
+}
+
+interface HostedGrowthTelegramSenderEvidence {
+  fallbackIdentity: string;
+  identityKey: string;
+  kind: "telegram";
+  registrationLookupKeys: string[];
+  senderMemberId?: string;
+}
+
+type HostedGrowthGroupSenderEvidence =
+  | HostedGrowthLinqSenderEvidence
+  | HostedGrowthTelegramSenderEvidence;
+
+interface HostedGrowthAttributedGroupMessage {
+  evidence: HostedGrowthGroupSenderEvidence;
+  occurredAt: Date;
+}
+
+interface HostedGrowthActiveUserCounts {
+  previous7Days: number;
+  trailing30Days: number;
+  trailing7Days: number;
+}
+
+async function calculateHostedGrowthActiveUsers(input: {
+  currentDirectRows: ReadonlyArray<{ userId: string }>;
+  groupRows: readonly HostedGrowthGroupMailboxRow[];
+  monthlyDirectRows: ReadonlyArray<{ userId: string }>;
+  monthlyStart: Date;
+  now: Date;
+  previousDirectRows: ReadonlyArray<{ userId: string }>;
+  previousStart: Date;
+  prisma: HostedGrowthPrisma;
+  trailing7DayStart: Date;
+}): Promise<HostedGrowthActiveUserCounts> {
+  const groupMessages = await decodeHostedGrowthGroupMessages(input.groupRows, input.prisma);
+  const senderIdentities = await resolveHostedGrowthGroupSenderIdentities(
+    groupMessages.map((message) => message.evidence),
+    input.prisma,
+  );
+  const trailing7DayIdentities = new Set(
+    input.currentDirectRows.map((row) => hostedGrowthMemberIdentity(row.userId)),
+  );
+  const previous7DayIdentities = new Set(
+    input.previousDirectRows.map((row) => hostedGrowthMemberIdentity(row.userId)),
+  );
+  const trailing30DayIdentities = new Set(
+    input.monthlyDirectRows.map((row) => hostedGrowthMemberIdentity(row.userId)),
+  );
+
+  for (const message of groupMessages) {
+    const identity = senderIdentities.get(message.evidence.identityKey);
+    if (!identity) {
+      throw new Error("Hosted growth group sender identity was not resolved.");
+    }
+    if (
+      message.occurredAt.getTime() >= input.monthlyStart.getTime()
+      && message.occurredAt.getTime() < input.now.getTime()
+    ) {
+      trailing30DayIdentities.add(identity);
+    }
+    if (
+      message.occurredAt.getTime() >= input.trailing7DayStart.getTime()
+      && message.occurredAt.getTime() < input.now.getTime()
+    ) {
+      trailing7DayIdentities.add(identity);
+    } else if (
+      message.occurredAt.getTime() >= input.previousStart.getTime()
+      && message.occurredAt.getTime() < input.trailing7DayStart.getTime()
+    ) {
+      previous7DayIdentities.add(identity);
+    }
+  }
+
+  return {
+    previous7Days: previous7DayIdentities.size,
+    trailing30Days: trailing30DayIdentities.size,
+    trailing7Days: trailing7DayIdentities.size,
+  };
+}
+
+async function decodeHostedGrowthGroupMessages(
+  rows: readonly HostedGrowthGroupMailboxRow[],
+  prisma: HostedGrowthPrisma,
+): Promise<HostedGrowthAttributedGroupMessage[]> {
+  return runWithHostedDomainRootUnwrapCache(async () => {
+    const messages = await Promise.all(rows.map(async (row) => {
+      if (row.payloadRef && !row.payload) {
+        throw new Error("Hosted growth group message sidecar payload is unavailable.");
+      }
+      const decoded = await decodeHostedMailboxStoredPayload({
+        dedupeKey: row.dedupeKey,
+        kind: row.kind,
+        lane: row.lane,
+        laneSeq: row.laneSeq,
+        mailboxItemId: row.id,
+        occurredAt: row.occurredAt.toISOString(),
+        payloadCiphertext: row.payload?.payloadCiphertext ?? null,
+        payloadInlineCiphertext: row.payloadInlineCiphertext,
+        payloadSchema: row.payloadSchema,
+        prisma,
+        userId: row.userId,
+      });
+      if (!decoded) {
+        throw new Error("Hosted growth group message payload is unavailable.");
+      }
+      const wake = parseHostedExecutionWake(decoded);
+      if (wake.kind !== INBOUND_MESSAGE_MAILBOX_KIND || wake.userId !== row.userId) {
+        throw new Error("Hosted growth group message does not match its mailbox item.");
+      }
+      if (isHostedEmailConversationMessageWake(wake)) {
+        return null;
+      }
+      const evidence = readHostedGrowthGroupSenderEvidence(wake);
+      if (!evidence) {
+        return null;
+      }
+
+      return {
+        evidence,
+        occurredAt: row.occurredAt,
+      };
+    }));
+    return messages.filter(
+      (message): message is HostedGrowthAttributedGroupMessage => message !== null,
+    );
+  });
+}
+
+function readHostedGrowthGroupSenderEvidence(
+  wake: HostedExecutionConversationMessageWake,
+): HostedGrowthGroupSenderEvidence | null {
+  if (isHostedLinqConversationMessageWake(wake)) {
+    if (wake.message.linqMessage.threadIsDirect !== false) {
+      throw new Error("Hosted growth thread-container Linq message must be non-direct.");
+    }
+    const storedContact = readHostedLinqConversationMessageContact(wake.message);
+    const currentContact = createHostedLinqParticipantContact({
+      kind: storedContact.kind,
+      value: wake.message.linqMessage.from,
+    });
+    if (!currentContact) {
+      throw new Error("Hosted growth Linq group sender contact is invalid.");
+    }
+    const registrationLookupKeys =
+      createHostedLinqParticipantContactLookupKeyReadCandidates({
+        kind: currentContact.kind,
+        value: currentContact.value,
+      });
+    if (!registrationLookupKeys.includes(storedContact.lookupKey)) {
+      throw new Error("Hosted growth Linq group sender contact does not match its blind index.");
+    }
+    const fallbackIdentity = hostedGrowthLinqEvidenceKey(
+      currentContact.kind,
+      currentContact.lookupKey,
+    );
+    const identityKey = wake.message.senderMemberId
+      ? hostedGrowthMemberIdentity(wake.message.senderMemberId)
+      : fallbackIdentity;
+    return {
+      contactKind: currentContact.kind,
+      fallbackIdentity,
+      identityKey,
+      kind: "linq",
+      registrationLookupKeys,
+      ...(wake.message.senderMemberId
+        ? { senderMemberId: wake.message.senderMemberId }
+        : {}),
+    };
+  }
+
+  if (isHostedTelegramConversationMessageWake(wake)) {
+    if (wake.message.telegramMessage.threadIsDirect !== false) {
+      throw new Error("Hosted growth thread-container Telegram message must be non-direct.");
+    }
+    if (wake.message.senderMemberId) {
+      const identityKey = hostedGrowthMemberIdentity(wake.message.senderMemberId);
+      return {
+        fallbackIdentity: identityKey,
+        identityKey,
+        kind: "telegram",
+        registrationLookupKeys: [],
+        senderMemberId: wake.message.senderMemberId,
+      };
+    }
+    const senderUserId = wake.message.telegramMessage.from?.trim() ?? "";
+    const registrationLookupKeys =
+      createHostedTelegramUserLookupKeyReadCandidates(senderUserId);
+    if (registrationLookupKeys.length === 0) {
+      return null;
+    }
+    const fallbackIdentity = `telegram:${registrationLookupKeys[0]}`;
+    return {
+      fallbackIdentity,
+      identityKey: fallbackIdentity,
+      kind: "telegram",
+      registrationLookupKeys,
+    };
+  }
+
+  throw new Error("Hosted growth thread-container message channel is not attributable.");
+}
+
+async function resolveHostedGrowthGroupSenderIdentities(
+  evidenceRows: readonly HostedGrowthGroupSenderEvidence[],
+  prisma: HostedGrowthPrisma,
+): Promise<Map<string, string>> {
+  const phoneLookupKeys = collectHostedGrowthLinqLookupKeys(evidenceRows, "phone");
+  const emailLookupKeys = collectHostedGrowthLinqLookupKeys(evidenceRows, "email");
+  const telegramLookupKeys = new Set(
+    evidenceRows.flatMap((evidence) =>
+      evidence.kind === "telegram" && !evidence.senderMemberId
+        ? evidence.registrationLookupKeys
+        : []
+    ),
+  );
+  const [phoneMembers, emailMembers, telegramMembers] = await Promise.all([
+    phoneLookupKeys.size === 0
+      ? []
+      : prisma.hostedMemberIdentity.findMany({
+          select: {
+            memberId: true,
+            phoneLookupKey: true,
+          },
+          where: {
+            phoneLookupKey: {
+              in: [...phoneLookupKeys],
+            },
+          },
+        }),
+    emailLookupKeys.size === 0
+      ? []
+      : prisma.hostedMemberEmailAuthorization.findMany({
+          select: {
+            memberId: true,
+            verifiedEmailLookupKey: true,
+          },
+          where: {
+            verifiedEmailLookupKey: {
+              in: [...emailLookupKeys],
+            },
+            verifiedEmailVerifiedAt: {
+              not: null,
+            },
+          },
+        }),
+    telegramLookupKeys.size === 0
+      ? []
+      : prisma.hostedMemberRouting.findMany({
+          select: {
+            memberId: true,
+            telegramUserLookupKey: true,
+          },
+          where: {
+            telegramUserLookupKey: {
+              in: [...telegramLookupKeys],
+            },
+          },
+        }),
+  ]);
+  const memberIdsByLookupKey = new Map<string, Set<string>>();
+  for (const row of phoneMembers) {
+    addHostedGrowthLookupMember(memberIdsByLookupKey, row.phoneLookupKey, row.memberId);
+  }
+  for (const row of emailMembers) {
+    addHostedGrowthLookupMember(
+      memberIdsByLookupKey,
+      row.verifiedEmailLookupKey,
+      row.memberId,
+    );
+  }
+  for (const row of telegramMembers) {
+    addHostedGrowthLookupMember(
+      memberIdsByLookupKey,
+      row.telegramUserLookupKey,
+      row.memberId,
+    );
+  }
+
+  const identities = new Map<string, string>();
+  for (const evidence of evidenceRows) {
+    if (identities.has(evidence.identityKey)) {
+      continue;
+    }
+    if (evidence.senderMemberId) {
+      identities.set(
+        evidence.identityKey,
+        hostedGrowthMemberIdentity(evidence.senderMemberId),
+      );
+      continue;
+    }
+    const matchingMemberIds = new Set(
+      evidence.registrationLookupKeys.flatMap((lookupKey) =>
+        [...(memberIdsByLookupKey.get(lookupKey) ?? [])]
+      ),
+    );
+    if (matchingMemberIds.size > 1) {
+      throw new Error("Hosted growth group sender matched multiple registered members.");
+    }
+    const [memberId] = [...matchingMemberIds];
+    if (memberId) {
+      identities.set(evidence.identityKey, hostedGrowthMemberIdentity(memberId));
+      continue;
+    }
+    identities.set(evidence.identityKey, evidence.fallbackIdentity);
+  }
+  return identities;
+}
+
+function collectHostedGrowthLinqLookupKeys(
+  evidenceRows: readonly HostedGrowthGroupSenderEvidence[],
+  kind: HostedLinqParticipantContactKind,
+): Set<string> {
+  return new Set(evidenceRows.flatMap((evidence) =>
+    evidence.kind === "linq"
+    && evidence.contactKind === kind
+    && !evidence.senderMemberId
+      ? evidence.registrationLookupKeys
+      : []
+  ));
+}
+
+function addHostedGrowthLookupMember(
+  memberIdsByLookupKey: Map<string, Set<string>>,
+  lookupKey: string | null,
+  memberId: string,
+): void {
+  if (!lookupKey) {
+    return;
+  }
+  const memberIds = memberIdsByLookupKey.get(lookupKey) ?? new Set<string>();
+  memberIds.add(memberId);
+  memberIdsByLookupKey.set(lookupKey, memberIds);
+}
+
+function hostedGrowthMemberIdentity(memberId: string): string {
+  return `member:${memberId}`;
+}
+
+function hostedGrowthLinqEvidenceKey(
+  kind: HostedLinqParticipantContactKind,
+  lookupKey: string,
+): string {
+  return `linq:${kind}:${lookupKey}`;
+}
+
 export async function readHostedGrowthDashboard(
   now: Date,
   prisma: HostedGrowthPrisma = getPrisma(),
@@ -578,6 +971,12 @@ export async function readHostedGrowthDashboard(
   const todayStart = startOfUtcDay(now);
   const recentStart = addUtcDays(todayStart, -63);
   const dailyStart = addUtcDays(todayStart, -(DAILY_SERIES_DAYS - 1));
+  const currentCalendarSevenDayStart = addUtcDays(todayStart, -6);
+  const previousCalendarSevenDayStart = addUtcDays(todayStart, -13);
+  const currentCalendarSevenDayEnd = addUtcDays(todayStart, 1);
+  const activeUsersCurrentStart = addUtcDays(now, -7);
+  const activeUsersPreviousStart = addUtcDays(now, -14);
+  const activeUsersMonthlyStart = addUtcDays(now, -30);
 
   const [
     current,
@@ -586,6 +985,11 @@ export async function readHostedGrowthDashboard(
     snapshots,
     matureStarted,
     matureConverted,
+    growthAggregate,
+    activeUsersTrailing7DayDirectRows,
+    activeUsersPrevious7DayDirectRows,
+    activeUsersTrailing30DayDirectRows,
+    activeUsersGroupRows,
   ] = await Promise.all([
     readCurrentHostedGrowthMetrics(now, prisma),
     prisma.hostedMember.findMany({
@@ -667,7 +1071,93 @@ export async function readHostedGrowthDashboard(
         },
       },
     }),
+    prisma.hostedGrowthAggregate.findUniqueOrThrow({
+      select: {
+        trackedFulfilledUsageTopUps: true,
+      },
+      where: {
+        id: HOSTED_GROWTH_AGGREGATE_ID,
+      },
+    }),
+    prisma.hostedMailboxItem.groupBy({
+      by: ["userId"],
+      where: {
+        kind: INBOUND_MESSAGE_MAILBOX_KIND,
+        member: realHostedMemberWhere,
+        occurredAt: {
+          gte: activeUsersCurrentStart,
+          lt: now,
+        },
+      },
+    }),
+    prisma.hostedMailboxItem.groupBy({
+      by: ["userId"],
+      where: {
+        kind: INBOUND_MESSAGE_MAILBOX_KIND,
+        member: realHostedMemberWhere,
+        occurredAt: {
+          gte: activeUsersPreviousStart,
+          lt: activeUsersCurrentStart,
+        },
+      },
+    }),
+    prisma.hostedMailboxItem.groupBy({
+      by: ["userId"],
+      where: {
+        kind: INBOUND_MESSAGE_MAILBOX_KIND,
+        member: realHostedMemberWhere,
+        occurredAt: {
+          gte: activeUsersMonthlyStart,
+          lt: now,
+        },
+      },
+    }),
+    prisma.hostedMailboxItem.findMany({
+      orderBy: {
+        occurredAt: "asc",
+      },
+      select: {
+        dedupeKey: true,
+        id: true,
+        kind: true,
+        lane: true,
+        laneSeq: true,
+        occurredAt: true,
+        payload: {
+          select: {
+            payloadCiphertext: true,
+          },
+        },
+        payloadInlineCiphertext: true,
+        payloadRef: true,
+        payloadSchema: true,
+        userId: true,
+      },
+      where: {
+        kind: INBOUND_MESSAGE_MAILBOX_KIND,
+        member: {
+          threadContainer: {
+            isNot: null,
+          },
+        },
+        occurredAt: {
+          gte: activeUsersMonthlyStart,
+          lt: now,
+        },
+      },
+    }),
   ]);
+  const activeUsers = await calculateHostedGrowthActiveUsers({
+    currentDirectRows: activeUsersTrailing7DayDirectRows,
+    groupRows: activeUsersGroupRows,
+    monthlyDirectRows: activeUsersTrailing30DayDirectRows,
+    monthlyStart: activeUsersMonthlyStart,
+    now,
+    previousDirectRows: activeUsersPrevious7DayDirectRows,
+    previousStart: activeUsersPreviousStart,
+    prisma,
+    trailing7DayStart: activeUsersCurrentStart,
+  });
   const trialStartRows = rawTrialStartRows.map((row): HostedGrowthTrialStartRow => ({
     currentBillingPhase: row.currentBillingPhase,
     member: {
@@ -695,30 +1185,36 @@ export async function readHostedGrowthDashboard(
     todayStart,
     addUtcDays(todayStart, 1),
   );
-  const currentSevenDayStart = addUtcDays(todayStart, -6);
-  const previousSevenDayStart = addUtcDays(todayStart, -13);
   const newMembersTrailing7Days = countCreatedRowsInRange(
     memberRows,
-    currentSevenDayStart,
-    addUtcDays(todayStart, 1),
+    currentCalendarSevenDayStart,
+    currentCalendarSevenDayEnd,
   );
   const newMembersPrevious7Days = countCreatedRowsInRange(
     memberRows,
-    previousSevenDayStart,
-    currentSevenDayStart,
+    previousCalendarSevenDayStart,
+    currentCalendarSevenDayStart,
   );
   const trialStartsTrailing7Days = countTrialStartsInRange(
     trialStartRows,
-    currentSevenDayStart,
-    addUtcDays(todayStart, 1),
+    currentCalendarSevenDayStart,
+    currentCalendarSevenDayEnd,
   );
   const trialStartsPrevious7Days = countTrialStartsInRange(
     trialStartRows,
-    previousSevenDayStart,
-    currentSevenDayStart,
+    previousCalendarSevenDayStart,
+    currentCalendarSevenDayStart,
   );
 
   return {
+    activeUsers: {
+      trailing30Days: activeUsers.trailing30Days,
+      trailing7Days: activeUsers.trailing7Days,
+      wowPercent: calculatePercentChange(
+        activeUsers.trailing7Days,
+        activeUsers.previous7Days,
+      ),
+    },
     capturedAt: now.toISOString(),
     conversion: calculateTrialConversionSummary({
       matureConverted,
@@ -752,6 +1248,9 @@ export async function readHostedGrowthDashboard(
         trialStartsTrailing7Days,
         trialStartsPrevious7Days,
       ),
+    },
+    usageTopUps: {
+      trackedFulfilled: growthAggregate.trackedFulfilledUsageTopUps,
     },
     weeklyRows,
   };

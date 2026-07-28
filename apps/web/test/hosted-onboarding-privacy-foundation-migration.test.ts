@@ -71,12 +71,14 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
     'assistantVoiceCausalSeq BigInt? @map("assistant_voice_causal_seq")',
     'billingStatus HostedBillingStatus @default(not_started) @map("billing_status")',
     "codexAuthConnection HostedCodexAuthConnection?",
+    'groupSponsorshipMomentsCreated HostedGroupSponsorshipMoment[] @relation("HostedGroupSponsorshipMomentCreator")',
     "linqContactCardShares HostedLinqContactCardShare[]",
     "mealPhotoCaptureEnrollments HostedMealPhotoCaptureEnrollment[]",
     'pendingActivationTimeZone String? @map("pending_activation_time_zone")',
     "sensitiveActionChallenges HostedSensitiveActionChallenge[]",
     'signupNotificationEmailAttemptedAt DateTime? @map("signup_notification_email_attempted_at")',
     'signupWelcomeEmailAttemptedAt DateTime? @map("signup_welcome_email_attempted_at")',
+    "subscriptionCheckouts HostedMemberSubscriptionCheckout[]",
     'suspendedAt DateTime? @map("suspended_at")',
     'threadContainerParticipations HostedThreadContainerParticipant[] @relation("HostedThreadContainerParticipantMember")',
     'usageCreditBalanceUsdMicros BigInt? @default(0) @map("usage_credit_balance_usd_micros")',
@@ -84,6 +86,9 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
     'usageCreditLedgerVersion BigInt? @default(0) @map("usage_credit_ledger_version")',
     'usageCreditPurchasesPaid HostedUsageCreditPurchase[] @relation("HostedUsageCreditPurchasePayer")',
     'usageCreditPurchasesReceived HostedUsageCreditPurchase[] @relation("HostedUsageCreditPurchaseBeneficiary")',
+    'usageReferralsAsBeneficiary HostedUsageReferral[] @relation("HostedUsageReferralBeneficiary")',
+    'usageReferralsAsIntroduced HostedUsageReferral[] @relation("HostedUsageReferralIntroducedMember")',
+    'usageReferralsAsReferrer HostedUsageReferral[] @relation("HostedUsageReferralReferrer")',
     'createdAt DateTime @default(now()) @map("created_at")',
     'updatedAt DateTime @updatedAt @map("updated_at")',
   ],
@@ -153,6 +158,12 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
     'createdAt DateTime @default(now()) @map("created_at")',
     'updatedAt DateTime @updatedAt @map("updated_at")',
   ],
+  HostedMemberSubscriptionCheckout: [
+    'stripeCheckoutSessionLookupKey String @id @map("stripe_checkout_session_lookup_key")',
+    'stripeCheckoutSessionIdEncrypted String @map("stripe_checkout_session_id_encrypted")',
+    'memberId String @map("member_id")',
+    'createdAt DateTime @default(now()) @map("created_at")',
+  ],
   HostedMemberEmailAuthorization: [
     'memberId String @unique @map("member_id")',
     'verifiedEmailLookupKey String? @unique @map("verified_email_lookup_key")',
@@ -175,6 +186,7 @@ const HOSTED_MEMBER_RELATION_TYPES = new Set([
   "ClinicalRecordRetrievalRequest",
   "ClinicalRecordRetrievalRun",
   "HostedAiUsage",
+  "HostedAddressBookProjection",
   "HostedAccountGroup",
   "HostedAccountGroupBillingRef",
   "HostedAccountGroupInvite",
@@ -244,6 +256,13 @@ describe("hosted Prisma baseline migration", () => {
     const hostedRuntimeHardCutMigrationSql = readFileSync(
       new URL(
         "../prisma/migrations/2026042700_hosted_runtime_hard_cut/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    const hostedUserCryptoEnvelopeMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260501000000_hosted_user_crypto_envelopes/migration.sql",
         import.meta.url,
       ),
       "utf8",
@@ -419,6 +438,13 @@ describe("hosted Prisma baseline migration", () => {
     const hostedThreadRoutesMigrationSql = readFileSync(
       new URL(
         "../prisma/migrations/20260624120000_hosted_thread_routes/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    const hostedThreadDeliveryRouteMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260725120000_hosted_thread_delivery_route/migration.sql",
         import.meta.url,
       ),
       "utf8",
@@ -766,9 +792,44 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
+    const hostedObservabilityRetentionMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260725120000_hosted_observability_retention/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     const deviceSyncSignalSourceProviderMigrationSql = readFileSync(
       new URL(
         "../prisma/migrations/20260725193000_device_sync_signal_source_provider/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    const hostedUsageReferralEntryKindMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260726115900_hosted_usage_referral_entry_kind/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    const hostedUsageReferralRewardsMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260726120000_hosted_usage_referral_rewards/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    const hostedUsageReferralCreditEntryContractMigrationSql = readFileSync(
+      new URL(
+        "../prisma/contract-migrations/20260726123000_allow_hosted_usage_referral_credit_entries/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    const hostedThreadContainerUsageDefaultMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260726180000_hosted_thread_container_usage_default/migration.sql",
         import.meta.url,
       ),
       "utf8",
@@ -895,7 +956,23 @@ describe("hosted Prisma baseline migration", () => {
       "20260723230000_hosted_member_assistant_unhinged",
       "20260724160000_hosted_account_exit_reason",
       "20260724180000_device_connection_source_last_data_at",
+      "20260725120000_hosted_observability_retention",
+      "20260725120000_hosted_thread_delivery_route",
+      "20260725190000_hosted_mailbox_content_retention",
       "20260725193000_device_sync_signal_source_provider",
+      "20260725230000_hosted_paid_usage_legacy_period_cutover",
+      "20260726115900_hosted_usage_referral_entry_kind",
+      "20260726120000_hosted_growth_aggregate",
+      "20260726120000_hosted_usage_referral_rewards",
+      "20260726124000_hosted_usage_referral_source_conversation",
+      "20260726180000_hosted_account_deletion_cleanup",
+      "20260726180000_hosted_address_book_projection",
+      "20260726180000_hosted_thread_container_usage_default",
+      "20260727040000_relax_hosted_usage_credit_detached_direct_proof",
+      "20260727120000_hosted_member_checkout_session",
+      "20260727190000_hosted_group_sponsorship_moment",
+      "20260728030000_hosted_invite_instant_start_admission",
+      "20260728050000_rearm_hosted_mailbox_content_retention",
       "migration_lock.toml",
     ]);
     expect(deviceSyncSignalSourceProviderMigrationSql).toContain(
@@ -904,8 +981,154 @@ describe("hosted Prisma baseline migration", () => {
     expect(deviceSyncSignalSourceProviderMigrationSql).toContain(
       'CREATE INDEX "device_sync_signal_user_source_idx"',
     );
+    expect(hostedUsageReferralEntryKindMigrationSql.trim()).toBe(
+      [
+        'ALTER TYPE "HostedUsageCreditEntryKind"',
+        "  ADD VALUE IF NOT EXISTS 'referral_grant';",
+      ].join("\n"),
+    );
+    expect(
+      migrationEntries.indexOf("20260726115900_hosted_usage_referral_entry_kind"),
+    ).toBeLessThan(
+      migrationEntries.indexOf("20260726120000_hosted_usage_referral_rewards"),
+    );
+    expect(hostedUsageReferralRewardsMigrationSql).toContain(
+      'CREATE TABLE "hosted_usage_referral"',
+    );
+    expect(hostedUsageReferralRewardsMigrationSql).toContain(
+      'ALTER COLUMN "purchase_id" DROP NOT NULL',
+    );
+    expect(hostedUsageReferralRewardsMigrationSql).toContain(
+      'ADD COLUMN "referral_id" TEXT',
+    );
+    expect(hostedUsageReferralCreditEntryContractMigrationSql).toContain(
+      '("purchase_id" IS NOT NULL) <> ("referral_id" IS NOT NULL)',
+    );
+    expect(hostedUsageReferralRewardsMigrationSql).not.toContain(
+      'DROP CONSTRAINT "hosted_usage_credit_entry_amount_direction_valid"',
+    );
+    expect(hostedUsageReferralRewardsMigrationSql).not.toContain(
+      'ADD CONSTRAINT "hosted_usage_credit_entry_amount_direction_valid"',
+    );
+    expect(hostedUsageReferralCreditEntryContractMigrationSql).toContain(
+      'DROP CONSTRAINT "hosted_usage_credit_entry_amount_direction_valid"',
+    );
+    expect(hostedUsageReferralCreditEntryContractMigrationSql).toContain(
+      'ADD CONSTRAINT "hosted_usage_credit_entry_amount_direction_valid"',
+    );
+    expect(hostedUsageReferralCreditEntryContractMigrationSql).toContain(
+      ') NOT VALID',
+    );
+    expect(hostedUsageReferralCreditEntryContractMigrationSql).toContain(
+      'VALIDATE CONSTRAINT "hosted_usage_credit_entry_source_shape_valid"',
+    );
+    expect(hostedUsageReferralRewardsMigrationSql).toContain(
+      'CREATE UNIQUE INDEX "hosted_usage_credit_entry_referral_grant_key"',
+    );
+    expect(hostedUsageReferralRewardsMigrationSql).toContain(
+      'WHERE "kind" = \'referral_grant\'',
+    );
+    expect(hostedUsageReferralRewardsMigrationSql).toContain(
+      'CREATE TABLE "hosted_usage_credit_grant"',
+    );
+    expect(hostedUsageReferralRewardsMigrationSql).toContain(
+      'PRIMARY KEY ("entry_id")',
+    );
+    expect(hostedUsageReferralRewardsMigrationSql).toContain(
+      'CHECK ("remaining_usd_micros" >= 0)',
+    );
+    expect(hostedUsageReferralRewardsMigrationSql).toContain(
+      'FOREIGN KEY ("entry_id") REFERENCES "hosted_usage_credit_entry"("id")',
+    );
+    expect(hostedUsageReferralRewardsMigrationSql).toContain(
+      [
+        'INNER JOIN "hosted_usage_credit_purchase" AS purchase',
+        '  ON purchase."id" = entry."purchase_id"',
+        "WHERE entry.\"kind\" = 'purchase_grant';",
+      ].join("\n"),
+    );
+    expect(hostedUsageReferralCreditEntryContractMigrationSql).toContain(
+      'ON CONFLICT ("entry_id") DO UPDATE',
+    );
+    expect(hostedUsageReferralCreditEntryContractMigrationSql).toContain(
+      '"remaining_usd_micros" = EXCLUDED."remaining_usd_micros"',
+    );
+    expect(hostedUsageReferralRewardsMigrationSql).not.toContain(
+      "hosted_usage_credit_allocation",
+    );
+    expect(hostedUsageReferralRewardsMigrationSql).not.toContain(
+      "HostedUsageCreditGrantKind",
+    );
+    expect(hostedUsageReferralRewardsMigrationSql).not.toMatch(
+      /phone|email|telegram|chat_id/iu,
+    );
+    expect(hostedUserCryptoEnvelopeMigrationSql).toContain(
+      "CREATE UNIQUE INDEX hosted_user_crypto_envelope_one_active_per_domain_idx",
+    );
+    expect(hostedUserCryptoEnvelopeMigrationSql).toMatch(
+      /ON hosted_user_crypto_envelope\(user_id, domain\)\s+WHERE status = 'active'/u,
+    );
+    expect(schema).toContain(
+      'monthlyUsageLimitUsdMicros BigInt              @default(7500000) @map("monthly_usage_limit_usd_micros")',
+    );
+    expect(hostedThreadContainerUsageDefaultMigrationSql.trim()).toBe(
+      [
+        'ALTER TABLE "hosted_thread_container"',
+        'ALTER COLUMN "monthly_usage_limit_usd_micros" SET DEFAULT 7500000;',
+      ].join("\n"),
+    );
+    expect(hostedThreadContainerUsageDefaultMigrationSql).not.toMatch(/\bUPDATE\b/u);
     expect(hostedMailboxSubscriptionActionClaimMigrationSql).toContain(
       'ALTER TABLE "hosted_mailbox_item"',
+    );
+    expect(hostedObservabilityRetentionMigrationSql).toContain(
+      [
+        'ALTER TABLE "hosted_workspace"',
+        'ADD COLUMN "accepted_attempt_failure_recheck_claimed_at" TIMESTAMP(3);',
+      ].join("\n"),
+    );
+    for (const [indexName, tableName, orderedColumns] of [
+      ["hosted_runtime_log_at_id_idx", "hosted_runtime_log", '"at", "id"'],
+      [
+        "hosted_ingress_latency_trace_accepted_at_id_idx",
+        "hosted_ingress_latency_trace",
+        '"accepted_at", "id"',
+      ],
+      [
+        "hosted_linq_provider_event_received_at_event_id_idx",
+        "hosted_linq_provider_event",
+        '"received_at", "event_id"',
+      ],
+      [
+        "hosted_mailbox_item_expires_at_id_idx",
+        "hosted_mailbox_item",
+        '"expires_at", "id"',
+      ],
+      [
+        "hosted_mailbox_item_created_at_id_idx",
+        "hosted_mailbox_item",
+        '"created_at", "id"',
+      ],
+      [
+        "hosted_web_session_expires_at_id_idx",
+        "hosted_web_session",
+        '"expires_at", "id"',
+      ],
+      [
+        "hosted_web_session_revoked_at_id_idx",
+        "hosted_web_session",
+        '"revoked_at", "id"',
+      ],
+    ] as const) {
+      expect(hostedObservabilityRetentionMigrationSql).toContain(
+        [
+          `CREATE INDEX CONCURRENTLY "${indexName}"`,
+          `ON "${tableName}"(${orderedColumns});`,
+        ].join("\n"),
+      );
+    }
+    expect(hostedObservabilityRetentionMigrationSql).not.toMatch(
+      /CREATE INDEX "(?:hosted_runtime_log|hosted_ingress_latency_trace|hosted_linq_provider_event|hosted_mailbox_item|hosted_web_session)/u,
     );
     expect(hostedMailboxSubscriptionActionClaimMigrationSql).toContain(
       'ADD COLUMN "subscription_action_claim" TEXT',
@@ -1085,6 +1308,14 @@ describe("hosted Prisma baseline migration", () => {
     expect(hostedThreadRoutesMigrationSql).not.toContain("thread_id_encrypted");
     expect(hostedThreadRoutesMigrationSql).not.toContain('"source"');
     expect(hostedThreadRoutesMigrationSql).not.toContain('"status"');
+    expect(hostedThreadDeliveryRouteMigrationSql).toContain(
+      'ADD COLUMN "delivery_route_encrypted" TEXT',
+    );
+    expect(hostedThreadDeliveryRouteMigrationSql).not.toContain("NOT NULL");
+    expect(schema).toMatch(
+      /deliveryRouteEncrypted\s+String\?\s+@map\("delivery_route_encrypted"\)/u,
+    );
+    expect(schema).not.toMatch(/deliveryRoute\s+String/u);
     expect(hostedThreadRouteParticipantAdditionMigrationSql).toContain(
       'ADD COLUMN "pending_participant_addition" BOOLEAN DEFAULT false',
     );

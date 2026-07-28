@@ -1627,6 +1627,69 @@ describe("runHostedDeviceSyncPass", () => {
     );
   });
 
+  it("stops a superseded connection wake after hydration without running device-sync work", async () => {
+    const close = vi.fn();
+    const drainWorker = vi.fn(async () => 0);
+    const runSchedulerOnce = vi.fn(async () => undefined);
+    const service = {
+      close,
+      drainWorker,
+      getNextWakeAt: () => "2026-04-08T01:00:00.000Z",
+      listJobFailureDiagnostics: vi.fn(() => []),
+      listAccounts: vi.fn(() => []),
+      runSchedulerOnce,
+    };
+    mocks.createHostedRuntimeDeviceSyncService.mockReturnValue(service);
+    mocks.syncHostedDeviceSyncControlPlaneState.mockResolvedValueOnce({
+      hostedToLocalAccountIds: new Map([["conn_replacement", "local_replacement"]]),
+      localToHostedAccountIds: new Map([["local_replacement", "conn_replacement"]]),
+      observedTokenVersions: new Map([["conn_replacement", 9]]),
+      pendingDirtyAcks: [],
+      pendingDirtyPayloadJobs: [],
+      snapshot: null,
+      wakeSuperseded: true,
+    });
+
+    const result = await runHostedDeviceSyncPass(
+      {
+        connectionId: "conn_replacement",
+        eventId: "evt_stale_disconnect",
+        expectedConnectedAt: "2026-04-08T00:00:00.000Z",
+        kind: "device-sync.wake",
+        occurredAt: "2026-04-08T00:30:00.000Z",
+        reason: "disconnected",
+        userId: "member_123",
+      },
+      FIXED_MAINTENANCE_VAULT_ROOT,
+      DEVICE_SYNC_CONFIG,
+      createMaintenanceDeviceSyncPortStub(),
+      45_000,
+      {
+        stagedDirtyAcks: [{
+          connectionId: "conn_dirty_pending",
+          processedRevision: "7",
+        }],
+      },
+    );
+
+    assert.deepEqual(result, {
+      nextWakeAt: "2026-04-08T01:00:00.000Z",
+      postCheckpointRecord: null,
+      processedJobs: 0,
+      skipped: false,
+      stagedDirtyAcks: [{
+        connectionId: "conn_dirty_pending",
+        processedRevision: "7",
+      }],
+    });
+    expect(runSchedulerOnce).not.toHaveBeenCalled();
+    expect(drainWorker).not.toHaveBeenCalled();
+    expect(mocks.promoteHostedCompletedDirtyPayloadAcks).not.toHaveBeenCalled();
+    expect(mocks.reconcileHostedDeviceSyncControlPlaneState).not.toHaveBeenCalled();
+    expect(mocks.pruneWearableDenseRawTimeseries).not.toHaveBeenCalled();
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
   it("reschedules idle device sync when its abort signal fires during control-plane sync", async () => {
     await withHostedMaintenanceNow("2026-04-08T00:00:00.000Z", async () => {
       const controller = new AbortController();
@@ -3390,6 +3453,73 @@ describe("runHostedDeviceSyncPass", () => {
 });
 
 describe("runHostedAssistantAutomationLane", () => {
+  it("projects committed terminal non-replies into the existing latency trace", async () => {
+    const latencyTraceRecord = vi.fn(async () => ({
+      matchedCount: 2,
+      recorded: true,
+      unmatchedCount: 0,
+    }));
+    mocks.runAssistantAutomationPass.mockImplementationOnce(async (input) => {
+      input.onTerminalNonReplyCommitted?.({
+        inputIds: ["input_group_1", "input_group_2"],
+        recordedAt: "2026-04-08T00:00:02.000Z",
+        source: "linq",
+      });
+      return {
+        nextWakeAt: null,
+        progressed: true,
+        replies: {
+          considered: 2,
+          failed: 0,
+          nextWakeAt: null,
+          replied: 0,
+          skipped: 2,
+        },
+      };
+    });
+
+    await runHostedAssistantAutomationLane({
+      wake: {
+        eventId: "evt_assistant_terminal_non_reply",
+        kind: "runtime.timer",
+        occurredAt: "2026-04-08T00:00:00.000Z",
+        triggerKind: "runtime_timer",
+        userId: "member_123",
+      },
+      idleCheckpointDelayMs: 180_000,
+      executionContext: {
+        hosted: {
+          memberId: "member_123",
+          userEnvKeys: [],
+        },
+      },
+      requestId: "req_terminal_non_reply",
+      runtime: createHostedAutomationRuntime({
+        platform: {
+          latencyTracePort: {
+            record: latencyTraceRecord,
+          },
+        },
+      }),
+      runtimeAttemptId: "attempt_terminal_non_reply",
+      vaultRoot: "/tmp/vault-root",
+    });
+
+    await vi.waitFor(() => {
+      expect(latencyTraceRecord).toHaveBeenCalledWith({
+        event: {
+          assistantInputIds: ["input_group_1", "input_group_2"],
+          at: "2026-04-08T00:00:02.000Z",
+          checkpointPublicationExpectedBy: "2026-04-08T00:27:47.000Z",
+          milestone: "terminal_non_reply_committed",
+          runtimeAttemptId: "attempt_terminal_non_reply",
+          source: "linq",
+          type: "assistant_milestone",
+        },
+      });
+    });
+  });
+
   it("runs assistant automation without sweeping parser or device-sync work", async () => {
     const latencyTraceRecord = vi.fn(async () => ({
       matchedCount: 1,
@@ -3490,6 +3620,7 @@ describe("runHostedAssistantAutomationLane", () => {
       onEvent: expect.any(Function),
       onProviderEvent: expect.any(Function),
       onProviderRequestStarted: expect.any(Function),
+      onTerminalNonReplyCommitted: expect.any(Function),
       onTraceEvent: expect.any(Function),
       requestId: "req_123",
       shouldDeferCron: expect.any(Function),

@@ -11,27 +11,27 @@ import type {
 } from "../src/assistant/hosted-tool-context.js";
 
 describe("assistant plan usage tool", () => {
-  it("allows one trusted low-usage check without turning it into a watcher", () => {
+  it("advertises the private read and immediate authorization boundary", () => {
     expect(MURPH_PLAN_USAGE_TOOL.description).toContain(
-      "including one trusted low-usage turn",
+      "current private hosted plan",
     );
     expect(MURPH_PLAN_USAGE_TOOL.description).toContain(
-      "relevant to the member's request or trusted low-usage heads-up",
+      "explicit plan, usage, billing request",
     );
     expect(MURPH_PLAN_USAGE_TOOL.description).toContain(
-      "Never call it automatically during onboarding or as a watcher",
+      "trusted low-usage context",
     );
     expect(MURPH_PLAN_USAGE_TOOL.description).toContain(
-      "When answering an explicit numerical usage question",
+      "This is read-only",
     );
     expect(MURPH_PLAN_USAGE_TOOL.description).toContain(
-      "do not volunteer percentages or forecast",
+      "overall AI-usage projection",
     );
     expect(MURPH_PLAN_USAGE_TOOL.description).toContain(
-      "the first assistant-initiated mention remains link-free",
+      "expose no allowance/credit-source split",
     );
-    expect(MURPH_PLAN_USAGE_TOOL.description).toContain(
-      "Only after the member asks for the link or accepts that initial offer",
+    expect(MURPH_PLAN_USAGE_TOOL.description).not.toContain(
+      "included/purchased",
     );
   });
 
@@ -42,7 +42,7 @@ describe("assistant plan usage tool", () => {
       .not.toContain(MURPH_PLAN_USAGE_TOOL);
   });
 
-  it("accepts only empty arguments and reads the bound member status", async () => {
+  it("accepts empty arguments and returns the bound member's overall projection", async () => {
     const request = readMurphDynamicToolRequest({
       method: "item/tool/call",
       params: {
@@ -75,9 +75,9 @@ describe("assistant plan usage tool", () => {
           action: "upgrade_edge" as const,
           label: "Upgrade to Edge ($20/month)",
         },
-        remainingPercent: 20,
+        remainingPercent: 24,
         status: "active" as const,
-        usedPercent: 80,
+        usedPercent: 76,
       })),
     };
     const result = await executeMurphDynamicToolRequest({
@@ -91,9 +91,15 @@ describe("assistant plan usage tool", () => {
 
     expect(planUsageTool.read).toHaveBeenCalledOnce();
     expect(result.rpcResult.success).toBe(true);
-    expect(result.rpcResult.contentItems[0]?.text).toContain('"usedPercent":80');
-    expect(result.rpcResult.contentItems[0]?.text).toContain("upgrade_edge");
-    expect(result.rpcResult.contentItems[0]?.text).toContain(
+    const resultText = result.rpcResult.contentItems[0]?.text;
+    expect(resultText).toContain('"usedPercent":76');
+    expect(resultText).toContain('"remainingPercent":24');
+    expect(resultText).not.toContain('"included');
+    expect(resultText).not.toContain('"usageCredit');
+    expect(resultText).not.toContain('"purchase');
+    expect(resultText).not.toContain('"referral');
+    expect(resultText).toContain("upgrade_edge");
+    expect(resultText).toContain(
       '"label":"Upgrade to Edge ($20/month)"',
     );
   });

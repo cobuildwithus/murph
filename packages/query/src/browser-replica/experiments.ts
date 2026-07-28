@@ -15,7 +15,7 @@ import {
   resolveActivityEvidenceLocalDate,
   resolveExperimentAdherenceRollupTarget,
   resolveAdherenceObservationActivityKind,
-  synthesizeLegacySessionAdherenceTargets,
+  resolveExperimentAdherenceTargets,
   type ExperimentAdherenceCalendarResult,
   type ExperimentAdherenceCellStatus,
   type ExperimentAdherenceObservation,
@@ -136,6 +136,8 @@ export interface BrowserVaultExperimentResultRun {
 
 export interface BrowserVaultExperimentAdherenceTarget {
   activityKind?: string;
+  activityKinds?: string[];
+  minimumDurationMinutes?: number;
   calendar?: ExperimentAdherenceTarget["calendar"];
   evidence: ExperimentAdherenceTarget["evidence"];
   label: string;
@@ -486,16 +488,25 @@ function buildRunContext(
   const schedule = readRunSchedule(attributes, diagnostics);
   const runPlanRecord = readRecord(attributes.runPlan);
   const parsedAdherenceTargets = readAdherenceTargets(attributes, diagnostics);
-  const adherenceTargets: ExperimentAdherenceTarget[] = parsedAdherenceTargets.targets === null
-    ? synthesizeLegacySessionAdherenceTargets({
-        runPlan: {
-          minimumUsefulSessions: readNumber(runPlanRecord, "minimumUsefulSessions") ?? undefined,
-          modality: readString(runPlanRecord?.modality) ?? undefined,
-          schedule: schedule ?? undefined,
-          targetSessions: readNumber(runPlanRecord, "targetSessions") ?? undefined,
-        },
-      })
-    : parsedAdherenceTargets.targets;
+  const sourceCommonsProtocolRef =
+    persistedOutcome?.commonsProtocolRef ?? attributes.commonsProtocolRef;
+  const sourceEffectiveProtocolSnapshot =
+    persistedOutcome?.effectiveProtocolSnapshot ??
+    attributes.effectiveProtocolSnapshot;
+  const adherenceTargets = resolveExperimentAdherenceTargets({
+    explicitTargets: parsedAdherenceTargets.targets,
+    protocolActivitySessionEvidence: readProtocolActivitySessionEvidence(
+      sourceEffectiveProtocolSnapshot,
+    ),
+    protocolKey: readString(readRecord(sourceCommonsProtocolRef)?.key),
+    runPlan: {
+      minimumUsefulSessions: readNumber(runPlanRecord, "minimumUsefulSessions") ?? undefined,
+      modality: readString(runPlanRecord?.modality) ?? undefined,
+      schedule: schedule ?? undefined,
+      sessionsPerWeek: readNumber(runPlanRecord, "sessionsPerWeek") ?? undefined,
+      targetSessions: readNumber(runPlanRecord, "targetSessions") ?? undefined,
+    },
+  });
   const runTimeZone = adherenceTargets.find((target) => target.calendar)?.calendar?.timeZone ?? schedule?.timeZone ?? null;
   const requestedAsOfDate = runTimeZone ? toZonedIsoDate(asOf, runTimeZone) : toIsoDate(asOf);
   const evidenceThrough = endedOn !== null
@@ -576,6 +587,13 @@ function projectBrowserAdherenceTarget(
   return {
     ...(target.evidence.kind === "linkedEventCount" && target.evidence.activityKind
       ? { activityKind: target.evidence.activityKind }
+      : {}),
+    ...(target.evidence.kind === "linkedEventCount" && target.evidence.activityKinds
+      ? { activityKinds: [...target.evidence.activityKinds] }
+      : {}),
+    ...(target.evidence.kind === "linkedEventCount" &&
+        target.evidence.minimumDurationMinutes !== undefined
+      ? { minimumDurationMinutes: target.evidence.minimumDurationMinutes }
       : {}),
     ...(target.calendar ? { calendar: target.calendar } : {}),
     evidence: target.evidence,
@@ -1479,6 +1497,7 @@ function buildAdherenceObservations(
           .filter((event) => eventKindIsCandidateForEvidence(event.kind, linkedEvidence))
           .map((event) => ({
             activityKind: resolveAdherenceObservationActivityKind({ attributes: event.attributes }),
+            durationMinutes: readBrowserActivityDurationMinutes(event),
             evidenceId: event.id,
             eventKind: event.kind,
             localDate:
@@ -2394,6 +2413,43 @@ function readNumber(recordLike: unknown, key: string): number | null {
   }
 
   return readFiniteNumber(record[key]);
+}
+
+function readBrowserActivityDurationMinutes(
+  event: BrowserVaultEntity,
+): number | null {
+  return readFiniteNumber(event.attributes.durationMinutes) ??
+    readFiniteNumber(readRecord(event.attributes.workout)?.durationMinutes);
+}
+
+function readProtocolActivitySessionEvidence(
+  snapshotLike: unknown,
+): {
+  activityKinds: string[];
+  minimumDurationMinutes?: number;
+} | null {
+  const evidence = readRecord(
+    readRecord(snapshotLike)?.activitySessionEvidence,
+  );
+  if (!evidence) {
+    return null;
+  }
+
+  const activityKinds = Array.isArray(evidence.activityKinds)
+    ? evidence.activityKinds.filter(
+        (value): value is string => typeof value === "string",
+      )
+    : [];
+  const minimumDurationMinutes = readFiniteNumber(
+    evidence.minimumDurationMinutes,
+  );
+
+  return {
+    activityKinds,
+    ...(minimumDurationMinutes === null
+      ? {}
+      : { minimumDurationMinutes }),
+  };
 }
 
 function readFiniteNumber(value: unknown): number | null {

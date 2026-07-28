@@ -36,6 +36,7 @@ import {
   resolveHostedEmailSelfAddresses,
   resolveHostedEmailSenderIdentity,
 } from "../src/hosted-email.ts";
+import { parseHostedExecutionWake } from "../src/parsers.ts";
 
 const occurredAt = "2026-04-08T00:00:00.000Z";
 const defaultMemberChannels = {
@@ -141,6 +142,12 @@ describe("hosted execution wake builders", () => {
       deliveryDispatchMode: "queue-only" as const,
       deliveryDedupeToken: "signup-welcome:user_123",
       deliveryIdempotencyKey: "signup-welcome:user_123",
+      externalThreadRouteAuthority: {
+        accountLookupKey: "linq-account-key",
+        channel: "linq" as const,
+        containerMemberId: "thread-container",
+        threadId: "group-thread",
+      },
       firstContact: {
         markSeenOnDeliveryAccepted: true,
       },
@@ -173,6 +180,7 @@ describe("hosted execution wake builders", () => {
     });
 
     notification.firstContact.markSeenOnDeliveryAccepted = false;
+    notification.externalThreadRouteAuthority.threadId = "mutated-thread";
     notification.responsePolicy.text = "mutated";
     notification.route.delivery.source!.fromPhoneNumber = "+15550009999";
 
@@ -183,6 +191,12 @@ describe("hosted execution wake builders", () => {
         deliveryDispatchMode: "queue-only",
         deliveryDedupeToken: "signup-welcome:user_123",
         deliveryIdempotencyKey: "signup-welcome:user_123",
+        externalThreadRouteAuthority: {
+          accountLookupKey: "linq-account-key",
+          channel: "linq",
+          containerMemberId: "thread-container",
+          threadId: "group-thread",
+        },
         firstContact: {
           markSeenOnDeliveryAccepted: true,
         },
@@ -415,6 +429,76 @@ describe("hosted execution wake builders", () => {
     });
   });
 
+  it("round-trips admission-time group sender members and rejects them on direct wakes", () => {
+    const linqWake = buildHostedExecutionLinqConversationMessageWake({
+      eventId: "linq-group-stable-sender",
+      linqMessage: buildNonDirectLinqMessage(),
+      occurredAt,
+      phoneLookupKey: "phone_lookup_123",
+      routeAuthority: {
+        channel: "linq",
+        containerMemberId: "member_thread_container_123",
+        threadId: "chat_group_123",
+      },
+      senderMemberId: "member_sender_123",
+      userId: "member_thread_container_123",
+    });
+    const telegramWake = buildHostedExecutionTelegramConversationMessageWake({
+      eventId: "telegram-group-stable-sender",
+      occurredAt,
+      routeAuthority: {
+        channel: "telegram",
+        containerMemberId: "member_thread_container_123",
+        threadId: "thread_group_123",
+      },
+      senderMemberId: "member_sender_123",
+      telegramMessage: {
+        from: "456",
+        messageId: "telegram_message_123",
+        schema: "murph.hosted-telegram-message.v1",
+        text: "hello group",
+        threadId: "thread_group_123",
+        threadIsDirect: false,
+      },
+      userId: "member_thread_container_123",
+    });
+
+    expect(parseHostedExecutionWake(linqWake)).toEqual(linqWake);
+    expect(parseHostedExecutionWake(telegramWake)).toEqual(telegramWake);
+
+    expect(() => buildHostedExecutionLinqConversationMessageWake({
+      eventId: "linq-direct-stable-sender",
+      linqMessage: {
+        ...buildNonDirectLinqMessage(),
+        threadIsDirect: true,
+      },
+      occurredAt,
+      phoneLookupKey: "phone_lookup_123",
+      senderMemberId: "member_sender_123",
+      userId: "member_sender_123",
+    })).toThrow("must not carry a group sender member");
+    expect(() => buildHostedExecutionTelegramConversationMessageWake({
+      eventId: "telegram-direct-stable-sender",
+      occurredAt,
+      senderMemberId: "member_sender_123",
+      telegramMessage: {
+        messageId: "telegram_message_direct_123",
+        schema: "murph.hosted-telegram-message.v1",
+        text: "hello",
+        threadId: "thread_direct_123",
+        threadIsDirect: true,
+      },
+      userId: "member_sender_123",
+    })).toThrow("must not carry group sender identity");
+    expect(() => parseHostedExecutionWake({
+      ...linqWake,
+      message: {
+        ...linqWake.message,
+        senderMemberId: " ",
+      },
+    })).toThrow("senderMemberId must be a non-empty normalized string");
+  });
+
   it("preserves Linq email contact lookup metadata alongside the legacy phone lookup field", () => {
     const linqMessage = {
       chatId: "chat_email_123",
@@ -607,8 +691,9 @@ describe("hosted execution wake builders", () => {
 
     expect(
       buildHostedExecutionDeviceSyncWake({
-        connectionId: null,
+        connectionId: "conn_device_sync_1",
         eventId: "device-sync-1",
+        expectedConnectedAt: "2026-04-25T00:00:00.000Z",
         hint: null,
         occurredAt,
         provider: null,
@@ -616,8 +701,9 @@ describe("hosted execution wake builders", () => {
         userId: "user_123",
       }),
     ).toEqual({
-      connectionId: null,
+      connectionId: "conn_device_sync_1",
       eventId: "device-sync-1",
+      expectedConnectedAt: "2026-04-25T00:00:00.000Z",
       hint: null,
       kind: "device-sync.wake",
       occurredAt,

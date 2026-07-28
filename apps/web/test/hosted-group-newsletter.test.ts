@@ -177,6 +177,25 @@ describe("hosted group newsletter participants", () => {
       prisma,
     });
     expect(prisma.hostedMember.findMany).toHaveBeenCalledTimes(2);
+    expect(prisma.hostedMember.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      select: expect.objectContaining({
+        threadContainer: {
+          select: {
+            owner: {
+              select: expect.any(Object),
+            },
+            participants: {
+              select: { participantMemberId: true },
+              take: 1,
+              where: expect.objectContaining({
+                lastSeenAt: { gte: expect.any(Date) },
+                removedAt: null,
+              }),
+            },
+          },
+        },
+      }),
+    }));
   });
 
   it("returns current address-free data grant ids only for email-authorized active members", async () => {

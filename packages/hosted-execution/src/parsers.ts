@@ -17,6 +17,7 @@ import {
 } from "@murphai/contracts";
 
 import {
+  HOSTED_EXECUTION_ASSISTANT_NOTIFICATION_PROMPT_PROFILES,
   HOSTED_EXECUTION_MEAL_PHOTO_MAX_BYTES,
   HOSTED_EXECUTION_LINQ_GROUP_REACTION_CONTEXT_MAX_CHARS,
   isHostedConversationMessageChannel,
@@ -34,6 +35,7 @@ import type {
   HostedExecutionAssistantNotificationDeliveryDispatchMode,
   HostedExecutionAssistantNotificationDeliverySource,
   HostedExecutionAssistantNotificationFirstContactPolicy,
+  HostedExecutionAssistantNotificationPromptProfile,
   HostedExecutionClinicalRecordsSyncRequestedEvent,
   HostedExecutionAssistantNotificationRequestedPayload,
   HostedExecutionAssistantNotificationResponsePolicy,
@@ -116,6 +118,7 @@ import {
   readHostedExecutionSnapshotHotRef,
 } from "./parsers/cursor.ts";
 import {
+  parseHostedExecutionDeviceSyncExpectedConnectedAt,
   parseHostedExecutionDeviceSyncReason,
   parseHostedExecutionDeviceSyncWakeHint,
 } from "./parsers/device-sync.ts";
@@ -349,6 +352,14 @@ export function parseHostedExecutionWake(value: unknown): HostedExecutionWake {
               ),
             }),
         eventId,
+        ...(record.expectedConnectedAt === undefined
+          ? {}
+          : {
+              expectedConnectedAt: parseHostedExecutionDeviceSyncExpectedConnectedAt(
+                record.expectedConnectedAt,
+                "Hosted execution wake device-sync.wake expectedConnectedAt",
+              ),
+            }),
         ...(record.hint === undefined
           ? {}
           : { hint: parseHostedExecutionDeviceSyncWakeHint(record.hint) }),
@@ -547,9 +558,13 @@ export function parseHostedExecutionConversationMessagePayload(
         record.routeAuthority,
         "Hosted execution conversation.message wake payload routeAuthority",
       );
+      const senderMemberId = parseOptionalHostedExecutionGroupSenderMemberId(
+        record.senderMemberId,
+      );
       return {
         channel,
         ...(routeAuthority === undefined ? {} : { routeAuthority }),
+        ...(senderMemberId === undefined ? {} : { senderMemberId }),
         telegramMessage: parseHostedExecutionTelegramMessage(record.telegramMessage),
       };
     }
@@ -678,6 +693,9 @@ function parseHostedExecutionLinqConversationMessagePayload(
     record.routeAuthority,
     "Hosted execution conversation.message wake payload routeAuthority",
   );
+  const senderMemberId = parseOptionalHostedExecutionGroupSenderMemberId(
+    record.senderMemberId,
+  );
   let groupParticipantAdded: true | undefined;
   if (record.groupParticipantAdded !== undefined) {
     if (record.groupParticipantAdded !== true) {
@@ -738,6 +756,7 @@ function parseHostedExecutionLinqConversationMessagePayload(
             ),
           }),
       ...(routeAuthority === undefined ? {} : { routeAuthority }),
+      ...(senderMemberId === undefined ? {} : { senderMemberId }),
     };
   }
 
@@ -762,7 +781,26 @@ function parseHostedExecutionLinqConversationMessagePayload(
     linqMessage,
     phoneLookupKey,
     ...(routeAuthority === undefined ? {} : { routeAuthority }),
+    ...(senderMemberId === undefined ? {} : { senderMemberId }),
   };
+}
+
+function parseOptionalHostedExecutionGroupSenderMemberId(
+  value: unknown,
+): string | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  const senderMemberId = requireString(
+    value,
+    "Hosted execution conversation.message wake payload senderMemberId",
+  );
+  if (senderMemberId.trim().length === 0 || senderMemberId.trim() !== senderMemberId) {
+    throw new TypeError(
+      "Hosted execution conversation.message wake payload senderMemberId must be a non-empty normalized string.",
+    );
+  }
+  return senderMemberId;
 }
 
 function parseOptionalHostedExecutionExternalThreadRouteAuthority(
@@ -1182,6 +1220,14 @@ export function parseHostedExecutionEvent(value: unknown): HostedExecutionEvent 
                 "Hosted execution device-sync.wake connectionId",
               ),
             }),
+        ...(record.expectedConnectedAt === undefined
+          ? {}
+          : {
+              expectedConnectedAt: parseHostedExecutionDeviceSyncExpectedConnectedAt(
+                record.expectedConnectedAt,
+                "Hosted execution device-sync.wake expectedConnectedAt",
+              ),
+            }),
         ...(record.hint === undefined
           ? {}
           : {
@@ -1296,6 +1342,15 @@ function parseHostedExecutionAssistantNotificationRequestedPayload(
             `${label}.deliveryIdempotencyKey`,
           ),
         }),
+    ...(record.externalThreadRouteAuthority === undefined
+      ? {}
+      : {
+          externalThreadRouteAuthority:
+            parseOptionalHostedExecutionExternalThreadRouteAuthority(
+              record.externalThreadRouteAuthority,
+              `${label}.externalThreadRouteAuthority`,
+            ),
+        }),
     ...(record.firstContact === undefined
       ? {}
       : {
@@ -1307,6 +1362,16 @@ function parseHostedExecutionAssistantNotificationRequestedPayload(
               ),
         }),
     instructions: requireString(record.instructions, `${label}.instructions`),
+    ...(record.notificationPromptProfile === undefined
+      ? {}
+      : {
+          notificationPromptProfile: record.notificationPromptProfile === null
+            ? null
+            : parseHostedExecutionAssistantNotificationPromptProfile(
+                record.notificationPromptProfile,
+                `${label}.notificationPromptProfile`,
+              ),
+        }),
     ...(record.responsePolicy === undefined
       ? {}
       : {
@@ -1319,6 +1384,23 @@ function parseHostedExecutionAssistantNotificationRequestedPayload(
         }),
     route: parseHostedExecutionAssistantNotificationRoute(record.route, `${label}.route`),
   };
+}
+
+function parseHostedExecutionAssistantNotificationPromptProfile(
+  value: unknown,
+  label: string,
+): HostedExecutionAssistantNotificationPromptProfile {
+  const profile = requireString(value, label);
+  if (
+    HOSTED_EXECUTION_ASSISTANT_NOTIFICATION_PROMPT_PROFILES.includes(
+      profile as HostedExecutionAssistantNotificationPromptProfile,
+    )
+  ) {
+    return profile as HostedExecutionAssistantNotificationPromptProfile;
+  }
+  throw new TypeError(
+    `${label} must be one of ${HOSTED_EXECUTION_ASSISTANT_NOTIFICATION_PROMPT_PROFILES.join(", ")}.`,
+  );
 }
 
 function parseHostedExecutionMemberActivationSignupWelcome(

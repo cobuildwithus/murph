@@ -1,4 +1,5 @@
 import type { VariantProps } from "class-variance-authority";
+import type { ReactNode } from "react";
 
 import type { buttonVariants } from "@/src/components/ui/button";
 import type { MurphContactOption } from "@/src/lib/murph-contact-routing";
@@ -13,13 +14,16 @@ const PURCHASE_STATUSES = [
 ] as const;
 
 type HostedUsageTopUpPurchaseStatus = (typeof PURCHASE_STATUSES)[number];
+type HostedUsageTopUpSelectionConflict = "offer" | "sponsorship";
 
 interface HostedUsageTopUpOffer {
   offerCode: string;
   amountLabel: string;
+  estimatedMessages: number;
 }
 
 interface HostedUsageTopUpActivePurchase {
+  cancelAllowed?: true;
   offerCode: string;
   purchaseId: string;
   restartAt?: string;
@@ -36,12 +40,22 @@ interface HostedUsageTopUpReturn {
 
 interface HostedUsageTopUpDialogProps {
   activePurchase?: HostedUsageTopUpActivePurchase | null;
+  buildCheckoutPayload?: (input: {
+    clientRequestKey: string;
+    offerCode: string;
+  }) => Record<string, unknown>;
   checkoutUrl?: string;
   contactOptions?: readonly MurphContactOption[];
   deferTerminalRefreshUntilClose?: boolean;
   initialOpen?: boolean;
   offers: readonly HostedUsageTopUpOffer[];
+  payerMemberId: string;
   purchaseReturn?: HostedUsageTopUpReturn | null;
+  renderPurchaseDetails?: ReactNode;
+  renderSelectionDetails?: (input: {
+    disabled: boolean;
+    selectedOffer: HostedUsageTopUpOffer | null;
+  }) => ReactNode;
   scope?: "family" | "group" | "personal";
   targetLabel?: string;
   triggerClassName?: string;
@@ -50,13 +64,37 @@ interface HostedUsageTopUpDialogProps {
 }
 
 interface HostedUsageTopUpPurchaseResponse {
+  cancelAllowed: boolean;
   purchaseId: string;
   recovered: boolean;
+  requestKeyMatched: boolean;
   restartAt: string | null;
   retryAllowed: boolean;
+  selectionConflict: HostedUsageTopUpSelectionConflict | null;
   status: HostedUsageTopUpPurchaseStatus;
   targetConflict: boolean;
   url: string | null;
+}
+
+interface HostedUsageTopUpRecoveryMissResponse {
+  recoveryMiss: true;
+}
+
+type HostedUsageTopUpCheckoutAttemptResponse =
+  | HostedUsageTopUpPurchaseResponse
+  | HostedUsageTopUpRecoveryMissResponse;
+
+function readCheckoutAttemptResponse(
+  value: unknown,
+): HostedUsageTopUpCheckoutAttemptResponse {
+  if (
+    isRecord(value) &&
+    Object.keys(value).length === 1 &&
+    value.recoveryMiss === true
+  ) {
+    return { recoveryMiss: true };
+  }
+  return readPurchaseResponse(value);
 }
 
 function readPurchaseResponse(value: unknown): HostedUsageTopUpPurchaseResponse {
@@ -66,7 +104,12 @@ function readPurchaseResponse(value: unknown): HostedUsageTopUpPurchaseResponse 
     value.purchaseId.trim().length === 0 ||
     value.purchaseId.length > 200 ||
     !isPurchaseStatus(value.status) ||
+    (value.cancelAllowed !== undefined && value.cancelAllowed !== true) ||
+    (value.selectionConflict !== undefined
+      && !isSelectionConflict(value.selectionConflict)) ||
     (value.recovered !== undefined && value.recovered !== true) ||
+    (value.requestKeyMatched !== undefined &&
+      value.requestKeyMatched !== true) ||
     (value.restartAt !== undefined &&
       (value.status !== "reconciling" ||
         !isCanonicalIsoTimestamp(value.restartAt))) ||
@@ -74,16 +117,25 @@ function readPurchaseResponse(value: unknown): HostedUsageTopUpPurchaseResponse 
     (value.targetConflict !== undefined && value.targetConflict !== true) ||
     (value.url !== undefined &&
       value.url !== null &&
-      typeof value.url !== "string")
+      typeof value.url !== "string") ||
+    (isSelectionConflict(value.selectionConflict) &&
+      (value.retryAllowed === true ||
+        value.targetConflict === true ||
+        typeof value.url === "string"))
   ) {
     throw new Error("Checkout didn’t open. Try again.");
   }
 
   return {
+    cancelAllowed: value.cancelAllowed === true,
     purchaseId: value.purchaseId,
     recovered: value.recovered === true,
+    requestKeyMatched: value.requestKeyMatched === true,
     restartAt: typeof value.restartAt === "string" ? value.restartAt : null,
     retryAllowed: value.retryAllowed === true,
+    selectionConflict: isSelectionConflict(value.selectionConflict)
+      ? value.selectionConflict
+      : null,
     status: value.status,
     targetConflict: value.targetConflict === true,
     url:
@@ -129,10 +181,19 @@ function readStatusContent(input: {
   pollKind: "dormant" | "checking" | "exhausted" | "failed";
   returnedFromSuccessfulCheckout: boolean;
   scope?: "family" | "group" | "personal";
+  selectionConflict?: HostedUsageTopUpSelectionConflict | null;
   status: HostedUsageTopUpPurchaseStatus | null;
   targetLabel?: string;
   targetConflict?: boolean;
 }): { message: string; title: string } {
+  if (input.selectionConflict) {
+    return readSelectionConflictStatusContent({
+      kind: input.selectionConflict,
+      pollKind: input.pollKind,
+      status: input.status,
+    });
+  }
+
   if (input.targetConflict) {
     if (input.pollKind === "failed") {
       return content(
@@ -252,8 +313,83 @@ function readStatusContent(input: {
   }
 }
 
+function readSelectionConflictStatusContent(input: {
+  kind: HostedUsageTopUpSelectionConflict;
+  pollKind: "dormant" | "checking" | "exhausted" | "failed";
+  status: HostedUsageTopUpPurchaseStatus | null;
+}): { message: string; title: string } {
+  if (input.kind === "sponsorship") {
+    const message =
+      "The sponsor details you just entered were not applied. The original purchase is shown below.";
+    switch (input.status) {
+      case "fulfilled":
+        return content("Original sponsorship completed", message);
+      case "expired":
+        return content("Original sponsorship canceled", message);
+      case "payment_failed":
+        return content("Original sponsorship not completed", message);
+      case "checkout_open":
+      case "payment_pending":
+      case "reconciling":
+      case null:
+        return content("Original sponsorship found", message);
+    }
+  }
+
+  if (input.pollKind === "failed") {
+    return content(
+      "Couldn't check the earlier amount",
+      "The amount you just selected was not started. We couldn't check the earlier purchase right now. Try again.",
+    );
+  }
+
+  switch (input.status) {
+    case "checkout_open":
+      return content(
+        "Earlier amount already in progress",
+        "The amount you just selected was not started. Cancel the earlier checkout before choosing another amount.",
+      );
+    case "reconciling":
+      return content(
+        "Earlier amount still starting",
+        "The amount you just selected was not started. The earlier purchase is still being prepared.",
+      );
+    case "payment_pending":
+      return content(
+        "Earlier payment being confirmed",
+        "The amount you just selected was not started. The earlier payment is still being confirmed.",
+      );
+    case "fulfilled":
+      return content(
+        "Earlier amount added",
+        "The amount you just selected was not started. The earlier purchase completed and its usage was added.",
+      );
+    case "expired":
+      return content(
+        "Earlier checkout canceled",
+        "The amount you just selected was not started. The earlier checkout was canceled.",
+      );
+    case "payment_failed":
+      return content(
+        "Earlier payment not completed",
+        "The amount you just selected was not started. The earlier payment did not complete.",
+      );
+    case null:
+      return content(
+        "Checking the earlier amount",
+        "The amount you just selected was not started. We're checking the earlier purchase.",
+      );
+  }
+}
+
 function content(title: string, message: string) {
   return { message, title };
+}
+
+function isSelectionConflict(
+  value: unknown,
+): value is HostedUsageTopUpSelectionConflict {
+  return value === "offer" || value === "sponsorship";
 }
 
 function shouldPollPurchaseStatus(
@@ -296,6 +432,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 export {
   createClientRequestKey,
+  readCheckoutAttemptResponse,
   readCheckoutUrl,
   readOptionalCheckoutUrl,
   readOptionalRestartAt,
@@ -306,6 +443,7 @@ export {
 };
 export type {
   HostedUsageTopUpActivePurchase,
+  HostedUsageTopUpCheckoutAttemptResponse,
   HostedUsageTopUpDialogProps,
   HostedUsageTopUpOffer,
   HostedUsageTopUpPurchaseResponse,

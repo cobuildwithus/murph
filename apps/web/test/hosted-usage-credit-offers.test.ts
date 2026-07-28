@@ -1,13 +1,17 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  estimateHostedUsageCreditMessages,
+  filterHostedNonGroupUsageCreditOfferCodes,
   getHostedUsageCreditOfferDefinition,
+  HOSTED_GROUP_SPONSORSHIP_OFFER_CODES,
   HOSTED_USAGE_CREDIT_OFFER_CODES,
+  parseHostedGroupSponsorshipOfferCode,
   parseHostedUsageCreditOfferCode,
 } from "@/src/lib/hosted-onboarding/usage-credit-offers";
 
 describe("hosted usage-credit offer catalog", () => {
-  it("freezes the exact $5, $10, and $25 one-time offers", () => {
+  it("freezes the historical catalog while giving groups a distinct $20 offer", () => {
     expect(HOSTED_USAGE_CREDIT_OFFER_CODES.map((code) =>
       getHostedUsageCreditOfferDefinition(code)
     )).toEqual([
@@ -24,6 +28,12 @@ describe("hosted usage-credit offer catalog", () => {
         grantUsdMicros: 10_000_000n,
       }),
       expect.objectContaining({
+        cashAmountMinor: 2_000,
+        cashCurrency: "usd",
+        code: "usage_20_usd",
+        grantUsdMicros: 20_000_000n,
+      }),
+      expect.objectContaining({
         cashAmountMinor: 2_500,
         cashCurrency: "usd",
         code: "usage_25_usd",
@@ -32,10 +42,35 @@ describe("hosted usage-credit offer catalog", () => {
     ]);
   });
 
+  it("quotes every offer's message estimate from one rate", () => {
+    expect(
+      HOSTED_USAGE_CREDIT_OFFER_CODES.map((code) =>
+        estimateHostedUsageCreditMessages(
+          getHostedUsageCreditOfferDefinition(code).cashAmountMinor,
+        )
+      ),
+    ).toEqual([100, 200, 400, 500]);
+  });
+
   it("accepts only exact internal offer codes", () => {
     expect(parseHostedUsageCreditOfferCode("usage_10_usd")).toBe("usage_10_usd");
     expect(parseHostedUsageCreditOfferCode(" usage_10_usd ")).toBeNull();
     expect(parseHostedUsageCreditOfferCode("usage_100_usd")).toBeNull();
     expect(parseHostedUsageCreditOfferCode(10)).toBeNull();
+  });
+
+  it("keeps group and non-group offer surfaces disjoint", () => {
+    expect(HOSTED_GROUP_SPONSORSHIP_OFFER_CODES).toEqual([
+      "usage_5_usd",
+      "usage_10_usd",
+      "usage_20_usd",
+    ]);
+    expect(parseHostedGroupSponsorshipOfferCode("usage_20_usd")).toBe(
+      "usage_20_usd",
+    );
+    expect(parseHostedGroupSponsorshipOfferCode("usage_25_usd")).toBeNull();
+    expect(filterHostedNonGroupUsageCreditOfferCodes(
+      HOSTED_USAGE_CREDIT_OFFER_CODES,
+    )).toEqual(["usage_5_usd", "usage_10_usd", "usage_25_usd"]);
   });
 });

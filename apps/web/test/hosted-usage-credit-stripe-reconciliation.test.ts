@@ -82,26 +82,27 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
   requireHostedStripeApiMode: mocks.stripeApiMode,
 }));
 
-vi.mock("@/src/lib/hosted-onboarding/usage-credit-purchase-stripe", () => ({
-  decryptHostedUsageCreditPurchaseStripeField: mocks.decryptStripeField,
-  encryptHostedUsageCreditPurchaseStripeField: mocks.encryptStripeField,
-  HOSTED_USAGE_CREDIT_PURCHASE_STRIPE_PRIVATE_FIELDS: {
-    chargeId: "hosted_usage_credit_purchase.stripe_charge_id",
-    checkoutSessionId: "hosted_usage_credit_purchase.stripe_checkout_session_id",
-    checkoutUrl: "hosted_usage_credit_purchase.stripe_checkout_url",
-    customerId: "hosted_usage_credit_purchase.stripe_customer_id",
-    paymentIntentId: "hosted_usage_credit_purchase.stripe_payment_intent_id",
-    priceId: "hosted_usage_credit_purchase.stripe_price_id",
+vi.mock(
+  "@/src/lib/hosted-onboarding/usage-credit-purchase-stripe",
+  async (importOriginal) => {
+    const original = await importOriginal<typeof import(
+      "../src/lib/hosted-onboarding/usage-credit-purchase-stripe"
+    )>();
+    return {
+      ...original,
+      decryptHostedUsageCreditPurchaseStripeField: mocks.decryptStripeField,
+      encryptHostedUsageCreditPurchaseStripeField: mocks.encryptStripeField,
+      requireHostedUsageCreditPurchasePayerMemberId: (purchase: {
+        payerMemberId: string | null;
+      }) => {
+        if (!purchase.payerMemberId) {
+          throw new Error("payer detached");
+        }
+        return purchase.payerMemberId;
+      },
+    };
   },
-  requireHostedUsageCreditPurchasePayerMemberId: (purchase: {
-    payerMemberId: string | null;
-  }) => {
-    if (!purchase.payerMemberId) {
-      throw new Error("payer detached");
-    }
-    return purchase.payerMemberId;
-  },
-}));
+);
 
 import {
   HOSTED_USAGE_CREDIT_STRIPE_PREPARATION_BUDGET,
@@ -348,6 +349,209 @@ describe("hosted usage-credit Stripe reconciliation", () => {
         "stripe-checkout-session:cs_usage_123",
       stripePaymentIntentLookupKey: "stripe-billing-event:pi_usage_123",
     }));
+  });
+
+  it.each([
+    "hosted-usage-credit-checkout-v2",
+    "hosted-usage-credit-checkout-v3",
+  ])("grants once from an owned %s saved-card PaymentIntent without Checkout", async (
+    policyVersion,
+  ) => {
+    const harness = createUsageCreditStripePrismaHarness({
+      checkoutRequestPolicyVersion: policyVersion,
+      status: HostedUsageCreditPurchaseStatus.payment_pending,
+      stripeChargeLookupKey: "stripe-billing-event:ch_usage_123",
+      stripeCheckoutSessionIdEncrypted: null,
+      stripeCheckoutSessionLookupKey: null,
+      stripePaymentIntentLookupKey: "stripe-billing-event:pi_usage_123",
+    });
+    const paymentIntent = makePaymentIntent({
+      policyVersion,
+      purpose: "saved_card",
+    });
+    mocks.stripe.paymentIntents.retrieve.mockResolvedValue(paymentIntent);
+
+    await expect(reconcileHostedUsageCreditStripeEvent({
+      event: makeDirectPaymentEvent("payment_intent.succeeded", paymentIntent),
+      prisma: harness.client,
+    })).resolves.toEqual({
+      beneficiaryMemberId: "member_beneficiary",
+      granted: true,
+      handled: true,
+      purchaseId: "hucp_purchase_123",
+      wakeRequired: true,
+    });
+
+    expect(mocks.stripe.checkout.sessions.retrieve).not.toHaveBeenCalled();
+    expect(mocks.stripe.checkout.sessions.list).not.toHaveBeenCalled();
+    expect(mocks.grantUsageCredit).toHaveBeenCalledOnce();
+    expect(harness.purchase).toEqual(expect.objectContaining({
+      stripeChargeLookupKey: "stripe-billing-event:ch_usage_123",
+      stripeCheckoutSessionLookupKey: null,
+      stripePaymentIntentLookupKey: "stripe-billing-event:pi_usage_123",
+    }));
+  });
+
+  it("rejects v2 saved-card proof for a personal purchase", async () => {
+    const personalSuccessUrl =
+      "https://murph.example/settings?usageCheckout=success&usagePurchase=hucp_purchase_123#subscription";
+    const harness = createUsageCreditStripePrismaHarness({
+      beneficiaryMemberId: "member_payer",
+      checkoutCancelUrl:
+        "https://murph.example/settings?usageCheckout=cancel&usagePurchase=hucp_purchase_123#subscription",
+      checkoutRequestPolicyVersion: "hosted-usage-credit-checkout-v2",
+      checkoutSuccessUrl: personalSuccessUrl,
+      status: HostedUsageCreditPurchaseStatus.payment_pending,
+      stripeChargeLookupKey: "stripe-billing-event:ch_usage_123",
+      stripeCheckoutSessionIdEncrypted: null,
+      stripeCheckoutSessionLookupKey: null,
+      stripePaymentIntentLookupKey: "stripe-billing-event:pi_usage_123",
+    });
+    const paymentIntent = makePaymentIntent({
+      policyVersion: "hosted-usage-credit-checkout-v2",
+      purpose: "saved_card",
+    });
+    mocks.stripe.paymentIntents.retrieve.mockResolvedValue(paymentIntent);
+
+    await expect(reconcileHostedUsageCreditStripeEvent({
+      event: makeDirectPaymentEvent("payment_intent.succeeded", paymentIntent),
+      prisma: harness.client,
+    })).rejects.toThrow("Usage-credit payment policy did not match.");
+
+    expect(mocks.grantUsageCredit).not.toHaveBeenCalled();
+  });
+
+  it("keeps an owned processing saved-card PaymentIntent pending", async () => {
+    const harness = createUsageCreditStripePrismaHarness({
+      checkoutRequestPolicyVersion: "hosted-usage-credit-checkout-v2",
+      status: HostedUsageCreditPurchaseStatus.payment_pending,
+      stripeCheckoutSessionIdEncrypted: null,
+      stripeCheckoutSessionLookupKey: null,
+      stripePaymentIntentLookupKey: "stripe-billing-event:pi_usage_123",
+    });
+    const paymentIntent = makePaymentIntent({
+      amountReceived: 0,
+      latestCharge: null,
+      purpose: "saved_card",
+      status: "processing",
+    });
+    mocks.stripe.paymentIntents.retrieve.mockResolvedValue(paymentIntent);
+
+    await expect(reconcileHostedUsageCreditStripeEvent({
+      event: makeDirectPaymentEvent("payment_intent.processing", paymentIntent),
+      prisma: harness.client,
+    })).resolves.toMatchObject({
+      granted: false,
+      handled: true,
+      wakeRequired: false,
+    });
+
+    expect(mocks.grantUsageCredit).not.toHaveBeenCalled();
+    expect(harness.purchase).toEqual(expect.objectContaining({
+      status: HostedUsageCreditPurchaseStatus.payment_pending,
+      terminalAt: null,
+    }));
+  });
+
+  it("keeps an unbound saved-card success retryable instead of consuming it", async () => {
+    const harness = createUsageCreditStripePrismaHarness({
+      checkoutRequestPolicyVersion: "hosted-usage-credit-checkout-v2",
+      status: HostedUsageCreditPurchaseStatus.created,
+      stripeChargeLookupKey: null,
+      stripeCheckoutSessionIdEncrypted: null,
+      stripeCheckoutSessionLookupKey: null,
+      stripePaymentIntentLookupKey: null,
+    });
+    const paymentIntent = makePaymentIntent({ purpose: "saved_card" });
+
+    const result = reconcileHostedUsageCreditStripeEvent({
+      event: makeDirectPaymentEvent("payment_intent.succeeded", paymentIntent),
+      prisma: harness.client,
+    });
+    await expect(result).rejects.toSatisfy(
+      isHostedUsageCreditStripeRetryableError,
+    );
+
+    expect(mocks.stripe.paymentIntents.retrieve).not.toHaveBeenCalled();
+    expect(mocks.grantUsageCredit).not.toHaveBeenCalled();
+    expect(harness.purchase.status).toBe(
+      HostedUsageCreditPurchaseStatus.created,
+    );
+  });
+
+  it.each([
+    ["payment_intent.payment_failed", "requires_payment_method"],
+    ["payment_intent.canceled", "canceled"],
+  ] as const)(
+    "keeps an owned saved-card PaymentIntent pending after %s",
+    async (eventType, status) => {
+      const harness = createUsageCreditStripePrismaHarness({
+        checkoutRequestPolicyVersion: "hosted-usage-credit-checkout-v2",
+        status: HostedUsageCreditPurchaseStatus.payment_pending,
+        stripeCheckoutSessionIdEncrypted: null,
+        stripeCheckoutSessionLookupKey: null,
+        stripePaymentIntentLookupKey: "stripe-billing-event:pi_usage_123",
+      });
+      const paymentIntent = makePaymentIntent({
+        amountReceived: 0,
+        latestCharge: null,
+        purpose: "saved_card",
+        status,
+      });
+      mocks.stripe.paymentIntents.retrieve.mockResolvedValue(paymentIntent);
+
+      await expect(reconcileHostedUsageCreditStripeEvent({
+        event: makeDirectPaymentEvent(eventType, paymentIntent),
+        prisma: harness.client,
+      })).resolves.toMatchObject({
+        granted: false,
+        handled: true,
+        wakeRequired: false,
+      });
+
+      expect(mocks.stripe.paymentIntents.retrieve).toHaveBeenCalledWith(
+        "pi_usage_123",
+        { expand: ["latest_charge"] },
+        BOUNDED_STRIPE_READ_OPTIONS,
+      );
+      expect(mocks.grantUsageCredit).not.toHaveBeenCalled();
+      expect(harness.purchase).toEqual(expect.objectContaining({
+        status: HostedUsageCreditPurchaseStatus.payment_pending,
+        terminalAt: null,
+      }));
+    },
+  );
+
+  it("acknowledges a terminal saved-card event after Checkout fallback owns the purchase", async () => {
+    const harness = createUsageCreditStripePrismaHarness({
+      checkoutRequestPolicyVersion: "hosted-usage-credit-checkout-v2",
+      status: HostedUsageCreditPurchaseStatus.checkout_open,
+      stripePaymentIntentLookupKey:
+        "stripe-billing-event:pi_checkout_replacement",
+    });
+    const paymentIntent = makePaymentIntent({
+      amountReceived: 0,
+      latestCharge: null,
+      purpose: "saved_card",
+      status: "canceled",
+    });
+
+    await expect(reconcileHostedUsageCreditStripeEvent({
+      event: makeDirectPaymentEvent("payment_intent.canceled", paymentIntent),
+      prisma: harness.client,
+    })).resolves.toEqual({
+      beneficiaryMemberId: "member_beneficiary",
+      granted: false,
+      handled: true,
+      purchaseId: "hucp_purchase_123",
+      wakeRequired: false,
+    });
+
+    expect(mocks.stripe.paymentIntents.retrieve).not.toHaveBeenCalled();
+    expect(mocks.grantUsageCredit).not.toHaveBeenCalled();
+    expect(harness.purchase.status).toBe(
+      HostedUsageCreditPurchaseStatus.checkout_open,
+    );
   });
 
   it("keeps completed but unpaid Checkout pending without granting credit", async () => {
@@ -664,6 +868,79 @@ describe("hosted usage-credit Stripe reconciliation", () => {
     ).toBe(HOSTED_USAGE_CREDIT_STRIPE_PREPARATION_BUDGET.kmsMaxOperations);
   });
 
+  it("reconciles a saved-card refund without requiring Checkout", async () => {
+    const harness = createUsageCreditStripePrismaHarness({
+      checkoutRequestPolicyVersion: "hosted-usage-credit-checkout-v2",
+      status: HostedUsageCreditPurchaseStatus.fulfilled,
+      stripeChargeLookupKey: "stripe-billing-event:ch_usage_123",
+      stripeCheckoutSessionIdEncrypted: null,
+      stripeCheckoutSessionLookupKey: null,
+      stripePaymentIntentLookupKey: "stripe-billing-event:pi_usage_123",
+    });
+    mocks.stripe.paymentIntents.retrieve.mockResolvedValue(
+      makePaymentIntent({ purpose: "saved_card" }),
+    );
+    mocks.stripe.charges.retrieve.mockResolvedValue(
+      makeCharge({ amountRefunded: 250 }),
+    );
+    mocks.stripe.refunds.list.mockResolvedValue(
+      makeRefundList([makeRefund()]),
+    );
+    mockExistingUsageCreditGrant();
+
+    await expect(reconcileHostedUsageCreditStripeEvent({
+      event: makeRefundEvent(),
+      prisma: harness.client,
+    })).resolves.toMatchObject({
+      granted: false,
+      handled: true,
+      wakeRequired: true,
+    });
+
+    expect(mocks.stripe.checkout.sessions.list).not.toHaveBeenCalled();
+    expect(mocks.stripe.checkout.sessions.retrieve).not.toHaveBeenCalled();
+    expect(mocks.reconcileRefundNetReversal).toHaveBeenCalled();
+  });
+
+  it("reconciles a direct refund after the payer account was detached", async () => {
+    const harness = createUsageCreditStripePrismaHarness({
+      checkoutRequestPolicyVersion: "hosted-usage-credit-checkout-v2",
+      payerMemberId: null,
+      status: HostedUsageCreditPurchaseStatus.fulfilled,
+      stripeChargeLookupKey: "stripe-billing-event:ch_usage_123",
+      stripeCheckoutSessionIdEncrypted: null,
+      stripeCheckoutSessionLookupKey: null,
+      stripePaymentIntentLookupKey: "stripe-billing-event:pi_usage_123",
+      terminalAt: new Date("2026-07-16T03:20:00.000Z"),
+    });
+    mocks.stripe.paymentIntents.retrieve.mockResolvedValue(
+      makePaymentIntent({ purpose: "saved_card" }),
+    );
+    mocks.stripe.charges.retrieve.mockResolvedValue(
+      makeCharge({ amountRefunded: 250 }),
+    );
+    mocks.stripe.refunds.list.mockResolvedValue(
+      makeRefundList([makeRefund()]),
+    );
+    mockExistingUsageCreditGrant();
+
+    await expect(reconcileHostedUsageCreditStripeEvent({
+      event: makeRefundEvent(),
+      prisma: harness.client,
+    })).resolves.toMatchObject({
+      beneficiaryMemberId: "member_beneficiary",
+      handled: true,
+      purchaseId: "hucp_purchase_123",
+    });
+
+    expect(mocks.stripe.checkout.sessions.list).not.toHaveBeenCalled();
+    expect(mocks.stripe.checkout.sessions.retrieve).not.toHaveBeenCalled();
+    expect(mocks.decryptStripeField).not.toHaveBeenCalled();
+    expect(mocks.encryptStripeField).not.toHaveBeenCalled();
+    expect(mocks.reconcileRefundNetReversal).toHaveBeenCalled();
+    expect(harness.purchase.payerMemberId).toBeNull();
+  });
+
   it("reconciles a terminal refund after the payer account was detached", async () => {
     const harness = createUsageCreditStripePrismaHarness({
       payerMemberId: null,
@@ -726,6 +1003,42 @@ describe("hosted usage-credit Stripe reconciliation", () => {
     expect(mocks.reconcileDisputeNetReversal).toHaveBeenCalled();
     expect(mocks.decryptStripeField).not.toHaveBeenCalled();
     expect(mocks.encryptStripeField).not.toHaveBeenCalled();
+    expect(harness.purchase.payerMemberId).toBeNull();
+  });
+
+  it("reconciles a direct dispute after the payer account was detached", async () => {
+    const harness = createUsageCreditStripePrismaHarness({
+      checkoutRequestPolicyVersion: "hosted-usage-credit-checkout-v2",
+      payerMemberId: null,
+      status: HostedUsageCreditPurchaseStatus.fulfilled,
+      stripeChargeLookupKey: "stripe-billing-event:ch_usage_123",
+      stripeCheckoutSessionIdEncrypted: null,
+      stripeCheckoutSessionLookupKey: null,
+      stripePaymentIntentLookupKey: "stripe-billing-event:pi_usage_123",
+      terminalAt: new Date("2026-07-16T03:20:00.000Z"),
+    });
+    mocks.stripe.paymentIntents.retrieve.mockResolvedValue(
+      makePaymentIntent({ purpose: "saved_card" }),
+    );
+    mocks.stripe.disputes.list.mockResolvedValue(
+      makeDisputeList([makeDispute({ withdrawnAmount: 250 })]),
+    );
+    mockExistingUsageCreditGrant();
+
+    await expect(reconcileHostedUsageCreditStripeEvent({
+      event: makeDisputeEvent("charge.dispute.funds_withdrawn"),
+      prisma: harness.client,
+    })).resolves.toMatchObject({
+      beneficiaryMemberId: "member_beneficiary",
+      handled: true,
+      purchaseId: "hucp_purchase_123",
+    });
+
+    expect(mocks.stripe.checkout.sessions.list).not.toHaveBeenCalled();
+    expect(mocks.stripe.checkout.sessions.retrieve).not.toHaveBeenCalled();
+    expect(mocks.decryptStripeField).not.toHaveBeenCalled();
+    expect(mocks.encryptStripeField).not.toHaveBeenCalled();
+    expect(mocks.reconcileDisputeNetReversal).toHaveBeenCalled();
     expect(harness.purchase.payerMemberId).toBeNull();
   });
 
@@ -1407,6 +1720,10 @@ function createUsageCreditStripePrismaHarness(
 
 function makeUsageCreditPurchase(
   overrides?: Partial<{
+    beneficiaryMemberId: string;
+    checkoutCancelUrl: string;
+    checkoutRequestPolicyVersion: string;
+    checkoutSuccessUrl: string;
     payerMemberId: string | null;
     status: HostedUsageCreditPurchaseStatus;
     stripeChargeLookupKey: string | null;
@@ -1416,14 +1733,24 @@ function makeUsageCreditPurchase(
     terminalAt: Date | null;
   }>,
 ) {
+  const isVersionTwo =
+    overrides?.checkoutRequestPolicyVersion ===
+      "hosted-usage-credit-checkout-v2";
   return {
-    beneficiaryMemberId: "member_beneficiary",
+    beneficiaryMemberId: overrides?.beneficiaryMemberId ??
+      "member_beneficiary",
     cashAmountMinor: 500,
     cashCurrency: "usd",
-    checkoutCancelUrl: "https://murph.example/settings?usageCredit=cancel",
+    checkoutCancelUrl: overrides?.checkoutCancelUrl ?? (isVersionTwo
+      ? "https://murph.example/groups/fund/group_join_code_1234?usageCredit=cancel"
+      : "https://murph.example/settings?usageCredit=cancel"),
     checkoutExpiresAt: new Date("2026-07-16T04:50:00.456Z"),
-    checkoutRequestPolicyVersion: "hosted-usage-credit-checkout-v1",
-    checkoutSuccessUrl: "https://murph.example/settings?usageCredit=success",
+    checkoutRequestPolicyVersion:
+      overrides?.checkoutRequestPolicyVersion ??
+      "hosted-usage-credit-checkout-v1",
+    checkoutSuccessUrl: overrides?.checkoutSuccessUrl ?? (isVersionTwo
+      ? "https://murph.example/groups/fund/group_join_code_1234?usageCredit=success"
+      : "https://murph.example/settings?usageCredit=success"),
     createdAt: new Date("2026-07-16T03:20:00.000Z"),
     grantUsdMicros: 5_000_000n,
     id: "hucp_purchase_123",
@@ -1465,6 +1792,30 @@ function makeCheckoutEvent(
     data: {
       object: makeCheckoutSession(),
     },
+    id: `evt_${type.replaceAll(".", "_")}`,
+    livemode: false,
+    object: "event",
+    pending_webhooks: 0,
+    request: {
+      id: null,
+      idempotency_key: null,
+    },
+    type,
+  } as Stripe.Event;
+}
+
+function makeDirectPaymentEvent(
+  type:
+    | "payment_intent.canceled"
+    | "payment_intent.payment_failed"
+    | "payment_intent.processing"
+    | "payment_intent.succeeded",
+  paymentIntent: Stripe.PaymentIntent,
+): Stripe.Event {
+  return {
+    api_version: "2025-03-31.basil",
+    created: 1_784_172_000,
+    data: { object: paymentIntent },
     id: `evt_${type.replaceAll(".", "_")}`,
     livemode: false,
     object: "event",
@@ -1612,22 +1963,30 @@ function makeCheckoutLineItems(overrides?: {
 }
 
 function makePaymentIntent(overrides?: {
+  amountReceived?: number;
+  latestCharge?: Stripe.Charge | string | null;
+  policyVersion?: string;
+  purpose?: "checkout" | "saved_card";
   status?: Stripe.PaymentIntent.Status;
 }): Stripe.PaymentIntent {
   return {
     amount: 500,
-    amount_received: 500,
+    amount_received: overrides?.amountReceived ?? 500,
     created: 1_784_171_900,
     currency: "usd",
     customer: "cus_usage_123",
     id: "pi_usage_123",
-    latest_charge: {
-      created: 1_784_172_000,
-      id: "ch_usage_123",
-      object: "charge",
-    } as Stripe.Charge,
+    latest_charge: overrides?.latestCharge === undefined
+      ? {
+          created: 1_784_172_000,
+          id: "ch_usage_123",
+          object: "charge",
+        } as Stripe.Charge
+      : overrides.latestCharge,
     livemode: false,
-    metadata: makeUsageCreditMetadata(),
+    metadata: overrides?.purpose === "saved_card"
+      ? makeSavedCardUsageCreditMetadata(overrides.policyVersion)
+      : makeUsageCreditMetadata(),
     object: "payment_intent",
     status: overrides?.status ?? "succeeded",
   } as Stripe.PaymentIntent;
@@ -1790,5 +2149,15 @@ function makeUsageCreditMetadata(): Record<string, string> {
     policyVersion: "hosted-usage-credit-checkout-v1",
     purchaseId: "hucp_purchase_123",
     purpose: "hosted_usage_credit",
+  };
+}
+
+function makeSavedCardUsageCreditMetadata(
+  policyVersion = "hosted-usage-credit-checkout-v2",
+): Record<string, string> {
+  return {
+    policyVersion,
+    purchaseId: "hucp_purchase_123",
+    purpose: "hosted_usage_credit_saved_card",
   };
 }

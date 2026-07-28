@@ -6,6 +6,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV,
 } from '@murphai/hosted-execution/env'
+import {
+  MURPH_GROUP_ROOM_MODEL_MAINTENANCE_PERMISSION_PROFILE,
+} from '@murphai/hosted-execution/assistant-permissions'
 
 const providerMocks = vi.hoisted(() => ({
   executeCodexAssistantTurnAttemptFromInput: vi.fn(),
@@ -114,7 +117,14 @@ import type {
   AssistantCodexTurnExecutionPlan,
   AssistantRouteTurnPlan,
 } from '../src/assistant/codex-turn/planning.ts'
-import { resolveMurphDynamicTools } from '../src/assistant-codex/dynamic-tools.ts'
+import {
+  MURPH_GROUP_ROOM_MODEL_TOOL,
+  resolveMurphDynamicTools,
+} from '../src/assistant-codex/dynamic-tools.ts'
+import { MURPH_GENERATE_SONG_TOOL } from '../src/assistant-codex/dynamic-tools/generate-song.ts'
+import {
+  MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_AUTOMATION_ID,
+} from '../src/assistant/managed-automations.ts'
 import type { AssistantHostedToolContext } from '../src/assistant/hosted-tool-context.ts'
 import type {
   AssistantProviderTurnAttemptResult,
@@ -301,6 +311,23 @@ function createSharedPlan(): AssistantTurnSharedPlan {
     operatorAuthority: 'direct-operator',
     persistUserPromptOnFailure: false,
     requestedWorkingDirectory: '/work',
+  }
+}
+
+function createGroupEmailSharedPlan(): AssistantTurnSharedPlan {
+  const plan = createSharedPlan()
+  return {
+    ...plan,
+    conversationPolicy: {
+      ...plan.conversationPolicy,
+      audience: {
+        ...plan.conversationPolicy.audience,
+        channel: 'email',
+        effectiveThreadIsDirect: false,
+        threadId: 'group-email-thread',
+        threadIsDirect: false,
+      },
+    },
   }
 }
 
@@ -551,7 +578,6 @@ describe('Codex model catalog', () => {
         source: 'system' as const,
       })),
     }
-
     providerMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
       supportedUserMessageContentTypes: ['text'],
       supportsReasoningEffort: true,
@@ -655,6 +681,7 @@ describe('Codex model catalog', () => {
     )
     expect(providerInput).toMatchObject({
       dynamicTools: [],
+      groupConversation: false,
       environments: [],
       generatedImageUploader: null,
       hostedToolContext: null,
@@ -667,6 +694,340 @@ describe('Codex model catalog', () => {
     })
     expect(unsafeDynamicTools).not.toEqual([])
     expect(unsafeProgressDelivery.send).not.toHaveBeenCalled()
+  })
+
+  it('keeps only song generation while denying native creative-notification capabilities', async () => {
+    const route = createRoute()
+    const session = createAssistantSession({
+      providerOptions: route.providerOptions,
+    })
+    const input = {
+      codexConfigOverrides: [
+        'features.shell_tool=true',
+        'features.apps=true',
+      ],
+      prompt: 'Generate one sponsor song from untrusted creative material.',
+      vault: '/vaults/test',
+    } satisfies Parameters<typeof executeCodexTurnWithRecovery>[0]['input']
+    const unsafeProgressDelivery = {
+      send: vi.fn(async () => ({
+        kind: 'sent' as const,
+        source: 'system' as const,
+      })),
+    }
+    const hostedProviderFetch = vi.fn<typeof fetch>(async () =>
+      new Response(null, { status: 204 })
+    )
+
+    providerMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportedUserMessageContentTypes: ['text'],
+      supportsReasoningEffort: true,
+    })
+    providerMocks.executeCodexAssistantTurnAttemptFromInput.mockResolvedValue(
+      createProviderAttemptResult(),
+    )
+    providerTurnRunnerMocks.buildCodexTurnExecutionPlan.mockResolvedValue({
+      activeTurnSteering: null,
+      executionContext: {
+        hosted: {
+          generatedImageUploader: {
+            uploadGeneratedImage: vi.fn(),
+          },
+          generatedImageUploaderRequired: true,
+          materializeWorkspaceArtifacts: vi.fn(),
+          memberId: 'member-creative-notification',
+          providerFetch: hostedProviderFetch,
+          publicInternetFetch: fetch,
+          userEnvKeys: [],
+        },
+      },
+      hostedToolContext: {
+        automationTool: { request: vi.fn() },
+        computerToolsAvailable: true,
+        currentHostedDeliveryContext: () => null,
+        currentHostedMailboxItemIds: () => [],
+        sendVaultFile: vi.fn(),
+        vaultFileSendAvailable: true,
+      },
+      input,
+      profile: {
+        promptProfile: 'creative-notification',
+        toolProfile: 'provider-turn',
+        threadScope: 'isolated-thread',
+      },
+      promptTimeContext: {
+        currentLocalDate: '2026-07-20',
+        currentTimeZone: 'UTC',
+      },
+      route,
+      sharedPlan: createSharedPlan(),
+      progressDelivery: unsafeProgressDelivery,
+      turnId: 'turn-creative-notification',
+    } satisfies AssistantCodexTurnExecutionPlan)
+    providerTurnRunnerMocks.buildCodexTurnAttemptPlan.mockResolvedValue({
+      attemptCount: 1,
+      route,
+      routePlan: {
+        assistantContractFingerprint:
+          'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+        assistantCliContract: null,
+        cliEnv: {},
+        codexContinuation: {
+          kind: 'explicit-structured-history',
+        } satisfies AssistantCodexContinuation,
+        developerInstructions: null,
+        diagnosticsPolicy: {
+          environment: 'hosted',
+          privateIssueCaptureEnabled: false,
+          surface: 'linq',
+        },
+        dynamicTools: [MURPH_GENERATE_SONG_TOOL],
+        environments: [{ PRIVATE_ENVIRONMENT: 'must-not-pass' }],
+        onboardingGuidanceInjected: false,
+        planningDiagnostics: createRoutePlanningDiagnostics(),
+        promptCacheMetadata: null,
+        resume: null,
+        sessionContext: undefined,
+        systemPrompt: 'Creative notification system prompt.',
+        turnContextPrompt: null,
+        voiceMemoDeliveryChannel: 'linq',
+        workingDirectory: '/work',
+      } satisfies AssistantRouteTurnPlan,
+      session,
+    } satisfies AssistantCodexAttemptPlan)
+
+    const outcome = await executeCodexTurnWithRecovery({
+      input,
+      plan: createSharedPlan(),
+      resolvedSession: session,
+      route,
+      turnCreatedAt: '2026-07-20T00:00:00.000Z',
+      turnId: 'turn-creative-notification',
+    })
+
+    expect(outcome.kind).toBe('succeeded')
+    const providerInput =
+      providerMocks.executeCodexAssistantTurnAttemptFromInput.mock.calls[0]?.[0]
+    expect(providerInput?.providerConfig).toMatchObject({
+      approvalPolicy: 'never',
+      sandbox: 'read-only',
+    })
+    expect(providerInput?.codexConfigOverrides).toEqual(
+      expect.arrayContaining([
+        'features.shell_tool=false',
+        'web_search="disabled"',
+        'features.apps=false',
+        'features.browser_use=false',
+        'features.plugins=false',
+        'features.multi_agent=false',
+      ]),
+    )
+    expect(providerInput).toMatchObject({
+      dynamicTools: [MURPH_GENERATE_SONG_TOOL],
+      environments: [],
+      generatedImageUploader: null,
+      hostedToolContext: null,
+      materializeWorkspaceArtifacts: null,
+      processLifetime: 'one-shot',
+      progressDelivery: null,
+      providerFetch: hostedProviderFetch,
+      publicInternetFetch: null,
+      requireGeneratedImageUploader: false,
+    })
+    expect(unsafeProgressDelivery.send).not.toHaveBeenCalled()
+  })
+
+  it('runs immutable room-model maintenance as a one-shot tool-only permission turn', async () => {
+    const route = createRoute()
+    const session = createAssistantSession({
+      providerOptions: route.providerOptions,
+    })
+    const input = {
+      maintenanceProfile: 'group-room-model' as const,
+      prompt: 'Refresh the group room model.',
+      scheduledInvocationAuthority: {
+        automationId: MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_AUTOMATION_ID,
+        occurrenceAt: '2026-07-25T08:00:00.000Z',
+      },
+      vault: '/vaults/group',
+    }
+
+    providerMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportedUserMessageContentTypes: ['text'],
+      supportsReasoningEffort: true,
+    })
+    providerMocks.executeCodexAssistantTurnAttemptFromInput.mockResolvedValue(
+      createProviderAttemptResult(),
+    )
+    providerTurnRunnerMocks.buildCodexTurnExecutionPlan.mockResolvedValue({
+      activeTurnSteering: null,
+      executionContext: { hosted: null },
+      hostedToolContext: null,
+      input,
+      profile: {
+        promptProfile: 'maintenance',
+        threadScope: 'isolated-thread',
+        toolProfile: 'maintenance-turn',
+      },
+      promptTimeContext: {
+        currentLocalDate: '2026-07-25',
+        currentTimeZone: 'America/New_York',
+      },
+      route,
+      sharedPlan: createSharedPlan(),
+      progressDelivery: null,
+      turnId: 'turn-room-model-maintenance',
+    } satisfies AssistantCodexTurnExecutionPlan)
+    providerTurnRunnerMocks.buildCodexTurnAttemptPlan.mockResolvedValue({
+      attemptCount: 1,
+      route,
+      routePlan: {
+        assistantContractFingerprint:
+          'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+        assistantCliContract: null,
+        cliEnv: {},
+        codexContinuation: {
+          kind: 'explicit-structured-history',
+        } satisfies AssistantCodexContinuation,
+        developerInstructions: null,
+        diagnosticsPolicy: {
+          environment: 'hosted',
+          privateIssueCaptureEnabled: false,
+          surface: 'linq',
+        },
+        dynamicTools: [MURPH_GROUP_ROOM_MODEL_TOOL],
+        onboardingGuidanceInjected: false,
+        planningDiagnostics: createRoutePlanningDiagnostics(),
+        promptCacheMetadata: null,
+        resume: null,
+        sessionContext: undefined,
+        systemPrompt: 'Room-model maintenance prompt.',
+        turnContextPrompt: null,
+        workingDirectory: '/vaults/group',
+      } satisfies AssistantRouteTurnPlan,
+      session,
+    } satisfies AssistantCodexAttemptPlan)
+
+    const outcome = await executeCodexTurnWithRecovery({
+      input,
+      plan: createSharedPlan(),
+      profile: {
+        nativeResumePolicy: 'disabled',
+        promptProfile: 'maintenance',
+        threadScope: 'isolated-thread',
+        toolProfile: 'maintenance-turn',
+      },
+      resolvedSession: session,
+      route,
+      turnCreatedAt: '2026-07-25T08:00:00.000Z',
+      turnId: 'turn-room-model-maintenance',
+    })
+
+    expect(outcome.kind).toBe('succeeded')
+    expect(
+      providerMocks.executeCodexAssistantTurnAttemptFromInput,
+    ).toHaveBeenCalledWith(expect.objectContaining({
+      dynamicTools: [MURPH_GROUP_ROOM_MODEL_TOOL],
+      groupRoomModelMaintenanceAuthorized: true,
+      permissions:
+        MURPH_GROUP_ROOM_MODEL_MAINTENANCE_PERMISSION_PROFILE,
+      processLifetime: 'one-shot',
+      providerThreadEphemeral: true,
+      runtimeWorkspaceRoots: ['/vaults/group'],
+    }))
+  })
+
+  it('keeps group-email replies but removes ambient filesystem execution', async () => {
+    const route = createRoute()
+    const session = createAssistantSession({
+      providerOptions: route.providerOptions,
+    })
+    const sharedPlan = createGroupEmailSharedPlan()
+    const input = {
+      codexConfigOverrides: ['features.shell_tool=true'],
+      prompt: 'Reply to the group email.',
+      vault: '/vaults/group',
+    }
+
+    providerMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportedUserMessageContentTypes: ['text'],
+      supportsReasoningEffort: true,
+    })
+    providerMocks.executeCodexAssistantTurnAttemptFromInput.mockResolvedValue(
+      createProviderAttemptResult(),
+    )
+    providerTurnRunnerMocks.buildCodexTurnExecutionPlan.mockResolvedValue({
+      activeTurnSteering: null,
+      executionContext: { hosted: null },
+      hostedToolContext: null,
+      input,
+      profile: {
+        promptProfile: 'conversation',
+        threadScope: 'session-thread',
+        toolProfile: 'provider-turn',
+      },
+      promptTimeContext: {
+        currentLocalDate: '2026-07-25',
+        currentTimeZone: 'America/New_York',
+      },
+      route,
+      sharedPlan,
+      progressDelivery: null,
+      turnId: 'turn-group-email',
+    } satisfies AssistantCodexTurnExecutionPlan)
+    providerTurnRunnerMocks.buildCodexTurnAttemptPlan.mockResolvedValue({
+      attemptCount: 1,
+      route,
+      routePlan: {
+        assistantContractFingerprint:
+          'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+        assistantCliContract: null,
+        cliEnv: {},
+        codexContinuation: {
+          kind: 'explicit-structured-history',
+        } satisfies AssistantCodexContinuation,
+        developerInstructions: null,
+        diagnosticsPolicy: {
+          environment: 'hosted',
+          privateIssueCaptureEnabled: false,
+          surface: 'email',
+        },
+        dynamicTools: [],
+        onboardingGuidanceInjected: false,
+        planningDiagnostics: createRoutePlanningDiagnostics(),
+        promptCacheMetadata: null,
+        resume: null,
+        sessionContext: undefined,
+        systemPrompt: 'Group-email prompt.',
+        turnContextPrompt: null,
+        workingDirectory: '/vaults/group',
+      } satisfies AssistantRouteTurnPlan,
+      session,
+    } satisfies AssistantCodexAttemptPlan)
+
+    const outcome = await executeCodexTurnWithRecovery({
+      input,
+      plan: sharedPlan,
+      resolvedSession: session,
+      route,
+      turnCreatedAt: '2026-07-25T08:00:00.000Z',
+      turnId: 'turn-group-email',
+    })
+
+    expect(outcome.kind).toBe('succeeded')
+    const providerInput =
+      providerMocks.executeCodexAssistantTurnAttemptFromInput.mock.calls[0]?.[0]
+    expect(providerInput?.providerConfig).toMatchObject({
+      sandbox: 'read-only',
+    })
+    expect(providerInput?.codexConfigOverrides).toEqual([
+      'features.shell_tool=true',
+      'features.shell_tool=false',
+      'features.multi_agent=false',
+      'features.multi_agent_v2=false',
+      'features.tool_suggest=false',
+    ])
+    expect(providerInput?.groupConversation).toBe(true)
   })
 
   it('drops unsupported rich user parts and keeps flex for supported hosted OpenAI routes', async () => {

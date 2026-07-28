@@ -380,6 +380,24 @@ export async function bindHostedMemberPendingLinqChatAndTrackInbound(input: {
   prisma: Prisma.TransactionClient;
   recipientPhone: string | null;
 }) {
+  await bindHostedMemberPendingLinqChat(input);
+
+  return incrementHostedLinqInboundDailyState({
+    memberId: input.memberId,
+    occurredAt: input.occurredAt,
+    prisma: input.prisma,
+  });
+}
+
+export async function bindHostedMemberPendingLinqChat(input: {
+  chatId: string;
+  homeLineAssignedAt?: Date | null;
+  memberId: string;
+  occurredAt: string;
+  participantContact?: HostedLinqParticipantContact | null;
+  prisma: Prisma.TransactionClient;
+  recipientPhone: string | null;
+}): Promise<void> {
   await upsertHostedMemberPendingLinqBindingTx({
     homeLineAssignedAt: input.homeLineAssignedAt ?? null,
     linqChatId: input.chatId,
@@ -388,12 +406,6 @@ export async function bindHostedMemberPendingLinqChatAndTrackInbound(input: {
     participantContactObservedAt: new Date(input.occurredAt),
     prisma: input.prisma,
     recipientPhone: input.recipientPhone,
-  });
-
-  return incrementHostedLinqInboundDailyState({
-    memberId: input.memberId,
-    occurredAt: input.occurredAt,
-    prisma: input.prisma,
   });
 }
 

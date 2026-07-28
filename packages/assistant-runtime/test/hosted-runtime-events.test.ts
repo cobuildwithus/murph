@@ -1369,6 +1369,7 @@ describe("executeHostedMailboxEvent", () => {
           schema: "murph.assistant-provider-prompt-size-diagnostics.v1",
           type: "assistant.provider.prompt_size",
           providerPromptDiagnosticKind: "primary",
+          baseInstructionsBytes: 768,
           providerPromptBytes: 4096,
           userPromptBytes: 5,
           turnContextPromptBytes: 2048,
@@ -1394,6 +1395,7 @@ describe("executeHostedMailboxEvent", () => {
       message: "Hosted assistant provider prompt-size diagnostics captured.",
       phase: "wake.running",
       redacted: expect.objectContaining({
+        baseInstructionsBytes: 768,
         conversationContextBytes: 256,
         conversationContextPresent: true,
         developerInstructionsBytes: 1024,
@@ -1749,6 +1751,7 @@ describe("executeHostedMailboxEvent", () => {
     expect(result).toEqual({
       bootstrapResult,
       conversationMetrics: null,
+      deliveryIntentIds: ["intent_notification"],
       mailboxLane: "assistant-notification",
       nextWakeAt: seededNextWakeAt,
       nextWakeReason: "assistant",
@@ -1828,6 +1831,65 @@ describe("executeHostedMailboxEvent", () => {
         },
       ],
     });
+  });
+
+  it("propagates detached group route authority into the assistant outbox", async () => {
+    const externalThreadRouteAuthority = {
+      accountLookupKey: "linq-account-key",
+      channel: "linq" as const,
+      containerMemberId: "group-runtime-member",
+      threadId: "linq-group-chat",
+    };
+    const wake = buildHostedExecutionAssistantNotificationRequestedWake({
+      eventId: "evt_group_notification",
+      memberId: "group-runtime-member",
+      notification: {
+        deliveryDispatchMode: "queue-only",
+        deliveryDedupeToken: "phone-call-result:hpc_group",
+        deliveryIdempotencyKey: "phone-call-result:hpc_group",
+        externalThreadRouteAuthority,
+        instructions: "Report the completed call result to this group.",
+        responsePolicy: { kind: "allow_send_or_skip" },
+        route: {
+          actorId: null,
+          channel: "linq",
+          delivery: {
+            kind: "thread",
+            target: "linq-group-chat",
+          },
+          identityId: "group-identity",
+          threadId: "group-thread",
+          threadIsDirect: false,
+        },
+      },
+      occurredAt: "2026-07-25T12:00:00.000Z",
+    });
+
+    await executeHostedMailboxEvent({
+      wake,
+      executionContext: {
+        hosted: {
+          memberId: "group-runtime-member",
+          userEnvKeys: [],
+        },
+      },
+      runtime: createRuntime(),
+      runtimeEnv: {},
+      vaultRoot: "/tmp/assistant-runtime-events",
+    });
+
+    expect(mocks.sendAssistantNotification).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actorId: null,
+        bindingDeliveryTarget: "linq-group-chat",
+        channel: "linq",
+        deliveryKind: "thread",
+        deliveryTarget: null,
+        outboxExternalThreadRouteAuthority: externalThreadRouteAuthority,
+        threadId: "group-thread",
+        threadIsDirect: false,
+      }),
+    );
   });
 
   it("delivers embedded member activation signup welcomes and seeds onboarding follow-up", async () => {
@@ -2563,6 +2625,51 @@ describe("executeHostedMailboxEvent", () => {
       conversationMetrics: null,
       mailboxLane: "assistant-notification",
     });
+  });
+
+  it("settles a failed creative notification without regenerating its media", async () => {
+    const wake = buildHostedExecutionAssistantNotificationRequestedWake({
+      eventId: "evt_notification_creative_failure",
+      memberId: "member_group_runtime",
+      notification: {
+        instructions: "Create one brief sponsorship thank-you.",
+        notificationPromptProfile: "creative-response",
+        responsePolicy: {
+          kind: "require_send",
+        },
+        route: {
+          actorId: null,
+          channel: "linq",
+          delivery: {
+            kind: "thread",
+            target: "thread_group_sponsorship",
+          },
+          identityId: "hbidx:phone:v1:test",
+          threadId: "thread_group_sponsorship",
+          threadIsDirect: false,
+        },
+      },
+      occurredAt: "2026-04-08T00:00:00.000Z",
+    });
+    mocks.sendAssistantNotification.mockRejectedValueOnce(
+      new Error("creative notification delivery failed"),
+    );
+
+    await expect(executeHostedMailboxEvent({
+      wake,
+      executionContext,
+      runtime: createRuntime(),
+      runtimeEnv: {},
+      vaultRoot: "/tmp/assistant-runtime-events",
+    })).resolves.toMatchObject({
+      conversationMetrics: null,
+      mailboxLane: "assistant-notification",
+    });
+    expect(mocks.sendAssistantNotification).toHaveBeenCalledWith(
+      expect.objectContaining({
+        notificationPromptProfile: "creative-response",
+      }),
+    );
   });
 
   it("still fails closed for non-first-contact required notifications", async () => {

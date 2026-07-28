@@ -27,6 +27,7 @@ export interface DurableObjectSqlStorageLike {
 
 export interface DurableObjectStorageLike {
   delete(key: string): Promise<boolean>;
+  deleteAll?(): Promise<void>;
   deleteAlarm?(): Promise<void>;
   get<T>(key: string): Promise<T | undefined>;
   getAlarm(): Promise<number | null>;

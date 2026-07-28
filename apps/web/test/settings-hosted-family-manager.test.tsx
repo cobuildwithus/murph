@@ -976,9 +976,9 @@ test("HostedFamilyManager surfaces the top-up dialog inside each member's manage
       usageTopUpActivePurchase: activePurchase,
       usageTopUpContactOptions: [payerTopUpContactOption()],
       usageTopUpOffers: [
-        { amountLabel: "$5", offerCode: "usage_5_usd" },
-        { amountLabel: "$10", offerCode: "usage_10_usd" },
-        { amountLabel: "$25", offerCode: "usage_25_usd" },
+        { amountLabel: "$5", estimatedMessages: 100, offerCode: "usage_5_usd" },
+        { amountLabel: "$10", estimatedMessages: 200, offerCode: "usage_10_usd" },
+        { amountLabel: "$25", estimatedMessages: 500, offerCode: "usage_25_usd" },
       ],
     }),
     { requireButton: false },
@@ -1104,6 +1104,7 @@ function baseFamilyManagerProps() {
       edge: { active: 0, billed: 0, invited: 0, remaining: 0, used: 0 },
       pulse: { active: 1, billed: 2, invited: 0, remaining: 1, used: 1 },
     },
+    payerMemberId: "member_owner",
     seats: {
       active: 1,
       billed: 2,
