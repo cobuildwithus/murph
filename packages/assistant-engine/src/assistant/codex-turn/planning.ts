@@ -227,6 +227,7 @@ export type AssistantCodexTurnPromptProfile =
 export type AssistantCodexTurnToolProfile =
   | 'provider-turn'
   | 'maintenance-turn'
+  | 'read-only-turn'
   | 'output-only-turn'
 
 export type AssistantCodexThreadScope =
@@ -462,6 +463,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
     input.hostedToolContext?.personalizationTool != null &&
     input.input.assistantStyleSettingsAuthorized !== false
   const outputOnlyTurn = input.profile.toolProfile === 'output-only-turn'
+  const readOnlyTurn = input.profile.toolProfile === 'read-only-turn'
   const systemNotificationTurn =
     input.profile.promptProfile === 'system-notification'
   const privateInteractiveProviderTurn =
@@ -470,7 +472,8 @@ export async function resolveAssistantRouteTurnPlan(input: {
     input.profile.toolProfile === 'provider-turn'
   const shouldUseCommittedTranscriptHistory =
     input.profile.threadScope === 'session-thread' ||
-    input.profile.promptProfile === 'assistant-ask-continuation'
+    input.profile.promptProfile === 'assistant-ask-continuation' ||
+    readOnlyTurn
   const resolveCommittedTranscriptHistoryMessages = async () =>
     shouldUseCommittedTranscriptHistory
       ? await resolveAssistantCommittedTranscriptHistoryMessages({
@@ -546,7 +549,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
   // model forbidden sources.
   const maintenanceTurn = input.profile.toolProfile === 'maintenance-turn'
   const hostedDynamicContextPrompts =
-    maintenanceTurn || outputOnlyTurn
+    maintenanceTurn || outputOnlyTurn || readOnlyTurn
       ? []
       : input.executionContext?.hosted?.dynamicContextPrompts ?? []
   const groupRoomModelPrompt =
@@ -563,7 +566,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
   const promptCapabilityAvailability = resolveAssistantPromptCapabilityAvailability({
     executionContext: input.executionContext,
   })
-  const voiceMemoDeliveryChannel = outputOnlyTurn
+  const voiceMemoDeliveryChannel = outputOnlyTurn || readOnlyTurn
     ? null
     : resolveAssistantVoiceMemoDeliveryChannel({
         messageInput: input.input,
@@ -589,7 +592,10 @@ export async function resolveAssistantRouteTurnPlan(input: {
   })
   let assistantContextSnapshotElapsedMs: number | null = null
   const assistantContextSnapshotPrompt =
-    maintenanceTurn || systemNotificationTurn || !privateInteractiveAudience
+    maintenanceTurn ||
+    readOnlyTurn ||
+    systemNotificationTurn ||
+    !privateInteractiveAudience
       ? null
       : await measureRoutePlanningAsync(
         routePlanningSpans,
@@ -656,6 +662,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
         privateInteractiveProviderTurn &&
         input.hostedToolContext?.labsTool != null,
       assistantKnowledgeToolsAvailable:
+        !readOnlyTurn &&
         promptCapabilityAvailability.assistantKnowledgeToolsAvailable,
       assistantToolNameAliases,
       assistantPersona: explicitAssistantPersona,
@@ -730,7 +737,8 @@ export async function resolveAssistantRouteTurnPlan(input: {
   // Maintenance turns run without a delivery target and must not expose any
   // external-capable or delivery-facing tool surface, so the gate is the
   // resolved tool set itself rather than prompt text.
-  const dynamicTools = outputOnlyTurn
+  const dynamicTools =
+    outputOnlyTurn || readOnlyTurn
       ? []
       : maintenanceTurn
       ? input.input.maintenanceProfile === 'group-room-model' &&
@@ -887,7 +895,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
     },
     developerInstructions: normalizeNullableString(developerInstructions),
     dynamicTools,
-    environments: outputOnlyTurn ? [] : undefined,
+    environments: outputOnlyTurn || readOnlyTurn ? [] : undefined,
     conversationHistoryMessages:
       conversationHistoryMessages.length > 0
         ? conversationHistoryMessages
@@ -921,7 +929,8 @@ export async function resolveAssistantRouteTurnPlan(input: {
     sessionContext:
       shouldPrepareBootstrapContext &&
       !maintenanceTurn &&
-      !outputOnlyTurn
+      !outputOnlyTurn &&
+      !readOnlyTurn
       ? {
           binding: input.session.binding,
         }

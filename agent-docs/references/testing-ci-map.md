@@ -63,6 +63,15 @@ the required frontend and coverage specialist audits, the review-only Fable or
 Opus UI pass, and ReviewGPT. Routine tests stub Junction; they do not call the live
 catalog or expose a production credential.
 
+The post-onboarding choice-point coverage spans managed-automation installation,
+legacy answered-onboarding catch-up, stable one-shot reconciliation, immutable
+member ownership, execution-time onboarding replacement/reopen races, and the
+exact read-only cron profile. Assistant planning and provider-runner tests prove
+that the profile retains bounded committed history plus vault CLI reads while
+removing hosted dynamic tools, broad context, network fetches, writable
+filesystem access, generated artifacts, progress hooks, and mutation-capable
+configuration overrides.
+
 Hosted usage-credit coverage is split across focused hosted-web unit
 and component tests. The allowance suites exercise enforced exhaustion,
 included-first settlement, carryover balance, and crossing-operation behavior;
@@ -148,6 +157,17 @@ before the ordinary group outbox path. Delimiter-bearing human text stays one
 quoted message; rendered transcript structure is ignored; attachment
 descriptors, extracted text, filenames, stored paths, and lifecycle metadata do
 not enter evidence; and attachment-only input fails closed before provider work.
+
+Post-onboarding choice-point coverage is concentrated in assistant-engine and
+assistant-runtime. Seed tests prove the 21-local-day schedule, DST handling,
+seven-day window, explicit unclear/unshared-goal prompt branch, legacy
+same-weekday catch-up, installed-occurrence stability, terminal non-reactivation,
+member ownership, and malformed-state failure isolation. Cron tests prove that
+recompletion or reopening invalidates a claimed occurrence before model work or
+delivery and that canonical onboarding is rechecked alongside existing owner
+and lifecycle authority. Hosted-runtime tests prove optional preparation
+failures enter the bounded managed-maintenance retry path without blocking the
+other managed automations.
 
 ## Current CI Workflows
 

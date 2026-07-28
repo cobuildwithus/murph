@@ -70,7 +70,44 @@ Last verified: 2026-07-27
   the attempt settles or expires; only then may the persisted incident become
   healthy.
 - Hosted managed-automation reconciliation persists retry generation in the existing workspace checkpoint owner. Only eligible, explicitly retryable failures receive the bounded 30-second, 2-minute, and 10-minute backoff sequence; unclassified or permanent failures are logged without manufacturing another wake, and a later successful pass clears the retry generation.
-- Managed automation ownership is exact-seed and route-authority based. Built-in seeds without an explicit scope default to `member`; member seeds run only on personal/direct routes, while `authenticated-group` seeds run only on live non-direct Linq/iMessage or Telegram routes. Group email is excluded. Reconciliation archives every nonterminal wrong-owner built-in record, including paused records, while already archived records and caller-supplied unscoped custom seeds retain their prior behavior. Claimed static built-ins resolve the current immutable seed by automation id before lifecycle hooks and revalidate the same owner and live route before evidence, provider admission, tools, delivery, and commit; editable tags, slugs, titles, and instructions cannot acquire authority. Permanently retired built-in IDs are not seeds: reconciliation archives matching persisted records and claimed occurrences fail closed before lifecycle or model work. Dynamically generated experiment-lifecycle seeds remain on their existing path until their separately coordinated owner exposes an exact resolver. Immutable personal-memory and group-room-model IDs still exclusively select silent maintenance policy and its provider-admission replay barrier.
+- Managed automation ownership is exact-identity and route-authority based.
+  Built-in seeds without an explicit scope default to `member`; the stable
+  dynamic post-onboarding choice-point id is explicitly registered as
+  `member`. Member identities run only on personal/direct routes, while
+  `authenticated-group` identities run only on live non-direct Linq/iMessage or
+  Telegram routes. Group email is excluded. Reconciliation archives every
+  nonterminal wrong-owner managed record, including paused records, while
+  already archived records and caller-supplied unscoped custom seeds retain
+  their prior behavior. Claimed registered identities resolve immutable owner
+  scope before lifecycle hooks and revalidate the same owner and live route
+  before evidence, provider admission, tools, delivery, and commit; editable
+  tags, slugs, titles, routes, and instructions cannot acquire authority.
+  Permanently retired built-in IDs are not seeds: reconciliation archives
+  matching persisted records and claimed occurrences fail closed before
+  lifecycle or model work. Dynamically generated experiment-lifecycle seeds
+  remain on their existing path until their separately coordinated owner
+  exposes an exact resolver. Immutable personal-memory and group-room-model IDs
+  still exclusively select silent maintenance policy and its provider-admission
+  replay barrier.
+- The post-onboarding choice point is one finite managed one-shot, including for
+  members whose answered onboarding predates its rollout. Recent completion
+  keeps the original 21-local-day schedule and seven-day window. An expired
+  original window derives the next future 1:30 p.m. occurrence on the same
+  local weekday as completion; once installed, the existing canonical
+  automation record freezes that occurrence across later maintenance passes.
+  Archived or consumed records are never reactivated. A malformed onboarding
+  read fails only this optional seed contribution, and a later maintenance pass
+  may retry without blocking unrelated managed automations. At execution,
+  canonical onboarding must still be completed with `user_answered` and at
+  least 20 elapsed days older than the claimed occurrence. That conservative
+  floor admits the earliest valid 21-local-calendar-day occurrence after a
+  late-day completion or timezone transition while rejecting a recently
+  replaced completion. The cron owner rechecks that fact before model work and
+  at every existing provider, tool, delivery, and commit boundary. Its exact
+  automation identity also selects a fresh one-shot read-only turn with bounded
+  transcript and vault CLI reads but no hosted dynamic tools, network fetch,
+  writable filesystem, or product-state mutation surface. A skip consumes the
+  one-shot normally and creates no retrying outreach loop.
 - Closed integration-ingest months compact only in the abortable hosted idle-shutdown lane. Core publishes a verified deterministic gzip before deleting raw bytes, normal readers and amendments stream bounded gzip output, and startup repairs only an independently valid, newline-terminated, byte-identical raw/gzip pair. A wake preserves foreground priority; a 30-second pass budget or ordinary compaction failure leaves any unfinished source intact and does not block checkpointing. Remaining raw months are the next pass's durable worklist, while a non-identical representation pair fails closed without a repair queue or marker.
 - The single group newsletter automation reuses canonical cron occurrence state for both delivery modes. Current-chat editions finish through the ordinary conversation outbox and its route retry policy. A scheduled non-direct Telegram occurrence resolves its exact Web-owned route before group tools or model work, persists that authority with the outbox intent, and rechecks it before provider entry. Missing route authority remains retryable; a locally mismatched target fails stale, while live ownership revocation fails permanently without sending. Email editions alone use the existing newsletter parent/recipient outbox lifecycle. The runtime appends the current execution contract on every occurrence so legacy saved instructions cannot retain a retired workflow; no migration queue, repair state, or second scheduler exists.
 - A usage-credit purchase persists one reconstructible `created` purchase before

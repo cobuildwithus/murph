@@ -1,4 +1,4 @@
-import { loadVault } from '@murphai/core'
+import { loadVault, showAutomation, type AutomationRecord } from '@murphai/core'
 import {
   addDaysToIsoDate,
   formatTimeZoneDateTimeParts,
@@ -14,8 +14,11 @@ export const MURPH_ONBOARDING_GOAL_CHECKIN_OWNER_SCOPE = 'member' as const
 
 const ONBOARDING_GOAL_CHECKIN_DELAY_DAYS = 21
 const ONBOARDING_GOAL_CHECKIN_ACTIVE_WINDOW_DAYS = 7
+const ONBOARDING_GOAL_CHECKIN_MINIMUM_AGE_DAYS = 20
 const ONBOARDING_GOAL_CHECKIN_LOCAL_HOUR = 13
 const ONBOARDING_GOAL_CHECKIN_LOCAL_MINUTE = 30
+
+const DAY_MS = 24 * 60 * 60 * 1000
 
 const ONBOARDING_GOAL_CHECKIN_INSTRUCTIONS = [
   'Goal: once, about three weeks after completed onboarding, help the member choose what deserves attention next. Make them feel remembered and supported, not watched or graded. This is a choice point, not a report card.',
@@ -53,6 +56,7 @@ type AssistantOnboardingState = Awaited<
 >
 
 export interface BuildOnboardingGoalCheckinSeedInput {
+  existingAutomation?: AutomationRecord | null
   onboardingState: AssistantOnboardingState
   now?: Date
   timeZone: string
@@ -68,6 +72,10 @@ export interface PrepareOnboardingGoalCheckinAutomationResult {
   seed: MurphManagedAutomationSeed | null
   yielded?: true
 }
+
+export type OnboardingGoalCheckinAuthorityPreconditionResult =
+  | { kind: 'continue' }
+  | { kind: 'skip'; reason: string }
 
 export function buildOnboardingGoalCheckinSeed(
   input: BuildOnboardingGoalCheckinSeedInput,
@@ -93,28 +101,31 @@ export function buildOnboardingGoalCheckinSeed(
     completionLocalDate,
     ONBOARDING_GOAL_CHECKIN_DELAY_DAYS,
   )
-  const activeUntilLocalDate = addDaysToIsoDate(
+  const originalWindow = buildOnboardingGoalCheckinWindow({
     scheduledLocalDate,
-    ONBOARDING_GOAL_CHECKIN_ACTIVE_WINDOW_DAYS,
-  )
-  const scheduledAt = resolveLocalDateTimeInstant({
-    date: scheduledLocalDate,
-    hour: ONBOARDING_GOAL_CHECKIN_LOCAL_HOUR,
-    minute: ONBOARDING_GOAL_CHECKIN_LOCAL_MINUTE,
     timeZone: input.timeZone,
   })
-  const activeUntil = resolveLocalDateTimeInstant({
-    date: activeUntilLocalDate,
-    hour: ONBOARDING_GOAL_CHECKIN_LOCAL_HOUR,
-    minute: ONBOARDING_GOAL_CHECKIN_LOCAL_MINUTE,
+  const installedWindow = resolveInstalledOnboardingGoalCheckinWindow({
+    completionLocalDate,
+    completedAt: onboardingState.completedAt,
+    existingAutomation: input.existingAutomation ?? null,
     timeZone: input.timeZone,
   })
-  if (now.getTime() >= Date.parse(activeUntil)) {
-    return null
-  }
+  const window =
+    now.getTime() < Date.parse(originalWindow.activeUntil)
+      ? originalWindow
+      : (installedWindow ??
+        buildOnboardingGoalCheckinWindow({
+          scheduledLocalDate: resolveNextOnboardingGoalCheckinLocalDate({
+            completionLocalDate,
+            now,
+            timeZone: input.timeZone,
+          }),
+          timeZone: input.timeZone,
+        }))
 
   return {
-    activeUntil,
+    activeUntil: window.activeUntil,
     assistantTargetOverride: {
       reasoningEffort: 'high',
     },
@@ -124,7 +135,7 @@ export function buildOnboardingGoalCheckinSeed(
     ownerScope: MURPH_ONBOARDING_GOAL_CHECKIN_OWNER_SCOPE,
     schedule: {
       kind: 'at',
-      at: scheduledAt,
+      at: window.scheduledAt,
     },
     slug: 'onboarding-goal-checkin',
     summary:
@@ -160,9 +171,17 @@ export async function prepareOnboardingGoalCheckinAutomation(
   const timeZone = isValidIanaTimeZone(vault.metadata.timezone)
     ? vault.metadata.timezone
     : 'UTC'
+  const existingAutomation = await showAutomation({
+    automationId: MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID,
+    vaultRoot: input.vaultRoot,
+  })
+  if (input.shouldYield?.() === true) {
+    return { seed: null, yielded: true }
+  }
 
   return {
     seed: buildOnboardingGoalCheckinSeed({
+      existingAutomation,
       onboardingState,
       timeZone,
       ...(input.now === undefined ? {} : { now: input.now }),
@@ -170,12 +189,172 @@ export async function prepareOnboardingGoalCheckinAutomation(
   }
 }
 
+export async function runOnboardingGoalCheckinAuthorityPrecondition(input: {
+  automationId: string
+  occurrenceAt: string
+  vault: string
+}): Promise<OnboardingGoalCheckinAuthorityPreconditionResult> {
+  if (input.automationId !== MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID) {
+    return { kind: 'continue' }
+  }
+
+  let onboardingState: AssistantOnboardingState
+  try {
+    onboardingState = await readAssistantOnboardingState(input.vault)
+  } catch {
+    return {
+      kind: 'skip',
+      reason: 'Onboarding goal check-in authority could not be revalidated.',
+    }
+  }
+  if (!onboardingStateSupportsGoalCheckin(onboardingState)) {
+    return {
+      kind: 'skip',
+      reason:
+        'Onboarding goal check-in no longer has answered-onboarding authority.',
+    }
+  }
+
+  const completedAtMs = Date.parse(onboardingState.completedAt)
+  const occurrenceAtMs = Date.parse(input.occurrenceAt)
+  if (
+    !Number.isFinite(completedAtMs) ||
+    !Number.isFinite(occurrenceAtMs) ||
+    occurrenceAtMs - completedAtMs <
+      ONBOARDING_GOAL_CHECKIN_MINIMUM_AGE_DAYS * DAY_MS
+  ) {
+    return {
+      kind: 'skip',
+      reason:
+        'Onboarding completion was replaced too recently for this check-in.',
+    }
+  }
+
+  return { kind: 'continue' }
+}
+
 function onboardingStateSupportsGoalCheckin(
   onboardingState: AssistantOnboardingState,
 ): onboardingState is AssistantOnboardingState & { completedAt: string } {
-  return onboardingState.status === 'completed' &&
+  return (
+    onboardingState.status === 'completed' &&
     onboardingState.completedReason === 'user_answered' &&
     onboardingState.completedAt !== null
+  )
+}
+
+function buildOnboardingGoalCheckinWindow(input: {
+  scheduledLocalDate: string
+  timeZone: string
+}): { activeUntil: string; scheduledAt: string } {
+  return {
+    activeUntil: resolveLocalDateTimeInstant({
+      date: addDaysToIsoDate(
+        input.scheduledLocalDate,
+        ONBOARDING_GOAL_CHECKIN_ACTIVE_WINDOW_DAYS,
+      ),
+      hour: ONBOARDING_GOAL_CHECKIN_LOCAL_HOUR,
+      minute: ONBOARDING_GOAL_CHECKIN_LOCAL_MINUTE,
+      timeZone: input.timeZone,
+    }),
+    scheduledAt: resolveLocalDateTimeInstant({
+      date: input.scheduledLocalDate,
+      hour: ONBOARDING_GOAL_CHECKIN_LOCAL_HOUR,
+      minute: ONBOARDING_GOAL_CHECKIN_LOCAL_MINUTE,
+      timeZone: input.timeZone,
+    }),
+  }
+}
+
+function resolveInstalledOnboardingGoalCheckinWindow(input: {
+  completedAt: string
+  completionLocalDate: string
+  existingAutomation: AutomationRecord | null
+  timeZone: string
+}): { activeUntil: string; scheduledAt: string } | null {
+  const existing = input.existingAutomation
+  if (
+    existing === null ||
+    existing.automationId !== MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID ||
+    existing.schedule.kind !== 'at' ||
+    existing.activeUntil === null
+  ) {
+    return null
+  }
+
+  const scheduledAtMs = Date.parse(existing.schedule.at)
+  const activeUntilMs = Date.parse(existing.activeUntil)
+  const completedAtMs = Date.parse(input.completedAt)
+  if (
+    !Number.isFinite(scheduledAtMs) ||
+    !Number.isFinite(activeUntilMs) ||
+    !Number.isFinite(completedAtMs) ||
+    scheduledAtMs >= activeUntilMs ||
+    scheduledAtMs - completedAtMs <
+      ONBOARDING_GOAL_CHECKIN_MINIMUM_AGE_DAYS * DAY_MS
+  ) {
+    return null
+  }
+
+  const scheduledParts = formatTimeZoneDateTimeParts(
+    new Date(scheduledAtMs),
+    input.timeZone,
+  )
+  const activeUntilParts = formatTimeZoneDateTimeParts(
+    new Date(activeUntilMs),
+    input.timeZone,
+  )
+  if (
+    isoDateWeekday(scheduledParts.dayKey) !==
+      isoDateWeekday(input.completionLocalDate) ||
+    scheduledParts.hour !== ONBOARDING_GOAL_CHECKIN_LOCAL_HOUR ||
+    scheduledParts.minute !== ONBOARDING_GOAL_CHECKIN_LOCAL_MINUTE ||
+    activeUntilParts.dayKey !==
+      addDaysToIsoDate(
+        scheduledParts.dayKey,
+        ONBOARDING_GOAL_CHECKIN_ACTIVE_WINDOW_DAYS,
+      ) ||
+    activeUntilParts.hour !== ONBOARDING_GOAL_CHECKIN_LOCAL_HOUR ||
+    activeUntilParts.minute !== ONBOARDING_GOAL_CHECKIN_LOCAL_MINUTE
+  ) {
+    return null
+  }
+
+  return {
+    activeUntil: existing.activeUntil,
+    scheduledAt: existing.schedule.at,
+  }
+}
+
+function resolveNextOnboardingGoalCheckinLocalDate(input: {
+  completionLocalDate: string
+  now: Date
+  timeZone: string
+}): string {
+  const nowLocalDate = formatTimeZoneDateTimeParts(
+    input.now,
+    input.timeZone,
+  ).dayKey
+  const weekdayOffset =
+    (isoDateWeekday(input.completionLocalDate) -
+      isoDateWeekday(nowLocalDate) +
+      7) %
+    7
+  let scheduledLocalDate = addDaysToIsoDate(nowLocalDate, weekdayOffset)
+  const candidateAt = resolveLocalDateTimeInstant({
+    date: scheduledLocalDate,
+    hour: ONBOARDING_GOAL_CHECKIN_LOCAL_HOUR,
+    minute: ONBOARDING_GOAL_CHECKIN_LOCAL_MINUTE,
+    timeZone: input.timeZone,
+  })
+  if (Date.parse(candidateAt) <= input.now.getTime()) {
+    scheduledLocalDate = addDaysToIsoDate(scheduledLocalDate, 7)
+  }
+  return scheduledLocalDate
+}
+
+function isoDateWeekday(date: string): number {
+  return new Date(`${date}T00:00:00.000Z`).getUTCDay()
 }
 
 function resolveLocalDateTimeInstant(input: {

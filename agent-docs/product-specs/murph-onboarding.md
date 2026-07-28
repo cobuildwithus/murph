@@ -48,6 +48,11 @@ privacy, authorization, or provider boundaries.
 - Keep the existing `finish-onboarding-followup` managed automation as the one
   recovery and continuation mechanism. Do not add a second automation for
   context collection or split onboarding into competing lifecycle owners.
+- After answered completion, use one separate member-owned managed one-shot as
+  a post-onboarding choice point. It is not an onboarding continuation,
+  foundation collector, or support owner and cannot change product state.
+  Ordinary managed maintenance also installs it for eligible members whose
+  answered onboarding predates the feature.
 - Do not add persisted step state, branch state, profile completion, context
   maturity, or a data-point score. Infer progress from visible conversation,
   the existing resume snapshot, and a targeted canonical read only when the
@@ -542,6 +547,51 @@ including after onboarding closes. Honor requested timing and skip whenever
 there is no timely onboarding continuation. Every user-facing scheduled
 continuation includes exactly one easy question that invites a reply; a
 reflection-only scheduled message returns skip.
+
+## Post-Onboarding Choice Point
+
+Answered onboarding receives one low-pressure choice point about three weeks
+after completion. Schedule it 21 local-calendar days after completion at 1:30
+p.m. in the vault timezone, keep it eligible for seven days, and archive it
+through the ordinary one-shot lifecycle after execution. Members whose original
+window predates the feature receive one future catch-up on the same local
+weekday as their completion; once installed, that canonical automation record
+anchors the occurrence. Open onboarding, `user_declined`, manual completion,
+and an already consumed choice point remain ineligible.
+
+The message is two to four short sentences with exactly one easy question. It
+does the reflective work instead of asking for a retrospective or status
+report, and it gives the member room to continue, make the approach easier or
+different, switch focus, or intentionally leave the thread open. Praise follows
+specific reliable evidence only. Missing, sparse, stale, misclassified, or
+contradictory tracking never proves failure.
+
+An unclear, unshared, deliberately open, or explore-mode goal is a first-class
+outcome. Murph must not imply that the member previously named a goal, infer one
+from health or wearable data, invent progress, or manufacture a problem. It asks
+naturally whether anything feels worth improving, understanding, or handling
+now, while making continued open-ended learning valid.
+
+Current intent and safety always win. Skip quietly when a similar review or
+proactive question is recent, another proactive question remains unanswered, a
+plan or experiment review owns the choice, the member requested no follow-up,
+the conversation is urgent or sensitive, or trustworthy evidence cannot support
+the proposed claim. The turn cannot create, update, complete, or archive goals,
+plans, experiments, regimens, memories, or automations. Those changes remain
+with the normal conversational owner after a reply. The engine enforces that
+boundary with a fresh read-only turn: bounded committed conversation history
+and canonical vault CLI reads remain available, while hosted dynamic tools,
+broad health-context injection, network fetches, and writable filesystem access
+do not.
+
+Canonical onboarding remains the execution authority. Cron rechecks that the
+state is still completed with `user_answered` and old enough for the claimed
+occurrence before model work and again before tools, delivery, and commit. A
+reopen, replacement completion, malformed state, or lost authority consumes the
+one-shot as a quiet skip rather than starting a retry loop. The 20-elapsed-day
+execution floor is the conservative lower bound for a 21-local-calendar-day
+schedule: it admits late-day completions and timezone transitions without
+allowing a newly replaced completion to inherit an older occurrence.
 
 ## Success Criteria
 

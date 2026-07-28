@@ -1,7 +1,7 @@
 import { mkdir, rm, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 
-import { initializeVault, showAutomation } from '@murphai/core'
+import { initializeVault, patchAutomation, showAutomation } from '@murphai/core'
 import { afterEach, describe, expect, it } from 'vitest'
 
 import {
@@ -11,6 +11,7 @@ import {
 import {
   MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID,
   buildOnboardingGoalCheckinSeed,
+  runOnboardingGoalCheckinAuthorityPrecondition,
 } from '../src/assistant/onboarding-goal-checkin-automation.ts'
 import {
   completeAssistantOnboarding,
@@ -134,7 +135,7 @@ describe('onboarding goal check-in automation', () => {
     ).toBe('member')
   })
 
-  it('does not seed open, declined, manual, expired, or invalid-timezone onboarding', () => {
+  it('does not seed open, declined, manual, or invalid-timezone onboarding', () => {
     expect(buildOnboardingGoalCheckinSeed({
       now: new Date('2026-06-02T12:00:00.000Z'),
       onboardingState: openOnboardingState(),
@@ -158,7 +159,13 @@ describe('onboarding goal check-in automation', () => {
       now: new Date('2026-06-29T13:30:00.000Z'),
       onboardingState: completedOnboardingState(),
       timeZone: 'UTC',
-    })).toBeNull()
+    })).toMatchObject({
+      activeUntil: '2026-07-13T13:30:00.000Z',
+      schedule: {
+        at: '2026-07-06T13:30:00.000Z',
+        kind: 'at',
+      },
+    })
 
     expect(() => buildOnboardingGoalCheckinSeed({
       now: new Date('2026-06-02T12:00:00.000Z'),
@@ -212,6 +219,124 @@ describe('onboarding goal check-in automation', () => {
       skipped: 6,
       updated: 0,
     })
+  })
+
+  it('installs one stable catch-up for answered onboarding completed before rollout', async () => {
+    const vaultRoot = await createVaultRoot('America/New_York')
+    await completeAssistantOnboarding({
+      completedAt: '2025-11-03T14:00:00.000Z',
+      reason: 'user_answered',
+      vault: vaultRoot,
+    })
+
+    await expect(
+      applyMurphManagedAutomations({
+        defaultRoute,
+        now: new Date('2026-07-01T16:00:00.000Z'),
+        vaultRoot,
+      }),
+    ).resolves.toEqual({
+      created: 6,
+      skipped: 0,
+      updated: 0,
+    })
+    await expect(
+      showAutomation({
+        automationId: MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID,
+        vaultRoot,
+      }),
+    ).resolves.toMatchObject({
+      activeUntil: '2026-07-13T17:30:00.000Z',
+      schedule: {
+        at: '2026-07-06T17:30:00.000Z',
+        kind: 'at',
+      },
+      status: 'active',
+    })
+
+    // Once installed, the canonical automation record anchors the catch-up.
+    // A later maintenance pass must not move it to the next matching weekday.
+    await expect(
+      applyMurphManagedAutomations({
+        defaultRoute,
+        now: new Date('2026-07-07T16:00:00.000Z'),
+        vaultRoot,
+      }),
+    ).resolves.toEqual({
+      created: 0,
+      skipped: 6,
+      updated: 0,
+    })
+    await expect(
+      showAutomation({
+        automationId: MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID,
+        vaultRoot,
+      }),
+    ).resolves.toMatchObject({
+      activeUntil: '2026-07-13T17:30:00.000Z',
+      schedule: {
+        at: '2026-07-06T17:30:00.000Z',
+        kind: 'at',
+      },
+      status: 'active',
+    })
+  })
+
+  it('does not reactivate a consumed legacy catch-up', async () => {
+    const vaultRoot = await createVaultRoot()
+    await completeAssistantOnboarding({
+      completedAt: '2025-11-03T14:00:00.000Z',
+      reason: 'user_answered',
+      vault: vaultRoot,
+    })
+    await applyMurphManagedAutomations({
+      defaultRoute,
+      now: new Date('2026-07-01T12:00:00.000Z'),
+      vaultRoot,
+    })
+    await patchAutomation({
+      lookup: MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID,
+      now: new Date('2026-07-06T14:00:00.000Z'),
+      status: 'archived',
+      vaultRoot,
+    })
+
+    await expect(
+      applyMurphManagedAutomations({
+        defaultRoute,
+        now: new Date('2026-07-08T12:00:00.000Z'),
+        vaultRoot,
+      }),
+    ).resolves.toEqual({
+      created: 0,
+      skipped: 6,
+      updated: 0,
+    })
+    await expect(
+      showAutomation({
+        automationId: MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID,
+        vaultRoot,
+      }),
+    ).resolves.toMatchObject({
+      status: 'archived',
+    })
+  })
+
+  it('accepts the earliest valid local-calendar occurrence after answered onboarding', async () => {
+    const vaultRoot = await createVaultRoot()
+    await completeAssistantOnboarding({
+      completedAt: '2026-06-01T23:59:00.000Z',
+      reason: 'user_answered',
+      vault: vaultRoot,
+    })
+
+    await expect(
+      runOnboardingGoalCheckinAuthorityPrecondition({
+        automationId: MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID,
+        occurrenceAt: '2026-06-22T13:30:00.000Z',
+        vault: vaultRoot,
+      }),
+    ).resolves.toEqual({ kind: 'continue' })
   })
 
   it('keeps unrelated managed automation setup alive when onboarding state is malformed', async () => {

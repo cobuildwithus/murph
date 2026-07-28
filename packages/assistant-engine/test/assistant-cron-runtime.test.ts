@@ -190,6 +190,7 @@ import {
 } from '../src/assistant/device-activity-cron-tags.ts'
 import {
   completeAssistantOnboarding,
+  reopenAssistantOnboarding,
   resolveAssistantOnboardingStatePath,
 } from '../src/assistant/onboarding-state.ts'
 import type { AssistantExecutionContext } from '../src/assistant/execution-context.ts'
@@ -4602,10 +4603,176 @@ describe('assistant cron runtime orchestration', () => {
     ).toHaveBeenCalledTimes(2)
     expect(deliveryAttempted).toBe(true)
     expect(commitCompleted).toBe(false)
-    expect(findCanonicalAutomation(
-      vaultRoot,
-      'automation-generic-support-revoked-before-commit',
-    )?.status).toBe('archived')
+    expect(
+      findCanonicalAutomation(
+        vaultRoot,
+        'automation-generic-support-revoked-before-commit',
+      )?.status,
+    ).toBe('archived')
+  })
+
+  it('skips a claimed onboarding goal check-in when onboarding was completed again too recently', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-07-06T13:30:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-onboarding-goal-checkin-recompleted-',
+    )
+    await completeAssistantOnboarding({
+      completedAt: '2025-11-03T14:00:00.000Z',
+      reason: 'user_answered',
+      vault: vaultRoot,
+    })
+    getVaultAutomationStore(vaultRoot).push({
+      activeUntil: '2026-07-13T13:30:00.000Z',
+      automationId: MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID,
+      continuityPolicy: 'fresh',
+      createdAt: '2026-07-01T12:00:00.000Z',
+      instructions: 'Offer one low-pressure health direction choice.',
+      route: {
+        channel: 'telegram',
+        deliverySource: null,
+        deliveryTarget: 'member-thread',
+        identityId: null,
+        participantId: null,
+        threadId: 'member-thread',
+        threadIsDirect: true,
+      },
+      schedule: { at: '2026-07-06T13:30:00.000Z', kind: 'at' },
+      slug: 'onboarding-goal-checkin',
+      status: 'active',
+      summary: null,
+      tags: ['assistant', 'scheduled', 'murph-managed'],
+      title: 'First health direction check-in',
+      updatedAt: '2026-07-01T12:00:00.000Z',
+    })
+    const { claimed, paths } = await claimFirstCanonicalCronJob(vaultRoot)
+    await completeAssistantOnboarding({
+      completedAt: '2026-07-01T14:00:00.000Z',
+      reason: 'user_answered',
+      vault: vaultRoot,
+    })
+
+    const result = await executeClaimedAssistantCronJob({
+      job: claimed,
+      paths,
+      trigger: 'scheduled',
+      vault: vaultRoot,
+    })
+
+    expect(result.run).toMatchObject({
+      outcome: 'skipped_gate',
+      reason: 'lifecycle_precondition',
+      status: 'skipped',
+    })
+    expect(
+      cronMocks.runExperimentLifecycleOutcomePrecondition,
+    ).not.toHaveBeenCalled()
+    expect(cronMocks.sendAssistantMessageLocal).not.toHaveBeenCalled()
+    expect(
+      findCanonicalAutomation(
+        vaultRoot,
+        MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID,
+      )?.status,
+    ).toBe('archived')
+  })
+
+  it('blocks onboarding goal check-in delivery when onboarding reopens during model work', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-07-06T13:30:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-onboarding-goal-checkin-reopened-',
+    )
+    await completeAssistantOnboarding({
+      completedAt: '2025-11-03T14:00:00.000Z',
+      reason: 'user_answered',
+      vault: vaultRoot,
+    })
+    getVaultAutomationStore(vaultRoot).push({
+      activeUntil: '2026-07-13T13:30:00.000Z',
+      automationId: MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID,
+      continuityPolicy: 'fresh',
+      createdAt: '2026-07-01T12:00:00.000Z',
+      instructions: 'Offer one low-pressure health direction choice.',
+      route: {
+        channel: 'telegram',
+        deliverySource: null,
+        deliveryTarget: 'member-thread',
+        identityId: null,
+        participantId: null,
+        threadId: 'member-thread',
+        threadIsDirect: true,
+      },
+      schedule: { at: '2026-07-06T13:30:00.000Z', kind: 'at' },
+      slug: 'onboarding-goal-checkin',
+      status: 'active',
+      summary: null,
+      tags: ['assistant', 'scheduled', 'murph-managed'],
+      title: 'First health direction check-in',
+      updatedAt: '2026-07-01T12:00:00.000Z',
+    })
+    const { claimed, paths } = await claimFirstCanonicalCronJob(vaultRoot)
+    let deliveryAttempted = false
+    cronMocks.sendAssistantMessageLocal.mockImplementationOnce(
+      async (notificationInput: {
+        beforeDelivery?: (context: {
+          decision: {
+            kind: 'send_message'
+            privateSummary: string
+            text: string
+          }
+          deliveryOutcome: null
+          response: string
+        }) => Promise<void>
+        beforeProviderAcceptedInputs?: () => Promise<void>
+      }) => {
+        await notificationInput.beforeProviderAcceptedInputs?.()
+        await reopenAssistantOnboarding({
+          reopenedAt: '2026-07-06T13:30:01.000Z',
+          vault: vaultRoot,
+        })
+        await notificationInput.beforeDelivery?.({
+          decision: {
+            kind: 'send_message',
+            privateSummary: 'Prepared a health direction choice.',
+            text: 'Does anything feel worth focusing on now?',
+          },
+          deliveryOutcome: null,
+          response: 'Does anything feel worth focusing on now?',
+        })
+        deliveryAttempted = true
+        throw new Error(
+          'Delivery should have been blocked after onboarding reopened.',
+        )
+      },
+    )
+
+    const result = await executeClaimedAssistantCronJob({
+      job: claimed,
+      paths,
+      trigger: 'scheduled',
+      vault: vaultRoot,
+    })
+
+    expect(result.run).toMatchObject({
+      outcome: 'skipped_gate',
+      reason: 'lifecycle_precondition',
+      status: 'skipped',
+    })
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledOnce()
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        turnPolicy: {
+          kind: 'read-only-send-or-skip',
+        },
+      }),
+    )
+    expect(deliveryAttempted).toBe(false)
+    expect(
+      findCanonicalAutomation(
+        vaultRoot,
+        MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID,
+      )?.status,
+    ).toBe('archived')
   })
 
   it('retries final-results lifecycle cleanup before stale one-shot expiry', async () => {

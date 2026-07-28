@@ -130,6 +130,14 @@ const ASSISTANT_SYSTEM_NOTIFICATION_TURN_PROFILE: Required<
   threadScope: 'isolated-thread',
   toolProfile: 'output-only-turn',
 }
+const ASSISTANT_READ_ONLY_NOTIFICATION_TURN_PROFILE: Required<
+  AssistantCodexTurnThreadScopeProfile
+> = {
+  nativeResumePolicy: 'disabled',
+  promptProfile: 'conversation',
+  threadScope: 'isolated-thread',
+  toolProfile: 'read-only-turn',
+}
 const ASSISTANT_NOTIFICATION_MAINTENANCE_CODEX_CONFIG_OVERRIDES = [
   'memories.use_memories=false',
   'memories.generate_memories=false',
@@ -139,11 +147,15 @@ export type AssistantNotificationDecision = z.infer<
   typeof assistantNotificationDecisionSchema
 >
 
-export type AssistantNotificationTurnPolicy = {
-  kind: 'maintenance-exact-skip'
-  maintenanceProfile: AssistantMaintenanceProfile
-  privateSummary: string
-}
+export type AssistantNotificationTurnPolicy =
+  | {
+      kind: 'maintenance-exact-skip'
+      maintenanceProfile: AssistantMaintenanceProfile
+      privateSummary: string
+    }
+  | {
+      kind: 'read-only-send-or-skip'
+    }
 
 export type AssistantNotificationResponsePolicy =
   | { kind: 'allow_send_or_skip' }
@@ -347,7 +359,7 @@ export async function sendAssistantNotificationLocal(
       const turnId = createAssistantTurnId()
       const hostedExecutionContext =
         isAssistantNotificationScheduledOccurrence(input) &&
-        !isAssistantNotificationMaintenanceExactSkip(input)
+        !assistantNotificationUsesRestrictedToolProfile(input)
           ? executionContext?.hosted ?? null
           : null
       const route = resolveAssistantTurnRoute(messageInput, defaults, resolved)
@@ -1471,6 +1483,21 @@ function isAssistantNotificationMaintenanceExactSkip(
   return input.turnPolicy?.kind === 'maintenance-exact-skip'
 }
 
+function isAssistantNotificationReadOnlySendOrSkip(
+  input: AssistantNotificationInput,
+): boolean {
+  return input.turnPolicy?.kind === 'read-only-send-or-skip'
+}
+
+function assistantNotificationUsesRestrictedToolProfile(
+  input: AssistantNotificationInput,
+): boolean {
+  return (
+    isAssistantNotificationMaintenanceExactSkip(input) ||
+    isAssistantNotificationReadOnlySendOrSkip(input)
+  )
+}
+
 function requireAssistantNotificationMaintenanceProfile(
   input: AssistantNotificationInput,
 ): AssistantMaintenanceProfile {
@@ -1492,6 +1519,9 @@ function resolveAssistantNotificationTurnProfile(
 ): Required<AssistantCodexTurnThreadScopeProfile> | null {
   if (isAssistantNotificationMaintenanceExactSkip(input)) {
     return ASSISTANT_MAINTENANCE_TURN_PROFILE
+  }
+  if (isAssistantNotificationReadOnlySendOrSkip(input)) {
+    return ASSISTANT_READ_ONLY_NOTIFICATION_TURN_PROFILE
   }
   return isAssistantNotificationScheduledOccurrence(input)
     ? null

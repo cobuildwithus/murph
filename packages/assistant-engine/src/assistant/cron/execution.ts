@@ -45,6 +45,10 @@ import {
 } from '../managed-automations.js'
 import { readAssistantOnboardingState } from '../onboarding-state.js'
 import {
+  MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID,
+  runOnboardingGoalCheckinAuthorityPrecondition,
+} from '../onboarding-goal-checkin-automation.js'
+import {
   resolveGroupNewsletterAutomationDelivery,
 } from '../group-newsletter-automation.js'
 import {
@@ -618,12 +622,24 @@ export async function executeClaimedAssistantCronJob(
     ) {
       // Route on the immutable automationId so a user-edited slug cannot
       // silently bypass the precondition.
-      const lifecycleResult = await runExperimentLifecycleOutcomePrecondition({
-        automationId: input.job.source.automationId,
-        tags: input.job.source.tags,
-        vault: input.vault,
-      })
-      if (lifecycleResult.kind === 'skip') {
+      const onboardingAuthority =
+        await runOnboardingGoalCheckinAuthorityPrecondition({
+          automationId: input.job.source.automationId,
+          occurrenceAt,
+          vault: input.vault,
+        })
+      if (onboardingAuthority.kind === 'skip') {
+        lifecycleSkipReason = onboardingAuthority.reason
+      }
+      const lifecycleResult =
+        lifecycleSkipReason === null
+          ? await runExperimentLifecycleOutcomePrecondition({
+              automationId: input.job.source.automationId,
+              tags: input.job.source.tags,
+              vault: input.vault,
+            })
+          : null
+      if (lifecycleResult?.kind === 'skip') {
         lifecycleSkipReason = lifecycleResult.reason
       }
     }
@@ -786,6 +802,7 @@ export async function executeClaimedAssistantCronJob(
             }
             await assertAssistantCronLifecycleNotificationStillAuthorized({
               job: input.job,
+              occurrenceAt,
               vault: input.vault,
             })
             await assertAssistantCronManagedOwnerStillAuthorized({
@@ -1317,6 +1334,7 @@ async function resolveAssistantCronCanonicalSourceAuthority(input: {
 
 async function assertAssistantCronLifecycleNotificationStillAuthorized(input: {
   job: ResolvedAssistantCronJob
+  occurrenceAt: string
   vault: string
 }): Promise<void> {
   if (
@@ -1324,6 +1342,18 @@ async function assertAssistantCronLifecycleNotificationStillAuthorized(input: {
     input.job.source.kind !== 'automation'
   ) {
     return
+  }
+
+  const onboardingAuthority =
+    await runOnboardingGoalCheckinAuthorityPrecondition({
+      automationId: input.job.source.automationId,
+      occurrenceAt: input.occurrenceAt,
+      vault: input.vault,
+    })
+  if (onboardingAuthority.kind === 'skip') {
+    throw new AssistantCronLifecycleNotificationInvalidatedError(
+      onboardingAuthority.reason,
+    )
   }
 
   const result = await runExperimentLifecycleDeliveryAuthorityPrecondition({
@@ -1521,6 +1551,14 @@ function resolveAssistantCronNotificationResponsePolicy(
 function resolveAssistantCronNotificationTurnPolicy(
   job: ResolvedAssistantCronJob,
 ): AssistantNotificationTurnPolicy | null {
+  if (
+    job.kind === 'canonical' &&
+    job.source.kind === 'automation' &&
+    job.source.automationId === MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID
+  ) {
+    return { kind: 'read-only-send-or-skip' }
+  }
+
   const policy = resolveAssistantCronBackgroundMaintenancePolicy(job)
   return policy
     ? {

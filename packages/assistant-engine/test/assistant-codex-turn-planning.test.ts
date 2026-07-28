@@ -293,6 +293,90 @@ describe('assistant Codex turn planning', () => {
     }
   })
 
+  it('plans scheduled read-only turns with bounded history and vault CLI access only', async () => {
+    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(
+      'READ_ONLY_CLI_CONTRACT',
+    )
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(
+      'PRIVATE_CONTEXT_SNAPSHOT',
+    )
+    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportsNativeResume: true,
+    })
+    const vault = await mkdtemp(
+      path.join(os.tmpdir(), 'assistant-read-only-notification-plan-'),
+    )
+    const session = createSession({
+      resumeState: {
+        assistantContractFingerprint: 'f'.repeat(64),
+        routeFingerprint: 'route-test',
+        threadId: 'private-conversation-thread',
+      },
+      turnCount: 2,
+    })
+
+    try {
+      await appendAssistantTranscriptEntries(vault, session.sessionId, [
+        { kind: 'user', text: 'I may want to leave this open for now.' },
+        { kind: 'assistant', text: 'That is completely fine.' },
+      ])
+      const plan = await resolveAssistantRouteTurnPlan({
+        executionContext: {
+          hosted: {
+            dynamicContextPrompts: ['PRIVATE_HOSTED_CONTEXT'],
+            memberId: 'member-read-only-notification',
+            providerFetch: fetch,
+            userEnvKeys: [],
+          },
+        },
+        hostedToolContext: {
+          ...createHostedToolContext(),
+          automationTool: { request: vi.fn() },
+          connectedApps: { request: vi.fn() },
+          familyPlanTool: { request: vi.fn() },
+        },
+        input: {
+          ...createMessageInput(),
+          deliverResponse: true,
+          prompt: 'Offer one low-pressure health direction choice.',
+          scheduledOccurrenceAt: '2026-07-20T17:30:00.000Z',
+          turnTrigger: 'automation-cron',
+          vault,
+        },
+        profile: {
+          promptProfile: 'conversation',
+          threadScope: 'isolated-thread',
+          toolProfile: 'read-only-turn',
+        },
+        promptTimeContext: {
+          currentLocalDate: '2026-07-20',
+          currentTimeZone: 'America/New_York',
+        },
+        route: createRoute(),
+        session,
+        sharedPlan: createPrivateSharedPlan(),
+      })
+
+      expect(plan.resume).toBeNull()
+      expect(plan.dynamicTools).toEqual([])
+      expect(plan.environments).toEqual([])
+      expect(plan.assistantCliContract).toContain('READ_ONLY_CLI_CONTRACT')
+      expect(plan.sessionContext).toBeUndefined()
+      expect(plan.conversationHistoryMessages).toEqual([
+        { content: 'I may want to leave this open for now.', role: 'user' },
+        { content: 'That is completely fine.', role: 'assistant' },
+      ])
+      expect(plan.systemPrompt).toContain('READ_ONLY_CLI_CONTRACT')
+      expect(plan.systemPrompt).not.toContain('PRIVATE_CONTEXT_SNAPSHOT')
+      expect(plan.systemPrompt).not.toContain('PRIVATE_HOSTED_CONTEXT')
+      expect(
+        planningMocks.readAssistantContextSnapshotPrompt,
+      ).not.toHaveBeenCalled()
+    } finally {
+      await rm(vault, { force: true, recursive: true })
+    }
+  })
+
   it('plans detached system notifications with no history, private context, or tools', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(
       'PRIVATE_CLI_CONTRACT',

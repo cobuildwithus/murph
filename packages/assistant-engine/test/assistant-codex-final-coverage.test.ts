@@ -545,7 +545,12 @@ describe('Codex model catalog', () => {
     expect(findCodexCatalogModelOptionIndex(null, [])).toBe(0)
   })
 
-  it('enforces the output-only boundary at provider execution', async () => {
+  async function verifyRestrictedProviderExecution(scenario: {
+    promptProfile: 'conversation' | 'system-notification'
+    shellDisabled: boolean
+    toolProfile: 'output-only-turn' | 'read-only-turn'
+  }): Promise<void> {
+    const { promptProfile, shellDisabled, toolProfile } = scenario
     const route = createRoute()
     const session = createAssistantSession({
       providerOptions: route.providerOptions,
@@ -603,8 +608,8 @@ describe('Codex model catalog', () => {
       hostedToolContext: unsafeHostedToolContext,
       input,
       profile: {
-        promptProfile: 'system-notification',
-        toolProfile: 'output-only-turn',
+        promptProfile,
+        toolProfile,
         threadScope: 'isolated-thread',
       },
       promptTimeContext: {
@@ -665,7 +670,6 @@ describe('Codex model catalog', () => {
     })
     expect(providerInput?.codexConfigOverrides).toEqual(
       expect.arrayContaining([
-        'features.shell_tool=false',
         'web_search="disabled"',
         'features.apps=false',
         'features.browser_use=false',
@@ -673,6 +677,15 @@ describe('Codex model catalog', () => {
         'features.multi_agent=false',
       ]),
     )
+    if (shellDisabled) {
+      expect(providerInput?.codexConfigOverrides).toContain(
+        'features.shell_tool=false',
+      )
+    } else {
+      expect(providerInput?.codexConfigOverrides).not.toContain(
+        'features.shell_tool=false',
+      )
+    }
     expect(providerInput?.codexConfigOverrides).not.toContain(
       'features.shell_tool=true',
     )
@@ -694,7 +707,23 @@ describe('Codex model catalog', () => {
     })
     expect(unsafeDynamicTools).not.toEqual([])
     expect(unsafeProgressDelivery.send).not.toHaveBeenCalled()
-  })
+  }
+
+  it.each([
+    {
+      promptProfile: 'system-notification' as const,
+      shellDisabled: true,
+      toolProfile: 'output-only-turn' as const,
+    },
+    {
+      promptProfile: 'conversation' as const,
+      shellDisabled: false,
+      toolProfile: 'read-only-turn' as const,
+    },
+  ])(
+    'enforces the $toolProfile boundary at provider execution',
+    verifyRestrictedProviderExecution,
+  )
 
   it('runs immutable room-model maintenance as a one-shot tool-only permission turn', async () => {
     const route = createRoute()

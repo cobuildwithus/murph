@@ -2512,9 +2512,11 @@ test('sendAssistantNotificationLocal gives hosted capabilities only to real sche
   const observedHostedToolContexts: Array<
     NotificationTurnProviderInput['hostedToolContext']
   > = []
+  const observedProfiles: Array<NotificationTurnProviderInput['profile']> = []
   const { sendAssistantNotificationLocal } = await loadNotificationTurnHarness({
     onExecuteCodexTurnWithRecovery: async (providerInput) => {
       observedHostedToolContexts.push(providerInput.hostedToolContext)
+      observedProfiles.push(providerInput.profile)
       return {
         kind: 'succeeded',
         providerTurn: providerResult,
@@ -2557,7 +2559,16 @@ test('sendAssistantNotificationLocal gives hosted capabilities only to real sche
     },
     vault: '/vaults/notification-device-scope',
   })
-  expect(observedHostedToolContexts).toHaveLength(3)
+  await sendAssistantNotificationLocal({
+    executionContext,
+    instructions: 'Offer one low-pressure health direction choice.',
+    scheduledOccurrenceAt: '2026-07-18T15:00:00.000Z',
+    turnPolicy: {
+      kind: 'read-only-send-or-skip',
+    },
+    vault: '/vaults/notification-device-scope',
+  })
+  expect(observedHostedToolContexts).toHaveLength(4)
   expect(observedHostedToolContexts[0]).toBeNull()
   expect(observedHostedToolContexts[1]?.automationTool).toBe(automationTool)
   expect(observedHostedToolContexts[1]?.connectedApps).toBe(connectedApps)
@@ -2568,6 +2579,13 @@ test('sendAssistantNotificationLocal gives hosted capabilities only to real sche
   )
   expect(observedHostedToolContexts[1]?.computerToolsAvailable).toBe(true)
   expect(observedHostedToolContexts[2]).toBeNull()
+  expect(observedHostedToolContexts[3]).toBeNull()
+  expect(observedProfiles[3]).toEqual({
+    nativeResumePolicy: 'disabled',
+    promptProfile: 'conversation',
+    threadScope: 'isolated-thread',
+    toolProfile: 'read-only-turn',
+  })
 })
 
 test('sendAssistantNotificationLocal exposes newsletter tools only with scheduled email authority', async () => {
