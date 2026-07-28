@@ -277,12 +277,7 @@ export async function listHostedLinqAssignableHomeLines(input: {
 }): Promise<HostedLinqAssignableHomeLine[]> {
   const limit = HOSTED_LINQ_ASSIGNABLE_HOME_LINE_LIMIT;
   const rows = await input.prisma.hostedLinqLine.findMany({
-    where: {
-      configuredAt: { not: null },
-      egressPolicy: "enabled",
-      healthStatus: { in: ["healthy", "unknown"] },
-      phoneNumberEncrypted: { not: null },
-    },
+    where: buildActiveHostedLinqManagedLineWhere(),
     orderBy: [
       { assignmentWeight: "desc" },
       { phoneNumberLookupKey: "asc" },
@@ -310,6 +305,36 @@ export async function listHostedLinqAssignableHomeLines(input: {
   }
 
   return mapHostedLinqAssignableHomeLineRows(rows);
+}
+
+/**
+ * New inbound route authority must come from the managed Linq line pool, not
+ * from a recipient phone supplied by the webhook alone. Lookup candidates keep
+ * this proof valid across contact-privacy key rotation without exposing the
+ * underlying phone number.
+ */
+export async function hasActiveHostedLinqManagedLine(input: {
+  phoneNumberLookupKeys: readonly string[];
+  prisma: HostedLinqLineClient;
+}): Promise<boolean> {
+  const phoneNumberLookupKeys = [...input.phoneNumberLookupKeys];
+  if (phoneNumberLookupKeys.length === 0) {
+    return false;
+  }
+
+  const line = await input.prisma.hostedLinqLine.findFirst({
+    where: {
+      ...buildActiveHostedLinqManagedLineWhere(),
+      phoneNumberLookupKey: {
+        in: phoneNumberLookupKeys,
+      },
+    },
+    select: {
+      phoneNumberLookupKey: true,
+    },
+  });
+
+  return line !== null;
 }
 
 export async function claimHostedLinqProactiveConversationCapacityTx(input: {
@@ -361,12 +386,7 @@ export async function assertHostedLinqAssignableHomeLinePoolReady(input: {
   prisma: HostedLinqLineClient;
 }): Promise<void> {
   const line = await input.prisma.hostedLinqLine.findFirst({
-    where: {
-      configuredAt: { not: null },
-      egressPolicy: "enabled",
-      healthStatus: { in: ["healthy", "unknown"] },
-      phoneNumberEncrypted: { not: null },
-    },
+    where: buildActiveHostedLinqManagedLineWhere(),
     select: {
       phoneNumberLookupKey: true,
     },
@@ -380,6 +400,15 @@ export async function assertHostedLinqAssignableHomeLinePoolReady(input: {
       retryable: false,
     });
   }
+}
+
+function buildActiveHostedLinqManagedLineWhere(): Prisma.HostedLinqLineWhereInput {
+  return {
+    configuredAt: { not: null },
+    egressPolicy: "enabled",
+    healthStatus: { in: ["healthy", "unknown"] },
+    phoneNumberEncrypted: { not: null },
+  };
 }
 
 function mapHostedLinqAssignableHomeLineRows(

@@ -356,7 +356,7 @@ export function ComponentsContent() {
             data-design-dashboard-legal-composition="true"
           >
             <HostedLegalConsentCard
-              acceptedPendingLabel="Refreshing your dashboard"
+              acceptedPendingLabel="Refreshing..."
               acceptScope={acceptDesignDashboardConsentScope}
               initialStatus={DESIGN_DASHBOARD_CONSENT_STATUS}
               launchDescription="We updated Murph's legal documents. Accept the current versions to get your full dashboard back."
