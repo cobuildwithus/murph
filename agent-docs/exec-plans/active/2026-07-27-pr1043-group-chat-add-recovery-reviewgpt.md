@@ -79,9 +79,11 @@ exact final PR head is merge-ready.
 2. [ ] Reproduce and correct only proven edge cases; run focused proof and the
    canonical coverage-bearing verification. Focused proof is green; canonical
    verification remains.
-3. [ ] Run the required local product-experience review and the one preliminary
+3. [x] Run the required local product-experience review and the one preliminary
    `completion-specialists` ReviewGPT pass; triage and resolve every finding.
-   Product-experience review passed; preliminary ReviewGPT remains.
+   Product-experience review passed. Preliminary ReviewGPT returned three
+   accepted test-only coverage findings; all three are resolved and focused
+   proof is green.
 4. [ ] Run the parent final review, close this plan with the scoped commit path,
    and push the exact candidate.
 5. [ ] Run the final ReviewGPT loop concurrently with CI until
@@ -106,6 +108,19 @@ exact final PR head is merge-ready.
   Web typecheck and scoped lint passed.
 - The required local product-experience review returned `PASS` after the Linq
   wrong-number fallback was made actionable and channel-specific.
+- Preliminary `completion-specialists` ReviewGPT reviewed pushed head
+  `d8177a816c`, returned three medium coverage findings, and supplied a
+  test-only patch. Parent inspection accepted all three: current-time expiry
+  proof for an existing Linq route, authenticated Telegram target and
+  missing-token retry proof, and Linq retryable private-send ownership proof.
+  The applied tests were tightened to use an in-trial provider timestamp for
+  the delayed Linq event.
+- The specialist remediation passes 91 focused tests, scoped ESLint,
+  `typecheck:prepared`, and `git diff --check`.
+- Canonical diff verification is still pending. Two bounded local admissions
+  exhausted the shared-slot limit behind unrelated verifier owners; the
+  canonical Crabbox fallback failed before Testbox creation because the
+  installed Blacksmith delegate rejects the dispatcher's `--stop-after` flag.
 
 ## Verification plan
 

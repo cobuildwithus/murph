@@ -479,6 +479,62 @@ describe("Linq group-chat visible access recovery", () => {
     }));
   });
 
+  it("preserves webhook retry ownership for a retryable private-route failure", async () => {
+    const event = buildGroupLinqEvent("evt_retryable_private_route");
+    const retryableError = hostedOnboardingError({
+      code: "LINQ_SEND_FAILED",
+      httpStatus: 502,
+      message: "Linq outbound reply failed with HTTP 503.",
+      retryable: true,
+    });
+    const sendHostedLinqChatMessage = vi.fn().mockRejectedValue(retryableError);
+    const readHostedMemberRoutingState = vi.fn()
+      .mockResolvedValueOnce({
+        linqChatId: "chat_private_member",
+        linqRecipientPhone: "+15550000000",
+      })
+      .mockResolvedValueOnce({
+        linqChatId: "chat_private_member",
+        linqRecipientPhone: "+15550000000",
+      });
+    const dependencies = buildLinqDependencies({
+      event,
+      getHostedLinqChatSummary: vi.fn(async () => ({
+        handles: [],
+        isGroup: false,
+      })),
+      readHostedMemberRoutingState,
+      resolveHostedRecognizedInboundAccess: vi.fn(async () => ({
+        kind: "access_notice" as const,
+        message: TRIAL_CONVERSION_MESSAGE,
+        noticeCode: "trial_conversion_pending" as const,
+        responseReason: "sent-trial-conversion-notice",
+      })),
+      sendHostedLinqChatMessage,
+    });
+    const handler: HostedOnboardingLinqWebhookHandler = vi.fn(async () => ({
+      ignored: true,
+      ok: true as const,
+      reason: "group-chat",
+    }));
+
+    await expect(withHostedVisibleSecondaryLinqOutcomes(
+      handler,
+      dependencies,
+    )({
+      rawBody: JSON.stringify(event),
+      signature: "signature",
+      timestamp: "timestamp",
+    })).rejects.toBe(retryableError);
+
+    expect(sendHostedLinqChatMessage).toHaveBeenCalledOnce();
+    expect(sendHostedLinqChatMessage).toHaveBeenCalledWith(expect.objectContaining({
+      chatId: "chat_private_member",
+      idempotencyKey: "visible-secondary-private:evt_retryable_private_route",
+      replyToMessageId: null,
+    }));
+  });
+
   it("falls back to the neutral group reply after a definite private-route rejection", async () => {
     const event = buildGroupLinqEvent("evt_stale_private_route");
     const sendHostedLinqChatMessage = vi.fn()

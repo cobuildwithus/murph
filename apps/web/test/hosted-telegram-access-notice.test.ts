@@ -211,6 +211,97 @@ describe("Telegram access notice delivery", () => {
     );
   });
 
+  it.each([
+    {
+      expectedTarget: {
+        businessConnectionId: "biz-42",
+        chatId: "456",
+        directMessagesTopicId: 9,
+      },
+      label: "preserves a sender-matching stored private context",
+      storedTarget: {
+        businessConnectionId: "biz-42",
+        chatId: "456",
+        directMessagesTopicId: 9,
+      },
+      storedThreadId: "456:business:biz-42:dm-topic:9",
+    },
+    {
+      expectedTarget: { chatId: "456" },
+      label: "ignores a stored context for a different Telegram chat",
+      storedTarget: {
+        businessConnectionId: "biz-42",
+        chatId: "789",
+        directMessagesTopicId: 9,
+      },
+      storedThreadId: "789:business:biz-42:dm-topic:9",
+    },
+  ])("$label", async ({ expectedTarget, storedTarget, storedThreadId }) => {
+    mocks.readHostedMemberRoutingState.mockResolvedValue({
+      telegramThreadId: storedThreadId,
+      telegramUserId: "456",
+    });
+    mocks.parseTelegramThreadTarget.mockImplementation((target: string) => {
+      if (target === storedThreadId) {
+        return storedTarget;
+      }
+      return target === "456" ? { chatId: "456" } : null;
+    });
+
+    await expect(sendHostedTelegramAccessNotice({
+      authorizedTelegramUserId: "456",
+      memberId: "member_123",
+      message: "Finish setup, then try the group again.",
+      noticeCode: "signup_required",
+      prisma: prisma as never,
+      replyToMessageId: null,
+      sourceEventId: "telegram:update:stored-private-context",
+      target: "456",
+    })).resolves.toEqual({ status: "sent" });
+
+    expect(mocks.sendHostedTelegramTextMessage).toHaveBeenCalledWith({
+      message: "Finish setup, then try the group again.",
+      replyToMessageId: null,
+      target: expectedTarget,
+    });
+  });
+
+  it("keeps a missing Telegram bot token retryable before private dispatch", async () => {
+    const sentAt = new Date("2026-07-25T12:00:00.000Z");
+    const retryAt = new Date("2026-07-25T12:00:30.000Z");
+    mocks.sendHostedTelegramTextMessage.mockRejectedValue(
+      hostedOnboardingError({
+        code: "HOSTED_TELEGRAM_BOT_TOKEN_NOT_CONFIGURED",
+        httpStatus: 500,
+        message: "TELEGRAM_BOT_TOKEN must be configured to call the Telegram Bot API.",
+        retryable: false,
+      }),
+    );
+
+    await expect(sendHostedTelegramAccessNotice({
+      authorizedTelegramUserId: "456",
+      memberId: "member_123",
+      message: "Finish setup, then try the group again.",
+      noticeCode: "signup_required",
+      prisma: prisma as never,
+      replyToMessageId: null,
+      sentAt,
+      sourceEventId: "telegram:update:token-missing",
+      target: "456",
+    })).resolves.toEqual({ retryAt, status: "in_flight" });
+
+    expect(mocks.markHostedLinqDeliverySendFailedTx).toHaveBeenCalledWith(
+      expect.objectContaining({
+        expectedAttemptedAt: sentAt,
+        failureCode: "HOSTED_TELEGRAM_BOT_TOKEN_NOT_CONFIGURED",
+        idempotencyKey: expect.stringMatching(/^telegram-access-notice:/u),
+        prisma,
+        retryAfterAt: retryAt,
+      }),
+    );
+    expect(mocks.markHostedLinqDeliveryAcceptedTx).not.toHaveBeenCalled();
+  });
+
   it("terminalizes an ambiguous unanchored send instead of duplicating it on replay", async () => {
     mocks.sendHostedTelegramTextMessage.mockRejectedValue(
       new Error("Telegram request outcome was unknown."),
