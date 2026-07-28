@@ -27,6 +27,31 @@ Runner bundle assembly esbuild-bundles two boot-critical surfaces with byte budg
 The device-sync package boundary suite also walks the static source graph from the runner's runtime-config entrypoint and rejects provider runtime modules, importer modules, and the Junction SDK. This focused gate catches boot-closure ownership regressions before the packed-bundle guard validates the final esbuild metafile.
 Hosted assistant delivery recovery now relies on committed side-effect state inside the encrypted workspace and the web-owned hosted workspace checkpoint.
 
+## Database Health Alert Rollout
+
+Before deploying the Worker version that introduces
+`DatabaseHealthDurableObject`, configure the production GitHub environment:
+
+- var `HOSTED_DATABASE_ALERT_ENABLED=1` (leave it unset outside production);
+- vars `HOSTED_DATABASE_ALERT_PLANETSCALE_ORGANIZATION` and
+  `HOSTED_DATABASE_ALERT_PLANETSCALE_BRANCH_ID`;
+- secrets `HOSTED_DATABASE_ALERT_PLANETSCALE_SERVICE_TOKEN_ID` and
+  `HOSTED_DATABASE_ALERT_PLANETSCALE_SERVICE_TOKEN` for a dedicated PlanetScale
+  token with only `read_metrics_endpoints`;
+- secret `HOSTED_DATABASE_ALERT_LINQ_CHAT_ID` for the existing operator chat;
+  and
+- the already-required `LINQ_API_TOKEN`.
+
+Deploy Cloudflare only; no Web or database migration is involved. Wrangler
+migration `v4` creates the SQLite Durable Object namespace and the generated
+config installs the five-minute cron. After deployment, confirm one scheduled
+invocation records an `ok` sample without a Linq send under healthy metrics.
+Then use the test-only fake-provider coverage for threshold and delivery proof;
+do not induce a production database failure or mutate a real counter for smoke.
+Confirm Workers Observability contains no configuration or collection failure
+codes. Rollback may leave the unused v4 namespace and samples in place; an older
+Worker does not schedule or address it, and no Web compatibility window exists.
+
 ## Device-Sync Wake Epoch Rollout
 
 Connection-scoped `device-sync.wake` items bind their authority to the
@@ -368,6 +393,10 @@ Set these in the selected GitHub environment as vars:
 - `HOSTED_WEB_PRODUCTION_BASE_URL`
 - `HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG`
 - `HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME`
+- `HOSTED_DATABASE_ALERT_ENABLED=1` (production only; it must be unset for
+  preview and development)
+- `HOSTED_DATABASE_ALERT_PLANETSCALE_BRANCH_ID`
+- `HOSTED_DATABASE_ALERT_PLANETSCALE_ORGANIZATION`
 - `HOSTED_R2_PRESIGN_ACCOUNT_ID`
 - `HOSTED_R2_PRESIGN_BUCKET_NAME`
 
@@ -395,11 +424,15 @@ Set these in the selected GitHub environment as secrets:
 - `CLOUDFLARE_API_TOKEN`
 - `CLOUDFLARE_ACCOUNT_ID`
 - `HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK`
+- `HOSTED_DATABASE_ALERT_LINQ_CHAT_ID`
+- `HOSTED_DATABASE_ALERT_PLANETSCALE_SERVICE_TOKEN`
+- `HOSTED_DATABASE_ALERT_PLANETSCALE_SERVICE_TOKEN_ID`
 - `HOSTED_LOG_FINGERPRINT_SECRET`
 - `HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET`
 - `HOSTED_R2_PRESIGN_ACCESS_KEY_ID`
 - `HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY`
 - `HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK`
+- `LINQ_API_TOKEN`
 - `MURPH_DATA_API_KEY`
 - `OPENAI_API_KEY`
 
@@ -550,7 +583,11 @@ When hosted email sender identity is configured, deploy automation renders one n
 
 Hosted assistant provider and channel secrets:
 
-- `EXA_API_KEY`, `LINQ_API_TOKEN`, `MAPBOX_ACCESS_TOKEN`, and `TELEGRAM_BOT_TOKEN` when those hosted runtime integrations are enabled. These are Worker-owned intercept credentials, not raw child-container env. Exa egress is limited to `POST /search`.
+- `EXA_API_KEY`, `MAPBOX_ACCESS_TOKEN`, and `TELEGRAM_BOT_TOKEN` when those
+  hosted runtime integrations are enabled. `LINQ_API_TOKEN` is no longer
+  optional because the independent database-health page owner uses it. These
+  are Worker-owned credentials, not raw child-container env. Exa egress is
+  limited to `POST /search`.
 
 Hosted usage-reporting secrets:
 
@@ -581,7 +618,6 @@ Opt-in execution integrations:
 - `JUNCTION_API_KEY`
 - `JUNCTION_CLIENT_USER_ID_SECRET`
 - `JUNCTION_WEBHOOK_SECRET`
-- `LINQ_API_TOKEN`
 - `LINQ_WEBHOOK_SECRET`
 - `MAPBOX_ACCESS_TOKEN`
 - `OURA_CLIENT_ID`

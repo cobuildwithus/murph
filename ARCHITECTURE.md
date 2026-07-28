@@ -743,6 +743,19 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   group-room model, Temporal, and Cloudflare own no sponsorship state,
   financial fact, expiration scheduler, or second delivery queue.
 - `apps/cloudflare`: hosted execution plane for ensure-processing requests (callback-signed from the Temporal orchestrator, or Vercel OIDC-authenticated best-effort direct ingress wakes from `apps/web`) plus Vercel OIDC-authenticated browser-vault session, deletion, status, and web-owned Telegram usage-limit notice requests, plus the signed deploy-smoke callback used to verify the managed container image, with per-user coordination via container-enabled Durable Objects, active write-fence wake/replace behavior, encrypted hosted workspace snapshots, legacy encrypted artifact objects, encrypted runner-secret blobs, short-lived DO-local coordination metadata, derived gateway projections, and a native Cloudflare container image that runs one-shot inbox/parser/assistant/device-sync execution through `packages/assistant-runtime`; it owns execution coordination, configured env profile selection, user-secret allowlisting, image-owned native parser tool paths, Worker-owned provider credential injection through runner HTTPS egress interception, and adapter transport details such as local loopback URL rewriting, while runtime launch semantics and profile key sets come from `packages/assistant-runtime`. Web applies its hosted access-and-usage decision before exhausted runnable mailbox work reaches Temporal or the runner. Cloudflare receives no billing or credit projection, cannot grant usage, and performs no Stripe call. Web preserves hosted conversation input before admission, and allowance accounting runs after usage exists. Cloudflare/runner #587 or newer is the permanent rollback floor while Web omits the retired callback route. Cloudflare carries the signed plan-usage read as a transport-only runtime port and cannot select a member, billing action, or usage interpretation; it owns opaque runtime blobs only, not canonical hosted product facts outside the encrypted workspace snapshot, and it may verify signed ingress/runtime root envelopes and unwrap its P-256 recipient wrap without holding GCP KMS decrypt authority; foreground runtime work may defer intermediate checkpoints, the active invocation remains dirty until the runtime-owned idle-floor—or last-chance shutdown—`idle_shutdown` checkpoint succeeds, RunnerContainer never records pending checkpoint intent, and activity expiry is cleanup-only
+- The same Cloudflare app owns one production database-health singleton that is
+  deliberately independent of hosted Web and Postgres. A five-minute Cron
+  Trigger asks a SQLite-backed `DatabaseHealthDurableObject` to discover and
+  scrape the configured PlanetScale production branch, retain 30 days of
+  normalized connection metrics or classified scrape failures, evaluate the
+  branch-local PgBouncer and Postgres connection conditions, and page one
+  preconfigured operator Linq chat. Its SQLite contains only counts, ratios,
+  bounded state maps, error-counter baselines, failure codes, and alert
+  admission state; it contains no connection URL, credential, query, member
+  identifier, phone number, or raw response. This is operational monitoring
+  history, never health truth, routing authority, or a product control plane.
+  The Web-owned reply-latency monitor remains a separate Resend-email incident
+  owner and never falls back to this Linq path.
 - Hosted deployment topology has one generated Cloudflare config/deploy owner
   and two manual protected-main targets: `production` and `preview`. The
   `preview` target is a separate trust boundary, not a mode inside production:

@@ -12,6 +12,30 @@ Last verified: 2026-07-27
 
 ## Runtime Expectations
 
+- The production database-health operator alert is an independent Cloudflare
+  singleton so the monitored Postgres database cannot take down its own page
+  owner. A five-minute Cron Trigger records one normalized PlanetScale sample
+  or classified failure in Durable Object SQLite and prunes history after 30
+  days. A two-minute persisted run lease coalesces overlapping cron delivery.
+  Concrete unhealthy gauges page immediately; discovery, scrape, parse, or
+  required-metric absence must recur on two consecutive runs before paging.
+  The first healthy sample after an incident closes it without a recovery
+  message. Provider entry is globally fenced by the persisted last-attempt
+  timestamp, so neither a new incident, recurrence, retry, nor worker restart
+  can attempt Linq more often than once every 30 minutes. The attempt time is
+  actual wall time, not the Cron slot, and is written before network egress.
+  The message's UTC check time likewise comes from the actual completed
+  collection run while the Cron slot remains only the persisted sample
+  identity. Every eligible attempt retrieves the configured direct chat and
+  current line reputation; unhealthy or indeterminate delivery health produces
+  no message POST and retains the pending alert for the next paced attempt.
+  Healthy delivery uses Linq's no-`from` auto-selection route. A
+  transport-ambiguous or rejected send keeps the exact persisted body and Linq
+  idempotency key for the next eligible attempt; acknowledged recurrences
+  advance the alert sequence and choose another fixed opening while rebuilding
+  current metric evidence. Message variation must remain contextual and
+  deterministic, never random padding. Database pages intentionally have no
+  quiet hours.
 - Linq instant start uses the existing planner twice around the existing no-card Pulse-trial owner. The first transaction may create the canonical member, verified inbound phone identity, pending same-line route, and invite, but it neither counts the inbound nor appends the conversation. The invite records the persisted model-source admission event and is the single-owner token for that exact original inbound. Only the transaction whose unique phone-identity insert actually creates a genuinely new member may mint the token; if another inbound wins that insert during classifier latency, the loser exits retryably before invite or accounting work and that signup path remains authoritative. While a token remains pending, a different inbound for the inactive member exits retryably before accounting or side effects instead of continuing or canceling the start. Stripe customer/subscription provisioning, the billing write, and activation share the existing member lock; before any Stripe mutation that owner revalidates the exact invite and event, and activation clears the token in the same transaction. Stripe calls use the existing five-second, no-network-retry authority budget. A second ordinary planner pass observes active access, promotes the route, counts the original inbound once, and appends it once. Later inbounds then take the ordinary active-member path. Only a genuinely new billing identity can enter this path; an existing Stripe customer falls back before subscription creation so a saved card cannot silently auto-convert. Any classifier, configuration, route, definitive Stripe, or activation failure falls back to the existing signup-link path, while the single-owner wait remains provider-retryable, without creating a second entitlement, queue, or runtime.
 
 - Define startup requirements, health checks, and critical invariants.

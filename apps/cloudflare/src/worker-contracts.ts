@@ -4,6 +4,8 @@ import type {
   HostedWorkspaceSnapshotOrphanCandidate,
   HostedWorkspaceSnapshotUploadSession,
 } from "./workspace-snapshot-store.ts";
+import type { DatabaseHealthMonitorResult } from "./database-health/monitor.ts";
+import type { DatabaseHealthStoredSample } from "./database-health/store.ts";
 
 export interface WorkerSendEmailBindingLike {
   send(message: unknown): Promise<unknown>;
@@ -143,6 +145,21 @@ export interface WorkerUserRunnerNamespaceLike<
   getByName(name: string): TStub;
 }
 
+export interface WorkerDatabaseHealthStubLike {
+  readRecentSamples?(input?: {
+    limit?: number;
+  }): Promise<DatabaseHealthStoredSample[]> | DatabaseHealthStoredSample[];
+  runScheduledCheck(input?: {
+    scheduledAtMs?: number;
+  }): Promise<DatabaseHealthMonitorResult>;
+}
+
+export interface WorkerDatabaseHealthNamespaceLike<
+  TStub extends WorkerDatabaseHealthStubLike = WorkerDatabaseHealthStubLike,
+> {
+  getByName(name: string): TStub;
+}
+
 export interface WorkerEnvironmentContract<
   TStub extends WorkerUserRunnerStubLike = WorkerUserRunnerStubLike,
 > extends Readonly<Record<string, unknown>> {
@@ -153,6 +170,13 @@ export interface WorkerEnvironmentContract<
     tag?: string;
     timestamp?: string;
   };
+  DATABASE_HEALTH_MONITOR?: WorkerDatabaseHealthNamespaceLike;
+  HOSTED_DATABASE_ALERT_ENABLED?: string;
+  HOSTED_DATABASE_ALERT_LINQ_CHAT_ID?: string;
+  HOSTED_DATABASE_ALERT_PLANETSCALE_BRANCH_ID?: string;
+  HOSTED_DATABASE_ALERT_PLANETSCALE_ORGANIZATION?: string;
+  HOSTED_DATABASE_ALERT_PLANETSCALE_SERVICE_TOKEN?: string;
+  HOSTED_DATABASE_ALERT_PLANETSCALE_SERVICE_TOKEN_ID?: string;
   HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS?: string;
   HOSTED_AI_USAGE_REPORTING_SECRET?: string;
   HOSTED_LOG_FINGERPRINT_SECRET?: string;
