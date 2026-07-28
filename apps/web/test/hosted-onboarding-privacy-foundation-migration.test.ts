@@ -963,6 +963,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260727040000_relax_hosted_usage_credit_detached_direct_proof",
       "20260727120000_hosted_member_checkout_session",
       "20260727190000_hosted_group_sponsorship_moment",
+      "20260728050000_rearm_hosted_mailbox_content_retention",
       "migration_lock.toml",
     ]);
     expect(hostedUsageReferralEntryKindMigrationSql.trim()).toBe(
