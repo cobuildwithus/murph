@@ -1,6 +1,6 @@
 # Device Sync Hosted Control Plane
 
-Last verified against repo layout: 2026-07-15
+Last verified against repo layout: 2026-07-27
 
 ## Current split
 
@@ -129,7 +129,7 @@ Recommended durable tables remain:
 
 Postgres should keep only opaque ids, blind indexes, typed summaries, sparse signals, audit history, dirty resource/window summaries, and the canonical hosted runtime authority consumed by the internal snapshot/apply/dirty-state/pending/ack routes. It should not store canonical health facts.
 
-`device_connect_intent` stores short-lived first-party Murph connect claims for hosted assistant-initiated wearable linking. The signed internal connect-link route returns only the first-party `/device/connect/:claim` URL to the runner. Opening that URL requires the authenticated Murph app session for the same member before provider OAuth starts. The provider callback then consumes OAuth state only for that same member. Intent rows must not store raw provider or Junction authorization URLs.
+`device_connect_intent` stores short-lived first-party Murph connect claims for hosted assistant-initiated wearable linking. The signed internal connect-link route returns only the first-party `/device/connect/:claim` URL to the runner. Opening that URL requires the authenticated Murph app session for the same member before provider OAuth starts. The hosted browser start also requires its configured provider callback base to use that request's hostname; a mismatch fails before OAuth state creation or provider authorization. The provider callback then requires the active app session and consumes OAuth state only when its `expectedOwnerId` matches that same member. Intent rows must not store raw provider or Junction authorization URLs.
 
 `device_sync_dirty_connection` is the coalescing point for high-cardinality device webhook backfills. It is keyed by hosted connection ID and tracks `dirty_revision`, `processed_revision`, first/latest dirty timestamps, widened safe windows, compact resource/source counters, and a compact `dirty_resources_json` map. It must not store raw provider request bodies, provider tokens, raw samples, or user-visible health facts. Provider-owned durable webhook work, such as Junction direct data or exact resource/delete/deauthorization jobs needed for later import, is event-triggered work and is stored in `device_sync_dirty_payload` as bounded encrypted/compressed payload rows until the runtime consumes and explicitly acknowledges those row ids.
 
@@ -217,7 +217,7 @@ These are internet-facing and provider-facing only. `:provider` is resolved thro
 - `POST /device/connect/:claim`
 - `GET /device-sync/connect/complete`
 
-These are the only browser-facing wearable connection start and completion routes. The settings start route resolves direct provider manifests and the connect-target catalog assembled by `@murphai/device-syncd/config`, so `/connect` can expose direct WHOOP/Oura/Strava targets plus Junction-backed Garmin/Fitbit-style sources when those providers are configured. The first-party `/device/connect/:claim` route is the hosted assistant confirmation path: GET renders login/confirmation state without mutating provider OAuth state, and POST starts provider OAuth only for the authenticated member that owns the claim. Successful hosted provider callbacks should redirect to the completion page so the user can continue into the text-Murph flow.
+These are the only browser-facing wearable connection start and completion routes. The settings start route resolves direct provider manifests and the connect-target catalog assembled by `@murphai/device-syncd/config`, so `/connect` can expose direct WHOOP/Oura/Strava targets plus Junction-backed Garmin/Fitbit-style sources when those providers are configured. The first-party `/device/connect/:claim` route is the hosted assistant confirmation path: GET renders login/confirmation state without mutating provider OAuth state, and POST starts provider OAuth only for the authenticated member that owns the claim. Every hosted browser start compares the resolved callback base with the authenticated request hostname before creating shared ingress; `DEVICE_SYNC_PUBLIC_BASE_URL` may change the path, but a split hostname is an operator error because the `__Host-` app-session cookie is host-only. Successful hosted provider callbacks require that app session, pass the session member as `expectedOwnerId`, and redirect to the completion page only after shared ingress verifies the OAuth-state owner.
 
 ### Hosted settings-authenticated routes
 
@@ -396,6 +396,6 @@ Local responsibilities:
 - `DEVICE_SYNC_SECRET` is the daemon's local bootstrap and service secret
 - `DEVICE_SYNC_CONTROL_TOKEN` is the daemon's loopback control-plane bearer token
 
-Those are local-daemon concerns. They are not part of the hosted browser or hosted execution auth contract.
+Those are local-daemon concerns. They are not part of the hosted browser or hosted execution auth contract. Local and tunneled daemon callback URLs remain explicitly configured on the daemon boundary and are not subject to the hosted browser app-session hostname check.
 
 Hosted execution continues to use signed internal web callbacks and hosted agent/session credentials instead of the daemon's `DEVICE_SYNC_CONTROL_TOKEN`.

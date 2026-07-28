@@ -30,6 +30,7 @@ const HOSTED_PUBLIC_BASE_URL_ENV_KEYS = [
   "HOSTED_WEB_BASE_URL",
 ] as const;
 const HOSTED_PUBLIC_VERCEL_URL_ENV_KEY = "VERCEL_PROJECT_PRODUCTION_URL";
+const DEVICE_SYNC_PUBLIC_BASE_URL_ENV_KEY = "DEVICE_SYNC_PUBLIC_BASE_URL";
 const MURPH_TELEGRAM_USERNAME_OVERRIDE_ENV_KEY = "MURPH_TELEGRAM_USERNAME_OVERRIDE";
 const HOSTED_PUBLIC_SUBDOMAIN_PREFIXES = ["app", "www", "web"] as const;
 const WORKFLOW_LOCAL_DATA_DIR_ENV_KEY = "WORKFLOW_LOCAL_DATA_DIR";
@@ -355,8 +356,64 @@ export function buildHostedWebClientEnv(
   };
 }
 
+export function assertHostedBrowserDeviceSyncCallbackHostnameConfiguration(
+  environment: NodeJS.ProcessEnv = process.env,
+): void {
+  const configuredCallbackValue =
+    environment[DEVICE_SYNC_PUBLIC_BASE_URL_ENV_KEY]?.trim() ?? "";
+  if (!configuredCallbackValue) {
+    return;
+  }
+
+  const configuredCallbackBaseUrl = normalizeConfiguredBaseUrl(
+    configuredCallbackValue,
+    {
+      allowHttpLoopback: true,
+      requireOriginOnly: false,
+    },
+  );
+
+  if (!configuredCallbackBaseUrl) {
+    throw new TypeError(
+      "DEVICE_SYNC_PUBLIC_BASE_URL must be a valid hosted browser OAuth callback URL.",
+    );
+  }
+
+  const configuredAppSessionBaseUrls = HOSTED_PUBLIC_BASE_URL_ENV_KEYS
+    .flatMap((label) => {
+      const baseUrl = normalizeConfiguredBaseUrl(environment[label], {
+        allowHttpLoopback: true,
+      });
+      return baseUrl ? [{ baseUrl, label }] : [];
+    });
+  const vercelAppSessionBaseUrl = normalizeConfiguredBaseUrl(
+    environment[HOSTED_PUBLIC_VERCEL_URL_ENV_KEY],
+    { allowHttpLoopback: true },
+  );
+  const appSessionBaseUrls = configuredAppSessionBaseUrls.length > 0
+    ? configuredAppSessionBaseUrls
+    : vercelAppSessionBaseUrl
+      ? [{
+          baseUrl: vercelAppSessionBaseUrl,
+          label: HOSTED_PUBLIC_VERCEL_URL_ENV_KEY,
+        }]
+      : [];
+  const callbackHostname = new URL(configuredCallbackBaseUrl).hostname;
+
+  for (const appSessionBaseUrl of appSessionBaseUrls) {
+    if (new URL(appSessionBaseUrl.baseUrl).hostname === callbackHostname) {
+      continue;
+    }
+
+    throw new TypeError(
+      `DEVICE_SYNC_PUBLIC_BASE_URL must use the ${appSessionBaseUrl.label} hostname for hosted browser OAuth callbacks.`,
+    );
+  }
+}
+
 async function nextConfig(phase: string): Promise<NextConfig> {
   configureHostedWebWorkflowLocalDataDir(phase);
+  assertHostedBrowserDeviceSyncCallbackHostnameConfiguration();
   return buildHostedWebNextConfig(phase);
 }
 
@@ -501,6 +558,7 @@ function normalizeConfiguredBaseUrl(
   value: string | null | undefined,
   options?: {
     allowHttpLoopback?: boolean;
+    requireOriginOnly?: boolean;
   },
 ): string | null {
   const parsed = parseConfiguredOrigin(value);
@@ -523,7 +581,11 @@ function normalizeConfiguredBaseUrl(
     throw new TypeError("Hosted public base URLs must not include embedded credentials.");
   }
 
-  if (parsed.pathname !== "" && parsed.pathname !== "/") {
+  if (
+    (options?.requireOriginOnly ?? true)
+    && parsed.pathname !== ""
+    && parsed.pathname !== "/"
+  ) {
     throw new TypeError(
       "Hosted public base URLs must not include a path; configure only the origin.",
     );

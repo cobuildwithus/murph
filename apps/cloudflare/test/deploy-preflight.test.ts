@@ -271,14 +271,15 @@ describe("deploy preflight helpers", () => {
     );
   });
 
-  it("rejects a preview device callback on the production Web origin", () => {
+  it("rejects a preview device callback on a different hostname from hosted Web", () => {
     expect(listHostedDeployEnvironmentInvariantErrors(
       createRequiredPreviewWorkerDeployEnv({
-        DEVICE_SYNC_PUBLIC_BASE_URL: "https://app.example.test/api/device-sync",
+        DEVICE_SYNC_PUBLIC_BASE_URL:
+          "https://device-sync-staging.example.test/api/device-sync",
       }),
       { deployWorker: true },
     )).toContain(
-      "DEVICE_SYNC_PUBLIC_BASE_URL must not use the HOSTED_WEB_PRODUCTION_BASE_URL origin in preview deploys.",
+      "DEVICE_SYNC_PUBLIC_BASE_URL must use the HOSTED_WEB_BASE_URL hostname in preview deploys.",
     );
   });
 
@@ -355,6 +356,26 @@ describe("deploy preflight helpers", () => {
       HOSTED_WEB_BASE_URL: "https://preview.example.test",
     }), { deployWorker: true })).toThrowError(
       "production deploys must set HOSTED_WEB_BASE_URL to HOSTED_WEB_PRODUCTION_BASE_URL",
+    );
+  });
+
+  it("allows an explicit production callback path on the hosted Web hostname", () => {
+    expect(listHostedDeployEnvironmentInvariantErrors(
+      createRequiredWorkerDeployEnv({
+        DEVICE_SYNC_PUBLIC_BASE_URL: "https://app.example.test/api/device-sync",
+      }),
+      { deployWorker: true },
+    )).toEqual([]);
+  });
+
+  it("rejects a production device callback on a different hostname from hosted Web", () => {
+    expect(listHostedDeployEnvironmentInvariantErrors(
+      createRequiredWorkerDeployEnv({
+        DEVICE_SYNC_PUBLIC_BASE_URL: "https://device-sync.example.test/api/device-sync",
+      }),
+      { deployWorker: true },
+    )).toContain(
+      "DEVICE_SYNC_PUBLIC_BASE_URL must use the HOSTED_WEB_BASE_URL hostname in production deploys.",
     );
   });
 
@@ -762,11 +783,11 @@ describe("deploy preflight helpers", () => {
     );
   });
 
-  it("allows preview deploy hostnames and a path-capable callback when all resolve publicly", async () => {
+  it("allows preview deploy hostnames and a same-host path-capable callback when all resolve publicly", async () => {
     await expect(assertHostedDeployEnvironmentAsync(
       createRequiredPreviewWorkerDeployEnv({
         DEVICE_SYNC_PUBLIC_BASE_URL:
-          "https://device-sync-staging.example.test/api/device-sync",
+          "https://web-staging.example.test/api/device-sync",
       }),
       { deployWorker: true },
       {
@@ -778,7 +799,7 @@ describe("deploy preflight helpers", () => {
   it.each([
     ["CF_PUBLIC_BASE_URL", "hosted-runner-staging.example.test"],
     ["HOSTED_WEB_BASE_URL", "web-staging.example.test"],
-    ["DEVICE_SYNC_PUBLIC_BASE_URL", "device-sync-staging.example.test"],
+    ["DEVICE_SYNC_PUBLIC_BASE_URL", "web-staging.example.test"],
   ] as const)(
     "rejects preview %s when it resolves to a private-network address",
     async (label, privateHostname) => {
@@ -787,7 +808,7 @@ describe("deploy preflight helpers", () => {
           label === "DEVICE_SYNC_PUBLIC_BASE_URL"
             ? {
                 DEVICE_SYNC_PUBLIC_BASE_URL:
-                  "https://device-sync-staging.example.test/api/device-sync",
+                  "https://web-staging.example.test/api/device-sync",
               }
             : {},
         ),

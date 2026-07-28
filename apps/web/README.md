@@ -846,9 +846,10 @@ Public origin precedence:
 - otherwise `HOSTED_WEB_BASE_URL` is the canonical hosted-web public base URL
 - on Vercel, when neither explicit hosted public-base env is set, `apps/web`
   falls back to `VERCEL_PROJECT_PRODUCTION_URL`
-- `DEVICE_SYNC_PUBLIC_BASE_URL` overrides the provider-facing callback and
-  webhook base for hosted device sync; when unset, `apps/web` derives that base
-  as `<canonical hosted public origin>/api/device-sync`
+- `DEVICE_SYNC_PUBLIC_BASE_URL` may override the provider-facing callback and
+  webhook path for hosted device sync, but its hostname must match the
+  first-party hosted app-session hostname; when unset, `apps/web` derives the
+  base as `<canonical hosted public origin>/api/device-sync`
 
 Hosted public-base constraints:
 
@@ -857,10 +858,20 @@ Hosted public-base constraints:
   them to subpaths such as `https://example.test/app`.
 - `DEVICE_SYNC_PUBLIC_BASE_URL` remains the one explicit callback-base override
   that may include its `/api/device-sync` path because that route base is part
-  of the device-sync provider contract.
+  of the device-sync provider contract. It is not a split-host escape hatch:
+  hosted browser OAuth start fails before OAuth state or provider authorization
+  when its hostname differs from the hostname serving the authenticated start
+  request.
 
 Callback auth contract:
 
+- hosted browser OAuth callbacks require the active first-party app session and
+  pass that exact member as `expectedOwnerId` before shared ingress can consume
+  OAuth state or exchange a provider code
+- the provider callback hostname must match the hostname that served the
+  authenticated browser start; the `__Host-` app-session cookie remains
+  host-only, and Murph does not add a Domain cookie, second callback cookie, or
+  member-bound handoff to bridge separate hosts
 - `apps/web` verifies narrow Cloudflare-signed internal callbacks with
   `HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_JWK`
 - `HOSTED_WEB_CALLBACK_SIGNING_KEY_ID` selects the active callback key id and
@@ -887,9 +898,12 @@ Callback auth contract:
   route at most once, with a timeout capped at two seconds, only after exact
   write-fence completion; failure is non-fatal and has no callback retry.
 
-When you set `DEVICE_SYNC_PUBLIC_BASE_URL`, point it at the stable production
-project domain or a custom domain. Do not use ephemeral preview deployment URLs
-as long-lived provider callback or webhook bases.
+When you set `DEVICE_SYNC_PUBLIC_BASE_URL`, use the same stable production
+hostname as every first-party hosted app-session URL that can serve the OAuth
+start; the callback path may differ. Do not use a separate device-sync subdomain
+or an ephemeral preview deployment URL as a long-lived provider callback or
+webhook base. Web build validation and the browser start boundary reject a
+hostname mismatch before provider authorization begins.
 
 ### Vercel setup
 

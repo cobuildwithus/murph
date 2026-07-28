@@ -272,6 +272,10 @@ describe("device sync settings routes", () => {
     vi.stubEnv("JUNCTION_PROVIDER_FILTER", "");
     vi.stubEnv("JUNCTION_REGION", "");
     vi.stubEnv("DEVICE_SYNC_BACKFILL_DIAGNOSTIC_ENABLED", "true");
+    vi.stubEnv(
+      "DEVICE_SYNC_PUBLIC_BASE_URL",
+      "https://join.example.test/api/device-sync",
+    );
     mocks.prismaClient.deviceConnection = {
       findMany: mocks.findManyDeviceConnections,
     };
