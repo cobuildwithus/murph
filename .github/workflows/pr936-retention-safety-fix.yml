@@ -4,12 +4,21 @@ on:
   push:
     branches:
       - agent/pr936-retention-safety-fix-20260727
+  pull_request:
+    branches:
+      - main
+    types:
+      - opened
+      - reopened
+      - synchronize
 
 permissions:
   contents: write
+  pull-requests: read
 
 jobs:
   fix:
+    if: ${{ github.event_name == 'push' || github.head_ref == 'agent/pr936-retention-safety-fix-20260727' }}
     name: Apply, verify, and push retention rollout safety fix
     runs-on: ubuntu-24.04
     timeout-minutes: 45
@@ -134,5 +143,3 @@ jobs:
           git diff --cached --check
           git commit -m "Make retention rollout fail closed"
           git push origin HEAD:message-retention-14d
-
-# Triggered after the helper PR was opened so the branch workflow is visible.
