@@ -598,23 +598,33 @@ describe("hosted group join outreach drain", () => {
     }
   });
 
-  it("keeps every variant reaction-neutral and clear that reply starts the next step", () => {
+  it("keeps at least 100 unique variants within the first-contact copy contract", () => {
     // The bank exists so many recipients do not get byte-identical copy, but each
     // variant is held to the same first-contact rules.
+    expect(HOSTED_GROUP_JOIN_OUTREACH_VARIANT_COUNT).toBeGreaterThanOrEqual(100);
     const messages = new Set<string>();
+    const normalizedMessages = new Set<string>();
     for (let variant = 0; variant < 600; variant += 1) {
       const message = buildHostedGroupJoinOutreachMessage({
         groupDisplayName: "Sunday Sleep Crew",
         outreachId: `hgrpjoa_opaque_${variant}`,
       });
       messages.add(message);
+      normalizedMessages.add(
+        message.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim(),
+      );
       expect(message).toContain("Sunday Sleep Crew");
       expect(message.endsWith("Reply here to start the next step.")).toBe(true);
       expect(message).not.toMatch(/\b(?:liked|hearted)\b|tapped like|your like/iu);
       expect(message).not.toMatch(/https?:|www\./iu);
       expect(message).not.toContain("\u2014");
-      // Acquisition framing is forbidden in outbound copy.
-      expect(message).not.toMatch(/sign ?up|get started|welcome|verify|account/iu);
+      // Acquisition, automation, and delivery-notification framing are forbidden.
+      expect(message).not.toMatch(
+        /sign ?up|get started|welcome|verify|account|enroll|activate|subscribe|free trial/iu,
+      );
+      expect(message).not.toMatch(
+        /\b(?:automate(?:d)?|automatic(?:ally)?|automation|bot|campaign|outreach|notification|delivery|delivered|privately)\b|\b(?:may|might|will|can|could)\s+(?:privately\s+)?text\b/iu,
+      );
       // The reply begins the handoff; it does not itself complete the web join.
       expect(message).not.toMatch(
         /one (message|reply)|all I need|and you're into|get you (?:added|in|joined|set up)|(?:do|finish|handle|sort) the rest|make it happen|take (?:care of it|it from there)|walk you in/iu,
@@ -623,6 +633,7 @@ describe("hosted group join outreach drain", () => {
 
     // Real spread, not one template with a rotating word.
     expect(messages.size).toBe(HOSTED_GROUP_JOIN_OUTREACH_VARIANT_COUNT);
+    expect(normalizedMessages.size).toBe(HOSTED_GROUP_JOIN_OUTREACH_VARIANT_COUNT);
   });
 
   it("reads correctly for every variant when the group name falls back", () => {

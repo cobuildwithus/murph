@@ -41,9 +41,9 @@ Updated: 2026-07-28
 
 ## Tasks
 
-1. [ ] Trace the landed instant-start feature and prove its interaction with PR 932.
-2. [ ] Ask ReviewGPT for a bounded patch covering compatibility, a 100+ opener bank, tests, and justified deletion.
-3. [ ] Inspect the returned patch and implement only verified, proportional changes.
+1. [x] Trace the landed instant-start feature and prove its interaction with PR 932.
+2. [x] Ask ReviewGPT for a bounded patch covering compatibility, a 100+ opener bank, tests, and justified deletion.
+3. [x] Inspect the returned patch and implement only verified, proportional changes.
 4. [ ] Run focused proof, product review, preliminary specialists, parent review, canonical verification, and acceptance.
 5. [ ] Close the plan, push the final head, complete ReviewGPT/CI/mergeability gates, and leave PR 932 open.
 
@@ -51,7 +51,14 @@ Updated: 2026-07-28
 
 - Merge current `origin/main` into the PR branch first so review and verification exercise the actually landed instant-start implementation.
 - Treat ReviewGPT output as untrusted implementation intent; every production hunk must be checked against the real owner boundary before application.
+- Keep the group-outreach reply as one deterministic group-link response rather than also appending it to the assistant mailbox. ReviewGPT's proposed early-return deletion would create a second response path and contradict the durable group-outreach contract.
+- Retain the outreach store, drain, transport, locks, and two-stage membership checks. The landed instant-start path owns admission and activation, but none of those PR-specific correlation, pacing, provider, or web-join-race responsibilities.
 
 ## Verification
 
-- Pending.
+- Focused Linq dispatcher, webhook idempotency, outreach drain, transport, and store: 285 passed.
+- Exact opener-bank plus instant-start/group-recovery recheck: 184 passed.
+- Prepared Web typecheck passed.
+- Isolated PostgreSQL reply-recovery and membership-race proof: 14 passed.
+- Agent docs drift passed.
+- Product-experience review: PASS after replacing topic-specific prompts and binding the exact issued invite URL.
