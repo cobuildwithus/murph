@@ -66,6 +66,15 @@ describe("health commons catalog", () => {
         field: "answers.sessionTiming",
       },
     });
+    const zone2Protocol = catalog.entities.find(
+      (entity) =>
+        entity.key ===
+        "protocol_variant:aerobic-base-training/zone-2-aerobic-base-block",
+    );
+    expect(zone2Protocol?.protocol?.activitySessionEvidence).toEqual({
+      activityKinds: ["walking", "cycling", "rowing", "elliptical"],
+      minimumDurationMinutes: 35,
+    });
     for (const protocol of catalog.entities.filter((entity) => entity.experimentOnboarding)) {
       expect(protocol.experimentOnboarding).not.toHaveProperty("contextReview");
       expect(protocol.experimentOnboarding).not.toHaveProperty("logging");

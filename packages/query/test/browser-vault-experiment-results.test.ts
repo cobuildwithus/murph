@@ -2265,6 +2265,88 @@ test("counts browser cycling adherence from provider ride activity sessions", ()
   assert.equal(result?.progress?.adherence.loggedSessions, 1);
 });
 
+test("browser progress uses the protocol snapshot's accepted activity kinds", () => {
+  const slug = "zone-2-block";
+  const client = createBrowserVaultQueryClient(
+    createReplica({
+      generatedAt: "2026-06-09T12:00:00.000Z",
+      entities: [
+        experimentEntity({
+          id: "exp_zone_2_block",
+          slug,
+          commonsProtocolRef: {
+            key: "protocol_variant:aerobic-base-training/zone-2-aerobic-base-block",
+            pageRevisionId: "sha256:page",
+            runSpecRevisionId: "sha256:run",
+            testPlanId: "zone2-aerobic-base-readout",
+          },
+          effectiveProtocolSnapshot: {
+            effectiveSpecHash: `sha256:${"4".repeat(64)}`,
+            doseSignature: "3x/week easy cardio, 35-60 min",
+            modality: "sustainable easy aerobic volume",
+            activitySessionEvidence: {
+              activityKinds: ["walking", "cycling", "rowing", "elliptical"],
+              minimumDurationMinutes: 35,
+            },
+            targetSessions: 12,
+            minimumUsefulSessions: 9,
+          },
+          runPlan: {
+            baselineStart: "2026-05-25",
+            baselineEnd: "2026-05-31",
+            interventionStart: "2026-06-01",
+            interventionEnd: "2026-06-28",
+            modality: "Cycling",
+            targetSessions: 12,
+            minimumUsefulSessions: 9,
+          },
+        }),
+        activitySessionEvent({
+          activityType: "Walking",
+          date: "2026-06-01",
+          durationMinutes: 40,
+          id: "evt_zone_2_walk",
+        }),
+        activitySessionEvent({
+          activityType: "Elliptical",
+          date: "2026-06-02",
+          durationMinutes: 45,
+          id: "evt_zone_2_elliptical",
+        }),
+        activitySessionEvent({
+          activityType: "Rowing",
+          date: "2026-06-03",
+          durationMinutes: 35,
+          id: "evt_zone_2_row",
+        }),
+        activitySessionEvent({
+          activityType: "Cycling",
+          date: "2026-06-04",
+          durationMinutes: 20,
+          id: "evt_zone_2_short_ride",
+        }),
+        activitySessionEvent({
+          activityType: "Running",
+          date: "2026-06-05",
+          durationMinutes: 50,
+          id: "evt_zone_2_run",
+        }),
+      ],
+    }),
+  );
+
+  const result = selectBrowserVaultExperimentResults(client, { slug });
+
+  assert.equal(result?.progress?.adherence.completedSessions, 3);
+  assert.deepEqual(result?.adherence?.targets[0]?.evidence, {
+    eventKind: "activity_session",
+    activityKinds: ["walking", "cycling", "rowing", "elliptical"],
+    kind: "linkedEventCount",
+    minimumDurationMinutes: 35,
+    missing: "missed_after_grace",
+  });
+});
+
 test("counts browser generic workout modality from any activity sessions", () => {
   const slug = "generic-workout-block";
   const client = createBrowserVaultQueryClient(
@@ -4056,6 +4138,8 @@ function savedOutcome(input: {
 
 function experimentEntity(input: {
   analysisPlan?: Record<string, unknown>;
+  commonsProtocolRef?: Record<string, unknown>;
+  effectiveProtocolSnapshot?: Record<string, unknown>;
   endedOn?: string;
   expectedSignalDescriptions?: unknown[];
   id?: string;
@@ -4076,12 +4160,15 @@ function experimentEntity(input: {
         primaryBiomarkerKey: "biomarker:resting-heart-rate",
         desiredDirection: "decrease",
       },
-      commonsProtocolRef: {
+      commonsProtocolRef: input.commonsProtocolRef ?? {
         key: "protocol:finnish-sauna",
         pageRevisionId: "sha256:page",
         runSpecRevisionId: "sha256:run",
         testPlanId: "rhr-21d",
       },
+      ...(input.effectiveProtocolSnapshot
+        ? { effectiveProtocolSnapshot: input.effectiveProtocolSnapshot }
+        : {}),
       expectedSignalDescriptions: input.expectedSignalDescriptions,
       ...(input.endedOn ? { endedOn: input.endedOn } : {}),
       experimentId: id,
@@ -4160,6 +4247,7 @@ function sessionEvent(
 function activitySessionEvent(input: {
   activityType: string;
   date: string;
+  durationMinutes?: number;
   id: string;
   occurredAt?: string;
   source?: string;
@@ -4169,6 +4257,9 @@ function activitySessionEvent(input: {
   return {
     attributes: {
       activityType: input.activityType,
+      ...(input.durationMinutes === undefined
+        ? {}
+        : { durationMinutes: input.durationMinutes }),
       ...(input.source === undefined ? {} : { source: input.source }),
       sportName: input.sportName ?? input.activityType,
     },
