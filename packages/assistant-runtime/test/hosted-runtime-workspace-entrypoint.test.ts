@@ -36,6 +36,7 @@ import {
   recordHostedMailboxAssistantInputItem,
   resolveAssistantSession,
   saveAssistantSession,
+  type AssistantHostedImageGenerationLauncher,
   type RunAssistantAutomationPassInput,
 } from "@murphai/assistant-engine";
 import {
@@ -16552,7 +16553,13 @@ describe("hosted workspace runtime entrypoint", () => {
     let assistantPhaseCalls = 0;
     let completionInputId: string | null = null;
     let completionReplyCount = 0;
+    let completionReleaseError: unknown = null;
+    let completionReleaseObserved = false;
     let imageIndexFailureInjected = false;
+    let originInputId: string | null = null;
+    const imageGenerationLauncherRef: {
+      current: AssistantHostedImageGenerationLauncher | null;
+    } = { current: null };
     const shutdownController = new AbortController();
 
     try {
@@ -16643,12 +16650,23 @@ describe("hosted workspace runtime entrypoint", () => {
             assistantPhaseCalls += 1;
             assert.equal(assistantInputIds.length, 1);
             const assistantInputId = assistantInputIds[0]!;
+            const releaseProviderInputs =
+              await phaseInput.beforeProviderAcceptedInputs?.({
+                acceptedInputs: [{
+                  id: assistantInputId,
+                  source: "assistant-input",
+                }],
+              });
 
             if (assistantPhaseCalls === 1) {
+              originInputId = assistantInputId;
+              imageGenerationLauncherRef.current =
+                phaseInput.imageGenerationLauncher ?? null;
               assert.equal(
                 phaseInput.imageGenerationLauncher?.launch({
                   operationId: "image_operation_index_retry",
                   originAssistantInputId: assistantInputId,
+                  scopeId: "session_image_index_retry",
                   async run() {
                     return {
                       media: {
@@ -16674,13 +16692,36 @@ describe("hosted workspace runtime entrypoint", () => {
               vaultRoot,
             });
             if (assistantPhaseCalls === 2) {
-              shutdownController.abort(
-                new DOMException(
-                  "Synthetic shutdown after image completion reply.",
-                  "AbortError",
-                ),
-              );
+              assert.ok(originInputId);
+              const releaseSteeringInputs =
+                await phaseInput.beforeProviderAcceptedInputs?.({
+                  acceptedInputs: [{
+                    id: originInputId,
+                    source: "assistant-input",
+                  }],
+                });
+              await releaseSteeringInputs?.();
+              void vi.waitFor(() => {
+                assert.equal(
+                  imageGenerationLauncherRef.current?.readStatus?.(
+                    "session_image_index_retry",
+                  ),
+                  null,
+                );
+              }, { timeout: 1_000 }).then(() => {
+                completionReleaseObserved = true;
+              }).catch((error: unknown) => {
+                completionReleaseError = error;
+              }).finally(() => {
+                shutdownController.abort(
+                  new DOMException(
+                    "Synthetic shutdown after terminal image completion release.",
+                    "AbortError",
+                  ),
+                );
+              });
             }
+            await releaseProviderInputs?.();
             return {
               checkpointReason: "assistant_runtime_commit" as const,
               foregroundReplyFailed: 0,
@@ -16711,6 +16752,10 @@ describe("hosted workspace runtime entrypoint", () => {
         }),
       );
       assert.equal(completionReplyCount, 1);
+      if (completionReleaseError) {
+        throw completionReleaseError;
+      }
+      assert.equal(completionReleaseObserved, true);
       assert.ok(completionInputId);
       const completion = await readAssistantInputEvent({
         inputId: completionInputId,

@@ -49,6 +49,9 @@ import {
   resolveAssistantDiagnosticsPolicy,
 } from "@murphai/assistant-engine";
 import {
+  hasCompleteAssistantAutoReplyTerminalEvidence,
+} from "@murphai/assistant-engine/assistant-automation";
+import {
   createHostedAssistantTurnEnvironment,
   normalizeHostedAssistantRuntimeConfig,
   projectHostedRuntimeTrustStoreEnv,
@@ -1823,6 +1826,23 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           },
           runAssistantPhase: async (phaseInput) => {
             currentAssistantInputId = null;
+            const acceptedAssistantInputIds = new Set<string>();
+            const releaseAcceptedImageGenerationInputs = async (
+              inputIds: readonly string[],
+            ) => {
+              await imageGenerationController?.releaseAcceptedInputs(
+                inputIds,
+                async (inputId) =>
+                  await hasCompleteAssistantAutoReplyTerminalEvidence({
+                    inputId,
+                    vault: restored.vaultRoot,
+                  }),
+              );
+            };
+            // Retry any previously accepted completion whose terminal-evidence
+            // read was incomplete or transiently unavailable before planning a
+            // new turn, so stale advisory status cannot block another image.
+            await releaseAcceptedImageGenerationInputs([]);
             try {
               const phaseAssistantTarget = readConfirmedAssistantTarget();
               const confirmedAssistantTargetEnv = phaseAssistantTarget
@@ -1841,7 +1861,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                     },
                   }
                 : foregroundRuntime;
-              const phaseResult = await (
+              return await (
                 options.runAssistantPhase ?? runHostedWorkspaceAssistantPhase
               )({
                 ...phaseInput,
@@ -1868,6 +1888,9 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                   const assistantInputIds = acceptedInputs
                     .filter((acceptedInput) => acceptedInput.source === "assistant-input")
                     .map((acceptedInput) => acceptedInput.id);
+                  for (const assistantInputId of assistantInputIds) {
+                    acceptedAssistantInputIds.add(assistantInputId);
+                  }
                   const acceptedInputContext =
                     await resolveHostedCurrentInputIdForAcceptedInputs({
                       assistantInputIds,
@@ -1890,9 +1913,14 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                 suppressDirtyPendingFetch: suppressDirtyPendingFetchUntilCheckpoint,
                 signal: passSignal,
               });
-              return phaseResult;
             } finally {
               currentAssistantInputId = null;
+              // A reply can acquire terminal evidence before a later phase error.
+              // Release invocation-local image status from that durable truth in
+              // both success and failure paths; evidence read errors retain it.
+              await releaseAcceptedImageGenerationInputs(
+                [...acceptedAssistantInputIds],
+              );
             }
           },
           signal: passSignal,
