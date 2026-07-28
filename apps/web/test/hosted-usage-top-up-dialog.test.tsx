@@ -220,7 +220,7 @@ beforeEach(() => {
   });
 });
 
-test("opens from the settings deep link on the default amount without starting checkout", async () => {
+test("requires an explicit amount choice after opening from the settings deep link", async () => {
   const { HostedUsageTopUpDialog } = await import(
     "@/src/components/settings/hosted-usage-top-up-dialog"
   );
@@ -251,18 +251,14 @@ test("opens from the settings deep link on the default amount without starting c
       rendered.container.querySelectorAll<HTMLInputElement>('input[type="radio"]'),
     );
     assert.equal(radioInputs.length, 3);
-    // The picker opens on the middle amount so the primary action is live, but
-    // a deep link must never itself request checkout.
     assert.equal(
       rendered.container
         .querySelector('[role="radiogroup"]')
         ?.getAttribute("data-value"),
-      "usage_1000",
+      "",
     );
-    assert.equal(
-      buttonByText(rendered.container, "Continue to checkout · $10").disabled,
-      false,
-    );
+    assert.equal(buttonByText(rendered.container, "Choose an amount").disabled, true);
+    assert.equal(radioInputs.every((input) => !input.checked), true);
     expect(mocks.requestHostedOnboardingJson).not.toHaveBeenCalled();
     assert.match(
       rendered.container.textContent ?? "",
@@ -323,10 +319,16 @@ test("opens from the settings deep link on the default amount without starting c
       firstAmountCard.querySelector("span")?.classList.contains("items-center"),
       true,
     );
-    const selectionActions = buttonByText(
-      rendered.container,
-      "Continue to checkout · $10",
-    ).parentElement;
+    await clickRadio(rendered.container, rendered.window, "usage_1000");
+    assert.equal(
+      rendered.container
+        .querySelector('[role="radiogroup"]')
+        ?.getAttribute("data-value"),
+      "usage_1000",
+    );
+    const addUsageButton = buttonByText(rendered.container, "Add usage · $10");
+    assert.equal(addUsageButton.disabled, false);
+    const selectionActions = addUsageButton.parentElement;
     assert.ok(selectionActions);
     assert.equal(selectionActions.classList.contains("grid"), true);
     assert.equal(
@@ -346,7 +348,7 @@ test("opens from the settings deep link on the default amount without starting c
 
     await clickRadio(rendered.container, rendered.window, "usage_1000");
     assert.equal(
-      buttonByText(rendered.container, "Continue to checkout · $10").disabled,
+      buttonByText(rendered.container, "Add usage · $10").disabled,
       false,
     );
   } finally {
@@ -818,12 +820,17 @@ test("rejects a malformed recovery restart timestamp", async () => {
 
   try {
     await clickRadio(rendered.container, rendered.window, "usage_1000");
-    await clickButton(rendered.container, rendered.window, "Continue to checkout · $10");
+    await clickButton(rendered.container, rendered.window, "Add usage · $10");
 
     assert.match(
       rendered.container.textContent ?? "",
-      /Try again, or choose another amount\./,
+      /We couldn’t confirm this payment yet/,
     );
+    assert.match(
+      rendered.container.textContent ?? "",
+      /Retry the same amount to check or continue it\./,
+    );
+    assert.doesNotMatch(rendered.container.textContent ?? "", /Change amount/);
     assert.doesNotMatch(rendered.container.textContent ?? "", /Checkout not open yet/);
   } finally {
     await rendered.cleanup();
@@ -1159,11 +1166,11 @@ test("posts the exact offer payload, shows pending text, and redirects to Stripe
 
   try {
     await clickRadio(rendered.container, rendered.window, "usage_500");
-    await clickButton(rendered.container, rendered.window, "Continue to checkout · $5");
+    await clickButton(rendered.container, rendered.window, "Add usage · $5");
 
-    assert.match(rendered.container.textContent ?? "", /Opening checkout…/);
+    assert.match(rendered.container.textContent ?? "", /Adding usage…/);
     assert.equal(
-      buttonByText(rendered.container, "Opening checkout…").getAttribute("aria-busy"),
+      buttonByText(rendered.container, "Adding usage…").getAttribute("aria-busy"),
       "true",
     );
     expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
@@ -1192,7 +1199,7 @@ test("posts the exact offer payload, shows pending text, and redirects to Stripe
     expect(rendered.assign).toHaveBeenCalledWith(
       "https://checkout.stripe.test/session",
     );
-    assert.equal(buttonByText(rendered.container, "Opening checkout…").disabled, true);
+    assert.equal(buttonByText(rendered.container, "Adding usage…").disabled, true);
 
     const pageShowEvent = new rendered.window.Event("pageshow");
     Object.defineProperty(pageShowEvent, "persisted", { value: true });
@@ -1202,14 +1209,16 @@ test("posts the exact offer payload, shows pending text, and redirects to Stripe
     });
     assert.match(
       rendered.container.textContent ?? "",
-      /Checkout was interrupted\. Retry to recover it\./,
+      /We couldn’t confirm this payment yet/,
     );
     assert.equal(
-      buttonByText(rendered.container, "Try again · $5").disabled,
+      buttonByText(rendered.container, "Retry payment · $5").disabled,
       false,
     );
     assert.equal(
-      buttonByText(rendered.container, "Change amount").disabled,
+      Array.from(rendered.container.querySelectorAll("button")).some(
+        (button) => button.textContent?.trim() === "Change amount",
+      ),
       false,
     );
   } finally {
@@ -1265,7 +1274,7 @@ test("asks before resuming a recovered Checkout from a fresh browser request", a
     const focus = vi.spyOn(title, "focus");
 
     await clickRadio(rendered.container, rendered.window, "usage_500");
-    await clickButton(rendered.container, rendered.window, "Continue to checkout · $5");
+    await clickButton(rendered.container, rendered.window, "Add usage · $5");
 
     assert.match(rendered.container.textContent ?? "", /Checkout already open/);
     assert.match(
@@ -1337,7 +1346,7 @@ test("cancels a recovered open Checkout through the existing expire route", asyn
 
   try {
     await clickRadio(rendered.container, rendered.window, "usage_2500");
-    await clickButton(rendered.container, rendered.window, "Continue to checkout · $25");
+    await clickButton(rendered.container, rendered.window, "Add usage · $25");
     const title = rendered.container.querySelector("h2");
     assert.ok(title);
     const focus = vi.spyOn(title, "focus");
@@ -1450,7 +1459,7 @@ test("shows recovered reconciliation without offering an unsafe early cancel", a
 
   try {
     await clickRadio(rendered.container, rendered.window, "usage_1000");
-    await clickButton(rendered.container, rendered.window, "Continue to checkout · $10");
+    await clickButton(rendered.container, rendered.window, "Add usage · $10");
 
     assert.match(
       rendered.container.textContent ?? "",
@@ -1495,7 +1504,7 @@ test("bounds checkout creation and restores retry and dismiss controls", async (
 
   try {
     await clickRadio(rendered.container, rendered.window, "usage_500");
-    await clickButton(rendered.container, rendered.window, "Continue to checkout · $5");
+    await clickButton(rendered.container, rendered.window, "Add usage · $5");
 
     assert.equal(buttonByText(rendered.container, "Cancel").disabled, false);
     await act(async () => {
@@ -1505,11 +1514,11 @@ test("bounds checkout creation and restores retry and dismiss controls", async (
 
     assert.match(
       rendered.container.textContent ?? "",
-      /Checkout took too long to open\. Try again\./,
+      /We couldn’t confirm this payment yet/,
     );
     assert.equal(buttonByText(rendered.container, "Cancel").disabled, false);
     assert.equal(
-      buttonByText(rendered.container, "Try again · $5").disabled,
+      buttonByText(rendered.container, "Retry payment · $5").disabled,
       false,
     );
   } finally {
@@ -1543,7 +1552,7 @@ test("aborts an owned checkout on close and preserves its retry key", async () =
 
   try {
     await clickRadio(rendered.container, rendered.window, "usage_500");
-    await clickButton(rendered.container, rendered.window, "Continue to checkout · $5");
+    await clickButton(rendered.container, rendered.window, "Add usage · $5");
     const firstPayload = mocks.requestHostedOnboardingJson.mock.calls[0]?.[0]?.payload;
 
     await clickButton(rendered.container, rendered.window, "Cancel");
@@ -1566,9 +1575,9 @@ test("aborts an owned checkout on close and preserves its retry key", async () =
     await clickButton(rendered.container, rendered.window, "Add usage");
     assert.match(
       rendered.container.textContent ?? "",
-      /Checkout was interrupted\. Retry to recover it\./,
+      /We couldn’t confirm this payment yet/,
     );
-    await clickButton(rendered.container, rendered.window, "Try again · $5");
+    await clickButton(rendered.container, rendered.window, "Retry payment · $5");
 
     assert.deepEqual(
       mocks.requestHostedOnboardingJson.mock.calls[1]?.[0]?.payload,
@@ -1598,7 +1607,7 @@ test("restores controls when the browser cannot create a request key", async () 
 
   try {
     await clickRadio(rendered.container, rendered.window, "usage_500");
-    await clickButton(rendered.container, rendered.window, "Continue to checkout · $5");
+    await clickButton(rendered.container, rendered.window, "Add usage · $5");
 
     assert.match(
       rendered.container.textContent ?? "",
@@ -1640,13 +1649,13 @@ test("retries a failed checkout with the same client request key", async () => {
 
   try {
     await clickRadio(rendered.container, rendered.window, "usage_2500");
-    await clickButton(rendered.container, rendered.window, "Continue to checkout · $25");
+    await clickButton(rendered.container, rendered.window, "Add usage · $25");
     assert.match(
       rendered.container.textContent ?? "",
-      /Try again, or choose another amount\./,
+      /We couldn’t confirm this payment yet/,
     );
 
-    await clickButton(rendered.container, rendered.window, "Try again · $25");
+    await clickButton(rendered.container, rendered.window, "Retry payment · $25");
     const checkoutCalls = mocks.requestHostedOnboardingJson.mock.calls;
     assert.equal(checkoutCalls.length, 2);
     assert.deepEqual(checkoutCalls[0]?.[0]?.payload, checkoutCalls[1]?.[0]?.payload);
@@ -1664,10 +1673,9 @@ test("retries a failed checkout with the same client request key", async () => {
   }
 });
 
-test("lets the member choose a different amount with a fresh request key", async () => {
+test("keeps the exact amount and request key after an ambiguous payment failure", async () => {
   mocks.randomUUID
-    .mockImplementationOnce(() => "00000000-0000-4000-8000-000000000101")
-    .mockImplementationOnce(() => "00000000-0000-4000-8000-000000000102");
+    .mockImplementationOnce(() => "00000000-0000-4000-8000-000000000101");
   let checkoutAttempt = 0;
   mocks.requestHostedOnboardingJson.mockImplementation(async (request: {
     method: string;
@@ -1705,42 +1713,30 @@ test("lets the member choose a different amount with a fresh request key", async
 
   try {
     await clickRadio(rendered.container, rendered.window, "usage_500");
-    await clickButton(rendered.container, rendered.window, "Continue to checkout · $5");
-    const firstAmount = rendered.container.querySelector<HTMLInputElement>(
-      "#usage-top-up-0",
-    );
-    assert.ok(firstAmount);
-    const focus = vi.spyOn(firstAmount, "focus");
+    await clickButton(rendered.container, rendered.window, "Add usage · $5");
     const lockedActions = buttonByText(
       rendered.container,
-      "Change amount",
+      "Retry payment · $5",
     ).parentElement;
     assert.ok(lockedActions);
     assert.equal(lockedActions.classList.contains("grid"), true);
-    assert.equal(lockedActions.classList.contains("sm:grid-cols-2"), true);
-    assert.match(rendered.container.textContent ?? "", /Checkout didn’t open/);
+    assert.equal(lockedActions.classList.contains("sm:grid-cols-2"), false);
+    assert.match(
+      rendered.container.textContent ?? "",
+      /We couldn’t confirm this payment yet/,
+    );
     assert.equal(
-      buttonByText(rendered.container, "Try again · $5").dataset.size,
+      buttonByText(rendered.container, "Retry payment · $5").dataset.size,
       "xl",
     );
-    assert.equal(buttonByText(rendered.container, "Change amount").dataset.size, "xl");
-    await clickButton(rendered.container, rendered.window, "Change amount");
-
-    // Changing the amount returns to the same default the picker first offered.
     assert.equal(
-      buttonByText(rendered.container, "Continue to checkout · $10").disabled,
+      Array.from(rendered.container.querySelectorAll("button")).some(
+        (button) => button.textContent?.trim() === "Change amount",
+      ),
       false,
     );
-    expect(focus).toHaveBeenCalledWith({ preventScroll: true });
-    assert.equal(
-      Array.from(
-        rendered.container.querySelectorAll<HTMLInputElement>('input[type="radio"]'),
-      ).every((input) => !input.disabled),
-      true,
-    );
 
-    await clickRadio(rendered.container, rendered.window, "usage_2500");
-    await clickButton(rendered.container, rendered.window, "Continue to checkout · $25");
+    await clickButton(rendered.container, rendered.window, "Retry payment · $5");
     const postPayloads = mocks.requestHostedOnboardingJson.mock.calls
       .map(([request]) => request)
       .filter((request) => request.method === "POST")
@@ -1751,10 +1747,11 @@ test("lets the member choose a different amount with a fresh request key", async
         offerCode: "usage_500",
       },
       {
-        clientRequestKey: "00000000-0000-4000-8000-000000000102",
-        offerCode: "usage_2500",
+        clientRequestKey: "00000000-0000-4000-8000-000000000101",
+        offerCode: "usage_500",
       },
     ]);
+    expect(mocks.randomUUID).toHaveBeenCalledTimes(1);
     assert.equal(buttonByText(rendered.container, "Resume checkout").disabled, false);
     expect(rendered.assign).not.toHaveBeenCalled();
   } finally {
@@ -1807,7 +1804,7 @@ test("keeps a conflicting Family checkout nonpayable and refreshes on close", as
 
   try {
     await clickRadio(rendered.container, rendered.window, "usage_500");
-    await clickButton(rendered.container, rendered.window, "Continue to checkout · $5");
+    await clickButton(rendered.container, rendered.window, "Add usage · $5");
 
     assert.match(
       rendered.container.textContent ?? "",

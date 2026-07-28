@@ -227,18 +227,6 @@ export default async function SettingsPage({
     familyUsageTopUpPurchaseReturn
       ? usageTopUpReturnTarget?.beneficiaryMemberId ?? null
       : null;
-  const familyOwnerUsageTopUpPurchaseReturn =
-    familyOwnerUsageTopUpMember
-    && familyUsageTopUpReturnMemberId === familyOwnerUsageTopUpMember.memberId
-      ? familyUsageTopUpPurchaseReturn
-      : null;
-  const openFamilyOwnerUsageTopUp = Boolean(
-    familyOwnerUsageTopUpMember
-      && (
-        requestedFamilyOwnerUsageTopUp
-        || familyOwnerUsageTopUpPurchaseReturn
-      ),
-  );
   const canStartFamily =
     authenticatedMember != null &&
     !activeFamilyOwner &&
@@ -400,10 +388,8 @@ export default async function SettingsPage({
             <HostedFamilySelfUsageTopUpHost
               activePurchase={familyOwnerUsageTopUpActivePurchase}
               contactOptions={usageTopUpContactOptions}
-              initialOpen={openFamilyOwnerUsageTopUp}
               memberId={familyOwnerUsageTopUpMember.memberId}
               offers={familyUsageTopUpOffers}
-              purchaseReturn={familyOwnerUsageTopUpPurchaseReturn}
               targetLabel={familyOwnerUsageTopUpMember.label ?? "you"}
             />
           ) : null}

@@ -48,10 +48,6 @@ type HostedUsageTopUpScreen =
   | HostedUsageTopUpSelectionScreen
   | HostedUsageTopUpPurchaseScreen;
 interface HostedUsageTopUpState {
-  // The amount the picker opens on, so the primary action is never a dead
-  // disabled button. Held on state because every reset back to the picker has
-  // to land on the same amount the dialog first offered.
-  defaultOfferCode: string | null;
   open: boolean;
   screen: HostedUsageTopUpScreen;
 }
@@ -122,7 +118,6 @@ type HostedUsageTopUpAction =
 
 function createHostedUsageTopUpState(input: {
   activePurchase: HostedUsageTopUpActivePurchase | null;
-  defaultOfferCode: string | null;
   initialOpen: boolean;
   purchaseReturn: HostedUsageTopUpReturn | null;
 }): HostedUsageTopUpState {
@@ -130,16 +125,14 @@ function createHostedUsageTopUpState(input: {
     input.purchaseReturn?.purchaseId ?? input.activePurchase?.purchaseId ?? null;
   if (!purchaseId) {
     return {
-      defaultOfferCode: input.defaultOfferCode,
       open: input.initialOpen,
-      screen: createSelectionScreen(input.defaultOfferCode),
+      screen: createSelectionScreen(),
     };
   }
   const status = input.purchaseReturn
     ? null
     : input.activePurchase?.status ?? null;
   return {
-    defaultOfferCode: input.defaultOfferCode,
     open: input.purchaseReturn !== null || input.initialOpen,
     screen: {
       ...createPurchaseScreen(purchaseId),
@@ -178,7 +171,7 @@ function hostedUsageTopUpReducer(
         ...state,
         open: true,
         screen: action.reset
-          ? createSelectionScreen(state.defaultOfferCode)
+          ? createSelectionScreen()
           : state.screen,
       };
     case "offer_selected":
@@ -189,7 +182,7 @@ function hostedUsageTopUpReducer(
       );
     case "amount_change_requested":
       return updateSelectionScreen(state, () =>
-        createSelectionScreen(state.defaultOfferCode),
+        createSelectionScreen(),
       );
     case "selection_checkout_started":
       return updateSelectionScreen(state, (screen) => ({
@@ -323,7 +316,7 @@ function hostedUsageTopUpReducer(
         state.screen.purchaseId === action.purchaseId
         ? {
             ...state,
-            screen: createSelectionScreen(state.defaultOfferCode),
+            screen: createSelectionScreen(),
           }
         : state;
   }
@@ -420,13 +413,11 @@ function screenFromResponse(
   };
 }
 
-function createSelectionScreen(
-  defaultOfferCode: string | null,
-): HostedUsageTopUpSelectionScreen {
+function createSelectionScreen(): HostedUsageTopUpSelectionScreen {
   return {
     attempt: { kind: "idle" },
     kind: "selection",
-    selectedOfferCode: defaultOfferCode,
+    selectedOfferCode: null,
   };
 }
 

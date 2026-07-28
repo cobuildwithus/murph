@@ -66,3 +66,22 @@ Let an eligible member ask Murph for the exact first-party page that opens the c
 - Do not put Family member or group identifiers in the model-facing URL; arbitrary member management remains inside authenticated Family Settings.
 - Use purchase policy v3 for target-neutral saved-card and Checkout-save behavior while retaining v1/v2 reconstruction.
 - Keep the existing saved-card resolver and direct PaymentIntent lifecycle unchanged unless focused proof exposes a target-specific assumption.
+- Leave every fresh amount picker unselected. The explicit amount choice is
+  required before the exact saved-card authorization action becomes available.
+
+## Progress
+
+- The focused audit found and corrected frozen-policy metadata and retry
+  projection gaps for personal and Family direct payments.
+- Current-policy direct payment, Checkout fallback, v2 rejection, exact Family
+  owner-self resolution, assistant handoffs, ambiguous recovery, and dialog
+  consent have focused regression coverage.
+- Web typecheck, 222 focused Web tests, eight assistant policy tests, and the
+  frontend design-proof checks pass.
+- Desktop and mobile design-catalog evidence show the production picker with no
+  preselected amount and a disabled action.
+- Product experience review returned no findings after the accepted
+  preselection finding was corrected. The separate Claude UI check stopped at
+  explicit credit exhaustion.
+- Current-base reconciliation, the preliminary specialist pass, final
+  acceptance, final ReviewGPT, and CI remain.

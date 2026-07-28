@@ -86,6 +86,8 @@ const mocks = vi.hoisted(() => ({
   HostedDataPrivacySettings: vi.fn((props: { authenticated: boolean }) =>
     React.createElement("div", null, `Hosted data privacy settings ${String(props.authenticated)}`)),
   HostedFamilySettings: vi.fn(() => React.createElement("div", null, "Hosted family settings")),
+  HostedFamilySelfUsageTopUpHost: vi.fn(() =>
+    React.createElement("div", null, "Family owner usage top up")),
   HostedPasskeySettings: vi.fn((props: {
     authenticated: boolean;
     secureApprovalStatus: { status: string };
@@ -225,6 +227,10 @@ vi.mock("@/src/components/settings/hosted-data-privacy-settings", () => ({
 
 vi.mock("@/src/components/settings/hosted-family-settings", () => ({
   HostedFamilySettings: mocks.HostedFamilySettings,
+}));
+
+vi.mock("@/src/components/settings/hosted-family-self-usage-top-up-host", () => ({
+  HostedFamilySelfUsageTopUpHost: mocks.HostedFamilySelfUsageTopUpHost,
 }));
 
 vi.mock("@/src/components/settings/hosted-passkey-settings", () => ({
@@ -853,6 +859,153 @@ test("SettingsPage rejects repeated or malformed usage top-up query state", asyn
       usageTopUpInitialOpen: false,
       usageTopUpPurchaseReturn: null,
     }),
+    undefined,
+  );
+});
+
+test("SettingsPage opens only the authenticated active Family owner's own usage picker", async () => {
+  mocks.getPrisma.mockReturnValue(mocks.prisma);
+  mocks.getHostedPrivySession.mockResolvedValue(null);
+  mocks.getHostedPageAuthSnapshot.mockResolvedValue({
+    authenticated: true,
+    authenticatedMember: {
+      billingStatus: "active",
+      id: "member_123",
+      suspendedAt: null,
+    },
+    linkedAccounts: [],
+    session: {
+      privyUserId: "did:privy:user_123",
+    },
+  });
+  const ownerMember = {
+    isOwner: true,
+    joinedAt: new Date("2026-07-01T12:00:00.000Z"),
+    label: null,
+    memberId: "member_123",
+    pendingPlanCode: null,
+    planCode: "launch_monthly",
+    role: "owner",
+    status: "active",
+  };
+  mocks.readHostedFamilyOwnerSnapshotForMember.mockResolvedValue({
+    billingActive: true,
+    billingStatus: "active",
+    displayName: null,
+    groupId: "hbag_abcdefghijklmnop",
+    invites: [],
+    members: [ownerMember],
+    ownerMemberId: "member_123",
+    plans: {},
+    seats: {},
+    suspendedAt: null,
+  });
+
+  const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
+  renderToStaticMarkup(await SettingsPage({
+    searchParams: Promise.resolve({ addUsage: "family" }),
+  }));
+
+  expect(mocks.HostedFamilySelfUsageTopUpHost).toHaveBeenCalledWith({
+    activePurchase: null,
+    contactOptions: [{
+      href: "sms:+15550100001?body=Hey%20Murph%2C%20I%20just%20added%20more%20usage.",
+      kind: "text",
+      label: "Messages",
+    }],
+    memberId: "member_123",
+    offers: [
+      {
+        amountLabel: "$5",
+        estimatedMessages: 100,
+        offerCode: "usage_5_usd",
+      },
+      {
+        amountLabel: "$10",
+        estimatedMessages: 200,
+        offerCode: "usage_10_usd",
+      },
+      {
+        amountLabel: "$25",
+        estimatedMessages: 500,
+        offerCode: "usage_25_usd",
+      },
+    ],
+    targetLabel: "you",
+  }, undefined);
+  expect(mocks.HostedBillingSettings).toHaveBeenCalledWith(
+    expect.objectContaining({ usageTopUpInitialOpen: false }),
+    undefined,
+  );
+});
+
+test.each([
+  {
+    addUsage: ["family", "family"],
+    label: "repeated selector",
+    member: {
+      isOwner: true,
+      memberId: "member_123",
+      status: "active",
+    },
+  },
+  {
+    addUsage: "family",
+    label: "non-owner row",
+    member: {
+      isOwner: false,
+      memberId: "member_123",
+      status: "active",
+    },
+  },
+  {
+    addUsage: "family",
+    label: "inactive owner row",
+    member: {
+      isOwner: true,
+      memberId: "member_123",
+      status: "inactive",
+    },
+  },
+])("SettingsPage ignores a $label for the Family owner picker", async ({
+  addUsage,
+  member,
+}) => {
+  mocks.getPrisma.mockReturnValue(mocks.prisma);
+  mocks.getHostedPrivySession.mockResolvedValue(null);
+  mocks.getHostedPageAuthSnapshot.mockResolvedValue({
+    authenticated: true,
+    authenticatedMember: {
+      billingStatus: "active",
+      id: "member_123",
+      suspendedAt: null,
+    },
+    linkedAccounts: [],
+    session: {
+      privyUserId: "did:privy:user_123",
+    },
+  });
+  mocks.readHostedFamilyOwnerSnapshotForMember.mockResolvedValue({
+    billingActive: true,
+    billingStatus: "active",
+    displayName: null,
+    groupId: "hbag_abcdefghijklmnop",
+    invites: [],
+    members: [member],
+    ownerMemberId: "member_123",
+    plans: {},
+    seats: {},
+    suspendedAt: null,
+  });
+
+  const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
+  renderToStaticMarkup(await SettingsPage({
+    searchParams: Promise.resolve({ addUsage }),
+  }));
+
+  expect(mocks.HostedFamilySelfUsageTopUpHost).not.toHaveBeenCalled();
+  expect(mocks.HostedBillingSettings).toHaveBeenCalledWith(
+    expect.objectContaining({ usageTopUpInitialOpen: false }),
     undefined,
   );
 });

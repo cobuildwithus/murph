@@ -1,15 +1,15 @@
 # Hosted Usage Top-Ups
 
 Status: Implemented personal, Family-member, and hosted-group funding
-Last verified: 2026-07-26
+Last verified: 2026-07-27
 
 ## Decision
 
 Use a one-time Stripe payment and a Murph-owned, append-only usage-credit ledger
-to decide who receives the usage and how it is consumed. Personal and Family
-funding use Stripe-hosted Checkout. Group funding first reuses one canonical
-card attached to the authenticated payer's Stripe Customer and falls back to
-Checkout for card collection or authentication.
+to decide who receives the usage and how it is consumed. Current-policy
+personal, Family, and group funding first reuse one canonical card attached to
+the authenticated payer's Stripe Customer and fall back to Checkout for card
+collection or authentication.
 
 The initial individual-plan offer is:
 
@@ -75,7 +75,9 @@ An eligible paid Pulse or Edge member can:
 1. See included usage in its existing percentage presentation.
 2. Open a small **Add usage** dialog over Settings.
 3. Choose $5, $10, or $25 without a preselected or promoted option.
-4. Continue to Stripe-hosted Checkout.
+4. Explicitly authorize the selected amount. Murph charges one canonical saved
+   card when available; otherwise Stripe Checkout collects card details or
+   verification.
 5. Return to Settings with an honest pending state while webhook fulfillment
    completes.
 6. See that remaining usage credit will carry work past included-usage
@@ -98,7 +100,8 @@ the card and saves it for a later group contribution.
 An active Family owner can use the same dialog from an exact active member row
 in Settings. The fixed pack is credited only to that selected member. A
 sponsored member cannot buy a personal pack, and Family credit is neither
-shared nor transferable.
+shared nor transferable. The same conservative saved-card selection and
+Checkout fallback apply.
 
 ## Individual MVP
 
@@ -162,11 +165,13 @@ do not add a generic payment-modal framework.
 The target composition is:
 
 - Title: **Add usage**
-- Description: **Choose a one-time credit amount for your account.**
 - Three equal choices: **$5**, **$10**, and **$25**
 - No default selection and no “popular” badge
-- Primary action after selection: **Continue to checkout · $10**
-- Pending action: **Opening checkout…**
+- Description: **Choose a one-time credit amount for your account. We’ll use
+  your saved card when available. Stripe will ask when card details or
+  verification are needed.**
+- Primary action after selection: **Add usage · $10**
+- Pending action: **Adding usage…**
 - Secondary action: **Cancel**
 - An inline accessible error for checkout-creation failure
 
@@ -175,9 +180,11 @@ opaque offer code and a single-use client request key, never a dollar amount,
 grant amount, Stripe Price ID, payer ID, or beneficiary ID.
 
 Home or a private assistant handoff opens the same dialog through a one-shot
-Settings URL such as `/settings?addUsage=true#subscription`. Settings removes
-the query parameter after initializing the dialog so refresh and Back do not
-replay it. If current authority returns no offers, that deep link still opens an
+Settings URL such as `/settings?addUsage=true#subscription`. An explicit
+request for that page may receive the link after a current paid-access read
+even below the threshold for a proactive recommendation. Settings removes the
+query parameter after initializing the dialog so refresh and Back do not replay
+it. If current authority returns no offers, that deep link still opens an
 honest **Usage credit unavailable** state with no purchase control.
 
 ### Checkout Return
@@ -237,8 +244,13 @@ never marks the purchase expired.
 The assistant may explain the server-projected state and offer the first-party
 Settings handoff. For Family management, it must first read current Family
 status and require the explicit active owner, active billing, and exact active
-member. It cannot select an offer, create Checkout, choose a payer or
-beneficiary, or claim that a purchase completed.
+member. The owner's own active seat receives the stable
+`/settings?addUsage=family#family` handoff; Settings resolves it against the
+authenticated owner's current Family rather than accepting identifiers from
+the model. Another active member receives `/settings#family` so the owner
+selects the member inside Settings. The assistant cannot select an offer,
+create Checkout, choose a payer or beneficiary, or claim that a purchase
+completed.
 
 A stored reply-anchored personal exhaustion message is neutral, for example:
 
@@ -538,9 +550,10 @@ funding route share this sequence:
     configured Stripe Price, and verify its live/test mode, active state,
     one-time per-unit shape, currency, exact amount, and absence of custom,
     transformed, or multi-currency amount semantics.
-11. For current-policy group purchases only, resolve one canonical reusable
-    card attached to the payer Customer. Conflicting Customer/Subscription
-    defaults or multiple cards without one canonical choice skip this path.
+11. For current-policy personal, Family, and group purchases, resolve one
+    canonical reusable card attached to the payer Customer. Conflicting
+    Customer/Subscription defaults or multiple cards without one canonical
+    choice skip this path.
 12. When a canonical card exists, create one unconfirmed PaymentIntent with a
     purchase-derived idempotency key. Under the payer-row lock, re-read the
     payer and purchase, bind only an active payer's still-`created` purchase to
@@ -568,8 +581,9 @@ The Stripe Session uses:
 - Session metadata containing only purchase ID, purpose, and policy version;
 - the same opaque purchase ID in `payment_intent_data.metadata` for later
   refund/dispute correlation;
-- `setup_future_usage=off_session` only for current-policy group Checkout, so
-  the collected card can be reused for a later explicit group contribution;
+- `setup_future_usage=off_session` for current-policy personal, Family, and
+  group Checkout, so the collected card can be reused for a later explicit
+  top-up;
 - a frozen `expires_at` 90 minutes after purchase creation;
 - Adaptive Pricing explicitly disabled so Dashboard defaults cannot change the
   frozen USD catalog contract;
@@ -598,9 +612,11 @@ unique ledger sources provide convergence.
 
 Request policy `hosted-usage-credit-checkout-v1` remains reconstructible
 without card saving so an in-flight idempotent Checkout request never changes
-shape. New purchases freeze `hosted-usage-credit-checkout-v2`; only v2 group
-Checkout adds future-use saving and only v2 group purchases may attempt the
-direct saved-card path.
+shape. Version two remains reconstructible with future-use saving and direct
+saved-card payment for group purchases only. New purchases freeze
+`hosted-usage-credit-checkout-v3`, which enables both behaviors for personal,
+Family, and group targets. Every retry and Stripe proof check uses the
+purchase's frozen policy version rather than the latest global version.
 
 ## Stripe Catalog And Payment Configuration
 
@@ -782,6 +798,15 @@ or Stripe Customer. Web binds the opaque member selector to the owner's active
 roster before locking the beneficiary, then re-reads membership and member
 eligibility under that lock. A foreign selector therefore cannot contend on or
 fund an unrelated member.
+
+Murph may deep-link the active owner's own seat with the stable
+`/settings?addUsage=family#family` selector only after a current Family status
+read proves owner, active billing, and exactly one active owner row. Settings
+resolves that hint to the authenticated owner's current active group and seat;
+malformed or repeated selectors, stale groups, inactive rows, and non-owners
+open nothing. Other members remain selected inside authenticated Family
+Settings. The purchase mutation repeats the full authorization regardless of
+how the dialog was opened.
 
 The purchase freezes the exact Family group and beneficiary in its
 server-generated return URLs. This distinguishes an owner's personal target

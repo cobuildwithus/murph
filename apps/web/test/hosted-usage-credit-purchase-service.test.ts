@@ -151,8 +151,13 @@ import {
   readHostedUsageCreditPurchaseTargetForPayer,
   readHostedUsageCreditPurchaseStatus,
 } from "@/src/lib/hosted-onboarding/usage-credit-purchase-service";
-import { reconstructHostedUsageCreditStripeCheckoutRequest } from
-  "@/src/lib/hosted-onboarding/usage-credit-purchase-stripe";
+import {
+  buildHostedUsageCreditSavedCardMetadata,
+  reconstructHostedUsageCreditStripeCheckoutRequest,
+} from "@/src/lib/hosted-onboarding/usage-credit-purchase-stripe";
+import {
+  hostedUsageCreditPolicySupportsSavedCardTarget,
+} from "@/src/lib/hosted-onboarding/usage-credit-offers";
 
 const NOW = new Date("2026-07-16T17:00:00.000Z");
 const MEMBER_ID = "hbm_member123";
@@ -258,12 +263,12 @@ beforeEach(() => {
     },
     stripeLiveMode: false,
   });
-  mocks.stripeCustomerRetrieve.mockResolvedValue({
-    id: "cus_group_payer",
+  mocks.stripeCustomerRetrieve.mockImplementation(async (customerId: string) => ({
+    id: customerId,
     invoice_settings: { default_payment_method: null },
     livemode: false,
     object: "customer",
-  });
+  }));
   mocks.stripePaymentMethodsList.mockResolvedValue({
     data: [],
     has_more: false,
@@ -300,6 +305,42 @@ describe("parseHostedUsageCreditCheckoutRequest", () => {
     expect(() => parseHostedUsageCreditCheckoutRequest(input)).toThrowError(
       expect.objectContaining({ httpStatus: 400 }),
     );
+  });
+});
+
+describe("usage-credit saved-card policy", () => {
+  it.each([
+    ["hosted-usage-credit-checkout-v1", "personal", false],
+    ["hosted-usage-credit-checkout-v1", "family", false],
+    ["hosted-usage-credit-checkout-v1", "group", false],
+    ["hosted-usage-credit-checkout-v2", "personal", false],
+    ["hosted-usage-credit-checkout-v2", "family", false],
+    ["hosted-usage-credit-checkout-v2", "group", true],
+    ["hosted-usage-credit-checkout-v3", "personal", true],
+    ["hosted-usage-credit-checkout-v3", "family", true],
+    ["hosted-usage-credit-checkout-v3", "group", true],
+  ] as const)(
+    "maps %s and %s to saved-card support=%s",
+    (policyVersion, targetKind, supported) => {
+      expect(hostedUsageCreditPolicySupportsSavedCardTarget({
+        policyVersion,
+        targetKind,
+      })).toBe(supported);
+    },
+  );
+
+  it.each([
+    "hosted-usage-credit-checkout-v2",
+    "hosted-usage-credit-checkout-v3",
+  ] as const)("freezes %s in saved-card metadata", (policyVersion) => {
+    expect(buildHostedUsageCreditSavedCardMetadata(
+      "hucp_abcdefghijklmnop",
+      policyVersion,
+    )).toEqual({
+      policyVersion,
+      purchaseId: "hucp_abcdefghijklmnop",
+      purpose: "hosted_usage_credit_saved_card",
+    });
   });
 });
 
@@ -341,7 +382,12 @@ describe("createHostedUsageCreditCheckout", () => {
       usagePurchase: checkout.purchaseId,
     });
     expect(mocks.stripeCheckoutCreate).toHaveBeenCalledWith(
-      expect.objectContaining({ customer: "cus_family_owner" }),
+      expect.objectContaining({
+        customer: "cus_family_owner",
+        payment_intent_data: expect.objectContaining({
+          setup_future_usage: "off_session",
+        }),
+      }),
       expect.any(Object),
     );
     expect(mocks.readHostedConfiguredUsageCreditOfferCodes).toHaveBeenCalledTimes(1);
@@ -383,6 +429,96 @@ describe("createHostedUsageCreditCheckout", () => {
       kind: "family",
     });
   });
+
+  it.each([
+    ["personal", "cus_123"],
+    ["family", "cus_family_owner"],
+  ] as const)(
+    "charges the canonical saved card for a v3 %s top-up",
+    async (targetKind, customerId) => {
+      const fake = createFakePrisma();
+      mockCanonicalSavedCard(customerId);
+      mocks.stripePaymentIntentCreate.mockImplementationOnce(
+        async (request: Record<string, unknown>) => ({
+          amount: request.amount,
+          amount_received: 0,
+          currency: request.currency,
+          customer: request.customer,
+          id: "pi_saved_card_123",
+          latest_charge: null,
+          livemode: false,
+          metadata: request.metadata,
+          object: "payment_intent",
+          status: "requires_confirmation",
+        }),
+      );
+      mocks.stripePaymentIntentConfirm.mockImplementationOnce(
+        async (paymentIntentId: string) => {
+          expect(paymentIntentId).toBe("pi_saved_card_123");
+          const purchase = onlyPurchase(fake.purchases);
+          return buildSavedCardPaymentIntent({
+            amountReceived: 1_000,
+            customerId,
+            latestCharge: "ch_saved_card_123",
+            purchaseId: String(purchase.id),
+            status: "succeeded",
+          });
+        },
+      );
+
+      const result = targetKind === "family"
+        ? await createHostedFamilyMemberUsageCreditCheckout({
+            beneficiaryMemberId: "hbm_familymember1",
+            clientRequestKey: CLIENT_REQUEST_KEY,
+            now: NOW,
+            offerCode: "usage_10_usd",
+            payerMemberId: MEMBER_ID,
+            prisma: fake.prisma as never,
+          })
+        : await createHostedUsageCreditCheckout({
+            clientRequestKey: CLIENT_REQUEST_KEY,
+            memberId: MEMBER_ID,
+            now: NOW,
+            offerCode: "usage_10_usd",
+            prisma: fake.prisma as never,
+          });
+
+      expect(result).toMatchObject({ status: "payment_pending" });
+      expect(result).not.toHaveProperty("url");
+      expect(mocks.stripePaymentIntentCreate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          customer: customerId,
+          metadata: expect.objectContaining({
+            policyVersion: "hosted-usage-credit-checkout-v3",
+          }),
+          payment_method: "pm_saved_card_123",
+        }),
+        expect.any(Object),
+      );
+      expect(mocks.stripePaymentIntentConfirm).toHaveBeenCalledOnce();
+      expect(mocks.stripeCheckoutCreate).not.toHaveBeenCalled();
+      const payableTarget = targetKind === "family"
+        ? {
+            beneficiaryMemberId: "hbm_familymember1",
+            familyGroupId: "hbag_abcdefghijklmnop",
+            kind: "family" as const,
+          }
+        : {
+            beneficiaryMemberId: MEMBER_ID,
+            kind: "personal" as const,
+          };
+      await expect(readHostedActiveUsageCreditPurchaseForPayer({
+        now: new Date(NOW.getTime() + 1_000),
+        payerMemberId: MEMBER_ID,
+        prisma: fake.prisma as never,
+        serverApprovedPayableTargets: [payableTarget],
+      })).resolves.toMatchObject({
+        retryAllowed: true,
+        status: "payment_pending",
+        target: payableTarget,
+      });
+    },
+  );
 
   it("does not confuse an owner Family seat with the owner's personal target", async () => {
     const fake = createFakePrisma();
@@ -773,7 +909,7 @@ describe("createHostedUsageCreditCheckout", () => {
           latest_charge: "ch_saved_card_123",
           livemode: false,
           metadata: {
-            policyVersion: "hosted-usage-credit-checkout-v2",
+            policyVersion: "hosted-usage-credit-checkout-v3",
             purchaseId: purchase.id,
             purpose: "hosted_usage_credit_saved_card",
           },
@@ -1368,22 +1504,20 @@ describe("createHostedUsageCreditCheckout", () => {
         expires_at: Math.floor((NOW.getTime() + 90 * 60 * 1_000) / 1_000),
         line_items: [{ price: "price_usage_10", quantity: 1 }],
         metadata: {
-          policyVersion: "hosted-usage-credit-checkout-v2",
+          policyVersion: "hosted-usage-credit-checkout-v3",
           purchaseId: purchase.id,
           purpose: "hosted_usage_credit",
         },
         mode: "payment",
         payment_intent_data: {
           metadata: {
-            policyVersion: "hosted-usage-credit-checkout-v2",
+            policyVersion: "hosted-usage-credit-checkout-v3",
             purchaseId: purchase.id,
             purpose: "hosted_usage_credit",
           },
+          setup_future_usage: "off_session",
         },
       });
-      expect(request.payment_intent_data).not.toHaveProperty(
-        "setup_future_usage",
-      );
       expect(request).not.toHaveProperty("price_data");
       expect(request).not.toHaveProperty("payment_method_types");
       expect(options).toEqual({
@@ -1408,7 +1542,7 @@ describe("createHostedUsageCreditCheckout", () => {
     expect(purchase).toMatchObject({
       cashAmountMinor: 1_000,
       cashCurrency: "usd",
-      checkoutRequestPolicyVersion: "hosted-usage-credit-checkout-v2",
+      checkoutRequestPolicyVersion: "hosted-usage-credit-checkout-v3",
       grantUsdMicros: 10_000_000n,
       offerCode: "usage_10_usd",
       payerMemberId: MEMBER_ID,
@@ -3067,16 +3201,16 @@ function expectNoStripeProviderIo(): void {
   expect(mocks.stripeSubscriptionsList).not.toHaveBeenCalled();
 }
 
-function mockCanonicalSavedCard(): void {
+function mockCanonicalSavedCard(customerId = "cus_group_payer"): void {
   mocks.stripeCustomerRetrieve.mockResolvedValueOnce({
-    id: "cus_group_payer",
+    id: customerId,
     invoice_settings: { default_payment_method: "pm_saved_card_123" },
     livemode: false,
     object: "customer",
   });
   mocks.stripePaymentMethodsList.mockResolvedValueOnce({
     data: [{
-      customer: "cus_group_payer",
+      customer: customerId,
       id: "pm_saved_card_123",
       livemode: false,
       object: "payment_method",
@@ -3090,6 +3224,7 @@ function mockCanonicalSavedCard(): void {
 
 function buildSavedCardPaymentIntent(input: {
   amountReceived: number;
+  customerId?: string;
   latestCharge: string | null;
   purchaseId: string;
   status: string;
@@ -3098,12 +3233,12 @@ function buildSavedCardPaymentIntent(input: {
     amount: 1_000,
     amount_received: input.amountReceived,
     currency: "usd",
-    customer: "cus_group_payer",
+    customer: input.customerId ?? "cus_group_payer",
     id: "pi_saved_card_123",
     latest_charge: input.latestCharge,
     livemode: false,
     metadata: {
-      policyVersion: "hosted-usage-credit-checkout-v2",
+      policyVersion: "hosted-usage-credit-checkout-v3",
       purchaseId: input.purchaseId,
       purpose: "hosted_usage_credit_saved_card",
     },

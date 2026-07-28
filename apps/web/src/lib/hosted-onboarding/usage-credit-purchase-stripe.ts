@@ -364,7 +364,7 @@ export function assertHostedUsageCreditStripeSessionMatchesPurchase(input: {
   }
 }
 
-function isHostedUsageCreditGroupReturnUrl(value: string): boolean {
+export function isHostedUsageCreditGroupReturnUrl(value: string): boolean {
   try {
     const pathSegments = new URL(value).pathname.split("/").filter(Boolean);
     return pathSegments.length === 3 &&

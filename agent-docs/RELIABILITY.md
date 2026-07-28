@@ -80,9 +80,11 @@ Last verified: 2026-07-26
   the frozen Session expiry. An ambiguous response must
   not mint a replacement purchase or create a second payable Session. The
   member may begin another purchase only after the existing one is terminal.
-- Current-policy group funding may create one unconfirmed saved-card
-  PaymentIntent with a purchase-derived idempotency key. The producer must bind
-  its encrypted exact reference under the payer lock before confirmation. The
+- Current-policy personal, Family, and group funding may create one unconfirmed
+  saved-card PaymentIntent with a purchase-derived idempotency key. Frozen v2
+  purchases retain this behavior for groups only; v1 remains Checkout-only.
+  The producer must bind its encrypted exact reference under the payer lock
+  before confirmation. The
   locked bind must re-read both payer suspension and purchase status; a
   suspension, deletion, or terminal transition that wins first leaves the
   intent unbound, canceled, and never confirmed. A succeeded or processing

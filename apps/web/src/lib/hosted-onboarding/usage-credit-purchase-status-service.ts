@@ -17,6 +17,8 @@ import {
 import { cancelHostedUsageCreditDirectPayment } from
   "./usage-credit-saved-card-payment";
 import {
+  hostedUsageCreditPolicySupportsSavedCardTarget,
+  parseHostedUsageCreditCheckoutRequestPolicyVersion,
   parseHostedUsageCreditOfferCode,
   type HostedUsageCreditOfferCode,
 } from "./usage-credit-offers";
@@ -260,10 +262,7 @@ export async function projectHostedUsageCreditCheckoutCapability(input: {
           now: input.now,
           purchase: input.purchase,
         }) ||
-        (
-          target.kind === "group" &&
-          canRetryHostedUsageCreditSavedCardPayment(input.purchase)
-        )
+        canRetryHostedUsageCreditSavedCardPayment(input.purchase)
       ),
     target,
     targetAuthorized:
@@ -490,13 +489,27 @@ export function canRetryHostedUsageCreditCheckoutCreate(input: {
 export function canRetryHostedUsageCreditSavedCardPayment(
   purchase: Pick<
     HostedUsageCreditPurchase,
+    | "beneficiaryMemberId"
+    | "checkoutRequestPolicyVersion"
+    | "checkoutSuccessUrl"
+    | "id"
+    | "payerMemberId"
     | "status"
     | "stripeCheckoutSessionLookupKey"
     | "stripePaymentIntentIdEncrypted"
     | "stripePaymentIntentLookupKey"
   >,
 ): boolean {
+  const policyVersion = parseHostedUsageCreditCheckoutRequestPolicyVersion(
+    purchase.checkoutRequestPolicyVersion,
+  );
+  const target = projectHostedUsageCreditPurchaseTarget(purchase);
   return purchase.status === HostedUsageCreditPurchaseStatus.payment_pending &&
+    policyVersion !== null &&
+    hostedUsageCreditPolicySupportsSavedCardTarget({
+      policyVersion,
+      targetKind: target.kind,
+    }) &&
     !purchase.stripeCheckoutSessionLookupKey &&
     Boolean(
       purchase.stripePaymentIntentIdEncrypted &&

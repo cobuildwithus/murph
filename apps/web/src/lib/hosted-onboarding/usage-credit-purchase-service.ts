@@ -644,6 +644,7 @@ async function continueHostedUsageCreditCheckout(input: {
     const directPaymentPurchase = await tryChargeHostedUsageCreditSavedCard({
       checkoutRequest,
       now: input.now,
+      policyVersion,
       prisma: input.prisma,
       purchase,
       stripe,

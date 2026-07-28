@@ -87,9 +87,11 @@ Last verified: 2026-07-26
   payable URL or retry permission only for an exact server-approved target.
   Former Family beneficiaries are always status/cancel-only; historical labels
   and contact hints are display data, not payment authority.
-- Saved-card group funding may select only one canonical card already attached
-  to the authenticated payer's verified Stripe Customer: one consistent
-  Customer or nonterminal Subscription default, or the sole attached card.
+- Current-policy saved-card personal, Family, and group funding may select only
+  one canonical card already attached to the authenticated payer's verified
+  Stripe Customer: one consistent Customer or nonterminal Subscription
+  default, or the sole attached card. Frozen v2 purchases retain this behavior
+  for group targets only; v1 retains no saved-card path.
   The browser cannot supply a PaymentMethod. Conflicting defaults or ambiguous
   attached cards must use Checkout. The server creates the PaymentIntent
   unconfirmed, stores its encrypted exact reference on the frozen purchase,
@@ -101,8 +103,9 @@ Last verified: 2026-07-26
   Checkout fallback. While that payment is nonterminal, recovery remains bound
   to its frozen offer and original client request; a different submitted amount
   fails closed and the browser does not expose amount changes. Choosing an amount has no payment effect, and each
-  explicit **Add messages** click authorizes only the selected one-time charge.
-  No raw card data enters Murph.
+  explicit **Add usage** or **Add messages** click authorizes only the selected
+  one-time charge. Current-policy Checkout fallback saves the entered card for
+  later explicit top-ups. No raw card data enters Murph.
 - Direct-purchase cancellation requires only authenticated payer ownership of
   the opaque purchase ID. Beneficiary, group-locator, or current target
   authority may gate retry but must not gate cancellation. Payer deletion may

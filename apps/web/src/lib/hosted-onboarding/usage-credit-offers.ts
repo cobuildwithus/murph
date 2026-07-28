@@ -31,10 +31,10 @@ export const HOSTED_USAGE_CREDIT_SAVED_CARD_PURPOSE =
 export function parseHostedUsageCreditCheckoutRequestPolicyVersion(
   value: string,
 ): HostedUsageCreditCheckoutRequestPolicyVersion | null {
-  return HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_VERSIONS.includes(
-      value as HostedUsageCreditCheckoutRequestPolicyVersion,
-    )
-    ? value as HostedUsageCreditCheckoutRequestPolicyVersion
+  return value === HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_V1 ||
+      value === HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_V2 ||
+      value === HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_VERSION
+    ? value
     : null;
 }
 
