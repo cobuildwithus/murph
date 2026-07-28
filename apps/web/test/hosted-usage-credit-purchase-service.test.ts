@@ -556,6 +556,64 @@ describe("createHostedUsageCreditCheckout", () => {
     expect(mocks.stripeCheckoutCreate).toHaveBeenCalledTimes(1);
   });
 
+  it.each([
+    "personal",
+    "family",
+  ] as const)(
+    "rejects a fresh %s amount before provider I/O while another offer is unfinished",
+    async (targetKind) => {
+      const fake = createFakePrisma();
+      mocks.stripeCheckoutCreate.mockRejectedValueOnce(
+        new Error("connection lost"),
+      );
+      const createCheckout = (
+        clientRequestKey: string,
+        offerCode: "usage_5_usd" | "usage_25_usd",
+        now: Date,
+      ) => targetKind === "family"
+        ? createHostedFamilyMemberUsageCreditCheckout({
+            beneficiaryMemberId: "hbm_familymember1",
+            clientRequestKey,
+            now,
+            offerCode,
+            payerMemberId: MEMBER_ID,
+            prisma: fake.prisma as never,
+          })
+        : createHostedUsageCreditCheckout({
+            clientRequestKey,
+            memberId: MEMBER_ID,
+            now,
+            offerCode,
+            prisma: fake.prisma as never,
+          });
+
+      await expect(createCheckout(
+        CLIENT_REQUEST_KEY,
+        "usage_25_usd",
+        NOW,
+      )).rejects.toMatchObject({
+        code: "HOSTED_USAGE_CREDIT_STRIPE_UNAVAILABLE",
+      });
+      clearStripeProviderMockHistory();
+
+      await expect(createCheckout(
+        "fresh_amount_key_1234",
+        "usage_5_usd",
+        new Date(NOW.getTime() + 1_000),
+      )).rejects.toMatchObject({
+        code: "HOSTED_USAGE_CREDIT_ACTIVE_PURCHASE_OFFER_CONFLICT",
+        httpStatus: 409,
+      });
+
+      expect(onlyPurchase(fake.purchases)).toMatchObject({
+        clientRequestKey: CLIENT_REQUEST_KEY,
+        offerCode: "usage_25_usd",
+        status: "created",
+      });
+      expectNoStripeProviderIo();
+    },
+  );
+
   it("does not expose member A's payable checkout from member B's Family request", async () => {
     const fake = createFakePrisma();
     mocks.stripeCheckoutCreate.mockImplementationOnce(async (request) =>
@@ -2078,7 +2136,7 @@ describe("createHostedUsageCreditCheckout", () => {
       clientRequestKey: "another_request_1234",
       memberId: MEMBER_ID,
       now: new Date(NOW.getTime() + 60_000),
-      offerCode: "usage_5_usd",
+      offerCode: "usage_10_usd",
     });
 
     expect(recovered).toMatchObject({
@@ -2126,7 +2184,7 @@ describe("createHostedUsageCreditCheckout", () => {
       clientRequestKey: "another_request_1234",
       memberId: MEMBER_ID,
       now: new Date(NOW.getTime() + 60_000),
-      offerCode: "usage_5_usd",
+      offerCode: "usage_10_usd",
     });
 
     expect(recovered).toEqual({
@@ -2160,7 +2218,7 @@ describe("createHostedUsageCreditCheckout", () => {
       clientRequestKey: "another_request_1234",
       memberId: MEMBER_ID,
       now: new Date(NOW.getTime() + 60_000),
-      offerCode: "usage_5_usd",
+      offerCode: "usage_10_usd",
     })).resolves.toEqual({
       purchaseId: String(purchase.id),
       recovered: true,

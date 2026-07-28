@@ -359,10 +359,7 @@ async function createHostedUsageCreditCheckoutForTarget(input: {
         purchase: existingActive,
         target,
       })) {
-        if (
-          target.kind === "group" &&
-          existingActive.offerCode !== input.offerCode
-        ) {
+        if (existingActive.offerCode !== input.offerCode) {
           throw hostedOnboardingError({
             code: "HOSTED_USAGE_CREDIT_ACTIVE_PURCHASE_OFFER_CONFLICT",
             httpStatus: 409,
