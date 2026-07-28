@@ -292,6 +292,7 @@ class DeviceSyncServiceController {
               ),
               metadata: record.metadata,
               existingAccountGuard: record.existingAccountGuard ?? null,
+              existingAccountPolicy: record.existingAccountPolicy,
               connectedAt: record.connectedAt,
               nextReconcileAt: record.nextReconcileAt ?? null,
             }),

@@ -18,7 +18,10 @@ import {
   createDeviceSyncService,
   resolveDeviceSyncStoreNextWakeAt,
 } from "../src/service.ts";
-import { createJunctionDeviceSyncProvider } from "../src/providers/junction.ts";
+import {
+  createJunctionDeviceSyncProvider,
+  JUNCTION_DEVICE_PROVIDER_DESCRIPTOR,
+} from "../src/providers/junction.ts";
 import { scopeWebhookTraceId } from "../src/shared.ts";
 import { SqliteDeviceSyncStore } from "../src/store.ts";
 import { DEVICE_SYNC_STORE_SQLITE_SCHEMA_VERSION } from "../src/store/schema.ts";
@@ -513,6 +516,262 @@ test("device sync service connects, imports, and deduplicates webhook traces", a
   assert.equal(reconcile.jobs.length, 1);
 
   close();
+});
+
+test("local shared-Junction target starts preserve established siblings through SQLite", async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date("2026-07-28T10:00:00.000Z"));
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-local-junction-siblings");
+  const executedJobKinds: string[] = [];
+  let webhookSequence = 0;
+  const provider: DeviceSyncProvider = {
+    provider: "junction",
+    descriptor: JUNCTION_DEVICE_PROVIDER_DESCRIPTOR,
+    credentialPolicy: {
+      kind: "provider_config",
+      providerConfigKey: "junction",
+    },
+    connectionHandler: {
+      async beginConnection(input) {
+        return {
+          authorizationUrl: `https://junction.example.test/link?state=${input.state}`,
+          connectionSeed: {
+            externalAccountId: "shared-junction-account",
+            displayName: "Junction",
+            status: "active",
+            setupPhase: "pending_link",
+            setupExpiresAt: "2026-07-28T10:30:00.000Z",
+            scopes: [],
+            credential: {
+              kind: "provider_config",
+              providerConfigKey: "junction",
+            },
+            nextReconcileAt: null,
+          },
+        };
+      },
+      async completeConnection(input) {
+        if (input.query.get("result") === "failure") {
+          throw deviceSyncError({
+            code: "JUNCTION_LINK_REJECTED",
+            message: "Junction Link did not confirm the requested source.",
+            retryable: false,
+            httpStatus: 409,
+          });
+        }
+
+        return {
+          externalAccountId: "shared-junction-account",
+          displayName: "Junction",
+          scopes: [],
+          credential: {
+            kind: "provider_config",
+            providerConfigKey: "junction",
+          },
+          setupPhase: "link_returned",
+          initialJobs: [
+            {
+              kind: "backfill",
+            },
+          ],
+          nextReconcileAt: "2026-07-28T10:05:00.000Z",
+        };
+      },
+      async revokeAccess() {},
+    },
+    webhookHandler: {
+      async verifyAndParseWebhook(context) {
+        const sourceProviderSlug = context.rawBody.toString("utf8");
+        webhookSequence += 1;
+        return {
+          acceptanceMode: "durable_webhook_work",
+          externalAccountId: "shared-junction-account",
+          eventType: "junction.updated",
+          traceId: `local-junction-${webhookSequence}`,
+          sourceProviderSlug,
+          jobs: [
+            {
+              kind: "reconcile",
+            },
+          ],
+        };
+      },
+    },
+    jobExecutor: {
+      createScheduledJobs(_account, now) {
+        return {
+          jobs: [
+            {
+              kind: "reconcile",
+            },
+          ],
+          nextReconcileAt: new Date(Date.parse(now) + 60 * 60_000).toISOString(),
+        };
+      },
+      async executeJob(_context, job) {
+        executedJobKinds.push(job.kind);
+        return {};
+      },
+    },
+  };
+  const { service, store, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    clock: {
+      now: () => new Date(),
+    },
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    providers: [provider],
+  });
+
+  try {
+    const garmin = await service.startConnection({
+      ownerId: "<REDACTED_OWNER_ID>",
+      provider: "junction",
+      sourceProviderSlug: "garmin",
+    });
+    vi.setSystemTime(new Date("2026-07-28T10:01:00.000Z"));
+    const established = await service.handleConnectionCallback({
+      expectedOwnerId: "<REDACTED_OWNER_ID>",
+      provider: "junction",
+      query: new URLSearchParams({
+        murph_state: garmin.state,
+        result: "success",
+      }),
+    });
+    await service.drainWorker(10);
+
+    const baseline = store.getAccountById(established.account.id);
+    assert.ok(baseline);
+    assert.equal(baseline.setupPhase, "source_confirmed");
+    assert.equal(
+      store.listConnectionSources({
+        connectionId: baseline.id,
+        sourceProviderSlug: "garmin",
+      })[0]?.status,
+      "connected",
+    );
+
+    vi.setSystemTime(new Date("2026-07-28T10:02:00.000Z"));
+    const fitbit = await service.startConnection({
+      ownerId: "<REDACTED_OWNER_ID>",
+      provider: "junction",
+      sourceProviderSlug: "fitbit",
+    });
+
+    const afterAbandonedFitbit = store.getAccountById(baseline.id);
+    assert.ok(afterAbandonedFitbit);
+    assert.equal(afterAbandonedFitbit.setupPhase, "source_confirmed");
+    assert.equal(afterAbandonedFitbit.connectedAt, baseline.connectedAt);
+    assert.equal(afterAbandonedFitbit.localConnectionRevision, baseline.localConnectionRevision);
+    assert.equal(afterAbandonedFitbit.localTokenRevision, baseline.localTokenRevision);
+    assert.equal(
+      store.listConnectionSources({
+        connectionId: baseline.id,
+        sourceProviderSlug: "fitbit",
+      })[0]?.status,
+      "disconnected",
+    );
+
+    await assert.doesNotReject(
+      service.handleWebhook("junction", new Headers(), Buffer.from("garmin")),
+    );
+    await assert.rejects(
+      service.handleWebhook("junction", new Headers(), Buffer.from("fitbit")),
+      (error: unknown) =>
+        error instanceof DeviceSyncError
+        && error.code === "WEBHOOK_SOURCE_NOT_READY"
+        && error.httpStatus === 503,
+    );
+    assert.doesNotThrow(() => service.queueManualReconcile(baseline.id));
+    store.markSyncSucceeded(baseline.id, "2026-07-28T10:02:00.000Z", null, {
+      nextReconcileAt: "2026-07-28T10:01:59.000Z",
+    });
+    const jobsBeforeScheduler = countJobsForAccountForTesting(store, baseline.id);
+    await service.runSchedulerOnce();
+    assert.ok(countJobsForAccountForTesting(store, baseline.id) > jobsBeforeScheduler);
+    await service.drainWorker(20);
+    assert.ok(executedJobKinds.includes("reconcile"));
+
+    vi.setSystemTime(new Date("2026-07-28T10:03:00.000Z"));
+    await assert.rejects(
+      service.handleConnectionCallback({
+        expectedOwnerId: "<REDACTED_OWNER_ID>",
+        provider: "junction",
+        query: new URLSearchParams({
+          murph_state: fitbit.state,
+          result: "failure",
+        }),
+      }),
+      (error: unknown) =>
+        error instanceof DeviceSyncError
+        && error.code === "JUNCTION_LINK_REJECTED",
+    );
+    const afterFitbitFailure = store.getAccountById(baseline.id);
+    assert.ok(afterFitbitFailure);
+    assert.equal(afterFitbitFailure.setupPhase, "source_confirmed");
+    assert.equal(afterFitbitFailure.connectedAt, baseline.connectedAt);
+    assert.equal(
+      store.listConnectionSources({
+        connectionId: baseline.id,
+        sourceProviderSlug: "fitbit",
+      })[0]?.status,
+      "disconnected",
+    );
+
+    vi.setSystemTime(new Date("2026-07-28T10:04:00.000Z"));
+    const fitbitRetry = await service.startConnection({
+      ownerId: "<REDACTED_OWNER_ID>",
+      provider: "junction",
+      sourceProviderSlug: "fitbit",
+    });
+    const afterFitbitRetry = store.getAccountById(baseline.id);
+    assert.ok(afterFitbitRetry);
+    assert.equal(afterFitbitRetry.setupPhase, "source_confirmed");
+    assert.equal(afterFitbitRetry.connectedAt, baseline.connectedAt);
+
+    vi.setSystemTime(new Date("2026-07-28T10:05:00.000Z"));
+    await service.handleConnectionCallback({
+      expectedOwnerId: "<REDACTED_OWNER_ID>",
+      provider: "junction",
+      query: new URLSearchParams({
+        murph_state: fitbitRetry.state,
+        result: "success",
+      }),
+    });
+    const afterFitbitCompletion = store.getAccountById(baseline.id);
+    assert.ok(afterFitbitCompletion);
+    assert.equal(afterFitbitCompletion.setupPhase, "source_confirmed");
+    assert.equal(afterFitbitCompletion.connectedAt, baseline.connectedAt);
+    assert.equal(
+      afterFitbitCompletion.localConnectionRevision,
+      afterFitbitRetry.localConnectionRevision,
+    );
+    assert.equal(afterFitbitCompletion.localTokenRevision, afterFitbitRetry.localTokenRevision);
+    assert.equal(
+      store.listConnectionSources({
+        connectionId: baseline.id,
+        sourceProviderSlug: "garmin",
+      })[0]?.status,
+      "connected",
+    );
+    assert.equal(
+      store.listConnectionSources({
+        connectionId: baseline.id,
+        sourceProviderSlug: "fitbit",
+      })[0]?.status,
+      "connected",
+    );
+    await assert.doesNotReject(
+      service.handleWebhook("junction", new Headers(), Buffer.from("fitbit")),
+    );
+  } finally {
+    close();
+    vi.useRealTimers();
+  }
 });
 
 test("device sync service reports canonical counts separately from durable delivery acceptance", async () => {

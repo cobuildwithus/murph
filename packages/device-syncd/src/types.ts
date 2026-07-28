@@ -268,6 +268,10 @@ export interface UpsertPublicDeviceSyncExistingAccountGuard {
   rejectIfDisconnected?: boolean;
 }
 
+export type UpsertPublicDeviceSyncExistingAccountPolicy =
+  | "replace"
+  | "preserve_established";
+
 export interface UpsertPublicDeviceSyncConnectionInput {
   ownerId?: string | null;
   provider: string;
@@ -281,7 +285,7 @@ export interface UpsertPublicDeviceSyncConnectionInput {
   tokens?: ProviderAuthTokens;
   metadata?: Record<string, unknown>;
   existingAccountGuard?: UpsertPublicDeviceSyncExistingAccountGuard | null;
-  reuseEstablishedConnection?: boolean;
+  existingAccountPolicy: UpsertPublicDeviceSyncExistingAccountPolicy;
   connectedAt: string;
   nextReconcileAt?: string | null;
 }

@@ -1,4 +1,7 @@
-import type { PublicDeviceSyncAccount } from "./types.ts";
+import type {
+  PublicDeviceSyncAccount,
+  UpsertPublicDeviceSyncExistingAccountPolicy,
+} from "./types.ts";
 
 export const DEVICE_SYNC_HISTORICAL_DATA_RECONNECT_REQUIRED_ERROR_CODE =
   "HISTORICAL_DATA_RECONNECT_REQUIRED";
@@ -42,6 +45,18 @@ export function isEstablishedDeviceSyncConnection(connection: {
   status?: string | null;
 }): boolean {
   return connection.status === "active" && isDeviceSyncConnectionSetupConfirmed(connection);
+}
+
+export function shouldPreserveEstablishedDeviceSyncConnection(
+  connection: {
+    setupPhase?: string | null;
+    status?: string | null;
+  } | null,
+  policy: UpsertPublicDeviceSyncExistingAccountPolicy,
+): boolean {
+  return policy === "preserve_established"
+    && connection !== null
+    && isEstablishedDeviceSyncConnection(connection);
 }
 
 export function isDeviceSyncDisconnectInProgress(connection: {

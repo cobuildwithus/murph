@@ -60,7 +60,11 @@ Last verified: 2026-07-28
   `disconnected`, and source-attributed webhooks, dirty-state commit races, and
   provider pulls fail or exit without admitting target data until callback
   confirmation reaches the sole runtime connection-established admission
-  boundary. Hosted admission commits the source, signal, and mailbox work in one
+  boundary. Shared ingress marks every account persistence request with the
+  closed `replace` or `preserve_established` policy; hosted Prisma and local
+  SQLite apply the same shared predicate inside their persistence transactions,
+  so neither adapter may reinterpret a source addition as an account reconnect.
+  Hosted admission commits the source, signal, and mailbox work in one
   transaction; local admission commits the source and initial jobs in one SQLite
   transaction. Shared ingress never performs a second source write. A missing,
   disconnected, or newer account makes the callback fail and leaves the source

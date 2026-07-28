@@ -607,8 +607,10 @@ export class DeviceSyncPublicIngress {
         scopes: started.connectionSeed.scopes ?? started.scopes ?? descriptor.defaultScopes,
         credential: started.connectionSeed.credential,
         metadata: started.connectionSeed.metadata ?? {},
-        reuseEstablishedConnection:
-          provider.provider === "junction" && sourceProviderSlug !== null,
+        existingAccountPolicy:
+          provider.provider === "junction" && sourceProviderSlug !== null
+            ? "preserve_established"
+            : "replace",
         connectedAt: now,
         nextReconcileAt: started.connectionSeed.nextReconcileAt ?? null,
       });
@@ -871,7 +873,7 @@ export class DeviceSyncPublicIngress {
           : [...descriptor.defaultScopes],
         credential: resolveAndValidateProviderConnectionCredential(provider, connection),
         metadata: connection.metadata ?? {},
-        reuseEstablishedConnection: true,
+        existingAccountPolicy: "preserve_established",
         connectedAt: now,
         nextReconcileAt: connection.nextReconcileAt ?? null,
       });
@@ -1195,7 +1197,9 @@ export class DeviceSyncPublicIngress {
             : [...descriptor.defaultScopes],
         credential: resolveAndValidateProviderConnectionCredential(provider, connection),
         metadata: connection.metadata ?? {},
-        reuseEstablishedConnection: reusedEstablishedJunctionAccount,
+        existingAccountPolicy: reusedEstablishedJunctionAccount
+          ? "preserve_established"
+          : "replace",
         existingAccountGuard: seededAccountId
           ? {
               expectedAccountId: seededAccountId,

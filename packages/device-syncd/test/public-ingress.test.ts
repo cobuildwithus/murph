@@ -149,7 +149,7 @@ class InMemoryPublicIngressStore implements DeviceSyncPublicIngressStore {
     }
 
     if (
-      input.reuseEstablishedConnection === true
+      input.existingAccountPolicy === "preserve_established"
       && existing
       && input.ownerId
       && existingOwnerId === input.ownerId
@@ -1378,6 +1378,7 @@ test("public ingress completes seeded external-link callbacks after mutable webh
       kind: "provider_config",
       providerConfigKey: "junction",
     },
+    existingAccountPolicy: "replace",
     metadata: {
       callbackOutcome: "seeded",
       junctionHistoricalBackfillStatus: "coverage_v3_retrying",
@@ -1829,6 +1830,7 @@ test("public ingress rejects seeded callbacks after the connection starts a newe
       kind: "provider_config",
       providerConfigKey: "junction",
     },
+    existingAccountPolicy: "replace",
     metadata: { connectionEpoch: "new" },
     connectedAt: "2099-04-27T00:00:00.000Z",
     nextReconcileAt: null,
@@ -4086,6 +4088,7 @@ test("public ingress skips provider revocation when post-persistence setup clean
             accessToken: "<REDACTED_NEW_ACCESS_TOKEN>",
             refreshToken: "<REDACTED_NEW_REFRESH_TOKEN>",
           },
+          existingAccountPolicy: "replace",
           metadata: { connectionEpoch: "new" },
           connectedAt: "2099-04-27T00:00:00.000Z",
           nextReconcileAt: null,

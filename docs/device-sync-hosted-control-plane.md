@@ -227,12 +227,16 @@ source on an established shared account preserves the account phase and sibling
 sources. The target `DeviceConnectionSource` remains `disconnected`; target
 webhooks and provider pulls stay inert until the hosted connection-established
 hook commits that source, its signal, and mailbox work in one transaction.
-Shared ingress does not independently connect the source. If explicit disconnect
-or a newer connection epoch wins the locked recheck, the callback fails and the
-target remains disconnected. The start path retries provider cleanup for that
-target source only and returns a retryable error rather than issuing a new link
-when cleanup is ambiguous. Whole-account revoke remains the explicit
-connection-wide disconnect path.
+Shared ingress explicitly selects `preserve_established` for a source addition
+and `replace` for an account reconnect. The hosted Prisma owner and the local or
+tunneled SQLite owner apply the same shared predicate inside persistence, so the
+local adapter cannot re-pend the shared account or change its generation.
+Shared ingress does not independently connect the source. If explicit
+disconnect or a newer connection epoch wins the locked recheck, the callback
+fails and the target remains disconnected. The start path retries provider
+cleanup for that target source only and returns a retryable error rather than
+issuing a new link when cleanup is ambiguous. Whole-account revoke remains the
+explicit connection-wide disconnect path.
 
 ### Hosted settings-authenticated routes
 
