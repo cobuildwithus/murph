@@ -23,6 +23,9 @@ import { resolveAssistantOperatorDefaults } from '@murphai/operator-config/opera
 import {
   normalizeAssistantDeliveryError,
 } from './outbox.js'
+import {
+  ASSISTANT_IMAGE_RESPONSE_TRANSCRIPT_MARKER,
+} from './response-media.js'
 import { recordAssistantDiagnosticEvent } from './diagnostics.js'
 import { refreshAssistantStatusSnapshotLocal } from './status.js'
 import {
@@ -2453,7 +2456,7 @@ function resolveAssistantProviderTranscriptText(input: {
   const imagePresence = (input.media ?? []).some(
     (item) => item.kind === 'image',
   )
-    ? '[This response included an image attachment.]'
+    ? ASSISTANT_IMAGE_RESPONSE_TRANSCRIPT_MARKER
     : null
   const mediaTranscriptText = buildAssistantResponseMediaTranscriptText(
     input.media,
