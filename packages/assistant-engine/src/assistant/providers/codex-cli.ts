@@ -344,6 +344,17 @@ export async function executeCodexAssistantTurnAttempt(
           }
         : input
     const prompt = resolveAssistantProviderPrompt(primaryInput)
+    const conversationHistoryContentAuthorityExpiresAt =
+      normalizeNullableString(
+        primaryInput.conversationHistoryContentAuthorityExpiresAt,
+      )
+    const promptWithoutConversationHistory =
+      conversationHistoryContentAuthorityExpiresAt
+        ? resolveAssistantProviderPrompt({
+            ...primaryInput,
+            conversationHistoryMessages: undefined,
+          })
+        : null
     emitAssistantProviderPromptSizeTraceEvent({
       input: primaryInput,
       prompt,
@@ -351,6 +362,13 @@ export async function executeCodexAssistantTurnAttempt(
     result = await executeCodexAppServerTurn({
       ...baseAppServerInput,
       prompt,
+      ...(conversationHistoryContentAuthorityExpiresAt
+        ? {
+            conversationHistoryContentAuthorityExpiresAt:
+              conversationHistoryContentAuthorityExpiresAt,
+            promptWithoutConversationHistory,
+          }
+        : {}),
       resumeSessionId: input.resume?.codexThreadId,
     })
   } catch (error) {

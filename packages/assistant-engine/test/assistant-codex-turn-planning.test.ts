@@ -603,6 +603,145 @@ describe('assistant Codex turn planning', () => {
     }
   })
 
+  it.each([
+    {
+      expectedFirstContent: 'Member message 2.',
+      expectedLength: 23,
+      expectedReceiptOffsetMs: -58 * 60_000,
+      label: 'the message-count cap',
+    },
+    {
+      expectedFirstContent: 'Current member message ',
+      expectedLength: 2,
+      expectedReceiptOffsetMs: -60 * 60_000,
+      label: 'the total-byte cap',
+    },
+  ])('keeps receipt authority coherent after $label', async ({
+    expectedFirstContent,
+    expectedLength,
+    expectedReceiptOffsetMs,
+    label,
+  }) => {
+    vi.useFakeTimers()
+    const executionAtMs = Date.parse('2026-07-20T17:30:00.000Z')
+    vi.setSystemTime(executionAtMs)
+    const vault = await mkdtemp(
+      path.join(os.tmpdir(), 'assistant-onboarding-bounded-evidence-plan-'),
+    )
+    const session = createSession({ turnCount: 2 })
+    const entries =
+      label === 'the message-count cap'
+        ? Array.from({ length: 25 }, (_, index) =>
+            index % 2 === 0
+              ? {
+                  contentReceivedAt: new Date(
+                    executionAtMs + (-60 + index) * 60_000,
+                  ).toISOString(),
+                  createdAt: new Date(
+                    executionAtMs + (-60 + index) * 60_000,
+                  ).toISOString(),
+                  kind: 'user' as const,
+                  schema: 'murph.assistant-transcript-entry.v1' as const,
+                  text: `Member message ${index}.`,
+                }
+              : {
+                  createdAt: new Date(
+                    executionAtMs + (-60 + index) * 60_000,
+                  ).toISOString(),
+                  kind: 'assistant' as const,
+                  schema: 'murph.assistant-transcript-entry.v1' as const,
+                  text: `Assistant response ${index}.`,
+                })
+        : [
+            {
+              contentReceivedAt: new Date(
+                executionAtMs - 4 * 60 * 60_000,
+              ).toISOString(),
+              createdAt: new Date(
+                executionAtMs - 4 * 60 * 60_000,
+              ).toISOString(),
+              kind: 'user' as const,
+              schema: 'murph.assistant-transcript-entry.v1' as const,
+              text: `Earlier member message ${'u'.repeat(3_850)}`,
+            },
+            {
+              createdAt: new Date(
+                executionAtMs - 3 * 60 * 60_000,
+              ).toISOString(),
+              kind: 'assistant' as const,
+              schema: 'murph.assistant-transcript-entry.v1' as const,
+              text: `Earlier assistant response ${'a'.repeat(3_850)}`,
+            },
+            {
+              contentReceivedAt: new Date(
+                executionAtMs - 60 * 60_000,
+              ).toISOString(),
+              createdAt: new Date(
+                executionAtMs - 60 * 60_000,
+              ).toISOString(),
+              kind: 'user' as const,
+              schema: 'murph.assistant-transcript-entry.v1' as const,
+              text: `Current member message ${'v'.repeat(3_850)}`,
+            },
+            {
+              createdAt: new Date(
+                executionAtMs - 30 * 60_000,
+              ).toISOString(),
+              kind: 'assistant' as const,
+              schema: 'murph.assistant-transcript-entry.v1' as const,
+              text: `Current assistant response ${'b'.repeat(3_850)}`,
+            },
+          ]
+
+    try {
+      await replaceTranscriptEntries(
+        resolveAssistantStatePaths(vault),
+        session.sessionId,
+        entries,
+      )
+      const plan = await resolveAssistantRouteTurnPlan({
+        executionContext: null,
+        hostedToolContext: null,
+        input: {
+          ...createMessageInput(),
+          prompt: 'Offer one low-pressure health direction choice.',
+          scheduledOccurrenceAt: '2026-07-20T17:30:00.000Z',
+          turnTrigger: 'automation-cron',
+          vault,
+        },
+        profile: {
+          promptProfile: 'onboarding-goal-checkin',
+          threadScope: 'isolated-thread',
+          toolProfile: 'output-only-turn',
+        },
+        promptTimeContext: {
+          currentLocalDate: '2026-07-20',
+          currentTimeZone: 'UTC',
+        },
+        route: createRoute(),
+        session,
+        sharedPlan: createPrivateSharedPlan(),
+      })
+
+      expect(plan.conversationHistoryMessages).toHaveLength(expectedLength)
+      expect(plan.conversationHistoryMessages?.[0]).toMatchObject({
+        role: 'user',
+      })
+      expect(plan.conversationHistoryMessages?.[0]?.content).toContain(
+        expectedFirstContent,
+      )
+      expect(plan.conversationHistoryContentAuthorityExpiresAt).toBe(
+        new Date(
+          executionAtMs +
+            expectedReceiptOffsetMs +
+            ASSISTANT_TRANSCRIPT_CONTENT_RETENTION_MS,
+        ).toISOString(),
+      )
+    } finally {
+      await rm(vault, { force: true, recursive: true })
+    }
+  })
+
   it('plans detached system notifications with no history, private context, or tools', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(
       'PRIVATE_CLI_CONTRACT',

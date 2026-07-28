@@ -729,14 +729,21 @@ describe('Codex model catalog', () => {
     expect(providerInput?.conversationHistoryMessages).toEqual(
       promptProfile !== 'onboarding-goal-checkin'
         ? undefined
+        : [
+            {
+              content: 'Current receipt-authorized member context.',
+              role: 'user',
+            },
+          ],
+    )
+    expect(
+      providerInput?.conversationHistoryContentAuthorityExpiresAt,
+    ).toBe(
+      promptProfile !== 'onboarding-goal-checkin'
+        ? undefined
         : expiresBeforeProvider === true
-          ? []
-          : [
-              {
-                content: 'Current receipt-authorized member context.',
-                role: 'user',
-              },
-            ],
+          ? '2026-07-20T17:30:00.000Z'
+          : '2099-07-20T17:30:00.000Z',
     )
     expect(unsafeDynamicTools).not.toEqual([])
     expect(unsafeProgressDelivery.send).not.toHaveBeenCalled()
@@ -755,12 +762,12 @@ describe('Codex model catalog', () => {
     },
     {
       expiresBeforeProvider: true,
-      label: 'onboarding evidence expiring before provider entry',
+      label: 'onboarding evidence carried to the turn-start boundary',
       promptProfile: 'onboarding-goal-checkin' as const,
       toolProfile: 'output-only-turn' as const,
     },
   ])(
-    'enforces the provider boundary for $label',
+    'enforces restricted provider input for $label',
     verifyRestrictedProviderExecution,
   )
 

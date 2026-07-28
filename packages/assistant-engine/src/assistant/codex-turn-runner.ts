@@ -142,26 +142,6 @@ function resolveAssistantCodexConfigOverrides(input: {
   ]
 }
 
-function resolveAssistantProviderConversationHistoryMessages(input: {
-  contentAuthorityExpiresAt: string | null | undefined
-  messages:
-    | readonly AssistantProviderConversationMessage[]
-    | null
-    | undefined
-  onboardingGoalCheckinTurn: boolean
-}): readonly AssistantProviderConversationMessage[] | undefined {
-  if (!input.onboardingGoalCheckinTurn) {
-    return input.messages ?? undefined
-  }
-  const contentAuthorityExpiresAtMs = Date.parse(
-    input.contentAuthorityExpiresAt ?? '',
-  )
-  return Number.isFinite(contentAuthorityExpiresAtMs) &&
-    Date.now() < contentAuthorityExpiresAtMs
-    ? input.messages ?? undefined
-    : []
-}
-
 export {
   resolveAssistantCodexThreadScope,
 } from './codex-turn/planning.js'
@@ -495,14 +475,6 @@ async function executeAssistantCodexAttempt(input: {
     const groupEmailTurn =
       audience.threadIsDirect === false &&
       normalizeNullableString(audience.channel)?.toLowerCase() === 'email'
-    const conversationHistoryMessages =
-      resolveAssistantProviderConversationHistoryMessages({
-        contentAuthorityExpiresAt:
-          attemptPlan.routePlan
-            .conversationHistoryContentAuthorityExpiresAt,
-        messages: attemptPlan.routePlan.conversationHistoryMessages,
-        onboardingGoalCheckinTurn,
-      })
     const attemptResult = await executeCodexAssistantTurnAttemptFromInput({
       providerConfig: {
         approvalPolicy: nativeCapabilitiesRestrictedTurn
@@ -538,7 +510,15 @@ async function executeAssistantCodexAttempt(input: {
           nativeCapabilitiesRestrictedTurn,
           requested: executionPlan.input.codexConfigOverrides ?? null,
         }),
-        conversationHistoryMessages,
+        ...(onboardingGoalCheckinTurn
+          ? {
+              conversationHistoryContentAuthorityExpiresAt:
+                attemptPlan.routePlan
+                  .conversationHistoryContentAuthorityExpiresAt ?? null,
+            }
+          : {}),
+        conversationHistoryMessages:
+          attemptPlan.routePlan.conversationHistoryMessages,
         developerInstructions: attemptPlan.routePlan.developerInstructions,
         dynamicTools: outputOnlyTurn
           ? []

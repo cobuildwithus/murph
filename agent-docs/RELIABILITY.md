@@ -112,8 +112,12 @@ Last verified: 2026-07-27
   transcript history requires unexpired receipt authority for member text and
   keeps only the coherent suffix beginning with an admissible member entry
   after the latest inadmissible one. It never derives a missing receipt from
-  transcript creation time, and the provider boundary drops the whole bounded
-  history if its earliest included receipt expires after planning. The final
+  transcript creation time. Count and byte caps retain only a suffix that
+  begins with an authorized member entry and recompute the earliest retained
+  receipt deadline. The one-shot provider rechecks that deadline when
+  constructing the actual `turn/start` request after process and thread
+  startup, so expiry during cold startup falls back to the history-free prompt.
+  The final
   outbox provider-entry gate repeats the onboarding precondition after deferred
   delivery or restart even when the automation revision itself is unchanged.
   A skip consumes the one-shot normally and creates no retrying outreach loop.

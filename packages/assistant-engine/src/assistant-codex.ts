@@ -466,6 +466,8 @@ export interface CodexAppServerTurnInput {
   permissions?: string | null
   processLifetime?: CodexAppServerProcessLifetime
   prompt: string
+  conversationHistoryContentAuthorityExpiresAt?: string | null
+  promptWithoutConversationHistory?: string | null
   images?: readonly CodexAppServerImageInput[] | null
   reasoningEffort?: string | null
   resumeSessionId?: string | null
@@ -626,6 +628,38 @@ function appendRequiredVaultFileApprovalUrls(
     normalizeNullableString(message),
     ...approvalUrls,
   ].filter((part): part is string => part !== null).join('\n\n')
+}
+
+function resolveCodexAppServerTurnStartPrompt(
+  input: CodexAppServerPreparedTurnInput,
+): string {
+  if (
+    input.conversationHistoryContentAuthorityExpiresAt === undefined ||
+    input.conversationHistoryContentAuthorityExpiresAt === null
+  ) {
+    return input.prompt
+  }
+
+  const contentAuthorityExpiresAtMs = Date.parse(
+    input.conversationHistoryContentAuthorityExpiresAt,
+  )
+  if (
+    Number.isFinite(contentAuthorityExpiresAtMs) &&
+    Date.now() < contentAuthorityExpiresAtMs
+  ) {
+    return input.prompt
+  }
+
+  const fallbackPrompt = normalizeNullableString(
+    input.promptWithoutConversationHistory,
+  )
+  if (!fallbackPrompt) {
+    throw new VaultCliError(
+      'ASSISTANT_CODEX_FAILED',
+      'Codex app-server turn is missing its history-free fallback prompt.',
+    )
+  }
+  return fallbackPrompt
 }
 
 export async function executeCodexAppServerTurn(
@@ -4707,10 +4741,16 @@ async function runCodexAppServerTurnOnProcess(
     )
     codexProcess.noteBoundThreadModel(input.model ?? null)
     codexProcess.noteBoundThreadServiceTier(input.serviceTier ?? null)
+    const prompt = resolveCodexAppServerTurnStartPrompt(input)
     const turnStartRequest = sendRequest(
       'turn/start',
       buildCodexTurnStartParams({
-        input,
+        input: prompt === input.prompt
+          ? input
+          : {
+              ...input,
+              prompt,
+            },
         imagePaths: input.imagePaths,
         codexThreadId,
       }),

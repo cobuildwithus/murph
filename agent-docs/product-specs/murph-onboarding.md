@@ -589,9 +589,12 @@ the coherent suffix beginning with an admissible member entry after the latest
 inadmissible one. It never derives missing receipt authority from transcript
 creation time, so delayed execution, interrupted retention, and retained
 assistant text cannot expose expired member content or create a misleading
-one-sided exchange. The route plan carries only the earliest included receipt
-deadline; if that deadline passes before provider entry, the runner drops the
-whole bounded history and leaves the prompt to the truthful generic branch.
+one-sided exchange. Count and byte bounds remove any leading assistant-only
+fragment and recompute authority from the member entries actually retained.
+The route plan carries only that earliest retained receipt deadline; if it
+passes before the actual Codex `turn/start` request, including during one-shot
+process or thread startup, the provider drops the whole bounded history and
+uses the history-free truthful generic branch.
 The isolated turn preserves the member's live conversation resume state
 whether it sends or skips. The dedicated system prompt owns the evidence and
 no-mutation contract above untrusted conversation, goal, and task text.

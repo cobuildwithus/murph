@@ -76,8 +76,12 @@ skip preserve the live direct-session resume owner; planning tests prove
 beginning, middle, and end-of-window execution admits only a coherent suffix
 with current receipt authority whether retention has already run or not,
 including cold reconstruction and unstamped legacy entries.
-Provider-execution tests advance the clock between planning and provider entry
-and prove the whole bounded history is dropped at the inclusive deadline;
+Planning tests exercise both message-count and total-byte caps, prove retained
+history still begins with an authorized member entry, and bind the deadline to
+the earliest retained member receipt. Provider-execution tests advance the
+clock across one-shot process/thread startup and inspect the real `turn/start`
+payload, proving history is present immediately before the deadline and absent
+at inclusive equality and afterward;
 outbox tests prove a deferred send revalidates answered onboarding at final
 provider entry.
 

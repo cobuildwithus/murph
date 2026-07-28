@@ -1061,17 +1061,15 @@ async function resolveAssistantCommittedTranscriptHistoryMessages(input: {
       messages: [],
     }
   }
-  let contentAuthorityExpiresAt: string | null = null
   if (input.requireCurrentUserContentAuthority === true) {
-    const selection = selectCurrentAssistantTranscriptEvidenceSuffix(
+    entries = selectCurrentAssistantTranscriptEvidenceSuffix(
       entries,
       Date.now(),
     )
-    entries = selection.entries
-    contentAuthorityExpiresAt = selection.contentAuthorityExpiresAt
   }
 
   type TranscriptHistoryCandidate = {
+    contentAuthorityExpiresAtMs: number | null
     message: AssistantProviderConversationMessage
     userPromptKey: string | null
   }
@@ -1082,6 +1080,7 @@ async function resolveAssistantCommittedTranscriptHistoryMessages(input: {
       entry.text.startsWith(ASSISTANT_NO_REPLY_TRANSCRIPT_MARKER_PREFIX)
     ) {
       return [{
+        contentAuthorityExpiresAtMs: null,
         message: {
           content: ASSISTANT_NO_REPLY_TRANSCRIPT_HISTORY_TEXT,
           role: 'assistant',
@@ -1097,8 +1096,18 @@ async function resolveAssistantCommittedTranscriptHistoryMessages(input: {
       rawContent,
       ASSISTANT_ROUTE_COMMITTED_TRANSCRIPT_HISTORY_MESSAGE_BYTES,
     )
+    const contentReceivedAtMs =
+      entry.kind === 'user' &&
+      input.requireCurrentUserContentAuthority === true
+        ? Date.parse(entry.contentReceivedAt ?? '')
+        : Number.NaN
     return content
       ? [{
+          contentAuthorityExpiresAtMs:
+            Number.isFinite(contentReceivedAtMs)
+              ? contentReceivedAtMs +
+                ASSISTANT_TRANSCRIPT_CONTENT_RETENTION_MS
+              : null,
           message: {
             content,
             role: entry.kind,
@@ -1134,24 +1143,60 @@ async function resolveAssistantCommittedTranscriptHistoryMessages(input: {
     break
   }
 
+  let retained = limitAssistantConversationHistoryCandidates(messages)
+  if (input.requireCurrentUserContentAuthority !== true) {
+    return {
+      contentAuthorityExpiresAt: null,
+      messages: retained.map(({ message }) => message),
+    }
+  }
+
+  const firstRetainedUserIndex = retained.findIndex(
+    ({ message }) => message.role === 'user',
+  )
+  if (firstRetainedUserIndex === -1) {
+    return {
+      contentAuthorityExpiresAt: null,
+      messages: [],
+    }
+  }
+  retained = retained.slice(firstRetainedUserIndex)
+
+  let contentAuthorityExpiresAtMs = Number.POSITIVE_INFINITY
+  for (const candidate of retained) {
+    if (candidate.message.role !== 'user') {
+      continue
+    }
+    if (
+      candidate.contentAuthorityExpiresAtMs === null ||
+      !Number.isFinite(candidate.contentAuthorityExpiresAtMs)
+    ) {
+      return {
+        contentAuthorityExpiresAt: null,
+        messages: [],
+      }
+    }
+    contentAuthorityExpiresAtMs = Math.min(
+      contentAuthorityExpiresAtMs,
+      candidate.contentAuthorityExpiresAtMs,
+    )
+  }
+
   return {
-    contentAuthorityExpiresAt,
-    messages: limitAssistantConversationHistoryMessages(
-      messages.map(({ message }) => message),
-    ),
+    contentAuthorityExpiresAt:
+      Number.isFinite(contentAuthorityExpiresAtMs)
+        ? new Date(contentAuthorityExpiresAtMs).toISOString()
+        : null,
+    messages: retained.map(({ message }) => message),
   }
 }
 
 function selectCurrentAssistantTranscriptEvidenceSuffix(
   entries: Awaited<ReturnType<typeof listAssistantTranscriptEntries>>,
   evidenceAdmissionAtMs: number,
-): {
-  contentAuthorityExpiresAt: string | null
-  entries: Awaited<ReturnType<typeof listAssistantTranscriptEntries>>
-} {
+): Awaited<ReturnType<typeof listAssistantTranscriptEntries>> {
   const cutoffMs =
     evidenceAdmissionAtMs - ASSISTANT_TRANSCRIPT_CONTENT_RETENTION_MS
-  let contentAuthorityExpiresAtMs = Number.POSITIVE_INFINITY
   let evidenceStartIndex = -1
 
   for (const [index, entry] of entries.entries()) {
@@ -1166,30 +1211,17 @@ function selectCurrentAssistantTranscriptEvidenceSuffix(
       contentReceivedAtMs > cutoffMs &&
       contentReceivedAtMs <= evidenceAdmissionAtMs
     if (!hasCurrentContentAuthority) {
-      contentAuthorityExpiresAtMs = Number.POSITIVE_INFINITY
       evidenceStartIndex = -1
       continue
     }
     if (evidenceStartIndex === -1) {
       evidenceStartIndex = index
     }
-    contentAuthorityExpiresAtMs = Math.min(
-      contentAuthorityExpiresAtMs,
-      contentReceivedAtMs + ASSISTANT_TRANSCRIPT_CONTENT_RETENTION_MS,
-    )
   }
 
-  return {
-    contentAuthorityExpiresAt:
-      evidenceStartIndex !== -1 &&
-      Number.isFinite(contentAuthorityExpiresAtMs)
-        ? new Date(contentAuthorityExpiresAtMs).toISOString()
-        : null,
-    entries:
-      evidenceStartIndex === -1
-        ? []
-        : entries.slice(evidenceStartIndex),
-  }
+  return evidenceStartIndex === -1
+    ? []
+    : entries.slice(evidenceStartIndex)
 }
 
 function normalizeAssistantConversationHistoryText(value: string): string | null {
@@ -1213,14 +1245,21 @@ function shouldDropTrailingCurrentUserPrompt(input: {
   )
 }
 
-function limitAssistantConversationHistoryMessages(
-  messages: readonly AssistantProviderConversationMessage[],
-): AssistantProviderConversationMessage[] {
-  const countLimited = messages.slice(-ASSISTANT_ROUTE_COMMITTED_TRANSCRIPT_HISTORY_LIMIT)
-  const retained: AssistantProviderConversationMessage[] = []
+function limitAssistantConversationHistoryCandidates<
+  TCandidate extends {
+    message: AssistantProviderConversationMessage
+  },
+>(
+  candidates: readonly TCandidate[],
+): TCandidate[] {
+  const countLimited = candidates.slice(
+    -ASSISTANT_ROUTE_COMMITTED_TRANSCRIPT_HISTORY_LIMIT,
+  )
+  const retained: TCandidate[] = []
   let retainedBytes = 0
 
-  for (const message of [...countLimited].reverse()) {
+  for (const candidate of [...countLimited].reverse()) {
+    const { message } = candidate
     if (typeof message.content !== 'string') {
       continue
     }
@@ -1234,7 +1273,7 @@ function limitAssistantConversationHistoryMessages(
     ) {
       break
     }
-    retained.push(message)
+    retained.push(candidate)
     retainedBytes += messageBytes
   }
 

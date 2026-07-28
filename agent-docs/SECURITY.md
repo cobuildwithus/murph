@@ -28,9 +28,11 @@ Last verified: 2026-07-26
   surface. At actual evidence admission, included member transcript text
   requires a valid unexpired receipt timestamp; the planner admits only the
   coherent suffix after the latest inadmissible member entry and never infers a
-  missing receipt from transcript creation time. The ephemeral route plan
-  carries the earliest included receipt deadline, and the provider boundary
-  drops all bounded history if that deadline has passed. The dedicated system
+  missing receipt from transcript creation time. Count and byte bounds must
+  preserve a leading authorized member entry, then recompute the ephemeral
+  deadline from the member entries that remain. The actual Codex `turn/start`
+  request drops all bounded history at or after that deadline, including after
+  asynchronous one-shot startup. The dedicated system
   prompt owns the evidence and no-mutation contract above untrusted
   conversation, goal, and task text. `member`
   identities require a personal/direct route;
