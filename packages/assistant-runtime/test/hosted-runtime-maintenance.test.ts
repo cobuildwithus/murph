@@ -3655,6 +3655,7 @@ describe("runHostedAssistantAutomationLane", () => {
       codexAppServerThreadResumeMs: 9,
       codexAppServerWarmReuseMs: 0,
       providerRequestOrdinal: 0,
+      serviceTier: "flex",
       source: "linq",
       startedAt: "2026-04-08T00:00:01.000Z",
     });
@@ -3680,6 +3681,7 @@ describe("runHostedAssistantAutomationLane", () => {
             codexAppServerSpawnReadyMs: 1,
             codexAppServerThreadResumeMs: 9,
             codexAppServerWarmReuseMs: 0,
+            serviceTier: "flex",
           },
           schemaVersion: 1,
         },

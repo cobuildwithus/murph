@@ -1740,6 +1740,11 @@ export type HostedRuntimeAssistantMilestone =
 export type HostedRuntimeLatencyTraceMilestone =
   (typeof HOSTED_RUNTIME_LATENCY_TRACE_MILESTONES)[number];
 
+export const HOSTED_RUNTIME_PROVIDER_SERVICE_TIERS = ["flex"] as const;
+
+export type HostedRuntimeProviderServiceTier =
+  (typeof HOSTED_RUNTIME_PROVIDER_SERVICE_TIERS)[number];
+
 export interface HostedRuntimeLatencyPhaseBreakdown {
   schemaVersion: number;
   // Control-plane orchestration stamps before the runner-container DO starts
@@ -1864,6 +1869,7 @@ export interface HostedRuntimeLatencyPhaseBreakdown {
     admissionMs?: number;
     preProviderSetupMs?: number;
     linqEgressGuardMs?: number;
+    serviceTier?: HostedRuntimeProviderServiceTier;
   };
 }
 
@@ -1994,6 +2000,7 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS: Record<
     "admissionMs",
     "preProviderSetupMs",
     "linqEgressGuardMs",
+    "serviceTier",
   ],
 } as const;
 
@@ -2242,6 +2249,12 @@ function isHostedRuntimeLatencyPhaseBreakdownLeafSafe(
     return typeof value === "string"
       && value.length <= 20
       && /^(?:0|[1-9]\d*)$/u.test(value);
+  }
+  if (phase === "provider" && leafKey === "serviceTier") {
+    return typeof value === "string"
+      && HOSTED_RUNTIME_PROVIDER_SERVICE_TIERS.includes(
+        value as HostedRuntimeProviderServiceTier,
+      );
   }
   if (HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_BOOLEAN_LEAF_KEY_SET.has(`${phase}.${leafKey}`)) {
     return typeof value === "boolean";

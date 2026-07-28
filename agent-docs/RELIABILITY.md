@@ -1,6 +1,6 @@
 # Reliability
 
-Last verified: 2026-07-27
+Last verified: 2026-07-28
 
 ## Current Guardrails
 
@@ -73,6 +73,10 @@ Last verified: 2026-07-27
 - Foreground inbox/parser-backed daemon runs should favor restartable connectors with bounded backoff over permanently dead watch loops, while still keeping low-level restart behavior opt-in and always bounded by the owning abort signal.
 - Networked assistant/provider/channel calls should set explicit timeouts, propagate caller abort signals, and only auto-retry request shapes that are replay-safe or rate-limit directed.
 - The hosted reply-latency operator alert remains one singleton incident owner.
+  Provider-start telemetry explicitly labels Flex turns, and the monitor
+  excludes those traces from completed-reply and unresolved-work health.
+  Missing or non-Flex labels remain alert-eligible; the monitor does not infer
+  tier from the best-effort usage ledger.
   Outbound paging requires the shared Resend operational-email sender and
   recipients plus a valid IANA operator timezone; it never falls back to
   Linq/iMessage. It suppresses sends from 11 PM through 7 AM local time and

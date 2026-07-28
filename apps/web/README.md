@@ -659,8 +659,11 @@ Hosted onboarding extras:
   and `HOSTED_LINQ_ALERT_EMAILS`. The historical Linq-prefixed email names are
   shared operational configuration; the latency path never sends through or
   falls back to Linq/iMessage. The monitor uses the fixed 30-second product
-  boundary, sends one email per continuous incident, suppresses sends from 11
-  PM through 7 AM operator-local time, and adds up to ten minutes of stable
+  boundary for non-Flex work; provider-start traces explicitly labeled `flex`
+  are excluded from both completed and unresolved alert health. Missing or
+  non-Flex labels remain eligible. The monitor sends one email per continuous
+  incident, suppresses sends from 11 PM through 7 AM operator-local time, and
+  adds up to ten minutes of stable
   wake/retry jitter. Provider attempts therefore stay at least ten minutes
   apart and spread across more than one five-minute cron tick. A fresh health
   and operator-time recheck before provider admission makes no attempt-state

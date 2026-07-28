@@ -1032,6 +1032,7 @@ describe('Codex model catalog', () => {
 
   it('drops unsupported rich user parts and keeps flex for supported hosted OpenAI routes', async () => {
     const providerScopeEvents: string[] = []
+    const providerRequestStarted = vi.fn()
     const flexCatalog = await createHostedCodexFlexCatalog({ model: 'gpt-5.6-terra' })
     const route = createRoute({
       providerOptions: {
@@ -1069,8 +1070,11 @@ describe('Codex model catalog', () => {
       supportsReasoningEffort: true,
     })
     providerMocks.executeCodexAssistantTurnAttemptFromInput.mockImplementation(
-      async () => {
+      async (providerInput) => {
         providerScopeEvents.push('provider')
+        await providerInput.onProviderRequestStarted?.({
+          startedAt: '2026-04-29T00:00:01.000Z',
+        })
         return createProviderAttemptResult()
       },
     )
@@ -1135,6 +1139,7 @@ describe('Codex model catalog', () => {
             providerScopeEvents.push('released')
           }
         },
+        onProviderRequestStarted: providerRequestStarted,
         plan: createSharedPlan(),
         providerRequestOrdinal: 1,
         resolvedSession: session,
@@ -1156,6 +1161,11 @@ describe('Codex model catalog', () => {
     expect(timeoutSpy).toHaveBeenCalledWith(600_000)
     expect(providerInput?.abortSignal).not.toBe(upstreamAbort.signal)
     expect(providerInput?.abortSignal?.aborted).toBe(false)
+    expect(providerRequestStarted).toHaveBeenCalledWith({
+      providerRequestOrdinal: 1,
+      serviceTier: 'flex',
+      startedAt: '2026-04-29T00:00:01.000Z',
+    })
     upstreamAbort.abort()
     expect(providerInput?.abortSignal?.aborted).toBe(true)
     expect(

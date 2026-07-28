@@ -92,6 +92,7 @@ export type AssistantProviderRequestStartHook = (event: {
   preProviderSetupMs?: number
   promptBuildMs?: number
   providerRequestOrdinal: number
+  serviceTier?: AssistantProviderServiceTier | null
   sessionResolveMs?: number
   startedAt: string
   turnLockWaitMs?: number

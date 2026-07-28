@@ -2013,6 +2013,7 @@ test('sendAssistantMessageLocal surfaces the provider setup sub-split on onProvi
       codexAppServerThreadResumeMs: 9,
       codexAppServerWarmReuseMs: 0,
       providerRequestOrdinal: 0,
+      serviceTier: 'flex',
       startedAt: '2026-06-09T00:00:00.000Z',
     })
     return {
@@ -2046,6 +2047,7 @@ test('sendAssistantMessageLocal surfaces the provider setup sub-split on onProvi
     codexAppServerWarmReuseMs: number
     preProviderSetupMs: number
     promptBuildMs: number
+    serviceTier: 'flex'
     sessionResolveMs: number
     turnLockWaitMs: number
   }
@@ -2055,6 +2057,7 @@ test('sendAssistantMessageLocal surfaces the provider setup sub-split on onProvi
   expect(event.codexAppServerSpawnReadyMs).toBe(1)
   expect(event.codexAppServerThreadResumeMs).toBe(9)
   expect(event.codexAppServerWarmReuseMs).toBe(0)
+  expect(event.serviceTier).toBe('flex')
   expect(typeof event.sessionResolveMs).toBe('number')
   expect(typeof event.promptBuildMs).toBe('number')
   expect(typeof event.admissionMs).toBe('number')

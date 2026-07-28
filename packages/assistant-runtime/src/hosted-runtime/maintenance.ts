@@ -763,6 +763,7 @@ function recordHostedAssistantProviderStartLatencyTraceBestEffort(input: {
   promptBuildMs?: number;
   providerRequestOrdinal: number;
   runtimeAttemptId?: string | null;
+  serviceTier?: "flex" | null;
   sessionResolveMs?: number;
   source: string;
   startedAt: string;
@@ -812,6 +813,9 @@ function recordHostedAssistantProviderStartLatencyTraceBestEffort(input: {
     ...(input.preProviderSetupMs === undefined
       ? {}
       : { preProviderSetupMs: input.preProviderSetupMs }),
+    ...(input.serviceTier === "flex"
+      ? { serviceTier: input.serviceTier }
+      : {}),
   };
 
   void recordHostedAssistantProviderStartLatencyTraceWithRetry(input.latencyTracePort, {

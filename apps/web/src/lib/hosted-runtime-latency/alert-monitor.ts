@@ -6,6 +6,9 @@ import {
   formatTimeZoneDateTimeParts,
   normalizeIanaTimeZone,
 } from "@murphai/contracts";
+import type {
+  HostedRuntimeProviderServiceTier,
+} from "@murphai/hosted-execution/runtime-control";
 import { Prisma, type HostedLinqAlert, type PrismaClient } from "@prisma/client";
 
 import { hostedOnboardingError, isHostedOnboardingError } from "../hosted-onboarding/errors";
@@ -57,6 +60,7 @@ export interface HostedRuntimeLatencyHealthRow {
   checkpointPublicationExpectedBy: Date | null;
   consumedAt: Date | null;
   deliveryAcceptedAt: Date | null;
+  providerServiceTier: HostedRuntimeProviderServiceTier | null;
   terminalNonReplyCommittedAt: Date | null;
 }
 
@@ -237,6 +241,8 @@ export async function readHostedRuntimeLatencyHealth(input: {
         readHostedRuntimeCheckpointPublicationExpectedBy(row.phaseBreakdownJson),
       consumedAt: row.mailboxItem.consumedAt,
       deliveryAcceptedAt: row.linqDelivery?.acceptedAt ?? null,
+      providerServiceTier:
+        readHostedRuntimeProviderServiceTier(row.phaseBreakdownJson),
       terminalNonReplyCommittedAt:
         readHostedRuntimeTerminalNonReplyCommittedAt(row.phaseBreakdownJson),
     })),
@@ -259,6 +265,9 @@ export function summarizeHostedRuntimeLatencyRows(input: {
   let unresolvedReplyCount = 0;
 
   for (const row of input.rows) {
+    if (row.providerServiceTier === "flex") {
+      continue;
+    }
     const acceptedAtMs = row.acceptedAt.getTime();
     const checkpointPublicationExpectedByMs =
       row.checkpointPublicationExpectedBy?.getTime() ?? null;
@@ -350,6 +359,19 @@ function readHostedRuntimeCheckpointPublicationExpectedBy(
     value,
     "checkpointPublicationExpectedByEpochMs",
   );
+}
+
+function readHostedRuntimeProviderServiceTier(
+  value: unknown,
+): HostedRuntimeProviderServiceTier | null {
+  if (!isHostedRuntimeLatencyPhaseRecord(value)) {
+    return null;
+  }
+  const provider = value.provider;
+  if (!isHostedRuntimeLatencyPhaseRecord(provider)) {
+    return null;
+  }
+  return provider.serviceTier === "flex" ? "flex" : null;
 }
 
 function readHostedRuntimeAssistantEpochDate(

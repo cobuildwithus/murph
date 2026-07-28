@@ -21,7 +21,10 @@ import {
   isAssistantProviderConnectionLostError,
   isAssistantProviderStalledError,
 } from '../provider-failure-diagnostics.js'
-import type { AssistantProviderRequestStartTiming } from '../providers/types.js'
+import type {
+  AssistantProviderRequestStartTiming,
+  AssistantProviderServiceTier,
+} from '../providers/types.js'
 import type { AssistantProviderTraceEvent } from '../provider-traces.js'
 import type { AssistantProviderProgressEvent } from '../provider-progress.js'
 import type {
@@ -1965,6 +1968,9 @@ async function executeAssistantAutoReply(input: {
               : { preProviderSetupMs: event.preProviderSetupMs }),
             ...(event.promptBuildMs === undefined ? {} : { promptBuildMs: event.promptBuildMs }),
             providerRequestOrdinal: event.providerRequestOrdinal,
+            ...(event.serviceTier === undefined
+              ? {}
+              : { serviceTier: event.serviceTier }),
             ...(event.sessionResolveMs === undefined
               ? {}
               : { sessionResolveMs: event.sessionResolveMs }),
@@ -1998,6 +2004,7 @@ export type AssistantAutoReplyProviderRequestStartHook = (event: {
   preProviderSetupMs?: number
   promptBuildMs?: number
   providerRequestOrdinal: number
+  serviceTier?: AssistantProviderServiceTier | null
   sessionResolveMs?: number
   source: string
   startedAt: string

@@ -1472,6 +1472,7 @@ describe("hosted runtime control contracts", () => {
         admissionMs: 4,
         preProviderSetupMs: 5,
         linqEgressGuardMs: 6,
+        serviceTier: "flex",
       },
     };
     expect(parseHostedRuntimeLatencyTraceRequest({
@@ -1504,6 +1505,7 @@ describe("hosted runtime control contracts", () => {
       { sessionResolveMs: { secret: 1 } }, // object leaf
       { sessionResolveMs: [1, 2, 3] }, // array leaf
       { codexAppServerWarmReuseMs: "0" }, // numeric leaf must stay numeric
+      { serviceTier: "priority" }, // only the explicit Flex tier is supported
       { networkToken: 1 }, // unknown sub key
     ]) {
       const parsed = parseHostedRuntimeLatencyTraceRequest({

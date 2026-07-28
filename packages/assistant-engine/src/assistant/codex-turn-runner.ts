@@ -219,6 +219,7 @@ export async function executeCodexTurnWithRecovery(input: {
   }) => Promise<AssistantProviderAcceptedInputsRelease | void>
   onProviderRequestStarted?: (event: {
     providerRequestOrdinal: number | null
+    serviceTier?: AssistantProviderServiceTier | null
     startedAt: string
   } & AssistantProviderRequestStartTiming) => Promise<void> | void
   plan: AssistantTurnSharedPlan
@@ -396,6 +397,7 @@ async function executeAssistantCodexAttempt(input: {
   executionPlan: AssistantCodexTurnExecutionPlan
   onProviderRequestStarted?: ((event: {
     providerRequestOrdinal: number | null
+    serviceTier?: AssistantProviderServiceTier | null
     startedAt: string
   } & AssistantProviderRequestStartTiming) => Promise<void> | void) | null
   providerRequestOrdinal: number | null
@@ -538,6 +540,7 @@ async function executeAssistantCodexAttempt(input: {
             event: {
               ...event,
               providerRequestOrdinal: input.providerRequestOrdinal,
+              serviceTier,
             },
             hook: input.onProviderRequestStarted ?? null,
           })
@@ -744,10 +747,12 @@ function normalizeAssistantProviderAttemptMetadata(
 function notifyProviderRequestStartedBestEffort(input: {
   event: {
     providerRequestOrdinal: number | null
+    serviceTier?: AssistantProviderServiceTier | null
     startedAt: string
   } & AssistantProviderRequestStartTiming
   hook?: ((event: {
     providerRequestOrdinal: number | null
+    serviceTier?: AssistantProviderServiceTier | null
     startedAt: string
   } & AssistantProviderRequestStartTiming) => Promise<void> | void) | null
 }): void {

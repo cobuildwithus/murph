@@ -74,6 +74,36 @@ describe("hosted runtime latency health", () => {
     expect(health.unresolvedReplyCount).toBe(0);
   });
 
+  it("excludes Flex-tier replies and unresolved traces from alert health", () => {
+    const health = summarizeHostedRuntimeLatencyRows({
+      now,
+      rows: [
+        latencyRow({
+          acceptedAt: "2026-07-26T15:58:00.000Z",
+          deliveryAcceptedAt: "2026-07-26T15:59:00.000Z",
+          providerServiceTier: "flex",
+        }),
+        latencyRow({
+          acceptedAt: "2026-07-26T15:59:00.000Z",
+          providerServiceTier: "flex",
+        }),
+        latencyRow({
+          acceptedAt: "2026-07-26T15:59:00.000Z",
+          deliveryAcceptedAt: "2026-07-26T15:59:31.000Z",
+        }),
+      ],
+    });
+
+    expect(health).toMatchObject({
+      anomalous: true,
+      maxCompletedReplyLatencyMs: 31_000,
+      oldestUnresolvedAgeMs: null,
+      recentCompletedReplyCount: 1,
+      recentSlowReplyCount: 1,
+      unresolvedReplyCount: 0,
+    });
+  });
+
   it("treats an explicit terminal non-reply as resolved before mailbox checkpointing", () => {
     const health = summarizeHostedRuntimeLatencyRows({
       now,
@@ -199,6 +229,37 @@ describe("hosted runtime latency health", () => {
 });
 
 describe("hosted runtime latency alert monitor", () => {
+  it("reads the Flex tier from stored provider-start telemetry", async () => {
+    const fixture = createMonitorPrismaFixture([
+      latencyRow({
+        acceptedAt: "2026-07-26T15:58:00.000Z",
+        deliveryAcceptedAt: "2026-07-26T15:59:00.000Z",
+        providerServiceTier: "flex",
+      }),
+      latencyRow({
+        acceptedAt: "2026-07-26T15:59:00.000Z",
+        deliveryAcceptedAt: "2026-07-26T15:59:10.000Z",
+      }),
+    ]);
+
+    const result = await runHostedRuntimeLatencyAlertMonitor({
+      env: {},
+      now,
+      prisma: fixture.prisma,
+    });
+
+    expect(result).toMatchObject({
+      configured: false,
+      health: {
+        anomalous: false,
+        recentCompletedReplyCount: 1,
+        recentSlowReplyCount: 0,
+        unresolvedReplyCount: 0,
+      },
+      outcome: "disabled",
+    });
+  });
+
   it("derives terminal non-replies from the stored latency phase breakdown", async () => {
     const fixture = createMonitorPrismaFixture([
       latencyRow({
@@ -1143,6 +1204,7 @@ function latencyRow(input: {
   checkpointPublicationExpectedBy?: string | null;
   consumedAt?: string | null;
   deliveryAcceptedAt?: string | null;
+  providerServiceTier?: "flex" | null;
   terminalNonReplyCommittedAt?: string | null;
 }): HostedRuntimeLatencyHealthRow {
   return {
@@ -1154,6 +1216,7 @@ function latencyRow(input: {
     deliveryAcceptedAt: input.deliveryAcceptedAt
       ? instant(input.deliveryAcceptedAt)
       : null,
+    providerServiceTier: input.providerServiceTier ?? null,
     terminalNonReplyCommittedAt: input.terminalNonReplyCommittedAt
       ? instant(input.terminalNonReplyCommittedAt)
       : null,
@@ -1182,22 +1245,35 @@ function createMonitorPrismaFixture(
         consumedAt: row.consumedAt,
       },
       phaseBreakdownJson:
-        row.terminalNonReplyCommittedAt || row.checkpointPublicationExpectedBy
+        row.terminalNonReplyCommittedAt
+        || row.checkpointPublicationExpectedBy
+        || row.providerServiceTier
         ? {
-            assistant: {
-              ...(row.terminalNonReplyCommittedAt
-                ? {
-                    terminalNonReplyCommittedAtEpochMs:
-                      row.terminalNonReplyCommittedAt.getTime(),
-                  }
-                : {}),
-              ...(row.checkpointPublicationExpectedBy
-                ? {
-                    checkpointPublicationExpectedByEpochMs:
-                      row.checkpointPublicationExpectedBy.getTime(),
-                  }
-                : {}),
-            },
+            ...(row.terminalNonReplyCommittedAt || row.checkpointPublicationExpectedBy
+              ? {
+                  assistant: {
+                    ...(row.terminalNonReplyCommittedAt
+                      ? {
+                          terminalNonReplyCommittedAtEpochMs:
+                            row.terminalNonReplyCommittedAt.getTime(),
+                        }
+                      : {}),
+                    ...(row.checkpointPublicationExpectedBy
+                      ? {
+                          checkpointPublicationExpectedByEpochMs:
+                            row.checkpointPublicationExpectedBy.getTime(),
+                        }
+                      : {}),
+                  },
+                }
+              : {}),
+            ...(row.providerServiceTier
+              ? {
+                  provider: {
+                    serviceTier: row.providerServiceTier,
+                  },
+                }
+              : {}),
             schemaVersion: 1,
           }
         : null,

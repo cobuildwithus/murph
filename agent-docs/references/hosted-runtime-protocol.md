@@ -1,6 +1,6 @@
 # Hosted Mailbox Runtime Protocol
 
-Last verified: 2026-07-27
+Last verified: 2026-07-28
 
 ## Decision
 
@@ -904,7 +904,12 @@ process. Its ingress `acceptedAt` value copies the mailbox row's PostgreSQL
 from `acceptedAt` includes the remainder of the append transaction and must not
 be labeled row-insert or commit latency. The web-owned `provider_started` field
 means the runtime observed a local Codex `turn/start`; it is not evidence of an
-upstream OpenAI request or first token. The runtime may also emit metadata-only
+upstream OpenAI request or first token. The same event carries the resolved
+`flex` service-tier label when that execution policy applies; missing tier
+metadata remains non-Flex for alert eligibility. Deploy the Web reader before
+the updated runner producer. The new reader accepts missing labels, while an
+old reader safely drops the unknown phase metadata but cannot exclude the Flex
+trace. The runtime may also emit metadata-only
 `assistant_milestone` events for Linq typing request start/acceptance and the
 first locally observed Codex output/text. It projects
 `terminal_non_reply_committed` only from the assistant engine's existing durable
@@ -2087,9 +2092,11 @@ provider payloads, secrets, local paths, or direct personal identifiers.
 Web runs one Vercel-authenticated reply-latency monitor every five minutes over
 the existing `HostedIngressLatencyTrace`, accepted `HostedLinqDelivery`, and
 conversation `consumed_at` facts. The fixed product boundary is 30 seconds. A
-recent accepted delivery at or above that boundary is anomalous. A trace at or
-above the boundary with no accepted delivery and no durable consumed evidence
-is provisionally resolved only when it has valid
+provider-start trace explicitly labeled `flex` is excluded from completed and
+unresolved alert health without joining the best-effort usage ledger. A recent
+non-Flex accepted delivery at or above the boundary is anomalous. A non-Flex
+trace at or above the boundary with no accepted delivery and no durable
+consumed evidence is provisionally resolved only when it has valid
 `terminal_non_reply_committed` evidence and the runtime's latest
 checkpoint-publication expectation has not elapsed. The expectation includes
 the configured idle window plus the bounded idle-maintenance, snapshot

@@ -4048,6 +4048,7 @@ describe('assistant auto-reply runtime', () => {
       onProviderRequestStarted?: (event: {
         acceptedInputIds: readonly string[]
         providerRequestOrdinal: number
+        serviceTier?: 'flex' | null
         startedAt: string
       }) => void
     }
@@ -4059,12 +4060,14 @@ describe('assistant auto-reply runtime', () => {
     sendInput.onProviderRequestStarted?.({
       acceptedInputIds: context.inputIds,
       providerRequestOrdinal: 0,
+      serviceTier: 'flex',
       startedAt: '2026-04-08T00:10:00.000Z',
     })
     expect(onProviderRequestStarted).toHaveBeenCalledWith(expect.objectContaining({
       assistantInputIds: context.inputIds,
       autoReplyHistory: historyMetrics,
       providerRequestOrdinal: 0,
+      serviceTier: 'flex',
     }))
     expect(historyReader.readMetrics).toHaveBeenCalledOnce()
     expect(evidenceMocks.writeAssistantAutoReplyReplyIntentEvidence).toHaveBeenCalledOnce()

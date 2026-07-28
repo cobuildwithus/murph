@@ -40,6 +40,7 @@ import {
   HOSTED_RUNTIME_LATENCY_TRACE_ASSISTANT_INPUT_MAX_IDS,
   HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_KEYS,
   HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS,
+  HOSTED_RUNTIME_PROVIDER_SERVICE_TIERS,
   HOSTED_RUNTIME_LATENCY_TRACE_MILESTONES,
   HOSTED_MAILBOX_FETCH_CURSOR_MODES,
   HOSTED_MAILBOX_KINDS,
@@ -5046,6 +5047,15 @@ function parseHostedRuntimeLatencyPhaseBreakdown(
       ...requireOptionalNonNegativeInteger(provider, "admissionMs", providerLabel),
       ...requireOptionalNonNegativeInteger(provider, "preProviderSetupMs", providerLabel),
       ...requireOptionalNonNegativeInteger(provider, "linqEgressGuardMs", providerLabel),
+      ...(provider.serviceTier === undefined
+        ? {}
+        : {
+            serviceTier: parseAllowedString(
+              provider.serviceTier,
+              `${providerLabel}.serviceTier`,
+              HOSTED_RUNTIME_PROVIDER_SERVICE_TIERS,
+            ),
+          }),
     };
   }
 
