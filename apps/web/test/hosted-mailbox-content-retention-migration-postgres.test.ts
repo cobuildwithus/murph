@@ -101,7 +101,12 @@ describe.skipIf(!runPostgresMigrationProof)(
         await client.query(`
           UPDATE "hosted_workspace"
           SET
-            "inbox_media_retention_wake_at" = NULL,
+            "inbox_media_retention_wake_at" =
+              CASE
+                WHEN "user_id" = 'snapshot-existing-wake'
+                  THEN TIMESTAMP '2099-01-01 00:00:00'
+                ELSE NULL
+              END,
             "inbox_media_retention_signal_attempted_at" =
               '2026-07-28T04:00:00.000Z',
             "checkpointed_at" = '2026-07-28T04:00:00.000Z',
@@ -118,12 +123,13 @@ describe.skipIf(!runPostgresMigrationProof)(
             "checkpointed_at" = '2026-07-26T15:00:00.000Z',
             "version" = "version" + 1
           WHERE "user_id" = 'snapshot-missing-wake'
-            AND "version" = 10
+            AND "version" = 11
         `);
         expect(staleCheckpoint.rowCount).toBe(0);
 
         const result = await client.query<{
           checkpointedAt: string | null;
+          dueNow: boolean;
           userId: string;
           signalAttemptedAt: string | null;
           version: string;
@@ -143,6 +149,8 @@ describe.skipIf(!runPostgresMigrationProof)(
               workspace."inbox_media_retention_wake_at",
               'YYYY-MM-DD"T"HH24:MI:SS.MS'
             ) AS "wakeAt",
+            workspace."inbox_media_retention_wake_at"
+              <= CURRENT_TIMESTAMP AT TIME ZONE 'UTC' AS "dueNow",
             workspace."version"::TEXT AS "version"
           FROM "hosted_workspace" AS workspace
           ORDER BY workspace."user_id"
@@ -151,6 +159,7 @@ describe.skipIf(!runPostgresMigrationProof)(
         expect(result.rows).toEqual([
           {
             checkpointedAt: "2026-07-25T17:00:00.000",
+            dueNow: false,
             userId: "no-snapshot",
             signalAttemptedAt: "2026-07-25T18:00:00.000",
             version: "2",
@@ -158,6 +167,7 @@ describe.skipIf(!runPostgresMigrationProof)(
           },
           {
             checkpointedAt: "2026-07-28T04:00:00.000",
+            dueNow: true,
             userId: "snapshot-existing-wake",
             signalAttemptedAt: null,
             version: "7",
@@ -165,6 +175,7 @@ describe.skipIf(!runPostgresMigrationProof)(
           },
           {
             checkpointedAt: "2026-07-28T04:00:00.000",
+            dueNow: true,
             userId: "snapshot-missing-wake",
             signalAttemptedAt: null,
             version: "12",
