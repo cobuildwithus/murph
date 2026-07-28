@@ -110,6 +110,11 @@ const ROUTE_AUTHORITY = {
   containerMemberId: GROUP_RUNTIME_MEMBER_ID,
   threadId: "chat_group",
 };
+const CURRENT_SENDER_ORIGIN = {
+  assistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
+  kind: "accepted_input" as const,
+  sessionId: "session_group",
+};
 
 function createSourceWake(input: {
   senderMemberId?: string;
@@ -161,6 +166,55 @@ function activeContainerLookup(input: { where?: { memberId?: string } }) {
   return input.where?.memberId === GROUP_RUNTIME_MEMBER_ID
     ? { memberId: GROUP_RUNTIME_MEMBER_ID }
     : null;
+}
+
+type CurrentSenderSourceWake =
+  | ReturnType<typeof createSourceWake>
+  | ReturnType<typeof createTelegramSourceWake>;
+
+async function createCurrentSenderRequestFixture(
+  sourceWake: CurrentSenderSourceWake,
+) {
+  mocks.readHostedMailboxConversationWakeByAssistantInputId.mockImplementation(
+    async ({ assistantInputId, memberId }: {
+      assistantInputId: string;
+      memberId: string;
+    }) => assistantInputId === ORIGIN_ASSISTANT_INPUT_ID
+      && memberId === GROUP_RUNTIME_MEMBER_ID
+        ? sourceWake
+        : null,
+  );
+  const admission = await requestHostedGroupCurrentSenderAssistantAsk({
+    groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
+    now: NOW,
+    origin: CURRENT_SENDER_ORIGIN,
+  });
+  const requestId = createHostedGroupCurrentSenderAssistantAskRequestId({
+    groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
+    originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
+  });
+  const requestWake =
+    mocks.appendHostedMailboxEnvelopeWithIdentityTx.mock.calls[0]?.[0].envelope;
+  if (!requestWake) {
+    throw new Error("Expected current-sender Assistant Ask request append.");
+  }
+  mocks.readHostedMailboxItemById.mockImplementation(
+    async ({ mailboxItemId }: { mailboxItemId: string }) =>
+      mailboxItemId === requestId
+        ? {
+            dedupeKey: requestId,
+            expiresAt: requestWake.ask.expiresAt,
+            id: requestId,
+            kind: "assistant.ask.requested",
+            userId: requestWake.userId,
+          }
+        : null,
+  );
+  mocks.readHostedMailboxWakeByItemId.mockImplementation(
+    async ({ mailboxItemId }: { mailboxItemId: string }) =>
+      mailboxItemId === requestId ? requestWake : null,
+  );
+  return { admission, requestId, requestWake };
 }
 
 describe("hosted current-sender Assistant Ask authority", () => {
@@ -366,6 +420,186 @@ describe("hosted current-sender Assistant Ask authority", () => {
       now: NOW,
       tx: fakeTx as never,
     })).resolves.toBeUndefined();
+  });
+
+  it("rejects replay at the exact expiry boundary without another wake", async () => {
+    const requested = await createCurrentSenderRequestFixture(createSourceWake());
+    expect(requested.requestWake.ask.expiresAt).toBe(
+      "2026-07-27T20:10:00.000Z",
+    );
+
+    mocks.appendHostedMailboxEnvelopeWithIdentityTx.mockClear();
+    mocks.readHostedMailboxConversationWakeByAssistantInputId.mockClear();
+    mocks.readHostedMailboxWakeByItemId.mockClear();
+    mocks.requireHostedRuntimeActiveAccessForUpdateTx.mockClear();
+    mocks.assertHostedThreadRouteEgressAuthority.mockClear();
+    mocks.lookupHostedGroupParticipantMemberByHandle.mockClear();
+
+    await expect(requestHostedGroupCurrentSenderAssistantAsk({
+      groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
+      now: new Date(requested.requestWake.ask.expiresAt),
+      origin: CURRENT_SENDER_ORIGIN,
+    })).resolves.toEqual({
+      mailboxWake: null,
+      result: {
+        status: "unavailable",
+        unavailableReason: "request_expired",
+      },
+    });
+    expect(mocks.appendHostedMailboxEnvelopeWithIdentityTx).not.toHaveBeenCalled();
+    expect(mocks.readHostedMailboxWakeByItemId).not.toHaveBeenCalled();
+    expect(
+      mocks.readHostedMailboxConversationWakeByAssistantInputId,
+    ).not.toHaveBeenCalled();
+    expect(
+      mocks.requireHostedRuntimeActiveAccessForUpdateTx,
+    ).not.toHaveBeenCalled();
+    expect(mocks.assertHostedThreadRouteEgressAuthority).not.toHaveBeenCalled();
+    expect(
+      mocks.lookupHostedGroupParticipantMemberByHandle,
+    ).not.toHaveBeenCalled();
+  });
+
+  it("carries Telegram through prepare, completion, and final authorization, then falls back after sender rebinding", async () => {
+    const requested = await createCurrentSenderRequestFixture(
+      createTelegramSourceWake(),
+    );
+    expect(requested.admission).toEqual({
+      mailboxWake: {
+        expectedUserId: SENDER_MEMBER_ID,
+        mailboxItemId: requested.requestId,
+      },
+      result: { status: "accepted" },
+    });
+    await expect(handleHostedRuntimeAssistantAskControl({
+      boundRuntimeMemberId: SENDER_MEMBER_ID,
+      now: NOW,
+      request: { action: "prepare", requestId: requested.requestId },
+    })).resolves.toEqual({
+      mailboxWake: null,
+      response: {
+        action: "prepare",
+        disclosure: {
+          permissionText: HOSTED_GROUP_CURRENT_SENDER_DISCLOSURE_PERMISSION_TEXT,
+        },
+        question: "Murph tell them about my recovery",
+        status: "ready",
+        targetLabel: null,
+      },
+    });
+
+    const completionId = createHostedAssistantAskCompletionId(
+      requested.requestId,
+    );
+    await expect(handleHostedRuntimeAssistantAskControl({
+      boundRuntimeMemberId: SENDER_MEMBER_ID,
+      now: NOW,
+      request: {
+        action: "complete",
+        requestId: requested.requestId,
+        result: {
+          answer: "Your recent recovery has been inconsistent.",
+          outcome: "answered",
+        },
+      },
+    })).resolves.toEqual({
+      mailboxWake: {
+        expectedUserId: GROUP_RUNTIME_MEMBER_ID,
+        mailboxItemId: completionId,
+      },
+      response: { action: "complete", status: "completed" },
+    });
+    const completionWake =
+      mocks.appendHostedMailboxEnvelopeWithIdentityTx.mock.calls[1]?.[0].envelope;
+    if (!completionWake) {
+      throw new Error("Expected current-sender Assistant Ask completion append.");
+    }
+    mocks.readHostedMailboxItemById.mockImplementation(
+      async ({ mailboxItemId }: { mailboxItemId: string }) =>
+        mailboxItemId === requested.requestId
+          ? {
+              dedupeKey: requested.requestId,
+              expiresAt: requested.requestWake.ask.expiresAt,
+              id: requested.requestId,
+              kind: "assistant.ask.requested",
+              userId: requested.requestWake.userId,
+            }
+          : mailboxItemId === completionId
+            ? {
+                dedupeKey: completionId,
+                expiresAt: completionWake.ask.expiresAt,
+                id: completionId,
+                kind: "assistant.ask.completed",
+                userId: completionWake.userId,
+              }
+            : null,
+    );
+    mocks.readHostedMailboxWakeByItemId.mockImplementation(
+      async ({ mailboxItemId }: { mailboxItemId: string }) =>
+        mailboxItemId === requested.requestId ? requested.requestWake : null,
+    );
+    mocks.readHostedMailboxWakeByDedupeKey.mockImplementation(
+      async ({ dedupeKey }: { dedupeKey: string }) =>
+        dedupeKey === completionId ? completionWake : null,
+    );
+    const deliveryInput = {
+      answeredMailboxItemIds: [completionId],
+      assistantAskCompletionExpiresAt: completionWake.ask.expiresAt,
+      boundRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
+      idempotencyKey:
+        createHostedExecutionReviewedAssistantAskCompletionDeliveryKey(
+          completionId,
+        ),
+      now: NOW,
+      tx: fakeTx as never,
+    };
+
+    await expect(assertHostedAssistantAskCompletionDeliveryAuthorityTx({
+      ...deliveryInput,
+      assistantAskFallback: false,
+    })).resolves.toBeUndefined();
+    expect(
+      mocks.readHostedMailboxConversationWakeByAssistantInputId,
+    ).toHaveBeenLastCalledWith({
+      assistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
+      availableAt: NOW,
+      memberId: GROUP_RUNTIME_MEMBER_ID,
+      prisma: fakeTx,
+    });
+    expect(
+      mocks.resolveHostedMemberRoutingByTelegramUserId,
+    ).toHaveBeenCalledTimes(4);
+    expect(
+      mocks.resolveHostedMemberRoutingByTelegramUserId,
+    ).toHaveBeenLastCalledWith({
+      prisma: fakeTx,
+      telegramUserId: "123456789",
+    });
+
+    mocks.resolveHostedMemberRoutingByTelegramUserId.mockResolvedValue({
+      lookup: { core: { id: "member_rebound_sender" } },
+      status: "found",
+    });
+    await expect(assertHostedAssistantAskCompletionDeliveryAuthorityTx({
+      ...deliveryInput,
+      assistantAskFallback: false,
+    })).resolves.toEqual({ assistantAskFallbackRequired: true });
+    await expect(assertHostedAssistantAskCompletionDeliveryAuthorityTx({
+      ...deliveryInput,
+      assistantAskFallback: true,
+    })).resolves.toBeUndefined();
+    expect(
+      mocks.resolveHostedMemberRoutingByTelegramUserId,
+    ).toHaveBeenCalledTimes(5);
+    expect(mocks.assertHostedThreadRouteEgressAuthority).toHaveBeenCalledTimes(5);
+    expect(mocks.assertHostedThreadRouteEgressAuthority).toHaveBeenLastCalledWith({
+      authority: {
+        channel: "telegram",
+        containerMemberId: GROUP_RUNTIME_MEMBER_ID,
+        threadId: "telegram_group",
+      },
+      prisma: fakeTx,
+    });
   });
 
   it("fails closed when the provider sender cannot be resolved or text is absent", async () => {

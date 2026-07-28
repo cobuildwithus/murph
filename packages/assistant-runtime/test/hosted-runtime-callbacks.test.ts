@@ -7961,7 +7961,7 @@ describe("hosted runtime callbacks", () => {
     ).toBeLessThan(mocks.sendTelegramMessage.mock.invocationCallOrder[0] ?? 0);
   });
 
-  it("supersedes a reviewed Telegram answer when provider-entry authority is stale", async () => {
+  it("retries a stale reviewed Telegram answer with the durable fixed fallback", async () => {
     const completionId = "aask_done_telegram_stale_authority";
     const expiresAt = "2099-04-08T00:15:00.000Z";
     const idempotencyKey =
@@ -7998,9 +7998,11 @@ describe("hosted runtime callbacks", () => {
       operation: null,
       reviewedAssistantAskCompletionExpiresAt: expiresAt,
     }) as AssistantOutboxIntent;
-    mocks.readAssistantOutboxIntentMirrorState.mockResolvedValueOnce(
-      createMirrorState(storedIntent),
-    );
+    const mirrorReadMessages: string[] = [];
+    mocks.readAssistantOutboxIntentMirrorState.mockImplementation(async () => {
+      mirrorReadMessages.push(storedIntent.message);
+      return createMirrorState(storedIntent);
+    });
     mocks.readAssistantOutboxIntent.mockImplementation(async () => storedIntent);
     mocks.saveAssistantOutboxIntentIfUnchanged.mockImplementation(
       async ({ intent }) => {
@@ -8008,27 +8010,45 @@ describe("hosted runtime callbacks", () => {
         return intent;
       },
     );
-    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(
+    mocks.sendTelegramMessage.mockResolvedValue({
+      providerMessageId: "provider_safe_fallback",
+      target: routeAuthority.threadId,
+    });
+    mocks.dispatchAssistantOutboxIntent.mockImplementation(
       async ({ dependencies, dispatchHooks }) => {
         await dispatchHooks?.preflightDispatchIntent?.({
           intent: storedIntent,
           now: new Date("2026-04-08T00:00:30.000Z"),
           vault: HOSTED_WAKE.vaultRoot,
         });
-        await dependencies.sendTelegram({
+        const delivery = await dependencies.sendTelegram({
           idempotencyKey,
-          message: reviewedAnswer,
+          message: storedIntent.message,
           replyToMessageId: null,
           target: routeAuthority.threadId,
         });
-        throw new Error("unreachable after fallback supersession");
+        return createDispatchResult({
+          delivery: createDelivery({
+            idempotencyKey,
+            messageLength: storedIntent.message.length,
+            providerMessageId: delivery.providerMessageId,
+            target: delivery.target,
+            targetKind: "thread",
+          }),
+          status: "sent",
+        });
       },
     );
-    const assertExternalThreadRouteAuthority = vi.fn(async () => ({
-      assistantAskFallbackRequired: true,
-    }));
-
-    await expect(drainHostedPreparedAssistantDeliveries({
+    const assertExternalThreadRouteAuthority = vi.fn(
+      async (_authority: unknown, input?: {
+        assistantAskCompletion?: {
+          assistantAskFallback: boolean;
+        } | null;
+      }) => input?.assistantAskCompletion?.assistantAskFallback === true
+        ? {}
+        : { assistantAskFallbackRequired: true },
+    );
+    const drain = () => drainHostedPreparedAssistantDeliveries({
       assistantDeliveryEffects: [effect],
       effectsPort: createHostedRuntimeEffectsPortStub({
         assertExternalThreadRouteAuthority,
@@ -8042,7 +8062,9 @@ describe("hosted runtime callbacks", () => {
       providerFetch: vi.fn<typeof fetch>(),
       vaultRoot: HOSTED_WAKE.vaultRoot,
       wake: HOSTED_WAKE.wake,
-    })).rejects.toMatchObject({
+    });
+
+    await expect(drain()).rejects.toMatchObject({
       code: "ASSISTANT_ASK_COMPLETION_FALLBACK_RETRY",
     });
 
@@ -8051,6 +8073,38 @@ describe("hosted runtime callbacks", () => {
       message: HOSTED_EXECUTION_ASSISTANT_ASK_CANNOT_ANSWER_RESPONSE,
     });
     expect(mocks.sendTelegramMessage).not.toHaveBeenCalled();
+    storedIntent = {
+      ...storedIntent,
+      status: "retryable",
+      updatedAt: "2026-04-08T00:00:45.000Z",
+    };
+
+    await expect(drain()).resolves.toEqual([
+      expect.objectContaining({ deliveryStatus: "sent" }),
+    ]);
+    expect(mirrorReadMessages).toEqual([
+      reviewedAnswer,
+      HOSTED_EXECUTION_ASSISTANT_ASK_CANNOT_ANSWER_RESPONSE,
+    ]);
+    expect(assertExternalThreadRouteAuthority.mock.calls.map(([, context]) =>
+      context?.assistantAskCompletion?.assistantAskFallback
+    )).toEqual([false, true]);
+    expect(mocks.sendTelegramMessage).toHaveBeenCalledTimes(1);
+    expect(mocks.sendTelegramMessage).toHaveBeenCalledWith(
+      {
+        idempotencyKey,
+        message: HOSTED_EXECUTION_ASSISTANT_ASK_CANNOT_ANSWER_RESPONSE,
+        replyToMessageId: null,
+        target: routeAuthority.threadId,
+      },
+      expect.objectContaining({
+        authorityBoundTarget: routeAuthority.threadId,
+      }),
+    );
+    expect(mocks.sendTelegramMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({ message: reviewedAnswer }),
+      expect.anything(),
+    );
   });
 
   it("carries the exact Telegram group route into image and reaction transports", async () => {
