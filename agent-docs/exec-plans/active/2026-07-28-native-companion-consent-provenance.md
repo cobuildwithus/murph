@@ -68,3 +68,23 @@ Updated: 2026-07-28
     `blacksmith-testbox` CLI rejects the dispatcher's `--stop-after` option.
   - The required acceptance gate remains pending and will run locally after the
     shared slot is free.
+- Preliminary `completion-specialists` ReviewGPT pass on commit `0dc6c5f3b3`
+  - Passed with no findings and no patch artifact.
+  - The response completed in 246 seconds. It is accepted under the documented
+    four-minute preliminary exception after confirming the exact PR/head,
+    archive attachment, selected Pro model, substantive coverage analysis,
+    completion marker, and `SPECIALIST_OUTCOME: PASS`.
+- Parent final review
+  - No findings. Confirmed the source remains server-owned, both launch scopes
+    retain coverage, request/response behavior is unchanged, and no consumer
+    depends on the retired iOS-only literal.
+- PR #1066 CI on commit `0dc6c5f3b3`
+  - Passed all release build/typecheck, fixture and package coverage, hosted-app
+    verification, host-matrix, repository hygiene, frontend-proof, viewport,
+    and required hosted E2E checks.
+- `MURPH_VERIFY_EXECUTOR=local pnpm verify:acceptance` retry
+  - A second documented ten-minute admission window elapsed while two unrelated
+    hosted-web verification owners acquired the shared slot in sequence.
+  - The exact task-owned waiter was stopped without signaling either owner.
+  - Shipping remains fail-closed until the local slot is available or the
+    canonical Crabbox dispatcher supports the installed Testbox CLI.
