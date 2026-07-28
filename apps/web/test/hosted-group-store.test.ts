@@ -2617,6 +2617,7 @@ describe("readHostedGroupMembershipsForMember", () => {
             { projectionKind: "hrv-days.v0" },
           ],
           role: "member",
+          runtimeMemberId: "member_group_runners",
         },
         {
           displayName: "Family check-in",
@@ -2627,6 +2628,7 @@ describe("readHostedGroupMembershipsForMember", () => {
           ownerJoinCode: "join_family",
           requestedVaultShareProjectionScopes: [{ projectionKind: "group-email.v0" }],
           role: "owner",
+          runtimeMemberId: "member_group_family",
         },
       ],
       truncated: false,

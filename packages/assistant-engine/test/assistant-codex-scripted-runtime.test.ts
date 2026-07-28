@@ -23,6 +23,12 @@ import type {
   VoiceMemoToolRuntime,
 } from '../src/assistant-codex/generate-voice-memo-tool.ts'
 import {
+  MURPH_CREATIVE_NOTIFICATION_GENERATE_SONG_TOOL,
+} from '../src/assistant-codex/dynamic-tools/generate-song.ts'
+import {
+  MURPH_GENERATE_VOICE_MEMO_TOOL,
+} from '../src/assistant-codex/dynamic-tools/generate-voice-memo.ts'
+import {
   createAskGrokToolRuntimeFromEnv,
 } from '../src/assistant-codex/ask-grok-tool.ts'
 import type {
@@ -654,6 +660,148 @@ describe('real codex app-server with scripted provider', () => {
     },
   )
 
+  it.each([
+    {
+      accepted: false,
+      arguments: {
+        instrumental: false,
+        prompt: 'A tiny sponsor jingle.',
+      },
+      label: 'an omitted duration',
+    },
+    {
+      accepted: false,
+      arguments: {
+        durationSeconds: 4,
+        instrumental: false,
+        prompt: 'A tiny sponsor jingle.',
+      },
+      label: 'a duration below the creative minimum',
+    },
+    {
+      accepted: false,
+      arguments: {
+        durationSeconds: 16,
+        instrumental: false,
+        prompt: 'A tiny sponsor jingle.',
+      },
+      label: 'a duration above the creative maximum',
+    },
+    {
+      accepted: true,
+      arguments: {
+        durationSeconds: 5,
+        instrumental: false,
+        prompt: 'A tiny sponsor jingle.',
+      },
+      label: 'the creative minimum duration',
+    },
+    {
+      accepted: true,
+      arguments: {
+        durationSeconds: 15,
+        instrumental: false,
+        prompt: 'A tiny sponsor jingle.',
+      },
+      label: 'the creative maximum duration',
+    },
+  ])(
+    'enforces $label at the real creative-media tool boundary',
+    { timeout: TURN_TIMEOUT_MS },
+    async ({ accepted, arguments: toolArguments }) => {
+      const scenario = await prepareScriptedTurnScenario()
+      const songGenerations: unknown[] = []
+      scenario.stub.queue(
+        {
+          functionCall: {
+            arguments: toolArguments,
+            name: 'generate_song',
+            namespace: 'murph',
+          },
+        },
+        { text: 'CREATIVE_DURATION_OK' },
+      )
+
+      const result = await executeCodexAppServerTurn({
+        ...scenario.turnInput,
+        creativeMediaPolicy: 'single-short',
+        dynamicTools: [MURPH_CREATIVE_NOTIFICATION_GENERATE_SONG_TOOL],
+        prompt: 'Try the requested sponsor jingle, then reply.',
+        voiceMemoRuntime: createScriptedSongRuntime(songGenerations),
+      })
+
+      expect(songGenerations).toHaveLength(accepted ? 1 : 0)
+      expect(result.responseMedia).toHaveLength(accepted ? 1 : 0)
+      expect(result.finalMessage).toBe('CREATIVE_DURATION_OK')
+    },
+  )
+
+  it.each([
+    {
+      firstAttemptSucceeds: false,
+      label: 'failed',
+    },
+    {
+      firstAttemptSucceeds: true,
+      label: 'successful',
+    },
+  ])(
+    'reserves one creative-media attempt before provider work after a $label first attempt',
+    { timeout: TURN_TIMEOUT_MS },
+    async ({ firstAttemptSucceeds }) => {
+      const scenario = await prepareScriptedTurnScenario()
+      const generations: unknown[] = []
+      scenario.stub.queue(
+        {
+          functionCall: {
+            arguments: {
+              durationSeconds: 10,
+              instrumental: false,
+              prompt: 'A tiny sponsor jingle.',
+            },
+            name: 'generate_song',
+            namespace: 'murph',
+          },
+        },
+        {
+          functionCall: {
+            arguments: {
+              text: 'A second media attempt that must not reach ElevenLabs.',
+            },
+            name: 'generate_voice_memo',
+            namespace: 'murph',
+          },
+        },
+        { text: 'CREATIVE_SINGLE_ATTEMPT_OK' },
+      )
+
+      const result = await executeCodexAppServerTurn({
+        ...scenario.turnInput,
+        creativeMediaPolicy: 'single-short',
+        dynamicTools: [
+          MURPH_GENERATE_VOICE_MEMO_TOOL,
+          MURPH_CREATIVE_NOTIFICATION_GENERATE_SONG_TOOL,
+        ],
+        prompt: 'Try the sponsor media, then reply.',
+        voiceMemoRuntime: createScriptedSongRuntime(generations, {
+          failUpload: !firstAttemptSucceeds,
+        }),
+      })
+
+      expect(generations).toHaveLength(1)
+      expect(result.responseMedia).toHaveLength(firstAttemptSucceeds ? 1 : 0)
+      expect(result.finalMessage).toBe('CREATIVE_SINGLE_ATTEMPT_OK')
+      expect(
+        scenario.stub.requestSummariesSinceBaseline()
+          .flatMap((summary) => summary.functionCallOutputs ?? []),
+      ).toEqual(expect.arrayContaining([
+        expect.stringContaining(
+          'creative media attempt already used for this turn',
+        ),
+      ]))
+    },
+  )
+
   it('passes an advisory participant label through the real app-server tool loop only', {
     timeout: TURN_TIMEOUT_MS,
   }, async () => {
@@ -886,6 +1034,9 @@ function createScriptedGroupToolContext(
 
 function createScriptedSongRuntime(
   generations: unknown[],
+  options: {
+    failUpload?: boolean
+  } = {},
 ): VoiceMemoToolRuntime {
   return {
     elevenLabs: {
@@ -895,6 +1046,9 @@ function createScriptedSongRuntime(
     },
     generateAndUpload: async (input) => {
       generations.push(input.generation)
+      if (options.failUpload) {
+        throw new Error('scripted creative media upload failure')
+      }
       return {
         attachmentId: 'attachment_explicit_group_song',
         filename: 'explicit-group-song.mp3',

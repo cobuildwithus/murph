@@ -119,6 +119,7 @@ export interface AssistantProviderTurn {
   abortSignal?: AbortSignal
   codexConfigOverrides?: readonly string[] | null
   conversationHistoryMessages?: ReadonlyArray<AssistantProviderConversationMessage>
+  creativeMediaPolicy?: 'single-short' | null
   developerInstructions?: string | null
   dynamicTools: readonly AssistantProviderDynamicTool[]
   environments?: readonly Readonly<Record<string, unknown>>[] | null

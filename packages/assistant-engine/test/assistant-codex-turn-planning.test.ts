@@ -520,7 +520,10 @@ describe('assistant Codex turn planning', () => {
       expect(plan.systemPrompt).not.toContain('PRIVATE_HOSTED_CONTEXT')
       const song = plan.dynamicTools.find((tool) => tool.name === 'generate_song')
       expect(song?.description).toContain(
-        'original, copyright-safe 5–15-second song',
+        'original 5–15-second song',
+      )
+      expect(song?.description).toContain(
+        'Never imitate or name a real artist, band, song, or lyrics.',
       )
       expect(song?.description).toContain(
         'only an explicitly supplied publicAlias',

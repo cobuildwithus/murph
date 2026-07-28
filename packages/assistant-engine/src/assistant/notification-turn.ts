@@ -1604,17 +1604,19 @@ function assertAssistantCreativeNotificationToolContract(input: {
     return
   }
   const attempts = readAssistantCreativeNotificationToolAttempts(input.rawEvents)
-  if (attempts.length > 1) {
+  const successfulAttemptCount = attempts.filter(
+    (attempt) => attempt.success,
+  ).length
+  if (successfulAttemptCount > 1) {
     throw new VaultCliError(
-      'ASSISTANT_NOTIFICATION_CREATIVE_TOOL_COUNT_INVALID',
-      'Creative notification may complete at most one media tool attempt.',
+      'ASSISTANT_NOTIFICATION_CREATIVE_MEDIA_INVALID',
+      'Creative notification may attach at most one successful media result.',
     )
   }
-  const successful = attempts[0]?.success === true
   const voiceMemoCount = input.responseMedia.filter(
     (media) => media.kind === 'voice_memo',
   ).length
-  if (voiceMemoCount !== (successful ? 1 : 0)) {
+  if (voiceMemoCount !== (successfulAttemptCount === 1 ? 1 : 0)) {
     throw new VaultCliError(
       'ASSISTANT_NOTIFICATION_CREATIVE_MEDIA_INVALID',
       'Creative notification media must match its media tool result.',

@@ -213,6 +213,7 @@ import {
   executeGenerateSongDynamicTool,
   MURPH_CREATIVE_NOTIFICATION_GENERATE_SONG_TOOL,
   MURPH_GENERATE_SONG_TOOL,
+  parseCreativeNotificationGenerateSongArguments,
   parseGenerateSongArguments,
 } from './dynamic-tools/generate-song.js'
 import {
@@ -2108,6 +2109,9 @@ function isMurphDynamicToolNamespace(namespace: string | null): boolean {
 
 export function readMurphDynamicToolRequest(
   message: CodexRpcMessage,
+  options: {
+    creativeMediaPolicy?: 'single-short' | null
+  } = {},
 ): MurphDynamicToolRequest | null {
   const request = parseDynamicToolCallRequest(message)
   if (!request) {
@@ -2246,7 +2250,10 @@ export function readMurphDynamicToolRequest(
       }
     }
     case MURPH_GENERATE_SONG_TOOL.name: {
-      const parsed = parseGenerateSongArguments(request.arguments)
+      const parsed =
+        options.creativeMediaPolicy === 'single-short'
+          ? parseCreativeNotificationGenerateSongArguments(request.arguments)
+          : parseGenerateSongArguments(request.arguments)
       if (!parsed.ok) {
         return {
           kind: 'invalid-generate-song-arguments',

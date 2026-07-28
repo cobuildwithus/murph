@@ -48,7 +48,7 @@ export const MURPH_CREATIVE_NOTIFICATION_GENERATE_SONG_TOOL = {
   namespace: 'murph',
   name: 'generate_song',
   description:
-    'Generate one original, copyright-safe 5–15-second song or instrumental for this existing group conversation and attach it as a native voice memo to the final response. Set durationSeconds explicitly between 5 and 15. Keep lyrics to at most four short lines. Never imitate or name a real artist, band, song, or lyrics. Use only group-safe details from supplied recent history. Do not expose private health, account, payment, or payer identity. You may use only an explicitly supplied publicAlias and must never infer contributor identity. This does not send directly.',
+    'Generate one original 5–15-second song or instrumental for this existing group conversation and attach it as a native voice memo to the final response. Set durationSeconds explicitly between 5 and 15. Keep lyrics to at most four short lines. Never imitate or name a real artist, band, song, or lyrics. Use only group-safe details from supplied recent history. Do not expose private health, account, payment, or payer identity. You may use only an explicitly supplied publicAlias and must never infer contributor identity. This does not send directly.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -80,6 +80,14 @@ const generateSongArgumentsSchema = z
   })
   .strict()
 
+const creativeNotificationGenerateSongArgumentsSchema = z
+  .object({
+    durationSeconds: z.number().int().min(5).max(15),
+    instrumental: z.boolean().default(false),
+    prompt: z.string().trim().min(1).max(4100),
+  })
+  .strict()
+
 export function parseGenerateSongArguments(
   value: unknown,
 ):
@@ -87,6 +95,18 @@ export function parseGenerateSongArguments(
   | { ok: false; validationDigest: SafeToolCallValidationDigest } {
   return parseDynamicToolArguments({
     schema: generateSongArgumentsSchema,
+    toolName: 'murph.generate_song',
+    value,
+  })
+}
+
+export function parseCreativeNotificationGenerateSongArguments(
+  value: unknown,
+):
+  | { ok: true; args: GenerateSongToolArgs }
+  | { ok: false; validationDigest: SafeToolCallValidationDigest } {
+  return parseDynamicToolArguments({
+    schema: creativeNotificationGenerateSongArgumentsSchema,
     toolName: 'murph.generate_song',
     value,
   })

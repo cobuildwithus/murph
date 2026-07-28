@@ -2931,15 +2931,15 @@ test('sendAssistantNotificationLocal accepts a text-only creative response', asy
   }))
 })
 
-test('sendAssistantNotificationLocal rejects more than one creative media attempt', async () => {
+test('sendAssistantNotificationLocal rejects impossible multiple successful creative media results', async () => {
   const providerResult = createProviderResult({
     rawEvents: [
       createCreativeMediaToolCompletedEvent({
-        success: false,
+        success: true,
         tool: 'generate_voice_memo',
       }),
       createCreativeMediaToolCompletedEvent({
-        success: false,
+        success: true,
         tool: 'generate_song',
       }),
     ],
@@ -2961,9 +2961,72 @@ test('sendAssistantNotificationLocal rejects more than one creative media attemp
     responsePolicy: { kind: 'require_send' },
     vault: '/vaults/group-sponsorship-two-media-attempts',
   })).rejects.toMatchObject({
-    code: 'ASSISTANT_NOTIFICATION_CREATIVE_TOOL_COUNT_INVALID',
+    code: 'ASSISTANT_NOTIFICATION_CREATIVE_MEDIA_INVALID',
   })
   expect(deliverMessage).not.toHaveBeenCalled()
+})
+
+test('sendAssistantNotificationLocal preserves valid media when a later request is rejected', async () => {
+  const voiceMemo = {
+    filename: 'group-thanks.mp3',
+    kind: 'voice_memo' as const,
+    transcript: 'Thanks for keeping the group going.',
+    transport: {
+      attachmentId: 'attachment-group-thanks',
+      kind: 'linq_attachment' as const,
+    },
+  }
+  const providerResult = createProviderResult({
+    rawEvents: [
+      createCreativeMediaToolCompletedEvent({
+        success: true,
+        tool: 'generate_song',
+      }),
+      createCreativeMediaToolCompletedEvent({
+        success: false,
+        tool: 'generate_voice_memo',
+      }),
+    ],
+    response: JSON.stringify({
+      kind: 'send_message',
+      privateSummary: 'Celebrate the group contribution.',
+      text: 'This challenge is now fiscally solvent.',
+    }),
+    responseMedia: [voiceMemo],
+    session: createAssistantSession({
+      binding: {
+        actorId: 'actor-group-sponsorship',
+        channel: 'linq',
+        conversationKey: null,
+        delivery: {
+          kind: 'thread',
+          target: 'thread-group-sponsorship',
+        },
+        identityId: 'identity-group-sponsorship',
+        threadId: 'thread-group-sponsorship',
+        threadIsDirect: false,
+      },
+    }),
+  })
+  const { deliverMessage, sendAssistantNotificationLocal } =
+    await loadNotificationTurnHarness({
+      providerResult,
+      turnId: 'turn-group-sponsorship-rejected-later-media',
+    })
+
+  await expect(sendAssistantNotificationLocal({
+    instructions: 'Create a brief group sponsorship thank-you.',
+    notificationToolProfile: 'creative-response',
+    responsePolicy: { kind: 'require_send' },
+    vault: '/vaults/group-sponsorship-rejected-later-media',
+  })).resolves.toMatchObject({
+    deliveryOutcome: {
+      kind: 'sent',
+    },
+  })
+  expect(deliverMessage).toHaveBeenCalledWith(expect.objectContaining({
+    media: [voiceMemo],
+  }))
 })
 
 test('sendAssistantNotificationLocal permits text fallback after one failed media attempt', async () => {

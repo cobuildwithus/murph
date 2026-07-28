@@ -246,7 +246,7 @@ export function buildAssistantCreativeNotificationPromptWithCacheMetadata(
     "Text alone is valid. You may call at most one of `murph.generate_voice_memo` or `murph.generate_song` when audio materially improves the moment. Do not call any other tool.",
     "If recent conversation history is urgent, medical, serious, sensitive, or conflict-heavy, send only a quiet, respectful text acknowledgment with no joke or media.",
     "Do not run commands, write files, use the network, contact anyone separately, schedule anything, mutate group state, or expose private health, account, payment, or routing details.",
-    "For a song, create only short original copyright-safe material. Never imitate or name a real artist, band, song, or lyrics.",
+    "For a song, create only short original material. Never imitate or name a real artist, band, song, or lyrics.",
     "Return exactly one JSON response object. A failed audio attempt must still return a brief text fallback.",
     buildAssistantCreativeNotificationDecisionContractText(input.channel),
   );
