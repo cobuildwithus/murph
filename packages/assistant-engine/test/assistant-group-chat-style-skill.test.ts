@@ -44,7 +44,13 @@ describe('assistant group-chat style guidance', () => {
       'Murph is the visible recipient, but the room is often the real audience.',
     )
     expect(normalized).toContain(
+      'When the person actually routes the bid through Murph',
+    )
+    expect(normalized).toContain(
       'a low-risk reason to share a photo, admit something, ask for attention, or make an ordinary life moment replyable',
+    )
+    expect(normalized).toContain(
+      'Do not manufacture this social alibi after the person addressed the humans directly.',
     )
     expect(normalized).toContain('social alibi')
     expect(normalized).toContain('shared third object')
@@ -54,6 +60,45 @@ describe('assistant group-chat style guidance', () => {
     )
     expect(normalized).toContain(
       'The handoff is beat-local, not a permanent exit',
+    )
+  })
+
+  it('gives collective human social bids first refusal without muting open requests', async () => {
+    const normalized = await readNormalizedGroupChatSkill()
+
+    expect(normalized).toContain('## Collective human ownership')
+    expect(normalized).toContain(
+      'belongs to the humans collectively on its first beat',
+    )
+    expect(normalized).toContain(
+      '"Y\'all remember this place?" is human-owned, not an open ensemble invitation to Murph.',
+    )
+    expect(normalized).toContain(
+      'Give the humans first refusal. Send no text or reaction on that initial bid',
+    )
+    expect(normalized).toContain(
+      'Read the whole beat, not only the newest bubble.',
+    )
+    expect(normalized).toContain(
+      "An immediate same-purpose same-sender elaboration, statistic, or caption inherits the setup's audience",
+    )
+    expect(normalized).toContain(
+      'When the first live bubble is an unaddressed personal artifact and its audience is not yet clear, do not compose or react yet.',
+    )
+    expect(normalized).toContain(
+      'The watch must happen before any assistant output because a later `finish_without_reply` cannot retract a completed reply.',
+    )
+    expect(normalized).toContain(
+      'A new factual or task request or a direct Murph address is evaluated under rule 4 or rule 3',
+    )
+    expect(normalized).toContain(
+      'even when it came from the same sender seconds later or arrived inside the same accepted provider turn',
+    )
+    expect(normalized).toContain(
+      '"Does anyone know whether that gym still does day passes?" remains eligible under rule 4',
+    )
+    expect(normalized).toContain(
+      'A shared artifact is not automatically open; the collective-human first-refusal rule above wins on its initial beat.',
     )
   })
 
@@ -74,6 +119,43 @@ describe('assistant group-chat style guidance', () => {
     )
     expect(normalized).toContain(
       'A reply that drew no reaction but started a ten-message human exchange succeeded',
+    )
+  })
+
+  it('brings a point of view without forcing agreement or novelty', async () => {
+    const normalized = await readNormalizedGroupChatSkill()
+
+    expect(normalized).toContain('## Bring a point of view')
+    expect(normalized).toContain(
+      'The latest message is material, not a conclusion Murph must endorse.',
+    )
+    expect(normalized).toContain(
+      'Agreement-and-heightening is one option, not the policy.',
+    )
+    expect(normalized).toContain(
+      'Fun comes from selective agency, not compulsory agreement, contrarianism, or jokes.',
+    )
+    expect(normalized).toContain(
+      "Start with Murph's contribution, not an acknowledgment preamble.",
+    )
+    expect(normalized).toContain(
+      'The best surprise feels unexpected at first and obvious after it lands.',
+    )
+    expect(normalized).toContain(
+      'do not append a question merely to manufacture engagement',
+    )
+    expect(normalized).toContain(
+      '"Correct, [the setup] has begun" is still an echo.',
+    )
+    expect(normalized).toContain(
+      '"Everyone should" is still an evasion when the visible game is a nomination or ruling.',
+    )
+    expect(normalized).toContain('Not every turn needs surprise.')
+    expect(normalized).toContain(
+      'Never contradict merely to seem interesting.',
+    )
+    expect(normalized).toContain(
+      'Obvious shared fiction may stay inside the play frame',
     )
   })
 
@@ -99,7 +181,7 @@ describe('assistant group-chat style guidance', () => {
   it('protects human-owned turns while preserving open ensemble banter', async () => {
     const normalized = await readNormalizedGroupChatSkill()
     const boundary = normalized.indexOf('1. **A participation boundary applies.**')
-    const human = normalized.indexOf('2. **Another human owns this turn.**')
+    const human = normalized.indexOf('2. **One or more humans own this turn.**')
     const addressed = normalized.indexOf('3. **Murph was addressed.**')
     const banter = normalized.indexOf('5. **An open ensemble banter beat.**')
 
@@ -111,7 +193,7 @@ describe('assistant group-chat style guidance', () => {
       'A question was addressed to a specific human.',
     )
     expect(normalized).toContain(
-      'This is a current-turn floor rule, not a ban on a later open beat.',
+      'This is a beat-local floor rule, not a ban on a later open beat.',
     )
     expect(normalized).toContain(
       'Direct address is not required.',

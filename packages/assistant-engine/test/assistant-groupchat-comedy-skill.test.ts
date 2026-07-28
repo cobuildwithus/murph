@@ -46,6 +46,30 @@ describe('assistant group-chat comedy skill', () => {
     )
   })
 
+  it('brings an independent comic point of view instead of echoing the setup', async () => {
+    const comedy = await readSkill('groupchat-comedy')
+    const normalized = comedy.replace(/\s+/gu, ' ')
+
+    expect(normalized).toContain(
+      "Bring a point of view; remix, don't repeat.",
+    )
+    expect(normalized).toContain(
+      'The setup is material, not a conclusion to endorse.',
+    )
+    expect(normalized).toContain(
+      'Agreement, contradiction, inversion, reframing, nomination, side-taking, role assignment, and consequence are all available',
+    )
+    expect(normalized).toContain(
+      'Start with the new move, not agreement plus paraphrase.',
+    )
+    expect(normalized).toContain(
+      'If covering the setup leaves no independent comic idea, use a straight answer, reaction, or silence.',
+    )
+    expect(normalized).toContain(
+      'unexpected at first and obvious after it lands, never random',
+    )
+  })
+
   it('uses canon for recognition without freezing a member into a character', async () => {
     const comedy = await readSkill('groupchat-comedy')
     const normalized = comedy.replace(/\s+/gu, ' ')
@@ -86,15 +110,37 @@ describe('assistant group-chat comedy skill', () => {
     )
   })
 
-  it('keeps Murph-originated forfeits funny without making logistics the punishment', async () => {
+  it('keeps challenge stakes human-owned, room-native, and practical', async () => {
     const comedy = await readSkill('groupchat-comedy')
     const normalized = comedy.replace(/\s+/gu, ' ')
 
+    expect(normalized).toContain('Stakes, prizes, and consequences')
+    expect(normalized).toContain(
+      'Challenge stakes are human-owned: the winner receives or chooses something, or another participant gives, does, performs, or owes something',
+    )
+    expect(normalized).toContain(
+      'real-world stakes do not require spending or a new errand.',
+    )
+    expect(normalized).toContain(
+      'A Murph-generated song, comic, poster, or recap may amplify or commemorate the stakes, but it is not the sole stake unless the room explicitly chooses that.',
+    )
+    expect(normalized).toContain(
+      'Start with the current conversation, then use reinforced canon, relationships, recurring rituals, and existing plans.',
+    )
+    expect(normalized).toContain(
+      'Do not import a game-show, sportsbook, or roast register merely because this is a challenge.',
+    )
+    expect(normalized).toContain(
+      'Never manufacture intensity the room did not supply.',
+    )
     expect(normalized).toContain(
       'Treat practicality as a creative quality, not a zero-cost gate.',
     )
     expect(normalized).toContain(
       'A modest purchase or ordinary consumable is fair when it materially creates the bit',
+    )
+    expect(normalized).toContain(
+      'pitch one or two specific options in the group\'s own register, as sharp as its existing tone supports',
     )
     expect(normalized).toContain(
       'anchor them to a moment already on the calendar',
@@ -106,7 +152,7 @@ describe('assistant group-chat comedy skill', () => {
       'The screenshot should be the performance or the line, not a receipt or a single-use outfit.',
     )
     expect(normalized).toContain(
-      "These are reference points, not a fixed menu: invent fresher versions from the group's canon and constraints.",
+      "These are reference points, not a fixed menu: invent fresher versions from the group's current context, canon, and constraints.",
     )
     expect(normalized).toContain('Judge ideas by their funny-to-hassle ratio.')
     expect(normalized).toContain(

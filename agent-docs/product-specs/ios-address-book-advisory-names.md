@@ -5,8 +5,9 @@ Last verified: 2026-07-27
 ## Product boundary
 
 The iOS companion may offer one optional Contacts step after Apple Health.
-Sharing lets Murph use a familiar, unverified first-name label for an
-unregistered phone participant in a group owned by the sharing member.
+Sharing lets Murph use a familiar, unverified first-name label for a
+phone participant in a group owned by the sharing member, whether or not that
+participant already uses Murph.
 Skipping makes no permission request and performs no backend mutation.
 
 This is not a contact importer, invite system, signup prefill, global social
@@ -100,17 +101,27 @@ The only consumer is the existing route-authorized
 `read_chat_participants` operation:
 
 1. Read and reconcile the truthful live Linq iMessage or SMS group roster.
-2. Select at most 16 canonical phone handles whose durable activation check
-   says they do not yet use Murph.
-3. Resolve only the human group owner's active projection.
+2. Select at most 16 canonical phone handles while retaining each handle's
+   durable activation result independently.
+3. Resolve only the human group owner's enabled projection.
 4. Omit ambiguous labels and return each remaining label as
    `unverifiedOwnerContactLabel`.
 5. Treat KMS, consent, storage, timeout, or decryption failure as an empty
    optional overlay; never degrade the truthful roster.
 
+Before KMS or token lookup, the advisory read must confirm that the owner still
+exists, is unsuspended, holds current launch consent, and has an enabled
+projection. It does not rerun the active member access check that gates
+replacement: the route-authorized live group read is the access boundary for an
+already-enabled projection, regardless of the owner's current personal or
+sponsored billing access.
+
 The model sees the label only for the current tool result and is explicitly
 told that it is untrusted presentation text with no identity, membership,
 consent, routing, instruction, or persistence authority.
+For a registered participant, the label remains only the owner's private
+presentation hint: it does not replace or modify that participant's Murph
+identity, and `hasOwnMurph` remains a separate durable-activation fact.
 
 SMS admission is limited to `read_chat_participants`. Its model-facing result is
 a roster read, but its Web owner also runs the existing best-effort Linq

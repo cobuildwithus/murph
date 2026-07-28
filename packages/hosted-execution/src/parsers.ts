@@ -116,6 +116,7 @@ import {
   readHostedExecutionSnapshotHotRef,
 } from "./parsers/cursor.ts";
 import {
+  parseHostedExecutionDeviceSyncExpectedConnectedAt,
   parseHostedExecutionDeviceSyncReason,
   parseHostedExecutionDeviceSyncWakeHint,
 } from "./parsers/device-sync.ts";
@@ -349,6 +350,14 @@ export function parseHostedExecutionWake(value: unknown): HostedExecutionWake {
               ),
             }),
         eventId,
+        ...(record.expectedConnectedAt === undefined
+          ? {}
+          : {
+              expectedConnectedAt: parseHostedExecutionDeviceSyncExpectedConnectedAt(
+                record.expectedConnectedAt,
+                "Hosted execution wake device-sync.wake expectedConnectedAt",
+              ),
+            }),
         ...(record.hint === undefined
           ? {}
           : { hint: parseHostedExecutionDeviceSyncWakeHint(record.hint) }),
@@ -1207,6 +1216,14 @@ export function parseHostedExecutionEvent(value: unknown): HostedExecutionEvent 
               connectionId: readNullableString(
                 record.connectionId,
                 "Hosted execution device-sync.wake connectionId",
+              ),
+            }),
+        ...(record.expectedConnectedAt === undefined
+          ? {}
+          : {
+              expectedConnectedAt: parseHostedExecutionDeviceSyncExpectedConnectedAt(
+                record.expectedConnectedAt,
+                "Hosted execution device-sync.wake expectedConnectedAt",
               ),
             }),
         ...(record.hint === undefined

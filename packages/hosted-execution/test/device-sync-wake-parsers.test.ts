@@ -7,6 +7,7 @@ describe("device-sync wake parser delegation", () => {
     const parsed = parseHostedExecutionWake({
       connectionId: "conn_123",
       eventId: "evt_123",
+      expectedConnectedAt: "2026-04-09T00:00:00.000Z",
       hint: {
         eventType: "webhook",
         jobs: [
@@ -42,6 +43,7 @@ describe("device-sync wake parser delegation", () => {
     expect(parsed).toEqual({
       connectionId: "conn_123",
       eventId: "evt_123",
+      expectedConnectedAt: "2026-04-09T00:00:00.000Z",
       hint: {
         eventType: "webhook",
         jobs: [
@@ -73,6 +75,43 @@ describe("device-sync wake parser delegation", () => {
       reason: "webhook_hint",
       userId: "user_123",
     });
+  });
+
+  it("keeps legacy connection-scoped wakes parseable without granting epoch authority", () => {
+    expect(parseHostedExecutionWake({
+      connectionId: "conn_legacy",
+      eventId: "evt_legacy",
+      kind: "device-sync.wake",
+      occurredAt: "2026-04-09T00:00:31.000Z",
+      provider: "oura",
+      reason: "disconnected",
+      userId: "user_123",
+    })).toEqual({
+      connectionId: "conn_legacy",
+      eventId: "evt_legacy",
+      kind: "device-sync.wake",
+      occurredAt: "2026-04-09T00:00:31.000Z",
+      provider: "oura",
+      reason: "disconnected",
+      userId: "user_123",
+    });
+  });
+
+  it("rejects malformed connection epochs", () => {
+    expect(() =>
+      parseHostedExecutionWake({
+        connectionId: "conn_123",
+        eventId: "evt_123",
+        expectedConnectedAt: "not-a-timestamp",
+        kind: "device-sync.wake",
+        occurredAt: "2026-04-09T00:00:31.000Z",
+        provider: "oura",
+        reason: "connected",
+        userId: "user_123",
+      }),
+    ).toThrow(
+      /expectedConnectedAt must be a valid ISO-8601 timestamp in canonical UTC form/i,
+    );
   });
 
   it("fails closed when delegated wake-hint payload fields are invalid", () => {

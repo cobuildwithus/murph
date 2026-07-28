@@ -1,8 +1,8 @@
 # PR 881 consent deep-review remediation
 
-Status: active
+Status: completed
 Created: 2026-07-23
-Updated: 2026-07-23
+Updated: 2026-07-27
 
 ## Goal
 
@@ -46,12 +46,16 @@ Updated: 2026-07-23
 ## Decisions
 
 - Treat the supplied patch as behavioral intent because its blob context does not exactly match the current PR head.
+- Apply the supplied follow-up patch directly to `main` after PR 881 merged, as explicitly requested, while retaining this plan as the consent-remediation owner.
 - Delete the single-purpose action wrapper and move decline ownership into the existing consent prompt.
 - Reset the existing auth-completion state on decline so clearing the consent gate returns to auth instead of exposing a stale finishing state.
 - Keep Decline as the quiet left action, shorten the affirmative label to `Consent`, and remove the decorative consent eyebrow so the consequential choice is immediately legible.
 - Shorten the health-data heading and explanation to the essential consent terms, and let both `Consent` and `Agree` fill the available action width beside `Decline`.
 - Revoke the authoritative Murph app session before clearing a declined consent gate; keep refusal visible and retryable when logout cannot be confirmed.
 - Reuse `AuthDialog` for sidebar and changelog auth entry points so consent headings and dismissal policy have one owner.
+- Keep requested dashboard routes mounted behind a non-dismissible consent dialog, with `/records/connect` exempt from the dialog so device connection remains usable.
+- Disable browser-vault loading while launch consent is absent or stale, expose an empty context, and synchronously clear landing-page warm state before blocked dashboard content can observe it.
+- Retire the active provider during layout cleanup. This matches the disabled provider's warm-state cleanup phase and prevents an adopted warm request from restarting during a concurrent active-to-disabled transition.
 
 ## Verification
 
@@ -68,3 +72,24 @@ Updated: 2026-07-23
 - Cloudflare Images upload: final desktop and mobile proof for the shortened copy and auto-width actions uploaded through the local least-privilege credentials; both public delivery URLs returned image responses.
 - `pnpm verify:acceptance`: touched web verification passed; the full command remains red on the pre-existing assistant-runtime fixture failures reproduced outside this diff.
 - Preliminary specialist ReviewGPT remains blocked by prior below-floor responses; exact-head specialist review, plan closure, final ReviewGPT, and current-head CI remain pending.
+
+### Direct-main follow-up verification (2026-07-27)
+
+- Applied the supplied consent-dialog/browser-vault patch and inspected its complete scoped diff.
+- A focused concurrent-transition regression failed before remediation because disabling the provider could abort an adopted landing load and let the outgoing active provider start a replacement request. Moving the mounted lifecycle to layout cleanup fixed the race; the regression and a disabled-to-enabled authority test now pass.
+- Full web Vitest pass: 539 files passed and 13 skipped; 6,927 tests passed and 191 skipped.
+- Browser-vault context suite: 42 tests passed.
+- Web typecheck: passed.
+- `pnpm test:frontend-design-proof`: passed (10 tests).
+- Product-experience review: passed with no patch-caused findings. The reviewer identified the pre-existing behavior where an already-mounted dashboard learns of newly stale consent only after reload; this patch neither causes nor broadens that behavior.
+- Local deep review found the concurrent provider-transition race described above; remediation review passed with no remaining patch-caused finding.
+- Desktop and mobile design-catalog renderings of the production consent card were inspected. An authenticated browser proof of the real dialog portal was unavailable, so focused dialog-wiring tests provide the modal/non-dismissible proof.
+- Claude UI review was not retried because the recorded usage-credit exhaustion is terminal under the completion policy. The preliminary specialist ReviewGPT pass and a separate final ReviewGPT gate remain unavailable in this direct-main checkout after the recorded below-floor responses; local product and deep-review passes supplied the scoped review evidence.
+- Canonical `pnpm test:diff` follow-up: the local command waited ten continuous
+  minutes without acquiring the shared verification lane. The required
+  Crabbox fallback then failed before provisioning because the installed
+  Blacksmith CLI rejected the dispatcher's pinned cleanup flag
+  (`--stop-after is not supported`). Per the verification policy, no automatic
+  second unbounded local wait was started; the completed full web, focused,
+  typecheck, and design-proof evidence above is the next-best validation.
+Completed: 2026-07-27
