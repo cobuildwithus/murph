@@ -22,10 +22,12 @@ export type {
 } from './automation/reply.js'
 export {
   findAssistantAutoReplyDeliveryIntentIds,
+  hasCompleteAssistantAutoReplyDeliveryTerminalEvidence,
   hasCompleteAssistantAutoReplyTerminalEvidence,
   listPendingAssistantAutoReplyLinqCleanupEvidence,
   markAssistantAutoReplyLinqCleanupQueued,
   readAssistantAutoReplyTerminalEvidenceByEvidenceId,
+  writeAssistantAutoReplyReplyTerminalEvidence,
   writeAssistantAutoReplySuppressionEvidence,
 } from './automation/evidence.js'
 export {

@@ -33,15 +33,18 @@ import {
 } from "@murphai/contracts";
 import {
   appendAssistantTranscriptEntries,
+  createAssistantOutboxIntent,
   ensureAutomaticMealCloseoutAutomation,
   getAssistantCronStatus,
   listAssistantTranscriptEntries,
   MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID,
   listAssistantOutboxIntents,
+  markAssistantOutboxIntentSentById,
   readAssistantContextSnapshotState,
   recordHostedMailboxAssistantInputItem,
   resolveAssistantSession,
   saveAssistantSession,
+  type AssistantHostedImageGenerationLauncher,
   type RunAssistantAutomationPassInput,
 } from "@murphai/assistant-engine";
 import {
@@ -55,6 +58,7 @@ import {
   updateAssistantInputAttachmentEvidence,
   updateAssistantInputProjection,
   upsertAssistantInputEvent,
+  writeAssistantAutoReplyReplyTerminalEvidence,
 } from "@murphai/assistant-engine/assistant-automation";
 import {
   saveAssistantAutomationState,
@@ -115,14 +119,26 @@ import {
 } from "@murphai/hosted-execution/parsers";
 import { describe, expect, test, vi } from "vitest";
 
+type HasCompleteAssistantAutoReplyDeliveryTerminalEvidence = (
+  input: {
+    captureId?: string | null;
+    inputId: string;
+    vault: string;
+  },
+) => Promise<boolean>;
+
 const mocks = vi.hoisted(() => ({
   actualEnqueueHostedPendingAssistantInputId: null as null | ((input: {
     inputId: string;
     vaultRoot: string;
   }) => Promise<string[]>),
+  actualHasCompleteAssistantAutoReplyDeliveryTerminalEvidence:
+    null as HasCompleteAssistantAutoReplyDeliveryTerminalEvidence | null,
   createHostedWorkspaceSnapshotCheckpointRequestBuilder: vi.fn(),
   enqueueHostedPendingAssistantInputId: vi.fn(),
   executeReadOnlyAssistantAsk: vi.fn(),
+  hasCompleteAssistantAutoReplyDeliveryTerminalEvidence:
+    vi.fn<HasCompleteAssistantAutoReplyDeliveryTerminalEvidence>(),
   prepareHostedCodexRuntimeEnvironment: vi.fn(),
   refreshHostedBrowserVaultReplicaFromRuntime: vi.fn(),
   runAssistantAutomationPass: vi.fn(),
@@ -157,6 +173,22 @@ vi.mock("@murphai/assistant-engine/assistant-ask", async (importOriginal) => {
     executeReadOnlyAssistantAsk:
       mocks.executeReadOnlyAssistantAsk.mockImplementation(
         actual.executeReadOnlyAssistantAsk,
+      ),
+  };
+});
+
+vi.mock("@murphai/assistant-engine/assistant-automation", async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import("@murphai/assistant-engine/assistant-automation")
+  >();
+  mocks.actualHasCompleteAssistantAutoReplyDeliveryTerminalEvidence =
+    actual.hasCompleteAssistantAutoReplyDeliveryTerminalEvidence;
+
+  return {
+    ...actual,
+    hasCompleteAssistantAutoReplyDeliveryTerminalEvidence:
+      mocks.hasCompleteAssistantAutoReplyDeliveryTerminalEvidence.mockImplementation(
+        actual.hasCompleteAssistantAutoReplyDeliveryTerminalEvidence,
       ),
   };
 });
@@ -17354,25 +17386,40 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
-  test("retries a transient image completion index failure inside the live runtime", async () => {
-    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-image-index-retry-"));
+  test("retains queued image state until its committed delivery intent is terminal", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-image-evidence-retry-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
-    const mailboxItem = createMailboxItem({
-      id: "mailbox_item_image_index_retry",
+    const mailboxItems = [createMailboxItem({
+      id: "mailbox_item_image_evidence_retry_origin",
       laneSeq: "1",
-    });
+    })];
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
     let assistantPhaseCalls = 0;
-    let completionInputId: string | null = null;
     let completionReplyCount = 0;
+    let firstDeliveryIntent: Awaited<
+      ReturnType<typeof createAssistantOutboxIntent>
+    > | null = null;
+    let firstCompletionInputId: string | null = null;
     let imageIndexFailureInjected = false;
-    const shutdownController = new AbortController();
+    let imageProviderInvocationCount = 0;
+    let originInputId: string | null = null;
+    let secondCompletionInputId: string | null = null;
+    let terminalEvidenceReadFailureInjected = false;
+    let terminalEvidenceRetryObserved = false;
+    const imageGenerationLauncherRef: {
+      current: AssistantHostedImageGenerationLauncher | null;
+    } = { current: null };
 
     try {
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
       mocks.enqueueHostedPendingAssistantInputId.mockClear();
+      mocks.hasCompleteAssistantAutoReplyDeliveryTerminalEvidence.mockClear();
       const actualEnqueue = mocks.actualEnqueueHostedPendingAssistantInputId;
+      const actualHasCompleteTerminalEvidence =
+        mocks.actualHasCompleteAssistantAutoReplyDeliveryTerminalEvidence;
       assert.ok(actualEnqueue);
+      assert.ok(actualHasCompleteTerminalEvidence);
       mocks.enqueueHostedPendingAssistantInputId.mockImplementation(
         async (request) => {
           const event = await readAssistantInputEvent({
@@ -17391,142 +17438,315 @@ describe("hosted workspace runtime entrypoint", () => {
           return await actualEnqueue(request);
         },
       );
-
-      const result = await runHostedWorkspaceRuntimeJobInProcess(
-        createWorkspaceRuntimeJobInput({
-          request: {
-            attemptId: "attempt_image_index_retry",
-            budget: { maxMailboxItems: 10 },
-            idleCheckpointDelayMs: 180_000,
-            leaseGeneration: "7",
-            userId: TEST_USER_ID,
-            workspaceVersion: "0",
-          },
-        }),
-        {
-          async createCheckpointSnapshot() {
-            return {
-              snapshotRef: createBundleRef({
-                hash: "4".repeat(64),
-                key: "users/bundles/member-synthetic/image-index-retry.bundle.json",
-                size: 512,
-              }),
-            };
-          },
-          async importItem(item) {
-            const assistantInputId =
-              await stagePendingLinqAssistantInputForMailboxItem({
-                item: item.item,
-                threadId: "thread_image_index_retry",
-                vaultRoot,
-              });
-            return {
-              assistantInputId,
-              status: "imported",
-            };
-          },
-          platform: createPlatform({
-            mailboxPort: createMailboxPort({
-              events,
-              items: [mailboxItem],
-            }),
-            workspacePort: createWorkspacePort({
-              checkpointRequests,
-              events,
-              workspace: createWorkspaceState({ version: "0" }),
-            }),
-          }),
-          async runAssistantPhase(phaseInput) {
-            const initialBatchInputIds =
-              phaseInput.initialAssistantInputBatch?.assistantInputIds ?? [];
-            let assistantInputIds: readonly string[] =
-              initialBatchInputIds.length > 0
-              ? initialBatchInputIds
-              : phaseInput.initialMailboxImport.importResult.assistantInputIds
-                ?? [];
-            if (assistantInputIds.length === 0) {
-              assistantInputIds = (await selectHostedAssistantInputIds({
-                mode: "background",
-                vaultRoot,
-              })).inputIds;
-            }
-            if (assistantInputIds.length === 0) {
-              return { progressed: false };
-            }
-            assistantPhaseCalls += 1;
-            assert.equal(assistantInputIds.length, 1);
-            const assistantInputId = assistantInputIds[0]!;
-
-            if (assistantPhaseCalls === 1) {
-              assert.equal(
-                phaseInput.imageGenerationLauncher?.launch({
-                  operationId: "image_operation_index_retry",
-                  originAssistantInputId: assistantInputId,
-                  async run() {
-                    return {
-                      media: {
-                        alt: "Generated sunrise",
-                        kind: "image",
-                        source: "gpt-image-2",
-                        url: "https://imagedelivery.net/account/retry/public",
-                      },
-                      runtimeIssue: null,
-                      savedImageRef: null,
-                    };
-                  },
-                }),
-                "started",
-              );
-            } else {
-              completionInputId = assistantInputId;
-              completionReplyCount += 1;
-            }
-
-            await writeSyntheticAssistantAutoReplyTerminalEvidence({
-              inputId: assistantInputId,
-              vaultRoot,
-            });
-            if (assistantPhaseCalls === 2) {
-              shutdownController.abort(
-                new DOMException(
-                  "Synthetic shutdown after image completion reply.",
-                  "AbortError",
-                ),
-              );
-            }
-            return {
-              checkpointReason: "assistant_runtime_commit" as const,
-              foregroundReplyFailed: 0,
-              nextWakeAt: null,
-              progressed: true,
-            };
-          },
-          shutdownSignal: shutdownController.signal,
-          vaultRoot,
+      mocks.hasCompleteAssistantAutoReplyDeliveryTerminalEvidence.mockImplementation(
+        async (request) => {
+          if (
+            !terminalEvidenceReadFailureInjected
+            && firstCompletionInputId !== null
+            && request.inputId === firstCompletionInputId
+          ) {
+            terminalEvidenceReadFailureInjected = true;
+            throw new Error("Synthetic terminal-evidence read failure.");
+          }
+          return await actualHasCompleteTerminalEvidence(request);
         },
       );
 
-      assert.equal(result.status, "idle");
+      await assert.rejects(
+        runHostedWorkspaceRuntimeJobInProcess(
+          createWorkspaceRuntimeJobInput({
+            request: {
+              attemptId: "attempt_image_evidence_retry",
+              budget: { maxMailboxItems: 10 },
+              idleCheckpointDelayMs: 180_000,
+              leaseGeneration: "7",
+              userId: TEST_USER_ID,
+              workspaceVersion: "0",
+            },
+          }),
+          {
+            async createCheckpointSnapshot() {
+              return {
+                snapshotRef: createBundleRef({
+                  hash: "4".repeat(64),
+                  key: "users/bundles/member-synthetic/image-evidence-retry.bundle.json",
+                  size: 512,
+                }),
+              };
+            },
+            async importItem(item) {
+              const assistantInputId =
+                await stagePendingLinqAssistantInputForMailboxItem({
+                  item: item.item,
+                  threadId: "thread_image_evidence_retry",
+                  vaultRoot,
+                });
+              return {
+                assistantInputId,
+                status: "imported",
+              };
+            },
+            platform: createPlatform({
+              mailboxPort: createMailboxPort({
+                events,
+                items: mailboxItems,
+              }),
+              workspacePort: createWorkspacePort({
+                checkpointRequests,
+                events,
+                workspace: createWorkspaceState({ version: "0" }),
+              }),
+            }),
+            runtimeWakeSignal,
+            async runAssistantPhase(phaseInput) {
+              const initialBatchInputIds =
+                phaseInput.initialAssistantInputBatch?.assistantInputIds ?? [];
+              let assistantInputIds: readonly string[] =
+                initialBatchInputIds.length > 0
+                ? initialBatchInputIds
+                : phaseInput.initialMailboxImport.importResult.assistantInputIds
+                  ?? [];
+              if (assistantInputIds.length === 0) {
+                assistantInputIds = (await selectHostedAssistantInputIds({
+                  mode: "background",
+                  vaultRoot,
+                })).inputIds;
+              }
+              if (assistantInputIds.length === 0) {
+                return { progressed: false };
+              }
+              assistantPhaseCalls += 1;
+              assert.equal(assistantInputIds.length, 1);
+              const assistantInputId = assistantInputIds[0]!;
+              const releaseProviderInputs =
+                await phaseInput.beforeProviderAcceptedInputs?.({
+                  acceptedInputs: [{
+                    id: assistantInputId,
+                    source: "assistant-input",
+                  }],
+                });
+
+              if (assistantPhaseCalls === 1) {
+                originInputId = assistantInputId;
+                imageGenerationLauncherRef.current =
+                  phaseInput.imageGenerationLauncher ?? null;
+                assert.equal(
+                  phaseInput.imageGenerationLauncher?.launch({
+                    operationId: "image_operation_evidence_retry_1",
+                    originAssistantInputId: assistantInputId,
+                    scopeId: "session_image_evidence_retry",
+                    async run() {
+                      imageProviderInvocationCount += 1;
+                      return {
+                        media: {
+                          alt: "Generated sunrise",
+                          kind: "image",
+                          source: "gpt-image-2",
+                          url: "https://imagedelivery.net/account/retry-first/public",
+                        },
+                        runtimeIssue: null,
+                        savedImageRef: null,
+                      };
+                    },
+                  }),
+                  "started",
+                );
+              } else if (assistantPhaseCalls === 2) {
+                firstCompletionInputId = assistantInputId;
+                completionReplyCount += 1;
+                assert.equal(
+                  imageGenerationLauncherRef.current?.readStatus?.(
+                    "session_image_evidence_retry",
+                  ),
+                  "queued",
+                );
+              } else if (assistantPhaseCalls === 3) {
+                terminalEvidenceRetryObserved = true;
+                assert.equal(
+                  imageGenerationLauncherRef.current?.readStatus?.(
+                    "session_image_evidence_retry",
+                  ),
+                  "queued",
+                );
+                assert.equal(
+                  phaseInput.imageGenerationLauncher?.launch({
+                    operationId: "image_operation_evidence_retry_2",
+                    originAssistantInputId: assistantInputId,
+                    scopeId: "session_image_evidence_retry",
+                    async run() {
+                      imageProviderInvocationCount += 1;
+                      return {
+                        media: {
+                          alt: "Generated moonrise",
+                          kind: "image",
+                          source: "gpt-image-2",
+                          url: "https://imagedelivery.net/account/retry-second/public",
+                        },
+                        runtimeIssue: null,
+                        savedImageRef: null,
+                      };
+                    },
+                  }),
+                  "already-pending",
+                );
+                assert.equal(imageProviderInvocationCount, 1);
+              } else if (assistantPhaseCalls === 4) {
+                assert.equal(
+                  imageGenerationLauncherRef.current?.readStatus?.(
+                    "session_image_evidence_retry",
+                  ),
+                  null,
+                );
+                assert.equal(
+                  phaseInput.imageGenerationLauncher?.launch({
+                    operationId: "image_operation_evidence_retry_2",
+                    originAssistantInputId: assistantInputId,
+                    scopeId: "session_image_evidence_retry",
+                    async run() {
+                      imageProviderInvocationCount += 1;
+                      return {
+                        media: {
+                          alt: "Generated moonrise",
+                          kind: "image",
+                          source: "gpt-image-2",
+                          url: "https://imagedelivery.net/account/retry-second/public",
+                        },
+                        runtimeIssue: null,
+                        savedImageRef: null,
+                      };
+                    },
+                  }),
+                  "started",
+                );
+              } else if (assistantPhaseCalls === 5) {
+                secondCompletionInputId = assistantInputId;
+                completionReplyCount += 1;
+                assert.equal(
+                  imageGenerationLauncherRef.current?.readStatus?.(
+                    "session_image_evidence_retry",
+                  ),
+                  "queued",
+                );
+              } else {
+                throw new Error("Unexpected extra image evidence retry phase.");
+              }
+
+              if (assistantPhaseCalls === 2) {
+                firstDeliveryIntent = await createAssistantOutboxIntent({
+                  channel: "telegram",
+                  dedupeToken: `image-delivery:${assistantInputId}`,
+                  explicitTarget: "chat_image_evidence_retry",
+                  identityId: "participant_image_evidence_retry",
+                  media: [{
+                    alt: "Generated sunrise",
+                    kind: "image",
+                    source: "gpt-image-2",
+                    url: "https://imagedelivery.net/account/retry-first/public",
+                  }],
+                  message: "",
+                  sessionId: "session_image_evidence_retry",
+                  threadId: "thread_image_evidence_retry",
+                  threadIsDirect: true,
+                  turnId: `turn_${assistantInputId}`,
+                  turnTrigger: "automation-auto-reply",
+                  vault: vaultRoot,
+                });
+                await writeAssistantAutoReplyReplyTerminalEvidence({
+                  captureIds: [],
+                  deliveryIntentId: firstDeliveryIntent.intentId,
+                  inputIds: [assistantInputId],
+                  outcome: "deferred",
+                  recordedAt: "2026-04-27T00:00:01.000Z",
+                  sessionId: firstDeliveryIntent.sessionId,
+                  terminalKind: "reply_intent_committed",
+                  vault: vaultRoot,
+                });
+                assert.ok(originInputId);
+                const releaseSteeringInputs =
+                  await phaseInput.beforeProviderAcceptedInputs?.({
+                    acceptedInputs: [{
+                      id: originInputId,
+                      source: "assistant-input",
+                    }],
+                  });
+                await releaseSteeringInputs?.();
+                mailboxItems.push(createMailboxItem({
+                  id: "mailbox_item_image_evidence_retry_followup",
+                  laneSeq: "2",
+                  occurredAt: "2026-04-27T00:00:01.000Z",
+                }));
+                runtimeWakeSignal.notify();
+              } else {
+                await writeSyntheticAssistantAutoReplyTerminalEvidence({
+                  inputId: assistantInputId,
+                  vaultRoot,
+                });
+              }
+              if (assistantPhaseCalls === 3) {
+                assert.ok(firstDeliveryIntent);
+                const sentIntent = await markAssistantOutboxIntentSentById({
+                  delivery: {
+                    channel: "telegram",
+                    idempotencyKey: null,
+                    messageLength: 0,
+                    providerMessageId: "telegram_image_evidence_retry",
+                    providerThreadId: null,
+                    sentAt: "2026-04-27T00:00:02.000Z",
+                    target: "chat_image_evidence_retry",
+                    targetKind: "explicit",
+                  },
+                  intentId: firstDeliveryIntent.intentId,
+                  vault: vaultRoot,
+                });
+                assert.equal(sentIntent?.status, "sent");
+                mailboxItems.push(createMailboxItem({
+                  id: "mailbox_item_image_evidence_retry_after_delivery",
+                  laneSeq: "3",
+                  occurredAt: "2026-04-27T00:00:02.000Z",
+                }));
+                runtimeWakeSignal.notify();
+              }
+              await releaseProviderInputs?.();
+              if (assistantPhaseCalls === 5) {
+                throw new Error(
+                  "Synthetic phase failure after second image terminal evidence.",
+                );
+              }
+              return {
+                checkpointReason: "assistant_runtime_commit" as const,
+                foregroundReplyFailed: 0,
+                nextWakeAt: null,
+                progressed: true,
+              };
+            },
+            vaultRoot,
+          },
+        ),
+        /Synthetic phase failure after second image terminal evidence\./u,
+      );
+
       assert.equal(imageIndexFailureInjected, true);
+      assert.equal(terminalEvidenceReadFailureInjected, true);
+      assert.equal(terminalEvidenceRetryObserved, true);
       const pendingAtEnd = await compactHostedPendingAssistantInputIds({
         vaultRoot,
       });
       assert.equal(
         assistantPhaseCalls,
-        2,
+        5,
         JSON.stringify({
           enqueueInputIds:
             mocks.enqueueHostedPendingAssistantInputId.mock.calls
               .map(([request]) => request.inputId),
-          nextWakeAt: result.nextWakeAt,
-          nextWakeReason: result.nextWakeReason,
           pendingAtEnd,
         }),
       );
-      assert.equal(completionReplyCount, 1);
-      assert.ok(completionInputId);
+      assert.equal(completionReplyCount, 2);
+      assert.equal(imageProviderInvocationCount, 2);
+      assert.ok(firstCompletionInputId);
+      assert.ok(secondCompletionInputId);
       const completion = await readAssistantInputEvent({
-        inputId: completionInputId,
+        inputId: firstCompletionInputId,
         vault: vaultRoot,
       });
       assert.equal(
@@ -17536,18 +17756,35 @@ describe("hosted workspace runtime entrypoint", () => {
         "murph.hosted-image-completion.v1",
       );
       assert.deepEqual(pendingAtEnd, []);
-      const completionEnqueueCalls =
+      const firstCompletionEnqueueCalls =
         mocks.enqueueHostedPendingAssistantInputId.mock.calls
-          .filter(([request]) => request.inputId === completionInputId);
-      assert.equal(completionEnqueueCalls.length, 2);
-    } finally {
-      shutdownController.abort(
-        new DOMException("Synthetic test cleanup.", "AbortError"),
+          .filter(([request]) => request.inputId === firstCompletionInputId);
+      assert.equal(firstCompletionEnqueueCalls.length, 2);
+      const terminalEvidenceInputIds =
+        mocks.hasCompleteAssistantAutoReplyDeliveryTerminalEvidence.mock.calls
+          .map(([request]) => request.inputId);
+      assert.equal(
+        terminalEvidenceInputIds.filter(
+          (inputId) => inputId === firstCompletionInputId,
+        ).length >= 2,
+        true,
       );
+      assert.equal(
+        terminalEvidenceInputIds.at(-1),
+        secondCompletionInputId,
+      );
+    } finally {
       const actualEnqueue = mocks.actualEnqueueHostedPendingAssistantInputId;
       if (actualEnqueue) {
         mocks.enqueueHostedPendingAssistantInputId.mockImplementation(
           actualEnqueue,
+        );
+      }
+      const actualHasCompleteTerminalEvidence =
+        mocks.actualHasCompleteAssistantAutoReplyDeliveryTerminalEvidence;
+      if (actualHasCompleteTerminalEvidence) {
+        mocks.hasCompleteAssistantAutoReplyDeliveryTerminalEvidence.mockImplementation(
+          actualHasCompleteTerminalEvidence,
         );
       }
       await removeTempRoot(vaultRoot);

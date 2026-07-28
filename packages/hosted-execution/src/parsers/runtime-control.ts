@@ -620,6 +620,13 @@ export function parseHostedMailboxFetchResponse(value: unknown): HostedMailboxFe
               record.conversationUsageStatus,
             ),
         }),
+    ...(record.groupRunningBit === undefined
+      ? {}
+      : {
+          groupRunningBit: record.groupRunningBit === null
+            ? null
+            : parseHostedGroupRunningBitProjection(record.groupRunningBit),
+        }),
     ...(record.consumedSeqByLane === undefined || record.consumedSeqByLane === null
       ? {}
       : {
@@ -642,6 +649,66 @@ export function parseHostedMailboxFetchResponse(value: unknown): HostedMailboxFe
       `Hosted mailbox fetch response maxSeqByLane[${index}]`,
     )),
     userId: requireString(record.userId, "Hosted mailbox fetch response userId"),
+  };
+}
+
+function parseHostedGroupRunningBitProjection(
+  value: unknown,
+): NonNullable<HostedMailboxFetchResponse["groupRunningBit"]> {
+  const record = requireObject(
+    value,
+    "Hosted mailbox fetch response groupRunningBit",
+  );
+  const allowedKeys = new Set([
+    "expiresAt",
+    "publicAlias",
+    "requestedBit",
+    "schema",
+  ]);
+  if (Object.keys(record).some((key) => !allowedKeys.has(key))) {
+    throw new TypeError(
+      "Hosted mailbox fetch response groupRunningBit contains unknown fields.",
+    );
+  }
+  if (record.schema !== "murph.group-sponsorship-bit.v1") {
+    throw new TypeError(
+      "Hosted mailbox fetch response groupRunningBit schema is invalid.",
+    );
+  }
+  const expiresAt = requireString(
+    record.expiresAt,
+    "Hosted mailbox fetch response groupRunningBit expiresAt",
+  );
+  if (
+    !Number.isFinite(new Date(expiresAt).getTime()) ||
+    new Date(expiresAt).toISOString() !== expiresAt
+  ) {
+    throw new TypeError(
+      "Hosted mailbox fetch response groupRunningBit expiresAt must be canonical.",
+    );
+  }
+  const publicAlias = readNullableString(
+    record.publicAlias,
+    "Hosted mailbox fetch response groupRunningBit publicAlias",
+  );
+  const requestedBit = requireString(
+    record.requestedBit,
+    "Hosted mailbox fetch response groupRunningBit requestedBit",
+  );
+  if (
+    (publicAlias && [...publicAlias].length > 80) ||
+    [...requestedBit].length < 1 ||
+    [...requestedBit].length > 240
+  ) {
+    throw new TypeError(
+      "Hosted mailbox fetch response groupRunningBit text is out of bounds.",
+    );
+  }
+  return {
+    expiresAt,
+    publicAlias,
+    requestedBit,
+    schema: "murph.group-sponsorship-bit.v1",
   };
 }
 
@@ -3176,6 +3243,7 @@ function parseHostedRuntimeGroupMembershipSummaries(
         "permissionsUrl",
         "requestedVaultShareProjectionScopes",
         "role",
+        "sponsorshipUrl",
       ]),
       `${label} entry`,
     );
@@ -3227,6 +3295,10 @@ function parseHostedRuntimeGroupMembershipSummaries(
       ),
       requestedVaultShareProjectionScopes,
       role: requireString(record.role, `${label} entry role`),
+      sponsorshipUrl: readNullableString(
+        record.sponsorshipUrl,
+        `${label} entry sponsorshipUrl`,
+      ),
     };
   });
 }

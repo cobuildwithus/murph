@@ -154,6 +154,12 @@ vi.mock("@/src/lib/hosted-groups/group-disclosure-store", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-groups/group-usage-funding", () => ({
+  buildHostedGroupUsageFundingLocatorForRuntimeMember: (memberId: string) =>
+    `gf1.${memberId}.signature`,
+  buildHostedGroupUsageFundingUrl: (input: {
+    joinCode: string;
+    publicBaseUrl: string;
+  }) => `${input.publicBaseUrl}/groups/fund/${input.joinCode}`,
   readHostedGroupUsageStatus: mocks.readHostedGroupUsageStatus,
 }));
 
@@ -334,6 +340,7 @@ describe("handleHostedRuntimeGroupTool", () => {
           { projectionKind: "hrv-days.v0" },
         ],
         role: "member",
+        runtimeMemberId: "member_group_runtime",
       }],
       truncated: false,
     });
@@ -600,6 +607,9 @@ describe("handleHostedRuntimeGroupTool", () => {
             { projectionKind: "hrv-days.v0" },
           ],
           role: "member",
+          sponsorshipUrl: expect.stringMatching(
+            /^https:\/\/www\.withmurph\.ai\/groups\/fund\/gf1\./u,
+          ),
         }],
         status: "ok",
         truncated: false,
@@ -626,6 +636,7 @@ describe("handleHostedRuntimeGroupTool", () => {
         ownerJoinCode: "join_runners",
         requestedVaultShareProjectionScopes: [{ projectionKind: "hrv-days.v0" }],
         role: "owner",
+        runtimeMemberId: "member_group_runtime",
       }],
       truncated: false,
     });
@@ -1346,6 +1357,7 @@ describe("filterHostedRuntimeGroupToolResponseProjectionScopes", () => {
           permissionsUrl: "https://www.withmurph.ai/groups/join/abc123",
           requestedVaultShareProjectionScopes: [SLEEP_SCOPE, RUNNING_DISTANCE_SCOPE],
           role: "member",
+          sponsorshipUrl: "https://www.withmurph.ai/groups/fund/funding_locator",
         }],
         status: "ok",
         truncated: false,
@@ -1368,6 +1380,7 @@ describe("filterHostedRuntimeGroupToolResponseProjectionScopes", () => {
           permissionsUrl: "https://www.withmurph.ai/groups/join/abc123",
           requestedVaultShareProjectionScopes: [SLEEP_SCOPE],
           role: "member",
+          sponsorshipUrl: "https://www.withmurph.ai/groups/fund/funding_locator",
         }],
         status: "ok",
         truncated: false,

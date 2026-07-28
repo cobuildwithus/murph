@@ -211,6 +211,7 @@ function createHostedOnboardingEnvironment(
     stripeUsageCreditPriceIdsByOffer: {
       usage_5_usd: null,
       usage_10_usd: null,
+      usage_20_usd: null,
       usage_25_usd: null,
     },
     stripeSecretKey: null,

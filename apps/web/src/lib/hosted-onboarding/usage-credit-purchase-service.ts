@@ -32,9 +32,12 @@ import {
   lockHostedMemberRow,
 } from "./shared";
 import {
+  filterHostedNonGroupUsageCreditOfferCodes,
   getHostedUsageCreditOfferDefinition,
   HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_VERSION,
+  parseHostedGroupSponsorshipOfferCode,
   parseHostedUsageCreditOfferCode,
+  type HostedGroupSponsorshipOfferCode,
   type HostedUsageCreditOfferCode,
 } from "./usage-credit-offers";
 import {
@@ -70,6 +73,16 @@ import {
   readHostedGroupUsageFundingLocatorRuntimeMemberId,
   readHostedGroupUsageFundingTargetByLocator,
 } from "../hosted-groups/group-usage-funding";
+import {
+  assertHostedGroupSponsorshipRequestMatchesTx,
+  createHostedGroupSponsorshipMomentTx,
+  hasHostedGroupSponsorshipCustomizationAuthority,
+  parseHostedGroupSponsorshipDraft,
+  type HostedGroupSponsorshipDraft,
+} from "../hosted-groups/group-sponsorship-store";
+import {
+  readHostedConfiguredGroupSponsorshipOfferCodes,
+} from "../hosted-groups/group-sponsorship-policy";
 import { hasHostedRuntimeActiveAccessForUpdateTx } from "../hosted-mailbox/runtime-access";
 import { generateHostedRandomPrefixedId } from "../primitives";
 import { getPrisma } from "../prisma";
@@ -114,6 +127,12 @@ const HOSTED_USAGE_CREDIT_NONTERMINAL_PURCHASE_STATUSES = [
 export interface HostedUsageCreditCheckoutRequest {
   clientRequestKey: string;
   offerCode: HostedUsageCreditOfferCode;
+}
+
+export interface HostedGroupSponsorshipCheckoutRequest {
+  clientRequestKey: string;
+  offerCode: HostedGroupSponsorshipOfferCode;
+  sponsorship: HostedGroupSponsorshipDraft | null;
 }
 
 type HostedUsageCreditCheckoutTarget =
@@ -178,6 +197,44 @@ export function parseHostedUsageCreditCheckoutRequest(
   };
 }
 
+export function parseHostedGroupSponsorshipCheckoutRequest(
+  value: Record<string, unknown>,
+): HostedGroupSponsorshipCheckoutRequest {
+  const keys = Object.keys(value);
+  if (
+    keys.some((key) =>
+      key !== "clientRequestKey" &&
+      key !== "offerCode" &&
+      key !== "sponsorship"
+    ) ||
+    !keys.includes("clientRequestKey") ||
+    !keys.includes("offerCode")
+  ) {
+    throw hostedOnboardingError({
+      code: "HOSTED_USAGE_CREDIT_CHECKOUT_INVALID_REQUEST",
+      httpStatus: 400,
+      message: "Group sponsorship requires an offer and request key.",
+    });
+  }
+  const base = parseHostedUsageCreditCheckoutRequest({
+    clientRequestKey: value.clientRequestKey,
+    offerCode: value.offerCode,
+  });
+  const offerCode = parseHostedGroupSponsorshipOfferCode(base.offerCode);
+  if (!offerCode) {
+    throw hostedOnboardingError({
+      code: "HOSTED_USAGE_CREDIT_OFFER_INVALID",
+      httpStatus: 400,
+      message: "Choose an available group sponsorship offer.",
+    });
+  }
+  return {
+    clientRequestKey: base.clientRequestKey,
+    offerCode,
+    sponsorship: parseHostedGroupSponsorshipDraft(value.sponsorship),
+  };
+}
+
 export async function createHostedUsageCreditCheckout(input: {
   clientRequestKey: string;
   memberId: string;
@@ -205,6 +262,7 @@ export async function createHostedGroupUsageCreditCheckout(input: {
   offerCode: HostedUsageCreditOfferCode;
   payerMemberId: string;
   prisma?: PrismaClient;
+  sponsorship?: HostedGroupSponsorshipDraft | null;
 }): Promise<HostedUsageCreditCheckoutResult> {
   const prisma = input.prisma ?? getPrisma();
   const locator = normalizeHostedGroupUsageFundingLocator(input.joinCode);
@@ -221,6 +279,7 @@ export async function createHostedGroupUsageCreditCheckout(input: {
 
   return createHostedUsageCreditCheckoutForTarget({
     clientRequestKey: input.clientRequestKey,
+    groupSponsorship: input.sponsorship ?? null,
     groupStripeCustomerId: stripeCustomerId,
     now: input.now,
     offerCode: input.offerCode,
@@ -258,6 +317,7 @@ export async function createHostedFamilyMemberUsageCreditCheckout(input: {
 
 async function createHostedUsageCreditCheckoutForTarget(input: {
   clientRequestKey: string;
+  groupSponsorship?: HostedGroupSponsorshipDraft | null;
   groupStripeCustomerId?: string;
   now?: Date;
   offerCode: HostedUsageCreditOfferCode;
@@ -293,6 +353,13 @@ async function createHostedUsageCreditCheckoutForTarget(input: {
         purchase: racedExisting,
         target: input.target,
       });
+      if (input.target.kind === "group") {
+        await assertHostedGroupSponsorshipRequestMatchesTx({
+          draft: input.groupSponsorship ?? null,
+          purchaseId: racedExisting.id,
+          tx,
+        });
+      }
       if (input.target.kind === "family") {
         const frozenTarget = projectHostedUsageCreditPurchaseTarget(
           racedExisting,
@@ -357,6 +424,13 @@ async function createHostedUsageCreditCheckoutForTarget(input: {
         purchase: existingActive,
         target,
       })) {
+        if (target.kind === "group") {
+          await assertHostedGroupSponsorshipRequestMatchesTx({
+            draft: input.groupSponsorship ?? null,
+            purchaseId: existingActive.id,
+            tx,
+          });
+        }
         if (
           target.kind === "group" &&
           existingActive.offerCode !== input.offerCode
@@ -433,13 +507,17 @@ async function createHostedUsageCreditCheckoutForTarget(input: {
       ) {
         throw buildHostedUsageCreditNotEligibleError("group");
       }
-      authorizedOfferCodes = readHostedConfiguredUsageCreditOfferCodes();
+      authorizedOfferCodes = readHostedConfiguredGroupSponsorshipOfferCodes({
+        configuredOfferCodes: readHostedConfiguredUsageCreditOfferCodes(),
+      });
       stripeCustomerId = input.groupStripeCustomerId;
     } else {
       if (!familyTarget || target.groupId !== familyTarget.groupId) {
         throw buildHostedUsageCreditInvariantError("family_target_missing");
       }
-      authorizedOfferCodes = readHostedConfiguredUsageCreditOfferCodes();
+      authorizedOfferCodes = filterHostedNonGroupUsageCreditOfferCodes(
+        readHostedConfiguredUsageCreditOfferCodes(),
+      );
       stripeCustomerId = familyTarget.stripeCustomerId;
     }
     if (!authorizedOfferCodes.includes(input.offerCode)) {
@@ -520,6 +598,25 @@ async function createHostedUsageCreditCheckoutForTarget(input: {
         updatedAt: now,
       },
     });
+    if (target.kind === "group") {
+      const customContentAuthorized =
+        await hasHostedGroupSponsorshipCustomizationAuthority({
+          containerMemberId: target.beneficiaryMemberId,
+          now,
+          participantMemberId: target.payerMemberId,
+          prisma: tx,
+        });
+      await createHostedGroupSponsorshipMomentTx({
+        authorizedDraft: customContentAuthorized
+          ? input.groupSponsorship ?? null
+          : null,
+        beneficiaryMemberId: target.beneficiaryMemberId,
+        creatorMemberId: target.payerMemberId,
+        offerCode: offer.code,
+        purchaseId,
+        tx,
+      });
+    }
     return {
       purchase: created,
       recovered: false,
