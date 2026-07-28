@@ -1,6 +1,6 @@
 # Address-book read access consistency
 
-Status: active
+Status: completed
 Created: 2026-07-27
 Updated: 2026-07-27
 
@@ -47,3 +47,4 @@ Updated: 2026-07-27
   consented owner whose personal billing is inactive.
 - Required product-experience, preliminary specialist, parent final, and final
   ReviewGPT gates.
+Completed: 2026-07-27
