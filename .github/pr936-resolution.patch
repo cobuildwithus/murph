@@ -1,0 +1,133 @@
+--- a/apps/web/src/lib/hosted-retention/cleanup.ts
++++ b/apps/web/src/lib/hosted-retention/cleanup.ts
+@@ -55,25 +55,21 @@
+ 
+ export async function runHostedRetentionCleanup(input: {
+   now?: Date | string;
+   prisma?: PrismaClient;
+   signalRuntimeRecheck?: HostedRuntimeRecheckSignal;
+ } = {}): Promise<HostedRetentionCleanupResult> {
+   const prisma = input.prisma ?? getPrisma();
+   const now = normalizeRetentionDate(input.now ?? new Date());
+-<<<<<<< HEAD
++  const accountDeletionCleanup = await drainHostedAccountDeletionCleanupBatch({
++    now,
++    prisma,
++  });
+   const expiredMailboxItems = await retireExpiredMailboxContent({
+-=======
+-  const accountDeletionCleanup = await drainHostedAccountDeletionCleanupBatch({
+-    now,
+-    prisma,
+-  });
+-  const expiredMailboxItemsDeleted = await deleteExpiredMailboxItems({
+->>>>>>> origin/main
+     now,
+     prisma,
+   });
+   const oldRuntimeLogsDeleted = await deleteOldHostedRuntimeLogs({
+     now,
+     prisma,
+   });
+   // Serial by design: these are background deletes and must never fan out
+--- a/apps/web/test/hosted-retention-cleanup.test.ts
++++ b/apps/web/test/hosted-retention-cleanup.test.ts
+@@ -1,22 +1,18 @@
+-<<<<<<< HEAD
+-import { afterEach, describe, expect, it, vi } from "vitest";
+-=======
+-import { beforeEach, describe, expect, it, vi } from "vitest";
++import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+ 
+ const accountDeletionCleanupMocks = vi.hoisted(() => ({
+   drainHostedAccountDeletionCleanupBatch: vi.fn(),
+ }));
+ 
+ vi.mock("@/src/lib/hosted-privacy/account-deletion-cleanup", () => ({
+   drainHostedAccountDeletionCleanupBatch:
+     accountDeletionCleanupMocks.drainHostedAccountDeletionCleanupBatch,
+ }));
+->>>>>>> origin/main
+ 
+ import * as hostedRuntimeSignals from "@/src/lib/hosted-orchestration/signal-runtime";
+ import {
+   HOSTED_DEVICE_WEBHOOK_TRACE_RETENTION_MS,
+   HOSTED_INBOX_MEDIA_RETENTION_SIGNAL_BATCH_SIZE,
+   HOSTED_INBOX_MEDIA_RETENTION_SIGNAL_TIMEOUT_MS,
+   HOSTED_INGRESS_LATENCY_TRACE_RETENTION_MS,
+   HOSTED_LINQ_PROVIDER_EVENT_DIAGNOSTIC_RETENTION_MS,
+@@ -25,29 +21,28 @@
+   HOSTED_RETENTION_BATCH_SIZE,
+   HOSTED_RETENTION_MAX_BATCHES,
+   HOSTED_RUN_LOG_RETENTION_MS,
+   HOSTED_RUN_LOG_VERBOSE_RETENTION_MS,
+   HOSTED_WEB_SESSION_RETENTION_MS,
+   runHostedRetentionCleanup,
+ } from "@/src/lib/hosted-retention/cleanup";
+ 
+-<<<<<<< HEAD
+-afterEach(() => {
+-  vi.restoreAllMocks();
+-=======
+ beforeEach(() => {
+   accountDeletionCleanupMocks.drainHostedAccountDeletionCleanupBatch.mockReset();
+   accountDeletionCleanupMocks.drainHostedAccountDeletionCleanupBatch.mockResolvedValue({
+     completed: 0,
+     failed: 0,
+     pending: 0,
+     selected: 0,
+   });
+->>>>>>> origin/main
++});
++
++afterEach(() => {
++  vi.restoreAllMocks();
+ });
+ 
+ function sqlOf(call: readonly unknown[]): string {
+   return (call[0] as TemplateStringsArray).join("?");
+ }
+ 
+ function findRetentionCall(
+   executeRaw: ReturnType<typeof vi.fn>,
+--- a/packages/cli/test/release-script-coverage-audit.test.ts
++++ b/packages/cli/test/release-script-coverage-audit.test.ts
+@@ -1172,38 +1172,33 @@
+         '  let focusReleaseError = null;',
+         '  try {',
+         '    await releasePageFocusEmulation();',
+         '  } catch (error) {',
+         '    focusReleaseError = error;',
+         '  }',
+       ].join('\n'),
+     )
+-<<<<<<< HEAD
+     const unsentDraftStart = reviewGptDriver.indexOf('  if (!shouldSend) {')
+     const unsentDraftEnd = reviewGptDriver.indexOf('\n  if (shouldSend) {', unsentDraftStart)
+     const unsentDraft = reviewGptDriver.slice(unsentDraftStart, unsentDraftEnd)
+     expect(unsentDraftStart).toBeGreaterThan(-1)
+     expect(unsentDraftEnd).toBeGreaterThan(unsentDraftStart)
+     expect(unsentDraft).toContain(
+-      "console.log('Retained generated local attachment artifact(s) for the unsent draft.');",
+-=======
+-    expect(reviewGptDriver).toContain(
+       [
+         '  if (!shouldSend) {',
+         '    if (shouldAttachFiles) {',
+         '      // A staged draft has not been sent, and the composer tile appears while',
+         '      // the browser is still reading the file off disk. Removing it here',
+         '      // cancels the upload and leaves a draft with no attachment, so',
+         '      // draft-only runs retain the generated artifacts.',
+         "      console.log('Retained generated local attachment artifact(s) for the unsent draft.');",
+         '    }',
+         "    ownedTargetId = '';",
+       ].join('\n'),
+->>>>>>> origin/main
+     )
+     expect(unsentDraft).not.toContain('cleanupConfirmedDraftAttachments')
+     expect(unsentDraft).toContain("    ownedTargetId = '';")
+     expect(reviewGptDriver).toContain(
+       [
+         '      if (!shouldWaitForResponse) {',
+         "        ownedTargetId = '';",
+         '      }',
