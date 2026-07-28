@@ -1,6 +1,6 @@
 # Complete PR 1055 review and verification
 
-Status: active
+Status: completed
 Created: 2026-07-28
 Updated: 2026-07-28
 
@@ -141,10 +141,31 @@ Updated: 2026-07-28
     its four findings were resolved through exact legacy matching,
     production-boundary proof, a self-contained duration example, and exact
     weekly-to-monthly reconciliation/current-tag coverage.
+  - `pnpm build:test-runtime:prepared` passed. Its prepared-artifact list does
+    not currently build `packages/assistant-runtime`, even though the hosted
+    local harness consumes that package's built output; an explicit
+    `pnpm --dir packages/assistant-runtime build` supplied that pre-existing
+    verifier prerequisite, after which the focused harness passed 70 tests.
+  - The canonical `pnpm test:diff <29 changed paths>` completed successfully:
+    every affected package typecheck and generated-artifact check passed, the
+    hosted local harness passed 410 tests with one skip, the web app passed
+    6,959 tests with 197 skips and built 219 pages, and the Cloudflare app
+    passed 2,014 node tests plus 2 worker tests.
+  - `pnpm verify:acceptance` was attempted twice under the shared-host
+    admission guard. Each run passed the affected package suites, typechecks,
+    generation, artifact hygiene, and production builds but was blocked by a
+    different untouched timing-sensitive suite under maximum concurrent
+    coverage: one web handoff-timeout test on the first run and seven hosted
+    runtime maintenance tests on the second. Immediate isolated reruns passed
+    all 9 web tests and all 74 runtime-maintenance tests; both suites also
+    passed in the complete canonical diff run. These are credibly unrelated
+    host-load failures, not failures caused by this diff.
+  - Parent final review confirmed one shared adherence resolver, protocol
+    snapshot ownership, exact legacy-only repair, and existing managed
+    automation ownership. No dependency, service, state owner, scheduler,
+    global activity taxonomy, workflow file, private evidence, generated
+    drift, or unrelated source change remains.
 - Remaining commands:
-  - Prepared runtime build and full CLI generated-artifact confirmation.
-  - `pnpm test:diff <final changed paths>`
-  - `pnpm verify:acceptance`
   - Final ReviewGPT round(s), `gh pr checks 1055`, and non-mutating merge-tree
     proof against current `origin/main`.
 - Expected outcomes:
@@ -152,3 +173,4 @@ Updated: 2026-07-28
   - ReviewGPT reports zero accepted findings and `REVIEW_COMPLETE`.
   - The final PR head contains no temporary workflow or audit artifact and is
     mergeable.
+Completed: 2026-07-28
