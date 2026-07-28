@@ -24,7 +24,7 @@ The existing `hosted_sensitive_action_challenge` table has two SQL-enforced shap
 
 An approval row starts with a non-secret placeholder token hash because `token_hash` remains the existing primary key. Pressing **Approve** rotates that value to a fresh one-time PR #274 challenge hash and binds the proof to the current app session. The approval decision is then written with a compare-and-set; the row is not passed through the ordinary consume-and-delete path.
 
-Database checks reject mixed plaintext/encrypted presentation shapes. During deployment, the backward-compatible expand constraint temporarily accepts either complete connected-app shape so old and new functions can drain safely; the postdeploy contract migration invalidates remaining plaintext connected-app approvals and installs the encrypted-only final constraint. The Settings challenge APIs are also narrowed to Settings action kinds, and ordinary challenge consumption explicitly rejects Assistant approval rows.
+Database checks reject mixed plaintext/encrypted presentation shapes. The encrypted connected-app producer and its columns ship together, so the predeploy migration immediately requires the encrypted shape for `connected-app:` rows while retaining the established plaintext shape for legacy approval producers. No plaintext connected-app compatibility window or destructive postdeploy cleanup is needed. The Settings challenge APIs are also narrowed to Settings action kinds, and ordinary challenge consumption explicitly rejects Assistant approval rows.
 
 ## Runtime contract
 

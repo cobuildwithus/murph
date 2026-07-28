@@ -5,11 +5,9 @@ ALTER TABLE "hosted_sensitive_action_challenge"
 ALTER TABLE "hosted_sensitive_action_challenge"
   DROP CONSTRAINT "hosted_sensitive_action_challenge_approval_shape_check";
 
--- This expand constraint is backward compatible during the old-function drain:
--- old code may write the plaintext-only form and new code writes the
--- encrypted-only form. Mixed or empty presentation storage is never accepted.
--- The postdeploy contract migration invalidates drain-window plaintext
--- connected-app approvals and installs the encrypted-only final constraint.
+-- Connected-app approvals and their encrypted presentation storage ship
+-- together. The previously deployed Web producer writes only non-connected
+-- plaintext approvals, which remain valid under this final constraint.
 ALTER TABLE "hosted_sensitive_action_challenge"
   ADD CONSTRAINT "hosted_sensitive_action_challenge_approval_shape_check"
   CHECK (
@@ -22,21 +20,10 @@ ALTER TABLE "hosted_sensitive_action_challenge"
       AND (
         (
           "action_id" LIKE 'connected-app:%'
-          AND (
-            (
-              "presentation_title" IS NOT NULL
-              AND "presentation_body" IS NOT NULL
-              AND "presentation_title_encrypted" IS NULL
-              AND "presentation_body_encrypted" IS NULL
-            )
-            OR
-            (
-              "presentation_title" IS NULL
-              AND "presentation_body" IS NULL
-              AND "presentation_title_encrypted" IS NOT NULL
-              AND "presentation_body_encrypted" IS NOT NULL
-            )
-          )
+          AND "presentation_title" IS NULL
+          AND "presentation_body" IS NULL
+          AND "presentation_title_encrypted" IS NOT NULL
+          AND "presentation_body_encrypted" IS NOT NULL
         )
         OR
         (
