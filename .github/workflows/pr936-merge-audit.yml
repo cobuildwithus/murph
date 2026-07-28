@@ -1,9 +1,16 @@
 name: PR 936 Merge Resolution
 
 on:
-  push:
+  pull_request:
     branches:
-      - agent/pr936-merge-audit-20260727
+      - main
+    types:
+      - reopened
+      - synchronize
+
+concurrency:
+  group: pr936-merge-resolution
+  cancel-in-progress: false
 
 permissions:
   contents: write
@@ -11,6 +18,7 @@ permissions:
 jobs:
   resolve:
     name: Resolve, verify, and push PR 936
+    if: github.head_ref == 'agent/pr936-merge-audit-20260727'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
