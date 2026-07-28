@@ -80,7 +80,7 @@ replace_once(
         async query() {
           return { rows: [] };
         },
-      }),
+      } as never),
     ).rejects.toThrow(/deploy the expand-only Web migration/u);
 
     await expect(
@@ -93,7 +93,7 @@ replace_once(
             ],
           };
         },
-      }),
+      } as never),
     ).resolves.toBeUndefined();
   });
 
