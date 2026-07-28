@@ -167,15 +167,11 @@ function readStatusContent(input: {
   targetLabel?: string;
   targetConflict?: boolean;
 }): { message: string; title: string } {
-  if (
-    input.offerConflict &&
-    input.pollKind !== "failed" &&
-    input.status === "checkout_open"
-  ) {
-    return content(
-      "Another amount is already in progress",
-      "Cancel the unfinished checkout before choosing another amount.",
-    );
+  if (input.offerConflict) {
+    return readOfferConflictStatusContent({
+      pollKind: input.pollKind,
+      status: input.status,
+    });
   }
 
   if (input.targetConflict) {
@@ -294,6 +290,56 @@ function readStatusContent(input: {
     case null:
     case "reconciling":
       return content("Confirming payment", "We’re confirming your payment…");
+  }
+}
+
+function readOfferConflictStatusContent(input: {
+  pollKind: "dormant" | "checking" | "exhausted" | "failed";
+  status: HostedUsageTopUpPurchaseStatus | null;
+}): { message: string; title: string } {
+  if (input.pollKind === "failed") {
+    return content(
+      "Couldn't check the earlier amount",
+      "The amount you just selected was not started. We couldn't check the earlier purchase right now. Try again.",
+    );
+  }
+
+  switch (input.status) {
+    case "checkout_open":
+      return content(
+        "Earlier amount already in progress",
+        "The amount you just selected was not started. Cancel the earlier checkout before choosing another amount.",
+      );
+    case "reconciling":
+      return content(
+        "Earlier amount still starting",
+        "The amount you just selected was not started. The earlier purchase is still being prepared.",
+      );
+    case "payment_pending":
+      return content(
+        "Earlier payment being confirmed",
+        "The amount you just selected was not started. The earlier payment is still being confirmed.",
+      );
+    case "fulfilled":
+      return content(
+        "Earlier amount added",
+        "The amount you just selected was not started. The earlier purchase completed and its usage was added.",
+      );
+    case "expired":
+      return content(
+        "Earlier checkout canceled",
+        "The amount you just selected was not started. The earlier checkout was canceled.",
+      );
+    case "payment_failed":
+      return content(
+        "Earlier payment not completed",
+        "The amount you just selected was not started. The earlier payment did not complete.",
+      );
+    case null:
+      return content(
+        "Checking the earlier amount",
+        "The amount you just selected was not started. We're checking the earlier purchase.",
+      );
   }
 }
 

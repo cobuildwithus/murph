@@ -378,11 +378,12 @@ or drain `created` purchases that use it.
 
 The initial authenticated transaction authorizes and persists one purchase
 before Stripe I/O. That `created` row is the durable ambiguity fence. Replaying
-the same payer/request-key/offer and funding target continues the same purchase
-with the same purchase-derived Stripe idempotency key; using the key for a
-different offer or target conflicts. Replay must not reinterpret the purchase
-against the mutable catalog, mint a replacement attempt, or require a second
-browser authorization. While a purchase is nonterminal, a fresh request
+the same payer/request key and funding target continues the same purchase with
+the same purchase-derived Stripe idempotency key. Reusing that key for another
+target conflicts; reusing it for another offer returns the winning purchase's
+status/cancel-only projection. Replay must not reinterpret the purchase against
+the mutable catalog, mint a replacement attempt, or require a second browser
+authorization. While a purchase is nonterminal, a fresh request
 key for that same target may recover it only when the submitted offer still
 matches the frozen offer. A different amount returns the earlier purchase's
 status/cancel-only projection instead of continuing it under new button copy;
@@ -391,9 +392,12 @@ times out, or is dismissed, **Check payment** resends the key only in
 recovery-only mode. Under the payer lock, recovery-only may continue an exact
 persisted request or return the current nonterminal purchase. When neither
 exists, it returns a typed miss before offer authorization, Customer creation,
-purchase insertion, or Stripe I/O; the dialog clears the rejected key and
-returns to an unselected picker. Only a later fresh amount selection and
-explicit Add action can invoke normal purchase creation. Account deletion
+purchase insertion, or Stripe I/O. The dialog returns to an unselected picker
+but retains that unresolved key in browser state across dismissal and reopen.
+The next explicit Add action reuses the key in normal create-capable mode, so
+the payer lock and request-key uniqueness serialize it with any delayed
+original request. If the newly selected offer differs from the winner, only
+the winner's nonpayable status/cancel projection is returned. Account deletion
 suspends new payment creation. A direct intent that already won the payer-lock binding
 boundary remains `payment_pending` until the existing Stripe-event owner
 settles it; deletion does not race it with a second cancellation decision. The
@@ -545,15 +549,18 @@ funding route share this sequence:
    side: the payer for personal funding, the exact active member selected from
    the payer's active Family roster, or the active group's synthetic member for
    `/groups/fund/[joinCode]`.
-4. Continue an exact existing request-key purchase; reuse with a different
-   offer is a conflict.
+4. Continue an exact existing request-key purchase. Reuse for another target is
+   a conflict; reuse for another offer returns the winning purchase's
+   status/cancel-only projection.
 5. Under the payer lock, expire an unattached purchase whose frozen window
    ended, then recover a nonterminal purchase only when its payer and
    beneficiary match the requested target. A purchase for another target
    conflicts. Only one created, open, or payment-pending purchase may exist for
    one payer at a time. If recovery-only finds neither an exact-key purchase nor
    a current nonterminal payer purchase, return a typed miss without resolving
-   a Customer, inserting a purchase, or entering Stripe.
+   a Customer, inserting a purchase, or entering Stripe. The browser retains
+   that key for the next explicit normal authorization, which serializes with
+   any delayed original request under the same payer lock.
 6. For a genuinely new purchase, require a current server-owned offer. Personal
    funding also requires the direct-paid eligibility projection. Family
    funding requires the current active owner, active group and billing, and an

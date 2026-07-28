@@ -27,6 +27,7 @@ interface HostedUsageTopUpSelectionScreen {
   attempt: HostedUsageTopUpSelectionAttempt;
   kind: "selection";
   selectedOfferCode: string | null;
+  unresolvedRequestKey: string | null;
 }
 
 interface HostedUsageTopUpPurchaseScreen {
@@ -406,7 +407,7 @@ function applyCheckoutRecoveryMiss(
     state.screen.retryOfferCode === action.offerCode &&
     state.screen.retryRequestKey === action.requestKey;
   return selectionMatches || purchaseMatches
-    ? { ...state, screen: createSelectionScreen() }
+    ? { ...state, screen: createSelectionScreen(action.requestKey) }
     : state;
 }
 
@@ -450,11 +451,14 @@ function screenFromResponse(
   };
 }
 
-function createSelectionScreen(): HostedUsageTopUpSelectionScreen {
+function createSelectionScreen(
+  unresolvedRequestKey: string | null = null,
+): HostedUsageTopUpSelectionScreen {
   return {
     attempt: { kind: "idle" },
     kind: "selection",
     selectedOfferCode: null,
+    unresolvedRequestKey,
   };
 }
 

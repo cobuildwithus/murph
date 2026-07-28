@@ -327,7 +327,8 @@ function useHostedUsageTopUpDialog({
       state.screen.kind === "purchase"
         ? state.screen.status !== null &&
           !shouldPollPurchaseStatus(state.screen.status)
-        : state.screen.attempt.kind === "idle";
+        : state.screen.attempt.kind === "idle" &&
+          state.screen.unresolvedRequestKey === null;
     dispatch({ type: "open", reset });
   }
 
@@ -350,7 +351,7 @@ function useHostedUsageTopUpDialog({
       return;
     }
     const sourceScreen = state.screen;
-    const previousRequestKey =
+    const recoveryRequestKey =
       sourceScreen.kind === "selection"
         ? sourceScreen.attempt.kind === "locked" &&
           sourceScreen.attempt.offerCode === offerCode
@@ -360,11 +361,18 @@ function useHostedUsageTopUpDialog({
           ? sourceScreen.retryRequestKey
           : null;
     const recoveryOnly =
-      sourceScreen.kind === "purchase" || previousRequestKey !== null;
+      sourceScreen.kind === "purchase" || recoveryRequestKey !== null;
+    const unresolvedRequestKey =
+      sourceScreen.kind === "selection"
+        ? sourceScreen.unresolvedRequestKey
+        : null;
 
     let requestKey: string;
     try {
-      requestKey = previousRequestKey ?? createClientRequestKey();
+      requestKey =
+        recoveryRequestKey ??
+        unresolvedRequestKey ??
+        createClientRequestKey();
     } catch {
       const message = "Try again, or choose another amount.";
       if (sourceScreen.kind === "selection") {

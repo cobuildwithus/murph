@@ -100,9 +100,12 @@ Last verified: 2026-07-27
   recovery-only mode. Under the payer lock, that mode can continue an exact-key
   purchase or the current matching nonterminal purchase, but it cannot create a
   purchase. When neither exists, it returns a miss before Stripe I/O and clears
-  the rejected key to an unselected picker. The frozen offer and original
-  purchase remain the only payable recovery path while the outcome is
-  uncertain.
+  the visible selection to an unselected picker while retaining the unresolved
+  request key in browser state. The next explicit Add action reuses that key in
+  normal create-capable mode. The payer lock and request-key uniqueness then
+  serialize it with any delayed original request: one purchase wins, and a
+  changed offer receives only that winning purchase's status/cancel-only
+  projection. The winning purchase remains the only payable path.
   Authentication or card failure
   may fall back to Checkout only after the exact intent is verified canceled
   and its binding is cleared under the same reconciliation fence. Direct

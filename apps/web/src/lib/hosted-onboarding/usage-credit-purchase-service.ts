@@ -336,11 +336,16 @@ async function createHostedUsageCreditCheckoutForTarget(input: {
       },
     });
     if (racedExisting) {
-      assertHostedUsageCreditRequestMatches({
-        offerCode: input.offerCode,
+      if (!hostedUsageCreditTargetMatches({
         purchase: racedExisting,
         target: input.target,
-      });
+      })) {
+        throw hostedOnboardingError({
+          code: "HOSTED_USAGE_CREDIT_REQUEST_KEY_CONFLICT",
+          httpStatus: 409,
+          message: "That usage-credit request key was already used for another request.",
+        });
+      }
       if (input.target.kind === "family") {
         const frozenTarget = projectHostedUsageCreditPurchaseTarget(
           racedExisting,
@@ -363,6 +368,15 @@ async function createHostedUsageCreditCheckoutForTarget(input: {
             targetConflict: true,
           };
         }
+      }
+      if (racedExisting.offerCode !== input.offerCode) {
+        return {
+          offerConflict: true,
+          kind: "purchase" as const,
+          purchase: racedExisting,
+          recovered: true,
+          targetConflict: false,
+        };
       }
       return {
         offerConflict: false,
@@ -995,27 +1009,6 @@ function buildHostedUsageCreditCheckoutReturnUrl(input: {
   return url.toString();
 }
 
-function assertHostedUsageCreditRequestMatches(input: {
-  offerCode: HostedUsageCreditOfferCode | null;
-  purchase: Pick<
-    HostedUsageCreditPurchase,
-    | "beneficiaryMemberId"
-    | "checkoutSuccessUrl"
-    | "id"
-    | "offerCode"
-    | "payerMemberId"
-  >;
-  target: HostedUsageCreditCheckoutTarget;
-}): void {
-  if (!hostedUsageCreditRequestMatches(input)) {
-    throw hostedOnboardingError({
-      code: "HOSTED_USAGE_CREDIT_REQUEST_KEY_CONFLICT",
-      httpStatus: 409,
-      message: "That usage-credit request key was already used for another request.",
-    });
-  }
-}
-
 function hostedUsageCreditTargetMatches(input: {
   purchase: Pick<
     HostedUsageCreditPurchase,
@@ -1041,25 +1034,6 @@ function hostedUsageCreditTargetMatches(input: {
         && (input.target.groupId === null
           || frozenTarget.familyGroupId === input.target.groupId);
   }
-}
-
-function hostedUsageCreditRequestMatches(input: {
-  offerCode: HostedUsageCreditOfferCode | null;
-  purchase: Pick<
-    HostedUsageCreditPurchase,
-    | "beneficiaryMemberId"
-    | "checkoutSuccessUrl"
-    | "id"
-    | "offerCode"
-    | "payerMemberId"
-  >;
-  target: HostedUsageCreditCheckoutTarget;
-}): boolean {
-  return Boolean(
-    input.offerCode
-    && input.purchase.offerCode === input.offerCode
-    && hostedUsageCreditTargetMatches(input)
-  );
 }
 
 function buildHostedUsageCreditNotEligibleError(

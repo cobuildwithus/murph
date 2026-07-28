@@ -132,9 +132,14 @@ Last verified: 2026-07-26
   is lost or dismissed, the browser can reuse the rejected key only with the
   server's recovery-only capability. The payer lock may continue an existing
   matching purchase but cannot create one; when none exists, it returns a miss
-  before resolving a new Customer or entering Stripe. The miss discards the key
-  and requires a fresh unselected authorization, so it cannot become a later
-  retry. Choosing an amount has no payment effect, and each
+  before resolving a new Customer or entering Stripe. The miss clears the
+  visible amount but retains the unresolved key in browser state. The next
+  explicit authorization reuses that key without the recovery-only capability,
+  so payer-lock and request-key uniqueness serialize it with any delayed
+  original request instead of authorizing a second purchase. If the newly
+  selected amount differs from the delayed winner, the server returns the
+  winner's nonpayable status/cancel projection. Choosing an amount has no
+  payment effect, and each
   explicit **Add usage** or **Add messages** click authorizes only the selected
   one-time charge. Current-policy Checkout fallback saves the entered card for
   later explicit top-ups. No raw card data enters Murph.

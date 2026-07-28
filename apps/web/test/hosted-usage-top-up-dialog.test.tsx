@@ -1411,6 +1411,9 @@ test.each([
   ["family", "reconciling"],
   ["family", "checkout_open"],
   ["family", "payment_pending"],
+  ["group", "reconciling"],
+  ["group", "checkout_open"],
+  ["group", "payment_pending"],
 ] as const)(
   "shows the frozen %s %s purchase instead of retaining a stale amount retry",
   async (scope, status) => {
@@ -1419,9 +1422,12 @@ test.each([
       resolveStatus = resolve;
     });
     const purchaseId = `hucp_${scope}_${status}`;
-    const checkoutUrl = scope === "family"
-      ? "/api/settings/billing/family/members/member_b/usage-credit/checkout"
-      : "/api/settings/billing/usage-credit/checkout";
+    const checkoutUrl =
+      scope === "family"
+        ? "/api/settings/billing/family/members/member_b/usage-credit/checkout"
+        : scope === "group"
+          ? "/api/groups/fund/group_join_code_1234/usage-credit/checkout"
+          : "/api/settings/billing/usage-credit/checkout";
     mocks.requestHostedOnboardingJson.mockImplementation(
       (request: { method: string; url: string }) => {
         if (request.method === "POST" && request.url === checkoutUrl) {
@@ -1442,6 +1448,7 @@ test.each([
     const rendered = await renderClientComponent(
       createElement(HostedUsageTopUpDialog, {
         checkoutUrl,
+        contactOptions: [textMurphContactOption()],
         initialOpen: true,
         offers: usageCreditOffers(),
         scope,
@@ -1455,7 +1462,11 @@ test.each([
 
     try {
       await clickRadio(rendered.container, rendered.window, "usage_500");
-      await clickButton(rendered.container, rendered.window, "Add usage · $5");
+      await clickButton(
+        rendered.container,
+        rendered.window,
+        scope === "group" ? "Add messages · $5" : "Add usage · $5",
+      );
 
       assert.doesNotMatch(
         rendered.container.textContent ?? "",
@@ -1464,10 +1475,14 @@ test.each([
       assert.match(
         rendered.container.textContent ?? "",
         status === "checkout_open"
-          ? /Another amount is already in progress/
+          ? /Earlier amount already in progress/
           : status === "reconciling"
-            ? /Checkout not open yet/
-            : /Confirming payment/,
+            ? /Earlier amount still starting/
+            : /Earlier payment being confirmed/,
+      );
+      assert.match(
+        rendered.container.textContent ?? "",
+        /The amount you just selected was not started/,
       );
       assert.equal(hasButton(rendered.container, "Check payment · $5"), false);
       assert.equal(hasButton(rendered.container, "Retry checkout"), false);
@@ -1501,8 +1516,10 @@ test.each([
 
       assert.match(
         rendered.container.textContent ?? "",
-        /Usage added/,
+        /Earlier amount added/,
       );
+      assert.doesNotMatch(rendered.container.textContent ?? "", /Open Messages/);
+      assert.doesNotMatch(rendered.container.textContent ?? "", /Text Murph/);
       assert.equal(hasButton(rendered.container, "Check payment · $5"), false);
       assert.equal(
         mocks.requestHostedOnboardingJson.mock.calls.filter(
@@ -1512,7 +1529,11 @@ test.each([
       );
 
       await clickButton(rendered.container, rendered.window, "Close");
-      await clickButton(rendered.container, rendered.window, "Add usage");
+      await clickButton(
+        rendered.container,
+        rendered.window,
+        scope === "group" ? "Add messages" : "Add usage",
+      );
       assert.equal(
         rendered.container
           .querySelector('[role="radiogroup"]')
@@ -1529,6 +1550,32 @@ test.each([
     } finally {
       await rendered.cleanup();
     }
+  },
+);
+
+test.each([
+  ["fulfilled", "dormant", "Earlier amount added"],
+  ["expired", "dormant", "Earlier checkout canceled"],
+  ["payment_failed", "dormant", "Earlier payment not completed"],
+  ["payment_pending", "failed", "Couldn't check the earlier amount"],
+] as const)(
+  "keeps the losing amount explicit for an offer conflict in %s with %s polling",
+  async (status, pollKind, title) => {
+    const { readStatusContent } = await import(
+      "@/src/components/settings/hosted-usage-top-up-contract"
+    );
+
+    const result = readStatusContent({
+      canResumeCheckout: false,
+      canRetryCheckout: false,
+      offerConflict: true,
+      pollKind,
+      returnedFromSuccessfulCheckout: false,
+      status,
+    });
+
+    assert.equal(result.title, title);
+    assert.match(result.message, /The amount you just selected was not started/);
   },
 );
 
@@ -1921,11 +1968,10 @@ test("retries a failed checkout with the same client request key", async () => {
 });
 
 test.each(USAGE_TOP_UP_TARGET_CASES)(
-  "requires a fresh $scope authorization after recovery finds no owned purchase",
-  async ({ addLabel, checkoutUrl, scope }) => {
+  "reuses the unresolved $scope request identity after recovery finds no owned purchase",
+  async ({ addLabel, checkoutUrl, openLabel, scope }) => {
     mocks.randomUUID
-      .mockImplementationOnce(() => "00000000-0000-4000-8000-000000000201")
-      .mockImplementationOnce(() => "00000000-0000-4000-8000-000000000202");
+      .mockImplementationOnce(() => "00000000-0000-4000-8000-000000000201");
     mocks.requestHostedOnboardingJson
       .mockRejectedValueOnce(new Error("Response was lost."))
       .mockResolvedValueOnce({ recoveryMiss: true })
@@ -1966,6 +2012,8 @@ test.each(USAGE_TOP_UP_TARGET_CASES)(
         true,
       );
 
+      await clickButton(rendered.container, rendered.window, "Cancel");
+      await clickButton(rendered.container, rendered.window, openLabel);
       await clickRadio(rendered.container, rendered.window, "usage_500");
       await clickButton(rendered.container, rendered.window, addLabel);
 
@@ -1984,12 +2032,85 @@ test.each(USAGE_TOP_UP_TARGET_CASES)(
           recoveryOnly: true,
         },
         {
-          clientRequestKey: "00000000-0000-4000-8000-000000000202",
+          clientRequestKey: "00000000-0000-4000-8000-000000000201",
           offerCode: "usage_500",
         },
       ]);
+      expect(mocks.randomUUID).toHaveBeenCalledTimes(1);
       expect(rendered.assign).toHaveBeenCalledWith(
         "https://checkout.stripe.test/fresh-after-recovery",
+      );
+    } finally {
+      await rendered.cleanup();
+    }
+  },
+);
+
+test.each(USAGE_TOP_UP_TARGET_CASES)(
+  "keeps the unresolved $scope identity when the next authorization changes amount",
+  async ({ addLabel, checkoutUrl, scope }) => {
+    mocks.randomUUID
+      .mockImplementationOnce(() => "00000000-0000-4000-8000-000000000211");
+    mocks.requestHostedOnboardingJson
+      .mockRejectedValueOnce(new Error("Response was lost."))
+      .mockResolvedValueOnce({ recoveryMiss: true })
+      .mockResolvedValueOnce({
+        offerConflict: true,
+        purchaseId: "hucp_delayed_original_winner",
+        recovered: true,
+        status: "checkout_open",
+      });
+    const { HostedUsageTopUpDialog } = await import(
+      "@/src/components/settings/hosted-usage-top-up-dialog"
+    );
+    const rendered = await renderClientComponent(
+      createElement(HostedUsageTopUpDialog, {
+        checkoutUrl,
+        initialOpen: true,
+        offers: usageCreditOffers(),
+        scope,
+      }),
+      {
+        location: { href: "https://example.test/settings?addUsage=true" },
+        requireButton: false,
+      },
+    );
+
+    try {
+      await clickRadio(rendered.container, rendered.window, "usage_500");
+      await clickButton(rendered.container, rendered.window, addLabel);
+      await clickButton(rendered.container, rendered.window, "Check payment · $5");
+      await clickRadio(rendered.container, rendered.window, "usage_2500");
+      await clickButton(
+        rendered.container,
+        rendered.window,
+        scope === "group" ? "Add messages · $25" : "Add usage · $25",
+      );
+
+      const postPayloads = mocks.requestHostedOnboardingJson.mock.calls
+        .map(([request]) => request)
+        .filter((request) => request.method === "POST")
+        .map((request) => request.payload);
+      assert.deepEqual(postPayloads, [
+        {
+          clientRequestKey: "00000000-0000-4000-8000-000000000211",
+          offerCode: "usage_500",
+        },
+        {
+          clientRequestKey: "00000000-0000-4000-8000-000000000211",
+          offerCode: "usage_500",
+          recoveryOnly: true,
+        },
+        {
+          clientRequestKey: "00000000-0000-4000-8000-000000000211",
+          offerCode: "usage_2500",
+        },
+      ]);
+      expect(mocks.randomUUID).toHaveBeenCalledTimes(1);
+      expect(rendered.assign).not.toHaveBeenCalled();
+      assert.match(
+        rendered.container.textContent ?? "",
+        /Earlier amount already in progress/,
       );
     } finally {
       await rendered.cleanup();

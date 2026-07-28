@@ -156,6 +156,7 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
   const fulfilledConfirmation =
     purchase !== null &&
     purchase.status === "fulfilled" &&
+    !purchase.offerConflict &&
     !purchase.targetConflict;
   const showGroupMessagesAction =
     fulfilledConfirmation && props.scope === "group";
@@ -225,11 +226,13 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
             {purchase
               ? purchase.targetConflict
                 ? "Manage the unfinished checkout before starting one for this usage destination."
-                : props.scope === "group"
-                  ? "We’ll update this group’s credit as soon as payment is complete."
-                  : familyTarget
-                    ? `We’ll update the available credit for ${familyTarget} as soon as payment is complete.`
-                    : "We’ll update your credit as soon as payment is complete."
+                : purchase.offerConflict
+                  ? "The amount you just selected was not started. Review the earlier purchase below."
+                  : props.scope === "group"
+                    ? "We’ll update this group’s credit as soon as payment is complete."
+                    : familyTarget
+                      ? `We’ll update the available credit for ${familyTarget} as soon as payment is complete.`
+                      : "We’ll update your credit as soon as payment is complete."
               : props.offers.length === 0
                 ? "There isn’t a usage-credit offer available for this account right now."
                 : props.scope === "group"
