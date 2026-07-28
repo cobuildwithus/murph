@@ -1,0 +1,110 @@
+        type: string
+''',
+)
+
+replace_once(
+    ".github/workflows/deploy-cloudflare-hosted.yml",
+    '''       - name: Verify checked-out deploy commit
+         run: |
+           set -euo pipefail
+           checked_out_sha="$(git rev-parse HEAD)"
+           echo "Deploy commit SHA: ${checked_out_sha}"
+           echo "Expected GitHub SHA: ${GITHUB_SHA}"
+           if [[ "${checked_out_sha}" != "${GITHUB_SHA}" ]]; then
+             echo "Checked-out commit does not match the validated deploy commit." >&2
+             exit 1
+           fi
+'''.replace('       -', '      -'),
+    '''      - name: Verify checked-out deploy commit
+        run: |
+          set -euo pipefail
+          checked_out_sha="$(git rev-parse HEAD)"
+          echo "Deploy commit SHA: ${checked_out_sha}"
+          echo "Expected GitHub SHA: ${GITHUB_SHA}"
+          if [[ "${checked_out_sha}" != "${GITHUB_SHA}" ]]; then
+            echo "Checked-out commit does not match the validated deploy commit." >&2
+            exit 1
+          fi
+
+      - name: Validate inbound-message content-retention rearm
+        if: ${{ inputs.rearm_inbound_message_content_retention }}
+        shell: bash
+        env:
+          RETENTION_REARM_CONTAINER_ROLLOUT: ${{ inputs.container_rollout }}
+          RETENTION_REARM_DEPLOY_WORKER: ${{ inputs.deploy_worker && 'true' || 'false' }}
+          RETENTION_REARM_ENVIRONMENT: ${{ inputs.environment }}
+          RETENTION_REARM_MAX_SNAPSHOTS: ${{ inputs.inbound_message_content_retention_max_snapshots }}
+          RETENTION_REARM_SKIP_PREDEPLOY_E2E: ${{ inputs.skip_predeploy_e2e && 'true' || 'false' }}
+        run: |
+          set -euo pipefail
+          if [[ "${RETENTION_REARM_ENVIRONMENT}" != "production" ]]; then
+            echo "Inbound-message content-retention rearm is production-only." >&2
+            exit 1
+          fi
+          if [[ "${RETENTION_REARM_DEPLOY_WORKER}" != "true" ]]; then
+            echo "Retention rearm requires deploying and smoking the Worker in the same job." >&2
+            exit 1
+          fi
+          if [[ "${RETENTION_REARM_CONTAINER_ROLLOUT}" != "immediate" ]]; then
+            echo "Retention rearm requires container_rollout=immediate." >&2
+            exit 1
+          fi
+          if [[ "${RETENTION_REARM_SKIP_PREDEPLOY_E2E}" != "false" ]]; then
+            echo "Retention rearm cannot skip the predeploy E2E gates." >&2
+            exit 1
+          fi
+          if ! [[ "${RETENTION_REARM_MAX_SNAPSHOTS}" =~ ^[1-9][0-9]*$ ]]; then
+            echo "Retention rearm requires a positive confirmed snapshot-capacity ceiling." >&2
+            exit 1
+          fi
+''',
+)
+
+replace_once(
+    ".github/workflows/deploy-cloudflare-hosted.yml",
+    '''      - name: Smoke test deployed endpoints
+        if: ${{ inputs.deploy_worker }}
+        env:
+          HOSTED_EXECUTION_SMOKE_VERSION_ID: ${{ steps.deploy.outputs.smoke_version_id }}
+          HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: ${{ secrets.HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK }}
+        run: pnpm --dir apps/cloudflare deploy:smoke
+''',
+    '''      - name: Smoke test deployed endpoints
+        if: ${{ inputs.deploy_worker }}
+        env:
+          HOSTED_EXECUTION_SMOKE_VERSION_ID: ${{ steps.deploy.outputs.smoke_version_id }}
+          HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: ${{ secrets.HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK }}
+        run: pnpm --dir apps/cloudflare deploy:smoke
+
+      - name: Rearm inbound-message content retention snapshots
+        if: ${{ inputs.rearm_inbound_message_content_retention }}
+        env:
+          DIRECT_DATABASE_URL: ${{ secrets.HOSTED_WEB_DIRECT_DATABASE_URL }}
+          MURPH_INBOUND_MESSAGE_CONTENT_RETENTION_MAX_SNAPSHOTS: ${{ inputs.inbound_message_content_retention_max_snapshots }}
+          MURPH_REQUIRE_DIRECT_DATABASE_URL_FOR_MIGRATIONS: "1"
+          MURPH_RUN_INBOUND_MESSAGE_CONTENT_RETENTION_REARM: "1"
+        run: >-
+          pnpm --dir apps/web exec tsx
+          scripts/rearm-inbound-message-content-retention.ts
+''',
+)
+
+replace_once(
+    ".github/workflows/deploy-cloudflare-hosted.yml",
+    '''          DEPLOY_SUMMARY_FINAL_VERSION_TRAFFIC: ${{ steps.deploy.outputs.final_version_traffic || 'not-deployed' }}
+          DEPLOY_SUMMARY_SMOKE_USER_ID: ${{ inputs.smoke_user_id || 'not-set' }}
+''',
+    '''          DEPLOY_SUMMARY_FINAL_VERSION_TRAFFIC: ${{ steps.deploy.outputs.final_version_traffic || 'not-deployed' }}
+          DEPLOY_SUMMARY_RETENTION_REARM: ${{ inputs.rearm_inbound_message_content_retention && 'requested-after-smoke' || 'not-requested' }}
+          DEPLOY_SUMMARY_RETENTION_REARM_MAX_SNAPSHOTS: ${{ inputs.inbound_message_content_retention_max_snapshots }}
+          DEPLOY_SUMMARY_SMOKE_USER_ID: ${{ inputs.smoke_user_id || 'not-set' }}
+''',
+)
+replace_once(
+    ".github/workflows/deploy-cloudflare-hosted.yml",
+    '''            printf -- '- Deployed versions: `%s`\\n' "${DEPLOY_SUMMARY_FINAL_VERSION_TRAFFIC}"
+            printf -- '- Smoke user id: `%s`\\n' "${DEPLOY_SUMMARY_SMOKE_USER_ID}"
+''',
+    '''            printf -- '- Deployed versions: `%s`\\n' "${DEPLOY_SUMMARY_FINAL_VERSION_TRAFFIC}"
+            printf -- '- Message-content retention rearm: `%s`\\n' "${DEPLOY_SUMMARY_RETENTION_REARM}"
+            printf -- '- Confirmed retention snapshot ceiling: `%s`\\n' "${DEPLOY_SUMMARY_RETENTION_REARM_MAX_SNAPSHOTS}"
