@@ -456,7 +456,13 @@ export async function handleHostedOnboardingLinqWebhook(input: {
             prisma,
           });
         } catch (error) {
-          if (input.signal?.aborted) {
+          if (
+            input.signal?.aborted
+            || (
+              isHostedOnboardingError(error)
+              && error.retryable
+            )
+          ) {
             throw error;
           }
           enrollmentFailed = true;

@@ -579,7 +579,13 @@ describe("hosted Linq webhook transport", () => {
       select: { id: true },
       where: {
         id: "invite-1",
-        member: { suspendedAt: null },
+        instantStartAdmissionEventId: null,
+        member: {
+          billingStatus: {
+            not: HostedBillingStatus.active,
+          },
+          suspendedAt: null,
+        },
         memberId: "member-1",
       },
     });
@@ -621,7 +627,13 @@ describe("hosted Linq webhook transport", () => {
       select: { id: true },
       where: {
         id: "invite-1",
-        member: { suspendedAt: null },
+        instantStartAdmissionEventId: null,
+        member: {
+          billingStatus: {
+            not: HostedBillingStatus.active,
+          },
+          suspendedAt: null,
+        },
         memberId: "member-1",
       },
     });
@@ -630,6 +642,41 @@ describe("hosted Linq webhook transport", () => {
     expect(claimHostedLinqDeliveryProviderDispatchTx).not.toHaveBeenCalled();
     expect(createHostedLinqChat).not.toHaveBeenCalled();
   });
+
+  it.each([
+    "instant-start-pending",
+    "member-active",
+  ] as const)(
+    "does not dispatch a stale signup link when the invite target is %s",
+    async (inviteState) => {
+      const effect = createHostedWebhookLinqMessageSideEffect({
+        chatId: "chat-1",
+        inviteId: "invite-1",
+        memberId: "member-1",
+        occurredAt: "2026-03-26T12:00:00.000Z",
+        sourceEventId: `event-stale-signup-${inviteState}`,
+        template: "invite_signup",
+      });
+      const prisma = createInviteSignupPrismaFixture({ inviteState });
+
+      await expect(
+        drainHostedLinqSideEffectsDirect({
+          prisma: prisma as never,
+          sideEffects: [effect],
+        }),
+      ).resolves.toMatchObject({
+        sentCount: 0,
+        skipped: [{
+          effectId: effect.effectId,
+          reason: "notice_target_unauthorized",
+          template: "invite_signup",
+        }],
+      });
+
+      expect(claimHostedLinqDeliveryProviderDispatchTx).not.toHaveBeenCalled();
+      expect(sendHostedLinqChatMessage).not.toHaveBeenCalled();
+    },
+  );
 
   it("rejects routed side effects when authority targets a different chat", async () => {
     const route = buildAuthorizedLinqRouteFixture({
@@ -2177,16 +2224,46 @@ function buildAuthorizedLinqRouteFixture(input: {
 }
 
 function createInviteSignupPrismaFixture(
-  input: { inviteAuthorized?: boolean } = {},
+  input: {
+    inviteAuthorized?: boolean;
+    inviteState?: "instant-start-pending" | "member-active";
+  } = {},
 ) {
   const transactionClient = {
     $queryRaw: vi.fn().mockResolvedValue([{ id: "member-1" }]),
     hostedInvite: {
-      findUnique: vi.fn(async (query: { select?: { id?: boolean } }) =>
-        query.select?.id
-          ? input.inviteAuthorized === false ? null : { id: "invite-1" }
-          : { inviteCode: "invite-code" }
-      ),
+      findUnique: vi.fn(async (query: {
+        select?: { id?: boolean };
+        where?: {
+          instantStartAdmissionEventId?: null;
+          member?: {
+            billingStatus?: {
+              not?: HostedBillingStatus;
+            };
+          };
+        };
+      }) => {
+        if (!query.select?.id) {
+          return { inviteCode: "invite-code" };
+        }
+        if (input.inviteAuthorized === false) {
+          return null;
+        }
+        if (
+          input.inviteState === "instant-start-pending"
+          && query.where?.instantStartAdmissionEventId === null
+        ) {
+          return null;
+        }
+        if (
+          input.inviteState === "member-active"
+          && query.where?.member?.billingStatus?.not
+            === HostedBillingStatus.active
+        ) {
+          return null;
+        }
+        return { id: "invite-1" };
+      }),
       update: vi.fn().mockResolvedValue({}),
     },
   };

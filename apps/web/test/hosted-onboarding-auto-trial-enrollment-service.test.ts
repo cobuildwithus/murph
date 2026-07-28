@@ -2827,6 +2827,50 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
       .not.toHaveBeenCalled();
   });
 
+  it("keeps instant-start Stripe provisioning and activation under one member lock", async () => {
+    const prisma = makePrisma();
+    mocks.stripe.subscriptions.list.mockImplementationOnce(async () => {
+      expect(prisma.isTransactionActive()).toBe(true);
+      return { data: [] };
+    });
+    mocks.stripe.subscriptions.create.mockImplementationOnce(async () => {
+      expect(prisma.isTransactionActive()).toBe(true);
+      return makeTrialSubscription();
+    });
+
+    await expect(
+      ensureHostedLinqInstantStartPulseTrialEnrollment({
+        inviteCode: "invite-code",
+        memberId: "member_123",
+        now: new Date("2026-06-14T12:00:05.000Z"),
+        prisma: prisma as never,
+      }),
+    ).resolves.toEqual({
+      redirectPath: "/home?initialVisit=true",
+      status: "enrolled",
+    });
+
+    expect(prisma.$transaction).toHaveBeenCalledOnce();
+    expect(mocks.lockHostedMemberRow).toHaveBeenCalledOnce();
+    expect(mocks.stripe.subscriptions.list).toHaveBeenCalledWith({
+      customer: "cus_auto_trial_123",
+      limit: 100,
+      status: "all",
+    }, {
+      maxNetworkRetries: 0,
+      timeout: 5_000,
+    });
+    expect(mocks.stripe.subscriptions.create).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.objectContaining({
+        maxNetworkRetries: 0,
+        timeout: 5_000,
+      }),
+    );
+    expect(mocks.writeHostedMemberStripeBillingTx).toHaveBeenCalledOnce();
+    expect(mocks.activateHostedMemberForPositiveSourceTx).toHaveBeenCalledOnce();
+  });
+
   it("falls back before Stripe when instant start finds an existing billing customer", async () => {
     mocks.readHostedMemberBillingSnapshot.mockResolvedValueOnce(makeBillingSnapshot({
       billingRef: {

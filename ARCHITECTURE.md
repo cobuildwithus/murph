@@ -1252,9 +1252,15 @@ use a persisted model-source allow to enter instant start. The selected permanen
 home line must be the same line the person contacted, and the existing no-card
 Pulse-trial owner must start from an unbound Stripe customer so an old saved card
 cannot silently auto-convert a text-initiated trial. The first planner transaction
-creates the canonical member, verified phone identity, pending route, and invite;
-the existing Stripe/activation owner runs after commit; then a second ordinary
-planner pass counts and appends the original inbound exactly once. Any block,
+creates the canonical member, verified phone identity, pending route, and invite.
+That invite carries only the event id of the persisted model-source allow, so an
+exact same-chat, same-participant, same-line follow-up can finish the already
+admitted start without being reclassified or receiving a stale signup link.
+The existing Stripe/activation owner then provisions the customer, subscription,
+billing ref, and activation under the member row lock with bounded no-retry
+provider calls. A second ordinary planner pass counts and appends each inbound
+exactly once after active access is visible. Signup delivery revalidates that the
+invite is no longer pending instant start and the member is still inactive. Any block,
 deterministic fail-open, unsupported prefix/channel, cross-line route, existing
 member or billing customer, or enrollment ambiguity keeps the existing signup-link
 or ignored behavior. Active members, explicit thread routes, own messages, group

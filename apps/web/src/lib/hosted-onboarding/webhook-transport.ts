@@ -1,6 +1,7 @@
-import type {
-  Prisma,
-  PrismaClient,
+import {
+  HostedBillingStatus,
+  type Prisma,
+  type PrismaClient,
 } from "@prisma/client";
 
 import {
@@ -826,7 +827,13 @@ async function prepareHostedLinqSideEffectProviderDispatch(input: {
         select: { id: true },
         where: {
           id: input.effect.payload.inviteId,
-          member: { suspendedAt: null },
+          instantStartAdmissionEventId: null,
+          member: {
+            billingStatus: {
+              not: HostedBillingStatus.active,
+            },
+            suspendedAt: null,
+          },
           memberId: input.effect.payload.memberId,
         },
       });

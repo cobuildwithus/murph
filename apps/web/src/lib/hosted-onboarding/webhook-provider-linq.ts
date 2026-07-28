@@ -1087,6 +1087,17 @@ export async function planHostedOnboardingLinqWebhook(input: {
       participantContact,
       phonePrefixes: instantStartPhonePrefixes,
     });
+  const pendingInstantStartAdmissionEventId =
+    existingMember && instantStartCandidate
+      ? await readHostedLinqPendingInstantStartAdmissionEventId({
+          chatId: summary.chatId,
+          memberId: existingMember.id,
+          now: new Date(),
+          participantContact,
+          prisma: input.prisma,
+          recipientPhoneNumber,
+        })
+      : null;
 
   if (
     existingMember === null
@@ -1205,7 +1216,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
 
   const incomingLinePhone = normalizePhoneNumber(recipientPhoneNumber);
   const assignedPhone = normalizePhoneNumber(bindingResult.recipientPhone);
-  const instantStartEligible = instantStartCandidate
+  const currentEventInstantStartEligible = instantStartCandidate
     && assignedPhone !== null
     && assignedPhone === incomingLinePhone
     && isHostedLinqInstantStartEligible({
@@ -1214,6 +1225,13 @@ export async function planHostedOnboardingLinqWebhook(input: {
       participantContact,
       phonePrefixes: instantStartPhonePrefixes,
     });
+  const instantStartAdmissionEventId = currentEventInstantStartEligible
+    ? input.event.event_id
+    : pendingInstantStartAdmissionEventId;
+  const instantStartEligible = instantStartCandidate
+    && assignedPhone !== null
+    && assignedPhone === incomingLinePhone
+    && instantStartAdmissionEventId !== null;
   const member = existingMember
     ?? (participantContact.kind === "phone"
       ? await ensureHostedMemberForPhoneTx({
@@ -1322,6 +1340,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
     });
     const invite = await issueHostedInviteTx({
       channel: "linq",
+      instantStartAdmissionEventId,
       memberId: member.id,
       prisma: input.prisma,
     });
@@ -1402,6 +1421,68 @@ export async function planHostedOnboardingLinqWebhook(input: {
       routeStage: "first-contact-signup-link",
     }),
   );
+}
+
+async function readHostedLinqPendingInstantStartAdmissionEventId(input: {
+  chatId: string;
+  memberId: string;
+  now: Date;
+  participantContact: HostedLinqParticipantContact;
+  prisma: Prisma.TransactionClient;
+  recipientPhoneNumber: string | null;
+}): Promise<string | null> {
+  const routing = await readHostedMemberRoutingState({
+    memberId: input.memberId,
+    prisma: input.prisma,
+  });
+  const pendingParticipant = routing?.pendingLinqParticipantContact;
+  if (
+    routing?.pendingLinqChatId !== input.chatId
+    || normalizePhoneNumber(routing.pendingLinqRecipientPhone)
+      !== normalizePhoneNumber(input.recipientPhoneNumber)
+    || pendingParticipant?.kind !== input.participantContact.kind
+    || pendingParticipant.lookupKey !== input.participantContact.lookupKey
+  ) {
+    return null;
+  }
+
+  const invite = await input.prisma.hostedInvite.findFirst({
+    orderBy: {
+      createdAt: "desc",
+    },
+    select: {
+      instantStartAdmissionEventId: true,
+    },
+    where: {
+      expiresAt: {
+        gt: input.now,
+      },
+      instantStartAdmissionEventId: {
+        not: null,
+      },
+      memberId: input.memberId,
+      sentAt: null,
+    },
+  });
+  const admissionEventId = invite?.instantStartAdmissionEventId ?? null;
+  if (!admissionEventId) {
+    return null;
+  }
+
+  const admissionDecision =
+    await input.prisma.hostedLinqFirstContactAdmissionDecision.findUnique({
+      select: {
+        decision: true,
+        source: true,
+      },
+      where: {
+        eventId: admissionEventId,
+      },
+    });
+  return admissionDecision?.decision === "allow"
+    && admissionDecision.source === "model"
+      ? admissionEventId
+      : null;
 }
 
 const HOSTED_LINQ_FAMILY_INVITE_ACCEPTANCE_MISS_CODES = new Set([
