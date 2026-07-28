@@ -243,9 +243,14 @@ not enter evidence; and attachment-only input fails closed before provider work.
   projection; a different attempt cannot adopt that nonterminal trace.
   `apps/web/vercel.json` registers that read-only monitor at a five-minute
   cadence. The hosted-local foreground-priority leg additionally uses real
-  PostgreSQL, authenticated cron HTTP, and the Linq stub boundary to prove one
-  accepted operator alert through a paced lost-ack retry, active-incident
-  coalescing, silent healthy reset, and a paced new alert for recurrence.
+  PostgreSQL, authenticated cron HTTP, and an isolated Resend stub to prove one
+  accepted operator email through a paced lost-ack retry, active-incident
+  coalescing, silent healthy reset, a paced new alert for recurrence, and no
+  Linq/iMessage fallback. The stub also proves same-key/same-body
+  deduplication, changed-payload conflict, and missing-authorization rejection.
+  Its `MURPH_HOSTED_LOCAL_RESEND_API_BASE_URL` override is accepted only as a
+  plain-HTTP loopback origin while hosted-local E2E isolation is explicitly
+  active; production deployments must leave both test-only settings unset.
 - After hosted scenarios initialize the schema, the Linq route-authority matrix leg runs the focused real-PostgreSQL proofs for deterministic hosted usage replay, both participant-addition route-row orderings, the canonical chat-ownership-before-route-row order shared by usage-limit dispatch and route-key convergence, and device-sync exact-payload plus companion-receipt lock order against concurrent account deletion.
 - That matrix starts from the hosted-local harness's intentional `prisma db
   push` schema. The usage-credit PostgreSQL suite therefore applies the exact

@@ -73,24 +73,29 @@ Last verified: 2026-07-27
 - Foreground inbox/parser-backed daemon runs should favor restartable connectors with bounded backoff over permanently dead watch loops, while still keeping low-level restart behavior opt-in and always bounded by the owning abort signal.
 - Networked assistant/provider/channel calls should set explicit timeouts, propagate caller abort signals, and only auto-retry request shapes that are replay-safe or rate-limit directed.
 - The hosted reply-latency operator alert remains one singleton incident owner.
-  Outbound paging requires both an opaque dedicated chat and a valid IANA
-  operator timezone, suppresses sends from 11 PM through 7 AM local time, and
+  Outbound paging requires the shared Resend operational-email sender and
+  recipients plus a valid IANA operator timezone; it never falls back to
+  Linq/iMessage. It suppresses sends from 11 PM through 7 AM local time and
   applies stable bounded jitter after quiet hours and after every provider
   attempt. No retry or post-healthy recurrence may call the provider less than
   ten minutes after the prior attempt or accepted-send boundary. A retry that
-  may already have succeeded preserves the exact body and idempotency key;
-  distinct incidents vary through current aggregate evidence and checked-at
-  time, never random padding or synonym churn. Fresh health and operator-time
-  rechecks precede the one exact row-version compare-and-swap that admits
-  provider entry, increments attempt count, and advances the provider-attempt
-  timestamp. The same version fence makes a stale recovery coalesce rather than
-  report healthy after a concurrent incident cycles back to the same status.
-  Recovery or quiet hours before admission leave attempt state untouched: a
-  known-unsent first alert later builds current evidence, while an ambiguous
-  prior attempt retains its exact body, key, and pacing boundary. After provider
-  entry, healthy scans coalesce against the bounded four-minute send lease until
-  the attempt settles or expires; only then may the persisted incident become
-  healthy.
+  may already have succeeded preserves the exact body and incident-scoped
+  idempotency key. The key does not vary with mutable email configuration:
+  within Resend's idempotency retention window, identical retries deduplicate
+  and a changed payload under the same key fails closed instead of acquiring a
+  second send identity. The monitor does not claim provider-side exactly-once
+  behavior beyond that external retention window. Distinct incidents vary
+  through current aggregate evidence and checked-at time, never random padding
+  or synonym churn. Fresh health and operator-time rechecks precede the one
+  exact row-version compare-and-swap that admits provider entry, increments
+  attempt count, and advances the provider-attempt timestamp. The same version
+  fence makes a stale recovery coalesce rather than report healthy after a
+  concurrent incident cycles back to the same status. Recovery or quiet hours
+  before admission leave attempt state untouched: a known-unsent first alert
+  later builds current evidence, while an ambiguous prior attempt retains its
+  exact body, key, and pacing boundary. After provider entry, healthy scans
+  coalesce against the bounded four-minute send lease until the attempt settles
+  or expires; only then may the persisted incident become healthy.
 - Hosted managed-automation reconciliation persists retry generation in the existing workspace checkpoint owner. Only eligible, explicitly retryable failures receive the bounded 30-second, 2-minute, and 10-minute backoff sequence; unclassified or permanent failures are logged without manufacturing another wake, and a later successful pass clears the retry generation.
 - Managed automation ownership is exact-seed and route-authority based. Built-in seeds without an explicit scope default to `member`; member seeds run only on personal/direct routes, while `authenticated-group` seeds run only on live non-direct Linq/iMessage or Telegram routes. Group email is excluded. Reconciliation archives every nonterminal wrong-owner built-in record, including paused records, while already archived records and caller-supplied unscoped custom seeds retain their prior behavior. Claimed static built-ins resolve the current immutable seed by automation id before lifecycle hooks and revalidate the same owner and live route before evidence, provider admission, tools, delivery, and commit; editable tags, slugs, titles, and instructions cannot acquire authority. Permanently retired built-in IDs are not seeds: reconciliation archives matching persisted records and claimed occurrences fail closed before lifecycle or model work. Dynamically generated experiment-lifecycle seeds remain on their existing path until their separately coordinated owner exposes an exact resolver. Immutable personal-memory and group-room-model IDs still exclusively select silent maintenance policy and its provider-admission replay barrier.
 - Closed integration-ingest months compact only in the abortable hosted idle-shutdown lane. Core publishes a verified deterministic gzip before deleting raw bytes, normal readers and amendments stream bounded gzip output, and startup repairs only an independently valid, newline-terminated, byte-identical raw/gzip pair. A wake preserves foreground priority; a 30-second pass budget or ordinary compaction failure leaves any unfinished source intact and does not block checkpointing. Remaining raw months are the next pass's durable worklist, while a non-identical representation pair fails closed without a repair queue or marker.

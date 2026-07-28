@@ -56,6 +56,6 @@ export const POST = withJsonError(async (request: Request) => {
     memberId: auth.member.id,
     prisma,
     scope: consent.scope,
-    source: "ios-companion",
+    source: "native-companion",
   }));
 });
