@@ -135,19 +135,22 @@ export async function projectHostedPersonalAiUsageStatus(input: {
     };
   }
 
-  const includedUsageExhausted =
-    decision.spentUsdMicros >= decision.limitUsdMicros;
   const exhausted = usageLimitExceeded;
+  // The bar follows the same effective-capacity boundary as admission: usage
+  // already spent plus every unit of included allowance or generic usage credit
+  // still available.
+  const totalCapacityUsdMicros =
+    decision.spentUsdMicros + decision.remainingUsdMicros;
   const usedPercent = calculateUsedPercent({
-    exhausted: includedUsageExhausted,
-    limit: decision.limitUsdMicros,
+    capacity: totalCapacityUsdMicros,
+    exhausted,
     spent: decision.spentUsdMicros,
   });
   const forecast = exhausted || decision.spentUsdMicros <= 0n
     ? null
     : await buildUsageForecast({
+        capacity: totalCapacityUsdMicros,
         memberId: input.memberId,
-        limit: decision.limitUsdMicros,
         now,
         periodEnd: decision.periodEnd,
         periodStart: decision.periodStart,
@@ -235,8 +238,8 @@ export async function projectHostedPersonalAiUsageStatus(input: {
 }
 
 function calculateUsedPercent(input: {
+  capacity: bigint;
   exhausted: boolean;
-  limit: bigint;
   spent: bigint;
 }): number {
   if (input.exhausted) {
@@ -246,12 +249,12 @@ function calculateUsedPercent(input: {
     return 0;
   }
 
-  const floored = Number((input.spent * 100n) / input.limit);
+  const floored = Number((input.spent * 100n) / input.capacity);
   return Math.min(99, Math.max(1, floored));
 }
 
 async function buildUsageForecast(input: {
-  limit: bigint;
+  capacity: bigint;
   memberId: string;
   now: Date;
   periodEnd: Date;
@@ -285,7 +288,8 @@ async function buildUsageForecast(input: {
     return null;
   }
 
-  const projectedDurationMs = (BigInt(elapsedMs) * input.limit) / input.spent;
+  const projectedDurationMs =
+    (BigInt(elapsedMs) * input.capacity) / input.spent;
   if (projectedDurationMs > BigInt(Number.MAX_SAFE_INTEGER)) {
     return null;
   }
