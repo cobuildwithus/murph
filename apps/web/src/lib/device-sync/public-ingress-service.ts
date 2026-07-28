@@ -133,7 +133,7 @@ export class HostedDeviceSyncPublicIngressService {
 
   async handleOAuthCallback(
     provider: string,
-    options: { expectedOwnerId?: string | null } = {},
+    options: { expectedOwnerId: string },
   ): Promise<CompleteConnectionResult> {
     return this.handleConnectionCallback(provider, options);
   }
@@ -244,7 +244,7 @@ export class HostedDeviceSyncPublicIngressService {
 
   async handleConnectionCallback(
     provider: string,
-    options: { expectedOwnerId?: string | null } = {},
+    options: { expectedOwnerId: string },
   ): Promise<CompleteConnectionResult> {
     const url = new URL(this.context.request.url);
     const handleConnectionCallback =
@@ -256,7 +256,7 @@ export class HostedDeviceSyncPublicIngressService {
       provider,
       query: url.searchParams,
       code: url.searchParams.get("code"),
-      expectedOwnerId: options.expectedOwnerId ?? null,
+      expectedOwnerId: options.expectedOwnerId,
       state: url.searchParams.get("murph_state") ?? url.searchParams.get("state"),
       scope: url.searchParams.get("scope"),
       error: url.searchParams.get("error"),

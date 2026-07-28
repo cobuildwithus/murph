@@ -2025,20 +2025,26 @@ test("public ingress validates OAuth callback state ownership and required param
 
 test("public ingress resolves a redelivered callback as a replay carrying return context", async () => {
   const store = new InMemoryPublicIngressStore();
+  const provider = createFakeProvider();
+  const connectionHandler = provider.connectionHandler;
+  assert.ok(connectionHandler);
+  const completeConnection = vi.spyOn(connectionHandler, "completeConnection");
   const ingress = createDeviceSyncPublicIngress({
     publicBaseUrl: "https://sync.example.test/device-sync",
-    registry: createDeviceSyncRegistry([createFakeProvider()]),
+    registry: createDeviceSyncRegistry([provider]),
     store,
   });
 
   const begin = await ingress.startConnection({
+    ownerId: "member_a",
     provider: "demo",
     returnTo: "https://sync.example.test/settings/devices",
     connectSourceId: "demo",
     connectTarget: "demo",
   });
 
-  const connected = await ingress.handleOAuthCallback({
+  const connected = await ingress.handleConnectionCallback({
+    expectedOwnerId: "member_a",
     provider: "demo",
     state: begin.state,
     code: "abc",
@@ -2047,7 +2053,8 @@ test("public ingress resolves a redelivered callback as a replay carrying return
 
   await assert.rejects(
     () =>
-      ingress.handleOAuthCallback({
+      ingress.handleConnectionCallback({
+        expectedOwnerId: "member_a",
         provider: "demo",
         state: begin.state,
         code: "abc",
@@ -2065,6 +2072,7 @@ test("public ingress resolves a redelivered callback as a replay carrying return
   );
 
   // Redelivery must not redo the connection work.
+  assert.equal(completeConnection.mock.calls.length, 1);
   assert.equal(store.upsertConnectionCalls, 1);
 });
 
@@ -3704,10 +3712,14 @@ test("public ingress does not burn valid oauth state on provider mismatch", asyn
 
 test("public ingress does not burn valid oauth state on owner mismatch", async () => {
   const store = new InMemoryPublicIngressStore();
+  const provider = createFakeProvider();
+  const connectionHandler = provider.connectionHandler;
+  assert.ok(connectionHandler);
+  const completeConnection = vi.spyOn(connectionHandler, "completeConnection");
   const ingress = createDeviceSyncPublicIngress({
     publicBaseUrl: "https://sync.example.test/device-sync",
     allowedReturnOrigins: ["https://app.example.test"],
-    registry: createDeviceSyncRegistry([createFakeProvider()]),
+    registry: createDeviceSyncRegistry([provider]),
     store,
   });
 
@@ -3731,6 +3743,7 @@ test("public ingress does not burn valid oauth state on owner mismatch", async (
       error.httpStatus === 403,
   );
   assert.equal(store.hasOAuthState(begin.state), true);
+  assert.equal(completeConnection.mock.calls.length, 0);
 
   const connected = await ingress.handleConnectionCallback({
     expectedOwnerId: "member_a",
@@ -3741,6 +3754,7 @@ test("public ingress does not burn valid oauth state on owner mismatch", async (
 
   assert.equal(connected.account.provider, "demo");
   assert.equal(store.hasOAuthState(begin.state), false);
+  assert.equal(completeConnection.mock.calls.length, 1);
 });
 
 test("public ingress discards tampered persisted returnTo values before reuse", async () => {

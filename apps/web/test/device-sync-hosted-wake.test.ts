@@ -609,6 +609,36 @@ describe("hosted device-sync wakes", () => {
     expect(controlPlane.allowedReturnOrigins).toEqual(["http://localhost:3000"]);
   });
 
+  it("forwards the required hosted callback owner to shared public ingress", async () => {
+    const handleConnectionCallback = vi.fn().mockResolvedValue({
+      account: buildHostedConnection(),
+      returnTo: null,
+    });
+    mocks.createDeviceSyncPublicIngress.mockReturnValueOnce({
+      describeProviders: vi.fn(() => []),
+      handleConnectionCallback,
+    });
+    const ingress = createHostedDeviceSyncPublicIngressService(
+      new Request(
+        "https://control.example.test/api/device-sync/oauth/oura/callback?code=abc&state=xyz&scope=read%3Asleep",
+      ),
+    );
+
+    await ingress.handleConnectionCallback("oura", {
+      expectedOwnerId: "member_a",
+    });
+
+    expect(handleConnectionCallback).toHaveBeenCalledWith(expect.objectContaining({
+      code: "abc",
+      error: null,
+      errorDescription: null,
+      expectedOwnerId: "member_a",
+      provider: "oura",
+      scope: "read:sleep",
+      state: "xyz",
+    }));
+  });
+
   it("uses explicit companion connect intent as the only lifecycle-changing SDK path", async () => {
     const ingress = createHostedDeviceSyncPublicIngressService(
       new Request("https://control.example.test/api/device-sync/companion/sign-in-token"),
@@ -2204,7 +2234,7 @@ describe("hosted device-sync wakes", () => {
       new Request("https://control.example.test/api/device-sync/oauth/oura/callback?code=abc&state=xyz"),
     );
 
-    await controlPlane.handleOAuthCallback("oura");
+    await controlPlane.handleOAuthCallback("oura", { expectedOwnerId: "user-123" });
 
     expect(mocks.withConnectionMutationLock).toHaveBeenCalledWith("dsc_123", expect.any(Function));
     expect(mocks.getConnectionForUser).toHaveBeenCalledWith(
@@ -2334,7 +2364,7 @@ describe("hosted device-sync wakes", () => {
       new Request("https://control.example.test/api/device-sync/oauth/oura/callback?code=abc&state=xyz"),
     );
 
-    await controlPlane.handleOAuthCallback("oura");
+    await controlPlane.handleOAuthCallback("oura", { expectedOwnerId: "user-123" });
 
     expect(mocks.withConnectionMutationLock).toHaveBeenCalledWith("dsc_123", expect.any(Function));
     expect(mocks.getConnectionForUser).toHaveBeenCalledWith(
@@ -2402,7 +2432,7 @@ describe("hosted device-sync wakes", () => {
       new Request("https://control.example.test/api/device-sync/connect/junction/callback?state=xyz"),
     );
 
-    await controlPlane.handleConnectionCallback("junction");
+    await controlPlane.handleConnectionCallback("junction", { expectedOwnerId: "user-123" });
 
     expect(mocks.upsertConnectionSource).toHaveBeenCalledWith({
       connectionId: "dsc_junction",
@@ -2507,9 +2537,9 @@ describe("hosted device-sync wakes", () => {
       new Request("https://control.example.test/api/device-sync/oauth/junction/callback?code=abc&state=xyz"),
     );
 
-    await controlPlane.handleOAuthCallback("junction");
-    await controlPlane.handleOAuthCallback("junction");
-    await controlPlane.handleOAuthCallback("junction");
+    await controlPlane.handleOAuthCallback("junction", { expectedOwnerId: "user-123" });
+    await controlPlane.handleOAuthCallback("junction", { expectedOwnerId: "user-123" });
+    await controlPlane.handleOAuthCallback("junction", { expectedOwnerId: "user-123" });
 
     expect(upsertedSourceKeys).toHaveLength(3);
     expect(upsertedSourceKeys[0]?.sourceProviderSlug).toBe("garmin");
@@ -2530,7 +2560,9 @@ describe("hosted device-sync wakes", () => {
       new Request("https://control.example.test/api/device-sync/oauth/oura/callback?code=abc&state=xyz"),
     );
 
-    await expect(controlPlane.handleOAuthCallback("oura")).resolves.toEqual({
+    await expect(
+      controlPlane.handleOAuthCallback("oura", { expectedOwnerId: "user-123" }),
+    ).resolves.toEqual({
       connection: {
         id: "dsc_123",
       },

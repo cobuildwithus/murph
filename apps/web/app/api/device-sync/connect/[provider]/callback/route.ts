@@ -14,6 +14,8 @@ import {
   resolveDecodedRouteParam,
 } from "@/src/lib/device-sync/http";
 import { createHostedDeviceSyncPublicIngressService } from "@/src/lib/device-sync/public-ingress-service";
+import { requireActiveHostedAppSessionFromRequest } from "@/src/lib/hosted-onboarding/app-session";
+import { isHostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 
 const HOSTED_DEVICE_SYNC_CALLBACK_FAILURE_MESSAGE =
   "Something went wrong while finishing the device connection. Please retry from Murph.";
@@ -26,8 +28,11 @@ export async function GET(
 
   try {
     providerName = await resolveDecodedRouteParam(context.params, "provider");
+    const session = await requireActiveHostedAppSessionFromRequest(request);
     const publicIngress = createHostedDeviceSyncPublicIngressService(request);
-    const result = await publicIngress.handleConnectionCallback(providerName);
+    const result = await publicIngress.handleConnectionCallback(providerName, {
+      expectedOwnerId: session.member.id,
+    });
     const redirect = providerCallbackRedirect({
       returnTo: result.returnTo,
       provider: result.account.provider,
@@ -81,6 +86,14 @@ export async function GET(
       });
 
       return redirect ?? callbackHtml(
+        "Device connection failed",
+        HOSTED_DEVICE_SYNC_CALLBACK_FAILURE_MESSAGE,
+        error.httpStatus,
+      );
+    }
+
+    if (isHostedOnboardingError(error)) {
+      return callbackHtml(
         "Device connection failed",
         HOSTED_DEVICE_SYNC_CALLBACK_FAILURE_MESSAGE,
         error.httpStatus,

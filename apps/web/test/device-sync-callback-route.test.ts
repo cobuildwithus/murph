@@ -1,15 +1,22 @@
 import { deviceSyncError } from "@murphai/device-syncd/public-ingress";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
+
 import { createRouteContext } from "./route-test-helpers";
 
 const mocks = vi.hoisted(() => ({
   createHostedDeviceSyncPublicIngressService: vi.fn(),
   handleConnectionCallback: vi.fn(),
+  requireActiveHostedAppSessionFromRequest: vi.fn(),
 }));
 
 vi.mock("@/src/lib/device-sync/public-ingress-service", () => ({
   createHostedDeviceSyncPublicIngressService: mocks.createHostedDeviceSyncPublicIngressService,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/app-session", () => ({
+  requireActiveHostedAppSessionFromRequest: mocks.requireActiveHostedAppSessionFromRequest,
 }));
 
 type CallbackRouteModule = typeof import("../app/api/device-sync/oauth/[provider]/callback/route");
@@ -36,6 +43,33 @@ describe("hosted device-sync callback route", () => {
       },
       returnTo: null,
     });
+    mocks.requireActiveHostedAppSessionFromRequest.mockResolvedValue({
+      member: {
+        id: "member_a",
+      },
+    });
+  });
+
+  it("rejects an anonymous callback before creating hosted public ingress", async () => {
+    mocks.requireActiveHostedAppSessionFromRequest.mockRejectedValueOnce(hostedOnboardingError({
+      code: "AUTH_REQUIRED",
+      httpStatus: 401,
+      message: "Sign in to continue.",
+    }));
+    const request = new Request(
+      "https://control.example.test/api/device-sync/oauth/oura/callback?code=abc&state=xyz",
+    );
+
+    const response = await callbackRoute.GET(
+      request,
+      createRouteContext({ provider: "oura" }),
+    );
+
+    expect(response.status).toBe(401);
+    expect(response.headers.get("location")).toBeNull();
+    expect(mocks.requireActiveHostedAppSessionFromRequest).toHaveBeenCalledWith(request);
+    expect(mocks.createHostedDeviceSyncPublicIngressService).not.toHaveBeenCalled();
+    expect(mocks.handleConnectionCallback).not.toHaveBeenCalled();
   });
 
   it("uses provider-only callback params in redirects", async () => {
@@ -46,14 +80,20 @@ describe("hosted device-sync callback route", () => {
       },
       returnTo: "https://app.example.test/settings",
     });
+    const request = new Request(
+      "https://control.example.test/api/device-sync/oauth/oura/callback?code=abc&state=xyz",
+    );
 
     const response = await callbackRoute.GET(
-      new Request("https://control.example.test/api/device-sync/oauth/oura/callback?code=abc&state=xyz"),
+      request,
       createRouteContext({ provider: "oura" }),
     );
 
     expect(response.status).toBe(302);
-    expect(mocks.handleConnectionCallback.mock.calls).toEqual([["oura"]]);
+    expect(mocks.requireActiveHostedAppSessionFromRequest).toHaveBeenCalledWith(request);
+    expect(mocks.handleConnectionCallback.mock.calls).toEqual([["oura", {
+      expectedOwnerId: "member_a",
+    }]]);
     const location = response.headers.get("location");
     expect(location).toContain("deviceSyncStatus=connected");
     expect(location).toContain("deviceSyncProvider=oura");
@@ -76,7 +116,9 @@ describe("hosted device-sync callback route", () => {
     );
 
     expect(response.status).toBe(302);
-    expect(mocks.handleConnectionCallback.mock.calls).toEqual([["junction"]]);
+    expect(mocks.handleConnectionCallback.mock.calls).toEqual([["junction", {
+      expectedOwnerId: "member_a",
+    }]]);
     const location = response.headers.get("location");
     expect(location).toContain("deviceSyncStatus=connected");
     expect(location).toContain("deviceSyncProvider=junction");
