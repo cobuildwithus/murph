@@ -68,6 +68,13 @@ const referralCreditEntryConstraintMigrationSql = readFileSync(
   ),
   "utf8",
 );
+const purchaseGrantResynchronizationContractMigrationSql = readFileSync(
+  new URL(
+    "../prisma/contract-migrations/20260728031000_resynchronize_hosted_usage_credit_purchase_grants/migration.sql",
+    import.meta.url,
+  ),
+  "utf8",
+);
 
 if (
   runPostgresConcurrencyProof &&
@@ -347,6 +354,221 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         }
       } finally {
         await client.end();
+      }
+    });
+
+    it("resynchronizes purchase grant projections without touching referral grants and is replay-safe", async () => {
+      const fixtureId = randomUUID();
+      const memberId = `member_usage_credit_resync_${fixtureId}`;
+      const missingPurchaseId = `hucp_resync_missing_${fixtureId}`;
+      const stalePurchaseId = `hucp_resync_stale_${fixtureId}`;
+      const missingEntryId = `huce_resync_missing_${fixtureId}`;
+      const staleEntryId = `huce_resync_stale_${fixtureId}`;
+      const referralId = `hur_resync_${fixtureId}`;
+      const referralEntryId = `huce_resync_referral_${fixtureId}`;
+      const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const now = new Date();
+      const targetBoundAt = new Date(now.getTime() - 3 * 60_000);
+      const qualifiedAt = new Date(now.getTime() - 2 * 60_000);
+      const rewardedAt = new Date(now.getTime() - 60_000);
+      let referralGrantBefore: {
+        createdAt: Date;
+        remainingUsdMicros: bigint;
+        updatedAt: Date;
+      } | null = null;
+
+      try {
+        await observer.hostedMember.create({
+          data: { billingStatus: "active", id: memberId },
+        });
+        await observer.hostedUsageCreditPurchase.createMany({
+          data: [
+            {
+              beneficiaryMemberId: memberId,
+              cashAmountMinor: 500,
+              cashCurrency: "usd",
+              checkoutCancelUrl: "https://example.test/settings?usage=cancelled",
+              checkoutExpiresAt: new Date(now.getTime() + 60 * 60_000),
+              checkoutRequestPolicyVersion: "hosted-usage-credit-checkout-v1",
+              checkoutSuccessUrl: "https://example.test/settings?usage=return",
+              clientRequestKey: `resync-missing:${fixtureId}`,
+              grantUsdMicros: 5_000_000n,
+              id: missingPurchaseId,
+              offerCode: "usage_5_usd",
+              payerMemberId: memberId,
+              remainingCreditUsdMicros: 4_000_000n,
+              status: HostedUsageCreditPurchaseStatus.fulfilled,
+              stripeCustomerIdEncrypted:
+                `encrypted-customer-missing:${fixtureId}`,
+              stripeCustomerLookupKey: `customer-missing:${fixtureId}`,
+              stripeLiveMode: false,
+              stripePriceIdEncrypted: `encrypted-price-missing:${fixtureId}`,
+              stripePriceLookupKey: `price-missing:${fixtureId}`,
+            },
+            {
+              beneficiaryMemberId: memberId,
+              cashAmountMinor: 500,
+              cashCurrency: "usd",
+              checkoutCancelUrl: "https://example.test/settings?usage=cancelled",
+              checkoutExpiresAt: new Date(now.getTime() + 60 * 60_000),
+              checkoutRequestPolicyVersion: "hosted-usage-credit-checkout-v1",
+              checkoutSuccessUrl: "https://example.test/settings?usage=return",
+              clientRequestKey: `resync-stale:${fixtureId}`,
+              grantUsdMicros: 5_000_000n,
+              id: stalePurchaseId,
+              offerCode: "usage_5_usd",
+              payerMemberId: memberId,
+              remainingCreditUsdMicros: 3_000_000n,
+              status: HostedUsageCreditPurchaseStatus.fulfilled,
+              stripeCustomerIdEncrypted:
+                `encrypted-customer-stale:${fixtureId}`,
+              stripeCustomerLookupKey: `customer-stale:${fixtureId}`,
+              stripeLiveMode: false,
+              stripePriceIdEncrypted: `encrypted-price-stale:${fixtureId}`,
+              stripePriceLookupKey: `price-stale:${fixtureId}`,
+            },
+          ],
+        });
+        await observer.hostedUsageReferral.create({
+          data: {
+            armedAt: new Date(now.getTime() - 4 * 60_000),
+            beneficiaryMemberId: memberId,
+            expiresAt: new Date(now.getTime() + 24 * 60 * 60_000),
+            id: referralId,
+            policyCode: "new_person_activation_v1",
+            policyVersion: HOSTED_USAGE_REFERRAL_POLICY_VERSION,
+            qualifiedAt,
+            referrerMemberId: memberId,
+            referrerSubjectKey: "authenticated-member",
+            rewardedAt,
+            rewardUsdMicros:
+              HOSTED_USAGE_REFERRAL_PERSON_REWARD_USD_MICROS,
+            status: "rewarded",
+            targetBoundAt,
+          },
+        });
+        await observer.hostedUsageCreditEntry.createMany({
+          data: [
+            {
+              amountUsdMicros: 5_000_000n,
+              beneficiaryMemberId: memberId,
+              beneficiarySequence: 1n,
+              effectiveAt: now,
+              id: missingEntryId,
+              kind: "purchase_grant",
+              purchaseId: missingPurchaseId,
+              semanticSourceKey: `purchase:${missingPurchaseId}`,
+            },
+            {
+              amountUsdMicros: 5_000_000n,
+              beneficiaryMemberId: memberId,
+              beneficiarySequence: 2n,
+              effectiveAt: now,
+              id: staleEntryId,
+              kind: "purchase_grant",
+              purchaseId: stalePurchaseId,
+              semanticSourceKey: `purchase:${stalePurchaseId}`,
+            },
+            {
+              amountUsdMicros:
+                HOSTED_USAGE_REFERRAL_PERSON_REWARD_USD_MICROS,
+              beneficiaryMemberId: memberId,
+              beneficiarySequence: 3n,
+              effectiveAt: now,
+              id: referralEntryId,
+              kind: "referral_grant",
+              referralId,
+              semanticSourceKey: `referral:${referralId}`,
+            },
+          ],
+        });
+        await observer.hostedUsageCreditGrant.createMany({
+          data: [
+            {
+              entryId: staleEntryId,
+              remainingUsdMicros: 1_000_000n,
+            },
+            {
+              entryId: referralEntryId,
+              remainingUsdMicros:
+                HOSTED_USAGE_REFERRAL_PERSON_REWARD_USD_MICROS,
+            },
+          ],
+        });
+        referralGrantBefore =
+          await observer.hostedUsageCreditGrant.findUniqueOrThrow({
+            select: {
+              createdAt: true,
+              remainingUsdMicros: true,
+              updatedAt: true,
+            },
+            where: { entryId: referralEntryId },
+          });
+
+        const client = new pg.Client({ connectionString: databaseUrl });
+        await client.connect();
+        try {
+          await client.query(purchaseGrantResynchronizationContractMigrationSql);
+          await client.query(purchaseGrantResynchronizationContractMigrationSql);
+        } finally {
+          await client.end();
+        }
+
+        await expect(observer.hostedUsageCreditGrant.findMany({
+          orderBy: { entryId: "asc" },
+          select: {
+            entryId: true,
+            remainingUsdMicros: true,
+          },
+          where: {
+            entryId: {
+              in: [missingEntryId, staleEntryId, referralEntryId],
+            },
+          },
+        })).resolves.toEqual([
+          {
+            entryId: missingEntryId,
+            remainingUsdMicros: 4_000_000n,
+          },
+          {
+            entryId: referralEntryId,
+            remainingUsdMicros:
+              HOSTED_USAGE_REFERRAL_PERSON_REWARD_USD_MICROS,
+          },
+          {
+            entryId: staleEntryId,
+            remainingUsdMicros: 3_000_000n,
+          },
+        ]);
+        await expect(
+          observer.hostedUsageCreditGrant.findUniqueOrThrow({
+            select: {
+              createdAt: true,
+              remainingUsdMicros: true,
+              updatedAt: true,
+            },
+            where: { entryId: referralEntryId },
+          }),
+        ).resolves.toEqual(referralGrantBefore);
+      } finally {
+        await observer.hostedUsageCreditGrant.deleteMany({
+          where: {
+            entryId: { in: [missingEntryId, staleEntryId, referralEntryId] },
+          },
+        });
+        await observer.hostedUsageCreditEntry.deleteMany({
+          where: {
+            id: { in: [missingEntryId, staleEntryId, referralEntryId] },
+          },
+        });
+        await observer.hostedUsageReferral.deleteMany({
+          where: { id: referralId },
+        });
+        await observer.hostedUsageCreditPurchase.deleteMany({
+          where: { id: { in: [missingPurchaseId, stalePurchaseId] } },
+        });
+        await observer.hostedMember.deleteMany({ where: { id: memberId } });
+        await observer.$disconnect();
       }
     });
 

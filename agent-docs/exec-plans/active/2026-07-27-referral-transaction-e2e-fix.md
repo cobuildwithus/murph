@@ -35,6 +35,9 @@ Updated: 2026-07-27
 - The live credit-entry checks accept the exact positive referral-grant shape,
   retain every existing ledger branch, cover every enum kind, and validate
   successfully after normal migration.
+- The exact DML-only contract migration inserts missing purchase projections,
+  corrects stale values, leaves referral grants unchanged, and is replay-safe
+  in real PostgreSQL.
 - The protected deployment workflow's scheduled-reminder E2E has enough
   deterministic runway for its pre-delivery checkpoint/wake proof and still
   observes the scheduled send without a test nudge.
@@ -114,6 +117,10 @@ Updated: 2026-07-27
    Mitigation: acknowledge the committed action with an exact recovery reason,
    keep the existing wire shape compatible, and direct Murph to read current
    state instead of repeating the mutation.
+7. Risk: state changes between the committed mutation and recovery read.
+   Mitigation: distinguish committed history from current state and make the
+   recovery read authoritative, including later cancellation, supersession, or
+   re-arming.
 
 ## Tasks
 

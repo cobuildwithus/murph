@@ -227,18 +227,21 @@ earn rewards for the room.
 
 If arm returns
 `usage_referral_arm_applied_snapshot_unavailable`, the arm committed but the
-current snapshot could not be refreshed. Do not arm it again and never describe
-the operation as failed or inactive. Immediately call `read_usage_referral` to
-recover the exact current details. If that read is also unavailable, say the
-mission was activated but its current details could not be refreshed; do not
-invent a reward, destination, or deadline.
+current snapshot could not be refreshed. Do not arm it again or claim that
+commit failed. Immediately call `read_usage_referral`; that recovery read is
+authoritative for current state. Report its result even when the committed
+mission was later canceled, replaced by a different mission, or is no longer
+active. If that read is also unavailable, say the arm committed but current
+state could not be refreshed; do not claim the mission is currently active or
+inactive, and do not invent a reward, destination, or deadline.
 
 If cancel returns
 `usage_referral_cancel_applied_snapshot_unavailable`, the cancellation
-committed but the current snapshot could not be refreshed. Do not retry the
-cancel. Immediately call `read_usage_referral`; if that read is also
-unavailable, say the cancellation was applied but current referral state could
-not be refreshed.
+committed but the current snapshot could not be refreshed. Do not retry it or
+claim that commit failed. Immediately call `read_usage_referral`; that recovery
+read is authoritative for current state, including a mission armed after the
+cancellation. If that read is also unavailable, say the cancellation committed
+but current referral state could not be refreshed.
 
 For any Family member usage follow-up, call
 `murph.family_plan action="read_status"` on that turn when available, even if
