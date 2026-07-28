@@ -1,0 +1,104 @@
+
+replace_once(
+    "apps/web/scripts/rearm-inbound-message-content-retention.ts",
+    '''export async function runHostedInboundMessageContentRetentionRearmIfNeeded(
+''',
+    '''export async function assertHostedInboundMessageContentRetentionSchema(
+  database: HostedInboundMessageContentRetentionRearmDatabase,
+): Promise<void> {
+  const result = await database.query<{
+    columnName: string;
+    isNullable: string;
+  }>(`
+    SELECT
+      column_name AS "columnName",
+      is_nullable AS "isNullable"
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'hosted_mailbox_item'
+      AND column_name IN ('content_retired_at', 'retention_disposition')
+    ORDER BY column_name
+  `);
+  const expected = [
+    { columnName: "content_retired_at", isNullable: "YES" },
+    { columnName: "retention_disposition", isNullable: "YES" },
+  ];
+  if (JSON.stringify(result.rows) !== JSON.stringify(expected)) {
+    throw new Error(
+      "Inbound message-content retention mailbox columns are missing or incompatible; deploy the expand-only Web migration before rearming snapshots.",
+    );
+  }
+}
+
+export async function runHostedInboundMessageContentRetentionRearmIfNeeded(
+''',
+)
+
+replace_once(
+    "apps/web/scripts/rearm-inbound-message-content-retention.ts",
+    '''      if (lock.rows[0]?.acquired !== true) {
+        throw new Error(
+          "Another inbound message-content retention rearm already owns the database lock.",
+        );
+      }
+
+      const result = await applyHostedInboundMessageContentRetentionRearm(
+''',
+    '''      if (lock.rows[0]?.acquired !== true) {
+        throw new Error(
+          "Another inbound message-content retention rearm already owns the database lock.",
+        );
+      }
+      await assertHostedInboundMessageContentRetentionSchema(client);
+
+      const result = await applyHostedInboundMessageContentRetentionRearm(
+''',
+)
+
+replace_once(
+    "apps/web/test/hosted-inbound-message-content-retention-rearm-postgres.test.ts",
+    '''import {
+  applyHostedInboundMessageContentRetentionRearm,
+  readHostedInboundMessageContentRetentionRearmMaxSnapshots,
+} from "../scripts/rearm-inbound-message-content-retention";
+''',
+    '''import {
+  applyHostedInboundMessageContentRetentionRearm,
+  assertHostedInboundMessageContentRetentionSchema,
+  readHostedInboundMessageContentRetentionRearmMaxSnapshots,
+} from "../scripts/rearm-inbound-message-content-retention";
+''',
+)
+
+replace_once(
+    "apps/web/test/hosted-inbound-message-content-retention-rearm-postgres.test.ts",
+    '''  it("requires an explicit positive capacity ceiling", () => {
+''',
+    '''  it("refuses to rearm before the expand-only mailbox schema is present", async () => {
+    await expect(
+      assertHostedInboundMessageContentRetentionSchema({
+        async query() {
+          return { rows: [] };
+        },
+      }),
+    ).rejects.toThrow(/deploy the expand-only Web migration/u);
+
+    await expect(
+      assertHostedInboundMessageContentRetentionSchema({
+        async query() {
+          return {
+            rows: [
+              { columnName: "content_retired_at", isNullable: "YES" },
+              { columnName: "retention_disposition", isNullable: "YES" },
+            ],
+          };
+        },
+      }),
+    ).resolves.toBeUndefined();
+  });
+
+  it("requires an explicit positive capacity ceiling", () => {
+''',
+)
+
+print("Added pre-rearm mailbox schema proof.")
