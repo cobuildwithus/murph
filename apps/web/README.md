@@ -492,9 +492,12 @@ Rollout gates:
 
 - `HOSTED_USAGE_REFERRALS_ENABLED=1` enables referral arming, fresh-group
   binding, and qualification observation. Every other value fails closed. Do
-  not enable it until the additive migration is live, the previous Vercel
-  function window has drained, and contract migration
-  `20260726123000_allow_hosted_usage_referral_credit_entries` has applied.
+  not enable it until normal migration
+  `20260728030000_hosted_usage_referral_credit_entry_constraints` is live, the
+  previous Vercel function window has drained, and projection-only contract
+  migration
+  `20260728031000_resynchronize_hosted_usage_credit_purchase_grants` has
+  applied.
 
 Required when hosted computer-use is enabled:
 
@@ -1047,6 +1050,21 @@ before the application serves is necessary because the new application can
 create that sessionless fulfilled shape. The migration guard permits only its
 proved constraint drop/add operations and still rejects any additional
 incompatible DDL.
+
+The exact
+`20260728030000_hosted_usage_referral_credit_entry_constraints` migration is a
+second narrow predeploy exception. It atomically replaces only the two existing
+credit-entry checks with the referral-aware amount and source branches. Its
+first explicit transaction uses the repository's five-second lock bound and
+adds both replacements `NOT VALID`, so the unavoidable `ACCESS EXCLUSIVE`
+metadata lock performs no retained-row scan and rejects new invalid writes as
+soon as it commits. A second transaction validates retained rows under the less
+disruptive PostgreSQL validation lock, which permits ordinary ledger reads and
+writes. The migration guard permits only those proved constraint drop/add
+operations. The former combined contract migration is superseded; post-drain
+contract migration
+`20260728031000_resynchronize_hosted_usage_credit_purchase_grants` now performs
+only the idempotent purchase-projection resynchronization.
 
 Production `DATABASE_URL` must use PlanetScale's transaction-mode PgBouncer
 endpoint (normally port `6432`); `DIRECT_DATABASE_URL` remains the direct
