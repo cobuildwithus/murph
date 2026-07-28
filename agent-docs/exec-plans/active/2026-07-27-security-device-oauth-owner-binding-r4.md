@@ -204,5 +204,11 @@ Completed after applying the accepted specialist remediation:
   tests: all 23 workout-expansion tests passed, and 37 of 38 assistant CLI tests
   passed. Only the first session-metadata test still timed out waiting for the
   contended shared artifact boundary. These files are unchanged by this branch.
-- Canonical remote acceptance, final ReviewGPT, and final-head CI remain
-  pending.
+- The required forced remote attempt,
+  `MURPH_VERIFY_EXECUTOR=crabbox pnpm verify:acceptance`, failed closed before
+  Testbox provisioning because the installed `blacksmith-testbox` provider
+  rejects the dispatcher's `--stop-after` argument. No candidate code or
+  environment was uploaded, and the lane did not fall back to another local
+  run.
+- Canonical acceptance therefore remains blocked on the separate verification
+  tooling repair. Final ReviewGPT and final-head CI remain pending.
