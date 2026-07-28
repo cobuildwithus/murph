@@ -16,7 +16,7 @@ Key decisions:
 - Add no config file, daemon, queue, scheduler, fallback, or persisted worker state.
 
 State:
-- In progress.
+- Completed.
 
 Done:
 - Proved direct key-only SSH and the dedicated worker toolchain.
@@ -79,16 +79,40 @@ Done:
   459 tests.
 - A fresh exact-head ReviewGPT correction check independently exercised
   repeated SIGHUP, SIGINT, and SIGTERM across install and verification and
-  passed with no findings. The live worker remains reachable through
-  operator-local routing, and its non-interactive readiness probe still reports
-  `zstd` missing.
+  passed with no findings. At that reviewed head the live worker remained
+  reachable through operator-local routing, but its non-interactive readiness
+  probe still reported `zstd` missing.
+- Installed worker-side `zstd` without changing repository or routing state.
+  The production readiness probe then passed the exact native
+  `tar`/production-argument `zstd` round trip before candidate inspection.
+- Completed one production-faithful static-SSH `pnpm verify:acceptance` run.
+  The dispatcher captured one immutable candidate tree, synced 17,720 files
+  (247.3 MiB), reconstructed the detached Git base and candidate index, completed
+  the frozen install, full workspace typecheck, documentation and artifact
+  guards, every package coverage lane, the hosted-web production build/lint/dev
+  smoke and 7,146-test matrix, Cloudflare's 2,013-test matrix, and 204-scenario
+  manifest proof. The canonical command returned `0`; command time was
+  12m28.613s and end-to-end sync plus execution was 13m18.471s.
+- The dispatcher reported `runStatus=succeeded`, `exitCode=0`, and
+  `leaseStopped=true`. An independent SSH probe proved the exact opaque outer
+  run directory absent and immediately acquired the worker-global
+  `/Users/Shared/murph-crabbox/verification.lock` nonblockingly.
+- Merged current `origin/main` through a normal merge. Five conflicts were
+  limited to the dispatcher, its tests, and aligned verification/security
+  guidance; the resolution preserved the proven static lane and omission of
+  unsupported paid-provider lifecycle flags while accepting unrelated current
+  base updates. Canonical post-resolution `pnpm test:diff` passed 30 repo-tool
+  files and 459 tests.
+- Parent final review found no remaining accepted finding, unnecessary owner,
+  credential path, cleanup gap, or proof gap. No additional paid Blacksmith
+  verification was triggered.
 
 Now:
-- Make `zstd` available in the dedicated account's non-interactive `PATH`, then
-  complete the production-faithful canonical acceptance command.
+- Archive this completed plan and push the resulting exact task head.
 
 Next:
-- Run preliminary specialist review, parent final review, final ReviewGPT, and PR CI.
+- Run final ReviewGPT correction-verification round 5 concurrently with PR CI,
+  update the PR evidence, and keep the PR draft pending those exact-head gates.
 
 Open questions (UNCONFIRMED if needed):
 - None.
@@ -108,3 +132,6 @@ Working set (files/ids/commands):
 - scripts/workspace-verify.sh
 - scripts/workspace-verify.test.ts
 - PR #1031
+Status: completed
+Updated: 2026-07-28
+Completed: 2026-07-28
