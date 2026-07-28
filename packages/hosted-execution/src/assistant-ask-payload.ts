@@ -4,6 +4,7 @@ import {
   HOSTED_EXECUTION_ASSISTANT_ASK_TARGET_LABEL_MAX_CODE_POINTS,
   type HostedExecutionAssistantAskCompletedPayload,
   type HostedExecutionAssistantAskConsentedMemberTarget,
+  type HostedExecutionAssistantAskGroupSenderTarget,
   type HostedExecutionAssistantAskJoinedGroupTarget,
   type HostedExecutionAssistantAskOrigin,
   type HostedExecutionAssistantAskRequestedPayload,
@@ -64,15 +65,17 @@ export function parseHostedExecutionAssistantAskRequestedPayload(
     "question",
     "target",
   ], label);
-  return {
-    expiresAt,
-    origin: parseHostedExecutionAssistantAskOrigin(
-      record.origin,
-      `${label}.origin`,
-    ),
-    question,
-    target,
-  };
+  const origin = parseHostedExecutionAssistantAskOrigin(
+    record.origin,
+    `${label}.origin`,
+  );
+  if (target.kind === "group_sender") {
+    if (origin.kind !== "accepted_input") {
+      throw new TypeError(`${label}.origin must be an accepted input for group_sender.`);
+    }
+    return { expiresAt, origin, question, target };
+  }
+  return { expiresAt, origin, question, target };
 }
 
 export function parseHostedExecutionAssistantAskCompletedPayload(
@@ -272,7 +275,8 @@ function parseHostedExecutionAssistantAskTarget(
   value: unknown,
   label: string,
 ): HostedExecutionAssistantAskJoinedGroupTarget
-  | HostedExecutionAssistantAskConsentedMemberTarget {
+  | HostedExecutionAssistantAskConsentedMemberTarget
+  | HostedExecutionAssistantAskGroupSenderTarget {
   const target = requireObject(value, label);
   const kind = requireString(target.kind, `${label}.kind`);
   if (kind === "joined_group") {
@@ -312,6 +316,24 @@ function parseHostedExecutionAssistantAskTarget(
         target.membershipId,
         `${label}.membershipId`,
       ),
+      permissionDigest: parseHostedExecutionAssistantAskOpaqueId(
+        target.permissionDigest,
+        `${label}.permissionDigest`,
+      ),
+    };
+  }
+  if (kind === "group_sender") {
+    assertExactHostedExecutionAssistantAskKeys(
+      target,
+      ["groupRuntimeMemberId", "kind", "permissionDigest"],
+      label,
+    );
+    return {
+      groupRuntimeMemberId: parseHostedExecutionAssistantAskOpaqueId(
+        target.groupRuntimeMemberId,
+        `${label}.groupRuntimeMemberId`,
+      ),
+      kind,
       permissionDigest: parseHostedExecutionAssistantAskOpaqueId(
         target.permissionDigest,
         `${label}.permissionDigest`,

@@ -684,6 +684,14 @@ describe("createHostedGroupToolWithCurrentTurnContext", () => {
 
     for (const actionRequest of [
       {
+        action: "ask_current_sender" as const,
+        origin: {
+          assistantInputId: PRIVATE_ASSISTANT_INPUT_ID,
+          kind: "accepted_input" as const,
+          sessionId: "session_group",
+        },
+      },
+      {
         action: "ask_member" as const,
         grantId: "hdg_calendar",
         origin: {

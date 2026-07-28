@@ -321,13 +321,15 @@ not enter evidence; and attachment-only input fails closed before provider work.
 
 - Assistant Ask has focused contract, parser, Web authority/idempotency,
   assistant-tool policy, runtime mailbox routing, detached-process lifecycle,
-  and Cloudflare runner-image confinement coverage. The production-like Linux
+  one-time current-sender identity/route/disclosure coverage, and Cloudflare
+  runner-image confinement coverage. The production-like Linux
   proof must show committed group reads succeed while writes, `.runtime/**`,
   `.codex/**`, environment files, other roots, inherited shell secrets, and tool network are
   denied, and it must show child failure or cancellation cannot interrupt the
   resident foreground App Server. Routine CI uses scripted provider responses;
   it does not send a real private-to-group ask, an accepted-input
-  group-to-member ask, or a scheduled same-turn ask/replay
+  grant-bound group-to-member ask, one-time current-sender self-disclosure, or
+  a scheduled same-turn ask/replay
   through deployed Web, Temporal, Cloudflare, a live model provider, and the
   applicable messaging or no-delivery destination.
 

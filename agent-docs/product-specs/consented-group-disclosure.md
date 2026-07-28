@@ -33,6 +33,16 @@ vault. Deterministic Web authorization establishes who may ask, which member
 may answer, and which immutable permission applies. The models only produce and
 review the candidate disclosure inside that boundary.
 
+A separate one-time first-party path uses an exact authenticated group message
+as its authority. The model selects only that accepted input's opaque Message
+ref. Web reopens the stored wake, derives the sender, route, exact question, and
+fixed self-only permission, then reuses the same isolated Assistant Ask and
+outgoing reviewer. It creates no group, membership, permission, or grant row and
+grants no future or scheduled access. Group ownership confers no additional
+disclosure authority. Linq and Telegram repeat the exact completion and
+one-time sender authority check at provider entry; stale authority durably
+replaces the reviewed answer with fixed non-disclosing text before delivery.
+
 ## Product flow
 
 1. During an authenticated group-chat turn, group Murph calls

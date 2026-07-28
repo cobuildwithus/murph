@@ -9,6 +9,7 @@ import {
   isHostedEmailConversationMessageWake,
   isHostedLinqConversationMessageWake,
   isHostedTelegramConversationMessageWake,
+  readHostedExecutionConversationMessageText,
   readHostedLinqConversationMessageAccountLookupKey,
 } from "@murphai/hosted-execution";
 import {
@@ -1205,13 +1206,12 @@ function createHostedConversationAssistantInputContent(
 function createHostedConversationAssistantInputText(
   wake: HostedExecutionConversationMessageWake,
 ): string {
+  const authoredText = normalizeHostedAssistantInputText(
+    readHostedExecutionConversationMessageText(wake.message) ?? "",
+  );
   if (isHostedLinqConversationMessageWake(wake)) {
-    const textParts = wake.message.linqMessage.parts
-      .filter((part) => part.type === "text")
-      .map((part) => part.value);
-    const text = normalizeHostedAssistantInputText(textParts.join("\n"));
-    if (text) {
-      return text;
+    if (authoredText) {
+      return authoredText;
     }
     const attachmentCount = wake.message.linqMessage.parts.filter((part) =>
       part.type === "media" || part.type === "voice_memo"
@@ -1222,11 +1222,8 @@ function createHostedConversationAssistantInputText(
   }
 
   if (isHostedTelegramConversationMessageWake(wake)) {
-    const text = normalizeHostedAssistantInputText(
-      wake.message.telegramMessage.text ?? "",
-    );
-    if (text) {
-      return text;
+    if (authoredText) {
+      return authoredText;
     }
     const attachmentCount = wake.message.telegramMessage.attachments?.length ?? 0;
     return attachmentCount > 0

@@ -154,6 +154,7 @@ import {
   type HostedRuntimeGroupUpdateDisplayNameRequest,
   type HostedRuntimeGroupToolLinqThreadContext,
   type HostedRuntimeGroupMembershipSummary,
+  type HostedRuntimeGroupMemberAskResult,
   type HostedRuntimeGroupMemberSummary,
   type HostedRuntimeGroupSharedMember,
   type HostedRuntimeGroupSharedProjection,
@@ -1099,6 +1100,18 @@ export function parseHostedRuntimeGroupToolRequest(
           }),
       ...parseHostedRuntimeGroupAssistantAskFields(record, label),
     };
+  }
+  if (action === "ask_current_sender") {
+    const label = "Hosted runtime group tool ask_current_sender request";
+    assertAllowedObjectKeys(record, new Set(["action", "origin"]), label);
+    const origin = parseHostedExecutionAssistantAskOrigin(
+      record.origin,
+      `${label} origin`,
+    );
+    if (origin.kind !== "accepted_input") {
+      throw new TypeError(`${label} origin must be an accepted input.`);
+    }
+    return { action, origin };
   }
   if (action === "ask_member") {
     const label = "Hosted runtime group tool ask_member request";
@@ -2069,6 +2082,48 @@ function parseHostedRuntimeGroupSharedProjection(
   };
 }
 
+function parseHostedRuntimeGroupMemberAskResult(
+  value: unknown,
+  action: "ask_current_sender" | "ask_member",
+): HostedRuntimeGroupMemberAskResult {
+  const label = `Hosted runtime group tool ${action} response result`;
+  const result = requireObject(value, label);
+  const status = requireString(result.status, `${label} status`);
+  if (status === "accepted") {
+    assertAllowedObjectKeys(result, new Set(["status"]), label);
+    return { status };
+  }
+  if (status === "completed") {
+    assertAllowedObjectKeys(
+      result,
+      new Set(["answer", "outcome", "status"]),
+      label,
+    );
+    return {
+      ...parseHostedExecutionAssistantAskResult(
+        { answer: result.answer, outcome: result.outcome },
+        `${label} result`,
+      ),
+      status,
+    };
+  }
+  if (status === "unavailable") {
+    assertAllowedObjectKeys(
+      result,
+      new Set(["status", "unavailableReason"]),
+      label,
+    );
+    return {
+      status,
+      unavailableReason: parseHostedRuntimeGroupUnavailableReason(
+        result,
+        `${label} unavailableReason`,
+      ),
+    };
+  }
+  throw new TypeError(`${label} status is invalid.`);
+}
+
 export function parseHostedRuntimeGroupToolResponse(
   value: unknown,
 ): HostedRuntimeGroupToolResponse {
@@ -2076,7 +2131,13 @@ export function parseHostedRuntimeGroupToolResponse(
   const action = requireString(record.action, "Hosted runtime group tool response action");
   assertAllowedObjectKeys(record, new Set(["action", "result"]), "Hosted runtime group tool response");
 
-  if (action === "ask" || action === "ask_member") {
+  if (action === "ask_current_sender" || action === "ask_member") {
+    return {
+      action,
+      result: parseHostedRuntimeGroupMemberAskResult(record.result, action),
+    };
+  }
+  if (action === "ask") {
     const result = requireObject(
       record.result,
       "Hosted runtime group tool ask response result",
@@ -2086,14 +2147,6 @@ export function parseHostedRuntimeGroupToolResponse(
       "Hosted runtime group tool ask response status",
     );
     if (status === "accepted") {
-      if (action === "ask_member") {
-        assertAllowedObjectKeys(
-          result,
-          new Set(["status"]),
-          "Hosted runtime group tool ask_member accepted response result",
-        );
-        return { action, result: { status } };
-      }
       assertAllowedObjectKeys(
         result,
         new Set(["status", "targetLabel"]),
@@ -2114,25 +2167,7 @@ export function parseHostedRuntimeGroupToolResponse(
         },
       };
     }
-    if (action === "ask_member" && status === "completed") {
-      assertAllowedObjectKeys(
-        result,
-        new Set(["answer", "outcome", "status"]),
-        "Hosted runtime group tool ask_member completed response result",
-      );
-      const parsedResult = parseHostedExecutionAssistantAskResult(
-        { answer: result.answer, outcome: result.outcome },
-        "Hosted runtime group tool ask_member completed result",
-      );
-      return {
-        action,
-        result: {
-          ...parsedResult,
-          status,
-        },
-      };
-    }
-    if (action === "ask" && status === "clarification_required") {
+    if (status === "clarification_required") {
       assertAllowedObjectKeys(
         result,
         new Set(["groupLabels", "status"]),
@@ -2165,7 +2200,7 @@ export function parseHostedRuntimeGroupToolResponse(
         },
       };
     }
-    if (action === "ask" && status === "no_groups") {
+    if (status === "no_groups") {
       assertAllowedObjectKeys(
         result,
         new Set(["status"]),

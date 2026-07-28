@@ -240,6 +240,25 @@ Candidate and reviewer provider usage flows through the existing
 hosted usage ledger with deterministic request, attempt, stage, and provider
 ordinal identity; usage recording is best-effort and never controls disclosure.
 
+The `group_sender` adapter is a one-time first-party disclosure path, not a
+grant shortcut. The group model supplies only one opaque Message ref from the
+accepted inputs in the current group turn. Web reopens the exact encrypted
+conversation wake under the synthetic group runtime, revalidates its live
+non-direct route, resolves its author through the channel's canonical identity
+index, and derives the exact authored text plus a fixed self-only permission.
+The transport's optional `senderMemberId` remains attribution metadata and is
+never runtime authority. The target must be an active personal runtime rather
+than another thread container. A deterministic request id binds the group
+runtime, accepted input, and fixed permission; admission, personal-read
+preparation, completion, and final group egress all re-open the same authority.
+Linq and Telegram repeat that disclosure check at their existing provider-entry
+authority boundary; if it has become stale, the outbox durably supersedes the
+reviewed answer with the fixed non-disclosing fallback before any provider call.
+Textless, oversized, direct, email, stale-route, unresolved-sender,
+cross-runtime, scheduled, or replay-conflicting requests fail closed. This path
+creates no group, membership, permission, grant, queue, workflow, or table and
+grants no future disclosure authority.
+
 The target runtime keeps its resident foreground Murph as the sole
 model-authored canonical-content writer and outbound sender. Beside it, at most
 one `executeReadOnlyAssistantAsk` call may start a separate one-shot Codex App
@@ -260,8 +279,9 @@ owned child before releasing the workspace. Further asks remain pending in the
 same mailbox; there is no second queue, projection, table, workflow, container,
 or general agent registry.
 
-For a consented member target, the private read-only child receives the exact
-permission context and produces a candidate from the member workspace. One
+For a consented member or one-time current-sender target, the private read-only
+child receives the exact permission context and produces a candidate from the
+member workspace. One
 separate fresh-context outgoing reviewer then receives only that immutable
 permission, the question, and the candidate; it has no member workspace,
 history, application tools, network, or delivery authority and returns only `allow` or
