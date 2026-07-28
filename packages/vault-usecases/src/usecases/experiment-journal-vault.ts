@@ -27,8 +27,8 @@ import {
 } from '@murphai/contracts'
 import {
   assessExperimentPrimaryMetricCapture,
+  resolveExperimentAdherenceTargets,
   resolveExperimentSessionMetricSpec,
-  synthesizeLegacySessionAdherenceTargets,
   validateExperimentSessionMetricValue,
 } from '@murphai/query'
 import { z } from 'zod'
@@ -186,6 +186,9 @@ interface ExperimentJournalVaultCoreRuntime {
         effectiveSpec: {
           doseSignature: string
           modality?: string
+          activitySessionEvidence?: z.infer<
+            typeof effectiveProtocolSnapshotSchema
+          >['activitySessionEvidence']
           frequency?: z.infer<typeof effectiveProtocolSnapshotSchema>['frequency']
           durationMinutes?: z.infer<typeof effectiveProtocolSnapshotSchema>['durationMinutes']
           temperatureC?: z.infer<typeof effectiveProtocolSnapshotSchema>['temperatureC']
@@ -856,6 +859,7 @@ function buildEffectiveProtocolSnapshotFromPrivateProtocol(
     effectiveSpecHash: profile.effectiveSpecHash,
     doseSignature: profile.effectiveSpec.doseSignature,
     modality: profile.effectiveSpec.modality,
+    activitySessionEvidence: profile.effectiveSpec.activitySessionEvidence,
     frequency: profile.effectiveSpec.frequency,
     durationMinutes: profile.effectiveSpec.durationMinutes,
     temperatureC: profile.effectiveSpec.temperatureC,
@@ -922,12 +926,21 @@ function toCurrentProtocolRef(
 
 function hydrateRunPlanAdherenceTargets(
   runPlan: ExperimentRunPlanValue | undefined,
+  effectiveProtocolSnapshot:
+    | z.infer<typeof effectiveProtocolSnapshotSchema>
+    | undefined,
+  protocolKey: string | undefined,
 ): ExperimentRunPlanValue | undefined {
   if (!runPlan || runPlan.adherenceTargets?.length) {
     return runPlan
   }
 
-  const [adherenceTarget] = synthesizeLegacySessionAdherenceTargets({ runPlan })
+  const [adherenceTarget] = resolveExperimentAdherenceTargets({
+    protocolActivitySessionEvidence:
+      effectiveProtocolSnapshot?.activitySessionEvidence,
+    protocolKey,
+    runPlan,
+  })
   if (!adherenceTarget?.calendar) {
     return runPlan
   }
@@ -997,7 +1010,6 @@ export async function planExperimentRecord(input: PlanExperimentRecordInput) {
 
 export async function startExperimentFromPlanRecord(input: StartExperimentFromPlanInput) {
   const payload = await resolveExperimentPlanPayload(input)
-  const runPlan = hydrateRunPlanAdherenceTargets(payload.runPlan)
   const core = await loadExperimentJournalVaultCoreRuntime()
   return core.withCanonicalWriteLock(input.vault, async () => {
     await assertHealthCommonsProtocolStartAllowed({
@@ -1060,6 +1072,11 @@ export async function startExperimentFromPlanRecord(input: StartExperimentFromPl
       )
     }
 
+    const runPlan = hydrateRunPlanAdherenceTargets(
+      payload.runPlan,
+      effectiveProtocolSnapshot,
+      payload.commonsProtocolRef?.key,
+    )
     const protocolRef = toCurrentProtocolRef(privateProtocolRef)
     const preflight = safeParseContract(experimentFrontmatterSchema, compactObject({
       schemaVersion: 'murph.frontmatter.experiment.v1',

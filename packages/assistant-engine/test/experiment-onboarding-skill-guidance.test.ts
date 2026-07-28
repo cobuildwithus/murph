@@ -429,10 +429,22 @@ describe('experiment onboarding skill guidance', () => {
       'do not save the workout through any other logging surface either; the wearable record is the log',
     )
     expect(raw).toContain(
-      'Your runs count automatically from your WHOOP. No need to tell me when you run.',
+      'Qualifying sessions count automatically from your WHOOP. No need to tell me when you do one.',
     )
     expect(raw).toContain(
-      'Once your workouts start syncing, your runs will count automatically.',
+      'Once your workouts start syncing, qualifying sessions will count automatically.',
+    )
+    expect(raw).toContain(
+      'When `progress.adherence.evidence.activityKinds` is present, every listed kind may count',
+    )
+    expect(raw).toContain(
+      '`minimumDurationMinutes` is the minimum known sensed duration',
+    )
+    expect(raw).toContain(
+      'Do not silently narrow a multi-modality plan to the machine or activity the user expects to use most often.',
+    )
+    expect(raw).toContain(
+      'Cycling can be your usual setup, but qualifying walks, rowing, and elliptical sessions count too.',
     )
     expect(raw).toContain('do not create the activity nudge automation')
     expect(raw).toContain('`progress.dataCoverage.activityProviders` is that evidence')
@@ -441,12 +453,14 @@ describe('experiment onboarding skill guidance', () => {
     )
     expect(raw).toContain('`schedule: { "kind": "deviceActivity", "after": "<current ISO timestamp>", "activityKind": "<activity-kind>" }`')
     expect(raw).toContain(
-      'Use `progress.adherence.evidence.activityKind` when present',
+      'Use `progress.adherence.evidence.activityKind` only for a singular target',
     )
     expect(raw).toContain(
-      'for a generic any-activity target use `activity`',
+      'for `activityKinds` or a generic any-activity target use `activity`',
     )
-    expect(raw).toContain('which the deviceActivity scanner treats as any workout session')
+    expect(raw).toContain(
+      'let `vault-cli experiment progress` decide whether the sensed workout advanced the run',
+    )
     expect(raw).toContain('Omit `source`; the trigger is provider-agnostic')
     expect(raw).toContain('experiment-activity-nudge-<experiment-slug>')
     expect(raw).toContain('activity_nudge_automation_slug')

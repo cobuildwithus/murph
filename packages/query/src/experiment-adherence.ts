@@ -5,6 +5,7 @@ import {
   type ExperimentAdherenceTarget,
   type ExperimentRunPlan,
   type ExperimentRunScheduleIntent,
+  type ProtocolActivitySessionEvidence,
 } from "@murphai/contracts";
 import type { MetricComparator } from "./metrics/index.ts";
 
@@ -26,6 +27,7 @@ export interface ExperimentAdherenceWindows {
 
 export interface ExperimentAdherenceObservation {
   activityKind?: string | null;
+  durationMinutes?: number | null;
   comparator?: MetricComparator | null;
   evidenceId: string;
   eventKind?: string | null;
@@ -131,6 +133,23 @@ const GENERIC_ACTIVITY_KIND_TOKENS = new Set([
   "unknown",
 ]);
 
+type LegacyExperimentRunPlan = Pick<
+  ExperimentRunPlan,
+  "minimumUsefulSessions" | "modality" | "schedule" | "sessionsPerWeek" | "targetSessions"
+>;
+
+interface ResolvedExperimentProtocolActivitySessionEvidence {
+  activityKinds: readonly string[];
+  minimumDurationMinutes: number | null;
+}
+
+const LEGACY_ZONE_2_AEROBIC_BASE_PROTOCOL_KEY =
+  "protocol_variant:aerobic-base-training/zone-2-aerobic-base-block";
+const LEGACY_ZONE_2_AEROBIC_BASE_ACTIVITY_EVIDENCE = {
+  activityKinds: ["walking", "cycling", "rowing", "elliptical"],
+  minimumDurationMinutes: 35,
+} as const satisfies ResolvedExperimentProtocolActivitySessionEvidence;
+
 export type LinkedEventCountEvidence = Extract<ExperimentAdherenceEvidenceRule, { kind: "linkedEventCount" }>;
 
 export interface AdherenceSessionCounts {
@@ -167,6 +186,143 @@ export function resolveAdherenceEvidence(
   }
 
   return { eventKind: "intervention_session" };
+}
+
+export function resolveExperimentAdherenceTargets(input: {
+  explicitTargets?: readonly ExperimentAdherenceTarget[] | null;
+  protocolActivitySessionEvidence?: ProtocolActivitySessionEvidence | null;
+  protocolKey?: string | null;
+  runPlan: LegacyExperimentRunPlan | null | undefined;
+}): ExperimentAdherenceTarget[] {
+  const protocolEvidence = resolveProtocolActivitySessionEvidence(input);
+  if (input.explicitTargets !== undefined && input.explicitTargets !== null) {
+    const explicitTargets = input.explicitTargets.slice();
+    if (
+      !protocolEvidence ||
+      !explicitTargetsLookLikeLegacySingleModalityTargets(
+        explicitTargets,
+        input.runPlan,
+        protocolEvidence,
+      )
+    ) {
+      return explicitTargets;
+    }
+    return explicitTargets.map((target) =>
+      applyProtocolActivitySessionEvidence(target, protocolEvidence)
+    );
+  }
+
+  const synthesized = synthesizeLegacySessionAdherenceTargets({
+    runPlan: input.runPlan,
+  });
+  return protocolEvidence
+    ? synthesized.map((target) =>
+        applyProtocolActivitySessionEvidence(target, protocolEvidence)
+      )
+    : synthesized;
+}
+
+function resolveProtocolActivitySessionEvidence(input: {
+  protocolActivitySessionEvidence?: ProtocolActivitySessionEvidence | null;
+  protocolKey?: string | null;
+}): ResolvedExperimentProtocolActivitySessionEvidence | null {
+  const activityKinds = normalizeAcceptedActivityKinds(
+    input.protocolActivitySessionEvidence?.activityKinds,
+  );
+  if (activityKinds.length > 0) {
+    return {
+      activityKinds,
+      minimumDurationMinutes: normalizePositiveInteger(
+        input.protocolActivitySessionEvidence?.minimumDurationMinutes,
+      ),
+    };
+  }
+
+  return input.protocolKey === LEGACY_ZONE_2_AEROBIC_BASE_PROTOCOL_KEY
+    ? LEGACY_ZONE_2_AEROBIC_BASE_ACTIVITY_EVIDENCE
+    : null;
+}
+
+function explicitTargetsLookLikeLegacySingleModalityTargets(
+  targets: readonly ExperimentAdherenceTarget[],
+  runPlan: LegacyExperimentRunPlan | null | undefined,
+  protocolEvidence: ResolvedExperimentProtocolActivitySessionEvidence,
+): boolean {
+  if (targets.length !== 1) {
+    return false;
+  }
+  const target = targets[0];
+  const synthesized = synthesizeLegacySessionAdherenceTargets({ runPlan })[0];
+  if (
+    !target ||
+    !synthesized ||
+    target.evidence.kind !== "linkedEventCount" ||
+    synthesized.evidence.kind !== "linkedEventCount" ||
+    target.evidence.eventKind !== "activity_session" ||
+    target.evidence.eventKind !== synthesized.evidence.eventKind ||
+    target.evidence.activityKind === undefined ||
+    target.evidence.activityKinds !== undefined ||
+    target.evidence.minimumDurationMinutes !== undefined ||
+    target.evidence.missing !== synthesized.evidence.missing ||
+    target.evidence.partialCredit !== synthesized.evidence.partialCredit
+  ) {
+    return false;
+  }
+
+  const legacyActivityKind = target.evidence.activityKind;
+  return (
+    target.targetId === synthesized.targetId &&
+    legacyActivityKind === synthesized.evidence.activityKind &&
+    protocolEvidence.activityKinds.some((activityKind) =>
+      activityTextMatchesKind(legacyActivityKind, activityKind)
+    )
+  );
+}
+
+function applyProtocolActivitySessionEvidence(
+  target: ExperimentAdherenceTarget,
+  protocolEvidence: ResolvedExperimentProtocolActivitySessionEvidence,
+): ExperimentAdherenceTarget {
+  if (target.evidence.kind !== "linkedEventCount") {
+    return target;
+  }
+
+  return {
+    ...target,
+    evidence: {
+      kind: "linkedEventCount",
+      eventKind: "activity_session",
+      activityKinds: [...protocolEvidence.activityKinds],
+      ...(protocolEvidence.minimumDurationMinutes === null
+        ? {}
+        : {
+            minimumDurationMinutes:
+              protocolEvidence.minimumDurationMinutes,
+          }),
+      ...(target.evidence.partialCredit === undefined
+        ? {}
+        : { partialCredit: target.evidence.partialCredit }),
+      missing: "missed_after_grace",
+    },
+  };
+}
+
+function normalizeAcceptedActivityKinds(
+  values: readonly string[] | null | undefined,
+): string[] {
+  return [...new Set(
+    (values ?? [])
+      .map((value) => normalizeActivityKindToken(value))
+      .filter((value): value is string => value !== null),
+  )];
+}
+
+function normalizePositiveInteger(value: number | null | undefined): number | null {
+  return typeof value === "number" &&
+      Number.isInteger(value) &&
+      value > 0
+    ? value
+    : null;
 }
 
 export function eventKindIsCandidateForEvidence(
@@ -355,10 +511,7 @@ function countExperimentAdherenceExpectations(
 }
 
 export function synthesizeLegacySessionAdherenceTargets(input: {
-  runPlan: Pick<
-    ExperimentRunPlan,
-    "minimumUsefulSessions" | "modality" | "schedule" | "sessionsPerWeek" | "targetSessions"
-  > | null | undefined;
+  runPlan: LegacyExperimentRunPlan | null | undefined;
 }): ExperimentAdherenceTarget[] {
   const runPlan = input.runPlan;
   if (!runPlan) {
@@ -770,22 +923,66 @@ function linkedEventObservationMatchesEvidence(
     return false;
   }
 
-  if (observation.eventKind === "activity_session" && evidence.activityKind) {
-    return activityTextMatchesKind(observation.activityKind, evidence.activityKind);
+  const acceptedActivityKinds = resolveAcceptedActivityKinds(evidence);
+  if (observation.eventKind === "activity_session") {
+    return (
+      activityDurationMatchesEvidence(observation, evidence) &&
+      (
+        acceptedActivityKinds === null ||
+        acceptedActivityKinds.some((activityKind) =>
+          activityTextMatchesKind(observation.activityKind, activityKind)
+        )
+      )
+    );
   }
 
   if (
     observation.eventKind === "intervention_session" &&
-    evidence.activityKind &&
-    observation.activityKind
+    evidence.eventKind === "activity_session"
   ) {
+    if (!activityDurationMatchesEvidence(observation, evidence)) {
+      return false;
+    }
+    if (acceptedActivityKinds === null || !observation.activityKind) {
+      return true;
+    }
+
     // Write boundaries own type matching; this read guard only honors explicit contradictions.
     // Only canonical-sport contradictions are rejected; unrecognized types pass.
     const canonicalKind = resolveDeviceObservableActivityKind(observation.activityKind);
-    return canonicalKind ? activityTextMatchesKind(canonicalKind, evidence.activityKind) : true;
+    return canonicalKind
+      ? acceptedActivityKinds.some((activityKind) =>
+          activityTextMatchesKind(canonicalKind, activityKind)
+        )
+      : true;
   }
 
   return true;
+}
+
+function resolveAcceptedActivityKinds(
+  evidence: LinkedEventCountEvidence,
+): readonly string[] | null {
+  if (evidence.activityKinds && evidence.activityKinds.length > 0) {
+    return evidence.activityKinds;
+  }
+  return evidence.activityKind ? [evidence.activityKind] : null;
+}
+
+function activityDurationMatchesEvidence(
+  observation: ExperimentAdherenceObservation,
+  evidence: LinkedEventCountEvidence,
+): boolean {
+  const minimumDurationMinutes = evidence.minimumDurationMinutes;
+  if (
+    minimumDurationMinutes === undefined ||
+    observation.durationMinutes === undefined ||
+    observation.durationMinutes === null
+  ) {
+    // Preserve legacy/manual evidence when a provider did not retain duration.
+    return true;
+  }
+  return observation.durationMinutes >= minimumDurationMinutes;
 }
 
 function suppressManualActivityDuplicates(

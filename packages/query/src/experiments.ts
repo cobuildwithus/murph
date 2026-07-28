@@ -26,8 +26,8 @@ import {
   resolveActivityEvidenceLocalDate,
   resolveAdherenceObservationActivityKind,
   resolveExperimentAdherenceRollupTarget,
+  resolveExperimentAdherenceTargets,
   resolveInterventionSessionLocalDate,
-  synthesizeLegacySessionAdherenceTargets,
   type ExperimentAdherenceCalendarResult,
   type ExperimentAdherenceObservation,
 } from "./experiment-adherence.ts";
@@ -156,6 +156,8 @@ export interface ExperimentProgressSummary extends ExperimentProgressSnapshot {
     evidence?: {
       eventKind: "activity_session" | "intervention_session";
       activityKind?: string;
+      activityKinds?: string[];
+      minimumDurationMinutes?: number;
     };
     confirmedSessions?: number;
     expectedSessionsByNow: number | null;
@@ -686,12 +688,13 @@ function resolveAdherenceTargets(
 function resolveAdherenceTargetsFromFrontmatter(
   frontmatter: QueryExperimentFrontmatter,
 ): QueryExperimentAdherenceTarget[] {
-  return (
-    frontmatter.runPlan?.adherenceTargets ??
-    synthesizeLegacySessionAdherenceTargets({
-      runPlan: frontmatter.runPlan,
-    })
-  );
+  return resolveExperimentAdherenceTargets({
+    explicitTargets: frontmatter.runPlan?.adherenceTargets,
+    protocolActivitySessionEvidence:
+      frontmatter.effectiveProtocolSnapshot?.activitySessionEvidence,
+    protocolKey: frontmatter.commonsProtocolRef?.key,
+    runPlan: frontmatter.runPlan,
+  });
 }
 
 function buildAdherenceCalendarFromContext(
@@ -836,6 +839,15 @@ function buildProgressAdherenceEvidence(
   return {
     eventKind: target.evidence.eventKind,
     ...(target.evidence.activityKind ? { activityKind: target.evidence.activityKind } : {}),
+    ...(target.evidence.activityKinds
+      ? { activityKinds: [...target.evidence.activityKinds] }
+      : {}),
+    ...(target.evidence.minimumDurationMinutes === undefined
+      ? {}
+      : {
+          minimumDurationMinutes:
+            target.evidence.minimumDurationMinutes,
+        }),
   };
 }
 
@@ -855,6 +867,7 @@ function buildAdherenceObservations(
             activityKind: resolveAdherenceObservationActivityKind({
               attributes: event.attributes as Record<string, unknown>,
             }),
+            durationMinutes: readActivityDurationMinutes(event),
             evidenceId: event.entityId,
             eventKind: event.kind,
             localDate:
@@ -1241,6 +1254,19 @@ function readRecordAttribute(
   const value = (entity.attributes as Record<string, unknown>)[key];
   return value && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown>
+    : null;
+}
+
+function readActivityDurationMinutes(entity: CanonicalEntity): number | null {
+  const attributes = entity.attributes as Record<string, unknown>;
+  const direct = attributes.durationMinutes;
+  if (typeof direct === "number" && Number.isFinite(direct)) {
+    return direct;
+  }
+
+  const nested = readRecordAttribute(entity, "workout")?.durationMinutes;
+  return typeof nested === "number" && Number.isFinite(nested)
+    ? nested
     : null;
 }
 

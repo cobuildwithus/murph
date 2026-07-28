@@ -7,6 +7,7 @@ import {
   buildExperimentAdherenceCalendar,
   countCompletedAdherenceSessions,
   resolveAdherenceEvidence,
+  resolveExperimentAdherenceTargets,
   synthesizeLegacySessionAdherenceTargets,
 } from "../src/experiment-adherence.ts";
 
@@ -508,6 +509,178 @@ test("counts cardio category activity targets from member activity kinds only", 
   });
 
   assert.equal(counts.completedSessions, 2);
+});
+
+test("uses declarative protocol activity evidence without protocol-specific query logic", () => {
+  const targets = resolveExperimentAdherenceTargets({
+    protocolActivitySessionEvidence: {
+      activityKinds: ["walking", "cycling", "rowing", "elliptical"],
+      minimumDurationMinutes: 35,
+    },
+    protocolKey: "protocol_variant:custom/easy-cardio",
+    runPlan: {
+      modality: "Cycling",
+      targetSessions: 12,
+      minimumUsefulSessions: 9,
+    },
+  });
+
+  assert.deepEqual(targets[0]?.evidence, {
+    kind: "linkedEventCount",
+    eventKind: "activity_session",
+    activityKinds: ["walking", "cycling", "rowing", "elliptical"],
+    minimumDurationMinutes: 35,
+    missing: "missed_after_grace",
+  });
+});
+
+test("repairs a legacy Zone 2 cycling target without snapshot evidence", () => {
+  const targets = resolveExperimentAdherenceTargets({
+    explicitTargets: [{
+      targetId: "cycling",
+      label: "Cycling",
+      phase: "intervention",
+      evidence: {
+        kind: "linkedEventCount",
+        eventKind: "activity_session",
+        activityKind: "cycling",
+        missing: "missed_after_grace",
+      },
+      rollup: {
+        targetCompletions: 12,
+        minimumUsefulCompletions: 9,
+      },
+    }],
+    protocolKey:
+      "protocol_variant:aerobic-base-training/zone-2-aerobic-base-block",
+    runPlan: {
+      modality: "Cycling",
+      targetSessions: 12,
+      minimumUsefulSessions: 9,
+    },
+  });
+
+  assert.deepEqual(targets[0]?.evidence, {
+    kind: "linkedEventCount",
+    eventKind: "activity_session",
+    activityKinds: ["walking", "cycling", "rowing", "elliptical"],
+    minimumDurationMinutes: 35,
+    missing: "missed_after_grace",
+  });
+});
+
+test("counts qualifying Zone 2 modalities without counting short or unrelated workouts", () => {
+  const [target] = resolveExperimentAdherenceTargets({
+    protocolKey:
+      "protocol_variant:aerobic-base-training/zone-2-aerobic-base-block",
+    runPlan: {
+      modality: "Cycling",
+      targetSessions: 12,
+      minimumUsefulSessions: 9,
+    },
+  });
+  assert.ok(target);
+
+  const counts = countCompletedAdherenceSessions({
+    asOfDate: "2026-04-12",
+    observations: [
+      {
+        activityKind: "walking",
+        durationMinutes: 40,
+        evidenceId: "walk_1",
+        eventKind: "activity_session",
+        localDate: "2026-04-08",
+      },
+      {
+        activityKind: "elliptical",
+        durationMinutes: 45,
+        evidenceId: "elliptical_1",
+        eventKind: "activity_session",
+        localDate: "2026-04-09",
+      },
+      {
+        activityKind: "rowing",
+        durationMinutes: 35,
+        evidenceId: "row_1",
+        eventKind: "activity_session",
+        localDate: "2026-04-10",
+      },
+      {
+        activityKind: "cycling",
+        durationMinutes: 20,
+        evidenceId: "short_ride",
+        eventKind: "activity_session",
+        localDate: "2026-04-11",
+      },
+      {
+        activityKind: "running",
+        durationMinutes: 50,
+        evidenceId: "run_1",
+        eventKind: "activity_session",
+        localDate: "2026-04-12",
+      },
+      {
+        activityKind: "walking",
+        evidenceId: "legacy_walk_without_duration",
+        eventKind: "activity_session",
+        localDate: "2026-04-12",
+      },
+    ],
+    target,
+    windows,
+  });
+
+  assert.equal(counts.completedSessions, 4);
+});
+
+test("preserves an explicit custom cycling-only target", () => {
+  const explicitTarget: ExperimentAdherenceTarget = {
+    targetId: "bike-only",
+    label: "Bike only",
+    phase: "intervention",
+    evidence: {
+      kind: "linkedEventCount",
+      eventKind: "activity_session",
+      activityKind: "cycling",
+      missing: "missed_after_grace",
+    },
+  };
+  const targets = resolveExperimentAdherenceTargets({
+    explicitTargets: [explicitTarget],
+    protocolKey:
+      "protocol_variant:aerobic-base-training/zone-2-aerobic-base-block",
+    runPlan: {
+      modality: "Cycling",
+    },
+  });
+
+  assert.deepEqual(targets, [explicitTarget]);
+});
+
+test("preserves a custom single-mode policy even when its id matches legacy synthesis", () => {
+  const explicitTarget: ExperimentAdherenceTarget = {
+    targetId: "cycling",
+    label: "Cycling",
+    phase: "intervention",
+    evidence: {
+      kind: "linkedEventCount",
+      eventKind: "activity_session",
+      activityKind: "cycling",
+      missing: "unknown",
+    },
+  };
+  const targets = resolveExperimentAdherenceTargets({
+    explicitTargets: [explicitTarget],
+    protocolActivitySessionEvidence: {
+      activityKinds: ["walking", "cycling", "rowing", "elliptical"],
+      minimumDurationMinutes: 35,
+    },
+    runPlan: {
+      modality: "Cycling",
+    },
+  });
+
+  assert.deepEqual(targets, [explicitTarget]);
 });
 
 test("honors only known intervention activity-kind contradictions for scoped activity evidence", () => {

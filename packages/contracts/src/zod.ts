@@ -81,6 +81,7 @@ import {
   HEALTH_COMMONS_EXPERIMENT_ONBOARDING_CAUTION_LEVELS,
   HEALTH_COMMONS_EXPERIMENT_ONBOARDING_MISSED_LOG_POLICIES,
   HEALTH_COMMONS_EXPERIMENT_ONBOARDING_POSITIVE_DISPOSITIONS,
+  healthCommonsActivitySessionEvidenceSchema,
   healthCommonsKeySchema,
   healthCommonsStableIdSchema,
 } from "./health-commons.ts";
@@ -1850,11 +1851,15 @@ const protocolTemperatureRangeSchema = z
   })
   .strict();
 
+export const protocolActivitySessionEvidenceSchema =
+  healthCommonsActivitySessionEvidenceSchema;
+
 export const effectiveProtocolSnapshotSchema = z
   .object({
     effectiveSpecHash: sha256DigestSchema,
     doseSignature: boundedString(1, 240),
     modality: boundedString(1, 160).optional(),
+    activitySessionEvidence: protocolActivitySessionEvidenceSchema.optional(),
     frequency: protocolFrequencySchema.optional(),
     durationMinutes: protocolNonnegativeRangeSchema.optional(),
     temperatureC: protocolTemperatureRangeSchema.optional(),
@@ -1868,6 +1873,7 @@ export const protocolEffectiveSpecSchema = z
   .object({
     doseSignature: boundedString(1, 240),
     modality: boundedString(1, 160).optional(),
+    activitySessionEvidence: protocolActivitySessionEvidenceSchema.optional(),
     frequency: protocolFrequencySchema.optional(),
     durationMinutes: protocolNonnegativeRangeSchema.optional(),
     temperatureC: protocolTemperatureRangeSchema.optional(),
@@ -2015,6 +2021,12 @@ export const experimentAdherenceEvidenceRuleSchema = z
         ]),
         missing: z.enum(["missed_after_grace", "assumed_after_grace", "unknown"]),
         activityKind: boundedString(1, 80).optional(),
+        activityKinds: uniqueArray(boundedString(1, 80), {
+          minItems: 1,
+          maxItems: 16,
+          uniqueItems: true,
+        }).optional(),
+        minimumDurationMinutes: integerSchema(1).optional(),
         partialCredit: numberSchema(0, 1).optional(),
       })
       .strict(),
@@ -2096,6 +2108,32 @@ export const experimentAdherenceTargetSchema = z
         message: "calendar is required unless evidence is linkedEventCount.",
         path: ["calendar"],
       });
+    }
+    if (target.evidence.kind === "linkedEventCount") {
+      if (
+        target.evidence.activityKind !== undefined &&
+        target.evidence.activityKinds !== undefined
+      ) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Use activityKind or activityKinds, not both.",
+          path: ["evidence", "activityKinds"],
+        });
+      }
+      if (
+        (
+          target.evidence.activityKind !== undefined ||
+          target.evidence.activityKinds !== undefined ||
+          target.evidence.minimumDurationMinutes !== undefined
+        ) &&
+        target.evidence.eventKind !== "activity_session"
+      ) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Activity matching fields require activity_session evidence.",
+          path: ["evidence", "eventKind"],
+        });
+      }
     }
     if (
       target.evidence.kind === "linkedEventCount" &&
@@ -2414,6 +2452,12 @@ export const experimentProgressSnapshotSchema = z
           .object({
             eventKind: z.enum(["activity_session", "intervention_session"]),
             activityKind: boundedString(1, 80).optional(),
+            activityKinds: uniqueArray(boundedString(1, 80), {
+              minItems: 1,
+              maxItems: 16,
+              uniqueItems: true,
+            }).optional(),
+            minimumDurationMinutes: integerSchema(1).optional(),
           })
           .strict()
           .optional(),
@@ -3303,6 +3347,9 @@ export type CoreFrontmatter = z.infer<typeof coreFrontmatterSchema>;
 export type JournalDayFrontmatter = z.infer<typeof journalDayFrontmatterSchema>;
 export type CommonsProtocolRef = z.infer<typeof commonsProtocolRefSchema>;
 export type ProtocolRef = z.infer<typeof protocolRefSchema>;
+export type ProtocolActivitySessionEvidence = z.infer<
+  typeof protocolActivitySessionEvidenceSchema
+>;
 export type EffectiveProtocolSnapshot = z.infer<typeof effectiveProtocolSnapshotSchema>;
 export type ProtocolEffectiveSpec = z.infer<typeof protocolEffectiveSpecSchema>;
 export type ProtocolLineage = z.infer<typeof protocolLineageSchema>;

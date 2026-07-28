@@ -22,7 +22,7 @@ import {
   MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
   MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID,
   MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
-  MURPH_WEEKLY_IMPROVEMENT_COACH_AUTOMATION_ID,
+  MURPH_MONTHLY_IMPROVEMENT_COACH_AUTOMATION_ID,
   MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID,
   MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
   applyMurphManagedAutomations,
@@ -256,6 +256,14 @@ describe('applyMurphManagedAutomations core integration', () => {
     expect(record?.instructions).toContain('no connected device accounts, no live wearable, no recent manual logs')
     expect(record?.instructions).toContain('what was probably noise')
     expect(record?.instructions).toContain('Never restate single-day metric values')
+    expect(record?.instructions).toContain('Proactive health outreach is not a report card')
+    expect(record?.instructions).toContain(
+      'Persona and tone preferences may shape warmth and phrasing',
+    )
+    expect(record?.instructions).toContain('Never use steps as a proxy for all exercise')
+    expect(record?.instructions).toContain(
+      'Never make Murph\'s tracking mismatch the user-facing takeaway',
+    )
     expect(record?.instructions).toContain(
       '{"kind":"skip","privateSummary":"No weekly digest cleared the memorability bar."}',
     )
@@ -345,37 +353,48 @@ describe('applyMurphManagedAutomations core integration', () => {
     expect(insightRecord?.instructions).toContain('Suppress true-but-boring findings')
     expect(insightRecord?.instructions).toContain('missing data, messy tags')
     expect(insightRecord?.instructions).toContain('Murph cannot currently see X')
+    expect(insightRecord?.instructions).toContain(
+      'A plain behavioral decline—fewer steps, fewer workouts, later bedtimes, or less logging—is not an insight by itself.',
+    )
+    expect(insightRecord?.instructions).toContain(
+      'Preserve useful uncomfortable physiological findings',
+    )
+    expect(insightRecord?.instructions).toContain(
+      'Steps are not a substitute for exercise',
+    )
 
     const improvementCoachRecord = await showAutomation({
-      automationId: MURPH_WEEKLY_IMPROVEMENT_COACH_AUTOMATION_ID,
+      automationId: MURPH_MONTHLY_IMPROVEMENT_COACH_AUTOMATION_ID,
       vaultRoot,
     })
 
     expect(improvementCoachRecord).toMatchObject({
-      automationId: MURPH_WEEKLY_IMPROVEMENT_COACH_AUTOMATION_ID,
+      automationId: MURPH_MONTHLY_IMPROVEMENT_COACH_AUTOMATION_ID,
       route: defaultRoute,
-      slug: 'weekly-improvement-coach',
+      schedule: { kind: 'cron', expression: '0 17 1 * *' },
+      slug: 'monthly-improvement-coach',
       status: 'active',
-      title: 'Weekly improvement coach',
+      summary: 'A monthly check for one user-relevant health friction worth offering help with.',
+      title: 'Monthly improvement coach',
     })
     expect(improvementCoachRecord?.assistantTargetOverride).toEqual({
       reasoningEffort: 'high',
     })
-    expectCronSchedule(improvementCoachRecord?.schedule)
-    expect(improvementCoachRecord?.tags).toContain('murph-managed:weekly-improvement-coach')
+    expect(improvementCoachRecord?.tags).toContain('murph-managed:monthly-improvement-coach')
+    expect(improvementCoachRecord?.tags).not.toContain('murph-managed:weekly-improvement-coach')
     expect(improvementCoachRecord?.tags).not.toContain(ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG)
     expect(improvementCoachRecord?.instructions).toContain('knowledge show improvement-opportunities')
     expect(improvementCoachRecord?.instructions).toContain(
       'knowledge append-section improvement-opportunities YYYY-MM-DD',
     )
     expect(improvementCoachRecord?.instructions).toContain(
-      '{"kind":"skip","privateSummary":"No improvement opportunity cleared the evidence bar and no open check-in was due."}',
+      '{"kind":"skip","privateSummary":"No monthly improvement opportunity cleared the evidence and taste bars, and no open check-in was due."}',
     )
     expect(improvementCoachRecord?.instructions).toContain(
       'Every completed run must leave one compact private decision record',
     )
     expect(improvementCoachRecord?.instructions).toContain(
-      'at most once in any 14-day window',
+      'at most once in any 30-day window',
     )
     expect(improvementCoachRecord?.instructions).toContain(
       'If no earlier record has `outreach: delivery_requested`, the unanswered-question gate does not block outreach',
@@ -401,6 +420,9 @@ describe('applyMurphManagedAutomations core integration', () => {
     )
     expect(improvementCoachRecord?.instructions).toContain(
       'Never infer absence of a behavior from absence of data',
+    )
+    expect(improvementCoachRecord?.instructions).toContain(
+      'If it could reasonably read as scolding, disappointment, surveillance, a grade, or "you need to do better," it does not clear the send bar.',
     )
 
     const researchScoutRecord = await showAutomation({
@@ -1524,7 +1546,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       vaultRoot,
     })).resolves.toBeNull()
     await expect(showAutomation({
-      automationId: MURPH_WEEKLY_IMPROVEMENT_COACH_AUTOMATION_ID,
+      automationId: MURPH_MONTHLY_IMPROVEMENT_COACH_AUTOMATION_ID,
       vaultRoot,
     })).resolves.toBeNull()
     await expect(showAutomation({

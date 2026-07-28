@@ -473,6 +473,7 @@ function buildEffectiveSnapshotFromCommonsProtocol(
       effectiveSpecHash,
       doseSignature: truncateBoundedText(entity.protocol.doseSignature, 240),
       modality: truncateBoundedText(entity.protocol.target, 160),
+      activitySessionEvidence: entity.protocol.activitySessionEvidence,
       frequency: entity.protocol.frequency,
       durationMinutes: entity.protocol.durationMinutes,
       temperatureC: entity.protocol.temperatureC,

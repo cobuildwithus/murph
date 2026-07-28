@@ -613,6 +613,7 @@ function makeActivitySession(input: {
   activityType: string;
   dataOrigin?: Record<string, unknown>;
   dayKey: string;
+  durationMinutes?: number;
   entityId: string;
   externalRef?: Record<string, unknown>;
   name?: string;
@@ -643,6 +644,9 @@ function makeActivitySession(input: {
     attributes: {
       activityType: input.activityType,
       ...(input.dataOrigin === undefined ? {} : { dataOrigin: input.dataOrigin }),
+      ...(input.durationMinutes === undefined
+        ? {}
+        : { durationMinutes: input.durationMinutes }),
       ...(externalRef === undefined ? {} : { externalRef }),
       ...(input.name === undefined ? {} : { name: input.name }),
       ...(input.provider === undefined && input.source === undefined ? {} : { source: input.source ?? "device" }),
@@ -1051,6 +1055,86 @@ test("experiment progress counts cycling adherence from provider ride activity s
   const progress = summarizeExperimentProgress(vault, "cycling-block", { asOf: "2026-06-09" });
 
   assert.equal(progress.adherence.completedSessions, 1);
+});
+
+test("experiment progress uses the protocol snapshot's accepted activity kinds", () => {
+  const vault = createVaultReadModel({
+    vaultRoot: "/virtual/experiment-analysis-zone-2-activity-adherence",
+    metadata: null,
+    entities: [
+      makeExperiment("active", {
+        experimentId: "exp_01JNV4458HYPP53JDQCBP1QJZ2",
+        slug: "zone-2-block",
+        commonsProtocolRef: {
+          key: "protocol_variant:aerobic-base-training/zone-2-aerobic-base-block",
+          pageRevisionId: "sha256:page-revision",
+          runSpecRevisionId: "sha256:run-spec-revision",
+          testPlanId: "zone2-aerobic-base-readout",
+        },
+        effectiveProtocolSnapshot: {
+          effectiveSpecHash: `sha256:${"4".repeat(64)}`,
+          doseSignature: "3x/week easy cardio, 35-60 min",
+          modality: "sustainable easy aerobic volume",
+          activitySessionEvidence: {
+            activityKinds: ["walking", "cycling", "rowing", "elliptical"],
+            minimumDurationMinutes: 35,
+          },
+          targetSessions: 12,
+          minimumUsefulSessions: 9,
+        },
+        runPlan: {
+          baselineStart: "2026-05-25",
+          baselineEnd: "2026-05-31",
+          interventionStart: "2026-06-01",
+          interventionEnd: "2026-06-28",
+          modality: "Cycling",
+          targetSessions: 12,
+          minimumUsefulSessions: 9,
+        },
+      }),
+      makeActivitySession({
+        entityId: "evt_zone_2_walk",
+        dayKey: "2026-06-01",
+        activityType: "Walking",
+        durationMinutes: 40,
+      }),
+      makeActivitySession({
+        entityId: "evt_zone_2_elliptical",
+        dayKey: "2026-06-02",
+        activityType: "Elliptical",
+        durationMinutes: 45,
+      }),
+      makeActivitySession({
+        entityId: "evt_zone_2_row",
+        dayKey: "2026-06-03",
+        activityType: "Rowing",
+        durationMinutes: 35,
+      }),
+      makeActivitySession({
+        entityId: "evt_zone_2_short_ride",
+        dayKey: "2026-06-04",
+        activityType: "Cycling",
+        durationMinutes: 20,
+      }),
+      makeActivitySession({
+        entityId: "evt_zone_2_run",
+        dayKey: "2026-06-05",
+        activityType: "Running",
+        durationMinutes: 50,
+      }),
+    ],
+  });
+
+  const progress = summarizeExperimentProgress(vault, "zone-2-block", {
+    asOf: "2026-06-09",
+  });
+
+  assert.equal(progress.adherence.completedSessions, 3);
+  assert.deepEqual(progress.adherence.evidence, {
+    eventKind: "activity_session",
+    activityKinds: ["walking", "cycling", "rowing", "elliptical"],
+    minimumDurationMinutes: 35,
+  });
 });
 
 test("experiment progress counts any activity session for generic workout modality", () => {
