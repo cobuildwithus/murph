@@ -177,7 +177,10 @@ describe('assistant execution prompt contract', () => {
       'send no reply or reaction unless Murph is addressed',
     )
     expect(groupLayers.staticCacheableCorePrompt).toContain(
-      'Read immediate same-sender elaborations as one beat.',
+      'Read immediate same-purpose same-sender elaborations as one beat.',
+    )
+    expect(groupLayers.staticCacheableCorePrompt).toContain(
+      'A later bubble that introduces a new factual or task request or directly addresses Murph is a new decision unit even inside the same accepted provider turn',
     )
     expect(groupLayers.staticCacheableCorePrompt).toContain(
       'use the existing brief watch before composing or reacting',
@@ -214,6 +217,9 @@ describe('assistant execution prompt contract', () => {
     )
     expect(directLayers.staticCacheableCorePrompt).not.toContain(
       'use the existing brief watch before composing or reacting',
+    )
+    expect(directLayers.staticCacheableCorePrompt).not.toContain(
+      'a new decision unit even inside the same accepted provider turn',
     )
   })
 

@@ -80,13 +80,19 @@ describe('assistant group-chat style guidance', () => {
       'Read the whole beat, not only the newest bubble.',
     )
     expect(normalized).toContain(
-      "An immediate same-sender elaboration, statistic, caption, or second message inherits the setup's audience",
+      "An immediate same-purpose same-sender elaboration, statistic, or caption inherits the setup's audience",
     )
     expect(normalized).toContain(
       'When the first live bubble is an unaddressed personal artifact and its audience is not yet clear, do not compose or react yet.',
     )
     expect(normalized).toContain(
       'The watch must happen before any assistant output because a later `finish_without_reply` cannot retract a completed reply.',
+    )
+    expect(normalized).toContain(
+      'A new factual or task request or a direct Murph address is evaluated under rule 4 or rule 3',
+    )
+    expect(normalized).toContain(
+      'even when it came from the same sender seconds later or arrived inside the same accepted provider turn',
     )
     expect(normalized).toContain(
       '"Does anyone know whether that gym still does day passes?" remains eligible under rule 4',

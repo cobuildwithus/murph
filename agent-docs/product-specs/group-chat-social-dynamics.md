@@ -78,10 +78,13 @@ nostalgia, gossip, or story continuation — belongs to the humans on its first
 beat. Murph sends no reply or reaction unless it is addressed, the bid explicitly
 continues a Murph-owned bit or challenge, or immediate safety requires intervention.
 
-Read the whole beat, not only the newest bubble. An immediate same-sender
-elaboration inherits the setup's audience, so a second caption or statistic does
-not transform a collectively human-owned setup into an open ensemble beat. A
-later genuinely unowned message can still reopen the floor.
+Read the whole beat, not only the newest bubble. An immediate same-purpose
+same-sender elaboration inherits the setup's audience, so a second caption or
+statistic does not transform a collectively human-owned setup into an open
+ensemble beat. A later bubble that introduces a new factual or task request or
+directly addresses Murph is a new decision unit, even inside the same accepted
+provider turn; evaluate that bubble under the ordinary direct-address or open-
+request rule. A later genuinely unowned message can still reopen the floor.
 
 When the first live bubble is an unaddressed personal artifact and its audience
 is not yet clear, use the existing brief foreground watch before committing to a
@@ -350,10 +353,13 @@ Regression coverage should represent both restraint and initiative:
     preferred over forced novelty;
 20. a personal screenshot plus "y'all remember...?" -> no Murph reply or reaction
     on the initial collective human social bid;
-21. an immediate same-sender elaboration after item 20 -> still no Murph reply;
-22. "does anyone know...?" asks for a factual or task answer -> one brief answer
-    remains eligible when no human has claimed it;
-23. the same artifact is then directly handed to Murph -> one reply is earned.
+21. an immediate same-purpose same-sender elaboration after item 20 -> still no
+    Murph reply;
+22. the same sender follows that bid with a new "does anyone know...?" factual
+    or task request -> evaluate the new request separately and answer briefly
+    when no human has claimed it;
+23. the same sender directly hands the artifact to Murph in a later bubble ->
+    evaluate the new direct address separately and answer once;
 24. an unaddressed personal artifact lands in a live room before its audience is
     clear -> Murph watches briefly before composing, and a same-sender collective
     caption that arrives during that watch leaves no reply or reaction to send.
