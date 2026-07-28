@@ -82,6 +82,10 @@ import {
 import {
   executeCodexAssistantTurnAttempt,
 } from '../src/assistant/codex-runtime.ts'
+import {
+  createAssistantActiveTurnInputController,
+  steerAssistantActiveTurnInput,
+} from '../src/assistant/active-turn-input-controller.ts'
 import type {
   AssistantHostedToolContext,
 } from '../src/assistant/hosted-tool-context.ts'
@@ -19098,6 +19102,173 @@ describe('steered final segments', () => {
     ])
     expect(result.finalMessage).toBe('Later response.')
     expect(result.responseMedia).toEqual([])
+  })
+
+  it('preserves provider acknowledgement when a steer response and first completion share one stdout batch', async () => {
+    const workingDirectory = await createTempDir(
+      'assistant-codex-batched-steer-ack-work-',
+    )
+    const liveTurnReady = createDeferred<void>()
+    const controller = createAssistantActiveTurnInputController({
+      conversationKeys: [
+        'channel:telegram|identity:identity-1|audience:indeterminate|thread:thread-1',
+      ],
+      sessionId: 'session-batched-steer',
+      turnId: 'turn-batched-owner',
+      vault: '/vaults/test',
+    })
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+
+      queueMicrotask(() => {
+        void (async () => {
+          const initialize = await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+          const threadStart = await waitForRpcMethod(child, 'thread/start')
+          child.stdout.write(jsonLine({
+            id: threadStart.id,
+            result: {
+              thread: {
+                id: 'thread-batched-steer',
+              },
+            },
+          }))
+          const turnStart = await waitForRpcMethod(child, 'turn/start')
+          child.stdout.write(jsonLine({
+            id: turnStart.id,
+            result: {
+              turn: {
+                id: 'turn-batched-steer',
+              },
+            },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'item/completed',
+            params: {
+              item: {
+                id: 'user-initial-question',
+                message: 'Initial question',
+                type: 'user_message',
+              },
+              threadId: 'thread-batched-steer',
+              turnId: 'turn-batched-steer',
+            },
+          }))
+
+          await liveTurnReady.promise
+          const steerRequest = await waitForRpcMethod(child, 'turn/steer')
+          child.stdout.write([
+            jsonLine({ id: steerRequest.id, result: {} }),
+            jsonLine({
+              method: 'item/completed',
+              params: {
+                item: {
+                  id: 'assistant-before-batched-steer',
+                  message: 'First response.',
+                  type: 'assistant_message',
+                },
+                threadId: 'thread-batched-steer',
+                turnId: 'turn-batched-steer',
+              },
+            }),
+          ].join(''))
+          child.stdout.write(jsonLine({
+            method: 'item/completed',
+            params: {
+              item: {
+                id: 'user-batched-steer',
+                message: 'Clarification accepted by the provider',
+                type: 'user_message',
+              },
+              threadId: 'thread-batched-steer',
+              turnId: 'turn-batched-steer',
+            },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'item/completed',
+            params: {
+              item: {
+                id: 'assistant-after-batched-steer',
+                message: 'Revised response.',
+                type: 'assistant_message',
+              },
+              threadId: 'thread-batched-steer',
+              turnId: 'turn-batched-steer',
+            },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'turn/completed',
+            params: {
+              turn: {
+                id: 'turn-batched-steer',
+                status: 'completed',
+              },
+            },
+          }))
+        })()
+      })
+
+      return child
+    })
+
+    try {
+      const turn = executeCodexAppServerTurn({
+        onFirstAssistantResponseCompleted: () => {
+          controller.closeInputAdmission()
+        },
+        onLiveTurn: (liveTurn) => {
+          const releaseLiveTurn = controller.registerLiveProviderTurn({
+            interrupt: () => liveTurn.interrupt(),
+            codexThreadId: liveTurn.threadId,
+            providerTurnId: liveTurn.turnId,
+            sessionId: 'session-batched-steer',
+            steer: (input) => liveTurn.steer(input),
+            turnId: 'turn-batched-owner',
+          })
+          liveTurnReady.resolve()
+          return releaseLiveTurn
+        },
+        prompt: 'Initial question',
+        workingDirectory,
+      })
+
+      await liveTurnReady.promise
+      const completion = steerAssistantActiveTurnInput({
+        conversation: {
+          channel: 'telegram',
+          identityId: 'identity-1',
+          threadId: 'thread-1',
+        },
+        expectedActiveTurnId: 'turn-batched-owner',
+        prompt: 'Clarification accepted by the provider',
+        vault: '/vaults/test',
+      })
+      expect(completion).not.toBeNull()
+      completion?.catch(() => undefined)
+
+      await expect(turn).resolves.toMatchObject({
+        finalMessage: 'Revised response.',
+        precedingAgentMessageSegments: [
+          {
+            deliveryContextOrdinal: 0,
+            response: 'First response.',
+          },
+        ],
+        responseDeliveryContextOrdinal: 1,
+      })
+      await expect(controller.admitLiveSteered()).resolves.toMatchObject({
+        acceptedInputs: [
+          expect.objectContaining({
+            id: 'manual-1',
+          }),
+        ],
+        providerAlreadySteered: true,
+      })
+    } finally {
+      controller.fail(new Error('batched steer acknowledgement test complete'))
+      controller.close()
+    }
   })
 
   it('keeps last-wins behavior for multiple finals without a steer boundary', async () => {

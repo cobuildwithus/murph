@@ -8806,32 +8806,39 @@ describe('assistant auto-reply runtime', () => {
       text: 'same actor without authenticated room authority',
       threadIsDirect: false,
     })
-    const actorB = createCapturelessAssistantInputCandidate({
+    const actorBCapture = createCaptureSummary({
       accountId: 'safe_acct_group_a',
       actorId: 'safe_actor_b',
-      conversationThreadId: 'hidden_group_order_thread',
-      inputId: 'ain_40404040404040404040404040404040',
+      captureId: 'capture-group-order-b1',
+      externalId: 'linq:real_group_order_message_b',
       occurredAt: '2026-04-08T00:04:00.000Z',
       receivedAt: '2026-04-08T00:04:01.000Z',
-      replyTarget: {
-        channel: 'linq',
-        messageId: 'real_group_order_message_b',
-        threadId: 'real_group_order_thread',
-      },
       source: 'linq',
-      sourceMetadata: {
-        externalThreadRouteAuthorityPresent: true,
-        kind: 'linq',
-        partCount: 1,
-        reactionEligible: true,
-        replyToMessageId: 'assistant_anchor_b',
-        senderDisplayName: 'Actor B',
-        senderHandle: '+15552220000',
-        service: 'iMessage',
-      },
       text: 'message from actor B',
       threadIsDirect: false,
+      threadId: 'hidden_group_order_thread',
     })
+    const projectedActorB = assistantInputCandidateFromInboxCapture(actorBCapture)
+    const actorB: AssistantInputCandidate = {
+      ...projectedActorB,
+      event: {
+        ...projectedActorB.event,
+        replyTarget: {
+          channel: 'linq',
+          messageId: 'real_group_order_message_b',
+          threadId: 'real_group_order_thread',
+        },
+        sourceMetadata: {
+          externalThreadRouteAuthorityPresent: true,
+          kind: 'linq',
+          partCount: 1,
+          reactionEligible: true,
+          replyToMessageId: 'assistant_anchor_b',
+          senderHandle: '+15552220000',
+          service: 'iMessage',
+        },
+      },
+    }
     const laterActorA = createCapturelessAssistantInputCandidate({
       accountId: 'safe_acct_group_a',
       actorId: 'safe_actor_a',
@@ -8851,7 +8858,6 @@ describe('assistant auto-reply runtime', () => {
         partCount: 1,
         reactionEligible: true,
         replyToMessageId: 'assistant_anchor_a2',
-        senderDisplayName: 'Actor A',
         senderHandle: '+15551110000',
         service: 'iMessage',
       },
@@ -8896,6 +8902,20 @@ describe('assistant auto-reply runtime', () => {
       progressed: false,
       reason: 'no_new_input' as const,
     }))
+    const groupParticipantDisplayNameReader = {
+      read: vi.fn(async (input: {
+        channel: 'linq'
+        senderHandles: readonly string[]
+      }) => input.senderHandles.flatMap((senderHandle) => {
+        if (senderHandle === '+15551110000') {
+          return [{ displayName: 'Actor A', senderHandle }]
+        }
+        if (senderHandle === '+15552220000') {
+          return [{ displayName: 'Actor B', senderHandle }]
+        }
+        return []
+      })),
+    }
     const inputSource = {
       checkpointAcceptedInput,
       listInputCandidatesByIds,
@@ -9005,7 +9025,37 @@ describe('assistant auto-reply runtime', () => {
       allowSelfAuthored: false,
       context,
       enabledChannels: ['linq'],
-      inboxServices: createInboxServices({ show: vi.fn() }),
+      executionContext: {
+        hosted: {
+          groupParticipantDisplayNameReader,
+          memberId: 'member-group-speaker-names',
+          userEnvKeys: [],
+        },
+      },
+      inboxServices: createInboxServices({
+        show: vi.fn(async (input: { captureId: string }) => {
+          const capture = input.captureId === actorBCapture.captureId
+            ? actorBCapture
+            : input.captureId === initialCapture.captureId
+              ? initialCapture
+              : null
+          if (!capture) {
+            throw new Error(`unexpected capture ${input.captureId}`)
+          }
+          return createShowResult(createCaptureDetail({
+            accountId: capture.accountId,
+            actorId: capture.actorId,
+            captureId: capture.captureId,
+            externalId: capture.externalId,
+            occurredAt: capture.occurredAt,
+            receivedAt: capture.receivedAt,
+            source: capture.source,
+            text: capture.text,
+            threadId: capture.threadId,
+            threadIsDirect: capture.threadIsDirect,
+          }))
+        }),
+      }),
       inputSource,
       requestId: null,
       sessionMaxAgeMs: null,
@@ -9014,6 +9064,22 @@ describe('assistant auto-reply runtime', () => {
 
     expect(result.replied).toBe(1)
     expect(replyMocks.sendAssistantMessage).toHaveBeenCalledTimes(1)
+    expect(replyMocks.sendAssistantMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        prompt: expect.stringContaining(
+          'Sender: +15551110000\n\nSpeaker name: "Actor A"',
+        ),
+      }),
+    )
+    expect(groupParticipantDisplayNameReader.read).toHaveBeenCalledTimes(3)
+    expect(groupParticipantDisplayNameReader.read).toHaveBeenCalledWith({
+      channel: 'linq',
+      senderHandles: ['+15551110000'],
+    })
+    expect(groupParticipantDisplayNameReader.read).toHaveBeenCalledWith({
+      channel: 'linq',
+      senderHandles: ['+15552220000'],
+    })
     expect(listInputCandidatesByIds).toHaveBeenCalledTimes(3)
     expect(listNewConversationInputs).not.toHaveBeenCalled()
     expect(refresh).not.toHaveBeenCalled()

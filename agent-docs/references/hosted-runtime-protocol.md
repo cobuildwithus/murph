@@ -1448,12 +1448,16 @@ Authenticated group transcript rendering keeps the opaque assistant input
 reference and server-derived sender handle authoritative. Telegram may carry a
 bounded display name from trusted ingress. Linq may resolve a bounded profile
 name only after durable import through the Web-owned
-`read_participant_display_names` boundary. That boundary matches the current
-handle to exactly one current joined, unsuspended membership and decrypts only
-its membership-implied `profile-name.v0` snapshot; it never traverses selectable
-health grants or device state. Ambiguity or failure returns no name. These names
-are safely quoted presentation data and never participate in identity, routing,
-membership, or participant-scoped effect authorization.
+`read_participant_display_names` boundary. The Cloudflare group-tool adapter
+caps only that presentation action at a one-second soft deadline, bounded
+further by the configured control timeout; timeout, abort, ambiguity, or failure
+returns no name, late completion is ignored, and every other group-tool action
+keeps the configured timeout. The boundary matches the current handle to exactly
+one current joined, unsuspended membership and decrypts only its
+membership-implied `profile-name.v0` snapshot; it never traverses selectable
+health grants or device state. These names are safely quoted presentation data
+and never participate in identity, routing, membership, or participant-scoped
+effect authorization.
 Assistant prompt preparation reads derived attachment evidence sequentially
 under one 32 MiB budget for the current turn and a 16 MiB per-file limit. Hosted
 artifact materialization rejects an external artifact whose declared size is
@@ -1507,11 +1511,15 @@ still replyable through the normal fallback. Duplicate staging and
 projection-completion notifications at or behind the newest queued or committed
 frontier are ignored before exact-successor proof. After the provider
 acknowledges `turn/steer`, Murph journals and checkpoints the accepted input
-before any hosted tool effect or final delivery may proceed. Missing input, a
-causal gap, a boundary change, capacity overflow, or input arriving after the
-first completed response remains pending for a normal later assistant turn. Strict active-turn-targeted input still fails closed instead of
-falling through, and the assistant engine does not synthesize another provider
-request inside the same assistant turn. Final-delivery and hosted-tool effect
+before any hosted tool effect or final delivery may proceed. First-response
+closure removes the conversation registration and starts no further steer, but
+retains the existing provider-turn correlation until the one steer already
+started under that exact key settles; a rejected steer is not acknowledged and
+its input remains pending. Missing input, a causal gap, a boundary change,
+capacity overflow, or input arriving after the first completed response remains
+pending for a normal later assistant turn. Strict active-turn-targeted input
+still fails closed instead of falling through, and the assistant engine does
+not synthesize another provider request inside the same assistant turn. Final-delivery and hosted-tool effect
 keys use the newest accepted causal input as the stable replay anchor while the
 full answered-mailbox set remains attached as evidence.
 When mailbox import produces or reuses a canonical write receipt, the runner
