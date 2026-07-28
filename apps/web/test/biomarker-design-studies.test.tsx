@@ -110,7 +110,7 @@ test("design page routes the biomarker studies through the dedicated sections ta
   expect(sectionsMarkup).toContain("Biomarker preparing state");
   expect(sectionsMarkup).toContain("Biomarker index");
   expect(sectionsMarkup).toContain("Group usage funding and top-up follow-up");
-  expect(sectionsMarkup).toContain("Personal usage credit states");
+  expect(sectionsMarkup).toContain("Overall AI usage and fulfilled top-up");
   expect(sectionsMarkup).toContain("Biomarker result detail");
   expect(sectionsMarkup).toContain("Biomarker reference context");
   expect(sectionsMarkup).toContain("Boundary result detail");
@@ -127,16 +127,18 @@ test("design page routes the biomarker studies through the dedicated sections ta
   expect(sectionsMarkup).toContain("Preview usage added with Text Murph");
   expect(sectionsMarkup).toContain("Preview usage added with channel choices");
   expect(sectionsMarkup).toContain("personal-usage-credit-owner");
-  expect(sectionsMarkup).toContain("Pulse included AI usage");
+  expect(sectionsMarkup).toContain("Pulse AI usage");
   expect(sectionsMarkup).toContain("Static owner-layout preview");
-  expect(sectionsMarkup).toContain("Included usage active");
-  expect(sectionsMarkup).toContain("Included usage exhausted, credit remains");
-  expect(sectionsMarkup).toContain("Included usage and credit exhausted");
-  expect(sectionsMarkup).toContain(
-    "Murph will use your remaining usage credit",
-  );
+  expect(sectionsMarkup).toContain("Overall usage active");
+  expect(sectionsMarkup).toContain("Plan usage exhausted, credit remains");
+  expect(sectionsMarkup).toContain("All available usage exhausted");
+  expect(sectionsMarkup).toContain("76% used");
+  expect(sectionsMarkup).toContain("24% remaining");
+  expect(sectionsMarkup).toContain("Fulfilled top-up with refreshed usage");
+  expect(sectionsMarkup).toContain("Preview fulfilled top-up");
   expect(sectionsMarkup).toContain("Add usage to continue");
   expect(sectionsMarkup).not.toContain("$8.42");
+  expect(sectionsMarkup).not.toContain("remaining usage credit");
   expect(sectionsMarkup).not.toContain("usage credit remaining");
   expect(sectionsMarkup).toContain("inert=\"\"");
   expect(sectionsMarkup).toContain("max-w-7xl");

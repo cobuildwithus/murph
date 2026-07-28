@@ -81,6 +81,9 @@ describe('assistant hosted low-usage skill', () => {
     expect(normalizedSkill).toContain(
       'on that turn when available, even if this heads-up already checked owner status',
     )
+    expect(normalizedSkill).toContain(
+      'a less capable model that uses less AI usage',
+    )
     expect(skill).toContain('`owner: true`, `billingActive: true`')
     expect(skill).toContain('matches exactly one `members` row')
     expect(skill).toContain('navigation to Settings > Family')
@@ -98,6 +101,19 @@ describe('assistant hosted low-usage skill', () => {
     expect(skill).toContain('If no funding URL is returned')
     expect(skill).toContain('period end when relevant')
     expect(skill).toContain('remaining percentage when the result includes remainingPercent')
+    expect(skill).toContain(
+      'returned percentages and forecast as overall available AI usage',
+    )
+    expect(normalizedSkill).toContain(
+      'does not expose how much comes from included allowance or any usage-credit source, including purchase or referral',
+    )
+    expect(normalizedSkill).toContain(
+      'If asked for a source split, say it is unavailable',
+    )
+    expect(normalizedSkill).toContain(
+      'never assign a returned percentage to included allowance, purchased credit, referral credit, or another source',
+    )
+    expect(skill).not.toContain('included-versus-purchased')
     expect(skill).not.toContain('Share only its')
   })
 
