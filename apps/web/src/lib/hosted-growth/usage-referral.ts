@@ -496,17 +496,18 @@ async function buildCommittedUsageReferralMutationResponse(input: {
   now: Date;
   prisma: PrismaClient;
 }): Promise<HostedRuntimeGroupToolResponse> {
+  const { action, actor, now, prisma } = input;
   try {
     const referral = await readHostedUsageReferralSnapshot({
-      actor: input.actor,
-      now: input.now,
-      prisma: input.prisma,
+      actor,
+      now,
+      prisma,
     });
     return {
-      action: input.action,
+      action,
       result: {
         outcome:
-          input.action === "arm_usage_referral" ? "armed" : "canceled",
+          action === "arm_usage_referral" ? "armed" : "canceled",
         referral,
         status: "ok",
       },
@@ -515,13 +516,13 @@ async function buildCommittedUsageReferralMutationResponse(input: {
     console.error(
       "Hosted usage referral snapshot refresh failed after committed mutation.",
       {
-        action: input.action,
+        action,
         errorName: error instanceof Error ? error.name : typeof error,
       },
     );
     return unavailableToolResponse(
-      input.action,
-      input.action === "arm_usage_referral"
+      action,
+      action === "arm_usage_referral"
         ? "usage_referral_arm_applied_snapshot_unavailable"
         : "usage_referral_cancel_applied_snapshot_unavailable",
     );
