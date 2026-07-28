@@ -134,3 +134,5 @@ jobs:
           git diff --cached --check
           git commit -m "Make retention rollout fail closed"
           git push origin HEAD:message-retention-14d
+
+# Triggered after the helper PR was opened so the branch workflow is visible.
