@@ -524,7 +524,7 @@ describe("handleRunnerOutboundRequest", () => {
     const stub: ReceiverSensitiveStub = {
       marker: "runner-outbound-stub",
       bindUser: vi.fn(async function (
-        this: WorkerUserRunnerStubLike,
+        this: ReceiverSensitiveStub,
         userId: string,
       ) {
         expect(this.marker).toBe("runner-outbound-stub");
@@ -4282,6 +4282,134 @@ describe("handleRunnerOutboundRequest", () => {
       secondBody.snapshotId,
       "second workspace snapshot id",
     ))).toBe(true);
+  });
+
+  it("keeps workspace snapshot upload-session RPCs bound to the Durable Object stub", async () => {
+    const fixture = await createHostedRuntimeCryptoContextFixture();
+    const runner = createWorkspaceVersionAwareUserRunner({
+      requireSnapshotRpcReceiver: true,
+    });
+    const startEnv = createDirectRunnerOutboundEnv({
+      ...fixture.env,
+      USER_RUNNER: {
+        getByName: runner.getByName,
+      },
+    });
+    vi.stubGlobal("fetch", fixture.fetchMock);
+
+    const startResponse = await handleRunnerOutboundRequest(
+      createWorkspaceSnapshotStartRequest({
+        expectedWorkspaceVersion: "4",
+        workspaceVersion: "4",
+      }),
+      startEnv,
+      "member_123",
+    );
+    expect(startResponse.status).toBe(200);
+    const startBody = requireTestObject(
+      await startResponse.json(),
+      "receiver-sensitive workspace snapshot start response",
+    );
+    const snapshotId = requireTestString(
+      startBody.snapshotId,
+      "receiver-sensitive workspace snapshot id",
+    );
+    const objectKey = requireTestString(
+      startBody.objectKey,
+      "receiver-sensitive workspace snapshot object key",
+    );
+    const bytes = new Uint8Array([1, 2, 3, 4]);
+    const snapshotRef = createWorkspaceSnapshotV2Ref({
+      encryptedByteSize: bytes.byteLength,
+      encryptedObjectSha256: sha256Hex(bytes),
+      objectKey,
+      snapshotId,
+      userId: "member_123",
+    });
+    const replacedSnapshotId = "snapshot_receiver_sensitive_previous";
+    const replacedObjectKey = await hostedWorkspaceSnapshotObjectKey({
+      snapshotId: replacedSnapshotId,
+      userId: "member_123",
+    });
+    const replacedSnapshotRef = createWorkspaceSnapshotV2Ref({
+      encryptedByteSize: 5,
+      encryptedObjectSha256: "b".repeat(64),
+      objectKey: replacedObjectKey,
+      snapshotId: replacedSnapshotId,
+      userId: "member_123",
+    });
+    const deleteObject = vi.fn(async () => {});
+    const env = createDirectRunnerOutboundEnv({
+      BUNDLES: createWorkspaceSnapshotBucket(
+        async (key) => ({ key, size: bytes.byteLength }),
+        async (key) => ({
+          checksums: createWorkspaceSnapshotHeadChecksums(snapshotRef),
+          customMetadata: createWorkspaceSnapshotHeadMetadata(snapshotRef),
+          key,
+          size: bytes.byteLength,
+        }),
+        deleteObject,
+      ),
+      USER_RUNNER: {
+        getByName: runner.getByName,
+      },
+    });
+    vi.stubGlobal("fetch", createWorkspaceSnapshotCompleteWebFetchMock({
+      currentSnapshotRef: replacedSnapshotRef,
+      onCheckpoint: (args) => {
+        const checkpointRequest = readTestFetchBodyObject(
+          args,
+          "receiver-sensitive workspace snapshot checkpoint request",
+        );
+        return new Response(
+          JSON.stringify({
+            ...createHostedWorkspaceCheckpointResponseWithSnapshotRef(
+              "5",
+              checkpointRequest.snapshotRef,
+            ),
+            replacedSnapshotRef,
+          }),
+          {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
+          },
+        );
+      },
+    }));
+
+    const completeResponse = await handleRunnerOutboundRequest(
+      createWorkspaceSnapshotCompleteRequest({
+        snapshotId,
+        snapshotRef,
+        workspaceVersion: "4",
+      }),
+      env,
+      "member_123",
+    );
+    expect(completeResponse.status).toBe(200);
+    expect(runner.workspaceSnapshotUploadSessions.get(snapshotId)).toMatchObject({
+      replacedSnapshotRef,
+      snapshotId,
+    });
+
+    const abortResponse = await handleRunnerOutboundRequest(
+      createWorkspaceSnapshotAbortRequest({
+        objectKey,
+        snapshotId,
+        workspaceVersion: "4",
+      }),
+      env,
+      "member_123",
+    );
+    expect(abortResponse.status).toBe(200);
+    expect(runner.createHostedWorkspaceSnapshotUploadSession).toHaveBeenCalledOnce();
+    expect(runner.readHostedWorkspaceSnapshotUploadSession).toHaveBeenCalled();
+    expect(runner.rememberHostedWorkspaceSnapshotReplacedRef).toHaveBeenCalledOnce();
+    expect(runner.deleteHostedWorkspaceSnapshotUploadSession).toHaveBeenCalledOnce();
+    expect(runner.workspaceSnapshotUploadSessions.has(snapshotId)).toBe(false);
+    expect(deleteObject).toHaveBeenCalledWith(objectKey);
   });
 
   it("does not let a stale snapshot start replace the active owner's upload session", async () => {
@@ -10091,14 +10219,24 @@ function createWorkspaceVersionAwareUserRunner(input: {
   attemptId?: string;
   leaseGeneration?: string;
   privateMediaPublishResult?: HostedPrivateMediaPublishResult;
+  requireSnapshotRpcReceiver?: boolean;
   userId?: string;
 } = {}) {
   let attemptId = input.attemptId ?? "attempt_1";
   let leaseGeneration = input.leaseGeneration ?? "9";
   const userId = input.userId ?? "member_123";
+  let userRunnerStub: WorkerUserRunnerStubLike;
   const workspaceSnapshotUploadSessions = new Map<string, HostedWorkspaceSnapshotUploadSession>();
   const workspaceSnapshotOrphanCandidates = new Map<string, HostedWorkspaceSnapshotOrphanCandidate>();
   let currentWorkspaceSnapshotUploadSessionId: string | null = null;
+  const assertSnapshotRpcReceiver = (receiver: WorkerUserRunnerStubLike) => {
+    if (
+      input.requireSnapshotRpcReceiver === true
+      && receiver !== userRunnerStub
+    ) {
+      throw new Error("Workspace snapshot Durable Object RPC receiver was detached.");
+    }
+  };
   const bindUser = vi.fn(async (boundUserId: string) => ({ userId: boundUserId }));
   const ownsActiveInvocationLease = vi.fn(async (lease: {
     attemptId: string;
@@ -10115,9 +10253,11 @@ function createWorkspaceVersionAwareUserRunner(input: {
 
     return true;
   });
-  const createHostedWorkspaceSnapshotUploadSession = vi.fn(async (
+  const createHostedWorkspaceSnapshotUploadSession = vi.fn(async function (
+    this: WorkerUserRunnerStubLike,
     session: HostedWorkspaceSnapshotUploadSession,
-  ) => {
+  ) {
+    assertSnapshotRpcReceiver(this);
     if (
       session.attemptId !== attemptId
       || session.leaseGeneration !== leaseGeneration
@@ -10135,10 +10275,14 @@ function createWorkspaceVersionAwareUserRunner(input: {
     currentWorkspaceSnapshotUploadSessionId = session.snapshotId;
     return session;
   });
-  const rememberHostedWorkspaceSnapshotReplacedRef = vi.fn(async (request: {
-    expectedSession: HostedWorkspaceSnapshotUploadSession;
-    replacedSnapshotRef: NonNullable<HostedWorkspaceSnapshotUploadSession["replacedSnapshotRef"]>;
-  }) => {
+  const rememberHostedWorkspaceSnapshotReplacedRef = vi.fn(async function (
+    this: WorkerUserRunnerStubLike,
+    request: {
+      expectedSession: HostedWorkspaceSnapshotUploadSession;
+      replacedSnapshotRef: NonNullable<HostedWorkspaceSnapshotUploadSession["replacedSnapshotRef"]>;
+    },
+  ) {
+    assertSnapshotRpcReceiver(this);
     const current = workspaceSnapshotUploadSessions.get(request.expectedSession.snapshotId);
     if (
       !current
@@ -10157,14 +10301,24 @@ function createWorkspaceVersionAwareUserRunner(input: {
     });
     return true;
   });
-  const readHostedWorkspaceSnapshotUploadSession = vi.fn(async (request: {
-    snapshotId: string;
-    userId: string;
-  }) => workspaceSnapshotUploadSessions.get(request.snapshotId) ?? null);
-  const deleteHostedWorkspaceSnapshotUploadSession = vi.fn(async (request: {
-    snapshotId: string;
-    userId: string;
-  }) => {
+  const readHostedWorkspaceSnapshotUploadSession = vi.fn(async function (
+    this: WorkerUserRunnerStubLike,
+    request: {
+      snapshotId: string;
+      userId: string;
+    },
+  ) {
+    assertSnapshotRpcReceiver(this);
+    return workspaceSnapshotUploadSessions.get(request.snapshotId) ?? null;
+  });
+  const deleteHostedWorkspaceSnapshotUploadSession = vi.fn(async function (
+    this: WorkerUserRunnerStubLike,
+    request: {
+      snapshotId: string;
+      userId: string;
+    },
+  ) {
+    assertSnapshotRpcReceiver(this);
     const deleted = workspaceSnapshotUploadSessions.delete(request.snapshotId);
     if (currentWorkspaceSnapshotUploadSessionId === request.snapshotId) {
       currentWorkspaceSnapshotUploadSessionId = null;
@@ -10210,22 +10364,23 @@ function createWorkspaceVersionAwareUserRunner(input: {
     };
   });
 
+  userRunnerStub = {
+    bindUser,
+    createHostedWorkspaceSnapshotUploadSession,
+    deleteHostedWorkspaceSnapshotUploadSession,
+    rememberHostedWorkspaceSnapshotReplacedRef,
+    publishHostedPrivateMedia,
+    readHostedWorkspaceSnapshotUploadSession,
+    recordHostedWorkspaceSnapshotOrphanCandidate,
+    validateRuntimeWriteFence,
+  };
+
   return {
     bindUser,
     createHostedWorkspaceSnapshotUploadSession,
     deleteHostedWorkspaceSnapshotUploadSession,
     getByName() {
-      return {
-        bindUser,
-        createHostedWorkspaceSnapshotUploadSession,
-        deleteHostedWorkspaceSnapshotUploadSession,
-        rememberHostedWorkspaceSnapshotReplacedRef,
-        ownsActiveInvocationLease,
-        publishHostedPrivateMedia,
-        readHostedWorkspaceSnapshotUploadSession,
-        recordHostedWorkspaceSnapshotOrphanCandidate,
-        validateRuntimeWriteFence,
-      };
+      return userRunnerStub;
     },
     ownsActiveInvocationLease,
     publishHostedPrivateMedia,
