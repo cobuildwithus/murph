@@ -37,9 +37,7 @@ export async function renewHostedThreadContainerParticipantAccessTx(input: {
 }): Promise<boolean> {
   assertValidDate(input.now);
   assertValidDate(input.observedAt);
-  const lastSeenAt = input.observedAt.getTime() > input.now.getTime()
-    ? input.now
-    : input.observedAt;
+  const lastSeenAt = clampHostedThreadContainerParticipantObservation(input);
   const updated = await input.prisma.hostedThreadContainerParticipant.updateMany({
     data: { lastSeenAt },
     where: {
@@ -51,6 +49,67 @@ export async function renewHostedThreadContainerParticipantAccessTx(input: {
   });
 
   return updated.count > 0;
+}
+
+/**
+ * Records an authenticated provider observation without transferring container
+ * ownership. The participant identity is part of the compound key, so one
+ * sender can only create or renew their own lease.
+ */
+export async function observeHostedThreadContainerParticipantAccessTx(input: {
+  containerMemberId: string;
+  handleLookupKey: string;
+  now: Date;
+  observedAt: Date;
+  participantMemberId: string;
+  prisma: Prisma.TransactionClient;
+}): Promise<void> {
+  assertValidDate(input.now);
+  assertValidDate(input.observedAt);
+  const lastSeenAt = clampHostedThreadContainerParticipantObservation({
+    now: input.now,
+    observedAt: input.observedAt,
+  });
+  await input.prisma.hostedThreadContainerParticipant.upsert({
+    create: {
+      containerMemberId: input.containerMemberId,
+      firstSeenAt: lastSeenAt,
+      handleLookupKey: input.handleLookupKey,
+      lastSeenAt,
+      participantMemberId: input.participantMemberId,
+      removedAt: null,
+    },
+    update: {
+      handleLookupKey: input.handleLookupKey,
+    },
+    where: {
+      containerMemberId_participantMemberId: {
+        containerMemberId: input.containerMemberId,
+        participantMemberId: input.participantMemberId,
+      },
+    },
+  });
+  await input.prisma.hostedThreadContainerParticipant.updateMany({
+    data: {
+      lastSeenAt,
+      removedAt: null,
+    },
+    where: {
+      containerMemberId: input.containerMemberId,
+      participantMemberId: input.participantMemberId,
+      removedAt: { lt: lastSeenAt },
+    },
+  });
+  await renewHostedThreadContainerParticipantAccessTx(input);
+}
+
+function clampHostedThreadContainerParticipantObservation(input: {
+  now: Date;
+  observedAt: Date;
+}): Date {
+  return input.observedAt.getTime() > input.now.getTime()
+    ? input.now
+    : input.observedAt;
 }
 
 function assertValidDate(value: Date): void {

@@ -29,6 +29,10 @@ const HOSTED_TELEGRAM_ACCESS_NOTICE_RETRY_MS = 30_000;
 const HOSTED_TELEGRAM_NOTICE_DELIVERY_SOURCE =
   "hosted_runtime_ai_usage_limit_notice";
 const HOSTED_TELEGRAM_ACCESS_NOTICE_TEMPLATE = "access_notice";
+const HOSTED_TELEGRAM_ACCESS_NOTICE_DEFINITE_FAILURE_CODE =
+  "telegram_access_notice_definite_failure";
+const HOSTED_TELEGRAM_API_RESPONSE_REJECTED_CODE =
+  "HOSTED_TELEGRAM_API_RESPONSE_REJECTED";
 
 export type HostedTelegramAccessNoticeDeliveryResult =
   | { status: "already_notified" }
@@ -44,6 +48,7 @@ type HostedTelegramAccessNoticeDispatchClaim =
       target: TelegramThreadTarget;
     }
   | { status: "already_notified" }
+  | { status: "definite_failure" }
   | { retryAt: Date; status: "in_flight" }
   | { status: "not_applicable" };
 
@@ -130,6 +135,9 @@ export async function sendHostedTelegramAccessNotice(
       return claim;
     }
     if (claim?.status === "already_notified") {
+      return claim;
+    }
+    if (claim?.status === "definite_failure") {
       return claim;
     }
     if (claim?.status === "in_flight") {
@@ -256,14 +264,33 @@ async function sendHostedTelegramUnanchoredAccessNotice(input: {
       });
     }
 
-    if (isHostedOnboardingError(error) && !error.retryable) {
+    if (
+      isHostedOnboardingError(error)
+      && error.code === HOSTED_TELEGRAM_API_RESPONSE_REJECTED_CODE
+      && error.retryable
+    ) {
+      return await markHostedTelegramAccessNoticeRetryable({
+        attemptedAt: claim.attemptedAt,
+        failureCode: error.code,
+        failureReason: error.message,
+        idempotencyKey: input.idempotencyKey,
+        prisma: input.input.prisma,
+        retryAfterSeconds: readHostedTelegramRetryAfterSeconds(error),
+      });
+    }
+
+    if (
+      isHostedOnboardingError(error)
+      && error.code === HOSTED_TELEGRAM_API_RESPONSE_REJECTED_CODE
+      && !error.retryable
+    ) {
       // Telegram returned a non-retryable rejection, so the private message
       // definitely did not land. Preserve the terminal provider-effect record
       // and let the webhook adapter use its account-neutral room fallback.
       await markHostedLinqDeliverySendFailedTx({
         expectedAttemptedAt: claim.attemptedAt,
         failedAt: claim.attemptedAt,
-        failureCode: error.code,
+        failureCode: HOSTED_TELEGRAM_ACCESS_NOTICE_DEFINITE_FAILURE_CODE,
         failureReason: error.message,
         idempotencyKey: input.idempotencyKey,
         prisma: input.input.prisma,
@@ -324,6 +351,7 @@ async function claimHostedTelegramAccessNoticeDispatch(input: {
         idempotencyKey: input.idempotencyKey,
         prisma: tx,
         reclaimStalePreProviderAttempt: true,
+        returnExistingFailureCode: true,
         source: HOSTED_TELEGRAM_NOTICE_DELIVERY_SOURCE,
         sourceRef: input.input.sourceEventId,
         status: "provider_dispatch_started",
@@ -348,6 +376,12 @@ async function claimHostedTelegramAccessNoticeDispatch(input: {
           retryAt: delivery.retryAt,
           status: "in_flight",
         };
+      }
+      if (
+        delivery.failureCode
+        === HOSTED_TELEGRAM_ACCESS_NOTICE_DEFINITE_FAILURE_CODE
+      ) {
+        return { status: "definite_failure" };
       }
       return { status: "already_notified" };
     },
@@ -383,10 +417,14 @@ async function markHostedTelegramAccessNoticeRetryable(input: {
   failureReason?: string | null;
   idempotencyKey: string;
   prisma: PrismaClient;
+  retryAfterSeconds?: number;
 }): Promise<HostedTelegramAccessNoticeDeliveryResult> {
-  const retryAt = new Date(
-    input.attemptedAt.getTime() + HOSTED_TELEGRAM_ACCESS_NOTICE_RETRY_MS,
-  );
+  const retryAt = resolveHostedTelegramAccessNoticeRetryAt({
+    ...(input.retryAfterSeconds === undefined
+      ? {}
+      : { retryAfterSeconds: input.retryAfterSeconds }),
+    sentAt: input.attemptedAt,
+  });
   await markHostedLinqDeliverySendFailedTx({
     expectedAttemptedAt: input.attemptedAt,
     failedAt: input.attemptedAt,
@@ -397,6 +435,17 @@ async function markHostedTelegramAccessNoticeRetryable(input: {
     retryAfterAt: retryAt,
   });
   return { retryAt, status: "in_flight" };
+}
+
+function readHostedTelegramRetryAfterSeconds(
+  error: Readonly<{ details?: Record<string, unknown> }>,
+): number | undefined {
+  const retryAfterSeconds = error.details?.retryAfterSeconds;
+  return typeof retryAfterSeconds === "number"
+    && Number.isSafeInteger(retryAfterSeconds)
+    && retryAfterSeconds > 0
+    ? retryAfterSeconds
+    : undefined;
 }
 
 function isHostedTelegramControlPreProviderFailure(

@@ -1771,6 +1771,51 @@ describe("hosted Linq observability stores", () => {
     expect(fixture.hostedLinqDeliveryUpdateMany).not.toHaveBeenCalled();
   });
 
+  it("returns a persisted Telegram failure code only when the caller requests it", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    const attemptedAt = new Date("2026-03-26T12:30:00.000Z");
+    fixture.hostedLinqDeliveryFindUnique.mockResolvedValueOnce({
+      acceptedAt: null,
+      attemptedAt: new Date("2026-03-26T12:00:00.000Z"),
+      deliveredAt: null,
+      failureCode: "telegram_access_notice_definite_failure",
+      failedAt: new Date("2026-03-26T12:00:01.000Z"),
+      id: "hld_failed_telegram_notice",
+      lastReceiptAt: null,
+      messageLookupKey: null,
+      phoneNumberLookupKey: null,
+      retryAfterAt: null,
+      skippedAt: null,
+      source: "hosted_runtime_ai_usage_limit_notice",
+      status: "failed",
+    });
+    fixture.hostedLinqDeliveryUpdateMany.mockResolvedValueOnce({ count: 0 });
+
+    await expect(claimHostedLinqDeliveryProviderDispatchTx({
+      attemptedAt,
+      idempotencyKey: "telegram-access-notice:event-123",
+      prisma: fixture.prisma as never,
+      reclaimStalePreProviderAttempt: true,
+      returnExistingFailureCode: true,
+      source: "hosted_runtime_ai_usage_limit_notice",
+      sourceRef: "telegram:update:123",
+      targetKind: "telegram_thread",
+      template: "access_notice",
+    })).resolves.toEqual({
+      claimed: false,
+      failureCode: "telegram_access_notice_definite_failure",
+      id: "hld_failed_telegram_notice",
+    });
+
+    expect(fixture.hostedLinqDeliveryUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          id: "hld_failed_telegram_notice",
+        }),
+      }),
+    );
+  });
+
   it("does not reclaim retry-after failed Telegram usage notice rows before their not-before time", async () => {
     const fixture = createObservabilityPrismaFixture();
     const attemptedAt = new Date("2026-03-26T12:14:30.000Z");

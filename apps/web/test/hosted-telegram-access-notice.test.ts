@@ -211,6 +211,33 @@ describe("Telegram access notice delivery", () => {
     );
   });
 
+  it("does not resend an accepted unanchored private notice on replay", async () => {
+    const input = {
+      authorizedTelegramUserId: "456",
+      memberId: "member_123",
+      message: "Finish setup, then try the group again.",
+      noticeCode: "signup_required",
+      prisma: prisma as never,
+      replyToMessageId: null,
+      sourceEventId: "telegram:update:accepted-replay",
+      target: "456",
+    };
+
+    await expect(sendHostedTelegramAccessNotice(input)).resolves.toEqual({
+      status: "sent",
+    });
+    mocks.claimHostedLinqDeliveryProviderDispatchTx.mockResolvedValue({
+      claimed: false,
+      failureCode: null,
+      id: "delivery_123",
+    });
+    await expect(sendHostedTelegramAccessNotice(input)).resolves.toEqual({
+      status: "already_notified",
+    });
+
+    expect(mocks.sendHostedTelegramTextMessage).toHaveBeenCalledOnce();
+  });
+
   it.each([
     {
       expectedTarget: {
@@ -326,12 +353,78 @@ describe("Telegram access notice delivery", () => {
       }),
     );
     expect(mocks.markHostedLinqDeliveryAcceptedTx).not.toHaveBeenCalled();
+
+    mocks.claimHostedLinqDeliveryProviderDispatchTx.mockResolvedValue({
+      claimed: false,
+      failureCode: "Error",
+      id: "delivery_123",
+    });
+    await expect(sendHostedTelegramAccessNotice({
+      authorizedTelegramUserId: "456",
+      memberId: "member_123",
+      message: "Finish setup, then try the group again.",
+      noticeCode: "signup_required",
+      prisma: prisma as never,
+      replyToMessageId: null,
+      sourceEventId: "telegram:update:324",
+      target: "456",
+    })).resolves.toEqual({ status: "already_notified" });
+    expect(mocks.sendHostedTelegramTextMessage).toHaveBeenCalledOnce();
+  });
+
+  it("retries a provider-confirmed rate limit after its persisted delay", async () => {
+    const sentAt = new Date("2026-07-25T12:00:00.000Z");
+    const retryAt = new Date("2026-07-25T12:00:45.000Z");
+    mocks.sendHostedTelegramTextMessage.mockRejectedValueOnce(
+      hostedOnboardingError({
+        code: "HOSTED_TELEGRAM_API_RESPONSE_REJECTED",
+        details: {
+          retryAfterSeconds: 45,
+          status: 429,
+        },
+        httpStatus: 502,
+        message: "Telegram sendMessage failed with HTTP 429.",
+        retryable: true,
+      }),
+    );
+
+    const input = {
+      authorizedTelegramUserId: "456",
+      memberId: "member_123",
+      message: "Finish setup, then try the group again.",
+      noticeCode: "signup_required",
+      prisma: prisma as never,
+      replyToMessageId: null,
+      sentAt,
+      sourceEventId: "telegram:update:rate-limited",
+      target: "456",
+    };
+    await expect(sendHostedTelegramAccessNotice(input)).resolves.toEqual({
+      retryAt,
+      status: "in_flight",
+    });
+    expect(mocks.markHostedLinqDeliverySendFailedTx).toHaveBeenCalledWith(
+      expect.objectContaining({
+        failureCode: "HOSTED_TELEGRAM_API_RESPONSE_REJECTED",
+        retryAfterAt: retryAt,
+      }),
+    );
+
+    mocks.claimHostedLinqDeliveryProviderDispatchTx.mockResolvedValue({
+      claimed: true,
+      id: "delivery_123",
+    });
+    await expect(sendHostedTelegramAccessNotice({
+      ...input,
+      sentAt: retryAt,
+    })).resolves.toEqual({ status: "sent" });
+    expect(mocks.sendHostedTelegramTextMessage).toHaveBeenCalledTimes(2);
   });
 
   it("reports a provider-confirmed private rejection for neutral group fallback", async () => {
     mocks.sendHostedTelegramTextMessage.mockRejectedValue(
       hostedOnboardingError({
-        code: "HOSTED_TELEGRAM_API_REQUEST_FAILED",
+        code: "HOSTED_TELEGRAM_API_RESPONSE_REJECTED",
         httpStatus: 502,
         message: "Telegram sendMessage failed with HTTP 403.",
         retryable: false,
@@ -351,12 +444,33 @@ describe("Telegram access notice delivery", () => {
 
     expect(mocks.markHostedLinqDeliverySendFailedTx).toHaveBeenCalledWith(
       expect.objectContaining({
-        failureCode: "HOSTED_TELEGRAM_API_REQUEST_FAILED",
+        failureCode: "telegram_access_notice_definite_failure",
         idempotencyKey: expect.stringMatching(/^telegram-access-notice:/u),
         prisma,
       }),
     );
     expect(mocks.markHostedLinqDeliveryAcceptedTx).not.toHaveBeenCalled();
+  });
+
+  it("replays a persisted provider rejection as definite without resending privately", async () => {
+    mocks.claimHostedLinqDeliveryProviderDispatchTx.mockResolvedValue({
+      claimed: false,
+      failureCode: "telegram_access_notice_definite_failure",
+      id: "delivery_123",
+    });
+
+    await expect(sendHostedTelegramAccessNotice({
+      authorizedTelegramUserId: "456",
+      memberId: "member_123",
+      message: "Finish setup, then try the group again.",
+      noticeCode: "signup_required",
+      prisma: prisma as never,
+      replyToMessageId: null,
+      sourceEventId: "telegram:update:rejected-replay",
+      target: "456",
+    })).resolves.toEqual({ status: "definite_failure" });
+
+    expect(mocks.sendHostedTelegramTextMessage).not.toHaveBeenCalled();
   });
 
   it("rejects a stale Telegram target under the routing lock before provider dispatch", async () => {

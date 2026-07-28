@@ -16,6 +16,12 @@ import {
   sendHostedLinqChatMessage,
 } from "./linq";
 import { getHostedLinqChatSummary } from "./linq-client";
+import {
+  createHostedLinqParticipantContactLookupKeyReadCandidates,
+  normalizeHostedLinqParticipantContactValue,
+  type HostedLinqParticipantContact,
+  type HostedLinqParticipantIdentity,
+} from "./linq-participant-contact";
 import { normalizePhoneNumber } from "./phone";
 import {
   buildHostedGroupChatAccessRecoveryMessage,
@@ -133,6 +139,13 @@ type HostedVisibleSecondaryLinqPrivateRecovery = {
   message: string;
 };
 
+type HostedVisibleSecondaryLinqPrivateRoute = {
+  chatId: string;
+  kind: "committed" | "pending";
+  participantContact: HostedLinqParticipantIdentity;
+  recipientPhone: string | null;
+};
+
 export function withHostedVisibleSecondaryLinqOutcomes(
   handler: HostedOnboardingLinqWebhookHandler,
   dependencies: HostedVisibleSecondaryLinqDependencies = defaultLinqDependencies,
@@ -170,6 +183,7 @@ export function withHostedVisibleSecondaryLinqOutcomes(
             currentChatId: context.summary.chatId,
             eventId: event.event_id,
             incomingRecipientPhone: context.recipientPhoneNumber,
+            participantContact: context.participantContact,
             prisma,
             reason,
             sender: recognizedSender,
@@ -352,6 +366,7 @@ async function resolveHostedLinqPrivateGroupRecovery(input: {
   dependencies: HostedVisibleSecondaryLinqDependencies;
   eventId: string;
   incomingRecipientPhone: string | null;
+  participantContact: HostedLinqParticipantContact | null;
   prisma: PrismaClient;
   reason: string;
   sender: HostedVisibleSecondaryLinqSender;
@@ -364,18 +379,20 @@ async function resolveHostedLinqPrivateGroupRecovery(input: {
     memberId: input.sender.id,
     prisma: input.prisma,
   });
-  const privateChatId = resolveHostedLinqPrivateGroupRecoveryChatId({
+  const privateRoute = resolveHostedLinqPrivateGroupRecoveryRoute({
     incomingRecipientPhone: input.incomingRecipientPhone,
+    participantContact: input.participantContact,
     reason: input.reason,
     routing: initialRouting,
   });
-  if (!privateChatId || privateChatId === input.currentChatId.trim()) {
+  if (!privateRoute || privateRoute.chatId === input.currentChatId.trim()) {
     return null;
   }
 
   if (!await isHostedLinqPrivateRecoveryChatAttested({
-    chatId: privateChatId,
+    chatId: privateRoute.chatId,
     dependencies: input.dependencies,
+    participantContact: input.participantContact,
     ...(input.signal ? { signal: input.signal } : {}),
   })) {
     // Never disclose account state to a route whose direct audience cannot be
@@ -402,49 +419,76 @@ async function resolveHostedLinqPrivateGroupRecovery(input: {
     prisma: input.prisma,
   });
   if (
-    resolveHostedLinqPrivateGroupRecoveryChatId({
-      incomingRecipientPhone: input.incomingRecipientPhone,
-      reason: input.reason,
-      routing: currentRouting,
-    }) !== privateChatId
+    !isSameHostedLinqPrivateRecoveryRoute(
+      resolveHostedLinqPrivateGroupRecoveryRoute({
+        incomingRecipientPhone: input.incomingRecipientPhone,
+        participantContact: input.participantContact,
+        reason: input.reason,
+        routing: currentRouting,
+      }),
+      privateRoute,
+    )
   ) {
     return null;
   }
   if (!await isHostedLinqPrivateRecoveryChatAttested({
-    chatId: privateChatId,
+    chatId: privateRoute.chatId,
     dependencies: input.dependencies,
+    participantContact: input.participantContact,
     ...(input.signal ? { signal: input.signal } : {}),
   })) {
     return null;
   }
 
   return {
-    chatId: privateChatId,
+    chatId: privateRoute.chatId,
     message: buildHostedGroupChatAccessRecoveryMessage(access.message),
   };
 }
 
-function resolveHostedLinqPrivateGroupRecoveryChatId(input: {
+function resolveHostedLinqPrivateGroupRecoveryRoute(input: {
   incomingRecipientPhone: string | null;
+  participantContact: HostedLinqParticipantContact | null;
   reason: string;
   routing: Awaited<ReturnType<typeof readHostedMemberRoutingState>>;
-}): string | null {
+}): HostedVisibleSecondaryLinqPrivateRoute | null {
   const routing = input.routing;
-  if (!routing) {
+  const participantContact = input.participantContact;
+  if (!routing || !participantContact) {
     return null;
   }
 
-  const route = routing.linqChatId?.trim()
-    ? {
-        chatId: routing.linqChatId.trim(),
-        recipientPhone: routing.linqRecipientPhone,
-      }
-    : routing.pendingLinqChatId?.trim()
+  const participantLookupKeyCandidates =
+    createHostedLinqParticipantContactLookupKeyReadCandidates(
+      participantContact,
+    );
+  const committedRoute =
+    routing.linqChatId?.trim()
+    && routing.linqParticipantContact?.kind === participantContact.kind
+    && participantLookupKeyCandidates.includes(
+      routing.linqParticipantContact.lookupKey,
+    )
+      ? {
+          chatId: routing.linqChatId.trim(),
+          kind: "committed" as const,
+          participantContact: routing.linqParticipantContact,
+          recipientPhone: routing.linqRecipientPhone,
+        }
+      : null;
+  const pendingRoute =
+    routing.pendingLinqChatId?.trim()
+    && routing.pendingLinqParticipantContact?.kind === participantContact.kind
+    && participantLookupKeyCandidates.includes(
+      routing.pendingLinqParticipantContact.lookupKey,
+    )
       ? {
           chatId: routing.pendingLinqChatId.trim(),
+          kind: "pending" as const,
+          participantContact: routing.pendingLinqParticipantContact,
           recipientPhone: routing.pendingLinqRecipientPhone,
         }
       : null;
+  const route = committedRoute ?? pendingRoute;
   if (!route) {
     return null;
   }
@@ -465,14 +509,37 @@ function resolveHostedLinqPrivateGroupRecoveryChatId(input: {
     }
   }
 
-  return route.chatId;
+  return route;
+}
+
+function isSameHostedLinqPrivateRecoveryRoute(
+  currentRoute: HostedVisibleSecondaryLinqPrivateRoute | null,
+  initialRoute: HostedVisibleSecondaryLinqPrivateRoute,
+): boolean {
+  return Boolean(
+    currentRoute
+    && currentRoute.chatId === initialRoute.chatId
+    && currentRoute.kind === initialRoute.kind
+    && currentRoute.participantContact.kind
+      === initialRoute.participantContact.kind
+    && currentRoute.participantContact.lookupKey
+      === initialRoute.participantContact.lookupKey
+    && normalizePhoneNumber(currentRoute.recipientPhone)
+      === normalizePhoneNumber(initialRoute.recipientPhone),
+  );
 }
 
 async function isHostedLinqPrivateRecoveryChatAttested(input: {
   chatId: string;
   dependencies: HostedVisibleSecondaryLinqDependencies;
+  participantContact: HostedLinqParticipantContact | null;
   signal?: AbortSignal;
 }): Promise<boolean> {
+  const participantContact = input.participantContact;
+  if (!participantContact) {
+    return false;
+  }
+
   const readChatSummary =
     input.dependencies.getHostedLinqChatSummary
     ?? getHostedLinqChatSummary;
@@ -481,7 +548,27 @@ async function isHostedLinqPrivateRecoveryChatAttested(input: {
       chatId: input.chatId,
       ...(input.signal ? { signal: input.signal } : {}),
     });
-    return privateChat.isGroup === false;
+    const expectedParticipantValue =
+      normalizeHostedLinqParticipantContactValue(participantContact);
+    if (privateChat.isGroup !== false || !expectedParticipantValue) {
+      return false;
+    }
+
+    const participantHandles = privateChat.handles
+      .filter((handle) =>
+        !handle.isMe
+        && (!handle.status || handle.status.trim().toLowerCase() === "active")
+      )
+      .map((handle) => normalizeHostedLinqParticipantContactValue({
+        kind: participantContact.kind,
+        value: handle.handle,
+      }));
+    return (
+      participantHandles.length > 0
+      && participantHandles.every(
+        (handle) => handle === expectedParticipantValue,
+      )
+    );
   } catch {
     return false;
   }
