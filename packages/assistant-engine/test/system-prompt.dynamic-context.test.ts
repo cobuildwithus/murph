@@ -1,6 +1,10 @@
+import { readFile } from 'node:fs/promises'
+import path from 'node:path'
+
 import { describe, expect, it } from 'vitest'
 import { MURPH_PRODUCT_ORIGIN } from '@murphai/contracts'
 
+import { resolveAssistantSkillsRoot } from '../src/assistant-skill-assets.js'
 import {
   buildAssistantSystemPromptLayers,
   type AssistantSystemPromptInput,
@@ -59,7 +63,10 @@ describe('assistant dynamic context prompt blocks', () => {
         '`murph.plan_usage` is read-only and changes neither billing, Family state, nor usage credit',
       )
       expect(layers.stableRouteCapabilityPrompt).toContain(
-        `provide \`${MURPH_PRODUCT_ORIGIN}/settings#subscription\` only after \`status\` is \`active\` or \`exhausted\`, or \`reason\` is \`trial_conversion_pending\``,
+        "For a personal or Family owner-self add-usage request that passes the relevant skill's authorization gates, use only that skill's selector-bearing handoff; never add or substitute the generic Settings route",
+      )
+      expect(layers.stableRouteCapabilityPrompt).toContain(
+        `For any other explicit personal billing or unsupported Family administration, provide \`${MURPH_PRODUCT_ORIGIN}/settings#subscription\` only after \`status\` is \`active\` or \`exhausted\`, or \`reason\` is \`trial_conversion_pending\``,
       )
       expect(layers.stableRouteCapabilityPrompt).toContain(
         'never provide it for `group_not_supported` or `hosted_access_inactive`',
@@ -72,6 +79,48 @@ describe('assistant dynamic context prompt blocks', () => {
       )
     },
   )
+
+  it('keeps selector-bearing add-usage routes exclusive in the assembled billing prompt stack', async () => {
+    const layers = buildAssistantSystemPromptLayers({
+      ...baseConversationInput,
+      conversationScope: 'direct',
+      hostedRuntime: true,
+    })
+    const skillsRoot = resolveAssistantSkillsRoot()
+    const [lowUsageSkill, familySkill] = await Promise.all([
+      readFile(path.join(skillsRoot, 'hosted-low-usage', 'SKILL.md'), 'utf8'),
+      readFile(path.join(skillsRoot, 'murph-family', 'SKILL.md'), 'utf8'),
+    ])
+    const assembledBillingPrompt = [
+      layers.stableRouteCapabilityPrompt,
+      lowUsageSkill,
+      familySkill,
+    ].join('\n')
+    const genericSettingsRoute = `${MURPH_PRODUCT_ORIGIN}/settings#subscription`
+    const personalAddUsageRoute =
+      `${MURPH_PRODUCT_ORIGIN}/settings?addUsage=true#subscription`
+    const familyOwnerSelfAddUsageRoute =
+      `${MURPH_PRODUCT_ORIGIN}/settings?addUsage=family#family`
+
+    expect(assembledBillingPrompt).toContain(
+      "For a personal or Family owner-self add-usage request that passes the relevant skill's authorization gates, use only that skill's selector-bearing handoff; never add or substitute the generic Settings route",
+    )
+    expect(assembledBillingPrompt).not.toContain(
+      'For explicit personal billing or unsupported Family administration',
+    )
+    expect(layers.stableRouteCapabilityPrompt).not.toContain(
+      personalAddUsageRoute,
+    )
+    expect(layers.stableRouteCapabilityPrompt).not.toContain(
+      familyOwnerSelfAddUsageRoute,
+    )
+    expect(lowUsageSkill).toContain(personalAddUsageRoute)
+    expect(lowUsageSkill).toContain(familyOwnerSelfAddUsageRoute)
+    expect(familySkill).toContain(familyOwnerSelfAddUsageRoute)
+    expect(lowUsageSkill).not.toContain(genericSettingsRoute)
+    expect(familySkill).not.toContain(genericSettingsRoute)
+    expect(assembledBillingPrompt.split(genericSettingsRoute)).toHaveLength(2)
+  })
 
   it('injects runtime dynamic context before the context snapshot on conversation turns', () => {
     const layers = buildAssistantSystemPromptLayers(baseConversationInput)
