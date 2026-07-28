@@ -8,6 +8,7 @@ import {
 
 import {
   GroupJoinAcceptForm,
+  GroupJoinInviteMismatchRecovery,
   GroupJoinLeaveButton,
   type GroupJoinPermissionDisplay,
 } from "@/src/components/hosted-groups/group-join-client";
@@ -143,6 +144,15 @@ export function GroupJoinStudy() {
             postJoinDestination="/home"
           />
           <GroupJoinHomeLink label="Not now" />
+        </GroupJoinPageMock>
+      </GroupJoinVariant>
+
+      <GroupJoinVariant
+        caption="The phone-bound invite belongs to a different account than the current browser session. The unsafe join stays blocked, and one existing sign-out action preserves this group link for phone verification."
+        title="Different account · recovery"
+      >
+        <GroupJoinPageMock alreadyActiveMember={false}>
+          <GroupJoinInviteMismatchRecovery />
         </GroupJoinPageMock>
       </GroupJoinVariant>
 

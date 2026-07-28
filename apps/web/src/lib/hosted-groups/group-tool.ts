@@ -1181,7 +1181,7 @@ function buildHostedGroupJoinOfferMessage(input: {
 }): string {
   // The link stays as the control for choosing different permissions, and works
   // for everyone.
-  return `Like or heart this message to share the following with this group: ${
+  return `Like or heart this message if these default sharing choices look right: ${
     renderHostedGroupJoinOfferScopeSentence(input.projectionScopes)
   }. To choose different permissions, use ${input.joinUrl}.`;
 }

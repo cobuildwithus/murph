@@ -11,8 +11,14 @@ import {
 
 import { HostedLegalConsentCard } from "@/src/components/legal/hosted-legal-consent-card";
 import { AuthDialog } from "@/src/components/hosted-onboarding/auth-dialog";
-import { requestHostedOnboardingJson } from "@/src/components/hosted-onboarding/client-api";
+import {
+  HostedOnboardingApiError,
+  requestHostedOnboardingJson,
+} from "@/src/components/hosted-onboarding/client-api";
 import { navigateHostedAuthRedirect } from "@/src/components/hosted-onboarding/hosted-auth-navigation";
+import {
+  JoinInviteSignOutButtonIsland,
+} from "@/src/components/hosted-onboarding/join-invite-islands";
 import { groupJoinPermissionsForDisplay } from "@/src/components/hosted-groups/group-join-permission-groups";
 import { MurphContactLink } from "@/src/components/murph/murph-contact-link";
 import { toErrorMessage } from "@/src/components/settings/hosted-settings-sync-helpers";
@@ -130,6 +136,7 @@ export function GroupJoinAcceptForm(props: {
   );
   const [status, setStatus] = useState<"idle" | "submitting" | "joined">("idle");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [inviteMismatch, setInviteMismatch] = useState(false);
   const selectedVaultShareProjectionScopes = useMemo(
     () => props.permissions
       .filter((permission) => selected.has(permission.projectionScopeKey))
@@ -162,6 +169,7 @@ export function GroupJoinAcceptForm(props: {
 
   async function submit() {
     setErrorMessage(null);
+    setInviteMismatch(false);
     setStatus("submitting");
     try {
       await requestHostedOnboardingJson({
@@ -176,6 +184,14 @@ export function GroupJoinAcceptForm(props: {
       setStatus("joined");
     } catch (error) {
       setStatus("idle");
+      if (
+        props.inviteCode
+        && error instanceof HostedOnboardingApiError
+        && error.code === "AUTH_INVITE_MISMATCH"
+      ) {
+        setInviteMismatch(true);
+        return;
+      }
       setErrorMessage(toErrorMessage(error, "Could not join this group right now."));
     }
   }
@@ -267,26 +283,52 @@ export function GroupJoinAcceptForm(props: {
       ) : null}
 
       <div className="flex flex-col gap-2">
-        <Button
-          type="button"
-          size="xl"
-          onClick={() => void submit()}
-          disabled={status === "submitting"}
-        >
-          {status === "submitting"
-            ? props.alreadyActiveMember
-              ? "Saving..."
-              : "Joining..."
-            : props.alreadyActiveMember
-              ? "Save changes"
-              : "Join group"}
-        </Button>
-        {errorMessage ? (
-          <p role="alert" className="text-sm text-destructive [overflow-wrap:anywhere]">
-            {errorMessage}
-          </p>
-        ) : null}
+        {inviteMismatch ? (
+          <GroupJoinInviteMismatchRecovery />
+        ) : (
+          <>
+            <Button
+              type="button"
+              size="xl"
+              onClick={() => void submit()}
+              disabled={status === "submitting"}
+            >
+              {status === "submitting"
+                ? props.alreadyActiveMember
+                  ? "Saving..."
+                  : "Joining..."
+                : props.alreadyActiveMember
+                  ? "Save changes"
+                  : "Join group"}
+            </Button>
+            {errorMessage ? (
+              <p role="alert" className="text-sm text-destructive [overflow-wrap:anywhere]">
+                {errorMessage}
+              </p>
+            ) : null}
+          </>
+        )}
       </div>
+    </div>
+  );
+}
+
+export function GroupJoinInviteMismatchRecovery() {
+  return (
+    <div
+      className="flex flex-col gap-3 rounded-2xl border border-border bg-muted/40 p-4"
+      role="alert"
+    >
+      <div className="flex flex-col gap-1">
+        <p className="text-sm font-semibold text-foreground">
+          Use the invited phone number
+        </p>
+        <p className="text-sm leading-5 text-muted-foreground">
+          This browser is signed into a different Murph account. Sign out, then
+          verify the phone number that received this invite.
+        </p>
+      </div>
+      <JoinInviteSignOutButtonIsland idleLabel="Sign out and continue" />
     </div>
   );
 }

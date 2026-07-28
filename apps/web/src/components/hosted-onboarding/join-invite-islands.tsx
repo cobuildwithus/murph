@@ -170,7 +170,13 @@ export function JoinInvitePhoneVerificationIsland({
   );
 }
 
-export function JoinInviteSignOutButtonIsland() {
+export function JoinInviteSignOutButtonIsland({
+  idleLabel = "Use this invite instead",
+  pendingLabel = "Signing out...",
+}: {
+  idleLabel?: string;
+  pendingLabel?: string;
+} = {}) {
   const router = useRouter();
   const { logout } = usePrivy();
   const [signOutPending, setSignOutPending] = useState(false);
@@ -194,7 +200,7 @@ export function JoinInviteSignOutButtonIsland() {
       variant="outline"
       size="lg"
     >
-      {signOutPending ? "Signing out..." : "Use this invite instead"}
+      {signOutPending ? pendingLabel : idleLabel}
     </Button>
   );
 }
@@ -362,4 +368,3 @@ export function JoinInviteCheckoutPlanButtonIsland({
     </div>
   );
 }
-
