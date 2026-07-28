@@ -90,7 +90,7 @@ describe("device sync companion legal consent route", () => {
   });
 
   it.each(["launch.legal", "launch.health-data"] as const)(
-    "records %s through the canonical launch-consent owner",
+    "records %s with server-owned native companion provenance",
     async (scope) => {
       const request = new Request(
         "https://app.example.test/api/device-sync/companion/legal-consent",
@@ -120,7 +120,7 @@ describe("device sync companion legal consent route", () => {
         memberId: MEMBER.id,
         prisma: mocks.prisma,
         scope,
-        source: "ios-companion",
+        source: "native-companion",
       });
     },
   );
