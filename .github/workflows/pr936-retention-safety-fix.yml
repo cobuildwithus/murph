@@ -12,8 +12,13 @@ on:
       - reopened
       - synchronize
 
+concurrency:
+  group: pr936-retention-safety-fix
+  cancel-in-progress: true
+
 permissions:
   contents: write
+  issues: write
   pull-requests: read
 
 jobs:
@@ -37,6 +42,23 @@ jobs:
           --health-timeout 5s
           --health-retries 20
     steps:
+      - name: Report verification run
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          body="PR #936 retention-safety verification started: ${RUN_URL} (run ${GITHUB_RUN_ID}, attempt ${GITHUB_RUN_ATTEMPT})."
+          curl --fail-with-body --silent --show-error \
+            --request POST \
+            --header "Accept: application/vnd.github+json" \
+            --header "Authorization: Bearer ${GH_TOKEN}" \
+            --header "X-GitHub-Api-Version: 2022-11-28" \
+            "${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}/issues/1056/comments" \
+            --data "$(node -e 'process.stdout.write(JSON.stringify({body: process.argv[1]}))' "${body}")" \
+            >/dev/null
+
       - name: Check out safety-fix helper
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
@@ -143,3 +165,22 @@ jobs:
           git diff --cached --check
           git commit -m "Make retention rollout fail closed"
           git push origin HEAD:message-retention-14d
+
+      - name: Report verification result
+        if: ${{ always() }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          JOB_STATUS: ${{ job.status }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          body="PR #936 retention-safety verification finished with ${JOB_STATUS}: ${RUN_URL} (run ${GITHUB_RUN_ID}, attempt ${GITHUB_RUN_ATTEMPT})."
+          curl --fail-with-body --silent --show-error \
+            --request POST \
+            --header "Accept: application/vnd.github+json" \
+            --header "Authorization: Bearer ${GH_TOKEN}" \
+            --header "X-GitHub-Api-Version: 2022-11-28" \
+            "${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}/issues/1056/comments" \
+            --data "$(node -e 'process.stdout.write(JSON.stringify({body: process.argv[1]}))' "${body}")" \
+            >/dev/null
