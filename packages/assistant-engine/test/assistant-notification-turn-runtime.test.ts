@@ -2906,7 +2906,7 @@ test('sendAssistantNotificationLocal accepts a text-only creative response', asy
 
   await expect(sendAssistantNotificationLocal({
     instructions: 'Create a brief group sponsorship thank-you.',
-    notificationToolProfile: 'creative-response',
+    notificationPromptProfile: 'creative-response',
     responsePolicy: { kind: 'require_send' },
     vault: '/vaults/group-sponsorship-text',
   })).resolves.toMatchObject({
@@ -2923,7 +2923,7 @@ test('sendAssistantNotificationLocal accepts a text-only creative response', asy
       nativeResumePolicy: 'disabled',
       promptProfile: 'creative-notification',
       threadScope: 'isolated-thread',
-      toolProfile: 'creative-response-turn',
+      toolProfile: 'provider-turn',
     },
   })
   expect(deliverMessage).toHaveBeenCalledWith(expect.objectContaining({
@@ -2931,14 +2931,8 @@ test('sendAssistantNotificationLocal accepts a text-only creative response', asy
   }))
 })
 
-test('sendAssistantNotificationLocal permits text fallback after one failed media attempt', async () => {
+test('sendAssistantNotificationLocal accepts a text fallback when creative audio is unavailable', async () => {
   const providerResult = createProviderResult({
-    rawEvents: [
-      createCreativeMediaToolCompletedEvent({
-        success: false,
-        tool: 'generate_voice_memo',
-      }),
-    ],
     response: JSON.stringify({
       kind: 'send_message',
       privateSummary: 'Audio was unavailable; use text.',
@@ -2953,7 +2947,7 @@ test('sendAssistantNotificationLocal permits text fallback after one failed medi
 
   await expect(sendAssistantNotificationLocal({
     instructions: 'Create a brief group sponsorship thank-you.',
-    notificationToolProfile: 'creative-response',
+    notificationPromptProfile: 'creative-response',
     responsePolicy: { kind: 'require_send' },
     vault: '/vaults/group-sponsorship-media-failed',
   })).resolves.toMatchObject({
@@ -2976,12 +2970,6 @@ test('sendAssistantNotificationLocal delivers one successful creative attachment
     },
   }
   const providerResult = createProviderResult({
-    rawEvents: [
-      createCreativeMediaToolCompletedEvent({
-        success: true,
-        tool: 'generate_song',
-      }),
-    ],
     response: JSON.stringify({
       kind: 'send_message',
       privateSummary: 'Celebrate the group contribution.',
@@ -3011,7 +2999,7 @@ test('sendAssistantNotificationLocal delivers one successful creative attachment
 
   await expect(sendAssistantNotificationLocal({
     instructions: 'Create a brief group sponsorship thank-you.',
-    notificationToolProfile: 'creative-response',
+    notificationPromptProfile: 'creative-response',
     responsePolicy: { kind: 'require_send' },
     vault: '/vaults/group-sponsorship-media-succeeded',
   })).resolves.toMatchObject({
@@ -3022,14 +3010,8 @@ test('sendAssistantNotificationLocal delivers one successful creative attachment
   }))
 })
 
-test('sendAssistantNotificationLocal marks successful creative media as non-replayable', async () => {
+test('sendAssistantNotificationLocal keeps creative response-media failures on the normal notification error path', async () => {
   const providerResult = createProviderResult({
-    rawEvents: [
-      createCreativeMediaToolCompletedEvent({
-        success: true,
-        tool: 'generate_voice_memo',
-      }),
-    ],
     response: 'not a notification decision',
     responseMedia: [{
       filename: 'group-thanks.mp3',
@@ -3049,13 +3031,13 @@ test('sendAssistantNotificationLocal marks successful creative media as non-repl
 
   await expect(sendAssistantNotificationLocal({
     instructions: 'Create a brief group sponsorship thank-you.',
-    notificationToolProfile: 'creative-response',
+    notificationPromptProfile: 'creative-response',
     responsePolicy: { kind: 'require_send' },
     vault: '/vaults/group-sponsorship-invalid-output',
   })).rejects.toMatchObject({
     code: 'ASSISTANT_NOTIFICATION_INVALID_RESPONSE',
     details: expect.objectContaining({
-      assistantNotificationProviderNonReplayableWork: true,
+      assistantNotificationProviderNonReplayableWork: false,
     }),
   })
   expect(deliverMessage).not.toHaveBeenCalled()
@@ -4698,24 +4680,6 @@ function createCodexCommandCompletedEvent(command: string): unknown {
       type: 'command.execution',
       command,
       exit_code: 0,
-    },
-  }
-}
-
-function createCreativeMediaToolCompletedEvent(input: {
-  success: boolean
-  tool: 'generate_song' | 'generate_voice_memo'
-}): unknown {
-  return {
-    method: 'item/completed',
-    params: {
-      item: {
-        id: `creative-response-${input.tool}`,
-        namespace: 'murph',
-        success: input.success,
-        tool: input.tool,
-        type: 'dynamicToolCall',
-      },
     },
   }
 }

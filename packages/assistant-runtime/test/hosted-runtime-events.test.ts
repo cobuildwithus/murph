@@ -2627,13 +2627,13 @@ describe("executeHostedMailboxEvent", () => {
     });
   });
 
-  it("does not replay a creative notification after successful media generation", async () => {
+  it("keeps failed creative notifications on the normal required-notification retry path", async () => {
     const wake = buildHostedExecutionAssistantNotificationRequestedWake({
-      eventId: "evt_notification_creative_media_succeeded",
+      eventId: "evt_notification_creative_failure",
       memberId: "member_group_runtime",
       notification: {
         instructions: "Create one brief sponsorship thank-you.",
-        notificationToolProfile: "creative-response",
+        notificationPromptProfile: "creative-response",
         responsePolicy: {
           kind: "require_send",
         },
@@ -2652,11 +2652,7 @@ describe("executeHostedMailboxEvent", () => {
       occurredAt: "2026-04-08T00:00:00.000Z",
     });
     mocks.sendAssistantNotification.mockRejectedValueOnce(
-      Object.assign(new Error("delivery outcome was ambiguous"), {
-        details: {
-          assistantNotificationProviderNonReplayableWork: true,
-        },
-      }),
+      new Error("creative notification delivery failed"),
     );
 
     await expect(executeHostedMailboxEvent({
@@ -2665,13 +2661,10 @@ describe("executeHostedMailboxEvent", () => {
       runtime: createRuntime(),
       runtimeEnv: {},
       vaultRoot: "/tmp/assistant-runtime-events",
-    })).resolves.toMatchObject({
-      conversationMetrics: null,
-      mailboxLane: "assistant-notification",
-    });
+    })).rejects.toThrow("creative notification delivery failed");
     expect(mocks.sendAssistantNotification).toHaveBeenCalledWith(
       expect.objectContaining({
-        notificationToolProfile: "creative-response",
+        notificationPromptProfile: "creative-response",
       }),
     );
   });

@@ -76,6 +76,9 @@ import {
   resolveMurphDynamicTools,
 } from '../src/assistant-codex/dynamic-tools.js'
 import {
+  MURPH_GENERATE_SONG_TOOL,
+} from '../src/assistant-codex/dynamic-tools/generate-song.js'
+import {
   MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_AUTOMATION_ID,
 } from '../src/assistant/managed-automations.js'
 import {
@@ -389,7 +392,7 @@ describe('assistant Codex turn planning', () => {
     }
   })
 
-  it('plans creative notifications with committed group history and only media tools', async () => {
+  it('plans creative notifications with committed group history and the normal provider tools', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(
       'PRIVATE_CLI_CONTRACT',
     )
@@ -432,6 +435,7 @@ describe('assistant Codex turn planning', () => {
         { kind: 'assistant', text: 'The wellness senate is now in session.' },
       ])
       const plan = await resolveAssistantRouteTurnPlan({
+        allowFinishWithoutReply: false,
         executionContext: {
           hosted: {
             dynamicContextPrompts: ['PRIVATE_HOSTED_CONTEXT'],
@@ -440,12 +444,7 @@ describe('assistant Codex turn planning', () => {
             userEnvKeys: [],
           },
         },
-        hostedToolContext: {
-          ...createHostedToolContext(),
-          automationTool: { request: vi.fn() },
-          connectedApps: { request: vi.fn() },
-          familyPlanTool: { request: vi.fn() },
-        },
+        hostedToolContext: null,
         input: {
           ...createMessageInput(),
           channel: 'telegram',
@@ -471,7 +470,7 @@ describe('assistant Codex turn planning', () => {
         profile: {
           promptProfile: 'creative-notification',
           threadScope: 'isolated-thread',
-          toolProfile: 'creative-response-turn',
+          toolProfile: 'provider-turn',
         },
         promptTimeContext: {
           currentLocalDate: '2026-07-27',
@@ -488,11 +487,15 @@ describe('assistant Codex turn planning', () => {
       })
 
       expect(plan.resume).toBeNull()
-      expect(plan.dynamicTools.map((tool) => tool.name).sort()).toEqual([
+      const dynamicToolNames = plan.dynamicTools.map((tool) => tool.name)
+      expect(dynamicToolNames).toEqual(expect.arrayContaining([
+        'attach_response_media',
+        'generate_image',
         'generate_song',
         'generate_voice_memo',
-      ])
-      expect(plan.environments).toEqual([])
+      ]))
+      expect(dynamicToolNames.length).toBeGreaterThan(2)
+      expect(plan.environments).toBeUndefined()
       expect(plan.assistantCliContract).toBeNull()
       expect(plan.sessionContext).toBeUndefined()
       expect(plan.conversationHistoryMessages).toEqual([
@@ -521,29 +524,19 @@ describe('assistant Codex turn planning', () => {
       expect(plan.systemPrompt).not.toContain('PRIVATE_CLI_CONTRACT')
       expect(plan.systemPrompt).not.toContain('PRIVATE_CONTEXT_SNAPSHOT')
       expect(plan.systemPrompt).not.toContain('PRIVATE_HOSTED_CONTEXT')
-      const song = plan.dynamicTools.find((tool) => tool.name === 'generate_song')
-      expect(song?.description).toContain(
-        'original 5–15-second song',
+      expect(plan.systemPrompt).toContain(
+        'set `durationSeconds` to 5–15',
       )
-      expect(song?.description).toContain(
-        'Never imitate or name a real artist, band, song, or lyrics.',
+      expect(plan.systemPrompt).toContain('at most four short lyric lines')
+      expect(plan.systemPrompt).toContain(
+        'Never infer the contributor or payer identity',
       )
-      expect(song?.description).toContain(
-        'only an explicitly supplied publicAlias',
+      expect(plan.systemPrompt).toContain(
+        'use a public alias only when the task explicitly supplies one',
       )
-      expect(song?.description).toContain(
-        'must never infer contributor identity',
-      )
-      expect(song?.inputSchema).toMatchObject({
-        properties: {
-          durationSeconds: {
-            maximum: 15,
-            minimum: 5,
-            type: 'integer',
-          },
-        },
-        required: ['prompt', 'durationSeconds'],
-      })
+      expect(
+        plan.dynamicTools.find((tool) => tool.name === 'generate_song'),
+      ).toBe(MURPH_GENERATE_SONG_TOOL)
       expect(plan.assistantPreferredElevenLabsVoiceId).toBe(
         resolveAssistantVoiceOptionElevenLabsVoiceId('warm'),
       )

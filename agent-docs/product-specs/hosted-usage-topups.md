@@ -139,14 +139,16 @@ fulfilled group purchase, Web idempotently:
 3. appends one purchase-deduplicated creative notification to the existing
    mailbox.
 
-The creative turn is isolated and may send text or make at most one short voice
-memo or original-song attempt. It has no shell, filesystem, network, billing,
-group-mutation, health, or scheduling authority. A successful media generation
-is non-replayable; a failed attempt may fall back to text. Serious, urgent,
-medical, sensitive, or conflict-heavy recent context forces a quiet text-only
-acknowledgment. The reconciler wakes newly paid usage work before attempting
-this optional social effect, and notification failure never rolls back an
-already committed credit grant.
+The creative turn is isolated and uses the ordinary provider-turn tool and
+delivery path. Its prompt says text alone is valid and, when audio helps, to call
+exactly one short voice memo or original song, never both or a second attempt,
+and no other tool. Serious, urgent, medical, sensitive, or conflict-heavy recent
+context forces a quiet text-only acknowledgment. Notification failures follow
+the ordinary required-notification retry and delivery-deduplication path; there
+is no reservation, attempt counter, post-hoc media-attempt accounting, or
+media-specific retry state. The reconciler wakes newly paid usage work before
+attempting this optional social effect, and notification failure never rolls
+back an already committed credit grant.
 
 The running bit remains a Web-owned expiring product fact, not durable group
 memory. Mailbox fetch projects only the newest active bit to fresh,

@@ -455,9 +455,6 @@ async function executeAssistantCodexAttempt(input: {
       attemptPlan.routePlan.assistantPreferredElevenLabsVoiceId ?? null
     const outputOnlyTurn =
       executionPlan.profile.toolProfile === 'output-only-turn'
-    const creativeResponseTurn =
-      executionPlan.profile.toolProfile === 'creative-response-turn'
-    const restrictedNotificationTurn = outputOnlyTurn || creativeResponseTurn
     const systemNotificationTurn =
       executionPlan.profile.promptProfile === 'system-notification' ||
       executionPlan.profile.promptProfile === 'creative-notification'
@@ -474,7 +471,7 @@ async function executeAssistantCodexAttempt(input: {
       normalizeNullableString(audience.channel)?.toLowerCase() === 'email'
     const attemptResult = await executeCodexAssistantTurnAttemptFromInput({
       providerConfig: {
-        approvalPolicy: restrictedNotificationTurn
+        approvalPolicy: outputOnlyTurn
           ? 'never'
           : attemptPlan.route.providerOptions.approvalPolicy,
         codexCommand:
@@ -488,7 +485,7 @@ async function executeAssistantCodexAttempt(input: {
         profile: attemptPlan.route.providerOptions.profile,
         provider: attemptPlan.route.provider,
         reasoningEffort: attemptPlan.route.providerOptions.reasoningEffort,
-        sandbox: restrictedNotificationTurn || groupEmailTurn
+        sandbox: outputOnlyTurn || groupEmailTurn
           ? 'read-only'
           : attemptPlan.route.providerOptions.sandbox,
       },
@@ -504,7 +501,7 @@ async function executeAssistantCodexAttempt(input: {
           executionPlan.authorizeAcceptedMessageTarget ?? null,
         codexConfigOverrides: resolveAssistantCodexConfigOverrides({
           filesystemDisabledTurn: groupEmailTurn,
-          outputOnlyTurn: restrictedNotificationTurn,
+          outputOnlyTurn,
           requested: executionPlan.input.codexConfigOverrides ?? null,
         }),
         conversationHistoryMessages:
@@ -513,19 +510,19 @@ async function executeAssistantCodexAttempt(input: {
         dynamicTools: outputOnlyTurn
           ? []
           : attemptPlan.routePlan.dynamicTools,
-        environments: restrictedNotificationTurn
+        environments: outputOnlyTurn
           ? []
           : attemptPlan.routePlan.environments,
         env: attemptEnv,
-        generatedImageUploader: restrictedNotificationTurn
+        generatedImageUploader: outputOnlyTurn
           ? null
           : executionPlan.executionContext?.hosted?.generatedImageUploader ?? null,
         groupConversation,
         groupRoomModelMaintenanceAuthorized: groupRoomModelMaintenanceTurn,
-        hostedToolContext: restrictedNotificationTurn
+        hostedToolContext: outputOnlyTurn
           ? null
           : executionPlan.hostedToolContext ?? null,
-        materializeWorkspaceArtifacts: restrictedNotificationTurn
+        materializeWorkspaceArtifacts: outputOnlyTurn
           ? null
           : executionPlan.executionContext?.hosted?.materializeWorkspaceArtifacts ?? null,
         onEvent: executionPlan.input.onProviderEvent ?? undefined,
@@ -559,7 +556,7 @@ async function executeAssistantCodexAttempt(input: {
         providerThreadEphemeral: groupRoomModelMaintenanceTurn
           ? true
           : executionPlan.input.providerThreadEphemeral ?? null,
-        progressDelivery: restrictedNotificationTurn
+        progressDelivery: outputOnlyTurn
           ? null
           : executionPlan.progressDelivery ?? null,
         permissions: groupRoomModelMaintenanceTurn
@@ -568,17 +565,17 @@ async function executeAssistantCodexAttempt(input: {
         ...(systemNotificationTurn || groupRoomModelMaintenanceTurn
           ? { processLifetime: 'one-shot' as const }
           : {}),
-        providerFetch: restrictedNotificationTurn
+        providerFetch: outputOnlyTurn
           ? null
           : executionPlan.executionContext?.hosted?.providerFetch ?? null,
         providerRequestOrdinal: input.providerRequestOrdinal ?? null,
-        publicInternetFetch: restrictedNotificationTurn
+        publicInternetFetch: outputOnlyTurn
           ? null
           : executionPlan.executionContext?.hosted?.publicInternetFetch ?? null,
         runtimeWorkspaceRoots: groupRoomModelMaintenanceTurn
           ? [attemptPlan.routePlan.workingDirectory]
           : null,
-        requireGeneratedImageUploader: restrictedNotificationTurn
+        requireGeneratedImageUploader: outputOnlyTurn
           ? false
           : executionPlan.executionContext?.hosted?.generatedImageUploaderRequired ?? false,
         resume: attemptPlan.routePlan.resume,

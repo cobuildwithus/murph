@@ -123,10 +123,14 @@ Last verified: 2026-07-26
   encrypted through the hosted member secure-box owner, omitted from logs, and
   quoted to the Assistant only as untrusted data. Losing authority suppresses
   publication without weakening or reversing the verified usage grant. The
-  creative notification profile exposes only response delivery plus one short
-  voice-memo or original-song attempt; it has no shell, filesystem, network,
-  billing, group-mutation, health-data, or scheduling tool authority. Running
-  bits may reach only fresh route-authorized non-direct Linq or Telegram input
+  creative notification prompt profile supplies only the task and bounded
+  committed group history in an isolated thread, then uses the ordinary
+  provider-turn tools and delivery path. Its prompt permits text or exactly one
+  short voice-memo or original-song call when audio helps, forbids a second or
+  different tool call, and forbids commands, network use, separate contact,
+  scheduling, state mutation, or disclosure of private health, account,
+  payment, or routing details. Running bits may reach only fresh
+  route-authorized non-direct Linq or Telegram input
   for the exact beneficiary, and account deletion removes the creator-owned
   authored row while retained financial purchase history remains detached.
 - Saved-card group funding may select only one canonical card already attached

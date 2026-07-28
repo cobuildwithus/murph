@@ -211,7 +211,6 @@ import {
 } from './dynamic-tools/phone-calls.js'
 import {
   executeGenerateSongDynamicTool,
-  MURPH_CREATIVE_NOTIFICATION_GENERATE_SONG_TOOL,
   MURPH_GENERATE_SONG_TOOL,
   parseGenerateSongArguments,
 } from './dynamic-tools/generate-song.js'
@@ -1191,7 +1190,6 @@ export const MURPH_DYNAMIC_TOOLS = [
 
 export type MurphDynamicTool =
   | (typeof MURPH_DYNAMIC_TOOLS)[number]
-  | typeof MURPH_CREATIVE_NOTIFICATION_GENERATE_SONG_TOOL
   | typeof MURPH_GROUP_SEND_PROGRESS_UPDATE_TOOL
   | typeof MURPH_GROUP_SHARED_READ_TOOL
   | typeof MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL

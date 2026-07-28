@@ -109,9 +109,6 @@ import {
   type MurphDynamicTool,
 } from '../../assistant-codex/dynamic-tools.js'
 import {
-  MURPH_CREATIVE_NOTIFICATION_GENERATE_SONG_TOOL,
-} from '../../assistant-codex/dynamic-tools/generate-song.js'
-import {
   resolveAssistantUserActionAcceptedInputIds,
 } from '../../assistant-codex/dynamic-tools/phone-calls.js'
 import {
@@ -233,7 +230,6 @@ export type AssistantCodexTurnToolProfile =
   | 'provider-turn'
   | 'maintenance-turn'
   | 'output-only-turn'
-  | 'creative-response-turn'
 
 export type AssistantCodexThreadScope =
   | 'session-thread'
@@ -468,8 +464,6 @@ export async function resolveAssistantRouteTurnPlan(input: {
     input.hostedToolContext?.personalizationTool != null &&
     input.input.assistantStyleSettingsAuthorized !== false
   const outputOnlyTurn = input.profile.toolProfile === 'output-only-turn'
-  const creativeResponseTurn =
-    input.profile.toolProfile === 'creative-response-turn'
   const systemNotificationTurn =
     input.profile.promptProfile === 'system-notification' ||
     input.profile.promptProfile === 'creative-notification'
@@ -556,7 +550,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
   // model forbidden sources.
   const maintenanceTurn = input.profile.toolProfile === 'maintenance-turn'
   const hostedDynamicContextPrompts =
-    maintenanceTurn || outputOnlyTurn || creativeResponseTurn
+    maintenanceTurn || systemNotificationTurn
       ? []
       : input.executionContext?.hosted?.dynamicContextPrompts ?? []
   const groupRoomModelPrompt =
@@ -820,17 +814,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
           privateInteractiveAudience &&
           input.hostedToolContext?.vaultFileSendAvailable === true,
       })
-  const dynamicTools: readonly MurphDynamicTool[] = creativeResponseTurn
-    ? availableDynamicTools.reduce<MurphDynamicTool[]>((tools, tool) => {
-        if (tool.namespace !== 'murph') return tools
-        if (tool.name === 'generate_voice_memo') {
-          tools.push(tool)
-        } else if (tool.name === 'generate_song') {
-          tools.push(MURPH_CREATIVE_NOTIFICATION_GENERATE_SONG_TOOL)
-        }
-        return tools
-      }, [])
-    : availableDynamicTools
+  const dynamicTools: readonly MurphDynamicTool[] = availableDynamicTools
   const messageTargetDynamicToolsAvailable =
     dynamicTools.some(
       (tool) => tool.namespace === 'murph' && tool.name === 'select_reply_target',
@@ -916,7 +900,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
     },
     developerInstructions: normalizeNullableString(developerInstructions),
     dynamicTools,
-    environments: outputOnlyTurn || creativeResponseTurn ? [] : undefined,
+    environments: outputOnlyTurn ? [] : undefined,
     conversationHistoryMessages:
       conversationHistoryMessages.length > 0
         ? conversationHistoryMessages
@@ -951,7 +935,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
       shouldPrepareBootstrapContext &&
       !maintenanceTurn &&
       !outputOnlyTurn &&
-      !creativeResponseTurn
+      !systemNotificationTurn
       ? {
           binding: input.session.binding,
         }

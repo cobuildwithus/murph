@@ -154,7 +154,7 @@ export async function materializeHostedGroupSponsorshipIfApplicable(input: {
             externalThreadRouteAuthority:
               destination.externalThreadRouteAuthority,
             instructions: buildInstructions(moment),
-            notificationToolProfile: "creative-response",
+            notificationPromptProfile: "creative-response",
             responsePolicy: { kind: "require_send" },
             route: destination.route,
           },
@@ -188,7 +188,6 @@ function buildInstructions(
 ): string {
   return [
     "Create one short, delightful sponsorship thank-you for this existing group conversation.",
-    "Text alone is valid. You may attempt at most one short voice memo or original song if it materially improves the moment.",
     "If recent group history is urgent, medical, serious, sensitive, or conflict-heavy, send only a quiet, respectful text acknowledgment with no joke or media.",
     "Use recent group history for tone, but never disclose private health or account details.",
     "Do not mention payment infrastructure, tokens, internal accounting, or the exact amount.",

@@ -21,7 +21,7 @@ const ROUTE = {
 };
 
 describe("hosted group sponsorship contracts", () => {
-  it("round-trips only the narrow creative notification profile", () => {
+  it("round-trips only the narrow creative notification prompt profile", () => {
     const wake = buildHostedExecutionAssistantNotificationRequestedWake({
       eventId: "assistant.notification.requested:group-sponsorship:test",
       memberId: "member-group-runtime",
@@ -30,7 +30,7 @@ describe("hosted group sponsorship contracts", () => {
         deliveryDispatchMode: "queue-only",
         deliveryIdempotencyKey: "group-sponsorship:test",
         instructions: "Create a brief thank-you.",
-        notificationToolProfile: "creative-response",
+        notificationPromptProfile: "creative-response",
         responsePolicy: { kind: "require_send" },
         route: ROUTE,
       },
@@ -42,9 +42,9 @@ describe("hosted group sponsorship contracts", () => {
       ...wake,
       notification: {
         ...wake.notification,
-        notificationToolProfile: "all-tools",
+        notificationPromptProfile: "all-tools",
       },
-    })).toThrow(/notificationToolProfile/u);
+    })).toThrow(/notificationPromptProfile/u);
   });
 
   it("strictly parses the optional expiring group-bit sidecar", () => {

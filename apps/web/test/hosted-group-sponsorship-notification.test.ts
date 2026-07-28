@@ -126,7 +126,7 @@ describe("group sponsorship notification", () => {
         ),
         externalThreadRouteAuthority:
           DESTINATION.externalThreadRouteAuthority,
-        notificationToolProfile: "creative-response",
+        notificationPromptProfile: "creative-response",
         responsePolicy: { kind: "require_send" },
         route: DESTINATION.route,
       },

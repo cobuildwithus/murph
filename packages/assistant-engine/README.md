@@ -50,13 +50,15 @@ formatter uses the existing one-shot App Server path so its restrictive launch
 configuration cannot replace the resident ordinary-turn process or interrupt
 detached enrichment.
 
-The `creative-response` notification profile is a separate bounded formatter
-for verified social moments. It may read only the committed conversation
-history supplied with that event and may send text or attempt one short voice
-memo or original song. It has no ordinary dynamic tools, private context,
-network, filesystem, billing, health, group-mutation, or resumed-thread
-authority. A successful media generation is non-replayable even if later
-delivery fails.
+The `creative-response` notification prompt profile is an isolated system
+continuation for verified social moments. Its prompt is built only from the
+engine-supplied task and bounded committed conversation history. Planning
+uses the ordinary provider-turn tools and the ordinary response-media and
+outbox delivery owners. The prompt says text is valid and, only when audio
+helps, to call exactly one short voice-memo or song tool, never both or a
+second attempt, and no other tool. Notification failure remains on the normal
+required-notification retry and delivery-deduplication path; no media-attempt
+state is inferred from provider events.
 
 Hosted invocation-scoped automation and device authority enters only the
 current root turn through narrow typed dynamic tools backed by existing domain

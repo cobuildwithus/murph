@@ -177,12 +177,13 @@ Last verified: 2026-07-27
   PaymentIntent, and webhook replay converge on one creative notification.
   Failure to activate or queue the moment keeps the Stripe receipt retryable
   but cannot roll back or duplicate the grant. An existing mailbox item is
-  re-signaled rather than regenerated. Once a creative media tool succeeds,
-  later provider or delivery failure is terminal for that notification so a
-  jingle or voice memo is never regenerated after an ambiguous send. Running
-  bits need no timer or cleanup job: Web reads only fulfilled rows whose
-  `expiresAt` is still in the future, and the Assistant rechecks expiry before
-  prompt construction.
+  re-signaled rather than regenerated. The creative turn adds no reservation,
+  attempt counter, or media-specific retry state: provider and delivery failures
+  follow the ordinary required-notification retry and delivery-deduplication
+  path, while the prompt limits one model turn to at most one short song or
+  voice-memo call. Running bits need no timer or cleanup job: Web reads only
+  fulfilled rows whose `expiresAt` is still in the future, and the Assistant
+  rechecks expiry before prompt construction.
 - Matching usage-credit refund or dispute events must never fall through to the
   subscription suspension path. Live re-fetch plus the same beneficiary lock
   must append replay-safe, capped signed `refund_adjustment` or
