@@ -1,5 +1,6 @@
 name: Verify PR 1030 instant-start retry fix
 
+# Temporary exact-head verifier; the successful job removes this workflow.
 on:
   push:
     branches:
