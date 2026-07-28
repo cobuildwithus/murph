@@ -959,11 +959,14 @@ describe("hosted device-sync wakes", () => {
   });
 
   it("preserves the sole Junction source on webhook receipt signals", async () => {
+    const connection = buildHostedConnection({ provider: "junction" });
+    mocks.getConnectionForUser.mockResolvedValue(connection);
+
     await handleHostedDeviceSyncWebhookAccepted({
       account: {
-        connectedAt: "2026-03-26T12:00:00.000Z",
-        id: "dsc_123",
-        provider: "junction",
+        connectedAt: connection.connectedAt,
+        id: connection.id,
+        provider: connection.provider,
       },
       claimToken: "claim-token",
       now: "2026-03-26T12:00:00.000Z",
@@ -1003,11 +1006,14 @@ describe("hosted device-sync wakes", () => {
   });
 
   it("omits source attribution for a data-less historical completion", async () => {
+    const connection = buildHostedConnection({ provider: "junction" });
+    mocks.getConnectionForUser.mockResolvedValue(connection);
+
     await handleHostedDeviceSyncWebhookAccepted({
       account: {
-        connectedAt: "2026-03-26T12:00:00.000Z",
-        id: "dsc_123",
-        provider: "junction",
+        connectedAt: connection.connectedAt,
+        id: connection.id,
+        provider: connection.provider,
       },
       claimToken: "claim-token",
       now: "2026-03-26T12:00:00.000Z",
