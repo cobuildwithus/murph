@@ -1,0 +1,73 @@
+name: Apply iMessage SMS group access parity patch
+
+on:
+  push:
+    branches:
+      - codex/imessage-sms-group-access-parity
+    paths:
+      - .github/workflows/codex-apply-imessage-sms-group-access-parity.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply-patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out bootstrap branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Reconstruct and verify patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat .codex/imessage-sms-group-access-parity/*.part \
+            | base64 --decode \
+            | gzip --decompress \
+            > /tmp/change.patch
+          echo '906e7500140e8633d6b4c2c05cba335c63feba826cb4acdd93d9d1330828e861  /tmp/change.patch' \
+            | sha256sum --check
+          git apply --numstat /tmp/change.patch
+
+      - name: Reset onto current main and apply patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          git reset --hard origin/main
+
+          if git apply --check --recount /tmp/change.patch; then
+            git apply --recount --whitespace=fix /tmp/change.patch
+          elif git apply --check --recount --ignore-space-change --ignore-whitespace /tmp/change.patch; then
+            git apply --recount --ignore-space-change --ignore-whitespace --whitespace=fix /tmp/change.patch
+          else
+            set +e
+            patch --batch --forward --fuzz=5 -p1 < /tmp/change.patch
+            patch_status=$?
+            set -e
+            if [ "$patch_status" -ne 0 ] || find . -name '*.rej' -print -quit | grep -q .; then
+              find . -name '*.rej' -print -exec sh -c 'echo "--- $1"; cat "$1"' sh {} \;
+              exit 1
+            fi
+          fi
+
+          git diff --check
+          test -f agent-docs/exec-plans/completed/2026-07-28-imessage-sms-group-access-parity.md
+          git status --short
+
+      - name: Commit final branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git add -A
+          if git diff --cached --quiet; then
+            echo 'Patch produced no changes.' >&2
+            exit 1
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'refactor(groups): unify access offers across messaging channels'
+          git push --force-with-lease origin HEAD:codex/imessage-sms-group-access-parity
