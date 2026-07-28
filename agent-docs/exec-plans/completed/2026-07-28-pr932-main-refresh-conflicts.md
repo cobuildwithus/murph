@@ -1,6 +1,6 @@
 # PR 932 current-main conflict resolution
 
-Status: active
+Status: completed
 Created: 2026-07-28
 Updated: 2026-07-28
 
@@ -81,4 +81,29 @@ Updated: 2026-07-28
 
 ## Verification
 
-- Pending.
+- Merged `origin/main` normally at `676a03b20d41b7692ae5f492355171c5ae91cb6c`
+  in merge commit `eb894f4798aefaaa6c388fe452e80dcddaffc983`.
+- Focused conflicted-path suite: 3 files, 280 tests passed.
+- Canonical Web diff verification: 556 files passed, 16 skipped; 7,271
+  tests passed, 216 skipped. TypeScript, lint (zero errors), development
+  smoke, and production build passed.
+- PostgreSQL reply-recovery suite: 14 tests passed against the isolated task
+  database after bringing its db-push schema current.
+- Local acceptance found one transient `AbortError` assertion in an unchanged
+  Assistant Runtime clinical-records test; the exact isolated test passed
+  immediately. A second local attempt could not acquire the shared host slot
+  for ten continuous minutes.
+- The first documented 16-vCPU bounded-admission fallback passed every visible
+  Web, Assistant Runtime, Inbox Services, and Cloudflare test, but its
+  orchestrator recorded an Inbox Services coverage-step failure despite the
+  output showing all 88 tests passed. The exact local Inbox Services coverage
+  command then passed 13 files and 88 tests.
+- The single unchanged-head infrastructure retry passed the full canonical
+  acceptance composition in 6m12s on Testbox
+  `tbx_01kyn3fwt54jm7d9jx2qysas77`; provider run
+  `30392476127` exited successfully.
+- Privacy scan, `git diff --check`, and conflict-marker scan passed.
+- A merge-tree simulation against then-current `origin/main`
+  (`c348b9662b17dadc950dad4c69b7d929d9a5364d`) was clean; this will be
+  repeated immediately before push and handoff.
+Completed: 2026-07-28

@@ -391,7 +391,11 @@ describe.skipIf(!runPostgresProof)(
         const blockedPlan = await prisma.$transaction((tx) =>
           planHostedOnboardingLinqWebhook({
             event: blockedEvent,
-            firstContactAdmitted: true,
+            firstContactAdmissionDecision: {
+              confidence: 1,
+              kind: "allow",
+              source: "deterministic",
+            },
             prisma: tx,
             requireFirstContactAdmission: true,
           })
@@ -413,7 +417,11 @@ describe.skipIf(!runPostgresProof)(
         const recoveredPlan = await prisma.$transaction((tx) =>
           planHostedOnboardingLinqWebhook({
             event: recoveredEvent,
-            firstContactAdmitted: true,
+            firstContactAdmissionDecision: {
+              confidence: 1,
+              kind: "allow",
+              source: "deterministic",
+            },
             prisma: tx,
             requireFirstContactAdmission: true,
           })
@@ -1235,7 +1243,11 @@ describe.skipIf(!runPostgresProof)(
         planPromise = fixture.contenderPrisma.$transaction((tx) =>
           planHostedOnboardingLinqWebhook({
             event: replyEvent,
-            firstContactAdmitted: true,
+            firstContactAdmissionDecision: {
+              confidence: 1,
+              kind: "allow",
+              source: "deterministic",
+            },
             prisma: tx,
             requireFirstContactAdmission: true,
           })
@@ -1967,7 +1979,11 @@ describe.skipIf(!runPostgresProof)(
         const recoveryPlan = await fixture.replyPrisma.$transaction((tx) =>
           planHostedOnboardingLinqWebhook({
             event: recoveryEvent,
-            firstContactAdmitted: true,
+            firstContactAdmissionDecision: {
+              confidence: 1,
+              kind: "allow",
+              source: "deterministic",
+            },
             prisma: tx,
             requireFirstContactAdmission: true,
           })
@@ -2087,7 +2103,11 @@ describe.skipIf(!runPostgresProof)(
         const laterPlan = await fixture.replyPrisma.$transaction((tx) =>
           planHostedOnboardingLinqWebhook({
             event: laterReplyEvent,
-            firstContactAdmitted: true,
+            firstContactAdmissionDecision: {
+              confidence: 1,
+              kind: "allow",
+              source: "deterministic",
+            },
             prisma: tx,
             requireFirstContactAdmission: true,
           })
