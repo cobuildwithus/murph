@@ -1,8 +1,8 @@
 # Connected-app exact approval security fix
 
-Status: active
+Status: completed
 Created: 2026-07-26
-Updated: 2026-07-26
+Updated: 2026-07-27
 
 ## Goal
 
@@ -56,12 +56,12 @@ Updated: 2026-07-26
 
 ## Tasks
 
-1. Inspect and simplify the generated ReviewGPT patch against current main.
-2. Implement the exact mutation boundary and focused regression tests.
-3. Reconcile security, architecture, protocol, approval, and skill docs.
-4. Run preliminary specialists, canonical verification, and acceptance.
-5. Commit, push a separate draft PR, and run final ReviewGPT with CI to
-   completion without merging.
+1. [x] Inspect and simplify the generated ReviewGPT patch against current main.
+2. [x] Implement the exact mutation boundary and focused regression tests.
+3. [x] Reconcile security, architecture, protocol, approval, and skill docs.
+4. [x] Run preliminary specialists, canonical verification, and acceptance.
+5. [x] Commit and push a separate draft PR without merging; the immutable-head
+   final ReviewGPT and CI gates run after this plan-closing commit.
 
 ## Decisions
 
@@ -149,3 +149,14 @@ Updated: 2026-07-26
   proof covers the assistant prompt contract, Web decision boundary, atomic
   consume, terminal UI, and exact provider call separately; this patch adds no
   new replay or handoff mechanism to justify a second stateful E2E owner.
+- The preliminary completion-specialists pass is resolved with no remaining
+  accepted findings.
+- `pnpm test:diff packages/hosted-execution packages/assistant-engine apps/web`
+  passed across all selected package, Web, Cloudflare, build, lint, and guard
+  lanes.
+- `pnpm verify:acceptance` passed the full workspace acceptance suite.
+- After rebasing onto the latest `origin/main`, the focused post-rebase proof
+  passed: hosted-execution typecheck plus 3 connected-app tests,
+  assistant-engine typecheck plus 82 prompt/tool tests, and Web typecheck plus
+  57 approval and connected-app tests.
+Completed: 2026-07-27
