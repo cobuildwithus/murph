@@ -8,6 +8,7 @@ import {
   COMPANION_HRV_RMSSD_SCHEMA,
   serializeCompanionHrvRmssdObservation,
 } from "@murphai/contracts";
+import { prepareDeviceProviderSnapshotImport } from "@murphai/importers";
 import { openSqliteRuntimeDatabase, writeSqliteRuntimeUserVersion } from "@murphai/runtime-state/node";
 import { DEVICE_SYNC_DB_RELATIVE_PATH } from "@murphai/runtime-state/node/runtime-paths";
 
@@ -771,6 +772,198 @@ test("local shared-Junction target starts preserve established siblings through 
   } finally {
     close();
     vi.useRealTimers();
+  }
+});
+
+test("local Junction workers exclude a disconnected source from production-normalized evidence", async () => {
+  const now = new Date("2026-07-28T10:00:00.000Z");
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-junction-source-admission");
+  const importerInputs: unknown[] = [];
+  const importerResults: unknown[] = [];
+  const { service, store, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    clock: {
+      now: () => now,
+    },
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    importer: {
+      async importDeviceProviderSnapshot(input) {
+        importerInputs.push(input);
+        const result = await prepareDeviceProviderSnapshotImport(input);
+        importerResults.push(result);
+        return { events: result.events ?? [] };
+      },
+    },
+    providers: [
+      createJunctionDeviceSyncProvider({
+        apiKey: "sk_us_test_123",
+        clientUserIdSecret: "junction-client-user-id-secret",
+        environment: "sandbox",
+        region: "us",
+        summaryResources: ["activity"],
+        timeseriesResources: ["blood_oxygen"],
+        fetchImpl: async (input) => {
+          const url = readUrl(input);
+
+          if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+            return createJsonResponse({
+              providers: [
+                {
+                  id: "provider-garmin-1",
+                  slug: "garmin",
+                  name: "Garmin",
+                  status: "connected",
+                  resource_availability: {
+                    activity: true,
+                    blood_oxygen: true,
+                  },
+                },
+                {
+                  id: "provider-fitbit-1",
+                  slug: "fitbit",
+                  name: "Fitbit",
+                  status: "connected",
+                  resource_availability: {
+                    activity: true,
+                    blood_oxygen: true,
+                  },
+                },
+              ],
+            });
+          }
+
+          if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/activity/junction-user-1")) {
+            return createJsonResponse({
+              data: [
+                {
+                  id: "garmin-activity-1",
+                  connectionId: "provider-garmin-1",
+                  observedAt: "2026-07-27T12:00:00.000Z",
+                  steps: 4321,
+                },
+                {
+                  id: "fitbit-activity-1",
+                  connectionId: "provider-fitbit-1",
+                  observedAt: "2026-07-27T12:00:00.000Z",
+                  steps: 1234,
+                },
+              ],
+            });
+          }
+
+          if (url.includes("/v2/timeseries/junction-user-1/blood_oxygen/grouped")) {
+            return createJsonResponse({
+              groups: {
+                garmin: [{
+                  data: [{
+                    id: "garmin-blood-oxygen-1",
+                    timestamp: "2026-07-27T14:00:00.000Z",
+                    unit: "%",
+                    value: 97,
+                  }],
+                  source: { provider: "garmin", type: "watch" },
+                }],
+                fitbit: [{
+                  data: [{
+                    id: "fitbit-blood-oxygen-1",
+                    timestamp: "2026-07-27T14:00:00.000Z",
+                    unit: "%",
+                    value: 91,
+                  }],
+                  source: { provider: "fitbit", type: "watch" },
+                }],
+              },
+            });
+          }
+
+          throw new Error(`Unexpected Junction request during source admission test: ${url}`);
+        },
+      }),
+    ],
+  });
+
+  try {
+    const account = store.upsertAccount({
+      provider: "junction",
+      externalAccountId: "junction-user-1",
+      displayName: "Junction",
+      scopes: [],
+      status: "active",
+      credential: {
+        kind: "provider_config",
+        providerConfigKey: "junction",
+        credentialMetadata: {},
+      },
+      connectedAt: "2026-07-27T00:00:00.000Z",
+      nextReconcileAt: null,
+    });
+    store.upsertConnectionSource({
+      connectionId: account.id,
+      sourceInstanceKey: "garmin",
+      sourceProviderSlug: "garmin",
+      status: "connected",
+      lastSeenAt: "2026-07-28T10:00:00.000Z",
+    });
+    store.upsertConnectionSource({
+      connectionId: account.id,
+      sourceInstanceKey: "fitbit",
+      sourceProviderSlug: "fitbit",
+      status: "disconnected",
+      lastSeenAt: "2026-07-28T10:00:00.000Z",
+    });
+    const job = store.enqueueJob({
+      accountId: account.id,
+      provider: "junction",
+      kind: "reconcile",
+      payload: {
+        windowStart: "2026-07-27T00:00:00.000Z",
+        windowEnd: "2026-07-28T00:00:00.000Z",
+      },
+      availableAt: "2026-07-28T10:00:00.000Z",
+    });
+
+    const processed = await service.runWorkerOnce();
+
+    assert.equal(processed?.id, job.id);
+    assert.equal(store.getJobById(job.id)?.status, "succeeded");
+    assert.equal(
+      store.listConnectionSources({
+        connectionId: account.id,
+        sourceProviderSlug: "fitbit",
+      })[0]?.status,
+      "disconnected",
+    );
+    assert.equal(importerInputs.length, 2);
+    const durableInput = JSON.stringify(importerInputs);
+    assert.match(durableInput, /garmin-activity-1|garmin-blood-oxygen-1/u);
+    assert.doesNotMatch(durableInput, /fitbit|provider-fitbit-1|1234|"value":91/u);
+
+    const durableResults = importerResults as Array<{
+      evidenceParts?: Array<{ content?: unknown }>;
+      events?: Array<{
+        dataOrigin?: { sourceProviderSlug?: string };
+      }>;
+      ingestReceipt?: Record<string, unknown>;
+    }>;
+    assert.equal(
+      durableResults.every((result) => (result.evidenceParts?.length ?? 0) > 0),
+      true,
+    );
+    assert.equal(
+      durableResults.every((result) => typeof result.ingestReceipt?.payloadHash === "string"),
+      true,
+    );
+    assert.equal(
+      durableResults.flatMap((result) => result.events ?? [])
+        .every((event) => event.dataOrigin?.sourceProviderSlug === "garmin"),
+      true,
+    );
+  } finally {
+    close();
   }
 });
 

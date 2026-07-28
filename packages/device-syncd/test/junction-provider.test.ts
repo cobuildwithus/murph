@@ -3372,6 +3372,183 @@ test("Junction unproven historical coverage saturates at a daily retry without a
   );
 });
 
+test("Junction account jobs keep a concurrently disconnected source out of projection and import", async () => {
+  const provider = createJunctionProvider(async (input) => {
+    const url = readUrl(input);
+
+    if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        providers: [
+          {
+            id: "provider-garmin-1",
+            slug: "garmin",
+            name: "Garmin",
+            status: "connected",
+            resource_availability: { activity: true },
+          },
+          {
+            id: "provider-fitbit-1",
+            slug: "fitbit",
+            name: "Fitbit",
+            status: "connected",
+            resource_availability: { activity: true },
+          },
+        ],
+      });
+    }
+
+    if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/activity/junction-user-1")) {
+      return createJsonResponse({
+        data: [
+          {
+            id: "garmin-activity-1",
+            connectionId: "provider-garmin-1",
+            steps: 4321,
+          },
+          {
+            id: "fitbit-activity-1",
+            connectionId: "provider-fitbit-1",
+            steps: 1234,
+          },
+          {
+            id: "fitbit-activity-direct-1",
+            sourceProviderSlug: "fitbit",
+            steps: 567,
+          },
+          {
+            id: "unresolved-source-activity-1",
+            connectionId: "provider-not-listed-1",
+            steps: 890,
+          },
+          {
+            id: "legacy-unattributed-activity-1",
+            steps: 321,
+          },
+          {
+            id: "legacy-rowless-activity-1",
+            sourceProviderSlug: "polar",
+            steps: 654,
+          },
+        ],
+      });
+    }
+
+    if (url.includes("/v2/timeseries/junction-user-1/blood_oxygen/grouped")) {
+      return createJsonResponse({
+        groups: {
+          garmin: [{
+            data: [{
+              id: "garmin-blood-oxygen-1",
+              timestamp: "2026-04-02T14:00:00.000Z",
+              unit: "%",
+              value: 97,
+            }],
+            source: { provider: "garmin", type: "watch" },
+          }],
+          fitbit: [{
+            data: [{
+              id: "fitbit-blood-oxygen-1",
+              timestamp: "2026-04-02T14:00:00.000Z",
+              unit: "%",
+              value: 91,
+            }],
+            source: { provider: "fitbit", type: "watch" },
+          }],
+        },
+      });
+    }
+
+    throw new Error(`Unexpected request: ${url}`);
+  }, {
+    timeseriesResources: ["blood_oxygen"],
+  });
+  const garminSource = createConnectionSource();
+  const fitbitSource = createConnectionSource({
+    id: "src-fitbit",
+    sourceInstanceKey: requireValue(buildJunctionProviderSourceInstanceKey({
+      connectionId: "acct-junction-1",
+      sourceProviderSlug: "fitbit",
+    }), "Fitbit source key should be available."),
+    sourceProviderSlug: "fitbit",
+    status: "disconnected",
+  });
+  let liveSources = [garminSource, fitbitSource];
+  const importedSnapshots: Array<{
+    summaries?: Record<string, Array<Record<string, unknown>>>;
+    timeseries?: Record<string, Array<Record<string, unknown>>>;
+  }> = [];
+  const upserts: Array<Parameters<NonNullable<ProviderJobContext["upsertConnectionSource"]>>[0]> = [];
+
+  await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      // Simulate a worker that loaded the established account before the target
+      // start committed its disconnected source row.
+      account: createAccount({
+        sources: [{
+          sourceProviderSlug: garminSource.sourceProviderSlug,
+          displayName: garminSource.displayName,
+          status: garminSource.status,
+          resourceCount: Object.keys(garminSource.resourceAvailabilitySummary).length,
+          lastErrorCode: garminSource.lastErrorCode,
+          lastErrorMessage: garminSource.lastErrorMessage,
+          firstSeenAt: garminSource.firstSeenAt,
+          lastSeenAt: garminSource.lastSeenAt,
+          lastDataAt: garminSource.lastDataAt,
+        }],
+      }),
+      importSnapshot: async (snapshot) => {
+        importedSnapshots.push(snapshot as (typeof importedSnapshots)[number]);
+        return { imported: true };
+      },
+      listConnectionSources: () => liveSources,
+      upsertConnectionSource: (input) => {
+        upserts.push(input);
+        const existing = liveSources.find((source) =>
+          source.sourceInstanceKey === input.sourceInstanceKey
+        );
+        const stored = createConnectionSource({
+          ...existing,
+          ...input,
+          id: existing?.id ?? `src-${input.sourceProviderSlug ?? "unknown"}`,
+          firstSeenAt: existing?.firstSeenAt ?? input.lastSeenAt,
+        });
+        liveSources = [
+          ...liveSources.filter((source) => source.sourceInstanceKey !== stored.sourceInstanceKey),
+          stored,
+        ];
+        return stored;
+      },
+    }),
+    createJob("reconcile", {}),
+  );
+
+  assert.equal(
+    upserts.some((source) =>
+      source.sourceProviderSlug === "fitbit" && source.status === "connected"
+    ),
+    false,
+  );
+  assert.equal(
+    liveSources.find((source) => source.sourceProviderSlug === "fitbit")?.status,
+    "disconnected",
+  );
+  assert.deepEqual(
+    importedSnapshots.flatMap((snapshot) => snapshot.summaries?.activity ?? [])
+      .map((record) => record.id),
+    [
+      "garmin-activity-1",
+      "legacy-unattributed-activity-1",
+      "legacy-rowless-activity-1",
+    ],
+  );
+  assert.deepEqual(
+    importedSnapshots.flatMap((snapshot) => snapshot.timeseries?.blood_oxygen ?? [])
+      .map((record) => record.id),
+    ["garmin-blood-oxygen-1"],
+  );
+});
+
 test("Junction non-connected source stays retrying without inventing a historical reset", async () => {
   const provider = createJunctionProvider(async (input) => {
     const url = readUrl(input);

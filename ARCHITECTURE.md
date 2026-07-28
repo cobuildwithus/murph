@@ -1020,7 +1020,13 @@ adapter may drop or reinterpret that decision. The runtime hook is the sole
 source-admission owner: hosted mode commits the source, signal, and mailbox work
 in one transaction, while local mode commits the source and initial jobs in one
 SQLite transaction. Shared ingress never writes source admission after the
-hook. Explicit disconnect or a newer connection epoch wins the locked recheck,
+hook. Junction polling lists every upstream source only to resolve provenance:
+before projection and every durable summary or timeseries import it rereads the
+live source rows, skips projection mutation for a disconnected source, and
+removes that source's records from the import. While any source admission is
+pending, a record whose source reference cannot be resolved fails closed;
+absence of a row for an explicit source remains the legacy admission rule.
+Explicit disconnect or a newer connection epoch wins the locked recheck,
 fails the stale callback, and leaves the target disconnected. Retry cleanup
 deregisters only the target source; whole-account revoke remains the explicit
 connection-wide disconnect path. Ambiguous target cleanup blocks the new link
