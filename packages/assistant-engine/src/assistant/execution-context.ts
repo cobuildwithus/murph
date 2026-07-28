@@ -1,7 +1,7 @@
 import type { AssistantModelTarget } from '@murphai/operator-config/assistant-backend'
 import type { AssistantOperatorDefaults } from '@murphai/operator-config/operator-config'
 import type {
-  AssistantResponseMedia,
+  AssistantVaultImageResponseMedia,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import { normalizeAssistantBackendTarget } from '@murphai/operator-config/assistant-backend'
 import type { AssistantUsageRecord } from '@murphai/hosted-execution/assistant-usage'
@@ -313,28 +313,27 @@ export interface AssistantPhoneCallPort {
   ): Promise<HostedPhoneCallStartResponse>
 }
 
-export type AssistantGeneratedImageContentType =
+export type AssistantPrivateImageContentType =
   | 'image/jpeg'
   | 'image/png'
   | 'image/webp'
 
-export interface AssistantHostedGeneratedImageUploadInput {
-  alt: string | null
+export interface AssistantHostedPrivateImageUrlPublishInput {
   bytes: Uint8Array
-  contentType: AssistantGeneratedImageContentType
-  filename: string
-  metadata: Record<string, string>
-  source: string
+  contentType: AssistantPrivateImageContentType
 }
 
-export interface AssistantHostedGeneratedImageUploader {
-  uploadGeneratedImage(
-    input: AssistantHostedGeneratedImageUploadInput,
-  ): Promise<AssistantResponseMedia>
+export interface AssistantHostedPrivateImageUrlPublisher {
+  publishPrivateImageUrl(
+    input: AssistantHostedPrivateImageUrlPublishInput,
+  ): Promise<{
+    expiresAt: string
+    url: string
+  }>
 }
 
 export interface AssistantHostedImageGenerationResult {
-  media: AssistantResponseMedia | null
+  media: AssistantVaultImageResponseMedia | null
   runtimeIssue: AssistantRuntimeIssueInput | null
   savedImageRef: string | null
 }
@@ -394,10 +393,9 @@ export interface AssistantHostedExecutionContext {
   labsTool?: AssistantHostedLabsTool | null
   newsletterTool?: AssistantHostedNewsletterTool | null
   planUsageTool?: AssistantHostedPlanUsageTool | null
+  privateImageUrlPublisher?: AssistantHostedPrivateImageUrlPublisher | null
   subscriptionTool?: AssistantHostedSubscriptionTool | null
   dynamicContextPrompts?: readonly string[] | null
-  generatedImageUploader?: AssistantHostedGeneratedImageUploader | null
-  generatedImageUploaderRequired?: boolean | null
   imageGenerationLauncher?: AssistantHostedImageGenerationLauncher | null
   materializeWorkspaceArtifacts?: AssistantWorkspaceArtifactMaterializer | null
   memberId: string
@@ -458,9 +456,6 @@ export function normalizeAssistantExecutionContext(
   const dynamicContextPrompts = normalizeAssistantDynamicContextPrompts(
     hosted?.dynamicContextPrompts,
   )
-  const generatedImageUploader = normalizeAssistantGeneratedImageUploader(
-    hosted?.generatedImageUploader,
-  )
   const familyPlanTool = normalizeAssistantFamilyPlanTool(hosted?.familyPlanTool)
   const personalizationTool = normalizeAssistantPersonalizationTool(
     hosted?.personalizationTool,
@@ -479,6 +474,9 @@ export function normalizeAssistantExecutionContext(
     hosted?.subscriptionTool,
   )
   const phoneCalls = normalizeAssistantPhoneCallPort(hosted?.phoneCalls)
+  const privateImageUrlPublisher = normalizeAssistantPrivateImageUrlPublisher(
+    hosted?.privateImageUrlPublisher,
+  )
   const productFeedbackRecorder = normalizeAssistantProductFeedbackRecorder(
     hosted?.productFeedbackRecorder,
   )
@@ -504,7 +502,6 @@ export function normalizeAssistantExecutionContext(
       ...(assistantConfigurationTool ? { assistantConfigurationTool } : {}),
       ...(connectedApps ? { connectedApps } : {}),
       ...(clinicalRecordsConnectLinkTool ? { clinicalRecordsConnectLinkTool } : {}),
-      ...(generatedImageUploader ? { generatedImageUploader } : {}),
       ...(hosted?.imageGenerationLauncher
         ? { imageGenerationLauncher: hosted.imageGenerationLauncher }
         : {}),
@@ -516,10 +513,8 @@ export function normalizeAssistantExecutionContext(
       ...(labsTool ? { labsTool } : {}),
       ...(newsletterTool ? { newsletterTool } : {}),
       ...(planUsageTool ? { planUsageTool } : {}),
+      ...(privateImageUrlPublisher ? { privateImageUrlPublisher } : {}),
       ...(subscriptionTool ? { subscriptionTool } : {}),
-      ...(hosted?.generatedImageUploaderRequired === true
-        ? { generatedImageUploaderRequired: true }
-        : {}),
       ...(typeof hosted?.materializeWorkspaceArtifacts === 'function'
         ? {
             materializeWorkspaceArtifacts: hosted.materializeWorkspaceArtifacts,
@@ -660,6 +655,18 @@ function normalizeAssistantPhoneCallPort(
 
   return {
     start: input.start.bind(input),
+  }
+}
+
+function normalizeAssistantPrivateImageUrlPublisher(
+  input: AssistantHostedExecutionContext['privateImageUrlPublisher'] | undefined,
+): AssistantHostedPrivateImageUrlPublisher | undefined {
+  if (!input || typeof input.publishPrivateImageUrl !== 'function') {
+    return undefined
+  }
+
+  return {
+    publishPrivateImageUrl: input.publishPrivateImageUrl.bind(input),
   }
 }
 
@@ -804,18 +811,6 @@ function normalizeAssistantUsageRecorder(
 
   return {
     recordUsage: input.recordUsage,
-  }
-}
-
-function normalizeAssistantGeneratedImageUploader(
-  input: AssistantHostedExecutionContext['generatedImageUploader'] | undefined,
-): AssistantHostedGeneratedImageUploader | undefined {
-  if (!input || typeof input.uploadGeneratedImage !== 'function') {
-    return undefined
-  }
-
-  return {
-    uploadGeneratedImage: input.uploadGeneratedImage,
   }
 }
 

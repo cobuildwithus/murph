@@ -36,6 +36,7 @@ import type {
   AssistantHostedNewsletterTool,
   AssistantHostedPersonalizationTool,
   AssistantHostedPlanUsageTool,
+  AssistantHostedPrivateImageUrlPublisher,
   AssistantHostedSubscriptionTool,
   AssistantHostedDeviceTool,
   AssistantPhoneCallPort,
@@ -101,6 +102,7 @@ export interface AssistantHostedToolContext {
   readonly newsletterTool?: AssistantHostedNewsletterTool | null
   readonly personalizationTool?: AssistantHostedPersonalizationTool | null
   readonly planUsageTool?: AssistantHostedPlanUsageTool | null
+  readonly privateImageUrlPublisher?: AssistantHostedPrivateImageUrlPublisher | null
   readonly subscriptionTool?: AssistantHostedSubscriptionTool | null
   readonly phoneCalls?: AssistantPhoneCallPort | null
   beforeToolExecution?(): Promise<void>
@@ -250,6 +252,8 @@ export function createAssistantHostedToolContext(input: {
     newsletterTool,
     personalizationTool: executionContext?.personalizationTool ?? null,
     planUsageTool: executionContext?.planUsageTool ?? null,
+    privateImageUrlPublisher:
+      executionContext?.privateImageUrlPublisher ?? null,
     subscriptionTool: executionContext?.subscriptionTool ?? null,
     phoneCalls: executionContext?.phoneCalls ?? null,
     ...(executionContext?.usageRecorder && route

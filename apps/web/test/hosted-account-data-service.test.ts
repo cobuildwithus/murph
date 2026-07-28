@@ -471,7 +471,7 @@ describe("deleteHostedAccountData", () => {
     );
   });
 
-  it("suspends before Temporal cleanup and leaves provider cleanup to the receipt", async () => {
+  it("suspends before Temporal cleanup and terminates around local and Cloudflare cleanup", async () => {
     const order: string[] = [];
     serviceMocks.terminateHostedUserRuntimeWorkflowBestEffort.mockImplementation(async () => {
       order.push("temporal");
@@ -481,6 +481,10 @@ describe("deleteHostedAccountData", () => {
         notFound: false,
         terminated: true,
       };
+    });
+    serviceMocks.runHostedAccountDeletionCleanup.mockImplementation(async () => {
+      order.push("cloudflare");
+      return makeCleanupRunResult();
     });
     const prisma = createHostedAccountDeletionPrismaForTest({
       onTransaction: () => order.push("prisma"),
@@ -492,8 +496,8 @@ describe("deleteHostedAccountData", () => {
       request: new Request("https://join.example.test/settings"),
     });
 
-    expect(order).toEqual(["prisma", "temporal", "prisma", "temporal", "temporal"]);
-    expect(result.cloudflare.deleted).toBe(false);
+    expect(order).toEqual(["prisma", "temporal", "prisma", "temporal", "cloudflare", "temporal"]);
+    expect(result.cloudflare.deleted).toBe(true);
     expect(serviceMocks.terminateHostedUserRuntimeWorkflowBestEffort).toHaveBeenNthCalledWith(
       1,
       {
@@ -501,7 +505,11 @@ describe("deleteHostedAccountData", () => {
         userId: "member_123",
       },
     );
-    expect(serviceMocks.runHostedAccountDeletionCleanup).not.toHaveBeenCalled();
+    expect(serviceMocks.runHostedAccountDeletionCleanup).toHaveBeenCalledWith({
+      attemptTimeoutMs: 5_000,
+      cleanupId: "cleanup_123",
+      prisma,
+    });
     expect(serviceMocks.terminateHostedUserRuntimeWorkflowBestEffort).toHaveBeenNthCalledWith(
       2,
       {
@@ -820,7 +828,7 @@ describe("deleteHostedAccountData", () => {
       request: new Request("https://join.example.test/settings"),
     });
 
-    expect(result.cloudflare.deleted).toBe(false);
+    expect(result.cloudflare.deleted).toBe(true);
     expect(serviceMocks.prepareHostedAccountDeletionCleanup).toHaveBeenCalledWith({
       now: expect.any(Date),
       privyUserId: null,
@@ -1037,6 +1045,10 @@ describe("deleteHostedAccountData", () => {
     serviceMocks.persistHostedAccountDeletionCleanupTx.mockImplementation(async () => {
       order.push("receipt:persist");
     });
+    serviceMocks.runHostedAccountDeletionCleanup.mockImplementation(async () => {
+      order.push("external-cleanup");
+      return makeCleanupRunResult();
+    });
     const vendorRows = await makeVendorAccountRowsForTest("member_123");
     const prisma = createHostedAccountDeletionPrismaForTest({
       ...vendorRows,
@@ -1055,6 +1067,7 @@ describe("deleteHostedAccountData", () => {
       "usage-credit:close",
       "prisma",
       "receipt:persist",
+      "external-cleanup",
     ]);
     expect(stripe.subscriptions.cancel).toHaveBeenCalledWith("sub_delete_123");
     expect(serviceMocks.prepareHostedAccountDeletionCleanup).toHaveBeenCalledWith({
@@ -1066,8 +1079,8 @@ describe("deleteHostedAccountData", () => {
     });
     expect(stripe.customers.del).not.toHaveBeenCalled();
     expect(result.vendorAccounts).toEqual({
-      privyUser: { errorCode: "ACCOUNT_DELETION_CLEANUP_PENDING", status: "failed" },
-      stripeCustomer: { errorCode: "ACCOUNT_DELETION_CLEANUP_PENDING", status: "failed" },
+      privyUser: { errorCode: null, status: "completed" },
+      stripeCustomer: { errorCode: null, status: "completed" },
       stripeSubscription: { errorCode: null, status: "completed" },
     });
   });
@@ -1246,7 +1259,7 @@ describe("deleteHostedAccountData", () => {
       prisma,
       request: new Request("https://join.example.test/settings"),
     })).resolves.toMatchObject({
-      cleanupPending: true,
+      cleanupPending: false,
     });
 
     expect(stripe.checkout.sessions.expire).not.toHaveBeenCalled();
@@ -1295,8 +1308,8 @@ describe("deleteHostedAccountData", () => {
     });
     expect(stripe.customers.del).not.toHaveBeenCalled();
     expect(result.vendorAccounts.stripeCustomer).toEqual({
-      errorCode: "ACCOUNT_DELETION_CLEANUP_PENDING",
-      status: "failed",
+      errorCode: null,
+      status: "completed",
     });
   });
 
@@ -1366,7 +1379,13 @@ describe("deleteHostedAccountData", () => {
     expect(result.vendorAccounts.stripeSubscription).toEqual({ errorCode: null, status: "completed" });
   });
 
-  it("reports durable vendor cleanup pending even when no vendor records exist", async () => {
+  it("reports skipped vendor deletions when no vendor records exist", async () => {
+    serviceMocks.runHostedAccountDeletionCleanup.mockResolvedValue(
+      makeCleanupRunResult({
+        privyUser: { errorCode: null, status: "skipped_no_record" },
+        stripeCustomer: { errorCode: null, status: "skipped_no_record" },
+      }),
+    );
     const prisma = createHostedAccountDeletionPrismaForTest({
       onTransaction: () => undefined,
     });
@@ -1378,8 +1397,8 @@ describe("deleteHostedAccountData", () => {
     });
 
     expect(result.vendorAccounts).toEqual({
-      privyUser: { errorCode: "ACCOUNT_DELETION_CLEANUP_PENDING", status: "failed" },
-      stripeCustomer: { errorCode: "ACCOUNT_DELETION_CLEANUP_PENDING", status: "failed" },
+      privyUser: { errorCode: null, status: "skipped_no_record" },
+      stripeCustomer: { errorCode: null, status: "skipped_no_record" },
       stripeSubscription: { errorCode: null, status: "skipped_no_record" },
     });
     expect(serviceMocks.deleteHostedPrivyUser).not.toHaveBeenCalled();
@@ -1423,33 +1442,56 @@ describe("deleteHostedAccountData", () => {
     expect(result.cleanupPending).toBe(true);
   });
 
-  it("does not start foreground cleanup after local deletion commits", async () => {
+  it("degrades an immediate cleanup exception to durable pending after local deletion commits", async () => {
     const operationOrder: string[] = [];
+    const cleanupError = Object.assign(new Error("kms unavailable"), {
+      name: "KmsUnavailableError",
+    });
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
     serviceMocks.runHostedAccountDeletionCleanup.mockImplementation(async () => {
       operationOrder.push("cleanup");
-      throw new Error("cleanup must not run in the request");
+      throw cleanupError;
     });
     const prisma = createHostedAccountDeletionPrismaForTest({
       onTransaction: () => operationOrder.push("transaction"),
       operationOrder,
     });
 
-    const result = await deleteHostedAccountData({
-      memberId: "member_123",
-      prisma,
-      request: new Request("https://join.example.test/settings"),
-    });
+    try {
+      const result = await deleteHostedAccountData({
+        memberId: "member_123",
+        prisma,
+        request: new Request("https://join.example.test/settings"),
+      });
 
-    expect(operationOrder).toContain("delete:hostedMember");
-    expect(operationOrder).not.toContain("cleanup");
-    expect(serviceMocks.persistHostedAccountDeletionCleanupTx).toHaveBeenCalledTimes(1);
-    expect(serviceMocks.pendingHostedAccountDeletionCleanupResult).toHaveBeenCalledWith();
-    expect(serviceMocks.runHostedAccountDeletionCleanup).not.toHaveBeenCalled();
-    expect(result.cleanupPending).toBe(true);
+      expect(operationOrder).toContain("delete:hostedMember");
+      expect(operationOrder).toContain("cleanup");
+      expect(operationOrder.indexOf("delete:hostedMember")).toBeLessThan(
+        operationOrder.indexOf("cleanup"),
+      );
+      expect(serviceMocks.persistHostedAccountDeletionCleanupTx).toHaveBeenCalledTimes(1);
+      expect(serviceMocks.pendingHostedAccountDeletionCleanupResult).toHaveBeenCalledWith(
+        "KmsUnavailableError",
+      );
+      expect(result.cleanupPending).toBe(true);
+      expect(result.vendorAccounts).toMatchObject({
+        privyUser: { errorCode: "KmsUnavailableError", status: "failed" },
+        stripeCustomer: { errorCode: "KmsUnavailableError", status: "failed" },
+      });
+    } finally {
+      consoleError.mockRestore();
+    }
   });
 
-  it("reports vendor deletion pending when the vendor clients are absent", async () => {
+  it("reports vendor deletions as not configured when the vendor clients are absent", async () => {
     serviceMocks.getHostedOnboardingStripe.mockReturnValue(null);
+    serviceMocks.runHostedAccountDeletionCleanup.mockResolvedValue(
+      makeCleanupRunResult({
+        cleanupPending: true,
+        privyUser: { errorCode: null, status: "skipped_not_configured" },
+        stripeCustomer: { errorCode: null, status: "skipped_not_configured" },
+      }),
+    );
     const vendorRows = await makeVendorAccountRowsForTest("member_123", {
       stripeSubscriptionId: null,
     });
@@ -1465,8 +1507,8 @@ describe("deleteHostedAccountData", () => {
     });
 
     expect(result.vendorAccounts).toEqual({
-      privyUser: { errorCode: "ACCOUNT_DELETION_CLEANUP_PENDING", status: "failed" },
-      stripeCustomer: { errorCode: "ACCOUNT_DELETION_CLEANUP_PENDING", status: "failed" },
+      privyUser: { errorCode: null, status: "skipped_not_configured" },
+      stripeCustomer: { errorCode: null, status: "skipped_not_configured" },
       stripeSubscription: { errorCode: null, status: "skipped_no_record" },
     });
   });
@@ -1846,7 +1888,7 @@ describe("deleteHostedAccountData", () => {
     ]);
   });
 
-  it("reports Cloudflare cleanup pending without starting the provider call", async () => {
+  it("reports incomplete configured Cloudflare cleanup after Prisma deletion commits", async () => {
     const order: string[] = [];
     serviceMocks.runHostedAccountDeletionCleanup.mockResolvedValue(
       makeCleanupRunResult({
@@ -1871,8 +1913,12 @@ describe("deleteHostedAccountData", () => {
 
     expect(order).toEqual(["prisma", "prisma"]);
     expect(result.cloudflare.deleted).toBe(false);
-    expect(result.cloudflare.r2SkippedUserScopedPrefixes).toBeNull();
-    expect(serviceMocks.runHostedAccountDeletionCleanup).not.toHaveBeenCalled();
+    expect(result.cloudflare.r2SkippedUserScopedPrefixes).toBe(true);
+    expect(serviceMocks.runHostedAccountDeletionCleanup).toHaveBeenCalledWith({
+      attemptTimeoutMs: 5_000,
+      cleanupId: "cleanup_123",
+      prisma,
+    });
     expect(result.cleanupPending).toBe(true);
   });
 

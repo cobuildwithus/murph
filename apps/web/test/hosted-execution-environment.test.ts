@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   readHostedExecutionControlBaseUrl,
   readHostedExecutionControlEnvironment,
+  readHostedExecutionControlOrigin,
 } from "@/src/lib/hosted-execution/environment";
 
 describe("hosted execution environment", () => {
@@ -30,5 +31,12 @@ describe("hosted execution environment", () => {
         HOSTED_EXECUTION_CONTROL_URL: "http://dispatch.example.test",
       }),
     ).toThrow(/Hosted execution base URLs must use HTTPS/u);
+  });
+
+  it("derives the private-media validation origin from the control URL", () => {
+    expect(readHostedExecutionControlOrigin({
+      HOSTED_EXECUTION_CONTROL_URL:
+        "https://hosted-runner-staging.example.test/internal/control",
+    })).toBe("https://hosted-runner-staging.example.test");
   });
 });

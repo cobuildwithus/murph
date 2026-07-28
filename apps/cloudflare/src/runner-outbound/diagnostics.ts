@@ -3,6 +3,7 @@ import {
 } from "../internal-hosts.ts";
 import {
   HOSTED_EXECUTION_RUNNER_GENERATED_IMAGE_UPLOAD_PATH,
+  HOSTED_EXECUTION_RUNNER_PRIVATE_IMAGE_URL_PUBLISH_PATH,
 } from "../runner-effects-contract.ts";
 import {
   matchHostedExecutionRunnerMealPhotoPath,
@@ -109,6 +110,13 @@ export function readHostedRunnerInternalOperation(input: {
       input.pathname === HOSTED_EXECUTION_RUNNER_GENERATED_IMAGE_UPLOAD_PATH
     ) {
       return "generated_image_upload";
+    }
+    if (
+      input.method === "POST"
+      && input.pathname
+        === HOSTED_EXECUTION_RUNNER_PRIVATE_IMAGE_URL_PUBLISH_PATH
+    ) {
+      return "private_image_url_publish";
     }
     return "effects_port";
   }

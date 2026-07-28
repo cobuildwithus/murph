@@ -11,6 +11,7 @@ import { parseJsoncObject } from "./helpers/jsonc.js";
 const EXPECTED_CONTAINER_ROLLOUT_ACTIVE_GRACE_PERIOD = 300;
 const EXPECTED_CONTAINER_ROLLOUT_STEP_PERCENTAGE = [10, 25, 50, 100];
 const REQUIRED_HOSTED_CRYPTO_WORKER_VARS = {
+  CF_PUBLIC_BASE_URL: "https://murph-hosted.cobuildwithus.workers.dev",
   HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION:
     "projects/test/locations/global/keyRings/ring/cryptoKeys/sign/cryptoKeyVersions/1",
   HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM:
