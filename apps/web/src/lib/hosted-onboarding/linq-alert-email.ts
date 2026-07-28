@@ -1,19 +1,18 @@
 import type { HostedLinqAlert, PrismaClient } from "@prisma/client";
 
 import { getPrisma } from "../prisma";
-import { normalizeNullableString, parseCommaSeparatedList, parseInteger } from "../primitives";
+import {
+  readHostedOperationalAlertEmailConfig,
+  type HostedOperationalAlertEmailConfig,
+} from "./operational-alert-email-config";
 import {
   HostedResendPlainTextEmailError,
   sendHostedResendPlainTextEmail,
-  type HostedResendPlainTextEmailConfig,
 } from "./resend-plain-text-email";
 
 type HostedLinqAlertEmailEnv = Readonly<Record<string, string | undefined>>;
 
-const HOSTED_LINQ_ALERT_EMAIL_DEFAULT_TIMEOUT_MS = 10_000;
 const HOSTED_LINQ_ALERT_EMAIL_SENDING_LEASE_MS = 15 * 60 * 1000;
-const HOSTED_LINQ_ALERT_EMAIL_MIN_TIMEOUT_MS = 1_000;
-const HOSTED_LINQ_ALERT_EMAIL_MAX_TIMEOUT_MS = 30_000;
 
 export async function sendPendingHostedLinqAlertsBestEffort(input: {
   alertIds: readonly string[];
@@ -61,7 +60,9 @@ async function sendPendingHostedLinqAlerts(input: {
   now?: Date;
   prisma?: PrismaClient;
 }): Promise<void> {
-  const config = readHostedLinqAlertEmailConfig(input.env ?? process.env);
+  const config = readHostedOperationalAlertEmailConfig(
+    input.env ?? process.env,
+  );
   if (!config) {
     return;
   }
@@ -92,7 +93,7 @@ async function sendPendingHostedLinqAlerts(input: {
 
 async function sendHostedLinqAlertEmail(input: {
   alert: HostedLinqAlert;
-  config: HostedLinqAlertEmailConfig;
+  config: HostedOperationalAlertEmailConfig;
   fetchImpl?: typeof fetch;
   prisma: PrismaClient;
 }): Promise<void> {
@@ -177,41 +178,6 @@ function buildHostedLinqAlertClaimableStatusWhere(now: Date | null) {
         ]
       : []),
   ];
-}
-
-type HostedLinqAlertEmailConfig = {
-  recipients: string[];
-  resend: HostedResendPlainTextEmailConfig;
-};
-
-function readHostedLinqAlertEmailConfig(source: HostedLinqAlertEmailEnv): HostedLinqAlertEmailConfig | null {
-  const apiKey = normalizeNullableString(source.RESEND_API_KEY);
-  const from = normalizeNullableString(source.HOSTED_LINQ_ALERT_EMAIL_FROM);
-  const recipients = parseCommaSeparatedList(source.HOSTED_LINQ_ALERT_EMAILS);
-  if (!apiKey || !from || recipients.length === 0) {
-    return null;
-  }
-
-  return {
-    recipients,
-    resend: {
-      apiKey,
-      from,
-      timeoutMs: readHostedLinqAlertEmailTimeoutMs(source),
-    },
-  };
-}
-
-function readHostedLinqAlertEmailTimeoutMs(source: HostedLinqAlertEmailEnv): number {
-  const configured = parseInteger(source.HOSTED_LINQ_ALERT_EMAIL_TIMEOUT_MS);
-  if (!configured) {
-    return HOSTED_LINQ_ALERT_EMAIL_DEFAULT_TIMEOUT_MS;
-  }
-
-  return Math.min(
-    Math.max(configured, HOSTED_LINQ_ALERT_EMAIL_MIN_TIMEOUT_MS),
-    HOSTED_LINQ_ALERT_EMAIL_MAX_TIMEOUT_MS,
-  );
 }
 
 function buildHostedLinqAlertEmailText(alert: HostedLinqAlert): string {

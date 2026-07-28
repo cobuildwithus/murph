@@ -2026,10 +2026,15 @@ incident pacing floor; the monitor does not send a potentially misleading
 recovery message from aged observability data. Every provider attempt,
 including an uncertain retry, is separated from the prior attempt or success
 by at least ten minutes plus stable bounded jitter. Uncertain retries reuse the
-exact incident body and provider idempotency key. Separate incidents carry
-fresh aggregate evidence and a fresh checked-at timestamp rather than
-artificial text variation. The configured destination is an opaque existing
-dedicated Linq chat ID, and its separately configured IANA operator timezone
+exact incident body and incident-scoped provider idempotency key. That key
+remains independent of mutable email configuration: Resend deduplicates an
+identical replay and rejects a changed payload under the same key instead of
+granting it a second send identity. Separate incidents carry fresh aggregate
+evidence and a fresh checked-at timestamp rather than artificial text
+variation. The configured destination is the shared Resend operational-alert
+mailbox; the historical `HOSTED_LINQ_ALERT_EMAIL_*` environment names remain
+its deployment configuration, but the latency path never sends through or
+falls back to Linq/iMessage. Its separately configured IANA operator timezone
 suppresses provider sends from 11 PM through 7 AM local time. A stable per-day
 delay of up to ten minutes spreads deferred alerts across more than one
 five-minute cron tick instead of resuming every alert at the same quiet-hours
@@ -2039,8 +2044,8 @@ operator local time. Recovery or quiet hours at that boundary make no
 provider-attempt state change. The subsequent singleton compare-and-swap is
 fenced by the candidate row's `updatedAt` version and is the sole admission
 boundary: only it enters sending state, increments attempt count, and advances
-`lastAttemptedAt` immediately before Linq. The same version comparison makes a
-stale recovery coalesce if another incident changed and then restored the
+`lastAttemptedAt` immediately before Resend. The same version comparison makes
+a stale recovery coalesce if another incident changed and then restored the
 visible status. A known-unsent first alert therefore has no incident or pacing
 boundary to carry overnight and later builds current evidence; a blocked retry
 whose prior provider call may have succeeded keeps its exact incident body,
@@ -2049,11 +2054,12 @@ another healthy scan coalesces against the bounded four-minute send lease rather
 than reporting recovery while delivery is still unknown. After the call settles
 or fails, or after the lease expires, a healthy scan silently clears sending,
 failed, or accepted active state. An admitted request may still complete.
-Persisted and delivered evidence is aggregate counts and durations only: no
-message content, member, phone, chat, mailbox, delivery, or trace identifiers.
-The monitor is observability-only: it does not append mailbox work, signal
-Temporal, wake Cloudflare, alter usage gates, or participate in foreground
-reply ownership.
+Persisted provider failure metadata contains only the sanitized error code and
+HTTP status. Persisted and delivered evidence is aggregate counts and durations
+only: no message content, member, phone, chat, mailbox, delivery, or trace
+identifiers. The monitor is observability-only: it does not append mailbox work,
+signal Temporal, wake Cloudflare, alter usage gates, or participate in
+foreground reply ownership.
 Orchestration phase telemetry is interpreted causally: direct-request routing
 ends at the Cloudflare route/auth stamps, Durable Object activation ends at
 `userRunnerEnsureStartedAtEpochMs`, stale-fence recovery is the active-wake and
