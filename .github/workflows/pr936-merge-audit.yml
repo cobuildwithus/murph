@@ -1,0 +1,67 @@
+name: PR 936 Merge Conflict Audit
+
+on:
+  push:
+    branches:
+      - agent/pr936-merge-audit-20260727
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    name: Capture real merge conflicts
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          ref: message-retention-14d
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Merge current main and capture each Git stage
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin main
+
+          out="$RUNNER_TEMP/pr936-conflicts"
+          mkdir -p "$out/base" "$out/ours" "$out/theirs" "$out/worktree"
+          git rev-parse HEAD > "$out/head-sha.txt"
+          git rev-parse origin/main > "$out/main-sha.txt"
+          git merge-base HEAD origin/main > "$out/merge-base-sha.txt"
+
+          set +e
+          git merge --no-commit --no-ff origin/main > "$out/merge-output.txt" 2>&1
+          merge_status=$?
+          set -e
+          printf '%s\n' "$merge_status" > "$out/merge-status.txt"
+          git status --porcelain=v2 > "$out/status.txt"
+          git diff --name-only --diff-filter=U > "$out/conflicts.txt"
+
+          while IFS= read -r path; do
+            [ -n "$path" ] || continue
+            mkdir -p \
+              "$out/base/$(dirname "$path")" \
+              "$out/ours/$(dirname "$path")" \
+              "$out/theirs/$(dirname "$path")" \
+              "$out/worktree/$(dirname "$path")"
+            git show ":1:$path" > "$out/base/$path" 2>/dev/null || true
+            git show ":2:$path" > "$out/ours/$path" 2>/dev/null || true
+            git show ":3:$path" > "$out/theirs/$path" 2>/dev/null || true
+            cp -- "$path" "$out/worktree/$path"
+          done < "$out/conflicts.txt"
+
+          tar -C "$out" -czf "$RUNNER_TEMP/pr936-conflicts.tar.gz" .
+          git merge --abort >/dev/null 2>&1 || true
+
+      - name: Upload conflict bundle
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: pr936-merge-conflicts
+          path: ${{ runner.temp }}/pr936-conflicts.tar.gz
+          retention-days: 1
+          if-no-files-found: error
