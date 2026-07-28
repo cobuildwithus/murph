@@ -37,6 +37,12 @@ import {
   readMurphDynamicToolRequest,
   resolveMurphDynamicTools,
 } from '../src/assistant-codex/dynamic-tools.ts'
+import {
+  replaceTranscriptEntries,
+} from '../src/assistant/store/persistence.ts'
+import {
+  resolveAssistantStatePaths,
+} from '../src/assistant/store/paths.ts'
 
 type CodexAssistantTarget = Extract<
   AssistantSession['target'],
@@ -75,6 +81,7 @@ const CODEX_MODEL_PROVIDER_CONFIG = {
 }
 
 afterEach(() => {
+  vi.useRealTimers()
   vi.resetModules()
   vi.unstubAllEnvs()
   vi.restoreAllMocks()
@@ -2653,6 +2660,218 @@ test('sendAssistantNotificationLocal keeps onboarding goal check-in skips silent
       providerResumeStateAction: 'preserve-existing',
     }),
   )
+})
+
+test('sendAssistantNotificationLocal quietly suppresses an unanswered recent assistant question before provider work', async () => {
+  vi.useFakeTimers()
+  const now = new Date('2026-07-18T15:00:00.000Z')
+  vi.setSystemTime(now)
+  const vault = await mkdtemp(
+    path.join(tmpdir(), 'assistant-notification-unanswered-question-'),
+  )
+  const session = createAssistantSession({
+    sessionId: 'session-onboarding-unanswered-question',
+  })
+  const providerResult = createProviderResult({ session })
+
+  try {
+    await replaceTranscriptEntries(
+      resolveAssistantStatePaths(vault),
+      session.sessionId,
+      [
+        {
+          contentReceivedAt: '2026-07-18T14:00:00.000Z',
+          createdAt: '2026-07-18T14:00:00.000Z',
+          kind: 'user',
+          schema: 'murph.assistant-transcript-entry.v1',
+          text: 'I may want to leave this open for now.',
+        },
+        {
+          createdAt: '2026-07-18T14:15:00.000Z',
+          kind: 'assistant',
+          schema: 'murph.assistant-transcript-entry.v1',
+          text: 'That is completely fine.',
+        },
+        {
+          createdAt: '2026-07-18T14:16:00.000Z',
+          kind: 'assistant',
+          schema: 'murph.assistant-transcript-entry.v1',
+          text: 'Should I keep learning for now?',
+        },
+      ],
+    )
+    const {
+      deliverMessage,
+      mocks,
+      sendAssistantNotificationLocal,
+    } = await loadNotificationTurnHarness({
+      providerResult,
+      turnId: 'turn-onboarding-unanswered-question',
+    })
+
+    const result = await sendAssistantNotificationLocal({
+      instructions: 'Offer one low-pressure health direction choice.',
+      scheduledOccurrenceAt: now.toISOString(),
+      sessionId: session.sessionId,
+      turnPolicy: {
+        kind: 'onboarding-goal-checkin',
+      },
+      vault,
+    })
+
+    expect(result).toMatchObject({
+      decision: {
+        kind: 'skip',
+        privateSummary: 'A recent assistant question is still unanswered.',
+      },
+      response: null,
+      session: {
+        sessionId: session.sessionId,
+      },
+    })
+    expect(mocks.executeCodexTurnWithRecovery).not.toHaveBeenCalled()
+    expect(mocks.startAssistantChannelTypingIndicator).not.toHaveBeenCalled()
+    expect(mocks.createAssistantRuntimeStateService).not.toHaveBeenCalled()
+    expect(mocks.persistAssistantTurnAndSession).not.toHaveBeenCalled()
+    expect(deliverMessage).not.toHaveBeenCalled()
+  } finally {
+    await rm(vault, { force: true, recursive: true })
+  }
+})
+
+test('sendAssistantNotificationLocal restores normal planning after a member answers the recent assistant question', async () => {
+  vi.useFakeTimers()
+  const now = new Date('2026-07-18T15:00:00.000Z')
+  vi.setSystemTime(now)
+  const vault = await mkdtemp(
+    path.join(tmpdir(), 'assistant-notification-answered-question-'),
+  )
+  const session = createAssistantSession({
+    sessionId: 'session-onboarding-answered-question',
+  })
+  const providerResult = createProviderResult({
+    response:
+      '```json\n{"kind":"skip","privateSummary":"No useful choice point now."}\n```',
+    session,
+  })
+
+  try {
+    await replaceTranscriptEntries(
+      resolveAssistantStatePaths(vault),
+      session.sessionId,
+      [
+        {
+          contentReceivedAt: '2026-07-18T14:00:00.000Z',
+          createdAt: '2026-07-18T14:00:00.000Z',
+          kind: 'user',
+          schema: 'murph.assistant-transcript-entry.v1',
+          text: 'I may want to leave this open for now.',
+        },
+        {
+          createdAt: '2026-07-18T14:16:00.000Z',
+          kind: 'assistant',
+          schema: 'murph.assistant-transcript-entry.v1',
+          text: 'Should I keep learning for now?',
+        },
+        {
+          contentReceivedAt: '2026-07-18T14:30:00.000Z',
+          createdAt: '2026-07-18T14:30:00.000Z',
+          kind: 'user',
+          schema: 'murph.assistant-transcript-entry.v1',
+          text: 'Yes, that sounds right.',
+        },
+      ],
+    )
+    const {
+      mocks,
+      sendAssistantNotificationLocal,
+    } = await loadNotificationTurnHarness({
+      providerResult,
+      turnId: 'turn-onboarding-answered-question',
+    })
+
+    await expect(sendAssistantNotificationLocal({
+      instructions: 'Offer one low-pressure health direction choice.',
+      scheduledOccurrenceAt: now.toISOString(),
+      sessionId: session.sessionId,
+      turnPolicy: {
+        kind: 'onboarding-goal-checkin',
+      },
+      vault,
+    })).resolves.toMatchObject({
+      decision: {
+        kind: 'skip',
+        privateSummary: 'No useful choice point now.',
+      },
+    })
+    expect(mocks.executeCodexTurnWithRecovery).toHaveBeenCalledOnce()
+  } finally {
+    await rm(vault, { force: true, recursive: true })
+  }
+})
+
+test('sendAssistantNotificationLocal does not suppress from member evidence at its receipt deadline', async () => {
+  vi.useFakeTimers()
+  const now = new Date('2026-07-18T15:00:00.000Z')
+  vi.setSystemTime(now)
+  const vault = await mkdtemp(
+    path.join(tmpdir(), 'assistant-notification-expired-question-'),
+  )
+  const session = createAssistantSession({
+    sessionId: 'session-onboarding-expired-question',
+  })
+  const providerResult = createProviderResult({
+    response:
+      '```json\n{"kind":"skip","privateSummary":"No current evidence for a useful message."}\n```',
+    session,
+  })
+
+  try {
+    await replaceTranscriptEntries(
+      resolveAssistantStatePaths(vault),
+      session.sessionId,
+      [
+        {
+          contentReceivedAt: '2026-07-04T15:00:00.000Z',
+          createdAt: '2026-07-04T15:00:00.000Z',
+          kind: 'user',
+          schema: 'murph.assistant-transcript-entry.v1',
+          text: 'I may want to leave this open for now.',
+        },
+        {
+          createdAt: '2026-07-04T15:01:00.000Z',
+          kind: 'assistant',
+          schema: 'murph.assistant-transcript-entry.v1',
+          text: 'Should I keep learning for now?',
+        },
+      ],
+    )
+    const {
+      mocks,
+      sendAssistantNotificationLocal,
+    } = await loadNotificationTurnHarness({
+      providerResult,
+      turnId: 'turn-onboarding-expired-question',
+    })
+
+    await expect(sendAssistantNotificationLocal({
+      instructions: 'Offer one low-pressure health direction choice.',
+      scheduledOccurrenceAt: now.toISOString(),
+      sessionId: session.sessionId,
+      turnPolicy: {
+        kind: 'onboarding-goal-checkin',
+      },
+      vault,
+    })).resolves.toMatchObject({
+      decision: {
+        kind: 'skip',
+        privateSummary: 'No current evidence for a useful message.',
+      },
+    })
+    expect(mocks.executeCodexTurnWithRecovery).toHaveBeenCalledOnce()
+  } finally {
+    await rm(vault, { force: true, recursive: true })
+  }
 })
 
 test('sendAssistantNotificationLocal exposes newsletter tools only with scheduled email authority', async () => {

@@ -33,7 +33,10 @@ Last verified: 2026-07-26
   bounds retain only authorized member entries and recompute the ephemeral
   deadline from the entries that remain. The actual Codex `turn/start`
   request drops all bounded history at or after that deadline, including after
-  asynchronous one-shot startup. The dedicated system
+  asynchronous one-shot startup. Before provider work, the notification owner
+  derives only a transient unanswered-question boolean from transcript order
+  and current member receipt authority; a positive result consumes a quiet
+  skip without exposing assistant text to the provider. The dedicated system
   prompt owns the evidence and no-mutation contract above untrusted
   conversation, goal, and task text. `member`
   identities require a personal/direct route;

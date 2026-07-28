@@ -82,10 +82,14 @@ import {
   normalizeAssistantDeliveryError,
 } from './outbox.js'
 import { createAssistantBinding } from './bindings.js'
+import { listAssistantTranscriptEntries } from './store.js'
 import {
   createAssistantSessionId,
   resolveAssistantStatePaths,
 } from './store/paths.js'
+import {
+  ASSISTANT_TRANSCRIPT_CONTENT_RETENTION_MS,
+} from './store/persistence.js'
 import {
   normalizeNullableString,
   normalizeRequiredText,
@@ -345,6 +349,25 @@ export async function sendAssistantNotificationLocal(
           decision: {
             kind: 'skip',
             privateSummary: 'First-contact notification already accepted for this route.',
+          },
+          response: null,
+          session: resolved.session,
+        })
+      }
+
+      if (
+        isAssistantNotificationOnboardingGoalCheckin(input) &&
+        await hasRecentUnansweredAssistantQuestion({
+          now: new Date(),
+          sessionId: resolved.session.sessionId,
+          vault: input.vault,
+        })
+      ) {
+        return withPostTurnDeliveryExpectations({
+          decision: {
+            kind: 'skip',
+            privateSummary:
+              'A recent assistant question is still unanswered.',
           },
           response: null,
           session: resolved.session,
@@ -1481,6 +1504,48 @@ function isAssistantNotificationOnboardingGoalCheckin(
   input: AssistantNotificationInput,
 ): boolean {
   return input.turnPolicy?.kind === 'onboarding-goal-checkin'
+}
+
+async function hasRecentUnansweredAssistantQuestion(input: {
+  now: Date
+  sessionId: string
+  vault: string
+}): Promise<boolean> {
+  let entries: Awaited<ReturnType<typeof listAssistantTranscriptEntries>>
+  try {
+    entries = await listAssistantTranscriptEntries(input.vault, input.sessionId)
+  } catch {
+    return false
+  }
+
+  let latestUserIndex = -1
+  for (const [index, entry] of entries.entries()) {
+    if (entry.kind === 'user') {
+      latestUserIndex = index
+    }
+  }
+  if (latestUserIndex === -1) {
+    return false
+  }
+
+  const latestUser = entries[latestUserIndex]
+  const contentReceivedAtMs = Date.parse(latestUser?.contentReceivedAt ?? '')
+  const nowMs = input.now.getTime()
+  const userContentIsCurrent =
+    latestUser?.kind === 'user' &&
+    latestUser.textRetiredAt === undefined &&
+    normalizeNullableString(latestUser.text) !== null &&
+    Number.isFinite(contentReceivedAtMs) &&
+    contentReceivedAtMs <= nowMs &&
+    contentReceivedAtMs + ASSISTANT_TRANSCRIPT_CONTENT_RETENTION_MS > nowMs
+  if (!userContentIsCurrent) {
+    return false
+  }
+
+  return entries.slice(latestUserIndex + 1).some((entry) =>
+    entry.kind === 'assistant' &&
+    /[?؟？]/u.test(entry.text),
+  )
 }
 
 function assistantNotificationUsesRestrictedToolProfile(

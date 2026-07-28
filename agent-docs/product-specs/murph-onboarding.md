@@ -592,6 +592,12 @@ assistant text cannot expose expired member content or create a misleading
 one-sided exchange. Assistant and status entries are excluded because they
 carry no source-receipt provenance. Count and byte bounds recompute authority
 from the member entries actually retained.
+Before provider work, the notification owner derives only a transient
+suppression boolean when a recent assistant question follows the latest
+receipt-authorized member entry with no later member reply. A positive result
+consumes the one-shot through the existing quiet-skip path without returning
+assistant text to the model. The model handles only suppression facts supported
+by the bounded member messages it actually receives.
 The route plan carries only that earliest retained receipt deadline; if it
 passes before the actual Codex `turn/start` request, including during one-shot
 process or thread startup, the provider drops the whole bounded history and

@@ -104,7 +104,7 @@ Last verified: 2026-07-27
   late-day completion or timezone transition while rejecting a recently
   replaced completion. The cron owner rechecks that fact before model work and
   at every existing provider, tool, delivery, and commit boundary. Its exact
-  automation identity also selects a fresh one-shot output-only turn with a
+  automation identity also selects a fresh one-shot output-only turn with
   bounded recent member messages and engine-projected active-goal titles but no memory
   document, generic CLI contract, shell, hosted dynamic tools, network fetch,
   writable filesystem, or product-state mutation surface. That isolated turn
@@ -118,9 +118,13 @@ Last verified: 2026-07-27
   retained receipt deadline. The one-shot provider rechecks that deadline when
   constructing the actual `turn/start` request after process and thread
   startup, so expiry during cold startup falls back to the history-free prompt.
-  The final
-  outbox provider-entry gate repeats the onboarding precondition after deferred
-  delivery or restart even when the automation revision itself is unchanged.
+  Before provider work, the notification owner derives only a transient boolean
+  when a recent assistant question follows the latest receipt-authorized member
+  entry with no later member reply. That boolean consumes the one-shot through
+  the existing quiet-skip path; assistant text is never added back to provider
+  evidence. The final outbox provider-entry gate repeats the onboarding
+  precondition after deferred delivery or restart even when the automation
+  revision itself is unchanged.
   A skip consumes the one-shot normally and creates no retrying outreach loop.
   Engine and runtime support ship in one runner bundle. Once that bundle writes
   the stable choice-point record, it is the hard rollback floor because an

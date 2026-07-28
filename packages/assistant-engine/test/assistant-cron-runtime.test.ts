@@ -4676,6 +4676,74 @@ describe('assistant cron runtime orchestration', () => {
     ).toBe('archived')
   })
 
+  it('consumes an onboarding goal check-in when a recent assistant question remains unanswered', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-07-06T13:30:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-onboarding-goal-checkin-unanswered-question-',
+    )
+    await completeAssistantOnboarding({
+      completedAt: '2025-11-03T14:00:00.000Z',
+      reason: 'user_answered',
+      vault: vaultRoot,
+    })
+    getVaultAutomationStore(vaultRoot).push({
+      activeUntil: '2026-07-13T13:30:00.000Z',
+      automationId: MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID,
+      continuityPolicy: 'fresh',
+      createdAt: '2026-07-01T12:00:00.000Z',
+      instructions: 'Offer one low-pressure health direction choice.',
+      route: {
+        channel: 'telegram',
+        deliverySource: null,
+        deliveryTarget: 'member-thread',
+        identityId: null,
+        participantId: null,
+        threadId: 'member-thread',
+        threadIsDirect: true,
+      },
+      schedule: { at: '2026-07-06T13:30:00.000Z', kind: 'at' },
+      slug: 'onboarding-goal-checkin',
+      status: 'active',
+      summary: null,
+      tags: ['assistant', 'scheduled', 'murph-managed'],
+      title: 'First health direction check-in',
+      updatedAt: '2026-07-01T12:00:00.000Z',
+    })
+    const { claimed, paths } = await claimFirstCanonicalCronJob(vaultRoot)
+    cronMocks.sendAssistantMessageLocal.mockResolvedValueOnce({
+      decision: {
+        kind: 'skip',
+        privateSummary: 'A recent assistant question is still unanswered.',
+      },
+      response: null,
+      session: {
+        sessionId: 'session-onboarding-unanswered-question',
+      },
+    })
+
+    const result = await executeClaimedAssistantCronJob({
+      job: claimed,
+      paths,
+      trigger: 'scheduled',
+      vault: vaultRoot,
+    })
+
+    expect(result.run).toMatchObject({
+      outcome: 'no_op',
+      reason: 'no_delivery',
+      response: 'A recent assistant question is still unanswered.',
+      status: 'succeeded',
+    })
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledOnce()
+    expect(
+      findCanonicalAutomation(
+        vaultRoot,
+        MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID,
+      )?.status,
+    ).toBe('archived')
+  })
+
   it('blocks onboarding goal check-in delivery when onboarding reopens during model work', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-07-06T13:30:00.000Z'))
