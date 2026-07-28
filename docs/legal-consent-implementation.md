@@ -1,6 +1,6 @@
 # Legal Consent Implementation
 
-Last verified: 2026-07-23
+Last verified: 2026-07-28
 
 ## Purpose
 
@@ -41,11 +41,11 @@ The `POST` accept and revoke routes also enforce hosted mutation-origin checks b
 The companion route uses Privy bearer authentication with no cookie fallback
 and accepts only the two launch scopes. It reads and writes the same consent
 tables and current server-side document registry as the browser routes. The
-native client therefore does not persist a second consent decision or hardcode
-document versions, and the route assigns its own `ios-companion` audit source
-instead of trusting a client label. One native action may submit the currently
-missing launch scopes sequentially and resume only after the returned status is
-launch-granted.
+iOS and Android clients therefore do not persist a second consent decision or
+hardcode document versions, and the route assigns its own generic
+`native-companion` audit source instead of trusting a client platform label. One
+native action may submit the currently missing launch scopes sequentially and
+resume only after the returned status is launch-granted.
 
 ## Consent Scopes
 

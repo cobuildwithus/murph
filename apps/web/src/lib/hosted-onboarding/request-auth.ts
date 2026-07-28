@@ -151,7 +151,7 @@ export async function requireActivePrivyMemberAuth(
 
 /**
  * Bearer-token variant of `requireActivePrivyMemberAuth` for native
- * (non-browser) clients such as the iOS companion app. The bearer token is
+ * (non-browser) Murph companion apps. The bearer token is
  * the Privy identity token and is verified through the same server-side
  * Privy verification path as cookie sessions; member resolution and the
  * active-access entitlement check are identical. There is intentionally no
