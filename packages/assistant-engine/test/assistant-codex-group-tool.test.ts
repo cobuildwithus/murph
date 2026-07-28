@@ -92,6 +92,7 @@ describe("murph.group dynamic tool", () => {
       .not.toContain(MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL);
     expect(MURPH_GROUP_TOOL.inputSchema.properties.action.enum).toEqual([
       "ask",
+      "ask_current_sender",
       "ask_member",
       "post_disclosure_request",
       "revoke_disclosure_grant",

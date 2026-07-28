@@ -1113,6 +1113,13 @@ export type HostedRuntimeGroupToolRequest =
       question: string;
     }
   | {
+      action: "ask_current_sender";
+      origin: Extract<
+        HostedExecutionAssistantAskOrigin,
+        { kind: "accepted_input" }
+      >;
+    }
+  | {
       action: "ask_member";
       grantId: string;
       origin: HostedExecutionAssistantAskOrigin;
@@ -1184,6 +1191,7 @@ export type HostedRuntimeGroupToolResponse =
       action: "ask";
       result: HostedRuntimeGroupAskResult;
     }
+  | { action: "ask_current_sender"; result: HostedRuntimeGroupMemberAskResult }
   | { action: "ask_member"; result: HostedRuntimeGroupMemberAskResult }
   | {
       action: "post_disclosure_request";

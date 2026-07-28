@@ -65,6 +65,9 @@ import {
   requestHostedGroupMemberAssistantAsk,
 } from "./group-assistant-ask";
 import {
+  requestHostedGroupCurrentSenderAssistantAsk,
+} from "./group-current-sender-assistant-ask";
+import {
   admitHostedGroupDisclosurePermissionAppendTx,
   canonicalizeHostedGroupDisclosurePermissionText,
   createHostedGroupDisclosurePermissionProviderIdempotencyKey,
@@ -137,6 +140,7 @@ export type HostedRuntimeGroupToolAccessClassification =
 
 export const HOSTED_RUNTIME_GROUP_TOOL_ACCESS_CLASSIFICATION = {
   ask: "personal_active",
+  ask_current_sender: "participant_aware",
   ask_member: "participant_aware",
   create_join_link: "owner_active",
   leave_membership: "participant_aware",
@@ -178,6 +182,17 @@ export async function handleHostedRuntimeGroupTool(input: {
       input.scheduleMailboxWake?.(admission.mailboxWake);
     }
     return { action: "ask", result: admission.result };
+  }
+
+  if (input.request.action === "ask_current_sender") {
+    const admission = await requestHostedGroupCurrentSenderAssistantAsk({
+      groupRuntimeMemberId: input.memberId,
+      origin: input.request.origin,
+    });
+    if (admission.mailboxWake) {
+      input.scheduleMailboxWake?.(admission.mailboxWake);
+    }
+    return { action: "ask_current_sender", result: admission.result };
   }
 
   if (input.request.action === "ask_member") {

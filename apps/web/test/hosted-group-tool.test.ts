@@ -25,6 +25,7 @@ const mocks = vi.hoisted(() => ({
   readActiveHostedGroupDisclosureGrantsForGroup: vi.fn(),
   readActiveHostedGroupDisclosureGrantsForMember: vi.fn(),
   requestHostedGroupAssistantAsk: vi.fn(),
+  requestHostedGroupCurrentSenderAssistantAsk: vi.fn(),
   requestHostedGroupMemberAssistantAsk: vi.fn(),
   readHostedGroupByRuntimeMemberId: vi.fn(),
   readHostedGroupIdByRuntimeMemberId: vi.fn(),
@@ -134,6 +135,11 @@ vi.mock("@/src/lib/hosted-groups/group-newsletter", () => ({
 vi.mock("@/src/lib/hosted-groups/group-assistant-ask", () => ({
   requestHostedGroupAssistantAsk: mocks.requestHostedGroupAssistantAsk,
   requestHostedGroupMemberAssistantAsk: mocks.requestHostedGroupMemberAssistantAsk,
+}));
+
+vi.mock("@/src/lib/hosted-groups/group-current-sender-assistant-ask", () => ({
+  requestHostedGroupCurrentSenderAssistantAsk:
+    mocks.requestHostedGroupCurrentSenderAssistantAsk,
 }));
 
 vi.mock("@/src/lib/hosted-groups/group-disclosure-store", () => ({
@@ -375,6 +381,10 @@ describe("handleHostedRuntimeGroupTool", () => {
       mailboxWake: null,
       result: { status: "unavailable", unavailableReason: "not_configured" },
     });
+    mocks.requestHostedGroupCurrentSenderAssistantAsk.mockResolvedValue({
+      mailboxWake: null,
+      result: { status: "unavailable", unavailableReason: "not_configured" },
+    });
     mocks.requestHostedGroupMemberAssistantAsk.mockResolvedValue({
       mailboxWake: null,
       result: { status: "unavailable", unavailableReason: "not_configured" },
@@ -384,6 +394,7 @@ describe("handleHostedRuntimeGroupTool", () => {
   it("classifies group-tool actions by access authority", () => {
     expect(HOSTED_RUNTIME_GROUP_TOOL_ACCESS_CLASSIFICATION).toEqual({
       ask: "personal_active",
+      ask_current_sender: "participant_aware",
       ask_member: "participant_aware",
       create_join_link: "owner_active",
       leave_membership: "participant_aware",
@@ -460,6 +471,42 @@ describe("handleHostedRuntimeGroupTool", () => {
     expect(scheduleMailboxWake).toHaveBeenCalledWith({
       expectedUserId: "member_group_runtime",
       mailboxItemId: "aask_req_one",
+    });
+  });
+
+  it("dispatches an exact current-sender ask and schedules only its personal wake", async () => {
+    const scheduleMailboxWake = vi.fn();
+    const origin = {
+      assistantInputId: `ain_${"c".repeat(32)}`,
+      kind: "accepted_input" as const,
+      sessionId: "session_group",
+    };
+    mocks.requestHostedGroupCurrentSenderAssistantAsk.mockResolvedValue({
+      mailboxWake: {
+        expectedUserId: "member_sender",
+        mailboxItemId: "aask_req_current_sender",
+      },
+      result: { status: "accepted" },
+    });
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_group_runtime",
+      request: { action: "ask_current_sender", origin },
+      scheduleMailboxWake,
+    })).resolves.toEqual({
+      action: "ask_current_sender",
+      result: { status: "accepted" },
+    });
+
+    expect(
+      mocks.requestHostedGroupCurrentSenderAssistantAsk,
+    ).toHaveBeenCalledWith({
+      groupRuntimeMemberId: "member_group_runtime",
+      origin,
+    });
+    expect(scheduleMailboxWake).toHaveBeenCalledWith({
+      expectedUserId: "member_sender",
+      mailboxItemId: "aask_req_current_sender",
     });
   });
 

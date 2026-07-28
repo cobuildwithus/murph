@@ -257,9 +257,16 @@ export interface HostedExecutionAssistantAskConsentedMemberTarget {
   permissionDigest: string;
 }
 
+export interface HostedExecutionAssistantAskGroupSenderTarget {
+  groupRuntimeMemberId: string;
+  kind: "group_sender";
+  permissionDigest: string;
+}
+
 export type HostedExecutionAssistantAskTarget =
   | HostedExecutionAssistantAskJoinedGroupTarget
-  | HostedExecutionAssistantAskConsentedMemberTarget;
+  | HostedExecutionAssistantAskConsentedMemberTarget
+  | HostedExecutionAssistantAskGroupSenderTarget;
 
 export interface HostedExecutionAssistantAskAcceptedInputOrigin {
   assistantInputId: string;
@@ -302,9 +309,17 @@ export interface HostedExecutionAssistantAskConsentedMemberRequestedPayload {
   target: HostedExecutionAssistantAskConsentedMemberTarget;
 }
 
+export interface HostedExecutionAssistantAskGroupSenderRequestedPayload {
+  expiresAt: string;
+  origin: HostedExecutionAssistantAskAcceptedInputOrigin;
+  question: string;
+  target: HostedExecutionAssistantAskGroupSenderTarget;
+}
+
 export type HostedExecutionAssistantAskRequestedPayload =
   | HostedExecutionAssistantAskJoinedGroupRequestedPayload
-  | HostedExecutionAssistantAskConsentedMemberRequestedPayload;
+  | HostedExecutionAssistantAskConsentedMemberRequestedPayload
+  | HostedExecutionAssistantAskGroupSenderRequestedPayload;
 
 export interface HostedExecutionAssistantAskJoinedGroupCompletedPayload {
   expiresAt: string;
@@ -615,6 +630,26 @@ export type HostedExecutionConversationMessagePayload =
   | HostedExecutionLinqConversationMessagePayload
   | HostedExecutionTelegramConversationMessagePayload
   | HostedExecutionEmailConversationMessagePayload;
+
+/**
+ * Returns only the human-authored text represented by a conversation wake.
+ * It performs no truncation so callers can either preserve the exact text or
+ * reject it at their own authorization boundary.
+ */
+export function readHostedExecutionConversationMessageText(
+  payload: HostedExecutionConversationMessagePayload,
+): string | null {
+  const text = payload.channel === "linq"
+    ? payload.linqMessage.parts
+      .filter((part) => part.type === "text")
+      .map((part) => part.value)
+      .join("\n")
+    : payload.channel === "telegram"
+      ? payload.telegramMessage.text ?? ""
+      : "";
+  const normalized = text.trim();
+  return normalized.length > 0 ? normalized : null;
+}
 
 export interface HostedExecutionConversationMessageWake extends HostedExecutionBaseWake {
   kind: "conversation.message";

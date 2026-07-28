@@ -15,17 +15,24 @@ import {
 import {
   assertHostedThreadRouteEgressAuthority,
 } from "@/src/lib/hosted-routing/thread-route-store";
+import {
+  assertHostedAssistantAskCompletionDeliveryAuthorityTx,
+} from "@/src/lib/hosted-groups/group-assistant-ask";
 import { readOptionalJsonObject } from "@/src/lib/http";
 import { getPrisma } from "@/src/lib/prisma";
 
-const HOSTED_THREAD_ROUTE_AUTHORITY_BODY_LIMIT_BYTES = 4 * 1024;
+const HOSTED_THREAD_ROUTE_AUTHORITY_BODY_LIMIT_BYTES = 8 * 1024;
 
 export const POST = withJsonError(async (request: Request) => {
   const memberId = await requireHostedCloudflareCallbackRequest(request, {
     maxBodyBytes: HOSTED_THREAD_ROUTE_AUTHORITY_BODY_LIMIT_BYTES,
   });
+  const body = await readOptionalJsonObject(request);
+  const assistantAskCompletion = parseAssistantAskCompletionAuthority(
+    body.assistantAskCompletion,
+  );
   const authority = parseHostedExecutionExternalThreadRouteAuthority(
-    await readOptionalJsonObject(request),
+    assistantAskCompletion ? body.authority : body,
   );
   if (authority.containerMemberId !== memberId) {
     throw hostedOnboardingError({
@@ -36,9 +43,86 @@ export const POST = withJsonError(async (request: Request) => {
     });
   }
 
-  await assertHostedThreadRouteEgressAuthority({
-    authority,
-    prisma: getPrisma(),
+  const assertion = await getPrisma().$transaction(async (tx) => {
+    await assertHostedThreadRouteEgressAuthority({
+      authority,
+      prisma: tx,
+    });
+    if (!assistantAskCompletion) {
+      return;
+    }
+    return await assertHostedAssistantAskCompletionDeliveryAuthorityTx({
+      ...assistantAskCompletion,
+      boundRuntimeMemberId: memberId,
+      tx,
+    });
   });
-  return jsonOk({ authorized: true });
+  return jsonOk({
+    authorized: true,
+    ...(assertion?.assistantAskFallbackRequired
+      ? { assistantAskFallbackRequired: true }
+      : {}),
+  });
 });
+
+interface AssistantAskCompletionAuthority {
+  answeredMailboxItemIds: readonly string[];
+  assistantAskCompletionExpiresAt: string;
+  assistantAskFallback: boolean;
+  idempotencyKey: string;
+}
+
+function parseAssistantAskCompletionAuthority(
+  value: unknown,
+): AssistantAskCompletionAuthority | null {
+  if (value === undefined || value === null) {
+    return null;
+  }
+  if (typeof value !== "object" || Array.isArray(value)) {
+    throwInvalidAssistantAskCompletionAuthority();
+  }
+  const input = value as Record<string, unknown>;
+  const answeredMailboxItemIds = input.answeredMailboxItemIds;
+  const assistantAskCompletionExpiresAt =
+    parseRequiredCanonicalTimestamp(input.assistantAskCompletionExpiresAt);
+  if (
+    !Array.isArray(answeredMailboxItemIds)
+    || answeredMailboxItemIds.length !== 1
+    || answeredMailboxItemIds.some(
+      (item) => typeof item !== "string" || item.trim().length === 0,
+    )
+    || typeof input.assistantAskFallback !== "boolean"
+    || typeof input.idempotencyKey !== "string"
+    || input.idempotencyKey.trim().length === 0
+  ) {
+    throwInvalidAssistantAskCompletionAuthority();
+  }
+  return {
+    answeredMailboxItemIds: answeredMailboxItemIds.map((item) => item.trim()),
+    assistantAskCompletionExpiresAt,
+    assistantAskFallback: input.assistantAskFallback,
+    idempotencyKey: input.idempotencyKey.trim(),
+  };
+}
+
+function parseRequiredCanonicalTimestamp(value: unknown): string {
+  const normalized = typeof value === "string" ? value.trim() : "";
+  const parsed = Date.parse(normalized);
+  if (
+    normalized
+    && Number.isFinite(parsed)
+    && new Date(parsed).toISOString() === normalized
+  ) {
+    return normalized;
+  }
+  throwInvalidAssistantAskCompletionAuthority();
+}
+
+function throwInvalidAssistantAskCompletionAuthority(): never {
+  throw hostedOnboardingError({
+    code: "HOSTED_THREAD_ROUTE_ASSISTANT_ASK_AUTHORITY_INVALID",
+    httpStatus: 400,
+    message: "Hosted thread route Assistant Ask authority is invalid.",
+    retryable: false,
+  });
+}
