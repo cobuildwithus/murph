@@ -245,9 +245,32 @@ describe("hosted usage referral tool", () => {
       status: "armed",
     });
   });
+
+  it("serializes every database query inside the arm transaction", async () => {
+    const { prisma } = buildPrisma({ guardTransactionQueries: true });
+
+    await expect(handleHostedUsageReferralGroupTool({
+      enabled: true,
+      memberId: "member_personal",
+      prisma: prisma as never,
+      request: {
+        action: "arm_usage_referral",
+        policyCode: "new_person_activation_v1",
+        sourceConversation: PERSONAL_SOURCE,
+      },
+    })).resolves.toMatchObject({
+      action: "arm_usage_referral",
+      result: {
+        outcome: "armed",
+        status: "ok",
+      },
+    });
+  });
 });
 
-function buildPrisma(): {
+function buildPrisma(input: {
+  guardTransactionQueries?: boolean;
+} = {}): {
   prisma: Record<string, unknown>;
   referrals: ReferralState[];
 } {
@@ -287,11 +310,64 @@ function buildPrisma(): {
     }]),
     $transaction: vi.fn(async (
       callback: (tx: Record<string, unknown>) => Promise<unknown>,
-    ) => callback(prisma)),
+    ) => callback(
+      input.guardTransactionQueries
+        ? createSingleQueryTransactionClient(prisma)
+        : prisma,
+    )),
     hostedThreadContainer: {
       findUnique: vi.fn(async () => null),
     },
     hostedUsageReferral: referralDelegate,
   };
   return { prisma, referrals };
+}
+
+function createSingleQueryTransactionClient(
+  prisma: Record<string, unknown>,
+): Record<string, unknown> {
+  let queryInFlight = false;
+  const guard = async <Result>(
+    operation: () => Promise<Result>,
+  ): Promise<Result> => {
+    if (queryInFlight) {
+      throw new Error("Concurrent transaction query started.");
+    }
+    queryInFlight = true;
+    try {
+      await Promise.resolve();
+      return await operation();
+    } finally {
+      queryInFlight = false;
+    }
+  };
+  const referralDelegate =
+    prisma.hostedUsageReferral as Record<string, (...args: never[]) => Promise<unknown>>;
+
+  return {
+    $executeRaw: (...args: never[]) =>
+      guard(() =>
+        (prisma.$executeRaw as (...args: never[]) => Promise<unknown>)(...args)
+      ),
+    $queryRaw: (...args: never[]) =>
+      guard(() =>
+        (prisma.$queryRaw as (...args: never[]) => Promise<unknown>)(...args)
+      ),
+    hostedThreadContainer: {
+      findUnique: (...args: never[]) =>
+        guard(() =>
+          (
+            prisma.hostedThreadContainer as {
+              findUnique: (...args: never[]) => Promise<unknown>;
+            }
+          ).findUnique(...args)
+        ),
+    },
+    hostedUsageReferral: Object.fromEntries(
+      Object.entries(referralDelegate).map(([key, operation]) => [
+        key,
+        (...args: never[]) => guard(() => operation(...args)),
+      ]),
+    ),
+  };
 }

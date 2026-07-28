@@ -1847,6 +1847,67 @@ describe("hosted runtime log store", () => {
     expect(createMany).not.toHaveBeenCalled();
   });
 
+  it("drops a late diagnostic batch after its member was deleted", async () => {
+    const createMany = vi.fn(async () => {
+      throw new Prisma.PrismaClientKnownRequestError(
+        "Foreign key constraint failed.",
+        {
+          clientVersion: "7.8.0",
+          code: "P2003",
+          meta: {
+            constraint: "hosted_runtime_log_user_id_fkey",
+            modelName: "HostedRuntimeLog",
+          },
+        },
+      );
+    });
+    const prisma = Object.assign(Object.create(null), {
+      hostedRuntimeLog: { createMany },
+    }) as Parameters<typeof recordHostedRuntimeLogs>[0]["prisma"];
+
+    await expect(recordHostedRuntimeLogs({
+      entries: [{
+        component: "mailbox",
+        eventCode: "mailbox.imported",
+        level: "info",
+        phase: "import",
+      }],
+      prisma,
+      userId: "member_deleted",
+    })).resolves.toBe(0);
+  });
+
+  it("does not hide a different runtime-log foreign-key failure", async () => {
+    const error = new Prisma.PrismaClientKnownRequestError(
+      "Foreign key constraint failed.",
+      {
+        clientVersion: "7.8.0",
+        code: "P2003",
+        meta: {
+          constraint: "different_runtime_log_constraint",
+          modelName: "HostedRuntimeLog",
+        },
+      },
+    );
+    const createMany = vi.fn(async () => {
+      throw error;
+    });
+    const prisma = Object.assign(Object.create(null), {
+      hostedRuntimeLog: { createMany },
+    }) as Parameters<typeof recordHostedRuntimeLogs>[0]["prisma"];
+
+    await expect(recordHostedRuntimeLogs({
+      entries: [{
+        component: "mailbox",
+        eventCode: "mailbox.imported",
+        level: "info",
+        phase: "import",
+      }],
+      prisma,
+      userId: "member_workspace_1",
+    })).rejects.toBe(error);
+  });
+
   it("rejects a batch entry with a forbidden field just like a single write", async () => {
     const createMany = vi.fn(async () => ({ count: 0 }));
     const prisma = Object.assign(Object.create(null), {

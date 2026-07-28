@@ -336,16 +336,14 @@ async function resolveHostedGroupJoinConfirmationRouteTx(input: {
   memberId: string;
   tx: Prisma.TransactionClient;
 }): Promise<HostedExecutionAssistantNotificationRoute | null> {
-  const [identity, routing] = await Promise.all([
-    readHostedMemberIdentity({
-      memberId: input.memberId,
-      prisma: input.tx,
-    }),
-    readHostedMemberRoutingState({
-      memberId: input.memberId,
-      prisma: input.tx,
-    }),
-  ]);
+  const identity = await readHostedMemberIdentity({
+    memberId: input.memberId,
+    prisma: input.tx,
+  });
+  const routing = await readHostedMemberRoutingState({
+    memberId: input.memberId,
+    prisma: input.tx,
+  });
   const linqAuthority = readHostedLinqHomeLineAuthority(routing);
   const linqContactLookupKey = (
     linqAuthority.kind === "home" || linqAuthority.kind === "pending"

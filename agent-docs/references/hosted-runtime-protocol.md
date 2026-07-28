@@ -692,7 +692,13 @@ causal-sequence action. The first sequence-aware Cloudflare consumer and that
 Web build are rollback floors while preference items or personality watermarks
 exist. Deploy behavior-changing consumer updates with immediate runner rollout
 and prove fleet convergence; prefer a forward fix over restoring a legacy
-producer or parser.
+producer or parser. Hourly mailbox retention may encounter a sequence-less
+preference row that predates the hard cut and was deliberately exempted from
+constraint validation because its lane sequence was already consumed.
+Retention deletes that expired legacy tombstone only while it remains at or
+below the authoritative consumed watermark. It never updates the row under the
+new constraint or fabricates a causal sequence; current sequence-bearing rows
+continue to retire in place.
 For the `conversationInputAhead` checkpoint and owner-release callback rollout,
 deploy Cloudflare Worker plus runner first with immediate container rollout,
 wait for the managed-container smoke to prove the new bundle, then deploy web.
@@ -950,7 +956,11 @@ The cooldown is a per-member claim on `HostedWorkspace`
 concurrent first-failure callbacks produce at most one immediate recheck and
 cannot all suppress each other. Recovery therefore does not depend on the
 diagnostic row having been written or read back: runtime logs stay purely
-diagnostic and remain subject to ordinary retention.
+diagnostic and remain subject to ordinary retention. The callback reports the
+number of rows actually persisted. If account deletion removes the member
+before a draining runtime's diagnostic batch arrives, Web treats only the exact
+`hosted_runtime_log_user_id_fkey` failure as a successful zero-row diagnostic
+drop; every other database failure remains visible.
 Cloudflare only reports the accepted-attempt failure through the existing
 signed runtime-log callback; it does not schedule retries or become a recovery
 orchestrator.
