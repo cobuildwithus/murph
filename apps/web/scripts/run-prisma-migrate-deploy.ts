@@ -105,6 +105,10 @@ const hostedWebPrismaPredeployHistoricalMigrationIds = new Set([
 
 const hostedWebPrismaPredeployCompatibleMigrationReasons = new Map([
   [
+    "20260728040000_connected_app_approval_presentation_encryption",
+    new Set(["ADD CONSTRAINT CHECK", "DROP CONSTRAINT"]),
+  ],
+  [
     "20260727040000_relax_hosted_usage_credit_detached_direct_proof",
     new Set(["ADD CONSTRAINT CHECK", "DROP CONSTRAINT"]),
   ],

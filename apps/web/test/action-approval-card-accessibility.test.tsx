@@ -275,7 +275,7 @@ test("renders rename and disconnect consent facts as distinct rows", async () =>
   const requests = [
     buildHostedConnectedAppsMutationApprovalRequest({
       account,
-      alias: "clinic · Account: forged",
+      alias: "clinic",
       memberId: "hbm_member",
       operation: "rename",
     }),
@@ -302,7 +302,9 @@ test("renders rename and disconnect consent facts as distinct rows", async () =>
         ),
       ).map((row) => row.textContent);
       expect(rows).toHaveLength(3);
-      expect(rows[0]).toBe("Account: Google Calendar — calendar");
+      expect(rows[0]).toBe(
+        "Account: Google Calendar — alias \"calendar\" — word ID \"quiet-calendar\"",
+      );
       expect(rows[1]).not.toContain(" · ");
       expect(rows[2]).toMatch(/^Only the complete account ID/);
     } finally {

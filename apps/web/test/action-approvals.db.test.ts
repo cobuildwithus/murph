@@ -37,6 +37,9 @@ import {
 import {
   decodeHostedMailboxStoredPayload,
 } from "@/src/lib/hosted-mailbox/store";
+import {
+  setHostedSecureBoxStringTestCodecForTests,
+} from "@/src/lib/hosted-crypto/secure-box";
 
 const REQUEST: HostedActionApprovalRequest = {
   actionFingerprint: "b".repeat(64),
@@ -49,15 +52,30 @@ const REQUEST: HostedActionApprovalRequest = {
   returnContactKind: "text",
 };
 
+const CONNECTED_APP_REQUEST: HostedActionApprovalRequest = {
+  actionFingerprint: "c".repeat(64),
+  actionId: `connected-app:${"d".repeat(64)}`,
+  actionKind: "connected-app.calendar-create.v1",
+  presentation: {
+    body:
+      "Account: Google Calendar — alias \"calendar\" — word ID \"quiet-calendar\""
+      + " · Event: Annual physical",
+    title: "Create this calendar event?",
+  },
+  returnContactKind: null,
+};
+
 describe("hosted action approvals", () => {
   let deps: HostedWebTestkitDeps | null = null;
 
   beforeEach(() => {
     vi.clearAllMocks();
+    installApprovalPresentationTestCodec();
     mocks.resolveHostedPublicOrigin.mockReturnValue("https://withmurph.ai");
   });
 
   afterEach(async () => {
+    setHostedSecureBoxStringTestCodecForTests(null);
     await deps?.prisma.$disconnect();
     deps = null;
   });
@@ -73,6 +91,68 @@ describe("hosted action approvals", () => {
     });
     return { deps, memberId };
   }
+
+  it("encrypts connected-app presentation for only the bound member and row fields", async () => {
+    const { deps, memberId } = await setup();
+    const requested = await requestHostedActionApproval({
+      memberId,
+      now: new Date("2026-07-28T04:00:00.000Z"),
+      prisma: deps.prisma,
+      request: CONNECTED_APP_REQUEST,
+    });
+    const stored = await requireApprovalRow(deps, requested.approvalId);
+
+    expect(stored).toMatchObject({
+      presentationBody: null,
+      presentationTitle: null,
+      presentationBodyEncrypted: expect.any(String),
+      presentationTitleEncrypted: expect.any(String),
+    });
+    expect(stored.presentationBodyEncrypted).not.toContain("Annual physical");
+    expect(stored.presentationTitleEncrypted).not.toContain("calendar event");
+    await expect(readHostedActionApproval({
+      approvalId: requested.approvalId,
+      memberId,
+      now: new Date("2026-07-28T04:01:00.000Z"),
+      prisma: deps.prisma,
+    })).resolves.toMatchObject({
+      presentation: CONNECTED_APP_REQUEST.presentation,
+    });
+
+    await deps.prisma.hostedSensitiveActionChallenge.update({
+      data: {
+        presentationBodyEncrypted: stored.presentationTitleEncrypted,
+        presentationTitleEncrypted: stored.presentationBodyEncrypted,
+      },
+      where: { approvalKey: requested.approvalId },
+    });
+    await expect(readHostedActionApproval({
+      approvalId: requested.approvalId,
+      memberId,
+      prisma: deps.prisma,
+    })).rejects.toThrow("test ciphertext context mismatch");
+
+    const otherMemberId = `member_action_${randomUUID().replaceAll("-", "")}`;
+    await deps.prisma.hostedMember.create({
+      data: {
+        billingStatus: "active",
+        id: otherMemberId,
+      },
+    });
+    await deps.prisma.hostedSensitiveActionChallenge.update({
+      data: {
+        memberId: otherMemberId,
+        presentationBodyEncrypted: stored.presentationBodyEncrypted,
+        presentationTitleEncrypted: stored.presentationTitleEncrypted,
+      },
+      where: { approvalKey: requested.approvalId },
+    });
+    await expect(readHostedActionApproval({
+      approvalId: requested.approvalId,
+      memberId: otherMemberId,
+      prisma: deps.prisma,
+    })).rejects.toThrow("test ciphertext context mismatch");
+  });
 
   it("commits a generation-scoped pending-effect wake with each approval decision", async () => {
     const { deps, memberId } = await setup();
@@ -827,4 +907,44 @@ async function requireApprovalRow(
     throw new Error(`Missing approval row: ${approvalId}`);
   }
   return row;
+}
+
+function installApprovalPresentationTestCodec(): void {
+  let sequence = 0;
+  const ciphertexts = new Map<string, {
+    context: string;
+    value: string;
+  }>();
+  setHostedSecureBoxStringTestCodecForTests({
+    decrypt(input) {
+      const stored = ciphertexts.get(input.value);
+      if (!stored || stored.context !== approvalPresentationTestContext(input)) {
+        throw new Error("test ciphertext context mismatch");
+      }
+      return stored.value;
+    },
+    encrypt(input) {
+      sequence += 1;
+      const ciphertext = `test-action-approval-ciphertext:${sequence}`;
+      ciphertexts.set(ciphertext, {
+        context: approvalPresentationTestContext(input),
+        value: input.value,
+      });
+      return ciphertext;
+    },
+  });
+}
+
+function approvalPresentationTestContext(input: {
+  aad: object;
+  lane: string;
+  scope: string;
+  userId: string;
+}): string {
+  return JSON.stringify({
+    aad: input.aad,
+    lane: input.lane,
+    scope: input.scope,
+    userId: input.userId,
+  }, (_key, value) => typeof value === "bigint" ? `${value}n` : value);
 }

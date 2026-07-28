@@ -37,6 +37,10 @@ import type {
   HostedActionApprovalView,
 } from "./action-approvals-shared";
 import { appendHostedMailboxEnvelopeTx } from "./hosted-mailbox/store";
+import {
+  openHostedUserSecureBoxStrings,
+  sealHostedUserSecureBoxStrings,
+} from "./hosted-crypto/secure-box";
 import { hostedOnboardingError } from "./hosted-onboarding/errors";
 import { resolveHostedPublicOrigin } from "./hosted-web/public-url";
 import {
@@ -54,7 +58,26 @@ const ACTION_APPROVAL_GENERATION_VERSION = "murph-action-approval-generation-v1"
 const ACTION_APPROVAL_OUTCOME_WAKE_VERSION = "murph-action-approval-outcome-wake-v1";
 const ACTION_APPROVAL_PLACEHOLDER_VERSION = "murph-action-approval-placeholder-v1";
 const ACTION_APPROVAL_ID_BYTES = 24;
+const ACTION_APPROVAL_PRESENTATION_CRYPTO_LANE = "hosted-member-private-field";
+const ACTION_APPROVAL_PRESENTATION_CRYPTO_PURPOSE =
+  "hosted-action-approval-presentation";
+const ACTION_APPROVAL_PRESENTATION_CRYPTO_TABLE =
+  "hosted_sensitive_action_challenge";
 const SHA256_HEX_PATTERN = /^[0-9a-f]{64}$/u;
+
+type ActionApprovalPresentationEncryptedField =
+  | "presentation_body_encrypted"
+  | "presentation_title_encrypted";
+
+interface HostedActionApprovalMetadata {
+  actionHash: string;
+  actionId: string;
+  approvalId: string;
+  bindingHash: string;
+  expiresAt: Date;
+  returnContactKind: HostedActionApprovalReturnContactKind | null;
+  tokenHash: string;
+}
 
 export interface PendingHostedActionApprovalIdentity {
   actionHash: string;
@@ -119,10 +142,37 @@ export async function requestHostedActionApproval(input: {
     now: input.now,
     request: input.request,
   });
+  const existing = await input.prisma.hostedSensitiveActionChallenge.findFirst({
+    where: {
+      approvalKey: prepared.approvalId,
+      kind: ACTION_APPROVAL_KIND,
+      memberId: prepared.memberId,
+    },
+  });
+  if (existing) {
+    assertHostedActionApprovalMatchesRequest(existing, prepared);
+    const existingStatus = readHostedActionApprovalStatus(existing, prepared.now);
+    if (existingStatus === "pending" || existingStatus === "approved") {
+      return buildHostedActionApprovalResult(existing, prepared.now);
+    }
+    return buildHostedActionApprovalResult(
+      await refreshHostedActionApprovalRequest({
+        approval: existing,
+        pendingData: await buildPendingHostedActionApprovalData({ prepared }),
+        prepared,
+        prisma: input.prisma,
+      }),
+      prepared.now,
+    );
+  }
+
+  const pendingData = await buildPendingHostedActionApprovalData({
+    prepared,
+  });
 
   const approval = await input.prisma.hostedSensitiveActionChallenge.upsert({
     where: { approvalKey: prepared.approvalId },
-    create: buildPendingHostedActionApprovalData(prepared),
+    create: pendingData,
     update: {},
   });
 
@@ -136,6 +186,7 @@ export async function requestHostedActionApproval(input: {
   return buildHostedActionApprovalResult(
     await refreshHostedActionApprovalRequest({
       approval,
+      pendingData,
       prepared,
       prisma: input.prisma,
     }),
@@ -286,7 +337,12 @@ export async function readHostedActionApproval(input: {
     throw actionApprovalNotFound();
   }
 
-  return buildHostedActionApprovalView(approval, input.now ?? new Date());
+  return buildHostedActionApprovalView({
+    approval,
+    memberId: input.memberId,
+    now: input.now ?? new Date(),
+    prisma: input.prisma,
+  });
 }
 
 export async function requirePendingHostedActionApproval(input: {
@@ -312,7 +368,11 @@ export async function requirePendingHostedActionApproval(input: {
     throw actionApprovalUnavailable();
   }
 
-  return requireHostedActionApprovalIdentity(approval);
+  return requireHostedActionApprovalIdentity({
+    approval,
+    memberId: input.memberId,
+    prisma: input.prisma,
+  });
 }
 
 export async function issueHostedActionApprovalChallenge(input: {
@@ -538,7 +598,7 @@ function buildHostedActionApprovalResult(
   approval: HostedSensitiveActionChallenge,
   now: Date,
 ): HostedActionApprovalResult {
-  const identity = requireHostedActionApprovalIdentity(approval);
+  const identity = requireHostedActionApprovalMetadata(approval);
   const status = readHostedActionApprovalStatus(approval, now);
 
   if (status === "approved") {
@@ -602,9 +662,11 @@ function prepareHostedActionApprovalRequest(input: {
   };
 }
 
-function buildPendingHostedActionApprovalData(
-  prepared: PreparedHostedActionApprovalRequest,
-) {
+async function buildPendingHostedActionApprovalData(input: {
+  prepared: PreparedHostedActionApprovalRequest;
+}) {
+  const presentation = await buildHostedActionApprovalPresentationStorage(input);
+  const prepared = input.prepared;
   return {
     actionHash: prepared.actionHash,
     actionId: prepared.request.actionId,
@@ -618,15 +680,56 @@ function buildPendingHostedActionApprovalData(
     expiresAt: prepared.expiresAt,
     kind: ACTION_APPROVAL_KIND,
     memberId: prepared.memberId,
-    presentationBody: prepared.request.presentation.body,
-    presentationTitle: prepared.request.presentation.title,
+    ...presentation,
     returnContactKind: prepared.request.returnContactKind,
     tokenHash: buildHostedActionApprovalPlaceholderHash(prepared.approvalId),
   };
 }
 
+async function buildHostedActionApprovalPresentationStorage(input: {
+  prepared: PreparedHostedActionApprovalRequest;
+}) {
+  if (
+    !input.prepared.request.actionId.startsWith(
+      HOSTED_CONNECTED_APPS_ACTION_ID_PREFIX,
+    )
+  ) {
+    return {
+      presentationBody: input.prepared.request.presentation.body,
+      presentationBodyEncrypted: null,
+      presentationTitle: input.prepared.request.presentation.title,
+      presentationTitleEncrypted: null,
+    };
+  }
+
+  const [body, title] = await sealHostedUserSecureBoxStrings({
+    entries: [
+      buildHostedActionApprovalPresentationCryptoEntry({
+        approvalId: input.prepared.approvalId,
+        field: "presentation_body_encrypted",
+        value: input.prepared.request.presentation.body,
+      }),
+      buildHostedActionApprovalPresentationCryptoEntry({
+        approvalId: input.prepared.approvalId,
+        field: "presentation_title_encrypted",
+        value: input.prepared.request.presentation.title,
+      }),
+    ],
+    lane: ACTION_APPROVAL_PRESENTATION_CRYPTO_LANE,
+    userId: input.prepared.memberId,
+  });
+
+  return {
+    presentationBody: null,
+    presentationBodyEncrypted: body,
+    presentationTitle: null,
+    presentationTitleEncrypted: title,
+  };
+}
+
 async function refreshHostedActionApprovalRequest(input: {
   approval: HostedSensitiveActionChallenge;
+  pendingData: Awaited<ReturnType<typeof buildPendingHostedActionApprovalData>>;
   prepared: PreparedHostedActionApprovalRequest;
   prisma: HostedActionApprovalWriteStore;
 }): Promise<HostedSensitiveActionChallenge> {
@@ -658,7 +761,7 @@ async function refreshHostedActionApprovalRequest(input: {
         },
       ],
     },
-    data: buildPendingHostedActionApprovalData(input.prepared),
+    data: input.pendingData,
   });
 
   if (updated.count !== 1) {
@@ -719,11 +822,13 @@ function assertHostedActionApprovalMatchesRequest(
   });
 }
 
-function buildHostedActionApprovalView(
-  approval: HostedSensitiveActionChallenge,
-  now: Date,
-): HostedActionApprovalView {
-  const identity = requireHostedActionApprovalIdentity(approval);
+async function buildHostedActionApprovalView(input: {
+  approval: HostedSensitiveActionChallenge;
+  memberId: string;
+  now: Date;
+  prisma: HostedActionApprovalReadStore;
+}): Promise<HostedActionApprovalView> {
+  const identity = await requireHostedActionApprovalIdentity(input);
 
   return {
     approvalId: identity.approvalId,
@@ -734,7 +839,10 @@ function buildHostedActionApprovalView(
       identity.actionId,
     ),
     returnContactKind: identity.returnContactKind,
-    status: readHostedActionApprovalPresentationStatus(approval, now),
+    status: readHostedActionApprovalPresentationStatus(
+      input.approval,
+      input.now,
+    ),
   };
 }
 
@@ -754,16 +862,109 @@ export function resolveHostedActionApprovalPresentationKind(
     : "prose";
 }
 
-function requireHostedActionApprovalIdentity(
+async function requireHostedActionApprovalIdentity(input: {
+  approval: HostedSensitiveActionChallenge;
+  memberId: string;
+  prisma: HostedActionApprovalReadStore;
+}): Promise<PendingHostedActionApprovalIdentity> {
+  if (input.approval.memberId !== input.memberId) {
+    throw new TypeError("Hosted action approval record is invalid.");
+  }
+  const identity = requireHostedActionApprovalMetadata(input.approval);
+  const presentation = await readHostedActionApprovalPresentation(input);
+
+  return {
+    ...identity,
+    presentation,
+  };
+}
+
+async function readHostedActionApprovalPresentation(input: {
+  approval: HostedSensitiveActionChallenge;
+  memberId: string;
+  prisma: HostedActionApprovalReadStore;
+}): Promise<HostedActionApprovalView["presentation"]> {
+  if (
+    !input.approval.actionId?.startsWith(
+      HOSTED_CONNECTED_APPS_ACTION_ID_PREFIX,
+    )
+  ) {
+    if (
+      !input.approval.presentationBody
+      || !input.approval.presentationTitle
+      || input.approval.presentationBodyEncrypted !== null
+      || input.approval.presentationTitleEncrypted !== null
+    ) {
+      throw new TypeError("Hosted action approval presentation is invalid.");
+    }
+    return parseHostedActionApprovalPresentation({
+      body: input.approval.presentationBody,
+      title: input.approval.presentationTitle,
+    });
+  }
+
+  if (
+    input.approval.presentationBody !== null
+    || input.approval.presentationTitle !== null
+    || !input.approval.presentationBodyEncrypted
+    || !input.approval.presentationTitleEncrypted
+    || !input.approval.approvalKey
+  ) {
+    throw new TypeError("Hosted action approval presentation is invalid.");
+  }
+
+  const [body, title] = await openHostedUserSecureBoxStrings({
+    entries: [
+      {
+        ...buildHostedActionApprovalPresentationCryptoEntry({
+          approvalId: input.approval.approvalKey,
+          field: "presentation_body_encrypted",
+          value: input.approval.presentationBodyEncrypted,
+        }),
+        userId: input.memberId,
+      },
+      {
+        ...buildHostedActionApprovalPresentationCryptoEntry({
+          approvalId: input.approval.approvalKey,
+          field: "presentation_title_encrypted",
+          value: input.approval.presentationTitleEncrypted,
+        }),
+        userId: input.memberId,
+      },
+    ],
+    lane: ACTION_APPROVAL_PRESENTATION_CRYPTO_LANE,
+  });
+  if (body === null || title === null) {
+    throw new TypeError("Hosted action approval presentation is invalid.");
+  }
+  return parseHostedActionApprovalPresentation({ body, title });
+}
+
+function buildHostedActionApprovalPresentationCryptoEntry(input: {
+  approvalId: string;
+  field: ActionApprovalPresentationEncryptedField;
+  value: string;
+}) {
+  return {
+    aad: {
+      field: input.field,
+      purpose: ACTION_APPROVAL_PRESENTATION_CRYPTO_PURPOSE,
+      rowId: input.approvalId,
+      table: ACTION_APPROVAL_PRESENTATION_CRYPTO_TABLE,
+    },
+    scope: `${ACTION_APPROVAL_PRESENTATION_CRYPTO_PURPOSE}:${input.field}`,
+    value: input.value,
+  };
+}
+
+function requireHostedActionApprovalMetadata(
   approval: HostedSensitiveActionChallenge,
-): PendingHostedActionApprovalIdentity {
+): HostedActionApprovalMetadata {
   if (
     approval.kind !== ACTION_APPROVAL_KIND
     || !approval.approvalKey
     || !approval.actionId
     || !approval.actionHash
-    || !approval.presentationTitle
-    || !approval.presentationBody
     || !approval.approvalStatus
   ) {
     throw new TypeError("Hosted action approval record is invalid.");
@@ -775,10 +976,6 @@ function requireHostedActionApprovalIdentity(
     approvalId: approval.approvalKey,
     bindingHash: approval.bindingHash,
     expiresAt: approval.expiresAt,
-    presentation: parseHostedActionApprovalPresentation({
-      body: approval.presentationBody,
-      title: approval.presentationTitle,
-    }),
     returnContactKind: readStoredReturnContactKind(approval.returnContactKind),
     tokenHash: approval.tokenHash,
   };
@@ -848,7 +1045,7 @@ function buildHostedActionApprovalPlaceholderHash(approvalId: string): string {
 function buildApprovedHostedActionApprovalResult(
   approval: HostedSensitiveActionChallenge,
 ): HostedActionApprovalResult {
-  const identity = requireHostedActionApprovalIdentity(approval);
+  const identity = requireHostedActionApprovalMetadata(approval);
   return {
     approvalGeneration: buildHostedActionApprovalGeneration(approval),
     approvalId: identity.approvalId,
@@ -860,12 +1057,12 @@ function buildHostedActionApprovalGeneration(
   approval: HostedSensitiveActionChallenge,
 ): string {
   return buildHostedActionApprovalIdentityGeneration(
-    requireHostedActionApprovalIdentity(approval),
+    requireHostedActionApprovalMetadata(approval),
   );
 }
 
 function buildHostedActionApprovalIdentityGeneration(
-  identity: PendingHostedActionApprovalIdentity,
+  identity: HostedActionApprovalMetadata,
 ): string {
   return sha256Hex([
     ACTION_APPROVAL_GENERATION_VERSION,

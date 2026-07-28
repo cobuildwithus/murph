@@ -938,6 +938,112 @@ describe("connected-app service", () => {
     ]);
   });
 
+  it("rejects hostile provider-bound values before approval or provider mutation", async () => {
+    installPrismaHarness();
+    const fetchImpl = vi.fn(async (
+      url: string | URL | Request,
+    ): Promise<Response> => {
+      const parsed = new URL(String(url));
+      if (parsed.pathname === "/api/v3.1/connected_accounts") {
+        return jsonResponse({
+          items: [
+            {
+              alias: "calendar\u202E",
+              id: "ca_calendar",
+              is_disabled: false,
+              status: "ACTIVE",
+              toolkit: { name: "Google Calendar", slug: "googlecalendar" },
+              word_id: "quiet-calendar",
+            },
+          ],
+        });
+      }
+      throw new Error("Hostile values must not reach a provider mutation.");
+    });
+
+    await expect(executeHostedConnectedAppsRequest({
+      fetchImpl,
+      memberId: "hbm_member",
+      request: {
+        input: {
+          account: "ca_calendar",
+          arguments: {
+            event_duration_minutes: 30,
+            start_datetime: "2026-07-01T10:00:00-04:00",
+            summary: "Annual physical",
+            timezone: "America/New_York",
+          },
+          toolSlug: "GOOGLECALENDAR_CREATE_EVENT",
+        },
+        operation: "execute",
+      },
+    })).rejects.toThrow("unsupported whitespace or control characters");
+    expect(approvalMocks.requestHostedActionApproval).not.toHaveBeenCalled();
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it("fingerprints an account when duplicate or missing word ids cannot disambiguate", async () => {
+    installPrismaHarness();
+    const fetchImpl = vi.fn(async (
+      url: string | URL | Request,
+    ): Promise<Response> => {
+      const parsed = new URL(String(url));
+      if (parsed.pathname === "/api/v3.1/connected_accounts") {
+        return jsonResponse({
+          items: [
+            {
+              alias: "work",
+              id: "ca_first",
+              is_disabled: false,
+              status: "ACTIVE",
+              toolkit: { name: "Google Calendar", slug: "googlecalendar" },
+              word_id: null,
+            },
+            {
+              alias: "work",
+              id: "ca_second",
+              is_disabled: false,
+              status: "ACTIVE",
+              toolkit: { name: "Google Calendar", slug: "googlecalendar" },
+              word_id: null,
+            },
+          ],
+        });
+      }
+      throw new Error("Pending approval must not reach a provider mutation.");
+    });
+
+    await expect(executeHostedConnectedAppsRequest({
+      fetchImpl,
+      memberId: "hbm_member",
+      request: {
+        input: {
+          account: "ca_first",
+          arguments: {
+            event_duration_minutes: 30,
+            start_datetime: "2026-07-01T10:00:00-04:00",
+            summary: "Annual physical",
+            timezone: "America/New_York",
+          },
+          toolSlug: "GOOGLECALENDAR_CREATE_EVENT",
+        },
+        operation: "execute",
+      },
+    })).resolves.toEqual(pendingConnectedAppApproval());
+    expect(approvalMocks.requestHostedActionApproval).toHaveBeenCalledWith(
+      expect.objectContaining({
+        request: expect.objectContaining({
+          presentation: expect.objectContaining({
+            body: expect.stringMatching(
+              /word ID "not available" — account ID fingerprint [0-9a-f]{16}/u,
+            ),
+          }),
+        }),
+      }),
+    );
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
   it("allows only one concurrent egress for one approved generation", async () => {
     installPrismaHarness();
     approvalMocks.requestHostedActionApproval.mockResolvedValue(

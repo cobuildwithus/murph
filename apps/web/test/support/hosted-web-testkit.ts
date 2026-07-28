@@ -186,7 +186,9 @@ export interface HostedSensitiveActionChallengeForTest {
   kind: string;
   memberId: string;
   presentationBody: string | null;
+  presentationBodyEncrypted: string | null;
   presentationTitle: string | null;
+  presentationTitleEncrypted: string | null;
   returnContactKind: string | null;
   tokenHash: string;
 }

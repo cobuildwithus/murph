@@ -13,7 +13,7 @@ import type {
 } from "@murphai/hosted-execution/connected-apps";
 
 import {
-  buildHostedConnectedAppsMutationApprovalRequest,
+  prepareHostedConnectedAppsMutation,
 } from "./action-approval";
 import {
   ComposioConnectedAppsRequestError,
@@ -150,12 +150,13 @@ export async function executeHostedConnectedAppsRequest(input: {
             message: "Choose a connected account before running that tool.",
           });
         }
-        const account = await resolveOwnedConnectedAccount({
+        const resolvedAccount = await resolveOwnedConnectedAccount({
           client,
           memberId: input.memberId,
           selector,
           scope: "configured",
         });
+        const account = resolvedAccount.account;
 
         if (writePolicy) {
           if (account.toolkit.slug.trim().toLowerCase() !== writePolicy.toolkit) {
@@ -169,27 +170,33 @@ export async function executeHostedConnectedAppsRequest(input: {
             ...argumentsValue,
             ...writePolicy.forcedArguments,
           };
+          const mutation = prepareHostedConnectedAppsMutation({
+            account,
+            arguments: completeArguments,
+            includeAccountIdFingerprint:
+              resolvedAccount.includeAccountIdFingerprint,
+            memberId: input.memberId,
+            operation: "calendar-create",
+            providerVersion: writePolicy.version,
+            toolSlug,
+          });
+          if (mutation.execution.operation !== "calendar-create") {
+            throw new TypeError("Connected-app calendar mutation is invalid.");
+          }
           const authorization = await authorizeHostedConnectedAppsMutation({
             memberId: input.memberId,
             prisma,
-            request: buildHostedConnectedAppsMutationApprovalRequest({
-              account,
-              arguments: completeArguments,
-              memberId: input.memberId,
-              operation: "calendar-create",
-              providerVersion: writePolicy.version,
-              toolSlug,
-            }),
+            request: mutation.approvalRequest,
           });
           if (!authorization.approved) {
             return authorization.result;
           }
 
           return await client.executeDirect({
-            account: account.id,
-            arguments: completeArguments,
-            toolSlug,
-            version: writePolicy.version,
+            account: mutation.execution.accountId,
+            arguments: mutation.execution.arguments,
+            toolSlug: mutation.execution.toolSlug,
+            version: mutation.execution.providerVersion,
           }).catch((error: unknown) => {
             if (error instanceof ComposioConnectedAppsRequestError) {
               throw new ComposioConnectedAppsRequestError(
@@ -432,56 +439,73 @@ async function executeConnectedAppsManagement(input: {
       };
     }
     case "rename": {
-      const account = await resolveOwnedConnectedAccount({
+      const resolvedAccount = await resolveOwnedConnectedAccount({
         client: input.client,
         memberId: input.memberId,
         selector: input.input.account,
         scope: "all-owned",
       });
+      const account = resolvedAccount.account;
+      const mutation = prepareHostedConnectedAppsMutation({
+        account,
+        alias: input.input.alias,
+        includeAccountIdFingerprint:
+          resolvedAccount.includeAccountIdFingerprint,
+        memberId: input.memberId,
+        operation: "rename",
+      });
+      if (mutation.execution.operation !== "rename") {
+        throw new TypeError("Connected-app rename mutation is invalid.");
+      }
       const authorization = await authorizeHostedConnectedAppsMutation({
         memberId: input.memberId,
         prisma: input.prisma,
-        request: buildHostedConnectedAppsMutationApprovalRequest({
-          account,
-          alias: input.input.alias,
-          memberId: input.memberId,
-          operation: "rename",
-        }),
+        request: mutation.approvalRequest,
       });
       if (!authorization.approved) {
         return authorization.result;
       }
 
-      await input.client.renameAccount(account.id, input.input.alias);
+      await input.client.renameAccount(
+        mutation.execution.accountId,
+        mutation.execution.alias,
+      );
       return {
         account: {
           ...presentConnectedAccount(account, input.config),
-          alias: input.input.alias,
+          alias: mutation.execution.alias,
         },
         status: "renamed",
       };
     }
     case "disconnect": {
-      const account = await resolveOwnedConnectedAccount({
+      const resolvedAccount = await resolveOwnedConnectedAccount({
         client: input.client,
         memberId: input.memberId,
         selector: input.input.account,
         scope: "all-owned",
       });
+      const account = resolvedAccount.account;
+      const mutation = prepareHostedConnectedAppsMutation({
+        account,
+        includeAccountIdFingerprint:
+          resolvedAccount.includeAccountIdFingerprint,
+        memberId: input.memberId,
+        operation: "disconnect",
+      });
+      if (mutation.execution.operation !== "disconnect") {
+        throw new TypeError("Connected-app disconnect mutation is invalid.");
+      }
       const authorization = await authorizeHostedConnectedAppsMutation({
         memberId: input.memberId,
         prisma: input.prisma,
-        request: buildHostedConnectedAppsMutationApprovalRequest({
-          account,
-          memberId: input.memberId,
-          operation: "disconnect",
-        }),
+        request: mutation.approvalRequest,
       });
       if (!authorization.approved) {
         return authorization.result;
       }
 
-      await input.client.disconnectAccount(account.id);
+      await input.client.disconnectAccount(mutation.execution.accountId);
       return {
         account: presentConnectedAccount(account, input.config),
         status: "disconnected",
@@ -674,7 +698,10 @@ async function resolveOwnedConnectedAccount(input: {
   memberId: string;
   selector: string;
   scope: "all-owned" | "configured";
-}): Promise<ComposioConnectedAccount> {
+}): Promise<{
+  account: ComposioConnectedAccount;
+  includeAccountIdFingerprint: boolean;
+}> {
   const accounts = await input.client.listAccounts({
     ...(input.scope === "all-owned" ? { toolkits: null } : {}),
     userId: input.memberId,
@@ -686,7 +713,18 @@ async function resolveOwnedConnectedAccount(input: {
     || account.wordId?.toLowerCase() === selector
   );
   if (matches.length === 1) {
-    return matches[0]!;
+    const account = matches[0]!;
+    const normalizedWordId = account.wordId?.trim().toLowerCase() ?? null;
+    const wordIdMatches = normalizedWordId === null
+      ? []
+      : accounts.filter(
+          (candidate) =>
+            candidate.wordId?.trim().toLowerCase() === normalizedWordId,
+        );
+    return {
+      account,
+      includeAccountIdFingerprint: wordIdMatches.length !== 1,
+    };
   }
   if (matches.length > 1) {
     throw hostedOnboardingError({
