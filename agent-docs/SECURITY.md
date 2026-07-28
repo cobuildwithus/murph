@@ -133,8 +133,11 @@ Last verified: 2026-07-26
   server's recovery-only capability. The payer lock may continue an existing
   matching purchase but cannot create one; when none exists, it returns a miss
   before resolving a new Customer or entering Stripe. The miss clears the
-  visible amount but retains the unresolved key in target-scoped browser
-  session storage. The browser verifies storage before the first request,
+  visible amount but retains the unresolved key in payer-and-target-scoped
+  browser session storage. The authenticated server-rendered payer identity
+  selects the browser slot, so another account using the same target in that
+  tab cannot consume or clear the first payer's unresolved key. The browser
+  verifies storage before the first request,
   hydrates it before enabling a remounted picker, and fails closed rather than
   minting another create-capable identity when storage is unavailable. The next
   explicit authorization reuses that key without the recovery-only capability,
@@ -143,9 +146,9 @@ Last verified: 2026-07-26
   selection response with server-owned proof that its submitted request key
   matched clears the stored key; mounted active-purchase and return
   projections, projected-purchase retries, and different-key recovery cannot
-  release it. The opaque key and target-scoped checkout path are navigation and
-  idempotency hints only; every request rederives authenticated payer and target
-  authority. If the newly
+  release it. The opaque key and payer-and-target-scoped browser slot are
+  navigation and idempotency hints only; every request rederives authenticated
+  payer and target authority. If the newly
   selected amount differs from the delayed winner, the server returns the
   winner's nonpayable status/cancel projection. Choosing an amount has no
   payment effect, and each

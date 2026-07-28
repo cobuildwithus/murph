@@ -180,9 +180,12 @@ Offer descriptors come from the server projection. A normal authorization
 submits only an opaque offer code and a single-use client request key. An
 ambiguous-response check adds the literal recovery-only capability, never a
 dollar amount, grant amount, Stripe Price ID, payer ID, or beneficiary ID.
-Before request entry, the browser stores that key in session storage scoped to
-the server-owned checkout target. It is an idempotency hint, not payer, target,
-offer, or payment authority.
+Before request entry, the browser stores that key in session storage scoped by
+the authenticated server-rendered payer identity and server-owned checkout
+target. Another account using the same target in that tab receives an
+independent slot and cannot consume or clear the first payer's unresolved key.
+The stored identity is an idempotency hint, not payer, target, offer, or payment
+authority.
 
 Home or a private assistant handoff opens the same dialog through a one-shot
 Settings URL such as `/settings?addUsage=true#subscription`. An explicit
@@ -396,17 +399,20 @@ recovery-only mode. Under the payer lock, recovery-only may continue an exact
 persisted request or return the current nonterminal purchase. When neither
 exists, it returns a typed miss before offer authorization, Customer creation,
 purchase insertion, or Stripe I/O. The dialog returns to an unselected picker
-but retains that unresolved key in target-scoped browser session storage across
-dismissal, reload, remount, and tab restoration. A remounted picker hydrates the
-key before enabling selection. The next explicit Add action reuses the key in
-normal create-capable mode, so the payer lock and request-key uniqueness
+but retains that unresolved key in payer-and-target-scoped browser session
+storage across dismissal, reload, remount, tab restoration, and same-tab
+account switches. The authenticated server-rendered payer identity selects the
+slot, so another payer using the same target receives an independent key and
+cannot clear the first payer's unresolved identity. A remounted picker hydrates
+the key before enabling selection. The next explicit Add action reuses the key
+in normal create-capable mode, so the payer lock and request-key uniqueness
 serialize it with any delayed original request. Only a durable purchase
-response with server-owned proof that the submitted selection key matched
-clears the stored key. Mounted active-purchase and return projections,
-projected-purchase retries, and different-key active-purchase recovery cannot
-release it. Unavailable or unverifiable storage fails closed before request
-entry. If the newly selected offer differs from the winner, only the winner's
-nonpayable status/cancel projection is returned. Account deletion
+response with server-owned proof that the submitted selection key matched for
+that payer clears the stored key. Mounted active-purchase and return
+projections, projected-purchase retries, and different-key active-purchase
+recovery cannot release it. Unavailable or unverifiable storage fails closed
+before request entry. If the newly selected offer differs from the winner, only
+the winner's nonpayable status/cancel projection is returned. Account deletion
 suspends new payment creation. A direct intent that already won the payer-lock binding
 boundary remains `payment_pending` until the existing Stripe-event owner
 settles it; deletion does not race it with a second cancellation decision. The
