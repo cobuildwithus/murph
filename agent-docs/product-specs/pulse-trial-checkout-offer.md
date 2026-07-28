@@ -23,7 +23,7 @@ trial policy is 14 days as of `pulse-trial-2026-07-15-v3`. The previous
 seven-day and ten-day policies remain readable for historical rows and
 in-flight Stripe events.
 
-Pulse Trial is a checkout offer for Pulse. It is not a third hosted plan, not a free plan, and not a separate usage-budget system.
+Pulse Trial is one Pulse entitlement policy reached through card checkout, the existing no-card auto-enrollment path, or country/prefix-gated direct-iMessage instant start. It is not a third hosted plan, not a free plan, and not a separate usage-budget system.
 
 Success means:
 
@@ -35,7 +35,7 @@ Success means:
 - The existing hosted AI usage allowance resolver enforces 4.50 USD of included trial usage and the normal Pulse allowance after Stripe converts the subscription to a paid cycle. The operation that crosses the remaining amount may finish; subsequent usage-bearing work blocks.
 - A stale trial phase never falls back to the normal monthly Pulse allowance.
 - Runtime admission uses the web-owned composed access-and-usage decision. Cloudflare owns no separate allowance, credit, or billing gate.
-- No-card auto Pulse Trial enrollment is the default hosted signup path when billing is configured and messaging setup is complete. Set `HOSTED_AUTO_PULSE_TRIAL_ENABLED=0` only to force card checkout fallback.
+- No-card auto Pulse Trial enrollment is the default hosted signup path when billing is configured and messaging setup is complete. The same owner may enroll a model-approved, same-line direct iMessage from a genuinely unknown member without a browser round trip; it still creates the ordinary Stripe-backed Pulse trial and uses the same 14-day/$4.50 policy. Instant start requires no pre-existing Stripe customer so a saved card cannot silently auto-convert a text-initiated trial. Set `HOSTED_AUTO_PULSE_TRIAL_ENABLED=0` to force the existing signup-link/checkout fallback.
 - The card-based trial CTA is release-gated by `HOSTED_PULSE_TRIAL_CHECKOUT_ENABLED=1`; the checkout backend remains safe with the flag off.
 
 ## Clean Target Model
@@ -54,6 +54,7 @@ The core state machine is:
 | --- | --- | --- | --- |
 | Standard Checkout completed | inactive/incomplete | unchanged entitlement | Bind refs only; paid activation still waits for `invoice.paid`. |
 | Pulse Trial Checkout completed | inactive/incomplete | active + `trial` | Only after metadata, ownership, subscription, and freshness checks pass. |
+| Model-approved same-line direct iMessage from an unknown member | no own billing or Stripe customer | active + `trial` | Reuse no-card auto enrollment; no preview member, alternate allowance, saved-card inheritance, or second runtime. |
 | Initial zero-dollar trial invoice paid | active + `trial` | active + `trial` | Ignore for paid entitlement and paid allowance. |
 | Trial subscription update reports `active` before paid invoice | active + `trial` | active + `trial` | Refresh matching refs/dates only; do not promote phase. |
 | First real paid invoice after trial | active + `trial` or inactive | active + `paid` | This is the only trial-to-paid transition. |

@@ -71,6 +71,7 @@ import {
 } from "../hosted-groups/thread-container-participant-access";
 import {
   bindHostedMemberHomeLinqChat,
+  bindHostedMemberPendingLinqChat,
   bindHostedMemberPendingLinqChatAndTrackInbound,
   buildActiveMemberDirectPlan,
   buildConversationHomeRedirectResponse,
@@ -109,8 +110,13 @@ import {
   refreshHostedThreadContainerDeliveryRouteTx,
 } from "../hosted-routing/thread-container-service";
 import type {
+  HostedLinqFirstContactAdmissionDecision,
   HostedLinqFirstContactAdmissionRequest,
 } from "./linq-first-contact-admission";
+import {
+  isHostedLinqInstantStartCandidate,
+  isHostedLinqInstantStartEligible,
+} from "./linq-instant-start";
 import type { HostedWebhookWakeHandoff } from "./webhook-service-types";
 import {
   consumeHostedLinqThreadRouteParticipantAdditionPendingTx,
@@ -141,6 +147,8 @@ import type { HostedOnboardingReadClient } from "./shared";
 import {
   hasActiveHostedCryptoDomainRootsForUserTx,
 } from "../hosted-crypto/domain-root-store";
+import { getHostedOnboardingEnvironment } from "./runtime";
+
 const HOSTED_LINQ_MESSAGE_MAX_PARTS = 32;
 const HOSTED_LINQ_CONVERSATION_WAKE_INLINE_TARGET_BYTES = 128 * 1024;
 const HOSTED_LINQ_TEXT_PART_MAX_CHARS = 20_000;
@@ -390,7 +398,8 @@ async function isHostedLinqMailboxRootPrewarmEligible(input: {
 export async function planHostedOnboardingLinqWebhook(input: {
   affirmativeReaction?: boolean;
   event: HostedLinqWebhookEvent;
-  firstContactAdmitted?: boolean;
+  firstContactAdmissionDecision?: HostedLinqFirstContactAdmissionDecision | null;
+  instantStartAllowed?: boolean;
   prisma: Prisma.TransactionClient;
   requireFirstContactAdmission?: boolean;
 }): Promise<HostedOnboardingLinqDirectPlan> {
@@ -1070,10 +1079,19 @@ export async function planHostedOnboardingLinqWebhook(input: {
     );
   }
 
+  const instantStartPhonePrefixes =
+    getHostedOnboardingEnvironment().linqInstantStartPhonePrefixes;
+  const instantStartCandidate = input.instantStartAllowed === true
+    && isHostedLinqInstantStartCandidate({
+      event: messageEvent,
+      participantContact,
+      phonePrefixes: instantStartPhonePrefixes,
+    });
+
   if (
     existingMember === null
-    && input.requireFirstContactAdmission === true
-    && input.firstContactAdmitted !== true
+    && (input.requireFirstContactAdmission === true || instantStartCandidate)
+    && input.firstContactAdmissionDecision?.kind !== "allow"
   ) {
     return logHostedLinqWebhookPlannerDecisionAndReturn(
       buildFirstContactAdmissionRequiredPlan({
@@ -1187,10 +1205,22 @@ export async function planHostedOnboardingLinqWebhook(input: {
 
   const incomingLinePhone = normalizePhoneNumber(recipientPhoneNumber);
   const assignedPhone = normalizePhoneNumber(bindingResult.recipientPhone);
+  const instantStartEligible = instantStartCandidate
+    && assignedPhone !== null
+    && assignedPhone === incomingLinePhone
+    && isHostedLinqInstantStartEligible({
+      admissionDecision: input.firstContactAdmissionDecision,
+      event: messageEvent,
+      participantContact,
+      phonePrefixes: instantStartPhonePrefixes,
+    });
   const member = existingMember
     ?? (participantContact.kind === "phone"
       ? await ensureHostedMemberForPhoneTx({
           phoneNumber: participantContact.value,
+          ...(instantStartEligible
+            ? { phoneNumberVerifiedAt: new Date(occurredAt) }
+            : {}),
           prisma: input.prisma,
         })
       : await ensureHostedMemberForPendingLinqParticipantContactTx({
@@ -1276,6 +1306,48 @@ export async function planHostedOnboardingLinqWebhook(input: {
         fallbackLine: true,
         reason: "sent-signup-link",
         routeStage: "first-contact-signup-link",
+      }),
+    );
+  }
+
+  if (instantStartEligible) {
+    await bindHostedMemberPendingLinqChat({
+      chatId: summary.chatId,
+      homeLineAssignedAt: bindingResult.homeLineAssignedAt,
+      memberId: member.id,
+      occurredAt,
+      participantContact,
+      prisma: input.prisma,
+      recipientPhone: bindingResult.recipientPhone,
+    });
+    const invite = await issueHostedInviteTx({
+      channel: "linq",
+      memberId: member.id,
+      prisma: input.prisma,
+    });
+
+    return logHostedLinqWebhookPlannerDecisionAndReturn(
+      {
+        ...buildActiveMemberDirectPlan({
+          desiredSideEffects: [],
+          response: {
+            ignored: true,
+            ok: true,
+            reason: "instant-start-enrollment-required",
+          },
+        }),
+        instantStartEnrollment: {
+          inviteCode: invite.inviteCode,
+          memberId: member.id,
+        },
+      },
+      buildHostedLinqWebhookPlannerDetails(input.event, context, {
+        chatDirectAttested: true,
+        existingMemberActive: existingMemberEffectiveActive,
+        existingMemberMatch,
+        reason: "instant-start-enrollment-required",
+        routeDecision: bindingResult.kind,
+        routeStage: "first-contact-instant-start-enrollment",
       }),
     );
   }

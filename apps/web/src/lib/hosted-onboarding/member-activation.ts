@@ -93,6 +93,7 @@ export async function activateHostedMemberForPositiveSourceTx(input: {
   prisma: Prisma.TransactionClient;
   skipIfBillingAlreadyActive?: boolean;
   skipIfPreviouslyActivated?: boolean;
+  suppressSignupWelcome?: boolean;
 }): Promise<HostedMemberActivationResult> {
   const timing = startHostedOnboardingTiming(
     "hosted-onboarding.member-activation.positive-source",
@@ -163,6 +164,7 @@ async function activateHostedMemberForPositiveSourceTxInner(input: {
   prisma: Prisma.TransactionClient;
   skipIfBillingAlreadyActive?: boolean;
   skipIfPreviouslyActivated?: boolean;
+  suppressSignupWelcome?: boolean;
   welcomeMessage?: string;
 }): Promise<HostedMemberActivationResult> {
   const currentMember = await readActivationReadyHostedMemberTx({
@@ -273,17 +275,19 @@ async function activateHostedMemberForPositiveSourceTxInner(input: {
     prisma: input.prisma,
   });
 
-  const linqRoute = await resolveHostedMemberActivationWelcomeLinqRoute({
-    member: currentMember,
-    prisma: input.prisma,
-  });
+  const signupWelcomeRoute = input.suppressSignupWelcome
+    ? null
+    : (await resolveHostedMemberActivationWelcomeLinqRoute({
+        member: currentMember,
+        prisma: input.prisma,
+      })).welcomeRoute;
   const activationWake = buildHostedMemberActivationWakeForMember({
     emailLinked: input.emailLinked ?? resolveHostedMemberActivationEmailLinked(currentMember),
     member: currentMember,
     occurredAt: input.dispatchContext.occurredAt,
     sourceEventId: input.dispatchContext.sourceEventId,
     sourceType: input.dispatchContext.sourceType,
-    signupWelcomeRoute: linqRoute.welcomeRoute,
+    signupWelcomeRoute,
     welcomeMessage: input.welcomeMessage,
   });
   const legacyWelcomeWake = buildHostedMemberSignupWelcomeNotificationWake({

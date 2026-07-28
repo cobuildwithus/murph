@@ -1228,7 +1228,7 @@ reactions remain on the silent group context path above (or ignored outside
 groups).
 
 Hosted Linq unknown first-contact admission is a web-owned classifier gate on
-the signup-link path only. It runs after cheap deterministic ingress filters and
+the first-contact path. It runs after cheap deterministic ingress filters and
 before member/invite mutation, calls OpenAI through an env-only key with bounded
 message metadata/text, reduces provider service metadata to a fixed enum,
 persists only the event-id keyed terminal allow/block decision, stores no
@@ -1246,7 +1246,18 @@ Classifier-unavailable states, including missing keys, timeouts, ordinary
 non-2xx responses, malformed output, non-completed responses, max-output
 exhaustion, and OpenAI quota or credits exhaustion, intentionally fail open by
 recording a deterministic allow decision so a legitimate first contact is not
-permanently dropped. Active members, explicit thread routes, own messages, group
+permanently dropped. With enforcement off, only a genuinely unknown member on a
+provider-authenticated direct iMessage from a configured E.164 phone prefix may
+use a persisted model-source allow to enter instant start. The selected permanent
+home line must be the same line the person contacted, and the existing no-card
+Pulse-trial owner must start from an unbound Stripe customer so an old saved card
+cannot silently auto-convert a text-initiated trial. The first planner transaction
+creates the canonical member, verified phone identity, pending route, and invite;
+the existing Stripe/activation owner runs after commit; then a second ordinary
+planner pass counts and appends the original inbound exactly once. Any block,
+deterministic fail-open, unsupported prefix/channel, cross-line route, existing
+member or billing customer, or enrollment ambiguity keeps the existing signup-link
+or ignored behavior. Active members, explicit thread routes, own messages, group
 chats, local guard rejects, deterministic URL/STOP-style spam, and other
 non-invite paths bypass the classifier.
 

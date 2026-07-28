@@ -37,6 +37,7 @@ const mocks = vi.hoisted(() => {
     claimHostedLinqQuotaReplyNotice: vi.fn(),
     markHostedLinqOnboardingLinkNoticeSent: vi.fn(),
     classifyHostedLinqFirstContactAdmission: vi.fn(),
+    ensureHostedLinqInstantStartPulseTrialEnrollment: vi.fn(),
     releaseHostedLinqOnboardingLinkNoticeClaim: vi.fn(),
     releaseHostedLinqQuotaReplyNoticeClaim: vi.fn(),
     drainHostedExecutionOutboxBestEffort: vi.fn(),
@@ -58,6 +59,7 @@ const mocks = vi.hoisted(() => {
       linqFirstContactAdmissionMode: "off" as "enforce" | "off",
       linqFirstContactAdmissionModel: "gpt-5.4-nano",
       linqFirstContactAdmissionOpenAiApiKey: "test-first-contact-openai-key",
+      linqInstantStartPhonePrefixes: ["+44"] as readonly string[],
       linqLocalAllowedInboundPhoneNumbers: undefined as readonly string[] | undefined,
       linqMaxActiveMembersPerConversationPhone: null,
       linqWebhookSecret: null,
@@ -314,6 +316,17 @@ vi.mock("@/src/lib/hosted-onboarding/linq-first-contact-admission", async () => 
     classifyHostedLinqFirstContactAdmission: mocks.classifyHostedLinqFirstContactAdmission,
     readHostedLinqFirstContactAdmissionMode: () =>
       mocks.hostedOnboardingEnvironment.linqFirstContactAdmissionMode,
+  };
+});
+
+vi.mock("@/src/lib/hosted-onboarding/auto-trial-enrollment-service", async () => {
+  const actual = await vi.importActual<
+    typeof import("@/src/lib/hosted-onboarding/auto-trial-enrollment-service")
+  >("@/src/lib/hosted-onboarding/auto-trial-enrollment-service");
+  return {
+    ...actual,
+    ensureHostedLinqInstantStartPulseTrialEnrollment:
+      mocks.ensureHostedLinqInstantStartPulseTrialEnrollment,
   };
 });
 
@@ -601,6 +614,10 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       kind: "allow",
       source: "model",
     });
+    mocks.ensureHostedLinqInstantStartPulseTrialEnrollment.mockResolvedValue({
+      redirectPath: "/home",
+      status: "enrolled",
+    });
     mocks.releaseHostedLinqOnboardingLinkNoticeClaim.mockResolvedValue(undefined);
     mocks.releaseHostedLinqQuotaReplyNoticeClaim.mockResolvedValue(undefined);
     mocks.drainHostedExecutionOutboxBestEffort.mockResolvedValue(undefined);
@@ -615,6 +632,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     mocks.readHostedLinqDailyState.mockResolvedValue(null);
     mocks.hostedOnboardingEnvironment.linqLocalAllowedInboundPhoneNumbers = undefined;
     mocks.hostedOnboardingEnvironment.linqFirstContactAdmissionMode = "off";
+    mocks.hostedOnboardingEnvironment.linqInstantStartPhonePrefixes = ["+44"];
     mocks.nudgeHostedRunnerUserBestEffort.mockResolvedValue({
       accepted: true,
       alarmScheduled: false,
@@ -4428,7 +4446,414 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(mocks.sendHostedLinqChatMessage.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.markHostedLinqOnboardingLinkNoticeSent.mock.invocationCallOrder[0],
     );
+    expect(mocks.ensureHostedLinqInstantStartPulseTrialEnrollment)
+      .not.toHaveBeenCalled();
+    expect(mocks.classifyHostedLinqFirstContactAdmission).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
+  });
+
+  it("keeps an existing inactive member on the signup-link path", async () => {
+    mocks.hostedOnboardingEnvironment.linqInstantStartPhonePrefixes = ["+1"];
+    const memberId = "member_existing_inactive";
+    const invite = {
+      channel: "linq",
+      id: "invite_existing_inactive",
+      inviteCode: "code_existing_inactive",
+      memberId,
+      sentAt: null,
+      status: "pending",
+    };
+    const hostedMemberCreate = vi.fn();
+    const prisma = asPrismaTransactionClient({
+      $queryRaw: vi.fn().mockResolvedValue([]),
+      hostedWebhookReceipt: buildHostedWebhookReceiptFixture(),
+      hostedInvite: {
+        create: vi.fn().mockResolvedValue(invite),
+        findFirst: vi.fn().mockResolvedValue(null),
+        findUnique: vi.fn().mockResolvedValue(invite),
+        update: vi.fn().mockResolvedValue({
+          id: invite.id,
+          sentAt: new Date("2026-03-26T12:00:01.000Z"),
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedMember: {
+        create: hostedMemberCreate,
+        findUnique: vi.fn().mockResolvedValue({
+          accountGroupMemberships: [],
+          billingStatus: HostedBillingStatus.not_started,
+          createdAt: new Date("2026-03-25T12:00:00.000Z"),
+          id: memberId,
+          invites: [],
+          phoneLookupKey: createHostedPhoneLookupKey("+15551234567"),
+          suspendedAt: null,
+          threadContainer: null,
+          updatedAt: new Date("2026-03-25T12:00:00.000Z"),
+        }),
+        update: vi.fn(),
+      },
+    });
+
+    await expect(handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody: buildHostedLinqWebhookBody({
+        data: {
+          chat: {
+            id: "chat_123",
+            is_group: false,
+            owner_handle: {
+              handle: "+15550000000",
+              id: "handle_owner_123",
+              is_me: true,
+              service: "iMessage",
+            },
+          },
+          parts: [{ type: "text", value: "Hey Murph" }],
+        },
+        eventId: "evt_existing_inactive",
+        service: "iMessage",
+      }),
+      signature: null,
+      timestamp: null,
+    })).resolves.toMatchObject({
+      inviteCode: invite.inviteCode,
+      joinUrl: `https://join.example.test/join/${invite.inviteCode}`,
+      ok: true,
+      reason: "sent-signup-link",
+    });
+
+    expect(hostedMemberCreate).not.toHaveBeenCalled();
+    expect(mocks.classifyHostedLinqFirstContactAdmission).not.toHaveBeenCalled();
+    expect(mocks.ensureHostedLinqInstantStartPulseTrialEnrollment)
+      .not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        chatId: "chat_123",
+        message: expect.stringContaining(invite.inviteCode),
+      }),
+    );
+  });
+
+  it("starts the full Pulse trial and answers the original model-approved direct iMessage", async () => {
+    mocks.hostedOnboardingEnvironment.linqInstantStartPhonePrefixes = ["+1"];
+    let createdMemberId: string | null = null;
+    let trialActive = false;
+    const hostedMemberCreate = vi.fn(async ({ data }: {
+      data: { billingStatus: HostedBillingStatus; id: string };
+    }) => {
+      createdMemberId = data.id;
+      return {
+        billingStatus: data.billingStatus,
+        createdAt: new Date("2026-03-26T12:00:00.000Z"),
+        id: data.id,
+        suspendedAt: null,
+        updatedAt: new Date("2026-03-26T12:00:00.000Z"),
+      };
+    });
+    const hostedMemberFindUnique = vi.fn(async () => {
+      if (!createdMemberId) {
+        return null;
+      }
+      return {
+        accountGroupMemberships: [],
+        billingStatus: trialActive
+          ? HostedBillingStatus.active
+          : HostedBillingStatus.not_started,
+        createdAt: new Date("2026-03-26T12:00:00.000Z"),
+        id: createdMemberId,
+        invites: [],
+        phoneLookupKey: createHostedPhoneLookupKey("+15551234567"),
+        suspendedAt: null,
+        threadContainer: null,
+        updatedAt: new Date("2026-03-26T12:00:00.000Z"),
+      };
+    });
+    const hostedInviteCreate = vi.fn(async ({ data }: {
+      data: { channel: string; id: string; inviteCode: string; memberId: string };
+    }) => ({
+      ...data,
+      sentAt: null,
+      status: "pending",
+    }));
+    const prismaMocks = {
+      $queryRaw: vi.fn().mockResolvedValue([]),
+      hostedWebhookReceipt: buildHostedWebhookReceiptFixture(),
+      hostedInvite: {
+        create: hostedInviteCreate,
+        findFirst: vi.fn().mockResolvedValue(null),
+        findUnique: vi.fn().mockResolvedValue(null),
+        update: vi.fn(),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedMember: {
+        create: hostedMemberCreate,
+        findUnique: hostedMemberFindUnique,
+        update: vi.fn(),
+      },
+    };
+    const prisma = asPrismaTransactionClient(prismaMocks);
+    let transactionOpen = false;
+    prisma.$transaction = vi.fn(async (callback: (tx: typeof prisma) => Promise<unknown>) => {
+      transactionOpen = true;
+      try {
+        return await callback(prisma);
+      } finally {
+        transactionOpen = false;
+      }
+    });
+    mocks.readHostedMailboxItemOwnerById.mockImplementationOnce(
+      async ({ mailboxItemId }: { mailboxItemId: string }) => ({
+        id: mailboxItemId,
+        userId: createdMemberId ?? "member_123",
+      }),
+    );
+    mocks.ensureHostedLinqInstantStartPulseTrialEnrollment.mockImplementationOnce(
+      async ({ inviteCode, memberId, prisma: enrollmentPrisma }) => {
+        expect(transactionOpen).toBe(false);
+        expect(inviteCode).toEqual(expect.any(String));
+        expect(memberId).toBe(createdMemberId);
+        expect(enrollmentPrisma).toBe(prisma);
+        trialActive = true;
+        return {
+          redirectPath: "/home",
+          status: "enrolled",
+        };
+      },
+    );
+
+    const response = await handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody: buildHostedLinqWebhookBody({
+        data: {
+          chat: {
+            id: "chat_123",
+            is_group: false,
+            owner_handle: {
+              handle: "+15550000000",
+              id: "handle_owner_123",
+              is_me: true,
+              service: "iMessage",
+            },
+          },
+          parts: [{ type: "text", value: "Hey Murph, what can you do?" }],
+        },
+        eventId: "evt_instant_start",
+        service: "iMessage",
+      }),
+      signature: null,
+      timestamp: null,
+    });
+
+    expect(response).toMatchObject({
+      ignored: false,
+      ok: true,
+      reason: "wake-appended-active-member",
+    });
+    expect(mocks.classifyHostedLinqFirstContactAdmission).toHaveBeenCalledOnce();
+    expect(mocks.ensureHostedLinqInstantStartPulseTrialEnrollment)
+      .toHaveBeenCalledOnce();
+    expect(hostedMemberCreate).toHaveBeenCalledOnce();
+    expect(hostedInviteCreate).toHaveBeenCalledOnce();
+    expect(prisma.hostedMemberIdentity!.createMany).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        memberId: createdMemberId,
+        phoneNumberVerifiedAt: new Date("2026-03-26T12:00:00.000Z"),
+      }),
+      skipDuplicates: true,
+    });
+    expect(mocks.incrementHostedLinqInboundDailyState).toHaveBeenCalledTimes(1);
+    expect(mocks.incrementHostedLinqInboundDailyState).toHaveBeenCalledWith({
+      memberId: createdMemberId,
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      prisma,
+    });
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(1);
+    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+    expect(mocks.markHostedLinqOnboardingLinkNoticeSent).not.toHaveBeenCalled();
+    expectHostedLinqPointerSignalAccepted("evt_instant_start", createdMemberId ?? undefined);
+    expectHostedLinqReadReceiptSent();
+  });
+
+  it("falls back to the existing signup link when instant-start trial enrollment fails", async () => {
+    mocks.hostedOnboardingEnvironment.linqInstantStartPhonePrefixes = ["+1"];
+    mocks.ensureHostedLinqInstantStartPulseTrialEnrollment.mockRejectedValueOnce(
+      new Error("Synthetic trial enrollment failure."),
+    );
+    const invite = {
+      channel: "linq",
+      id: "invite_instant_start_fallback",
+      inviteCode: "code_instant_start_fallback",
+      memberId: "member_instant_start_fallback",
+      sentAt: null,
+      status: "pending",
+    };
+    let memberCreated = false;
+    const prismaMocks = {
+      $queryRaw: vi.fn().mockResolvedValue([]),
+      hostedWebhookReceipt: buildHostedWebhookReceiptFixture(),
+      hostedInvite: {
+        create: vi.fn().mockResolvedValue(invite),
+        findFirst: vi.fn()
+          .mockResolvedValueOnce(null)
+          .mockResolvedValue(invite),
+        findUnique: vi.fn().mockResolvedValue(invite),
+        update: vi.fn().mockResolvedValue({
+          ...invite,
+          sentAt: new Date("2026-03-26T12:00:01.000Z"),
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedMember: {
+        create: vi.fn().mockImplementation(async () => {
+          memberCreated = true;
+          return {
+            billingStatus: HostedBillingStatus.not_started,
+            createdAt: new Date("2026-03-26T12:00:00.000Z"),
+            id: invite.memberId,
+            suspendedAt: null,
+            updatedAt: new Date("2026-03-26T12:00:00.000Z"),
+          };
+        }),
+        findUnique: vi.fn().mockImplementation(async () =>
+          memberCreated
+            ? {
+                accountGroupMemberships: [],
+                billingStatus: HostedBillingStatus.not_started,
+                createdAt: new Date("2026-03-26T12:00:00.000Z"),
+                id: invite.memberId,
+                invites: [invite],
+                phoneLookupKey: createHostedPhoneLookupKey("+15551234567"),
+                suspendedAt: null,
+                threadContainer: null,
+                updatedAt: new Date("2026-03-26T12:00:00.000Z"),
+              }
+            : null),
+        update: vi.fn(),
+      },
+    };
+    const prisma = asPrismaTransactionClient(prismaMocks);
+
+    await expect(handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody: buildHostedLinqWebhookBody({
+        data: {
+          chat: {
+            id: "chat_123",
+            is_group: false,
+            owner_handle: {
+              handle: "+15550000000",
+              id: "handle_owner_123",
+              is_me: true,
+              service: "iMessage",
+            },
+          },
+          parts: [{ type: "text", value: "Hey Murph" }],
+        },
+        eventId: "evt_instant_start_fallback",
+        service: "iMessage",
+      }),
+      signature: null,
+      timestamp: null,
+    })).resolves.toMatchObject({
+      inviteCode: invite.inviteCode,
+      joinUrl: `https://join.example.test/join/${invite.inviteCode}`,
+      ok: true,
+      reason: "sent-signup-link",
+    });
+
+    expect(mocks.ensureHostedLinqInstantStartPulseTrialEnrollment)
+      .toHaveBeenCalledOnce();
+    expect(mocks.incrementHostedLinqInboundDailyState).toHaveBeenCalledTimes(1);
+    expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        chatId: "chat_123",
+        message: expect.stringContaining(invite.inviteCode),
+        replyToMessageId: "msg_123",
+      }),
+    );
+    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+  });
+
+  it("keeps a model-blocked instant-start candidate on the existing signup-link path when admission enforcement is off", async () => {
+    mocks.hostedOnboardingEnvironment.linqInstantStartPhonePrefixes = ["+1"];
+    mocks.classifyHostedLinqFirstContactAdmission.mockResolvedValueOnce({
+      confidence: 0.98,
+      kind: "block",
+      source: "model",
+    });
+    const invite = {
+      channel: "linq",
+      id: "invite_model_block_fallback",
+      inviteCode: "code_model_block_fallback",
+      memberId: "member_model_block_fallback",
+      sentAt: null,
+      status: "pending",
+    };
+    const prisma = asPrismaTransactionClient({
+      $queryRaw: vi.fn().mockResolvedValue([]),
+      hostedWebhookReceipt: buildHostedWebhookReceiptFixture(),
+      hostedInvite: {
+        create: vi.fn().mockResolvedValue(invite),
+        findFirst: vi.fn().mockResolvedValue(null),
+        findUnique: vi.fn().mockResolvedValue(invite),
+        update: vi.fn().mockResolvedValue({
+          id: invite.id,
+          sentAt: new Date("2026-03-26T12:00:01.000Z"),
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedMember: {
+        create: vi.fn().mockResolvedValue({
+          accountGroupMemberships: [],
+          billingStatus: HostedBillingStatus.not_started,
+          id: invite.memberId,
+          phoneLookupKey: createHostedPhoneLookupKey("+15551234567"),
+        }),
+        findUnique: vi.fn().mockResolvedValue(null),
+        update: vi.fn(),
+      },
+    });
+
+    await expect(handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody: buildHostedLinqWebhookBody({
+        data: {
+          chat: {
+            id: "chat_123",
+            is_group: false,
+            owner_handle: {
+              handle: "+15550000000",
+              id: "handle_owner_123",
+              is_me: true,
+              service: "iMessage",
+            },
+          },
+          parts: [{ type: "text", value: "Hey Murph" }],
+        },
+        eventId: "evt_model_block_fallback",
+        service: "iMessage",
+      }),
+      signature: null,
+      timestamp: null,
+    })).resolves.toMatchObject({
+      inviteCode: invite.inviteCode,
+      joinUrl: `https://join.example.test/join/${invite.inviteCode}`,
+      ok: true,
+      reason: "sent-signup-link",
+    });
+
+    expect(mocks.classifyHostedLinqFirstContactAdmission).toHaveBeenCalledOnce();
+    expect(mocks.ensureHostedLinqInstantStartPulseTrialEnrollment)
+      .not.toHaveBeenCalled();
+    expect(mocks.incrementHostedLinqInboundDailyState).toHaveBeenCalledTimes(1);
+    expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        chatId: "chat_123",
+        message: expect.stringContaining(invite.inviteCode),
+        replyToMessageId: "msg_123",
+      }),
+    );
+    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
   });
 
   it("does not create a pending signup route when the inbound Linq line is not assignable", async () => {
@@ -5535,8 +5960,9 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     });
   });
 
-  it("fails open when the first-contact classifier is unavailable", async () => {
+  it("fails open to the signup link, not instant start, when the classifier is unavailable", async () => {
     mocks.hostedOnboardingEnvironment.linqFirstContactAdmissionMode = "enforce";
+    mocks.hostedOnboardingEnvironment.linqInstantStartPhonePrefixes = ["+1"];
     mocks.classifyHostedLinqFirstContactAdmission.mockRejectedValueOnce(hostedOnboardingError({
       code: "LINQ_FIRST_CONTACT_ADMISSION_CLASSIFIER_UNAVAILABLE",
       details: {
@@ -5654,6 +6080,8 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
     expect(mocks.drainHostedExecutionOutboxBestEffort).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
+    expect(mocks.ensureHostedLinqInstantStartPulseTrialEnrollment)
+      .not.toHaveBeenCalled();
   });
 
   it("does not fail open for plain errors that only mimic the classifier-unavailable code", async () => {

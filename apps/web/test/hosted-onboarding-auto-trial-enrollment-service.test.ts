@@ -151,6 +151,7 @@ import {
   buildHostedAutoPulseTrialCustomerIdempotencyKey,
   buildHostedAutoPulseTrialSubscriptionIdempotencyKey,
   ensureHostedAutoPulseTrialEnrollment,
+  ensureHostedLinqInstantStartPulseTrialEnrollment,
   inspectHostedAutoPulseTrialCampaignDisposition,
   runHostedAutoPulseTrialCampaignPostCommitEffects,
 } from "@/src/lib/hosted-onboarding/auto-trial-enrollment-service";
@@ -2798,6 +2799,69 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
     expect(mocks.stripe.subscriptions.create).not.toHaveBeenCalled();
     expect(mocks.readHostedMemberBillingSnapshot).not.toHaveBeenCalled();
     expect(mocks.writeHostedMemberStripeBillingTx).not.toHaveBeenCalled();
+  });
+
+  it("reuses the ordinary Pulse trial for trusted Linq instant start without a canned welcome", async () => {
+    await expect(
+      ensureHostedLinqInstantStartPulseTrialEnrollment({
+        inviteCode: "invite-code",
+        memberId: "member_123",
+        now: new Date("2026-06-14T12:00:05.000Z"),
+        prisma: makePrisma() as never,
+      }),
+    ).resolves.toEqual({
+      redirectPath: "/home?initialVisit=true",
+      status: "enrolled",
+    });
+
+    expect(mocks.assertHostedLaunchRequiredConsentGranted).not.toHaveBeenCalled();
+    expect(mocks.activateHostedMemberForPositiveSourceTx).toHaveBeenCalledWith(
+      expect.objectContaining({
+        memberId: "member_123",
+        suppressSignupWelcome: true,
+      }),
+    );
+    expect(mocks.signalHostedMemberActivationRuntimeWakeBestEffortResult)
+      .toHaveBeenCalled();
+    expect(mocks.sendHostedSignupWelcomeEmailForMemberBestEffort)
+      .not.toHaveBeenCalled();
+  });
+
+  it("falls back before Stripe when instant start finds an existing billing customer", async () => {
+    mocks.readHostedMemberBillingSnapshot.mockResolvedValueOnce(makeBillingSnapshot({
+      billingRef: {
+        currentBillingPhase: null,
+        currentBillingPlanCode: null,
+        currentCheckoutOffer: null,
+        currentPeriodEnd: null,
+        currentPeriodStart: null,
+        currentTrialEndsAt: null,
+        currentTrialStartedAt: null,
+        lastStripeEventCreatedAt: null,
+        memberId: "member_123",
+        pulseTrialPolicyVersion: null,
+        pulseTrialRedeemedAt: null,
+        stripeCustomerId: "cus_existing_123",
+        stripeSubscriptionId: null,
+      },
+    }));
+
+    await expect(
+      ensureHostedLinqInstantStartPulseTrialEnrollment({
+        inviteCode: "invite-code",
+        memberId: "member_123",
+        now: new Date("2026-06-14T12:00:05.000Z"),
+        prisma: makePrisma() as never,
+      }),
+    ).rejects.toMatchObject({
+      code: "HOSTED_LINQ_INSTANT_START_EXISTING_STRIPE_CUSTOMER",
+      httpStatus: 409,
+    });
+
+    expect(mocks.assertHostedLaunchRequiredConsentGranted).not.toHaveBeenCalled();
+    expect(mocks.stripe.customers.create).not.toHaveBeenCalled();
+    expect(mocks.stripe.subscriptions.list).not.toHaveBeenCalled();
+    expect(mocks.stripe.subscriptions.create).not.toHaveBeenCalled();
   });
 
   it("rejects members without a messaging channel before Stripe or billing writes", async () => {

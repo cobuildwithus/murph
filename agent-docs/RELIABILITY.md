@@ -12,6 +12,8 @@ Last verified: 2026-07-27
 
 ## Runtime Expectations
 
+- Linq instant start uses the existing planner twice around the existing no-card Pulse-trial owner. The first transaction may create the canonical member, verified inbound phone identity, pending same-line route, and invite, but it neither counts the inbound nor appends the conversation. Stripe/customer/subscription work and activation then run outside that planner transaction. A second ordinary planner pass observes active access, promotes the same route, counts the inbound once, and appends the original message once. Only a genuinely new billing identity can enter this path; an existing Stripe customer falls back before subscription creation so a saved card cannot silently auto-convert. Any classifier, configuration, route, Stripe, activation, or retry ambiguity falls back to the existing signup-link path rather than creating a second entitlement, queue, or runtime.
+
 - Define startup requirements, health checks, and critical invariants.
 - Document retry/idempotency expectations for writes or background work.
 - Add tests for failure modes before relying on production-side recovery logic.

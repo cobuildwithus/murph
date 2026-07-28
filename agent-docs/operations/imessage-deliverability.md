@@ -111,6 +111,8 @@ Preferred shape:
 - full recognizable URLs only when links are necessary
 - calm, non-salesy language
 
+For a provider-authenticated direct iMessage that the person initiated, answering the original question in the same thread is preferable to opening with a signup link. Instant-start eligibility must stay same-line and inbound-only; if line assignment would move the conversation, the ordinary explicit signup-link fallback remains safer than proactively opening a new thread from another number.
+
 High-risk shape:
 
 - "Here's your update" followed by a link as the first contact

@@ -96,6 +96,13 @@ export interface HostedAutoPulseTrialEnrollmentInput {
   prisma?: PrismaClient;
 }
 
+export interface HostedLinqInstantStartPulseTrialEnrollmentInput {
+  inviteCode: string;
+  memberId: string;
+  now?: Date;
+  prisma?: PrismaClient;
+}
+
 export interface HostedAutoPulseTrialAuthenticatedMember {
   id: string;
   suspendedAt: Date | null;
@@ -105,6 +112,12 @@ export interface HostedAutoPulseTrialEnrollmentResult {
   redirectPath: string;
   status: HostedAutoPulseTrialEnrollmentStatus;
 }
+
+type HostedAutoPulseTrialEnrollmentPolicy = {
+  requireLaunchConsent: boolean;
+  requireUnboundStripeCustomer: boolean;
+  suppressSignupWelcome: boolean;
+};
 
 export type HostedAutoPulseTrialCampaignSubscription = Pick<
   Stripe.Subscription,
@@ -207,6 +220,45 @@ const EMPTY_AUTO_TRIAL_POST_COMMIT_EFFECTS: HostedAutoPulseTrialPostCommitEffect
 export async function ensureHostedAutoPulseTrialEnrollment(
   input: HostedAutoPulseTrialEnrollmentInput,
 ): Promise<HostedAutoPulseTrialEnrollmentResult> {
+  return ensureHostedAutoPulseTrialEnrollmentWithPolicy(input, {
+    requireLaunchConsent: true,
+    requireUnboundStripeCustomer: false,
+    suppressSignupWelcome: false,
+  });
+}
+
+/**
+ * Trusted inbound iMessage already proves a reachable direct channel. Reuse
+ * the ordinary no-card Pulse trial without routing through browser onboarding;
+ * the current inbound privacy boundary stays unchanged and the original
+ * message becomes the welcome turn.
+ */
+export async function ensureHostedLinqInstantStartPulseTrialEnrollment(
+  input: HostedLinqInstantStartPulseTrialEnrollmentInput,
+): Promise<HostedAutoPulseTrialEnrollmentResult> {
+  return ensureHostedAutoPulseTrialEnrollmentWithPolicy({
+    inviteCode: input.inviteCode,
+    member: {
+      id: input.memberId,
+      // The invite snapshot below remains the authoritative suspension check.
+      suspendedAt: null,
+    },
+    ...(input.now ? { now: input.now } : {}),
+    ...(input.prisma ? { prisma: input.prisma } : {}),
+  }, {
+    requireLaunchConsent: false,
+    // Instant start is only for a genuinely new billing identity. Reusing an
+    // existing customer could silently inherit a saved payment method and
+    // auto-convert a trial the person started only by texting Murph.
+    requireUnboundStripeCustomer: true,
+    suppressSignupWelcome: true,
+  });
+}
+
+async function ensureHostedAutoPulseTrialEnrollmentWithPolicy(
+  input: HostedAutoPulseTrialEnrollmentInput,
+  policy: HostedAutoPulseTrialEnrollmentPolicy,
+): Promise<HostedAutoPulseTrialEnrollmentResult> {
   const prisma = input.prisma ?? getPrisma();
   const now = input.now ?? new Date();
 
@@ -243,10 +295,12 @@ export async function ensureHostedAutoPulseTrialEnrollment(
     });
   }
 
-  await assertHostedLaunchRequiredConsentGranted({
-    memberId: invite.member.id,
-    prisma,
-  });
+  if (policy.requireLaunchConsent) {
+    await assertHostedLaunchRequiredConsentGranted({
+      memberId: invite.member.id,
+      prisma,
+    });
+  }
 
   await assertHostedMemberBillingStartMessagingReady({
     identity: invite.member.identity,
@@ -274,6 +328,7 @@ export async function ensureHostedAutoPulseTrialEnrollment(
   }
 
   assertHostedAutoPulseTrialEligible(initialMember);
+  assertHostedAutoPulseTrialCustomerPolicy(initialMember, policy);
 
   const metadata = buildHostedAutoPulseTrialMetadata(invite.member.id);
 
@@ -300,6 +355,7 @@ export async function ensureHostedAutoPulseTrialEnrollment(
           }
 
           assertHostedAutoPulseTrialEligible(currentMember);
+          assertHostedAutoPulseTrialCustomerPolicy(currentMember, policy);
           const candidateStripeCustomerId = currentMember.billingRef?.stripeCustomerId
             ?? await createHostedPulseTrialStripeCustomer({
               memberId: invite.member.id,
@@ -366,6 +422,7 @@ export async function ensureHostedAutoPulseTrialEnrollment(
     now,
     priceId,
     prisma,
+    suppressSignupWelcome: policy.suppressSignupWelcome,
     stripe,
     stripeCustomerId: reservation.stripeCustomerId,
     subscriptionId: subscription.id,
@@ -513,6 +570,7 @@ export async function applyHostedAutoPulseTrialCampaignDispositionTx(input: {
     preparedCryptoDomainRoots: input.preparedCryptoDomainRoots ?? new Map(),
     stripeCustomerId: input.stripeCustomerId,
     subscription: input.disposition.subscription,
+    suppressSignupWelcome: false,
     trialSnapshot: readHostedAutoPulseTrialSubscriptionSnapshot(
       input.disposition.subscription,
     ),
@@ -618,6 +676,7 @@ async function finalizeHostedAutoPulseTrialEnrollment(input: {
   now: Date;
   priceId: string;
   prisma: PrismaClient;
+  suppressSignupWelcome: boolean;
   stripe: Stripe;
   stripeCustomerId: string;
   subscriptionId: string;
@@ -667,6 +726,7 @@ async function runHostedAutoPulseTrialFinalizationWithMemberLockRetry(input: {
   preparedCryptoDomainRoots: PreparedHostedCryptoDomainRootCandidates;
   priceId: string;
   prisma: PrismaClient;
+  suppressSignupWelcome: boolean;
   stripe: Stripe;
   stripeCustomerId: string;
   subscriptionId: string;
@@ -713,6 +773,7 @@ async function runHostedAutoPulseTrialFinalizationWithMemberLockRetry(input: {
               preparedCryptoDomainRoots: input.preparedCryptoDomainRoots,
               stripeCustomerId: input.stripeCustomerId,
               subscription,
+              suppressSignupWelcome: input.suppressSignupWelcome,
               trialSnapshot,
               tx,
             });
@@ -858,6 +919,7 @@ async function finalizeHostedAutoPulseTrialEnrollmentTx(input: {
   preparedCryptoDomainRoots: PreparedHostedCryptoDomainRootCandidates;
   stripeCustomerId: string;
   subscription: HostedAutoPulseTrialCampaignSubscription;
+  suppressSignupWelcome: boolean;
   trialSnapshot: ReturnType<typeof readHostedAutoPulseTrialSubscriptionSnapshot>;
   tx: Prisma.TransactionClient;
 }): Promise<HostedAutoPulseTrialFinalizationOutcome> {
@@ -965,6 +1027,7 @@ async function finalizeHostedAutoPulseTrialEnrollmentTx(input: {
     prisma: input.tx,
     skipIfBillingAlreadyActive: false,
     skipIfPreviouslyActivated: true,
+    suppressSignupWelcome: input.suppressSignupWelcome,
   });
   return {
     kind: "completed",
@@ -972,8 +1035,8 @@ async function finalizeHostedAutoPulseTrialEnrollmentTx(input: {
     postCommitEffects: {
       activatedMemberId: activation.activated ? updatedMember.core.id : null,
       hostedExecutionEventId: activation.hostedExecutionEventId,
-      welcomeEmailMemberId:
-        activation.activated || activation.hostedExecutionEventId
+      welcomeEmailMemberId: !input.suppressSignupWelcome
+        && (activation.activated || activation.hostedExecutionEventId)
           ? updatedMember.core.id
           : null,
     },
@@ -1045,6 +1108,24 @@ function resolveHostedAutoPulseTrialExistingStatus(
     member.billingRef.currentCheckoutOffer === HOSTED_PULSE_TRIAL_OFFER
     ? "already_enrolled"
     : "already_active";
+}
+
+function assertHostedAutoPulseTrialCustomerPolicy(
+  member: HostedMemberBillingSnapshot,
+  policy: HostedAutoPulseTrialEnrollmentPolicy,
+): void {
+  if (
+    !policy.requireUnboundStripeCustomer
+    || !member.billingRef?.stripeCustomerId
+  ) {
+    return;
+  }
+
+  throw hostedOnboardingError({
+    code: "HOSTED_LINQ_INSTANT_START_EXISTING_STRIPE_CUSTOMER",
+    httpStatus: 409,
+    message: "This account must finish trial setup through the existing signup link.",
+  });
 }
 
 function assertHostedAutoPulseTrialEligible(
