@@ -34,6 +34,11 @@ import {
   prepareExperimentLifecycleAutomations,
 } from './experiment-support-automations.js'
 import { readAssistantOnboardingState } from './onboarding-state.js'
+import {
+  MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID,
+  MURPH_ONBOARDING_GOAL_CHECKIN_OWNER_SCOPE,
+  prepareOnboardingGoalCheckinAutomation,
+} from './onboarding-goal-checkin-automation.js'
 import type { AssistantMaintenanceProfile } from './maintenance-evidence.js'
 import { MURPH_ONBOARDING_FOLLOWUP_AUTOMATION } from './onboarding-followup-automation.js'
 import { assistantRouteSupportsGroupRoomModel } from './group-room-model.js'
@@ -84,6 +89,7 @@ export interface ApplyMurphManagedAutomationsInput {
 
 export type MurphManagedAutomationDiagnosticStageName =
   | 'experiment_lifecycle'
+  | 'onboarding_goal_checkin'
   | 'seed_composition'
   | 'managed_seed'
   | 'onboarding_followup'
@@ -98,6 +104,7 @@ export interface MurphManagedAutomationDiagnosticStage {
 export interface ApplyMurphManagedAutomationsResult {
   created: number
   experimentLifecycleFailure?: unknown
+  onboardingGoalCheckinFailure?: unknown
   skipped: number
   stableKeyFailure?: unknown
   stableKeyRetryNeeded?: true
@@ -680,6 +687,23 @@ export function resolveMurphManagedAutomationSeed(
   ) ?? null
 }
 
+export function resolveMurphManagedAutomationOwnerScope(
+  automationId: string | null | undefined,
+): MurphManagedAutomationOwnerScope | null {
+  if (!automationId) {
+    return null
+  }
+
+  const staticSeed = resolveMurphManagedAutomationSeed(automationId)
+  if (staticSeed) {
+    return staticSeed.ownerScope ?? 'member'
+  }
+
+  return automationId === MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID
+    ? MURPH_ONBOARDING_GOAL_CHECKIN_OWNER_SCOPE
+    : null
+}
+
 export async function applyMurphManagedAutomations(
   input: ApplyMurphManagedAutomationsInput,
 ): Promise<ApplyMurphManagedAutomationsResult> {
@@ -732,6 +756,33 @@ export async function applyMurphManagedAutomations(
   if (experimentLifecycle?.yielded === true || input.shouldYield?.() === true) {
     return { ...result, yielded: true }
   }
+  let onboardingGoalCheckin: Awaited<ReturnType<
+    typeof prepareOnboardingGoalCheckinAutomation
+  >> | null = null
+  let onboardingGoalCheckinFailure: unknown = null
+  if (input.seeds === undefined) {
+    reportMurphManagedAutomationDiagnosticStage(input, {
+      stage: 'onboarding_goal_checkin',
+    })
+    try {
+      onboardingGoalCheckin = await prepareOnboardingGoalCheckinAutomation({
+        now,
+        shouldYield: input.shouldYield ?? null,
+        vaultRoot: input.vaultRoot,
+      })
+    } catch (error) {
+      // A malformed or temporarily unreadable onboarding state must not take
+      // unrelated managed automations down with it. Record the failure and let
+      // a later maintenance pass retry this optional lifecycle seed.
+      onboardingGoalCheckinFailure = error
+    }
+  }
+  if (onboardingGoalCheckinFailure !== null) {
+    result.onboardingGoalCheckinFailure = onboardingGoalCheckinFailure
+  }
+  if (onboardingGoalCheckin?.yielded === true || input.shouldYield?.() === true) {
+    return { ...result, yielded: true }
+  }
   reportMurphManagedAutomationDiagnosticStage(input, {
     stage: 'seed_composition',
   })
@@ -739,6 +790,9 @@ export async function applyMurphManagedAutomations(
     input.seeds ??
     applyDefaultMurphManagedAutomationOwnership([
       ...MURPH_MANAGED_AUTOMATIONS,
+      ...(onboardingGoalCheckin?.seed
+        ? [onboardingGoalCheckin.seed]
+        : []),
       ...(experimentLifecycle?.seeds ?? []),
     ])
   // A failed experiment scan leaves the desired experiment state *unknown*, not

@@ -224,6 +224,7 @@ describe('applyMurphManagedAutomations core integration', () => {
     })
     expect(diagnosticStages).toEqual([
       { stage: 'experiment_lifecycle' },
+      { stage: 'onboarding_goal_checkin' },
       { stage: 'seed_composition' },
       ...Array.from({ length: 5 }, (_value, seedIndex) => ({
         seedCount: 5,
@@ -1186,7 +1187,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       now: new Date('2026-06-23T13:00:00.000Z'),
       vaultRoot,
     })).resolves.toEqual({
-      created: 5,
+      created: 6,
       skipped: 0,
       updated: 1,
     })

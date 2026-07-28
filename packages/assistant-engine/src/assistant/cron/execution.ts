@@ -39,9 +39,8 @@ import {
 import type { AssistantExecutionContext } from '../execution-context.js'
 import {
   isRetiredMurphManagedAutomationId,
-  resolveMurphManagedAutomationSeed,
+  resolveMurphManagedAutomationOwnerScope,
   resolveMurphManagedMaintenancePolicy,
-  type MurphManagedAutomationSeed,
   type MurphManagedMaintenancePolicy,
 } from '../managed-automations.js'
 import { readAssistantOnboardingState } from '../onboarding-state.js'
@@ -2214,9 +2213,9 @@ type AssistantCronManagedOwnerAuthorization =
   | {
       authorizedDelivery: AssistantCronAuthorizedNotificationDelivery
       channel: string | null
+      automationId: string
       kind: 'authorized'
       ownerScope: 'member' | 'authenticated-group'
-      seed: MurphManagedAutomationSeed
       target: string | null
       threadIsDirect: boolean | null
     }
@@ -2237,17 +2236,16 @@ async function resolveAssistantCronManagedOwnerAuthorization(input: {
     return { kind: 'retired' }
   }
 
-  // Only immutable current built-in identities carry hidden owner policy.
-  // Dynamically generated experiment lifecycle seeds deliberately remain on
-  // their existing path until their concurrently owned source can expose an
-  // exact identity resolver; tags, slugs, and prompt text are never authority.
-  const seed = resolveMurphManagedAutomationSeed(
+  // Only immutable current built-in or explicitly registered dynamic identities
+  // carry hidden owner policy. Other dynamic lifecycle seeds deliberately remain
+  // on their existing path until their source can expose an exact identity
+  // resolver; tags, slugs, and prompt text are never authority.
+  const ownerScope = resolveMurphManagedAutomationOwnerScope(
     input.job.source.automationId,
   )
-  if (!seed) {
+  if (!ownerScope) {
     return { kind: 'unmanaged' }
   }
-  const ownerScope = seed.ownerScope ?? 'member'
   const declaredRoute = resolveAssistantCronNotificationDeliveryRoute(
     input.target,
   )
@@ -2315,10 +2313,10 @@ async function resolveAssistantCronManagedOwnerAuthorization(input: {
 
   return {
     authorizedDelivery,
+    automationId: input.job.source.automationId,
     channel,
     kind: 'authorized',
     ownerScope,
-    seed,
     target,
     threadIsDirect: route.threadIsDirect,
   }
@@ -2361,7 +2359,7 @@ function assistantCronManagedOwnerAuthorizationMatches(
   if (expected.kind !== 'authorized' || current.kind !== 'authorized') {
     return expected.kind === current.kind && expected.kind === 'unmanaged'
   }
-  return expected.seed.automationId === current.seed.automationId &&
+  return expected.automationId === current.automationId &&
     expected.ownerScope === current.ownerScope &&
     expected.channel === current.channel &&
     expected.target === current.target &&
